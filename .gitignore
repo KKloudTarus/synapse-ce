@@ -9,7 +9,7 @@
 /synapse-worker
 /synapse-mcp
 
-# Env / secrets — never commit
+# Env / secrets (never commit)
 .env
 .env.local
 *.local
