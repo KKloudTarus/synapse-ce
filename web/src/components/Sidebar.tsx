@@ -120,7 +120,10 @@ export function MobileSidebar({ open, onClose }: { open: boolean; onClose: () =>
 
   return (
     <div className={cn('fixed inset-0 z-40 md:hidden', !open && 'pointer-events-none')} aria-hidden={!open}>
-      <div
+      <button
+        type="button"
+        aria-label="Close menu"
+        tabIndex={open ? undefined : -1}
         onClick={onClose}
         className={cn(
           'absolute inset-0 bg-black/50 transition-opacity motion-reduce:transition-none',

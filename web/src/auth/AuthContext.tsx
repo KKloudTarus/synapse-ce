@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from 'react'
@@ -109,8 +110,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [refreshAup])
 
+  const value = useMemo(
+    () => ({ phase, aup, error, connecting, connect, acceptAup, logout }),
+    [phase, aup, error, connecting, connect, acceptAup, logout],
+  )
+
   return (
-    <Ctx.Provider value={{ phase, aup, error, connecting, connect, acceptAup, logout }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   )

@@ -38,7 +38,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
-import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   Button,
@@ -264,7 +264,7 @@ export function EngagementDetail() {
         {tab === 'threats' && <ThreatModelTab engagementId={id} />}
         {tab === 'recon' && <ReconTab eng={eng} onGoTab={setTab} />}
         {tab === 'agent' && <AgentTab engagementId={id} />}
-        {tab === 'evidence' && <EvidenceTab engagementId={id} />}
+        {tab === 'evidence' && <EvidenceTab key={id} engagementId={id} />}
         {tab === 'settings' && <SettingsTab eng={eng} onUpdated={setEng} />}
       </div>
     </div>
@@ -4129,18 +4129,16 @@ function EvidenceTab({ engagementId }: { engagementId: string }) {
   const [ledger, setLedger] = useState<EvidenceLedger | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  function reload() {
+  const reload = useCallback(() => {
     api
       .evidenceLedger(engagementId)
       .then(setLedger)
       .catch((e) => setErr(e instanceof Error ? e.message : 'Failed to load evidence'))
-  }
-  useEffect(() => {
-    setLedger(null)
-    setErr(null)
-    reload()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engagementId])
+
+  useEffect(() => {
+    reload()
+  }, [reload])
 
   if (err) return <ErrorState message={err} />
   if (ledger === null) return <Spinner label="Loading evidence…" />
