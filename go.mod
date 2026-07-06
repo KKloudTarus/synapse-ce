@@ -3,19 +3,19 @@ module github.com/KKloudTarus/synapse-ce
 go 1.26.4
 
 require (
-	github.com/cilium/ebpf v0.21.0
+	github.com/cilium/ebpf v0.22.0
 	github.com/digitorus/timestamp v0.0.0-20250524132541-c45532741eea
 	github.com/go-enry/go-enry/v2 v2.9.6
 	github.com/google/licensecheck v0.3.1
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/johnfercher/maroto/v2 v2.4.0
-	github.com/minio/minio-go/v7 v7.2.0
+	github.com/minio/minio-go/v7 v7.2.1
 	github.com/phpdave11/gofpdf v1.4.3
-	github.com/pressly/goose/v3 v3.27.1
+	github.com/pressly/goose/v3 v3.27.2
 	golang.org/x/sys v0.46.0
-	golang.org/x/tools v0.46.0
+	golang.org/x/tools v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.49.1
+	modernc.org/sqlite v1.53.0
 )
 
 require (
@@ -62,7 +62,7 @@ require (
 	golang.org/x/text v0.38.0 // indirect
 	gopkg.in/ini.v1 v1.67.2 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	modernc.org/libc v1.72.1 // indirect
+	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
