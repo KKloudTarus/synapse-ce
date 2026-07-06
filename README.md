@@ -15,7 +15,7 @@ deterministic reports.
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8)](go.mod)
 [![Docs](https://img.shields.io/badge/docs-live-6d5bff)](https://kkloudtarus.github.io/synapse-ce/)
 
-[Documentation](https://kkloudtarus.github.io/synapse-ce/) · [Quickstart](#quickstart) · [Features](#features) · [Configuration](https://kkloudtarus.github.io/synapse-ce/#config)
+[Landing page](https://kkloudtarus.github.io/synapse-ce/) · [Documentation](docs/guide/README.md) · [Quickstart](#quickstart) · [Features](#features) · [Configuration](docs/guide/configuration.md)
 
 </div>
 
@@ -139,7 +139,10 @@ in `internal/usecase/ports`. `cmd/*` is the composition root, with dependency in
 
 Synapse reads its configuration from the process environment. Copy `.env.example` and adjust.
 The only required variable is `SYNAPSE_API_TOKEN`. See the
-[configuration reference](https://kkloudtarus.github.io/synapse-ce/#config) for the full list.
+[configuration reference](docs/guide/configuration.md) for the full list.
+
+Full documentation lives in [`docs/guide/`](docs/guide/README.md): introduction, installation,
+quickstart, features, configuration, CLI, architecture, deployment, and the security model.
 
 ## Contributors
 

@@ -1,0 +1,70 @@
+# Command line (synapse-cli)
+
+[Documentation home](README.md) · Previous: [Configuration](configuration.md) · Next: [Architecture](architecture.md)
+
+`synapse-cli` runs the same SCA pipeline as the server, from the command line. It is built for
+CI gating. It creates an ephemeral, scope-checked engagement covering the target path, so scope
+enforcement is exercised, not bypassed. Nothing is persisted.
+
+Build it with `make build`. The binary lands at `./bin/synapse-cli`.
+
+## Scan
+
+```
+synapse-cli scan <path|image-ref> [flags]
+```
+
+| Flag | Description |
+| --- | --- |
+| `--mode full\|vulnerabilities\|licenses` | What to scan. Default is full. |
+| `--fail-on critical\|high\|medium\|low\|info` | Exit non-zero if a finding at or above this severity is present. Default is high. |
+| `--image` | Treat the argument as a container image reference, pulled via crane, instead of a local path. |
+| `--offline` | Skip the live advisory source and detect with the offline database only. |
+| `--ignore-unfixed` | Ignore vulnerabilities that have no fix available. |
+
+### Examples
+
+```bash
+# fail a build on any high-or-critical vulnerability
+synapse-cli scan . --fail-on high
+
+# licenses only
+synapse-cli scan . --mode licenses
+
+# scan a container image, offline
+synapse-cli scan alpine:3.19 --image --offline
+```
+
+The exit code is 0 when no finding meets the `--fail-on` threshold, and non-zero otherwise.
+Wire it straight into a pipeline step.
+
+## Advisory sync (optional owned store)
+
+For detection independence you can maintain an owned advisory store and ingest feeds into it.
+This requires a database via `SYNAPSE_DB_DSN`.
+
+```bash
+# ingest a local OSV dump directory
+synapse-cli sync-advisories <dir>
+
+# fetch and ingest application ecosystems from the OSV bulk source
+synapse-cli sync-advisories --remote
+
+# fetch and ingest OS-package advisories (large)
+synapse-cli sync-advisories --remote-distros
+
+# ingest a local CSAF 2.0 advisory dump
+synapse-cli sync-advisories --csaf <dir>
+```
+
+## GitHub Actions
+
+```yaml
+- name: SCA scan
+  run: |
+    make tools
+    make build
+    ./bin/synapse-cli scan . --fail-on high
+```
+
+Next: [Architecture](architecture.md)
