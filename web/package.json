@@ -10,23 +10,23 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@radix-ui/react-select": "^2.3.1",
-    "@tanstack/react-virtual": "^3.14.3",
-    "@xyflow/react": "^12.11.0",
-    "fflate": "0.8.2",
-    "lucide-react": "^0.468.0",
+    "@radix-ui/react-select": "^2.3.2",
+    "@tanstack/react-virtual": "^3.14.5",
+    "@xyflow/react": "^12.11.2",
+    "fflate": "0.8.3",
+    "lucide-react": "^1.23.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.18.0",
+    "react-router-dom": "^7.18.1",
     "xlsx-js-style": "1.2.0"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.0.0",
+    "@tailwindcss/vite": "^4.3.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.3.4",
-    "tailwindcss": "^4.0.0",
-    "typescript": "^5.7.2",
-    "vite": "^6.0.0"
+    "@vitejs/plugin-react": "^6.0.3",
+    "tailwindcss": "^4.3.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.3"
   }
 }
