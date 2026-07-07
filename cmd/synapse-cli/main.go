@@ -310,6 +310,9 @@ func run(path string, failOn shared.Severity, mode string, ignoreUnfixed, image,
 	if cfg.VEXEnabled {
 		sca.SetVEXLoader(vexfile.New()) // in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions (CI-friendly)
 	}
+	if cfg.ComplianceEnabled {
+		sca.SetComplianceEnabled(true) // attach the AppSec-baseline benchmark (per-control PASS/FAIL)
+	}
 	if cfg.ScanCacheEnabled {
 		if dir := cfg.ResolveScanCacheDir(); dir != "" {
 			sca.SetSBOMCache(sbomcache.New(dir)) // content+version-addressed generated-SBOM cache (CI-friendly)
@@ -446,6 +449,29 @@ func printReport(target string, res *scauc.ScanResult) {
 			kev = " [KEV]"
 		}
 		fmt.Printf("    %-9s risk %5.2f  %s%s\n", f.Severity, f.RiskScore, f.Title, kev)
+	}
+	if c := res.Compliance; c != nil {
+		scope := ""
+		if c.MinSeverity != "" && c.MinSeverity != "info" {
+			scope = " (evaluated over findings ≥ " + c.MinSeverity
+			if c.IgnoreUnfixed {
+				scope += ", unfixed excluded"
+			}
+			scope += ")"
+		} else if c.IgnoreUnfixed {
+			scope = " (unfixed vulns excluded)"
+		}
+		fmt.Printf("\n  compliance: %s v%s — %d/%d controls passing%s\n", c.Title, c.Version, c.Passed, c.Passed+c.Failed, scope)
+		for _, r := range c.Results {
+			status := "PASS"
+			if !r.Passed {
+				status = "FAIL"
+			}
+			fmt.Printf("    [%s] %-14s %s\n", status, r.Control.ID, r.Control.Title)
+			for _, e := range r.Evidence {
+				fmt.Printf("           - %s\n", e)
+			}
+		}
 	}
 	fmt.Println()
 }

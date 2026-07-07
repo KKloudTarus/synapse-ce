@@ -548,6 +548,10 @@ func main() {
 		scaService.SetVEXLoader(vexfile.New()) // in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
 		log.Info("in-scan VEX ENABLED (.synapse.vex.json; not_affected/fixed gate-exempt, still reported + sealed)")
 	}
+	if cfg.ComplianceEnabled {
+		scaService.SetComplianceEnabled(true) // attach the AppSec-baseline benchmark (per-control PASS/FAIL)
+		log.Info("compliance report ENABLED (Synapse AppSec Baseline; deterministic, LLM-free)")
+	}
 	if cfg.ScanCacheEnabled {
 		if dir := cfg.ResolveScanCacheDir(); dir != "" {
 			scaService.SetSBOMCache(sbomcache.New(dir)) // content+version-addressed generated-SBOM cache

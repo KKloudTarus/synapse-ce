@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/compliance"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/distro"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
@@ -63,6 +64,7 @@ type Service struct {
 	misconfig      ports.MisconfigScanner        // optional deterministic IaC/config misconfig scan over the live workspace
 	suppression    ports.SuppressionLoader       // optional repo-committed .synapseignore accepted-risk policy
 	vexLoader      ports.VEXLoader               // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
+	complianceOn   bool                          // when set, attach the AppSec-baseline compliance report to a scan
 	reachability   ports.ReachabilityRecorder    // optional deterministic Tier-2 reachability proof
 	correlation    ports.CorrelationRecorder     // optional cross-check disagreement → judgment minter
 	sbomGen2       ports.SBOMGenerator           // optional 2nd SBOM producer for the cross-check
@@ -155,6 +157,24 @@ func (s *Service) SetSuppressionLoader(l ports.SuppressionLoader) { s.suppressio
 // A not_affected/fixed statement annotates the matched finding accepted-risk on the same retain-and-mark
 // surface as .synapseignore (gate-exempt, but reported + sealed), never removed.
 func (s *Service) SetVEXLoader(l ports.VEXLoader) { s.vexLoader = l }
+
+// SetComplianceEnabled turns on attaching the owned AppSec-baseline compliance report (per-control
+// PASS/FAIL over the scan's findings) to each scan result. Deterministic + LLM-free; off by default.
+func (s *Service) SetComplianceEnabled(on bool) { s.complianceOn = on }
+
+// attachCompliance computes the AppSec-baseline benchmark over the finalized findings when enabled. It runs
+// over ALL findings (an accepted-risk finding still fails its control — compliance reflects what is present).
+func (s *Service) attachCompliance(result *ScanResult) {
+	if !s.complianceOn || result == nil {
+		return
+	}
+	rep := compliance.Evaluate(compliance.BaselineSpec(), result.Findings)
+	// Record the finding-set scope so a PASS is never misread: a raised floor / --ignore-unfixed drops
+	// findings BEFORE compliance, and this qualifies the result accordingly.
+	rep.MinSeverity = string(result.MinSeverity)
+	rep.IgnoreUnfixed = s.ignoreUnfixed
+	result.Compliance = &rep
+}
 
 // SetReachability configures the optional deterministic Tier-2 reachability prover. nil ⇒ no
 // reachability judgments. Best-effort + opt-in: a no-coverage/un-buildable target leaves the prior
@@ -313,7 +333,11 @@ type ScanResult struct {
 	ExpiredSuppressions []string `json:"expired_suppressions,omitempty"`
 	// MalformedSuppressions lists .synapseignore rule ids whose expiry could not be parsed; fail-safe, they
 	// do NOT suppress (a date typo must not become a permanent silent acceptance) and are surfaced to fix.
-	MalformedSuppressions    []string                 `json:"malformed_suppressions,omitempty"`
+	MalformedSuppressions []string `json:"malformed_suppressions,omitempty"`
+	// Compliance is the owned AppSec-baseline benchmark re-projected onto this scan's findings (per-control
+	// PASS/FAIL, LLM-free); nil unless compliance is enabled. Computed over ALL findings (an accepted-risk
+	// finding still fails its control — compliance reflects what is present, not the CI-gate decision).
+	Compliance               *compliance.Report       `json:"compliance,omitempty"`
 	ToolVersions             map[string]string        `json:"tool_versions"`
 	VulnDBSnapshot           string                   `json:"vuln_db_snapshot"`
 	Completeness             ports.Completeness       `json:"completeness"`
@@ -1239,6 +1263,11 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 				mergeCachedScanResult(result, previous, opts)
 			}
 		}
+	}
+	// Compute compliance over the FINAL findings — AFTER any partial-rescan merge restores prior security
+	// findings — so a control can never falsely PASS against a finding the merged result actually carries.
+	s.attachCompliance(result)
+	if s.results != nil {
 		if data, mErr := json.Marshal(result); mErr == nil {
 			_ = s.results.SaveResult(ctx, engagementID, data)
 		}
@@ -1774,6 +1803,11 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 				mergeCachedScanResult(result, previous, opts)
 			}
 		}
+	}
+	// Compute compliance over the FINAL findings — AFTER any partial-rescan merge restores prior security
+	// findings — so a control can never falsely PASS against a finding the merged result actually carries.
+	s.attachCompliance(result)
+	if s.results != nil {
 		if data, mErr := json.Marshal(result); mErr == nil {
 			_ = s.results.SaveResult(ctx, engagementID, data)
 		}
