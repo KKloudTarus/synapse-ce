@@ -23,6 +23,7 @@ dependencies = [
 name = "serde"
 version = "1.0.197"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fb1c873e1b9b056a4dc4c0c198b24c3ffa059243875552b2bd0933b1aee4ce2"
 dependencies = [
  "serde_derive",
 ]
@@ -102,6 +103,14 @@ func TestCargoParseWithCompanion(t *testing.T) {
 	// resolved version + cargo PURL
 	if c := byName["serde"]; c.Version != "1.0.197" || c.PURL != "pkg:cargo/serde@1.0.197" {
 		t.Errorf("serde = %+v, want 1.0.197 / pkg:cargo/serde@1.0.197", c)
+	}
+	// the [[package]] checksum is captured as a SHA256 component Checksum
+	if ck := byName["serde"].Checksums; len(ck) != 1 || ck[0].Algorithm != "SHA256" || ck[0].Value != "3fb1c873e1b9b056a4dc4c0c198b24c3ffa059243875552b2bd0933b1aee4ce2" {
+		t.Errorf("serde checksum = %+v, want [{SHA256 3fb1c8…}]", ck)
+	}
+	// a crate without a checksum line stays without one
+	if ck := byName["serde_derive"].Checksums; len(ck) != 0 {
+		t.Errorf("serde_derive has no checksum line, want none, got %+v", ck)
 	}
 	// THE POINT: the companion Cargo.toml scopes dev-deps as development (first parser to exercise
 	// ParseInput.Dir) — across all three declaration forms.

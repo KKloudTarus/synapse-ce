@@ -32,7 +32,31 @@ type pipfileLock struct {
 }
 
 type pipfilePkg struct {
-	Version string `json:"version"`
+	Version string   `json:"version"`
+	Hashes  []string `json:"hashes"` // "sha256:<hex>" per acceptable artifact file
+}
+
+// pyHashChecksums converts a Python lockfile hash list ("<alg>:<hex>", e.g. "sha256:abc…", as Pipfile.lock
+// and poetry.lock record one per artifact file) into component Checksums, keeping the FIRST hash of each
+// algorithm (the files share an algorithm but differ per wheel/sdist, and one representative digest is enough
+// for integrity). Malformed entries are skipped; returns nil when none parse.
+func pyHashChecksums(hashes []string) []sbom.Checksum {
+	seen := map[string]bool{}
+	var out []sbom.Checksum
+	for _, h := range hashes {
+		i := strings.IndexByte(h, ':')
+		if i <= 0 || i == len(h)-1 {
+			continue // not "<alg>:<value>"
+		}
+		alg := strings.ToUpper(strings.TrimSpace(h[:i]))
+		val := strings.TrimSpace(h[i+1:])
+		if alg == "" || val == "" || seen[alg] {
+			continue
+		}
+		seen[alg] = true
+		out = append(out, sbom.Checksum{Algorithm: alg, Value: val})
+	}
+	return out
 }
 
 // Parse extracts the resolved Python packages: "default" as production, "develop" as development. Each
@@ -58,11 +82,12 @@ func (Pipfile) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sb
 				continue
 			}
 			set.add(sbom.Component{
-				Name:     name,
-				Version:  version,
-				PURL:     "pkg:pypi/" + name + "@" + version,
-				Location: in.Path,
-				Scope:    scope,
+				Name:      name,
+				Version:   version,
+				PURL:      "pkg:pypi/" + name + "@" + version,
+				Location:  in.Path,
+				Scope:     scope,
+				Checksums: pyHashChecksums(p.Hashes),
 			})
 		}
 	}

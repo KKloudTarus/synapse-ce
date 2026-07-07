@@ -35,6 +35,13 @@ func TestPipfileParse(t *testing.T) {
 	if c := byName["requests"]; c.Version != "2.31.0" || c.PURL != "pkg:pypi/requests@2.31.0" || c.Scope != sbom.ScopeProduction {
 		t.Errorf("requests = %+v, want 2.31.0 / pkg:pypi/requests@2.31.0 / production", c)
 	}
+	// the "sha256:<hex>" hash is captured as a SHA256 component Checksum; a package with no hashes has none.
+	if ck := byName["requests"].Checksums; len(ck) != 1 || ck[0].Algorithm != "SHA256" || ck[0].Value != "x" {
+		t.Errorf("requests checksum = %+v, want [{SHA256 x}]", ck)
+	}
+	if ck := byName["django"].Checksums; len(ck) != 0 {
+		t.Errorf("django has no hashes, want no checksum, got %+v", ck)
+	}
 	// PEP 503 normalization: Django → django.
 	if c := byName["django"]; c.Version != "4.2.0" {
 		t.Errorf("Django must normalize to django @4.2.0, got %+v", c)

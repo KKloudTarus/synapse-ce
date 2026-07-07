@@ -29,6 +29,7 @@ func (Cargo) Markers() []string { return []string{"Cargo.lock"} }
 // "name version", the version present only to disambiguate when a crate appears at multiple versions).
 type cargoPkg struct {
 	name, version string
+	checksum      string // the [[package]] `checksum` (sha256 hex), when present
 	deps          []string
 }
 
@@ -68,6 +69,8 @@ func (Cargo) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 			cur.name = tomlString(line[len("name = "):])
 		case inPkg && strings.HasPrefix(line, "version = "):
 			cur.version = tomlString(line[len("version = "):])
+		case inPkg && strings.HasPrefix(line, "checksum = "):
+			cur.checksum = tomlString(line[len("checksum = "):])
 		case inPkg && strings.HasPrefix(line, "dependencies = ["):
 			// usually a multi-line array (Cargo's serializer), but may be inline `[…]`/`[]` on this line
 			if rest, closed := strings.CutSuffix(strings.TrimPrefix(line, "dependencies = ["), "]"); closed {
@@ -125,7 +128,11 @@ func (Cargo) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 			scope = sbom.ScopeDevelopment
 		}
 		ref := purlOf(p.name, p.version)
-		set.add(sbom.Component{Name: p.name, Version: p.version, PURL: ref, Location: in.Path, Scope: scope})
+		comp := sbom.Component{Name: p.name, Version: p.version, PURL: ref, Location: in.Path, Scope: scope}
+		if p.checksum != "" { // Cargo.lock records a sha256 hex per crate
+			comp.Checksums = []sbom.Checksum{{Algorithm: "SHA256", Value: p.checksum}}
+		}
+		set.add(comp)
 		seen := map[string]bool{ref: true} // drop duplicate targets + self-edges (parity with the Syft path)
 		var on []string
 		for _, e := range p.deps {
