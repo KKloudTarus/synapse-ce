@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,5 +140,20 @@ func TestScanTimePinned(t *testing.T) {
 	// no snapshot -> stable zero time, never time.Now()
 	if (ScanResult{}).scanTime() != time.Unix(0, 0).UTC() {
 		t.Error("scanTime fallback must be the stable zero time")
+	}
+}
+
+// The export gate delegates entirely to the shared domain digest gate, so an SPDX package emits the same
+// canonical algorithm name + lowercase hex the scorer validated — and rejects what the scorer rejects.
+func TestSPDXHexDigestDelegatesToDomainGate(t *testing.T) {
+	name, hexVal, ok := spdxHexDigest("sha-256", strings.ToUpper(strings.Repeat("a", 64)))
+	if !ok || name != "SHA256" || hexVal != strings.Repeat("a", 64) {
+		t.Errorf("spdxHexDigest(sha-256, UPPER hex) = %q,%q,%v; want SHA256, lowercase hex, true", name, hexVal, ok)
+	}
+	if _, _, ok := spdxHexDigest("SHA256", "not-a-digest"); ok {
+		t.Error("a malformed value must be dropped by the export gate")
+	}
+	if _, _, ok := spdxHexDigest("CRC32", strings.Repeat("a", 8)); ok {
+		t.Error("an unrecognized algorithm must be dropped by the export gate")
 	}
 }

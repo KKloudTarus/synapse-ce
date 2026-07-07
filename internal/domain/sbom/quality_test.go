@@ -166,22 +166,35 @@ func TestQualityPartialRatio(t *testing.T) {
 }
 
 func TestHasChecksumAndScorerCreditsChecksums(t *testing.T) {
-	// A component with a Checksums entry (npm/pnpm SRI) but no legacy SHA1 must count as having a checksum.
-	withCk := Component{Name: "lodash", Version: "4.17.21", PURL: "pkg:npm/lodash@4.17.21", Checksums: []Checksum{{Algorithm: "SHA512", Value: "aaa"}}}
+	validSHA512SRI := strings.Repeat("A", 86) + "==" // 88-char base64 (npm SRI) decoding to 64 bytes = a real SHA-512
+	// A component with a VALID Checksums entry (npm/pnpm SRI base64) but no legacy SHA1 must count.
+	withCk := Component{Name: "lodash", Version: "4.17.21", PURL: "pkg:npm/lodash@4.17.21", Checksums: []Checksum{{Algorithm: "SHA512", Value: validSHA512SRI}}}
 	if !HasChecksum(withCk) {
-		t.Error("a component with a Checksums entry must report HasChecksum")
+		t.Error("a component with a valid Checksums entry must report HasChecksum")
 	}
 	if HasChecksum(Component{Name: "bare"}) {
 		t.Error("a component with neither SHA1 nor Checksums must not report HasChecksum")
 	}
-	if !HasChecksum(Component{SHA1: "abc"}) {
-		t.Error("the legacy SHA1 field must still count as a checksum")
+	// A valid 40-hex legacy SHA1 still counts.
+	if !HasChecksum(Component{SHA1: strings.Repeat("a", 40)}) {
+		t.Error("a valid legacy SHA1 must still count as a checksum")
+	}
+	// A MALFORMED digest must NOT count: the SPDX export gate would drop it, so it must not inflate the
+	// quality score with tamper evidence the exported SBOM will not actually carry.
+	if HasChecksum(Component{SHA1: "abc"}) {
+		t.Error("a too-short/garbage SHA1 must not count as a checksum")
+	}
+	if HasChecksum(Component{Checksums: []Checksum{{Algorithm: "SHA512", Value: "aaa"}}}) {
+		t.Error("a wrong-length digest value must not count as a checksum")
+	}
+	if HasChecksum(Component{Checksums: []Checksum{{Algorithm: "CRC32", Value: strings.Repeat("a", 8)}}}) {
+		t.Error("an unrecognized algorithm must not count as a checksum")
 	}
 	doc := SBOM{Source: "synapse", Components: []Component{withCk}}
 	doc.Audit.CreatedAt = time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
 	for _, e := range Quality(doc).Elements {
 		if e.ID == "sem-checksum" && e.Score != 100 {
-			t.Errorf("sem-checksum = %d, want 100 for a Checksums-only component", e.Score)
+			t.Errorf("sem-checksum = %d, want 100 for a valid-checksum component", e.Score)
 		}
 	}
 }

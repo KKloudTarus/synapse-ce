@@ -280,10 +280,21 @@ const (
 	SupplierDerived  = "derived"  // deterministically inferred by Synapse from the PURL namespace
 )
 
-// HasChecksum reports whether a component carries any integrity digest — the legacy SHA1 field or a
+// HasChecksum reports whether a component carries a VALID integrity digest — the legacy SHA1 field or a
 // Checksums entry — which is the semantic-quality "checksum present" signal (tamper evidence per component).
+// It validates the digest (recognized algorithm + right-length hex/base64) via ValidChecksum rather than
+// merely counting presence, so a malformed value that the SPDX exporter would drop does not inflate the
+// score with tamper evidence the exported SBOM will not actually carry.
 func HasChecksum(c Component) bool {
-	return strings.TrimSpace(c.SHA1) != "" || len(c.Checksums) > 0
+	if ValidChecksum(Checksum{Algorithm: "SHA1", Value: c.SHA1}) {
+		return true
+	}
+	for _, ck := range c.Checksums {
+		if ValidChecksum(ck) {
+			return true
+		}
+	}
+	return false
 }
 
 // supplierOf returns a component's supplier: the explicitly-captured Supplier when the producer/imported SBOM
