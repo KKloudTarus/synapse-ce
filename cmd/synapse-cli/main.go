@@ -417,6 +417,18 @@ func printReport(target string, res *scauc.ScanResult) {
 			fmt.Printf("    %-12s %d/%d resolved\n", c.Ecosystem, c.Resolved, c.Components)
 		}
 	}
+	if q := res.SBOMQuality; len(q.Elements) > 0 { // NTIA + semantic describe-quality of the SBOM (distinct from coverage)
+		mark := "NTIA minimum elements present"
+		if !q.NTIAMet {
+			mark = "! NTIA GAPS"
+		}
+		fmt.Printf("  sbom quality: %d/100 (NTIA %d/100) — %s\n", q.Score, q.NTIAScore, mark)
+		for _, e := range q.Elements { // surface each thin dimension so the gap is actionable, not just a number
+			if e.Score < 100 && e.Detail != "" {
+				fmt.Printf("    %-26s %3d/100 — %s\n", e.Label, e.Score, e.Detail)
+			}
+		}
+	}
 	fmt.Printf("  vulnerabilities: %d", len(res.Vulnerabilities))
 	if counts := countVulnSeverity(res); counts != "" {
 		fmt.Printf(" (%s)", counts)

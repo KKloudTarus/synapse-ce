@@ -359,6 +359,13 @@ type ScanResult struct {
 	// ecosystem, so a thin / partially-resolved ecosystem is VISIBLE rather than hidden behind the single
 	// global Completeness number ("no silent gap").
 	Coverage []sbom.EcosystemCoverage `json:"coverage"`
+	// SBOMQuality scores the produced SBOM against the NTIA minimum elements + semantic-quality checks —
+	// how well the components are DESCRIBED (supplier, unique id, checksum, license, dependency graph, ...),
+	// distinct from Completeness (which judges scan COVERAGE). Surfaced so a thin, hard-to-share, or
+	// non-regulation-minimum SBOM is a visible signal rather than a silent assumption. A consumer gates on
+	// len(.Elements) > 0 (a nil-SBOM / recon-only run leaves it zero-valued = "not computed", not "graded 0"),
+	// and any hard pass/fail gate keys off .NTIAMet / .NTIAScore, never the blended .Score.
+	SBOMQuality sbom.QualityReport `json:"sbom_quality"`
 	// ReproDigest is a stable content fingerprint of the reproducible output: same target + pinned
 	// producer + pinned advisory/DB snapshot ⇒ same digest. Excludes timestamps + per-run metadata.
 	ReproDigest string                 `json:"repro_digest"`
@@ -1257,6 +1264,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	trace.succeed(step, "Findings derived", map[string]int{"vulnerabilities": len(vulns), "licenses": len(lics), "findings": len(result.Findings)})
 	result.DebugEvents = trace.snapshot()
 	result.Coverage = sbom.CoverageByEcosystem(*result.SBOM)
+	result.SBOMQuality = sbom.Quality(*result.SBOM)
 	result.ReproDigest = ReproDigest(result)
 
 	if opts.scansVulnerabilities() && s.correlation != nil {
@@ -1746,6 +1754,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	result.DebugEvents = trace.snapshot()
 	if result.SBOM != nil {
 		result.Coverage = sbom.CoverageByEcosystem(*result.SBOM) // per-ecosystem coverage breakdown
+		result.SBOMQuality = sbom.Quality(*result.SBOM)          // NTIA + semantic describe-quality of the SBOM
 	}
 
 	// Deterministic Tier-2 reachability proof, best-effort + opt-in: prove which findings' affected
