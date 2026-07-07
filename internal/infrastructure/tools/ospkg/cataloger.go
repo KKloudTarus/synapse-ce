@@ -111,8 +111,12 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 			rpmResolved = rpmMatchableIDs[id] && major != ""
 		}
 	}
-	if comps := rpmComponents(ctx, rootfsDir, rpmNS, rpmTag); len(comps) > 0 {
-		res.Components = append(res.Components, comps...)
+	rpmComps, err := rpmComponents(ctx, rootfsDir, rpmNS, rpmTag)
+	if err != nil { // only a context cancellation; a hostile/malformed DB degrades to no components
+		return ports.OSPackageResult{}, err
+	}
+	if len(rpmComps) > 0 {
+		res.Components = append(res.Components, rpmComps...)
 		if !rpmResolved {
 			res.DistroResolved = false
 		}

@@ -19,10 +19,11 @@ import (
 // older Berkeley-DB (/var/lib/rpm/Packages, RHEL<=8/CentOS/AL2) and ndb (openSUSE) backends are DEFERRED —
 // their binary page formats are a larger, riskier parse and the generator already catalogs them from the
 // layout. Everything here treats the DB + header as UNTRUSTED (a hostile image): reads are cancellable
-// (ctx-threaded), bounded (per-blob size filter server-side, total-byte + row-count budgets), and each
-// identity tag is read at most once so a crafted header cannot amplify work; the header parse is fully
-// bounds-checked and the whole sqlite interaction is recover-wrapped so a malformed DB contributes nothing
-// rather than panicking the scan (cf. PR #43).
+// (ctx-threaded, plus a watchdog that closes the DB on ctx.Done so even a crafted sqlite that spins inside one
+// driver step is aborted by the scan deadline), bounded (per-blob size filter server-side, total-byte +
+// row-count budgets), and each identity tag latches on its first NON-EMPTY value so a crafted header cannot
+// amplify the per-entry scan; the header parse is fully bounds-checked and the whole sqlite interaction is
+// recover-wrapped so a malformed DB contributes nothing rather than panicking the scan (cf. PR #43).
 const (
 	maxRPMIndex   = 1 << 16  // index-entry count cap per header
 	maxRPMData    = 64 << 20 // header data-store size cap
@@ -44,32 +45,48 @@ const (
 
 // rpmComponents reads /var/lib/rpm/rpmdb.sqlite and returns one component per installed package. namespace is
 // the PURL namespace (distro id) and tag the distro qualifier (or ""). Best-effort + hardened for an untrusted
-// DB: streamed (one blob at a time), bounded (per-blob size filter + total-byte + row-count budgets),
-// cancellable (ctx), and recover-wrapped so a malformed sqlite yields nil rather than crashing the scan. An
-// absent/non-sqlite DB (a Berkeley-DB/ndb rootfs) → nil; the generator still catalogs those from the layout.
-func rpmComponents(ctx context.Context, rootfsDir, namespace, tag string) (out []sbom.Component) {
+// DB: streamed (one blob at a time), bounded (per-blob size filter + total-byte + row-count budgets), and
+// recover-wrapped so a malformed sqlite yields nil rather than crashing the scan. It is cancellable: an error
+// is returned ONLY on context cancellation (so the pipeline surfaces a timed-out read as a failure, never a
+// silently-truncated success); a hostile-DB read error or panic degrades to (nil, nil). An absent/non-sqlite
+// DB (a Berkeley-DB/ndb rootfs) → (nil, nil); the generator still catalogs those from the layout.
+func rpmComponents(ctx context.Context, rootfsDir, namespace, tag string) (out []sbom.Component, err error) {
 	defer func() {
 		if recover() != nil { // the sqlite file is untrusted; a driver panic must degrade to no components
-			out = nil
+			out, err = nil, nil
 		}
 	}()
 	path := filepath.Join(rootfsDir, "var/lib/rpm/rpmdb.sqlite")
-	fi, err := os.Lstat(path) // regular-file guard: never follow a symlinked DB out of the rootfs
-	if err != nil || !fi.Mode().IsRegular() {
-		return nil
+	fi, statErr := os.Lstat(path) // regular-file guard: never follow a symlinked DB out of the rootfs
+	if statErr != nil || !fi.Mode().IsRegular() {
+		return nil, nil
 	}
 	// mode=ro + immutable=1: the rootfs is static, never written; the path is a fixed suffix of the workspace
 	// dir (no attacker-controlled '?'), so the DSN query cannot be overridden.
-	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&immutable=1")
-	if err != nil {
-		return nil
+	db, openErr := sql.Open("sqlite", "file:"+path+"?mode=ro&immutable=1")
+	if openErr != nil {
+		return nil, nil
 	}
 	defer func() { _ = db.Close() }()
+	// A crafted sqlite (e.g. Packages as a view over a recursive CTE) can spin INSIDE one driver step — where
+	// the pure-Go driver only arms its ctx-interrupt for the first step, so the per-row ctx.Err() below never
+	// gets a turn and the scan's timeout could not otherwise stop it. Closing the DB on ctx.Done aborts an
+	// in-flight step, so this read is genuinely bounded by the scan deadline. done stops the watchdog on a
+	// normal return (defer order: close(done) runs before db.Close, so the watchdog never double-closes).
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = db.Close()
+		case <-done:
+		}
+	}()
 	// Bound each header server-side (parameterized, no string concatenation) so an oversized row is filtered
-	// before Scan allocates it; the read is cancellable via QueryContext.
-	rows, err := db.QueryContext(ctx, "SELECT blob FROM Packages WHERE LENGTH(blob) > 0 AND LENGTH(blob) <= ?", rpmMaxBlobLen)
-	if err != nil {
-		return nil
+	// before Scan allocates it; the read is cancellable via QueryContext + the watchdog above.
+	rows, queryErr := db.QueryContext(ctx, "SELECT blob FROM Packages WHERE LENGTH(blob) > 0 AND LENGTH(blob) <= ?", rpmMaxBlobLen)
+	if queryErr != nil {
+		return nil, ctx.Err() // ctx.Err() is non-nil iff cancelled → surface; else a hostile-DB error → (nil, nil)
 	}
 	defer func() { _ = rows.Close() }()
 	var total int64
@@ -77,12 +94,12 @@ func rpmComponents(ctx context.Context, rootfsDir, namespace, tag string) (out [
 		if len(out) >= maxPackages || total >= maxDBBytes { // row-count + total-byte budgets (bomb guard)
 			break
 		}
-		if err := ctx.Err(); err != nil {
-			return out
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
 		}
 		var b []byte
-		if err := rows.Scan(&b); err != nil {
-			return out
+		if scanErr := rows.Scan(&b); scanErr != nil {
+			return nil, ctx.Err() // watchdog-close (cancelled) → surface; otherwise a hostile-DB error → (nil, nil)
 		}
 		total += int64(len(b))
 		if name, evr, arch, ok := safeParseRPMHeader(b); ok {
@@ -91,7 +108,10 @@ func rpmComponents(ctx context.Context, rootfsDir, namespace, tag string) (out [
 			}
 		}
 	}
-	return out
+	if rows.Err() != nil {
+		return nil, ctx.Err() // discard partials on a hostile-DB read error (matches parseOSDB); surface a cancel
+	}
+	return out, nil
 }
 
 // safeParseRPMHeader wraps parseRPMHeader in a recover: the bounds checks below should already prevent a
@@ -108,8 +128,9 @@ func safeParseRPMHeader(blob []byte) (name, evr, arch string, ok bool) {
 // parseRPMHeader extracts (name, epoch:version-release, arch) from one RPM header blob. Layout: an optional
 // 8-byte lead (magic 8e ad e8 01 + 4 reserved), then nindex (u32 BE) + hsize (u32 BE), then nindex 16-byte
 // index entries (tag, type, offset, count), then an hsize-byte data store. Every offset is bounds-checked in
-// unsigned space (width-independent), and each identity tag is read AT MOST ONCE — so a crafted header with
-// many duplicate tags cannot amplify the per-entry string scan.
+// unsigned space (width-independent), and each identity tag latches on its first NON-EMPTY value — a costly
+// rpmCStr scan only ever returns non-empty (an empty result is O(1)), so a crafted header with many duplicate
+// tags cannot amplify the per-entry string scan.
 func parseRPMHeader(blob []byte) (name, evr, arch string, ok bool) {
 	off := 0
 	if len(blob) >= 4 && [4]byte(blob[:4]) == rpmHeaderMagic {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // rpmTagEntry is one header tag for the test builder.
@@ -168,6 +169,49 @@ func TestCatalogHonorsCancellation(t *testing.T) {
 	cancel()
 	if _, err := New().Catalog(ctx, t.TempDir()); err == nil {
 		t.Error("a cancelled context must abort Catalog with an error")
+	}
+}
+
+// TestCatalogRPMHostileViewTerminates guards the property behind the ctx watchdog: a crafted Packages VIEW —
+// here a valid seed row followed by an unbounded recursive CTE of oversized rows the server-side LENGTH filter
+// rejects — must never hang the scan. This modernc version happens to terminate the view on its own (it does
+// not spin inside a single step), so the watchdog is a driver-independent backstop rather than load-bearing
+// here; the test still locks "a hostile Packages view returns within its deadline, never an unbounded hang"
+// (with a 2s ctx: if a future driver spins, the DB-close watchdog aborts it well under the outer guard). The
+// outer guard makes a true hang fail the test instead of stalling the suite; either an error or a best-effort
+// success is acceptable, only a hang is not.
+func TestCatalogRPMHostileViewTerminates(t *testing.T) {
+	rootfs := t.TempDir()
+	dbPath := filepath.Join(rootfs, "var/lib/rpm/rpmdb.sqlite")
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", "file:"+dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE TABLE seed(blob BLOB)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO seed(blob) VALUES(?)", bashHeader(t, 0)); err != nil {
+		t.Fatal(err)
+	}
+	// zeroblob keeps LENGTH O(1) with no materialization, so a skip is a pure CPU spin (no OOM even on a
+	// regression); 13MB > rpmMaxBlobLen (12MB) so every CTE row fails the filter.
+	if _, err := db.Exec(`CREATE VIEW Packages AS SELECT blob FROM seed UNION ALL ` +
+		`SELECT zeroblob(13000000) AS blob FROM (WITH RECURSIVE r(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM r) SELECT x FROM r)`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	resCh := make(chan error, 1)
+	go func() { _, e := New().Catalog(ctx, rootfs); resCh <- e }()
+	select {
+	case <-resCh: // returned (error or best-effort success) — the scan was not hung
+	case <-time.After(30 * time.Second):
+		t.Fatal("Catalog hung on a hostile Packages view: the ctx deadline did not bound the sqlite read")
 	}
 }
 
