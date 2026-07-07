@@ -60,6 +60,7 @@ type Service struct {
 	licFile        ports.LicenseFileResolver     // optional offline license-text fallback from JAR LICENSE files
 	sastAnalyzer   ports.SASTAnalyzer            // optional deterministic pattern-SAST over the live workspace
 	secretScanner  ports.SecretScanner           // optional deterministic secret scan over the live workspace
+	misconfig      ports.MisconfigScanner        // optional deterministic IaC/config misconfig scan over the live workspace
 	reachability   ports.ReachabilityRecorder    // optional deterministic Tier-2 reachability proof
 	correlation    ports.CorrelationRecorder     // optional cross-check disagreement → judgment minter
 	sbomGen2       ports.SBOMGenerator           // optional 2nd SBOM producer for the cross-check
@@ -111,6 +112,10 @@ func (s *Service) SetSASTAnalyzer(a ports.SASTAnalyzer) { s.sastAnalyzer = a }
 
 // SetSecretScanner configures the optional deterministic secret scanner. nil ⇒ no secret scanning.
 func (s *Service) SetSecretScanner(sc ports.SecretScanner) { s.secretScanner = sc }
+
+// SetMisconfigScanner configures the optional deterministic IaC/config misconfig scanner.
+// nil ⇒ no misconfig scanning. A setter keeps the existing NewService call sites unchanged.
+func (s *Service) SetMisconfigScanner(m ports.MisconfigScanner) { s.misconfig = m }
 
 // SetReachability configures the optional deterministic Tier-2 reachability prover. nil ⇒ no
 // reachability judgments. Best-effort + opt-in: a no-coverage/un-buildable target leaves the prior
@@ -1575,6 +1580,13 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			return nil, fmt.Errorf("scan secrets: %w", serr)
 		}
 		result.Findings = append(result.Findings, buildSecretFindings(engagementID, secretRaws, now, s.minSeverity)...)
+	}
+	if opts.scansVulnerabilities() && s.misconfig != nil {
+		misRaws, merr := s.misconfig.ScanConfigs(ctx, ws.Dir)
+		if merr != nil {
+			return nil, fmt.Errorf("scan misconfig: %w", merr)
+		}
+		result.Findings = append(result.Findings, buildMisconfigFindings(engagementID, misRaws, now, s.minSeverity)...)
 	}
 	result.MinSeverity = s.minSeverity
 	result.VulnsBelowThreshold = countBelowThreshold(vulns, s.minSeverity)

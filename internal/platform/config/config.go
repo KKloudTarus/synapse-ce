@@ -162,6 +162,9 @@ type Config struct {
 	// SecretScanEnabled turns on the deterministic secret scanner in the scan pipeline; off by default.
 	// It reads workspace files and redacts every match, so nothing sensitive reaches logs or the report.
 	SecretScanEnabled bool
+	// MisconfigEnabled turns on the deterministic IaC/config misconfig scanner (Dockerfile, Kubernetes
+	// manifests) in the scan pipeline; off by default. Read-only, first-party checks, no policy engine.
+	MisconfigEnabled bool
 	// OwnedAdvisoryEnabled wires the owned advisory DetectionSource: match the SBOM
 	// against the owned normalized-advisory store (offline, reproducible) ALONGSIDE live OSV/Grype. Off by
 	// default; opt-in. An empty store yields no findings (a harmless no-op) until the advisory ingester
@@ -304,6 +307,7 @@ func Load() Config {
 		JudgmentsEnabled:       getbool("SYNAPSE_JUDGMENTS_ENABLED", false),
 		SASTEnabled:            getbool("SYNAPSE_SAST_ENABLED", false),
 		SecretScanEnabled:      getbool("SYNAPSE_SECRET_SCAN_ENABLED", false),
+		MisconfigEnabled:       getbool("SYNAPSE_MISCONFIG_ENABLED", false),
 		OwnedAdvisoryEnabled:   getbool("SYNAPSE_OWNED_ADVISORY", false),
 		ReachabilityEnabled:    getbool("SYNAPSE_REACHABILITY_ENABLED", false),
 		CrossCheckEnabled:      getbool("SYNAPSE_CROSSCHECK_ENABLED", false),

@@ -56,6 +56,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownsbom"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/risk"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/misconfig"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/secretscan"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/syft"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/taintcallgraph"
@@ -531,6 +532,10 @@ func main() {
 	if cfg.SecretScanEnabled {
 		scaService.SetSecretScanner(secretscan.New()) // deterministic, redacted secret scan in the scan pipeline
 		log.Info("secret scanning ENABLED (hardcoded credentials; matches redacted)")
+	}
+	if cfg.MisconfigEnabled {
+		scaService.SetMisconfigScanner(misconfig.New()) // deterministic IaC/config misconfig scan in the scan pipeline
+		log.Info("misconfig scanning ENABLED (Dockerfile + Kubernetes manifests)")
 	}
 	aupService := aupuc.NewService(aupStore, auditLog, clock, cfg.AUPVersion)
 	exportService := exportuc.NewService(findingRepo, clock, buildinfo.App())

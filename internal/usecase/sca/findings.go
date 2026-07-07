@@ -256,6 +256,49 @@ func secretDescription(sr ports.SecretRawFinding) string {
 		sr.Category, sr.RuleID, sr.Match)
 }
 
+// buildMisconfigFindings turns insecure IaC/config settings into ungated Kind=misconfig findings
+// (deterministic, publishable like SCA). Each is a first-party presence fact located at file:line.
+func buildMisconfigFindings(engagementID shared.ID, raws []ports.MisconfigRawFinding, now time.Time, minSeverity shared.Severity) []finding.Finding {
+	min := shared.SeverityRank(minSeverity)
+	out := make([]finding.Finding, 0, len(raws))
+	for _, mr := range raws {
+		if mr.Severity != shared.SeverityUnknown && shared.SeverityRank(mr.Severity) < min {
+			continue
+		}
+		// Dedup on rule+file+line so a re-scan updates in place (1:1).
+		dedup := "misconfig:" + mr.RuleID + ":" + mr.File + ":" + strconv.Itoa(mr.Line)
+		scope := sbom.ClassifyScope(mr.File, "")
+		out = append(out, finding.Finding{
+			ID:           findingID(engagementID, dedup),
+			EngagementID: engagementID,
+			Title:        fmt.Sprintf("%s (%s:%d)", mr.Title, mr.File, mr.Line),
+			Description:  misconfigDescription(mr),
+			Severity:     mr.Severity,
+			Sources:      []string{"synapse-misconfig"},
+			Confidence:   vulnerability.ConfidenceForSources(1),
+			Class:        finding.ClassFirstParty,
+			Scope:        scope,
+			// Reachability/Impact are left empty on purpose: a misconfiguration is a static PRESENCE fact
+			// in a config file, not a reachable-code weakness, so the SAST scope+severity impact model
+			// does not apply.
+			Priority: sastPriority(mr.Severity),
+			Status:   finding.StatusOpen,
+			Kind:     finding.KindMisconfig,
+			DedupKey: dedup,
+			Audit:    shared.Audit{CreatedAt: now, UpdatedAt: now},
+		})
+	}
+	return out
+}
+
+func misconfigDescription(mr ports.MisconfigRawFinding) string {
+	res := strings.TrimSpace(mr.Resource)
+	if res != "" {
+		return fmt.Sprintf("%s [%s]. %s", res, mr.RuleID, mr.Description)
+	}
+	return fmt.Sprintf("[%s] %s", mr.RuleID, mr.Description)
+}
+
 func sastDescription(sr ports.SASTRawFinding) string {
 	desc := strings.TrimSpace(sr.Description)
 	proof := []string{}

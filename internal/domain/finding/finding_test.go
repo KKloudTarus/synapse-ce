@@ -16,7 +16,7 @@ func TestStatusValid(t *testing.T) {
 }
 
 func TestKindValid(t *testing.T) {
-	for _, k := range []Kind{KindSCA, KindRecon, KindExploitation, KindManual, KindSAST, KindSecret, KindDAST, KindThreat} {
+	for _, k := range []Kind{KindSCA, KindRecon, KindExploitation, KindManual, KindSAST, KindSecret, KindMisconfig, KindDAST, KindThreat} {
 		if !k.Valid() {
 			t.Errorf("Kind %q should be valid", k)
 		}

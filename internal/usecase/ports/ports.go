@@ -848,6 +848,27 @@ type SecretScanner interface {
 	ScanFiles(ctx context.Context, root string) ([]SecretRawFinding, error)
 }
 
+// MisconfigRawFinding is one insecure infrastructure-as-code / config setting located at file:line, tied
+// to the resource it applies to (e.g. "Deployment/api" or "Dockerfile").
+type MisconfigRawFinding struct {
+	File        string // path relative to the scanned source root
+	Line        int    // 1-indexed (best-effort; the resource/instruction line)
+	RuleID      string // e.g. "kubernetes-privileged"
+	Title       string // human title, e.g. "Privileged container"
+	Severity    shared.Severity
+	Resource    string // what it applies to, e.g. "Deployment/api" or "Dockerfile FROM"
+	Description string // what is wrong + how to fix
+}
+
+// MisconfigScanner detects insecure IaC/config (Dockerfile, Kubernetes manifests, ...) in a prepared
+// workspace with owned, deterministic checks (no external policy engine). READ-ONLY and best-effort: a
+// parse or walk error is a per-file skip, never a scan failure. Results become ungated Kind=misconfig
+// findings.
+type MisconfigScanner interface {
+	Name() string
+	ScanConfigs(ctx context.Context, root string) ([]MisconfigRawFinding, error)
+}
+
 // RiskResult is the output of risk enrichment: vulns annotated with KEV + EPSS,
 // plus the data-source versions (for reproducibility provenance).
 type RiskResult struct {
