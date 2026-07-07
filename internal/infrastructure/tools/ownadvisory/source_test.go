@@ -106,7 +106,11 @@ func TestOsDistroEcosystem(t *testing.T) {
 		"pkg:apk/alpine/musl@1.2.2-r0?distro=alpine-3.18.12":     "Alpine:v3.18",
 		"pkg:deb/ubuntu/bash@5?distro=ubuntu-22.04":              "Ubuntu:22.04", // mapped: owned OVAL feed keys "Ubuntu:<version>"
 		"pkg:deb/ubuntu/openssl@3?distro=ubuntu-20.04":           "Ubuntu:20.04",
-		"pkg:rpm/redhat/bash@4.4?distro=rhel-9":                  "", // RPM distros deferred
+		"pkg:rpm/rocky/bash@4.4-1?distro=rocky-9.3":              "Rocky Linux:9", // mapped: OSV keys "<Name>:<major>"
+		"pkg:rpm/almalinux/openssl@3?distro=almalinux-8.9":       "AlmaLinux:8",
+		"pkg:rpm/ol/glibc@2?distro=ol-9":                         "Oracle Linux:9",
+		"pkg:rpm/redhat/bash@4.4?distro=rhel-9":                  "", // rhel/centos/fedora: module-qualified/uncertain OSV keys → unmapped (flagged, not silent)
+		"pkg:rpm/fedora/bash@5?distro=fedora-39":                 "",
 		"pkg:deb/debian/openssl@1.1":                             "", // no distro qualifier
 		"pkg:npm/lodash@4.0.0":                                   "", // not an OS package
 	}

@@ -88,8 +88,31 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 			res.DistroResolved = false
 		}
 	}
+
+	// rpm (RHEL/Fedora family, sqlite backend): the distro qualifier is set for any rpm-family id (inventory),
+	// but only the ids osDistroEcosystem keys (Rocky/AlmaLinux/Oracle) count as resolved — RHEL/CentOS/Fedora
+	// use module-qualified or uncertain OSV keys, so they are emitted but flagged unresolved (surfaced upstream,
+	// never a silent zero-match). Berkeley-DB/ndb backends are deferred (the generator covers them).
+	rpmNS, rpmTag := "rhel", ""
+	if id != "" {
+		rpmNS = id
+		if versionID != "" {
+			rpmTag = id + "-" + versionID
+		}
+	}
+	if comps := rpmComponents(rootfsDir, rpmNS, rpmTag); len(comps) > 0 {
+		res.Components = append(res.Components, comps...)
+		if !(rpmMatchableIDs[id] && rpmTag != "") {
+			res.DistroResolved = false
+		}
+	}
 	return res, nil
 }
+
+// rpmMatchableIDs are the rpm-family os-release IDs osDistroEcosystem can key to an advisory ecosystem
+// (Rocky/AlmaLinux/Oracle Linux, which OSV keys by "<Name>:<major>"). Others (rhel/centos/fedora/amzn/suse)
+// are cataloged for inventory but flagged unresolved until their ecosystem mapping + advisory feed land.
+var rpmMatchableIDs = map[string]bool{"rocky": true, "almalinux": true, "alma": true, "ol": true, "oracle": true}
 
 // dpkgFieldKeys / apkFieldKeys are the ONLY stanza keys each parser reads. parseOSDB stores only these, so a
 // stanza with millions of distinct junk keys cannot grow the per-stanza map (keeps memory O(1) per stanza).
