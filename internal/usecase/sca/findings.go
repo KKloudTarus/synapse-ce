@@ -496,6 +496,51 @@ func applyVEX(res *ScanResult, doc vex.Document) {
 	}
 }
 
+// NeedsVerifyFinding marks a vuln finding the precise detection-priority quarantined as lower-confidence
+// (a single, uncorroborated detection source, and not KEV). The finding STAYS in Findings (reported +
+// evidence-sealed); this only labels it needs-verify and exempts it from the --fail-on gate — the
+// "quarantine into a verify queue, don't drop" alternative to Trivy dropping imprecise matches.
+type NeedsVerifyFinding struct {
+	DedupKey string `json:"dedup_key"`
+	Title    string `json:"title"`
+	Reason   string `json:"reason"`
+}
+
+// applyDetectionPriority, in precise mode, quarantines single-source (uncorroborated) non-KEV vuln findings
+// into res.NeedsVerification WITHOUT removing them. KEV (actively exploited), multi-source (corroborated),
+// and non-vuln findings (deterministic SAST/secret/misconfig/license) always stay actionable. Comprehensive
+// mode is a no-op. Deterministic; nothing is removed, so nothing is hidden — only the gate is exempted.
+func applyDetectionPriority(res *ScanResult, priority string) {
+	if res == nil || priority != DetectionPrecise {
+		return
+	}
+	verified := res.SuppressedKeys() // already-accepted findings aren't re-labeled needs-verify
+	for _, f := range res.Findings {
+		if !strings.HasPrefix(f.DedupKey, "vuln:") { // only advisory-vuln findings; first-party stays actionable
+			continue
+		}
+		if f.KEV || len(f.Sources) > 1 || verified[f.DedupKey] { // KEV + corroborated + accepted stay as-is
+			continue
+		}
+		res.NeedsVerification = append(res.NeedsVerification, NeedsVerifyFinding{
+			DedupKey: f.DedupKey, Title: f.Title,
+			Reason: "≤1 detection source (uncorroborated) — verify before acting",
+		})
+	}
+}
+
+// NeedsVerifyKeys returns the dedup keys a CI gate should exempt from --fail-on (the needs-verify queue).
+func (r *ScanResult) NeedsVerifyKeys() map[string]bool {
+	if len(r.NeedsVerification) == 0 {
+		return nil
+	}
+	m := make(map[string]bool, len(r.NeedsVerification))
+	for _, n := range r.NeedsVerification {
+		m[n.DedupKey] = true
+	}
+	return m
+}
+
 // SuppressedKeys returns the dedup keys a CI gate should exempt from --fail-on (the accepted-risk set).
 func (r *ScanResult) SuppressedKeys() map[string]bool {
 	if len(r.SuppressedFindings) == 0 {
