@@ -439,10 +439,23 @@ func printReport(target string, res *scauc.ScanResult) {
 			mark = "! NTIA GAPS"
 		}
 		fmt.Printf("  sbom quality: %d/100 (NTIA %d/100) — %s\n", q.Score, q.NTIAScore, mark)
-		for _, e := range q.Elements { // surface each thin dimension so the gap is actionable, not just a number
-			if e.Score < 100 && e.Detail != "" {
+		for _, e := range q.Elements { // surface each thin score-feeding dimension so the gap is actionable
+			if e.Category != sbom.QualityCategoryCompliance && e.Score < 100 && e.Detail != "" {
 				fmt.Printf("    %-26s %3d/100 — %s\n", e.Label, e.Score, e.Detail)
 			}
+		}
+		// Compliance-only signals gate a profile but deliberately do NOT feed the blended score above; label them
+		// so a "100/100" headline beside a "0/100" strong-checksum line does not read as a contradiction.
+		firstCompliance := true
+		for _, e := range q.Elements {
+			if e.Category != sbom.QualityCategoryCompliance || e.Score >= 100 || e.Detail == "" {
+				continue
+			}
+			if firstCompliance {
+				fmt.Printf("    profile-only signals (do not affect the score above):\n")
+				firstCompliance = false
+			}
+			fmt.Printf("      %-24s %3d/100 — %s\n", e.Label, e.Score, e.Detail)
 		}
 		for _, p := range q.Profiles { // explicit per-standard PASS/FAIL a regulated buyer can cite
 			fmt.Printf("    %s\n", p.Summary)
