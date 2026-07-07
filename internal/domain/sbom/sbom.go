@@ -134,6 +134,20 @@ type Component struct {
 	// exact artifact bytes, so it can recover the Maven coordinate of a shaded/renamed/metadata-less JAR
 	// whose in-file identity was stripped, where pom.properties recovery cannot.
 	SHA1 string `json:",omitempty"`
+
+	// Checksums are the component artifact's integrity digests as recorded by the lockfile / producer
+	// (e.g. npm `integrity` sha512, a Cargo.lock sha256), giving tamper evidence per component. Kept
+	// alongside SHA1 (which is a single legacy hex form); empty when the source records none. Emitted as
+	// SPDX package checksums on export.
+	Checksums []Checksum `json:",omitempty"`
+}
+
+// Checksum is one integrity digest of a component artifact. Algorithm is an SPDX-style name (SHA1, SHA256,
+// SHA512, ...); Value is the digest as the source recorded it (hex for SHA-256/SHA-1, base64 for an npm
+// sha512 integrity).
+type Checksum struct {
+	Algorithm string `json:"algorithm"`
+	Value     string `json:"value"`
 }
 
 // Coarse JVM class-reachability verdicts. Empty ("") = not analyzed / unknown.

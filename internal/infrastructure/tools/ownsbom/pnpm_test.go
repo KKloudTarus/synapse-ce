@@ -54,6 +54,14 @@ func TestPnpmParseV9(t *testing.T) {
 	if len(comps) != 2 {
 		t.Fatalf("want 2 components from packages: (lodash, @babel/core), got %d: %+v", len(comps), comps)
 	}
+	// The resolution integrity (SRI) must be captured as a component Checksum (deferred-emission attaches it
+	// to the right package key).
+	if ck := byName["lodash"].Checksums; len(ck) != 1 || ck[0].Algorithm != "SHA512" || ck[0].Value != "aaa" {
+		t.Errorf("lodash checksum = %+v, want [{SHA512 aaa}]", ck)
+	}
+	if ck := byName["@babel/core"].Checksums; len(ck) != 1 || ck[0].Value != "bbb" {
+		t.Errorf("@babel/core checksum = %+v, want [{SHA512 bbb}]", ck)
+	}
 }
 
 // v6 keys carry a leading `/` and a `(peer)` suffix; v5 uses `/name/version`. Both must resolve.

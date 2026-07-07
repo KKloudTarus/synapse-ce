@@ -149,6 +149,21 @@ func (c cdxComponent) sha1() string {
 	return ""
 }
 
+// checksums maps every CycloneDX hash Syft emitted for the component to a domain Checksum, normalizing the
+// algorithm to an SPDX-style name ("SHA-256" -> "SHA256"). This is the general integrity-digest capture (the
+// separate sha1() stays for JAR-coordinate recovery). Returns nil when the component carries no hashes.
+func (c cdxComponent) checksums() []sbom.Checksum {
+	var out []sbom.Checksum
+	for _, h := range c.Hashes {
+		v := strings.TrimSpace(h.Content)
+		if v == "" {
+			continue
+		}
+		out = append(out, sbom.Checksum{Algorithm: strings.ToUpper(strings.ReplaceAll(h.Alg, "-", "")), Value: v})
+	}
+	return out
+}
+
 type cdxProperty struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
@@ -264,6 +279,7 @@ func parseCycloneDX(data []byte) ([]sbom.Component, []sbom.Dependency, string, e
 			SupplierSource: supplierSrc,
 			LayerID:        layerID,
 			SHA1:           c.sha1(),
+			Checksums:      c.checksums(),
 		}
 		for _, lc := range c.Licenses {
 			switch {

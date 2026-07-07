@@ -165,6 +165,27 @@ func TestQualityPartialRatio(t *testing.T) {
 	}
 }
 
+func TestHasChecksumAndScorerCreditsChecksums(t *testing.T) {
+	// A component with a Checksums entry (npm/pnpm SRI) but no legacy SHA1 must count as having a checksum.
+	withCk := Component{Name: "lodash", Version: "4.17.21", PURL: "pkg:npm/lodash@4.17.21", Checksums: []Checksum{{Algorithm: "SHA512", Value: "aaa"}}}
+	if !HasChecksum(withCk) {
+		t.Error("a component with a Checksums entry must report HasChecksum")
+	}
+	if HasChecksum(Component{Name: "bare"}) {
+		t.Error("a component with neither SHA1 nor Checksums must not report HasChecksum")
+	}
+	if !HasChecksum(Component{SHA1: "abc"}) {
+		t.Error("the legacy SHA1 field must still count as a checksum")
+	}
+	doc := SBOM{Source: "synapse", Components: []Component{withCk}}
+	doc.Audit.CreatedAt = time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
+	for _, e := range Quality(doc).Elements {
+		if e.ID == "sem-checksum" && e.Score != 100 {
+			t.Errorf("sem-checksum = %d, want 100 for a Checksums-only component", e.Score)
+		}
+	}
+}
+
 func TestQualityScoreClampedWhenNTIAUnmet(t *testing.T) {
 	// A component fully described EXCEPT supplier (a bare-namespace PURL): every semantic check passes, so
 	// the raw blend lands at the threshold — but a missing NTIA minimum element must keep the headline Score

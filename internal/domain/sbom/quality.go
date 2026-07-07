@@ -86,7 +86,7 @@ func Quality(s SBOM) QualityReport {
 				}
 			}
 		}
-		if strings.TrimSpace(c.SHA1) != "" {
+		if HasChecksum(c) {
 			withChecksum++
 		}
 	}
@@ -123,7 +123,7 @@ func Quality(s SBOM) QualityReport {
 		// Semantic quality beyond the NTIA floor.
 		comp("sem-license", "License present", QualityCategorySemantic, withLicense, "have no license"),
 		comp("sem-license-spdx", "License is an SPDX id", QualityCategorySemantic, withSPDXLicense, "have no SPDX-valid license id"),
-		comp("sem-checksum", "Checksum (SHA-1)", QualityCategorySemantic, withChecksum, "have no checksum"),
+		comp("sem-checksum", "Checksum", QualityCategorySemantic, withChecksum, "have no integrity checksum"),
 	}
 	sort.SliceStable(elements, func(i, j int) bool {
 		if elements[i].Category != elements[j].Category {
@@ -198,6 +198,12 @@ const (
 	SupplierDeclared = "declared" // asserted by the producer or an imported/untrusted client SBOM
 	SupplierDerived  = "derived"  // deterministically inferred by Synapse from the PURL namespace
 )
+
+// HasChecksum reports whether a component carries any integrity digest — the legacy SHA1 field or a
+// Checksums entry — which is the semantic-quality "checksum present" signal (tamper evidence per component).
+func HasChecksum(c Component) bool {
+	return strings.TrimSpace(c.SHA1) != "" || len(c.Checksums) > 0
+}
 
 // supplierOf returns a component's supplier: the explicitly-captured Supplier when the producer/imported SBOM
 // carried one, else one derived from the PURL namespace. Empty when neither yields one.

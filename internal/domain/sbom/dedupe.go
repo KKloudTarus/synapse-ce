@@ -81,6 +81,19 @@ func mergeComponents(dst, src Component) Component {
 	} else if dst.UnknownReason == "" {
 		dst.UnknownReason = src.UnknownReason
 	}
+	// Supplier + its provenance move together so the source label always describes the value it accompanies.
+	if dst.Supplier == "" {
+		dst.Supplier = src.Supplier
+		dst.SupplierSource = src.SupplierSource
+	}
+	// Integrity digests: adopt the twin's when this entry has none, so a Syft phantom-UNKNOWN twin that
+	// carries the only checksum/SHA1 doesn't drop it on merge (mirrors the license union above).
+	if dst.SHA1 == "" {
+		dst.SHA1 = src.SHA1
+	}
+	if len(dst.Checksums) == 0 {
+		dst.Checksums = src.Checksums
+	}
 	// First-party is a true OR: if either evidence source identifies it as the project's own module.
 	dst.FirstParty = dst.FirstParty || src.FirstParty
 	return dst

@@ -28,6 +28,32 @@ func TestDedupeComponentsUnionsLicenses(t *testing.T) {
 	}
 }
 
+func TestDedupeComponentsPreservesSupplierAndChecksums(t *testing.T) {
+	// A Syft phantom-twin split: the licensed entry carries no integrity/supplier, the other twin carries
+	// the only checksum + supplier. The merge must keep ALL of it — dropping the checksum would under-count
+	// the SBOM quality score.
+	in := []Component{
+		{Name: "lodash", Version: "4.17.21", PURL: "pkg:npm/lodash@4.17.21", Licenses: []License{{SPDXID: "MIT"}}},
+		{Name: "lodash", Version: "4.17.21", PURL: "pkg:npm/lodash@4.17.21",
+			Supplier: "acme", SupplierSource: SupplierDeclared, SHA1: "abc",
+			Checksums: []Checksum{{Algorithm: "SHA512", Value: "zzz"}}},
+	}
+	out := DedupeComponents(in)
+	if len(out) != 1 {
+		t.Fatalf("want 1 merged component, got %d", len(out))
+	}
+	c := out[0]
+	if c.Supplier != "acme" || c.SupplierSource != SupplierDeclared {
+		t.Errorf("supplier + source must survive the merge, got %q/%q", c.Supplier, c.SupplierSource)
+	}
+	if c.SHA1 != "abc" || len(c.Checksums) != 1 || c.Checksums[0].Value != "zzz" {
+		t.Errorf("integrity digests must survive the merge, got SHA1=%q Checksums=%+v", c.SHA1, c.Checksums)
+	}
+	if len(c.Licenses) != 1 { // and the first entry's license is still there
+		t.Errorf("license from the first entry must survive, got %+v", c.Licenses)
+	}
+}
+
 func TestDedupeComponentsFillsEmptyTwin(t *testing.T) {
 	// Order-independent: the license-less entry first, the licensed one second.
 	in := []Component{

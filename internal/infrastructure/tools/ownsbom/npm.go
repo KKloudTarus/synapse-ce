@@ -40,6 +40,7 @@ func (NPM) Markers() []string { return []string{"package-lock.json"} }
 type npmV1Dep struct {
 	Version      string              `json:"version"`
 	Dev          bool                `json:"dev"`
+	Integrity    string              `json:"integrity"`
 	Dependencies map[string]npmV1Dep `json:"dependencies"`
 }
 
@@ -49,6 +50,7 @@ type npmV1Dep struct {
 type npmV3Pkg struct {
 	Version              string            `json:"version"`
 	Dev                  bool              `json:"dev"`
+	Integrity            string            `json:"integrity"`
 	Dependencies         map[string]string `json:"dependencies"`
 	DevDependencies      map[string]string `json:"devDependencies"`
 	OptionalDependencies map[string]string `json:"optionalDependencies"`
@@ -74,14 +76,14 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 		}
 		return "pkg:npm/" + purlName + "@" + version
 	}
-	add := func(name, version string, dev bool) string {
+	add := func(name, version, integrity string, dev bool) string {
 		name = strings.TrimSpace(name)
 		scope := prodScope
 		if dev {
 			scope = sbom.ScopeDevelopment
 		}
 		purl := npmPURL(name, version)
-		set.add(sbom.Component{Name: name, Version: version, PURL: purl, Location: in.Path, Scope: scope})
+		set.add(sbom.Component{Name: name, Version: version, PURL: purl, Location: in.Path, Scope: scope, Checksums: parseSubresourceIntegrity(integrity)})
 		return purl
 	}
 
@@ -90,7 +92,7 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 		pathPURL := make(map[string]string, len(lock.Packages))
 		for path, p := range lock.Packages {
 			if name := npmNameFromPath(path); name != "" {
-				pathPURL[path] = add(name, p.Version, p.Dev)
+				pathPURL[path] = add(name, p.Version, p.Integrity, p.Dev)
 			}
 		}
 		// Pass 2: resolve each package's direct deps to PURLs via npm's nearest-wins hoisting. Deterministic:
@@ -132,7 +134,7 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 			return fmt.Errorf("%w: package-lock.json nesting exceeds %d levels", shared.ErrValidation, maxNPMNestDepth)
 		}
 		for name, d := range deps {
-			add(name, d.Version, d.Dev)
+			add(name, d.Version, d.Integrity, d.Dev)
 			if err := walk(d.Dependencies, depth+1); err != nil {
 				return err
 			}
@@ -143,6 +145,22 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 		return nil, nil, err
 	}
 	return set.components(), nil, nil
+}
+
+// parseSubresourceIntegrity parses a W3C Subresource Integrity string as npm/yarn/pnpm record it in a
+// lockfile `integrity` field: one or more space-separated "<alg>-<base64>" hashes (e.g.
+// "sha512-<b64> sha1-<b64>"). Each becomes a Checksum with an SPDX-style uppercased algorithm name and the
+// base64 digest as recorded. Malformed tokens are skipped; returns nil when none parse.
+func parseSubresourceIntegrity(s string) []sbom.Checksum {
+	var out []sbom.Checksum
+	for _, tok := range strings.Fields(s) {
+		i := strings.IndexByte(tok, '-')
+		if i <= 0 || i == len(tok)-1 {
+			continue // not the "<alg>-<digest>" shape
+		}
+		out = append(out, sbom.Checksum{Algorithm: strings.ToUpper(tok[:i]), Value: tok[i+1:]})
+	}
+	return out
 }
 
 // npmDepNames returns the sorted, unique direct-dependency names of a v2/v3 package: its dependencies +

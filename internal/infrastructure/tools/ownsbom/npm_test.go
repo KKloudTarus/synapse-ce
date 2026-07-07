@@ -13,7 +13,7 @@ const npmLockV3 = `{
   "name": "app", "lockfileVersion": 3,
   "packages": {
     "": {"name": "app", "version": "1.0.0", "dependencies": {"lodash": "^4"}},
-    "node_modules/lodash": {"version": "4.17.21"},
+    "node_modules/lodash": {"version": "4.17.21", "integrity": "sha512-lodashhash"},
     "node_modules/mocha": {"version": "10.2.0", "dev": true, "dependencies": {"ms": "^2"}},
     "node_modules/@angular/core": {"version": "17.0.1", "dependencies": {"tslib": "^2", "ms": "^1"}},
     "node_modules/ms": {"version": "2.1.3"},
@@ -37,6 +37,10 @@ func TestNPMParseV3(t *testing.T) {
 	// resolved version + production scope
 	if c := byName["lodash"]; c.Version != "4.17.21" || c.PURL != "pkg:npm/lodash@4.17.21" || c.Scope != sbom.ScopeProduction {
 		t.Errorf("lodash = %+v, want 4.17.21 / pkg:npm/lodash@4.17.21 / production", c)
+	}
+	// npm `integrity` (SRI) is captured as a component Checksum.
+	if ck := byName["lodash"].Checksums; len(ck) != 1 || ck[0].Algorithm != "SHA512" || ck[0].Value != "lodashhash" {
+		t.Errorf("lodash checksum = %+v, want [{SHA512 lodashhash}]", ck)
 	}
 	// the lock's dev flag maps to ScopeDevelopment
 	if c := byName["mocha"]; c.Scope != sbom.ScopeDevelopment {
