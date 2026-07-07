@@ -104,7 +104,8 @@ func TestOsDistroEcosystem(t *testing.T) {
 		"pkg:deb/debian/openssl@1.1?distro=debian-9":             "Debian:9",
 		"pkg:deb/debian/openssl@1.1?arch=amd64&distro=debian-10": "Debian:10",
 		"pkg:apk/alpine/musl@1.2.2-r0?distro=alpine-3.18.12":     "Alpine:v3.18",
-		"pkg:deb/ubuntu/bash@5?distro=ubuntu-22.04":              "", // Ubuntu deferred (OSV uses:LTS/:Pro)
+		"pkg:deb/ubuntu/bash@5?distro=ubuntu-22.04":              "Ubuntu:22.04", // mapped: owned OVAL feed keys "Ubuntu:<version>"
+		"pkg:deb/ubuntu/openssl@3?distro=ubuntu-20.04":           "Ubuntu:20.04",
 		"pkg:rpm/redhat/bash@4.4?distro=rhel-9":                  "", // RPM distros deferred
 		"pkg:deb/debian/openssl@1.1":                             "", // no distro qualifier
 		"pkg:npm/lodash@4.0.0":                                   "", // not an OS package

@@ -24,6 +24,23 @@ import (
 // FILES and a fatal error. ADVISORY-level skipping (e.g. an inert empty-Affected advisory) is the caller's
 // concern, applied inside emit — this walk only counts file-level skips.
 func walkJSONAdvisories(ctx context.Context, dir string, parse func([]byte) ([]advisory.Advisory, error), emit func(advisory.Advisory) error) (int, error) {
+	return walkAdvisoryFiles(ctx, dir, hasJSONSuffix, maxAdvisoryBytes, parse, emit)
+}
+
+// hasJSONSuffix / hasOVALSuffix select which files a feed's walk reads.
+func hasJSONSuffix(name string) bool { return strings.HasSuffix(strings.ToLower(name), ".json") }
+
+func hasOVALSuffix(name string) bool {
+	n := strings.ToLower(name)
+	return strings.HasSuffix(n, ".xml") || strings.HasSuffix(n, ".xml.bz2") || strings.HasSuffix(n, ".oval.bz2")
+}
+
+// walkAdvisoryFiles is the generic hardened core shared by every directory-backed advisory feed. accept
+// selects files by name; maxBytes is the per-file read cap (OSV/CSAF JSON and OVAL XML differ by an order
+// of magnitude, so it is a parameter, not a constant baked into the walk). Everything else — the abort vs
+// skip discipline, the regular-file guard, the TOCTOU-narrowed Lstat, and the file-count cap — is identical
+// for every feed, so a hardening fix here can never drift between them.
+func walkAdvisoryFiles(ctx context.Context, dir string, accept func(name string) bool, maxBytes int64, parse func([]byte) ([]advisory.Advisory, error), emit func(advisory.Advisory) error) (int, error) {
 	info, err := os.Stat(dir)
 	if err != nil {
 		return 0, fmt.Errorf("stat advisory dir: %w", err)
@@ -45,7 +62,7 @@ func walkJSONAdvisories(ctx context.Context, dir string, parse func([]byte) ([]a
 		if !d.Type().IsRegular() {
 			return nil // symlink/device/etc — never follow out of the tree
 		}
-		if !strings.HasSuffix(strings.ToLower(d.Name()), ".json") {
+		if !accept(d.Name()) {
 			return nil
 		}
 		if files++; files > maxAdvisoryFiles {
@@ -62,7 +79,7 @@ func walkJSONAdvisories(ctx context.Context, dir string, parse func([]byte) ([]a
 			skipped++ // a non-regular swapped in within the Lstat window — not read (the guard holds); count it for an honest skip total
 			return nil
 		}
-		if fi.Size() > maxAdvisoryBytes {
+		if fi.Size() > maxBytes {
 			skipped++ // an over-cap file is one bad record, not a reason to abort the whole sync
 			return nil
 		}
