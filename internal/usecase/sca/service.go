@@ -1375,6 +1375,14 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			_ = s.sbomCache.Store(ctx, ws.Dir, producerVer, doc) // best-effort; a store error never fails the scan
 		}
 	}
+	// Stamp the SBOM's creation time from the scan clock (an NTIA minimum element the producers don't set).
+	// Applied AFTER the cache block so it is the CURRENT scan's time on both a fresh generate and a cache hit
+	// (the cache stores component content, not this per-scan timestamp), and so a cached SBOM never carries a
+	// stale one. Excluded from ReproDigest, so it does not perturb reproducibility.
+	if doc != nil && doc.Audit.CreatedAt.IsZero() {
+		doc.Audit.CreatedAt = now
+		doc.Audit.UpdatedAt = now
+	}
 	trace.succeed(step, "SBOM generated", map[string]int{"components": countComponents(doc), "dependencies": len(doc.Dependencies), "cache_hit": boolToInt(cacheHit)})
 	// SBOM producer cross-check: when a 2nd producer is configured, diff the two RAW
 	// component sets — BEFORE enrichment, so it compares the PRODUCERS themselves, not a shared post-process —

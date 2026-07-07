@@ -178,6 +178,35 @@ func TestScanInScopeRunsAndAudits(t *testing.T) {
 	assertDebugEvent(t, res.DebugEvents, stageLicense, "license-policy", ports.ScanDebugSucceeded)
 }
 
+func TestScanStampsSBOMCreationTime(t *testing.T) {
+	// The producers (fakeSBOM here) return an SBOM with no creation time; the pipeline must stamp it from
+	// the scan clock so the NTIA "timestamp" minimum element is present on Synapse's own SBOM.
+	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
+	clkTime := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	svc := newSvc(repo, fakeClock{t: clkTime}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{})
+
+	res, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if res.SBOM == nil {
+		t.Fatal("scan result has no SBOM")
+	}
+	if res.SBOM.Audit.CreatedAt.IsZero() {
+		t.Error("SBOM creation time (NTIA minimum element) must be stamped, got zero")
+	}
+	if !res.SBOM.Audit.CreatedAt.Equal(clkTime) {
+		t.Errorf("SBOM CreatedAt = %v, want scan clock %v", res.SBOM.Audit.CreatedAt, clkTime)
+	}
+	if q := res.SBOMQuality; q.Score > 0 { // and the quality scorer must now credit the timestamp element
+		for _, e := range q.Elements {
+			if e.ID == "ntia-timestamp" && e.Score != 100 {
+				t.Errorf("ntia-timestamp element = %d, want 100 once the SBOM is stamped", e.Score)
+			}
+		}
+	}
+}
+
 func TestScanUsesImportedSBOMWithoutAcquiringTarget(t *testing.T) {
 	store := memory.NewImportedSBOMStore()
 	data := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","metadata":{"component":{"name":"product-service"}},"components":[{"name":"pkg","version":"1.0.0","purl":"pkg:npm/pkg@1.0.0","licenses":[{"license":{"id":"MIT"}}]}],"dependencies":[{"ref":"pkg:npm/pkg@1.0.0","dependsOn":[]}]}`)
