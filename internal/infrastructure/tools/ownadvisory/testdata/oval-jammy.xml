@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<oval_definitions xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5"
+                  xmlns:oval="http://oval.mitre.org/XMLSchema/oval-common-5"
+                  xmlns:linux-def="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+  <definitions>
+    <definition class="vulnerability" id="oval:com.ubuntu.jammy:def:202310000000">
+      <metadata>
+        <title>CVE-2023-1000 on Ubuntu 22.04 LTS (jammy) - medium.</title>
+        <reference source="CVE" ref_id="CVE-2023-1000" ref_url="https://ubuntu.com/security/CVE-2023-1000"/>
+        <advisory>
+          <severity>Medium</severity>
+        </advisory>
+      </metadata>
+      <criteria>
+        <criterion test_ref="oval:com.ubuntu.jammy:tst:100" comment="openssl package in jammy is affected and has been fixed (note: '3.0.2-0ubuntu1.10')."/>
+      </criteria>
+    </definition>
+    <definition class="vulnerability" id="oval:com.ubuntu.jammy:def:202320000000">
+      <metadata>
+        <title>CVE-2023-2000 on Ubuntu 22.04 LTS (jammy) - high.</title>
+        <reference source="CVE" ref_id="CVE-2023-2000"/>
+        <advisory>
+          <severity>High</severity>
+        </advisory>
+      </metadata>
+      <criteria>
+        <criterion test_ref="oval:com.ubuntu.jammy:tst:200" comment="bash package in jammy is affected, but a decision has been made to defer addressing it."/>
+      </criteria>
+    </definition>
+  </definitions>
+  <tests>
+    <linux-def:dpkginfo_test id="oval:com.ubuntu.jammy:tst:100" check="at least one" comment="openssl is affected">
+      <linux-def:object object_ref="oval:com.ubuntu.jammy:obj:100"/>
+      <linux-def:state state_ref="oval:com.ubuntu.jammy:ste:100"/>
+    </linux-def:dpkginfo_test>
+    <linux-def:dpkginfo_test id="oval:com.ubuntu.jammy:tst:200" check="at least one" comment="bash is affected">
+      <linux-def:object object_ref="oval:com.ubuntu.jammy:obj:200"/>
+      <linux-def:state state_ref="oval:com.ubuntu.jammy:ste:200"/>
+    </linux-def:dpkginfo_test>
+  </tests>
+  <objects>
+    <linux-def:dpkginfo_object id="oval:com.ubuntu.jammy:obj:100" comment="openssl">
+      <linux-def:name>openssl</linux-def:name>
+    </linux-def:dpkginfo_object>
+    <linux-def:dpkginfo_object id="oval:com.ubuntu.jammy:obj:200" comment="bash">
+      <linux-def:name>bash</linux-def:name>
+    </linux-def:dpkginfo_object>
+  </objects>
+  <states>
+    <linux-def:dpkginfo_state id="oval:com.ubuntu.jammy:ste:100" comment="fixed version">
+      <linux-def:version datatype="debian_evr_string" operation="less than">3.0.2-0ubuntu1.10</linux-def:version>
+    </linux-def:dpkginfo_state>
+    <linux-def:dpkginfo_state id="oval:com.ubuntu.jammy:ste:200" comment="deferred, no fix">
+      <linux-def:version datatype="debian_evr_string" operation="pattern match">.*</linux-def:version>
+    </linux-def:dpkginfo_state>
+  </states>
+</oval_definitions>

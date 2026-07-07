@@ -145,12 +145,12 @@ func purlQualifier(purl, key string) string {
 	return ""
 }
 
-// osDistroEcosystem derives the release-versioned OSV ecosystem for an OS-package PURL from its
-// "distro" qualifier (Syft emits e.g. distro=debian-9 / alpine-3.18.12). OSV keys distro advisories by
-// release: Debian "Debian:<major>", Alpine "Alpine:v<major>.<minor>". Only the families whose OSV
-// ecosystem string is FAITHFULLY derivable from a PURL are mapped — Ubuntu (OSV uses:LTS/:Pro
-// variants) and the RPM distros (OSV uses "Red Hat:enterprise_linux:N::variant") are deferred and
-// return "" (skip → never a false match), though their comparators exist for any future bridge.
+// osDistroEcosystem derives the release-versioned ecosystem key for an OS-package PURL from its "distro"
+// qualifier (Syft emits e.g. distro=debian-9 / ubuntu-22.04 / alpine-3.18.12). Debian keys by major
+// ("Debian:<major>", from OSV); Alpine by "Alpine:v<major>.<minor>" (OSV); Ubuntu by its full VERSION_ID
+// ("Ubuntu:<version>") — the canonical key the OWNED Ubuntu OVAL feed writes, which sidesteps OSV's
+// awkward :LTS/:Pro variants because we own both the feed and this mapping. The RPM distros stay deferred
+// (return "" → skip → never a false match), though their comparators exist for any future bridge.
 func osDistroEcosystem(purl string) string {
 	distro := purlQualifier(purl, "distro")
 	if distro == "" {
@@ -170,6 +170,16 @@ func osDistroEcosystem(purl string) string {
 			if major != "" {
 				return "Debian:" + major
 			}
+		}
+		if id == "ubuntu" {
+			// Ubuntu OVAL keys by the release major.minor (e.g. "Ubuntu:22.04"), matching ParseUbuntuOVAL.
+			// Tolerate a point-release qualifier (ubuntu-22.04.1) by keying on major.minor so it can't
+			// desync from the feed's key.
+			parts := strings.SplitN(ver, ".", 3)
+			if len(parts) >= 2 && parts[0] != "" && parts[1] != "" {
+				return "Ubuntu:" + parts[0] + "." + parts[1]
+			}
+			return "Ubuntu:" + ver
 		}
 	case "apk":
 		if id == "alpine" {
