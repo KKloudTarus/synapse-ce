@@ -42,6 +42,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/secretscan"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/syft"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/vexfile"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
@@ -305,6 +306,9 @@ func run(path string, failOn shared.Severity, mode string, ignoreUnfixed, image,
 	}
 	if cfg.SuppressionEnabled {
 		sca.SetSuppressionLoader(ignorefile.New()) // repo-committed .synapseignore accepted-risk policy (CI-friendly)
+	}
+	if cfg.VEXEnabled {
+		sca.SetVEXLoader(vexfile.New()) // in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions (CI-friendly)
 	}
 	if cfg.ScanCacheEnabled {
 		if dir := cfg.ResolveScanCacheDir(); dir != "" {

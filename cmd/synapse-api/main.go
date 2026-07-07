@@ -62,6 +62,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/secretscan"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/syft"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/taintcallgraph"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/vexfile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/binregistry"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo"
@@ -542,6 +543,10 @@ func main() {
 	if cfg.SuppressionEnabled {
 		scaService.SetSuppressionLoader(ignorefile.New()) // repo-committed .synapseignore accepted-risk policy
 		log.Info("suppression ENABLED (.synapseignore; suppressed findings retained + surfaced)")
+	}
+	if cfg.VEXEnabled {
+		scaService.SetVEXLoader(vexfile.New()) // in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
+		log.Info("in-scan VEX ENABLED (.synapse.vex.json; not_affected/fixed gate-exempt, still reported + sealed)")
 	}
 	if cfg.ScanCacheEnabled {
 		if dir := cfg.ResolveScanCacheDir(); dir != "" {

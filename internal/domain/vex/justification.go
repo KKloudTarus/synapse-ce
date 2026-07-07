@@ -1,5 +1,7 @@
-// Package vex holds the OpenVEX domain vocabulary shared by the VEX export (the OpenVEX document) and the
-// AI vex-justification judgment. It is pure reference data — a closed enum, no I/O.
+// Package vex holds the OpenVEX domain vocabulary (the closed justification enum, shared by the VEX export
+// and the AI vex-justification judgment) AND the consume-side parser + product-to-finding matcher
+// (document.go: Parse, Statement.Suppresses, Statement.MatchesFinding) shared by the post-scan VEX apply
+// and the in-scan .vex consumer. Pure: parsing + matching only, no I/O beyond the passed-in bytes.
 package vex
 
 // OpenVexJustification is the CLOSED set of OpenVEX justifications for a not_affected status (per the OpenVEX

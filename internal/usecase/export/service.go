@@ -9,6 +9,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -134,21 +135,8 @@ type parsedKey struct {
 // parseDedup splits a dedup key. Advisory ids and versions never contain ':',
 // so the component (which may) is the middle join.
 func parseDedup(key string) parsedKey {
-	if rest, ok := strings.CutPrefix(key, "vuln:"); ok {
-		parts := strings.Split(rest, ":")
-		switch {
-		case len(parts) >= 3:
-			return parsedKey{
-				kind:      "vuln",
-				advisory:  parts[0],
-				component: strings.Join(parts[1:len(parts)-1], ":"),
-				version:   parts[len(parts)-1],
-			}
-		case len(parts) == 2:
-			return parsedKey{kind: "vuln", advisory: parts[0], version: parts[1]}
-		default:
-			return parsedKey{kind: "vuln", advisory: rest}
-		}
+	if advisory, component, version, ok := vulnerability.ParseDedupKey(key); ok {
+		return parsedKey{kind: "vuln", advisory: advisory, component: component, version: version}
 	}
 	if rest, ok := strings.CutPrefix(key, "license:"); ok {
 		return parsedKey{kind: "license", advisory: rest}

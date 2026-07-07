@@ -62,6 +62,7 @@ type Service struct {
 	secretScanner  ports.SecretScanner           // optional deterministic secret scan over the live workspace
 	misconfig      ports.MisconfigScanner        // optional deterministic IaC/config misconfig scan over the live workspace
 	suppression    ports.SuppressionLoader       // optional repo-committed .synapseignore accepted-risk policy
+	vexLoader      ports.VEXLoader               // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
 	reachability   ports.ReachabilityRecorder    // optional deterministic Tier-2 reachability proof
 	correlation    ports.CorrelationRecorder     // optional cross-check disagreement → judgment minter
 	sbomGen2       ports.SBOMGenerator           // optional 2nd SBOM producer for the cross-check
@@ -149,6 +150,11 @@ func (s *Service) SetMisconfigScanner(m ports.MisconfigScanner) { s.misconfig = 
 // SetSuppressionLoader configures the optional repo-committed .synapseignore accepted-risk policy loader.
 // nil ⇒ no suppression. Suppressed findings are always retained + surfaced, never silently dropped.
 func (s *Service) SetSuppressionLoader(l ports.SuppressionLoader) { s.suppression = l }
+
+// SetVEXLoader configures the optional in-repo OpenVEX (.synapse.vex.json) loader. nil ⇒ no in-scan VEX.
+// A not_affected/fixed statement annotates the matched finding accepted-risk on the same retain-and-mark
+// surface as .synapseignore (gate-exempt, but reported + sealed), never removed.
+func (s *Service) SetVEXLoader(l ports.VEXLoader) { s.vexLoader = l }
 
 // SetReachability configures the optional deterministic Tier-2 reachability prover. nil ⇒ no
 // reachability judgments. Best-effort + opt-in: a no-coverage/un-buildable target leaves the prior
@@ -1656,6 +1662,16 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if s.suppression != nil {
 		if set, serr := s.suppression.Load(ctx, ws.Dir); serr == nil {
 			applySuppressions(result, set, now)
+		}
+	}
+	// In-repo OpenVEX (.synapse.vex.json): a not_affected/fixed statement annotates the matched finding
+	// accepted-risk on the SAME surface (gate-exempt, still reported + sealed). A malformed doc is surfaced,
+	// not silently ignored, and fail-safe (nothing suppressed).
+	if s.vexLoader != nil {
+		if doc, verr := s.vexLoader.Load(ctx, ws.Dir); verr != nil {
+			result.SourceWarnings = append(result.SourceWarnings, "in-repo VEX (.synapse.vex.json) was not applied (unreadable or not a valid OpenVEX document)")
+		} else {
+			applyVEX(result, doc)
 		}
 	}
 	result.MinSeverity = s.minSeverity

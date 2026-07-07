@@ -19,6 +19,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/threatmodel"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeupdraft"
 )
@@ -883,6 +884,16 @@ type MisconfigRawFinding struct {
 // declared accepted-risk decisions.
 type SuppressionLoader interface {
 	Load(ctx context.Context, dir string) (ignore.Set, error)
+}
+
+// VEXLoader reads an in-repo OpenVEX document (.synapse.vex.json) from a prepared workspace: the
+// machine-readable accepted-risk counterpart to .synapseignore — a maintainer's not_affected/fixed
+// assertions with a justification. READ-ONLY and best-effort: a missing file yields an empty document with
+// no error; a malformed/oversized one returns an error the pipeline surfaces (never a scan failure).
+// Applying it — annotating matched findings accepted-risk on the SAME retain-and-mark surface, never
+// removing them — is the SCA pipeline's job.
+type VEXLoader interface {
+	Load(ctx context.Context, dir string) (vex.Document, error)
 }
 
 // MisconfigScanner detects insecure IaC/config (Dockerfile, Kubernetes manifests, ...) in a prepared

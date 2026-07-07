@@ -12,6 +12,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/ignore"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -415,7 +416,7 @@ func findingID(engagementID shared.ID, dedupKey string) shared.ID {
 // reachabilitySubjects (which joins back to it) — so the reachability subject's FindingID provably matches
 // a persisted finding and the two can never drift.
 func vulnDedupKey(v vulnerability.Vulnerability) string {
-	return "vuln:" + v.ID + ":" + v.Component + ":" + v.Version
+	return vulnerability.DedupKey(v.ID, v.Component, v.Version)
 }
 
 // SuppressedFinding marks a finding a .synapseignore rule accepts. CRUCIALLY the finding STAYS in the
@@ -458,6 +459,40 @@ func applySuppressions(res *ScanResult, set ignore.Set, now time.Time) {
 	}
 	for _, r := range set.Malformed() {
 		res.MalformedSuppressions = append(res.MalformedSuppressions, r.ID)
+	}
+}
+
+// applyVEX annotates findings that an in-repo OpenVEX not_affected/fixed statement targets as accepted-risk
+// on the SAME retain-and-mark surface as .synapseignore: the finding STAYS in res.Findings (reported +
+// sealed), only exempted from the --fail-on gate, with the VEX justification as the reason. A statement
+// matches by advisory id + component (+ version) via the shared domain/vex matcher. Nothing is removed.
+func applyVEX(res *ScanResult, doc vex.Document) {
+	if res == nil || len(doc.Statements) == 0 {
+		return
+	}
+	accepted := make(map[string]bool, len(res.SuppressedFindings))
+	for _, sf := range res.SuppressedFindings {
+		accepted[sf.DedupKey] = true // don't double-annotate a finding already accepted (.synapseignore or earlier stmt)
+	}
+	for _, st := range doc.Statements {
+		if !st.Suppresses() { // only not_affected / fixed exempt the gate; affected/under_investigation don't
+			continue
+		}
+		for _, f := range res.Findings {
+			if accepted[f.DedupKey] {
+				continue
+			}
+			a, comp, ver, ok := vulnerability.ParseDedupKey(f.DedupKey)
+			if !ok || !st.MatchesFinding(a, comp, ver) {
+				continue
+			}
+			accepted[f.DedupKey] = true
+			reason := "VEX " + st.Status
+			if st.Justification != "" {
+				reason += ": " + st.Justification
+			}
+			res.SuppressedFindings = append(res.SuppressedFindings, SuppressedFinding{DedupKey: f.DedupKey, Title: f.Title, RuleID: st.Vulnerability, Reason: reason})
+		}
 	}
 }
 

@@ -169,6 +169,9 @@ type Config struct {
 	// SuppressionEnabled turns on the repo-committed .synapseignore accepted-risk policy; off by default.
 	// Suppressed findings are always retained + surfaced in the result, never silently dropped.
 	SuppressionEnabled bool
+	// VEXEnabled turns on consuming an in-repo OpenVEX doc (.synapse.vex.json) at scan time; off by default.
+	// A not_affected/fixed statement gate-exempts the matched finding (still reported + sealed), never removes it.
+	VEXEnabled bool
 	// ScanCacheEnabled turns on the content+version-addressed generated-SBOM cache; off by default. A hit on
 	// an unchanged tree skips the cataloging step; a producer version bump invalidates the entry.
 	ScanCacheEnabled bool
@@ -321,6 +324,7 @@ func Load() Config {
 		SecretScanEnabled:      getbool("SYNAPSE_SECRET_SCAN_ENABLED", false),
 		MisconfigEnabled:       getbool("SYNAPSE_MISCONFIG_ENABLED", false),
 		SuppressionEnabled:     getbool("SYNAPSE_SUPPRESSION_ENABLED", false),
+		VEXEnabled:             getbool("SYNAPSE_VEX_ENABLED", false),
 		ScanCacheEnabled:       getbool("SYNAPSE_SCAN_CACHE_ENABLED", false),
 		ScanCacheDir:           os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
 		OwnedAdvisoryEnabled:   getbool("SYNAPSE_OWNED_ADVISORY", false),

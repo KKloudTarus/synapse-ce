@@ -105,5 +105,5 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, report
 // (stable dedup). The id is compared for EQUALITY only, never parsed, so the unescaped ":" (which can appear
 // in a Maven component) is harmless — matching the house convention.
 func correlationSubjectID(d vulnerability.CrossCheckItem) shared.ID {
-	return shared.ID("vuln:" + d.AdvisoryID + ":" + d.Component + ":" + d.Version)
+	return shared.ID(vulnerability.DedupKey(d.AdvisoryID, d.Component, d.Version))
 }
