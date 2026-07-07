@@ -1,6 +1,6 @@
 // Package ospkg catalogs installed OS packages from a materialized image root filesystem: Debian/Ubuntu dpkg
-// (/var/lib/dpkg/status) and Alpine apk (/lib/apk/db/installed), with the distro release read from
-// /etc/os-release. It is the OWNED (detection-independent) alternative to relying on the SBOM generator for
+// (/var/lib/dpkg/status), Alpine apk (/lib/apk/db/installed), and RHEL-family rpm (/var/lib/rpm/rpmdb.sqlite),
+// with the distro release read from /etc/os-release. It is the OWNED (detection-independent) alternative to relying on the SBOM generator for
 // OS packages, and emits components tagged with a Syft-style "distro" qualifier so the existing advisory
 // matcher keys them to the right OS ecosystem. It only READS the rootfs (already assembled within the
 // workspace); the databases are UNTRUSTED, so: reads are streamed + bounded (size, line, and package caps)
@@ -90,19 +90,30 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 	}
 
 	// rpm (RHEL/Fedora family, sqlite backend): the distro qualifier is set for any rpm-family id (inventory),
-	// but only the ids osDistroEcosystem keys (Rocky/AlmaLinux/Oracle) count as resolved — RHEL/CentOS/Fedora
-	// use module-qualified or uncertain OSV keys, so they are emitted but flagged unresolved (surfaced upstream,
-	// never a silent zero-match). Berkeley-DB/ndb backends are deferred (the generator covers them).
+	// but only the ids osDistroEcosystem keys (Rocky/AlmaLinux/Oracle) with a non-empty major version count as
+	// resolved — RHEL/CentOS/Fedora use module-qualified or uncertain OSV keys, so they are emitted but flagged
+	// unresolved (surfaced upstream, never a silent zero-match). Berkeley-DB/ndb backends are deferred (the
+	// generator covers them).
 	rpmNS, rpmTag := "rhel", ""
+	rpmResolved := false
 	if id != "" {
 		rpmNS = id
 		if versionID != "" {
 			rpmTag = id + "-" + versionID
+			// Mirror osDistroEcosystem, which keys on the major (VERSION_ID up to the first '.'): a clean-but-
+			// empty major (e.g. VERSION_ID=".3", which isCleanToken admits) maps to nothing. Require a non-empty
+			// major here too, so this resolved flag can never disagree with the mapping — a disagreement would be
+			// exactly the silent zero-match (resolved=true yet ecosystem="") this flag exists to prevent.
+			major := versionID
+			if i := strings.IndexByte(versionID, '.'); i >= 0 {
+				major = versionID[:i]
+			}
+			rpmResolved = rpmMatchableIDs[id] && major != ""
 		}
 	}
-	if comps := rpmComponents(rootfsDir, rpmNS, rpmTag); len(comps) > 0 {
+	if comps := rpmComponents(ctx, rootfsDir, rpmNS, rpmTag); len(comps) > 0 {
 		res.Components = append(res.Components, comps...)
-		if !(rpmMatchableIDs[id] && rpmTag != "") {
+		if !rpmResolved {
 			res.DistroResolved = false
 		}
 	}

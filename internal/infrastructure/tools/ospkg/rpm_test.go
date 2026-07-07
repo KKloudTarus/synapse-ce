@@ -40,7 +40,7 @@ func buildRPMHeader(t *testing.T, withMagic bool, tags []rpmTagEntry) []byte {
 	}
 	var buf []byte
 	if withMagic {
-		buf = append(buf, rpmHeaderMagic...)
+		buf = append(buf, rpmHeaderMagic[:]...)
 		buf = append(buf, 0, 0, 0, 0)
 	}
 	intro := make([]byte, 8)
@@ -81,8 +81,8 @@ func TestParseRPMHeader(t *testing.T) {
 func TestParseRPMHeaderRejectsMalformed(t *testing.T) {
 	cases := map[string][]byte{
 		"too short":        {0x8e, 0xad, 0xe8, 0x01},
-		"huge nindex":      append(append([]byte{}, rpmHeaderMagic...), 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0), // nindex 4B
-		"data beyond blob": append(append([]byte{}, rpmHeaderMagic...), 0, 0, 0, 0, 0, 0, 0, 1, 0x7f, 0xff, 0xff, 0xff), // hsize huge
+		"huge nindex":      append(append([]byte{}, rpmHeaderMagic[:]...), 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0), // nindex 4B
+		"data beyond blob": append(append([]byte{}, rpmHeaderMagic[:]...), 0, 0, 0, 0, 0, 0, 0, 1, 0x7f, 0xff, 0xff, 0xff), // hsize huge
 		"empty":            {},
 	}
 	for name, blob := range cases {
@@ -99,15 +99,17 @@ func TestParseRPMHeaderRejectsMalformed(t *testing.T) {
 	}
 }
 
-func TestCatalogRPMSqlite(t *testing.T) {
+// writeRPMRootfs builds a temp rootfs with the given os-release contents and a rpmdb.sqlite holding one bash
+// header, written with the same driver the cataloger reads with.
+func writeRPMRootfs(t *testing.T, osRelease string) string {
+	t.Helper()
 	rootfs := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(rootfs, "etc"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(rootfs, "etc/os-release"), []byte("ID=rocky\nVERSION_ID=\"9.3\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(rootfs, "etc/os-release"), []byte(osRelease), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Build a real rpmdb.sqlite (Packages table, one header blob) with the same driver the cataloger uses.
 	dbPath := filepath.Join(rootfs, "var/lib/rpm/rpmdb.sqlite")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -123,7 +125,11 @@ func TestCatalogRPMSqlite(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = db.Close()
+	return rootfs
+}
 
+func TestCatalogRPMSqlite(t *testing.T) {
+	rootfs := writeRPMRootfs(t, "ID=rocky\nVERSION_ID=\"9.3\"\n")
 	res, err := New().Catalog(context.Background(), rootfs)
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
@@ -137,5 +143,47 @@ func TestCatalogRPMSqlite(t *testing.T) {
 	}
 	if !res.DistroResolved { // rocky is a matchable rpm distro
 		t.Error("a Rocky Linux rpm DB must resolve its distro")
+	}
+}
+
+// TestParseRPMHeaderReadsEachTagOnce locks the read-once guard that neutralizes the work-amplification vector:
+// a crafted header can repeat an identity tag many times over a NUL-free data store, but each identity tag is
+// read at most once (first wins), so rpmCStr runs a bounded number of times regardless of nindex.
+func TestParseRPMHeaderReadsEachTagOnce(t *testing.T) {
+	// Two NAME tags: read-once keeps the FIRST ("bash"); a regression to last-wins / re-scan picks "evil".
+	tags := []rpmTagEntry{
+		{tag: rpmTagName, typ: rpmTypeString, str: "bash"},
+		{tag: rpmTagVersion, typ: rpmTypeString, str: "5.1.8"},
+		{tag: rpmTagName, typ: rpmTypeString, str: "evil"},
+	}
+	name, _, _, ok := parseRPMHeader(buildRPMHeader(t, true, tags))
+	if !ok || name != "bash" {
+		t.Errorf("read-once: name = %q ok=%v; want the first NAME (bash), not a later duplicate", name, ok)
+	}
+}
+
+// TestCatalogHonorsCancellation: a cancelled context aborts the catalog rather than reading the rootfs.
+func TestCatalogHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := New().Catalog(ctx, t.TempDir()); err == nil {
+		t.Error("a cancelled context must abort Catalog with an error")
+	}
+}
+
+// TestCatalogRPMUnresolvedMajor: a clean-but-major-less VERSION_ID (".3") still emits the rpm components (for
+// inventory) but flags DistroResolved=false, so the cataloger never claims resolved while osDistroEcosystem
+// would map that release to nothing (the silent-zero-match guard the resolved flag exists to prevent).
+func TestCatalogRPMUnresolvedMajor(t *testing.T) {
+	rootfs := writeRPMRootfs(t, "ID=rocky\nVERSION_ID=\".3\"\n")
+	res, err := New().Catalog(context.Background(), rootfs)
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	if len(res.Components) != 1 {
+		t.Fatalf("want the rpm component still emitted for inventory, got %d", len(res.Components))
+	}
+	if res.DistroResolved {
+		t.Error("a VERSION_ID with an empty major must NOT be flagged resolved (osDistroEcosystem maps it to nothing)")
 	}
 }
