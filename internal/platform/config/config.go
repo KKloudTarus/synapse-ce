@@ -3,6 +3,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -165,6 +166,14 @@ type Config struct {
 	// MisconfigEnabled turns on the deterministic IaC/config misconfig scanner (Dockerfile, Kubernetes
 	// manifests) in the scan pipeline; off by default. Read-only, first-party checks, no policy engine.
 	MisconfigEnabled bool
+	// ScanCacheEnabled turns on the content+version-addressed generated-SBOM cache; off by default. A hit on
+	// an unchanged tree skips the cataloging step; a producer version bump invalidates the entry.
+	ScanCacheEnabled bool
+	// ScanCacheDir is where cached SBOMs live when ScanCacheEnabled. Empty ⇒ a "synapse-sbom" subdir of the
+	// OS user cache dir. It MUST be operator-owned and not writable by untrusted users: an attacker who can
+	// write there and compute a scan's content+producer key could pre-seed a lossy SBOM (a silent
+	// false-negative). The default per-user cache dir satisfies this.
+	ScanCacheDir string
 	// OwnedAdvisoryEnabled wires the owned advisory DetectionSource: match the SBOM
 	// against the owned normalized-advisory store (offline, reproducible) ALONGSIDE live OSV/Grype. Off by
 	// default; opt-in. An empty store yields no findings (a harmless no-op) until the advisory ingester
@@ -308,6 +317,8 @@ func Load() Config {
 		SASTEnabled:            getbool("SYNAPSE_SAST_ENABLED", false),
 		SecretScanEnabled:      getbool("SYNAPSE_SECRET_SCAN_ENABLED", false),
 		MisconfigEnabled:       getbool("SYNAPSE_MISCONFIG_ENABLED", false),
+		ScanCacheEnabled:       getbool("SYNAPSE_SCAN_CACHE_ENABLED", false),
+		ScanCacheDir:           os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
 		OwnedAdvisoryEnabled:   getbool("SYNAPSE_OWNED_ADVISORY", false),
 		ReachabilityEnabled:    getbool("SYNAPSE_REACHABILITY_ENABLED", false),
 		CrossCheckEnabled:      getbool("SYNAPSE_CROSSCHECK_ENABLED", false),
@@ -427,6 +438,19 @@ func getbool(key string, def bool) bool {
 		}
 	}
 	return def
+}
+
+// ResolveScanCacheDir returns the SBOM cache directory, defaulting to a "synapse-sbom" subdir of the OS
+// user cache dir when SYNAPSE_SCAN_CACHE_DIR is unset. Empty only when no cache dir can be determined.
+func (c Config) ResolveScanCacheDir() string {
+	if c.ScanCacheDir != "" {
+		return c.ScanCacheDir
+	}
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(base, "synapse-sbom")
 }
 
 func getduration(key string, def time.Duration) time.Duration {

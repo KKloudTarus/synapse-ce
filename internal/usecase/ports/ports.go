@@ -557,6 +557,21 @@ type SBOMGenerator interface {
 	Generate(ctx context.Context, targetRef string) (*sbom.SBOM, error)
 }
 
+// SBOMCache is an optional content-addressed cache of GENERATED (pre-enrichment) SBOMs. The key is derived
+// from the workspace CONTENT plus the producer VERSION, so an unchanged source re-scanned with the same
+// producer reuses the SBOM (skipping the expensive cataloging step), while a producer version bump
+// invalidates the entry — Trivy's analyzer-version cache-invalidation model. The implementation owns the
+// key derivation (it walks dir) so filesystem I/O stays in the infrastructure layer; the usecase only
+// supplies the pure producerVersion string. It preserves SBOM.Raw (which is json:"-") so a cache hit still
+// hands a downstream detector (Grype) the EXACT original document, not a lossy reconstruction. Best-effort:
+// an empty producerVersion, an uncomputable key, or any cache error is a silent miss, NEVER a scan failure.
+type SBOMCache interface {
+	// Load returns the cached SBOM for (dir, producerVersion) when present + fresh; ok=false on a miss.
+	Load(ctx context.Context, dir, producerVersion string) (*sbom.SBOM, bool, error)
+	// Store caches doc for (dir, producerVersion). A store failure is non-fatal to the caller.
+	Store(ctx context.Context, dir, producerVersion string, doc *sbom.SBOM) error
+}
+
 // ReachabilitySubject is one finding to assess for reachability: its id (the judgment subject) + the
 // advisory's affected symbols ("importPath.Symbol"). Lives here (not in a usecase) so a producer like the
 // SCA pipeline can feed the reachability recorder without importing the reachproof use case.

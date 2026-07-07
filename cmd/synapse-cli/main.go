@@ -18,6 +18,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
@@ -300,6 +301,11 @@ func run(path string, failOn shared.Severity, mode string, ignoreUnfixed, image,
 	}
 	if cfg.MisconfigEnabled {
 		sca.SetMisconfigScanner(misconfig.New()) // deterministic IaC/config misconfig scan (CI-friendly)
+	}
+	if cfg.ScanCacheEnabled {
+		if dir := cfg.ResolveScanCacheDir(); dir != "" {
+			sca.SetSBOMCache(sbomcache.New(dir)) // content+version-addressed generated-SBOM cache (CI-friendly)
+		}
 	}
 	// JAR-embedded licenses + workspace LICENSE files for every ecosystem.
 	sca.SetLicenseFileResolver(licensefile.NewChain(jarlicense.New(), licensefile.New()))

@@ -64,6 +64,7 @@ type Service struct {
 	reachability   ports.ReachabilityRecorder    // optional deterministic Tier-2 reachability proof
 	correlation    ports.CorrelationRecorder     // optional cross-check disagreement → judgment minter
 	sbomGen2       ports.SBOMGenerator           // optional 2nd SBOM producer for the cross-check
+	sbomCache      ports.SBOMCache               // optional content+version-addressed cache of the generated SBOM
 	sbomCrossCheck ports.SBOMCrossCheckRecorder  // optional SBOM-producer disagreement → judgment minter
 	taint          ports.TaintScanner            // optional deterministic taint-analysis → gated CapSAST proposals
 	graphResolver  ports.DependencyGraphResolver // optional transitive-edge resolver (Go via `go mod graph`)
@@ -112,6 +113,33 @@ func (s *Service) SetSASTAnalyzer(a ports.SASTAnalyzer) { s.sastAnalyzer = a }
 
 // SetSecretScanner configures the optional deterministic secret scanner. nil ⇒ no secret scanning.
 func (s *Service) SetSecretScanner(sc ports.SecretScanner) { s.secretScanner = sc }
+
+// SetSBOMCache configures the optional generated-SBOM cache. nil ⇒ always regenerate. Best-effort: a cache
+// miss or error never affects correctness, only whether the cataloging step is skipped.
+func (s *Service) SetSBOMCache(c ports.SBOMCache) { s.sbomCache = c }
+
+// sbomProducerVersion is the SBOM-producer identity used as the cache-invalidation version: the versions of
+// the components that determine SBOM OUTPUT — the syft binary, the language classifier, and the synapse
+// binary that carries the owned parsers/enrichers. It deliberately excludes advisory/KEV/EPSS DB versions
+// (they don't change the generated SBOM). Empty when no producer version is known, which keeps the cache
+// off rather than serving an SBOM that can't be soundly version-keyed.
+func sbomProducerVersion(tv map[string]string) string {
+	if tv == nil {
+		return ""
+	}
+	v := tv["syft"] + "\x00" + tv["go-enry"] + "\x00" + tv["synapse"]
+	if strings.Trim(v, "\x00") == "" {
+		return ""
+	}
+	return v
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
 
 // SetMisconfigScanner configures the optional deterministic IaC/config misconfig scanner.
 // nil ⇒ no misconfig scanning. A setter keeps the existing NewService call sites unchanged.
@@ -1232,12 +1260,30 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	stage, pct = stageSBOM, 35
 	report(stage, pct, trace.snapshot())
 	step = trace.start(stageSBOM, "sbom-generation", "sbom", "Generate SBOM", nil)
-	doc, err := s.sbomGen.Generate(ctx, ws.Dir)
-	if err != nil {
-		trace.fail(step, err)
-		return nil, fmt.Errorf("generate sbom: %w", err)
+	// Content+version-addressed cache (opt-in): on an unchanged tree scanned with the same producer, reuse
+	// the cataloged SBOM and skip generation; a producer version bump makes the key miss (Trivy's
+	// analyzer-version invalidation). Best-effort — a miss/error just regenerates.
+	producerVer := sbomProducerVersion(s.prov.ToolVersions)
+	var doc *sbom.SBOM
+	cacheHit := false
+	if s.sbomCache != nil {
+		if cached, ok, _ := s.sbomCache.Load(ctx, ws.Dir, producerVer); ok && cached != nil {
+			doc, cacheHit = cached, true
+		}
 	}
-	trace.succeed(step, "SBOM generated", map[string]int{"components": countComponents(doc), "dependencies": len(doc.Dependencies)})
+	if doc == nil {
+		doc, err = s.sbomGen.Generate(ctx, ws.Dir)
+		if err != nil {
+			trace.fail(step, err)
+			return nil, fmt.Errorf("generate sbom: %w", err)
+		}
+		if s.sbomCache != nil {
+			// Store re-fingerprints ws.Dir; this assumes the generator did NOT mutate the workspace (Syft +
+			// the owned parsers read only), so the stored key matches the next clean scan's Load key.
+			_ = s.sbomCache.Store(ctx, ws.Dir, producerVer, doc) // best-effort; a store error never fails the scan
+		}
+	}
+	trace.succeed(step, "SBOM generated", map[string]int{"components": countComponents(doc), "dependencies": len(doc.Dependencies), "cache_hit": boolToInt(cacheHit)})
 	// SBOM producer cross-check: when a 2nd producer is configured, diff the two RAW
 	// component sets — BEFORE enrichment, so it compares the PRODUCERS themselves, not a shared post-process —
 	// and record components only one producer emitted as ungated CapCorrelation judgments for human review.
