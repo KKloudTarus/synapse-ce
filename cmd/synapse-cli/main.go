@@ -428,6 +428,9 @@ func printReport(target string, res *scauc.ScanResult) {
 				fmt.Printf("    %-26s %3d/100 — %s\n", e.Label, e.Score, e.Detail)
 			}
 		}
+		for _, p := range q.Profiles { // explicit per-standard PASS/FAIL a regulated buyer can cite
+			fmt.Printf("    %s\n", p.Summary)
+		}
 	}
 	fmt.Printf("  vulnerabilities: %d", len(res.Vulnerabilities))
 	if counts := countVulnSeverity(res); counts != "" {

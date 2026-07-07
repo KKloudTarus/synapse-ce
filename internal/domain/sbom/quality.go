@@ -56,7 +56,72 @@ type QualityReport struct {
 	NTIAScore int              `json:"ntia_score"` // mean of the NTIA element scores, 0..100
 	NTIAMet   bool             `json:"ntia_met"`   // every NTIA element Score >= NTIAThreshold
 	Elements  []QualityElement `json:"elements"`
-	Summary   string           `json:"summary"`
+	// Profiles projects the scored elements onto named compliance profiles (NTIA 2021, vulnerability-lookup
+	// readiness, ...) as explicit PASS/FAIL with the failing requirements named — the citable governance
+	// artifact a regulated buyer asks for, distinct from the raw score.
+	Profiles []ProfileResult `json:"profiles"`
+	Summary  string          `json:"summary"`
+}
+
+// ProfileResult is a QualityReport projected onto one named compliance profile: whether every required
+// element clears the bar, and the labels of those that did not.
+type ProfileResult struct {
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Met     bool     `json:"met"`
+	Missing []string `json:"missing,omitempty"` // labels of required elements below the profile threshold
+	Summary string   `json:"summary"`
+}
+
+// complianceProfile is a named set of required QualityElement IDs — a regulation or standard's expected
+// subset. Each required element must score >= NTIAThreshold for the profile to be met.
+type complianceProfile struct {
+	id, name string
+	required []string
+}
+
+// complianceProfiles are the built-in, curated profiles. NTIA-2021 is the authoritative minimum-elements
+// baseline (EO 14028); vuln-lookup is the narrower "can every component be matched against an advisory DB"
+// readiness check (name + version + a unique identifier). Both are LLM-free, deterministic tables. More
+// profiles (NTIA-2025, BSI TR-03183-2, OWASP SCVS levels) slot in here as their mappings are curated.
+var complianceProfiles = []complianceProfile{
+	{id: "ntia-2021", name: "NTIA 2021 minimum elements", required: []string{
+		"ntia-supplier", "ntia-name", "ntia-version", "ntia-uniqid", "ntia-dependencies", "ntia-author", "ntia-timestamp",
+	}},
+	{id: "vuln-lookup", name: "Vulnerability lookup readiness", required: []string{
+		"ntia-name", "ntia-version", "ntia-uniqid",
+	}},
+}
+
+// evaluateProfiles projects the scored elements onto the built-in compliance profiles. Deterministic: the
+// profile order and the missing-labels order follow the fixed tables above.
+func evaluateProfiles(elements []QualityElement) []ProfileResult {
+	byID := make(map[string]QualityElement, len(elements))
+	for _, e := range elements {
+		byID[e.ID] = e
+	}
+	out := make([]ProfileResult, 0, len(complianceProfiles))
+	for _, p := range complianceProfiles {
+		pr := ProfileResult{ID: p.id, Name: p.name, Met: true}
+		for _, id := range p.required {
+			e, ok := byID[id]
+			if !ok || e.Score < NTIAThreshold {
+				pr.Met = false
+				if ok {
+					pr.Missing = append(pr.Missing, e.Label)
+				} else {
+					pr.Missing = append(pr.Missing, id)
+				}
+			}
+		}
+		if pr.Met {
+			pr.Summary = fmt.Sprintf("%s: PASS", p.name)
+		} else {
+			pr.Summary = fmt.Sprintf("%s: FAIL (missing: %s)", p.name, strings.Join(pr.Missing, ", "))
+		}
+		out = append(out, pr)
+	}
+	return out
 }
 
 // Quality scores an SBOM against the NTIA minimum elements and semantic-quality checks. Pure + deterministic.
@@ -147,6 +212,7 @@ func Quality(s SBOM) QualityReport {
 	if !r.NTIAMet && r.Score >= NTIAThreshold {
 		r.Score = NTIAThreshold - 1
 	}
+	r.Profiles = evaluateProfiles(elements)
 	r.Summary = qualitySummary(r)
 	return r
 }

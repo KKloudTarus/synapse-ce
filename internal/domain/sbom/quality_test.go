@@ -228,6 +228,79 @@ func TestQualityEmptySBOMScoresZeroNotPanic(t *testing.T) {
 	}
 }
 
+func TestQualityComplianceProfiles(t *testing.T) {
+	profileByID := func(r QualityReport) map[string]ProfileResult {
+		m := map[string]ProfileResult{}
+		for _, p := range r.Profiles {
+			m[p.ID] = p
+		}
+		return m
+	}
+
+	// A fully described SBOM meets both profiles.
+	full := SBOM{Source: "synapse", Components: []Component{fullComponent()}, Dependencies: []Dependency{{Ref: "gin"}}}
+	full.Audit.CreatedAt = time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
+	fp := profileByID(Quality(full))
+	if !fp["ntia-2021"].Met || !fp["vuln-lookup"].Met {
+		t.Errorf("a full SBOM must pass both profiles, got ntia=%+v vuln=%+v", fp["ntia-2021"], fp["vuln-lookup"])
+	}
+
+	// Supplier-less but otherwise complete: NTIA-2021 fails naming Supplier; vuln-lookup still passes
+	// (name+version+PURL present).
+	noSupplier := SBOM{
+		Source:       "synapse",
+		Components:   []Component{{Name: "requests", Version: "2.31.0", PURL: "pkg:pypi/requests@2.31.0", Licenses: []License{{SPDXID: "Apache-2.0"}}, SHA1: "abc"}},
+		Dependencies: []Dependency{{Ref: "requests"}},
+	}
+	noSupplier.Audit.CreatedAt = time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
+	np := profileByID(Quality(noSupplier))
+	if np["ntia-2021"].Met {
+		t.Error("a supplier-less SBOM must FAIL NTIA-2021")
+	}
+	if len(np["ntia-2021"].Missing) != 1 || np["ntia-2021"].Missing[0] != "Supplier name" {
+		t.Errorf("NTIA-2021 must name the missing Supplier element, got %v", np["ntia-2021"].Missing)
+	}
+	if !strings.Contains(np["ntia-2021"].Summary, "FAIL") {
+		t.Errorf("failing profile summary must say FAIL, got %q", np["ntia-2021"].Summary)
+	}
+	if !np["vuln-lookup"].Met {
+		t.Error("name+version+PURL present must PASS vuln-lookup readiness even without a supplier")
+	}
+
+	// A bare (name-only) component fails vuln-lookup too.
+	bare := SBOM{Source: "synapse", Components: []Component{{Name: "mystery"}}}
+	bare.Audit.CreatedAt = time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
+	if profileByID(Quality(bare))["vuln-lookup"].Met {
+		t.Error("a version-less, PURL-less component must FAIL vuln-lookup readiness")
+	}
+}
+
+func TestNTIAProfileMatchesNTIAMet(t *testing.T) {
+	// The ntia-2021 profile requires exactly the NTIA elements at the same threshold as NTIAMet, so the two
+	// must never disagree. This guard fails loudly if a future NTIA element is added to the scorer but not the
+	// profile table (or vice versa).
+	full := SBOM{Source: "synapse", Components: []Component{fullComponent()}, Dependencies: []Dependency{{Ref: "gin"}}}
+	full.Audit.CreatedAt = time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
+	cases := []SBOM{
+		full,
+		{Source: "synapse", Components: []Component{{Name: "bare"}}}, // fails many NTIA elements
+		{Source: "", Components: []Component{fullComponent()}},       // missing author + timestamp
+		{Components: nil}, // empty
+	}
+	for i, doc := range cases {
+		r := Quality(doc)
+		var ntia ProfileResult
+		for _, p := range r.Profiles {
+			if p.ID == "ntia-2021" {
+				ntia = p
+			}
+		}
+		if ntia.Met != r.NTIAMet {
+			t.Errorf("case %d: ntia-2021 profile Met=%v but NTIAMet=%v — the two must agree", i, ntia.Met, r.NTIAMet)
+		}
+	}
+}
+
 func TestQualityDeterministicOrder(t *testing.T) {
 	doc := SBOM{Source: "synapse", Components: []Component{fullComponent()}}
 	doc.Audit.CreatedAt = time.Now().UTC()
