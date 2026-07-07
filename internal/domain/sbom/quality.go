@@ -88,6 +88,21 @@ var complianceProfiles = []complianceProfile{
 	{id: "ntia-2021", name: "NTIA 2021 minimum elements", required: []string{
 		"ntia-supplier", "ntia-name", "ntia-version", "ntia-uniqid", "ntia-dependencies", "ntia-author", "ntia-timestamp",
 	}},
+	// NTIA 2025 (CISA's refreshed minimum elements) keeps the 2021 seven and adds a per-component cryptographic
+	// hash, mapped here to the checksum element (the other 2025 additions — lifecycle phase, generation tooling
+	// context — are not yet scored, so this profile covers the data-field subset Synapse can verify today).
+	{id: "ntia-2025", name: "NTIA 2025 minimum elements (verifiable data-field subset)", required: []string{
+		"ntia-supplier", "ntia-name", "ntia-version", "ntia-uniqid", "ntia-dependencies", "ntia-author", "ntia-timestamp", "sem-checksum",
+	}},
+	// OWASP SCVS Level 1 (inventory assurance): every component is identified by name, version, and a unique
+	// identifier (PURL), and carries a license.
+	{id: "scvs-l1", name: "OWASP SCVS Level 1 (inventory)", required: []string{
+		"ntia-name", "ntia-version", "ntia-uniqid", "sem-license",
+	}},
+	// OWASP SCVS Level 2 adds integrity + provenance to L1: a component checksum and a supplier.
+	{id: "scvs-l2", name: "OWASP SCVS Level 2 (integrity)", required: []string{
+		"ntia-name", "ntia-version", "ntia-uniqid", "sem-license", "sem-checksum", "ntia-supplier",
+	}},
 	{id: "vuln-lookup", name: "Vulnerability lookup readiness", required: []string{
 		"ntia-name", "ntia-version", "ntia-uniqid",
 	}},

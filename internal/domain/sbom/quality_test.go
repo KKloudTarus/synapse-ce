@@ -275,6 +275,42 @@ func TestQualityComplianceProfiles(t *testing.T) {
 	}
 }
 
+func TestComplianceProfilesReferenceRealElements(t *testing.T) {
+	// Every element ID a profile requires must actually be produced by the scorer; a typo would make the
+	// profile perpetually FAIL and silently mislead. Guard against drift.
+	ids := map[string]bool{}
+	for _, e := range Quality(SBOM{Source: "s", Components: []Component{fullComponent()}}).Elements {
+		ids[e.ID] = true
+	}
+	for _, p := range complianceProfiles {
+		for _, id := range p.required {
+			if !ids[id] {
+				t.Errorf("profile %q requires element %q, which the scorer does not produce", p.id, id)
+			}
+		}
+	}
+}
+
+func TestNTIA2025AndSCVSRequireChecksum(t *testing.T) {
+	// A fully-described SBOM WITHOUT a component checksum passes NTIA-2021 + SCVS L1, but fails NTIA-2025
+	// (which adds the component-hash element) and SCVS L2 (which adds integrity).
+	comp := fullComponent()
+	comp.SHA1 = ""
+	comp.Checksums = nil
+	doc := SBOM{Source: "synapse", Components: []Component{comp}, Dependencies: []Dependency{{Ref: "gin"}}}
+	doc.Audit.CreatedAt = time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
+	met := map[string]bool{}
+	for _, p := range Quality(doc).Profiles {
+		met[p.ID] = p.Met
+	}
+	if !met["ntia-2021"] || !met["scvs-l1"] {
+		t.Errorf("a checksumless-but-complete SBOM should pass NTIA-2021 + SCVS L1, got %+v", met)
+	}
+	if met["ntia-2025"] || met["scvs-l2"] {
+		t.Errorf("NTIA-2025 + SCVS L2 require a component checksum; a checksumless SBOM must FAIL them, got %+v", met)
+	}
+}
+
 func TestNTIAProfileMatchesNTIAMet(t *testing.T) {
 	// The ntia-2021 profile requires exactly the NTIA elements at the same threshold as NTIAMet, so the two
 	// must never disagree. This guard fails loudly if a future NTIA element is added to the scorer but not the
