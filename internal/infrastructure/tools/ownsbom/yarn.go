@@ -35,6 +35,7 @@ func (Yarn) Markers() []string { return []string{"yarn.lock"} }
 // claims (for edge resolution), and the direct deps from its dependencies: block.
 type yarnEntry struct {
 	name, version string
+	integrity     string    // the `integrity` Subresource Integrity value (Yarn v1), when present
 	descriptors   []string  // full `name@range` specs from the key line(s)
 	deps          []yarnDep // direct deps from the dependencies: block
 }
@@ -96,6 +97,10 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 			inDeps, depsIndent = true, indent
 		case strings.HasPrefix(line, "version ") || strings.HasPrefix(line, "version:"):
 			cur.version = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "version")), `:" `)
+		case strings.HasPrefix(line, "integrity "):
+			// Yarn v1 records a Subresource Integrity value ("integrity sha512-<b64>"); Yarn Berry's
+			// `checksum:` is an internal cache hash, not an artifact digest, so it is intentionally not captured.
+			cur.integrity = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "integrity")), `:" `)
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -125,7 +130,7 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 			scope = sbom.ScopeDevelopment
 		}
 		ref := yarnPURL(e.name, e.version)
-		set.add(sbom.Component{Name: e.name, Version: e.version, PURL: ref, Location: in.Path, Scope: scope})
+		set.add(sbom.Component{Name: e.name, Version: e.version, PURL: ref, Location: in.Path, Scope: scope, Checksums: parseSubresourceIntegrity(e.integrity)})
 		seen := map[string]bool{ref: true} // drop self-edges + duplicate targets
 		var on []string
 		for _, d := range e.deps {

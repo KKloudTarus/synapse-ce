@@ -63,6 +63,10 @@ func TestYarnV1(t *testing.T) {
 	if c := byName["@babel/core"]; c.Version != "7.23.0" || c.PURL != "pkg:npm/%40babel/core@7.23.0" {
 		t.Errorf("@babel/core = %+v, want 7.23.0 / pkg:npm/%%40babel/core@7.23.0", c)
 	}
+	// the Yarn v1 `integrity` SRI line is captured as a component Checksum
+	if ck := byName["@babel/core"].Checksums; len(ck) != 1 || ck[0].Algorithm != "SHA512" || ck[0].Value != "abc" {
+		t.Errorf("@babel/core checksum = %+v, want [{SHA512 abc}]", ck)
+	}
 	// dev-scope from the companion package.json [devDependencies]
 	if c := byName["mocha"]; c.Scope != sbom.ScopeDevelopment {
 		t.Errorf("mocha must be dev-scoped via companion package.json: %+v", c)
