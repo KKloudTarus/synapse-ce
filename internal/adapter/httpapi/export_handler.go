@@ -43,6 +43,26 @@ func (rt *Router) exportSPDX(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
+// exportCycloneDX renders the engagement's latest scan SBOM as a downloadable CycloneDX 1.6 document
+// (deterministic, from stored data — no LLM in the report path). The SBOM lives with the scan, so it is
+// served by the SCA service.
+func (rt *Router) exportCycloneDX(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "engagement id is required"})
+		return
+	}
+	body, err := rt.sca.CycloneDX(r.Context(), shared.ID(id))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.cyclonedx+json")
+	w.Header().Set("Content-Disposition", `attachment; filename="synapse-`+safeID(id)+`.cdx.json"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
 // applyVEX ingests a client OpenVEX document and applies each statement to the
 // engagement's findings (e.g. not_affected → false positive). CRA-aligned.
 func (rt *Router) applyVEX(w http.ResponseWriter, r *http.Request) {

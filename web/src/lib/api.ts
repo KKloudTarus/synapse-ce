@@ -220,7 +220,7 @@ async function blobDownload(path: string, fallbackName: string): Promise<void> {
   URL.revokeObjectURL(url)
 }
 
-export async function downloadExport(engagementId: string, format: 'sarif' | 'openvex' | 'spdx'): Promise<void> {
+export async function downloadExport(engagementId: string, format: 'sarif' | 'openvex' | 'spdx' | 'cyclonedx'): Promise<void> {
   const id = encodeURIComponent(engagementId)
   await blobDownload(`/api/v1/engagements/${id}/export/${format}`, `synapse-${engagementId}.${format}.json`)
 }

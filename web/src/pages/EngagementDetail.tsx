@@ -348,7 +348,7 @@ function EvidenceBadge({ engagementId }: { engagementId: string }) {
 }
 
 function ExportButtons({ engagementId, scan, onChanged }: { engagementId: string; scan: ScanResult | null; onChanged: () => void }) {
-  const [busy, setBusy] = useState<'sarif' | 'openvex' | 'spdx' | 'bundle' | 'sbom' | 'vex' | 'excel' | null>(null)
+  const [busy, setBusy] = useState<'sarif' | 'openvex' | 'spdx' | 'cyclonedx' | 'bundle' | 'sbom' | 'vex' | 'excel' | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [building, setBuilding] = useState(false)
@@ -356,7 +356,7 @@ function ExportButtons({ engagementId, scan, onChanged }: { engagementId: string
   const sbomRef = useRef<HTMLInputElement>(null)
   const vexRef = useRef<HTMLInputElement>(null)
 
-  async function run(kind: 'sarif' | 'openvex' | 'spdx' | 'bundle') {
+  async function run(kind: 'sarif' | 'openvex' | 'spdx' | 'cyclonedx' | 'bundle') {
     setBusy(kind)
     setErr(null)
     setMsg(null)
@@ -439,6 +439,9 @@ function ExportButtons({ engagementId, scan, onChanged }: { engagementId: string
         </Button>
         <Button variant="secondary" loading={busy === 'spdx'} onClick={() => run('spdx')} className="px-3 py-1.5" title="SPDX 3.0.1 (CRA-aligned)">
           <Download className="size-4" /> SPDX
+        </Button>
+        <Button variant="secondary" loading={busy === 'cyclonedx'} onClick={() => run('cyclonedx')} className="px-3 py-1.5" title="CycloneDX 1.6">
+          <Download className="size-4" /> CycloneDX
         </Button>
         <Button variant="secondary" loading={busy === 'bundle'} onClick={() => run('bundle')} className="px-3 py-1.5" title="Portable engagement bundle with the evidence chain (re-verified on import)">
           <PackageOpen className="size-4" /> Bundle
