@@ -55,6 +55,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavenresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/misconfig"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/nvd"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ospkg"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/osv"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownadvisory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownsbom"
@@ -537,6 +538,10 @@ func main() {
 	if cfg.SecretScanEnabled {
 		scaService.SetSecretScanner(secretscan.New()) // deterministic, redacted secret scan in the scan pipeline
 		log.Info("secret scanning ENABLED (hardcoded credentials; matches redacted)")
+	}
+	if cfg.ImageRootFSEnabled {
+		scaService.SetOSPackageCataloger(ospkg.New()) // owned dpkg/apk cataloging from the materialized image rootfs
+		log.Info("image-rootfs OS-package cataloging ENABLED (dpkg + apk)")
 	}
 	if cfg.MisconfigEnabled {
 		scaService.SetMisconfigScanner(misconfig.New()) // deterministic IaC/config misconfig scan in the scan pipeline

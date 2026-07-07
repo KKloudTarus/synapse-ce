@@ -38,6 +38,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavenresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/misconfig"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/nvd"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ospkg"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/osv"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownadvisory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/risk"
@@ -319,6 +320,9 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	}
 	if cfg.MisconfigEnabled {
 		sca.SetMisconfigScanner(misconfig.New()) // deterministic IaC/config misconfig scan (CI-friendly)
+	}
+	if cfg.ImageRootFSEnabled {
+		sca.SetOSPackageCataloger(ospkg.New()) // owned dpkg/apk cataloging from the materialized image rootfs
 	}
 	if cfg.SuppressionEnabled {
 		sca.SetSuppressionLoader(ignorefile.New()) // repo-committed .synapseignore accepted-risk policy (CI-friendly)
