@@ -545,6 +545,16 @@ type OSPackageCataloger interface {
 	Catalog(ctx context.Context, rootfsDir string) (OSPackageResult, error)
 }
 
+// InstalledPackageCataloger reads a materialized image root filesystem for installed LANGUAGE packages a
+// lockfile would miss: Go module dependencies embedded in compiled binaries (debug/buildinfo) and Python
+// distributions installed on disk (dist-info/egg-info). Components carry the language PURL (pkg:golang /
+// pkg:pypi) so the advisory matcher keys them. It is the owned, detection-independent inventory of what a
+// SHIPPED image actually contains (e.g. a scratch image with one static Go binary and no go.mod). Empty when
+// the rootfs has no such artifacts.
+type InstalledPackageCataloger interface {
+	CatalogInstalled(ctx context.Context, rootfsDir string) ([]sbom.Component, error)
+}
+
 // Completeness signals how trustworthy a scan's results are: whether dependency
 // versions were actually resolved. Scanning source WITHOUT a lockfile yields
 // unresolved versions, so a "0 vulnerabilities" result must NOT be read as clean.

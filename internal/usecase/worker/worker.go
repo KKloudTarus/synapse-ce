@@ -8,7 +8,9 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -110,6 +112,19 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 }
 
+// safeHandle runs a job handler, converting a PANIC into an error so one poisoned job — e.g. a crafted
+// container image that panics a stdlib binary/archive parser in the SCA handler — fails and retries through
+// the normal path instead of unwinding out of the claim loop and crashing the shared worker process.
+func (w *Worker) safeHandle(ctx context.Context, h Handler, job ports.QueuedJob) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			w.log.Error("job handler panicked — failing job", "kind", job.Kind, "job", job.ID, "panic", r, "stack", string(debug.Stack()))
+			err = fmt.Errorf("handler panicked: %v", r)
+		}
+	}()
+	return h.Handle(ctx, job)
+}
+
 // process dispatches one job, heartbeating its lease until the handler returns, then
 // Completes or Fails it.
 func (w *Worker) process(ctx context.Context, job ports.QueuedJob) {
@@ -125,7 +140,7 @@ func (w *Worker) process(ctx context.Context, job ports.QueuedJob) {
 	hbCtx, stopHB := context.WithCancel(ctx)
 	go w.heartbeat(hbCtx, job.ID)
 
-	err := h.Handle(ctx, job)
+	err := w.safeHandle(ctx, h, job)
 	stopHB()
 
 	if err == nil {

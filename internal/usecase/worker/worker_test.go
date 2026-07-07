@@ -41,6 +41,37 @@ func cfg() Config {
 	return Config{Visibility: time.Second, Poll: 5 * time.Millisecond, Heartbeat: 200 * time.Millisecond, Backoff: 10 * time.Millisecond, MaxAttempts: 3}
 }
 
+// TestWorkerRecoversFromHandlerPanic proves a panicking handler (e.g. a crafted image that panics a stdlib
+// parser in the SCA handler) is converted to a job failure and does NOT crash the shared worker. If the panic
+// were not recovered it would unwind out of the Run goroutine and crash this test process.
+func TestWorkerRecoversFromHandlerPanic(t *testing.T) {
+	q := memory.NewJobQueue(&seqIDs{}, nil)
+	if _, err := q.Enqueue(context.Background(), "boom", []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int64
+	w := New(q, map[string]Handler{
+		"boom": HandlerFunc(func(_ context.Context, _ ports.QueuedJob) error {
+			calls.Add(1)
+			panic("crafted-binary parser exploded")
+		}),
+	}, cfg(), nil)
+
+	runFor(t, w, func(cancel context.CancelFunc) {
+		for i := 0; i < 200; i++ {
+			if calls.Load() >= 1 {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		cancel()
+	})
+	if calls.Load() < 1 {
+		t.Fatal("the panicking handler was never invoked")
+	}
+	// Reaching here (Run returned on cancel) proves the panic did not crash the worker.
+}
+
 func TestWorkerProcessesAndCompletes(t *testing.T) {
 	q := memory.NewJobQueue(&seqIDs{}, nil)
 	ctx := context.Background()

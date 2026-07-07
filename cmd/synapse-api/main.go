@@ -37,6 +37,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gomodgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/govulncheck"
@@ -540,8 +541,9 @@ func main() {
 		log.Info("secret scanning ENABLED (hardcoded credentials; matches redacted)")
 	}
 	if cfg.ImageRootFSEnabled {
-		scaService.SetOSPackageCataloger(ospkg.New()) // owned dpkg/apk cataloging from the materialized image rootfs
-		log.Info("image-rootfs OS-package cataloging ENABLED (dpkg + apk)")
+		scaService.SetOSPackageCataloger(ospkg.New())         // owned dpkg/apk cataloging from the materialized image rootfs
+		scaService.SetInstalledPackageCataloger(bincat.New()) // owned Go-binary + Python dist-info cataloging from the rootfs
+		log.Info("image-rootfs cataloging ENABLED (dpkg + apk OS packages; Go binaries + Python dist-info)")
 	}
 	if cfg.MisconfigEnabled {
 		scaService.SetMisconfigScanner(misconfig.New()) // deterministic IaC/config misconfig scan in the scan pipeline

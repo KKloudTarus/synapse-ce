@@ -22,6 +22,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/grype"
@@ -322,7 +323,8 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		sca.SetMisconfigScanner(misconfig.New()) // deterministic IaC/config misconfig scan (CI-friendly)
 	}
 	if cfg.ImageRootFSEnabled {
-		sca.SetOSPackageCataloger(ospkg.New()) // owned dpkg/apk cataloging from the materialized image rootfs
+		sca.SetOSPackageCataloger(ospkg.New())         // owned dpkg/apk cataloging from the materialized image rootfs
+		sca.SetInstalledPackageCataloger(bincat.New()) // owned Go-binary + Python dist-info cataloging from the rootfs
 	}
 	if cfg.SuppressionEnabled {
 		sca.SetSuppressionLoader(ignorefile.New()) // repo-committed .synapseignore accepted-risk policy (CI-friendly)

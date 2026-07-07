@@ -55,32 +55,33 @@ type Service struct {
 	riskEnricher   ports.RiskEnricher
 	licScan        ports.LicenseScanner
 	licEnricher    ports.LicenseEnricher
-	sbomEnricher   ports.SBOMEnricher            // optional manifest enrichment (gem edges, maven/gradle deps, pnpm scope)
-	licCoord       ports.MavenCoordResolver      // optional: recover real Maven coords from JAR pom.properties before license lookup
-	jarChecksum    ports.JarChecksumResolver     // optional: capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
-	jarHash        ports.JarHashResolver         // optional: recover coords of shaded/metadata-less JARs via SHA-1
-	licFile        ports.LicenseFileResolver     // optional offline license-text fallback from JAR LICENSE files
-	sastAnalyzer   ports.SASTAnalyzer            // optional deterministic pattern-SAST over the live workspace
-	secretScanner  ports.SecretScanner           // optional deterministic secret scan over the live workspace
-	misconfig      ports.MisconfigScanner        // optional deterministic IaC/config misconfig scan over the live workspace
-	osPkgCataloger ports.OSPackageCataloger      // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
-	suppression    ports.SuppressionLoader       // optional repo-committed .synapseignore accepted-risk policy
-	vexLoader      ports.VEXLoader               // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
-	complianceOn   bool                          // when set, attach the AppSec-baseline compliance report to a scan
-	dbMaxAgeDays   int                           // when > 0, warn if a reference DB (KEV/EPSS/vuln-DB) is older than this
-	reachability   ports.ReachabilityRecorder    // optional deterministic Tier-2 reachability proof
-	correlation    ports.CorrelationRecorder     // optional cross-check disagreement → judgment minter
-	sbomGen2       ports.SBOMGenerator           // optional 2nd SBOM producer for the cross-check
-	sbomCache      ports.SBOMCache               // optional content+version-addressed cache of the generated SBOM
-	sbomCrossCheck ports.SBOMCrossCheckRecorder  // optional SBOM-producer disagreement → judgment minter
-	taint          ports.TaintScanner            // optional deterministic taint-analysis → gated CapSAST proposals
-	graphResolver  ports.DependencyGraphResolver // optional transitive-edge resolver (Go via `go mod graph`)
-	mavenResolver  ports.MavenResolver           // optional Maven transitive-tree resolver (`mvn dependency:list`)
-	gradleResolver ports.GradleResolver          // optional Gradle transitive-tree resolver (`gradle dependencies`)
-	jvmReach       ports.JVMReachabilityAnalyzer // optional coarse JVM class-reachability tagger
-	sevEnricher    ports.SeverityEnricher        // optional NVD CVSS backfill for unknown-severity vulns
-	ignoreUnfixed  bool                          // when set, don't promote no-fix vulns to findings (Trivy --ignore-unfixed)
-	guard          *execution.Guard              // shared scope + window + audit gate; built in NewService
+	sbomEnricher   ports.SBOMEnricher              // optional manifest enrichment (gem edges, maven/gradle deps, pnpm scope)
+	licCoord       ports.MavenCoordResolver        // optional: recover real Maven coords from JAR pom.properties before license lookup
+	jarChecksum    ports.JarChecksumResolver       // optional: capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
+	jarHash        ports.JarHashResolver           // optional: recover coords of shaded/metadata-less JARs via SHA-1
+	licFile        ports.LicenseFileResolver       // optional offline license-text fallback from JAR LICENSE files
+	sastAnalyzer   ports.SASTAnalyzer              // optional deterministic pattern-SAST over the live workspace
+	secretScanner  ports.SecretScanner             // optional deterministic secret scan over the live workspace
+	misconfig      ports.MisconfigScanner          // optional deterministic IaC/config misconfig scan over the live workspace
+	osPkgCataloger ports.OSPackageCataloger        // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
+	instCataloger  ports.InstalledPackageCataloger // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
+	suppression    ports.SuppressionLoader         // optional repo-committed .synapseignore accepted-risk policy
+	vexLoader      ports.VEXLoader                 // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
+	complianceOn   bool                            // when set, attach the AppSec-baseline compliance report to a scan
+	dbMaxAgeDays   int                             // when > 0, warn if a reference DB (KEV/EPSS/vuln-DB) is older than this
+	reachability   ports.ReachabilityRecorder      // optional deterministic Tier-2 reachability proof
+	correlation    ports.CorrelationRecorder       // optional cross-check disagreement → judgment minter
+	sbomGen2       ports.SBOMGenerator             // optional 2nd SBOM producer for the cross-check
+	sbomCache      ports.SBOMCache                 // optional content+version-addressed cache of the generated SBOM
+	sbomCrossCheck ports.SBOMCrossCheckRecorder    // optional SBOM-producer disagreement → judgment minter
+	taint          ports.TaintScanner              // optional deterministic taint-analysis → gated CapSAST proposals
+	graphResolver  ports.DependencyGraphResolver   // optional transitive-edge resolver (Go via `go mod graph`)
+	mavenResolver  ports.MavenResolver             // optional Maven transitive-tree resolver (`mvn dependency:list`)
+	gradleResolver ports.GradleResolver            // optional Gradle transitive-tree resolver (`gradle dependencies`)
+	jvmReach       ports.JVMReachabilityAnalyzer   // optional coarse JVM class-reachability tagger
+	sevEnricher    ports.SeverityEnricher          // optional NVD CVSS backfill for unknown-severity vulns
+	ignoreUnfixed  bool                            // when set, don't promote no-fix vulns to findings (Trivy --ignore-unfixed)
+	guard          *execution.Guard                // shared scope + window + audit gate; built in NewService
 }
 
 // SetSeverityEnricher configures optional severity backfill (NVD CVSS) for vulnerabilities the
@@ -129,6 +130,12 @@ func (s *Service) SetSecretScanner(sc ports.SecretScanner) { s.secretScanner = s
 // SetOSPackageCataloger configures optional owned OS-package cataloging (dpkg/apk) from a materialized image
 // rootfs (Workspace.RootFS). nil ⇒ no owned OS cataloging. It only runs when a rootfs was materialized.
 func (s *Service) SetOSPackageCataloger(c ports.OSPackageCataloger) { s.osPkgCataloger = c }
+
+// SetInstalledPackageCataloger configures optional owned installed-package cataloging (Go binaries, Python
+// dist-info) from a materialized image rootfs. nil ⇒ off. It only runs when a rootfs was materialized.
+func (s *Service) SetInstalledPackageCataloger(c ports.InstalledPackageCataloger) {
+	s.instCataloger = c
+}
 
 // SetSBOMCache configures the optional generated-SBOM cache. nil ⇒ always regenerate. Best-effort: a cache
 // miss or error never affects correctness, only whether the cataloging step is skipped.
@@ -527,15 +534,15 @@ func countComponents(doc *sbom.SBOM) int {
 	return len(doc.Components)
 }
 
-// mergeOSComponents adds owned OS-package components not already present, so owned cataloging fills the gap
-// under the owned producer WITHOUT duplicating OS packages the generator already cataloged from the image
-// layout. The dedup key is PURL-type + lowercased name@version + arch: including the type prevents a same
-// name@version NON-OS package (which a hostile image could plant) from masking an OS package's advisories,
-// and including the arch keeps a multiarch pair (libc6:amd64 + :i386, same version) distinct — while still
-// matching the generator's own deb/apk entry (same type+arch) so it is not double-counted. Returns the number
-// added.
-func mergeOSComponents(doc *sbom.SBOM, osComps []sbom.Component) int {
-	if doc == nil || len(osComps) == 0 {
+// mergeComponents adds owned rootfs-cataloged components (OS packages from dpkg/apk, plus installed Go/Python
+// packages) not already present, so owned cataloging fills the gap under the owned producer WITHOUT
+// duplicating what the generator already cataloged from the image. The dedup key is PURL-type + lowercased
+// name@version + arch: including the type prevents a same name@version component in a DIFFERENT ecosystem
+// (which a hostile image could plant) from masking another's advisories, and including the arch keeps a
+// multiarch pair (libc6:amd64 + :i386, same version) distinct — while still matching the generator's own
+// same-type+arch entry so it is not double-counted. Returns the number added.
+func mergeComponents(doc *sbom.SBOM, extra []sbom.Component) int {
+	if doc == nil || len(extra) == 0 {
 		return 0
 	}
 	key := func(c sbom.Component) string {
@@ -546,7 +553,7 @@ func mergeOSComponents(doc *sbom.SBOM, osComps []sbom.Component) int {
 		have[key(c)] = true
 	}
 	added := 0
-	for _, c := range osComps {
+	for _, c := range extra {
 		k := key(c)
 		if have[k] {
 			continue
@@ -1495,10 +1502,22 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		if osRes, oerr := s.osPkgCataloger.Catalog(ctx, ws.RootFS); oerr != nil {
 			trace.fail(step, oerr) // surface (never swallow) a cancellation/error rather than reporting success
 		} else {
-			osPkgsAdded = mergeOSComponents(doc, osRes.Components)
+			osPkgsAdded = mergeComponents(doc, osRes.Components)
 			// no-silent-gap: packages cataloged but the release could not be keyed to an ecosystem → warn below.
 			osDistroUnresolved = osPkgsAdded > 0 && !osRes.DistroResolved
 			trace.succeed(step, "OS-package cataloging completed", map[string]int{"os_packages_added": osPkgsAdded})
+		}
+	}
+	// Owned installed-package cataloging (Go binaries + Python dist-info) from the same materialized rootfs:
+	// detection-independent inventory of what the shipped image actually contains, added BEFORE detection and
+	// deduped so it fills the gap under the owned producer without duplicating the generator's findings.
+	if s.instCataloger != nil && ws.RootFS != "" {
+		before := countComponents(doc)
+		step = trace.start(stageSBOM, "installed-package-catalog", "bincat-cataloger", "Catalog installed Go/Python packages from image rootfs", map[string]int{"components": before})
+		if instComps, ierr := s.instCataloger.CatalogInstalled(ctx, ws.RootFS); ierr != nil {
+			trace.fail(step, ierr)
+		} else {
+			trace.succeed(step, "Installed-package cataloging completed", map[string]int{"packages_added": mergeComponents(doc, instComps)})
 		}
 	}
 	// Resolve the FULL Maven dependency tree via `mvn dependency:list` (best-effort + opt-in): a from-source
