@@ -1,10 +1,49 @@
 package manifest
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
+
+func TestEnrichAttachesLockfileChecksums(t *testing.T) {
+	// Syft omits per-package integrity for lockfile ecosystems; the enricher backfills it from the lockfile.
+	dir := t.TempDir()
+	lock := `{"name":"app","lockfileVersion":3,"packages":{
+        "":{"name":"app"},
+        "node_modules/lodash":{"version":"4.17.21","integrity":"sha512-lodashHASH"}
+    }}`
+	if err := os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		{Name: "lodash", Version: "4.17.21", PURL: "pkg:npm/lodash@4.17.21"},          // Syft-produced, no checksum
+		{Name: "hasown", Version: "1.0.0", PURL: "pkg:npm/hasown@1.0.0", SHA1: "abc"}, // already has integrity
+	}}
+	res := (Enricher{}).Enrich(context.Background(), dir, doc)
+
+	if res.ChecksumsAttached != 1 {
+		t.Fatalf("want 1 checksum attached, got %d", res.ChecksumsAttached)
+	}
+	if ck := doc.Components[0].Checksums; len(ck) != 1 || ck[0].Algorithm != "SHA512" || ck[0].Value != "lodashHASH" {
+		t.Errorf("lodash should get the lockfile SHA512, got %+v", ck)
+	}
+	if len(doc.Components[1].Checksums) != 0 {
+		t.Error("a component that already had integrity (SHA1) must not be overwritten")
+	}
+	found := false
+	for _, s := range res.Sources {
+		if s == "checksums" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Sources should record \"checksums\", got %v", res.Sources)
+	}
+}
 
 func TestParseGemfileLockEdges(t *testing.T) {
 	lock := []byte("GEM\n  remote: https://rubygems.org/\n  specs:\n    actioncable (7.0.4)\n      actionpack (= 7.0.4)\n      nio4r (~> 2.0)\n    actionpack (7.0.4)\n      rack (~> 2.0)\n    nio4r (2.5.8)\n    rack (2.2.4)\n\nPLATFORMS\n  ruby\n\nDEPENDENCIES\n  rails (~> 7.0)\n")
