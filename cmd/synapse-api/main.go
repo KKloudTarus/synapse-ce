@@ -42,6 +42,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/govulncheck"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/grype"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ignorefile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarhash"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarlicense"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jvmreach"
@@ -537,6 +538,10 @@ func main() {
 	if cfg.MisconfigEnabled {
 		scaService.SetMisconfigScanner(misconfig.New()) // deterministic IaC/config misconfig scan in the scan pipeline
 		log.Info("misconfig scanning ENABLED (Dockerfile + Kubernetes manifests)")
+	}
+	if cfg.SuppressionEnabled {
+		scaService.SetSuppressionLoader(ignorefile.New()) // repo-committed .synapseignore accepted-risk policy
+		log.Info("suppression ENABLED (.synapseignore; suppressed findings retained + surfaced)")
 	}
 	if cfg.ScanCacheEnabled {
 		if dir := cfg.ResolveScanCacheDir(); dir != "" {

@@ -166,6 +166,9 @@ type Config struct {
 	// MisconfigEnabled turns on the deterministic IaC/config misconfig scanner (Dockerfile, Kubernetes
 	// manifests) in the scan pipeline; off by default. Read-only, first-party checks, no policy engine.
 	MisconfigEnabled bool
+	// SuppressionEnabled turns on the repo-committed .synapseignore accepted-risk policy; off by default.
+	// Suppressed findings are always retained + surfaced in the result, never silently dropped.
+	SuppressionEnabled bool
 	// ScanCacheEnabled turns on the content+version-addressed generated-SBOM cache; off by default. A hit on
 	// an unchanged tree skips the cataloging step; a producer version bump invalidates the entry.
 	ScanCacheEnabled bool
@@ -317,6 +320,7 @@ func Load() Config {
 		SASTEnabled:            getbool("SYNAPSE_SAST_ENABLED", false),
 		SecretScanEnabled:      getbool("SYNAPSE_SECRET_SCAN_ENABLED", false),
 		MisconfigEnabled:       getbool("SYNAPSE_MISCONFIG_ENABLED", false),
+		SuppressionEnabled:     getbool("SYNAPSE_SUPPRESSION_ENABLED", false),
 		ScanCacheEnabled:       getbool("SYNAPSE_SCAN_CACHE_ENABLED", false),
 		ScanCacheDir:           os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
 		OwnedAdvisoryEnabled:   getbool("SYNAPSE_OWNED_ADVISORY", false),

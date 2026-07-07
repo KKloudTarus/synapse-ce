@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/ignore"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
@@ -415,6 +416,61 @@ func findingID(engagementID shared.ID, dedupKey string) shared.ID {
 // a persisted finding and the two can never drift.
 func vulnDedupKey(v vulnerability.Vulnerability) string {
 	return "vuln:" + v.ID + ":" + v.Component + ":" + v.Version
+}
+
+// SuppressedFinding marks a finding a .synapseignore rule accepts. CRUCIALLY the finding STAYS in the
+// actionable Findings set — reported, persisted, and sealed into the evidence chain like any other, so a
+// suppression can never hide a finding from a deliverable or the tamper-evident record. This record only
+// ADDS an accepted-risk annotation (which rule matched, and why) that a CI --fail-on gate consults to
+// exempt the finding. Governance over Trivy: acceptance suppresses the GATE, not the finding's visibility.
+type SuppressedFinding struct {
+	DedupKey string `json:"dedup_key"` // the accepted finding's key (also its --fail-on gate-exemption key)
+	Title    string `json:"title"`
+	RuleID   string `json:"rule_id"` // the .synapseignore id that matched (a CVE/GHSA or a dedup key)
+	Reason   string `json:"reason,omitempty"`
+}
+
+// applySuppressions ANNOTATES findings matched by the .synapseignore policy as accepted-risk (in
+// SuppressedFindings) without removing them from res.Findings, and records expired + malformed rule ids so
+// they get fixed. A finding matches on its PRIMARY advisory id (its vuln's CVE/GHSA, as printed in the
+// report) or its exact dedup key, so a team can suppress by CVE (the common case) or pin a specific
+// finding. Non-primary aliases are not retained on the vuln, so a rule should list the id as reported.
+// Deterministic; nothing is removed, so nothing can be hidden — only the CI gate is exempted.
+func applySuppressions(res *ScanResult, set ignore.Set, now time.Time) {
+	if res == nil || len(set) == 0 {
+		return
+	}
+	byVuln := make(map[string]vulnerability.Vulnerability, len(res.Vulnerabilities))
+	for _, v := range res.Vulnerabilities {
+		byVuln[vulnDedupKey(v)] = v
+	}
+	for _, f := range res.Findings {
+		ids := []string{f.DedupKey}
+		if v, ok := byVuln[f.DedupKey]; ok && v.ID != "" {
+			ids = append(ids, v.ID)
+		}
+		if rule, matched := set.Match(ids, now); matched {
+			res.SuppressedFindings = append(res.SuppressedFindings, SuppressedFinding{DedupKey: f.DedupKey, Title: f.Title, RuleID: rule.ID, Reason: rule.Reason})
+		}
+	}
+	for _, r := range set.Expired(now) {
+		res.ExpiredSuppressions = append(res.ExpiredSuppressions, r.ID)
+	}
+	for _, r := range set.Malformed() {
+		res.MalformedSuppressions = append(res.MalformedSuppressions, r.ID)
+	}
+}
+
+// SuppressedKeys returns the dedup keys a CI gate should exempt from --fail-on (the accepted-risk set).
+func (r *ScanResult) SuppressedKeys() map[string]bool {
+	if len(r.SuppressedFindings) == 0 {
+		return nil
+	}
+	m := make(map[string]bool, len(r.SuppressedFindings))
+	for _, s := range r.SuppressedFindings {
+		m[s.DedupKey] = true
+	}
+	return m
 }
 
 // reachabilitySubjects builds the per-finding reachability inputs: each PROMOTED finding that maps

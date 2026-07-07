@@ -61,6 +61,7 @@ type Service struct {
 	sastAnalyzer   ports.SASTAnalyzer            // optional deterministic pattern-SAST over the live workspace
 	secretScanner  ports.SecretScanner           // optional deterministic secret scan over the live workspace
 	misconfig      ports.MisconfigScanner        // optional deterministic IaC/config misconfig scan over the live workspace
+	suppression    ports.SuppressionLoader       // optional repo-committed .synapseignore accepted-risk policy
 	reachability   ports.ReachabilityRecorder    // optional deterministic Tier-2 reachability proof
 	correlation    ports.CorrelationRecorder     // optional cross-check disagreement → judgment minter
 	sbomGen2       ports.SBOMGenerator           // optional 2nd SBOM producer for the cross-check
@@ -144,6 +145,10 @@ func boolToInt(b bool) int {
 // SetMisconfigScanner configures the optional deterministic IaC/config misconfig scanner.
 // nil ⇒ no misconfig scanning. A setter keeps the existing NewService call sites unchanged.
 func (s *Service) SetMisconfigScanner(m ports.MisconfigScanner) { s.misconfig = m }
+
+// SetSuppressionLoader configures the optional repo-committed .synapseignore accepted-risk policy loader.
+// nil ⇒ no suppression. Suppressed findings are always retained + surfaced, never silently dropped.
+func (s *Service) SetSuppressionLoader(l ports.SuppressionLoader) { s.suppression = l }
 
 // SetReachability configures the optional deterministic Tier-2 reachability prover. nil ⇒ no
 // reachability judgments. Best-effort + opt-in: a no-coverage/un-buildable target leaves the prior
@@ -292,7 +297,17 @@ type ScanResult struct {
 	UnfixedSuppressed int `json:"unfixed_suppressed"`
 	// SourceWarnings flags a configured detection source that did NOT run (e.g. the Grype
 	// binary/DB is missing), so a silently-degraded source can't masquerade as "0 vulns / clean".
-	SourceWarnings           []string                 `json:"source_warnings,omitempty"`
+	SourceWarnings []string `json:"source_warnings,omitempty"`
+	// SuppressedFindings marks findings accepted by the repo's .synapseignore policy. The findings REMAIN in
+	// Findings (reported, persisted, evidence-sealed — never hidden); this is only an accepted-risk
+	// annotation a CI --fail-on gate consults to exempt them. Acceptance suppresses the GATE, not visibility.
+	SuppressedFindings []SuppressedFinding `json:"suppressed_findings,omitempty"`
+	// ExpiredSuppressions lists .synapseignore rule ids that have lapsed, surfaced so accepted risk gets
+	// revisited rather than lingering — an expired rule no longer suppresses, so its finding re-surfaces.
+	ExpiredSuppressions []string `json:"expired_suppressions,omitempty"`
+	// MalformedSuppressions lists .synapseignore rule ids whose expiry could not be parsed; fail-safe, they
+	// do NOT suppress (a date typo must not become a permanent silent acceptance) and are surfaced to fix.
+	MalformedSuppressions    []string                 `json:"malformed_suppressions,omitempty"`
 	ToolVersions             map[string]string        `json:"tool_versions"`
 	VulnDBSnapshot           string                   `json:"vuln_db_snapshot"`
 	Completeness             ports.Completeness       `json:"completeness"`
@@ -1634,6 +1649,15 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 		result.Findings = append(result.Findings, buildMisconfigFindings(engagementID, misRaws, now, s.minSeverity)...)
 	}
+	// Apply the repo-committed .synapseignore accepted-risk policy. It ANNOTATES matched findings as
+	// accepted-risk (SuppressedFindings) so a CI --fail-on gate can exempt them, but does NOT remove them:
+	// they stay reported, persisted, and evidence-sealed, so an acceptance can never hide a finding from a
+	// deliverable or the tamper-evident record. Expired/malformed rules are surfaced, not applied. Best-effort.
+	if s.suppression != nil {
+		if set, serr := s.suppression.Load(ctx, ws.Dir); serr == nil {
+			applySuppressions(result, set, now)
+		}
+	}
 	result.MinSeverity = s.minSeverity
 	result.VulnsBelowThreshold = countBelowThreshold(vulns, s.minSeverity)
 	result.UnfixedSuppressed = countUnfixedSuppressed(vulns, s.minSeverity, s.ignoreUnfixed)
@@ -2111,13 +2135,22 @@ func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID s
 		keys = append(keys, f.DedupKey)
 	}
 	sort.Strings(keys)
+	// Seal the accepted-risk exemptions too (rule=finding-key pairs), so a .synapseignore decision — which
+	// findings were exempted from the --fail-on gate, by which rule — is itself tamper-evident, not just a
+	// mutable convenience in the results cache. omitempty keeps a suppression-free scan's seal unchanged.
+	var suppressed []string
+	for _, sf := range result.SuppressedFindings {
+		suppressed = append(suppressed, sf.RuleID+"="+sf.DedupKey)
+	}
+	sort.Strings(suppressed)
 	payload := struct {
 		SBOMSHA256 string             `json:"sbom_sha256"`
 		Findings   []string           `json:"findings"`
+		Suppressed []string           `json:"suppressed,omitempty"`
 		Manifest   ports.ScanManifest `json:"manifest"`
 		SealedAt   string             `json:"sealed_at"`
 		Actor      string             `json:"actor"`
-	}{result.Manifest.SBOMSHA256, keys, result.Manifest, now.UTC().Format(time.RFC3339), actor}
+	}{result.Manifest.SBOMSHA256, keys, suppressed, result.Manifest, now.UTC().Format(time.RFC3339), actor}
 	content, err := json.Marshal(payload)
 	if err != nil {
 		return

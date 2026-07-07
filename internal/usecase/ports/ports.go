@@ -13,6 +13,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/ignore"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedsbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
@@ -873,6 +874,15 @@ type MisconfigRawFinding struct {
 	Severity    shared.Severity
 	Resource    string // what it applies to, e.g. "Deployment/api" or "Dockerfile FROM"
 	Description string // what is wrong + how to fix
+}
+
+// SuppressionLoader reads a repo-committed suppression policy (.synapseignore) from a prepared workspace.
+// It is READ-ONLY and best-effort: a missing file yields an empty set with no error, and any read/parse
+// issue degrades to fewer rules rather than failing a scan. Applying the policy — and SURFACING every
+// suppressed finding rather than silently dropping it — is the SCA pipeline's job; this only loads the
+// declared accepted-risk decisions.
+type SuppressionLoader interface {
+	Load(ctx context.Context, dir string) (ignore.Set, error)
 }
 
 // MisconfigScanner detects insecure IaC/config (Dockerfile, Kubernetes manifests, ...) in a prepared

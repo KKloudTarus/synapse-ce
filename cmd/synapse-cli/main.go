@@ -24,6 +24,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/grype"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ignorefile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarhash"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarlicense"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jvmreach"
@@ -302,6 +303,9 @@ func run(path string, failOn shared.Severity, mode string, ignoreUnfixed, image,
 	if cfg.MisconfigEnabled {
 		sca.SetMisconfigScanner(misconfig.New()) // deterministic IaC/config misconfig scan (CI-friendly)
 	}
+	if cfg.SuppressionEnabled {
+		sca.SetSuppressionLoader(ignorefile.New()) // repo-committed .synapseignore accepted-risk policy (CI-friendly)
+	}
 	if cfg.ScanCacheEnabled {
 		if dir := cfg.ResolveScanCacheDir(); dir != "" {
 			sca.SetSBOMCache(sbomcache.New(dir)) // content+version-addressed generated-SBOM cache (CI-friendly)
@@ -337,8 +341,12 @@ func run(path string, failOn shared.Severity, mode string, ignoreUnfixed, image,
 	printReport(target, res)
 
 	gate := shared.SeverityRank(failOn)
+	accepted := res.SuppressedKeys() // .synapseignore accepted-risk: reported + sealed, but exempt from the gate
 	over := 0
 	for _, f := range res.Findings {
+		if accepted[f.DedupKey] {
+			continue
+		}
 		if shared.SeverityRank(f.Severity) >= gate {
 			over++
 		}
@@ -411,6 +419,22 @@ func printReport(target string, res *scauc.ScanResult) {
 	}
 	for _, w := range res.SourceWarnings {
 		fmt.Printf("  ! %s\n", w)
+	}
+	if n := len(res.SuppressedFindings); n > 0 {
+		fmt.Printf("  accepted-risk via .synapseignore: %d (still reported + evidence-sealed; exempt from --fail-on)\n", n)
+		for _, s := range res.SuppressedFindings {
+			reason := s.Reason
+			if reason == "" {
+				reason = "(no reason given)"
+			}
+			fmt.Printf("    - %s  [%s]  %s\n", s.Title, s.RuleID, reason)
+		}
+	}
+	for _, id := range res.ExpiredSuppressions {
+		fmt.Printf("  ! .synapseignore rule %q has EXPIRED — no longer accepted; the finding trips --fail-on again. Refresh or remove it\n", id)
+	}
+	for _, id := range res.MalformedSuppressions {
+		fmt.Printf("  ! .synapseignore rule %q has an UNPARSEABLE exp: date — not applied (fail-safe). Fix it to YYYY-MM-DD\n", id)
 	}
 	for _, f := range res.Findings {
 		kev := ""
