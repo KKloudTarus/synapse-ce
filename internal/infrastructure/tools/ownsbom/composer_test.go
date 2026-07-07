@@ -9,7 +9,7 @@ import (
 
 const composerLockFixture = `{
   "packages": [
-    {"name": "symfony/console", "version": "v6.3.0"},
+    {"name": "symfony/console", "version": "v6.3.0", "dist": {"type": "zip", "shasum": "0123456789abcdef0123456789abcdef01234567"}},
     {"name": "monolog/monolog", "version": "3.4.0"}
   ],
   "packages-dev": [
@@ -34,6 +34,13 @@ func TestComposerParse(t *testing.T) {
 	}
 	if c := byName["symfony/console"]; c.PURL != "pkg:composer/symfony/console@v6.3.0" {
 		t.Errorf("vendor/package PURL wrong: %+v", c)
+	}
+	// the dist.shasum (SHA-1) is captured as a component Checksum; a package without a dist has none.
+	if ck := byName["symfony/console"].Checksums; len(ck) != 1 || ck[0].Algorithm != "SHA1" || ck[0].Value != "0123456789abcdef0123456789abcdef01234567" {
+		t.Errorf("symfony/console checksum = %+v, want [{SHA1 0123…}]", ck)
+	}
+	if ck := byName["monolog/monolog"].Checksums; len(ck) != 0 {
+		t.Errorf("monolog has no dist.shasum, want no checksum, got %+v", ck)
 	}
 	if c := byName["symfony/console"]; c.Scope == sbom.ScopeDevelopment {
 		t.Errorf("a production package must not be development-scoped: %+v", c)

@@ -115,13 +115,14 @@ type lockChecksumParser interface {
 
 // checksumLockParsers maps a lockfile name to the owned parser that extracts its per-artifact integrity, for
 // the ecosystems whose parsers capture Checksums today (npm/pnpm/yarn Subresource Integrity, Cargo + Pipfile
-// hashes). More slot in here as their owned parsers gain checksum capture.
+// hashes, Composer dist shasum). More slot in here as their owned parsers gain checksum capture.
 var checksumLockParsers = map[string]lockChecksumParser{
 	"package-lock.json": ownsbom.NPM{},
 	"pnpm-lock.yaml":    ownsbom.Pnpm{},
 	"yarn.lock":         ownsbom.Yarn{},
 	"cargo.lock":        ownsbom.Cargo{},
 	"pipfile.lock":      ownsbom.Pipfile{},
+	"composer.lock":     ownsbom.Composer{},
 }
 
 // attachChecksums fills in a lockfile integrity digest for each generator component that has none, matched by

@@ -31,6 +31,9 @@ type composerLock struct {
 type composerPkg struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
+	Dist    struct {
+		Shasum string `json:"shasum"` // the distribution artifact's SHA-1 hex (Composer records it per package)
+	} `json:"dist"`
 }
 
 // Parse extracts the resolved PHP packages: "packages" as production, "packages-dev" as development. Each
@@ -52,13 +55,17 @@ func (Composer) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []s
 			if name == "" || version == "" {
 				continue // an entry missing identity is dropped (componentSet would drop it anyway)
 			}
-			set.add(sbom.Component{
+			comp := sbom.Component{
 				Name:     name,
 				Version:  version,
 				PURL:     "pkg:composer/" + name + "@" + version,
 				Location: in.Path,
 				Scope:    scope,
-			})
+			}
+			if s := strings.TrimSpace(p.Dist.Shasum); s != "" {
+				comp.Checksums = []sbom.Checksum{{Algorithm: "SHA1", Value: s}}
+			}
+			set.add(comp)
 		}
 	}
 	add(lock.Packages, baseScope)
