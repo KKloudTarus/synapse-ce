@@ -672,10 +672,11 @@ type GradleResolver interface {
 
 // SBOMEnrichment is what an SBOMEnricher contributed, for honest provenance.
 type SBOMEnrichment struct {
-	ComponentsAdded int      // components the generator missed (Maven/Gradle direct deps)
-	EdgesAdded      int      // dependency edges reconstructed (e.g. Gemfile.lock graph)
-	ScopesRefined   int      // components re-scoped from workspace attribution (pnpm importers)
-	Sources         []string // which manifest parsers contributed (gemfile, pnpm, maven, gradle)
+	ComponentsAdded   int      // components the generator missed (Maven/Gradle direct deps)
+	EdgesAdded        int      // dependency edges reconstructed (e.g. Gemfile.lock graph)
+	ScopesRefined     int      // components re-scoped from workspace attribution (pnpm importers)
+	ChecksumsAttached int      // components given a lockfile integrity digest the generator omitted (npm/pnpm/Cargo/Pipfile)
+	Sources           []string // which manifest parsers contributed (gemfile, pnpm, maven, gradle, checksums)
 }
 
 // SBOMEnricher augments a generator's SBOM from dependency manifests the generator
