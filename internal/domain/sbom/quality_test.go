@@ -25,6 +25,51 @@ func TestSupplierFromPURL(t *testing.T) {
 	}
 }
 
+func TestSupplierOr(t *testing.T) {
+	// Declared supplier wins; else derive from the PURL namespace; else empty.
+	if got := SupplierOr("Acme Corp", "pkg:pypi/requests@2.31.0"); got != "Acme Corp" {
+		t.Errorf("declared supplier must win, got %q", got)
+	}
+	if got := SupplierOr("  ", "pkg:maven/org.apache.commons/commons-lang3@3.12.0"); got != "org.apache.commons" {
+		t.Errorf("blank declared must fall back to PURL namespace, got %q", got)
+	}
+	if got := SupplierOr("", "pkg:pypi/requests@2.31.0"); got != "" {
+		t.Errorf("no declared + no namespace must be empty, got %q", got)
+	}
+}
+
+func TestSupplierWithSource(t *testing.T) {
+	cases := []struct{ declared, purl, wantSup, wantSrc string }{
+		{"Acme Corp", "pkg:pypi/requests@2.31.0", "Acme Corp", SupplierDeclared},
+		{"", "pkg:maven/org.apache.commons/commons-lang3@3.12.0", "org.apache.commons", SupplierDerived},
+		{"  ", "pkg:npm/%40angular/core@17.0.0", "@angular", SupplierDerived},
+		{"", "pkg:pypi/requests@2.31.0", "", ""},
+	}
+	for _, c := range cases {
+		sup, src := SupplierWithSource(c.declared, c.purl)
+		if sup != c.wantSup || src != c.wantSrc {
+			t.Errorf("SupplierWithSource(%q,%q) = (%q,%q), want (%q,%q)", c.declared, c.purl, sup, src, c.wantSup, c.wantSrc)
+		}
+	}
+}
+
+func TestQualityCreditsExplicitSupplier(t *testing.T) {
+	// A component with NO PURL (so no derivable supplier) but an explicitly-captured Supplier must still
+	// count toward the NTIA supplier element.
+	doc := SBOM{
+		Source:     "synapse",
+		Components: []Component{{Name: "internal-lib", Version: "1.0.0", Supplier: "Acme Corp"}},
+	}
+	doc.Audit.CreatedAt = time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
+	byID := map[string]QualityElement{}
+	for _, e := range Quality(doc).Elements {
+		byID[e.ID] = e
+	}
+	if byID["ntia-supplier"].Score != 100 {
+		t.Errorf("an explicit Supplier must satisfy the supplier element even with no PURL, got %d", byID["ntia-supplier"].Score)
+	}
+}
+
 func fullComponent() Component {
 	return Component{
 		Name:     "gin",

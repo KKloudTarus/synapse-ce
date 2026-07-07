@@ -82,6 +82,17 @@ type Component struct {
 	PURL     string // package URL (purl spec)
 	Licenses []License
 
+	// Supplier is the entity that supplies the component (a Maven groupId, an npm scope, a GitHub org, a
+	// package registry) — the NTIA "supplier name" minimum SBOM element. Captured from the producer/imported
+	// SBOM when it carries one, else derived from the PURL namespace (SupplierFromPURL); empty when neither
+	// yields one (a bare, namespaceless package). Emitted as SPDX PackageSupplier on export.
+	Supplier string `json:",omitempty"`
+	// SupplierSource records HOW Supplier was obtained — SupplierDeclared (asserted by the producer or an
+	// imported/untrusted client SBOM) vs SupplierDerived (deterministically inferred by Synapse from the PURL
+	// namespace) — so a downstream trust decision can tell an authoritative supplier from an echoed or inferred
+	// one (mirrors LicenseSource/LicenseConfidence). Empty when Supplier is empty.
+	SupplierSource string `json:",omitempty"`
+
 	// License provenance: where the license data came from and, when it
 	// is still unknown, why — so coverage is explainable + audit-ready.
 	LicenseSource     string // "sbom" | "registry" | "local-file" | "" (unknown)

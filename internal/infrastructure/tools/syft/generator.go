@@ -122,9 +122,15 @@ type cdxComponent struct {
 	Version    string             `json:"version"`
 	PURL       string             `json:"purl"`
 	Scope      string             `json:"scope"` // required | optional | excluded (npm dev -> excluded)
+	Supplier   cdxSupplier        `json:"supplier"`
 	Licenses   []cdxLicenseChoice `json:"licenses"`
 	Properties []cdxProperty      `json:"properties"`
 	Hashes     []cdxHash          `json:"hashes"`
+}
+
+// cdxSupplier is the CycloneDX component.supplier object; only its name is consumed (the NTIA supplier element).
+type cdxSupplier struct {
+	Name string `json:"name"`
 }
 
 type cdxHash struct {
@@ -249,12 +255,15 @@ func parseCycloneDX(data []byte) ([]sbom.Component, []sbom.Dependency, string, e
 			continue // skip entries that don't identify a package
 		}
 		loc, layerID := c.primaryLocation()
+		supplier, supplierSrc := sbom.SupplierWithSource(c.Supplier.Name, c.PURL)
 		comp := sbom.Component{
 			Name: c.Name, Version: c.Version, PURL: c.PURL,
-			Location: loc,
-			Scope:    sbom.ClassifyScope(loc, c.Scope),
-			LayerID:  layerID,
-			SHA1:     c.sha1(),
+			Location:       loc,
+			Scope:          sbom.ClassifyScope(loc, c.Scope),
+			Supplier:       supplier,
+			SupplierSource: supplierSrc,
+			LayerID:        layerID,
+			SHA1:           c.sha1(),
 		}
 		for _, lc := range c.Licenses {
 			switch {
