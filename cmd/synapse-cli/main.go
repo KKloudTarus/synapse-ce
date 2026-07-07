@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/grype"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ignorefile"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarchecksum"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarhash"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarlicense"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jvmreach"
@@ -73,7 +75,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
-	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
+	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  skip the live OSV.dev source; detect with Grype's offline DB only (air-gapped / fast)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories <dir>        # ingest a local OSV dump into the owned advisory store (requires SYNAPSE_DB_DSN)")
@@ -94,6 +96,7 @@ func runScan() {
 	ignoreUnfixed := false
 	image := false
 	offline := false
+	jsonOut := false
 	for i := 3; i < len(os.Args); i++ {
 		switch {
 		case os.Args[i] == "--fail-on" && i+1 < len(os.Args):
@@ -111,6 +114,8 @@ func runScan() {
 			image = true
 		case os.Args[i] == "--offline":
 			offline = true
+		case os.Args[i] == "--json":
+			jsonOut = true
 		default:
 			fmt.Fprintf(os.Stderr, "synapse-cli: unknown or incomplete option %q\n", os.Args[i])
 			os.Exit(2)
@@ -129,7 +134,7 @@ func runScan() {
 		fmt.Fprintf(os.Stderr, "synapse-cli: %v (mode want full|vulnerabilities|licenses; detection-priority want comprehensive|precise)\n", err)
 		os.Exit(2)
 	}
-	if err := run(os.Args[2], failOn, mode, priority, ignoreUnfixed, image, offline); err != nil {
+	if err := run(os.Args[2], failOn, mode, priority, ignoreUnfixed, image, offline, jsonOut); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 		os.Exit(1)
 	}
@@ -207,7 +212,7 @@ func (stderrAudit) Record(_ context.Context, e ports.AuditEntry) error {
 
 var _ ports.AuditLogger = stderrAudit{}
 
-func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfixed, image, offline bool) error {
+func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfixed, image, offline, jsonOut bool) error {
 	// An image target is an OCI reference (acquired via crane → OCI layout); a local
 	// target is a filesystem path that must be absolute for the scope check.
 	target := strings.TrimSpace(path)
@@ -250,7 +255,8 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil)),
 	)
 	sca.SetSBOMEnricher(manifest.New())
-	sca.SetMavenCoordResolver(mavencoord.New()) // recover real Maven coords from JAR pom.properties (offline) before license lookup
+	sca.SetMavenCoordResolver(mavencoord.New())   // recover real Maven coords from JAR pom.properties (offline) before license lookup
+	sca.SetJarChecksumResolver(jarchecksum.New()) // capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
 	// SHA-1 coordinate recovery for shaded/metadata-less JARs: offline trivy-java-db index
 	// (SYNAPSE_JARHASH_DB_PATH) first, online Maven Central (SYNAPSE_JARHASH_ONLINE_ENABLED) as fallback.
 	var jhResolvers []ports.JarHashResolver
@@ -356,7 +362,17 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		return fmt.Errorf("scan: %w", err)
 	}
 
-	printReport(target, res)
+	if jsonOut {
+		// Machine-readable full scan result (for CI / tooling / cross-scanner comparison), to stdout so the
+		// human report never mixes in. The --fail-on gate below still sets the exit code.
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(res); err != nil {
+			return fmt.Errorf("encode json result: %w", err)
+		}
+	} else {
+		printReport(target, res)
+	}
 
 	gate := shared.SeverityRank(failOn)
 	accepted := res.SuppressedKeys() // .synapseignore/VEX accepted-risk: reported + sealed, but exempt from the gate

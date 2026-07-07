@@ -57,6 +57,7 @@ type Service struct {
 	licEnricher    ports.LicenseEnricher
 	sbomEnricher   ports.SBOMEnricher            // optional manifest enrichment (gem edges, maven/gradle deps, pnpm scope)
 	licCoord       ports.MavenCoordResolver      // optional: recover real Maven coords from JAR pom.properties before license lookup
+	jarChecksum    ports.JarChecksumResolver     // optional: capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
 	jarHash        ports.JarHashResolver         // optional: recover coords of shaded/metadata-less JARs via SHA-1
 	licFile        ports.LicenseFileResolver     // optional offline license-text fallback from JAR LICENSE files
 	sastAnalyzer   ports.SASTAnalyzer            // optional deterministic pattern-SAST over the live workspace
@@ -102,6 +103,11 @@ func (s *Service) SetSBOMEnricher(e ports.SBOMEnricher) { s.sbomEnricher = e }
 // offline) that runs before registry license enrichment, so a mis-derived JAR groupId
 // doesn't make the deps.dev lookup 404 → "unknown". Best-effort; nil disables it.
 func (s *Service) SetMavenCoordResolver(r ports.MavenCoordResolver) { s.licCoord = r }
+
+// SetJarChecksumResolver configures optional JAR artifact-SHA-1 capture from the prepared workspace, filling
+// in a checksum Syft's CycloneDX output omits (deterministic, offline, read-only). It runs before the SHA-1
+// coordinate recovery, which needs that checksum as input.
+func (s *Service) SetJarChecksumResolver(r ports.JarChecksumResolver) { s.jarChecksum = r }
 
 // SetJarHashResolver configures optional SHA-1 coordinate recovery for shaded/metadata-less JARs
 // an egress call to Maven Central, so it's opt-in + best-effort. nil disables it.
@@ -1485,6 +1491,14 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		} else {
 			trace.succeed(step, "Dependency graph resolution completed", map[string]int{"components": countComponents(doc), "resolved_edges": resolved})
 		}
+	}
+	// Capture each JAR's artifact SHA-1 from the workspace (Syft computes it but omits it from CycloneDX),
+	// BEFORE the SHA-1 coordinate recovery below (which needs it) and so the SBOM carries a checksum. Offline,
+	// read-only, best-effort.
+	if s.jarChecksum != nil {
+		step = trace.start(stageSBOM, "jar-checksum", "jar-sha1", "Capture JAR artifact SHA-1 from the workspace", map[string]int{"components": countComponents(doc)})
+		n := s.jarChecksum.Resolve(ctx, ws.Dir, doc.Components)
+		trace.succeed(step, "JAR checksum capture completed", map[string]int{"checksummed": n})
 	}
 	// Recover the coordinate of a shaded / metadata-less JAR from its SHA-1, BEFORE detection,
 	// so its CVEs are looked up (a JAR with no resolvable coordinate is otherwise skipped by every source).

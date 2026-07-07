@@ -43,6 +43,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/grype"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ignorefile"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarchecksum"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarhash"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarlicense"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jvmreach"
@@ -453,7 +454,8 @@ func main() {
 		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil)))
 	scaService.SetImportedSBOMStore(importedSBOMStore)
 	scaService.SetSBOMEnricher(manifest.New())
-	scaService.SetMavenCoordResolver(mavencoord.New()) // recover real Maven coords from JAR pom.properties (offline) before license lookup
+	scaService.SetMavenCoordResolver(mavencoord.New())   // recover real Maven coords from JAR pom.properties (offline) before license lookup
+	scaService.SetJarChecksumResolver(jarchecksum.New()) // capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
 	// SHA-1 coordinate recovery for shaded/metadata-less JARs: offline trivy-java-db-format
 	// index first (if configured), online Maven Central as the fallback. Best-effort.
 	var jhResolvers []ports.JarHashResolver

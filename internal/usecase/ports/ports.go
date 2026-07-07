@@ -980,6 +980,16 @@ type MavenCoordResolver interface {
 	Resolve(ctx context.Context, wsDir string, comps []sbom.Component) int
 }
 
+// JarChecksumResolver captures the artifact SHA-1 of each JVM component's JAR by hashing the file in the
+// prepared workspace, when the SBOM generator supplied none (Syft computes a JAR digest but omits it from
+// its CycloneDX output). It sets Component.SHA1 + a Checksums entry IN PLACE for components that have a JAR
+// on disk and no existing SHA-1, and returns the count set. This both feeds the SBOM checksum quality
+// element and unblocks JarHashResolver (which needs a SHA-1 as input). Deterministic, offline, read-only,
+// bounded, and symlink-guarded; best-effort — an unreadable JAR is skipped, never fatal.
+type JarChecksumResolver interface {
+	Resolve(ctx context.Context, wsDir string, comps []sbom.Component) int
+}
+
 // JarHashResolver recovers the Maven coordinate of a JVM component that carries NO usable in-file
 // identity — a shaded / relocated / renamed JAR whose pom.properties was stripped, which MavenCoordResolver
 // therefore cannot fix — by looking its artifact SHA-1 up against a coordinate index.
