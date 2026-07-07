@@ -104,6 +104,28 @@ func TestBuildSPDX3EmitsSupplierAgent(t *testing.T) {
 	}
 }
 
+func TestBuildSPDX3EmitsHash(t *testing.T) {
+	doc := &sbom.SBOM{
+		TargetRef:  "t",
+		Components: []sbom.Component{{Name: "a", Version: "1.0", PURL: "pkg:maven/g/a@1.0", SHA1: "0123456789abcdef0123456789abcdef01234567"}},
+	}
+	a := buildSPDX3(doc, doc.TargetRef, time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC))
+	var pkg *spdx3Package
+	for _, n := range a.Graph {
+		if p, ok := n.(spdx3Package); ok {
+			pp := p
+			pkg = &pp
+		}
+	}
+	if pkg == nil || len(pkg.VerifiedUsing) != 1 {
+		t.Fatalf("SPDX3 package must carry one verifiedUsing Hash, got %+v", pkg)
+	}
+	h := pkg.VerifiedUsing[0]
+	if h.Type != "Hash" || h.Algorithm != "sha1" || h.HashValue != "0123456789abcdef0123456789abcdef01234567" {
+		t.Errorf("verifiedUsing Hash = %+v, want {Hash sha1 <hex>} (algorithm lowercase per SPDX 3.0)", h)
+	}
+}
+
 func pkgSuppliedBy(p *spdx3Package) string {
 	if p == nil {
 		return "<nil package>"

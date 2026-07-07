@@ -1,6 +1,8 @@
 package sca
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 	"time"
@@ -67,6 +69,65 @@ func TestBuildSPDXEmitsSupplier(t *testing.T) {
 	}
 	if got := byName["leftpad"].Supplier; got != "" {
 		t.Errorf("a component with no supplier must omit PackageSupplier, got %q", got)
+	}
+}
+
+func TestBuildSPDXEmitsChecksums(t *testing.T) {
+	// A hex SHA1 stays hex; an npm-style base64 SHA512 (Subresource Integrity) is converted to hex, since SPDX
+	// requires a hex checksumValue.
+	raw := make([]byte, 64) // a 64-byte digest = SHA512
+	for i := range raw {
+		raw[i] = byte(i * 3)
+	}
+	b64 := base64.StdEncoding.EncodeToString(raw)
+	wantHex := hex.EncodeToString(raw)
+	sha1hex := "0123456789abcdef0123456789abcdef01234567"
+
+	doc := &sbom.SBOM{
+		TargetRef: "https://github.com/org/repo",
+		Components: []sbom.Component{{
+			Name: "a", Version: "1.0", PURL: "pkg:maven/g/a@1.0",
+			SHA1:      sha1hex,
+			Checksums: []sbom.Checksum{{Algorithm: "SHA512", Value: b64}},
+		}},
+	}
+	pkg := buildSPDX(doc, doc.TargetRef, time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)).Packages[0]
+	got := map[string]string{}
+	for _, c := range pkg.Checksums {
+		got[c.Algorithm] = c.ChecksumValue
+	}
+	if got["SHA1"] != sha1hex {
+		t.Errorf("SHA1 checksum = %q, want the hex as-is %q", got["SHA1"], sha1hex)
+	}
+	if got["SHA512"] != wantHex {
+		t.Errorf("SHA512 checksum = %q, want the base64 SRI converted to hex %q", got["SHA512"], wantHex)
+	}
+	// Deterministic + sorted by algorithm (SHA1 before SHA512).
+	if len(pkg.Checksums) != 2 || pkg.Checksums[0].Algorithm != "SHA1" {
+		t.Errorf("checksums must be sorted by algorithm, got %+v", pkg.Checksums)
+	}
+	// Robustness: garbage, wrong-length-for-algorithm, unknown algorithm, and an oversized value must all be
+	// dropped — never emitted as a malformed or non-conformant SPDX checksum.
+	long := make([]byte, 300)
+	for i := range long {
+		long[i] = 'a'
+	}
+	for _, bad := range []sbom.Checksum{
+		{Algorithm: "SHA256", Value: "not-a-digest!!"},                              // not hex, not base64
+		{Algorithm: "SHA512", Value: "deadbeef"},                                    // valid hex but wrong length for SHA512
+		{Algorithm: "WEIRDHASH", Value: "0123456789abcdef0123456789abcdef01234567"}, // algorithm not in the allowlist
+		{Algorithm: "SHA256", Value: string(long)},                                  // oversized value
+	} {
+		docBad := &sbom.SBOM{Components: []sbom.Component{{Name: "b", Version: "1.0", PURL: "pkg:maven/g/b@1.0", Checksums: []sbom.Checksum{bad}}}}
+		if cks := buildSPDX(docBad, "t", time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)).Packages[0].Checksums; len(cks) != 0 {
+			t.Errorf("bad checksum %+v must be dropped, got %+v", bad, cks)
+		}
+	}
+	// A hyphen-stripped Syft algorithm ("SHA3256") still normalizes to the canonical SPDX name "SHA3-256".
+	raw32 := make([]byte, 32)
+	docSha3 := &sbom.SBOM{Components: []sbom.Component{{Name: "c", Version: "1.0", PURL: "pkg:maven/g/c@1.0", Checksums: []sbom.Checksum{{Algorithm: "SHA3256", Value: hex.EncodeToString(raw32)}}}}}
+	if cks := buildSPDX(docSha3, "t", time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)).Packages[0].Checksums; len(cks) != 1 || cks[0].Algorithm != "SHA3-256" {
+		t.Errorf("SHA3256 must canonicalize to the SPDX name SHA3-256, got %+v", cks)
 	}
 }
 

@@ -5,11 +5,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
+
+// spdx3Hashes renders a component's integrity digests as SPDX 3.0 Hash elements, reusing the SPDX 2.x
+// normalization (hex value, one per algorithm) and lowercasing the algorithm per the SPDX 3.0 vocabulary.
+func spdx3Hashes(c sbom.Component) []spdx3Hash {
+	cks := spdxChecksums(c)
+	if len(cks) == 0 {
+		return nil
+	}
+	out := make([]spdx3Hash, 0, len(cks))
+	for _, ck := range cks {
+		out = append(out, spdx3Hash{Type: "Hash", Algorithm: strings.ToLower(ck.Algorithm), HashValue: ck.ChecksumValue})
+	}
+	return out
+}
 
 // SPDX 3.0.1 minimal JSON-LD projection (CRA-aligned target format) of the stored
 // SBOM — core + software profiles. A pure, deterministic function of the stored
@@ -45,14 +60,22 @@ type spdx3Document struct {
 }
 
 type spdx3Package struct {
-	Type           string `json:"type"`
-	SpdxID         string `json:"spdxId"`
-	CreationInfo   string `json:"creationInfo"`
-	Name           string `json:"name"`
-	PackageVersion string `json:"software_packageVersion,omitempty"`
-	PackageURL     string `json:"software_packageUrl,omitempty"`
-	SuppliedBy     string `json:"suppliedBy,omitempty"` // IRI of the supplier Agent (NTIA supplier element); SPDX 3.0 models it as a link
-	CopyrightText  string `json:"software_copyrightText"`
+	Type           string      `json:"type"`
+	SpdxID         string      `json:"spdxId"`
+	CreationInfo   string      `json:"creationInfo"`
+	Name           string      `json:"name"`
+	PackageVersion string      `json:"software_packageVersion,omitempty"`
+	PackageURL     string      `json:"software_packageUrl,omitempty"`
+	SuppliedBy     string      `json:"suppliedBy,omitempty"`    // IRI of the supplier Agent (NTIA supplier element); SPDX 3.0 models it as a link
+	VerifiedUsing  []spdx3Hash `json:"verifiedUsing,omitempty"` // integrity digests, SPDX 3.0 Hash elements (lowercase algorithm, hex value)
+	CopyrightText  string      `json:"software_copyrightText"`
+}
+
+// spdx3Hash is an SPDX 3.0 Hash integrity method: a lowercase algorithm name + a hex digest.
+type spdx3Hash struct {
+	Type      string `json:"type"`
+	Algorithm string `json:"algorithm"`
+	HashValue string `json:"hashValue"`
 }
 
 // spdx3Agent is an SPDX 3.0 Organization element a package's suppliedBy points to (the NTIA supplier).
@@ -155,6 +178,7 @@ func buildSPDX3(doc *sbom.SBOM, target string, created time.Time) spdx3Doc {
 			if sup := sbom.SupplierOr(c.Supplier, c.PURL); sup != "" {
 				pkg.SuppliedBy = agentByName[sup]
 			}
+			pkg.VerifiedUsing = spdx3Hashes(c)
 			pkgs = append(pkgs, pkg)
 		}
 	}

@@ -3,6 +3,8 @@ package sca
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -33,14 +35,22 @@ type spdxCreation struct {
 }
 
 type spdxPackage struct {
-	SPDXID           string       `json:"SPDXID"`
-	Name             string       `json:"name"`
-	VersionInfo      string       `json:"versionInfo,omitempty"`
-	Supplier         string       `json:"supplier,omitempty"` // "Organization: <name>" — NTIA supplier element; omitted when unknown
-	DownloadLocation string       `json:"downloadLocation"`
-	LicenseDeclared  string       `json:"licenseDeclared"`
-	LicenseConcluded string       `json:"licenseConcluded"`
-	ExternalRefs     []spdxExtRef `json:"externalRefs,omitempty"`
+	SPDXID           string         `json:"SPDXID"`
+	Name             string         `json:"name"`
+	VersionInfo      string         `json:"versionInfo,omitempty"`
+	Supplier         string         `json:"supplier,omitempty"` // "Organization: <name>" — NTIA supplier element; omitted when unknown
+	DownloadLocation string         `json:"downloadLocation"`
+	Checksums        []spdxChecksum `json:"checksums,omitempty"` // integrity digests (SPDX form: lowercase hex per algorithm)
+	LicenseDeclared  string         `json:"licenseDeclared"`
+	LicenseConcluded string         `json:"licenseConcluded"`
+	ExternalRefs     []spdxExtRef   `json:"externalRefs,omitempty"`
+}
+
+// spdxChecksum is an SPDX 2.3 package integrity digest. ChecksumValue is lowercase hex (SPDX requires hex,
+// so a base64 digest such as npm's Subresource Integrity is converted on the way out).
+type spdxChecksum struct {
+	Algorithm     string `json:"algorithm"`
+	ChecksumValue string `json:"checksumValue"`
 }
 
 type spdxExtRef struct {
@@ -129,6 +139,7 @@ func buildSPDX(doc *sbom.SBOM, target string, created time.Time) spdxDoc {
 		if sup := sbom.SupplierOr(c.Supplier, c.PURL); sup != "" { // NTIA supplier element; SPDX form "Organization: <name>"
 			pkg.Supplier = "Organization: " + sup
 		}
+		pkg.Checksums = spdxChecksums(c)
 		if c.PURL != "" {
 			pkg.ExternalRefs = []spdxExtRef{{
 				ReferenceCategory: "PACKAGE-MANAGER",
@@ -144,6 +155,94 @@ func buildSPDX(doc *sbom.SBOM, target string, created time.Time) spdxDoc {
 		})
 	}
 	return out
+}
+
+// spdxChecksums renders a component's integrity digests as SPDX 2.3 checksums: the legacy SHA1 field plus any
+// Checksums entry, each normalized to lowercase hex (SPDX requires hex, so a base64 SRI digest is converted).
+// Deterministic: one entry per algorithm, sorted by algorithm.
+func spdxChecksums(c sbom.Component) []spdxChecksum {
+	seen := map[string]bool{}
+	var out []spdxChecksum
+	add := func(alg, val string) {
+		spdxAlg, hexVal, ok := spdxHexDigest(alg, val)
+		if !ok || seen[spdxAlg] { // dedup by the CANONICAL name (a SHA1 field + a "SHA-1" entry collapse to one)
+			return
+		}
+		seen[spdxAlg] = true
+		out = append(out, spdxChecksum{Algorithm: spdxAlg, ChecksumValue: hexVal})
+	}
+	if c.SHA1 != "" {
+		add("SHA1", c.SHA1)
+	}
+	for _, ck := range c.Checksums {
+		add(ck.Algorithm, ck.Value)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Algorithm < out[j].Algorithm })
+	return out
+}
+
+// spdxHashInfo maps a normalized input algorithm (uppercase, separators removed) to its canonical SPDX 2.3
+// checksum-algorithm name and hex-digest length. Only algorithms in this allowlist are exported; an
+// unrecognized token (from Syft or an untrusted imported SBOM) is DROPPED, so a non-conformant algorithm or
+// a wrong-length digest can never reach the SPDX output.
+var spdxHashInfo = map[string]struct {
+	name   string
+	hexLen int
+}{
+	"SHA1": {"SHA1", 40}, "SHA224": {"SHA224", 56}, "SHA256": {"SHA256", 64},
+	"SHA384": {"SHA384", 96}, "SHA512": {"SHA512", 128},
+	"SHA3256": {"SHA3-256", 64}, "SHA3384": {"SHA3-384", 96}, "SHA3512": {"SHA3-512", 128},
+	"BLAKE2B256": {"BLAKE2b-256", 64}, "BLAKE2B384": {"BLAKE2b-384", 96}, "BLAKE2B512": {"BLAKE2b-512", 128},
+	"MD2": {"MD2", 32}, "MD4": {"MD4", 32}, "MD5": {"MD5", 32}, "ADLER32": {"ADLER32", 8},
+}
+
+// maxDigestChars bounds the raw digest value before any decode/allocate: no known hash encodes longer, so a
+// larger value from an untrusted SBOM is dropped early rather than lower-cased/base64-decoded into memory.
+const maxDigestChars = 256
+
+// spdxHexDigest maps (algorithm, value) to a canonical SPDX algorithm name + lowercase-hex value. It accepts
+// ONLY an allowlisted algorithm whose value is a digest of exactly the right length — as hex, or as base64
+// (npm Subresource Integrity). Anything else returns ("", "", false): never a malformed, wrong-length, or
+// non-conformant checksum.
+func spdxHexDigest(alg, value string) (spdxAlg, hexVal string, ok bool) {
+	v := strings.TrimSpace(value)
+	if v == "" || len(v) > maxDigestChars {
+		return "", "", false
+	}
+	info, known := spdxHashInfo[spdxNormalizeAlg(alg)]
+	if !known {
+		return "", "", false
+	}
+	if lower := strings.ToLower(v); len(lower) == info.hexLen && isHexString(lower) {
+		return info.name, lower, true
+	}
+	if b, err := base64.StdEncoding.DecodeString(v); err == nil && len(b)*2 == info.hexLen {
+		return info.name, hex.EncodeToString(b), true
+	}
+	return "", "", false
+}
+
+// spdxNormalizeAlg uppercases an algorithm name and strips separators, so "sha-256" / "SHA256" / "SHA_256"
+// and syft's hyphen-stripped "SHA3256" all key into spdxHashInfo consistently.
+func spdxNormalizeAlg(alg string) string {
+	r := strings.ToUpper(strings.TrimSpace(alg))
+	r = strings.ReplaceAll(r, "-", "")
+	r = strings.ReplaceAll(r, "_", "")
+	return r
+}
+
+// isHexString reports whether s is non-empty, even-length lowercase hex.
+func isHexString(s string) bool {
+	if s == "" || len(s)%2 != 0 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 func spdxLicense(c sbom.Component) string {
