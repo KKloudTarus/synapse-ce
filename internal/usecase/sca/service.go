@@ -337,7 +337,11 @@ type ScanResult struct {
 	// Compliance is the owned AppSec-baseline benchmark re-projected onto this scan's findings (per-control
 	// PASS/FAIL, LLM-free); nil unless compliance is enabled. Computed over ALL findings (an accepted-risk
 	// finding still fails its control — compliance reflects what is present, not the CI-gate decision).
-	Compliance               *compliance.Report       `json:"compliance,omitempty"`
+	Compliance *compliance.Report `json:"compliance,omitempty"`
+	// NeedsVerification lists vuln findings the precise detection-priority quarantined as lower-confidence
+	// (single uncorroborated source, non-KEV): still reported + sealed, but exempt from the --fail-on gate.
+	// nil in comprehensive mode. Recall is retained; only the lower-confidence set is separated.
+	NeedsVerification        []NeedsVerifyFinding     `json:"needs_verification,omitempty"`
 	ToolVersions             map[string]string        `json:"tool_versions"`
 	VulnDBSnapshot           string                   `json:"vuln_db_snapshot"`
 	Completeness             ports.Completeness       `json:"completeness"`
@@ -362,8 +366,20 @@ const (
 	ScanModeLicenses        = "licenses"
 )
 
+const (
+	// DetectionComprehensive is the default: every detected vulnerability at/above the floor is an
+	// actionable finding (current behavior). DetectionPrecise raises the ACTIONABLE bar — a single-source,
+	// uncorroborated, non-KEV vulnerability finding is quarantined into a needs-verify queue (still reported
+	// + evidence-sealed, just exempt from the --fail-on gate) rather than dropped, so recall is retained
+	// with the lower-confidence set clearly separated. KEV + multi-source findings are never quarantined.
+	DetectionComprehensive = "comprehensive"
+	DetectionPrecise       = "precise"
+)
+
 type ScanOptions struct {
 	Mode string `json:"mode"`
+	// DetectionPriority selects comprehensive (default) or precise; see the Detection* consts.
+	DetectionPriority string `json:"detection_priority,omitempty"`
 }
 
 func normalizeScanOptions(opts ScanOptions) (ScanOptions, error) {
@@ -374,9 +390,19 @@ func normalizeScanOptions(opts ScanOptions) (ScanOptions, error) {
 	switch mode {
 	case ScanModeFull, ScanModeVulnerabilities, ScanModeLicenses:
 		opts.Mode = mode
-		return opts, nil
 	default:
 		return ScanOptions{}, fmt.Errorf("%w: unknown scan mode %q", shared.ErrValidation, opts.Mode)
+	}
+	prio := strings.ToLower(strings.TrimSpace(opts.DetectionPriority))
+	if prio == "" {
+		prio = DetectionComprehensive
+	}
+	switch prio {
+	case DetectionComprehensive, DetectionPrecise:
+		opts.DetectionPriority = prio
+		return opts, nil
+	default:
+		return ScanOptions{}, fmt.Errorf("%w: unknown detection priority %q (want comprehensive|precise)", shared.ErrValidation, opts.DetectionPriority)
 	}
 }
 
@@ -1264,8 +1290,10 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 			}
 		}
 	}
-	// Compute compliance over the FINAL findings — AFTER any partial-rescan merge restores prior security
-	// findings — so a control can never falsely PASS against a finding the merged result actually carries.
+	// Run over the FINAL findings (after any partial-rescan merge): quarantine lower-confidence vulns into
+	// the needs-verify queue (precise mode), then compute compliance — both must see the merged set so
+	// derived data can never go stale/false-clean.
+	applyDetectionPriority(result, opts.DetectionPriority)
 	s.attachCompliance(result)
 	if s.results != nil {
 		if data, mErr := json.Marshal(result); mErr == nil {
@@ -1804,8 +1832,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			}
 		}
 	}
-	// Compute compliance over the FINAL findings — AFTER any partial-rescan merge restores prior security
-	// findings — so a control can never falsely PASS against a finding the merged result actually carries.
+	// Run over the FINAL findings (after any partial-rescan merge): quarantine lower-confidence vulns into
+	// the needs-verify queue (precise mode), then compute compliance — both must see the merged set so
+	// derived data can never go stale/false-clean.
+	applyDetectionPriority(result, opts.DetectionPriority)
 	s.attachCompliance(result)
 	if s.results != nil {
 		if data, mErr := json.Marshal(result); mErr == nil {

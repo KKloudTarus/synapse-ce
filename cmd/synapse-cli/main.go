@@ -73,7 +73,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
-	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--ignore-unfixed]")
+	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  skip the live OSV.dev source; detect with Grype's offline DB only (air-gapped / fast)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories <dir>        # ingest a local OSV dump into the owned advisory store (requires SYNAPSE_DB_DSN)")
@@ -90,6 +90,7 @@ func runScan() {
 	}
 	failOn := shared.Severity("high")
 	mode := scauc.ScanModeFull
+	priority := ""
 	ignoreUnfixed := false
 	image := false
 	offline := false
@@ -100,6 +101,9 @@ func runScan() {
 			i++
 		case os.Args[i] == "--mode" && i+1 < len(os.Args):
 			mode = os.Args[i+1]
+			i++
+		case os.Args[i] == "--detection-priority" && i+1 < len(os.Args):
+			priority = os.Args[i+1]
 			i++
 		case os.Args[i] == "--ignore-unfixed":
 			ignoreUnfixed = true
@@ -118,11 +122,14 @@ func runScan() {
 		fmt.Fprintf(os.Stderr, "synapse-cli: invalid --fail-on %q (want critical|high|medium|low|info)\n", failOn)
 		os.Exit(2)
 	}
-	if _, err := scauc.NormalizeScanOptions(scauc.ScanOptions{Mode: mode}); err != nil {
-		fmt.Fprintf(os.Stderr, "synapse-cli: invalid --mode %q (want full|vulnerabilities|licenses)\n", mode)
+	if priority == "" { // resolve the configured default here so an invalid env value gets this same exit-2 message
+		priority = os.Getenv("SYNAPSE_DETECTION_PRIORITY")
+	}
+	if _, err := scauc.NormalizeScanOptions(scauc.ScanOptions{Mode: mode, DetectionPriority: priority}); err != nil {
+		fmt.Fprintf(os.Stderr, "synapse-cli: %v (mode want full|vulnerabilities|licenses; detection-priority want comprehensive|precise)\n", err)
 		os.Exit(2)
 	}
-	if err := run(os.Args[2], failOn, mode, ignoreUnfixed, image, offline); err != nil {
+	if err := run(os.Args[2], failOn, mode, priority, ignoreUnfixed, image, offline); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 		os.Exit(1)
 	}
@@ -200,7 +207,7 @@ func (stderrAudit) Record(_ context.Context, e ports.AuditEntry) error {
 
 var _ ports.AuditLogger = stderrAudit{}
 
-func run(path string, failOn shared.Severity, mode string, ignoreUnfixed, image, offline bool) error {
+func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfixed, image, offline bool) error {
 	// An image target is an OCI reference (acquired via crane → OCI layout); a local
 	// target is a filesystem path that must be absolute for the scope check.
 	target := strings.TrimSpace(path)
@@ -213,6 +220,9 @@ func run(path string, failOn shared.Severity, mode string, ignoreUnfixed, image,
 	}
 	ctx := context.Background()
 	cfg := config.Load()
+	if priority == "" { // the --detection-priority flag falls back to the configured default
+		priority = cfg.DetectionPriority
+	}
 	clock := idgen.SystemClock{}
 	ids := idgen.RandomID{}
 
@@ -340,7 +350,7 @@ func run(path string, failOn shared.Severity, mode string, ignoreUnfixed, image,
 		return fmt.Errorf("register ephemeral engagement: %w", err)
 	}
 
-	res, err := sca.ScanWithOptions(ctx, "synapse-cli", eng.ID, ports.AcquireRequest{Kind: acqKind, Value: target}, scauc.ScanOptions{Mode: mode})
+	res, err := sca.ScanWithOptions(ctx, "synapse-cli", eng.ID, ports.AcquireRequest{Kind: acqKind, Value: target}, scauc.ScanOptions{Mode: mode, DetectionPriority: priority})
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
@@ -348,10 +358,11 @@ func run(path string, failOn shared.Severity, mode string, ignoreUnfixed, image,
 	printReport(target, res)
 
 	gate := shared.SeverityRank(failOn)
-	accepted := res.SuppressedKeys() // .synapseignore accepted-risk: reported + sealed, but exempt from the gate
+	accepted := res.SuppressedKeys() // .synapseignore/VEX accepted-risk: reported + sealed, but exempt from the gate
+	verify := res.NeedsVerifyKeys()  // precise-mode needs-verify: lower-confidence, exempt from the gate too
 	over := 0
 	for _, f := range res.Findings {
-		if accepted[f.DedupKey] {
+		if accepted[f.DedupKey] || verify[f.DedupKey] {
 			continue
 		}
 		if shared.SeverityRank(f.Severity) >= gate {
@@ -442,6 +453,12 @@ func printReport(target string, res *scauc.ScanResult) {
 	}
 	for _, id := range res.MalformedSuppressions {
 		fmt.Printf("  ! .synapseignore rule %q has an UNPARSEABLE exp: date — not applied (fail-safe). Fix it to YYYY-MM-DD\n", id)
+	}
+	if n := len(res.NeedsVerification); n > 0 {
+		fmt.Printf("  needs-verify (precise): %d single-source vuln(s) quarantined — still reported + sealed, exempt from --fail-on\n", n)
+		for _, v := range res.NeedsVerification {
+			fmt.Printf("    - %s\n", v.Title)
+		}
 	}
 	for _, f := range res.Findings {
 		kev := ""

@@ -175,6 +175,10 @@ type Config struct {
 	// ComplianceEnabled attaches the owned AppSec-baseline benchmark (per-control PASS/FAIL over the scan's
 	// findings, LLM-free) to each scan result; off by default.
 	ComplianceEnabled bool
+	// DetectionPriority is the default vulnerability detection priority: "comprehensive" (default; every
+	// detected vuln is actionable) or "precise" (single-source, non-KEV vulns are quarantined into a
+	// needs-verify queue — reported + sealed, exempt from the --fail-on gate). Empty = comprehensive.
+	DetectionPriority string
 	// ScanCacheEnabled turns on the content+version-addressed generated-SBOM cache; off by default. A hit on
 	// an unchanged tree skips the cataloging step; a producer version bump invalidates the entry.
 	ScanCacheEnabled bool
@@ -329,6 +333,7 @@ func Load() Config {
 		SuppressionEnabled:     getbool("SYNAPSE_SUPPRESSION_ENABLED", false),
 		VEXEnabled:             getbool("SYNAPSE_VEX_ENABLED", false),
 		ComplianceEnabled:      getbool("SYNAPSE_COMPLIANCE_ENABLED", false),
+		DetectionPriority:      os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
 		ScanCacheEnabled:       getbool("SYNAPSE_SCAN_CACHE_ENABLED", false),
 		ScanCacheDir:           os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
 		OwnedAdvisoryEnabled:   getbool("SYNAPSE_OWNED_ADVISORY", false),
