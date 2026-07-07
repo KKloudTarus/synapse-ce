@@ -514,6 +514,7 @@ type Workspace struct {
 	// targets. Owned parsers read it for on-disk OS-package DBs + /etc/os-release. Dir stays the OCI layout
 	// (what syft scans); RootFS is the walkable tree. Both live under the same cleaned-up temp dir.
 	RootFS string
+	// (see OSPackageCataloger for how RootFS is consumed.)
 	// RootFSNote records why rootfs materialization was skipped for an image target (unsupported layer
 	// compression, a hostile layer the hardening refused, a malformed layout) when extraction was enabled but
 	// failed. Empty on success or when not enabled. Rootfs is best-effort — a failure never aborts the scan —
@@ -521,6 +522,27 @@ type Workspace struct {
 	// "not analyzed", never as "no OS packages".
 	RootFSNote string
 	Cleanup    func() error
+}
+
+// OSPackageResult is the outcome of OS-package cataloging: the components plus whether their distro release
+// resolved to an advisory-matchable ecosystem. DistroResolved is false when the OS DB was read but the release
+// could not be keyed (/etc/os-release absent, garbled, or inconsistent with the DB family) — so the pipeline
+// surfaces a completeness warning instead of the packages silently matching zero OS advisories (a falsely-clean
+// OS posture). DistroResolved is meaningful only when Components is non-empty.
+type OSPackageResult struct {
+	Components     []sbom.Component
+	DistroResolved bool
+}
+
+// OSPackageCataloger reads a materialized image root filesystem (Workspace.RootFS) and returns the installed
+// OS packages — Debian/Ubuntu dpkg (/var/lib/dpkg/status) and Alpine apk (/lib/apk/db/installed) — as SBOM
+// components, each tagged (when the release resolves) with a Syft-style distro qualifier
+// (distro=debian-12/ubuntu-22.04/alpine-3.18.12, from /etc/os-release) so the existing advisory matcher keys
+// them to the right OS ecosystem. It is the owned (detection-independent) alternative to relying on the
+// generator for OS packages. An empty result means "OS not analyzed", never "no OS packages" (a hostile image
+// can legitimately yield an empty rootfs).
+type OSPackageCataloger interface {
+	Catalog(ctx context.Context, rootfsDir string) (OSPackageResult, error)
 }
 
 // Completeness signals how trustworthy a scan's results are: whether dependency

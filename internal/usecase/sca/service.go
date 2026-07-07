@@ -63,6 +63,7 @@ type Service struct {
 	sastAnalyzer   ports.SASTAnalyzer            // optional deterministic pattern-SAST over the live workspace
 	secretScanner  ports.SecretScanner           // optional deterministic secret scan over the live workspace
 	misconfig      ports.MisconfigScanner        // optional deterministic IaC/config misconfig scan over the live workspace
+	osPkgCataloger ports.OSPackageCataloger      // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
 	suppression    ports.SuppressionLoader       // optional repo-committed .synapseignore accepted-risk policy
 	vexLoader      ports.VEXLoader               // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
 	complianceOn   bool                          // when set, attach the AppSec-baseline compliance report to a scan
@@ -124,6 +125,10 @@ func (s *Service) SetSASTAnalyzer(a ports.SASTAnalyzer) { s.sastAnalyzer = a }
 
 // SetSecretScanner configures the optional deterministic secret scanner. nil ⇒ no secret scanning.
 func (s *Service) SetSecretScanner(sc ports.SecretScanner) { s.secretScanner = sc }
+
+// SetOSPackageCataloger configures optional owned OS-package cataloging (dpkg/apk) from a materialized image
+// rootfs (Workspace.RootFS). nil ⇒ no owned OS cataloging. It only runs when a rootfs was materialized.
+func (s *Service) SetOSPackageCataloger(c ports.OSPackageCataloger) { s.osPkgCataloger = c }
 
 // SetSBOMCache configures the optional generated-SBOM cache. nil ⇒ always regenerate. Best-effort: a cache
 // miss or error never affects correctness, only whether the cataloging step is skipped.
@@ -520,6 +525,65 @@ func countComponents(doc *sbom.SBOM) int {
 		return 0
 	}
 	return len(doc.Components)
+}
+
+// mergeOSComponents adds owned OS-package components not already present, so owned cataloging fills the gap
+// under the owned producer WITHOUT duplicating OS packages the generator already cataloged from the image
+// layout. The dedup key is PURL-type + lowercased name@version + arch: including the type prevents a same
+// name@version NON-OS package (which a hostile image could plant) from masking an OS package's advisories,
+// and including the arch keeps a multiarch pair (libc6:amd64 + :i386, same version) distinct — while still
+// matching the generator's own deb/apk entry (same type+arch) so it is not double-counted. Returns the number
+// added.
+func mergeOSComponents(doc *sbom.SBOM, osComps []sbom.Component) int {
+	if doc == nil || len(osComps) == 0 {
+		return 0
+	}
+	key := func(c sbom.Component) string {
+		return purlType(c.PURL) + "|" + strings.ToLower(c.Name) + "@" + c.Version + "|" + purlArch(c.PURL)
+	}
+	have := make(map[string]bool, len(doc.Components))
+	for _, c := range doc.Components {
+		have[key(c)] = true
+	}
+	added := 0
+	for _, c := range osComps {
+		k := key(c)
+		if have[k] {
+			continue
+		}
+		have[k] = true
+		doc.Components = append(doc.Components, c)
+		added++
+	}
+	return added
+}
+
+// purlType returns a PURL's package type ("pkg:deb/..." -> "deb"), or "" if absent. A minimal read-only
+// subset for the OS-package dedup key (the full PURL parser lives in the advisory infra, which usecase cannot
+// import).
+func purlType(purl string) string {
+	s := strings.TrimPrefix(purl, "pkg:")
+	if s == purl { // no "pkg:" prefix
+		return ""
+	}
+	if i := strings.IndexByte(s, '/'); i > 0 {
+		return s[:i]
+	}
+	return ""
+}
+
+// purlArch returns a PURL's "arch" qualifier value, or "" if absent.
+func purlArch(purl string) string {
+	i := strings.IndexByte(purl, '?')
+	if i < 0 {
+		return ""
+	}
+	for _, kv := range strings.Split(purl[i+1:], "&") {
+		if v, ok := strings.CutPrefix(kv, "arch="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 func buildComponentLicenseAudit(comps []sbom.Component, findings []ports.LicenseFinding) []ComponentLicenseAudit {
@@ -1419,6 +1483,24 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		s.sbomEnricher.Enrich(ctx, ws.Dir, doc)
 		trace.succeed(step, "SBOM enrichment completed", map[string]int{"components_before": before, "components": countComponents(doc)})
 	}
+	// Owned OS-package cataloging (dpkg/apk) from a materialized image rootfs: detection-independent OS
+	// packages, added BEFORE detection so they get advisory-matched. Best-effort, and deduped by name@version
+	// so it fills the gap under the owned producer WITHOUT duplicating OS packages the generator already
+	// cataloged from the image layout. A non-image target / disabled or failed extraction leaves RootFS empty,
+	// so this is a no-op there.
+	osPkgsAdded, osDistroUnresolved := 0, false
+	if s.osPkgCataloger != nil && ws.RootFS != "" {
+		before := countComponents(doc)
+		step = trace.start(stageSBOM, "os-package-catalog", "ospkg-cataloger", "Catalog OS packages from image rootfs", map[string]int{"components": before})
+		if osRes, oerr := s.osPkgCataloger.Catalog(ctx, ws.RootFS); oerr != nil {
+			trace.fail(step, oerr) // surface (never swallow) a cancellation/error rather than reporting success
+		} else {
+			osPkgsAdded = mergeOSComponents(doc, osRes.Components)
+			// no-silent-gap: packages cataloged but the release could not be keyed to an ecosystem → warn below.
+			osDistroUnresolved = osPkgsAdded > 0 && !osRes.DistroResolved
+			trace.succeed(step, "OS-package cataloging completed", map[string]int{"os_packages_added": osPkgsAdded})
+		}
+	}
 	// Resolve the FULL Maven dependency tree via `mvn dependency:list` (best-effort + opt-in): a from-source
 	// Maven scan otherwise sees only the direct starters with UNKNOWN (parent-BOM-managed) versions and no
 	// transitive tree, so it under-reports vs a build-artifact scan. When it resolves, replace syft's
@@ -1646,6 +1728,19 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			sourceWarnings = append(sourceWarnings, fmt.Sprintf(
 				"Gradle dependency resolution failed — transitive tree NOT captured (result INCOMPLETE): %v", gradleResolveErr))
 		}
+	}
+	// An image target whose rootfs could not be assembled means OS packages were NOT owned-cataloged; surface
+	// it (never silent) so an absent OS-package set reads as "not analyzed", not "no OS packages".
+	if ws.RootFSNote != "" {
+		sourceWarnings = append(sourceWarnings, fmt.Sprintf(
+			"image rootfs NOT materialized — OS packages NOT owned-cataloged (result may under-report OS vulns): %s", ws.RootFSNote))
+	}
+	// OS packages were cataloged but their distro release could not be resolved (os-release absent/garbled, or
+	// inconsistent with the package DB), so they matched NO OS advisories — surface it so this never reads as
+	// a clean OS posture (a hostile image cannot suppress its own OS vulns by lying in /etc/os-release).
+	if osDistroUnresolved {
+		sourceWarnings = append(sourceWarnings, fmt.Sprintf(
+			"%d OS package(s) cataloged but the distro release could not be resolved (/etc/os-release absent, garbled, or inconsistent with the package database) — OS advisories were NOT matched", osPkgsAdded))
 	}
 	for _, src := range s.sources {
 		p, ok := src.(ports.SourceProvenance)
