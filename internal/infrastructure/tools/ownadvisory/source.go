@@ -188,6 +188,25 @@ func osDistroEcosystem(purl string) string {
 				return "Alpine:v" + parts[0] + "." + parts[1]
 			}
 		}
+	case "rpm":
+		// The rpm distros OSV keys by "<Name>:<major>". RHEL/CentOS/Fedora use module-qualified or uncertain
+		// keys (e.g. "Red Hat:enterprise_linux:9::baseos"), so they are intentionally NOT mapped here — the
+		// cataloger flags them DistroResolved=false so an unmatched OS-package set is surfaced, never silent.
+		major := ver
+		if i := strings.IndexByte(ver, '.'); i >= 0 {
+			major = ver[:i]
+		}
+		if major == "" {
+			return ""
+		}
+		switch id {
+		case "rocky":
+			return "Rocky Linux:" + major
+		case "almalinux", "alma":
+			return "AlmaLinux:" + major
+		case "ol", "oracle":
+			return "Oracle Linux:" + major
+		}
 	}
 	return ""
 }

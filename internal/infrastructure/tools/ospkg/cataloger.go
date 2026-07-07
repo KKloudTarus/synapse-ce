@@ -1,6 +1,6 @@
 // Package ospkg catalogs installed OS packages from a materialized image root filesystem: Debian/Ubuntu dpkg
-// (/var/lib/dpkg/status) and Alpine apk (/lib/apk/db/installed), with the distro release read from
-// /etc/os-release. It is the OWNED (detection-independent) alternative to relying on the SBOM generator for
+// (/var/lib/dpkg/status), Alpine apk (/lib/apk/db/installed), and RHEL-family rpm (/var/lib/rpm/rpmdb.sqlite),
+// with the distro release read from /etc/os-release. It is the OWNED (detection-independent) alternative to relying on the SBOM generator for
 // OS packages, and emits components tagged with a Syft-style "distro" qualifier so the existing advisory
 // matcher keys them to the right OS ecosystem. It only READS the rootfs (already assembled within the
 // workspace); the databases are UNTRUSTED, so: reads are streamed + bounded (size, line, and package caps)
@@ -88,8 +88,46 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 			res.DistroResolved = false
 		}
 	}
+
+	// rpm (RHEL/Fedora family, sqlite backend): the distro qualifier is set for any rpm-family id (inventory),
+	// but only the ids osDistroEcosystem keys (Rocky/AlmaLinux/Oracle) with a non-empty major version count as
+	// resolved — RHEL/CentOS/Fedora use module-qualified or uncertain OSV keys, so they are emitted but flagged
+	// unresolved (surfaced upstream, never a silent zero-match). Berkeley-DB/ndb backends are deferred (the
+	// generator covers them).
+	rpmNS, rpmTag := "rhel", ""
+	rpmResolved := false
+	if id != "" {
+		rpmNS = id
+		if versionID != "" {
+			rpmTag = id + "-" + versionID
+			// Mirror osDistroEcosystem, which keys on the major (VERSION_ID up to the first '.'): a clean-but-
+			// empty major (e.g. VERSION_ID=".3", which isCleanToken admits) maps to nothing. Require a non-empty
+			// major here too, so this resolved flag can never disagree with the mapping — a disagreement would be
+			// exactly the silent zero-match (resolved=true yet ecosystem="") this flag exists to prevent.
+			major := versionID
+			if i := strings.IndexByte(versionID, '.'); i >= 0 {
+				major = versionID[:i]
+			}
+			rpmResolved = rpmMatchableIDs[id] && major != ""
+		}
+	}
+	rpmComps, err := rpmComponents(ctx, rootfsDir, rpmNS, rpmTag)
+	if err != nil { // only a context cancellation; a hostile/malformed DB degrades to no components
+		return ports.OSPackageResult{}, err
+	}
+	if len(rpmComps) > 0 {
+		res.Components = append(res.Components, rpmComps...)
+		if !rpmResolved {
+			res.DistroResolved = false
+		}
+	}
 	return res, nil
 }
+
+// rpmMatchableIDs are the rpm-family os-release IDs osDistroEcosystem can key to an advisory ecosystem
+// (Rocky/AlmaLinux/Oracle Linux, which OSV keys by "<Name>:<major>"). Others (rhel/centos/fedora/amzn/suse)
+// are cataloged for inventory but flagged unresolved until their ecosystem mapping + advisory feed land.
+var rpmMatchableIDs = map[string]bool{"rocky": true, "almalinux": true, "alma": true, "ol": true, "oracle": true}
 
 // dpkgFieldKeys / apkFieldKeys are the ONLY stanza keys each parser reads. parseOSDB stores only these, so a
 // stanza with millions of distinct junk keys cannot grow the per-stanza map (keeps memory O(1) per stanza).
