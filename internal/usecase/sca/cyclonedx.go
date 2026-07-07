@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
@@ -36,18 +37,48 @@ type cdxOutTools struct {
 }
 
 type cdxOutComponent struct {
-	Type     string          `json:"type"`
-	BOMRef   string          `json:"bom-ref,omitempty"`
-	Name     string          `json:"name"`
-	Version  string          `json:"version,omitempty"`
-	PURL     string          `json:"purl,omitempty"`
-	Supplier *cdxOutOrg      `json:"supplier,omitempty"`
-	Licenses []cdxOutLicense `json:"licenses,omitempty"`
-	Hashes   []cdxOutHash    `json:"hashes,omitempty"`
+	Type       string           `json:"type"`
+	BOMRef     string           `json:"bom-ref,omitempty"`
+	Name       string           `json:"name"`
+	Version    string           `json:"version,omitempty"`
+	PURL       string           `json:"purl,omitempty"`
+	Scope      string           `json:"scope,omitempty"` // required|excluded|"" (never optional) — see cdxScope
+	Supplier   *cdxOutOrg       `json:"supplier,omitempty"`
+	Licenses   []cdxOutLicense  `json:"licenses,omitempty"`
+	Hashes     []cdxOutHash     `json:"hashes,omitempty"`
+	Evidence   *cdxOutEvidence  `json:"evidence,omitempty"`
+	Properties []cdxOutProperty `json:"properties,omitempty"`
 }
 
 type cdxOutOrg struct {
 	Name string `json:"name"`
+}
+
+// cdxOutEvidence carries how Synapse identified a component: identity (the coordinate + technique) and
+// occurrences (where it was found). It projects stored facts only — no fabricated signals.
+type cdxOutEvidence struct {
+	Identity    []cdxOutIdentity   `json:"identity,omitempty"`
+	Occurrences []cdxOutOccurrence `json:"occurrences,omitempty"`
+}
+
+type cdxOutIdentity struct {
+	Field   string                 `json:"field"` // e.g. "purl"
+	Methods []cdxOutIdentityMethod `json:"methods,omitempty"`
+}
+
+type cdxOutIdentityMethod struct {
+	Technique  string  `json:"technique"`
+	Confidence float64 `json:"confidence"` // 0..1
+	Value      string  `json:"value,omitempty"`
+}
+
+type cdxOutOccurrence struct {
+	Location string `json:"location"`
+}
+
+type cdxOutProperty struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // cdxOutLicense is a CycloneDX license choice: an SPDX id when known, else a free-text name (mutually exclusive).
@@ -118,13 +149,16 @@ func buildCycloneDX(doc *sbom.SBOM, target string, created time.Time) cdxOutDoc 
 	for i, c := range comps {
 		ref := cdxBOMRef(c, i)
 		cc := cdxOutComponent{
-			Type:     "library",
-			BOMRef:   ref,
-			Name:     c.Name,
-			Version:  c.Version,
-			PURL:     c.PURL,
-			Licenses: cdxLicenses(c),
-			Hashes:   cdxHashes(c),
+			Type:       "library",
+			BOMRef:     ref,
+			Name:       c.Name,
+			Version:    c.Version,
+			PURL:       c.PURL,
+			Scope:      cdxScope(c.Scope),
+			Licenses:   cdxLicenses(c),
+			Hashes:     cdxHashes(c),
+			Evidence:   cdxEvidence(c),
+			Properties: cdxProperties(c),
 		}
 		// Resolve via SupplierOr (not the raw field) so the export derives the supplier from the PURL namespace
 		// for producers/merge paths that leave Supplier empty, matching the SPDX exporters and the scorer.
@@ -166,6 +200,55 @@ func cdxDependencies(deps []sbom.Dependency, valid map[string]bool) []cdxOutDepe
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Ref < out[j].Ref })
 	return out
+}
+
+// cdxScope maps a domain component scope to the CycloneDX component.scope enum. Production code is required
+// (runtime); development and the non-shipping background scopes (test/example/fixture/benchmark/docs) are
+// excluded from the deployed artifact — this lets a consumer deprioritize dev-only vulnerabilities. It is the
+// inverse of the import mapping in sbom.ClassifyScope ("required"->production, "excluded"->development).
+// Unknown/unset yields "" so no scope is asserted.
+func cdxScope(scope string) string {
+	switch {
+	case scope == sbom.ScopeProduction:
+		return "required"
+	case scope == sbom.ScopeDevelopment || sbom.IsBackgroundScope(scope):
+		return "excluded"
+	default:
+		return ""
+	}
+}
+
+// cdxEvidence projects how Synapse identified a component: an occurrence at its Location, and — only for a
+// source-tree component (no container LayerID) with a PURL — a purl identity via the manifest-analysis
+// technique at full confidence. Every producer sets a source component's Location to the manifest/lockfile it
+// was read from, so the coordinate is a deterministic manifest read (not a guess), which is why confidence is
+// 1. An image-layer component (LayerID set) was cataloged from a layer by other means, so it gets the
+// occurrence fact WITHOUT an unfounded manifest-analysis claim. A component with no Location gets no evidence.
+// Returns nil when there is nothing to assert. (When per-technique image cataloging lands, derive the
+// technique for LayerID-bearing components rather than omitting identity.)
+func cdxEvidence(c sbom.Component) *cdxOutEvidence {
+	loc := strings.TrimSpace(c.Location)
+	if loc == "" {
+		return nil
+	}
+	ev := &cdxOutEvidence{Occurrences: []cdxOutOccurrence{{Location: loc}}}
+	if c.PURL != "" && c.LayerID == "" {
+		ev.Identity = []cdxOutIdentity{{
+			Field:   "purl",
+			Methods: []cdxOutIdentityMethod{{Technique: "manifest-analysis", Confidence: 1, Value: c.PURL}},
+		}}
+	}
+	return ev
+}
+
+// cdxProperties surfaces Synapse-specific analysis as CycloneDX namespaced properties: the coarse JVM
+// reachability verdict when one was computed. Deterministic, stored-fact only.
+func cdxProperties(c sbom.Component) []cdxOutProperty {
+	var props []cdxOutProperty
+	if r := strings.TrimSpace(c.Reachability); r != "" {
+		props = append(props, cdxOutProperty{Name: "synapse:reachability", Value: r})
+	}
+	return props
 }
 
 // cdxLicenses renders a component's licenses as CycloneDX license choices: an SPDX id when known, else a

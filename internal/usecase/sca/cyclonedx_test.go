@@ -95,6 +95,58 @@ func TestCDXDanglingDependencyEdgeDropped(t *testing.T) {
 	}
 }
 
+func TestCDXEvidenceScopeAndProperties(t *testing.T) {
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		{Name: "prod", Version: "1", PURL: "pkg:npm/prod@1", Scope: sbom.ScopeProduction, Location: "package.json", Reachability: sbom.ReachabilityReachable},
+		{Name: "dev", Version: "1", PURL: "pkg:npm/dev@1", Scope: sbom.ScopeDevelopment, Location: "package.json"},
+		{Name: "testdep", Version: "1", PURL: "pkg:npm/testdep@1", Scope: sbom.ScopeTest},
+		{Name: "bare", Version: "1", PURL: "pkg:npm/bare@1"},                                                                   // no scope / no location
+		{Name: "imglib", Version: "1", PURL: "pkg:deb/debian/imglib@1", Location: "/usr/lib/imglib.so", LayerID: "sha256:abc"}, // image-layer component
+	}}
+	d := buildCycloneDX(doc, "t", time.Unix(0, 0).UTC())
+	by := map[string]cdxOutComponent{}
+	for _, c := range d.Components {
+		by[c.Name] = c
+	}
+	// production -> required, with an occurrence + purl identity (manifest-analysis) and a reachability property.
+	prod := by["prod"]
+	if prod.Scope != "required" {
+		t.Errorf("prod scope = %q, want required", prod.Scope)
+	}
+	if prod.Evidence == nil || len(prod.Evidence.Occurrences) != 1 || prod.Evidence.Occurrences[0].Location != "package.json" {
+		t.Fatalf("prod occurrences = %+v", prod.Evidence)
+	}
+	if len(prod.Evidence.Identity) != 1 || prod.Evidence.Identity[0].Field != "purl" || len(prod.Evidence.Identity[0].Methods) != 1 ||
+		prod.Evidence.Identity[0].Methods[0].Technique != "manifest-analysis" || prod.Evidence.Identity[0].Methods[0].Confidence != 1 {
+		t.Errorf("prod identity = %+v", prod.Evidence.Identity)
+	}
+	if len(prod.Properties) != 1 || prod.Properties[0].Name != "synapse:reachability" || prod.Properties[0].Value != "reachable" {
+		t.Errorf("prod properties = %+v", prod.Properties)
+	}
+	// development and background(test) both -> excluded (non-shipping).
+	if by["dev"].Scope != "excluded" {
+		t.Errorf("dev scope = %q, want excluded", by["dev"].Scope)
+	}
+	if by["testdep"].Scope != "excluded" {
+		t.Errorf("test scope = %q, want excluded", by["testdep"].Scope)
+	}
+	// bare: unknown scope is not asserted, and no Location -> no evidence.
+	if by["bare"].Scope != "" {
+		t.Errorf("bare scope should be omitted, got %q", by["bare"].Scope)
+	}
+	if by["bare"].Evidence != nil || len(by["bare"].Properties) != 0 {
+		t.Errorf("bare (no location, no reachability) should have no evidence/properties, got %+v / %+v", by["bare"].Evidence, by["bare"].Properties)
+	}
+	// image-layer component: keeps the occurrence fact but makes NO manifest-analysis identity claim.
+	img := by["imglib"]
+	if img.Evidence == nil || len(img.Evidence.Occurrences) != 1 || img.Evidence.Occurrences[0].Location != "/usr/lib/imglib.so" {
+		t.Fatalf("imglib should keep its occurrence, got %+v", img.Evidence)
+	}
+	if len(img.Evidence.Identity) != 0 {
+		t.Errorf("an image-layer component (LayerID set) must not claim manifest-analysis identity, got %+v", img.Evidence.Identity)
+	}
+}
+
 func TestCDXHashesAlgorithmMapping(t *testing.T) {
 	c := sbom.Component{Checksums: []sbom.Checksum{
 		{Algorithm: "sha-256", Value: strings.Repeat("a", 64)},       // -> SHA-256 (hyphenated, normalized input)
