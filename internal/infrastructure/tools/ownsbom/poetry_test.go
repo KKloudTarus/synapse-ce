@@ -15,6 +15,10 @@ version = "2.31.0"
 description = "Python HTTP for Humans."
 category = "main"
 optional = false
+files = [
+    {file = "requests-2.31.0-py3-none-any.whl", hash = "sha256:reqwhlhash"},
+    {file = "requests-2.31.0.tar.gz", hash = "sha256:reqtarhash"},
+]
 
 [package.dependencies]
 charset-normalizer = ">=2,<4"
@@ -60,6 +64,14 @@ func TestPoetryParse(t *testing.T) {
 	if c := byName["requests"]; c.Version != "2.31.0" || c.PURL != "pkg:pypi/requests@2.31.0" || c.Scope != sbom.ScopeProduction {
 		t.Errorf("requests = %+v, want 2.31.0 / pkg:pypi/requests@2.31.0 / production", c)
 	}
+	// lock v2.0 per-package `files = [...]`: the FIRST artifact hash is captured as a SHA256 Checksum, and the
+	// `[package.dependencies]` block that follows the files array still parses (charset-normalizer edge above).
+	if ck := byName["requests"].Checksums; len(ck) != 1 || ck[0].Algorithm != "SHA256" || ck[0].Value != "reqwhlhash" {
+		t.Errorf("requests checksum = %+v, want [{SHA256 reqwhlhash}]", ck)
+	}
+	if len(byName["pytest"].Checksums) != 0 {
+		t.Errorf("pytest has no files block, want no checksum, got %+v", byName["pytest"].Checksums)
+	}
 	// category "dev" -> development scope; name PEP 503-normalized (Pytest -> pytest)
 	if c := byName["pytest"]; c.Version != "8.0.0" || c.Scope != sbom.ScopeDevelopment {
 		t.Errorf("pytest = %+v, want 8.0.0 / dev / normalized name", c)
@@ -71,6 +83,66 @@ func TestPoetryParse(t *testing.T) {
 	// idna appears only as a sub-table dependency range (no [[package]]) -> not a component
 	if _, ok := byName["idna"]; ok {
 		t.Error("a [package.dependencies] range key (idna) must not be emitted as a component")
+	}
+}
+
+// An unterminated v2 files array (missing `]`) must not swallow the packages that follow it — the next
+// [[package]] boundary ends the array, so no component is silently dropped.
+func TestPoetryParseUnterminatedFilesArray(t *testing.T) {
+	lock := `[[package]]
+name = "first"
+version = "1.0.0"
+files = [
+    {file = "first-1.0.0.tar.gz", hash = "sha256:firsthash"},
+
+[[package]]
+name = "second"
+version = "2.0.0"
+`
+	comps, _, err := Poetry{}.Parse(context.Background(), ParseInput{Path: "poetry.lock", Content: []byte(lock)})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	byName := map[string]sbom.Component{}
+	for _, c := range comps {
+		byName[c.Name] = c
+	}
+	if _, ok := byName["second"]; !ok {
+		t.Fatalf("the package after an unterminated files array must still be emitted, got %+v", comps)
+	}
+	if ck := byName["first"].Checksums; len(ck) != 1 || ck[0].Value != "firsthash" {
+		t.Errorf("first should still get its captured hash, got %+v", ck)
+	}
+}
+
+// Lock v1 (< 2.0) stores artifact hashes in a trailing [metadata.files] table keyed by package name, not in
+// each package's own files array. The hash must still be attached to the matching component.
+func TestPoetryParseV1MetadataFiles(t *testing.T) {
+	lock := `[[package]]
+name = "Requests"
+version = "2.31.0"
+category = "main"
+
+[metadata]
+lock-version = "1.1"
+content-hash = "abc"
+
+[metadata.files]
+requests = [
+    {file = "requests-2.31.0-py3-none-any.whl", hash = "sha256:v1whlhash"},
+    {file = "requests-2.31.0.tar.gz", hash = "sha256:v1tarhash"},
+]
+`
+	comps, _, err := Poetry{}.Parse(context.Background(), ParseInput{Path: "poetry.lock", Content: []byte(lock)})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(comps) != 1 {
+		t.Fatalf("want 1 component, got %d", len(comps))
+	}
+	// The [metadata.files] key "requests" (PEP 503-normalized) matches the "Requests" package; first hash wins.
+	if ck := comps[0].Checksums; len(ck) != 1 || ck[0].Algorithm != "SHA256" || ck[0].Value != "v1whlhash" {
+		t.Errorf("v1 [metadata.files] hash must attach to the component, got %+v", ck)
 	}
 }
 

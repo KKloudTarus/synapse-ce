@@ -31,37 +31,86 @@ func (Poetry) Markers() []string { return []string{"poetry.lock"} }
 // [package.dependencies] sub-table (resolved to edges in pass 2).
 type poetryPkg struct {
 	name, version, category string
+	hash                    string   // first artifact hash ("sha256:<hex>") from the package's own `files = [...]` (lock v2.0)
 	deps                    []string // raw direct-dependency names from [package.dependencies]
 }
 
-// Parse extracts the resolved packages + their dependency edges from a poetry.lock.
-func (Poetry) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
+// Parse extracts the resolved packages + their dependency edges from a poetry.lock. The artifact-hash
+// capture assumes the canonical poetry/tomlkit layout where a files/`[metadata.files]` array's closing `]`
+// is on its own line (it always is); a compact closer just means the hash is not captured, never a mis-attribution.
+func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
+	if err := ctx.Err(); err != nil { // honor cancellation before parsing (parity with the sibling parsers)
+		return nil, nil, err
+	}
 	baseScope := sbom.ClassifyScope(in.Path, "")
 
 	// Pass 1: collect the [[package]] blocks (identity + the direct dep names from [package.dependencies];
 	// a dep can reference a package defined later in the file, so edges are resolved in pass 2).
 	var pkgs []poetryPkg
 	var cur poetryPkg
-	inPkg, inDeps := false, false
+	inPkg, inDeps, inFiles := false, false, false
+	// Lock v1 (< 2.0) stores hashes in a trailing [metadata.files] table keyed by package name, not per
+	// package; collect them here and attach in pass 2 to whichever layout the lock used.
+	inMeta := false
+	metaName := ""
+	metaHashes := map[string]string{}
 	flush := func() {
 		if cur.name != "" && cur.version != "" {
 			pkgs = append(pkgs, cur)
 		}
-		cur, inDeps = poetryPkg{}, false
+		cur, inDeps, inFiles = poetryPkg{}, false, false
 	}
 	sc := bufio.NewScanner(bytes.NewReader(in.Content))
 	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
+		// Lock v2.0: the current package's own `files = [ {file=…, hash="sha256:…"} ]` array.
+		if inFiles {
+			if strings.HasPrefix(line, "[") {
+				// An unterminated files array (missing `]`): a new table/[[package]] ends it. Exit and fall
+				// through so the boundary line is handled below — never swallow later packages (no silent gap).
+				inFiles = false
+			} else {
+				if line == "]" {
+					inFiles = false
+				} else if cur.hash == "" {
+					cur.hash = poetryFileHash(line) // keep the first artifact hash; "" if the line has none
+				}
+				continue
+			}
+		}
+		// Lock v1: the trailing [metadata.files] table — `name = [ {file=…, hash="sha256:…"} ]`.
+		if inMeta && !strings.HasPrefix(line, "[") {
+			switch {
+			case metaName == "":
+				if i := strings.IndexByte(line, '='); i > 0 && strings.Contains(line[i:], "[") {
+					metaName = normalizePyPI(strings.Trim(strings.TrimSpace(line[:i]), `"`))
+				}
+			case line == "]":
+				metaName = ""
+			default:
+				if h := poetryFileHash(line); h != "" {
+					if _, ok := metaHashes[metaName]; !ok {
+						metaHashes[metaName] = h
+					}
+				}
+			}
+			continue
+		}
 		switch {
 		case line == "[[package]]":
 			flush() // close the previous package block
-			inPkg = true
+			inPkg, inMeta = true, false
+		case line == "[metadata.files]":
+			flush()
+			inPkg, inMeta, metaName = false, true, ""
 		case line == "[package.dependencies]":
 			inDeps = true // the current package's direct deps follow — stay associated with cur (do NOT flush)
 		case strings.HasPrefix(line, "["): // any other table ([package.extras]/[package.source]/[metadata]/…) ends the block
 			flush()
-			inPkg = false
+			inPkg, inMeta = false, false
+		case inPkg && line == "files = [": // lock v2.0 per-package artifact hashes
+			inFiles = true
 		case inDeps && strings.ContainsRune(line, '='):
 			// a dep entry `name = "constraint"` or `name = {version=…}`: the KEY (before the first =) is the
 			// dep name. A non-package-name key (e.g. a "{" array element) is filtered; an unresolvable name
@@ -102,7 +151,11 @@ func (Poetry) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.
 			scope = sbom.ScopeDevelopment
 		}
 		ref := purlOf(n, p.version)
-		set.add(sbom.Component{Name: n, Version: p.version, PURL: ref, Location: in.Path, Scope: scope})
+		hash := p.hash // lock v2.0 per-package files; fall back to the v1 [metadata.files] table
+		if hash == "" {
+			hash = metaHashes[n]
+		}
+		set.add(sbom.Component{Name: n, Version: p.version, PURL: ref, Location: in.Path, Scope: scope, Checksums: pyHashChecksums([]string{hash})})
 		seen := map[string]bool{ref: true} // drop self-edges + duplicate targets
 		var on []string
 		for _, d := range p.deps {
@@ -121,6 +174,16 @@ func (Poetry) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.
 		}
 	}
 	return set.components(), deps, nil
+}
+
+// poetryFileHash extracts the `hash = "sha256:<hex>"` value from a poetry.lock files-array entry line
+// (`{file = "…", hash = "sha256:…"}`), returning the full "alg:hex" token or "" when the line carries none.
+func poetryFileHash(line string) string {
+	i := strings.Index(line, "hash = ")
+	if i < 0 {
+		return ""
+	}
+	return tomlString(line[i+len("hash = "):])
 }
 
 // isPoetryDepKey reports whether a [package.dependencies] line's key is a package-name token (starts

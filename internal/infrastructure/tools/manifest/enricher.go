@@ -122,6 +122,7 @@ var checksumLockParsers = map[string]lockChecksumParser{
 	"yarn.lock":         ownsbom.Yarn{},
 	"cargo.lock":        ownsbom.Cargo{},
 	"pipfile.lock":      ownsbom.Pipfile{},
+	"poetry.lock":       ownsbom.Poetry{},
 	"composer.lock":     ownsbom.Composer{},
 }
 
