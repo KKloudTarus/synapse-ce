@@ -2,7 +2,9 @@ package sca
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,6 +79,55 @@ func TestParseCycloneDXIncludesMetadataComponentAndLicenseURL(t *testing.T) {
 	}
 }
 
+func TestParseCycloneDXAcceptsModernSpecVersions(t *testing.T) {
+	// CycloneDX 1.5 and 1.6 are what current Syft/Trivy/cdxgen emit by default; the fields Synapse reads are
+	// stable across the 1.x line, so they must parse the same as 1.4 (not be rejected).
+	for _, v := range []string{"1.4", "1.5", "1.6"} {
+		doc := []byte(`{"bomFormat":"CycloneDX","specVersion":"` + v + `","metadata":{"component":{"name":"app"}},"components":[{"type":"library","name":"express","version":"4.18.2","purl":"pkg:npm/express@4.18.2"}]}`)
+		parsed, err := parseCycloneDX(doc)
+		if err != nil {
+			t.Errorf("specVersion %s must parse, got %v", v, err)
+			continue
+		}
+		if len(parsed.Components) != 1 || parsed.Components[0].PURL != "pkg:npm/express@4.18.2" {
+			t.Errorf("specVersion %s: components = %+v", v, parsed.Components)
+		}
+	}
+}
+
+func TestCDXGeneratorVersionCappedAndBounded(t *testing.T) {
+	// An untrusted, over-long tool name is capped (it flows to the stored + sealed manifest).
+	raw := json.RawMessage(`[{"name":"` + strings.Repeat("x", 1000) + `","version":"1.0"}]`)
+	if got := cdxGeneratorVersion(raw); len([]rune(got)) > 256 {
+		t.Errorf("generator version must be capped to 256 runes, got %d", len([]rune(got)))
+	}
+	// An implausibly large tools blob yields no generator string (bounded), never a panic.
+	huge := json.RawMessage(`[` + strings.Repeat(`{"name":"a"},`, 10000) + `{"name":"b"}]`)
+	if got := cdxGeneratorVersion(huge); got != "" {
+		t.Errorf("an oversized tools blob should yield an empty generator version, got %q", got)
+	}
+}
+
+// TestCycloneDXSelfRoundTrip proves the CycloneDX exporter and importer agree: a document Synapse EMITS can
+// be re-INGESTED. It caught the export(1.6)/import(1.4-only) asymmetry this change fixes.
+func TestCycloneDXSelfRoundTrip(t *testing.T) {
+	out, err := json.Marshal(buildCycloneDX(cdxFixtureSBOM(), "github.com/org/repo", time.Unix(0, 0).UTC()))
+	if err != nil {
+		t.Fatalf("marshal export: %v", err)
+	}
+	parsed, err := parseCycloneDX(out)
+	if err != nil {
+		t.Fatalf("re-import of own export failed: %v", err)
+	}
+	byPURL := map[string]bool{}
+	for _, c := range parsed.Components {
+		byPURL[c.PURL] = true
+	}
+	if !byPURL["pkg:golang/github.com/gin-gonic/gin@v1.9.1"] || !byPURL["pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"] {
+		t.Errorf("round-trip lost components: %+v", parsed.Components)
+	}
+}
+
 func TestParseCycloneDXRejectsNonCycloneDX(t *testing.T) {
 	if _, err := parseCycloneDX([]byte(`{"bomFormat":"SPDX","components":[]}`)); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("non-CycloneDX: want ErrValidation, got %v", err)
@@ -84,8 +135,8 @@ func TestParseCycloneDXRejectsNonCycloneDX(t *testing.T) {
 	if _, err := parseCycloneDX([]byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","components":[]}`)); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("empty components: want ErrValidation, got %v", err)
 	}
-	if _, err := parseCycloneDX([]byte(`{"bomFormat":"CycloneDX","specVersion":"1.5","components":[{"name":"x"}]}`)); !errors.Is(err, shared.ErrValidation) {
-		t.Errorf("unsupported spec: want ErrValidation, got %v", err)
+	if _, err := parseCycloneDX([]byte(`{"bomFormat":"CycloneDX","specVersion":"1.3","components":[{"name":"x"}]}`)); !errors.Is(err, shared.ErrValidation) {
+		t.Errorf("unsupported spec (below the 1.4 floor): want ErrValidation, got %v", err)
 	}
 	if _, err := parseCycloneDX([]byte(`not json`)); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("bad json: want ErrValidation, got %v", err)
