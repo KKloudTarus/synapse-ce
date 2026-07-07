@@ -8,7 +8,9 @@ import (
 )
 
 // rule is one deterministic pattern check: a regex over a source line plus the finding metadata it
-// yields. skipFn is an optional false-positive filter (e.g. drop env-ref "secrets").
+// yields. skipFn is an optional false-positive filter (e.g. drop env-ref "secrets"). exts, when non-nil,
+// restricts the rule to those file extensions (lower-case, dot-prefixed) so a language-specific idiom
+// (e.g. a C string function) can't false-positive on a same-named safe function in another language.
 type rule struct {
 	id       string
 	cwe      string
@@ -17,9 +19,20 @@ type rule struct {
 	desc     string
 	re       *regexp.Regexp
 	skipFn   func(line string) bool
+	exts     map[string]bool
 }
 
 func (r *rule) skip(line string) bool { return r.skipFn != nil && r.skipFn(line) }
+
+// appliesTo reports whether the rule runs on a file with the given (lower-case) extension. A nil exts
+// means language-agnostic (every file).
+func (r *rule) appliesTo(ext string) bool { return r.exts == nil || r.exts[ext] }
+
+// cSourceExts are the C/C++/Objective-C source and header extensions that the C-specific rules gate on.
+var cSourceExts = map[string]bool{
+	".c": true, ".h": true, ".cc": true, ".cpp": true, ".cxx": true, ".hpp": true, ".hh": true,
+	".hxx": true, ".m": true, ".mm": true,
+}
 
 // placeholderSecret drops obvious non-secrets (env refs, templating, placeholders) so the
 // hardcoded-credential rule stays high-signal — deterministic findings are publishable directly
@@ -261,6 +274,71 @@ func builtinRules() []rule {
 			desc:   "Passing an entire request body into create/update/model constructors can allow privilege or ownership field overwrite. Whitelist assignable fields explicitly.",
 			re:     regexp.MustCompile(`(?i)(\.(create|update)\s*\([^;\n]*(data\s*:\s*req\.body|req\.body)|new\s+\w+\s*\(\s*req\.body|\b[A-Z]\w*\.create\s*\(\s*params|update_attributes\s*\(\s*params)`),
 			skipFn: commentOnlyLine,
+		},
+		{
+			id: "xxe-insecure-xml-parsing", cwe: "CWE-611", severity: shared.SeverityHigh, title: "XML parser resolves external entities (XXE)",
+			desc:   "An XML parser is explicitly configured to resolve external entities or expand DTDs, enabling XXE (file read, SSRF, DoS). Disable DOCTYPE/external-entity processing on the parser.",
+			re:     regexp.MustCompile(`(?i)(resolve_entities\s*=\s*True|libxml_disable_entity_loader\s*\(\s*false|setExpandEntityReferences\s*\(\s*true|\bLIBXML_NOENT\b|setFeature\s*\(\s*["'][^"']*(external-general-entities|load-external-dtd)["']\s*,\s*true)`),
+			skipFn: commentOnlyLine,
+		},
+		{
+			id: "dynamic-code-eval", cwe: "CWE-95", severity: shared.SeverityCritical, title: "Dynamic code evaluation of untrusted input",
+			desc:   "eval() runs its argument as code. When request-controlled or externally-read data reaches it this is remote code execution; parse the value explicitly instead of evaluating it.",
+			re:     regexp.MustCompile(`(?i)\beval\s*\(\s*[^)\n]*(req\.|request\.|params\[|\$_(GET|POST|REQUEST)|\binput\s*\()`),
+			skipFn: commentOnlyLine,
+		},
+		{
+			id: "dom-xss-inner-html", cwe: "CWE-79", severity: shared.SeverityHigh, title: "DOM sink assigns untrusted data to innerHTML",
+			desc: "Assigning request-, location-, or template-derived data to innerHTML/outerHTML (or document.write) executes markup in the page (DOM XSS). Use textContent or sanitize before insertion.",
+			// A bare ${...} is NOT a marker (benign ${count} is not XSS); a template interpolation only counts
+			// when it carries a taint source. \+?= also catches the innerHTML += append form.
+			re:     regexp.MustCompile(`(?i)(\.(inner|outer)HTML\s*\+?=\s*[^;\n]*(req\.|request\.|params\[|location\.(hash|search|href|pathname)|document\.(URL|referrer|cookie)|window\.name|\$\{[^}]*(req\.|location\.|document\.|params\[))|document\.write\s*\(\s*[^)\n]*(location\.|document\.(URL|referrer)|req\.|params\[|\$\{[^}]*(req\.|location\.|document\.)))`),
+			skipFn: commentOnlyLine,
+		},
+		{
+			id: "nosql-injection-request", cwe: "CWE-943", severity: shared.SeverityHigh, title: "NoSQL query built from request data",
+			desc:   "A MongoDB query passes request data (or a $where JavaScript predicate) straight into the filter, allowing NoSQL operator injection. Cast/validate fields and never pass req.body as a filter.",
+			re:     regexp.MustCompile(`(?i)(\.(find|findOne|findOneAndUpdate|updateOne|updateMany|deleteOne|deleteMany|count|aggregate)\s*\(\s*(req\.(body|query|params)|\{[^}\n]*(\$where|req\.(body|query|params)))|\$where\s*:\s*["'` + "`" + `])`),
+			skipFn: commentOnlyLine,
+		},
+		{
+			id: "open-redirect-user-url", cwe: "CWE-601", severity: shared.SeverityMedium, title: "Redirect target is request-controlled",
+			desc: "A redirect appears to use a request-controlled destination, enabling open redirect (phishing, token leakage). Redirect to a fixed allowlist or validate against a same-origin allowlist.",
+			// The request markers are the USER-controlled subset only (query/params/body/url/headers/cookies),
+			// so a canonical-host redirect built from server-derived req.protocol/req.hostname is not flagged.
+			re:     regexp.MustCompile(`(?i)(res\.redirect|response\.redirect|sendRedirect|http\.Redirect|c\.Redirect)\s*\(\s*[^;\n]*(req\.(query|params|body|originalUrl|url|headers|cookies)|params\[|r\.URL|\$_(GET|POST|REQUEST)|c\.Query|getParameter)`),
+			skipFn: commentOnlyLine,
+		},
+		{
+			id: "insecure-randomness-security-context", cwe: "CWE-338", severity: shared.SeverityMedium, title: "Weak PRNG used in a security context",
+			desc:   "A non-cryptographic PRNG (Math.random, random.*, mt_rand, math/rand) appears to generate a token, OTP, salt, or session value. Use a CSPRNG (crypto.randomBytes, secrets, crypto/rand).",
+			re:     regexp.MustCompile(`(?i)((token|otp|nonce|salt|secret|session|csrf|password|passwd|apikey|api_key|verification|reset)\b[^\n]{0,50}(Math\.random\s*\(|random\.(random|randint|choice|getrandbits)\s*\(|mt_rand\s*\(|\bmath/rand\b)|(Math\.random\s*\(|random\.(random|randint|choice|getrandbits)\s*\(|mt_rand\s*\(|\bmath/rand\b)[^\n]{0,50}(token|otp|nonce|salt|secret|session|csrf|password|passwd|apikey|api_key|verification|reset)\b)`),
+			skipFn: commentOnlyLine,
+		},
+		{
+			id: "weak-rsa-key-size", cwe: "CWE-326", severity: shared.SeverityMedium, title: "RSA key size below 2048 bits",
+			desc: "An RSA key is generated with 512 or 1024 bits, which is factorable. Generate at least 2048-bit RSA (3072+ preferred) or use an elliptic-curve key.",
+			// RSA-specific constructors only (Go rsa.GenerateKey, Java RSAKeyGenParameterSpec, Python/Ruby
+			// RSA.generate, openssl genrsa). A bare `.initialize(1024)` is deliberately excluded — it false-
+			// positives on buffer/pool sizing.
+			re:     regexp.MustCompile(`(?i)(rsa\.GenerateKey\s*\([^,\n]+,\s*(512|1024)\b|RSAKeyGenParameterSpec\s*\(\s*(512|1024)\b|RSA\.generate\s*\(\s*(512|1024)\b|genrsa\b[^\n]*\b(512|1024)\b)`),
+			skipFn: commentOnlyLine,
+		},
+		{
+			id: "world-writable-permissions", cwe: "CWE-732", severity: shared.SeverityMedium, title: "World-writable file or directory permissions",
+			desc: "A file or directory is created world-writable (0777), letting any local user tamper with it. Use least-privilege modes (0600/0640 for files, 0700/0750 for directories).",
+			// The gap is bounded and stops at ')' so it can't reach a 0777 mentioned in a trailing comment.
+			re:     regexp.MustCompile(`(?i)((os\.(Chmod|Mkdir|MkdirAll)|os\.WriteFile|ioutil\.WriteFile|os\.chmod)\s*\([^;)\n]{0,40}0o?777\b|\bchmod\s*\(\s*["']?0?777|\bchmod\s+(-R\s+)?0?777\b)`),
+			skipFn: commentOnlyLine,
+		},
+		{
+			id: "unsafe-c-string-function", cwe: "CWE-676", severity: shared.SeverityMedium, title: "Unsafe C string function (buffer overflow risk)",
+			desc: "gets/strcpy/strcat/vsprintf write without a bound and are classic buffer-overflow sources. Use the size-bounded variants (fgets, strncpy/strlcpy, strncat/strlcat, vsnprintf).",
+			// Gated to C/C++/ObjC files (exts) AND anchored with (^|[^.\w]) so the same names as safe functions
+			// in other languages (Ruby gets, PHP vsprintf) can never produce a finding.
+			re:     regexp.MustCompile(`(^|[^.\w])(gets|strcpy|strcat|vsprintf)\s*\(`),
+			skipFn: commentOnlyLine,
+			exts:   cSourceExts,
 		},
 	}
 }

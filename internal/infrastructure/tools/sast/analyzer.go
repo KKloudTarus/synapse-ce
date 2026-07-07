@@ -146,6 +146,7 @@ func readSourceLines(path string) []string {
 // scanLines applies rules to an already-read source file.
 func (a *Analyzer) scanLines(rel string, lines []string, project projectContext) []ports.SASTRawFinding {
 	var hits []ports.SASTRawFinding
+	ext := strings.ToLower(filepath.Ext(rel))
 	for i, text := range lines {
 		line := i + 1
 		if len(text) > maxLineBytes {
@@ -153,6 +154,9 @@ func (a *Analyzer) scanLines(rel string, lines []string, project projectContext)
 		}
 		for ri := range a.rules {
 			r := &a.rules[ri]
+			if !r.appliesTo(ext) {
+				continue // language-gated rule on a non-matching file type
+			}
 			if r.re.MatchString(text) && !r.skip(text) {
 				h := ports.SASTRawFinding{
 					File: rel, Line: line, RuleID: r.id, CWE: r.cwe,

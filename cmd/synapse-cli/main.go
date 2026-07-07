@@ -32,11 +32,12 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/manifest"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavencoord"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavenresolve"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/misconfig"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/nvd"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/osv"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownadvisory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/risk"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/misconfig"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/secretscan"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/syft"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo"
@@ -290,6 +291,9 @@ func run(path string, failOn shared.Severity, mode string, ignoreUnfixed, image,
 	}
 	if jvmReachOn {
 		sca.SetJVMReachability(jvmreach.New())
+	}
+	if cfg.SASTEnabled {
+		sca.SetSASTAnalyzer(sast.New()) // deterministic pattern-SAST (CI-friendly)
 	}
 	if cfg.SecretScanEnabled {
 		sca.SetSecretScanner(secretscan.New()) // deterministic, redacted secret scan (CI-friendly)
