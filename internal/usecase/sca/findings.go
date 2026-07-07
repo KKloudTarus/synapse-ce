@@ -216,6 +216,46 @@ func buildFindings(engagementID shared.ID, res *ScanResult, now time.Time, minSe
 	return out
 }
 
+// buildSecretFindings turns redacted secret hits into ungated Kind=secret findings (deterministic,
+// publishable like SCA). The Match is already redacted by the scanner, so the raw credential is never
+// stored in the finding, the evidence seal, or the report.
+func buildSecretFindings(engagementID shared.ID, raws []ports.SecretRawFinding, now time.Time, minSeverity shared.Severity) []finding.Finding {
+	min := shared.SeverityRank(minSeverity)
+	out := make([]finding.Finding, 0, len(raws))
+	for _, sr := range raws {
+		if sr.Severity != shared.SeverityUnknown && shared.SeverityRank(sr.Severity) < min {
+			continue
+		}
+		// Dedup on rule+file+line so a re-scan updates in place (1:1).
+		dedup := "secret:" + sr.RuleID + ":" + sr.File + ":" + strconv.Itoa(sr.Line)
+		scope := sbom.ClassifyScope(sr.File, "")
+		out = append(out, finding.Finding{
+			ID:           findingID(engagementID, dedup),
+			EngagementID: engagementID,
+			Title:        fmt.Sprintf("%s (%s:%d)", sr.Title, sr.File, sr.Line),
+			Description:  secretDescription(sr),
+			Severity:     sr.Severity,
+			Sources:      []string{"synapse-secret-scan"},
+			Confidence:   vulnerability.ConfidenceForSources(1),
+			Class:        finding.ClassFirstParty,
+			Scope:        scope,
+			// Reachability/Impact are left empty on purpose: a hardcoded secret is a PRESENCE fact, not a
+			// reachable-code weakness, so the scope+severity impact model the SAST loop uses does not apply.
+			Priority: sastPriority(sr.Severity),
+			Status:   finding.StatusOpen,
+			Kind:     finding.KindSecret,
+			DedupKey: dedup,
+			Audit:    shared.Audit{CreatedAt: now, UpdatedAt: now},
+		})
+	}
+	return out
+}
+
+func secretDescription(sr ports.SecretRawFinding) string {
+	return fmt.Sprintf("A %s secret was detected (rule %s). Rotate the credential and remove it from source; prefer a secret manager or environment injection. Match (redacted): %s",
+		sr.Category, sr.RuleID, sr.Match)
+}
+
 func sastDescription(sr ports.SASTRawFinding) string {
 	desc := strings.TrimSpace(sr.Description)
 	proof := []string{}

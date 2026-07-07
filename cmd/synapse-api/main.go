@@ -56,6 +56,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownsbom"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/risk"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/secretscan"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/syft"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/taintcallgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
@@ -526,6 +527,10 @@ func main() {
 	if cfg.SASTEnabled {
 		scaService.SetSASTAnalyzer(sast.New()) // deterministic pattern-SAST in the scan pipeline
 		log.Info("pattern-SAST ENABLED (weak crypto / hardcoded secrets / insecure config)")
+	}
+	if cfg.SecretScanEnabled {
+		scaService.SetSecretScanner(secretscan.New()) // deterministic, redacted secret scan in the scan pipeline
+		log.Info("secret scanning ENABLED (hardcoded credentials; matches redacted)")
 	}
 	aupService := aupuc.NewService(aupStore, auditLog, clock, cfg.AUPVersion)
 	exportService := exportuc.NewService(findingRepo, clock, buildinfo.App())

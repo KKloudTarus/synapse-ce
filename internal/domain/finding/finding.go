@@ -43,6 +43,7 @@ const (
 	KindExploitation Kind = "exploitation"
 	KindManual       Kind = "manual"
 	KindSAST         Kind = "sast"       // first-party source-code issue (SAST)
+	KindSecret       Kind = "secret"     // a hardcoded secret found in source (deterministic; ungated)
 	KindDAST         Kind = "dast"       // runtime app issue (DAST; deferred)
 	KindThreat       Kind = "threat"     // threat-model item
 	KindHypothesis   Kind = "hypothesis" // AI-proposed attack-chain hypothesis linking findings (gated until human-verified)
@@ -51,7 +52,7 @@ const (
 // Valid reports whether k is a known finding kind.
 func (k Kind) Valid() bool {
 	switch k {
-	case KindSCA, KindRecon, KindExploitation, KindManual, KindSAST, KindDAST, KindThreat, KindHypothesis:
+	case KindSCA, KindRecon, KindExploitation, KindManual, KindSAST, KindSecret, KindDAST, KindThreat, KindHypothesis:
 		return true
 	}
 	return false

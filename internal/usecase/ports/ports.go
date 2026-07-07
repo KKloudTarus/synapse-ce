@@ -827,6 +827,27 @@ type SASTAnalyzer interface {
 	AnalyzeSource(ctx context.Context, root string) ([]SASTRawFinding, error)
 }
 
+// SecretRawFinding is one hardcoded-secret hit located at file:line in the scanned source. The Match is
+// ALWAYS a redacted preview (never the raw secret): the scanner masks the value before it leaves the
+// adapter, so a leaked credential never re-enters logs, the transcript, the evidence seal, or the report.
+type SecretRawFinding struct {
+	File     string // path relative to the scanned source root
+	Line     int    // 1-indexed
+	RuleID   string // e.g. "aws-access-key-id"
+	Category string // e.g. "AWS"
+	Title    string // human title, e.g. "AWS access key ID"
+	Severity shared.Severity
+	Match    string // REDACTED preview only (e.g. "AKIA****...**7X"), never the full secret
+}
+
+// SecretScanner detects hardcoded secrets (tokens, keys, private-key blocks) in a prepared workspace. It is
+// deterministic and READ-ONLY, and it must redact every match before returning it. Best-effort: a walk
+// error is a per-file skip, never a scan failure. Results become ungated Kind=secret findings.
+type SecretScanner interface {
+	Name() string
+	ScanFiles(ctx context.Context, root string) ([]SecretRawFinding, error)
+}
+
 // RiskResult is the output of risk enrichment: vulns annotated with KEV + EPSS,
 // plus the data-source versions (for reproducibility provenance).
 type RiskResult struct {

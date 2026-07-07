@@ -159,6 +159,9 @@ type Config struct {
 	JudgmentsEnabled bool
 	// SASTEnabled turns on the deterministic pattern-SAST analyzer in the scan pipeline; off by default.
 	SASTEnabled bool
+	// SecretScanEnabled turns on the deterministic secret scanner in the scan pipeline; off by default.
+	// It reads workspace files and redacts every match, so nothing sensitive reaches logs or the report.
+	SecretScanEnabled bool
 	// OwnedAdvisoryEnabled wires the owned advisory DetectionSource: match the SBOM
 	// against the owned normalized-advisory store (offline, reproducible) ALONGSIDE live OSV/Grype. Off by
 	// default; opt-in. An empty store yields no findings (a harmless no-op) until the advisory ingester
@@ -300,6 +303,7 @@ func Load() Config {
 		AgentEnabled:           getbool("SYNAPSE_AGENT_ENABLED", false),
 		JudgmentsEnabled:       getbool("SYNAPSE_JUDGMENTS_ENABLED", false),
 		SASTEnabled:            getbool("SYNAPSE_SAST_ENABLED", false),
+		SecretScanEnabled:      getbool("SYNAPSE_SECRET_SCAN_ENABLED", false),
 		OwnedAdvisoryEnabled:   getbool("SYNAPSE_OWNED_ADVISORY", false),
 		ReachabilityEnabled:    getbool("SYNAPSE_REACHABILITY_ENABLED", false),
 		CrossCheckEnabled:      getbool("SYNAPSE_CROSSCHECK_ENABLED", false),

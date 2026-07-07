@@ -59,6 +59,7 @@ type Service struct {
 	jarHash        ports.JarHashResolver         // optional: recover coords of shaded/metadata-less JARs via SHA-1
 	licFile        ports.LicenseFileResolver     // optional offline license-text fallback from JAR LICENSE files
 	sastAnalyzer   ports.SASTAnalyzer            // optional deterministic pattern-SAST over the live workspace
+	secretScanner  ports.SecretScanner           // optional deterministic secret scan over the live workspace
 	reachability   ports.ReachabilityRecorder    // optional deterministic Tier-2 reachability proof
 	correlation    ports.CorrelationRecorder     // optional cross-check disagreement → judgment minter
 	sbomGen2       ports.SBOMGenerator           // optional 2nd SBOM producer for the cross-check
@@ -107,6 +108,9 @@ func (s *Service) SetLicenseFileResolver(r ports.LicenseFileResolver) { s.licFil
 // SetSASTAnalyzer configures the optional deterministic pattern-SAST analyzer. nil ⇒ no SAST
 // findings. A setter keeps the existing NewService call sites unchanged.
 func (s *Service) SetSASTAnalyzer(a ports.SASTAnalyzer) { s.sastAnalyzer = a }
+
+// SetSecretScanner configures the optional deterministic secret scanner. nil ⇒ no secret scanning.
+func (s *Service) SetSecretScanner(sc ports.SecretScanner) { s.secretScanner = sc }
 
 // SetReachability configures the optional deterministic Tier-2 reachability prover. nil ⇒ no
 // reachability judgments. Best-effort + opt-in: a no-coverage/un-buildable target leaves the prior
@@ -1563,6 +1567,15 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 	}
 	result.Findings = buildFindings(engagementID, result, now, s.minSeverity, s.ignoreUnfixed, sastRaws)
+	// Deterministic secret scan over the LIVE workspace: hardcoded credentials, redacted before they
+	// leave the scanner. Ungated Kind=secret findings, publishable like SCA. Best-effort.
+	if opts.scansVulnerabilities() && s.secretScanner != nil {
+		secretRaws, serr := s.secretScanner.ScanFiles(ctx, ws.Dir)
+		if serr != nil {
+			return nil, fmt.Errorf("scan secrets: %w", serr)
+		}
+		result.Findings = append(result.Findings, buildSecretFindings(engagementID, secretRaws, now, s.minSeverity)...)
+	}
 	result.MinSeverity = s.minSeverity
 	result.VulnsBelowThreshold = countBelowThreshold(vulns, s.minSeverity)
 	result.UnfixedSuppressed = countUnfixedSuppressed(vulns, s.minSeverity, s.ignoreUnfixed)

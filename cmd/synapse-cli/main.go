@@ -36,6 +36,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/osv"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownadvisory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/risk"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/secretscan"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/syft"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
@@ -281,6 +282,9 @@ func run(path string, failOn shared.Severity, mode string, ignoreUnfixed, image,
 	}
 	if jvmReachOn {
 		sca.SetJVMReachability(jvmreach.New())
+	}
+	if cfg.SecretScanEnabled {
+		sca.SetSecretScanner(secretscan.New()) // deterministic, redacted secret scan (CI-friendly)
 	}
 	// JAR-embedded licenses + workspace LICENSE files for every ecosystem.
 	sca.SetLicenseFileResolver(licensefile.NewChain(jarlicense.New(), licensefile.New()))
