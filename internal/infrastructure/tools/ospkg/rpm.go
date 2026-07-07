@@ -9,7 +9,10 @@ import (
 	"path/filepath"
 	"strconv"
 
-	_ "modernc.org/sqlite" // pure-Go sqlite driver (matches CGO_ENABLED=0), for the RHEL9+/Fedora rpmdb.sqlite
+	// pure-Go sqlite driver (matches CGO_ENABLED=0), for the RHEL9+/Fedora rpmdb.sqlite. NOTE: the crafted-view
+	// non-hang property (see rpmComponents + TestCatalogRPMHostileViewTerminates) is driver-behavior-specific —
+	// re-validate that test on any version bump of this dependency.
+	_ "modernc.org/sqlite"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
@@ -19,11 +22,12 @@ import (
 // older Berkeley-DB (/var/lib/rpm/Packages, RHEL<=8/CentOS/AL2) and ndb (openSUSE) backends are DEFERRED —
 // their binary page formats are a larger, riskier parse and the generator already catalogs them from the
 // layout. Everything here treats the DB + header as UNTRUSTED (a hostile image): reads are cancellable
-// (ctx-threaded, plus a watchdog that closes the DB on ctx.Done so even a crafted sqlite that spins inside one
-// driver step is aborted by the scan deadline), bounded (per-blob size filter server-side, total-byte +
-// row-count budgets), and each identity tag latches on its first NON-EMPTY value so a crafted header cannot
-// amplify the per-entry scan; the header parse is fully bounds-checked and the whole sqlite interaction is
-// recover-wrapped so a malformed DB contributes nothing rather than panicking the scan (cf. PR #43).
+// (modernc interrupts the first query step, the loop re-checks ctx between steps, and a best-effort watchdog
+// closes the DB on cancel) and bounded (per-blob size filter server-side + total-byte + row-count budgets);
+// together with the pinned driver returning promptly on a crafted view rather than spinning, those bound a
+// hostile DB. Each identity tag latches on its first NON-EMPTY value so a crafted header cannot amplify the
+// per-entry scan; the header parse is fully bounds-checked and the whole sqlite interaction is recover-wrapped
+// so a malformed DB contributes nothing rather than panicking the scan (cf. PR #43).
 const (
 	maxRPMIndex   = 1 << 16  // index-entry count cap per header
 	maxRPMData    = 64 << 20 // header data-store size cap
@@ -68,11 +72,17 @@ func rpmComponents(ctx context.Context, rootfsDir, namespace, tag string) (out [
 		return nil, nil
 	}
 	defer func() { _ = db.Close() }()
-	// A crafted sqlite (e.g. Packages as a view over a recursive CTE) can spin INSIDE one driver step — where
-	// the pure-Go driver only arms its ctx-interrupt for the first step, so the per-row ctx.Err() below never
-	// gets a turn and the scan's timeout could not otherwise stop it. Closing the DB on ctx.Done aborts an
-	// in-flight step, so this read is genuinely bounded by the scan deadline. done stops the watchdog on a
-	// normal return (defer order: close(done) runs before db.Close, so the watchdog never double-closes).
+	// Best-effort cancellation backstop. Real cancellation of this read comes from (1) modernc arming a
+	// ctx->sqlite3_interrupt watcher for QueryContext's FIRST step and (2) the per-row ctx.Err() check below,
+	// between steps. A spin INSIDE a later rows.Next() step is NOT interruptible by modernc, by stdlib, or by
+	// this close: sql.DB.Close closes an in-use connection only when it is returned and never interrupts a
+	// running step, so this watchdog does not guarantee aborting a mid-step spin (it only unblocks idle work
+	// and prevents new queries). Such a spin is only reachable via a crafted Packages view whose rows the
+	// server-side LENGTH filter rejects internally (so they never reach the loop); the pinned modernc v1.53.0
+	// returns promptly on that shape rather than spinning, which — with the per-blob + total-byte + row-count
+	// bounds below — is what actually bounds a hostile DB. TestCatalogRPMHostileViewTerminates locks that
+	// property; RE-VALIDATE it on any modernc bump. done stops the watchdog on a normal return; defer order
+	// (close(done) before db.Close) means no double-close on the happy path, and db.Close is idempotent anyway.
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
