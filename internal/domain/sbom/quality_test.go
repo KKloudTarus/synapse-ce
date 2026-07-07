@@ -324,6 +324,36 @@ func TestNTIA2025AndSCVSRequireChecksum(t *testing.T) {
 	}
 }
 
+func TestBSIProfileRequiresStrongChecksum(t *testing.T) {
+	metOf := func(doc SBOM) map[string]bool {
+		m := map[string]bool{}
+		for _, p := range Quality(doc).Profiles {
+			m[p.ID] = p.Met
+		}
+		return m
+	}
+	// A component with a valid but WEAK checksum (fullComponent's SHA-1) satisfies the any-checksum profiles
+	// (NTIA-2025 / SCVS L2) but must FAIL BSI TR-03183-2, which requires SHA-256 or stronger.
+	weakDoc := SBOM{Source: "synapse", Components: []Component{fullComponent()}, Dependencies: []Dependency{{Ref: "gin"}}}
+	weakDoc.Audit.CreatedAt = time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
+	weak := metOf(weakDoc)
+	if !weak["ntia-2025"] || !weak["scvs-l2"] {
+		t.Errorf("a SHA-1 checksum should still satisfy the any-checksum profiles, got %+v", weak)
+	}
+	if weak["bsi-tr-03183-2"] {
+		t.Error("BSI TR-03183-2 requires a strong checksum; a SHA-1-only component must FAIL it")
+	}
+	// Swap in a valid SHA-256 digest: BSI now passes, since all its other required fields are present.
+	strong := fullComponent()
+	strong.SHA1 = ""
+	strong.Checksums = []Checksum{{Algorithm: "SHA256", Value: strings.Repeat("a", 64)}}
+	strongDoc := SBOM{Source: "synapse", Components: []Component{strong}, Dependencies: []Dependency{{Ref: "gin"}}}
+	strongDoc.Audit.CreatedAt = time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
+	if !metOf(strongDoc)["bsi-tr-03183-2"] {
+		t.Errorf("a component with a valid SHA-256 digest + all BSI fields should PASS BSI, got %+v", metOf(strongDoc))
+	}
+}
+
 func TestNTIAProfileMatchesNTIAMet(t *testing.T) {
 	// The ntia-2021 profile requires exactly the NTIA elements at the same threshold as NTIAMet, so the two
 	// must never disagree. This guard fails loudly if a future NTIA element is added to the scorer but not the

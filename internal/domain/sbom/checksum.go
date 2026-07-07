@@ -22,6 +22,7 @@ const maxDigestChars = 256
 type digestSpec struct {
 	hexLen int
 	name   string
+	strong bool // a strong (collision-resistant, >=256-bit) modern digest, per the BSI TR-03183-2 "SHA-256 or stronger" bar
 }
 
 // digestAlgs maps a NORMALIZED hash-algorithm name (see NormalizeChecksumAlg) to its spec. It is the single
@@ -29,11 +30,11 @@ type digestSpec struct {
 // digest. Both the quality scorer and the SPDX export gate read this one table, so they accept exactly the
 // same digests by construction — nothing to keep in sync across packages.
 var digestAlgs = map[string]digestSpec{
-	"SHA1": {40, "SHA1"}, "SHA224": {56, "SHA224"}, "SHA256": {64, "SHA256"},
-	"SHA384": {96, "SHA384"}, "SHA512": {128, "SHA512"},
-	"SHA3256": {64, "SHA3-256"}, "SHA3384": {96, "SHA3-384"}, "SHA3512": {128, "SHA3-512"},
-	"BLAKE2B256": {64, "BLAKE2b-256"}, "BLAKE2B384": {96, "BLAKE2b-384"}, "BLAKE2B512": {128, "BLAKE2b-512"},
-	"MD2": {32, "MD2"}, "MD4": {32, "MD4"}, "MD5": {32, "MD5"}, "ADLER32": {8, "ADLER32"},
+	"SHA1": {40, "SHA1", false}, "SHA224": {56, "SHA224", false}, "SHA256": {64, "SHA256", true},
+	"SHA384": {96, "SHA384", true}, "SHA512": {128, "SHA512", true},
+	"SHA3256": {64, "SHA3-256", true}, "SHA3384": {96, "SHA3-384", true}, "SHA3512": {128, "SHA3-512", true},
+	"BLAKE2B256": {64, "BLAKE2b-256", true}, "BLAKE2B384": {96, "BLAKE2b-384", true}, "BLAKE2B512": {128, "BLAKE2b-512", true},
+	"MD2": {32, "MD2", false}, "MD4": {32, "MD4", false}, "MD5": {32, "MD5", false}, "ADLER32": {8, "ADLER32", false},
 }
 
 // NormalizeChecksumAlg uppercases an algorithm name and strips separators, so "sha-256" / "SHA256" /
@@ -75,6 +76,25 @@ func CanonicalHexDigest(alg, value string) (name, hexValue string, ok bool) {
 func ValidChecksum(c Checksum) bool {
 	_, _, ok := CanonicalHexDigest(c.Algorithm, c.Value)
 	return ok
+}
+
+// StrongAlg reports whether an algorithm is a strong integrity digest: a collision-resistant, >=256-bit
+// modern hash (SHA-256/384/512, the SHA-3 family, or BLAKE2b), as opposed to SHA-1, SHA-224, the MD family,
+// or ADLER32. It underpins the "SHA-256 or stronger" bar of the BSI TR-03183-2 compliance profile. An
+// unrecognized algorithm is not strong (the map miss yields the zero digestSpec, strong=false).
+func StrongAlg(alg string) bool {
+	return digestAlgs[NormalizeChecksumAlg(alg)].strong
+}
+
+// HasStrongChecksum reports whether a component carries a VALID digest from a strong algorithm (see
+// StrongAlg). The legacy SHA1 field is a weak digest by definition, so only the Checksums entries count.
+func HasStrongChecksum(c Component) bool {
+	for _, ck := range c.Checksums {
+		if StrongAlg(ck.Algorithm) && ValidChecksum(ck) {
+			return true
+		}
+	}
+	return false
 }
 
 // isLowerHex reports whether s is non-empty, even-length lowercase hex.

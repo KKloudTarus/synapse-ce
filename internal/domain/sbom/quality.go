@@ -23,6 +23,10 @@ import (
 const (
 	QualityCategoryNTIA     = "ntia"     // an NTIA-2021 minimum element
 	QualityCategorySemantic = "semantic" // a CycloneDX/SPDX describe-quality check beyond the NTIA floor
+	// QualityCategoryCompliance is a stricter, profile-specific signal (e.g. a strong checksum for BSI
+	// TR-03183-2). It gates a compliance profile but is DELIBERATELY excluded from the blended headline Score
+	// (only NTIA + semantic feed that), so a profile-only requirement never silently moves the general score.
+	QualityCategoryCompliance = "compliance"
 )
 
 // NTIAThreshold is the per-element score (0..100) at or above which an NTIA minimum element is treated as
@@ -106,6 +110,12 @@ var complianceProfiles = []complianceProfile{
 	{id: "vuln-lookup", name: "Vulnerability lookup readiness", required: []string{
 		"ntia-name", "ntia-version", "ntia-uniqid",
 	}},
+	// BSI TR-03183-2 goes beyond the NTIA floor: it wants a license and a STRONG (SHA-256 or stronger)
+	// integrity digest per component, plus the NTIA identity/provenance fields. cmp-checksum-strong (not the
+	// weaker sem-checksum) is the gating requirement.
+	{id: "bsi-tr-03183-2", name: "BSI TR-03183-2 (strong integrity)", required: []string{
+		"ntia-supplier", "ntia-name", "ntia-version", "ntia-uniqid", "ntia-dependencies", "ntia-author", "ntia-timestamp", "sem-license", "cmp-checksum-strong",
+	}},
 }
 
 // evaluateProfiles projects the scored elements onto the built-in compliance profiles. Deterministic: the
@@ -143,7 +153,7 @@ func evaluateProfiles(elements []QualityElement) []ProfileResult {
 func Quality(s SBOM) QualityReport {
 	n := len(s.Components)
 	// Component-level tallies (single pass).
-	var withSupplier, withName, withVersionField, withPURL, withLicense, withSPDXLicense, withChecksum int
+	var withSupplier, withName, withVersionField, withPURL, withLicense, withSPDXLicense, withChecksum, withStrongChecksum int
 	for _, c := range s.Components {
 		if supplierOf(c) != "" {
 			withSupplier++
@@ -168,6 +178,9 @@ func Quality(s SBOM) QualityReport {
 		}
 		if HasChecksum(c) {
 			withChecksum++
+		}
+		if HasStrongChecksum(c) {
+			withStrongChecksum++
 		}
 	}
 
@@ -204,10 +217,12 @@ func Quality(s SBOM) QualityReport {
 		comp("sem-license", "License present", QualityCategorySemantic, withLicense, "have no license"),
 		comp("sem-license-spdx", "License is an SPDX id", QualityCategorySemantic, withSPDXLicense, "have no SPDX-valid license id"),
 		comp("sem-checksum", "Checksum", QualityCategorySemantic, withChecksum, "have no integrity checksum"),
+		// Compliance-only signal (see QualityCategoryCompliance): gates the BSI profile, excluded from the blend.
+		comp("cmp-checksum-strong", "Strong checksum (SHA-256+)", QualityCategoryCompliance, withStrongChecksum, "have no SHA-256-or-stronger integrity digest"),
 	}
 	sort.SliceStable(elements, func(i, j int) bool {
-		if elements[i].Category != elements[j].Category {
-			return elements[i].Category < elements[j].Category // "ntia" before "semantic"
+		if ri, rj := categoryRank(elements[i].Category), categoryRank(elements[j].Category); ri != rj {
+			return ri < rj // NTIA floor first, then semantic, then compliance-only signals
 		}
 		return elements[i].ID < elements[j].ID
 	})
@@ -230,6 +245,21 @@ func Quality(s SBOM) QualityReport {
 	r.Profiles = evaluateProfiles(elements)
 	r.Summary = qualitySummary(r)
 	return r
+}
+
+// categoryRank orders the element categories for a stable, human-sensible report: the NTIA minimum floor
+// first, then semantic describe-quality, then compliance-only signals (which do not feed the headline score).
+func categoryRank(category string) int {
+	switch category {
+	case QualityCategoryNTIA:
+		return 0
+	case QualityCategorySemantic:
+		return 1
+	case QualityCategoryCompliance:
+		return 2
+	default:
+		return 3
+	}
 }
 
 // ntiaScore returns the mean of the NTIA element scores and whether every one clears NTIAThreshold.

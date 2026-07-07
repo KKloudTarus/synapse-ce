@@ -60,3 +60,33 @@ func TestValidChecksum(t *testing.T) {
 		}
 	}
 }
+
+func TestStrongAlgAndHasStrongChecksum(t *testing.T) {
+	strong := map[string]bool{
+		"SHA256": true, "sha-384": true, "SHA512": true,
+		"SHA3-256": true, "BLAKE2b-256": true, "blake2b-512": true,
+		"SHA1": false, "SHA224": false, "MD5": false, "ADLER32": false, "CRC32": false, "": false,
+	}
+	for alg, want := range strong {
+		if got := StrongAlg(alg); got != want {
+			t.Errorf("StrongAlg(%q) = %v, want %v", alg, got, want)
+		}
+	}
+	sha256Hex := strings.Repeat("a", 64)
+	// A valid SHA-256 in Checksums is a strong checksum.
+	if !HasStrongChecksum(Component{Checksums: []Checksum{{Algorithm: "SHA256", Value: sha256Hex}}}) {
+		t.Error("a valid SHA-256 Checksums entry must be a strong checksum")
+	}
+	// A valid but WEAK digest (SHA-1) is not strong.
+	if HasStrongChecksum(Component{Checksums: []Checksum{{Algorithm: "SHA1", Value: strings.Repeat("a", 40)}}}) {
+		t.Error("a SHA-1 digest must not count as a strong checksum")
+	}
+	// The legacy SHA1 field is never consulted, even with a 64-hex value.
+	if HasStrongChecksum(Component{SHA1: sha256Hex}) {
+		t.Error("the legacy SHA1 field must never count as a strong checksum")
+	}
+	// A strong algorithm with a malformed value is not a strong checksum (must be a valid digest too).
+	if HasStrongChecksum(Component{Checksums: []Checksum{{Algorithm: "SHA256", Value: "not-hex"}}}) {
+		t.Error("a strong algorithm with an invalid value must not count")
+	}
+}
