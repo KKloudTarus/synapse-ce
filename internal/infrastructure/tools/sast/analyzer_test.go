@@ -119,6 +119,7 @@ func TestRuleCorpus(t *testing.T) {
 		rule string
 		tp   []string // must be flagged by `rule`
 		fp   []string // must NOT be flagged by `rule`
+		file string   // fixture filename (default case.go); set for language-gated rules
 	}{
 		{
 			rule: "weak-hash-md5",
@@ -260,19 +261,75 @@ func TestRuleCorpus(t *testing.T) {
 			tp:   []string{`await prisma.user.update({ where: { id }, data: req.body })`, `User.create(params)`},
 			fp:   []string{`await prisma.user.update({ where: { id }, data: { name, phone } })`},
 		},
+		{
+			rule: "xxe-insecure-xml-parsing",
+			tp:   []string{`parser = etree.XMLParser(resolve_entities=True)`, `libxml_disable_entity_loader(false);`, `dbf.setExpandEntityReferences(true);`},
+			fp:   []string{`parser = etree.XMLParser(resolve_entities=False)`, `dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)`},
+		},
+		{
+			rule: "dynamic-code-eval",
+			tp:   []string{`result = eval("run_" + req.body.cmd)`, `eval($_GET["code"])`, `value = eval(input("expr: "))`},
+			fp:   []string{`const total = eval("2 + 2")`, `// eval of user input is dangerous`},
+		},
+		{
+			rule: "dom-xss-inner-html",
+			tp:   []string{"el.innerHTML = `<h1>${req.query.name}</h1>`", `container.innerHTML = location.hash`, `document.write(location.search)`, `list.innerHTML += req.body.html`},
+			fp:   []string{`el.innerHTML = ""`, `el.innerHTML = sanitize(userInput)`, "el.innerHTML = `<b>${count}</b>`"},
+		},
+		{
+			rule: "nosql-injection-request",
+			tp:   []string{`db.users.find(req.body)`, `User.findOne({ $where: "this.n == 1" })`, `col.find({ user: req.query.user })`},
+			fp:   []string{`db.users.find({ _id: ObjectId(id) })`, `User.findOne({ email: safeEmail })`},
+		},
+		{
+			rule: "open-redirect-user-url",
+			tp:   []string{`res.redirect(req.query.next)`, `response.sendRedirect(request.getParameter("url"))`, `http.Redirect(w, r, r.URL.Query().Get("next"), 302)`},
+			fp:   []string{`res.redirect("/login")`, `res.redirect(302, "/dashboard")`, "res.redirect(`${req.protocol}://${req.hostname}/dashboard`)"},
+		},
+		{
+			rule: "insecure-randomness-security-context",
+			tp:   []string{`const token = Math.random().toString(36)`, `otp = random.randint(1000, 9999)`, `$salt = mt_rand();`},
+			fp:   []string{`const offset = Math.random() * width`, `jitter = random.random() * 0.5`},
+		},
+		{
+			rule: "weak-rsa-key-size",
+			tp:   []string{`rsa.GenerateKey(rand.Reader, 1024)`, `new RSAKeyGenParameterSpec(512, RSAKeyGenParameterSpec.F4)`},
+			fp:   []string{`rsa.GenerateKey(rand.Reader, 2048)`, `new RSAKeyGenParameterSpec(2048, F4)`, `bufferPool.initialize(1024)`},
+		},
+		{
+			rule: "world-writable-permissions",
+			tp:   []string{`os.Chmod(path, 0777)`, `os.WriteFile(p, data, 0o777)`, `os.chmod(path, 0777)`},
+			fp:   []string{`os.Chmod(path, 0644)`, `os.WriteFile(p, data, 0600)`, `os.WriteFile(p, data, 0644) // was 0777`},
+		},
+		{
+			rule: "unsafe-c-string-function",
+			file: "case.c",
+			tp:   []string{`gets(buf);`, `strcpy(dest, src);`, `strcat(path, suffix);`},
+			fp:   []string{`strncpy(dest, src, sizeof(dest));`, `snprintf(buf, sizeof(buf), "%s", s);`, `// strcpy is unsafe`},
+		},
+		{
+			// The same C names in a non-C file (e.g. Ruby gets, PHP vsprintf) must NOT be flagged (ext gate).
+			rule: "unsafe-c-string-function",
+			file: "case.rb",
+			fp:   []string{`line = gets(chomp: true)`, `out = vsprintf(fmt, args)`},
+		},
 	}
 
 	for _, c := range corpus {
+		fname := c.file
+		if fname == "" {
+			fname = "case.go"
+		}
 		for _, tp := range c.tp {
 			root := t.TempDir()
-			writeFile(t, root, "case.go", tp+"\n")
+			writeFile(t, root, fname, tp+"\n")
 			if len(findingsByRule(t, root)[c.rule]) == 0 {
 				t.Errorf("%s: true-positive %q was NOT flagged", c.rule, tp)
 			}
 		}
 		for _, fp := range c.fp {
 			root := t.TempDir()
-			writeFile(t, root, "case.go", fp+"\n")
+			writeFile(t, root, fname, fp+"\n")
 			if n := len(findingsByRule(t, root)[c.rule]); n > 0 {
 				t.Errorf("%s: false-positive %q was wrongly flagged (%d hits)", c.rule, fp, n)
 			}
