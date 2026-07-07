@@ -36,6 +36,7 @@ type spdxPackage struct {
 	SPDXID           string       `json:"SPDXID"`
 	Name             string       `json:"name"`
 	VersionInfo      string       `json:"versionInfo,omitempty"`
+	Supplier         string       `json:"supplier,omitempty"` // "Organization: <name>" — NTIA supplier element; omitted when unknown
 	DownloadLocation string       `json:"downloadLocation"`
 	LicenseDeclared  string       `json:"licenseDeclared"`
 	LicenseConcluded string       `json:"licenseConcluded"`
@@ -122,6 +123,11 @@ func buildSPDX(doc *sbom.SBOM, target string, created time.Time) spdxDoc {
 			DownloadLocation: "NOASSERTION",
 			LicenseDeclared:  lic,
 			LicenseConcluded: lic,
+		}
+		// Resolve via SupplierOr (not the raw field) so the export derives the supplier from the PURL namespace
+		// for producers/merge paths that leave Supplier empty (e.g. the JVM resolver tree) — matching the scorer.
+		if sup := sbom.SupplierOr(c.Supplier, c.PURL); sup != "" { // NTIA supplier element; SPDX form "Organization: <name>"
+			pkg.Supplier = "Organization: " + sup
 		}
 		if c.PURL != "" {
 			pkg.ExternalRefs = []spdxExtRef{{

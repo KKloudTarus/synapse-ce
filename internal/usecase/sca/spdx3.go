@@ -51,7 +51,16 @@ type spdx3Package struct {
 	Name           string `json:"name"`
 	PackageVersion string `json:"software_packageVersion,omitempty"`
 	PackageURL     string `json:"software_packageUrl,omitempty"`
+	SuppliedBy     string `json:"suppliedBy,omitempty"` // IRI of the supplier Agent (NTIA supplier element); SPDX 3.0 models it as a link
 	CopyrightText  string `json:"software_copyrightText"`
+}
+
+// spdx3Agent is an SPDX 3.0 Organization element a package's suppliedBy points to (the NTIA supplier).
+type spdx3Agent struct {
+	Type         string `json:"type"`
+	SpdxID       string `json:"spdxId"`
+	CreationInfo string `json:"creationInfo"`
+	Name         string `json:"name"`
 }
 
 type spdx3Relationship struct {
@@ -101,6 +110,8 @@ func buildSPDX3(doc *sbom.SBOM, target string, created time.Time) spdx3Doc {
 
 	var pkgIDs []string
 	var pkgs []any
+	var agentIDs []string
+	var agents []any
 	if doc != nil {
 		comps := append([]sbom.Component(nil), doc.Components...)
 		sort.SliceStable(comps, func(i, j int) bool {
@@ -109,10 +120,30 @@ func buildSPDX3(doc *sbom.SBOM, target string, created time.Time) spdx3Doc {
 			}
 			return comps[i].Version < comps[j].Version
 		})
+		// Mint one Organization Agent per unique supplier (SupplierOr, so producers/merge paths that left
+		// Supplier empty still get the PURL-derived value — matching SPDX 2.x + the scorer). Sorted for a
+		// deterministic, content-hashed IRI.
+		agentByName := map[string]string{}
+		var supplierNames []string
+		for _, c := range comps {
+			if sup := sbom.SupplierOr(c.Supplier, c.PURL); sup != "" {
+				if _, ok := agentByName[sup]; !ok {
+					agentByName[sup] = "" // placeholder; IRI assigned after sorting
+					supplierNames = append(supplierNames, sup)
+				}
+			}
+		}
+		sort.Strings(supplierNames)
+		for _, sup := range supplierNames {
+			id := spdx3IRIBase + "agent:" + hash12(sup)
+			agentByName[sup] = id
+			agentIDs = append(agentIDs, id)
+			agents = append(agents, spdx3Agent{Type: "Organization", SpdxID: id, CreationInfo: ciID, Name: sup})
+		}
 		for i, c := range comps {
 			id := spdx3IRIBase + "pkg:" + fmt.Sprintf("%d-%s", i, hash12(c.Name+"@"+c.Version+c.PURL))
 			pkgIDs = append(pkgIDs, id)
-			pkgs = append(pkgs, spdx3Package{
+			pkg := spdx3Package{
 				Type:           "software_Package",
 				SpdxID:         id,
 				CreationInfo:   ciID,
@@ -120,7 +151,11 @@ func buildSPDX3(doc *sbom.SBOM, target string, created time.Time) spdx3Doc {
 				PackageVersion: c.Version,
 				PackageURL:     c.PURL,
 				CopyrightText:  "NOASSERTION",
-			})
+			}
+			if sup := sbom.SupplierOr(c.Supplier, c.PURL); sup != "" {
+				pkg.SuppliedBy = agentByName[sup]
+			}
+			pkgs = append(pkgs, pkg)
 		}
 	}
 
@@ -131,9 +166,10 @@ func buildSPDX3(doc *sbom.SBOM, target string, created time.Time) spdx3Doc {
 		Name:               name,
 		ProfileConformance: []string{"core", "software"},
 		RootElement:        pkgIDs,
-		Element:            pkgIDs,
+		Element:            append(append([]string(nil), pkgIDs...), agentIDs...),
 	})
 	graph = append(graph, pkgs...)
+	graph = append(graph, agents...)
 	if len(pkgIDs) > 0 {
 		graph = append(graph, spdx3Relationship{
 			Type:             "Relationship",

@@ -60,3 +60,53 @@ func TestBuildSPDX3DeterministicAndValid(t *testing.T) {
 		t.Errorf("first package should be express (sorted), got %+v", a.Graph[2])
 	}
 }
+
+func TestBuildSPDX3EmitsSupplierAgent(t *testing.T) {
+	doc := &sbom.SBOM{
+		TargetRef: "https://github.com/org/repo",
+		Components: []sbom.Component{
+			{Name: "commons-lang3", Version: "3.12.0", PURL: "pkg:maven/org.apache.commons/commons-lang3@3.12.0"},
+		},
+	}
+	a := buildSPDX3(doc, doc.TargetRef, time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC))
+
+	var agent *spdx3Agent
+	var pkg *spdx3Package
+	for _, n := range a.Graph {
+		switch v := n.(type) {
+		case spdx3Agent:
+			ag := v
+			agent = &ag
+		case spdx3Package:
+			p := v
+			pkg = &p
+		}
+	}
+	if agent == nil {
+		t.Fatal("SPDX3 must emit an Organization Agent for the derived supplier")
+	}
+	if agent.Type != "Organization" || agent.Name != "org.apache.commons" {
+		t.Errorf("supplier agent = %+v, want Organization org.apache.commons", agent)
+	}
+	if pkg == nil || pkg.SuppliedBy != agent.SpdxID {
+		t.Errorf("package suppliedBy = %q, want the agent IRI %q", pkgSuppliedBy(pkg), agent.SpdxID)
+	}
+	// The Agent must also be listed among the document's elements.
+	docNode, _ := a.Graph[1].(spdx3Document)
+	found := false
+	for _, e := range docNode.Element {
+		if e == agent.SpdxID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("supplier agent IRI must appear in the SpdxDocument.element list")
+	}
+}
+
+func pkgSuppliedBy(p *spdx3Package) string {
+	if p == nil {
+		return "<nil package>"
+	}
+	return p.SuppliedBy
+}

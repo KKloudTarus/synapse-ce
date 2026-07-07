@@ -164,6 +164,7 @@ func (r *Registry) Generate(ctx context.Context, targetRef string) (*sbom.SBOM, 
 				continue
 			}
 			seen[id] = true
+			c.Supplier, c.SupplierSource = sbom.SupplierWithSource(c.Supplier, c.PURL) // lockfiles carry no supplier; derive from the PURL namespace
 			comps = append(comps, c)
 		}
 		deps = append(deps, pdeps...)

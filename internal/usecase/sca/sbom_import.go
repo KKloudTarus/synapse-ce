@@ -175,6 +175,9 @@ type cdxComponent struct {
 	PURL     string `json:"purl"`
 	BOMRef   string `json:"bom-ref"`
 	Scope    string `json:"scope"` // CycloneDX scope: required|optional|excluded
+	Supplier struct {
+		Name string `json:"name"`
+	} `json:"supplier"`
 	Licenses []struct {
 		License struct {
 			ID   string `json:"id"`
@@ -257,6 +260,9 @@ func cdxComponentToDomain(c cdxComponent) (sbom.Component, bool) {
 		name = c.Group + ":" + c.Name
 	}
 	comp := sbom.Component{Name: name, Version: c.Version, PURL: c.PURL}
+	// Preserve the client's declared supplier (NTIA element, tagged "declared" as it is untrusted client input);
+	// else derive it from the PURL namespace ("derived").
+	comp.Supplier, comp.SupplierSource = sbom.SupplierWithSource(c.Supplier.Name, c.PURL)
 	// No on-disk location for an imported component; the CycloneDX scope still
 	// classifies dev/excluded (excluded -> development).
 	comp.Scope = sbom.ClassifyScope("", c.Scope)

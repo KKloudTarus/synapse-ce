@@ -65,7 +65,7 @@ func Quality(s SBOM) QualityReport {
 	// Component-level tallies (single pass).
 	var withSupplier, withName, withVersionField, withPURL, withLicense, withSPDXLicense, withChecksum int
 	for _, c := range s.Components {
-		if SupplierFromPURL(c.PURL) != "" {
+		if supplierOf(c) != "" {
 			withSupplier++
 		}
 		if strings.TrimSpace(c.Name) != "" {
@@ -112,7 +112,7 @@ func Quality(s SBOM) QualityReport {
 
 	elements := []QualityElement{
 		// NTIA minimum elements (NTIA 2021).
-		comp("ntia-supplier", "Supplier name", QualityCategoryNTIA, withSupplier, "have no resolvable supplier (no PURL namespace)"),
+		comp("ntia-supplier", "Supplier name", QualityCategoryNTIA, withSupplier, "have no declared or derivable supplier (no supplier field and no PURL namespace)"),
 		comp("ntia-name", "Component name", QualityCategoryNTIA, withName, "have no name"),
 		comp("ntia-version", "Version", QualityCategoryNTIA, withVersionField, "have no version"),
 		comp("ntia-uniqid", "Unique identifier (PURL)", QualityCategoryNTIA, withPURL, "have no PURL"),
@@ -191,6 +191,36 @@ func qualitySummary(r QualityReport) string {
 	}
 	return fmt.Sprintf("SBOM quality %d/100 (NTIA %d/100 — below the %d threshold on: %s).",
 		r.Score, r.NTIAScore, NTIAThreshold, strings.Join(weak, ", "))
+}
+
+// SupplierSource values record how a component's Supplier was obtained (see Component.SupplierSource).
+const (
+	SupplierDeclared = "declared" // asserted by the producer or an imported/untrusted client SBOM
+	SupplierDerived  = "derived"  // deterministically inferred by Synapse from the PURL namespace
+)
+
+// supplierOf returns a component's supplier: the explicitly-captured Supplier when the producer/imported SBOM
+// carried one, else one derived from the PURL namespace. Empty when neither yields one.
+func supplierOf(c Component) string { return SupplierOr(c.Supplier, c.PURL) }
+
+// SupplierOr prefers a producer-declared supplier name, falling back to the PURL-namespace derivation. It is
+// the single home for the "captured, else derived" rule so every producer (Syft, owned parsers, importer),
+// both SPDX exporters, and the scorer agree on how a component's supplier is resolved.
+func SupplierOr(declared, purl string) string {
+	s, _ := SupplierWithSource(declared, purl)
+	return s
+}
+
+// SupplierWithSource resolves a component's supplier AND reports its provenance: a non-blank declared value
+// wins as SupplierDeclared; else the PURL namespace is inferred as SupplierDerived; else ("", "").
+func SupplierWithSource(declared, purl string) (supplier, source string) {
+	if s := strings.TrimSpace(declared); s != "" {
+		return s, SupplierDeclared
+	}
+	if s := SupplierFromPURL(purl); s != "" {
+		return s, SupplierDerived
+	}
+	return "", ""
 }
 
 // SupplierFromPURL derives a component's supplier from its PURL namespace — the segment(s) between the PURL

@@ -49,6 +49,27 @@ func TestBuildSPDXDeterministicAndValid(t *testing.T) {
 	}
 }
 
+func TestBuildSPDXEmitsSupplier(t *testing.T) {
+	doc := &sbom.SBOM{
+		TargetRef: "https://github.com/org/repo",
+		Components: []sbom.Component{
+			{Name: "commons-lang3", Version: "3.12.0", PURL: "pkg:maven/org.apache.commons/commons-lang3@3.12.0", Supplier: "org.apache.commons"},
+			{Name: "leftpad", Version: "1.0.0", PURL: "pkg:npm/leftpad@1.0.0"}, // no supplier
+		},
+	}
+	a := buildSPDX(doc, doc.TargetRef, time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC))
+	byName := map[string]spdxPackage{}
+	for _, p := range a.Packages {
+		byName[p.Name] = p
+	}
+	if got := byName["commons-lang3"].Supplier; got != "Organization: org.apache.commons" {
+		t.Errorf("PackageSupplier = %q, want \"Organization: org.apache.commons\"", got)
+	}
+	if got := byName["leftpad"].Supplier; got != "" {
+		t.Errorf("a component with no supplier must omit PackageSupplier, got %q", got)
+	}
+}
+
 func TestScanTimePinned(t *testing.T) {
 	r := ScanResult{VulnDBSnapshot: "osv.dev@2026-06-21T10:00:00Z"}
 	if got := r.scanTime(); got.Format(time.RFC3339) != "2026-06-21T10:00:00Z" {
