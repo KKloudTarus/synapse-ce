@@ -65,6 +65,7 @@ type Service struct {
 	suppression    ports.SuppressionLoader       // optional repo-committed .synapseignore accepted-risk policy
 	vexLoader      ports.VEXLoader               // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
 	complianceOn   bool                          // when set, attach the AppSec-baseline compliance report to a scan
+	dbMaxAgeDays   int                           // when > 0, warn if a reference DB (KEV/EPSS/vuln-DB) is older than this
 	reachability   ports.ReachabilityRecorder    // optional deterministic Tier-2 reachability proof
 	correlation    ports.CorrelationRecorder     // optional cross-check disagreement → judgment minter
 	sbomGen2       ports.SBOMGenerator           // optional 2nd SBOM producer for the cross-check
@@ -161,6 +162,10 @@ func (s *Service) SetVEXLoader(l ports.VEXLoader) { s.vexLoader = l }
 // SetComplianceEnabled turns on attaching the owned AppSec-baseline compliance report (per-control
 // PASS/FAIL over the scan's findings) to each scan result. Deterministic + LLM-free; off by default.
 func (s *Service) SetComplianceEnabled(on bool) { s.complianceOn = on }
+
+// SetDBMaxAgeDays sets the reference-DB freshness policy: a scan warns (SourceWarning) when a dated DB
+// (KEV/EPSS catalog, vuln-DB build) is older than this many days. 0 (default) disables the check.
+func (s *Service) SetDBMaxAgeDays(days int) { s.dbMaxAgeDays = days }
 
 // attachCompliance computes the AppSec-baseline benchmark over the finalized findings when enabled. It runs
 // over ALL findings (an accepted-risk finding still fails its control — compliance reflects what is present).
@@ -1224,6 +1229,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		}
 	}
 	snap := ports.ScanSnapshot{ToolVersions: toolVersions, VulnDBSnapshot: s.prov.VulnDBSource + "@" + now.UTC().Format(time.RFC3339), GrypeDBVersion: grypeDB}
+	sourceWarnings = append(sourceWarnings, dbFreshnessWarnings(toolVersions, now, s.dbMaxAgeDays)...) // stale-DB freshness policy
 	manifest := buildManifest(toolVersions, snap.VulnDBSnapshot, grypeDB, doc)
 	manifest.SBOMSHA256 = record.SHA256
 	result := &ScanResult{
@@ -1642,6 +1648,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		VulnDBSnapshot: s.prov.VulnDBSource + "@" + now.UTC().Format(time.RFC3339),
 		GrypeDBVersion: grypeDB,
 	}
+	sourceWarnings = append(sourceWarnings, dbFreshnessWarnings(toolVersions, now, s.dbMaxAgeDays)...) // stale-DB freshness policy
 	manifest := buildManifest(toolVersions, snap.VulnDBSnapshot, grypeDB, doc)
 
 	// Maven, once its full tree is resolved (mvn dependency:list), is no longer an under-reporting

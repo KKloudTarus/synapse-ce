@@ -179,6 +179,10 @@ type Config struct {
 	// detected vuln is actionable) or "precise" (single-source, non-KEV vulns are quarantined into a
 	// needs-verify queue — reported + sealed, exempt from the --fail-on gate). Empty = comprehensive.
 	DetectionPriority string
+	// DBMaxAgeDays warns (non-fatal, SourceWarning) when a dated reference DB (CISA KEV / EPSS catalog, or a
+	// pinned vuln DB) is older than this many days — so a scan on stale advisory data can't silently
+	// under-report (Trivy uses a stale DB silently). 0 disables the check.
+	DBMaxAgeDays int
 	// ScanCacheEnabled turns on the content+version-addressed generated-SBOM cache; off by default. A hit on
 	// an unchanged tree skips the cataloging step; a producer version bump invalidates the entry.
 	ScanCacheEnabled bool
@@ -334,6 +338,7 @@ func Load() Config {
 		VEXEnabled:             getbool("SYNAPSE_VEX_ENABLED", false),
 		ComplianceEnabled:      getbool("SYNAPSE_COMPLIANCE_ENABLED", false),
 		DetectionPriority:      os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
+		DBMaxAgeDays:           getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
 		ScanCacheEnabled:       getbool("SYNAPSE_SCAN_CACHE_ENABLED", false),
 		ScanCacheDir:           os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
 		OwnedAdvisoryEnabled:   getbool("SYNAPSE_OWNED_ADVISORY", false),
