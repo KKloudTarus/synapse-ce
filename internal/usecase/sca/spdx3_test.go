@@ -132,3 +132,20 @@ func pkgSuppliedBy(p *spdx3Package) string {
 	}
 	return p.SuppliedBy
 }
+
+func TestSPDX3HashAlg(t *testing.T) {
+	// Every canonical (SPDX 2.3-style) algorithm name the domain gate can emit must map to a valid SPDX 3.0.1
+	// HashAlgorithm token: most lower-case cleanly, but the SHA-3 family takes an underscore and BLAKE2b drops
+	// the separator. This covers all 15 names, so an override typo or a fallback regression is caught.
+	cases := map[string]string{
+		"SHA1": "sha1", "SHA224": "sha224", "SHA256": "sha256", "SHA384": "sha384", "SHA512": "sha512",
+		"SHA3-256": "sha3_256", "SHA3-384": "sha3_384", "SHA3-512": "sha3_512",
+		"BLAKE2b-256": "blake2b256", "BLAKE2b-384": "blake2b384", "BLAKE2b-512": "blake2b512",
+		"MD2": "md2", "MD4": "md4", "MD5": "md5", "ADLER32": "adler32",
+	}
+	for in, want := range cases {
+		if got := spdx3HashAlg(in); got != want {
+			t.Errorf("spdx3HashAlg(%q) = %q, want %q for the SPDX 3.0.1 vocabulary", in, got, want)
+		}
+	}
+}

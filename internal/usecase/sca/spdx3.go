@@ -13,7 +13,8 @@ import (
 )
 
 // spdx3Hashes renders a component's integrity digests as SPDX 3.0 Hash elements, reusing the SPDX 2.x
-// normalization (hex value, one per algorithm) and lowercasing the algorithm per the SPDX 3.0 vocabulary.
+// normalization (hex value, one per algorithm) and mapping the canonical algorithm name to the SPDX 3.0.1
+// HashAlgorithm vocabulary (which is not a plain lower-casing for the SHA-3 and BLAKE2b families).
 func spdx3Hashes(c sbom.Component) []spdx3Hash {
 	cks := spdxChecksums(c)
 	if len(cks) == 0 {
@@ -21,9 +22,27 @@ func spdx3Hashes(c sbom.Component) []spdx3Hash {
 	}
 	out := make([]spdx3Hash, 0, len(cks))
 	for _, ck := range cks {
-		out = append(out, spdx3Hash{Type: "Hash", Algorithm: strings.ToLower(ck.Algorithm), HashValue: ck.ChecksumValue})
+		out = append(out, spdx3Hash{Type: "Hash", Algorithm: spdx3HashAlg(ck.Algorithm), HashValue: ck.ChecksumValue})
 	}
 	return out
+}
+
+// spdx3HashAlgOverrides maps a canonical (SPDX 2.3-style) algorithm name to its SPDX 3.0.1 HashAlgorithm
+// token for the families whose 3.0 spelling is NOT a plain lower-casing: the SHA-3 family uses an underscore
+// (sha3_256, not sha3-256) and the BLAKE2b family uses no separator (blake2b256, not blake2b-256).
+var spdx3HashAlgOverrides = map[string]string{
+	"SHA3-256": "sha3_256", "SHA3-384": "sha3_384", "SHA3-512": "sha3_512",
+	"BLAKE2b-256": "blake2b256", "BLAKE2b-384": "blake2b384", "BLAKE2b-512": "blake2b512",
+}
+
+// spdx3HashAlg returns the SPDX 3.0.1 HashAlgorithm token for a canonical algorithm name. Most names
+// lower-case cleanly (SHA256 -> sha256, MD5 -> md5, ADLER32 -> adler32); the SHA-3 / BLAKE2b families use the
+// explicit overrides above.
+func spdx3HashAlg(canonical string) string {
+	if n, ok := spdx3HashAlgOverrides[canonical]; ok {
+		return n
+	}
+	return strings.ToLower(canonical)
 }
 
 // SPDX 3.0.1 minimal JSON-LD projection (CRA-aligned target format) of the stored
@@ -67,11 +86,11 @@ type spdx3Package struct {
 	PackageVersion string      `json:"software_packageVersion,omitempty"`
 	PackageURL     string      `json:"software_packageUrl,omitempty"`
 	SuppliedBy     string      `json:"suppliedBy,omitempty"`    // IRI of the supplier Agent (NTIA supplier element); SPDX 3.0 models it as a link
-	VerifiedUsing  []spdx3Hash `json:"verifiedUsing,omitempty"` // integrity digests, SPDX 3.0 Hash elements (lowercase algorithm, hex value)
+	VerifiedUsing  []spdx3Hash `json:"verifiedUsing,omitempty"` // integrity digests, SPDX 3.0 Hash elements (SPDX 3.0.1 HashAlgorithm token, hex value)
 	CopyrightText  string      `json:"software_copyrightText"`
 }
 
-// spdx3Hash is an SPDX 3.0 Hash integrity method: a lowercase algorithm name + a hex digest.
+// spdx3Hash is an SPDX 3.0 Hash integrity method: an SPDX 3.0.1 HashAlgorithm token + a hex digest.
 type spdx3Hash struct {
 	Type      string `json:"type"`
 	Algorithm string `json:"algorithm"`
