@@ -249,7 +249,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	}
 	sca := scauc.NewService(
 		engRepo, memory.NewFindingRepository(), memory.NewScanRepository(), nil, nil, nil, nil, nil, prov, clock, stderrAudit{},
-		shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes),
+		shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled),
 		enry.New(), syft.New(cfg.SyftBin),
 		detectionSources,
 		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil)),

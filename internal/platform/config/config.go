@@ -191,6 +191,10 @@ type Config struct {
 	// write there and compute a scan's content+producer key could pre-seed a lossy SBOM (a silent
 	// false-negative). The default per-user cache dir satisfies this.
 	ScanCacheDir string
+	// ImageRootFSEnabled materializes a container image's assembled root filesystem from the pulled OCI
+	// layout (applying layers + whiteouts), so the owned parsers can read on-disk OS-package DBs and
+	// /etc/os-release. Off by default; extraction is hardened but adds disk + time to an image scan.
+	ImageRootFSEnabled bool
 	// OwnedAdvisoryEnabled wires the owned advisory DetectionSource: match the SBOM
 	// against the owned normalized-advisory store (offline, reproducible) ALONGSIDE live OSV/Grype. Off by
 	// default; opt-in. An empty store yields no findings (a harmless no-op) until the advisory ingester
@@ -341,6 +345,7 @@ func Load() Config {
 		DBMaxAgeDays:           getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
 		ScanCacheEnabled:       getbool("SYNAPSE_SCAN_CACHE_ENABLED", false),
 		ScanCacheDir:           os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
+		ImageRootFSEnabled:     getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", false),
 		OwnedAdvisoryEnabled:   getbool("SYNAPSE_OWNED_ADVISORY", false),
 		ReachabilityEnabled:    getbool("SYNAPSE_REACHABILITY_ENABLED", false),
 		CrossCheckEnabled:      getbool("SYNAPSE_CROSSCHECK_ENABLED", false),

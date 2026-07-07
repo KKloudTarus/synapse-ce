@@ -120,7 +120,7 @@ func main() {
 
 	clock := idgen.SystemClock{}
 	ids := idgen.RandomID{}
-	acquirer := acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes)
+	acquirer := acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled)
 
 	// Persistence: PostgreSQL when configured, else file + in-memory (dev).
 	var repo ports.EngagementRepository

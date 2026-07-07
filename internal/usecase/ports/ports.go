@@ -508,8 +508,19 @@ type Workspace struct {
 	// layer stack) when the target is an image (acquired as an OCI layout); nil for
 	// source/dir/archive targets. Drives Epic D layer attribution + base-image
 	// estimation. Best-effort: nil if the image config could not be read.
-	Image   *sbom.ImageInfo
-	Cleanup func() error
+	Image *sbom.ImageInfo
+	// RootFS is the assembled root filesystem of an image target, materialized from the OCI layout (layers
+	// applied with whiteouts) when image-rootfs extraction is enabled; empty otherwise and for non-image
+	// targets. Owned parsers read it for on-disk OS-package DBs + /etc/os-release. Dir stays the OCI layout
+	// (what syft scans); RootFS is the walkable tree. Both live under the same cleaned-up temp dir.
+	RootFS string
+	// RootFSNote records why rootfs materialization was skipped for an image target (unsupported layer
+	// compression, a hostile layer the hardening refused, a malformed layout) when extraction was enabled but
+	// failed. Empty on success or when not enabled. Rootfs is best-effort — a failure never aborts the scan —
+	// so the pipeline surfaces this as a warning (never silently) and a consumer treats an absent RootFS as
+	// "not analyzed", never as "no OS packages".
+	RootFSNote string
+	Cleanup    func() error
 }
 
 // Completeness signals how trustworthy a scan's results are: whether dependency

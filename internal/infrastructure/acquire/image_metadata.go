@@ -86,6 +86,12 @@ type ociManifest struct {
 	Config struct {
 		Digest string `json:"digest"`
 	} `json:"config"`
+	// Layers are the filesystem layers in application order (each a tar, usually gzipped). Used to
+	// materialize the assembled rootfs (extractOCIRootFS); readImageInfo itself does not read them. Only the
+	// digest is needed (the layer compression is sniffed by magic, not trusted from the media type).
+	Layers []struct {
+		Digest string `json:"digest"`
+	} `json:"layers"`
 	selfDigest string // the manifest's own digest (from the index), not in the JSON
 }
 
@@ -125,16 +131,26 @@ func readManifest(layoutDir string) (ociManifest, bool) {
 	return man, true
 }
 
-// readBlobJSON reads + decodes the OCI blob addressed by a "sha256:<hex>" digest
-// from <layoutDir>/blobs/sha256/<hex>. The digest is validated to be a bare
-// algorithm:hex pair so it cannot escape the blobs directory (no path traversal).
-func readBlobJSON[T any](layoutDir, digest string) (T, bool) {
-	var zero T
+// blobPath maps a "sha256:<hex>" digest to its on-disk path <layoutDir>/blobs/<algo>/<hex>, validating the
+// digest is a bare algorithm:hex pair (no separators) so it cannot escape the blobs directory (no traversal).
+func blobPath(layoutDir, digest string) (string, bool) {
 	algo, hex, found := strings.Cut(digest, ":")
 	if !found || algo == "" || hex == "" || strings.ContainsAny(hex, "/\\.") || strings.ContainsAny(algo, "/\\.") {
+		return "", false
+	}
+	return filepath.Join(layoutDir, "blobs", algo, hex), true
+}
+
+// readBlobJSON reads + decodes the OCI blob addressed by a "sha256:<hex>" digest
+// from <layoutDir>/blobs/sha256/<hex>. The digest is validated (see blobPath) so it
+// cannot escape the blobs directory (no path traversal).
+func readBlobJSON[T any](layoutDir, digest string) (T, bool) {
+	var zero T
+	p, ok := blobPath(layoutDir, digest)
+	if !ok {
 		return zero, false
 	}
-	return readJSON[T](filepath.Join(layoutDir, "blobs", algo, hex))
+	return readJSON[T](p)
 }
 
 // readJSON reads + decodes a JSON file, bounded to a sane size. Best-effort: any

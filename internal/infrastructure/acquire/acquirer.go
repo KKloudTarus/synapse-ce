@@ -37,6 +37,7 @@ type Acquirer struct {
 	egressScoped      bool             // when true, scope egress to the repo/registry host; else host-net sandbox
 	imageTool         string           // crane (go-containerregistry CLI) binary for daemonless image pulls
 	maxWorkspaceBytes int64            // prepared-workspace size cap; <=0 ⇒ the MaxWorkspaceBytes default
+	materializeRootFS bool             // when true, an image pull also assembles the layers into a walkable rootfs
 }
 
 // New returns a new Acquirer.
@@ -58,6 +59,15 @@ func (a *Acquirer) WithMaxWorkspaceBytes(n int64) *Acquirer {
 	if n > 0 {
 		a.maxWorkspaceBytes = n
 	}
+	return a
+}
+
+// WithImageRootFS makes an image pull ALSO materialize the assembled root filesystem from the OCI layout
+// (layers applied with whiteouts) into the workspace, exposed on Workspace.RootFS, so owned parsers can read
+// on-disk OS-package DBs and /etc/os-release. Off by default (extra disk + time); wired from
+// SYNAPSE_IMAGE_ROOTFS_ENABLED at the composition root.
+func (a *Acquirer) WithImageRootFS(enabled bool) *Acquirer {
+	a.materializeRootFS = enabled
 	return a
 }
 
@@ -288,7 +298,21 @@ func (a *Acquirer) acquireImage(ctx context.Context, ref string) (*ports.Workspa
 	// host-side lockfiles to inspect, so the workspace carries just the layout dir. Recover
 	// image metadata (layer stack + build history) from the OCI config for layer attribution
 	// (Epic D) — best-effort: nil if the config is unreadable, never fails the acquisition.
-	return &ports.Workspace{Dir: layout, Image: readImageInfo(layout, ref), Cleanup: cleanup}, nil
+	ws := &ports.Workspace{Dir: layout, Image: readImageInfo(layout, ref), Cleanup: cleanup}
+	// Optionally assemble the layers into a walkable root filesystem (owned OS-package cataloging reads it).
+	// BEST-EFFORT: the rootfs is supplementary — syft still scans the OCI layout in Dir regardless — and the
+	// extractor is fail-closed, so a failure (a hostile layer the hardening refused, an unsupported
+	// compression, a malformed layer) SKIPS the rootfs with a recorded reason rather than aborting the scan.
+	// RootFS is left empty so no partial tree is ever consumed.
+	if a.materializeRootFS {
+		rootfs := filepath.Join(dir, "rootfs")
+		if err := extractOCIRootFS(ctx, layout, rootfs, a.maxWorkspaceBytes); err != nil {
+			ws.RootFSNote = truncate(redactCreds(err.Error()), 200)
+		} else {
+			ws.RootFS = rootfs
+		}
+	}
+	return ws, nil
 }
 
 // registryHosts is the egress allow-list for pulling ref: the registry host, plus the
