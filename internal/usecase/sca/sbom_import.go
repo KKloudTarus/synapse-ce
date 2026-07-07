@@ -156,12 +156,11 @@ type cdxBOM struct {
 	BOMFormat   string `json:"bomFormat"`
 	SpecVersion string `json:"specVersion"`
 	Metadata    struct {
-		Tools []struct {
-			Vendor  string `json:"vendor"`
-			Name    string `json:"name"`
-			Version string `json:"version"`
-		} `json:"tools"`
-		Component cdxComponent `json:"component"`
+		// Tools is the legacy array [{vendor,name,version}] (<=1.4) OR the object {components:[...]} (1.5+);
+		// kept raw so a modern document does not fail the whole decode on this optional field. Parsed by
+		// cdxGeneratorVersion.
+		Tools     json.RawMessage `json:"tools"`
+		Component cdxComponent    `json:"component"`
 	} `json:"metadata"`
 	Components   []cdxComponent  `json:"components"`
 	Dependencies []cdxDependency `json:"dependencies"`
@@ -193,6 +192,17 @@ type cdxDependency struct {
 	DependsOn []string `json:"dependsOn"`
 }
 
+// supportedCDXSpecVersions are the CycloneDX 1.x spec versions the importer accepts. The fields Synapse
+// reads (bomFormat, components with purl/version/licenses, metadata.component, dependencies) are
+// stable across these versions and CycloneDX is backward-tolerant within 1.x, so a 1.5/1.6 document parses
+// the same as a 1.4 one. Accepting 1.5/1.6 lets Synapse ingest what current Syft/Trivy/cdxgen emit by
+// default, and re-import its own CycloneDX 1.6 export.
+var supportedCDXSpecVersions = map[string]bool{"1.4": true, "1.5": true, "1.6": true}
+
+func supportedCDXSpecVersion(v string) bool {
+	return supportedCDXSpecVersions[strings.TrimSpace(v)]
+}
+
 // parseCycloneDX decodes a CycloneDX JSON document into domain components + the
 // target name from metadata. Rejects a non-CycloneDX or empty document.
 func parseCycloneDX(data []byte) (parsedCycloneDX, error) {
@@ -203,8 +213,8 @@ func parseCycloneDX(data []byte) (parsedCycloneDX, error) {
 	if !strings.EqualFold(bom.BOMFormat, "CycloneDX") {
 		return parsedCycloneDX{}, fmt.Errorf("%w: not a CycloneDX document (bomFormat=%q)", shared.ErrValidation, bom.BOMFormat)
 	}
-	if strings.TrimSpace(bom.SpecVersion) != "1.4" {
-		return parsedCycloneDX{}, fmt.Errorf("%w: unsupported CycloneDX specVersion %q", shared.ErrValidation, bom.SpecVersion)
+	if !supportedCDXSpecVersion(bom.SpecVersion) {
+		return parsedCycloneDX{}, fmt.Errorf("%w: unsupported CycloneDX specVersion %q (supported: 1.4, 1.5, 1.6)", shared.ErrValidation, bom.SpecVersion)
 	}
 	if len(bom.Components) == 0 {
 		return parsedCycloneDX{}, fmt.Errorf("%w: CycloneDX document has no components", shared.ErrValidation)
@@ -285,27 +295,64 @@ func cdxComponentToDomain(c cdxComponent) (sbom.Component, bool) {
 	return comp, true
 }
 
-func cdxGeneratorVersion(tools []struct {
-	Vendor  string `json:"vendor"`
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}) string {
-	if len(tools) == 0 {
+// cdxMaxToolsBytes bounds the raw metadata.tools value before parsing: a real tools list is a handful of
+// entries, so a larger value is an implausible/adversarial blob and yields no generator string (it never
+// rejects the document, since GeneratorVersion is optional) rather than decoding a huge transient slice.
+const cdxMaxToolsBytes = 64 << 10
+
+// cdxMaxGeneratorVersionChars caps the untrusted generator string before it is stored, sealed into the
+// import manifest, and shown, so a pathological tools.name/version cannot amplify into those sinks.
+const cdxMaxGeneratorVersionChars = 256
+
+// cdxGeneratorVersion extracts a "name/version" for the SBOM's generating tool from metadata.tools, which
+// has TWO shapes across CycloneDX versions: the legacy array [{vendor,name,version}] (<=1.4) and the object
+// {components:[{name,version}], services:[...]} (1.5+). It tries both and never errors — a tools value it
+// cannot read just yields "", so a modern document is not rejected over this optional field.
+func cdxGeneratorVersion(raw json.RawMessage) string {
+	if len(raw) == 0 || len(raw) > cdxMaxToolsBytes {
 		return ""
 	}
-	tool := tools[0]
-	name := strings.TrimSpace(tool.Name)
-	if name == "" {
-		name = strings.TrimSpace(tool.Vendor)
+	type cdxTool struct {
+		Vendor  string `json:"vendor"`
+		Name    string `json:"name"`
+		Version string `json:"version"`
 	}
-	version := strings.TrimSpace(tool.Version)
-	if name == "" {
-		return version
+	format := func(t cdxTool) string {
+		name := strings.TrimSpace(t.Name)
+		if name == "" {
+			name = strings.TrimSpace(t.Vendor)
+		}
+		version := strings.TrimSpace(t.Version)
+		var s string
+		switch {
+		case name == "":
+			s = version
+		case version == "":
+			s = name
+		default:
+			s = name + "/" + version
+		}
+		if len(s) > cdxMaxGeneratorVersionChars { // cap the untrusted string (rune-safe) before it flows onward
+			if r := []rune(s); len(r) > cdxMaxGeneratorVersionChars {
+				s = string(r[:cdxMaxGeneratorVersionChars])
+			}
+		}
+		return s
 	}
-	if version == "" {
-		return name
+	var arr []cdxTool // legacy array form
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		if len(arr) > 0 {
+			return format(arr[0])
+		}
+		return ""
 	}
-	return name + "/" + version
+	var obj struct { // 1.5+ object form: tools.components[]
+		Components []cdxTool `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil && len(obj.Components) > 0 {
+		return format(obj.Components[0])
+	}
+	return ""
 }
 
 func hashHex(data []byte) string {
