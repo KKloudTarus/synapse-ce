@@ -398,8 +398,10 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		manifestByComp := map[string]string{}
 		if res.SBOM != nil {
 			for _, c := range res.SBOM.Components {
-				// SBOM Location is workspace-rooted with a leading "/" (Syft's dir-scan convention); a
-				// code-scanning UI wants a repo-relative path, so drop the leading slash.
+				// SBOM Location is often workspace-rooted with a leading "/" (Syft's dir-scan convention);
+				// a code-scanning UI wants a repo-relative path, so drop any leading slash (a no-op when
+				// absent). If two components share name@version, last write wins — any declaring manifest
+				// is fine for the annotation.
 				if loc := strings.TrimPrefix(c.Location, "/"); loc != "" {
 					manifestByComp[c.Name+"@"+c.Version] = loc
 				}
