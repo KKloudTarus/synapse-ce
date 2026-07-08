@@ -1,7 +1,3 @@
-<div align="center">
-
-<img src="assets/logo-mark-colour.png" alt="Synapse" width="88">
-
 # Synapse Documentation
 
 **Verify Everything. Trust Nothing.**
@@ -9,8 +5,6 @@
 A governed control plane for software composition analysis, recon, evidence, and reporting.
 
 [Landing page](https://synapse.kkloudtarus.net/) · [GitHub](https://github.com/KKloudTarus/synapse-ce) · [License](https://github.com/KKloudTarus/synapse-ce/blob/main/LICENSE)
-
-</div>
 
 ---
 
