@@ -1,7 +1,9 @@
 // Package misconfig is an owned, deterministic infrastructure-as-code / config scanner over a prepared
-// workspace. It flags insecure Dockerfile and Kubernetes-manifest settings with first-party Go checks —
-// no external policy engine (no OPA/Rego) and no network. Checks are chosen to be high-signal and
-// low-false-positive: a rule fires only on an explicit insecure setting, never on an unset default.
+// workspace. It flags insecure settings in Dockerfiles, Kubernetes manifests, Helm charts (rendered via
+// `helm template`), and Terraform (HCL) with first-party Go checks — no external policy engine (no
+// OPA/Rego). Explicit-insecure settings are flagged as high/medium; recommended-hardening that is absent
+// (KSV/CIS/tfsec baseline: runAsNonRoot, dropped capabilities, encryption, resource limits, ...) is
+// flagged as low/medium, so coverage matches comprehensive scanners while the highs stay legible.
 //
 // It is READ-ONLY: it classifies files by name/content, parses them, and returns located findings. A
 // parse or read error is a per-file skip, never a scan failure. Results become ungated Kind=misconfig
@@ -30,6 +32,7 @@ const (
 // Scanner implements ports.MisconfigScanner with an owned ruleset.
 type Scanner struct {
 	skipDirs map[string]bool
+	helmBin  string // `helm` binary for rendering Helm charts; empty or missing ⇒ Helm charts are skipped
 }
 
 var _ ports.MisconfigScanner = (*Scanner)(nil)
@@ -39,6 +42,7 @@ func New() *Scanner {
 	return &Scanner{
 		skipDirs: set(".git", "node_modules", "vendor", "dist", "build", "target", ".idea",
 			".gradle", ".venv", "venv", "__pycache__", "bin"),
+		helmBin: "helm",
 	}
 }
 
@@ -52,6 +56,7 @@ const (
 	cfgNone configKind = iota
 	cfgDockerfile
 	cfgKubernetes
+	cfgTerraform
 )
 
 // ScanConfigs walks root, classifies each regular file, and returns located misconfig findings.
@@ -80,6 +85,17 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 		// Only read regular files: never follow a symlink out of the (untrusted) workspace, so a planted
 		// link cannot pull an out-of-root file into the scan.
 		if !d.Type().IsRegular() {
+			return nil
+		}
+		// A Helm chart (Chart.yaml) is rendered as a whole via `helm template` and its output scanned with
+		// the Kubernetes rules — the raw templates carry Go-template directives and are not valid YAML.
+		// Skip a Chart.yaml bundled under a parent chart's charts/ dir (the parent render covers the subchart).
+		if d.Name() == "Chart.yaml" {
+			if !strings.Contains(path, string(os.PathSeparator)+"charts"+string(os.PathSeparator)) && count < maxFiles {
+				count++
+				relDir := strings.TrimPrefix(strings.TrimPrefix(filepath.Dir(path), root), string(os.PathSeparator))
+				out = append(out, scanHelmChart(ctx, s.helmBin, filepath.Dir(path), relDir)...)
+			}
 			return nil
 		}
 		kind := classifyName(d.Name())
@@ -111,6 +127,8 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			out = append(out, scanDockerfile(rel, data)...)
 		case cfgKubernetes:
 			out = append(out, scanKubernetes(rel, data)...)
+		case cfgTerraform:
+			out = append(out, scanTerraform(rel, data)...)
 		}
 		return nil
 	})
@@ -126,6 +144,9 @@ func classifyName(name string) configKind {
 		strings.HasPrefix(name, "Dockerfile.") ||
 		strings.HasSuffix(strings.ToLower(name), ".dockerfile") {
 		return cfgDockerfile
+	}
+	if strings.HasSuffix(strings.ToLower(name), ".tf") {
+		return cfgTerraform
 	}
 	return cfgNone
 }

@@ -39,15 +39,28 @@ type k8sDoc struct {
 }
 
 type k8sSpec struct {
-	HostNetwork    bool           `yaml:"hostNetwork"`
-	HostPID        bool           `yaml:"hostPID"`
-	HostIPC        bool           `yaml:"hostIPC"`
-	Containers     []k8sContainer `yaml:"containers"`
-	InitContainers []k8sContainer `yaml:"initContainers"`
-	Volumes        []k8sVolume    `yaml:"volumes"`
-	Template       *struct {
+	HostNetwork                  bool           `yaml:"hostNetwork"`
+	HostPID                      bool           `yaml:"hostPID"`
+	HostIPC                      bool           `yaml:"hostIPC"`
+	AutomountServiceAccountToken *bool          `yaml:"automountServiceAccountToken"`
+	Containers                   []k8sContainer `yaml:"containers"`
+	InitContainers               []k8sContainer `yaml:"initContainers"`
+	Volumes                      []k8sVolume    `yaml:"volumes"`
+	SecurityContext              *podSecCtx     `yaml:"securityContext"` // pod-level (inherited by containers)
+	Template                     *struct {
 		Spec k8sSpec `yaml:"spec"`
 	} `yaml:"template"`
+}
+
+// podSecCtx is the pod-level securityContext; runAsNonRoot / runAsUser / seccompProfile set here are
+// inherited by every container that does not override them.
+type podSecCtx struct {
+	RunAsNonRoot   *bool `yaml:"runAsNonRoot"`
+	RunAsUser      *int  `yaml:"runAsUser"`
+	RunAsGroup     *int  `yaml:"runAsGroup"`
+	SeccompProfile *struct {
+		Type string `yaml:"type"`
+	} `yaml:"seccompProfile"`
 }
 
 type k8sVolume struct {
@@ -61,16 +74,28 @@ type k8sContainer struct {
 	Name            string     `yaml:"name"`
 	Image           string     `yaml:"image"`
 	SecurityContext *ctnSecCtx `yaml:"securityContext"`
+	Resources       *struct {
+		Limits map[string]any `yaml:"limits"`
+	} `yaml:"resources"`
+	Ports []struct {
+		HostPort int `yaml:"hostPort"`
+	} `yaml:"ports"`
 }
 
 type ctnSecCtx struct {
 	Privileged               *bool `yaml:"privileged"`
 	RunAsNonRoot             *bool `yaml:"runAsNonRoot"`
 	RunAsUser                *int  `yaml:"runAsUser"`
+	RunAsGroup               *int  `yaml:"runAsGroup"`
 	AllowPrivilegeEscalation *bool `yaml:"allowPrivilegeEscalation"`
+	ReadOnlyRootFilesystem   *bool `yaml:"readOnlyRootFilesystem"`
 	Capabilities             *struct {
-		Add []string `yaml:"add"`
+		Add  []string `yaml:"add"`
+		Drop []string `yaml:"drop"`
 	} `yaml:"capabilities"`
+	SeccompProfile *struct {
+		Type string `yaml:"type"`
+	} `yaml:"seccompProfile"`
 }
 
 // podSpec resolves the effective pod spec: a workload's spec.template.spec, or the object's own spec.
@@ -129,6 +154,16 @@ func checkK8sDoc(rel string, doc k8sDoc, node *yaml.Node) []ports.MisconfigRawFi
 		})
 	}
 
+	if isWorkloadKind(doc.Kind) && (doc.Metadata.Namespace == "" || doc.Metadata.Namespace == "default") {
+		add("kubernetes-default-namespace", "Workload in the default namespace",
+			"The workload has no namespace or uses \"default\", so it shares a namespace with unrelated workloads and weakens RBAC/network-policy scoping. Deploy it to a dedicated namespace.",
+			shared.SeverityLow, "metadata")
+	}
+	if isWorkloadKind(doc.Kind) && (spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken) {
+		add("kubernetes-automount-sa-token", "Service-account token auto-mounted",
+			"automountServiceAccountToken is not set to false, so the pod receives the API token even if it never calls the API server, widening the blast radius of a compromise. Set it to false unless API access is needed.",
+			shared.SeverityLow, "automountServiceAccountToken")
+	}
 	if spec.HostNetwork {
 		add("kubernetes-host-network", "Pod shares the host network namespace",
 			"hostNetwork: true lets the pod see and bind host interfaces, bypassing network policy and exposing host services. Remove hostNetwork unless the workload is a node-level agent that genuinely needs it.",
@@ -154,11 +189,14 @@ func checkK8sDoc(rel string, doc k8sDoc, node *yaml.Node) []ports.MisconfigRawFi
 
 	all := append(append([]k8sContainer{}, spec.Containers...), spec.InitContainers...)
 	for _, c := range all {
-		sc := c.SecurityContext
-		if sc == nil {
-			continue
-		}
 		cres := res + " container=" + clip(c.Name)
+		sc := c.SecurityContext
+		// KSV/CIS hardening: fire when a recommended secure setting is MISSING (the comprehensive
+		// posture that matches Trivy/kube-bench), regardless of whether a securityContext block exists.
+		out = append(out, k8sHardening(rel, node, cres, docLine, sc, c, spec.SecurityContext)...)
+		if sc == nil {
+			continue // the explicit-insecure checks below need a securityContext to inspect
+		}
 		if sc.Privileged != nil && *sc.Privileged {
 			out = append(out, k8sContainerFinding(rel, node, cres, "kubernetes-privileged",
 				"Privileged container", shared.SeverityHigh, "privileged",
@@ -186,6 +224,143 @@ func checkK8sDoc(rel string, doc k8sDoc, node *yaml.Node) []ports.MisconfigRawFi
 		}
 	}
 	return out
+}
+
+// k8sHardening emits the missing-hardening findings (KSV / CIS / Pod Security baseline) for one
+// container: a recommended secure setting that is absent is flagged, matching the comprehensive posture
+// of scanners like Trivy and kube-bench. Pod-level runAsNonRoot / seccompProfile are inherited when the
+// container does not set its own. Severities are low/medium so they never bury the explicit-insecure highs.
+func k8sHardening(rel string, node *yaml.Node, cres string, docLine int, sc *ctnSecCtx, c k8sContainer, pod *podSecCtx) []ports.MisconfigRawFinding {
+	var out []ports.MisconfigRawFinding
+	h := func(rule, title, desc, key string, sev shared.Severity) {
+		out = append(out, k8sContainerFinding(rel, node, cres, rule, title, sev, key, desc, docLine))
+	}
+	if !runAsNonRootEnforced(sc, pod) {
+		h("kubernetes-no-run-as-non-root", "Container may run as root",
+			"Nothing enforces a non-root user (runAsNonRoot: true or a non-zero runAsUser) on the container or the pod, so it can run as UID 0. Set securityContext.runAsNonRoot: true.",
+			"runAsNonRoot", shared.SeverityMedium)
+	}
+	if !(sc != nil && sc.AllowPrivilegeEscalation != nil && !*sc.AllowPrivilegeEscalation) {
+		h("kubernetes-no-priv-escalation-disabled", "Privilege escalation not disabled",
+			"allowPrivilegeEscalation is not set to false, so a process can gain more privileges than its parent (e.g. via a setuid binary). Set securityContext.allowPrivilegeEscalation: false.",
+			"allowPrivilegeEscalation", shared.SeverityLow)
+	}
+	if !(sc != nil && sc.ReadOnlyRootFilesystem != nil && *sc.ReadOnlyRootFilesystem) {
+		h("kubernetes-no-read-only-root-fs", "Writable container root filesystem",
+			"readOnlyRootFilesystem is not true, so the container can write to its own filesystem (tampering, dropped tooling persists). Set securityContext.readOnlyRootFilesystem: true and mount writable paths explicitly.",
+			"readOnlyRootFilesystem", shared.SeverityLow)
+	}
+	if !dropsAllCaps(sc) {
+		h("kubernetes-caps-not-dropped", "Default Linux capabilities not dropped",
+			"The container does not drop ALL capabilities (securityContext.capabilities.drop: [ALL]), so it keeps the default capability set. Drop ALL and add back only the few that are required.",
+			"capabilities", shared.SeverityLow)
+	}
+	if !seccompEnforced(sc, pod) {
+		h("kubernetes-no-seccomp", "No seccomp profile",
+			"No seccompProfile is set (RuntimeDefault or Localhost) on the container or the pod, so syscalls are unrestricted. Set seccompProfile.type: RuntimeDefault.",
+			"seccompProfile", shared.SeverityLow)
+	}
+	cpu, mem := false, false
+	if c.Resources != nil {
+		_, cpu = c.Resources.Limits["cpu"]
+		_, mem = c.Resources.Limits["memory"]
+	}
+	if !cpu {
+		h("kubernetes-no-cpu-limit", "No CPU limit",
+			"The container sets no resources.limits.cpu, so a runaway workload can starve other pods on the node. Set a CPU limit.",
+			"resources", shared.SeverityLow)
+	}
+	if !mem {
+		h("kubernetes-no-memory-limit", "No memory limit",
+			"The container sets no resources.limits.memory, so a memory leak or hostile workload can OOM the node (noisy-neighbor / DoS). Set a memory limit.",
+			"resources", shared.SeverityLow)
+	}
+	if !runAsUserSet(sc, pod) {
+		h("kubernetes-no-run-as-user", "No explicit runAsUser",
+			"Neither the container nor the pod sets an explicit securityContext.runAsUser, so the UID is left to the image. Pin a non-zero runAsUser for a predictable, non-root identity.",
+			"runAsUser", shared.SeverityLow)
+	}
+	if (sc == nil || sc.RunAsGroup == nil) && (pod == nil || pod.RunAsGroup == nil) {
+		h("kubernetes-no-run-as-group", "No explicit runAsGroup",
+			"Neither the container nor the pod sets securityContext.runAsGroup, so the primary GID defaults to the image (often 0/root group). Pin a non-zero runAsGroup.",
+			"runAsGroup", shared.SeverityLow)
+	}
+	if t := imageTag(c.Image); c.Image != "" && (t == "" || t == "latest") {
+		h("kubernetes-image-no-tag", "Container image not version-pinned",
+			"The container image uses no tag or :latest, so the deployed version is not reproducible and can silently change. Pin an explicit tag, ideally by digest.",
+			"image", shared.SeverityLow)
+	}
+	for _, p := range c.Ports {
+		if p.HostPort != 0 {
+			h("kubernetes-host-port", "Container binds a host port",
+				"A container port sets hostPort, binding directly to the node's network and bypassing Service abstraction and network policy. Expose the workload through a Service instead.",
+				"hostPort", shared.SeverityMedium)
+			break
+		}
+	}
+	return out
+}
+
+// isWorkloadKind reports whether a Kubernetes kind carries a pod template / runs workloads (so pod-level
+// namespace and service-account checks apply); cluster-scoped objects like Namespace or ClusterRole do not.
+func isWorkloadKind(kind string) bool {
+	switch kind {
+	case "Pod", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob", "ReplicationController":
+		return true
+	}
+	return false
+}
+
+// runAsUserSet reports whether an explicit runAsUser is set on the container or, by inheritance, the pod.
+func runAsUserSet(sc *ctnSecCtx, pod *podSecCtx) bool {
+	if sc != nil && sc.RunAsUser != nil {
+		return true
+	}
+	return pod != nil && pod.RunAsUser != nil
+}
+
+// runAsNonRootEnforced reports whether a non-root user is enforced by the container or, by inheritance,
+// the pod. An EXPLICIT root setting also counts as "enforced/handled" here so the missing-hardening rule
+// does not double-report with runsAsRoot (which flags the explicit case at a higher severity).
+func runAsNonRootEnforced(sc *ctnSecCtx, pod *podSecCtx) bool {
+	if sc != nil {
+		if sc.RunAsNonRoot != nil {
+			return true // explicitly true (secure) or false (handled by runsAsRoot)
+		}
+		if sc.RunAsUser != nil {
+			return true // any explicit UID: >0 secure, 0 handled by runsAsRoot
+		}
+	}
+	if pod != nil {
+		if pod.RunAsNonRoot != nil && *pod.RunAsNonRoot {
+			return true
+		}
+		if pod.RunAsUser != nil && *pod.RunAsUser > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// seccompEnforced reports whether a seccomp profile is set on the container or, by inheritance, the pod.
+func seccompEnforced(sc *ctnSecCtx, pod *podSecCtx) bool {
+	if sc != nil && sc.SeccompProfile != nil && strings.TrimSpace(sc.SeccompProfile.Type) != "" {
+		return true
+	}
+	return pod != nil && pod.SeccompProfile != nil && strings.TrimSpace(pod.SeccompProfile.Type) != ""
+}
+
+// dropsAllCaps reports whether the container drops ALL Linux capabilities.
+func dropsAllCaps(sc *ctnSecCtx) bool {
+	if sc == nil || sc.Capabilities == nil {
+		return false
+	}
+	for _, d := range sc.Capabilities.Drop {
+		if strings.EqualFold(strings.TrimSpace(d), "ALL") {
+			return true
+		}
+	}
+	return false
 }
 
 // runsAsRoot reports an EXPLICIT root configuration only (runAsUser 0, or runAsNonRoot false) — an unset

@@ -66,6 +66,7 @@ func TestDockerfileSecureNoFindings(t *testing.T) {
 RUN useradd -r app
 COPY ./bin/app /usr/local/bin/app
 USER app
+HEALTHCHECK CMD ["app", "healthz"]
 ENTRYPOINT ["app"]
 `
 	if got := scan(t, map[string]string{"Dockerfile": df}); len(got) != 0 {
@@ -148,25 +149,38 @@ func TestKubernetesHardenedNoFindings(t *testing.T) {
 kind: Pod
 metadata:
   name: safe
+  namespace: prod
 spec:
+  automountServiceAccountToken: false
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
   containers:
     - name: app
       image: myapp:1.0
+      resources:
+        limits:
+          cpu: "500m"
+          memory: "256Mi"
       securityContext:
         privileged: false
         runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 3000
         allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
         capabilities:
           drop: ["ALL"]
 `
 	if got := scan(t, map[string]string{"pod.yaml": manifest}); len(got) != 0 {
-		t.Errorf("hardened Pod should yield no findings, got %+v", got)
+		t.Errorf("fully hardened Pod should yield no findings, got %+v", got)
 	}
 }
 
-func TestKubernetesUnsetSecurityContextIsQuiet(t *testing.T) {
-	// No securityContext at all: we deliberately do NOT flag defaults (low-FP policy).
+func TestKubernetesUnhardenedFlagged(t *testing.T) {
+	// A container with no securityContext now yields the missing-hardening findings (the comprehensive
+	// KSV/CIS posture that matches Trivy/kube-bench); the earlier low-FP "stay quiet" policy was
+	// intentionally replaced so Synapse is not weaker than comprehensive scanners on IaC coverage.
 	manifest := `apiVersion: v1
 kind: Pod
 metadata:
@@ -176,8 +190,16 @@ spec:
     - name: app
       image: myapp:1.0
 `
-	if got := scan(t, map[string]string{"pod.yaml": manifest}); len(got) != 0 {
-		t.Errorf("pod with no securityContext must stay quiet, got %+v", got)
+	got := ruleIDs(scan(t, map[string]string{"pod.yaml": manifest}))
+	for _, want := range []string{
+		"kubernetes-no-run-as-non-root", "kubernetes-no-priv-escalation-disabled",
+		"kubernetes-no-read-only-root-fs", "kubernetes-caps-not-dropped",
+		"kubernetes-no-seccomp", "kubernetes-no-cpu-limit", "kubernetes-no-memory-limit",
+		"kubernetes-no-run-as-user",
+	} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("unhardened container must flag %q, got %v", want, keys(got))
+		}
 	}
 }
 
