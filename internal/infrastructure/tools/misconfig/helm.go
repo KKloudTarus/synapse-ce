@@ -39,7 +39,9 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 			ReadOnlyPaths:  []string{chartDir},
 			Timeout:        helmRenderTimeout,
 			MaxOutputBytes: maxRenderedBytes,
-			EgressPolicy:   &ports.EgressPolicy{}, // no AllowDomains ⇒ default-deny
+			// No EgressPolicy: `helm template` needs no network, so leave it nil for full network isolation
+			// (--unshare-all, no interface at all) rather than a filtered veth — stronger, and it does not
+			// depend on the egress applier being present. This neutralizes Helm's Sprig getHostByName.
 		})
 		if err != nil || res.ExitCode != 0 {
 			return nil
