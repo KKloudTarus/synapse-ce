@@ -1,7 +1,6 @@
 <div align="center">
 
-<img src="../assets/logo-full-black.png#gh-light-mode-only" alt="Synapse" width="340">
-<img src="../assets/logo-full-white.png#gh-dark-mode-only" alt="Synapse" width="340">
+<img src="assets/logo-mark-colour.png" alt="Synapse" width="88">
 
 # Synapse Documentation
 
@@ -9,7 +8,7 @@
 
 A governed control plane for software composition analysis, recon, evidence, and reporting.
 
-[Landing page](https://synapse.kkloudtarus.net/) · [GitHub](https://github.com/KKloudTarus/synapse-ce) · [License](../../LICENSE)
+[Landing page](https://synapse.kkloudtarus.net/) · [GitHub](https://github.com/KKloudTarus/synapse-ce) · [License](https://github.com/KKloudTarus/synapse-ce/blob/main/LICENSE)
 
 </div>
 

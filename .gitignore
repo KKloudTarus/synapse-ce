@@ -30,3 +30,6 @@ web/dist/
 
 # local scratch prompt file
 prompt.txt
+
+# Docs site (mkdocs build output)
+/site/

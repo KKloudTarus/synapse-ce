@@ -21,6 +21,8 @@ synapse-cli scan <path|image-ref> [flags]
 | `--image` | Treat the argument as a container image reference, pulled via crane, instead of a local path. |
 | `--offline` | Skip the live advisory source and detect with the offline database only. |
 | `--ignore-unfixed` | Ignore vulnerabilities that have no fix available. |
+| `--detection-priority comprehensive\|precise` | `comprehensive` (default) reports every match. `precise` moves single-source, non-KEV findings into a needs-verify queue that does not trip `--fail-on`. |
+| `--json` | Print the full scan result as JSON to stdout, for machine consumption in CI. |
 
 ### Examples
 
@@ -55,7 +57,13 @@ synapse-cli sync-advisories --remote-distros
 
 # ingest a local CSAF 2.0 advisory dump
 synapse-cli sync-advisories --csaf <dir>
+
+# ingest a local Ubuntu OVAL dump (com.ubuntu.*.cve.oval.xml[.bz2])
+synapse-cli sync-advisories --oval <dir>
 ```
+
+Enable the store at scan time with `SYNAPSE_OWNED_ADVISORY=true`, then it runs alongside the
+live and offline sources.
 
 ## GitHub Actions
 

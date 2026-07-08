@@ -1,0 +1,60 @@
+name: Docs
+
+# Build the MkDocs Material guide and deploy it to GitHub Pages, keeping the
+# hand-built marketing landing page at the site root and serving the rendered
+# guide under /docs/. The custom domain (CNAME) is preserved in the artifact.
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - mkdocs.yml
+      - requirements-docs.txt
+      - .github/workflows/docs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deploy; do not cancel an in-flight publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install MkDocs Material
+        run: pip install -r requirements-docs.txt
+      - name: Build the guide (strict)
+        run: mkdocs build --strict
+      - name: Assemble the Pages site (landing at /, guide under /docs/)
+        run: |
+          rm -rf _site
+          mkdir -p _site/docs
+          cp -r site/. _site/docs/
+          cp docs/index.html docs/style.css _site/
+          cp -r docs/assets _site/assets
+          cp docs/CNAME _site/CNAME
+          touch _site/.nojekyll
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

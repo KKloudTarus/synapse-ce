@@ -5,7 +5,7 @@
 Synapse reads its configuration from the process environment. It does not auto-load a file.
 Load your settings first, for example `set -a; source .env; set +a`, or pass them with
 `docker run --env-file`, Compose `env_file`, or your process manager. A fully documented
-template lives in [`.env.example`](../../.env.example).
+template lives in [`.env.example`](https://github.com/KKloudTarus/synapse-ce/blob/main/.env.example).
 
 Conventions: an empty value means unset, so the built-in default applies. Booleans accept
 `1/0/true/false`. Durations use Go syntax such as `30s`, `10m`, `1h`. Sizes are byte counts.
@@ -70,6 +70,25 @@ Conventions: an empty value means unset, so the built-in default applies. Boolea
 | `SYNAPSE_OWNED_ADVISORY` | `false` | Match the SBOM against the owned advisory store, alongside the live and offline sources. Populate it first with `synapse-cli sync-advisories`. |
 | `SYNAPSE_JARHASH_ONLINE_ENABLED` | `false` | Recover the coordinate of a shaded or metadata-less JAR by its SHA-1. |
 | `SYNAPSE_OSV_URL`, `SYNAPSE_OSV_BULK_URL`, `SYNAPSE_DEPSDEV_URL`, `SYNAPSE_KEV_URL`, `SYNAPSE_EPSS_URL` | (public) | Feed overrides for tests or mirrors. |
+
+## Extra scanners and detection tuning (opt-in)
+
+All of these are off by default. See [Features](features.md) for what each one does.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_SECRET_SCAN_ENABLED` | `false` | Secret scanning over the workspace (regex plus entropy). Matches are redacted; the raw secret never reaches logs, evidence, or the report. |
+| `SYNAPSE_MISCONFIG_ENABLED` | `false` | Misconfiguration and IaC scanning of Dockerfiles and Kubernetes manifests. |
+| `SYNAPSE_DETECTION_PRIORITY` | `comprehensive` | `comprehensive` reports every match. `precise` quarantines single-source, non-KEV findings into a needs-verify queue that is still reported and sealed but exempt from the `--fail-on` gate. |
+| `SYNAPSE_OFFLINE` | `false` | Skip the live advisory source and detect with the offline database only. |
+| `SYNAPSE_IGNORE_UNFIXED` | `false` | Drop vulnerabilities that have no fixed version. |
+| `SYNAPSE_DB_MAX_AGE_DAYS` | `30` | Warn when a dated reference database (KEV, EPSS, or the Grype DB) is older than this many days. 0 disables the check. |
+| `SYNAPSE_SUPPRESSION_ENABLED` | `false` | Honor a `.synapseignore` file. Acceptance exempts only the `--fail-on` gate; the finding is still reported, persisted, and evidence-sealed. |
+| `SYNAPSE_VEX_ENABLED` | `false` | Consume an in-repo OpenVEX document (`.synapse.vex.json`) at scan time, on the same retain-and-mark surface as suppression. |
+| `SYNAPSE_COMPLIANCE_ENABLED` | `false` | Compliance benchmark. Re-projects findings onto a control specification and reports per-control PASS or FAIL. |
+| `SYNAPSE_SCAN_CACHE_ENABLED` | `false` | SBOM scan cache, addressed by content plus producer version. The cache directory must be operator-owned, since a shared-writable cache would allow poisoning. |
+| `SYNAPSE_SCAN_CACHE_DIR` | (per-user) | Cache location. Empty uses a per-user cache directory. |
+| `SYNAPSE_IMAGE_ROOTFS_ENABLED` | `false` | Materialize a container image root filesystem so the owned OS-package catalogers (dpkg, apk, and the rpm sqlite database) and installed-binary catalogers (Go build info, Python dist-info) can run. Best-effort. |
 
 ## Recon and execution sandbox (sandbox required in production)
 
