@@ -255,7 +255,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled),
 		enry.New(), syft.New(cfg.SyftBin),
 		detectionSources,
-		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil)),
+		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil)),
 	)
 	sca.SetSBOMEnricher(manifest.New())
 	sca.SetMavenCoordResolver(mavencoord.New())   // recover real Maven coords from JAR pom.properties (offline) before license lookup
