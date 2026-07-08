@@ -49,20 +49,83 @@ func TestFindingMinSeverityDefaultsToInfo(t *testing.T) {
 	}
 }
 
-// TestLoadReachability confirms the Tier-2 reachability proof is OFF by default (opt-in) and the
-// govulncheck binary defaults sensibly.
+// TestLoadReachability confirms the Tier-2 reachability proof is ON by default (effective-by-default
+// policy), that it can be opted out, and the govulncheck binary defaults sensibly.
 func TestLoadReachability(t *testing.T) {
 	t.Setenv("SYNAPSE_REACHABILITY_ENABLED", "")
 	t.Setenv("SYNAPSE_GOVULNCHECK_BIN", "") // hermetic: ignore any binary override in the runner env
-	if c := Load(); c.ReachabilityEnabled {
-		t.Error("reachability must be OFF by default (opt-in)")
+	if c := Load(); !c.ReachabilityEnabled {
+		t.Error("reachability must be ON by default (effective-by-default)")
 	}
 	if got := Load().GovulncheckBin; got != "govulncheck" {
 		t.Errorf("GovulncheckBin default = %q, want govulncheck", got)
 	}
-	t.Setenv("SYNAPSE_REACHABILITY_ENABLED", "true")
-	if !Load().ReachabilityEnabled {
-		t.Error("SYNAPSE_REACHABILITY_ENABLED=true must enable it")
+	t.Setenv("SYNAPSE_REACHABILITY_ENABLED", "false")
+	if Load().ReachabilityEnabled {
+		t.Error("SYNAPSE_REACHABILITY_ENABLED=false must disable it")
+	}
+}
+
+// analysisDefaultOnEnv is the set of deterministic, best-effort capability flags that default ON so
+// the tool is fully effective out of the box (the UI and a bare scan get the full feature set).
+var analysisDefaultOnEnv = []string{
+	"SYNAPSE_JUDGMENTS_ENABLED", "SYNAPSE_SAST_ENABLED", "SYNAPSE_SECRET_SCAN_ENABLED",
+	"SYNAPSE_MISCONFIG_ENABLED", "SYNAPSE_SUPPRESSION_ENABLED", "SYNAPSE_VEX_ENABLED",
+	"SYNAPSE_COMPLIANCE_ENABLED", "SYNAPSE_SCAN_CACHE_ENABLED", "SYNAPSE_IMAGE_ROOTFS_ENABLED",
+	"SYNAPSE_OWNED_ADVISORY", "SYNAPSE_REACHABILITY_ENABLED", "SYNAPSE_CROSSCHECK_ENABLED",
+	"SYNAPSE_SBOM_CROSSCHECK_ENABLED", "SYNAPSE_GOMODGRAPH_ENABLED", "SYNAPSE_JVM_REACHABILITY_ENABLED",
+}
+
+// TestAnalysisDefaultsOn pins the effective-by-default policy: every deterministic, best-effort
+// analysis capability is ON unless the operator opts out. A regression that silently flips one back
+// to opt-in would make the UI quietly stop running that scanner.
+func TestAnalysisDefaultsOn(t *testing.T) {
+	for _, k := range analysisDefaultOnEnv {
+		t.Setenv(k, "") // hermetic: no override from the runner env
+	}
+	c := Load()
+	on := map[string]bool{
+		"Judgments": c.JudgmentsEnabled, "SAST": c.SASTEnabled, "SecretScan": c.SecretScanEnabled,
+		"Misconfig": c.MisconfigEnabled, "Suppression": c.SuppressionEnabled, "VEX": c.VEXEnabled,
+		"Compliance": c.ComplianceEnabled, "ScanCache": c.ScanCacheEnabled, "ImageRootFS": c.ImageRootFSEnabled,
+		"OwnedAdvisory": c.OwnedAdvisoryEnabled, "Reachability": c.ReachabilityEnabled,
+		"CrossCheck": c.CrossCheckEnabled, "SBOMCrossCheck": c.SBOMCrossCheckEnabled,
+		"GoModGraph": c.GoModGraphEnabled, "JVMReachability": c.JVMReachabilityEnabled,
+	}
+	for name, v := range on {
+		if !v {
+			t.Errorf("%s must default ON (effective-by-default policy)", name)
+		}
+	}
+	// And it stays opt-out-able.
+	t.Setenv("SYNAPSE_SAST_ENABLED", "false")
+	if Load().SASTEnabled {
+		t.Error("SYNAPSE_SAST_ENABLED=false must disable it")
+	}
+}
+
+// TestExternalSetupDefaultsOff pins that capabilities needing external setup, or unsafe when
+// unsandboxed, stay OFF by default: a fresh server starts cleanly and never runs untrusted build
+// logic or contacts an LLM without an explicit opt-in.
+func TestExternalSetupDefaultsOff(t *testing.T) {
+	for _, k := range []string{
+		"SYNAPSE_SANDBOX_ENABLED", "SYNAPSE_AGENT_ENABLED", "SYNAPSE_TAINT_ENABLED",
+		"SYNAPSE_MAVEN_RESOLVE_ENABLED", "SYNAPSE_GRADLE_RESOLVE_ENABLED", "SYNAPSE_JARHASH_ONLINE_ENABLED",
+		"SYNAPSE_WRITEUP_DRAFTS_ENABLED", "SYNAPSE_OFFLINE", "SYNAPSE_IGNORE_UNFIXED",
+	} {
+		t.Setenv(k, "")
+	}
+	c := Load()
+	off := map[string]bool{
+		"Sandbox": c.SandboxEnabled, "Agent": c.AgentEnabled, "Taint": c.TaintEnabled,
+		"MavenResolve": c.MavenResolveEnabled, "GradleResolve": c.GradleResolveEnabled,
+		"JarHashOnline": c.JarHashOnlineEnabled, "WriteupDrafts": c.WriteupDraftsEnabled,
+		"Offline": c.Offline, "IgnoreUnfixed": c.IgnoreUnfixed,
+	}
+	for name, v := range off {
+		if v {
+			t.Errorf("%s must default OFF (needs external setup / opt-in)", name)
+		}
 	}
 }
 

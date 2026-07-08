@@ -561,7 +561,8 @@ func main() {
 		scaService.SetComplianceEnabled(true) // attach the AppSec-baseline benchmark (per-control PASS/FAIL)
 		log.Info("compliance report ENABLED (Synapse AppSec Baseline; deterministic, LLM-free)")
 	}
-	scaService.SetDBMaxAgeDays(cfg.DBMaxAgeDays) // warn on stale reference DBs (KEV/EPSS/vuln-DB); 0 disables
+	scaService.SetDBMaxAgeDays(cfg.DBMaxAgeDays)           // warn on stale reference DBs (KEV/EPSS/vuln-DB); 0 disables
+	scaService.SetDetectionPriority(cfg.DetectionPriority) // server default (comprehensive|precise); the API scan path has no per-request priority
 	if cfg.ScanCacheEnabled {
 		if dir := cfg.ResolveScanCacheDir(); dir != "" {
 			scaService.SetSBOMCache(sbomcache.New(dir)) // content+version-addressed generated-SBOM cache

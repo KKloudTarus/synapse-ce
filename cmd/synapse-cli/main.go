@@ -24,6 +24,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gomodgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/grype"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ignorefile"
@@ -334,6 +335,12 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	}
 	if cfg.ComplianceEnabled {
 		sca.SetComplianceEnabled(true) // attach the AppSec-baseline benchmark (per-control PASS/FAIL)
+	}
+	if cfg.GoModGraphEnabled {
+		// Transitive pkg:golang edges via `go mod graph` (reads go.mod only, never compiles; GOPROXY=off +
+		// GOTOOLCHAIN=local). Runs unsandboxed here, matching the CLI's trusted-local model for its other
+		// resolvers; best-effort (a non-Go target / no module cache adds no edges, never fails the scan).
+		sca.SetGraphResolver(gomodgraph.New(cfg.GoBin))
 	}
 	sca.SetDBMaxAgeDays(cfg.DBMaxAgeDays) // warn on stale reference DBs (KEV/EPSS/vuln-DB); 0 disables
 	if cfg.ScanCacheEnabled {

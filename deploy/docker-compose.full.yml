@@ -112,13 +112,23 @@ services:
       # --- SANDBOX: OFF in a plain container (dev). syft/grype/git run unsandboxed. ---
       SYNAPSE_SANDBOX_ENABLED: "false"
 
-      # --- SCA feature flags (everything that works WITHOUT the sandbox) ---
+      # --- SCA feature flags: the full analysis set is ON BY DEFAULT (these are the code
+      #     defaults, listed explicitly so the enabled surface is visible). Everything here
+      #     works WITHOUT the sandbox. Set any to "false" to opt out. ---
       SYNAPSE_SBOM_PRODUCER: "syft"
       SYNAPSE_OWNED_ADVISORY: "true"        # owned matcher; populate with `synapse-cli sync-advisories`
       SYNAPSE_JUDGMENTS_ENABLED: "true"
       SYNAPSE_CROSSCHECK_ENABLED: "true"
       SYNAPSE_SBOM_CROSSCHECK_ENABLED: "true"
       SYNAPSE_SAST_ENABLED: "true"
+      SYNAPSE_SECRET_SCAN_ENABLED: "true"   # hardcoded credentials; matches redacted
+      SYNAPSE_MISCONFIG_ENABLED: "true"     # Dockerfile + Kubernetes manifests
+      SYNAPSE_COMPLIANCE_ENABLED: "true"    # AppSec-baseline benchmark (deterministic, LLM-free)
+      SYNAPSE_SUPPRESSION_ENABLED: "true"   # .synapseignore accepted-risk (retain-and-mark)
+      SYNAPSE_VEX_ENABLED: "true"           # in-repo .synapse.vex.json
+      SYNAPSE_REACHABILITY_ENABLED: "true"  # govulncheck call-graph proof; best-effort, warns when unsandboxed
+      SYNAPSE_SCAN_CACHE_ENABLED: "true"    # content+version-addressed SBOM cache
+      SYNAPSE_IMAGE_ROOTFS_ENABLED: "true"  # OS-package + installed-binary cataloging from an image rootfs
       SYNAPSE_GOMODGRAPH_ENABLED: "true"    # runs unsandboxed (warns) when the sandbox is off
       SYNAPSE_JVM_REACHABILITY_ENABLED: "true"   # read-only bytecode parse, no sandbox needed
       # Maven/Gradle transitive resolvers: the API server fail-closes these without the sandbox (they run
