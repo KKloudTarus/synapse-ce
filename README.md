@@ -31,6 +31,16 @@ deterministic reports.
 <img src="assets/engagements-overview-part1.png" alt="Synapse engagements overview" width="900">
 </div>
 
+## Why Synapse
+
+- ✅ **Deterministic first.** Scanning, matching, and reporting are pure, reproducible Go. No model sits in the report path.
+- ✅ **Evidence you can trust.** Every artifact is hash-chained into a tamper-evident custody record. A broken chain blocks the report.
+- ✅ **One tool, four scanners.** SCA, first-party SAST, secret scanning, and IaC misconfig behind a single gate.
+- ✅ **Reachability aware.** A deterministic call graph decides whether a vulnerable symbol is actually reachable from your code.
+- ✅ **Detection independent.** Owns its SBOM parsers and advisory matching, and ingests OSV, GHSA, and CSAF.
+- ✅ **CI ready.** `synapse-cli` is a single static binary that gates a build and emits SARIF for code scanning.
+- ✅ **Safe by construction.** argv-only execution in a Linux sandbox, server-side scope and authorization before any tool runs, secrets never leave the server.
+
 ## What is Synapse
 
 Synapse runs the security-assessment lifecycle behind one governed control plane: software
@@ -68,6 +78,25 @@ approves anything intrusive.
   confirms. No model ever sits in the report path.
 
 See the full walkthrough with screenshots on the [documentation site](https://synapse.kkloudtarus.net/#screens).
+
+## How it compares
+
+Detection is at parity with the popular scanners, and sometimes ahead. On one representative
+real-world repository, Synapse reported 261 unique CVEs to Trivy's 239 (235 in common) and
+attached a license to 1443 packages to Trivy's 1394. Numbers move with the project, so treat
+these as illustrative rather than a benchmark claim.
+
+The lasting difference is what sits around the finding:
+
+| Capability | Synapse | Most scanners |
+| --- | --- | --- |
+| SCA, license, IaC misconfig, secret scanning | Yes | Yes |
+| First-party SAST (source-code rules) | Yes | Usually no |
+| Reachability via a call graph | Yes | Rarely |
+| Hash-chained, tamper-evident evidence | Yes | No |
+| Server-side scope and authorization before a tool runs | Yes | No |
+| RBAC, tenant isolation, separation of duties | Yes | No |
+| Deterministic, model-free report path | Yes | Varies |
 
 ## Quickstart
 
@@ -143,6 +172,23 @@ The only required variable is `SYNAPSE_API_TOKEN`. See the
 
 Full documentation lives in [`docs/guide/`](docs/guide/README.md): introduction, installation,
 quickstart, features, configuration, CLI, architecture, deployment, and the security model.
+
+## Roadmap
+
+Synapse is under active development. Near-term directions:
+
+- Broader ecosystem coverage: more owned lockfile parsers (Conda, R, Julia, Conan).
+- More first-party SAST rules, and additional languages.
+- More IaC checks across Terraform, Kubernetes, and CloudFormation.
+- Richer SARIF output, including remediation in code-scanning alerts.
+- More curated, model-free compliance profiles.
+- Reachability for more language ecosystems.
+- More CI recipes and integration examples.
+
+Have a request? Open an issue or start a discussion. Issues tagged
+[`good first issue`](https://github.com/KKloudTarus/synapse-ce/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+and [`help wanted`](https://github.com/KKloudTarus/synapse-ce/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
+are a good place to start.
 
 ## Contributors
 
