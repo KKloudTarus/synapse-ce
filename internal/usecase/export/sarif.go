@@ -87,7 +87,7 @@ type SARIFLogicalLocation struct {
 	Kind string `json:"kind,omitempty"`
 }
 
-func buildSARIF(findings []finding.Finding, version string) *SARIFLog {
+func buildSARIF(findings []finding.Finding, version string, manifestFor func(finding.Finding) string) *SARIFLog {
 	rules := make([]SARIFRule, 0)
 	seen := map[string]bool{}
 	results := make([]SARIFResult, 0, len(findings))
@@ -113,10 +113,20 @@ func buildSARIF(findings []finding.Finding, version string) *SARIFLog {
 			// them under one stable rule id rather than leaking the per-finding anchor as the rule id.
 			ruleID = "synapse-taint-sast"
 		} else if p.component != "" {
-			// SCA: the vulnerable dependency is a logical module, not a source line.
-			locations = []SARIFLocation{{
-				LogicalLocations: []SARIFLogicalLocation{{Name: p.component + "@" + p.version, Kind: "module"}},
-			}}
+			// SCA: point at the manifest/lockfile that declares the vulnerable dependency, so a
+			// code-scanning UI annotates it (GitHub rejects a location that has only a logical/module
+			// location). When the manifest is unknown, emit NO location — a result with no location is a
+			// valid repo-level alert, but a logical-only location is not.
+			manifest := ""
+			if manifestFor != nil {
+				manifest = manifestFor(f)
+			}
+			if manifest != "" {
+				locations = []SARIFLocation{{
+					PhysicalLocation: &SARIFPhysicalLocation{ArtifactLocation: SARIFArtifactLocation{URI: manifest}},
+					LogicalLocations: []SARIFLogicalLocation{{Name: p.component + "@" + p.version, Kind: "module"}},
+				}}
+			}
 		}
 
 		level := sarifLevel(f.Severity)
@@ -229,7 +239,9 @@ func ruleTitle(title string) string {
 // MarshalSARIF renders findings as an indented SARIF 2.1.0 log — the artifact a code-scanning
 // uploader (e.g. GitHub `codeql-action/upload-sarif`) consumes. It is deterministic and templated
 // purely from stored findings: no clock, no LLM (golden rule 5). version is the synapse driver
-// version recorded on the run's tool driver.
-func MarshalSARIF(findings []finding.Finding, version string) ([]byte, error) {
-	return json.MarshalIndent(buildSARIF(findings, version), "", "  ")
+// version recorded on the run's tool driver. manifestFor, when non-nil, returns the repo-relative
+// manifest/lockfile path that declares a dependency finding's component so SCA findings get a
+// physical location; return "" when unknown (the finding then becomes a repo-level alert).
+func MarshalSARIF(findings []finding.Finding, version string, manifestFor func(finding.Finding) string) ([]byte, error) {
+	return json.MarshalIndent(buildSARIF(findings, version, manifestFor), "", "  ")
 }

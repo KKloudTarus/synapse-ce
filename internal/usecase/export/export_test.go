@@ -121,7 +121,13 @@ func TestOpenVEXJustificationFromVexJudgment(t *testing.T) {
 }
 
 func TestBuildSARIF(t *testing.T) {
-	log := buildSARIF(sampleFindings(), "v1.2.3")
+	manifests := func(f finding.Finding) string {
+		if f.DedupKey == "vuln:CVE-2020-7471:django:2.2.0" {
+			return "requirements.txt"
+		}
+		return ""
+	}
+	log := buildSARIF(sampleFindings(), "v1.2.3", manifests)
 	if log.Version != "2.1.0" || log.Schema == "" {
 		t.Fatalf("bad header: %+v", log)
 	}

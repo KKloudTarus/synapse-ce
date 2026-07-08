@@ -16,8 +16,10 @@ import (
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
@@ -390,9 +392,26 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	case sarifOut:
 		// SARIF 2.1.0 for a code-scanning uploader (e.g. GitHub codeql-action/upload-sarif), to stdout so
 		// nothing else mixes in. Covers every finding kind (SCA/SAST/secret/misconfig); first-party kinds
-		// carry a file:line physical location. The --fail-on gate below still sets the exit code, so the
-		// same run both annotates and gates.
-		out, err := exportuc.MarshalSARIF(res.Findings, res.ToolVersions["synapse"])
+		// carry a file:line physical location. Map each component@version to the manifest it was found in
+		// so SCA findings get a physical location too (GitHub rejects logical-only locations). The
+		// --fail-on gate below still sets the exit code, so the same run both annotates and gates.
+		manifestByComp := map[string]string{}
+		if res.SBOM != nil {
+			for _, c := range res.SBOM.Components {
+				// SBOM Location is workspace-rooted with a leading "/" (Syft's dir-scan convention); a
+				// code-scanning UI wants a repo-relative path, so drop the leading slash.
+				if loc := strings.TrimPrefix(c.Location, "/"); loc != "" {
+					manifestByComp[c.Name+"@"+c.Version] = loc
+				}
+			}
+		}
+		manifestFor := func(f finding.Finding) string {
+			if _, comp, ver, ok := vulnerability.ParseDedupKey(f.DedupKey); ok {
+				return manifestByComp[comp+"@"+ver]
+			}
+			return ""
+		}
+		out, err := exportuc.MarshalSARIF(res.Findings, res.ToolVersions["synapse"], manifestFor)
 		if err != nil {
 			return fmt.Errorf("encode sarif: %w", err)
 		}

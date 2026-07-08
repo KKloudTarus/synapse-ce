@@ -19,8 +19,16 @@ func firstPartyFindings() []finding.Finding {
 	}
 }
 
+// demoManifests resolves the sample SCA finding's component to the manifest that declares it.
+func demoManifests(f finding.Finding) string {
+	if f.DedupKey == "vuln:CVE-2020-7471:django:2.2.0" {
+		return "requirements.txt"
+	}
+	return ""
+}
+
 func TestSARIFPhysicalLocationForFirstParty(t *testing.T) {
-	log := buildSARIF(firstPartyFindings(), "v9")
+	log := buildSARIF(firstPartyFindings(), "v9", demoManifests)
 	byRule := map[string]SARIFResult{}
 	for _, r := range log.Runs[0].Results {
 		byRule[r.RuleID] = r
@@ -59,21 +67,45 @@ func TestSARIFPhysicalLocationForFirstParty(t *testing.T) {
 		}
 	}
 
-	// The SCA vuln keeps a logical module location and never a physical one.
+	// The SCA vuln points at the manifest (physical) so a code-scanning UI can annotate it, and keeps
+	// the module as a companion logical location.
 	v, ok := byRule["CVE-2020-7471"]
 	if !ok {
 		t.Fatal("missing SCA result")
 	}
-	if len(v.Locations) != 1 || v.Locations[0].PhysicalLocation != nil {
-		t.Fatalf("SCA finding must not have a physical location: %+v", v.Locations)
+	if len(v.Locations) != 1 || v.Locations[0].PhysicalLocation == nil {
+		t.Fatalf("SCA finding should carry a manifest physical location: %+v", v.Locations)
+	}
+	if v.Locations[0].PhysicalLocation.ArtifactLocation.URI != "requirements.txt" {
+		t.Errorf("SCA manifest uri = %q, want requirements.txt", v.Locations[0].PhysicalLocation.ArtifactLocation.URI)
 	}
 	if v.Locations[0].LogicalLocations[0].Name != "django@2.2.0" {
 		t.Errorf("SCA module location = %+v", v.Locations[0].LogicalLocations)
 	}
 }
 
+// TestSARIFNoLogicalOnlyLocation guards the GitHub-ingestion invariant: a result must never carry a
+// location that has only a logicalLocation (GitHub rejects the whole file with "expected a physical
+// location"). Without a manifest resolver, an SCA finding therefore gets NO location, not a logical-only one.
+func TestSARIFNoLogicalOnlyLocation(t *testing.T) {
+	log := buildSARIF(firstPartyFindings(), "v9", nil) // no manifest resolver
+	for _, r := range log.Runs[0].Results {
+		for _, loc := range r.Locations {
+			if loc.PhysicalLocation == nil {
+				t.Errorf("result %q has a location without a physicalLocation: %+v", r.RuleID, loc)
+			}
+		}
+	}
+	// The SCA finding specifically must end up with zero locations here.
+	for _, r := range log.Runs[0].Results {
+		if r.RuleID == "CVE-2020-7471" && len(r.Locations) != 0 {
+			t.Errorf("SCA finding with no known manifest should have no location, got %+v", r.Locations)
+		}
+	}
+}
+
 func TestMarshalSARIFValidJSON(t *testing.T) {
-	out, err := MarshalSARIF(firstPartyFindings(), "v9")
+	out, err := MarshalSARIF(firstPartyFindings(), "v9", nil)
 	if err != nil {
 		t.Fatalf("MarshalSARIF: %v", err)
 	}
@@ -144,7 +176,7 @@ func TestRuleTitleStripsLocationMarker(t *testing.T) {
 	}
 
 	// The rule entry uses the generic title; the per-result message keeps the located one.
-	log := buildSARIF(firstPartyFindings(), "v9")
+	log := buildSARIF(firstPartyFindings(), "v9", nil)
 	var found bool
 	for _, r := range log.Runs[0].Tool.Driver.Rules {
 		if r.ID == "weak-crypto-md5" {
@@ -170,7 +202,7 @@ func TestGatedTaintSASTRuleID(t *testing.T) {
 	fs := []finding.Finding{
 		{ID: "t1", Title: "Command injection via tainted flow", Severity: shared.SeverityHigh, Status: finding.StatusOpen, Kind: finding.KindSAST, DedupKey: "sast:ai:pkg/handler.go.Serve"},
 	}
-	log := buildSARIF(fs, "v9")
+	log := buildSARIF(fs, "v9", nil)
 	r := log.Runs[0].Results[0]
 	if r.RuleID != "synapse-taint-sast" {
 		t.Errorf("gated taint rule id = %q, want synapse-taint-sast", r.RuleID)

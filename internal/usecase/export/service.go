@@ -45,7 +45,9 @@ func (s *Service) SARIF(ctx context.Context, engagementID shared.ID) (*SARIFLog,
 	if err != nil {
 		return nil, err
 	}
-	return buildSARIF(fs, s.version), nil
+	// The store-backed export path has findings only (no SBOM), so no manifest resolver: SCA findings
+	// become repo-level alerts rather than logical-only locations a code-scanning UI would reject.
+	return buildSARIF(fs, s.version, nil), nil
 }
 
 // OpenVEX returns the engagement's vulnerability findings as an OpenVEX document. It
