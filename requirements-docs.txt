@@ -1,0 +1,4 @@
+# Documentation site toolchain (MkDocs Material). Used by .github/workflows/docs.yml
+# and for local builds: `mkdocs serve`.
+mkdocs-material>=9.5,<10
+pymdown-extensions>=10

@@ -11,8 +11,10 @@ single vendor. It can also ingest a client-supplied CycloneDX SBOM as the scan i
 
 **Multi-source detection.** Components are matched against a live advisory API and an offline
 database. Results are cross-correlated and de-duplicated, and each finding records the scanner
-and database version as evidence. An owned advisory store can ingest OSV, GHSA, and CSAF feeds
-so that detection does not depend on one provider.
+and database version as evidence. An owned advisory store can ingest OSV, GHSA, CSAF, and
+Ubuntu OVAL feeds so that detection does not depend on one provider. A freshness check warns
+when a dated database is stale, and a `precise` detection mode routes single-source,
+uncorroborated findings into a needs-verify queue instead of failing the build on them.
 
 **Risk-based prioritization.** Findings are ordered by exploitability: the known-exploited
 catalog first, then the exploit-prediction score, then CVSS. Ordering never uses raw CVSS
@@ -21,6 +23,57 @@ alone, so what is actually being exploited rises to the top.
 **Reachability.** A deterministic call-graph engine decides whether a vulnerable symbol is
 reachable from application code. A finding on code that is never called can be de-prioritized,
 and a deterministic proof supersedes any model opinion.
+
+**SBOM quality scoring.** Beyond coverage, Synapse scores the SBOM document itself against the
+NTIA minimum elements and a set of semantic checks, then projects that onto named compliance
+profiles: NTIA 2021 and 2025, BSI TR-03183-2, and OWASP SCVS levels 1 and 2. The score is
+advisory and never gates a build, but it tells you whether the bill of materials is fit for
+downstream vulnerability lookup and sharing.
+
+**Scan cache.** An optional cache, addressed by source content plus the producer version, skips
+re-cataloging an unchanged tree. A producer upgrade invalidates it automatically, so a stale
+catalog is never served. The cache directory must be operator-owned.
+
+## Secret and configuration scanning
+
+**Secret scanning.** A read-only scan of the workspace flags hardcoded credentials using
+keyword prefilters, per-rule regular expressions, and a Shannon-entropy gate for generic
+secrets. Every match is redacted before it is stored, so the raw secret never reaches a log,
+the evidence ledger, or a report.
+
+**Misconfiguration and IaC scanning.** Owned checks over parsed Dockerfiles and Kubernetes
+manifests flag issues such as running as root, unpinned base images, pipe-to-shell installs,
+privileged or host-namespace pods, host-path mounts, and dangerous capabilities. The rules are
+precision-biased: an unset default is not flagged, only an explicit unsafe setting.
+
+## Container image and OS-package analysis
+
+When container image scanning is enabled, Synapse materializes the image root filesystem and
+runs owned catalogers over it, so a shipped artifact is inventoried even without a lockfile:
+
+- **OS packages.** dpkg (`/var/lib/dpkg/status`) and apk (`/lib/apk/db/installed`) for Debian,
+  Ubuntu, and Alpine, plus rpm from the sqlite `rpmdb.sqlite` used by modern RHEL, Fedora,
+  AlmaLinux, Rocky, and Oracle Linux. Packages are emitted with a distro qualifier so the
+  advisory matcher keys them to the right OS ecosystem.
+- **Installed binaries.** Go build information embedded in ELF, PE, and Mach-O binaries, and
+  Python dist-info and egg-info metadata, become `pkg:golang` and `pkg:pypi` components.
+
+Every parser treats the image as untrusted input: reads are bounded, cancellable, and hardened
+against a hostile filesystem or a crafted package database.
+
+## Governance: suppression, VEX, and compliance
+
+These share one rule that fits a chain-of-custody tool: acceptance is retain-and-mark, never
+delete. An accepted finding is still reported, persisted, and evidence-sealed. Only the
+`--fail-on` gate is exempted, and the exemption itself is recorded.
+
+- **`.synapseignore` suppression.** Accept a finding by id, with an optional expiry and reason.
+  An expired rule re-surfaces the finding and trips the gate again.
+- **In-scan VEX.** An in-repo OpenVEX document (`.synapse.vex.json`) marks a finding
+  `not_affected` or `fixed` at scan time, on the same retain-and-mark surface.
+- **Compliance benchmark.** Re-projects findings onto a control specification and reports
+  per-control PASS or FAIL. It reads every finding, including accepted ones, so acceptance can
+  never flip a control to PASS.
 
 ## License compliance
 
@@ -56,6 +109,8 @@ credential vault with placeholder substitution.
 Reports are templated from stored data and are deterministic. Compliance mapping from CWE to
 OWASP, PCI, and ISO controls comes from a curated, source-cited table, with no model in the
 path. Synapse speaks CycloneDX and SPDX with PURL, SARIF, OpenVEX and CSAF, and KEV plus EPSS.
+The SBOM both imports and exports: CycloneDX 1.6 and SPDX 2.3 and 3.0 are available from the
+engagement, from the API export routes, and from the export button in the dashboard.
 
 ## Bounded AI analysis (optional)
 

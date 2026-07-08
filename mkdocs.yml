@@ -1,0 +1,86 @@
+# MkDocs Material configuration for the Synapse documentation site.
+# The marketing landing page (docs/index.html) is kept at the site root; this
+# renders the guide under /docs/. Both are assembled and deployed by
+# .github/workflows/docs.yml. Build locally with:  mkdocs serve
+site_name: Synapse
+site_description: A governed control plane for software composition analysis, recon, evidence, and reporting.
+site_url: https://synapse.kkloudtarus.net/docs/
+repo_url: https://github.com/KKloudTarus/synapse-ce
+repo_name: KKloudTarus/synapse-ce
+edit_uri: edit/main/docs/guide/
+docs_dir: docs/guide
+site_dir: site
+copyright: Apache-2.0 licensed. Authorized security testing only.
+
+theme:
+  name: material
+  language: en
+  logo: assets/logo-mark-white.png
+  favicon: assets/favicon.png
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - navigation.sections
+    - navigation.footer
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - search.highlight
+    - toc.follow
+
+nav:
+  - Home: README.md
+  - Introduction: introduction.md
+  - Installation: installation.md
+  - Quickstart: quickstart.md
+  - Features: features.md
+  - Configuration: configuration.md
+  - CLI: cli.md
+  - Architecture: architecture.md
+  - Deployment: deployment.md
+  - Security model: security.md
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+
+extra:
+  homepage: https://synapse.kkloudtarus.net/
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/KKloudTarus/synapse-ce
+      name: Synapse on GitHub

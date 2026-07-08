@@ -66,7 +66,7 @@ the imported SBOM and runs the detection half of the pipeline.
 ## 6. Report
 
 Assemble a report from the stored data. Reports are templated and deterministic. Export as
-PDF, or in a standard format such as SARIF, SPDX, or OpenVEX.
+PDF, or in a standard format such as SARIF, CycloneDX, SPDX, or OpenVEX.
 
 ## Gate CI instead
 

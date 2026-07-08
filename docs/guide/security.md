@@ -49,4 +49,4 @@ explicitly authorized to test.
 
 Please do not open a public issue for a security vulnerability. Use GitHub's private
 vulnerability reporting on the repository (Security tab, Report a vulnerability). See
-[SECURITY.md](../../SECURITY.md) for details.
+[SECURITY.md](https://github.com/KKloudTarus/synapse-ce/blob/main/SECURITY.md) for details.
