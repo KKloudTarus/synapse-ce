@@ -52,6 +52,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/advisoryingest"
+	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 )
@@ -78,7 +79,8 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
-	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
+	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
+	fmt.Fprintln(os.Stderr, "      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  skip the live OSV.dev source; detect with Grype's offline DB only (air-gapped / fast)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories <dir>        # ingest a local OSV dump into the owned advisory store (requires SYNAPSE_DB_DSN)")
@@ -100,6 +102,7 @@ func runScan() {
 	image := false
 	offline := false
 	jsonOut := false
+	sarifOut := false
 	for i := 3; i < len(os.Args); i++ {
 		switch {
 		case os.Args[i] == "--fail-on" && i+1 < len(os.Args):
@@ -119,6 +122,8 @@ func runScan() {
 			offline = true
 		case os.Args[i] == "--json":
 			jsonOut = true
+		case os.Args[i] == "--sarif":
+			sarifOut = true
 		default:
 			fmt.Fprintf(os.Stderr, "synapse-cli: unknown or incomplete option %q\n", os.Args[i])
 			os.Exit(2)
@@ -137,7 +142,11 @@ func runScan() {
 		fmt.Fprintf(os.Stderr, "synapse-cli: %v (mode want full|vulnerabilities|licenses; detection-priority want comprehensive|precise)\n", err)
 		os.Exit(2)
 	}
-	if err := run(os.Args[2], failOn, mode, priority, ignoreUnfixed, image, offline, jsonOut); err != nil {
+	if jsonOut && sarifOut {
+		fmt.Fprintln(os.Stderr, "synapse-cli: choose only one of --json or --sarif")
+		os.Exit(2)
+	}
+	if err := run(os.Args[2], failOn, mode, priority, ignoreUnfixed, image, offline, jsonOut, sarifOut); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 		os.Exit(1)
 	}
@@ -215,7 +224,7 @@ func (stderrAudit) Record(_ context.Context, e ports.AuditEntry) error {
 
 var _ ports.AuditLogger = stderrAudit{}
 
-func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfixed, image, offline, jsonOut bool) error {
+func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfixed, image, offline, jsonOut, sarifOut bool) error {
 	// An image target is an OCI reference (acquired via crane → OCI layout); a local
 	// target is a filesystem path that must be absolute for the scope check.
 	target := strings.TrimSpace(path)
@@ -377,7 +386,20 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		return fmt.Errorf("scan: %w", err)
 	}
 
-	if jsonOut {
+	switch {
+	case sarifOut:
+		// SARIF 2.1.0 for a code-scanning uploader (e.g. GitHub codeql-action/upload-sarif), to stdout so
+		// nothing else mixes in. Covers every finding kind (SCA/SAST/secret/misconfig); first-party kinds
+		// carry a file:line physical location. The --fail-on gate below still sets the exit code, so the
+		// same run both annotates and gates.
+		out, err := exportuc.MarshalSARIF(res.Findings, res.ToolVersions["synapse"])
+		if err != nil {
+			return fmt.Errorf("encode sarif: %w", err)
+		}
+		if _, err := os.Stdout.Write(append(out, '\n')); err != nil {
+			return fmt.Errorf("write sarif: %w", err)
+		}
+	case jsonOut:
 		// Machine-readable full scan result (for CI / tooling / cross-scanner comparison), to stdout so the
 		// human report never mixes in. The --fail-on gate below still sets the exit code.
 		enc := json.NewEncoder(os.Stdout)
@@ -385,7 +407,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		if err := enc.Encode(res); err != nil {
 			return fmt.Errorf("encode json result: %w", err)
 		}
-	} else {
+	default:
 		printReport(target, res)
 	}
 
