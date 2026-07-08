@@ -321,7 +321,9 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		sca.SetSecretScanner(secretscan.New()) // deterministic, redacted secret scan (CI-friendly)
 	}
 	if cfg.MisconfigEnabled {
-		sca.SetMisconfigScanner(misconfig.New()) // deterministic IaC/config misconfig scan (CI-friendly)
+		// Trusted-local model (like the CLI's maven/gradle resolvers): render Helm charts via a direct
+		// `helm template` exec. It runs the chart's templates on the host, so use it only on a project you trust.
+		sca.SetMisconfigScanner(misconfig.New().WithHelmDirect()) // deterministic IaC/config misconfig scan (CI-friendly)
 	}
 	if cfg.ImageRootFSEnabled {
 		sca.SetOSPackageCataloger(ospkg.New())         // owned dpkg/apk cataloging from the materialized image rootfs

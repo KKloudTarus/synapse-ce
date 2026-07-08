@@ -1,7 +1,10 @@
 package misconfig
 
 import (
+	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 )
 
@@ -91,7 +94,22 @@ func TestHelmRenderedIfAvailable(t *testing.T) {
 		"chart/values.yaml":               "image: demo:1.0\n",
 		"chart/templates/deployment.yaml": helmDeployment,
 	}
-	got := ruleIDs(scan(t, files))
+	root := t.TempDir()
+	for name, body := range files {
+		p := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Helm rendering is off by default; the trusted-local CLI path (WithHelmDirect) enables it.
+	out, err := New().WithHelmDirect().ScanConfigs(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ScanConfigs: %v", err)
+	}
+	got := ruleIDs(out)
 	// The rendered pod sets no hardening, so the missing-hardening rules must fire via the Helm path.
 	for _, want := range []string{"kubernetes-no-run-as-non-root", "kubernetes-no-seccomp"} {
 		if _, ok := got[want]; !ok {

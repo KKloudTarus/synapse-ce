@@ -32,12 +32,16 @@ const (
 // Scanner implements ports.MisconfigScanner with an owned ruleset.
 type Scanner struct {
 	skipDirs map[string]bool
-	helmBin  string // `helm` binary for rendering Helm charts; empty or missing ⇒ Helm charts are skipped
+	helmBin  string           // `helm` binary for rendering Helm charts
+	helmRun  ports.ToolRunner // sandbox runner for helm (API path); nil = not sandboxed
+	helmDir  bool             // allow a direct host exec of helm (trusted-local CLI only)
 }
 
 var _ ports.MisconfigScanner = (*Scanner)(nil)
 
-// New returns a scanner with the default configuration.
+// New returns a scanner with the default configuration. Helm rendering is OFF by default (no runner, not
+// trusted-local): `helm template` executes an untrusted chart, so a caller must opt in with WithHelmRunner
+// (sandboxed, for the API) or WithHelmDirect (direct exec, for the trusted-local CLI).
 func New() *Scanner {
 	return &Scanner{
 		skipDirs: set(".git", "node_modules", "vendor", "dist", "build", "target", ".idea",
@@ -45,6 +49,14 @@ func New() *Scanner {
 		helmBin: "helm",
 	}
 }
+
+// WithHelmRunner enables Helm chart rendering confined by the given ToolRunner (the SCA sandbox), so
+// `helm template` never runs unprotected on the host. Use this in the API path.
+func (s *Scanner) WithHelmRunner(r ports.ToolRunner) *Scanner { s.helmRun = r; return s }
+
+// WithHelmDirect enables Helm chart rendering via a direct host exec — ONLY for a trusted-local caller
+// (the CLI), mirroring how the CLI runs the maven/gradle resolvers unsandboxed on a trusted project.
+func (s *Scanner) WithHelmDirect() *Scanner { s.helmDir = true; return s }
 
 // Name identifies the source on findings.
 func (s *Scanner) Name() string { return "synapse-misconfig" }
@@ -94,7 +106,7 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			if !strings.Contains(path, string(os.PathSeparator)+"charts"+string(os.PathSeparator)) && count < maxFiles {
 				count++
 				relDir := strings.TrimPrefix(strings.TrimPrefix(filepath.Dir(path), root), string(os.PathSeparator))
-				out = append(out, scanHelmChart(ctx, s.helmBin, filepath.Dir(path), relDir)...)
+				out = append(out, scanHelmChart(ctx, s.helmRun, s.helmDir, s.helmBin, filepath.Dir(path), relDir)...)
 			}
 			return nil
 		}
