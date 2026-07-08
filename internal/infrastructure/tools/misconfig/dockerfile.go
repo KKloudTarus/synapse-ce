@@ -30,6 +30,7 @@ func scanDockerfile(rel string, data []byte) []ports.MisconfigRawFinding {
 	var lastUserLine, lastFromLine int
 	lastUserRoot := true // no USER yet ⇒ root
 	haveStage := false
+	haveHealthcheck := false
 
 	for _, in := range instrs {
 		switch in.cmd {
@@ -49,8 +50,18 @@ func scanDockerfile(rel string, data []byte) []ports.MisconfigRawFinding {
 		case "USER":
 			lastUserLine = in.line
 			lastUserRoot = isRootUser(in.args)
+		case "HEALTHCHECK":
+			if !strings.EqualFold(strings.TrimSpace(in.args), "NONE") {
+				haveHealthcheck = true
+			}
+		case "ENV", "ARG":
+			if r, ok := checkSecretEnv(in.cmd, in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
 		case "ADD":
 			if r, ok := checkAddRemote(in.args, rel, in.line); ok {
+				out = append(out, r)
+			} else if r, ok := checkAddLocal(in.args, rel, in.line); ok {
 				out = append(out, r)
 			}
 		case "RUN":
@@ -62,6 +73,7 @@ func scanDockerfile(rel string, data []byte) []ports.MisconfigRawFinding {
 					Description: "A RUN step downloads a script and pipes it directly into a shell (e.g. curl ... | sh), executing unverified remote code at build time. Download to a file, verify a checksum or signature, then run it.",
 				})
 			}
+			out = append(out, checkRunStep(in.args, rel, in.line)...)
 		}
 	}
 
@@ -78,6 +90,16 @@ func scanDockerfile(rel string, data []byte) []ports.MisconfigRawFinding {
 			File: rel, Line: line, RuleID: "dockerfile-run-as-root",
 			Title: "Container runs as root", Severity: shared.SeverityHigh,
 			Resource: "Dockerfile USER", Description: desc,
+		})
+	}
+
+	// No HEALTHCHECK: an orchestrator can't tell whether the container is actually serving.
+	if haveStage && !haveHealthcheck {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: lastFromLine, RuleID: "dockerfile-no-healthcheck",
+			Title: "No container HEALTHCHECK", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile",
+			Description: "The image declares no HEALTHCHECK instruction, so an orchestrator cannot detect an unhealthy-but-running container. Add a HEALTHCHECK that probes the application's readiness.",
 		})
 	}
 	return out
@@ -215,3 +237,153 @@ func isRootUser(args string) bool {
 }
 
 func fields(s string) []string { return strings.Fields(s) }
+
+// secretKeyRe matches an ENV/ARG key that names a credential; a literal value on such a key bakes a
+// secret into an image layer (recoverable by anyone who can pull the image).
+var secretKeyRe = regexp.MustCompile(`(?i)(password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential|\bauth\b)`)
+
+// checkSecretEnv flags an ENV/ARG that assigns a literal value to a secret-named key. A value that
+// references another variable ($X / ${X}) or is empty is not a baked-in secret.
+func checkSecretEnv(cmd, args, rel string, line int) (ports.MisconfigRawFinding, bool) {
+	for _, kv := range envAssignments(args) {
+		key, val := kv[0], kv[1]
+		if !secretKeyRe.MatchString(key) {
+			continue
+		}
+		v := strings.TrimSpace(val)
+		if v == "" || strings.HasPrefix(v, "$") {
+			continue // references another var or unset — not a baked literal
+		}
+		return ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-secret-in-" + strings.ToLower(cmd),
+			Title: "Secret baked into image (" + cmd + ")", Severity: shared.SeverityHigh,
+			Resource:    "Dockerfile " + cmd + " " + clip(key),
+			Description: "A secret-looking " + cmd + " key is assigned a literal value, so the credential is persisted in an image layer and recoverable by anyone who can pull the image. Inject secrets at runtime (env or secret mount) or use BuildKit --secret; never bake them in.",
+		}, true
+	}
+	return ports.MisconfigRawFinding{}, false
+}
+
+// checkAddLocal flags ADD of a plain local path (not a URL, not an archive ADD auto-extracts): COPY is
+// clearer and lacks ADD's implicit URL/extraction behavior.
+func checkAddLocal(args, rel string, line int) (ports.MisconfigRawFinding, bool) {
+	var src []string
+	for _, tok := range fields(args) {
+		if !strings.HasPrefix(tok, "--") {
+			src = append(src, tok)
+		}
+	}
+	if len(src) < 2 {
+		return ports.MisconfigRawFinding{}, false
+	}
+	for _, s := range src[:len(src)-1] { // all but the destination
+		if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+			return ports.MisconfigRawFinding{}, false // remote: handled by checkAddRemote
+		}
+		low := strings.ToLower(s)
+		for _, ext := range []string{".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".gz", ".xz", ".bz2"} {
+			if strings.HasSuffix(low, ext) {
+				return ports.MisconfigRawFinding{}, false // ADD auto-extracts archives — a legitimate use
+			}
+		}
+	}
+	return ports.MisconfigRawFinding{
+		File: rel, Line: line, RuleID: "dockerfile-add-instead-of-copy",
+		Title: "ADD used for a local file (prefer COPY)", Severity: shared.SeverityLow,
+		Resource:    "Dockerfile ADD",
+		Description: "ADD copies a local file here, but ADD also fetches URLs and auto-extracts archives, which is surprising and error-prone. Use COPY for local files so the intent is explicit.",
+	}, true
+}
+
+var (
+	insecureDownloadRe = regexp.MustCompile(`(?i)(?:curl\b[^|&;]*\s(?:-k|--insecure)|wget\b[^|&;]*\s--no-check-certificate)`)
+	aptInstallRe       = regexp.MustCompile(`(?i)\bapt(?:-get)?\s+(?:-[a-z]+\s+)*install\b`)
+	aptCleanRe         = regexp.MustCompile(`(?i)rm\s+-rf?\s+[^\n]*/var/lib/apt/lists`)
+	sudoRe             = regexp.MustCompile(`(?i)(?:^|[|&;]\s*|\s)sudo\s`)
+)
+
+// checkRunStep runs the RUN-instruction checks other than pipe-to-shell: sudo use, TLS-disabling
+// downloads, and apt installs that never prune the package cache.
+func checkRunStep(args, rel string, line int) []ports.MisconfigRawFinding {
+	var out []ports.MisconfigRawFinding
+	if sudoRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-run-sudo",
+			Title: "sudo used in a RUN step", Severity: shared.SeverityMedium,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step uses sudo. Image builds already run as root, so sudo is unnecessary and can pull in a setuid binary or mask the intended user. Run the command directly, or switch USER explicitly.",
+		})
+	}
+	if insecureDownloadRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-insecure-download",
+			Title: "TLS verification disabled in a download", Severity: shared.SeverityMedium,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step downloads with TLS verification disabled (curl -k / --insecure or wget --no-check-certificate), so the content can be tampered with in transit. Remove the flag and trust the system CA store.",
+		})
+	}
+	if aptInstallRe.MatchString(args) && !aptCleanRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-apt-no-clean",
+			Title: "apt install without cache cleanup", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "An apt/apt-get install in this RUN step does not remove /var/lib/apt/lists afterward, leaving the package index in the image layer (larger image, stale metadata). Append: rm -rf /var/lib/apt/lists/*.",
+		})
+	}
+	return out
+}
+
+// envAssignments parses an ENV/ARG argument into (key, value) pairs, handling the modern "K=V K2=V2"
+// form and the legacy "ENV KEY the value" single-pair form.
+func envAssignments(args string) [][2]string {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return nil
+	}
+	var out [][2]string
+	if strings.Contains(args, "=") {
+		for _, tok := range splitEnvTokens(args) {
+			if eq := strings.IndexByte(tok, '='); eq > 0 {
+				out = append(out, [2]string{tok[:eq], strings.Trim(tok[eq+1:], `"'`)})
+			}
+		}
+		return out
+	}
+	if f := strings.Fields(args); len(f) >= 2 { // legacy: ENV KEY rest-is-value
+		out = append(out, [2]string{f[0], strings.Trim(strings.TrimSpace(args[len(f[0]):]), `"'`)})
+	} else if len(f) == 1 {
+		out = append(out, [2]string{f[0], ""})
+	}
+	return out
+}
+
+// splitEnvTokens splits `K=V K2="a b"` on spaces that are outside quotes.
+func splitEnvTokens(s string) []string {
+	var toks []string
+	var cur strings.Builder
+	inQ := byte(0)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case inQ != 0:
+			if c == inQ {
+				inQ = 0
+			}
+			cur.WriteByte(c)
+		case c == '"' || c == '\'':
+			inQ = c
+			cur.WriteByte(c)
+		case c == ' ' || c == '\t':
+			if cur.Len() > 0 {
+				toks = append(toks, cur.String())
+				cur.Reset()
+			}
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	if cur.Len() > 0 {
+		toks = append(toks, cur.String())
+	}
+	return toks
+}

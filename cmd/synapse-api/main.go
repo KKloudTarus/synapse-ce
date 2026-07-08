@@ -470,7 +470,7 @@ func main() {
 	scaService := scauc.NewService(repo, findingRepo, scanRepo, scanResultStore, scanJobStore, scanRunStore, evidenceService, ids, prov, clock, auditLog, shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, acquirer,
 		enry.New(), sbomGen,
 		detectionSources,
-		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil)))
+		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil)))
 	scaService.SetImportedSBOMStore(importedSBOMStore)
 	scaService.SetSBOMEnricher(manifest.New())
 	scaService.SetMavenCoordResolver(mavencoord.New())   // recover real Maven coords from JAR pom.properties (offline) before license lookup
@@ -563,8 +563,17 @@ func main() {
 		log.Info("image-rootfs cataloging ENABLED (dpkg + apk OS packages; Go binaries + Python dist-info)")
 	}
 	if cfg.MisconfigEnabled {
-		scaService.SetMisconfigScanner(misconfig.New()) // deterministic IaC/config misconfig scan in the scan pipeline
-		log.Info("misconfig scanning ENABLED (Dockerfile + Kubernetes manifests)")
+		// Helm chart rendering shells out `helm template` over an UNTRUSTED chart; like the maven/gradle
+		// resolvers it must be sandbox-confined on the API host (a crafted chart's Sprig getHostByName is an
+		// SSRF vector). Wire it through the SCA sandbox when present; otherwise leave Helm rendering OFF.
+		mc := misconfig.New()
+		helmMode := "Helm rendering OFF (no SCA sandbox; a chart runs untrusted templates on the host)"
+		if scaSandbox != nil {
+			mc = mc.WithHelmRunner(scaSandbox)
+			helmMode = "Helm charts rendered sandboxed (egress-denied)"
+		}
+		scaService.SetMisconfigScanner(mc) // deterministic IaC/config misconfig scan in the scan pipeline
+		log.Info("misconfig scanning ENABLED (Dockerfile + Kubernetes + Terraform); " + helmMode)
 	}
 	if cfg.SuppressionEnabled {
 		scaService.SetSuppressionLoader(ignorefile.New()) // repo-committed .synapseignore accepted-risk policy
