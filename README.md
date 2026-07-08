@@ -28,7 +28,7 @@ deterministic reports.
 > holding written permission to test any target.
 
 <div align="center">
-<img src="assets/dashboard.png" alt="Synapse dashboard" width="900">
+<img src="assets/engagements-overview-part1.png" alt="Synapse engagements overview" width="900">
 </div>
 
 ## What is Synapse
