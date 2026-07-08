@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -108,6 +109,22 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/worker"
 	writeupdraftuc "github.com/KKloudTarus/synapse-ce/internal/usecase/writeupdraftuc"
 )
+
+// requireJudgmentsOrSkip decides whether a judgment-minting analyzer that now defaults ON (reachability,
+// cross-check, SBOM cross-check) may wire. With the judgment service present it wires. With judgments off it
+// AUTO-SKIPS (warn) — a default-on analyzer must not crash a judgments-off deployment — UNLESS the operator
+// EXPLICITLY set the analyzer's flag =true, which is a real contradiction worth failing closed on.
+func requireJudgmentsOrSkip(log *slog.Logger, hasJudgment bool, envKey, name string) bool {
+	if hasJudgment {
+		return true
+	}
+	if _, explicit := os.LookupEnv(envKey); explicit {
+		log.Error(name + " requires SYNAPSE_JUDGMENTS_ENABLED (it mints judgments); enable judgments or unset " + envKey)
+		os.Exit(1)
+	}
+	log.Warn(name + " auto-skipped: SYNAPSE_JUDGMENTS_ENABLED is off (it mints judgments)")
+	return false
+}
 
 func main() {
 	cfg := config.Load()
@@ -561,8 +578,17 @@ func main() {
 		scaService.SetComplianceEnabled(true) // attach the AppSec-baseline benchmark (per-control PASS/FAIL)
 		log.Info("compliance report ENABLED (Synapse AppSec Baseline; deterministic, LLM-free)")
 	}
-	scaService.SetDBMaxAgeDays(cfg.DBMaxAgeDays)           // warn on stale reference DBs (KEV/EPSS/vuln-DB); 0 disables
-	scaService.SetDetectionPriority(cfg.DetectionPriority) // server default (comprehensive|precise); the API scan path has no per-request priority
+	scaService.SetDBMaxAgeDays(cfg.DBMaxAgeDays) // warn on stale reference DBs (KEV/EPSS/vuln-DB); 0 disables
+	// Validate the configured detection priority once at startup: an invalid value would otherwise make
+	// EVERY API scan return 400. Warn + fall back to comprehensive rather than crash a long-running server.
+	detPriority := cfg.DetectionPriority
+	if detPriority != "" {
+		if _, err := scauc.NormalizeScanOptions(scauc.ScanOptions{Mode: scauc.ScanModeFull, DetectionPriority: detPriority}); err != nil {
+			log.Warn("invalid SYNAPSE_DETECTION_PRIORITY; falling back to comprehensive", "value", detPriority, "err", err)
+			detPriority = ""
+		}
+	}
+	scaService.SetDetectionPriority(detPriority) // server default (comprehensive|precise); the API scan path has no per-request priority
 	if cfg.ScanCacheEnabled {
 		if dir := cfg.ResolveScanCacheDir(); dir != "" {
 			scaService.SetSBOMCache(sbomcache.New(dir)) // content+version-addressed generated-SBOM cache
@@ -799,11 +825,7 @@ func main() {
 	// enabled (so it never runs unsandboxed in production); a no-coverage/un-buildable target is best-effort
 	// (the prior tier stands). Injected here at the composition root only — never on an agent-reachable
 	// surface (the reachproof architecture tripwire enforces it).
-	if cfg.ReachabilityEnabled {
-		if judgmentSvc == nil {
-			log.Error("SYNAPSE_REACHABILITY_ENABLED requires SYNAPSE_JUDGMENTS_ENABLED (reachability mints judgments)")
-			os.Exit(1)
-		}
+	if cfg.ReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_REACHABILITY_ENABLED", "reachability") {
 		gvBuilder := govulncheck.New(cfg.GovulncheckBin)
 		if scaSandbox != nil {
 			gvBuilder = gvBuilder.WithRunner(scaSandbox) // same containment as syft/grype; required in production
@@ -855,11 +877,7 @@ func main() {
 	// the judgment lifecycle. The coordinator proposes ungated CapCorrelation judgments (system identity) for
 	// human review where the run detection sources disagree; composition-root only (the crosscheckjudge arch
 	// tripwire keeps it off the agent surface). Best-effort: a recorder error never fails the scan.
-	if cfg.CrossCheckEnabled {
-		if judgmentSvc == nil {
-			log.Error("SYNAPSE_CROSSCHECK_ENABLED requires SYNAPSE_JUDGMENTS_ENABLED (cross-check mints judgments)")
-			os.Exit(1)
-		}
+	if cfg.CrossCheckEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_CROSSCHECK_ENABLED", "cross-check") {
 		ccCoord, ccErr := crosscheckjudge.NewCoordinator(judgmentSvc, auditLog, clock)
 		if ccErr != nil {
 			log.Error("cross-check coordinator init failed", "err", ccErr)
@@ -874,11 +892,7 @@ func main() {
 	// identity) for human review — detection independence as a feature. Like the advisory cross-check it mints
 	// judgments, so it needs the judgment lifecycle; composition-root only (the sbomcrosscheckjudge arch
 	// tripwire keeps it off the agent surface). Best-effort: a 2nd-producer error never fails the scan.
-	if cfg.SBOMCrossCheckEnabled {
-		if judgmentSvc == nil {
-			log.Error("SYNAPSE_SBOM_CROSSCHECK_ENABLED requires SYNAPSE_JUDGMENTS_ENABLED (it mints judgments)")
-			os.Exit(1)
-		}
+	if cfg.SBOMCrossCheckEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_SBOM_CROSSCHECK_ENABLED", "SBOM cross-check") {
 		// The cross-check producer is whichever Tier-1 producer is NOT the primary, so two INDEPENDENT
 		// producers (owned parsers vs Syft) are diffed. Build the owned registry on demand when Syft is primary.
 		var secondary ports.SBOMGenerator
