@@ -14,6 +14,8 @@ deterministic reports.
 [![License](https://img.shields.io/badge/license-Apache--2.0-6d5bff)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8)](go.mod)
 [![Docs](https://img.shields.io/badge/docs-live-6d5bff)](https://synapse.kkloudtarus.net/)
+[![CI](https://github.com/KKloudTarus/synapse-ce/actions/workflows/ci.yml/badge.svg)](https://github.com/KKloudTarus/synapse-ce/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/KKloudTarus/synapse-ce)](https://goreportcard.com/report/github.com/KKloudTarus/synapse-ce)
 
 [Landing page](https://synapse.kkloudtarus.net/) · [Documentation](docs/guide/README.md) · [Quickstart](#quickstart) · [Features](#features) · [Configuration](docs/guide/configuration.md)
 
