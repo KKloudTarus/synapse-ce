@@ -22,8 +22,9 @@ var cfnSecretKeyRe = regexp.MustCompile(`(?i)(password|secret|token|api[_-]?key|
 // skip, never a scan failure.
 func scanCloudFormation(rel string, data []byte) []ports.MisconfigRawFinding {
 	// Refuse pathologically deep documents before decoding, matching the Kubernetes path: yaml.v3 recurses
-	// per nesting level with no depth cap, so a crafted deep document would overflow the goroutine stack.
-	if maxFlowDepth(data) > maxNestDepth {
+	// per nesting level with no depth cap, so a crafted deep document (flow or compact block) would overflow
+	// the goroutine stack. tooDeepYAML makes that a per-file skip.
+	if tooDeepYAML(data) {
 		return nil
 	}
 	var root yaml.Node
@@ -83,6 +84,8 @@ func cfnResourceRules(rel string, resLine int, logicalID, resType string, props 
 				"StorageEncrypted is not true, so the database volume is unencrypted at rest. Set StorageEncrypted: true (and a KMS key where policy requires one).")
 		}
 	case "AWS::EC2::SecurityGroup":
+		// Covers the inline ingress list. Standalone AWS::EC2::SecurityGroupIngress resources and egress
+		// rules are not yet checked.
 		for _, ing := range seqItems(mapValue(props, "SecurityGroupIngress")) {
 			cidr, ok := literalScalar(mapValue(ing, "CidrIp"))
 			cidr6, ok6 := literalScalar(mapValue(ing, "CidrIpv6"))
@@ -99,7 +102,7 @@ func cfnResourceRules(rel string, resLine int, logicalID, resType string, props 
 				if eff, ok := literalScalar(mapValue(st, "Effect")); ok && !strings.EqualFold(eff, "Allow") {
 					continue
 				}
-				if wildcardLeaf(mapValue(st, "Action")) || wildcardLeaf(mapValue(st, "Resource")) {
+				if hasWildcard(mapValue(st, "Action"), true) || hasWildcard(mapValue(st, "Resource"), false) {
 					add("cloudformation-iam-wildcard", "IAM policy grants a wildcard action or resource", shared.SeverityMedium, st.Line,
 						"An Allow statement uses \"*\" for Action or Resource, granting overly broad permissions. Scope both to the minimum required.")
 					flagged = true
@@ -189,13 +192,18 @@ func cfnPolicyDocuments(props *yaml.Node) []*yaml.Node {
 	return docs
 }
 
-// wildcardLeaf reports whether a node is the literal "*" or a sequence containing it.
-func wildcardLeaf(n *yaml.Node) bool {
+// hasWildcard reports whether a policy leaf (a scalar or a sequence of scalars) is a wildcard. For an
+// action, a service-scoped wildcard like "s3:*" also counts; for a resource only a bare "*" does, since a
+// resource ARN ending in "*" (e.g. "arn:aws:s3:::bucket/*") is common, legitimate scoping.
+func hasWildcard(n *yaml.Node, serviceScope bool) bool {
+	match := func(v string) bool {
+		return v == "*" || (serviceScope && strings.HasSuffix(v, ":*"))
+	}
 	if v, ok := literalScalar(n); ok {
-		return v == "*"
+		return match(v)
 	}
 	for _, it := range seqItems(n) {
-		if v, ok := literalScalar(it); ok && v == "*" {
+		if v, ok := literalScalar(it); ok && match(v) {
 			return true
 		}
 	}

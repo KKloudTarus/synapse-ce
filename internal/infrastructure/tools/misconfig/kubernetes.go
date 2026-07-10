@@ -115,7 +115,7 @@ func scanKubernetes(rel string, data []byte) []ports.MisconfigRawFinding {
 	// Refuse pathologically deep documents BEFORE decoding: yaml.v3 recurses per nesting level with no
 	// depth cap, so a crafted deep document would overflow the goroutine stack (an unrecoverable fatal),
 	// not merely return an error. This keeps a malformed file a per-file skip, per the port contract.
-	if maxFlowDepth(data) > maxNestDepth {
+	if tooDeepYAML(data) {
 		return nil
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
@@ -422,10 +422,17 @@ func firstKeyLineDepth(node *yaml.Node, key string, depth int) int {
 	return 0
 }
 
+// tooDeepYAML reports whether data nests deeper than maxNestDepth in a way that could overflow yaml.v3's
+// recursive parser. It covers both linear-cost forms: flow collections ('['/'{') and compact block chains
+// ("- - - x"). Indented block nesting is not checked because it costs ~O(depth^2) bytes, so the file-size
+// cap already bounds it well below a stack-overflowing depth.
+func tooDeepYAML(data []byte) bool {
+	return maxFlowDepth(data) > maxNestDepth || maxBlockChainDepth(data) > maxNestDepth
+}
+
 // maxFlowDepth returns the deepest nesting of YAML flow collections ('[' and '{') in data, ignoring
 // brackets inside quoted scalars and comments. It is a cheap linear pre-scan so a deep untrusted document
-// is rejected before it reaches the recursive yaml.v3 parser. (Block-style nesting is naturally bounded
-// by the file-size cap, since each level costs a line of indentation.)
+// is rejected before it reaches the recursive yaml.v3 parser.
 func maxFlowDepth(data []byte) int {
 	var depth, maxd int
 	var inSingle, inDouble bool
@@ -475,6 +482,41 @@ func maxFlowDepth(data []byte) int {
 			}
 		}
 		prev = b
+	}
+	return maxd
+}
+
+// maxBlockChainDepth returns the longest run of compact block-collection indicators ("- " or "? ") at the
+// start of a line, after leading whitespace. Compact block nesting like "- - - - x" is a single line whose
+// nesting depth equals that run and costs only ~2 bytes per level, so unlike indented block nesting it is
+// NOT bounded by the file-size cap. Only leading indicator runs are counted, so a dash inside a scalar
+// value does not inflate the result. yaml.v3 recurses per level, so this is capped alongside maxFlowDepth.
+func maxBlockChainDepth(data []byte) int {
+	maxd, i, n := 0, 0, len(data)
+	for i < n {
+		for i < n && (data[i] == ' ' || data[i] == '\t') { // leading indentation
+			i++
+		}
+		chain := 0
+		for i+1 < n && (data[i] == '-' || data[i] == '?') && (data[i+1] == ' ' || data[i+1] == '\t') {
+			chain++
+			i += 2
+			for i < n && (data[i] == ' ' || data[i] == '\t') {
+				i++
+			}
+		}
+		if chain > maxd {
+			maxd = chain
+			if maxd > maxNestDepth {
+				return maxd // early out: already past the cap
+			}
+		}
+		for i < n && data[i] != '\n' { // advance to the next line
+			i++
+		}
+		if i < n {
+			i++
+		}
 	}
 	return maxd
 }

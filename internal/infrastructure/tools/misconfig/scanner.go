@@ -184,7 +184,8 @@ func maybeCFN(name string) bool {
 }
 
 // looksKubernetes is a cheap pre-filter so we only parse YAML that declares a Kubernetes object, not
-// every CI/compose/config YAML in the tree.
+// every CI/compose/config YAML in the tree. It matches the YAML form `apiVersion:` (colon-attached), so a
+// JSON-authored manifest (`"apiVersion":`) is intentionally not treated as Kubernetes here.
 func looksKubernetes(data []byte) bool {
 	t := string(data)
 	return strings.Contains(t, "apiVersion:") && strings.Contains(t, "kind:")

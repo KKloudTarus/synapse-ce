@@ -1,6 +1,37 @@
 package misconfig
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
+
+func TestCloudFormationDepthBombSkipped(t *testing.T) {
+	// A compact block-nesting bomb ("- - - ... x", one line, linear bytes) would overflow yaml.v3's
+	// recursive parser. The pre-decode depth guard must make it a per-file skip (nil), never a crash.
+	bomb := append(bytes.Repeat([]byte("- "), 300000), 'x')
+	if got := scanCloudFormation("bomb.yaml", bomb); got != nil {
+		t.Fatalf("compact-nesting bomb should be skipped, got %d findings", len(got))
+	}
+}
+
+func TestCloudFormationActionServiceWildcard(t *testing.T) {
+	// A service-scoped action wildcard ("s3:*") is flagged even though the resource ARN ending in "*" is
+	// legitimate scoping and on its own is not.
+	tmpl := `Resources:
+  P:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action: "s3:*"
+            Resource: "arn:aws:s3:::bucket/*"
+`
+	got := ruleIDs(scan(t, map[string]string{"p.yaml": tmpl}))
+	if _, ok := got["cloudformation-iam-wildcard"]; !ok {
+		t.Errorf("service-scoped action wildcard s3:* should be flagged, got %v", keys(got))
+	}
+}
 
 func TestCloudFormationInsecure(t *testing.T) {
 	tmpl := `AWSTemplateFormatVersion: "2010-09-09"
