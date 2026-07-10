@@ -1,0 +1,17 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://synapse.kkloudtarus.net/.well-known/vex/synapse-ce",
+  "author": "Synapse maintainers",
+  "role": "document creator",
+  "timestamp": "2026-07-11T00:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": { "name": "GO-2026-5932" },
+      "products": [ { "@id": "golang.org/x/crypto" } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "GO-2026-5932 concerns golang.org/x/crypto/openpgp, which Synapse does not import. Only argon2, blake2b and ocsp are used (verified via go list -deps). The advisory has no upstream fix because the package is deprecated."
+    }
+  ]
+}
