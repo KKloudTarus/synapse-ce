@@ -124,6 +124,7 @@ func buildRedteam(t *testing.T) string {
 }
 
 func TestRedTeamIsolated(t *testing.T) {
+	requireSandboxIntegration(t)
 	bin := buildRedteam(t)
 	// Plant a host secret + a worker-env canary, then run ISOLATED (no egress).
 	_ = os.MkdirAll("/root/.ssh", 0o700)
@@ -146,6 +147,7 @@ func TestRedTeamIsolated(t *testing.T) {
 }
 
 func TestRedTeamEgress(t *testing.T) {
+	requireSandboxIntegration(t)
 	bin := buildRedteam(t)
 	sb, err := sandbox.NewRunner(60*time.Second, 64<<20, 1<<30, 256)
 	if err != nil {

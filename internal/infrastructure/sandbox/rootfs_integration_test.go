@@ -18,6 +18,7 @@ import (
 // a tool cannot reach $HOME secrets (~/.ssh etc.) — the path is absent — while the OS tree
 // it needs (/etc, /usr) is present. Run as root (sudo) so $HOME=/root.
 func TestSandboxHidesHostSecrets(t *testing.T) {
+	requireSandboxIntegration(t)
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("bwrap not installed")
 	}

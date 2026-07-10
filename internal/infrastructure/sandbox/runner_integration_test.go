@@ -21,6 +21,7 @@ import (
 // capabilities, and NO network egress (the fresh netns). It needs bubblewrap + bash, so
 // it skips on hosts without them (e.g. macOS dev) and runs on the Linux test box.
 func TestSandboxIsolationLive(t *testing.T) {
+	requireSandboxIntegration(t)
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("bubblewrap not installed — sandbox integration test skipped")
 	}
@@ -70,6 +71,7 @@ echo PROBE_DONE
 
 // TestSandboxCapNetRawGranted proves naabu's CAP_NET_RAW is re-added (and only it).
 func TestSandboxCapNetRawGranted(t *testing.T) {
+	requireSandboxIntegration(t)
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("bubblewrap not installed")
 	}
@@ -100,6 +102,7 @@ func TestSandboxCapNetRawGranted(t *testing.T) {
 // secret never appears in the child's cmdline, and a secret the tool echoes is REDACTED
 // from the captured output.
 func TestSandboxSecretInjection(t *testing.T) {
+	requireSandboxIntegration(t)
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("bubblewrap not installed")
 	}
@@ -175,6 +178,7 @@ printf 'CMDLINE='; tr '\0' ' ' < /proc/self/cmdline; echo
 // sandboxed tool reaches an in-scope address but an out-of-scope one is dropped, while
 // bwrap's isolation still holds. Needs Linux + bwrap + bash + ip/iptables + sudo.
 func TestSandboxEgressEnforced(t *testing.T) {
+	requireSandboxIntegration(t)
 	for _, bin := range []string{"bwrap", "bash", "ip", "iptables", "sudo"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			t.Skipf("%s not available", bin)
@@ -229,6 +233,7 @@ echo caps=$(grep CapEff /proc/self/status | awk '{print $2}')
 // /etc/hosts (with NO DNS egress) — so the tool resolves + reaches the in-scope domain
 // but cannot resolve (or reach) an out-of-scope one.
 func TestSandboxEgressDomainPinning(t *testing.T) {
+	requireSandboxIntegration(t)
 	for _, bin := range []string{"bwrap", "bash", "ip", "iptables", "sudo", "getent"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			t.Skipf("%s not available", bin)

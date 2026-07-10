@@ -20,6 +20,7 @@ import (
 // TestBinaryIntegrityRefusesTamper proves F5: once a tool binary is pinned (TOFU on first
 // run), replacing it makes the next run be REFUSED before exec.
 func TestBinaryIntegrityRefusesTamper(t *testing.T) {
+	requireSandboxIntegration(t)
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("bwrap not installed")
 	}

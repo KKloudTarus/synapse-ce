@@ -39,6 +39,7 @@ int main(int argc,char**argv){
 // TestCgroupContainsForkBomb proves F3: pids.max bounds a fork bomb on the egress path
 // (the privileged path that touches hostile networks). Needs bwrap + gcc + cgroup write.
 func TestCgroupContainsBombs(t *testing.T) {
+	requireSandboxIntegration(t)
 	for _, b := range []string{"bwrap", "gcc"} {
 		if _, err := exec.LookPath(b); err != nil {
 			t.Skipf("%s not installed", b)

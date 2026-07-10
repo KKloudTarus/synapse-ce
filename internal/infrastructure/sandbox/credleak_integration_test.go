@@ -19,6 +19,7 @@ import (
 // TestCredentialLeakChannels behaviorally probes Part 4: a tool that ECHOES an injected
 // secret raw vs base64 vs hex — which channels does the redaction chokepoint catch?
 func TestCredentialLeakChannels(t *testing.T) {
+	requireSandboxIntegration(t)
 	for _, b := range []string{"bwrap", "base64", "xxd", "sh"} {
 		if _, err := exec.LookPath(b); err != nil {
 			t.Skipf("%s not installed", b)

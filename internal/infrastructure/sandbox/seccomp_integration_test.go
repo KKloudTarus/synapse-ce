@@ -41,6 +41,7 @@ int main(){
 // dangerous syscalls the audit named return EPERM, while an allowlisted one (getpid)
 // works and a real Go tool (syft) still runs. Needs bwrap + gcc + syft (a real Linux host).
 func TestSeccompDeniesDangerousSyscalls(t *testing.T) {
+	requireSandboxIntegration(t)
 	for _, b := range []string{"bwrap", "gcc"} {
 		if _, err := exec.LookPath(b); err != nil {
 			t.Skipf("%s not installed", b)
@@ -79,6 +80,7 @@ func TestSeccompDeniesDangerousSyscalls(t *testing.T) {
 
 // TestSeccompAllowsRealTool proves the allowlist is complete enough to run a real Go tool.
 func TestSeccompAllowsRealTool(t *testing.T) {
+	requireSandboxIntegration(t)
 	for _, b := range []string{"bwrap", "syft"} {
 		if _, err := exec.LookPath(b); err != nil {
 			t.Skipf("%s not installed", b)

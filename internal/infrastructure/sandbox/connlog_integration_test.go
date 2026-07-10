@@ -19,6 +19,7 @@ import (
 // labels each allowed/denied against the scope. Needs Linux + bwrap + curl + CAP_NET_ADMIN
 // + cgroup-bpf (run with sudo on a real host); skips otherwise.
 func TestSandboxEgressConnectLog(t *testing.T) {
+	requireSandboxIntegration(t)
 	if runtime.GOOS != "linux" {
 		t.Skip("sandbox/eBPF are Linux-only")
 	}
