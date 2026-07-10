@@ -127,7 +127,7 @@ func TestBuildSARIF(t *testing.T) {
 		}
 		return ""
 	}
-	log := buildSARIF(sampleFindings(), "v1.2.3", manifests)
+	log := buildSARIF(sampleFindings(), "v1.2.3", SARIFOptions{Manifest: manifests})
 	if log.Version != "2.1.0" || log.Schema == "" {
 		t.Fatalf("bad header: %+v", log)
 	}

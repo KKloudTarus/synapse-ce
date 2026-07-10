@@ -87,7 +87,16 @@ type SARIFLogicalLocation struct {
 	Kind string `json:"kind,omitempty"`
 }
 
-func buildSARIF(findings []finding.Finding, version string, manifestFor func(finding.Finding) string) *SARIFLog {
+// SARIFOptions carries optional per-finding resolvers that enrich SCA results. Both fields are nil-safe.
+type SARIFOptions struct {
+	// Manifest returns the repo-relative manifest/lockfile that declares a dependency finding's
+	// component, so the result gets a physical location a code-scanning UI can annotate. "" when unknown.
+	Manifest func(finding.Finding) string
+	// Fix returns the version that remediates a dependency finding. "" when there is no fix or it is unknown.
+	Fix func(finding.Finding) string
+}
+
+func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *SARIFLog {
 	rules := make([]SARIFRule, 0)
 	seen := map[string]bool{}
 	results := make([]SARIFResult, 0, len(findings))
@@ -118,8 +127,8 @@ func buildSARIF(findings []finding.Finding, version string, manifestFor func(fin
 			// location). When the manifest is unknown, emit NO location — a result with no location is a
 			// valid repo-level alert, but a logical-only location is not.
 			manifest := ""
-			if manifestFor != nil {
-				manifest = manifestFor(f)
+			if opts.Manifest != nil {
+				manifest = opts.Manifest(f)
 			}
 			if manifest != "" {
 				locations = []SARIFLocation{{
@@ -162,6 +171,14 @@ func buildSARIF(findings []finding.Finding, version string, manifestFor func(fin
 			// Coarse JVM class-reachability: "reachable" | "unreferenced". Advisory — lets a
 			// consumer separate/deprioritize deps the app never references (priority already reflects it).
 			res.Properties["componentReachability"] = f.ClassReachability
+		}
+		if opts.Fix != nil {
+			// The version that remediates a dependency finding, surfaced both as a property and inline in the
+			// message so a code-scanning alert shows the fix without opening the finding.
+			if fix := opts.Fix(f); fix != "" {
+				res.Properties["fixedVersion"] = fix
+				res.Message.Text = f.Title + " (fixed in " + fix + ")"
+			}
 		}
 		results = append(results, res)
 	}
@@ -239,9 +256,9 @@ func ruleTitle(title string) string {
 // MarshalSARIF renders findings as an indented SARIF 2.1.0 log — the artifact a code-scanning
 // uploader (e.g. GitHub `codeql-action/upload-sarif`) consumes. It is deterministic and templated
 // purely from stored findings: no clock, no LLM (golden rule 5). version is the synapse driver
-// version recorded on the run's tool driver. manifestFor, when non-nil, returns the repo-relative
-// manifest/lockfile path that declares a dependency finding's component so SCA findings get a
-// physical location; return "" when unknown (the finding then becomes a repo-level alert).
-func MarshalSARIF(findings []finding.Finding, version string, manifestFor func(finding.Finding) string) ([]byte, error) {
-	return json.MarshalIndent(buildSARIF(findings, version, manifestFor), "", "  ")
+// version recorded on the run's tool driver. opts carries optional per-finding resolvers: Manifest gives
+// SCA findings a physical location (a repo-relative manifest path), and Fix adds the remediating version.
+// Both are nil-safe; pass the zero SARIFOptions to enrich nothing.
+func MarshalSARIF(findings []finding.Finding, version string, opts SARIFOptions) ([]byte, error) {
+	return json.MarshalIndent(buildSARIF(findings, version, opts), "", "  ")
 }

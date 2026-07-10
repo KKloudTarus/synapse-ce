@@ -413,7 +413,17 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 			}
 			return ""
 		}
-		out, err := exportuc.MarshalSARIF(res.Findings, res.ToolVersions["synapse"], manifestFor)
+		// Map each vulnerability's dedup key to its fixed version so a code-scanning alert shows the
+		// remediation. Keyed by the same dedup key the finding carries (advisory + component + version),
+		// because different advisories on the same component are fixed in different releases.
+		fixByKey := map[string]string{}
+		for _, v := range res.Vulnerabilities {
+			if v.FixedVersion != "" {
+				fixByKey[vulnerability.DedupKey(v.ID, v.Component, v.Version)] = v.FixedVersion
+			}
+		}
+		fixFor := func(f finding.Finding) string { return fixByKey[f.DedupKey] }
+		out, err := exportuc.MarshalSARIF(res.Findings, res.ToolVersions["synapse"], exportuc.SARIFOptions{Manifest: manifestFor, Fix: fixFor})
 		if err != nil {
 			return fmt.Errorf("encode sarif: %w", err)
 		}

@@ -28,7 +28,7 @@ func demoManifests(f finding.Finding) string {
 }
 
 func TestSARIFPhysicalLocationForFirstParty(t *testing.T) {
-	log := buildSARIF(firstPartyFindings(), "v9", demoManifests)
+	log := buildSARIF(firstPartyFindings(), "v9", SARIFOptions{Manifest: demoManifests})
 	byRule := map[string]SARIFResult{}
 	for _, r := range log.Runs[0].Results {
 		byRule[r.RuleID] = r
@@ -88,7 +88,7 @@ func TestSARIFPhysicalLocationForFirstParty(t *testing.T) {
 // location that has only a logicalLocation (GitHub rejects the whole file with "expected a physical
 // location"). Without a manifest resolver, an SCA finding therefore gets NO location, not a logical-only one.
 func TestSARIFNoLogicalOnlyLocation(t *testing.T) {
-	log := buildSARIF(firstPartyFindings(), "v9", nil) // no manifest resolver
+	log := buildSARIF(firstPartyFindings(), "v9", SARIFOptions{}) // no manifest resolver
 	for _, r := range log.Runs[0].Results {
 		for _, loc := range r.Locations {
 			if loc.PhysicalLocation == nil {
@@ -105,7 +105,7 @@ func TestSARIFNoLogicalOnlyLocation(t *testing.T) {
 }
 
 func TestMarshalSARIFValidJSON(t *testing.T) {
-	out, err := MarshalSARIF(firstPartyFindings(), "v9", nil)
+	out, err := MarshalSARIF(firstPartyFindings(), "v9", SARIFOptions{})
 	if err != nil {
 		t.Fatalf("MarshalSARIF: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestRuleTitleStripsLocationMarker(t *testing.T) {
 	}
 
 	// The rule entry uses the generic title; the per-result message keeps the located one.
-	log := buildSARIF(firstPartyFindings(), "v9", nil)
+	log := buildSARIF(firstPartyFindings(), "v9", SARIFOptions{})
 	var found bool
 	for _, r := range log.Runs[0].Tool.Driver.Rules {
 		if r.ID == "weak-crypto-md5" {
@@ -202,13 +202,53 @@ func TestGatedTaintSASTRuleID(t *testing.T) {
 	fs := []finding.Finding{
 		{ID: "t1", Title: "Command injection via tainted flow", Severity: shared.SeverityHigh, Status: finding.StatusOpen, Kind: finding.KindSAST, DedupKey: "sast:ai:pkg/handler.go.Serve"},
 	}
-	log := buildSARIF(fs, "v9", nil)
+	log := buildSARIF(fs, "v9", SARIFOptions{})
 	r := log.Runs[0].Results[0]
 	if r.RuleID != "synapse-taint-sast" {
 		t.Errorf("gated taint rule id = %q, want synapse-taint-sast", r.RuleID)
 	}
 	if len(r.Locations) != 0 {
 		t.Errorf("gated taint finding should carry no location, got %+v", r.Locations)
+	}
+}
+
+func TestSARIFFixedVersion(t *testing.T) {
+	fix := func(f finding.Finding) string {
+		if f.DedupKey == "vuln:CVE-2020-7471:django:2.2.0" {
+			return "3.9.1"
+		}
+		return "" // the first-party findings have no fix
+	}
+	log := buildSARIF(firstPartyFindings(), "v9", SARIFOptions{Fix: fix})
+	byRule := map[string]SARIFResult{}
+	for _, r := range log.Runs[0].Results {
+		byRule[r.RuleID] = r
+	}
+
+	// The SCA vuln with a known fix carries it as a property and inline in the message.
+	v := byRule["CVE-2020-7471"]
+	if v.Properties["fixedVersion"] != "3.9.1" {
+		t.Errorf("fixedVersion property = %v, want 3.9.1", v.Properties["fixedVersion"])
+	}
+	if v.Message.Text != "CVE-2020-7471 in django@2.2.0 (fixed in 3.9.1)" {
+		t.Errorf("message = %q, want the fix appended", v.Message.Text)
+	}
+
+	// A finding with no fix must not carry a fixedVersion property or a mangled message.
+	sast := byRule["weak-crypto-md5"]
+	if _, ok := sast.Properties["fixedVersion"]; ok {
+		t.Errorf("non-fixable finding should not carry fixedVersion: %+v", sast.Properties)
+	}
+	if sast.Message.Text != "MD5 is a weak hash (app/crypto.go:42)" {
+		t.Errorf("non-fixable message must be unchanged, got %q", sast.Message.Text)
+	}
+
+	// With no Fix resolver, nothing is enriched.
+	plain := buildSARIF(firstPartyFindings(), "v9", SARIFOptions{})
+	for _, r := range plain.Runs[0].Results {
+		if _, ok := r.Properties["fixedVersion"]; ok {
+			t.Errorf("no Fix resolver, but result %q carries fixedVersion", r.RuleID)
+		}
 	}
 }
 
