@@ -164,8 +164,17 @@ func parseDockerfile(src string) []instruction {
 		for strings.HasSuffix(strings.TrimRight(full, " \t"), `\`) && i+1 < len(lines) {
 			full = strings.TrimSuffix(strings.TrimRight(full, " \t"), `\`)
 			i++
-			full += " " + strings.TrimSpace(strings.TrimRight(lines[i], "\r"))
+			next := strings.TrimSpace(strings.TrimRight(lines[i], "\r"))
+			if strings.HasPrefix(next, "#") {
+				// A full-line comment inside a continuation. Docker strips comments before joining
+				// continuations, so skip it and keep the continuation open instead of ending the
+				// instruction early (which would drop the real commands that follow the comment).
+				full += ` \`
+				continue
+			}
+			full += " " + next
 		}
+		full = strings.TrimSuffix(strings.TrimRight(full, " \t"), `\`) // drop a dangling trailing backslash
 		i++
 		cmd, args := splitInstruction(full)
 		if cmd == "" {
