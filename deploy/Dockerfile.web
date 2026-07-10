@@ -22,8 +22,15 @@ RUN pnpm install --frozen-lockfile
 # The rest of the source — bind-mount in dev for hot reload (see compose).
 COPY web/ .
 
+# Drop to the image's built-in non-root `node` user (uid 1000) instead of running the dev server as
+# root. Own /app so pnpm/Vite can write their caches (node_modules/.vite) under the unprivileged user.
+RUN chown -R node:node /app
+USER node
+
 # Vite dev server. --host 0.0.0.0 so it's reachable from the host.
 # VITE_API_PROXY_TARGET is the in-network API URL (compose DNS resolves the service name).
 ENV VITE_API_PROXY_TARGET=http://synapse-api:8080
 EXPOSE 5173
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:5173/ >/dev/null 2>&1 || exit 1
 CMD ["pnpm", "dev", "--host", "0.0.0.0", "--port", "5173"]
