@@ -172,8 +172,9 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 			// consumer separate/deprioritize deps the app never references (priority already reflects it).
 			res.Properties["componentReachability"] = f.ClassReachability
 		}
-		if opts.Fix != nil {
-			// The version that remediates a dependency finding, surfaced both as a property and inline in the
+		if p.component != "" && opts.Fix != nil {
+			// Only dependency (SCA) findings have a fix version; the p.component gate makes that structural
+			// rather than relying on the resolver returning "". Surface it as a property and inline in the
 			// message so a code-scanning alert shows the fix without opening the finding.
 			if fix := opts.Fix(f); fix != "" {
 				res.Properties["fixedVersion"] = fix
