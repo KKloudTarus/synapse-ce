@@ -1,7 +1,7 @@
 // Package misconfig is an owned, deterministic infrastructure-as-code / config scanner over a prepared
 // workspace. It flags insecure settings in Dockerfiles, Kubernetes manifests, Helm charts (rendered via
-// `helm template`), and Terraform (HCL) with first-party Go checks — no external policy engine (no
-// OPA/Rego). Explicit-insecure settings are flagged as high/medium; recommended-hardening that is absent
+// `helm template`), Terraform (HCL), and CloudFormation (YAML/JSON) with first-party Go checks — no
+// external policy engine (no OPA/Rego). Explicit-insecure settings are flagged as high/medium; recommended-hardening that is absent
 // (KSV/CIS/tfsec baseline: runAsNonRoot, dropped capabilities, encryption, resource limits, ...) is
 // flagged as low/medium, so coverage matches comprehensive scanners while the highs stay legible.
 //
@@ -69,6 +69,7 @@ const (
 	cfgDockerfile
 	cfgKubernetes
 	cfgTerraform
+	cfgCloudFormation
 )
 
 // ScanConfigs walks root, classifies each regular file, and returns located misconfig findings.
@@ -111,7 +112,7 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			return nil
 		}
 		kind := classifyName(d.Name())
-		if kind == cfgNone && !maybeYAML(d.Name()) {
+		if kind == cfgNone && !maybeYAML(d.Name()) && !maybeCFN(d.Name()) {
 			return nil
 		}
 		if count >= maxFiles {
@@ -127,11 +128,16 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			return nil
 		}
 		if kind == cfgNone {
-			// A .yaml/.yml file is only a Kubernetes manifest if it declares apiVersion + kind.
-			if !looksKubernetes(data) {
+			// Decide by content: a Kubernetes manifest declares apiVersion + kind; a CloudFormation
+			// template declares AWSTemplateFormatVersion or a Resources map of AWS:: types.
+			switch {
+			case looksKubernetes(data):
+				kind = cfgKubernetes
+			case looksCloudFormation(data):
+				kind = cfgCloudFormation
+			default:
 				return nil
 			}
-			kind = cfgKubernetes
 		}
 		rel := strings.TrimPrefix(strings.TrimPrefix(path, root), string(os.PathSeparator))
 		switch kind {
@@ -141,6 +147,8 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			out = append(out, scanKubernetes(rel, data)...)
 		case cfgTerraform:
 			out = append(out, scanTerraform(rel, data)...)
+		case cfgCloudFormation:
+			out = append(out, scanCloudFormation(rel, data)...)
 		}
 		return nil
 	})
@@ -168,11 +176,25 @@ func maybeYAML(name string) bool {
 	return ext == ".yaml" || ext == ".yml"
 }
 
+// maybeCFN lets a .json or .template file through to the content sniff, since CloudFormation templates
+// are commonly written in either (YAML .yaml/.yml is already covered by maybeYAML).
+func maybeCFN(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return ext == ".json" || ext == ".template"
+}
+
 // looksKubernetes is a cheap pre-filter so we only parse YAML that declares a Kubernetes object, not
 // every CI/compose/config YAML in the tree.
 func looksKubernetes(data []byte) bool {
 	t := string(data)
 	return strings.Contains(t, "apiVersion:") && strings.Contains(t, "kind:")
+}
+
+// looksCloudFormation is a cheap pre-filter for a CloudFormation template: it declares the format version
+// or a Resources map whose entries carry AWS:: types. Specific enough to skip an ordinary JSON/YAML file.
+func looksCloudFormation(data []byte) bool {
+	t := string(data)
+	return strings.Contains(t, "AWSTemplateFormatVersion") || (strings.Contains(t, "Resources") && strings.Contains(t, "AWS::"))
 }
 
 func isBinary(data []byte) bool {
