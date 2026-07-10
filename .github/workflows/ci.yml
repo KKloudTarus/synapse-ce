@@ -6,13 +6,16 @@ on:
   pull_request:
     branches: [main]
 
+# Runs on a self-hosted runner. Note: this is a PUBLIC repo, so a fork pull request executes on your
+# infrastructure once its workflow run is approved. Keep the runner ephemeral and network-isolated, and
+# keep "require approval for all outside collaborators" on in Settings > Actions.
 permissions:
   contents: read
 
 jobs:
   lint:
     name: Lint (Go)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v7
 
@@ -29,7 +32,7 @@ jobs:
 
   backend:
     name: Backend (Go)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v7
 
@@ -53,7 +56,7 @@ jobs:
 
   frontend:
     name: Frontend (web)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults:
       run:
         working-directory: web
