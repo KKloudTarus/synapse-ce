@@ -23,7 +23,7 @@ import (
 
 const (
 	// ownsbomVersion identifies this producer in SBOM provenance. Bump when parser behavior changes.
-	ownsbomVersion = "ownsbom/0.1.0"
+	ownsbomVersion = "ownsbom/0.2.0"
 	// maxManifestBytes caps a single manifest read so a hostile/corrupt repo cannot OOM the scan with an
 	// absurd file. Real manifests are KB–low-MB; exceeding this is malicious or wrong, so it fails loud.
 	maxManifestBytes = 64 << 20
@@ -88,11 +88,11 @@ func New(parsers ...EcosystemParser) (*Registry, error) {
 	return r, nil
 }
 
-// DefaultRegistry assembles the owned parsers into a producer covering Go, JS (npm + yarn), Python, Rust,
-// and Java (Maven pom.xml + Gradle libs.versions.toml) — the detection-independent SBOM producer.
+// DefaultRegistry assembles the owned parsers into a producer covering Go, JS (npm + yarn), Python, Conda,
+// Rust, and Java (Maven pom.xml + Gradle libs.versions.toml) — the detection-independent SBOM producer.
 // The parsers claim distinct markers, so New does not error here in practice.
 func DefaultRegistry() (*Registry, error) {
-	return New(GoMod{}, NPM{}, Yarn{}, Pnpm{}, PyPI{}, Poetry{}, Pipfile{}, Cargo{}, Maven{}, Gradle{}, Gem{}, Composer{}, NuGet{}, Swift{}, Dart{}, Elixir{})
+	return New(GoMod{}, NPM{}, Yarn{}, Pnpm{}, PyPI{}, Poetry{}, Pipfile{}, Cargo{}, Maven{}, Gradle{}, Gem{}, Composer{}, NuGet{}, Swift{}, Dart{}, Elixir{}, Conda{})
 }
 
 // Generate walks the target directory, parses every recognized manifest with its EcosystemParser, and

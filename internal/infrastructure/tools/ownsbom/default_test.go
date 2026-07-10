@@ -10,15 +10,15 @@ func TestDefaultRegistry(t *testing.T) {
 		t.Fatalf("DefaultRegistry: %v", err)
 	}
 	for _, marker := range []string{
-		"go.mod", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "requirements.txt", "requirements-dev.txt", "poetry.lock", "pipfile.lock", "cargo.lock", "pom.xml", "libs.versions.toml", "gemfile.lock", "composer.lock", "packages.lock.json", "package.resolved", "pubspec.lock", "mix.lock",
+		"go.mod", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "requirements.txt", "requirements-dev.txt", "poetry.lock", "pipfile.lock", "cargo.lock", "pom.xml", "libs.versions.toml", "gemfile.lock", "composer.lock", "packages.lock.json", "package.resolved", "pubspec.lock", "mix.lock", "environment.yml", "environment.yaml",
 	} {
 		if _, ok := reg.byMarker[marker]; !ok {
 			t.Errorf("DefaultRegistry missing marker %q", marker)
 		}
 	}
-	// yarn + pnpm share the npm ecosystem, Pipfile shares pypi, Gradle shares maven, so the distinct set is
-	// cargo/composer/gem/go/hex/maven/npm/nuget/pub/pypi/swift (sorted) — unchanged by the new parsers.
-	want := []string{"cargo", "composer", "gem", "go", "hex", "maven", "npm", "nuget", "pub", "pypi", "swift"}
+	// yarn + pnpm share the npm ecosystem, Pipfile shares pypi, and Gradle shares maven, so the distinct
+	// ecosystem set contains each shared PURL type only once.
+	want := []string{"cargo", "composer", "conda", "gem", "go", "hex", "maven", "npm", "nuget", "pub", "pypi", "swift"}
 	if len(reg.ecos) != len(want) {
 		t.Fatalf("DefaultRegistry ecosystems = %v, want %v", reg.ecos, want)
 	}
