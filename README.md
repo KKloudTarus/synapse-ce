@@ -12,6 +12,8 @@ server-side scope enforcement, hardened tool execution, tamper-evident evidence,
 deterministic reports.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-6d5bff)](LICENSE)
+[![CI](https://github.com/KKloudTarus/synapse-ce/actions/workflows/ci.yml/badge.svg)](https://github.com/KKloudTarus/synapse-ce/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/KKloudTarus/synapse-ce)](https://goreportcard.com/report/github.com/KKloudTarus/synapse-ce)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8)](go.mod)
 [![Docs](https://img.shields.io/badge/docs-live-6d5bff)](https://synapse.kkloudtarus.net/)
 
