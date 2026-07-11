@@ -93,6 +93,41 @@ func TestServiceMapsAndBridges(t *testing.T) {
 	}
 }
 
+type fakeBugs struct {
+	bugs      []ports.BugFinding
+	available bool
+}
+
+func (f fakeBugs) Bugs(context.Context, string) ([]ports.BugFinding, bool, error) {
+	return f.bugs, f.available, nil
+}
+
+func TestBugsBridgeEmitsReliability(t *testing.T) {
+	bugs := fakeBugs{available: true, bugs: []ports.BugFinding{
+		{Rule: "reliability-unreachable-code", Message: "unreachable", File: "a.go", Line: 7},
+		{Rule: "reliability-constant-condition", Message: "always true", File: "b.py", Line: 3},
+	}}
+	svc := New(fakeAnalyzer{}, WithBugs(bugs))
+	fs, err := svc.Analyze(context.Background(), "root")
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	m := byRule(fs)
+	unr, ok := m["reliability-unreachable-code"]
+	if !ok || unr.Kind != finding.KindReliability || unr.DedupKey != "reliability:reliability-unreachable-code:a.go:7" {
+		t.Errorf("unreachable bug mapping wrong: %+v", unr)
+	}
+	if cc, ok := m["reliability-constant-condition"]; !ok || cc.Kind != finding.KindReliability {
+		t.Errorf("constant-condition bug missing/wrong: %+v", cc)
+	}
+	// unavailable detector emits nothing.
+	svc2 := New(fakeAnalyzer{}, WithBugs(fakeBugs{available: false, bugs: bugs.bugs}))
+	fs2, _ := svc2.Analyze(context.Background(), "root")
+	if len(fs2) != 0 {
+		t.Errorf("unavailable bug detector must emit nothing, got %+v", fs2)
+	}
+}
+
 func TestComplexityUnavailableSkipsBridge(t *testing.T) {
 	svc := New(fakeAnalyzer{}, WithComplexity(fakeMetrics{available: false, rep: measure.ComplexityReport{
 		Functions: []measure.FunctionComplexity{{Name: "x", Cyclomatic: 99}},
