@@ -27,7 +27,7 @@ SYNAPSE_DEP :missing-group:1.0
 SYNAPSE_DEP org.example:lib:
 random gradle output org.foo:bar:1.0
 `)
-	comps := parseGradleDeps(out)
+	comps, _ := parseGradleDeps(out)
 
 	got := map[string]string{} // name -> version
 	for _, c := range comps {
@@ -58,8 +58,25 @@ random gradle output org.foo:bar:1.0
 }
 
 func TestParseGradleDepsEmpty(t *testing.T) {
-	if c := parseGradleDeps([]byte("> Task :help\nWelcome to Gradle.\nNo dependencies\n")); len(c) != 0 {
+	if c, _ := parseGradleDeps([]byte("> Task :help\nWelcome to Gradle.\nNo dependencies\n")); len(c) != 0 {
 		t.Errorf("want 0 components, got %+v", c)
+	}
+}
+
+// The init script emits a `SYNAPSE_RESOLVE_ERROR <notation>` line for every dependency it could not
+// resolve (metadata unreachable). parseGradleDeps must collect these alongside the resolved components so
+// the caller can surface an incomplete tree — an empty notation is ignored.
+func TestParseGradleDepsCollectsUnresolved(t *testing.T) {
+	out := []byte("SYNAPSE_DEP org.example:lib:1.0\n" +
+		"SYNAPSE_RESOLVE_ERROR com.finx:secret-sdk:2.3.4\n" +
+		"SYNAPSE_RESOLVE_ERROR :payments (ResolveException)\n" +
+		"SYNAPSE_RESOLVE_ERROR \n")
+	comps, unresolved := parseGradleDeps(out)
+	if len(comps) != 1 || comps[0].Name != "org.example:lib" {
+		t.Fatalf("want the one resolved module, got %+v", comps)
+	}
+	if len(unresolved) != 2 {
+		t.Fatalf("want 2 unresolved notations (empty one dropped), got %+v", unresolved)
 	}
 }
 
@@ -191,5 +208,25 @@ func TestResolvePartialFailureKeepsResolvedPlusError(t *testing.T) {
 	}
 	if len(comps) != 1 || comps[0].Name != "org.apache.commons:commons-lang3" {
 		t.Fatalf("partial failure must still return the resolved build's components, got %+v", comps)
+	}
+}
+
+// A build root that resolves SOME modules and exits 0 but reports an UNRESOLVED dependency (its metadata
+// only lives on an unreachable private mirror) must still surface a non-nil error — otherwise an
+// incomplete tree reads as a clean scan (a false-negative for a security scan). The resolved modules are
+// still returned so their CVEs are checked.
+func TestResolveUnresolvedModuleSurfacesIncomplete(t *testing.T) {
+	dir := t.TempDir()
+	mkfile(t, dir, "build.gradle")
+	out := "SYNAPSE_DEP org.example:lib:1.0\nSYNAPSE_RESOLVE_ERROR com.finx:secret-sdk:2.3.4\n"
+	r := New("gradle").WithRunner(fakeRunner{byArgSubstr: map[string]ports.ToolResult{
+		dir: {Stdout: []byte(out)}, // exit 0, yet a module could not be resolved
+	}})
+	comps, err := r.Resolve(context.Background(), dir)
+	if err == nil {
+		t.Fatal("an exit-0 run that left a module unresolved must surface a non-nil error (no false-clean)")
+	}
+	if len(comps) != 1 || comps[0].Name != "org.example:lib" {
+		t.Fatalf("must keep the module that DID resolve, got %+v", comps)
 	}
 }
