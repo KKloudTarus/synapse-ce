@@ -29,6 +29,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gomodgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
@@ -91,6 +92,14 @@ func main() {
 			usage()
 		}
 		if err := runMetrics(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
+			os.Exit(1)
+		}
+	case "duplication":
+		if len(os.Args) < 3 {
+			usage()
+		}
+		if err := runDuplication(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 			os.Exit(1)
 		}
@@ -191,6 +200,66 @@ func runMetrics(args []string) error {
 	return nil
 }
 
+// runDuplication prints a copy-paste (clone) report for a local source tree and optionally gates on the
+// duplicated-lines density. Pure-Go, read-only; no DB, no sidecar.
+func runDuplication(args []string) error {
+	dir := args[0]
+	minTokens := duplication.DefaultMinTokens
+	failOnPct := -1.0 // <0 = no gate
+	top := 10
+	for i := 1; i < len(args); i++ {
+		switch {
+		case args[i] == "--min-tokens" && i+1 < len(args):
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n < 1 {
+				return fmt.Errorf("--min-tokens wants a positive integer, got %q", args[i+1])
+			}
+			minTokens = n
+			i++
+		case args[i] == "--fail-on-duplication" && i+1 < len(args):
+			p, err := strconv.ParseFloat(args[i+1], 64)
+			if err != nil || p < 0 {
+				return fmt.Errorf("--fail-on-duplication wants a non-negative percentage, got %q", args[i+1])
+			}
+			failOnPct = p
+			i++
+		case args[i] == "--top" && i+1 < len(args):
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n < 0 {
+				return fmt.Errorf("--top wants a non-negative integer, got %q", args[i+1])
+			}
+			top = n
+			i++
+		default:
+			return fmt.Errorf("unknown or incomplete option %q", args[i])
+		}
+	}
+
+	report, err := duplication.New(minTokens).Duplication(context.Background(), dir)
+	if err != nil {
+		return fmt.Errorf("duplication: %w", err)
+	}
+	fmt.Printf("\nSynapse code duplication — %s\n", dir)
+	if report.Truncated {
+		fmt.Println("  ! result truncated at the file cap; metrics are a lower bound")
+	}
+	fmt.Printf("  duplicated blocks: %d · duplicated lines: %d / %d code lines · density: %.1f%% · files: %d (min-tokens %d)\n",
+		len(report.Blocks), report.DuplicatedLines, report.TotalLines, report.Density(), report.Files, minTokens)
+	if len(report.Blocks) > 0 {
+		fmt.Printf("  top %d duplicated blocks:\n", top)
+		for _, b := range report.TopBlocks(top) {
+			fmt.Printf("    %d tokens, %d places:\n", b.Tokens, len(b.Occurrences))
+			for _, o := range b.Occurrences {
+				fmt.Printf("      %s:%d-%d\n", o.File, o.StartLine, o.EndLine)
+			}
+		}
+	}
+	if failOnPct >= 0 && report.Density() > failOnPct {
+		return fmt.Errorf("duplicated-lines density %.1f%% exceeds %.1f%%", report.Density(), failOnPct)
+	}
+	return nil
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
@@ -199,6 +268,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "      --offline  skip the live OSV.dev source; detect with Grype's offline DB only (air-gapped / fast)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli inventory <path>             # per-language code-size inventory (files, code/comment/blank lines, functions) — no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli metrics <path> [--fail-on-complexity N] [--top N]  # per-function cyclomatic+cognitive complexity (needs the synapse-ast sidecar)")
+	fmt.Fprintln(os.Stderr, "  synapse-cli duplication <path> [--min-tokens N] [--fail-on-duplication PCT] [--top N]  # copy-paste detection (blocks, lines, density) — no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories <dir>        # ingest a local OSV dump into the owned advisory store (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote     # fetch + ingest app ecosystems from the OSV bulk bucket (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-distros # fetch + ingest OS-package advisories (Debian/Alpine) from OSV (large; requires SYNAPSE_DB_DSN)")
