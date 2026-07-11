@@ -92,7 +92,7 @@ func New(parsers ...EcosystemParser) (*Registry, error) {
 // Rust, and Java (Maven pom.xml + Gradle libs.versions.toml) — the detection-independent SBOM producer.
 // The parsers claim distinct markers, so New does not error here in practice.
 func DefaultRegistry() (*Registry, error) {
-	return New(GoMod{}, NPM{}, Yarn{}, Pnpm{}, PyPI{}, Poetry{}, Pipfile{}, Cargo{}, Maven{}, Gradle{}, Gem{}, Composer{}, NuGet{}, Swift{}, Dart{}, Elixir{}, Conda{})
+	return New(GoMod{}, NPM{}, Yarn{}, Pnpm{}, PyPI{}, Poetry{}, Pipfile{}, Cargo{}, Maven{}, Gradle{}, Gem{}, Composer{}, NuGet{}, Swift{}, Dart{}, Elixir{}, Conda{}, Renv{}, Julia{}, Conan{})
 }
 
 // Generate walks the target directory, parses every recognized manifest with its EcosystemParser, and
