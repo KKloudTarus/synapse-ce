@@ -50,6 +50,8 @@ func scanTerraform(rel string, data []byte) []ports.MisconfigRawFinding {
 		if m := tfResourceOpen.FindStringSubmatch(trimmed); m != nil {
 			stack = append(stack, &frame{typ: m[1], name: m[2], depth: depth, start: i + 1})
 		}
+		// The brace is expected on the same line as ingress/egress (the near-universal HCL style); a
+		// brace on the following line would miss attribution, acceptable for this depth heuristic.
 		if m := tfSubBlockOpen.FindStringSubmatch(trimmed); m != nil && strings.Contains(trimmed, "{") {
 			subBlock, subOpenDepth = m[1], depth
 		}
