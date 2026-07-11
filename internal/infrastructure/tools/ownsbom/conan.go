@@ -12,10 +12,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// Conan is the owned C/C++ parser: it reads conan.lock – the resolved dependency set produced by the
-// Conan package manager – into conan components. Two lockfile shapes are handled: the Conan 2.x form,
-// which lists reference strings under "requires"/"build_requires"/"python_requires", and the Conan 1.x
-// form, which nests a "graph_lock" whose node "ref" fields carry the same reference strings. A reference
 // Conan is the owned C/C++ parser. It reads conan.lock, the resolved
 // dependency set produced by the Conan package manager, into Conan
 // components.
@@ -170,10 +166,8 @@ func (Conan) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 	// Materialize deterministic graph edges
 	var deps []sbom.Dependency
 	refs := make([]string, 0, len(edgesByRef))
-	for ref, targets := range edgesByRef {
-		if len(targets) > 0 {
-			refs = append(refs, ref)
-		}
+	for ref := range edgesByRef {
+		refs = append(refs, ref) // every entry has at least one target by construction
 	}
 	sort.Strings(refs)
 
