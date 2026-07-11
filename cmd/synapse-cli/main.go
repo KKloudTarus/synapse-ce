@@ -32,6 +32,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/coverage"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
@@ -130,6 +131,14 @@ func main() {
 			usage()
 		}
 		if err := runGate(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
+			os.Exit(1)
+		}
+	case "coverage":
+		if len(os.Args) < 3 {
+			usage()
+		}
+		if err := runCoverage(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 			os.Exit(1)
 		}
@@ -472,6 +481,8 @@ func runGate(args []string) error {
 	base := "origin/main"
 	gatePath := filepath.Join(dir, ".synapse-gate.yaml")
 	rulesPath := filepath.Join(dir, ".synapse-rules.yaml")
+	covPath := ""
+	markdown := false
 	for i := 1; i < len(args); i++ {
 		switch {
 		case args[i] == "--new-code-only":
@@ -484,6 +495,15 @@ func runGate(args []string) error {
 			i++
 		case args[i] == "--rules" && i+1 < len(args):
 			rulesPath = args[i+1]
+			i++
+		case args[i] == "--coverage" && i+1 < len(args):
+			covPath = args[i+1]
+			i++
+		case args[i] == "--format" && i+1 < len(args):
+			if args[i+1] != "markdown" && args[i+1] != "text" {
+				return fmt.Errorf("--format wants text|markdown, got %q", args[i+1])
+			}
+			markdown = args[i+1] == "markdown"
 			i++
 		default:
 			return fmt.Errorf("unknown or incomplete option %q", args[i])
@@ -524,8 +544,10 @@ func runGate(args []string) error {
 	// change introduced. Ratings are computed over the SAME scope, so "reliability_rating A" means "no
 	// reliability issue in new code", the adoption-friendly semantic.
 	scoped := findings
+	var changed gitdiff.ChangedLines
 	if newCodeOnly {
-		changed, derr := gitdiff.Changed(ctx, dir, base)
+		var derr error
+		changed, derr = gitdiff.Changed(ctx, dir, base)
 		if derr != nil {
 			return fmt.Errorf("new-code diff: %w", derr)
 		}
@@ -544,8 +566,30 @@ func runGate(args []string) error {
 		return fmt.Errorf("duplication: %w", err)
 	}
 
-	// 5. Build the snapshot + evaluate the gate.
+	// 5. Coverage (optional): overall line coverage, or coverage on new code when scoping to a diff.
+	coverageMeasured := false
+	var snapCoverage float64
+	if covPath != "" {
+		covRep, lc, cerr := coverage.Parse(covPath)
+		if cerr != nil {
+			return fmt.Errorf("coverage: %w", cerr)
+		}
+		if newCodeOnly && changed != nil {
+			if pct, ok := lc.NewCodePercent(changed); ok {
+				snapCoverage = pct
+				coverageMeasured = true
+			}
+		} else {
+			snapCoverage = covRep.Percent()
+			coverageMeasured = true
+		}
+	}
+
+	// 6. Build the snapshot + evaluate the gate.
 	snap := buildSnapshot(scoped, rep, dupRep.Density())
+	if coverageMeasured {
+		snap[qualitygate.MetricCoveragePct] = snapCoverage
+	}
 	gate, found, err := qualityprofile.LoadGate(gatePath)
 	if err != nil {
 		return fmt.Errorf("load gate: %w", err)
@@ -559,20 +603,98 @@ func runGate(args []string) error {
 	if newCodeOnly {
 		scopeLabel = "new code vs " + base
 	}
-	fmt.Printf("\nSynapse quality gate – %s (%s)\n", dir, scopeLabel)
-	fmt.Printf("  ratings: security %s · reliability %s · maintainability %s · duplication %.1f%%\n", rep.Security, rep.Reliability, rep.Maintainability, dupRep.Density())
-	for _, cr := range result.Results {
-		mark := "PASS"
-		if !cr.Passed {
-			mark = "FAIL"
+	covLabel := "n/a"
+	if coverageMeasured {
+		covLabel = fmt.Sprintf("%.1f%%", snapCoverage)
+	}
+	if markdown {
+		printGateMarkdown(dir, scopeLabel, rep, dupRep.Density(), covLabel, result)
+	} else {
+		fmt.Printf("\nSynapse quality gate – %s (%s)\n", dir, scopeLabel)
+		fmt.Printf("  ratings: security %s · reliability %s · maintainability %s · duplication %.1f%% · coverage %s\n", rep.Security, rep.Reliability, rep.Maintainability, dupRep.Density(), covLabel)
+		for _, cr := range result.Results {
+			mark := "PASS"
+			if !cr.Passed {
+				mark = "FAIL"
+			}
+			fmt.Printf("  [%s] %s (actual %g)\n", mark, cr.Condition, cr.Actual)
 		}
-		fmt.Printf("  [%s] %s (actual %g)\n", mark, cr.Condition, cr.Actual)
 	}
 	if !result.Passed {
 		return fmt.Errorf("quality gate FAILED: %d condition(s) not met", len(result.Failures()))
 	}
-	fmt.Println("  quality gate PASSED")
+	if !markdown {
+		fmt.Println("  quality gate PASSED")
+	}
 	return nil
+}
+
+// runCoverage parses a coverage report (lcov / cobertura / jacoco, auto-detected) and prints the overall
+// line coverage + the least-covered files, optionally gating on a minimum percentage.
+func runCoverage(args []string) error {
+	path := args[0]
+	if strings.HasPrefix(path, "-") {
+		return fmt.Errorf("first argument must be a report file, got option %q", path)
+	}
+	failBelow := -1.0
+	top := 10
+	for i := 1; i < len(args); i++ {
+		switch {
+		case args[i] == "--fail-below" && i+1 < len(args):
+			p, err := strconv.ParseFloat(args[i+1], 64)
+			if err != nil || p < 0 || p > 100 {
+				return fmt.Errorf("--fail-below wants a percentage 0-100, got %q", args[i+1])
+			}
+			failBelow = p
+			i++
+		case args[i] == "--top" && i+1 < len(args):
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n < 0 {
+				return fmt.Errorf("--top wants a non-negative integer, got %q", args[i+1])
+			}
+			top = n
+			i++
+		default:
+			return fmt.Errorf("unknown or incomplete option %q", args[i])
+		}
+	}
+	rep, _, err := coverage.Parse(path)
+	if err != nil {
+		return fmt.Errorf("coverage: %w", err)
+	}
+	fmt.Printf("\nSynapse coverage – %s\n", path)
+	fmt.Printf("  line coverage: %.1f%% (%d/%d lines, %d files)\n", rep.Percent(), rep.CoveredLines, rep.TotalLines, len(rep.Files))
+	least := rep.LeastCovered(top)
+	if len(least) > 0 {
+		fmt.Printf("  least covered:\n")
+		for _, f := range least {
+			fmt.Printf("    %6.1f%%  %s (%d/%d)\n", f.Percent(), f.File, f.CoveredLines, f.TotalLines)
+		}
+	}
+	if failBelow >= 0 && rep.Percent() < failBelow {
+		return fmt.Errorf("line coverage %.1f%% is below %.1f%%", rep.Percent(), failBelow)
+	}
+	return nil
+}
+
+// printGateMarkdown renders the gate result as a Markdown summary suitable for a PR comment (gh pr comment
+// --body-file). Failed conditions are listed first so a reviewer sees the blockers immediately.
+func printGateMarkdown(dir, scope string, rep rating.Report, dupDensity float64, coverage string, result qualitygate.Result) {
+	status := "✅ **Quality gate passed**"
+	if !result.Passed {
+		status = "❌ **Quality gate failed**"
+	}
+	fmt.Printf("## Synapse quality gate\n\n%s _(%s)_\n\n", status, scope)
+	fmt.Printf("| Rating | Grade |\n|---|---|\n| Security | %s |\n| Reliability | %s |\n| Maintainability | %s |\n", rep.Security, rep.Reliability, rep.Maintainability)
+	fmt.Printf("\nDuplication %.1f%% · Coverage %s\n\n", dupDensity, coverage)
+	fmt.Printf("| Condition | Actual | |\n|---|---|---|\n")
+	for _, cr := range result.Results {
+		mark := "✅"
+		if !cr.Passed {
+			mark = "❌"
+		}
+		fmt.Printf("| `%s` | %g | %s |\n", cr.Condition, cr.Actual, mark)
+	}
 }
 
 // filterNewCode keeps only line-anchored findings that sit on a changed line.
@@ -648,7 +770,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  synapse-cli duplication <path> [--min-tokens N] [--fail-on-duplication PCT] [--top N]  # copy-paste detection (blocks, lines, density) – no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli quality <path> [--fail-on SEV] [--min-complexity N] [--sarif]  # maintainability + reliability findings (+ duplication, + complexity via synapse-ast) – no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli rating <path> [--json] [--fail-below GRADE]  # A-E health grades (security/reliability/maintainability) + technical debt – no DB")
-	fmt.Fprintln(os.Stderr, "  synapse-cli gate <path> [--new-code-only] [--base REF] [--gate FILE] [--rules FILE]  # Clean-as-You-Code quality gate (.synapse-gate.yaml / .synapse-rules.yaml) – no DB")
+	fmt.Fprintln(os.Stderr, "  synapse-cli gate <path> [--new-code-only] [--base REF] [--gate FILE] [--rules FILE] [--coverage FILE] [--format text|markdown]  # Clean-as-You-Code quality gate")
+	fmt.Fprintln(os.Stderr, "  synapse-cli coverage <lcov|cobertura|jacoco file> [--fail-below PCT] [--top N]  # parse a coverage report (auto-detected)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories <dir>        # ingest a local OSV dump into the owned advisory store (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote     # fetch + ingest app ecosystems from the OSV bulk bucket (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-distros # fetch + ingest OS-package advisories (Debian/Alpine) from OSV (large; requires SYNAPSE_DB_DSN)")

@@ -162,4 +162,59 @@ stage('Synapse scan') {
 }
 ```
 
+## Code quality gate (Clean as You Code)
+
+Beyond security, `synapse-cli` measures code health and gates on it. The quality gate can score the
+whole codebase or, with `--new-code-only`, just the lines a branch changed, so a legacy repo can adopt
+the gate without fixing all pre-existing debt first.
+
+```bash
+# fail the build if new code introduces a critical/high issue, a new secret, or drops below A ratings
+synapse-cli gate . --new-code-only --base origin/main
+
+# feed a coverage report (lcov / Cobertura / JaCoCo, auto-detected); a .synapse-gate.yaml can then
+# require e.g. `coverage >= 80` on new code
+synapse-cli gate . --new-code-only --base origin/main --coverage coverage.info
+```
+
+A `.synapse-gate.yaml` overrides the built-in gate, and a `.synapse-rules.yaml` enables/disables rules
+or overrides severities:
+
+```yaml
+# .synapse-gate.yaml
+conditions:
+  - metric: new_critical
+    op: "<="
+    threshold: 0
+  - metric: coverage
+    op: ">="
+    threshold: 80
+```
+
+Inspect coverage on its own:
+
+```bash
+synapse-cli coverage coverage.info --fail-below 80
+```
+
+### PR decoration
+
+Post the gate result as a pull-request comment. `--format markdown` prints a ready-to-post summary:
+
+```yaml
+- name: Synapse quality gate
+  run: |
+    make tools && make build
+    ./bin/synapse-cli gate . --new-code-only --base "origin/${{ github.base_ref }}" \
+      --coverage coverage.info --format markdown > gate.md || echo "GATE_FAILED=1" >> "$GITHUB_ENV"
+- name: Comment the gate on the PR
+  if: always()
+  run: gh pr comment "${{ github.event.pull_request.number }}" --body-file gate.md
+  env:
+    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+- name: Fail if the gate failed
+  if: env.GATE_FAILED == '1'
+  run: exit 1
+```
+
 Next: [Architecture](architecture.md)
