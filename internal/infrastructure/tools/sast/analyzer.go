@@ -264,10 +264,14 @@ func sourceFromContextBlock(lower string, line int) (source, evidence string) {
 }
 
 func (a *Analyzer) findingFromRule(rel string, line int, ruleID string, lines []string, project projectContext) (ports.SASTRawFinding, bool) {
+	ext := strings.ToLower(filepath.Ext(rel))
 	for ri := range a.rules {
 		r := &a.rules[ri]
 		if r.id != ruleID {
 			continue
+		}
+		if !r.appliesTo(ext) {
+			return ports.SASTRawFinding{}, false // honor the language gate on the contextual path too
 		}
 		h := ports.SASTRawFinding{
 			File: rel, Line: line, RuleID: r.id, CWE: r.cwe,

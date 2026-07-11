@@ -425,6 +425,8 @@ func TestLanguageGatedRulesRespectExtensions(t *testing.T) {
 		{"prisma-raw-sql-unsafe", `await prisma.$queryRawUnsafe(sql)`, "db.ts", "db.go"},
 		{"react-dangerous-html", `<div dangerouslySetInnerHTML={{ __html: note }} />`, "View.tsx", "view.py"},
 		{"unsafe-deserialization-node-serialize", `const o = unserialize(req.body.data)`, "d.js", "d.go"},
+		// exercises the contextual (multi-line block) path in findingFromRule, not just scanLines
+		{"possible-idor-prisma-id-only", `await prisma.pet.update({ where: { id: petId }, data: body })`, "svc.ts", "svc.go"},
 	}
 	for _, c := range cases {
 		fires := t.TempDir()
