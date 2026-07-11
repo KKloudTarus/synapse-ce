@@ -195,3 +195,30 @@ func TestTestScopedInfoSmellsSuppressed(t *testing.T) {
 		t.Errorf("WithTestScopedSmells(true) should keep all 3, got %d", len(all))
 	}
 }
+
+func TestIsTestPath(t *testing.T) {
+	tests := map[string]bool{
+		"src/test/java/com/x/FooTest.java":  true,
+		"services/kyc/src/test/java/A.java": true,
+		"pkg/foo_test.go":                   true,
+		"app/user.test.ts":                  true,
+		"app/user.spec.ts":                  true,
+		"tests/test_login.py":               true,
+		"foo/testdata/sample.json":          true,
+		"a/__tests__/b.js":                  true,
+		"Bar.kt":                            false,
+		"BarTest.kt":                        true,
+		// Production files that must NOT be misclassified (the substring-match FP class).
+		"src/main/java/com/x/Latest.java":   false,
+		"src/main/java/com/x/Contest.java":  false,
+		"src/main/java/com/x/Greatest.java": false,
+		"pkg/testing/helper.go":             false, // production test-helper package
+		"api/spec/handler.go":               false, // production spec dir
+		"src/main/java/com/x/Foo.java":      false,
+	}
+	for path, want := range tests {
+		if got := isTestPath(path); got != want {
+			t.Errorf("isTestPath(%q) = %v, want %v", path, got, want)
+		}
+	}
+}

@@ -370,6 +370,9 @@ func runQuality(args []string) error {
 			byKind[f.Kind]++
 		}
 		fmt.Printf("  findings: %d (quality: %d, reliability: %d)\n", len(findings), byKind[finding.KindQuality], byKind[finding.KindReliability])
+		if !includeTestSmells {
+			fmt.Println("  note: info-severity smells in test code are hidden (--include-test-smells to show)")
+		}
 		for _, f := range findings {
 			fmt.Printf("    [%-8s %-11s] %s\n", f.Severity, f.Kind, f.Title)
 		}

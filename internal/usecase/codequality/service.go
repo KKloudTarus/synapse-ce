@@ -64,6 +64,10 @@ var bugCWE = map[string]string{
 // commented-out-code fires heavily in tests and otherwise drowns the higher-value findings (complexity,
 // duplication, reliability). Pass true to restore full verbosity. Only Info-severity smells are affected;
 // medium/high findings (and every non-test finding) are always kept.
+//
+// Because the filter lives in the single analyze() chokepoint, it also applies to BuildReport and thus to
+// rating.Compute: test-scoped Info smells (5 debt-minutes each) are excluded from the technical-debt total
+// and the maintainability grade by default, which is intentional (test TODOs are not production debt).
 func WithTestScopedSmells(include bool) Option {
 	return func(s *Service) { s.includeTestSmells = include }
 }
@@ -193,15 +197,16 @@ func deterministicID(dedupKey string) shared.ID {
 // (commented-out code, TODOs) are low-value noise. Matches common directory and filename conventions
 // across ecosystems (Go _test.go, JS/TS .test./.spec., Python test_*, Java src/test + *Test.java, ...).
 func isTestPath(p string) bool {
-	q := strings.ToLower(filepath.ToSlash(p))
-	for _, seg := range []string{
-		"/test/", "/tests/", "/testing/", "/__tests__/", "/__mocks__/", "/testdata/", "/spec/", "/specs/", "/fixtures/",
-	} {
+	slash := filepath.ToSlash(p)
+	q := strings.ToLower(slash)
+	// Directory conventions. Deliberately NOT /testing/ or /spec(s)/ – those are common production
+	// package/dir names (test helpers that ship in the binary, OpenAPI/language specs).
+	for _, seg := range []string{"/test/", "/tests/", "/__tests__/", "/__mocks__/", "/testdata/", "/fixtures/"} {
 		if strings.Contains(q, seg) {
 			return true
 		}
 	}
-	if strings.HasPrefix(q, "test/") || strings.HasPrefix(q, "tests/") || strings.HasPrefix(q, "spec/") || strings.HasPrefix(q, "testdata/") {
+	if strings.HasPrefix(q, "test/") || strings.HasPrefix(q, "tests/") || strings.HasPrefix(q, "testdata/") {
 		return true
 	}
 	base := q
@@ -211,8 +216,17 @@ func isTestPath(p string) bool {
 	if strings.HasPrefix(base, "test_") { // python test_foo.py
 		return true
 	}
-	for _, m := range []string{"_test.", ".test.", "_spec.", ".spec.", "test.java", "tests.java"} {
+	// Dot/underscore-bounded filename conventions (JS/TS .test./.spec., Python _test./_spec.).
+	for _, m := range []string{"_test.", ".test.", "_spec.", ".spec."} {
 		if strings.Contains(base, m) {
+			return true
+		}
+	}
+	// CamelCase suffix conventions (JUnit/Kotlin/C#/Scala). Matched case-sensitively on the ORIGINAL
+	// basename so a capital T distinguishes FooTest.java from production files like Latest.java/Contest.java.
+	obase := filepath.Base(slash)
+	for _, suf := range []string{"Test.java", "Tests.java", "Test.kt", "Tests.kt", "Test.cs", "Tests.cs", "Spec.scala"} {
+		if strings.HasSuffix(obase, suf) {
 			return true
 		}
 	}
