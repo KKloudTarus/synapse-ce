@@ -19,6 +19,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rating"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -33,6 +34,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gomodgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/grype"
@@ -52,6 +54,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ospkg"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/osv"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownadvisory"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/qualityprofile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/risk"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/secretscan"
@@ -119,6 +122,14 @@ func main() {
 			usage()
 		}
 		if err := runRating(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
+			os.Exit(1)
+		}
+	case "gate":
+		if len(os.Args) < 3 {
+			usage()
+		}
+		if err := runGate(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 			os.Exit(1)
 		}
@@ -447,6 +458,185 @@ func runRating(args []string) error {
 	return nil
 }
 
+// runGate is the unified Clean-as-You-Code quality gate: it gathers the code-quality + first-party
+// security findings, applies the rule profile (.synapse-rules.yaml), optionally scopes to new/changed
+// code (git diff vs a base ref), builds the metric snapshot (+ ratings + duplication density), and
+// evaluates the quality gate (.synapse-gate.yaml or the built-in default). Exits non-zero when the gate
+// fails, printing the exact conditions that failed.
+func runGate(args []string) error {
+	dir := args[0]
+	if strings.HasPrefix(dir, "-") {
+		return fmt.Errorf("first argument must be a path, got option %q", dir)
+	}
+	newCodeOnly := false
+	base := "origin/main"
+	gatePath := filepath.Join(dir, ".synapse-gate.yaml")
+	rulesPath := filepath.Join(dir, ".synapse-rules.yaml")
+	for i := 1; i < len(args); i++ {
+		switch {
+		case args[i] == "--new-code-only":
+			newCodeOnly = true
+		case args[i] == "--base" && i+1 < len(args):
+			base = args[i+1]
+			i++
+		case args[i] == "--gate" && i+1 < len(args):
+			gatePath = args[i+1]
+			i++
+		case args[i] == "--rules" && i+1 < len(args):
+			rulesPath = args[i+1]
+			i++
+		default:
+			return fmt.Errorf("unknown or incomplete option %q", args[i])
+		}
+	}
+	ctx := context.Background()
+
+	// 1. Gather findings: code quality (quality+reliability, + duplication/complexity bridges) + SAST.
+	svc := codequality.New(
+		codeanalysis.New(),
+		codequality.WithDuplication(duplication.New(0)),
+		codequality.WithComplexity(ast.New(os.Getenv("SYNAPSE_AST_BIN")), codequality.DefaultComplexityThreshold),
+	)
+	findings, err := svc.Analyze(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("code quality: %w", err)
+	}
+	sastRaws, err := sast.New().AnalyzeSource(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("sast: %w", err)
+	}
+	for _, sr := range sastRaws {
+		findings = append(findings, finding.Finding{
+			Kind:     finding.KindSAST,
+			Severity: sr.Severity,
+			DedupKey: "sast:" + sr.RuleID + ":" + sr.File + ":" + strconv.Itoa(sr.Line),
+		})
+	}
+
+	// 2. Apply the rule profile (enable/disable + severity override).
+	profile, _, err := qualityprofile.LoadProfile(rulesPath)
+	if err != nil {
+		return fmt.Errorf("load rules profile: %w", err)
+	}
+	findings = profile.Apply(findings)
+
+	// 3. Scope to new/changed code if requested (Clean as You Code): the gate then judges only what this
+	// change introduced. Ratings are computed over the SAME scope, so "reliability_rating A" means "no
+	// reliability issue in new code", the adoption-friendly semantic.
+	scoped := findings
+	if newCodeOnly {
+		changed, derr := gitdiff.Changed(ctx, dir, base)
+		if derr != nil {
+			return fmt.Errorf("new-code diff: %w", derr)
+		}
+		scoped = filterNewCode(findings, changed)
+	}
+
+	// 4. Ratings over the scope (security/reliability are worst-severity, so correctly new-code-scoped;
+	// maintainability's debt ratio still divides by whole-repo LOC) + whole-codebase duplication density.
+	inv, err := codeinventory.New().Inventory(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("inventory: %w", err)
+	}
+	rep := rating.Compute(scoped, inv.Totals().CodeLines)
+	dupRep, err := duplication.New(0).Duplication(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("duplication: %w", err)
+	}
+
+	// 5. Build the snapshot + evaluate the gate.
+	snap := buildSnapshot(scoped, rep, dupRep.Density())
+	gate, found, err := qualityprofile.LoadGate(gatePath)
+	if err != nil {
+		return fmt.Errorf("load gate: %w", err)
+	}
+	if !found {
+		gate = qualitygate.Default()
+	}
+	result := qualitygate.Evaluate(gate, snap)
+
+	scopeLabel := "whole codebase"
+	if newCodeOnly {
+		scopeLabel = "new code vs " + base
+	}
+	fmt.Printf("\nSynapse quality gate — %s (%s)\n", dir, scopeLabel)
+	fmt.Printf("  ratings: security %s · reliability %s · maintainability %s · duplication %.1f%%\n", rep.Security, rep.Reliability, rep.Maintainability, dupRep.Density())
+	for _, cr := range result.Results {
+		mark := "PASS"
+		if !cr.Passed {
+			mark = "FAIL"
+		}
+		fmt.Printf("  [%s] %s (actual %g)\n", mark, cr.Condition, cr.Actual)
+	}
+	if !result.Passed {
+		return fmt.Errorf("quality gate FAILED: %d condition(s) not met", len(result.Failures()))
+	}
+	fmt.Println("  quality gate PASSED")
+	return nil
+}
+
+// filterNewCode keeps only line-anchored findings that sit on a changed line.
+func filterNewCode(findings []finding.Finding, changed gitdiff.ChangedLines) []finding.Finding {
+	var out []finding.Finding
+	for _, f := range findings {
+		file, line, ok := qualitygate.FileLineOf(f.DedupKey)
+		if !ok {
+			continue // not line-anchored (e.g. SCA): not attributable to a changed line
+		}
+		if changed.Has(file, line) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// buildSnapshot turns the scoped findings + ratings + duplication into gate metrics.
+func buildSnapshot(scoped []finding.Finding, rep rating.Report, dupDensity float64) qualitygate.Snapshot {
+	s := qualitygate.Snapshot{}
+	securityKind := map[finding.Kind]bool{
+		finding.KindSCA: true, finding.KindSAST: true, finding.KindSecret: true,
+		finding.KindMisconfig: true, finding.KindExploitation: true, finding.KindDAST: true,
+	}
+	for _, f := range scoped {
+		s[qualitygate.MetricNewIssues]++
+		switch f.Severity {
+		case shared.SeverityCritical:
+			s[qualitygate.MetricNewCritical]++
+		case shared.SeverityHigh:
+			s[qualitygate.MetricNewHigh]++
+		case shared.SeverityMedium:
+			s[qualitygate.MetricNewMedium]++
+		}
+		if f.Kind == finding.KindSecret {
+			s[qualitygate.MetricNewSecret]++
+		}
+		if securityKind[f.Kind] {
+			s[qualitygate.MetricNewVulnerability]++
+		}
+	}
+	s[qualitygate.MetricDuplicationPct] = dupDensity
+	s[qualitygate.MetricSecurityRating] = gradeNum(rep.Security)
+	s[qualitygate.MetricReliability] = gradeNum(rep.Reliability)
+	s[qualitygate.MetricMaintainability] = gradeNum(rep.Maintainability)
+	return s
+}
+
+func gradeNum(g rating.Grade) float64 {
+	switch g {
+	case rating.GradeA:
+		return 1
+	case rating.GradeB:
+		return 2
+	case rating.GradeC:
+		return 3
+	case rating.GradeD:
+		return 4
+	case rating.GradeE:
+		return 5
+	}
+	return 0
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
@@ -458,6 +648,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  synapse-cli duplication <path> [--min-tokens N] [--fail-on-duplication PCT] [--top N]  # copy-paste detection (blocks, lines, density) — no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli quality <path> [--fail-on SEV] [--min-complexity N] [--sarif]  # maintainability + reliability findings (+ duplication, + complexity via synapse-ast) — no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli rating <path> [--json] [--fail-below GRADE]  # A-E health grades (security/reliability/maintainability) + technical debt — no DB")
+	fmt.Fprintln(os.Stderr, "  synapse-cli gate <path> [--new-code-only] [--base REF] [--gate FILE] [--rules FILE]  # Clean-as-You-Code quality gate (.synapse-gate.yaml / .synapse-rules.yaml) — no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories <dir>        # ingest a local OSV dump into the owned advisory store (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote     # fetch + ingest app ecosystems from the OSV bulk bucket (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-distros # fetch + ingest OS-package advisories (Debian/Alpine) from OSV (large; requires SYNAPSE_DB_DSN)")
