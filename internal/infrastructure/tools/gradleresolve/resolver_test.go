@@ -135,6 +135,25 @@ func TestBuildRootsSkipsIncludedAndOutputDirs(t *testing.T) {
 	}
 }
 
+func TestBuildRootsComposite(t *testing.T) {
+	// A composite build (like a service monorepo): the root settings.gradle uses includeBuild for each
+	// service, and each service is its OWN build with its own settings.gradle. Every independent build must
+	// be discovered; a plain subproject (build.gradle only, under a settings root) must NOT be a root.
+	dir := t.TempDir()
+	mkfile(t, dir, "settings.gradle")
+	mkfile(t, dir, "build.gradle")
+	mkfile(t, filepath.Join(dir, "services", "kyc"), "settings.gradle")
+	mkfile(t, filepath.Join(dir, "services", "kyc"), "build.gradle")
+	mkfile(t, filepath.Join(dir, "services", "acct"), "settings.gradle")
+	mkfile(t, filepath.Join(dir, "services", "acct"), "build.gradle")
+	mkfile(t, filepath.Join(dir, "shared", "common"), "settings.gradle")
+	mkfile(t, filepath.Join(dir, "shared", "common"), "build.gradle")
+	mkfile(t, filepath.Join(dir, "shared", "common", "sub"), "build.gradle") // subproject – NOT a root
+	if roots := buildRoots(dir); len(roots) != 4 {
+		t.Fatalf("composite: got %d roots, want 4 (root + kyc + acct + shared/common): %v", len(roots), roots)
+	}
+}
+
 func TestBuildRootsNone(t *testing.T) {
 	if roots := buildRoots(t.TempDir()); len(roots) != 0 {
 		t.Fatalf("no build file: roots = %v, want none", roots)

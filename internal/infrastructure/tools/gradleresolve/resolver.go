@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -39,9 +40,6 @@ const maxBuildRoots = 200 // bound the sub-project discovery walk (a monorepo of
 // portal / distribution services Gradle reaches to resolve plugins and dependency metadata. Extra
 // private-mirror hosts are added via WithRepoHosts.
 var defaultRepoHosts = []string{"repo1.maven.org", "repo.maven.apache.org", "plugins.gradle.org", "services.gradle.org"}
-
-// buildFiles are the project markers that indicate a Gradle build (Groovy or Kotlin DSL).
-var buildFiles = []string{"build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"}
 
 // Resolver runs `gradle dependencies` to resolve a Gradle project's full dependency tree. bin is the
 // pinned gradle executable (path/name) – NOT the project's./gradlew.
@@ -115,6 +113,9 @@ func (r *Resolver) Resolve(ctx context.Context, dir string) ([]sbom.Component, e
 		}
 		out, err := r.run(ctx, root)
 		if err != nil {
+			if errors.Is(err, errNoRuntimeClasspath) {
+				continue // aggregator / non-Java build root (no runtimeClasspath) – expected, not a failure
+			}
 			if firstErr == nil {
 				firstErr = fmt.Errorf("%s: %w", relOrBase(dir, root), err)
 			}
@@ -143,8 +144,25 @@ func relOrBase(dir, root string) string {
 	return filepath.Base(root)
 }
 
-func hasBuildFile(dir string) bool {
-	for _, f := range buildFiles {
+// errNoRuntimeClasspath signals that a build root has no runtimeClasspath configuration — an aggregator /
+// non-Java root (common as the top of a composite build). Resolve treats it as an expected skip, not a
+// resolution failure. run() returns it after classifying the RAW (un-truncated) gradle stderr.
+var errNoRuntimeClasspath = errors.New("gradle: build root has no runtimeClasspath configuration")
+
+// noRuntimeClasspath detects Gradle's "configuration 'runtimeClasspath' not found …" failure in raw
+// stderr. Matched on the un-truncated output (before run() clips it) and on two stable tokens, so a long
+// FAILURE/`* Where:` preamble can't push the marker out of view.
+func noRuntimeClasspath(stderr string) bool {
+	return strings.Contains(stderr, "runtimeClasspath") && strings.Contains(stderr, "not found")
+}
+
+// settingsFiles mark an INDEPENDENT Gradle build (its own root project): a standard multi-project build
+// has one only at the top, while a composite build (`includeBuild`) — and a monorepo of independent
+// service builds — has one in EACH included build.
+var settingsFiles = []string{"settings.gradle", "settings.gradle.kts"}
+
+func hasSettingsFile(dir string) bool {
+	for _, f := range settingsFiles {
 		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
 			return true
 		}
@@ -152,29 +170,64 @@ func hasBuildFile(dir string) bool {
 	return false
 }
 
-// buildRoots finds the Gradle build roots under dir: each directory holding a build script
-// (build.gradle[.kts] / settings.gradle[.kts]), WITHOUT descending into it – a multi-project build's
-// included sub-projects are resolved by running gradle on the build root (the settings.gradle dir), just
-// as `gradle -p <root> dependencies` configures the whole build. dir itself is a root when it has a build
-// file (single-build fast path). Gradle output/VCS/tooling dirs are skipped. Bounded to maxBuildRoots.
+// hasBuildScript reports whether dir has a build.gradle[.kts] (a project build script, ignoring settings).
+func hasBuildScript(dir string) bool {
+	for _, f := range []string{"build.gradle", "build.gradle.kts"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// buildRoots finds the Gradle build roots under dir. Each directory with a SETTINGS file is an
+// independent build and becomes a root, and the walk keeps descending past it so that composite/included
+// builds (`includeBuild ...`) — e.g. a monorepo whose root settings.gradle pulls each service in as its
+// own build — are all discovered and resolved individually. (Running `gradle -p <root> dependencies` only
+// reports the ROOT project, so an aggregator root with no runtimeClasspath contributes nothing on its own;
+// the included builds are where the real dependency trees live.) When there is NO settings file anywhere,
+// a bare build.gradle at dir is the single build root (the common single-module fast path). Gradle
+// output/VCS/tooling/source dirs are skipped; bounded to maxBuildRoots.
 func buildRoots(dir string) []string {
 	var roots []string
+	var covered []string // settings-root paths: a build.gradle-only dir beneath one is a subproject, not a root
+	underCovered := func(p string) bool {
+		for _, c := range covered {
+			if strings.HasPrefix(p, c+string(os.PathSeparator)) {
+				return true
+			}
+		}
+		return false
+	}
 	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || !d.IsDir() {
 			return nil
 		}
 		if p != dir {
 			switch d.Name() {
-			case "build", "target", ".gradle", "buildSrc", "node_modules", ".git", ".idea":
-				return filepath.SkipDir // Gradle output / build-logic / VCS / tooling – never a build root to run gradle on
+			case "build", "target", ".gradle", "buildSrc", "node_modules", ".git", ".idea", "src":
+				return filepath.SkipDir // Gradle output / build-logic / VCS / tooling / sources – never a build root
 			}
 		}
-		if hasBuildFile(p) {
+		switch {
+		case hasSettingsFile(p):
+			// An independent build (its own root project). Composite builds (`includeBuild`) nest one per
+			// included build, so KEEP descending to find them; its build.gradle-only subdirs are its
+			// subprojects (marked covered below), resolved by gradle on this root.
 			roots = append(roots, p)
+			covered = append(covered, p)
+		case hasBuildScript(p):
+			if underCovered(p) {
+				return filepath.SkipDir // a subproject of an enclosing settings-root build – not a separate root
+			}
+			roots = append(roots, p) // a standalone single-module build (no settings file)
 			if len(roots) >= maxBuildRoots {
 				return filepath.SkipAll
 			}
-			return filepath.SkipDir // this dir is a build root; its included sub-projects are gradle's job
+			return filepath.SkipDir // its own subprojects belong to this build
+		}
+		if len(roots) >= maxBuildRoots {
+			return filepath.SkipAll
 		}
 		return nil
 	})
@@ -211,6 +264,9 @@ func (r *Resolver) run(ctx context.Context, dir string) ([]byte, error) {
 			return nil, fmt.Errorf("sandboxed: %w: %s", err, truncate(string(res.Stderr), 300))
 		}
 		if res.ExitCode != 0 {
+			if noRuntimeClasspath(string(res.Stderr)) {
+				return nil, errNoRuntimeClasspath
+			}
 			return nil, fmt.Errorf("exit %d: %s", res.ExitCode, truncate(string(res.Stderr), 300))
 		}
 		return res.Stdout, nil
@@ -229,6 +285,9 @@ func (r *Resolver) run(ctx context.Context, dir string) ([]byte, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if noRuntimeClasspath(stderr.String()) {
+			return nil, errNoRuntimeClasspath
+		}
 		return nil, fmt.Errorf("%w: %s", err, truncate(stderr.String(), 300))
 	}
 	return stdout.Bytes(), nil
