@@ -34,6 +34,13 @@ var cSourceExts = map[string]bool{
 	".hxx": true, ".m": true, ".mm": true,
 }
 
+// pyExts / jsExts gate rules whose sink or idiom belongs to a single language ecosystem, so a
+// Python- or JS/TS-specific pattern (SQLAlchemy, Prisma, React/DOM, node-serialize, ...) can never
+// false-positive on a same-named construct in another language (e.g. the "Python SQLAlchemy" rule
+// firing on a .java file, or a Prisma rule on Go). nil exts stays language-agnostic.
+var pyExts = map[string]bool{".py": true, ".pyi": true, ".pyw": true}
+var jsExts = map[string]bool{".js": true, ".jsx": true, ".mjs": true, ".cjs": true, ".ts": true, ".tsx": true}
+
 // placeholderSecret drops obvious non-secrets (env refs, templating, placeholders) so the
 // hardcoded-credential rule stays high-signal – deterministic findings are publishable directly
 // (no AI gate), so precision matters more than recall here.
@@ -157,6 +164,7 @@ func builtinRules() []rule {
 			desc:   "Prisma $queryRawUnsafe executes string-built SQL. If request-controlled values reach the query string this is SQL injection; use parameterized $queryRaw or Prisma query builders.",
 			re:     regexp.MustCompile(`(?i)\$queryRawUnsafe\s*(<[^>]+>)?\s*[\(\x60]`),
 			skipFn: commentOnlyLine,
+			exts:   jsExts,
 		},
 		{
 			id: "template-sql-interpolation", cwe: "CWE-89", severity: shared.SeverityCritical, title: "SQL string interpolates dynamic data",
@@ -166,8 +174,13 @@ func builtinRules() []rule {
 		},
 		{
 			id: "generic-sql-dynamic-execute", cwe: "CWE-89", severity: shared.SeverityHigh, title: "SQL execution uses dynamic string construction",
-			desc:   "A SQL execution sink appears to receive a string built from request/user-controlled data. Use parameterized queries or ORM query builders.",
-			re:     regexp.MustCompile(`(?i)(cursor\.execute|execute(Query|Update)?|mysqli_query|pg_query|sequelize\.query|ActiveRecord::Base\.connection\.execute)\s*\([^;\n]*(\+|%|\.|\$\{|#\{|params\[|request\.|req\.|\$_(GET|POST|REQUEST))`),
+			desc: "A SQL execution sink appears to receive a string built from request/user-controlled data. Use parameterized queries or ORM query builders.",
+			// The evidence must be a request/interpolation marker OR a string literal that is then
+			// concatenated (`"..." +`). A bare `.` used to count as evidence, which flagged any
+			// `x.execute(y.z(...))` – notably java.util.concurrent Executor.execute(Runnable) – as SQL
+			// injection; requiring a quoted literal before the `+` keeps the JDBC/DBAPI true positives
+			// (stmt.executeQuery("SELECT ..." + q)) while dropping the executor/worker false positives.
+			re:     regexp.MustCompile(`(?i)(cursor\.execute|execute(Query|Update)?|mysqli_query|pg_query|sequelize\.query|ActiveRecord::Base\.connection\.execute)\s*\([^;\n]*(request\.|req\.|params\[|\$_(GET|POST|REQUEST)|\$\{|#\{|["'` + "`" + `][^;\n]*\+)`),
 			skipFn: commentOnlyLine,
 		},
 		{
@@ -181,12 +194,14 @@ func builtinRules() []rule {
 			desc:   "SQLAlchemy/session execution appears to receive dynamically formatted SQL. Use bound parameters instead of f-strings, concatenation, or request-derived interpolation.",
 			re:     regexp.MustCompile(`(?i)(session\.execute|connection\.execute|db\.session\.execute|text)\s*\([^;\n]*(f["']|%|\+|request\.|params\[)`),
 			skipFn: commentOnlyLine,
+			exts:   pyExts,
 		},
 		{
 			id: "child-process-exec-template", cwe: "CWE-78", severity: shared.SeverityCritical, title: "Shell command uses template interpolation",
 			desc:   "child_process.exec runs through a shell. Interpolating paths, filenames, request fields, or other variables can enable command injection; use execFile/spawn with argv and strict validation.",
 			re:     regexp.MustCompile("(?i)\\bexec\\s*\\(\\s*`[^`]*\\$\\{[^}]+}[^`]*`"),
 			skipFn: commentOnlyLine,
+			exts:   jsExts,
 		},
 		{
 			id: "generic-command-injection-sink", cwe: "CWE-78", severity: shared.SeverityHigh, title: "Command execution sink receives dynamic input",
@@ -205,6 +220,7 @@ func builtinRules() []rule {
 			desc:   "node-serialize unserialize() can execute attacker-controlled JavaScript payloads. Never deserialize untrusted request data with this package.",
 			re:     regexp.MustCompile(`(?i)\bunserialize\s*\(`),
 			skipFn: commentOnlyLine,
+			exts:   jsExts,
 		},
 		{
 			id: "unsafe-deserialization-generic", cwe: "CWE-502", severity: shared.SeverityHigh, title: "Unsafe deserialization of potentially untrusted data",
@@ -235,6 +251,7 @@ func builtinRules() []rule {
 			desc:   "dangerouslySetInnerHTML bypasses React escaping. Ensure the value is sanitized server-side and client-side before rendering untrusted content.",
 			re:     regexp.MustCompile(`\bdangerouslySetInnerHTML\b`),
 			skipFn: commentOnlyLine,
+			exts:   jsExts,
 		},
 		{
 			id: "reflected-response-write", cwe: "CWE-79", severity: shared.SeverityHigh, title: "Response writes potentially unescaped request data",
@@ -283,6 +300,7 @@ func builtinRules() []rule {
 			desc:   "A Prisma find/update/delete operation appears to select an object by id only. For user-owned resources, include an owner/tenant/role predicate or perform an explicit authorization check.",
 			re:     regexp.MustCompile(`(?i)prisma\.\w+\.(findUnique|update|delete)\s*\(\s*\{\s*where\s*:\s*\{\s*id\s*[:}]`),
 			skipFn: commentOnlyLine,
+			exts:   jsExts,
 		},
 		{
 			id: "mass-assignment-request-body", cwe: "CWE-915", severity: shared.SeverityMedium, title: "Mass assignment from request body",
@@ -309,6 +327,7 @@ func builtinRules() []rule {
 			// when it carries a taint source. \+?= also catches the innerHTML += append form.
 			re:     regexp.MustCompile(`(?i)(\.(inner|outer)HTML\s*\+?=\s*[^;\n]*(req\.|request\.|params\[|location\.(hash|search|href|pathname)|document\.(URL|referrer|cookie)|window\.name|\$\{[^}]*(req\.|location\.|document\.|params\[))|document\.write\s*\(\s*[^)\n]*(location\.|document\.(URL|referrer)|req\.|params\[|\$\{[^}]*(req\.|location\.|document\.)))`),
 			skipFn: commentOnlyLine,
+			exts:   jsExts,
 		},
 		{
 			id: "nosql-injection-request", cwe: "CWE-943", severity: shared.SeverityHigh, title: "NoSQL query built from request data",

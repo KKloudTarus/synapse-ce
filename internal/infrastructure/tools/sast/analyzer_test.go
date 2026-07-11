@@ -175,6 +175,7 @@ func TestRuleCorpus(t *testing.T) {
 			rule: "prisma-raw-sql-unsafe",
 			tp:   []string{`await prisma.$queryRawUnsafe(`},
 			fp:   []string{`await prisma.$queryRaw` + "`SELECT * FROM users WHERE id = ${id}`"},
+			file: "case.ts",
 		},
 		{
 			rule: "template-sql-interpolation",
@@ -183,13 +184,24 @@ func TestRuleCorpus(t *testing.T) {
 		},
 		{
 			rule: "generic-sql-dynamic-execute",
-			tp:   []string{`cursor.execute("SELECT * FROM users WHERE id=" + request.args["id"])`, `mysqli_query($db, "SELECT * FROM users WHERE id=".$_GET["id"])`},
-			fp:   []string{`cursor.execute("SELECT * FROM users WHERE id=?", [id])`},
+			tp: []string{
+				`cursor.execute("SELECT * FROM users WHERE id=" + request.args["id"])`,
+				`mysqli_query($db, "SELECT * FROM users WHERE id=".$_GET["id"])`,
+				`stmt.executeQuery("SELECT * FROM users WHERE id=" + id)`, // JDBC bare-execute TP survives the fix
+			},
+			fp: []string{
+				`cursor.execute("SELECT * FROM users WHERE id=?", [id])`,
+				// java.util.concurrent Executor / worker dispatch – NOT SQL. Used to match on the bare `.`.
+				`taskExecutor.execute(decorator.decorate(command))`,
+				`worker.execute(new KycContext(lookup(id)))`,
+				`pool.execute(() -> counter.add(delta + 1))`,
+			},
 		},
 		{
 			rule: "child-process-exec-template",
 			tp:   []string{"exec(`file \"${savedPath}\"`)"},
 			fp:   []string{`execFile("file", [savedPath])`},
+			file: "case.js",
 		},
 		{
 			rule: "generic-command-injection-sink",
@@ -200,6 +212,7 @@ func TestRuleCorpus(t *testing.T) {
 			rule: "unsafe-deserialization-node-serialize",
 			tp:   []string{`const obj = unserialize(req.body.data)`},
 			fp:   []string{`// unserialize user data would be unsafe`},
+			file: "case.js",
 		},
 		{
 			rule: "unsafe-deserialization-generic",
@@ -220,6 +233,7 @@ func TestRuleCorpus(t *testing.T) {
 			rule: "react-dangerous-html",
 			tp:   []string{`<div dangerouslySetInnerHTML={{ __html: note }} />`},
 			fp:   []string{`// dangerouslySetInnerHTML would be unsafe for comments`},
+			file: "case.tsx",
 		},
 		{
 			rule: "server-template-injection",
@@ -255,6 +269,7 @@ func TestRuleCorpus(t *testing.T) {
 			rule: "possible-idor-prisma-id-only",
 			tp:   []string{`await prisma.pet.update({ where: { id: petId }, data: body })`},
 			fp:   []string{`await prisma.pet.update({ where: { id_ownerId: { id: petId, ownerId } }, data })`},
+			file: "case.ts",
 		},
 		{
 			rule: "mass-assignment-request-body",
@@ -275,6 +290,7 @@ func TestRuleCorpus(t *testing.T) {
 			rule: "dom-xss-inner-html",
 			tp:   []string{"el.innerHTML = `<h1>${req.query.name}</h1>`", `container.innerHTML = location.hash`, `document.write(location.search)`, `list.innerHTML += req.body.html`},
 			fp:   []string{`el.innerHTML = ""`, `el.innerHTML = sanitize(userInput)`, "el.innerHTML = `<b>${count}</b>`"},
+			file: "case.js",
 		},
 		{
 			rule: "nosql-injection-request",
@@ -391,6 +407,35 @@ func TestRuleCorpus(t *testing.T) {
 			if n := len(findingsByRule(t, root)[c.rule]); n > 0 {
 				t.Errorf("%s: false-positive %q was wrongly flagged (%d hits)", c.rule, fp, n)
 			}
+		}
+	}
+}
+
+// TestLanguageGatedRulesRespectExtensions locks the fix for the language-scoping bug: a rule whose
+// idiom belongs to one ecosystem (Python SQLAlchemy, Prisma, React/DOM, node-serialize) must fire on
+// its own file type and stay silent on a foreign one, so it can never mislabel e.g. a .java file.
+func TestLanguageGatedRulesRespectExtensions(t *testing.T) {
+	cases := []struct {
+		rule    string
+		snippet string
+		firesIn string // extension where the rule should fire
+		quietIn string // foreign extension where the rule must stay silent
+	}{
+		{"sqlalchemy-raw-sql-dynamic", `db.session.execute(f"SELECT * FROM users WHERE n = '{q}'")`, "svc.py", "Svc.java"},
+		{"prisma-raw-sql-unsafe", `await prisma.$queryRawUnsafe(sql)`, "db.ts", "db.go"},
+		{"react-dangerous-html", `<div dangerouslySetInnerHTML={{ __html: note }} />`, "View.tsx", "view.py"},
+		{"unsafe-deserialization-node-serialize", `const o = unserialize(req.body.data)`, "d.js", "d.go"},
+	}
+	for _, c := range cases {
+		fires := t.TempDir()
+		writeFile(t, fires, c.firesIn, c.snippet+"\n")
+		if len(findingsByRule(t, fires)[c.rule]) == 0 {
+			t.Errorf("%s: expected a finding in %s", c.rule, c.firesIn)
+		}
+		quiet := t.TempDir()
+		writeFile(t, quiet, c.quietIn, c.snippet+"\n")
+		if n := len(findingsByRule(t, quiet)[c.rule]); n > 0 {
+			t.Errorf("%s: must not fire in foreign file %s (%d hits)", c.rule, c.quietIn, n)
 		}
 	}
 }
