@@ -38,8 +38,12 @@ var cSourceExts = map[string]bool{
 // Python- or JS/TS-specific pattern (SQLAlchemy, Prisma, React/DOM, node-serialize, ...) can never
 // false-positive on a same-named construct in another language (e.g. the "Python SQLAlchemy" rule
 // firing on a .java file, or a Prisma rule on Go). nil exts stays language-agnostic.
-var pyExts = map[string]bool{".py": true, ".pyi": true, ".pyw": true}
-var jsExts = map[string]bool{".js": true, ".jsx": true, ".mjs": true, ".cjs": true, ".ts": true, ".tsx": true}
+var pyExts = map[string]bool{".py": true, ".pyi": true, ".pyw": true, ".pyx": true}
+var jsExts = map[string]bool{
+	".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
+	".ts": true, ".tsx": true, ".mts": true, ".cts": true, // .mts/.cts are first-class TS ESM/CJS extensions
+	".vue": true, ".svelte": true, ".astro": true, // single-file components embed JS/TS
+}
 
 // placeholderSecret drops obvious non-secrets (env refs, templating, placeholders) so the
 // hardcoded-credential rule stays high-signal – deterministic findings are publishable directly
@@ -175,12 +179,14 @@ func builtinRules() []rule {
 		{
 			id: "generic-sql-dynamic-execute", cwe: "CWE-89", severity: shared.SeverityHigh, title: "SQL execution uses dynamic string construction",
 			desc: "A SQL execution sink appears to receive a string built from request/user-controlled data. Use parameterized queries or ORM query builders.",
-			// The evidence must be a request/interpolation marker OR a string literal that is then
-			// concatenated (`"..." +`). A bare `.` used to count as evidence, which flagged any
+			// The evidence must be a request/interpolation marker, an f-string, OR a string literal that is
+			// then combined dynamically: `"..." +` (concat), `"..." . $var` (PHP concat), or
+			// `"...".format(` (Python). A bare `.` used to count as evidence, which flagged any
 			// `x.execute(y.z(...))` – notably java.util.concurrent Executor.execute(Runnable) – as SQL
-			// injection; requiring a quoted literal before the `+` keeps the JDBC/DBAPI true positives
-			// (stmt.executeQuery("SELECT ..." + q)) while dropping the executor/worker false positives.
-			re:     regexp.MustCompile(`(?i)(cursor\.execute|execute(Query|Update)?|mysqli_query|pg_query|sequelize\.query|ActiveRecord::Base\.connection\.execute)\s*\([^;\n]*(request\.|req\.|params\[|\$_(GET|POST|REQUEST)|\$\{|#\{|["'` + "`" + `][^;\n]*\+)`),
+			// injection; anchoring the concat markers to a preceding quote keeps the JDBC/DBAPI/PHP/Python
+			// true positives while dropping the executor/worker false positives. (Bare `%` is deliberately
+			// excluded: it false-positives on constant `LIKE '%x%'` queries.)
+			re:     regexp.MustCompile(`(?i)(cursor\.execute|execute(Query|Update)?|mysqli_query|pg_query|sequelize\.query|ActiveRecord::Base\.connection\.execute)\s*\([^;\n]*(request\.|req\.|params\[|\$_(GET|POST|REQUEST)|\$\{|#\{|\bf["'` + "`" + `]|["'` + "`" + `][^;\n]*(\+|\.\s*\$|\.format\s*\())`),
 			skipFn: commentOnlyLine,
 		},
 		{

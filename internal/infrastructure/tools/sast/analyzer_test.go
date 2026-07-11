@@ -187,7 +187,10 @@ func TestRuleCorpus(t *testing.T) {
 			tp: []string{
 				`cursor.execute("SELECT * FROM users WHERE id=" + request.args["id"])`,
 				`mysqli_query($db, "SELECT * FROM users WHERE id=".$_GET["id"])`,
-				`stmt.executeQuery("SELECT * FROM users WHERE id=" + id)`, // JDBC bare-execute TP survives the fix
+				`stmt.executeQuery("SELECT * FROM users WHERE id=" + id)`,          // JDBC bare-execute TP survives the fix
+				`mysqli_query($db, "SELECT * FROM users WHERE n='" . $name . "'")`, // PHP indirect concat via `.$`
+				`cursor.execute("SELECT * FROM users WHERE n='{}'".format(name))`,  // Python str.format
+				`cursor.execute(f"SELECT * FROM users WHERE id={uid}")`,            // Python f-string
 			},
 			fp: []string{
 				`cursor.execute("SELECT * FROM users WHERE id=?", [id])`,
@@ -195,6 +198,7 @@ func TestRuleCorpus(t *testing.T) {
 				`taskExecutor.execute(decorator.decorate(command))`,
 				`worker.execute(new KycContext(lookup(id)))`,
 				`pool.execute(() -> counter.add(delta + 1))`,
+				`cursor.execute("SELECT * FROM t WHERE x LIKE '%admin%'")`, // constant LIKE, not injection (guards the dropped `%`)
 			},
 		},
 		{
@@ -427,6 +431,9 @@ func TestLanguageGatedRulesRespectExtensions(t *testing.T) {
 		{"unsafe-deserialization-node-serialize", `const o = unserialize(req.body.data)`, "d.js", "d.go"},
 		// exercises the contextual (multi-line block) path in findingFromRule, not just scanLines
 		{"possible-idor-prisma-id-only", `await prisma.pet.update({ where: { id: petId }, data: body })`, "svc.ts", "svc.go"},
+		// .mts/.cts (TS ESM/CJS) and single-file components must still be scanned by the JS/TS rules
+		{"prisma-raw-sql-unsafe", `await prisma.$queryRawUnsafe(sql)`, "handlers.mts", "handlers.go"},
+		{"dom-xss-inner-html", `el.innerHTML = location.hash`, "App.vue", "app.py"},
 	}
 	for _, c := range cases {
 		fires := t.TempDir()
