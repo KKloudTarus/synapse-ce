@@ -205,3 +205,20 @@ func TestParseCycloneDXDropsGradleWrapper(t *testing.T) {
 		t.Fatalf("want only commons-lang3, got %+v", comps)
 	}
 }
+
+func TestParseCycloneDXKeepsNonWrapperGradleArtifact(t *testing.T) {
+	// The drop is anchored to the canonical wrapper location. A real published artifact whose filename
+	// merely starts with "gradle-wrapper" (e.g. a versioned jar in a Maven-style path) must be KEPT — this
+	// locks the suffix from being loosened into a name match later.
+	doc := `{"components":[
+	  {"bom-ref":"a","name":"gradle-wrapper","version":"8.5","purl":"pkg:maven/org.gradle/gradle-wrapper@8.5",
+	   "properties":[{"name":"syft:location:0:path","value":"/root/.m2/repository/org/gradle/gradle-wrapper/8.5/gradle-wrapper-8.5.jar"}]}
+	]}`
+	comps, _, _, err := parseCycloneDX([]byte(doc))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(comps) != 1 || comps[0].Version != "8.5" {
+		t.Fatalf("a versioned gradle-wrapper artifact must be kept, got %+v", comps)
+	}
+}

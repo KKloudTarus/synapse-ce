@@ -384,9 +384,11 @@ func truncate(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
-// isGradleWrapperJar reports whether loc is the Gradle wrapper jar (gradle/wrapper/gradle-wrapper.jar) —
+// isGradleWrapperJar reports whether loc is the Gradle wrapper jar (<project>/gradle/wrapper/gradle-wrapper.jar) —
 // build tooling, not a project dependency. Syft catalogs it as a version-UNKNOWN pkg:maven pseudo-
-// component that can't be advisory-matched, so it is pure SBOM noise and is dropped.
+// component that can't be advisory-matched, so it is pure SBOM noise and is dropped. The suffix is anchored on
+// a path separator so a directory merely ending in "gradle" (e.g. mygradle/wrapper/…) can't match; Syft always
+// emits '/'-delimited location paths, so no separator normalization is needed.
 func isGradleWrapperJar(loc string) bool {
-	return strings.HasSuffix(filepath.ToSlash(loc), "gradle/wrapper/gradle-wrapper.jar")
+	return strings.HasSuffix(loc, "/gradle/wrapper/gradle-wrapper.jar")
 }
