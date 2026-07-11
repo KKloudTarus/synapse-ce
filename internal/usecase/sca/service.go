@@ -80,6 +80,7 @@ type Service struct {
 	mavenResolver     ports.MavenResolver             // optional Maven transitive-tree resolver (`mvn dependency:list`)
 	gradleResolver    ports.GradleResolver            // optional Gradle transitive-tree resolver (`gradle dependencies`)
 	npmResolver       ports.NPMResolver               // optional npm resolver (`npm install --package-lock-only`) for a lockfile-less package.json
+	manifestResolvers []ports.ManifestResolver        // optional lockfile-less resolvers for composer.json / Gemfile / pyproject.toml / ...
 	jvmReach          ports.JVMReachabilityAnalyzer   // optional coarse JVM class-reachability tagger
 	sevEnricher       ports.SeverityEnricher          // optional NVD CVSS backfill for unknown-severity vulns
 	ignoreUnfixed     bool                            // when set, don't promote no-fix vulns to findings (Trivy --ignore-unfixed)
@@ -255,6 +256,14 @@ func (s *Service) SetGradleResolver(r ports.GradleResolver) { s.gradleResolver =
 // a package.json that has no committed lockfile into a pinned pkg:npm tree. nil ⇒ disabled.
 func (s *Service) SetNPMResolver(r ports.NPMResolver) { s.npmResolver = r }
 
+// AddManifestResolver registers a lockfile-less manifest resolver (composer/gem/poetry/...). Several may
+// be added; each runs best-effort and no-ops when its manifest is absent or already locked.
+func (s *Service) AddManifestResolver(r ports.ManifestResolver) {
+	if r != nil {
+		s.manifestResolvers = append(s.manifestResolvers, r)
+	}
+}
+
 // mergeResolvedJVM folds a resolver's transitive pkg:maven tree into doc and dedups by identity. Shared by
 // the Maven + Gradle resolvers (both emit Maven coordinates). No-op on an empty resolved set – with nothing
 // authoritative to substitute, syft's view (including any target/ jars, then the only version source) is
@@ -302,6 +311,37 @@ func mergeResolvedNPM(doc *sbom.SBOM, resolved []sbom.Component) {
 			continue // resolver owns the versioned npm tree; drop the redundant unversioned placeholders
 		}
 		kept = append(kept, c)
+	}
+	doc.Components = sbom.DedupeComponents(append(kept, resolved...))
+}
+
+// mergeResolvedManifest folds a lockfile-less manifest resolver's pinned tree into doc. It drops the
+// generator's UNVERSIONED components of the SAME ecosystem(s) as the resolved set (e.g. the range-declared
+// placeholders a composer.json/Gemfile/pyproject.toml yields), keeps concretely-versioned ones, then adds
+// the resolved tree and dedups by PURL. The ecosystem is derived from the resolved components' PURL type
+// (pkg:composer/, pkg:gem/, pkg:pypi/, ...), so it is generic across resolvers. No-op on an empty set.
+func mergeResolvedManifest(doc *sbom.SBOM, resolved []sbom.Component) {
+	if len(resolved) == 0 {
+		return
+	}
+	prefixes := map[string]bool{}
+	for _, c := range resolved {
+		if i := strings.IndexByte(c.PURL, '/'); i > 0 {
+			prefixes[c.PURL[:i+1]] = true // e.g. "pkg:composer/"
+		}
+	}
+	kept := make([]sbom.Component, 0, len(doc.Components))
+	for _, c := range doc.Components {
+		drop := false
+		for p := range prefixes {
+			if strings.HasPrefix(c.PURL, p) && !sbom.IsResolvedVersion(c.Version) {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			kept = append(kept, c)
+		}
 	}
 	doc.Components = sbom.DedupeComponents(append(kept, resolved...))
 }
@@ -1630,6 +1670,32 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			trace.succeed(step, "npm resolution skipped (no lockless package.json)", map[string]int{"components": countComponents(doc)})
 		}
 	}
+	// Lockfile-less manifest resolvers (composer.json / Gemfile / pyproject.toml): each runs the
+	// ecosystem's own lock tool over a throwaway copy (no scripts) to pin versions; best-effort + opt-in,
+	// sandbox-gated in production. Merge like npm: drop the generator's unversioned placeholders of that
+	// ecosystem, keep versioned, dedup.
+	var manifestResolveErrs []string
+	for _, mr := range s.manifestResolvers {
+		if ctx.Err() != nil {
+			break
+		}
+		eco := mr.Ecosystem()
+		step = trace.start(stageSBOM, "manifest-resolve", eco+"-resolver", "Resolve "+eco+" dependency tree", map[string]int{"components": countComponents(doc)})
+		resolvedComps, mrr := mr.Resolve(ctx, ws.Dir)
+		before := countComponents(doc)
+		if len(resolvedComps) > 0 {
+			mergeResolvedManifest(doc, resolvedComps)
+		}
+		switch {
+		case mrr != nil:
+			manifestResolveErrs = append(manifestResolveErrs, fmt.Sprintf("%s: %v", eco, mrr))
+			trace.fail(step, mrr)
+		case len(resolvedComps) > 0:
+			trace.succeed(step, eco+" dependency tree resolved", map[string]int{"components_before": before, "components": countComponents(doc), "resolved": len(resolvedComps)})
+		default:
+			trace.succeed(step, eco+" resolution skipped (no lockless manifest)", map[string]int{"components": countComponents(doc)})
+		}
+	}
 	// Coarse JVM class-reachability, best-effort + opt-in: tag each JVM component with whether the
 	// app's own compiled code (transitively) references its classes, so a finding on a dependency the
 	// project never wires in can be DEPRIORITIZED. Runs post-resolve over the resolved tree + the built
@@ -1812,6 +1878,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if npmResolveErr != nil {
 		sourceWarnings = append(sourceWarnings, fmt.Sprintf(
 			"npm dependency resolution failed – package.json tree NOT captured (result INCOMPLETE): %v", npmResolveErr))
+	}
+	for _, e := range manifestResolveErrs {
+		sourceWarnings = append(sourceWarnings, fmt.Sprintf(
+			"manifest dependency resolution failed – tree NOT captured (result INCOMPLETE): %s", e))
 	}
 	// An image target whose rootfs could not be assembled means OS packages were NOT owned-cataloged; surface
 	// it (never silent) so an absent OS-package set reads as "not analyzed", not "no OS packages".

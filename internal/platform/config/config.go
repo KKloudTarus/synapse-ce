@@ -249,6 +249,15 @@ type Config struct {
 	NPMResolveEnabled bool
 	NPMBin            string
 	NPMRegistryHosts  []string
+	// ManifestResolveEnabled turns on lockfile-less manifest resolution for composer.json / Gemfile /
+	// pyproject.toml via each ecosystem's own lock tool (no scripts). Reaches the registry, so production
+	// MUST run it sandbox-confined. Bins default to composer/bundle/poetry; ManifestRegistryHosts extends
+	// the egress allow-list (private mirror).
+	ManifestResolveEnabled bool
+	ComposerBin            string
+	BundleBin              string
+	PoetryBin              string
+	ManifestRegistryHosts  []string
 	// JVMReachabilityEnabled turns on coarse JVM class-reachability tagging: after resolving the
 	// dependency tree, tag each component with whether the app's own compiled classes (transitively)
 	// reference its classes, so a finding on an unreferenced dependency can be deprioritized. Read-only
@@ -377,6 +386,11 @@ func Load() Config {
 		NPMResolveEnabled:      getbool("SYNAPSE_NPM_RESOLVE_ENABLED", false),
 		NPMBin:                 getenv("SYNAPSE_NPM_BIN", "npm"),
 		NPMRegistryHosts:       splitList(getenv("SYNAPSE_NPM_REGISTRY_HOSTS", "")),
+		ManifestResolveEnabled: getbool("SYNAPSE_MANIFEST_RESOLVE_ENABLED", false),
+		ComposerBin:            getenv("SYNAPSE_COMPOSER_BIN", "composer"),
+		BundleBin:              getenv("SYNAPSE_BUNDLE_BIN", "bundle"),
+		PoetryBin:              getenv("SYNAPSE_POETRY_BIN", "poetry"),
+		ManifestRegistryHosts:  splitList(getenv("SYNAPSE_MANIFEST_REGISTRY_HOSTS", "")),
 		JVMReachabilityEnabled: getbool("SYNAPSE_JVM_REACHABILITY_ENABLED", true),
 		JarHashOnlineEnabled:   getbool("SYNAPSE_JARHASH_ONLINE_ENABLED", false),
 		JarHashBaseURL:         getenv("SYNAPSE_JARHASH_BASE_URL", ""),

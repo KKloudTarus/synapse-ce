@@ -56,6 +56,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensefile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensemeta"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/manifest"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/manifestresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavencoord"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavenresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/misconfig"
@@ -558,6 +559,20 @@ func main() {
 		} else {
 			scaService.SetNPMResolver(npmresolve.New(cfg.NPMBin).WithRunner(scaSandbox).WithRegistryHosts(cfg.NPMRegistryHosts))
 			log.Info("npm resolution ENABLED (npm install --package-lock-only, sandbox-confined; best-effort)", "extra_registry_hosts", len(cfg.NPMRegistryHosts))
+		}
+	}
+	// Lockfile-less manifest resolvers (composer.json / Gemfile / pyproject.toml): each runs its ecosystem
+	// tool over an untrusted manifest and reaches the registry, so the SERVER enables them ONLY with the SCA
+	// sandbox and FAILS CLOSED otherwise. Lock-only + no-scripts + a throwaway copy mean no project code runs.
+	if cfg.ManifestResolveEnabled {
+		if scaSandbox == nil {
+			log.Warn("SYNAPSE_MANIFEST_RESOLVE_ENABLED ignored: it requires the SCA sandbox (composer/bundle/poetry would otherwise reach the network over an untrusted manifest on the host). Enable the sandbox to use it.")
+		} else {
+			binOf := map[string]string{"composer": cfg.ComposerBin, "gem": cfg.BundleBin, "poetry": cfg.PoetryBin}
+			for _, eco := range []string{"composer", "gem", "poetry"} {
+				scaService.AddManifestResolver(manifestresolve.New(eco, binOf[eco]).WithRunner(scaSandbox).WithRegistryHosts(cfg.ManifestRegistryHosts))
+			}
+			log.Info("lockfile-less manifest resolution ENABLED (composer/gem/poetry, sandbox-confined; best-effort)", "extra_registry_hosts", len(cfg.ManifestRegistryHosts))
 		}
 	}
 	if cfg.JVMReachabilityEnabled {

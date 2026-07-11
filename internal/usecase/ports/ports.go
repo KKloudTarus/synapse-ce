@@ -727,6 +727,16 @@ type NPMResolver interface {
 	Resolve(ctx context.Context, dir string) ([]sbom.Component, error)
 }
 
+// ManifestResolver resolves a lockfile-less package manifest (composer.json / Gemfile / pyproject.toml,
+// ...) to a pinned component tree by running the ecosystem's own lock tool in a no-scripts, lock-only
+// mode over a throwaway copy. Ecosystem() labels it for tracing. Several may be registered; each is a
+// no-op when its manifest is absent or a committed lockfile is present. Best-effort + OPT-IN; a
+// production implementation MUST run sandbox-confined (untrusted manifest, reaches the registry).
+type ManifestResolver interface {
+	Ecosystem() string
+	Resolve(ctx context.Context, dir string) ([]sbom.Component, error)
+}
+
 // SBOMEnrichment is what an SBOMEnricher contributed, for honest provenance.
 type SBOMEnrichment struct {
 	ComponentsAdded   int      // components the generator missed (Maven/Gradle direct deps)

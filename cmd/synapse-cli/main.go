@@ -48,6 +48,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensefile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensemeta"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/manifest"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/manifestresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavencoord"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavenresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/misconfig"
@@ -1028,6 +1029,19 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	if npmOn {
 		sca.SetNPMResolver(npmresolve.New(cfg.NPMBin).WithRegistryHosts(cfg.NPMRegistryHosts))
 		fmt.Fprintln(os.Stderr, "synapse-cli: npm resolver ON – runs `npm install --package-lock-only --ignore-scripts` over a COPY of a lockfile-less package.json to pin versions (no project scripts run; set SYNAPSE_NPM_RESOLVE_ENABLED=false to disable)")
+	}
+	// Lockfile-less manifest resolvers (composer.json / Gemfile / pyproject.toml) – default-on for the CLI
+	// (trusted local). Each runs its ecosystem tool in lock-only, no-scripts mode over a COPY. Best-effort.
+	manifestOn := cfg.ManifestResolveEnabled
+	if _, set := os.LookupEnv("SYNAPSE_MANIFEST_RESOLVE_ENABLED"); !set {
+		manifestOn = true
+	}
+	if manifestOn {
+		binOf := map[string]string{"composer": cfg.ComposerBin, "gem": cfg.BundleBin, "poetry": cfg.PoetryBin}
+		for _, eco := range []string{"composer", "gem", "poetry"} {
+			sca.AddManifestResolver(manifestresolve.New(eco, binOf[eco]).WithRegistryHosts(cfg.ManifestRegistryHosts))
+		}
+		fmt.Fprintln(os.Stderr, "synapse-cli: manifest resolvers ON – run composer/bundle/poetry in lock-only, no-scripts mode over a COPY of a lockfile-less composer.json/Gemfile/pyproject.toml (no project scripts run; set SYNAPSE_MANIFEST_RESOLVE_ENABLED=false to disable)")
 	}
 	// Coarse JVM class-reachability – default-on for the CLI (read-only bytecode parsing, no exec);
 	// tags each JVM component reachable/unreferenced from the app's compiled closure. Opt out with
