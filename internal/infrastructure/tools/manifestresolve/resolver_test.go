@@ -49,17 +49,24 @@ func TestEcosystemLabelAndSpecs(t *testing.T) {
 			t.Errorf("Ecosystem() = %q, want %q", got, want)
 		}
 	}
-	// Every spec must run in a no-scripts / lock-only mode (safety-critical, per ecosystem).
+	// Per-ecosystem invocation safety. composer runs on inert JSON with scripts+plugins DISABLED; poetry
+	// runs on inert TOML in lock (resolve-only) mode. gem is DIFFERENT: `bundle lock` evaluates the Gemfile
+	// (Ruby), so it is NOT script-isolated — its safety is the trusted-local/sandbox posture, not a flag.
 	for eco, s := range specs {
 		joined := strings.Join(s.args, " ")
 		switch eco {
 		case "composer":
-			if !strings.Contains(joined, "--no-scripts") || !strings.Contains(joined, "--no-install") {
-				t.Errorf("composer args must be no-scripts + no-install: %q", joined)
+			if !strings.Contains(joined, "--no-scripts") || !strings.Contains(joined, "--no-plugins") || !strings.Contains(joined, "--no-install") {
+				t.Errorf("composer args must be no-scripts + no-plugins + no-install: %q", joined)
 			}
-		case "gem", "poetry":
+		case "poetry":
 			if !strings.Contains(joined, "lock") || strings.Contains(joined, "install") {
-				t.Errorf("%s args must be lock-only (no install): %q", eco, joined)
+				t.Errorf("poetry args must be lock-only (no install): %q", joined)
+			}
+		case "gem":
+			// Resolve-only (no install), but note: this does NOT make it code-isolated (Gemfile is Ruby).
+			if !strings.Contains(joined, "lock") || strings.Contains(joined, "install") {
+				t.Errorf("gem args must be `lock` (no install): %q", joined)
 			}
 		}
 	}

@@ -8,11 +8,18 @@
 //	gem       Gemfile        -> bundle lock                                              -> Gemfile.lock
 //	poetry    pyproject.toml -> poetry lock                                              -> poetry.lock
 //
-// SECURITY mirrors npmresolve: each tool runs with lifecycle scripts/plugins DISABLED so no project code
-// executes; it runs against a temp copy so the user's project is never mutated; it invokes a PINNED tool
-// (never a project-vendored one) with SYNAPSE_*/credential env scrubbed; in production it MUST run through
-// a ToolRunner (the sandbox) with egress restricted to the ecosystem registry, and the API composition
-// root refuses to enable it without a sandbox (fail-closed). Direct-exec is the trusted-local CLI path.
+// SECURITY: it always runs against a temp COPY (the user's project is never mutated), invokes a PINNED
+// tool (never a project-vendored one) with SYNAPSE_*/credential env scrubbed, and in production MUST run
+// through a ToolRunner (the sandbox) with egress restricted to the ecosystem registry — the API root
+// refuses to enable it without a sandbox (fail-closed). The "no project code runs" guarantee is
+// ECOSYSTEM-SPECIFIC, not blanket:
+//   - composer (--no-scripts --no-plugins) and poetry (lock) operate on INERT data (composer.json is
+//     JSON, pyproject.toml is TOML) and do not execute the project manifest. (poetry may build a
+//     dependency's sdist to read metadata — that is dependency code, not the project's.)
+//   - gem: `bundle lock` EVALUATES the Gemfile, which IS a Ruby program, so it executes PROJECT code —
+//     the same risk class as the Gradle resolver. On the trusted-local CLI direct-exec path this runs
+//     UNSANDBOXED (with an honest banner); the API path confines it in the sandbox.
+//
 // Best-effort + OPT-IN: no manifest / a committed lockfile / a missing tool / any error is a no-op and
 // never fails the scan.
 package manifestresolve
@@ -165,7 +172,16 @@ func (r *Resolver) allowedHosts() []string {
 }
 
 func (r *Resolver) run(ctx context.Context, work string) error {
-	env := []string{"HOME=" + work} // keep the tool's home/cache inside the throwaway dir
+	// Pin every tool's home/cache/config inside the throwaway dir so nothing reads host credentials
+	// (~/.composer/auth.json, ~/.gem/credentials, poetry keyring) or writes to the host cache.
+	env := []string{
+		"HOME=" + work,
+		"COMPOSER_HOME=" + filepath.Join(work, ".composer"),
+		"BUNDLE_USER_HOME=" + filepath.Join(work, ".bundle"),
+		"POETRY_CACHE_DIR=" + filepath.Join(work, ".poetry-cache"),
+		"XDG_CACHE_HOME=" + filepath.Join(work, ".cache"),
+		"XDG_CONFIG_HOME=" + filepath.Join(work, ".config"),
+	}
 	if r.runner != nil {
 		res, err := r.runner.Run(ctx, ports.ToolSpec{
 			Name:         r.bin,
@@ -203,10 +219,12 @@ func scrubSensitiveEnv(env []string) []string {
 		if i := strings.IndexByte(kv, '='); i >= 0 {
 			name = kv[:i]
 		}
-		if strings.HasPrefix(name, "SYNAPSE_") {
+		u := strings.ToUpper(name)
+		// SYNAPSE_*, bundler per-host creds (BUNDLE_<HOST>=user:pass), and composer inline creds
+		// (COMPOSER_AUTH) are stripped by prefix/name; the rest by credential fragment.
+		if strings.HasPrefix(u, "SYNAPSE_") || strings.HasPrefix(u, "BUNDLE_") || u == "COMPOSER_AUTH" {
 			continue
 		}
-		u := strings.ToUpper(name)
 		sensitive := false
 		for _, frag := range []string{"TOKEN", "SECRET", "PASSWORD", "PASSWD", "APIKEY", "API_KEY", "ACCESS_KEY", "PRIVATE_KEY", "CREDENTIAL"} {
 			if strings.Contains(u, frag) {

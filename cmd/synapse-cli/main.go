@@ -1041,7 +1041,8 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		for _, eco := range []string{"composer", "gem", "poetry"} {
 			sca.AddManifestResolver(manifestresolve.New(eco, binOf[eco]).WithRegistryHosts(cfg.ManifestRegistryHosts))
 		}
-		fmt.Fprintln(os.Stderr, "synapse-cli: manifest resolvers ON – run composer/bundle/poetry in lock-only, no-scripts mode over a COPY of a lockfile-less composer.json/Gemfile/pyproject.toml (no project scripts run; set SYNAPSE_MANIFEST_RESOLVE_ENABLED=false to disable)")
+		fmt.Fprintln(os.Stderr, "synapse-cli: manifest resolvers ON – composer/poetry resolve a lockfile-less composer.json/pyproject.toml over a COPY in lock-only, no-scripts mode (inert manifests; no project code runs)")
+		fmt.Fprintln(os.Stderr, "synapse-cli: manifest resolvers ON – `bundle lock` EVALUATES a lockfile-less Gemfile as Ruby, so it runs the project's manifest code UNSANDBOXED (trusted-local assumption, like the Gradle resolver); set SYNAPSE_MANIFEST_RESOLVE_ENABLED=false to disable")
 	}
 	// Coarse JVM class-reachability – default-on for the CLI (read-only bytecode parsing, no exec);
 	// tags each JVM component reachable/unreferenced from the app's compiled closure. Opt out with
