@@ -198,38 +198,48 @@ func isBoolOp(n *sitter.Node, sp spec) bool {
 }
 
 // complexity computes (cyclomatic, cognitive) for one function node over its own body, not descending into
-// nested functions (which are separate records). See the package doc for the exact rules.
+// nested functions (which are separate records). See the package doc for the exact rules. Iterative
+// (explicit stack of (node, nestingDepth)) so a pathologically deep expression tree in untrusted source
+// cannot overflow the goroutine stack — matching countType/collectFunctions.
 func complexity(fn *sitter.Node, sp spec) (cyc, cog int) {
 	cyc = 1
-	var rec func(n *sitter.Node, depth int)
-	rec = func(n *sitter.Node, depth int) {
+	type frame struct {
+		n     *sitter.Node
+		depth int
+	}
+	var stack []frame
+	push := func(n *sitter.Node, depth int) {
 		for i := 0; i < int(n.ChildCount()); i++ {
-			c := n.Child(i)
-			ct := c.Type()
-			if sp.funcType[ct] {
-				continue // nested function: its own record, and a nesting boundary
-			}
-			if isBoolOp(c, sp) {
-				cyc++
-				cog++
-				rec(c, depth)
-				continue
-			}
-			if sp.cycDecision[ct] {
-				cyc++
-			}
-			switch {
-			case sp.cogIncrement[ct]:
-				cog += 1 + depth
-				rec(c, depth+1)
-			case sp.cogElse[ct]:
-				cog++
-				rec(c, depth+1)
-			default:
-				rec(c, depth)
-			}
+			stack = append(stack, frame{n.Child(i), depth})
 		}
 	}
-	rec(fn, 0)
+	push(fn, 0) // start with the function's children at nesting depth 0
+	for len(stack) > 0 {
+		f := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		c, ct := f.n, f.n.Type()
+		if sp.funcType[ct] {
+			continue // nested function: its own record, and a nesting boundary — do not descend
+		}
+		if isBoolOp(c, sp) {
+			cyc++
+			cog++
+			push(c, f.depth)
+			continue
+		}
+		if sp.cycDecision[ct] {
+			cyc++
+		}
+		switch {
+		case sp.cogIncrement[ct]:
+			cog += 1 + f.depth
+			push(c, f.depth+1)
+		case sp.cogElse[ct]:
+			cog++
+			push(c, f.depth+1)
+		default:
+			push(c, f.depth)
+		}
+	}
 	return cyc, cog
 }

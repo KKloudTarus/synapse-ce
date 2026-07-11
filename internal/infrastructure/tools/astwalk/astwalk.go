@@ -28,7 +28,7 @@ type Result struct {
 
 // FunctionMetric is one function's size/complexity record. Line is 1-based; File is relative to the walk
 // root. Cyclomatic is McCabe's measure (1 + decision points); Cognitive is the nesting-aware readability
-// measure (see metrics_cgo.go for the exact rules).
+// measure (see parse_cgo.go for the exact rules).
 type FunctionMetric struct {
 	File       string `json:"file"`
 	Line       int    `json:"line"`
