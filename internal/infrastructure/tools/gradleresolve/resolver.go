@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -39,9 +40,6 @@ const maxBuildRoots = 200 // bound the sub-project discovery walk (a monorepo of
 // portal / distribution services Gradle reaches to resolve plugins and dependency metadata. Extra
 // private-mirror hosts are added via WithRepoHosts.
 var defaultRepoHosts = []string{"repo1.maven.org", "repo.maven.apache.org", "plugins.gradle.org", "services.gradle.org"}
-
-// buildFiles are the project markers that indicate a Gradle build (Groovy or Kotlin DSL).
-var buildFiles = []string{"build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"}
 
 // Resolver runs `gradle dependencies` to resolve a Gradle project's full dependency tree. bin is the
 // pinned gradle executable (path/name) – NOT the project's./gradlew.
@@ -115,7 +113,7 @@ func (r *Resolver) Resolve(ctx context.Context, dir string) ([]sbom.Component, e
 		}
 		out, err := r.run(ctx, root)
 		if err != nil {
-			if isNoRuntimeClasspath(err) {
+			if errors.Is(err, errNoRuntimeClasspath) {
 				continue // aggregator / non-Java build root (no runtimeClasspath) – expected, not a failure
 			}
 			if firstErr == nil {
@@ -146,21 +144,16 @@ func relOrBase(dir, root string) string {
 	return filepath.Base(root)
 }
 
-// isNoRuntimeClasspath reports whether a resolve failed only because the build root has no
-// runtimeClasspath configuration — an aggregator / non-Java root (common as the top of a composite
-// build), which is expected and not a real resolution failure worth surfacing.
-func isNoRuntimeClasspath(err error) bool {
-	s := err.Error()
-	return strings.Contains(s, "runtimeClasspath' not found") || strings.Contains(s, "not found in configuration container")
-}
+// errNoRuntimeClasspath signals that a build root has no runtimeClasspath configuration — an aggregator /
+// non-Java root (common as the top of a composite build). Resolve treats it as an expected skip, not a
+// resolution failure. run() returns it after classifying the RAW (un-truncated) gradle stderr.
+var errNoRuntimeClasspath = errors.New("gradle: build root has no runtimeClasspath configuration")
 
-func hasBuildFile(dir string) bool {
-	for _, f := range buildFiles {
-		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
-			return true
-		}
-	}
-	return false
+// noRuntimeClasspath detects Gradle's "configuration 'runtimeClasspath' not found …" failure in raw
+// stderr. Matched on the un-truncated output (before run() clips it) and on two stable tokens, so a long
+// FAILURE/`* Where:` preamble can't push the marker out of view.
+func noRuntimeClasspath(stderr string) bool {
+	return strings.Contains(stderr, "runtimeClasspath") && strings.Contains(stderr, "not found")
 }
 
 // settingsFiles mark an INDEPENDENT Gradle build (its own root project): a standard multi-project build
@@ -228,7 +221,10 @@ func buildRoots(dir string) []string {
 				return filepath.SkipDir // a subproject of an enclosing settings-root build – not a separate root
 			}
 			roots = append(roots, p) // a standalone single-module build (no settings file)
-			return filepath.SkipDir  // its own subprojects belong to this build
+			if len(roots) >= maxBuildRoots {
+				return filepath.SkipAll
+			}
+			return filepath.SkipDir // its own subprojects belong to this build
 		}
 		if len(roots) >= maxBuildRoots {
 			return filepath.SkipAll
@@ -268,6 +264,9 @@ func (r *Resolver) run(ctx context.Context, dir string) ([]byte, error) {
 			return nil, fmt.Errorf("sandboxed: %w: %s", err, truncate(string(res.Stderr), 300))
 		}
 		if res.ExitCode != 0 {
+			if noRuntimeClasspath(string(res.Stderr)) {
+				return nil, errNoRuntimeClasspath
+			}
 			return nil, fmt.Errorf("exit %d: %s", res.ExitCode, truncate(string(res.Stderr), 300))
 		}
 		return res.Stdout, nil
@@ -286,6 +285,9 @@ func (r *Resolver) run(ctx context.Context, dir string) ([]byte, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if noRuntimeClasspath(stderr.String()) {
+			return nil, errNoRuntimeClasspath
+		}
 		return nil, fmt.Errorf("%w: %s", err, truncate(stderr.String(), 300))
 	}
 	return stdout.Bytes(), nil
