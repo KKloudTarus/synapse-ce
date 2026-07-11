@@ -42,16 +42,25 @@ func TestArgsAreScriptSafe(t *testing.T) {
 	}
 }
 
-func TestScrubSynapseEnv(t *testing.T) {
-	in := []string{"PATH=/usr/bin", "SYNAPSE_LLM_API_KEY=secret", "HOME=/h", "SYNAPSE_DB_DSN=x"}
-	out := scrubSynapseEnv(in)
+func TestScrubSensitiveEnv(t *testing.T) {
+	in := []string{
+		"PATH=/usr/bin", "HOME=/h", // kept
+		"SYNAPSE_LLM_API_KEY=x", "SYNAPSE_DB_DSN=x", // Synapse
+		"NPM_TOKEN=x", "NODE_AUTH_TOKEN=x", "GITHUB_TOKEN=x", // registry/CI
+		"AWS_SECRET_ACCESS_KEY=x", "AWS_ACCESS_KEY_ID=x", "DB_PASSWORD=x", // cloud/db creds
+	}
+	out := scrubSensitiveEnv(in)
+	kept := map[string]bool{}
 	for _, kv := range out {
-		if strings.HasPrefix(kv, "SYNAPSE_") {
-			t.Errorf("SYNAPSE_* must be scrubbed; found %q", kv)
+		kept[kv] = true
+		for _, frag := range []string{"SYNAPSE_", "TOKEN", "SECRET", "ACCESS_KEY", "PASSWORD"} {
+			if strings.Contains(strings.ToUpper(kv), frag) {
+				t.Errorf("sensitive var must be scrubbed; found %q", kv)
+			}
 		}
 	}
-	if len(out) != 2 {
-		t.Errorf("want the 2 non-SYNAPSE vars kept, got %v", out)
+	if !kept["PATH=/usr/bin"] || !kept["HOME=/h"] || len(out) != 2 {
+		t.Errorf("only the 2 non-sensitive vars must remain, got %v", out)
 	}
 }
 

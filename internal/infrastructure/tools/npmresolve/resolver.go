@@ -72,8 +72,10 @@ func (r *Resolver) WithRegistryHosts(hosts []string) *Resolver {
 var _ ports.NPMResolver = (*Resolver)(nil)
 
 // Resolve returns the resolved pkg:npm component tree for a package.json under dir with no committed
-// lockfile. It is a no-op (nil, nil) when there is no package.json, a lockfile is already present, or npm
-// is unavailable; any resolution error is returned alongside whatever resolved so a failure is diagnosable.
+// lockfile. It is a no-op (nil, nil) when there is no package.json or a committed lockfile is already
+// present. A missing npm binary or any resolution error returns (nil, err), which the SCA service surfaces
+// as a source warning (never failing the scan); components are returned only on success (never partial).
+// Only the top-level dir is inspected (a monorepo with package.json in subfolders is not walked here).
 func (r *Resolver) Resolve(ctx context.Context, dir string) ([]sbom.Component, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -159,7 +161,7 @@ func (r *Resolver) run(ctx context.Context, work string) error {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, r.bin, r.args()...)
 	cmd.Dir = work
-	cmd.Env = append(scrubSynapseEnv(os.Environ()), env...)
+	cmd.Env = append(scrubSensitiveEnv(os.Environ()), env...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -168,17 +170,38 @@ func (r *Resolver) run(ctx context.Context, work string) error {
 	return nil
 }
 
-// scrubSynapseEnv drops SYNAPSE_* entries so the child npm (and any transitively-run tooling) cannot read
-// Synapse secrets from the environment. Non-SYNAPSE vars (PATH, npm config, ...) are preserved.
-func scrubSynapseEnv(env []string) []string {
+// scrubSensitiveEnv drops SYNAPSE_* entries AND common credential env vars (registry / CI / cloud tokens
+// such as NPM_TOKEN, NODE_AUTH_TOKEN, GITHUB_TOKEN, AWS_SECRET_ACCESS_KEY) so the child npm — and anything
+// it transitively spawns — cannot read Synapse or host secrets from the environment. Non-sensitive vars
+// (PATH, npm config, ...) are preserved. Defense-in-depth on the trusted-local direct-exec path; the
+// sandbox path already runs with a controlled, non-inherited env.
+func scrubSensitiveEnv(env []string) []string {
 	out := env[:0:0]
 	for _, kv := range env {
-		if strings.HasPrefix(kv, "SYNAPSE_") {
+		name := kv
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			name = kv[:i]
+		}
+		if isSensitiveEnvName(name) {
 			continue
 		}
 		out = append(out, kv)
 	}
 	return out
+}
+
+// isSensitiveEnvName reports whether an env var name looks like a Synapse or credential variable.
+func isSensitiveEnvName(name string) bool {
+	if strings.HasPrefix(name, "SYNAPSE_") {
+		return true
+	}
+	u := strings.ToUpper(name)
+	for _, frag := range []string{"TOKEN", "SECRET", "PASSWORD", "PASSWD", "APIKEY", "API_KEY", "ACCESS_KEY", "PRIVATE_KEY", "CREDENTIAL"} {
+		if strings.Contains(u, frag) {
+			return true
+		}
+	}
+	return false
 }
 
 func truncate(s string, n int) string {

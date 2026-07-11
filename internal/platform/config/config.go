@@ -245,10 +245,10 @@ type Config struct {
 	// NPMResolveEnabled turns on npm dependency resolution via `npm install --package-lock-only` for a
 	// package.json with no committed lockfile (best-effort + opt-in). It runs --ignore-scripts (no project
 	// code executes) against a throwaway copy, but reaches the registry, so production MUST run it
-	// sandbox-confined. NpmBin is the pinned npm executable; NpmRegistryHosts extends the egress allow-list.
+	// sandbox-confined. NPMBin is the pinned npm executable; NPMRegistryHosts extends the egress allow-list.
 	NPMResolveEnabled bool
-	NpmBin            string
-	NpmRegistryHosts  []string
+	NPMBin            string
+	NPMRegistryHosts  []string
 	// JVMReachabilityEnabled turns on coarse JVM class-reachability tagging: after resolving the
 	// dependency tree, tag each component with whether the app's own compiled classes (transitively)
 	// reference its classes, so a finding on an unreferenced dependency can be deprioritized. Read-only
@@ -375,8 +375,8 @@ func Load() Config {
 		GradleBin:              getenv("SYNAPSE_GRADLE_BIN", "gradle"),
 		GradleHome:             getenv("SYNAPSE_GRADLE_HOME", ""),
 		NPMResolveEnabled:      getbool("SYNAPSE_NPM_RESOLVE_ENABLED", false),
-		NpmBin:                 getenv("SYNAPSE_NPM_BIN", "npm"),
-		NpmRegistryHosts:       splitList(getenv("SYNAPSE_NPM_REGISTRY_HOSTS", "")),
+		NPMBin:                 getenv("SYNAPSE_NPM_BIN", "npm"),
+		NPMRegistryHosts:       splitList(getenv("SYNAPSE_NPM_REGISTRY_HOSTS", "")),
 		JVMReachabilityEnabled: getbool("SYNAPSE_JVM_REACHABILITY_ENABLED", true),
 		JarHashOnlineEnabled:   getbool("SYNAPSE_JARHASH_ONLINE_ENABLED", false),
 		JarHashBaseURL:         getenv("SYNAPSE_JARHASH_BASE_URL", ""),

@@ -1026,7 +1026,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		npmOn = true
 	}
 	if npmOn {
-		sca.SetNPMResolver(npmresolve.New(cfg.NpmBin).WithRegistryHosts(cfg.NpmRegistryHosts))
+		sca.SetNPMResolver(npmresolve.New(cfg.NPMBin).WithRegistryHosts(cfg.NPMRegistryHosts))
 		fmt.Fprintln(os.Stderr, "synapse-cli: npm resolver ON – runs `npm install --package-lock-only --ignore-scripts` over a COPY of a lockfile-less package.json to pin versions (no project scripts run; set SYNAPSE_NPM_RESOLVE_ENABLED=false to disable)")
 	}
 	// Coarse JVM class-reachability – default-on for the CLI (read-only bytecode parsing, no exec);

@@ -556,8 +556,8 @@ func main() {
 		if scaSandbox == nil {
 			log.Warn("SYNAPSE_NPM_RESOLVE_ENABLED ignored: it requires the SCA sandbox (npm would otherwise reach the network over an untrusted manifest on the host). Enable the sandbox to use it.")
 		} else {
-			scaService.SetNPMResolver(npmresolve.New(cfg.NpmBin).WithRunner(scaSandbox).WithRegistryHosts(cfg.NpmRegistryHosts))
-			log.Info("npm resolution ENABLED (npm install --package-lock-only, sandbox-confined; best-effort)", "extra_registry_hosts", len(cfg.NpmRegistryHosts))
+			scaService.SetNPMResolver(npmresolve.New(cfg.NPMBin).WithRunner(scaSandbox).WithRegistryHosts(cfg.NPMRegistryHosts))
+			log.Info("npm resolution ENABLED (npm install --package-lock-only, sandbox-confined; best-effort)", "extra_registry_hosts", len(cfg.NPMRegistryHosts))
 		}
 	}
 	if cfg.JVMReachabilityEnabled {
