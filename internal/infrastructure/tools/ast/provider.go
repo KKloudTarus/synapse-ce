@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -77,10 +78,12 @@ func (p *Provider) run(ctx context.Context, root string) ([]byte, int, error) {
 			ReadOnlyPaths: []string{root},
 		})
 		if err != nil {
-			return nil, res.ExitCode, fmt.Errorf("synapse-ast %q (sandboxed): %w", root, err)
+			// The sidecar could not be run (absent binary / sandbox setup). Like the direct path, degrade
+			// to unavailable rather than failing the inventory — this provider is optional enrichment.
+			return nil, exitUnavailable, nil
 		}
 		if res.ExitCode != 0 && res.ExitCode != exitUnavailable {
-			return nil, res.ExitCode, fmt.Errorf("synapse-ast %q: exit %d", root, res.ExitCode)
+			return nil, res.ExitCode, fmt.Errorf("synapse-ast %q: exit %d: %s", root, res.ExitCode, truncate(string(res.Stderr), 300))
 		}
 		return res.Stdout, res.ExitCode, nil
 	}
@@ -102,4 +105,15 @@ func (p *Provider) run(ctx context.Context, root string) ([]byte, int, error) {
 		return nil, exitUnavailable, nil
 	}
 	return out, 0, nil
+}
+
+// truncate caps sidecar stderr in an error message to a bounded, UTF-8-valid prefix.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
 }

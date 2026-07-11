@@ -8,7 +8,6 @@ package astwalk
 import (
 	"context"
 	"errors"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -20,8 +19,10 @@ import (
 var ErrUnavailable = errors.New("astwalk: tree-sitter backend not available (built without cgo)")
 
 // Result is the sidecar's wire output: accurate function counts keyed by go-enry language name.
+// Truncated is set when the file-count cap tripped, so a caller can tell an undercount from a complete one.
 type Result struct {
 	Functions map[string]int `json:"functions"`
+	Truncated bool           `json:"truncated,omitempty"`
 }
 
 const (
@@ -62,7 +63,8 @@ func walk(ctx context.Context, root string, parse func(lang string, content []by
 			return nil
 		}
 		if files++; files > maxFiles {
-			return io.EOF
+			res.Truncated = true // signal the undercount rather than silently returning a partial result
+			return fs.SkipAll
 		}
 		fi, lerr := os.Lstat(path)
 		if lerr != nil || !fi.Mode().IsRegular() || fi.Size() > maxFileBytes {
@@ -84,7 +86,7 @@ func walk(ctx context.Context, root string, parse func(lang string, content []by
 		}
 		return nil
 	})
-	if walkErr != nil && walkErr != io.EOF {
+	if walkErr != nil {
 		return Result{}, walkErr
 	}
 	return res, nil
