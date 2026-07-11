@@ -60,7 +60,8 @@ func dimensionOf(k finding.Kind) Dimension {
 		return Reliability
 	case finding.KindQuality:
 		return Maintainability
-	case finding.KindSCA, finding.KindSAST, finding.KindSecret, finding.KindMisconfig, finding.KindExploitation, finding.KindDAST:
+	case finding.KindSCA, "", finding.KindSAST, finding.KindSecret, finding.KindMisconfig, finding.KindExploitation, finding.KindDAST:
+		// An empty Kind is legacy-SCA per the finding taxonomy (back-compat), so it counts toward security.
 		return Security
 	default:
 		return "" // recon/manual/threat/hypothesis are not rating inputs
@@ -93,15 +94,23 @@ func Compute(findings []finding.Finding, loc int) Report {
 		LinesOfCode:     loc,
 	}
 	devCost := loc * devCostPerLineMinutes
-	if devCost > 0 {
+	switch {
+	case devCost > 0:
 		rep.DebtRatioPct = 100 * float64(debt) / float64(devCost)
+		rep.Maintainability = gradeByDebtRatio(rep.DebtRatioPct)
+	case debt > 0:
+		// Debt but no measurable code size (loc == 0): the ratio is undefined/infinite, so grade worst
+		// rather than letting max debt read as the best grade.
+		rep.Maintainability = GradeE
+	default:
+		rep.Maintainability = GradeA
 	}
-	rep.Maintainability = gradeByDebtRatio(rep.DebtRatioPct)
 	return rep
 }
 
 // gradeBySeverity maps the worst-issue severity rank on an axis to a grade: none->A, low->B, medium->C,
-// high->D, critical->E (info is treated as no material issue).
+// high->D, critical->E. info and unknown (rank <= 1) are treated as no material issue (grade A) — an
+// unknown-severity finding does not, on its own, degrade a health grade.
 func gradeBySeverity(rank int) Grade {
 	switch {
 	case rank >= shared.SeverityRank(shared.SeverityCritical):

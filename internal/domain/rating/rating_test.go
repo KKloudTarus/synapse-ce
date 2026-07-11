@@ -74,6 +74,22 @@ func TestInfoDoesNotDegradeSecurity(t *testing.T) {
 	}
 }
 
+func TestEmptyKindCountsAsSecurity(t *testing.T) {
+	// A legacy empty-Kind finding is SCA per the taxonomy, so it must degrade the security grade.
+	r := Compute([]finding.Finding{{Severity: shared.SeverityCritical}}, 1000)
+	if r.Security != GradeE {
+		t.Errorf("empty-kind critical finding must grade security E, got %s", r.Security)
+	}
+}
+
+func TestDebtWithoutLOCGradesWorst(t *testing.T) {
+	// Debt but loc==0 (undefined ratio) must not read as the best grade.
+	r := Compute([]finding.Finding{f(finding.KindQuality, shared.SeverityHigh)}, 0)
+	if r.Maintainability != GradeE {
+		t.Errorf("debt with no LOC must grade maintainability E, got %s", r.Maintainability)
+	}
+}
+
 func TestNonRatingKindsIgnored(t *testing.T) {
 	// recon/manual/threat must not affect any grade.
 	r := Compute([]finding.Finding{
