@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -22,7 +23,7 @@ type Conan struct{}
 func (Conan) Ecosystem() string { return "conan" }
 
 // Markers are the lockfile basenames Conan claims.
-func (Conan) Markers() []string { return []string{"conan.lock"} }
+func (Conan) Markers() []string { return []string{"conan.lock", "conanfile.txt"} }
 
 // conanLock covers both lockfile shapes: the 2.x top-level reference lists and the 1.x graph_lock nodes.
 type conanLock struct {
@@ -41,6 +42,12 @@ type conanLock struct {
 func (Conan) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
+	}
+	if strings.ToLower(filepath.Base(in.Path)) == "conanfile.txt" {
+		if _, ok := readManifestFile(filepath.Join(in.Dir, "conan.lock")); ok {
+			return nil, nil, nil // lockfile takes precedence
+		}
+		return parseConanTxt(ctx, in)
 	}
 	var lock conanLock
 	if err := json.Unmarshal(in.Content, &lock); err != nil {
