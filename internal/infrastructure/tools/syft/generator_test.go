@@ -1,6 +1,9 @@
 package syft
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const cdxFixture = `{
   "components": [
@@ -179,5 +182,26 @@ func TestParseCycloneDXDependencyDedup(t *testing.T) {
 	}
 	if len(deps[0].DependsOn) != 1 || deps[0].DependsOn[0] != "pkg:npm/b@1" {
 		t.Errorf("dependsOn = %+v, want [pkg:npm/b@1] (self-edge + dup dropped)", deps[0].DependsOn)
+	}
+}
+
+func TestParseCycloneDXDropsGradleWrapper(t *testing.T) {
+	doc := `{"components":[
+	  {"bom-ref":"a","name":"gradle-wrapper","version":"UNKNOWN","purl":"pkg:maven/gradle-wrapper/gradle-wrapper",
+	   "properties":[{"name":"syft:location:0:path","value":"/gradle/wrapper/gradle-wrapper.jar"}]},
+	  {"bom-ref":"b","name":"commons-lang3","version":"3.17.0","purl":"pkg:maven/org.apache.commons/commons-lang3@3.17.0",
+	   "properties":[{"name":"syft:location:0:path","value":"/build/libs/app.jar"}]}
+	]}`
+	comps, _, _, err := parseCycloneDX([]byte(doc))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	for _, c := range comps {
+		if c.Name == "gradle-wrapper" || strings.Contains(c.PURL, "gradle-wrapper") {
+			t.Errorf("gradle wrapper jar must be dropped, got %+v", c)
+		}
+	}
+	if len(comps) != 1 || comps[0].Name != "commons-lang3" {
+		t.Fatalf("want only commons-lang3, got %+v", comps)
 	}
 }
