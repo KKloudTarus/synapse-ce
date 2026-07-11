@@ -225,7 +225,7 @@ func (r *Resolver) run(ctx context.Context, dir string) ([]byte, error) {
 	// On the trusted-local direct-exec path, auto-detect a JDK and inject it so resolution succeeds
 	// instead of failing with "JAVA_HOME is set to an invalid directory"; if none is found the env is
 	// left as-is and Gradle's own error is surfaced (via source_warnings).
-	cmd.Env = ensureJavaHome(append(scrubSynapseEnv(os.Environ()), env...), detectJDK)
+	cmd.Env = ensureJavaHome(append(scrubSynapseEnv(os.Environ()), env...), func() string { return detectJDK(ctx) })
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -345,23 +345,27 @@ func ensureJavaHome(env []string, detect func() string) []string {
 	return setEnvVar(env, "JAVA_HOME", jdk)
 }
 
-// javaHomeValid reports whether dir looks like a JDK/JRE home (has a bin/java[.exe] executable).
+// javaHomeValid reports whether dir looks like a JDK home. Gradle needs a JDK (not just a JRE), so it
+// requires BOTH bin/java and bin/javac (the compiler is JDK-only).
 func javaHomeValid(dir string) bool {
 	if strings.TrimSpace(dir) == "" {
 		return false
 	}
-	for _, name := range []string{"java", "java.exe"} {
-		if fi, err := os.Stat(filepath.Join(dir, "bin", name)); err == nil && !fi.IsDir() {
-			return true
+	hasExe := func(names ...string) bool {
+		for _, name := range names {
+			if fi, err := os.Stat(filepath.Join(dir, "bin", name)); err == nil && !fi.IsDir() {
+				return true
+			}
 		}
+		return false
 	}
-	return false
+	return hasExe("java", "java.exe") && hasExe("javac", "javac.exe")
 }
 
 // detectJDK finds a JDK home on the local host (trusted-local path only). It prefers the macOS
 // java_home helper, then well-known install roots on macOS/Linux/Homebrew. Returns "" when none is found.
-func detectJDK() string {
-	if out, err := exec.Command("/usr/libexec/java_home").Output(); err == nil { // macOS
+func detectJDK(ctx context.Context) string {
+	if out, err := exec.CommandContext(ctx, "/usr/libexec/java_home").Output(); err == nil { // macOS
 		if p := strings.TrimSpace(string(out)); javaHomeValid(p) {
 			return p
 		}

@@ -13,8 +13,10 @@ func makeJDK(t *testing.T) string {
 	if err := os.MkdirAll(filepath.Join(jdk, "bin"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(jdk, "bin", "java"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
+	for _, exe := range []string{"java", "javac"} { // a JDK has both; javaHomeValid requires the compiler
+		if err := os.WriteFile(filepath.Join(jdk, "bin", exe), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return jdk
 }
@@ -28,6 +30,17 @@ func TestJavaHomeValid(t *testing.T) {
 	}
 	if javaHomeValid("") {
 		t.Errorf("empty string must not be valid")
+	}
+	// A JRE (java but no javac) must be rejected – Gradle needs a JDK.
+	jre := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(jre, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jre, "bin", "java"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if javaHomeValid(jre) {
+		t.Errorf("a JRE (no javac) must not be accepted as a JDK")
 	}
 }
 

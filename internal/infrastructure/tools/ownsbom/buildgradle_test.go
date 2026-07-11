@@ -57,6 +57,67 @@ repositories {
 	}
 }
 
+func TestParseBuildGradleDepsExcludesBuildscriptAndComments(t *testing.T) {
+	src := `
+buildscript {
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.1.0'          // build-time plugin -> must NOT be emitted
+    }
+}
+dependencies {
+    implementation 'real:lib:1.2.3'   // was 'com.fasterxml.jackson.core:jackson-databind:2.9.9' -> comment ignored
+    implementation 'dyn:sel:1.+'      // dynamic selector -> must NOT be emitted (phantom-major FP)
+    /* implementation 'blocked:out:9.9.9' */
+    implementation 'ok:concrete:2.0.0'
+}
+`
+	comps := ParseBuildGradleDeps([]byte(src))
+	got := map[string]bool{}
+	for _, c := range comps {
+		got[c.Name] = true
+	}
+	for _, want := range []string{"real:lib", "ok:concrete"} {
+		if !got[want] {
+			t.Errorf("expected %s to be emitted; got %v", want, got)
+		}
+	}
+	for _, bad := range []string{
+		"com.android.tools.build:gradle",              // buildscript classpath
+		"com.fasterxml.jackson.core:jackson-databind", // trailing-comment coord
+		"blocked:out", // block-comment coord
+		"dyn:sel",     // dynamic version 1.+
+	} {
+		if got[bad] {
+			t.Errorf("%s must NOT be emitted", bad)
+		}
+	}
+	if len(comps) != 2 {
+		t.Errorf("want exactly 2 components (real:lib, ok:concrete), got %d: %+v", len(comps), comps)
+	}
+}
+
+func TestSplitGradleCoord(t *testing.T) {
+	cases := []struct {
+		in                       string
+		wantOK                   bool
+		group, artifact, version string
+	}{
+		{"g:a:1.2.3", true, "g", "a", "1.2.3"},
+		{"g:a:1.0@aar", true, "g", "a", "1.0"},    // @ext stripped
+		{"g:a:1.0:jar", true, "g", "a", "1.0"},    // classifier ignored (version is 3rd part)
+		{"g:a", false, "", "", ""},                // version-less (BOM)
+		{"g:a:${v}", false, "", "", ""},           // interpolated
+		{"g:a:1.+", false, "", "", ""},            // dynamic
+		{"g:a:latest.release", false, "", "", ""}, // word
+	}
+	for _, c := range cases {
+		g, a, v, ok := splitGradleCoord(c.in)
+		if ok != c.wantOK || (ok && (g != c.group || a != c.artifact || v != c.version)) {
+			t.Errorf("splitGradleCoord(%q) = (%q,%q,%q,%v), want (%q,%q,%q,%v)", c.in, g, a, v, ok, c.group, c.artifact, c.version, c.wantOK)
+		}
+	}
+}
+
 func purlOf(comps []sbom.Component, name string) string {
 	for _, c := range comps {
 		if c.Name == name {
