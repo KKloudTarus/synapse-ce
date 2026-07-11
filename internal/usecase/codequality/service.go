@@ -31,6 +31,7 @@ type Service struct {
 	dup           ports.DuplicationScanner
 	metrics       ports.CodeMetricsProvider
 	inventory     ports.CodeInventoryScanner
+	bugs          ports.BugDetector
 	complexityMin int
 }
 
@@ -43,6 +44,16 @@ func WithDuplication(d ports.DuplicationScanner) Option { return func(s *Service
 // WithInventory wires the code-size inventory, enabling Report() to compute ratings + a health summary.
 func WithInventory(inv ports.CodeInventoryScanner) Option {
 	return func(s *Service) { s.inventory = inv }
+}
+
+// WithBugs wires the deeper AST bug detector (unreachable code, constant conditions), emitting its
+// findings as Kind=reliability. Requires the synapse-ast sidecar; degrades to nothing without it.
+func WithBugs(b ports.BugDetector) Option { return func(s *Service) { s.bugs = b } }
+
+// bugCWE maps a deeper-bug rule id to its CWE for the finding.
+var bugCWE = map[string]string{
+	"reliability-unreachable-code":   "CWE-561", // dead code
+	"reliability-constant-condition": "CWE-570", // expression is always false/true
 }
 
 // WithComplexity adds high-complexity maintainability findings (functions over threshold), using the AST
@@ -113,6 +124,18 @@ func (s *Service) analyze(ctx context.Context, root string) ([]finding.Finding, 
 				title := fmt.Sprintf("High cyclomatic complexity: %d (%s)", f.Cyclomatic, f.Name)
 				desc := fmt.Sprintf("Function %q has cyclomatic complexity %d (cognitive %d), above %d. Break it into smaller units to improve testability and readability.", f.Name, f.Cyclomatic, f.Cognitive, s.complexityMin)
 				out = append(out, newFinding("quality", "quality-high-complexity", "CWE-1120", shared.SeverityMedium, title, desc, f.File, f.Line))
+			}
+		}
+	}
+
+	if s.bugs != nil {
+		bugs, available, berr := s.bugs.Bugs(ctx, root)
+		if berr != nil {
+			return nil, measure.DuplicationReport{}, fmt.Errorf("bug detection: %w", berr)
+		}
+		if available {
+			for _, b := range bugs {
+				out = append(out, newFinding("reliability", b.Rule, bugCWE[b.Rule], shared.SeverityMedium, b.Message, b.Message, b.File, b.Line))
 			}
 		}
 	}

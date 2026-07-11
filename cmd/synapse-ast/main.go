@@ -20,8 +20,8 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 3 || (os.Args[1] != "functions" && os.Args[1] != "metrics") {
-		fmt.Fprintln(os.Stderr, "usage: synapse-ast functions|metrics <dir>")
+	if len(os.Args) != 3 || (os.Args[1] != "functions" && os.Args[1] != "metrics" && os.Args[1] != "bugs") {
+		fmt.Fprintln(os.Stderr, "usage: synapse-ast functions|metrics|bugs <dir>")
 		os.Exit(2)
 	}
 	var (
@@ -33,6 +33,8 @@ func main() {
 		out, err = astwalk.FunctionsFor(context.Background(), os.Args[2])
 	case "metrics":
 		out, err = astwalk.MetricsFor(context.Background(), os.Args[2])
+	case "bugs":
+		out, err = astwalk.BugsFor(context.Background(), os.Args[2])
 	}
 	if errors.Is(err, astwalk.ErrUnavailable) {
 		fmt.Fprintln(os.Stderr, "synapse-ast:", err)

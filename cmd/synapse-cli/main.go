@@ -343,6 +343,7 @@ func runQuality(args []string) error {
 		codeanalysis.New(),
 		codequality.WithDuplication(duplication.New(0)),
 		codequality.WithComplexity(ast.New(os.Getenv("SYNAPSE_AST_BIN")), complexityMin),
+		codequality.WithBugs(ast.New(os.Getenv("SYNAPSE_AST_BIN"))),
 	)
 	findings, err := svc.Analyze(context.Background(), dir)
 	if err != nil {
@@ -417,6 +418,7 @@ func runRating(args []string) error {
 		codeanalysis.New(),
 		codequality.WithDuplication(duplication.New(0)),
 		codequality.WithComplexity(ast.New(os.Getenv("SYNAPSE_AST_BIN")), codequality.DefaultComplexityThreshold),
+		codequality.WithBugs(ast.New(os.Getenv("SYNAPSE_AST_BIN"))),
 	)
 	findings, err := svc.Analyze(ctx, dir)
 	if err != nil {
@@ -516,6 +518,7 @@ func runGate(args []string) error {
 		codeanalysis.New(),
 		codequality.WithDuplication(duplication.New(0)),
 		codequality.WithComplexity(ast.New(os.Getenv("SYNAPSE_AST_BIN")), codequality.DefaultComplexityThreshold),
+		codequality.WithBugs(ast.New(os.Getenv("SYNAPSE_AST_BIN"))),
 	)
 	findings, err := svc.Analyze(ctx, dir)
 	if err != nil {

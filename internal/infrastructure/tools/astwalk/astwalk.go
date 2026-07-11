@@ -44,6 +44,21 @@ type Metrics struct {
 	Truncated bool             `json:"truncated,omitempty"`
 }
 
+// Bug is one deterministic reliability defect found by the AST dataflow checks (deeper than the
+// line-pattern rules): a rule id, the file:line it occurs at, and a human message.
+type Bug struct {
+	File    string `json:"file"`
+	Line    int    `json:"line"`
+	Rule    string `json:"rule"`
+	Message string `json:"message"`
+}
+
+// Bugs is the `bugs` wire output.
+type Bugs struct {
+	Bugs      []Bug `json:"bugs"`
+	Truncated bool  `json:"truncated,omitempty"`
+}
+
 const (
 	maxFileBytes = 4 << 20
 	maxFiles     = 200_000

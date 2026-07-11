@@ -46,6 +46,7 @@ func (p *Provider) WithRunner(r ports.ToolRunner) *Provider { p.runner = r; retu
 var (
 	_ ports.ASTProvider         = (*Provider)(nil)
 	_ ports.CodeMetricsProvider = (*Provider)(nil)
+	_ ports.BugDetector         = (*Provider)(nil)
 )
 
 // FunctionCounts runs `synapse-ast functions <root>` and returns per-language function counts. A sidecar
@@ -93,6 +94,37 @@ func (p *Provider) Complexity(ctx context.Context, root string) (measure.Complex
 		return measure.ComplexityReport{}, false, fmt.Errorf("parse synapse-ast metrics: %w", err)
 	}
 	return measure.ComplexityReport{Functions: wire.Functions, Truncated: wire.Truncated}, true, nil
+}
+
+// Bugs runs `synapse-ast bugs <root>` and returns the deterministic reliability defects. A sidecar built
+// without the tree-sitter backend (or an absent binary) maps to available=false so the caller degrades.
+func (p *Provider) Bugs(ctx context.Context, root string) ([]ports.BugFinding, bool, error) {
+	if strings.TrimSpace(root) == "" {
+		return nil, false, nil
+	}
+	out, exit, err := p.run(ctx, "bugs", root)
+	if exit == exitUnavailable {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	var wire struct {
+		Bugs []struct {
+			File    string `json:"file"`
+			Line    int    `json:"line"`
+			Rule    string `json:"rule"`
+			Message string `json:"message"`
+		} `json:"bugs"`
+	}
+	if err := json.Unmarshal(out, &wire); err != nil {
+		return nil, false, fmt.Errorf("parse synapse-ast bugs: %w", err)
+	}
+	findings := make([]ports.BugFinding, 0, len(wire.Bugs))
+	for _, b := range wire.Bugs {
+		findings = append(findings, ports.BugFinding{Rule: b.Rule, Message: b.Message, File: b.File, Line: b.Line})
+	}
+	return findings, true, nil
 }
 
 // run executes the sidecar (sandboxed when a runner is set, else direct os/exec) and returns stdout, the
