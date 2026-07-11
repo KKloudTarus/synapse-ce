@@ -70,6 +70,8 @@ const (
 	cfgKubernetes
 	cfgTerraform
 	cfgCloudFormation
+	cfgCompose
+	cfgGithubActions
 )
 
 // ScanConfigs walks root, classifies each regular file, and returns located misconfig findings.
@@ -127,10 +129,16 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 		if e != nil || isBinary(data) {
 			return nil
 		}
+		rel := strings.TrimPrefix(strings.TrimPrefix(path, root), string(os.PathSeparator))
 		if kind == cfgNone {
-			// Decide by content: a Kubernetes manifest declares apiVersion + kind; a CloudFormation
-			// template declares AWSTemplateFormatVersion or a Resources map of AWS:: types.
+			// Decide by path/content: a GitHub Actions workflow lives under .github/workflows/; a Compose
+			// file declares a top-level services: map; a Kubernetes manifest declares apiVersion + kind; a
+			// CloudFormation template declares AWSTemplateFormatVersion or a Resources map of AWS:: types.
 			switch {
+			case isGitHubActionsPath(rel):
+				kind = cfgGithubActions
+			case looksCompose(data):
+				kind = cfgCompose
 			case looksKubernetes(data):
 				kind = cfgKubernetes
 			case looksCloudFormation(data):
@@ -139,7 +147,6 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 				return nil
 			}
 		}
-		rel := strings.TrimPrefix(strings.TrimPrefix(path, root), string(os.PathSeparator))
 		switch kind {
 		case cfgDockerfile:
 			out = append(out, scanDockerfile(rel, data)...)
@@ -149,6 +156,10 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			out = append(out, scanTerraform(rel, data)...)
 		case cfgCloudFormation:
 			out = append(out, scanCloudFormation(rel, data)...)
+		case cfgCompose:
+			out = append(out, scanCompose(rel, data)...)
+		case cfgGithubActions:
+			out = append(out, scanGitHubActions(rel, data)...)
 		}
 		return nil
 	})
@@ -167,6 +178,9 @@ func classifyName(name string) configKind {
 	}
 	if strings.HasSuffix(strings.ToLower(name), ".tf") {
 		return cfgTerraform
+	}
+	if isComposeName(name) {
+		return cfgCompose
 	}
 	return cfgNone
 }
