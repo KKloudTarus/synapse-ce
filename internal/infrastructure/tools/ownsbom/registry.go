@@ -88,9 +88,10 @@ func New(parsers ...EcosystemParser) (*Registry, error) {
 	return r, nil
 }
 
-// DefaultRegistry assembles the owned parsers into a producer covering Go, JS (npm + yarn), Python, Conda,
-// Rust, and Java (Maven pom.xml + Gradle libs.versions.toml) — the detection-independent SBOM producer.
-// The parsers claim distinct markers, so New does not error here in practice.
+// DefaultRegistry assembles the owned parsers into the detection-independent SBOM producer, covering Go,
+// JS (npm/yarn/pnpm), Python (PyPI/Poetry/Pipfile/Conda), Rust, Java (Maven + Gradle), Ruby, PHP,.NET,
+// Swift, Dart, Elixir, R (renv), Julia, and Conan. The parsers claim distinct markers, so New does not
+// error here in practice.
 func DefaultRegistry() (*Registry, error) {
 	return New(GoMod{}, NPM{}, Yarn{}, Pnpm{}, PyPI{}, Poetry{}, Pipfile{}, Cargo{}, Maven{}, Gradle{}, Gem{}, Composer{}, NuGet{}, Swift{}, Dart{}, Elixir{}, Conda{}, Renv{}, Julia{}, Conan{})
 }

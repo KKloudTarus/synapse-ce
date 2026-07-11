@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -62,6 +63,9 @@ func (Julia) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 			})
 			curName = "" // one version per package block; avoid a stray later match rebinding it
 		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, nil, fmt.Errorf("parse Manifest.toml: %w", err)
 	}
 	comps := set.components()
 	sort.Slice(comps, func(i, j int) bool { return comps[i].PURL < comps[j].PURL })
