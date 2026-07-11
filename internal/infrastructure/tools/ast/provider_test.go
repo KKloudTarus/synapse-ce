@@ -28,6 +28,17 @@ func TestProviderEmptyRoot(t *testing.T) {
 	}
 }
 
+func TestBugsUnavailableWhenBinaryMissing(t *testing.T) {
+	p := New("/nonexistent/synapse-ast-does-not-exist")
+	bugs, available, err := p.Bugs(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("missing binary must not error, got %v", err)
+	}
+	if available || len(bugs) != 0 {
+		t.Errorf("missing binary must report unavailable + no bugs, got available=%v bugs=%d", available, len(bugs))
+	}
+}
+
 func TestComplexityUnavailableWhenBinaryMissing(t *testing.T) {
 	p := New("/nonexistent/synapse-ast-does-not-exist")
 	report, available, err := p.Complexity(context.Background(), t.TempDir())
