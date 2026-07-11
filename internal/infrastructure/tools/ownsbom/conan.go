@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -44,8 +45,10 @@ func (Conan) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 		return nil, nil, err
 	}
 	if strings.ToLower(filepath.Base(in.Path)) == "conanfile.txt" {
-		if _, ok := readManifestFile(filepath.Join(in.Dir, "conan.lock")); ok {
-			return nil, nil, nil // lockfile takes precedence
+		// A resolved lockfile beside the manifest takes precedence; an Lstat is enough to test existence
+		// (the registry reads + parses conan.lock on its own marker pass).
+		if fi, err := os.Lstat(filepath.Join(in.Dir, "conan.lock")); err == nil && fi.Mode().IsRegular() {
+			return nil, nil, nil
 		}
 		return parseConanTxt(ctx, in)
 	}
@@ -53,9 +56,15 @@ func (Conan) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 	if err := json.Unmarshal(in.Content, &lock); err != nil {
 		return nil, nil, fmt.Errorf("parse conan.lock: %w", err)
 	}
-	scope := sbom.ClassifyScope(in.Path, "")
+	// Scope build/python requires as development (build-time tooling), matching the conanfile.txt mapping
+	// of [tool_requires]; the path scope may already be a background one, which wins.
+	prod := sbom.ClassifyScope(in.Path, "")
+	dev := prod
+	if !sbom.IsBackgroundScope(prod) {
+		dev = sbom.ScopeDevelopment
+	}
 	set := newComponentSet()
-	add := func(ref string) {
+	add := func(ref, scope string) {
 		name, version := parseConanRef(ref)
 		if name == "" || version == "" {
 			return
@@ -68,13 +77,17 @@ func (Conan) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 			Scope:    scope,
 		})
 	}
-	for _, refs := range [][]string{lock.Requires, lock.BuildRequires, lock.PythonRequires} {
-		for _, ref := range refs {
-			add(ref)
-		}
+	for _, ref := range lock.Requires {
+		add(ref, prod)
+	}
+	for _, ref := range lock.BuildRequires {
+		add(ref, dev)
+	}
+	for _, ref := range lock.PythonRequires {
+		add(ref, dev)
 	}
 	for _, node := range lock.GraphLock.Nodes {
-		add(node.Ref)
+		add(node.Ref, prod) // 1.x graph nodes carry no requires-kind, so scope by path
 	}
 	comps := set.components()
 	sort.Slice(comps, func(i, j int) bool { return comps[i].PURL < comps[j].PURL })

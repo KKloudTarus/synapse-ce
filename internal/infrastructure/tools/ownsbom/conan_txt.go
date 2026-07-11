@@ -24,6 +24,7 @@ func parseConanTxt(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 	sc := bufio.NewScanner(bytes.NewReader(in.Content))
 	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
 
+	dirScope := sbom.ClassifyScope(in.Path, "") // path scope is invariant across sections
 	var currentScope string
 
 	for sc.Scan() {
@@ -47,7 +48,6 @@ func parseConanTxt(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			section := strings.ToLower(line[1 : len(line)-1])
-			dirScope := sbom.ClassifyScope(in.Path, "")
 
 			switch section {
 			case "requires":
