@@ -67,11 +67,20 @@ func New(analyzer ports.CodeAnalyzer, opts ...Option) *Service {
 
 // Analyze returns the code-quality findings for root, sorted deterministically by dedup key.
 func (s *Service) Analyze(ctx context.Context, root string) ([]finding.Finding, error) {
+	findings, _, err := s.analyze(ctx, root)
+	return findings, err
+}
+
+// analyze runs the rule engine + the metric bridges once, returning the findings AND the duplication
+// report it computed (so BuildReport reuses it rather than re-scanning the tree). dupReport is the zero
+// value when no duplication scanner is wired.
+func (s *Service) analyze(ctx context.Context, root string) ([]finding.Finding, measure.DuplicationReport, error) {
 	var out []finding.Finding
+	var dupReport measure.DuplicationReport
 
 	raws, err := s.analyzer.Analyze(ctx, root)
 	if err != nil {
-		return nil, fmt.Errorf("code analysis: %w", err)
+		return nil, measure.DuplicationReport{}, fmt.Errorf("code analysis: %w", err)
 	}
 	for _, r := range raws {
 		out = append(out, newFinding(r.Kind, r.RuleID, r.CWE, r.Severity, r.Title, r.Description, r.File, r.Line))
@@ -80,8 +89,9 @@ func (s *Service) Analyze(ctx context.Context, root string) ([]finding.Finding, 
 	if s.dup != nil {
 		rep, derr := s.dup.Duplication(ctx, root)
 		if derr != nil {
-			return nil, fmt.Errorf("duplication: %w", derr)
+			return nil, measure.DuplicationReport{}, fmt.Errorf("duplication: %w", derr)
 		}
+		dupReport = rep
 		for _, b := range rep.Blocks {
 			if len(b.Occurrences) == 0 {
 				continue
@@ -96,7 +106,7 @@ func (s *Service) Analyze(ctx context.Context, root string) ([]finding.Finding, 
 	if s.metrics != nil {
 		rep, available, merr := s.metrics.Complexity(ctx, root)
 		if merr != nil {
-			return nil, fmt.Errorf("complexity: %w", merr)
+			return nil, measure.DuplicationReport{}, fmt.Errorf("complexity: %w", merr)
 		}
 		if available {
 			for _, f := range rep.OverCyclomatic(s.complexityMin) {
@@ -108,7 +118,7 @@ func (s *Service) Analyze(ctx context.Context, root string) ([]finding.Finding, 
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].DedupKey < out[j].DedupKey })
-	return out, nil
+	return out, dupReport, nil
 }
 
 // newFinding maps a raw code-quality signal to a first-party finding. The DedupKey (<kind>:<rule>:<file>:
@@ -154,25 +164,17 @@ type Report struct {
 // bridges duplication + complexity); the inventory + duplication summary + ratings are added for display.
 // Missing optional dependencies degrade to empty sections rather than erroring.
 func (s *Service) BuildReport(ctx context.Context, root string) (Report, error) {
-	findings, err := s.Analyze(ctx, root)
+	findings, dup, err := s.analyze(ctx, root) // reuse the duplication report Analyze already computed
 	if err != nil {
 		return Report{}, err
 	}
-	var rep Report
-	rep.Findings = findings
+	rep := Report{Findings: findings, Duplication: dup}
 	if s.inventory != nil {
 		inv, ierr := s.inventory.Inventory(ctx, root)
 		if ierr != nil {
 			return Report{}, fmt.Errorf("inventory: %w", ierr)
 		}
 		rep.Inventory = inv
-	}
-	if s.dup != nil {
-		dup, derr := s.dup.Duplication(ctx, root)
-		if derr != nil {
-			return Report{}, fmt.Errorf("duplication: %w", derr)
-		}
-		rep.Duplication = dup
 	}
 	rep.Rating = rating.Compute(findings, rep.Inventory.Totals().CodeLines)
 	return rep, nil

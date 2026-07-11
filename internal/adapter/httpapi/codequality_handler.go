@@ -43,7 +43,7 @@ func (rt *Router) codeQualityReport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	root := localSourceDir(e.Scope.InScope)
+	root := localSourceDir(e.Scope)
 	if root == "" {
 		writeJSON(w, http.StatusOK, codeQualityReportView{
 			Available: false,
@@ -59,12 +59,14 @@ func (rt *Router) codeQualityReport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, codeQualityReportView{Available: true, Report: &rep})
 }
 
-// localSourceDir returns the first in-scope repo target whose value is an existing local directory, or ""
-// when none is. Only authorized scope targets are considered, so a caller can never point the analyzer at
-// an arbitrary server path.
-func localSourceDir(targets []engagement.Target) string {
-	for _, t := range targets {
-		if t.Kind != engagement.TargetRepo {
+// localSourceDir returns the first in-scope repo target whose value is an existing local directory and is
+// not excluded by the engagement's out-of-scope rules, or "" when none is. Only authorized scope targets
+// are considered, so a caller can never point the analyzer at an arbitrary server path; the AllowsTarget
+// check honors the "out-of-scope always wins" invariant at the repo level. (Pruning out-of-scope SUBPATHS
+// inside an allowed repo is a follow-up; the analyzer walk currently covers the whole allowed directory.)
+func localSourceDir(scope engagement.Scope) string {
+	for _, t := range scope.InScope {
+		if t.Kind != engagement.TargetRepo || !scope.AllowsTarget(t) {
 			continue
 		}
 		if fi, err := os.Stat(t.Value); err == nil && fi.IsDir() {
