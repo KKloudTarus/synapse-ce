@@ -9,7 +9,7 @@ import (
 	transferuc "github.com/KKloudTarus/synapse-ce/internal/usecase/transfer"
 )
 
-// maxBundleBytes caps an uploaded import bundle (defensive — bundles are JSON).
+// maxBundleBytes caps an uploaded import bundle (defensive – bundles are JSON).
 const maxBundleBytes = 64 << 20 // 64 MiB
 
 // exportBundle streams a portable engagement bundle: scope + findings +
@@ -71,7 +71,7 @@ func (rt *Router) listAudit(w http.ResponseWriter, r *http.Request) {
 }
 
 // verifyAudit re-derives the audit hash chain and reports whether it is intact
-// — the audit-log analogue of the evidence-chain verify. A broken
+// – the audit-log analogue of the evidence-chain verify. A broken
 // chain means the append-only log was tampered with after the fact.
 func (rt *Router) verifyAudit(w http.ResponseWriter, r *http.Request) {
 	report, err := rt.audit.Verify(r.Context())

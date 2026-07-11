@@ -11,7 +11,7 @@ import (
 )
 
 // TestGoldenSuite is the deterministic agent-evaluation regression gate. Each scenario is a
-// hermetic replay-LLM script with a SCORED expected outcome — the safety-critical properties the
+// hermetic replay-LLM script with a SCORED expected outcome – the safety-critical properties the
 // agent must hold across changes: out-of-scope NEVER executes (false-positive = 0), intrusive
 // always suspends, budgets terminate the run, reads execute nothing. A regression flips a verdict.
 func TestGoldenSuite(t *testing.T) {

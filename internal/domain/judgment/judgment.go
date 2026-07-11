@@ -1,7 +1,7 @@
 // Package judgment is the AI "analysis brain" primitive: a propose→verify→confirm CLAIM
 // about a subject (a finding, component, vulnerability, or the engagement), evidence-gated and
 // hash-chainable, that generalizes the exploitation gate. It is pure (stdlib + shared
-// + the shared verdict value type — NOT finding, R1): a Judgment never imports the Finding
+// + the shared verdict value type – NOT finding, R1): a Judgment never imports the Finding
 // aggregate. The proposing agent can only PROPOSE (score 0); a DISTINCT verifier's sealed verdict
 // (gated capabilities) or a human's acceptance (ungated) is the only thing that confirms it
 // .
@@ -16,7 +16,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/verdict"
 )
 
-// Capability is the CLOSED vocabulary of analysis brains — never an LLM-supplied string. Add one
+// Capability is the CLOSED vocabulary of analysis brains – never an LLM-supplied string. Add one
 // (a const + a Gated case + a concrete Claim type + UnmarshalClaim registration) with its epic.
 type Capability string
 
@@ -41,7 +41,7 @@ func (c Capability) Valid() bool {
 
 // Gated reports whether a verdict gates this capability's publishability (R2). Adversarially-
 // refutable capabilities (reachability/sast/critique/threat/vex_justification) are gated: publishable only with a sealed
-// verdict >= EvidenceThreshold. Descriptive ones (risk_narrative; correlation — a deterministic
+// verdict >= EvidenceThreshold. Descriptive ones (risk_narrative; correlation – a deterministic
 // cross-check disagreement) have no "refuted at 75" semantics; they are human-accepted, not score-gated.
 func (c Capability) Gated() bool {
 	switch c {
@@ -91,7 +91,7 @@ func (k SubjectKind) Valid() bool {
 
 // Judgment is one propose→verify→confirm unit of AI analysis. It is a CLAIM until a DISTINCT
 // verifier seals a verdict (gated capabilities) or a human accepts it (ungated). Tenant-scoped via
-// EngagementID (R9). ProposedBy is attribution only — it confers no power to move the score.
+// EngagementID (R9). ProposedBy is attribution only – it confers no power to move the score.
 type Judgment struct {
 	ID            shared.ID
 	EngagementID  shared.ID
@@ -128,7 +128,7 @@ func New(id, engagementID shared.ID, capability Capability, subjectKind SubjectK
 		return Judgment{}, fmt.Errorf("%w: claim capability %q != judgment %q", shared.ErrValidation, claim.Capability(), capability)
 	}
 	// Canonicalize through the fail-closed (de)serialization (R8): the stored Claim is a fresh,
-	// validated, alias-free copy identical to what persistence seals — a caller can't mutate it
+	// validated, alias-free copy identical to what persistence seals – a caller can't mutate it
 	// post-validation. This also runs the claim's field validation.
 	canonical, err := canonicalizeClaim(claim)
 	if err != nil {
@@ -142,7 +142,7 @@ func New(id, engagementID shared.ID, capability Capability, subjectKind SubjectK
 	}, nil
 }
 
-// ApplyVerdict moves a GATED judgment's score via a DISTINCT verifier's verdict — the only path
+// ApplyVerdict moves a GATED judgment's score via a DISTINCT verifier's verdict – the only path
 // that scores a gated capability. It refuses an ungated capability (use Accept),
 // an invalid verdict, and a self-confirming verifier. >= EvidenceThreshold ⇒ confirmed, else
 // refuted. Pure state change; the use case MUST have sealed the verdict as evidence first (R10).

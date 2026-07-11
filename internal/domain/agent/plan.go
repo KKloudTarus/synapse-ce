@@ -11,7 +11,7 @@ import (
 // The LLM proposes a set of recon steps and their dependencies; Go mints the node ids,
 // classifies each node's risk, and validates the graph (acyclic, bounded, well-formed) before
 // anything runs. A node carries NO authority: when the scheduler runs it, the node's action is
-// RE-ADMITTED through safety.Gate.Admit exactly like a reactive proposal — the plan only
+// RE-ADMITTED through safety.Gate.Admit exactly like a reactive proposal – the plan only
 // expresses ORDER + intent, never permission. Plans are append-only (replan adds nodes; it
 // never edits a settled one) and versioned with an optimistic-concurrency Revision so a
 // node-status change is an atomic compare-and-swap (the durable idempotency authority: a
@@ -102,7 +102,7 @@ type Plan struct {
 
 // Plan size bounds (defense against a hostile/runaway model proposing an enormous graph that
 // would blow the step/token budget or the DB row). A plan exceeding these is rejected at
-// NewPlan — never silently truncated.
+// NewPlan – never silently truncated.
 const (
 	MaxPlanNodes          = 32 // total nodes in a plan
 	MaxNodeFanout         = 16 // dependencies a single node may declare
@@ -251,7 +251,7 @@ func (p Plan) Ready() []string {
 	return out
 }
 
-// ReadyActive returns up to max ready node ids that are RiskActive — the candidates a scheduler
+// ReadyActive returns up to max ready node ids that are RiskActive – the candidates a scheduler
 // may run CONCURRENTLY. RiskIntrusive nodes are deliberately excluded: they always need
 // manual approval and are run strictly one-at-a-time (never two intrusive in flight), so the
 // serial path handles them. Order is stable (plan order). max<=0 returns nothing.
@@ -274,7 +274,7 @@ func (p Plan) ReadyActive(max int) []string {
 }
 
 // FirstUnsettledClaimed returns the id of a node already claimed (NodeRunning) or suspended
-// (NodeAwaiting) — work the scheduler must resolve before picking new Ready nodes. NodeRunning
+// (NodeAwaiting) – work the scheduler must resolve before picking new Ready nodes. NodeRunning
 // is crash-recovery (re-drive idempotently); NodeAwaiting is a HITL resume. Empty if none.
 func (p Plan) FirstUnsettledClaimed() string {
 	for _, n := range p.Nodes {
@@ -286,7 +286,7 @@ func (p Plan) FirstUnsettledClaimed() string {
 }
 
 // SetNodeStatus updates a node's status (and optionally a redacted failure reason). Returns an
-// error if the id is unknown — the scheduler owns transitions, so an unknown id is a bug.
+// error if the id is unknown – the scheduler owns transitions, so an unknown id is a bug.
 func (p *Plan) SetNodeStatus(id string, status NodeStatus, failure string) error {
 	n, ok := p.node(id)
 	if !ok {

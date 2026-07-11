@@ -15,6 +15,7 @@ import {
   FileSignature,
   FileClock,
   FileText,
+  Gauge,
   GaugeCircle,
   LayoutDashboard,
   Loader2,
@@ -57,6 +58,7 @@ import {
 import { VirtualTable, type Column } from '../components/VirtualTable'
 import { AgentTab } from './AgentTab'
 import { ThreatModelTab } from './ThreatModelTab'
+import { CodeQualityTab } from './CodeQualityTab'
 import { api, ApiError, downloadBundle, downloadExport, downloadReport, downloadReportDoc, streamReconLogs, type ReportType } from '../lib/api'
 import {
   downloadStyledExcel,
@@ -94,7 +96,7 @@ import { StatusPill } from './Engagements'
 // Lazy-loaded so React Flow stays out of the initial bundle (only the Graph tab needs it).
 const DependencyGraphTab = lazy(() => import('./DependencyGraph').then((m) => ({ default: m.DependencyGraphTab })))
 
-type Tab = 'overview' | 'findings' | 'components' | 'vulns' | 'licenses' | 'graph' | 'threats' | 'recon' | 'agent' | 'evidence' | 'settings'
+type Tab = 'overview' | 'findings' | 'components' | 'vulns' | 'licenses' | 'graph' | 'quality' | 'threats' | 'recon' | 'agent' | 'evidence' | 'settings'
 
 export function EngagementDetail() {
   const { id = '' } = useParams()
@@ -262,6 +264,7 @@ export function EngagementDetail() {
         )}
         {tab === 'licenses' && <LicensesTab scan={scan} />}
         {tab === 'threats' && <ThreatModelTab engagementId={id} />}
+        {tab === 'quality' && <CodeQualityTab engagementId={id} />}
         {tab === 'recon' && <ReconTab eng={eng} onGoTab={setTab} />}
         {tab === 'agent' && <AgentTab engagementId={id} />}
         {tab === 'evidence' && <EvidenceTab key={id} engagementId={id} />}
@@ -337,7 +340,7 @@ function EvidenceBadge({ engagementId }: { engagementId: string }) {
       {ev.intact && ev.keyId && (
         <span
           className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 font-mono text-xs text-mutedfg ring-1 ring-inset ring-border"
-          title={`Chain head signed (ed25519) by key ${ev.keyId} — proves origin, not just integrity`}
+          title={`Chain head signed (ed25519) by key ${ev.keyId} – proves origin, not just integrity`}
         >
           <FileSignature className="size-3.5" />
           {ev.keyId}
@@ -487,7 +490,7 @@ const REPORT_SECTIONS: { key: string; label: string }[] = [
   { key: 'exhibits', label: 'Evidence exhibits (screenshots)' },
 ]
 
-// Report variants and their default section sets — mirrors reportProfiles in
+// Report variants and their default section sets – mirrors reportProfiles in
 // internal/usecase/report. The server stays the source of truth (framing + content);
 // these only pre-select the checkboxes so the modal is WYSIWYG per type. The
 // remediation + exhibits sections self-omit when there's no data, so they are safe to
@@ -823,7 +826,7 @@ function ScanPanel({
   const usingImportedSBOM = Boolean(importedSBOM)
 
   // Authorization window guard: refuse to start a scan in the UI when the
-  // engagement is outside its window — the server enforces this too (403).
+  // engagement is outside its window – the server enforces this too (403).
   const now = Date.now()
   const notYet = eng.authorizedFrom ? now < new Date(eng.authorizedFrom).getTime() : false
   const expired = eng.authorizedTo ? now > new Date(eng.authorizedTo).getTime() : false
@@ -930,7 +933,7 @@ function ScanPanel({
               <span className="font-mono tabular-nums">{importedSBOM.componentCount.toLocaleString()} components</span>
               <span className="font-mono tabular-nums">{importedSBOM.dependencyCount.toLocaleString()} edges</span>
               <span className="truncate font-mono" title={importedSBOM.sha256}>{importedSBOM.sha256.slice(0, 12)}</span>
-              <span>{importedSBOM.createdAt ? new Date(importedSBOM.createdAt).toLocaleString() : '—'}</span>
+              <span>{importedSBOM.createdAt ? new Date(importedSBOM.createdAt).toLocaleString() : '–'}</span>
             </div>
           ) : (
             <div className="mt-1 text-xs text-mutedfg">No imported SBOM active</div>
@@ -947,7 +950,7 @@ function ScanPanel({
           {sbomError || sbomMessage}
         </div>
       )}
-      {/* Single horizontal scan bar — all controls share one height + baseline. */}
+      {/* Single horizontal scan bar – all controls share one height + baseline. */}
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
         {!usingImportedSBOM && (
           <SegmentedKind
@@ -1006,7 +1009,7 @@ function ScanPanel({
         <div className="mt-3 flex items-start gap-2 rounded-lg border border-critical/40 bg-critical/10 p-3 text-xs text-critical">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <span>
-            {expired ? 'Authorization window has expired' : 'Authorization window has not started'} — scanning is
+            {expired ? 'Authorization window has expired' : 'Authorization window has not started'} – scanning is
             disabled. Update the engagement’s window to proceed.
           </span>
         </div>
@@ -1042,7 +1045,7 @@ function ScanPanel({
         </div>
       )}
 
-      {/* Pipeline description tucked away — the scan flow reads in 3 seconds without it. */}
+      {/* Pipeline description tucked away – the scan flow reads in 3 seconds without it. */}
       <details className="group mt-3 text-xs">
         <summary className="inline-flex cursor-pointer select-none items-center gap-1 text-mutedfg transition-colors hover:text-foreground">
           <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
@@ -1130,6 +1133,7 @@ const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard; countKey?: k
   { id: 'licenses', label: 'Licenses', icon: Scale, countKey: 'licenses' },
   { id: 'graph', label: 'Graph', icon: Network },
   { id: 'threats', label: 'Threat Model', icon: Waypoints },
+  { id: 'quality', label: 'Code Quality', icon: Gauge },
   { id: 'recon', label: 'Recon', icon: Radar },
   { id: 'agent', label: 'Agent', icon: Bot },
   { id: 'evidence', label: 'Evidence', icon: ShieldCheck },
@@ -1193,7 +1197,7 @@ function OverviewTab({
       <EmptyState
         icon={LayoutDashboard}
         title="No scan yet"
-        hint="Run a scan above — this overview will show what’s risky, what to fix first, and where it came from."
+        hint="Run a scan above – this overview will show what’s risky, what to fix first, and where it came from."
       />
     )
   }
@@ -1214,7 +1218,7 @@ function OverviewTab({
 }
 
 // FindingQualityStrip: raw vs actionable vs background, before any
-// vuln count — so a flood of example/test findings never reads as headline risk.
+// vuln count – so a flood of example/test findings never reads as headline risk.
 function FindingQualityStrip({ scan }: { scan: ScanResult }) {
   const q = scan.findingQuality
   if (q.rawFindings === 0) return null
@@ -1265,7 +1269,7 @@ function QualityTile({ label, value, accent, muted }: { label: string; value: nu
   )
 }
 
-// Section 1 — Scan Health.
+// Section 1 – Scan Health.
 function ScanHealth({ scan, job }: { scan: ScanResult; job: ScanJob | null }) {
   const status = job?.status ?? 'succeeded'
   const statusLabelText = status === 'running' ? 'Running' : status === 'failed' ? 'Failed' : 'Complete'
@@ -1334,7 +1338,7 @@ function HealthStat({
   )
 }
 
-// Section 2 — What Needs Attention (the most important section; before composition).
+// Section 2 – What Needs Attention (the most important section; before composition).
 function WhatNeedsAttention({
   findings,
   scan,
@@ -1346,7 +1350,7 @@ function WhatNeedsAttention({
   onSelectSeverity: (s: Severity | 'all') => void
   onGoTab: (t: Tab) => void
 }) {
-  // Count only actionable third-party findings — first-party historical advisories
+  // Count only actionable third-party findings – first-party historical advisories
   // (unversioned own modules) never inflate the headline risk.
   const tp = findings.filter((f) => f.class !== 'first_party_historical')
   const critical = tp.filter((f) => f.severity === 'critical').length
@@ -1467,7 +1471,7 @@ function remediationTargets(scan: ScanResult): RemTarget[] {
     .slice(0, 5)
 }
 
-// Section 3 — Top Remediation Targets: what to fix first.
+// Section 3 – Top Remediation Targets: what to fix first.
 function RemediationTargets({ scan, onGoTab }: { scan: ScanResult; onGoTab: (t: Tab) => void }) {
   const targets = useMemo(() => remediationTargets(scan), [scan])
   return (
@@ -1485,7 +1489,7 @@ function RemediationTargets({ scan, onGoTab }: { scan: ScanResult; onGoTab: (t: 
       }
     >
       {targets.length === 0 ? (
-        <CardEmpty icon={CheckCircle2} text="No vulnerable packages — nothing to remediate." />
+        <CardEmpty icon={CheckCircle2} text="No vulnerable packages – nothing to remediate." />
       ) : (
         <ol className="space-y-2.5">
           {targets.map((t, i) => (
@@ -1529,7 +1533,7 @@ function CountBadge({ n, sev }: { n: number; sev: Severity }) {
   )
 }
 
-// Section 4 — Vulnerability Distribution (clickable → filtered findings).
+// Section 4 – Vulnerability Distribution (clickable → filtered findings).
 function VulnDistribution({
   findings,
   loading,
@@ -1575,7 +1579,7 @@ function VulnDistribution({
   )
 }
 
-// Section 5 — Project Composition (informational, lower).
+// Section 5 – Project Composition (informational, lower).
 function ProjectComposition({ scan, onGoTab }: { scan: ScanResult; onGoTab: (t: Tab) => void }) {
   const langs = scan.languages.slice().sort((a, b) => b.percent - a.percent)
   return (
@@ -1630,7 +1634,7 @@ function CompTile({
   )
 }
 
-// Section 6 — Provenance (audit info, bottom).
+// Section 6 – Provenance (audit info, bottom).
 function ProvenanceCard({ scan }: { scan: ScanResult }) {
   const m = scan.manifest
   const repro = m.reproScore
@@ -1671,7 +1675,7 @@ function ProvenanceCard({ scan }: { scan: ScanResult }) {
             <Database className="size-3 text-subtlefg" />
             vuln DB
           </span>
-          <span className="truncate font-mono text-xs">{scan.vulnDBSnapshot || '—'}</span>
+          <span className="truncate font-mono text-xs">{scan.vulnDBSnapshot || '–'}</span>
         </div>
         {m.sbomSha256 && (
           <div className="flex items-center justify-between gap-3 border-b border-border/60 pb-1.5">
@@ -1740,11 +1744,11 @@ function FindingsTab({
   if (findings === null) return <Spinner label="Loading findings…" />
 
   // Separate actionable third-party findings from first-party historical advisories
-  // — the table shows only actionable findings.
+  // – the table shows only actionable findings.
   const thirdParty = findings.filter((f) => f.class !== 'first_party_historical')
   const historical = findings.filter((f) => f.class === 'first_party_historical')
   const available = new Set(thirdParty.map((f) => f.severity))
-  // The Kinds present — the Kind filter only appears when there's more than one to choose from.
+  // The Kinds present – the Kind filter only appears when there's more than one to choose from.
   const kinds = Array.from(new Set(thirdParty.map((f) => f.kind).filter(Boolean)))
   // findings arrive already risk-ordered (KEV -> EPSS x CVSS) from the API.
   const rows = thirdParty.filter(
@@ -1768,7 +1772,7 @@ function FindingsTab({
           {historical.length > 0 && (
             <span
               className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs text-mutedfg"
-              title="Advisories matched against the project's own unversioned modules — cannot be confirmed, excluded from remediation."
+              title="Advisories matched against the project's own unversioned modules – cannot be confirmed, excluded from remediation."
             >
               <FileClock className="size-3.5" />
               {historical.length} historical
@@ -1906,7 +1910,7 @@ function frameworkShort(framework: string): string {
 }
 
 // ComplianceChips lists the curated regulatory/standard controls a finding's CWE maps to.
-// Deterministic, server-computed reference data (compliance.ControlsFor) — advisory context only,
+// Deterministic, server-computed reference data (compliance.ControlsFor) – advisory context only,
 // never a gate. Renders nothing when the CWE maps to no controls (the common case for non-code kinds).
 function ComplianceChips({ controls }: { controls: Finding['complianceControls'] }) {
   if (!controls || controls.length === 0) return null
@@ -1930,7 +1934,7 @@ function ComplianceChips({ controls }: { controls: Finding['complianceControls']
 }
 
 // JudgmentStateBadge shows a judgment's lifecycle state (proposed = unverified AI output, confirmed
-// = human-ratified, refuted = a verifier rejected it) as a text+color chip — never color alone.
+// = human-ratified, refuted = a verifier rejected it) as a text+color chip – never color alone.
 function JudgmentStateBadge({ state }: { state: string }) {
   const tone =
     state === 'confirmed'
@@ -1945,7 +1949,7 @@ function JudgmentStateBadge({ state }: { state: string }) {
   )
 }
 
-// RiskNarrative (ungated) explains a finding's computed priority via closed driver tokens —
+// RiskNarrative (ungated) explains a finding's computed priority via closed driver tokens –
 // never free prose (R8); the priority mirrors the Go-computed value.
 function RiskNarrative({ j }: { j: Judgment }) {
   const c = j.claim as Partial<RiskNarrativeClaim>
@@ -1974,7 +1978,7 @@ function RiskNarrative({ j }: { j: Judgment }) {
   )
 }
 
-// Critique (gated) is an adversarial review of a finding — verdict + a closed driver token +
+// Critique (gated) is an adversarial review of a finding – verdict + a closed driver token +
 // confidence. A confirmed "refuted" critique is what drives the suspected-FP flag on the list.
 function Critique({ j }: { j: Judgment }) {
   const c = j.claim as Partial<CritiqueClaim>
@@ -2036,7 +2040,7 @@ function Reachability({ j }: { j: Judgment }) {
 
 // ExplainJudgments surfaces the read-side "explain & advise" analysis judgments for a finding:
 // the risk narrative, adversarial critiques, and the reachability verdict (AI-proposed or deterministic).
-// Self-contained, best-effort fetch — it NEVER blocks or errors the finding detail (judgments disabled /
+// Self-contained, best-effort fetch – it NEVER blocks or errors the finding detail (judgments disabled /
 // load failure / none ⇒ renders nothing). The state badge keeps a "proposed" (unverified) judgment
 // visibly distinct from a human-ratified or deterministically-proven one.
 function ExplainJudgments({ engagementId, findingId }: { engagementId: string; findingId: string }) {
@@ -2111,12 +2115,12 @@ function FindingDetail({
       {vuln ? (
         <>
           <div className="flex flex-wrap gap-x-6 gap-y-1.5 font-mono text-xs">
-            <DetailKV label="CVSS" value={vuln.cvssScore > 0 ? vuln.cvssScore.toFixed(1) : '—'} />
-            <DetailKV label="EPSS" value={vuln.epss > 0 ? `${(vuln.epss * 100).toFixed(1)}%` : '—'} />
+            <DetailKV label="CVSS" value={vuln.cvssScore > 0 ? vuln.cvssScore.toFixed(1) : '–'} />
+            <DetailKV label="EPSS" value={vuln.epss > 0 ? `${(vuln.epss * 100).toFixed(1)}%` : '–'} />
             <DetailKV label="installed" value={`${vuln.component}@${vuln.version}`} />
             <DetailKV
               label="fixed in"
-              value={vuln.fixedVersion || '—'}
+              value={vuln.fixedVersion || '–'}
               valueClass={vuln.fixedVersion ? 'text-accent' : 'text-subtlefg'}
             />
           </div>
@@ -2191,7 +2195,7 @@ function EvidenceGate({
       setOpen(false)
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
-        setErr('This finding changed — reloading.')
+        setErr('This finding changed – reloading.')
         onReload()
       } else {
         setErr(e instanceof ApiError ? e.message : 'Verify failed')
@@ -2211,7 +2215,7 @@ function EvidenceGate({
             <ShieldQuestion className="size-4 text-medium" />
           )}
           <span className={cn('font-medium', proven ? 'text-accent' : 'text-medium')}>
-            {proven ? 'Verified — reportable' : 'Unproven — not reportable'}
+            {proven ? 'Verified – reportable' : 'Unproven – not reportable'}
           </span>
         </span>
         <DetailKV label="evidence" value={`${finding.evidenceScore}/${EVIDENCE_BAR}`} valueClass="font-mono tabular-nums" />
@@ -2326,7 +2330,7 @@ function FindingStatusControl({
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
         setNote('conflict')
-        onReload() // someone else moved it — pull the latest
+        onReload() // someone else moved it – pull the latest
       } else {
         setNote('failed')
       }
@@ -2375,17 +2379,17 @@ function ComponentsTab({ scan }: { scan: ScanResult | null }) {
           {
             header: 'Version',
             className: 'w-28 font-mono text-xs tabular-nums text-mutedfg',
-            cell: (c) => c.version || '—',
+            cell: (c) => c.version || '–',
           },
           {
             header: 'License',
             className: 'w-44 text-xs text-mutedfg',
             cell: (c) =>
               c.licenses.length === 0
-                ? '—'
-                : c.licenses.map((l) => l.spdxId || l.name).filter(Boolean).join(', ') || '—',
+                ? '–'
+                : c.licenses.map((l) => l.spdxId || l.name).filter(Boolean).join(', ') || '–',
           },
-          { header: 'PURL', className: 'flex-1 font-mono text-xs text-subtlefg', cell: (c) => c.purl || '—' },
+          { header: 'PURL', className: 'flex-1 font-mono text-xs text-subtlefg', cell: (c) => c.purl || '–' },
         ]}
       />
     </Card>
@@ -2417,8 +2421,8 @@ function packageLocationMap(components: ScanResult['components']): Map<string, s
 }
 
 // countVulnerabilityFindings is the TRUE finding count the table renders: every advisory
-// (CVE/GHSA/OSV — not just CVE) counted once per affected package@version per manifest
-// location. This matches the rows on screen — not distinct packages, not distinct CVE ids.
+// (CVE/GHSA/OSV – not just CVE) counted once per affected package@version per manifest
+// location. This matches the rows on screen – not distinct packages, not distinct CVE ids.
 function countVulnerabilityFindings(vulns: Vulnerability[], locations: Map<string, string[]>): number {
   let n = 0
   for (const v of vulns) {
@@ -2563,7 +2567,7 @@ function dependencyPathToRoot(dependencies: ScanResult['dependencies'], target: 
 function buildVulnerabilityDisplayRows(vulns: Vulnerability[], packageLocations: Map<string, string[]>): VulnerabilityDisplayRow[] {
   // Group rows by package, ordering packages (and CVEs within a package) by their FIRST
   // appearance in the already-risk-ordered (KEV -> EPSS x CVSS) input. Never re-rank by raw
-  // CVSS severity — that would violate the risk-priority invariant.
+  // CVSS severity – that would violate the risk-priority invariant.
   const packageOrder = new Map<string, number>()
   const cveOrder = new Map<string, number>()
   vulns.forEach((vuln, i) => {
@@ -2604,7 +2608,7 @@ function buildVulnerabilityDisplayRows(vulns: Vulnerability[], packageLocations:
     const cveDelta =
       (cveOrder.get(`${a.component}\x00${a.cve}`) ?? 0) - (cveOrder.get(`${b.component}\x00${b.cve}`) ?? 0)
     if (cveDelta !== 0) return cveDelta
-    // same CVE expanded across install paths/locations — stable, deterministic tiebreak
+    // same CVE expanded across install paths/locations – stable, deterministic tiebreak
     return a.installed.localeCompare(b.installed) || a.location.localeCompare(b.location)
   })
 
@@ -2641,7 +2645,7 @@ function VulnsTab({ scan }: { scan: ScanResult | null }) {
   )
   const shownPackages = new Set(displayRows.map((row) => packageVersionKey(row.component, row.installed))).size
   // Counts MUST equal the rows actually rendered: every advisory×package×location (incl.
-  // non-CVE advisories), not distinct CVE ids — otherwise the headline undercounts the table.
+  // non-CVE advisories), not distinct CVE ids – otherwise the headline undercounts the table.
   const shownAdvisories = displayRows.length
   const totalAdvisories = allSeverityDisplayRows.length
   const vulnColumns = useMemo<Column<VulnerabilityDisplayRow>[]>(
@@ -2698,7 +2702,7 @@ function VulnsTab({ scan }: { scan: ScanResult | null }) {
         header: 'Fixed Version',
         className: 'w-32 font-mono text-xs',
         cell: (row) =>
-          row.fixedVersion ? <span className="text-accent">{row.fixedVersion}</span> : <span className="text-subtlefg">—</span>,
+          row.fixedVersion ? <span className="text-accent">{row.fixedVersion}</span> : <span className="text-subtlefg">–</span>,
       },
       {
         header: 'Source / Path',
@@ -2807,7 +2811,7 @@ interface LicenseDisplayRow {
   licenses: string[]
   categories: string[]
   // entries = the package's licenses kept SEPARATE (dual/multi-license packages are a
-  // choice/OR, shown as one chip each with its own severity — not collapsed into one row).
+  // choice/OR, shown as one chip each with its own severity – not collapsed into one row).
   entries: LicenseEntry[]
   severity: Severity
   location: string
@@ -2841,7 +2845,7 @@ function licenseSeverity(category: string): Severity {
 }
 
 // LicenseChipStack renders a package's licenses (or their severities) as one chip per
-// entry, stacked vertically and coloured by each license's own severity — so a dual/multi-
+// entry, stacked vertically and coloured by each license's own severity – so a dual/multi-
 // license package reads as separate choices (OR), aligned across the License/Severity columns.
 function LicenseChipStack({
   entries,
@@ -2922,10 +2926,10 @@ function buildLicenseDisplayRows(
     const path = dependencyPathToRoot(dependencies, id)
     const via = path.length >= 2 ? shortPkg(path[path.length - 2]) : ''
     const inferredDirect = path.length === 1
-    const rowKey = `${component?.name || componentName || '—'}\x00${component?.version ?? ''}\x00${component?.location ?? ''}`
+    const rowKey = `${component?.name || componentName || '–'}\x00${component?.version ?? ''}\x00${component?.location ?? ''}`
     const existing = byPackage.get(rowKey) ?? {
       key: rowKey,
-      component: component?.name || componentName || '—',
+      component: component?.name || componentName || '–',
       version: component?.version ?? '',
       licenses: [],
       categories: [],
@@ -3018,7 +3022,7 @@ function LicensesTab({ scan }: { scan: ScanResult | null }) {
     {
       header: 'License',
       className: 'w-72 font-mono text-xs text-foreground',
-      // Multi-license packages are a CHOICE (OR) — show one chip per license (coloured by
+      // Multi-license packages are a CHOICE (OR) – show one chip per license (coloured by
       // its own severity), not a collapsed "A AND B" string.
       cell: (row) => <LicenseChipStack entries={row.entries} render={(e) => e.license} title={(e) => e.license} />,
     },
@@ -3073,7 +3077,7 @@ function LicensesTab({ scan }: { scan: ScanResult | null }) {
         <EmptyState
           icon={Scale}
           title="No licenses classified"
-          hint="No license metadata resolved for these packages — see coverage above."
+          hint="No license metadata resolved for these packages – see coverage above."
         />
       ) : (
         <Card bodyClass="p-0">
@@ -3163,7 +3167,7 @@ const SCOPE_LABEL: Record<string, string> = {
   fixture: 'fixture',
   benchmark: 'bench',
   documentation: 'docs',
-  unknown: '—',
+  unknown: '–',
 }
 
 // ScopeBadge shows where the component lives; background scopes are de-emphasized.
@@ -3176,9 +3180,9 @@ function ScopeBadge({ scope }: { scope: string }) {
   )
 }
 
-// DetectedBy renders the detection sources — OSV, Grype, or both.
+// DetectedBy renders the detection sources – OSV, Grype, or both.
 function DetectedBy({ sources }: { sources: string[] }) {
-  if (!sources || sources.length === 0) return <span className="text-subtlefg">—</span>
+  if (!sources || sources.length === 0) return <span className="text-subtlefg">–</span>
   return (
     <div className="flex flex-wrap gap-1">
       {sources.map((s) => (
@@ -3204,7 +3208,7 @@ const CONFIDENCE_LABEL: Record<string, string> = {
 }
 
 function ConfidenceBadge({ confidence }: { confidence: string }) {
-  if (!confidence) return <span className="text-subtlefg">—</span>
+  if (!confidence) return <span className="text-subtlefg">–</span>
   const tone =
     confidence === 'very_high'
       ? 'bg-accent/10 text-accent ring-accent/25'
@@ -3220,7 +3224,7 @@ function ConfidenceBadge({ confidence }: { confidence: string }) {
   )
 }
 
-// KindBadge labels a finding's Kind — shown in the list for the non-SCA kinds (sast,
+// KindBadge labels a finding's Kind – shown in the list for the non-SCA kinds (sast,
 // exploitation, threat, hypothesis, recon, manual) where the provenance is worth surfacing.
 function KindBadge({ kind }: { kind: string }) {
   return (
@@ -3295,7 +3299,7 @@ function countEdges(scan: ScanResult): number {
 }
 
 function fmtDuration(start: string | null, end: string | null): string {
-  if (!start) return '—'
+  if (!start) return '–'
   const s = new Date(start).getTime()
   const e = end ? new Date(end).getTime() : Date.now()
   const sec = Math.max(0, Math.round((e - s) / 1000))
@@ -3305,7 +3309,7 @@ function fmtDuration(start: string | null, end: string | null): string {
 }
 
 function fmtWindow(from: string | null, to: string | null): string {
-  const f = from ? new Date(from).toLocaleDateString() : '—'
+  const f = from ? new Date(from).toLocaleDateString() : '–'
   const t = to ? new Date(to).toLocaleDateString() : 'open'
   return `${f} → ${t}`
 }
@@ -3442,7 +3446,7 @@ function ReconLauncher({ eng, tools, onLaunched }: { eng: Engagement; tools: Rec
             }))}
           />
         </Field>
-        <Field label="In-scope target" hint={targets.length ? undefined : 'No in-scope target matches this tool — add one in Settings'}>
+        <Field label="In-scope target" hint={targets.length ? undefined : 'No in-scope target matches this tool – add one in Settings'}>
           {targets.length > 0 ? (
             <Select
               value={target}
@@ -3457,7 +3461,7 @@ function ReconLauncher({ eng, tools, onLaunched }: { eng: Engagement; tools: Rec
       </div>
       {tool?.capabilitySensitive && (
         <p className="mt-3 flex items-center gap-1.5 text-xs text-medium">
-          <AlertTriangle className="size-3.5" /> {tool.name} uses raw sockets — authorized lab environments only.
+          <AlertTriangle className="size-3.5" /> {tool.name} uses raw sockets – authorized lab environments only.
         </p>
       )}
       {err && (
@@ -3502,7 +3506,7 @@ function ReconContainmentBadge({ posture }: { posture: string }) {
       title="Containment posture this run executed under (sealed into evidence)"
     >
       <Icon className="size-3 shrink-0" aria-hidden />
-      {/* Announce the safe/unsafe state to screen readers — the icon is decorative and the
+      {/* Announce the safe/unsafe state to screen readers – the icon is decorative and the
           posture string alone (e.g. "unsandboxed-dev") carries no semantic severity. */}
       <span className="sr-only">{unsandboxed ? 'Warning, unsandboxed: ' : 'Sandboxed: '}</span>
       <span className="truncate">{posture}</span>
@@ -3742,7 +3746,7 @@ function LifecycleCard({ eng, onUpdated }: { eng: Engagement; onUpdated: (e: Eng
         <StatusPill status={eng.status} />
         <div className="ml-auto flex flex-wrap gap-2">
           {next.length === 0 ? (
-            <span className="text-xs text-subtlefg">Terminal — no further transitions.</span>
+            <span className="text-xs text-subtlefg">Terminal – no further transitions.</span>
           ) : (
             next.map((n) => (
               <Button
@@ -3760,7 +3764,7 @@ function LifecycleCard({ eng, onUpdated }: { eng: Engagement; onUpdated: (e: Eng
       </div>
       <p className="mt-3 text-xs text-subtlefg">
         Completing or archiving an engagement blocks all tool execution. Scope and the authorization window are enforced
-        on every run too — changes here take effect immediately, server-side.
+        on every run too – changes here take effect immediately, server-side.
       </p>
       {err && (
         <div className="mt-3">
@@ -3818,7 +3822,7 @@ function ScopeEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdated: (e: E
       </div>
       <p className="mt-4 text-xs text-subtlefg">
         Host-centric matching: a CIDR contains an IP, <span className="font-mono">*.example.com</span> matches
-        subdomains, URLs match by host. Out-of-scope always wins. The execution gate reads this live — no restart.
+        subdomains, URLs match by host. Out-of-scope always wins. The execution gate reads this live – no restart.
       </p>
       {err && (
         <div className="mt-3">
@@ -3958,7 +3962,7 @@ function WindowEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdated: (e: 
       {clearsWindow && (
         <div className="mt-3 flex items-start gap-2 rounded-lg border border-medium/40 bg-medium/10 p-3 text-xs text-medium">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>Both bounds are empty — saving removes the authorization window (testing allowed at any time).</span>
+          <span>Both bounds are empty – saving removes the authorization window (testing allowed at any time).</span>
         </div>
       )}
       {err && (
@@ -4050,7 +4054,7 @@ function RoeEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdated: (e: Eng
             <div className="mt-2 flex items-start gap-2 rounded-lg border border-medium/40 bg-medium/10 p-3 text-xs text-medium">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <span>
-                None selected — <strong>all</strong> tool classes are allowed. Select one or more to restrict execution.
+                None selected – <strong>all</strong> tool classes are allowed. Select one or more to restrict execution.
               </span>
             </div>
           ) : (
@@ -4177,7 +4181,7 @@ function EvidenceIntegrity({ ledger }: { ledger: EvidenceLedger }) {
           {ledger.verified} hash-chained link{ledger.verified === 1 ? '' : 's'} verified.{' '}
           {intact
             ? 'Each link binds to the previous, so any edit, insertion, or removal is detectable.'
-            : ledger.error || 'The chain failed verification — the report path is blocked.'}
+            : ledger.error || 'The chain failed verification – the report path is blocked.'}
         </p>
       </div>
     </div>
@@ -4278,8 +4282,8 @@ function EvidenceChain({ engagementId, items }: { engagementId: string; items: E
           >
             <span className="w-6 shrink-0 text-center font-mono text-xs text-subtlefg">{i + 1}</span>
             <Pill className="uppercase">{it.kind.replace('_', ' ')}</Pill>
-            <span className="text-xs text-mutedfg">{it.createdAt ? new Date(it.createdAt).toLocaleString() : '—'}</span>
-            <span className="text-xs text-subtlefg">{it.createdBy || '—'}</span>
+            <span className="text-xs text-mutedfg">{it.createdAt ? new Date(it.createdAt).toLocaleString() : '–'}</span>
+            <span className="text-xs text-subtlefg">{it.createdBy || '–'}</span>
             <span className="flex-1" />
             <span className="font-mono text-[11px] text-subtlefg" title={it.hash}>
               {it.hash.slice(0, 12)}
@@ -4310,7 +4314,7 @@ function ArtifactDownload({ engagementId, item }: { engagementId: string; item: 
     <button
       onClick={dl}
       disabled={busy}
-      title={failed ? 'Download failed — the artifact may be tampered' : 'Download artifact'}
+      title={failed ? 'Download failed – the artifact may be tampered' : 'Download artifact'}
       className={cn(
         'inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40',
         failed ? 'text-critical' : 'text-branddim hover:bg-elevated',
@@ -4442,7 +4446,7 @@ function NewFindingForm({ engagementId, onCreated, onCancel }: { engagementId: s
     >
       <div className="space-y-4">
         {writeups.length > 0 && (
-          <Field label="Start from library" hint="Optional — prefills the fields below with a reusable writeup">
+          <Field label="Start from library" hint="Optional – prefills the fields below with a reusable writeup">
             <Select
               value={writeupId}
               onValueChange={applyWriteup}
@@ -4624,12 +4628,12 @@ function FindingsBoard({
               <span className="font-mono text-xs tabular-nums text-subtlefg">{col.length}</span>
             </div>
             <div className="space-y-2 p-2">
-              {col.length === 0 && <p className="px-1 py-3 text-center text-xs text-subtlefg">—</p>}
+              {col.length === 0 && <p className="px-1 py-3 text-center text-xs text-subtlefg">–</p>}
               {col.slice(0, 25).map((f) => (
                 <BoardCard key={f.id} finding={f} engagementId={engagementId} onUpdated={onUpdated} onReload={onReload} />
               ))}
               {col.length > 25 && (
-                <p className="px-1 py-2 text-center text-xs text-subtlefg">+{col.length - 25} more — switch to Table view</p>
+                <p className="px-1 py-2 text-center text-xs text-subtlefg">+{col.length - 25} more – switch to Table view</p>
               )}
             </div>
           </div>
@@ -4741,7 +4745,7 @@ function RetestPanel({ finding, engagementId, onUpdated }: { finding: Finding; e
       setNote('')
       onUpdated(updated)
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) setErr('Finding changed — reload and retry.')
+      if (e instanceof ApiError && e.status === 409) setErr('Finding changed – reload and retry.')
       else setErr(e instanceof Error ? e.message : 'Failed to record retest')
     } finally {
       setBusy(false)
@@ -4759,7 +4763,7 @@ function RetestPanel({ finding, engagementId, onUpdated }: { finding: Finding; e
             <li key={r.id} className="flex items-center gap-2 text-xs">
               <RetestOutcomeBadge outcome={r.outcome} />
               <span className="text-mutedfg">{r.tester}</span>
-              {r.note && <span className="truncate text-subtlefg">— {r.note}</span>}
+              {r.note && <span className="truncate text-subtlefg">– {r.note}</span>}
               <span className="ml-auto shrink-0 tabular-nums text-subtlefg">{r.at ? new Date(r.at).toLocaleDateString() : ''}</span>
             </li>
           ))}

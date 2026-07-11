@@ -1,10 +1,10 @@
 // DOCX report renderer. Consultancies live in Word, so the report ships as a real
-// OOXML.docx — hand-built (no third-party DOCX dependency, matching the
+// OOXML.docx – hand-built (no third-party DOCX dependency, matching the
 // "light pure-Go" preference) so we fully control the bytes.
 //
 // Determinism (reproducible-report / chain-of-custody): the document content is a pure
 // function of ports.ReportDocument, every ZIP entry uses a FIXED modification time,
-// and the parts are written in a FIXED order — so identical engagement data yields
+// and the parts are written in a FIXED order – so identical engagement data yields
 // byte-identical output and a reproducible SHA-256 seal. All dynamic text is
 // XML-escaped (operator-authored finding text is untrusted).
 package report
@@ -26,14 +26,14 @@ import (
 )
 
 // EMU (English Metric Units) per pixel at 96 DPI, and the printable content width for
-// a Letter page with 1in margins — used to size inline images deterministically.
+// a Letter page with 1in margins – used to size inline images deterministically.
 const (
 	emuPerPx        = 9525
 	contentWidthEMU = 5943600 // 6.5in * 914400 EMU/in
 )
 
 // docxEpoch pins every ZIP entry's timestamp so the archive bytes don't vary with
-// wall-clock time — the report's own GeneratedAt lives in the document text.
+// wall-clock time – the report's own GeneratedAt lives in the document text.
 var docxEpoch = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // DOCXRenderer implements ports.DocRenderer for Word (.docx) output.
@@ -119,7 +119,7 @@ func (DOCXRenderer) Render(_ context.Context, doc ports.ReportDocument) ([]byte,
 			return nil, fmt.Errorf("docx write %s: %w", p.name, err)
 		}
 	}
-	// Media parts are already-compressed image bytes — Store (no deflate); fixed order
+	// Media parts are already-compressed image bytes – Store (no deflate); fixed order
 	// + fixed modtime keep the archive byte-deterministic.
 	for _, im := range imgs {
 		hdr := &zip.FileHeader{Name: im.partName, Method: zip.Store, Modified: docxEpoch}

@@ -10,9 +10,9 @@ import (
 )
 
 // HypothesisInput is the content for an attack-chain HYPOTHESIS finding: the AI's narrative that a
-// SET of existing findings chain into an attack path. It is a PROPOSAL — non-publishable until a distinct
+// SET of existing findings chain into an attack path. It is a PROPOSAL – non-publishable until a distinct
 // human verifies it (evidence-gated like an exploitation finding). The constituent finding ids are the chain
-// being hypothesized; building the hypothesis NEVER modifies or merges them — it only NAMES them.
+// being hypothesized; building the hypothesis NEVER modifies or merges them – it only NAMES them.
 type HypothesisInput struct {
 	Title          string
 	Description    string
@@ -21,16 +21,16 @@ type HypothesisInput struct {
 }
 
 // NewHypothesis builds an AI-proposed attack-chain hypothesis finding (Kind=hypothesis). Unlike a threat
-// projection (ungated — its evidence gate ran at the judgment layer), a hypothesis is the agent's UNPROVEN
+// projection (ungated – its evidence gate ran at the judgment layer), a hypothesis is the agent's UNPROVEN
 // claim, so ProposedBy is SET → it RequiresEvidenceGate and starts at score 0 → it is non-publishable: it can
 // reach the report only once a DISTINCT human raises its EvidenceScore to the bar (>= EvidenceThreshold) via
 // the standard finding verify path (exploitation.Service.Confirm → ApplyVerdict, which gates on
 // RequiresEvidenceGate so it serves a hypothesis too); the agent can never raise its own score (SoD). Still
-// pending: a CREATE path — the agent propose tool that calls NewHypothesis — until which nothing
+// pending: a CREATE path – the agent propose tool that calls NewHypothesis – until which nothing
 // produces a hypothesis to verify; that tool MUST redact the prose at the agent edge (like propose_finding).
 // The constituent finding ids are recorded in the TEMPLATED description
 // (Finding has no structured cross-reference field; folding them in keeps the chain self-contained and the
-// report path templated) — the constructor never loads or mutates the constituent findings (no auto-merge).
+// report path templated) – the constructor never loads or mutates the constituent findings (no auto-merge).
 // Dedup is by the sorted constituent set, so re-proposing the same chain updates in place.
 func NewHypothesis(id, engagementID shared.ID, in HypothesisInput, proposer string, now time.Time) (Finding, error) {
 	title := strings.TrimSpace(in.Title)

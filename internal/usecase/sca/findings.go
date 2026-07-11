@@ -60,7 +60,7 @@ func countUnfixedSuppressed(vulns []vulnerability.Vulnerability, minSeverity sha
 
 // layerNote renders the container-image layer attribution for a vuln (Epic D): which layer
 // introduced it and whether that layer belongs to the base image (OS/distro rootfs) vs an
-// application layer added on top — so a report tells an operator where to remediate (the base
+// application layer added on top – so a report tells an operator where to remediate (the base
 // image vs. their own Dockerfile/app deps). Empty for non-image scans (no layer attributed).
 func layerNote(v vulnerability.Vulnerability) string {
 	if v.LayerID == "" || v.LayerIndex == nil {
@@ -106,7 +106,7 @@ func buildFindings(engagementID shared.ID, res *ScanResult, now time.Time, minSe
 
 	for _, v := range res.Vulnerabilities {
 		// An advisory matched to a component with no resolvable version (the project's
-		// own first-party modules scanned from source) CANNOT be confirmed — there is
+		// own first-party modules scanned from source) CANNOT be confirmed – there is
 		// no version to compare to the affected range. These are recorded as
 		// first-party historical advisories (informational), never as actionable
 		// third-party findings, so they never pollute remediation queues or
@@ -116,7 +116,7 @@ func buildFindings(engagementID shared.ID, res *ScanResult, now time.Time, minSe
 			class = finding.ClassFirstPartyHistoric
 		}
 		// Severity threshold applies to ACTIONABLE third-party findings only (an unversioned /
-		// first-party-historic advisory and an unknown-severity advisory are always promoted) —
+		// first-party-historic advisory and an unknown-severity advisory are always promoted) –
 		// the same predicate countBelowThreshold reports on, so the two can never disagree.
 		if suppressedByFloor(v, min) {
 			continue
@@ -413,14 +413,14 @@ func findingID(engagementID shared.ID, dedupKey string) shared.ID {
 
 // vulnDedupKey is the idempotency key for a vuln-derived finding (advisory+component+version). It is the
 // single source of truth shared by buildFindings (which sets it as the finding's DedupKey) and
-// reachabilitySubjects (which joins back to it) — so the reachability subject's FindingID provably matches
+// reachabilitySubjects (which joins back to it) – so the reachability subject's FindingID provably matches
 // a persisted finding and the two can never drift.
 func vulnDedupKey(v vulnerability.Vulnerability) string {
 	return vulnerability.DedupKey(v.ID, v.Component, v.Version)
 }
 
 // SuppressedFinding marks a finding a .synapseignore rule accepts. CRUCIALLY the finding STAYS in the
-// actionable Findings set — reported, persisted, and sealed into the evidence chain like any other, so a
+// actionable Findings set – reported, persisted, and sealed into the evidence chain like any other, so a
 // suppression can never hide a finding from a deliverable or the tamper-evident record. This record only
 // ADDS an accepted-risk annotation (which rule matched, and why) that a CI --fail-on gate consults to
 // exempt the finding. Governance over Trivy: acceptance suppresses the GATE, not the finding's visibility.
@@ -436,7 +436,7 @@ type SuppressedFinding struct {
 // they get fixed. A finding matches on its PRIMARY advisory id (its vuln's CVE/GHSA, as printed in the
 // report) or its exact dedup key, so a team can suppress by CVE (the common case) or pin a specific
 // finding. Non-primary aliases are not retained on the vuln, so a rule should list the id as reported.
-// Deterministic; nothing is removed, so nothing can be hidden — only the CI gate is exempted.
+// Deterministic; nothing is removed, so nothing can be hidden – only the CI gate is exempted.
 func applySuppressions(res *ScanResult, set ignore.Set, now time.Time) {
 	if res == nil || len(set) == 0 {
 		return
@@ -498,7 +498,7 @@ func applyVEX(res *ScanResult, doc vex.Document) {
 
 // NeedsVerifyFinding marks a vuln finding the precise detection-priority quarantined as lower-confidence
 // (a single, uncorroborated detection source, and not KEV). The finding STAYS in Findings (reported +
-// evidence-sealed); this only labels it needs-verify and exempts it from the --fail-on gate — the
+// evidence-sealed); this only labels it needs-verify and exempts it from the --fail-on gate – the
 // "quarantine into a verify queue, don't drop" alternative to Trivy dropping imprecise matches.
 type NeedsVerifyFinding struct {
 	DedupKey string `json:"dedup_key"`
@@ -509,7 +509,7 @@ type NeedsVerifyFinding struct {
 // applyDetectionPriority, in precise mode, quarantines single-source (uncorroborated) non-KEV vuln findings
 // into res.NeedsVerification WITHOUT removing them. KEV (actively exploited), multi-source (corroborated),
 // and non-vuln findings (deterministic SAST/secret/misconfig/license) always stay actionable. Comprehensive
-// mode is a no-op. Deterministic; nothing is removed, so nothing is hidden — only the gate is exempted.
+// mode is a no-op. Deterministic; nothing is removed, so nothing is hidden – only the gate is exempted.
 func applyDetectionPriority(res *ScanResult, priority string) {
 	if res == nil || priority != DetectionPrecise {
 		return
@@ -524,7 +524,7 @@ func applyDetectionPriority(res *ScanResult, priority string) {
 		}
 		res.NeedsVerification = append(res.NeedsVerification, NeedsVerifyFinding{
 			DedupKey: f.DedupKey, Title: f.Title,
-			Reason: "≤1 detection source (uncorroborated) — verify before acting",
+			Reason: "≤1 detection source (uncorroborated) – verify before acting",
 		})
 	}
 }
@@ -557,7 +557,7 @@ func (r *ScanResult) SuppressedKeys() map[string]bool {
 // to an advisory carrying affected symbols becomes a subject keyed by the real finding id. Joining via the
 // finding's DedupKey (the "vuln:id:component:version" key buildFindings derives) guarantees the subject's
 // FindingID matches a persisted finding, and only advisories with symbols (the Go vuln DB form) are worth
-// a symbol-level reachability query — non-symbol findings are skipped.
+// a symbol-level reachability query – non-symbol findings are skipped.
 func reachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vulnerability) []ports.ReachabilitySubject {
 	byDedup := make(map[string]vulnerability.Vulnerability, len(vulns))
 	for _, v := range vulns {
@@ -572,7 +572,7 @@ func reachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vuln
 	return subs
 }
 
-// detectionSourceNames returns the names of the run detection sources — the cross-check "run set",
+// detectionSourceNames returns the names of the run detection sources – the cross-check "run set",
 // so a source that ran but reported nothing for a vuln is correctly flagged as a disagreement.
 func detectionSourceNames(sources []ports.DetectionSource) []string {
 	out := make([]string, 0, len(sources))

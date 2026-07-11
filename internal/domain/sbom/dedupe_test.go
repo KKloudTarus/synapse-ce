@@ -3,7 +3,7 @@ package sbom
 import "testing"
 
 func TestDedupeComponentsUnionsLicenses(t *testing.T) {
-	// The reported bug: Syft emits the same package twice — one entry with the resolved license,
+	// The reported bug: Syft emits the same package twice – one entry with the resolved license,
 	// one with none. After dedup there must be a SINGLE component carrying the license (no phantom
 	// license-less twin that reads as UNKNOWN downstream).
 	in := []Component{
@@ -30,7 +30,7 @@ func TestDedupeComponentsUnionsLicenses(t *testing.T) {
 
 func TestDedupeComponentsPreservesSupplierAndChecksums(t *testing.T) {
 	// A Syft phantom-twin split: the licensed entry carries no integrity/supplier, the other twin carries
-	// the only checksum + supplier. The merge must keep ALL of it — dropping the checksum would under-count
+	// the only checksum + supplier. The merge must keep ALL of it – dropping the checksum would under-count
 	// the SBOM quality score.
 	in := []Component{
 		{Name: "lodash", Version: "4.17.21", PURL: "pkg:npm/lodash@4.17.21", Licenses: []License{{SPDXID: "MIT"}}},

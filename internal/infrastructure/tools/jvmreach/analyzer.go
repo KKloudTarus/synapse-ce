@@ -49,7 +49,7 @@ func newGraph() *graph {
 // Unreferenced. Components whose classes were not found (jar absent, non-JVM) are left unknown.
 //
 // It is BEST-EFFORT and CONSERVATIVE: if no application root classes are found (source not built), it
-// tags NOTHING and returns 0 — an "unreferenced" verdict is never emitted without app roots to anchor
+// tags NOTHING and returns 0 – an "unreferenced" verdict is never emitted without app roots to anchor
 // it, so a not-built project can never be mislabeled as having dead dependencies. Non-nil error only on
 // a walk that could not start; a per-file parse error is skipped.
 func (a *Analyzer) Analyze(ctx context.Context, wsDir string, comps []sbom.Component) (int, error) {
@@ -162,7 +162,7 @@ func scanWorkspace(ctx context.Context, wsDir string, g *graph) {
 	})
 }
 
-// isAppClassPath reports whether a loose.class file is application (first-party) compiled output — under
+// isAppClassPath reports whether a loose.class file is application (first-party) compiled output – under
 // a "classes" build-output dir (Maven target/classes, Gradle build/classes/java/main), excluding tests.
 func isAppClassPath(p string) bool {
 	segs := strings.Split(filepath.ToSlash(p), "/")
@@ -229,7 +229,7 @@ func addClass(g *graph, data []byte, coord string, app bool) {
 	}
 	g.classes++
 	// First-writer-wins on a duplicate internal class name (common with fat-jar shading/relocation): the
-	// first copy's references define the edges, but every owning coordinate still claims the class below —
+	// first copy's references define the edges, but every owning coordinate still claims the class below –
 	// so a shaded duplicate may attribute reachability to more than one component. Acceptable for a coarse,
 	// deprioritize-only signal (it can only ever mark MORE components reachable, never fewer / never suppress).
 	if _, ok := g.refs[name]; !ok {

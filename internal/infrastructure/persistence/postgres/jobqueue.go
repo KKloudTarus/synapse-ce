@@ -15,7 +15,7 @@ import (
 
 // JobQueue is the durable ports.JobQueue on PostgreSQL. Claim uses FOR UPDATE
 // SKIP LOCKED so concurrent workers never hand the same job to two claimants, and an
-// expired lease (claimed_until < now) makes a job claimable again — at-least-once
+// expired lease (claimed_until < now) makes a job claimable again – at-least-once
 // delivery with crash recovery.
 type JobQueue struct {
 	pool *pgxpool.Pool
@@ -114,7 +114,7 @@ func (q *JobQueue) Deadletter(ctx context.Context, id string) error {
 	return nil
 }
 
-// Depth counts not-yet-terminal jobs (queued or claimed) — the durable-backpressure
+// Depth counts not-yet-terminal jobs (queued or claimed) – the durable-backpressure
 // admission signal. 'done' and 'failed' are terminal and excluded. Optional kind filter.
 func (q *JobQueue) Depth(ctx context.Context, kinds ...string) (int, error) {
 	query := `SELECT count(*) FROM jobs WHERE status IN ('queued','claimed')`

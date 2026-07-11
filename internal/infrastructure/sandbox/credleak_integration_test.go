@@ -17,7 +17,7 @@ import (
 )
 
 // TestCredentialLeakChannels behaviorally probes Part 4: a tool that ECHOES an injected
-// secret raw vs base64 vs hex — which channels does the redaction chokepoint catch?
+// secret raw vs base64 vs hex – which channels does the redaction chokepoint catch?
 func TestCredentialLeakChannels(t *testing.T) {
 	for _, b := range []string{"bwrap", "base64", "xxd", "sh"} {
 		if _, err := exec.LookPath(b); err != nil {
@@ -54,7 +54,7 @@ func TestCredentialLeakChannels(t *testing.T) {
 	if rawLeak {
 		t.Errorf("RAW secret leaked into sealed output (redaction should catch exact match)")
 	}
-	// base64/hex leaks are the DOCUMENTED residual — record what actually happens.
+	// base64/hex leaks are the DOCUMENTED residual – record what actually happens.
 	if b64Leak || hexLeak {
 		t.Logf("CONFIRMED residual: encoded secret survives the substring redactor (base64=%v hex=%v)", b64Leak, hexLeak)
 	}

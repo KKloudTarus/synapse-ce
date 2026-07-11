@@ -1,6 +1,6 @@
 // Package vex consumes OpenVEX documents (CRA-aligned): a client hands Synapse a
 // VEX doc asserting the exploitability status of vulnerabilities in their products,
-// and Synapse applies each statement to the matching finding — e.g. not_affected
+// and Synapse applies each statement to the matching finding – e.g. not_affected
 // suppresses it (false positive), fixed marks it remediated. Every applied change is
 // recorded on the append-only audit log. This is the inverse of the
 // OpenVEX the export service emits.
@@ -51,7 +51,7 @@ func (s *Service) Apply(ctx context.Context, actor string, tenantID, engagementI
 		return ApplyResult{}, err
 	}
 	// Confirm the engagement exists AND belongs to the caller's tenant (404 cross-tenant;
-	// defense-in-depth behind the withEngTenant route wrapper — parity with SBOM import).
+	// defense-in-depth behind the withEngTenant route wrapper – parity with SBOM import).
 	if _, err := s.engagements.GetByIDInTenant(ctx, tenantID, engagementID); err != nil {
 		return ApplyResult{}, fmt.Errorf("load engagement: %w", err)
 	}
@@ -65,7 +65,7 @@ func (s *Service) Apply(ctx context.Context, actor string, tenantID, engagementI
 	for _, st := range doc.Statements {
 		target, ok := vexTargetStatus(st.Status)
 		if !ok {
-			continue // a status we don't map (e.g. unknown) — leave findings untouched
+			continue // a status we don't map (e.g. unknown) – leave findings untouched
 		}
 		for i := range findings {
 			f := &findings[i]

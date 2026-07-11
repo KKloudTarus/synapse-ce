@@ -3,7 +3,7 @@ package advisory
 // Advisory is one normalized vulnerability advisory in the OWNED store: a stable id, cross-feed
 // aliases, severity, and the affected packages each with their version ranges / explicit versions. It is
 // the feed-agnostic shape an OSV/CSAF/NVD ingester normalizes into, and the unit the owned matcher +
-// DetectionSource query — so detection runs against our store, not a third-party service.
+// DetectionSource query – so detection runs against our store, not a third-party service.
 type Advisory struct {
 	ID         string            // the advisory's primary id (e.g. "GHSA-…" or "CVE-…")
 	Aliases    []string          // cross-feed ids (CVE/GHSA/…), for reconciliation + reporting
@@ -25,7 +25,7 @@ type AffectedPackage struct {
 
 // Match reports whether the advisory affects (ecosystem, name) at version, and returns the matched block's
 // fixed version. It runs the owned matcher (Affected = explicit-versions OR semver-range) against every
-// affected block for that exact ecosystem+package — so it is a deterministic, third-party-free verdict.
+// affected block for that exact ecosystem+package – so it is a deterministic, third-party-free verdict.
 func (a Advisory) Match(ecosystem, name, version string) (bool, string) {
 	for _, aff := range a.Affected {
 		if aff.Ecosystem != ecosystem || aff.Package != name {

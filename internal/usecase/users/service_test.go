@@ -63,7 +63,7 @@ func TestCreateUserReturnsKeyOnceAndAuthenticates(t *testing.T) {
 		t.Error("only the key HASH must be stored, never the raw key")
 	}
 
-	// The issued key authenticates back to that exact user — distinct attribution.
+	// The issued key authenticates back to that exact user – distinct attribution.
 	got, err := svc.Authenticate(ctx, key)
 	if err != nil {
 		t.Fatalf("authenticate: %v", err)
@@ -78,7 +78,7 @@ func TestCreateUserReturnsKeyOnceAndAuthenticates(t *testing.T) {
 
 // TestCreateUserAssignsTenant covers the activation step (closes the "isolation is inert"
 // gap): a provisioned user is stamped with the assigned tenant, and that tenant survives a
-// re-authenticate round-trip — so the resolved Principal carries it and every read/write the user
+// re-authenticate round-trip – so the resolved Principal carries it and every read/write the user
 // makes is tenant-scoped. The bootstrap admin stays tenant ” (the deliberate single-tenant /
 // default-tenant superadmin), which is the only principal the ” escape hatch is meant for.
 func TestCreateUserAssignsTenant(t *testing.T) {
@@ -119,7 +119,7 @@ func TestBootstrapAdminIdempotentAndAuthenticates(t *testing.T) {
 	if err := svc.EnsureBootstrapAdmin(ctx, "env-token"); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
-	// Idempotent — a second call (e.g. restart) must not error or duplicate.
+	// Idempotent – a second call (e.g. restart) must not error or duplicate.
 	if err := svc.EnsureBootstrapAdmin(ctx, "env-token"); err != nil {
 		t.Fatalf("bootstrap (again): %v", err)
 	}

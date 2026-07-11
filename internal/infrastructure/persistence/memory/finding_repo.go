@@ -45,7 +45,7 @@ func (r *FindingRepository) Upsert(_ context.Context, findings []finding.Finding
 			f.Assignee = existing.Assignee
 			f.Audit.CreatedAt = existing.Audit.CreatedAt
 			f.Version = existing.Version             // version is a triage token; re-scans preserve it
-			f.EvidenceScore = existing.EvidenceScore // moves only via SetEvidenceScore; a re-upsert never changes it — mirrors the postgres ON CONFLICT set
+			f.EvidenceScore = existing.EvidenceScore // moves only via SetEvidenceScore; a re-upsert never changes it – mirrors the postgres ON CONFLICT set
 		} else if f.Version <= 0 {
 			f.Version = 1
 		}

@@ -7,7 +7,7 @@
 // Scope of the guarantee (same as evidence): the attestation proves the head was
 // signed by THIS instance's key (origin / non-repudiation), and the hash chain makes
 // edits/deletions that leave a verifiable suffix detectable. It does NOT, on its own,
-// stop a privileged operator who reforges the whole chain and re-signs — that needs an
+// stop a privileged operator who reforges the whole chain and re-signs – that needs an
 // external anchor (RFC-3161 via ports.TimestampAuthority, wired through SetTimestamper). The
 // signed head is also returned on read so an external party can archive it out-of-band.
 package audit
@@ -62,7 +62,7 @@ func NewService(reader ports.AuditReader) (*Service, error) {
 	return &Service{reader: reader}, nil
 }
 
-// SetSigner enables chain-head attestation. Optional — nil leaves the audit chain
+// SetSigner enables chain-head attestation. Optional – nil leaves the audit chain
 // integrity-only (the same signer the evidence vault uses is wired here for parity).
 func (s *Service) SetSigner(signer ports.ChainSigner) { s.signer = signer }
 

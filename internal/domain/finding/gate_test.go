@@ -3,7 +3,7 @@ package finding
 import "testing"
 
 // TestRequiresEvidenceGate pins the R4 predicate: gate on PROVENANCE (ProposedBy), plus
-// KindExploitation as a defensive belt, normalizing an empty Kind to SCA — and never letting a
+// KindExploitation as a defensive belt, normalizing an empty Kind to SCA – and never letting a
 // missing signal remove the gate.
 func TestRequiresEvidenceGate(t *testing.T) {
 	cases := []struct {

@@ -12,7 +12,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// CycloneDX 1.6 EXPORT document — a pure, deterministic projection of the stored SBOM (templated from data,
+// CycloneDX 1.6 EXPORT document – a pure, deterministic projection of the stored SBOM (templated from data,
 // no LLM), the CycloneDX peer of the SPDX 2.3 / 3.0 exporters. Synapse consumes CycloneDX on import (the
 // cdxBOM/cdxComponent types in sbom_import.go); these cdxOut* types are the distinct EMIT shape, so it emits
 // its own enriched model rather than relaying a generator's bytes.
@@ -42,7 +42,7 @@ type cdxOutComponent struct {
 	Name       string           `json:"name"`
 	Version    string           `json:"version,omitempty"`
 	PURL       string           `json:"purl,omitempty"`
-	Scope      string           `json:"scope,omitempty"` // required|excluded|"" (never optional) — see cdxScope
+	Scope      string           `json:"scope,omitempty"` // required|excluded|"" (never optional) – see cdxScope
 	Supplier   *cdxOutOrg       `json:"supplier,omitempty"`
 	Licenses   []cdxOutLicense  `json:"licenses,omitempty"`
 	Hashes     []cdxOutHash     `json:"hashes,omitempty"`
@@ -55,7 +55,7 @@ type cdxOutOrg struct {
 }
 
 // cdxOutEvidence carries how Synapse identified a component: identity (the coordinate + technique) and
-// occurrences (where it was found). It projects stored facts only — no fabricated signals.
+// occurrences (where it was found). It projects stored facts only – no fabricated signals.
 type cdxOutEvidence struct {
 	Identity    []cdxOutIdentity   `json:"identity,omitempty"`
 	Occurrences []cdxOutOccurrence `json:"occurrences,omitempty"`
@@ -204,7 +204,7 @@ func cdxDependencies(deps []sbom.Dependency, valid map[string]bool) []cdxOutDepe
 
 // cdxScope maps a domain component scope to the CycloneDX component.scope enum. Production code is required
 // (runtime); development and the non-shipping background scopes (test/example/fixture/benchmark/docs) are
-// excluded from the deployed artifact — this lets a consumer deprioritize dev-only vulnerabilities. It is the
+// excluded from the deployed artifact – this lets a consumer deprioritize dev-only vulnerabilities. It is the
 // inverse of the import mapping in sbom.ClassifyScope ("required"->production, "excluded"->development).
 // Unknown/unset yields "" so no scope is asserted.
 func cdxScope(scope string) string {
@@ -218,8 +218,8 @@ func cdxScope(scope string) string {
 	}
 }
 
-// cdxEvidence projects how Synapse identified a component: an occurrence at its Location, and — only for a
-// source-tree component (no container LayerID) with a PURL — a purl identity via the manifest-analysis
+// cdxEvidence projects how Synapse identified a component: an occurrence at its Location, and – only for a
+// source-tree component (no container LayerID) with a PURL – a purl identity via the manifest-analysis
 // technique at full confidence. Every producer sets a source component's Location to the manifest/lockfile it
 // was read from, so the coordinate is a deterministic manifest read (not a guess), which is why confidence is
 // 1. An image-layer component (LayerID set) was cataloged from a layer by other means, so it gets the

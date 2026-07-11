@@ -675,7 +675,7 @@ func TestProposeThreat(t *testing.T) {
 		t.Errorf("bad element_kind: want ErrValidation, got %v", err)
 	}
 
-	// disabled by default (no EnableJudgments) — not advertised, dispatch refused
+	// disabled by default (no EnableJudgments) – not advertised, dispatch refused
 	c2, _ := newCatalog(t, nil, nil, subfinder())
 	for _, ts := range c2.Tools() {
 		if ts.Name == ToolProposeThreat {

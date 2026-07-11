@@ -1,6 +1,6 @@
 // Package jarchecksum captures the artifact SHA-1 of JVM components by hashing the JAR files in the prepared
 // workspace. Syft computes a JAR digest but omits it from its CycloneDX output, so a Syft-produced SBOM
-// carries no checksum for its JAR components — leaving the SBOM checksum quality element at zero and starving
+// carries no checksum for its JAR components – leaving the SBOM checksum quality element at zero and starving
 // JarHashResolver, which needs a SHA-1 as input for shaded-JAR coordinate recovery.
 //
 // This resolver walks the workspace once, streams a SHA-1 over each JAR file (the standard Maven artifact
@@ -45,7 +45,7 @@ func (r *Resolver) Resolve(ctx context.Context, wsDir string, comps []sbom.Compo
 	if strings.TrimSpace(wsDir) == "" {
 		return 0
 	}
-	// Only walk if at least one component actually needs a SHA-1 and looks like a JAR — avoids the file I/O
+	// Only walk if at least one component actually needs a SHA-1 and looks like a JAR – avoids the file I/O
 	// entirely for non-JVM scans.
 	need := false
 	for i := range comps {
@@ -97,7 +97,7 @@ func hashWorkspaceJARs(ctx context.Context, wsDir string) (byName map[string]str
 		if d.IsDir() {
 			return nil
 		}
-		if !d.Type().IsRegular() { // skip symlinks etc. — an untrusted workspace must not hash a link out of tree
+		if !d.Type().IsRegular() { // skip symlinks etc. – an untrusted workspace must not hash a link out of tree
 			return nil
 		}
 		if !isJARName(d.Name()) {

@@ -10,7 +10,7 @@ import (
 
 // Terraform (HCL) misconfiguration checks. Rather than a full HCL evaluator, this tracks the enclosing
 // `resource "TYPE" "NAME"` block by brace depth and matches insecure LITERAL attribute values inside it
-// — the common, high-signal cloud misconfigurations (public storage, world-open security groups,
+// – the common, high-signal cloud misconfigurations (public storage, world-open security groups,
 // disabled encryption, public databases, wildcard IAM, plaintext secrets). Values that come from a
 // variable / interpolation (${...}) are not flagged, keeping false positives low.
 var (
@@ -101,7 +101,7 @@ func filterOutBucketVersioning(in []ports.MisconfigRawFinding) []ports.Misconfig
 	return out
 }
 
-// tfBlockRules applies whole-block "recommended secure setting is missing" rules to a resource block —
+// tfBlockRules applies whole-block "recommended secure setting is missing" rules to a resource block –
 // the posture comprehensive scanners (tfsec/Trivy) use for cloud hardening. A rule fires when a resource
 // of a given type does not contain the attribute that enables the secure behavior.
 func tfBlockRules(rel, resType string, line int, body string) []ports.MisconfigRawFinding {

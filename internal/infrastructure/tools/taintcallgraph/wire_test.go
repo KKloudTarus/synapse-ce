@@ -31,7 +31,7 @@ func TestEncodeParseRoundTrip(t *testing.T) {
 
 func TestEncodeParseEmptyGraph(t *testing.T) {
 	// The load-bearing contract (ports.CallGraphBuilder): a SUCCESSFUL build that reached nothing must
-	// round-trip to a NON-NIL empty Graph + nil error — the "definitive not-reachable" signal, distinct from
+	// round-trip to a NON-NIL empty Graph + nil error – the "definitive not-reachable" signal, distinct from
 	// a build error (no coverage). reachability.Analyze relies on this distinction to avoid false negatives.
 	var buf bytes.Buffer
 	if err := EncodeGraph(&buf, &callgraph.Graph{}); err != nil {

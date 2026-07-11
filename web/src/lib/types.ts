@@ -20,7 +20,7 @@ export interface Blackout {
   to: string // RFC3339
 }
 
-// RoE — rules of engagement the execution gate enforces. Empty
+// RoE – rules of engagement the execution gate enforces. Empty
 // allowedToolClasses means no tool-class restriction (all allowed).
 export interface RoE {
   allowedToolClasses: string[]
@@ -77,7 +77,7 @@ export interface Finding {
 }
 
 // ComplianceControl is one curated control a finding's CWE maps to: the framework, the
-// control/category id, and its title — e.g. { OWASP-2021, A03:2021, Injection }. Deterministic
+// control/category id, and its title – e.g. { OWASP-2021, A03:2021, Injection }. Deterministic
 // reference data from the server's curated table (a lookup, not a model output).
 export interface ComplianceControl {
   framework: string // 'OWASP-2021' | 'PCI-DSS-4.0' | 'ISO-27001-2022'
@@ -90,7 +90,7 @@ export interface ComplianceControl {
 export type JudgmentState = 'proposed' | 'confirmed' | 'refuted'
 
 // RiskNarrativeClaim (ungated): explains a finding's computed priority via closed driver
-// tokens (never free prose, R8) — e.g. ["kev", "epss>0.5", "reachable"].
+// tokens (never free prose, R8) – e.g. ["kev", "epss>0.5", "reachable"].
 export interface RiskNarrativeClaim {
   drivers: string[]
   priority: number // 1..5
@@ -98,7 +98,7 @@ export interface RiskNarrativeClaim {
 
 export type CritiqueVerdict = 'refuted' | 'sound' | 'uncertain'
 
-// CritiqueClaim (gated): an adversarial review of a finding — verdict + a closed driver token.
+// CritiqueClaim (gated): an adversarial review of a finding – verdict + a closed driver token.
 export interface CritiqueClaim {
   verdict: CritiqueVerdict
   driver: string
@@ -113,13 +113,13 @@ export type ReachabilityTier = 'tier-0' | 'tier-1' | 'tier-1.5' | 'tier-2'
 export interface ReachabilityClaim {
   reachable: ReachabilityState
   tier: ReachabilityTier
-  path: string[] // "importPath.Symbol" chain — the call path from an entrypoint to the vulnerable symbol
+  path: string[] // "importPath.Symbol" chain – the call path from an entrypoint to the vulnerable symbol
   confidence: number // 0..100
 }
 
 // Judgment is one AI-proposed, human-ratified analysis over a subject (a finding, a data flow…).
 // Read-only here; proposed = unverified AI output (score 0), confirmed = a distinct human verified
-// (gated) or accepted (ungated) it. The UI labels the state — it never presents a proposal as fact.
+// (gated) or accepted (ungated) it. The UI labels the state – it never presents a proposal as fact.
 export interface Judgment {
   id: string
   engagementId: string
@@ -469,7 +469,7 @@ export interface AgentDecision {
   target?: string
   risk?: string
   decided_by?: string
-  stop_reason?: string // step? no — stop only (goal_reached | max_steps | budget | wall_clock | error | plan_settled)
+  stop_reason?: string // step? no – stop only (goal_reached | max_steps | budget | wall_clock | error | plan_settled)
   reason: { why_tool?: string; why_target?: string; summary?: string }
   refs: { step_hash?: string; admission_hash?: string; intent_hash?: string }
   created_at: string | null
@@ -577,4 +577,58 @@ export interface ThreatModel {
   flows: ThreatFlow[]
   boundaries: TrustBoundary[]
   assets: ThreatAsset[]
+}
+
+// ---- Code quality (Phase 6 dashboard) ----
+
+export interface LanguageInventory {
+  language: string
+  files: number
+  codeLines: number
+  commentLines: number
+  blankLines: number
+  functions: number
+  functionsKnown: boolean
+}
+
+export interface DuplicationOccurrence {
+  file: string
+  startLine: number
+  endLine: number
+}
+
+export interface DuplicationBlock {
+  tokens: number
+  occurrences: DuplicationOccurrence[]
+}
+
+export interface DuplicationSummary {
+  blocks: DuplicationBlock[]
+  duplicatedLines: number
+  totalLines: number
+  files: number
+}
+
+export type Grade = 'A' | 'B' | 'C' | 'D' | 'E'
+
+export interface CodeRating {
+  security: Grade
+  reliability: Grade
+  maintainability: Grade
+  techDebtMinutes: number
+  debtRatioPct: number
+  linesOfCode: number
+}
+
+export interface CodeQualityReport {
+  inventory: LanguageInventory[]
+  findings: Finding[]
+  duplication: DuplicationSummary
+  rating: CodeRating
+}
+
+export interface CodeQualityView {
+  available: boolean
+  reason?: string
+  report?: CodeQualityReport
 }

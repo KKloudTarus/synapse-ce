@@ -4,7 +4,7 @@ import "strings"
 
 // commentSyntax is a language's comment delimiters used to strip comments before tokenizing (a comment
 // change must not hide or fabricate a clone). Languages absent here are tokenized without comment
-// stripping (a conservative default — comment tokens simply participate, which cannot create a false
+// stripping (a conservative default – comment tokens simply participate, which cannot create a false
 // clone across differently-commented code any more than code itself can).
 type commentSyntax struct {
 	line       []string
@@ -29,7 +29,7 @@ var syntaxByLang = map[string]commentSyntax{
 // number of code lines (lines that produced at least one token). A token is a maximal run of
 // identifier/number characters, or a single punctuation character. Comments are stripped line- and
 // block-wise. Limitation: a comment marker inside a string literal is treated as a comment (rare;
-// documented) — the same simplification the code-inventory line classifier makes.
+// documented) – the same simplification the code-inventory line classifier makes.
 func tokenize(lang string, content []byte) (toks []token, codeLines int) {
 	syn := syntaxByLang[lang]
 	inBlock := false

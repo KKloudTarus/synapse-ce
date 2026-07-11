@@ -13,7 +13,7 @@ import (
 // separator means URL, a parseable prefix means CIDR, a parseable address means IP, and
 // anything else is treated as a domain. Repo/image kinds are never inferred from a bare
 // string (they are explicit). The recon use-case carries an equivalent private classifier
-// (frozen P2); new callers — notably the agent tool catalog — use this canonical one.
+// (frozen P2); new callers – notably the agent tool catalog – use this canonical one.
 func InferTargetKind(v string) TargetKind {
 	v = strings.TrimSpace(v)
 	if strings.Contains(v, "://") {
@@ -31,7 +31,7 @@ func InferTargetKind(v string) TargetKind {
 }
 
 // ValidateTargetValue guards a target string against being smuggled in as a CLI flag or
-// carrying whitespace — the value-level check behind argv-only execution. It
+// carrying whitespace – the value-level check behind argv-only execution. It
 // is the layer-owned guard a caller applies BEFORE building a tool argv, so a safe argv never
 // depends on each tool adapter re-validating its input. Mirrors the recon use-case's private
 // validateTargetValue (and the per-tool safeHost backstop).

@@ -1,6 +1,6 @@
 // Package evidence is the tamper-evident evidence vault: it appends sealed,
 // hash-chained links, stores artifacts content-addressed in a blob store, and
-// verifies the chain on read — emitting an append-only tamper ALERT on any
+// verifies the chain on read – emitting an append-only tamper ALERT on any
 // mismatch. SCA, recon, and manual capture all
 // funnel through it, so there is ONE chain and one verify path per engagement.
 package evidence
@@ -39,12 +39,12 @@ type Service struct {
 const anchorTimeout = 5 * time.Second
 
 // SetLogger sets the logger used to surface dropped audit/alert writes (a dropped
-// tamper alert must not vanish silently). Optional — defaults to slog.Default().
+// tamper alert must not vanish silently). Optional – defaults to slog.Default().
 func (s *Service) SetLogger(l *slog.Logger) { s.log = l }
 
 // SetSigner enables chain-head attestation: when set, Verify attaches
 // a deterministic ed25519 signature over the chain head, proving origin on top of
-// integrity. Optional — nil leaves the chain integrity-only.
+// integrity. Optional – nil leaves the chain integrity-only.
 func (s *Service) SetSigner(signer ports.ChainSigner) { s.signer = signer }
 
 // SetTimestamper enables external RFC-3161 anchoring: when both are set, Verify
@@ -118,13 +118,13 @@ func (s *Service) sealRef(ctx context.Context, engagementID shared.ID, kind stri
 	// the same engagement chain can both read the same head and FORK it. The store enforces
 	// one child per parent (unique engagement+previous_hash → ErrConflict); on conflict we
 	// re-read the now-advanced head and re-chain, so the chain stays strictly linear under
-	// multi-writer contention — never a forked (corrupt) custody chain.
+	// multi-writer contention – never a forked (corrupt) custody chain.
 	const maxAttempts = 16
 	for attempt := 0; ; attempt++ {
 		prev, err := s.store.Head(ctx, engagementID)
 		if err != nil {
 			// Never fork the append-only chain with an empty previous_hash on a transient
-			// Head failure — fail the seal instead.
+			// Head failure – fail the seal instead.
 			return evdom.Evidence{}, fmt.Errorf("evidence head: %w", err)
 		}
 		link := evdom.Evidence{
@@ -140,13 +140,13 @@ func (s *Service) sealRef(ctx context.Context, engagementID shared.ID, kind stri
 		err = s.store.Append(ctx, []evdom.Evidence{link})
 		if err == nil {
 			// Retain (externally anchor) the freshly-sealed head so out-of-band tail-truncation
-			// detection covers EVERY writer's heads — recon, SCA, manual capture, agent — not
+			// detection covers EVERY writer's heads – recon, SCA, manual capture, agent – not
 			// just paths that later call Verify. Best-effort + bounded; no-op without a TSA.
 			s.anchorSealedHead(ctx, engagementID, link.Hash)
 			return link, nil
 		}
 		if errors.Is(err, shared.ErrConflict) && attempt < maxAttempts {
-			continue // another writer linked this head first — re-read + re-chain
+			continue // another writer linked this head first – re-read + re-chain
 		}
 		return evdom.Evidence{}, fmt.Errorf("append evidence: %w", err)
 	}
@@ -213,7 +213,7 @@ func (s *Service) Verify(ctx context.Context, engagementID shared.ID) (Report, e
 		return rep, nil
 	}
 	// Out-of-band TAIL-TRUNCATION detection: the append-only trigger (migration 0033)
-	// blocks an in-band DELETE, but a superuser who disables the trigger could delete the tail —
+	// blocks an in-band DELETE, but a superuser who disables the trigger could delete the tail –
 	// and VerifyChain on the shortened-but-still-linear chain would pass. Every sealed head is
 	// anchored, so its hash is RETAINED out-of-band in the timestamp store; if the latest retained
 	// head is no longer present in the current chain, links were truncated from the end. Detect it.
@@ -226,7 +226,7 @@ func (s *Service) Verify(ctx context.Context, engagementID shared.ID) (Report, e
 		}
 	}
 	// Attest the verified head: a deterministic signature proving this chain
-	// originated here. Only on an intact, non-empty chain — never sign a broken or
+	// originated here. Only on an intact, non-empty chain – never sign a broken or
 	// empty head. A signing failure is non-fatal: integrity still holds, so the
 	// report is returned without an attestation rather than failing the read.
 	if s.signer != nil && rep.Head != "" {
@@ -249,7 +249,7 @@ const ChainEvidence = "evidence"
 // anchorHead attaches an external RFC-3161 timestamp to an intact, non-empty head: it
 // first looks for an already-stored token (cheap, the common case), and only if absent
 // requests one from the TSA under a bounded timeout and stores it. A missing/slow TSA
-// leaves the head pending-anchor (Anchored=false) and never fails the caller — the
+// leaves the head pending-anchor (Anchored=false) and never fails the caller – the
 // report still succeeds. Exported as AnchorHead for the audit service
 // to reuse the same logic over its head.
 func (s *Service) anchorHead(ctx context.Context, chain string, engagementID shared.ID, rep *Report) {
@@ -277,7 +277,7 @@ func (s *Service) anchorHead(ctx context.Context, chain string, engagementID sha
 }
 
 // anchorSealedHead externally timestamps (RFC-3161) a freshly-sealed head so it is RETAINED
-// out-of-band in the token store — the basis for tail-truncation detection over EVERY writer's
+// out-of-band in the token store – the basis for tail-truncation detection over EVERY writer's
 // heads, not only paths that later call Verify. Best-effort + bounded; a no-op when no TSA is
 // configured (the in-band 0033 append-only trigger still applies) and never fails the seal.
 func (s *Service) anchorSealedHead(ctx context.Context, engagementID shared.ID, head string) {
@@ -299,7 +299,7 @@ func (s *Service) anchorSealedHead(ctx context.Context, engagementID shared.ID, 
 	}
 }
 
-// containsHash reports whether any chain item carries the given head hash — used by
+// containsHash reports whether any chain item carries the given head hash – used by
 // tail-truncation detection to confirm a retained (anchored) head is still present.
 func containsHash(items []evdom.Evidence, h string) bool {
 	for i := range items {
@@ -318,7 +318,7 @@ func (s *Service) List(ctx context.Context, engagementID shared.ID) ([]evdom.Evi
 var _ ports.ReportEvidenceProvider = (*Service)(nil)
 
 // ListArtifacts returns the captured binary artifacts in the engagement's chain
-// (oldest first), parsed from their sealed payloads — for the report's evidence
+// (oldest first), parsed from their sealed payloads – for the report's evidence
 // exhibits. Only links that reference an out-of-line blob (StorageRef set) are
 // artifacts; sealed scan/summary links are skipped.
 func (s *Service) ListArtifacts(ctx context.Context, engagementID shared.ID) ([]ports.EvidenceArtifact, error) {
@@ -356,18 +356,18 @@ func (s *Service) ArtifactBytes(ctx context.Context, engagementID shared.ID, sha
 // verbatim (hashes + content preserved) to the ledger. Used by engagement import
 // a bundle whose chain does not verify is rejected before any write, so a
 // tampered chain can never be materialized. Callers may remap EngagementID/ID/
-// FindingID first — those fields are not part of the chain hash, so the chain still
+// FindingID first – those fields are not part of the chain hash, so the chain still
 // verifies.
 func (s *Service) ImportVerified(ctx context.Context, items []evdom.Evidence) error {
 	if err := evdom.VerifyChain(items); err != nil {
-		return fmt.Errorf("%w: imported evidence chain failed verification — import rejected", shared.ErrValidation)
+		return fmt.Errorf("%w: imported evidence chain failed verification – import rejected", shared.ErrValidation)
 	}
 	if len(items) == 0 {
 		return nil
 	}
 	// Import only into an engagement with NO existing chain (audit): the imported chain
 	// carries its own genesis (previous_hash=""), so merging it onto a non-empty chain would
-	// create two genesis links — which the fork-guard (unique engagement+previous_hash)
+	// create two genesis links – which the fork-guard (unique engagement+previous_hash)
 	// rejects on Postgres AND the in-memory guard rejects too. Check upfront for a CLEAR
 	// error rather than a generic append conflict; re-basing isn't an option (it would
 	// change previous_hash and break the verified seals).
@@ -384,7 +384,7 @@ func (s *Service) ImportVerified(ctx context.Context, items []evdom.Evidence) er
 	return nil
 }
 
-// ArtifactForEngagement returns a captured artifact's bytes — but ONLY if a sealed
+// ArtifactForEngagement returns a captured artifact's bytes – but ONLY if a sealed
 // link in that engagement's chain references the blob. This scopes reads to the
 // engagement (no cross-engagement custody leak) and closes the existence oracle a
 // global-by-sha lookup would expose. The sha must be a 64-char lowercase hex
@@ -444,7 +444,7 @@ func (s *Service) alertTampered(ctx context.Context, engagementID shared.ID, cau
 		Metadata: map[string]string{"engagement": engagementID.String(), "error": cause.Error()},
 		At:       s.clock.Now(),
 	}); err != nil {
-		// A dropped tamper alert must not vanish silently — it is the custody signal.
+		// A dropped tamper alert must not vanish silently – it is the custody signal.
 		s.logger().Error("evidence tamper alert not recorded", "engagement", engagementID.String(), "err", err)
 	}
 }

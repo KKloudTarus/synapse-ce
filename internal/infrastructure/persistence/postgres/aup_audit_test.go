@@ -54,7 +54,7 @@ func TestAUPStoreAndAuditLog(t *testing.T) {
 
 	// --- append-only audit ---
 	// audit_log is DB-enforced append-only (migration 0033: UPDATE/DELETE/TRUNCATE raise), so
-	// there is no cleanup — the test uses a unique action per run (randHex) and filters reads by
+	// there is no cleanup – the test uses a unique action per run (randHex) and filters reads by
 	// it, so accumulated rows from prior runs are harmless.
 	action := "test.action-" + randHex(t)
 	log := NewAuditLog(pool)

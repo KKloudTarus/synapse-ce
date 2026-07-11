@@ -21,11 +21,11 @@ const (
 
 // Finding classes: third-party findings are actionable; first-party
 // historical advisories are matched against the project's own unversioned modules
-// and are informational only — never counted in remediation/critical totals.
+// and are informational only – never counted in remediation/critical totals.
 const (
 	ClassThirdParty         = "third_party"
 	ClassFirstPartyHistoric = "first_party_historical"
-	// ClassFirstParty is a first-party, ACTIONABLE weakness in the project's OWN source — e.g. a
+	// ClassFirstParty is a first-party, ACTIONABLE weakness in the project's OWN source – e.g. a
 	// deterministic pattern-SAST hit. Unlike ClassFirstPartyHistoric (unconfirmable advisory,
 	// informational), it is real and remediable; unlike ClassThirdParty, it is not a dependency.
 	ClassFirstParty = "first_party"
@@ -113,7 +113,7 @@ type Finding struct {
 	Priority     int
 
 	// ClassReachability is the coarse JVM class-reachability verdict for the component:
-	// "reachable" | "unreferenced" | "" (unknown). Advisory only — deprioritizes an unreferenced
+	// "reachable" | "unreferenced" | "" (unknown). Advisory only – deprioritizes an unreferenced
 	// component's finding, never suppresses it; lets a report/export SEPARATE used from unreferenced deps.
 	ClassReachability string `json:",omitempty"`
 
@@ -138,7 +138,7 @@ type Finding struct {
 }
 
 // EvidenceThreshold is the minimum evidence score for a finding to be promoted. It is the shared
-// bar — defined once in internal/domain/verdict and aliased here, so finding + judgment can
+// bar – defined once in internal/domain/verdict and aliased here, so finding + judgment can
 // never drift apart.
 const EvidenceThreshold = verdict.EvidenceThreshold
 
@@ -157,8 +157,8 @@ func (f *Finding) kindNormalized() Kind {
 // RequiresEvidenceGate reports whether this finding must clear the evidence bar before promotion.
 // It gates on PROVENANCE, not category: any AI/agent-proposed finding (ProposedBy != "") is
 // an unproven CLAIM and is gated, plus KindExploitation as a defensive belt for the highest-risk
-// kind. SCA/recon/manual — and a HUMAN-entered sast/dast/threat (ProposedBy == "", carrying
-// human evidence like a manual finding) — are not gated. Attribution implies gating; a
+// kind. SCA/recon/manual – and a HUMAN-entered sast/dast/threat (ProposedBy == "", carrying
+// human evidence like a manual finding) – are not gated. Attribution implies gating; a
 // missing/unknown Kind can never REMOVE the gate (fail-closed via the ProposedBy check +
 // kindNormalized). NewManual never sets ProposedBy, so manual findings stay ungated.
 func (f *Finding) RequiresEvidenceGate() bool {
@@ -168,7 +168,7 @@ func (f *Finding) RequiresEvidenceGate() bool {
 // CanPromote reports whether the finding may be promoted/auto-published. Gated
 // kinds must meet the evidence bar (>= EvidenceThreshold); others always may.
 // The recon/exploitation use cases MUST call this before persisting
-// a finding as confirmed — it is the deterministic evidence gate.
+// a finding as confirmed – it is the deterministic evidence gate.
 func (f *Finding) CanPromote() bool {
 	if f.RequiresEvidenceGate() {
 		return f.MeetsEvidenceBar()
@@ -178,8 +178,8 @@ func (f *Finding) CanPromote() bool {
 
 // Publishable filters a finding slice to those that may appear in a customer-facing
 // deliverable, applying the deterministic evidence gate via CanPromote.
-// It is the SINGLE rule every client-facing reader funnels through — directly, or via
-// the repository's ListPublishableByEngagement — so no export/report surface (PDF, HTML,
+// It is the SINGLE rule every client-facing reader funnels through – directly, or via
+// the repository's ListPublishableByEngagement – so no export/report surface (PDF, HTML,
 // DOCX, SARIF, OpenVEX, engagement bundle) can leak an unproven exploitation finding.
 // The input is not mutated; order is preserved.
 func Publishable(in []Finding) []Finding {

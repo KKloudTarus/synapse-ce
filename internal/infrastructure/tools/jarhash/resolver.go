@@ -9,7 +9,7 @@
 // ambiguous byte-identical republish is resolved deterministically, never invented). A
 // SHA-1 → coordinate answer is IMMUTABLE, so results are cached for the process lifetime; the client is
 // rate-limit disciplined (bounded concurrency, honors Retry-After, stops for the rest of the scan on a
-// 429/403 — Maven Central escalates throttling to a 24h org-level block). A lookup error or an
+// 429/403 – Maven Central escalates throttling to a 24h org-level block). A lookup error or an
 // unreachable/throttled index is a no-op; the scan never fails.
 package jarhash
 
@@ -70,7 +70,7 @@ var _ ports.JarHashResolver = (*Resolver)(nil)
 // in place. Returns the number recovered. Best-effort: errors/throttling are no-ops. Components are
 // GROUPED by SHA-1 so each distinct hash is queried at most once, even when several components share it.
 func (r *Resolver) Resolve(ctx context.Context, comps []sbom.Component) int {
-	// Group unresolved components by their (lowercased) SHA-1 — one query per distinct hash.
+	// Group unresolved components by their (lowercased) SHA-1 – one query per distinct hash.
 	bySHA1 := map[string][]int{}
 	var order []string
 	for i := range comps {
@@ -166,7 +166,7 @@ type outcome int
 const (
 	outMiss      outcome = iota // definitive: the index has no coordinate for this SHA-1
 	outHit                      // definitive: a valid coordinate
-	outTransient                // network/5xx/decode error — not an answer, don't cache
+	outTransient                // network/5xx/decode error – not an answer, don't cache
 )
 
 // lookup resolves one SHA-1 to a coordinate, using the process cache first. ok=false on miss/error/transient.
@@ -184,7 +184,7 @@ func (r *Resolver) lookup(ctx context.Context, sha1 string) (coord, bool) {
 
 	c, out := r.query(ctx, sha1)
 	if out == outTransient {
-		return coord{}, false // don't cache a transient failure — a later component with this SHA-1 may retry
+		return coord{}, false // don't cache a transient failure – a later component with this SHA-1 may retry
 	}
 	r.mu.Lock()
 	r.cache[sha1] = c // cache the definitive answer (a hit's coord, or the zero coord for a real miss)
@@ -210,7 +210,7 @@ func (r *Resolver) query(ctx context.Context, sha1 string) (coord, outcome) {
 
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return coord{}, outTransient // network error — retryable, not a definitive miss
+		return coord{}, outTransient // network error – retryable, not a definitive miss
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -223,7 +223,7 @@ func (r *Resolver) query(ctx context.Context, sha1 string) (coord, outcome) {
 		return coord{}, outTransient
 	}
 	if resp.StatusCode != http.StatusOK {
-		return coord{}, outTransient // 5xx/other — retryable, don't cache as a miss
+		return coord{}, outTransient // 5xx/other – retryable, don't cache as a miss
 	}
 
 	var out struct {
@@ -236,7 +236,7 @@ func (r *Resolver) query(ctx context.Context, sha1 string) (coord, outcome) {
 		} `json:"response"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBodyBytes)).Decode(&out); err != nil {
-		return coord{}, outTransient // malformed body — retryable
+		return coord{}, outTransient // malformed body – retryable
 	}
 	docs := out.Response.Docs
 	if len(docs) == 0 {
@@ -253,7 +253,7 @@ func (r *Resolver) query(ctx context.Context, sha1 string) (coord, outcome) {
 	// The response is UNTRUSTED external input: validate the coordinate BEFORE it becomes a PURL /
 	// advisory-match key, so a malicious/compromised endpoint can't inject a malformed group/artifact/
 	// version (e.g. a `/`, `@`, whitespace, or control char that would confuse the PURL or a downstream
-	// matcher). Reject anything outside the strict Maven-coordinate character set — treat as a miss.
+	// matcher). Reject anything outside the strict Maven-coordinate character set – treat as a miss.
 	if !validGA(best.G) || !validGA(best.A) || !validVersion(best.V) {
 		return coord{}, outMiss
 	}
@@ -276,7 +276,7 @@ func validGA(s string) bool {
 	return true
 }
 
-// validVersion is a strict allow-list for a Maven version: [A-Za-z0-9._+-] — covers every real form
+// validVersion is a strict allow-list for a Maven version: [A-Za-z0-9._+-] – covers every real form
 // (2.16.3, 1.0-RELEASE, Hoxton.SR12, 1.0.0-alpha.1+build) while rejecting '/', '@', ':', '%', whitespace,
 // and control chars that would malform the PURL or the advisory match key (untrusted-input hardening).
 func validVersion(s string) bool {

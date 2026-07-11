@@ -2,19 +2,19 @@
 // capabilities the LLM is allowed to invoke. It embodies two non-negotiable constraints in
 // its very shape:
 //
-// Anti-self-escalation. The catalog exposes ONLY read tools — scoped to the
-// agent's own engagement — plus a single propose-only execute tool. There is NO tool to
+// Anti-self-escalation. The catalog exposes ONLY read tools – scoped to the
+// agent's own engagement – plus a single propose-only execute tool. There is NO tool to
 // mutate scope, the authorization window, RoE, live-recon, credentials, or the approval
 // mode; those are operator-only. The catalog literally holds no writer for any of them,
 // so a hostile or confused model cannot widen its own authority by calling a tool.
 // Data minimization. Scope data, tokens, and AUP records are NEVER returned
-// to the LLM. The agent does not need the scope inventory to be useful — the safety gate
-// enforces scope server-side regardless of what the model proposes — so it is never
+// to the LLM. The agent does not need the scope inventory to be useful – the safety gate
+// enforces scope server-side regardless of what the model proposes – so it is never
 // disclosed to the (third-party, untrusted) LLM provider. Read tools are locked to the
 // session's engagement id; an engagement id is not even accepted as a tool argument.
 //
 // Read tools return DATA (fed back to the model as a tool message). The execute tool
-// (start_recon) returns a *ProposedAction ENVELOPE and runs nothing — the orchestrator MUST
+// (start_recon) returns a *ProposedAction ENVELOPE and runs nothing – the orchestrator MUST
 // pass it through safety.Gate before any execution. Every dispatch is recorded in the
 // append-only audit log as the agent (actor = "agent:<sessionID>").
 package agenttools
@@ -60,7 +60,7 @@ const (
 	ToolProposeReachability     = "propose_reachability"      // propose a reachability Judgment (score 0; verify is human-only)
 	ToolProposeSASTValidation   = "propose_sast_validation"   // propose a gated CapSAST judgment for verifier review; score 0, no execution
 	ToolProposeCritique         = "propose_critique"          // propose an adversarial critique Judgment against a finding (score 0)
-	ToolEvidenceSufficiency     = "evidence_sufficiency"      // read-only advisory — what's missing for a finding to reach the bar
+	ToolEvidenceSufficiency     = "evidence_sufficiency"      // read-only advisory – what's missing for a finding to reach the bar
 	ToolProposeRiskNarrative    = "propose_risk_narrative"    // propose a risk-narrative Judgment (ungated; a human accepts)
 	ToolProposeThreat           = "propose_threat"            // propose a STRIDE threat Judgment over the architecture model (score 0; a human ratifies)
 	ToolProposeWriteupDraft     = "propose_writeup_draft"     // propose a finding write-up DRAFT (prose) awaiting human sign-off (NOT a judgment)
@@ -89,7 +89,7 @@ type evidenceReader interface {
 
 // findingProposer is the narrow slice of the exploitation use-case the catalog needs to record
 // an UNPROVEN finding. It creates the finding at EvidenceScore 0 attributed to the
-// proposer; it confers NO power to raise the score or confirm — a DISTINCT verifier must do that
+// proposer; it confers NO power to raise the score or confirm – a DISTINCT verifier must do that
 // out of band (the catalog deliberately exposes no score/verify/confirm writer). *exploitation.Service
 // satisfies it.
 type findingProposer interface {
@@ -98,7 +98,7 @@ type findingProposer interface {
 
 // hypothesisProposer is the narrow slice of the exploitation use-case the catalog needs to record an
 // attack-chain HYPOTHESIS: a Kind=hypothesis finding at EvidenceScore 0, gated until a distinct human
-// verifies it. Like findingProposer it exposes only the propose path — no score/verify writer. The created
+// verifies it. Like findingProposer it exposes only the propose path – no score/verify writer. The created
 // finding NEVER auto-merges its constituents (it only names them). *exploitation.Service satisfies it.
 type hypothesisProposer interface {
 	ProposeHypothesis(ctx context.Context, proposer string, engagementID shared.ID, in finding.HypothesisInput) (finding.Finding, error)
@@ -106,13 +106,13 @@ type hypothesisProposer interface {
 
 // scanResultReader is the narrow read slice of the SCA scan-result store the reachability-context
 // tool needs: the latest persisted scan result for an engagement, as JSON. The catalog decodes only
-// the dep-graph fields it needs (SBOM components + edges) — it does NOT import the sca use case.
+// the dep-graph fields it needs (SBOM components + edges) – it does NOT import the sca use case.
 type scanResultReader interface {
 	LatestResult(ctx context.Context, engagementID shared.ID) ([]byte, error)
 }
 
 // judgmentProposer is the narrow slice of the analysis use-case the propose_reachability/critique/risk_narrative/threat tools need:
-// record a PROPOSED judgment (score 0). It exposes ONLY Propose — NOT Verify/Accept — so the agent
+// record a PROPOSED judgment (score 0). It exposes ONLY Propose – NOT Verify/Accept – so the agent
 // can never confirm its own judgment (R11); the arch_test tripwire forbidding usecase/analysis makes
 // that structural. *analysis.Service satisfies it.
 type judgmentProposer interface {
@@ -120,8 +120,8 @@ type judgmentProposer interface {
 }
 
 // writeupdraftProposer is the narrow slice of the writeupdraft use-case the propose_writeup_draft tool
-// needs: record a PROPOSED draft awaiting human sign-off. It exposes ONLY Propose — NOT Edit/Accept/Reject
-// — so the agent can never sign off its own draft (the human-gate + SoD live behind the HTTP routes); the
+// needs: record a PROPOSED draft awaiting human sign-off. It exposes ONLY Propose – NOT Edit/Accept/Reject
+// – so the agent can never sign off its own draft (the human-gate + SoD live behind the HTTP routes); the
 // arch_test tripwire forbidding usecase/writeupdraftuc makes that structural. *writeupdraftuc.Service satisfies it.
 type writeupdraftProposer interface {
 	Propose(ctx context.Context, proposer string, engagementID, findingID shared.ID, description, remediation string) (writeupdraft.Draft, error)
@@ -147,29 +147,29 @@ type Catalog struct {
 
 // EnableFindingProposals turns on the propose_finding tool. The agent can then
 // RECORD an unproven exploitation claim (score 0); it still cannot raise its own score or
-// confirm — that needs a distinct verifier out of band. The composition root supplies the
+// confirm – that needs a distinct verifier out of band. The composition root supplies the
 // exploitation service.
 func (c *Catalog) EnableFindingProposals(p findingProposer) { c.proposer = p }
 
 // EnableHypotheses turns on the propose_attack_chain tool. The agent can then record an attack-chain
 // HYPOTHESIS (a Kind=hypothesis finding at score 0, linking constituent findings); it still cannot raise the
-// score or confirm — a distinct human verifies it out of band (the same gate as an exploitation finding).
+// score or confirm – a distinct human verifies it out of band (the same gate as an exploitation finding).
 func (c *Catalog) EnableHypotheses(p hypothesisProposer) { c.hypProposer = p }
 
 // EnableReachability turns on the reachability_context read tool: the agent can read the
 // engagement's dependency-graph FACTS for a vulnerable package (dep path, direct flag, scope,
-// manifest location) to reason about T0/T1 reachability. Read-only — it forms NO verdict (the agent
+// manifest location) to reason about T0/T1 reachability. Read-only – it forms NO verdict (the agent
 // proposes a ReachabilityClaim out of band). The composition root supplies the scan-result store.
 func (c *Catalog) EnableReachability(r scanResultReader) { c.reach = r }
 
 // EnableJudgments turns on the propose_reachability + propose_sast_validation + propose_critique + propose_risk_narrative + propose_threat tools: the agent can
-// RECORD a judgment (score 0); it still cannot raise the score or confirm — a distinct human reviewer verifies
+// RECORD a judgment (score 0); it still cannot raise the score or confirm – a distinct human reviewer verifies
 // it via PermReview, out of band. The composition root supplies the analysis service.
 func (c *Catalog) EnableJudgments(p judgmentProposer) { c.jproposer = p }
 
 // EnableWriteupDrafts turns on the propose_writeup_draft tool: the agent can DRAFT a finding's
 // description + remediation PROSE as a proposal (awaiting human sign-off). It still cannot edit, accept, or
-// reject a draft — those are human actions behind PermReview + SoD (the proposer cannot sign off its own
+// reject a draft – those are human actions behind PermReview + SoD (the proposer cannot sign off its own
 // draft). The composition root supplies the writeupdraft service (which satisfies the narrow proposer).
 func (c *Catalog) EnableWriteupDrafts(p writeupdraftProposer) { c.drafter = p }
 
@@ -209,13 +209,13 @@ type Result struct {
 	Data     json.RawMessage
 	Proposal *agent.ProposedAction
 	// Plan is set by propose_plan: a validated, NOT-yet-persisted execution DAG (Go minted the
-	// node ids, classified risk, and validated acyclicity). It has executed nothing — the
+	// node ids, classified risk, and validated acyclicity). It has executed nothing – the
 	// orchestrator persists it and drives each node through safety.Gate.Admit.
 	Plan *agent.Plan
 }
 
 // Tools returns the JSON-schema tool definitions advertised to the LLM. The read tools take
-// no arguments — they operate on the session's engagement, which is never an LLM-supplied id.
+// no arguments – they operate on the session's engagement, which is never an LLM-supplied id.
 func (c *Catalog) Tools() []agent.ToolSchema {
 	empty := json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
 	schemas := []agent.ToolSchema{
@@ -227,19 +227,19 @@ func (c *Catalog) Tools() []agent.ToolSchema {
 		{Name: ToolVerifyCustody, Description: "Verify the integrity of the engagement's hash-chained evidence custody. Returns {ok, count, head_hash}. Read-only.", Parameters: empty},
 		{Name: ToolListReconTools, Description: "List the reconnaissance tools you may propose via start_recon, with the target kinds each accepts and the risk class a proposal would carry. Read-only.", Parameters: empty},
 		{Name: ToolStartRecon, Description: "Propose a reconnaissance run against a target. This does NOT run the tool: it creates an approval-required proposal that the scope/authorization gate and a human approver must clear before anything executes. Always include a one-line rationale.", Parameters: json.RawMessage(`{"type":"object","properties":{"tool":{"type":"string","description":"recon tool name, e.g. subfinder"},"target":{"type":"string","description":"the target to run against, e.g. app.example.com"},"rationale":{"type":"string","description":"one-line justification shown to the approver"}},"required":["tool","target"],"additionalProperties":false}`)},
-		{Name: ToolEvidenceSufficiency, Description: "Assess whether a finding has enough evidence to be PUBLISHABLE. Returns its evidence score vs the bar, whether it is gated (exploitation/AI claims need a distinct verifier's sealed verdict; SCA/recon/manual do not), how many evidence items it has, and structured ADVICE on what is missing. Read-only and ADVISORY — it sets no score; only a distinct human verifier's sealed verdict moves a finding's score.", Parameters: json.RawMessage(`{"type":"object","properties":{"finding_id":{"type":"string","description":"the finding id to assess (from list_findings)"}},"required":["finding_id"],"additionalProperties":false}`)},
+		{Name: ToolEvidenceSufficiency, Description: "Assess whether a finding has enough evidence to be PUBLISHABLE. Returns its evidence score vs the bar, whether it is gated (exploitation/AI claims need a distinct verifier's sealed verdict; SCA/recon/manual do not), how many evidence items it has, and structured ADVICE on what is missing. Read-only and ADVISORY – it sets no score; only a distinct human verifier's sealed verdict moves a finding's score.", Parameters: json.RawMessage(`{"type":"object","properties":{"finding_id":{"type":"string","description":"the finding id to assess (from list_findings)"}},"required":["finding_id"],"additionalProperties":false}`)},
 	}
 	if c.proposer != nil {
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeFinding,
-			Description: "Record a SUSPECTED exploitation finding for the current engagement. This is an UNPROVEN claim: it is stored at evidence score 0 and is NOT reportable. You CANNOT confirm it or raise its score — a separate human/verifier must adversarially verify it out of band. Use only for a concrete, observed exploitation hypothesis.",
+			Description: "Record a SUSPECTED exploitation finding for the current engagement. This is an UNPROVEN claim: it is stored at evidence score 0 and is NOT reportable. You CANNOT confirm it or raise its score – a separate human/verifier must adversarially verify it out of band. Use only for a concrete, observed exploitation hypothesis.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"severity":{"type":"string","description":"critical|high|medium|low|info"},"cvss_vector":{"type":"string"},"cwe":{"type":"string"}},"required":["title","description","severity"],"additionalProperties":false}`),
 		})
 	}
 	if c.hypProposer != nil {
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeAttackChain,
-			Description: "Record an attack-chain HYPOTHESIS: a claim that two or more EXISTING findings chain into an attack path (e.g. SSRF → cloud-metadata creds → admin API). This is an UNPROVEN claim, stored at evidence score 0 and NOT reportable; you CANNOT confirm it or raise its score — a distinct human verifies it out of band. It NEVER modifies or merges the constituent findings, only names them. Give the constituent finding ids (>= 2, from list_findings).",
+			Description: "Record an attack-chain HYPOTHESIS: a claim that two or more EXISTING findings chain into an attack path (e.g. SSRF → cloud-metadata creds → admin API). This is an UNPROVEN claim, stored at evidence score 0 and NOT reportable; you CANNOT confirm it or raise its score – a distinct human verifies it out of band. It NEVER modifies or merges the constituent findings, only names them. Give the constituent finding ids (>= 2, from list_findings).",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string","description":"short name of the attack chain"},"description":{"type":"string","description":"how the findings chain into an attack path"},"constituent_ids":{"type":"array","items":{"type":"string"},"minItems":2,"description":"the finding ids this chain links (>= 2, from list_findings)"},"severity":{"type":"string","description":"optional: critical|high|medium|low|info; defaults to unknown for human triage"}},"required":["title","description","constituent_ids"],"additionalProperties":false}`),
 		})
 	}
@@ -253,14 +253,14 @@ func (c *Catalog) Tools() []agent.ToolSchema {
 	if c.reach != nil {
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolReachabilityContext,
-			Description: "Get dependency-graph reachability FACTS for a vulnerable package in the current engagement: whether it is present in the SBOM, its dependency path from the project root, whether it is a DIRECT dependency, its scope (production/test/example/…), and its manifest location. Read-only — it returns facts, not a verdict; use it to reason about whether a vulnerability is actually reachable (a transitive, dev-only, deep dependency is far less likely to be reachable than a direct production one). Source call-path analysis is NOT included. Pass the exact version to disambiguate a package present at multiple versions; omitting it matches the first found.",
+			Description: "Get dependency-graph reachability FACTS for a vulnerable package in the current engagement: whether it is present in the SBOM, its dependency path from the project root, whether it is a DIRECT dependency, its scope (production/test/example/…), and its manifest location. Read-only – it returns facts, not a verdict; use it to reason about whether a vulnerability is actually reachable (a transitive, dev-only, deep dependency is far less likely to be reachable than a direct production one). Source call-path analysis is NOT included. Pass the exact version to disambiguate a package present at multiple versions; omitting it matches the first found.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"component":{"type":"string","description":"the vulnerable package name, e.g. lodash"},"version":{"type":"string","description":"the package version, e.g. 4.17.21 (optional)"}},"required":["component"],"additionalProperties":false}`),
 		})
 	}
 	if c.jproposer != nil {
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeReachability,
-			Description: "Propose a REACHABILITY judgment for a finding — whether the vulnerable code is actually reachable — based on the facts from reachability_context. This is a PROPOSAL recorded at score 0: you CANNOT confirm it or raise its score; a distinct human reviewer must verify it out of band. Use tier-0 (dependency-graph presence) or tier-1 (direct import) — do NOT claim a deeper tier without source-call-path proof.",
+			Description: "Propose a REACHABILITY judgment for a finding – whether the vulnerable code is actually reachable – based on the facts from reachability_context. This is a PROPOSAL recorded at score 0: you CANNOT confirm it or raise its score; a distinct human reviewer must verify it out of band. Use tier-0 (dependency-graph presence) or tier-1 (direct import) – do NOT claim a deeper tier without source-call-path proof.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"subject_id":{"type":"string","description":"the finding id this judgment is about (from list_findings)"},"reachable":{"type":"string","description":"reachable | not_reachable | unknown"},"tier":{"type":"string","description":"tier-0 | tier-1 (the strongest your evidence supports)"},"path":{"type":"array","items":{"type":"string"},"description":"the dependency/call path supporting the verdict"},"confidence":{"type":"integer","description":"0-100"}},"required":["subject_id","reachable","tier"],"additionalProperties":false}`),
 		})
 		schemas = append(schemas, agent.ToolSchema{
@@ -270,29 +270,29 @@ func (c *Catalog) Tools() []agent.ToolSchema {
 		})
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeCritique,
-			Description: "Adversarially CRITIQUE a finding — try to REFUTE it (is it a false positive? wrong version match? unreachable? a duplicate?). This is a PROPOSAL recorded at score 0: you CANNOT suppress or confirm a finding. A confirmed 'refuted' critique only FLAGS the finding as suspected-FP for a human reviewer; it never auto-hides it. Give a structured driver TOKEN for the refutation category, not prose.",
+			Description: "Adversarially CRITIQUE a finding – try to REFUTE it (is it a false positive? wrong version match? unreachable? a duplicate?). This is a PROPOSAL recorded at score 0: you CANNOT suppress or confirm a finding. A confirmed 'refuted' critique only FLAGS the finding as suspected-FP for a human reviewer; it never auto-hides it. Give a structured driver TOKEN for the refutation category, not prose.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"subject_id":{"type":"string","description":"the finding id you are critiquing (from list_findings)"},"verdict":{"type":"string","description":"refuted | sound | uncertain"},"driver":{"type":"string","description":"a short token for the refutation category, e.g. not_reachable, version_mismatch, false_match, duplicate (lowercase, no spaces, no prose)"},"confidence":{"type":"integer","description":"0-100"}},"required":["subject_id","verdict","driver"],"additionalProperties":false}`),
 		})
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeRiskNarrative,
-			Description: "Explain WHY a finding has its computed risk priority, as STRUCTURED driver TOKENS (never prose). Recorded as a descriptive, UNGATED Judgment that a human ACCEPTS — it proves nothing, so there is no score or verifier verdict; it just explains. The renderer composes the sentence from the tokens.",
+			Description: "Explain WHY a finding has its computed risk priority, as STRUCTURED driver TOKENS (never prose). Recorded as a descriptive, UNGATED Judgment that a human ACCEPTS – it proves nothing, so there is no score or verifier verdict; it just explains. The renderer composes the sentence from the tokens.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"subject_id":{"type":"string","description":"the finding id this narrative explains (from list_findings)"},"drivers":{"type":"array","items":{"type":"string"},"description":"the risk-factor TOKENS that drive the priority, e.g. kev, epss>0.5, cvss>=9, reachable, direct, production (lowercase tokens, no spaces, no prose)"},"priority":{"type":"integer","description":"1 (highest) .. 5, mirroring the finding's computed priority"}},"required":["subject_id","drivers","priority"],"additionalProperties":false}`),
 		})
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeThreat,
-			Description: "Propose a STRIDE THREAT over the architecture model: pick the category (spoofing/tampering/repudiation/info_disclosure/denial_of_service/elevation_of_privilege) and the model ELEMENT it applies to — a component or a data flow (prefer the flows that CROSS a trust boundary, the attack surface). This is a PROPOSAL recorded at score 0: you CANNOT confirm or rate it; a distinct human ratifies it. Give a structured category + element id, never prose.",
+			Description: "Propose a STRIDE THREAT over the architecture model: pick the category (spoofing/tampering/repudiation/info_disclosure/denial_of_service/elevation_of_privilege) and the model ELEMENT it applies to – a component or a data flow (prefer the flows that CROSS a trust boundary, the attack surface). This is a PROPOSAL recorded at score 0: you CANNOT confirm or rate it; a distinct human ratifies it. Give a structured category + element id, never prose.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"element_kind":{"type":"string","description":"component | data_flow (what the threatened element is)"},"element_id":{"type":"string","description":"the threatened model element's id (a component id or data flow id)"},"category":{"type":"string","description":"spoofing | tampering | repudiation | info_disclosure | denial_of_service | elevation_of_privilege"},"asset":{"type":"string","description":"optional id of the asset at risk (e.g. the classified data an info_disclosure exposes); omit if none"}},"required":["element_kind","element_id","category"],"additionalProperties":false}`),
 		})
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeVexJustification,
-			Description: "Propose an OpenVEX JUSTIFICATION for why a finding is NOT AFFECTED — pick ONE of the closed OpenVEX justifications. This is a PROPOSAL recorded at score 0: you CANNOT confirm it; a distinct human ratifies it before any export trusts it (a false 'not affected' suppresses a real vuln). Pick the most specific justification you can support.",
+			Description: "Propose an OpenVEX JUSTIFICATION for why a finding is NOT AFFECTED – pick ONE of the closed OpenVEX justifications. This is a PROPOSAL recorded at score 0: you CANNOT confirm it; a distinct human ratifies it before any export trusts it (a false 'not affected' suppresses a real vuln). Pick the most specific justification you can support.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"finding_id":{"type":"string","description":"the finding this justification is about (from list_findings)"},"justification":{"type":"string","description":"one of: component_not_present | vulnerable_code_not_present | vulnerable_code_not_in_execute_path | vulnerable_code_cannot_be_controlled_by_adversary | inline_mitigations_already_exist"}},"required":["finding_id","justification"],"additionalProperties":false}`),
 		})
 	}
 	if c.drafter != nil {
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeWriteupDraft,
-			Description: "DRAFT a finding's write-up — its description (what the issue is) and/or remediation (how to fix it) — as PROSE for a human to review. This is a PROPOSAL awaiting explicit human sign-off: it is NEVER auto-applied to the finding or rendered into a report, and you CANNOT accept your own draft. Provide at least a description or a remediation.",
+			Description: "DRAFT a finding's write-up – its description (what the issue is) and/or remediation (how to fix it) – as PROSE for a human to review. This is a PROPOSAL awaiting explicit human sign-off: it is NEVER auto-applied to the finding or rendered into a report, and you CANNOT accept your own draft. Provide at least a description or a remediation.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"finding_id":{"type":"string","description":"the finding whose write-up you are drafting (from list_findings)"},"description":{"type":"string","description":"the drafted finding-description prose; optional if you provide a remediation"},"remediation":{"type":"string","description":"the drafted remediation prose; optional if you provide a description"}},"required":["finding_id"],"additionalProperties":false}`),
 		})
 	}
@@ -524,10 +524,10 @@ func (c *Catalog) listFindings(ctx context.Context, sess agent.Session) (Result,
 	return Result{Data: payload}, nil
 }
 
-// reachabilityView is the dependency-graph FACTS the reachability_context tool returns —
+// reachabilityView is the dependency-graph FACTS the reachability_context tool returns –
 // context for the model to reason about T0/T1 reachability, NOT a verdict. The agent forms a
 // ReachabilityClaim and proposes it; a human verifies. Source call-path is out of
-// scope here — the scanned source is not retained after a scan.
+// scope here – the scanned source is not retained after a scan.
 func (c *Catalog) listSASTValidation(ctx context.Context, sess agent.Session) (Result, error) {
 	fs, err := c.findings.ListByEngagement(ctx, sess.EngagementID)
 	if err != nil {
@@ -990,7 +990,7 @@ type reachabilityView struct {
 }
 
 // scanResultView is the minimal projection of the persisted sca scan result the reachability tool
-// decodes — only the SBOM, so the catalog depends on the domain types, not the sca use case.
+// decodes – only the SBOM, so the catalog depends on the domain types, not the sca use case.
 type scanResultView struct {
 	SBOM            *sbom.SBOM                    `json:"sbom"`
 	Vulnerabilities []vulnerability.Vulnerability `json:"vulnerabilities"`
@@ -1038,7 +1038,7 @@ func (c *Catalog) reachabilityContext(ctx context.Context, sess agent.Session, r
 }
 
 // maxReachStr bounds any single SBOM-sourced string reflected into the (untrusted) LLM transcript,
-// and maxReachPathElems bounds the reflected dep-path depth — the scanned artifact is
+// and maxReachPathElems bounds the reflected dep-path depth – the scanned artifact is
 // attacker-influenceable, so a hostile component name/location/PURL cannot bloat or smuggle into the
 // transcript (defense-in-depth; read-tool data is fed back un-capped by the orchestrator).
 const (
@@ -1065,12 +1065,12 @@ func fillReachability(v *reachabilityView, doc *sbom.SBOM, component, version st
 		}
 	}
 	if comp == nil {
-		v.Note = "Package not found in the engagement's SBOM — it is not in the resolved dependency graph (a strong signal it is not reachable). " + v.Note
+		v.Note = "Package not found in the engagement's SBOM – it is not in the resolved dependency graph (a strong signal it is not reachable). " + v.Note
 		return
 	}
 	v.PresentInSBOM = true
 	v.Version = clampStr(comp.Version)
-	v.Scope = comp.Scope // closed vocab from sbom.ClassifyScope — bounded, no clamp needed
+	v.Scope = comp.Scope // closed vocab from sbom.ClassifyScope – bounded, no clamp needed
 	v.BackgroundScope = sbom.IsBackgroundScope(comp.Scope)
 	if comp.Location != "" {
 		v.Location = clampStr(filepath.Base(comp.Location)) // basename only (data-minimization) + bounded
@@ -1133,7 +1133,7 @@ type proposeReachabilityArgs struct {
 
 // proposeReachability records a PROPOSED reachability judgment (score 0) for a finding. The agent
 // forms the verdict from reachability_context facts; the domain validates the typed claim (fail-closed
-// vocab) and the analysis service persists at score 0 + audits. The agent CANNOT confirm it — a
+// vocab) and the analysis service persists at score 0 + audits. The agent CANNOT confirm it – a
 // distinct human verifies via PermReview (R11); the propose-only interface + the arch tripwire make
 // that structural.
 func (c *Catalog) proposeReachability(ctx context.Context, sess agent.Session, raw json.RawMessage) (Result, error) {
@@ -1158,7 +1158,7 @@ func (c *Catalog) proposeReachability(ctx context.Context, sess agent.Session, r
 	payload, err := json.Marshal(map[string]any{
 		"judgment_id": j.ID.String(), "state": string(j.State), "evidence_score": j.EvidenceScore,
 		"proposed_by": j.ProposedBy, "publishable": j.Publishable(),
-		"note": "recorded as a PROPOSED reachability judgment (score 0); a distinct human reviewer must verify it — you cannot confirm your own.",
+		"note": "recorded as a PROPOSED reachability judgment (score 0); a distinct human reviewer must verify it – you cannot confirm your own.",
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal judgment: %w", err)
@@ -1176,7 +1176,7 @@ type proposeThreatArgs struct {
 // proposeThreat records a PROPOSED STRIDE threat (score 0) over the architecture model. The agent
 // picks a STRIDE category + the threatened model element (a component or a boundary-crossing data flow); the
 // domain validates the typed claim (closed STRIDE vocab) and the analysis service persists at score 0 +
-// audits. The threat is GATED + human-ratified — the agent CANNOT confirm it (the propose-only interface +
+// audits. The threat is GATED + human-ratified – the agent CANNOT confirm it (the propose-only interface +
 // the arch tripwire make that structural).
 func (c *Catalog) proposeThreat(ctx context.Context, sess agent.Session, raw json.RawMessage) (Result, error) {
 	var a proposeThreatArgs
@@ -1207,7 +1207,7 @@ func (c *Catalog) proposeThreat(ctx context.Context, sess agent.Session, raw jso
 	payload, err := json.Marshal(map[string]any{
 		"judgment_id": j.ID.String(), "state": string(j.State), "evidence_score": j.EvidenceScore,
 		"proposed_by": j.ProposedBy, "publishable": j.Publishable(),
-		"note": "recorded as a PROPOSED STRIDE threat (score 0); a distinct human reviewer must ratify it — you cannot confirm your own.",
+		"note": "recorded as a PROPOSED STRIDE threat (score 0); a distinct human reviewer must ratify it – you cannot confirm your own.",
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal judgment: %w", err)
@@ -1222,9 +1222,9 @@ type proposeVexJustificationArgs struct {
 
 // proposeVexJustification records a PROPOSED OpenVEX justification for why a finding is not_affected:
 // the agent picks ONE of the closed OpenVEX justifications and the analysis service persists it at score 0 +
-// audits. GATED + human-ratified — the agent CANNOT confirm it (the propose-only interface + the arch tripwire
+// audits. GATED + human-ratified – the agent CANNOT confirm it (the propose-only interface + the arch tripwire
 // make that structural); a confirmed claim later refines the OpenVEX export. The justification is a closed
-// enum (the domain VexJustificationClaim.Validate rejects anything else) — never free prose. The finding is
+// enum (the domain VexJustificationClaim.Validate rejects anything else) – never free prose. The finding is
 // ALWAYS the session's engagement scope; the engagement id is never read from the call.
 func (c *Catalog) proposeVexJustification(ctx context.Context, sess agent.Session, raw json.RawMessage) (Result, error) {
 	var a proposeVexJustificationArgs
@@ -1243,7 +1243,7 @@ func (c *Catalog) proposeVexJustification(ctx context.Context, sess agent.Sessio
 	payload, err := json.Marshal(map[string]any{
 		"judgment_id": j.ID.String(), "state": string(j.State), "evidence_score": j.EvidenceScore,
 		"proposed_by": j.ProposedBy, "publishable": j.Publishable(),
-		"note": "recorded as a PROPOSED OpenVEX justification (score 0); a distinct human reviewer must ratify it before any export trusts it — you cannot confirm your own.",
+		"note": "recorded as a PROPOSED OpenVEX justification (score 0); a distinct human reviewer must ratify it before any export trusts it – you cannot confirm your own.",
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal judgment: %w", err)
@@ -1259,7 +1259,7 @@ type proposeWriteupDraftArgs struct {
 
 // proposeWriteupDraft records a PROPOSED finding write-up draft: the agent drafts the finding's
 // description + remediation PROSE, scrubbed of URL credentials (mirroring propose_finding) and bounded
-// by the domain. The draft is inert — a distinct human must edit/accept it (the proposer cannot sign off its
+// by the domain. The draft is inert – a distinct human must edit/accept it (the proposer cannot sign off its
 // own draft) and it never auto-renders. The finding is ALWAYS the agent's session engagement
 // scope; only the finding id comes from the call, never a cross-engagement reference.
 func (c *Catalog) proposeWriteupDraft(ctx context.Context, sess agent.Session, raw json.RawMessage) (Result, error) {
@@ -1280,7 +1280,7 @@ func (c *Catalog) proposeWriteupDraft(ctx context.Context, sess agent.Session, r
 	payload, err := json.Marshal(map[string]any{
 		"draft_id": d.ID.String(), "state": string(d.State), "finding_id": d.FindingID.String(),
 		"proposed_by": d.ProposedBy,
-		"note":        "recorded as a PROPOSED writeup draft awaiting human sign-off — it is not applied to the finding or rendered, and you cannot accept your own draft.",
+		"note":        "recorded as a PROPOSED writeup draft awaiting human sign-off – it is not applied to the finding or rendered, and you cannot accept your own draft.",
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal writeup draft: %w", err)
@@ -1352,7 +1352,7 @@ type proposeCritiqueArgs struct {
 
 // proposeCritique records a PROPOSED adversarial critique (score 0) against a finding. The
 // agent tries to REFUTE the finding; the domain validates the typed claim and the analysis service
-// persists at score 0 + audits. The agent CANNOT suppress/confirm — a confirmed "refuted" critique
+// persists at score 0 + audits. The agent CANNOT suppress/confirm – a confirmed "refuted" critique
 // only flags suspected-FP for a human (the propose-only interface + the arch tripwire are structural).
 func (c *Catalog) proposeCritique(ctx context.Context, sess agent.Session, raw json.RawMessage) (Result, error) {
 	var a proposeCritiqueArgs
@@ -1375,7 +1375,7 @@ func (c *Catalog) proposeCritique(ctx context.Context, sess agent.Session, raw j
 	payload, err := json.Marshal(map[string]any{
 		"judgment_id": j.ID.String(), "state": string(j.State), "evidence_score": j.EvidenceScore,
 		"proposed_by": j.ProposedBy, "publishable": j.Publishable(),
-		"note": "recorded as a PROPOSED critique (score 0); a distinct human reviewer verifies it. A confirmed refutation only FLAGS the finding as suspected-FP — it never suppresses it.",
+		"note": "recorded as a PROPOSED critique (score 0); a distinct human reviewer verifies it. A confirmed refutation only FLAGS the finding as suspected-FP – it never suppresses it.",
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal judgment: %w", err)
@@ -1391,7 +1391,7 @@ type proposeRiskNarrativeArgs struct {
 
 // proposeRiskNarrative records a PROPOSED risk-narrative judgment: the agent explains a
 // finding's computed priority via STRUCTURED driver tokens (never prose, R8). It is DESCRIPTIVE +
-// UNGATED — a human ACCEPTS it (there is nothing to "refute at 75"); the agent sets no score, and
+// UNGATED – a human ACCEPTS it (there is nothing to "refute at 75"); the agent sets no score, and
 // the domain rejects any free-text driver.
 func (c *Catalog) proposeRiskNarrative(ctx context.Context, sess agent.Session, raw json.RawMessage) (Result, error) {
 	var a proposeRiskNarrativeArgs
@@ -1410,7 +1410,7 @@ func (c *Catalog) proposeRiskNarrative(ctx context.Context, sess agent.Session, 
 	payload, err := json.Marshal(map[string]any{
 		"judgment_id": j.ID.String(), "state": string(j.State), "evidence_score": j.EvidenceScore,
 		"proposed_by": j.ProposedBy, "publishable": j.Publishable(),
-		"note": "recorded as a PROPOSED risk narrative (descriptive, ungated); a human ACCEPTS it — there is no score or verifier verdict. Drivers are tokens, never prose.",
+		"note": "recorded as a PROPOSED risk narrative (descriptive, ungated); a human ACCEPTS it – there is no score or verifier verdict. Drivers are tokens, never prose.",
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal judgment: %w", err)
@@ -1436,7 +1436,7 @@ type sufficiencyView struct {
 
 // evidenceSufficiency is a read-only ADVISORY: for a finding, it reports the evidence score vs
 // the publishability bar, whether it is gated, its evidence-item count, and a structured advice token
-// for what is missing. It sets NO score — only a distinct verifier's sealed verdict moves the score
+// for what is missing. It sets NO score – only a distinct verifier's sealed verdict moves the score
 // . Session-locked + audited.
 func (c *Catalog) evidenceSufficiency(ctx context.Context, sess agent.Session, raw json.RawMessage) (Result, error) {
 	var args struct {
@@ -1455,7 +1455,7 @@ func (c *Catalog) evidenceSufficiency(ctx context.Context, sess agent.Session, r
 	}
 	view := sufficiencyView{
 		FindingID: fid, Bar: finding.EvidenceThreshold,
-		Note: "advisory only — a DISTINCT verifier's sealed verdict moves the score; this tool sets nothing.",
+		Note: "advisory only – a DISTINCT verifier's sealed verdict moves the score; this tool sets nothing.",
 	}
 	var f *finding.Finding
 	for i := range fs {
@@ -1529,7 +1529,7 @@ func (c *Catalog) listEvidence(ctx context.Context, sess agent.Session) (Result,
 	if err != nil {
 		return Result{}, fmt.Errorf("list evidence: %w", err)
 	}
-	// Metadata only — evidence Content/StorageRef are never surfaced to the model (content
+	// Metadata only – evidence Content/StorageRef are never surfaced to the model (content
 	// may carry secrets or scope-derived data; the storage ref is an internal blob key).
 	views := make([]evidenceView, 0, min(len(items), maxRows))
 	for i, e := range items {
@@ -1651,7 +1651,7 @@ func (c *Catalog) startRecon(ctx context.Context, sess agent.Session, raw json.R
 }
 
 // buildReconProposal turns (tool, target) into an approval-required ProposedAction with the
-// EXACT argv the gated run would use. It runs nothing and audits nothing — the caller owns the
+// EXACT argv the gated run would use. It runs nothing and audits nothing – the caller owns the
 // audit (start_recon audits a single propose; a plan audits once at the plan level). actionID
 // is supplied by the caller so a plan node keeps a STABLE id across re-admissions (idempotency).
 // This is the single source of truth for target validation + argv building.
@@ -1714,7 +1714,7 @@ type proposeFindingArgs struct {
 
 // proposeFinding records a SUSPECTED exploitation finding at EvidenceScore 0, attributed to the
 // agent. It is NOT a gated tool execution (it touches no target) and confers no power to raise
-// the score or confirm — the finding is inert (unreportable, CanPromote=false) until a DISTINCT
+// the score or confirm – the finding is inert (unreportable, CanPromote=false) until a DISTINCT
 // verifier acts out of band. Redaction: title/description are LLM prose → scrubbed before persist.
 func (c *Catalog) proposeFinding(ctx context.Context, sess agent.Session, raw json.RawMessage) (Result, error) {
 	var a proposeFindingArgs
@@ -1756,8 +1756,8 @@ type proposeAttackChainArgs struct {
 
 // proposeAttackChain records an attack-chain HYPOTHESIS finding (Kind=hypothesis) at EvidenceScore 0,
 // attributed to the agent. The chain narrative (title/description) is LLM prose → scrubbed before persist
-// (GR3, like propose_finding). It confers NO power to verify — the finding is gated/unreportable until a
-// DISTINCT human raises its score out of band — and the constituent findings are only NAMED, never merged.
+// (GR3, like propose_finding). It confers NO power to verify – the finding is gated/unreportable until a
+// DISTINCT human raises its score out of band – and the constituent findings are only NAMED, never merged.
 // The domain (NewHypothesis) validates >= 2 constituents + title/description. Engagement is ALWAYS the
 // session's; only the finding ids come from the call, never a cross-engagement reference.
 func (c *Catalog) proposeAttackChain(ctx context.Context, sess agent.Session, raw json.RawMessage) (Result, error) {
@@ -1812,7 +1812,7 @@ type proposePlanNode struct {
 // risk via riskFor (never trusting an LLM-supplied risk), validates each tool/target exactly as
 // start_recon does, translates the LLM's dependency LABELS (keys) to minted ids, and validates
 // the DAG (acyclic, bounded) via agent.NewPlan. The orchestrator persists the returned plan and
-// admits every node through safety.Gate — a node carries no authority of its own.
+// admits every node through safety.Gate – a node carries no authority of its own.
 func (c *Catalog) proposePlan(ctx context.Context, sess agent.Session, raw json.RawMessage) (Result, error) {
 	var a proposePlanArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
@@ -1879,7 +1879,7 @@ func (c *Catalog) proposePlan(ctx context.Context, sess agent.Session, raw json.
 	}
 	plan, err := agent.NewPlan(c.ids.NewID(), sess.ID, sess.EngagementID, sess.Goal, nodes, c.clock.Now())
 	if err != nil {
-		return Result{}, err // cycle / oversize / bad dep — rejected, never truncated
+		return Result{}, err // cycle / oversize / bad dep – rejected, never truncated
 	}
 	if err := c.audit.Record(ctx, ports.AuditEntry{
 		Actor:  sess.AgentActor(),
@@ -1909,7 +1909,7 @@ func (c *Catalog) ProposeForNode(sess agent.Session, node agent.PlanNode) (agent
 // --- helpers ---
 
 // auditRead records a read-tool access in the append-only log as the agent. A failure
-// to audit fails the call closed — an unrecorded data access is not allowed.
+// to audit fails the call closed – an unrecorded data access is not allowed.
 func (c *Catalog) auditRead(ctx context.Context, sess agent.Session, action, target string, count int) error {
 	if err := c.audit.Record(ctx, ports.AuditEntry{
 		Actor:    sess.AgentActor(),
@@ -1925,7 +1925,7 @@ func (c *Catalog) auditRead(ctx context.Context, sess agent.Session, action, tar
 
 // riskFor classifies a recon proposal's risk. Capability-sensitive tools (raw sockets, e.g.
 // naabu SYN scans) are Intrusive (always manual approval); all other live recon is Active. No
-// recon launch is ever Read — reconnaissance touches third-party/target infrastructure, so it
+// recon launch is ever Read – reconnaissance touches third-party/target infrastructure, so it
 // is never silently auto-approved in filter mode (only in full auto mode). Conservative by
 // design: the gate can always be made stricter, never weaker, by this mapping.
 func riskFor(t ports.ReconTool) agent.RiskClass {

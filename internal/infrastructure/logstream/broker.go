@@ -57,7 +57,7 @@ func (b *Broker) stream(runID string) *runStream {
 
 // Publish appends a line to the run's stream and fans it out to live subscribers.
 // A subscriber whose buffer is full is skipped for this live event (it remains in
-// the replay buffer, so a reconnect recovers it) — the publisher never blocks.
+// the replay buffer, so a reconnect recovers it) – the publisher never blocks.
 func (b *Broker) Publish(runID, line string) {
 	rs := b.stream(runID)
 	rs.mu.Lock()

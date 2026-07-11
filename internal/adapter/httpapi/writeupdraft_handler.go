@@ -8,7 +8,7 @@ import (
 )
 
 // listWriteupDrafts returns the engagement's AI-proposed finding write-up drafts (read; PermView +
-// tenant-gated via withEngTenant). Drafts are working data — a separate human sign-off applies one to a
+// tenant-gated via withEngTenant). Drafts are working data – a separate human sign-off applies one to a
 // finding; nothing here renders into a report.
 func (rt *Router) listWriteupDrafts(w http.ResponseWriter, r *http.Request) {
 	ds, err := rt.drafts.ListByEngagement(r.Context(), shared.ID(r.PathValue("id")))
@@ -46,7 +46,7 @@ func (rt *Router) editWriteupDraft(w http.ResponseWriter, r *http.Request) {
 }
 
 // acceptWriteupDraft is the human sign-off on a proposed draft (PermReview, separation of duties: the
-// acceptor must be a non-proposer — enforced in the domain). An accepted draft becomes eligible to be
+// acceptor must be a non-proposer – enforced in the domain). An accepted draft becomes eligible to be
 // applied to its finding; acceptance itself renders nothing.
 func (rt *Router) acceptWriteupDraft(w http.ResponseWriter, r *http.Request) {
 	engID, did := r.PathValue("id"), r.PathValue("did")

@@ -12,7 +12,7 @@ import (
 )
 
 // resumableLister + enqueuer are the narrow slices the reconciler needs. enqueuer is defined
-// here (not imported from usecase/worker) so the orchestrator stays off the worker package —
+// here (not imported from usecase/worker) so the orchestrator stays off the worker package –
 // the concrete ports.JobQueue satisfies it.
 type resumableLister interface {
 	ListResumable(ctx context.Context, staleFor time.Duration, now time.Time, limit int) ([]agent.Session, error)

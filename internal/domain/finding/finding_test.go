@@ -57,7 +57,7 @@ func TestPublishable(t *testing.T) {
 
 func TestCanPromote(t *testing.T) {
 	// Evidence-gating is PROVENANCE-keyed: a finding with an agent proposer (or Kind=exploitation as a belt)
-	// must clear the bar; an ungated finding (scanner SCA/recon, human manual — no proposer) always promotes.
+	// must clear the bar; an ungated finding (scanner SCA/recon, human manual – no proposer) always promotes.
 	cases := []struct {
 		name       string
 		kind       Kind

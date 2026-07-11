@@ -19,7 +19,7 @@ type fakeReader struct {
 func (f fakeReader) List(context.Context, int) ([]ports.AuditEntry, error) { return nil, nil }
 func (f fakeReader) Verify(context.Context) (auditdom.Report, error)       { return f.report, f.err }
 
-// stubSigner returns a sentinel attestation over the head (parity test only — real
+// stubSigner returns a sentinel attestation over the head (parity test only – real
 // ed25519 correctness is covered in domain/evidence + infrastructure/signing).
 type stubSigner struct{ calls int }
 

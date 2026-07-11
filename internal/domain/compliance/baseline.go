@@ -3,7 +3,7 @@ package compliance
 // BaselineSpec is the owned "Synapse AppSec Baseline" benchmark: a small, deterministic control set that
 // re-projects Synapse's own findings (pattern-SAST CWEs, secret + misconfig kinds, severity) into
 // auditor-citable pass/fail. It is a STARTER spec that exercises the engine end to end; ingesting a
-// third-party benchmark verbatim (a CIS/PSS YAML, joined by check id) is a follow-up — the engine is the
+// third-party benchmark verbatim (a CIS/PSS YAML, joined by check id) is a follow-up – the engine is the
 // same, only the spec source differs. Each control's join keys trace to what Synapse actually detects, so a
 // FAIL is always backed by a real, listed finding.
 func BaselineSpec() Spec {

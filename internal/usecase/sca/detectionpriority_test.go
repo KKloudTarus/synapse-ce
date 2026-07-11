@@ -18,7 +18,7 @@ func TestApplyDetectionPriority(t *testing.T) {
 	}
 	applyDetectionPriority(res, DetectionPrecise)
 
-	// CRITICAL: nothing is removed — all findings stay reported/sealed.
+	// CRITICAL: nothing is removed – all findings stay reported/sealed.
 	if len(res.Findings) != 4 {
 		t.Fatalf("detection-priority must NOT remove findings, got %d", len(res.Findings))
 	}

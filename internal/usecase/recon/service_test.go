@@ -383,7 +383,7 @@ func TestStartViaDurableQueue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	// Enqueued — not executed in-process.
+	// Enqueued – not executed in-process.
 	if got, _ := h.runs.Get(context.Background(), run.ID); got.Status != recon.StatusQueued {
 		t.Fatalf("run should be queued (not yet executed), got %s", got.Status)
 	}
@@ -496,7 +496,7 @@ func TestSweepStaleRunsSkipsLiveOwner(t *testing.T) {
 }
 
 // ctxRunner honors ctx cancellation (unlike fakeRunner) so a cancelled lease context aborts
-// the tool run — used by the lease-loss test.
+// the tool run – used by the lease-loss test.
 type ctxRunner struct{}
 
 func (ctxRunner) Run(ctx context.Context, _ ports.ToolSpec) (ports.ToolResult, error) {
@@ -521,7 +521,7 @@ func (fakeLeaseLock) TryLockLeased(ctx context.Context, _ string) (context.Conte
 
 // TestRunJobAbortsOnLeaseLoss covers lease-loss handling: when the run lease is lost
 // mid-execution (the lease context is cancelled), the in-flight tool aborts, the run is
-// finalized failed, and an attributable audit entry (reason=lease_lost) is recorded — so a
+// finalized failed, and an attributable audit entry (reason=lease_lost) is recorded – so a
 // stolen lease never leaves a silently-double-run or a stranded `running` row.
 func TestRunJobAbortsOnLeaseLoss(t *testing.T) {
 	h := newHarness(t, ctxRunner{}, subfinderTool(), false)
@@ -555,8 +555,8 @@ func TestRunJobAbortsOnLeaseLoss(t *testing.T) {
 }
 
 // TestReconProactivelyAnchorsHead covers head-anchoring: when chain-head attestation is wired, the
-// recon worker attests (and would RFC-3161-anchor) the evidence head it just sealed — at seal
-// time, not only on a later API read — so a worker-sealed head is tamper-proof immediately.
+// recon worker attests (and would RFC-3161-anchor) the evidence head it just sealed – at seal
+// time, not only on a later API read – so a worker-sealed head is tamper-proof immediately.
 func TestReconProactivelyAnchorsHead(t *testing.T) {
 	h := newHarness(t, fakeRunner{res: ports.ToolResult{Stdout: []byte("sub.example.com\n")}}, subfinderTool(), false)
 	h.seedEngagement(t, true)
@@ -584,7 +584,7 @@ func TestReconProactivelyAnchorsHead(t *testing.T) {
 }
 
 // TestRunRecordsContainmentPosture covers posture recording: a completed run records its confinement
-// posture (operator-facing) — "unsandboxed (dev)" off the sandbox, "sandboxed-live …"
+// posture (operator-facing) – "unsandboxed (dev)" off the sandbox, "sandboxed-live …"
 // when egress-enforced.
 func TestRunRecordsContainmentPosture(t *testing.T) {
 	// Unsandboxed (no SetSandboxEnforcement).

@@ -11,7 +11,7 @@ import (
 )
 
 // WriteupDraftStore is the in-memory write-up-draft repository (dev/tests). It mirrors the Postgres
-// adapter to come: Save is an UPSERT by draft id (a draft is mutable working data — edited then
+// adapter to come: Save is an UPSERT by draft id (a draft is mutable working data – edited then
 // accepted/rejected), and reads are engagement-scoped (tenant isolation is enforced upstream at the
 // route). ListByEngagement returns a deterministic (created_at, id) order to match the SQL adapter.
 type WriteupDraftStore struct {

@@ -101,7 +101,7 @@ func (e *Enricher) Enrich(ctx context.Context, vulns []vulnerability.Vulnerabili
 }
 
 // cveCandidates returns every CVE id associated with a vuln: its canonical id (if
-// a CVE) plus each detection's advisory id that is a CVE — so KEV/EPSS match even
+// a CVE) plus each detection's advisory id that is a CVE – so KEV/EPSS match even
 // when the canonical id is a GHSA.
 func cveCandidates(v vulnerability.Vulnerability) []string {
 	seen := map[string]struct{}{}

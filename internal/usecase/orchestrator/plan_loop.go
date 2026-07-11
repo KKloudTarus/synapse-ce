@@ -16,7 +16,7 @@ import (
 
 // drivePlan handles a propose_plan tool call: it dispatches it (the catalog mints node ids,
 // classifies risk, validates the DAG), persists the plan (one per session), and hands off to
-// the plan scheduler. A rejected plan or a duplicate is fed back to the model — never fatal.
+// the plan scheduler. A rejected plan or a duplicate is fed back to the model – never fatal.
 func (o *Orchestrator) drivePlan(ctx context.Context, sess agent.Session, call agent.ToolCall) (agent.Session, error) {
 	res, err := o.catalog.Dispatch(ctx, sess, call)
 	if err != nil || res.Plan == nil {
@@ -40,7 +40,7 @@ func (o *Orchestrator) drivePlan(ctx context.Context, sess agent.Session, call a
 }
 
 // planLoop is the sequential plan scheduler (PR3; parallelism is PR5). It executes the DAG one
-// ready node at a time: claim the node (Pending→Running via the revision CAS — the durable
+// ready node at a time: claim the node (Pending→Running via the revision CAS – the durable
 // idempotency authority), re-admit it through safety.Gate exactly like a reactive proposal,
 // execute + seal on approval, then settle the node and cascade skips behind any blocking
 // terminal. It SUSPENDS the whole session when a node needs manual approval (resumable: the
@@ -176,13 +176,13 @@ func (o *Orchestrator) planLoop(ctx context.Context, sess agent.Session, plan ag
 	o.auditSessionMeta(ctx, sess, "agent.plan.finished", map[string]string{"plan": plan.ID.String(), "status": string(plan.Status)})
 
 	if !hasPending {
-		return o.loop(ctx, sess) // the call was already answered (re-entry after settle) — continue
+		return o.loop(ctx, sess) // the call was already answered (re-entry after settle) – continue
 	}
 	return o.answerPlanCall(ctx, sess, pendingCall, planSummary(plan))
 }
 
 // planSaveFail handles a SavePlan error in the loop: a stale CAS is benign (another driver
-// advanced it — stop, the other driver owns it), anything else fails the session.
+// advanced it – stop, the other driver owns it), anything else fails the session.
 func (o *Orchestrator) planSaveFail(ctx context.Context, sess agent.Session, plan *agent.Plan, err error) (agent.Session, error) {
 	if errors.Is(err, shared.ErrConflict) {
 		// Another driver holds the truth; do not double-drive. The session stays running and a
@@ -339,7 +339,7 @@ func mustNodeStatus(plan agent.Plan, id string) agent.NodeStatus {
 }
 
 // planSummary renders the settled plan's node outcomes as the tool answer fed back to the model.
-// It carries only tool/target/status (no observation bytes — those are in the sealed evidence),
+// It carries only tool/target/status (no observation bytes – those are in the sealed evidence),
 // so nothing untrusted or secret-bearing rides back in via this path.
 func planSummary(plan agent.Plan) string {
 	counts := map[agent.NodeStatus]int{}

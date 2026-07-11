@@ -27,7 +27,7 @@ var _ ports.SuppressionLoader = (*Loader)(nil)
 func New() *Loader { return &Loader{} }
 
 // Load reads and parses <dir>/.synapseignore. A missing, non-regular, oversized, or unreadable file is a
-// silent empty policy (never a scan failure) — accepted risk that can't be read simply isn't applied.
+// silent empty policy (never a scan failure) – accepted risk that can't be read simply isn't applied.
 func (l *Loader) Load(_ context.Context, dir string) (ignore.Set, error) {
 	path := filepath.Join(dir, fileName)
 	// Lstat + IsRegular: never follow a .synapseignore symlink out of the (untrusted) workspace.

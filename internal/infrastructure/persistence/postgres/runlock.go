@@ -12,7 +12,7 @@ import (
 
 // RunLock implements ports.RunLocker with a PostgreSQL session advisory lock keyed by the
 // run id (F9). The lock is held on a dedicated pooled connection for the duration of the
-// execution and released (with the connection) afterwards — so across the API + the
+// execution and released (with the connection) afterwards – so across the API + the
 // worker, at most one delivery of a given run executes at a time. A redelivery that finds
 // the lock held gets ok=false and skips, preventing a duplicate live scan.
 type RunLock struct {

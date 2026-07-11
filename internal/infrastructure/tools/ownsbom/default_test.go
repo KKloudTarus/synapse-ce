@@ -3,7 +3,7 @@ package ownsbom
 import "testing"
 
 // TestDefaultRegistry asserts the production producer assembles the Tier-1 owned parsers and
-// dispatches every ecosystem's marker — so SYNAPSE_SBOM_PRODUCER=ownsbom yields a usable SBOMGenerator.
+// dispatches every ecosystem's marker – so SYNAPSE_SBOM_PRODUCER=ownsbom yields a usable SBOMGenerator.
 func TestDefaultRegistry(t *testing.T) {
 	reg, err := DefaultRegistry()
 	if err != nil {

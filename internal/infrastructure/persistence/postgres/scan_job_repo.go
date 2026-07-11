@@ -42,7 +42,7 @@ func (r *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
 }
 
 // ListStaleRunning returns scan jobs still 'running' that started before olderThan (≤ limit),
-// oldest first — the stale-scan sweeper's input.
+// oldest first – the stale-scan sweeper's input.
 func (r *ScanJobStore) ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]ports.ScanJob, error) {
 	if limit <= 0 {
 		limit = 100

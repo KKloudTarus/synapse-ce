@@ -158,7 +158,7 @@ function chainEdges(chain: string[]): Array<{ source: string; target: string }> 
   return out
 }
 
-// Mode 1 — Finding Path: root → … → vulnerable component (uses the backend path).
+// Mode 1 – Finding Path: root → … → vulnerable component (uses the backend path).
 function findingPathGraph(idx: GraphIndex, v: Vulnerability): SubGraph {
   const compId = idx.cvToId.get(`${v.component}|${v.version}`)
   // Keep the full backend path; toFlow falls back to shortName for any node that
@@ -174,7 +174,7 @@ function findingPathGraph(idx: GraphIndex, v: Vulnerability): SubGraph {
   }
 }
 
-// Mode 2 — Package Explorer: parents + children of a package up to depth N.
+// Mode 2 – Package Explorer: parents + children of a package up to depth N.
 function explorerGraph(idx: GraphIndex, focusId: string, depth: number): SubGraph {
   const ids = new Set<string>([focusId])
   let frontier = [focusId]
@@ -228,13 +228,13 @@ function pathToRoot(idx: GraphIndex, start: string): string[] {
   return path
 }
 
-// Mode 3 — License Path: root → … → the flagged-license component.
+// Mode 3 – License Path: root → … → the flagged-license component.
 function licensePathGraph(idx: GraphIndex, id: string): SubGraph {
   const chain = pathToRoot(idx, id)
   return { ids: new Set(chain), edges: chainEdges(chain), focus: id }
 }
 
-// Mode 4 — Blast Radius: every package that (transitively) depends on a component.
+// Mode 4 – Blast Radius: every package that (transitively) depends on a component.
 function blastRadiusGraph(idx: GraphIndex, focusId: string): SubGraph {
   const ids = new Set<string>([focusId])
   let frontier = [focusId]
@@ -349,7 +349,7 @@ export function DependencyGraphTab({ scan }: { scan: ScanResult | null }) {
 
   return (
     <Card bodyClass="p-0">
-      {/* Mode switcher — the graph answers a question, it is not a full dump. */}
+      {/* Mode switcher – the graph answers a question, it is not a full dump. */}
       <div className="flex flex-wrap gap-1.5 border-b border-border p-3">
         {MODES.map((m) => {
           const active = mode === m.id
@@ -390,11 +390,11 @@ export function DependencyGraphTab({ scan }: { scan: ScanResult | null }) {
               />
               {selectedVuln && (
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-xs text-mutedfg">
-                  <KV label="CVSS" value={selectedVuln.cvssScore > 0 ? selectedVuln.cvssScore.toFixed(1) : '—'} />
+                  <KV label="CVSS" value={selectedVuln.cvssScore > 0 ? selectedVuln.cvssScore.toFixed(1) : '–'} />
                   <KV label="current" value={`${selectedVuln.component}@${selectedVuln.version}`} />
                   <KV
                     label="fixed in"
-                    value={selectedVuln.fixedVersion || '—'}
+                    value={selectedVuln.fixedVersion || '–'}
                     valueClass={selectedVuln.fixedVersion ? 'text-accent' : 'text-subtlefg'}
                   />
                 </div>
@@ -477,7 +477,7 @@ function GraphCanvas({
         <Network className="size-7 text-subtlefg" />
         <p className="max-w-md text-sm text-mutedfg">
           This repository contains {idx.totalComponents.toLocaleString()} packages and{' '}
-          {idx.totalEdges.toLocaleString()} dependency edges — too large to render at once. Narrow the depth, or use{' '}
+          {idx.totalEdges.toLocaleString()} dependency edges – too large to render at once. Narrow the depth, or use{' '}
           <span className="text-foreground">Finding path</span> / <span className="text-foreground">License path</span>{' '}
           to explore a focused chain.
         </p>

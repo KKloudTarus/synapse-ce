@@ -106,7 +106,7 @@ export function VerdictBadge({ verdict }: { verdict: Verdict }) {
 export function KevBadge() {
   return (
     <span
-      title="CISA Known Exploited Vulnerability — actively exploited in the wild"
+      title="CISA Known Exploited Vulnerability – actively exploited in the wild"
       className="inline-flex items-center rounded-md bg-critical/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-critical ring-1 ring-inset ring-critical/30"
     >
       KEV
@@ -162,7 +162,7 @@ export function Field({
   )
 }
 
-// ---- Select (custom dropdown — Radix, styled with design tokens) ----
+// ---- Select (custom dropdown – Radix, styled with design tokens) ----
 
 export type SelectOption = { value: string; label: ReactNode }
 

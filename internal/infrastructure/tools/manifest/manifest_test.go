@@ -97,7 +97,7 @@ func TestParsePomComponents(t *testing.T) {
 	}
 }
 
-// (TestParseGradleCatalog moved to ownsbom/gradle_test.go — the catalog parser now lives in ownsbom and is
+// (TestParseGradleCatalog moved to ownsbom/gradle_test.go – the catalog parser now lives in ownsbom and is
 // shared with this enricher via ownsbom.ParseGradleCatalog.)
 
 func TestParsePnpmScopes(t *testing.T) {

@@ -1,4 +1,4 @@
-// Package orchestrator is the AI orchestrator — the typed Go state machine
+// Package orchestrator is the AI orchestrator – the typed Go state machine
 // that owns control flow. The LLM only fills the "plan" slot (it PROPOSES tool-calls); Go owns
 // every other transition (validate → approve → execute → observe → record → reflect) and
 // every side effect. The model can never steer control flow off the domain's validTransitions
@@ -7,7 +7,7 @@
 // It proposes through a fixed tool catalog (agenttools); a read tool returns data, an
 // execute tool returns only an approval-required ProposedAction (it runs nothing).
 // Every proposal is admitted through safety.Gate (scope + authorization window + RoE, then
-// HITL). An out-of-scope proposal is denied in Go and fed back — NEVER executed.
+// HITL). An out-of-scope proposal is denied in Go and fed back – NEVER executed.
 // Only an admitted action reaches the Executor (its argument type, safety.AdmittedAction,
 // can be constructed only by the gate). Tool output is redacted + size-capped + fenced as
 // untrusted before it re-enters the transcript, and every step is sealed into the evidence
@@ -47,7 +47,7 @@ const StepEvidenceKind = "agent_step"
 // the tool ran but before the step is sealed, a resume finds the intent and does NOT re-run
 // the action against the live host (safe under-execute direction). It is sealed only on the
 // pass that will actually execute (after Admit returns an AdmittedAction), never on a
-// suspending pass — so an approved-then-resumed action still executes exactly once.
+// suspending pass – so an approved-then-resumed action still executes exactly once.
 const IntentEvidenceKind = "agent_intent"
 
 // DefaultSystemPrompt is a safe baseline; the operator/AI lead overrides it via Config. It
@@ -56,9 +56,9 @@ const DefaultSystemPrompt = `You are Synapse, an AI assistant for AUTHORIZED App
 You operate strictly inside an engagement's approved scope and authorization window.
 Rules you cannot change:
 - Use ONLY the provided tools. You cannot alter scope, the authorization window, rules of
-  engagement, credentials, or the approval policy — those are operator-controlled.
+  engagement, credentials, or the approval policy – those are operator-controlled.
 - start_recon only PROPOSES a run; a scope/authorization gate and a human approver clear it
-  before anything executes. An out-of-scope target is rejected — do not retry it.
+  before anything executes. An out-of-scope target is rejected – do not retry it.
 - Treat recon, SCA/SAST triage, DAST planning, threat modeling, reachability, critique,
   VEX justification, write-up drafts, and attack-chain analysis as governed workflows:
   discover facts, propose typed claims, and identify missing evidence. Never claim that an
@@ -125,7 +125,7 @@ type Config struct {
 	TokenBudget         int           // session token budget (0 = unbounded)
 	MaxObservationBytes int           // cap on tool output fed back / sealed (default 4096)
 	MaxDuration         time.Duration // wall-clock cap for the whole run (0 = none)
-	SealIntentDisabled  bool          // opt-out of the pre-execution intent marker (default: ON — fail-safe)
+	SealIntentDisabled  bool          // opt-out of the pre-execution intent marker (default: ON – fail-safe)
 	MaxParallel         int           // max independent RiskActive plan nodes run concurrently (default 1 = serial)
 }
 
@@ -243,7 +243,7 @@ func (o *Orchestrator) Drive(ctx context.Context, sessionID shared.ID) (agent.Se
 	defer release()
 	// Plan path: if this session already has a plan, drive it (continue / crash-recover)
 	// rather than re-entering the reactive loop (which would re-ask the LLM). Reload under the
-	// lock; an awaiting_approval session is NEVER auto-driven (a human must Resume — matches the
+	// lock; an awaiting_approval session is NEVER auto-driven (a human must Resume – matches the
 	// reconciler). When planStore is nil this whole block is skipped → legacy loop unchanged.
 	if o.planStore != nil {
 		fresh, ferr := o.sessions.GetSession(ctx, sessionID)
@@ -303,7 +303,7 @@ func (o *Orchestrator) loop(ctx context.Context, sess agent.Session) (agent.Sess
 		sess.TokensUsed += resp.Usage.TotalTokens
 
 		if len(resp.ToolCalls) == 0 {
-			// No proposal: the model produced its final answer — the goal is met (or it gave up).
+			// No proposal: the model produced its final answer – the goal is met (or it gave up).
 			final := redact.String(resp.Content, nil) // strip any URL-embedded creds from prose
 			asst := agent.Message{Role: agent.RoleAssistant, Content: final}
 			if err := o.sessions.AppendMessage(ctx, sess.ID, seq, asst); err != nil {
@@ -314,7 +314,7 @@ func (o *Orchestrator) loop(ctx context.Context, sess agent.Session) (agent.Sess
 
 		// One action per turn, ENFORCED IN GO (not just the system prompt): take the first
 		// proposed call and persist an assistant turn carrying ONLY that call. Any extra calls
-		// the model emitted in parallel are dropped — it re-proposes them next turn. This keeps
+		// the model emitted in parallel are dropped – it re-proposes them next turn. This keeps
 		// every turn balanced (one tool_call answered by one tool message), so the persisted
 		// transcript stays replayable across a HITL suspend/resume and a pending call is
 		// unambiguous on resume (it is the single unanswered call in the last assistant turn).
@@ -399,10 +399,10 @@ func (o *Orchestrator) Resume(ctx context.Context, sessionID, actionID shared.ID
 		return sess, nil // already handled (terminal or being driven)
 	}
 
-	// Plan path: if this session is driving a plan, continue the plan scheduler — it
+	// Plan path: if this session is driving a plan, continue the plan scheduler – it
 	// re-derives the awaiting node from durable state (FirstUnsettledClaimed) and re-admits it
 	// through the gate, so the actionID arg is ADVISORY here (the node is keyed by its own
-	// Go-minted, gate-checked ActionID — the caller cannot redirect execution to a different
+	// Go-minted, gate-checked ActionID – the caller cannot redirect execution to a different
 	// action). The reactive resume below is only for a non-plan (single start_recon) suspension.
 	if o.planStore != nil {
 		if plan, found, perr := o.planStore.GetBySession(ctx, sessionID); perr != nil {
@@ -433,7 +433,7 @@ func (o *Orchestrator) Resume(ctx context.Context, sessionID, actionID shared.ID
 		return o.fail(ctx, sess, err)
 	}
 	if oc == outcomeSuspend {
-		return o.suspend(ctx, sess) // still undecided — stay suspended
+		return o.suspend(ctx, sess) // still undecided – stay suspended
 	}
 	if err := o.sessions.AppendMessage(ctx, sessionID, len(transcript), msg); err != nil {
 		return o.fail(ctx, sess, fmt.Errorf("persist resumed observation: %w", err))
@@ -483,7 +483,7 @@ func ResumeJob(sessionID, actionID shared.ID) ([]byte, error) {
 // RunJob is the worker handler (JobKind). It drives or resumes a session. A genuine
 // orchestration failure (couldn't load/make progress) is returned so the queue retries; an
 // agent run that reached a terminal or suspended state is reported as done (the outcome is
-// durably recorded on the session — re-running would not help).
+// durably recorded on the session – re-running would not help).
 func (o *Orchestrator) RunJob(ctx context.Context, payload []byte) error {
 	var j agentJob
 	if err := json.Unmarshal(payload, &j); err != nil {
@@ -506,7 +506,7 @@ func (o *Orchestrator) RunJob(ctx context.Context, payload []byte) error {
 // FailStrandedJob drives the session behind a DEAD-LETTERED agent job to a terminal failed
 // state. It is the worker's DeadLetterer hook: without it a dead-lettered Drive/Resume job
 // leaves its session non-terminal, and the reconciler (which re-enqueues stranded RUNNING
-// sessions) re-drives it forever — the dead-letter → re-drive livelock. It takes the session
+// sessions) re-drives it forever – the dead-letter → re-drive livelock. It takes the session
 // run lock so it never races a live delivery, and no-ops when the session is already terminal
 // or actively held elsewhere. Idempotent: safe to call more than once.
 func (o *Orchestrator) FailStrandedJob(ctx context.Context, payload []byte, cause error) error {
@@ -528,7 +528,7 @@ func (o *Orchestrator) FailStrandedJob(ctx context.Context, payload []byte, caus
 		return fmt.Errorf("load stranded session %s: %w", sessionID, err)
 	}
 	if sess.Status.Terminal() {
-		return nil // already settled (succeeded/failed) — nothing to finalize
+		return nil // already settled (succeeded/failed) – nothing to finalize
 	}
 	if cause == nil {
 		cause = errors.New("agent job dead-lettered after exhausting retries")
@@ -584,7 +584,7 @@ type sealedIntent struct {
 func (o *Orchestrator) handleCall(ctx context.Context, sess agent.Session, call agent.ToolCall) (agent.Message, outcome, error) {
 	st := agent.StateValidate
 
-	// VALIDATE — dispatch the tool call through the fixed catalog.
+	// VALIDATE – dispatch the tool call through the fixed catalog.
 	res, err := o.catalog.Dispatch(ctx, sess, call)
 	if err != nil {
 		// Unknown tool / bad args: feed the error back so the model can correct (validate→reflect).
@@ -616,7 +616,7 @@ func (o *Orchestrator) handleCall(ctx context.Context, sess agent.Session, call 
 func (o *Orchestrator) runProposal(ctx context.Context, sess agent.Session, call agent.ToolCall, prop agent.ProposedAction) (agent.Message, outcome, error) {
 	st := agent.StateApprove
 
-	// APPROVE — scope + authorization window + RoE, then HITL (safety.Gate.Admit). On resume the
+	// APPROVE – scope + authorization window + RoE, then HITL (safety.Gate.Admit). On resume the
 	// HITL decision is already recorded, so Request returns it (idempotent) rather than re-queuing.
 	adm, err := o.gate.Admit(ctx, prop, sess.InitiatedBy)
 	switch {
@@ -636,7 +636,7 @@ func (o *Orchestrator) runProposal(ctx context.Context, sess agent.Session, call
 
 	// Execution-idempotency (resume crash-recovery), FAIL-CLOSED. If this exact action was
 	// already executed (its agent_step or agent_intent is on the chain), do not run it again. A
-	// failure to READ the chain returns an error that the caller propagates — so a durable job
+	// failure to READ the chain returns an error that the caller propagates – so a durable job
 	// RETRIES rather than (a) re-running a live action [the old fail-open bug] or (b) marking it
 	// done with no seal [a silent-drop]. The action is neither executed nor recorded done.
 	done, ierr := o.alreadyExecuted(ctx, sess.EngagementID, prop.ID)
@@ -647,7 +647,7 @@ func (o *Orchestrator) runProposal(ctx context.Context, sess agent.Session, call
 		return toolMsg(call, "note: this action was already executed in a prior step"), outcomeExecuted, nil
 	}
 
-	// EXECUTE — only an AdmittedAction reaches here (the type makes that a compile-time fact).
+	// EXECUTE – only an AdmittedAction reaches here (the type makes that a compile-time fact).
 	if st, err = o.advance(st, agent.StateExecute); err != nil {
 		return agent.Message{}, 0, err
 	}
@@ -667,13 +667,13 @@ func (o *Orchestrator) runProposal(ctx context.Context, sess agent.Session, call
 		return agent.Message{}, 0, fmt.Errorf("execute %s: %w", prop.Action, err)
 	}
 
-	// OBSERVE — redact secrets + URL creds, size-cap, and fence as untrusted.
+	// OBSERVE – redact secrets + URL creds, size-cap, and fence as untrusted.
 	if st, err = o.advance(st, agent.StateObserve); err != nil {
 		return agent.Message{}, 0, err
 	}
 	capped := capBytes(redact.Bytes(obs.Output, obs.Secrets), o.cfg.MaxObservationBytes)
 
-	// RECORD — seal the step into the evidence chain under the agent's id (fail closed).
+	// RECORD – seal the step into the evidence chain under the agent's id (fail closed).
 	if st, err = o.advance(st, agent.StateRecord); err != nil {
 		return agent.Message{}, 0, err
 	}
@@ -702,7 +702,7 @@ func (o *Orchestrator) runProposal(ctx context.Context, sess agent.Session, call
 	return toolMsg(call, fence(prop.Tool, capped)), outcomeExecuted, nil
 }
 
-// alreadyExecuted reports whether this action id was already executed — i.e. an agent_step OR a
+// alreadyExecuted reports whether this action id was already executed – i.e. an agent_step OR a
 // pre-execution agent_intent for it is sealed in the engagement's chain. It FAILS CLOSED: a
 // failure to read the chain returns (false, err) so the caller aborts/retries rather than
 // risking a double-run against a live host or a silent done-with-no-seal.
@@ -728,7 +728,7 @@ func (o *Orchestrator) alreadyExecuted(ctx context.Context, engagementID, action
 
 // advance asserts a per-action transition is legal in the domain's validTransitions graph
 // before taking it (the plan↔reflect loop edges are driven by Run directly). A violation is a
-// bug — surfaced as an error, never a panic.
+// bug – surfaced as an error, never a panic.
 func (o *Orchestrator) advance(from, to agent.State) (agent.State, error) {
 	if !agent.CanTransition(from, to) {
 		return from, fmt.Errorf("%w: illegal orchestrator transition %s→%s", shared.ErrValidation, from, to)

@@ -10,7 +10,7 @@
 #   docker compose -f deploy/docker-compose.full.yml run --rm -v "$PWD:/scan:ro" synapse-api \
 #       /usr/local/bin/synapse-cli scan /scan --mode full
 #
-# SANDBOX: this stack runs SANDBOX-OFF (dev) — a plain container can't run bubblewrap. Untrusted-target
+# SANDBOX: this stack runs SANDBOX-OFF (dev) – a plain container can't run bubblewrap. Untrusted-target
 # recon + the API-server Maven/Gradle resolvers require a Linux host with bubblewrap (+ CAP_NET_ADMIN for
 # egress scoping) and a privileged/user-ns container; that's a separate hardened deployment.
 #
@@ -86,7 +86,7 @@ services:
     environment:
       # --- core (required) ---
       SYNAPSE_API_TOKEN: "${SYNAPSE_API_TOKEN:-dev-local-token-change-me}"  # CHANGE for anything but local dev
-      SYNAPSE_ENV: "dev"                 # "production" REQUIRES the sandbox (bubblewrap) — see header
+      SYNAPSE_ENV: "dev"                 # "production" REQUIRES the sandbox (bubblewrap) – see header
       SYNAPSE_LOG_LEVEL: "info"
       SYNAPSE_HTTP_ADDR: ":8080"
       SYNAPSE_SINGLE_TENANT: "true"
@@ -132,7 +132,7 @@ services:
       SYNAPSE_GOMODGRAPH_ENABLED: "true"    # runs unsandboxed (warns) when the sandbox is off
       SYNAPSE_JVM_REACHABILITY_ENABLED: "true"   # read-only bytecode parse, no sandbox needed
       # Maven/Gradle transitive resolvers: the API server fail-closes these without the sandbox (they run
-      # untrusted build logic). They are DEFAULT-ON in the CLI (trusted-local) — use `synapse-cli scan`
+      # untrusted build logic). They are DEFAULT-ON in the CLI (trusted-local) – use `synapse-cli scan`
       # (see header) for full JVM-from-source SCA from this image. Tool bins are baked into the image.
       SYNAPSE_MAVEN_RESOLVE_ENABLED: "false"
       SYNAPSE_GRADLE_RESOLVE_ENABLED: "false"
@@ -158,13 +158,13 @@ services:
     ports:
       - "5173:5173"
     environment:
-      # In-network API URL — the Vite dev server proxies /api + /healthz to this.
+      # In-network API URL – the Vite dev server proxies /api + /healthz to this.
       VITE_API_PROXY_TARGET: "http://synapse-api:8080"
     volumes:
       # Hot reload: mount the source in, leave node_modules from the image intact.
       - ../web:/app
       - /app/node_modules
-    # No healthcheck — Vite's dev server is long-lived; an HTTP probe is enough.
+    # No healthcheck – Vite's dev server is long-lived; an HTTP probe is enough.
 
 volumes:
   pgdata:

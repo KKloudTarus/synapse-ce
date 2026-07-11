@@ -24,7 +24,7 @@ func NewScanRepository(pool *pgxpool.Pool) *ScanRepository { return &ScanReposit
 var _ ports.ScanRepository = (*ScanRepository)(nil)
 
 // SaveScan stores the SBOM, its components, and the vulnerabilities found against
-// them in one transaction — a new immutable snapshot per scan. It returns the
+// them in one transaction – a new immutable snapshot per scan. It returns the
 // number of vulns that could not be linked to a component in this SBOM (skipped,
 // never orphaned); the caller surfaces a non-zero count on the audit log so a
 // dropped advisory is never invisible on a chain-of-custody tool.
@@ -76,7 +76,7 @@ func (r *ScanRepository) SaveScan(ctx context.Context, engagementID shared.ID, d
 	for _, v := range vulns {
 		cid, ok := compID[v.Component+"\x00"+v.Version]
 		if !ok {
-			skipped++ // component not in this SBOM — counted + surfaced by the caller
+			skipped++ // component not in this SBOM – counted + surfaced by the caller
 			continue
 		}
 		src := v.Source

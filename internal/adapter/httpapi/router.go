@@ -57,6 +57,7 @@ type Router struct {
 	judgments    judgmentService     // optional; nil ⇒ judgment routes are not registered
 	threatModels threatModelService  // optional; nil ⇒ threat-model routes are not registered
 	drafts       writeupDraftService // optional; nil ⇒ writeup-draft sign-off routes are not registered
+	codeQuality  codeQualityService  // optional; nil ⇒ the code-quality route is not registered
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -72,7 +73,7 @@ func (rt *Router) SetExploitation(v findingVerifier) { rt.exploitation = v }
 // judgmentService is the narrow slice of the analysis use-case the HTTP layer needs: list
 // the engagement's AI judgments (read) and apply a distinct-verifier verdict / human acceptance.
 // Verify + Accept are gated by PermReview (separation of duties; never a machine role). Propose is
-// NOT exposed here — judgments are proposed by the agent via the tool catalog, and the
+// NOT exposed here – judgments are proposed by the agent via the tool catalog, and the
 // score-mover is off the broad read port. *analysis.Service satisfies this.
 type judgmentService interface {
 	List(ctx context.Context, engagementID shared.ID) ([]judgment.Judgment, error)
@@ -81,7 +82,7 @@ type judgmentService interface {
 }
 
 // writeupDraftService is the human sign-off slice of the writeupdraft use case: list the
-// engagement's drafts, and the human-only edit/accept/reject. (Propose is NOT here — the agent reaches
+// engagement's drafts, and the human-only edit/accept/reject. (Propose is NOT here – the agent reaches
 // it via a separate narrow interface in the agent catalog; a human cannot propose via HTTP.)
 type writeupDraftService interface {
 	ListByEngagement(ctx context.Context, engagementID shared.ID) ([]writeupdraft.Draft, error)
@@ -124,7 +125,7 @@ func NewRouter(log *slog.Logger, auth *Authenticator, eng *enguc.Service, sca *s
 }
 
 // authz wraps a handler with an RBAC check: the request principal's role must be granted
-// perm, else 403. It is the single role chokepoint — every non-public route is registered through
+// perm, else 403. It is the single role chokepoint – every non-public route is registered through
 // it, so no handler decides its own authorization. Composed OUTSIDE withEngTenant for engagement
 // child routes (role 403 is decided first and cheaply, without revealing whether a cross-tenant
 // engagement exists; a role-allowed caller then hits the tenant 404). Machine (mcp/agent) and
@@ -163,7 +164,7 @@ func (rt *Router) withEngTenant(h http.HandlerFunc) http.HandlerFunc {
 
 // routes registers every route on a fresh ServeMux and returns it. Split out from Handler so the
 // hostile validation harness can drive the real route → authz → withEngTenant → handler
-// chain directly with a context-injected principal — exercising the production authorization wiring
+// chain directly with a context-injected principal – exercising the production authorization wiring
 // without the auth/AUP middleware (which are validated separately).
 func (rt *Router) routes() *http.ServeMux {
 	mux := http.NewServeMux()
@@ -172,7 +173,7 @@ func (rt *Router) routes() *http.ServeMux {
 	})
 	// Identity/consent routes carry NO role gate (a brand-new principal must reach them): /aup,
 	// /aup/accept, /me, and public /healthz. EVERY other route below is registered through
-	// authz(perm, …) — the single RBAC chokepoint, so no handler decides its own role
+	// authz(perm, …) – the single RBAC chokepoint, so no handler decides its own role
 	// check. Engagement child routes compose authz OUTSIDE withEngTenant: the role 403 is decided
 	// first and cheaply (without revealing whether a cross-tenant engagement exists); a role-allowed
 	// caller then hits the tenant 404. Machine (mcp/agent) roles are granted nothing here.
@@ -202,7 +203,7 @@ func (rt *Router) routes() *http.ServeMux {
 	if rt.exploitation != nil { // distinct-verifier verdict that gates promotion (sign-off → PermReview)
 		mux.HandleFunc("POST /api/v1/engagements/{id}/findings/{fid}/verify", rt.authz(userdom.PermReview, rt.withEngTenant(rt.verifyFinding)))
 	}
-	if rt.judgments != nil { // AI judgment lifecycle — read (PermView) + sign-off verify/accept (PermReview, SoD)
+	if rt.judgments != nil { // AI judgment lifecycle – read (PermView) + sign-off verify/accept (PermReview, SoD)
 		mux.HandleFunc("GET /api/v1/engagements/{id}/judgments", rt.authz(userdom.PermView, rt.withEngTenant(rt.listJudgments)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/judgments/{jid}/verify", rt.authz(userdom.PermReview, rt.withEngTenant(rt.verifyJudgment)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/judgments/{jid}/accept", rt.authz(userdom.PermReview, rt.withEngTenant(rt.acceptJudgment)))
@@ -219,7 +220,10 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("PUT /api/v1/engagements/{id}/threat-model", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.putThreatModel)))
 		mux.HandleFunc("GET /api/v1/engagements/{id}/threat-model", rt.authz(userdom.PermView, rt.withEngTenant(rt.getThreatModel)))
 	}
-	if rt.drafts != nil { // AI-proposed write-up drafts — read (PermView) + human sign-off edit/accept/reject (PermReview, SoD)
+	if rt.codeQuality != nil { // read-only code-quality dashboard (PermView)
+		mux.HandleFunc("GET /api/v1/engagements/{id}/code-quality", rt.authz(userdom.PermView, rt.withEngTenant(rt.codeQualityReport)))
+	}
+	if rt.drafts != nil { // AI-proposed write-up drafts – read (PermView) + human sign-off edit/accept/reject (PermReview, SoD)
 		mux.HandleFunc("GET /api/v1/engagements/{id}/writeup-drafts", rt.authz(userdom.PermView, rt.withEngTenant(rt.listWriteupDrafts)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/writeup-drafts/{did}/edit", rt.authz(userdom.PermReview, rt.withEngTenant(rt.editWriteupDraft)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/writeup-drafts/{did}/accept", rt.authz(userdom.PermReview, rt.withEngTenant(rt.acceptWriteupDraft)))
@@ -277,7 +281,7 @@ func (rt *Router) routes() *http.ServeMux {
 
 // Handler returns the root http.Handler. Middleware chain (outermost first):
 // normalize-path → auth → AUP gate → routes. Per-route RBAC is applied at registration via
-// authz(perm, …) — not a path-set. Normalizing first ensures the public/AUP-exempt path-sets
+// authz(perm, …) – not a path-set. Normalizing first ensures the public/AUP-exempt path-sets
 // (matched on the request path) see exactly the path the ServeMux will route on (closes the
 // raw-vs-cleaned path mismatch).
 func (rt *Router) Handler() http.Handler {

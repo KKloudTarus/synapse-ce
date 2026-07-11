@@ -129,7 +129,7 @@ func classify(ctx context.Context, path string, fi os.FileInfo, tally map[string
 	}
 	switch enry.GetLanguageType(lang) {
 	case enry.Programming, enry.Markup:
-		// Classify on the (capped) sample, but weight by the full file size —
+		// Classify on the (capped) sample, but weight by the full file size –
 		// Linguist-style. Don't "fix" this to len(content); it would break weighting.
 		tally[lang] += fi.Size()
 	}

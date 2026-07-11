@@ -12,9 +12,9 @@ import (
 )
 
 // findingView is a finding annotated for the UI read path with two purely-additive, DETERMINISTIC
-// augmentations (no LLM): the suspected-FP flag (a CONFIRMED, publishable "refuted" critique —
+// augmentations (no LLM): the suspected-FP flag (a CONFIRMED, publishable "refuted" critique –
 // advisory only, never suppresses the finding) and the curated compliance controls the finding's CWE
-// maps to (the same table the report uses — a lookup, not a model output). The embedded
+// maps to (the same table the report uses – a lookup, not a model output). The embedded
 // finding's JSON shape is unchanged; both new fields are omitempty (non-breaking).
 type findingView struct {
 	finding.Finding
@@ -106,9 +106,9 @@ func (rt *Router) createFinding(w http.ResponseWriter, r *http.Request) {
 // verifyFinding applies a DISTINCT verifier's adversarial verdict to an exploitation finding
 // it seals the verdict into the evidence chain and, if the score clears the bar, makes
 // the finding promotable. Separation of duties is enforced two independent ways: the route requires
-// PermReview (machine roles — mcp/agent — are granted nothing in the RBAC matrix, so they cannot
+// PermReview (machine roles – mcp/agent – are granted nothing in the RBAC matrix, so they cannot
 // verify) and the domain rejects verifier == proposed_by. A passing verdict still does not
-// auto-confirm — a human PATCHes status=confirmed afterward (which the findings service blocks
+// auto-confirm – a human PATCHes status=confirmed afterward (which the findings service blocks
 // below the evidence bar).
 func (rt *Router) verifyFinding(w http.ResponseWriter, r *http.Request) {
 	engID, findID := r.PathValue("id"), r.PathValue("fid")

@@ -1,14 +1,14 @@
 // Package mcpserver exposes Synapse's agent tool catalog to external AI clients over the Model
-// Context Protocol. It is a hand-rolled MCP core — JSON-RPC 2.0 over the
+// Context Protocol. It is a hand-rolled MCP core – JSON-RPC 2.0 over the
 // Streamable-HTTP transport (a single POST endpoint) implementing initialize / tools/list /
-// tools/call — so it needs no third-party SDK and is fully testable offline. (The SDK can be
+// tools/call – so it needs no third-party SDK and is fully testable offline. (The SDK can be
 // swapped in later behind the same Catalog seam.)
 //
 // Safety: the server is bearer-locked (role "mcp") and pinned to ONE engagement, so it can
 // never reach another engagement's data (the catalog is engagement-locked per session and an
 // engagement id is never accepted from the client). It dispatches through the SAME
 // agenttools.Catalog the in-process orchestrator uses, so read tools return data and an
-// execute proposal (start_recon) is returned as an approval-required envelope — the MCP path
+// execute proposal (start_recon) is returned as an approval-required envelope – the MCP path
 // has no executor and no gate, so it can never RUN a tool (it can only read + propose). All
 // dispatches are audited by the catalog under the agent id.
 package mcpserver

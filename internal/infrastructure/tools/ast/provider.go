@@ -38,7 +38,7 @@ func New(bin string) *Provider {
 	return &Provider{bin: bin}
 }
 
-// WithRunner confines the sidecar via a ToolRunner (the SandboxRunner) — recommended in production, since
+// WithRunner confines the sidecar via a ToolRunner (the SandboxRunner) – recommended in production, since
 // the binary parses untrusted target source. nil keeps the direct-exec dev path. The target is bound
 // read-only. Unlike synapse-callgraph, cgo is NOT disabled: the tree-sitter backend requires it.
 func (p *Provider) WithRunner(r ports.ToolRunner) *Provider { p.runner = r; return p }
@@ -107,7 +107,7 @@ func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, erro
 		})
 		if err != nil {
 			// The sidecar could not be run (absent binary / sandbox setup). Like the direct path, degrade
-			// to unavailable rather than failing the inventory — this provider is optional enrichment.
+			// to unavailable rather than failing the inventory – this provider is optional enrichment.
 			return nil, exitUnavailable, nil
 		}
 		if res.ExitCode != 0 && res.ExitCode != exitUnavailable {

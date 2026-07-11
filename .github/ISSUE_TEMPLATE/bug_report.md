@@ -23,4 +23,4 @@ What you expected to happen.
 **Logs / output**
 Relevant logs or error output (redact any secrets).
 
-> Do not report security vulnerabilities here — see [SECURITY.md](../../SECURITY.md).
+> Do not report security vulnerabilities here – see [SECURITY.md](../../SECURITY.md).

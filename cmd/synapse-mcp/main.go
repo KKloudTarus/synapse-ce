@@ -3,7 +3,7 @@
 // read-only catalog over the SAME repos as the API, bearer-locks the endpoint (role "mcp"),
 // pins it to one engagement, and serves JSON-RPC over Streamable HTTP. It coexists with the
 // API + worker via a role-scoped single-instance lock. The MCP path has no executor and no
-// safety gate, so it can only read + propose — never run a tool.
+// safety gate, so it can only read + propose – never run a tool.
 package main
 
 import (
@@ -70,7 +70,7 @@ func main() {
 			os.Exit(1)
 		}
 		if !ok {
-			log.Error("another synapse-mcp holds the single-instance lock — run ONE per role")
+			log.Error("another synapse-mcp holds the single-instance lock – run ONE per role")
 			os.Exit(1)
 		}
 		defer lockConn.Release()

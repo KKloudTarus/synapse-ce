@@ -1,7 +1,7 @@
 -- +goose Up
 -- Multi-source detection (Phase 1.6): which detectors found each vulnerability,
 -- the confidence derived from how many agree, and each source's original data.
--- Backward compatible — existing rows keep the defaults (treated as OSV / medium).
+-- Backward compatible – existing rows keep the defaults (treated as OSV / medium).
 ALTER TABLE vulnerabilities ADD COLUMN sources         TEXT NOT NULL DEFAULT '';
 ALTER TABLE vulnerabilities ADD COLUMN confidence      TEXT NOT NULL DEFAULT 'medium';
 ALTER TABLE vulnerabilities ADD COLUMN source_metadata JSONB;

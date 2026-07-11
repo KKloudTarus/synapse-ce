@@ -10,10 +10,10 @@ import (
 )
 
 // ParseOSV normalizes one OSV-schema advisory (the OSV.dev bulk-export / vulns/{id} JSON) into the owned
-// domain advisory.Advisory. It is a pure parser (no I/O) — the ingest pipeline reads
+// domain advisory.Advisory. It is a pure parser (no I/O) – the ingest pipeline reads
 // the bytes (offline snapshot) and calls this; the store persists the result, keyed in the exact
 // OSV-canonical ecosystem/package form the matcher's KEY CONTRACT requires (the OSV `package` block IS
-// that canonical form — Maven is already "groupId:artifactId", Go the module path). Fixture-tested,
+// that canonical form – Maven is already "groupId:artifactId", Go the module path). Fixture-tested,
 // mirroring the owned SBOM parsers.
 func ParseOSV(data []byte) (advisory.Advisory, error) {
 	var doc osvDoc
@@ -41,7 +41,7 @@ func ParseOSV(data []byte) (advisory.Advisory, error) {
 		adv.Affected = append(adv.Affected, advisory.AffectedPackage{
 			Ecosystem: aff.Package.Ecosystem, // OSV ecosystem is the canonical form the matcher keys on
 			// Normalize the package name to the ecosystem-canonical key (PEP 503 for PyPI) so the stored key
-			// matches the SBOM-side lookup — OSV PyPI advisories carry non-normalized names ("Django").
+			// matches the SBOM-side lookup – OSV PyPI advisories carry non-normalized names ("Django").
 			Package:      canonicalName(aff.Package.Ecosystem, aff.Package.Name),
 			Ranges:       mapRanges(aff.Ranges),
 			Versions:     aff.Versions,
@@ -72,7 +72,7 @@ func mapRanges(ranges []osvRange) []advisory.Range {
 }
 
 // firstFixed returns the first "fixed" version across an affected entry's ranges, for the remediation
-// hint. GIT ranges are skipped — their "fixed" is a commit SHA, a misleading version hint — preferring a
+// hint. GIT ranges are skipped – their "fixed" is a commit SHA, a misleading version hint – preferring a
 // SEMVER/ECOSYSTEM fix.
 func firstFixed(ranges []osvRange) string {
 	for _, r := range ranges {

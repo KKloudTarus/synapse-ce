@@ -29,7 +29,7 @@ func TestMarkBaseLayers(t *testing.T) {
 		}
 	})
 
-	t.Run("pure OS image — all base", func(t *testing.T) {
+	t.Run("pure OS image – all base", func(t *testing.T) {
 		img := mk()
 		img.MarkBaseLayers(nil) // no app layers
 		if img.BaseLayerCount != 5 {
@@ -37,7 +37,7 @@ func TestMarkBaseLayers(t *testing.T) {
 		}
 	})
 
-	t.Run("app in the very first layer — no base", func(t *testing.T) {
+	t.Run("app in the very first layer – no base", func(t *testing.T) {
 		img := mk()
 		img.MarkBaseLayers(map[string]bool{"sha256:a": true})
 		if img.BaseLayerCount != 0 {

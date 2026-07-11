@@ -143,7 +143,7 @@ func TestQualityThinSBOMSurfacesGaps(t *testing.T) {
 }
 
 func TestQualityPartialRatio(t *testing.T) {
-	// One of two components fully described, the other bare — element scores should be 50.
+	// One of two components fully described, the other bare – element scores should be 50.
 	doc := SBOM{
 		Source:     "synapse",
 		Components: []Component{fullComponent(), {Name: "bare"}},
@@ -201,7 +201,7 @@ func TestHasChecksumAndScorerCreditsChecksums(t *testing.T) {
 
 func TestQualityScoreClampedWhenNTIAUnmet(t *testing.T) {
 	// A component fully described EXCEPT supplier (a bare-namespace PURL): every semantic check passes, so
-	// the raw blend lands at the threshold — but a missing NTIA minimum element must keep the headline Score
+	// the raw blend lands at the threshold – but a missing NTIA minimum element must keep the headline Score
 	// visibly below NTIAThreshold so a gate that (wrongly) keys off Score can't read it as passing.
 	doc := SBOM{
 		Source: "synapse",
@@ -375,7 +375,7 @@ func TestNTIAProfileMatchesNTIAMet(t *testing.T) {
 			}
 		}
 		if ntia.Met != r.NTIAMet {
-			t.Errorf("case %d: ntia-2021 profile Met=%v but NTIAMet=%v — the two must agree", i, ntia.Met, r.NTIAMet)
+			t.Errorf("case %d: ntia-2021 profile Met=%v but NTIAMet=%v – the two must agree", i, ntia.Met, r.NTIAMet)
 		}
 	}
 }

@@ -12,7 +12,7 @@ import (
 // advisories. Each file is one release's whole CVE set, parsed via ParseUbuntuOVAL over the same hardened
 // walkAdvisoryFiles core as the JSON feeds (regular-file-only, size- and count-capped, abort-vs-skip).
 //
-// Like CSAFDirFeed it drops INERT advisories — ones that resolved to no fixed (ecosystem, package) key —
+// Like CSAFDirFeed it drops INERT advisories – ones that resolved to no fixed (ecosystem, package) key –
 // counting them into the skip total so the CLI reports honest coverage instead of storing rows that could
 // never match.
 type OVALDirFeed struct {

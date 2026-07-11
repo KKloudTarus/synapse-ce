@@ -53,8 +53,8 @@ func TestFailStrandedJobNoOpsOnTerminal(t *testing.T) {
 	}
 }
 
-// TestFailStrandedJobIdempotent proves repeated finalize calls are safe — at-least-once delivery
-// plus the reconciler can re-present the same dead-letter — leaving the session failed, no error.
+// TestFailStrandedJobIdempotent proves repeated finalize calls are safe – at-least-once delivery
+// plus the reconciler can re-present the same dead-letter – leaving the session failed, no error.
 func TestFailStrandedJobIdempotent(t *testing.T) {
 	orch, _, sessions := newOrch(t, loadLLM{}, &fakeExecutor{}, agent.ModeAuto, orchestrator.Config{MaxSteps: 4})
 	ctx := context.Background()

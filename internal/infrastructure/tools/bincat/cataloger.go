@@ -1,7 +1,7 @@
 // Package bincat catalogs installed language packages from a materialized image root filesystem that a
 // lockfile would miss: Go module dependencies embedded in compiled Go binaries (via stdlib debug/buildinfo)
 // and Python distributions installed on disk (*.dist-info / *.egg-info metadata). It is the OWNED
-// (detection-independent) counterpart to the generator for a SHIPPED artifact — a Go image is frequently just
+// (detection-independent) counterpart to the generator for a SHIPPED artifact – a Go image is frequently just
 // a scratch/distroless base plus one static binary with no go.mod present, so the binary's embedded build
 // info is the only inventory. Emitted components carry the language PURL (pkg:golang / pkg:pypi) so the
 // existing OSV advisory source matches them. It only READS the rootfs (assembled + symlink-free within the
@@ -134,7 +134,7 @@ func pythonComponent(path string) (sbom.Component, bool) {
 func goBinaryComponents(path string) (comps []sbom.Component) {
 	// A crafted ELF/PE/Mach-O can PANIC the stdlib debug/* parsers (malformed header counts/offsets turn into
 	// index/slice-bounds panics, not errors). Recover so one poisoned binary in an untrusted image contributes
-	// nothing — preserving the best-effort contract — rather than unwinding out of the walk and crashing the
+	// nothing – preserving the best-effort contract – rather than unwinding out of the walk and crashing the
 	// scan worker.
 	defer func() {
 		if recover() != nil {
@@ -149,7 +149,7 @@ func goBinaryComponents(path string) (comps []sbom.Component) {
 }
 
 // buildInfoComponents maps a Go binary's build info to pkg:golang components: the main module (when it carries
-// a resolved version — a source build records "(devel)", which is filtered) and every dependency, following a
+// a resolved version – a source build records "(devel)", which is filtered) and every dependency, following a
 // replacement. Pure, so it is unit-tested with a synthetic BuildInfo (a go-test binary omits its dep graph).
 func buildInfoComponents(bi *debug.BuildInfo) []sbom.Component {
 	var out []sbom.Component

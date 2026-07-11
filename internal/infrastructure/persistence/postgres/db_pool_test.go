@@ -49,7 +49,7 @@ func TestBuildPoolConfig_BadDSN(t *testing.T) {
 }
 
 // TestDSNForMigrate_StripsPoolParams: the pgxpool-only pool_* params must be removed before
-// the DSN reaches the database/sql pgx driver (goose), which rejects them — while every other
+// the DSN reaches the database/sql pgx driver (goose), which rejects them – while every other
 // param (sslmode, etc.) is preserved. Regression for the boot failure host validation caught.
 func TestDSNForMigrate_StripsPoolParams(t *testing.T) {
 	got := dsnForMigrate(poolTestDSN + "&pool_max_conns=24&pool_min_conns=2")

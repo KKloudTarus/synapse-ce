@@ -207,7 +207,7 @@ func TestExtractOCIRootFSRejectsTraversingWhiteout(t *testing.T) {
 
 func TestExtractOCIRootFSWhiteoutRootVictimSkipped(t *testing.T) {
 	layout := t.TempDir()
-	// A crafted marker ".wh..." trims to victim ".." — not a valid whiteout target. It must be skipped, never
+	// A crafted marker ".wh..." trims to victim ".." – not a valid whiteout target. It must be skipped, never
 	// deleting the assembled-tree root; the lower-layer file must survive.
 	l1 := addLayer(t, layout, true, []layerEntry{reg("keep.txt", "x")})
 	l2 := addLayer(t, layout, true, []layerEntry{reg(".wh...", "")})

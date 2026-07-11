@@ -24,7 +24,7 @@ func TestPostgresEvidenceForkGuard(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	// evidence is DB-enforced append-only (migration 0033) — no TRUNCATE. Use a fresh
+	// evidence is DB-enforced append-only (migration 0033) – no TRUNCATE. Use a fresh
 	// engagement id per run so the per-engagement fork-guard starts from an empty chain and
 	// accumulated rows from prior runs are harmless.
 	eng := "eng-" + randHex(t)
@@ -69,7 +69,7 @@ func TestPostgresEvidenceVerifyRoundTrip(t *testing.T) {
 	_, _ = pool.Exec(ctx, `INSERT INTO engagements (id, tenant_id, name) VALUES ($1,'','rt') ON CONFLICT (id) DO NOTHING`, eng)
 	store := NewEvidenceStore(pool)
 
-	now := time.Now() // nanosecond precision — must survive the round-trip via µs truncation
+	now := time.Now() // nanosecond precision – must survive the round-trip via µs truncation
 	prev := ""
 	for i := 0; i < 3; i++ {
 		e := evidence.Evidence{

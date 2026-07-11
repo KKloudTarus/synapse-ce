@@ -5,7 +5,7 @@ package sandbox
 import "errors"
 
 // On non-Linux platforms cgroup v2 does not exist; newRunCgroup always errors so the
-// runner falls back (the sandbox itself is already unavailable off Linux — no bwrap).
+// runner falls back (the sandbox itself is already unavailable off Linux – no bwrap).
 type runCgroup struct{}
 
 func newRunCgroup(int64, int64, int) (*runCgroup, error) {

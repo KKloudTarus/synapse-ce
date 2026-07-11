@@ -2,16 +2,16 @@
 // the resolved versions) by shelling out to `gradle dependencies` via argv and parsing the
 // dependency tree into SBOM components. A static build.gradle parse cannot do this: versions are often
 // supplied by a platform/BOM or version catalog (so the declaration carries no version) and the
-// transitive tree — where most CVEs live — is not listed. This adapter fills that gap as a best-effort,
+// transitive tree – where most CVEs live – is not listed. This adapter fills that gap as a best-effort,
 // opt-in, post-SBOM step. Gradle uses Maven coordinates, so the components are pkg:maven PURLs.
 //
 // SECURITY: this is HIGHER-risk than the Maven resolver. Evaluating `settings.gradle` + `build.gradle`
 // RUNS ARBITRARY Groovy/Kotlin build logic at configuration time (the `dependencies` task still
-// configures the project) — untrusted code execution by design. Mitigations: it invokes a PINNED
+// configures the project) – untrusted code execution by design. Mitigations: it invokes a PINNED
 // `gradle` binary, NEVER the project's own `./gradlew` wrapper (which would download+run an
 // attacker-chosen Gradle distribution); `--no-daemon` so nothing persists; in production it MUST run
 // through a ToolRunner (the sandbox) that confines the filesystem and restricts egress to the
-// configured repositories — the synapse-api composition root REFUSES to enable it without a sandbox
+// configured repositories – the synapse-api composition root REFUSES to enable it without a sandbox
 // (fail-closed). Direct-exec is the synapse-cli dogfood path for a TRUSTED local project only. OPT-IN
 // (SYNAPSE_GRADLE_RESOLVE_ENABLED) + BEST-EFFORT: no build script / missing gradle / any error yields
 // no components and never fails the scan.
@@ -44,7 +44,7 @@ var defaultRepoHosts = []string{"repo1.maven.org", "repo.maven.apache.org", "plu
 var buildFiles = []string{"build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"}
 
 // Resolver runs `gradle dependencies` to resolve a Gradle project's full dependency tree. bin is the
-// pinned gradle executable (path/name) — NOT the project's./gradlew.
+// pinned gradle executable (path/name) – NOT the project's./gradlew.
 type Resolver struct {
 	bin        string
 	runner     ports.ToolRunner
@@ -99,7 +99,7 @@ var _ ports.GradleResolver = (*Resolver)(nil)
 //
 // Resolution is best-effort PER build: a build that fails does not discard the ones that succeed.
 // Whenever ANY build failed, the first failure's reason is returned as the error ALONGSIDE the components
-// that did resolve — so the caller keeps the partial tree AND can surface the gap. A total failure returns
+// that did resolve – so the caller keeps the partial tree AND can surface the gap. A total failure returns
 // no components + the error; a clean run returns (comps, nil).
 func (r *Resolver) Resolve(ctx context.Context, dir string) ([]sbom.Component, error) {
 	roots := buildRoots(dir)
@@ -153,7 +153,7 @@ func hasBuildFile(dir string) bool {
 }
 
 // buildRoots finds the Gradle build roots under dir: each directory holding a build script
-// (build.gradle[.kts] / settings.gradle[.kts]), WITHOUT descending into it — a multi-project build's
+// (build.gradle[.kts] / settings.gradle[.kts]), WITHOUT descending into it – a multi-project build's
 // included sub-projects are resolved by running gradle on the build root (the settings.gradle dir), just
 // as `gradle -p <root> dependencies` configures the whole build. dir itself is a root when it has a build
 // file (single-build fast path). Gradle output/VCS/tooling dirs are skipped. Bounded to maxBuildRoots.
@@ -166,7 +166,7 @@ func buildRoots(dir string) []string {
 		if p != dir {
 			switch d.Name() {
 			case "build", "target", ".gradle", "buildSrc", "node_modules", ".git", ".idea":
-				return filepath.SkipDir // Gradle output / build-logic / VCS / tooling — never a build root to run gradle on
+				return filepath.SkipDir // Gradle output / build-logic / VCS / tooling – never a build root to run gradle on
 			}
 		}
 		if hasBuildFile(p) {
@@ -183,7 +183,7 @@ func buildRoots(dir string) []string {
 
 // args is the gradle invocation: the read-only `dependencies` task for the deployed runtimeClasspath
 // (compile + runtime; excludes test), plain console (no ANSI), no daemon (nothing persists). `-p` sets
-// the project dir; `-Dmaven.repo.local` has no gradle analogue — the cache is GRADLE_USER_HOME (env).
+// the project dir; `-Dmaven.repo.local` has no gradle analogue – the cache is GRADLE_USER_HOME (env).
 func (r *Resolver) args(dir string) []string {
 	return []string{"--no-daemon", "--console=plain", "-q", "-p", dir, "dependencies", "--configuration", "runtimeClasspath"}
 }
@@ -216,7 +216,7 @@ func (r *Resolver) run(ctx context.Context, dir string) ([]byte, error) {
 		return res.Stdout, nil
 	}
 	// Direct exec: dev/CLI path for a TRUSTED local project. build.gradle runs arbitrary code that can
-	// read the process env, so scrub SYNAPSE_* secrets (API keys, signing seeds, …) from the child — the
+	// read the process env, so scrub SYNAPSE_* secrets (API keys, signing seeds, …) from the child – the
 	// resolver needs none of them (defense-in-depth on the unsandboxed path; the sandbox path uses a
 	// controlled env already).
 	var stdout, stderr bytes.Buffer
@@ -246,7 +246,7 @@ func parseGradleDeps(data []byte) []sbom.Component {
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
 	for sc.Scan() {
-		// Strip leading tree-drawing chars ("+--- ", "\--- ", "| ") — coords start with an alnum group.
+		// Strip leading tree-drawing chars ("+--- ", "\--- ", "| ") – coords start with an alnum group.
 		line := strings.TrimLeft(sc.Text(), " |+\\-")
 		line, skip := gradleLine(strings.TrimSpace(line))
 		if skip {
@@ -282,12 +282,12 @@ func parseGradleDeps(data []byte) []sbom.Component {
 }
 
 // gradleLine handles a Gradle dependency-tree node's trailing marker and reports whether to SKIP it:
-// " (c)" — a dependency CONSTRAINT (constraints{}/platform()/BOM import), NOT necessarily an artifact
+// " (c)" – a dependency CONSTRAINT (constraints{}/platform()/BOM import), NOT necessarily an artifact
 // on the resolved classpath; a BOM is a pom, not a running jar, so emitting it would be a phantom
-// component + false-positive CVEs. SKIP — a constraint that IS resolved reappears on a normal line.
-// " (n)" — not resolved. SKIP.
-// " (*)" — subtree shown earlier; the coordinate/version here is the real resolved one. Strip + keep.
-// " (e)" — strip + keep (defensive; treat like a plain coordinate).
+// component + false-positive CVEs. SKIP – a constraint that IS resolved reappears on a normal line.
+// " (n)" – not resolved. SKIP.
+// " (*)" – subtree shown earlier; the coordinate/version here is the real resolved one. Strip + keep.
+// " (e)" – strip + keep (defensive; treat like a plain coordinate).
 //
 // Returns the cleaned coordinate text and skip=true when the line must be dropped.
 func gradleLine(line string) (string, bool) {

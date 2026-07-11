@@ -2,9 +2,9 @@
 // into Judgments for human review. When ≥2 SBOM producers run (an owned parser registry + a vendor tool
 // like Syft) over one target, a component only one producer emitted is the human-review signal: this
 // PROPOSES an ungated CapCorrelation judgment (subject = component) under a RESERVED system identity, which
-// a human acknowledges via Accept — NEVER auto-resolved (the disagreement is itself the signal). It reuses
+// a human acknowledges via Accept – NEVER auto-resolved (the disagreement is itself the signal). It reuses
 // the existing audited propose path (no new confirmed-state path) and is injected only from the composition
-// root, so it is not agent-reachable. Mirrors crosscheckjudge — the advisory analogue.
+// root, so it is not agent-reachable. Mirrors crosscheckjudge – the advisory analogue.
 package sbomcrosscheckjudge
 
 import (
@@ -23,7 +23,7 @@ import (
 const proposerActor = "system:sbom-cross-check"
 
 // proposer is the NARROW judgment-lifecycle slice the coordinator needs (analysis.Service satisfies it):
-// Propose (mint at score 0) + List (idempotent dedup). It has NO Verify/Accept — correlation is ungated and
+// Propose (mint at score 0) + List (idempotent dedup). It has NO Verify/Accept – correlation is ungated and
 // a human acknowledges it, so the coordinator can never confirm its own judgments. Composition-root only.
 type proposer interface {
 	Propose(ctx context.Context, proposer string, engagementID shared.ID, capability judgment.Capability, subjectKind judgment.SubjectKind, subjectID shared.ID, claim judgment.Claim) (judgment.Judgment, error)
@@ -48,7 +48,7 @@ func NewCoordinator(p proposer, audit ports.AuditLogger, clock ports.Clock) (*Co
 	return &Coordinator{proposer: p, audit: audit, clock: clock}, nil
 }
 
-// Record proposes one ungated CapCorrelation judgment per disagreement in the report — a human acknowledges
+// Record proposes one ungated CapCorrelation judgment per disagreement in the report – a human acknowledges
 // each via Accept (never auto-resolved). Idempotent: a disagreement whose component subject already has a
 // component-correlation judgment is skipped (no churn on re-scan, no duplicate from a repeated subject within
 // one report). Agreements mint nothing. Returns the number minted; a propose/audit error aborts with the
@@ -100,7 +100,7 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, report
 // ComponentID convention (PURL, else name@version, else name), prefixed with "component:" so the subject
 // kind is self-evident and can't collide with the vulnerability cross-check's "vuln:" subjects. The id is
 // compared for EQUALITY only, never parsed, so an unescaped ":" inside a PURL is harmless. A fully-blank
-// component yields the empty id (skipped) — though sbom.CrossCheck already drops blank components upstream.
+// component yields the empty id (skipped) – though sbom.CrossCheck already drops blank components upstream.
 func componentSubjectID(d sbom.CrossCheckItem) shared.ID {
 	id := sbom.ComponentID(d.Name, d.Version, d.PURL)
 	if id == "" {

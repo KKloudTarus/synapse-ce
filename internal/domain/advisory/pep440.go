@@ -8,7 +8,7 @@ import (
 // This file is the PyPI version comparator (PEP 440), the per-ecosystem ordering the SemVer comparator can't
 // express: PyPI versions carry an epoch (`1!2.0`), implicit/explicit post-releases (`1.0.post1`, `1.0-1`),
 // pre-releases (`1.0a1`, `1.0rc2`), and dev-releases (`1.0.dev3`) whose precedence is dev < pre < final <
-// post — none of which SemVer 2.0 orders correctly. It is pure + table-tested against the PEP 440 spec
+// post – none of which SemVer 2.0 orders correctly. It is pure + table-tested against the PEP 440 spec
 // examples, so an OSV ECOSYSTEM-range verdict on a PyPI advisory is deterministic + third-party-free.
 //
 // Submatch groups: 1=epoch 2=release 3=pre-letter 4=pre-num 5=implicit-post(-N) 6=post-letter 7=post-num
@@ -34,7 +34,7 @@ type pep struct {
 	devN    string // dev number (default "0")
 }
 
-// validPEP440 reports whether v is a well-formed PEP 440 version — the fail-closed gate the matcher uses
+// validPEP440 reports whether v is a well-formed PEP 440 version – the fail-closed gate the matcher uses
 // before trusting comparePEP440 (a non-PEP-440 token like "latest" or "1.2.x" must never match a range).
 func validPEP440(v string) bool { return pep440RE.MatchString(v) }
 
@@ -146,7 +146,7 @@ func comparePre(a, b pep) int {
 	if d := cmpInt(prePhase(a), prePhase(b)); d != 0 {
 		return d
 	}
-	if !a.hasPre { // both NEG_INF or both POS_INF — equal in this phase
+	if !a.hasPre { // both NEG_INF or both POS_INF – equal in this phase
 		return 0
 	}
 	if a.preL != b.preL {

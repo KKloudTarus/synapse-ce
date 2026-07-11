@@ -66,11 +66,11 @@ func TestAnalyzerFindsAndSkips(t *testing.T) {
 
 func TestDebugModeDetection(t *testing.T) {
 	root := t.TempDir()
-	// positives — a literal debug=true (Django/generic), Flask app.run(debug=True), Gin debug mode.
+	// positives – a literal debug=true (Django/generic), Flask app.run(debug=True), Gin debug mode.
 	writeFile(t, root, "settings.py", "DEBUG = True\n")
 	writeFile(t, root, "app.py", "app.run(host=\"0.0.0.0\", debug=True)\n")
 	writeFile(t, root, "main.go", "func main() { gin.SetMode(gin.DebugMode) }\n")
-	// negatives — env-derived (RHS not a literal true) and an explicit false.
+	// negatives – env-derived (RHS not a literal true) and an explicit false.
 	writeFile(t, root, "env.py", "DEBUG = os.environ.get(\"DEBUG\", False)\n")
 	writeFile(t, root, "off.go", "cfg.Debug = false\n")
 
@@ -87,11 +87,11 @@ func TestDebugModeDetection(t *testing.T) {
 
 func TestPermissiveCORSDetection(t *testing.T) {
 	root := t.TempDir()
-	// positives — Go header Set form, a raw header (no colon), and a Go AllowedOrigins config.
+	// positives – Go header Set form, a raw header (no colon), and a Go AllowedOrigins config.
 	writeFile(t, root, "headers.go", "w.Header().Set(\"Access-Control-Allow-Origin\", \"*\")\n")
 	writeFile(t, root, "site.conf", "add_header Access-Control-Allow-Origin *;\n")
 	writeFile(t, root, "cors.go", "opts := cors.Options{AllowedOrigins: []string{\"*\"}}\n")
-	// negatives — a specific origin is fine.
+	// negatives – a specific origin is fine.
 	writeFile(t, root, "ok.go", "w.Header().Set(\"Access-Control-Allow-Origin\", \"https://app.example.com\")\n")
 	writeFile(t, root, "ok2.go", "AllowedOrigins: []string{\"https://trusted.com\"}\n")
 

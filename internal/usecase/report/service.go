@@ -50,7 +50,7 @@ var sectionOrder = []string{
 
 // Report types frame the deliverable: each picks a title, an
 // executive-summary posture line, a methodology narrative, and a default section set.
-// The underlying finding data is identical — only the framing + selection differ, so
+// The underlying finding data is identical – only the framing + selection differ, so
 // nothing is invented. TypeRetest additionally surfaces real retest
 // verdicts in a Remediation Status section.
 const (
@@ -71,7 +71,7 @@ type reportProfile struct {
 
 // fullSections is the SCA/default section set. The retest-only remediation section
 // and the exhibits section appear only when their data exists (retest verdicts /
-// captured images), so including them here is safe — they self-omit otherwise.
+// captured images), so including them here is safe – they self-omit otherwise.
 var fullSections = []string{
 	SectionEngagement, SectionScope, SectionMethodology, SectionSummary,
 	SectionRisk, SectionTop, SectionFindings, SectionDetails, SectionScan, SectionEvidence, SectionExhibits,
@@ -93,7 +93,7 @@ var reportProfiles = map[string]reportProfile{
 		title:   "External Security Assessment",
 		posture: "This report presents the results of an authorized EXTERNAL assessment of the client's internet-facing attack surface within the stated scope.",
 		methodology: []string{
-			"External assessment: testing was conducted from an external (internet) vantage against the in-scope perimeter — reconnaissance of exposed assets, identification of externally-reachable services, and analysis of the resulting findings. No internal network position was assumed.",
+			"External assessment: testing was conducted from an external (internet) vantage against the in-scope perimeter – reconnaissance of exposed assets, identification of externally-reachable services, and analysis of the resulting findings. No internal network position was assumed.",
 		},
 		sections: assessmentSections,
 	},
@@ -101,7 +101,7 @@ var reportProfiles = map[string]reportProfile{
 		title:   "Internal Network Assessment",
 		posture: "This report presents the results of an authorized INTERNAL assessment conducted from a position inside the client's network within the stated scope.",
 		methodology: []string{
-			"Internal assessment: testing was conducted from an authenticated/internal network position against the in-scope assets — enumeration of internal services and exposure, and analysis of the resulting findings. The starting position reflects an assumed-breach or insider scenario as agreed in scope.",
+			"Internal assessment: testing was conducted from an authenticated/internal network position against the in-scope assets – enumeration of internal services and exposure, and analysis of the resulting findings. The starting position reflects an assumed-breach or insider scenario as agreed in scope.",
 		},
 		sections: assessmentSections,
 	},
@@ -177,7 +177,7 @@ type Service struct {
 	docRenderers map[string]ports.DocRenderer
 }
 
-// NewService wires the report service. insight/retests/evidence may each be nil — the
+// NewService wires the report service. insight/retests/evidence may each be nil – the
 // report then omits the corresponding sections (scan-level executive sections, the
 // retest remediation status, and the evidence image exhibits respectively).
 func NewService(e ports.EngagementRepository, f ports.FindingRepository, retests ports.RetestRepository, evidence ports.ReportEvidenceProvider, r ports.ReportRenderer, insight ports.ReportInsightProvider, clock ports.Clock, version string) *Service {
@@ -205,7 +205,7 @@ type loaded struct {
 }
 
 // load reads the engagement + findings + scan insight, enforces the chain-of-custody
-// gate, and pins the report timestamp — the shared front half of every format.
+// gate, and pins the report timestamp – the shared front half of every format.
 func (s *Service) load(ctx context.Context, tenantID, engagementID shared.ID) (loaded, error) {
 	eng, err := s.engagements.GetByIDInTenant(ctx, tenantID, engagementID)
 	if err != nil {
@@ -226,14 +226,14 @@ func (s *Service) load(ctx context.Context, tenantID, engagementID shared.ID) (l
 			return loaded{}, fmt.Errorf("load report insight: %w", err)
 		}
 		// Chain-of-custody: a tampered evidence ledger blocks the report regardless of
-		// whether a scan ran — recon-only/manual engagements seal evidence too, and the
+		// whether a scan ran – recon-only/manual engagements seal evidence too, and the
 		// insight provider fails closed if it cannot verify the chain.
 		if insight.EvidenceCount > 0 && !insight.EvidenceIntact {
-			return loaded{}, fmt.Errorf("%w: evidence chain verification failed — report blocked", shared.ErrValidation)
+			return loaded{}, fmt.Errorf("%w: evidence chain verification failed – report blocked", shared.ErrValidation)
 		}
 	}
 	// Pin the report timestamp to the SCAN time (not generation time) so output is a
-	// pure function of stored data — byte-identical + SHA-256-stable across repeated
+	// pure function of stored data – byte-identical + SHA-256-stable across repeated
 	// generations (determinism fix). Fall back to Now only with no scan.
 	generatedAt := s.clock.Now()
 	if insight.HasScan && !insight.ScanTime.IsZero() {
@@ -276,7 +276,7 @@ func (s *Service) Render(ctx context.Context, tenantID, engagementID shared.ID, 
 	}
 	// Resolve the section set once so we only fetch what the report will show.
 	want := sectionSet(opts.Sections, profileFor(opts.Type).sections)
-	// A retest report surfaces real retest verdicts — fetch them only for that type so
+	// A retest report surfaces real retest verdicts – fetch them only for that type so
 	// the other reports cost no extra queries.
 	if opts.Type == TypeRetest && s.retests != nil {
 		l.retests, err = s.loadRetests(ctx, engagementID, l.findings)
@@ -396,7 +396,7 @@ func (s *Service) loadRetests(ctx context.Context, engagementID shared.ID, findi
 // loadExhibits fetches the engagement's captured image artifacts (chain order) and
 // returns the raster ones as report images, bounded by the deterministic caps. Each
 // exhibit's bytes are re-verified against its sha by the vault read path; non-image or
-// oversized artifacts are skipped. A purely additive section — never fails the report.
+// oversized artifacts are skipped. A purely additive section – never fails the report.
 func (s *Service) loadExhibits(ctx context.Context, engagementID shared.ID) ([]ports.ReportImage, error) {
 	arts, err := s.evidence.ListArtifacts(ctx, engagementID)
 	if err != nil {
@@ -419,7 +419,7 @@ func (s *Service) loadExhibits(ctx context.Context, engagementID shared.ID) ([]p
 			continue
 		}
 		if total+len(data) > maxExhibitTotalBytes {
-			break // total budget reached — stop adding (deterministic: first-N in order)
+			break // total budget reached – stop adding (deterministic: first-N in order)
 		}
 		mime, ok := rasterMIME(data)
 		if !ok {
@@ -517,7 +517,7 @@ func filterByStatus(findings []finding.Finding, statuses []string) []finding.Fin
 // produced, and by what. Always present (built purely from stored engagement data).
 func engagementSection(eng *engagement.Engagement, insight ports.ReportInsight, at time.Time, version string) (ports.ReportSection, bool) {
 	tbl := &ports.ReportTable{Headers: []string{"Field", "Value"}}
-	row := func(k, v string) { tbl.Rows = append(tbl.Rows, []string{k, nonEmpty(v, "—")}) }
+	row := func(k, v string) { tbl.Rows = append(tbl.Rows, []string{k, nonEmpty(v, "–")}) }
 	row("Engagement", eng.Name)
 	row("Client", eng.Client)
 	row("Status", titleCase(string(eng.Status)))
@@ -537,7 +537,7 @@ func engagementSection(eng *engagement.Engagement, insight ports.ReportInsight, 
 	return sec, true
 }
 
-// scopeSection states exactly what was authorized for testing — the legal + technical
+// scopeSection states exactly what was authorized for testing – the legal + technical
 // boundary of the engagement. Always present.
 func scopeSection(eng *engagement.Engagement) (ports.ReportSection, bool) {
 	sec := ports.ReportSection{Heading: "Scope Statement"}
@@ -559,7 +559,7 @@ func scopeSection(eng *engagement.Engagement) (ports.ReportSection, bool) {
 	return sec, true
 }
 
-// methodologySection describes what was performed and to which standards — so a
+// methodologySection describes what was performed and to which standards – so a
 // client (or an auditor) can judge coverage. Deterministic, derived from the scan
 // insight; no narrative is invented.
 func methodologySection(profile reportProfile, insight ports.ReportInsight) (ports.ReportSection, bool) {
@@ -578,7 +578,7 @@ func methodologySection(profile reportProfile, insight ports.ReportInsight) (por
 			"Findings in this report were recorded manually by the assessment team against the authorized scope.")
 	}
 	sec.Paragraphs = append(sec.Paragraphs,
-		"Risk priority orders remediation by CISA KEV (known exploited) first, then EPSS exploitation probability weighted by CVSS — not by raw CVSS alone.")
+		"Risk priority orders remediation by CISA KEV (known exploited) first, then EPSS exploitation probability weighted by CVSS – not by raw CVSS alone.")
 	sec.Paragraphs = append(sec.Paragraphs,
 		"Standards: CycloneDX 1.7 and SPDX 3.0 (SBOM), SARIF 2.1 (findings), OpenVEX/CSAF (exploitability), CISA KEV and FIRST EPSS (prioritization).")
 	sec.Paragraphs = append(sec.Paragraphs,
@@ -602,7 +602,7 @@ func remediationSection(findings []finding.Finding, retests map[shared.ID][]find
 			continue
 		}
 		// The latest retest (append-order: oldest-first) is the current verdict. Tester
-		// and Note are intentionally omitted from this client deliverable — Note is
+		// and Note are intentionally omitted from this client deliverable – Note is
 		// free-form operator text and the verdict + date are what the customer needs.
 		latest := rs[len(rs)-1]
 		retested++
@@ -668,7 +668,7 @@ func summarySection(profile reportProfile, findings []finding.Finding, insight p
 			conf = "confident"
 		}
 		sec.Paragraphs = append(sec.Paragraphs, fmt.Sprintf("Actionable third-party findings: %d of %d raw (analysis confidence: %s).", insight.Actionable, insight.RawFindings, conf))
-		sec.Paragraphs = append(sec.Paragraphs, fmt.Sprintf("Coverage — version: %.0f%%, path: %.0f%%; license detection: %.0f%%.", insight.VersionCoveragePct, insight.PathCoveragePct, insight.LicensePct))
+		sec.Paragraphs = append(sec.Paragraphs, fmt.Sprintf("Coverage – version: %.0f%%, path: %.0f%%; license detection: %.0f%%.", insight.VersionCoveragePct, insight.PathCoveragePct, insight.LicensePct))
 	}
 	return sec, true
 }
@@ -693,7 +693,7 @@ func riskOverviewSection(findings []finding.Finding) (ports.ReportSection, bool)
 		sec.Paragraphs = append(sec.Paragraphs, fmt.Sprintf("%d finding(s) are on the CISA Known Exploited Vulnerabilities catalog and should be prioritized.", kev))
 	}
 	if line := priorityDistribution(findings); line != "" {
-		sec.Paragraphs = append(sec.Paragraphs, "Risk-priority distribution — "+line+".")
+		sec.Paragraphs = append(sec.Paragraphs, "Risk-priority distribution – "+line+".")
 	}
 	return sec, true
 }
@@ -710,7 +710,7 @@ func topFindingsSection(findings []finding.Finding) (ports.ReportSection, bool) 
 		if i >= topN {
 			break
 		}
-		kev := "—"
+		kev := "–"
 		if f.KEV {
 			kev = "yes"
 		}
@@ -724,7 +724,7 @@ func topFindingsSection(findings []finding.Finding) (ports.ReportSection, bool) 
 	}
 	return ports.ReportSection{
 		Heading:    "Top Findings",
-		Paragraphs: []string{"The findings below are ordered by risk priority (CISA KEV, then EPSS × CVSS) — address them first."},
+		Paragraphs: []string{"The findings below are ordered by risk priority (CISA KEV, then EPSS × CVSS) – address them first."},
 		Table:      tbl,
 	}, true
 }
@@ -753,7 +753,7 @@ func detailsSection(findings []finding.Finding) (ports.ReportSection, bool) {
 	}
 	sec := ports.ReportSection{Heading: "Finding Details"}
 	for _, f := range findings {
-		head := fmt.Sprintf("%s — %s  [%s · %s]", string(f.ID), nonEmpty(f.Title, "Untitled finding"), titleCase(string(f.Severity)), titleCase(strings.ReplaceAll(string(f.Status), "_", " ")))
+		head := fmt.Sprintf("%s – %s  [%s · %s]", string(f.ID), nonEmpty(f.Title, "Untitled finding"), titleCase(string(f.Severity)), titleCase(strings.ReplaceAll(string(f.Status), "_", " ")))
 		sec.Paragraphs = append(sec.Paragraphs, head)
 		if d := strings.TrimSpace(f.Description); d != "" {
 			sec.Paragraphs = append(sec.Paragraphs, d)
@@ -785,7 +785,7 @@ func detailsSection(findings []finding.Finding) (ports.ReportSection, bool) {
 // complianceLabel maps a finding's CWE to its compliance controls as a compact "Framework ID" list
 // (e.g. "ISO-27001-2022 A.8.28, OWASP-2021 A03:2021, PCI-DSS-4.0 6.2.4"), or "" if the CWE is empty or
 // maps to none. It is a pure curated-table lookup (no LLM, deterministic order), so the report path stays
-// templated and auditable — a compliance tag is a stored-data lookup, not a model output.
+// templated and auditable – a compliance tag is a stored-data lookup, not a model output.
 func complianceLabel(cwe string) string {
 	controls := compliance.ControlsFor(cwe)
 	if len(controls) == 0 {
@@ -832,7 +832,7 @@ func evidenceSection(insight ports.ReportInsight) (ports.ReportSection, bool) {
 	}
 	if insight.EvidenceAttested {
 		sec.Paragraphs = append(sec.Paragraphs,
-			"Origin: the chain head is signed (ed25519) by key "+insight.EvidenceKeyID+", proving this evidence originated from this instance — not only that it is internally consistent.")
+			"Origin: the chain head is signed (ed25519) by key "+insight.EvidenceKeyID+", proving this evidence originated from this instance – not only that it is internally consistent.")
 	}
 	return sec, true
 }
@@ -857,13 +857,13 @@ func executivePosture(findings []finding.Finding, insight ports.ReportInsight) s
 	crit, high := counts[shared.SeverityCritical], counts[shared.SeverityHigh]
 	switch {
 	case crit > 0:
-		return fmt.Sprintf("Overall posture: HIGH RISK — %d critical and %d high-severity finding(s) require prompt remediation.", crit, high)
+		return fmt.Sprintf("Overall posture: HIGH RISK – %d critical and %d high-severity finding(s) require prompt remediation.", crit, high)
 	case high > 0:
-		return fmt.Sprintf("Overall posture: ELEVATED RISK — %d high-severity finding(s) should be remediated.", high)
+		return fmt.Sprintf("Overall posture: ELEVATED RISK – %d high-severity finding(s) should be remediated.", high)
 	case len(findings) > 0:
-		return "Overall posture: LOW RISK — findings were identified, none critical or high."
+		return "Overall posture: LOW RISK – findings were identified, none critical or high."
 	case insight.HasScan && !insight.Confident:
-		return "Overall posture: INCONCLUSIVE — no findings, but the scan was incomplete; treat as indicative."
+		return "Overall posture: INCONCLUSIVE – no findings, but the scan was incomplete; treat as indicative."
 	default:
 		return "Overall posture: no findings at or above the reporting threshold were identified."
 	}

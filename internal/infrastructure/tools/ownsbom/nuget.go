@@ -10,11 +10,11 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// NuGet is the owned.NET parser: it reads packages.lock.json — the resolved NuGet
+// NuGet is the owned.NET parser: it reads packages.lock.json – the resolved NuGet
 // dependency set (the deterministic lockfile produced by `dotnet restore` with RestorePackagesWithLockFile)
-// — into nuget components. The lockfile maps each target framework to its resolved packages; a package's
+// – into nuget components. The lockfile maps each target framework to its resolved packages; a package's
 // "resolved" field is the concrete version. "Project" entries are local project references, not registry
-// packages, and are skipped. Components only — edges are not emitted yet. Vendor-neutral (stdlib encoding/json).
+// packages, and are skipped. Components only – edges are not emitted yet. Vendor-neutral (stdlib encoding/json).
 type NuGet struct{}
 
 // Ecosystem identifies this parser's package ecosystem.
@@ -35,7 +35,7 @@ type nugetEntry struct {
 
 // Parse extracts the resolved NuGet packages across all target frameworks. A package resolved under several
 // frameworks at the same version dedups (componentSet, by PURL); "Project" references are skipped. The result
-// is sorted by PURL — packages.lock.json's per-framework maps have no inherent order, so sorting keeps the
+// is sorted by PURL – packages.lock.json's per-framework maps have no inherent order, so sorting keeps the
 // component list deterministic across runs (the other lockfile parsers iterate ordered slices already).
 func (NuGet) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
 	if err := ctx.Err(); err != nil {

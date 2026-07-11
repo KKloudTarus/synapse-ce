@@ -97,7 +97,7 @@ func TestOfflineRejectsWrongSchema(t *testing.T) {
 	}
 }
 
-// Chain: the offline DB resolves what it has; the online client is the fallback for the DB's misses —
+// Chain: the offline DB resolves what it has; the online client is the fallback for the DB's misses –
 // and it must NOT be queried for a component the offline DB already resolved.
 func TestChainOfflineFirstOnlineFallback(t *testing.T) {
 	offSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

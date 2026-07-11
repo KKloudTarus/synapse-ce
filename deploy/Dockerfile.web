@@ -1,4 +1,4 @@
-# Synapse web — Vite dev server. Used by docker-compose.full.yml as the `web` service.
+# Synapse web – Vite dev server. Used by docker-compose.full.yml as the `web` service.
 #
 # Vite proxies /api and /healthz to the `synapse-api` compose service on :8080,
 # so the SPA on :5173 talks to the same backend the CLI would.
@@ -19,7 +19,7 @@ COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 # postinstall; without it, pnpm exits with ERR_PNPM_IGNORED_BUILDS.
 RUN pnpm install --frozen-lockfile
 
-# The rest of the source — bind-mount in dev for hot reload (see compose).
+# The rest of the source – bind-mount in dev for hot reload (see compose).
 COPY web/ .
 
 # Drop to the image's built-in non-root `node` user (uid 1000) instead of running the dev server as

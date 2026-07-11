@@ -75,7 +75,7 @@ func (rt *Router) runSCAScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Tenant isolation: the engagement id is in the BODY, not a path param, so the
-	// withEngTenant route wrapper can't cover this route — verify the engagement belongs to the
+	// withEngTenant route wrapper can't cover this route – verify the engagement belongs to the
 	// caller's tenant here (404 cross-tenant, before any scope/window gate or scan starts).
 	if _, err := rt.eng.Get(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(req.EngagementID)); err != nil {
 		writeError(w, rt.log, err)
@@ -90,7 +90,7 @@ func (rt *Router) runSCAScan(w http.ResponseWriter, r *http.Request) {
 		usingImportedSBOM = true
 	}
 	// Validate the target synchronously so a malformed target is rejected
-	// at submit with a clear reason — not accepted (202) then failed asynchronously.
+	// at submit with a clear reason – not accepted (202) then failed asynchronously.
 	if msg := validateScanTarget(req.Kind, req.Target); !usingImportedSBOM && msg != "" {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: msg})
 		return

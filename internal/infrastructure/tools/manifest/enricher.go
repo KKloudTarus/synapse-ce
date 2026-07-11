@@ -2,7 +2,7 @@
 // generator under-uses: it reconstructs missing dependency edges
 // (Gemfile.lock), recovers dependencies the generator cannot resolve from source
 // (Maven pom.xml, Gradle version catalogs), and refines component scope via pnpm
-// workspace attribution. It reads only files already in the acquired workspace —
+// workspace attribution. It reads only files already in the acquired workspace –
 // no execution, no network.
 package manifest
 
@@ -62,7 +62,7 @@ func (Enricher) Enrich(ctx context.Context, dir string, doc *sbom.SBOM) ports.SB
 			}
 		case "libs.versions.toml":
 			if data := read(path); data != nil {
-				// Delegate to the SHARED owned Gradle parser — one implementation for both the owned
+				// Delegate to the SHARED owned Gradle parser – one implementation for both the owned
 				// SBOM producer (ownsbom.Gradle) and this Syft-enrichment path; no duplicated catalog parser.
 				gradleComps = append(gradleComps, ownsbom.ParseGradleCatalog(data)...)
 			}
@@ -197,7 +197,7 @@ func refineScopes(doc *sbom.SBOM, scopes map[string]string) int {
 		if !ok {
 			continue
 		}
-		// Only move toward MORE background (lower rank) — never upgrade a
+		// Only move toward MORE background (lower rank) – never upgrade a
 		// directory-derived background scope back to production.
 		if scopeRank(s) < scopeRank(orDefault(c.Scope)) {
 			c.Scope = s

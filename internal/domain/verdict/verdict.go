@@ -2,7 +2,7 @@
 // finding (exploitation) and judgment (AI analysis). It is pure (stdlib + shared only), so
 // neither aggregate imports the other for the one shared evidence-gating mechanism (R1): a
 // distinct verifier seals a verdict whose score moves a claim's standing, and the same
-// EvidenceThreshold gates publishability everywhere — one bar, never forked.
+// EvidenceThreshold gates publishability everywhere – one bar, never forked.
 package verdict
 
 import (
@@ -48,7 +48,7 @@ func (v Verdict) Validate() error {
 	return nil
 }
 
-// SelfConfirm reports whether a verdict would let a claim confirm itself — the verifier being the
+// SelfConfirm reports whether a verdict would let a claim confirm itself – the verifier being the
 // same actor that proposed it. A self-confirming verdict must be refused: a
 // finding/judgment cannot confirm itself. An empty proposer (human/tool-sourced, no AI claim)
 // never self-confirms.

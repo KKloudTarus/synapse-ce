@@ -16,7 +16,7 @@ import (
 
 // LeaseRunLock implements ports.RunLocker via a jobs_run_lock ROW lease instead of a session
 // advisory lock. Unlike RunLock it does NOT hold a pooled connection for the duration of the
-// run — each operation borrows a connection transiently — so N concurrent runs cannot starve
+// run – each operation borrows a connection transiently – so N concurrent runs cannot starve
 // the pool (the ≤8-default-pool hazard the hostile review flagged). A background renewer
 // extends the lease while the run is live; a crash lets the lease expire so another worker can
 // reclaim it. Used for RECON; the agent SESSION lock stays the advisory RunLock (it must not
@@ -42,7 +42,7 @@ var (
 	_ ports.LeaseRunLocker = (*LeaseRunLock)(nil)
 )
 
-// TryLock claims the lease (see TryLockLeased) and discards the lease-loss context — for
+// TryLock claims the lease (see TryLockLeased) and discards the lease-loss context – for
 // callers that don't observe lease loss (e.g. the stale-run sweeper's liveness probe).
 func (l *LeaseRunLock) TryLock(ctx context.Context, runID string) (func(), bool, error) {
 	_, release, ok, err := l.TryLockLeased(ctx, runID)
@@ -89,12 +89,12 @@ func (l *LeaseRunLock) TryLockLeased(ctx context.Context, runID string) (context
 }
 
 // renew extends the lease, owner-scoped, while the run is live. It ticks at lease/4 so several
-// renews fall inside one TTL — a single transient DB stall cannot let the claim expire and be
+// renews fall inside one TTL – a single transient DB stall cannot let the claim expire and be
 // stolen (the double-run hazard). Each renew gets its own short timeout so a stalled call does
-// not wedge the loop. On a DEFINITIVE loss (renew matched no owned row — the claim expired and
+// not wedge the loop. On a DEFINITIVE loss (renew matched no owned row – the claim expired and
 // another worker stole it, or the row was deleted) OR a full lease-TTL window of consecutive
-// renew failures (the claim can now be stolen), it calls onLost — cancelling the run's lease
-// context so the caller ABORTS — and stops. A silently-lost lease is exactly what would let a
+// renew failures (the claim can now be stolen), it calls onLost – cancelling the run's lease
+// context so the caller ABORTS – and stops. A silently-lost lease is exactly what would let a
 // second worker double-run an admitted action against a live host.
 func (l *LeaseRunLock) renew(ctx context.Context, runID string, onLost func()) {
 	interval := l.lease / 4
@@ -125,7 +125,7 @@ func (l *LeaseRunLock) renew(ctx context.Context, runID string, onLost func()) {
 			case ctx.Err() == nil: // err != nil, not a shutdown
 				slog.Warn("run lease renew failed; will retry until the TTL elapses", "run", runID, "err", err)
 				if time.Since(lastOK) >= l.lease {
-					// The full TTL has elapsed since the last successful renew — another worker
+					// The full TTL has elapsed since the last successful renew – another worker
 					// can now claim the expired lease, so abort rather than risk a double-run.
 					slog.Warn("run lease expired after repeated renew failures; aborting in-flight run", "run", runID)
 					onLost()

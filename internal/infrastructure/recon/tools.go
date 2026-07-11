@@ -1,11 +1,11 @@
 // Package recon provides ports.ReconTool adapters: each knows one recon binary's
 // argv and output format. Arguments are built ONLY from a validated, in-scope
-// target — never from free-form strings — and every
+// target – never from free-form strings – and every
 // target value is checked so it cannot be smuggled in as a flag. Output is parsed
 // from the tools' JSON-lines format into domain recon.Results.
 //
 // Tools are registered with the recon use case; capability-sensitive ones
-// (naabu/nuclei — raw sockets) are flagged so the use case keeps them behind the
+// (naabu/nuclei – raw sockets) are flagged so the use case keeps them behind the
 // lab-only / sandbox gate.
 package recon
 
@@ -113,7 +113,7 @@ func (HTTPX) Parse(stdout []byte) ([]recon.Result, error) {
 	})
 }
 
-// ---- naabu: port scan (capability-sensitive — wants CAP_NET_RAW; lab-only) ----
+// ---- naabu: port scan (capability-sensitive – wants CAP_NET_RAW; lab-only) ----
 
 type Naabu struct{}
 
@@ -137,7 +137,7 @@ func (Naabu) BuildArgs(t engagement.Target) (ports.ToolSpec, error) {
 	}
 	// CONNECT scan (`-s c`), NOT a SYN scan (F6, audit fix). A SYN scan needs CAP_NET_RAW,
 	// which also authorizes AF_PACKET link-layer sockets whose frames bypass the netns
-	// iptables egress filter AND the connect() eBPF log — a scope-bypass + a forensic
+	// iptables egress filter AND the connect() eBPF log – a scope-bypass + a forensic
 	// blind spot for a *compromised* tool binary. So Synapse grants NO capability: a connect
 	// scan uses ordinary TCP sockets, which the egress filter constrains and the connect4/6
 	// hook logs. Scope integrity > scan stealth for an authorized-pentest platform. (The
@@ -169,7 +169,7 @@ func (Naabu) Parse(stdout []byte) ([]recon.Result, error) {
 // safeHost extracts a clean, single-token host/value from an in-scope target and
 // guarantees it cannot be interpreted as a CLI flag. Even though everything is
 // passed as an argv array (no shell), a value beginning with "-" could be parsed by
-// the tool as an option — so we reject it (defense against flag injection via a
+// the tool as an option – so we reject it (defense against flag injection via a
 // crafted scope entry).
 func safeHost(t engagement.Target) (string, error) {
 	v := strings.TrimSpace(t.Value)

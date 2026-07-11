@@ -13,10 +13,10 @@ import (
 
 // TestLiveOrchestratorAgainstGateway drives the FULL state machine against a real
 // OpenAI-compatible gateway: a real LLM proposes, the real safety gate admits an in-scope
-// action, a stub executor "runs" it, and the step is sealed — proving the propose-validate-execute loop works
+// action, a stub executor "runs" it, and the step is sealed – proving the propose-validate-execute loop works
 // end-to-end with a live model, not just the record/replay fake. Gated on SYNAPSE_LLM_BASE_URL
 // so CI/dev skip it. The executor is stubbed (no real recon binary/sandbox in a unit test);
-// everything else — model, catalog, gate, scope check, evidence — is real.
+// everything else – model, catalog, gate, scope check, evidence – is real.
 func TestLiveOrchestratorAgainstGateway(t *testing.T) {
 	base := os.Getenv("SYNAPSE_LLM_BASE_URL")
 	if base == "" {
@@ -38,11 +38,11 @@ func TestLiveOrchestratorAgainstGateway(t *testing.T) {
 		if err == nil {
 			break
 		}
-		t.Logf("attempt %d: run failed (%v) — waiting out the gateway cooldown", attempt, err)
+		t.Logf("attempt %d: run failed (%v) – waiting out the gateway cooldown", attempt, err)
 		time.Sleep(20 * time.Second)
 	}
 	if err != nil {
-		t.Skipf("gateway upstream stayed unhealthy across retries — skipping: %v", err)
+		t.Skipf("gateway upstream stayed unhealthy across retries – skipping: %v", err)
 	}
 
 	msgs, _ := sessions.Messages(context.Background(), sess.ID)
@@ -60,6 +60,6 @@ func TestLiveOrchestratorAgainstGateway(t *testing.T) {
 		t.Fatalf("run did not reach a terminal/suspended state: %s", sess.Status)
 	}
 	if !engaged {
-		t.Logf("NOTE: the model produced no tool call — the prompt/model may need tuning for tool-use")
+		t.Logf("NOTE: the model produced no tool call – the prompt/model may need tuning for tool-use")
 	}
 }

@@ -52,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem(TOKEN_KEY)
       setApiToken('')
       setPhase('need-token')
-      setError('Session rejected — check your API token.')
+      setError('Session rejected – check your API token.')
     })
   }, [])
 

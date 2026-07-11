@@ -139,7 +139,7 @@ func (a *Analyzer) Inventory(ctx context.Context, root string) (measure.Inventor
 		byLang[lang] = li
 	}
 	// If an AST provider (the synapse-ast sidecar) is wired and available, fill accurate function counts
-	// for the languages it parses (e.g. Python/JavaScript/Java) — only for languages already present in
+	// for the languages it parses (e.g. Python/JavaScript/Java) – only for languages already present in
 	// the inventory, so it never invents a language the walk did not see. Go stays on the in-process count.
 	if a.provider != nil {
 		counts, available, perr := a.provider.FunctionCounts(ctx, root)

@@ -26,8 +26,8 @@ var _ ports.EvidenceStore = (*EvidenceStore)(nil)
 func (s *EvidenceStore) Append(_ context.Context, items []evidence.Evidence) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Fork guard: one child per parent. Validate the WHOLE batch before mutating —
-	// against existing links AND earlier items in the same batch — so a mid-batch conflict
+	// Fork guard: one child per parent. Validate the WHOLE batch before mutating –
+	// against existing links AND earlier items in the same batch – so a mid-batch conflict
 	// leaves nothing appended (atomic, mirroring the Postgres transaction + unique index).
 	for i, e := range items {
 		for _, existing := range s.items[e.EngagementID] {

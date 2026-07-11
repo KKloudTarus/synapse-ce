@@ -1,6 +1,6 @@
 // Package jobs is a small bounded worker pool: a fixed number of workers draining a
 // fixed-size queue. It replaces the earlier "one bare goroutine per scan" with a
-// real concurrency cap + backpressure, and is generic infrastructure —
+// real concurrency cap + backpressure, and is generic infrastructure –
 // no business logic.
 package jobs
 
@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-// ErrQueueFull is returned by Submit when the queue is at capacity (backpressure —
+// ErrQueueFull is returned by Submit when the queue is at capacity (backpressure –
 // the caller should surface a "try again" rather than spawn unbounded work).
 var ErrQueueFull = errors.New("job queue is full")
 
@@ -61,7 +61,7 @@ func (p *Pool) worker() {
 
 // Submit enqueues a task without blocking. It returns ErrQueueFull if the queue is
 // at capacity, or ErrStopped after Shutdown. The non-blocking send happens UNDER the
-// lock so it is mutually exclusive with Shutdown's close(p.tasks) — otherwise a
+// lock so it is mutually exclusive with Shutdown's close(p.tasks) – otherwise a
 // Submit racing a Shutdown could send on a closed channel and panic.
 func (p *Pool) Submit(t Task) error {
 	p.mu.Lock()
@@ -78,7 +78,7 @@ func (p *Pool) Submit(t Task) error {
 }
 
 // Shutdown stops accepting tasks, cancels the pool context (signalling in-flight
-// tasks), and waits for workers to drain — or until ctx is done, whichever first.
+// tasks), and waits for workers to drain – or until ctx is done, whichever first.
 func (p *Pool) Shutdown(ctx context.Context) {
 	p.mu.Lock()
 	if p.stopped {

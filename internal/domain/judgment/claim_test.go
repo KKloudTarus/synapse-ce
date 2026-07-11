@@ -154,7 +154,7 @@ func TestReachabilitySupersedes(t *testing.T) {
 	if !rc(Tier1_5).Supersedes(rc(Tier0)) {
 		t.Error("Tier-1.5 must supersede Tier-0")
 	}
-	// same tier does NOT supersede (no churn) — even if the new verdict disagrees
+	// same tier does NOT supersede (no churn) – even if the new verdict disagrees
 	notReach := ReachabilityClaim{Reachable: NotReachable, Tier: Tier2, Confidence: 90}
 	if notReach.Supersedes(rc(Tier2)) {
 		t.Error("same tier must not supersede (stored verdict stands)")
@@ -180,7 +180,7 @@ func TestMarshalNilClaim(t *testing.T) {
 }
 
 func TestReachabilityTierRank(t *testing.T) {
-	// Strength ordering must be strictly increasing — supersession compares ranks.
+	// Strength ordering must be strictly increasing – supersession compares ranks.
 	if !(Tier0.Rank() < Tier1.Rank() && Tier1.Rank() < Tier1_5.Rank() && Tier1_5.Rank() < Tier2.Rank()) {
 		t.Fatalf("tier ranks must be strictly increasing: %d %d %d %d", Tier0.Rank(), Tier1.Rank(), Tier1_5.Rank(), Tier2.Rank())
 	}

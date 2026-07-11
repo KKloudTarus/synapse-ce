@@ -4,12 +4,12 @@
 // A Draft is the ONE place LLM-authored PROSE enters the system as a proposal. The AI drafts a finding's
 // description + remediation, but a draft is inert until a human signs off. It is kept DELIBERATELY SEPARATE
 // from the judgment claim union (internal/domain/judgment), whose claims are structured tokens and carry
-// a "never free prose" invariant — a write-up is inherently prose, so it cannot live there without breaking that
+// a "never free prose" invariant – a write-up is inherently prose, so it cannot live there without breaking that
 // invariant. The safety here is therefore PROCEDURAL, not structural:
 //
 // A draft NEVER auto-flows into the templated report. Only a human-Accepted draft is
 // eligible to be applied to its finding (a separate use case), and the report renders only the
-// authoritative finding/writeup data — never a Draft.
+// authoritative finding/writeup data – never a Draft.
 // The agent may only Propose a draft. Accept/Reject is the human sign-off; the proposer cannot sign off
 // its own draft (separation of duties, enforced here as defense-in-depth and again by RBAC/SoD at the
 // usecase + HTTP layers, mirroring the judgment review gate).
@@ -36,7 +36,7 @@ type State string
 
 const (
 	StateProposed State = "proposed" // AI-proposed, awaiting human sign-off
-	StateAccepted State = "accepted" // a human signed off — eligible to be applied to the finding
+	StateAccepted State = "accepted" // a human signed off – eligible to be applied to the finding
 	StateRejected State = "rejected" // a human discarded the draft
 )
 
@@ -57,7 +57,7 @@ type Draft struct {
 	Description  string
 	Remediation  string
 	State        State
-	ProposedBy   string // the proposer identity (an agent id) — never the acceptor
+	ProposedBy   string // the proposer identity (an agent id) – never the acceptor
 	DecidedBy    string // the human who accepted/rejected; "" while Proposed
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
@@ -104,7 +104,7 @@ func (d Draft) validateContent() error {
 }
 
 // Edit replaces a still-Proposed draft's text (a human revising the AI draft before sign-off). It fails on
-// a decided (Accepted/Rejected) draft. Editing does not change attribution — ProposedBy is preserved.
+// a decided (Accepted/Rejected) draft. Editing does not change attribution – ProposedBy is preserved.
 func (d Draft) Edit(description, remediation string, now time.Time) (Draft, error) {
 	if d.State != StateProposed {
 		return Draft{}, fmt.Errorf("%w: only a proposed draft can be edited (state=%s)", shared.ErrValidation, d.State)
@@ -119,13 +119,13 @@ func (d Draft) Edit(description, remediation string, now time.Time) (Draft, erro
 }
 
 // Accept is the human sign-off: a Proposed draft becomes Accepted, attributed to the accepting human. An
-// accepted draft is only ELIGIBLE to be applied to its finding (a separate use case) — acceptance itself
+// accepted draft is only ELIGIBLE to be applied to its finding (a separate use case) – acceptance itself
 // renders nothing.
 func (d Draft) Accept(acceptedBy string, now time.Time) (Draft, error) {
 	return d.decide(StateAccepted, acceptedBy, now)
 }
 
-// Reject discards a Proposed draft, attributed to the rejecting human. A rejected draft is terminal — it
+// Reject discards a Proposed draft, attributed to the rejecting human. A rejected draft is terminal – it
 // is never applied to a finding and never rendered.
 func (d Draft) Reject(rejectedBy string, now time.Time) (Draft, error) {
 	return d.decide(StateRejected, rejectedBy, now)

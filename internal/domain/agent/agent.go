@@ -25,7 +25,7 @@ const (
 	StateFailed   State = "failed"   // terminal: error / budget exhausted / denied-terminal
 )
 
-// validTransitions is the allowed state graph. A transition not listed here is a bug — the
+// validTransitions is the allowed state graph. A transition not listed here is a bug – the
 // orchestrator asserts against it so the control flow can never be steered off-graph by an
 // observation or a model response.
 var validTransitions = map[State]map[State]bool{
@@ -63,7 +63,7 @@ func (s Status) Terminal() bool {
 // RiskClass tiers a proposed action for the HITL policy. Read is passive (subfinder/httpx/
 // SBOM); Active touches live hosts (naabu); Intrusive is exploitation/credential-use/
 // state-changing. ModeFilter auto-approves Read; Intrusive is ALWAYS manual regardless of
-// mode (the gate enforces that — this is just the classification).
+// mode (the gate enforces that – this is just the classification).
 type RiskClass string
 
 const (
@@ -82,7 +82,7 @@ type Session struct {
 	Goal           string
 	Model          string
 	ProviderBase   string // the LLM base URL (e.g. the gateway endpoint); never the API key
-	PromptHash     string // sha256 of (system prompt + tool contract) — pins the reasoning context
+	PromptHash     string // sha256 of (system prompt + tool contract) – pins the reasoning context
 	Status         Status
 	Steps          int
 	TokensUsed     int
@@ -121,7 +121,7 @@ func NewSession(id, engagementID shared.ID, initiatedBy, goal, model, providerBa
 
 // ProposedAction is a single tool-call the LLM proposed, decoded into typed, scope-relevant
 // fields. Argv + Target + EgressPreview ARE the diff-before-run payload shown to a human
-// approver — the EXACT command and the scope it would run under. It is just a proposal: it
+// approver – the EXACT command and the scope it would run under. It is just a proposal: it
 // has NOT been scope-validated or approved here (that yields a safety.AdmittedAction).
 type ProposedAction struct {
 	ID            shared.ID
@@ -179,7 +179,7 @@ const (
 func (s ApprovalState) Admitted() bool { return s == ApprovalApproved }
 
 // ApprovalDecision records who decided a proposed action and how. DecidedBy is the human
-// actor (empty for a timeout — the system denied it). It is sealed + audited.
+// actor (empty for a timeout – the system denied it). It is sealed + audited.
 type ApprovalDecision struct {
 	ActionID  shared.ID
 	State     ApprovalState

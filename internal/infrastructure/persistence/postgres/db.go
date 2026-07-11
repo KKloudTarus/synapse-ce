@@ -21,7 +21,7 @@ import (
 
 // PoolConfig sizes the pgx connection pool. Zero values get sane defaults. Sizing the pool
 // explicitly (the default pgx cap is max(4, NumCPU) ≈ 8) is required now that the durable
-// agent path holds a connection-bearing advisory lock per active run — an unsized pool would
+// agent path holds a connection-bearing advisory lock per active run – an unsized pool would
 // starve HTTP handlers at low-tens concurrency.
 type PoolConfig struct {
 	MaxConns          int32
@@ -89,7 +89,7 @@ func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 
 // singletonLockKey derives a stable advisory-lock key PER ROLE. Scoping by
 // role lets one synapse-api AND one synapse-worker run together (each a singleton in its
-// own role) while still refusing a second instance of the SAME role — the multi-process
+// own role) while still refusing a second instance of the SAME role – the multi-process
 // model the worker era needs, instead of a single global lock that would block the worker.
 func singletonLockKey(role string) int64 {
 	h := fnv.New64a()
@@ -98,7 +98,7 @@ func singletonLockKey(role string) int64 {
 }
 
 // AcquireSingletonLock takes a session-level advisory lock (keyed by role) on a DEDICATED
-// connection the caller holds for the whole process lifetime — releasing it drops the
+// connection the caller holds for the whole process lifetime – releasing it drops the
 // lock. A second instance OF THE SAME ROLE gets ok=false so it can fail fast (the repos
 // still ignore tenant_id, so two same-role writers would race). Returns the held
 // connection (retain it; Release at shutdown), whether the lock was obtained, and any error.
@@ -122,8 +122,8 @@ func AcquireSingletonLock(ctx context.Context, pool *pgxpool.Pool, role string) 
 // dsnForMigrate strips pgxpool-only query params (pool_*) from a DSN. ConnectPool (pgxpool)
 // understands pool_max_conns etc., but goose migrates over database/sql via the pgx stdlib
 // driver, whose pgconn.ParseConfig REJECTS those params ("unrecognized configuration
-// parameter pool_max_conns"). Stripping them lets an operator set pool sizing in the DSN —
-// the documented PR0 override — without breaking migrations at boot.
+// parameter pool_max_conns"). Stripping them lets an operator set pool sizing in the DSN –
+// the documented PR0 override – without breaking migrations at boot.
 func dsnForMigrate(dsn string) string {
 	u, err := url.Parse(dsn)
 	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {

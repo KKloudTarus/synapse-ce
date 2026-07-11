@@ -1,8 +1,8 @@
 // Package threatmodel is the architecture-input model that threat modeling reasons over:
-// a data-flow diagram — components (processes, data stores, external entities), directed data flows between
+// a data-flow diagram – components (processes, data stores, external entities), directed data flows between
 // them, trust boundaries that partition them by trust level, and the assets at stake. It is PURE domain (no
 // I/O, no LLM): the analysis layer proposes STRIDE threats as gated Judgments over THIS model, while the model itself only
-// validates the DFD (fail-closed on dangling references) and answers the structural query STRIDE turns on —
+// validates the DFD (fail-closed on dangling references) and answers the structural query STRIDE turns on –
 // which data flows CROSS a trust boundary (the attack surface). Mirrors the callgraph/taint seams: a small
 // pure value type an ingest adapter populates and the analysis layer queries, deterministic + table-testable.
 package threatmodel
@@ -44,12 +44,12 @@ type Component struct {
 }
 
 // DataFlow is a directed edge: data moves From → To. A flow whose endpoints sit in different trust
-// boundaries CROSSES one — where spoofing / tampering / information-disclosure threats concentrate.
+// boundaries CROSSES one – where spoofing / tampering / information-disclosure threats concentrate.
 type DataFlow struct {
 	ID        string `json:"id"`
 	From      string `json:"from"`                 // source Component.ID
 	To        string `json:"to"`                   // destination Component.ID
-	Data      string `json:"data,omitempty"`       // a human label for what flows (opaque free text — not a reference)
+	Data      string `json:"data,omitempty"`       // a human label for what flows (opaque free text – not a reference)
 	DataAsset string `json:"data_asset,omitempty"` // optional Asset.ID this flow carries; validated when set, so the analysis layer can flag information-disclosure of a classified asset that crosses a boundary
 }
 
@@ -76,7 +76,7 @@ type Model struct {
 
 // Validate fail-closes a malformed model: ids must be non-empty + unique within their kind; every component
 // kind must be known; a component's Boundary (when set) and Assets must reference declared entries; and every
-// flow endpoint must reference a declared component. A dangling reference is rejected, not silently dropped —
+// flow endpoint must reference a declared component. A dangling reference is rejected, not silently dropped –
 // an ingested model with a typo'd boundary would otherwise hide the very crossing STRIDE looks for.
 func (m Model) Validate() error {
 	comps := make(map[string]bool, len(m.Components))
@@ -154,7 +154,7 @@ func (m Model) boundaryByComponent() map[string]string {
 	return out
 }
 
-// BoundaryCrossings returns the data flows whose endpoints sit in DIFFERENT trust boundaries — the attack
+// BoundaryCrossings returns the data flows whose endpoints sit in DIFFERENT trust boundaries – the attack
 // surface threat modeling focuses on: a flow staying within one boundary is lower-risk, while one crossing a
 // boundary is where an attacker on the lower-trust side can spoof/tamper/eavesdrop. Deterministic order (by
 // flow id). A flow referencing an unknown component is skipped defensively (call Validate first to reject it).

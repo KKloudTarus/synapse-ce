@@ -1,5 +1,5 @@
 // Package openai implements ports.LLM against an OpenAI-compatible Chat Completions API
-// — the reference provider, tested against the LLM gateway. It is
+// – the reference provider, tested against the LLM gateway. It is
 // the ONLY thing that knows the wire shape; the orchestrator depends only on ports.LLM, so
 // other providers can slot in later with no orchestrator change. The model only
 // PROPOSES tool-calls here; this adapter never decides what runs. The API
@@ -55,7 +55,7 @@ func New(base, key, model string, timeout time.Duration) (*Client, error) {
 	return &Client{base: base, key: strings.TrimSpace(key), model: strings.TrimSpace(model), http: &http.Client{Timeout: timeout}}, nil
 }
 
-// BaseURL is the configured endpoint (safe to log — never returns the key).
+// BaseURL is the configured endpoint (safe to log – never returns the key).
 func (c *Client) BaseURL() string { return c.base }
 
 // --- wire types (OpenAI Chat Completions shape) ---
@@ -130,7 +130,7 @@ func (c *Client) Chat(ctx context.Context, req ports.ChatRequest) (ports.ChatRes
 		t := req.Temperature
 		body.Temperature = &t
 	}
-	// NOTE: no max_tokens/max_completion_tokens — the field name differs across OpenAI model
+	// NOTE: no max_tokens/max_completion_tokens – the field name differs across OpenAI model
 	// generations (the upstream is a large model). The agent budget is enforced on OUR side
 	// (max-steps + token accounting), so we don't risk a provider-specific field here.
 
@@ -179,7 +179,7 @@ func (c *Client) do(ctx context.Context, raw []byte) (ports.ChatResponse, error)
 		return ports.ChatResponse{}, fmt.Errorf("%w: provider status %d: %s", ErrUnavailable, httpResp.StatusCode, snippet(data))
 	}
 	if httpResp.StatusCode != http.StatusOK {
-		// 400/401/403 etc. — surface the provider message (which may carry a cooldown hint),
+		// 400/401/403 etc. – surface the provider message (which may carry a cooldown hint),
 		// but NEVER echo the request (it never contains secrets anyway). Treat as terminal.
 		return ports.ChatResponse{}, fmt.Errorf("%w: provider status %d: %s", shared.ErrValidation, httpResp.StatusCode, snippet(data))
 	}

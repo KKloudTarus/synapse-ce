@@ -7,11 +7,11 @@ import (
 )
 
 // TestNotAgentReachable structurally enforces that the cross-check
-// coordinator — whose narrow proposer is satisfied by analysis.Service (which also carries the score-mover
-// Verify/Accept) — is never imported by the agent tool catalog or the orchestrator. The agent stays
+// coordinator – whose narrow proposer is satisfied by analysis.Service (which also carries the score-mover
+// Verify/Accept) – is never imported by the agent tool catalog or the orchestrator. The agent stays
 // propose-only (it reaches judgments only through the propose-only judgmentProposer); a system-identity
 // minting path must remain composition-root-only. A future edge that wired this package into the agent
-// surface would hand the agent a propose path under a NON-agent (`system:cross-check`) identity — this test
+// surface would hand the agent a propose path under a NON-agent (`system:cross-check`) identity – this test
 // fails loud if that happens. Best-effort: skips without the toolchain.
 func TestNotAgentReachable(t *testing.T) {
 	const self = "github.com/KKloudTarus/synapse-ce/internal/usecase/crosscheckjudge"
@@ -26,7 +26,7 @@ func TestNotAgentReachable(t *testing.T) {
 		}
 		for _, line := range strings.Split(string(out), "\n") {
 			if strings.TrimSpace(line) == self {
-				t.Errorf("%s imports the cross-check coordinator — that would give the agent a system-identity mint path; keep it composition-root-only", pkg)
+				t.Errorf("%s imports the cross-check coordinator – that would give the agent a system-identity mint path; keep it composition-root-only", pkg)
 			}
 		}
 	}

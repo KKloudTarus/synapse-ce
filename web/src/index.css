@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Synapse design tokens — Linear/Vercel-grade dark. A layered surface model,
+/* Synapse design tokens – Linear/Vercel-grade dark. A layered surface model,
    restrained indigo accent; green is reserved for semantic success/allow/live.
    Tailwind v4 maps --color-x → bg-x / text-x / border-x / ring-x. */
 @theme {
@@ -21,13 +21,13 @@
   --color-border: #2a2a38; /* subtle, ~1px */
   --color-borderstrong: #3a3a4a;
 
-  /* indigo accent — used sparingly (primary actions, nav-active, focus) */
+  /* indigo accent – used sparingly (primary actions, nav-active, focus) */
   --color-brand: #6366f1;
   --color-brandhover: #5558e0;
   --color-brandfg: #ffffff;
   --color-branddim: #8b8efc; /* indigo for links/labels on dark */
 
-  /* green — semantic success / allow / live only */
+  /* green – semantic success / allow / live only */
   --color-accent: #22c55e;
   --color-accentfg: #04210f;
   --color-info: #38bdf8;
@@ -98,7 +98,7 @@
   .card-sheen {
     background-image: linear-gradient(180deg, color-mix(in srgb, white 4%, transparent), transparent 40%);
   }
-  /* recessed input — subtle inset so form fields read as fields, not flat blocks */
+  /* recessed input – subtle inset so form fields read as fields, not flat blocks */
   .input-inset {
     box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.28);
   }
@@ -109,7 +109,7 @@
       inset 0 1px 0 0 rgb(255 255 255 / 0.18),
       0 6px 16px -6px color-mix(in srgb, var(--color-brand) 55%, transparent);
   }
-  /* brand hero — indigo glow fading into a surface */
+  /* brand hero – indigo glow fading into a surface */
   .bg-hero {
     background:
       radial-gradient(
@@ -119,7 +119,7 @@
       ),
       linear-gradient(180deg, var(--color-elevated), var(--color-card));
   }
-  /* auth screen — a centered indigo glow to anchor the floating card */
+  /* auth screen – a centered indigo glow to anchor the floating card */
   .bg-auth {
     background:
       radial-gradient(
@@ -138,7 +138,7 @@
     transform: translateY(-2px);
   }
 
-  /* Radix dropdown pop — fade + scale + slide from the trigger origin */
+  /* Radix dropdown pop – fade + scale + slide from the trigger origin */
   @keyframes dropdown-in {
     from {
       opacity: 0;

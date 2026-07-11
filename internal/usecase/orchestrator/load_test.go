@@ -23,7 +23,7 @@ import (
 )
 
 // multiEngRepo returns an in-scope engagement for ANY requested id (every engagement shares the
-// app.acme.io scope + an open window + live recon) — so the load harness can drive many distinct
+// app.acme.io scope + an open window + live recon) – so the load harness can drive many distinct
 // engagement chains through the real gate.
 type multiEngRepo struct{ now time.Time }
 
@@ -134,7 +134,7 @@ func TestLoad_ManyWorkflowsNoDoubleExecChainIntact(t *testing.T) {
 	if terminal != total {
 		t.Fatalf("only %d/%d workflows reached terminal", terminal, total)
 	}
-	// SLO: exactly one execution per workflow — no double-run, no dropped run, under concurrency.
+	// SLO: exactly one execution per workflow – no double-run, no dropped run, under concurrency.
 	if got := atomic.LoadInt64(&exec.n); got != total {
 		t.Fatalf("executor ran %d times, want exactly %d (no double-run / no drop)", got, total)
 	}

@@ -73,7 +73,7 @@ func VerifyChain(items []Record) error {
 
 // Report is the audit chain's verification status. Verified counts the chained
 // records; Unchained counts leading legacy records written before the chain feature
-// shipped (no Hash) — they are reported honestly, not silently treated as intact.
+// shipped (no Hash) – they are reported honestly, not silently treated as intact.
 type Report struct {
 	Intact    bool   `json:"intact"`
 	Verified  int    `json:"verified"`
@@ -89,13 +89,13 @@ type Report struct {
 // begins is a break, not a legacy row.
 //
 // Threat model: this detects in-application tampering, accidental edits, and the
-// deletion or blanking of ANY row that leaves a verifiable suffix — including an
+// deletion or blanking of ANY row that leaves a verifiable suffix – including an
 // attempt to blank a leading prefix so it is mistaken for legacy, because the
 // surviving suffix's first record then has a non-empty PreviousHash and fails the
 // genesis check. What an unanchored hash chain CANNOT detect on its own is a
 // privileged operator who reforges the whole chain (blanks rows, then recomputes
 // every subsequent Hash with ComputeHash) or erases it entirely. Closing that gap
-// requires an external anchor — signing the audit head (as evidence heads are signed,
+// requires an external anchor – signing the audit head (as evidence heads are signed,
 // WS4) or an RFC-3161 timestamp (ports.TimestampAuthority, wired via the audit service's
 // SetTimestamper). A non-zero Unchained count must always be surfaced, never treated as benign.
 func Verify(items []Record) Report {

@@ -56,13 +56,13 @@ func generateKey() (plaintext, hash string, err error) {
 }
 
 // EnsureBootstrapAdmin idempotently makes the bootstrap admin (id "operator") whose
-// key is the env SYNAPSE_API_TOKEN, so the existing token keeps authenticating —
+// key is the env SYNAPSE_API_TOKEN, so the existing token keeps authenticating –
 // now as a real, admin user. Safe to call on every startup.
 func (s *Service) EnsureBootstrapAdmin(ctx context.Context, token string) error {
 	if token == "" {
 		return fmt.Errorf("%w: bootstrap token is required", shared.ErrValidation)
 	}
-	// Bootstrap admin lives in tenant '' — the deliberate single-tenant / default-tenant superadmin.
+	// Bootstrap admin lives in tenant '' – the deliberate single-tenant / default-tenant superadmin.
 	u, err := user.New(BootstrapID, "", "Operator (bootstrap admin)", user.RoleAdmin, HashToken(token), s.clock.Now())
 	if err != nil {
 		return err
@@ -83,7 +83,7 @@ func (s *Service) CreateUser(ctx context.Context, actor string, tenantID string,
 	if err != nil {
 		return nil, "", err
 	}
-	// The provisioning admin assigns the tenant — the aggregate owns it from birth.
+	// The provisioning admin assigns the tenant – the aggregate owns it from birth.
 	u, err := user.New(s.ids.NewID(), tenantID, name, role, hash, s.clock.Now())
 	if err != nil {
 		return nil, "", err

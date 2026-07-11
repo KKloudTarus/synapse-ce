@@ -12,7 +12,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// Integration test — runs only when SYNAPSE_TEST_DB_DSN points at a Postgres.
+// Integration test – runs only when SYNAPSE_TEST_DB_DSN points at a Postgres.
 func TestEngagementRepository(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
@@ -135,7 +135,7 @@ func TestEngagementRepository(t *testing.T) {
 		t.Fatalf("ownership round-trip: g=%+v err=%v", g, err)
 	}
 	// Same tenant reads it; a zero tenant (single-tenant / admin) reads it; tenant B cannot
-	// (ErrNotFound — existence is not revealed cross-tenant).
+	// (ErrNotFound – existence is not revealed cross-tenant).
 	if _, err := repo.GetByIDInTenant(ctx, tenA, idA); err != nil {
 		t.Errorf("same-tenant GetByIDInTenant: %v", err)
 	}

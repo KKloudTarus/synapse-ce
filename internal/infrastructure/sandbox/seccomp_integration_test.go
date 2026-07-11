@@ -65,7 +65,7 @@ func TestSeccompDeniesDangerousSyscalls(t *testing.T) {
 
 	denied := []string{"ptrace", "af_packet", "bpf", "keyctl", "add_key", "userfaultfd", "unshare", "mount", "setns"}
 	for _, name := range denied {
-		// Expect "<name> rc=-1 errno=1" (EPERM) — the seccomp filter blocked it.
+		// Expect "<name> rc=-1 errno=1" (EPERM) – the seccomp filter blocked it.
 		line := lineFor(out, name)
 		if !strings.Contains(line, "rc=-1") || !strings.Contains(line, "errno=1") {
 			t.Errorf("syscall %q was NOT seccomp-denied (want rc=-1 errno=1): %q", name, line)

@@ -10,7 +10,7 @@ import (
 	"strconv"
 
 	// pure-Go sqlite driver (matches CGO_ENABLED=0), for the RHEL9+/Fedora rpmdb.sqlite. NOTE: the crafted-view
-	// non-hang property (see rpmComponents + TestCatalogRPMHostileViewTerminates) is driver-behavior-specific —
+	// non-hang property (see rpmComponents + TestCatalogRPMHostileViewTerminates) is driver-behavior-specific –
 	// re-validate that test on any version bump of this dependency.
 	_ "modernc.org/sqlite"
 
@@ -19,7 +19,7 @@ import (
 
 // RPM package cataloging. Modern distros (RHEL 9+/Fedora/AL2023/UBI9) store the package DB as sqlite at
 // /var/lib/rpm/rpmdb.sqlite, whose Packages table holds one binary RPM HEADER blob per installed package. The
-// older Berkeley-DB (/var/lib/rpm/Packages, RHEL<=8/CentOS/AL2) and ndb (openSUSE) backends are DEFERRED —
+// older Berkeley-DB (/var/lib/rpm/Packages, RHEL<=8/CentOS/AL2) and ndb (openSUSE) backends are DEFERRED –
 // their binary page formats are a larger, riskier parse and the generator already catalogs them from the
 // layout. Everything here treats the DB + header as UNTRUSTED (a hostile image): reads are cancellable
 // (modernc interrupts the first query step, the loop re-checks ctx between steps, and a best-effort watchdog
@@ -79,8 +79,8 @@ func rpmComponents(ctx context.Context, rootfsDir, namespace, tag string) (out [
 	// running step, so this watchdog does not guarantee aborting a mid-step spin (it only unblocks idle work
 	// and prevents new queries). Such a spin is only reachable via a crafted Packages view whose rows the
 	// server-side LENGTH filter rejects internally (so they never reach the loop); the pinned modernc v1.53.0
-	// returns promptly on that shape rather than spinning, which — with the per-blob + total-byte + row-count
-	// bounds below — is what actually bounds a hostile DB. TestCatalogRPMHostileViewTerminates locks that
+	// returns promptly on that shape rather than spinning, which – with the per-blob + total-byte + row-count
+	// bounds below – is what actually bounds a hostile DB. TestCatalogRPMHostileViewTerminates locks that
 	// property; RE-VALIDATE it on any modernc bump. done stops the watchdog on a normal return; defer order
 	// (close(done) before db.Close) means no double-close on the happy path, and db.Close is idempotent anyway.
 	done := make(chan struct{})
@@ -138,7 +138,7 @@ func safeParseRPMHeader(blob []byte) (name, evr, arch string, ok bool) {
 // parseRPMHeader extracts (name, epoch:version-release, arch) from one RPM header blob. Layout: an optional
 // 8-byte lead (magic 8e ad e8 01 + 4 reserved), then nindex (u32 BE) + hsize (u32 BE), then nindex 16-byte
 // index entries (tag, type, offset, count), then an hsize-byte data store. Every offset is bounds-checked in
-// unsigned space (width-independent), and each identity tag latches on its first NON-EMPTY value — a costly
+// unsigned space (width-independent), and each identity tag latches on its first NON-EMPTY value – a costly
 // rpmCStr scan only ever returns non-empty (an empty result is O(1)), so a crafted header with many duplicate
 // tags cannot amplify the per-entry string scan.
 func parseRPMHeader(blob []byte) (name, evr, arch string, ok bool) {

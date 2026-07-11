@@ -1,6 +1,6 @@
 // Package sca orchestrates the Software Composition Analysis pipeline. Scope and
 // the engagement authorization window are enforced HERE (the execution layer),
-// before any tool runs — never as a skippable check.
+// before any tool runs – never as a skippable check.
 package sca
 
 import (
@@ -143,7 +143,7 @@ func (s *Service) SetInstalledPackageCataloger(c ports.InstalledPackageCataloger
 func (s *Service) SetSBOMCache(c ports.SBOMCache) { s.sbomCache = c }
 
 // sbomProducerVersion is the SBOM-producer identity used as the cache-invalidation version: the versions of
-// the components that determine SBOM OUTPUT — the syft binary, the language classifier, and the synapse
+// the components that determine SBOM OUTPUT – the syft binary, the language classifier, and the synapse
 // binary that carries the owned parsers/enrichers. It deliberately excludes advisory/KEV/EPSS DB versions
 // (they don't change the generated SBOM). Empty when no producer version is known, which keeps the cache
 // off rather than serving an SBOM that can't be soundly version-keyed.
@@ -187,7 +187,7 @@ func (s *Service) SetComplianceEnabled(on bool) { s.complianceOn = on }
 func (s *Service) SetDBMaxAgeDays(days int) { s.dbMaxAgeDays = days }
 
 // SetDetectionPriority sets the server-level default detection priority (comprehensive|precise) applied
-// when a scan request does not specify one — so a server-configured SYNAPSE_DETECTION_PRIORITY reaches
+// when a scan request does not specify one – so a server-configured SYNAPSE_DETECTION_PRIORITY reaches
 // the API scan path, which has no per-request priority field. Empty leaves the comprehensive default.
 func (s *Service) SetDetectionPriority(p string) { s.detectionPriority = p }
 
@@ -201,7 +201,7 @@ func (s *Service) withDetectionDefault(opts ScanOptions) ScanOptions {
 }
 
 // attachCompliance computes the AppSec-baseline benchmark over the finalized findings when enabled. It runs
-// over ALL findings (an accepted-risk finding still fails its control — compliance reflects what is present).
+// over ALL findings (an accepted-risk finding still fails its control – compliance reflects what is present).
 func (s *Service) attachCompliance(result *ScanResult) {
 	if !s.complianceOn || result == nil {
 		return
@@ -251,14 +251,14 @@ func (s *Service) SetMavenResolver(r ports.MavenResolver) { s.mavenResolver = r 
 func (s *Service) SetGradleResolver(r ports.GradleResolver) { s.gradleResolver = r }
 
 // mergeResolvedJVM folds a resolver's transitive pkg:maven tree into doc and dedups by identity. Shared by
-// the Maven + Gradle resolvers (both emit Maven coordinates). No-op on an empty resolved set — with nothing
+// the Maven + Gradle resolvers (both emit Maven coordinates). No-op on an empty resolved set – with nothing
 // authoritative to substitute, syft's view (including any target/ jars, then the only version source) is
 // left intact rather than zeroed out.
 //
 // completeScopes selects how much of syft's pkg:maven view the resolved tree supersedes:
 //
 // true (Maven): `mvn dependency:list` enumerates ALL non-test scopes (compile/provided/runtime/system),
-// so the resolved set is a complete view of the shipped deps. Drop syft's ENTIRE pkg:maven view —
+// so the resolved set is a complete view of the shipped deps. Drop syft's ENTIRE pkg:maven view –
 // including the concretely-versioned jars syft catalogs from a built target/ dir. That last case is the
 // real hazard: a Spring Boot fat jar re-lists every dependency as a nested BOOT-INF/lib jar, so a
 // from-source scan of an already-built project counts each dependency twice (observed 162 real deps →
@@ -324,7 +324,7 @@ func NewService(
 	// deps, so every scan is gated + audited through the one chokepoint recon will
 	// also use. NewService keeps its (no-error) signature to avoid churn at
 	// the 20-param composition root; the guard's only failure mode is a nil dep, and
-	// a nil guard FAILS CLOSED — gateAndAudit returns ErrValidation so no scan runs
+	// a nil guard FAILS CLOSED – gateAndAudit returns ErrValidation so no scan runs
 	// (defended + tested). Revisit if NewService gains an error return.
 	if g, err := execution.NewGuard(engagements, clock, audit); err == nil {
 		svc.guard = g
@@ -340,10 +340,10 @@ type ScanResult struct {
 	SBOM      *sbom.SBOM               `json:"sbom"`
 	// Image carries container-image metadata (manifest digest, platform, ordered layer
 	// stack with base-image classification) for image scans; nil otherwise. Every vuln on
-	// an image is also attributed to its layer (Vulnerability.Layer*) — Epic D.
+	// an image is also attributed to its layer (Vulnerability.Layer*) – Epic D.
 	Image *sbom.ImageInfo `json:"image,omitempty"`
 	// Distro is the captured OS distribution (from OS-package PURLs) + its End-of-Life verdict;
-	// nil when the target has no OS packages. An EOL distro receives no security updates — a
+	// nil when the target has no OS packages. An EOL distro receives no security updates – a
 	// first-class posture signal for a container/host scan (Epic E).
 	Distro            *distro.Status                `json:"distro,omitempty"`
 	Vulnerabilities   []vulnerability.Vulnerability `json:"vulnerabilities"`
@@ -357,24 +357,24 @@ type ScanResult struct {
 	MinSeverity         shared.Severity `json:"min_severity"`
 	VulnsBelowThreshold int             `json:"vulns_below_threshold"`
 	// UnfixedSuppressed counts vulns not promoted ONLY because --ignore-unfixed is on and they
-	// have no available fix (they remain in Vulnerabilities) — surfaced so it's never silent.
+	// have no available fix (they remain in Vulnerabilities) – surfaced so it's never silent.
 	UnfixedSuppressed int `json:"unfixed_suppressed"`
 	// SourceWarnings flags a configured detection source that did NOT run (e.g. the Grype
 	// binary/DB is missing), so a silently-degraded source can't masquerade as "0 vulns / clean".
 	SourceWarnings []string `json:"source_warnings,omitempty"`
 	// SuppressedFindings marks findings accepted by the repo's .synapseignore policy. The findings REMAIN in
-	// Findings (reported, persisted, evidence-sealed — never hidden); this is only an accepted-risk
+	// Findings (reported, persisted, evidence-sealed – never hidden); this is only an accepted-risk
 	// annotation a CI --fail-on gate consults to exempt them. Acceptance suppresses the GATE, not visibility.
 	SuppressedFindings []SuppressedFinding `json:"suppressed_findings,omitempty"`
 	// ExpiredSuppressions lists .synapseignore rule ids that have lapsed, surfaced so accepted risk gets
-	// revisited rather than lingering — an expired rule no longer suppresses, so its finding re-surfaces.
+	// revisited rather than lingering – an expired rule no longer suppresses, so its finding re-surfaces.
 	ExpiredSuppressions []string `json:"expired_suppressions,omitempty"`
 	// MalformedSuppressions lists .synapseignore rule ids whose expiry could not be parsed; fail-safe, they
 	// do NOT suppress (a date typo must not become a permanent silent acceptance) and are surfaced to fix.
 	MalformedSuppressions []string `json:"malformed_suppressions,omitempty"`
 	// Compliance is the owned AppSec-baseline benchmark re-projected onto this scan's findings (per-control
 	// PASS/FAIL, LLM-free); nil unless compliance is enabled. Computed over ALL findings (an accepted-risk
-	// finding still fails its control — compliance reflects what is present, not the CI-gate decision).
+	// finding still fails its control – compliance reflects what is present, not the CI-gate decision).
 	Compliance *compliance.Report `json:"compliance,omitempty"`
 	// NeedsVerification lists vuln findings the precise detection-priority quarantined as lower-confidence
 	// (single uncorroborated source, non-KEV): still reported + sealed, but exempt from the --fail-on gate.
@@ -392,7 +392,7 @@ type ScanResult struct {
 	// ecosystem, so a thin / partially-resolved ecosystem is VISIBLE rather than hidden behind the single
 	// global Completeness number ("no silent gap").
 	Coverage []sbom.EcosystemCoverage `json:"coverage"`
-	// SBOMQuality scores the produced SBOM against the NTIA minimum elements + semantic-quality checks —
+	// SBOMQuality scores the produced SBOM against the NTIA minimum elements + semantic-quality checks –
 	// how well the components are DESCRIBED (supplier, unique id, checksum, license, dependency graph, ...),
 	// distinct from Completeness (which judges scan COVERAGE). Surfaced so a thin, hard-to-share, or
 	// non-regulation-minimum SBOM is a visible signal rather than a silent assumption. A consumer gates on
@@ -413,7 +413,7 @@ const (
 
 const (
 	// DetectionComprehensive is the default: every detected vulnerability at/above the floor is an
-	// actionable finding (current behavior). DetectionPrecise raises the ACTIONABLE bar — a single-source,
+	// actionable finding (current behavior). DetectionPrecise raises the ACTIONABLE bar – a single-source,
 	// uncorroborated, non-KEV vulnerability finding is quarantined into a needs-verify queue (still reported
 	// + evidence-sealed, just exempt from the --fail-on gate) rather than dropped, so recall is retained
 	// with the lower-confidence set clearly separated. KEV + multi-source findings are never quarantined.
@@ -554,7 +554,7 @@ func countComponents(doc *sbom.SBOM) int {
 // duplicating what the generator already cataloged from the image. The dedup key is PURL-type + lowercased
 // name@version + arch: including the type prevents a same name@version component in a DIFFERENT ecosystem
 // (which a hostile image could plant) from masking another's advisories, and including the arch keeps a
-// multiarch pair (libc6:amd64 + :i386, same version) distinct — while still matching the generator's own
+// multiarch pair (libc6:amd64 + :i386, same version) distinct – while still matching the generator's own
 // same-type+arch entry so it is not double-counted. Returns the number added.
 func mergeComponents(doc *sbom.SBOM, extra []sbom.Component) int {
 	if doc == nil || len(extra) == 0 {
@@ -756,7 +756,7 @@ func computeFindingQuality(res *ScanResult) FindingQuality {
 			continue
 		}
 		if f.Class == finding.ClassFirstParty {
-			continue // first-party actionable (e.g. SAST) — counted in Actionable above, not a third-party advisory
+			continue // first-party actionable (e.g. SAST) – counted in Actionable above, not a third-party advisory
 		}
 		q.ThirdParty++
 		switch f.Severity {
@@ -910,7 +910,7 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 		}
 	}
 	// defer to the durable queue when configured (an in-process or separate worker
-	// claims + runs the pipeline with syft/grype sandboxed) — replaces the bare goroutine,
+	// claims + runs the pipeline with syft/grype sandboxed) – replaces the bare goroutine,
 	// so queued work survives a restart. Without a queue, the in-process goroutine runs it.
 	if s.jobQueue != nil {
 		payload, mErr := json.Marshal(scaJobPayload{Actor: actor, EngagementID: engagementID.String(), Now: now, Req: req, Options: opts, Job: job})
@@ -940,7 +940,7 @@ type scaJobPayload struct {
 }
 
 // SetQueue routes SCA scans through the durable job queue: StartScan enqueues and
-// a worker claims + calls RunScanJob. Optional — without it, the in-process goroutine runs.
+// a worker claims + calls RunScanJob. Optional – without it, the in-process goroutine runs.
 func (s *Service) SetQueue(q ports.JobQueue) { s.jobQueue = q }
 
 // SetRunLock guards against duplicate concurrent execution of the same scan job under
@@ -955,7 +955,7 @@ func (s *Service) RunScanJob(ctx context.Context, payload []byte) error {
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("%w: malformed scan job payload: %v", shared.ErrValidation, err)
 	}
-	// single-active-execution lease at the JOB boundary (re-audit fix) — a lock ERROR
+	// single-active-execution lease at the JOB boundary (re-audit fix) – a lock ERROR
 	// returns an error so the queue REDELIVERS (never silently completes a never-run scan);
 	// a held lease means another delivery is running it → complete this one (nil).
 	if s.runLock != nil {
@@ -977,7 +977,7 @@ func (s *Service) RunScanJob(ctx context.Context, payload []byte) error {
 }
 
 // FailStrandedScanJob marks the scan job behind a DEAD-LETTERED sca job failed if it has not
-// already reached a terminal state — so a crash/lock-error that exhausts the retries leaves a
+// already reached a terminal state – so a crash/lock-error that exhausts the retries leaves a
 // terminal, operator-visible ScanJob (status=failed) instead of one stuck non-terminal with no
 // result. It is the worker's DeadLetterer hook for SCA (parity with recon + agent). It takes the
 // run lease so it never races a live redelivery and no-ops when the scan is already terminal.
@@ -1022,7 +1022,7 @@ func (s *Service) FailStrandedScanJob(ctx context.Context, payload []byte, cause
 }
 
 // SweepStaleScans reclaims scan jobs a crashed worker left `running` past staleFor WITHOUT a
-// dead-letter event — parity with recon's SweepStaleRuns, using the run lease as the liveness
+// dead-letter event – parity with recon's SweepStaleRuns, using the run lease as the liveness
 // signal (acquirable lease ⇒ no live owner ⇒ stranded ⇒ finalize failed). Requires the lease;
 // no-ops without it. Returns the number reclaimed.
 func (s *Service) SweepStaleScans(ctx context.Context, staleFor time.Duration) (int, error) {
@@ -1048,7 +1048,7 @@ func (s *Service) SweepStaleScans(ctx context.Context, staleFor time.Duration) (
 		}
 		fin := s.clock.Now()
 		job.FinishedAt, job.Progress = &fin, 100
-		job.Status, job.Stage, job.Error = ports.ScanFailed, "swept", "scan stranded running past staleFor with no live owner — reclaimed by sweeper"
+		job.Status, job.Stage, job.Error = ports.ScanFailed, "swept", "scan stranded running past staleFor with no live owner – reclaimed by sweeper"
 		_ = s.jobs.Save(ctx, job)
 		release()
 		n++
@@ -1066,7 +1066,7 @@ func (s *Service) LatestJob(ctx context.Context, engagementID shared.ID) (ports.
 
 // gateAndAudit enforces scope + the authorization window and records the
 // append-only audit entry, all BEFORE any tool runs, by delegating to the shared
-// execution guard — the same server-side chokepoint recon uses, never an
+// execution guard – the same server-side chokepoint recon uses, never an
 // SCA-private copy. The SCA target is matched as a repo (value-exact). Returns
 // the scan timestamp.
 func (s *Service) gateAndAudit(ctx context.Context, actor string, engagementID shared.ID, req ports.AcquireRequest, opts ScanOptions) (time.Time, error) {
@@ -1138,13 +1138,13 @@ func (s *Service) loadImportedSBOM(ctx context.Context, engagementID shared.ID) 
 	return record, doc, true, nil
 }
 
-// normalizeLocalTarget canonicalizes a LOCAL-filesystem target path — absolute, cleaned,
-// OS-native separators — so the scope check and the acquisition see the SAME stable value
+// normalizeLocalTarget canonicalizes a LOCAL-filesystem target path – absolute, cleaned,
+// OS-native separators – so the scope check and the acquisition see the SAME stable value
 // regardless of how the operator typed the path (relative, trailing slash, mixed '/' and '\',
 // '.'/'..', drive-letter case on Windows). It runs ONLY for the local kind: filepath.Clean would
 // corrupt a git URL (it collapses "https://" to "https:/"), so non-local kinds are returned
 // untouched. An empty value, or a path that cannot be made absolute, is left as-is for the
-// existing validation to reject. This only canonicalizes — it never widens scope (an out-of-scope
+// existing validation to reject. This only canonicalizes – it never widens scope (an out-of-scope
 // path still fails the gate); it fixes the cross-OS case where a valid local repo path was matched
 // inconsistently against scope.
 func normalizeLocalTarget(req ports.AcquireRequest) ports.AcquireRequest {
@@ -1176,7 +1176,7 @@ func (s *Service) runScanJob(actor string, engagementID shared.ID, now time.Time
 	// re-invoke a scan a prior delivery already finished. Re-running is read-only (findings
 	// dedup by advisory+component+version) but would seal a DUPLICATE "scan" evidence link
 	// and write a phantom ScanRun row. If this engagement's latest job is THIS job and is
-	// already terminal, skip — the worker then Completes the job. (A newer scan started
+	// already terminal, skip – the worker then Completes the job. (A newer scan started
 	// between deliveries masks this guard; the only cost there is the duplicate seal.)
 	if s.jobs != nil {
 		if latest, err := s.jobs.LatestForEngagement(context.Background(), engagementID); err == nil &&
@@ -1324,7 +1324,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 			}
 		}
 		if ver == "" && db == "" && len(doc.Components) > 0 {
-			sourceWarnings = append(sourceWarnings, fmt.Sprintf("detection source %q did not run (tool/DB missing or errored) — its vulnerabilities are NOT included", src.Name()))
+			sourceWarnings = append(sourceWarnings, fmt.Sprintf("detection source %q did not run (tool/DB missing or errored) – its vulnerabilities are NOT included", src.Name()))
 		}
 	}
 	snap := ports.ScanSnapshot{ToolVersions: toolVersions, VulnDBSnapshot: s.prov.VulnDBSource + "@" + now.UTC().Format(time.RFC3339), GrypeDBVersion: grypeDB}
@@ -1397,7 +1397,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		}
 	}
 	// Run over the FINAL findings (after any partial-rescan merge): quarantine lower-confidence vulns into
-	// the needs-verify queue (precise mode), then compute compliance — both must see the merged set so
+	// the needs-verify queue (precise mode), then compute compliance – both must see the merged set so
 	// derived data can never go stale/false-clean.
 	applyDetectionPriority(result, opts.DetectionPriority)
 	s.attachCompliance(result)
@@ -1446,7 +1446,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	step = trace.start(stageSBOM, "sbom-generation", "sbom", "Generate SBOM", nil)
 	// Content+version-addressed cache (opt-in): on an unchanged tree scanned with the same producer, reuse
 	// the cataloged SBOM and skip generation; a producer version bump makes the key miss (Trivy's
-	// analyzer-version invalidation). Best-effort — a miss/error just regenerates.
+	// analyzer-version invalidation). Best-effort – a miss/error just regenerates.
 	producerVer := sbomProducerVersion(s.prov.ToolVersions)
 	var doc *sbom.SBOM
 	cacheHit := false
@@ -1477,7 +1477,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	}
 	trace.succeed(step, "SBOM generated", map[string]int{"components": countComponents(doc), "dependencies": len(doc.Dependencies), "cache_hit": boolToInt(cacheHit)})
 	// SBOM producer cross-check: when a 2nd producer is configured, diff the two RAW
-	// component sets — BEFORE enrichment, so it compares the PRODUCERS themselves, not a shared post-process —
+	// component sets – BEFORE enrichment, so it compares the PRODUCERS themselves, not a shared post-process –
 	// and record components only one producer emitted as ungated CapCorrelation judgments for human review.
 	// Best-effort + opt-in: a 2nd-producer error is ignored (the scan never fails); never auto-resolved.
 	if s.sbomCrossCheck != nil && s.sbomGen2 != nil {
@@ -1546,7 +1546,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		step = trace.start(stageSBOM, "maven-resolve", "maven-resolver", "Resolve Maven dependency tree", map[string]int{"components": countComponents(doc)})
 		resolvedComps, mrr := s.mavenResolver.Resolve(ctx, ws.Dir)
 		before := countComponents(doc)
-		// Merge whatever resolved — a partial multi-project result still returns the projects that
+		// Merge whatever resolved – a partial multi-project result still returns the projects that
 		// succeeded (alongside a non-nil error), and those must not be discarded.
 		if len(resolvedComps) > 0 {
 			mergeResolvedJVM(doc, resolvedComps, true) // dependency:list = all non-test scopes → complete
@@ -1748,33 +1748,33 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if mavenResolveErr != nil {
 		if mavenResolved { // some projects resolved, at least one did not → partial under-count
 			sourceWarnings = append(sourceWarnings, fmt.Sprintf(
-				"Maven resolution PARTIALLY failed — some project(s)' transitive tree NOT captured: %v", mavenResolveErr))
+				"Maven resolution PARTIALLY failed – some project(s)' transitive tree NOT captured: %v", mavenResolveErr))
 		} else {
 			sourceWarnings = append(sourceWarnings, fmt.Sprintf(
-				"Maven dependency resolution failed — transitive tree NOT captured (result INCOMPLETE): %v", mavenResolveErr))
+				"Maven dependency resolution failed – transitive tree NOT captured (result INCOMPLETE): %v", mavenResolveErr))
 		}
 	}
 	if gradleResolveErr != nil {
 		if gradleResolved {
 			sourceWarnings = append(sourceWarnings, fmt.Sprintf(
-				"Gradle resolution PARTIALLY failed — some project(s)' transitive tree NOT captured: %v", gradleResolveErr))
+				"Gradle resolution PARTIALLY failed – some project(s)' transitive tree NOT captured: %v", gradleResolveErr))
 		} else {
 			sourceWarnings = append(sourceWarnings, fmt.Sprintf(
-				"Gradle dependency resolution failed — transitive tree NOT captured (result INCOMPLETE): %v", gradleResolveErr))
+				"Gradle dependency resolution failed – transitive tree NOT captured (result INCOMPLETE): %v", gradleResolveErr))
 		}
 	}
 	// An image target whose rootfs could not be assembled means OS packages were NOT owned-cataloged; surface
 	// it (never silent) so an absent OS-package set reads as "not analyzed", not "no OS packages".
 	if ws.RootFSNote != "" {
 		sourceWarnings = append(sourceWarnings, fmt.Sprintf(
-			"image rootfs NOT materialized — OS packages NOT owned-cataloged (result may under-report OS vulns): %s", ws.RootFSNote))
+			"image rootfs NOT materialized – OS packages NOT owned-cataloged (result may under-report OS vulns): %s", ws.RootFSNote))
 	}
 	// OS packages were cataloged but their distro release could not be resolved (os-release absent/garbled, or
-	// inconsistent with the package DB), so they matched NO OS advisories — surface it so this never reads as
+	// inconsistent with the package DB), so they matched NO OS advisories – surface it so this never reads as
 	// a clean OS posture (a hostile image cannot suppress its own OS vulns by lying in /etc/os-release).
 	if osDistroUnresolved {
 		sourceWarnings = append(sourceWarnings, fmt.Sprintf(
-			"%d OS package(s) cataloged but the distro release could not be resolved (/etc/os-release absent, garbled, or inconsistent with the package database) — OS advisories were NOT matched", osPkgsAdded))
+			"%d OS package(s) cataloged but the distro release could not be resolved (/etc/os-release absent, garbled, or inconsistent with the package database) – OS advisories were NOT matched", osPkgsAdded))
 	}
 	for _, src := range s.sources {
 		p, ok := src.(ports.SourceProvenance)
@@ -1792,14 +1792,14 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			}
 		}
 		// A source that EXPOSES provenance but reports it empty after a scan over a non-empty
-		// SBOM did not run (today only Grype degrades silently this way — its binary/DB missing;
+		// SBOM did not run (today only Grype degrades silently this way – its binary/DB missing;
 		// OSV + the owned store fail the scan loudly instead, so they need no such flag). Surface
-		// it so a silently-degraded source can't read as "0 vulns / clean" — a real "missing
+		// it so a silently-degraded source can't read as "0 vulns / clean" – a real "missing
 		// vulns" cause. Grype resets its provenance every scan, so this can't false-negative on a
 		// stale prior success.
 		if ver == "" && db == "" && len(doc.Components) > 0 {
 			sourceWarnings = append(sourceWarnings, fmt.Sprintf(
-				"detection source %q did not run (tool/DB missing or errored) — its vulnerabilities are NOT included", src.Name()))
+				"detection source %q did not run (tool/DB missing or errored) – its vulnerabilities are NOT included", src.Name()))
 		}
 	}
 	snap := ports.ScanSnapshot{
@@ -1811,9 +1811,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	manifest := buildManifest(toolVersions, snap.VulnDBSnapshot, grypeDB, doc)
 
 	// Maven, once its full tree is resolved (mvn dependency:list), is no longer an under-reporting
-	// unresolved ecosystem — drop it from the completeness signal so the scan reads as complete.
+	// unresolved ecosystem – drop it from the completeness signal so the scan reads as complete.
 	unresolvedEco := ws.UnresolvedEcosystems
-	// A successful Maven/Gradle resolution produces the FULL versioned tree — a complete resolving
+	// A successful Maven/Gradle resolution produces the FULL versioned tree – a complete resolving
 	// source, equivalent to a lockfile. Drop the ecosystem from the unresolved set AND record a synthetic
 	// lockfile marker so completeness reads the scan as confident (no "transitive tree unresolved" or
 	// "X of Y pinned" warning) rather than still flagging it incomplete.
@@ -1850,7 +1850,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// its component, and classify base vs application layers. No-op for non-image scans.
 	attributeImageLayers(result.Image, doc, result.Vulnerabilities)
 	// Capture the OS distribution from the SBOM's OS-package PURLs and flag it if End-of-Life
-	// (no security updates) as of the scan time — a posture signal for container/host scans (Epic E).
+	// (no security updates) as of the scan time – a posture signal for container/host scans (Epic E).
 	result.Distro = captureDistro(doc, now)
 	// Deterministic pattern-SAST over the LIVE workspace: weak crypto / hardcoded secrets /
 	// insecure config in first-party source. In-process, read-only, no LLM; findings publish like SCA.
@@ -1911,7 +1911,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Deterministic Tier-2 reachability proof, best-effort + opt-in: prove which findings' affected
 	// symbols are actually CALLED in the live workspace and mint Tier-2 judgments that supersede weaker
 	// (LLM Tier-1.5) reachability claims. A no-coverage/un-buildable target (e.g. non-Go, or no module
-	// cache) returns an error here — IGNORED: reachability is an enhancement, so the prior tier stands and
+	// cache) returns an error here – IGNORED: reachability is an enhancement, so the prior tier stands and
 	// the scan is never failed (mirrors the best-effort sbom/risk enrichers). Runs while ws.Dir still exists.
 	if opts.scansVulnerabilities() && s.reachability != nil {
 		if subs := reachabilitySubjects(result.Findings, result.Vulnerabilities); len(subs) > 0 {
@@ -1922,7 +1922,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Deterministic taint-analysis CapSAST proposals, best-effort + opt-in: build the workspace call
 	// graph (sandboxed), assemble the taint FlowGraph over the injection catalog, and PROPOSE gated CapSAST
 	// judgments (one per injection path × class) for a distinct verifier to gate. Same best-effort contract
-	// as reachability — a no-coverage/un-buildable target returns an error here that is IGNORED (taint is an
+	// as reachability – a no-coverage/un-buildable target returns an error here that is IGNORED (taint is an
 	// enhancement; the scan is never failed). Runs while ws.Dir still exists.
 	if opts.scansVulnerabilities() && s.taint != nil {
 		_, _ = s.taint.Scan(ctx, engagementID, ws.Dir)
@@ -1931,7 +1931,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Cross-check disagreement judgments, best-effort + opt-in: where the RUN detection sources
 	// disagree on a vuln (one reported it; another that ran did not), mint an ungated CapCorrelation
 	// judgment for human review (never auto-resolved). Uses the pre-correlation multi-source raws
-	// + the run source names. A recorder error is IGNORED — like reachability, this is an enhancement, not a
+	// + the run source names. A recorder error is IGNORED – like reachability, this is an enhancement, not a
 	// gate; the scan is never failed. No-op with <2 sources (nothing can disagree).
 	if opts.scansVulnerabilities() && s.correlation != nil {
 		if report := vulnerability.CrossCheck(detectionSourceNames(s.sources), raws); len(report.Disagreements) > 0 {
@@ -1971,7 +1971,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			return nil, fmt.Errorf("persist scan: %w", err)
 		}
 		if skipped > 0 {
-			// A vuln could not be linked to an SBOM component and was dropped — record it
+			// A vuln could not be linked to an SBOM component and was dropped – record it
 			// on the append-only audit log (counts only; never advisory/component text).
 			if err := s.audit.Record(ctx, ports.AuditEntry{
 				Actor:    actor,
@@ -2000,7 +2000,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 	}
 	// Run over the FINAL findings (after any partial-rescan merge): quarantine lower-confidence vulns into
-	// the needs-verify queue (precise mode), then compute compliance — both must see the merged set so
+	// the needs-verify queue (precise mode), then compute compliance – both must see the merged set so
 	// derived data can never go stale/false-clean.
 	applyDetectionPriority(result, opts.DetectionPriority)
 	s.attachCompliance(result)
@@ -2091,7 +2091,7 @@ func kindOrLocal(kind string) string {
 // SBOM's dependency graph.
 // classifyVulns marks each vuln first-party / unversioned from its SBOM component
 // . Unversioned (no resolvable version) means the advisory cannot be
-// confirmed against an affected range — it becomes a historical advisory.
+// confirmed against an affected range – it becomes a historical advisory.
 func classifyVulns(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) {
 	firstParty := make(map[string]bool, len(doc.Components))
 	scopeByCV := make(map[string]string, len(doc.Components))
@@ -2119,7 +2119,7 @@ func classifyVulns(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) {
 		}
 		// Finding-quality signals: reachability, impact, priority. The coarse JVM
 		// class-reachability verdict rides along and DEPRIORITIZES a vuln on an unreferenced
-		// component by one tier (never suppresses — it's a coarse, reflection-blind signal).
+		// component by one tier (never suppresses – it's a coarse, reflection-blind signal).
 		v.ClassReachability = reachByCV[v.Component+"\x00"+v.Version]
 		v.Reachability = vulnerability.Reachability(v.Scope, v.Direct)
 		v.Impact = vulnerability.Impact(v.Severity, v.Scope)
@@ -2148,7 +2148,7 @@ func attachDependencyPaths(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) 
 
 // computeCompleteness reports whether dependency versions were actually resolved.
 // A scan of source WITHOUT a lockfile leaves versions unresolved, so a low/zero
-// vulnerability count must not be read as "clean" — never silently
+// vulnerability count must not be read as "clean" – never silently
 // under-report (a trust signal).
 func computeCompleteness(doc *sbom.SBOM, lockfiles, unresolvedEco []string) ports.Completeness {
 	total := len(doc.Components)
@@ -2170,38 +2170,38 @@ func computeCompleteness(doc *sbom.SBOM, lockfiles, unresolvedEco []string) port
 	c := ports.Completeness{Lockfiles: lockfiles, ComponentsTotal: total, ComponentsResolved: resolved}
 	// Confidence is judged on the APPLICATION (non-OS) components ONLY. OS packages are read
 	// installed + fully pinned from the package-manager DB, so they must not DILUTE an
-	// unresolved app surface — otherwise a few range-versioned app deps could hide behind many
+	// unresolved app surface – otherwise a few range-versioned app deps could hide behind many
 	// pinned OS packages and falsely read "confident" (a silent under-report).
 	appRatio := 1.0
 	if appTotal > 0 {
 		appRatio = float64(appResolved) / float64(appTotal)
 	}
 	// A container / OS image scan reads INSTALLED packages from the package-manager DB
-	// (dpkg/apk/rpm) — authoritative + pinned, needing NO manifest lockfile. Record the DB as
-	// the resolving source so the scan is not mislabeled "INCOMPLETE — provide a lockfile"
+	// (dpkg/apk/rpm) – authoritative + pinned, needing NO manifest lockfile. Record the DB as
+	// the resolving source so the scan is not mislabeled "INCOMPLETE – provide a lockfile"
 	// (nonsensical for a container).
 	osScan := osPkgs > 0
-	if osScan { // osPackageDB is synthetic — produced only here, so no need to dedup against lockfiles
+	if osScan { // osPackageDB is synthetic – produced only here, so no need to dedup against lockfiles
 		c.Lockfiles = append(append([]string{}, lockfiles...), osPackageDB)
 	}
 	// Confident when a resolving source exists (a manifest lockfile, or the OS DB), the APP
 	// components are well-resolved, and no app build system is left unresolved (Gradle/Maven
-	// without a lockfile under-reports that ecosystem's transitive tree — honesty fix).
+	// without a lockfile under-reports that ecosystem's transitive tree – honesty fix).
 	c.Confident = (len(lockfiles) > 0 || osScan) && appRatio >= 0.8 && len(unresolvedEco) == 0
 	switch {
 	case len(unresolvedEco) > 0:
 		c.Warning = fmt.Sprintf("Unresolved build system(s) present: %s. Their dependencies are NOT fully captured "+
-			"(the transitive tree wasn't resolved from source), so this result is INCOMPLETE — a low finding count does NOT mean clean. %s",
+			"(the transitive tree wasn't resolved from source), so this result is INCOMPLETE – a low finding count does NOT mean clean. %s",
 			strings.Join(unresolvedEco, ", "), unresolvedRemediation(unresolvedEco))
 	case c.Confident:
 	case total == 0:
-		c.Warning = "No components resolved — the target has no recognized dependency manifests."
+		c.Warning = "No components resolved – the target has no recognized dependency manifests."
 	case appTotal > 0 && appRatio < 0.8 && len(lockfiles) == 0:
 		// Application dependencies are present without a lockfile (whether or not OS packages
 		// are too): their versions are unresolved and under-reported. Reported over the APP
 		// components so abundant pinned OS packages can't make it look complete.
 		c.Warning = fmt.Sprintf("No application lockfile found; only %d of %d application components have pinned versions. "+
-			"Those dependencies are unresolved, so this result is INCOMPLETE for the application — a low vulnerability count does "+
+			"Those dependencies are unresolved, so this result is INCOMPLETE for the application – a low vulnerability count does "+
 			"NOT mean clean. Provide a lockfile (package-lock.json, yarn.lock, Gemfile.lock, poetry.lock, go.sum, ...) for a complete scan.", appResolved, appTotal)
 	default:
 		c.Warning = fmt.Sprintf("Only %d of %d components have pinned versions; some dependencies are unresolved and may be under-reported.", resolved, total)
@@ -2210,11 +2210,11 @@ func computeCompleteness(doc *sbom.SBOM, lockfiles, unresolvedEco []string) port
 }
 
 // osPackageDB is the synthetic "resolving source" recorded for a container/OS scan, where the
-// OS package-manager DB (dpkg/apk/rpm) — not a manifest lockfile — is the authoritative pinned source.
+// OS package-manager DB (dpkg/apk/rpm) – not a manifest lockfile – is the authoritative pinned source.
 const osPackageDB = "os-package-db"
 
 // isOSPackage reports whether a PURL is an OS package-manager package (Debian/Ubuntu deb, Alpine
-// apk, RHEL/Fedora rpm, Arch alpm) — an installed package read from the OS DB, always pinned.
+// apk, RHEL/Fedora rpm, Arch alpm) – an installed package read from the OS DB, always pinned.
 func isOSPackage(purl string) bool {
 	switch ecosystemFromPURL(purl) {
 	case "deb", "apk", "rpm", "alpm":
@@ -2275,7 +2275,7 @@ func removeEcosystem(unresolvedEco []string, name string) []string {
 
 // unresolvedRemediation gives ECOSYSTEM-ACCURATE guidance for turning an incomplete scan into a
 // complete one. Maven has no lockfile, so the generic "write a lockfile" advice (correct for Gradle)
-// misleads a Maven user — the fix there is to scan a built artifact or resolve the tree first. This is
+// misleads a Maven user – the fix there is to scan a built artifact or resolve the tree first. This is
 // why a Maven-from-source scan under-reports vs a tool that resolves the full dependency tree.
 func unresolvedRemediation(unresolvedEco []string) string {
 	has := func(name string) bool {
@@ -2288,11 +2288,11 @@ func unresolvedRemediation(unresolvedEco []string) string {
 	}
 	var tips []string
 	if has("maven") {
-		tips = append(tips, "Maven has no lockfile — scan a BUILT artifact (`mvn package`, then scan the produced JAR or `target/`), "+
+		tips = append(tips, "Maven has no lockfile – scan a BUILT artifact (`mvn package`, then scan the produced JAR or `target/`), "+
 			"or resolve the tree first (`mvn dependency:copy-dependencies -DoutputDirectory=target/deps`) and scan that directory")
 	}
 	if has("gradle") {
-		tips = append(tips, "Gradle — generate a lockfile (`gradle dependencies --write-locks`) then re-scan")
+		tips = append(tips, "Gradle – generate a lockfile (`gradle dependencies --write-locks`) then re-scan")
 	}
 	if len(tips) == 0 {
 		tips = append(tips, "provide a resolved lockfile or a built artifact, then re-scan")
@@ -2338,7 +2338,7 @@ func attributeImageLayers(img *sbom.ImageInfo, doc *sbom.SBOM, vulns []vulnerabi
 		}
 		l, ok := byDiff[layerID]
 		if !ok {
-			continue // component carried a layerID the image config doesn't list — treat as unattributed
+			continue // component carried a layerID the image config doesn't list – treat as unattributed
 		}
 		idx := l.Index
 		v.LayerID = layerID
@@ -2366,12 +2366,12 @@ func isPinnedVersion(v string) bool {
 
 // credInErr matches credentials embedded in a URL (scheme://userinfo@host) that a
 // future tool adapter might echo into an error, so they never reach the client via
-// job.Error — a second layer beyond the acquirer's own redaction.
+// job.Error – a second layer beyond the acquirer's own redaction.
 var credInErr = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@`)
 
 // sealEvidence appends one tamper-evident link summarizing this scan to the
 // engagement's hash chain. Content is a canonical digest of the run:
-// SBOM hash, finding keys, and the manifest — so any later tampering is detectable
+// SBOM hash, finding keys, and the manifest – so any later tampering is detectable
 // by re-verification. Best-effort: a ledger write must not fail a good scan.
 func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID shared.ID, now time.Time, result *ScanResult) {
 	if s.evidence == nil {
@@ -2382,8 +2382,8 @@ func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID s
 		keys = append(keys, f.DedupKey)
 	}
 	sort.Strings(keys)
-	// Seal the accepted-risk exemptions too (rule=finding-key pairs), so a .synapseignore decision — which
-	// findings were exempted from the --fail-on gate, by which rule — is itself tamper-evident, not just a
+	// Seal the accepted-risk exemptions too (rule=finding-key pairs), so a .synapseignore decision – which
+	// findings were exempted from the --fail-on gate, by which rule – is itself tamper-evident, not just a
 	// mutable convenience in the results cache. omitempty keeps a suppression-free scan's seal unchanged.
 	var suppressed []string
 	for _, sf := range result.SuppressedFindings {
@@ -2402,7 +2402,7 @@ func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID s
 	if err != nil {
 		return
 	}
-	// Append through the evidence vault — one tamper-evident chain + verify path per
+	// Append through the evidence vault – one tamper-evident chain + verify path per
 	// engagement. The vault binds the link to the current head; a transient
 	// Head failure fails the seal rather than forking the chain.
 	_, _ = s.evidence.Seal(ctx, engagementID, "scan", content, actor)
@@ -2452,7 +2452,7 @@ func (s *Service) ReportInsight(ctx context.Context, engagementID shared.ID) (po
 			PriorityCounts:       res.FindingQuality.ByPriority,
 		}
 	}
-	// Always verify the evidence chain — recon-only and manual engagements seal
+	// Always verify the evidence chain – recon-only and manual engagements seal
 	// evidence too. A verification ERROR fails closed (not silently read as "no
 	// evidence"), so the report gate can block a custody chain it could not prove.
 	ev, err := s.VerifyEvidence(ctx, engagementID)
@@ -2561,7 +2561,7 @@ func diffRuns(a, b ports.ScanRun) ScanDrift {
 	return d
 }
 
-// explainDrift lists the manifest inputs that changed between two runs — the
+// explainDrift lists the manifest inputs that changed between two runs – the
 // reasons a result can legitimately differ.
 func explainDrift(a, b ports.ScanManifest) []string {
 	var out []string
@@ -2582,10 +2582,10 @@ func explainDrift(a, b ports.ScanManifest) []string {
 		out = append(out, "SBOM changed (the target's dependencies differ between runs)")
 	}
 	if a.VulnDBSnapshot != b.VulnDBSnapshot {
-		out = append(out, "OSV.dev is a live source queried per scan — advisories may have changed between runs (unpinned)")
+		out = append(out, "OSV.dev is a live source queried per scan – advisories may have changed between runs (unpinned)")
 	}
 	if len(out) == 0 {
-		out = append(out, "no manifest inputs changed — results should be identical")
+		out = append(out, "no manifest inputs changed – results should be identical")
 	}
 	return out
 }

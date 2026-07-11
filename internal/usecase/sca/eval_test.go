@@ -3,7 +3,7 @@ package sca
 // Eval harness (NOT a CI test): drives Synapse's REAL detection + license pipeline over a CycloneDX SBOM
 // and writes the vuln + license result as JSON, so it can be diffed against a Trivy report. Gated by
 // SYNAPSE_EVAL_SBOM (path to the SBOM) so `go test./...` skips it. Uses OSV (live) + Grype (offline DB
-// if available) as vuln sources — the same sources the scan pipeline runs — then Correlate + classifyVulns
+// if available) as vuln sources – the same sources the scan pipeline runs – then Correlate + classifyVulns
 // (cross-source dedup + risk), and the license Scanner (normalize declared licenses → SPDX + risk).
 //
 // SYNAPSE_EVAL_SBOM=/abs/SBOM.cdx.json SYNAPSE_EVAL_OUT=/abs/out.json \
@@ -27,7 +27,7 @@ import (
 func TestEvalSBOM(t *testing.T) {
 	sbomPath := os.Getenv("SYNAPSE_EVAL_SBOM")
 	if sbomPath == "" {
-		t.Skip("SYNAPSE_EVAL_SBOM not set — eval harness, not a CI test")
+		t.Skip("SYNAPSE_EVAL_SBOM not set – eval harness, not a CI test")
 	}
 	data, err := os.ReadFile(sbomPath)
 	if err != nil {
@@ -41,7 +41,7 @@ func TestEvalSBOM(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 
-	// --- vuln sources: OSV (live) + Grype (offline DB if present) — same as the scan pipeline ---
+	// --- vuln sources: OSV (live) + Grype (offline DB if present) – same as the scan pipeline ---
 	var raws []vulnerability.RawFinding
 	if r, e := osv.New("", nil).Scan(ctx, doc); e != nil {
 		t.Logf("OSV: %v", e)
@@ -50,7 +50,7 @@ func TestEvalSBOM(t *testing.T) {
 		raws = append(raws, r...)
 	}
 	if r, e := grype.New("grype", os.Getenv("GRYPE_DB_DIR")).Scan(ctx, doc); e != nil {
-		t.Logf("Grype: %v (skipping — DB/binary unavailable)", e)
+		t.Logf("Grype: %v (skipping – DB/binary unavailable)", e)
 	} else {
 		t.Logf("Grype raws: %d", len(r))
 		raws = append(raws, r...)

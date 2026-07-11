@@ -215,7 +215,7 @@ func extractTarStream(r io.Reader, dest string, maxBytes int64) error {
 				return fmt.Errorf("%w: archive exceeds the %d-byte workspace cap", shared.ErrValidation, maxBytes)
 			}
 		default:
-			// Symlinks (TypeSymlink/TypeLink), devices, fifos: skipped — a link could
+			// Symlinks (TypeSymlink/TypeLink), devices, fifos: skipped – a link could
 			// redirect a later read/write outside the workspace.
 		}
 	}

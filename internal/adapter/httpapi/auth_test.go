@@ -9,7 +9,7 @@ import (
 
 // TestTenantPropagatesThroughContext covers the tenant foundation: the tenant the resolver
 // puts on the Principal flows through the auth middleware into the request context, readable via
-// TenantFrom — the plumbing that lets writes stamp + reads scope by tenant.
+// TenantFrom – the plumbing that lets writes stamp + reads scope by tenant.
 func TestTenantPropagatesThroughContext(t *testing.T) {
 	auth := NewAuthenticator(func(_ context.Context, _ string) (Principal, bool) {
 		return Principal{ID: "u1", Name: "T", Role: "member", TenantID: "acme"}, true

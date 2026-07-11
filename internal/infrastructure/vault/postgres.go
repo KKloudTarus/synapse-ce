@@ -13,8 +13,8 @@ import (
 )
 
 // PostgresVault persists encrypted credentials on PostgreSQL. The column holds only the
-// AES-256-GCM ciphertext (base64) — the master key lives in process memory, never in
-// the DB — so a database compromise alone does not yield the secrets.
+// AES-256-GCM ciphertext (base64) – the master key lives in process memory, never in
+// the DB – so a database compromise alone does not yield the secrets.
 type PostgresVault struct {
 	pool   *pgxpool.Pool
 	cipher *Cipher

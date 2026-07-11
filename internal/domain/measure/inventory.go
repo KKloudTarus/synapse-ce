@@ -1,6 +1,6 @@
 // Package measure holds numeric, non-finding project measures (code size, complexity, duplication,
 // coverage). It is the counterpart to domain/finding for the code-quality ("power tool") capability:
-// a finding is a defect to fix, a measure is a number that describes the codebase. Pure domain — data
+// a finding is a defect to fix, a measure is a number that describes the codebase. Pure domain – data
 // types + deterministic rollups only, no I/O and no infrastructure types.
 package measure
 

@@ -28,9 +28,9 @@ type Config struct {
 	DBDSN string
 	// SyftBin is the Syft executable used for SBOM generation (shell-out).
 	SyftBin string
-	// SBOMProducer selects the SBOM-generation producer: "syft" (default — the pinned
+	// SBOMProducer selects the SBOM-generation producer: "syft" (default – the pinned
 	// binary, full ecosystem coverage + dep-graph edges via CycloneDX) or "ownsbom" (the detection-
-	// independent owned per-ecosystem parsers — no third-party scanner, but components-only + Tier-1 ecosystems).
+	// independent owned per-ecosystem parsers – no third-party scanner, but components-only + Tier-1 ecosystems).
 	SBOMProducer string
 	// GrypeBin is the Grype executable for the second detection source;
 	// missing binary degrades gracefully to OSV-only.
@@ -62,11 +62,11 @@ type Config struct {
 	// FindingMinSeverity is the lowest vuln severity promoted to a finding.
 	FindingMinSeverity string
 	// IgnoreUnfixed, when true, does NOT promote vulnerabilities that have no available fix
-	// (FixedVersion empty — not-fixed / wont-fix / deferred) to findings, matching Trivy's
+	// (FixedVersion empty – not-fixed / wont-fix / deferred) to findings, matching Trivy's
 	// --ignore-unfixed. Default false (show everything); they remain in the vuln inventory.
 	IgnoreUnfixed bool
 	// Offline, when true, omits detection sources that require network egress (the live OSV.dev
-	// source), running only offline sources — Grype's pre-synced DB and the owned advisory store.
+	// source), running only offline sources – Grype's pre-synced DB and the owned advisory store.
 	// Trades some recall for a fast, air-gapped scan (no live HTTP per scan). Default false.
 	Offline bool
 	// MaxWorkspaceBytes caps the total size of a prepared SCA workspace: the
@@ -86,7 +86,7 @@ type Config struct {
 	ReconMaxOutput   int
 	ReconConcurrency int
 	ReconQueueSize   int
-	// ReconAllowCapabilitySensitive permits capability-sensitive tools (naabu — raw
+	// ReconAllowCapabilitySensitive permits capability-sensitive tools (naabu – raw
 	// sockets) to run. Default false: they stay behind the sandbox.
 	ReconAllowCapabilitySensitive bool
 	// EvidenceSigningSeed is the ed25519 seed (64 hex chars or base64 of 32 bytes)
@@ -108,7 +108,7 @@ type Config struct {
 	SandboxPidsMax int
 	// ToolHashes are operator-supplied authoritative sha256 pins for tool binaries,
 	// format "name=hex,/abs/path=hex,…". When set, the SandboxRunner refuses to execute a
-	// binary whose hash does not match its pin — closing the initial-supply-chain gap that
+	// binary whose hash does not match its pin – closing the initial-supply-chain gap that
 	// trust-on-first-use alone cannot (TOFU only detects post-first-run replacement). Empty
 	// = TOFU only. Parsed from SYNAPSE_TOOL_HASHES.
 	ToolHashes map[string]string
@@ -132,7 +132,7 @@ type Config struct {
 	LLMTimeout time.Duration
 
 	// Agent orchestration policy. ApprovalMode: manual|filter|auto (manual is
-	// the safe default — a human approves every action). The rest bound a run.
+	// the safe default – a human approves every action). The rest bound a run.
 	AgentApprovalMode    string
 	AgentApprovalTimeout time.Duration
 	AgentMaxSteps        int
@@ -177,10 +177,10 @@ type Config struct {
 	ComplianceEnabled bool
 	// DetectionPriority is the default vulnerability detection priority: "comprehensive" (default; every
 	// detected vuln is actionable) or "precise" (single-source, non-KEV vulns are quarantined into a
-	// needs-verify queue — reported + sealed, exempt from the --fail-on gate). Empty = comprehensive.
+	// needs-verify queue – reported + sealed, exempt from the --fail-on gate). Empty = comprehensive.
 	DetectionPriority string
 	// DBMaxAgeDays warns (non-fatal, SourceWarning) when a dated reference DB (CISA KEV / EPSS catalog, or a
-	// pinned vuln DB) is older than this many days — so a scan on stale advisory data can't silently
+	// pinned vuln DB) is older than this many days – so a scan on stale advisory data can't silently
 	// under-report (Trivy uses a stale DB silently). 0 disables the check.
 	DBMaxAgeDays int
 	// ScanCacheEnabled turns on the content+version-addressed generated-SBOM cache; off by default. A hit on
@@ -198,7 +198,7 @@ type Config struct {
 	// OwnedAdvisoryEnabled wires the owned advisory DetectionSource: match the SBOM
 	// against the owned normalized-advisory store (offline, reproducible) ALONGSIDE live OSV/Grype. Off by
 	// default; opt-in. An empty store yields no findings (a harmless no-op) until the advisory ingester
-	// populates it — so enabling it without a populated store changes nothing.
+	// populates it – so enabling it without a populated store changes nothing.
 	OwnedAdvisoryEnabled bool
 	// ReachabilityEnabled turns on deterministic Tier-2 call-graph reachability proof: post-scan,
 	// it proves which findings' affected symbols are actually called and mints Tier-2 judgments that
@@ -224,19 +224,19 @@ type Config struct {
 	// MavenResolveEnabled turns on full Maven dependency-tree resolution via `mvn dependency:list`
 	// (best-effort + opt-in): a from-source Maven scan otherwise sees only direct deps with UNKNOWN
 	// (parent-BOM-managed) versions and no transitive tree, under-reporting vs a build-artifact scan.
-	// Off by default — it runs the Maven toolchain over untrusted project config + reaches the Maven
+	// Off by default – it runs the Maven toolchain over untrusted project config + reaches the Maven
 	// repo, so production MUST run it sandbox-confined. MvnBin is the mvn executable.
 	MavenResolveEnabled bool
 	MvnBin              string
 	// MavenRepoHosts are extra Maven-repository hosts (comma-separated) the sandboxed resolver may reach
-	// beyond Maven Central — e.g. a corporate mirror or the Apache plugin repo. Empty = Central only.
+	// beyond Maven Central – e.g. a corporate mirror or the Apache plugin repo. Empty = Central only.
 	MavenRepoHosts []string
 	// MavenLocalRepo pins Maven's local repository to a PERSISTENT dir so the resolved tree is cached
 	// across scans instead of re-downloaded. Empty = ephemeral (under the sandbox tmpfs HOME).
 	MavenLocalRepo string
 	// GradleResolveEnabled turns on full Gradle dependency-tree resolution via `gradle dependencies`
-	// (best-effort + opt-in). HIGHER risk than Maven — evaluating build.gradle runs arbitrary build
-	// logic — so production MUST run it sandbox-confined and it never invokes the project's./gradlew.
+	// (best-effort + opt-in). HIGHER risk than Maven – evaluating build.gradle runs arbitrary build
+	// logic – so production MUST run it sandbox-confined and it never invokes the project's./gradlew.
 	// GradleBin is the pinned gradle executable; GradleHome is an optional persistent GRADLE_USER_HOME
 	// cache. MavenRepoHosts (above) extends the egress allow-list for both resolvers (shared JVM repos).
 	GradleResolveEnabled bool
@@ -306,7 +306,7 @@ func Load() Config {
 		NVDBudget:    getduration("SYNAPSE_NVD_BUDGET", 20*time.Second),
 		ScanTimeout:  getduration("SYNAPSE_SCAN_TIMEOUT", 10*time.Minute),
 		// Promote EVERY detected vulnerability by default (info = lowest rank), matching
-		// Grype/Trivy/OSV-Scanner — a higher floor silently hides detected vulns and reads as
+		// Grype/Trivy/OSV-Scanner – a higher floor silently hides detected vulns and reads as
 		// "missing vulns". Prioritization is done by risk priority (KEV→EPSS×CVSS), not by
 		// dropping findings; raise this floor explicitly to trim a report's actionable set.
 		FindingMinSeverity: getenv("SYNAPSE_FINDING_MIN_SEVERITY", "info"),
@@ -339,7 +339,7 @@ func Load() Config {
 		// safe to default on: file/compute-based, no external service, and a no-op when its input is
 		// absent. Set the flag to false to opt out. Capabilities that need external setup or would be
 		// unsafe unsandboxed stay OFF by default (sandbox, agent/LLM, taint, maven/gradle resolvers,
-		// jarhash egress) — see their fields below.
+		// jarhash egress) – see their fields below.
 		JudgmentsEnabled:       getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
 		SASTEnabled:            getbool("SYNAPSE_SAST_ENABLED", true),
 		SecretScanEnabled:      getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
@@ -439,7 +439,7 @@ func normalizeEnv(s string) string { return strings.ToLower(strings.TrimSpace(s)
 
 // IsProduction reports whether this is a production-grade deployment, in which the
 // security gates (credential-vault master key, evidence/audit chain-head signing,
-// sandbox requirement) MUST fail closed. It is the single authority for that decision —
+// sandbox requirement) MUST fail closed. It is the single authority for that decision –
 // never compare cfg.Environment to a string literal directly.
 //
 // It fails CLOSED: only an explicitly recognized non-production environment is treated

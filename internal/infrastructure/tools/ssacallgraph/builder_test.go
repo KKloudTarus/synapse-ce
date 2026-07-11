@@ -62,7 +62,7 @@ func run(name string) { _ = exec.Command(name).Run() }
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	// Specific edges must exist (the full CHA graph is huge — assert the ones we control).
+	// Specific edges must exist (the full CHA graph is huge – assert the ones we control).
 	if !hasEdge(g, "cgfixture.main", "cgfixture.run") {
 		t.Errorf("missing edge cgfixture.main → cgfixture.run (edges=%d)", len(g.Edges))
 	}
@@ -79,7 +79,7 @@ func run(name string) { _ = exec.Command(name).Run() }
 }
 
 func TestBuildGraphMethodNodeID(t *testing.T) {
-	// A method node is "pkg.RecvType.Method" with the receiver pointer stripped — matching the govulncheck
+	// A method node is "pkg.RecvType.Method" with the receiver pointer stripped – matching the govulncheck
 	// builder's convention so taint/reachability node ids align.
 	dir := writeModule(t, map[string]string{
 		"go.mod": "module mfix\n\ngo 1.21\n",
@@ -109,7 +109,7 @@ func main() { (&Svc{}).Handle() }
 func TestBuildGraphGenericInstanceEdgesSurvive(t *testing.T) {
 	// A call chain THROUGH a generic function must NOT be severed. A monomorphized instance (Map[int]) has a
 	// nil ssa Pkg + a parameterized name, so without Origin() resolution its in/out edges would silently drop
-	// — a taint false-negative. The node id resolves to the un-parameterized origin "genfix.Map" (matching
+	// – a taint false-negative. The node id resolves to the un-parameterized origin "genfix.Map" (matching
 	// the govulncheck convention), so both edges survive.
 	dir := writeModule(t, map[string]string{
 		"go.mod": "module genfix\n\ngo 1.21\n",
@@ -136,12 +136,12 @@ func main() { _ = Map([]int{1, 2}, id) }
 		t.Errorf("edge INTO the generic (genfix.main → genfix.Map) must survive Origin resolution (edges=%d)", len(g.Edges))
 	}
 	if !hasEdge(g, "genfix.Map", "genfix.id") {
-		t.Errorf("edge OUT of the generic (genfix.Map → genfix.id) must survive — a severed chain is a taint false-negative")
+		t.Errorf("edge OUT of the generic (genfix.Map → genfix.id) must survive – a severed chain is a taint false-negative")
 	}
 }
 
 func TestBuildGraphLoadErrorFailsClosed(t *testing.T) {
-	// A package that does not compile must fail closed — a partial graph would silently drop edges (a taint
+	// A package that does not compile must fail closed – a partial graph would silently drop edges (a taint
 	// false-negative), so BuildGraph refuses it rather than returning an under-approximation.
 	dir := writeModule(t, map[string]string{
 		"go.mod":  "module brokenfix\n\ngo 1.21\n",

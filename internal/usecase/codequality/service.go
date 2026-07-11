@@ -1,7 +1,7 @@
 // Package codequality assembles the code-quality findings for a source tree: it runs the deterministic
 // maintainability/reliability rule engine and layers on the metric-derived signals (duplication, and
 // complexity when an AST backend is available), mapping everything to first-party finding.Finding values
-// (Kind=quality/reliability, ungated, publishable like SAST). No LLM, no persistence — a read-only
+// (Kind=quality/reliability, ungated, publishable like SAST). No LLM, no persistence – a read-only
 // producer the CLI (and, later, the scan pipeline + UI) consume.
 package codequality
 
@@ -14,6 +14,8 @@ import (
 	"strconv"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/rating"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -22,11 +24,13 @@ import (
 // finding (a widely used "refactor" line). Configurable via WithComplexityThreshold.
 const DefaultComplexityThreshold = 15
 
-// Service produces code-quality findings. analyzer is required; dup and metrics are optional enrichers.
+// Service produces code-quality findings. analyzer is required; dup, metrics and inventory are optional
+// enrichers.
 type Service struct {
 	analyzer      ports.CodeAnalyzer
 	dup           ports.DuplicationScanner
 	metrics       ports.CodeMetricsProvider
+	inventory     ports.CodeInventoryScanner
 	complexityMin int
 }
 
@@ -35,6 +39,11 @@ type Option func(*Service)
 
 // WithDuplication adds duplicated-block maintainability findings.
 func WithDuplication(d ports.DuplicationScanner) Option { return func(s *Service) { s.dup = d } }
+
+// WithInventory wires the code-size inventory, enabling Report() to compute ratings + a health summary.
+func WithInventory(inv ports.CodeInventoryScanner) Option {
+	return func(s *Service) { s.inventory = inv }
+}
 
 // WithComplexity adds high-complexity maintainability findings (functions over threshold), using the AST
 // metrics provider. threshold <= 0 uses DefaultComplexityThreshold.
@@ -130,4 +139,41 @@ func newFinding(kind, ruleID, cwe string, sev shared.Severity, title, desc, file
 func deterministicID(dedupKey string) shared.ID {
 	sum := sha256.Sum256([]byte("codequality|" + dedupKey))
 	return shared.ID(hex.EncodeToString(sum[:16]))
+}
+
+// Report is the full code-quality dashboard payload for a source tree: the per-language inventory, the
+// findings, the duplication summary, and the rolled-up A-E health ratings + technical debt.
+type Report struct {
+	Inventory   measure.Inventory         `json:"inventory"`
+	Findings    []finding.Finding         `json:"findings"`
+	Duplication measure.DuplicationReport `json:"duplication"`
+	Rating      rating.Report             `json:"rating"`
+}
+
+// BuildReport computes the full dashboard report for root. Findings come from Analyze (which already
+// bridges duplication + complexity); the inventory + duplication summary + ratings are added for display.
+// Missing optional dependencies degrade to empty sections rather than erroring.
+func (s *Service) BuildReport(ctx context.Context, root string) (Report, error) {
+	findings, err := s.Analyze(ctx, root)
+	if err != nil {
+		return Report{}, err
+	}
+	var rep Report
+	rep.Findings = findings
+	if s.inventory != nil {
+		inv, ierr := s.inventory.Inventory(ctx, root)
+		if ierr != nil {
+			return Report{}, fmt.Errorf("inventory: %w", ierr)
+		}
+		rep.Inventory = inv
+	}
+	if s.dup != nil {
+		dup, derr := s.dup.Duplication(ctx, root)
+		if derr != nil {
+			return Report{}, fmt.Errorf("duplication: %w", derr)
+		}
+		rep.Duplication = dup
+	}
+	rep.Rating = rating.Compute(findings, rep.Inventory.Totals().CodeLines)
+	return rep, nil
 }

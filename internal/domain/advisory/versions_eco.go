@@ -5,14 +5,14 @@ import "strings"
 // This file adds OWNED version comparators for the three ecosystems whose ECOSYSTEM-type ranges
 // the matcher previously SKIPPED (schemeFor returned ok=false): Maven, RubyGems, NuGet. Each is a
 // (compare, valid) pair plugged into schemeFor, so the owned advisory store can match RANGE
-// advisories for these ecosystems offline — not just explicit-version advisories. Per golden
+// advisories for these ecosystems offline – not just explicit-version advisories. Per golden
 // rule 5, each `valid` FAILS CLOSED: a version it can't soundly order returns false → the range is
 // skipped (never silently mis-ordered into a false match), exactly as before for unsupported input.
 
 // ---- shared tokenizer -------------------------------------------------------
 
 // splitVersionRuns tokenizes a version into maximal runs of ASCII digits and ASCII letters,
-// dropping every separator (".", "-", "_", "+", …) — the scan RubyGems and Maven both use
+// dropping every separator (".", "-", "_", "+", …) – the scan RubyGems and Maven both use
 // (Ruby: /[0-9]+|[a-z]+/i; Maven: digit/letter transitions act as separators). So "1.0.0.rc1"
 // and "1.0.0-rc1" and "1.0.0rc1" all tokenize to ["1","0","0","rc","1"].
 func splitVersionRuns(v string) []string {
@@ -68,7 +68,7 @@ func validVersionChars(v string) bool {
 var rubygemsScheme = scheme{compare: compareRubyGems, valid: validVersionChars}
 
 // compareRubyGems orders two Gem versions per Gem::Version#<=>: tokenize into segments, pad the
-// shorter with numeric 0, then compare pairwise — numeric vs numeric numerically, string vs string
+// shorter with numeric 0, then compare pairwise – numeric vs numeric numerically, string vs string
 // lexically, and a STRING segment (a letter run = pre-release marker) is LOWER than a numeric one.
 // So "1.0.0.a" < "1.0.0" and "1.0" == "1.0.0" (trailing zeros).
 func compareRubyGems(a, b string) int {
@@ -93,7 +93,7 @@ func compareRubyGems(a, b string) int {
 			}
 		// A letter run is a pre-release segment → LOWER than a number (Gem::Version). NOTE this is
 		// the OPPOSITE sign from SemVer §11 / comparePrerelease (where numeric identifiers are the
-		// lower ones) — the two must not be "aligned".
+		// lower ones) – the two must not be "aligned".
 		case xNum: // number > string
 			return 1
 		case yNum:
@@ -194,7 +194,7 @@ func validMaven(v string) bool {
 // mavenQualifierRank maps a Maven qualifier to its order relative to the release ("") at rank 5,
 // following Apache Maven's ComparableVersion: alpha<beta<milestone<rc<snapshot < release < sp, with
 // the common aliases. An UNKNOWN qualifier sorts AFTER all known ones (rank 7) and is then ordered
-// lexically among unknowns — matching Maven, where an unrecognized qualifier outranks the release.
+// lexically among unknowns – matching Maven, where an unrecognized qualifier outranks the release.
 func mavenQualifierRank(q string) int {
 	switch q {
 	case "alpha", "a":
@@ -220,7 +220,7 @@ func mavenQualifierRank(q string) int {
 // numeric core (the dominant signal) is exact, and the qualifier tie-break follows Maven's
 // canonical qualifier ordering. NOTE: it treats '-' and '.' uniformly (a flat token list) rather
 // than reproducing ComparableVersion's '-' sub-list NESTING; the numeric-core comparison is
-// unaffected, so range membership is correct for the overwhelming majority of real versions — the
+// unaffected, so range membership is correct for the overwhelming majority of real versions – the
 // nesting only perturbs exotic equal-core tie-breaks (e.g. "1-1" vs "1.1").
 func compareMaven(a, b string) int {
 	as, bs := splitVersionRuns(strings.ToLower(a)), splitVersionRuns(strings.ToLower(b))
@@ -247,7 +247,7 @@ func itemAt(s []string, i int) (string, bool) {
 }
 
 // compareMavenItem compares one position. A MISSING item (ok=false) is Maven's "null": vs a number
-// it is 0 (so trailing ".0" is equal — "1.0" == "1"); vs a qualifier it is the RELEASE qualifier (so
+// it is 0 (so trailing ".0" is equal – "1.0" == "1"); vs a qualifier it is the RELEASE qualifier (so
 // "1-alpha" < "1" and "1-sp"/"1-foo" > "1"). A number always outranks a qualifier (IntItem > StringItem).
 func compareMavenItem(a string, aok bool, b string, bok bool) int {
 	aNum := aok && isNumericStr(a)
@@ -279,7 +279,7 @@ func compareMavenItem(a string, aok bool, b string, bok bool) int {
 			}
 			return 1
 		}
-		if ra == 7 { // both unknown qualifiers — lexical
+		if ra == 7 { // both unknown qualifiers – lexical
 			return strings.Compare(a, b)
 		}
 		return 0

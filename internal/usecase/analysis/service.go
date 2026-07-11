@@ -1,4 +1,4 @@
-// Package analysis runs the evidence-gated lifecycle for AI "judgments" — the generalized
+// Package analysis runs the evidence-gated lifecycle for AI "judgments" – the generalized
 // twin of the exploitation gate. A judgment is PROPOSED at EvidenceScore 0; a DISTINCT
 // verifier's verdict (gated capabilities) or a human's acceptance (ungated) is the only thing that
 // confirms it, and the verdict is SEALED into the hash-chained evidence ledger BEFORE the score
@@ -28,7 +28,7 @@ const (
 )
 
 // Store is the narrow slice of the judgment repository this use case needs. The score/state MOVER
-// (SetScoreState) lives here (and on the concrete repo) — NOT on a broad ports interface — so a
+// (SetScoreState) lives here (and on the concrete repo) – NOT on a broad ports interface – so a
 // read-only consumer (the agent tool catalog) cannot move a score. Concrete repos satisfy it.
 type Store interface {
 	Save(ctx context.Context, j judgment.Judgment) error
@@ -49,10 +49,10 @@ type Service struct {
 	clock    ports.Clock
 	ids      ports.IDGenerator
 	// threatRecorder (optional) promotes a CONFIRMED threat judgment to a Kind=threat finding,
-	// best-effort. Injected from the composition root — never reachable by the agent (R11 stays intact).
+	// best-effort. Injected from the composition root – never reachable by the agent (R11 stays intact).
 	threatRecorder ports.ConfirmedThreatRecorder
 	// sastRecorder (optional) promotes a CONFIRMED CapSAST (taint) judgment to a Kind=sast finding,
-	// best-effort. Injected from the composition root — never reachable by the agent.
+	// best-effort. Injected from the composition root – never reachable by the agent.
 	sastRecorder ports.ConfirmedSASTRecorder
 }
 
@@ -131,7 +131,7 @@ func (s *Service) Propose(ctx context.Context, proposer string, engagementID sha
 
 // Verify applies a DISTINCT verifier's verdict to a GATED judgment. It seals the verdict FIRST
 // (fail-closed), then moves the score+state under optimistic concurrency (expectedVersion). A
-// verdict that loses the race leaves an orphan sealed verdict with no score move — acceptable (the
+// verdict that loses the race leaves an orphan sealed verdict with no score move – acceptable (the
 // assessment really happened), mirroring the exploitation gate's one-directional provenance.
 func (s *Service) Verify(ctx context.Context, verifier string, engagementID, judgmentID shared.ID, score int, rationale string, expectedVersion int) (judgment.Judgment, error) {
 	v := verdict.Verdict{Verifier: verifier, Score: score, Rationale: rationale}
@@ -166,7 +166,7 @@ func (s *Service) Verify(ctx context.Context, verifier string, engagementID, jud
 	}); err != nil {
 		return judgment.Judgment{}, fmt.Errorf("audit judgment verdict: %w", err)
 	}
-	// a ratified STRIDE threat auto-emits a Kind=threat finding. Best-effort — the judgment is
+	// a ratified STRIDE threat auto-emits a Kind=threat finding. Best-effort – the judgment is
 	// already confirmed + audited; a failed emit is audited, not rolled back (the finding is a
 	// re-derivable projection of the source-of-truth judgment, mirroring the reachproof auto-mint).
 	if s.threatRecorder != nil && saved.State == judgment.StateConfirmed && saved.Capability == judgment.CapThreat {
@@ -178,7 +178,7 @@ func (s *Service) Verify(ctx context.Context, verifier string, engagementID, jud
 		}
 	}
 	// a verifier-confirmed CapSAST (taint) judgment auto-emits a Kind=sast finding. Best-effort, same
-	// contract as the threat promoter — the judgment is already confirmed + audited; a failed emit is
+	// contract as the threat promoter – the judgment is already confirmed + audited; a failed emit is
 	// audited, not rolled back (the finding is a re-derivable projection of the source-of-truth judgment).
 	if s.sastRecorder != nil && saved.State == judgment.StateConfirmed && saved.Capability == judgment.CapSAST {
 		if rerr := s.sastRecorder.RecordConfirmedSAST(ctx, verifier, saved); rerr != nil {
@@ -232,7 +232,7 @@ func (s *Service) Accept(ctx context.Context, by string, engagementID, judgmentI
 	return saved, nil
 }
 
-// List returns the engagement's judgments — the read path for the HTTP layer. Tenant isolation is
+// List returns the engagement's judgments – the read path for the HTTP layer. Tenant isolation is
 // enforced at the route (withEngTenant resolves the engagement in the caller's tenant) before this
 // is called; the store scopes by engagement.
 func (s *Service) List(ctx context.Context, engagementID shared.ID) ([]judgment.Judgment, error) {
@@ -240,7 +240,7 @@ func (s *Service) List(ctx context.Context, engagementID shared.ID) ([]judgment.
 }
 
 // load returns one judgment scoped to its engagement (the store lists by engagement, so a single
-// get is a scan-and-match — mirrors the exploitation use case).
+// get is a scan-and-match – mirrors the exploitation use case).
 func (s *Service) load(ctx context.Context, engagementID, id shared.ID) (judgment.Judgment, error) {
 	all, err := s.store.ListByEngagement(ctx, engagementID)
 	if err != nil {

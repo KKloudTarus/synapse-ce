@@ -98,7 +98,7 @@ func TestBoundaryCrossingsUngroupedVsNamed(t *testing.T) {
 	}
 }
 
-// TestBoundaryCrossingsNoBoundaries: with no trust boundaries declared, every component is "" — no flow
+// TestBoundaryCrossingsNoBoundaries: with no trust boundaries declared, every component is "" – no flow
 // crosses, so there is no attack surface to model (the empty/degenerate case).
 func TestBoundaryCrossingsNoBoundaries(t *testing.T) {
 	m := Model{

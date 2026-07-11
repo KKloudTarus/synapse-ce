@@ -10,7 +10,7 @@ import (
 // LLM is the model provider the orchestrator proposes through.
 // The model only PROPOSES tool-calls; Go validates + executes. The first/reference adapter
 // is OpenAI-compatible Chat Completions (tested against gateway); other providers are
-// future adapters behind THIS interface — the orchestrator never branches on provider.
+// future adapters behind THIS interface – the orchestrator never branches on provider.
 // Implementations must never log the API key and must honor ctx + a
 // per-request timeout, returning a transient error (not a panic) on a 5xx/timeout.
 type LLM interface {
@@ -29,7 +29,7 @@ type ChatRequest struct {
 	MaxTokens      int
 }
 
-// ChatResponse is the model's turn. ToolCalls are PROPOSALS — the orchestrator decides what
+// ChatResponse is the model's turn. ToolCalls are PROPOSALS – the orchestrator decides what
 // (if anything) runs. FinishReason is the provider's stop reason ("stop"|"tool_calls"|"length").
 type ChatResponse struct {
 	Content      string

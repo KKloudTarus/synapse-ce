@@ -71,9 +71,9 @@ func (a *Acquirer) WithImageRootFS(enabled bool) *Acquirer {
 	return a
 }
 
-// WithSandbox makes git clone + image pull ALWAYS run inside the sandbox (F4) — caps
+// WithSandbox makes git clone + image pull ALWAYS run inside the sandbox (F4) – caps
 // dropped, seccomp-filtered, curated read-only FS, cgroup-limited, workspace the only
-// writable path — so a hostile repo/server/hook/image cannot touch the host or read its
+// writable path – so a hostile repo/server/hook/image cannot touch the host or read its
 // secrets. egressScoped selects the network posture: true confines the fetch to a netns
 // whose egress is DNS-pinned to the repo/registry host (needs CAP_NET_ADMIN); false
 // shares the host network un-scoped (still fully sandboxed otherwise) for an unprivileged
@@ -226,7 +226,7 @@ func rejectInternalAcquisitionHost(host string) error {
 	}
 	for _, ip := range ips {
 		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
-			return fmt.Errorf("%w: acquisition host %q resolves to a loopback/link-local address (%s) — refused (SSRF/metadata guard)", shared.ErrValidation, host, ip)
+			return fmt.Errorf("%w: acquisition host %q resolves to a loopback/link-local address (%s) – refused (SSRF/metadata guard)", shared.ErrValidation, host, ip)
 		}
 	}
 	return nil
@@ -247,7 +247,7 @@ func gitHost(rawURL string) (string, error) {
 var imageRefRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@-]*$`)
 
 // acquireImage pulls a container image's rootfs into an OCI layout for SCA: a
-// DAEMONLESS pull (crane / go-containerregistry — never `docker run`), pinned to one
+// DAEMONLESS pull (crane / go-containerregistry – never `docker run`), pinned to one
 // platform, written into the workspace. When a sandbox is set, the pull runs confined
 // with egress restricted to the registry. syft auto-detects the layout (oci-dir scan).
 func (a *Acquirer) acquireImage(ctx context.Context, ref string) (*ports.Workspace, error) {
@@ -297,10 +297,10 @@ func (a *Acquirer) acquireImage(ctx context.Context, ref string) (*ports.Workspa
 	// The packages live in the image layers (syft oci-dir scans the layout); there are no
 	// host-side lockfiles to inspect, so the workspace carries just the layout dir. Recover
 	// image metadata (layer stack + build history) from the OCI config for layer attribution
-	// (Epic D) — best-effort: nil if the config is unreadable, never fails the acquisition.
+	// (Epic D) – best-effort: nil if the config is unreadable, never fails the acquisition.
 	ws := &ports.Workspace{Dir: layout, Image: readImageInfo(layout, ref), Cleanup: cleanup}
 	// Optionally assemble the layers into a walkable root filesystem (owned OS-package cataloging reads it).
-	// BEST-EFFORT: the rootfs is supplementary — syft still scans the OCI layout in Dir regardless — and the
+	// BEST-EFFORT: the rootfs is supplementary – syft still scans the OCI layout in Dir regardless – and the
 	// extractor is fail-closed, so a failure (a hostile layer the hardening refused, an unsupported
 	// compression, a malformed layer) SKIPS the rootfs with a recorded reason rather than aborting the scan.
 	// RootFS is left empty so no partial tree is ever consumed.
@@ -358,7 +358,7 @@ func validateGitURL(url string) error {
 	if url == "" || strings.HasPrefix(url, "-") {
 		return fmt.Errorf("%w: invalid git URL", shared.ErrValidation)
 	}
-	// Require https — plaintext http:// is unauthenticated + on-path-tamperable (the same
+	// Require https – plaintext http:// is unauthenticated + on-path-tamperable (the same
 	// reason git:// is rejected): a MITM'd clone could plant a malicious lockfile/source the
 	// SCA pipeline then parses. The egress pin limits WHERE the clone connects, not the
 	// integrity of what comes back.
@@ -394,8 +394,8 @@ var lockfileNames = map[string]bool{
 var goModModuleRE = regexp.MustCompile(`(?m)^module\s+(\S+)`)
 
 // inspectWorkspace enforces the size cap, collects recognized lockfile basenames
-// (completeness signal), and collects local module identities — module paths from
-// go.mod files + package.json names — which mark first-party components. Symlinks
+// (completeness signal), and collects local module identities – module paths from
+// go.mod files + package.json names – which mark first-party components. Symlinks
 // are not followed.
 func inspectWorkspace(root string, maxBytes int64) (lockfiles, localModules, unresolvedEco []string, err error) {
 	if maxBytes <= 0 {

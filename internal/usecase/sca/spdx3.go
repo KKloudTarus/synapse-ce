@@ -46,7 +46,7 @@ func spdx3HashAlg(canonical string) string {
 }
 
 // SPDX 3.0.1 minimal JSON-LD projection (CRA-aligned target format) of the stored
-// SBOM — core + software profiles. A pure, deterministic function of the stored
+// SBOM – core + software profiles. A pure, deterministic function of the stored
 // data: sorted components, content-hashed IRIs, the timestamp pinned
 // to the scan (never time.Now), so the bytes are byte-reproducible.
 const (
@@ -163,7 +163,7 @@ func buildSPDX3(doc *sbom.SBOM, target string, created time.Time) spdx3Doc {
 			return comps[i].Version < comps[j].Version
 		})
 		// Mint one Organization Agent per unique supplier (SupplierOr, so producers/merge paths that left
-		// Supplier empty still get the PURL-derived value — matching SPDX 2.x + the scorer). Sorted for a
+		// Supplier empty still get the PURL-derived value – matching SPDX 2.x + the scorer). Sorted for a
 		// deterministic, content-hashed IRI.
 		agentByName := map[string]string{}
 		var supplierNames []string

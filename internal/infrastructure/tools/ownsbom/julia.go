@@ -11,12 +11,12 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// Julia is the owned Julia parser: it reads Manifest.toml — the resolved dependency set produced by Pkg —
+// Julia is the owned Julia parser: it reads Manifest.toml – the resolved dependency set produced by Pkg –
 // into julia components. Both manifest_format 1.0 (top-level [[Name]] array-of-tables) and 2.0
 // ([[deps.Name]]) are handled. A package block carries a `version = "x"`; standard-library packages that
 // ship with Julia have no version and are skipped (they are not registry dependencies to match against an
 // advisory). Hand-parsed (the targeted array-table header + version line), no TOML library, vendor-neutral.
-// Components only — the per-package `deps` edges are deferred.
+// Components only – the per-package `deps` edges are deferred.
 type Julia struct{}
 
 // Ecosystem identifies this parser's package ecosystem.

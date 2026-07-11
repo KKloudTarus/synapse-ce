@@ -1,6 +1,6 @@
 // Package safety is the single admission gate for AI-proposed actions and
 // the structural embodiment of the rule that AI orchestration is a typed Go state machine,
-// not prompt-driven control flow. It produces an AdmittedAction — a type whose
+// not prompt-driven control flow. It produces an AdmittedAction – a type whose
 // fields are UNEXPORTED, so it can be constructed ONLY here, by Gate.Admit, and only after
 // (1) the engagement execution guard (scope + authorization window + RoE) AND (2) the HITL
 // approval both pass. Because the orchestrator's executor accepts an AdmittedAction (not a
@@ -22,7 +22,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 )
 
-// ErrPendingApproval means the action is enqueued for a human and not yet decided — the
+// ErrPendingApproval means the action is enqueued for a human and not yet decided – the
 // orchestrator suspends the session (status awaiting_approval) and resumes on the decision.
 var ErrPendingApproval = errors.New("action awaiting human approval")
 
@@ -54,7 +54,7 @@ type Gate struct {
 }
 
 // NewGate validates its deps. All three are required: the guard (scope/window/RoE), the
-// approval service (HITL), and the evidence vault (the admission MUST be sealed — if it
+// approval service (HITL), and the evidence vault (the admission MUST be sealed – if it
 // cannot be recorded, the action is not admitted).
 func NewGate(guard *execution.Guard, approvals *approval.Service, ev *evidence.Service) (*Gate, error) {
 	if guard == nil || approvals == nil || ev == nil {
@@ -77,10 +77,10 @@ type sealedAdmission struct {
 
 // Admit runs the proposed action through the guard then the HITL gate. On success it seals
 // the admission as evidence and returns an AdmittedAction. Returns ErrForbidden (scope/
-// window/RoE failure — already audited by the guard, or a deny/timeout), or ErrPendingApproval
+// window/RoE failure – already audited by the guard, or a deny/timeout), or ErrPendingApproval
 // (awaiting a human). actor is the human who owns the agent session (attribution).
 func (g *Gate) Admit(ctx context.Context, p agent.ProposedAction, actor string) (AdmittedAction, error) {
-	// 1) Scope + authorization window + RoE — the SAME server-side chokepoint recon/SCA use.
+	// 1) Scope + authorization window + RoE – the SAME server-side chokepoint recon/SCA use.
 	// A failure here is ErrForbidden and is already audited (agent.<tool>.denied).
 	at, err := g.guard.Authorize(ctx, execution.Request{
 		Actor:        actor,
@@ -99,7 +99,7 @@ func (g *Gate) Admit(ctx context.Context, p agent.ProposedAction, actor string) 
 	}
 	switch dec.State {
 	case agent.ApprovalApproved:
-		// 3) Seal the admission into the evidence chain — fail CLOSED if it cannot be
+		// 3) Seal the admission into the evidence chain – fail CLOSED if it cannot be
 		// recorded (custody must capture every authorized AI action into the hash-chained,
 		// append-only record).
 		payload, _ := json.Marshal(sealedAdmission{

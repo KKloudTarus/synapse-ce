@@ -4,7 +4,7 @@ import "sort"
 
 // ModelDelta is the deterministic change between two versions of an architecture model (the
 // shift-left "re-run on architecture change, surface deltas" hook): which components and flows were
-// added/removed, and — most actionable — which data flows newly CROSS a trust boundary (new attack surface)
+// added/removed, and – most actionable – which data flows newly CROSS a trust boundary (new attack surface)
 // or no longer do (closed surface). Pure data, NO LLM: it is computed from the two stored models and
 // recorded in the append-only audit trail, so an architecture change is attributable and its security
 // impact (new crossings) is visible without re-running the agent.
@@ -18,7 +18,7 @@ type ModelDelta struct {
 }
 
 // Empty reports whether the two models are structurally identical (no added/removed components or flows, and
-// no change in the boundary-crossing set) — i.e. the architecture change introduced no DFD delta.
+// no change in the boundary-crossing set) – i.e. the architecture change introduced no DFD delta.
 func (d ModelDelta) Empty() bool {
 	return len(d.AddedComponents) == 0 && len(d.RemovedComponents) == 0 &&
 		len(d.AddedFlows) == 0 && len(d.RemovedFlows) == 0 &&
@@ -27,7 +27,7 @@ func (d ModelDelta) Empty() bool {
 
 // Diff computes the change from prior to next. Elements are keyed by ID: present in next but not prior ⇒
 // Added; present in prior but not next ⇒ Removed. NewCrossings/ClosedCrossings diff the two models'
-// BoundaryCrossings sets — a flow that newly crosses a boundary (a re-homed component, a new cross-boundary
+// BoundaryCrossings sets – a flow that newly crosses a boundary (a re-homed component, a new cross-boundary
 // flow) is NEW attack surface even if the flow itself already existed, which is exactly the shift-left
 // signal. Deterministic (sorted by id); pure (the inputs are not mutated). A first ingest (prior is the zero
 // Model) yields everything as Added.

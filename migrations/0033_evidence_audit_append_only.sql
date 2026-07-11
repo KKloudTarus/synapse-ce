@@ -2,7 +2,7 @@
 -- Phase 4 hardening (PR3, golden rules 5 + 6): make the evidence + audit custody chains
 -- TAMPER-RESISTANT at the database level, not merely tamper-evident.
 --
--- 1) Audit fork-guard — parity with the evidence chain (0026). A partial unique index on
+-- 1) Audit fork-guard – parity with the evidence chain (0026). A partial unique index on
 --    previous_hash (chained rows only; legacy pre-0021 rows have NULL previous_hash and are
 --    excluded) means one child per parent: two rows can never claim the same parent hash, so
 --    the chain cannot FORK. This is the structural guarantee beyond the advisory-lock write
@@ -10,10 +10,10 @@
 --    too, so the chain has a single root.
 CREATE UNIQUE INDEX audit_chain_link_uniq ON audit_log (previous_hash) WHERE previous_hash IS NOT NULL;
 
--- 2) Append-only enforcement — block UPDATE / DELETE / TRUNCATE on both custody tables at the
+-- 2) Append-only enforcement – block UPDATE / DELETE / TRUNCATE on both custody tables at the
 --    DB level. A row, once sealed into a chain, can never be edited or removed in-band, so a
 --    TAIL-TRUNCATION (delete the latest links to hide an action) or a row-edit is impossible
---    through the normal connection — not just detectable after the fact. Both tables are
+--    through the normal connection – not just detectable after the fact. Both tables are
 --    INSERT-only in the application (evidence re-chains by INSERTing a fresh link on a fork
 --    conflict; audit only ever inserts), so this changes no live code path. A superuser can
 --    still DISABLE a trigger; the hash chain + ed25519 head attestation + RFC-3161 anchor

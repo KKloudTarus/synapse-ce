@@ -22,7 +22,7 @@ import (
 // it skips on hosts without them (e.g. macOS dev) and runs on the Linux test box.
 func TestSandboxIsolationLive(t *testing.T) {
 	if _, err := exec.LookPath("bwrap"); err != nil {
-		t.Skip("bubblewrap not installed — sandbox integration test skipped")
+		t.Skip("bubblewrap not installed – sandbox integration test skipped")
 	}
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available for the probe")
@@ -171,7 +171,7 @@ printf 'CMDLINE='; tr '\0' ' ' < /proc/self/cmdline; echo
 }
 
 // TestSandboxEgressEnforced proves the E9+E12 integration: a run carrying an EgressPolicy
-// executes inside a netns whose kernel filter allows only in-scope destinations — the
+// executes inside a netns whose kernel filter allows only in-scope destinations – the
 // sandboxed tool reaches an in-scope address but an out-of-scope one is dropped, while
 // bwrap's isolation still holds. Needs Linux + bwrap + bash + ip/iptables + sudo.
 func TestSandboxEgressEnforced(t *testing.T) {
@@ -226,7 +226,7 @@ echo caps=$(grep CapEff /proc/self/status | awk '{print $2}')
 
 // TestSandboxEgressDomainPinning covers domain-scoped egress: a domain-scoped egress policy is enforced
 // by pre-resolving the in-scope domain, pinning its IP, and giving the tool a pinned
-// /etc/hosts (with NO DNS egress) — so the tool resolves + reaches the in-scope domain
+// /etc/hosts (with NO DNS egress) – so the tool resolves + reaches the in-scope domain
 // but cannot resolve (or reach) an out-of-scope one.
 func TestSandboxEgressDomainPinning(t *testing.T) {
 	for _, bin := range []string{"bwrap", "bash", "ip", "iptables", "sudo", "getent"} {

@@ -12,7 +12,7 @@ import (
 // It is filled DETERMINISTICALLY from the confirmed judgment (no LLM): the STRIDE category +
 // the threatened model element + the optional asset at risk, anchored to the source judgment id for dedup.
 type ThreatInput struct {
-	JudgmentID string          // the confirmed threat judgment (dedup anchor — re-confirming updates in place)
+	JudgmentID string          // the confirmed threat judgment (dedup anchor – re-confirming updates in place)
 	Category   string          // STRIDE category token (e.g. "spoofing", "info_disclosure")
 	Element    string          // the threatened model element id (a component or data flow)
 	Asset      string          // optional Asset.ID at risk ("" when none)
@@ -21,7 +21,7 @@ type ThreatInput struct {
 
 // NewThreat builds a first-party threat-model finding (Kind=threat) from a confirmed STRIDE threat. The
 // title is TEMPLATED from the structured category + element (never LLM prose). It is idempotent by the
-// threat:<judgmentID> dedup key — a re-confirm updates in place rather than duplicating. Severity defaults to
+// threat:<judgmentID> dedup key – a re-confirm updates in place rather than duplicating. Severity defaults to
 // Unknown so a human triages it through the standard finding workflow (a STRIDE threat carries no CVSS).
 func NewThreat(id, engagementID shared.ID, in ThreatInput, now time.Time) (Finding, error) {
 	cat := strings.TrimSpace(in.Category)
@@ -59,7 +59,7 @@ func NewThreat(id, engagementID shared.ID, in ThreatInput, now time.Time) (Findi
 		DedupKey:     "threat:" + anchor,
 		// ProposedBy is deliberately LEFT EMPTY: the evidence gate already ran at the judgment layer
 		// (gated propose→verify, score ≥ threshold, PermReview/SoD), so this projection is ungated like a
-		// manual finding. Do NOT set it to the agent proposer — that would re-gate it stuck-at-score-0.
+		// manual finding. Do NOT set it to the agent proposer – that would re-gate it stuck-at-score-0.
 		Version: 1,
 		Audit:   shared.Audit{CreatedAt: now, UpdatedAt: now},
 	}, nil

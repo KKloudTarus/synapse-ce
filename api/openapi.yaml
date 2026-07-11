@@ -3,7 +3,7 @@ info:
   title: Synapse API
   version: 0.1.0
   description: >
-    Security & pentest operations — software composition analysis core.
+    Security & pentest operations – software composition analysis core.
     Authorized security testing only: every scan is gated by an engagement's
     scope and authorization window, enforced server-side.
 
@@ -115,7 +115,7 @@ paths:
     get:
       tags: [findings]
       summary: List an engagement's findings (highest risk first)
-      description: Ordered by CISA KEV, then EPSS x CVSS, then severity — never raw CVSS.
+      description: Ordered by CISA KEV, then EPSS x CVSS, then severity – never raw CVSS.
       responses:
         "200":
           description: Findings

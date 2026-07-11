@@ -12,10 +12,10 @@ import (
 // Gradle is the owned Gradle parser: it reads a Gradle version catalog (gradle/libs.versions.toml)
 // into Maven-coordinate components (pkg:maven/<group>/<artifact>@<version>, Name <group>:<artifact>),
 // resolving each library's version.ref against the [versions] table. Modern Gradle projects declare deps
-// here, which Syft does not resolve from source — so this gives the owned SBOM producer Gradle coverage it
+// here, which Syft does not resolve from source – so this gives the owned SBOM producer Gradle coverage it
 // previously lacked. Its Ecosystem is "maven" (Gradle is a build tool for the Java/Maven package
 // ecosystem; the components ARE maven PURLs); its marker is the catalog filename. It shares its parsing
-// (ParseGradleCatalog) with the manifest enricher's Syft-enrichment path — ONE Gradle parser, no
+// (ParseGradleCatalog) with the manifest enricher's Syft-enrichment path – ONE Gradle parser, no
 // duplication. No third-party TOML library: only the [versions] + [libraries] tables are read.
 type Gradle struct{}
 
@@ -39,7 +39,7 @@ func (Gradle) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.
 // (gradle/libs.versions.toml): the declared [libraries] resolved against the [versions] table, as
 // components (Name "group:artifact", pkg:maven PURL when a version resolves). It is the shared, pure parser
 // used by BOTH the owned Gradle EcosystemParser (owned generation) AND the manifest enricher
-// (Syft-enrichment) — one implementation, two producers. Only the [versions] + [libraries] tables are read;
+// (Syft-enrichment) – one implementation, two producers. Only the [versions] + [libraries] tables are read;
 // a full TOML parse is unnecessary, so no TOML dependency is added.
 func ParseGradleCatalog(data []byte) []sbom.Component {
 	versions := map[string]string{}

@@ -12,12 +12,12 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// Conan is the owned C/C++ parser: it reads conan.lock — the resolved dependency set produced by the
-// Conan package manager — into conan components. Two lockfile shapes are handled: the Conan 2.x form,
+// Conan is the owned C/C++ parser: it reads conan.lock – the resolved dependency set produced by the
+// Conan package manager – into conan components. Two lockfile shapes are handled: the Conan 2.x form,
 // which lists reference strings under "requires"/"build_requires"/"python_requires", and the Conan 1.x
 // form, which nests a "graph_lock" whose node "ref" fields carry the same reference strings. A reference
 // is name/version[@user/channel][#recipe_revision]; the name and version are extracted from it. Components
-// only — the 1.x graph edges are deferred. Vendor-neutral (stdlib encoding/json).
+// only – the 1.x graph edges are deferred. Vendor-neutral (stdlib encoding/json).
 type Conan struct{}
 
 // Ecosystem identifies this parser's package ecosystem.
@@ -39,7 +39,7 @@ type conanLock struct {
 }
 
 // Parse extracts the resolved Conan packages from a conan.lock across both shapes. Result is sorted by
-// PURL — the 2.x lists are ordered but the 1.x nodes map is not, so sorting keeps output deterministic.
+// PURL – the 2.x lists are ordered but the 1.x nodes map is not, so sorting keeps output deterministic.
 func (Conan) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err

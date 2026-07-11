@@ -25,7 +25,7 @@ import (
 var tsaTime = time.Now().UTC().Truncate(time.Second)
 
 // fakeTSA stands up an in-process RFC-3161 authority backed by a real 2-cert chain (a
-// root CA + a TSA leaf it signs) — no network, fully deterministic. The leaf signs the
+// root CA + a TSA leaf it signs) – no network, fully deterministic. The leaf signs the
 // timestamp tokens; both certs are embedded so the token self-verifies.
 func fakeTSA(t *testing.T) (*httptest.Server, *x509.Certificate) {
 	t.Helper()

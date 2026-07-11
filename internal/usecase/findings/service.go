@@ -41,7 +41,7 @@ func (s *Service) List(ctx context.Context, engagementID shared.ID) ([]finding.F
 }
 
 // RecordConfirmedThreat promotes a human-ratified STRIDE threat judgment to a persisted Kind=threat finding
-// (auto-emit on ratify). Idempotent via the threat:<judgmentID> dedup key — a re-confirm updates in
+// (auto-emit on ratify). Idempotent via the threat:<judgmentID> dedup key – a re-confirm updates in
 // place. The finding is built DETERMINISTICALLY from the typed claim + subject (no LLM);
 // severity starts Unknown so a human triages it through the normal finding workflow. Audited.
 func (s *Service) RecordConfirmedThreat(ctx context.Context, verifier string, j judgment.Judgment) error {
@@ -65,13 +65,13 @@ func (s *Service) RecordConfirmedThreat(ctx context.Context, verifier string, j 
 		return fmt.Errorf("persist threat finding: %w", err)
 	}
 	// Attribute the promotion to the human VERIFIER who ratified the threat (the trigger), not the agent
-	// that originally proposed the judgment — the judgment's own verdict audit already records the proposer.
+	// that originally proposed the judgment – the judgment's own verdict audit already records the proposer.
 	return s.record(ctx, verifier, "finding.threat_promoted", j.EngagementID, f.ID,
 		map[string]string{"judgment": j.ID.String(), "category": string(tc.Category), "element": j.SubjectID.String()})
 }
 
 // RecordConfirmedSAST promotes a verifier-confirmed CapSAST (taint) judgment to a persisted Kind=sast
-// finding (auto-emit on confirm). Idempotent via the sast:ai:<judgmentID> dedup key — a re-confirm
+// finding (auto-emit on confirm). Idempotent via the sast:ai:<judgmentID> dedup key – a re-confirm
 // updates in place. The finding is built DETERMINISTICALLY from the typed SASTClaim (no LLM);
 // severity starts Unknown so a human triages it through the normal finding workflow. Audited.
 func (s *Service) RecordConfirmedSAST(ctx context.Context, verifier string, j judgment.Judgment) error {
@@ -95,7 +95,7 @@ func (s *Service) RecordConfirmedSAST(ctx context.Context, verifier string, j ju
 		return fmt.Errorf("persist sast finding: %w", err)
 	}
 	// Attribute the promotion to the VERIFIER who confirmed the taint judgment (the trigger), not the
-	// system proposer — the judgment's own verdict audit already records the proposer.
+	// system proposer – the judgment's own verdict audit already records the proposer.
 	return s.record(ctx, verifier, "finding.sast_promoted", j.EngagementID, f.ID,
 		map[string]string{"judgment": j.ID.String(), "cwe": sc.CWE, "rule": sc.Rule, "location": sc.Location})
 }
@@ -104,7 +104,7 @@ func (s *Service) RecordConfirmedSAST(ctx context.Context, verifier string, j ju
 // finding's authoritative Description from the draft's description + remediation prose. It is the auto-apply
 // hook the writeupdraft accept path calls. It VALIDATES the finding belongs to the engagement before mutating
 // (loadFinding → ErrNotFound for a cross-engagement / unknown id, so no cross-engagement write), preserves the
-// finding's other fields (the upsert keeps triage state, severity, CWE — so the report's per-finding compliance
+// finding's other fields (the upsert keeps triage state, severity, CWE – so the report's per-finding compliance
 // mapping is unaffected), and audits. The prose was already trimmed, length-bounded, and credential-redacted
 // at the draft's propose/edit edge.
 func (s *Service) ApplyWriteupDraft(ctx context.Context, actor string, engagementID, findingID shared.ID, description, remediation string) error {

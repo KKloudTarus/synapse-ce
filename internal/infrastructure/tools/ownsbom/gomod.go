@@ -10,10 +10,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// GoMod is the owned Go-ecosystem parser: it reads go.mod `require` directives — both the
-// block form `require (…)` and the single-line `require <path> <version>` — into golang components,
+// GoMod is the owned Go-ecosystem parser: it reads go.mod `require` directives – both the
+// block form `require (…)` and the single-line `require <path> <version>` – into golang components,
 // dropping the trailing `// indirect` comment. go.mod alone carries no full edge graph (that needs
-// `go mod graph`), so this emits components only — the dependency graph + direct/
+// `go mod graph`), so this emits components only – the dependency graph + direct/
 // transitive proof come later. Hand-parsed (no third-party module library) to keep the producer
 // vendor-neutral and dependency-light.
 type GoMod struct{}

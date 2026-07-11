@@ -4,7 +4,7 @@
 // until this ingester runs a feed (a local OSV dump today; a remote OSV/GHSA bulk snapshot later) into the
 // store. It is feed- and store-agnostic: pure orchestration over ports.AdvisoryFeed + ports.AdvisoryWriter,
 // no infrastructure import. Ingesting reference data is an ops action and is intentionally NOT audited
-// (parity with the NVD/KEV/EPSS sync) — the audited, hash-chained ledger is evidence/findings.
+// (parity with the NVD/KEV/EPSS sync) – the audited, hash-chained ledger is evidence/findings.
 package advisoryingest
 
 import (
@@ -41,7 +41,7 @@ func NewService(feed ports.AdvisoryFeed, writer ports.AdvisoryWriter) (*Service,
 }
 
 // Ingest streams the feed into the store, upserting each advisory. A store write failure is FATAL (it aborts
-// the run and is returned with the partial Stats) — a half-loaded corpus that silently swallowed write
+// the run and is returned with the partial Stats) – a half-loaded corpus that silently swallowed write
 // errors would under-report vulnerabilities. Unparseable source entries are skipped by the feed and counted
 // in Stats.Skipped (best-effort bulk ingest). The run honors ctx cancellation via the feed.
 func (s *Service) Ingest(ctx context.Context) (Stats, error) {

@@ -92,7 +92,7 @@ func TestPlanLoop_ExecutesDependencyChainAndSeals(t *testing.T) {
 	]}`
 	llm := &scriptLLM{steps: []ports.ChatResponse{
 		chatTool(proposePlanCall("c1", plan)),
-		chatStop("done — 2 steps executed"),
+		chatStop("done – 2 steps executed"),
 	}}
 	exec := &fakeExecutor{out: orchestrator.Observation{Output: []byte("a.app.acme.io"), Summary: "1 host"}}
 	orch, ev, _, planStore, _ := newPlanOrch(t, llm, exec, agent.ModeAuto, orchestrator.Config{MaxSteps: 8})
@@ -126,7 +126,7 @@ func TestPlanLoop_ExecutesDependencyChainAndSeals(t *testing.T) {
 }
 
 // TestPlanLoop_OutOfScopeNodeSkipsDependents is the headline safety AC for the DAG: an
-// out-of-scope node is DENIED by the gate (never executed) and its dependents are SKIPPED —
+// out-of-scope node is DENIED by the gate (never executed) and its dependents are SKIPPED –
 // 0 executor calls, 0 agent_step.
 func TestPlanLoop_OutOfScopeNodeSkipsDependents(t *testing.T) {
 	plan := `{"nodes":[
@@ -165,7 +165,7 @@ func TestPlanLoop_OutOfScopeNodeSkipsDependents(t *testing.T) {
 }
 
 // TestPlanLoop_IntrusiveSuspendsThenResumes: an intrusive (capability-sensitive) node always
-// requires manual approval even in auto mode — the session suspends; after a human approves,
+// requires manual approval even in auto mode – the session suspends; after a human approves,
 // Resume re-drives the node and it executes exactly once.
 func TestPlanLoop_IntrusiveSuspendsThenResumes(t *testing.T) {
 	plan := `{"nodes":[{"key":"scan","tool":"naabu","target":"app.acme.io","rationale":"port scan"}]}`
@@ -247,7 +247,7 @@ func TestPlanLoop_RedeliveryNoDoubleRun(t *testing.T) {
 }
 
 // TestPlanLoop_NilPlanStoreRejectsPlanTool: with no plan store wired (legacy config), propose_plan
-// is not dispatchable — the call is fed back as an error and nothing is executed. Proves the
+// is not dispatchable – the call is fed back as an error and nothing is executed. Proves the
 // nil-plan-store path is safe (the byte-identical legacy loop never drives a plan).
 func TestPlanLoop_NilPlanStoreRejectsPlanTool(t *testing.T) {
 	llm := &scriptLLM{steps: []ports.ChatResponse{

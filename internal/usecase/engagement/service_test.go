@@ -76,7 +76,7 @@ func (a *capAudit) has(action string) bool {
 
 // TestEngagementOwnership covers ownership: Create stamps the engagement owner
 // (created_by) from the actor; a later mutation by a different actor updates updated_by but
-// the owner (created_by) is immutable — the basis for per-engagement RBAC.
+// the owner (created_by) is immutable – the basis for per-engagement RBAC.
 func TestEngagementOwnership(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
@@ -231,7 +231,7 @@ func TestSetLiveReconRequiresAttestation(t *testing.T) {
 }
 
 // TestEngagementTenantIsolation covers tenant isolation: a caller scoped to tenant A
-// cannot read OR mutate tenant B's engagement — every user-facing path returns ErrNotFound
+// cannot read OR mutate tenant B's engagement – every user-facing path returns ErrNotFound
 // (existence is not revealed cross-tenant, so it must NOT be ErrForbidden), while a zero-tenant
 // caller (single-tenant / default-tenant admin) sees any engagement. This guards against the
 // dangerous false-separation mode where one read path is left unscoped.
@@ -250,7 +250,7 @@ func TestEngagementTenantIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Tenant B cannot READ it — ErrNotFound, never ErrForbidden (don't reveal existence).
+	// Tenant B cannot READ it – ErrNotFound, never ErrForbidden (don't reveal existence).
 	if _, err := svc.Get(ctx, shared.ID("tenant-B"), engA.ID); !errors.Is(err, shared.ErrNotFound) {
 		t.Errorf("cross-tenant Get must be ErrNotFound, got %v", err)
 	}
@@ -261,7 +261,7 @@ func TestEngagementTenantIsolation(t *testing.T) {
 	if _, err := svc.Get(ctx, "", engA.ID); err != nil {
 		t.Errorf("zero-tenant Get must succeed, got %v", err)
 	}
-	// Every MUTATION is equally scoped: a wrong-tenant caller fails closed (ErrNotFound) — no
+	// Every MUTATION is equally scoped: a wrong-tenant caller fails closed (ErrNotFound) – no
 	// silent cross-tenant write. One assertion per mutation so a future unscoped load is caught.
 	if _, err := svc.UpdateScope(ctx, "mallory", shared.ID("tenant-B"), engA.ID, nil, nil); !errors.Is(err, shared.ErrNotFound) {
 		t.Errorf("cross-tenant UpdateScope must be ErrNotFound, got %v", err)

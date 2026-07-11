@@ -11,10 +11,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// Cargo is the owned Rust parser: it reads Cargo.lock — the resolved dependency set —
+// Cargo is the owned Rust parser: it reads Cargo.lock – the resolved dependency set –
 // into cargo components, and reads the COMPANION Cargo.toml (via ParseInput.Dir) to scope direct
 // [dev-dependencies] as development, since Cargo.lock itself carries no dev flag. This is the first
-// parser to use the widened contract's Dir for a companion read. Components only — the lock's
+// parser to use the widened contract's Dir for a companion read. Components only – the lock's
 // `dependencies = [...]` edges are deferred. Hand-parsed (the targeted [[package]] name/version
 // + [dev-dependencies] keys), no TOML library, vendor-neutral.
 type Cargo struct{}
@@ -149,10 +149,10 @@ func (Cargo) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 }
 
 // cargoDevDeps reads the companion Cargo.toml beside Cargo.lock (if present) and returns the set of DIRECT
-// [dev-dependencies] names, so the lock's resolved crates can be scoped dev vs prod. Best-effort — no
+// [dev-dependencies] names, so the lock's resolved crates can be scoped dev vs prod. Best-effort – no
 // manifest, or an unreadable one, yields no dev refinement (everything stays prod/path-scoped). Their
 // transitive dev-deps stay prod (Cargo.lock is a flat resolved set; precise dev-transitivity needs the
-// graph) — same limitation as the Syft path, which Cargo.lock's lack of a dev flag forces.
+// graph) – same limitation as the Syft path, which Cargo.lock's lack of a dev flag forces.
 func cargoDevDeps(dir string) map[string]bool {
 	dev := map[string]bool{}
 	if dir == "" {
@@ -174,11 +174,11 @@ func cargoDevDeps(dir string) map[string]bool {
 		case line == "":
 			continue
 		case strings.HasPrefix(line, "["):
-			// Detect dev-dependency tables by exact dotted SEGMENT (not substring — so [dependencies.
+			// Detect dev-dependency tables by exact dotted SEGMENT (not substring – so [dependencies.
 			// my-dev-dependencies] is NOT treated as dev). Two forms:
 			// [dev-dependencies] / [target.'cfg(…)'.dev-dependencies] -> harvest the "name =" body lines
 			// [dev-dependencies.<crate>] -> the crate name is in the HEADER (next segment); capture it and
-			// do NOT harvest the body (version/features are not crate names — harvesting them could
+			// do NOT harvest the body (version/features are not crate names – harvesting them could
 			// mis-scope a real production crate literally named "version").
 			inDev = false
 			segs := strings.Split(strings.TrimSpace(strings.Trim(line, "[]")), ".")

@@ -5,6 +5,8 @@ import type {
   AgentMessage,
   AgentSession,
   AupStatus,
+  CodeQualityView,
+  CodeRating,
   Component,
   PendingApproval,
   CreateEngagementInput,
@@ -240,7 +242,7 @@ export async function downloadBundle(engagementId: string): Promise<void> {
 export type ReportType = 'sca' | 'external' | 'internal' | 'retest'
 
 // Options for the report builder. Empty arrays/title mean "everything" /
-// the type default — they are only narrowing filters server-side.
+// the type default – they are only narrowing filters server-side.
 export interface ReportBuildOptions {
   type?: ReportType
   sections?: string[]
@@ -598,6 +600,53 @@ function mapJudgment(r: any): Judgment {
 export const api = {
   aup: (): Promise<AupStatus> => req('/aup'),
 
+  // the engagement's code-quality report (inventory + findings + duplication + A-E ratings). Computed
+  // over an in-scope local source directory; an engagement without one returns available=false. 404 (the
+  // route is not registered when code quality is disabled) → also available=false.
+  codeQuality: async (engagementId: string): Promise<CodeQualityView> => {
+    let r: any
+    try {
+      r = await req(`/engagements/${encodeURIComponent(engagementId)}/code-quality`)
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return { available: false, reason: 'code quality is not enabled on this server' }
+      throw e
+    }
+    if (!r?.available || !r.report) return { available: false, reason: r?.reason }
+    const rep = r.report
+    return {
+      available: true,
+      report: {
+        inventory: (rep.inventory?.languages ?? []).map((l: any) => ({
+          language: l.language,
+          files: l.files ?? 0,
+          codeLines: l.code_lines ?? 0,
+          commentLines: l.comment_lines ?? 0,
+          blankLines: l.blank_lines ?? 0,
+          functions: l.functions ?? 0,
+          functionsKnown: !!l.functions_known,
+        })),
+        findings: (rep.findings ?? []).map(mapFinding),
+        duplication: {
+          blocks: (rep.duplication?.blocks ?? []).map((b: any) => ({
+            tokens: b.tokens ?? 0,
+            occurrences: (b.occurrences ?? []).map((o: any) => ({ file: o.file, startLine: o.start_line ?? 0, endLine: o.end_line ?? 0 })),
+          })),
+          duplicatedLines: rep.duplication?.duplicated_lines ?? 0,
+          totalLines: rep.duplication?.total_lines ?? 0,
+          files: rep.duplication?.files ?? 0,
+        },
+        rating: {
+          security: (rep.rating?.security ?? 'A') as CodeRating['security'],
+          reliability: (rep.rating?.reliability ?? 'A') as CodeRating['reliability'],
+          maintainability: (rep.rating?.maintainability ?? 'A') as CodeRating['maintainability'],
+          techDebtMinutes: rep.rating?.tech_debt_minutes ?? 0,
+          debtRatioPct: rep.rating?.debt_ratio_pct ?? 0,
+          linesOfCode: rep.rating?.lines_of_code ?? 0,
+        },
+      },
+    }
+  },
+
   // the engagement's architecture threat model (DFD). 404 (not ingested) → null.
   threatModel: async (engagementId: string): Promise<ThreatModel | null> => {
     try {
@@ -660,7 +709,7 @@ export const api = {
       }),
     ),
 
-  // a DISTINCT verifier applies an adversarial verdict to an exploitation finding —
+  // a DISTINCT verifier applies an adversarial verdict to an exploitation finding –
   // seals the verdict into the evidence chain and (if score >= 75) makes it promotable. The
   // verifier is the authenticated human; the server rejects verifier == proposed_by + machine roles.
   verifyFinding: async (

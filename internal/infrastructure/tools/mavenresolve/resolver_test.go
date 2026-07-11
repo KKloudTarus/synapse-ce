@@ -257,7 +257,7 @@ func TestFillDeclaredLicensesRealM2(t *testing.T) {
 	}
 	repo := filepath.Join(home, ".m2", "repository")
 	if _, err := os.Stat(filepath.Join(repo, "mysql", "mysql-connector-java", "8.0.21", "mysql-connector-java-8.0.21.pom")); err != nil {
-		t.Skip("mysql pom not in local ~/.m2 — skipping real-data check")
+		t.Skip("mysql pom not in local ~/.m2 – skipping real-data check")
 	}
 	comps := []sbom.Component{{Name: "mysql:mysql-connector-java", Version: "8.0.21"}}
 	New("mvn").WithLocalRepo(repo).fillDeclaredLicenses(context.Background(), comps)
@@ -303,8 +303,8 @@ func TestProjectRootsMonorepo(t *testing.T) {
 func TestProjectRootsSkipsSubmodulesAndBuildDirs(t *testing.T) {
 	dir := t.TempDir()
 	mkpom(t, dir)                                    // root project
-	mkpom(t, filepath.Join(dir, "module-a"))         // a sub-module — must NOT be a separate root
-	mkpom(t, filepath.Join(dir, "target", "shaded")) // build output — must be skipped
+	mkpom(t, filepath.Join(dir, "module-a"))         // a sub-module – must NOT be a separate root
+	mkpom(t, filepath.Join(dir, "target", "shaded")) // build output – must be skipped
 	roots := projectRoots(dir)
 	if len(roots) != 1 || roots[0] != dir {
 		t.Fatalf("roots = %v, want just the top-level project [%s]", roots, dir)

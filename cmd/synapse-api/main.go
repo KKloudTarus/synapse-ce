@@ -39,6 +39,9 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeanalysis"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gomodgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/govulncheck"
@@ -80,6 +83,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	credentialsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/credentials"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/crosscheckjudge"
 	dastrunneruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
@@ -112,7 +116,7 @@ import (
 
 // requireJudgmentsOrSkip decides whether a judgment-minting analyzer that now defaults ON (reachability,
 // cross-check, SBOM cross-check) may wire. With the judgment service present it wires. With judgments off it
-// AUTO-SKIPS (warn) — a default-on analyzer must not crash a judgments-off deployment — UNLESS the operator
+// AUTO-SKIPS (warn) – a default-on analyzer must not crash a judgments-off deployment – UNLESS the operator
 // EXPLICITLY set the analyzer's flag =true, which is a real contradiction worth failing closed on.
 func requireJudgmentsOrSkip(log *slog.Logger, hasJudgment bool, envKey, name string) bool {
 	if hasJudgment {
@@ -172,7 +176,7 @@ func main() {
 	var decisionStore ports.DecisionStore         // structured decision log
 
 	// Credential vault cipher: a configured master key gives durable
-	// encryption; an empty key yields an ephemeral one (dev only — stored secrets won't
+	// encryption; an empty key yields an ephemeral one (dev only – stored secrets won't
 	// survive a restart, and Postgres ciphertext becomes undecryptable, so production
 	// fails closed). The key is never logged.
 	vaultCipher := func() *vault.Cipher {
@@ -194,7 +198,7 @@ func main() {
 				log.Error("vault ephemeral key generation failed", "err", err)
 				os.Exit(1)
 			}
-			log.Warn("credential vault key is ephemeral — set SYNAPSE_VAULT_MASTER_KEY; stored secrets will not survive restart")
+			log.Warn("credential vault key is ephemeral – set SYNAPSE_VAULT_MASTER_KEY; stored secrets will not survive restart")
 		}
 		c, err := vault.NewCipher(key)
 		if err != nil {
@@ -206,7 +210,7 @@ func main() {
 
 	if cfg.DBDSN != "" {
 		// Bounded so a migration that blocks can't hang boot forever. NOTE: no
-		// advisory lock yet — run a single instance (or a one-shot migrate job)
+		// advisory lock yet – run a single instance (or a one-shot migrate job)
 		// until multi-replica horizontal scaling lands (P5).
 		startup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -225,7 +229,7 @@ func main() {
 		defer pool.Close()
 		// Single-instance guard: until horizontal scaling the repos
 		// ignore tenant_id and there is no leader election, so two writers would race. A
-		// session advisory lock makes the assumption explicit + enforced — a second
+		// session advisory lock makes the assumption explicit + enforced – a second
 		// instance fails fast instead of silently corrupting state.
 		lockConn, ok, lerr := postgres.AcquireSingletonLock(startup, pool, "api")
 		if lerr != nil {
@@ -233,7 +237,7 @@ func main() {
 			os.Exit(1)
 		}
 		if !ok {
-			log.Error("another synapse-api instance holds the single-instance lock — this build runs ONE instance (stop the other first); horizontal scaling is P5")
+			log.Error("another synapse-api instance holds the single-instance lock – this build runs ONE instance (stop the other first); horizontal scaling is P5")
 			os.Exit(1)
 		}
 		defer lockConn.Release()
@@ -362,7 +366,7 @@ func main() {
 		evidenceService.SetSigner(signer.WithContext(evidence.AttestationContextEvidence))
 		auditSigner = signer.WithContext(evidence.AttestationContextAudit)
 		if signer.Ephemeral() {
-			log.Warn("chain-head signing key is ephemeral — set SYNAPSE_EVIDENCE_SIGNING_SEED for a stable attestation key", "key_id", signer.KeyID())
+			log.Warn("chain-head signing key is ephemeral – set SYNAPSE_EVIDENCE_SIGNING_SEED for a stable attestation key", "key_id", signer.KeyID())
 		} else {
 			log.Info("chain-head attestation enabled (evidence + audit)", "key_id", signer.KeyID())
 		}
@@ -385,7 +389,7 @@ func main() {
 	evidenceService.SetTimestamper(tsaClient, timestampStore)
 	// SCA tool sandboxing (closes audit finding D2): syft + grype are offline, so
 	// when the sandbox is enabled they run in an ISOLATED sandbox (read-only FS, no
-	// network, dropped caps) — no egress/vault needed. Build/parse output is unchanged.
+	// network, dropped caps) – no egress/vault needed. Build/parse output is unchanged.
 	// Best-effort: if bubblewrap is unavailable, syft/grype degrade to a direct exec.
 	syftGen := syft.New(cfg.SyftBin)
 	grypeSrc := grype.New(cfg.GrypeBin, cfg.GrypeDBDir)
@@ -395,9 +399,9 @@ func main() {
 		if serr != nil {
 			// Fail CLOSED (re-audit fix): the operator explicitly asked for the sandbox
 			// (SYNAPSE_SANDBOX_ENABLED=true); if it cannot be built we must NOT silently
-			// degrade to a direct host exec of syft/grype/git/crane. Refuse to start —
+			// degrade to a direct host exec of syft/grype/git/crane. Refuse to start –
 			// mirrors the worker (which os.Exit's) and the prod-vault-key hardening.
-			log.Error("SYNAPSE_SANDBOX_ENABLED is set but the sandbox is unavailable — refusing to run SCA/acquisition UNSANDBOXED; install bubblewrap or unset the flag", "err", serr)
+			log.Error("SYNAPSE_SANDBOX_ENABLED is set but the sandbox is unavailable – refusing to run SCA/acquisition UNSANDBOXED; install bubblewrap or unset the flag", "err", serr)
 			os.Exit(1)
 		}
 		scaSandbox = sb
@@ -407,7 +411,7 @@ func main() {
 		syftGen = syftGen.WithRunner(scaSandbox)
 		grypeSrc = grypeSrc.WithRunner(scaSandbox)
 		log.Info("SCA tools (syft/grype) run sandboxed-isolated")
-		// acquisition (git/image) ALWAYS runs sandboxed — never a direct exec. When
+		// acquisition (git/image) ALWAYS runs sandboxed – never a direct exec. When
 		// kernel egress is usable here (privileged), scope egress to the repo/registry
 		// host; otherwise the fetch runs host-net but STILL fully sandboxed
 		// (fs/seccomp/caps/cgroup), removing the direct-exec RCE surface.
@@ -432,11 +436,11 @@ func main() {
 		log.Error("SYNAPSE_SANDBOX_ENABLED is required in production (tool execution + acquisition containment); set it and install bubblewrap")
 		os.Exit(1)
 	} else {
-		log.Warn("SANDBOX DISABLED (SYNAPSE_SANDBOX_ENABLED is off) — syft/grype/git/crane run UNSANDBOXED with NO seccomp/rootfs/egress/cgroup containment; dev only, never production")
+		log.Warn("SANDBOX DISABLED (SYNAPSE_SANDBOX_ENABLED is off) – syft/grype/git/crane run UNSANDBOXED with NO seccomp/rootfs/egress/cgroup containment; dev only, never production")
 	}
 	// SBOM producer select: default Syft (pinned binary, full coverage + CycloneDX
 	// dep-graph edges) or the detection-independent owned parsers. ownsbom is pure-Go (no exec) so it
-	// needs no sandbox; its SBOM is components-only (no edges) over Tier-1 ecosystems — which OSV and
+	// needs no sandbox; its SBOM is components-only (no edges) over Tier-1 ecosystems – which OSV and
 	// grype both accept (grype reconstructs a CycloneDX from the components when there is no Raw).
 	var sbomGen ports.SBOMGenerator = syftGen
 	switch cfg.SBOMProducer {
@@ -455,7 +459,7 @@ func main() {
 		os.Exit(1)
 	}
 	// Detection sources: Grype (offline DB) always; live OSV unless SYNAPSE_OFFLINE (air-gapped /
-	// fast path — no per-scan network egress). The owned advisory store is opt-in
+	// fast path – no per-scan network egress). The owned advisory store is opt-in
 	// and offline, so it runs in both modes (detection independence).
 	detectionSources := []ports.DetectionSource{grypeSrc}
 	if !cfg.Offline {
@@ -465,7 +469,7 @@ func main() {
 	}
 	if cfg.OwnedAdvisoryEnabled {
 		detectionSources = append(detectionSources, ownadvisory.New(advisoryStore))
-		log.Info("owned advisory DetectionSource ENABLED (offline match against the owned store, alongside OSV/Grype) — ensure the store is populated; an empty store yields no findings until the advisory ingester runs")
+		log.Info("owned advisory DetectionSource ENABLED (offline match against the owned store, alongside OSV/Grype) – ensure the store is populated; an empty store yields no findings until the advisory ingester runs")
 	}
 	scaService := scauc.NewService(repo, findingRepo, scanRepo, scanResultStore, scanJobStore, scanRunStore, evidenceService, ids, prov, clock, auditLog, shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, acquirer,
 		enry.New(), sbomGen,
@@ -480,7 +484,7 @@ func main() {
 	var jhResolvers []ports.JarHashResolver
 	if cfg.JarHashDBPath != "" {
 		if off, err := jarhash.NewOffline(cfg.JarHashDBPath); err != nil {
-			log.Warn("JAR SHA-1 offline DB not usable — falling back to online only if enabled", "path", cfg.JarHashDBPath, "err", err)
+			log.Warn("JAR SHA-1 offline DB not usable – falling back to online only if enabled", "path", cfg.JarHashDBPath, "err", err)
 		} else {
 			defer func() { _ = off.Close() }() // release the read-only DB handle at shutdown
 			jhResolvers = append(jhResolvers, off)
@@ -510,7 +514,7 @@ func main() {
 			gmg = gmg.WithRunner(scaSandbox)
 		} else {
 			// dev only (prod attaches the sandbox above): the direct path still pins GOPROXY=off +
-			// GOTOOLCHAIN=local, but runs `go` outside the bwrap confinement — make that explicit.
+			// GOTOOLCHAIN=local, but runs `go` outside the bwrap confinement – make that explicit.
 			log.Warn("go mod graph runs UNSANDBOXED (SCA sandbox off; dev only)")
 		}
 		scaService.SetGraphResolver(gmg)
@@ -518,9 +522,9 @@ func main() {
 	}
 	// Maven full-tree resolution (`mvn dependency:list`): resolves managed versions + the transitive tree
 	// a from-source pom.xml scan can't, so Maven projects stop under-reporting. HIGHER RISK than go mod
-	// graph — it RUNS the Maven toolchain (POM + parent-POM + plugin resolution) over UNTRUSTED project
+	// graph – it RUNS the Maven toolchain (POM + parent-POM + plugin resolution) over UNTRUSTED project
 	// config and reaches the Maven repo. The SERVER therefore enables it ONLY when the SCA sandbox is
-	// present (egress confined to Maven Central) and FAILS CLOSED otherwise — it never host-execs mvn over
+	// present (egress confined to Maven Central) and FAILS CLOSED otherwise – it never host-execs mvn over
 	// an untrusted target. Direct-exec is left to synapse-cli, the trusted-local dogfood path. Opt-in.
 	if cfg.MavenResolveEnabled {
 		if scaSandbox == nil {
@@ -532,7 +536,7 @@ func main() {
 		}
 	}
 	// Gradle full-tree resolution (`gradle dependencies`): same gap as Maven, but evaluating build.gradle
-	// runs arbitrary build logic — so the SERVER enables it ONLY with the SCA sandbox and FAILS CLOSED
+	// runs arbitrary build logic – so the SERVER enables it ONLY with the SCA sandbox and FAILS CLOSED
 	// otherwise (never host-execs gradle over an untrusted target). A pinned gradle, never./gradlew.
 	if cfg.GradleResolveEnabled {
 		if scaSandbox == nil {
@@ -544,7 +548,7 @@ func main() {
 		}
 	}
 	if cfg.JVMReachabilityEnabled {
-		// Read-only bytecode parsing (no exec, no ToolRunner needed) — tags JVM components reachable/
+		// Read-only bytecode parsing (no exec, no ToolRunner needed) – tags JVM components reachable/
 		// unreferenced from the app's compiled closure. Best-effort; a not-built target tags nothing.
 		scaService.SetJVMReachability(jvmreach.New())
 		log.Info("coarse JVM class-reachability ENABLED (deprioritizes findings on unreferenced deps)")
@@ -608,7 +612,7 @@ func main() {
 	exportService := exportuc.NewService(findingRepo, clock, buildinfo.App())
 	findingsService := findingsuc.NewService(findingRepo, commentRepo, retestRepo, auditLog, clock, ids)
 	// Exploitation needs the SCORE-MUTATING finding store (SetEvidenceScore is on the concrete
-	// repo, NOT ports.FindingRepository — read-only consumers can't move a score). Both the
+	// repo, NOT ports.FindingRepository – read-only consumers can't move a score). Both the
 	// postgres + memory concrete repos implement it; assert it from the interface-typed var.
 	exploitFindings, ok := findingRepo.(exploitationuc.FindingStore)
 	if !ok {
@@ -652,20 +656,20 @@ func main() {
 	reconPool := jobs.NewPool(cfg.ReconConcurrency, cfg.ReconQueueSize)
 	defer reconPool.Shutdown(context.Background())
 	// Select the tool runner: the bubblewrap sandbox when enabled, else the plain
-	// argv ExecRunner. Fail closed if the sandbox is required but unavailable — never
+	// argv ExecRunner. Fail closed if the sandbox is required but unavailable – never
 	// silently run unsandboxed (mirrors the prod-signing-seed hardening).
 	var reconRunner ports.ToolRunner = toolrunner.NewExecRunner(cfg.ReconTimeout, cfg.ReconMaxOutput)
 	egressLive := false // set when the sandbox can kernel-enforce scope egress
 	if cfg.SandboxEnabled {
 		sb, serr := sandbox.NewRunner(cfg.ReconTimeout, cfg.ReconMaxOutput, cfg.SandboxMemMax, cfg.SandboxPidsMax)
 		if serr != nil {
-			log.Error("SYNAPSE_SANDBOX_ENABLED but the sandbox is unavailable — install bubblewrap or disable it", "err", serr)
+			log.Error("SYNAPSE_SANDBOX_ENABLED but the sandbox is unavailable – install bubblewrap or disable it", "err", serr)
 			os.Exit(1)
 		}
 		reconRunner = sb
 		sb.SetVault(credVault)                                      // resolve {{secret:NAME}} into the child env at exec time
 		sb.SetBinaryRegistry(binregistry.New(cfg.ToolHashes, true)) // refuse a replaced recon tool binary (TOFU)
-		// Egress enforcement: enable ONLY when the applier actually works here — it
+		// Egress enforcement: enable ONLY when the applier actually works here – it
 		// needs CAP_NET_ADMIN + CAP_SYS_ADMIN, which an unprivileged API lacks. Probe and
 		// degrade to network-isolated (still safe) rather than failing recon at runtime.
 		if app, aerr := egressinfra.NewApplier(); aerr == nil {
@@ -678,10 +682,10 @@ func main() {
 				egressLive = true
 				log.Info("recon sandbox enabled with KERNEL EGRESS enforcement (scope-restricted netns)")
 			} else {
-				log.Warn("sandbox egress not usable here (needs CAP_NET_ADMIN/SYS_ADMIN) — sandboxed recon runs network-ISOLATED; run capability-sensitive/live recon via synapse-worker", "err", perr)
+				log.Warn("sandbox egress not usable here (needs CAP_NET_ADMIN/SYS_ADMIN) – sandboxed recon runs network-ISOLATED; run capability-sensitive/live recon via synapse-worker", "err", perr)
 			}
 		} else {
-			log.Warn("sandbox egress applier unavailable (no ip/iptables) — sandboxed recon runs network-isolated", "err", aerr)
+			log.Warn("sandbox egress applier unavailable (no ip/iptables) – sandboxed recon runs network-isolated", "err", aerr)
 		}
 		if !sb.CgroupLimitsEnforced() {
 			log.Warn("sandbox cgroup resource limits NOT enforced (no usable systemd-run --user)")
@@ -695,7 +699,7 @@ func main() {
 		os.Exit(1)
 	}
 	if egressLive {
-		// with kernel egress enforcement available, recon runs sandboxed-live —
+		// with kernel egress enforcement available, recon runs sandboxed-live –
 		// capability-sensitive tools are permitted (contained) and each run carries a
 		// scope-derived egress policy.
 		reconService.SetSandboxEnforcement(egresspolicy.Compile)
@@ -716,7 +720,7 @@ func main() {
 			}, worker.Config{Visibility: cfg.ScanTimeout + time.Minute, MaxAttempts: 3}, log)
 			log.Info("execution deferred to the durable queue: recon → synapse-worker, SCA → in-process worker")
 		} else {
-			log.Warn("SYNAPSE_RECON_VIA_WORKER set but no Postgres queue (set SYNAPSE_DB_DSN) — running in-process")
+			log.Warn("SYNAPSE_RECON_VIA_WORKER set but no Postgres queue (set SYNAPSE_DB_DSN) – running in-process")
 		}
 	}
 
@@ -767,7 +771,15 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
-	router.SetExploitation(exploitationService)                                                  // evidence-gated finding verify endpoint
+	router.SetExploitation(exploitationService) // evidence-gated finding verify endpoint
+	// Read-only code-quality dashboard. Server-side analysis is PURE-GO and memory-safe only (pattern
+	// rules + duplication + Go-parser inventory); tree-sitter complexity is intentionally NOT wired here
+	// so the server never runs C parsers over untrusted source (that stays a local-CLI capability).
+	router.SetCodeQuality(codequality.New(
+		codeanalysis.New(),
+		codequality.WithDuplication(duplication.New(0)),
+		codequality.WithInventory(codeinventory.New()),
+	))
 	if tmSvc, terr := threatmodeluc.NewService(threatModelStore, auditLog, clock); terr != nil { // architecture threat-model ingest/read
 		log.Error("threat-model service init failed", "err", terr)
 		os.Exit(1)
@@ -832,7 +844,7 @@ func main() {
 	// deterministic Tier-2 reachability proof in the scan pipeline (opt-in). It mints reachability
 	// judgments, so it requires the judgment lifecycle. The govulncheck builder shares the SCA sandbox when
 	// enabled (so it never runs unsandboxed in production); a no-coverage/un-buildable target is best-effort
-	// (the prior tier stands). Injected here at the composition root only — never on an agent-reachable
+	// (the prior tier stands). Injected here at the composition root only – never on an agent-reachable
 	// surface (the reachproof architecture tripwire enforces it).
 	if cfg.ReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_REACHABILITY_ENABLED", "reachability") {
 		gvBuilder := govulncheck.New(cfg.GovulncheckBin)
@@ -840,8 +852,8 @@ func main() {
 			gvBuilder = gvBuilder.WithRunner(scaSandbox) // same containment as syft/grype; required in production
 		} else {
 			// dev only (prod forces the sandbox above): govulncheck SOURCE-mode does a real build of the
-			// target unsandboxed — make that posture explicit rather than silent.
-			log.Warn("reachability: govulncheck runs UNSANDBOXED (sandbox off; dev only) — it builds the target")
+			// target unsandboxed – make that posture explicit rather than silent.
+			log.Warn("reachability: govulncheck runs UNSANDBOXED (sandbox off; dev only) – it builds the target")
 		}
 		reachSvc, rerr := reachability.NewService(gvBuilder)
 		if rerr != nil {
@@ -859,10 +871,10 @@ func main() {
 
 	// Deterministic taint-analysis CapSAST proposals, opt-in. Builds the workspace call
 	// graph via the sandboxed synapse-callgraph binary, assembles the taint FlowGraph over the injection
-	// catalog, and PROPOSES gated CapSAST judgments (propose-only — a distinct verifier gates them).
+	// catalog, and PROPOSES gated CapSAST judgments (propose-only – a distinct verifier gates them).
 	// Composition-root only (the taintscan arch tripwire keeps it off the agent surface). Requires the
 	// sandbox: synapse-callgraph compiles the GENERAL target source, so there is NO safe unsandboxed dev
-	// fallback (contrast govulncheck's vuln-scan) — refuse rather than build untrusted code on the host.
+	// fallback (contrast govulncheck's vuln-scan) – refuse rather than build untrusted code on the host.
 	if cfg.TaintEnabled {
 		if judgmentSvc == nil {
 			log.Error("SYNAPSE_TAINT_ENABLED requires SYNAPSE_JUDGMENTS_ENABLED (taint mints judgments)")
@@ -898,7 +910,7 @@ func main() {
 
 	// SBOM producer cross-check (SBOM side), opt-in. A SECOND SBOM producer runs alongside
 	// the primary and components only one producer emits become ungated CapCorrelation judgments (system
-	// identity) for human review — detection independence as a feature. Like the advisory cross-check it mints
+	// identity) for human review – detection independence as a feature. Like the advisory cross-check it mints
 	// judgments, so it needs the judgment lifecycle; composition-root only (the sbomcrosscheckjudge arch
 	// tripwire keeps it off the agent surface). Best-effort: a 2nd-producer error never fails the scan.
 	if cfg.SBOMCrossCheckEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_SBOM_CROSSCHECK_ENABLED", "SBOM cross-check") {
@@ -978,13 +990,13 @@ func main() {
 			os.Exit(1)
 		}
 		if agentRunLock != nil {
-			orch.SetRunLock(agentRunLock) // advisory session lock — cannot expire mid-LLM-loop
+			orch.SetRunLock(agentRunLock) // advisory session lock – cannot expire mid-LLM-loop
 		}
 		orch.SetPlanStore(planStore)         // drive a proposed plan DAG (node-CAS idempotency)
 		orch.SetDecisionStore(decisionStore) // structured decision-log projection
 		// Durable dispatch when SYNAPSE_AGENT_VIA_WORKER (requires the recon worker + Postgres):
 		// the API enqueues and synapse-worker drives + survives restart. Otherwise the API runs
-		// the agent inline (bounded by AgentConcurrency; NOT durable — a crash strands the run).
+		// the agent inline (bounded by AgentConcurrency; NOT durable – a crash strands the run).
 		var agentQueue ports.JobQueue
 		if cfg.AgentViaWorker {
 			if !cfg.ReconViaWorker || reconQueue == nil {

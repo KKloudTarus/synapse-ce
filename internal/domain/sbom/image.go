@@ -25,7 +25,7 @@ type ImageLayer struct {
 	Created string `json:"created,omitempty"`
 	// InBase reports whether this layer is classified as part of the base image
 	// (the OS/distro rootfs + base packages) rather than application content added
-	// on top. Set by MarkBaseLayers — a heuristic estimate, not authoritative.
+	// on top. Set by MarkBaseLayers – a heuristic estimate, not authoritative.
 	InBase bool `json:"in_base"`
 }
 
@@ -62,7 +62,7 @@ func (i *ImageInfo) LayerIndexByDiffID(diffID string) int {
 // MarkBaseLayers separates the base image from the application layers using a
 // conservative, deterministic heuristic: given the set of layer diff_ids that
 // introduced at least one APPLICATION (non-OS) package, the base image is every
-// layer BELOW the lowest such layer — i.e. the bottom run of layers that carry
+// layer BELOW the lowest such layer – i.e. the bottom run of layers that carry
 // only OS/distro content. It sets InBase on those layers and BaseLayerCount.
 //
 // This is an ESTIMATE, not a definitive base-image identification: a multi-stage

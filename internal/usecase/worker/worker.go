@@ -2,7 +2,7 @@
 // ports.JobQueue, dispatches each to a Handler registered by Kind, heartbeats long runs
 // so their lease does not expire mid-flight, and Completes or Fails (with backoff) the
 // job. It is the process body of synapse-worker, and reusable in-process. It owns no
-// business logic — the handlers (recon/SCA) carry the same gate/audit/
+// business logic – the handlers (recon/SCA) carry the same gate/audit/
 // evidence invariants as the synchronous path.
 package worker
 
@@ -33,7 +33,7 @@ func (f HandlerFunc) Handle(ctx context.Context, job ports.QueuedJob) error { re
 // DeadLetterer is an optional capability a Handler may implement. When the worker is about to
 // dead-letter a job (terminal failure after MaxAttempts), it calls OnDeadLetter FIRST so the
 // handler can drive its backing domain entity (agent session / recon run) to a terminal state.
-// Without it, a reconciler that keys on the ENTITY's status — not the job's — re-enqueues the
+// Without it, a reconciler that keys on the ENTITY's status – not the job's – re-enqueues the
 // stranded entity forever (the dead-letter → re-drive livelock), and the job/entity states
 // permanently disagree. Best-effort: an OnDeadLetter error is logged, never blocking the
 // dead-letter itself. cause is the last handler error that exhausted the retries.
@@ -86,8 +86,8 @@ func New(queue ports.JobQueue, handlers map[string]Handler, cfg Config, log *slo
 }
 
 // Run claims and processes jobs until ctx is cancelled (graceful shutdown drains the
-// current job, then returns). It never returns on a transient queue error — it logs and
-// keeps polling — so a brief DB blip doesn't kill the worker.
+// current job, then returns). It never returns on a transient queue error – it logs and
+// keeps polling – so a brief DB blip doesn't kill the worker.
 func (w *Worker) Run(ctx context.Context) error {
 	w.log.Info("worker started", "kinds", w.kinds(), "visibility", w.cfg.Visibility)
 	for {
@@ -112,13 +112,13 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 }
 
-// safeHandle runs a job handler, converting a PANIC into an error so one poisoned job — e.g. a crafted
-// container image that panics a stdlib binary/archive parser in the SCA handler — fails and retries through
+// safeHandle runs a job handler, converting a PANIC into an error so one poisoned job – e.g. a crafted
+// container image that panics a stdlib binary/archive parser in the SCA handler – fails and retries through
 // the normal path instead of unwinding out of the claim loop and crashing the shared worker process.
 func (w *Worker) safeHandle(ctx context.Context, h Handler, job ports.QueuedJob) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			w.log.Error("job handler panicked — failing job", "kind", job.Kind, "job", job.ID, "panic", r, "stack", string(debug.Stack()))
+			w.log.Error("job handler panicked – failing job", "kind", job.Kind, "job", job.ID, "panic", r, "stack", string(debug.Stack()))
 			err = fmt.Errorf("handler panicked: %v", r)
 		}
 	}()
@@ -131,8 +131,8 @@ func (w *Worker) process(ctx context.Context, job ports.QueuedJob) {
 	h, ok := w.handlers[job.Kind]
 	if !ok {
 		// Unknown kind: there is no handler in this build. Park it (Complete) so it does
-		// not spin forever, and log loudly — a silent drop would hide a misconfiguration.
-		w.log.Error("no handler for job kind — parking job", "kind", job.Kind, "job", job.ID)
+		// not spin forever, and log loudly – a silent drop would hide a misconfiguration.
+		w.log.Error("no handler for job kind – parking job", "kind", job.Kind, "job", job.ID)
 		w.complete(job.ID)
 		return
 	}
@@ -148,9 +148,9 @@ func (w *Worker) process(ctx context.Context, job ports.QueuedJob) {
 		return
 	}
 	if job.Attempts >= w.cfg.MaxAttempts {
-		w.log.Error("job failed permanently — dead-lettering", "kind", job.Kind, "job", job.ID, "attempts", job.Attempts, "err", err)
+		w.log.Error("job failed permanently – dead-lettering", "kind", job.Kind, "job", job.ID, "attempts", job.Attempts, "err", err)
 		// Drive the backing domain entity terminal BEFORE flipping the job row, so a reconciler
-		// keyed on the entity's status (not the job's) stops re-enqueuing it — closing the
+		// keyed on the entity's status (not the job's) stops re-enqueuing it – closing the
 		// dead-letter → re-drive livelock. Best-effort + logged; never blocks the dead-letter.
 		if dl, ok := h.(DeadLetterer); ok {
 			if derr := dl.OnDeadLetter(context.Background(), job, err); derr != nil {
@@ -164,7 +164,7 @@ func (w *Worker) process(ctx context.Context, job ports.QueuedJob) {
 		}
 		return
 	}
-	w.log.Warn("job failed — requeueing with backoff", "kind", job.Kind, "job", job.ID, "attempt", job.Attempts, "err", err)
+	w.log.Warn("job failed – requeueing with backoff", "kind", job.Kind, "job", job.ID, "attempt", job.Attempts, "err", err)
 	if ferr := w.queue.Fail(ctx, job.ID, w.cfg.Backoff); ferr != nil {
 		w.log.Error("requeue failed", "job", job.ID, "err", ferr)
 	}

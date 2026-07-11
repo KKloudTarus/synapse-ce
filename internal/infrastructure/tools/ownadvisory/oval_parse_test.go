@@ -45,7 +45,7 @@ func TestParseUbuntuOVALMatchesViaDomainMatcher(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := advs[0]
-	// A lower dpkg version is affected; at/above the fixed version it is not — proves the owned dpkg
+	// A lower dpkg version is affected; at/above the fixed version it is not – proves the owned dpkg
 	// comparator wires up end to end through the "Ubuntu:22.04" ecosystem key.
 	if ok, fixed := a.Match("Ubuntu:22.04", "openssl", "3.0.2-0ubuntu1.9"); !ok || fixed != "3.0.2-0ubuntu1.10" {
 		t.Errorf("older openssl must match with fix 3.0.2-0ubuntu1.10, got ok=%v fixed=%q", ok, fixed)

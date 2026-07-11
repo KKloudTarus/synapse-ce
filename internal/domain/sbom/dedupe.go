@@ -2,18 +2,18 @@ package sbom
 
 // DedupeComponents collapses duplicate component entries for the SAME package into one, unioning
 // their license data. SBOM generators (notably Syft) routinely emit the same package as several
-// components from different evidence sources — e.g. one entry carrying the resolved license and a
+// components from different evidence sources – e.g. one entry carrying the resolved license and a
 // second carrying none. Left as-is, the license-less twin reads as an "UNKNOWN license" everywhere
 // downstream (license coverage, the component audit, and the Excel export) even though the package's
-// license WAS detected on its sibling — the phantom-UNKNOWN customers reported.
+// license WAS detected on its sibling – the phantom-UNKNOWN customers reported.
 //
 // Identity is the PURL when present (same PURL ⇒ same package), else name@version as a fallback for
 // the rare PURL-less entry. Components with no identity at all (no PURL, no name+version) are kept
 // as-is. The first occurrence wins for scalar fields; a later occurrence only FILLS values the first
-// left empty (license list, location, layer, license provenance) — so merging a licensed entry with
+// left empty (license list, location, layer, license provenance) – so merging a licensed entry with
 // an empty one yields the licensed result and never drops information.
 //
-// Layer note (Epic D): identity intentionally does NOT include LayerID — the phantom-UNKNOWN twin is
+// Layer note (Epic D): identity intentionally does NOT include LayerID – the phantom-UNKNOWN twin is
 // precisely a same-package entry with an empty LayerID, so keying on layer would stop the merge and
 // reintroduce the bug. The trade is that a package legitimately present in two layers under the same
 // identity keeps only the first LayerID; near-zero in practice (same PURL+version across layers is

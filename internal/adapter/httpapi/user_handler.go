@@ -8,7 +8,7 @@ import (
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
 )
 
-// userView is the safe, serialized shape of a user — never the API-key hash.
+// userView is the safe, serialized shape of a user – never the API-key hash.
 type userView struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
@@ -71,6 +71,6 @@ func (rt *Router) createUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	// apiKey is shown exactly once — it is not recoverable afterwards.
+	// apiKey is shown exactly once – it is not recoverable afterwards.
 	writeJSON(w, http.StatusCreated, map[string]any{"user": toUserView(u), "apiKey": apiKey})
 }

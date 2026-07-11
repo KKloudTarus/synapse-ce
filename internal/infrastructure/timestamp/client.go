@@ -1,13 +1,13 @@
 // Package timestamp implements ports.TimestampAuthority with an RFC-3161 client: it
 // anchors a custody chain head to an EXTERNAL trusted timestamp, so a head can be
 // proven to have existed before a given instant independent of the server's own
-// ed25519 key — i.e. tamper-PROOF, not just tamper-evident (append-only, tamper-evident
+// ed25519 key – i.e. tamper-PROOF, not just tamper-evident (append-only, tamper-evident
 // custody). ASN.1/CMS is handled by github.com/digitorus/timestamp (never hand-rolled).
 //
 // Token verification (VerifyToken) lives here, not in the domain, because RFC-3161 +
 // CMS are not stdlib (unlike the ed25519 attestation in domain/evidence). It proves
 // the token binds the digest and that the token's own CMS signature is intact; it does
-// NOT decide whether the issuing TSA is trusted — that is the verifier's policy.
+// NOT decide whether the issuing TSA is trusted – that is the verifier's policy.
 package timestamp
 
 import (
@@ -30,7 +30,7 @@ import (
 
 const (
 	defaultTimeout  = 15 * time.Second
-	maxResponseSize = 1 << 20 // 1 MiB — an RFC-3161 reply is small
+	maxResponseSize = 1 << 20 // 1 MiB – an RFC-3161 reply is small
 	contentTypeReq  = "application/timestamp-query"
 )
 

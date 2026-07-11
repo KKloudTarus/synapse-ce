@@ -108,7 +108,7 @@ func TestBuildSPDXEmitsChecksums(t *testing.T) {
 		t.Errorf("checksums must be sorted by algorithm, got %+v", pkg.Checksums)
 	}
 	// Robustness: garbage, wrong-length-for-algorithm, unknown algorithm, and an oversized value must all be
-	// dropped — never emitted as a malformed or non-conformant SPDX checksum.
+	// dropped – never emitted as a malformed or non-conformant SPDX checksum.
 	long := make([]byte, 300)
 	for i := range long {
 		long[i] = 'a'
@@ -144,7 +144,7 @@ func TestScanTimePinned(t *testing.T) {
 }
 
 // The export gate delegates entirely to the shared domain digest gate, so an SPDX package emits the same
-// canonical algorithm name + lowercase hex the scorer validated — and rejects what the scorer rejects.
+// canonical algorithm name + lowercase hex the scorer validated – and rejects what the scorer rejects.
 func TestSPDXHexDigestDelegatesToDomainGate(t *testing.T) {
 	name, hexVal, ok := spdxHexDigest("sha-256", strings.ToUpper(strings.Repeat("a", 64)))
 	if !ok || name != "SHA256" || hexVal != strings.Repeat("a", 64) {

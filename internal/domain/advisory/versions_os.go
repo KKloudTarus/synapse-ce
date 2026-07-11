@@ -6,7 +6,7 @@ import "strings"
 // ranges the matcher previously SKIPPED (schemeFor returned ok=false): Debian/Ubuntu (dpkg), Alpine
 // (apk), and the RPM distros (rpm). Each is a faithful port of the distro's native package-version
 // ordering, plugged into schemeFor via osFamilyScheme, so the owned advisory store can match RANGE
-// advisories for OS packages offline — detection independence for container/OS scans (Epic B).
+// advisories for OS packages offline – detection independence for container/OS scans (Epic B).
 //
 // every `valid` FAILS CLOSED: a version it cannot soundly order returns false → the
 // range is skipped (never mis-ordered into a false match), exactly as for any unsupported input.
@@ -124,7 +124,7 @@ func dpkgOrder(c byte) int {
 	}
 }
 
-// verrevcmp compares one dpkg version part (upstream or revision) — the canonical dpkg algorithm.
+// verrevcmp compares one dpkg version part (upstream or revision) – the canonical dpkg algorithm.
 func verrevcmp(a, b string) int {
 	i, j := 0, 0
 	for i < len(a) || j < len(b) {
@@ -466,7 +466,7 @@ func rpmvercmp(a, b string) int {
 }
 
 // validRPM fails closed: epoch (if present) must be digits and the version part must contain at least
-// one alphanumeric (rpmvercmp orders by alnum segments — a separator-only version is meaningless).
+// one alphanumeric (rpmvercmp orders by alnum segments – a separator-only version is meaningless).
 func validRPM(v string) bool {
 	if strings.TrimSpace(v) != v || v == "" {
 		return false

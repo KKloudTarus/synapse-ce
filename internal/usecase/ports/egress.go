@@ -15,7 +15,7 @@ type EgressRule struct {
 // scope. It lives in ports so both the usecase compiler that produces it
 // and the infrastructure applier that enforces it depend only inward on it. Domains can
 // only be enforced once resolved, so they are carried separately for run-start
-// resolution + pinning — never matched on the hostname string.
+// resolution + pinning – never matched on the hostname string.
 type EgressPolicy struct {
 	Rules        []EgressRule
 	AllowDomains []string // in-scope domain/url-host names to resolve + add as allow rules

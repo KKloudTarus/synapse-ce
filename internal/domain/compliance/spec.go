@@ -10,7 +10,7 @@ import (
 
 // A Spec is a versioned compliance benchmark: a set of controls, each PASS or FAIL depending on whether any
 // scan finding matches it. It re-projects the deterministic findings onto an auditor-citable pass/fail
-// report (Trivy's compliance-spec idea), purely by a deterministic id/attribute join — NO LLM, so the
+// report (Trivy's compliance-spec idea), purely by a deterministic id/attribute join – NO LLM, so the
 // result is a lookup a human can audit, and it drops straight into the LLM-free report path.
 type Spec struct {
 	ID       string
@@ -38,7 +38,7 @@ type ControlResult struct {
 
 // Report is the evaluated benchmark: per-control results plus pass/fail tallies. MinSeverity + IgnoreUnfixed
 // record the SCOPE of the finding set it was computed over, so a PASS is never misread as "no weakness of
-// this class at ANY severity" — findings below the floor (and, when IgnoreUnfixed, unfixed vulns) were not
+// this class at ANY severity" – findings below the floor (and, when IgnoreUnfixed, unfixed vulns) were not
 // in the evaluated set.
 type Report struct {
 	SpecID        string
@@ -54,7 +54,7 @@ type Report struct {
 // Evaluate joins the findings against the spec and returns the per-control report. Deterministic and
 // order-independent: controls keep their spec order; evidence is sorted. A control matches a finding when
 // the finding's CWE is in Controls.CWEs, its Kind is in Controls.Kinds, or its severity is at/above
-// MinSeverity — the same match a human would make by reading the control's join keys.
+// MinSeverity – the same match a human would make by reading the control's join keys.
 func Evaluate(spec Spec, findings []finding.Finding) Report {
 	rep := Report{SpecID: spec.ID, Title: spec.Title, Version: spec.Version}
 	for _, c := range spec.Controls {

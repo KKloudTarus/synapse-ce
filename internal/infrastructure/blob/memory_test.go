@@ -26,7 +26,7 @@ func TestMemoryRoundTrip(t *testing.T) {
 		t.Fatalf("get: got=%q err=%v", got, err)
 	}
 
-	// Get returns a copy — mutating it must not corrupt the store.
+	// Get returns a copy – mutating it must not corrupt the store.
 	got[0] = 'X'
 	again, _ := s.Get(ctx, "k1")
 	if string(again) != string(data) {

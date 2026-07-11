@@ -91,7 +91,7 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 
 	// rpm (RHEL/Fedora family, sqlite backend): the distro qualifier is set for any rpm-family id (inventory),
 	// but only the ids osDistroEcosystem keys (Rocky/AlmaLinux/Oracle) with a non-empty major version count as
-	// resolved — RHEL/CentOS/Fedora use module-qualified or uncertain OSV keys, so they are emitted but flagged
+	// resolved – RHEL/CentOS/Fedora use module-qualified or uncertain OSV keys, so they are emitted but flagged
 	// unresolved (surfaced upstream, never a silent zero-match). Berkeley-DB/ndb backends are deferred (the
 	// generator covers them).
 	rpmNS, rpmTag := "rhel", ""
@@ -102,7 +102,7 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 			rpmTag = id + "-" + versionID
 			// Mirror osDistroEcosystem, which keys on the major (VERSION_ID up to the first '.'): a clean-but-
 			// empty major (e.g. VERSION_ID=".3", which isCleanToken admits) maps to nothing. Require a non-empty
-			// major here too, so this resolved flag can never disagree with the mapping — a disagreement would be
+			// major here too, so this resolved flag can never disagree with the mapping – a disagreement would be
 			// exactly the silent zero-match (resolved=true yet ecosystem="") this flag exists to prevent.
 			major := versionID
 			if i := strings.IndexByte(versionID, '.'); i >= 0 {

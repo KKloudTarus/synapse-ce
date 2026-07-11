@@ -1,6 +1,6 @@
 // Package credentials is the management use case over the credential vault
 // (secrets never enter logs): an operator stores per-engagement secrets (write-only) and lists
-// or deletes them by NAME. The secret value is never returned, logged, or audited — only
+// or deletes them by NAME. The secret value is never returned, logged, or audited – only
 // the SandboxRunner resolves plaintext, at execution time. Every mutation is recorded to
 // the append-only audit log WITHOUT the value.
 package credentials
@@ -47,7 +47,7 @@ func (s *Service) Set(ctx context.Context, actor string, engagementID shared.ID,
 	if err := s.vault.Put(ctx, engagementID, name, secret); err != nil {
 		return fmt.Errorf("put credential: %w", err)
 	}
-	// Audit the fact + the name only — NEVER the value.
+	// Audit the fact + the name only – NEVER the value.
 	return s.record(ctx, actor, "credential.set", engagementID, name)
 }
 

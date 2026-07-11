@@ -10,7 +10,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// Integration test — runs only when SYNAPSE_TEST_DB_DSN points at a Postgres.
+// Integration test – runs only when SYNAPSE_TEST_DB_DSN points at a Postgres.
 func TestAdvisoryRepository(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {

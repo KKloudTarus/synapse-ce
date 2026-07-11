@@ -156,7 +156,7 @@ func TestScanMultiClassEmitsPerClass(t *testing.T) {
 }
 
 // Two sinks of the SAME class at one function (DB.Query + DB.Exec, both CWE-89) are ONE finding: the
-// claim is byte-identical, so it must be proposed once (no duplicate judgments/seals/audit — the bug the
+// claim is byte-identical, so it must be proposed once (no duplicate judgments/seals/audit – the bug the
 // go-arch review caught). DefaultCatalog has 10 SQLi symbols, so this is the common case, not an edge.
 func TestScanSameClassSinkDedup(t *testing.T) {
 	b := &fakeBuilder{g: &callgraph.Graph{Edges: []callgraph.Edge{
@@ -199,7 +199,7 @@ func TestScanNilGraphFailsClosed(t *testing.T) {
 	}
 }
 
-// A successful build with no catalog hits proposes nothing (a genuinely clean target — no error).
+// A successful build with no catalog hits proposes nothing (a genuinely clean target – no error).
 func TestScanCleanTargetProposesNothing(t *testing.T) {
 	b := &fakeBuilder{g: &callgraph.Graph{Edges: []callgraph.Edge{
 		{Caller: "app.main", Callees: []string{"fmt.Println", "app.helper"}},

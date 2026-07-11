@@ -105,7 +105,7 @@ func TestNewServiceValidates(t *testing.T) {
 
 // stubSigner records calls and returns a sentinel attestation over the head, so the
 // service test asserts the WIRING (attest on intact, skip on broken/empty) without
-// real crypto — signature correctness is covered in the signing + domain packages.
+// real crypto – signature correctness is covered in the signing + domain packages.
 type stubSigner struct{ calls int }
 
 func (s *stubSigner) Sign(_ context.Context, head string) (evdom.Attestation, error) {
@@ -334,7 +334,7 @@ func TestVerifyDetectsTailTruncation(t *testing.T) {
 		t.Fatalf("a complete chain must verify intact: intact=%v err=%v", rep.Intact, err)
 	}
 	// Simulate an out-of-band tail truncation: a head was anchored (retained) that is no longer
-	// present in the chain — i.e. a superuser disabled the append-only trigger and deleted the
+	// present in the chain – i.e. a superuser disabled the append-only trigger and deleted the
 	// tail. The latest retained head now mismatches the (shorter, still-linear) chain.
 	if err := ts.Put(ctx, ChainEvidence, "e1", "deadbeefphantomhead", ports.TimestampToken{Authority: "tsa", Token: "tok"}); err != nil {
 		t.Fatal(err)
@@ -383,7 +383,7 @@ func TestVerifyNoAnchorWithoutTimestamper(t *testing.T) {
 }
 
 // TestSealConcurrentStaysLinear covers many writers sealing the SAME engagement
-// chain concurrently must never fork it — the store's one-child-per-parent guard +
+// chain concurrently must never fork it – the store's one-child-per-parent guard +
 // re-chain-on-conflict keeps the chain strictly linear and intact.
 func TestSealConcurrentStaysLinear(t *testing.T) {
 	store := memory.NewEvidenceStore()

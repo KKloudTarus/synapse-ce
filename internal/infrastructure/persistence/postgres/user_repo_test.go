@@ -10,7 +10,7 @@ import (
 )
 
 // TestUserRepoTenantRoundTrip covers the tenant source (migration 0035): a user's
-// tenant_id persists and round-trips through GetByAPIKeyHash — the auth path the Principal
+// tenant_id persists and round-trips through GetByAPIKeyHash – the auth path the Principal
 // resolves its tenant from. A user created without one defaults to ” (single-tenant). Gated
 // on SYNAPSE_TEST_DB_DSN.
 func TestUserRepoTenantRoundTrip(t *testing.T) {

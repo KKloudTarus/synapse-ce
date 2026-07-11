@@ -1,17 +1,17 @@
 // Package gomodgraph resolves the transitive dependency EDGES of a Go module by shelling out to
 // `go mod graph` via argv and mapping its module-graph output onto the SBOM's existing golang
-// components. go.mod alone carries only the (flattened) requirement list — not the edge graph — and the
+// components. go.mod alone carries only the (flattened) requirement list – not the edge graph – and the
 // transitive graph lives in the module cache, which `go mod graph` reads; so an owned, no-exec parse cannot
 // produce edges. This adapter fills that gap as a best-effort, post-SBOM enrichment.
 //
-// SAFETY: `go mod graph` only READS go.mod files (from the workspace + module cache) — it does NOT compile
+// SAFETY: `go mod graph` only READS go.mod files (from the workspace + module cache) – it does NOT compile
 // the target (unlike govulncheck/taint), so it is low-risk; it still runs sandbox-confined when a runner is
-// set (the module dir bound READ-ONLY, GOPROXY=off so it never reaches the network — cache-only, fail-fast
+// set (the module dir bound READ-ONLY, GOPROXY=off so it never reaches the network – cache-only, fail-fast
 // offline; GOTOOLCHAIN=local so a hostile `toolchain` directive can never trigger a toolchain fetch+exec).
 // It is BEST-EFFORT: a non-Go target, an un-resolvable graph (no module cache), or any tool error
 // adds NO edges and never fails the scan. Edges are RESOLUTION-AS-FILTER: an edge is emitted only when BOTH
 // endpoints are already golang components in the SBOM, so a `go mod graph` line for an unselected module
-// version (the graph lists every version considered by MVS) is dropped — never a phantom edge.
+// version (the graph lists every version considered by MVS) is dropped – never a phantom edge.
 package gomodgraph
 
 import (
@@ -45,28 +45,28 @@ func New(bin string) *Resolver {
 
 // WithRunner runs `go mod graph` through a ToolRunner (the SandboxRunner) instead of a bare os/exec. The
 // module dir is bound READ-ONLY; `go mod graph` reads the module cache (HOME/go/pkg/mod in the sandbox's
-// ephemeral env) — binding a populated cache offline is an operational follow-up shared with
+// ephemeral env) – binding a populated cache offline is an operational follow-up shared with
 // govulncheck, so until then a sandboxed run is best-effort (no cache ⇒ no edges, never a false graph).
 func (r *Resolver) WithRunner(runner ports.ToolRunner) *Resolver { r.runner = runner; return r }
 
 var _ ports.DependencyGraphResolver = (*Resolver)(nil)
 
 // ResolveEdges runs `go mod graph` over dir and adds the resolved Go dependency edges to doc, in place.
-// It no-ops (0, nil) when doc has no golang components (not a Go target — nothing to resolve, and the tool
+// It no-ops (0, nil) when doc has no golang components (not a Go target – nothing to resolve, and the tool
 // would be pointless). Returns the number of edges (DependsOn entries) added. Best-effort: a tool error is
 // returned for the caller to log+ignore; doc is left unchanged on error.
 func (r *Resolver) ResolveEdges(ctx context.Context, dir string, doc *sbom.SBOM) (int, error) {
 	if doc == nil {
 		return 0, nil
 	}
-	have := make(map[string]bool) // existing golang component PURLs — the resolution-as-filter set
+	have := make(map[string]bool) // existing golang component PURLs – the resolution-as-filter set
 	for _, c := range doc.Components {
 		if strings.HasPrefix(c.PURL, "pkg:golang/") {
 			have[c.PURL] = true
 		}
 	}
 	if len(have) == 0 {
-		return 0, nil // not a Go project (or no resolved go components) — don't run the tool
+		return 0, nil // not a Go project (or no resolved go components) – don't run the tool
 	}
 	out, err := r.run(ctx, dir)
 	if err != nil {
@@ -88,7 +88,7 @@ func (r *Resolver) ResolveEdges(ctx context.Context, dir string, doc *sbom.SBOM)
 }
 
 // containmentEnv is the offline/containment environment applied on BOTH the sandboxed and direct paths:
-// GOPROXY=off (cache-only, never the network) + GOTOOLCHAIN=local (use the running toolchain only — a
+// GOPROXY=off (cache-only, never the network) + GOTOOLCHAIN=local (use the running toolchain only – a
 // hostile go.mod `toolchain` directive can never trigger a fetch+exec). The module dir is bound read-only
 // and `go mod graph` does not write, so the default -mod=readonly is correct (NEVER -mod=mod, which would
 // permit writes against the read-only mount + a network go.sum sync).
@@ -148,7 +148,7 @@ func parseModGraph(data []byte) []modEdge {
 }
 
 // modTokenToPURL converts a `go mod graph` module token (`path@version`) to its golang PURL. A token with
-// no `@` is the MAIN module (the root) — not a dependency component — and maps to "" (skipped). Module
+// no `@` is the MAIN module (the root) – not a dependency component – and maps to "" (skipped). Module
 // paths cannot contain `@`, so the single `@` cleanly splits path from version.
 func modTokenToPURL(token string) string {
 	at := strings.IndexByte(token, '@')

@@ -10,12 +10,12 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// Pipfile is the owned Python-via-Pipenv parser: it reads Pipfile.lock — the resolved
-// dependency set — into pypi components (pkg:pypi/<name>@<version>). Pipfile.lock is JSON with two objects:
+// Pipfile is the owned Python-via-Pipenv parser: it reads Pipfile.lock – the resolved
+// dependency set – into pypi components (pkg:pypi/<name>@<version>). Pipfile.lock is JSON with two objects:
 // "default" (production) and "develop" (development), each {name: {version: "==x.y.z", …}}. The dev split is
 // INLINE in the lock (no companion needed). Pipenv pins exactly, so versions carry an "==" operator we strip;
 // an entry with no concrete version (a VCS/editable ref) is skipped (no resolvable version → no match). Names
-// are PEP 503-normalized (shared with the requirements/poetry parsers). Components only — edges are not
+// are PEP 503-normalized (shared with the requirements/poetry parsers). Components only – edges are not
 // emitted yet. Vendor-neutral (stdlib encoding/json), no third-party Pipenv library.
 type Pipfile struct{}
 

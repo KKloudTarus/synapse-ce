@@ -15,7 +15,7 @@ import (
 // scan can attribute packages to layers and estimate the base image (Epic D).
 //
 // Best-effort: any malformed/missing file returns nil rather than failing the
-// acquisition — layer attribution is an enhancement, not a scan precondition.
+// acquisition – layer attribution is an enhancement, not a scan precondition.
 // It only reads files already on disk under layoutDir (no network, no exec).
 func readImageInfo(layoutDir, ref string) *sbom.ImageInfo {
 	manifest, ok := readManifest(layoutDir)
@@ -52,7 +52,7 @@ func buildLayers(cfg ociConfig) []sbom.ImageLayer {
 			continue // metadata-only history entry: no diff_id to pair
 		}
 		if di >= len(diffIDs) {
-			break // more non-empty history than diff_ids — stop pairing, stay consistent
+			break // more non-empty history than diff_ids – stop pairing, stay consistent
 		}
 		layers = append(layers, sbom.ImageLayer{
 			Index:     di,

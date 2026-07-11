@@ -1,7 +1,7 @@
 // Package binregistry verifies tool-binary integrity before execution (F5). The audit
 // found tools were trusted purely by PATH: a replaced /usr/local/bin/naabu would be run
-// (with whatever the spec grants). The registry pins each tool's sha256 — from operator-
-// supplied expected hashes (authoritative, supply-chain) and/or trust-on-first-use — and
+// (with whatever the spec grants). The registry pins each tool's sha256 – from operator-
+// supplied expected hashes (authoritative, supply-chain) and/or trust-on-first-use – and
 // the SandboxRunner refuses to execute a binary whose hash does not match its pin.
 package binregistry
 
@@ -17,7 +17,7 @@ import (
 	"sync"
 )
 
-// ErrIntegrity means a binary's on-disk hash does not match its pin — execution is refused.
+// ErrIntegrity means a binary's on-disk hash does not match its pin – execution is refused.
 var ErrIntegrity = errors.New("binary integrity check failed")
 
 // Registry pins resolved binary paths to expected sha256 hashes.
@@ -28,7 +28,7 @@ type Registry struct {
 	tofu     bool              // when true, pin-on-first-use and detect any later change
 }
 
-// New builds a registry. expected maps a binary path (or bare name) to its hex sha256 — an
+// New builds a registry. expected maps a binary path (or bare name) to its hex sha256 – an
 // authoritative pin that must match. tofu enables trust-on-first-use for binaries with no
 // expected pin: the first hash seen is recorded and every later run must match it (detects
 // runtime replacement). With tofu=false and no expected pin, a binary is allowed unverified.

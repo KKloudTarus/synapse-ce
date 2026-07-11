@@ -1,7 +1,7 @@
 // Package evidence models tamper-evident, hash-chained records of what an
 // engagement produced (scans, findings, reports). Each item's Hash covers its
 // content AND the previous item's Hash, so any later edit, insertion, or removal
-// breaks the chain — and the report path must refuse to proceed on a mismatch
+// breaks the chain – and the report path must refuse to proceed on a mismatch
 // . This is the domain groundwork; persistence + wiring land
 // with the evidence vault.
 package evidence
@@ -43,7 +43,7 @@ const attestSep = "\x1f"
 // Attestation is a detached signature over a chain head: it proves WHICH key
 // attested to that head (origin / non-repudiation) and, via Context, WHICH chain it
 // covers, on top of the chain's integrity. ed25519 signatures are
-// deterministic (RFC 8032), and only the (context-tagged) head is signed — so
+// deterministic (RFC 8032), and only the (context-tagged) head is signed – so
 // re-signing the same chain yields identical bytes, keeping the report
 // byte-reproducible. Verification needs only the public key, so it is
 // a pure function here; only signing needs the private key (a port).
@@ -69,7 +69,7 @@ func AttestationMessage(context, head string) []byte {
 }
 
 // KeyFingerprint returns a short, stable id for an ed25519 public key (first 16 hex
-// chars of its sha256) — used as the attestation KeyID and to pin a signer.
+// chars of its sha256) – used as the attestation KeyID and to pin a signer.
 func KeyFingerprint(pub ed25519.PublicKey) string {
 	sum := sha256.Sum256(pub)
 	return hex.EncodeToString(sum[:])[:16]
@@ -78,7 +78,7 @@ func KeyFingerprint(pub ed25519.PublicKey) string {
 // VerifyAttestation checks that att is a well-formed ed25519 signature over its
 // context-tagged head by att.PublicKey, and that the embedded KeyID matches that key.
 // It does NOT decide whether the key is trusted, nor whether the Context is the one
-// the caller expected — those are the verifier's policy (pin a known key; assert the
+// the caller expected – those are the verifier's policy (pin a known key; assert the
 // context for your chain). Returns ErrBadAttestation on any failure.
 func VerifyAttestation(att Attestation) error {
 	if att.Algorithm != "ed25519" {
@@ -120,7 +120,7 @@ const evSep = "\x1e"
 
 // ComputeHash returns the chain hash binding an evidence link to its predecessor. It binds
 // not just previous_hash + content but ALSO the attribution + metadata (kind, finding_id,
-// storage_ref, created_by, created_at) — so a rewrite of WHO produced the evidence or WHEN
+// storage_ref, created_by, created_at) – so a rewrite of WHO produced the evidence or WHEN
 // is detected by VerifyChain, not just a content edit. The timestamp is
 // truncated to µs (matching Postgres timestamptz) so the hash is stable across a DB
 // round-trip. Including previous_hash links the chain: any earlier change cascades.

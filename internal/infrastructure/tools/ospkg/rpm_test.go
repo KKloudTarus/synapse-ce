@@ -172,9 +172,9 @@ func TestCatalogHonorsCancellation(t *testing.T) {
 	}
 }
 
-// TestCatalogRPMHostileViewTerminates guards the property behind the ctx watchdog: a crafted Packages VIEW —
+// TestCatalogRPMHostileViewTerminates guards the property behind the ctx watchdog: a crafted Packages VIEW –
 // here a valid seed row followed by an unbounded recursive CTE of oversized rows the server-side LENGTH filter
-// rejects — must never hang the scan. This modernc version happens to terminate the view on its own (it does
+// rejects – must never hang the scan. This modernc version happens to terminate the view on its own (it does
 // not spin inside a single step), so the watchdog is a driver-independent backstop rather than load-bearing
 // here; the test still locks "a hostile Packages view returns within its deadline, never an unbounded hang"
 // (with a 2s ctx: if a future driver spins, the DB-close watchdog aborts it well under the outer guard). The
@@ -209,7 +209,7 @@ func TestCatalogRPMHostileViewTerminates(t *testing.T) {
 	resCh := make(chan error, 1)
 	go func() { _, e := New().Catalog(ctx, rootfs); resCh <- e }()
 	select {
-	case <-resCh: // returned (error or best-effort success) — the scan was not hung
+	case <-resCh: // returned (error or best-effort success) – the scan was not hung
 	case <-time.After(30 * time.Second):
 		t.Fatal("Catalog hung on a hostile Packages view: the ctx deadline did not bound the sqlite read")
 	}

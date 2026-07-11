@@ -10,7 +10,7 @@ import (
 )
 
 // writeBlob writes content to <layout>/blobs/sha256/<sha256(content)> and returns
-// the "sha256:<hex>" digest — mimicking how crane lays out an OCI image.
+// the "sha256:<hex>" digest – mimicking how crane lays out an OCI image.
 func writeBlob(t *testing.T, layout string, content []byte) string {
 	t.Helper()
 	sum := sha256.Sum256(content)

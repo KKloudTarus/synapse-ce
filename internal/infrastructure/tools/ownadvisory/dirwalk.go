@@ -22,7 +22,7 @@ import (
 // before the read (TOCTOU narrowing); the file count is bounded; and an unparseable/oversized/unreadable
 // file is SKIPPED + counted (one bad record must never abort a bulk sync). It returns the count of skipped
 // FILES and a fatal error. ADVISORY-level skipping (e.g. an inert empty-Affected advisory) is the caller's
-// concern, applied inside emit — this walk only counts file-level skips.
+// concern, applied inside emit – this walk only counts file-level skips.
 func walkJSONAdvisories(ctx context.Context, dir string, parse func([]byte) ([]advisory.Advisory, error), emit func(advisory.Advisory) error) (int, error) {
 	return walkAdvisoryFiles(ctx, dir, hasJSONSuffix, maxAdvisoryBytes, parse, emit)
 }
@@ -37,8 +37,8 @@ func hasOVALSuffix(name string) bool {
 
 // walkAdvisoryFiles is the generic hardened core shared by every directory-backed advisory feed. accept
 // selects files by name; maxBytes is the per-file read cap (OSV/CSAF JSON and OVAL XML differ by an order
-// of magnitude, so it is a parameter, not a constant baked into the walk). Everything else — the abort vs
-// skip discipline, the regular-file guard, the TOCTOU-narrowed Lstat, and the file-count cap — is identical
+// of magnitude, so it is a parameter, not a constant baked into the walk). Everything else – the abort vs
+// skip discipline, the regular-file guard, the TOCTOU-narrowed Lstat, and the file-count cap – is identical
 // for every feed, so a hardening fix here can never drift between them.
 func walkAdvisoryFiles(ctx context.Context, dir string, accept func(name string) bool, maxBytes int64, parse func([]byte) ([]advisory.Advisory, error), emit func(advisory.Advisory) error) (int, error) {
 	info, err := os.Stat(dir)
@@ -60,7 +60,7 @@ func walkAdvisoryFiles(ctx context.Context, dir string, accept func(name string)
 			return nil
 		}
 		if !d.Type().IsRegular() {
-			return nil // symlink/device/etc — never follow out of the tree
+			return nil // symlink/device/etc – never follow out of the tree
 		}
 		if !accept(d.Name()) {
 			return nil
@@ -76,7 +76,7 @@ func walkAdvisoryFiles(ctx context.Context, dir string, accept func(name string)
 			return nil
 		}
 		if !fi.Mode().IsRegular() {
-			skipped++ // a non-regular swapped in within the Lstat window — not read (the guard holds); count it for an honest skip total
+			skipped++ // a non-regular swapped in within the Lstat window – not read (the guard holds); count it for an honest skip total
 			return nil
 		}
 		if fi.Size() > maxBytes {

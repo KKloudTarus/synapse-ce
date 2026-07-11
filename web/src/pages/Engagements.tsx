@@ -48,7 +48,7 @@ export function Engagements() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Engagements</h1>
           <p className="mt-1.5 max-w-xl text-sm text-mutedfg">
-            Authorized testing scopes — every scan is gated by an engagement's scope and window, server-side.
+            Authorized testing scopes – every scan is gated by an engagement's scope and window, server-side.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -262,10 +262,10 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Authorized from" hint="Optional — testing is refused before this" htmlFor="auth-from">
+          <Field label="Authorized from" hint="Optional – testing is refused before this" htmlFor="auth-from">
             <Input id="auth-from" type="datetime-local" value={authFrom} onChange={(e) => setAuthFrom(e.target.value)} />
           </Field>
-          <Field label="Authorized to" hint="Optional — testing is refused after this" htmlFor="auth-to">
+          <Field label="Authorized to" hint="Optional – testing is refused after this" htmlFor="auth-to">
             <Input id="auth-to" type="datetime-local" value={authTo} onChange={(e) => setAuthTo(e.target.value)} />
           </Field>
         </div>

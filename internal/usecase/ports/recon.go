@@ -11,7 +11,7 @@ import (
 )
 
 // ToolSpec describes a single argv-based tool execution. The command is always run
-// as an argv array — never a shell string — and Args must already
+// as an argv array – never a shell string – and Args must already
 // be derived from validated, in-scope data by the caller. Timeout and
 // MaxOutputBytes bound the run: the process is killed once Timeout elapses
 // and stdout/stderr are truncated once they reach MaxOutputBytes.
@@ -40,7 +40,7 @@ type ToolSpec struct {
 	// Env are KEY=VALUE pairs for the child environment. A VALUE may contain a
 	// {{secret:NAME}} placeholder: the SandboxRunner resolves it from the credential
 	// vault for EngagementID and injects the plaintext via the child's ENVIRONMENT (never
-	// argv — so it stays out of `ps`/cmdline), immediately before exec, after the redacted
+	// argv – so it stays out of `ps`/cmdline), immediately before exec, after the redacted
 	// spec was audited + sealed. The plain ExecRunner passes Env through verbatim and does
 	// NOT resolve secrets (sandbox-only).
 	Env          []string
@@ -49,10 +49,10 @@ type ToolSpec struct {
 	// EgressPolicy, when set, makes the SandboxRunner run the tool inside a network
 	// namespace whose kernel egress filter is compiled from this policy: the tool
 	// can reach only in-scope destinations. Nil = the run is fully network-isolated
-	// (bubblewrap's fresh netns, no egress) — the E9 default.
+	// (bubblewrap's fresh netns, no egress) – the E9 default.
 	EgressPolicy *EgressPolicy
 	// HostNetwork runs the tool with the HOST network namespace (sandboxed for fs/seccomp/
-	// caps/cgroup, but NOT egress-scoped) — used only for acquisition (git/image) when
+	// caps/cgroup, but NOT egress-scoped) – used only for acquisition (git/image) when
 	// kernel egress scoping is unavailable (F4): it removes the direct-exec surface while
 	// still allowing the network the fetch needs. Ignored when EgressPolicy is set
 	// (egress-scoped wins). Never set for recon (recon fails closed without egress scoping).
@@ -71,7 +71,7 @@ type ToolResult struct {
 	TimedOut  bool // the run exceeded its timeout and was killed
 	Truncated bool // output reached MaxOutputBytes and was cut
 	// ConnectLog is the forensic record of every outbound connect() the tool attempted,
-	// captured by the cgroup eBPF hook — populated only for an egress run on the
+	// captured by the cgroup eBPF hook – populated only for an egress run on the
 	// SandboxRunner; nil otherwise. Includes attempts the kernel egress filter DROPPED.
 	ConnectLog []ConnEvent
 }
@@ -116,7 +116,7 @@ type ReconRunStore interface {
 	Get(ctx context.Context, id shared.ID) (recon.Run, error)
 	ListByEngagement(ctx context.Context, engagementID shared.ID) ([]recon.Run, error)
 	// ListStaleRunning returns runs still in status 'running' that started before olderThan
-	// (bounded by limit) — the input to the stale-run sweeper, which reclaims runs a crashed
+	// (bounded by limit) – the input to the stale-run sweeper, which reclaims runs a crashed
 	// worker stranded `running` without a dead-letter event (no live owner holds their lease).
 	ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]recon.Run, error)
 }

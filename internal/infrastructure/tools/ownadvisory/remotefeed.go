@@ -19,13 +19,13 @@ import (
 // defaultOSVBulkURL is the public OSV bulk-data bucket. (Download/size caps live in limits.go.)
 const defaultOSVBulkURL = "https://osv-vulnerabilities.storage.googleapis.com"
 
-// noRedirect makes a client surface a 3xx as the response instead of following it — a redirect cannot bounce
+// noRedirect makes a client surface a 3xx as the response instead of following it – a redirect cannot bounce
 // the fetch to an internal host (SSRF guard). Applied to the default client and to any injected client that
 // has no redirect policy of its own.
 func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 // ecosystemRE bounds an OSV bucket ecosystem name to a safe single path segment (e.g. "Go", "npm",
-// "crates.io") — no "/", no "..", so it cannot redirect the fetch to an unintended path. A name that fails
+// "crates.io") – no "/", no "..", so it cannot redirect the fetch to an unintended path. A name that fails
 // is a configuration error (fatal), never silently skipped.
 var ecosystemRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.+_-]*$`)
 
@@ -41,14 +41,14 @@ var defaultBulkEcosystems = []string{"Go", "npm", "PyPI", "crates.io", "Maven", 
 var DistroBulkEcosystems = []string{"Debian", "Alpine"}
 
 // RemoteFeed is an AdvisoryFeed that fetches OSV advisories from the OSV bulk-data bucket: per
-// ecosystem it downloads "<base>/<ecosystem>/all.zip" and streams every advisory JSON inside into the store —
+// ecosystem it downloads "<base>/<ecosystem>/all.zip" and streams every advisory JSON inside into the store –
 // the NO-TOUCH population path complementing the offline DirFeed. Safety: the ecosystem is validated to a
 // single safe path segment (no SSRF/path redirect); the download is size-capped to a temp file (no unbounded
 // memory or disk); each zip entry is read with a per-entry decompression cap (zip-bomb guard) and the entry
-// count is bounded; entry names are never used as filesystem paths (no zip-slip — only the content is read).
+// count is bounded; entry names are never used as filesystem paths (no zip-slip – only the content is read).
 // A per-ENTRY parse error is skipped+counted (best-effort, one bad advisory among thousands), while an
 // HTTP/download/zip-open failure for a whole ecosystem is FATAL (a silently-skipped ecosystem would be a
-// large hidden gap — fail loud so the operator re-runs).
+// large hidden gap – fail loud so the operator re-runs).
 type RemoteFeed struct {
 	baseURL    string
 	ecosystems []string
@@ -130,7 +130,7 @@ func (f *RemoteFeed) eachEcosystem(ctx context.Context, eco string, fn func(a ad
 		}
 		adv, ok := readZipEntry(zf)
 		if !ok {
-			skipped++ // unreadable / oversized / unparseable advisory — best-effort, never aborts the sync
+			skipped++ // unreadable / oversized / unparseable advisory – best-effort, never aborts the sync
 			continue
 		}
 		if err := fn(adv); err != nil {
@@ -141,7 +141,7 @@ func (f *RemoteFeed) eachEcosystem(ctx context.Context, eco string, fn func(a ad
 }
 
 // readZipEntry decompresses one entry under the per-entry cap (zip-bomb guard) and parses it. ok=false on any
-// read/oversize/parse failure (the caller skips+counts) — never a panic, never an unbounded read.
+// read/oversize/parse failure (the caller skips+counts) – never a panic, never an unbounded read.
 func readZipEntry(zf *zip.File) (advisory.Advisory, bool) {
 	rc, err := zf.Open()
 	if err != nil {
@@ -162,7 +162,7 @@ func readZipEntry(zf *zip.File) (advisory.Advisory, bool) {
 }
 
 // downloadInto streams url into w under the download size cap and returns the bytes written. A non-2xx
-// status, an over-cap body, or any I/O error is returned. It does not own w — the caller (eachEcosystem)
+// status, an over-cap body, or any I/O error is returned. It does not own w – the caller (eachEcosystem)
 // creates and cleans up the temp file, so there is no cross-function file ownership.
 func (f *RemoteFeed) downloadInto(ctx context.Context, url string, w io.Writer) (int64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

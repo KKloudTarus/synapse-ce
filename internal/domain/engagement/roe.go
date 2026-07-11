@@ -39,7 +39,7 @@ func (b Blackout) Contains(t time.Time) bool {
 type RoE struct {
 	// AllowedToolClasses restricts which tool classes may run. EMPTY means no
 	// restriction (all classes allowed), so engagements created before RoE keep
-	// working — operators opt INTO restriction by listing classes.
+	// working – operators opt INTO restriction by listing classes.
 	AllowedToolClasses []ToolClass `json:"allowed_tool_classes,omitempty"`
 	// Blackouts are time ranges during which no tool may run.
 	Blackouts []Blackout `json:"blackouts,omitempty"`

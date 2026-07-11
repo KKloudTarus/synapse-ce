@@ -40,12 +40,12 @@ func TestHTMLEmbedsImageAsDataURI(t *testing.T) {
 	}
 	s := string(out)
 	// The data URI must be present and NOT replaced by html/template's unsafe-URL
-	// marker (#ZgotmplZ) — i.e. imageDataURI correctly returns a trusted template.URL.
+	// marker (#ZgotmplZ) – i.e. imageDataURI correctly returns a trusted template.URL.
 	if !strings.Contains(s, "<img src=\"data:image/png;base64,") {
 		t.Error("expected an inline data-URI <img>")
 	}
 	if strings.Contains(s, "ZgotmplZ") {
-		t.Error("html/template stripped the data URI as unsafe — imageDataURI must return template.URL")
+		t.Error("html/template stripped the data URI as unsafe – imageDataURI must return template.URL")
 	}
 	if !strings.Contains(s, "<figcaption>login.png") {
 		t.Error("expected the exhibit caption")

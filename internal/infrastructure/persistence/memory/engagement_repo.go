@@ -43,7 +43,7 @@ func (r *EngagementRepository) GetByID(_ context.Context, id shared.ID) (*engage
 }
 
 // GetByIDInTenant loads an engagement scoped to tenantID. A caller tenant of ”
-// matches any row; a non-empty tenant matches only its own — tenant A cannot read tenant B's
+// matches any row; a non-empty tenant matches only its own – tenant A cannot read tenant B's
 // engagement (ErrNotFound).
 func (r *EngagementRepository) GetByIDInTenant(_ context.Context, tenantID, id shared.ID) (*engagement.Engagement, error) {
 	r.mu.RLock()
@@ -53,7 +53,7 @@ func (r *EngagementRepository) GetByIDInTenant(_ context.Context, tenantID, id s
 		return nil, shared.ErrNotFound
 	}
 	if !tenantID.IsZero() && e.TenantID != tenantID {
-		return nil, shared.ErrNotFound // cross-tenant access — do not reveal existence
+		return nil, shared.ErrNotFound // cross-tenant access – do not reveal existence
 	}
 	return e, nil
 }

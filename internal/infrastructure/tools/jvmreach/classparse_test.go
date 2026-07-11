@@ -54,7 +54,7 @@ func TestNormalizeClassName(t *testing.T) {
 		"com/foo/Bar":         "com/foo/Bar",
 		"[Ljava/lang/Object;": "java/lang/Object",
 		"[[Lcom/foo/Bar;":     "com/foo/Bar",
-		"[I":                  "", // primitive array element — not a class
+		"[I":                  "", // primitive array element – not a class
 		"":                    "",
 	}
 	for in, want := range cases {

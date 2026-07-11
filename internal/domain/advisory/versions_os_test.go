@@ -172,7 +172,7 @@ func TestOSFamilySchemeDispatch(t *testing.T) {
 }
 
 // TestAffectedDebianRange: an owned Debian advisory matches a vulnerable version below the fix and
-// clears once patched — the end-to-end Epic B matching path (range ordering via the dpkg comparator).
+// clears once patched – the end-to-end Epic B matching path (range ordering via the dpkg comparator).
 func TestAffectedDebianRange(t *testing.T) {
 	ranges := []Range{{
 		Type:   "ECOSYSTEM",

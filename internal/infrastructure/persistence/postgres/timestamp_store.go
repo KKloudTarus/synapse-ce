@@ -36,7 +36,7 @@ func (s *TimestampStore) Get(ctx context.Context, chain string, eng shared.ID, h
 	return &tok, nil
 }
 
-// LatestHead returns the most-recently-anchored head for a chain (ok=false if none) — the
+// LatestHead returns the most-recently-anchored head for a chain (ok=false if none) – the
 // retained head for out-of-band tail-truncation detection.
 func (s *TimestampStore) LatestHead(ctx context.Context, chain string, eng shared.ID) (string, bool, error) {
 	var head string

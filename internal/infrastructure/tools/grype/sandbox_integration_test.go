@@ -29,7 +29,7 @@ func TestGrypeSandboxedMatchesDirect(t *testing.T) {
 	if _, err := os.Stat(dbDir); err != nil {
 		t.Skipf("grype DB not at %s (run `grype db update`)", dbDir)
 	}
-	// lodash 4.17.4 has known advisories — a stable, offline match.
+	// lodash 4.17.4 has known advisories – a stable, offline match.
 	doc := &sbom.SBOM{Components: []sbom.Component{{Name: "lodash", Version: "4.17.4", PURL: "pkg:npm/lodash@4.17.4"}}}
 	ctx := context.Background()
 
@@ -38,7 +38,7 @@ func TestGrypeSandboxedMatchesDirect(t *testing.T) {
 		t.Fatalf("direct grype: %v", err)
 	}
 	if len(direct) == 0 {
-		t.Fatal("direct grype found 0 vulns for lodash@4.17.4 — DB/setup problem")
+		t.Fatal("direct grype found 0 vulns for lodash@4.17.4 – DB/setup problem")
 	}
 	sb, err := sandbox.NewRunner(2*time.Minute, 16<<20, 512<<20, 256)
 	if err != nil {

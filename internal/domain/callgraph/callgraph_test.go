@@ -127,7 +127,7 @@ func TestDuplicateCallerEdgesMerge(t *testing.T) {
 }
 
 // TestTieBreakEarliestEntrypoint locks the documented tie-break: with two equal-length paths via different
-// entrypoints, the path from the EARLIEST entrypoint (Entrypoints order) wins — deterministic.
+// entrypoints, the path from the EARLIEST entrypoint (Entrypoints order) wins – deterministic.
 func TestTieBreakEarliestEntrypoint(t *testing.T) {
 	g := Graph{
 		Entrypoints: []string{"first", "second"},

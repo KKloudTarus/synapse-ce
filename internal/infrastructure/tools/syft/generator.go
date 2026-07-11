@@ -43,7 +43,7 @@ func New(bin string) *Generator {
 }
 
 // WithRunner runs Syft through a ToolRunner (the SandboxRunner) instead of a bare
-// os/exec — confining the SBOM scan (read-only FS, no network, dropped caps). Syft is
+// os/exec – confining the SBOM scan (read-only FS, no network, dropped caps). Syft is
 // offline, so the isolated sandbox is a clean fit and the SBOM output is
 // unchanged. nil keeps the direct exec.
 func (g *Generator) WithRunner(r ports.ToolRunner) *Generator { g.runner = r; return g }
@@ -67,7 +67,7 @@ func (g *Generator) Generate(ctx context.Context, targetRef string) (*sbom.SBOM,
 }
 
 // run executes Syft (sandboxed when a runner is set, else direct os/exec) and returns the
-// raw CycloneDX bytes. The sandbox does not change argv or output — only how Syft runs.
+// raw CycloneDX bytes. The sandbox does not change argv or output – only how Syft runs.
 func (g *Generator) run(ctx context.Context, targetRef string) ([]byte, error) {
 	args := []string{"scan", sourceScheme(targetRef) + ":" + targetRef, "-o", "cyclonedx-json", "-q"}
 	if g.runner != nil {
@@ -204,7 +204,7 @@ func (c cdxComponent) primaryLocation() (path, layerID string) {
 	}
 	// Prefer the MOST SPECIFIC location for scope classification: a per-directory
 	// manifest (e.g. examples/x/package.json) over a hoisted root lockfile, and the
-	// deepest path among those — so a workspace's scope wins over the shared lock.
+	// deepest path among those – so a workspace's scope wins over the shared lock.
 	bestRank, bestDepth := -1, -1
 	for _, idx := range order {
 		l := byIdx[idx]
@@ -319,7 +319,7 @@ func parseCycloneDX(data []byte) ([]sbom.Component, []sbom.Dependency, string, e
 			deps = append(deps, sbom.Dependency{Ref: ref, DependsOn: on})
 		}
 	}
-	// Syft emits the same package as several components from different evidence sources — some
+	// Syft emits the same package as several components from different evidence sources – some
 	// carrying the resolved license, some none. Collapse them by identity (PURL / name@version) and
 	// union their licenses, so a license-less twin can't surface as a phantom "UNKNOWN" downstream
 	// (license coverage, component audit, Excel export). Dependency edges key on component identity,

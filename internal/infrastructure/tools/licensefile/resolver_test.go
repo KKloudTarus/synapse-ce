@@ -126,7 +126,7 @@ func TestChainRunsResolversInOrder(t *testing.T) {
 	}
 }
 
-// A symlink named LICENSE must NOT be followed — that would read an arbitrary host file
+// A symlink named LICENSE must NOT be followed – that would read an arbitrary host file
 // outside the workspace (and attribute it to a component). Security guard.
 func TestResolveIgnoresSymlinkedLicense(t *testing.T) {
 	dir := t.TempDir()

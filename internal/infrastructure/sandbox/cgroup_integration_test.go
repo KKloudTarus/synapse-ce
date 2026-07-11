@@ -86,6 +86,6 @@ func TestCgroupContainsBombs(t *testing.T) {
 		t.Fatalf("memory bomb NOT contained: reached %dMB under a 64MB cap", high)
 	}
 	if strings.Contains(string(res.Stdout), "alloced=1024MB") {
-		t.Fatal("memory bomb ran to completion — cgroup memory.max not enforced")
+		t.Fatal("memory bomb ran to completion – cgroup memory.max not enforced")
 	}
 }

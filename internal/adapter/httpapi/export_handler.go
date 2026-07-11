@@ -44,7 +44,7 @@ func (rt *Router) exportSPDX(w http.ResponseWriter, r *http.Request) {
 }
 
 // exportCycloneDX renders the engagement's latest scan SBOM as a downloadable CycloneDX 1.6 document
-// (deterministic, from stored data — no LLM in the report path). The SBOM lives with the scan, so it is
+// (deterministic, from stored data – no LLM in the report path). The SBOM lives with the scan, so it is
 // served by the SCA service.
 func (rt *Router) exportCycloneDX(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -127,7 +127,7 @@ func readBounded(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte
 }
 
 // writeExport renders an engagement's findings as a downloadable SARIF / OpenVEX
-// document (templated from stored data — no LLM in the report path).
+// document (templated from stored data – no LLM in the report path).
 func (rt *Router) writeExport(w http.ResponseWriter, r *http.Request, format string) {
 	id := r.PathValue("id")
 	if id == "" {

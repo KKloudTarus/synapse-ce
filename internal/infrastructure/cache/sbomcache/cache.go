@@ -4,7 +4,7 @@
 // same producer reuses the cataloged SBOM, and a producer bump makes every prior entry a miss.
 //
 // The workspace digest is metadata-based (path + size + mtime), which is deliberately CHEAPER than reading
-// and hashing every byte — the whole point is to be faster than the Syft cataloging pass it replaces. That
+// and hashing every byte – the whole point is to be faster than the Syft cataloging pass it replaces. That
 // matches Trivy's filesystem-cache posture: a content edit that preserves BOTH size and mtime (pathological;
 // editors and git checkouts always bump mtime) is the only stale case, and it is bounded by the fact that a
 // producer version bump always invalidates. The cache is opt-in.
@@ -60,7 +60,7 @@ func (c *Cache) Load(ctx context.Context, dir, producerVersion string) (*sbom.SB
 	}
 	data, err := os.ReadFile(filepath.Join(c.root, key+".json"))
 	if err != nil {
-		return nil, false, nil // miss (not found / unreadable) — never fatal
+		return nil, false, nil // miss (not found / unreadable) – never fatal
 	}
 	var env envelope
 	if err := json.Unmarshal(data, &env); err != nil || env.SBOM == nil {
@@ -111,7 +111,7 @@ func (c *Cache) Store(ctx context.Context, dir, producerVersion string, doc *sbo
 }
 
 // key folds the workspace content digest with the producer version. Returns "" (no caching) when the
-// producer version is unknown — never serve an SBOM that can't be soundly version-keyed.
+// producer version is unknown – never serve an SBOM that can't be soundly version-keyed.
 func (c *Cache) key(ctx context.Context, dir, producerVersion string) string {
 	if strings.TrimSpace(producerVersion) == "" {
 		return ""

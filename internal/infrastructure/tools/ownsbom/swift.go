@@ -10,8 +10,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// Swift is the owned Swift Package Manager parser: it reads Package.resolved — the pinned
-// dependency set — into swift components. It handles both the v1 layout (`object.pins[]`, each with a
+// Swift is the owned Swift Package Manager parser: it reads Package.resolved – the pinned
+// dependency set – into swift components. It handles both the v1 layout (`object.pins[]`, each with a
 // `package` name) and the v2/v3 layout (top-level `pins[]`, each with an `identity`); the resolved version
 // is `state.version`. Components only; vendor-neutral (stdlib encoding/json). PURL uses the package identity
 // (the canonical source-location form is a later refinement).
@@ -40,7 +40,7 @@ type swiftPin struct {
 }
 
 // Parse extracts the pinned Swift packages. The package name is the v2/v3 `identity` or, failing that, the
-// v1 `package`; the version is `state.version` (a branch/revision pin with no version is skipped — not
+// v1 `package`; the version is `state.version` (a branch/revision pin with no version is skipped – not
 // version-matchable). Sorted by PURL for determinism; deduped by the shared componentSet.
 func (Swift) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
 	if err := ctx.Err(); err != nil {

@@ -16,7 +16,7 @@ type Principal struct {
 	ID   string
 	Name string
 	Role string
-	// TenantID is the tenant the principal belongs to — it scopes the request's data and stamps
+	// TenantID is the tenant the principal belongs to – it scopes the request's data and stamps
 	// new records. Empty = the single default tenant (single-tenant mode).
 	TenantID string
 }
@@ -34,7 +34,7 @@ func PrincipalFrom(ctx context.Context) string {
 	return PrincipalOperator
 }
 
-// TenantFrom returns the authenticated principal's tenant from ctx — the tenant that scopes the
+// TenantFrom returns the authenticated principal's tenant from ctx – the tenant that scopes the
 // request's data and stamps new records. Empty = the single default tenant (single-tenant mode).
 func TenantFrom(ctx context.Context) string {
 	if p, ok := ctx.Value(principalKey).(Principal); ok {

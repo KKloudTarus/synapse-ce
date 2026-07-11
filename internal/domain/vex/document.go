@@ -60,7 +60,7 @@ func Parse(data []byte) (Document, error) {
 	return doc, nil
 }
 
-// Suppresses reports whether this statement's status asserts "no action needed" (not_affected or fixed) —
+// Suppresses reports whether this statement's status asserts "no action needed" (not_affected or fixed) –
 // the two statuses that remove a finding from the actionable set.
 func (s Statement) Suppresses() bool {
 	switch strings.ToLower(strings.TrimSpace(s.Status)) {
@@ -98,7 +98,7 @@ func splitProduct(id string) (component, version string) {
 
 // componentMatches matches a finding component to a VEX product component: exact, or the product's
 // path-bounded PURL name segment equals it. Matching the bounded name (not a raw substring) avoids
-// over-matching — a product "pkg:npm/foobar" must NOT match a finding component "foo".
+// over-matching – a product "pkg:npm/foobar" must NOT match a finding component "foo".
 func componentMatches(findingComp, productComp string) bool {
 	if findingComp == "" || productComp == "" {
 		return false

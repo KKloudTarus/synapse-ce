@@ -1,11 +1,11 @@
 // Package jvmreach computes COARSE, deterministic class-level reachability for JVM projects: starting from
 // the application's own compiled classes, does anything (transitively) reference a dependency's classes at
-// all? A dependency whose classes are never referenced is "present but not wired in" — the signal behind
+// all? A dependency whose classes are never referenced is "present but not wired in" – the signal behind
 // the field complaint that a scan lists packages the project does not use. This is deliberately COARSE
 // (class references, not a method call graph) and CONSERVATIVE: it only ever DEPRIORITIZES/labels a finding,
 // never suppresses it, and reflection/service-loader/DI edges are invisible to it, so an "unreferenced"
-// verdict means "no STATIC reference found", not "provably dead". It reads compiled bytecode only — never
-// executes it — mirroring the bounded, offline archive reads the license resolvers already do.
+// verdict means "no STATIC reference found", not "provably dead". It reads compiled bytecode only – never
+// executes it – mirroring the bounded, offline archive reads the license resolvers already do.
 package jvmreach
 
 import (
@@ -41,7 +41,7 @@ var errMalformed = errors.New("malformed class file")
 
 // parseClass reads a.class file's constant pool + this_class and returns the class's own internal name
 // (e.g. "com/demo/App") and the internal names of every class it structurally references (superclass,
-// interfaces, and the owner class of every method call / field access / new / cast / catch — all recorded
+// interfaces, and the owner class of every method call / field access / new / cast / catch – all recorded
 // as CONSTANT_Class entries). It parses ONLY up to this_class; it never reads method bodies and never
 // executes anything. Bounds are checked on every read so a hostile/truncated class returns an error
 // instead of panicking. Array class names ("[Lcom/foo/Bar;") are normalized to the element type.
@@ -119,7 +119,7 @@ func normalizeClassName(s string) string {
 	if s[0] == 'L' && strings.HasSuffix(s, ";") {
 		return s[1 : len(s)-1] // array of objects: "Lcom/foo/Bar;" -> "com/foo/Bar"
 	}
-	if len(s) == 1 { // a primitive array element (I,J,Z,…) — not a class
+	if len(s) == 1 { // a primitive array element (I,J,Z,…) – not a class
 		return ""
 	}
 	return s
