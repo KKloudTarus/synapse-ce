@@ -56,11 +56,14 @@ func TestBugsForNoFalsePositive(t *testing.T) {
 	root := t.TempDir()
 	// Clean code: a normal if, a normal return, a real infinite loop. No bugs.
 	writeFile(t, root, "c.js", "function ok(x){\n  if (x > 0) { return 1; }\n  while (true) { if (stop()) return 2; }\n  return 0;\n}\n")
+	// A hoisted function declaration after a return is still callable (NOT dead); a trailing empty
+	// statement after a return is not a dead statement either.
+	writeFile(t, root, "d.js", "function h(x){\n  return x;\n  function helper(){ return 1; }\n}\nfunction i(){\n  return 0;\n  ;\n}\n")
 	res, err := BugsFor(context.Background(), root)
 	if err != nil {
 		t.Fatalf("BugsFor: %v", err)
 	}
 	if len(res.Bugs) != 0 {
-		t.Errorf("clean code must yield no bugs, got %+v", res.Bugs)
+		t.Errorf("clean code (incl. hoisted func + empty stmt after return) must yield no bugs, got %+v", res.Bugs)
 	}
 }

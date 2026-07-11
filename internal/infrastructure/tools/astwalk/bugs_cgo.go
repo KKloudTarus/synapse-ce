@@ -4,8 +4,8 @@
 // use the tree-sitter AST and intra-block statement order, so they catch defects a regex cannot:
 //   - reliability-unreachable-code: a statement following an unconditional terminator (return/throw/
 //     raise/break/continue) in the same block can never execute.
-//   - reliability-constant-condition: an if/while/do whose condition is a boolean literal is always
-//     taken or never taken (a logic bug or leftover debug flag).
+//   - reliability-constant-condition: an `if` whose condition is a boolean literal is always taken or
+//     never taken (a logic bug or leftover debug flag). Loops are excluded on purpose (see bugSpecs).
 //
 // Deterministic (no LLM); emitted as ungated Kind=reliability findings, like the pattern rules.
 package astwalk
@@ -97,12 +97,17 @@ func detectBugs(root *sitter.Node, content []byte, sp bugSpec, rel string) []Bug
 	return bugs
 }
 
-// unreachable flags the first statement that follows an unconditional terminator in a block.
+// notDeadAfterTerminator are named block children that, appearing after a terminator, are NOT genuinely
+// unreachable: comments; a hoisted JS function declaration (still defined and callable); and an empty
+// statement (a bare ";").
+var notDeadAfterTerminator = set("comment", "function_declaration", "empty_statement")
+
+// unreachable flags the first genuinely-dead statement that follows an unconditional terminator in a block.
 func unreachable(block *sitter.Node, sp bugSpec, rel string) (Bug, bool) {
 	terminated := false
 	for i := 0; i < int(block.NamedChildCount()); i++ {
 		c := block.NamedChild(i)
-		if c.Type() == "comment" {
+		if notDeadAfterTerminator[c.Type()] {
 			continue
 		}
 		if terminated {
@@ -120,7 +125,7 @@ func unreachable(block *sitter.Node, sp bugSpec, rel string) (Bug, bool) {
 	return Bug{}, false
 }
 
-// constantCondition flags an if/while/do whose condition is a boolean literal.
+// constantCondition flags an `if` whose condition is a boolean literal (loops are excluded by bugSpecs).
 func constantCondition(node *sitter.Node, content []byte, rel string) (Bug, bool) {
 	cond := node.ChildByFieldName("condition")
 	if cond == nil {
