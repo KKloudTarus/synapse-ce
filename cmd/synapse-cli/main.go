@@ -578,6 +578,10 @@ func runGate(args []string) error {
 			if pct, ok := lc.NewCodePercent(changed); ok {
 				snapCoverage = pct
 				coverageMeasured = true
+			} else {
+				// No changed line matched the report (paths differ, or the diff touched no measurable
+				// line). Note it so an operator is not misled by a silently-absent coverage condition.
+				fmt.Fprintln(os.Stderr, "synapse-cli: note: coverage report matched no changed line (check its paths are repo-relative); coverage condition skipped")
 			}
 		} else {
 			snapCoverage = covRep.Percent()
