@@ -3,6 +3,7 @@ package ownsbom
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,7 +22,9 @@ const conanLockV2Fixture = `{
   "build_requires": [
     "cmake/3.27.0"
   ],
-  "python_requires": []
+  "python_requires": [
+    "config/2.0@company/stable"
+  ]
 }`
 
 // Conan 1.x: a graph_lock whose node ref fields carry the same reference strings.
@@ -35,6 +38,15 @@ const conanLockV1Fixture = `{
   }
 }`
 
+func parseConanTest(t *testing.T, path string, content []byte) ([]sbom.Component, []sbom.Dependency) {
+	t.Helper()
+	comps, deps, err := Conan{}.Parse(context.Background(), ParseInput{Path: path, Content: content})
+	if err != nil {
+		t.Fatalf("parse Conan fixture: %v", err)
+	}
+	return comps, deps
+}
+
 func TestConanParseV2(t *testing.T) {
 	comps, deps, err := Conan{}.Parse(context.Background(), ParseInput{Path: "conan.lock", Content: []byte(conanLockV2Fixture)})
 	if err != nil {
@@ -47,14 +59,20 @@ func TestConanParseV2(t *testing.T) {
 	for _, c := range comps {
 		byName[c.Name] = c
 	}
-	if len(comps) != 3 {
-		t.Fatalf("want 3 components (zlib, openssl, cmake), got %d (%+v)", len(comps), comps)
+	if len(comps) != 4 {
+		t.Fatalf("want 4 components (zlib, openssl, cmake, config), got %d (%+v)", len(comps), comps)
 	}
 	if c := byName["zlib"]; c.PURL != "pkg:conan/zlib@1.2.13" {
 		t.Errorf("zlib PURL wrong (revision must be stripped): %+v", c)
 	}
+	if c := byName["zlib"]; c.Scope != sbom.ScopeProduction {
+		t.Errorf("zlib scope wrong: %+v", c)
+	}
 	if c := byName["openssl"]; c.Version != "3.1.0" {
 		t.Errorf("openssl version wrong (user/channel + revision must be stripped): %+v", c)
+	}
+	if c := byName["config"]; c.Scope != sbom.ScopeDevelopment {
+		t.Errorf("config scope wrong: %+v", c)
 	}
 }
 
@@ -240,7 +258,7 @@ func TestConanParseV1GraphEdgeCases(t *testing.T) {
 			},
 		},
 		{
-			name: "python requires ignored",
+			name: "python requires emitted as components only",
 			fixture: `{
 			  "version": "0.4",
 			  "graph_lock": {
@@ -250,7 +268,7 @@ func TestConanParseV1GraphEdgeCases(t *testing.T) {
 			    }
 			  }
 			}`,
-			wantComps: []string{"pkg:conan/app@1.0", "pkg:conan/lib@3.0"},
+			wantComps: []string{"pkg:conan/app@1.0", "pkg:conan/lib@3.0", "pkg:conan/pyreq@2.0"},
 			wantDeps: []sbom.Dependency{
 				{Ref: "pkg:conan/app@1.0", DependsOn: []string{"pkg:conan/lib@3.0"}},
 			},
@@ -390,21 +408,304 @@ func TestConanRegistryGenerateIncludesGraphEdges(t *testing.T) {
 }
 
 func TestConanParseV1GraphDeterministic(t *testing.T) {
-	firstComps, firstDeps, err := Conan{}.Parse(context.Background(), ParseInput{Path: "conan.lock", Content: []byte(conanLockV1GraphFixture)})
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
+	firstComps, firstDeps := parseConanTest(t, "conan.lock", []byte(conanLockV1GraphFixture))
 
 	for i := 0; i < 20; i++ {
-		comps, deps, err := Conan{}.Parse(context.Background(), ParseInput{Path: "conan.lock", Content: []byte(conanLockV1GraphFixture)})
-		if err != nil {
-			t.Fatalf("parse: %v", err)
-		}
+		comps, deps := parseConanTest(t, "conan.lock", []byte(conanLockV1GraphFixture))
 		if !reflect.DeepEqual(firstComps, comps) {
 			t.Fatalf("components not deterministic at iter %d", i)
 		}
 		if !reflect.DeepEqual(firstDeps, deps) {
 			t.Fatalf("dependencies not deterministic at iter %d", i)
 		}
+	}
+}
+
+func TestConanParseV1PythonRequiresComponents(t *testing.T) {
+	comps, deps := parseConanTest(t, "conan.lock", []byte(`{
+		  "version": "0.4",
+		  "graph_lock": {
+		    "nodes": {
+		      "0": {
+		        "ref": "app/1.0",
+		        "requires": ["1"],
+		        "python_requires": ["build-config/2.0@company/stable"]
+		      },
+		      "1": { "ref": "lib/3.0" }
+		    }
+		  }
+		}`))
+
+	expectedComps := []sbom.Component{
+		{Name: "app", Version: "1.0", PURL: "pkg:conan/app@1.0", Scope: sbom.ScopeProduction, Location: "conan.lock"},
+		{Name: "build-config", Version: "2.0", PURL: "pkg:conan/build-config@2.0", Scope: sbom.ScopeDevelopment, Location: "conan.lock"},
+		{Name: "lib", Version: "3.0", PURL: "pkg:conan/lib@3.0", Scope: sbom.ScopeProduction, Location: "conan.lock"},
+	}
+
+	if len(comps) != len(expectedComps) {
+		t.Fatalf("want %d components, got %d", len(expectedComps), len(comps))
+	}
+
+	for i, c := range comps {
+		e := expectedComps[i]
+		if c.Name != e.Name || c.Version != e.Version || c.PURL != e.PURL || c.Scope != e.Scope || c.Location != e.Location {
+			t.Errorf("comp %d: want %+v, got %+v", i, e, c)
+		}
+	}
+
+	if len(deps) != 1 || deps[0].Ref != "pkg:conan/app@1.0" || len(deps[0].DependsOn) != 1 || deps[0].DependsOn[0] != "pkg:conan/lib@3.0" {
+		t.Errorf("deps wrong, got: %+v", deps)
+	}
+}
+
+func TestConanParseV1PythonRequiresNormalization(t *testing.T) {
+	tests := []struct {
+		name     string
+		ref      string
+		wantPURL string
+	}{
+		{"plain", "config/1.0", "pkg:conan/config@1.0"},
+		{"user channel", "config/1.0@company/stable", "pkg:conan/config@1.0"},
+		{"recipe revision", "config/1.0#rev123", "pkg:conan/config@1.0"},
+		{"user channel and revision", "config/1.0@company/stable#rev123", "pkg:conan/config@1.0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := fmt.Sprintf(`{"version":"0.4","graph_lock":{"nodes":{"0":{"python_requires":["%s"]}}}}`, tt.ref)
+			comps, _ := parseConanTest(t, "conan.lock", []byte(fixture))
+			if len(comps) != 1 {
+				t.Fatalf("want 1 component, got %d", len(comps))
+			}
+			if comps[0].PURL != tt.wantPURL {
+				t.Errorf("want PURL %s, got %s", tt.wantPURL, comps[0].PURL)
+			}
+			if comps[0].Name != "config" || comps[0].Version != "1.0" {
+				t.Errorf("name/version wrong: %s/%s", comps[0].Name, comps[0].Version)
+			}
+			if comps[0].Scope != sbom.ScopeDevelopment {
+				t.Errorf("scope wrong, got %s", comps[0].Scope)
+			}
+		})
+	}
+}
+
+func TestConanParseV1PythonRequiresDuplicate(t *testing.T) {
+	comps, deps := parseConanTest(t, "conan.lock", []byte(`{
+		  "version": "0.4",
+		  "graph_lock": {
+		    "nodes": {
+		      "0": {
+		        "ref": "app/1.0",
+		        "python_requires": ["config/1.0", "config/1.0@company/stable", "config/1.0#rev123"]
+		      },
+		      "1": {
+		        "ref": "lib/2.0",
+		        "python_requires": ["config/1.0"]
+		      }
+		    }
+		  }
+		}`))
+	if len(comps) != 3 {
+		t.Fatalf("want 3 components (app, config, lib), got %d", len(comps))
+	}
+	if comps[1].PURL != "pkg:conan/config@1.0" {
+		t.Errorf("config component missing or wrong order: %+v", comps[1])
+	}
+	if len(deps) != 0 {
+		t.Errorf("expected 0 dependencies from python_requires, got %d", len(deps))
+	}
+}
+
+func TestConanParseV1PythonRequiresMalformed(t *testing.T) {
+	comps, _ := parseConanTest(t, "conan.lock", []byte(`{
+		  "version": "0.4",
+		  "graph_lock": {
+		    "nodes": {
+		      "0": {
+		        "python_requires": ["invalid-reference", "config/", " /1.0", "valid/2.0"]
+		      }
+		    }
+		  }
+		}`))
+	if len(comps) != 1 {
+		t.Fatalf("want 1 component, got %d", len(comps))
+	}
+	if comps[0].PURL != "pkg:conan/valid@2.0" {
+		t.Errorf("want valid/2.0, got %s", comps[0].PURL)
+	}
+}
+
+func TestConanParseV1PythonRequiresRefLessRoot(t *testing.T) {
+	comps, deps := parseConanTest(t, "conan.lock", []byte(`{
+		  "version": "0.4",
+		  "graph_lock": {
+		    "nodes": {
+		      "0": {
+		        "path": "/project/conanfile.py",
+		        "python_requires": ["build-config/2.0"]
+		      },
+		      "1": { "ref": "lib/3.0" }
+		    }
+		  }
+		}`))
+
+	if len(comps) != 2 || comps[0].PURL != "pkg:conan/build-config@2.0" || comps[1].PURL != "pkg:conan/lib@3.0" {
+		t.Errorf("components wrong: %+v", comps)
+	}
+	if len(deps) != 0 {
+		t.Errorf("deps should be empty")
+	}
+}
+
+func TestConanParseV1PythonRequiresScopePrecedence(t *testing.T) {
+	comps, _ := parseConanTest(t, "conan.lock", []byte(`{
+		  "version": "0.4",
+		  "graph_lock": {
+		    "nodes": {
+		      "1": {
+		        "ref": "app/1.0",
+		        "python_requires": ["config/1.0"]
+		      },
+		      "9": {
+		        "ref": "config/1.0"
+		      }
+		    }
+		  }
+		}`))
+	if len(comps) != 2 {
+		t.Fatalf("want 2 comps")
+	}
+	var configComp sbom.Component
+	for _, c := range comps {
+		if c.Name == "config" {
+			configComp = c
+		}
+	}
+	if configComp.Scope != sbom.ScopeProduction {
+		t.Errorf("want config to retain production scope, got %s", configComp.Scope)
+	}
+}
+
+func TestConanParseV1PythonRequiresBackgroundPath(t *testing.T) {
+	comps, _ := parseConanTest(t, "tests/integration/conan.lock", []byte(`{
+		  "version": "0.4",
+		  "graph_lock": {
+		    "nodes": {
+		      "0": { "ref": "app/1.0", "python_requires": ["config/1.0"] }
+		    }
+		  }
+		}`))
+
+	if len(comps) != 2 {
+		t.Fatalf("want 2 components, got %d: %+v", len(comps), comps)
+	}
+
+	want := map[string]bool{
+		"pkg:conan/app@1.0":    true,
+		"pkg:conan/config@1.0": true,
+	}
+
+	for _, c := range comps {
+		if !want[c.PURL] {
+			t.Errorf("unexpected component: %+v", c)
+		}
+		if c.Scope != sbom.ScopeTest {
+			t.Errorf("component %s: want scope %s, got %s", c.PURL, sbom.ScopeTest, c.Scope)
+		}
+	}
+}
+
+func TestConanParseV1PythonRequiresMixedEdgeKinds(t *testing.T) {
+	comps, deps := parseConanTest(t, "conan.lock", []byte(`{
+		  "version": "0.4",
+		  "graph_lock": {
+		    "nodes": {
+		      "0": {
+		        "ref": "app/1.0",
+		        "requires": ["1"],
+		        "build_requires": ["2"],
+		        "python_requires": ["config/3.0"]
+		      },
+		      "1": { "ref": "runtime/1.0" },
+		      "2": { "ref": "cmake/2.0" }
+		    }
+		  }
+		}`))
+	if len(comps) != 4 {
+		t.Fatalf("want 4 components")
+	}
+	if len(deps) != 1 || len(deps[0].DependsOn) != 2 {
+		t.Fatalf("want 1 dep with 2 edges, got %+v", deps)
+	}
+	if deps[0].DependsOn[0] != "pkg:conan/cmake@2.0" || deps[0].DependsOn[1] != "pkg:conan/runtime@1.0" {
+		t.Errorf("DependsOn wrong: %v", deps[0].DependsOn)
+	}
+}
+
+func TestConanParseV1PythonRequiresDoNotInferEdges(t *testing.T) {
+	comps, deps := parseConanTest(t, "conan.lock", []byte(`{
+		  "version": "0.4",
+		  "graph_lock": {
+		    "nodes": {
+		      "0": {
+		        "ref": "app/1.0",
+		        "python_requires": ["direct-config/1.0", "transitive-base/2.0"]
+		      }
+		    }
+		  }
+		}`))
+	if len(comps) != 3 {
+		t.Fatalf("want 3 components")
+	}
+	if len(deps) != 0 {
+		t.Errorf("dependencies should be nil, got: %+v", deps)
+	}
+}
+
+func TestConanParseV1PythonRequiresDeterministic(t *testing.T) {
+	fixture := []byte(`{
+	  "version": "0.4",
+	  "graph_lock": {
+	    "nodes": {
+	      "1": { "ref": "lib-b/1.0", "python_requires": ["config/1.0@user/chan#rev"] },
+	      "0": { "ref": "app/1.0", "requires": ["1"], "python_requires": ["config/1.0"] }
+	    }
+	  }
+	}`)
+	firstComps, firstDeps := parseConanTest(t, "conan.lock", fixture)
+	for i := 0; i < 20; i++ {
+		comps, deps := parseConanTest(t, "conan.lock", fixture)
+		if !reflect.DeepEqual(firstComps, comps) {
+			t.Fatalf("components not deterministic at iter %d", i)
+		}
+		if !reflect.DeepEqual(firstDeps, deps) {
+			t.Fatalf("dependencies not deterministic at iter %d", i)
+		}
+	}
+}
+
+func TestConanRegistryGenerateIncludesPythonRequires(t *testing.T) {
+	dir := t.TempDir()
+	fixture := []byte(`{"version": "0.4", "graph_lock": {"nodes": {"0": {"python_requires": ["config/1.0"]}}}}`)
+	if err := os.WriteFile(filepath.Join(dir, "conan.lock"), fixture, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := DefaultRegistry()
+	if err != nil {
+		t.Fatalf("DefaultRegistry: %v", err)
+	}
+	doc, err := reg.Generate(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if doc.Source != "ownsbom" || doc.GeneratorVersion != ownsbomVersion {
+		t.Errorf("want source ownsbom and generator %s, got %s and %s", ownsbomVersion, doc.Source, doc.GeneratorVersion)
+	}
+	if len(doc.Components) != 1 || doc.Components[0].Name != "config" {
+		t.Errorf("want 1 config component, got %+v", doc.Components)
+	}
+	if len(doc.Dependencies) != 0 {
+		t.Errorf("want 0 dependencies, got %+v", doc.Dependencies)
 	}
 }
