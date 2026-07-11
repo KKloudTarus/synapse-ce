@@ -175,7 +175,8 @@ func runInventory(dir string) error {
 		printInvRow(li)
 	}
 	printInvRow(inv.Totals())
-	fmt.Println("  functions: accurate for Go; other languages land with the multi-language AST phase")
+	fmt.Println("  functions: Go counted in-process; Java/JavaScript/Python via the synapse-ast sidecar")
+	fmt.Println("             (set SYNAPSE_AST_BIN, or have `synapse-ast` on PATH); other languages show n/a")
 	return nil
 }
 
