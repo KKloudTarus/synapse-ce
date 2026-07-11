@@ -12,6 +12,7 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **SCA.** Added deterministic dependency graph relationships for Conan 1.x `graph_lock` files.
 - **SCA.** Added OwnSBOM support for exact Conan dependencies declared in `conanfile.txt`.
 - **SCA (software composition analysis).** First-party SBOM generation across many
   lockfile ecosystems, advisory matching against OSV/GHSA/CSAF, and severity/risk
