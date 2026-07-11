@@ -51,6 +51,7 @@ func (a *Analyzer) Inventory(ctx context.Context, root string) (measure.Inventor
 		return measure.Inventory{}, nil
 	}
 	byLang := map[string]measure.LanguageInventory{}
+	brokenFuncs := map[string]bool{} // a parser-supported language with an unparseable file: count is unreliable
 	files := 0
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -96,15 +97,26 @@ func (a *Analyzer) Inventory(ctx context.Context, root string) (measure.Inventor
 		li.CodeLines += code
 		li.CommentLines += comment
 		li.BlankLines += blank
-		if fn, known := countFunctions(lang, content); known {
-			li.Functions += fn
-			li.FunctionsKnown = true
+		if fn, supported, ok := countFunctions(lang, content); supported {
+			li.FunctionsKnown = true // the language has a first-party parser
+			if ok {
+				li.Functions += fn
+			} else {
+				brokenFuncs[lang] = true // one file did not parse; the aggregate is an undercount
+			}
 		}
 		byLang[lang] = li
 		return nil
 	})
 	if walkErr != nil && walkErr != io.EOF {
 		return measure.Inventory{}, walkErr
+	}
+	// Downgrade any language with an unparseable file to "not counted", so a reported count is never a
+	// silent undercount (the doc promise: an accurate count, or FunctionsKnown=false).
+	for lang := range brokenFuncs {
+		li := byLang[lang]
+		li.FunctionsKnown = false
+		byLang[lang] = li
 	}
 	return measure.NewInventory(byLang), nil
 }
@@ -162,7 +174,8 @@ var syntaxByLang = map[string]commentSyntax{
 // classifyLines counts code, comment and blank lines. A blank line is whitespace-only. A line is a
 // comment when it starts with a line-comment token or lies inside a block comment; a line with trailing
 // code before a comment counts as code (standard cloc-style accounting). Deterministic, no allocation
-// beyond the line split.
+// beyond the line split. Limitation (Phase 0): a block comment opened AFTER code on the same line
+// (`foo() /* ...`) is not tracked, so its continuation lines count as code; the AST phase removes this.
 func classifyLines(lang string, content []byte) (code, comment, blank int) {
 	syn, hasSyntax := syntaxByLang[lang]
 	inBlock := false
@@ -214,22 +227,23 @@ func classifyLines(lang string, content []byte) (code, comment, blank int) {
 	return code, comment, blank
 }
 
-// countFunctions returns an accurate function count for languages with a first-party parser. Go uses
-// go/parser (top-level and method FuncDecls). known=false for every other language until the AST phase,
-// so the inventory reports "not counted" rather than a wrong zero.
-func countFunctions(lang string, content []byte) (n int, known bool) {
+// countFunctions counts functions for a language with a first-party parser. Go uses go/parser
+// (top-level and method FuncDecls). supported=false for every other language until the AST phase (the
+// caller then reports "not counted", never a wrong zero); ok=false when a supported language's file
+// does not parse, so the caller can downgrade that language's whole count to not-known.
+func countFunctions(lang string, content []byte) (n int, supported, ok bool) {
 	if lang != "Go" {
-		return 0, false
+		return 0, false, false
 	}
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "", content, parser.SkipObjectResolution)
 	if err != nil || f == nil {
-		return 0, false // unparseable (e.g. a fragment): do not claim a count
+		return 0, true, false // supported, but this file did not parse (e.g. a fragment)
 	}
 	for _, decl := range f.Decls {
 		if _, ok := decl.(*ast.FuncDecl); ok {
 			n++
 		}
 	}
-	return n, true
+	return n, true, true
 }

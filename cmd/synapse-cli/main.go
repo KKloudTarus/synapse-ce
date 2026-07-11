@@ -98,6 +98,10 @@ func runInventory(dir string) error {
 		return fmt.Errorf("inventory: %w", err)
 	}
 	fmt.Printf("\nSynapse code inventory — %s\n", dir)
+	if len(inv.Languages) == 0 {
+		fmt.Println("  (no source files detected)")
+		return nil
+	}
 	fmt.Printf("  %-16s %8s %10s %10s %8s %10s\n", "language", "files", "code", "comment", "blank", "functions")
 	printInvRow := func(li measure.LanguageInventory) {
 		fn := "n/a"
@@ -108,10 +112,6 @@ func runInventory(dir string) error {
 	}
 	for _, li := range inv.Languages {
 		printInvRow(li)
-	}
-	if len(inv.Languages) == 0 {
-		fmt.Println("  (no source files detected)")
-		return nil
 	}
 	printInvRow(inv.Totals())
 	fmt.Println("  functions: accurate for Go; other languages land with the multi-language AST phase")

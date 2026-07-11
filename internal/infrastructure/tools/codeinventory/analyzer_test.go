@@ -105,6 +105,25 @@ func TestInventoryMixedTree(t *testing.T) {
 	}
 }
 
+func TestInventoryGoParseFailureDowngrades(t *testing.T) {
+	// A parser-supported language (Go) with even one unparseable file must report FunctionsKnown=false
+	// for that language, so a reported count is never a silent undercount.
+	root := t.TempDir()
+	write(t, root, "ok.go", "package a\nfunc F() {}\nfunc G() {}\n")
+	write(t, root, "broken.go", "package a\nfunc H( {\n") // syntactically invalid
+	inv, err := New().Inventory(context.Background(), root)
+	if err != nil {
+		t.Fatalf("inventory: %v", err)
+	}
+	g := byLang(inv)["Go"]
+	if g.Files != 2 {
+		t.Fatalf("want 2 Go files, got %d", g.Files)
+	}
+	if g.FunctionsKnown {
+		t.Errorf("a Go file that fails to parse must downgrade FunctionsKnown to false; got %+v", g)
+	}
+}
+
 func TestInventoryEmptyRoot(t *testing.T) {
 	inv, err := New().Inventory(context.Background(), t.TempDir())
 	if err != nil {
