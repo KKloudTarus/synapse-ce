@@ -95,7 +95,20 @@ func isWord(b byte) bool {
 	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
-// tokenizeLine appends the tokens of a comment-stripped line.
+// opChars are the characters that combine into a single operator token (so `!=`, `<=`, `&&`, `->`, `=>`,
+// `::`, `+=` count as one token, matching a real lexer's granularity rather than one-per-character).
+func isOpChar(b byte) bool {
+	switch b {
+	case '+', '-', '*', '/', '%', '=', '<', '>', '!', '&', '|', '^', '~', '?', ':':
+		return true
+	}
+	return false
+}
+
+// tokenizeLine appends the tokens of a comment-stripped line, at roughly lexer granularity: an
+// identifier/number run, a whole string literal, a run of operator characters, or a single structural
+// punctuation char. A string literal that is not closed on the same line yields one token to end of line
+// (the walk is line-based; multi-line raw strings/templates are a documented edge).
 func tokenizeLine(line string, lineNo int, toks *[]token) {
 	i := 0
 	for i < len(line) {
@@ -103,9 +116,31 @@ func tokenizeLine(line string, lineNo int, toks *[]token) {
 		switch {
 		case c == ' ' || c == '\t' || c == '\r':
 			i++
+		case c == '"' || c == '\'' || c == '`':
+			j := i + 1
+			for j < len(line) {
+				if line[j] == '\\' && j+1 < len(line) { // skip an escaped char (e.g. \" \\)
+					j += 2
+					continue
+				}
+				if line[j] == c {
+					j++
+					break
+				}
+				j++
+			}
+			*toks = append(*toks, token{text: line[i:j], line: lineNo})
+			i = j
 		case isWord(c):
 			j := i + 1
 			for j < len(line) && isWord(line[j]) {
+				j++
+			}
+			*toks = append(*toks, token{text: line[i:j], line: lineNo})
+			i = j
+		case isOpChar(c):
+			j := i + 1
+			for j < len(line) && isOpChar(line[j]) {
 				j++
 			}
 			*toks = append(*toks, token{text: line[i:j], line: lineNo})

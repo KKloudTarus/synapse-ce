@@ -204,6 +204,9 @@ func runMetrics(args []string) error {
 // duplicated-lines density. Pure-Go, read-only; no DB, no sidecar.
 func runDuplication(args []string) error {
 	dir := args[0]
+	if strings.HasPrefix(dir, "-") {
+		return fmt.Errorf("first argument must be a path, got option %q", dir)
+	}
 	minTokens := duplication.DefaultMinTokens
 	failOnPct := -1.0 // <0 = no gate
 	top := 10

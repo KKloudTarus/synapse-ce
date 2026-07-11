@@ -22,8 +22,9 @@ import (
 )
 
 const (
-	// DefaultMinTokens is the smallest duplicated token run reported by default. 100 tokens is the
-	// long-standing industry default (PMD/CPD) and keeps trivial repetition (imports, boilerplate) out.
+	// DefaultMinTokens is the smallest duplicated token run reported by default. Tokens here are at
+	// lexer granularity (an identifier/number, a whole string literal, or an operator run — see the
+	// tokenizer), so 100 matches the long-standing PMD/CPD default and keeps trivial repetition out.
 	DefaultMinTokens = 100
 	maxFileBytes     = 4 << 20
 	maxFiles         = 200_000
@@ -66,7 +67,7 @@ func (d *Detector) Duplication(ctx context.Context, root string) (measure.Duplic
 	if err != nil {
 		return measure.DuplicationReport{}, err
 	}
-	return d.detect(files, truncated), nil
+	return d.detect(ctx, files, truncated)
 }
 
 // collect walks root and tokenizes each regular, non-vendored, non-binary source file.
@@ -133,8 +134,10 @@ func (d *Detector) collect(ctx context.Context, root string) ([]fileTokens, bool
 	return out, truncated, nil
 }
 
-// detect finds maximal duplicated token runs across the collected files.
-func (d *Detector) detect(files []fileTokens, truncated bool) measure.DuplicationReport {
+// detect finds maximal duplicated token runs across the collected files. Greedy: each token is assigned
+// to at most one clone class (via covered[]), so overlapping clone classes that share tokens can be
+// undercounted — false negatives only, never false positives.
+func (d *Detector) detect(ctx context.Context, files []fileTokens, truncated bool) (measure.DuplicationReport, error) {
 	k := d.minTokens
 	rep := measure.DuplicationReport{Truncated: truncated}
 	for _, f := range files {
@@ -186,6 +189,9 @@ func (d *Detector) detect(files []fileTokens, truncated bool) measure.Duplicatio
 	// Process seeds in file/token order for determinism; the leftmost start of a clone is seen first, so
 	// right-extension captures it maximally and covered[] suppresses its interior windows.
 	for fi := range files {
+		if ctx.Err() != nil {
+			return measure.DuplicationReport{}, ctx.Err()
+		}
 		toks := files[fi].toks
 		for start := 0; start+k <= len(toks); start++ {
 			if covered[fi][start] {
@@ -269,7 +275,7 @@ func (d *Detector) detect(files []fileTokens, truncated bool) measure.Duplicatio
 		}
 	}
 	rep.Files = filesWith
-	return rep
+	return rep, nil
 }
 
 // equalRun reports whether a[ai:ai+n] and b[bi:bi+n] have identical token text.
