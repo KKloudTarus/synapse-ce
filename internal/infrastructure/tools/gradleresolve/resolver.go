@@ -1,13 +1,22 @@
-// Package gradleresolve resolves a Gradle project's full dependency tree (direct + transitive, with
-// the resolved versions) by shelling out to `gradle dependencies` via argv and parsing the
-// dependency tree into SBOM components. A static build.gradle parse cannot do this: versions are often
-// supplied by a platform/BOM or version catalog (so the declaration carries no version) and the
-// transitive tree – where most CVEs live – is not listed. This adapter fills that gap as a best-effort,
-// opt-in, post-SBOM step. Gradle uses Maven coordinates, so the components are pkg:maven PURLs.
+// Package gradleresolve resolves a Gradle project's full dependency tree (direct + transitive, with the
+// resolved versions) by shelling out (argv only) to a pinned `gradle` with a Synapse init script that
+// walks the resolution-result GRAPH of the `runtimeClasspath` of EVERY project in the build (root + all
+// subprojects) and prints each resolved Maven module. A static build.gradle parse cannot do this: versions
+// are often supplied by a platform/BOM or version catalog (so the declaration carries no version) and the
+// transitive tree – where most CVEs live – is not listed; and Gradle's built-in per-project `dependencies`
+// task reports only the invoked project, so a multi-project `include` build (aggregator root + java
+// subprojects) would be badly under-reported. This adapter fills that gap as a best-effort, opt-in,
+// post-SBOM step. Gradle uses Maven coordinates, so the components are pkg:maven PURLs.
+//
+// The graph is read from METADATA ONLY (no artifact/JAR download): a module is reported even when its jar
+// can't be fetched, and — critically for a security scan — a dependency that could NOT be resolved (e.g.
+// one that lives only on an unreachable private mirror) is emitted as an explicit unresolved marker rather
+// than silently dropped, so an incomplete tree surfaces to the caller as INCOMPLETE (a source_warning)
+// instead of reading as a clean scan (false-negative).
 //
 // SECURITY: this is HIGHER-risk than the Maven resolver. Evaluating `settings.gradle` + `build.gradle`
-// RUNS ARBITRARY Groovy/Kotlin build logic at configuration time (the `dependencies` task still
-// configures the project) – untrusted code execution by design. Mitigations: it invokes a PINNED
+// RUNS ARBITRARY Groovy/Kotlin build logic at configuration time (resolving a configuration configures the
+// project) – untrusted code execution by design. Mitigations: it invokes a PINNED
 // `gradle` binary, NEVER the project's own `./gradlew` wrapper (which would download+run an
 // attacker-chosen Gradle distribution); `--no-daemon` so nothing persists; in production it MUST run
 // through a ToolRunner (the sandbox) that confines the filesystem and restricts egress to the
@@ -21,13 +30,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
@@ -41,8 +49,8 @@ const maxBuildRoots = 200 // bound the sub-project discovery walk (a monorepo of
 // private-mirror hosts are added via WithRepoHosts.
 var defaultRepoHosts = []string{"repo1.maven.org", "repo.maven.apache.org", "plugins.gradle.org", "services.gradle.org"}
 
-// Resolver runs `gradle dependencies` to resolve a Gradle project's full dependency tree. bin is the
-// pinned gradle executable (path/name) – NOT the project's./gradlew.
+// Resolver runs a pinned gradle with a Synapse init script to resolve a Gradle project's full dependency
+// tree. bin is the pinned gradle executable (path/name) – NOT the project's ./gradlew.
 type Resolver struct {
 	bin        string
 	runner     ports.ToolRunner
@@ -104,6 +112,16 @@ func (r *Resolver) Resolve(ctx context.Context, dir string) ([]sbom.Component, e
 	if len(roots) == 0 {
 		return nil, nil // no Gradle build anywhere under dir
 	}
+	// Materialize the all-projects resolver init script once; every build root reuses it.
+	initDir, err := os.MkdirTemp("", "synapse-gradleinit-")
+	if err != nil {
+		return nil, fmt.Errorf("gradle resolve: init script: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(initDir) }()
+	initPath := filepath.Join(initDir, "synapse-resolve.init.gradle")
+	if err := os.WriteFile(initPath, []byte(initScript), 0o600); err != nil {
+		return nil, fmt.Errorf("gradle resolve: write init script: %w", err)
+	}
 	seen := map[string]bool{}
 	var all []sbom.Component
 	var firstErr error
@@ -111,26 +129,36 @@ func (r *Resolver) Resolve(ctx context.Context, dir string) ([]sbom.Component, e
 		if ctx.Err() != nil {
 			break
 		}
-		out, err := r.run(ctx, root)
+		out, err := r.run(ctx, root, initPath)
 		if err != nil {
-			if errors.Is(err, errNoRuntimeClasspath) {
-				continue // aggregator / non-Java build root (no runtimeClasspath) – expected, not a failure
-			}
+			// The build root could not be configured/run at all (missing/broken gradle, bad JAVA_HOME, a
+			// build-script config error). An aggregator / non-Java root simply emits nothing and exits 0,
+			// so this is a genuine failure worth surfacing.
 			if firstErr == nil {
 				firstErr = fmt.Errorf("%s: %w", relOrBase(dir, root), err)
 			}
 			continue
 		}
-		for _, c := range parseGradleDeps(out) {
+		comps, unresolved := parseGradleDeps(out)
+		for _, c := range comps {
 			if !seen[c.PURL] {
 				seen[c.PURL] = true
 				all = append(all, c)
 			}
 		}
+		// A build root can resolve+exit-0 yet leave individual modules unresolved (metadata unreachable —
+		// e.g. a dependency that lives only on an unreachable private mirror). Lenient resolution keeps the
+		// modules that DID resolve, but the gap MUST surface: an incomplete tree reported as clean is a
+		// false-negative for a security scan. Turn it into the resolve error so the caller degrades
+		// completeness (the SCA service emits a "result INCOMPLETE" source_warning).
+		if len(unresolved) > 0 && firstErr == nil {
+			firstErr = fmt.Errorf("%s: %d dependency(ies) NOT resolved (e.g. %q — repository unreachable or artifact missing)",
+				relOrBase(dir, root), len(unresolved), unresolved[0])
+		}
 	}
 	if firstErr != nil {
 		// Return the error WITH any components that resolved (partial keeps the good builds).
-		return all, fmt.Errorf("gradle dependencies: %w", firstErr)
+		return all, fmt.Errorf("gradle resolve: %w", firstErr)
 	}
 	return all, nil
 }
@@ -142,18 +170,6 @@ func relOrBase(dir, root string) string {
 		return rel
 	}
 	return filepath.Base(root)
-}
-
-// errNoRuntimeClasspath signals that a build root has no runtimeClasspath configuration — an aggregator /
-// non-Java root (common as the top of a composite build). Resolve treats it as an expected skip, not a
-// resolution failure. run() returns it after classifying the RAW (un-truncated) gradle stderr.
-var errNoRuntimeClasspath = errors.New("gradle: build root has no runtimeClasspath configuration")
-
-// noRuntimeClasspath detects Gradle's "configuration 'runtimeClasspath' not found …" failure in raw
-// stderr. Matched on the un-truncated output (before run() clips it) and on two stable tokens, so a long
-// FAILURE/`* Where:` preamble can't push the marker out of view.
-func noRuntimeClasspath(stderr string) bool {
-	return strings.Contains(stderr, "runtimeClasspath") && strings.Contains(stderr, "not found")
 }
 
 // settingsFiles mark an INDEPENDENT Gradle build (its own root project): a standard multi-project build
@@ -183,9 +199,10 @@ func hasBuildScript(dir string) bool {
 // buildRoots finds the Gradle build roots under dir. Each directory with a SETTINGS file is an
 // independent build and becomes a root, and the walk keeps descending past it so that composite/included
 // builds (`includeBuild ...`) — e.g. a monorepo whose root settings.gradle pulls each service in as its
-// own build — are all discovered and resolved individually. (Running `gradle -p <root> dependencies` only
-// reports the ROOT project, so an aggregator root with no runtimeClasspath contributes nothing on its own;
-// the included builds are where the real dependency trees live.) When there is NO settings file anywhere,
+// own build — are all discovered and resolved individually. (The init script's `allprojects` walk covers a
+// build's root + subprojects, but NOT its separately-included composite builds; an aggregator root with no
+// runtimeClasspath contributes nothing on its own, and the included builds are where the real dependency
+// trees live — hence each is resolved as its own root.) When there is NO settings file anywhere,
 // a bare build.gradle at dir is the single build root (the common single-module fast path). Gradle
 // output/VCS/tooling/source dirs are skipped; bounded to maxBuildRoots.
 func buildRoots(dir string) []string {
@@ -234,19 +251,89 @@ func buildRoots(dir string) []string {
 	return roots
 }
 
-// args is the gradle invocation: the read-only `dependencies` task for the deployed runtimeClasspath
-// (compile + runtime; excludes test), plain console (no ANSI), no daemon (nothing persists). `-p` sets
-// the project dir; `-Dmaven.repo.local` has no gradle analogue – the cache is GRADLE_USER_HOME (env).
-func (r *Resolver) args(dir string) []string {
-	return []string{"--no-daemon", "--console=plain", "-q", "-p", dir, "dependencies", "--configuration", "runtimeClasspath"}
+// initScript walks the resolution-result GRAPH of the runtimeClasspath of EVERY project in the build (root
+// + all subprojects, so a standard multi-project `include` build is fully covered — Gradle's built-in
+// per-project `dependencies` task would report only the invoked project) and prints each resolved Maven
+// module as a `SYNAPSE_DEP group:module:version` line, plus a `SYNAPSE_RESOLVE_ERROR <notation>` line for
+// each dependency it could NOT resolve. pom-only `platform`/`enforced-platform` (BOM) nodes are skipped
+// (they carry no artifact and no advisory of their own) so the SBOM lists real libraries, matching syft.
+//
+// The resolutionResult is read from METADATA only (it does NOT download artifacts): this both avoids a
+// download-amplification vector from a hostile build and, unlike a lenient artifact view, still reports a
+// graph module whose jar is unreachable — and it records an unresolvable dependency as an
+// UnresolvedDependencyResult node instead of aborting, so we can emit it as an explicit gap marker rather
+// than silently under-reporting. The per-project resolve is wrapped in try/catch so one bad project (or a
+// hard resolve failure) can't abort the others; a caught throwable is itself surfaced as a resolve error.
+// It fires in projectsEvaluated so the configurations exist. Composite/included builds are covered because
+// Resolve runs this per build root.
+const initScript = `gradle.projectsEvaluated {
+    rootProject.allprojects { p ->
+        def cfg = p.configurations.findByName('runtimeClasspath')
+        if (cfg != null && cfg.canBeResolved) {
+            try {
+                def rr = cfg.incoming.resolutionResult
+                rr.allComponents { c ->
+                    def cid = c.id
+                    if (cid instanceof org.gradle.api.artifacts.component.ModuleComponentIdentifier) {
+                        def isPlatform = c.variants.any { v ->
+                            v.attributes.keySet().any { k ->
+                                k.name == 'org.gradle.category' &&
+                                ((v.attributes.getAttribute(k) as String) in ['platform', 'enforced-platform'])
+                            }
+                        }
+                        if (!isPlatform) {
+                            println "SYNAPSE_DEP ${cid.group}:${cid.module}:${cid.version}"
+                        }
+                    }
+                }
+                rr.allDependencies { d ->
+                    if (d instanceof org.gradle.api.artifacts.result.UnresolvedDependencyResult) {
+                        println "SYNAPSE_RESOLVE_ERROR ${d.requested.displayName}"
+                    }
+                }
+            } catch (Throwable t) {
+                println "SYNAPSE_RESOLVE_ERROR ${p.path} (${t.getClass().simpleName})"
+            }
+        }
+    }
+}
+`
+
+// defaultHTTPTimeoutMS bounds how long gradle waits on a repository connection/read. Kept short so an
+// UNREACHABLE private mirror (a very common first entry in enterprise repo lists) fails fast and the scan
+// does not hang for minutes; override via SYNAPSE_GRADLE_HTTP_TIMEOUT_MS.
+const defaultHTTPTimeoutMS = 15000
+
+func httpTimeoutMS() string {
+	if v := strings.TrimSpace(os.Getenv("SYNAPSE_GRADLE_HTTP_TIMEOUT_MS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return v
+		}
+	}
+	return strconv.Itoa(defaultHTTPTimeoutMS)
+}
+
+// args is the gradle invocation: run the trivial `help` task with our init script attached (which resolves
+// every project's runtimeClasspath at configuration time and prints SYNAPSE_DEP lines), plain console (no
+// ANSI), no daemon (nothing persists). Short HTTP timeouts make an unreachable repo fail fast rather than
+// hang. `-p` sets the build root; the cache is GRADLE_USER_HOME (env).
+func (r *Resolver) args(dir, initPath string) []string {
+	to := httpTimeoutMS()
+	return []string{
+		"--no-daemon", "--console=plain", "-q",
+		"--init-script", initPath,
+		"-Dorg.gradle.internal.http.connectionTimeout=" + to,
+		"-Dorg.gradle.internal.http.socketTimeout=" + to,
+		"-p", dir, "help",
+	}
 }
 
 func (r *Resolver) allowedHosts() []string {
 	return append(append([]string{}, defaultRepoHosts...), r.repoHosts...)
 }
 
-func (r *Resolver) run(ctx context.Context, dir string) ([]byte, error) {
-	args := r.args(dir)
+func (r *Resolver) run(ctx context.Context, dir, initPath string) ([]byte, error) {
+	args := r.args(dir, initPath)
 	var env []string
 	if r.gradleHome != "" {
 		env = []string{"GRADLE_USER_HOME=" + r.gradleHome}
@@ -255,8 +342,8 @@ func (r *Resolver) run(ctx context.Context, dir string) ([]byte, error) {
 		res, err := r.runner.Run(ctx, ports.ToolSpec{
 			Name:          r.bin,
 			Args:          args,
-			ReadOnlyPaths: []string{dir},
-			Workdir:       r.gradleHome, // persistent cache (when set) is the one writable bind
+			ReadOnlyPaths: []string{dir, filepath.Dir(initPath)}, // bind the init script (read-only) for gradle
+			Workdir:       r.gradleHome,                          // persistent cache (when set) is the one writable bind
 			Env:           env,
 			EgressPolicy:  &ports.EgressPolicy{AllowDomains: r.allowedHosts()},
 		})
@@ -264,9 +351,6 @@ func (r *Resolver) run(ctx context.Context, dir string) ([]byte, error) {
 			return nil, fmt.Errorf("sandboxed: %w: %s", err, truncate(string(res.Stderr), 300))
 		}
 		if res.ExitCode != 0 {
-			if noRuntimeClasspath(string(res.Stderr)) {
-				return nil, errNoRuntimeClasspath
-			}
 			return nil, fmt.Errorf("exit %d: %s", res.ExitCode, truncate(string(res.Stderr), 300))
 		}
 		return res.Stdout, nil
@@ -285,84 +369,60 @@ func (r *Resolver) run(ctx context.Context, dir string) ([]byte, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		if noRuntimeClasspath(stderr.String()) {
-			return nil, errNoRuntimeClasspath
-		}
 		return nil, fmt.Errorf("%w: %s", err, truncate(stderr.String(), 300))
 	}
 	return stdout.Bytes(), nil
 }
 
-// gradleCoordRE matches a Gradle dependency-tree coordinate once the tree-drawing prefix is stripped:
-// "group:artifact[:requestedVersion]" optionally followed by "-> resolvedVersion". The RESOLVED version
-// (after "->", Gradle's conflict-resolution winner) wins; else the declared version. Trailing
-// annotations like "(*)", "(c)", "(n)" are stripped before matching.
-var gradleCoordRE = regexp.MustCompile(`^([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+)(?::([^\s(]+))?(?:\s*->\s*([A-Za-z0-9_.+-]+))?$`)
-
-// parseGradleDeps parses `gradle dependencies` tree output into pkg:maven components. The testable core
-// (no exec): strip the tree prefix + trailing annotation per line, take the resolved version (post-`->`)
-// or the declared one, drop entries with no resolvable version (BOM imports, `project:x` modules,
-// `(n)` unresolved), and dedup by PURL.
-func parseGradleDeps(data []byte) []sbom.Component {
-	var out []sbom.Component
+// parseGradleDeps parses the init script's stdout into pkg:maven components and the list of unresolved
+// dependency notations. The testable core (no exec): one `SYNAPSE_DEP group:module:version` line per
+// resolved Maven module (from the resolution-result graph; the init script already filters pom-only
+// platform/BOM nodes) becomes a deduped-by-PURL component, and malformed / version-less coords are dropped.
+// Each `SYNAPSE_RESOLVE_ERROR <notation>` line (a dependency gradle could not resolve) is collected so
+// Resolve can surface an incomplete tree instead of a false-clean.
+//
+// SECURITY: both markers are ordinary stdout, so a hostile project build script — which runs arbitrary
+// Groovy at configuration time (under the sandbox in production) — could `println` a forged SYNAPSE_DEP /
+// SYNAPSE_RESOLVE_ERROR line. Impact is bounded to ADDING spurious components / warnings; it cannot
+// suppress the real coordinates our init script prints, and a target can already misdeclare its own
+// dependencies. This is inherent to parsing gradle stdout (gradle exposes no target-inaccessible output
+// channel here) and was equally true of the prior tree parser — accepted as defense-in-depth, not a gap.
+func parseGradleDeps(data []byte) (comps []sbom.Component, unresolved []string) {
 	seen := map[string]bool{}
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
 	for sc.Scan() {
-		// Strip leading tree-drawing chars ("+--- ", "\--- ", "| ") – coords start with an alnum group.
-		line := strings.TrimLeft(sc.Text(), " |+\\-")
-		line, skip := gradleLine(strings.TrimSpace(line))
-		if skip {
-			continue
+		line := strings.TrimSpace(sc.Text())
+		switch {
+		case strings.HasPrefix(line, "SYNAPSE_DEP "):
+			coord := strings.TrimSpace(strings.TrimPrefix(line, "SYNAPSE_DEP "))
+			parts := strings.Split(coord, ":") // group:module:version (the init script emits exactly 3 parts)
+			if len(parts) != 3 {
+				continue
+			}
+			group, artifact, version := parts[0], parts[1], parts[2]
+			if group == "" || artifact == "" || !sbom.IsResolvedVersion(version) {
+				continue
+			}
+			purl := "pkg:maven/" + group + "/" + artifact + "@" + version
+			if seen[purl] {
+				continue
+			}
+			seen[purl] = true
+			comps = append(comps, sbom.Component{
+				Name:    group + ":" + artifact, // matches the other Maven adapters + the owned-advisory key
+				Version: version,
+				PURL:    purl,
+				// Production is correct because the init script resolves only `runtimeClasspath` (excludes test).
+				Scope: sbom.ScopeProduction,
+			})
+		case strings.HasPrefix(line, "SYNAPSE_RESOLVE_ERROR "):
+			if n := strings.TrimSpace(strings.TrimPrefix(line, "SYNAPSE_RESOLVE_ERROR ")); n != "" {
+				unresolved = append(unresolved, n)
+			}
 		}
-		m := gradleCoordRE.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		group, artifact, declared, resolved := m[1], m[2], m[3], m[4]
-		version := resolved
-		if version == "" {
-			version = declared
-		}
-		if !sbom.IsResolvedVersion(version) { // no version, a range, or a {strictly …} form we won't guess
-			continue
-		}
-		purl := "pkg:maven/" + group + "/" + artifact + "@" + version
-		if seen[purl] {
-			continue
-		}
-		seen[purl] = true
-		out = append(out, sbom.Component{
-			Name:    group + ":" + artifact, // matches the other Maven adapters + the owned-advisory key
-			Version: version,
-			PURL:    purl,
-			// Production is correct because args() resolves only `runtimeClasspath` (excludes test); if
-			// that configuration is ever broadened, revisit this so test deps aren't mislabeled.
-			Scope: sbom.ScopeProduction,
-		})
 	}
-	return out
-}
-
-// gradleLine handles a Gradle dependency-tree node's trailing marker and reports whether to SKIP it:
-// " (c)" – a dependency CONSTRAINT (constraints{}/platform()/BOM import), NOT necessarily an artifact
-// on the resolved classpath; a BOM is a pom, not a running jar, so emitting it would be a phantom
-// component + false-positive CVEs. SKIP – a constraint that IS resolved reappears on a normal line.
-// " (n)" – not resolved. SKIP.
-// " (*)" – subtree shown earlier; the coordinate/version here is the real resolved one. Strip + keep.
-// " (e)" – strip + keep (defensive; treat like a plain coordinate).
-//
-// Returns the cleaned coordinate text and skip=true when the line must be dropped.
-func gradleLine(line string) (string, bool) {
-	switch {
-	case strings.HasSuffix(line, " (c)"), strings.HasSuffix(line, " (n)"):
-		return "", true
-	case strings.HasSuffix(line, " (*)"):
-		return strings.TrimSpace(line[:len(line)-len(" (*)")]), false
-	case strings.HasSuffix(line, " (e)"):
-		return strings.TrimSpace(line[:len(line)-len(" (e)")]), false
-	}
-	return line, false
+	return comps, unresolved
 }
 
 // scrubSynapseEnv drops SYNAPSE_* entries from an environment list. The resolver needs none of them,

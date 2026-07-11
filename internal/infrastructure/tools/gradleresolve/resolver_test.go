@@ -12,24 +12,22 @@ import (
 )
 
 func TestParseGradleDeps(t *testing.T) {
-	// Authentic `gradle dependencies --configuration runtimeClasspath` tree output: tree-drawing
-	// prefixes, the "g:a:declared -> resolved" conflict form, "g:a -> resolved" (no declared), a plain
-	// "g:a:ver", "(*)" seen-elsewhere + "(c)" constraint + "(n)" not-resolved markers, a `project:x`
-	// local module, and a BOM/platform line with no version.
+	// The init script emits one `SYNAPSE_DEP group:module:version` line per resolved Maven module (across
+	// ALL projects). Gradle also prints help/banner text that must be ignored. Duplicate coords dedup; a
+	// 2-part coord, an empty group, and an empty/absent version are dropped.
 	out := []byte(`
-runtimeClasspath - Runtime classpath of source set 'main'.
-+--- org.springframework.boot:spring-boot-starter-web:2.7.5
-|    +--- org.springframework.boot:spring-boot-starter:2.7.5
-|    |    \--- org.springframework:spring-core:5.3.23
-|    +--- org.springframework.boot:spring-boot-starter-json:2.7.5 (*)
-|    \--- com.fasterxml.jackson.core:jackson-databind:2.13.4 -> 2.13.4.2
-+--- org.yaml:snakeyaml:1.30
-+--- org.apache.logging.log4j:log4j-api -> 2.17.2
-+--- com.example:internal-bom:1.0.0 (c)
-+--- project :shared-lib
-\--- some.broken:thing (n)
+> Task :help
+Welcome to Gradle 9.6.0.
+SYNAPSE_DEP org.springframework.boot:spring-boot-starter-web:3.2.5
+SYNAPSE_DEP org.springframework:spring-core:6.1.6
+SYNAPSE_DEP com.fasterxml.jackson.core:jackson-databind:2.17.0
+SYNAPSE_DEP org.springframework.boot:spring-boot-starter-web:3.2.5
+SYNAPSE_DEP badcoord-no-colons
+SYNAPSE_DEP :missing-group:1.0
+SYNAPSE_DEP org.example:lib:
+random gradle output org.foo:bar:1.0
 `)
-	comps := parseGradleDeps(out)
+	comps, _ := parseGradleDeps(out)
 
 	got := map[string]string{} // name -> version
 	for _, c := range comps {
@@ -39,13 +37,9 @@ runtimeClasspath - Runtime classpath of source set 'main'.
 		}
 	}
 	want := map[string]string{
-		"org.springframework.boot:spring-boot-starter-web":  "2.7.5",
-		"org.springframework.boot:spring-boot-starter":      "2.7.5",
-		"org.springframework:spring-core":                   "5.3.23",
-		"org.springframework.boot:spring-boot-starter-json": "2.7.5",
-		"com.fasterxml.jackson.core:jackson-databind":       "2.13.4.2", // resolved (post ->) wins over declared
-		"org.yaml:snakeyaml":                                "1.30",
-		"org.apache.logging.log4j:log4j-api":                "2.17.2", // "g:a -> resolved", no declared version
+		"org.springframework.boot:spring-boot-starter-web": "3.2.5",
+		"org.springframework:spring-core":                  "6.1.6",
+		"com.fasterxml.jackson.core:jackson-databind":      "2.17.0",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d components, want %d: %+v", len(got), len(want), got)
@@ -55,27 +49,52 @@ runtimeClasspath - Runtime classpath of source set 'main'.
 			t.Errorf("%s = %q, want %q", name, got[name], ver)
 		}
 	}
-	// `(c)` constraint (BOM/platform – not a runtime artifact), `project:shared-lib` (local module),
-	// and the `(n)` unresolved entry must ALL be dropped (no phantom components / BOM false positives).
+	// Malformed coords and non-SYNAPSE_DEP (help/banner) lines must never become components.
 	for name := range got {
-		if strings.Contains(name, "internal-bom") || strings.Contains(name, "shared-lib") || strings.Contains(name, "broken") {
-			t.Errorf("constraint/non-external/unresolved entry leaked: %q", name)
+		if strings.Contains(name, "foo") || strings.Contains(name, "missing-group") || strings.Contains(name, "badcoord") {
+			t.Errorf("malformed / non-marker entry leaked: %q", name)
 		}
 	}
 }
 
 func TestParseGradleDepsEmpty(t *testing.T) {
-	if c := parseGradleDeps([]byte("runtimeClasspath\nNo dependencies\n")); len(c) != 0 {
+	if c, _ := parseGradleDeps([]byte("> Task :help\nWelcome to Gradle.\nNo dependencies\n")); len(c) != 0 {
 		t.Errorf("want 0 components, got %+v", c)
 	}
 }
 
+// The init script emits a `SYNAPSE_RESOLVE_ERROR <notation>` line for every dependency it could not
+// resolve (metadata unreachable). parseGradleDeps must collect these alongside the resolved components so
+// the caller can surface an incomplete tree — an empty notation is ignored.
+func TestParseGradleDepsCollectsUnresolved(t *testing.T) {
+	out := []byte("SYNAPSE_DEP org.example:lib:1.0\n" +
+		"SYNAPSE_RESOLVE_ERROR com.finx:secret-sdk:2.3.4\n" +
+		"SYNAPSE_RESOLVE_ERROR :payments (ResolveException)\n" +
+		"SYNAPSE_RESOLVE_ERROR \n")
+	comps, unresolved := parseGradleDeps(out)
+	if len(comps) != 1 || comps[0].Name != "org.example:lib" {
+		t.Fatalf("want the one resolved module, got %+v", comps)
+	}
+	if len(unresolved) != 2 {
+		t.Fatalf("want 2 unresolved notations (empty one dropped), got %+v", unresolved)
+	}
+}
+
 func TestGradleArgsAndHosts(t *testing.T) {
-	a := New("gradle").args("/proj")
-	for _, want := range []string{"dependencies", "runtimeClasspath", "--no-daemon", "-p"} {
+	a := New("gradle").args("/proj", "/tmp/x.init.gradle")
+	for _, want := range []string{"--init-script", "/tmp/x.init.gradle", "help", "--no-daemon", "-p", "/proj"} {
 		if !contains(a, want) {
 			t.Errorf("args missing %q: %v", want, a)
 		}
+	}
+	hasTimeout := false
+	for _, x := range a {
+		if strings.Contains(x, "org.gradle.internal.http.connectionTimeout=") {
+			hasTimeout = true
+		}
+	}
+	if !hasTimeout {
+		t.Errorf("args missing a short HTTP connection timeout (fail-fast on unreachable repo): %v", a)
 	}
 	hosts := New("gradle").WithRepoHosts([]string{"nexus.corp.local", ""}).allowedHosts()
 	if !contains(hosts, "repo1.maven.org") || !contains(hosts, "plugins.gradle.org") || !contains(hosts, "nexus.corp.local") {
@@ -178,9 +197,9 @@ func TestResolvePartialFailureKeepsResolvedPlusError(t *testing.T) {
 	dir := t.TempDir()
 	mkfile(t, filepath.Join(dir, "svcA"), "build.gradle")
 	mkfile(t, filepath.Join(dir, "svcB"), "build.gradle")
-	tree := "+--- org.apache.commons:commons-lang3:3.10\n"
+	deps := "SYNAPSE_DEP org.apache.commons:commons-lang3:3.10\n" // init-script output form
 	r := New("gradle").WithRunner(fakeRunner{byArgSubstr: map[string]ports.ToolResult{
-		filepath.Join(dir, "svcA"): {Stdout: []byte(tree)},                // svcA resolves (matched by -p <root>)
+		filepath.Join(dir, "svcA"): {Stdout: []byte(deps)},                // svcA resolves (matched by -p <root>)
 		filepath.Join(dir, "svcB"): {ExitCode: 1, Stderr: []byte("boom")}, // svcB fails
 	}})
 	comps, err := r.Resolve(context.Background(), dir)
@@ -189,5 +208,25 @@ func TestResolvePartialFailureKeepsResolvedPlusError(t *testing.T) {
 	}
 	if len(comps) != 1 || comps[0].Name != "org.apache.commons:commons-lang3" {
 		t.Fatalf("partial failure must still return the resolved build's components, got %+v", comps)
+	}
+}
+
+// A build root that resolves SOME modules and exits 0 but reports an UNRESOLVED dependency (its metadata
+// only lives on an unreachable private mirror) must still surface a non-nil error — otherwise an
+// incomplete tree reads as a clean scan (a false-negative for a security scan). The resolved modules are
+// still returned so their CVEs are checked.
+func TestResolveUnresolvedModuleSurfacesIncomplete(t *testing.T) {
+	dir := t.TempDir()
+	mkfile(t, dir, "build.gradle")
+	out := "SYNAPSE_DEP org.example:lib:1.0\nSYNAPSE_RESOLVE_ERROR com.finx:secret-sdk:2.3.4\n"
+	r := New("gradle").WithRunner(fakeRunner{byArgSubstr: map[string]ports.ToolResult{
+		dir: {Stdout: []byte(out)}, // exit 0, yet a module could not be resolved
+	}})
+	comps, err := r.Resolve(context.Background(), dir)
+	if err == nil {
+		t.Fatal("an exit-0 run that left a module unresolved must surface a non-nil error (no false-clean)")
+	}
+	if len(comps) != 1 || comps[0].Name != "org.example:lib" {
+		t.Fatalf("must keep the module that DID resolve, got %+v", comps)
 	}
 }
