@@ -37,6 +37,7 @@ func scanTerraform(rel string, data []byte) []ports.MisconfigRawFinding {
 	}
 	var stack []*frame
 	depth := 0
+	sawEnabledVersioning := false
 
 	for i, raw := range lines {
 		line := stripHCLComment(raw)
@@ -60,7 +61,29 @@ func scanTerraform(rel string, data []byte) []ports.MisconfigRawFinding {
 			f := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
 			out = append(out, tfBlockRules(rel, f.typ, f.start, f.body.String())...) // block-level missing-setting rules
+			if f.typ == "aws_s3_bucket_versioning" && strings.Contains(f.body.String(), `"Enabled"`) {
+				sawEnabledVersioning = true
+			}
 		}
+	}
+	// Provider v4+ manages versioning in a separate aws_s3_bucket_versioning resource, so an aws_s3_bucket
+	// block legitimately omits an inline versioning block. When the file has an Enabled versioning resource,
+	// drop the bucket-origin "no versioning" finding to avoid a false positive on the modern split style.
+	if sawEnabledVersioning {
+		out = filterOutBucketVersioning(out)
+	}
+	return out
+}
+
+// filterOutBucketVersioning removes terraform-s3-no-versioning findings that originate from an
+// aws_s3_bucket block (as opposed to an aws_s3_bucket_versioning resource).
+func filterOutBucketVersioning(in []ports.MisconfigRawFinding) []ports.MisconfigRawFinding {
+	out := in[:0]
+	for _, f := range in {
+		if f.RuleID == "terraform-s3-no-versioning" && f.Resource == "Terraform aws_s3_bucket" {
+			continue
+		}
+		out = append(out, f)
 	}
 	return out
 }

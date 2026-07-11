@@ -107,6 +107,31 @@ resource "aws_ecr_repository" "r" {
 	}
 }
 
+func TestTerraformS3VersioningSplitStyle(t *testing.T) {
+	// Provider v4+ style: the bucket omits an inline versioning block and versioning is set on a
+	// separate aws_s3_bucket_versioning resource. An Enabled split resource must suppress the
+	// bucket-origin "no versioning" false positive.
+	tf := `resource "aws_s3_bucket" "b" {
+  bucket = "my-bucket"
+  acl    = "private"
+  logging {
+    target_bucket = "logs"
+  }
+}
+
+resource "aws_s3_bucket_versioning" "v" {
+  bucket = aws_s3_bucket.b.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+`
+	got := ruleIDs(scan(t, map[string]string{"main.tf": tf}))
+	if _, ok := got["terraform-s3-no-versioning"]; ok {
+		t.Errorf("split-style Enabled versioning must not flag terraform-s3-no-versioning, got %v", keys(got))
+	}
+}
+
 func TestHelmRenderedIfAvailable(t *testing.T) {
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm not installed; Helm rendering is best-effort and skipped")
