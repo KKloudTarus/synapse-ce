@@ -3,10 +3,10 @@
 // walks the resolution-result GRAPH of the `runtimeClasspath` of EVERY project in the build (root + all
 // subprojects) and prints each resolved Maven module. A static build.gradle parse cannot do this: versions
 // are often supplied by a platform/BOM or version catalog (so the declaration carries no version) and the
-// transitive tree – where most CVEs live – is not listed; and the per-project `dependencies` task reports
-// only the root project, so a multi-project `include` build (aggregator root + java subprojects) was badly
-// under-reported. This adapter fills that gap as a best-effort, opt-in, post-SBOM step. Gradle uses Maven
-// coordinates, so the components are pkg:maven PURLs.
+// transitive tree – where most CVEs live – is not listed; and Gradle's built-in per-project `dependencies`
+// task reports only the invoked project, so a multi-project `include` build (aggregator root + java
+// subprojects) would be badly under-reported. This adapter fills that gap as a best-effort, opt-in,
+// post-SBOM step. Gradle uses Maven coordinates, so the components are pkg:maven PURLs.
 //
 // The graph is read from METADATA ONLY (no artifact/JAR download): a module is reported even when its jar
 // can't be fetched, and — critically for a security scan — a dependency that could NOT be resolved (e.g.
@@ -199,9 +199,10 @@ func hasBuildScript(dir string) bool {
 // buildRoots finds the Gradle build roots under dir. Each directory with a SETTINGS file is an
 // independent build and becomes a root, and the walk keeps descending past it so that composite/included
 // builds (`includeBuild ...`) — e.g. a monorepo whose root settings.gradle pulls each service in as its
-// own build — are all discovered and resolved individually. (Running `gradle -p <root> dependencies` only
-// reports the ROOT project, so an aggregator root with no runtimeClasspath contributes nothing on its own;
-// the included builds are where the real dependency trees live.) When there is NO settings file anywhere,
+// own build — are all discovered and resolved individually. (The init script's `allprojects` walk covers a
+// build's root + subprojects, but NOT its separately-included composite builds; an aggregator root with no
+// runtimeClasspath contributes nothing on its own, and the included builds are where the real dependency
+// trees live — hence each is resolved as its own root.) When there is NO settings file anywhere,
 // a bare build.gradle at dir is the single build root (the common single-module fast path). Gradle
 // output/VCS/tooling/source dirs are skipped; bounded to maxBuildRoots.
 func buildRoots(dir string) []string {
@@ -251,10 +252,11 @@ func buildRoots(dir string) []string {
 }
 
 // initScript walks the resolution-result GRAPH of the runtimeClasspath of EVERY project in the build (root
-// + all subprojects, so a standard multi-project `include` build is fully covered — the per-project
-// `dependencies` task only reported the root) and prints each resolved Maven module as a
-// `SYNAPSE_DEP group:module:version` line, plus a `SYNAPSE_RESOLVE_ERROR <notation>` line for each
-// dependency it could NOT resolve.
+// + all subprojects, so a standard multi-project `include` build is fully covered — Gradle's built-in
+// per-project `dependencies` task would report only the invoked project) and prints each resolved Maven
+// module as a `SYNAPSE_DEP group:module:version` line, plus a `SYNAPSE_RESOLVE_ERROR <notation>` line for
+// each dependency it could NOT resolve. pom-only `platform`/`enforced-platform` (BOM) nodes are skipped
+// (they carry no artifact and no advisory of their own) so the SBOM lists real libraries, matching syft.
 //
 // The resolutionResult is read from METADATA only (it does NOT download artifacts): this both avoids a
 // download-amplification vector from a hostile build and, unlike a lenient artifact view, still reports a
@@ -273,7 +275,15 @@ const initScript = `gradle.projectsEvaluated {
                 rr.allComponents { c ->
                     def cid = c.id
                     if (cid instanceof org.gradle.api.artifacts.component.ModuleComponentIdentifier) {
-                        println "SYNAPSE_DEP ${cid.group}:${cid.module}:${cid.version}"
+                        def isPlatform = c.variants.any { v ->
+                            v.attributes.keySet().any { k ->
+                                k.name == 'org.gradle.category' &&
+                                ((v.attributes.getAttribute(k) as String) in ['platform', 'enforced-platform'])
+                            }
+                        }
+                        if (!isPlatform) {
+                            println "SYNAPSE_DEP ${cid.group}:${cid.module}:${cid.version}"
+                        }
                     }
                 }
                 rr.allDependencies { d ->
@@ -366,9 +376,10 @@ func (r *Resolver) run(ctx context.Context, dir, initPath string) ([]byte, error
 
 // parseGradleDeps parses the init script's stdout into pkg:maven components and the list of unresolved
 // dependency notations. The testable core (no exec): one `SYNAPSE_DEP group:module:version` line per
-// resolved Maven module (from the resolution-result graph) becomes a deduped-by-PURL component; malformed /
-// BOM / version-less coords are dropped. Each `SYNAPSE_RESOLVE_ERROR <notation>` line (a dependency gradle
-// could not resolve) is collected so Resolve can surface an incomplete tree instead of a false-clean.
+// resolved Maven module (from the resolution-result graph; the init script already filters pom-only
+// platform/BOM nodes) becomes a deduped-by-PURL component, and malformed / version-less coords are dropped.
+// Each `SYNAPSE_RESOLVE_ERROR <notation>` line (a dependency gradle could not resolve) is collected so
+// Resolve can surface an incomplete tree instead of a false-clean.
 //
 // SECURITY: both markers are ordinary stdout, so a hostile project build script — which runs arbitrary
 // Groovy at configuration time (under the sandbox in production) — could `println` a forged SYNAPSE_DEP /
