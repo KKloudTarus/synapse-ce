@@ -20,11 +20,20 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 3 || os.Args[1] != "functions" {
-		fmt.Fprintln(os.Stderr, "usage: synapse-ast functions <dir>")
+	if len(os.Args) != 3 || (os.Args[1] != "functions" && os.Args[1] != "metrics") {
+		fmt.Fprintln(os.Stderr, "usage: synapse-ast functions|metrics <dir>")
 		os.Exit(2)
 	}
-	res, err := astwalk.FunctionsFor(context.Background(), os.Args[2])
+	var (
+		out any
+		err error
+	)
+	switch os.Args[1] {
+	case "functions":
+		out, err = astwalk.FunctionsFor(context.Background(), os.Args[2])
+	case "metrics":
+		out, err = astwalk.MetricsFor(context.Background(), os.Args[2])
+	}
 	if errors.Is(err, astwalk.ErrUnavailable) {
 		fmt.Fprintln(os.Stderr, "synapse-ast:", err)
 		os.Exit(3)
@@ -33,7 +42,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "synapse-ast:", err)
 		os.Exit(1)
 	}
-	if err := json.NewEncoder(os.Stdout).Encode(res); err != nil {
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-ast: encode:", err)
 		os.Exit(1)
 	}

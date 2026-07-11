@@ -27,3 +27,17 @@ func TestProviderEmptyRoot(t *testing.T) {
 		t.Errorf("empty root: want (unavailable, no error), got available=%v err=%v", available, err)
 	}
 }
+
+func TestComplexityUnavailableWhenBinaryMissing(t *testing.T) {
+	p := New("/nonexistent/synapse-ast-does-not-exist")
+	report, available, err := p.Complexity(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("missing binary must not error, got %v", err)
+	}
+	if available {
+		t.Errorf("missing binary must report available=false")
+	}
+	if len(report.Functions) != 0 {
+		t.Errorf("missing binary must return an empty report, got %+v", report)
+	}
+}

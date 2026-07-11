@@ -15,6 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -42,7 +43,10 @@ func New(bin string) *Provider {
 // read-only. Unlike synapse-callgraph, cgo is NOT disabled: the tree-sitter backend requires it.
 func (p *Provider) WithRunner(r ports.ToolRunner) *Provider { p.runner = r; return p }
 
-var _ ports.ASTProvider = (*Provider)(nil)
+var (
+	_ ports.ASTProvider         = (*Provider)(nil)
+	_ ports.CodeMetricsProvider = (*Provider)(nil)
+)
 
 // FunctionCounts runs `synapse-ast functions <root>` and returns per-language function counts. A sidecar
 // built without the tree-sitter backend exits exitUnavailable, which maps to (nil, false, nil) so the
@@ -51,7 +55,7 @@ func (p *Provider) FunctionCounts(ctx context.Context, root string) (map[string]
 	if strings.TrimSpace(root) == "" {
 		return nil, false, nil
 	}
-	out, exit, err := p.run(ctx, root)
+	out, exit, err := p.run(ctx, "functions", root)
 	if exit == exitUnavailable {
 		return nil, false, nil
 	}
@@ -67,10 +71,34 @@ func (p *Provider) FunctionCounts(ctx context.Context, root string) (map[string]
 	return res.Functions, true, nil
 }
 
+// Complexity runs `synapse-ast metrics <root>` and returns per-function cyclomatic + cognitive complexity.
+// A sidecar built without the tree-sitter backend (or an absent binary) maps to available=false so the
+// caller degrades rather than erroring.
+func (p *Provider) Complexity(ctx context.Context, root string) (measure.ComplexityReport, bool, error) {
+	if strings.TrimSpace(root) == "" {
+		return measure.ComplexityReport{}, false, nil
+	}
+	out, exit, err := p.run(ctx, "metrics", root)
+	if exit == exitUnavailable {
+		return measure.ComplexityReport{}, false, nil
+	}
+	if err != nil {
+		return measure.ComplexityReport{}, false, err
+	}
+	var wire struct {
+		Functions []measure.FunctionComplexity `json:"functions"`
+		Truncated bool                         `json:"truncated"`
+	}
+	if err := json.Unmarshal(out, &wire); err != nil {
+		return measure.ComplexityReport{}, false, fmt.Errorf("parse synapse-ast metrics: %w", err)
+	}
+	return measure.ComplexityReport{Functions: wire.Functions, Truncated: wire.Truncated}, true, nil
+}
+
 // run executes the sidecar (sandboxed when a runner is set, else direct os/exec) and returns stdout, the
 // process exit code, and any error. argv only (no shell).
-func (p *Provider) run(ctx context.Context, root string) ([]byte, int, error) {
-	args := []string{"functions", root}
+func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, error) {
+	args := []string{cmd, root}
 	if p.runner != nil {
 		res, err := p.runner.Run(ctx, ports.ToolSpec{
 			Name:          p.bin,
@@ -88,9 +116,9 @@ func (p *Provider) run(ctx context.Context, root string) ([]byte, int, error) {
 		return res.Stdout, res.ExitCode, nil
 	}
 	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, p.bin, args...)
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	ec := exec.CommandContext(ctx, p.bin, args...)
+	ec.Stderr = &stderr
+	out, err := ec.Output()
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {

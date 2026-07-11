@@ -86,6 +86,14 @@ func main() {
 			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 			os.Exit(1)
 		}
+	case "metrics":
+		if len(os.Args) < 3 {
+			usage()
+		}
+		if err := runMetrics(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
+			os.Exit(1)
+		}
 	default:
 		usage()
 	}
@@ -123,6 +131,66 @@ func runInventory(dir string) error {
 	return nil
 }
 
+// runMetrics prints per-function complexity (cyclomatic + cognitive) hotspots for a local source tree and
+// optionally gates on cyclomatic complexity. Backed by the synapse-ast sidecar; if it is absent or built
+// without the tree-sitter backend, this reports that and (for the gate) does not fail.
+func runMetrics(args []string) error {
+	dir := args[0]
+	failOn := 0 // 0 = no gate
+	top := 10
+	for i := 1; i < len(args); i++ {
+		switch {
+		case args[i] == "--fail-on-complexity" && i+1 < len(args):
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n < 1 {
+				return fmt.Errorf("--fail-on-complexity wants a positive integer, got %q", args[i+1])
+			}
+			failOn = n
+			i++
+		case args[i] == "--top" && i+1 < len(args):
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n < 0 {
+				return fmt.Errorf("--top wants a non-negative integer, got %q", args[i+1])
+			}
+			top = n
+			i++
+		default:
+			return fmt.Errorf("unknown or incomplete option %q", args[i])
+		}
+	}
+
+	astBin := os.Getenv("SYNAPSE_AST_BIN")
+	report, available, err := ast.New(astBin).Complexity(context.Background(), dir)
+	if err != nil {
+		return fmt.Errorf("metrics: %w", err)
+	}
+	fmt.Printf("\nSynapse code complexity — %s\n", dir)
+	if !available {
+		fmt.Println("  the synapse-ast sidecar is unavailable (build it with cgo, or set SYNAPSE_AST_BIN); no complexity computed")
+		return nil
+	}
+	if len(report.Functions) == 0 {
+		fmt.Println("  (no functions detected in supported languages)")
+		return nil
+	}
+	if report.Truncated {
+		fmt.Println("  ! result truncated at the file cap; counts are a lower bound")
+	}
+	fmt.Printf("  functions: %d · highest cyclomatic: %d\n", len(report.Functions), report.MaxCyclomatic())
+	fmt.Printf("  top %d by cyclomatic complexity:\n", top)
+	fmt.Printf("    %-4s %-4s  %-10s %s\n", "cyc", "cog", "language", "function (file:line)")
+	for _, f := range report.TopByCyclomatic(top) {
+		fmt.Printf("    %-4d %-4d  %-10s %s (%s:%d)\n", f.Cyclomatic, f.Cognitive, f.Language, f.Name, f.File, f.Line)
+	}
+	if failOn > 0 {
+		over := report.OverCyclomatic(failOn)
+		if len(over) > 0 {
+			return fmt.Errorf("%d function(s) exceed cyclomatic complexity %d (highest %d)", len(over), failOn, report.MaxCyclomatic())
+		}
+	}
+	return nil
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
@@ -130,6 +198,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  skip the live OSV.dev source; detect with Grype's offline DB only (air-gapped / fast)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli inventory <path>             # per-language code-size inventory (files, code/comment/blank lines, functions) — no DB")
+	fmt.Fprintln(os.Stderr, "  synapse-cli metrics <path> [--fail-on-complexity N] [--top N]  # per-function cyclomatic+cognitive complexity (needs the synapse-ast sidecar)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories <dir>        # ingest a local OSV dump into the owned advisory store (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote     # fetch + ingest app ecosystems from the OSV bulk bucket (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-distros # fetch + ingest OS-package advisories (Debian/Alpine) from OSV (large; requires SYNAPSE_DB_DSN)")
