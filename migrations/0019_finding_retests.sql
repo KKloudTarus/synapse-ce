@@ -1,7 +1,7 @@
 -- +goose Up
 -- E6 retest tracking (FR-B6): an append-only history of re-tests on a finding (who
 -- re-tested, the outcome, a note). The outcome also moves the finding's status
--- (handled in the use case). No tenant FK — single-tenant for now (matches audit_log).
+-- (handled in the use case). No tenant FK – single-tenant for now (matches audit_log).
 CREATE TABLE finding_retests (
     id            TEXT PRIMARY KEY,
     tenant_id     TEXT NOT NULL DEFAULT '',

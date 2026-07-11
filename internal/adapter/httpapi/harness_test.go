@@ -20,7 +20,7 @@ import (
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 )
 
-// fakeJudgments is a no-op judgmentService for the harness — every judgment assertion below is a
+// fakeJudgments is a no-op judgmentService for the harness – every judgment assertion below is a
 // DENY (403/404) rejected by authz/withEngTenant before any method runs, except the readonly LIST
 // allow which returns an empty set.
 type fakeJudgments struct{}
@@ -39,7 +39,7 @@ func (fakeRuntimeVerifier) Apply(context.Context, shared.ID, dastverifieruc.Resu
 	return judgment.Judgment{}, nil
 }
 
-// fakeThreatModel is a no-op threatModelService for the harness — every threat-model assertion below is a
+// fakeThreatModel is a no-op threatModelService for the harness – every threat-model assertion below is a
 // DENY (403/404) rejected by authz/withEngTenant before either method runs.
 type fakeDASTWorkflow struct{}
 
@@ -62,7 +62,7 @@ func (fakeThreatModel) Get(context.Context, shared.ID) (threatmodel.Model, bool,
 	return threatmodel.Model{}, false, nil
 }
 
-// fakeWriteupDrafts is a no-op writeupDraftService for the harness — every sign-off assertion below is a
+// fakeWriteupDrafts is a no-op writeupDraftService for the harness – every sign-off assertion below is a
 // DENY (403/404) rejected by authz/withEngTenant before any method runs, except the readonly LIST allow.
 type fakeWriteupDrafts struct{}
 
@@ -88,13 +88,13 @@ func (fakeWriteupDrafts) Reject(context.Context, string, shared.ID, shared.ID) (
 // fail-closed on a missing principal.
 //
 // A future route registered WITHOUT the right authz/withEngTenant wrapper, or with the wrong
-// permission, fails here — that is the regression this harness exists to catch. The auth + AUP
+// permission, fails here – that is the regression this harness exists to catch. The auth + AUP
 // middleware are intentionally bypassed (driven via routes(), not Handler()) to isolate the
 // authorization layer; they are validated by their own tests.
 //
 // Allow (200) cases are asserted only on routes whose downstream service is wired here (the
 // engagement + users services); deny cases (403/404) are rejected by authz/withEngTenant before any
-// handler runs, so they need no downstream service. This is deliberate — the security-critical
+// handler runs, so they need no downstream service. This is deliberate – the security-critical
 // assertions are the denials.
 func TestHostileHarness(t *testing.T) {
 	engRepo := memory.NewEngagementRepository()
@@ -114,7 +114,7 @@ func TestHostileHarness(t *testing.T) {
 	}
 	// Register the two CONDITIONAL sign-off routes so the harness guards their gates too: the
 	// PermReview /verify route (needs a non-nil exploitation verifier) and the agent routes incl.
-	// PermReview approval-decide (needs a non-nil agent — nil deps are fine because every assertion
+	// PermReview approval-decide (needs a non-nil agent – nil deps are fine because every assertion
 	// below on these routes is a DENY that authz/withEngTenant reject before any handler runs).
 	rt.SetExploitation(&fakeVerifier{})
 	rt.SetJudgments(&fakeJudgments{}) // register the judgment sign-off routes so the harness guards their SoD gates
@@ -145,7 +145,7 @@ func TestHostileHarness(t *testing.T) {
 		// Fail-closed: no principal → 403 at the authz chokepoint (the 401-producing auth middleware
 		// is bypassed here on purpose to isolate the authorization layer).
 		{"no principal is denied", "", "", false, http.MethodGet, "/api/v1/engagements", http.StatusForbidden},
-		// A machine role is granted NOTHING — not even view (separation of duties).
+		// A machine role is granted NOTHING – not even view (separation of duties).
 		{"machine role denied even view", "agent", "tenantA", true, http.MethodGet, "/api/v1/engagements", http.StatusForbidden},
 		// RBAC allow (view): every human role reads.
 		{"readonly may list", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements", http.StatusOK},
@@ -163,13 +163,13 @@ func TestHostileHarness(t *testing.T) {
 		// Admin: administer yes.
 		{"admin may manage users", "admin", "tenantA", true, http.MethodGet, "/api/v1/users", http.StatusOK},
 		// Tenant isolation: tenant B cannot READ tenant A's engagement row (service-scoped), nor
-		// reach its child resource (withEngTenant chokepoint) — both 404, never 200, never a
+		// reach its child resource (withEngTenant chokepoint) – both 404, never 200, never a
 		// 403 that would reveal the engagement exists.
 		{"cross-tenant engagement read → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA", http.StatusNotFound},
 		{"cross-tenant child resource → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/findings", http.StatusNotFound},
 		// Same-tenant read still works (isolation does not over-block).
 		{"same-tenant engagement read → 200", "consultant", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA", http.StatusOK},
-		// Sign-off routes (PermReview) — the crown-jewel separation-of-duties gates. A machine role
+		// Sign-off routes (PermReview) – the crown-jewel separation-of-duties gates. A machine role
 		// can never verify a finding nor decide an agent approval; a consultant lacks review; a
 		// reviewer in another tenant is tenant-blocked (404) before the sign-off runs.
 		{"machine may not verify (review/SoD)", "agent", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/findings/f1/verify", http.StatusForbidden},
@@ -180,7 +180,7 @@ func TestHostileHarness(t *testing.T) {
 		{"cross-tenant decide → 404", "reviewer", "tenantB", true, http.MethodPost, "/api/v1/engagements/engA/agent/approvals/a1/decide", http.StatusNotFound},
 		{"readonly may not start agent (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/agent/sessions", http.StatusForbidden},
 		// Judgment sign-off (PermReview SoD): a machine role can NEVER verify/accept an AI
-		// judgment (the runtime twin of the AST tripwire) — no agent self-confirm; a consultant lacks
+		// judgment (the runtime twin of the AST tripwire) – no agent self-confirm; a consultant lacks
 		// review; cross-tenant is 404 before the sign-off; readonly may read.
 		{"machine may not verify judgment (review/SoD)", "agent", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/judgments/j1/verify", http.StatusForbidden},
 		{"consultant may not verify judgment (review)", "consultant", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/judgments/j1/verify", http.StatusForbidden},

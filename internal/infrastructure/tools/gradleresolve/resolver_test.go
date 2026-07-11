@@ -55,7 +55,7 @@ runtimeClasspath - Runtime classpath of source set 'main'.
 			t.Errorf("%s = %q, want %q", name, got[name], ver)
 		}
 	}
-	// `(c)` constraint (BOM/platform — not a runtime artifact), `project:shared-lib` (local module),
+	// `(c)` constraint (BOM/platform – not a runtime artifact), `project:shared-lib` (local module),
 	// and the `(n)` unresolved entry must ALL be dropped (no phantom components / BOM false positives).
 	for name := range got {
 		if strings.Contains(name, "internal-bom") || strings.Contains(name, "shared-lib") || strings.Contains(name, "broken") {
@@ -122,14 +122,14 @@ func TestBuildRootsMonorepo(t *testing.T) {
 }
 
 // A multi-project build's included sub-project (build.gradle under a settings.gradle root) is NOT a
-// separate root — gradle on the root handles it — and Gradle output/build-logic dirs are skipped.
+// separate root – gradle on the root handles it – and Gradle output/build-logic dirs are skipped.
 func TestBuildRootsSkipsIncludedAndOutputDirs(t *testing.T) {
 	dir := t.TempDir()
 	mkfile(t, dir, "settings.gradle")                           // the build root
 	mkfile(t, dir, "build.gradle")                              // root build script (same dir)
-	mkfile(t, filepath.Join(dir, "app"), "build.gradle")        // an included sub-project — must NOT be separate
-	mkfile(t, filepath.Join(dir, "build", "x"), "build.gradle") // output dir — must be skipped
-	mkfile(t, filepath.Join(dir, "buildSrc"), "build.gradle")   // build logic — must be skipped
+	mkfile(t, filepath.Join(dir, "app"), "build.gradle")        // an included sub-project – must NOT be separate
+	mkfile(t, filepath.Join(dir, "build", "x"), "build.gradle") // output dir – must be skipped
+	mkfile(t, filepath.Join(dir, "buildSrc"), "build.gradle")   // build logic – must be skipped
 	if roots := buildRoots(dir); len(roots) != 1 || roots[0] != dir {
 		t.Fatalf("roots = %v, want just the build root [%s]", roots, dir)
 	}

@@ -33,7 +33,7 @@ func (s *JudgmentStore) Save(_ context.Context, j judgment.Judgment) error {
 	list := s.byEng[j.EngagementID]
 	for i := range list {
 		if list[i].ID == j.ID {
-			return nil // insert-only: mirror postgres ON CONFLICT (id) DO NOTHING — never clobber an existing judgment's score/state
+			return nil // insert-only: mirror postgres ON CONFLICT (id) DO NOTHING – never clobber an existing judgment's score/state
 		}
 	}
 	s.byEng[j.EngagementID] = append(list, j)

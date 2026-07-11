@@ -1,4 +1,4 @@
-// Package qualitygate is the deterministic pass/fail gate over a codebase's measured metrics — the
+// Package qualitygate is the deterministic pass/fail gate over a codebase's measured metrics – the
 // "Clean as You Code" quality gate. It is pure domain: types + evaluation, no I/O, no LLM. A Gate is a
 // list of conditions on named metrics (e.g. new_critical <= 0); Evaluate returns pass/fail plus the exact
 // conditions that failed, so a CI step can print an actionable reason.

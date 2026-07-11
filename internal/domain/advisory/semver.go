@@ -55,7 +55,7 @@ func splitSemver(v string) ([3]string, string) {
 }
 
 // compareNum compares two version core segments. All-digit segments compare as ARBITRARY-PRECISION
-// non-negative integers (so a >19-digit id — a real OSV/date-stamped identifier — never falls back to a
+// non-negative integers (so a >19-digit id – a real OSV/date-stamped identifier – never falls back to a
 // wrong lexical order, #2); a non-numeric segment is the matcher's fail-closed responsibility (validCore),
 // so the lexical fallback here is only a defensive last resort.
 func compareNum(a, b string) int {
@@ -99,7 +99,7 @@ func trimLeadingZeros(s string) string {
 	return s[i:]
 }
 
-// validCore reports whether v's major.minor.patch are all numeric — the well-formedness the matcher
+// validCore reports whether v's major.minor.patch are all numeric – the well-formedness the matcher
 // fail-closes on (a garbage or over-long version like "abc" or "1.2.3.4" must never match an advisory).
 func validCore(v string) bool {
 	if strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(v), "v")) == "" {
@@ -124,7 +124,7 @@ func comparePrerelease(a, b string) int {
 		x, y := ai[i], bi[i]
 		xNum, yNum := isNumericStr(x), isNumericStr(y)
 		switch {
-		case xNum && yNum: // both numeric — arbitrary precision (no int overflow, #2)
+		case xNum && yNum: // both numeric – arbitrary precision (no int overflow, #2)
 			if d := compareNumeric(x, y); d != 0 {
 				return d
 			}
@@ -132,7 +132,7 @@ func comparePrerelease(a, b string) int {
 			return -1
 		case yNum:
 			return 1
-		default: // both alphanumeric — ASCII lexical
+		default: // both alphanumeric – ASCII lexical
 			if d := strings.Compare(x, y); d != 0 {
 				return d
 			}

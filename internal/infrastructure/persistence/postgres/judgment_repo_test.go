@@ -12,7 +12,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// Integration test — runs only when SYNAPSE_TEST_DB_DSN points at a Postgres.
+// Integration test – runs only when SYNAPSE_TEST_DB_DSN points at a Postgres.
 func TestJudgmentRepository(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
@@ -86,7 +86,7 @@ func TestJudgmentRepository(t *testing.T) {
 	}
 
 	// fail-closed on a corrupted enum row (defense-in-depth): a hand-edited row with a junk state
-	// must be rejected on read, never hydrated. (Last assertion — it poisons ListByEngagement.)
+	// must be rejected on read, never hydrated. (Last assertion – it poisons ListByEngagement.)
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO judgments (id, tenant_id, engagement_id, capability, subject_kind, subject_id, claim, state, version, created_at, updated_at)
 		 VALUES ($1,'',$2,'reachability','finding','f1','{"capability":"reachability","claim":{"reachable":"unknown","tier":"tier-0","confidence":0}}','GARBAGE',1,now(),now())`,

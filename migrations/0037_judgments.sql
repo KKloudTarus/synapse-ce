@@ -1,9 +1,9 @@
 -- +goose Up
--- Tier-0 (E27.5 / ADR-0021): AI "judgment" records — the propose->verify->confirm analysis
+-- Tier-0 (E27.5 / ADR-0021): AI "judgment" records – the propose->verify->confirm analysis
 -- primitive (reachability, sast, risk_narrative, ...). Born tenant-aware (tenant_id, R9) so the
 -- P5/E22 row-scoping sweep covers it with no backfill; reads are engagement-scoped today via the
 -- tenant-scoped engagement gate (mirrors findings). The typed Claim is stored as its fail-closed
--- discriminated envelope (JSONB) — never free prose (golden rule 5). evidence_score + state move
+-- discriminated envelope (JSONB) – never free prose (golden rule 5). evidence_score + state move
 -- ONLY via the analysis use case's verify/accept path (optimistic concurrency on version); the
 -- proposing agent has no path to set them.
 CREATE TABLE judgments (

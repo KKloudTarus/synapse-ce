@@ -141,7 +141,7 @@ func TestVerdictOnlyOnProposed(t *testing.T) {
 	}
 }
 
-// TestCapabilityContractExhaustive: insurance against fail-OPEN drift — every capability in the
+// TestCapabilityContractExhaustive: insurance against fail-OPEN drift – every capability in the
 // closed set must be Valid, have a decoder (a sample claim round-trips), and an explicit gated
 // decision. Add new capabilities to this table when you add them.
 func TestCapabilityContractExhaustive(t *testing.T) {

@@ -4,12 +4,12 @@
 // `--seccomp <fd>` (F1). The filter is DEFAULT-DENY: it returns EPERM for any syscall not
 // on the explicit allowlist, and KILLs the process on a foreign architecture. The
 // allowlist is the set a Go/C tool (syft, grype, naabu, subfinder, httpx, crane, git)
-// needs to run — it deliberately OMITS the dangerous syscalls a malicious tool/input would
+// needs to run – it deliberately OMITS the dangerous syscalls a malicious tool/input would
 // reach for: ptrace, process_vm_*, bpf, keyctl, add_key, request_key, userfaultfd, unshare,
 // setns, mount, umount2, pivot_root, kexec_*, *_module, perf_event_open, io_uring_*,
 // reboot, swapon/off, modify_ldt, iopl/ioperm, clock_settime, settimeofday, sethostname.
 //
-// AF_PACKET raw sockets are blocked structurally (CAP_NET_RAW is no longer granted — F6),
+// AF_PACKET raw sockets are blocked structurally (CAP_NET_RAW is no longer granted – F6),
 // so this filter need not arg-inspect socket(2); socket() stays allowed for normal
 // TCP/UDP. The program is emitted as raw `struct sock_filter` bytes (native-endian), the
 // format bwrap's --seccomp fd expects (cf. seccomp_export_bpf).
@@ -73,7 +73,7 @@ var seccompAllow = []int{
 	unix.SYS_RT_SIGACTION, unix.SYS_RT_SIGPROCMASK, unix.SYS_RT_SIGRETURN, unix.SYS_RT_SIGPENDING,
 	unix.SYS_RT_SIGTIMEDWAIT, unix.SYS_RT_SIGQUEUEINFO, unix.SYS_RT_SIGSUSPEND, unix.SYS_SIGALTSTACK,
 	unix.SYS_KILL, unix.SYS_TGKILL, unix.SYS_TKILL, unix.SYS_PAUSE,
-	// process lifecycle / threads — NOTE: clone + clone3 are handled specially in
+	// process lifecycle / threads – NOTE: clone + clone3 are handled specially in
 	// buildSeccompProgram (flag-filtered to block CLONE_NEW*), NOT listed here.
 	unix.SYS_EXECVE, unix.SYS_EXECVEAT, unix.SYS_EXIT,
 	unix.SYS_EXIT_GROUP, unix.SYS_WAIT4, unix.SYS_WAITID, unix.SYS_SET_TID_ADDRESS,
@@ -92,7 +92,7 @@ var seccompAllow = []int{
 	unix.SYS_EPOLL_WAIT, unix.SYS_EPOLL_PWAIT, unix.SYS_EPOLL_PWAIT2, unix.SYS_EVENTFD,
 	unix.SYS_EVENTFD2, unix.SYS_SIGNALFD, unix.SYS_SIGNALFD4, unix.SYS_TIMERFD_CREATE,
 	unix.SYS_TIMERFD_SETTIME, unix.SYS_TIMERFD_GETTIME,
-	// network (TCP/UDP — NOT raw; AF_PACKET blocked by dropping CAP_NET_RAW)
+	// network (TCP/UDP – NOT raw; AF_PACKET blocked by dropping CAP_NET_RAW)
 	unix.SYS_SOCKET, unix.SYS_CONNECT, unix.SYS_ACCEPT, unix.SYS_ACCEPT4, unix.SYS_BIND,
 	unix.SYS_LISTEN, unix.SYS_GETSOCKNAME, unix.SYS_GETPEERNAME, unix.SYS_SOCKETPAIR,
 	unix.SYS_SETSOCKOPT, unix.SYS_GETSOCKOPT, unix.SYS_SENDTO, unix.SYS_RECVFROM,
@@ -127,7 +127,7 @@ func buildSeccompProgram() []byte {
 	emit(bpfJeqK, 0, 1, uint32(unix.SYS_CLONE3)) // nr==clone3 ? fall to ENOSYS: skip
 	emit(bpfRetK, 0, 0, seccompRetErrnoENOSYS)
 
-	// clone: ALLOW only when no CLONE_NEW* namespace flag is set — blocks a tool from
+	// clone: ALLOW only when no CLONE_NEW* namespace flag is set – blocks a tool from
 	// creating a nested user/mount/net/etc. namespace (the demonstrated nested-userns
 	// escape-surface). Go/glibc thread creation sets none of these flags, so it is allowed.
 	emit(bpfJeqK, 0, 5, uint32(unix.SYS_CLONE)) // nr==clone ? fall into the 5-instr check: skip past it

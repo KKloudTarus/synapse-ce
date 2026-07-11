@@ -1,6 +1,6 @@
 // Package approval is the Human-In-The-Loop gate for AI-proposed actions.
 // A proposed action is auto-approved (per the engagement's ApprovalMode + the action's
-// RiskClass), or enqueued for a human, or — if undecided past the timeout — failed CLOSED
+// RiskClass), or enqueued for a human, or – if undecided past the timeout – failed CLOSED
 // (denied). Every decision is recorded on the append-only audit log, attributed to the
 // deciding human (or the system on a timeout). It does NOT execute anything: it only
 // produces an ApprovalDecision the safety gate consumes.
@@ -19,7 +19,7 @@ import (
 
 // ResumeFunc re-drives a suspended session after its pending action was decided (here: timed
 // out). The composition root supplies it (enqueue an orchestrator resume job) so the approval
-// package does NOT import the orchestrator — avoiding the orchestrator→safety→approval cycle.
+// package does NOT import the orchestrator – avoiding the orchestrator→safety→approval cycle.
 type ResumeFunc func(ctx context.Context, sessionID, actionID shared.ID) error
 
 // Service runs the approval policy over a durable ApprovalStore.
@@ -51,7 +51,7 @@ func NewService(store ports.ApprovalStore, audit ports.AuditLogger, clock ports.
 // else enqueued and returned PENDING (the orchestrator suspends; a human Decides).
 func (s *Service) Request(ctx context.Context, p agent.ProposedAction) (agent.ApprovalDecision, error) {
 	if _, dec, err := s.store.Get(ctx, p.ID); err == nil && dec.State != agent.ApprovalPending {
-		return dec, nil // already decided — idempotent resume
+		return dec, nil // already decided – idempotent resume
 	}
 	if err := s.store.Enqueue(ctx, p); err != nil {
 		return agent.ApprovalDecision{}, fmt.Errorf("enqueue approval: %w", err)
@@ -72,7 +72,7 @@ func (s *Service) Request(ctx context.Context, p agent.ProposedAction) (agent.Ap
 	return dec, err // pending
 }
 
-// Decide records a human's approve/deny (idempotent — a 2nd decision returns ErrConflict),
+// Decide records a human's approve/deny (idempotent – a 2nd decision returns ErrConflict),
 // audited under the HUMAN actor.
 func (s *Service) Decide(ctx context.Context, human string, actionID shared.ID, approve bool, reason string) (agent.ApprovalDecision, error) {
 	if human == "" {
@@ -148,7 +148,7 @@ func (s *Service) SweepAllExpired(ctx context.Context) (int, error) {
 }
 
 // RunSweeper periodically sweeps expired approvals until ctx is cancelled (a running binary
-// must call this — fail-closed timeout is otherwise never enforced in prod).
+// must call this – fail-closed timeout is otherwise never enforced in prod).
 func (s *Service) RunSweeper(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = time.Minute

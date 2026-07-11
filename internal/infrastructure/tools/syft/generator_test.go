@@ -37,7 +37,7 @@ func TestParseCycloneDXLayerID(t *testing.T) {
 }
 
 func TestParseCycloneDXNoLayerID(t *testing.T) {
-	// A source (non-image) scan has paths but no layerID — LayerID stays empty, no attribution.
+	// A source (non-image) scan has paths but no layerID – LayerID stays empty, no attribution.
 	data := `{"components":[{"name":"p","version":"1","purl":"pkg:npm/p@1",
 		"properties":[{"name":"syft:location:0:path","value":"package.json"}]}]}`
 	comps, _, _, err := parseCycloneDX([]byte(data))

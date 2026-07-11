@@ -18,7 +18,7 @@ func TestCountBelowThreshold(t *testing.T) {
 		{Severity: shared.SeverityMedium}, {Severity: shared.SeverityLow},
 		{Severity: shared.SeverityUnknown},                   // unscored → always promoted, never "below"
 		{Severity: shared.SeverityLow, Unversioned: true},    // first-party-historic → always promoted, never "below"
-		{Severity: shared.SeverityMedium, Unversioned: true}, // ditto — must NOT inflate the count
+		{Severity: shared.SeverityMedium, Unversioned: true}, // ditto – must NOT inflate the count
 	}
 	// Counts must match buildFindings EXACTLY: only versioned (third-party) sub-floor vulns count.
 	cases := map[shared.Severity]int{
@@ -86,7 +86,7 @@ func TestBuildFindingsIgnoreUnfixed(t *testing.T) {
 			{ID: "CVE-1", Component: "openssl", Version: "1.1", Severity: shared.SeverityHigh, FixedVersion: "1.1.1"}, // has fix → kept
 			{ID: "CVE-2", Component: "openssl", Version: "1.1", Severity: shared.SeverityHigh, FixState: "wont-fix"},  // no fix → suppressed
 			{ID: "CVE-3", Component: "openssl", Version: "1.1", Severity: shared.SeverityCritical},                    // no fix → suppressed
-			// edge: a source claimed "fixed" but gave no concrete version — promotion keys on
+			// edge: a source claimed "fixed" but gave no concrete version – promotion keys on
 			// FixedVersion, so this is correctly treated as unfixed and suppressed (no false "has-fix").
 			{ID: "CVE-4", Component: "openssl", Version: "1.1", Severity: shared.SeverityHigh, FixState: "fixed"},
 		},

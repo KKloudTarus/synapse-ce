@@ -75,7 +75,7 @@ func (e *Enricher) Enrich(ctx context.Context, comps []sbom.Component) []sbom.Co
 			}
 			continue
 		}
-		// Only unresolved placeholder evidence (sha256:/LicenseRef-/unknown) survived — drop
+		// Only unresolved placeholder evidence (sha256:/LicenseRef-/unknown) survived – drop
 		// it so a successful registry lookup replaces it cleanly (matches the chain enrichers)
 		// rather than mislabeling a placeholder as a declared SBOM license.
 		c.Licenses = nil

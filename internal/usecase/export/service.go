@@ -1,5 +1,5 @@
 // Package export builds deterministic SARIF 2.1.0 + OpenVEX documents from stored
-// findings. Templated from data — no LLM in the report path.
+// findings. Templated from data – no LLM in the report path.
 package export
 
 import (
@@ -14,8 +14,8 @@ import (
 )
 
 // judgmentReader is the narrow read slice the OpenVEX justification-by-tier mapping needs:
-// list the engagement's judgments. Optional — nil ⇒ the default justification. ports.JudgmentStore
-// (memory/postgres) satisfies it. Reads typed data only — no LLM in the report path.
+// list the engagement's judgments. Optional – nil ⇒ the default justification. ports.JudgmentStore
+// (memory/postgres) satisfies it. Reads typed data only – no LLM in the report path.
 type judgmentReader interface {
 	ListByEngagement(ctx context.Context, engagementID shared.ID) ([]judgment.Judgment, error)
 }
@@ -52,8 +52,8 @@ func (s *Service) SARIF(ctx context.Context, engagementID shared.ID) (*SARIFLog,
 }
 
 // OpenVEX returns the engagement's vulnerability findings as an OpenVEX document. It
-// reads through the publishability gate — consistent with SARIF and the
-// report path — so an unproven exploitation finding is never asserted in a VEX statement.
+// reads through the publishability gate – consistent with SARIF and the
+// report path – so an unproven exploitation finding is never asserted in a VEX statement.
 func (s *Service) OpenVEX(ctx context.Context, engagementID shared.ID) (*VEXDoc, error) {
 	fs, err := s.findings.ListPublishableByEngagement(ctx, engagementID)
 	if err != nil {
@@ -74,7 +74,7 @@ func (s *Service) OpenVEX(ctx context.Context, engagementID shared.ID) (*VEXDoc,
 // ≥ bar) CapVexJustification judgment about it. It reuses the same judgment reader as the reachability path; the
 // first such confirmed claim per finding wins (deterministic by the repo's created_at/id order). Empty
 // when judgments are disabled. The export applies it only to a not_affected finding, and only when no
-// reachability-tier justification (a deterministic proof) is present — see buildOpenVEX.
+// reachability-tier justification (a deterministic proof) is present – see buildOpenVEX.
 func (s *Service) vexJustifications(ctx context.Context, engagementID shared.ID) (map[string]string, error) {
 	if s.judgments == nil {
 		return nil, nil

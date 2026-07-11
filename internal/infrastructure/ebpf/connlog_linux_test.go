@@ -23,7 +23,7 @@ func TestConnLogHelperDial(t *testing.T) {
 		if c, err := net.DialTimeout("tcp", addr, 2*time.Second); err == nil {
 			_ = c.Close()
 		}
-		// Even a failed/blocked connect fires the connect() hook — the ATTEMPT is the point.
+		// Even a failed/blocked connect fires the connect() hook – the ATTEMPT is the point.
 	}
 }
 

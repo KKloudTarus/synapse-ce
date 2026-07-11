@@ -7,7 +7,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// CredentialMeta is the non-secret metadata about a stored credential — safe to list,
+// CredentialMeta is the non-secret metadata about a stored credential – safe to list,
 // log, and return over the API. The secret value is NEVER part of it.
 type CredentialMeta struct {
 	Name      string    `json:"name"`

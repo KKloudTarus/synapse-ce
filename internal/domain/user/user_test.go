@@ -2,7 +2,7 @@ package user
 
 import "testing"
 
-// TestRolePermissions pins the RBAC matrix exactly — including the crown-jewel
+// TestRolePermissions pins the RBAC matrix exactly – including the crown-jewel
 // separation-of-duties property that machine (mcp/agent) and unknown roles are granted NOTHING,
 // so they can never operate, triage, review (verify/decide), or administer via the human API.
 func TestRolePermissions(t *testing.T) {
@@ -15,13 +15,13 @@ func TestRolePermissions(t *testing.T) {
 		{RoleAdmin, PermView, true}, {RoleAdmin, PermOperate, true}, {RoleAdmin, PermTriage, true}, {RoleAdmin, PermReview, true}, {RoleAdmin, PermAdminister, true},
 		// consultant: view + operate + triage; NOT review (sign-off) or administer.
 		{RoleConsultant, PermView, true}, {RoleConsultant, PermOperate, true}, {RoleConsultant, PermTriage, true}, {RoleConsultant, PermReview, false}, {RoleConsultant, PermAdminister, false},
-		// member is the alias for consultant — identical grants.
+		// member is the alias for consultant – identical grants.
 		{RoleMember, PermView, true}, {RoleMember, PermOperate, true}, {RoleMember, PermTriage, true}, {RoleMember, PermReview, false}, {RoleMember, PermAdminister, false},
 		// reviewer: view + triage + review (sign-off); NOT operate or administer (separation of duties).
 		{RoleReviewer, PermView, true}, {RoleReviewer, PermTriage, true}, {RoleReviewer, PermReview, true}, {RoleReviewer, PermOperate, false}, {RoleReviewer, PermAdminister, false},
 		// readonly: view only.
 		{RoleReadOnly, PermView, true}, {RoleReadOnly, PermOperate, false}, {RoleReadOnly, PermTriage, false}, {RoleReadOnly, PermReview, false}, {RoleReadOnly, PermAdminister, false},
-		// machine + unknown roles: NOTHING (the SoD invariant — an agent/mcp principal can never
+		// machine + unknown roles: NOTHING (the SoD invariant – an agent/mcp principal can never
 		// approve its own actions or verify findings, and an unknown role is fail-closed).
 		{Role("mcp"), PermView, false}, {Role("mcp"), PermReview, false}, {Role("mcp"), PermOperate, false}, {Role("mcp"), PermAdminister, false},
 		{Role("agent"), PermView, false}, {Role("agent"), PermReview, false}, {Role("agent"), PermOperate, false},
@@ -35,7 +35,7 @@ func TestRolePermissions(t *testing.T) {
 }
 
 // TestEveryDeclaredRoleIsInMatrix guards against adding a Role constant but forgetting its matrix
-// entry — such a role would silently grant nothing (fail-closed, so safe, but a latent bug that
+// entry – such a role would silently grant nothing (fail-closed, so safe, but a latent bug that
 // the exhaustive case table above would not catch for a NEW role). Every canonical human role must
 // appear and grant at least the view floor. (RoleMember aliases to consultant, so it is exempt.)
 func TestEveryDeclaredRoleIsInMatrix(t *testing.T) {
@@ -44,7 +44,7 @@ func TestEveryDeclaredRoleIsInMatrix(t *testing.T) {
 			t.Errorf("role %q is declared but missing from rolePermissions (would silently grant nothing)", r)
 		}
 		if !r.Can(PermView) {
-			t.Errorf("role %q grants not even PermView — likely a missing/empty matrix entry", r)
+			t.Errorf("role %q grants not even PermView – likely a missing/empty matrix entry", r)
 		}
 	}
 }

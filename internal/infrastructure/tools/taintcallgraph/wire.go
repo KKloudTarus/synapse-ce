@@ -1,7 +1,7 @@
 // Package taintcallgraph is the adapter that produces a general first-party call graph for E39 taint
 // analysis by shelling out to the sandboxed `synapse-callgraph` argv binary (which runs the heavy go/ssa
 // builder, internal/infrastructure/tools/ssacallgraph). Keeping the build behind an exec boundary means the
-// untrusted target is compiled inside the sandbox — NOT in the api server's address space — and x/tools
+// untrusted target is compiled inside the sandbox – NOT in the api server's address space – and x/tools
 // stays OUT of the server's import graph (this package imports neither ssacallgraph nor x/tools).
 //
 // This file holds the wire protocol shared across that exec boundary: the binary EncodeGraph()s the domain
@@ -47,7 +47,7 @@ func EncodeGraph(w io.Writer, g *callgraph.Graph) error {
 
 // parseCallgraph decodes the synapse-callgraph wire envelope into the domain callgraph.Graph. It fails
 // closed on a JSON error or an unrecognized protocol version (a drifted format must not be silently
-// mis-parsed into a partial graph — that would drop taint paths). This is the testable core (like
+// mis-parsed into a partial graph – that would drop taint paths). This is the testable core (like
 // parseGovulncheck): the exec wrapper just feeds it the captured stdout.
 func parseCallgraph(data []byte) (*callgraph.Graph, error) {
 	var wg wireGraph

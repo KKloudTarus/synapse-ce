@@ -11,8 +11,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
 )
 
-// driverRE constrains a risk-narrative driver to a closed token grammar — a lowercase token,
-// optionally with a numeric comparator (e.g. "kev", "reachable", "epss>0.5", "cvss>=9") — so a
+// driverRE constrains a risk-narrative driver to a closed token grammar – a lowercase token,
+// optionally with a numeric comparator (e.g. "kev", "reachable", "epss>0.5", "cvss>=9") – so a
 // model can never smuggle a free-text sentence into the one []string field of a Claim (so
 // no LLM prose reaches a deliverable).
 var driverRE = regexp.MustCompile(`^[a-z][a-z0-9_]*((<=|>=|==|!=|<|>)[0-9]+(\.[0-9]+)?)?$`)
@@ -30,7 +30,7 @@ const (
 // report templates render its fields; the model's rationale lives only in sealed
 // evidence. Each capability has one concrete Claim type; the JSON envelope carries the discriminant
 // so a stored claim decodes FAIL-CLOSED on an unknown capability or a body that doesn't match its
-// discriminant — no free-text passthrough can reach a deliverable.
+// discriminant – no free-text passthrough can reach a deliverable.
 type Claim interface {
 	Capability() Capability
 	Validate() error
@@ -98,7 +98,7 @@ type ReachabilityClaim struct {
 // Capability identifies this claim's brain.
 func (ReachabilityClaim) Capability() Capability { return CapReachability }
 
-// Supersedes reports whether this claim should override prior — true only when this claim was produced by
+// Supersedes reports whether this claim should override prior – true only when this claim was produced by
 // a STRICTLY STRONGER tier of proof (a deterministic Tier-2 call-graph result overrides an
 // LLM Tier-1.5 claim, whether they agree or contradict). Same-or-lower tier does NOT supersede: a re-run
 // at equal strength leaves the stored verdict standing (no churn), and a weaker re-analysis never
@@ -131,7 +131,7 @@ func (c ReachabilityClaim) Validate() error {
 }
 
 // SASTClaim is the typed result of a SAST judgment: the weakness (CWE), where, and the
-// rule that fired. No free-text — a "hardcoded secret at L42" finding renders from these fields.
+// rule that fired. No free-text – a "hardcoded secret at L42" finding renders from these fields.
 type SASTClaim struct {
 	CWE      string `json:"cwe"`
 	Location string `json:"location"` // path[:line]
@@ -156,7 +156,7 @@ func (c SASTClaim) Validate() error {
 }
 
 // RiskNarrativeClaim explains the Go-computed priority via STRUCTURED drivers (never prose):
-// the renderer composes the sentence from these fields. It is NOT evidence-gated — there is
+// the renderer composes the sentence from these fields. It is NOT evidence-gated – there is
 // nothing to "refute at 75"; a human accepts it.
 type RiskNarrativeClaim struct {
 	Drivers  []string `json:"drivers"`  // e.g. "kev", "epss>0.5", "cvss>=9", "reachable"
@@ -186,7 +186,7 @@ func (c RiskNarrativeClaim) Validate() error {
 type CritiqueVerdict string
 
 const (
-	CritiqueRefuted   CritiqueVerdict = "refuted"   // the finding does not hold — a suspected false positive
+	CritiqueRefuted   CritiqueVerdict = "refuted"   // the finding does not hold – a suspected false positive
 	CritiqueSound     CritiqueVerdict = "sound"     // the finding survives adversarial review
 	CritiqueUncertain CritiqueVerdict = "uncertain" // inconclusive
 )
@@ -201,9 +201,9 @@ func (v CritiqueVerdict) Valid() bool {
 }
 
 // CritiqueClaim is the typed result of an adversarial critique: an attempt to REFUTE a finding,
-// with a STRUCTURED driver (the refutation category — never free prose) and a confidence. A
+// with a STRUCTURED driver (the refutation category – never free prose) and a confidence. A
 // confirmed "refuted" critique flags the finding as suspected-FP for a human; it never auto-suppresses
-// (fail-safe — a wrong critique cannot publish a falsehood).
+// (fail-safe – a wrong critique cannot publish a falsehood).
 type CritiqueClaim struct {
 	Verdict    CritiqueVerdict `json:"verdict"`
 	Driver     string          `json:"driver"` // closed token, e.g. "not_reachable", "version_mismatch", "false_match"
@@ -228,7 +228,7 @@ func (c CritiqueClaim) Validate() error {
 }
 
 // StrideCategory is one STRIDE threat class (closed vocabulary; the renderer composes the human sentence
-// from this + the threatened subject element — never free prose).
+// from this + the threatened subject element – never free prose).
 type StrideCategory string
 
 const (
@@ -250,7 +250,7 @@ func (s StrideCategory) Valid() bool {
 }
 
 // ThreatClaim is a proposed STRIDE threat over the architecture model: the STRIDE
-// category, plus the optional Asset.ID at risk (e.g. the classified data an info-disclosure exposes) — both
+// category, plus the optional Asset.ID at risk (e.g. the classified data an info-disclosure exposes) – both
 // STRUCTURED tokens, never free prose. The threatened model element (a component or data flow) is the
 // Judgment's SUBJECT (SubjectComponent / SubjectDataFlow), not part of the claim. Gated: a human verifier
 // ratifies it ("human-confirmed"); the agent only ever proposes it at score 0.
@@ -276,7 +276,7 @@ func (c ThreatClaim) Validate() error {
 
 // CorrelationClaim is a cross-check DISAGREEMENT: on a vulnerability, which detection
 // sources reported it (Reporters) and which RAN but did not (Missing). It is the deterministic, descriptive
-// record that a human acknowledges — NEVER auto-resolved (the disagreement is itself the signal). Both lists
+// record that a human acknowledges – NEVER auto-resolved (the disagreement is itself the signal). Both lists
 // are source-name tokens (no prose); Missing is non-empty by construction (an agreed vuln is not a claim).
 type CorrelationClaim struct {
 	Reporters []string `json:"reporters"` // sources that reported the vuln (the minter supplies them sorted+distinct)
@@ -303,7 +303,7 @@ func (c CorrelationClaim) Validate() error {
 	return nil
 }
 
-// VexJustificationClaim is a proposed OpenVEX justification for why a finding is NOT_AFFECTED — the
+// VexJustificationClaim is a proposed OpenVEX justification for why a finding is NOT_AFFECTED – the
 // AI's STRUCTURED choice from the CLOSED OpenVEX justification set, never free prose. The finding it
 // applies to is the Judgment's SUBJECT (SubjectFinding), not part of the claim. Gated: a distinct human
 // verifier ratifies it before the export trusts it (it asserts "not affected" in a published deliverable);
@@ -354,7 +354,7 @@ func MarshalClaim(c Claim) ([]byte, error) {
 // UnmarshalClaim decodes a discriminated envelope into the concrete Claim for its capability,
 // FAIL-CLOSED: an unknown/unregistered capability, a body carrying unknown fields, a body
 // whose reported capability disagrees with the envelope, or a body that fails Validate is all
-// rejected — never a free-text passthrough.
+// rejected – never a free-text passthrough.
 func UnmarshalClaim(data []byte) (Claim, error) {
 	var env envelope
 	if err := json.Unmarshal(data, &env); err != nil {
@@ -408,7 +408,7 @@ func UnmarshalClaim(data []byte) (Claim, error) {
 		}
 		c = vc
 	default:
-		// In the Valid() vocabulary but no decoder yet — registered alongside the capability.
+		// In the Valid() vocabulary but no decoder yet – registered alongside the capability.
 		return nil, fmt.Errorf("%w: no claim decoder for capability %q", shared.ErrValidation, env.Capability)
 	}
 	if c.Capability() != env.Capability {
@@ -421,7 +421,7 @@ func UnmarshalClaim(data []byte) (Claim, error) {
 }
 
 // canonicalizeClaim round-trips a claim through the fail-closed envelope so the result is a fresh,
-// validated, alias-free copy identical to what persistence will seal — closing the slice-aliasing
+// validated, alias-free copy identical to what persistence will seal – closing the slice-aliasing
 // footgun (a caller cannot mutate a constructed judgment's claim post-validation).
 func canonicalizeClaim(c Claim) (Claim, error) {
 	data, err := MarshalClaim(c)

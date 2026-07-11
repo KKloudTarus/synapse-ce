@@ -42,7 +42,7 @@ func TestCrossCheckDisagreement(t *testing.T) {
 }
 
 func TestCrossCheckEmptyProducerStillCounts(t *testing.T) {
-	// ownsbom ran but produced an empty SBOM (no recognized manifests) — it must still be Missing on
+	// ownsbom ran but produced an empty SBOM (no recognized manifests) – it must still be Missing on
 	// everything syft emitted, never silently dropped (the union-expands invariant).
 	r := CrossCheck([]string{"syft", "ownsbom"}, []*SBOM{
 		doc("syft", comp("left-pad", "1.0.0", "pkg:npm/left-pad@1.0.0")),
@@ -76,7 +76,7 @@ func TestCrossCheckNilAndEmpty(t *testing.T) {
 
 func TestCrossCheckDedupsAndSkipsBlank(t *testing.T) {
 	// A producer listing the same component twice counts as ONE reporter (set semantics), and a
-	// fully-blank component (empty ComponentID) is dropped — never a phantom item. Pins both invariants.
+	// fully-blank component (empty ComponentID) is dropped – never a phantom item. Pins both invariants.
 	c := comp("left-pad", "1.0.0", "pkg:npm/left-pad@1.0.0")
 	r := CrossCheck([]string{"syft", "ownsbom"}, []*SBOM{
 		doc("syft", c, c, comp("", "", "")), // duplicate + a blank component

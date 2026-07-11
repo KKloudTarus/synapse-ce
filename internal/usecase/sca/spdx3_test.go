@@ -47,7 +47,7 @@ func TestBuildSPDX3DeterministicAndValid(t *testing.T) {
 		}
 	}
 
-	// Packages are sorted (express before lodash) — find their order in the graph.
+	// Packages are sorted (express before lodash) – find their order in the graph.
 	doc0, ok := a.Graph[1].(spdx3Document)
 	if !ok {
 		t.Fatalf("graph[1] is not the SpdxDocument: %T", a.Graph[1])

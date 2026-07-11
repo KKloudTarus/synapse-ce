@@ -95,7 +95,7 @@ func newFindingsRouter() (*Router, *findRepoFake) {
 	repo := newFindRepoFake()
 	clock := fixedClock{t: time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)}
 	svc := findingsuc.NewService(repo, &commentRepoFake{}, &retestRepoFake{}, &fakeAudit{}, clock, engIDs{})
-	// createFinding verifies the engagement exists — seed "e1".
+	// createFinding verifies the engagement exists – seed "e1".
 	engRepo := newEngRepoFake()
 	_ = engRepo.Create(context.Background(), &engdom.Engagement{ID: shared.ID("e1"), Status: engdom.StatusActive})
 	engSvc := enguc.NewService(engRepo, clock, engIDs{}, &fakeAudit{})

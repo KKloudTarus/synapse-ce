@@ -2,15 +2,15 @@
 // real versions) by shelling out to `mvn dependency:list` via argv, then parsing the
 // resolved coordinates into SBOM components. A static pom.xml parse cannot do this: Spring-Boot-style
 // versions are managed by the parent BOM (so syft reports the direct starters as version=UNKNOWN) and
-// the transitive tree — where most CVEs live (spring-core, snakeyaml, tomcat-embed-core, …) — is not
+// the transitive tree – where most CVEs live (spring-core, snakeyaml, tomcat-embed-core, …) – is not
 // listed in pom.xml at all. This adapter fills that gap as a best-effort, opt-in, post-SBOM step.
 //
 // SECURITY: this RUNS the Maven toolchain over UNTRUSTED project configuration (the pom.xml, its
-// parent POM chain, and the dependency plugin) and reaches a package repository for metadata — so it
+// parent POM chain, and the dependency plugin) and reaches a package repository for metadata – so it
 // is materially higher-risk than the read-only `go mod graph` resolver. For a SINGLE module the standalone
 // `dependency:list` goal avoids the build lifecycle (no compile/test/package, no app code run); a
 // MULTI-MODULE reactor additionally runs `install -DskipTests` so a module can resolve its sibling
-// modules (this compiles the project — a `mvn package`-class surface — but is still sandbox-confined).
+// modules (this compiles the project – a `mvn package`-class surface – but is still sandbox-confined).
 // Either way it is NOT inert: POM/parent-POM evaluation + plugin/extension resolution (and, multi-module,
 // compilation) is a code-execution + egress surface. So in production it MUST run through a
 // ToolRunner (the sandbox), which confines the filesystem and restricts egress to the Maven repo; the
@@ -100,13 +100,13 @@ var _ ports.MavenResolver = (*Resolver)(nil)
 // Resolve resolves every Maven project under dir and returns the union of their components (direct +
 // transitive, with versions), deduped by PURL. When dir is itself a Maven project it resolves that one;
 // when dir is a monorepo PARENT with no root pom.xml but sub-folders that each have one (a common layout
-// — e.g. 20 services under one directory), it discovers and resolves EACH sub-project (without this, the
+// – e.g. 20 services under one directory), it discovers and resolves EACH sub-project (without this, the
 // resolver saw no root pom.xml and skipped entirely, so the whole tree fell back to syft's pom-only view
 // → severe under-count). No-ops ([], nil) when no pom.xml exists anywhere under dir.
 //
 // Resolution is best-effort PER project: a project that fails to resolve (bad POM, unreachable repo,
 // missing sibling) does not discard the ones that succeed. Whenever ANY project failed, the first
-// failure's reason is returned as the error ALONGSIDE the components that did resolve — so the caller
+// failure's reason is returned as the error ALONGSIDE the components that did resolve – so the caller
 // keeps the partial tree AND can surface the failure (a partial monorepo resolve is still an under-count
 // worth flagging). A total failure returns no components + the error; a clean run returns (comps, nil).
 func (r *Resolver) Resolve(ctx context.Context, dir string) ([]sbom.Component, error) {
@@ -175,8 +175,8 @@ func projectRoots(dir string) []string {
 
 // fillDeclaredLicenses populates each component's DECLARED license from its resolved.pom's <licenses>
 // block (walking the <parent> chain for inherited declarations), read OFFLINE from the Maven local
-// repository that `dependency:list` just populated. This is the authoritative legal declaration — the
-// same source Trivy uses — and, crucially, the SCA pipeline REPLACES syft's entire pkg:maven view with
+// repository that `dependency:list` just populated. This is the authoritative legal declaration – the
+// same source Trivy uses – and, crucially, the SCA pipeline REPLACES syft's entire pkg:maven view with
 // this resolved tree (mergeResolvedJVM, completeScopes=true), so a clean declared license here also
 // eliminates syft's embedded-text license SPRAY (e.g. mysql-connector-java: syft concludes ~10 SPDX ids
 // from bundled third-party notices → the pom declares 1). Best-effort: a missing repo/POM leaves the
@@ -193,7 +193,7 @@ func (r *Resolver) fillDeclaredLicenses(ctx context.Context, comps []sbom.Compon
 	cache := map[string][]string{} // "g:a:v" -> declared names; shared parents are read once
 	for i := range comps {
 		if ctx.Err() != nil {
-			return // honor cancellation/timeout — stop reading POMs
+			return // honor cancellation/timeout – stop reading POMs
 		}
 		c := &comps[i]
 		gi := strings.IndexByte(c.Name, ':') // Name is "group:artifact"
@@ -299,7 +299,7 @@ func pomFilePath(repo, g, a, v string) string {
 }
 
 // args is the mvn invocation. For a SINGLE-module project it runs only the standalone `dependency:list`
-// goal (no build lifecycle — fast, and resolves from POMs even when the source wouldn't compile). A
+// goal (no build lifecycle – fast, and resolves from POMs even when the source wouldn't compile). A
 // MULTI-MODULE reactor is special: a module may depend on a SIBLING module that isn't published, which
 // `dependency:list` alone cannot resolve (it aborts → no output). So when the root POM declares
 // <modules>, prepend `install -DskipTests` to build + install every module first, after which
@@ -311,7 +311,7 @@ func (r *Resolver) args(dir string) []string {
 		args = append(args, "-Dmaven.repo.local="+r.localRepo)
 	}
 	if pomDeclaresModules(readBounded(pom)) {
-		// install compiles the project (a larger exec surface than dependency:list alone) — still
+		// install compiles the project (a larger exec surface than dependency:list alone) – still
 		// sandbox-confined on the server. maven.test.skip=true skips compiling AND running tests, so no
 		// test code is built or executed. install runs first (a lifecycle segment), then dependency:list.
 		// NOTE: install writes each module's target/ inside the project; on the SERVER the project is
@@ -323,7 +323,7 @@ func (r *Resolver) args(dir string) []string {
 }
 
 // pomDeclaresModules reports whether a POM is a multi-module aggregator (has a <module> entry). A naive
-// substring check is enough — a false positive only adds a harmless `install`, never a wrong result.
+// substring check is enough – a false positive only adds a harmless `install`, never a wrong result.
 func pomDeclaresModules(pom []byte) bool { return bytes.Contains(pom, []byte("<module>")) }
 
 // readBounded reads a small file (the POM), capped; any error → nil (treated as single-module).
@@ -347,7 +347,7 @@ func (r *Resolver) run(ctx context.Context, dir string) ([]byte, error) {
 			Name:          r.bin,
 			Args:          args,
 			ReadOnlyPaths: []string{dir},
-			// Persistent local-repo (when set) is the one writable bind — mvn caches the resolved tree
+			// Persistent local-repo (when set) is the one writable bind – mvn caches the resolved tree
 			// there across scans; empty leaves the ephemeral tmpfs HOME (re-download each scan).
 			Workdir: r.localRepo,
 			// mvn must reach the Maven repository for POM/metadata resolution; confine egress to it
@@ -364,7 +364,7 @@ func (r *Resolver) run(ctx context.Context, dir string) ([]byte, error) {
 	}
 	// Direct exec: dev/CLI path for a TRUSTED local project (parity with the syft/go adapters). mvn
 	// evaluates the project's POM/plugin config, which can read the process env, so scrub SYNAPSE_*
-	// secrets from the child — the resolver needs none of them (defense-in-depth on the unsandboxed path).
+	// secrets from the child – the resolver needs none of them (defense-in-depth on the unsandboxed path).
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, r.bin, args...)
 	cmd.Env = scrubSynapseEnv(os.Environ())
@@ -398,7 +398,7 @@ func parseDependencyList(data []byte) []sbom.Component {
 			continue
 		}
 		group, artifact, version, scope := m[1], m[2], m[3], m[4]
-		if scope == "test" { // test deps aren't shipped — exclude (avoids test-only CVE noise)
+		if scope == "test" { // test deps aren't shipped – exclude (avoids test-only CVE noise)
 			continue
 		}
 		purl := "pkg:maven/" + group + "/" + artifact + "@" + version
@@ -418,7 +418,7 @@ func parseDependencyList(data []byte) []sbom.Component {
 	return out
 }
 
-// scrubSynapseEnv drops SYNAPSE_* entries from an environment list — the resolver needs none, and on the
+// scrubSynapseEnv drops SYNAPSE_* entries from an environment list – the resolver needs none, and on the
 // unsandboxed path the build tool runs untrusted code that could read+exfiltrate secrets via the env.
 func scrubSynapseEnv(env []string) []string {
 	out := env[:0:0]

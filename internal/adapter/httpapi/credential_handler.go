@@ -36,7 +36,7 @@ func (rt *Router) setCredential(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	// Echo the name only — never the value.
+	// Echo the name only – never the value.
 	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name, "status": "stored"})
 }
 

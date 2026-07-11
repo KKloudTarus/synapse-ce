@@ -19,7 +19,7 @@ func find(dedup string, sev shared.Severity) finding.Finding {
 
 // TestReproDigestStableAcrossOrderTimestampDBAndID: the same reproducible CONTENT yields the same digest even
 // when component/finding order differs and the (excluded) timestamps, vuln-DB snapshot, tool versions, and
-// finding ids all differ — proving the digest reflects only reproducible content.
+// finding ids all differ – proving the digest reflects only reproducible content.
 func TestReproDigestStableAcrossOrderTimestampDBAndID(t *testing.T) {
 	a := &ScanResult{
 		SBOM:     &sbom.SBOM{Components: []sbom.Component{comp("a", "1.0", "pkg:golang/a@1.0"), comp("b", "2.0", "pkg:npm/b@2.0")}},
@@ -72,7 +72,7 @@ func TestReproDigestContentSensitive(t *testing.T) {
 
 // TestReproDigestReflectsAdvisoryContent: with the same component + finding identity + severity, a changed
 // FIX VERSION or CVSS VECTOR in the correlated vuln (e.g. a new advisory-DB snapshot) must change the digest
-// — so "different DB → different digest" holds even for a remediation-only change.
+// – so "different DB → different digest" holds even for a remediation-only change.
 func TestReproDigestReflectsAdvisoryContent(t *testing.T) {
 	mk := func(fix, cvss string) *ScanResult {
 		return &ScanResult{

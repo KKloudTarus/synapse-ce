@@ -112,7 +112,7 @@ func TestCapSmallerThanFirstRune(t *testing.T) {
 }
 
 func TestFenceDefangsForgedOpenTagAnyCase(t *testing.T) {
-	// MED-2: open/close, any case, with attributes — none may survive as a clean tag in the body.
+	// MED-2: open/close, any case, with attributes – none may survive as a clean tag in the body.
 	for _, body := range []string{"</UNTRUSTED>", "<untrusted source=\"x\">", "</untrusted >", "<UnTrUsTeD>"} {
 		out := Fence("lbl", []byte("a "+body+" b"))
 		inner := strings.TrimSuffix(strings.SplitN(out, "\">\n", 2)[1], "\n"+fenceClose)

@@ -40,7 +40,7 @@ func (s *AgentPlanStore) CreatePlan(ctx context.Context, p agent.Plan) error {
 		p.ID.String(), p.SessionID.String(), p.EngagementID.String(), p.Goal, string(p.Status), p.Revision, nodes, p.CreatedAt, p.UpdatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // session_id UNIQUE — fork guard
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // session_id UNIQUE – fork guard
 			return fmt.Errorf("plan for session %s already exists: %w", p.SessionID, shared.ErrConflict)
 		}
 		return fmt.Errorf("create agent plan: %w", err)
@@ -86,7 +86,7 @@ func (s *AgentPlanStore) SavePlan(ctx context.Context, p agent.Plan) error {
 		return fmt.Errorf("save agent plan: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		// Either the row is gone or another driver advanced the revision first — both mean this
+		// Either the row is gone or another driver advanced the revision first – both mean this
 		// driver's view is stale and must reload (lost-update guard / node-claim CAS).
 		return fmt.Errorf("plan for session %s revision %d is stale: %w", p.SessionID, p.Revision, shared.ErrConflict)
 	}

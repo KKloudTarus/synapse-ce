@@ -19,7 +19,7 @@ import (
 // ImportSBOM ingests a client-supplied CycloneDX SBOM (consultancies receive
 // client SBOMs) as the engagement's scan result, so its components are visible,
 // license-summarized, exportable (SPDX), and sealed into the evidence chain. It does
-// NOT run vulnerability detection on the imported components — that reuses the
+// NOT run vulnerability detection on the imported components – that reuses the
 // post-SBOM half of the scan pipeline and is a follow-up; importing makes the
 // client's inventory a first-class, attested artifact today. Audited.
 func (s *Service) ImportSBOM(ctx context.Context, actor string, tenantID, engagementID shared.ID, data []byte) (*ScanResult, error) {
@@ -306,7 +306,7 @@ const cdxMaxGeneratorVersionChars = 256
 
 // cdxGeneratorVersion extracts a "name/version" for the SBOM's generating tool from metadata.tools, which
 // has TWO shapes across CycloneDX versions: the legacy array [{vendor,name,version}] (<=1.4) and the object
-// {components:[{name,version}], services:[...]} (1.5+). It tries both and never errors — a tools value it
+// {components:[{name,version}], services:[...]} (1.5+). It tries both and never errors – a tools value it
 // cannot read just yields "", so a modern document is not rejected over this optional field.
 func cdxGeneratorVersion(raw json.RawMessage) string {
 	if len(raw) == 0 || len(raw) > cdxMaxToolsBytes {

@@ -66,7 +66,7 @@ func priorityForSeverity(s shared.Severity) int {
 	}
 }
 
-// Comment is a persisted collaboration note on a finding — distinct from
+// Comment is a persisted collaboration note on a finding – distinct from
 // the append-only audit log; comments are the human activity thread.
 type Comment struct {
 	ID           shared.ID

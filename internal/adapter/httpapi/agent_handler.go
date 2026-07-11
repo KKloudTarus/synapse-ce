@@ -21,7 +21,7 @@ const maxAgentStreamDuration = 30 * time.Minute
 
 // agentDeps bundles the AI-orchestration dependencies the agent routes need. queue is optional: when
 // set, a run is dispatched DURABLY to a worker; otherwise it runs inline in a bounded goroutine
-// pool (dev — non-durable). The inline path is bounded by `sem` (backpressure → 503) and bound
+// pool (dev – non-durable). The inline path is bounded by `sem` (backpressure → 503) and bound
 // to a server-lifetime context so a run is cancelled on shutdown rather than orphaned.
 type agentDeps struct {
 	orch          *orchestrator.Orchestrator
@@ -41,7 +41,7 @@ type agentDeps struct {
 const agentRetryAfterSeconds = 5
 
 // EnableAgent wires the AI agent routes. concurrency bounds inline (non-durable) runs;
-// queueDepth bounds the DURABLE path — the max number of not-yet-terminal agent jobs admitted
+// queueDepth bounds the DURABLE path – the max number of not-yet-terminal agent jobs admitted
 // before the API returns 503 (with Retry-After), so a flood / retry-storm / dead-letter
 // re-drive cannot grow the jobs table without bound. Call after NewRouter; if never called the
 // agent endpoints are not registered (fail-safe: SYNAPSE_AGENT_ENABLED=false leaves off).
@@ -99,7 +99,7 @@ func (rt *Router) admitAgent(ctx context.Context) (release func(), ok bool) {
 	}
 	depth, err := d.queue.Depth(ctx, orchestrator.JobKind)
 	if err != nil {
-		rt.log.Error("agent queue depth check failed — rejecting (fail closed)", "err", err)
+		rt.log.Error("agent queue depth check failed – rejecting (fail closed)", "err", err)
 		return nil, false
 	}
 	if depth >= d.queueDepth {
@@ -148,7 +148,7 @@ func (rt *Router) startAgentSession(w http.ResponseWriter, r *http.Request) {
 	}
 	// Reserve an execution slot BEFORE creating the session, so a SATURATED server returns 503
 	// without ever creating a session it can't drive. NOTE: this guards the saturation case
-	// only — an inline (non-durable) run still does not survive a crash/shutdown mid-run (the
+	// only – an inline (non-durable) run still does not survive a crash/shutdown mid-run (the
 	// session is left `running` with no driver). Durable recovery requires SYNAPSE_AGENT_VIA_WORKER,
 	// where synapse-worker's reconciler re-drives stranded `running` sessions.
 	release, ok := rt.admitAgent(r.Context())
@@ -197,7 +197,7 @@ func (rt *Router) getAgentSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // listAgentDecisions returns the structured decision log for a session: why each tool
-// was chosen, the outcome, the evidence-chain hashes it links to, and why the run stopped —
+// was chosen, the outcome, the evidence-chain hashes it links to, and why the run stopped –
 // answerable from stored data, no transcript parsing. Engagement-scoped + read-only.
 func (rt *Router) listAgentDecisions(w http.ResponseWriter, r *http.Request) {
 	sess, ok := rt.lookupSession(w, r)
@@ -217,7 +217,7 @@ func (rt *Router) listAgentDecisions(w http.ResponseWriter, r *http.Request) {
 }
 
 // getAgentPlan returns the session's execution plan DAG: the proposed nodes, their
-// dependencies, status, and risk — so an operator can see what the agent planned + how it
+// dependencies, status, and risk – so an operator can see what the agent planned + how it
 // settled. Engagement-scoped + read-only. Returns an empty object when the session has no plan
 // (a reactive, non-plan run).
 func (rt *Router) getAgentPlan(w http.ResponseWriter, r *http.Request) {
@@ -254,7 +254,7 @@ func (rt *Router) listAgentApprovals(w http.ResponseWriter, r *http.Request) {
 // decideAgentApproval records a human's approve/deny on a proposed action, then resumes the
 // session (executing on approve, feeding back the denial on deny). Separation of duties is enforced
 // by the route's PermReview gate: a machine role (mcp/agent) is granted nothing in the RBAC matrix,
-// so it can never approve agent actions — the invariant holds the moment such a service principal
+// so it can never approve agent actions – the invariant holds the moment such a service principal
 // is introduced.
 func (rt *Router) decideAgentApproval(w http.ResponseWriter, r *http.Request) {
 	engID := r.PathValue("id")

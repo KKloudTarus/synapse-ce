@@ -37,13 +37,13 @@ var ErrUnavailable = errors.New("egress enforcement unavailable: ip/iptables not
 type Applier struct {
 	ip        string   // resolved `ip` path
 	iptables  string   // resolved `iptables` path
-	ip6tables string   // resolved `ip6tables` path ("" if absent) — IPv6 default-drop fail-closed
-	sysctl    string   // resolved `sysctl` path ("" if absent) — IPv6 disable fail-closed
+	ip6tables string   // resolved `ip6tables` path ("" if absent) – IPv6 default-drop fail-closed
+	sysctl    string   // resolved `sysctl` path ("" if absent) – IPv6 disable fail-closed
 	cmdPrefix []string // prepended to every privileged command (e.g. {"sudo"}); empty when already privileged
 }
 
 // NewApplier resolves the `ip` + `iptables` binaries (Linux only). cmdPrefix is prepended
-// to each command — pass {"sudo"} from an unprivileged dev/test driver, nil in prod where
+// to each command – pass {"sudo"} from an unprivileged dev/test driver, nil in prod where
 // the worker holds CAP_NET_ADMIN.
 func NewApplier(cmdPrefix ...string) (*Applier, error) {
 	ipBin, err := exec.LookPath("ip")
@@ -59,8 +59,8 @@ func NewApplier(cmdPrefix ...string) (*Applier, error) {
 	return &Applier{ip: ipBin, iptables: ipt, ip6tables: ip6Bin, sysctl: sysctlBin, cmdPrefix: cmdPrefix}, nil
 }
 
-// Probe verifies egress enforcement actually works here — i.e. the process has enough
-// privilege (CAP_NET_ADMIN + CAP_SYS_ADMIN) to build a netns + veth + NAT + iptables — by
+// Probe verifies egress enforcement actually works here – i.e. the process has enough
+// privilege (CAP_NET_ADMIN + CAP_SYS_ADMIN) to build a netns + veth + NAT + iptables – by
 // creating and tearing down a throwaway namespace. Returns nil when usable, so the
 // composition root can enable egress only when it will succeed (else degrade to isolated).
 func (a *Applier) Probe(ctx context.Context) error {
@@ -155,7 +155,7 @@ func (a *Applier) Setup(ctx context.Context, name string, idx int, p ports.Egres
 	// IPv6 fail-closed, UNCONDITIONAL (re-audit fix): the v4 rules above don't touch v6, and
 	// a fresh netns autoconfigures an IPv6 link-local. We do not yet compile v6 allow rules,
 	// so v6 must be locked down. Apply BOTH available mechanisms and require at least one to
-	// succeed — never silently leave v6 open: (1) sysctl disable_ipv6 (flushes addresses),
+	// succeed – never silently leave v6 open: (1) sysctl disable_ipv6 (flushes addresses),
 	// (2) ip6tables default-DROP on OUTPUT+FORWARD. If neither tool exists, FAIL the setup.
 	v6Locked := false
 	if a.sysctl != "" {
@@ -173,10 +173,10 @@ func (a *Applier) Setup(ctx context.Context, name string, idx int, p ports.Egres
 	}
 	if !v6Locked {
 		_ = ns.Teardown(context.Background())
-		return nil, fmt.Errorf("egress: cannot lock down IPv6 in the netns (need sysctl or ip6tables) — refusing to run with unfiltered v6")
+		return nil, fmt.Errorf("egress: cannot lock down IPv6 in the netns (need sysctl or ip6tables) – refusing to run with unfiltered v6")
 	}
 
-	// resolve in-scope domains on the host (where DNS works) and PIN them — their
+	// resolve in-scope domains on the host (where DNS works) and PIN them – their
 	// IPs become allow rules + a pinned /etc/hosts the tool reads, while NO DNS egress is
 	// opened. So the tool reaches an in-scope domain (via the pinned host entry → an
 	// allowed IP) but cannot resolve anything else and has no DNS channel to exfiltrate
@@ -283,7 +283,7 @@ func filterRules(rules []ports.EgressRule, allow bool) []ports.EgressRule {
 
 // outputRule appends an OUTPUT rule for one policy rule (per-port when set, else all
 // protocols to the destination). IPv6 rules are skipped here (iptables is v4; ip6tables
-// is the v6 sibling — a follow-up).
+// is the v6 sibling – a follow-up).
 func (a *Applier) outputRule(ctx context.Context, ns, verdict string, r ports.EgressRule) error {
 	if !r.Net.Addr().Is4() {
 		return nil // v4 enforcement only in this layer

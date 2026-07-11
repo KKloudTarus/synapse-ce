@@ -118,13 +118,13 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 			}
 			locations = []SARIFLocation{{PhysicalLocation: phys}}
 		} else if strings.HasPrefix(f.DedupKey, "sast:ai:") {
-			// A gated taint (E39) SAST finding is judgment-anchored, not file:line-anchored — group
+			// A gated taint (E39) SAST finding is judgment-anchored, not file:line-anchored – group
 			// them under one stable rule id rather than leaking the per-finding anchor as the rule id.
 			ruleID = "synapse-taint-sast"
 		} else if p.component != "" {
 			// SCA: point at the manifest/lockfile that declares the vulnerable dependency, so a
 			// code-scanning UI annotates it (GitHub rejects a location that has only a logical/module
-			// location). When the manifest is unknown, emit NO location — a result with no location is a
+			// location). When the manifest is unknown, emit NO location – a result with no location is a
 			// valid repo-level alert, but a logical-only location is not.
 			manifest := ""
 			if opts.Manifest != nil {
@@ -168,7 +168,7 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 			res.Properties["cvssVector"] = f.CVSSVector
 		}
 		if f.ClassReachability != "" {
-			// Coarse JVM class-reachability: "reachable" | "unreferenced". Advisory — lets a
+			// Coarse JVM class-reachability: "reachable" | "unreferenced". Advisory – lets a
 			// consumer separate/deprioritize deps the app never references (priority already reflects it).
 			res.Properties["componentReachability"] = f.ClassReachability
 		}
@@ -249,12 +249,12 @@ func ruleTitle(title string) string {
 		return title
 	}
 	if _, err := strconv.Atoi(inner[colon+1:]); err != nil {
-		return title // not a "<path>:<line>" marker — leave the title intact
+		return title // not a "<path>:<line>" marker – leave the title intact
 	}
 	return title[:open]
 }
 
-// MarshalSARIF renders findings as an indented SARIF 2.1.0 log — the artifact a code-scanning
+// MarshalSARIF renders findings as an indented SARIF 2.1.0 log – the artifact a code-scanning
 // uploader (e.g. GitHub `codeql-action/upload-sarif`) consumes. It is deterministic and templated
 // purely from stored findings: no clock, no LLM (golden rule 5). version is the synapse driver
 // version recorded on the run's tool driver. opts carries optional per-finding resolvers: Manifest gives

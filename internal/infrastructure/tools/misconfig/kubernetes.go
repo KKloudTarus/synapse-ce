@@ -19,7 +19,7 @@ var dangerousCaps = set("ALL", "SYS_ADMIN", "NET_ADMIN", "NET_RAW", "SYS_PTRACE"
 	"SYS_MODULE", "SYS_BOOT", "DAC_READ_SEARCH", "SYS_RAWIO")
 
 // maxNestDepth bounds YAML flow-collection nesting before we decode. yaml.v3 has no recursion-depth
-// limit, so a deeply-nested untrusted document (e.g. millions of '[') can overflow the parser's stack —
+// limit, so a deeply-nested untrusted document (e.g. millions of '[') can overflow the parser's stack –
 // a FATAL error that recover() cannot catch. Real manifests nest < ~30 deep; 200 is generous headroom.
 const maxNestDepth = 200
 
@@ -28,7 +28,7 @@ const maxNestDepth = 200
 const maxLocatorDepth = 1000
 
 // k8sDoc is the slice of a Kubernetes object we inspect. A workload (Deployment, StatefulSet, ...) nests
-// the pod under spec.template.spec; a bare Pod uses spec directly — podSpec() resolves both.
+// the pod under spec.template.spec; a bare Pod uses spec directly – podSpec() resolves both.
 type k8sDoc struct {
 	Kind     string `yaml:"kind"`
 	Metadata struct {
@@ -363,7 +363,7 @@ func dropsAllCaps(sc *ctnSecCtx) bool {
 	return false
 }
 
-// runsAsRoot reports an EXPLICIT root configuration only (runAsUser 0, or runAsNonRoot false) — an unset
+// runsAsRoot reports an EXPLICIT root configuration only (runAsUser 0, or runAsNonRoot false) – an unset
 // securityContext is left alone to keep false positives low.
 func runsAsRoot(sc *ctnSecCtx) bool {
 	if sc.RunAsUser != nil && *sc.RunAsUser == 0 {

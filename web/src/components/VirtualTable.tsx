@@ -9,7 +9,7 @@ export interface Column<T> {
   cell: (item: T) => ReactNode
 }
 
-/** A windowed table that renders only the visible rows — for SBOMs / vuln lists
+/** A windowed table that renders only the visible rows – for SBOMs / vuln lists
  *  that can run to thousands of rows (docs/04-ui-ux.md: virtualize > 50 rows). */
 export function VirtualTable<T>({
   columns,

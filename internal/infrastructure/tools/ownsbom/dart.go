@@ -11,11 +11,11 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// Dart is the owned Dart/Flutter parser: it reads pubspec.lock — the resolved package set —
+// Dart is the owned Dart/Flutter parser: it reads pubspec.lock – the resolved package set –
 // into pub components. pubspec.lock is YAML; under the `packages:` map each indent-2 key is a package whose
 // indent-4 fields include `version:` and `dependency:` ("direct dev" ⇒ development scope, else production).
-// Hand-parsed (a small indented subset — no YAML library, vendor-neutral); deeper-indented `description:`
-// sub-maps are ignored by matching fields at EXACTLY indent 4. Components only — edges deferred.
+// Hand-parsed (a small indented subset – no YAML library, vendor-neutral); deeper-indented `description:`
+// sub-maps are ignored by matching fields at EXACTLY indent 4. Components only – edges deferred.
 type Dart struct{}
 
 // Ecosystem identifies this parser's package ecosystem.

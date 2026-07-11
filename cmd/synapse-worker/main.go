@@ -2,7 +2,7 @@
 // claims recon jobs the API enqueued to the durable queue and runs them under the SAME
 // gate/audit/evidence invariants as the in-process path, but with the sandbox + kernel
 // egress allowlist (it runs with CAP_NET_ADMIN/SYS_ADMIN, which the API lacks). It is a
-// composition root only — no business logic. It coexists with the API via a role-scoped
+// composition root only – no business logic. It coexists with the API via a role-scoped
 // single-instance lock, and the evidence chain is multi-writer-safe.
 package main
 
@@ -53,7 +53,7 @@ func main() {
 	log.Info("starting synapse-worker", "env", cfg.Environment)
 
 	// The worker shares the API's Postgres (the queue + the recon/evidence repos), so a DSN
-	// is required — an in-memory queue is not shared across processes.
+	// is required – an in-memory queue is not shared across processes.
 	if cfg.DBDSN == "" {
 		log.Error("synapse-worker requires SYNAPSE_DB_DSN (the durable queue + repos shared with the API)")
 		os.Exit(1)
@@ -83,7 +83,7 @@ func main() {
 		os.Exit(1)
 	}
 	if !ok {
-		log.Error("another synapse-worker holds the single-instance lock — run ONE worker")
+		log.Error("another synapse-worker holds the single-instance lock – run ONE worker")
 		os.Exit(1)
 	}
 	defer lockConn.Release()
@@ -95,7 +95,7 @@ func main() {
 	auditLog := postgres.NewAuditLog(pool)
 	queue := postgres.NewJobQueue(pool, ids)
 
-	// Credential vault — same master key as the API so secrets resolve.
+	// Credential vault – same master key as the API so secrets resolve.
 	credVault := vault.NewPostgresVault(pool, mustVaultCipher(cfg, log))
 
 	// Evidence blob store (shared with the API when MinIO is configured).
@@ -123,7 +123,7 @@ func main() {
 	}
 
 	// Tamper-resistant custody: the worker SEALS evidence (recon + agent), so it must
-	// also attest + anchor the heads it advances — not leave them un-anchored until a later API
+	// also attest + anchor the heads it advances – not leave them un-anchored until a later API
 	// read. Wire the SAME ed25519 signer (shared seed ⇒ consistent attestation with the API) +
 	// RFC-3161 TSA, fail-CLOSED in production (an ephemeral attestation key cannot back an
 	// "origin" claim across restarts). recon.execute calls Verify after a seal to anchor here.
@@ -140,7 +140,7 @@ func main() {
 		}
 		evidenceService.SetSigner(signer.WithContext(evidence.AttestationContextEvidence))
 		if signer.Ephemeral() {
-			log.Warn("worker chain-head signing key is ephemeral — set SYNAPSE_EVIDENCE_SIGNING_SEED", "key_id", signer.KeyID())
+			log.Warn("worker chain-head signing key is ephemeral – set SYNAPSE_EVIDENCE_SIGNING_SEED", "key_id", signer.KeyID())
 		} else {
 			log.Info("worker chain-head attestation enabled", "key_id", signer.KeyID())
 		}
@@ -157,10 +157,10 @@ func main() {
 	}
 	evidenceService.SetTimestamper(tsaClient, postgres.NewTimestampStore(pool))
 
-	// The sandbox is REQUIRED here — the worker exists to run recon contained.
+	// The sandbox is REQUIRED here – the worker exists to run recon contained.
 	sb, serr := sandbox.NewRunner(cfg.ReconTimeout, cfg.ReconMaxOutput, cfg.SandboxMemMax, cfg.SandboxPidsMax)
 	if serr != nil {
-		log.Error("synapse-worker requires the sandbox (bubblewrap) — install it", "err", serr)
+		log.Error("synapse-worker requires the sandbox (bubblewrap) – install it", "err", serr)
 		os.Exit(1)
 	}
 	sb.SetVault(credVault)
@@ -176,7 +176,7 @@ func main() {
 			egressLive = true
 			log.Info("worker: kernel egress enforcement enabled")
 		} else {
-			log.Warn("worker has no usable egress (needs CAP_NET_ADMIN/SYS_ADMIN) — recon will be network-isolated", "err", perr)
+			log.Warn("worker has no usable egress (needs CAP_NET_ADMIN/SYS_ADMIN) – recon will be network-isolated", "err", perr)
 		}
 	}
 
@@ -202,7 +202,7 @@ func main() {
 	visibility := cfg.ReconTimeout + time.Minute
 
 	// durable agent runs. Register the agent handler with a DEDICATED
-	// dispatcher-backed recon service (its own pool, NO SetQueue) — so the agent executor's
+	// dispatcher-backed recon service (its own pool, NO SetQueue) – so the agent executor's
 	// blocking recon poll never starves THIS worker's recon-claim loop (the self-deadlock the
 	// design flags). The agent session lock is the connection-holding advisory RunLock (it must
 	// not expire mid-LLM-loop); recon uses the row-lease lock above.
@@ -222,7 +222,7 @@ func main() {
 			os.Exit(1)
 		}
 		if egressLive {
-			agentReconSvc.SetSandboxEnforcement(egresspolicy.Compile) // NO SetQueue / SetRunLock — in-process only
+			agentReconSvc.SetSandboxEnforcement(egresspolicy.Compile) // NO SetQueue / SetRunLock – in-process only
 		}
 
 		llm, lerr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMTimeout)
@@ -295,7 +295,7 @@ func main() {
 	}
 
 	// Stale-run sweeper: reclaim recon runs a crash left `running` with no live owner
-	// — i.e. stranded WITHOUT a dead-letter event (the dead-letter hook covers only jobs that
+	// – i.e. stranded WITHOUT a dead-letter event (the dead-letter hook covers only jobs that
 	// dead-letter). Lease-as-liveness: an acquirable lease means no live owner. Immediate pass,
 	// then every 5m, until shutdown.
 	go func() {
@@ -325,7 +325,7 @@ func main() {
 }
 
 // mustVaultCipher builds the vault cipher from the master key (ephemeral in dev), exiting
-// on failure. Mirrors the API so secrets sealed by one resolve in the other — INCLUDING the
+// on failure. Mirrors the API so secrets sealed by one resolve in the other – INCLUDING the
 // production fail-closed guard: without a configured key the worker would seal/resolve under a
 // per-process ephemeral key that diverges from the API's, so every credentialed recon run
 // breaks. Fail closed in production rather than fail open to an ephemeral key.
@@ -348,7 +348,7 @@ func mustVaultCipher(cfg config.Config, log *slog.Logger) *vault.Cipher {
 			log.Error("vault ephemeral key generation failed", "err", err)
 			os.Exit(1)
 		}
-		log.Warn("credential vault key is ephemeral — set SYNAPSE_VAULT_MASTER_KEY; stored secrets will not survive restart")
+		log.Warn("credential vault key is ephemeral – set SYNAPSE_VAULT_MASTER_KEY; stored secrets will not survive restart")
 	}
 	c, err := vault.NewCipher(key)
 	if err != nil {

@@ -86,7 +86,7 @@ func proposal(target string, risk agent.RiskClass) agent.ProposedAction {
 }
 
 // TestAdmitForbidsOutOfScope: even in auto-approve mode, an out-of-scope target is refused
-// by the guard FIRST — the AI cannot escape scope no matter what it proposes.
+// by the guard FIRST – the AI cannot escape scope no matter what it proposes.
 func TestAdmitForbidsOutOfScope(t *testing.T) {
 	gate, _ := newGate(t, agent.ModeAuto)
 	_, err := gate.Admit(context.Background(), proposal("evil.com", agent.RiskRead), "alice")
@@ -96,7 +96,7 @@ func TestAdmitForbidsOutOfScope(t *testing.T) {
 }
 
 // TestAdmitAutoApproved: in-scope + auto-approvable risk → an AdmittedAction (the only way
-// to obtain one is through the gate — its fields are unexported).
+// to obtain one is through the gate – its fields are unexported).
 func TestAdmitAutoApproved(t *testing.T) {
 	gate, _ := newGate(t, agent.ModeAuto)
 	adm, err := gate.Admit(context.Background(), proposal("app.acme.io", agent.RiskRead), "alice")

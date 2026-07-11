@@ -48,7 +48,7 @@ jobs:
       - name: Test
         run: go test ./...
 
-      - name: Build (CGO disabled — distroless parity)
+      - name: Build (CGO disabled – distroless parity)
         run: CGO_ENABLED=0 go build ./cmd/...
 
   backend-windows:

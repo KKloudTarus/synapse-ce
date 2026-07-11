@@ -15,7 +15,7 @@ import (
 )
 
 // TestAcquireGitHostNetSandboxed proves F4: with NO egress applier (the unprivileged-API
-// path), git clone STILL runs fully sandboxed (host-net mode) — never a direct exec — and
+// path), git clone STILL runs fully sandboxed (host-net mode) – never a direct exec – and
 // succeeds. Needs git + bwrap; runs without root (the realistic unprivileged scenario).
 func TestAcquireGitHostNetSandboxed(t *testing.T) {
 	for _, b := range []string{"git", "bwrap"} {

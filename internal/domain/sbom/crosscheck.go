@@ -5,7 +5,7 @@ import "sort"
 // Cross-check (the swappability invariant as a feature, SBOM side): run ≥2 SBOM
 // PRODUCERS (an owned parser registry + a vendor tool like Syft) over the same target and record where
 // their component sets DISAGREE. A component both producers emit is a confidence signal; one only a single
-// producer emits is the human-review signal — surfaced, NEVER auto-resolved. This is the pure, deterministic
+// producer emits is the human-review signal – surfaced, NEVER auto-resolved. This is the pure, deterministic
 // disagreement record the cross-check use case builds on (mirrors vulnerability.CrossCheck).
 
 // CrossCheckItem is one component and which run producers did / did not emit it.
@@ -14,7 +14,7 @@ type CrossCheckItem struct {
 	Version   string
 	PURL      string
 	Reporters []string // the run producers that emitted it (sorted, distinct)
-	Missing   []string // run producers that did NOT emit it (sorted) — empty for an agreed item
+	Missing   []string // run producers that did NOT emit it (sorted) – empty for an agreed item
 }
 
 // CrossCheckReport partitions the union of components by whether ALL run producers emitted them. Producers
@@ -23,16 +23,16 @@ type CrossCheckItem struct {
 type CrossCheckReport struct {
 	Producers     []string         // the SBOM producers that ran (sorted, distinct)
 	Agreed        []CrossCheckItem // emitted by EVERY run producer
-	Disagreements []CrossCheckItem // emitted by some but not all run producers — the review signal
+	Disagreements []CrossCheckItem // emitted by some but not all run producers – the review signal
 }
 
-// CrossCheck diffs each producer's component set. For every component (keyed by ComponentID — PURL, else
+// CrossCheck diffs each producer's component set. For every component (keyed by ComponentID – PURL, else
 // name@version, else name) it compares the producers that emitted it against the run-producer set: emitted by
 // every producer ⇒ Agreed; missed by any ⇒ Disagreement. Pure + deterministic.
 //
 // producerNames SHOULD be the producers actually EXECUTED. The effective set is the UNION of producerNames
 // with every doc's Source: the union only ever EXPANDS the declared set (so a producer that ran but emitted
-// an empty SBOM is still flagged Missing on every component it lacked — never weakened), keeps the report
+// an empty SBOM is still flagged Missing on every component it lacked – never weakened), keeps the report
 // self-consistent if the caller passes an incomplete set, and prevents an empty producerNames from emitting a
 // FALSE "Agreed" (a lone producer then reads as a single-producer, trivially-agreed scan).
 func CrossCheck(producerNames []string, docs []*SBOM) CrossCheckReport {

@@ -2,7 +2,7 @@ package advisory
 
 import "testing"
 
-// TestAffectedEcosystemPyPI: a PyPI ECOSYSTEM range is matched with PEP 440 ordering — including the cases
+// TestAffectedEcosystemPyPI: a PyPI ECOSYSTEM range is matched with PEP 440 ordering – including the cases
 // SemVer gets wrong (a post-release is still inside [0, 2.0); a dev-release of the fixed version is below it).
 func TestAffectedEcosystemPyPI(t *testing.T) {
 	r := []Range{{Type: "ECOSYSTEM", Events: []Event{{Introduced: "0"}, {Fixed: "2.0"}}}}
@@ -39,7 +39,7 @@ func TestAffectedEcosystemSemverEcosystems(t *testing.T) {
 	}
 }
 
-// TestAffectedGitRangeSkipped: a GIT range is never order-matched (no commit graph) — only the explicit
+// TestAffectedGitRangeSkipped: a GIT range is never order-matched (no commit graph) – only the explicit
 // versions list signals affectedness.
 func TestAffectedGitRangeSkipped(t *testing.T) {
 	r := []Range{{Type: "GIT", Events: []Event{{Introduced: "0"}, {Fixed: "deadbeef"}}}}
@@ -52,8 +52,8 @@ func TestAffectedGitRangeSkipped(t *testing.T) {
 }
 
 // TestAffectedUnsupportedEcosystemFailsClosed: an ecosystem with NO owned comparator yet (Hex, Pub,
-// Packagist, Swift, …) still skips ECOSYSTEM ranges — versions list only, never a guessed-order false
-// match. (Maven/RubyGems/NuGet are now SUPPORTED via versions_eco.go — see versions_eco_test.go.)
+// Packagist, Swift, …) still skips ECOSYSTEM ranges – versions list only, never a guessed-order false
+// match. (Maven/RubyGems/NuGet are now SUPPORTED via versions_eco.go – see versions_eco_test.go.)
 func TestAffectedUnsupportedEcosystemFailsClosed(t *testing.T) {
 	r := []Range{{Type: "ECOSYSTEM", Events: []Event{{Introduced: "0"}, {Fixed: "2.0"}}}}
 	for _, eco := range []string{"Hex", "Pub", "Packagist", "SwiftURL"} {
@@ -67,7 +67,7 @@ func TestAffectedUnsupportedEcosystemFailsClosed(t *testing.T) {
 }
 
 // TestAffectedPyPIUnparseableFailsClosed: a PyPI component version that isn't valid PEP 440 never matches a
-// range (fail-closed — no false hit on garbage).
+// range (fail-closed – no false hit on garbage).
 func TestAffectedPyPIUnparseableFailsClosed(t *testing.T) {
 	r := []Range{{Type: "ECOSYSTEM", Events: []Event{{Introduced: "0"}, {Fixed: "2.0"}}}}
 	if Affected("PyPI", "not-a-version", r, nil) {

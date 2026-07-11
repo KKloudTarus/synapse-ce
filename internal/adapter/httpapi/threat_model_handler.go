@@ -18,7 +18,7 @@ type threatModelService interface {
 
 // putThreatModel ingests (replaces) the engagement's architecture threat model. The body is the model
 // (components / flows / trust-boundaries / assets); the use case bounds element counts, fail-closed-validates
-// the DFD (referential integrity), persists it, and audits the action. The engagement is the path's — the
+// the DFD (referential integrity), persists it, and audits the action. The engagement is the path's – the
 // tenant gate (withEngTenant) has already verified it belongs to the caller's tenant.
 func (rt *Router) putThreatModel(w http.ResponseWriter, r *http.Request) {
 	var m threatmodel.Model
@@ -33,7 +33,7 @@ func (rt *Router) putThreatModel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	// surface what this architecture change altered — added/removed components+flows and, most
+	// surface what this architecture change altered – added/removed components+flows and, most
 	// importantly, the data flows that newly cross (or no longer cross) a trust boundary = the attack-surface delta.
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ingested", "boundary_crossings": len(m.BoundaryCrossings()), "delta": delta})
 }

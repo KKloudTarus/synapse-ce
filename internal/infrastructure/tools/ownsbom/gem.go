@@ -11,10 +11,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// Gem is the owned Ruby parser: it reads Gemfile.lock — the resolved gem set — into gem
+// Gem is the owned Ruby parser: it reads Gemfile.lock – the resolved gem set – into gem
 // components, and reads the COMPANION Gemfile (via ParseInput.Dir) to scope gems declared in a
 // `group:development`/`:test` block (or with an inline group: option) as development, since Gemfile.lock
-// carries no group flag. Components only — a spec's deeper-indented deps are version CONSTRAINTS (edges),
+// carries no group flag. Components only – a spec's deeper-indented deps are version CONSTRAINTS (edges),
 // deferred. Hand-parsed (the GEM section's `specs:` block), no Ruby/Bundler dependency.
 type Gem struct{}
 
@@ -72,7 +72,7 @@ func (Gem) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.D
 
 // parseGemSpec parses a `name (version)` spec line. A version containing a space or comma is a dependency
 // CONSTRAINT (e.g. "= 7.0.4", ">= 1.0"), not a resolved spec version, so it is rejected (belt-and-suspenders
-// — the spec-indent filter already excludes dep lines). A platform-qualified version (e.g.
+// – the spec-indent filter already excludes dep lines). A platform-qualified version (e.g.
 // "1.15.0-x86_64-linux") has no space and is taken verbatim.
 func parseGemSpec(line string) (name, version string, ok bool) {
 	open := strings.IndexByte(line, '(')
@@ -89,7 +89,7 @@ func parseGemSpec(line string) (name, version string, ok bool) {
 
 // gemDevGems reads the companion Gemfile (if present) and returns the set of gems scoped development/test:
 // those declared inside a `group:development`/`:test do … end` block, or on a `gem` line carrying an
-// inline `group:`/`groups:`:development/:test option. Best-effort — no Gemfile (or unreadable) → no dev
+// inline `group:`/`groups:`:development/:test option. Best-effort – no Gemfile (or unreadable) → no dev
 // refinement. A balanced block stack (do-blocks + if/unless/case/begin) tracks nesting so the matching
 // `end` pops the right block; a gem is dev when any enclosing block is a dev group.
 func gemDevGems(dir string) map[string]bool {

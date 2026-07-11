@@ -143,13 +143,13 @@ func main() {
 func runInventory(dir string) error {
 	// Wire the synapse-ast sidecar so non-Go languages get accurate function counts too. If the binary is
 	// absent or built without the tree-sitter backend, the provider reports unavailable and the inventory
-	// falls back to Go-only function counts — no error.
+	// falls back to Go-only function counts – no error.
 	astBin := os.Getenv("SYNAPSE_AST_BIN") // else "synapse-ast" in PATH
 	inv, err := codeinventory.New(codeinventory.WithASTProvider(ast.New(astBin))).Inventory(context.Background(), dir)
 	if err != nil {
 		return fmt.Errorf("inventory: %w", err)
 	}
-	fmt.Printf("\nSynapse code inventory — %s\n", dir)
+	fmt.Printf("\nSynapse code inventory – %s\n", dir)
 	if len(inv.Languages) == 0 {
 		fmt.Println("  (no source files detected)")
 		return nil
@@ -203,7 +203,7 @@ func runMetrics(args []string) error {
 	if err != nil {
 		return fmt.Errorf("metrics: %w", err)
 	}
-	fmt.Printf("\nSynapse code complexity — %s\n", dir)
+	fmt.Printf("\nSynapse code complexity – %s\n", dir)
 	if !available {
 		fmt.Println("  the synapse-ast sidecar is unavailable (build it with cgo, or set SYNAPSE_AST_BIN); no complexity computed")
 		return nil
@@ -272,7 +272,7 @@ func runDuplication(args []string) error {
 	if err != nil {
 		return fmt.Errorf("duplication: %w", err)
 	}
-	fmt.Printf("\nSynapse code duplication — %s\n", dir)
+	fmt.Printf("\nSynapse code duplication – %s\n", dir)
 	if report.Truncated {
 		fmt.Println("  ! result truncated at the file cap; metrics are a lower bound")
 	}
@@ -349,7 +349,7 @@ func runQuality(args []string) error {
 			return fmt.Errorf("write sarif: %w", werr)
 		}
 	} else {
-		fmt.Printf("\nSynapse code quality — %s\n", dir)
+		fmt.Printf("\nSynapse code quality – %s\n", dir)
 		byKind := map[finding.Kind]int{}
 		for _, f := range findings {
 			byKind[f.Kind]++
@@ -432,7 +432,7 @@ func runRating(args []string) error {
 			return fmt.Errorf("encode json: %w", err)
 		}
 	} else {
-		fmt.Printf("\nSynapse code health — %s\n", dir)
+		fmt.Printf("\nSynapse code health – %s\n", dir)
 		fmt.Printf("  security:        %s\n", rep.Security)
 		fmt.Printf("  reliability:     %s\n", rep.Reliability)
 		fmt.Printf("  maintainability: %s\n", rep.Maintainability)
@@ -559,7 +559,7 @@ func runGate(args []string) error {
 	if newCodeOnly {
 		scopeLabel = "new code vs " + base
 	}
-	fmt.Printf("\nSynapse quality gate — %s (%s)\n", dir, scopeLabel)
+	fmt.Printf("\nSynapse quality gate – %s (%s)\n", dir, scopeLabel)
 	fmt.Printf("  ratings: security %s · reliability %s · maintainability %s · duplication %.1f%%\n", rep.Security, rep.Reliability, rep.Maintainability, dupRep.Density())
 	for _, cr := range result.Results {
 		mark := "PASS"
@@ -643,12 +643,12 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  skip the live OSV.dev source; detect with Grype's offline DB only (air-gapped / fast)")
-	fmt.Fprintln(os.Stderr, "  synapse-cli inventory <path>             # per-language code-size inventory (files, code/comment/blank lines, functions) — no DB")
+	fmt.Fprintln(os.Stderr, "  synapse-cli inventory <path>             # per-language code-size inventory (files, code/comment/blank lines, functions) – no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli metrics <path> [--fail-on-complexity N] [--top N]  # per-function cyclomatic+cognitive complexity (needs the synapse-ast sidecar)")
-	fmt.Fprintln(os.Stderr, "  synapse-cli duplication <path> [--min-tokens N] [--fail-on-duplication PCT] [--top N]  # copy-paste detection (blocks, lines, density) — no DB")
-	fmt.Fprintln(os.Stderr, "  synapse-cli quality <path> [--fail-on SEV] [--min-complexity N] [--sarif]  # maintainability + reliability findings (+ duplication, + complexity via synapse-ast) — no DB")
-	fmt.Fprintln(os.Stderr, "  synapse-cli rating <path> [--json] [--fail-below GRADE]  # A-E health grades (security/reliability/maintainability) + technical debt — no DB")
-	fmt.Fprintln(os.Stderr, "  synapse-cli gate <path> [--new-code-only] [--base REF] [--gate FILE] [--rules FILE]  # Clean-as-You-Code quality gate (.synapse-gate.yaml / .synapse-rules.yaml) — no DB")
+	fmt.Fprintln(os.Stderr, "  synapse-cli duplication <path> [--min-tokens N] [--fail-on-duplication PCT] [--top N]  # copy-paste detection (blocks, lines, density) – no DB")
+	fmt.Fprintln(os.Stderr, "  synapse-cli quality <path> [--fail-on SEV] [--min-complexity N] [--sarif]  # maintainability + reliability findings (+ duplication, + complexity via synapse-ast) – no DB")
+	fmt.Fprintln(os.Stderr, "  synapse-cli rating <path> [--json] [--fail-below GRADE]  # A-E health grades (security/reliability/maintainability) + technical debt – no DB")
+	fmt.Fprintln(os.Stderr, "  synapse-cli gate <path> [--new-code-only] [--base REF] [--gate FILE] [--rules FILE]  # Clean-as-You-Code quality gate (.synapse-gate.yaml / .synapse-rules.yaml) – no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories <dir>        # ingest a local OSV dump into the owned advisory store (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote     # fetch + ingest app ecosystems from the OSV bulk bucket (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-distros # fetch + ingest OS-package advisories (Debian/Alpine) from OSV (large; requires SYNAPSE_DB_DSN)")
@@ -739,7 +739,7 @@ func syncAdvisories(args []string) error {
 		feed = ownadvisory.NewRemoteFeed(cfg.OSVBulkURL, nil, nil) // default bucket + the covered app ecosystems
 		src = "OSV bulk bucket"
 	case args[0] == "--remote-distros":
-		// OS-package advisories (Debian/Alpine) — large zips, fetched only on explicit request (Epic B).
+		// OS-package advisories (Debian/Alpine) – large zips, fetched only on explicit request (Epic B).
 		feed = ownadvisory.NewRemoteFeed(cfg.OSVBulkURL, ownadvisory.DistroBulkEcosystems, nil)
 		src = "OSV bulk bucket (distros)"
 	case args[0] == "--csaf":
@@ -780,7 +780,7 @@ func syncAdvisories(args []string) error {
 }
 
 // stderrAudit keeps scan actions attributable without a database
-// — the entry is written to the CI log rather than persisted.
+// – the entry is written to the CI log rather than persisted.
 type stderrAudit struct{}
 
 func (stderrAudit) Record(_ context.Context, e ports.AuditEntry) error {
@@ -821,7 +821,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	detectionSources := []ports.DetectionSource{grype.New(cfg.GrypeBin, cfg.GrypeDBDir)}
 	if offline || cfg.Offline {
 		// Make the reduced-coverage mode visible: the operator chose lower recall for speed.
-		fmt.Fprintln(os.Stderr, "synapse-cli: offline mode — live OSV disabled; detecting with Grype's offline DB only")
+		fmt.Fprintln(os.Stderr, "synapse-cli: offline mode – live OSV disabled; detecting with Grype's offline DB only")
 	} else {
 		detectionSources = append([]ports.DetectionSource{osv.New(cfg.OSVBaseURL, nil)}, detectionSources...)
 	}
@@ -853,7 +853,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	if len(jhResolvers) > 0 {
 		sca.SetJarHashResolver(jarhash.NewChain(jhResolvers...))
 	}
-	// Maven full-tree resolution (`mvn dependency:list`) — resolves managed versions + transitive deps a
+	// Maven full-tree resolution (`mvn dependency:list`) – resolves managed versions + transitive deps a
 	// from-source pom scan can't, so a Maven project is handled straight from pom.xml (no manual build).
 	// The CLI dogfoods a TRUSTED local project, so this is ON BY DEFAULT; set
 	// SYNAPSE_MAVEN_RESOLVE_ENABLED=false to opt out. Best-effort: a missing mvn / non-Maven target / error
@@ -864,11 +864,11 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	}
 	if mavenOn {
 		sca.SetMavenResolver(mavenresolve.New(cfg.MvnBin).WithRepoHosts(cfg.MavenRepoHosts).WithLocalRepo(cfg.MavenLocalRepo))
-		// Transparency: the CLI runs mvn UNSANDBOXED (it evaluates the project's POM/plugin config) — make
+		// Transparency: the CLI runs mvn UNSANDBOXED (it evaluates the project's POM/plugin config) – make
 		// that visible so it's never a silent host-exec (the API stays sandbox-gated).
-		fmt.Fprintln(os.Stderr, "synapse-cli: Maven resolver ON — runs `mvn` UNSANDBOXED over the project if it has a pom.xml (trusted-local assumption; set SYNAPSE_MAVEN_RESOLVE_ENABLED=false to disable)")
+		fmt.Fprintln(os.Stderr, "synapse-cli: Maven resolver ON – runs `mvn` UNSANDBOXED over the project if it has a pom.xml (trusted-local assumption; set SYNAPSE_MAVEN_RESOLVE_ENABLED=false to disable)")
 	}
-	// Gradle full-tree resolution — same default-on-for-CLI model as Maven (trusted local project),
+	// Gradle full-tree resolution – same default-on-for-CLI model as Maven (trusted local project),
 	// handled straight from build.gradle. Opt out with SYNAPSE_GRADLE_RESOLVE_ENABLED=false. Best-effort.
 	gradleOn := cfg.GradleResolveEnabled
 	if _, set := os.LookupEnv("SYNAPSE_GRADLE_RESOLVE_ENABLED"); !set {
@@ -876,10 +876,10 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	}
 	if gradleOn {
 		sca.SetGradleResolver(gradleresolve.New(cfg.GradleBin).WithRepoHosts(cfg.MavenRepoHosts).WithGradleHome(cfg.GradleHome))
-		// Gradle evaluates build.gradle (arbitrary Groovy/Kotlin) — even higher-risk than mvn; surface it.
-		fmt.Fprintln(os.Stderr, "synapse-cli: Gradle resolver ON — runs `gradle` UNSANDBOXED over the project if it has a build.gradle, which executes the build script (trusted-local assumption; set SYNAPSE_GRADLE_RESOLVE_ENABLED=false to disable)")
+		// Gradle evaluates build.gradle (arbitrary Groovy/Kotlin) – even higher-risk than mvn; surface it.
+		fmt.Fprintln(os.Stderr, "synapse-cli: Gradle resolver ON – runs `gradle` UNSANDBOXED over the project if it has a build.gradle, which executes the build script (trusted-local assumption; set SYNAPSE_GRADLE_RESOLVE_ENABLED=false to disable)")
 	}
-	// Coarse JVM class-reachability — default-on for the CLI (read-only bytecode parsing, no exec);
+	// Coarse JVM class-reachability – default-on for the CLI (read-only bytecode parsing, no exec);
 	// tags each JVM component reachable/unreferenced from the app's compiled closure. Opt out with
 	// SYNAPSE_JVM_REACHABILITY_ENABLED=false. Best-effort; a not-built project tags nothing.
 	jvmReachOn := cfg.JVMReachabilityEnabled
@@ -929,7 +929,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	sca.SetLicenseFileResolver(licensefile.NewChain(jarlicense.New(), licensefile.New()))
 	// Backfill unknown vuln severities from NVD CVSS (best-effort; set SYNAPSE_NVD_API_KEY for throughput).
 	sca.SetSeverityEnricher(nvd.New(cfg.NVDAPIURL, cfg.NVDAPIKey, nil).WithBudget(cfg.NVDBudget))
-	// --ignore-unfixed (or SYNAPSE_IGNORE_UNFIXED) drops vulns with no upstream fix — the
+	// --ignore-unfixed (or SYNAPSE_IGNORE_UNFIXED) drops vulns with no upstream fix – the
 	// classic distro-noise reducer for OS-package scans (matches Trivy's --ignore-unfixed).
 	sca.SetIgnoreUnfixed(ignoreUnfixed || cfg.IgnoreUnfixed)
 
@@ -964,7 +964,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 			for _, c := range res.SBOM.Components {
 				// SBOM Location is often workspace-rooted with a leading "/" (Syft's dir-scan convention);
 				// a code-scanning UI wants a repo-relative path, so drop any leading slash (a no-op when
-				// absent). If two components share name@version, last write wins — any declaring manifest
+				// absent). If two components share name@version, last write wins – any declaring manifest
 				// is fine for the annotation.
 				if loc := strings.TrimPrefix(c.Location, "/"); loc != "" {
 					manifestByComp[c.Name+"@"+c.Version] = loc
@@ -1025,7 +1025,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 }
 
 func printReport(target string, res *scauc.ScanResult) {
-	fmt.Printf("\nSynapse SCA dogfood — %s\n", target)
+	fmt.Printf("\nSynapse SCA dogfood – %s\n", target)
 	fmt.Printf("  tools: %v · vuln-db: %s\n", res.ToolVersions, res.VulnDBSnapshot)
 	if w := res.Completeness.Warning; w != "" {
 		fmt.Printf("  ! INCOMPLETE SCAN: %s\n", w)
@@ -1042,7 +1042,7 @@ func printReport(target string, res *scauc.ScanResult) {
 			fmt.Printf(" @ %s", img.Digest)
 		}
 		fmt.Printf(" (%s/%s)\n", img.OS, img.Architecture)
-		fmt.Printf("    layers: %d total — %d base (estimated OS/distro), %d application\n",
+		fmt.Printf("    layers: %d total – %d base (estimated OS/distro), %d application\n",
 			len(img.Layers), img.BaseLayerCount, len(img.Layers)-img.BaseLayerCount)
 	}
 	if d := res.Distro; d != nil { // Epic E: captured OS distribution + End-of-Life flag
@@ -1052,11 +1052,11 @@ func printReport(target string, res *scauc.ScanResult) {
 		}
 		switch {
 		case d.EndOfLife:
-			fmt.Printf("  distro: %s — ! END-OF-LIFE since %s (no security updates; %s)\n", name, d.EOLDate, d.Source)
+			fmt.Printf("  distro: %s – ! END-OF-LIFE since %s (no security updates; %s)\n", name, d.EOLDate, d.Source)
 		case d.Known:
-			fmt.Printf("  distro: %s — supported until %s\n", name, d.EOLDate)
+			fmt.Printf("  distro: %s – supported until %s\n", name, d.EOLDate)
 		default:
-			fmt.Printf("  distro: %s — EOL status unknown (not in the curated table)\n", name)
+			fmt.Printf("  distro: %s – EOL status unknown (not in the curated table)\n", name)
 		}
 	}
 	if len(res.Coverage) > 0 { // per-ecosystem breakdown so a thin ecosystem isn't hidden behind the global number
@@ -1070,10 +1070,10 @@ func printReport(target string, res *scauc.ScanResult) {
 		if !q.NTIAMet {
 			mark = "! NTIA GAPS"
 		}
-		fmt.Printf("  sbom quality: %d/100 (NTIA %d/100) — %s\n", q.Score, q.NTIAScore, mark)
+		fmt.Printf("  sbom quality: %d/100 (NTIA %d/100) – %s\n", q.Score, q.NTIAScore, mark)
 		for _, e := range q.Elements { // surface each thin score-feeding dimension so the gap is actionable
 			if e.Category != sbom.QualityCategoryCompliance && e.Score < 100 && e.Detail != "" {
-				fmt.Printf("    %-26s %3d/100 — %s\n", e.Label, e.Score, e.Detail)
+				fmt.Printf("    %-26s %3d/100 – %s\n", e.Label, e.Score, e.Detail)
 			}
 		}
 		// Compliance-only signals gate a profile but deliberately do NOT feed the blended score above; label them
@@ -1087,7 +1087,7 @@ func printReport(target string, res *scauc.ScanResult) {
 				fmt.Printf("    profile-only signals (do not affect the score above):\n")
 				firstCompliance = false
 			}
-			fmt.Printf("      %-24s %3d/100 — %s\n", e.Label, e.Score, e.Detail)
+			fmt.Printf("      %-24s %3d/100 – %s\n", e.Label, e.Score, e.Detail)
 		}
 		for _, p := range q.Profiles { // explicit per-standard PASS/FAIL a regulated buyer can cite
 			fmt.Printf("    %s\n", p.Summary)
@@ -1126,13 +1126,13 @@ func printReport(target string, res *scauc.ScanResult) {
 		}
 	}
 	for _, id := range res.ExpiredSuppressions {
-		fmt.Printf("  ! .synapseignore rule %q has EXPIRED — no longer accepted; the finding trips --fail-on again. Refresh or remove it\n", id)
+		fmt.Printf("  ! .synapseignore rule %q has EXPIRED – no longer accepted; the finding trips --fail-on again. Refresh or remove it\n", id)
 	}
 	for _, id := range res.MalformedSuppressions {
-		fmt.Printf("  ! .synapseignore rule %q has an UNPARSEABLE exp: date — not applied (fail-safe). Fix it to YYYY-MM-DD\n", id)
+		fmt.Printf("  ! .synapseignore rule %q has an UNPARSEABLE exp: date – not applied (fail-safe). Fix it to YYYY-MM-DD\n", id)
 	}
 	if n := len(res.NeedsVerification); n > 0 {
-		fmt.Printf("  needs-verify (precise): %d single-source vuln(s) quarantined — still reported + sealed, exempt from --fail-on\n", n)
+		fmt.Printf("  needs-verify (precise): %d single-source vuln(s) quarantined – still reported + sealed, exempt from --fail-on\n", n)
 		for _, v := range res.NeedsVerification {
 			fmt.Printf("    - %s\n", v.Title)
 		}
@@ -1155,7 +1155,7 @@ func printReport(target string, res *scauc.ScanResult) {
 		} else if c.IgnoreUnfixed {
 			scope = " (unfixed vulns excluded)"
 		}
-		fmt.Printf("\n  compliance: %s v%s — %d/%d controls passing%s\n", c.Title, c.Version, c.Passed, c.Passed+c.Failed, scope)
+		fmt.Printf("\n  compliance: %s v%s – %d/%d controls passing%s\n", c.Title, c.Version, c.Passed, c.Passed+c.Failed, scope)
 		for _, r := range c.Results {
 			status := "PASS"
 			if !r.Passed {

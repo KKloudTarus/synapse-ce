@@ -1,4 +1,4 @@
-// Display helpers (presentation only — never mutate the stored value).
+// Display helpers (presentation only – never mutate the stored value).
 
 const ACRONYMS = new Set(['url', 'cidr', 'api', 'cve', 'ip', 'dns'])
 

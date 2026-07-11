@@ -24,7 +24,7 @@ import (
 
 // fakeToolRunner is the ONLY mock below the LLM: it implements ports.ToolRunner (the lowest
 // exec seam) and returns canned stdout for an argv, running NO real binary. Everything above it
-// — the recon use-case, the gate, the evidence chain, the ReconExecutor, the orchestrator — is
+// – the recon use-case, the gate, the evidence chain, the ReconExecutor, the orchestrator – is
 // the REAL production code. It records every Run so the test can assert exec-exactly-once.
 type fakeToolRunner struct {
 	mu     sync.Mutex

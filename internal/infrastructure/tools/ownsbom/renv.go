@@ -10,9 +10,9 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// Renv is the owned R parser: it reads renv.lock — the resolved dependency set produced by the renv
-// package manager — into cran components. renv.lock is JSON with a top-level "Packages" object mapping a
-// package name to a record carrying its "Package" and "Version". Components only — renv records a per-
+// Renv is the owned R parser: it reads renv.lock – the resolved dependency set produced by the renv
+// package manager – into cran components. renv.lock is JSON with a top-level "Packages" object mapping a
+// package name to a record carrying its "Package" and "Version". Components only – renv records a per-
 // package "Requirements" list, but those edges are deferred. Vendor-neutral (stdlib encoding/json).
 type Renv struct{}
 
@@ -34,7 +34,7 @@ type renvPackage struct {
 
 // Parse extracts the resolved R packages from a renv.lock. The record's "Package" is preferred over the
 // map key for the name (they normally agree); a record missing a name or version is skipped. Result is
-// sorted by PURL — renv.lock's Packages object has no inherent order, so sorting keeps output deterministic.
+// sorted by PURL – renv.lock's Packages object has no inherent order, so sorting keeps output deterministic.
 func (Renv) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err

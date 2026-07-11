@@ -16,7 +16,7 @@ import (
 // AuditLog is an append-only, file-backed audit sink (one JSON object per line).
 // Append-only by construction (O_APPEND); replaced by the Postgres adapter. Each
 // record is chained to the previous one (audit.ComputeHash) so the log is
-// tamper-evident — editing or dropping a line breaks Verify.
+// tamper-evident – editing or dropping a line breaks Verify.
 type AuditLog struct {
 	path string
 	mu   sync.Mutex

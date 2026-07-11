@@ -84,7 +84,7 @@ func (fakeClock) Now() time.Time { return time.Unix(1_000_000, 0).UTC() }
 // --- tests ---
 
 // TestRecordReachableMintsConfirmedTier2 (C1/C2): a reachable result mints a Tier-2 judgment via
-// propose(scan) -> verify(engine) — two DISTINCT reserved non-agent identities, score = deterministic
+// propose(scan) -> verify(engine) – two DISTINCT reserved non-agent identities, score = deterministic
 // proof score, rationale = the proof path.
 func TestRecordReachableMintsConfirmedTier2(t *testing.T) {
 	rec := &fakeRecorder{}
@@ -153,7 +153,7 @@ func TestSupersedesPriorTier15(t *testing.T) {
 }
 
 // TestDoesNotChurnSameTier (C4): a prior Tier-2 judgment is NOT superseded by another Tier-2 run (same
-// rank) — no propose/verify, no churn.
+// rank) – no propose/verify, no churn.
 func TestDoesNotChurnSameTier(t *testing.T) {
 	prior := judgment.Judgment{
 		ID: "old1", Capability: judgment.CapReachability, SubjectKind: judgment.SubjectFinding, SubjectID: "f1",
@@ -170,7 +170,7 @@ func TestDoesNotChurnSameTier(t *testing.T) {
 	}
 }
 
-// TestNoCoverageMintsNothing (C5): a builder error (no coverage) aborts the pass — nothing minted, the
+// TestNoCoverageMintsNothing (C5): a builder error (no coverage) aborts the pass – nothing minted, the
 // weaker prior stands, never a false "not reachable".
 func TestNoCoverageMintsNothing(t *testing.T) {
 	rec := &fakeRecorder{}

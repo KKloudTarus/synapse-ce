@@ -12,16 +12,16 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// Yarn is the owned parser for yarn.lock (components + edges) — npm-ecosystem packages resolved
+// Yarn is the owned parser for yarn.lock (components + edges) – npm-ecosystem packages resolved
 // by Yarn. It line-parses the lock's entries: a key line of one-or-more `name@range` descriptors, an
 // indented `version "x.y.z"` (Yarn v1) / `version: x.y.z` (Yarn Berry) giving the resolved version, and an
 // optional indented `dependencies:` block of `name range` direct deps. yarn.lock carries no dev flag, so it
 // reads the companion package.json (via ParseInput.Dir) and scopes its [devDependencies] as development.
 //
-// Edges: yarn.lock is effectively a DESCRIPTOR→version map — each entry's key line lists every `name@range`
+// Edges: yarn.lock is effectively a DESCRIPTOR→version map – each entry's key line lists every `name@range`
 // descriptor that resolves to it. So a dependency `name range` is resolved by reconstructing its descriptor
-// (`name@range`) and looking up the entry that claims it (resolution-as-filter: an unclaimed descriptor —
-// e.g. a workspace/peer dep with no lock entry — yields no edge). No nearest-wins is needed (yarn's lock is
+// (`name@range`) and looking up the entry that claims it (resolution-as-filter: an unclaimed descriptor –
+// e.g. a workspace/peer dep with no lock entry – yields no edge). No nearest-wins is needed (yarn's lock is
 // already a flat descriptor map, unlike npm's path-keyed tree). Hand-parsed, no third-party lib.
 type Yarn struct{}
 
@@ -65,7 +65,7 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 		}
 		if !indented(raw) {
 			// a col-0 key line starts a new entry. A `name@workspace:…` key is the project/workspace ITSELF
-			// (its version is the non-matchable 0.0.0-use.local), not a dependency — skip it; a non-spec line
+			// (its version is the non-matchable 0.0.0-use.local), not a dependency – skip it; a non-spec line
 			// (Berry's __metadata) has no name and is skipped too.
 			inDeps, cur = false, nil
 			if strings.HasSuffix(line, ":") && !strings.Contains(line, "@workspace:") {
@@ -87,12 +87,12 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 				}
 				continue
 			}
-			inDeps = false // dedented back to an entry field — the dependencies: block ended
+			inDeps = false // dedented back to an entry field – the dependencies: block ended
 		}
 		switch {
 		case strings.HasPrefix(line, "dependencies:") || strings.HasPrefix(line, "optionalDependencies:"):
 			// Both are real installed edges (optional ones are present in the tree when satisfiable; an
-			// unsatisfied one fails the descriptor lookup → no edge anyway) — parity with the npm parser,
+			// unsatisfied one fails the descriptor lookup → no edge anyway) – parity with the npm parser,
 			// which also merges optionalDependencies. peerDependencies stays excluded (host-provides).
 			inDeps, depsIndent = true, indent
 		case strings.HasPrefix(line, "version ") || strings.HasPrefix(line, "version:"):
@@ -123,7 +123,7 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 	var edges []sbom.Dependency
 	for _, e := range entries {
 		if e.version == "" {
-			continue // no resolved version (e.g. a malformed entry) — not a component
+			continue // no resolved version (e.g. a malformed entry) – not a component
 		}
 		scope := prodScope
 		if devNames[e.name] {
@@ -136,7 +136,7 @@ func (Yarn) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.
 		for _, d := range e.deps {
 			v, ok := descVer[d.name+"@"+d.rng]
 			if !ok {
-				continue // descriptor not claimed by any lock entry — no edge
+				continue // descriptor not claimed by any lock entry – no edge
 			}
 			if t := yarnPURL(d.name, v); !seen[t] {
 				seen[t] = true
@@ -168,7 +168,7 @@ func indented(raw string) bool {
 
 // leadingIndent counts a line's leading whitespace (space OR tab) to tell a dependencies: block member
 // (more indented) from a sibling entry field. It counts tabs as well as spaces so it agrees with indented()
-// — yarn.lock is 2-space by spec, but a tab-indented file must not silently lose every edge.
+// – yarn.lock is 2-space by spec, but a tab-indented file must not silently lose every edge.
 func leadingIndent(raw string) int {
 	n := 0
 	for n < len(raw) && (raw[n] == ' ' || raw[n] == '\t') {
@@ -235,7 +235,7 @@ func parseYarnDep(line string) (yarnDep, bool) {
 
 // npmDevDeps reads the companion package.json beside a yarn/pnpm lock (if present) and returns the set of
 // direct [devDependencies] names, so the lock's resolved packages can be scoped dev vs prod (yarn.lock
-// carries no dev flag). Best-effort — a missing/unreadable manifest yields no dev refinement.
+// carries no dev flag). Best-effort – a missing/unreadable manifest yields no dev refinement.
 func npmDevDeps(dir string) map[string]bool {
 	dev := map[string]bool{}
 	if dir == "" {

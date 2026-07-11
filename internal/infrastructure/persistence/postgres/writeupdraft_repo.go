@@ -14,7 +14,7 @@ import (
 )
 
 // writeupDraftCols is the SELECT projection scanned by scanWriteupDraft (tenant_id is written but not
-// read back — it is not part of the domain type; reads are engagement-scoped).
+// read back – it is not part of the domain type; reads are engagement-scoped).
 const writeupDraftCols = `id, engagement_id, finding_id, description, remediation, state, proposed_by, decided_by, created_at, updated_at`
 
 // WriteupDraftRepository persists AI-proposed, human-gated finding write-up drafts to
@@ -85,7 +85,7 @@ func (r *WriteupDraftRepository) ListByEngagement(ctx context.Context, engagemen
 }
 
 // scanWriteupDraft scans a writeupDraftCols row into a Draft, fail-closed on a corrupted/hand-edited
-// state value (defense-in-depth at the DB read boundary — an unknown state is never returned).
+// state value (defense-in-depth at the DB read boundary – an unknown state is never returned).
 func scanWriteupDraft(row rowScanner) (writeupdraft.Draft, error) {
 	var (
 		d                     writeupdraft.Draft

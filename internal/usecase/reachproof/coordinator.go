@@ -9,7 +9,7 @@
 // = the engine. The domain self-confirm guard is satisfied because they differ, and it stays meaningful
 // for the agent path (no agent is involved; this coordinator is not agent-reachable).
 // The proof IS the evidence: the verdict carries the call path + a fixed deterministic score.
-// No coverage (build failed) mints NOTHING — the weaker prior judgment stands, never a false
+// No coverage (build failed) mints NOTHING – the weaker prior judgment stands, never a false
 // "not reachable". Only a SUCCESSFUL build yields reachable / not-reachable judgments.
 // Supersession is append-only: a NEW judgment row + an audit entry naming BOTH sides; the prior
 // judgment is never mutated or deleted.
@@ -27,8 +27,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachability"
 )
 
-// Reserved deterministic-proof identities. They use the "system:" namespace — distinct from the
-// "agent:<sid>" and "human:<id>" namespaces no real principal can collide with — and are mutually
+// Reserved deterministic-proof identities. They use the "system:" namespace – distinct from the
+// "agent:<sid>" and "human:<id>" namespaces no real principal can collide with – and are mutually
 // distinct so verdict.SelfConfirm(verifierActor, proposerActor) is always false. Neither is mintable by
 // the agent/human actor factories.
 const (
@@ -43,7 +43,7 @@ type analyzer interface {
 }
 
 // recorder is the NARROW judgment-lifecycle slice the coordinator needs (analysis.Service satisfies it).
-// It is injected only from the composition root — never handed to the agent tool catalog, so adding
+// It is injected only from the composition root – never handed to the agent tool catalog, so adding
 // a Verify caller here does not widen the agent's reach.
 type recorder interface {
 	Propose(ctx context.Context, proposer string, engagementID shared.ID, capability judgment.Capability, subjectKind judgment.SubjectKind, subjectID shared.ID, claim judgment.Claim) (judgment.Judgment, error)
@@ -72,10 +72,10 @@ func NewCoordinator(a analyzer, r recorder, audit ports.AuditLogger, clock ports
 
 // Record builds the engagement target's call graph ONCE and mints a deterministic Tier-2 reachability
 // judgment per subject. It returns the number of judgments minted. A no-coverage build error aborts the
-// whole pass (mints nothing — the weaker prior judgments stand). Per subject, a judgment is minted
-// only when it SUPERSEDES the prior reachability judgment (or there is none) — same-or-stronger prior is
+// whole pass (mints nothing – the weaker prior judgments stand). Per subject, a judgment is minted
+// only when it SUPERSEDES the prior reachability judgment (or there is none) – same-or-stronger prior is
 // left untouched (no churn). Subjects must have DISTINCT FindingIDs (the supersession check reads the
-// stored prior, not in-flight mints) — the post-scan trigger produces one Subject per finding.
+// stored prior, not in-flight mints) – the post-scan trigger produces one Subject per finding.
 func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, targetRef string, subjects []ports.ReachabilitySubject) (int, error) {
 	if engagementID.IsZero() {
 		return 0, fmt.Errorf("%w: engagement id is required", shared.ErrValidation)
@@ -87,7 +87,7 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, target
 	}
 	analysis, err := c.analyzer.Analyze(ctx, targetRef, allSymbols)
 	if err != nil {
-		return 0, fmt.Errorf("reachability analysis (no coverage — prior tier stands): %w", err)
+		return 0, fmt.Errorf("reachability analysis (no coverage – prior tier stands): %w", err)
 	}
 	if analysis == nil { // defensive: a contract-violating analyzer returning (nil,nil) is no-coverage, not a deref
 		return 0, fmt.Errorf("%w: reachability analysis returned no result", shared.ErrValidation)
@@ -107,7 +107,7 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, target
 		}
 		claim := subjectClaim(sub, reachableBy)
 		if p, ok := prior[sub.FindingID]; ok && !claim.Supersedes(p.claim) {
-			continue // a same-or-stronger prior reachability judgment stands — don't churn
+			continue // a same-or-stronger prior reachability judgment stands – don't churn
 		}
 		if err := c.mint(ctx, engagementID, sub.FindingID, claim, prior[sub.FindingID]); err != nil {
 			return minted, err
@@ -118,7 +118,7 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, target
 }
 
 // deterministicClaimConfidence is the claim's OWN self-reported confidence for a deterministic Tier-2
-// result: maximal (100) — the engine is fully confident in its computed call graph. This is deliberately
+// result: maximal (100) – the engine is fully confident in its computed call graph. This is deliberately
 // distinct from the evidence/verdict score (verdict.DeterministicProofScore=90), which is where the
 // VTA-over-approximation discount lives: the claim asserts itself with full confidence; the gate
 // weighs how much we trust that assertion as publishable evidence.
@@ -180,7 +180,7 @@ func (c *Coordinator) mint(ctx context.Context, engagementID, findingID shared.I
 	if _, err := c.recorder.Verify(ctx, verifierActor, engagementID, proposed.ID, verdict.DeterministicProofScore, proofRationale(claim), proposed.Version); err != nil {
 		return fmt.Errorf("verify reachability judgment: %w", err)
 	}
-	if !prior.id.IsZero() { // append-only — the prior row is untouched; record the supersession with BOTH ids/tiers
+	if !prior.id.IsZero() { // append-only – the prior row is untouched; record the supersession with BOTH ids/tiers
 		if err := c.audit.Record(ctx, ports.AuditEntry{
 			Actor: verifierActor, Action: "judgment.superseded", Target: proposed.ID.String(),
 			Metadata: map[string]string{

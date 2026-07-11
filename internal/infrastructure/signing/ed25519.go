@@ -1,7 +1,7 @@
 // Package signing implements ports.ChainSigner with ed25519: it attests to an
 // evidence chain head so a custody chain proves origin (non-repudiation), not just
 // integrity. ed25519 signatures are deterministic
-// (RFC 8032), so signing the same head with the same key is byte-reproducible —
+// (RFC 8032), so signing the same head with the same key is byte-reproducible –
 // the report path stays reproducible. Verification lives in the
 // domain (evidence.VerifyAttestation); only signing needs the private key.
 package signing
@@ -43,7 +43,7 @@ func (s *Ed25519Signer) WithContext(context string) *Ed25519Signer {
 
 // NewEd25519Signer builds a signer from a 32-byte seed (a stable key, so the same
 // instance always attests under the same key id). If seed is empty, a random key is
-// generated and the signer is marked Ephemeral — attestations still self-verify (the
+// generated and the signer is marked Ephemeral – attestations still self-verify (the
 // public key travels with them), but the key id is not stable across restarts; the
 // caller should log a warning and an operator should configure a seed in production.
 func NewEd25519Signer(seed []byte) (*Ed25519Signer, error) {

@@ -39,7 +39,7 @@ func TestAdvisoryStoreUpsertByPackage(t *testing.T) {
 
 // TestAdvisoryStoreReSyncRebuildsIndex pins the idempotent-replace contract: re-upserting an id with a
 // CHANGED affected set drops the stale index entries (a key no longer affected stops returning the advisory)
-// and adds the new ones — never a duplicate, never a phantom hit on the old package.
+// and adds the new ones – never a duplicate, never a phantom hit on the old package.
 func TestAdvisoryStoreReSyncRebuildsIndex(t *testing.T) {
 	ctx := context.Background()
 	s := NewAdvisoryStore()
@@ -68,7 +68,7 @@ func TestAdvisoryStoreMultiBlockSamePackageIndexedOnce(t *testing.T) {
 }
 
 // TestAdvisoryStoreSkipsEmptyKeys: an affected block with no ecosystem or package is not indexed (it can't
-// be soundly looked up) — never a phantom empty-key hit.
+// be soundly looked up) – never a phantom empty-key hit.
 func TestAdvisoryStoreSkipsEmptyKeys(t *testing.T) {
 	ctx := context.Background()
 	s := NewAdvisoryStore()

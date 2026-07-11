@@ -42,7 +42,7 @@ func (r *EvidenceStore) Append(ctx context.Context, items []evidence.Evidence) e
 			 VALUES ($1, '', $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 			e.ID.String(), findingID, e.EngagementID.String(), e.Kind, e.Hash, e.PreviousHash, e.StorageRef, e.Content, e.CreatedBy, e.CreatedAt); err != nil {
 			// Fork guard: the unique(engagement, previous_hash) index rejects a
-			// second child for the same parent — surface as ErrConflict so the caller
+			// second child for the same parent – surface as ErrConflict so the caller
 			// re-reads the advanced head + re-chains (keeps the chain strictly linear).
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {

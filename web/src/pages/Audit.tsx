@@ -18,13 +18,13 @@ export function Audit() {
 
   const columns: Column<AuditEntry>[] = [
     { header: 'Time', className: 'w-44 shrink-0 font-mono text-xs tabular-nums text-mutedfg', cell: (e) => fmtTime(e.at) },
-    { header: 'Actor', className: 'w-32 shrink-0 truncate', cell: (e) => e.actor || '—' },
+    { header: 'Actor', className: 'w-32 shrink-0 truncate', cell: (e) => e.actor || '–' },
     {
       header: 'Action',
       className: 'w-52 shrink-0 font-mono text-xs',
       cell: (e) => <span className={cn(e.action.endsWith('.denied') && 'text-critical')}>{e.action}</span>,
     },
-    { header: 'Target', className: 'w-48 shrink-0 truncate font-mono text-xs text-mutedfg', cell: (e) => e.target || '—' },
+    { header: 'Target', className: 'w-48 shrink-0 truncate font-mono text-xs text-mutedfg', cell: (e) => e.target || '–' },
     { header: 'Details', className: 'flex-1 truncate text-xs text-subtlefg', cell: (e) => metaSummary(e.metadata) },
   ]
 
@@ -33,7 +33,7 @@ export function Audit() {
       <header className="bg-hero mb-6 rounded-xl border border-border p-6">
         <h1 className="text-3xl font-bold tracking-tight">Audit log</h1>
         <p className="mt-1.5 max-w-2xl text-sm text-mutedfg">
-          Append-only, attributable record of every action — scans, gate decisions (incl. denials), findings, lifecycle, and
+          Append-only, attributable record of every action – scans, gate decisions (incl. denials), findings, lifecycle, and
           evidence.
         </p>
         <ChainStatus />
@@ -54,7 +54,7 @@ export function Audit() {
 }
 
 // ChainStatus verifies the audit hash chain server-side and shows whether the
-// append-only log is intact — the audit-trail analogue of the evidence badge.
+// append-only log is intact – the audit-trail analogue of the evidence badge.
 function ChainStatus() {
   const [report, setReport] = useState<AuditReport | null>(null)
   const [busy, setBusy] = useState(false)
@@ -106,7 +106,7 @@ function ChainStatus() {
       {report?.intact && report.attestation && !err && (
         <span
           className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 font-mono text-xs text-mutedfg ring-1 ring-inset ring-border"
-          title={`Chain head signed (ed25519) by key ${report.attestation.key_id} — proves origin, not just integrity`}
+          title={`Chain head signed (ed25519) by key ${report.attestation.key_id} – proves origin, not just integrity`}
         >
           <FileSignature className="size-3.5" />
           {report.attestation.key_id}
@@ -127,7 +127,7 @@ function ChainStatus() {
 }
 
 function fmtTime(s: string | null): string {
-  return s ? new Date(s).toLocaleString() : '—'
+  return s ? new Date(s).toLocaleString() : '–'
 }
 
 function metaSummary(m?: Record<string, string>): string {

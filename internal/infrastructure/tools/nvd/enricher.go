@@ -3,7 +3,7 @@
 // the NVD CVE API. It implements ports.SeverityEnricher.
 //
 // Bounded + best-effort by design: NVD's per-CVE API is rate-limited (5 req / 30 s without an
-// API key, 50 with one), so this NEVER blocks a scan — it works a time budget, gated by a rate
+// API key, 50 with one), so this NEVER blocks a scan – it works a time budget, gated by a rate
 // limiter, and whatever it can't resolve in the budget stays unknown (no regression, no hang).
 // It ONLY fills an unknown severity; it never overrides a severity a detection source set.
 // Set SYNAPSE_NVD_API_KEY for real throughput; an empty store/outage simply backfills nothing.

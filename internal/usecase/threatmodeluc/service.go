@@ -1,6 +1,6 @@
 // Package threatmodeluc is the architecture-input threat-model ingest use case:
 // it accepts an UNTRUSTED architecture model (from the API), bounds its size, runs the domain's fail-closed
-// Validate (referential integrity), persists it per engagement, and audits the action — the server-side
+// Validate (referential integrity), persists it per engagement, and audits the action – the server-side
 // enforcement the domain seam (internal/domain/threatmodel) is reasoned over by. The agent then proposes
 // STRIDE threats over the stored model. Pure orchestration over ports (no infra import).
 package threatmodeluc
@@ -14,7 +14,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// Size caps on an ingested model — an untrusted payload is bounded BEFORE the (linear) Validate runs, so a
+// Size caps on an ingested model – an untrusted payload is bounded BEFORE the (linear) Validate runs, so a
 // hostile model can't exhaust memory/CPU. Generous vs any real architecture; the HTTP edge also caps bytes.
 const (
 	maxComponents = 2000
@@ -53,7 +53,7 @@ func (s *Service) Ingest(ctx context.Context, principal string, tenantID, engage
 		return threatmodel.ModelDelta{}, err // fail-closed referential integrity (shared.ErrValidation-wrapped)
 	}
 	// Shift-left "re-run on architecture change, surface deltas": diff the new model against the PRIOR
-	// one — read BEFORE Save overwrites it — so the architecture change, especially any NEW boundary crossing
+	// one – read BEFORE Save overwrites it – so the architecture change, especially any NEW boundary crossing
 	// (new attack surface), is computed, returned to the caller, and audited. Deterministic, no LLM.
 	// Best-effort: a read error yields an empty delta (never fabricate an all-added delta from a failed read);
 	// a first ingest (no prior → zero Model) reports everything as added.
@@ -65,7 +65,7 @@ func (s *Service) Ingest(ctx context.Context, principal string, tenantID, engage
 		return threatmodel.ModelDelta{}, fmt.Errorf("save threat model: %w", err)
 	}
 	// Append-only, attributable audit; the AuditLogger impl hash-chains it. The delta counts make an
-	// architecture change — and its security impact (new crossings) — visible + attributable in the trail.
+	// architecture change – and its security impact (new crossings) – visible + attributable in the trail.
 	if err := s.audit.Record(ctx, ports.AuditEntry{
 		Actor:  principal,
 		Action: "threat_model.ingest",

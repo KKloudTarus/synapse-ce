@@ -1,12 +1,12 @@
 // Package taint is the deterministic taint-analysis domain model: a data-flow
 // graph from untrusted SOURCES to dangerous SINKS, with SANITIZER nodes that neutralize a flow, plus the
-// pure query that reports an injection — a source→sink path that crosses no sanitizer.
+// pure query that reports an injection – a source→sink path that crosses no sanitizer.
 //
 // It deliberately layers its OWN edge + role model on the shared "importPath.Symbol" node-identity
 // convention (the one the call-graph + OSV affected-symbols use) rather than reusing callgraph.Edge
 // a call edge says "A calls B"; a taint Flow says "tainted data moves A→B", and taint needs
 // source/sink/sanitizer ROLES a plain call edge cannot carry. Like the callgraph seam, the queries are
-// pure Go — deterministic + table-testable with no tool — so a Tier-2 taint result is reproducible and a
+// pure Go – deterministic + table-testable with no tool – so a Tier-2 taint result is reproducible and a
 // builder adapter (over the shared call-graph engine) just populates the graph.
 package taint
 
@@ -28,7 +28,7 @@ type FlowGraph struct {
 	Flows      []Flow
 }
 
-// TaintPath is a proven injection: untrusted data flows from Source to Sink with no sanitizer between —
+// TaintPath is a proven injection: untrusted data flows from Source to Sink with no sanitizer between –
 // Path is the witness [source, …, sink], the explainable proof.
 type TaintPath struct {
 	Source string
@@ -46,7 +46,7 @@ func toSet(xs []string) map[string]bool {
 	return s
 }
 
-// adjacency builds the From → []To map once (empty endpoints dropped — the builder is untrusted).
+// adjacency builds the From → []To map once (empty endpoints dropped – the builder is untrusted).
 func (g FlowGraph) adjacency() map[string][]string {
 	adj := make(map[string][]string, len(g.Flows))
 	for _, f := range g.Flows {
@@ -58,7 +58,7 @@ func (g FlowGraph) adjacency() map[string][]string {
 }
 
 // Vulnerabilities returns one shortest unsanitized source→sink path per (source, sink) pair that is
-// reachable without crossing a sanitizer — i.e. the injection findings. A sanitizer node is a WALL: the
+// reachable without crossing a sanitizer – i.e. the injection findings. A sanitizer node is a WALL: the
 // search never expands out of it (data leaving a sanitizer is clean), so a sink reachable only through a
 // sanitizer is correctly NOT reported. A source that is itself a sink is reported as a length-1 path.
 // BFS (shortest witness) + cycle-safe; results are sorted (source, then sink) for deterministic output.
@@ -90,7 +90,7 @@ func (g FlowGraph) Vulnerabilities() []TaintPath {
 			n := queue[0]
 			queue = queue[1:]
 			if sanitizers[n.id] {
-				continue // wall: data leaving a sanitizer is clean — do not expand
+				continue // wall: data leaving a sanitizer is clean – do not expand
 			}
 			for _, to := range adj[n.id] {
 				if seen[to] {

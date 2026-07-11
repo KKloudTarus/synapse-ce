@@ -29,7 +29,7 @@ func New(bin string) *Builder {
 	return &Builder{bin: bin}
 }
 
-// WithRunner runs synapse-callgraph through a ToolRunner (the SandboxRunner) — REQUIRED in production: the
+// WithRunner runs synapse-callgraph through a ToolRunner (the SandboxRunner) – REQUIRED in production: the
 // binary compiles UNTRUSTED target source via go/packages, so it must be confined (cgo is also disabled
 // here as defense-in-depth). Like govulncheck source-mode, the target needs a buildable, pre-fetched module
 // cache bound into the sandbox (an operational follow-up); missing deps → fail-closed (no graph),
@@ -39,7 +39,7 @@ func (b *Builder) WithRunner(r ports.ToolRunner) *Builder { b.runner = r; return
 var _ ports.CallGraphBuilder = (*Builder)(nil)
 
 // Build runs `synapse-callgraph build-callgraph <targetRef>` and parses its wire output into the domain
-// call graph. A load/type error in the target fails closed (the binary exits non-zero) — never a partial
+// call graph. A load/type error in the target fails closed (the binary exits non-zero) – never a partial
 // graph, which would drop taint paths.
 func (b *Builder) Build(ctx context.Context, targetRef string) (*callgraph.Graph, error) {
 	out, err := b.run(ctx, targetRef)
@@ -60,7 +60,7 @@ func (b *Builder) run(ctx context.Context, targetRef string) ([]byte, error) {
 	if b.runner != nil {
 		// Bind the target READ-ONLY (a compromised analyzer can't mutate the acquired source) + disable cgo
 		// so a malicious target can't get its C compiled during load. The SandboxRunner hands a CLEAN base
-		// env (PATH/HOME only — the worker's GOPACKAGESDRIVER/CC/GOFLAGS never pass through) plus its
+		// env (PATH/HOME only – the worker's GOPACKAGESDRIVER/CC/GOFLAGS never pass through) plus its
 		// configured cgroup/egress confinement, so this spec only adds CGO_ENABLED=0 on top.
 		res, err := b.runner.Run(ctx, ports.ToolSpec{
 			Name:          b.bin,
@@ -89,7 +89,7 @@ func (b *Builder) run(ctx context.Context, targetRef string) ([]byte, error) {
 	return out, nil
 }
 
-// truncate caps a tool stderr for an error message — compiler diagnostics can quote target source, so the
+// truncate caps a tool stderr for an error message – compiler diagnostics can quote target source, so the
 // captured text is bounded (and must be kept out of the LLM transcript + audit, GR3).
 func truncate(s string, n int) string {
 	if len(s) <= n {

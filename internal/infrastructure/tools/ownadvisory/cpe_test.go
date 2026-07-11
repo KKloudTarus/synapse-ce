@@ -14,7 +14,7 @@ func TestCPEToEcosystem(t *testing.T) {
 		{"PyPI canonicalized", "cpe:2.3:a:x:Django_REST:1.0:*:*:*:*:python:*:*", "PyPI", "django-rest", "1.0", true},
 		{"unmapped target_sw (apache http)", "cpe:2.3:a:apache:http_server:2.4:*:*:*:*:*:*:*", "", "", "", false},
 		// Go + Maven are deliberately NOT mapped: their package key (module path / groupId:artifactId) is not
-		// the CPE product, so a mapping would mis-key — and Go's comparator would amplify it (security HIGH).
+		// the CPE product, so a mapping would mis-key – and Go's comparator would amplify it (security HIGH).
 		{"go module not keyed by CPE product", "cpe:2.3:a:etcd-io:etcd:3.5.0:*:*:*:*:go:*:*", "", "", "", false},
 		{"maven not keyed by CPE product", "cpe:2.3:a:apache:log4j:2.14.0:*:*:*:*:maven:*:*", "", "", "", false},
 		{"rubygems has no range comparator yet", "cpe:2.3:a:x:rails:6.0.0:*:*:*:*:ruby:*:*", "", "", "", false},
@@ -34,7 +34,7 @@ func TestCPEToEcosystem(t *testing.T) {
 }
 
 func TestSplitCPEHandlesEscapedColon(t *testing.T) {
-	// CPE 2.3 escapes ':' as "\:" inside a component — a naive split would over-split.
+	// CPE 2.3 escapes ':' as "\:" inside a component – a naive split would over-split.
 	parts := splitCPE(`cpe:2.3:a:ven\:dor:prod:1.0:*:*:*:*:python:*:*`)
 	if len(parts) != 13 {
 		t.Fatalf("escaped colon must not over-split: want 13 components, got %d (%v)", len(parts), parts)

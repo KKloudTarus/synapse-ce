@@ -3,24 +3,24 @@ package ownadvisory
 import "strings"
 
 // cpeToEcosystem bridges a CPE 2.3 product identifier to the OSV (ecosystem, package) key the owned matcher
-// uses. CSAF and NVD identify products by CPE — a vendor/product/version tuple plus a
-// `target_sw` platform — NOT by the PURL ecosystem+package the SBOM side keys on. There is no general,
+// uses. CSAF and NVD identify products by CPE – a vendor/product/version tuple plus a
+// `target_sw` platform – NOT by the PURL ecosystem+package the SBOM side keys on. There is no general,
 // lossless CPE↔PURL mapping, so this is a deliberately CONSERVATIVE best-effort bridge:
 //
 // it maps ONLY when the CPE part is "a" (application) AND `target_sw` names a language ecosystem the
 // owned matcher has a version comparator for; anything else returns ok=false and the caller skips+logs
-// it (a wrong ecosystem key would silently mis-attribute a CVE — far worse than a miss);
+// it (a wrong ecosystem key would silently mis-attribute a CVE – far worse than a miss);
 // the package name is the CPE product (canonicalized). The allow-list (targetSWEcosystem) is restricted
 // to ecosystems where the CPE product IS the package key, so the name is faithful; ecosystems whose key
 // is NOT the CPE product (Maven groupId:artifactId, Go module path) are excluded there rather than
-// mapped to a name that could never match. Where a name is nonetheless imperfect it FAILS to match — the
+// mapped to a name that could never match. Where a name is nonetheless imperfect it FAILS to match – the
 // exact (ecosystem, package) key in advisory.Match means it never matches the WRONG package.
 //
 // Net: this yields true matches for the common language-ecosystem case and fails closed everywhere else,
 // rather than fabricating ecosystem keys. The matching value therefore depends on the SBOM carrying
 // CPE-derivable components; this is the documented limitation of CPE-keyed advisory feeds.
 //
-// It also returns the CPE's version component (unescaped, verbatim — "*"=ANY, "-"=NA, else a concrete
+// It also returns the CPE's version component (unescaped, verbatim – "*"=ANY, "-"=NA, else a concrete
 // version) so the caller can map a CSAF/NVD product binding onto an explicit affected version.
 func cpeToEcosystem(cpe string) (ecosystem, pkg, version string, ok bool) {
 	c, parsed := parseCPE23(cpe)
@@ -39,12 +39,12 @@ func cpeToEcosystem(cpe string) (ecosystem, pkg, version string, ok bool) {
 }
 
 // targetSWEcosystem maps a CPE 2.3 `target_sw` value to the OSV ecosystem. It is intentionally limited to
-// ecosystems where BOTH hold: (1) the owned matcher has a version comparator (advisory.schemeFor — so an
+// ecosystems where BOTH hold: (1) the owned matcher has a version comparator (advisory.schemeFor – so an
 // "all versions" open range can actually match), AND (2) the CPE product IS the package key (a simple
 // lowercase name equal to the OSV/SBOM key after canonicalName). Others are DELIBERATELY EXCLUDED because a
-// mapping there would be inert or mis-keyed — better to skip+log than fabricate a key:
+// mapping there would be inert or mis-keyed – better to skip+log than fabricate a key:
 // Maven (key is groupId:artifactId) and Go (key is the module path): the CPE product can never equal
-// the stored key, so it would never match — and for Go, comparator-backed open ranges could even
+// the stored key, so it would never match – and for Go, comparator-backed open ranges could even
 // amplify a coincidental mis-key (security review HIGH);
 // RubyGems / NuGet: no ECOSYSTEM-range comparator yet (open ranges would be silently inert), and NuGet's
 // PascalCase id does not fold to a lowercase CPE product.
@@ -113,7 +113,7 @@ func splitCPE(s string) []string {
 			b.WriteRune(r)
 		}
 	}
-	if escaped { // a trailing lone backslash — keep it rather than drop a rune
+	if escaped { // a trailing lone backslash – keep it rather than drop a rune
 		b.WriteRune('\\')
 	}
 	out = append(out, b.String())

@@ -1,5 +1,5 @@
 // Package taintscan is the coordinator that turns a target's deterministic taint analysis
-// into PROPOSED, gated CapSAST judgments — one per reported injection path × injection class — reusing the
+// into PROPOSED, gated CapSAST judgments – one per reported injection path × injection class – reusing the
 // existing propose→verify gate. It builds the workspace call graph (sandboxed, via the CallGraphBuilder
 // port), assembles the taint.FlowGraph over the injection catalog, and proposes a SASTClaim for each
 // source→sink flow Vulnerabilities() reports.
@@ -10,14 +10,14 @@
 // and a DISTINCT verifier's verdict ≥75 is the only thing that confirms it. There is one reserved
 // "system:" proposer identity and deliberately NO verifier identity here (contrast reachproof, whose
 // deterministic proof legitimately auto-confirms).
-// The proposer slice is NARROW (Propose only — no Verify/score path) and composition-root-only; the
+// The proposer slice is NARROW (Propose only – no Verify/score path) and composition-root-only; the
 // arch_test keeps this package off the agent surface (defense-in-depth, mirroring reachproof), even
 // though propose-only already grants no confirm power.
-// No coverage (the build failed / un-buildable target) proposes NOTHING — never a false "clean" (the
+// No coverage (the build failed / un-buildable target) proposes NOTHING – never a false "clean" (the
 // SCA pipeline drives this best-effort and IGNORES the error). The build error (which may wrap tool
 // stderr) is returned but never written to the audit log or an LLM transcript (GR3).
 // The proposal's witness is recorded as append-only, attributable evidence carrying ONLY normalized
-// importPath.Symbol frames + the injection class (GR6/GR3 — no file contents, env, or secrets).
+// importPath.Symbol frames + the injection class (GR6/GR3 – no file contents, env, or secrets).
 package taintscan
 
 import (
@@ -34,18 +34,18 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// proposerActor is the reserved, system-namespace identity the taint engine proposes under — distinct from
+// proposerActor is the reserved, system-namespace identity the taint engine proposes under – distinct from
 // the "agent:<sid>" / "human:<id>" namespaces no real principal can collide with, and not mintable by the
 // agent/human actor factories. It only ever PROPOSES; a gated CapSAST judgment is confirmed solely by a
 // DISTINCT verifier's sealed verdict ≥75.
 const proposerActor = "system:taint-scan"
 
 // maxWitnessElems bounds the proof path recorded in the audit metadata so a hostile/huge call graph cannot
-// seal an unbounded string (generous — a real taint path is far smaller).
+// seal an unbounded string (generous – a real taint path is far smaller).
 const maxWitnessElems = 64
 
 // builder builds a target's call graph (ports.CallGraphBuilder satisfies it). A build error is NO COVERAGE
-// — the coordinator proposes nothing rather than a false "clean".
+// – the coordinator proposes nothing rather than a false "clean".
 type builder interface {
 	Build(ctx context.Context, targetRef string) (*callgraph.Graph, error)
 }
@@ -70,7 +70,7 @@ type Coordinator struct {
 var _ ports.TaintScanner = (*Coordinator)(nil)
 
 // NewCoordinator validates and returns the coordinator. The catalog must be non-empty (an empty catalog
-// would silently propose nothing — a misconfiguration, not a clean result).
+// would silently propose nothing – a misconfiguration, not a clean result).
 func NewCoordinator(b builder, p proposer, catalog taint.Catalog, audit ports.AuditLogger, clock ports.Clock) (*Coordinator, error) {
 	if b == nil || p == nil || audit == nil || clock == nil {
 		return nil, fmt.Errorf("%w: taintscan coordinator is missing a dependency", shared.ErrValidation)
@@ -91,9 +91,9 @@ func (c *Coordinator) Scan(ctx context.Context, engagementID shared.ID, targetRe
 	}
 	g, err := c.builder.Build(ctx, targetRef)
 	if err != nil {
-		// No coverage: propose nothing. The wrapped error may carry tool stderr — it is returned to the
+		// No coverage: propose nothing. The wrapped error may carry tool stderr – it is returned to the
 		// best-effort caller (which ignores it) and never reaches the audit log or an LLM transcript.
-		return 0, fmt.Errorf("taint call-graph build (no coverage — no judgments proposed): %w", err)
+		return 0, fmt.Errorf("taint call-graph build (no coverage – no judgments proposed): %w", err)
 	}
 	if g == nil { // defensive: a contract-violating builder returning (nil,nil) is no-coverage, not a deref
 		return 0, fmt.Errorf("%w: taint call-graph build returned no graph", shared.ErrValidation)
@@ -103,7 +103,7 @@ func (c *Coordinator) Scan(ctx context.Context, engagementID shared.ID, targetRe
 	proposed := 0
 	for _, v := range fg.Vulnerabilities() {
 		// Join the sink-class index against the REPORTED path: every injection CLASS the reached
-		// sink-using function calls is reachable via this flow. Dedup by (CWE, Rule) — two sinks of the
+		// sink-using function calls is reachable via this flow. Dedup by (CWE, Rule) – two sinks of the
 		// same class at one function (e.g. DB.Query + DB.Exec, both CWE-89) produce a byte-identical claim
 		// (Location is the function, not the specific sink call), so they are the SAME finding and must be
 		// proposed once. This also matches flowSubjectID's per-class key (no duplicate subjects/seals).
@@ -114,7 +114,7 @@ func (c *Coordinator) Scan(ctx context.Context, engagementID shared.ID, targetRe
 				continue
 			}
 			seen[classKey] = true
-			// Location is the sink-using function's importPath.Symbol — function-granular: the current build
+			// Location is the sink-using function's importPath.Symbol – function-granular: the current build
 			// carries no file:line (precise positions are the deferred def-use follow-up), so the claim's
 			// "path[:line]" field holds the symbol.
 			claim := judgment.SASTClaim{CWE: sink.CWE, Location: v.Sink, Rule: sink.Rule}
@@ -133,7 +133,7 @@ func (c *Coordinator) Scan(ctx context.Context, engagementID shared.ID, targetRe
 
 // flowSubjectID derives the stable SubjectDataFlow id for a (source→sink, injection class) triple so a
 // re-scan of the same flow+class yields the SAME subject (no churn within a pass), tenant-scoped by
-// engagement. Keyed on source/sink importPath.Symbol + CWE + Rule (the fields that distinguish a claim) —
+// engagement. Keyed on source/sink importPath.Symbol + CWE + Rule (the fields that distinguish a claim) –
 // never file contents (mirrors sca.findingID's derivation). Cross-scan idempotency additionally depends on
 // the judgment store, as with reachproof.
 func flowSubjectID(engagementID shared.ID, v taint.TaintPath, sink taint.Sink) shared.ID {
@@ -142,7 +142,7 @@ func flowSubjectID(engagementID shared.ID, v taint.TaintPath, sink taint.Sink) s
 }
 
 // recordWitness records the taint proof path as append-only, attributable evidence for the proposed
-// judgment (GR6). The metadata carries ONLY normalized importPath.Symbol frames + the injection class —
+// judgment (GR6). The metadata carries ONLY normalized importPath.Symbol frames + the injection class –
 // never file contents, env, build stderr, or secrets (GR3), mirroring reachproof's proof rationale.
 func (c *Coordinator) recordWitness(ctx context.Context, engagementID, judgmentID shared.ID, v taint.TaintPath, sink taint.Sink) error {
 	if err := c.audit.Record(ctx, ports.AuditEntry{

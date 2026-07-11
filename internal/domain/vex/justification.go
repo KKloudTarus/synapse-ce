@@ -5,7 +5,7 @@
 package vex
 
 // OpenVexJustification is the CLOSED set of OpenVEX justifications for a not_affected status (per the OpenVEX
-// spec). A justification is a STRUCTURED choice, never free prose — so it can ride in a judgment claim (R8).
+// spec). A justification is a STRUCTURED choice, never free prose – so it can ride in a judgment claim (R8).
 type OpenVexJustification string
 
 const (

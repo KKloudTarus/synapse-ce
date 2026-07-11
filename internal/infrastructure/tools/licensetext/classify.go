@@ -1,7 +1,7 @@
 // Package licensetext classifies license FILE TEXT into an SPDX id with a confidence
 // score, using github.com/google/licensecheck (the classifier deps.dev/pkgsite use).
 // It is the shared, deterministic, offline primitive behind both the JAR license reader
-// (jarlicense) and the workspace license-file scanner (licensefile) — so they agree on
+// (jarlicense) and the workspace license-file scanner (licensefile) – so they agree on
 // the match threshold and the SPDX id, and both can surface the confidence.
 package licensetext
 

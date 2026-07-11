@@ -2,7 +2,7 @@
 -- Phase 4 hardening PR3 (ADR-0012): the LLM-proposed, Go-validated execution plan for an agent
 -- session. ONE plan per session (session_id UNIQUE) so a redelivered Drive job cannot fork a
 -- second plan. `revision` is an optimistic-concurrency token: a node-status change is a guarded
--- UPDATE (… WHERE revision=$expected) that bumps it, making a node claim an atomic CAS — the
+-- UPDATE (… WHERE revision=$expected) that bumps it, making a node claim an atomic CAS – the
 -- durable idempotency authority that stops a redelivered/concurrent driver double-running a
 -- node. `nodes` holds the DAG (id, tool, target, depends_on, status, action_id, risk) as JSONB;
 -- the domain (agent.Plan) owns the structural invariants, this table just persists the bytes.

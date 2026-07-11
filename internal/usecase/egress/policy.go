@@ -1,6 +1,6 @@
 // Package egress compiles an engagement scope into a default-deny egress policy: the
 // concrete set of {destination, ports} a sandboxed tool may reach. It is
-// the kernel-enforced backstop for scope enforcement — the gate refuses to LAUNCH an
+// the kernel-enforced backstop for scope enforcement – the gate refuses to LAUNCH an
 // out-of-scope run; this policy makes the kernel DROP any out-of-scope packet a tool
 // tries to send. The compiler is a pure, deterministic function of the scope; the
 // netns/iptables application + DNS pinning live in infrastructure. (The
@@ -83,7 +83,7 @@ func addDomain(p *ports.EgressPolicy, allow bool, host string) {
 }
 
 // hostPrefix returns the single-host prefix for an address (/32 v4, /128 v6). It does
-// NOT unmap an IPv4-mapped IPv6 — matching the scope matcher's family-strict stance
+// NOT unmap an IPv4-mapped IPv6 – matching the scope matcher's family-strict stance
 // (scope.go addrOf), so a mapped form fails closed (a v6 /128 won't match v4 packets)
 // rather than silently widening into a v4 allow.
 func hostPrefix(a netip.Addr) netip.Prefix {
@@ -91,7 +91,7 @@ func hostPrefix(a netip.Addr) netip.Prefix {
 }
 
 // urlHostPort extracts the lowercased host + port from a URL value; port 0 means the
-// scheme default (80/443) was implied — callers treat 0 as "the URL's default port".
+// scheme default (80/443) was implied – callers treat 0 as "the URL's default port".
 func urlHostPort(value string) (host string, port uint16) {
 	value = strings.TrimSpace(value)
 	if !strings.Contains(value, "://") {

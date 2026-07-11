@@ -9,10 +9,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// Composer is the owned PHP parser: it reads composer.lock — the resolved dependency set —
+// Composer is the owned PHP parser: it reads composer.lock – the resolved dependency set –
 // into composer components. composer.lock is JSON with two arrays: "packages" (production) and
 // "packages-dev" (development), each entry {name: "vendor/package", version}. The dev split is INLINE in
-// the lock (no companion needed). Components only — each package's "require" edges are deferred.
+// the lock (no companion needed). Components only – each package's "require" edges are deferred.
 // Vendor-neutral (stdlib encoding/json), no third-party Composer library.
 type Composer struct{}
 

@@ -30,7 +30,7 @@ const csafFixture = `{
       "product_status": {"known_affected": ["P-APACHE"]}
     },
     {
-      "title": "no cve — must be skipped",
+      "title": "no cve – must be skipped",
       "product_status": {"known_affected": ["P-DJANGO-321"]}
     }
   ]
@@ -158,7 +158,7 @@ func TestParseCSAFBranchesAndVendorFix(t *testing.T) {
 }
 
 // A pathologically deep branches tree (well past maxBranchDepth, but small bytes + under the JSON decoder's
-// own nesting limit) must NOT panic — collectBranchCPEs is depth-bounded; the too-deep product is dropped.
+// own nesting limit) must NOT panic – collectBranchCPEs is depth-bounded; the too-deep product is dropped.
 func TestParseCSAFDeepBranchesBounded(t *testing.T) {
 	const depth = 500
 	open := strings.Repeat(`{"category":"x","name":"n","branches":[`, depth)

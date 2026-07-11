@@ -1,6 +1,6 @@
 // Package ownadvisory is the OWNED advisory DetectionSource: it matches an SBOM
 // against Synapse's own normalized advisory store using the owned matcher (internal/domain/advisory),
-// producing the same vulnerability.RawFinding the OSV/Grype adapters do — but WITHOUT querying any
+// producing the same vulnerability.RawFinding the OSV/Grype adapters do – but WITHOUT querying any
 // third-party service. It is the detection-independence counterpart to the owned SBOM producer:
 // live OSV + Grype stay wired as a cross-check, but a scan can run fully offline against the owned store.
 package ownadvisory
@@ -35,7 +35,7 @@ func (s *Source) Name() string { return sourceName }
 
 // Scan matches every component with a resolvable version against the owned store and emits a RawFinding
 // per affected advisory. A component whose PURL ecosystem is unmapped, or with no resolvable version, is
-// skipped (it can't be soundly matched) — never a false hit. A store error fails the WHOLE scan (the SCA
+// skipped (it can't be soundly matched) – never a false hit. A store error fails the WHOLE scan (the SCA
 // pipeline aborts; live OSV/Grype, when also wired, are the cross-check across scans, not a within-scan
 // fallback). NOTE (no-silent-gap): an offline-only deployment should surface skipped-component
 // coverage via the pipeline's Completeness; that rides on the offline-mode composition-root wiring.
@@ -90,7 +90,7 @@ func rawFinding(a advisory.Advisory, c sbom.Component, fixed string) vulnerabili
 		Description:  a.Summary,
 	}
 	// Severity from the score; if the store has the vector but no precomputed score, derive it (an ingester
-	// may store only the vector) — mirrors the OSV adapter so a vuln found by both correlates to one band.
+	// may store only the vector) – mirrors the OSV adapter so a vuln found by both correlates to one band.
 	score := a.CVSSScore
 	if score == 0 && a.CVSSVector != "" {
 		if s, ok := shared.CVSSv3BaseScore(a.CVSSVector); ok {
@@ -104,7 +104,7 @@ func rawFinding(a advisory.Advisory, c sbom.Component, fixed string) vulnerabili
 	return rf
 }
 
-// preferCVE returns a CVE id when one is present (the id or an alias), else the primary id — mirroring the
+// preferCVE returns a CVE id when one is present (the id or an alias), else the primary id – mirroring the
 // OSV adapter so the owned source's AdvisoryID dedupes against the live sources in Correlate.
 func preferCVE(id string, aliases []string) string {
 	if strings.HasPrefix(id, "CVE-") {
@@ -148,7 +148,7 @@ func purlQualifier(purl, key string) string {
 // osDistroEcosystem derives the release-versioned ecosystem key for an OS-package PURL from its "distro"
 // qualifier (Syft emits e.g. distro=debian-9 / ubuntu-22.04 / alpine-3.18.12). Debian keys by major
 // ("Debian:<major>", from OSV); Alpine by "Alpine:v<major>.<minor>" (OSV); Ubuntu by its full VERSION_ID
-// ("Ubuntu:<version>") — the canonical key the OWNED Ubuntu OVAL feed writes, which sidesteps OSV's
+// ("Ubuntu:<version>") – the canonical key the OWNED Ubuntu OVAL feed writes, which sidesteps OSV's
 // awkward :LTS/:Pro variants because we own both the feed and this mapping. The RPM distros stay deferred
 // (return "" → skip → never a false match), though their comparators exist for any future bridge.
 func osDistroEcosystem(purl string) string {
@@ -190,7 +190,7 @@ func osDistroEcosystem(purl string) string {
 		}
 	case "rpm":
 		// The rpm distros OSV keys by "<Name>:<major>". RHEL/CentOS/Fedora use module-qualified or uncertain
-		// keys (e.g. "Red Hat:enterprise_linux:9::baseos"), so they are intentionally NOT mapped here — the
+		// keys (e.g. "Red Hat:enterprise_linux:9::baseos"), so they are intentionally NOT mapped here – the
 		// cataloger flags them DistroResolved=false so an unmatched OS-package set is surfaced, never silent.
 		major := ver
 		if i := strings.IndexByte(ver, '.'); i >= 0 {
@@ -211,7 +211,7 @@ func osDistroEcosystem(purl string) string {
 	return ""
 }
 
-// osvEcosystem maps a PURL type to the OSV ecosystem the store is keyed by. Unmapped → "" (skip — never a
+// osvEcosystem maps a PURL type to the OSV ecosystem the store is keyed by. Unmapped → "" (skip – never a
 // false match). Covers the ecosystems the owned SBOM producer emits.
 func osvEcosystem(purlType string) string {
 	switch purlType {
@@ -230,7 +230,7 @@ func osvEcosystem(purlType string) string {
 	case "nuget":
 		return "NuGet"
 	case "hex":
-		return "Hex" // Elixir/Erlang; OSV has a Hex ecosystem. Explicit-version matches today —
+		return "Hex" // Elixir/Erlang; OSV has a Hex ecosystem. Explicit-version matches today –
 		// Hex range ordering (a comparator in advisory.schemeFor) is a follow-up, so ranges are skipped (safe).
 	}
 	return ""

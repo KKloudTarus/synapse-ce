@@ -1,5 +1,5 @@
 // Package untrusted is the shared guard for any UNTRUSTED text a source-reading AI ingests
-// — dependency source excerpts, files a SAST/threat brain reads, or a
+// – dependency source excerpts, files a SAST/threat brain reads, or a
 // tool's stdout. It composes the controls that keep secrets out of logs and the LLM
 // boundary intact: REDACT secrets → CAP size (rune-safe) → CLASSIFY likely prompt-injection → FENCE
 // the content so the model treats it as data, not instructions.
@@ -24,7 +24,7 @@ import (
 // cannot "break out" of the fence and smuggle instructions.
 const fenceClose = "</untrusted>"
 
-// fenceTagRE matches ANY literal fence tag in a body — open or close, any case, any attributes — so
+// fenceTagRE matches ANY literal fence tag in a body – open or close, any case, any attributes – so
 // a forged copy can be neutralized. Catches the case/spacing/opening-tag variants a single literal
 // ReplaceAll would miss (defense-in-depth for the data/instruction boundary).
 var fenceTagRE = regexp.MustCompile(`(?i)</?untrusted\b[^>]*>`)
@@ -32,7 +32,7 @@ var fenceTagRE = regexp.MustCompile(`(?i)</?untrusted\b[^>]*>`)
 // truncMarker is appended when Cap truncates (visible to the model so it knows content was cut).
 const truncMarker = "\n…[truncated]"
 
-// Verdict is the injection-classifier result. Suspicious is ADVISORY (the caller decides — the guard
+// Verdict is the injection-classifier result. Suspicious is ADVISORY (the caller decides – the guard
 // never silently drops content); Markers name the heuristics that fired, for audit/evidence.
 type Verdict struct {
 	Suspicious bool     `json:"suspicious"`
@@ -60,12 +60,12 @@ func Guard(label string, content []byte, maxBytes int, secrets [][]byte) Guarded
 }
 
 // Fence wraps content so the model treats it as DATA, not instructions. Any forged
-// fence tag in the body — open OR close, any case/attributes — is defanged, removing the
+// fence tag in the body – open OR close, any case/attributes – is defanged, removing the
 // prompt-injection breakout foothold. NOTE: Fence does NOT redact secrets; call Guard for the full
 // redact→cap→classify→fence pipeline and use Fence alone only on already-redacted content.
 func Fence(label string, content []byte) string {
 	// Defang any forged fence tag by breaking its leading "<": "</untrusted>" → "<\/untrusted>",
-	// "<untrusted x>" → "<\untrusted x>" — so untrusted content can't fabricate or escape the boundary.
+	// "<untrusted x>" → "<\untrusted x>" – so untrusted content can't fabricate or escape the boundary.
 	safe := fenceTagRE.ReplaceAllFunc(content, func(m []byte) []byte {
 		out := make([]byte, 0, len(m)+1)
 		out = append(out, '<', '\\')
@@ -102,7 +102,7 @@ func Cap(b []byte, maxBytes int) ([]byte, bool) {
 
 // injectionMarkers are conservative-RECALL heuristics for prompt-injection in untrusted text. They
 // favor catching an attack over avoiding a false positive (a benign code comment that literally says
-// "ignore all previous instructions" IS flagged — the safe direction, since the result is advisory).
+// "ignore all previous instructions" IS flagged – the safe direction, since the result is advisory).
 var injectionMarkers = []struct {
 	name string
 	re   *regexp.Regexp
@@ -116,11 +116,11 @@ var injectionMarkers = []struct {
 	{"fence-escape", regexp.MustCompile(`(?i)</?untrusted\b`)},
 }
 
-// ClassifyInjection scans content for known prompt-injection heuristics. It is ADVISORY — it never
+// ClassifyInjection scans content for known prompt-injection heuristics. It is ADVISORY – it never
 // drops content; a Suspicious result means the caller should treat the text with extra suspicion
 // (seal the markers as evidence, lower confidence, or require human review). It is BEST-EFFORT, not
 // exhaustive: it strips zero-width/format runes first (a common token-splitting evasion), but a
-// sufficiently clever transform (unicode confusables, arbitrary encodings) can still evade it — the
+// sufficiently clever transform (unicode confusables, arbitrary encodings) can still evade it – the
 // same caveat redact states. Markers are returned in a stable order for deterministic sealing.
 func ClassifyInjection(content []byte) Verdict {
 	scan := stripInvisible(content)

@@ -7,14 +7,14 @@ import "testing"
 // dominating and dev/post nesting inside a release.
 func TestComparePEP440Ordering(t *testing.T) {
 	ascending := []string{
-		"1.0.dev1",       // dev of the final 1.0 — sorts below any pre-release of 1.0
-		"1.0a1.dev1",     // dev of alpha1 — below alpha1
+		"1.0.dev1",       // dev of the final 1.0 – sorts below any pre-release of 1.0
+		"1.0a1.dev1",     // dev of alpha1 – below alpha1
 		"1.0a1",          // alpha 1
 		"1.0a2",          // alpha 2 > alpha 1
 		"1.0b1",          // beta > alpha
 		"1.0rc1",         // rc > beta
 		"1.0",            // final > any pre-release
-		"1.0.post1.dev1", // dev of post1 — below post1, above final
+		"1.0.post1.dev1", // dev of post1 – below post1, above final
 		"1.0.post1",      // post-release > final
 		"1.1",            // higher release
 		"2!1.0",          // epoch 2 dominates everything in epoch 0

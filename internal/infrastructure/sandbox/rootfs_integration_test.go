@@ -15,7 +15,7 @@ import (
 )
 
 // TestSandboxHidesHostSecrets proves F2: with a curated rootfs (no whole-host-root bind),
-// a tool cannot reach $HOME secrets (~/.ssh etc.) — the path is absent — while the OS tree
+// a tool cannot reach $HOME secrets (~/.ssh etc.) – the path is absent – while the OS tree
 // it needs (/etc, /usr) is present. Run as root (sudo) so $HOME=/root.
 func TestSandboxHidesHostSecrets(t *testing.T) {
 	if _, err := exec.LookPath("bwrap"); err != nil {
@@ -38,8 +38,8 @@ func TestSandboxHidesHostSecrets(t *testing.T) {
 	}
 	defer os.Remove(canary)
 
-	// Read the canary ($HOME secret) AND /etc/shadow (root-readable secret) — both must be
-	// absent from the curated sandbox — while TLS trust (CA certs) + nsswitch remain.
+	// Read the canary ($HOME secret) AND /etc/shadow (root-readable secret) – both must be
+	// absent from the curated sandbox – while TLS trust (CA certs) + nsswitch remain.
 	script := "cat " + canary + " 2>&1; echo __MARK__; " +
 		"( test -e /etc/ssl/certs || test -e /etc/pki/tls/certs ) && echo CA_OK; " +
 		"test -e /etc/nsswitch.conf && echo NSS_OK; " +

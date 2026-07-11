@@ -44,10 +44,10 @@ func (rt *Router) exportReportDOCX(w http.ResponseWriter, r *http.Request) {
 // renderReportDoc renders a report in the given builder format. The "report
 // builder" spec is carried in query params (repeatable or comma-separated):
 //
-//	?type=external — report variant (sca|external|internal|retest)
-//	?status=confirmed&status=triage — include only these finding statuses
-//	?section=summary,findings — include only these sections (overrides the type default)
-//	?title=Q3 External Assessment — override the report title
+//	?type=external – report variant (sca|external|internal|retest)
+//	?status=confirmed&status=triage – include only these finding statuses
+//	?section=summary,findings – include only these sections (overrides the type default)
+//	?title=Q3 External Assessment – override the report title
 //
 // Like the PDF, the bytes are templated from stored data (no LLM) and SHA-256
 // sealed (X-Report-SHA256).

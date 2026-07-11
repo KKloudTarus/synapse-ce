@@ -23,7 +23,7 @@ import (
 
 const (
 	// DefaultMinTokens is the smallest duplicated token run reported by default. Tokens here are at
-	// lexer granularity (an identifier/number, a whole string literal, or an operator run — see the
+	// lexer granularity (an identifier/number, a whole string literal, or an operator run – see the
 	// tokenizer), so 100 matches the long-standing PMD/CPD default and keeps trivial repetition out.
 	DefaultMinTokens = 100
 	maxFileBytes     = 4 << 20
@@ -136,7 +136,7 @@ func (d *Detector) collect(ctx context.Context, root string) ([]fileTokens, bool
 
 // detect finds maximal duplicated token runs across the collected files. Greedy: each token is assigned
 // to at most one clone class (via covered[]), so overlapping clone classes that share tokens can be
-// undercounted — false negatives only, never false positives.
+// undercounted – false negatives only, never false positives.
 func (d *Detector) detect(ctx context.Context, files []fileTokens, truncated bool) (measure.DuplicationReport, error) {
 	k := d.minTokens
 	rep := measure.DuplicationReport{Truncated: truncated}

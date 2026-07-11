@@ -44,13 +44,13 @@ func TestDartParse(t *testing.T) {
 		byName[c.Name] = c
 	}
 	if len(comps) != 3 {
-		t.Fatalf("want 3 packages (http, lints, meta — flutter SDK pseudo-package skipped), got %d (%+v)", len(comps), comps)
+		t.Fatalf("want 3 packages (http, lints, meta – flutter SDK pseudo-package skipped), got %d (%+v)", len(comps), comps)
 	}
 	if _, ok := byName["flutter"]; ok {
 		t.Error("a source: sdk pseudo-package (flutter) must be skipped, not emitted as pkg:pub/flutter@0.0.0")
 	}
 	// http (direct main) → production; its version comes from the indent-4 `version:`, NOT the indent-6
-	// `description:` sub-map (which must be ignored — no phantom "name"/"url" packages either).
+	// `description:` sub-map (which must be ignored – no phantom "name"/"url" packages either).
 	if c := byName["http"]; c.PURL != "pkg:pub/http@0.13.5" || c.Scope == sbom.ScopeDevelopment {
 		t.Errorf("http should be a production package at 0.13.5: %+v", c)
 	}

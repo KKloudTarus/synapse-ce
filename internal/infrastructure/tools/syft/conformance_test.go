@@ -6,7 +6,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// canonicalCDX17 is a representative CycloneDX 1.7 document — the open standard Synapse ingests:
+// canonicalCDX17 is a representative CycloneDX 1.7 document – the open standard Synapse ingests:
 // bomFormat + specVersion 1.7, a 1.5+ `metadata.tools.components` block, library components carrying PURLs
 // across ecosystems (golang + npm) with a CDX `scope`, and a dependency graph keyed by bom-ref.
 const canonicalCDX17 = `{

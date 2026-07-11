@@ -16,8 +16,8 @@ import (
 )
 
 // PyPI resolves a PyPI component's license from the PyPI registry (pypi.org JSON API). It exists
-// because deps.dev classifies a large share of PyPI packages as "non-standard" — their license lives
-// in the trove classifiers or the free-text info.license, not deps.dev's normalized field — so the
+// because deps.dev classifies a large share of PyPI packages as "non-standard" – their license lives
+// in the trove classifiers or the free-text info.license, not deps.dev's normalized field – so the
 // deps.dev enricher leaves them unresolved. PyPI's own metadata carries the authoritative license:
 // PEP 639 license_expression (SPDX), the trove "License :: ..." classifiers, or free-text info.license.
 // Placed AFTER the deps.dev enricher in the chain, so it only fills what deps.dev could not.
@@ -121,7 +121,7 @@ func (p *PyPI) fetch(ctx context.Context, u string) []sbom.License {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&body); err != nil {
 		return nil
 	}
-	// 1. PEP 639 license_expression is already an SPDX expression — the most authoritative.
+	// 1. PEP 639 license_expression is already an SPDX expression – the most authoritative.
 	if e := strings.TrimSpace(body.Info.LicenseExpression); e != "" {
 		return []sbom.License{{SPDXID: e, Name: e}}
 	}

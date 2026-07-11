@@ -90,7 +90,7 @@ func TestStartReconRunHappyPath(t *testing.T) {
 	rec := httptest.NewRecorder()
 	rt.startReconRun(rec, startReq(`{"tool":"subfinder","target":"example.com"}`))
 
-	// POST returns 202 + the run record (queued — async semantics).
+	// POST returns 202 + the run record (queued – async semantics).
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}

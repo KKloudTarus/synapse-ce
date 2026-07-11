@@ -28,7 +28,7 @@ var (
 )
 
 // Upsert inserts or replaces an advisory by id and rebuilds its (ecosystem, package) index rows, in one
-// transaction. Idempotent — advisories are re-syncable reference data (a re-ingest REPLACES in place), not
+// transaction. Idempotent – advisories are re-syncable reference data (a re-ingest REPLACES in place), not
 // an append-only ledger. The affected (ecosystem, package) keys must be ingester-normalized per the
 // ports.AdvisoryStore KEY CONTRACT. The full domain advisory round-trips through the JSONB `data` blob.
 func (r *AdvisoryRepository) Upsert(ctx context.Context, a advisory.Advisory) error {
@@ -51,7 +51,7 @@ func (r *AdvisoryRepository) Upsert(ctx context.Context, a advisory.Advisory) er
 		return fmt.Errorf("upsert advisory: %w", err)
 	}
 	// Rebuild the affect index for this advisory (the affected set may change across re-syncs). CASCADE on
-	// the FK is not enough — we only want THIS advisory's rows cleared, then re-inserted from the new blob.
+	// the FK is not enough – we only want THIS advisory's rows cleared, then re-inserted from the new blob.
 	if _, err := tx.Exec(ctx, `DELETE FROM advisory_affects WHERE advisory_id = $1`, a.ID); err != nil {
 		return fmt.Errorf("clear advisory affects: %w", err)
 	}

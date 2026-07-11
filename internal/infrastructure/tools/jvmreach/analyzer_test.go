@@ -35,7 +35,7 @@ func TestAnalyzeReachableVsUnreferenced(t *testing.T) {
 	}
 }
 
-// CONSERVATIVE guard: with no application root classes (source not built — only dep jars present), the
+// CONSERVATIVE guard: with no application root classes (source not built – only dep jars present), the
 // analyzer must tag NOTHING. An "unreferenced" verdict is never emitted without app roots to anchor it,
 // so a not-built project can't be mislabeled as having dead dependencies.
 func TestAnalyzeNotBuiltTagsNothing(t *testing.T) {

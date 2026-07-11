@@ -21,7 +21,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /out/synapse-api ./cmd/synapse-api
 # synapse-cli is bundled too so the image doubles as a cross-platform scanner
-# (`docker run … synapse-cli scan /scan`) — the SCA path runs identically on any host
+# (`docker run … synapse-cli scan /scan`) – the SCA path runs identically on any host
 # that runs Linux containers (Windows/macOS via Docker Desktop, Linux natively).
 RUN CGO_ENABLED=0 go build -trimpath -o /out/synapse-cli ./cmd/synapse-cli
 
@@ -30,7 +30,7 @@ FROM anchore/syft:v1.45.1 AS syft
 FROM anchore/grype:v0.115.0 AS grype
 
 # ---------------------------------------------------------------------------
-# target: full — batteries-included SCA platform (JVM toolchain + git).
+# target: full – batteries-included SCA platform (JVM toolchain + git).
 # ---------------------------------------------------------------------------
 FROM debian:bookworm-slim AS full
 ARG GRADLE_VERSION=8.10.2
@@ -62,7 +62,7 @@ USER synapse:synapse
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/synapse-api"]
 
 # ---------------------------------------------------------------------------
-# target: api (DEFAULT — last stage) — minimal, non-root, distroless.
+# target: api (DEFAULT – last stage) – minimal, non-root, distroless.
 # distroless/static has no git/jdk/mvn/gradle; the `local` kind + SBOM generation
 # + OSV/Grype vulns + licenses work here. `make docker-build` builds this stage.
 # ---------------------------------------------------------------------------

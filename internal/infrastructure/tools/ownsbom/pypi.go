@@ -13,7 +13,7 @@ import (
 
 // PyPI is the owned Python parser: it reads pip requirements files, extracting PINNED
 // `name==version` requirements as pypi components. Only `==`/`===` pins yield a resolved version (an SBOM
-// needs resolved versions, so unpinned ranges >=/~=/etc. are skipped — they can't soundly match an
+// needs resolved versions, so unpinned ranges >=/~=/etc. are skipped – they can't soundly match an
 // advisory). It handles comments (#), nested includes + option lines (-r/-c/-e/--hash), environment
 // markers (`; python_version<…`), and extras (`pkg[extra]`). The dev/prod scope is derived from the file
 // PATH (requirements-dev.txt -> development) via ClassifyScope. Names are PEP 503-normalized for the PURL.

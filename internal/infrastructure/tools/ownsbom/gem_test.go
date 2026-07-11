@@ -112,7 +112,7 @@ func TestGemInlineDevGroup(t *testing.T) {
 
 func TestGemSkipsGitAndPathSections(t *testing.T) {
 	// Only the GEM section's specs are rubygems.org packages. A GIT or PATH section's specs (a gem sourced
-	// from a git repo or a local path) must NOT be emitted as pkg:gem/… components — they would get a wrong
+	// from a git repo or a local path) must NOT be emitted as pkg:gem/… components – they would get a wrong
 	// rubygems PURL. The inGEM gating enforces this; this test pins it against a future refactor.
 	lock := `GIT
   remote: https://github.com/example/foo.git
@@ -154,7 +154,7 @@ DEPENDENCIES
 
 func TestGemFailSoftOnJunk(t *testing.T) {
 	// The gem parser is fail-soft by design: a lockfile with no GEM/specs block yields no components and no
-	// error (unlike composer's JSON, which fails loud) — a junk file just contributes nothing to the SBOM.
+	// error (unlike composer's JSON, which fails loud) – a junk file just contributes nothing to the SBOM.
 	comps, deps, err := Gem{}.Parse(context.Background(), ParseInput{Path: "Gemfile.lock", Content: []byte("not a real lockfile\n  random: stuff\n")})
 	if err != nil || len(comps) != 0 || deps != nil {
 		t.Errorf("junk Gemfile.lock → empty + no error; got %d comps, deps=%v, err=%v", len(comps), deps, err)

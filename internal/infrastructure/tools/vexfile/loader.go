@@ -30,7 +30,7 @@ func New() *Loader { return &Loader{} }
 
 // Load reads and parses <dir>/.synapse.vex.json. A missing or non-regular file is an empty document with no
 // error (nothing to apply). An oversized file, or one that isn't a valid OpenVEX document, returns an error
-// the caller surfaces — so a malformed VEX is visible, and fail-safe (no assertions applied → nothing
+// the caller surfaces – so a malformed VEX is visible, and fail-safe (no assertions applied → nothing
 // suppressed).
 func (l *Loader) Load(_ context.Context, dir string) (vex.Document, error) {
 	path := filepath.Join(dir, fileName)

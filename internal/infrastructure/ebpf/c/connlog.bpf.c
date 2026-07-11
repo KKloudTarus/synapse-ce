@@ -1,13 +1,13 @@
-// connlog.bpf.c — egress connection observability.
+// connlog.bpf.c – egress connection observability.
 //
 // Two cgroup hooks (connect4/connect6) fire on every outbound connect() a process in the
-// attached cgroup makes — BEFORE the netns iptables filter runs — so even an *attempted*
+// attached cgroup makes – BEFORE the netns iptables filter runs – so even an *attempted*
 // out-of-scope connection is captured, not just silently dropped. This program only
 // OBSERVES (always returns 1 = allow); enforcement stays with the kernel egress filter
 // Each attempt is pushed to a ring buffer the Go side drains + seals as
 // evidence, labelling the verdict against the run's scope policy in userspace.
 //
-// Compiled to BPF bytecode by clang (`-target bpf`) and embedded via go:embed — no clang
+// Compiled to BPF bytecode by clang (`-target bpf`) and embedded via go:embed – no clang
 // or libbpf at runtime; cilium/ebpf loads the object. UAPI-stable fields only (no CO-RE).
 #include <linux/bpf.h>
 #include <bpf/bpf_helpers.h>
@@ -34,7 +34,7 @@ static __always_inline void emit(struct bpf_sock_addr *ctx, __u16 family)
 {
 	struct conn_event *e = bpf_ringbuf_reserve(&conn_events, sizeof(*e), 0);
 	if (!e)
-		return; // ring full — drop the record, never block the connect
+		return; // ring full – drop the record, never block the connect
 	e->pid = bpf_get_current_pid_tgid() >> 32;
 	e->family = family;
 	e->port = bpf_ntohs(ctx->user_port);

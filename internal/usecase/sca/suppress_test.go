@@ -25,7 +25,7 @@ func TestApplySuppressions(t *testing.T) {
 	set := ignore.Parse([]byte("CVE-2023-1 # accepted, not exploitable\nsecret:rule:file:9 exp:2027-01-01 # pinned\nGHSA-lapsed exp:2026-01-01\n"))
 	applySuppressions(res, set, now)
 
-	// CRITICAL governance property: nothing is removed — all findings stay in the actionable/reported set.
+	// CRITICAL governance property: nothing is removed – all findings stay in the actionable/reported set.
 	if len(res.Findings) != 3 {
 		t.Fatalf("suppression must NOT remove findings (they stay reported + sealed); got %d", len(res.Findings))
 	}

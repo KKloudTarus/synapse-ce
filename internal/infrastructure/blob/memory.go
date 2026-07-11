@@ -9,7 +9,7 @@ import (
 )
 
 // Memory is an in-memory content-addressed BlobStore for dev + tests (no object
-// store required). Not durable — artifacts are lost on restart.
+// store required). Not durable – artifacts are lost on restart.
 type Memory struct {
 	mu sync.RWMutex
 	m  map[string][]byte

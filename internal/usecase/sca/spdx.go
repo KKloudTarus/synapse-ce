@@ -13,7 +13,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// SPDX 2.3 minimal document — a pure, deterministic projection of the stored SBOM
+// SPDX 2.3 minimal document – a pure, deterministic projection of the stored SBOM
 // (templated from data, no LLM). PURLs become externalRefs;
 // licenses (now registry-enriched) become licenseDeclared.
 type spdxDoc struct {
@@ -36,7 +36,7 @@ type spdxPackage struct {
 	SPDXID           string         `json:"SPDXID"`
 	Name             string         `json:"name"`
 	VersionInfo      string         `json:"versionInfo,omitempty"`
-	Supplier         string         `json:"supplier,omitempty"` // "Organization: <name>" — NTIA supplier element; omitted when unknown
+	Supplier         string         `json:"supplier,omitempty"` // "Organization: <name>" – NTIA supplier element; omitted when unknown
 	DownloadLocation string         `json:"downloadLocation"`
 	Checksums        []spdxChecksum `json:"checksums,omitempty"` // integrity digests (SPDX form: lowercase hex per algorithm)
 	LicenseDeclared  string         `json:"licenseDeclared"`
@@ -84,7 +84,7 @@ func (s *Service) SPDX(ctx context.Context, engagementID shared.ID) ([]byte, err
 }
 
 // scanTime derives a stable timestamp from the vuln-DB snapshot marker (which is
-// pinned per scan), falling back to the zero time — never time.Now(), so the
+// pinned per scan), falling back to the zero time – never time.Now(), so the
 // document is byte-reproducible from stored data.
 func (r ScanResult) scanTime() time.Time {
 	if i := strings.LastIndex(r.VulnDBSnapshot, "@"); i >= 0 {
@@ -133,7 +133,7 @@ func buildSPDX(doc *sbom.SBOM, target string, created time.Time) spdxDoc {
 			LicenseConcluded: lic,
 		}
 		// Resolve via SupplierOr (not the raw field) so the export derives the supplier from the PURL namespace
-		// for producers/merge paths that leave Supplier empty (e.g. the JVM resolver tree) — matching the scorer.
+		// for producers/merge paths that leave Supplier empty (e.g. the JVM resolver tree) – matching the scorer.
 		if sup := sbom.SupplierOr(c.Supplier, c.PURL); sup != "" { // NTIA supplier element; SPDX form "Organization: <name>"
 			pkg.Supplier = "Organization: " + sup
 		}
@@ -180,8 +180,8 @@ func spdxChecksums(c sbom.Component) []spdxChecksum {
 }
 
 // spdxHexDigest maps (algorithm, value) to a canonical SPDX 2.3 checksum-algorithm name + lowercase-hex
-// value. It delegates BOTH the accept decision and the canonical name to sbom.CanonicalHexDigest — the one
-// digest gate shared with the quality scorer (HasChecksum) — so the exporter and the scorer accept exactly
+// value. It delegates BOTH the accept decision and the canonical name to sbom.CanonicalHexDigest – the one
+// digest gate shared with the quality scorer (HasChecksum) – so the exporter and the scorer accept exactly
 // the same digests by construction, with no second algorithm table to drift. Domain checksum algorithm
 // names are SPDX-style (see sbom.Checksum), so the returned name is the SPDX spelling. A malformed,
 // wrong-length, or non-conformant checksum yields ("", "", false) and is dropped from the output.

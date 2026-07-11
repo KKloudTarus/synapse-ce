@@ -69,7 +69,7 @@ func TestControlsForNormalization(t *testing.T) {
 	}
 }
 
-// TestControlsForUnmappedAndEmpty: an unmapped or non-CWE token returns nil — never a guessed mapping.
+// TestControlsForUnmappedAndEmpty: an unmapped or non-CWE token returns nil – never a guessed mapping.
 func TestControlsForUnmappedAndEmpty(t *testing.T) {
 	for _, in := range []string{"", "  ", "CWE-99999", "not-a-cwe", "CWE-", "CWE-abc", "+89", "-1", "CWE 89"} {
 		if got := ControlsFor(in); got != nil {

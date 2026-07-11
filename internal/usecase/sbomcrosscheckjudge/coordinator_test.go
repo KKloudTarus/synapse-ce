@@ -98,7 +98,7 @@ func TestRecordIdempotent(t *testing.T) {
 
 func TestVulnCorrelationDoesNotSuppressComponent(t *testing.T) {
 	// A vulnerability-correlation judgment (same CapCorrelation) with a colliding subject id must NOT
-	// suppress a COMPONENT disagreement — the dedup filters on SubjectKind==component too.
+	// suppress a COMPONENT disagreement – the dedup filters on SubjectKind==component too.
 	fp := &fakeProposer{existing: []judgment.Judgment{{Capability: judgment.CapCorrelation, SubjectKind: judgment.SubjectVulnerability, SubjectID: "component:pkg:npm/ms@2.1.3"}}}
 	c, _ := NewCoordinator(fp, &fakeAudit{}, fixedClock{})
 	n, _ := c.Record(context.Background(), "eng-1", report(

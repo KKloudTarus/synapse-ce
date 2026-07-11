@@ -41,7 +41,7 @@ type Report struct {
 }
 
 // Tunables (deterministic defaults; documented). effortMinutes is the remediation effort assumed per
-// issue by severity; devCostPerLineMinutes is the assumed cost to (re)develop one line of code — together
+// issue by severity; devCostPerLineMinutes is the assumed cost to (re)develop one line of code – together
 // they define the debt ratio that grades maintainability.
 var effortMinutes = map[shared.Severity]int{
 	shared.SeverityCritical: 120,
@@ -109,7 +109,7 @@ func Compute(findings []finding.Finding, loc int) Report {
 }
 
 // gradeBySeverity maps the worst-issue severity rank on an axis to a grade: none->A, low->B, medium->C,
-// high->D, critical->E. info and unknown (rank <= 1) are treated as no material issue (grade A) — an
+// high->D, critical->E. info and unknown (rank <= 1) are treated as no material issue (grade A) – an
 // unknown-severity finding does not, on its own, degrade a health grade.
 func gradeBySeverity(rank int) Grade {
 	switch {

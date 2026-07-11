@@ -129,7 +129,7 @@ func (l *scriptLLM) Chat(_ context.Context, req ports.ChatRequest) (ports.ChatRe
 	return r, nil
 }
 
-// loopingLLM always proposes the same read tool — never stops (drives the budget/step-cap test).
+// loopingLLM always proposes the same read tool – never stops (drives the budget/step-cap test).
 type loopingLLM struct{ call agent.ToolCall }
 
 func (l loopingLLM) Chat(_ context.Context, _ ports.ChatRequest) (ports.ChatResponse, error) {

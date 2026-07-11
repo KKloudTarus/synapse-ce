@@ -45,7 +45,7 @@ func TestDiffNewCrossingFromMovedComponent(t *testing.T) {
 	}
 	d := Diff(prior, next)
 	if len(d.AddedFlows) != 0 || len(d.RemovedFlows) != 0 {
-		t.Errorf("f1 is unchanged — must not be added/removed: %+v", d)
+		t.Errorf("f1 is unchanged – must not be added/removed: %+v", d)
 	}
 	if len(d.NewCrossings) != 1 || d.NewCrossings[0].ID != "f1" {
 		t.Errorf("f1 newly crosses zone1→zone2 → one new crossing: %+v", d.NewCrossings)

@@ -34,7 +34,7 @@ func (s *AUPStore) Accepted(ctx context.Context, version string) (bool, error) {
 	return ok, nil
 }
 
-// Save records an acceptance, idempotent per (actor, version) — this keeps
+// Save records an acceptance, idempotent per (actor, version) – this keeps
 // per-actor history (the file dev sink keeps one record per version; both gate
 // identically via Accepted's EXISTS-by-version).
 // RBAC is enforced at the API edge. Should actor identifiers ever become attacker-
@@ -126,11 +126,11 @@ func (l *AuditLog) Verify(ctx context.Context) (audit.Report, error) {
 	return audit.Verify(toRecords(entries)), nil
 }
 
-// Record appends an immutable audit entry (INSERT only — never update or delete), chaining it
+// Record appends an immutable audit entry (INSERT only – never update or delete), chaining it
 // to the previous row. A transaction-scoped advisory lock serializes the read-head/insert so
 // concurrent writers cannot fork the chain. The fork-guard unique index
 // (migration 0033) is defense-in-depth on top of the lock: if the lock is ever bypassed, a
-// concurrent append yields a 23505 unique violation — Record then re-reads the advanced head
+// concurrent append yields a 23505 unique violation – Record then re-reads the advanced head
 // and re-chains (bounded), parity with the evidence store, rather than surfacing an opaque
 // error. On the normal locked path the conflict is unreachable and the loop runs once.
 func (l *AuditLog) Record(ctx context.Context, e ports.AuditEntry) error {
@@ -146,7 +146,7 @@ func (l *AuditLog) Record(ctx context.Context, e ports.AuditEntry) error {
 		}
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			continue // fork race (lock bypassed) — re-read the advanced head + re-chain
+			continue // fork race (lock bypassed) – re-read the advanced head + re-chain
 		}
 		return err
 	}

@@ -38,7 +38,7 @@ func (s *TimestampStore) Get(_ context.Context, chain string, eng shared.ID, hea
 	return nil, nil
 }
 
-// Put stores a token for a head (idempotent — first write wins, like the SQL ON
+// Put stores a token for a head (idempotent – first write wins, like the SQL ON
 // CONFLICT DO NOTHING).
 func (s *TimestampStore) Put(_ context.Context, chain string, eng shared.ID, head string, token ports.TimestampToken) error {
 	s.mu.Lock()
@@ -50,7 +50,7 @@ func (s *TimestampStore) Put(_ context.Context, chain string, eng shared.ID, hea
 	return nil
 }
 
-// LatestHead returns the most-recently-Put head for a chain (ok=false if none) — the retained
+// LatestHead returns the most-recently-Put head for a chain (ok=false if none) – the retained
 // head for out-of-band tail-truncation detection.
 func (s *TimestampStore) LatestHead(_ context.Context, chain string, eng shared.ID) (string, bool, error) {
 	s.mu.RLock()

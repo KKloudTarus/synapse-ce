@@ -29,7 +29,7 @@ export function Team() {
         </h1>
         <p className="mt-1.5 max-w-2xl text-sm text-mutedfg">
           Each consultant gets their own API key, so every finding edit, comment, assignment, and evidence capture is
-          attributable to a real person — not a shared account.
+          attributable to a real person – not a shared account.
         </p>
       </header>
 
@@ -108,7 +108,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
       await navigator.clipboard.writeText(issued.key)
       setCopied(true)
     } catch {
-      /* clipboard blocked — the key is visible to copy manually */
+      /* clipboard blocked – the key is visible to copy manually */
     }
   }
 
@@ -143,7 +143,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
           <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
             <KeyRound className="size-4 text-medium" /> API key for {issued.name}
           </p>
-          <p className="mt-1 text-xs text-mutedfg">Copy it now — it is shown once and cannot be recovered.</p>
+          <p className="mt-1 text-xs text-mutedfg">Copy it now – it is shown once and cannot be recovered.</p>
           <div className="mt-2 flex items-center gap-2">
             <code className="flex-1 overflow-x-auto rounded-md border border-border bg-bg px-3 py-2 font-mono text-xs text-foreground">{issued.key}</code>
             <Button variant="secondary" onClick={copyKey} className="shrink-0 px-3 py-1.5">

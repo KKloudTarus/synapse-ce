@@ -177,7 +177,7 @@ func (x *rootfsExtractor) applyTar(tr *tar.Reader) error {
 }
 
 // applyWhiteout removes what a ".wh." marker deletes. ".wh..wh..opq" clears the marker's parent directory's
-// lower-layer contents (opaque, via clearDir which removes children only — never the directory itself, so a
+// lower-layer contents (opaque, via clearDir which removes children only – never the directory itself, so a
 // root-level opaque marker cannot delete dest). ".wh.<name>" removes <name> in that directory; a name that
 // resolves to ""/"."/".." is not a valid whiteout target and is skipped, so a crafted marker can neither
 // delete the assembled-tree root nor (with safeJoin) escape it.
@@ -192,7 +192,7 @@ func (x *rootfsExtractor) applyWhiteout(name, base string) error {
 	}
 	victim := strings.TrimPrefix(base, whiteoutPrefix)
 	if victim == "" || victim == "." || victim == ".." {
-		return nil // not a valid whiteout target — never delete the tree root or a traversal target
+		return nil // not a valid whiteout target – never delete the tree root or a traversal target
 	}
 	target, err := safeJoin(x.dest, filepath.Join(dir, victim))
 	if err != nil {

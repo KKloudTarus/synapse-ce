@@ -76,7 +76,7 @@ func (s *Service) List(ctx context.Context, tenantID shared.ID) ([]*domain.Engag
 
 // UpdateScope validates and replaces an engagement's in/out-of-scope target sets,
 // persists, and records an append-only audit entry. The execution
-// gate reads scope live, so the change takes effect on the next tool run — no
+// gate reads scope live, so the change takes effect on the next tool run – no
 // restart. ErrNotFound if the engagement is missing; ErrValidation on a bad target.
 func (s *Service) UpdateScope(ctx context.Context, actor string, tenantID, id shared.ID, in, out []domain.Target) (*domain.Engagement, error) {
 	if err := requireActor(actor); err != nil {
@@ -159,7 +159,7 @@ func (s *Service) Transition(ctx context.Context, actor string, tenantID, id sha
 // SetLiveRecon toggles the engagement's live-recon enablement. Enabling
 // it is the moment live execution against real targets becomes possible, so it
 // requires the operator to RE-CONFIRM the AUP and record a lab-authorization
-// attestation at that moment — a plain boolean flip is not
+// attestation at that moment – a plain boolean flip is not
 // enough. Both are required to enable (refused otherwise) and captured in the append-only,
 // hash-chained, signed audit log, so enabling live execution is an
 // attributable, tamper-evident, non-repudiable act. Disabling needs neither.

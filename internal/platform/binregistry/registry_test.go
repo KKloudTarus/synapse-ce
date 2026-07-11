@@ -20,7 +20,7 @@ func TestTOFUPinsThenDetectsTamper(t *testing.T) {
 	if err := r.Verify(bin); err != nil {
 		t.Fatalf("unchanged binary should still verify: %v", err)
 	}
-	// Replace the binary — a later run must be refused.
+	// Replace the binary – a later run must be refused.
 	if err := os.WriteFile(bin, []byte("TAMPERED"), 0o755); err != nil {
 		t.Fatal(err)
 	}

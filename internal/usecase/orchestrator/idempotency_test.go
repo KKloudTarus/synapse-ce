@@ -19,7 +19,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 )
 
-// faultyVault wraps the real evidence service but can be made to fail List on demand — to
+// faultyVault wraps the real evidence service but can be made to fail List on demand – to
 // exercise the FAIL-CLOSED idempotency path. Seal always delegates (so the gate's admission
 // seal and the intent/step seals behave normally).
 type faultyVault struct {
@@ -38,7 +38,7 @@ func (f *faultyVault) List(ctx context.Context, eng shared.ID) ([]evdom.Evidence
 }
 
 // TestAlreadyExecutedFailsClosed: if the evidence chain cannot be read during the
-// idempotency check, the action is NEITHER executed NOR marked done — the run fails (and a
+// idempotency check, the action is NEITHER executed NOR marked done – the run fails (and a
 // durable job would retry). This is the fix for the fail-open double-run-vs-live-host hazard.
 func TestAlreadyExecutedFailsClosed(t *testing.T) {
 	now := time.Unix(1_000_000, 0).UTC()
@@ -89,7 +89,7 @@ func TestAlreadyExecutedFailsClosed(t *testing.T) {
 }
 
 // TestIntentMarkerSealedBeforeExecute: a successful in-scope run seals an agent_intent (keyed
-// on the action) BEFORE the agent_step — the marker that prevents a double-run on a crash
+// on the action) BEFORE the agent_step – the marker that prevents a double-run on a crash
 // between execute and step-seal.
 func TestIntentMarkerSealedBeforeExecute(t *testing.T) {
 	llm := &scriptLLM{steps: []ports.ChatResponse{

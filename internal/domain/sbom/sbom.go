@@ -83,18 +83,18 @@ type Component struct {
 	Licenses []License
 
 	// Supplier is the entity that supplies the component (a Maven groupId, an npm scope, a GitHub org, a
-	// package registry) — the NTIA "supplier name" minimum SBOM element. Captured from the producer/imported
+	// package registry) – the NTIA "supplier name" minimum SBOM element. Captured from the producer/imported
 	// SBOM when it carries one, else derived from the PURL namespace (SupplierFromPURL); empty when neither
 	// yields one (a bare, namespaceless package). Emitted as SPDX PackageSupplier on export.
 	Supplier string `json:",omitempty"`
-	// SupplierSource records HOW Supplier was obtained — SupplierDeclared (asserted by the producer or an
+	// SupplierSource records HOW Supplier was obtained – SupplierDeclared (asserted by the producer or an
 	// imported/untrusted client SBOM) vs SupplierDerived (deterministically inferred by Synapse from the PURL
-	// namespace) — so a downstream trust decision can tell an authoritative supplier from an echoed or inferred
+	// namespace) – so a downstream trust decision can tell an authoritative supplier from an echoed or inferred
 	// one (mirrors LicenseSource/LicenseConfidence). Empty when Supplier is empty.
 	SupplierSource string `json:",omitempty"`
 
 	// License provenance: where the license data came from and, when it
-	// is still unknown, why — so coverage is explainable + audit-ready.
+	// is still unknown, why – so coverage is explainable + audit-ready.
 	LicenseSource     string // "sbom" | "registry" | "local-file" | "" (unknown)
 	LicenseConfidence string // "declared" | "registry" | "unknown"
 	// LicenseConfidencePct is the license-text match coverage (0..100) when the license was
@@ -108,8 +108,8 @@ type Component struct {
 	// historical, not actionable.
 	FirstParty bool
 
-	// Scope classification: where this component lives in the repo —
-	// production code vs dev/test/example/fixture/benchmark/docs — so findings on
+	// Scope classification: where this component lives in the repo –
+	// production code vs dev/test/example/fixture/benchmark/docs – so findings on
 	// non-shipping assets can be ranked as background, not actionable. Location is
 	// the on-disk manifest path the classification was derived from.
 	Scope    string
@@ -117,14 +117,14 @@ type Component struct {
 
 	// LayerID is the container-image layer (its uncompressed diff_id digest, e.g.
 	// "sha256:…") that introduced this component, recovered from Syft's
-	// `syft:location:N:layerID`. Empty for non-image scans. It joins a component —
-	// and thus any vulnerability on it — back to the image layer it came from
+	// `syft:location:N:layerID`. Empty for non-image scans. It joins a component –
+	// and thus any vulnerability on it – back to the image layer it came from
 	// (Epic D layer attribution); cross-references ImageInfo.Layers.
 	LayerID string
 
 	// Reachability is a COARSE, deterministic JVM class-reachability verdict: whether the
 	// application's own compiled code (transitively) references any of this component's classes.
-	// Empty = not analyzed / unknown (the default — non-JVM, source not built, or analysis skipped).
+	// Empty = not analyzed / unknown (the default – non-JVM, source not built, or analysis skipped).
 	// It only DEPRIORITIZES a finding, never suppresses one; Unreferenced means "no STATIC reference
 	// found", NOT "provably unused" (reflection/DI/ServiceLoader edges are invisible to it).
 	Reachability string
@@ -168,7 +168,7 @@ const (
 	ScopeUnknown       = "unknown"
 )
 
-// IsBackgroundScope reports whether a scope is non-shipping (example/test/etc.) —
+// IsBackgroundScope reports whether a scope is non-shipping (example/test/etc.) –
 // findings there are background, not actionable.
 func IsBackgroundScope(s string) bool {
 	switch s {
@@ -239,7 +239,7 @@ func IsResolvedVersion(v string) bool {
 	return false
 }
 
-// Unknown-license reasons — why a component has no resolved license.
+// Unknown-license reasons – why a component has no resolved license.
 const (
 	LicenseSourceSBOM        = "sbom"
 	LicenseSourceRegistry    = "registry"

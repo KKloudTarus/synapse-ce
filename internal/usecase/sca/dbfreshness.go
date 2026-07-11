@@ -8,8 +8,8 @@ import (
 )
 
 // dbFreshnessWarnings surfaces reference DBs whose captured date is older than maxAgeDays, so a scan running
-// against stale advisory / risk data — a failed live fetch that fell back to a stale cache, or an
-// air-gapped DB pinned to an old build — can't silently under-report or mis-prioritize. Trivy uses a stale
+// against stale advisory / risk data – a failed live fetch that fell back to a stale cache, or an
+// air-gapped DB pinned to an old build – can't silently under-report or mis-prioritize. Trivy uses a stale
 // DB SILENTLY under --skip-db-update (only a schema mismatch errors); Synapse warns, in keeping with its
 // "no silent gap" posture. Dates that are absent or unparseable are skipped (never a false alarm), and
 // maxAgeDays <= 0 disables the check. Deterministic: DB keys are sorted, so the warning order is stable.
@@ -21,14 +21,14 @@ func dbFreshnessWarnings(tv map[string]string, now time.Time, maxAgeDays int) []
 	var out []string
 	warn := func(label, dateStr string, t time.Time) {
 		if age := now.Sub(t); age > maxAge {
-			out = append(out, fmt.Sprintf("%s is %d days old (built %s) — older than the %d-day freshness policy; re-sync so recent advisories / exploited-CVE data are not missed",
+			out = append(out, fmt.Sprintf("%s is %d days old (built %s) – older than the %d-day freshness policy; re-sync so recent advisories / exploited-CVE data are not missed",
 				label, int(age.Hours()/24), dateStr, maxAgeDays))
 		}
 	}
 	// A DB is PRESENT but its date can't be read: don't skip silently (that would let the freshness guarantee
-	// itself vanish if a feed changes its date format) — surface it so freshness is visibly unverifiable.
+	// itself vanish if a feed changes its date format) – surface it so freshness is visibly unverifiable.
 	unverifiable := func(label, dateStr string) string {
-		return fmt.Sprintf("%s reports a build date %q in an unrecognized format — freshness cannot be verified; check the DB source", label, dateStr)
+		return fmt.Sprintf("%s reports a build date %q in an unrecognized format – freshness cannot be verified; check the DB source", label, dateStr)
 	}
 	checkFixed := func(label, key, layout string) {
 		v := strings.TrimSpace(tv[key])

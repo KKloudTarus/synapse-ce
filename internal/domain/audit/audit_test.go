@@ -114,7 +114,7 @@ func TestVerifyDetectsErasedLeadingPrefix(t *testing.T) {
 	when := at("2026-06-21T12:00:00Z")
 	// An attacker blanks the hash of leading rows hoping Verify skips them as "legacy".
 	// Because the surviving suffix's first record still points at a non-empty previous
-	// hash, the erasure is detected — only a FULL reforge (recomputing every subsequent
+	// hash, the erasure is detected – only a FULL reforge (recomputing every subsequent
 	// hash), which an unanchored chain cannot defend against, could hide it.
 	base := chain([][3]string{{"a", "1", "t"}, {"b", "2", "t"}, {"c", "3", "t"}}, when)
 

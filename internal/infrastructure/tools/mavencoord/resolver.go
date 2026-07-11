@@ -1,7 +1,7 @@
 // Package mavencoord recovers authoritative Maven coordinates for SBOM components
 // whose groupId was mis-derived during SBOM generation. Syft, scanning a packaged
 // app (a fat JAR or a container filesystem) without reliable pom metadata, infers the
-// groupId from a JAR's Java package namespace — e.g. "io.grpc.internal" instead of
+// groupId from a JAR's Java package namespace – e.g. "io.grpc.internal" instead of
 // "io.grpc", "org.aspectj.weaver" instead of "org.aspectj". A wrong group makes the
 // downstream registry license lookup (deps.dev) 404, so the license stays "unknown"
 // even though the package is published under a known license.

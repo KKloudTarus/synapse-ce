@@ -34,25 +34,25 @@ type IDGenerator interface {
 	NewID() shared.ID
 }
 
-// EngagementRepository persists engagements. Returned aggregates are read-only —
+// EngagementRepository persists engagements. Returned aggregates are read-only –
 // callers must not mutate them (implementations may return shared instances).
 type EngagementRepository interface {
 	Create(ctx context.Context, e *engagement.Engagement) error
 	// GetByID loads an engagement by id WITHOUT a tenant predicate. It is reserved for INTERNAL
-	// execution paths that act on an engagement a queued/authorized run already belongs to — the
-	// scope/window execution gate, recon start/run, and agent orchestration — where tenancy was
+	// execution paths that act on an engagement a queued/authorized run already belongs to – the
+	// scope/window execution gate, recon start/run, and agent orchestration – where tenancy was
 	// already proven when the work was admitted. It is NOT a user-facing read: every request-driven
 	// access (HTTP handlers and the usecase reads they call) MUST go through GetByIDInTenant so a
 	// caller can only reach engagements in their own tenant. Adding a new GetByID caller on a
-	// request path reintroduces a cross-tenant read — use GetByIDInTenant instead.
+	// request path reintroduces a cross-tenant read – use GetByIDInTenant instead.
 	GetByID(ctx context.Context, id shared.ID) (*engagement.Engagement, error)
-	// GetByIDInTenant loads an engagement by id scoped to tenantID — the tenant-isolated read
+	// GetByIDInTenant loads an engagement by id scoped to tenantID – the tenant-isolated read
 	// for user-facing access. A caller's tenant '' (single-tenant / default-tenant
 	// admin) matches any row; a non-empty tenant matches only its own, so tenant A cannot reach
-	// tenant B's engagement (returns shared.ErrNotFound — existence is not revealed).
+	// tenant B's engagement (returns shared.ErrNotFound – existence is not revealed).
 	GetByIDInTenant(ctx context.Context, tenantID, id shared.ID) (*engagement.Engagement, error)
 	List(ctx context.Context, tenantID shared.ID) ([]*engagement.Engagement, error)
-	// Update persists changes to an existing engagement aggregate — its row
+	// Update persists changes to an existing engagement aggregate – its row
 	// (name/client/status/authorization window/timezone) and its full scope target
 	// set, replaced atomically. Returns shared.ErrNotFound if it does not exist.
 	Update(ctx context.Context, e *engagement.Engagement) error
@@ -62,7 +62,7 @@ type EngagementRepository interface {
 }
 
 // JudgmentStore is the broad read/create repository for AI judgments. The
-// score/state MOVER is deliberately NOT here — it lives on the analysis use case's narrow Store
+// score/state MOVER is deliberately NOT here – it lives on the analysis use case's narrow Store
 // interface + the concrete repo, so a read-only consumer (e.g. the agent tool catalog) cannot move
 // a judgment's score. Reads are engagement-scoped (tenant-isolated via the
 // engagement gate).
@@ -76,8 +76,8 @@ type JudgmentStore interface {
 }
 
 // WriteupDraftStore persists AI-proposed, human-gated finding write-up drafts. Unlike a
-// Judgment (insert-only), a Draft is mutable working data — a human edits it and then accepts/rejects
-// it — so Save is an UPSERT by draft id (last write wins). Reads are engagement-scoped; tenant isolation
+// Judgment (insert-only), a Draft is mutable working data – a human edits it and then accepts/rejects
+// it – so Save is an UPSERT by draft id (last write wins). Reads are engagement-scoped; tenant isolation
 // is enforced upstream at the route (withEngTenant), so Get/List take no tenant argument. A Draft is NOT
 // append-only and NEVER renders into a report by itself; the append-only record of each
 // change is the audit log written by the use case.
@@ -96,7 +96,7 @@ type FindingRepository interface {
 	Upsert(ctx context.Context, findings []finding.Finding) error
 	ListByEngagement(ctx context.Context, engagementID shared.ID) ([]finding.Finding, error)
 	// ListPublishableByEngagement returns ONLY the findings that may appear in a
-	// customer-facing deliverable — the evidence gate applied via
+	// customer-facing deliverable – the evidence gate applied via
 	// finding.Publishable/CanPromote. Every client-facing reader (report PDF/HTML/DOCX,
 	// SARIF, OpenVEX, engagement bundle) MUST read through this, never ListByEngagement,
 	// so an unproven exploitation finding (EvidenceScore < EvidenceThreshold) cannot leak
@@ -113,7 +113,7 @@ type FindingRepository interface {
 	SetAssignee(ctx context.Context, engagementID, findingID shared.ID, assignee string, expectedVersion int) (finding.Finding, error)
 }
 
-// CommentRepository persists the per-finding comment thread — the human
+// CommentRepository persists the per-finding comment thread – the human
 // collaboration record, distinct from the append-only audit log. Reads are scoped
 // to the engagement (no cross-engagement comment access).
 type CommentRepository interface {
@@ -239,7 +239,7 @@ type ScanJobStore interface {
 	// scan for the same engagement cannot mislead the dead-letter terminal-guard.
 	GetJob(ctx context.Context, id string) (ScanJob, error)
 	// ListStaleRunning returns scan jobs still in status 'running' that started before
-	// olderThan (bounded by limit) — the input to the stale-scan sweeper, which reclaims scans
+	// olderThan (bounded by limit) – the input to the stale-scan sweeper, which reclaims scans
 	// a crashed worker stranded `running` without a dead-letter event.
 	ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]ScanJob, error)
 }
@@ -261,7 +261,7 @@ type ImportedSBOMStore interface {
 }
 
 // EvidenceStore appends to and reads the per-engagement hash-chained evidence
-// ledger. Append-only — never UPDATE/DELETE in app code.
+// ledger. Append-only – never UPDATE/DELETE in app code.
 type EvidenceStore interface {
 	Append(ctx context.Context, items []evidence.Evidence) error
 	ListByEngagement(ctx context.Context, engagementID shared.ID) ([]evidence.Evidence, error)
@@ -294,7 +294,7 @@ type ChainSigner interface {
 }
 
 // TimestampAuthority binds a chain head to a trusted time source (RFC 3161), so a
-// custody chain can prove it existed BEFORE a given instant — independent of the
+// custody chain can prove it existed BEFORE a given instant – independent of the
 // signer's own clock. Implemented in P3 (infrastructure/timestamp). Implementations
 // must not block the seal path on an unreachable TSA (the vault times the call out).
 type TimestampAuthority interface {
@@ -310,7 +310,7 @@ type TimestampToken struct {
 }
 
 // TimestampStore persists external RFC-3161 tokens for chain heads OUT-OF-BAND from
-// the (byte-deterministic) report — keyed by chain ("evidence"|"audit") + engagement
+// the (byte-deterministic) report – keyed by chain ("evidence"|"audit") + engagement
 // + head, so a head is anchored at most once. Get returns nil when the head is not yet
 // anchored. This is the side-channel that keeps the report bytes unchanged whether or
 // not a TSA is configured.
@@ -365,7 +365,7 @@ type AuditReader interface {
 type ReportInsight struct {
 	ScanTarget       string
 	HasScan          bool
-	ScanTime         time.Time // pinned scan timestamp — the report uses this (not Now) so it is byte-reproducible
+	ScanTime         time.Time // pinned scan timestamp – the report uses this (not Now) so it is byte-reproducible
 	LicenseDetected  int
 	LicenseUnknown   int
 	LicensePct       float64
@@ -401,7 +401,7 @@ type ReportInsight struct {
 
 // ReportRenderer renders a deterministic PDF report from stored engagement data
 // (templated, no LLM in the report path). generatedAt is supplied
-// by the caller so the output — including PDF creation-date metadata — is
+// by the caller so the output – including PDF creation-date metadata – is
 // reproducible from the same stored data.
 type ReportRenderer interface {
 	Render(ctx context.Context, eng *engagement.Engagement, findings []finding.Finding, insight ReportInsight, generatedAt time.Time, version string) ([]byte, error)
@@ -440,7 +440,7 @@ type ReportTable struct {
 }
 
 // ReportImage is an inline raster image exhibit (a captured evidence screenshot).
-// Data is the raw image bytes; MIME is a known raster type (image/png|jpeg|gif) — the
+// Data is the raw image bytes; MIME is a known raster type (image/png|jpeg|gif) – the
 // builder rejects everything else, so renderers never embed SVG/HTML (no script). The
 // renderers must keep output deterministic (same bytes -> same seal). SHA256 ties the
 // exhibit to the evidence chain so a reader can verify it against the ledger.
@@ -499,7 +499,7 @@ type AcquireRequest struct {
 type Workspace struct {
 	Dir          string
 	Lockfiles    []string // recognized lockfile basenames present (scan-completeness signal)
-	LocalModules []string // module paths declared in the repo (go.mod module, package.json name) — first-party identities
+	LocalModules []string // module paths declared in the repo (go.mod module, package.json name) – first-party identities
 	// UnresolvedEcosystems are build systems present in the repo whose dependencies
 	// the SBOM generator cannot fully resolve without a lockfile (e.g. Gradle/Maven),
 	// so their dependency tree is likely UNDER-reported. Drives honest completeness.
@@ -517,7 +517,7 @@ type Workspace struct {
 	// (see OSPackageCataloger for how RootFS is consumed.)
 	// RootFSNote records why rootfs materialization was skipped for an image target (unsupported layer
 	// compression, a hostile layer the hardening refused, a malformed layout) when extraction was enabled but
-	// failed. Empty on success or when not enabled. Rootfs is best-effort — a failure never aborts the scan —
+	// failed. Empty on success or when not enabled. Rootfs is best-effort – a failure never aborts the scan –
 	// so the pipeline surfaces this as a warning (never silently) and a consumer treats an absent RootFS as
 	// "not analyzed", never as "no OS packages".
 	RootFSNote string
@@ -526,7 +526,7 @@ type Workspace struct {
 
 // OSPackageResult is the outcome of OS-package cataloging: the components plus whether their distro release
 // resolved to an advisory-matchable ecosystem. DistroResolved is false when the OS DB was read but the release
-// could not be keyed (/etc/os-release absent, garbled, or inconsistent with the DB family) — so the pipeline
+// could not be keyed (/etc/os-release absent, garbled, or inconsistent with the DB family) – so the pipeline
 // surfaces a completeness warning instead of the packages silently matching zero OS advisories (a falsely-clean
 // OS posture). DistroResolved is meaningful only when Components is non-empty.
 type OSPackageResult struct {
@@ -535,7 +535,7 @@ type OSPackageResult struct {
 }
 
 // OSPackageCataloger reads a materialized image root filesystem (Workspace.RootFS) and returns the installed
-// OS packages — Debian/Ubuntu dpkg (/var/lib/dpkg/status) and Alpine apk (/lib/apk/db/installed) — as SBOM
+// OS packages – Debian/Ubuntu dpkg (/var/lib/dpkg/status) and Alpine apk (/lib/apk/db/installed) – as SBOM
 // components, each tagged (when the release resolves) with a Syft-style distro qualifier
 // (distro=debian-12/ubuntu-22.04/alpine-3.18.12, from /etc/os-release) so the existing advisory matcher keys
 // them to the right OS ecosystem. It is the owned (detection-independent) alternative to relying on the
@@ -595,7 +595,7 @@ type LanguageDetector interface {
 
 // SBOMGenerator is the vendor-neutral SBOM-PRODUCER port: an implementation runs
 // any producer (Syft today, an owned per-ecosystem parser registry under E33, or another tool) and
-// returns the NORMALIZED domain sbom.SBOM — no vendor/CycloneDX type ever crosses this boundary, so
+// returns the NORMALIZED domain sbom.SBOM – no vendor/CycloneDX type ever crosses this boundary, so
 // the business logic stays independent of any one scanner (enforced by the vendor-neutral tripwire in
 // internal/domain/sbom). Producer identity + version ride on the returned SBOM (Source, GeneratorVersion).
 type SBOMGenerator interface {
@@ -605,7 +605,7 @@ type SBOMGenerator interface {
 // SBOMCache is an optional content-addressed cache of GENERATED (pre-enrichment) SBOMs. The key is derived
 // from the workspace CONTENT plus the producer VERSION, so an unchanged source re-scanned with the same
 // producer reuses the SBOM (skipping the expensive cataloging step), while a producer version bump
-// invalidates the entry — Trivy's analyzer-version cache-invalidation model. The implementation owns the
+// invalidates the entry – Trivy's analyzer-version cache-invalidation model. The implementation owns the
 // key derivation (it walks dir) so filesystem I/O stays in the infrastructure layer; the usecase only
 // supplies the pure producerVersion string. It preserves SBOM.Raw (which is json:"-") so a cache hit still
 // hands a downstream detector (Grype) the EXACT original document, not a lossy reconstruction. Best-effort:
@@ -628,7 +628,7 @@ type ReachabilitySubject struct {
 // ReachabilityRecorder runs deterministic reachability over a target and records the resulting Tier-2
 // judgments. It is the seam the SCA pipeline calls post-scan; reachproof.Coordinator implements
 // it. Returns the number of judgments minted. A no-coverage build error is returned (the caller treats
-// reachability as a best-effort enhancement — a lower reachability tier stands, never a false negative).
+// reachability as a best-effort enhancement – a lower reachability tier stands, never a false negative).
 type ReachabilityRecorder interface {
 	Record(ctx context.Context, engagementID shared.ID, targetRef string, subjects []ReachabilitySubject) (int, error)
 }
@@ -639,7 +639,7 @@ type ReachabilityRecorder interface {
 // is "present but not wired in". Returns the number of components tagged. BEST-EFFORT + CONSERVATIVE: a
 // non-JVM / not-built target tags nothing (never emits "unreferenced" without app roots), and it only
 // DEPRIORITIZES a finding, never suppresses one (an unreferenced verdict is "no static reference found",
-// not proof of dead code — reflection/DI/ServiceLoader are invisible to it). Reads compiled bytecode
+// not proof of dead code – reflection/DI/ServiceLoader are invisible to it). Reads compiled bytecode
 // only; never executes it. The SCA pipeline calls it best-effort post-resolve; an error is ignored.
 type JVMReachabilityAnalyzer interface {
 	Analyze(ctx context.Context, wsDir string, comps []sbom.Component) (int, error)
@@ -647,15 +647,15 @@ type JVMReachabilityAnalyzer interface {
 
 // CallGraphBuilder is the deterministic call-graph PRODUCER port: an implementation
 // runs a language's builder (the Go MVP shells govulncheck-class via argv, sandboxed) over a target and
-// returns the NORMALIZED domain callgraph.Graph — no tool/analysis type crosses this boundary. The Graph
+// returns the NORMALIZED domain callgraph.Graph – no tool/analysis type crosses this boundary. The Graph
 // is the seam reachability proof + taint consume.
 //
 // The two "empty" cases must be signaled DISTINCTLY (the soundness of every downstream reachability
 // verdict rests on this):
-// NO COVERAGE — the target could not be analyzed (un-buildable module, unsupported language, tool
+// NO COVERAGE – the target could not be analyzed (un-buildable module, unsupported language, tool
 // failure): return a non-nil ERROR. The caller degrades to a lower reachability tier; it must NOT
 // read this as "nothing reachable".
-// SUCCESSFUL but nothing reached — the analysis ran and the symbol(s) genuinely are not called:
+// SUCCESSFUL but nothing reached – the analysis ran and the symbol(s) genuinely are not called:
 // return a non-nil Graph (possibly with no edges), nil error. This is DEFINITIVE not-reachable.
 //
 // A successful build must return a non-nil Graph (an empty &callgraph.Graph{}, never nil).
@@ -664,8 +664,8 @@ type CallGraphBuilder interface {
 }
 
 // TaintScanner is the OPTIONAL taint-analysis hook: given a built target, it runs the
-// deterministic taint engine (call-graph + injection catalog) and PROPOSES gated CapSAST judgments — one
-// per reported injection path × class — for a distinct verifier to gate. It only proposes; it never
+// deterministic taint engine (call-graph + injection catalog) and PROPOSES gated CapSAST judgments – one
+// per reported injection path × class – for a distinct verifier to gate. It only proposes; it never
 // confirms. The SCA pipeline drives it best-effort post-scan: a no-coverage/un-buildable target returns an
 // error that is IGNORED (taint is an enhancement; the scan is never failed). Returns the number proposed.
 type TaintScanner interface {
@@ -673,7 +673,7 @@ type TaintScanner interface {
 }
 
 // DependencyGraphResolver augments a generated SBOM with transitive dependency EDGES that a static
-// lockfile/manifest parse cannot provide on its own — e.g. Go modules, whose edge graph is not in go.mod
+// lockfile/manifest parse cannot provide on its own – e.g. Go modules, whose edge graph is not in go.mod
 // but in the module cache, read via `go mod graph`. Unlike SBOMEnricher (pure file reads), an
 // implementation MAY run a sandboxed tool. Best-effort: the SCA pipeline calls it post-SBOM; a non-matching
 // or un-resolvable target (no module cache, not a Go project) adds no edges and never fails the scan.
@@ -684,13 +684,13 @@ type DependencyGraphResolver interface {
 }
 
 // MavenResolver resolves a Maven project's FULL dependency tree (direct + transitive, with the real
-// versions) from its pom.xml — which a static parse cannot do, because Maven versions are managed by
+// versions) from its pom.xml – which a static parse cannot do, because Maven versions are managed by
 // the parent BOM (absent from pom.xml ⇒ syft reports them UNKNOWN) and transitive deps are not listed
 // at all. It returns the resolved components for the SCA pipeline to fold into the SBOM, closing the
 // "Maven-from-source under-reports" gap (a pom-only scan otherwise misses the transitive CVEs).
 //
 // SAFETY: unlike a static parse, an implementation RUNS the Maven toolchain over untrusted project
-// configuration (parent POMs, the dependency plugin) and reaches a package repository — so a
+// configuration (parent POMs, the dependency plugin) and reaches a package repository – so a
 // production implementation MUST run sandbox-confined with egress restricted to the configured Maven
 // repository, exactly like the source-compiling analyzers. Best-effort + OPT-IN: a non-Maven target,
 // a missing mvn binary, or any resolution error returns no components and never fails the scan.
@@ -699,12 +699,12 @@ type MavenResolver interface {
 }
 
 // GradleResolver resolves a Gradle project's FULL dependency tree (direct + transitive, with the
-// resolved versions) from its build script — which a static parse cannot do, because Gradle versions
+// resolved versions) from its build script – which a static parse cannot do, because Gradle versions
 // are often supplied by a platform/BOM or version catalog (absent from the declaration ⇒ UNKNOWN) and
 // transitive deps are not listed. Like MavenResolver it returns versioned pkg:maven components (Gradle
 // uses Maven coordinates) for the SCA pipeline to fold in.
 //
-// SAFETY: even higher-risk than Maven — evaluating build.gradle / settings.gradle RUNS arbitrary
+// SAFETY: even higher-risk than Maven – evaluating build.gradle / settings.gradle RUNS arbitrary
 // Groovy/Kotlin build logic during configuration. So a production implementation MUST run sandbox-
 // confined with egress restricted to the configured repositories, and it must NOT execute the project's
 // own `./gradlew` wrapper (a pinned `gradle` binary only). Best-effort + OPT-IN: a non-Gradle target, a
@@ -726,14 +726,14 @@ type SBOMEnrichment struct {
 // under-uses: it reconstructs missing dependency edges (Gemfile.lock), adds
 // dependencies the generator couldn't resolve (Maven pom.xml, Gradle version
 // catalogs), and refines component scope via workspace attribution (pnpm
-// importers). Reads only manifest files already in the workspace — no execution.
+// importers). Reads only manifest files already in the workspace – no execution.
 type SBOMEnricher interface {
 	Enrich(ctx context.Context, dir string, doc *sbom.SBOM) SBOMEnrichment
 }
 
 // DetectionSource is one vulnerability detector (OSV, Grype, …). The SCA service
 // runs EVERY source against the same Syft SBOM and correlates the results, so
-// sources augment — not replace — each other. A source returns raw
+// sources augment – not replace – each other. A source returns raw
 // findings; the domain correlator (vulnerability.Correlate) merges them into
 // unified vulnerabilities with multi-source confidence.
 type DetectionSource interface {
@@ -748,7 +748,7 @@ type DetectionSource interface {
 //
 // KEY CONTRACT (the ingester normalizes ON WRITE; advisory.Match compares case-sensitively): ecosystem is
 // the exact OSV-canonical name ("Go", "npm", "PyPI", "crates.io", "Maven", "RubyGems", "NuGet"); the
-// package name is the ecosystem's canonical id matching the SBOM component's Name — notably **Maven is
+// package name is the ecosystem's canonical id matching the SBOM component's Name – notably **Maven is
 // "groupId:artifactId"** (colon), Go is the module path. A casing/format divergence between the stored
 // AffectedPackage.{Ecosystem,Package} and the query key silently yields no match (a missed CVE), so the
 // store + the SBOM producer MUST agree per ecosystem.
@@ -759,7 +759,7 @@ type AdvisoryStore interface {
 // CorrelationRecorder turns a cross-check DISAGREEMENT report into Judgments for human review.
 // The SCA pipeline computes the report (vulnerability.CrossCheck over its multi-source
 // RawFindings) and hands it here; the recorder proposes one UNGATED CapCorrelation judgment per NEW
-// disagreement (idempotent on re-scan), which a human acknowledges via Accept — never auto-resolved.
+// disagreement (idempotent on re-scan), which a human acknowledges via Accept – never auto-resolved.
 // crosscheckjudge.Coordinator implements it; injected from the composition root (not agent-reachable).
 type CorrelationRecorder interface {
 	Record(ctx context.Context, engagementID shared.ID, report vulnerability.CrossCheckReport) (int, error)
@@ -769,7 +769,7 @@ type CorrelationRecorder interface {
 // (SBOM side). When ≥2 SBOM producers run (e.g. an owned parser registry + Syft), the
 // SCA pipeline computes the report (sbom.CrossCheck over the two component sets) and hands it here; the
 // recorder proposes one UNGATED CapCorrelation judgment (subject = component) per NEW disagreement
-// (idempotent on re-scan), which a human acknowledges via Accept — never auto-resolved.
+// (idempotent on re-scan), which a human acknowledges via Accept – never auto-resolved.
 // sbomcrosscheckjudge.Coordinator implements it; injected from the composition root (not agent-reachable).
 type SBOMCrossCheckRecorder interface {
 	Record(ctx context.Context, engagementID shared.ID, report sbom.CrossCheckReport) (int, error)
@@ -778,7 +778,7 @@ type SBOMCrossCheckRecorder interface {
 // ConfirmedThreatRecorder promotes a human-ratified STRIDE threat judgment to a persisted Kind=threat
 // finding (auto-emit on ratify). The analysis verify path calls it best-effort after a `threat`
 // judgment reaches Confirmed; the finding is a deterministic, templated projection (no LLM). Implemented by
-// the findings use case and injected from the composition root — the judgment lifecycle never imports it.
+// the findings use case and injected from the composition root – the judgment lifecycle never imports it.
 type ConfirmedThreatRecorder interface {
 	RecordConfirmedThreat(ctx context.Context, verifier string, j judgment.Judgment) error
 }
@@ -786,7 +786,7 @@ type ConfirmedThreatRecorder interface {
 // ConfirmedSASTRecorder promotes a verifier-confirmed CapSAST (taint) judgment to a persisted Kind=sast
 // finding (auto-emit on confirm). The analysis verify path calls it best-effort after a `sast`
 // judgment reaches Confirmed; the finding is a deterministic, templated projection of the SASTClaim (no
-// LLM in the report path). Implemented by the findings use case and injected from the composition root — the
+// LLM in the report path). Implemented by the findings use case and injected from the composition root – the
 // judgment lifecycle never imports it, and it is never agent-reachable.
 type ConfirmedSASTRecorder interface {
 	RecordConfirmedSAST(ctx context.Context, verifier string, j judgment.Judgment) error
@@ -796,14 +796,14 @@ type ConfirmedSASTRecorder interface {
 // the finding's authoritative Description (the draft's prose, composed from description + remediation). The
 // writeupdraft accept path calls it; the implementation MUST validate the finding belongs to the engagement
 // before mutating (no cross-engagement write) and audit the change. Implemented by the findings use case and
-// injected from the composition root — writeupdraftuc reaches findings ONLY through this narrow port.
+// injected from the composition root – writeupdraftuc reaches findings ONLY through this narrow port.
 type FindingWriteupApplier interface {
 	ApplyWriteupDraft(ctx context.Context, actor string, engagementID, findingID shared.ID, description, remediation string) error
 }
 
 // ThreatModelStore persists the architecture-input threat model per engagement: ONE model
-// per engagement (Save upserts). Born tenant-aware (R9) — Save records tenant_id so the row-scoping sweep
-// covers it — while Get is engagement-scoped, because the tenant-gated child route verifies engagement∈tenant
+// per engagement (Save upserts). Born tenant-aware (R9) – Save records tenant_id so the row-scoping sweep
+// covers it – while Get is engagement-scoped, because the tenant-gated child route verifies engagement∈tenant
 // before the handler runs (mirrors the judgment store). Get returns ok=false when no model has been ingested.
 type ThreatModelStore interface {
 	Save(ctx context.Context, engagementID, tenantID shared.ID, m threatmodel.Model) error
@@ -812,7 +812,7 @@ type ThreatModelStore interface {
 
 // AdvisoryWriter loads normalized advisories into the owned store during ingestion. It is deliberately
 // SEPARATE from the read-only AdvisoryStore so a read consumer (the owned DetectionSource) cannot reach the
-// mutator — only the ingester holds this narrow writer (mirrors how the score-mover is kept off the broad
+// mutator – only the ingester holds this narrow writer (mirrors how the score-mover is kept off the broad
 // JudgmentStore). Upsert is idempotent by advisory id: advisories are re-syncable reference data, so a
 // re-ingest REPLACES in place (not append-only). The ingester must pass ingester-NORMALIZED keys per the
 // AdvisoryStore KEY CONTRACT.
@@ -820,10 +820,10 @@ type AdvisoryWriter interface {
 	Upsert(ctx context.Context, a advisory.Advisory) error
 }
 
-// AdvisoryFeed streams normalized advisories from a bulk source — a local OSV dump directory today, a remote
+// AdvisoryFeed streams normalized advisories from a bulk source – a local OSV dump directory today, a remote
 // OSV/GHSA bulk snapshot later. It yields DOMAIN advisories: the OSV/feed-format parsing is the
 // feed's concern, so the ingester stays feed-agnostic. Each invokes fn once per parseable advisory and
-// returns the count of source entries it had to SKIP (unparseable/oversized — best-effort bulk ingest, never
+// returns the count of source entries it had to SKIP (unparseable/oversized – best-effort bulk ingest, never
 // abort the whole sync for one bad record) plus a fatal source error (I/O, cancellation). An error returned
 // by fn aborts iteration and is propagated. Reporting `skipped` keeps a sparse/partial sync visible (no
 // silent gap) rather than masquerading as a complete corpus.
@@ -882,7 +882,7 @@ type SASTRawFinding struct {
 
 // SASTAnalyzer scans first-party SOURCE for deterministic weaknesses (weak crypto, hardcoded
 // secrets, insecure config). It reads the workspace root in-process and NEVER executes anything;
-// findings are deterministic (no LLM), so they publish like SCA (ungated — ProposedBy == "").
+// findings are deterministic (no LLM), so they publish like SCA (ungated – ProposedBy == "").
 type SASTAnalyzer interface {
 	Name() string
 	AnalyzeSource(ctx context.Context, root string) ([]SASTRawFinding, error)
@@ -923,19 +923,19 @@ type MisconfigRawFinding struct {
 
 // SuppressionLoader reads a repo-committed suppression policy (.synapseignore) from a prepared workspace.
 // It is READ-ONLY and best-effort: a missing file yields an empty set with no error, and any read/parse
-// issue degrades to fewer rules rather than failing a scan. Applying the policy — and SURFACING every
-// suppressed finding rather than silently dropping it — is the SCA pipeline's job; this only loads the
+// issue degrades to fewer rules rather than failing a scan. Applying the policy – and SURFACING every
+// suppressed finding rather than silently dropping it – is the SCA pipeline's job; this only loads the
 // declared accepted-risk decisions.
 type SuppressionLoader interface {
 	Load(ctx context.Context, dir string) (ignore.Set, error)
 }
 
 // VEXLoader reads an in-repo OpenVEX document (.synapse.vex.json) from a prepared workspace: the
-// machine-readable accepted-risk counterpart to .synapseignore — a maintainer's not_affected/fixed
+// machine-readable accepted-risk counterpart to .synapseignore – a maintainer's not_affected/fixed
 // assertions with a justification. READ-ONLY and best-effort: a missing file yields an empty document with
 // no error; a malformed/oversized one returns an error the pipeline surfaces (never a scan failure).
-// Applying it — annotating matched findings accepted-risk on the SAME retain-and-mark surface, never
-// removing them — is the SCA pipeline's job.
+// Applying it – annotating matched findings accepted-risk on the SAME retain-and-mark surface, never
+// removing them – is the SCA pipeline's job.
 type VEXLoader interface {
 	Load(ctx context.Context, dir string) (vex.Document, error)
 }
@@ -954,7 +954,7 @@ type MisconfigScanner interface {
 type RiskResult struct {
 	Vulns    []vulnerability.Vulnerability
 	Versions map[string]string // source versions only, e.g. {"kev-catalog":..., "epss-date":...}
-	Matches  map[string]int    // per-scan match counts (kev/epss) — diagnostic, NOT versions
+	Matches  map[string]int    // per-scan match counts (kev/epss) – diagnostic, NOT versions
 }
 
 // RiskEnricher annotates vulnerabilities with CISA KEV + EPSS so they can be
@@ -974,8 +974,8 @@ type SeverityResult struct {
 
 // SeverityEnricher backfills the severity + CVSS of vulnerabilities the detection sources
 // left UNKNOWN (e.g. an OSV-only distro CVE that carries no CVSS) from an authoritative
-// CVSS source (NVD). It ONLY fills unknown severities — it never overrides a source's
-// verdict — and is BEST-EFFORT + bounded: a slow/absent source leaves them unknown rather
+// CVSS source (NVD). It ONLY fills unknown severities – it never overrides a source's
+// verdict – and is BEST-EFFORT + bounded: a slow/absent source leaves them unknown rather
 // than failing or hanging the scan. Runs BEFORE risk enrichment so risk priority can use
 // the backfilled CVSS.
 type SeverityEnricher interface {
@@ -1029,14 +1029,14 @@ type MavenCoordResolver interface {
 // its CycloneDX output). It sets Component.SHA1 + a Checksums entry IN PLACE for components that have a JAR
 // on disk and no existing SHA-1, and returns the count set. This both feeds the SBOM checksum quality
 // element and unblocks JarHashResolver (which needs a SHA-1 as input). Deterministic, offline, read-only,
-// bounded, and symlink-guarded; best-effort — an unreadable JAR is skipped, never fatal.
+// bounded, and symlink-guarded; best-effort – an unreadable JAR is skipped, never fatal.
 type JarChecksumResolver interface {
 	Resolve(ctx context.Context, wsDir string, comps []sbom.Component) int
 }
 
 // JarHashResolver recovers the Maven coordinate of a JVM component that carries NO usable in-file
-// identity — a shaded / relocated / renamed JAR whose pom.properties was stripped, which MavenCoordResolver
-// therefore cannot fix — by looking its artifact SHA-1 up against a coordinate index.
+// identity – a shaded / relocated / renamed JAR whose pom.properties was stripped, which MavenCoordResolver
+// therefore cannot fix – by looking its artifact SHA-1 up against a coordinate index.
 // It corrects the component PURL + name + version IN PLACE and returns the number of components recovered.
 // Only components with a SHA-1 and an UNRESOLVED coordinate are queried; a single unambiguous match is
 // adopted, anything else is left unchanged (never guess). Best-effort: a lookup error /

@@ -146,7 +146,7 @@ func TestChildEnvResolvesSecretsCleanly(t *testing.T) {
 	if !has("PLAIN=value") || !has("HOME=/work") {
 		t.Errorf("plain env + HOME should be present: %v", env)
 	}
-	// A clean base env only — the worker's environment must NOT be inherited.
+	// A clean base env only – the worker's environment must NOT be inherited.
 	for _, e := range env {
 		if strings.HasPrefix(e, "SYNAPSE_") {
 			t.Errorf("worker env leaked into the child: %q", e)

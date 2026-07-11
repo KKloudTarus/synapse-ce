@@ -81,7 +81,7 @@ func seedEngagement(t *testing.T, engRepo *memory.EngagementRepository, findRepo
 
 // TestExportTenantIsolation proves the service-layer defense-in-depth: even reached
 // DIRECTLY (bypassing the HTTP withEngTenant wrapper), Export refuses a cross-tenant engagement
-// with ErrNotFound — so the bundle, which leaves the instance, can never be pulled across tenants
+// with ErrNotFound – so the bundle, which leaves the instance, can never be pulled across tenants
 // even if a future caller forgets the route wrapper. The matching tenant still exports normally.
 func TestExportTenantIsolation(t *testing.T) {
 	svc, engRepo, findRepo, ev := setup(t)

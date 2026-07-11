@@ -13,7 +13,7 @@ const cgroupRoot = "/sys/fs/cgroup"
 
 // runCgroup is a per-run cgroup v2 with hard resource limits (F3). The tool is created
 // inside it via clone-into-cgroup (CgroupFD), so memory.max + pids.max bound a memory or
-// fork bomb on EVERY execution path — egress and isolated alike — without depending on
+// fork bomb on EVERY execution path – egress and isolated alike – without depending on
 // systemd-run. Creating a cgroup needs write access to /sys/fs/cgroup (root / CAP delegated);
 // the egress path always has it, so the privileged runs that touch hostile networks are
 // always limited. When creation isn't permitted, newRunCgroup errors and the caller falls
@@ -23,7 +23,7 @@ type runCgroup struct {
 	dir  *os.File
 }
 
-// newRunCgroup creates the cgroup, writes the limits (checked — a failed limit write is an
+// newRunCgroup creates the cgroup, writes the limits (checked – a failed limit write is an
 // error, never a silently-unlimited cgroup), and opens its dir fd for clone-into-cgroup.
 func newRunCgroup(seq int64, memMax int64, pidsMax int) (*runCgroup, error) {
 	path := filepath.Join(cgroupRoot, fmt.Sprintf("synapse-run-%d", seq))
@@ -43,7 +43,7 @@ func newRunCgroup(seq int64, memMax int64, pidsMax int) (*runCgroup, error) {
 			cg.Close()
 			return nil, err
 		}
-		// No swap escape hatch — a memory bomb must not spill into swap to evade memory.max.
+		// No swap escape hatch – a memory bomb must not spill into swap to evade memory.max.
 		// Checked: if the controller is present but the write fails, fail the cgroup (the
 		// caller falls back) rather than silently allowing swap-based evasion. Skipped only
 		// when swap accounting is absent (file missing → write returns an error we tolerate).

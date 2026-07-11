@@ -200,7 +200,7 @@ func isBoolOp(n *sitter.Node, sp spec) bool {
 // complexity computes (cyclomatic, cognitive) for one function node over its own body, not descending into
 // nested functions (which are separate records). See the package doc for the exact rules. Iterative
 // (explicit stack of (node, nestingDepth)) so a pathologically deep expression tree in untrusted source
-// cannot overflow the goroutine stack — matching countType/collectFunctions.
+// cannot overflow the goroutine stack – matching countType/collectFunctions.
 func complexity(fn *sitter.Node, sp spec) (cyc, cog int) {
 	cyc = 1
 	type frame struct {
@@ -219,7 +219,7 @@ func complexity(fn *sitter.Node, sp spec) (cyc, cog int) {
 		stack = stack[:len(stack)-1]
 		c, ct := f.n, f.n.Type()
 		if sp.funcType[ct] {
-			continue // nested function: its own record, and a nesting boundary — do not descend
+			continue // nested function: its own record, and a nesting boundary – do not descend
 		}
 		if isBoolOp(c, sp) {
 			cyc++

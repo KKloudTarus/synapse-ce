@@ -1,6 +1,6 @@
 // Package user models operator identities: each consultant is a
-// distinct user with their own API key, so every action — comments, findings,
-// assignments, audit, evidence — is attributable to a real person, not a shared
+// distinct user with their own API key, so every action – comments, findings,
+// assignments, audit, evidence – is attributable to a real person, not a shared
 // "operator". Only the API key's SHA-256 digest is ever stored; the raw key is
 // shown once at creation and never persisted.
 package user
@@ -36,24 +36,24 @@ func (r Role) Valid() bool {
 }
 
 // Permission is a coarse capability a handler requires (RBAC). Buckets are intentionally
-// few and well-understood — easier to reason about and audit than dozens of fine-grained flags.
+// few and well-understood – easier to reason about and audit than dozens of fine-grained flags.
 type Permission string
 
 const (
-	// PermView — read engagement-scoped data + sealed report/export artifacts. The floor for any
+	// PermView – read engagement-scoped data + sealed report/export artifacts. The floor for any
 	// authenticated human principal in a tenant.
 	PermView Permission = "view"
-	// PermOperate — engagement work that writes or executes: create/edit engagements, scope,
+	// PermOperate – engagement work that writes or executes: create/edit engagements, scope,
 	// window, RoE, live-recon, transition; run scans/recon; import SBOM; capture evidence; apply
 	// VEX; manage credentials; author findings; start agent sessions; import a bundle.
 	PermOperate Permission = "operate"
-	// PermTriage — light finding handling that is neither authoring nor sign-off: comment, set
+	// PermTriage – light finding handling that is neither authoring nor sign-off: comment, set
 	// status, assign, record a retest. Held by consultants and reviewers.
 	PermTriage Permission = "triage"
-	// PermReview — sign-off with separation of duties: verify/confirm an exploitation finding
+	// PermReview – sign-off with separation of duties: verify/confirm an exploitation finding
 	// and decide an agent HITL approval. NEVER held by a machine (mcp/agent) role.
 	PermReview Permission = "review"
-	// PermAdminister — user management + tenant assignment. Admin only.
+	// PermAdminister – user management + tenant assignment. Admin only.
 	PermAdminister Permission = "administer"
 )
 
@@ -62,7 +62,7 @@ const (
 // they are granted nothing on the human REST API (they act only via their own propose-only surface).
 //
 // INVARIANT: read-only after package initialization. It is never mutated at runtime; Can is the
-// only accessor. Do not write to it — a guarded static table is what makes authorization a pure,
+// only accessor. Do not write to it – a guarded static table is what makes authorization a pure,
 // race-free decision.
 var rolePermissions = map[Role]map[Permission]bool{
 	RoleAdmin:      {PermView: true, PermOperate: true, PermTriage: true, PermReview: true, PermAdminister: true},

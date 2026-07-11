@@ -17,7 +17,7 @@ import (
 
 // TestRunTimeoutKillsProcessGroup is the regression test for F-1: a tool that spawns
 // a background child must NOT leave that child alive after the runner's timeout. We
-// exec `sh` (as a binary — argv only, no shell string is built from input) which forks
+// exec `sh` (as a binary – argv only, no shell string is built from input) which forks
 // a long `sleep`, records its pid, then blocks; on timeout the runner must kill the
 // whole process group, taking the orphaned sleep with it.
 func TestRunTimeoutKillsProcessGroup(t *testing.T) {
@@ -25,7 +25,7 @@ func TestRunTimeoutKillsProcessGroup(t *testing.T) {
 	skipIfMissing(t, "sleep")
 
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
-	// Background a long sleep, write its pid, then wait — so the script outlives the
+	// Background a long sleep, write its pid, then wait – so the script outlives the
 	// short timeout and the sleep is a grandchild of the runner.
 	script := "sleep 30 & echo $! > " + pidFile + "; wait"
 
@@ -46,7 +46,7 @@ func TestRunTimeoutKillsProcessGroup(t *testing.T) {
 	}
 	// Clean up the orphan we just proved leaked, so the test host isn't littered.
 	_ = syscall.Kill(pid, syscall.SIGKILL)
-	t.Fatalf("grandchild pid %d survived the timeout — process group was not killed (F-1)", pid)
+	t.Fatalf("grandchild pid %d survived the timeout – process group was not killed (F-1)", pid)
 }
 
 func readPID(t *testing.T, path string) int {

@@ -12,7 +12,7 @@ import (
 
 // This file is the structured decision-log projection. Every recorder is a
 // no-op when no DecisionStore is wired (legacy), and a recording failure is AUDITED but never
-// fails the run — the evidence chain (fail-closed) is the authoritative custody record; the
+// fails the run – the evidence chain (fail-closed) is the authoritative custody record; the
 // decision log is a queryable projection on top of it.
 
 // appendDecision persists a built decision, swallowing+auditing a store error (non-fatal).

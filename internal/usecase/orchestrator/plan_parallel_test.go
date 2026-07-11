@@ -61,7 +61,7 @@ func TestPlanLoop_ParallelActiveSiblingsConcurrentChainIntact(t *testing.T) {
 	]}`
 	llm := &scriptLLM{steps: []ports.ChatResponse{
 		chatTool(proposePlanCall("c1", plan)),
-		chatStop("done — 3 in parallel"),
+		chatStop("done – 3 in parallel"),
 	}}
 	exec := &concExecutor{}
 	orch, ev, _, planStore, _ := newPlanOrch(t, llm, exec, agent.ModeAuto, orchestrator.Config{MaxSteps: 8, MaxParallel: 3})
@@ -91,7 +91,7 @@ func TestPlanLoop_ParallelActiveSiblingsConcurrentChainIntact(t *testing.T) {
 
 // TestPlanLoop_IntrusiveNeverBatched: with active + intrusive ready siblings and MaxParallel=4,
 // only the RiskActive nodes run concurrently; the intrusive node is NOT batched (it suspends for
-// manual approval) — so two intrusive actions can never be in flight together.
+// manual approval) – so two intrusive actions can never be in flight together.
 func TestPlanLoop_IntrusiveNeverBatched(t *testing.T) {
 	plan := `{"nodes":[
 		{"key":"a","tool":"subfinder","target":"app.acme.io","rationale":"a"},

@@ -25,25 +25,25 @@ Synapse follows clean architecture with a strict, inward-only dependency rule:
 domain  ←  usecase  ←  adapter / infrastructure
 ```
 
-- `internal/domain/*` imports only `domain` + the standard library — no frameworks, DB, or
+- `internal/domain/*` imports only `domain` + the standard library – no frameworks, DB, or
   tools.
-- `internal/usecase/*` imports `domain` and `usecase/ports` (interfaces) — never a concrete
+- `internal/usecase/*` imports `domain` and `usecase/ports` (interfaces) – never a concrete
   adapter or infrastructure package.
 - All external I/O (database, tools, storage, sandbox) goes through **ports** in
   `internal/usecase/ports`.
-- `cmd/*` is the composition root — dependency injection only, no business logic.
+- `cmd/*` is the composition root – dependency injection only, no business logic.
 
 ## Safety invariants (non-negotiable)
 
 Synapse is a security tool. Changes must preserve these:
 
-1. **Execute tools via `argv` arrays — never a shell string.** No user/target input is ever
+1. **Execute tools via `argv` arrays – never a shell string.** No user/target input is ever
    concatenated into a command.
 2. **Enforce scope + the authorization window in the execution layer**, server-side, before
    any tool runs.
 3. **Secrets never enter logs, transcripts, or source.** Use the credential vault + server-side
    placeholder substitution.
-4. **Reports are templated from stored data** — deterministic, reproducible.
+4. **Reports are templated from stored data** – deterministic, reproducible.
 5. **Evidence and audit logs are append-only** and hash-chained; a broken chain blocks the
    report.
 
@@ -61,7 +61,7 @@ If a change would weaken any of these, please open an issue to discuss first.
 
 **Frontend (`web/`):**
 - Use **pnpm**, never npm/yarn.
-- Style via the design-system tokens in `web/src/index.css` — no raw hex in components.
+- Style via the design-system tokens in `web/src/index.css` – no raw hex in components.
 - Icons: `lucide-react`. Always handle loading/empty/error states.
 
 ## Pull requests

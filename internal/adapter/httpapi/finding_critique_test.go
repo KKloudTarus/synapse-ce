@@ -32,7 +32,7 @@ func critJ(subj string, st judgment.State, score int, capb judgment.Capability, 
 }
 
 // TestSuspectedFP: only a CONFIRMED, publishable, "refuted" CRITIQUE flags a finding as
-// suspected-FP — proposed/non-refuted/other-capability judgments never do.
+// suspected-FP – proposed/non-refuted/other-capability judgments never do.
 func TestSuspectedFP(t *testing.T) {
 	rt := &Router{judgments: &critiqueJudgments{js: []judgment.Judgment{
 		critJ("f1", judgment.StateConfirmed, 90, judgment.CapCritique, judgment.CritiqueClaim{Verdict: judgment.CritiqueRefuted, Driver: "not_reachable", Confidence: 90}),     // flagged
@@ -55,7 +55,7 @@ func TestSuspectedFP(t *testing.T) {
 }
 
 // TestFindingViewsAttachCompliance: the findings list annotates each finding with the curated
-// compliance controls its CWE maps to — a mapped CWE carries its controls (alongside the suspected-FP
+// compliance controls its CWE maps to – a mapped CWE carries its controls (alongside the suspected-FP
 // flag), while an empty or unmapped CWE carries none (compliance.ControlsFor fail-open).
 func TestFindingViewsAttachCompliance(t *testing.T) {
 	list := []finding.Finding{

@@ -10,14 +10,14 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// Poetry is the owned Python-via-Poetry parser (components + edges): it reads poetry.lock — the
-// resolved dependency set as TOML [[package]] blocks — into pypi components (pkg:pypi/<name>@<version>) AND
+// Poetry is the owned Python-via-Poetry parser (components + edges): it reads poetry.lock – the
+// resolved dependency set as TOML [[package]] blocks – into pypi components (pkg:pypi/<name>@<version>) AND
 // the dependency edges between them. Resolved versions come from the lock; the dev/prod scope comes from the
 // block's `category = "dev"` (Poetry <1.5, inline) when present, else the file path. Names are PEP 503-
 // normalized (shared with the requirements parser). Each package's `[package.dependencies]` sub-table names
-// its direct deps; each dep is resolved to the matching [[package]]'s PURL — a dep with no [[package]] entry
+// its direct deps; each dep is resolved to the matching [[package]]'s PURL – a dep with no [[package]] entry
 // (e.g. the `python` constraint, or an extras-only marker) yields no edge, so an odd/unparsed entry is
-// silently dropped rather than mis-linked. Reuses the [[package]] scan (shared with Cargo) — hand-parsed, no
+// silently dropped rather than mis-linked. Reuses the [[package]] scan (shared with Cargo) – hand-parsed, no
 // TOML library, vendor-neutral.
 type Poetry struct{}
 
@@ -68,7 +68,7 @@ func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 		if inFiles {
 			if strings.HasPrefix(line, "[") {
 				// An unterminated files array (missing `]`): a new table/[[package]] ends it. Exit and fall
-				// through so the boundary line is handled below — never swallow later packages (no silent gap).
+				// through so the boundary line is handled below – never swallow later packages (no silent gap).
 				inFiles = false
 			} else {
 				if line == "]" {
@@ -79,7 +79,7 @@ func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 				continue
 			}
 		}
-		// Lock v1: the trailing [metadata.files] table — `name = [ {file=…, hash="sha256:…"} ]`.
+		// Lock v1: the trailing [metadata.files] table – `name = [ {file=…, hash="sha256:…"} ]`.
 		if inMeta && !strings.HasPrefix(line, "[") {
 			switch {
 			case metaName == "":
@@ -105,7 +105,7 @@ func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 			flush()
 			inPkg, inMeta, metaName = false, true, ""
 		case line == "[package.dependencies]":
-			inDeps = true // the current package's direct deps follow — stay associated with cur (do NOT flush)
+			inDeps = true // the current package's direct deps follow – stay associated with cur (do NOT flush)
 		case strings.HasPrefix(line, "["): // any other table ([package.extras]/[package.source]/[metadata]/…) ends the block
 			flush()
 			inPkg, inMeta = false, false
@@ -133,7 +133,7 @@ func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 
 	// Index normalized name -> resolved version(s). A real poetry.lock is deduped (one version per name); a
 	// name mapping to MORE than one version (a malformed/crafted lock) is ambiguous and resolves to NO edge,
-	// mirroring Cargo's resolver — never guess which same-named package an edge points at.
+	// mirroring Cargo's resolver – never guess which same-named package an edge points at.
 	purlOf := func(name, version string) string { return "pkg:pypi/" + name + "@" + version }
 	versionsOf := map[string][]string{}
 	for _, p := range pkgs {
@@ -162,7 +162,7 @@ func (Poetry) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbo
 			dn := normalizePyPI(d)
 			vs := versionsOf[dn]
 			if len(vs) != 1 {
-				continue // no [[package]] entry (e.g. the python constraint) OR an ambiguous duplicate name — no edge
+				continue // no [[package]] entry (e.g. the python constraint) OR an ambiguous duplicate name – no edge
 			}
 			if t := purlOf(dn, vs[0]); !seen[t] {
 				seen[t] = true
@@ -187,7 +187,7 @@ func poetryFileHash(line string) string {
 }
 
 // isPoetryDepKey reports whether a [package.dependencies] line's key is a package-name token (starts
-// alphanumeric) — filtering multi-line-value continuation lines (e.g. an array element starting with "{").
+// alphanumeric) – filtering multi-line-value continuation lines (e.g. an array element starting with "{").
 func isPoetryDepKey(k string) bool {
 	if k == "" {
 		return false

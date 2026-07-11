@@ -1,5 +1,5 @@
 // Package licensefile recovers component licenses by classifying the LICENSE / COPYING
-// files present in the prepared workspace — the cross-ecosystem equivalent of Trivy's
+// files present in the prepared workspace – the cross-ecosystem equivalent of Trivy's
 // `--license-full`, but for ANY language (not just JARs, which jarlicense handles).
 //
 // It walks the workspace, classifies each license file's TEXT via the shared licensetext
@@ -62,7 +62,7 @@ func (r *Resolver) Resolve(ctx context.Context, wsDir string, comps []sbom.Compo
 
 	// Index components for directory matching. A name seen on two components is ambiguous
 	// (never guessed). A root-level license file attaches only to FIRST-PARTY components
-	// (the project itself) — never to dependencies, which carry their own licenses.
+	// (the project itself) – never to dependencies, which carry their own licenses.
 	byName := map[string]int{}
 	ambiguous := map[string]bool{}
 	var firstParty []int
@@ -95,7 +95,7 @@ func (r *Resolver) Resolve(ctx context.Context, wsDir string, comps []sbom.Compo
 		}
 		// Only regular files: a symlink named LICENSE could redirect the read outside the
 		// workspace (e.g. LICENSE -> /etc/passwd). d.Type() comes from the dirent (Lstat),
-		// so it identifies the symlink WITHOUT following it — mirrors enry/detector + acquirer.
+		// so it identifies the symlink WITHOUT following it – mirrors enry/detector + acquirer.
 		if !d.Type().IsRegular() {
 			return nil
 		}

@@ -1,8 +1,8 @@
 // Package sandbox implements ports.ToolRunner by confining each argv tool run in an
 // unprivileged sandbox (see docs/08-security-model.md for the
-// as-built control set). It orchestrates bubblewrap (bwrap) — the vetted, minimal-trust
-// namespace sandbox (Flatpak's engine) — to give every run: a CURATED read-only OS tree
-// (NOT the whole host root — $HOME/secrets are absent, F2), a single read-write scoped
+// as-built control set). It orchestrates bubblewrap (bwrap) – the vetted, minimal-trust
+// namespace sandbox (Flatpak's engine) – to give every run: a CURATED read-only OS tree
+// (NOT the whole host root – $HOME/secrets are absent, F2), a single read-write scoped
 // workdir, a fresh tmpfs, all namespaces unshared (user/net/pid/ipc/uts/cgroup), every
 // capability dropped, a default-DENY seccomp syscall filter (F1, fail-closed), and a new
 // session. The fresh network namespace is the DEFAULT-DENY egress backstop: a tool can
@@ -12,8 +12,8 @@
 // unprivileged runs that cannot create a cgroup.
 //
 // It is argv-only: the runner builds `[systemd-run …] bwrap … -- tool
-// args…` as an argv array and delegates the actual exec — timeout, output cap, and
-// whole-process-group kill — to the existing ExecRunner, so there is one execution
+// args…` as an argv array and delegates the actual exec – timeout, output cap, and
+// whole-process-group kill – to the existing ExecRunner, so there is one execution
 // primitive. bwrap is Linux-only; on a host without it (macOS dev) NewRunner returns
 // ErrUnavailable so the caller degrades rather than running unsandboxed.
 package sandbox
@@ -68,7 +68,7 @@ const netnsSlotCount = 64
 
 // curatedEtc is the allowlist of PUBLIC /etc paths bound read-only into the sandbox (F2
 // re-audit fix). It deliberately omits /etc/shadow, /etc/gshadow, /etc/ssl/private,
-// /etc/pki/tls/private, /etc/krb5.keytab and any service-credential files — binding only
+// /etc/pki/tls/private, /etc/krb5.keytab and any service-credential files – binding only
 // the TLS trust store (public certs), name resolution, account names, loader, and tz.
 // Covers RHEL (/etc/pki) and Debian (/etc/ssl) layouts; missing paths are skipped.
 var curatedEtc = []string{
@@ -84,22 +84,22 @@ var curatedEtc = []string{
 
 // SetBinaryRegistry enables tool-binary integrity verification (F5): before each run the
 // resolved binary's sha256 is checked against its pin (config-supplied and/or TOFU); a
-// mismatch refuses the run. Optional — without it, binaries are trusted by PATH (legacy).
+// mismatch refuses the run. Optional – without it, binaries are trusted by PATH (legacy).
 func (r *Runner) SetBinaryRegistry(b *binregistry.Registry) { r.binreg = b }
 
-// SetVault enables {{secret:NAME}} resolution from the credential vault. Optional — with
+// SetVault enables {{secret:NAME}} resolution from the credential vault. Optional – with
 // no vault a spec that references a secret fails closed.
 func (r *Runner) SetVault(v ports.CredentialVault) { r.vault = v }
 
 // SetEgress enables per-run scope egress enforcement: a spec carrying an
 // EgressPolicy is run inside a network namespace whose kernel filter allows only in-scope
-// destinations. Optional — without it, an EgressPolicy-bearing spec fails closed.
+// destinations. Optional – without it, an EgressPolicy-bearing spec fails closed.
 func (r *Runner) SetEgress(a *egress.Applier) { r.egress = a }
 
 // SetConnMonitor enables the eBPF connect-logger: each egress run is placed in a
 // cgroup whose connect4/connect6 hooks capture every outbound connect() attempt (incl.
 // ones the egress filter drops) into the run's ToolResult.ConnectLog. Optional + best-
-// effort — a missing/unprivileged logger never fails the run (it is observability).
+// effort – a missing/unprivileged logger never fails the run (it is observability).
 func (r *Runner) SetConnMonitor(m *ebpf.Monitor) { r.connMon = m }
 
 var _ ports.ToolRunner = (*Runner)(nil)
@@ -112,7 +112,7 @@ func NewRunner(timeout time.Duration, maxOut int, memMax int64, pidsMax int) (*R
 		return nil, ErrUnavailable
 	}
 	// F1 fail-closed: a sandbox without a syscall filter is NOT a sandbox. If seccomp
-	// cannot be built on this platform, refuse to construct the runner — the caller then
+	// cannot be built on this platform, refuse to construct the runner – the caller then
 	// degrades rather than silently running tools with the full syscall table.
 	if !seccompSupported {
 		return nil, fmt.Errorf("%w: seccomp filtering is required but unsupported on this platform", ErrUnavailable)
@@ -149,7 +149,7 @@ func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult
 		return ports.ToolResult{}, fmt.Errorf("%w: sandbox empty command name", shared.ErrValidation)
 	}
 	// Build a CONTROLLED child environment (never inherit the worker's, which holds the
-	// vault master key, DB password, and signing seed — secrets never enter logs). Secrets are
+	// vault master key, DB password, and signing seed – secrets never enter logs). Secrets are
 	// resolved into env values here, immediately before exec, and reach the tool via the
 	// environment, not argv.
 	env, secrets, err := r.childEnv(ctx, spec)
@@ -157,7 +157,7 @@ func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult
 		return ports.ToolResult{}, err
 	}
 	// F1: build the seccomp filter fd for THIS run; bwrap loads it via `--seccomp 3` (the
-	// fd's child number, since it is the sole ExtraFile). Fail closed — never run a tool
+	// fd's child number, since it is the sole ExtraFile). Fail closed – never run a tool
 	// without the syscall filter the sandbox promises.
 	seccompF, serr := seccompFile()
 	if serr != nil {
@@ -175,7 +175,7 @@ func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult
 		if verr := r.binreg.Verify(binPath); verr != nil {
 			return ports.ToolResult{}, fmt.Errorf("%w: %v", shared.ErrValidation, verr)
 		}
-		// Exec the EXACT path we verified (absolute) — so bwrap does not re-resolve spec.Name
+		// Exec the EXACT path we verified (absolute) – so bwrap does not re-resolve spec.Name
 		// via PATH to a possibly-different binary (closes the verify-path != exec-path gap).
 		spec.Name = binPath
 	}
@@ -228,7 +228,7 @@ func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult
 		// capture every connect() the tool attempts (incl. dropped out-of-scope
 		// ones). Attach to the SAME per-run cgroup the limits are on (so one clone-into-
 		// cgroup both limits and logs); fall back to a logger-owned cgroup if F3's cgroup
-		// could not be created. Best-effort — observability never fails the run.
+		// could not be created. Best-effort – observability never fails the run.
 		if r.connMon != nil {
 			if runCG != nil {
 				if s, merr := r.connMon.Attach(runCG.Path()); merr == nil {
@@ -284,7 +284,7 @@ func (r *Runner) childEnv(ctx context.Context, spec ports.ToolSpec) (env []strin
 	}
 	env = []string{"PATH=" + path, "HOME=" + home}
 	// The systemd-run --user wrapper needs these to reach the user session bus; they are
-	// not secrets. Pass ONLY them through from the worker — everything else (the vault
+	// not secrets. Pass ONLY them through from the worker – everything else (the vault
 	// master key, DB DSN, signing seed) is dropped by omission (allowlist).
 	if r.systemdRun != "" {
 		for _, k := range []string{"XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"} {
@@ -343,7 +343,7 @@ func (r *Runner) substituteSecrets(ctx context.Context, engagementID shared.ID, 
 
 // command builds the full argv. Isolated run: `[systemd-run …] bwrap <flags> -- tool`.
 // Egress run (egressNS set): `[sudo] ip netns exec <ns> bwrap <flags, shared net> -- tool`
-// — entering the prepared netns; systemd-run is skipped there (it conflicts with the
+// – entering the prepared netns; systemd-run is skipped there (it conflicts with the
 // netns-enter privilege). cgroup memory/pids limits ARE applied on egress runs via the
 // per-run cgroup the tool is cloned into (F3, directCgroup), not via systemd-run.
 func (r *Runner) command(spec ports.ToolSpec, egressNS, hostsFile string, seccompFD int, directCgroup bool) []string {
@@ -370,7 +370,7 @@ func (r *Runner) command(spec ports.ToolSpec, egressNS, hostsFile string, seccom
 // its own path.
 func (r *Runner) bwrapArgs(spec ports.ToolSpec, sharedNet bool, hostsFile string, seccompFD int) []string {
 	args := []string{
-		// F2: a CURATED read-only OS tree — NOT the whole host root. Only the dirs a tool
+		// F2: a CURATED read-only OS tree – NOT the whole host root. Only the dirs a tool
 		// needs to run (binaries, shared libs, CA bundle, nsswitch) are bound. $HOME, /root,
 		// /var, /opt, /srv, /mnt, /media, /boot are NOT bound, so ~/.ssh, ~/.aws,
 		// ~/.docker and other host secrets are ABSENT (ENOENT), not merely read-only. The
@@ -391,7 +391,7 @@ func (r *Runner) bwrapArgs(spec ports.ToolSpec, sharedNet bool, hostsFile string
 	// as mapped root on the privileged worker, so binding the whole /etc would expose
 	// root-readable secrets (/etc/shadow, /etc/ssl/private/*.key, /etc/krb5.keytab, service
 	// creds). Only public OS config a tool needs (CA trust, nsswitch, passwd/group, TLS
-	// config, loader cache, timezone) is bound — never the private dirs. Missing paths are
+	// config, loader cache, timezone) is bound – never the private dirs. Missing paths are
 	// skipped (--ro-bind-try), covering both RHEL (/etc/pki) and Debian (/etc/ssl) layouts.
 	for _, p := range curatedEtc {
 		args = append(args, "--ro-bind-try", p, p)
@@ -416,7 +416,7 @@ func (r *Runner) bwrapArgs(spec ports.ToolSpec, sharedNet bool, hostsFile string
 			}
 		}
 	} else {
-		// Isolated mode: fresh netns too — default-deny egress by construction (E9 default).
+		// Isolated mode: fresh netns too – default-deny egress by construction (E9 default).
 		args = append(args, "--unshare-all")
 	}
 	for _, p := range spec.ReadOnlyPaths {
@@ -497,7 +497,7 @@ func connAllowed(e ports.ConnEvent, allow []ports.EgressRule) bool {
 // omission.
 //
 // RESIDUAL RISK (audit): CAP_NET_RAW also authorizes AF_PACKET (link-layer) sockets, whose
-// TX frames do NOT traverse the netns's iptables filter/OUTPUT chain — so a COMPROMISED or
+// TX frames do NOT traverse the netns's iptables filter/OUTPUT chain – so a COMPROMISED or
 // replaced tool binary holding this cap could craft packets that egress the veth outside
 // the scope allowlist (the host's FORWARD -s subnet -j ACCEPT then forwards them). The
 // allowlist therefore bounds a well-behaved tool's L3 traffic, not a malicious one's L2

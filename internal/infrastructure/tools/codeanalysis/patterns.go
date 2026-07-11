@@ -115,7 +115,7 @@ func stripTrailingComment(l string) string {
 }
 
 // selfAssignment reports whether the whole statement is `<ident> = <ident>` (same identifier), e.g.
-// `y = y;` — a no-op. The right side must be ONLY the identifier, so `total = total + 1` does not match.
+// `y = y;` – a no-op. The right side must be ONLY the identifier, so `total = total + 1` does not match.
 func selfAssignment(line string) bool {
 	l := strings.TrimSpace(stripTrailingComment(maskStrings(line)))
 	l = strings.TrimSpace(strings.TrimSuffix(l, ";"))
@@ -243,7 +243,7 @@ func builtinRules() []rule {
 		{
 			id: "quality-commented-out-code", kind: kindQuality, cwe: "", severity: shared.SeverityInfo,
 			title: "Commented-out code",
-			desc:  "A comment appears to contain commented-out code, which rots and confuses readers. Delete it — version control preserves history.",
+			desc:  "A comment appears to contain commented-out code, which rots and confuses readers. Delete it – version control preserves history.",
 			match: commentedOutCode,
 		},
 		{

@@ -1,6 +1,6 @@
 -- +goose Up
 -- Finding-quality signals (Phase 1.95): component scope, metadata reachability,
--- action impact, and unified Synapse risk priority — so findings can be ranked
+-- action impact, and unified Synapse risk priority – so findings can be ranked
 -- (production/direct/KEV first) and background (example/test) separated without
 -- hiding anything. Defaults keep existing rows valid.
 ALTER TABLE findings ADD COLUMN scope        TEXT NOT NULL DEFAULT 'unknown';

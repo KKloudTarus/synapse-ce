@@ -1,9 +1,9 @@
 //go:build linux
 
 // Package ebpf is the egress connection observer: a cgroup connect4/connect6 eBPF
-// program (compiled to bytecode by clang, embedded, loaded by cilium/ebpf — no toolchain
+// program (compiled to bytecode by clang, embedded, loaded by cilium/ebpf – no toolchain
 // at runtime) attached to a per-run cgroup. Every outbound connect() the sandboxed tool
-// attempts — including ones the kernel egress filter then DROPS — is captured and returned
+// attempts – including ones the kernel egress filter then DROPS – is captured and returned
 // for sealing as evidence. It only OBSERVES; enforcement stays with the iptables filter.
 package ebpf
 
@@ -37,7 +37,7 @@ var connlogObj []byte
 const cgroupRoot = "/sys/fs/cgroup"
 
 // ErrUnavailable means the eBPF connect-logger cannot run here (no privilege / kernel
-// support). Callers degrade to no connect-log — never block or fail the run on it.
+// support). Callers degrade to no connect-log – never block or fail the run on it.
 var ErrUnavailable = errors.New("ebpf connect-logger unavailable")
 
 // rawEvent mirrors `struct conn_event` in connlog.bpf.c (packed, host == little-endian).
@@ -91,7 +91,7 @@ func (m *Monitor) Start(name string) (*Session, error) {
 	return sess, nil
 }
 
-// Attach attaches the connect hooks to an EXISTING cgroup (owned by the caller — e.g. the
+// Attach attaches the connect hooks to an EXISTING cgroup (owned by the caller – e.g. the
 // sandbox's per-run limit cgroup, F3). Close detaches but does NOT remove the cgroup.
 func (m *Monitor) Attach(cgroupPath string) (*Session, error) {
 	return m.attach(cgroupPath, nil, false)
@@ -137,7 +137,7 @@ func (m *Monitor) attach(cgPath string, cgDir *os.File, owns bool) (*Session, er
 	return sess, nil
 }
 
-// closeProg tears down only the eBPF objects (links + collection), not the cgroup — used
+// closeProg tears down only the eBPF objects (links + collection), not the cgroup – used
 // on a failed attach where the caller still owns cgroup cleanup.
 func (s *Session) closeProg() {
 	for _, l := range s.links {

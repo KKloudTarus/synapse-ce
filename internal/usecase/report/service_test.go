@@ -59,7 +59,7 @@ func (fakePDF) Render(context.Context, *engagement.Engagement, []finding.Finding
 }
 
 // capturePDF records the findings handed to the PDF renderer so a test can assert the
-// evidence gate ran before the PDF was rendered (the PDF path once skipped it — a publishability leak).
+// evidence gate ran before the PDF was rendered (the PDF path once skipped it – a publishability leak).
 type capturePDF struct{ findings []finding.Finding }
 
 func (c *capturePDF) Render(_ context.Context, _ *engagement.Engagement, fs []finding.Finding, _ ports.ReportInsight, _ time.Time, _ string) ([]byte, error) {
@@ -514,7 +514,7 @@ func sectionMentions(doc ports.ReportDocument, heading, sub string) bool {
 }
 
 // TestDetailsSectionCompliance: a finding's CWE surfaces its curated compliance controls in the
-// finding-details meta line (a deterministic table lookup — no LLM in the report path).
+// finding-details meta line (a deterministic table lookup – no LLM in the report path).
 // An unmapped or CWE-less finding carries no compliance tag.
 func TestDetailsSectionCompliance(t *testing.T) {
 	findings := []finding.Finding{
@@ -534,7 +534,7 @@ func TestDetailsSectionCompliance(t *testing.T) {
 			t.Errorf("CWE-89 finding details must include %q; got:\n%s", want, joined)
 		}
 	}
-	// CWE-918 (SSRF) → OWASP A10 + ISO, but NOT PCI (not enumerated by 6.2.4 — verified in the domain test).
+	// CWE-918 (SSRF) → OWASP A10 + ISO, but NOT PCI (not enumerated by 6.2.4 – verified in the domain test).
 	if !strings.Contains(joined, "OWASP-2021 A10:2021") {
 		t.Errorf("CWE-918 must map to OWASP A10; got:\n%s", joined)
 	}

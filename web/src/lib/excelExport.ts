@@ -148,7 +148,7 @@ function excelRelativeLocation(location: string, scanTarget: string): string {
   const normalized = location.trim().replace(/^\.\//, '').replace(/\\/g, '/')
   const target = scanTarget.trim().replace(/\\/g, '/').replace(/\/$/, '')
   const targetName = target.split('/').filter(Boolean).at(-1) ?? ''
-  if (!normalized || normalized === '—') return ''
+  if (!normalized || normalized === '–') return ''
   if (target && normalized.startsWith(`${target}/`)) {
     return normalized.slice(target.length + 1)
   }

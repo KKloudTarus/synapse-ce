@@ -14,7 +14,7 @@ import (
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 )
 
-// engRepoFake is an in-test engagement repository — adapter tests stay free of
+// engRepoFake is an in-test engagement repository – adapter tests stay free of
 // infrastructure imports (see the note in aup_test.go).
 type engRepoFake struct {
 	data map[shared.ID]*engdom.Engagement
@@ -50,7 +50,7 @@ func (r *engRepoFake) GetByIDInTenant(_ context.Context, tenantID, id shared.ID)
 		return nil, shared.ErrNotFound
 	}
 	if !tenantID.IsZero() && e.TenantID != tenantID {
-		return nil, shared.ErrNotFound // cross-tenant — do not reveal existence
+		return nil, shared.ErrNotFound // cross-tenant – do not reveal existence
 	}
 	return e, nil
 }
@@ -97,7 +97,7 @@ func auditHas(a *fakeAudit, action string) bool {
 
 // TestWithEngTenantIsolatesChildRoutes proves the single chokepoint that tenant-isolates every
 // /engagements/{id}/… child route (PR5c): a cross-tenant caller gets 404 and the wrapped child
-// handler NEVER runs (so no child resource — findings, evidence, recon, agent data — is read or
+// handler NEVER runs (so no child resource – findings, evidence, recon, agent data – is read or
 // written cross-tenant, and existence is not revealed); same-tenant and zero-tenant callers pass
 // through. This is what makes the "every child read/mutation is tenant-scoped" claim hold without
 // trusting each of ~30 handlers to remember the check.

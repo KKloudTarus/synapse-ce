@@ -59,9 +59,9 @@ func TestNewHypothesisNonPublishableUntilVerified(t *testing.T) {
 	if got := Publishable([]Finding{f}); len(got) != 0 {
 		t.Errorf("a proposed hypothesis must be filtered out of the report, got %d", len(got))
 	}
-	// Raising the score to the bar (what a future human-verify path will do — the wiring is a follow-up,
+	// Raising the score to the bar (what a future human-verify path will do – the wiring is a follow-up,
 	// see the NewHypothesis doc) flips it to promotable: the gate keys purely on EvidenceScore, so a
-	// hypothesis is never PERMANENTLY blocked — only pending a verify path that can raise its score.
+	// hypothesis is never PERMANENTLY blocked – only pending a verify path that can raise its score.
 	f.EvidenceScore = EvidenceThreshold
 	if !f.CanPromote() {
 		t.Error("a hypothesis at the evidence bar must be promotable (the gate keys on score)")

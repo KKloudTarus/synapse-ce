@@ -1,5 +1,5 @@
 // Package redact is the shared belt-and-suspenders scrubber for secret material on its
-// way to any sink — logs, the audit writer, the evidence seal, tool output. It is
+// way to any sink – logs, the audit writer, the evidence seal, tool output. It is
 // defense-in-depth behind the vault: the vault keeps secrets out of argv and
 // the worker env, and redact ensures that if a tool echoes its own token (or a URL
 // carries embedded creds) the value is removed before it is published or sealed.
@@ -27,13 +27,13 @@ func URLCreds(s string) string { return urlCredsRE.ReplaceAllString(s, "$1***@")
 // strips URL-embedded creds. Used to scrub a tool's stdout/stderr before it is logged
 // or sealed, so a tool that prints its own injected token is caught.
 //
-// Each secret is scrubbed both verbatim AND in its common ENCODED forms — base64 (std +
-// URL-safe, padded + unpadded) and lower/upper hex — because a tool that echoes
+// Each secret is scrubbed both verbatim AND in its common ENCODED forms – base64 (std +
+// URL-safe, padded + unpadded) and lower/upper hex – because a tool that echoes
 // base64(token) or hex(token) would otherwise defeat a verbatim-only scrub (demonstrated
 // in the red-team audit). DEFENSE-IN-DEPTH ONLY, not the primary control: the vault keeps
 // plaintext out of argv/`/proc` and injects via the child env, so a secret reaches here
 // only if a misbehaving tool echoes it. An ARBITRARY transform (gzip, XOR, char-by-char)
-// can still defeat any substring scrub — treat a tool that can emit attacker-chosen output
+// can still defeat any substring scrub – treat a tool that can emit attacker-chosen output
 // AND holds a secret as able to exfiltrate it; the vault scoping is what bounds blast radius.
 func Bytes(data []byte, secrets [][]byte) []byte {
 	if len(data) == 0 {

@@ -16,8 +16,8 @@ import (
 
 // AgentDecisionStore is the durable ports.DecisionStore on PostgreSQL (migration 0032).
 // seq is a monotonic per-session counter (MAX+1). Idempotency is enforced by
-// partial unique indexes — one row per (session_id, action_id) for steps and one stop per
-// session — so a redelivered drive that re-records a decision is a no-op (ON CONFLICT DO
+// partial unique indexes – one row per (session_id, action_id) for steps and one stop per
+// session – so a redelivered drive that re-records a decision is a no-op (ON CONFLICT DO
 // NOTHING), never a forked log. Decisions are written by a single driver under the session run
 // lock, so the MAX+1 read/insert pair is race-free.
 type AgentDecisionStore struct {
@@ -41,7 +41,7 @@ func (s *AgentDecisionStore) AppendDecision(ctx context.Context, d agent.AgentDe
 		return fmt.Errorf("marshal decision refs: %w", err)
 	}
 	// seq is allocated as MAX+1 then inserted. Under a parallel batch, several drivers in
-	// the same session can read the same MAX+1 and collide on the (session_id, seq) PK — that is
+	// the same session can read the same MAX+1 and collide on the (session_id, seq) PK – that is
 	// NOT an idempotent re-record and must RETRY with a fresh seq (else the projection silently
 	// drops a row). A collision on the partial unique indexes (same action for a step, or a
 	// second stop) IS a genuine idempotent re-record → success, no retry. We distinguish by the
@@ -65,8 +65,8 @@ func (s *AgentDecisionStore) AppendDecision(ctx context.Context, d agent.AgentDe
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			switch pgErr.ConstraintName {
 			case "idx_agent_decisions_step_action", "idx_agent_decisions_one_stop":
-				return nil // genuine idempotent re-record (same action / second stop) — no-op
-			default: // (session_id, seq) PK collision under concurrency — retry with a fresh seq
+				return nil // genuine idempotent re-record (same action / second stop) – no-op
+			default: // (session_id, seq) PK collision under concurrency – retry with a fresh seq
 				continue
 			}
 		}

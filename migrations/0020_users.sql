@@ -2,7 +2,7 @@
 -- Phase 2.5 (FR-D2): real operator identities. Each consultant authenticates with
 -- their own API key (only its SHA-256 is stored), so every action is attributable.
 -- The bootstrap admin (id 'operator', keyed by SYNAPSE_API_TOKEN) is seeded in code
--- on startup — existing deployments keep working and historical "operator"
+-- on startup – existing deployments keep working and historical "operator"
 -- attribution stays valid (it now resolves to that user).
 CREATE TABLE users (
     id           TEXT PRIMARY KEY,

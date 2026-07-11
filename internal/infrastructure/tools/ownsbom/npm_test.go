@@ -52,7 +52,7 @@ func TestNPMParseV3(t *testing.T) {
 	}
 
 	// Edges, with npm's NEAREST-WINS hoisting: @angular/core depends on ms, and a nested
-	// node_modules/@angular/core/node_modules/ms@1.0.0 shadows the hoisted node_modules/ms@2.1.3 — so the
+	// node_modules/@angular/core/node_modules/ms@1.0.0 shadows the hoisted node_modules/ms@2.1.3 – so the
 	// edge must point at the NEARER 1.0.0, while mocha (no nested ms) resolves to the hoisted 2.1.3.
 	on := map[string][]string{}
 	for _, d := range deps {
@@ -108,7 +108,7 @@ func TestNPMParseV1Nested(t *testing.T) {
 }
 
 // TestRegistryMultiEcosystem proves the Registry dispatches different manifests to their parsers and
-// merges across ecosystems — go.mod -> GoMod, package-lock.json -> NPM, in one normalized SBOM.
+// merges across ecosystems – go.mod -> GoMod, package-lock.json -> NPM, in one normalized SBOM.
 func TestRegistryMultiEcosystem(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "go.mod"), goModFixture)

@@ -9,8 +9,8 @@ import (
 var pep503Sep = regexp.MustCompile(`[-_.]+`)
 
 // canonicalName normalizes a package name to the ECOSYSTEM-CANONICAL form used as the advisory-store key,
-// applied on BOTH sides of the match — when the ingester stores an advisory's package name AND when the
-// DetectionSource looks a component up — so they meet at the same key regardless of how either side spelled
+// applied on BOTH sides of the match – when the ingester stores an advisory's package name AND when the
+// DetectionSource looks a component up – so they meet at the same key regardless of how either side spelled
 // it. This closes the silent-missed-CVE gap where OSV PyPI advisories carry a non-normalized name (e.g.
 // "Django", "ruamel.yaml") while the SBOM component name is PEP 503-normalized ("django", "ruamel-yaml").
 //

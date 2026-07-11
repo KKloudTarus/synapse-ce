@@ -9,7 +9,7 @@ import (
 
 // The classic injection shape: ONE function both reads untrusted input and calls a dangerous sink
 // (`db.Query(r.FormValue("id"))`). That function is both source- and sink-using, so Vulnerabilities reports
-// it as the length-1 path — the most common, clearest taint bug.
+// it as the length-1 path – the most common, clearest taint bug.
 func TestAssembleSameFunctionIsLength1Path(t *testing.T) {
 	g := callgraph.Graph{Edges: []callgraph.Edge{
 		{Caller: "app.handler", Callees: []string{"net/http.Request.FormValue", "database/sql.DB.Query"}},
@@ -70,7 +70,7 @@ func TestAssembleSanitizerWalls(t *testing.T) {
 	}
 }
 
-// When the sink is ALSO reachable by a path that does NOT cross the sanitizer, the flow is still a vuln —
+// When the sink is ALSO reachable by a path that does NOT cross the sanitizer, the flow is still a vuln –
 // the wall only prunes the sanitized route.
 func TestAssembleUnsanitizedRouteStillVuln(t *testing.T) {
 	g := callgraph.Graph{Edges: []callgraph.Edge{
@@ -163,7 +163,7 @@ func TestDefaultCatalogWellFormed(t *testing.T) {
 	}
 	// Soundness guard (security review): a class-blind sanitizer wall must list ONLY purpose-built
 	// neutralizers. filepath.Clean does not prevent traversal (it would mask CWE-22) and incidental
-	// utilities like strconv.Atoi would wall unrelated real flows — both must stay OUT.
+	// utilities like strconv.Atoi would wall unrelated real flows – both must stay OUT.
 	unsound := map[string]bool{"path/filepath.Clean": true, "strconv.Atoi": true, "strconv.ParseInt": true}
 	for _, s := range c.Sanitizers {
 		if unsound[s] {

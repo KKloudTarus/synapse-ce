@@ -35,7 +35,7 @@ var cSourceExts = map[string]bool{
 }
 
 // placeholderSecret drops obvious non-secrets (env refs, templating, placeholders) so the
-// hardcoded-credential rule stays high-signal — deterministic findings are publishable directly
+// hardcoded-credential rule stays high-signal – deterministic findings are publishable directly
 // (no AI gate), so precision matters more than recall here.
 func placeholderSecret(line string) bool {
 	l := strings.ToLower(line)
@@ -84,7 +84,7 @@ func safeLDAPFilter(line string) bool {
 }
 
 // builtinRules is the tier-1 (cheap, deterministic) rule set: high-signal weaknesses across common
-// languages. Intentionally precision-biased — taint/dataflow + broader coverage is the AI/E39 tier.
+// languages. Intentionally precision-biased – taint/dataflow + broader coverage is the AI/E39 tier.
 // redosContextRe marks a line that constructs or uses a regular expression, so the ReDoS rule only fires
 // on actual regex text and never on ordinary parenthesised arithmetic like (a + b) * c.
 var redosContextRe = regexp.MustCompile(`(?i)(regexp\.|RegExp|re\.(compile|match|search|fullmatch)|Pattern\.compile|MustCompile|preg_match|\.match\(|\.test\(|=~)`)
@@ -343,7 +343,7 @@ func builtinRules() []rule {
 			id: "weak-rsa-key-size", cwe: "CWE-326", severity: shared.SeverityMedium, title: "RSA key size below 2048 bits",
 			desc: "An RSA key is generated with 512 or 1024 bits, which is factorable. Generate at least 2048-bit RSA (3072+ preferred) or use an elliptic-curve key.",
 			// RSA-specific constructors only (Go rsa.GenerateKey, Java RSAKeyGenParameterSpec, Python/Ruby
-			// RSA.generate, openssl genrsa). A bare `.initialize(1024)` is deliberately excluded — it false-
+			// RSA.generate, openssl genrsa). A bare `.initialize(1024)` is deliberately excluded – it false-
 			// positives on buffer/pool sizing.
 			re:     regexp.MustCompile(`(?i)(rsa\.GenerateKey\s*\([^,\n]+,\s*(512|1024)\b|RSAKeyGenParameterSpec\s*\(\s*(512|1024)\b|RSA\.generate\s*\(\s*(512|1024)\b|genrsa\b[^\n]*\b(512|1024)\b)`),
 			skipFn: commentOnlyLine,

@@ -26,7 +26,7 @@ func NewJudgmentRepository(pool *pgxpool.Pool) *JudgmentRepository {
 
 var _ ports.JudgmentStore = (*JudgmentRepository)(nil)
 
-// Save inserts a proposed judgment (idempotent by id; never clobbers an existing row — score/state
+// Save inserts a proposed judgment (idempotent by id; never clobbers an existing row – score/state
 // move only via SetScoreState). The typed claim is stored as its fail-closed discriminated
 // envelope (JSONB).
 func (r *JudgmentRepository) Save(ctx context.Context, j judgment.Judgment) error {

@@ -33,7 +33,7 @@ type Source struct {
 	dbVersion string // vulnerability DB build/schema (reproducibility)
 }
 
-// WithRunner runs Grype through a ToolRunner (the SandboxRunner) — confining the match
+// WithRunner runs Grype through a ToolRunner (the SandboxRunner) – confining the match
 // against a pre-synced DB (read-only FS, no network, dropped caps).
 // Grype is offline (pinned DB, auto-update off), so the isolated sandbox fits and the
 // findings are unchanged. nil keeps the direct exec.
@@ -41,7 +41,7 @@ func (s *Source) WithRunner(r ports.ToolRunner) *Source { s.runner = r; return s
 
 // New returns a Grype detection source using the given binary (defaults to "grype").
 // dbDir, when set, pins the vulnerability DB to a pre-synced cache directory and
-// disables auto-update — so scans run offline against a fixed DB build and are
+// disables auto-update – so scans run offline against a fixed DB build and are
 // reproducible (the DB version is still captured as evidence). Empty = Grype's
 // default (online auto-update).
 func New(bin, dbDir string) *Source {
@@ -76,14 +76,14 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 	}
 	path, cleanup, err := writeCycloneDX(doc)
 	if err != nil {
-		return nil, nil // cannot stage the SBOM — degrade, don't fail the scan
+		return nil, nil // cannot stage the SBOM – degrade, don't fail the scan
 	}
 	defer cleanup()
 
 	stdout, ok := s.run(ctx, path)
 	if !ok {
 		// Missing binary or a DB/runtime error: record Grype unavailable + contribute
-		// nothing — the scan still succeeds (graceful degrade, regression-preserving).
+		// nothing – the scan still succeeds (graceful degrade, regression-preserving).
 		s.setProvenance("", "")
 		return nil, nil
 	}
@@ -91,7 +91,7 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 	var out grypeOutput
 	if err := json.Unmarshal(stdout, &out); err != nil {
 		s.setProvenance("", "")
-		return nil, nil // malformed output — degrade
+		return nil, nil // malformed output – degrade
 	}
 	s.setProvenance(out.Descriptor.Version, out.dbLabel())
 
@@ -309,7 +309,7 @@ func matchToRaw(m grypeMatch, components map[string]sbom.Component) vulnerabilit
 			r.CVSSVector = c.Vector
 		}
 	}
-	r.FixState = m.Vulnerability.Fix.State // fixed / not-fixed / wont-fix / unknown — drives --ignore-unfixed
+	r.FixState = m.Vulnerability.Fix.State // fixed / not-fixed / wont-fix / unknown – drives --ignore-unfixed
 	if m.Vulnerability.Fix.State == "fixed" && len(m.Vulnerability.Fix.Versions) > 0 {
 		r.FixedVersion = m.Vulnerability.Fix.Versions[0]
 	}

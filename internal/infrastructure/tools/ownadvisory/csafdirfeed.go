@@ -12,7 +12,7 @@ import (
 // via ParseCSAF (which yields MANY advisories per document) over the same hardened walkJSONAdvisories core
 // as DirFeed.
 //
-// Beyond the file-level skipping the shared walk does, this feed also drops INERT advisories — ones whose
+// Beyond the file-level skipping the shared walk does, this feed also drops INERT advisories – ones whose
 // products did not resolve to any owned (ecosystem, package) key (the CPE↔ecosystem gap; see cpe.go), so
 // they carry no Affected block and could never match. They are counted into the returned skip total so the
 // CLI can surface honest coverage (how much of a CSAF feed actually maps to a matchable ecosystem) rather
@@ -33,7 +33,7 @@ func (f *CSAFDirFeed) Each(ctx context.Context, fn func(a advisory.Advisory) err
 	inert := 0
 	fileSkipped, err := walkJSONAdvisories(ctx, f.dir, ParseCSAF, func(adv advisory.Advisory) error {
 		if len(adv.Affected) == 0 {
-			inert++ // no product mapped to a comparable ecosystem — inert in the store, so don't persist it
+			inert++ // no product mapped to a comparable ecosystem – inert in the store, so don't persist it
 			return nil
 		}
 		return fn(adv)

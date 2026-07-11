@@ -136,7 +136,7 @@ func TestApplyWriteupDraft(t *testing.T) {
 		if got.Description != "new desc\n\nRemediation:\ndo the fix" {
 			t.Errorf("composed description wrong: %q", got.Description)
 		}
-		// other fields preserved (the report's per-finding compliance mapping keys off CWE — must be unchanged)
+		// other fields preserved (the report's per-finding compliance mapping keys off CWE – must be unchanged)
 		if got.CWE != "CWE-89" || got.Status != finding.StatusConfirmed {
 			t.Errorf("non-description fields must be preserved: %+v", got)
 		}

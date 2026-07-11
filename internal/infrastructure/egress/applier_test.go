@@ -43,11 +43,11 @@ func TestEgressEnforcesPolicyLive(t *testing.T) {
 	}
 	// Baseline reachability: the netns NATs out through the host's uplink, so this live test
 	// needs real external ICMP connectivity. CI sandboxes (e.g. GitHub Actions) permit ip +
-	// sudo but BLOCK ICMP to the internet — when the HOST itself can't ping the in-scope IP,
+	// sudo but BLOCK ICMP to the internet – when the HOST itself can't ping the in-scope IP,
 	// the in-scope assertion below would fail for an environmental reason, not a policy
 	// regression. Skip there; this stays a host-validation test (runs on a real Linux box).
 	if exec.Command("sudo", "ping", "-c1", "-W2", "1.1.1.1").Run() != nil {
-		t.Skip("no external ICMP connectivity from the host (CI sandbox?) — egress enforcement is host-validated")
+		t.Skip("no external ICMP connectivity from the host (CI sandbox?) – egress enforcement is host-validated")
 	}
 
 	a, err := NewApplier("sudo")

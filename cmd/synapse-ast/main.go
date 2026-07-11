@@ -2,7 +2,7 @@
 // structural facts as JSON on stdout. Its first capability is accurate per-language function counts
 // (`synapse-ast functions <dir>`). It isolates the CGO tree-sitter grammars into a standalone,
 // sandboxable binary so the api server and CLI never import them and the UNTRUSTED target is parsed only
-// inside the sandbox the ast adapter runs this binary under. Composition root only — the analysis lives
+// inside the sandbox the ast adapter runs this binary under. Composition root only – the analysis lives
 // in internal/infrastructure/tools/astwalk.
 //
 // Exit codes: 0 = ok (JSON on stdout); 3 = the tree-sitter backend is not built in (CGO-free build), so

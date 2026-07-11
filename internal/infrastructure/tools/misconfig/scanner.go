@@ -1,6 +1,6 @@
 // Package misconfig is an owned, deterministic infrastructure-as-code / config scanner over a prepared
 // workspace. It flags insecure settings in Dockerfiles, Kubernetes manifests, Helm charts (rendered via
-// `helm template`), Terraform (HCL), and CloudFormation (YAML/JSON) with first-party Go checks — no
+// `helm template`), Terraform (HCL), and CloudFormation (YAML/JSON) with first-party Go checks – no
 // external policy engine (no OPA/Rego). Explicit-insecure settings are flagged as high/medium; recommended-hardening that is absent
 // (KSV/CIS/tfsec baseline: runAsNonRoot, dropped capabilities, encryption, resource limits, ...) is
 // flagged as low/medium, so coverage matches comprehensive scanners while the highs stay legible.
@@ -54,7 +54,7 @@ func New() *Scanner {
 // `helm template` never runs unprotected on the host. Use this in the API path.
 func (s *Scanner) WithHelmRunner(r ports.ToolRunner) *Scanner { s.helmRun = r; return s }
 
-// WithHelmDirect enables Helm chart rendering via a direct host exec — ONLY for a trusted-local caller
+// WithHelmDirect enables Helm chart rendering via a direct host exec – ONLY for a trusted-local caller
 // (the CLI), mirroring how the CLI runs the maven/gradle resolvers unsandboxed on a trusted project.
 func (s *Scanner) WithHelmDirect() *Scanner { s.helmDir = true; return s }
 
@@ -101,7 +101,7 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			return nil
 		}
 		// A Helm chart (Chart.yaml) is rendered as a whole via `helm template` and its output scanned with
-		// the Kubernetes rules — the raw templates carry Go-template directives and are not valid YAML.
+		// the Kubernetes rules – the raw templates carry Go-template directives and are not valid YAML.
 		// Skip a Chart.yaml bundled under a parent chart's charts/ dir (the parent render covers the subchart).
 		if d.Name() == "Chart.yaml" {
 			if !strings.Contains(path, string(os.PathSeparator)+"charts"+string(os.PathSeparator)) && count < maxFiles {

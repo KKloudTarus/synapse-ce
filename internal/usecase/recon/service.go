@@ -36,12 +36,12 @@ const evidenceKindTerminalLog = "terminal_log"
 
 // evidenceKindContainment tags the per-run containment posture: metadata proving
 // HOW a tool was confined (sandbox tier, egress enforcement, caps). It never affects
-// argv/output/parsing — it is sealed alongside the terminal log so a reader can verify
+// argv/output/parsing – it is sealed alongside the terminal log so a reader can verify
 // the containment under which the run executed.
 const evidenceKindContainment = "containment_profile"
 
 // evidenceKindConnectLog tags the eBPF connect-log: every outbound connect() the
-// tool attempted, with an allowed/denied verdict — a forensic record of what the tool
+// tool attempted, with an allowed/denied verdict – a forensic record of what the tool
 // reached for, including out-of-scope attempts the kernel egress filter dropped.
 const evidenceKindConnectLog = "connect_log"
 
@@ -105,7 +105,7 @@ type Service struct {
 	tools       map[string]ports.ReconTool
 	timeout     time.Duration
 	maxOut      int
-	// allowCapabilitySensitive is a dev override for capability-sensitive tools (naabu —
+	// allowCapabilitySensitive is a dev override for capability-sensitive tools (naabu –
 	// raw sockets) when no sandbox is configured. The supported path is the
 	// sandbox: when sandboxed is true, capability-sensitive tools are permitted *because*
 	// they run sandboxed + egress-restricted, so this stays false in prod.
@@ -119,7 +119,7 @@ type Service struct {
 	// alongside sandboxed; nil leaves runs network-isolated.
 	compileEgress func(engagement.Scope) ports.EgressPolicy
 	// jobQueue, when set, makes Start defer each run to the durable queue instead
-	// of the in-process dispatcher — so queued recon survives a restart and can be claimed
+	// of the in-process dispatcher – so queued recon survives a restart and can be claimed
 	// by the worker. nil keeps the in-process dispatcher (dev / single-process).
 	jobQueue ports.JobQueue
 	// runLock, when set, guards a single active execution per run: an at-least-once
@@ -144,7 +144,7 @@ type reconJob struct {
 }
 
 // SetQueue routes recon runs through the durable job queue: Start enqueues, and a
-// worker claims + calls RunJob. Optional — without it, the in-process dispatcher is used.
+// worker claims + calls RunJob. Optional – without it, the in-process dispatcher is used.
 func (s *Service) SetQueue(q ports.JobQueue) { s.jobQueue = q }
 
 // RunJob executes a recon run claimed from the durable queue (the worker handler calls
@@ -156,7 +156,7 @@ func (s *Service) RunJob(ctx context.Context, payload []byte) error {
 		return fmt.Errorf("%w: malformed recon job payload: %v", shared.ErrValidation, err)
 	}
 	target := engagement.Target{Kind: inferKind(j.Target), Value: j.Target}
-	// single-active-execution lease (re-audit fix — held at the JOB boundary so a lock
+	// single-active-execution lease (re-audit fix – held at the JOB boundary so a lock
 	// ERROR returns an error and the queue REDELIVERS, never silently completing a
 	// never-executed authorized scan). A held lease (ok=false) means another delivery is
 	// running it → complete this delivery (nil).
@@ -186,7 +186,7 @@ func (s *Service) RunJob(ctx context.Context, payload []byte) error {
 	}
 	s.execute(runCtx, j.Actor, shared.ID(j.RunID), j.Tool, target)
 	// Lease lost mid-run (runCtx cancelled, but NOT a parent shutdown): the in-flight tool was
-	// aborted via runCtx — finalize the run failed + audit the abort.
+	// aborted via runCtx – finalize the run failed + audit the abort.
 	if runCtx.Err() != nil && ctx.Err() == nil {
 		s.finalizeLeaseLost(j, target)
 	}
@@ -196,7 +196,7 @@ func (s *Service) RunJob(ctx context.Context, payload []byte) error {
 // finalizeLeaseLost records a recon run whose lease was lost mid-execution: mark it failed on a
 // FRESH context (the run's own context is cancelled, so execute's finishFailed Save may not have
 // persisted) when not already terminal, and write an append-only audit entry attributing the
-// abort — a lost lease means another worker may now own the host, so we stopped.
+// abort – a lost lease means another worker may now own the host, so we stopped.
 func (s *Service) finalizeLeaseLost(j reconJob, target engagement.Target) {
 	bg := context.Background()
 	run, err := s.runs.Get(bg, shared.ID(j.RunID))
@@ -207,7 +207,7 @@ func (s *Service) finalizeLeaseLost(j reconJob, target engagement.Target) {
 		fin := s.clock.Now()
 		run.Status = recon.StatusFailed
 		run.Stage = "lease-lost"
-		run.Error = "run lease lost mid-execution — aborted (another worker may have reclaimed the host)"
+		run.Error = "run lease lost mid-execution – aborted (another worker may have reclaimed the host)"
 		run.FinishedAt = &fin
 		_ = s.runs.Save(bg, run)
 	}
@@ -247,7 +247,7 @@ func (s *Service) FailStrandedJob(ctx context.Context, payload []byte, cause err
 	}
 	msg := "recon job dead-lettered after exhausting retries"
 	if cause != nil {
-		// Redact before it persists to run.Error — uniform with the agent path and the rest of
+		// Redact before it persists to run.Error – uniform with the agent path and the rest of
 		// this file's error sinks (the cause is Go-internal today, but never persist raw).
 		msg = redact.String(cause.Error(), nil)
 	}
@@ -260,7 +260,7 @@ func (s *Service) FailStrandedJob(ctx context.Context, payload []byte, cause err
 // row was lost or never dead-lettered has no such event). It uses the run lease as the liveness
 // signal: if TryLock succeeds the prior owner is gone (lease free/expired) → the run is stranded
 // → finalize it failed; a held lease means a live owner is still running it → skip. Requires the
-// lease lock — without it a stranded run cannot be told from a live one, so it no-ops. Returns
+// lease lock – without it a stranded run cannot be told from a live one, so it no-ops. Returns
 // the number of runs reclaimed.
 func (s *Service) SweepStaleRuns(ctx context.Context, staleFor time.Duration) (int, error) {
 	if s.runLock == nil {
@@ -285,7 +285,7 @@ func (s *Service) SweepStaleRuns(ctx context.Context, staleFor time.Duration) (i
 			release()
 			continue
 		}
-		s.finishFailed(ctx, &run, "swept", "run stranded running past staleFor with no live owner — reclaimed by sweeper")
+		s.finishFailed(ctx, &run, "swept", "run stranded running past staleFor with no live owner – reclaimed by sweeper")
 		release()
 		n++
 	}
@@ -444,9 +444,9 @@ func (s *Service) execute(ctx context.Context, actor string, runID shared.ID, to
 	// (lease expiry / crash / heartbeat failure) can re-invoke this for a run a prior
 	// delivery already finished. Recon executes against REAL hosts and seals + audits, so
 	// re-running would duplicate the live scan, the audit entry, and the evidence links. If
-	// the run is already terminal, skip — the worker then Completes the job.
+	// the run is already terminal, skip – the worker then Completes the job.
 	if run.Status.Terminal() {
-		s.logs.Publish(rid, "run already finished (duplicate at-least-once delivery) — skipping re-execution")
+		s.logs.Publish(rid, "run already finished (duplicate at-least-once delivery) – skipping re-execution")
 		return
 	}
 	tool := s.tools[toolName]
@@ -499,7 +499,7 @@ func (s *Service) execute(ctx context.Context, actor string, runID shared.ID, to
 		spec.EgressPolicy = &policy
 	}
 	// record the containment posture on the run (operator-facing) and seal it
-	// into evidence (provable). Metadata only — never changes argv/output.
+	// into evidence (provable). Metadata only – never changes argv/output.
 	profile := s.buildContainmentProfile(tool, spec.EgressPolicy)
 	run.Containment = profile.Summary()
 	if cp, mErr := json.Marshal(profile); mErr == nil {
@@ -514,7 +514,7 @@ func (s *Service) execute(ctx context.Context, actor string, runID shared.ID, to
 
 	res, runErr := s.runner.Run(ctx, spec)
 
-	// Seal whatever output we captured into the evidence chain — even on failure,
+	// Seal whatever output we captured into the evidence chain – even on failure,
 	// the attempt is recorded.
 	output := make([]byte, 0, len(res.Stdout)+len(res.Stderr))
 	output = append(output, res.Stdout...)
@@ -529,7 +529,7 @@ func (s *Service) execute(ctx context.Context, actor string, runID shared.ID, to
 	}
 	// seal the connect-log (kernel-observed outbound attempts, incl. dropped
 	// out-of-scope ones) as a forensic artifact. Empty unless this was an egress run with
-	// the eBPF logger active. Never fails the run — observability.
+	// the eBPF logger active. Never fails the run – observability.
 	if len(res.ConnectLog) > 0 {
 		if cl, mErr := json.Marshal(res.ConnectLog); mErr == nil {
 			if _, sErr := s.evidence.Seal(ctx, run.EngagementID, evidenceKindConnectLog, cl, actor); sErr != nil {
@@ -547,7 +547,7 @@ func (s *Service) execute(ctx context.Context, actor string, runID shared.ID, to
 	}
 	// Proactively attest + externally anchor the advanced evidence head: a head the
 	// worker just sealed becomes tamper-PROOF at seal time, not only on a later API read. Verify
-	// re-checks the chain, ed25519-attests, and RFC-3161-anchors the head — all best-effort and
+	// re-checks the chain, ed25519-attests, and RFC-3161-anchors the head – all best-effort and
 	// bounded. Skipped when no signer/TSA is wired (avoids a chain read with no attestation).
 	if s.evidence.AttestationEnabled() {
 		if _, aerr := s.evidence.Verify(ctx, run.EngagementID); aerr != nil {
@@ -588,7 +588,7 @@ func (s *Service) execute(ctx context.Context, actor string, runID shared.ID, to
 	fin := s.clock.Now()
 	run.FinishedAt = &fin
 	s.saveRun(ctx, &run)
-	s.logs.Publish(rid, fmt.Sprintf("done — %d in-scope result(s)", inScope))
+	s.logs.Publish(rid, fmt.Sprintf("done – %d in-scope result(s)", inScope))
 }
 
 // finishFailed marks a run failed, persists it, and reports the error on the log

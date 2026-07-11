@@ -1,7 +1,7 @@
 // Package ignore models a repo-committed, declarative finding-suppression policy: the accepted-risk
-// decisions a team version-controls alongside its code — Synapse's take on Trivy's .trivyignore, made
+// decisions a team version-controls alongside its code – Synapse's take on Trivy's .trivyignore, made
 // governance-first. A rule may carry a reason and an expiry; an expired rule never suppresses (accepted
-// risk is revisited, not permanent); and — enforced by the caller — a suppressed finding is RETAINED and
+// risk is revisited, not permanent); and – enforced by the caller – a suppressed finding is RETAINED and
 // surfaced, never silently dropped. This package is pure (bytes in, decisions out): reading the file and
 // applying the decisions live in the infrastructure + usecase layers.
 package ignore
@@ -79,7 +79,7 @@ func (s Set) Match(ids []string, now time.Time) (Rule, bool) {
 }
 
 // Expired returns the rules that have lapsed as of now, so an operator can be told which accepted-risk
-// decisions need refreshing (surfacing them is the caller's job — this never hides anything).
+// decisions need refreshing (surfacing them is the caller's job – this never hides anything).
 func (s Set) Expired(now time.Time) Set {
 	var out Set
 	for _, r := range s {

@@ -2,7 +2,7 @@
 // conversation values (messages, tool-calls, usage) and the orchestration state (session,
 // proposed action, risk class, approval decision). It imports only other domain packages
 // + stdlib. The LLM only ever PROPOSES typed tool-calls here; whether any of them runs is
-// decided by the typed Go state machine + the safety gate (usecase layer) — never by the
+// decided by the typed Go state machine + the safety gate (usecase layer) – never by the
 // model. These types carry NO secrets: resolved credentials live only
 // inside the sandboxed child at exec time and never enter a Message.
 package agent
@@ -25,7 +25,7 @@ type Message struct {
 	Role    Role   `json:"role"`
 	Content string `json:"content,omitempty"`
 	// ToolCalls is set on an assistant turn that PROPOSES tool invocations. They are
-	// proposals only — the orchestrator validates + gates each before anything executes.
+	// proposals only – the orchestrator validates + gates each before anything executes.
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 	// ToolCallID links a RoleTool turn back to the ToolCall it answers.
 	ToolCallID string `json:"tool_call_id,omitempty"`
@@ -48,7 +48,7 @@ type ToolSchema struct {
 	Parameters  json.RawMessage `json:"parameters"` // JSON Schema object
 }
 
-// Usage is the token accounting for a turn — fed into the per-session budget guard.
+// Usage is the token accounting for a turn – fed into the per-session budget guard.
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`

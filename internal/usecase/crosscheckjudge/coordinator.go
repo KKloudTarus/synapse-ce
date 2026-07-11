@@ -1,6 +1,6 @@
 // Package crosscheckjudge turns cross-check DISAGREEMENTS into Judgments for human review.
 // For each vulnerability that some detection sources reported but others (that ran) did not, it PROPOSES an
-// ungated CapCorrelation judgment under a RESERVED system identity — the human acknowledges it via Accept; it
+// ungated CapCorrelation judgment under a RESERVED system identity – the human acknowledges it via Accept; it
 // is NEVER auto-resolved (the disagreement is itself the signal). It reuses the existing audited propose path
 // (no new confirmed-state path) and is injected only from the composition root, so it is not agent-reachable.
 package crosscheckjudge
@@ -21,7 +21,7 @@ import (
 const proposerActor = "system:cross-check"
 
 // proposer is the NARROW judgment-lifecycle slice the coordinator needs (analysis.Service satisfies it):
-// Propose (mint at score 0) + List (idempotent dedup). It has NO Verify/Accept — correlation is ungated and
+// Propose (mint at score 0) + List (idempotent dedup). It has NO Verify/Accept – correlation is ungated and
 // a human acknowledges it, so the coordinator can never confirm its own judgments. Composition-root only.
 type proposer interface {
 	Propose(ctx context.Context, proposer string, engagementID shared.ID, capability judgment.Capability, subjectKind judgment.SubjectKind, subjectID shared.ID, claim judgment.Claim) (judgment.Judgment, error)
@@ -46,7 +46,7 @@ func NewCoordinator(p proposer, audit ports.AuditLogger, clock ports.Clock) (*Co
 	return &Coordinator{proposer: p, audit: audit, clock: clock}, nil
 }
 
-// Record proposes one ungated CapCorrelation judgment per disagreement in the report — a human acknowledges
+// Record proposes one ungated CapCorrelation judgment per disagreement in the report – a human acknowledges
 // each via Accept (never auto-resolved). Idempotent: a disagreement whose vulnerability subject already has a
 // correlation judgment is skipped (no churn on re-scan, and no duplicate from a repeated subject within one
 // report). Agreements mint nothing. Returns the number minted; a propose/audit error aborts with the partial
@@ -71,7 +71,7 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, report
 	minted := 0
 	for _, d := range report.Disagreements {
 		if strings.TrimSpace(d.AdvisoryID) == "" {
-			// A title-only cluster (no advisory id) has no stable, distinct cross-check subject — two such
+			// A title-only cluster (no advisory id) has no stable, distinct cross-check subject – two such
 			// disagreements on the same component@version would collapse to one id and silently drop a
 			// signal. An id-less, low-confidence vuln is not a meaningful "which source named which CVE"
 			// disagreement, so skip it (no judgment minted) rather than risk the collision.
@@ -103,7 +103,7 @@ func (c *Coordinator) Record(ctx context.Context, engagementID shared.ID, report
 // SCA pipeline's vulnDedupKey convention ("vuln:"+id+":"+component+":"+version) so the two canonical encodings
 // of the same (id, component, version) triple can't drift; the same vuln across re-scans yields the same id
 // (stable dedup). The id is compared for EQUALITY only, never parsed, so the unescaped ":" (which can appear
-// in a Maven component) is harmless — matching the house convention.
+// in a Maven component) is harmless – matching the house convention.
 func correlationSubjectID(d vulnerability.CrossCheckItem) shared.ID {
 	return shared.ID(vulnerability.DedupKey(d.AdvisoryID, d.Component, d.Version))
 }

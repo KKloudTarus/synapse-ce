@@ -94,7 +94,7 @@ export function AgentTab({ engagementId }: { engagementId: string }) {
     <div className="space-y-6">
       <Card title={<span className="flex items-center gap-2"><Bot className="size-4" /> Run an AI agent</span>}>
         <p className="mb-3 text-sm text-mutedfg">
-          The agent proposes AppSec workflows — recon, SCA/SAST triage, DAST planning, and attack-path hypotheses.
+          The agent proposes AppSec workflows – recon, SCA/SAST triage, DAST planning, and attack-path hypotheses.
           Every action is still checked against scope + the authorization window and (per policy) approved before
           anything runs. Tool output is untrusted and every step is sealed into the evidence chain.
         </p>
@@ -444,7 +444,7 @@ function planStatusTone(s: string): string {
 }
 
 // DecisionLog renders the structured decision log: why each tool/target was chosen, the
-// outcome, and why the run stopped — read from stored data, not the transcript. Refetches as the
+// outcome, and why the run stopped – read from stored data, not the transcript. Refetches as the
 // status advances so it fills in as the run progresses.
 function DecisionLog({ engagementId, sessionId, status }: { engagementId: string; sessionId: string; status: string }) {
   const [decisions, setDecisions] = useState<AgentDecision[]>([])

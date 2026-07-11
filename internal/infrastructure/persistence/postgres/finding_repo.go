@@ -31,7 +31,7 @@ var _ ports.FindingRepository = (*FindingRepository)(nil)
 
 // Upsert inserts or updates findings, deduped on (engagement_id, dedup_key). On
 // conflict it updates the data fields but preserves id, status (triage), assignee,
-// and created_at — and bumps version (a re-scan IS a concurrent change) — so human
+// and created_at – and bumps version (a re-scan IS a concurrent change) – so human
 // triage state is never clobbered.
 func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Finding) error {
 	if len(findings) == 0 {
@@ -123,7 +123,7 @@ func (r *FindingRepository) SetEvidenceScore(ctx context.Context, engagementID, 
 }
 
 // classifyUpdateMiss maps a no-row optimistic UPDATE to ErrConflict (the finding
-// exists but its version moved — lost-update guard) or ErrNotFound.
+// exists but its version moved – lost-update guard) or ErrNotFound.
 func (r *FindingRepository) classifyUpdateMiss(ctx context.Context, engagementID, findingID shared.ID) error {
 	var exists bool
 	if err := r.pool.QueryRow(ctx,

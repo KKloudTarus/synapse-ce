@@ -40,7 +40,7 @@ func NewOffline(dbPath string) (*OfflineResolver, error) {
 		return nil, fmt.Errorf("jarhash offline: empty db path")
 	}
 	// The DSN is `file:<path>?mode=ro`; a '?' in the path would leak into the DSN query and could override
-	// mode=ro (defense-in-depth — the path is trusted operator config, but keep the read-only guarantee
+	// mode=ro (defense-in-depth – the path is trusted operator config, but keep the read-only guarantee
 	// textual-injection-proof). Reject it, and require a regular file (a clear error, not a driver error).
 	if strings.ContainsAny(dbPath, "?#") {
 		return nil, fmt.Errorf("jarhash offline: db path %q must not contain '?' or '#'", dbPath)
@@ -78,7 +78,7 @@ func (r *OfflineResolver) Resolve(ctx context.Context, comps []sbom.Component) i
 	if r.db == nil {
 		return 0
 	}
-	// A local SQLite lookup has no rate limit, so — unlike the online Resolver — this deliberately does NOT
+	// A local SQLite lookup has no rate limit, so – unlike the online Resolver – this deliberately does NOT
 	// group by SHA-1; N components sharing a hash just do N cheap indexed reads (grouping would add
 	// complexity for negligible gain).
 	recovered := 0
@@ -91,7 +91,7 @@ func (r *OfflineResolver) Resolve(ctx context.Context, comps []sbom.Component) i
 		}
 		blob, err := hex.DecodeString(strings.ToLower(strings.TrimSpace(comps[i].SHA1)))
 		if err != nil {
-			continue // not valid hex — nothing to look up
+			continue // not valid hex – nothing to look up
 		}
 		var g, a, v string
 		if err := r.db.QueryRowContext(ctx, lookupSQL, blob).Scan(&g, &a, &v); err != nil {

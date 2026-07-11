@@ -43,7 +43,7 @@ func TestDBFreshnessDisabledAndFresh(t *testing.T) {
 
 func TestDBFreshnessUnparseableSurfaced(t *testing.T) {
 	now := time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
-	// A PRESENT-but-unreadable date must be surfaced ("freshness cannot be verified"), not silently skipped —
+	// A PRESENT-but-unreadable date must be surfaced ("freshness cannot be verified"), not silently skipped –
 	// so the freshness guarantee itself can't vanish if a feed changes its date format. A truly-absent date
 	// (empty) is a different concern and stays a skip.
 	tv := map[string]string{"kev-catalog": "not-a-date", "grype-db": "schema-6@garbage", "epss-date": ""}

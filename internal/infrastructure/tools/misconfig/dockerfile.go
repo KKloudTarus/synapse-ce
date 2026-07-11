@@ -8,7 +8,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// pipeToShell matches a download piped straight into a shell (curl ... | sh, wget ... | bash) — a common
+// pipeToShell matches a download piped straight into a shell (curl ... | sh, wget ... | bash) – a common
 // remote-code-execution pattern in image builds.
 var pipeToShell = regexp.MustCompile(`(?i)\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b`)
 
@@ -261,7 +261,7 @@ func checkSecretEnv(cmd, args, rel string, line int) (ports.MisconfigRawFinding,
 		}
 		v := strings.TrimSpace(val)
 		if v == "" || strings.HasPrefix(v, "$") {
-			continue // references another var or unset — not a baked literal
+			continue // references another var or unset – not a baked literal
 		}
 		return ports.MisconfigRawFinding{
 			File: rel, Line: line, RuleID: "dockerfile-secret-in-" + strings.ToLower(cmd),
@@ -292,7 +292,7 @@ func checkAddLocal(args, rel string, line int) (ports.MisconfigRawFinding, bool)
 		low := strings.ToLower(s)
 		for _, ext := range []string{".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".gz", ".xz", ".bz2"} {
 			if strings.HasSuffix(low, ext) {
-				return ports.MisconfigRawFinding{}, false // ADD auto-extracts archives — a legitimate use
+				return ports.MisconfigRawFinding{}, false // ADD auto-extracts archives – a legitimate use
 			}
 		}
 	}

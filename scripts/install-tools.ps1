@@ -1,11 +1,11 @@
-# install-tools.ps1 — Windows installer for the external scan binaries Synapse shells
+# install-tools.ps1 – Windows installer for the external scan binaries Synapse shells
 # out to, at PINNED versions with sha256 verification. The bash installer
 # (scripts/install-tools.sh) is for Linux/macOS; this is the native-Windows equivalent.
 #
 # Installs syft + grype (the SCA essentials) into .\bin by downloading the pinned
 # release asset from GitHub and verifying it against the release checksums file.
 # Recon tools + the execution sandbox are Linux-only (kernel features) and are NOT
-# installed here — on Windows, use Docker for those (see README "Run anywhere via Docker").
+# installed here – on Windows, use Docker for those (see README "Run anywhere via Docker").
 #
 # Usage:
 #   pwsh scripts/install-tools.ps1

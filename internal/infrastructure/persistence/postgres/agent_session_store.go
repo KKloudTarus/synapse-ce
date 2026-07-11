@@ -18,7 +18,7 @@ import (
 
 // AgentSessionStore is the durable ports.AgentSessionStore on PostgreSQL:
 // agent_sessions + agent_messages (migration 0027). The (session_id, seq) primary key is
-// the transcript fork-guard — a duplicate seq is a unique violation → ErrConflict.
+// the transcript fork-guard – a duplicate seq is a unique violation → ErrConflict.
 type AgentSessionStore struct {
 	pool *pgxpool.Pool
 }
@@ -119,7 +119,7 @@ func (s *AgentSessionStore) AppendMessage(ctx context.Context, sessionID shared.
 		sessionID.String(), seq, string(m.Role), m.Content, toolCalls, m.ToolCallID)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // (session_id, seq) PK — fork guard
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // (session_id, seq) PK – fork guard
 			return fmt.Errorf("agent message (%s, seq %d) already exists: %w", sessionID, seq, shared.ErrConflict)
 		}
 		return fmt.Errorf("append agent message: %w", err)

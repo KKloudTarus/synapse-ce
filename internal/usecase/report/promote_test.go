@@ -39,7 +39,7 @@ func TestPromotableExcludesUnprovenExploitation(t *testing.T) {
 // evidence gate must run for EVERY format, not only HTML/DOCX. Before the fix, Generate (PDF)
 // handed raw findings straight to the renderer, so an unproven exploitation finding was sealed
 // into the primary client deliverable. It drives the real Generate + Render entry points (a
-// unit test on promotable() alone would NOT have caught it — promotable() was correct; it just
+// unit test on promotable() alone would NOT have caught it – promotable() was correct; it just
 // was not called on the PDF path).
 func TestEvidenceGateAppliesToEveryReportFormat(t *testing.T) {
 	findings := []finding.Finding{

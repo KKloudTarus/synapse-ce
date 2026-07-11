@@ -1,6 +1,6 @@
 // Package toolrunner runs argv-based tools for the recon use case. It is the single
 // execution primitive behind the ToolRunner port: a command is always invoked as an
-// argv array via os/exec — NEVER a shell string — with a per-run
+// argv array via os/exec – NEVER a shell string – with a per-run
 // timeout (the WHOLE process group is killed on deadline, so resolver/helper
 // grandchildren cannot outlive the authorization window) and a hard output-size cap
 // . It performs no scope/authorization logic itself; the caller must have
@@ -24,7 +24,7 @@ const (
 	defaultTimeout = 2 * time.Minute
 	defaultMaxOut  = 8 << 20 // 8 MiB per stream
 	// waitDelay bounds how long Wait blocks after the process is signalled before
-	// os/exec force-closes the output pipes — so a grandchild that inherited a pipe
+	// os/exec force-closes the output pipes – so a grandchild that inherited a pipe
 	// cannot hang the runner indefinitely after a timeout/kill.
 	waitDelay = 3 * time.Second
 )
@@ -81,7 +81,7 @@ func (r *ExecRunner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolRe
 		cmd.Env = spec.Env
 	}
 	// Put the tool in its own process group and, on context cancel/timeout, kill the
-	// WHOLE group — recon tools (subfinder/httpx/naabu) spawn resolver/helper children
+	// WHOLE group – recon tools (subfinder/httpx/naabu) spawn resolver/helper children
 	// that the default single-child kill would orphan past the timeout and the
 	// authorization window (F-1). WaitDelay caps any post-kill pipe-drain hang.
 	configureProcessGroup(cmd)
@@ -107,7 +107,7 @@ func (r *ExecRunner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolRe
 	if runErr != nil {
 		var ee *exec.ExitError
 		if errors.As(runErr, &ee) {
-			// Ran to completion but exited non-zero — surface the code, not an error.
+			// Ran to completion but exited non-zero – surface the code, not an error.
 			res.ExitCode = ee.ExitCode()
 			return res, nil
 		}

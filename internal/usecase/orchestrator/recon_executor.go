@@ -22,7 +22,7 @@ type reconStarter interface {
 }
 
 // evidenceLister reads the engagement's evidence chain (to recover a finished run's sealed
-// raw output, which recon stores only as a terminal_log link — not in the run record).
+// raw output, which recon stores only as a terminal_log link – not in the run record).
 type evidenceLister interface {
 	List(ctx context.Context, engagementID shared.ID) ([]devidence.Evidence, error)
 }
@@ -30,12 +30,12 @@ type evidenceLister interface {
 // ReconExecutor is the production Executor: it runs an admitted action by dispatching
 // to the sandboxed recon use-case and polling the run to completion, then recovers the sealed
 // tool output to feed back to the model. A TOOL-LEVEL failure (run failed, live recon
-// disabled, scope re-check) is returned as an Observation — fed back so the model can adapt,
+// disabled, scope re-check) is returned as an Observation – fed back so the model can adapt,
 // NOT a hard error that aborts the whole agent run. Only orchestration failures (context
 // cancelled, the run record cannot be polled) return an error.
 //
 // IMPORTANT (composition): the recon service handed here MUST be dispatcher-backed (in-process
-// pool), not queue-backed — otherwise an agent running on the same worker that must also claim
+// pool), not queue-backed – otherwise an agent running on the same worker that must also claim
 // the recon job would self-deadlock (the blocking poll starves the claim loop). The agent and
 // HTTP recon therefore use distinct recon.Service instances, or run on separate workers.
 type ReconExecutor struct {
@@ -75,7 +75,7 @@ func (e *ReconExecutor) Execute(ctx context.Context, adm safety.AdmittedAction) 
 	run, err := e.recon.Start(ctx, actor, p.EngagementID, tool, p.Target.Value)
 	if err != nil {
 		// A tool-level refusal (out of scope/window, live recon disabled, bad target) is fed
-		// back so the model can adapt — it does not abort the agent run.
+		// back so the model can adapt – it does not abort the agent run.
 		return Observation{Summary: fmt.Sprintf("recon %s could not start: %s", tool, err.Error()),
 			Output: []byte(err.Error())}, nil
 	}

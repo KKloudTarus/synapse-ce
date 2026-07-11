@@ -1,5 +1,5 @@
 -- +goose Up
--- E40.1 ingest (ADR-0023): the architecture-input threat model per engagement — a data-flow diagram
+-- E40.1 ingest (ADR-0023): the architecture-input threat model per engagement – a data-flow diagram
 -- (components / data flows / trust boundaries / assets) the threat-modeling agent (E40.2) reasons over.
 -- ONE row per engagement (the current model), stored as a validated JSONB blob (the domain
 -- threatmodel.Model shape; the usecase bounds size + calls Model.Validate before every write). Unlike the

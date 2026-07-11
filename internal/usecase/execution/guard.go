@@ -1,7 +1,7 @@
 // Package execution holds the shared server-side execution guard: engagement
 // scope + legal authorization-window enforcement with append-only audit, applied
 // BEFORE any tool runs. Both SCA and recon authorize through this one
-// chokepoint — never a per-caller copy of a security-critical control. A
+// chokepoint – never a per-caller copy of a security-critical control. A
 // divergent copy of the gate is the worst possible debt: scope enforcement and
 // the append-only audit trail must live in exactly one place.
 package execution
@@ -124,14 +124,14 @@ func (g *Guard) AuthorizeEngagementArtifact(ctx context.Context, req Request) (t
 // AuditDenial records a denied execution that was rejected BEFORE reaching Authorize
 // (e.g. a submit-time fast-fail in the recon use case: out-of-scope, capability,
 // live-recon-disabled, invalid target). It exists so no denial path is silent
-// — every refusal lands on the append-only audit log, exactly like
+// – every refusal lands on the append-only audit log, exactly like
 // the denials Authorize records itself.
 func (g *Guard) AuditDenial(ctx context.Context, req Request, reason string) {
 	g.auditDenied(ctx, req, g.clock.Now(), reason)
 }
 
 // auditDenied records a gated-out execution on the append-only audit log (golden
-// rule 6) — a denied action is never invisible. Best-effort: the denial error is
+// rule 6) – a denied action is never invisible. Best-effort: the denial error is
 // returned regardless of whether the audit write succeeds.
 func (g *Guard) auditDenied(ctx context.Context, req Request, now time.Time, reason string) {
 	md := make(map[string]string, len(req.Metadata)+1)

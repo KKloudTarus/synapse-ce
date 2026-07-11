@@ -43,7 +43,7 @@ func TestParseOSV(t *testing.T) {
 }
 
 // TestParseOSVThenMatch is the round trip: a parsed advisory, loaded into a store, matches an SBOM via the
-// owned DetectionSource — ingest→store→match end-to-end with one canonical OSV fixture.
+// owned DetectionSource – ingest→store→match end-to-end with one canonical OSV fixture.
 func TestParseOSVThenMatch(t *testing.T) {
 	adv, err := ParseOSV([]byte(osvAdvisoryJSON))
 	if err != nil {
@@ -66,7 +66,7 @@ func TestParseOSVThenMatch(t *testing.T) {
 
 // TestParseOSVPyPINameNormalized (the MAJOR key-contract fix): an OSV PyPI advisory carries a
 // non-normalized name ("Django"); the SBOM component is PEP 503-normalized ("django"). Ingest must store
-// the canonical key so the round trip matches — else a silent missed CVE for the 2nd-largest ecosystem.
+// the canonical key so the round trip matches – else a silent missed CVE for the 2nd-largest ecosystem.
 func TestParseOSVPyPINameNormalized(t *testing.T) {
 	const j = `{
 	  "id": "GHSA-pypi-1", "aliases": ["CVE-2024-7"],

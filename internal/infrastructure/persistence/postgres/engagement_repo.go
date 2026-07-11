@@ -87,7 +87,7 @@ func (r *EngagementRepository) Update(ctx context.Context, e *engagement.Engagem
 	if err != nil {
 		return fmt.Errorf("marshal roe: %w", err)
 	}
-	// created_by is intentionally NOT updated — the owner is immutable; only updated_by changes.
+	// created_by is intentionally NOT updated – the owner is immutable; only updated_by changes.
 	ct, err := tx.Exec(ctx,
 		`UPDATE engagements SET name=$2, client=$3, status=$4, authorized_from=$5, authorized_to=$6, timezone=$7, updated_at=$8, roe=$9, live_recon=$10, updated_by=$11 WHERE id=$1`,
 		e.ID.String(), e.Name, e.Client, string(e.Status),
@@ -156,7 +156,7 @@ func (r *EngagementRepository) GetByID(ctx context.Context, id shared.ID) (*enga
 
 // GetByIDInTenant loads an engagement scoped to tenantID (tenant isolation). A caller
 // tenant of ” (single-tenant / default-tenant admin) matches any row; a non-empty tenant
-// matches only its own — tenant A cannot read tenant B's engagement (ErrNotFound, existence
+// matches only its own – tenant A cannot read tenant B's engagement (ErrNotFound, existence
 // not revealed).
 func (r *EngagementRepository) GetByIDInTenant(ctx context.Context, tenantID, id shared.ID) (*engagement.Engagement, error) {
 	e, err := scanEngagement(r.pool.QueryRow(ctx,

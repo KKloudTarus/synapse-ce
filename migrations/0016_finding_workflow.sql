@@ -1,7 +1,7 @@
 -- +goose Up
 -- E3 findings workflow: a human assignee + an optimistic-concurrency version on
 -- findings (Kanban/status edits check it to prevent lost updates), and a persisted
--- comment thread (the Phase 1 triage note was audit-only — comments are the
+-- comment thread (the Phase 1 triage note was audit-only – comments are the
 -- collaboration record, FR-B7).
 ALTER TABLE findings ADD COLUMN assignee TEXT NOT NULL DEFAULT '';
 ALTER TABLE findings ADD COLUMN version  INT  NOT NULL DEFAULT 1;

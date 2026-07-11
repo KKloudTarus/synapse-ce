@@ -1,5 +1,5 @@
 // Package report renders engagement PDF reports with maroto v2. The output is
-// deterministic — the PDF creation-date metadata is
+// deterministic – the PDF creation-date metadata is
 // pinned to the caller-supplied generatedAt and the content is a pure function
 // of the stored engagement + findings (no LLM in the report path).
 package report
@@ -27,8 +27,8 @@ import (
 )
 
 // gofpdf assigns font/image object ids by Go map-iteration order unless
-// catalog-sort is enabled, which would make the PDF bytes — and thus the SHA-256
-// seal — non-reproducible from the same data. Enable it process-wide so every
+// catalog-sort is enabled, which would make the PDF bytes – and thus the SHA-256
+// seal – non-reproducible from the same data. Enable it process-wide so every
 // report is deterministic (maroto builds its Fpdf internally, inheriting this).
 func init() { gofpdf.SetDefaultCatalogSort(true) }
 
@@ -41,7 +41,7 @@ func NewRenderer() *Renderer { return &Renderer{} }
 var _ ports.ReportRenderer = (*Renderer)(nil)
 
 // Render builds the engagement report PDF. It never calls an LLM or external
-// service — the document is derived solely from eng + findings.
+// service – the document is derived solely from eng + findings.
 func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings []finding.Finding, insight ports.ReportInsight, generatedAt time.Time, version string) ([]byte, error) {
 	at := generatedAt.UTC()
 	cfg := config.NewBuilder().WithCreationDate(at).Build()
@@ -56,23 +56,23 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 	}
 	m.AddRow(6, text.NewCol(12, sub, props.Text{Size: 9, Align: align.Center, Color: gray()}))
 
-	// Engagement summary — who the report is for + the testing window, up front so the
+	// Engagement summary – who the report is for + the testing window, up front so the
 	// deliverable reads as a client report.
 	section(m, "Engagement summary")
 	m.AddRow(5,
-		text.NewCol(6, "Client: "+nonEmpty(eng.Client, "—"), props.Text{Size: 9}),
-		text.NewCol(6, "Status: "+nonEmpty(string(eng.Status), "—"), props.Text{Size: 9, Color: gray()}))
+		text.NewCol(6, "Client: "+nonEmpty(eng.Client, "–"), props.Text{Size: 9}),
+		text.NewCol(6, "Status: "+nonEmpty(string(eng.Status), "–"), props.Text{Size: 9, Color: gray()}))
 	m.AddRow(5,
 		text.NewCol(6, "Authorization window: "+authWindow(eng), props.Text{Size: 9, Color: gray()}),
 		text.NewCol(6, "Report date: "+at.Format("2006-01-02 15:04 UTC"), props.Text{Size: 9, Color: gray()}))
-	m.AddRow(5, text.NewCol(12, "Prepared by Synapse "+version+" — authorized security testing only.", props.Text{Size: 8, Color: gray()}))
+	m.AddRow(5, text.NewCol(12, "Prepared by Synapse "+version+" – authorized security testing only.", props.Text{Size: 8, Color: gray()}))
 
 	// Split actionable third-party findings from first-party historical advisories
 	// Only third-party findings count toward risk posture + remediation.
 	thirdParty, historical := splitByClass(findings)
 	crit, high := severityOf(thirdParty, "critical"), severityOf(thirdParty, "high")
 
-	// Finding quality — shown BEFORE any vulnerability count so the headline numbers
+	// Finding quality – shown BEFORE any vulnerability count so the headline numbers
 	// are never misread (a flood of stale first-party advisories is not "criticals").
 	section(m, "Finding quality")
 	m.AddRow(5,
@@ -93,11 +93,11 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 			text.NewCol(6, fmt.Sprintf("Dependency-path coverage: %.0f%%", insight.PathCoveragePct), props.Text{Size: 8, Color: gray()}))
 		if len(insight.PriorityCounts) > 0 {
 			m.AddRow(5,
-				text.NewCol(12, "Risk priority — "+priorityLine(insight.PriorityCounts), props.Text{Size: 8, Color: gray()}))
+				text.NewCol(12, "Risk priority – "+priorityLine(insight.PriorityCounts), props.Text{Size: 8, Color: gray()}))
 		}
 	}
 
-	// Executive summary — posture in one line + third-party headline numbers.
+	// Executive summary – posture in one line + third-party headline numbers.
 	section(m, "Executive summary")
 	m.AddRow(10, text.NewCol(12, executivePosture(crit, high, len(thirdParty), insight), props.Text{Size: 10}))
 	m.AddRow(5,
@@ -105,7 +105,7 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 		text.NewCol(4, fmt.Sprintf("Critical: %d", crit), props.Text{Size: 9, Style: fontstyle.Bold, Color: sevColor("critical")}),
 		text.NewCol(4, fmt.Sprintf("High: %d", high), props.Text{Size: 9, Style: fontstyle.Bold, Color: sevColor("high")}))
 
-	// Top remediation priorities — what to fix first (third-party only).
+	// Top remediation priorities – what to fix first (third-party only).
 	if len(thirdParty) > 0 {
 		section(m, "Top remediation priorities")
 		for i, f := range thirdParty {
@@ -136,7 +136,7 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 	}
 	m.AddRow(5, text.NewCol(12, "Authorization window: "+authWindow(eng), props.Text{Size: 9, Color: gray()}))
 
-	// Methodology — what was performed + standards + ordering, so a client/auditor can
+	// Methodology – what was performed + standards + ordering, so a client/auditor can
 	// judge coverage. Deterministic static text + scan-derived flags.
 	section(m, "Methodology")
 	if insight.HasScan {
@@ -149,7 +149,7 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 			props.Text{Size: 8, Color: gray()}))
 	}
 	m.AddRow(8, text.NewCol(12,
-		"Risk priority orders remediation by CISA KEV first, then EPSS × CVSS — not raw CVSS. Standards: CycloneDX 1.7 + SPDX 3.0, SARIF 2.1, OpenVEX/CSAF, KEV + EPSS. Every artifact is sealed into a per-engagement hash chain.",
+		"Risk priority orders remediation by CISA KEV first, then EPSS × CVSS – not raw CVSS. Standards: CycloneDX 1.7 + SPDX 3.0, SARIF 2.1, OpenVEX/CSAF, KEV + EPSS. Every artifact is sealed into a per-engagement hash chain.",
 		props.Text{Size: 8, Color: gray()}))
 
 	// Severity summary (third-party only).
@@ -164,7 +164,7 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 			text.NewCol(9, fmt.Sprintf("%d", c.n), props.Text{Size: 9}))
 	}
 
-	// Detection sources summary — third-party findings only.
+	// Detection sources summary – third-party findings only.
 	if ds := detectionSummary(thirdParty); ds.total > 0 {
 		section(m, "Detection sources")
 		m.AddRow(5,
@@ -197,11 +197,11 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 		}
 	}
 
-	// First-party historical advisories — informational, clearly separated. These
+	// First-party historical advisories – informational, clearly separated. These
 	// are matched against the project's own unversioned modules and cannot be
 	// confirmed; they are NOT remediation items.
 	if len(historical) > 0 {
-		section(m, fmt.Sprintf("First-party historical advisories (%d) — informational, not actionable", len(historical)))
+		section(m, fmt.Sprintf("First-party historical advisories (%d) – informational, not actionable", len(historical)))
 		m.AddRow(6, text.NewCol(12,
 			"Matched against the project's own modules (no resolvable version). Shown for completeness; excluded from risk counts.",
 			props.Text{Size: 8, Color: gray()}))
@@ -226,24 +226,24 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 		section(m, "Scan completeness")
 		note := insight.CompletenessNote
 		if note == "" {
-			note = "Complete — dependency versions resolved with confidence."
+			note = "Complete – dependency versions resolved with confidence."
 		}
 		m.AddRow(8, text.NewCol(12, note, props.Text{Size: 9, Color: gray()}))
 
-		// Evidence integrity — the chain-of-custody attestation.
+		// Evidence integrity – the chain-of-custody attestation.
 		section(m, "Evidence integrity")
-		status := "VERIFIED — evidence chain intact"
+		status := "VERIFIED – evidence chain intact"
 		if insight.EvidenceCount == 0 {
 			status = "no evidence recorded"
 		} else if !insight.EvidenceIntact {
-			status = "FAILED — evidence chain broken"
+			status = "FAILED – evidence chain broken"
 		}
 		m.AddRow(5, text.NewCol(12, status, props.Text{Size: 9, Style: fontstyle.Bold}))
 		if insight.EvidenceHead != "" {
 			m.AddRow(5, text.NewCol(12, "Chain head (sha256): "+insight.EvidenceHead, props.Text{Size: 8, Color: gray()}))
 		}
 		if insight.EvidenceAttested {
-			m.AddRow(5, text.NewCol(12, "Origin attested (ed25519) by key "+insight.EvidenceKeyID+" — proves origin, not just integrity.", props.Text{Size: 8, Color: gray()}))
+			m.AddRow(5, text.NewCol(12, "Origin attested (ed25519) by key "+insight.EvidenceKeyID+" – proves origin, not just integrity.", props.Text{Size: 8, Color: gray()}))
 		}
 
 		// Reproducibility.
@@ -258,13 +258,13 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 		if insight.GrypeDBVersion != "" {
 			m.AddRow(5, text.NewCol(12, "Grype DB: "+insight.GrypeDBVersion, props.Text{Size: 8, Color: gray()}))
 		}
-		m.AddRow(5, text.NewCol(12, "Vuln DB snapshot: "+nonEmpty(insight.VulnDBSnapshot, "—"), props.Text{Size: 8, Color: gray()}))
+		m.AddRow(5, text.NewCol(12, "Vuln DB snapshot: "+nonEmpty(insight.VulnDBSnapshot, "–"), props.Text{Size: 8, Color: gray()}))
 	}
 
 	// Footer / provenance note.
 	section(m, "")
 	m.AddRow(10, text.NewCol(12,
-		"Templated from stored data — no AI is in the report path. "+
+		"Templated from stored data – no AI is in the report path. "+
 			"Findings are ordered by risk priority (CISA KEV, then EPSS x CVSS). "+
 			"The delivered PDF is sealed with a SHA-256 returned at download.",
 		props.Text{Size: 7, Align: align.Center, Color: gray()}))
@@ -283,7 +283,7 @@ var (
 
 // pinModDate copies the pinned /CreationDate onto /ModDate. maroto v2 only exposes
 // WithCreationDate; the underlying gofpdf fills /ModDate with the wall clock, which
-// would make the bytes — and thus the SHA-256 seal — non-reproducible from the same
+// would make the bytes – and thus the SHA-256 seal – non-reproducible from the same
 // stored data. Both dates share gofpdf's fixed format, so this is a same-length
 // rewrite that keeps the xref byte offsets valid.
 func pinModDate(pdf []byte) []byte {
@@ -376,7 +376,7 @@ func executivePosture(crit, high, total int, insight ports.ReportInsight) string
 	case total > 0:
 		return fmt.Sprintf("This project has LOW RISK: %d findings, none critical or high.", total)
 	case insight.HasScan && !insight.Confident:
-		return "No findings, but the scan was INCOMPLETE — treat the result as indicative, not conclusive."
+		return "No findings, but the scan was INCOMPLETE – treat the result as indicative, not conclusive."
 	default:
 		return "No findings at or above the promotion threshold were identified."
 	}
@@ -429,7 +429,7 @@ func detectionSummary(findings []finding.Finding) detSummary {
 }
 
 // severityCounts returns the non-zero severity tallies in fixed display order
-// (deterministic — never map iteration order). Any non-standard severity is
+// (deterministic – never map iteration order). Any non-standard severity is
 // bucketed as unknown.
 func severityCounts(findings []finding.Finding) []sevCount {
 	order := []shared.Severity{

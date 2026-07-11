@@ -2,8 +2,8 @@
 // secrets encrypted at rest with AES-256-GCM under a master key that never touches the
 // database, logs, or the LLM transcript. The plaintext is returned ONLY via Resolve at
 // tool-execution time (the SandboxRunner substitutes it into the child's environment
-// after the redacted spec has been audited + sealed). Everything else — listing, the
-// API, logs — sees names only.
+// after the redacted spec has been audited + sealed). Everything else – listing, the
+// API, logs – sees names only.
 package vault
 
 import (

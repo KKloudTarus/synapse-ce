@@ -11,7 +11,7 @@ import (
 // TestCatalogCannotReachAScoreSetter pins the read-only-consumer invariant: the agent tool
 // catalog must have NO path to move a finding's EvidenceScore or to
 // confirm an exploitation finding. It therefore must not import the exploitation use case,
-// the findings write service, or any concrete persistence (where SetEvidenceScore lives — it
+// the findings write service, or any concrete persistence (where SetEvidenceScore lives – it
 // is deliberately off the ports.FindingRepository interface). The catalog reaches findings
 // only through its own read-only findingReader interface. This is the structural twin of the
 // report package's no-LLM tripwire: a same-package AST import scan that fails loudly if a
@@ -21,11 +21,11 @@ func TestCatalogCannotReachAScoreSetter(t *testing.T) {
 	forbidden := []string{
 		mod + "/internal/usecase/exploitation",
 		mod + "/internal/usecase/findings",
-		mod + "/internal/usecase/analysis",       // judgment Verify (the score/state mover) — the agent must not reach it
-		mod + "/internal/usecase/writeupdraftuc", // draft Edit/Accept/Reject (the human sign-off) — agent reaches Propose only, via the narrow writeupdraftProposer
+		mod + "/internal/usecase/analysis",       // judgment Verify (the score/state mover) – the agent must not reach it
+		mod + "/internal/usecase/writeupdraftuc", // draft Edit/Accept/Reject (the human sign-off) – agent reaches Propose only, via the narrow writeupdraftProposer
 		mod + "/internal/infrastructure",         // concrete repos hold SetEvidenceScore / SetScoreState (and the writeupdraft store)
 	}
-	// NOTE: domain/judgment is intentionally NOT forbidden — the catalog imports it for the
+	// NOTE: domain/judgment is intentionally NOT forbidden – the catalog imports it for the
 	// ReachabilityTier consts and will for ReachabilityClaim. Its in-memory
 	// ApplyVerdict/Accept are value-receiver transitions with NO persistence reach; the actual
 	// score/state move lives in the forbidden usecase/analysis + infrastructure setters above.
@@ -49,12 +49,12 @@ func TestCatalogCannotReachAScoreSetter(t *testing.T) {
 			p := strings.Trim(imp.Path.Value, `"`)
 			for _, bad := range forbidden {
 				if p == bad || strings.HasPrefix(p, bad+"/") {
-					t.Errorf("%s imports forbidden package %q — the agent tool catalog must not reach a finding score-setter", name, p)
+					t.Errorf("%s imports forbidden package %q – the agent tool catalog must not reach a finding score-setter", name, p)
 				}
 			}
 		}
 	}
 	if scanned == 0 {
-		t.Fatal("scanned no catalog source files — test wiring is wrong")
+		t.Fatal("scanned no catalog source files – test wiring is wrong")
 	}
 }

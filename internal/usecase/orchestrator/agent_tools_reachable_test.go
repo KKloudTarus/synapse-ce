@@ -19,7 +19,7 @@ import (
 )
 
 // captureProposer records that the agent's propose_critique tool reached the judgment proposer (the
-// Propose-only seam — the agent can never verify/confirm).
+// Propose-only seam – the agent can never verify/confirm).
 type captureProposer struct {
 	called  bool
 	cap     judgment.Capability
@@ -34,7 +34,7 @@ func (p *captureProposer) Propose(_ context.Context, _ string, _ shared.ID, c ju
 // TestAgentReachesSessionBuiltTool is the end-to-end proof that the AI is actually CALLED against the
 // analysis-brain tools built this session: the LLM (a scripted fake) is OFFERED propose_critique in the
 // ChatRequest.Tools, proposes a call, and the orchestrator DISPATCHES it into the judgment proposer. So
-// the tool is not orphaned — the agent loop (llm.Chat → tool-call → catalog dispatch) reaches it.
+// the tool is not orphaned – the agent loop (llm.Chat → tool-call → catalog dispatch) reaches it.
 func TestAgentReachesSessionBuiltTool(t *testing.T) {
 	now := time.Unix(1_000_000, 0).UTC()
 	clock := fixedClock{now}
@@ -83,7 +83,7 @@ func TestAgentReachesSessionBuiltTool(t *testing.T) {
 
 	// (1) the agent ADVERTISED propose_critique to the LLM (it's in the ChatRequest.Tools)
 	if len(llm.reqs) == 0 {
-		t.Fatal("the LLM was never called — the AI path did not run")
+		t.Fatal("the LLM was never called – the AI path did not run")
 	}
 	var advertised bool
 	for _, ts := range llm.reqs[0].Tools {

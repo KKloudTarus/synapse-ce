@@ -55,7 +55,7 @@ func TestRequestAutoApprovesRead(t *testing.T) {
 }
 
 func TestRequestIntrusiveAlwaysManual(t *testing.T) {
-	// Even in auto mode, an intrusive action must NOT auto-approve — it suspends pending.
+	// Even in auto mode, an intrusive action must NOT auto-approve – it suspends pending.
 	svc, _ := newSvc(t, agent.ModeAuto)
 	dec, err := svc.Request(context.Background(), proposal("a1", agent.RiskIntrusive, now))
 	if err != nil {
@@ -106,14 +106,14 @@ func TestSweepExpiredDeniesTimedOutPending_NeverApproves(t *testing.T) {
 		t.Fatal(err)
 	}
 	if dec.State != agent.ApprovalTimeout {
-		t.Fatalf("sweep must fail-closed to timeout (deny), never approve — got %s", dec.State)
+		t.Fatalf("sweep must fail-closed to timeout (deny), never approve – got %s", dec.State)
 	}
 }
 
 func TestSweepExpiredLeavesFreshPending(t *testing.T) {
 	svc, store := newSvc(t, agent.ModeManual)
 	ctx := context.Background()
-	p := proposal("a1", agent.RiskActive, now) // proposed "now" — within the window
+	p := proposal("a1", agent.RiskActive, now) // proposed "now" – within the window
 	if _, err := svc.Request(ctx, p); err != nil {
 		t.Fatal(err)
 	}

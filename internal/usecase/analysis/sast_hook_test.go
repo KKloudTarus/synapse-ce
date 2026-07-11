@@ -55,7 +55,7 @@ func TestVerifyConfirmedNonSASTDoesNotEmit(t *testing.T) {
 	}
 }
 
-// A verdict BELOW the bar REFUTES the gated judgment — no finding emitted (only a confirmed one promotes).
+// A verdict BELOW the bar REFUTES the gated judgment – no finding emitted (only a confirmed one promotes).
 func TestVerifyRefutedSASTDoesNotEmit(t *testing.T) {
 	svc, _, _, _ := newSvc()
 	rec := &fakeSASTRecorder{}
@@ -69,7 +69,7 @@ func TestVerifyRefutedSASTDoesNotEmit(t *testing.T) {
 	}
 }
 
-// The emit is BEST-EFFORT — a recorder failure leaves the judgment confirmed and the failure is audited.
+// The emit is BEST-EFFORT – a recorder failure leaves the judgment confirmed and the failure is audited.
 func TestVerifySASTEmitFailureDoesNotRollback(t *testing.T) {
 	svc, _, _, audit := newSvc()
 	svc.SetSASTRecorder(&fakeSASTRecorder{err: errors.New("repo down")})

@@ -78,7 +78,7 @@ func TestResolveNoMatchLeavesUnchanged(t *testing.T) {
 	}
 }
 
-// A component without a (valid) SHA-1 is never queried — nothing to fingerprint.
+// A component without a (valid) SHA-1 is never queried – nothing to fingerprint.
 func TestResolveIgnoresMissingOrBadSHA1(t *testing.T) {
 	var hits int32
 	srv := stubCentral(t, map[string][]map[string]string{}, &hits)
@@ -168,7 +168,7 @@ func TestResolveDeterministicOnMultiHit(t *testing.T) {
 	}
 }
 
-// A transient failure (HTTP 500) must NOT be cached as a permanent miss — a later lookup can retry.
+// A transient failure (HTTP 500) must NOT be cached as a permanent miss – a later lookup can retry.
 func TestResolveTransientNotCached(t *testing.T) {
 	sha1 := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	var calls int32

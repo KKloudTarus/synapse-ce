@@ -213,7 +213,7 @@ func stripPort(h string) string {
 
 // addrOf parses the host of a target value as an IP address (ok=false if it is a
 // hostname rather than a literal IP). Hostname<->IP reconciliation (DNS) is
-// intentionally NOT done here: a pure domain matcher must not resolve names — that
+// intentionally NOT done here: a pure domain matcher must not resolve names – that
 // would add a DNS-rebinding / SSRF surface. Recon adapters normalize a target to
 // the kind the scope expresses (resolve-then-check, with their own logging) before
 // calling, so an in-scope CIDR is matched against an already-resolved IP upstream.

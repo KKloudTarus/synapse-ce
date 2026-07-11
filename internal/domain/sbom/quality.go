@@ -6,13 +6,13 @@ import (
 	"strings"
 )
 
-// SBOM QUALITY scoring — a first-class, surfaced measure of how well a PRODUCED SBOM describes its
+// SBOM QUALITY scoring – a first-class, surfaced measure of how well a PRODUCED SBOM describes its
 // components, scored against the NTIA "minimum elements" (NTIA 2021, the baseline EO 14028 / EU CRA
 // consumers increasingly require) plus a few CycloneDX/SPDX semantic-quality checks. It is deliberately
 // DISTINCT from Completeness: Completeness judges scan COVERAGE ("did we capture the dependencies");
 // QualityReport judges the DOCUMENT ("are the captured components described well enough to act on, share,
 // or satisfy a regulatory minimum"). A thin SBOM that omits suppliers or checksums is a supply-chain risk
-// even when coverage is perfect, so — per Synapse's "no silent gap" posture — that shortfall is measured
+// even when coverage is perfect, so – per Synapse's "no silent gap" posture – that shortfall is measured
 // and reported rather than assumed away. The scorer is pure + deterministic (no I/O, sorted output):
 // same SBOM ⇒ same report.
 //
@@ -61,7 +61,7 @@ type QualityReport struct {
 	NTIAMet   bool             `json:"ntia_met"`   // every NTIA element Score >= NTIAThreshold
 	Elements  []QualityElement `json:"elements"`
 	// Profiles projects the scored elements onto named compliance profiles (NTIA 2021, vulnerability-lookup
-	// readiness, ...) as explicit PASS/FAIL with the failing requirements named — the citable governance
+	// readiness, ...) as explicit PASS/FAIL with the failing requirements named – the citable governance
 	// artifact a regulated buyer asks for, distinct from the raw score.
 	Profiles []ProfileResult `json:"profiles"`
 	Summary  string          `json:"summary"`
@@ -77,7 +77,7 @@ type ProfileResult struct {
 	Summary string   `json:"summary"`
 }
 
-// complianceProfile is a named set of required QualityElement IDs — a regulation or standard's expected
+// complianceProfile is a named set of required QualityElement IDs – a regulation or standard's expected
 // subset. Each required element must score >= NTIAThreshold for the profile to be met.
 type complianceProfile struct {
 	id, name string
@@ -93,8 +93,8 @@ var complianceProfiles = []complianceProfile{
 		"ntia-supplier", "ntia-name", "ntia-version", "ntia-uniqid", "ntia-dependencies", "ntia-author", "ntia-timestamp",
 	}},
 	// NTIA 2025 (CISA's refreshed minimum elements) keeps the 2021 seven and adds a per-component cryptographic
-	// hash, mapped here to the checksum element (the other 2025 additions — lifecycle phase, generation tooling
-	// context — are not yet scored, so this profile covers the data-field subset Synapse can verify today).
+	// hash, mapped here to the checksum element (the other 2025 additions – lifecycle phase, generation tooling
+	// context – are not yet scored, so this profile covers the data-field subset Synapse can verify today).
 	{id: "ntia-2025", name: "NTIA 2025 minimum elements (verifiable data-field subset)", required: []string{
 		"ntia-supplier", "ntia-name", "ntia-version", "ntia-uniqid", "ntia-dependencies", "ntia-author", "ntia-timestamp", "sem-checksum",
 	}},
@@ -291,7 +291,7 @@ func categoryMean(elements []QualityElement, category string) (mean int, has boo
 
 func qualitySummary(r QualityReport) string {
 	if r.NTIAMet {
-		return fmt.Sprintf("SBOM quality %d/100 (NTIA %d/100 — all minimum elements present).", r.Score, r.NTIAScore)
+		return fmt.Sprintf("SBOM quality %d/100 (NTIA %d/100 – all minimum elements present).", r.Score, r.NTIAScore)
 	}
 	// Name the weakest NTIA elements so the shortfall is actionable, not just a number.
 	var weak []string
@@ -300,7 +300,7 @@ func qualitySummary(r QualityReport) string {
 			weak = append(weak, e.Label)
 		}
 	}
-	return fmt.Sprintf("SBOM quality %d/100 (NTIA %d/100 — below the %d threshold on: %s).",
+	return fmt.Sprintf("SBOM quality %d/100 (NTIA %d/100 – below the %d threshold on: %s).",
 		r.Score, r.NTIAScore, NTIAThreshold, strings.Join(weak, ", "))
 }
 
@@ -310,8 +310,8 @@ const (
 	SupplierDerived  = "derived"  // deterministically inferred by Synapse from the PURL namespace
 )
 
-// HasChecksum reports whether a component carries a VALID integrity digest — the legacy SHA1 field or a
-// Checksums entry — which is the semantic-quality "checksum present" signal (tamper evidence per component).
+// HasChecksum reports whether a component carries a VALID integrity digest – the legacy SHA1 field or a
+// Checksums entry – which is the semantic-quality "checksum present" signal (tamper evidence per component).
 // It validates the digest (recognized algorithm + right-length hex/base64) via ValidChecksum rather than
 // merely counting presence, so a malformed value that the SPDX exporter would drop does not inflate the
 // score with tamper evidence the exported SBOM will not actually carry.
@@ -351,7 +351,7 @@ func SupplierWithSource(declared, purl string) (supplier, source string) {
 	return "", ""
 }
 
-// SupplierFromPURL derives a component's supplier from its PURL namespace — the segment(s) between the PURL
+// SupplierFromPURL derives a component's supplier from its PURL namespace – the segment(s) between the PURL
 // type and the package name (a Maven groupId, an npm scope, a GitHub org, a Docker image owner, ...), which
 // the PURL spec defines as "a name prefix such as a Maven groupId, a Docker image owner, a GitHub user or
 // organization". It is a conservative, deterministic attribution: a PURL with no namespace (e.g. a bare npm

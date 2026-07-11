@@ -178,7 +178,7 @@ func TestBuildOpenVEX(t *testing.T) {
 
 // TestExportsApplyPublishabilityGate proves SARIF + OpenVEX read through the evidence
 // gate via ListPublishableByEngagement: an unproven exploitation finding
-// (EvidenceScore < bar) is excluded from BOTH exports — even when it carries a vuln-shaped
+// (EvidenceScore < bar) is excluded from BOTH exports – even when it carries a vuln-shaped
 // dedup key that OpenVEX's vuln filter would otherwise pass. Red before the gate landed (the Service
 // read ListByEngagement, ungated), green after.
 func TestExportsApplyPublishabilityGate(t *testing.T) {

@@ -12,13 +12,22 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// Conan is the owned C/C++ parser: it reads conan.lock — the resolved dependency set produced by the
-// Conan package manager — into conan components. Two lockfile shapes are handled: the Conan 2.x form,
+// Conan is the owned C/C++ parser: it reads conan.lock – the resolved dependency set produced by the
+// Conan package manager – into conan components. Two lockfile shapes are handled: the Conan 2.x form,
 // which lists reference strings under "requires"/"build_requires"/"python_requires", and the Conan 1.x
 // form, which nests a "graph_lock" whose node "ref" fields carry the same reference strings. A reference
-// is name/version[@user/channel][#recipe_revision]; the name and version are extracted from it.
-// Conan 1.x graph nodes additionally emit deterministic dependency relationships from requires and build_requires.
-// Vendor-neutral (stdlib encoding/json).
+// Conan is the owned C/C++ parser. It reads conan.lock, the resolved
+// dependency set produced by the Conan package manager, into Conan
+// components.
+//
+// Two lockfile shapes are supported: the Conan 2.x form lists reference
+// strings under requires, build_requires, and python_requires. The Conan 1.x
+// form stores references in graph_lock nodes. References use the form
+// name/version[@user/channel][#recipe_revision].
+//
+// Conan 1.x graph nodes additionally emit deterministic dependency
+// relationships from requires and build_requires. The parser uses only the
+// Go standard library.
 type Conan struct{}
 
 // Ecosystem identifies this parser's package ecosystem.
@@ -43,8 +52,10 @@ type conanLock struct {
 	} `json:"graph_lock"`
 }
 
-// Parse extracts resolved Conan components and, for Conan 1.x graph_lock files, dependency graph edges.
-// Result is sorted by PURL — the 2.x lists are ordered but the 1.x nodes map is not, so sorting keeps output deterministic.
+// Parse extracts resolved Conan components and, for Conan 1.x graph_lock
+// files, dependency graph edges. Results are sorted deterministically because
+// Conan 1.x nodes are stored in a JSON object and therefore decoded into a Go
+// map with unspecified iteration order.
 func (Conan) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err

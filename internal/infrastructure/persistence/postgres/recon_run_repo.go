@@ -72,7 +72,7 @@ func (r *ReconRunStore) ListByEngagement(ctx context.Context, engagementID share
 }
 
 // ListStaleRunning returns runs still 'running' that started before olderThan (≤ limit),
-// oldest first — the stale-run sweeper's input.
+// oldest first – the stale-run sweeper's input.
 func (r *ReconRunStore) ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]recon.Run, error) {
 	if limit <= 0 {
 		limit = 100

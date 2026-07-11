@@ -10,9 +10,9 @@ import (
 )
 
 // AdvisoryStore is the in-memory owned-advisory store (dev/tests, mirrors the Postgres adapter). It
-// is GLOBAL reference data — NOT tenant-scoped. Advisories are indexed by every affected (ecosystem,
+// is GLOBAL reference data – NOT tenant-scoped. Advisories are indexed by every affected (ecosystem,
 // package) so ByPackage is a map lookup, and Upsert is idempotent by advisory id (re-syncable reference
-// data, replaced in place — not append-only). The stored ecosystem+package keys are the ingester-normalized,
+// data, replaced in place – not append-only). The stored ecosystem+package keys are the ingester-normalized,
 // OSV-canonical ids per the ports.AdvisoryStore KEY CONTRACT.
 type AdvisoryStore struct {
 	mu    sync.RWMutex

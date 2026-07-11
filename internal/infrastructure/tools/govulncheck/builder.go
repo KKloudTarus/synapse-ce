@@ -1,7 +1,7 @@
 // Package govulncheck adapts the Go call-graph builder to the CallGraphBuilder port
 // by shelling out to a pinned govulncheck binary via argv. It runs `govulncheck -json
 // -scan=symbol` over an acquired Go module and reconstructs the deterministic domain callgraph.Graph from
-// the emitted finding traces — the vuln-reachability witness paths that reachability PROOF
+// the emitted finding traces – the vuln-reachability witness paths that reachability PROOF
 // consumes. Importing govulncheck/x-tools as a library would compile the (untrusted) target in our
 // address space and bloat the binary, so it is exec'd and sandbox-confined instead.
 //
@@ -53,8 +53,8 @@ func (b *Builder) WithRunner(r ports.ToolRunner) *Builder { b.runner = r; return
 var _ ports.CallGraphBuilder = (*Builder)(nil)
 
 // Build runs `govulncheck -json -scan=symbol./...` in the target module and reconstructs the call graph
-// from its finding traces. A target with no reachable vulns yields an empty (non-nil) Graph — never an
-// error for "nothing reachable" — so a caller degrades to a lower reachability tier, not a false negative.
+// from its finding traces. A target with no reachable vulns yields an empty (non-nil) Graph – never an
+// error for "nothing reachable" – so a caller degrades to a lower reachability tier, not a false negative.
 func (b *Builder) Build(ctx context.Context, targetRef string) (*callgraph.Graph, error) {
 	out, err := b.run(ctx, targetRef)
 	if err != nil {
@@ -86,7 +86,7 @@ func (b *Builder) run(ctx context.Context, targetRef string) ([]byte, error) {
 		return res.Stdout, nil
 	}
 	// Direct exec is the dev path; production runs via WithRunner (sandboxed + output-capped). cmd.Output()
-	// buffers stdout unbounded, so the direct path trusts the pinned/hash-verified binary (F5) — parity
+	// buffers stdout unbounded, so the direct path trusts the pinned/hash-verified binary (F5) – parity
 	// with the syft adapter's accepted precedent.
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, b.bin, args...)
@@ -195,7 +195,7 @@ func sortedKeys(set map[string]bool) []string {
 }
 
 // edgesOf flattens the adjacency set into sorted, de-duplicated callgraph.Edges (caller order + callee
-// order both stable) — the canonical form that keeps the Graph + its query results deterministic.
+// order both stable) – the canonical form that keeps the Graph + its query results deterministic.
 func edgesOf(adj map[string]map[string]bool) []callgraph.Edge {
 	if len(adj) == 0 {
 		return nil

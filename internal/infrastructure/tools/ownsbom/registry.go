@@ -1,10 +1,10 @@
 // Package ownsbom is Synapse's OWNED SBOM producer: a per-ecosystem parser registry
 // that reads dependency manifests/lockfiles directly and emits a normalized sbom.SBOM, WITHOUT shelling
-// out to a third-party scanner. It is the detection-independence path — an alternative implementation of
+// out to a third-party scanner. It is the detection-independence path – an alternative implementation of
 // the ports.SBOMGenerator producer port, swappable with the Syft adapter behind the same port
 // (the moat: "not dependent on any one scanner"). Each ecosystem is owned by an EcosystemParser; the
 // Registry walks the target tree, dispatches each recognized manifest to its parser, and merges the
-// fragments. Vendor-neutral by construction — it imports no scanner library, only domain types.
+// fragments. Vendor-neutral by construction – it imports no scanner library, only domain types.
 package ownsbom
 
 import (
@@ -33,7 +33,7 @@ const (
 )
 
 // ParseInput is everything an EcosystemParser needs to parse one matched manifest: its full path +
-// content, plus the containing directory so a parser can read a COMPANION lockfile — many ecosystems
+// content, plus the containing directory so a parser can read a COMPANION lockfile – many ecosystems
 // pin versions in a lockfile separate from the dependency-declaring manifest (poetry.lock beside
 // pyproject.toml, package-lock.json beside package.json, the pom.xml parent/BOM chain). Carried as a
 // struct so the contract can grow fields without breaking the parsers that implement it.
@@ -99,7 +99,7 @@ func DefaultRegistry() (*Registry, error) {
 // Generate walks the target directory, parses every recognized manifest with its EcosystemParser, and
 // merges the fragments into a normalized SBOM. Manifests are matched by basename (case-insensitive);
 // unknown files and dependency-cache/VCS directories (node_modules, vendor,.git, …) are skipped. A
-// manifest that fails to parse fails the whole scan with its path (fail-loud — a silently-dropped
+// manifest that fails to parse fails the whole scan with its path (fail-loud – a silently-dropped
 // manifest is undercounted risk). Components are de-duplicated by identity (PURL, else name@version);
 // edges are concatenated. Hardened against a hostile tree: non-regular files are skipped (no symlink
 // escape), each manifest is size-capped, and the total manifest count is bounded.
@@ -137,7 +137,7 @@ func (r *Registry) Generate(ctx context.Context, targetRef string) (*sbom.SBOM, 
 		}
 		// Re-stat via Lstat right before the read (parity with the SAST adapter): narrows the TOCTOU
 		// window where a regular manifest is swapped for a symlink after WalkDir cached its type, and
-		// yields the authoritative size for the cap — never follow a symlinked manifest out of the tree.
+		// yields the authoritative size for the cap – never follow a symlinked manifest out of the tree.
 		fi, lerr := os.Lstat(path)
 		if lerr != nil {
 			return fmt.Errorf("lstat %s: %w", path, lerr)
@@ -194,13 +194,13 @@ func skipDir(name string) bool {
 }
 
 // readManifestFile safely reads a COMPANION manifest beside a matched lockfile (e.g. Cargo.toml next to
-// Cargo.lock): it must be a regular file (Lstat — never follow a symlink out of the tree) under the size
-// cap. ok=false on any miss (missing, irregular, oversized) — a companion read is best-effort, never
+// Cargo.lock): it must be a regular file (Lstat – never follow a symlink out of the tree) under the size
+// cap. ok=false on any miss (missing, irregular, oversized) – a companion read is best-effort, never
 // fatal. Parsers whose scope/version data lives in a sibling file use this rather than a raw os.ReadFile,
 // so the registry's file-safety posture (no symlink escape, bounded size) extends to companion reads.
 //
-// CALLER CONTRACT: pass a fixed basename joined to a registry-derived directory — filepath.Join(in.Dir,
-// "<name>") — NEVER a path derived from manifest CONTENT. The Lstat/size guards block symlinks + oversize
+// CALLER CONTRACT: pass a fixed basename joined to a registry-derived directory – filepath.Join(in.Dir,
+// "<name>") – NEVER a path derived from manifest CONTENT. The Lstat/size guards block symlinks + oversize
 // but not an in-tree-relative `..`; a future content-derived companion path (e.g. a Maven module ref)
 // must add explicit root containment (filepath.Rel/Clean) before calling this.
 func readManifestFile(path string) ([]byte, bool) {

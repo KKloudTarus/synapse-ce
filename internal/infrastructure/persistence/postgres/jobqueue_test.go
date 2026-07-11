@@ -16,7 +16,7 @@ func testDSN(t *testing.T) string {
 	t.Helper()
 	d := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if d == "" {
-		t.Skip("SYNAPSE_TEST_DB_DSN not set — skipping Postgres integration test")
+		t.Skip("SYNAPSE_TEST_DB_DSN not set – skipping Postgres integration test")
 	}
 	return d
 }
@@ -74,7 +74,7 @@ func TestPostgresJobQueueLeaseReclaim(t *testing.T) {
 	if err != nil || first == nil || first.ID != id {
 		t.Fatalf("first claim: %+v err=%v", first, err)
 	}
-	// Immediately, it's leased — not claimable.
+	// Immediately, it's leased – not claimable.
 	if j, _ := q.Claim(ctx, 1*time.Second); j != nil {
 		t.Fatalf("leased job must not be re-claimed, got %+v", j)
 	}
@@ -91,7 +91,7 @@ func TestPostgresJobQueueLeaseReclaim(t *testing.T) {
 	}
 }
 
-// TestPostgresJobQueueClaimByKind covers the kind = ANY($2) filter — a worker
+// TestPostgresJobQueueClaimByKind covers the kind = ANY($2) filter – a worker
 // claims only its kinds. Gated on SYNAPSE_TEST_DB_DSN.
 func TestPostgresJobQueueClaimByKind(t *testing.T) {
 	q, ctx := setupJobQueue(t)

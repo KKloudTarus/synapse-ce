@@ -54,7 +54,7 @@ func TestVerifyConfirmedNonThreatDoesNotEmit(t *testing.T) {
 	}
 }
 
-// TestVerifyThreatEmitFailureDoesNotRollback: the emit is BEST-EFFORT — a recorder failure leaves the
+// TestVerifyThreatEmitFailureDoesNotRollback: the emit is BEST-EFFORT – a recorder failure leaves the
 // judgment confirmed (the human's ratification stands) and the failure is audited, not silent.
 func TestVerifyThreatEmitFailureDoesNotRollback(t *testing.T) {
 	svc, _, _, audit := newSvc()

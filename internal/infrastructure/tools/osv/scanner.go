@@ -1,4 +1,4 @@
-// Package osv is a DetectionSource that queries OSV.dev — the primary
+// Package osv is a DetectionSource that queries OSV.dev – the primary
 // vuln source (free, no auth, no rate limit). It matches SBOM components
 // by PURL and maps results to raw findings for correlation.
 package osv
@@ -237,7 +237,7 @@ func osvToRaw(comp sbom.Component, v osvVuln) vulnerability.RawFinding {
 		FixedVersion: firstFixed(v.Affected),
 		Description:  firstNonEmpty(v.Summary, v.Details),
 	}
-	// Pick a CVSS vector — prefer v3.x (scoreable) for the base score.
+	// Pick a CVSS vector – prefer v3.x (scoreable) for the base score.
 	var v3vec string
 	for _, sev := range v.Severity {
 		if !strings.HasPrefix(sev.Type, "CVSS_V") {
@@ -337,7 +337,7 @@ func firstNonEmpty(vals ...string) string {
 }
 
 // dedupVulns collapses the same advisory on the same component+version (OSV often
-// returns several records — e.g. GHSA and PYSEC — aliasing one CVE), keeping the
+// returns several records – e.g. GHSA and PYSEC – aliasing one CVE), keeping the
 // richest record: highest severity, then a known fix, then a CVSS vector.
 func dedupRaws(raws []vulnerability.RawFinding) []vulnerability.RawFinding {
 	type key struct{ id, comp, ver string }

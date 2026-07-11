@@ -69,7 +69,7 @@ type Audit struct {
 	// CreatedBy / UpdatedBy attribute a record to the actor that created / last modified it
 	// (ownership). Empty = system/unknown (legacy rows, or write paths not yet wired).
 	// Engagements persist these; other record types carry the fields and adopt persistence
-	// incrementally — the canonical home so ownership is one shape across the domain.
+	// incrementally – the canonical home so ownership is one shape across the domain.
 	CreatedBy string
 	UpdatedBy string
 }

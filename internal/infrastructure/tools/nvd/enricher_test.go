@@ -77,7 +77,7 @@ func TestEnrichBackfillsUnknownSeverities(t *testing.T) {
 	if res.Matches != 2 {
 		t.Errorf("matches = %d, want 2", res.Matches)
 	}
-	// Only the 3 unknown CVEs are queried — the known one and the GHSA are not.
+	// Only the 3 unknown CVEs are queried – the known one and the GHSA are not.
 	if calls != 3 {
 		t.Errorf("NVD calls = %d, want 3 (only unknown CVE ids)", calls)
 	}

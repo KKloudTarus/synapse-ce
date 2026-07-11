@@ -153,7 +153,7 @@ func TestEmpty(t *testing.T) {
 	if (FlowGraph{}).Vulnerable() {
 		t.Error("empty graph is not vulnerable")
 	}
-	// sources but no sinks, and sinks but no flow — both non-vulnerable
+	// sources but no sinks, and sinks but no flow – both non-vulnerable
 	if (FlowGraph{Sources: []string{"s"}, Flows: []Flow{{From: "s", To: "x"}}}).Vulnerable() {
 		t.Error("no sink -> not vulnerable")
 	}

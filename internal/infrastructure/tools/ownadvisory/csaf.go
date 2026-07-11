@@ -12,19 +12,19 @@ import (
 
 // ParseCSAF normalizes one OASIS CSAF 2.0 document (RedHat/SUSE/Cisco-style vendor security advisories)
 // into the owned domain advisory.Advisory model. A CSAF document carries MANY
-// vulnerabilities, so it yields a SLICE — one advisory per `vulnerabilities[]` entry that has a CVE id and
+// vulnerabilities, so it yields a SLICE – one advisory per `vulnerabilities[]` entry that has a CVE id and
 // at least one product binding we can resolve to an OSV (ecosystem, package) key.
 //
-// CSAF is product-centric: a `product_tree` defines products — via BOTH the flat `full_product_names` list
-// and the recursive `branches` tree (vendor→product→version, the RedHat/SUSE form) — each carrying a CPE,
+// CSAF is product-centric: a `product_tree` defines products – via BOTH the flat `full_product_names` list
+// and the recursive `branches` tree (vendor→product→version, the RedHat/SUSE form) – each carrying a CPE,
 // and each vulnerability's `product_status.{known_affected,fixed,first_fixed}` + `remediations[]` (category
 // vendor_fix) references those products by id. We resolve product_id → CPE → (ecosystem, package, version)
-// via the conservative cpeToEcosystem bridge (see cpe.go) — a binding whose CPE does not map to a
+// via the conservative cpeToEcosystem bridge (see cpe.go) – a binding whose CPE does not map to a
 // comparator-backed language ecosystem is SKIPPED (not mis-keyed). This is a pure parser (no I/O), mirroring
 // ParseOSV; the feed reads the bytes and the store persists the result.
 //
 // Limitation (documented, not a defect): CSAF/CPE keys vendor products, the matcher keys OSV
-// ecosystem+package — so an advisory only matches when the SBOM carries a CPE-derivable component. A vuln
+// ecosystem+package – so an advisory only matches when the SBOM carries a CPE-derivable component. A vuln
 // with no resolvable binding yields an advisory with empty Affected (inert in the store); the feed skips it.
 func ParseCSAF(data []byte) ([]advisory.Advisory, error) {
 	if len(data) > maxAdvisoryBytes {
@@ -99,7 +99,7 @@ const maxBranchDepth = 64
 
 // cpeByProductID indexes product_id → CPE from BOTH product_tree shapes: the flat full_product_names list
 // and the recursive branches tree. full_product_names is indexed first; a branch product with the same id
-// refines it (deterministic — both come from the same parsed document).
+// refines it (deterministic – both come from the same parsed document).
 func (t csafTree) cpeByProductID() map[string]string {
 	m := make(map[string]string, len(t.FullProductNames))
 	for _, p := range t.FullProductNames {
@@ -150,7 +150,7 @@ type csafVulnDoc struct {
 }
 
 // fixedProductIDs is the union of product_status.{fixed,first_fixed} and the product_ids of any
-// "vendor_fix" remediation — the CSAF places that name a remediated product version.
+// "vendor_fix" remediation – the CSAF places that name a remediated product version.
 func (v csafVulnDoc) fixedProductIDs() []string {
 	out := append([]string{}, v.ProductStatus.Fixed...)
 	out = append(out, v.ProductStatus.FirstFixed...)
@@ -225,7 +225,7 @@ func (v csafVulnDoc) affected(cpeByProduct map[string]string) []advisory.Affecte
 		case "*":
 			g.allVersions = true // CPE version ANY ⇒ all versions affected
 		case "-", "":
-			// NA / unspecified version: the package is named but no version signal — record the group so a
+			// NA / unspecified version: the package is named but no version signal – record the group so a
 			// fixed version can still attach, but it contributes no match on its own.
 		default:
 			g.versions[ver] = true
@@ -247,10 +247,10 @@ func (v csafVulnDoc) affected(cpeByProduct map[string]string) []advisory.Affecte
 		if g.allVersions {
 			// "all versions affected" as an open ECOSYSTEM range (introduced at 0); the fixed event, if any,
 			// closes it so the matcher reports versions >= fixed as not-affected. This is the broadest match
-			// (every version of the package) — intentionally accepted as OSV's all-versions semantics. It is
+			// (every version of the package) – intentionally accepted as OSV's all-versions semantics. It is
 			// safe here because targetSWEcosystem is restricted to faithful-name ecosystems, so a mis-key
 			// (which an unbounded range would amplify) is prevented at the bridge, not here; it errs toward a
-			// false positive on the RIGHT package (conservatively many versions) — the safe direction.
+			// false positive on the RIGHT package (conservatively many versions) – the safe direction.
 			ev := []advisory.Event{{Introduced: "0"}}
 			if g.fixed != "" {
 				ev = append(ev, advisory.Event{Fixed: g.fixed})
@@ -261,7 +261,7 @@ func (v csafVulnDoc) affected(cpeByProduct map[string]string) []advisory.Affecte
 			ap.Versions = append(ap.Versions, ver)
 		}
 		sort.Strings(ap.Versions)
-		// Drop a binding that carries no match signal at all (no versions, not all-versions) — it is inert.
+		// Drop a binding that carries no match signal at all (no versions, not all-versions) – it is inert.
 		if len(ap.Versions) == 0 && len(ap.Ranges) == 0 {
 			continue
 		}

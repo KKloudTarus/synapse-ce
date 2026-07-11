@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Checksum digest validation — the single source of truth for "what a real integrity digest looks like",
+// Checksum digest validation – the single source of truth for "what a real integrity digest looks like",
 // shared by the quality scorer (HasChecksum, via ValidChecksum) and the SPDX export gate (via
 // CanonicalHexDigest). Keeping BOTH the digest-size knowledge and the canonical algorithm name here (not
 // duplicated per consumer) means the scorer and the exporter can never disagree: a checksum the exporter
@@ -17,7 +17,7 @@ import (
 const maxDigestChars = 256
 
 // digestSpec is a recognized hash's hex-digest length plus its canonical algorithm name. The canonical name
-// is the domain's SPDX-style spelling (see Checksum.Algorithm), which the SPDX exporter emits directly — so
+// is the domain's SPDX-style spelling (see Checksum.Algorithm), which the SPDX exporter emits directly – so
 // there is no second, drift-prone name table in the export path.
 type digestSpec struct {
 	hexLen int
@@ -28,7 +28,7 @@ type digestSpec struct {
 // digestAlgs maps a NORMALIZED hash-algorithm name (see NormalizeChecksumAlg) to its spec. It is the single
 // allowlist of algorithms Synapse treats as real tamper evidence; a token absent here is not a recognized
 // digest. Both the quality scorer and the SPDX export gate read this one table, so they accept exactly the
-// same digests by construction — nothing to keep in sync across packages.
+// same digests by construction – nothing to keep in sync across packages.
 var digestAlgs = map[string]digestSpec{
 	"SHA1": {40, "SHA1", false}, "SHA224": {56, "SHA224", false}, "SHA256": {64, "SHA256", true},
 	"SHA384": {96, "SHA384", true}, "SHA512": {128, "SHA512", true},
@@ -51,7 +51,7 @@ func NormalizeChecksumAlg(alg string) string {
 // (converting a base64 Subresource-Integrity value to hex). ok is false for an unrecognized algorithm, or a
 // value that is not a right-length hex or base64 digest, or one over maxDigestChars. Because both consumers
 // go through this one function and one allowlist, the scorer never counts a digest the exporter would drop,
-// or vice versa — the two cannot drift.
+// or vice versa – the two cannot drift.
 func CanonicalHexDigest(alg, value string) (name, hexValue string, ok bool) {
 	spec, known := digestAlgs[NormalizeChecksumAlg(alg)]
 	if !known {
@@ -71,7 +71,7 @@ func CanonicalHexDigest(alg, value string) (name, hexValue string, ok bool) {
 }
 
 // ValidChecksum reports whether a checksum carries a REAL digest (a recognized algorithm whose value is a
-// right-length hex or base64 digest) — the semantic-quality "checksum present" signal. It is the boolean
+// right-length hex or base64 digest) – the semantic-quality "checksum present" signal. It is the boolean
 // view of CanonicalHexDigest, so a checksum the SPDX exporter would drop does not count toward quality.
 func ValidChecksum(c Checksum) bool {
 	_, _, ok := CanonicalHexDigest(c.Algorithm, c.Value)

@@ -1,12 +1,12 @@
-// Package ssacallgraph builds a deterministic call graph from Go SOURCE using go/ssa — the general,
+// Package ssacallgraph builds a deterministic call graph from Go SOURCE using go/ssa – the general,
 // first-party call graph taint analysis needs. The govulncheck builder is vuln-trace-scoped and
 // yields no edges for a general source→sink query, so taint needs its own general builder. This
 // produces the SAME callgraph.Graph domain type + the SAME "importPath.Symbol" node identity as the
 // govulncheck builder, so taint + reachability share node ids with no translation.
 //
-// It uses golang.org/x/tools (go/packages + go/ssa + go/callgraph) — the heavy analysis library. Because
+// It uses golang.org/x/tools (go/packages + go/ssa + go/callgraph) – the heavy analysis library. Because
 // heavy tools are shelled out via argv, the intent is to compile this into a standalone, sandboxed argv binary
-// (cmd/synapse-callgraph) the adapter execs — so x/tools stays OUT of the api server's import graph. This
+// (cmd/synapse-callgraph) the adapter execs – so x/tools stays OUT of the api server's import graph. This
 // package holds the pure build logic (the testable core, like govulncheck's parseGovulncheck); the cmd +
 // adapter wrapper land in a follow-up slice.
 package ssacallgraph
@@ -29,7 +29,7 @@ import (
 // BuildGraph loads the Go packages under dir (the module's./...), builds SSA + a CHA call graph, and
 // reduces it to the deterministic domain callgraph.Graph: edges are caller→callee by "importPath.Symbol";
 // entrypoints are the FIRST-PARTY (loaded-module) exported functions + any main. CHA (class-hierarchy
-// analysis) is a SOUND over-approximation — the right precision tier for the taint over-approximation MVP
+// analysis) is a SOUND over-approximation – the right precision tier for the taint over-approximation MVP
 // ; precise VTA/def-use is a later refinement. Output is deterministic (sorted, deduped). Honors
 // ctx. Load/type errors fail closed (a partial graph would silently drop edges → false-negative taint).
 func BuildGraph(ctx context.Context, dir string) (*domaincg.Graph, error) {
@@ -44,13 +44,13 @@ func BuildGraph(ctx context.Context, dir string) (*domaincg.Graph, error) {
 		return nil, fmt.Errorf("load packages: %w", err)
 	}
 	if n := packages.PrintErrors(pkgs); n > 0 {
-		return nil, fmt.Errorf("%d package load/type error(s) — refusing a partial call graph", n)
+		return nil, fmt.Errorf("%d package load/type error(s) – refusing a partial call graph", n)
 	}
 	if len(pkgs) == 0 {
 		return &domaincg.Graph{}, nil
 	}
 
-	// First-party package paths (the loaded module's own packages) — entrypoints are drawn from these, so a
+	// First-party package paths (the loaded module's own packages) – entrypoints are drawn from these, so a
 	// stdlib/dependency exported function isn't treated as a reachability root.
 	firstParty := map[string]bool{}
 	for _, p := range pkgs {
@@ -90,14 +90,14 @@ func BuildGraph(ctx context.Context, dir string) (*domaincg.Graph, error) {
 
 // nodeID composes an ssa.Function into the "importPath.Symbol" identity (matching the govulncheck builder +
 // OSV AffectedSymbols): "pkg.Func", or "pkg.RecvType.Method" for a method (receiver pointer stripped).
-// Returns "" for a function with no package (synthetic/shared/anonymous) — it has no stable symbol id.
+// Returns "" for a function with no package (synthetic/shared/anonymous) – it has no stable symbol id.
 func nodeID(fn *ssa.Function) string {
 	if fn == nil {
 		return ""
 	}
 	// A monomorphized generic INSTANCE (e.g. "Map[int]") has a nil ssa Pkg + a parameterized Name, so it
 	// would yield "" and SEVER every edge through the generic (a taint false-negative). Resolve to the
-	// generic ORIGIN ("Map" — real Pkg, clean name), which also matches govulncheck's un-parameterized
+	// generic ORIGIN ("Map" – real Pkg, clean name), which also matches govulncheck's un-parameterized
 	// symbol so the two builders' node ids align. Origin() is nil for a non-instance, so this is a no-op there.
 	if o := fn.Origin(); o != nil {
 		fn = o

@@ -13,9 +13,9 @@ import (
 // TestExportPathHasNoLLM is the golden-rule-5 tripwire for the export path (SARIF / OpenVEX): the
 // customer-facing artifacts are templated from STORED data, with no LLM anywhere. It fails if any
 // non-test source file in this package imports an agent/LLM package or references an LLM port type.
-// Export now reads AI judgments for the OpenVEX justification-by-tier — it reads only TYPED
+// Export now reads AI judgments for the OpenVEX justification-by-tier – it reads only TYPED
 // data through ports.JudgmentStore, never the judgment USE CASE (usecase/analysis is forbidden) and
-// never an LLM — so nobody can quietly wire a model into a deliverable. Mirrors report/arch_test.go.
+// never an LLM – so nobody can quietly wire a model into a deliverable. Mirrors report/arch_test.go.
 func TestExportPathHasNoLLM(t *testing.T) {
 	const mod = "github.com/KKloudTarus/synapse-ce"
 	forbiddenImport := []string{
@@ -52,7 +52,7 @@ func TestExportPathHasNoLLM(t *testing.T) {
 			p := strings.Trim(imp.Path.Value, `"`)
 			for _, bad := range forbiddenImport {
 				if p == bad || strings.HasPrefix(p, bad+"/") {
-					t.Errorf("%s imports forbidden package %q — no LLM/agent in the export path", name, p)
+					t.Errorf("%s imports forbidden package %q – no LLM/agent in the export path", name, p)
 				}
 			}
 		}
@@ -62,18 +62,18 @@ func TestExportPathHasNoLLM(t *testing.T) {
 				return true
 			}
 			if x, ok := sel.X.(*ast.Ident); ok && x.Name == "ports" && forbiddenSelector[sel.Sel.Name] {
-				t.Errorf("%s references ports.%s — the export path must not touch an LLM type", name, sel.Sel.Name)
+				t.Errorf("%s references ports.%s – the export path must not touch an LLM type", name, sel.Sel.Name)
 			}
 			return true
 		})
 	}
 	if scanned == 0 {
-		t.Fatal("scanned no export source files — test wiring is wrong")
+		t.Fatal("scanned no export source files – test wiring is wrong")
 	}
 }
 
 // TestExportPathHasNoLLMTransitive is defense-in-depth over the direct scan: the export package's
-// FULL transitive import graph must reach no LLM implementation or agent-orchestration package —
+// FULL transitive import graph must reach no LLM implementation or agent-orchestration package –
 // catching a model wired in two hops away. domain/agent + usecase/ports are deliberately NOT
 // forbidden (export reaches them only via ports, which defines the agent/LLM port TYPES; no model
 // runs from a type or an interface). Best-effort: skips if the go toolchain is unavailable.
@@ -96,7 +96,7 @@ func TestExportPathHasNoLLMTransitive(t *testing.T) {
 		dep := strings.TrimSpace(line)
 		for _, bad := range forbidden {
 			if dep == bad || strings.HasPrefix(dep, bad+"/") {
-				t.Errorf("export transitively imports forbidden package %q — no LLM/agent in the export path", dep)
+				t.Errorf("export transitively imports forbidden package %q – no LLM/agent in the export path", dep)
 			}
 		}
 	}

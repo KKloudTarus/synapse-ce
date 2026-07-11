@@ -54,7 +54,7 @@ func TestCipherRejectsWrongKey(t *testing.T) {
 func TestCipherRejectsWrongAAD(t *testing.T) {
 	c, _ := NewCipher(testKey(t))
 	sealed, _ := c.Seal([]byte("s"), aad("eng1", "name1"))
-	// A ciphertext stored for (eng1,name1) cannot be opened as (eng1,name2) — defeats
+	// A ciphertext stored for (eng1,name1) cannot be opened as (eng1,name2) – defeats
 	// swapping blobs between credentials even with DB write access.
 	if _, err := c.Open(sealed, aad("eng1", "name2")); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("mismatched AAD must fail, got %v", err)

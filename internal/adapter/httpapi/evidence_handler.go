@@ -20,7 +20,7 @@ type captureEvidenceRequest struct {
 // captureEvidence ingests a manual artifact into the engagement's tamper-evident
 // vault: the bytes are stored content-addressed and a sealed, hash-chained
 // link referencing them by sha256 is appended + audited. Not gated by scope/window
-// — recording an observation is not running a tool.
+// – recording an observation is not running a tool.
 func (rt *Router) captureEvidence(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id") // engagement existence + tenant isolation enforced by withEngTenant
 	var req captureEvidenceRequest

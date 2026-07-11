@@ -29,7 +29,7 @@ func TestNewSAST(t *testing.T) {
 		t.Errorf("dedup must anchor on the judgment id (distinct from pattern-SAST keys), got %q", f.DedupKey)
 	}
 	if f.ProposedBy != "" {
-		t.Errorf("ProposedBy must be empty (the gate ran at the judgment layer) — else the projection is re-gated stuck-at-0, got %q", f.ProposedBy)
+		t.Errorf("ProposedBy must be empty (the gate ran at the judgment layer) – else the projection is re-gated stuck-at-0, got %q", f.ProposedBy)
 	}
 	// The title is templated from the structured fields (no LLM prose).
 	if want := "Taint: taint-sqli (CWE-89) at app/dao.Find"; f.Title != want {

@@ -28,7 +28,7 @@ func TestLeaseRunLockMutualExclusion(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("first lease should succeed: ok=%v err=%v", ok, err)
 	}
-	// The lease does NOT hold a pooled connection — verify the pool isn't pinned.
+	// The lease does NOT hold a pooled connection – verify the pool isn't pinned.
 	if got := pool.Stat().AcquiredConns(); got != 0 {
 		t.Fatalf("lease must not pin a pooled connection, AcquiredConns=%d", got)
 	}

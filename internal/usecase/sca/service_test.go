@@ -672,7 +672,7 @@ func TestStartScanAsyncCompletes(t *testing.T) {
 		t.Errorf("want sca.scan audited before async run, got %+v", audit.entries)
 	}
 
-	// Poll LatestJob (concurrently with the running goroutine — run under -race) until terminal.
+	// Poll LatestJob (concurrently with the running goroutine – run under -race) until terminal.
 	var final ports.ScanJob
 	for i := 0; i < 400; i++ {
 		j, err := svc.LatestJob(context.Background(), "e1")

@@ -11,10 +11,10 @@ import (
 
 // Maven is the owned Java parser: it reads a pom.xml's DIRECT <dependencies> into maven
 // components (pkg:maven/<group>/<artifact>@<version>, Name <group>:<artifact>). Only a LITERAL <version>
-// yields a resolved version — a version via ${property} or inherited from a parent / dependencyManagement
+// yields a resolved version – a version via ${property} or inherited from a parent / dependencyManagement
 // BOM is not resolved here (full parent-chain + property resolution, which needs the companion/parent
 // poms via ParseInput.Dir, is not done yet), so those deps are SKIPPED rather than emitted with an
-// unresolved version. <scope>test</scope> maps to background test scope. Uses stdlib encoding/xml — and
+// unresolved version. <scope>test</scope> maps to background test scope. Uses stdlib encoding/xml – and
 // because the schema only binds <project><dependencies>, the <dependencyManagement> BOM (version
 // constraints, not real deps) is naturally excluded. No third-party library, vendor-neutral.
 type Maven struct{}

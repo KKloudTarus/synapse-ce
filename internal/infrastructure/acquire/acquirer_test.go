@@ -64,7 +64,7 @@ func TestValidateGitURL(t *testing.T) {
 			t.Errorf("validateGitURL(%q) = %v, want nil", u, err)
 		}
 	}
-	// http:// is now rejected (MITM-able, same as git://) — https only.
+	// http:// is now rejected (MITM-able, same as git://) – https only.
 	bad := []string{"", "-x", "http://h/x", "git://h/x", "ssh://h/x", "git@github.com:x/y.git", "ext::sh -c id", "file:///etc/passwd", "/local/path"}
 	for _, u := range bad {
 		if err := validateGitURL(u); err == nil {

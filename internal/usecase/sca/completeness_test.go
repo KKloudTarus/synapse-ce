@@ -60,7 +60,7 @@ func TestComputeCompletenessOSScan(t *testing.T) {
 		t.Errorf("OS scan must record the os-package-db source, got lockfiles %v", c.Lockfiles)
 	}
 
-	// Mixed image: OS packages + an app build system with NO lockfile (unresolved) — that app
+	// Mixed image: OS packages + an app build system with NO lockfile (unresolved) – that app
 	// gap is still a real INCOMPLETE signal even though the OS side is fine.
 	mixed := &sbom.SBOM{Components: []sbom.Component{
 		{Name: "curl", Version: "7.52.1", PURL: "pkg:deb/debian/curl@7.52.1"},
@@ -79,7 +79,7 @@ func TestComputeCompletenessOSScan(t *testing.T) {
 
 	// SECURITY regression: a FEW range-versioned app deps (no lockfile) must NOT hide behind
 	// MANY pinned OS packages. Confidence is judged on the app (non-OS) components only, so this
-	// stays non-confident + warns — abundant pinned OS packages can't dilute the unresolved app surface.
+	// stays non-confident + warns – abundant pinned OS packages can't dilute the unresolved app surface.
 	mixedApp := &sbom.SBOM{Components: []sbom.Component{
 		{Name: "curl", Version: "7.52.1", PURL: "pkg:deb/debian/curl@7.52.1"},   // pinned OS
 		{Name: "bash", Version: "4.4-5", PURL: "pkg:deb/debian/bash@4.4-5"},     // pinned OS
@@ -96,7 +96,7 @@ func TestComputeCompletenessOSScan(t *testing.T) {
 }
 
 func TestUnresolvedRemediation(t *testing.T) {
-	// Maven must NOT be told to write a lockfile (it has none) — it gets build/resolve guidance.
+	// Maven must NOT be told to write a lockfile (it has none) – it gets build/resolve guidance.
 	maven := unresolvedRemediation([]string{"maven"})
 	if !strings.Contains(maven, "mvn package") || !strings.Contains(maven, "copy-dependencies") {
 		t.Errorf("maven guidance must mention building/resolving, got: %q", maven)

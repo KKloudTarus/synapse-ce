@@ -38,7 +38,7 @@ func TestNewStopDecision_RequiresClosedReason(t *testing.T) {
 		t.Fatalf("valid stop: %v", err)
 	}
 	if _, err := NewStopDecision("s1", "e1", StopReason("freeform"), "x", "agent:s1", decNow); !errors.Is(err, shared.ErrValidation) {
-		t.Fatal("an unknown (free-prose) stop reason must be rejected — the set is closed")
+		t.Fatal("an unknown (free-prose) stop reason must be rejected – the set is closed")
 	}
 }
 

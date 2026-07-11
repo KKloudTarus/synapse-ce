@@ -113,7 +113,7 @@ func TestCargoParseWithCompanion(t *testing.T) {
 		t.Errorf("serde_derive has no checksum line, want none, got %+v", ck)
 	}
 	// THE POINT: the companion Cargo.toml scopes dev-deps as development (first parser to exercise
-	// ParseInput.Dir) — across all three declaration forms.
+	// ParseInput.Dir) – across all three declaration forms.
 	for _, devCrate := range []string{
 		"criterion",  // plain: key = "ver"
 		"mockall",    // inline: key = { version = … }

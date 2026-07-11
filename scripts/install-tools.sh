@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install-tools.sh — install the external binaries Synapse shells out to,
+# install-tools.sh – install the external binaries Synapse shells out to,
 # at PINNED versions, so operators don't hand-install them. Checksum verification is
 # delegated to Anchore's official installers (they verify the download against the
 # release checksums file); recon tools install via `go install` at pinned versions
@@ -63,7 +63,7 @@ if [ "$uname_s" = "Linux" ]; then
   elif have dnf;     then say "installing bubblewrap (dnf)";  sudo dnf install -y bubblewrap
   elif have pacman;  then say "installing bubblewrap (pacman)"; sudo pacman -S --noconfirm bubblewrap
   elif have apk;     then say "installing bubblewrap (apk)";   sudo apk add bubblewrap
-  else warn "could not detect a package manager for bubblewrap — install it manually"
+  else warn "could not detect a package manager for bubblewrap – install it manually"
   fi
 else
   warn "bubblewrap is Linux-only; on ${uname_s} the sandbox + live recon stay disabled (fail-closed, by design)"
@@ -75,7 +75,7 @@ if [ "$WITH_RECON" = 1 ]; then
     warn "recon tools (subfinder/httpx/naabu) are used only inside the Linux sandbox; installing on ${uname_s} is for convenience only"
   fi
   if ! have go; then
-    warn "go toolchain not found — skipping recon tools"
+    warn "go toolchain not found – skipping recon tools"
   else
     export GOBIN="$BINDIR"
     say "subfinder ${SUBFINDER_VERSION}"; go install "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@${SUBFINDER_VERSION}" || warn "subfinder install failed (check SUBFINDER_VERSION)"

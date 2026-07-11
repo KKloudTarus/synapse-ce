@@ -32,7 +32,7 @@ func TestBinaryIntegrityRefusesTamper(t *testing.T) {
 	dir := t.TempDir()
 	tool := filepath.Join(dir, "tool")
 	// A tiny static-ish tool: use /bin/true's bytes copied in, or a shell script won't work
-	// as an exec target under PATH resolution — copy the real `true` binary.
+	// as an exec target under PATH resolution – copy the real `true` binary.
 	src, _ := exec.LookPath("true")
 	b, _ := os.ReadFile(src)
 	if err := os.WriteFile(tool, b, 0o755); err != nil {

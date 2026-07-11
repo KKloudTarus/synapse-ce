@@ -5,7 +5,7 @@
 // Tenant isolation is enforced UPSTREAM at the HTTP route (withEngTenant), so these methods take an
 // already-tenant-proven engagement id. The agent reaches ONLY Propose (via a narrow proposer interface it
 // declares); Edit/Accept/Reject are human actions gated by RBAC (PermReview) + separation of duties at the
-// route — and the domain enforces SoD again (a proposer cannot sign off its own draft) as defense-in-depth.
+// route – and the domain enforces SoD again (a proposer cannot sign off its own draft) as defense-in-depth.
 // A draft never renders into a report by itself.
 package writeupdraftuc
 
@@ -28,7 +28,7 @@ type Service struct {
 }
 
 // SetFindingWriteupApplier wires the on-accept hook that applies an accepted draft's prose to its finding
-// . Optional — without it, Accept just marks the draft accepted (no apply). The composition root
+// . Optional – without it, Accept just marks the draft accepted (no apply). The composition root
 // supplies *findings.Service through the narrow ports.FindingWriteupApplier (writeupdraftuc never imports
 // the findings use case).
 func (s *Service) SetFindingWriteupApplier(a ports.FindingWriteupApplier) { s.applier = a }

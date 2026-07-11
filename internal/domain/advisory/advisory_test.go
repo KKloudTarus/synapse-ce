@@ -25,7 +25,7 @@ func TestCompareSemver(t *testing.T) {
 		{"1.0.0-alpha", "1.0.0-alpha.1", -1},    // fewer identifiers < more
 		{"1.0.0-1", "1.0.0-alpha", -1},          // numeric < alphanumeric
 		{"1.0.0-alpha.beta", "1.0.0-beta", -1},  // discriminating §11 case (alphanumeric, fewer-id-first)
-		// arbitrary-precision numeric identifiers (would overflow int64) — #2
+		// arbitrary-precision numeric identifiers (would overflow int64) – #2
 		{"99999999999999999999999.0.0", "100000000000000000000000.0.0", -1},
 		{"1.0.0-99999999999999999999999", "1.0.0-100000000000000000000000", -1},
 	}
@@ -154,7 +154,7 @@ func TestAffectedEntryPointORs(t *testing.T) {
 }
 
 func TestAffectedSemverSkipsNonSemver(t *testing.T) {
-	// a non-SEMVER range (ECOSYSTEM/GIT) is not matched by this matcher (handled elsewhere) — so a
+	// a non-SEMVER range (ECOSYSTEM/GIT) is not matched by this matcher (handled elsewhere) – so a
 	// version is NOT reported affected via it here.
 	ranges := []Range{{Type: "ECOSYSTEM", Events: []Event{{Introduced: "0"}, {Fixed: "1.2.0"}}}}
 	if AffectedSemver("1.1.0", ranges) {

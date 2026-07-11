@@ -72,7 +72,7 @@ func TestScanSkipsUnmappedEcosystemAndUnresolvedVersion(t *testing.T) {
 
 func TestScanMatchesDebianOSPackage(t *testing.T) {
 	// Epic B: an owned Debian advisory matches a deb component via the distro-qualifier → "Debian:9"
-	// bridge + the dpkg range comparator — no grype involved (detection independence).
+	// bridge + the dpkg range comparator – no grype involved (detection independence).
 	adv := advisory.Advisory{
 		ID: "CVE-2024-OS", Summary: "openssl", CVSSScore: 7.5,
 		Affected: []advisory.AffectedPackage{{
@@ -168,7 +168,7 @@ func TestScanMavenKeyContract(t *testing.T) {
 }
 
 // TestScanSeverityFromVector (MED-2): when the advisory has a CVSS vector but no precomputed score, the
-// severity is derived from the vector (not left Unknown) — parity with the OSV adapter.
+// severity is derived from the vector (not left Unknown) – parity with the OSV adapter.
 func TestScanSeverityFromVector(t *testing.T) {
 	store := memStore{byKey: map[string][]advisory.Advisory{
 		"Go|github.com/foo/bar": {{
@@ -193,7 +193,7 @@ func TestScanSeverityFromVector(t *testing.T) {
 }
 
 // TestScanNpmScopedKeyContract (#2): a scoped npm package (@scope/name) keeps its name verbatim on both
-// sides — the store key and the SBOM component Name agree, so it matches.
+// sides – the store key and the SBOM component Name agree, so it matches.
 func TestScanNpmScopedKeyContract(t *testing.T) {
 	const pkg = "@vue/cli"
 	store := memStore{byKey: map[string][]advisory.Advisory{

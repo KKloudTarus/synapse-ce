@@ -59,14 +59,14 @@ func TestPyPIParse(t *testing.T) {
 		}
 	}
 	if _, ok := got["urllib3"]; ok {
-		t.Error("an unpinned range (urllib3) must be skipped — no resolved version")
+		t.Error("an unpinned range (urllib3) must be skipped – no resolved version")
 	}
 	if got["flask"].Scope != sbom.ScopeProduction || got["flask"].Location != "requirements.txt" {
 		t.Errorf("flask scope/location = %q/%q, want production/requirements.txt", got["flask"].Scope, got["flask"].Location)
 	}
 }
 
-// TestPyPIDevScopeFromPath: the file PATH drives scope — requirements-dev.txt deps are development
+// TestPyPIDevScopeFromPath: the file PATH drives scope – requirements-dev.txt deps are development
 // (the contract-widening payoff: a parser derives scope from ParseInput.Path).
 func TestPyPIDevScopeFromPath(t *testing.T) {
 	comps, _, err := PyPI{}.Parse(context.Background(), ParseInput{Path: "requirements-dev.txt", Content: []byte("pytest==8.0.0\n")})

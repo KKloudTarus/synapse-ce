@@ -1,7 +1,7 @@
 -- +goose Up
 -- Phase 4 (E18.3): durable agent sessions + transcripts so an AI orchestration run is
 -- resumable across a HITL pause/restart and replayable for audit. The (session_id, seq)
--- primary key is the transcript fork-guard — a redelivery cannot fork a session's history
+-- primary key is the transcript fork-guard – a redelivery cannot fork a session's history
 -- (mirrors the evidence chain's one-child-per-parent rule).
 CREATE TABLE agent_sessions (
     id               TEXT PRIMARY KEY,

@@ -3,7 +3,7 @@ package postgres
 import "testing"
 
 // TestSingletonLockKeyDistinctPerRole covers that the API and the worker get DIFFERENT
-// advisory-lock keys, so they coexist (each a singleton in its own role) — while the same
+// advisory-lock keys, so they coexist (each a singleton in its own role) – while the same
 // role yields the same key (a second same-role instance is refused).
 func TestSingletonLockKeyDistinctPerRole(t *testing.T) {
 	api, worker := singletonLockKey("api"), singletonLockKey("worker")

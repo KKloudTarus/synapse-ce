@@ -12,19 +12,19 @@ import (
 
 // ReproDigest is a stable content fingerprint of a scan's REPRODUCIBLE output (the
 // swappability invariant as a verifiable feature): the SBOM component SET + the promoted findings (with each
-// vuln finding's advisory content — fix version + CVSS vector — folded in), hashed over a canonical (sorted,
-// order-independent) form. It makes reproducibility CHECKABLE — the SAME inputs (same target, pinned SBOM
+// vuln finding's advisory content – fix version + CVSS vector – folded in), hashed over a canonical (sorted,
+// order-independent) form. It makes reproducibility CHECKABLE – the SAME inputs (same target, pinned SBOM
 // producer, pinned advisory/vuln-DB snapshot) yield the SAME digest; two scans match ⟺ their digests match,
 // and a DIFFERENT advisory DB (new fix version, changed CVSS, new/dropped vuln) changes the digest.
 //
-// Scope (deliberate): it fingerprints the component SET + finding identity/severity/fix/CVSS — NOT the SBOM
+// Scope (deliberate): it fingerprints the component SET + finding identity/severity/fix/CVSS – NOT the SBOM
 // dependency-graph EDGES and NOT raw component license strings (denied-license *outcomes* re-enter as their
 // own license findings, so policy results are captured). It EXCLUDES per-run/timestamped data so the digest
 // reflects only what is reproducible: no ToolVersions / VulnDBSnapshot (both embed the scan time / feed-sync
 // date), no finding id (engagement-derived), no Audit timestamps. Field separator is NUL (\x00), which the
 // inputs (PURLs, "vuln:id:component:version" dedup keys, enum kinds/severities) never contain.
 //
-// It is a provenance/regression fingerprint, NOT a security hash — it carries no secret and proves nothing on
+// It is a provenance/regression fingerprint, NOT a security hash – it carries no secret and proves nothing on
 // its own; a human/CI compares two digests to assert a scan reproduced.
 func ReproDigest(res *ScanResult) string {
 	if res == nil {
@@ -42,7 +42,7 @@ func ReproDigest(res *ScanResult) string {
 	}
 	for _, f := range res.Findings {
 		// CONTENT only: kind + dedup key + severity, plus the correlated advisory's fix version + CVSS vector
-		// (so a remediation/score change in a new DB snapshot is reflected) — never the id or any timestamp.
+		// (so a remediation/score change in a new DB snapshot is reflected) – never the id or any timestamp.
 		line := "find\x00" + string(f.Kind) + "\x00" + f.DedupKey + "\x00" + string(f.Severity)
 		if v, ok := byVuln[f.DedupKey]; ok {
 			line += "\x00" + v.FixedVersion + "\x00" + v.CVSSVector

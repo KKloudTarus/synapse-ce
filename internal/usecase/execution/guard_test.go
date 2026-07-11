@@ -87,7 +87,7 @@ func TestAuthorizeAllows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	at, err := g.Authorize(context.Background(), newReq("api.acme.io")) // wildcard-free exact host in scope? no — exact "app.acme.io" only
+	at, err := g.Authorize(context.Background(), newReq("api.acme.io")) // wildcard-free exact host in scope? no – exact "app.acme.io" only
 	if !errors.Is(err, shared.ErrForbidden) {
 		// "api.acme.io" is NOT in scope (only app.acme.io is), so it must be denied.
 		t.Fatalf("expected out-of-scope denial for api.acme.io, got at=%v err=%v", at, err)
@@ -165,7 +165,7 @@ func TestAuthorizeDeniesTerminalEngagement(t *testing.T) {
 
 func TestAuthorizeRoEDenies(t *testing.T) {
 	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
-	// In-window, in-scope, active — but RoE blocks the recon tool class.
+	// In-window, in-scope, active – but RoE blocks the recon tool class.
 	t.Run("tool class not allowed", func(t *testing.T) {
 		audit := &fakeAudit{}
 		eng := engAt(now, false)

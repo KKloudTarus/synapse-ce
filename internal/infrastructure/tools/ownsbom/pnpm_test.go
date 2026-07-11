@@ -49,7 +49,7 @@ func TestPnpmParseV9(t *testing.T) {
 	if c := byName["@babel/core"]; c.Version != "7.23.0" || c.PURL != "pkg:npm/%40babel/core@7.23.0" {
 		t.Errorf("scoped @babel/core = %+v, want 7.23.0 / pkg:npm/%%40babel/core@7.23.0", c)
 	}
-	// importers: deps (lodash under importers) + snapshots: keys must NOT be double-counted as components —
+	// importers: deps (lodash under importers) + snapshots: keys must NOT be double-counted as components –
 	// only the packages: block is the source. lodash appears once.
 	if len(comps) != 2 {
 		t.Fatalf("want 2 components from packages: (lodash, @babel/core), got %d: %+v", len(comps), comps)

@@ -1,8 +1,8 @@
 // Package distro captures the operating-system distribution of a scanned target (from its OS
-// packages) and flags releases that are past End-of-Life — i.e. no longer receiving security
+// packages) and flags releases that are past End-of-Life – i.e. no longer receiving security
 // updates, a first-class posture finding for a container/host scan. It is LLM-free and
 // deterministic: the EOL dates are a curated, source-cited snapshot (endoflife.date), and a release
-// the table does not know is reported as "unknown" — never guessed EOL (fail-open on
+// the table does not know is reported as "unknown" – never guessed EOL (fail-open on
 // the negative claim: we never assert "supported" or "EOL" without data).
 package distro
 
@@ -34,25 +34,25 @@ type Status struct {
 const eolSource = "endoflife.date (curated snapshot 2026-06)"
 
 // eolDates is the curated End-of-Life table, keyed "id:version". Dates are the end of FREE security
-// support (Debian/Ubuntu LTS end; Alpine 2-year window) — deliberately conservative so a release is
+// support (Debian/Ubuntu LTS end; Alpine 2-year window) – deliberately conservative so a release is
 // only flagged EOL once even paid/extended support has lapsed for the common case. Source:
 // endoflife.date. A release absent here is reported Known=false (no EOL claim).
 var eolDates = map[string]string{
-	// Debian — LTS end-of-life (https://endoflife.date/debian)
+	// Debian – LTS end-of-life (https://endoflife.date/debian)
 	"debian:7":  "2018-05-31",
 	"debian:8":  "2020-06-30",
 	"debian:9":  "2022-06-30",
 	"debian:10": "2024-06-30",
 	"debian:11": "2026-08-31",
 	"debian:12": "2028-06-30",
-	// Ubuntu — end of standard support, excluding paid ESM (https://endoflife.date/ubuntu)
+	// Ubuntu – end of standard support, excluding paid ESM (https://endoflife.date/ubuntu)
 	"ubuntu:14.04": "2019-04-30",
 	"ubuntu:16.04": "2021-04-30",
 	"ubuntu:18.04": "2023-05-31",
 	"ubuntu:20.04": "2025-05-31",
 	"ubuntu:22.04": "2027-06-01",
 	"ubuntu:24.04": "2029-05-31",
-	// Alpine — 2-year support window (https://endoflife.date/alpine)
+	// Alpine – 2-year support window (https://endoflife.date/alpine)
 	"alpine:3.14": "2023-05-01",
 	"alpine:3.15": "2023-11-01",
 	"alpine:3.16": "2024-05-23",
@@ -62,7 +62,7 @@ var eolDates = map[string]string{
 	"alpine:3.20": "2026-04-01",
 	"alpine:3.21": "2026-11-01",
 	"alpine:3.22": "2027-05-01",
-	// CentOS — note the early CentOS 8 EOL (https://endoflife.date/centos)
+	// CentOS – note the early CentOS 8 EOL (https://endoflife.date/centos)
 	"centos:7": "2024-06-30",
 	"centos:8": "2021-12-31",
 }

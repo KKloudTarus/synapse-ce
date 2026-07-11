@@ -1,4 +1,4 @@
-# setup-windows.ps1 — Windows-native one-shot bootstrap for Synapse SCA.
+# setup-windows.ps1 – Windows-native one-shot bootstrap for Synapse SCA.
 #
 # Verifies the Go/Node/pnpm/JDK/Maven/Gradle toolchain (user-installed, see REQUIREMENTS.md),
 # calls scripts/install-tools.ps1 to install syft + grype (pinned, sha256-verified) into .\bin,
@@ -16,7 +16,7 @@
 #   pwsh scripts/setup-windows.ps1 -ApiToken <hex>     # non-interactive token
 #   pwsh scripts/setup-windows.ps1 -NonInteractive     # auto-generate token, no prompts
 #
-# Does NOT require admin elevation. Does NOT install Go/Node/JDK/Maven/Gradle — those are
+# Does NOT require admin elevation. Does NOT install Go/Node/JDK/Maven/Gradle – those are
 # user-installed per REQUIREMENTS.md §2.
 $ErrorActionPreference = 'Stop'
 
@@ -84,7 +84,7 @@ Write-Host "Bin dir:   $BinDir"
 Write-Host ""
 
 # ===========================================================================
-# Section A — Verify prerequisites
+# Section A – Verify prerequisites
 # ===========================================================================
 Write-Step "A. Verifying toolchain"
 
@@ -113,13 +113,13 @@ foreach ($t in $tools) {
         Write-Ok ("{0,-10} {1}" -f $t.Label, $info.Version)
     } else {
         $need = "$($t.MinMajor).$($t.MinMinor)+"
-        $line = "$($t.Label) $($info.Version) — need $need"
+        $line = "$($t.Label) $($info.Version) – need $need"
         if ($t.Hard) { Write-Err  $line; $hardMissing += $t.Label }
         else         { Write-Warn2 $line }
     }
 }
 
-# Section A — external scan binaries (syft + grype) — soft; section B installs them
+# Section A – external scan binaries (syft + grype) – soft; section B installs them
 $syftExe  = Join-Path $BinDir 'syft.exe'
 $grypeExe = Join-Path $BinDir 'grype.exe'
 $syftInfo  = if (Test-Path $syftExe)  { Get-CommandVersion -Cmd $syftExe  -VersionArgs @('version') } else { $null }
@@ -138,7 +138,7 @@ if ($hardMissing.Count -gt 0) {
 Write-Host ""
 
 # ===========================================================================
-# Section B — Install external scan binaries (delegate to install-tools.ps1)
+# Section B – Install external scan binaries (delegate to install-tools.ps1)
 # ===========================================================================
 Write-Step "B. Installing external scan binaries (syft + grype)"
 $needInstall = $false
@@ -146,11 +146,11 @@ if (-not (Test-Path $syftExe))  { $needInstall = $true }
 if (-not (Test-Path $grypeExe)) { $needInstall = $true }
 
 if (-not $needInstall) {
-    Write-Ok "syft + grype already present in $BinDir — skipping (delete them to force reinstall)"
+    Write-Ok "syft + grype already present in $BinDir – skipping (delete them to force reinstall)"
 } else {
     $childScript = Join-Path $RepoRoot 'scripts\install-tools.ps1'
     if (-not (Test-Path $childScript)) {
-        throw "Cannot find $childScript — clone the repo again, or run scripts/install-tools.ps1 manually."
+        throw "Cannot find $childScript – clone the repo again, or run scripts/install-tools.ps1 manually."
     }
     Write-Host "  Delegating to scripts/install-tools.ps1 ..."
     & pwsh -NoProfile -File $childScript -BINDIR $BinDir
@@ -160,15 +160,15 @@ if (-not $needInstall) {
 Write-Host ""
 
 # ===========================================================================
-# Section C — Generate .env
+# Section C – Generate .env
 # ===========================================================================
 Write-Step "C. Configuring .env"
 $envPath  = Join-Path $RepoRoot '.env'
 $tmplPath = Join-Path $RepoRoot '.env.example'
-if (-not (Test-Path $tmplPath)) { throw ".env.example not found at $tmplPath — repo corrupt?" }
+if (-not (Test-Path $tmplPath)) { throw ".env.example not found at $tmplPath – repo corrupt?" }
 
 if ((Test-Path $envPath) -and -not $ForceEnv) {
-    Write-Warn2 ".env already exists at $envPath — leaving it alone (use -ForceEnv to overwrite)"
+    Write-Warn2 ".env already exists at $envPath – leaving it alone (use -ForceEnv to overwrite)"
 } else {
     if ((Test-Path $envPath) -and $ForceEnv) {
         Write-Warn2 "Overwriting existing .env (per -ForceEnv)"
@@ -195,14 +195,14 @@ if ((Test-Path $envPath) -and -not $ForceEnv) {
         }
     }
 
-    # Inject token — replace the first empty SYNAPSE_API_TOKEN= line.
+    # Inject token – replace the first empty SYNAPSE_API_TOKEN= line.
     $content = Get-Content $envPath
     $idx = -1
     for ($i = 0; $i -lt $content.Count; $i++) {
         if ($content[$i] -match '^SYNAPSE_API_TOKEN=\s*$') { $idx = $i; break }
     }
     if ($idx -lt 0) {
-        # Not found empty — append.
+        # Not found empty – append.
         Add-Content $envPath "SYNAPSE_API_TOKEN=$ApiToken"
     } else {
         $content[$idx] = "SYNAPSE_API_TOKEN=$ApiToken"
@@ -224,15 +224,15 @@ if ((Test-Path $envPath) -and -not $ForceEnv) {
     Write-Ok ".env written (token prefix: $($ApiToken.Substring(0, [Math]::Min(8, $ApiToken.Length)))...)"
 }
 
-# Fail-closed verify — server refuses to start with empty token.
+# Fail-closed verify – server refuses to start with empty token.
 $verify = Select-String -Path $envPath -Pattern '^SYNAPSE_API_TOKEN=(.+)$' | Select-Object -First 1
 if (-not $verify -or [string]::IsNullOrWhiteSpace($verify.Matches.Groups[1].Value)) {
-    throw "SYNAPSE_API_TOKEN is empty in .env — refusing to continue (server would fail-closed at startup)."
+    throw "SYNAPSE_API_TOKEN is empty in .env – refusing to continue (server would fail-closed at startup)."
 }
 Write-Host ""
 
 # ===========================================================================
-# Section D — Build
+# Section D – Build
 # ===========================================================================
 if (-not $SkipBuild) {
     Write-Step "D1. Building Go binaries (go build -o bin\ .\cmd\...)"
@@ -246,7 +246,7 @@ if (-not $SkipBuild) {
     if ($bins) {
         Write-Ok "Built: $($bins -join ', ')"
     } else {
-        Write-Warn2 "No synapse-*.exe found in $BinDir after build — check Go output above"
+        Write-Warn2 "No synapse-*.exe found in $BinDir after build – check Go output above"
     }
 } else {
     Write-Warn2 "D1. Skipped Go build (-SkipBuild)"
@@ -269,7 +269,7 @@ if (-not $SkipWebBuild) {
 Write-Host ""
 
 # ===========================================================================
-# Section E — Final report
+# Section E – Final report
 # ===========================================================================
 Write-Host "=== Synapse is ready ===" -ForegroundColor Green
 Write-Host ""
@@ -280,12 +280,12 @@ Write-Host "  Config:     $envPath"
 Write-Host ""
 Write-Host "Next steps (pick one):" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  1. SCA CLI only — fastest, no Postgres, no server" -ForegroundColor Cyan
+Write-Host "  1. SCA CLI only – fastest, no Postgres, no server" -ForegroundColor Cyan
 Write-Host "       cd $RepoRoot"
 Write-Host "       `$env:PATH = `"$BinDir;`$env:PATH`""
 Write-Host "       .\bin\synapse-cli.exe scan C:\path\to\project --mode licenses"
 Write-Host ""
-Write-Host "  2. Full stack — API (:8080) + Web (:5173) + Postgres/MinIO via Docker" -ForegroundColor Cyan
+Write-Host "  2. Full stack – API (:8080) + Web (:5173) + Postgres/MinIO via Docker" -ForegroundColor Cyan
 Write-Host "       Terminal 1:" -ForegroundColor Cyan
 Write-Host "           cd $RepoRoot"
 Write-Host "           Get-Content .env | ForEach-Object { if (`$_ -match '^\s*([^#][^=]*)=(.*)$') { [System.Environment]::SetEnvironmentVariable(`$matches[1].Trim(), `$matches[2].Trim(), 'Process') } }"

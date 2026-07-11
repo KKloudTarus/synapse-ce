@@ -2,7 +2,7 @@
 // as the taintcallgraph wire JSON on stdout. It isolates the heavy go/ssa analysis (golang.org/x/tools) into
 // a standalone, sandboxable binary so the api server never imports x/tools and the UNTRUSTED
 // target is compiled ONLY inside the sandbox the taintcallgraph adapter runs this binary under. Composition
-// root only — the analysis lives in internal/infrastructure/tools/ssacallgraph.
+// root only – the analysis lives in internal/infrastructure/tools/ssacallgraph.
 package main
 
 import (

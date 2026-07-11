@@ -14,7 +14,7 @@ import (
 
 // This file parses a Canonical Ubuntu OVAL feed (com.ubuntu.<codename>.cve.oval.xml[.bz2]) into the owned
 // normalized advisory shape. Ubuntu (and Debian) publish per-release OVAL that carries the distro's OWN
-// fixed package version — the backport-accurate value a generic NVD range cannot express — so ingesting it
+// fixed package version – the backport-accurate value a generic NVD range cannot express – so ingesting it
 // natively gives Synapse offline, vendor-authoritative OS-package detection independent of any scanner DB.
 //
 // It handles only the dpkginfo (deb-family) OVAL: a definition's criteria reference dpkginfo_tests, each
@@ -266,7 +266,7 @@ func ubuntuCodename(id string) string {
 }
 
 // ubuntuRelease maps a codename to its VERSION_ID ("22.04"), which is what Syft emits in the deb PURL's
-// distro qualifier (distro=ubuntu-22.04) — so the feed and the matcher agree on "Ubuntu:22.04". Unknown
+// distro qualifier (distro=ubuntu-22.04) – so the feed and the matcher agree on "Ubuntu:22.04". Unknown
 // codename → "" (skip the file, honestly counted, rather than key it wrong).
 func ubuntuRelease(codename string) string {
 	switch strings.ToLower(codename) {

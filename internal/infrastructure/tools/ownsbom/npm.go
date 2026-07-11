@@ -13,20 +13,20 @@ import (
 
 // maxNPMNestDepth bounds the lockfileVersion-1 nested-dependencies recursion. Go's encoding/json already
 // rejects JSON nested past ~10000 before Parse runs, but this makes the parser self-defending rather than
-// leaning on that stdlib internal — a transitive tree deeper than this is malicious, so it fails loud.
+// leaning on that stdlib internal – a transitive tree deeper than this is malicious, so it fails loud.
 const maxNPMNestDepth = 1000
 
-// NPM is the owned npm-ecosystem parser (components + edges): it reads package-lock.json — the
-// RESOLVED dependency tree — into npm components and, for lockfileVersion 2/3, the dependency edges between
+// NPM is the owned npm-ecosystem parser (components + edges): it reads package-lock.json – the
+// RESOLVED dependency tree – into npm components and, for lockfileVersion 2/3, the dependency edges between
 // them. The modern lockfileVersion 2/3 `packages` map (flat, keyed by install path, carrying a `dev` flag
 // + the dependency ranges) is the primary source; lockfileVersion 1's nested `dependencies` map is recursed
-// as a fallback (COMPONENTS ONLY — v1 edge resolution over the nested tree is a legacy-format follow-up;
+// as a fallback (COMPONENTS ONLY – v1 edge resolution over the nested tree is a legacy-format follow-up;
 // v1 is npm <7, pre-2020). Resolved versions AND the dev/prod scope come straight from the lock, so no
 // companion package.json read is needed. Pure JSON parsing, no third-party library, vendor-neutral.
 //
 // Limitation (honest deferral): a LOCAL workspace/`link` package in a monorepo (a bare non-node_modules
 // path like "packages/lib", plus its versionless "link": true symlink entry under node_modules) is not
-// emitted as a component — so its outgoing edges are omitted too. This matches the workspace-blind
+// emitted as a component – so its outgoing edges are omitted too. This matches the workspace-blind
 // convention of the yarn parser + the Syft path; precise monorepo workspace edges are a follow-up.
 type NPM struct{}
 
@@ -46,7 +46,7 @@ type npmV1Dep struct {
 
 // npmV3Pkg is one entry in the lockfileVersion-2/3 flat `packages` map (keyed by install path). The
 // dependency-range maps name this package's direct deps; the RESOLVED version of each is found by walking
-// the install path (npm's hoisting — see resolveNpmDep), not from these ranges.
+// the install path (npm's hoisting – see resolveNpmDep), not from these ranges.
 type npmV3Pkg struct {
 	Version              string            `json:"version"`
 	Dev                  bool              `json:"dev"`
@@ -87,7 +87,7 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 		return purl
 	}
 
-	if len(lock.Packages) > 0 { // lockfileVersion 2/3 — flat + complete
+	if len(lock.Packages) > 0 { // lockfileVersion 2/3 – flat + complete
 		// Pass 1: emit components + index install-path -> PURL (the root project, path "", is not a dep).
 		pathPURL := make(map[string]string, len(lock.Packages))
 		for path, p := range lock.Packages {
@@ -96,7 +96,7 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 			}
 		}
 		// Pass 2: resolve each package's direct deps to PURLs via npm's nearest-wins hoisting. Deterministic:
-		// iterate paths + dep names sorted. Resolution-as-filter — a dep not present in the tree yields no edge.
+		// iterate paths + dep names sorted. Resolution-as-filter – a dep not present in the tree yields no edge.
 		paths := make([]string, 0, len(lock.Packages))
 		for path := range lock.Packages {
 			paths = append(paths, path)
@@ -106,7 +106,7 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 		for _, path := range paths {
 			ref, ok := pathPURL[path]
 			if !ok {
-				continue // root project / unnamed — not a component, so no edges from it
+				continue // root project / unnamed – not a component, so no edges from it
 			}
 			seen := map[string]bool{ref: true} // drop self-edges + duplicate targets
 			var on []string
@@ -127,7 +127,7 @@ func (NPM) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dep
 		return set.components(), edges, nil
 	}
 
-	// lockfileVersion 1 — recurse the nested dependencies map (components only; v1 edges are a legacy follow-up).
+	// lockfileVersion 1 – recurse the nested dependencies map (components only; v1 edges are a legacy follow-up).
 	var walk func(deps map[string]npmV1Dep, depth int) error
 	walk = func(deps map[string]npmV1Dep, depth int) error {
 		if depth > maxNPMNestDepth {
@@ -165,7 +165,7 @@ func parseSubresourceIntegrity(s string) []sbom.Checksum {
 
 // npmDepNames returns the sorted, unique direct-dependency names of a v2/v3 package: its dependencies +
 // devDependencies (chiefly on the root, but npm may write them on nested entries too) + optionalDependencies
-// — i.e. everything npm installs into the tree for it. peerDependencies are excluded (a "the host must
+// – i.e. everything npm installs into the tree for it. peerDependencies are excluded (a "the host must
 // provide" expectation, not a "this depends on").
 func npmDepNames(p npmV3Pkg) []string {
 	set := map[string]bool{}
@@ -183,7 +183,7 @@ func npmDepNames(p npmV3Pkg) []string {
 }
 
 // resolveNpmDep resolves dependency depName, as required by the package installed at fromPath, to the
-// install path of the package that satisfies it — npm's hoisting rule: search fromPath's own
+// install path of the package that satisfies it – npm's hoisting rule: search fromPath's own
 // node_modules first, then each ancestor install context outward, ending at the root node_modules; the
 // nearest match wins. Returns "" when no installed package satisfies it (resolution-as-filter → no edge).
 func resolveNpmDep(fromPath, depName string, packages map[string]npmV3Pkg) string {
@@ -197,7 +197,7 @@ func resolveNpmDep(fromPath, depName string, packages map[string]npmV3Pkg) strin
 			return cand
 		}
 		if cur == "" {
-			return "" // already tried the root node_modules — unresolvable
+			return "" // already tried the root node_modules – unresolvable
 		}
 		if idx := strings.LastIndex(cur, "/node_modules/"); idx >= 0 {
 			cur = cur[:idx] // step out to the parent install context
@@ -209,7 +209,7 @@ func resolveNpmDep(fromPath, depName string, packages map[string]npmV3Pkg) strin
 
 // npmNameFromPath turns a lockfileVersion-2/3 `packages` key into a package name: "node_modules/foo" ->
 // "foo", "node_modules/@scope/bar" -> "@scope/bar", a nested ".../node_modules/b" -> "b" (the last
-// segment). The root-project key "" yields "" (skipped — the project itself is not a dependency).
+// segment). The root-project key "" yields "" (skipped – the project itself is not a dependency).
 func npmNameFromPath(p string) string {
 	const nm = "node_modules/"
 	i := strings.LastIndex(p, nm)

@@ -1,7 +1,7 @@
 // Package transfer implements engagement export/import: a portable bundle
 // of an engagement's scope/findings/comments and its tamper-evident evidence chain.
 // On import the chain is RE-VERIFIED and the bundle structurally validated BEFORE
-// anything is written — a bundle whose hash chain does not verify (or whose internal
+// anything is written – a bundle whose hash chain does not verify (or whose internal
 // references are inconsistent) is rejected, so chain-of-custody survives moving an
 // engagement between Synapse instances.
 package transfer
@@ -76,7 +76,7 @@ func (s *Service) Export(ctx context.Context, actor string, tenantID, engagement
 		return Bundle{}, fmt.Errorf("load engagement: %w", err)
 	}
 	// Publishability gate: a bundle is a customer-facing artifact that
-	// leaves the instance, so it carries only promotable findings — an unproven
+	// leaves the instance, so it carries only promotable findings – an unproven
 	// exploitation finding (EvidenceScore < bar) must not travel in it.
 	findings, err := s.findings.ListPublishableByEngagement(ctx, engagementID)
 	if err != nil {
@@ -91,7 +91,7 @@ func (s *Service) Export(ctx context.Context, actor string, tenantID, engagement
 		comments = append(comments, cs...)
 	}
 	// Verify-on-export (not just List): a bundle leaves with its whole custody chain,
-	// so we re-verify it here — this also alerts on tamper and yields the chain-head
+	// so we re-verify it here – this also alerts on tamper and yields the chain-head
 	// attestation (origin proof) to travel with the bundle.
 	rep, err := s.evidence.Verify(ctx, engagementID)
 	if err != nil {
@@ -133,7 +133,7 @@ func (s *Service) Import(ctx context.Context, actor string, tenantID shared.ID, 
 		return nil, fmt.Errorf("%w: evidence chain failed verification, import rejected: %v", shared.ErrValidation, err)
 	}
 	// If the bundle carries an origin attestation, it must be a valid signature
-	// over THIS chain's head — a bundle claiming an attestation that does not verify
+	// over THIS chain's head – a bundle claiming an attestation that does not verify
 	// (or signs a different head) is forged/tampered and is rejected. We do not require
 	// the key to be pre-trusted here (cross-org transfer); the operator pins keys.
 	if b.Attestation != nil {
@@ -161,7 +161,7 @@ func (s *Service) Import(ctx context.Context, actor string, tenantID shared.ID, 
 	now := s.clock.Now()
 	newEngID := s.ids.NewID()
 	// Tenant is set server-side from the importing principal, NEVER trusted from the
-	// bundle — an imported engagement belongs to the tenant that imported it ('' = default tenant).
+	// bundle – an imported engagement belongs to the tenant that imported it ('' = default tenant).
 	eng, err := engagement.New(newEngID, tenantID, b.Engagement.Name+" (imported)", b.Engagement.Client, now)
 	if err != nil {
 		return nil, err

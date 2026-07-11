@@ -47,7 +47,7 @@ func TestNaabuSandboxedEgressContainment(t *testing.T) {
 	}
 	sb.SetEgress(app)
 
-	const scanme = "45.33.32.156" // scanme.nmap.org — Nmap's authorized scan target (22/80 open)
+	const scanme = "45.33.32.156" // scanme.nmap.org – Nmap's authorized scan target (22/80 open)
 
 	// Build the naabu spec exactly as the recon adapter does (incl. CapAdd=CAP_NET_RAW),
 	// then attach a scope-derived egress policy that allows allowIP only.
@@ -83,13 +83,13 @@ func TestNaabuSandboxedEgressContainment(t *testing.T) {
 	// In scope: scanme is allowed → the sandboxed CAP_NET_RAW connect scan finds open ports.
 	inScope := scan(scanme)
 	if !hasPort(inScope) {
-		t.Fatalf("in-scope scan found no open ports — sandboxed naabu/CAP_NET_RAW/egress broken:\n%s", inScope)
+		t.Fatalf("in-scope scan found no open ports – sandboxed naabu/CAP_NET_RAW/egress broken:\n%s", inScope)
 	}
 	// Out of scope: egress allows only 192.0.2.1 (TEST-NET-1), so scanme's SYNs are
 	// default-DENIED by the kernel → no ports. This is the #387 kernel-drop.
 	outScope := scan("192.0.2.1")
 	if hasPort(outScope) {
-		t.Fatalf("out-of-scope scan still reached scanme — egress did NOT kernel-drop it:\n%s", outScope)
+		t.Fatalf("out-of-scope scan still reached scanme – egress did NOT kernel-drop it:\n%s", outScope)
 	}
 	t.Logf("#387 OK: in-scope connect scan found open ports; out-of-scope connect scan was kernel-dropped (no ports)")
 }

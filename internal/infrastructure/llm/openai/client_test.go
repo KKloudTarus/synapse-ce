@@ -130,15 +130,15 @@ func TestLiveAgainstGateway(t *testing.T) {
 		if err == nil {
 			break
 		}
-		t.Logf("attempt %d: provider not ready (%v) — waiting out the cooldown", attempt, err)
+		t.Logf("attempt %d: provider not ready (%v) – waiting out the cooldown", attempt, err)
 		time.Sleep(20 * time.Second)
 	}
 	if err != nil {
-		t.Skipf("gateway upstream stayed unhealthy across retries — skipping: %v", err)
+		t.Skipf("gateway upstream stayed unhealthy across retries – skipping: %v", err)
 	}
 	t.Logf("live: finish=%s tool_calls=%d usage=%+v content=%q", resp.FinishReason, len(resp.ToolCalls), resp.Usage, strings.TrimSpace(resp.Content))
 	if len(resp.ToolCalls) == 0 {
-		t.Logf("NOTE: model returned prose, not a tool_call — prompt/model may need tuning for tool-use")
+		t.Logf("NOTE: model returned prose, not a tool_call – prompt/model may need tuning for tool-use")
 	} else if resp.ToolCalls[0].Name != "get_scope" {
 		t.Errorf("unexpected tool call: %s", resp.ToolCalls[0].Name)
 	}

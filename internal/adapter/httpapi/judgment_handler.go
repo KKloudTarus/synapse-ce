@@ -9,7 +9,7 @@ import (
 )
 
 // listJudgments returns the engagement's AI judgments (read; PermView + tenant-gated via
-// withEngTenant). The typed Claim renders as fields — no LLM prose.
+// withEngTenant). The typed Claim renders as fields – no LLM prose.
 func (rt *Router) listJudgments(w http.ResponseWriter, r *http.Request) {
 	js, err := rt.judgments.List(r.Context(), shared.ID(r.PathValue("id")))
 	if err != nil {
@@ -47,7 +47,7 @@ func (rt *Router) verifyJudgment(w http.ResponseWriter, r *http.Request) {
 }
 
 // acceptJudgment confirms an UNGATED judgment by human acceptance (PermReview; the acceptor must be
-// a non-proposer — enforced in the domain). Optimistic concurrency via the client-supplied version.
+// a non-proposer – enforced in the domain). Optimistic concurrency via the client-supplied version.
 func (rt *Router) acceptJudgment(w http.ResponseWriter, r *http.Request) {
 	engID, jid := r.PathValue("id"), r.PathValue("jid")
 	if engID == "" || jid == "" {

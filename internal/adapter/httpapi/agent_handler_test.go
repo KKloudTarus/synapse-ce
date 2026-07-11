@@ -165,7 +165,7 @@ func TestReserveAgentSlot_Backpressure(t *testing.T) {
 }
 
 // TestReserveAgentSlot_DurableUnbounded: the durable path (non-nil queue) never blocks on the
-// inline semaphore — the queue is the buffer.
+// inline semaphore – the queue is the buffer.
 func TestReserveAgentSlot_DurableAlwaysReserves(t *testing.T) {
 	rt := &Router{log: logging.New("error")}
 	rt.EnableAgent(nil, nil, nil, nil, memory.NewJobQueue(idgen.RandomID{}, func() time.Time { return time.Unix(1, 0) }), 1, 8)

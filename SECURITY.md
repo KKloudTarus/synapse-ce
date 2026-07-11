@@ -40,7 +40,7 @@ Out of scope:
 
 Synapse is a security-testing tool. It must only be used against systems you are explicitly
 authorized to test. It enforces an engagement **scope** and a **legal authorization window**
-server-side before any tool runs, but it cannot verify your legal authorization — the
+server-side before any tool runs, but it cannot verify your legal authorization – the
 operator is responsible for holding written permission.
 
 Hardening highlights operators should preserve:

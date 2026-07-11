@@ -86,7 +86,7 @@ func TestPoetryParse(t *testing.T) {
 	}
 }
 
-// An unterminated v2 files array (missing `]`) must not swallow the packages that follow it — the next
+// An unterminated v2 files array (missing `]`) must not swallow the packages that follow it – the next
 // [[package]] boundary ends the array, so no component is silently dropped.
 func TestPoetryParseUnterminatedFilesArray(t *testing.T) {
 	lock := `[[package]]
@@ -177,7 +177,7 @@ category = "main"
 }
 
 // A (crafted) lock whose two [[package]] blocks normalize to the SAME name makes that name ambiguous, so an
-// edge to it is DROPPED (never guess which version) — mirroring the Cargo resolver.
+// edge to it is DROPPED (never guess which version) – mirroring the Cargo resolver.
 func TestPoetryParseAmbiguousDepNoEdge(t *testing.T) {
 	lock := `[[package]]
 name = "app"

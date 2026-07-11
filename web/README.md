@@ -18,13 +18,13 @@ make run
 
 ## Scripts
 
-- `pnpm dev` — dev server with API proxy
-- `pnpm build` — production build to `dist/`
-- `pnpm preview` — preview the build
-- `pnpm run typecheck` — `tsc --noEmit`
+- `pnpm dev` – dev server with API proxy
+- `pnpm build` – production build to `dist/`
+- `pnpm preview` – preview the build
+- `pnpm run typecheck` – `tsc --noEmit`
 
 ## Design system
 
 Dark-mode-first, developer/terminal palette. Tokens live in `src/index.css`
-(`@theme`) — Tailwind v4 turns `--color-card` into `bg-card`, etc. Fonts: Inter
+(`@theme`) – Tailwind v4 turns `--color-card` into `bg-card`, etc. Fonts: Inter
 (UI) + JetBrains Mono (data). Icons: lucide-react.

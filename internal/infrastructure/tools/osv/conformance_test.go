@@ -8,7 +8,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// canonicalOSV is a representative OSV-schema record — the open standard osv.dev serves:
+// canonicalOSV is a representative OSV-schema record – the open standard osv.dev serves:
 // id + CVE alias, a CVSS_V3 severity vector, an affected[] block with a range (introduced/fixed events)
 // and the Go-ecosystem affected symbols, plus a database_specific severity label. Mirrors a real
 // vulns/{id} payload so the fields Synapse keys on are exercised end-to-end from JSON.
@@ -26,7 +26,7 @@ const canonicalOSV = `{
 
 // TestOSVSchemaConformance locks parsing of the OSV open standard end-to-end: a
 // canonical vulns/{id} record decodes and maps to the normalized RawFinding with the fields Synapse
-// keys on — the CVE alias preferred as the advisory id, the CVSS_V3 vector + computed base score, the
+// keys on – the CVE alias preferred as the advisory id, the CVSS_V3 vector + computed base score, the
 // fixed version from the range events, the curated severity label, and the path-qualified affected
 // symbols. Symmetric with TestCycloneDX17Conformance (CDX) + TestPURLSpecConformance (PURL).
 func TestOSVSchemaConformance(t *testing.T) {

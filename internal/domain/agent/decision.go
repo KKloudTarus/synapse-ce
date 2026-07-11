@@ -8,9 +8,9 @@ import (
 )
 
 // AgentDecision is the STRUCTURED, queryable record of one orchestrator decision (for
-// explainability). It makes a run answerable from stored data —
+// explainability). It makes a run answerable from stored data –
 // why a tool was chosen (Reason.WhyTool), why a target (Reason.WhyTarget), and why the run
-// stopped (StopReason) — WITHOUT parsing prose or the (untrusted) LLM transcript. It is a
+// stopped (StopReason) – WITHOUT parsing prose or the (untrusted) LLM transcript. It is a
 // projection ALONGSIDE the authoritative evidence chain, not a replacement: Refs link each
 // decision to the chain by hash only (no content, no secrets), so a decision can always be
 // tied back to the sealed `agent_step`/`agent_admission` it describes.
@@ -46,7 +46,7 @@ func (o StepOutcome) valid() bool {
 }
 
 // StopReason is the CLOSED set of run-termination reasons (so "why did it stop?" is always a
-// known, queryable value — never free prose).
+// known, queryable value – never free prose).
 type StopReason string
 
 const (

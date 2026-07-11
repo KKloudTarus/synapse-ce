@@ -16,11 +16,11 @@ const (
 	maxRenderedBytes  = 16 << 20         // cap the rendered manifest stream fed to the K8s rules
 )
 
-// scanHelmChart renders a Helm chart and runs the Kubernetes rules over the output — the raw templates
+// scanHelmChart renders a Helm chart and runs the Kubernetes rules over the output – the raw templates
 // carry Go-template directives and are not valid YAML, so rendering is how comprehensive scanners
 // evaluate Helm. `helm template` on an UNTRUSTED chart must not run unprotected on the host: Helm's
 // Sprig engine exposes getHostByName (live DNS), an SSRF / blind-exfil vector. So this mirrors the
-// maven/gradle resolvers exactly — a caller-supplied ToolRunner confines the exec (the API path, with
+// maven/gradle resolvers exactly – a caller-supplied ToolRunner confines the exec (the API path, with
 // egress denied), or an explicit trusted-local direct exec is used (the CLI). With NEITHER set, Helm
 // rendering is skipped. Always argv (never a shell), fixed release name, no chart hooks; best-effort.
 func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, helmBin, chartDir, relDir string) []ports.MisconfigRawFinding {
@@ -40,7 +40,7 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 			Timeout:        helmRenderTimeout,
 			MaxOutputBytes: maxRenderedBytes,
 			// No EgressPolicy: `helm template` needs no network, so leave it nil for full network isolation
-			// (--unshare-all, no interface at all) rather than a filtered veth — stronger, and it does not
+			// (--unshare-all, no interface at all) rather than a filtered veth – stronger, and it does not
 			// depend on the egress applier being present. This neutralizes Helm's Sprig getHostByName.
 		})
 		if err != nil || res.ExitCode != 0 {
