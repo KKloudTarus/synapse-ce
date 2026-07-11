@@ -20,6 +20,11 @@ resource "aws_security_group" "sg" {
     to_port     = 22
     cidr_blocks = ["0.0.0.0/0"]
   }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }
 
 resource "aws_db_instance" "db" {
@@ -54,7 +59,7 @@ resource "aws_s3_bucket_versioning" "v" {
 		"terraform-encryption-disabled", "terraform-plaintext-secret",
 		"terraform-ecr-mutable-tags", "terraform-ecr-no-cmk",
 		"terraform-dynamodb-unencrypted", "terraform-dynamodb-no-pitr",
-		"terraform-ebs-unencrypted", "terraform-s3-no-versioning",
+		"terraform-ebs-unencrypted", "terraform-s3-no-versioning", "terraform-open-egress",
 	} {
 		if _, ok := got[want]; !ok {
 			t.Errorf("expected Terraform rule %q, got %v", want, keys(got))
@@ -84,6 +89,9 @@ resource "aws_ebs_volume" "v" {
 
 resource "aws_security_group" "sg" {
   ingress {
+    cidr_blocks = ["10.0.0.0/8"]
+  }
+  egress {
     cidr_blocks = ["10.0.0.0/8"]
   }
 }

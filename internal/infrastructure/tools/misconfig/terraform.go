@@ -20,6 +20,7 @@ var (
 	tfPublicRDS    = regexp.MustCompile(`(?i)\bpublicly_accessible\s*=\s*true\b`)
 	tfPabDisabled  = regexp.MustCompile(`(?i)\b(block_public_acls|block_public_policy|ignore_public_acls|restrict_public_buckets)\s*=\s*false\b`)
 	tfOpenCIDR     = regexp.MustCompile(`"0\.0\.0\.0/0"|"::/0"`)
+	tfSubBlockOpen = regexp.MustCompile(`^(ingress|egress)\b`)
 	tfIAMWildcard  = regexp.MustCompile(`(?i)("Action"\s*:\s*"\*"|actions\s*=\s*\[\s*"\*"\s*\])`)
 	tfSecretAttr   = regexp.MustCompile(`(?i)\b(password|secret|secret_key|access_key|private_key|api_key|token)\s*=\s*"([^"]+)"`)
 )
@@ -38,6 +39,10 @@ func scanTerraform(rel string, data []byte) []ports.MisconfigRawFinding {
 	var stack []*frame
 	depth := 0
 	sawEnabledVersioning := false
+	// subBlock tracks the innermost ingress/egress sub-block so an open CIDR can be attributed to the
+	// right direction; subOpenDepth is the brace depth at which it opened, used to clear it on close.
+	subBlock := ""
+	subOpenDepth := 0
 
 	for i, raw := range lines {
 		line := stripHCLComment(raw)
@@ -45,17 +50,25 @@ func scanTerraform(rel string, data []byte) []ports.MisconfigRawFinding {
 		if m := tfResourceOpen.FindStringSubmatch(trimmed); m != nil {
 			stack = append(stack, &frame{typ: m[1], name: m[2], depth: depth, start: i + 1})
 		}
+		// The brace is expected on the same line as ingress/egress (the near-universal HCL style); a
+		// brace on the following line would miss attribution, acceptable for this depth heuristic.
+		if m := tfSubBlockOpen.FindStringSubmatch(trimmed); m != nil && strings.Contains(trimmed, "{") {
+			subBlock, subOpenDepth = m[1], depth
+		}
 		curType := ""
 		if len(stack) > 0 {
 			curType = stack[len(stack)-1].typ
 			stack[len(stack)-1].body.WriteString(trimmed)
 			stack[len(stack)-1].body.WriteByte('\n')
 		}
-		out = append(out, tfLineRules(rel, i+1, trimmed, curType)...)
+		out = append(out, tfLineRules(rel, i+1, trimmed, curType, subBlock)...)
 
 		depth += strings.Count(line, "{") - strings.Count(line, "}")
 		if depth < 0 {
 			depth = 0
+		}
+		if subBlock != "" && depth <= subOpenDepth {
+			subBlock = "" // the ingress/egress sub-block closed
 		}
 		for len(stack) > 0 && depth <= stack[len(stack)-1].depth {
 			f := stack[len(stack)-1]
@@ -161,8 +174,9 @@ func tfBlockRules(rel, resType string, line int, body string) []ports.MisconfigR
 	return out
 }
 
-// tfLineRules applies the per-line attribute checks, scoping by the enclosing resource type where it matters.
-func tfLineRules(rel string, line int, text, resType string) []ports.MisconfigRawFinding {
+// tfLineRules applies the per-line attribute checks, scoping by the enclosing resource type (and, for an
+// open CIDR, the ingress/egress sub-block) where it matters.
+func tfLineRules(rel string, line int, text, resType, subBlock string) []ports.MisconfigRawFinding {
 	var out []ports.MisconfigRawFinding
 	add := func(rule, title string, sev shared.Severity, desc string) {
 		res := "Terraform"
@@ -192,8 +206,13 @@ func tfLineRules(rel string, line int, text, resType string) []ports.MisconfigRa
 			"An S3 public-access-block guard is set to false, weakening the account/bucket protection against accidental public exposure. Keep all four block settings true.")
 	}
 	if tfOpenCIDR.MatchString(text) && (strings.Contains(lower, "security_group") || strings.Contains(lower, "firewall") || strings.Contains(lower, "ingress") || resType == "") {
-		add("terraform-open-cidr", "Network rule open to the whole internet", shared.SeverityHigh,
-			"A security-group / firewall rule allows 0.0.0.0/0 (or ::/0), exposing the port to the entire internet. Restrict the CIDR to the specific ranges that need access.")
+		if subBlock == "egress" {
+			add("terraform-open-egress", "Security group egress open to the whole internet", shared.SeverityMedium,
+				"An egress rule allows 0.0.0.0/0 (or ::/0), letting the workload reach any host on the internet and easing data exfiltration if it is compromised. Restrict egress to the destinations it actually needs.")
+		} else {
+			add("terraform-open-cidr", "Network rule open to the whole internet", shared.SeverityHigh,
+				"A security-group / firewall rule allows 0.0.0.0/0 (or ::/0), exposing the port to the entire internet. Restrict the CIDR to the specific ranges that need access.")
+		}
 	}
 	if tfIAMWildcard.MatchString(text) {
 		add("terraform-iam-wildcard", "IAM policy grants a wildcard action", shared.SeverityMedium,
