@@ -59,6 +59,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavencoord"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavenresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/misconfig"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/npmresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/nvd"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ospkg"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/osv"
@@ -545,6 +546,18 @@ func main() {
 			scaService.SetGradleResolver(gradleresolve.New(cfg.GradleBin).WithRunner(scaSandbox).
 				WithRepoHosts(cfg.MavenRepoHosts).WithGradleHome(cfg.GradleHome))
 			log.Info("Gradle transitive-tree resolution ENABLED (gradle dependencies, sandbox-confined; best-effort)", "extra_repo_hosts", len(cfg.MavenRepoHosts), "persistent_cache", cfg.GradleHome != "")
+		}
+	}
+	// npm resolution for a lockfile-less package.json (`npm install --package-lock-only --ignore-scripts`):
+	// reaches the registry over an untrusted manifest, so the SERVER enables it ONLY with the SCA sandbox
+	// and FAILS CLOSED otherwise (never host-execs npm over an untrusted target). --ignore-scripts + a
+	// throwaway copy mean no project code runs and the source is never mutated. Opt-in.
+	if cfg.NPMResolveEnabled {
+		if scaSandbox == nil {
+			log.Warn("SYNAPSE_NPM_RESOLVE_ENABLED ignored: it requires the SCA sandbox (npm would otherwise reach the network over an untrusted manifest on the host). Enable the sandbox to use it.")
+		} else {
+			scaService.SetNPMResolver(npmresolve.New(cfg.NpmBin).WithRunner(scaSandbox).WithRegistryHosts(cfg.NpmRegistryHosts))
+			log.Info("npm resolution ENABLED (npm install --package-lock-only, sandbox-confined; best-effort)", "extra_registry_hosts", len(cfg.NpmRegistryHosts))
 		}
 	}
 	if cfg.JVMReachabilityEnabled {

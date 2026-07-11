@@ -79,6 +79,7 @@ type Service struct {
 	graphResolver     ports.DependencyGraphResolver   // optional transitive-edge resolver (Go via `go mod graph`)
 	mavenResolver     ports.MavenResolver             // optional Maven transitive-tree resolver (`mvn dependency:list`)
 	gradleResolver    ports.GradleResolver            // optional Gradle transitive-tree resolver (`gradle dependencies`)
+	npmResolver       ports.NPMResolver               // optional npm resolver (`npm install --package-lock-only`) for a lockfile-less package.json
 	jvmReach          ports.JVMReachabilityAnalyzer   // optional coarse JVM class-reachability tagger
 	sevEnricher       ports.SeverityEnricher          // optional NVD CVSS backfill for unknown-severity vulns
 	ignoreUnfixed     bool                            // when set, don't promote no-fix vulns to findings (Trivy --ignore-unfixed)
@@ -250,6 +251,10 @@ func (s *Service) SetMavenResolver(r ports.MavenResolver) { s.mavenResolver = r 
 // resolution error leaves the SBOM unchanged and never fails the scan.
 func (s *Service) SetGradleResolver(r ports.GradleResolver) { s.gradleResolver = r }
 
+// SetNPMResolver configures the optional npm resolver (`npm install --package-lock-only`), which resolves
+// a package.json that has no committed lockfile into a pinned pkg:npm tree. nil ⇒ disabled.
+func (s *Service) SetNPMResolver(r ports.NPMResolver) { s.npmResolver = r }
+
 // mergeResolvedJVM folds a resolver's transitive pkg:maven tree into doc and dedups by identity. Shared by
 // the Maven + Gradle resolvers (both emit Maven coordinates). No-op on an empty resolved set – with nothing
 // authoritative to substitute, syft's view (including any target/ jars, then the only version source) is
@@ -277,6 +282,24 @@ func mergeResolvedJVM(doc *sbom.SBOM, resolved []sbom.Component, completeScopes 
 	for _, c := range doc.Components {
 		if strings.HasPrefix(c.PURL, "pkg:maven/") && (completeScopes || !sbom.IsResolvedVersion(c.Version)) {
 			continue // resolver owns (this slice of) the JVM tree; drop the redundant syft entries
+		}
+		kept = append(kept, c)
+	}
+	doc.Components = sbom.DedupeComponents(append(kept, resolved...))
+}
+
+// mergeResolvedNPM folds an npm resolver's pinned pkg:npm tree into doc. Like the Gradle path it drops
+// only the generator's UNVERSIONED npm placeholders (a lockfile-less package.json yields range-declared,
+// version-less entries) and keeps any concretely-versioned npm components, then adds the resolved tree and
+// dedups by identity. No-op on an empty resolved set.
+func mergeResolvedNPM(doc *sbom.SBOM, resolved []sbom.Component) {
+	if len(resolved) == 0 {
+		return
+	}
+	kept := make([]sbom.Component, 0, len(doc.Components))
+	for _, c := range doc.Components {
+		if strings.HasPrefix(c.PURL, "pkg:npm/") && !sbom.IsResolvedVersion(c.Version) {
+			continue // resolver owns the versioned npm tree; drop the redundant unversioned placeholders
 		}
 		kept = append(kept, c)
 	}
@@ -1541,7 +1564,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// unversioned pom-derived Maven placeholders with the resolved tree (direct + transitive, versioned) so
 	// detection + licensing run over the real artifacts. A non-Maven target / missing mvn / error is a no-op.
 	mavenResolved := false
-	var mavenResolveErr, gradleResolveErr error // surfaced as a SourceWarning so a failed resolve is diagnosable
+	var mavenResolveErr, gradleResolveErr, npmResolveErr error // surfaced as a SourceWarning so a failed resolve is diagnosable
 	if s.mavenResolver != nil {
 		step = trace.start(stageSBOM, "maven-resolve", "maven-resolver", "Resolve Maven dependency tree", map[string]int{"components": countComponents(doc)})
 		resolvedComps, mrr := s.mavenResolver.Resolve(ctx, ws.Dir)
@@ -1582,6 +1605,29 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			trace.succeed(step, "Gradle dependency tree resolved", map[string]int{"components_before": before, "components": countComponents(doc), "resolved": len(resolvedComps)})
 		default:
 			trace.succeed(step, "Gradle resolution skipped (not a Gradle project)", map[string]int{"components": countComponents(doc)})
+		}
+	}
+	// Resolve a lockfile-less npm package.json to a pinned tree via `npm install --package-lock-only`
+	// (best-effort + opt-in). Zero-setup: package.json alone declares only semver ranges, so without this
+	// (and without a committed lockfile) there is no version to advisory-match. npm components merge like
+	// the JVM ones: drop the generator's unversioned placeholders, keep resolved versions.
+	npmResolved := false
+	if s.npmResolver != nil {
+		step = trace.start(stageSBOM, "npm-resolve", "npm-resolver", "Resolve npm dependency tree", map[string]int{"components": countComponents(doc)})
+		resolvedComps, nrr := s.npmResolver.Resolve(ctx, ws.Dir)
+		before := countComponents(doc)
+		if len(resolvedComps) > 0 {
+			mergeResolvedNPM(doc, resolvedComps)
+			npmResolved = true
+		}
+		switch {
+		case nrr != nil:
+			npmResolveErr = nrr
+			trace.fail(step, nrr)
+		case npmResolved:
+			trace.succeed(step, "npm dependency tree resolved", map[string]int{"components_before": before, "components": countComponents(doc), "resolved": len(resolvedComps)})
+		default:
+			trace.succeed(step, "npm resolution skipped (no lockless package.json)", map[string]int{"components": countComponents(doc)})
 		}
 	}
 	// Coarse JVM class-reachability, best-effort + opt-in: tag each JVM component with whether the
@@ -1762,6 +1808,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			sourceWarnings = append(sourceWarnings, fmt.Sprintf(
 				"Gradle dependency resolution failed – transitive tree NOT captured (result INCOMPLETE): %v", gradleResolveErr))
 		}
+	}
+	if npmResolveErr != nil {
+		sourceWarnings = append(sourceWarnings, fmt.Sprintf(
+			"npm dependency resolution failed – package.json tree NOT captured (result INCOMPLETE): %v", npmResolveErr))
 	}
 	// An image target whose rootfs could not be assembled means OS packages were NOT owned-cataloged; surface
 	// it (never silent) so an absent OS-package set reads as "not analyzed", not "no OS packages".

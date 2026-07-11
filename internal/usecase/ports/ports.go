@@ -713,6 +713,20 @@ type GradleResolver interface {
 	Resolve(ctx context.Context, dir string) ([]sbom.Component, error)
 }
 
+// NPMResolver resolves an npm project's FULL dependency tree (direct + transitive, with pinned versions)
+// from a package.json that has NO committed lockfile — the common raw-source state where the manifest
+// declares only semver RANGES and the SBOM otherwise sees no resolvable version to advisory-match. It
+// returns versioned pkg:npm components for the SCA pipeline to fold in.
+//
+// SAFETY: package.json can declare lifecycle scripts (preinstall/install/postinstall) that run arbitrary
+// code. A production implementation MUST run sandbox-confined with egress restricted to the registry and
+// MUST resolve the lockfile only (--ignore-scripts, no node_modules, no build) so no project code executes.
+// Best-effort + OPT-IN: a non-npm target, a committed lockfile, a missing npm binary, or any resolution
+// error returns no components and never fails the scan.
+type NPMResolver interface {
+	Resolve(ctx context.Context, dir string) ([]sbom.Component, error)
+}
+
 // SBOMEnrichment is what an SBOMEnricher contributed, for honest provenance.
 type SBOMEnrichment struct {
 	ComponentsAdded   int      // components the generator missed (Maven/Gradle direct deps)

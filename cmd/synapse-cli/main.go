@@ -51,6 +51,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavencoord"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavenresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/misconfig"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/npmresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/nvd"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ospkg"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/osv"
@@ -1017,6 +1018,16 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		sca.SetGradleResolver(gradleresolve.New(cfg.GradleBin).WithRepoHosts(cfg.MavenRepoHosts).WithGradleHome(cfg.GradleHome))
 		// Gradle evaluates build.gradle (arbitrary Groovy/Kotlin) – even higher-risk than mvn; surface it.
 		fmt.Fprintln(os.Stderr, "synapse-cli: Gradle resolver ON – runs `gradle` UNSANDBOXED over the project if it has a build.gradle, which executes the build script (trusted-local assumption; set SYNAPSE_GRADLE_RESOLVE_ENABLED=false to disable)")
+	}
+	// npm resolution for a lockfile-less package.json – same default-on-for-CLI model (trusted local).
+	// Opt out with SYNAPSE_NPM_RESOLVE_ENABLED=false. Best-effort; --ignore-scripts so no project code runs.
+	npmOn := cfg.NPMResolveEnabled
+	if _, set := os.LookupEnv("SYNAPSE_NPM_RESOLVE_ENABLED"); !set {
+		npmOn = true
+	}
+	if npmOn {
+		sca.SetNPMResolver(npmresolve.New(cfg.NpmBin).WithRegistryHosts(cfg.NpmRegistryHosts))
+		fmt.Fprintln(os.Stderr, "synapse-cli: npm resolver ON – runs `npm install --package-lock-only --ignore-scripts` over a COPY of a lockfile-less package.json to pin versions (no project scripts run; set SYNAPSE_NPM_RESOLVE_ENABLED=false to disable)")
 	}
 	// Coarse JVM class-reachability – default-on for the CLI (read-only bytecode parsing, no exec);
 	// tags each JVM component reachable/unreferenced from the app's compiled closure. Opt out with
