@@ -51,6 +51,27 @@ jobs:
       - name: Build (CGO disabled — distroless parity)
         run: CGO_ENABLED=0 go build ./cmd/...
 
+  backend-windows:
+    name: Backend (Go, Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
   frontend:
     name: Frontend (web)
     runs-on: ubuntu-latest
