@@ -313,6 +313,7 @@ func runQuality(args []string) error {
 	}
 	failOn := ""
 	sarifOut := false
+	includeTestSmells := false
 	complexityMin := codequality.DefaultComplexityThreshold
 	for i := 1; i < len(args); i++ {
 		switch {
@@ -328,6 +329,8 @@ func runQuality(args []string) error {
 			i++
 		case args[i] == "--sarif":
 			sarifOut = true
+		case args[i] == "--include-test-smells":
+			includeTestSmells = true
 		default:
 			return fmt.Errorf("unknown or incomplete option %q", args[i])
 		}
@@ -345,6 +348,7 @@ func runQuality(args []string) error {
 		codequality.WithDuplication(duplication.New(0)),
 		codequality.WithComplexity(ast.New(os.Getenv("SYNAPSE_AST_BIN")), complexityMin),
 		codequality.WithBugs(ast.New(os.Getenv("SYNAPSE_AST_BIN"))),
+		codequality.WithTestScopedSmells(includeTestSmells),
 	)
 	findings, err := svc.Analyze(context.Background(), dir)
 	if err != nil {
@@ -776,7 +780,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  synapse-cli inventory <path>             # per-language code-size inventory (files, code/comment/blank lines, functions) – no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli metrics <path> [--fail-on-complexity N] [--top N]  # per-function cyclomatic+cognitive complexity (needs the synapse-ast sidecar)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli duplication <path> [--min-tokens N] [--fail-on-duplication PCT] [--top N]  # copy-paste detection (blocks, lines, density) – no DB")
-	fmt.Fprintln(os.Stderr, "  synapse-cli quality <path> [--fail-on SEV] [--min-complexity N] [--sarif]  # maintainability + reliability findings (+ duplication, + complexity via synapse-ast) – no DB")
+	fmt.Fprintln(os.Stderr, "  synapse-cli quality <path> [--fail-on SEV] [--min-complexity N] [--include-test-smells] [--sarif]  # maintainability + reliability findings (+ duplication, + complexity via synapse-ast) – no DB")
+	fmt.Fprintln(os.Stderr, "      --include-test-smells  also report info-severity smells in test code (suppressed by default)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli rating <path> [--json] [--fail-below GRADE]  # A-E health grades (security/reliability/maintainability) + technical debt – no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli gate <path> [--new-code-only] [--base REF] [--gate FILE] [--rules FILE] [--coverage FILE] [--format text|markdown]  # Clean-as-You-Code quality gate")
 	fmt.Fprintln(os.Stderr, "  synapse-cli coverage <lcov|cobertura|jacoco file> [--fail-below PCT] [--top N]  # parse a coverage report (auto-detected)")

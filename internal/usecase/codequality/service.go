@@ -10,8 +10,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
@@ -27,12 +29,13 @@ const DefaultComplexityThreshold = 15
 // Service produces code-quality findings. analyzer is required; dup, metrics and inventory are optional
 // enrichers.
 type Service struct {
-	analyzer      ports.CodeAnalyzer
-	dup           ports.DuplicationScanner
-	metrics       ports.CodeMetricsProvider
-	inventory     ports.CodeInventoryScanner
-	bugs          ports.BugDetector
-	complexityMin int
+	analyzer          ports.CodeAnalyzer
+	dup               ports.DuplicationScanner
+	metrics           ports.CodeMetricsProvider
+	inventory         ports.CodeInventoryScanner
+	bugs              ports.BugDetector
+	complexityMin     int
+	includeTestSmells bool
 }
 
 // Option configures a Service.
@@ -54,6 +57,15 @@ func WithBugs(b ports.BugDetector) Option { return func(s *Service) { s.bugs = b
 var bugCWE = map[string]string{
 	"reliability-unreachable-code":   "CWE-561", // dead code
 	"reliability-constant-condition": "CWE-570", // expression is always false/true
+}
+
+// WithTestScopedSmells controls whether info-severity code smells located in test code (src/test,
+// *_test.*, *.spec.*, __tests__, testdata, ...) are emitted. They are SUPPRESSED by default: a rule like
+// commented-out-code fires heavily in tests and otherwise drowns the higher-value findings (complexity,
+// duplication, reliability). Pass true to restore full verbosity. Only Info-severity smells are affected;
+// medium/high findings (and every non-test finding) are always kept.
+func WithTestScopedSmells(include bool) Option {
+	return func(s *Service) { s.includeTestSmells = include }
 }
 
 // WithComplexity adds high-complexity maintainability findings (functions over threshold), using the AST
@@ -94,6 +106,9 @@ func (s *Service) analyze(ctx context.Context, root string) ([]finding.Finding, 
 		return nil, measure.DuplicationReport{}, fmt.Errorf("code analysis: %w", err)
 	}
 	for _, r := range raws {
+		if !s.includeTestSmells && r.Severity == shared.SeverityInfo && isTestPath(r.File) {
+			continue // low-value info smell in test code – suppressed by default (see WithTestScopedSmells)
+		}
 		out = append(out, newFinding(r.Kind, r.RuleID, r.CWE, r.Severity, r.Title, r.Description, r.File, r.Line))
 	}
 
@@ -172,6 +187,36 @@ func newFinding(kind, ruleID, cwe string, sev shared.Severity, title, desc, file
 func deterministicID(dedupKey string) shared.ID {
 	sum := sha256.Sum256([]byte("codequality|" + dedupKey))
 	return shared.ID(hex.EncodeToString(sum[:16]))
+}
+
+// isTestPath reports whether a source path is test/spec/fixture code, where info-severity smells
+// (commented-out code, TODOs) are low-value noise. Matches common directory and filename conventions
+// across ecosystems (Go _test.go, JS/TS .test./.spec., Python test_*, Java src/test + *Test.java, ...).
+func isTestPath(p string) bool {
+	q := strings.ToLower(filepath.ToSlash(p))
+	for _, seg := range []string{
+		"/test/", "/tests/", "/testing/", "/__tests__/", "/__mocks__/", "/testdata/", "/spec/", "/specs/", "/fixtures/",
+	} {
+		if strings.Contains(q, seg) {
+			return true
+		}
+	}
+	if strings.HasPrefix(q, "test/") || strings.HasPrefix(q, "tests/") || strings.HasPrefix(q, "spec/") || strings.HasPrefix(q, "testdata/") {
+		return true
+	}
+	base := q
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	if strings.HasPrefix(base, "test_") { // python test_foo.py
+		return true
+	}
+	for _, m := range []string{"_test.", ".test.", "_spec.", ".spec.", "test.java", "tests.java"} {
+		if strings.Contains(base, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // Report is the full code-quality dashboard payload for a source tree: the per-language inventory, the

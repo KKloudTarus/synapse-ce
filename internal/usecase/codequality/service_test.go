@@ -153,3 +153,45 @@ func TestAnalyzerOnly(t *testing.T) {
 		t.Fatalf("want 1 finding, got %d err=%v", len(fs), err)
 	}
 }
+
+func TestTestScopedInfoSmellsSuppressed(t *testing.T) {
+	raws := []ports.CodeAnalysisRawFinding{
+		{Kind: "quality", RuleID: "quality-commented-out-code", Severity: shared.SeverityInfo, Title: "commented", File: "src/test/java/FooTest.java", Line: 3},
+		{Kind: "quality", RuleID: "quality-commented-out-code", Severity: shared.SeverityInfo, Title: "commented", File: "src/main/java/Foo.java", Line: 9},
+		{Kind: "reliability", RuleID: "reliability-empty-catch", Severity: shared.SeverityMedium, Title: "empty catch", File: "src/test/java/FooTest.java", Line: 5},
+	}
+	// Default: info smell in test code is dropped; the prod info smell and the test-scoped MEDIUM stay.
+	fs, err := New(fakeAnalyzer{raws: raws}).Analyze(context.Background(), "root")
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	m := byRule(fs)
+	if len(fs) != 2 {
+		t.Fatalf("default should drop the test-scoped info smell, want 2, got %d: %+v", len(fs), fs)
+	}
+	if _, ok := m["reliability-empty-catch"]; !ok {
+		t.Errorf("a medium finding in test code must be kept")
+	}
+	// The prod commented-out-code must survive; the test one must not.
+	var prod, test int
+	for _, f := range fs {
+		if strings.Contains(f.DedupKey, "src/main/") {
+			prod++
+		}
+		if strings.Contains(f.DedupKey, "FooTest.java") && f.Kind == finding.KindQuality {
+			test++
+		}
+	}
+	if prod != 1 || test != 0 {
+		t.Errorf("want prod-info kept (1) and test-info dropped (0); got prod=%d test=%d", prod, test)
+	}
+
+	// Opt-in restores full verbosity.
+	all, err := New(fakeAnalyzer{raws: raws}, WithTestScopedSmells(true)).Analyze(context.Background(), "root")
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("WithTestScopedSmells(true) should keep all 3, got %d", len(all))
+	}
+}
