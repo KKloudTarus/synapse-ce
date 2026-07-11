@@ -12,6 +12,7 @@ require (
 	github.com/minio/minio-go/v7 v7.2.1
 	github.com/phpdave11/gofpdf v1.4.3
 	github.com/pressly/goose/v3 v3.27.2
+	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
 	golang.org/x/sys v0.47.0
 	golang.org/x/tools v0.47.0
 	gopkg.in/yaml.v3 v3.0.1

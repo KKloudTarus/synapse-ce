@@ -26,6 +26,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
@@ -93,7 +94,11 @@ func main() {
 // runInventory prints a per-language code-size inventory for a local source tree (the Phase-0
 // code-quality surface). Pure-Go, read-only; no engagement/DB needed.
 func runInventory(dir string) error {
-	inv, err := codeinventory.New().Inventory(context.Background(), dir)
+	// Wire the synapse-ast sidecar so non-Go languages get accurate function counts too. If the binary is
+	// absent or built without the tree-sitter backend, the provider reports unavailable and the inventory
+	// falls back to Go-only function counts — no error.
+	astBin := os.Getenv("SYNAPSE_AST_BIN") // else "synapse-ast" in PATH
+	inv, err := codeinventory.New(codeinventory.WithASTProvider(ast.New(astBin))).Inventory(context.Background(), dir)
 	if err != nil {
 		return fmt.Errorf("inventory: %w", err)
 	}

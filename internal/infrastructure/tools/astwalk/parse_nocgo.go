@@ -1,0 +1,12 @@
+//go:build !cgo
+
+package astwalk
+
+import "context"
+
+// FunctionsFor is the CGO-free stub: no tree-sitter grammar is compiled in, so the sidecar reports the
+// backend as unavailable and callers fall back to their own counting. This is the build the distroless-
+// parity CI step (`CGO_ENABLED=0 go build ./cmd/...`) compiles.
+func FunctionsFor(ctx context.Context, root string) (Result, error) {
+	return Result{}, ErrUnavailable
+}

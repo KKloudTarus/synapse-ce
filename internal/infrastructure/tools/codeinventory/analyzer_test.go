@@ -124,6 +124,52 @@ func TestInventoryGoParseFailureDowngrades(t *testing.T) {
 	}
 }
 
+// fakeProvider is an in-memory ports.ASTProvider so the wiring is testable without the sidecar binary.
+type fakeProvider struct {
+	counts    map[string]int
+	available bool
+}
+
+func (f fakeProvider) FunctionCounts(_ context.Context, _ string) (map[string]int, bool, error) {
+	return f.counts, f.available, nil
+}
+
+func TestInventoryASTProviderFillsNonGoFunctions(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "main.go", "package a\nfunc F() {}\n") // Go: counted in-process
+	write(t, root, "app.py", "x = 1\n")                   // Python: not counted in-process
+
+	// Provider reports Python functions + a stale Go count that must be ignored (Go is already accurate).
+	prov := fakeProvider{available: true, counts: map[string]int{"Python": 7, "Go": 999, "Ruby": 3}}
+	inv, err := New(WithASTProvider(prov)).Inventory(context.Background(), root)
+	if err != nil {
+		t.Fatalf("inventory: %v", err)
+	}
+	m := byLang(inv)
+	if py := m["Python"]; !py.FunctionsKnown || py.Functions != 7 {
+		t.Errorf("provider must fill Python functions: got %+v", py)
+	}
+	if g := m["Go"]; g.Functions != 1 {
+		t.Errorf("provider must NOT override the in-process Go count: got %+v", g)
+	}
+	if _, ok := m["Ruby"]; ok {
+		t.Errorf("provider must not invent a language the walk did not see (Ruby)")
+	}
+}
+
+func TestInventoryASTProviderUnavailableIsNoop(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "app.py", "x = 1\n")
+	prov := fakeProvider{available: false, counts: map[string]int{"Python": 7}}
+	inv, err := New(WithASTProvider(prov)).Inventory(context.Background(), root)
+	if err != nil {
+		t.Fatalf("inventory: %v", err)
+	}
+	if py := byLang(inv)["Python"]; py.FunctionsKnown {
+		t.Errorf("unavailable provider must not fill counts: got %+v", py)
+	}
+}
+
 func TestInventoryEmptyRoot(t *testing.T) {
 	inv, err := New().Inventory(context.Background(), t.TempDir())
 	if err != nil {

@@ -9,6 +9,7 @@ package codeinventory
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -36,11 +37,30 @@ var skipDirs = map[string]bool{
 	".vscode": true, ".tox": true, ".hg": true, ".svn": true,
 }
 
-// Analyzer is the pure-Go code-inventory adapter.
-type Analyzer struct{}
+// Analyzer is the pure-Go code-inventory adapter. An optional ASTProvider (the synapse-ast sidecar)
+// supplies accurate function counts for the non-Go languages it supports; without it, only Go function
+// counts are known.
+type Analyzer struct {
+	provider ports.ASTProvider
+}
 
-// New returns a new analyzer.
-func New() *Analyzer { return &Analyzer{} }
+// Option configures an Analyzer.
+type Option func(*Analyzer)
+
+// WithASTProvider wires an ASTProvider so function counts are filled for the languages it parses. A nil
+// provider is ignored (the analyzer stays pure-Go, Go-only function counts).
+func WithASTProvider(p ports.ASTProvider) Option {
+	return func(a *Analyzer) { a.provider = p }
+}
+
+// New returns a new analyzer with the given options.
+func New(opts ...Option) *Analyzer {
+	a := &Analyzer{}
+	for _, o := range opts {
+		o(a)
+	}
+	return a
+}
 
 var _ ports.CodeInventoryScanner = (*Analyzer)(nil)
 
@@ -117,6 +137,26 @@ func (a *Analyzer) Inventory(ctx context.Context, root string) (measure.Inventor
 		li := byLang[lang]
 		li.FunctionsKnown = false
 		byLang[lang] = li
+	}
+	// If an AST provider (the synapse-ast sidecar) is wired and available, fill accurate function counts
+	// for the languages it parses (e.g. Python/JavaScript/Java) — only for languages already present in
+	// the inventory, so it never invents a language the walk did not see. Go stays on the in-process count.
+	if a.provider != nil {
+		counts, available, perr := a.provider.FunctionCounts(ctx, root)
+		if perr != nil {
+			return measure.Inventory{}, fmt.Errorf("ast provider: %w", perr)
+		}
+		if available {
+			for lang, n := range counts {
+				li, ok := byLang[lang]
+				if !ok || li.FunctionsKnown {
+					continue // language not in inventory, or already accurately counted in-process (Go)
+				}
+				li.Functions = n
+				li.FunctionsKnown = true
+				byLang[lang] = li
+			}
+		}
 	}
 	return measure.NewInventory(byLang), nil
 }
