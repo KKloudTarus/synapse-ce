@@ -79,6 +79,15 @@ func safePathAccess(line string) bool {
 
 // builtinRules is the tier-1 (cheap, deterministic) rule set: high-signal weaknesses across common
 // languages. Intentionally precision-biased — taint/dataflow + broader coverage is the AI/E39 tier.
+// redosContextRe marks a line that constructs or uses a regular expression, so the ReDoS rule only fires
+// on actual regex text and never on ordinary parenthesised arithmetic like (a + b) * c.
+var redosContextRe = regexp.MustCompile(`(?i)(regexp\.|RegExp|re\.(compile|match|search|fullmatch)|Pattern\.compile|MustCompile|preg_match|\.match\(|\.test\(|=~)`)
+
+// skipUnlessRegexContext skips a line that is a comment or does not look like regex construction.
+func skipUnlessRegexContext(line string) bool {
+	return commentOnlyLine(line) || !redosContextRe.MatchString(line)
+}
+
 func builtinRules() []rule {
 	return []rule{
 		{
@@ -339,6 +348,24 @@ func builtinRules() []rule {
 			re:     regexp.MustCompile(`(^|[^.\w])(gets|strcpy|strcat|vsprintf)\s*\(`),
 			skipFn: commentOnlyLine,
 			exts:   cSourceExts,
+		},
+		{
+			id: "xpath-injection", cwe: "CWE-643", severity: shared.SeverityHigh, title: "XPath query built from untrusted input",
+			desc:   "An XPath expression is concatenated or interpolated from untrusted input, allowing XPath injection (authentication bypass, data disclosure). Use a precompiled expression with variable bindings and validate any dynamic value.",
+			re:     regexp.MustCompile(`(?i)((evaluate|selectNodes|selectSingleNode|\.xpath)\s*\([^\n]*//[^\n]*(\+|\$\{|%[sv])|(evaluate|selectNodes|\.xpath)\s*\(\s*f["'` + "`" + `][^\n]*//)`),
+			skipFn: commentOnlyLine,
+		},
+		{
+			id: "redos-vulnerable-regex", cwe: "CWE-1333", severity: shared.SeverityMedium, title: "Regular expression vulnerable to catastrophic backtracking (ReDoS)",
+			desc:   "A regex nests a quantifier inside a quantified group (e.g. (a+)+, (.*)*), which backtracks exponentially on crafted input and can hang the process. Rewrite without nested quantifiers, anchor the pattern, or use a linear-time engine.",
+			re:     regexp.MustCompile(`\([^()\n]{0,80}[+*][^()\n]{0,80}\)\s*[+*]`),
+			skipFn: skipUnlessRegexContext,
+		},
+		{
+			id: "insecure-temp-file", cwe: "CWE-377", severity: shared.SeverityMedium, title: "Insecure temporary file",
+			desc:   "A predictable temporary path (a hardcoded /tmp/<name>) or an unsafe API (tmpnam/mktemp) invites a symlink or race attack. Use a library that creates the file atomically with a random name (os.CreateTemp, tempfile.NamedTemporaryFile, mkstemp).",
+			re:     regexp.MustCompile(`(?i)(["'` + "`" + `]/tmp/[\w.$+-]+|\btmpnam\s*\(|\btempnam\s*\(|\bmktemp\s*\()`),
+			skipFn: commentOnlyLine,
 		},
 	}
 }

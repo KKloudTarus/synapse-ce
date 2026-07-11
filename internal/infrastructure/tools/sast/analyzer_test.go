@@ -313,6 +313,45 @@ func TestRuleCorpus(t *testing.T) {
 			file: "case.rb",
 			fp:   []string{`line = gets(chomp: true)`, `out = vsprintf(fmt, args)`},
 		},
+		{
+			rule: "xpath-injection",
+			tp: []string{
+				`nodes := xpath.evaluate("//user[name='" + name + "']")`,
+				`doc.selectNodes("//account[@id=" + id + "]")`,
+				`hits = tree.xpath(f"//user[@name='{name}']")`,
+			},
+			fp: []string{
+				`nodes := xpath.evaluate("//user[name='admin']")`,
+				`expr := xpath.compile(userQueryConst)`,
+				`if doc.selectNodes("//user") { render() }`,
+			},
+		},
+		{
+			rule: "redos-vulnerable-regex",
+			tp: []string{
+				`re := regexp.MustCompile("(a+)+$")`,
+				`pat = re.compile(r"(.*)*")`,
+				`const rx = new RegExp("(\\d+)*")`,
+			},
+			fp: []string{
+				`re := regexp.MustCompile("(abc)+")`,
+				`total := (base + tax) * qty`,
+				`pat = re.compile("^[a-z]+$")`,
+			},
+		},
+		{
+			rule: "insecure-temp-file",
+			tp: []string{
+				`f, _ := os.Create("/tmp/app.log")`,
+				`path := "/tmp/session_" + id`,
+				`char *p = tmpnam(buf);`,
+			},
+			fp: []string{
+				`d, _ := os.MkdirTemp("", "synapse")`,
+				`f, _ := os.CreateTemp(dir, "prefix-")`,
+				`tf = tempfile.NamedTemporaryFile()`,
+			},
+		},
 	}
 
 	for _, c := range corpus {
