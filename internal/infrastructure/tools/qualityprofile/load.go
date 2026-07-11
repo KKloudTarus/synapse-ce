@@ -1,0 +1,62 @@
+// Package qualityprofile loads the .synapse-gate.yaml (quality gate) and .synapse-rules.yaml (rule
+// profile) config files into the pure-domain qualitygate types. Read-only, bounded.
+package qualityprofile
+
+import (
+	"fmt"
+	"os"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
+)
+
+const maxConfigBytes = 1 << 20 // a gate/profile file is small; cap defensively
+
+// LoadGate reads a quality-gate YAML file. found=false when the path is empty or the file does not exist
+// (the caller then uses qualitygate.Default()). A present-but-malformed file is an error.
+func LoadGate(path string) (qualitygate.Gate, bool, error) {
+	data, found, err := readConfig(path)
+	if err != nil || !found {
+		return qualitygate.Gate{}, found, err
+	}
+	var g qualitygate.Gate
+	if err := yaml.Unmarshal(data, &g); err != nil {
+		return qualitygate.Gate{}, true, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return g, true, nil
+}
+
+// LoadProfile reads a rule-profile YAML file. found=false when the path is empty or the file is absent.
+func LoadProfile(path string) (qualitygate.Profile, bool, error) {
+	data, found, err := readConfig(path)
+	if err != nil || !found {
+		return qualitygate.Profile{}, found, err
+	}
+	var p qualitygate.Profile
+	if err := yaml.Unmarshal(data, &p); err != nil {
+		return qualitygate.Profile{}, true, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return p, true, nil
+}
+
+func readConfig(path string) ([]byte, bool, error) {
+	if path == "" {
+		return nil, false, nil
+	}
+	fi, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("stat %s: %w", path, err)
+	}
+	if !fi.Mode().IsRegular() || fi.Size() > maxConfigBytes {
+		return nil, false, fmt.Errorf("%s is not a regular config file within %d bytes", path, maxConfigBytes)
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- operator-provided config path, regular + size-capped above
+	if err != nil {
+		return nil, false, fmt.Errorf("read %s: %w", path, err)
+	}
+	return data, true, nil
+}
