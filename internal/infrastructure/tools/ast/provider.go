@@ -11,7 +11,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"unicode/utf8"
 
@@ -30,12 +33,48 @@ type Provider struct {
 	runner ports.ToolRunner
 }
 
-// New returns a provider using the given synapse-ast binary (defaults to "synapse-ast" in PATH).
+// New returns a provider using the given synapse-ast binary. An empty bin triggers zero-setup discovery
+// (resolveSidecar): the sidecar shipped ALONGSIDE the running executable is used automatically, so a
+// distribution that bundles synapse-cli + synapse-ast "just works" with no SYNAPSE_AST_BIN and no PATH
+// entry; otherwise it falls back to "synapse-ast" resolved on PATH by exec.
 func New(bin string) *Provider {
 	if strings.TrimSpace(bin) == "" {
-		bin = "synapse-ast"
+		bin = resolveSidecar()
 	}
 	return &Provider{bin: bin}
+}
+
+// sidecarName is the sidecar executable's basename for the current OS.
+func sidecarName() string {
+	if runtime.GOOS == "windows" {
+		return "synapse-ast.exe"
+	}
+	return "synapse-ast"
+}
+
+// resolveSidecar finds the synapse-ast sidecar with zero configuration. It prefers a copy sitting next to
+// the running executable (the common "bundled distribution" layout), then the plain name for a PATH
+// lookup at exec time. Returning the bare name (not "") keeps the existing behavior when nothing is
+// bundled: a missing binary later degrades to available=false, never an error.
+func resolveSidecar() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return sidecarName()
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return resolveSidecarIn(filepath.Dir(exe))
+}
+
+// resolveSidecarIn returns the bundled sidecar path if it exists in exeDir, else the bare name (PATH
+// lookup at exec time). Split out from resolveSidecar so the discovery logic is unit-testable.
+func resolveSidecarIn(exeDir string) string {
+	cand := filepath.Join(exeDir, sidecarName())
+	if fi, err := os.Stat(cand); err == nil && fi.Mode().IsRegular() {
+		return cand
+	}
+	return sidecarName()
 }
 
 // WithRunner confines the sidecar via a ToolRunner (the SandboxRunner) – recommended in production, since
