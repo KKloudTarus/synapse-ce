@@ -13,10 +13,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
@@ -25,6 +27,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gomodgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
@@ -74,9 +77,45 @@ func main() {
 			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 			os.Exit(1)
 		}
+	case "inventory":
+		if len(os.Args) < 3 {
+			usage() // missing <dir> exits 2
+		}
+		if err := runInventory(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
+			os.Exit(1)
+		}
 	default:
 		usage()
 	}
+}
+
+// runInventory prints a per-language code-size inventory for a local source tree (the Phase-0
+// code-quality surface). Pure-Go, read-only; no engagement/DB needed.
+func runInventory(dir string) error {
+	inv, err := codeinventory.New().Inventory(context.Background(), dir)
+	if err != nil {
+		return fmt.Errorf("inventory: %w", err)
+	}
+	fmt.Printf("\nSynapse code inventory — %s\n", dir)
+	fmt.Printf("  %-16s %8s %10s %10s %8s %10s\n", "language", "files", "code", "comment", "blank", "functions")
+	printInvRow := func(li measure.LanguageInventory) {
+		fn := "n/a"
+		if li.FunctionsKnown {
+			fn = strconv.Itoa(li.Functions)
+		}
+		fmt.Printf("  %-16s %8d %10d %10d %8d %10s\n", li.Language, li.Files, li.CodeLines, li.CommentLines, li.BlankLines, fn)
+	}
+	for _, li := range inv.Languages {
+		printInvRow(li)
+	}
+	if len(inv.Languages) == 0 {
+		fmt.Println("  (no source files detected)")
+		return nil
+	}
+	printInvRow(inv.Totals())
+	fmt.Println("  functions: accurate for Go; other languages land with the multi-language AST phase")
+	return nil
 }
 
 func usage() {
@@ -85,6 +124,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  skip the live OSV.dev source; detect with Grype's offline DB only (air-gapped / fast)")
+	fmt.Fprintln(os.Stderr, "  synapse-cli inventory <path>             # per-language code-size inventory (files, code/comment/blank lines, functions) — no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories <dir>        # ingest a local OSV dump into the owned advisory store (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote     # fetch + ingest app ecosystems from the OSV bulk bucket (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-distros # fetch + ingest OS-package advisories (Debian/Alpine) from OSV (large; requires SYNAPSE_DB_DSN)")
