@@ -66,6 +66,12 @@ func (Enricher) Enrich(ctx context.Context, dir string, doc *sbom.SBOM) ports.SB
 				// SBOM producer (ownsbom.Gradle) and this Syft-enrichment path; no duplicated catalog parser.
 				gradleComps = append(gradleComps, ownsbom.ParseGradleCatalog(data)...)
 			}
+		case "build.gradle", "build.gradle.kts":
+			if data := read(path); data != nil {
+				// Inline `dependencies { ... }` coordinates with a literal version (shared owned parser),
+				// so a pinned direct dependency is captured when the resolver can't run.
+				gradleComps = append(gradleComps, ownsbom.ParseBuildGradleDeps(data)...)
+			}
 		case "pnpm-lock.yaml":
 			if data := read(path); data != nil {
 				for k, v := range parsePnpmScopes(data) {

@@ -221,7 +221,11 @@ func (r *Resolver) run(ctx context.Context, dir string) ([]byte, error) {
 	// controlled env already).
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, r.bin, args...)
-	cmd.Env = append(scrubSynapseEnv(os.Environ()), env...)
+	// Gradle refuses to run if JAVA_HOME is unset or points at an absent JDK (a common local-dev state).
+	// On the trusted-local direct-exec path, auto-detect a JDK and inject it so resolution succeeds
+	// instead of failing with "JAVA_HOME is set to an invalid directory"; if none is found the env is
+	// left as-is and Gradle's own error is surfaced (via source_warnings).
+	cmd.Env = ensureJavaHome(append(scrubSynapseEnv(os.Environ()), env...), func() string { return detectJDK(ctx) })
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -324,4 +328,87 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// ensureJavaHome returns env with a usable JAVA_HOME. If env's JAVA_HOME is missing or points at a
+// directory that is not a JDK, it calls detect() to find one and sets it; if detect finds nothing the env
+// is returned unchanged (Gradle then surfaces its own JAVA_HOME error). detect is a parameter so tests can
+// inject a deterministic result.
+func ensureJavaHome(env []string, detect func() string) []string {
+	if javaHomeValid(envValue(env, "JAVA_HOME")) {
+		return env
+	}
+	jdk := detect()
+	if jdk == "" {
+		return env
+	}
+	return setEnvVar(env, "JAVA_HOME", jdk)
+}
+
+// javaHomeValid reports whether dir looks like a JDK home. Gradle needs a JDK (not just a JRE), so it
+// requires BOTH bin/java and bin/javac (the compiler is JDK-only).
+func javaHomeValid(dir string) bool {
+	if strings.TrimSpace(dir) == "" {
+		return false
+	}
+	hasExe := func(names ...string) bool {
+		for _, name := range names {
+			if fi, err := os.Stat(filepath.Join(dir, "bin", name)); err == nil && !fi.IsDir() {
+				return true
+			}
+		}
+		return false
+	}
+	return hasExe("java", "java.exe") && hasExe("javac", "javac.exe")
+}
+
+// detectJDK finds a JDK home on the local host (trusted-local path only). It prefers the macOS
+// java_home helper, then well-known install roots on macOS/Linux/Homebrew. Returns "" when none is found.
+func detectJDK(ctx context.Context) string {
+	if out, err := exec.CommandContext(ctx, "/usr/libexec/java_home").Output(); err == nil { // macOS
+		if p := strings.TrimSpace(string(out)); javaHomeValid(p) {
+			return p
+		}
+	}
+	globs := []string{
+		"/usr/lib/jvm/*",
+		"/Library/Java/JavaVirtualMachines/*/Contents/Home",
+		filepath.Join(os.Getenv("HOME"), "Library/Java/JavaVirtualMachines/*/Contents/Home"),
+		"/opt/homebrew/opt/openjdk*/libexec/openjdk.jdk/Contents/Home",
+		"/opt/homebrew/opt/openjdk*",
+		"/usr/local/opt/openjdk*",
+	}
+	for _, g := range globs {
+		matches, _ := filepath.Glob(g)
+		for _, m := range matches {
+			if javaHomeValid(m) {
+				return m
+			}
+		}
+	}
+	return ""
+}
+
+// envValue returns the last value of key in an environment list ("" if absent).
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	val := ""
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			val = kv[len(prefix):]
+		}
+	}
+	return val
+}
+
+// setEnvVar returns env with key set to val, removing any prior entries for key (last-wins on all OSes).
+func setEnvVar(env []string, key, val string) []string {
+	prefix := key + "="
+	out := env[:0:0]
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, prefix) {
+			out = append(out, kv)
+		}
+	}
+	return append(out, prefix+val)
 }
