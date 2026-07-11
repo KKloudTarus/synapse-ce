@@ -33,12 +33,17 @@ func TestRuleCorpus(t *testing.T) {
 		{
 			id: "reliability-self-assignment",
 			tp: []string{"y = y;", "a.b = a.b", "count = count // keep"},
-			fp: []string{"y = y + 1;", "a = b", "x == x", "total = total - 1"},
+			fp: []string{"y = y + 1;", "a = b", "x == x", "total = total - 1", `msg = "y = y"`},
 		},
 		{
 			id: "reliability-self-comparison",
 			tp: []string{"if (x == x) {", "return a.b != a.b;", "while (i == i)"},
-			fp: []string{"if (x == y) {", "if (a != b) {", "z = z"},
+			fp: []string{
+				"if (x == y) {", "if (a != b) {", "z = z",
+				`log.Printf("x == x means equal")`, // operator inside a string, not code
+				`errors.New("id != id not allowed")`,
+				"if strings.Contains(s, `a == a`) {",
+			},
 		},
 	}
 	for _, c := range corpus {

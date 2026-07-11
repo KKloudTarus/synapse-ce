@@ -70,6 +70,38 @@ func commentedOutCode(line string) bool {
 	return codeTail.MatchString(body) && strings.ContainsAny(body, "=(")
 }
 
+// maskStrings replaces the contents of string/char literals ("...", '...', `...`) with spaces, so an
+// operator or identifier INSIDE a string is never matched as code (e.g. log("x == x") is not a
+// self-comparison). Escapes are honored. Length/positions are preserved.
+func maskStrings(l string) string {
+	b := []byte(l)
+	i := 0
+	for i < len(b) {
+		c := b[i]
+		if c == '"' || c == '\'' || c == '`' {
+			b[i] = ' '
+			i++
+			for i < len(b) {
+				if b[i] == '\\' && i+1 < len(b) {
+					b[i], b[i+1] = ' ', ' '
+					i += 2
+					continue
+				}
+				if b[i] == c {
+					b[i] = ' '
+					i++
+					break
+				}
+				b[i] = ' '
+				i++
+			}
+			continue
+		}
+		i++
+	}
+	return string(b)
+}
+
 // stripTrailingComment removes a trailing line comment (// or space-# ) so an assignment with a trailing
 // note still parses. It does not attempt to respect string literals (a rare edge for these checks).
 func stripTrailingComment(l string) string {
@@ -85,7 +117,7 @@ func stripTrailingComment(l string) string {
 // selfAssignment reports whether the whole statement is `<ident> = <ident>` (same identifier), e.g.
 // `y = y;` — a no-op. The right side must be ONLY the identifier, so `total = total + 1` does not match.
 func selfAssignment(line string) bool {
-	l := strings.TrimSpace(stripTrailingComment(line))
+	l := strings.TrimSpace(stripTrailingComment(maskStrings(line)))
 	l = strings.TrimSpace(strings.TrimSuffix(l, ";"))
 	idx := findOperator(l, "=")
 	if idx < 0 {
@@ -100,8 +132,9 @@ func selfAssignment(line string) bool {
 // `a && y.z != y.z`. It inspects the identifier-path operands ADJACENT to each operator, so it works
 // inside a larger expression, not only on a bare statement.
 func selfComparison(line string) bool {
+	masked := maskStrings(line)
 	for _, op := range []string{"==", "!="} {
-		l := line
+		l := masked
 		base := 0
 		for {
 			rel := findOperator(l[base:], op)
