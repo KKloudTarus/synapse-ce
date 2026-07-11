@@ -19,6 +19,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/rating"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
@@ -110,6 +111,14 @@ func main() {
 			usage()
 		}
 		if err := runQuality(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
+			os.Exit(1)
+		}
+	case "rating":
+		if len(os.Args) < 3 {
+			usage()
+		}
+		if err := runRating(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 			os.Exit(1)
 		}
@@ -355,6 +364,89 @@ func runQuality(args []string) error {
 	return nil
 }
 
+// runRating computes the deterministic A-E health grades (security / reliability / maintainability) and
+// the technical-debt estimate for a local source tree, from the code-quality findings + first-party SAST
+// + the code-size inventory. Read-only, no DB.
+func runRating(args []string) error {
+	dir := args[0]
+	if strings.HasPrefix(dir, "-") {
+		return fmt.Errorf("first argument must be a path, got option %q", dir)
+	}
+	jsonOut := false
+	failBelow := ""
+	for i := 1; i < len(args); i++ {
+		switch {
+		case args[i] == "--json":
+			jsonOut = true
+		case args[i] == "--fail-below" && i+1 < len(args):
+			failBelow = strings.ToUpper(args[i+1])
+			i++
+		default:
+			return fmt.Errorf("unknown or incomplete option %q", args[i])
+		}
+	}
+	ctx := context.Background()
+
+	inv, err := codeinventory.New().Inventory(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("inventory: %w", err)
+	}
+	loc := inv.Totals().CodeLines
+
+	svc := codequality.New(
+		codeanalysis.New(),
+		codequality.WithDuplication(duplication.New(0)),
+		codequality.WithComplexity(ast.New(os.Getenv("SYNAPSE_AST_BIN")), codequality.DefaultComplexityThreshold),
+	)
+	findings, err := svc.Analyze(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("code quality: %w", err)
+	}
+	// First-party security signal for the security grade (SCA dep vulns fold in when rating runs over a
+	// full scan's findings; this standalone command uses the SAST analyzer).
+	sastRaws, err := sast.New().AnalyzeSource(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("sast: %w", err)
+	}
+	for _, sr := range sastRaws {
+		findings = append(findings, finding.Finding{Kind: finding.KindSAST, Severity: sr.Severity})
+	}
+
+	rep := rating.Compute(findings, loc)
+
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rep); err != nil {
+			return fmt.Errorf("encode json: %w", err)
+		}
+	} else {
+		fmt.Printf("\nSynapse code health — %s\n", dir)
+		fmt.Printf("  security:        %s\n", rep.Security)
+		fmt.Printf("  reliability:     %s\n", rep.Reliability)
+		fmt.Printf("  maintainability: %s\n", rep.Maintainability)
+		fmt.Printf("  technical debt:  %dh %dm (ratio %.1f%% of ~%d code lines)\n", rep.TechDebtMinutes/60, rep.TechDebtMinutes%60, rep.DebtRatioPct, rep.LinesOfCode)
+	}
+
+	if failBelow != "" {
+		order := map[string]int{"A": 1, "B": 2, "C": 3, "D": 4, "E": 5}
+		threshold, ok := order[failBelow]
+		if !ok {
+			return fmt.Errorf("--fail-below wants a grade A-E, got %q", failBelow)
+		}
+		worst := 0
+		for _, g := range []rating.Grade{rep.Security, rep.Reliability, rep.Maintainability} {
+			if order[string(g)] > worst {
+				worst = order[string(g)]
+			}
+		}
+		if worst > threshold {
+			return fmt.Errorf("a health grade is below %s (security %s, reliability %s, maintainability %s)", failBelow, rep.Security, rep.Reliability, rep.Maintainability)
+		}
+	}
+	return nil
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
@@ -365,6 +457,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  synapse-cli metrics <path> [--fail-on-complexity N] [--top N]  # per-function cyclomatic+cognitive complexity (needs the synapse-ast sidecar)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli duplication <path> [--min-tokens N] [--fail-on-duplication PCT] [--top N]  # copy-paste detection (blocks, lines, density) — no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli quality <path> [--fail-on SEV] [--min-complexity N] [--sarif]  # maintainability + reliability findings (+ duplication, + complexity via synapse-ast) — no DB")
+	fmt.Fprintln(os.Stderr, "  synapse-cli rating <path> [--json] [--fail-below GRADE]  # A-E health grades (security/reliability/maintainability) + technical debt — no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories <dir>        # ingest a local OSV dump into the owned advisory store (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote     # fetch + ingest app ecosystems from the OSV bulk bucket (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-distros # fetch + ingest OS-package advisories (Debian/Alpine) from OSV (large; requires SYNAPSE_DB_DSN)")
