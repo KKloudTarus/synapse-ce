@@ -3,6 +3,7 @@ package ast
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -29,6 +30,16 @@ func TestResolveSidecarInFallsBackToPath(t *testing.T) {
 	}
 	if got := resolveSidecarIn(dir); got != sidecarName() {
 		t.Errorf("a directory named like the sidecar must be ignored; got %q", got)
+	}
+	// A NON-executable regular file must not shadow a working PATH copy (fall through to the bare name).
+	if runtime.GOOS != "windows" {
+		nx := t.TempDir()
+		if err := os.WriteFile(filepath.Join(nx, sidecarName()), []byte("stub"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := resolveSidecarIn(nx); got != sidecarName() {
+			t.Errorf("a non-executable stub must not be selected; got %q", got)
+		}
 	}
 }
 

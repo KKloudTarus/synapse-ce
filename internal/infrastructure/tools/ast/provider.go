@@ -67,12 +67,16 @@ func resolveSidecar() string {
 	return resolveSidecarIn(filepath.Dir(exe))
 }
 
-// resolveSidecarIn returns the bundled sidecar path if it exists in exeDir, else the bare name (PATH
-// lookup at exec time). Split out from resolveSidecar so the discovery logic is unit-testable.
+// resolveSidecarIn returns the bundled sidecar path if a runnable copy exists in exeDir, else the bare
+// name (PATH lookup at exec time). Split out from resolveSidecar so the discovery logic is unit-testable.
+// It requires a regular, executable file: a non-executable stub (0-byte / partial download / wrong perms)
+// next to the launcher must NOT shadow a working copy on PATH — falling through lets PATH still resolve.
 func resolveSidecarIn(exeDir string) string {
 	cand := filepath.Join(exeDir, sidecarName())
 	if fi, err := os.Stat(cand); err == nil && fi.Mode().IsRegular() {
-		return cand
+		if runtime.GOOS == "windows" || fi.Mode().Perm()&0o111 != 0 { // exec bit is meaningless on Windows
+			return cand
+		}
 	}
 	return sidecarName()
 }
