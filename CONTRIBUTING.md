@@ -70,6 +70,7 @@ If a change would weaken any of these, please open an issue to discuss first.
 - Include tests for new behavior.
 - Ensure `make build vet test typecheck` and `cd web && pnpm build` pass.
 - Use clear, conventional commit messages (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`).
+- For a user-visible change, add an entry under the `Unreleased` section of [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 

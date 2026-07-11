@@ -174,6 +174,7 @@ The only required variable is `SYNAPSE_API_TOKEN`. See the
 
 Full documentation lives in [`docs/guide/`](docs/guide/README.md): introduction, installation,
 quickstart, features, configuration, CLI, architecture, deployment, and the security model.
+See [`CHANGELOG.md`](CHANGELOG.md) for what has changed.
 
 ## Roadmap
 

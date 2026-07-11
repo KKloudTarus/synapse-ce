@@ -94,4 +94,72 @@ Or emit SARIF and upload it to the GitHub Security tab, while still failing the 
 The report lands in the repository's Code scanning alerts, with each SAST, secret and misconfig
 finding annotated on its exact source line.
 
+## GitLab CI
+
+The same gate as a GitLab job. `make tools` installs syft and grype, `make build` produces
+`./bin/synapse-cli`, and a non-zero exit from the scan fails the pipeline:
+
+```yaml
+synapse-scan:
+  stage: test
+  image: golang:1.26
+  script:
+    - make tools
+    - make build
+    - ./bin/synapse-cli scan . --fail-on high
+```
+
+To publish to the GitLab SAST report so findings show in the merge-request widget, emit SARIF and
+keep it as an artifact (GitLab reads SARIF as a `sast` report):
+
+```yaml
+synapse-scan:
+  stage: test
+  image: golang:1.26
+  script:
+    - make tools
+    - make build
+    - ./bin/synapse-cli scan . --sarif --fail-on high > gl-sast-report.sarif
+  artifacts:
+    when: always
+    reports:
+      sast: gl-sast-report.sarif
+```
+
+## Jenkins
+
+A declarative pipeline stage. The scan's exit code fails the stage on a finding at or above the
+threshold:
+
+```groovy
+pipeline {
+  agent { docker { image 'golang:1.26' } }
+  stages {
+    stage('Synapse scan') {
+      steps {
+        sh 'make tools'
+        sh 'make build'
+        sh './bin/synapse-cli scan . --fail-on high'
+      }
+    }
+  }
+}
+```
+
+To keep the SARIF report as a build artifact (for a platform or plugin that ingests SARIF), let the
+scan step record its exit code, archive the report, then fail the build explicitly:
+
+```groovy
+stage('Synapse scan') {
+  steps {
+    sh 'make tools && make build'
+    script {
+      def rc = sh(returnStatus: true, script: './bin/synapse-cli scan . --sarif --fail-on high > synapse.sarif')
+      archiveArtifacts artifacts: 'synapse.sarif', allowEmptyArchive: true
+      if (rc != 0) { error("Synapse found a finding at or above the fail-on threshold") }
+    }
+  }
+}
+```
+
 Next: [Architecture](architecture.md)
