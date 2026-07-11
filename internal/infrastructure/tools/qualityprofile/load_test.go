@@ -37,6 +37,32 @@ func TestLoadProfile(t *testing.T) {
 	}
 }
 
+func TestLoadGateRejectsBadConfig(t *testing.T) {
+	dir := t.TempDir()
+	cases := map[string]string{
+		"typo-key.yaml":       "condition:\n  - metric: new_critical\n    op: \"<=\"\n    threshold: 0\n",  // wrong top key -> empty -> rejected
+		"unknown-metric.yaml": "conditions:\n  - metric: new_criticl\n    op: \"<=\"\n    threshold: 0\n",  // typo'd metric
+		"bad-op.yaml":         "conditions:\n  - metric: new_critical\n    op: \"~=\"\n    threshold: 0\n", // unknown op
+		"empty.yaml":          "conditions: []\n",                                                          // no conditions
+	}
+	for name, body := range cases {
+		p := filepath.Join(dir, name)
+		os.WriteFile(p, []byte(body), 0o644)
+		if _, _, err := LoadGate(p); err == nil {
+			t.Errorf("%s: expected a load error (fail-closed), got nil", name)
+		}
+	}
+}
+
+func TestLoadProfileRejectsUnknownField(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "rules.yaml")
+	os.WriteFile(p, []byte("ruls:\n  x:\n    enabled: false\n"), 0o644) // "ruls" typo
+	if _, _, err := LoadProfile(p); err == nil {
+		t.Error("a misspelled profile key must be rejected")
+	}
+}
+
 func TestMissingFilesNotFound(t *testing.T) {
 	if _, found, err := LoadGate(""); found || err != nil {
 		t.Errorf("empty path: want (not-found, no error)")

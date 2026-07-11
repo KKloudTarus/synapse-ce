@@ -32,6 +32,27 @@ type Gate struct {
 // Snapshot is the measured metric values. A metric absent from the snapshot reads as 0.
 type Snapshot map[string]float64
 
+// validOps is the set of operators a condition may use.
+var validOps = map[Op]bool{OpLE: true, OpGE: true, OpEQ: true, OpLT: true, OpGT: true}
+
+// Validate rejects a gate that is empty or references an unknown metric/operator, so a typo'd or
+// truncated config fails loud at load time rather than silently passing (a security gate must fail
+// closed). It is called by the config loader.
+func (g Gate) Validate() error {
+	if len(g.Conditions) == 0 {
+		return fmt.Errorf("quality gate has no conditions")
+	}
+	for _, c := range g.Conditions {
+		if !ValidMetric(c.Metric) {
+			return fmt.Errorf("unknown gate metric %q", c.Metric)
+		}
+		if !validOps[c.Op] {
+			return fmt.Errorf("unknown gate operator %q for metric %q", c.Op, c.Metric)
+		}
+	}
+	return nil
+}
+
 // ConditionResult is one evaluated condition.
 type ConditionResult struct {
 	Condition Condition

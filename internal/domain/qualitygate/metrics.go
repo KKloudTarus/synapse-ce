@@ -8,7 +8,7 @@ const (
 	MetricNewHigh          = "new_high"          // new findings with high severity
 	MetricNewMedium        = "new_medium"        // new findings with medium severity
 	MetricNewSecret        = "new_secret"        // new secret findings
-	MetricNewVulnerability = "new_vulnerability" // new security findings (sca/sast/secret/misconfig)
+	MetricNewVulnerability = "new_vulnerability" // new security findings (sca/sast/secret/misconfig/exploitation/dast)
 	MetricNewIssues        = "new_issues"        // all new findings
 	MetricTotalCritical    = "total_critical"    // whole-codebase critical findings
 	MetricDuplicationPct   = "duplication_density"
@@ -17,6 +17,20 @@ const (
 	MetricReliability      = "reliability_rating"
 	MetricMaintainability  = "maintainability_rating"
 )
+
+// knownMetrics is the set a gate condition may reference, so a typo'd metric name is rejected at load
+// time (a metric absent from the snapshot reads as 0, which could otherwise silently pass a gate).
+// NOTE: `coverage` is accepted but not yet measured (lands with the coverage-import phase); a coverage
+// condition therefore reads 0 and fails closed until then.
+var knownMetrics = map[string]bool{
+	MetricNewCritical: true, MetricNewHigh: true, MetricNewMedium: true, MetricNewSecret: true,
+	MetricNewVulnerability: true, MetricNewIssues: true, MetricTotalCritical: true,
+	MetricDuplicationPct: true, MetricCoveragePct: true,
+	MetricSecurityRating: true, MetricReliability: true, MetricMaintainability: true,
+}
+
+// ValidMetric reports whether name is a recognized gate metric.
+func ValidMetric(name string) bool { return knownMetrics[name] }
 
 // Default returns the built-in "clean new code" gate: no new critical/high findings, no new secrets, and
 // A ratings on the whole codebase. It mirrors the widely used default of gating strictly on new code

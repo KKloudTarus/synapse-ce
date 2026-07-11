@@ -30,8 +30,15 @@ func Changed(ctx context.Context, dir, base string) (ChangedLines, error) {
 	if strings.TrimSpace(base) == "" {
 		return nil, fmt.Errorf("gitdiff: empty base ref")
 	}
+	if strings.HasPrefix(base, "-") {
+		// Reject a ref that would be parsed as a git option (e.g. --output=...): option injection.
+		return nil, fmt.Errorf("gitdiff: base ref %q must not start with '-'", base)
+	}
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "diff", "--unified=0", "--no-color", "--diff-filter=d", base, "--", ".")
+	// --relative makes diff paths relative to dir (so they match finding paths, which are filepath.Rel to
+	// dir) and scopes the diff to dir. --end-of-options ensures base is treated as a revision, never an
+	// option (defense-in-depth with the leading-dash check). argv only, no shell.
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "diff", "--relative", "--unified=0", "--no-color", "--diff-filter=d", "--end-of-options", base, "--", ".")
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

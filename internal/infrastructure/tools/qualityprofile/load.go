@@ -3,6 +3,7 @@
 package qualityprofile
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 
@@ -10,6 +11,14 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 )
+
+// strictUnmarshal decodes YAML rejecting unknown fields, so a misspelled top-level key (e.g. `condition:`
+// instead of `conditions:`) is an error rather than a silently-empty struct that could bypass the gate.
+func strictUnmarshal(data []byte, into any) error {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	return dec.Decode(into)
+}
 
 const maxConfigBytes = 1 << 20 // a gate/profile file is small; cap defensively
 
@@ -21,8 +30,11 @@ func LoadGate(path string) (qualitygate.Gate, bool, error) {
 		return qualitygate.Gate{}, found, err
 	}
 	var g qualitygate.Gate
-	if err := yaml.Unmarshal(data, &g); err != nil {
+	if err := strictUnmarshal(data, &g); err != nil {
 		return qualitygate.Gate{}, true, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if err := g.Validate(); err != nil {
+		return qualitygate.Gate{}, true, fmt.Errorf("invalid gate %s: %w", path, err)
 	}
 	return g, true, nil
 }
@@ -34,7 +46,7 @@ func LoadProfile(path string) (qualitygate.Profile, bool, error) {
 		return qualitygate.Profile{}, found, err
 	}
 	var p qualitygate.Profile
-	if err := yaml.Unmarshal(data, &p); err != nil {
+	if err := strictUnmarshal(data, &p); err != nil {
 		return qualitygate.Profile{}, true, fmt.Errorf("parse %s: %w", path, err)
 	}
 	return p, true, nil

@@ -532,7 +532,8 @@ func runGate(args []string) error {
 		scoped = filterNewCode(findings, changed)
 	}
 
-	// 4. Ratings (over the scope) + whole-codebase duplication density.
+	// 4. Ratings over the scope (security/reliability are worst-severity, so correctly new-code-scoped;
+	// maintainability's debt ratio still divides by whole-repo LOC) + whole-codebase duplication density.
 	inv, err := codeinventory.New().Inventory(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("inventory: %w", err)

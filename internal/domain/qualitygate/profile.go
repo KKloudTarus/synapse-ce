@@ -28,7 +28,7 @@ func (p Profile) Apply(findings []finding.Finding) []finding.Finding {
 	if len(p.Rules) == 0 {
 		return findings
 	}
-	out := findings[:0]
+	out := make([]finding.Finding, 0, len(findings)) // fresh slice: never mutate the caller's backing array
 	for _, f := range findings {
 		cfg, ok := p.Rules[RuleIDOf(f.DedupKey)]
 		if !ok {
