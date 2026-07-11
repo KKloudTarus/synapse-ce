@@ -96,6 +96,89 @@ jobs:
 	}
 }
 
+func TestGitHubActionsEnvRoutingNotFlagged(t *testing.T) {
+	// The recommended mitigation: pass untrusted input through env: (even AFTER run:) and reference it as
+	// a shell variable. This must NOT be flagged as injection (regression guard for the run-block tracker).
+	wf := `jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "$TITLE"
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+`
+	got := ruleIDs(scan(t, map[string]string{".github/workflows/ci.yml": wf}))
+	if _, ok := got["gha-script-injection"]; ok {
+		t.Errorf("env-routed untrusted input (the mitigation) must not be flagged; got %v", keys(got))
+	}
+}
+
+func TestGitHubActionsNoFalsePositiveInsideRunScript(t *testing.T) {
+	// YAML-looking text echoed inside a run: script must not trigger the trigger/permissions/uses rules.
+	wf := `jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "permissions: write-all"
+          echo "uses: foo/bar@v1"
+`
+	got := ruleIDs(scan(t, map[string]string{".github/workflows/ci.yml": wf}))
+	for _, r := range []string{"gha-permissions-write-all", "gha-unpinned-action"} {
+		if _, ok := got[r]; ok {
+			t.Errorf("%s must not fire on run-script content; got %v", r, keys(got))
+		}
+	}
+}
+
+func TestGitHubActionsCommentedTriggerNotFlagged(t *testing.T) {
+	wf := `on: [push]  # not pull_request_target
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+`
+	got := ruleIDs(scan(t, map[string]string{".github/workflows/ci.yaml": wf}))
+	if _, ok := got["gha-pull-request-target"]; ok {
+		t.Errorf("a commented mention of pull_request_target must not be flagged; got %v", keys(got))
+	}
+}
+
+func TestComposeQuotedInlineCapAndSecurityOpt(t *testing.T) {
+	compose := `services:
+  app:
+    image: alpine:3.20
+    cap_add: ["SYS_ADMIN"]
+    userns_mode: host
+    security_opt:
+      - seccomp:unconfined
+`
+	got := ruleIDs(scan(t, map[string]string{"docker-compose.yml": compose}))
+	for _, want := range []string{"compose-dangerous-capability", "compose-userns-host", "compose-unconfined-security-opt"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("compose: expected %s; got %v", want, keys(got))
+		}
+	}
+}
+
+func TestComposeEnvKeyNotMisclassified(t *testing.T) {
+	// An env var whose key happens to look like a directive must be treated as an env var, not the directive.
+	compose := `services:
+  app:
+    image: alpine:3.20
+    environment:
+      PRIVILEGED: "true"
+      NETWORK_MODE: host
+`
+	got := ruleIDs(scan(t, map[string]string{"compose.yaml": compose}))
+	for _, bad := range []string{"compose-privileged", "compose-host-network"} {
+		if _, ok := got[bad]; ok {
+			t.Errorf("%s must not fire on an environment variable key; got %v", bad, keys(got))
+		}
+	}
+}
+
 func TestGitHubActionsRulesGatedToWorkflowPath(t *testing.T) {
 	// The same `uses:`/`run:` content OUTSIDE .github/workflows/ must not trigger the workflow rules
 	// (path gating), and must not be misread as a Compose file either.
