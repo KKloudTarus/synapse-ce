@@ -12,7 +12,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// Conan 2.x: reference strings under requires / build_requires / python_requires.
+// Conan 2.x: reference strings under requires, build_requires,
+// python_requires, and config_requires.
 const conanLockV2Fixture = `{
   "version": "0.5",
   "requires": [
@@ -24,6 +25,9 @@ const conanLockV2Fixture = `{
   ],
   "python_requires": [
     "config/2.0@company/stable"
+  ],
+  "config_requires": [
+    "company-config/3.2#abc123%1724319985.398"
   ]
 }`
 
@@ -59,8 +63,8 @@ func TestConanParseV2(t *testing.T) {
 	for _, c := range comps {
 		byName[c.Name] = c
 	}
-	if len(comps) != 4 {
-		t.Fatalf("want 4 components (zlib, openssl, cmake, config), got %d (%+v)", len(comps), comps)
+	if len(comps) != 5 {
+		t.Fatalf("want 5 components (zlib, openssl, cmake, config, company-config), got %d (%+v)", len(comps), comps)
 	}
 	if c := byName["zlib"]; c.PURL != "pkg:conan/zlib@1.2.13" {
 		t.Errorf("zlib PURL wrong (revision must be stripped): %+v", c)
@@ -73,6 +77,9 @@ func TestConanParseV2(t *testing.T) {
 	}
 	if c := byName["config"]; c.Scope != sbom.ScopeDevelopment {
 		t.Errorf("config scope wrong: %+v", c)
+	}
+	if c := byName["company-config"]; c.Name != "company-config" || c.Version != "3.2" || c.PURL != "pkg:conan/company-config@3.2" || c.Scope != sbom.ScopeDevelopment || c.Location != "conan.lock" {
+		t.Errorf("company-config component wrong: %+v", c)
 	}
 }
 
@@ -707,5 +714,384 @@ func TestConanRegistryGenerateIncludesPythonRequires(t *testing.T) {
 	}
 	if len(doc.Dependencies) != 0 {
 		t.Errorf("want 0 dependencies, got %+v", doc.Dependencies)
+	}
+}
+
+func TestConanParseV2ConfigRequiresOnly(t *testing.T) {
+	comps, deps := parseConanTest(t, "conan.lock", []byte(`{
+  "version": "0.5",
+  "requires": [],
+  "build_requires": [],
+  "python_requires": [],
+  "config_requires": [
+    "company-config/3.2"
+  ]
+}`))
+	if len(comps) != 1 {
+		t.Fatalf("want 1 component, got %d: %+v", len(comps), comps)
+	}
+	c := comps[0]
+	if c.Name != "company-config" || c.Version != "3.2" || c.PURL != "pkg:conan/company-config@3.2" || c.Scope != sbom.ScopeDevelopment || c.Location != "conan.lock" {
+		t.Errorf("wrong component: %+v", c)
+	}
+	if deps != nil {
+		t.Errorf("want nil deps, got %v", deps)
+	}
+}
+
+func TestConanParseV2ConfigRequiresNormalization(t *testing.T) {
+	tests := []struct {
+		name     string
+		ref      string
+		wantPURL string
+	}{
+		{
+			name:     "plain",
+			ref:      "config/1.0",
+			wantPURL: "pkg:conan/config@1.0",
+		},
+		{
+			name:     "user channel",
+			ref:      "config/1.0@company/stable",
+			wantPURL: "pkg:conan/config@1.0",
+		},
+		{
+			name:     "recipe revision",
+			ref:      "config/1.0#abc123",
+			wantPURL: "pkg:conan/config@1.0",
+		},
+		{
+			name:     "revision timestamp",
+			ref:      "config/1.0#abc123%1724319985.398",
+			wantPURL: "pkg:conan/config@1.0",
+		},
+		{
+			name:     "user channel revision timestamp",
+			ref:      "config/1.0@company/stable#abc123%1724319985.398",
+			wantPURL: "pkg:conan/config@1.0",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comps, deps := parseConanTest(t, "conan.lock", []byte(fmt.Sprintf(`{"version": "0.5", "config_requires": ["%s"]}`, tt.ref)))
+			if len(comps) != 1 {
+				t.Fatalf("want 1 component, got %d: %+v", len(comps), comps)
+			}
+			c := comps[0]
+			if c.Name != "config" || c.Version != "1.0" || c.PURL != tt.wantPURL || c.Scope != sbom.ScopeDevelopment || c.Location != "conan.lock" {
+				t.Errorf("wrong component: %+v", c)
+			}
+			if deps != nil {
+				t.Errorf("want nil deps, got %v", deps)
+			}
+		})
+	}
+}
+
+func TestConanParseV2ConfigRequiresScopePrecedence(t *testing.T) {
+	comps, deps := parseConanTest(t, "conan.lock", []byte(`{
+  "version": "0.5",
+  "config_requires": [
+    "shared-config/1.0@company/stable#abc123"
+  ],
+  "requires": [
+    "shared-config/1.0"
+  ]
+}`))
+	if len(comps) != 1 {
+		t.Fatalf("want 1 component, got %d: %+v", len(comps), comps)
+	}
+	c := comps[0]
+	if c.Name != "shared-config" || c.Version != "1.0" || c.PURL != "pkg:conan/shared-config@1.0" || c.Scope != sbom.ScopeProduction {
+		t.Errorf("wrong component: %+v", c)
+	}
+	if deps != nil {
+		t.Errorf("want nil deps, got %v", deps)
+	}
+}
+
+func TestConanParseV2ConfigRequiresBackgroundScope(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		wantScope string
+	}{
+		{
+			name:      "test",
+			path:      "tests/conan.lock",
+			wantScope: sbom.ScopeTest,
+		},
+		{
+			name:      "fixture",
+			path:      "testdata/conan.lock",
+			wantScope: sbom.ScopeFixture,
+		},
+		{
+			name:      "example",
+			path:      "examples/app/conan.lock",
+			wantScope: sbom.ScopeExample,
+		},
+		{
+			name:      "documentation",
+			path:      "docs/sample/conan.lock",
+			wantScope: sbom.ScopeDocumentation,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comps, deps := parseConanTest(t, tt.path, []byte(`{
+  "version": "0.5",
+  "requires": [
+    "app/1.0"
+  ],
+  "config_requires": [
+    "company-config/3.2"
+  ]
+}`))
+			if len(comps) != 2 {
+				t.Fatalf("want 2 components, got %d: %+v", len(comps), comps)
+			}
+			var app, cfg sbom.Component
+			for _, c := range comps {
+				if c.Name == "app" {
+					app = c
+				} else if c.Name == "company-config" {
+					cfg = c
+				}
+			}
+			if app.Scope != tt.wantScope {
+				t.Errorf("want app scope %q, got %q", tt.wantScope, app.Scope)
+			}
+			if cfg.Scope != tt.wantScope {
+				t.Errorf("want cfg scope %q, got %q", tt.wantScope, cfg.Scope)
+			}
+			if deps != nil {
+				t.Errorf("want nil deps, got %v", deps)
+			}
+		})
+	}
+}
+
+func TestConanParseV2ConfigRequiresDeduplicatesPURL(t *testing.T) {
+	comps, deps := parseConanTest(t, "conan.lock", []byte(`{
+  "version": "0.5",
+  "config_requires": [
+    "config/1.0",
+    "config/1.0@company/stable",
+    "config/1.0#abc123",
+    "config/1.0#abc123%1724319985.398"
+  ]
+}`))
+	if len(comps) != 1 {
+		t.Fatalf("want 1 component, got %d: %+v", len(comps), comps)
+	}
+	c := comps[0]
+	if c.Name != "config" || c.Version != "1.0" || c.PURL != "pkg:conan/config@1.0" || c.Scope != sbom.ScopeDevelopment {
+		t.Errorf("wrong component: %+v", c)
+	}
+	if deps != nil {
+		t.Errorf("want nil deps, got %v", deps)
+	}
+}
+
+func TestConanParseV2ConfigRequiresCrossKindDedup(t *testing.T) {
+	comps, deps := parseConanTest(t, "conan.lock", []byte(`{
+  "version": "0.5",
+  "build_requires": [
+    "config/1.0"
+  ],
+  "python_requires": [
+    "config/1.0@company/stable"
+  ],
+  "config_requires": [
+    "config/1.0#abc123"
+  ]
+}`))
+	if len(comps) != 1 {
+		t.Fatalf("want 1 component, got %d: %+v", len(comps), comps)
+	}
+	c := comps[0]
+	if c.Name != "config" || c.Version != "1.0" || c.PURL != "pkg:conan/config@1.0" || c.Scope != sbom.ScopeDevelopment {
+		t.Errorf("wrong component: %+v", c)
+	}
+	if deps != nil {
+		t.Errorf("want nil deps, got %v", deps)
+	}
+}
+
+func TestConanParseV2ConfigRequiresPreservesVersions(t *testing.T) {
+	comps, deps := parseConanTest(t, "conan.lock", []byte(`{
+  "version": "0.5",
+  "config_requires": [
+    "config/2.0",
+    "config/1.0"
+  ]
+}`))
+	if len(comps) != 2 {
+		t.Fatalf("want 2 components, got %d: %+v", len(comps), comps)
+	}
+	if comps[0].PURL != "pkg:conan/config@1.0" || comps[1].PURL != "pkg:conan/config@2.0" {
+		t.Errorf("wrong components or not sorted: %+v", comps)
+	}
+	if comps[0].Scope != sbom.ScopeDevelopment || comps[1].Scope != sbom.ScopeDevelopment {
+		t.Errorf("wrong scopes: %+v", comps)
+	}
+	if deps != nil {
+		t.Errorf("want nil deps, got %v", deps)
+	}
+}
+
+func TestConanParseV2ConfigRequiresSkipsMalformed(t *testing.T) {
+	comps, deps := parseConanTest(t, "conan.lock", []byte(`{
+  "version": "0.5",
+  "config_requires": [
+    "",
+    "   ",
+    "invalid-reference",
+    "/1.0",
+    "config/",
+    "valid-config/2.0#abc123%1724319985.398"
+  ]
+}`))
+	if len(comps) != 1 {
+		t.Fatalf("want 1 component, got %d: %+v", len(comps), comps)
+	}
+	if comps[0].PURL != "pkg:conan/valid-config@2.0" || comps[0].Scope != sbom.ScopeDevelopment {
+		t.Errorf("wrong component: %+v", comps[0])
+	}
+	if deps != nil {
+		t.Errorf("want nil deps, got %v", deps)
+	}
+}
+
+func TestConanParseV2ConfigRequiresDoNotInferEdges(t *testing.T) {
+	comps, deps := parseConanTest(t, "conan.lock", []byte(`{
+  "version": "0.5",
+  "requires": [
+    "app/1.0",
+    "lib/2.0"
+  ],
+  "config_requires": [
+    "company-config/3.2"
+  ]
+}`))
+	if len(comps) != 3 {
+		t.Fatalf("want 3 components, got %d: %+v", len(comps), comps)
+	}
+	if deps != nil {
+		t.Errorf("want nil deps, got %v", deps)
+	}
+}
+
+func TestConanParseV2ConfigRequiresDeterministic(t *testing.T) {
+	fixture := []byte(`{
+  "version": "0.5",
+  "config_requires": [
+    "z-config/1.0",
+    "a-config/2.0",
+    "middle-config/3.0"
+  ],
+  "requires": [
+    "app/1.0"
+  ]
+}`)
+	firstComps, firstDeps := parseConanTest(t, "conan.lock", fixture)
+	if len(firstComps) != 4 {
+		t.Fatalf("want 4 components, got %d: %+v", len(firstComps), firstComps)
+	}
+	expectedOrder := []string{
+		"pkg:conan/a-config@2.0",
+		"pkg:conan/app@1.0",
+		"pkg:conan/middle-config@3.0",
+		"pkg:conan/z-config@1.0",
+	}
+	for i, purl := range expectedOrder {
+		if firstComps[i].PURL != purl {
+			t.Errorf("item %d want %s, got %s", i, purl, firstComps[i].PURL)
+		}
+	}
+	for i := 0; i < 20; i++ {
+		comps, deps := parseConanTest(t, "conan.lock", fixture)
+		if !reflect.DeepEqual(firstComps, comps) {
+			t.Errorf("components differ on run %d", i)
+		}
+		if !reflect.DeepEqual(firstDeps, deps) {
+			t.Errorf("dependencies differ on run %d", i)
+		}
+	}
+}
+
+func TestConanRegistryGenerateIncludesConfigRequires(t *testing.T) {
+	dir := t.TempDir()
+
+	fixture := []byte(`{
+	  "version": "0.5",
+	  "requires": [
+	    "app/1.0"
+	  ],
+	  "config_requires": [
+	    "company-config/3.2#abc123%1724319985.398"
+	  ]
+	}`)
+
+	if err := os.WriteFile(
+		filepath.Join(dir, "conan.lock"),
+		fixture,
+		0o644,
+	); err != nil {
+		t.Fatalf("write conan.lock: %v", err)
+	}
+
+	reg, err := DefaultRegistry()
+	if err != nil {
+		t.Fatalf("DefaultRegistry: %v", err)
+	}
+
+	doc, err := reg.Generate(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	if doc.Source != "ownsbom" ||
+		doc.GeneratorVersion != ownsbomVersion {
+		t.Errorf(
+			"want source ownsbom and generator %s, got %s and %s",
+			ownsbomVersion,
+			doc.Source,
+			doc.GeneratorVersion,
+		)
+	}
+
+	if len(doc.Components) != 2 {
+		t.Fatalf(
+			"want 2 components, got %d: %+v",
+			len(doc.Components),
+			doc.Components,
+		)
+	}
+
+	byName := make(map[string]sbom.Component, len(doc.Components))
+	for _, component := range doc.Components {
+		byName[component.Name] = component
+	}
+
+	if component := byName["app"]; component.PURL != "pkg:conan/app@1.0" ||
+		component.Scope != sbom.ScopeProduction {
+		t.Errorf("app component wrong: %+v", component)
+	}
+
+	if component := byName["company-config"]; component.PURL != "pkg:conan/company-config@3.2" ||
+		component.Scope != sbom.ScopeDevelopment {
+		t.Errorf(
+			"company-config component wrong: %+v",
+			component,
+		)
+	}
+
+	if len(doc.Dependencies) != 0 {
+		t.Errorf(
+			"want no dependencies, got %+v",
+			doc.Dependencies,
+		)
 	}
 }

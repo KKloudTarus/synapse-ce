@@ -17,15 +17,17 @@ import (
 // components.
 //
 // Two lockfile shapes are supported: Conan 2.x lists reference strings under
-// requires, build_requires, and python_requires. Conan 1.x stores package
-// references and graph relationships in graph_lock nodes. References use the
-// form name/version[@user/channel][#recipe_revision].
+// requires, build_requires, python_requires, and config_requires. Conan 1.x
+// stores package references and graph relationships in graph_lock nodes.
+// References use the form
+// name/version[@user/channel][#recipe_revision[%revision_timestamp]].
 //
-// Conan 1.x requires and build_requires node IDs emit deterministic dependency
-// relationships. Node-level python_requires references are emitted as development- or
-// background-scoped components only because Conan stores a transitive
-// reference closure rather than direct graph node IDs. The parser uses only
-// the Go standard library.
+// Conan 2.x build, Python, and configuration requirements are emitted as
+// development- or background-scoped components. Conan 1.x requires and
+// build_requires node IDs emit deterministic dependency relationships.
+// Node-level python_requires references are emitted as components only because
+// Conan stores a transitive reference closure rather than direct graph node
+// IDs. The parser uses only the Go standard library.
 type Conan struct{}
 
 // Ecosystem identifies this parser's package ecosystem.
@@ -46,6 +48,7 @@ type conanLock struct {
 	Requires       []string `json:"requires"`
 	BuildRequires  []string `json:"build_requires"`
 	PythonRequires []string `json:"python_requires"`
+	ConfigRequires []string `json:"config_requires"`
 	GraphLock      struct {
 		Nodes map[string]conanLockNode `json:"nodes"`
 	} `json:"graph_lock"`
@@ -53,10 +56,12 @@ type conanLock struct {
 
 // Parse extracts resolved Conan components and, for Conan 1.x graph_lock
 // files, dependency relationships from requires and build_requires.
-// Node-level python_requires references are included as components but are
-// not inferred as direct dependency edges.
+// Top-level Conan 2.x config_requires and Conan 1.x node-level
+// python_requires are included as components but do not create dependency
+// edges.
 // Results are sorted deterministically because Conan 1.x nodes are stored in a
-// JSON object and therefore decoded into a Go map with unspecified iteration order.
+// JSON object and therefore decoded into a Go map with unspecified iteration
+// order.
 func (Conan) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -82,8 +87,8 @@ func (Conan) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 		return name, version, purl, true
 	}
 
-	// Scope build/python requires as development (build-time tooling), matching the conanfile.txt mapping
-	// of [tool_requires]; the path scope may already be a background one, which wins.
+	// Scope build, Python, and configuration requirements as development-time
+	// inputs. A path-derived background scope takes precedence.
 	prod := sbom.ClassifyScope(in.Path, "")
 	dev := prod
 	if !sbom.IsBackgroundScope(prod) {
@@ -110,6 +115,9 @@ func (Conan) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 		add(ref, dev)
 	}
 	for _, ref := range lock.PythonRequires {
+		add(ref, dev)
+	}
+	for _, ref := range lock.ConfigRequires {
 		add(ref, dev)
 	}
 
@@ -204,8 +212,9 @@ func (Conan) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom
 	return comps, deps, nil
 }
 
-// parseConanRef splits a Conan reference name/version[@user/channel][#recipe_revision] into its name and
-// version. The version is the segment after the first "/", cut at the first "@" (user/channel) or "#"
+// parseConanRef splits a Conan reference
+// name/version[@user/channel][#recipe_revision[%revision_timestamp]]
+// into its name and version. The version is the segment after the first "/", cut at the first "@" (user/channel) or "#"
 // (recipe revision). Returns empty strings when the ref has no version segment.
 func parseConanRef(ref string) (string, string) {
 	ref = strings.TrimSpace(ref)

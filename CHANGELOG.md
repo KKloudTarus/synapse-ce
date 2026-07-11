@@ -12,6 +12,7 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **SCA.** Added Conan 2.x `config_requires` packages to OwnSBOM component output.
 - **SCA.** Added first-party OwnSBOM support for exact registry packages in Python `uv.lock` files.
 - **SCA.** Added Conan 1.x node-level `python_requires` components to OwnSBOM output.
 - **SCA.** Added deterministic dependency graph relationships for Conan 1.x `graph_lock` files.
