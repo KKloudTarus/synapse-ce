@@ -324,6 +324,9 @@ func TestRuleCorpus(t *testing.T) {
 				`nodes := xpath.evaluate("//user[name='admin']")`,
 				`expr := xpath.compile(userQueryConst)`,
 				`if doc.selectNodes("//user") { render() }`,
+				`result = evaluate("total // count + 1")`,  // // inside a constant string, no string-concat
+				`page.evaluate(expr) // TODO: fix + later`, // first arg is not a string literal
+				`out := preEvaluate("//x[@id=" + id)`,      // preEvaluate is not the evaluate sink
 			},
 		},
 		{

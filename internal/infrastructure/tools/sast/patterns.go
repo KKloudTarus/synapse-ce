@@ -351,8 +351,13 @@ func builtinRules() []rule {
 		},
 		{
 			id: "xpath-injection", cwe: "CWE-643", severity: shared.SeverityHigh, title: "XPath query built from untrusted input",
-			desc:   "An XPath expression is concatenated or interpolated from untrusted input, allowing XPath injection (authentication bypass, data disclosure). Use a precompiled expression with variable bindings and validate any dynamic value.",
-			re:     regexp.MustCompile(`(?i)((evaluate|selectNodes|selectSingleNode|\.xpath)\s*\([^\n]*//[^\n]*(\+|\$\{|%[sv])|(evaluate|selectNodes|\.xpath)\s*\(\s*f["'` + "`" + `][^\n]*//)`),
+			desc: "An XPath expression is concatenated or interpolated from untrusted input, allowing XPath injection (authentication bypass, data disclosure). Use a precompiled expression with variable bindings and validate any dynamic value.",
+			// Anchored so the XPath (the //... string) must be the sink's first argument: an opening quote
+			// right after "(" pins // inside a string literal, not a // line comment or Python floor division.
+			// A concat marker must sit adjacent to a quote (real string concatenation) or be an ${...}/{name}/%s
+			// interpolation, so a fully constant query like "//user[name='admin']" never fires. \b stops
+			// preEvaluate/deselectNodes substring matches.
+			re:     regexp.MustCompile(`(?i)\b(evaluate|selectNodes|selectSingleNode|xpath)\s*\(\s*f?["'` + "`" + `][^"'` + "`" + `\n]*//[^\n]*(["'` + "`" + `]\s*\+|\+\s*["'` + "`" + `]|\$\{|%[sv]|\{[a-zA-Z_])`),
 			skipFn: commentOnlyLine,
 		},
 		{
