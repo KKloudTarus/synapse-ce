@@ -270,6 +270,9 @@ func parseCycloneDX(data []byte) ([]sbom.Component, []sbom.Dependency, string, e
 			continue // skip entries that don't identify a package
 		}
 		loc, layerID := c.primaryLocation()
+		if isGradleWrapperJar(loc) {
+			continue // the Gradle wrapper jar is build tooling, not a dependency (Syft emits it version-UNKNOWN)
+		}
 		supplier, supplierSrc := sbom.SupplierWithSource(c.Supplier.Name, c.PURL)
 		comp := sbom.Component{
 			Name: c.Name, Version: c.Version, PURL: c.PURL,
@@ -379,4 +382,13 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// isGradleWrapperJar reports whether loc is the Gradle wrapper jar (<project>/gradle/wrapper/gradle-wrapper.jar) —
+// build tooling, not a project dependency. Syft catalogs it as a version-UNKNOWN pkg:maven pseudo-
+// component that can't be advisory-matched, so it is pure SBOM noise and is dropped. The suffix is anchored on
+// a path separator so a directory merely ending in "gradle" (e.g. mygradle/wrapper/…) can't match; Syft always
+// emits '/'-delimited location paths, so no separator normalization is needed.
+func isGradleWrapperJar(loc string) bool {
+	return strings.HasSuffix(loc, "/gradle/wrapper/gradle-wrapper.jar")
 }
