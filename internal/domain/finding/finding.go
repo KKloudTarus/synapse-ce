@@ -42,18 +42,20 @@ const (
 	KindRecon        Kind = "recon"
 	KindExploitation Kind = "exploitation"
 	KindManual       Kind = "manual"
-	KindSAST         Kind = "sast"       // first-party source-code issue (SAST)
-	KindSecret       Kind = "secret"     // a hardcoded secret found in source (deterministic; ungated)
-	KindMisconfig    Kind = "misconfig"  // an insecure IaC/config setting (deterministic; ungated)
-	KindDAST         Kind = "dast"       // runtime app issue (DAST; deferred)
-	KindThreat       Kind = "threat"     // threat-model item
-	KindHypothesis   Kind = "hypothesis" // AI-proposed attack-chain hypothesis linking findings (gated until human-verified)
+	KindSAST         Kind = "sast"        // first-party source-code issue (SAST)
+	KindSecret       Kind = "secret"      // a hardcoded secret found in source (deterministic; ungated)
+	KindMisconfig    Kind = "misconfig"   // an insecure IaC/config setting (deterministic; ungated)
+	KindDAST         Kind = "dast"        // runtime app issue (DAST; deferred)
+	KindThreat       Kind = "threat"      // threat-model item
+	KindHypothesis   Kind = "hypothesis"  // AI-proposed attack-chain hypothesis linking findings (gated until human-verified)
+	KindQuality      Kind = "quality"     // maintainability / code-smell issue (deterministic; ungated)
+	KindReliability  Kind = "reliability" // likely bug (deterministic; ungated)
 )
 
 // Valid reports whether k is a known finding kind.
 func (k Kind) Valid() bool {
 	switch k {
-	case KindSCA, KindRecon, KindExploitation, KindManual, KindSAST, KindSecret, KindMisconfig, KindDAST, KindThreat, KindHypothesis:
+	case KindSCA, KindRecon, KindExploitation, KindManual, KindSAST, KindSecret, KindMisconfig, KindDAST, KindThreat, KindHypothesis, KindQuality, KindReliability:
 		return true
 	}
 	return false

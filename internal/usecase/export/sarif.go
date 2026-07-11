@@ -207,7 +207,7 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 func firstPartyLoc(key string) (ruleID, file string, line int, ok bool) {
 	var rest string
 	matched := false
-	for _, kind := range []string{"sast:", "secret:", "misconfig:"} {
+	for _, kind := range []string{"sast:", "secret:", "misconfig:", "quality:", "reliability:"} {
 		if r, has := strings.CutPrefix(key, kind); has {
 			rest, matched = r, true
 			break

@@ -28,6 +28,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
@@ -59,6 +60,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/advisoryingest"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
@@ -100,6 +102,14 @@ func main() {
 			usage()
 		}
 		if err := runDuplication(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
+			os.Exit(1)
+		}
+	case "quality":
+		if len(os.Args) < 3 {
+			usage()
+		}
+		if err := runQuality(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 			os.Exit(1)
 		}
@@ -263,6 +273,88 @@ func runDuplication(args []string) error {
 	return nil
 }
 
+// runQuality runs the maintainability + reliability rules (plus duplication and, when the synapse-ast
+// sidecar is available, high-complexity) over a local source tree and reports the findings, optionally
+// emitting SARIF or gating on severity.
+func runQuality(args []string) error {
+	dir := args[0]
+	if strings.HasPrefix(dir, "-") {
+		return fmt.Errorf("first argument must be a path, got option %q", dir)
+	}
+	failOn := ""
+	sarifOut := false
+	complexityMin := codequality.DefaultComplexityThreshold
+	for i := 1; i < len(args); i++ {
+		switch {
+		case args[i] == "--fail-on" && i+1 < len(args):
+			failOn = args[i+1]
+			i++
+		case args[i] == "--min-complexity" && i+1 < len(args):
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n < 1 {
+				return fmt.Errorf("--min-complexity wants a positive integer, got %q", args[i+1])
+			}
+			complexityMin = n
+			i++
+		case args[i] == "--sarif":
+			sarifOut = true
+		default:
+			return fmt.Errorf("unknown or incomplete option %q", args[i])
+		}
+	}
+	if failOn != "" {
+		switch shared.Severity(failOn) {
+		case "critical", "high", "medium", "low", "info":
+		default:
+			return fmt.Errorf("invalid --fail-on %q (want critical|high|medium|low|info)", failOn)
+		}
+	}
+
+	svc := codequality.New(
+		codeanalysis.New(),
+		codequality.WithDuplication(duplication.New(0)),
+		codequality.WithComplexity(ast.New(os.Getenv("SYNAPSE_AST_BIN")), complexityMin),
+	)
+	findings, err := svc.Analyze(context.Background(), dir)
+	if err != nil {
+		return fmt.Errorf("quality: %w", err)
+	}
+
+	if sarifOut {
+		out, merr := exportuc.MarshalSARIF(findings, buildinfo.App(), exportuc.SARIFOptions{})
+		if merr != nil {
+			return fmt.Errorf("encode sarif: %w", merr)
+		}
+		if _, werr := os.Stdout.Write(append(out, '\n')); werr != nil {
+			return fmt.Errorf("write sarif: %w", werr)
+		}
+	} else {
+		fmt.Printf("\nSynapse code quality — %s\n", dir)
+		byKind := map[finding.Kind]int{}
+		for _, f := range findings {
+			byKind[f.Kind]++
+		}
+		fmt.Printf("  findings: %d (quality: %d, reliability: %d)\n", len(findings), byKind[finding.KindQuality], byKind[finding.KindReliability])
+		for _, f := range findings {
+			fmt.Printf("    [%-8s %-11s] %s\n", f.Severity, f.Kind, f.Title)
+		}
+	}
+
+	if failOn != "" {
+		gate := shared.SeverityRank(shared.Severity(failOn))
+		over := 0
+		for _, f := range findings {
+			if shared.SeverityRank(f.Severity) >= gate {
+				over++
+			}
+		}
+		if over > 0 {
+			return fmt.Errorf("%d code-quality finding(s) at or above %s", over, failOn)
+		}
+	}
+	return nil
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
@@ -272,6 +364,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  synapse-cli inventory <path>             # per-language code-size inventory (files, code/comment/blank lines, functions) — no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli metrics <path> [--fail-on-complexity N] [--top N]  # per-function cyclomatic+cognitive complexity (needs the synapse-ast sidecar)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli duplication <path> [--min-tokens N] [--fail-on-duplication PCT] [--top N]  # copy-paste detection (blocks, lines, density) — no DB")
+	fmt.Fprintln(os.Stderr, "  synapse-cli quality <path> [--fail-on SEV] [--min-complexity N] [--sarif]  # maintainability + reliability findings (+ duplication, + complexity via synapse-ast) — no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories <dir>        # ingest a local OSV dump into the owned advisory store (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote     # fetch + ingest app ecosystems from the OSV bulk bucket (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-distros # fetch + ingest OS-package advisories (Debian/Alpine) from OSV (large; requires SYNAPSE_DB_DSN)")
