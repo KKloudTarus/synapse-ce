@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
+	"unicode"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
@@ -35,6 +37,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/coverage"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/doctor"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
@@ -81,6 +84,11 @@ func main() {
 		usage()
 	}
 	switch os.Args[1] {
+	case "doctor":
+		if err := runDoctor(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
+			os.Exit(1)
+		}
 	case "scan":
 		runScan()
 	case "sync-advisories":
@@ -150,6 +158,107 @@ func main() {
 	default:
 		usage()
 	}
+}
+
+// runDoctor prints an offline pre-scan readiness report. It never runs a scan, installs tools, or uses
+// the network; tool probes are limited to PATH lookups and cheap version commands.
+func runDoctor(args []string) error {
+	dir := "."
+	pathSet := false
+	jsonOut := false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--json":
+			jsonOut = true
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				return fmt.Errorf("unknown doctor option %q", args[i])
+			}
+			if pathSet {
+				return fmt.Errorf("doctor accepts at most one path")
+			}
+			dir = args[i]
+			pathSet = true
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	rep, err := doctor.Probe(ctx, dir, doctor.Options{})
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(rep)
+	}
+	printDoctorReport(rep)
+	return nil
+}
+
+func printDoctorReport(rep doctor.Report) {
+	fmt.Printf("\nSynapse doctor - %s\n", printable(rep.Target))
+	fmt.Println("  tools:")
+	for _, t := range rep.Tools {
+		state := "missing"
+		if t.Found {
+			state = "found"
+		}
+		version := ""
+		if t.Version != "" {
+			version = " (" + printable(t.Version) + ")"
+		}
+		where := printable(t.Detail)
+		if t.Path != "" {
+			where = printable(t.Path)
+		}
+		if where != "" {
+			fmt.Printf("    %-12s %-7s %s%s\n", printable(t.Name), state, where, version)
+		} else {
+			fmt.Printf("    %-12s %-7s%s\n", printable(t.Name), state, version)
+		}
+	}
+	fmt.Println("  inventory:")
+	if len(rep.Inventory.Markers) == 0 {
+		fmt.Println("    no supported dependency markers found")
+	} else {
+		limit := len(rep.Inventory.Markers)
+		if limit > 12 {
+			limit = 12
+		}
+		for _, m := range rep.Inventory.Markers[:limit] {
+			fmt.Printf("    %-18s %-9s %-10s %s\n", printable(m.Name), printable(m.Kind), printable(m.Ecosystem), printable(m.Path))
+		}
+		if extra := len(rep.Inventory.Markers) - limit; extra > 0 {
+			fmt.Printf("    ... %d more marker(s)\n", extra)
+		}
+	}
+	if len(rep.Inventory.Languages) > 0 {
+		fmt.Print("    languages:")
+		for _, l := range rep.Inventory.Languages {
+			fmt.Printf(" %s=%d", printable(l.Name), l.Files)
+		}
+		fmt.Println()
+	}
+	if rep.Inventory.Truncated {
+		fmt.Println("    inventory truncated at the traversal limit")
+	}
+	fmt.Println("  readiness:")
+	for _, d := range rep.Dimensions {
+		fmt.Printf("    %-13s %-11s %s\n", printable(d.Dimension), d.Status, printable(d.Reason))
+		if d.NextStep != "" {
+			fmt.Printf("                  next: %s\n", printable(d.NextStep))
+		}
+	}
+}
+
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // runInventory prints a per-language code-size inventory for a local source tree (the Phase-0
@@ -781,6 +890,7 @@ func gradeNum(g rating.Grade) float64 {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
+	fmt.Fprintln(os.Stderr, "  synapse-cli doctor [path] [--json]       # offline pre-scan readiness: toolchain, markers, and dimension coverage")
 	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--include-test] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
 	fmt.Fprintln(os.Stderr, "      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")

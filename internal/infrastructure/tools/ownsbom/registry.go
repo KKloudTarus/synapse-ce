@@ -96,6 +96,15 @@ func DefaultRegistry() (*Registry, error) {
 	return New(GoMod{}, NPM{}, Yarn{}, Pnpm{}, PyPI{}, Poetry{}, Pipfile{}, UV{}, Cargo{}, Maven{}, Gradle{}, BuildGradle{}, Gem{}, Composer{}, NuGet{}, Swift{}, Dart{}, Elixir{}, Conda{}, Renv{}, Julia{}, Conan{})
 }
 
+// MarkerEcosystems returns each registry marker mapped to the ecosystem parser that claims it.
+func (r *Registry) MarkerEcosystems() map[string]string {
+	out := make(map[string]string, len(r.byMarker))
+	for marker, parser := range r.byMarker {
+		out[marker] = parser.Ecosystem()
+	}
+	return out
+}
+
 // Generate walks the target directory, parses every recognized manifest with its EcosystemParser, and
 // merges the fragments into a normalized SBOM. Manifests are matched by basename (case-insensitive);
 // unknown files and dependency-cache/VCS directories (node_modules, vendor,.git, …) are skipped. A

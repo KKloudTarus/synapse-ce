@@ -8,6 +8,25 @@ enforcement is exercised, not bypassed. Nothing is persisted.
 
 Build it with `make build`. The binary lands at `./bin/synapse-cli`.
 
+## Doctor
+
+```
+synapse-cli doctor [path] [--json]
+```
+
+`doctor` is an offline pre-scan readiness check. It does not run a scan, install tools, or
+call the network. It reports optional toolchain availability, dependency markers found in the
+target tree, and whether SCA, SAST, secret, misconfig, and code-quality coverage is full,
+partial, or unavailable.
+
+```bash
+# preview what Synapse can analyze before scanning the current tree
+synapse-cli doctor .
+
+# emit structured output for CI or wrapper scripts
+synapse-cli doctor . --json
+```
+
 ## Scan
 
 ```

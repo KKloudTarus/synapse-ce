@@ -67,6 +67,13 @@ func resolveSidecar() string {
 	return resolveSidecarIn(filepath.Dir(exe))
 }
 
+// ResolveSidecar exposes the same zero-configuration sidecar discovery used by Provider. It is useful for
+// read-only preflight surfaces that need to report whether a bundled synapse-ast binary is discoverable
+// without actually parsing a target tree.
+func ResolveSidecar() string {
+	return resolveSidecar()
+}
+
 // resolveSidecarIn returns the bundled sidecar path if a runnable copy exists in exeDir, else the bare
 // name (PATH lookup at exec time). Split out from resolveSidecar so the discovery logic is unit-testable.
 // It requires a regular, executable file: a non-executable stub (0-byte / partial download / wrong perms)
