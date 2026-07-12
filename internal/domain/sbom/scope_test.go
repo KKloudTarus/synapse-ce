@@ -32,6 +32,10 @@ func TestClassifyScope(t *testing.T) {
 		{"cmd/tools.go", "", ScopeDevelopment},                      // dev tooling stub, unchanged
 		{"src/contest/index.ts", "", ScopeProduction},               // "contest" has no ".test."
 		{"internal/domain/finding/finding.go", "", ScopeProduction}, // ordinary Go source
+		// .test./.spec. count as test ONLY on a JS/TS extension — a spec ARTIFACT stays production.
+		{"api/openapi.spec.yaml", "", ScopeProduction}, // OpenAPI spec, not a test
+		{"config/db.spec.json", "", ScopeProduction},   // config artifact, not a test
+		{"web/src/Button.spec.ts", "", ScopeTest},      // real jasmine spec
 	}
 	for _, c := range cases {
 		if got := ClassifyScope(c.loc, c.cdx); got != c.want {

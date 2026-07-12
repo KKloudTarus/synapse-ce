@@ -1297,11 +1297,22 @@ type fileSnippetReader struct{ root string }
 
 func (r fileSnippetReader) Snippet(file string, line, radius int) (string, error) {
 	p := filepath.Join(r.root, filepath.FromSlash(file))
-	// Defense-in-depth: keep the read inside the scanned root even though the path is our own finding's.
-	if rel, err := filepath.Rel(r.root, p); err != nil || strings.HasPrefix(rel, "..") {
+	// Defense-in-depth: keep the read inside the scanned root (the path is our own finding's). Resolve
+	// symlinks on both sides so a link inside the root can't point outside, and match the boundary
+	// precisely so a legitimate name like "..gitkeep" is not rejected.
+	root, err := filepath.EvalSymlinks(r.root)
+	if err != nil {
+		root = r.root
+	}
+	rp, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return "", err // missing/broken file → the coordinator critiques on metadata only
+	}
+	rel, err := filepath.Rel(root, rp)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("snippet path escapes scan root")
 	}
-	data, err := os.ReadFile(p)
+	data, err := os.ReadFile(rp)
 	if err != nil {
 		return "", err
 	}

@@ -68,6 +68,13 @@ SYNAPSE_FP_TRIAGE_ENABLED=true SYNAPSE_FP_TRIAGE_MODEL=<model> \
   synapse-cli scan . --fail-on high --json
 ```
 
+The AI critique reads the target's own source into the prompt, so treat it as a trusted-local convenience:
+on a scan of an **untrusted PR**, a contributor could add a comment that tries to talk the model into
+refuting their finding. The blast radius is bounded — the finding is still reported and in the SARIF/JSON
+(only the `--fail-on` exit code is affected), the model only proposes (a gate exemption, never a sealed
+suppression or a deletion), and the run prints how many findings were held back — but for gating untrusted
+PRs, upload the SARIF to code-scanning (which shows every finding) and treat the AI verdict as advisory.
+
 ## Container image (Docker)
 
 Every release publishes a multi-arch `synapse-cli` image to GHCR that bundles syft and grype, so you can

@@ -241,8 +241,22 @@ func isTestFilename(base string) bool {
 		return true
 	case strings.HasSuffix(base, "_test.rb"), strings.HasSuffix(base, "_spec.rb"): // minitest / RSpec
 		return true
-	case strings.Contains(base, ".test."), strings.Contains(base, ".spec."): // jest / jasmine (foo.test.ts, foo.spec.js)
+	case isJSTestFile(base): // jest / jasmine (foo.test.ts, foo.spec.js)
 		return true
+	}
+	return false
+}
+
+// isJSTestFile matches the jest/jasmine `.test.`/`.spec.` infix ONLY on a JS/TS source extension, so a
+// non-code specification artifact (openapi.spec.yaml, api.spec.json) is not misread as a test file.
+func isJSTestFile(base string) bool {
+	if !strings.Contains(base, ".test.") && !strings.Contains(base, ".spec.") {
+		return false
+	}
+	for _, ext := range []string{".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"} {
+		if strings.HasSuffix(base, ext) {
+			return true
+		}
 	}
 	return false
 }

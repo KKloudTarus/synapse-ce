@@ -59,10 +59,6 @@ type Coordinator struct {
 	concurrency int
 }
 
-var _ interface {
-	Assess(context.Context, []finding.Finding, SourceReader) []Critique
-} = (*Coordinator)(nil)
-
 // New builds a Coordinator. model is the proposer model id; llm must be non-nil.
 func New(llm ports.LLM, model string) *Coordinator {
 	return &Coordinator{
