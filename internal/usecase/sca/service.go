@@ -483,6 +483,9 @@ type AICritique struct {
 	Driver      string `json:"driver"`
 	Confidence  int    `json:"confidence"`
 	SuspectedFP bool   `json:"suspected_fp"`
+	// Verified is true when a DISTINCT verifier model independently confirmed the refutation (two-model
+	// consensus). Omitted when no verifier was configured (single-model triage).
+	Verified bool `json:"verified,omitempty"`
 }
 
 const (
