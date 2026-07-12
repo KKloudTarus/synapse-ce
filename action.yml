@@ -63,7 +63,12 @@ runs:
             | grep -m1 '"tag_name"' | cut -d '"' -f4)"
         fi
         # Only a strict vX.Y.Z[-suffix] tag is allowed, so a crafted `version` input cannot walk the
-        # download path to an arbitrary artifact.
+        # download path to an arbitrary artifact. The case guard rejects any stray character over the
+        # WHOLE value (empty, newline, slash) that a line-oriented grep would miss; the regex fixes shape.
+        case "${tag}" in
+          ""|*[!A-Za-z0-9.+-]*)
+            echo "::error::invalid release tag '${tag}' (input version='${SYNAPSE_VERSION}')" >&2; exit 1 ;;
+        esac
         if ! printf '%s' "${tag}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.+-][0-9A-Za-z.-]+)?$'; then
           echo "::error::refusing non-semver release tag '${tag}' (input version='${SYNAPSE_VERSION}')" >&2
           exit 1
@@ -89,7 +94,7 @@ runs:
         # Download the archive AND the release checksums, then verify BEFORE extracting/executing.
         curl -fsSL -o "${BIN_DIR}/${asset}" "${base}/${asset}"
         curl -fsSL -o "${BIN_DIR}/checksums.txt" "${base}/checksums.txt"
-        want="$(grep " ${asset}\$" "${BIN_DIR}/checksums.txt" | awk '{print $1}')"
+        want="$(awk -v f="${asset}" '$2 == f {print $1}' "${BIN_DIR}/checksums.txt")"
         if [ -z "${want}" ]; then
           echo "::error::no checksum for ${asset} in checksums.txt" >&2; exit 1
         fi
