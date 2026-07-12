@@ -1,6 +1,7 @@
 import { Bot, CheckCircle2, Eye, ListChecks, ListTree, Loader2, Network, Play, ShieldAlert, X, Zap, type LucideIcon } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Card, cn, EmptyState, ErrorState, Spinner } from '../components/ui'
+import { Markdown } from '../components/Markdown'
 import { api, streamAgentSession } from '../lib/api'
 import type { AgentDecision, AgentMessage, AgentPlan, AgentReadiness, AgentSession, PendingApproval } from '../lib/types'
 
@@ -63,19 +64,31 @@ export function AgentTab({ engagementId }: { engagementId: string }) {
     return () => clearInterval(t)
   }, [refresh])
 
+  // startWithGoal starts a NEW goal-scoped session (the agent runs one goal per session — a typed
+  // state machine, not a free-form chat) and selects it. Shared by the top form and the per-session
+  // "follow-up run" affordance, so finishing one run never dead-ends the operator.
+  const startWithGoal = useCallback(
+    async (g: string) => {
+      const goalStr = g.trim()
+      if (!goalStr) return
+      setStarting(true)
+      setError(null)
+      try {
+        const sess = await api.startAgentSession(engagementId, goalStr)
+        setGoal('')
+        setActiveId(sess.id)
+        await refresh()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to start the agent')
+      } finally {
+        setStarting(false)
+      }
+    },
+    [engagementId, refresh],
+  )
+
   async function startAgent() {
-    if (!goal.trim()) return
-    setStarting(true)
-    try {
-      const sess = await api.startAgentSession(engagementId, goal.trim())
-      setGoal('')
-      setActiveId(sess.id)
-      await refresh()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to start the agent')
-    } finally {
-      setStarting(false)
-    }
+    await startWithGoal(goal)
   }
 
   async function decide(actionId: string, approve: boolean) {
@@ -156,7 +169,14 @@ export function AgentTab({ engagementId }: { engagementId: string }) {
           </Card>
           <div className="lg:col-span-2">
             {activeId ? (
-              <SessionTranscript key={activeId} engagementId={engagementId} sessionId={activeId} onChanged={refresh} />
+              <SessionTranscript
+                key={activeId}
+                engagementId={engagementId}
+                sessionId={activeId}
+                onChanged={refresh}
+                onFollowUp={startWithGoal}
+                followUpBusy={starting}
+              />
             ) : (
               <Card title="Transcript">
                 <p className="text-sm text-mutedfg">Select a session to view its transcript.</p>
@@ -275,13 +295,18 @@ function SessionTranscript({
   engagementId,
   sessionId,
   onChanged,
+  onFollowUp,
+  followUpBusy,
 }: {
   engagementId: string
   sessionId: string
   onChanged: () => void
+  onFollowUp: (goal: string) => void
+  followUpBusy: boolean
 }) {
   const [messages, setMessages] = useState<AgentMessage[]>([])
   const [status, setStatus] = useState<string>('running')
+  const [followUp, setFollowUp] = useState('')
   const boxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -363,6 +388,40 @@ function SessionTranscript({
       </div>
       <PlanGraph engagementId={engagementId} sessionId={sessionId} status={status} />
       <DecisionLog engagementId={engagementId} sessionId={sessionId} status={status} />
+      {terminal(status) && (
+        <div className="mt-3 border-t border-border pt-3">
+          <p className="mb-1.5 text-xs text-mutedfg">
+            This run is {status}. The agent runs one goal per session — start a follow-up run to continue this
+            line of work (it opens a fresh session).
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              value={followUp}
+              onChange={(e) => setFollowUp(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing && followUp.trim() && !followUpBusy) {
+                  onFollowUp(followUp)
+                  setFollowUp('')
+                }
+              }}
+              placeholder="Follow-up goal, e.g. “now triage the SQLi candidates one by one”"
+              aria-label="Follow-up goal"
+              className="flex-1 rounded-lg border border-border bg-elevated px-3 py-2 text-sm text-foreground placeholder:text-mutedfg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
+            />
+            <Button
+              loading={followUpBusy}
+              disabled={!followUp.trim()}
+              onClick={() => {
+                onFollowUp(followUp)
+                setFollowUp('')
+              }}
+              className="px-3 py-2"
+            >
+              <Play className="size-4" /> Follow up
+            </Button>
+          </div>
+        </div>
+      )}
     </Card>
   )
 }
@@ -517,7 +576,64 @@ function MessageRow({ m }: { m: AgentMessage }) {
           → {m.toolCalls.map((c) => c.name).join(', ')}
         </div>
       )}
-      {m.content && <div className="whitespace-pre-wrap break-words font-mono text-xs text-foreground">{m.content}</div>}
+      {m.content &&
+        (m.role === 'tool' ? (
+          // Tool output is untrusted + often verbose JSON; collapse it behind a one-line summary rather
+          // than dumping a raw blob at the operator.
+          <ToolResult content={m.content} />
+        ) : m.role === 'assistant' ? (
+          // The model writes markdown prose; render it (never as raw HTML) instead of leaking the syntax.
+          <Markdown className="text-xs">{m.content}</Markdown>
+        ) : (
+          <div className="whitespace-pre-wrap break-words text-xs text-foreground">{m.content}</div>
+        ))}
     </div>
   )
+}
+
+// ToolResult presents an (untrusted) tool message: a one-line human summary, expandable to pretty-printed
+// JSON. It never executes or trusts the content — just formats it.
+function ToolResult({ content }: { content: string }) {
+  const parsed = safeParse(content)
+  const pretty = parsed !== undefined ? JSON.stringify(parsed, null, 2) : null
+  return (
+    <details className="text-xs">
+      <summary className="cursor-pointer select-none rounded text-mutedfg marker:text-mutedfg hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40">
+        {toolSummary(parsed, content)}
+      </summary>
+      <pre className="mt-1 max-h-64 overflow-auto rounded-md border border-border bg-bg p-2 font-mono text-[11px] leading-relaxed text-mutedfg">
+        {pretty ?? content}
+      </pre>
+    </details>
+  )
+}
+
+function safeParse(s: string): unknown {
+  try {
+    return JSON.parse(s)
+  } catch {
+    return undefined
+  }
+}
+
+// toolSummary builds a one-line, human-readable headline for a tool result so the operator sees WHAT it
+// returned without expanding: an array's length, a notable headline field, or a field count.
+function toolSummary(parsed: unknown, raw: string): string {
+  const suffix = ' — click to expand'
+  if (Array.isArray(parsed)) return `${parsed.length} item${parsed.length === 1 ? '' : 's'}${suffix}`
+  if (parsed && typeof parsed === 'object') {
+    const o = parsed as Record<string, unknown>
+    for (const k of ['note', 'summary', 'state', 'status', 'verdict', 'message']) {
+      const v = o[k]
+      if (typeof v === 'string' && v.trim()) return clipText(v.trim(), 120) + suffix
+    }
+    const n = Object.keys(o).length
+    return `result (${n} field${n === 1 ? '' : 's'})${suffix}`
+  }
+  const t = raw.trim()
+  return (t ? clipText(t, 120) : 'result') + suffix
+}
+
+function clipText(s: string, n: number): string {
+  return s.length <= n ? s : s.slice(0, n) + '…'
 }
