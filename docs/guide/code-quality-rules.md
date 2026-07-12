@@ -53,6 +53,35 @@ new rule declares the quality it impacts so the rating engine stays honest.
 Safe), not the exploitability gate — see the hotspots issue
 [#179](https://github.com/KKloudTarus/synapse-ce/issues/179).
 
+## Depth: parity targets + rule categories
+
+A serious code-quality profile carries **hundreds** of rules per major language, not a dozen. Our
+built-in profiles target real parity with mature analyzers. A flat list of 300+ rules is unmaintainable,
+so every language pack is planned as a set of **rule categories (families)**, each with a target count
+that sums to the language's parity target. Contributors claim a *category* within a language and fill it
+out; reviewers check the family is complete, not just that "some rules exist".
+
+**Standard rule families** (apply across languages; a language issue distributes its target across these):
+
+| Family | Covers | Typical types |
+| --- | --- | --- |
+| `bugs` | logic/correctness defects (wrong comparisons, off-by-one, always-true conditions, unreachable code) | bug |
+| `err` | exception & error handling (swallowed errors, over-broad catch, error in finally) | bug, code_smell |
+| `res` | resource & memory management (unclosed handles, leaks, use-after-free, double-free) | bug |
+| `conc` | concurrency / async (races, deadlock shapes, unawaited promises, goroutine leaks) | bug |
+| `inj` | injection & untrusted input (SQLi, command, path traversal, XXE, deserialization, SSRF, XSS) | vulnerability |
+| `crypto` | cryptography & secrets (weak hash/cipher, hardcoded keys, bad randomness, TLS misconfig) | vulnerability, security_hotspot |
+| `authz` | authentication / session / access control | vulnerability, security_hotspot |
+| `hotspot` | security-sensitive code to **review** (not asserted exploitable) | security_hotspot |
+| `api` | library/contract misuse (deprecated/dangerous API, wrong arguments, misused stdlib) | bug, code_smell |
+| `types` | type & null safety (null deref, unchecked casts, narrowing, `any`) | bug, code_smell |
+| `perf` | performance anti-patterns (allocation in loops, needless copies) | code_smell |
+| `maint` | maintainability: cyclomatic/cognitive complexity, size, duplication, dead/redundant code, naming, comments, docs, modernization, test smells | code_smell |
+
+Each language issue carries a **category-count table** (family → target) whose total is the language's
+parity target. Ship a family at a time; each rule still needs metadata + a compliant/non-compliant golden
+test (see the workflow below).
+
 ## Rule schema
 
 Rules are catalogued as first-class entities (see [#182](https://github.com/KKloudTarus/synapse-ce/issues/182)):
@@ -99,8 +128,27 @@ analyzer) before AST rules are possible are noted in the matrix below.
 
 ## Language source matrix
 
-Rule-count targets are our own scope goals (seed → longer-term), informed by how much ground each
-language covers in mature analyzers. Start with the seed set. Every source below is openly published.
+**Parity targets.** These are our own built-in-profile targets, set to match the depth of a mature
+analyzer's default profile (not a token seed). Each language issue decomposes its target across the rule
+families above. Ship families incrementally toward the target; every rule is clean-room + golden-tested.
+
+| Language | Parity target (rules) | Notes |
+| --- | --- | --- |
+| Java | ~450 | broadest surface; concurrency + API misuse heavy |
+| JavaScript/TypeScript | ~400 | one pack; shared JS rules + TS-only type rules |
+| C# | ~300 | + VB.NET later shares much of the catalog |
+| Python | ~300 | dynamic-language bug + API-misuse heavy |
+| C++ | ~180 | memory/resource + object-lifetime heavy |
+| C | ~120 | memory safety + CERT C core |
+| Rust | ~80 | Clippy-category coverage + unsafe/security |
+| Node.js | ~50 | server-side security subset (complements JS/TS) |
+| Go | ~40 | correctness + concurrency + gosec-class security |
+| ARM | ~35 | cloud misconfig |
+| CSS | ~30 | correctness + maintainability |
+| Docker | ~30 | image hardening + hygiene |
+| CloudFormation | ~30 | cloud misconfig |
+
+Every source below is openly published; cite the concept origin per rule.
 
 | Language | Detection | Parser status | Authoritative sources |
 | --- | --- | --- | --- |
