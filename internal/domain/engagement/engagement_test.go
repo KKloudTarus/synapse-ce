@@ -2,6 +2,7 @@ package engagement
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -113,9 +114,22 @@ func TestSetScope(t *testing.T) {
 	if len(e.Scope.InScope) != 1 || len(e.Scope.OutOfScope) != 1 || !e.Audit.UpdatedAt.Equal(now) {
 		t.Errorf("scope not set / UpdatedAt not stamped: %+v", e.Scope)
 	}
-	// A malformed target is rejected and the scope is left unchanged-or-erroring.
+	if err := e.SetScope([]Target{{Kind: TargetDomain, Value: "WWW.Example.COM."}, {Kind: TargetURL, Value: "HTTPS://app.example.com/a"}}, nil, now); err != nil {
+		t.Fatalf("canonical scope rejected: %v", err)
+	}
+	if got, want := e.Scope.InScope[0].Value, "www.example.com"; got != want {
+		t.Errorf("canonical domain = %q, want %q", got, want)
+	}
+	if got, want := e.Scope.InScope[1].Value, "https://app.example.com/a"; got != want {
+		t.Errorf("canonical URL = %q, want %q", got, want)
+	}
+	before := e.Scope
+	// A malformed target is rejected without partially replacing the existing scope.
 	if err := e.SetScope([]Target{{Kind: TargetKind("bogus"), Value: "x"}}, nil, now); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("malformed scope: want ErrValidation, got %v", err)
+	}
+	if !reflect.DeepEqual(e.Scope, before) {
+		t.Errorf("scope changed after rejected update: got %+v, want %+v", e.Scope, before)
 	}
 }
 

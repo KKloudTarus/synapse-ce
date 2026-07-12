@@ -26,7 +26,8 @@ domain  ←  usecase  ←  adapter / infrastructure
 ```
 
 - `internal/domain/*` imports only `domain` + the standard library – no frameworks, DB, or
-  tools.
+  tools. The sole sanctioned exception is the pure-Go `golang.org/x/net/idna` package used for
+  standards-based canonical domain identity; this does not permit other third-party domain dependencies.
 - `internal/usecase/*` imports `domain` and `usecase/ports` (interfaces) – never a concrete
   adapter or infrastructure package.
 - All external I/O (database, tools, storage, sandbox) goes through **ports** in

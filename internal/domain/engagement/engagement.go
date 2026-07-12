@@ -156,14 +156,26 @@ func (e *Engagement) Transition(to Status, now time.Time) error {
 // UpdatedAt. Every target must have a known kind and a non-empty value, so the
 // execution gate never matches against a malformed entry.
 func (e *Engagement) SetScope(in, out []Target, now time.Time) error {
-	for _, group := range [][]Target{in, out} {
-		for _, t := range group {
-			if err := t.Validate(); err != nil {
-				return err
+	normalize := func(targets []Target) ([]Target, error) {
+		canonical := make([]Target, 0, len(targets))
+		for _, t := range targets {
+			normalized, err := NormalizeTarget(t, true)
+			if err != nil {
+				return nil, err
 			}
+			canonical = append(canonical, normalized)
 		}
+		return canonical, nil
 	}
-	e.Scope = Scope{InScope: in, OutOfScope: out}
+	canonicalIn, err := normalize(in)
+	if err != nil {
+		return err
+	}
+	canonicalOut, err := normalize(out)
+	if err != nil {
+		return err
+	}
+	e.Scope = Scope{InScope: canonicalIn, OutOfScope: canonicalOut}
 	e.Audit.UpdatedAt = now
 	return nil
 }

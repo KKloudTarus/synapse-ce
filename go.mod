@@ -13,6 +13,7 @@ require (
 	github.com/phpdave11/gofpdf v1.4.3
 	github.com/pressly/goose/v3 v3.27.2
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
+	golang.org/x/net v0.56.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/tools v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -58,7 +59,6 @@ require (
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/image v0.43.0 // indirect
 	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	gopkg.in/ini.v1 v1.67.2 // indirect

@@ -12,7 +12,7 @@ domain  <-  usecase  <-  adapter / infrastructure
 
 | Layer | Path | May import |
 | --- | --- | --- |
-| domain | `internal/domain/*` | only domain and the standard library |
+| domain | `internal/domain/*` | only domain and the standard library; `golang.org/x/net/idna` is the sole sanctioned pure-Go standards exception for canonical IDNA processing |
 | usecase | `internal/usecase/*` | domain and the ports it defines |
 | adapter | `internal/adapter/*` | usecase and domain |
 | infrastructure | `internal/infrastructure/*` | the ports it implements, plus domain |

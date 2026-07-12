@@ -1181,17 +1181,22 @@ func (s *Service) LatestJob(ctx context.Context, engagementID shared.ID) (ports.
 // gateAndAudit enforces scope + the authorization window and records the
 // append-only audit entry, all BEFORE any tool runs, by delegating to the shared
 // execution guard – the same server-side chokepoint recon uses, never an
-// SCA-private copy. The SCA target is matched as a repo (value-exact). Returns
-// the scan timestamp.
+// SCA-private copy. Source targets are matched as repositories; container
+// acquisition is matched as an image so registry URL carve-outs remain effective.
+// Returns the scan timestamp.
 func (s *Service) gateAndAudit(ctx context.Context, actor string, engagementID shared.ID, req ports.AcquireRequest, opts ScanOptions) (time.Time, error) {
 	if s.guard == nil {
 		return time.Time{}, fmt.Errorf("%w: execution guard not configured", shared.ErrValidation)
+	}
+	targetKind := engagement.TargetRepo
+	if req.Kind == ports.TargetImage {
+		targetKind = engagement.TargetImage
 	}
 	return s.guard.Authorize(ctx, execution.Request{
 		Actor:        actor,
 		EngagementID: engagementID,
 		Action:       "sca.scan",
-		Target:       engagement.Target{Kind: engagement.TargetRepo, Value: req.Value},
+		Target:       engagement.Target{Kind: targetKind, Value: req.Value},
 		Metadata:     map[string]string{"kind": kindOrLocal(req.Kind), "engagement": engagementID.String(), "mode": opts.Mode},
 	})
 }

@@ -1,12 +1,8 @@
 // Package recon provides ports.ReconTool adapters: each knows one recon binary's
 // argv and output format. Arguments are built ONLY from a validated, in-scope
-// target – never from free-form strings – and every
-// target value is checked so it cannot be smuggled in as a flag. Output is parsed
-// from the tools' JSON-lines format into domain recon.Results.
-//
-// Tools are registered with the recon use case; capability-sensitive ones
-// (naabu/nuclei – raw sockets) are flagged so the use case keeps them behind the
-// lab-only / sandbox gate.
+// target – never from free-form strings – and every target value is checked so
+// it cannot be smuggled in as a flag. Output is parsed from the tools' JSON-lines
+// format into canonical domain recon.Results.
 package recon
 
 import (
@@ -14,8 +10,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strconv"
-	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/recon"
@@ -63,10 +59,11 @@ func (Subfinder) Parse(stdout []byte) ([]recon.Result, error) {
 		Host string `json:"host"`
 	}
 	return parseJSONLines(stdout, func(r rec) (recon.Result, bool) {
-		if r.Host == "" {
+		host, err := engagement.NormalizeDomain(r.Host)
+		if err != nil {
 			return recon.Result{}, false
 		}
-		return recon.Result{Kind: recon.ResultSubdomain, Value: strings.ToLower(r.Host)}, true
+		return recon.Result{Kind: recon.ResultSubdomain, Value: host}, true
 	})
 }
 
@@ -88,11 +85,11 @@ func (HTTPX) Accepts(k engagement.TargetKind) bool {
 }
 
 func (HTTPX) BuildArgs(t engagement.Target) (ports.ToolSpec, error) {
-	host, err := safeHost(t)
+	value, err := safeHTTPXTarget(t)
 	if err != nil {
 		return ports.ToolSpec{}, err
 	}
-	return ports.ToolSpec{Name: "httpx", Args: []string{"-silent", "-json", "-u", host}}, nil
+	return ports.ToolSpec{Name: "httpx", Args: []string{"-silent", "-json", "-u", value}}, nil
 }
 
 func (HTTPX) Parse(stdout []byte) ([]recon.Result, error) {
@@ -102,18 +99,19 @@ func (HTTPX) Parse(stdout []byte) ([]recon.Result, error) {
 		Title  string `json:"title"`
 	}
 	return parseJSONLines(stdout, func(r rec) (recon.Result, bool) {
-		if r.URL == "" {
+		identity, err := engagement.NormalizeURL(r.URL)
+		if err != nil {
 			return recon.Result{}, false
 		}
 		detail := strconv.Itoa(r.Status)
 		if r.Title != "" {
 			detail += " · " + r.Title
 		}
-		return recon.Result{Kind: recon.ResultURL, Value: r.URL, Detail: detail}, true
+		return recon.Result{Kind: recon.ResultURL, Value: identity.URL, Detail: detail}, true
 	})
 }
 
-// ---- naabu: port scan (capability-sensitive – wants CAP_NET_RAW; lab-only) ----
+// ---- naabu: port scan (capability-sensitive – no raw sockets) ----
 
 type Naabu struct{}
 
@@ -140,9 +138,7 @@ func (Naabu) BuildArgs(t engagement.Target) (ports.ToolSpec, error) {
 	// iptables egress filter AND the connect() eBPF log – a scope-bypass + a forensic
 	// blind spot for a *compromised* tool binary. So Synapse grants NO capability: a connect
 	// scan uses ordinary TCP sockets, which the egress filter constrains and the connect4/6
-	// hook logs. Scope integrity > scan stealth for an authorized-pentest platform. (The
-	// runner's allowlist still permits ONLY CAP_NET_RAW should a future contained raw-socket
-	// design need it; today nothing requests it.)
+	// hook logs. Scope integrity > scan stealth for an authorized-pentest platform.
 	return ports.ToolSpec{Name: "naabu", Args: []string{"-silent", "-json", "-s", "c", "-host", host}}, nil
 }
 
@@ -157,43 +153,54 @@ func (Naabu) Parse(stdout []byte) ([]recon.Result, error) {
 		if hostpart == "" {
 			hostpart = r.IP
 		}
-		if hostpart == "" || r.Port == 0 {
+		if hostpart == "" || r.Port <= 0 || r.Port > 65535 {
 			return recon.Result{}, false
 		}
-		return recon.Result{Kind: recon.ResultPort, Value: hostpart + ":" + strconv.Itoa(r.Port), Detail: r.IP}, true
+		_, _, endpoint, err := engagement.NormalizeEndpoint(net.JoinHostPort(hostpart, strconv.Itoa(r.Port)))
+		if err != nil {
+			return recon.Result{}, false
+		}
+		ip, err := engagement.NormalizeHost(r.IP)
+		if err != nil {
+			ip = ""
+		}
+		return recon.Result{Kind: recon.ResultPort, Value: endpoint, Detail: ip}, true
 	})
 }
 
 // ---- shared helpers ----
 
-// safeHost extracts a clean, single-token host/value from an in-scope target and
-// guarantees it cannot be interpreted as a CLI flag. Even though everything is
-// passed as an argv array (no shell), a value beginning with "-" could be parsed by
-// the tool as an option – so we reject it (defense against flag injection via a
-// crafted scope entry).
+// safeHost canonicalizes a non-URL target into a single argv token and keeps the
+// adapter-level defense-in-depth guard against option injection.
 func safeHost(t engagement.Target) (string, error) {
-	v := strings.TrimSpace(t.Value)
-	// reduce a URL scope entry to its host
-	if i := strings.Index(v, "://"); i >= 0 {
-		v = v[i+3:]
-		if j := strings.IndexAny(v, "/?#"); j >= 0 {
-			v = v[:j]
-		}
+	if err := engagement.ValidateTargetValue(t.Value); err != nil {
+		return "", err
 	}
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return "", fmt.Errorf("%w: empty recon target", shared.ErrValidation)
+	if t.Kind == engagement.TargetURL {
+		return "", fmt.Errorf("%w: URL target requires HTTPX URL handling", shared.ErrValidation)
 	}
-	if strings.HasPrefix(v, "-") {
-		return "", fmt.Errorf("%w: recon target may not start with '-' (flag injection)", shared.ErrValidation)
+	normalized, err := engagement.NormalizeTarget(t, false)
+	if err != nil {
+		return "", err
 	}
-	if strings.ContainsAny(v, " \t\n\r") {
-		return "", fmt.Errorf("%w: recon target may not contain whitespace", shared.ErrValidation)
-	}
-	return v, nil
+	return normalized.Value, nil
 }
 
-// parseJSONLines decodes one JSON object per line (the projectdiscovery -json
+// safeHTTPXTarget preserves the canonical URL, including its path, scheme, and
+// port, when an operator selected a URL scope. Bare domain/IP targets remain
+// host-based HTTPX inputs.
+func safeHTTPXTarget(t engagement.Target) (string, error) {
+	if err := engagement.ValidateTargetValue(t.Value); err != nil {
+		return "", err
+	}
+	normalized, err := engagement.NormalizeTarget(t, false)
+	if err != nil {
+		return "", err
+	}
+	return normalized.Value, nil
+}
+
+// parseJSONLines decodes one JSON object per line (the ProjectDiscovery -json
 // format), skipping blank/non-JSON noise lines, and maps each record to a Result.
 func parseJSONLines[T any](stdout []byte, fn func(T) (recon.Result, bool)) ([]recon.Result, error) {
 	var out []recon.Result
@@ -206,7 +213,7 @@ func parseJSONLines[T any](stdout []byte, fn func(T) (recon.Result, bool)) ([]re
 		}
 		var rec T
 		if err := json.Unmarshal(line, &rec); err != nil {
-			continue // tolerate noise/banner lines
+			continue // diagnostics/schema drift are TODO item 5
 		}
 		if r, ok := fn(rec); ok {
 			out = append(out, r)

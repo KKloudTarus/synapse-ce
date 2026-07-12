@@ -283,6 +283,26 @@ func TestScanOutOfScopeForbidden(t *testing.T) {
 	}
 }
 
+func TestScanImageDeniedByRegistryURLCarveOut(t *testing.T) {
+	eng := engagementWithScope(t)
+	eng.Scope = engdom.Scope{
+		InScope:    []engdom.Target{{Kind: engdom.TargetImage, Value: "registry.example/team/app:1"}},
+		OutOfScope: []engdom.Target{{Kind: engdom.TargetURL, Value: "https://registry.example/private"}},
+	}
+	acq := &fakeAcquirer{dir: "/tmp/ws"}
+	svc := newSvc(&fakeEngRepo{eng: eng}, fakeClock{t: time.Unix(0, 0).UTC()}, acq, &fakeAudit{}, &fakeDetector{})
+
+	_, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{
+		Kind: ports.TargetImage, Value: "registry.example/team/app:1",
+	})
+	if !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("registry URL carve-out error = %v, want ErrForbidden", err)
+	}
+	if acq.called {
+		t.Error("image acquirer must not run for a denied registry")
+	}
+}
+
 func TestScanDebugTraceCapturesVulnerabilitySourceFailure(t *testing.T) {
 	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
 	svc := newSvcWithSources(repo, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{}, []ports.DetectionSource{failingVuln{err: errors.New("database unavailable")}})

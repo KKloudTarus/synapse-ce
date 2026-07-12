@@ -233,10 +233,14 @@ func (r *EngagementRepository) loadScope(ctx context.Context, id shared.ID) (eng
 			return engagement.Scope{}, fmt.Errorf("scan scope: %w", err)
 		}
 		t := engagement.Target{Kind: engagement.TargetKind(kind), Value: value}
+		normalized, err := engagement.NormalizeTarget(t, true)
+		if err != nil {
+			return engagement.Scope{}, fmt.Errorf("normalize stored scope target kind=%q value=%q: %w", kind, value, err)
+		}
 		if inScope {
-			scope.InScope = append(scope.InScope, t)
+			scope.InScope = append(scope.InScope, normalized)
 		} else {
-			scope.OutOfScope = append(scope.OutOfScope, t)
+			scope.OutOfScope = append(scope.OutOfScope, normalized)
 		}
 	}
 	return scope, rows.Err()

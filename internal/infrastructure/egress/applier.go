@@ -184,10 +184,10 @@ func (a *Applier) Setup(ctx context.Context, name string, idx int, p ports.Egres
 	// dynamic subdomain pinning is a follow-up).
 	denyRules := filterRules(p.Rules, false)
 	allowRules := filterRules(p.Rules, true)
-	hosts, allowDomainRules := a.resolvePins(ctx, p.AllowDomains)
+	hosts, allowDomainRules := a.resolvePins(ctx, domainRules(p.AllowDomains, p.AllowDomainRules))
 	allowRules = append(allowRules, allowDomainRules...)
 	ns.AllowedRules = allowRules // expose the resolved allow-set for the connection-observer verdict
-	if _, deny := a.resolvePins(ctx, p.DenyDomains); len(deny) > 0 {
+	if _, deny := a.resolvePins(ctx, domainRules(p.DenyDomains, p.DenyDomainRules)); len(deny) > 0 {
 		denyRules = append(denyRules, deny...)
 	}
 
@@ -223,25 +223,36 @@ func (a *Applier) Setup(ctx context.Context, name string, idx int, p ports.Egres
 	return ns, nil
 }
 
+// domainRules combines backwards-compatible hostname-wide rules with structured
+// hostname-and-port rules. The structured form keeps URL authorization's effective
+// port through host-side resolution and into the kernel rule set.
+func domainRules(domains []string, structured []ports.DomainRule) []ports.DomainRule {
+	out := make([]ports.DomainRule, 0, len(domains)+len(structured))
+	for _, host := range domains {
+		out = append(out, ports.DomainRule{Host: host})
+	}
+	return append(out, structured...)
+}
+
 // resolvePins resolves each non-wildcard domain on the host and returns pinned
 // /etc/hosts lines + the matching allow-by-IP rules. A domain that fails to resolve is
 // skipped (fail-closed: it simply stays unreachable). Wildcards can't be pre-resolved.
-func (a *Applier) resolvePins(ctx context.Context, domains []string) (hosts string, rules []ports.EgressRule) {
+func (a *Applier) resolvePins(ctx context.Context, domains []ports.DomainRule) (hosts string, rules []ports.EgressRule) {
 	var b strings.Builder
 	seen := map[string]bool{}
-	for _, d := range domains {
-		d = strings.TrimSpace(d)
-		if d == "" || strings.ContainsAny(d, "*") {
+	for _, domain := range domains {
+		host := strings.TrimSpace(domain.Host)
+		if host == "" || strings.Contains(host, "*") {
 			continue
 		}
-		addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", d)
+		addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 		if err != nil {
 			continue
 		}
 		for _, ip := range addrs {
 			ip = ip.Unmap()
-			rules = append(rules, ports.EgressRule{Allow: true, Net: netip.PrefixFrom(ip, ip.BitLen())})
-			line := ip.String() + " " + d
+			rules = append(rules, ports.EgressRule{Allow: true, Net: netip.PrefixFrom(ip, ip.BitLen()), Ports: domain.Ports})
+			line := ip.String() + " " + host
 			if !seen[line] {
 				b.WriteString(line + "\n")
 				seen[line] = true

@@ -239,6 +239,38 @@ func TestExportAttestsAndImportVerifiesOrigin(t *testing.T) {
 	}
 }
 
+func TestImportCanonicalizesAndValidatesScope(t *testing.T) {
+	svc, engRepo, findRepo, ev := setup(t)
+	seedEngagement(t, engRepo, findRepo, ev)
+	ctx := context.Background()
+	bundle, err := svc.Export(ctx, "alice", "", "e1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle.Engagement.Scope.InScope[0].Value = "Example.COM."
+	imported, err := svc.Import(ctx, "alice", "", bundle)
+	if err != nil {
+		t.Fatalf("import canonical scope: %v", err)
+	}
+	if got := imported.Scope.InScope[0].Value; got != "example.com" {
+		t.Errorf("imported scope = %q, want canonical example.com", got)
+	}
+
+	invalid, err := svc.Export(ctx, "alice", "", "e1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid.Engagement.Scope.OutOfScope = []engagement.Target{{Kind: engagement.TargetDomain, Value: "not a host"}}
+	before, _ := engRepo.List(ctx, "")
+	if _, err := svc.Import(ctx, "alice", "", invalid); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("invalid imported scope error = %v, want ErrValidation", err)
+	}
+	after, _ := engRepo.List(ctx, "")
+	if len(after) != len(before) {
+		t.Errorf("invalid scope import wrote an engagement: before=%d after=%d", len(before), len(after))
+	}
+}
+
 func TestImportRejectsUnknownVersion(t *testing.T) {
 	svc, engRepo, findRepo, ev := setup(t)
 	seedEngagement(t, engRepo, findRepo, ev)

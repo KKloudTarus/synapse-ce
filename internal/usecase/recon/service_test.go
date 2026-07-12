@@ -613,4 +613,11 @@ func TestRunRecordsContainmentPosture(t *testing.T) {
 	if !strings.HasPrefix(got2.Containment, "sandboxed-live") || !strings.Contains(got2.Containment, "egress-restricted") {
 		t.Errorf("sandboxed run posture = %q, want sandboxed-live egress-restricted", got2.Containment)
 	}
+
+	profile := h2.svc.buildContainmentProfile(subfinderTool(), &ports.EgressPolicy{
+		AllowDomainRules: []ports.DomainRule{{Host: "example.com", Ports: []uint16{443}}},
+	})
+	if profile.EgressAllowDomains != 1 || !strings.Contains(profile.Summary(), "1 destination(s)") {
+		t.Errorf("structured URL hostname omitted from containment profile: %+v / %q", profile, profile.Summary())
+	}
 }

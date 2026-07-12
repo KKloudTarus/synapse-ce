@@ -56,6 +56,35 @@ func TestEngagementRepository(t *testing.T) {
 		t.Errorf("scope round-trip wrong: %+v", got.Scope)
 	}
 
+	// Simulate legacy rows written before canonical scope storage. Valid values are
+	// canonicalized in memory; invalid rows make the engagement unloadable rather
+	// than silently dropping an out-of-scope restriction.
+	if _, err := pool.Exec(ctx,
+		`UPDATE scope_targets SET value='Secret.IO.' WHERE engagement_id=$1 AND in_scope=false`,
+		id.String()); err != nil {
+		t.Fatalf("seed legacy scope spelling: %v", err)
+	}
+	got, err = repo.GetByID(ctx, id)
+	if err != nil {
+		t.Fatalf("get with canonicalizable legacy scope: %v", err)
+	}
+	if len(got.Scope.OutOfScope) != 1 || got.Scope.OutOfScope[0].Value != "secret.io" {
+		t.Fatalf("legacy scope was not canonicalized: %+v", got.Scope.OutOfScope)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE scope_targets SET value='not a host' WHERE engagement_id=$1 AND in_scope=false`,
+		id.String()); err != nil {
+		t.Fatalf("seed invalid legacy scope: %v", err)
+	}
+	if _, err := repo.GetByID(ctx, id); err == nil {
+		t.Fatal("invalid persisted scope must fail engagement loading")
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE scope_targets SET value='secret.io' WHERE engagement_id=$1 AND in_scope=false`,
+		id.String()); err != nil {
+		t.Fatalf("restore scope row: %v", err)
+	}
+
 	list, err := repo.List(ctx, "")
 	if err != nil {
 		t.Fatalf("list: %v", err)

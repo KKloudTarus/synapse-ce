@@ -1,14 +1,10 @@
 package engagement
 
 import (
-	"fmt"
 	"net/netip"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
-
-	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 // Scope defines what is in and out of bounds for an engagement.
@@ -36,96 +32,164 @@ type Target struct {
 	Value string
 }
 
-// Validate reports whether the target has a known kind and a non-empty value.
-// Used when scope is created or edited so the gate never matches against a
-// malformed entry.
+// Validate reports whether the target is a well-formed scope entry. Network
+// targets use the same canonical parsing contract used at authorization and
+// process-execution boundaries.
 func (t Target) Validate() error {
-	v := strings.TrimSpace(t.Value)
-	if v == "" {
-		return fmt.Errorf("%w: scope target value is required", shared.ErrValidation)
-	}
-	switch t.Kind {
-	case TargetCIDR:
-		if _, err := netip.ParsePrefix(v); err != nil {
-			return fmt.Errorf("%w: invalid CIDR %q", shared.ErrValidation, t.Value)
-		}
-	case TargetIP:
-		if _, err := netip.ParseAddr(v); err != nil {
-			return fmt.Errorf("%w: invalid IP address %q", shared.ErrValidation, t.Value)
-		}
-	case TargetDomain, TargetURL, TargetRepo, TargetImage:
-		// non-empty value is sufficient for these kinds
-	default:
-		return fmt.Errorf("%w: unknown scope target kind %q", shared.ErrValidation, t.Kind)
-	}
-	return nil
+	_, err := NormalizeTarget(t, true)
+	return err
 }
 
-// Allows reports whether a raw target value is permitted by this scope. It is a
-// convenience for value-only callers (SCA repo/path/URL targets): the value is
-// matched exactly, plus host-centric against any host/CIDR/wildcard scope entry.
-// Out-of-scope matches always win. Prefer AllowsTarget for kind-aware requests.
+// Allows infers the request kind and reports whether a raw target value is
+// permitted. It preserves kind-aware repository containment and network matching;
+// callers that already know the kind should use AllowsTarget directly.
 func (s Scope) Allows(value string) bool {
-	return s.AllowsTarget(Target{Value: value})
+	return s.AllowsTarget(Target{Kind: InferTargetKind(value), Value: value})
 }
 
-// AllowsTarget reports whether the requested target is permitted (host-centric,
-// CIDR/wildcard-aware). Matching is value-exact first (preserves
-// SCA repo/image semantics), then kind-aware against each scope entry: a CIDR
-// entry contains an IP, a `*.example.com` entry matches subdomains, a domain
-// entry matches its exact host, and a URL entry matches by host. Out-of-scope
-// always wins over in-scope (fail closed). Enforced server-side before any tool
-// runs.
+// AllowsTarget reports whether the requested target is permitted. In-scope URL
+// entries authorize only their canonical scheme, host, and effective port. An
+// out-of-scope URL is intentionally broader: it denies its host for every request
+// kind, scheme, and port. Out-of-scope always wins, and an invalid deny entry makes
+// the scope unenforceable and therefore denies every request. Enforced server-side
+// before any tool runs.
 func (s Scope) AllowsTarget(req Target) bool {
 	if strings.TrimSpace(req.Value) == "" {
 		return false
 	}
 	for _, t := range s.OutOfScope {
-		if matchScopeTarget(t, req) {
+		if matchesDenyTarget(t, req) {
 			return false
 		}
 	}
 	for _, t := range s.InScope {
-		if matchScopeTarget(t, req) {
+		if matchesAllowTarget(t, req) {
 			return true
 		}
 	}
 	return false
 }
 
-// matchScopeTarget reports whether a requested target matches a single scope
-// entry. Exact value equality is tried first (case-insensitive, trimmed) so
-// repo/image/local targets and identical entries always match regardless of
-// kind; then the entry's kind drives host-centric matching.
-func matchScopeTarget(scopeT, req Target) bool {
-	sv := strings.TrimSpace(strings.ToLower(scopeT.Value))
-	if sv == "" {
+// matchesDenyTarget applies the conservative carve-out semantics. A malformed
+// deny cannot be enforced reliably, so it matches every request. URL denies are
+// host-wide even though URL allows are scheme-and-port specific.
+func matchesDenyTarget(scopeT, req Target) bool {
+	normalized, err := NormalizeTarget(scopeT, true)
+	if err != nil {
+		return true
+	}
+	if normalized.Kind == TargetURL {
+		identity, err := NormalizeURL(normalized.Value)
+		return err == nil && identity.Host == targetHost(req)
+	}
+	if normalized.Kind == TargetCIDR && req.Kind == TargetCIDR {
+		denied, err := netip.ParsePrefix(normalized.Value)
+		if err != nil {
+			return true
+		}
+		requested, err := netip.ParsePrefix(strings.TrimSpace(req.Value))
+		return err == nil && prefixesOverlap(denied, requested)
+	}
+	return matchScopeTarget(normalized, req)
+}
+
+func targetHost(t Target) string {
+	if t.Kind == TargetImage {
+		return imageRegistryHost(t.Value)
+	}
+	return hostOf(t.Value)
+}
+
+// imageRegistryHost mirrors container reference registry selection: an explicit
+// first path component containing '.' or ':' (or localhost) is the registry;
+// otherwise the unqualified reference uses Docker Hub.
+func imageRegistryHost(value string) string {
+	ref := strings.TrimSpace(value)
+	if ref == "" || strings.ContainsAny(ref, " \t\r\n") {
+		return ""
+	}
+	i := strings.IndexByte(ref, '/')
+	if i <= 0 {
+		return "docker.io"
+	}
+	first := ref[:i]
+	if first != "localhost" && !strings.ContainsAny(first, ".:") {
+		return "docker.io"
+	}
+	host, _, _, err := NormalizeEndpoint(first)
+	if err == nil {
+		return host
+	}
+	host, err = NormalizeHost(first)
+	if err == nil {
+		return host
+	}
+	return ""
+}
+
+func prefixesOverlap(a, b netip.Prefix) bool {
+	return a.Addr().BitLen() == b.Addr().BitLen() &&
+		(a.Contains(b.Addr()) || b.Contains(a.Addr()))
+}
+
+// matchesAllowTarget applies least-privilege allow semantics. Invalid entries
+// grant nothing.
+func matchesAllowTarget(scopeT, req Target) bool {
+	normalized, err := NormalizeTarget(scopeT, true)
+	if err != nil {
 		return false
 	}
-	if rv := strings.TrimSpace(strings.ToLower(req.Value)); rv != "" && sv == rv {
-		return true
+	return matchScopeTarget(normalized, req)
+}
+
+// matchScopeTarget compares a normalized scope entry with a request. Repo/image
+// values retain their established comparisons; network requests are parsed without
+// DNS resolution. URL entries use the strict allow identity here; deny-side URL
+// host matching is handled separately by matchesDenyTarget.
+func matchScopeTarget(scopeT, req Target) bool {
+	if strings.TrimSpace(req.Value) == "" {
+		return false
 	}
 	if scopeT.Kind == TargetRepo && req.Kind == TargetRepo && localPathContains(scopeT.Value, req.Value) {
 		return true
 	}
+	if (scopeT.Kind == TargetRepo || scopeT.Kind == TargetImage) &&
+		strings.EqualFold(strings.TrimSpace(scopeT.Value), strings.TrimSpace(req.Value)) {
+		return true
+	}
+
 	switch scopeT.Kind {
 	case TargetCIDR:
-		if pfx, err := netip.ParsePrefix(sv); err == nil {
-			if ip, ok := addrOf(req.Value); ok && pfx.Contains(ip) {
-				return true
-			}
+		pfx, err := netip.ParsePrefix(scopeT.Value)
+		if err != nil {
+			return false
 		}
+		if req.Kind == TargetCIDR {
+			requested, err := netip.ParsePrefix(strings.TrimSpace(req.Value))
+			return err == nil && pfx.Addr().BitLen() == requested.Addr().BitLen() &&
+				pfx.Bits() <= requested.Bits() && pfx.Contains(requested.Addr())
+		}
+		ip, ok := addrOf(req.Value)
+		return ok && pfx.Contains(ip)
 	case TargetIP:
-		if a, err := netip.ParseAddr(sv); err == nil {
-			if b, ok := addrOf(req.Value); ok {
-				return a == b
-			}
+		a, err := netip.ParseAddr(scopeT.Value)
+		if err != nil {
+			return false
 		}
+		b, ok := addrOf(req.Value)
+		return ok && a == b
 	case TargetDomain:
-		return domainMatches(sv, hostOf(req.Value))
+		return domainMatches(scopeT.Value, hostOf(req.Value))
 	case TargetURL:
-		sh := hostOf(sv)
-		return sh != "" && sh == hostOf(req.Value)
+		if req.Kind != TargetURL {
+			return false
+		}
+		reqURL, err := NormalizeURL(req.Value)
+		if err != nil {
+			return false
+		}
+		scopeURL, err := NormalizeURL(scopeT.Value)
+		return err == nil && scopeURL.Scheme == reqURL.Scheme && scopeURL.Host == reqURL.Host && scopeURL.Port == reqURL.Port
 	}
 	return false
 }
@@ -160,63 +224,49 @@ func cleanLocalScopePath(v string) (string, bool) {
 	return clean, true
 }
 
-// domainMatches reports whether host is covered by a domain scope pattern.
-// A `*.example.com` pattern matches any subdomain (not the bare apex); a plain
-// `example.com` pattern matches that exact host only (subdomains require `*.`).
+// domainMatches reports whether host is covered by a canonical domain scope
+// pattern. A `*.example.com` pattern matches any subdomain (not the bare apex);
+// a plain `example.com` pattern matches that exact host only.
 func domainMatches(pattern, host string) bool {
 	if host == "" {
 		return false
 	}
 	if strings.HasPrefix(pattern, "*.") {
-		suffix := pattern[1:] // ".example.com"
+		suffix := pattern[1:]
 		return strings.HasSuffix(host, suffix) && len(host) > len(suffix)
 	}
 	return pattern == host
 }
 
-// hostOf extracts the comparable host (lowercased, no scheme/userinfo/port/path)
-// from a target value, for host-centric scope matching. URLs reduce to their
-// host; a bare host/domain/IP returns itself; non-host-like values (e.g. file
-// paths) return "".
+// hostOf extracts a canonical host from a URL, endpoint, or bare host/IP. It
+// performs no DNS resolution; malformed values return an empty host so matching
+// fails closed.
 func hostOf(value string) string {
-	value = strings.TrimSpace(strings.ToLower(value))
-	if value == "" {
+	v := strings.TrimSpace(value)
+	if v == "" {
 		return ""
 	}
-	if i := strings.Index(value, "://"); i >= 0 {
-		value = value[i+3:]
-	}
-	if i := strings.LastIndex(value, "@"); i >= 0 {
-		value = value[i+1:]
-	}
-	if i := strings.IndexAny(value, "/?#"); i >= 0 {
-		value = value[:i]
-	}
-	return stripPort(value)
-}
-
-// stripPort removes a trailing:port (and IPv6 brackets), leaving a bare host or
-// IP. A bracket-less IPv6 literal (multiple colons) is left untouched.
-func stripPort(h string) string {
-	if strings.HasPrefix(h, "[") { // [ipv6] or [ipv6]:port
-		if j := strings.Index(h, "]"); j >= 0 {
-			return h[1:j]
+	if strings.Contains(v, "://") {
+		identity, err := NormalizeURL(v)
+		if err != nil {
+			return ""
 		}
+		return identity.Host
 	}
-	if i := strings.LastIndex(h, ":"); i >= 0 && !strings.Contains(h[:i], ":") {
-		if _, err := strconv.Atoi(h[i+1:]); err == nil {
-			return h[:i]
-		}
+	if host, _, _, err := NormalizeEndpoint(v); err == nil {
+		return host
 	}
-	return h
+	host, err := NormalizeHost(v)
+	if err != nil {
+		return ""
+	}
+	return host
 }
 
 // addrOf parses the host of a target value as an IP address (ok=false if it is a
 // hostname rather than a literal IP). Hostname<->IP reconciliation (DNS) is
 // intentionally NOT done here: a pure domain matcher must not resolve names – that
-// would add a DNS-rebinding / SSRF surface. Recon adapters normalize a target to
-// the kind the scope expresses (resolve-then-check, with their own logging) before
-// calling, so an in-scope CIDR is matched against an already-resolved IP upstream.
+// would add a DNS-rebinding / SSRF surface.
 func addrOf(value string) (netip.Addr, bool) {
 	a, err := netip.ParseAddr(hostOf(value))
 	if err != nil {

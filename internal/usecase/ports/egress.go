@@ -11,13 +11,25 @@ type EgressRule struct {
 	Ports []uint16 // nil/empty = all ports
 }
 
-// EgressPolicy is an ordered, default-deny egress ruleset compiled from an engagement
-// scope. It lives in ports so both the usecase compiler that produces it
-// and the infrastructure applier that enforces it depend only inward on it. Domains can
-// only be enforced once resolved, so they are carried separately for run-start
-// resolution + pinning – never matched on the hostname string.
+// DomainRule defers a hostname rule until sandbox setup resolves and pins it.
+// Ports follows EgressRule semantics: empty covers every port; otherwise it
+// constrains each resolved IP to the declared TCP/UDP ports. URL allows carry
+// their effective port, while out-of-scope URL carve-outs use empty Ports so the
+// resolved host is denied on every port.
+type DomainRule struct {
+	Host  string
+	Ports []uint16
+}
+
+// EgressPolicy is an ordered, default-deny ruleset compiled from engagement
+// scope. It lives in ports so the usecase compiler and infrastructure applier
+// both depend inward on the shared contract. AllowDomains and DenyDomains remain
+// for hostname-wide callers; the structured rules preserve URL port semantics
+// until run-start resolution and pinning.
 type EgressPolicy struct {
-	Rules        []EgressRule
-	AllowDomains []string // in-scope domain/url-host names to resolve + add as allow rules
-	DenyDomains  []string // out-of-scope domain/url-host names to resolve + add as deny rules
+	Rules            []EgressRule
+	AllowDomains     []string // hostname-wide in-scope domains to resolve + allow
+	DenyDomains      []string // hostname-wide out-of-scope domains to resolve + deny
+	AllowDomainRules []DomainRule
+	DenyDomainRules  []DomainRule
 }

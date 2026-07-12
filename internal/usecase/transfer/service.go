@@ -167,8 +167,11 @@ func (s *Service) Import(ctx context.Context, actor string, tenantID shared.ID, 
 		return nil, err
 	}
 	// Carry over scope/window/RoE; status stays draft and live-recon stays off so the
-	// operator re-activates deliberately on this instance.
-	eng.Scope = b.Engagement.Scope
+	// operator re-activates deliberately on this instance. Scope must cross the same
+	// canonical validation boundary as an API edit before the first repository write.
+	if err := eng.SetScope(b.Engagement.Scope.InScope, b.Engagement.Scope.OutOfScope, now); err != nil {
+		return nil, fmt.Errorf("%w: imported engagement scope: %v", shared.ErrValidation, err)
+	}
 	eng.RoE = b.Engagement.RoE
 	eng.AuthorizedFrom = b.Engagement.AuthorizedFrom
 	eng.AuthorizedTo = b.Engagement.AuthorizedTo

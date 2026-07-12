@@ -11,7 +11,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/netip"
 	"sort"
 	"strings"
 	"time"
@@ -86,7 +85,7 @@ func (s *Service) buildContainmentProfile(tool ports.ReconTool, egress *ports.Eg
 				p.EgressAllowRules++
 			}
 		}
-		p.EgressAllowDomains = len(egress.AllowDomains)
+		p.EgressAllowDomains = len(egress.AllowDomains) + len(egress.AllowDomainRules)
 	}
 	return p
 }
@@ -155,7 +154,15 @@ func (s *Service) RunJob(ctx context.Context, payload []byte) error {
 	if err := json.Unmarshal(payload, &j); err != nil {
 		return fmt.Errorf("%w: malformed recon job payload: %v", shared.ErrValidation, err)
 	}
-	target := engagement.Target{Kind: inferKind(j.Target), Value: j.Target}
+	if err := engagement.ValidateTargetValue(j.Target); err != nil {
+		return fmt.Errorf("%w: invalid recon job target: %v", shared.ErrValidation, err)
+	}
+	target := engagement.Target{Kind: engagement.InferTargetKind(j.Target), Value: j.Target}
+	normalized, err := engagement.NormalizeTarget(target, false)
+	if err != nil {
+		return fmt.Errorf("%w: invalid recon job target: %v", shared.ErrValidation, err)
+	}
+	target = normalized
 	// single-active-execution lease (re-audit fix – held at the JOB boundary so a lock
 	// ERROR returns an error and the queue REDELIVERS, never silently completing a
 	// never-executed authorized scan). A held lease (ok=false) means another delivery is
@@ -347,7 +354,7 @@ func (s *Service) Tools() []ToolInfo {
 // the caller; the worker re-authorizes through the guard before executing.
 func (s *Service) Start(ctx context.Context, actor string, engagementID shared.ID, toolName, targetValue string) (recon.Run, error) {
 	value := strings.TrimSpace(targetValue)
-	target := engagement.Target{Kind: inferKind(value), Value: value}
+	target := engagement.Target{Kind: engagement.InferTargetKind(value), Value: value}
 
 	tool, ok := s.tools[toolName]
 	if !ok {
@@ -369,9 +376,14 @@ func (s *Service) Start(ctx context.Context, actor string, engagementID shared.I
 		return recon.Run{}, s.denySubmit(ctx, actor, engagementID, tool, target, "live_recon_disabled",
 			fmt.Errorf("%w: live recon is not enabled for this engagement (lab-only)", shared.ErrForbidden))
 	}
-	if err := validateTargetValue(value); err != nil {
+	if err := engagement.ValidateTargetValue(value); err != nil {
 		return recon.Run{}, s.denySubmit(ctx, actor, engagementID, tool, target, "invalid_target", err)
 	}
+	normalized, err := engagement.NormalizeTarget(target, false)
+	if err != nil {
+		return recon.Run{}, s.denySubmit(ctx, actor, engagementID, tool, target, "invalid_target", err)
+	}
+	target = normalized
 	if !tool.Accepts(target.Kind) {
 		return recon.Run{}, s.denySubmit(ctx, actor, engagementID, tool, target, "wrong_target_kind",
 			fmt.Errorf("%w: %s does not accept %s targets", shared.ErrValidation, toolName, target.Kind))
@@ -634,36 +646,4 @@ func (s *Service) checkCapability(tool ports.ReconTool) error {
 		return fmt.Errorf("%w: %s is capability-sensitive and requires the sandbox; enable SYNAPSE_SANDBOX_ENABLED", shared.ErrForbidden, tool.Name())
 	}
 	return nil
-}
-
-// validateTargetValue is the central guard (mirrors the per-tool safeHost) that a
-// target cannot be smuggled in as a CLI flag or carry whitespace.
-func validateTargetValue(v string) error {
-	if v == "" {
-		return fmt.Errorf("%w: a target is required", shared.ErrValidation)
-	}
-	if strings.HasPrefix(v, "-") {
-		return fmt.Errorf("%w: target may not start with '-'", shared.ErrValidation)
-	}
-	if strings.ContainsAny(v, " \t\n\r") {
-		return fmt.Errorf("%w: target may not contain whitespace", shared.ErrValidation)
-	}
-	return nil
-}
-
-// inferKind classifies a raw target value into a scope target kind.
-func inferKind(v string) engagement.TargetKind {
-	v = strings.TrimSpace(v)
-	if strings.Contains(v, "://") {
-		return engagement.TargetURL
-	}
-	if strings.Contains(v, "/") {
-		if _, err := netip.ParsePrefix(v); err == nil {
-			return engagement.TargetCIDR
-		}
-	}
-	if _, err := netip.ParseAddr(v); err == nil {
-		return engagement.TargetIP
-	}
-	return engagement.TargetDomain
 }

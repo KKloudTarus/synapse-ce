@@ -108,12 +108,24 @@ func TestBuildArgsRejectsFlagInjection(t *testing.T) {
 	}
 }
 
-func TestBuildArgsURLReducesToHost(t *testing.T) {
-	spec, err := HTTPX{}.BuildArgs(engagement.Target{Kind: engagement.TargetURL, Value: "https://shop.example.com/cart?x=1"})
+func TestBuildArgsURLPreservesAuthorizedURL(t *testing.T) {
+	spec, err := HTTPX{}.BuildArgs(engagement.Target{Kind: engagement.TargetURL, Value: "HTTPS://shop.Example.com:8443/cart?x=1"})
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	if spec.Args[len(spec.Args)-1] != "shop.example.com" {
-		t.Errorf("expected host-only arg, got %v", spec.Args)
+	if got, want := spec.Args[len(spec.Args)-1], "https://shop.example.com:8443/cart?x=1"; got != want {
+		t.Errorf("HTTPX target = %q, want %q", got, want)
+	}
+}
+
+func TestBuildArgsRejectsAmbiguousURLAuthority(t *testing.T) {
+	for _, value := range []string{
+		"https://user@shop.example.com/cart",
+		"https://shop.example.com:65536/cart",
+		"ftp://shop.example.com/cart",
+	} {
+		if _, err := (HTTPX{}).BuildArgs(engagement.Target{Kind: engagement.TargetURL, Value: value}); err == nil {
+			t.Errorf("BuildArgs(%q) unexpectedly succeeded", value)
+		}
 	}
 }

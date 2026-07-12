@@ -76,6 +76,113 @@ func TestScopeOutOfScopeWins(t *testing.T) {
 	}
 }
 
+func TestScopeOutOfScopeURLDeniesHostWide(t *testing.T) {
+	s := Scope{
+		InScope:    []Target{{Kind: TargetDomain, Value: "*.acme.io"}},
+		OutOfScope: []Target{{Kind: TargetURL, Value: "https://payments.acme.io/"}},
+	}
+	cases := []Target{
+		{Kind: TargetURL, Value: "https://payments.acme.io/checkout"},
+		{Kind: TargetURL, Value: "http://payments.acme.io/checkout"},
+		{Kind: TargetURL, Value: "https://payments.acme.io:8443/checkout"},
+		{Kind: TargetDomain, Value: "payments.acme.io"},
+	}
+	for _, req := range cases {
+		if s.AllowsTarget(req) {
+			t.Errorf("out-of-scope URL host must deny %+v", req)
+		}
+	}
+	if s.Allows("payments.acme.io") {
+		t.Error("value-only matching must preserve the URL host carve-out")
+	}
+	if !s.Allows("api.acme.io") {
+		t.Error("the carve-out must not deny a different in-scope host")
+	}
+}
+
+func TestScopeInScopeURLRemainsSchemeAndPortSpecific(t *testing.T) {
+	s := Scope{InScope: []Target{{Kind: TargetURL, Value: "https://app.acme.io/"}}}
+	cases := []struct {
+		req  Target
+		want bool
+	}{
+		{req: Target{Kind: TargetURL, Value: "https://app.acme.io/other"}, want: true},
+		{req: Target{Kind: TargetURL, Value: "https://app.acme.io:443/other"}, want: true},
+		{req: Target{Kind: TargetURL, Value: "http://app.acme.io/other"}, want: false},
+		{req: Target{Kind: TargetURL, Value: "https://app.acme.io:8443/other"}, want: false},
+		{req: Target{Kind: TargetDomain, Value: "app.acme.io"}, want: false},
+	}
+	for _, tc := range cases {
+		if got := s.AllowsTarget(tc.req); got != tc.want {
+			t.Errorf("AllowsTarget(%+v) = %v, want %v", tc.req, got, tc.want)
+		}
+	}
+}
+
+func TestScopeMalformedEntriesFailClosed(t *testing.T) {
+	malformedDeny := Scope{
+		InScope:    []Target{{Kind: TargetDomain, Value: "*.acme.io"}},
+		OutOfScope: []Target{{Kind: TargetURL, Value: "not-a-url"}},
+	}
+	if malformedDeny.Allows("api.acme.io") {
+		t.Error("an unenforceable deny entry must deny every request")
+	}
+
+	malformedAllow := Scope{InScope: []Target{{Kind: TargetURL, Value: "not-a-url"}}}
+	if malformedAllow.Allows("not-a-url") {
+		t.Error("a malformed allow entry must grant nothing")
+	}
+}
+
+func TestScopeOutOfScopeURLDeniesContainerRegistry(t *testing.T) {
+	cases := []struct {
+		image string
+		host  string
+	}{
+		{image: "nginx:1", host: "docker.io"},
+		{image: "nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", host: "docker.io"},
+		{image: "library/nginx:1", host: "docker.io"},
+		{image: "registry.example/team/app:1", host: "registry.example"},
+		{image: "registry.example:5000/app:1", host: "registry.example"},
+		{image: "localhost:5000/app:1", host: "localhost"},
+	}
+	for _, tc := range cases {
+		s := Scope{
+			InScope:    []Target{{Kind: TargetImage, Value: tc.image}},
+			OutOfScope: []Target{{Kind: TargetURL, Value: "https://" + tc.host + "/private"}},
+		}
+		if s.AllowsTarget(Target{Kind: TargetImage, Value: tc.image}) {
+			t.Errorf("URL carve-out for %q must deny image %q", tc.host, tc.image)
+		}
+	}
+
+	allowed := Scope{InScope: []Target{{Kind: TargetImage, Value: "nginx:1"}}}
+	if !allowed.AllowsTarget(Target{Kind: TargetImage, Value: "nginx:1"}) {
+		t.Error("image exact-match capability must remain available")
+	}
+}
+
+func TestScopeCIDRRequests(t *testing.T) {
+	s := Scope{
+		InScope:    []Target{{Kind: TargetCIDR, Value: "10.0.0.0/16"}},
+		OutOfScope: []Target{{Kind: TargetCIDR, Value: "10.0.1.0/24"}},
+	}
+	cases := []struct {
+		value string
+		want  bool
+	}{
+		{value: "10.0.0.0/16", want: false}, // overlaps the carved-out /24
+		{value: "10.0.2.0/24", want: true},
+		{value: "10.0.1.0/25", want: false},
+		{value: "10.1.0.0/16", want: false},
+	}
+	for _, tc := range cases {
+		if got := s.AllowsTarget(Target{Kind: TargetCIDR, Value: tc.value}); got != tc.want {
+			t.Errorf("AllowsTarget(CIDR %q) = %v, want %v", tc.value, got, tc.want)
+		}
+	}
+}
+
 func TestScopeAllowsLocalRepoChildPath(t *testing.T) {
 	s := Scope{
 		InScope:    []Target{{Kind: TargetRepo, Value: "/srv/app"}},
@@ -133,8 +240,9 @@ func TestScopeAllowsTarget(t *testing.T) {
 		{"subdomain of exact host not covered", Target{Kind: TargetDomain, Value: "x.host.example.com"}, false},
 		{"exact ip", Target{Kind: TargetIP, Value: "192.168.1.5"}, true},
 		{"url host falls inside cidr", Target{Kind: TargetURL, Value: "http://10.0.0.9:8080/x"}, true},
-		{"url matches url entry by host", Target{Kind: TargetURL, Value: "https://app.acme.io/other"}, true},
-		{"userinfo cannot smuggle an out-of-scope host", Target{Kind: TargetURL, Value: "https://app.acme.io@evil.com/x"}, false},
+		{"url matches URL entry by scheme host and effective port", Target{Kind: TargetURL, Value: "https://app.acme.io/other"}, true},
+		{"domain scope remains intentionally host-wide", Target{Kind: TargetURL, Value: "http://app.acme.io/other"}, true},
+		{"userinfo is rejected", Target{Kind: TargetURL, Value: "https://app.acme.io@evil.com/x"}, false},
 		{"unrelated host", Target{Kind: TargetDomain, Value: "evil.com"}, false},
 		{"ipv6 not in v4 cidr", Target{Kind: TargetIP, Value: "::1"}, false},
 		{"empty value", Target{Kind: TargetDomain, Value: ""}, false},
