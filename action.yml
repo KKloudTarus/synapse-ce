@@ -1,0 +1,152 @@
+name: "Synapse SCA scan"
+description: "Run a Synapse SCA + SAST + secret + IaC-misconfig scan and gate CI on findings."
+author: "KKloudTarus"
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  path:
+    description: "Path to scan."
+    required: false
+    default: "."
+  fail-on:
+    description: "Minimum severity that fails the build: critical | high | medium | low | info | none."
+    required: false
+    default: "high"
+  sarif:
+    description: "When true, write a SARIF 2.1.0 report and expose its path as the `sarif-file` output."
+    required: false
+    default: "false"
+  offline:
+    description: "When true, run without network egress (offline databases only)."
+    required: false
+    default: "false"
+  version:
+    description: 'synapse-cli release to use, e.g. "v0.1.0", or "latest".'
+    required: false
+    default: "latest"
+  sarif-output:
+    description: "Path for the SARIF report when `sarif` is true."
+    required: false
+    default: "synapse.sarif"
+
+outputs:
+  sarif-file:
+    description: "Path to the generated SARIF report (only when `sarif` is true)."
+    value: ${{ steps.scan.outputs.sarif-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install synapse-cli, syft and grype
+      shell: bash
+      # No GITHUB_TOKEN is exposed here on purpose: the release lookup hits a PUBLIC endpoint, and
+      # keeping the token out of this step means the `curl | sh` tool installers below cannot exfiltrate
+      # it. Pin `version` to a tag to skip the unauthenticated API call entirely.
+      env:
+        SYNAPSE_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        # Pinned scanner tool versions (kept in step with the release container image).
+        SYFT_VERSION="v1.45.1"
+        GRYPE_VERSION="v0.115.0"
+        REPO="KKloudTarus/synapse-ce"
+        BIN_DIR="${RUNNER_TEMP}/synapse-bin"
+        mkdir -p "${BIN_DIR}"
+
+        # Resolve the release tag (accept "latest" or an explicit vX.Y.Z). Public repo → no auth needed.
+        tag="${SYNAPSE_VERSION}"
+        if [ "${tag}" = "latest" ] || [ -z "${tag}" ]; then
+          tag="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+            | grep -m1 '"tag_name"' | cut -d '"' -f4)"
+        fi
+        # Only a strict vX.Y.Z[-suffix] tag is allowed, so a crafted `version` input cannot walk the
+        # download path to an arbitrary artifact. The case guard rejects any stray character over the
+        # WHOLE value (empty, newline, slash) that a line-oriented grep would miss; the regex fixes shape.
+        case "${tag}" in
+          ""|*[!A-Za-z0-9.+-]*)
+            echo "::error::invalid release tag '${tag}' (input version='${SYNAPSE_VERSION}')" >&2; exit 1 ;;
+        esac
+        if ! printf '%s' "${tag}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.+-][0-9A-Za-z.-]+)?$'; then
+          echo "::error::refusing non-semver release tag '${tag}' (input version='${SYNAPSE_VERSION}')" >&2
+          exit 1
+        fi
+        ver="${tag#v}" # goreleaser archive names drop the leading 'v'
+
+        # Map the runner to goreleaser's OS/arch archive naming.
+        case "${RUNNER_OS}" in
+          Linux) os="linux" ;;
+          macOS) os="darwin" ;;
+          Windows) os="windows" ;;
+          *) echo "::error::unsupported runner OS ${RUNNER_OS}" >&2; exit 1 ;;
+        esac
+        case "${RUNNER_ARCH}" in
+          X64) arch="amd64" ;;
+          ARM64) arch="arm64" ;;
+          *) echo "::error::unsupported runner arch ${RUNNER_ARCH}" >&2; exit 1 ;;
+        esac
+        ext="tar.gz"; [ "${os}" = "windows" ] && ext="zip"
+        asset="synapse-ce_${ver}_${os}_${arch}.${ext}"
+        base="https://github.com/${REPO}/releases/download/${tag}"
+
+        # Download the archive AND the release checksums, then verify BEFORE extracting/executing.
+        curl -fsSL -o "${BIN_DIR}/${asset}" "${base}/${asset}"
+        curl -fsSL -o "${BIN_DIR}/checksums.txt" "${base}/checksums.txt"
+        want="$(awk -v f="${asset}" '$2 == f {print $1}' "${BIN_DIR}/checksums.txt")"
+        if [ -z "${want}" ]; then
+          echo "::error::no checksum for ${asset} in checksums.txt" >&2; exit 1
+        fi
+        if command -v sha256sum >/dev/null 2>&1; then
+          got="$(sha256sum "${BIN_DIR}/${asset}" | awk '{print $1}')"
+        else
+          got="$(shasum -a 256 "${BIN_DIR}/${asset}" | awk '{print $1}')" # macOS runners
+        fi
+        if [ "${want}" != "${got}" ]; then
+          echo "::error::checksum mismatch for ${asset} (want ${want}, got ${got})" >&2; exit 1
+        fi
+
+        if [ "${ext}" = "zip" ]; then
+          unzip -o "${BIN_DIR}/${asset}" -d "${BIN_DIR}" >/dev/null
+        else
+          tar -xzf "${BIN_DIR}/${asset}" -C "${BIN_DIR}" synapse-cli
+        fi
+        chmod +x "${BIN_DIR}/synapse-cli" 2>/dev/null || true
+
+        # syft (required) + grype (offline DB) via anchore's installers, PINNED to the tool version tag
+        # (not the moving main branch) so the installer script itself is fixed. The installers
+        # checksum-verify the tool binaries they fetch.
+        curl -fsSL "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" | sh -s -- -b "${BIN_DIR}" "${SYFT_VERSION}"
+        curl -fsSL "https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh" | sh -s -- -b "${BIN_DIR}" "${GRYPE_VERSION}"
+
+        echo "${BIN_DIR}" >> "${GITHUB_PATH}"
+        echo "SYNAPSE_SYFT_BIN=${BIN_DIR}/syft" >> "${GITHUB_ENV}"
+        echo "SYNAPSE_GRYPE_BIN=${BIN_DIR}/grype" >> "${GITHUB_ENV}"
+
+    - name: Run scan
+      id: scan
+      shell: bash
+      env:
+        SYNAPSE_PATH: ${{ inputs.path }}
+        SYNAPSE_FAIL_ON: ${{ inputs.fail-on }}
+        SYNAPSE_SARIF: ${{ inputs.sarif }}
+        SYNAPSE_OFFLINE: ${{ inputs.offline }}
+        SYNAPSE_SARIF_OUT: ${{ inputs.sarif-output }}
+      run: |
+        # Not `-e`: the scan's non-zero exit IS the gate result, propagated deliberately at the end so
+        # the SARIF output is still recorded when the gate fails (an `if: always()` upload keeps working).
+        set -uo pipefail
+        args=(scan "${SYNAPSE_PATH}" --fail-on "${SYNAPSE_FAIL_ON}")
+        if [ "${SYNAPSE_OFFLINE}" = "true" ]; then
+          args+=(--offline)
+        fi
+        rc=0
+        if [ "${SYNAPSE_SARIF}" = "true" ]; then
+          # --sarif writes the SARIF report to stdout; capture it to the requested file.
+          synapse-cli "${args[@]}" --sarif > "${SYNAPSE_SARIF_OUT}" || rc=$?
+          echo "sarif-file=${SYNAPSE_SARIF_OUT}" >> "${GITHUB_OUTPUT}"
+        else
+          synapse-cli "${args[@]}" || rc=$?
+        fi
+        exit "${rc}"
