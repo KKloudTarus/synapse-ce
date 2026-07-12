@@ -45,7 +45,7 @@ const (
 	KindSAST         Kind = "sast"        // first-party source-code issue (SAST)
 	KindSecret       Kind = "secret"      // a hardcoded secret found in source (deterministic; ungated)
 	KindMisconfig    Kind = "misconfig"   // an insecure IaC/config setting (deterministic; ungated)
-	KindDAST         Kind = "dast"        // runtime app issue (DAST; deferred)
+	KindDAST         Kind = "dast"        // runtime-confirmed app issue: a safe probe verified exploitability of a gated hypothesis
 	KindThreat       Kind = "threat"      // threat-model item
 	KindHypothesis   Kind = "hypothesis"  // AI-proposed attack-chain hypothesis linking findings (gated until human-verified)
 	KindQuality      Kind = "quality"     // maintainability / code-smell issue (deterministic; ungated)

@@ -124,4 +124,20 @@ Capabilities include reachability proposals, pattern SAST, a taint engine over t
 threat modeling over an architecture seam, AI critique and risk narrative, and human-gated
 write-up drafts.
 
+### Runtime confirmation (DAST)
+
+A gated SAST hypothesis can be confirmed at runtime by a **safe HTTP probe**. When a distinct
+verifier's runtime probe confirms the hypothesis, the confirmed judgment is projected into a
+`Kind=dast` finding — the dynamically-proven twin of the `Kind=sast` projection (a statically or
+LLM-confirmed hypothesis stays `Kind=sast`). A DAST finding records `reachability = reachable`,
+because the probe demonstrated the sink is actually reachable and exploitable.
+
+The runtime probe never runs unguarded. It executes only through the governed workflow, which
+requires, server-side: the target inside the engagement's authorization scope and window; the
+sandbox with **kernel-enforced egress confinement** (the probe is refused when the host cannot
+enforce the egress allowlist); and explicit HITL approval before any packet is sent. The verifier
+records only a structured, closed-token result (a proof class plus a rationale) — raw probe output
+lives in sealed, hash-chained evidence, never in the model transcript. The agent can only *propose*
+the hypothesis; a **distinct** verifier confirms it, so a claim can never confirm itself.
+
 Next: [Configuration](configuration.md)

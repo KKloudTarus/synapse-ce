@@ -18,6 +18,7 @@ import (
 
 var _ ports.ConfirmedThreatRecorder = (*Service)(nil)
 var _ ports.ConfirmedSASTRecorder = (*Service)(nil)
+var _ ports.ConfirmedDASTRecorder = (*Service)(nil)
 var _ ports.FindingWriteupApplier = (*Service)(nil)
 
 // Service lists findings and applies authoring/triage/assignment/comment/retest changes.
@@ -97,6 +98,39 @@ func (s *Service) RecordConfirmedSAST(ctx context.Context, verifier string, j ju
 	// Attribute the promotion to the VERIFIER who confirmed the taint judgment (the trigger), not the
 	// system proposer – the judgment's own verdict audit already records the proposer.
 	return s.record(ctx, verifier, "finding.sast_promoted", j.EngagementID, f.ID,
+		map[string]string{"judgment": j.ID.String(), "cwe": sc.CWE, "rule": sc.Rule, "location": sc.Location})
+}
+
+// RecordConfirmedDAST promotes a RUNTIME-verifier-confirmed CapSAST judgment to a persisted Kind=dast
+// finding (auto-emit on runtime confirm). It is the runtime twin of RecordConfirmedSAST — the same
+// verifier-confirmed CapSAST judgment, but the confirming verdict came from a safe runtime probe rather
+// than a static/LLM verifier, so it projects to a distinct, dynamically-proven Kind=dast finding.
+// Idempotent via the dast:ai:<judgmentID> dedup key – a re-confirm updates in place. The finding is built
+// DETERMINISTICALLY from the typed SASTClaim (no LLM); severity starts Unknown so a human triages it
+// through the normal finding workflow. Audited.
+func (s *Service) RecordConfirmedDAST(ctx context.Context, verifier string, j judgment.Judgment) error {
+	if j.Capability != judgment.CapSAST {
+		return fmt.Errorf("%w: not a sast judgment (%s)", shared.ErrValidation, j.Capability)
+	}
+	sc, ok := j.Claim.(judgment.SASTClaim)
+	if !ok {
+		return fmt.Errorf("%w: sast judgment %s carries no SASTClaim", shared.ErrValidation, j.ID)
+	}
+	f, err := finding.NewDAST(s.ids.NewID(), j.EngagementID, finding.DASTInput{
+		JudgmentID: j.ID.String(),
+		CWE:        sc.CWE,
+		Location:   sc.Location,
+		Rule:       sc.Rule,
+	}, s.clock.Now())
+	if err != nil {
+		return err
+	}
+	if err := s.repo.Upsert(ctx, []finding.Finding{f}); err != nil {
+		return fmt.Errorf("persist dast finding: %w", err)
+	}
+	// Attribute the promotion to the VERIFIER whose runtime probe confirmed the judgment (the trigger), not
+	// the system proposer – the judgment's own verdict audit already records the proposer.
+	return s.record(ctx, verifier, "finding.dast_promoted", j.EngagementID, f.ID,
 		map[string]string{"judgment": j.ID.String(), "cwe": sc.CWE, "rule": sc.Rule, "location": sc.Location})
 }
 

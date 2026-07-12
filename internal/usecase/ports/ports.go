@@ -838,6 +838,16 @@ type ConfirmedSASTRecorder interface {
 	RecordConfirmedSAST(ctx context.Context, verifier string, j judgment.Judgment) error
 }
 
+// ConfirmedDASTRecorder promotes a RUNTIME-verifier-confirmed CapSAST judgment to a persisted Kind=dast
+// finding (auto-emit on runtime confirm). The analysis runtime-verify path calls it best-effort after a
+// `sast` judgment reaches Confirmed VIA A RUNTIME PROBE (as opposed to a static/LLM verdict, which emits
+// Kind=sast); the finding is a deterministic, templated projection of the SASTClaim (no LLM). Implemented by
+// the findings use case and injected from the composition root – the judgment lifecycle never imports it,
+// and it is never agent-reachable (the agent proposes; a distinct verifier confirms).
+type ConfirmedDASTRecorder interface {
+	RecordConfirmedDAST(ctx context.Context, verifier string, j judgment.Judgment) error
+}
+
 // FindingWriteupApplier applies an accepted, human-signed-off write-up draft to its finding: it sets
 // the finding's authoritative Description (the draft's prose, composed from description + remediation). The
 // writeupdraft accept path calls it; the implementation MUST validate the finding belongs to the engagement

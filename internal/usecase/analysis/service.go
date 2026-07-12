@@ -54,6 +54,10 @@ type Service struct {
 	// sastRecorder (optional) promotes a CONFIRMED CapSAST (taint) judgment to a Kind=sast finding,
 	// best-effort. Injected from the composition root – never reachable by the agent.
 	sastRecorder ports.ConfirmedSASTRecorder
+	// dastRecorder (optional) promotes a CONFIRMED CapSAST judgment to a Kind=dast finding when the
+	// confirming verdict came from a RUNTIME probe (via VerifyRuntime) rather than a static/LLM verdict,
+	// best-effort. Injected from the composition root – never reachable by the agent.
+	dastRecorder ports.ConfirmedDASTRecorder
 }
 
 // NewService validates dependencies (all required; the sealer is mandatory because a verdict that
@@ -134,6 +138,19 @@ func (s *Service) Propose(ctx context.Context, proposer string, engagementID sha
 // verdict that loses the race leaves an orphan sealed verdict with no score move – acceptable (the
 // assessment really happened), mirroring the exploitation gate's one-directional provenance.
 func (s *Service) Verify(ctx context.Context, verifier string, engagementID, judgmentID shared.ID, score int, rationale string, expectedVersion int) (judgment.Judgment, error) {
+	return s.verify(ctx, verifier, engagementID, judgmentID, score, rationale, expectedVersion, false)
+}
+
+// VerifyRuntime is Verify for a verdict produced by a RUNTIME probe (the safe HTTP DAST verifier). It is
+// identical to Verify EXCEPT that a confirmed CapSAST judgment auto-emits a Kind=dast finding (dynamically
+// proven) instead of Kind=sast (statically/LLM confirmed). The runtime-probe path (dastverifier) calls this;
+// the static/LLM path (human review, llmverifier) calls Verify. The distinct verifier, score bar, verdict
+// sealing, and self-confirm guard are all unchanged — only the finding projection differs.
+func (s *Service) VerifyRuntime(ctx context.Context, verifier string, engagementID, judgmentID shared.ID, score int, rationale string, expectedVersion int) (judgment.Judgment, error) {
+	return s.verify(ctx, verifier, engagementID, judgmentID, score, rationale, expectedVersion, true)
+}
+
+func (s *Service) verify(ctx context.Context, verifier string, engagementID, judgmentID shared.ID, score int, rationale string, expectedVersion int, runtimeProof bool) (judgment.Judgment, error) {
 	v := verdict.Verdict{Verifier: verifier, Score: score, Rationale: rationale}
 	if err := v.Validate(); err != nil {
 		return judgment.Judgment{}, err
@@ -177,15 +194,26 @@ func (s *Service) Verify(ctx context.Context, verifier string, engagementID, jud
 			})
 		}
 	}
-	// a verifier-confirmed CapSAST (taint) judgment auto-emits a Kind=sast finding. Best-effort, same
-	// contract as the threat promoter – the judgment is already confirmed + audited; a failed emit is
-	// audited, not rolled back (the finding is a re-derivable projection of the source-of-truth judgment).
-	if s.sastRecorder != nil && saved.State == judgment.StateConfirmed && saved.Capability == judgment.CapSAST {
-		if rerr := s.sastRecorder.RecordConfirmedSAST(ctx, verifier, saved); rerr != nil {
-			_ = s.audit.Record(ctx, ports.AuditEntry{
-				Actor: verifier, Action: "sast_finding.emit_failed", Target: judgmentID.String(),
-				Metadata: map[string]string{"engagement": engagementID.String()}, At: s.clock.Now(),
-			})
+	// a verifier-confirmed CapSAST (taint) judgment auto-emits a finding. Best-effort, same contract as the
+	// threat promoter – the judgment is already confirmed + audited; a failed emit is audited, not rolled
+	// back (the finding is a re-derivable projection of the source-of-truth judgment). The verdict's PROOF
+	// METHOD picks the Kind: a RUNTIME probe (VerifyRuntime) → Kind=dast (dynamically proven); a static/LLM
+	// verdict (Verify) → Kind=sast. Exactly one fires per confirmation, so there is never a duplicate.
+	if saved.State == judgment.StateConfirmed && saved.Capability == judgment.CapSAST {
+		if runtimeProof && s.dastRecorder != nil {
+			if rerr := s.dastRecorder.RecordConfirmedDAST(ctx, verifier, saved); rerr != nil {
+				_ = s.audit.Record(ctx, ports.AuditEntry{
+					Actor: verifier, Action: "dast_finding.emit_failed", Target: judgmentID.String(),
+					Metadata: map[string]string{"engagement": engagementID.String()}, At: s.clock.Now(),
+				})
+			}
+		} else if !runtimeProof && s.sastRecorder != nil {
+			if rerr := s.sastRecorder.RecordConfirmedSAST(ctx, verifier, saved); rerr != nil {
+				_ = s.audit.Record(ctx, ports.AuditEntry{
+					Actor: verifier, Action: "sast_finding.emit_failed", Target: judgmentID.String(),
+					Metadata: map[string]string{"engagement": engagementID.String()}, At: s.clock.Now(),
+				})
+			}
 		}
 	}
 	return saved, nil
@@ -198,6 +226,11 @@ func (s *Service) SetThreatRecorder(r ports.ConfirmedThreatRecorder) { s.threatR
 // SetSASTRecorder wires the optional confirmed-CapSAST → finding promoter. nil ⇒ no finding is
 // emitted on confirm. Composition-root only.
 func (s *Service) SetSASTRecorder(r ports.ConfirmedSASTRecorder) { s.sastRecorder = r }
+
+// SetDASTRecorder wires the optional runtime-confirmed-CapSAST → Kind=dast finding promoter, used only by
+// the VerifyRuntime path. nil ⇒ a runtime confirmation still confirms the judgment but emits no DAST
+// finding. Composition-root only.
+func (s *Service) SetDASTRecorder(r ports.ConfirmedDASTRecorder) { s.dastRecorder = r }
 
 // Accept confirms an UNGATED judgment by human acceptance (no score; there is nothing to refute at
 // 75). It seals the acceptance FIRST, then transitions state under optimistic concurrency. The

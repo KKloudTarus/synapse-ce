@@ -852,6 +852,7 @@ func main() {
 		judgmentSvc = svc
 		judgmentSvc.SetThreatRecorder(findingsService) // a ratified threat auto-emits a Kind=threat finding
 		judgmentSvc.SetSASTRecorder(findingsService)   // a confirmed CapSAST (taint) judgment auto-emits a Kind=sast finding
+		judgmentSvc.SetDASTRecorder(findingsService)   // a RUNTIME-confirmed CapSAST judgment auto-emits a Kind=dast finding (via VerifyRuntime)
 		router.SetJudgments(judgmentSvc)
 		// Automated LLM judgment-verifier: when SYNAPSE_VERIFIER_MODEL names a model DIFFERENT from the
 		// agent's model, a distinct verifier independently scores each proposed gated judgment and seals a

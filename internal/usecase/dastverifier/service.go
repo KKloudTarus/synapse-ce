@@ -14,10 +14,14 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/verdict"
 )
 
+// judgmentVerifier is the narrow runtime-verify slice of analysis.Service. It is VerifyRuntime (not the
+// generic Verify): a confirmation here came from a safe runtime probe, so a confirmed CapSAST judgment
+// projects to a Kind=dast finding (dynamically proven) rather than Kind=sast.
 type judgmentVerifier interface {
-	Verify(ctx context.Context, verifier string, engagementID, judgmentID shared.ID, score int, rationale string, expectedVersion int) (judgment.Judgment, error)
+	VerifyRuntime(ctx context.Context, verifier string, engagementID, judgmentID shared.ID, score int, rationale string, expectedVersion int) (judgment.Judgment, error)
 }
 
 // Service validates a runtime-verifier result and applies it through the Judgment gate.
@@ -83,6 +87,14 @@ func (s *Service) Apply(ctx context.Context, engagementID shared.ID, r Result) (
 	if strings.TrimSpace(r.Rationale) == "" {
 		return judgment.Judgment{}, fmt.Errorf("%w: verifier rationale is required", shared.ErrValidation)
 	}
+	// The closed proof_class token and the numeric score must AGREE before anything is sealed, so the
+	// sealed evidence can never be internally inconsistent (a "runtime_confirmed" rationale on a sub-bar
+	// verdict, or a "refuted"/"needs_more_proof" rationale on a bar-clearing one that then confirms). The
+	// numeric score remains the authoritative bar in analysis.Verify; this just refuses a contradictory pair.
+	if (r.ProofClass == ProofClassRuntimeConfirmed) != verdict.MeetsBar(r.Score) {
+		return judgment.Judgment{}, fmt.Errorf("%w: proof_class %q is inconsistent with score %d: runtime_confirmed must clear the evidence bar (>= %d) and runtime_refuted/needs_more_proof must not",
+			shared.ErrValidation, r.ProofClass, r.Score, verdict.EvidenceThreshold)
+	}
 	rationale := fmt.Sprintf("proof_class=%s; %s", r.ProofClass, strings.TrimSpace(r.Rationale))
-	return s.verifier.Verify(ctx, r.Verifier, engagementID, r.JudgmentID, r.Score, rationale, r.ExpectedVersion)
+	return s.verifier.VerifyRuntime(ctx, r.Verifier, engagementID, r.JudgmentID, r.Score, rationale, r.ExpectedVersion)
 }
