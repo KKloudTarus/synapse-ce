@@ -35,6 +35,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/jobs"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/logging"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
+	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
 	egresspolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/egress"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
@@ -45,6 +46,7 @@ import (
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/worker"
+	writeupdraftuc "github.com/KKloudTarus/synapse-ce/internal/usecase/writeupdraftuc"
 )
 
 func main() {
@@ -206,6 +208,11 @@ func main() {
 	// blocking recon poll never starves THIS worker's recon-claim loop (the self-deadlock the
 	// design flags). The agent session lock is the connection-holding advisory RunLock (it must
 	// not expire mid-LLM-loop); recon uses the row-lease lock above.
+	if cfg.AgentEnabled && cfg.LLMModel == "" {
+		// The API hard-errors in this case; the worker degrades to no-agent (fail-safe) but must say so,
+		// or a misconfigured worker silently runs without the durable agent handler (operator visibility).
+		log.Warn("SYNAPSE_AGENT_ENABLED is set but SYNAPSE_LLM_MODEL is empty: the durable agent handler is DISABLED on this worker (set SYNAPSE_LLM_MODEL to match the API)")
+	}
 	if cfg.AgentEnabled && cfg.LLMModel != "" {
 		agentSessionStore := postgres.NewAgentSessionStore(pool)
 		approvalStore := postgres.NewApprovalStore(pool)
@@ -249,11 +256,40 @@ func main() {
 			log.Error("agent catalog init failed", "err", cerr)
 			os.Exit(1)
 		}
-		agentCatalog.EnablePlanning() // advertise + dispatch propose_plan (paired with SetPlanStore below)
-		if exploitSvc, eerr := exploitationuc.NewService(findingRepo, evidenceService, auditLog, clock, ids); eerr == nil {
-			agentCatalog.EnableFindingProposals(exploitSvc) // durable agent can record unproven findings (score 0)
-		} else {
+		// Build the SAME toolset dependencies the inline API agent wires so a DURABLE run advertises an
+		// IDENTICAL tool set (#161 parity). Before this, the worker enabled only planning + finding
+		// proposals, so an agent driven durably saw a strictly smaller toolset than the same session run
+		// inline. Findings/hypotheses (exploitation) + reachability (scan-result store) are always on;
+		// judgments + writeup drafts mirror their feature flags — matching the API exactly. All are
+		// PROPOSE-only here: a distinct human confirms/verifies out of band via the API (PermReview).
+		exploitSvc, eerr := exploitationuc.NewService(findingRepo, evidenceService, auditLog, clock, ids)
+		if eerr != nil {
 			log.Error("exploitation service init failed", "err", eerr)
+			os.Exit(1)
+		}
+		toolset := agenttools.AgentToolset{
+			Findings:     exploitSvc,
+			Hypotheses:   exploitSvc,
+			Reachability: postgres.NewScanResultStore(pool),
+		}
+		if cfg.JudgmentsEnabled {
+			judgmentSvc, jerr := analysisuc.NewService(postgres.NewJudgmentRepository(pool), evidenceService, auditLog, clock, ids)
+			if jerr != nil {
+				log.Error("analysis (judgment) service init failed", "err", jerr)
+				os.Exit(1)
+			}
+			toolset.Judgments = judgmentSvc
+		}
+		if cfg.WriteupDraftsEnabled {
+			writeupSvc, werr := writeupdraftuc.NewService(postgres.NewWriteupDraftRepository(pool), auditLog, clock, ids)
+			if werr != nil {
+				log.Error("writeup-draft service init failed", "err", werr)
+				os.Exit(1)
+			}
+			toolset.WriteupDrafts = writeupSvc
+		}
+		if terr := agentCatalog.EnableAgentToolset(toolset); terr != nil {
+			log.Error("agent toolset wiring failed (durable/inline parity)", "err", terr)
 			os.Exit(1)
 		}
 		agentExec, xerr := orchestrator.NewReconExecutor(agentReconSvc, evidenceService, clock, 500*time.Millisecond, cfg.ReconTimeout+time.Minute)
