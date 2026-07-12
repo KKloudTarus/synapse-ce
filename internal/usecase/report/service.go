@@ -172,6 +172,7 @@ type Service struct {
 	evidence     ports.ReportEvidenceProvider // optional; nil disables the image-exhibits section
 	renderer     ports.ReportRenderer
 	insight      ports.ReportInsightProvider
+	judgments    judgmentReader // optional; ACCEPTED risk-narrative + correlation judgments → insight tokens
 	clock        ports.Clock
 	version      string
 	docRenderers map[string]ports.DocRenderer
@@ -231,6 +232,12 @@ func (s *Service) load(ctx context.Context, tenantID, engagementID shared.ID) (l
 		if insight.EvidenceCount > 0 && !insight.EvidenceIntact {
 			return loaded{}, fmt.Errorf("%w: evidence chain verification failed – report blocked", shared.ErrValidation)
 		}
+	}
+	// Project ACCEPTED (human-confirmed) risk-narrative + correlation judgments into the insight as
+	// closed tokens (LLM-free — the report path never sees model prose). Best-effort: a judgment-store
+	// error leaves the report unchanged rather than blocking it.
+	if s.judgments != nil {
+		projectAcceptedJudgments(ctx, s.judgments, engagementID, &insight)
 	}
 	// Pin the report timestamp to the SCAN time (not generation time) so output is a
 	// pure function of stored data – byte-identical + SHA-256-stable across repeated
@@ -799,21 +806,30 @@ func complianceLabel(cwe string) string {
 }
 
 func scanSection(insight ports.ReportInsight) (ports.ReportSection, bool) {
-	if !insight.HasScan {
+	if !insight.HasScan && len(insight.RiskRationales) == 0 && len(insight.CorrelationNotes) == 0 {
 		return ports.ReportSection{}, false
 	}
 	sec := ports.ReportSection{Heading: "Scan & SBOM Insight"}
-	if insight.CompletenessNote != "" {
-		sec.Paragraphs = append(sec.Paragraphs, insight.CompletenessNote)
+	if insight.HasScan {
+		if insight.CompletenessNote != "" {
+			sec.Paragraphs = append(sec.Paragraphs, insight.CompletenessNote)
+		}
+		sec.Paragraphs = append(sec.Paragraphs, fmt.Sprintf("Reproducibility score: %d/100.", insight.ReproScore))
+		if insight.VulnDBSnapshot != "" {
+			sec.Paragraphs = append(sec.Paragraphs, "Vulnerability DB snapshot: "+insight.VulnDBSnapshot)
+		}
+		if insight.GrypeDBVersion != "" {
+			sec.Paragraphs = append(sec.Paragraphs, "Grype DB version: "+insight.GrypeDBVersion)
+		}
+		sec.Paragraphs = append(sec.Paragraphs, fmt.Sprintf("License detection: %d known, %d unknown (%.0f%%).", insight.LicenseDetected, insight.LicenseUnknown, insight.LicensePct))
 	}
-	sec.Paragraphs = append(sec.Paragraphs, fmt.Sprintf("Reproducibility score: %d/100.", insight.ReproScore))
-	if insight.VulnDBSnapshot != "" {
-		sec.Paragraphs = append(sec.Paragraphs, "Vulnerability DB snapshot: "+insight.VulnDBSnapshot)
+	// Accepted AI judgments, rendered as closed tokens (no model prose): risk rationale + cross-check.
+	for _, rr := range insight.RiskRationales {
+		sec.Paragraphs = append(sec.Paragraphs, fmt.Sprintf("AI risk rationale — %s: priority %d, drivers %s.", rr.Subject, rr.Priority, strings.Join(rr.Drivers, ", ")))
 	}
-	if insight.GrypeDBVersion != "" {
-		sec.Paragraphs = append(sec.Paragraphs, "Grype DB version: "+insight.GrypeDBVersion)
+	for _, cn := range insight.CorrelationNotes {
+		sec.Paragraphs = append(sec.Paragraphs, fmt.Sprintf("Cross-check — %s: reported by [%s]; not reported by [%s].", cn.Subject, strings.Join(cn.Reporters, ", "), strings.Join(cn.Missing, ", ")))
 	}
-	sec.Paragraphs = append(sec.Paragraphs, fmt.Sprintf("License detection: %d known, %d unknown (%.0f%%).", insight.LicenseDetected, insight.LicenseUnknown, insight.LicensePct))
 	return sec, true
 }
 

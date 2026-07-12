@@ -892,6 +892,7 @@ func main() {
 			}
 		}
 		exportService.SetJudgments(judgmentStore) // OpenVEX justification-by-tier from confirmed not_reachable judgments
+		reportService.SetJudgments(judgmentStore) // ACCEPTED risk-narrative + correlation → closed report tokens (LLM-free)
 		log.Info("AI judgment lifecycle ENABLED (verify/accept/list)")
 	}
 	// AI-proposed, human-gated finding write-up drafts. The service is shared by the agent's

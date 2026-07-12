@@ -97,6 +97,18 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 		}
 	}
 
+	// Accepted AI judgments – closed tokens only (risk rationale drivers/priority, cross-check source
+	// names). No model prose ever reaches the PDF (the report path is LLM-free).
+	if len(insight.RiskRationales) > 0 || len(insight.CorrelationNotes) > 0 {
+		section(m, "AI analysis (accepted)")
+		for _, rr := range insight.RiskRationales {
+			m.AddRow(5, text.NewCol(12, fmt.Sprintf("AI risk rationale — %s: priority %d, drivers %s", rr.Subject, rr.Priority, strings.Join(rr.Drivers, ", ")), props.Text{Size: 8, Color: gray()}))
+		}
+		for _, cn := range insight.CorrelationNotes {
+			m.AddRow(5, text.NewCol(12, fmt.Sprintf("Cross-check — %s: reported by [%s]; not reported by [%s]", cn.Subject, strings.Join(cn.Reporters, ", "), strings.Join(cn.Missing, ", ")), props.Text{Size: 8, Color: gray()}))
+		}
+	}
+
 	// Executive summary – posture in one line + third-party headline numbers.
 	section(m, "Executive summary")
 	m.AddRow(10, text.NewCol(12, executivePosture(crit, high, len(thirdParty), insight), props.Text{Size: 10}))

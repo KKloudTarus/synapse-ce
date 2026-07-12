@@ -397,6 +397,28 @@ type ReportInsight struct {
 	Development    int
 	ExampleTest    int
 	PriorityCounts map[int]int
+	// RiskRationales + CorrelationNotes are LLM-free projections of ACCEPTED (human-confirmed) AI
+	// judgments — closed tokens only (drivers/priority, reporter/missing source names), never model
+	// prose — so the report can surface AI risk rationale and cross-check disagreements while the report
+	// path stays LLM-free. Empty unless judgments were accepted.
+	RiskRationales   []RiskRationale
+	CorrelationNotes []CorrelationNote
+}
+
+// RiskRationale is a rendered projection of an ACCEPTED risk-narrative judgment: the closed driver tokens
+// plus the 1..5 priority. Templated tokens only — never model prose.
+type RiskRationale struct {
+	Subject  string   `json:"subject"` // "<kind>:<id>" the narrative is about
+	Drivers  []string `json:"drivers"`
+	Priority int      `json:"priority"`
+}
+
+// CorrelationNote is a rendered projection of an ACCEPTED cross-check correlation judgment: which
+// detection sources reported a vuln and which did NOT — a data-quality note that never auto-resolves it.
+type CorrelationNote struct {
+	Subject   string   `json:"subject"`
+	Reporters []string `json:"reporters"`
+	Missing   []string `json:"missing"`
 }
 
 // ReportRenderer renders a deterministic PDF report from stored engagement data
