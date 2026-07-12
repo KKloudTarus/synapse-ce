@@ -12,6 +12,7 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **Release engineering.** goreleaser config and a tag-triggered release workflow that publish prebuilt binaries for all five commands (linux, macOS, Windows; amd64 and arm64) with a checksums file, a multi-arch `synapse-cli` container image on GHCR, and a reusable GitHub Action (`uses: KKloudTarus/synapse-ce@v1`) for the CI scan gate.
 - **IaC misconfiguration scanning.** Added a Terraform rule for Amazon RDS DB instances without deletion protection.
 - **SCA.** Added Conan 2.x `config_requires` packages to OwnSBOM component output.
 - **SCA.** Added first-party OwnSBOM support for exact registry packages in Python `uv.lock` files.

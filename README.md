@@ -111,6 +111,34 @@ The lasting difference is what sits around the finding:
 - The hardened sandbox and live recon need a Linux host. Without them the API still runs
   (SCA, findings, reports); sandboxed execution fails closed rather than running unsandboxed.
 
+### Install a released build
+
+Grab a prebuilt binary from the [Releases page](https://github.com/KKloudTarus/synapse-ce/releases)
+(linux, macOS and Windows; amd64 and arm64) and verify it against `checksums.txt`. Each archive bundles
+all five commands.
+
+```bash
+# Example: linux/amd64
+curl -fsSL -o synapse.tar.gz \
+  https://github.com/KKloudTarus/synapse-ce/releases/latest/download/synapse-ce_<version>_linux_amd64.tar.gz
+tar -xzf synapse.tar.gz synapse-cli
+./synapse-cli scan ./path/to/project --fail-on high
+```
+
+Or scan with zero install using the container image (bundles `synapse-cli` plus syft and grype):
+
+```bash
+docker run --rm -v "$PWD:/scan:ro" ghcr.io/kkloudtarus/synapse-cli scan /scan --fail-on high
+```
+
+Gate a repository in CI with the reusable action (see [`docs/guide/cli.md`](docs/guide/cli.md#github-action)):
+
+```yaml
+- uses: KKloudTarus/synapse-ce@v1
+  with:
+    fail-on: high
+```
+
 ### Run the full stack with Docker
 
 ```bash

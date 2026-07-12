@@ -1,0 +1,155 @@
+# goreleaser configuration for Synapse CE.
+#
+# Cutting a release:
+#   git tag v0.1.0 && git push origin v0.1.0
+# The tag triggers .github/workflows/release.yml, which runs `goreleaser release --clean`:
+# cross-compiled binaries for every target, a checksums file, per-platform archives, a GitHub
+# Release, and a multi-arch synapse-cli container image on GHCR.
+#
+# Every command is pure Go and builds with CGO_ENABLED=0 (the sqlite driver is pure Go), so all five
+# cross-compile from a single Linux runner. `synapse-ast` (the tree-sitter sidecar) is intentionally
+# NOT released here: it needs cgo for full parsing and cannot cross-compile with CGO_ENABLED=0. It can
+# be added later with per-platform cgo toolchains.
+version: 2
+
+project_name: synapse-ce
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: synapse-cli
+    main: ./cmd/synapse-cli
+    binary: synapse-cli
+    env: &build_env
+      - CGO_ENABLED=0
+    flags: &build_flags
+      - -trimpath
+    ldflags: &build_ldflags
+      - -s -w -X github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo.version={{ .Version }}
+    goos: &build_goos
+      - linux
+      - darwin
+      - windows
+    goarch: &build_goarch
+      - amd64
+      - arm64
+    ignore: &build_ignore
+      # Windows/arm64 is not a supported target (keeps the matrix to the five documented builds).
+      - goos: windows
+        goarch: arm64
+
+  - id: synapse-api
+    main: ./cmd/synapse-api
+    binary: synapse-api
+    env: *build_env
+    flags: *build_flags
+    ldflags: *build_ldflags
+    goos: *build_goos
+    goarch: *build_goarch
+    ignore: *build_ignore
+
+  - id: synapse-worker
+    main: ./cmd/synapse-worker
+    binary: synapse-worker
+    env: *build_env
+    flags: *build_flags
+    ldflags: *build_ldflags
+    goos: *build_goos
+    goarch: *build_goarch
+    ignore: *build_ignore
+
+  - id: synapse-callgraph
+    main: ./cmd/synapse-callgraph
+    binary: synapse-callgraph
+    env: *build_env
+    flags: *build_flags
+    ldflags: *build_ldflags
+    goos: *build_goos
+    goarch: *build_goarch
+    ignore: *build_ignore
+
+  - id: synapse-mcp
+    main: ./cmd/synapse-mcp
+    binary: synapse-mcp
+    env: *build_env
+    flags: *build_flags
+    ldflags: *build_ldflags
+    goos: *build_goos
+    goarch: *build_goarch
+    ignore: *build_ignore
+
+archives:
+  # One archive per OS/arch bundling all five binaries (download once, get the whole suite).
+  - id: synapse
+    ids:
+      - synapse-cli
+      - synapse-api
+      - synapse-worker
+      - synapse-callgraph
+      - synapse-mcp
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+# Multi-arch synapse-cli container image on GHCR, built with buildx from the prebuilt binaries (no
+# in-image Go build). The synapse-api image follows the same pattern and can be added when needed; the
+# compose stack already builds an API image from deploy/Dockerfile.
+dockers_v2:
+  - id: synapse-cli
+    images:
+      - ghcr.io/kkloudtarus/synapse-cli
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.cli
+    labels:
+      org.opencontainers.image.title: synapse-cli
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.source: https://github.com/KKloudTarus/synapse-ce
+      org.opencontainers.image.licenses: Apache-2.0
+
+release:
+  github:
+    owner: KKloudTarus
+    name: synapse-ce
+  draft: false
+  prerelease: auto
+
+changelog:
+  # Release-notes changelog generated from git history (separate from the curated CHANGELOG.md).
+  sort: asc
+  use: github
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch

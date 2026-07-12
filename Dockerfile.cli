@@ -1,0 +1,25 @@
+# syntax=docker/dockerfile:1
+#
+# Release image for synapse-cli. Built by goreleaser (.goreleaser.yaml `dockers`) from the prebuilt,
+# cross-compiled binary in the build context, so there is NO Go build here. Ships syft (required for any
+# scan) and grype (offline vulnerability DB) so a user can scan with zero host install:
+#
+#   docker run --rm -v "$PWD:/scan:ro" ghcr.io/kkloudtarus/synapse-cli scan /scan --fail-on high
+#
+# This targets the pure-Go SCA/SAST/secret/misconfig path. Sandboxed execution and JVM-from-source
+# resolution need a Linux host with bubblewrap and a JDK/Maven/Gradle, which a plain distroless image
+# does not provide (matching deploy/Dockerfile's `api` target).
+FROM anchore/syft:v1.45.1 AS syft
+FROM anchore/grype:v0.115.0 AS grype
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=syft /syft /usr/local/bin/syft
+COPY --from=grype /grype /usr/local/bin/grype
+# The cross-compiled synapse-cli for this image's platform, supplied by goreleaser at the context root.
+COPY synapse-cli /usr/local/bin/synapse-cli
+ENV SYNAPSE_SYFT_BIN=/usr/local/bin/syft \
+    SYNAPSE_GRYPE_BIN=/usr/local/bin/grype
+USER nonroot:nonroot
+WORKDIR /scan
+ENTRYPOINT ["/usr/local/bin/synapse-cli"]
+CMD ["--help"]

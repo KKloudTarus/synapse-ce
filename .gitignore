@@ -33,3 +33,6 @@ prompt.txt
 
 # Docs site (mkdocs build output)
 /site/
+
+# goreleaser build output
+dist/

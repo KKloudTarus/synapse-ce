@@ -41,6 +41,23 @@ synapse-cli scan alpine:3.19 --image --offline
 The exit code is 0 when no finding meets the `--fail-on` threshold, and non-zero otherwise.
 Wire it straight into a pipeline step.
 
+## Container image (Docker)
+
+Every release publishes a multi-arch `synapse-cli` image to GHCR that bundles syft and grype, so you can
+scan with nothing installed but Docker:
+
+```bash
+# scan the current directory (mounted read-only), fail on high-or-critical
+docker run --rm -v "$PWD:/scan:ro" ghcr.io/kkloudtarus/synapse-cli scan /scan --fail-on high
+
+# pin a version instead of latest
+docker run --rm -v "$PWD:/scan:ro" ghcr.io/kkloudtarus/synapse-cli:v0.1.0 scan /scan
+```
+
+The image targets the pure-Go scan path (SBOM, OSV/Grype vulnerabilities, licenses, SAST, secrets, IaC
+misconfig). Sandboxed execution and JVM-from-source resolution need a Linux host with bubblewrap and a
+JDK/Maven/Gradle, so run those on a host install or the batteries-included compose image.
+
 ## Advisory sync (optional owned store)
 
 For detection independence you can maintain an owned advisory store and ingest feeds into it.
@@ -66,9 +83,40 @@ synapse-cli sync-advisories --oval <dir>
 Enable the store at scan time with `SYNAPSE_OWNED_ADVISORY=true`, then it runs alongside the
 live and offline sources.
 
-## GitHub Actions
+## GitHub Action
 
-Gate a build on findings:
+The reusable action installs the released `synapse-cli` (plus syft and grype) and runs the gate, so a
+whole scan step is three lines:
+
+```yaml
+- uses: KKloudTarus/synapse-ce@v1
+  with:
+    fail-on: high        # critical | high | medium | low | info | none (default: high)
+    path: .              # what to scan (default: .)
+    version: latest      # a released tag like v0.1.0, or latest (default)
+```
+
+Emit SARIF and upload it to the Security tab, while still failing the build on high findings:
+
+```yaml
+- id: synapse
+  uses: KKloudTarus/synapse-ce@v1
+  with:
+    fail-on: high
+    sarif: true
+  continue-on-error: true          # let the upload run even when the gate fails
+- name: Upload SARIF
+  if: always()
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: ${{ steps.synapse.outputs.sarif-file }}
+```
+
+Set `offline: true` to run against the bundled offline databases only (no network egress).
+
+### From source
+
+Without the action you can install the tools and build the CLI yourself:
 
 ```yaml
 - name: SCA scan

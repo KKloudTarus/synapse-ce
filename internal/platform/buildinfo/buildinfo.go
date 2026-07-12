@@ -25,8 +25,21 @@ func Module(path string) string {
 	return "unknown"
 }
 
-// App returns the main module's version ("devel" for an untagged build, e.g. go run).
+// version is injected at release-build time via
+//
+//	-ldflags "-X github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo.version=vX.Y.Z"
+//
+// (goreleaser sets it from the git tag). It is empty for `go run`, `go build`, and plain
+// `go install`, which fall back to the compiled build metadata read below.
+var version string
+
+// App returns the main module's version. A release build injects the tag via ldflags (see version);
+// otherwise it reads the compiled build metadata — "devel" for an untagged `go run` / `go build`, or the
+// tag/pseudo-version for `go install <module>@<version>`.
 func App() string {
+	if version != "" {
+		return version
+	}
 	bi, ok := debug.ReadBuildInfo()
 	if !ok || bi.Main.Version == "" || bi.Main.Version == "(devel)" {
 		return "devel"
