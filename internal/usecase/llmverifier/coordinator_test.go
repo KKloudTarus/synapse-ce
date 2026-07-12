@@ -63,13 +63,13 @@ func critique(id, proposer string, state judgment.State) judgment.Judgment {
 func TestAutoVerifyConfirmsAndRefutes(t *testing.T) {
 	lister := fakeLister{js: []judgment.Judgment{
 		critique("1", "agent:x", judgment.StateProposed),                                                       // high-score → confirmed
-		critique("2", "agent:x", judgment.StateProposed),                                                       // low-score → refuted (separate run below)
+		critique("2", "agent:x", judgment.StateProposed),                                                       // second proposed critique → also confirmed (fakeLLM scores 90)
 		critique("3", "agent:x", judgment.StateConfirmed),                                                      // already confirmed → skip
 		{ID: "4", Capability: judgment.CapRiskNarrative, State: judgment.StateProposed, ProposedBy: "agent:x"}, // ungated → skip
 	}}
 	ver := &fakeVerifier{}
 	c := New(fakeLLM{content: `{"score":90,"rationale":"clearly a false positive"}`}, "cx/verifier", ver, lister)
-	res, err := c.AutoVerify(context.Background(), "eng")
+	res, err := c.AutoVerify(context.Background(), "eng", "human:tester")
 	if err != nil {
 		t.Fatalf("AutoVerify: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestAutoVerifyConfirmsAndRefutes(t *testing.T) {
 func TestAutoVerifyLowScoreRefutes(t *testing.T) {
 	c := New(fakeLLM{content: `{"score":40,"rationale":"finding looks real"}`}, "cx/verifier", &fakeVerifier{},
 		fakeLister{js: []judgment.Judgment{critique("1", "agent:x", judgment.StateProposed)}})
-	res, _ := c.AutoVerify(context.Background(), "eng")
+	res, _ := c.AutoVerify(context.Background(), "eng", "human:tester")
 	if res.Confirmed != 0 || res.Refuted != 1 {
 		t.Errorf("low score must refute, got %+v", res)
 	}
@@ -95,7 +95,7 @@ func TestAutoVerifySkipsSelfConfirm(t *testing.T) {
 	// A judgment proposed BY this verifier identity must be skipped (never self-confirm).
 	c := New(fakeLLM{content: `{"score":99,"rationale":"x"}`}, "cx/verifier", &fakeVerifier{},
 		fakeLister{js: []judgment.Judgment{critique("1", "llm:cx/verifier", judgment.StateProposed)}})
-	res, _ := c.AutoVerify(context.Background(), "eng")
+	res, _ := c.AutoVerify(context.Background(), "eng", "human:tester")
 	if res.Attempted != 0 || res.Skipped != 1 {
 		t.Errorf("self-proposed judgment must be skipped, got %+v", res)
 	}
@@ -105,7 +105,7 @@ func TestAutoVerifyBestEffortOnLLMError(t *testing.T) {
 	ver := &fakeVerifier{}
 	c := New(fakeLLM{err: errors.New("gateway 503")}, "cx/verifier", ver,
 		fakeLister{js: []judgment.Judgment{critique("1", "agent:x", judgment.StateProposed)}})
-	res, err := c.AutoVerify(context.Background(), "eng")
+	res, err := c.AutoVerify(context.Background(), "eng", "human:tester")
 	if err != nil {
 		t.Fatalf("batch must not error on a per-judgment LLM failure: %v", err)
 	}

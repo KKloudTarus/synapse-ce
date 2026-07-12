@@ -75,7 +75,7 @@ func TestLiveAutoVerifyAgainstGateway(t *testing.T) {
 		t.Fatalf("a proposed judgment must be inert (proposed, score 0): %+v", proposed)
 	}
 
-	res, err := New(llm, model, svc, store).AutoVerify(ctx, eng)
+	res, err := New(llm, model, svc, store).AutoVerify(ctx, eng, "human:tester")
 	if err != nil {
 		t.Fatalf("AutoVerify: %v", err)
 	}

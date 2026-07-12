@@ -14,7 +14,7 @@ import (
 // distinct verifier model over an engagement's PROPOSED gated judgments and seal a verdict on each. It
 // cannot propose or accept. *llmverifier.Coordinator satisfies this.
 type autoVerifierService interface {
-	AutoVerify(ctx context.Context, engagementID shared.ID) (llmverifier.Result, error)
+	AutoVerify(ctx context.Context, engagementID shared.ID, triggeredBy string) (llmverifier.Result, error)
 }
 
 // autoVerifyJudgments runs the automated LLM verifier over the engagement's proposed gated judgments
@@ -26,7 +26,7 @@ func (rt *Router) autoVerifyJudgments(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "engagement id is required"})
 		return
 	}
-	res, err := rt.autoVerifier.AutoVerify(r.Context(), shared.ID(engID))
+	res, err := rt.autoVerifier.AutoVerify(r.Context(), shared.ID(engID), PrincipalFrom(r.Context()))
 	if err != nil {
 		writeError(w, rt.log, err)
 		return

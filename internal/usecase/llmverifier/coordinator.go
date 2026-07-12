@@ -9,11 +9,20 @@
 // into the hash-chained evidence ledger (never into the typed claim or the report), and only a structured
 // {score, rationale} crosses the boundary — no free prose reaches a deliverable. Best-effort: a per-
 // judgment model/verify error is counted and skipped, never aborting the batch or failing a scan.
+//
+// Accepted risk (LLM-as-judge): a crafted claim/subject could in principle coax a wrongful high score
+// (the sharpest edge is a critique refutation wrongly dismissing a real finding). This is bounded and
+// accepted: the verifier is a DISTINCT model, the ≥75 confirm bar is an un-lowerable Go constant, the
+// batch is human-triggered under PermReview and stamped with the triggering principal, every verdict is
+// sealed + audited, and only the typed {score, rationale} — never model prose — reaches a claim; the
+// report path stays LLM-free. The verify prompt is skeptical and treats the claim/subject as untrusted
+// data. It is a defense-in-depth verifier, not a sole authority.
 package llmverifier
 
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -50,16 +59,18 @@ func (c *Coordinator) Identity() string { return "llm:" + c.model }
 
 // Result is the batch outcome (all counts over PROPOSED gated judgments in the engagement).
 type Result struct {
-	Attempted int // judgments the verifier ran the model on
-	Confirmed int // sealed verdict >= threshold → StateConfirmed
-	Refuted   int // sealed verdict < threshold → StateRefuted
-	Skipped   int // would self-confirm (proposer == this verifier)
-	Errors    int // model or verify failure (left proposed, gates normally)
+	Attempted int `json:"attempted"` // judgments the verifier ran the model on
+	Confirmed int `json:"confirmed"` // sealed verdict >= threshold → StateConfirmed
+	Refuted   int `json:"refuted"`   // sealed verdict < threshold → StateRefuted
+	Skipped   int `json:"skipped"`   // would self-confirm (proposer == this verifier)
+	Errors    int `json:"errors"`    // model or verify failure (left proposed, gates normally)
 }
 
 // AutoVerify assesses every PROPOSED gated judgment in the engagement (except ones this verifier would
-// self-confirm) and seals a verdict via analysis.Verify. Best-effort per judgment.
-func (c *Coordinator) AutoVerify(ctx context.Context, engagementID shared.ID) (Result, error) {
+// self-confirm) and seals a verdict via analysis.Verify. Best-effort per judgment. triggeredBy is the
+// human principal who initiated the batch; it is stamped into the sealed verdict rationale for
+// accountability (the verdict is still attributed to the "llm:<model>" verifier that produced the score).
+func (c *Coordinator) AutoVerify(ctx context.Context, engagementID shared.ID, triggeredBy string) (Result, error) {
 	var res Result
 	if c == nil || c.llm == nil || c.verifier == nil || c.lister == nil {
 		return res, nil
@@ -87,6 +98,9 @@ func (c *Coordinator) AutoVerify(ctx context.Context, engagementID shared.ID) (R
 		if !ok {
 			res.Errors++
 			continue
+		}
+		if tb := strings.TrimSpace(triggeredBy); tb != "" {
+			rationale = "[auto-verify triggered by " + tb + "] " + rationale
 		}
 		updated, verr := c.verifier.Verify(ctx, me, engagementID, j.ID, score, rationale, j.Version)
 		if verr != nil {
