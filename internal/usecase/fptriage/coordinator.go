@@ -34,29 +34,50 @@ type SourceReader interface {
 	Snippet(file string, line, radius int) (string, error)
 }
 
-// Critique is the model's per-finding verdict. Err is set when the model could not be consulted
-// (timeout, transport, or an unparseable/invalid reply); such a critique is treated as inconclusive
-// and never marks a finding.
+// Critique is the model's per-finding verdict. Err is set when the (proposer) model could not be
+// consulted (timeout, transport, or an unparseable/invalid reply); such a critique is treated as
+// inconclusive and never marks a finding.
+//
+// When a DISTINCT verifier model is configured, a proposer "refuted" is only actionable if the verifier
+// independently agrees — the stateless-CLI analogue of the judgment gate's "a distinct verifier's sealed
+// verdict, self-confirm forbidden". VerifyAttempted records that a verifier was required for this
+// critique (proposer refuted at/above the bar); Verifier holds its reply (nil if the verify call failed).
 type Critique struct {
-	FindingID string
-	DedupKey  string
-	Claim     judgment.CritiqueClaim
-	Err       error
+	FindingID       string
+	DedupKey        string
+	Claim           judgment.CritiqueClaim  // the proposer's verdict
+	Verifier        *judgment.CritiqueClaim // the distinct verifier's verdict, when one was run
+	VerifyAttempted bool                    // a distinct verifier was required (and tried) for this critique
+	Err             error
 }
 
 // SuspectedFP reports whether this critique refutes the finding with at least minConfidence — the only
-// condition under which the caller exempts it from the gate.
+// condition under which the caller exempts it from the gate. When a distinct verifier was required
+// (VerifyAttempted), BOTH the proposer and the verifier must refute at/above the bar; a verifier that
+// disagreed, was inconclusive, or failed to respond keeps the finding gating (conservative, fail-safe).
 func (c Critique) SuspectedFP(minConfidence int) bool {
-	return c.Err == nil && c.Claim.Verdict == judgment.CritiqueRefuted && c.Claim.Confidence >= minConfidence
+	if c.Err != nil {
+		return false
+	}
+	proposerFP := c.Claim.Verdict == judgment.CritiqueRefuted && c.Claim.Confidence >= minConfidence
+	if !proposerFP {
+		return false
+	}
+	if !c.VerifyAttempted {
+		return true // single-model mode: no distinct verifier configured
+	}
+	return c.Verifier != nil && c.Verifier.Verdict == judgment.CritiqueRefuted && c.Verifier.Confidence >= minConfidence
 }
 
-// Coordinator critiques findings through an LLM proposer.
+// Coordinator critiques findings through an LLM proposer, and (when configured) a DISTINCT verifier.
 type Coordinator struct {
-	llm         ports.LLM
-	model       string
-	minConf     int // minimum confidence for a "refuted" to be actionable (default verdict.EvidenceThreshold)
-	radius      int // source context lines each side of the finding line
-	concurrency int
+	llm           ports.LLM
+	model         string
+	verifier      ports.LLM // optional distinct verifier; a proposer "refuted" is confirmed only if it agrees
+	verifierModel string
+	minConf       int // minimum confidence for a "refuted" to be actionable (default verdict.EvidenceThreshold)
+	radius        int // source context lines each side of the finding line
+	concurrency   int
 }
 
 // New builds a Coordinator. model is the proposer model id; llm must be non-nil.
@@ -77,6 +98,22 @@ func (c *Coordinator) WithMinConfidence(n int) *Coordinator {
 	}
 	return c
 }
+
+// WithVerifier attaches a DISTINCT verifier model: after the proposer refutes a finding at/above the
+// bar, the verifier independently re-assesses and the refutation only stands (exempts the gate) if the
+// verifier agrees — mirroring the judgment gate's distinct-verifier rule in the stateless CLI. A no-op
+// if llm is nil or the verifier model equals the proposer model (not a distinct verifier).
+func (c *Coordinator) WithVerifier(llm ports.LLM, model string) *Coordinator {
+	model = strings.TrimSpace(model)
+	if llm != nil && model != "" && model != c.model {
+		c.verifier = llm
+		c.verifierModel = model
+	}
+	return c
+}
+
+// VerifierModel returns the distinct verifier model in effect, or "" when single-model.
+func (c *Coordinator) VerifierModel() string { return c.verifierModel }
 
 // MinConfidence is the confidence bar in effect.
 func (c *Coordinator) MinConfidence() int { return c.minConf }
@@ -140,7 +177,38 @@ func (c *Coordinator) assessOne(ctx context.Context, f finding.Finding, src Sour
 		return res
 	}
 	res.Claim = claim
+	// Distinct-verifier consensus: only a proposer "refuted" at/above the bar is worth a second call.
+	// The verifier must independently agree for the refutation to stand (SuspectedFP); a disagreement,
+	// inconclusive reply, or failed call leaves Verifier nil → the finding keeps gating (fail-safe).
+	if c.verifier != nil && claim.Verdict == judgment.CritiqueRefuted && claim.Confidence >= c.minConf {
+		res.VerifyAttempted = true
+		if v, verr := c.verify(ctx, f, snippet, claim); verr == nil {
+			res.Verifier = &v
+		}
+	}
 	return res
+}
+
+// verify runs the distinct verifier model over a proposer's refutation, adversarially framed to keep a
+// real weakness from being dismissed. Returns the verifier's CritiqueClaim, or an error if unreachable.
+func (c *Coordinator) verify(ctx context.Context, f finding.Finding, snippet string, proposer judgment.CritiqueClaim) (judgment.CritiqueClaim, error) {
+	if ctx.Err() != nil {
+		return judgment.CritiqueClaim{}, ctx.Err()
+	}
+	resp, err := c.verifier.Chat(ctx, ports.ChatRequest{
+		Model:          c.verifierModel,
+		Temperature:    0,
+		MaxTokens:      512,
+		ResponseSchema: critiqueSchema,
+		Messages: []agent.Message{
+			{Role: "system", Content: verifierSystemPrompt},
+			{Role: "user", Content: verifierUserPrompt(f, snippet, proposer)},
+		},
+	})
+	if err != nil {
+		return judgment.CritiqueClaim{}, fmt.Errorf("verify llm: %w", err)
+	}
+	return parseCritique(resp.Content)
 }
 
 // parseCritique decodes the model's reply into a CritiqueClaim and validates it against the domain's

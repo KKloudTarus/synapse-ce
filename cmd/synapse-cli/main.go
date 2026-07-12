@@ -1135,7 +1135,15 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage disabled: %v\n", lerr)
 		} else if cands := fpTriageCandidates(res.Findings); len(cands) > 0 {
 			coord := fptriage.New(llm, cfg.FPTriageModel)
-			tctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+			// Distinct-verifier consensus: when SYNAPSE_VERIFIER_MODEL names a DIFFERENT model, a
+			// refutation must be independently confirmed by it before it exempts the gate (two-model
+			// agreement — the CLI analogue of the judgment gate's distinct verifier).
+			if cfg.VerifierModel != "" && cfg.VerifierModel != cfg.FPTriageModel {
+				if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
+					coord.WithVerifier(vllm, cfg.VerifierModel)
+				}
+			}
+			tctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 			crits := coord.Assess(tctx, cands, fileSnippetReader{root: target})
 			cancel()
 			res.AITriage, fpSuspect = summarizeCritiques(crits, coord.MinConfidence())
@@ -1148,7 +1156,11 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 					}
 				}
 			}
-			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage (%s): assessed %d, critiqued %d, unassessed %d, %d suspected false positive(s) held back from the gate\n", cfg.FPTriageModel, len(cands), len(res.AITriage), nErr, len(fpSuspect))
+			mode := "single-model"
+			if coord.VerifierModel() != "" {
+				mode = "verified by " + coord.VerifierModel()
+			}
+			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage (%s, %s): assessed %d, critiqued %d, unassessed %d, %d suspected false positive(s) held back from the gate\n", cfg.FPTriageModel, mode, len(cands), len(res.AITriage), nErr, len(fpSuspect))
 			if nErr > 0 {
 				fmt.Fprintf(os.Stderr, "synapse-cli: %d finding(s) could not be assessed (left to gate normally); first: %s\n", nErr, sample)
 			}
@@ -1283,6 +1295,7 @@ func summarizeCritiques(crits []fptriage.Critique, minConf int) ([]scauc.AICriti
 			Driver:      c.Claim.Driver,
 			Confidence:  c.Claim.Confidence,
 			SuspectedFP: fp,
+			Verified:    fp && c.VerifyAttempted, // a suspected-FP that a DISTINCT verifier confirmed
 		})
 		if fp {
 			suspect[c.DedupKey] = true

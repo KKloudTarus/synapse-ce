@@ -12,6 +12,7 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **AI false-positive gate — distinct-verifier consensus.** When `SYNAPSE_VERIFIER_MODEL` names a model different from the triage model, a `refuted` verdict must be independently confirmed by that verifier before it exempts the `--fail-on` gate (two-model consensus; a single model can no longer flip the gate on its own). Confirmed entries carry `"verified": true` in `ai_triage`. Falls back to single-model when no distinct verifier is set.
 - **False-positive gate.** Findings in test/fixture/example paths (including the `*_test.go`, `test_*.py`, `*.test.ts`, `*_spec.rb` file conventions) are now classified as background scope and held back from the `--fail-on` gate by default (`--include-test` re-includes them). An opt-in AI critique (`SYNAPSE_FP_TRIAGE_ENABLED`) then has the configured LLM adjudicate the remaining production-scope first-party source findings, marking high-confidence refutations as suspected false positives — retain-and-mark (still reported and sealed, exempt from the gate), never deleted.
 - **Release engineering.** goreleaser config and a tag-triggered release workflow that publish prebuilt binaries for all five commands (linux, macOS, Windows; amd64 and arm64) with a checksums file, a multi-arch `synapse-cli` container image on GHCR, and a reusable GitHub Action (`uses: KKloudTarus/synapse-ce@v1`) for the CI scan gate.
 - **IaC misconfiguration scanning.** Added a Terraform rule for Amazon RDS DB instances without deletion protection.
@@ -36,5 +37,11 @@ capabilities below are already shipped on `main`.
   findings.
 - **CLI merge gate.** `synapse-cli scan . --fail-on <severity>` exits non-zero when a
   finding at or above the threshold is present, for use in CI pipelines.
+
+### Fixed
+
+- **Config docs.** `docs/guide/configuration.md` listed the analysis-brain flags (judgments, SAST,
+  reachability, secret and misconfig scanning, cross-check, compliance, scan cache, image rootfs, owned
+  advisory, gomodgraph) as default `false`; they ship `true`. Corrected the defaults to match the code.
 
 [Unreleased]: https://github.com/KKloudTarus/synapse-ce/commits/main

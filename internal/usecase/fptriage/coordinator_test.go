@@ -75,6 +75,59 @@ func TestAssessAppliesVerdicts(t *testing.T) {
 	}
 }
 
+// roleLLM answers differently for the proposer vs the verifier pass (the verifier user prompt carries
+// the "first reviewer's verdict" preamble), and can fail the verifier call.
+type roleLLM struct {
+	proposer  string
+	verifier  string
+	verifyErr error
+}
+
+func (f roleLLM) Chat(_ context.Context, req ports.ChatRequest) (ports.ChatResponse, error) {
+	user := ""
+	for _, m := range req.Messages {
+		if m.Role == "user" {
+			user = m.Content
+		}
+	}
+	if strings.Contains(user, "first reviewer's verdict") { // the verifier pass
+		if f.verifyErr != nil {
+			return ports.ChatResponse{}, f.verifyErr
+		}
+		return ports.ChatResponse{Content: f.verifier}, nil
+	}
+	return ports.ChatResponse{Content: f.proposer}, nil
+}
+
+func TestVerifierConsensus(t *testing.T) {
+	cand := []finding.Finding{mkFinding("1", "X (a/b.go:1)")}
+	refuted := `{"verdict":"refuted","driver":"not_reachable","confidence":92}`
+	run := func(llm roleLLM) Critique {
+		c := New(llm, "proposer-model").WithVerifier(llm, "verifier-model")
+		return c.Assess(context.Background(), cand, nil)[0]
+	}
+	// Both agree → suspected FP, verified.
+	if got := run(roleLLM{proposer: refuted, verifier: `{"verdict":"refuted","driver":"not_reachable","confidence":85}`}); !got.SuspectedFP(75) || !got.VerifyAttempted || got.Verifier == nil {
+		t.Errorf("consensus refuted must be suspected-FP + verified: %+v", got)
+	}
+	// Verifier disagrees (sound) → NOT suspected FP (finding gates).
+	if got := run(roleLLM{proposer: refuted, verifier: `{"verdict":"sound","driver":"attacker_controlled","confidence":80}`}); got.SuspectedFP(75) {
+		t.Errorf("a verifier that disagrees must keep the finding gating: %+v", got)
+	}
+	// Verifier below the bar → NOT suspected FP.
+	if got := run(roleLLM{proposer: refuted, verifier: `{"verdict":"refuted","driver":"not_reachable","confidence":40}`}); got.SuspectedFP(75) {
+		t.Errorf("a low-confidence verifier must keep the finding gating: %+v", got)
+	}
+	// Verifier call fails → fail-safe, NOT suspected FP.
+	if got := run(roleLLM{proposer: refuted, verifyErr: errors.New("gateway 503")}); got.SuspectedFP(75) || got.Verifier != nil {
+		t.Errorf("a failed verify must keep the finding gating (fail-safe): %+v", got)
+	}
+	// Proposer says sound → no verify attempted, not FP.
+	if got := run(roleLLM{proposer: `{"verdict":"sound","driver":"attacker_controlled","confidence":88}`, verifier: refuted}); got.SuspectedFP(75) || got.VerifyAttempted {
+		t.Errorf("a sound proposer must not trigger verification or FP: %+v", got)
+	}
+}
+
 func TestAssessBestEffortOnLLMError(t *testing.T) {
 	cands := []finding.Finding{mkFinding("1", "X (a/b.go:1)")}
 	got := New(fakeLLM{err: errors.New("gateway 503")}, "m").Assess(context.Background(), cands, nil)

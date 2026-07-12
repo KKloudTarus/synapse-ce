@@ -61,6 +61,11 @@ stays in the report, it is only held back from the `--fail-on` gate).
    still reported (see `ai_triage` in `--json`) and sealed, never deleted, and an `uncertain` verdict
    keeps the finding gating. Best-effort: if the model can't be reached the scan proceeds unchanged.
 
+   For a stricter, hallucination-resistant gate, set `SYNAPSE_VERIFIER_MODEL` to a **different** model:
+   a refutation then only exempts the gate if that distinct verifier independently agrees (two-model
+   consensus — a single model cannot flip the gate on its own). `ai_triage` entries confirmed this way
+   carry `"verified": true`.
+
 ```bash
 export SYNAPSE_LLM_BASE_URL=http://localhost:8081/v1
 export SYNAPSE_LLM_API_KEY=…

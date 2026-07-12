@@ -67,28 +67,28 @@ Conventions: an empty value means unset, so the built-in default applies. Boolea
 | `SYNAPSE_SCAN_TIMEOUT` | `10m` | Per-scan timeout. 0 disables. |
 | `SYNAPSE_FINDING_MIN_SEVERITY` | `high` | Lowest severity promoted to a finding: critical, high, medium, low, info. |
 | `SYNAPSE_MAX_WORKSPACE_BYTES` | `2147483648` | Maximum prepared workspace size. A bigger target or archive is rejected. |
-| `SYNAPSE_OWNED_ADVISORY` | `false` | Match the SBOM against the owned advisory store, alongside the live and offline sources. Populate it first with `synapse-cli sync-advisories`. |
+| `SYNAPSE_OWNED_ADVISORY` | `true` | Match the SBOM against the owned advisory store, alongside the live and offline sources. Populate it first with `synapse-cli sync-advisories`. |
 | `SYNAPSE_JARHASH_ONLINE_ENABLED` | `false` | Recover the coordinate of a shaded or metadata-less JAR by its SHA-1. |
 | `SYNAPSE_OSV_URL`, `SYNAPSE_OSV_BULK_URL`, `SYNAPSE_DEPSDEV_URL`, `SYNAPSE_KEV_URL`, `SYNAPSE_EPSS_URL` | (public) | Feed overrides for tests or mirrors. |
 
 ## Extra scanners and detection tuning (opt-in)
 
-All of these are off by default. See [Features](features.md) for what each one does.
+Most of these ship ON by default (safe, best-effort). See [Features](features.md) for what each one does.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_SECRET_SCAN_ENABLED` | `false` | Secret scanning over the workspace (regex plus entropy). Matches are redacted; the raw secret never reaches logs, evidence, or the report. |
-| `SYNAPSE_MISCONFIG_ENABLED` | `false` | Misconfiguration and IaC scanning of Dockerfiles and Kubernetes manifests. |
+| `SYNAPSE_SECRET_SCAN_ENABLED` | `true` | Secret scanning over the workspace (regex plus entropy). Matches are redacted; the raw secret never reaches logs, evidence, or the report. |
+| `SYNAPSE_MISCONFIG_ENABLED` | `true` | Misconfiguration and IaC scanning of Dockerfiles and Kubernetes manifests. |
 | `SYNAPSE_DETECTION_PRIORITY` | `comprehensive` | `comprehensive` reports every match. `precise` quarantines single-source, non-KEV findings into a needs-verify queue that is still reported and sealed but exempt from the `--fail-on` gate. |
 | `SYNAPSE_OFFLINE` | `false` | Skip the live advisory source and detect with the offline database only. |
 | `SYNAPSE_IGNORE_UNFIXED` | `false` | Drop vulnerabilities that have no fixed version. |
 | `SYNAPSE_DB_MAX_AGE_DAYS` | `30` | Warn when a dated reference database (KEV, EPSS, or the Grype DB) is older than this many days. 0 disables the check. |
-| `SYNAPSE_SUPPRESSION_ENABLED` | `false` | Honor a `.synapseignore` file. Acceptance exempts only the `--fail-on` gate; the finding is still reported, persisted, and evidence-sealed. |
-| `SYNAPSE_VEX_ENABLED` | `false` | Consume an in-repo OpenVEX document (`.synapse.vex.json`) at scan time, on the same retain-and-mark surface as suppression. |
-| `SYNAPSE_COMPLIANCE_ENABLED` | `false` | Compliance benchmark. Re-projects findings onto a control specification and reports per-control PASS or FAIL. |
-| `SYNAPSE_SCAN_CACHE_ENABLED` | `false` | SBOM scan cache, addressed by content plus producer version. The cache directory must be operator-owned, since a shared-writable cache would allow poisoning. |
+| `SYNAPSE_SUPPRESSION_ENABLED` | `true` | Honor a `.synapseignore` file. Acceptance exempts only the `--fail-on` gate; the finding is still reported, persisted, and evidence-sealed. |
+| `SYNAPSE_VEX_ENABLED` | `true` | Consume an in-repo OpenVEX document (`.synapse.vex.json`) at scan time, on the same retain-and-mark surface as suppression. |
+| `SYNAPSE_COMPLIANCE_ENABLED` | `true` | Compliance benchmark. Re-projects findings onto a control specification and reports per-control PASS or FAIL. |
+| `SYNAPSE_SCAN_CACHE_ENABLED` | `true` | SBOM scan cache, addressed by content plus producer version. The cache directory must be operator-owned, since a shared-writable cache would allow poisoning. |
 | `SYNAPSE_SCAN_CACHE_DIR` | (per-user) | Cache location. Empty uses a per-user cache directory. |
-| `SYNAPSE_IMAGE_ROOTFS_ENABLED` | `false` | Materialize a container image root filesystem so the owned OS-package catalogers (dpkg, apk, and the rpm sqlite database) and installed-binary catalogers (Go build info, Python dist-info) can run. Best-effort. |
+| `SYNAPSE_IMAGE_ROOTFS_ENABLED` | `true` | Materialize a container image root filesystem so the owned OS-package catalogers (dpkg, apk, and the rpm sqlite database) and installed-binary catalogers (Go build info, Python dist-info) can run. Best-effort. |
 
 ## Recon and execution sandbox (sandbox required in production)
 
@@ -121,18 +121,18 @@ All of these are off by default. See [Features](features.md) for what each one d
 
 ## AI analysis brain (opt-in, best-effort)
 
-`SYNAPSE_JUDGMENTS_ENABLED` is the prerequisite for the analyzers that mint judgments. All are
-best-effort and no-op without inputs.
+`SYNAPSE_JUDGMENTS_ENABLED` (on by default) is the prerequisite for the analyzers that mint judgments.
+All are best-effort and no-op without inputs. Set a flag to `false` to opt out.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_JUDGMENTS_ENABLED` | `false` | Judgment lifecycle routes (verify, accept, list). |
-| `SYNAPSE_SAST_ENABLED` | `false` | Pattern SAST in the scan pipeline. |
-| `SYNAPSE_REACHABILITY_ENABLED` | `false` | Call-graph reachability proof. Needs judgments. |
+| `SYNAPSE_JUDGMENTS_ENABLED` | `true` | Judgment lifecycle routes (verify, accept, list). |
+| `SYNAPSE_SAST_ENABLED` | `true` | Pattern SAST in the scan pipeline. |
+| `SYNAPSE_REACHABILITY_ENABLED` | `true` | Call-graph reachability proof. Needs judgments. |
 | `SYNAPSE_TAINT_ENABLED` | `false` | Taint proposals. Needs judgments and the sandbox. |
-| `SYNAPSE_CROSSCHECK_ENABLED` | `false` | Detection-source disagreement judgments. |
-| `SYNAPSE_SBOM_CROSSCHECK_ENABLED` | `false` | Dual-producer SBOM cross-check. |
-| `SYNAPSE_GOMODGRAPH_ENABLED` | `false` | Transitive Go dependency edges via `go mod graph`. |
+| `SYNAPSE_CROSSCHECK_ENABLED` | `true` | Detection-source disagreement judgments. |
+| `SYNAPSE_SBOM_CROSSCHECK_ENABLED` | `true` | Dual-producer SBOM cross-check. |
+| `SYNAPSE_GOMODGRAPH_ENABLED` | `true` | Transitive Go dependency edges via `go mod graph`. |
 | `SYNAPSE_WRITEUP_DRAFTS_ENABLED` | `false` | Agent write-up draft tool. A distinct human signs off. |
 
 ## MCP server (synapse-mcp)
