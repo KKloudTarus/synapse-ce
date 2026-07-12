@@ -131,6 +131,13 @@ type Config struct {
 	LLMModel   string
 	LLMTimeout time.Duration
 
+	// FPTriageEnabled turns on the opt-in LLM false-positive gate: after a scan, the configured model
+	// critiques the remaining production-scope first-party source findings and a "refuted" verdict marks
+	// the finding suspected-FP (retain-and-mark, exempt from the gate). Off by default; needs an LLM.
+	// FPTriageModel is the model to critique with (defaults to LLMModel).
+	FPTriageEnabled bool
+	FPTriageModel   string
+
 	// Agent orchestration policy. ApprovalMode: manual|filter|auto (manual is
 	// the safe default – a human approves every action). The rest bound a run.
 	AgentApprovalMode    string
@@ -401,6 +408,8 @@ func Load() Config {
 		LLMAPIKey:              getenv("SYNAPSE_LLM_API_KEY", ""),
 		LLMModel:               getenv("SYNAPSE_LLM_MODEL", ""),
 		LLMTimeout:             getduration("SYNAPSE_LLM_TIMEOUT", 60*time.Second),
+		FPTriageEnabled:        getbool("SYNAPSE_FP_TRIAGE_ENABLED", false),
+		FPTriageModel:          getenv("SYNAPSE_FP_TRIAGE_MODEL", getenv("SYNAPSE_LLM_MODEL", "")),
 
 		AgentApprovalMode:    getenv("SYNAPSE_AGENT_APPROVAL_MODE", "manual"),
 		AgentApprovalTimeout: getduration("SYNAPSE_AGENT_APPROVAL_TIMEOUT", 30*time.Minute),

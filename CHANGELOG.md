@@ -12,6 +12,7 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **False-positive gate.** Findings in test/fixture/example paths (including the `*_test.go`, `test_*.py`, `*.test.ts`, `*_spec.rb` file conventions) are now classified as background scope and held back from the `--fail-on` gate by default (`--include-test` re-includes them). An opt-in AI critique (`SYNAPSE_FP_TRIAGE_ENABLED`) then has the configured LLM adjudicate the remaining production-scope first-party source findings, marking high-confidence refutations as suspected false positives — retain-and-mark (still reported and sealed, exempt from the gate), never deleted.
 - **Release engineering.** goreleaser config and a tag-triggered release workflow that publish prebuilt binaries for all five commands (linux, macOS, Windows; amd64 and arm64) with a checksums file, a multi-arch `synapse-cli` container image on GHCR, and a reusable GitHub Action (`uses: KKloudTarus/synapse-ce@v1`) for the CI scan gate.
 - **IaC misconfiguration scanning.** Added a Terraform rule for Amazon RDS DB instances without deletion protection.
 - **SCA.** Added Conan 2.x `config_requires` packages to OwnSBOM component output.

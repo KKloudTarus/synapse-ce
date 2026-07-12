@@ -466,6 +466,23 @@ type ScanResult struct {
 	// producer + pinned advisory/DB snapshot ⇒ same digest. Excludes timestamps + per-run metadata.
 	ReproDigest string                 `json:"repro_digest"`
 	DebugEvents []ports.ScanDebugEvent `json:"debug_events"`
+	// AITriage holds an optional LLM false-positive critique of first-party source findings (opt-in,
+	// best-effort). Each entry is the model's PROPOSED verdict; a suspected-FP entry is retain-and-mark
+	// (the finding stays reported here and sealed, it is only held back from the CI gate), never a
+	// deletion. Empty unless the FP-triage gate ran.
+	AITriage []AICritique `json:"ai_triage,omitempty"`
+}
+
+// AICritique is one finding's LLM false-positive verdict (propose-only, advisory). Verdict and Driver
+// use the closed judgment.CritiqueClaim vocabulary (no free prose); SuspectedFP is set when the verdict
+// is "refuted" at or above the coordinator's confidence bar.
+type AICritique struct {
+	FindingID   string `json:"finding_id"`
+	DedupKey    string `json:"dedup_key"`
+	Verdict     string `json:"verdict"`
+	Driver      string `json:"driver"`
+	Confidence  int    `json:"confidence"`
+	SuspectedFP bool   `json:"suspected_fp"`
 }
 
 const (

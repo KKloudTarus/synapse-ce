@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
@@ -26,6 +27,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
@@ -69,6 +71,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/advisoryingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 )
@@ -778,10 +781,11 @@ func gradeNum(g rating.Grade) float64 {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
-	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
+	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--include-test] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
 	fmt.Fprintln(os.Stderr, "      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  skip the live OSV.dev source; detect with Grype's offline DB only (air-gapped / fast)")
+	fmt.Fprintln(os.Stderr, "      --include-test  also fail the gate on findings in test/fixture/example paths (default: reported but exempt)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli inventory <path>             # per-language code-size inventory (files, code/comment/blank lines, functions) – no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli metrics <path> [--fail-on-complexity N] [--top N]  # per-function cyclomatic+cognitive complexity (needs the synapse-ast sidecar)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli duplication <path> [--min-tokens N] [--fail-on-duplication PCT] [--top N]  # copy-paste detection (blocks, lines, density) – no DB")
@@ -810,11 +814,14 @@ func runScan() {
 	offline := false
 	jsonOut := false
 	sarifOut := false
+	includeTest := false
 	for i := 3; i < len(os.Args); i++ {
 		switch {
 		case os.Args[i] == "--fail-on" && i+1 < len(os.Args):
 			failOn = shared.Severity(os.Args[i+1])
 			i++
+		case os.Args[i] == "--include-test":
+			includeTest = true
 		case os.Args[i] == "--mode" && i+1 < len(os.Args):
 			mode = os.Args[i+1]
 			i++
@@ -853,7 +860,7 @@ func runScan() {
 		fmt.Fprintln(os.Stderr, "synapse-cli: choose only one of --json or --sarif")
 		os.Exit(2)
 	}
-	if err := run(os.Args[2], failOn, mode, priority, ignoreUnfixed, image, offline, jsonOut, sarifOut); err != nil {
+	if err := run(os.Args[2], failOn, mode, priority, ignoreUnfixed, image, offline, jsonOut, sarifOut, includeTest); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 		os.Exit(1)
 	}
@@ -931,7 +938,7 @@ func (stderrAudit) Record(_ context.Context, e ports.AuditEntry) error {
 
 var _ ports.AuditLogger = stderrAudit{}
 
-func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfixed, image, offline, jsonOut, sarifOut bool) error {
+func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfixed, image, offline, jsonOut, sarifOut, includeTest bool) error {
 	// An image target is an OCI reference (acquired via crane → OCI layout); a local
 	// target is a filesystem path that must be absolute for the scope check.
 	target := strings.TrimSpace(path)
@@ -1117,6 +1124,37 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		return fmt.Errorf("scan: %w", err)
 	}
 
+	// AI false-positive gate (opt-in, best-effort). After the deterministic scope pass, ask the
+	// configured LLM to adjudicate the remaining PRODUCTION-scope first-party source findings. The model
+	// is a proposer only: a "refuted" verdict at/above the confidence bar marks the finding suspected-FP
+	// (retain-and-mark — still reported + sealed, only held back from the gate), never a deletion. Skipped
+	// for image targets (no local source tree) and when no LLM model is configured; any error is non-fatal.
+	fpSuspect := map[string]bool{}
+	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" && !image {
+		if llm, lerr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); lerr != nil {
+			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage disabled: %v\n", lerr)
+		} else if cands := fpTriageCandidates(res.Findings); len(cands) > 0 {
+			coord := fptriage.New(llm, cfg.FPTriageModel)
+			tctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+			crits := coord.Assess(tctx, cands, fileSnippetReader{root: target})
+			cancel()
+			res.AITriage, fpSuspect = summarizeCritiques(crits, coord.MinConfidence())
+			nErr, sample := 0, ""
+			for _, c := range crits {
+				if c.Err != nil {
+					nErr++
+					if sample == "" {
+						sample = c.Err.Error()
+					}
+				}
+			}
+			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage (%s): assessed %d, critiqued %d, unassessed %d, %d suspected false positive(s) held back from the gate\n", cfg.FPTriageModel, len(cands), len(res.AITriage), nErr, len(fpSuspect))
+			if nErr > 0 {
+				fmt.Fprintf(os.Stderr, "synapse-cli: %d finding(s) could not be assessed (left to gate normally); first: %s\n", nErr, sample)
+			}
+		}
+	}
+
 	switch {
 	case sarifOut:
 		// SARIF 2.1.0 for a code-scanning uploader (e.g. GitHub codeql-action/upload-sarif), to stdout so
@@ -1175,18 +1213,112 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	accepted := res.SuppressedKeys() // .synapseignore/VEX accepted-risk: reported + sealed, but exempt from the gate
 	verify := res.NeedsVerifyKeys()  // precise-mode needs-verify: lower-confidence, exempt from the gate too
 	over := 0
+	bgExempt := 0 // background-scope (test/fixture/example/...) findings held back from the gate
+	fpExempt := 0 // AI-critiqued suspected false positives held back from the gate
 	for _, f := range res.Findings {
 		if accepted[f.DedupKey] || verify[f.DedupKey] {
 			continue
 		}
-		if shared.SeverityRank(f.Severity) >= gate {
-			over++
+		if shared.SeverityRank(f.Severity) < gate {
+			continue
 		}
+		// A finding in a test/fixture/example/benchmark/docs path is background, not production risk. It
+		// stays reported (retain-and-mark) but does NOT fail the gate unless --include-test is set —
+		// this is what stops a deliberately-insecure test fixture from breaking CI.
+		if !includeTest && sbom.IsBackgroundScope(f.Scope) {
+			bgExempt++
+			continue
+		}
+		// The AI critique refuted this finding (retain-and-mark: reported above, held back from the gate).
+		if fpSuspect[f.DedupKey] {
+			fpExempt++
+			continue
+		}
+		over++
+	}
+	if bgExempt > 0 {
+		fmt.Fprintf(os.Stderr, "synapse-cli: %d background/test-scope finding(s) at or above %s reported but exempt from the gate (use --include-test to gate them)\n", bgExempt, failOn)
+	}
+	if fpExempt > 0 {
+		fmt.Fprintf(os.Stderr, "synapse-cli: %d suspected false positive(s) at or above %s held back from the gate by AI triage (reported with a verdict; not deleted)\n", fpExempt, failOn)
 	}
 	if over > 0 {
 		return fmt.Errorf("%d finding(s) at or above %s", over, failOn)
 	}
 	return nil
+}
+
+// fpTriageCandidates selects the findings worth an LLM critique: production-scope, first-party source
+// analysis (SAST/secret/misconfig). Background-scope findings are already gate-exempt deterministically,
+// and SCA/advisory findings are DB-backed facts, so neither is critiqued.
+func fpTriageCandidates(fs []finding.Finding) []finding.Finding {
+	out := make([]finding.Finding, 0, len(fs))
+	for _, f := range fs {
+		if sbom.IsBackgroundScope(f.Scope) {
+			continue
+		}
+		switch f.Kind {
+		case finding.KindSAST, finding.KindSecret, finding.KindMisconfig:
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// summarizeCritiques turns the coordinator's per-finding critiques into the ScanResult DTO slice and a
+// set of DedupKeys the gate should exempt (suspected false positives). A best-effort failure (Err set)
+// is skipped, so an unassessed finding is left to gate normally.
+func summarizeCritiques(crits []fptriage.Critique, minConf int) ([]scauc.AICritique, map[string]bool) {
+	suspect := map[string]bool{}
+	out := make([]scauc.AICritique, 0, len(crits))
+	for _, c := range crits {
+		if c.Err != nil {
+			continue
+		}
+		fp := c.SuspectedFP(minConf)
+		out = append(out, scauc.AICritique{
+			FindingID:   c.FindingID,
+			DedupKey:    c.DedupKey,
+			Verdict:     string(c.Claim.Verdict),
+			Driver:      c.Claim.Driver,
+			Confidence:  c.Claim.Confidence,
+			SuspectedFP: fp,
+		})
+		if fp {
+			suspect[c.DedupKey] = true
+		}
+	}
+	return out, suspect
+}
+
+// fileSnippetReader reads a bounded source excerpt from the scanned (trusted-local) workspace so the
+// critique model sees the actual code, not just the finding metadata.
+type fileSnippetReader struct{ root string }
+
+func (r fileSnippetReader) Snippet(file string, line, radius int) (string, error) {
+	p := filepath.Join(r.root, filepath.FromSlash(file))
+	// Defense-in-depth: keep the read inside the scanned root even though the path is our own finding's.
+	if rel, err := filepath.Rel(r.root, p); err != nil || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("snippet path escapes scan root")
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(string(data), "\n")
+	lo := line - radius
+	if lo < 1 {
+		lo = 1
+	}
+	hi := line + radius
+	if hi > len(lines) {
+		hi = len(lines)
+	}
+	var b strings.Builder
+	for i := lo; i <= hi; i++ {
+		fmt.Fprintf(&b, "%d: %s\n", i, lines[i-1])
+	}
+	return b.String(), nil
 }
 
 func printReport(target string, res *scauc.ScanResult) {
