@@ -41,9 +41,11 @@ runs:
   steps:
     - name: Install synapse-cli, syft and grype
       shell: bash
+      # No GITHUB_TOKEN is exposed here on purpose: the release lookup hits a PUBLIC endpoint, and
+      # keeping the token out of this step means the `curl | sh` tool installers below cannot exfiltrate
+      # it. Pin `version` to a tag to skip the unauthenticated API call entirely.
       env:
         SYNAPSE_VERSION: ${{ inputs.version }}
-        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
 
@@ -54,15 +56,16 @@ runs:
         BIN_DIR="${RUNNER_TEMP}/synapse-bin"
         mkdir -p "${BIN_DIR}"
 
-        # Resolve the release tag (accept "latest" or an explicit vX.Y.Z).
+        # Resolve the release tag (accept "latest" or an explicit vX.Y.Z). Public repo → no auth needed.
         tag="${SYNAPSE_VERSION}"
         if [ "${tag}" = "latest" ] || [ -z "${tag}" ]; then
-          tag="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
-            "https://api.github.com/repos/${REPO}/releases/latest" \
+          tag="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
             | grep -m1 '"tag_name"' | cut -d '"' -f4)"
         fi
-        if [ -z "${tag}" ]; then
-          echo "::error::could not resolve a synapse-cli release (input version='${SYNAPSE_VERSION}')" >&2
+        # Only a strict vX.Y.Z[-suffix] tag is allowed, so a crafted `version` input cannot walk the
+        # download path to an arbitrary artifact.
+        if ! printf '%s' "${tag}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.+-][0-9A-Za-z.-]+)?$'; then
+          echo "::error::refusing non-semver release tag '${tag}' (input version='${SYNAPSE_VERSION}')" >&2
           exit 1
         fi
         ver="${tag#v}" # goreleaser archive names drop the leading 'v'
@@ -81,20 +84,36 @@ runs:
         esac
         ext="tar.gz"; [ "${os}" = "windows" ] && ext="zip"
         asset="synapse-ce_${ver}_${os}_${arch}.${ext}"
-        url="https://github.com/${REPO}/releases/download/${tag}/${asset}"
+        base="https://github.com/${REPO}/releases/download/${tag}"
 
-        echo "Downloading ${url}"
-        curl -fsSL -o "${BIN_DIR}/${asset}" "${url}"
+        # Download the archive AND the release checksums, then verify BEFORE extracting/executing.
+        curl -fsSL -o "${BIN_DIR}/${asset}" "${base}/${asset}"
+        curl -fsSL -o "${BIN_DIR}/checksums.txt" "${base}/checksums.txt"
+        want="$(grep " ${asset}\$" "${BIN_DIR}/checksums.txt" | awk '{print $1}')"
+        if [ -z "${want}" ]; then
+          echo "::error::no checksum for ${asset} in checksums.txt" >&2; exit 1
+        fi
+        if command -v sha256sum >/dev/null 2>&1; then
+          got="$(sha256sum "${BIN_DIR}/${asset}" | awk '{print $1}')"
+        else
+          got="$(shasum -a 256 "${BIN_DIR}/${asset}" | awk '{print $1}')" # macOS runners
+        fi
+        if [ "${want}" != "${got}" ]; then
+          echo "::error::checksum mismatch for ${asset} (want ${want}, got ${got})" >&2; exit 1
+        fi
+
         if [ "${ext}" = "zip" ]; then
-          unzip -o "${BIN_DIR}/${asset}" -d "${BIN_DIR}" synapse-cli synapse-cli.exe 2>/dev/null || unzip -o "${BIN_DIR}/${asset}" -d "${BIN_DIR}"
+          unzip -o "${BIN_DIR}/${asset}" -d "${BIN_DIR}" >/dev/null
         else
           tar -xzf "${BIN_DIR}/${asset}" -C "${BIN_DIR}" synapse-cli
         fi
         chmod +x "${BIN_DIR}/synapse-cli" 2>/dev/null || true
 
-        # syft (required) + grype (offline DB) via anchore's official, checksum-verifying installers.
-        curl -fsSL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "${BIN_DIR}" "${SYFT_VERSION}"
-        curl -fsSL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b "${BIN_DIR}" "${GRYPE_VERSION}"
+        # syft (required) + grype (offline DB) via anchore's installers, PINNED to the tool version tag
+        # (not the moving main branch) so the installer script itself is fixed. The installers
+        # checksum-verify the tool binaries they fetch.
+        curl -fsSL "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" | sh -s -- -b "${BIN_DIR}" "${SYFT_VERSION}"
+        curl -fsSL "https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh" | sh -s -- -b "${BIN_DIR}" "${GRYPE_VERSION}"
 
         echo "${BIN_DIR}" >> "${GITHUB_PATH}"
         echo "SYNAPSE_SYFT_BIN=${BIN_DIR}/syft" >> "${GITHUB_ENV}"

@@ -27,7 +27,9 @@ builds:
     flags: &build_flags
       - -trimpath
     ldflags: &build_ldflags
-      - -s -w -X github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo.version={{ .Version }}
+      # .Tag keeps the leading "v" so the embedded version matches Go's vX.Y.Z convention (the
+      # `go install <module>@<version>` fallback and buildinfo.Module() both report v-prefixed).
+      - -s -w -X github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo.version={{ .Tag }}
     goos: &build_goos
       - linux
       - darwin
@@ -105,6 +107,10 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
+# Follow-up hardening (separate PR, needs keyless-signing setup): a cosign `signs:` stanza over
+# checksums.txt plus SLSA provenance and an `sboms:` block, so consumers can verify artifact
+# authenticity rather than only integrity.
+
 # Multi-arch synapse-cli container image on GHCR, built with buildx from the prebuilt binaries (no
 # in-image Go build). The synapse-api image follows the same pattern and can be added when needed; the
 # compose stack already builds an API image from deploy/Dockerfile.
@@ -113,7 +119,7 @@ dockers_v2:
     images:
       - ghcr.io/kkloudtarus/synapse-cli
     tags:
-      - "{{ .Version }}"
+      - "{{ .Tag }}"
       - latest
     platforms:
       - linux/amd64
