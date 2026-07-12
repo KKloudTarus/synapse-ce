@@ -1031,15 +1031,25 @@ func main() {
 			log.Error("agent catalog init failed", "err", cerr)
 			os.Exit(1)
 		}
-		agentCatalog.EnablePlanning()                            // advertise + dispatch propose_plan (paired with SetPlanStore below)
-		agentCatalog.EnableFindingProposals(exploitationService) // agent can record unproven findings (score 0)
-		agentCatalog.EnableHypotheses(exploitationService)       // agent can propose attack-chain hypotheses (score 0; gated until human-verified)
-		agentCatalog.EnableReachability(scanResultStore)         // agent can read dep-graph reachability facts (T0/T1)
-		if judgmentSvc != nil {                                  // agent can PROPOSE reachability judgments (score 0); verify stays human-only (PermReview)
-			agentCatalog.EnableJudgments(judgmentSvc)
+		// Enable the agent's tools through the SHARED toolset helper so the inline (here) and durable
+		// (synapse-worker) catalogs advertise an IDENTICAL tool set — the durable/inline parity guarantee
+		// (#161). Planning + findings + hypotheses + reachability are always on; judgments + writeup drafts
+		// mirror their feature flags (assigned only when the concrete service is non-nil, to avoid a
+		// non-nil interface wrapping a typed-nil pointer).
+		toolset := agenttools.AgentToolset{
+			Findings:     exploitationService, // record unproven findings (score 0)
+			Hypotheses:   exploitationService, // propose attack-chain hypotheses (score 0; gated until human-verified)
+			Reachability: scanResultStore,     // read dep-graph reachability facts (T0/T1)
 		}
-		if writeupDraftSvc != nil { // agent can PROPOSE finding write-up drafts (prose); edit/accept stays human-only
-			agentCatalog.EnableWriteupDrafts(writeupDraftSvc)
+		if judgmentSvc != nil { // PROPOSE reachability/critique/… judgments (score 0); verify stays human-only (PermReview)
+			toolset.Judgments = judgmentSvc
+		}
+		if writeupDraftSvc != nil { // PROPOSE finding write-up drafts (prose); edit/accept stays human-only
+			toolset.WriteupDrafts = writeupDraftSvc
+		}
+		if terr := agentCatalog.EnableAgentToolset(toolset); terr != nil {
+			log.Error("agent toolset wiring failed", "err", terr)
+			os.Exit(1)
 		}
 		// The executor drives recon through the SAME dispatcher-backed recon service (in-process
 		// pool), so the inline agent never starves a queue claim. A durable agent-on-worker would
