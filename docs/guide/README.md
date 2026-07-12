@@ -20,6 +20,7 @@ has screenshots of the current build.
 | [Installation](installation.md) | Requirements, external tools, and the ways to install |
 | [Quickstart](quickstart.md) | From clone to a running dashboard, then a first scan |
 | [Features](features.md) | Every capability, in depth |
+| [Code Quality Rules](code-quality-rules.md) | Authoring guide for code-quality rule packs (schema, clean-room policy, per-language sources) |
 | [Configuration](configuration.md) | The full environment-variable reference |
 | [CLI](cli.md) | Using `synapse-cli` for scans in CI |
 | [Architecture](architecture.md) | Clean architecture, layers, ports, and the binaries |
