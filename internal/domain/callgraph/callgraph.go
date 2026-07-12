@@ -24,9 +24,20 @@ type Edge struct {
 
 // Graph is a deterministic call graph: the call Edges plus the Entrypoints reachability is measured from
 // (a Go build's main + exported API). A builder adapter populates it; the query methods are pure.
+//
+// Positions is an OPTIONAL side table: a first-party node's "importPath.Symbol" → its definition position
+// as "relpath:line" (relative to the scan root, never an absolute host path). It exists so a taint SAST
+// finding can cite a file:line for the sink-using function instead of only its symbol (def-use precision;
+// a coarse, function-granular over-approximation — the function's definition line, not the exact sink call
+// site). It is purely descriptive: the reachability queries (adjacency/Reachable/PathTo) never read it, so
+// a builder that omits it (empty map) degrades gracefully to symbol-only locations. Only file PATHS + lines
+// are carried here — never file CONTENTS (GR3).
 type Graph struct {
 	Entrypoints []string
 	Edges       []Edge
+	// Positions carries no json tag to match Entrypoints/Edges: the domain Graph is never marshaled
+	// directly — the synapse-callgraph wire type (taintcallgraph.wireGraph) owns serialization.
+	Positions map[string]string
 }
 
 // adjacency builds the caller -> callees map once, for the multi-target queries to share. Empty node

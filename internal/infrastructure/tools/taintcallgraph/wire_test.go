@@ -29,6 +29,27 @@ func TestEncodeParseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEncodeParseCarriesPositions(t *testing.T) {
+	// The def-use position side table (#163) must survive the exec-boundary round-trip so a taint finding
+	// can cite a file:line instead of only a symbol.
+	g := &callgraph.Graph{
+		Entrypoints: []string{"m.main"},
+		Edges:       []callgraph.Edge{{Caller: "m.main", Callees: []string{"m.dao.Find"}}},
+		Positions:   map[string]string{"m.dao.Find": "internal/dao/dao.go:88", "m.main": "main.go:12"},
+	}
+	var buf bytes.Buffer
+	if err := EncodeGraph(&buf, g); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	got, err := parseCallgraph(buf.Bytes())
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !reflect.DeepEqual(got.Positions, g.Positions) {
+		t.Errorf("positions must round-trip:\n got %+v\nwant %+v", got.Positions, g.Positions)
+	}
+}
+
 func TestEncodeParseEmptyGraph(t *testing.T) {
 	// The load-bearing contract (ports.CallGraphBuilder): a SUCCESSFUL build that reached nothing must
 	// round-trip to a NON-NIL empty Graph + nil error – the "definitive not-reachable" signal, distinct from

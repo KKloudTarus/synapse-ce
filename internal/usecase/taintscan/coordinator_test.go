@@ -115,6 +115,49 @@ func TestScanProposesSameFunctionInjection(t *testing.T) {
 	}
 }
 
+// With def-use positions from the build (#163), the claim Location is the sink-using function's file:line
+// (not just its symbol), and the witness records source/sink file:line.
+func TestScanUsesFileLinePositions(t *testing.T) {
+	b := &fakeBuilder{g: &callgraph.Graph{
+		Edges: []callgraph.Edge{
+			{Caller: "app.handler", Callees: []string{"os.Getenv", "os/exec.Command"}},
+		},
+		Positions: map[string]string{"app.handler": "internal/app/handler.go:42"},
+	}}
+	p := &fakeProposer{}
+	a := &fakeAudit{}
+	if _, err := newCoord(t, b, p, a).Scan(context.Background(), engID, "/work/target"); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	sc := p.calls[0].claim.(judgment.SASTClaim)
+	if sc.Location != "internal/app/handler.go:42" {
+		t.Errorf("Location must be the sink-using function's file:line, got %q", sc.Location)
+	}
+	md := a.entries[0].Metadata
+	if md["sink_pos"] != "internal/app/handler.go:42" || md["source_pos"] != "internal/app/handler.go:42" {
+		t.Errorf("witness must carry source/sink file:line, got source_pos=%q sink_pos=%q", md["source_pos"], md["sink_pos"])
+	}
+}
+
+// Without positions (older builder / non-first-party), the claim falls back to the symbol and the witness
+// omits the position keys (never blank values).
+func TestScanFallsBackToSymbolWithoutPositions(t *testing.T) {
+	b := &fakeBuilder{g: &callgraph.Graph{Edges: []callgraph.Edge{
+		{Caller: "app.handler", Callees: []string{"os.Getenv", "os/exec.Command"}},
+	}}}
+	p := &fakeProposer{}
+	a := &fakeAudit{}
+	if _, err := newCoord(t, b, p, a).Scan(context.Background(), engID, "/work/target"); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if got := p.calls[0].claim.(judgment.SASTClaim).Location; got != "app.handler" {
+		t.Errorf("Location must fall back to the symbol, got %q", got)
+	}
+	if _, ok := a.entries[0].Metadata["sink_pos"]; ok {
+		t.Errorf("witness must OMIT sink_pos when unavailable (not a blank value): %+v", a.entries[0].Metadata)
+	}
+}
+
 // A sink-using function reached via a forward call chain is proposed with the cross-function witness path.
 func TestScanProposesCrossFunctionWitness(t *testing.T) {
 	b := &fakeBuilder{g: &callgraph.Graph{Edges: []callgraph.Edge{

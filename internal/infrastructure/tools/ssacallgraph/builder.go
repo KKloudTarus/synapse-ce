@@ -16,7 +16,9 @@ import (
 	"fmt"
 	"go/token"
 	"go/types"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"golang.org/x/tools/go/callgraph/cha"
 	"golang.org/x/tools/go/packages"
@@ -66,6 +68,7 @@ func BuildGraph(ctx context.Context, dir string) (*domaincg.Graph, error) {
 
 	adj := map[string]map[string]bool{}
 	entry := map[string]bool{}
+	positions := map[string]string{} // first-party symbol → "relpath:line" (def-use precision for taint findings)
 	for fn, node := range cg.Nodes {
 		caller := nodeID(fn)
 		if caller == "" {
@@ -73,6 +76,9 @@ func BuildGraph(ctx context.Context, dir string) (*domaincg.Graph, error) {
 		}
 		if isEntrypoint(fn, firstParty) {
 			entry[caller] = true
+		}
+		if p := firstPartyPos(prog.Fset, fn, dir, firstParty); p != "" {
+			positions[caller] = p
 		}
 		for _, e := range node.Out {
 			callee := nodeID(e.Callee.Func)
@@ -85,7 +91,38 @@ func BuildGraph(ctx context.Context, dir string) (*domaincg.Graph, error) {
 			adj[caller][callee] = true
 		}
 	}
-	return &domaincg.Graph{Entrypoints: sortedKeys(entry), Edges: edgesOf(adj)}, nil
+	return &domaincg.Graph{Entrypoints: sortedKeys(entry), Edges: edgesOf(adj), Positions: positions}, nil
+}
+
+// firstPartyPos returns fn's definition position as "relpath:line" (relative to the scan root dir) for a
+// FIRST-PARTY function, or "" otherwise. It bounds the position table to the module's own code (which is
+// where taint source/sink USING-functions live) and never emits an absolute host path (GR3: a path outside
+// dir, or an un-relativizable one, degrades to the base name). It resolves a generic INSTANCE to its ORIGIN
+// so the key matches nodeID's id exactly. It carries only a path + line — never file contents.
+func firstPartyPos(fset *token.FileSet, fn *ssa.Function, dir string, firstParty map[string]bool) string {
+	if o := fn.Origin(); o != nil {
+		fn = o
+	}
+	if fn.Pkg == nil || fn.Pkg.Pkg == nil || !firstParty[fn.Pkg.Pkg.Path()] {
+		return ""
+	}
+	if !fn.Pos().IsValid() {
+		return ""
+	}
+	p := fset.Position(fn.Pos())
+	if p.Filename == "" {
+		return ""
+	}
+	name := p.Filename
+	// Keep the relative path only when it stays INSIDE the scan root; a real escape ("../…") degrades to
+	// the base name (no host-layout leak). Match the escape precisely so a directory literally named
+	// "..foo" is not misclassified as an escape.
+	if rel, err := filepath.Rel(dir, name); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		name = rel
+	} else {
+		name = filepath.Base(name)
+	}
+	return fmt.Sprintf("%s:%d", name, p.Line)
 }
 
 // nodeID composes an ssa.Function into the "importPath.Symbol" identity (matching the govulncheck builder +

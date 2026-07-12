@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	domaincg "github.com/KKloudTarus/synapse-ce/internal/domain/callgraph"
@@ -75,6 +76,41 @@ func run(name string) { _ = exec.Command(name).Run() }
 	}
 	if contains(g.Entrypoints, "cgfixture.run") {
 		t.Errorf("unexported cgfixture.run must NOT be an entrypoint")
+	}
+}
+
+func TestBuildGraphRecordsFirstPartyPositions(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module cgfixture\n\ngo 1.21\n",
+		"main.go": `package main
+
+import "os/exec"
+
+func main() { run("ls") }
+
+func run(name string) { _ = exec.Command(name).Run() }
+`,
+	})
+	g, err := BuildGraph(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	// First-party functions carry a "relpath:line" definition position (def-use precision for taint).
+	if got := g.Positions["cgfixture.main"]; got != "main.go:5" {
+		t.Errorf("main position = %q, want main.go:5", got)
+	}
+	if got := g.Positions["cgfixture.run"]; got != "main.go:7" {
+		t.Errorf("run position = %q, want main.go:7", got)
+	}
+	// Positions are RELATIVE (never an absolute host path) so no host layout leaks.
+	for sym, pos := range g.Positions {
+		if strings.HasPrefix(pos, "/") {
+			t.Errorf("position for %q must be relative, got absolute %q", sym, pos)
+		}
+	}
+	// A stdlib/dependency symbol is NOT first-party, so it carries no position (bounded table).
+	if _, ok := g.Positions["os/exec.Command"]; ok {
+		t.Errorf("stdlib symbol must not carry a first-party position")
 	}
 }
 

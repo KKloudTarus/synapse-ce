@@ -114,15 +114,22 @@ func (c *Coordinator) Scan(ctx context.Context, engagementID shared.ID, targetRe
 				continue
 			}
 			seen[classKey] = true
-			// Location is the sink-using function's importPath.Symbol – function-granular: the current build
-			// carries no file:line (precise positions are the deferred def-use follow-up), so the claim's
-			// "path[:line]" field holds the symbol.
-			claim := judgment.SASTClaim{CWE: sink.CWE, Location: v.Sink, Rule: sink.Rule}
+			// Location prefers the sink-using function's "relpath:line" (def-use precision, from the SSA
+			// build's Positions side table) so the finding cites a file:line like the pattern engine, not
+			// only a symbol. It is a coarse, function-granular over-approximation — the function's
+			// DEFINITION line, not the exact sink call site — and falls back to the importPath.Symbol when
+			// no position is available (older builder / non-first-party). The witness records both.
+			sinkPos, sourcePos := g.Positions[v.Sink], g.Positions[v.Source]
+			loc := v.Sink
+			if sinkPos != "" {
+				loc = sinkPos
+			}
+			claim := judgment.SASTClaim{CWE: sink.CWE, Location: loc, Rule: sink.Rule}
 			j, err := c.proposer.Propose(ctx, proposerActor, engagementID, judgment.CapSAST, judgment.SubjectDataFlow, flowSubjectID(engagementID, v, sink), claim)
 			if err != nil {
 				return proposed, fmt.Errorf("propose taint judgment: %w", err)
 			}
-			if err := c.recordWitness(ctx, engagementID, j.ID, v, sink); err != nil {
+			if err := c.recordWitness(ctx, engagementID, j.ID, v, sink, sourcePos, sinkPos); err != nil {
 				return proposed, err
 			}
 			proposed++
@@ -144,18 +151,27 @@ func flowSubjectID(engagementID shared.ID, v taint.TaintPath, sink taint.Sink) s
 // recordWitness records the taint proof path as append-only, attributable evidence for the proposed
 // judgment (GR6). The metadata carries ONLY normalized importPath.Symbol frames + the injection class –
 // never file contents, env, build stderr, or secrets (GR3), mirroring reachproof's proof rationale.
-func (c *Coordinator) recordWitness(ctx context.Context, engagementID, judgmentID shared.ID, v taint.TaintPath, sink taint.Sink) error {
+func (c *Coordinator) recordWitness(ctx context.Context, engagementID, judgmentID shared.ID, v taint.TaintPath, sink taint.Sink, sourcePos, sinkPos string) error {
+	md := map[string]string{
+		"engagement": engagementID.String(),
+		"cwe":        sink.CWE,
+		"rule":       sink.Rule,
+		"path":       witnessPath(v.Path),
+	}
+	// Source→sink def-use positions ("relpath:line") when the build carried them – the file:line proof
+	// behind the symbol witness. Omitted (not blank) when unavailable, so the metadata stays clean.
+	if sourcePos != "" {
+		md["source_pos"] = sourcePos
+	}
+	if sinkPos != "" {
+		md["sink_pos"] = sinkPos
+	}
 	if err := c.audit.Record(ctx, ports.AuditEntry{
-		Actor:  proposerActor,
-		Action: "judgment.taint_proposed",
-		Target: judgmentID.String(),
-		Metadata: map[string]string{
-			"engagement": engagementID.String(),
-			"cwe":        sink.CWE,
-			"rule":       sink.Rule,
-			"path":       witnessPath(v.Path),
-		},
-		At: c.clock.Now(),
+		Actor:    proposerActor,
+		Action:   "judgment.taint_proposed",
+		Target:   judgmentID.String(),
+		Metadata: md,
+		At:       c.clock.Now(),
 	}); err != nil {
 		return fmt.Errorf("audit taint proposal: %w", err)
 	}
