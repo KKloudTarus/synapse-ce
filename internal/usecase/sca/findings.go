@@ -572,6 +572,40 @@ func reachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vuln
 	return subs
 }
 
+// pyReachabilitySubjects builds the per-finding inputs for TIER-1 Python import-reachability: each promoted
+// finding whose vulnerable component is a PyPI package (identified by its SBOM component's pkg:pypi/ PURL)
+// becomes a subject keyed by the real finding id, with the PyPI DISTRIBUTION name as the single symbol (the
+// pyreach analyzer expands it to candidate import names). Unlike the Go path this needs NO affected symbols
+// — the "is this package imported at all" question is package-level. Findings without a PyPI component are
+// skipped (they get no Python reachability judgment).
+func pyReachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vulnerability, doc *sbom.SBOM) []ports.ReachabilitySubject {
+	if doc == nil {
+		return nil
+	}
+	pypi := map[string]bool{} // lowercased PyPI component name → true
+	for _, c := range doc.Components {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.PURL)), "pkg:pypi/") {
+			pypi[strings.ToLower(c.Name)] = true
+		}
+	}
+	if len(pypi) == 0 {
+		return nil
+	}
+	byDedup := make(map[string]vulnerability.Vulnerability, len(vulns))
+	for _, v := range vulns {
+		byDedup[vulnDedupKey(v)] = v
+	}
+	var subs []ports.ReachabilitySubject
+	for _, f := range findings {
+		v, ok := byDedup[f.DedupKey]
+		if !ok || !pypi[strings.ToLower(v.Component)] {
+			continue
+		}
+		subs = append(subs, ports.ReachabilitySubject{FindingID: f.ID, Symbols: []string{v.Component}})
+	}
+	return subs
+}
+
 // detectionSourceNames returns the names of the run detection sources – the cross-check "run set",
 // so a source that ran but reported nothing for a vuln is correctly flagged as a disagreement.
 func detectionSourceNames(sources []ports.DetectionSource) []string {

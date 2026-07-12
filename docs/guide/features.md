@@ -124,6 +124,18 @@ Capabilities include reachability proposals, pattern SAST, a taint engine over t
 threat modeling over an architecture seam, AI critique and risk narrative, and human-gated
 write-up drafts.
 
+### Deterministic reachability
+
+Reachability is the strongest anti-hallucination signal: a deterministic proof supersedes any LLM
+opinion. The Go path builds a real call graph (Tier-2) and proves whether a vulnerable symbol is
+actually called. For **Python** (`SYNAPSE_PYREACH_ENABLED`), a source-only scanner proves whether a
+declared PyPI package is imported by first-party code at all — a declared-but-never-imported package
+(a dead dependency) becomes a deterministic **Tier-1 `not_reachable`** judgment that the OpenVEX
+export turns into a `vulnerable_code_not_in_execute_path` justification. It is honestly tiered
+(import-level, weaker than a call path) and conservative: a target that uses dynamic imports
+(`importlib`/`__import__`), a non-Python target, or an unresolvable import name yields no verdict
+rather than a false "not reachable" that could suppress a real vulnerability.
+
 ### Runtime confirmation (DAST)
 
 A gated SAST hypothesis can be confirmed at runtime by a **safe HTTP probe**. When a distinct

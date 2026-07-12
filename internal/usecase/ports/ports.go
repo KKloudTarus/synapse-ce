@@ -685,6 +685,27 @@ type CallGraphBuilder interface {
 	Build(ctx context.Context, targetRef string) (*callgraph.Graph, error)
 }
 
+// PyImportGraph is the first-party Python import surface a PyImportScanner extracts (source-only, no
+// execution): the top-level modules imported by first-party code, the first-party module roots (provenance
+// for the reachability proof), and whether first-party code uses DYNAMIC imports (importlib/__import__),
+// which make a static "package not imported" conclusion UNSAFE. Counts bound the evidence.
+type PyImportGraph struct {
+	ImportedModules   []string // top-level module names appearing in first-party absolute imports
+	FirstPartyModules []string // the project's own top-level modules (import roots), for provenance
+	DynamicImports    bool     // first-party code uses __import__ / importlib – a not-imported conclusion is unsafe
+	FilesScanned      int
+}
+
+// PyImportScanner reads a target's FIRST-PARTY Python source and returns its import surface. It is
+// SOURCE-ONLY (line/AST parse, never compiles or executes the target) and reads no file contents beyond
+// import statements, so — unlike the sandboxed go/ssa call-graph builder (which compiles the target) — it
+// runs in-process, like the pure-Go lockfile parsers. It bounds its walk (file count/size) and skips
+// vendored/virtualenv trees so installed third-party source never pollutes the first-party import set. A
+// target with no Python source returns an error (no coverage), NOT an empty graph.
+type PyImportScanner interface {
+	ScanImports(ctx context.Context, dir string) (PyImportGraph, error)
+}
+
 // TaintScanner is the OPTIONAL taint-analysis hook: given a built target, it runs the
 // deterministic taint engine (call-graph + injection catalog) and PROPOSES gated CapSAST judgments – one
 // per reported injection path × class – for a distinct verifier to gate. It only proposes; it never

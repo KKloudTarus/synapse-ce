@@ -128,7 +128,8 @@ All are best-effort and no-op without inputs. Set a flag to `false` to opt out.
 | --- | --- | --- |
 | `SYNAPSE_JUDGMENTS_ENABLED` | `true` | Judgment lifecycle routes (verify, accept, list). |
 | `SYNAPSE_SAST_ENABLED` | `true` | Pattern SAST in the scan pipeline. |
-| `SYNAPSE_REACHABILITY_ENABLED` | `true` | Call-graph reachability proof. Needs judgments. |
+| `SYNAPSE_REACHABILITY_ENABLED` | `true` | Call-graph reachability proof (Go, Tier-2). Needs judgments. |
+| `SYNAPSE_PYREACH_ENABLED` | `false` | Python import-reachability (Tier-1 dead-dependency → OpenVEX). Needs judgments. |
 | `SYNAPSE_TAINT_ENABLED` | `false` | Taint proposals. Needs judgments and the sandbox. |
 | `SYNAPSE_CROSSCHECK_ENABLED` | `true` | Detection-source disagreement judgments. |
 | `SYNAPSE_SBOM_CROSSCHECK_ENABLED` | `true` | Dual-producer SBOM cross-check. |

@@ -95,15 +95,15 @@ func TestRecordReachableMintsConfirmedTier2(t *testing.T) {
 	if err != nil || n != 1 {
 		t.Fatalf("want 1 minted, got n=%d err=%v", n, err)
 	}
-	if len(rec.proposes) != 1 || rec.proposes[0].proposer != proposerActor || rec.proposes[0].claim.Tier != judgment.Tier2 ||
+	if len(rec.proposes) != 1 || rec.proposes[0].proposer != "system:callgraph-scan" || rec.proposes[0].claim.Tier != judgment.Tier2 ||
 		rec.proposes[0].claim.Reachable != judgment.Reachable {
 		t.Fatalf("propose wrong: %+v", rec.proposes)
 	}
-	if len(rec.verifies) != 1 || rec.verifies[0].verifier != verifierActor || rec.verifies[0].score != verdict.DeterministicProofScore {
+	if len(rec.verifies) != 1 || rec.verifies[0].verifier != "system:callgraph-engine" || rec.verifies[0].score != verdict.DeterministicProofScore {
 		t.Fatalf("verify wrong: %+v", rec.verifies)
 	}
 	// C1: the two identities are distinct, so the self-confirm guard never fires
-	if verdict.SelfConfirm(verifierActor, proposerActor) {
+	if verdict.SelfConfirm("system:callgraph-engine", "system:callgraph-scan") {
 		t.Error("proposer and verifier must be distinct (self-confirm guard)")
 	}
 	// proof path is in the rationale (C6), no file contents

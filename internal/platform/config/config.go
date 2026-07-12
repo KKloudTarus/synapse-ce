@@ -213,6 +213,14 @@ type Config struct {
 	// leaves the prior tier standing). GovulncheckBin is the pinned builder binary.
 	ReachabilityEnabled bool
 	GovulncheckBin      string
+
+	// PyReachabilityEnabled turns on deterministic Tier-1 Python import-reachability: post-scan, it mints a
+	// not_reachable judgment for a declared PyPI package that first-party code never imports (a dead
+	// dependency) → an OpenVEX not_affected justification. Weaker than the Go Tier-2 call-graph proof
+	// (import-level, not a reached call path). Off by default; opt-in + best-effort (a non-Python /
+	// dynamic-import / no-coverage target leaves the prior tier standing, never a false "not reachable").
+	// Also requires the judgment lifecycle (SYNAPSE_JUDGMENTS_ENABLED).
+	PyReachabilityEnabled bool
 	// TaintCallgraphBin is the pinned synapse-callgraph binary: the sandboxed go/ssa call-graph builder
 	// the taint analyzer shells out to. In-repo cmd (built by `make build` into bin/); pin its hash via
 	// SYNAPSE_TOOL_HASHES, like any other tool binary.
@@ -377,6 +385,7 @@ func Load() Config {
 		ImageRootFSEnabled:     getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
 		OwnedAdvisoryEnabled:   getbool("SYNAPSE_OWNED_ADVISORY", true),
 		ReachabilityEnabled:    getbool("SYNAPSE_REACHABILITY_ENABLED", true),
+		PyReachabilityEnabled:  getbool("SYNAPSE_PYREACH_ENABLED", false),
 		CrossCheckEnabled:      getbool("SYNAPSE_CROSSCHECK_ENABLED", true),
 		SBOMCrossCheckEnabled:  getbool("SYNAPSE_SBOM_CROSSCHECK_ENABLED", true),
 		WriteupDraftsEnabled:   getbool("SYNAPSE_WRITEUP_DRAFTS_ENABLED", false), // needs agent → opt-in

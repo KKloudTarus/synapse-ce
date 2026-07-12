@@ -71,7 +71,8 @@ type Service struct {
 	complianceOn      bool                            // when set, attach the AppSec-baseline compliance report to a scan
 	dbMaxAgeDays      int                             // when > 0, warn if a reference DB (KEV/EPSS/vuln-DB) is older than this
 	detectionPriority string                          // server default detection priority (comprehensive|precise); empty = comprehensive
-	reachability      ports.ReachabilityRecorder      // optional deterministic Tier-2 reachability proof
+	reachability      ports.ReachabilityRecorder      // optional deterministic Tier-2 reachability proof (Go call-graph)
+	pyReachability    ports.ReachabilityRecorder      // optional deterministic Tier-1 Python import-reachability proof
 	correlation       ports.CorrelationRecorder       // optional cross-check disagreement → judgment minter
 	sbomGen2          ports.SBOMGenerator             // optional 2nd SBOM producer for the cross-check
 	sbomCache         ports.SBOMCache                 // optional content+version-addressed cache of the generated SBOM
@@ -227,6 +228,13 @@ func (s *Service) attachCompliance(result *ScanResult) {
 // reachability judgments. Best-effort + opt-in: a no-coverage/un-buildable target leaves the prior
 // reachability tier standing (never a false "not reachable"). A setter keeps NewService call sites unchanged.
 func (s *Service) SetReachability(r ports.ReachabilityRecorder) { s.reachability = r }
+
+// SetPyReachability configures the optional deterministic Tier-1 Python import-reachability prover: it
+// mints a not_reachable judgment for a declared PyPI package that first-party code never imports (a dead
+// dependency). nil ⇒ no Python reachability judgments. Same best-effort + opt-in contract as
+// SetReachability (a no-coverage / dynamic-import target leaves the prior tier standing, never a false
+// "not reachable"). Kept distinct from the Go call-graph prover: it is a WEAKER (Tier-1, import-level) proof.
+func (s *Service) SetPyReachability(r ports.ReachabilityRecorder) { s.pyReachability = r }
 
 // SetCorrelation configures the optional cross-check disagreement→judgment minter. nil ⇒ no
 // correlation judgments. Best-effort + opt-in: a recorder error is ignored (the scan never fails). A setter
@@ -2090,6 +2098,17 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if opts.scansVulnerabilities() && s.reachability != nil {
 		if subs := reachabilitySubjects(result.Findings, result.Vulnerabilities); len(subs) > 0 {
 			_, _ = s.reachability.Record(ctx, engagementID, ws.Dir, subs)
+		}
+	}
+
+	// Deterministic TIER-1 Python import-reachability, best-effort + opt-in: for each PyPI finding, mint a
+	// judgment on whether first-party code actually imports the vulnerable package. A dead dependency
+	// (declared, never imported) becomes not_reachable → an OpenVEX not_affected justification. Same
+	// best-effort contract: a non-Python / dynamic-import / no-coverage target returns an error here that is
+	// IGNORED (the prior tier stands; never a false "not reachable"). Runs while ws.Dir still exists.
+	if opts.scansVulnerabilities() && s.pyReachability != nil {
+		if subs := pyReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
+			_, _ = s.pyReachability.Record(ctx, engagementID, ws.Dir, subs)
 		}
 	}
 

@@ -82,13 +82,17 @@ func buildOpenVEX(engagementID shared.ID, findings []finding.Finding, notReachab
 }
 
 // reachabilityJustification maps a confirmed not_reachable reachability tier to the OpenVEX
-// justification: a source/call-graph proof (tier-1.5/2) shows the vulnerable code is not in
-// the execute path; a dependency-graph determination (tier-0/1) shows it is not present in what ships.
+// justification: an import/source/call-graph proof (tier-1..2) shows the vulnerable code is present but
+// not on the execute path (e.g. a declared package first-party code never imports); a dependency-graph
+// determination (tier-0) shows the vulnerable code is not present in what ships at all.
 func reachabilityJustification(tier judgment.ReachabilityTier) string {
 	switch tier {
-	case judgment.Tier1_5, judgment.Tier2:
+	case judgment.Tier1, judgment.Tier1_5, judgment.Tier2:
+		// Tier-1 (direct import) .. Tier-2 (call path): the vulnerable code IS present (a declared
+		// dependency) but is not on the execute path — e.g. a package first-party code never imports.
 		return "vulnerable_code_not_in_execute_path"
 	default:
+		// Tier-0 (not in the dependency graph at all): the vulnerable code is not present.
 		return "vulnerable_code_not_present"
 	}
 }

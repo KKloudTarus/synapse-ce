@@ -21,6 +21,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/httpapi"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
@@ -68,6 +69,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/osv"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownadvisory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownsbom"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/pyimports"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/risk"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/secretscan"
@@ -104,6 +106,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/llmverifier"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/pyreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachability"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachproof"
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
@@ -937,6 +940,25 @@ func main() {
 		}
 		scaService.SetReachability(coord)
 		log.Info("Tier-2 reachability proof ENABLED (govulncheck call-graph; best-effort, deterministic overrides LLM Tier-1.5)")
+	}
+
+	// Deterministic Tier-1 Python import-reachability, opt-in. A SOURCE-ONLY scanner (no compile/execute, so
+	// in-process like the lockfile parsers) determines which declared PyPI packages first-party code imports;
+	// a dead dependency becomes a not_reachable judgment → an OpenVEX not_affected justification. Requires the
+	// judgment lifecycle. Never on an agent-reachable surface (composition-root only).
+	if cfg.PyReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_PYREACH_ENABLED", "python reachability") {
+		pyAnalyzer, perr := pyreach.New(pyimports.New())
+		if perr != nil {
+			log.Error("python reachability analyzer init failed", "err", perr)
+			os.Exit(1)
+		}
+		pyCoord, cerr := reachproof.NewCoordinatorForTier(pyAnalyzer, judgmentSvc, auditLog, clock, judgment.Tier1)
+		if cerr != nil {
+			log.Error("python reachability coordinator init failed", "err", cerr)
+			os.Exit(1)
+		}
+		scaService.SetPyReachability(pyCoord)
+		log.Info("Tier-1 Python import-reachability ENABLED (source-only dead-dependency detection → OpenVEX not_affected; best-effort)")
 	}
 
 	// Deterministic taint-analysis CapSAST proposals, opt-in. Builds the workspace call
