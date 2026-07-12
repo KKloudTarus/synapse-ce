@@ -8,11 +8,13 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// Terraform (HCL) misconfiguration checks. Rather than a full HCL evaluator, this tracks the enclosing
-// `resource "TYPE" "NAME"` block by brace depth and matches insecure LITERAL attribute values inside it
-// – the common, high-signal cloud misconfigurations (public storage, world-open security groups,
-// disabled encryption, public databases, wildcard IAM, plaintext secrets). Values that come from a
-// variable / interpolation (${...}) are not flagged, keeping false positives low.
+// Terraform (HCL) misconfiguration checks. Rather than a full HCL
+// evaluator, this tracks the enclosing `resource "TYPE" "NAME"` block
+// by brace depth and matches high-confidence insecure literal values or
+// missing secure settings.
+//
+// Dynamic values from variables, locals, data sources, modules, and
+// expressions are not evaluated, keeping false positives low.
 var (
 	tfResourceOpen = regexp.MustCompile(`^\s*resource\s+"([^"]+)"\s+"([^"]*)"\s*\{`)
 	tfPublicACL    = regexp.MustCompile(`(?i)\bacl\s*=\s*"(public-read|public-read-write|authenticated-read)"`)
@@ -113,6 +115,20 @@ func tfBlockRules(rel, resType string, line int, body string) []ports.MisconfigR
 		})
 	}
 	switch resType {
+	case "aws_db_instance":
+		value, present := tfDirectAttribute(
+			body,
+			"deletion_protection",
+		)
+
+		if !present || value == "false" {
+			add(
+				"terraform-rds-deletion-protection-disabled",
+				"RDS deletion protection is not enabled",
+				shared.SeverityLow,
+				"The RDS DB instance does not enable deletion protection, so it can be deleted without first removing an explicit protection control. Set deletion_protection = true to reduce the risk of accidental or unauthorized deletion.",
+			)
+		}
 	case "aws_ecr_repository":
 		if !has("image_tag_mutability") || strings.Contains(body, `image_tag_mutability = "MUTABLE"`) {
 			add("terraform-ecr-mutable-tags", "ECR image tags are mutable", shared.SeverityLow,
@@ -246,4 +262,66 @@ func stripHCLComment(line string) string {
 		}
 	}
 	return line
+}
+
+func tfDirectAttribute(
+	body string,
+	attr string,
+) (string, bool) {
+	body = stripHCLBlockComments(body)
+	depth := 0
+
+	for _, raw := range strings.Split(body, "\n") {
+		line := strings.TrimSpace(raw)
+
+		if depth == 1 {
+			key, value, ok := strings.Cut(line, "=")
+			if ok && strings.TrimSpace(key) == attr {
+				return strings.TrimSpace(value), true
+			}
+		}
+
+		depth += strings.Count(line, "{")
+		depth -= strings.Count(line, "}")
+
+		if depth < 0 {
+			depth = 0
+		}
+	}
+
+	return "", false
+}
+
+// stripHCLBlockComments removes /* ... */ block comments from the given string,
+// except when inside a quoted string. It preserves newline characters to maintain
+// line counting and structure.
+func stripHCLBlockComments(body string) string {
+	var out strings.Builder
+	out.Grow(len(body))
+	inQ := false
+	inC := false
+	for i := 0; i < len(body); i++ {
+		c := body[i]
+		if !inC && c == '"' && (i == 0 || body[i-1] != '\\') {
+			inQ = !inQ
+			out.WriteByte(c)
+			continue
+		}
+		if !inQ && !inC && c == '/' && i+1 < len(body) && body[i+1] == '*' {
+			inC = true
+			i++ // skip '*'
+			continue
+		}
+		if inC {
+			if c == '*' && i+1 < len(body) && body[i+1] == '/' {
+				inC = false
+				i++ // skip '/'
+			} else if c == '\n' {
+				out.WriteByte('\n')
+			}
+			continue
+		}
+		out.WriteByte(c)
+	}
+	return out.String()
 }
