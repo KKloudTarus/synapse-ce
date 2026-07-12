@@ -132,6 +132,17 @@ func (c *Coordinator) Assess(ctx context.Context, candidates []finding.Finding, 
 		go func(i int) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			// Make the best-effort guarantee unconditional: a panic in one critique becomes that
+			// finding's Err (it then gates normally), never taking down the scan pipeline.
+			defer func() {
+				if r := recover(); r != nil {
+					out[i] = Critique{
+						FindingID: string(candidates[i].ID),
+						DedupKey:  candidates[i].DedupKey,
+						Err:       fmt.Errorf("critique panicked: %v", r),
+					}
+				}
+			}()
 			out[i] = c.assessOne(ctx, candidates[i], src)
 		}(i)
 	}
@@ -148,7 +159,7 @@ func (c *Coordinator) assessOne(ctx context.Context, f finding.Finding, src Sour
 	snippet := ""
 	if src != nil {
 		if file, line, ok := locationOf(f); ok {
-			if s, err := src.Snippet(file, line, c.radius); err == nil {
+			if s, err := src.Snippet(ctx, file, line, c.radius); err == nil {
 				snippet = s
 			}
 		}

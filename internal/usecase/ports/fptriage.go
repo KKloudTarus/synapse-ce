@@ -11,7 +11,7 @@ import (
 // read-only helper), so this is not a path handed to a tool. An error (missing/binary file) is
 // non-fatal — the caller critiques on finding metadata alone.
 type SourceSnippetReader interface {
-	Snippet(file string, line, radius int) (string, error)
+	Snippet(ctx context.Context, file string, line, radius int) (string, error)
 }
 
 // AICritique is one finding's LLM false-positive verdict (propose-only, advisory). Verdict and Driver use
