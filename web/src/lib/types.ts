@@ -124,10 +124,12 @@ export interface Judgment {
   id: string
   engagementId: string
   capability: string // 'risk_narrative' | 'critique' | 'reachability' | 'threat' | …
+  subjectKind: string
   subjectId: string
   state: JudgmentState
   evidenceScore: number // 0..100
   proposedBy: string
+  version: number
   claim: RiskNarrativeClaim | CritiqueClaim | ReachabilityClaim | Record<string, unknown>
 }
 
@@ -321,6 +323,7 @@ export interface AupStatus {
 export interface EvidenceItem {
   id: string
   kind: string
+  contentBase64: string // sealed payload; Go encodes []byte as base64 in JSON
   hash: string
   previousHash: string
   storageRef: string // blob sha256 for an artifact; '' for a sealed summary

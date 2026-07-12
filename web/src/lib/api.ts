@@ -442,6 +442,7 @@ function mapEvidenceItem(r: any): EvidenceItem {
   return {
     id: r.ID ?? '',
     kind: r.Kind ?? '',
+    contentBase64: r.Content ?? '',
     hash: r.Hash ?? '',
     previousHash: r.PreviousHash ?? '',
     storageRef: r.StorageRef ?? '',
@@ -589,10 +590,12 @@ function mapJudgment(r: any): Judgment {
     id: r.ID ?? '',
     engagementId: r.EngagementID ?? '',
     capability: r.Capability ?? '',
+    subjectKind: r.SubjectKind ?? '',
     subjectId: r.SubjectID ?? '',
     state: (r.State ?? 'proposed') as Judgment['state'],
     evidenceScore: r.EvidenceScore ?? 0,
     proposedBy: r.ProposedBy ?? '',
+    version: r.Version ?? 0,
     claim: r.Claim ?? {},
   }
 }
@@ -669,6 +672,28 @@ export const api = {
       throw e
     }
   },
+
+  verifyJudgment: async (
+    engagementId: string,
+    judgmentId: string,
+    score: number,
+    rationale: string,
+    version: number,
+  ): Promise<Judgment> =>
+    mapJudgment(
+      await req(
+        `/engagements/${encodeURIComponent(engagementId)}/judgments/${encodeURIComponent(judgmentId)}/verify`,
+        { method: 'POST', body: JSON.stringify({ score, rationale, version }) },
+      ),
+    ),
+
+  acceptJudgment: async (engagementId: string, judgmentId: string, version: number): Promise<Judgment> =>
+    mapJudgment(
+      await req(
+        `/engagements/${encodeURIComponent(engagementId)}/judgments/${encodeURIComponent(judgmentId)}/accept`,
+        { method: 'POST', body: JSON.stringify({ version }) },
+      ),
+    ),
 
   acceptAup: (version: string): Promise<unknown> =>
     req('/aup/accept', { method: 'POST', body: JSON.stringify({ version }) }),
