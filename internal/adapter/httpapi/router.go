@@ -55,6 +55,7 @@ type Router struct {
 	agent        *agentDeps          // optional; nil ⇒ agent routes are not registered
 	exploitation findingVerifier     // optional; nil ⇒ the verify route is not registered
 	judgments    judgmentService     // optional; nil ⇒ judgment routes are not registered
+	autoVerifier autoVerifierService // optional; nil ⇒ the LLM auto-verify route is not registered
 	threatModels threatModelService  // optional; nil ⇒ threat-model routes are not registered
 	drafts       writeupDraftService // optional; nil ⇒ writeup-draft sign-off routes are not registered
 	codeQuality  codeQualityService  // optional; nil ⇒ the code-quality route is not registered
@@ -93,6 +94,10 @@ type writeupDraftService interface {
 
 // SetJudgments wires the AI judgment lifecycle endpoints. nil ⇒ routes are not registered.
 func (rt *Router) SetJudgments(s judgmentService) { rt.judgments = s }
+
+// SetAutoVerifier wires the optional automated LLM judgment-verifier (nil ⇒ the auto-verify route is
+// not registered). It seals a distinct-verifier verdict on each proposed gated judgment.
+func (rt *Router) SetAutoVerifier(s autoVerifierService) { rt.autoVerifier = s }
 
 // runtimeVerifierService is the narrow HTTP slice for applying approved DAST/runtime verifier
 // results. It validates the typed proof class and delegates to analysis.Verify; it is deliberately
@@ -207,6 +212,9 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/engagements/{id}/judgments", rt.authz(userdom.PermView, rt.withEngTenant(rt.listJudgments)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/judgments/{jid}/verify", rt.authz(userdom.PermReview, rt.withEngTenant(rt.verifyJudgment)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/judgments/{jid}/accept", rt.authz(userdom.PermReview, rt.withEngTenant(rt.acceptJudgment)))
+	}
+	if rt.autoVerifier != nil { // automated LLM verifier: a distinct verifier model seals verdicts (PermReview, SoD)
+		mux.HandleFunc("POST /api/v1/engagements/{id}/judgments/auto-verify", rt.authz(userdom.PermReview, rt.withEngTenant(rt.autoVerifyJudgments)))
 	}
 	if rt.dastVerifier != nil {
 		mux.HandleFunc("POST /api/v1/engagements/{id}/judgments/{jid}/runtime-verification", rt.authz(userdom.PermReview, rt.withEngTenant(rt.applyRuntimeVerification)))

@@ -101,6 +101,7 @@ import (
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/llmverifier"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachability"
@@ -852,6 +853,18 @@ func main() {
 		judgmentSvc.SetThreatRecorder(findingsService) // a ratified threat auto-emits a Kind=threat finding
 		judgmentSvc.SetSASTRecorder(findingsService)   // a confirmed CapSAST (taint) judgment auto-emits a Kind=sast finding
 		router.SetJudgments(judgmentSvc)
+		// Automated LLM judgment-verifier: when SYNAPSE_VERIFIER_MODEL names a model DIFFERENT from the
+		// agent's model, a distinct verifier independently scores each proposed gated judgment and seals a
+		// verdict via the same gate a human uses (verifier identity "llm:<model>", never the proposer, so
+		// it can never confirm its own claim). POST .../judgments/auto-verify triggers it. Best-effort.
+		if cfg.VerifierModel != "" && cfg.VerifierModel != cfg.LLMModel {
+			if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr != nil {
+				log.Warn("automated LLM judgment-verifier DISABLED (LLM unavailable)", "err", verr)
+			} else {
+				router.SetAutoVerifier(llmverifier.New(vllm, cfg.VerifierModel, judgmentSvc, judgmentStore))
+				log.Info("automated LLM judgment-verifier ENABLED (distinct verifier seals verdicts)", "model", cfg.VerifierModel)
+			}
+		}
 		if runtimeVerifierSvc, rerr := dastverifieruc.NewService(judgmentSvc); rerr != nil {
 			log.Error("runtime verifier service init failed", "err", rerr)
 			os.Exit(1)

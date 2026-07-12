@@ -1,12 +1,38 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/llmverifier"
 )
+
+// autoVerifierService is the narrow slice of the LLM judgment-verifier the HTTP layer needs: run the
+// distinct verifier model over an engagement's PROPOSED gated judgments and seal a verdict on each. It
+// cannot propose or accept. *llmverifier.Coordinator satisfies this.
+type autoVerifierService interface {
+	AutoVerify(ctx context.Context, engagementID shared.ID) (llmverifier.Result, error)
+}
+
+// autoVerifyJudgments runs the automated LLM verifier over the engagement's proposed gated judgments
+// (PermReview = a sign-off action, SoD; the verifier identity is "llm:<model>", distinct from the
+// proposer, so it can never confirm its own claim). Best-effort per judgment; returns the batch counts.
+func (rt *Router) autoVerifyJudgments(w http.ResponseWriter, r *http.Request) {
+	engID := r.PathValue("id")
+	if engID == "" {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "engagement id is required"})
+		return
+	}
+	res, err := rt.autoVerifier.AutoVerify(r.Context(), shared.ID(engID))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
 
 // listJudgments returns the engagement's AI judgments (read; PermView + tenant-gated via
 // withEngTenant). The typed Claim renders as fields – no LLM prose.
