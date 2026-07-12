@@ -198,11 +198,19 @@ func ClassifyScope(location, cdxScope string) string {
 			return ScopeDocumentation
 		}
 	}
-	// Manifest-type heuristics (dev/test requirement files).
 	base := ""
 	if len(segs) > 0 {
 		base = segs[len(segs)-1]
 	}
+	// Test-file NAME conventions the directory heuristics above miss: languages that keep the test
+	// beside its source (Go `foo_test.go`, pytest `test_foo.py`/`foo_test.py`, jest/jasmine
+	// `foo.test.ts`/`foo.spec.js`, RSpec/minitest `foo_spec.rb`/`foo_test.rb`). A first-party SAST /
+	// secret / misconfig hit in one of these is background, not production risk — this is what stops a
+	// deliberately-insecure test fixture (a fake credential, a test that shells out) from failing a gate.
+	if isTestFilename(base) {
+		return ScopeTest
+	}
+	// Manifest-type heuristics (dev/test requirement files).
 	switch {
 	case strings.Contains(base, "requirements-dev"), strings.Contains(base, "dev-requirements"),
 		strings.Contains(base, "requirements_dev"), base == "tools.go", strings.Contains(base, "package-dev"):
@@ -220,6 +228,37 @@ func ClassifyScope(location, cdxScope string) string {
 		return ScopeUnknown
 	}
 	return ScopeProduction
+}
+
+// isTestFilename reports whether base (a lowercased file name) matches a language's test-file naming
+// convention where the test lives beside its source (so a directory heuristic never sees a "test"
+// path segment). High-confidence, low-false-positive suffixes/prefixes only.
+func isTestFilename(base string) bool {
+	switch {
+	case strings.HasSuffix(base, "_test.go"): // Go
+		return true
+	case strings.HasSuffix(base, "_test.py"), strings.HasPrefix(base, "test_") && strings.HasSuffix(base, ".py"): // pytest / unittest
+		return true
+	case strings.HasSuffix(base, "_test.rb"), strings.HasSuffix(base, "_spec.rb"): // minitest / RSpec
+		return true
+	case isJSTestFile(base): // jest / jasmine (foo.test.ts, foo.spec.js)
+		return true
+	}
+	return false
+}
+
+// isJSTestFile matches the jest/jasmine `.test.`/`.spec.` infix ONLY on a JS/TS source extension, so a
+// non-code specification artifact (openapi.spec.yaml, api.spec.json) is not misread as a test file.
+func isJSTestFile(base string) bool {
+	if !strings.Contains(base, ".test.") && !strings.Contains(base, ".spec.") {
+		return false
+	}
+	for _, ext := range []string{".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"} {
+		if strings.HasSuffix(base, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsResolvedVersion reports whether a component version is a concrete, matchable

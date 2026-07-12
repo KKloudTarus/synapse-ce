@@ -41,6 +41,40 @@ synapse-cli scan alpine:3.19 --image --offline
 The exit code is 0 when no finding meets the `--fail-on` threshold, and non-zero otherwise.
 Wire it straight into a pipeline step.
 
+## False-positive gate
+
+A scan of a real repository surfaces findings in test files and deliberately-insecure fixtures. Synapse
+handles this in two layers, and neither ever deletes a finding — both are retain-and-mark (the finding
+stays in the report, it is only held back from the `--fail-on` gate).
+
+1. **Deterministic test scope.** Findings in test/fixture/example/benchmark/docs paths — including the
+   `foo_test.go`, `test_foo.py`, `foo.test.ts`, `foo_spec.rb` file conventions where the test sits beside
+   its source — are classified as background scope and are exempt from the gate by default. Pass
+   `--include-test` to gate on them too. This alone removes the bulk of the noise.
+
+2. **AI critique (opt-in).** Set `SYNAPSE_FP_TRIAGE_ENABLED=true` with an LLM endpoint configured
+   (`SYNAPSE_LLM_BASE_URL`, `SYNAPSE_LLM_API_KEY`, and `SYNAPSE_FP_TRIAGE_MODEL` or `SYNAPSE_LLM_MODEL`).
+   After the deterministic pass, the model adjudicates the remaining production-scope first-party source
+   findings (SAST/secret/misconfig) and returns a typed verdict — `refuted` (suspected false positive),
+   `sound`, or `uncertain` — with a confidence. The model only proposes: a `refuted` verdict at or above
+   the confidence bar marks the finding a suspected false positive and holds it back from the gate; it is
+   still reported (see `ai_triage` in `--json`) and sealed, never deleted, and an `uncertain` verdict
+   keeps the finding gating. Best-effort: if the model can't be reached the scan proceeds unchanged.
+
+```bash
+export SYNAPSE_LLM_BASE_URL=http://localhost:8081/v1
+export SYNAPSE_LLM_API_KEY=…
+SYNAPSE_FP_TRIAGE_ENABLED=true SYNAPSE_FP_TRIAGE_MODEL=<model> \
+  synapse-cli scan . --fail-on high --json
+```
+
+The AI critique reads the target's own source into the prompt, so treat it as a trusted-local convenience:
+on a scan of an **untrusted PR**, a contributor could add a comment that tries to talk the model into
+refuting their finding. The blast radius is bounded — the finding is still reported and in the SARIF/JSON
+(only the `--fail-on` exit code is affected), the model only proposes (a gate exemption, never a sealed
+suppression or a deletion), and the run prints how many findings were held back — but for gating untrusted
+PRs, upload the SARIF to code-scanning (which shows every finding) and treat the AI verdict as advisory.
+
 ## Container image (Docker)
 
 Every release publishes a multi-arch `synapse-cli` image to GHCR that bundles syft and grype, so you can

@@ -18,6 +18,24 @@ func TestClassifyScope(t *testing.T) {
 		{"usr/share/doc/bash/copyright", "", ScopeDocumentation},
 		{"", "", ScopeUnknown},
 		{"", "required", ScopeProduction},
+		// Test-file NAME conventions where the test lives beside its source (no "test" path segment).
+		{"internal/infrastructure/egress/applier_test.go", "", ScopeTest}, // Go
+		{"internal/sandbox/credleak_integration_test.go", "", ScopeTest},  // Go integration test
+		{"app/services/payment_test.py", "", ScopeTest},                   // pytest suffix
+		{"app/services/test_payment.py", "", ScopeTest},                   // pytest prefix
+		{"src/components/Button.test.tsx", "", ScopeTest},                 // jest
+		{"src/utils/date.spec.js", "", ScopeTest},                         // jasmine
+		{"lib/parser_spec.rb", "", ScopeTest},                             // RSpec
+		{"lib/parser_test.rb", "", ScopeTest},                             // minitest
+		// Must NOT misfire on production source that merely resembles a test name.
+		{"internal/domain/latest/version.go", "", ScopeProduction},  // "latest" != "_test.go"
+		{"cmd/tools.go", "", ScopeDevelopment},                      // dev tooling stub, unchanged
+		{"src/contest/index.ts", "", ScopeProduction},               // "contest" has no ".test."
+		{"internal/domain/finding/finding.go", "", ScopeProduction}, // ordinary Go source
+		// .test./.spec. count as test ONLY on a JS/TS extension — a spec ARTIFACT stays production.
+		{"api/openapi.spec.yaml", "", ScopeProduction}, // OpenAPI spec, not a test
+		{"config/db.spec.json", "", ScopeProduction},   // config artifact, not a test
+		{"web/src/Button.spec.ts", "", ScopeTest},      // real jasmine spec
 	}
 	for _, c := range cases {
 		if got := ClassifyScope(c.loc, c.cdx); got != c.want {
