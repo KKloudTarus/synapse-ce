@@ -143,10 +143,24 @@ families above. Ship families incrementally toward the target; every rule is cle
 | Rust | ~80 | Clippy-category coverage + unsafe/security |
 | Node.js | ~50 | server-side security subset (complements JS/TS) |
 | Go | ~40 | correctness + concurrency + gosec-class security |
+| PHP | ~180 | web-app security + typing |
+| VB.NET | ~140 | shares most of the C# catalog |
+| Kotlin | ~130 | JVM + Android; nullability + coroutines |
+| Swift | ~120 | iOS/macOS; optionals + memory |
+| Terraform | ~60 | multi-cloud (AWS/Azure/GCP) misconfig |
+| HTML | ~50 | correctness + accessibility (WCAG) |
+| Secrets | ~40 | credential detectors (extends the existing scanner) |
+| Ruby | ~40 | Rails security (Brakeman-class) + style |
+| Scala | ~40 | JVM + functional idioms |
 | ARM | ~35 | cloud misconfig |
 | CSS | ~30 | correctness + maintainability |
 | Docker | ~30 | image hardening + hygiene |
+| Kubernetes | ~30 | manifest hardening (Pod Security Standards) |
 | CloudFormation | ~30 | cloud misconfig |
+| XML | ~30 | XXE + schema/well-formedness |
+| IPython Notebooks | +~15 | notebook-specific (reuses the Python pack over cells) |
+| Text | ~8 | any-file: bidi-unicode, BOM, generic secrets |
+| Flex | deferred | legacy ActionScript — low priority |
 
 Every source below is openly published; cite the concept origin per rule.
 
@@ -165,10 +179,24 @@ Every source below is openly published; cite the concept origin per rule.
 | **Docker** | config analyzer | ready (misconfig) | [Dockerfile best practices](https://docs.docker.com/build/building/best-practices/), [Hadolint rules](https://github.com/hadolint/hadolint#rules), [CIS Docker Benchmark](https://www.cisecurity.org/benchmark/docker), [CWE](https://cwe.mitre.org/) |
 | **CloudFormation** | config analyzer | ready (misconfig) | [AWS Well-Architected](https://aws.amazon.com/architecture/well-architected/), [cfn-lint rules](https://github.com/aws-cloudformation/cfn-lint/blob/main/docs/rules.md), [CIS AWS Benchmark](https://www.cisecurity.org/benchmark/amazon_web_services), [CWE](https://cwe.mitre.org/) |
 | **Azure Resource Manager** | config analyzer | ready (misconfig) | [ARM template best practices](https://learn.microsoft.com/en-us/azure/azure-resource-manager/templates/best-practices), [arm-ttk](https://github.com/Azure/arm-ttk), [Azure Security Baseline](https://learn.microsoft.com/en-us/security/benchmark/azure/), [CWE](https://cwe.mitre.org/) |
+| **Kotlin** | AST | needs Kotlin grammar | [Kotlin coding conventions](https://kotlinlang.org/docs/coding-conventions.html), [detekt rules](https://detekt.dev/docs/rules/comments), [ktlint standard rules](https://pinterest.github.io/ktlint/latest/rules/standard/), [CWE](https://cwe.mitre.org/) |
+| **PHP** | AST | needs PHP grammar | [PSR standards](https://www.php-fig.org/psr/), [PHPStan](https://phpstan.org/), [Psalm](https://psalm.dev/docs/), [OWASP PHP](https://cheatsheetseries.owasp.org/), [CWE](https://cwe.mitre.org/) |
+| **Ruby** | AST | needs Ruby grammar | [Ruby Style Guide](https://rubystyle.guide/), [RuboCop cops](https://docs.rubocop.org/rubocop/cops.html), [Brakeman warnings](https://brakemanscanner.org/docs/warning_types/), [CWE](https://cwe.mitre.org/) |
+| **Scala** | AST | needs Scala grammar | [Scala Style Guide](https://docs.scala-lang.org/style/), [Scalafix rules](https://scalacenter.github.io/scalafix/docs/rules/overview.html), [Scalastyle](http://www.scalastyle.org/rules-dev.html), [CWE](https://cwe.mitre.org/) |
+| **Swift** | AST | needs Swift grammar | [Swift API Design Guidelines](https://www.swift.org/documentation/api-design-guidelines/), [SwiftLint rule directory](https://realm.github.io/SwiftLint/rule-directory.html), [CWE](https://cwe.mitre.org/) |
+| **VB.NET** | AST | needs VB grammar | [.NET code-quality rules](https://learn.microsoft.com/en-us/dotnet/fundamentals/code-analysis/quality-rules/) (shared with C#), [CWE](https://cwe.mitre.org/) |
+| **Kubernetes** | config analyzer | ready (misconfig) | [Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/), [KubeLinter checks](https://docs.kubelinter.io/#/generated/checks), [CIS Kubernetes Benchmark](https://www.cisecurity.org/benchmark/kubernetes), [kubesec](https://kubesec.io/), [CWE](https://cwe.mitre.org/) |
+| **Terraform** | config analyzer | ready (misconfig) | [Terraform style](https://developer.hashicorp.com/terraform/language/style), [Trivy IaC (ex-tfsec)](https://aquasecurity.github.io/trivy/latest/docs/coverage/iac/terraform/), [Checkov Terraform policies](https://www.checkov.io/5.Policy%20Index/terraform.html), [tflint](https://github.com/terraform-linters/tflint), AWS/Azure/GCP Well-Architected, [CWE](https://cwe.mitre.org/) |
+| **HTML** | AST/token | needs HTML grammar | [HTMLHint rules](https://htmlhint.com/docs/user-guide/list-rules), [WCAG](https://www.w3.org/WAI/standards-guidelines/wcag/), [MDN HTML](https://developer.mozilla.org/en-US/docs/Web/HTML), [W3C validator](https://validator.w3.org/) |
+| **XML** | token/parse | ready | [W3C XML](https://www.w3.org/TR/xml/), [OWASP XXE Prevention](https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html), [CWE-611](https://cwe.mitre.org/data/definitions/611.html) |
+| **IPython Notebooks** | reuses Python | ready (Python) | reuses the [Python](#) pack over notebook cells + notebook-specific ([nbqa](https://nbqa.readthedocs.io/), [Bandit](https://bandit.readthedocs.io/)) |
+| **Secrets** | token/entropy | ready (secretscan) | extends the existing secret scanner; [gitleaks rules](https://github.com/gitleaks/gitleaks), [detect-secrets](https://github.com/Yelp/detect-secrets), [CWE-798](https://cwe.mitre.org/data/definitions/798.html) |
+| **Text** | token | ready | any-file checks: [bidi-unicode (Trojan Source)](https://trojansource.codes/), BOM, oversized files, generic secrets |
 
-Languages already partly covered elsewhere: **Kubernetes** and **Terraform** by the misconfig
-analyzer; **Java** has AST metrics today. Candidates for later packs: HTML, Ruby, PHP, Kotlin, Scala,
-Swift, Shell, YAML.
+**Kubernetes** and **Terraform** give Synapse its **AWS / Azure / GCP** cloud-misconfig coverage
+alongside CloudFormation + ARM. **Secrets** and **IPython Notebooks** extend existing engines (the secret
+scanner and the Python pack) rather than adding a new parser. Deferred / low-priority: **Flex** (legacy
+ActionScript). Further candidates: Shell, Dart, YAML-generic.
 
 ## Reviewing an existing pack
 
