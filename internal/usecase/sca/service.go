@@ -63,6 +63,7 @@ type Service struct {
 	sastAnalyzer      ports.SASTAnalyzer              // optional deterministic pattern-SAST over the live workspace
 	secretScanner     ports.SecretScanner             // optional deterministic secret scan over the live workspace
 	misconfig         ports.MisconfigScanner          // optional deterministic IaC/config misconfig scan over the live workspace
+	fpTriager         ports.FPTriager                 // optional LLM false-positive critique of production-scope source findings
 	osPkgCataloger    ports.OSPackageCataloger        // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
 	instCataloger     ports.InstalledPackageCataloger // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
 	suppression       ports.SuppressionLoader         // optional repo-committed .synapseignore accepted-risk policy
@@ -129,6 +130,12 @@ func (s *Service) SetSASTAnalyzer(a ports.SASTAnalyzer) { s.sastAnalyzer = a }
 
 // SetSecretScanner configures the optional deterministic secret scanner. nil ⇒ no secret scanning.
 func (s *Service) SetSecretScanner(sc ports.SecretScanner) { s.secretScanner = sc }
+
+// SetFPTriage injects the optional LLM false-positive triager. When set, the pipeline critiques the
+// production-scope first-party source findings after they are built and records the advisory verdicts on
+// ScanResult.AITriage; a suspected-FP is retain-and-mark (gate-exempt via SuspectedFPKeys, still
+// reported + sealed). Best-effort; nil = no triage.
+func (s *Service) SetFPTriage(t ports.FPTriager) { s.fpTriager = t }
 
 // SetOSPackageCataloger configures optional owned OS-package cataloging (dpkg/apk) from a materialized image
 // rootfs (Workspace.RootFS). nil ⇒ no owned OS cataloging. It only runs when a rootfs was materialized.
@@ -469,23 +476,39 @@ type ScanResult struct {
 	// AITriage holds an optional LLM false-positive critique of first-party source findings (opt-in,
 	// best-effort). Each entry is the model's PROPOSED verdict; a suspected-FP entry is retain-and-mark
 	// (the finding stays reported here and sealed, it is only held back from the CI gate), never a
-	// deletion. Empty unless the FP-triage gate ran.
-	AITriage []AICritique `json:"ai_triage,omitempty"`
+	// deletion. Populated by the injected ports.FPTriager for BOTH the CLI and the durable API scan job;
+	// empty unless the FP-triage gate ran.
+	AITriage []ports.AICritique `json:"ai_triage,omitempty"`
 }
 
-// AICritique is one finding's LLM false-positive verdict (propose-only, advisory). Verdict and Driver
-// use the closed judgment.CritiqueClaim vocabulary (no free prose); SuspectedFP is set when the verdict
-// is "refuted" at or above the coordinator's confidence bar.
-type AICritique struct {
-	FindingID   string `json:"finding_id"`
-	DedupKey    string `json:"dedup_key"`
-	Verdict     string `json:"verdict"`
-	Driver      string `json:"driver"`
-	Confidence  int    `json:"confidence"`
-	SuspectedFP bool   `json:"suspected_fp"`
-	// Verified is true when a DISTINCT verifier model independently confirmed the refutation (two-model
-	// consensus). Omitted when no verifier was configured (single-model triage).
-	Verified bool `json:"verified,omitempty"`
+// SuspectedFPKeys returns the set of finding DedupKeys the AI triage marked as suspected false positives
+// (retain-and-mark). A --fail-on gate exempts these (still reported + sealed), the same way it exempts
+// accepted-risk and needs-verify findings.
+func (r *ScanResult) SuspectedFPKeys() map[string]bool {
+	out := map[string]bool{}
+	for _, c := range r.AITriage {
+		if c.SuspectedFP {
+			out[c.DedupKey] = true
+		}
+	}
+	return out
+}
+
+// fpTriageCandidates selects the findings worth an LLM critique: production-scope, first-party source
+// analysis (SAST/secret/misconfig). Background-scope findings are already gate-exempt deterministically,
+// and SCA/advisory findings are DB-backed facts, so neither is critiqued.
+func fpTriageCandidates(fs []finding.Finding) []finding.Finding {
+	out := make([]finding.Finding, 0, len(fs))
+	for _, f := range fs {
+		if sbom.IsBackgroundScope(f.Scope) {
+			continue
+		}
+		switch f.Kind {
+		case finding.KindSAST, finding.KindSecret, finding.KindMisconfig:
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 const (
@@ -2035,6 +2058,17 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			result.SourceWarnings = append(result.SourceWarnings, "in-repo VEX (.synapse.vex.json) was not applied (unreadable or not a valid OpenVEX document)")
 		} else {
 			applyVEX(result, doc)
+		}
+	}
+	// AI false-positive triage (opt-in, best-effort, PROPOSE-ONLY). After the deterministic pass, the
+	// injected triager critiques the remaining production-scope first-party source findings and records
+	// advisory verdicts on AITriage; a suspected-FP is retain-and-mark (held back from the gate via
+	// SuspectedFPKeys, still reported + sealed). Runs for BOTH the CLI and the durable API scan job.
+	if s.fpTriager != nil {
+		if cands := fpTriageCandidates(result.Findings); len(cands) > 0 {
+			tstep := trace.start(stageFindings, "ai-fp-triage", "fp-triager", "AI false-positive triage", map[string]int{"candidates": len(cands)})
+			result.AITriage = s.fpTriager.Triage(ctx, cands, ws.Dir)
+			trace.succeed(tstep, "AI false-positive triage", map[string]int{"candidates": len(cands), "critiqued": len(result.AITriage), "suspected_fp": len(result.SuspectedFPKeys())})
 		}
 	}
 	result.MinSeverity = s.minSeverity

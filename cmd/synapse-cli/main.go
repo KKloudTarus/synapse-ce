@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
@@ -30,6 +29,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourcesnippet"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeanalysis"
@@ -1105,6 +1105,28 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	// classic distro-noise reducer for OS-package scans (matches Trivy's --ignore-unfixed).
 	sca.SetIgnoreUnfixed(ignoreUnfixed || cfg.IgnoreUnfixed)
 
+	// AI false-positive triage (opt-in). Inject an LLM critic the scan pipeline runs over the remaining
+	// production-scope first-party source findings; a "refuted" verdict marks the finding suspected-FP
+	// (retain-and-mark, held back from the gate below), never a deletion. Propose-only + best-effort. A
+	// distinct SYNAPSE_VERIFIER_MODEL enables two-model consensus. Skipped for image targets (no source).
+	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" && !image {
+		if llm, lerr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); lerr != nil {
+			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage disabled: %v\n", lerr)
+		} else {
+			coord := fptriage.New(llm, cfg.FPTriageModel)
+			if cfg.VerifierModel != "" && cfg.VerifierModel != cfg.FPTriageModel {
+				if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
+					coord.WithVerifier(vllm, cfg.VerifierModel)
+				} else {
+					fmt.Fprintf(os.Stderr, "synapse-cli: verifier model %q unavailable, falling back to single-model triage: %v\n", cfg.VerifierModel, verr)
+				}
+			}
+			sca.SetFPTriage(fptriage.NewTriager(coord, func(root string) ports.SourceSnippetReader {
+				return sourcesnippet.Reader{Root: root}
+			}))
+		}
+	}
+
 	// Ephemeral engagement covering the target so the real (gated) Scan path runs.
 	eng, err := engagement.New(ids.NewID(), "", "synapse-cli dogfood", "", clock.Now())
 	if err != nil {
@@ -1124,49 +1146,15 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		return fmt.Errorf("scan: %w", err)
 	}
 
-	// AI false-positive gate (opt-in, best-effort). After the deterministic scope pass, ask the
-	// configured LLM to adjudicate the remaining PRODUCTION-scope first-party source findings. The model
-	// is a proposer only: a "refuted" verdict at/above the confidence bar marks the finding suspected-FP
-	// (retain-and-mark — still reported + sealed, only held back from the gate), never a deletion. Skipped
-	// for image targets (no local source tree) and when no LLM model is configured; any error is non-fatal.
-	fpSuspect := map[string]bool{}
-	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" && !image {
-		if llm, lerr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); lerr != nil {
-			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage disabled: %v\n", lerr)
-		} else if cands := fpTriageCandidates(res.Findings); len(cands) > 0 {
-			coord := fptriage.New(llm, cfg.FPTriageModel)
-			// Distinct-verifier consensus: when SYNAPSE_VERIFIER_MODEL names a DIFFERENT model, a
-			// refutation must be independently confirmed by it before it exempts the gate (two-model
-			// agreement — the CLI analogue of the judgment gate's distinct verifier).
-			if cfg.VerifierModel != "" && cfg.VerifierModel != cfg.FPTriageModel {
-				if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
-					coord.WithVerifier(vllm, cfg.VerifierModel)
-				} else {
-					fmt.Fprintf(os.Stderr, "synapse-cli: verifier model %q unavailable, falling back to single-model triage: %v\n", cfg.VerifierModel, verr)
-				}
-			}
-			tctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
-			crits := coord.Assess(tctx, cands, fileSnippetReader{root: target})
-			cancel()
-			res.AITriage, fpSuspect = summarizeCritiques(crits, coord.MinConfidence())
-			nErr, sample := 0, ""
-			for _, c := range crits {
-				if c.Err != nil {
-					nErr++
-					if sample == "" {
-						sample = c.Err.Error()
-					}
-				}
-			}
-			mode := "single-model"
-			if coord.VerifierModel() != "" {
-				mode = "verified by " + coord.VerifierModel()
-			}
-			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage (%s, %s): assessed %d, critiqued %d, unassessed %d, %d suspected false positive(s) held back from the gate\n", cfg.FPTriageModel, mode, len(cands), len(res.AITriage), nErr, len(fpSuspect))
-			if nErr > 0 {
-				fmt.Fprintf(os.Stderr, "synapse-cli: %d finding(s) could not be assessed (left to gate normally); first: %s\n", nErr, sample)
-			}
+	// The scan pipeline ran the AI false-positive triage (if injected above); report the outcome. A
+	// suspected-FP is held back from the --fail-on gate (retain-and-mark), still reported in ai_triage.
+	fpSuspect := res.SuspectedFPKeys()
+	if len(res.AITriage) > 0 {
+		mode := "single-model"
+		if cfg.VerifierModel != "" && cfg.VerifierModel != cfg.FPTriageModel {
+			mode = "verified by " + cfg.VerifierModel
 		}
+		fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage (%s, %s): critiqued %d finding(s), %d suspected false positive(s) held back from the gate\n", cfg.FPTriageModel, mode, len(res.AITriage), len(fpSuspect))
 	}
 
 	switch {
@@ -1260,91 +1248,6 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		return fmt.Errorf("%d finding(s) at or above %s", over, failOn)
 	}
 	return nil
-}
-
-// fpTriageCandidates selects the findings worth an LLM critique: production-scope, first-party source
-// analysis (SAST/secret/misconfig). Background-scope findings are already gate-exempt deterministically,
-// and SCA/advisory findings are DB-backed facts, so neither is critiqued.
-func fpTriageCandidates(fs []finding.Finding) []finding.Finding {
-	out := make([]finding.Finding, 0, len(fs))
-	for _, f := range fs {
-		if sbom.IsBackgroundScope(f.Scope) {
-			continue
-		}
-		switch f.Kind {
-		case finding.KindSAST, finding.KindSecret, finding.KindMisconfig:
-			out = append(out, f)
-		}
-	}
-	return out
-}
-
-// summarizeCritiques turns the coordinator's per-finding critiques into the ScanResult DTO slice and a
-// set of DedupKeys the gate should exempt (suspected false positives). A best-effort failure (Err set)
-// is skipped, so an unassessed finding is left to gate normally.
-func summarizeCritiques(crits []fptriage.Critique, minConf int) ([]scauc.AICritique, map[string]bool) {
-	suspect := map[string]bool{}
-	out := make([]scauc.AICritique, 0, len(crits))
-	for _, c := range crits {
-		if c.Err != nil {
-			continue
-		}
-		fp := c.SuspectedFP(minConf)
-		out = append(out, scauc.AICritique{
-			FindingID:   c.FindingID,
-			DedupKey:    c.DedupKey,
-			Verdict:     string(c.Claim.Verdict),
-			Driver:      c.Claim.Driver,
-			Confidence:  c.Claim.Confidence,
-			SuspectedFP: fp,
-			Verified:    fp && c.VerifyAttempted, // a suspected-FP that a DISTINCT verifier confirmed
-		})
-		if fp {
-			suspect[c.DedupKey] = true
-		}
-	}
-	return out, suspect
-}
-
-// fileSnippetReader reads a bounded source excerpt from the scanned (trusted-local) workspace so the
-// critique model sees the actual code, not just the finding metadata.
-type fileSnippetReader struct{ root string }
-
-func (r fileSnippetReader) Snippet(file string, line, radius int) (string, error) {
-	p := filepath.Join(r.root, filepath.FromSlash(file))
-	// Defense-in-depth: keep the read inside the scanned root (the path is our own finding's). Resolve
-	// symlinks on both sides so a link inside the root can't point outside, and match the boundary
-	// precisely so a legitimate name like "..gitkeep" is not rejected.
-	root, err := filepath.EvalSymlinks(r.root)
-	if err != nil {
-		root = r.root
-	}
-	rp, err := filepath.EvalSymlinks(p)
-	if err != nil {
-		return "", err // missing/broken file → the coordinator critiques on metadata only
-	}
-	rel, err := filepath.Rel(root, rp)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return "", fmt.Errorf("snippet path escapes scan root")
-	}
-	data, err := os.ReadFile(rp)
-	if err != nil {
-		return "", err
-	}
-	lines := strings.Split(string(data), "\n")
-	lo := line - radius
-	if lo < 1 {
-		lo = 1
-	}
-	hi := line + radius
-	if hi > len(lines) {
-		hi = len(lines)
-	}
-	var b strings.Builder
-	for i := lo; i <= hi; i++ {
-		fmt.Fprintf(&b, "%d: %s\n", i, lines[i-1])
-	}
-	return b.String(), nil
 }
 
 func printReport(target string, res *scauc.ScanResult) {

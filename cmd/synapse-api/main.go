@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,6 +37,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/report"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourcesnippet"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
@@ -98,6 +100,7 @@ import (
 	exploitationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/exploitation"
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachability"
@@ -606,6 +609,30 @@ func main() {
 		}
 		scaService.SetMisconfigScanner(mc) // deterministic IaC/config misconfig scan in the scan pipeline
 		log.Info("misconfig scanning ENABLED (Dockerfile + Kubernetes + Terraform); " + helmMode)
+	}
+	// AI false-positive triage in the scan pipeline (opt-in, best-effort, PROPOSE-ONLY). Independent of
+	// the agent: it critiques production-scope source findings and marks suspected FPs retain-and-mark
+	// (held back from the gate via ScanResult.SuspectedFPKeys, still reported + sealed). A distinct
+	// SYNAPSE_VERIFIER_MODEL enables two-model consensus.
+	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" {
+		if tllm, terr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); terr != nil {
+			log.Warn("AI false-positive triage DISABLED (LLM unavailable)", "err", terr)
+		} else {
+			coord := fptriage.New(tllm, cfg.FPTriageModel)
+			mode := "single-model"
+			if cfg.VerifierModel != "" && cfg.VerifierModel != cfg.FPTriageModel {
+				if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
+					coord.WithVerifier(vllm, cfg.VerifierModel)
+					mode = "verified by " + cfg.VerifierModel
+				} else {
+					log.Warn("AI FP-triage verifier unavailable, single-model", "err", verr)
+				}
+			}
+			scaService.SetFPTriage(fptriage.NewTriager(coord, func(root string) ports.SourceSnippetReader {
+				return sourcesnippet.Reader{Root: root}
+			}))
+			log.Info("AI false-positive triage ENABLED ("+mode+"); suspected FPs held back from the gate, still reported", "model", cfg.FPTriageModel)
+		}
 	}
 	if cfg.SuppressionEnabled {
 		scaService.SetSuppressionLoader(ignorefile.New()) // repo-committed .synapseignore accepted-risk policy

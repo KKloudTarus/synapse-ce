@@ -26,13 +26,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// SourceReader returns a small source excerpt around file:line (1-based), radius lines each side. The
-// workspace it reads from is Synapse-controlled (a trusted-local dir or a sandbox-acquired tree), so
-// this is a bounded read, not a path handed to a tool. An error (missing file, binary) is non-fatal:
-// the coordinator critiques on the finding metadata alone.
-type SourceReader interface {
-	Snippet(file string, line, radius int) (string, error)
-}
+// SourceReader is the source-excerpt reader the coordinator uses for context (an alias for the shared
+// port, so the concrete fs reader lives in infrastructure, not here). An error is non-fatal: the
+// coordinator critiques on finding metadata alone.
+type SourceReader = ports.SourceSnippetReader
 
 // Critique is the model's per-finding verdict. Err is set when the (proposer) model could not be
 // consulted (timeout, transport, or an unparseable/invalid reply); such a critique is treated as
