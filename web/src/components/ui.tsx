@@ -228,9 +228,9 @@ export function Select({
 
 // ---- States ----
 
-export function Spinner({ label }: { label?: string }) {
+export function Spinner({ label, className }: { label?: string; className?: string }) {
   return (
-    <div className="flex items-center justify-center gap-2 py-10 text-sm text-mutedfg">
+    <div className={cn("flex items-center justify-center gap-2 py-10 text-sm text-mutedfg", className)}>
       <Loader2 className="size-4 animate-spin" />
       {label ?? 'Loading…'}
     </div>

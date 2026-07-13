@@ -1,6 +1,6 @@
-import { Boxes, FileText, Radar, ScrollText, Settings, Target, Users, X, type LucideIcon } from 'lucide-react'
+import { Boxes, FileText, Radar, ScrollText, Settings, Target, Users, X, Library, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { cn } from './ui'
 import logo from '../assets/logo.png'
 
@@ -12,6 +12,7 @@ const SOON: { icon: LucideIcon; label: string }[] = [
 ]
 
 function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+  const location = useLocation()
   return (
     <>
       <div className="flex h-14 items-center gap-2 border-b border-border px-5">
@@ -49,6 +50,22 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         >
           <ScrollText className="size-[18px]" />
           Audit log
+        </NavLink>
+
+        <NavLink
+          to="/rules"
+          onClick={onNavigate}
+          className={({ isActive }) =>
+            cn(
+              'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+              isActive || location.pathname.startsWith('/rules')
+                ? 'bg-brand/10 font-semibold text-branddim before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-brand before:content-[""]'
+                : 'text-mutedfg hover:bg-elevated hover:text-foreground',
+            )
+          }
+        >
+          <Library className="size-[18px]" />
+          Rules
         </NavLink>
 
         <NavLink

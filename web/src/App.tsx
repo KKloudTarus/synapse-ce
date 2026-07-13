@@ -8,6 +8,8 @@ import { Connect } from './pages/Connect'
 import { EngagementDetail } from './pages/EngagementDetail'
 import { Engagements } from './pages/Engagements'
 import { Team } from './pages/Team'
+import Rules from './pages/Rules'
+import RuleDetail from './pages/RuleDetail'
 
 export default function App() {
   return (
@@ -26,6 +28,8 @@ function Gate() {
         <Route index element={<Navigate to="/engagements" replace />} />
         <Route path="engagements" element={<Engagements />} />
         <Route path="engagements/:id" element={<EngagementDetail />} />
+        <Route path="rules" element={<Rules />} />
+        <Route path="rules/:key" element={<RuleDetail />} />
         <Route path="audit" element={<Audit />} />
         <Route path="team" element={<Team />} />
         <Route path="*" element={<Navigate to="/engagements" replace />} />

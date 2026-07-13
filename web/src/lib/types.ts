@@ -635,3 +635,66 @@ export interface CodeQualityView {
   reason?: string
   report?: CodeQualityReport
 }
+
+// --- Rules API ---
+
+export type RuleType =
+  | 'bug'
+  | 'vulnerability'
+  | 'code_smell'
+  | 'security_hotspot'
+
+export type RuleQuality =
+  | 'security'
+  | 'reliability'
+  | 'maintainability'
+
+export type RuleSeverity =
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'critical'
+
+export type RuleDetection =
+  | 'ast'
+  | 'pattern'
+  | 'metric'
+
+export interface RuleSummary {
+  key: string
+  name: string
+  language: string
+  type: RuleType
+  qualities: RuleQuality[]
+  defaultSeverity: RuleSeverity
+  tags: string[]
+  cwe: string[]
+  owasp: string[]
+  description: string
+  remediationEffort: number
+  detection: RuleDetection
+}
+
+export interface RuleDetail extends RuleSummary {
+  rationale: string
+  remediation: string
+  compliantExample: string
+  noncompliantExample: string
+}
+
+export interface RuleListFilters {
+  query: string
+  languages: string[]
+  types: RuleType[]
+  severities: RuleSeverity[]
+  tags: string[]
+  cwe: string[]
+}
+
+export interface RuleFacets {
+  languages: string[]
+  types: RuleType[]
+  severities: RuleSeverity[]
+  tags: string[]
+  cwe: string[]
+}
