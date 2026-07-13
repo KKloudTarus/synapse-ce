@@ -1,0 +1,83 @@
+package rulecatalog
+
+import (
+	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+)
+
+func qualityRules() []rule.Rule {
+	return []rule.Rule{
+		{
+			Key:                 "quality-todo-comment",
+			Name:                "Unresolved TODO/FIXME marker",
+			Language:            "General",
+			Type:                rule.TypeCodeSmell,
+			Qualities:           []rule.Quality{rule.QualityMaintainability},
+			DefaultSeverity:     shared.SeverityInfo,
+			Tags:                []string{"maintainability", "technical-debt"},
+			CWE:                 []string{"CWE-546"},
+			OWASP:               []string{},
+			Description:         "Detects unresolved TODO, FIXME, HACK, or BUG markers in comments.",
+			Rationale:           "Comments indicating unfinished work or known problems should be resolved or tracked in a formal issue tracker rather than left to rot in the source tree.\n\nSource: https://cwe.mitre.org/data/definitions/546.html",
+			Remediation:         "Address the required work or create a ticket in an issue tracker and remove the inline comment.",
+			CompliantExample:    "// User authentication logic completed.",
+			NoncompliantExample: "// TODO: implement user authentication logic",
+			RemediationEffort:   5,
+			Detection:           rule.DetectionPattern,
+		},
+		{
+			Key:                 "quality-commented-out-code",
+			Name:                "Commented-out code",
+			Language:            "General",
+			Type:                rule.TypeCodeSmell,
+			Qualities:           []rule.Quality{rule.QualityMaintainability},
+			DefaultSeverity:     shared.SeverityInfo,
+			Tags:                []string{"maintainability", "code-hygiene"},
+			CWE:                 []string{},
+			OWASP:               []string{},
+			Description:         "Detects blocks of comments that appear to contain valid source code rather than prose.",
+			Rationale:           "Commented-out code confuses developers, clutters the source, and decays over time without compiler verification. Version control systems already maintain previous code states.\n\nSource: https://wiki.sei.cmu.edu/confluence/display/c/MSC04-C.+Use+comments+consistently+and+in+a+readable+fashion",
+			Remediation:         "Delete the commented-out code. Use version control history if the code is needed again in the future.",
+			CompliantExample:    "count := x + y",
+			NoncompliantExample: "// count := x + y;\n// doSomething(count);",
+			RemediationEffort:   5,
+			Detection:           rule.DetectionPattern,
+		},
+		{
+			Key:                 "quality-duplicated-block",
+			Name:                "Duplicated block",
+			Language:            "General",
+			Type:                rule.TypeCodeSmell,
+			Qualities:           []rule.Quality{rule.QualityMaintainability},
+			DefaultSeverity:     shared.SeverityLow,
+			Tags:                []string{"maintainability", "duplication"},
+			CWE:                 []string{"CWE-1041"},
+			OWASP:               []string{},
+			Description:         "Detects blocks of identical or structurally equivalent code that are repeated across multiple locations.",
+			Rationale:           "Duplicated code increases the maintenance burden and the risk of bugs, as changes must be replicated in multiple places. Extracting reusable functions or components improves consistency and maintainability.\n\nSource: https://cwe.mitre.org/data/definitions/1041.html",
+			Remediation:         "Extract the duplicated code into a single, reusable function, method, or class, and call it from the original locations.",
+			CompliantExample:    "func calculateTax(amount float64) float64 {\n\treturn amount * 0.2\n}\n\ntax1 := calculateTax(100)\ntax2 := calculateTax(200)",
+			NoncompliantExample: "tax1 := 100 * 0.2\n// ... later ...\ntax2 := 200 * 0.2",
+			RemediationEffort:   30,
+			Detection:           rule.DetectionMetric,
+		},
+		{
+			Key:                 "quality-high-complexity",
+			Name:                "High complexity",
+			Language:            "General",
+			Type:                rule.TypeCodeSmell,
+			Qualities:           []rule.Quality{rule.QualityMaintainability},
+			DefaultSeverity:     shared.SeverityMedium,
+			Tags:                []string{"maintainability", "complexity"},
+			CWE:                 []string{"CWE-1120"},
+			OWASP:               []string{},
+			Description:         "Detects functions or methods with excessively high cyclomatic complexity.",
+			Rationale:           "Complex code is difficult to understand, test, and maintain. It increases the likelihood of introducing defects during future modifications.\n\nSource: https://cwe.mitre.org/data/definitions/1120.html",
+			Remediation:         "Refactor the overly complex function into smaller, well-named, and logically separated helper functions.",
+			CompliantExample:    "func process(data Data) {\n\tif err := validate(data); err != nil { return }\n\tstore(data)\n}",
+			NoncompliantExample: "func process(data Data) {\n\tif data.Name == \"\" {\n\t\t// ...\n\t} else if data.Age < 0 {\n\t\t// ...\n\t} else {\n\t\tfor i := 0; i < 10; i++ {\n\t\t\t// deeply branched logic\n\t\t}\n\t}\n}",
+			RemediationEffort:   60,
+			Detection:           rule.DetectionMetric,
+		},
+	}
+}
