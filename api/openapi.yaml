@@ -29,6 +29,7 @@ tags:
   - name: findings
   - name: sca
   - name: export
+  - name: rule-catalog
 
 paths:
   /healthz:
@@ -232,6 +233,77 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/v1/rules:
+    get:
+      tags: [rule-catalog]
+      summary: List rule catalog
+      description: Returns the immutable first-party rule catalog with optional filters.
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: language
+          in: query
+          explode: true
+          schema:
+            type: array
+            items: { type: string }
+        - name: type
+          in: query
+          explode: true
+          schema:
+            type: array
+            items: { type: string }
+        - name: severity
+          in: query
+          explode: true
+          schema:
+            type: array
+            items: { type: string }
+        - name: tag
+          in: query
+          explode: true
+          schema:
+            type: array
+            items: { type: string }
+        - name: cwe
+          in: query
+          explode: true
+          schema:
+            type: array
+            items: { type: string }
+      responses:
+        "200":
+          description: A list of rule summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RuleSummary" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/rules/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [rule-catalog]
+      summary: Get rule by exact key
+      responses:
+        "200":
+          description: The full rule detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuleDetail" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -380,3 +452,55 @@ components:
           type: object
           additionalProperties: { type: string }
         vuln_db_snapshot: { type: string }
+
+    RuleSummary:
+      type: object
+      properties:
+        key: { type: string }
+        name: { type: string }
+        language: { type: string }
+        type: { type: string }
+        qualities:
+          type: array
+          items: { type: string }
+        default_severity: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        cwe:
+          type: array
+          items: { type: string }
+        owasp:
+          type: array
+          items: { type: string }
+        description: { type: string }
+        remediation_effort: { type: integer }
+        detection: { type: string }
+
+    RuleDetail:
+      type: object
+      properties:
+        key: { type: string }
+        name: { type: string }
+        language: { type: string }
+        type: { type: string }
+        qualities:
+          type: array
+          items: { type: string }
+        default_severity: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        cwe:
+          type: array
+          items: { type: string }
+        owasp:
+          type: array
+          items: { type: string }
+        description: { type: string }
+        rationale: { type: string }
+        remediation: { type: string }
+        compliant_example: { type: string }
+        noncompliant_example: { type: string }
+        remediation_effort: { type: integer }
+        detection: { type: string }

@@ -9,6 +9,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/threatmodel"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeupdraft"
@@ -17,6 +18,7 @@ import (
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 )
 
@@ -79,6 +81,12 @@ func (fakeWriteupDrafts) Reject(context.Context, string, shared.ID, shared.ID) (
 	return writeupdraft.Draft{}, nil
 }
 
+// fakeRules is a no-op rulesService for the harness.
+type fakeRules struct{}
+
+func (fakeRules) List(context.Context, rules.Filter) ([]rule.Rule, error) { return nil, nil }
+func (fakeRules) Get(context.Context, rule.Key) (rule.Rule, error)        { return rule.Rule{}, nil }
+
 // TestHostileHarness drives the REAL route table (rt.routes()) through the production
 // authz → withEngTenant → handler chain with a context-injected principal, asserting the program's
 // cross-cutting authorization invariants END-TO-END through the actual wiring (not a stand-in):
@@ -122,6 +130,7 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetDASTWorkflow(&fakeDASTWorkflow{})
 	rt.SetThreatModel(&fakeThreatModel{})     // register the threat-model ingest/read routes so the harness guards their gates
 	rt.SetWriteupDrafts(&fakeWriteupDrafts{}) // register the writeup-draft sign-off routes so the harness guards their SoD gates
+	rt.SetRules(&fakeRules{})                 // register rule catalog routes so the harness guards their gates
 	rt.EnableAgent(nil, nil, nil, nil, nil, 1, 8)
 	mux := rt.routes()
 
@@ -207,6 +216,11 @@ func TestHostileHarness(t *testing.T) {
 		{"machine may not edit writeup draft (review)", "agent", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/writeup-drafts/d1/edit", http.StatusForbidden},
 		{"cross-tenant writeup-draft accept → 404", "reviewer", "tenantB", true, http.MethodPost, "/api/v1/engagements/engA/writeup-drafts/d1/accept", http.StatusNotFound},
 		{"readonly may list writeup drafts (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/writeup-drafts", http.StatusOK},
+		// Rule Catalog (PermView): no tenant context required, but machine roles denied.
+		{"machine may not list rules (view/SoD)", "agent", "tenantA", true, http.MethodGet, "/api/v1/rules", http.StatusForbidden},
+		{"machine may not get rule (view/SoD)", "agent", "tenantA", true, http.MethodGet, "/api/v1/rules/go:sql-injection", http.StatusForbidden},
+		{"readonly may list rules (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/rules", http.StatusOK},
+		{"readonly may get rule (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/rules/go:sql-injection", http.StatusOK},
 	}
 	for _, c := range cases {
 		if got := send(c.role, c.tenant, c.method, c.path, c.authed); got != c.want {

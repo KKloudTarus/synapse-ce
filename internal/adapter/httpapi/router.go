@@ -59,6 +59,7 @@ type Router struct {
 	threatModels threatModelService  // optional; nil ⇒ threat-model routes are not registered
 	drafts       writeupDraftService // optional; nil ⇒ writeup-draft sign-off routes are not registered
 	codeQuality  codeQualityService  // optional; nil ⇒ the code-quality route is not registered
+	rules        rulesService        // optional; nil ⇒ rule catalog routes are not registered
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -123,6 +124,9 @@ func (rt *Router) SetThreatModel(s threatModelService) { rt.threatModels = s }
 
 // SetWriteupDrafts wires the human sign-off endpoints for AI-proposed write-up drafts. nil ⇒ not registered.
 func (rt *Router) SetWriteupDrafts(s writeupDraftService) { rt.drafts = s }
+
+// SetRules wires the rule catalog endpoints. nil ⇒ not registered.
+func (rt *Router) SetRules(s rulesService) { rt.rules = s }
 
 // NewRouter builds the HTTP router.
 func NewRouter(log *slog.Logger, auth *Authenticator, eng *enguc.Service, sca *scauc.Service, aup *aupuc.Service, findings *findingsuc.Service, export *exportuc.Service, report *reportuc.Service, evidence *evidenceuc.Service, recon *reconuc.Service, logs ports.LogStream, transfer *transferuc.Service, audit *audituc.Service, vex *vexuc.Service, users *usersuc.Service, credentials *credentialsuc.Service) *Router {
@@ -282,6 +286,11 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/engagements/{id}/agent/sessions/{sid}/stream", rt.authz(userdom.PermView, rt.withEngTenant(rt.streamAgentSession)))
 		mux.HandleFunc("GET /api/v1/engagements/{id}/agent/approvals", rt.authz(userdom.PermView, rt.withEngTenant(rt.listAgentApprovals)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/agent/approvals/{aid}/decide", rt.authz(userdom.PermReview, rt.withEngTenant(rt.decideAgentApproval)))
+	}
+
+	if rt.rules != nil { // read-only rule catalog (PermView)
+		mux.HandleFunc("GET /api/v1/rules", rt.authz(userdom.PermView, rt.listRules))
+		mux.HandleFunc("GET /api/v1/rules/{key}", rt.authz(userdom.PermView, rt.getRule))
 	}
 
 	return mux

@@ -36,6 +36,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
 	recontools "github.com/KKloudTarus/synapse-ce/internal/infrastructure/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/report"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/rulecatalog"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourcesnippet"
@@ -111,6 +112,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachproof"
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	reportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/report"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sbomcrosscheckjudge"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
@@ -839,6 +841,15 @@ func main() {
 		codequality.WithDuplication(duplication.New(0)),
 		codequality.WithInventory(codeinventory.New()),
 	))
+	if ruleCat, rerr := rulecatalog.Default(); rerr != nil {
+		log.Error("rule catalog init failed", "err", rerr)
+		os.Exit(1)
+	} else if rulesSvc, rerr := rules.NewService(ruleCat); rerr != nil {
+		log.Error("rules service init failed", "err", rerr)
+		os.Exit(1)
+	} else {
+		router.SetRules(rulesSvc)
+	}
 	if tmSvc, terr := threatmodeluc.NewService(threatModelStore, auditLog, clock); terr != nil { // architecture threat-model ingest/read
 		log.Error("threat-model service init failed", "err", terr)
 		os.Exit(1)
