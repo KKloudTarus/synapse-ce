@@ -12,8 +12,9 @@ info:
     endpoint except the AUP endpoints also requires that the current Acceptable
     Use Policy has been accepted, else `403`.
 
-    Note: request bodies are snake_case; response objects are serialized from the
-    Go domain structs and therefore use PascalCase property names.
+    Note: legacy response objects may use PascalCase where they are serialized
+    directly from domain structs. Endpoints with explicit response schemas,
+    including the rule catalog API, use the field names documented below.
 
 servers:
   - url: http://localhost:8080
@@ -29,7 +30,8 @@ tags:
   - name: findings
   - name: sca
   - name: export
-  - name: rule-catalog
+  - name: rules
+    description: Built-in code-quality and security rule catalog
 
 paths:
   /healthz:
@@ -235,43 +237,65 @@ paths:
 
   /api/v1/rules:
     get:
-      tags: [rule-catalog]
+      tags: [rules]
       summary: List rule catalog
+      operationId: listRules
       description: Returns the immutable first-party rule catalog with optional filters.
       parameters:
         - name: q
           in: query
-          schema: { type: string }
+          description: Search term. Max length 256. (Total filter values across all dimensions limit is 64).
+          schema:
+            type: string
+            maxLength: 256
         - name: language
           in: query
+          style: form
           explode: true
           schema:
             type: array
-            items: { type: string }
+            maxItems: 32
+            items:
+              type: string
+              maxLength: 128
         - name: type
           in: query
+          style: form
           explode: true
           schema:
             type: array
-            items: { type: string }
+            maxItems: 32
+            items:
+              $ref: "#/components/schemas/RuleType"
         - name: severity
           in: query
+          style: form
           explode: true
           schema:
             type: array
-            items: { type: string }
+            maxItems: 32
+            items:
+              $ref: "#/components/schemas/RuleSeverity"
         - name: tag
           in: query
+          style: form
           explode: true
           schema:
             type: array
-            items: { type: string }
+            maxItems: 32
+            items:
+              type: string
+              maxLength: 128
         - name: cwe
           in: query
+          style: form
           explode: true
           schema:
             type: array
-            items: { type: string }
+            maxItems: 32
+            items:
+              type: string
+              maxLength: 128
       responses:
         "200":
           description: A list of rule summaries
@@ -283,16 +307,20 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
 
   /api/v1/rules/{key}:
     parameters:
       - name: key
         in: path
         required: true
-        schema: { type: string }
+        schema:
+          type: string
+        example: go:sql-injection
     get:
-      tags: [rule-catalog]
+      tags: [rules]
       summary: Get rule by exact key
+      operationId: getRule
       responses:
         "200":
           description: The full rule detail
@@ -302,6 +330,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
         "404": { $ref: "#/components/responses/NotFound" }
 
 components:
@@ -335,6 +364,11 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
     NotFound:
       description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    InternalServerError:
+      description: Internal server error
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -453,17 +487,60 @@ components:
           additionalProperties: { type: string }
         vuln_db_snapshot: { type: string }
 
+    RuleType:
+      type: string
+      enum:
+        - bug
+        - vulnerability
+        - code_smell
+        - security_hotspot
+
+    RuleQuality:
+      type: string
+      enum:
+        - security
+        - reliability
+        - maintainability
+
+    RuleSeverity:
+      type: string
+      enum:
+        - low
+        - medium
+        - high
+        - critical
+
+    RuleDetection:
+      type: string
+      enum:
+        - ast
+        - pattern
+        - metric
+
     RuleSummary:
       type: object
+      required:
+        - key
+        - name
+        - language
+        - type
+        - qualities
+        - default_severity
+        - tags
+        - cwe
+        - owasp
+        - description
+        - remediation_effort
+        - detection
       properties:
         key: { type: string }
         name: { type: string }
         language: { type: string }
-        type: { type: string }
+        type: { $ref: "#/components/schemas/RuleType" }
         qualities:
           type: array
-          items: { type: string }
-        default_severity: { type: string }
+          items: { $ref: "#/components/schemas/RuleQuality" }
+        default_severity: { $ref: "#/components/schemas/RuleSeverity" }
         tags:
           type: array
           items: { type: string }
@@ -475,19 +552,36 @@ components:
           items: { type: string }
         description: { type: string }
         remediation_effort: { type: integer }
-        detection: { type: string }
+        detection: { $ref: "#/components/schemas/RuleDetection" }
 
     RuleDetail:
       type: object
+      required:
+        - key
+        - name
+        - language
+        - type
+        - qualities
+        - default_severity
+        - tags
+        - cwe
+        - owasp
+        - description
+        - rationale
+        - remediation
+        - compliant_example
+        - noncompliant_example
+        - remediation_effort
+        - detection
       properties:
         key: { type: string }
         name: { type: string }
         language: { type: string }
-        type: { type: string }
+        type: { $ref: "#/components/schemas/RuleType" }
         qualities:
           type: array
-          items: { type: string }
-        default_severity: { type: string }
+          items: { $ref: "#/components/schemas/RuleQuality" }
+        default_severity: { $ref: "#/components/schemas/RuleSeverity" }
         tags:
           type: array
           items: { type: string }
@@ -503,4 +597,4 @@ components:
         compliant_example: { type: string }
         noncompliant_example: { type: string }
         remediation_effort: { type: integer }
-        detection: { type: string }
+        detection: { $ref: "#/components/schemas/RuleDetection" }

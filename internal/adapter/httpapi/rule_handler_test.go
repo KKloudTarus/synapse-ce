@@ -22,14 +22,18 @@ type fakeRulesService struct {
 	getErr     error
 	lastFilter rules.Filter
 	lastKey    rule.Key
+	listCalls  int
+	getCalls   int
 }
 
 func (f *fakeRulesService) List(ctx context.Context, filter rules.Filter) ([]rule.Rule, error) {
+	f.listCalls++
 	f.lastFilter = filter
 	return f.listRes, f.listErr
 }
 
 func (f *fakeRulesService) Get(ctx context.Context, key rule.Key) (rule.Rule, error) {
+	f.getCalls++
 	f.lastKey = key
 	return f.getRes, f.getErr
 }
@@ -75,16 +79,35 @@ func TestRouter_listRules(t *testing.T) {
 	})
 
 	t.Run("unsupported query param", func(t *testing.T) {
+		svc.listCalls = 0
 		w := callList("/api/v1/rules?severty=high")
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("expected 400 for bad query param, got %d", w.Code)
 		}
+		if svc.listCalls != 0 {
+			t.Errorf("expected 0 list calls, got %d", svc.listCalls)
+		}
 	})
 
 	t.Run("service validation error", func(t *testing.T) {
+		svc.listCalls = 0
 		w := callList("/api/v1/rules?type=unknown")
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("expected 400 for bad type, got %d", w.Code)
+		}
+		if svc.listCalls != 0 {
+			t.Errorf("expected 0 list calls, got %d", svc.listCalls)
+		}
+	})
+
+	t.Run("combined params", func(t *testing.T) {
+		svc.listCalls = 0
+		w := callList("/api/v1/rules?severity=high&severity=critical&tag=security")
+		if w.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", w.Code)
+		}
+		if len(svc.lastFilter.Severities) != 2 || len(svc.lastFilter.Tags) != 1 {
+			t.Errorf("expected 2 severities and 1 tag, got %v and %v", svc.lastFilter.Severities, svc.lastFilter.Tags)
 		}
 	})
 
@@ -158,6 +181,15 @@ func TestRouter_getRule(t *testing.T) {
 		}
 		svc.getErr = nil
 	})
+
+	t.Run("service internal error", func(t *testing.T) {
+		svc.getErr = errors.New("boom")
+		w := callGet("go:sql")
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("expected 500, got %d", w.Code)
+		}
+		svc.getErr = nil
+	})
 }
 
 func TestRealCatalogIntegration(t *testing.T) {
@@ -195,11 +227,25 @@ func TestRealCatalogIntegration(t *testing.T) {
 		}
 
 		var res []map[string]any
-		json.Unmarshal(w.Body.Bytes(), &res)
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+			t.Fatal(err)
+		}
 
-		all, _ := cat.List(context.Background())
+		all, err := cat.List(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(res) != len(all) {
-			t.Errorf("expected %d rules, got %d", len(all), len(res))
+			t.Fatalf("expected %d rules, got %d", len(all), len(res))
+		}
+
+		// Check exact ordered key sets
+		for i := 0; i < len(all); i++ {
+			expectedKey := string(all[i].Key)
+			actualKey := res[i]["key"].(string)
+			if expectedKey != actualKey {
+				t.Errorf("index %d: expected key %s, got %s", i, expectedKey, actualKey)
+			}
 		}
 
 		// check sorting
@@ -215,7 +261,9 @@ func TestRealCatalogIntegration(t *testing.T) {
 	t.Run("filter returns subset", func(t *testing.T) {
 		w := callList("/api/v1/rules?language=go")
 		var res []map[string]any
-		json.Unmarshal(w.Body.Bytes(), &res)
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+			t.Fatal(err)
+		}
 
 		if len(res) == 0 {
 			t.Errorf("expected some go rules")
@@ -228,7 +276,10 @@ func TestRealCatalogIntegration(t *testing.T) {
 	})
 
 	t.Run("get known key", func(t *testing.T) {
-		all, _ := cat.List(context.Background())
+		all, err := cat.List(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
 		firstKey := string(all[0].Key)
 
 		w := callGet(firstKey)
@@ -237,7 +288,9 @@ func TestRealCatalogIntegration(t *testing.T) {
 		}
 
 		var res map[string]any
-		json.Unmarshal(w.Body.Bytes(), &res)
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+			t.Fatal(err)
+		}
 		if res["key"] != firstKey {
 			t.Errorf("expected key %s, got %v", firstKey, res["key"])
 		}

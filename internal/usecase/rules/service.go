@@ -156,7 +156,7 @@ func NewFilter(query string, languages, types, severities, tags, cwe []string) (
 				return Filter{}, fmt.Errorf("%w: invalid CWE value %q", shared.ErrValidation, c)
 			}
 		}
-		
+
 		cweForm := fmt.Sprintf("CWE-%d", id)
 		if _, ok := cweSet[cweForm]; !ok {
 			cweSet[cweForm] = struct{}{}
@@ -185,7 +185,7 @@ func (s *Service) List(ctx context.Context, filter Filter) ([]rule.Rule, error) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	
+
 	all, err := s.catalog.List(ctx)
 	if err != nil {
 		return nil, err
@@ -305,6 +305,9 @@ func containsQualitySubstring(slice []rule.Quality, q string) bool {
 
 // Get returns the exact rule by key.
 func (s *Service) Get(ctx context.Context, key rule.Key) (rule.Rule, error) {
+	if err := ctx.Err(); err != nil {
+		return rule.Rule{}, err
+	}
 	if string(key) == "" {
 		return rule.Rule{}, fmt.Errorf("%w: empty rule key", shared.ErrValidation)
 	}

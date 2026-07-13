@@ -12,11 +12,14 @@ import (
 )
 
 type fakeCatalog struct {
-	rules []rule.Rule
-	err   error
+	rules     []rule.Rule
+	err       error
+	getCalls  int
+	listCalls int
 }
 
 func (f *fakeCatalog) List(ctx context.Context) ([]rule.Rule, error) {
+	f.listCalls++
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -24,6 +27,7 @@ func (f *fakeCatalog) List(ctx context.Context) ([]rule.Rule, error) {
 }
 
 func (f *fakeCatalog) Get(ctx context.Context, key rule.Key) (rule.Rule, error) {
+	f.getCalls++
 	if f.err != nil {
 		return rule.Rule{}, f.err
 	}
@@ -167,7 +171,7 @@ func TestNewFilter_Bounds(t *testing.T) {
 	}
 }
 
-// wait, the rule says max values per dimension is 32! Let's test that directly:
+// Test dimension bounds (max 32):
 func TestNewFilter_DimensionBound(t *testing.T) {
 	tags32 := make([]string, 32)
 	for i := range tags32 {
@@ -257,7 +261,7 @@ func TestService_List(t *testing.T) {
 
 	// 6. Source rules are cloned (slices)
 	cat.rules[0].Tags[0] = "mutated" // change the original, should not affect previously returned
-	// wait, we returned clones. Let's mutate the clone and see if source is affected
+	// Verify we returned clones. Let's mutate the clone and see if source is affected
 	f, _ = rules.NewFilter("", nil, nil, nil, nil, nil)
 	out, _ = svc.List(ctx, f)
 	out[0].Tags[0] = "mutated-clone"
@@ -317,18 +321,137 @@ func TestNewService_NilDependency(t *testing.T) {
 	}
 }
 
-func TestService_ContextCancel(t *testing.T) {
+func TestServiceListCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	svc, _ := rules.NewService(&fakeCatalog{})
+	cat := &fakeCatalog{}
+	svc, _ := rules.NewService(cat)
 	_, err := svc.List(ctx, rules.Filter{})
 	if err == nil || !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context canceled, got %v", err)
 	}
 
-	_, err = svc.Get(ctx, rule.Key("a"))
-	// fake catalog currently just returns on Get if f.err!=nil, else loops.
-	// We need to implement context propagation in the service or fake.
-	// Wait, catalog handles context.
+	if cat.listCalls != 0 {
+		t.Fatalf("catalog.List called %d times", cat.listCalls)
+	}
+}
+
+func TestServiceGetCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	cat := &fakeCatalog{}
+	svc, err := rules.NewService(cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.Get(ctx, rule.Key("a-rule"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+
+	if cat.getCalls != 0 {
+		t.Fatalf("catalog.Get called %d times", cat.getCalls)
+	}
+}
+
+func TestNewFilter_Advanced(t *testing.T) {
+	cases := []struct {
+		name       string
+		languages  []string
+		types      []string
+		severities []string
+		tags       []string
+		cwe        []string
+		wantErr    bool
+	}{
+		{name: "empty language value", languages: []string{""}, wantErr: true},
+		{name: "empty type value", types: []string{""}, wantErr: true},
+		{name: "empty severity value", severities: []string{""}, wantErr: true},
+		{name: "empty tag value", tags: []string{""}, wantErr: true},
+		{name: "boundary 128 language", languages: []string{strings.Repeat("a", 128)}, wantErr: false},
+		{name: "boundary 129 language", languages: []string{strings.Repeat("a", 129)}, wantErr: true},
+		{name: "CWE--89", cwe: []string{"CWE--89"}, wantErr: true},
+		{name: "CWE-+89", cwe: []string{"CWE-+89"}, wantErr: true},
+		{name: "  CWE-89", cwe: []string{"  CWE-89"}, wantErr: false}, // gets trimmed
+		{name: "CWE-00089", cwe: []string{"CWE-00089"}, wantErr: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := rules.NewFilter("", tc.languages, tc.types, tc.severities, tc.tags, tc.cwe)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("wantErr %v, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestService_List_Advanced(t *testing.T) {
+	ctx := context.Background()
+	cat := &fakeCatalog{
+		rules: []rule.Rule{
+			{
+				Key: "a", Name: "name_match", Language: "go", Type: rule.TypeBug, DefaultSeverity: shared.SeverityLow,
+				Description: "desc", Rationale: "rat", Remediation: "rem", Detection: rule.DetectionAST,
+				Tags: []string{"tag1"}, CWE: []string{"CWE-1"}, OWASP: []string{"A1"}, Qualities: []rule.Quality{rule.QualitySecurity},
+			},
+			{Key: "b", CompliantExample: "match_but_ignored", NoncompliantExample: "match_but_ignored"},
+		},
+	}
+	svc, _ := rules.NewService(cat)
+
+	// Test search matches and non-matches
+	f, _ := rules.NewFilter("name_match", nil, nil, nil, nil, nil)
+	out, _ := svc.List(ctx, f)
+	if len(out) != 1 {
+		t.Errorf("expected match")
+	}
+
+	f, _ = rules.NewFilter("match_but_ignored", nil, nil, nil, nil, nil)
+	out, _ = svc.List(ctx, f)
+	if len(out) != 0 {
+		t.Errorf("should not match examples")
+	}
+
+	// Test empty catalog
+	catEmpty := &fakeCatalog{rules: []rule.Rule{}}
+	svcEmpty, _ := rules.NewService(catEmpty)
+	out, _ = svcEmpty.List(ctx, rules.Filter{})
+	if out == nil {
+		t.Errorf("expected non-nil empty slice")
+	}
+
+	// Test error propagation
+	catErr := &fakeCatalog{err: errors.New("boom")}
+	svcErr, _ := rules.NewService(catErr)
+	_, err := svcErr.List(ctx, rules.Filter{})
+	if err == nil || err.Error() != "boom" {
+		t.Errorf("expected error propagation")
+	}
+}
+
+func TestService_Get_Advanced(t *testing.T) {
+	ctx := context.Background()
+	cat := &fakeCatalog{
+		rules: []rule.Rule{
+			{Key: " go:rule "}, // whitespace
+		},
+	}
+	svc, _ := rules.NewService(cat)
+
+	// Exact case lookup with whitespace
+	r, err := svc.Get(ctx, rule.Key(" go:rule "))
+	if err != nil || r.Key != " go:rule " {
+		t.Errorf("expected match")
+	}
+
+	// Error propagation
+	catErr := &fakeCatalog{err: errors.New("boom")}
+	svcErr, _ := rules.NewService(catErr)
+	_, err = svcErr.Get(ctx, rule.Key("k"))
+	if err == nil || err.Error() != "boom" {
+		t.Errorf("expected error propagation")
+	}
 }
