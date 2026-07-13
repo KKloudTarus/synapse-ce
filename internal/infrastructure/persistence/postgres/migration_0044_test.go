@@ -83,7 +83,7 @@ func TestMigration0044(t *testing.T) {
 		{uuid.New().String(), "sca", "sca:some-rule:file.go:1", ""},          // Unsupported kind
 		{uuid.New().String(), "manual", "manual:some-rule:file.go:1", ""},
 		{uuid.New().String(), "dast", "dast:some-rule:file.go:1", ""},
-		{uuid.New().String(), "", "sast:sql-injection:src/a.go:10", ""}, // Empty kind
+		{uuid.New().String(), "", "sast:sql-injection:src/a.go:11", ""}, // Empty kind
 		{uuid.New().String(), "sast", "arbitrary malformed string", ""},
 	}
 

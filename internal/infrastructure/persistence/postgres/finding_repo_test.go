@@ -103,7 +103,7 @@ func TestFindingRepository(t *testing.T) {
 	}
 
 	// RuleKey enhancements:
-	// 4. Mixed valid/invalid batch không tạo partial rows.
+	// Mixed valid/invalid batch prevents partial inserts.
 	fidValid := shared.ID("fid-" + randHex(t))
 	fidInvalid := shared.ID("fid-" + randHex(t))
 	validF := finding.Finding{ID: fidValid, EngagementID: eid, Kind: finding.KindSAST, DedupKey: "sast:valid", RuleKey: "valid"}
@@ -113,13 +113,15 @@ func TestFindingRepository(t *testing.T) {
 	}
 	// Verify neither were inserted
 	var count int
-	pool.QueryRow(ctx, "SELECT count(*) FROM findings WHERE id IN ($1, $2)", fidValid, fidInvalid).Scan(&count)
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM findings WHERE id IN ($1, $2)", fidValid, fidInvalid).Scan(&count); err != nil {
+		t.Fatalf("count partial rows: %v", err)
+	}
 	if count != 0 {
 		t.Errorf("expected 0 partial rows, got %d", count)
 	}
 
-	// 5. Non-rule finding với empty RuleKey persist bình thường.
-	// 6. Non-rule finding với non-empty RuleKey bị từ chối.
+	// Non-rule findings with empty RuleKey persist normally.
+	// Non-rule findings with non-empty RuleKey are rejected.
 	nonRuleValid := finding.Finding{ID: shared.ID("fid-" + randHex(t)), EngagementID: eid, Kind: finding.KindSCA, DedupKey: "sca:1", RuleKey: ""}
 	nonRuleInvalid := finding.Finding{ID: shared.ID("fid-" + randHex(t)), EngagementID: eid, Kind: finding.KindManual, DedupKey: "manual:1", RuleKey: "bad"}
 	if err := repo.Upsert(ctx, []finding.Finding{nonRuleValid}); err != nil {
@@ -129,10 +131,8 @@ func TestFindingRepository(t *testing.T) {
 		t.Error("non-rule finding with non-empty RuleKey should be rejected")
 	}
 
-	// 7. Legacy rule-based row với blank RuleKey vẫn đọc được.
-	// 2. Existing blank RuleKey được scan mới chữa.
-	// 3. Triage fields vẫn được giữ.
-	// 1. Conflict upsert cập nhật RuleKey.
+	// Conflict healing: legacy rule-based rows with a blank RuleKey can still be read.
+	// A new scan with a valid RuleKey heals the missing key while preserving existing triage fields.
 	fidLegacy := shared.ID("fid-" + randHex(t))
 	_, err = pool.Exec(ctx,
 		`INSERT INTO findings (id, tenant_id, engagement_id, title, description, severity, cvss_vector, cwe, status, evidence_score, dedup_key, kev, risk_score, created_at, updated_at, sources, confidence, class, scope, reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key)
@@ -174,9 +174,7 @@ func TestFindingRepository(t *testing.T) {
 		t.Errorf("triage fields should be preserved: status=%v, assignee=%v, evidence=%v", healed.Status, healed.Assignee, healed.EvidenceScore)
 	}
 
-	// 8. UpdateStatus trả và giữ RuleKey.
-	// 9. SetAssignee trả và giữ RuleKey.
-	// 10. SetEvidenceScore trả và giữ RuleKey.
+	// Triage methods correctly return and preserve the finding's RuleKey.
 	fUpd, err := repo.UpdateStatus(ctx, eid, fidLegacy, finding.StatusFalsePos, healed.Version)
 	if err != nil || fUpd.RuleKey != "healed-rule" {
 		t.Errorf("UpdateStatus must preserve RuleKey, got %q (err: %v)", fUpd.RuleKey, err)
