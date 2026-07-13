@@ -76,6 +76,7 @@ import type {
   FindingComment,
   ImportedSBOMMetadata,
   Judgment,
+  CurrentUser,
   RiskNarrativeClaim,
   CritiqueClaim,
   ReachabilityClaim,
@@ -96,7 +97,7 @@ import { StatusPill } from './Engagements'
 // Lazy-loaded so React Flow stays out of the initial bundle (only the Graph tab needs it).
 const DependencyGraphTab = lazy(() => import('./DependencyGraph').then((m) => ({ default: m.DependencyGraphTab })))
 
-type Tab = 'overview' | 'findings' | 'components' | 'vulns' | 'licenses' | 'graph' | 'quality' | 'threats' | 'recon' | 'agent' | 'evidence' | 'settings'
+type Tab = 'overview' | 'findings' | 'components' | 'vulns' | 'licenses' | 'graph' | 'quality' | 'threats' | 'recon' | 'agent' | 'reviews' | 'evidence' | 'settings'
 
 export function EngagementDetail() {
   const { id = '' } = useParams()
@@ -267,6 +268,7 @@ export function EngagementDetail() {
         {tab === 'quality' && <CodeQualityTab engagementId={id} />}
         {tab === 'recon' && <ReconTab eng={eng} onGoTab={setTab} />}
         {tab === 'agent' && <AgentTab engagementId={id} />}
+        {tab === 'reviews' && <JudgmentReviewTab key={id} engagementId={id} />}
         {tab === 'evidence' && <EvidenceTab key={id} engagementId={id} />}
         {tab === 'settings' && <SettingsTab eng={eng} onUpdated={setEng} />}
       </div>
@@ -1136,6 +1138,7 @@ const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard; countKey?: k
   { id: 'quality', label: 'Code Quality', icon: Gauge },
   { id: 'recon', label: 'Recon', icon: Radar },
   { id: 'agent', label: 'Agent', icon: Bot },
+  { id: 'reviews', label: 'Awaiting review', icon: ShieldQuestion },
   { id: 'evidence', label: 'Evidence', icon: ShieldCheck },
   { id: 'settings', label: 'Settings', icon: SlidersHorizontal },
 ]
@@ -2087,6 +2090,304 @@ function ExplainJudgments({ engagementId, findingId }: { engagementId: string; f
           </li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+const GATED_JUDGMENT_CAPABILITIES = new Set(['reachability', 'sast', 'critique', 'threat', 'vex_justification'])
+
+function JudgmentClaim({ judgment }: { judgment: Judgment }) {
+  if (judgment.capability === 'reachability') return <Reachability j={judgment} />
+  if (judgment.capability === 'critique') return <Critique j={judgment} />
+  if (judgment.capability === 'risk_narrative') return <RiskNarrative j={judgment} />
+
+  return (
+    <dl className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+      {Object.entries(judgment.claim).map(([key, value]) => (
+        <div key={key} className="rounded-md border border-border bg-elevated px-2.5 py-2">
+          <dt className="text-[11px] uppercase tracking-wide text-subtlefg">{key.replaceAll('_', ' ')}</dt>
+          <dd className="mt-0.5 break-words font-mono text-foreground">
+            {Array.isArray(value) ? value.join(', ') : String(value ?? '–')}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+function sealedJudgmentId(item: EvidenceItem): string {
+  if (item.kind !== 'judgment_proposed' || !item.contentBase64) return ''
+  try {
+    const bytes = Uint8Array.from(atob(item.contentBase64), (c) => c.charCodeAt(0))
+    const payload = JSON.parse(new TextDecoder().decode(bytes)) as unknown
+    if (payload && typeof payload === 'object' && 'judgment_id' in payload) {
+      const id = (payload as { judgment_id?: unknown }).judgment_id
+      return typeof id === 'string' ? id : ''
+    }
+  } catch {
+    // A malformed ledger item must not hide the rest of the review queue.
+  }
+  return ''
+}
+
+function JudgmentReviewTab({ engagementId }: { engagementId: string }) {
+  const [judgments, setJudgments] = useState<Judgment[] | null>(null)
+  const [ledger, setLedger] = useState<EvidenceLedger | null>(null)
+  const [me, setMe] = useState<CurrentUser | null | undefined>(undefined)
+  const [selected, setSelected] = useState<Judgment | null>(null)
+  const [err, setErr] = useState('')
+  const [notice, setNotice] = useState('')
+  const reviewHeadingRef = useRef<HTMLHeadingElement>(null)
+  const pendingReviewFocus = useRef<string | null>(null)
+
+  function focusReviewTrigger(id?: string) {
+    pendingReviewFocus.current = id ?? ''
+  }
+
+  useEffect(() => {
+    const id = pendingReviewFocus.current
+    if (id === null) return
+    pendingReviewFocus.current = null
+    const triggers = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-review-trigger]'))
+    const trigger = triggers.find((button) => button.dataset.reviewTrigger === id) ?? triggers[0]
+    ;(trigger ?? reviewHeadingRef.current)?.focus({ preventScroll: true })
+  }, [judgments, selected])
+
+  const load = useCallback(async () => {
+    setErr('')
+    try {
+      const [nextJudgments, nextLedger, currentUser] = await Promise.all([
+        api.judgments(engagementId),
+        api.evidenceLedger(engagementId),
+        api.me().catch(() => null),
+      ])
+      setJudgments(nextJudgments.filter((j) => j.state === 'proposed'))
+      setLedger(nextLedger)
+      setMe(currentUser)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to load judgments')
+    }
+  }, [engagementId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  async function settled(updated: Judgment) {
+    setJudgments((current) => current?.filter((j) => j.id !== updated.id) ?? current)
+    setSelected(null)
+    setNotice('')
+    focusReviewTrigger()
+    const nextLedger = await api.evidenceLedger(engagementId).catch(() => null)
+    if (nextLedger) setLedger(nextLedger)
+  }
+
+  async function conflict() {
+    const id = selected?.id
+    setSelected(null)
+    setNotice('This judgment changed; the review list was reloaded.')
+    await load()
+    focusReviewTrigger(id)
+  }
+
+  if (judgments === null && !err) return <Spinner label="Loading judgments…" />
+  if (err)
+    return (
+      <div className="space-y-3">
+        <ErrorState message={err} />
+        <Button variant="secondary" onClick={load}>Retry</Button>
+      </div>
+    )
+  if (!judgments?.length) {
+    return (
+      <div className="space-y-3">
+        <EmptyState icon={ShieldCheck} title="No judgments awaiting review" hint="All proposed judgments have been settled." />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 ref={reviewHeadingRef} tabIndex={-1} className="text-lg font-semibold text-foreground">Judgments awaiting review</h2>
+        <p className="mt-1 text-sm text-mutedfg">
+          Verify evidence-gated claims or accept descriptive claims. The server records every decision in the evidence chain.
+        </p>
+      </div>
+      {notice && <p role="status" className="text-sm text-accent">{notice}</p>}
+      {!ledger?.intact && (
+        <p role="alert" className="flex items-center gap-2 text-sm text-critical">
+          <AlertTriangle className="size-4" /> Evidence chain integrity check failed.
+        </p>
+      )}
+      <ul role="list" className="space-y-3">
+        {judgments.map((judgment) => {
+          const gated = GATED_JUDGMENT_CAPABILITIES.has(judgment.capability)
+          const evidence = ledger?.items.find((item) => sealedJudgmentId(item) === judgment.id)
+          const blockedReason =
+            me === undefined
+              ? 'Loading reviewer identity…'
+              : me === null
+                ? 'Reviewer identity is unavailable.'
+                : me.id === judgment.proposedBy
+                  ? 'The proposer cannot review their own judgment.'
+                  : me.role !== 'admin' && me.role !== 'reviewer'
+                    ? 'Reviewer permission is required.'
+                    : ''
+          return (
+            <li
+              key={judgment.id}
+              onClick={(event) => {
+                if (blockedReason || (event.target as HTMLElement).closest('button, input, textarea, label, select, a')) return
+                setSelected(judgment)
+              }}
+              onKeyDown={(event) => {
+                if (blockedReason || event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+                event.preventDefault()
+                setSelected(judgment)
+              }}
+              tabIndex={blockedReason ? undefined : 0}
+            >
+              <Card bodyClass="p-4" className={cn(!blockedReason && 'cursor-pointer hover:border-borderstrong')}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium capitalize text-foreground">{judgment.capability.replaceAll('_', ' ')}</span>
+                      <JudgmentStateBadge state={judgment.state} />
+                      <Pill>{gated ? 'evidence-gated' : 'human acceptance'}</Pill>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-mutedfg">
+                      <span>{judgment.subjectKind || 'subject'}: <span className="break-all font-mono text-foreground">{judgment.subjectId}</span></span>
+                      <span>proposed by <span className="font-mono text-foreground">{judgment.proposedBy}</span></span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <Button
+                      variant="secondary"
+                      data-review-trigger={judgment.id}
+                      aria-expanded={selected?.id === judgment.id}
+                      aria-controls={`judgment-review-${judgment.id}`}
+                      disabled={Boolean(blockedReason)}
+                      title={blockedReason || undefined}
+                      onClick={() => setSelected(judgment)}
+                      className="px-3 py-1.5"
+                    >
+                      {gated ? <ShieldCheck className="size-4" /> : <CheckCircle2 className="size-4" />}
+                      {gated ? 'Verify' : 'Accept'}
+                    </Button>
+                    {blockedReason && <p className="mt-1 max-w-64 text-xs text-subtlefg">{blockedReason}</p>}
+                  </div>
+                </div>
+                <div className="mt-4 rounded-lg border border-border bg-bg p-3">
+                  <JudgmentClaim judgment={judgment} />
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-mutedfg">
+                  {evidence ? (
+                    <>
+                      <span className="flex items-center gap-1.5 text-accent"><ShieldCheck className="size-3.5" /> Sealed proposal</span>
+                      <span className="font-mono" title={evidence.hash}>sha256 {evidence.hash.slice(0, 12)}</span>
+                      <span>by {evidence.createdBy}</span>
+                      <span>{evidence.createdAt ? new Date(evidence.createdAt).toLocaleString() : '–'}</span>
+                    </>
+                  ) : (
+                    <span className="flex items-center gap-1.5 text-medium"><ShieldQuestion className="size-3.5" /> Sealed proposal evidence unavailable</span>
+                  )}
+                </div>
+                {selected?.id === judgment.id && (
+                  <JudgmentReviewForm
+                    engagementId={engagementId}
+                    judgment={judgment}
+                    onCancel={() => {
+                      setSelected(null)
+                      focusReviewTrigger(judgment.id)
+                    }}
+                    onSettled={settled}
+                    onConflict={conflict}
+                  />
+                )}
+              </Card>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+function JudgmentReviewForm({
+  engagementId,
+  judgment,
+  onCancel,
+  onSettled,
+  onConflict,
+}: {
+  engagementId: string
+  judgment: Judgment
+  onCancel: () => void
+  onSettled: (judgment: Judgment) => void
+  onConflict: () => void
+}) {
+  const gated = GATED_JUDGMENT_CAPABILITIES.has(judgment.capability)
+  const [score, setScore] = useState(90)
+  const [rationale, setRationale] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  async function submit() {
+    setBusy(true)
+    setErr('')
+    try {
+      const updated = gated
+        ? await api.verifyJudgment(engagementId, judgment.id, score, rationale.trim(), judgment.version)
+        : await api.acceptJudgment(engagementId, judgment.id, judgment.version)
+      onSettled(updated)
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) onConflict()
+      else setErr(e instanceof ApiError ? e.message : `${gated ? 'Verify' : 'Accept'} failed`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div id={`judgment-review-${judgment.id}`} className="mt-4 border-t border-border pt-4">
+      {gated ? (
+        <div className="space-y-3">
+          <p className="text-xs text-mutedfg">
+            Record an adversarial verdict. Scores ≥ {EVIDENCE_BAR} confirm this claim; lower scores refute it. Either outcome is sealed.
+          </p>
+          <Field label="Evidence score" hint="0–100">
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={score}
+              onChange={(e) => setScore(Math.max(0, Math.min(100, Number(e.target.value))))}
+            />
+          </Field>
+          <Field label="Rationale">
+            <textarea
+              value={rationale}
+              onChange={(e) => setRationale(e.target.value)}
+              rows={4}
+              placeholder="How the claim was reproduced or refuted"
+              className="w-full rounded-lg border border-border bg-elevated px-3 py-2 text-sm text-foreground placeholder:text-subtlefg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
+            />
+          </Field>
+        </div>
+      ) : (
+        <p className="text-sm text-mutedfg">
+          Accept this descriptive claim as reviewed. The acceptance is sealed into the evidence chain.
+        </p>
+      )}
+
+      {err && <p role="alert" className="mt-3 text-sm text-critical">{err}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="ghost" disabled={busy} onClick={onCancel}>Cancel</Button>
+        <Button loading={busy} disabled={gated && !rationale.trim()} onClick={submit}>
+          {gated ? 'Seal verdict' : 'Accept judgment'}
+        </Button>
+      </div>
     </div>
   )
 }
