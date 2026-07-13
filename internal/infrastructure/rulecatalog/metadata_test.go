@@ -197,6 +197,7 @@ func TestMetadata_ApprovedLanguage(t *testing.T) {
 		"CloudFormation":        true,
 		"GitHub Actions":        true,
 		"Secrets":               true,
+		"XML":                   true,
 	}
 
 	for _, r := range rules {
