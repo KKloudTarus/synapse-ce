@@ -34,7 +34,7 @@ func TestDefault_GoldenInventory(t *testing.T) {
 		t.Fatalf("Failed to read golden file: %v", err)
 	}
 
-	goldenRaw := string(goldenBytes)
+	goldenRaw := strings.ReplaceAll(string(goldenBytes), "\r\n", "\n")
 	if !strings.HasSuffix(goldenRaw, "\n") {
 		t.Errorf("Golden file missing final newline")
 	}
