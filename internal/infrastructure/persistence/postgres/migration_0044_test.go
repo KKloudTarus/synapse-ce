@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pressly/goose/v3"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
@@ -68,15 +69,22 @@ func TestMigration0044(t *testing.T) {
 		dedupKey string
 		wantRule string
 	}{
-		{uuid.New().String(), "sast", "sast:go:sql-injection:main.go:42", "go:sql-injection"},
-		{uuid.New().String(), "sast", "sast:go:sql-injection:C:\\project\\main.go:42", "go:sql-injection"},
-		{uuid.New().String(), "secret", "secret:aws-key:file.txt:1", "aws-key"},
-		{uuid.New().String(), "misconfig", "misconfig:tf.s3.public:main.tf:10", "tf.s3.public"},
-		{uuid.New().String(), "quality", "quality:quality-duplicated-block:src/foo.js:12", "quality-duplicated-block"},
-		{uuid.New().String(), "reliability", "reliability:reliability-empty-catch:test.java:5", "reliability-empty-catch"},
-		{uuid.New().String(), "sast", "sast:my:weird:rule:name:path/file.go:1", "my:weird:rule:name"},
-		{uuid.New().String(), "sca", "vuln:CVE-1:pkg:1", ""},
-		{uuid.New().String(), "sast", "sast:bad-format", ""}, // Does not match regex
+		{uuid.New().String(), "sast", "sast:sql-injection:src/a.go:10", "sql-injection"},
+		{uuid.New().String(), "secret", "secret:google-api-key:src/a.go:11", "google-api-key"},
+		{uuid.New().String(), "misconfig", "misconfig:terraform-open-egress:main.tf:12", "terraform-open-egress"},
+		{uuid.New().String(), "quality", "quality:quality-high-complexity:src/a.go:13", "quality-high-complexity"},
+		{uuid.New().String(), "reliability", "reliability:reliability-empty-catch:src/A.java:14", "reliability-empty-catch"},
+		{uuid.New().String(), "sast", "sast:sql-injection:C:\\src\\main.go:42", "sql-injection"},
+		{uuid.New().String(), "sast", "secret:google-api-key:file.go:1", ""}, // Prefix mismatch
+		{uuid.New().String(), "sast", "sast::file.go:1", ""},                 // Empty rule
+		{uuid.New().String(), "sast", "sast:rule::1", ""},                    // Empty path
+		{uuid.New().String(), "sast", "sast:rule:file.go:not-a-number", ""},  // Non-numeric line
+		{uuid.New().String(), "sast", "sast:go:sql-injection:file.go:1", ""}, // Colons in rule
+		{uuid.New().String(), "sca", "sca:some-rule:file.go:1", ""},          // Unsupported kind
+		{uuid.New().String(), "manual", "manual:some-rule:file.go:1", ""},
+		{uuid.New().String(), "dast", "dast:some-rule:file.go:1", ""},
+		{uuid.New().String(), "", "sast:sql-injection:src/a.go:10", ""}, // Empty kind
+		{uuid.New().String(), "sast", "arbitrary malformed string", ""},
 	}
 
 	now := time.Now().UTC()
@@ -113,13 +121,32 @@ func TestMigration0044(t *testing.T) {
 	}
 
 	// Assert rule_key is gone
-	err = pool.QueryRow(ctx, "SELECT rule_key FROM findings WHERE id=$1", fixtures[0].id).Scan(nil)
+	var scanVal string
+	err = pool.QueryRow(ctx, "SELECT rule_key FROM findings WHERE id=$1", fixtures[0].id).Scan(&scanVal)
 	if err == nil {
 		t.Error("rule_key column still exists after Down")
+	} else if pgErr, ok := err.(*pgconn.PgError); ok {
+		if pgErr.Code != "42703" { // undefined_column
+			t.Errorf("expected undefined_column error, got: %v", pgErr.Code)
+		}
+	} else {
+		t.Errorf("expected pgx error, got: %T %v", err, err)
 	}
 
 	// 6. Apply Up again
 	if err := goose.UpTo(db, ".", 44); err != nil {
 		t.Fatalf("goose up to 44 (second time): %v", err)
+	}
+
+	// Assert column exists and backfill is correct again
+	for _, f := range fixtures {
+		var gotRule string
+		if err := pool.QueryRow(ctx, "SELECT rule_key FROM findings WHERE id=$1", f.id).Scan(&gotRule); err != nil {
+			t.Errorf("fixture %s not found on second up: %v", f.id, err)
+			continue
+		}
+		if gotRule != f.wantRule {
+			t.Errorf("fixture %s (dedup: %s): got rule_key %q, want %q on second up", f.id, f.dedupKey, gotRule, f.wantRule)
+		}
 	}
 }

@@ -173,11 +173,12 @@ func TestBuildFindingsSAST(t *testing.T) {
 	raws := []ports.SASTRawFinding{
 		{File: "cmd/app/main.go", Line: 42, RuleID: "weak-hash-md5", CWE: "CWE-327", Severity: shared.SeverityMedium, Title: "Weak hash: MD5", Description: "use SHA-256", OWASP2025: "A04:2025 Cryptographic Failures", EntryPoint: "POST /login", Source: "password/crypto lifecycle", SourceEvidence: "line-local crypto/password lifecycle cue", Sink: "password hashing sink", SinkEvidence: "line 42: password hashing sink", ControlEvidence: "line 40: route POST /login", RouteMiddleware: "line 40: route-level authenticated middleware cue", AuthEvidence: "line 40: route-level authenticated middleware cue", Exposure: "authenticated application route", TrustBoundary: "internet/client-controlled input crosses into server-side password hashing sink", Impact: "possible weak cryptographic protection", Route: "POST /login", AuthScope: "authenticated", DataFlow: "password/crypto lifecycle -> password hashing sink via POST /login", DataFlowEvidence: "not-applicable: finding is about source/lifecycle material rather than request source-to-sink flow", DataFlowConfidence: "not-applicable", Preconditions: "no extra preconditions visible beyond the candidate source/sink path", CounterEvidence: "none observed in bounded local context", ValidationRubric: "source=present; control=present; sink=present; dataflow=not-applicable; counterevidence=none_observed", ValidationMethod: "static-code-understanding", ValidationDisposition: "reportable-static-candidate", Exploitability: "candidate", AttackPath: "attacker reaches login hashing path", Confidence: "high", SeverityRationale: "Pattern severity is medium for CWE-327."},
 		{File: "internal/auth/login.go", Line: 7, RuleID: "hardcoded-aws-access-key", CWE: "CWE-798", Severity: shared.SeverityCritical, Title: "Hardcoded AWS access key id", Description: "rotate"},
-		{File: "x.go", Line: 1, RuleID: "weak-hash-sha1", CWE: "CWE-327", Severity: shared.SeverityLow, Title: "low", Description: "x"}, // below threshold
+		{File: "x.go", Line: 1, RuleID: "weak-hash-sha1", CWE: "CWE-327", Severity: shared.SeverityLow, Title: "low", Description: "x"},         // below threshold
+		{File: "y.go", Line: 2, RuleID: "go:example-rule", CWE: "CWE-89", Severity: shared.SeverityHigh, Title: "colon test", Description: "y"}, // colon-containing rule
 	}
 	got := buildFindings("eng1", res, now, shared.SeverityMedium, false, raws)
-	if len(got) != 2 { // Medium + Critical kept; Low filtered by the threshold
-		t.Fatalf("want 2 SAST findings (Low filtered), got %d: %+v", len(got), got)
+	if len(got) != 3 { // Medium + Critical + High kept; Low filtered by the threshold
+		t.Fatalf("want 3 SAST findings (Low filtered), got %d: %+v", len(got), got)
 	}
 	var md5 *finding.Finding
 	for i := range got {
@@ -193,6 +194,20 @@ func TestBuildFindingsSAST(t *testing.T) {
 	}
 	if md5.RuleKey != "weak-hash-md5" {
 		t.Fatalf("SAST finding RuleKey = %q, want 'weak-hash-md5'", md5.RuleKey)
+	}
+
+	// verify the colon-containing finding
+	var colon *finding.Finding
+	for i := range got {
+		if got[i].RuleKey == "go:example-rule" {
+			colon = &got[i]
+		}
+	}
+	if colon == nil {
+		t.Fatalf("missing colon-containing finding")
+	}
+	if colon.DedupKey != "sast:go:example-rule:y.go:2" {
+		t.Fatalf("colon-containing DedupKey wrong: %q", colon.DedupKey)
 	}
 	for _, want := range []string{"AppSec validation envelope", "OWASP/CWE mapping: A04:2025 Cryptographic Failures / CWE-327", "Source: password/crypto lifecycle", "Source evidence:", "Sink/control: password hashing sink", "Sink evidence:", "Control evidence:", "Route middleware:", "Auth evidence:", "Exposure: authenticated application route", "Trust boundary:", "Impact hypothesis:", "Route reachability: POST /login", "Validation receipt: static-code-understanding / reportable-static-candidate", "Preconditions/proof gaps:", "Counterevidence:", "Validation rubric:", "Dataflow:", "Dataflow evidence:", "Dataflow confidence:", "Exploitability validation:", "Attack-path calibration:", "Severity rationale:"} {
 		if !strings.Contains(md5.Description, want) {

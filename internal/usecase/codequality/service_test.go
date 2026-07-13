@@ -34,16 +34,13 @@ func (f fakeMetrics) Complexity(context.Context, string) (measure.ComplexityRepo
 	return f.rep, f.available, nil
 }
 
-func byRule(fs []finding.Finding) map[string]finding.Finding {
-	m := map[string]finding.Finding{}
-	for _, f := range fs {
-		// dedup key is <kind>:<rule>:<file>:<line>; index by rule id (2nd field)
-		parts := strings.SplitN(f.DedupKey, ":", 3)
-		if len(parts) >= 2 {
-			m[parts[1]] = f
+func byRule(findings []finding.Finding, ruleKey string) *finding.Finding {
+	for i := range findings {
+		if findings[i].RuleKey == ruleKey {
+			return &findings[i]
 		}
 	}
-	return m
+	return nil
 }
 
 func TestServiceMapsAndBridges(t *testing.T) {
@@ -64,31 +61,39 @@ func TestServiceMapsAndBridges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
-	m := byRule(fs)
-
-	todo, ok := m["quality-todo-comment"]
-	if !ok || todo.Kind != finding.KindQuality || todo.DedupKey != "quality:quality-todo-comment:a.go:3" {
+	todo := byRule(fs, "quality-todo-comment")
+	if todo == nil || todo.Kind != finding.KindQuality || todo.DedupKey != "quality:quality-todo-comment:a.go:3" {
 		t.Errorf("todo mapping wrong: %+v", todo)
 	}
 	if todo.Class != finding.ClassFirstParty || todo.Status != finding.StatusOpen {
 		t.Errorf("todo class/status wrong: %+v", todo)
 	}
-	for _, f := range fs {
-		if f.RuleKey == "" {
-			t.Errorf("finding %q missing RuleKey", f.DedupKey)
-		}
+	if todo.RuleKey != "quality-todo-comment" {
+		t.Errorf("todo RuleKey = %q", todo.RuleKey)
 	}
-	ec, ok := m["reliability-empty-catch"]
-	if !ok || ec.Kind != finding.KindReliability {
+
+	ec := byRule(fs, "reliability-empty-catch")
+	if ec == nil || ec.Kind != finding.KindReliability {
 		t.Errorf("empty-catch kind wrong: %+v", ec)
 	}
-	dupF, ok := m["quality-duplicated-block"]
-	if !ok || dupF.Kind != finding.KindQuality || !strings.Contains(dupF.Title, "x.go") {
+	if ec.RuleKey != "reliability-empty-catch" {
+		t.Errorf("empty-catch RuleKey = %q", ec.RuleKey)
+	}
+
+	dupF := byRule(fs, "quality-duplicated-block")
+	if dupF == nil || dupF.Kind != finding.KindQuality || !strings.Contains(dupF.Title, "x.go") {
 		t.Errorf("duplication bridge wrong: %+v", dupF)
 	}
-	hc, ok := m["quality-high-complexity"]
-	if !ok || !strings.Contains(hc.Title, "25") {
+	if dupF.RuleKey != "quality-duplicated-block" {
+		t.Errorf("duplication RuleKey = %q", dupF.RuleKey)
+	}
+
+	hc := byRule(fs, "quality-high-complexity")
+	if hc == nil || !strings.Contains(hc.Title, "25") {
 		t.Errorf("complexity bridge should flag the cyclomatic-25 function: %+v", hc)
+	}
+	if hc.RuleKey != "quality-high-complexity" {
+		t.Errorf("complexity RuleKey = %q", hc.RuleKey)
 	}
 	// The cyclomatic-2 function must NOT be flagged.
 	for _, f := range fs {
@@ -117,12 +122,12 @@ func TestBugsBridgeEmitsReliability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
-	m := byRule(fs)
-	unr, ok := m["reliability-unreachable-code"]
-	if !ok || unr.Kind != finding.KindReliability || unr.DedupKey != "reliability:reliability-unreachable-code:a.go:7" {
+	unr := byRule(fs, "reliability-unreachable-code")
+	if unr == nil || unr.Kind != finding.KindReliability || unr.DedupKey != "reliability:reliability-unreachable-code:a.go:7" {
 		t.Errorf("unreachable bug mapping wrong: %+v", unr)
 	}
-	if cc, ok := m["reliability-constant-condition"]; !ok || cc.Kind != finding.KindReliability {
+	cc := byRule(fs, "reliability-constant-condition")
+	if cc == nil || cc.Kind != finding.KindReliability {
 		t.Errorf("constant-condition bug missing/wrong: %+v", cc)
 	}
 	// unavailable detector emits nothing.
@@ -170,11 +175,10 @@ func TestTestScopedInfoSmellsSuppressed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
-	m := byRule(fs)
 	if len(fs) != 2 {
 		t.Fatalf("default should drop the test-scoped info smell, want 2, got %d: %+v", len(fs), fs)
 	}
-	if _, ok := m["reliability-empty-catch"]; !ok {
+	if byRule(fs, "reliability-empty-catch") == nil {
 		t.Errorf("a medium finding in test code must be kept")
 	}
 	// The prod commented-out-code must survive; the test one must not.

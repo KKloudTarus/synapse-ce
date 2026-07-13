@@ -22,12 +22,12 @@ func TestBuildMisconfigFindings(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("want 2 findings (low dropped by threshold), got %d", len(got))
 	}
-	for _, f := range got {
+	for i, f := range got {
 		if f.Kind != finding.KindMisconfig {
 			t.Errorf("finding %q must be Kind=misconfig, got %q", f.Title, f.Kind)
 		}
-		if f.RuleKey == "" {
-			t.Errorf("finding %q must have RuleKey populated", f.Title)
+		if f.RuleKey != raws[i].RuleID {
+			t.Errorf("finding %q must have RuleKey = %q, got %q", f.Title, raws[i].RuleID, f.RuleKey)
 		}
 		if f.Class != finding.ClassFirstParty {
 			t.Errorf("misconfig must be first-party, got %q", f.Class)

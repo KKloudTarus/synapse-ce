@@ -8,12 +8,20 @@ ALTER TABLE findings ADD COLUMN rule_key TEXT NOT NULL DEFAULT '';
 -- The file path (?:(?:[a-zA-Z]:[/\\])?[^:]+) safely handles optional Windows drive letters
 -- without capturing, ensuring colons inside the rule_id are safely matched.
 UPDATE findings
-SET rule_key = COALESCE(
-    substring(dedup_key from '^(?:sast|secret|misconfig|quality|reliability):(.+?):(?:(?:[a-zA-Z]:[/\\])?[^:]+):\d+$'),
-    ''
-)
-WHERE kind IN ('sast', 'secret', 'misconfig', 'quality', 'reliability')
-  AND rule_key = '';
+SET rule_key = split_part(dedup_key, ':', 2)
+WHERE rule_key = ''
+  AND kind::text IN (
+      'sast',
+      'secret',
+      'misconfig',
+      'quality',
+      'reliability'
+  )
+  AND dedup_key ~ (
+      '^'
+      || kind::text
+      || ':[^:[:space:][:cntrl:]]+:.+:[0-9]+$'
+  );
 -- +goose StatementEnd
 
 -- +goose Down

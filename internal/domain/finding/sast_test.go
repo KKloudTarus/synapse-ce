@@ -31,6 +31,9 @@ func TestNewSAST(t *testing.T) {
 	if f.ProposedBy != "" {
 		t.Errorf("ProposedBy must be empty (the gate ran at the judgment layer) – else the projection is re-gated stuck-at-0, got %q", f.ProposedBy)
 	}
+	if f.RuleKey != "taint-sqli" {
+		t.Errorf("RuleKey must match the supplied rule, got %q", f.RuleKey)
+	}
 	// The title is templated from the structured fields (no LLM prose).
 	if want := "Taint: taint-sqli (CWE-89) at app/dao.Find"; f.Title != want {
 		t.Errorf("title must be templated, want %q got %q", want, f.Title)

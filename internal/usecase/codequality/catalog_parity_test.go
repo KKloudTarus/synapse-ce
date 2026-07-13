@@ -2,7 +2,6 @@ package codequality
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
@@ -62,11 +61,11 @@ func TestCatalogParity(t *testing.T) {
 	}
 
 	for _, f := range fs {
-		parts := strings.SplitN(f.DedupKey, ":", 3)
-		if len(parts) < 2 {
+		ruleID := f.RuleKey
+		if ruleID == "" {
+			t.Errorf("Finding missing RuleKey: %s", f.DedupKey)
 			continue
 		}
-		ruleID := parts[1]
 		catRule, ok := catalogMap[ruleID]
 		if !ok {
 			t.Errorf("Rule %s missing from catalog", ruleID)
