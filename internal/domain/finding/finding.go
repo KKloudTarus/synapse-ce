@@ -2,7 +2,9 @@
 package finding
 
 import (
+	"errors"
 	"strings"
+	"unicode"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/verdict"
@@ -17,6 +19,12 @@ const (
 	StatusConfirmed  Status = "confirmed"
 	StatusFalsePos   Status = "false_positive"
 	StatusRemediated Status = "remediated"
+)
+
+var (
+	ErrRuleKeyRequired  = errors.New("rule key is required")
+	ErrRuleKeyForbidden = errors.New("rule key is not allowed")
+	ErrRuleKeyInvalid   = errors.New("rule key is invalid")
 )
 
 // Finding classes: third-party findings are actionable; first-party
@@ -61,6 +69,15 @@ func (k Kind) Valid() bool {
 	return false
 }
 
+// IsRuleBased reports whether k is a kind that requires a catalog rule key.
+func (k Kind) IsRuleBased() bool {
+	switch k {
+	case KindSAST, KindSecret, KindMisconfig, KindQuality, KindReliability:
+		return true
+	}
+	return false
+}
+
 // Valid reports whether s is a known triage status.
 func (s Status) Valid() bool {
 	switch s {
@@ -85,6 +102,9 @@ type Finding struct {
 	// manual); it drives promotion gating. Empty is treated as KindSCA for
 	// backward compatibility with legacy rows.
 	Kind Kind
+
+	// RuleKey is the stable catalog rule identifier emitted by the producer.
+	RuleKey string
 
 	// Workflow: the human assignee, and an optimistic-concurrency version that
 	// Kanban/status/assignee edits check to prevent lost updates.
@@ -190,4 +210,27 @@ func Publishable(in []Finding) []Finding {
 		}
 	}
 	return out
+}
+
+// ValidateRuleKey enforces the structural invariant for rule keys: rule-based
+// findings must have a valid key, non-rule findings must have an empty key.
+func (f Finding) ValidateRuleKey() error {
+	if !f.Kind.IsRuleBased() {
+		if f.RuleKey != "" {
+			return ErrRuleKeyForbidden
+		}
+		return nil
+	}
+
+	if f.RuleKey == "" {
+		return ErrRuleKeyRequired
+	}
+
+	for _, r := range f.RuleKey {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return ErrRuleKeyInvalid
+		}
+	}
+
+	return nil
 }

@@ -60,6 +60,7 @@ func NewSAST(id, engagementID shared.ID, in SASTInput, now time.Time) (Finding, 
 		Priority:     priorityForSeverity(sev),
 		Status:       StatusOpen,
 		Kind:         KindSAST,
+		RuleKey:      rule,
 		DedupKey:     "sast:ai:" + anchor,
 		// ProposedBy LEFT EMPTY (the judgment-layer gate already ran) – see the doc above.
 		Version: 1,

@@ -73,6 +73,11 @@ func TestServiceMapsAndBridges(t *testing.T) {
 	if todo.Class != finding.ClassFirstParty || todo.Status != finding.StatusOpen {
 		t.Errorf("todo class/status wrong: %+v", todo)
 	}
+	for _, f := range fs {
+		if f.RuleKey == "" {
+			t.Errorf("finding %q missing RuleKey", f.DedupKey)
+		}
+	}
 	ec, ok := m["reliability-empty-catch"]
 	if !ok || ec.Kind != finding.KindReliability {
 		t.Errorf("empty-catch kind wrong: %+v", ec)

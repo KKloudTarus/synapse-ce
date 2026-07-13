@@ -26,6 +26,9 @@ func TestBuildMisconfigFindings(t *testing.T) {
 		if f.Kind != finding.KindMisconfig {
 			t.Errorf("finding %q must be Kind=misconfig, got %q", f.Title, f.Kind)
 		}
+		if f.RuleKey == "" {
+			t.Errorf("finding %q must have RuleKey populated", f.Title)
+		}
 		if f.Class != finding.ClassFirstParty {
 			t.Errorf("misconfig must be first-party, got %q", f.Class)
 		}

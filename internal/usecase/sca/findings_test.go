@@ -191,6 +191,9 @@ func TestBuildFindingsSAST(t *testing.T) {
 	if md5.Kind != finding.KindSAST || md5.Class != finding.ClassFirstParty || md5.CWE != "CWE-327" || md5.ProposedBy != "" {
 		t.Fatalf("SAST finding fields wrong: %+v", md5)
 	}
+	if md5.RuleKey != "weak-hash-md5" {
+		t.Fatalf("SAST finding RuleKey = %q, want 'weak-hash-md5'", md5.RuleKey)
+	}
 	for _, want := range []string{"AppSec validation envelope", "OWASP/CWE mapping: A04:2025 Cryptographic Failures / CWE-327", "Source: password/crypto lifecycle", "Source evidence:", "Sink/control: password hashing sink", "Sink evidence:", "Control evidence:", "Route middleware:", "Auth evidence:", "Exposure: authenticated application route", "Trust boundary:", "Impact hypothesis:", "Route reachability: POST /login", "Validation receipt: static-code-understanding / reportable-static-candidate", "Preconditions/proof gaps:", "Counterevidence:", "Validation rubric:", "Dataflow:", "Dataflow evidence:", "Dataflow confidence:", "Exploitability validation:", "Attack-path calibration:", "Severity rationale:"} {
 		if !strings.Contains(md5.Description, want) {
 			t.Fatalf("SAST proof summary missing %q from description:\n%s", want, md5.Description)
@@ -207,5 +210,26 @@ func TestBuildFindingsSAST(t *testing.T) {
 	again := buildFindings("eng1", res, now.Add(time.Hour), shared.SeverityMedium, false, raws)
 	if md5.ID != findingID("eng1", md5.DedupKey) || again[0].ID != got[0].ID {
 		t.Error("SAST finding id not deterministic")
+	}
+}
+
+func TestBuildSecretFindings(t *testing.T) {
+	raws := []ports.SecretRawFinding{
+		{File: "main.go", Line: 10, RuleID: "aws-key", Severity: shared.SeverityHigh, Title: "Hardcoded key"},
+	}
+	now := time.Now().UTC()
+	got := buildSecretFindings("eng1", raws, now, shared.SeverityMedium)
+	if len(got) != 1 {
+		t.Fatalf("want 1 secret finding, got %d", len(got))
+	}
+	f := got[0]
+	if f.Kind != finding.KindSecret {
+		t.Errorf("Kind = %q, want %q", f.Kind, finding.KindSecret)
+	}
+	if f.RuleKey != "aws-key" {
+		t.Errorf("RuleKey = %q, want 'aws-key'", f.RuleKey)
+	}
+	if f.DedupKey != "secret:aws-key:main.go:10" {
+		t.Errorf("DedupKey = %q, want 'secret:aws-key:main.go:10'", f.DedupKey)
 	}
 }

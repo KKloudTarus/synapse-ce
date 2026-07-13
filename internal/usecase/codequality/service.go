@@ -184,6 +184,7 @@ func newFinding(kind, ruleID, cwe string, sev shared.Severity, title, desc, file
 		Class:       finding.ClassFirstParty,
 		Status:      finding.StatusOpen,
 		Kind:        k,
+		RuleKey:     ruleID,
 		DedupKey:    dedup,
 	}
 }

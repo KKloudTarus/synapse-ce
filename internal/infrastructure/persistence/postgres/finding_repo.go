@@ -17,7 +17,7 @@ import (
 // findingCols is the SELECT/RETURNING projection scanned by scanFinding.
 const findingCols = `id, engagement_id, title, description, severity, cvss_vector, cwe, status, evidence_score, ` +
 	`COALESCE(dedup_key, ''), kev, risk_score, created_at, updated_at, sources, confidence, class, scope, ` +
-	`reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability`
+	`reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key`
 
 // FindingRepository persists findings to PostgreSQL, deduped per engagement.
 type FindingRepository struct{ pool *pgxpool.Pool }
@@ -34,6 +34,9 @@ var _ ports.FindingRepository = (*FindingRepository)(nil)
 // and created_at – and bumps version (a re-scan IS a concurrent change) – so human
 // triage state is never clobbered.
 func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Finding) error {
+	if err := validateFindingBatch(findings); err != nil {
+		return err
+	}
 	if len(findings) == 0 {
 		return nil
 	}
@@ -48,20 +51,20 @@ func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Findi
 		// tenant-scoped engagement gate; deriving this row's tenant_id from the engagement
 		// is a remaining row-level follow-up and does not affect read isolation today.
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO findings (id, tenant_id, engagement_id, title, description, severity, cvss_vector, cwe, status, evidence_score, dedup_key, kev, risk_score, created_at, updated_at, sources, confidence, class, scope, reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability)
-			 VALUES ($1, '', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+			`INSERT INTO findings (id, tenant_id, engagement_id, title, description, severity, cvss_vector, cwe, status, evidence_score, dedup_key, kev, risk_score, created_at, updated_at, sources, confidence, class, scope, reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key)
+			 VALUES ($1, '', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
 			 ON CONFLICT (engagement_id, dedup_key) WHERE dedup_key IS NOT NULL
 			 DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description,
 			               severity = EXCLUDED.severity, cvss_vector = EXCLUDED.cvss_vector, kev = EXCLUDED.kev, risk_score = EXCLUDED.risk_score,
 			               sources = EXCLUDED.sources, confidence = EXCLUDED.confidence, class = EXCLUDED.class,
 			               scope = EXCLUDED.scope, reachability = EXCLUDED.reachability, impact = EXCLUDED.impact, priority = EXCLUDED.priority,
 			               kind = EXCLUDED.kind, class_reachability = EXCLUDED.class_reachability,
-			               updated_at = EXCLUDED.updated_at`,
+			               rule_key = EXCLUDED.rule_key, updated_at = EXCLUDED.updated_at`,
 			f.ID.String(), f.EngagementID.String(), f.Title, f.Description, string(f.Severity),
 			f.CVSSVector, f.CWE, string(f.Status), f.EvidenceScore, f.DedupKey,
 			f.KEV, f.RiskScore, f.Audit.CreatedAt, f.Audit.UpdatedAt, strings.Join(f.Sources, ","), f.Confidence, classOrDefault(f.Class),
 			scopeOrDefault(f.Scope), reachOrDefault(f.Reachability), f.Impact, priorityOrDefault(f.Priority), kindOrDefault(string(f.Kind)),
-			f.Assignee, versionOrDefault(f.Version), f.ProposedBy, f.ClassReachability); err != nil {
+			f.Assignee, versionOrDefault(f.Version), f.ProposedBy, f.ClassReachability, f.RuleKey); err != nil {
 			return fmt.Errorf("upsert finding: %w", err)
 		}
 	}
@@ -186,7 +189,7 @@ func scanFinding(row rowScanner) (finding.Finding, error) {
 	if err := row.Scan(&id, &eid, &f.Title, &f.Description, &sev, &f.CVSSVector, &f.CWE,
 		&status, &f.EvidenceScore, &dedup, &f.KEV, &f.RiskScore, &f.Audit.CreatedAt, &f.Audit.UpdatedAt,
 		&sources, &f.Confidence, &f.Class, &f.Scope, &f.Reachability, &f.Impact, &f.Priority, &kind,
-		&f.Assignee, &f.Version, &f.ProposedBy, &f.ClassReachability); err != nil {
+		&f.Assignee, &f.Version, &f.ProposedBy, &f.ClassReachability, &f.RuleKey); err != nil {
 		return finding.Finding{}, err
 	}
 	f.ID = shared.ID(id)
@@ -249,4 +252,15 @@ func splitSources(s string) []string {
 		return nil
 	}
 	return strings.Split(s, ",")
+}
+
+// validateFindingBatch asserts domain invariants (like RuleKey constraints) for a
+// batch before writing to the database. An atomic failure prevents partial writes.
+func validateFindingBatch(findings []finding.Finding) error {
+	for _, f := range findings {
+		if err := f.ValidateRuleKey(); err != nil {
+			return fmt.Errorf("finding %s (kind %s): %w", f.DedupKey, f.Kind, err)
+		}
+	}
+	return nil
 }

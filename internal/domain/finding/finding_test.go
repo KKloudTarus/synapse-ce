@@ -106,3 +106,55 @@ func TestMeetsEvidenceBar(t *testing.T) {
 		}
 	}
 }
+
+func TestIsRuleBased(t *testing.T) {
+	for _, k := range []Kind{KindSAST, KindSecret, KindMisconfig, KindQuality, KindReliability} {
+		if !k.IsRuleBased() {
+			t.Errorf("Kind %q should be rule-based", k)
+		}
+	}
+	for _, k := range []Kind{"", KindSCA, KindRecon, KindExploitation, KindManual, KindDAST, KindThreat, KindHypothesis, "unknown"} {
+		if k.IsRuleBased() {
+			t.Errorf("Kind %q should not be rule-based", k)
+		}
+	}
+}
+
+func TestValidateRuleKey(t *testing.T) {
+	cases := []struct {
+		name    string
+		kind    Kind
+		ruleKey string
+		wantErr error
+	}{
+		{"valid sast", KindSAST, "go:sql-injection", nil},
+		{"valid secret", KindSecret, "aws-key", nil},
+		{"valid misconfig", KindMisconfig, "tf.s3.public", nil},
+		{"valid quality", KindQuality, "quality-duplicated-block", nil},
+		{"valid reliability", KindReliability, "reliability-empty-catch", nil},
+		{"empty rule-based", KindSAST, "", ErrRuleKeyRequired},
+		{"empty non-rule", KindSCA, "", nil},
+		{"empty kind (treated as sca)", "", "", nil},
+		{"non-empty sca", KindSCA, "some-key", ErrRuleKeyForbidden},
+		{"non-empty unknown", "unknown", "key", ErrRuleKeyForbidden},
+		{"leading space", KindSAST, " key", ErrRuleKeyInvalid},
+		{"trailing space", KindSAST, "key ", ErrRuleKeyInvalid},
+		{"tab", KindSAST, "my\tkey", ErrRuleKeyInvalid},
+		{"newline", KindSAST, "my\nkey", ErrRuleKeyInvalid},
+		{"unicode space", KindSAST, "my\u2000key", ErrRuleKeyInvalid},
+		{"control", KindSAST, "my\x00key", ErrRuleKeyInvalid},
+		{"hyphen", KindSAST, "my-key", nil},
+		{"underscore", KindSAST, "my_key", nil},
+		{"slash", KindSAST, "my/key", nil},
+		{"dot", KindSAST, "my.key", nil},
+		{"colon future", KindSAST, "go:sql-injection", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := Finding{Kind: c.kind, RuleKey: c.ruleKey}
+			if err := f.ValidateRuleKey(); err != c.wantErr {
+				t.Errorf("Kind %q RuleKey %q: got %v, want %v", c.kind, c.ruleKey, err, c.wantErr)
+			}
+		})
+	}
+}

@@ -211,6 +211,7 @@ func buildFindings(engagementID shared.ID, res *ScanResult, now time.Time, minSe
 			Priority:     sastPriority(sr.Severity),
 			Status:       finding.StatusOpen,
 			Kind:         finding.KindSAST,
+			RuleKey:      sr.RuleID,
 			DedupKey:     dedup,
 			Audit:        shared.Audit{CreatedAt: now, UpdatedAt: now},
 		})
@@ -246,6 +247,7 @@ func buildSecretFindings(engagementID shared.ID, raws []ports.SecretRawFinding, 
 			Priority: sastPriority(sr.Severity),
 			Status:   finding.StatusOpen,
 			Kind:     finding.KindSecret,
+			RuleKey:  sr.RuleID,
 			DedupKey: dedup,
 			Audit:    shared.Audit{CreatedAt: now, UpdatedAt: now},
 		})
@@ -286,6 +288,7 @@ func buildMisconfigFindings(engagementID shared.ID, raws []ports.MisconfigRawFin
 			Priority: sastPriority(mr.Severity),
 			Status:   finding.StatusOpen,
 			Kind:     finding.KindMisconfig,
+			RuleKey:  mr.RuleID,
 			DedupKey: dedup,
 			Audit:    shared.Audit{CreatedAt: now, UpdatedAt: now},
 		})

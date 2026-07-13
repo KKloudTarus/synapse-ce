@@ -101,4 +101,33 @@ func TestFindingRepository(t *testing.T) {
 	if !ranked[0].KEV || ranked[0].RiskScore != 8.0 {
 		t.Errorf("kev/risk_score round-trip failed: KEV=%v risk=%v", ranked[0].KEV, ranked[0].RiskScore)
 	}
+
+	// RuleKey round-trip and validation
+	fRule := finding.Finding{
+		ID: shared.ID("fid-" + randHex(t)), EngagementID: eid, Title: "RuleKey test", Kind: finding.KindSAST,
+		Severity: shared.SeverityMedium, Status: finding.StatusOpen, DedupKey: "sast:my-rule:a.go:1",
+		RuleKey: "my-rule", Audit: shared.Audit{CreatedAt: now, UpdatedAt: now},
+	}
+	if err := repo.Upsert(ctx, []finding.Finding{fRule}); err != nil {
+		t.Fatalf("upsert rulekey finding: %v", err)
+	}
+	ranked, _ = repo.ListByEngagement(ctx, eid)
+	var foundRule *finding.Finding
+	for i := range ranked {
+		if ranked[i].ID == fRule.ID {
+			foundRule = &ranked[i]
+		}
+	}
+	if foundRule == nil || foundRule.RuleKey != "my-rule" {
+		t.Errorf("RuleKey round-trip failed: want my-rule, got %q", foundRule.RuleKey)
+	}
+
+	// Validation rejection on invalid batch
+	badRule := finding.Finding{
+		ID: shared.ID("fid-" + randHex(t)), EngagementID: eid, Kind: finding.KindSAST,
+		DedupKey: "sast:bad", RuleKey: "",
+	}
+	if err := repo.Upsert(ctx, []finding.Finding{badRule}); err == nil {
+		t.Error("expected Upsert to fail atomic validation due to empty RuleKey, but succeeded")
+	}
 }

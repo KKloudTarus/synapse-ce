@@ -28,6 +28,9 @@ var _ ports.FindingRepository = (*FindingRepository)(nil)
 // Upsert inserts or updates findings, deduped by (engagement, dedup key). On
 // update it preserves the existing triage status + created timestamp.
 func (r *FindingRepository) Upsert(_ context.Context, findings []finding.Finding) error {
+	if err := validateFindingBatch(findings); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, f := range findings {
@@ -145,4 +148,15 @@ func (r *FindingRepository) ListPublishableByEngagement(ctx context.Context, eng
 		return nil, err
 	}
 	return finding.Publishable(all), nil
+}
+
+// validateFindingBatch asserts domain invariants (like RuleKey constraints) for a
+// batch before writing to the database. An atomic failure prevents partial writes.
+func validateFindingBatch(findings []finding.Finding) error {
+	for _, f := range findings {
+		if err := f.ValidateRuleKey(); err != nil {
+			return fmt.Errorf("finding %s (kind %s): %w", f.DedupKey, f.Kind, err)
+		}
+	}
+	return nil
 }
