@@ -117,6 +117,8 @@ insecure-randomness-security-context
 insecure-temp-file
 insecure-tls-verify-disabled
 java-access-controller
+java-android-actionbaractivity
+java-android-androidhttpclient
 java-android-asynctask
 java-android-content-query-concat
 java-android-device-id
@@ -124,11 +126,17 @@ java-android-external-storage
 java-android-file-access-from-file
 java-android-fingerprint-manager
 java-android-get-imei
+java-android-getcolor-int
+java-android-getdrawable-int
+java-android-html-fromhtml-legacy
 java-android-js-interface
 java-android-line1-number
+java-android-listactivity
 java-android-loadurl-javascript
 java-android-mixed-content
+java-android-notification-ctor
 java-android-on-activity-result
+java-android-preferenceactivity
 java-android-preferencemanager-default
 java-android-progressdialog
 java-android-rawquery-concat
@@ -136,7 +144,10 @@ java-android-save-password
 java-android-sim-serial
 java-android-ssl-getinsecure
 java-android-start-activity-for-result
+java-android-support-library
+java-android-tabactivity
 java-android-universal-file-access
+java-android-vibrate-long
 java-android-webview-debugging
 java-android-webview-file-access
 java-android-webview-js
@@ -241,6 +252,7 @@ java-date-tolocalestring
 java-date-utc
 java-date-year-month-ctor
 java-dbcp1-import
+java-decimalformat-static
 java-des-keygen
 java-des-keyspec
 java-des-secretkeyfactory
@@ -351,7 +363,9 @@ java-javax-servlet
 java-javax-transaction
 java-javax-validation
 java-javax-websocket
+java-jboss-seam-import
 java-jdbc-get-unicode-stream
+java-jdbc-odbc-bridge-import
 java-jdbctemplate-concat
 java-jdk-activation-import
 java-jdk-applet-import
@@ -392,6 +406,7 @@ java-legacy-stack
 java-literals-first-equals
 java-literals-first-equalsignorecase
 java-log-injection
+java-log-string-concat
 java-log4j1-import
 java-long-literal-lowercase-l
 java-loose-coupling-collection
@@ -444,6 +459,7 @@ java-request-dispatcher-param
 java-response-exception-message
 java-return-in-finally
 java-rhino-evaluate-string
+java-richfaces-import
 java-rsa-no-padding
 java-run-finalization
 java-run-finalizers-on-exit
@@ -476,6 +492,7 @@ java-spring-hibernate-template
 java-spring-mvcmatchers
 java-spring-oauth2-resttemplate
 java-spring-permit-all-requests
+java-spring-redirect-view-concat
 java-spring-resource-server-adapter
 java-spring-webmvc-adapter
 java-spring-websecurity-adapter
