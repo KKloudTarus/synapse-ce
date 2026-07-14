@@ -117,6 +117,7 @@ insecure-randomness-security-context
 insecure-temp-file
 insecure-tls-verify-disabled
 java-access-controller
+java-android-content-query-concat
 java-android-device-id
 java-android-external-storage
 java-android-file-access-from-file
@@ -127,6 +128,7 @@ java-android-mixed-content
 java-android-rawquery-concat
 java-android-save-password
 java-android-sim-serial
+java-android-ssl-getinsecure
 java-android-universal-file-access
 java-android-webview-debugging
 java-android-webview-file-access
@@ -181,6 +183,8 @@ java-catch-error
 java-catch-generic
 java-catch-npe
 java-catch-throwable
+java-character-isjavaletterordigit
+java-character-isspace
 java-cipher-3des
 java-cipher-aes-default-ecb
 java-cipher-arcfour
@@ -263,6 +267,8 @@ java-guava-sha1
 java-guava-supplier
 java-guava-throwables-propagate
 java-guava-tostringhelper
+java-hardcoded-iv
+java-hardcoded-secret-key
 java-hardcoded-tmp-path
 java-header-crlf-param
 java-hessian-input
@@ -284,6 +290,7 @@ java-insecure-random
 java-ioutils-closequietly
 java-jackson-activate-default-typing
 java-jackson-default-typing
+java-jdbc-get-unicode-stream
 java-jdk-activation-import
 java-jdk-applet-import
 java-jdk-corba-import
@@ -402,6 +409,7 @@ java-system-exit
 java-system-load-param
 java-system-out-print
 java-temp-file-insecure
+java-thread-countstackframes
 java-thread-suspend
 java-thread-yield
 java-throw-in-finally
