@@ -322,6 +322,7 @@ js-express-logger
 js-express-req-param
 js-express-res-send-status
 js-express-res-sendfile
+js-for-empty-init-while
 js-foreach-async
 js-global-isnan
 js-implicit-string-coercion
@@ -486,6 +487,18 @@ js-vue-slot-attribute
 js-vue-v-bind-sync
 js-vue-v-html
 js-vue-v-on-native
+js-web-attach-event
+js-web-create-event
+js-web-detach-event
+js-web-document-all
+js-web-execcommand
+js-web-get-prevent-default
+js-web-init-event
+js-web-prefixed-matches
+js-web-prefixed-raf
+js-web-register-element
+js-web-show-modal-dialog
+js-web-window-event
 js-yoda-condition
 jwt
 jwt-hardcoded-secret-or-none
