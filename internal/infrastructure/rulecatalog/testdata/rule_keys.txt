@@ -194,9 +194,11 @@ java-toarray-noarg
 jfrog-token
 js-array-sort-no-compare
 js-ast-empty-function
+js-ast-identical-branches
 js-ast-large-class
 js-ast-long-function
 js-ast-missing-switch-default
+js-ast-return-in-finally
 js-ast-too-many-params
 js-document-cookie-write
 js-dom-xss-outerhtml

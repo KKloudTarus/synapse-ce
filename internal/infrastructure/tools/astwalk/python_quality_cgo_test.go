@@ -454,3 +454,22 @@ func TestQualityForJavaScriptAST(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForJavaScriptASTBatch2(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "b.js", "function pick(found) {\n  if (found) {\n    save();\n  } else {\n    save();\n  }\n}\n"+
+		"function risky() {\n  try {\n    return compute();\n  } finally {\n    return fallback();\n  }\n}\n")
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"js-ast-identical-branches", "js-ast-return-in-finally"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
