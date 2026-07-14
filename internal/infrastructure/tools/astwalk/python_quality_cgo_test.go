@@ -493,3 +493,46 @@ func TestQualityForTooManyReturns(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForJavaASTStructural(t *testing.T) {
+	root := t.TempDir()
+	src := "class Big {\n" +
+		"  int a1; int a2; int a3; int a4; int a5; int a6; int a7; int a8;\n" +
+		"  int a9; int a10; int a11; int a12; int a13; int a14; int a15; int a16;\n" +
+		"  void deep() {\n" +
+		"    if (a) {\n" +
+		"      for (int i = 0; i < n; i++) {\n" +
+		"        while (b) {\n" +
+		"          try {\n" +
+		"            switch (c) { default: break; }\n" +
+		"          } finally { cleanup(); }\n" +
+		"        }\n" +
+		"      }\n" +
+		"    }\n" +
+		"  }\n" +
+		"  void loops() {\n" +
+		"    for (int i = 0; i < n; i++) {\n" +
+		"      for (int j = 0; j < n; j++) {\n" +
+		"        for (int k = 0; k < n; k++) { sum += grid[i][j][k]; }\n" +
+		"      }\n" +
+		"    }\n" +
+		"  }\n" +
+		"  void cond() {\n" +
+		"    if (a && b && c && d && e && f) { accept(); }\n" +
+		"  }\n" +
+		"}\n"
+	writeFile(t, root, "Big.java", src)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"java-ast-too-many-fields", "java-ast-deep-nesting", "java-ast-nested-loop", "java-ast-complex-condition"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}

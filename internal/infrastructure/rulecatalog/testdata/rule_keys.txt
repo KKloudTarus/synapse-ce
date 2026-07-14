@@ -117,7 +117,9 @@ insecure-randomness-security-context
 insecure-temp-file
 insecure-tls-verify-disabled
 java-ast-collapsible-if
+java-ast-complex-condition
 java-ast-constant-condition
+java-ast-deep-nesting
 java-ast-empty-else
 java-ast-empty-if-block
 java-ast-empty-loop-body
@@ -127,8 +129,10 @@ java-ast-if-return-boolean
 java-ast-large-class
 java-ast-long-method
 java-ast-missing-switch-default
+java-ast-nested-loop
 java-ast-nested-ternary
 java-ast-nested-try
+java-ast-too-many-fields
 java-ast-too-many-params
 java-ast-too-many-returns
 java-bigdecimal-double
