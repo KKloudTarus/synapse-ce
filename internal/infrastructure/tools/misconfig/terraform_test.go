@@ -92,6 +92,7 @@ resource "aws_ebs_volume" "v" {
 }
 
 resource "aws_security_group" "sg" {
+  description = "App tier ingress from the load balancer"
   ingress {
     cidr_blocks = ["10.0.0.0/8"]
   }
@@ -101,15 +102,19 @@ resource "aws_security_group" "sg" {
 }
 
 resource "aws_db_instance" "db" {
-  publicly_accessible = false
-  storage_encrypted   = true
-  password            = var.db_password
-  deletion_protection = true
+  publicly_accessible                 = false
+  storage_encrypted                   = true
+  iam_database_authentication_enabled = true
+  password                            = var.db_password
+  deletion_protection                 = true
 }
 
 resource "aws_ecr_repository" "r" {
   name                 = "app"
   image_tag_mutability = "IMMUTABLE"
+  image_scanning_configuration {
+    scan_on_push = true
+  }
   encryption_configuration {
     encryption_type = "KMS"
   }
@@ -562,5 +567,93 @@ func TestTerraformRDSDeletionProtectionOneFindingPerResource(t *testing.T) {
 	got := terraformFindingsByRule(all, "terraform-rds-deletion-protection-disabled")
 	if len(got) != 1 {
 		t.Fatalf("want 1 finding, got %d: %+v", len(got), got)
+	}
+}
+
+func TestTerraformGapPackTriggers(t *testing.T) {
+	// Each new rule must fire on a genuine violation across AWS/Azure/GCP.
+	cases := []struct {
+		name, tf, want string
+	}{
+		{"iam resource wildcard", "resource \"aws_iam_policy\" \"p\" {\n  policy = jsonencode({ Statement = [{ Effect = \"Allow\", Action = \"s3:GetObject\", Resource = \"*\" }] })\n}\n", "terraform-iam-wildcard-resource"},
+		{"wildcard principal", "resource \"aws_sqs_queue_policy\" \"p\" {\n  policy = jsonencode({ Statement = [{ Effect = \"Allow\", Principal = \"*\", Action = \"sqs:SendMessage\" }] })\n}\n", "terraform-wildcard-principal"},
+		{"lambda public", "resource \"aws_lambda_permission\" \"p\" {\n  action        = \"lambda:InvokeFunction\"\n  function_name = \"f\"\n  principal     = \"*\"\n}\n", "terraform-lambda-public"},
+		{"api no auth", "resource \"aws_api_gateway_method\" \"m\" {\n  authorization = \"NONE\"\n}\n", "terraform-api-gateway-no-auth"},
+		{"azure public container", "resource \"azurerm_storage_container\" \"c\" {\n  container_access_type = \"blob\"\n}\n", "terraform-azure-storage-public-container"},
+		{"azure public net", "resource \"azurerm_storage_account\" \"sa\" {\n  public_network_access_enabled = true\n}\n", "terraform-azure-public-network-access"},
+		{"gcp public member", "resource \"google_storage_bucket_iam_member\" \"m\" {\n  member = \"allUsers\"\n}\n", "terraform-gcp-public-iam-member"},
+		{"eks public endpoint", "resource \"aws_eks_cluster\" \"c\" {\n  enabled_cluster_log_types = [\"api\"]\n  vpc_config {\n    endpoint_public_access = true\n  }\n}\n", "terraform-eks-public-endpoint"},
+		{"azure nsg open", "resource \"azurerm_network_security_rule\" \"r\" {\n  source_address_prefix = \"*\"\n}\n", "terraform-azure-nsg-open"},
+		{"iam admin policy", "resource \"aws_iam_role_policy_attachment\" \"a\" {\n  policy_arn = \"arn:aws:iam::aws:policy/AdministratorAccess\"\n}\n", "terraform-iam-admin-policy"},
+		{"rds iam auth", "resource \"aws_db_instance\" \"db\" {\n  storage_encrypted = true\n}\n", "terraform-rds-iam-auth-disabled"},
+		{"gcp public ip", "resource \"google_compute_instance\" \"vm\" {\n  network_interface {\n    access_config {\n    }\n  }\n}\n", "terraform-gcp-compute-public-ip"},
+		{"rds no encryption", "resource \"aws_db_instance\" \"db\" {\n  engine = \"postgres\"\n}\n", "terraform-rds-no-encryption"},
+		{"efs unencrypted", "resource \"aws_efs_file_system\" \"fs\" {\n  creation_token = \"app\"\n}\n", "terraform-efs-unencrypted"},
+		{"sqs unencrypted", "resource \"aws_sqs_queue\" \"q\" {\n  name = \"jobs\"\n}\n", "terraform-sqs-unencrypted"},
+		{"elasticache unencrypted", "resource \"aws_elasticache_replication_group\" \"r\" {\n  replication_group_id = \"c\"\n}\n", "terraform-elasticache-unencrypted"},
+		{"redshift unencrypted", "resource \"aws_redshift_cluster\" \"c\" {\n  cluster_identifier = \"dw\"\n}\n", "terraform-redshift-unencrypted"},
+		{"kinesis unencrypted", "resource \"aws_kinesis_stream\" \"s\" {\n  name = \"e\"\n}\n", "terraform-kinesis-unencrypted"},
+		{"cloudfront http", "resource \"aws_cloudfront_distribution\" \"d\" {\n  default_root_object = \"index.html\"\n  default_cache_behavior {\n    viewer_protocol_policy = \"allow-all\"\n  }\n}\n", "terraform-cloudfront-allow-http"},
+		{"azure no https", "resource \"azurerm_storage_account\" \"sa\" {\n  https_traffic_only_enabled = false\n}\n", "terraform-azure-storage-no-https"},
+		{"azure min tls", "resource \"azurerm_storage_account\" \"sa\" {\n  min_tls_version = \"TLS1_1\"\n}\n", "terraform-azure-storage-min-tls"},
+		{"ecr no scan", "resource \"aws_ecr_repository\" \"r\" {\n  name = \"app\"\n}\n", "terraform-ecr-no-scan"},
+		{"cloudtrail no validation", "resource \"aws_cloudtrail\" \"t\" {\n  is_multi_region_trail = true\n}\n", "terraform-cloudtrail-no-log-validation"},
+		{"cloudtrail not multi region", "resource \"aws_cloudtrail\" \"t\" {\n  enable_log_file_validation = true\n}\n", "terraform-cloudtrail-not-multi-region"},
+		{"lb no access logs", "resource \"aws_lb\" \"lb\" {\n  name = \"app\"\n}\n", "terraform-lb-no-access-logs"},
+		{"apigw no logging", "resource \"aws_api_gateway_stage\" \"s\" {\n  stage_name = \"prod\"\n}\n", "terraform-apigw-no-logging"},
+		{"eks no logging", "resource \"aws_eks_cluster\" \"c\" {\n  name = \"app\"\n}\n", "terraform-eks-no-logging"},
+		{"cloudwatch no retention", "resource \"aws_cloudwatch_log_group\" \"lg\" {\n  kms_key_id = \"k\"\n}\n", "terraform-cloudwatch-no-retention"},
+		{"sg no description", "resource \"aws_security_group\" \"sg\" {\n  name = \"app\"\n}\n", "terraform-sg-no-description"},
+		{"rds no backup", "resource \"aws_db_instance\" \"db\" {\n  storage_encrypted       = true\n  backup_retention_period = 0\n}\n", "terraform-rds-no-backup"},
+		{"sqs no dlq", "resource \"aws_sqs_queue\" \"q\" {\n  sqs_managed_sse_enabled = true\n}\n", "terraform-sqs-no-dlq"},
+		{"lambda no dlq", "resource \"aws_lambda_function\" \"f\" {\n  function_name = \"w\"\n}\n", "terraform-lambda-no-dlq"},
+		{"asg no health check", "resource \"aws_autoscaling_group\" \"asg\" {\n  max_size = 3\n}\n", "terraform-asg-no-health-check"},
+		{"cloudfront no root", "resource \"aws_cloudfront_distribution\" \"d\" {\n  enabled = true\n}\n", "terraform-cloudfront-no-default-root"},
+		{"rds single az", "resource \"aws_db_instance\" \"db\" {\n  storage_encrypted = true\n  multi_az          = false\n}\n", "terraform-rds-no-multi-az"},
+		{"default resource", "resource \"aws_default_vpc\" \"d\" {\n}\n", "terraform-default-resource-managed"},
+		{"local exec", "resource \"null_resource\" \"r\" {\n  provisioner \"local-exec\" {\n    command = \"echo hi\"\n  }\n}\n", "terraform-local-exec-provisioner"},
+		{"remote exec", "resource \"null_resource\" \"r\" {\n  provisioner \"remote-exec\" {\n    inline = [\"ls\"]\n  }\n}\n", "terraform-remote-exec-provisioner"},
+		{"ignore all", "resource \"null_resource\" \"r\" {\n  lifecycle {\n    ignore_changes = all\n  }\n}\n", "terraform-lifecycle-ignore-all"},
+		{"module no version", "module \"vpc\" {\n  source = \"terraform-aws-modules/vpc/aws\"\n}\n", "terraform-module-no-version"},
+		{"module unpinned git", "module \"vpc\" {\n  source = \"git::https://github.com/org/repo.git\"\n}\n", "terraform-module-unpinned-git"},
+		{"kms no rotation", "resource \"aws_kms_key\" \"k\" {\n  description = \"app\"\n}\n", "terraform-kms-no-rotation"},
+		{"instance public ip", "resource \"aws_instance\" \"i\" {\n  associate_public_ip_address = true\n}\n", "terraform-instance-public-ip"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ruleIDs(scan(t, map[string]string{"main.tf": tc.tf}))
+			if _, ok := got[tc.want]; !ok {
+				t.Errorf("expected %s, got %v", tc.want, keys(got))
+			}
+		})
+	}
+}
+
+func TestTerraformGapPackNoFalsePositives(t *testing.T) {
+	// Compliant snippets must NOT trigger the paired rule (low-false-positive guard).
+	cases := []struct {
+		name, tf, notRule string
+	}{
+		{"scoped resource", "resource \"aws_iam_policy\" \"p\" {\n  policy = jsonencode({ Statement = [{ Effect = \"Allow\", Action = \"s3:GetObject\", Resource = \"arn:aws:s3:::b/*\" }] })\n}\n", "terraform-iam-wildcard-resource"},
+		{"lambda scoped principal", "resource \"aws_lambda_permission\" \"p\" {\n  principal = \"s3.amazonaws.com\"\n}\n", "terraform-lambda-public"},
+		{"lambda principal is not iam principal", "resource \"aws_lambda_permission\" \"p\" {\n  principal = \"s3.amazonaws.com\"\n}\n", "terraform-wildcard-principal"},
+		{"module with version", "module \"vpc\" {\n  source  = \"terraform-aws-modules/vpc/aws\"\n  version = \"~> 5.0\"\n}\n", "terraform-module-no-version"},
+		{"git module with ref", "module \"vpc\" {\n  source = \"git::https://github.com/org/repo.git?ref=v1.2.0\"\n}\n", "terraform-module-unpinned-git"},
+		{"local module is fine", "module \"vpc\" {\n  source = \"./modules/vpc\"\n}\n", "terraform-module-no-version"},
+		{"kms rotation on", "resource \"aws_kms_key\" \"k\" {\n  enable_key_rotation = true\n}\n", "terraform-kms-no-rotation"},
+		{"tls 1.2 is fine", "resource \"azurerm_storage_account\" \"sa\" {\n  min_tls_version = \"TLS1_2\"\n}\n", "terraform-azure-storage-min-tls"},
+		{"cloudfront https is fine", "resource \"aws_cloudfront_distribution\" \"d\" {\n  default_root_object = \"index.html\"\n  default_cache_behavior {\n    viewer_protocol_policy = \"redirect-to-https\"\n  }\n}\n", "terraform-cloudfront-allow-http"},
+		{"scoped nsg is fine", "resource \"azurerm_network_security_rule\" \"r\" {\n  source_address_prefix = \"10.0.0.0/16\"\n}\n", "terraform-azure-nsg-open"},
+		{"specific member is fine", "resource \"google_storage_bucket_iam_member\" \"m\" {\n  member = \"user:alice@example.com\"\n}\n", "terraform-gcp-public-iam-member"},
+		{"private instance is fine", "resource \"aws_instance\" \"i\" {\n  associate_public_ip_address = false\n  metadata_options {\n    http_tokens = \"required\"\n  }\n}\n", "terraform-instance-public-ip"},
+		{"apt-target-release style safe pin", "resource \"aws_db_instance\" \"db\" {\n  storage_encrypted       = true\n  backup_retention_period = 7\n}\n", "terraform-rds-no-backup"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ruleIDs(scan(t, map[string]string{"main.tf": tc.tf}))
+			if _, bad := got[tc.notRule]; bad {
+				t.Errorf("%s: must not trigger %q; got %v", tc.name, tc.notRule, keys(got))
+			}
+		})
 	}
 }
