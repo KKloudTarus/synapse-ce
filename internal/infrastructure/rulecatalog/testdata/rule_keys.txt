@@ -292,6 +292,7 @@ js-instanceof-array
 js-jwt-alg-none
 js-jwt-decode-no-verify
 js-keycode-deprecated
+js-legacy-escape
 js-localstorage-sensitive
 js-map-flat
 js-mongo-where
@@ -341,6 +342,8 @@ js-no-void
 js-no-with
 js-parseint-radix
 js-postmessage-wildcard
+js-prefer-array-find
+js-prefer-array-some
 js-prefer-date-now
 js-prefer-exponentiation
 js-prefer-includes
@@ -351,6 +354,8 @@ js-prefer-regex-literal
 js-prefer-rest-params
 js-prefer-spread
 js-prefer-template
+js-prefer-text-content
+js-promise-new-static
 js-proto-assign
 js-proto-constructor-bracket
 js-proto-pollution-bracket
@@ -366,6 +371,7 @@ js-substr-deprecated
 js-symbol-no-description
 js-throw-new-error
 js-tls-reject-unauthorized-env
+js-tofixed-no-digits
 js-trim-left-right
 js-unneeded-ternary
 js-use-isnan
