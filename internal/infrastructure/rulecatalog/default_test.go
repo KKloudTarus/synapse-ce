@@ -64,11 +64,6 @@ func TestDefault_GoldenInventory(t *testing.T) {
 		prev = line
 		expectedKeys[line] = true
 	}
-
-	if len(expectedKeys) != 212 {
-		t.Errorf("Golden file must have exactly 212 rules, found %d", len(expectedKeys))
-	}
-
 	actualRules, err := cat.List(context.Background())
 	if err != nil {
 		t.Fatalf("List() failed: %v", err)

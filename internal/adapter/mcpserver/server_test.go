@@ -107,16 +107,36 @@ func TestMCPToolsList(t *testing.T) {
 	_, out := rpc(t, h, "secret-token", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
 	res, _ := out["result"].(map[string]any)
 	tools, _ := res["tools"].([]any)
-	if len(tools) != 9 { // + SAST/detail/evidence-sufficiency/runtime-verification read-only advisory tools
-		t.Fatalf("expected 9 catalog tools, got %d", len(tools))
+	expected := map[string]bool{
+		agenttools.ToolListFindings:            true,
+		agenttools.ToolGetFindingDetail:        true,
+		agenttools.ToolListSASTValidation:      true,
+		agenttools.ToolPlanRuntimeVerification: true,
+		agenttools.ToolListEvidence:            true,
+		agenttools.ToolVerifyCustody:           true,
+		agenttools.ToolListReconTools:          true,
+		agenttools.ToolStartRecon:              true,
+		agenttools.ToolEvidenceSufficiency:     true,
 	}
-	names := map[string]bool{}
+	actual := make(map[string]bool, len(tools))
 	for _, tt := range tools {
 		m := tt.(map[string]any)
-		names[m["name"].(string)] = true
+		name := m["name"].(string)
+		if actual[name] {
+			t.Errorf("duplicate tool name: %s", name)
+			continue
+		}
+		actual[name] = true
 	}
-	if !names[agenttools.ToolListFindings] || !names[agenttools.ToolGetFindingDetail] || !names[agenttools.ToolListSASTValidation] || !names[agenttools.ToolPlanRuntimeVerification] || !names[agenttools.ToolStartRecon] {
-		t.Errorf("missing expected tools: %v", names)
+	for name := range expected {
+		if !actual[name] {
+			t.Errorf("missing expected tool: %s", name)
+		}
+	}
+	for name := range actual {
+		if !expected[name] {
+			t.Errorf("unexpected tool: %s", name)
+		}
 	}
 }
 

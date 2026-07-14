@@ -24,16 +24,29 @@ func TestCatalogParity(t *testing.T) {
 		catalogMap[string(r.Key)] = r
 	}
 
-	builtin := defaultRules()
-
-	if len(builtin) != 8 {
-		t.Fatalf("Secret scanner must have exactly 8 rules, found %d", len(builtin))
+	expectedCWE := map[string]string{
+		"aws-access-key-id": "CWE-798",
+		"github-token":      "CWE-798",
+		"gitlab-pat":        "CWE-798",
+		"slack-token":       "CWE-798",
+		"google-api-key":    "CWE-798",
+		"private-key":       "CWE-321",
+		"jwt":               "CWE-798",
+		"generic-secret":    "CWE-798",
 	}
-
-	seenInBuiltin := make(map[string]bool)
+	builtin := defaultRules()
+	seenInBuiltin := make(map[string]bool, len(builtin))
 
 	for _, tc := range builtin {
+		if seenInBuiltin[tc.id] {
+			t.Errorf("Duplicate secret scanner rule: %s", tc.id)
+			continue
+		}
 		seenInBuiltin[tc.id] = true
+		if _, ok := expectedCWE[tc.id]; !ok {
+			t.Errorf("Unexpected secret scanner rule: %s", tc.id)
+			continue
+		}
 		catRule, ok := catalogMap[tc.id]
 		if !ok {
 			t.Errorf("Rule %s missing from catalog", tc.id)
@@ -62,17 +75,6 @@ func TestCatalogParity(t *testing.T) {
 		}
 
 		// CWE parity
-		expectedCWE := map[string]string{
-			"aws-access-key-id": "CWE-798",
-			"github-token":      "CWE-798",
-			"gitlab-pat":        "CWE-798",
-			"slack-token":       "CWE-798",
-			"google-api-key":    "CWE-798",
-			"private-key":       "CWE-321",
-			"jwt":               "CWE-798",
-			"generic-secret":    "CWE-798",
-		}
-
 		expected := expectedCWE[tc.id]
 		if expected == "" {
 			t.Errorf("Rule %s has no mapped expected CWE", tc.id)
@@ -88,6 +90,12 @@ func TestCatalogParity(t *testing.T) {
 		}
 		if !foundCWE {
 			t.Errorf("Rule %s CWE mismatch: expected %s, got %v", tc.id, expected, catRule.CWE)
+		}
+	}
+
+	for id := range expectedCWE {
+		if !seenInBuiltin[id] {
+			t.Errorf("Expected secret scanner rule missing: %s", id)
 		}
 	}
 
