@@ -117,10 +117,14 @@ insecure-randomness-security-context
 insecure-temp-file
 insecure-tls-verify-disabled
 java-ast-collapsible-if
+java-ast-constant-condition
+java-ast-empty-else
 java-ast-empty-if-block
+java-ast-empty-loop-body
 java-ast-empty-method
 java-ast-missing-switch-default
 java-ast-nested-try
+java-ast-too-many-params
 java-bigdecimal-double
 java-biginteger-literal
 java-boolean-getboolean

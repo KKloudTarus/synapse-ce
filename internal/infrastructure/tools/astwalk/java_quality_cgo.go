@@ -15,6 +15,10 @@ var javaRules = map[string]pythonRule{
 	"nested-try":      {"quality", "java-ast-nested-try", "", "low", "Nested try statement", "A try nested directly inside another try is hard to follow; extract the inner block into a method."},
 	"empty-if-block":  {"reliability", "java-ast-empty-if-block", "", "low", "Empty if block", "An if with an empty body has no effect and usually signals unfinished or dead code."},
 	"collapsible-if":  {"quality", "java-ast-collapsible-if", "", "low", "Collapsible if statement", "An if whose only statement is another if (with no else) can be merged with && for clarity."},
+	"empty-loop":      {"reliability", "java-ast-empty-loop-body", "", "medium", "Empty loop body", "A loop with an empty body spins doing nothing useful; add the body or remove the loop."},
+	"too-many-params": {"quality", "java-ast-too-many-params", "", "low", "Method has too many parameters", "A long parameter list is hard to call correctly; group related parameters into an object."},
+	"empty-else":      {"reliability", "java-ast-empty-else", "", "low", "Empty else block", "An empty else block is dead code; remove it."},
+	"constant-if":     {"reliability", "java-ast-constant-condition", "", "medium", "Constant if condition", "An if with a literal true/false condition has a dead branch and is usually leftover debugging."},
 }
 
 func javaFinding(key string, n *sitter.Node, rel string) QualityFinding {
@@ -35,6 +39,13 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			if body := n.ChildByFieldName("body"); body != nil && body.Type() == "block" && body.NamedChildCount() == 0 {
 				out = append(out, javaFinding("empty-method", n, rel))
 			}
+			if p := n.ChildByFieldName("parameters"); p != nil && javaParamCount(p) > 7 {
+				out = append(out, javaFinding("too-many-params", n, rel))
+			}
+		case "for_statement", "while_statement", "do_statement", "enhanced_for_statement":
+			if body := n.ChildByFieldName("body"); body != nil && body.Type() == "block" && body.NamedChildCount() == 0 {
+				out = append(out, javaFinding("empty-loop", n, rel))
+			}
 		case "switch_expression", "switch_statement":
 			if !javaSwitchHasDefault(n, src) {
 				out = append(out, javaFinding("missing-default", n, rel))
@@ -50,6 +61,15 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			}
 			if n.ChildByFieldName("alternative") == nil && javaCollapsibleIf(cons) {
 				out = append(out, javaFinding("collapsible-if", n, rel))
+			}
+			if alt := n.ChildByFieldName("alternative"); alt != nil && alt.Type() == "block" && alt.NamedChildCount() == 0 {
+				out = append(out, javaFinding("empty-else", n, rel))
+			}
+			if cond := n.ChildByFieldName("condition"); cond != nil {
+				ct := strings.TrimSpace(cond.Content(src))
+				if ct == "(true)" || ct == "(false)" {
+					out = append(out, javaFinding("constant-if", n, rel))
+				}
 			}
 		}
 		for i := 0; i < int(n.ChildCount()); i++ {
@@ -94,6 +114,18 @@ func javaHasNestedTry(n *sitter.Node) bool {
 		return false
 	}
 	return walk(n)
+}
+
+// javaParamCount counts declared parameters in a formal_parameters node.
+func javaParamCount(params *sitter.Node) int {
+	cnt := 0
+	for i := 0; i < int(params.NamedChildCount()); i++ {
+		switch params.NamedChild(i).Type() {
+		case "formal_parameter", "spread_parameter", "receiver_parameter":
+			cnt++
+		}
+	}
+	return cnt
 }
 
 // javaCollapsibleIf reports whether a then-block's single statement is an if with no else.

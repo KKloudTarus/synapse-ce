@@ -297,3 +297,43 @@ class App {
 		}
 	}
 }
+
+func TestQualityForJavaASTBatch2(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "B.java", `
+class B {
+    void loop(int n) {
+        for (int i = 0; i < n; i++) {
+        }
+    }
+    void many(String host, int port, int timeout, boolean tls, String user, String pass, int retries, int backoff) {
+        connect(host, port);
+    }
+    void guard(boolean ready) {
+        if (ready) {
+            start();
+        } else {
+        }
+        if (true) {
+            run();
+        }
+    }
+}
+`)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{
+		"java-ast-empty-loop-body", "java-ast-too-many-params",
+		"java-ast-empty-else", "java-ast-constant-condition",
+	} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
