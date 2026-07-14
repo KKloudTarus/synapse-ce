@@ -124,6 +124,8 @@ java-ast-empty-else
 java-ast-empty-if-block
 java-ast-empty-loop-body
 java-ast-empty-method
+java-ast-empty-switch
+java-ast-empty-try
 java-ast-high-complexity
 java-ast-identical-branches
 java-ast-if-return-boolean
@@ -138,6 +140,7 @@ java-ast-param-reassign
 java-ast-self-assign
 java-ast-self-comparison
 java-ast-small-switch
+java-ast-switch-fallthrough
 java-ast-switch-many-cases
 java-ast-ternary-boolean
 java-ast-too-many-fields
@@ -164,6 +167,7 @@ java-cipher-rc4
 java-cipher-rsa-default
 java-cipher-rsa-pkcs1
 java-classforname-param
+java-classloader-getresource-param
 java-collection-size-zero
 java-command-exec-concat
 java-cond-assign
@@ -220,6 +224,7 @@ java-jackson-default-typing
 java-jjwt-unsigned
 java-jndi-injection
 java-jwt-signwith-none
+java-ldap-filter-concat
 java-legacy-collection
 java-literals-first-equals
 java-log-injection

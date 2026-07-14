@@ -798,3 +798,26 @@ func TestQualityForJavaASTBehavioral2(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForJavaASTMore(t *testing.T) {
+	root := t.TempDir()
+	src := "class C {\n" +
+		"  void a(int state) {\n    switch (state) {\n    }\n  }\n" +
+		"  void b() {\n    try {\n    } catch (Exception e) {\n      log(e);\n    }\n  }\n" +
+		"  int c(int n) {\n    switch (n) {\n      case 1:\n        one();\n      case 2:\n        two();\n        break;\n      default:\n        return 0;\n    }\n    return -1;\n  }\n" +
+		"}\n"
+	writeFile(t, root, "C.java", src)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"java-ast-empty-switch", "java-ast-empty-try", "java-ast-switch-fallthrough"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}

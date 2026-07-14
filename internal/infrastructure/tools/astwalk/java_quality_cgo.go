@@ -39,6 +39,44 @@ var javaRules = map[string]pythonRule{
 	"small-switch":       {"quality", "java-ast-small-switch", "", "low", "switch with very few cases", "A switch with only one or two cases is clearer as an if/else."},
 	"self-assign":        {"reliability", "java-ast-self-assign", "", "medium", "Self assignment", "Assigning a variable to itself has no effect and is usually a mistake."},
 	"self-compare":       {"reliability", "java-ast-self-comparison", "", "medium", "Self comparison", "Comparing a value to itself is constant and misses the intended operand."},
+	"empty-switch":       {"reliability", "java-ast-empty-switch", "", "low", "Empty switch statement", "A switch with no cases does nothing; remove it or add cases."},
+	"empty-try":          {"reliability", "java-ast-empty-try", "", "low", "Empty try block", "A try with an empty body guards nothing."},
+	"switch-fallthrough": {"reliability", "java-ast-switch-fallthrough", "", "medium", "switch case falls through", "A non-empty case that does not end in break/return/throw/continue falls through to the next case."},
+}
+
+// javaSwitchJumps are statements that terminate a switch case group.
+var javaSwitchJumps = map[string]bool{
+	"break_statement": true, "return_statement": true, "throw_statement": true,
+	"continue_statement": true, "yield_statement": true,
+}
+
+// javaSwitchFallsThrough reports whether a switch has a non-empty case group (other than the last)
+// that does not end in a terminating statement, i.e. it falls through.
+func javaSwitchFallsThrough(n *sitter.Node) bool {
+	body := n.ChildByFieldName("body")
+	if body == nil {
+		return false
+	}
+	var groups []*sitter.Node
+	for i := 0; i < int(body.NamedChildCount()); i++ {
+		if body.NamedChild(i).Type() == "switch_block_statement_group" {
+			groups = append(groups, body.NamedChild(i))
+		}
+	}
+	for gi := 0; gi < len(groups)-1; gi++ {
+		g := groups[gi]
+		if g.NamedChildCount() == 0 {
+			continue
+		}
+		last := g.NamedChild(int(g.NamedChildCount()) - 1)
+		if last.Type() == "switch_label" {
+			continue // labels only: intentional fall-through stacking
+		}
+		if !javaSwitchJumps[last.Type()] {
+			return true
+		}
+	}
+	return false
 }
 
 // javaFuncTypes bound "within this method/lambda" searches.
@@ -171,8 +209,14 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			if javaHasDescendantType(n, "switch_statement") || javaHasDescendantType(n, "switch_expression") {
 				out = append(out, javaFinding("nested-switch", n, rel))
 			}
-			if labels := javaCountByType(n, map[string]bool{"switch_label": true, "switch_rule": true}); labels >= 1 && labels < 3 {
+			switch labels := javaCountByType(n, map[string]bool{"switch_label": true, "switch_rule": true}); {
+			case labels == 0:
+				out = append(out, javaFinding("empty-switch", n, rel))
+			case labels >= 1 && labels < 3:
 				out = append(out, javaFinding("small-switch", n, rel))
+			}
+			if javaSwitchFallsThrough(n) {
+				out = append(out, javaFinding("switch-fallthrough", n, rel))
 			}
 		case "assignment_expression":
 			if op := n.ChildByFieldName("operator"); op != nil && strings.TrimSpace(op.Content(src)) == "=" {
@@ -195,6 +239,9 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 		case "try_statement":
 			if javaHasNestedTry(n) {
 				out = append(out, javaFinding("nested-try", n, rel))
+			}
+			if body := n.ChildByFieldName("body"); body != nil && body.Type() == "block" && body.NamedChildCount() == 0 {
+				out = append(out, javaFinding("empty-try", n, rel))
 			}
 		case "if_statement":
 			cons := n.ChildByFieldName("consequence")
