@@ -126,7 +126,13 @@ if __name__ == "__main__":
     # golden keys
     gp = os.path.join(ROOT, "internal/infrastructure/rulecatalog/testdata/rule_keys.txt")
     PREFIXES = ("js-", "ts-", "java-", "node-")
-    existing = set(l.strip() for l in open(gp) if l.strip() and not l.strip().startswith(PREFIXES))
+
+    def is_generated_line_rule(k):
+        # Strip only the generated line-regex langpack keys; preserve the hand-written
+        # tree-sitter AST keys (java-ast-*, js-ast-*), which are not produced from specs.
+        return k.startswith(PREFIXES) and "-ast-" not in k
+
+    existing = set(l.strip() for l in open(gp) if l.strip() and not is_generated_line_rule(l.strip()))
     keys = existing | set(s["id"] for s in specs)
     open(gp, "w").write("\n".join(sorted(keys)) + "\n")
     by_lang = {}
