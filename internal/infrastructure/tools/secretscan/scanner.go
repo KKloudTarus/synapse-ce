@@ -284,6 +284,193 @@ func defaultRules() []rule {
 			keywords: []string{"eyJ"},
 			re:       regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`),
 		},
+		// ── cloud provider keys ─────────────────────────────────────────────────
+		{
+			id: "aws-secret-access-key", category: "AWS", title: "AWS secret access key", severity: shared.SeverityHigh,
+			keywords: []string{"aws_secret", "AWS_SECRET", "secret_access_key", "SecretAccessKey"},
+			re:       regexp.MustCompile(`(?i)aws_?secret_?access_?key["']?\s*[:=]\s*["']([A-Za-z0-9/+]{40})["']`),
+			group:    1, minEnt: 4.0,
+		},
+		{
+			id: "gcp-service-account-key", category: "GCP", title: "GCP service account key", severity: shared.SeverityHigh,
+			keywords: []string{"service_account"},
+			re:       regexp.MustCompile(`"type"\s*:\s*"service_account"`),
+		},
+		{
+			id: "azure-storage-key", category: "Azure", title: "Azure storage account key", severity: shared.SeverityHigh,
+			keywords: []string{"AccountKey="},
+			re:       regexp.MustCompile(`AccountKey=[A-Za-z0-9+/]{86,88}==`),
+		},
+		// ── VCS / package registry tokens ───────────────────────────────────────
+		{
+			id: "github-fine-grained-pat", category: "GitHub", title: "GitHub fine-grained token", severity: shared.SeverityHigh,
+			keywords: []string{"github_pat_"},
+			re:       regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{22,}\b`),
+		},
+		{
+			id: "npm-token", category: "npm", title: "npm access token", severity: shared.SeverityHigh,
+			keywords: []string{"npm_"},
+			re:       regexp.MustCompile(`\bnpm_[A-Za-z0-9]{36}\b`),
+		},
+		{
+			id: "pypi-token", category: "PyPI", title: "PyPI upload token", severity: shared.SeverityHigh,
+			keywords: []string{"pypi-"},
+			re:       regexp.MustCompile(`\bpypi-[A-Za-z0-9_-]{50,}\b`),
+		},
+		{
+			id: "rubygems-token", category: "RubyGems", title: "RubyGems API key", severity: shared.SeverityHigh,
+			keywords: []string{"rubygems_"},
+			re:       regexp.MustCompile(`\brubygems_[a-f0-9]{48}\b`),
+		},
+		// ── SaaS provider tokens ─────────────────────────────────────────────────
+		{
+			id: "stripe-secret-key", category: "Stripe", title: "Stripe secret key", severity: shared.SeverityHigh,
+			keywords: []string{"sk_live_", "rk_live_"},
+			re:       regexp.MustCompile(`\b(?:sk|rk)_live_[A-Za-z0-9]{20,}\b`),
+		},
+		{
+			id: "twilio-api-key", category: "Twilio", title: "Twilio API key SID", severity: shared.SeverityHigh,
+			keywords: []string{"SK"},
+			re:       regexp.MustCompile(`\bSK[0-9a-fA-F]{32}\b`),
+		},
+		{
+			id: "sendgrid-api-key", category: "SendGrid", title: "SendGrid API key", severity: shared.SeverityHigh,
+			keywords: []string{"SG."},
+			re:       regexp.MustCompile(`\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b`),
+		},
+		{
+			id: "slack-webhook-url", category: "Slack", title: "Slack webhook URL", severity: shared.SeverityMedium,
+			keywords: []string{"hooks.slack.com"},
+			re:       regexp.MustCompile(`https://hooks\.slack\.com/services/[A-Za-z0-9/_+-]{40,}`),
+		},
+		{
+			id: "mailgun-api-key", category: "Mailgun", title: "Mailgun API key", severity: shared.SeverityHigh,
+			keywords: []string{"key-"},
+			re:       regexp.MustCompile(`\bkey-[0-9a-f]{32}\b`),
+		},
+		{
+			id: "mailchimp-api-key", category: "Mailchimp", title: "Mailchimp API key", severity: shared.SeverityHigh,
+			keywords: []string{"-us"},
+			re:       regexp.MustCompile(`\b[0-9a-f]{32}-us[0-9]{1,2}\b`),
+		},
+		{
+			id: "openai-api-key", category: "OpenAI", title: "OpenAI API key", severity: shared.SeverityHigh,
+			keywords: []string{"sk-"},
+			re:       regexp.MustCompile(`\bsk-(?:proj-)?[A-Za-z0-9]{20,}\b`),
+		},
+		{
+			id: "anthropic-api-key", category: "Anthropic", title: "Anthropic API key", severity: shared.SeverityHigh,
+			keywords: []string{"sk-ant-"},
+			re:       regexp.MustCompile(`\bsk-ant-[A-Za-z0-9_-]{20,}\b`),
+		},
+		{
+			id: "digitalocean-token", category: "DigitalOcean", title: "DigitalOcean personal access token", severity: shared.SeverityHigh,
+			keywords: []string{"dop_v1_"},
+			re:       regexp.MustCompile(`\bdop_v1_[a-f0-9]{64}\b`),
+		},
+		{
+			id: "shopify-token", category: "Shopify", title: "Shopify access token", severity: shared.SeverityHigh,
+			keywords: []string{"shpat_", "shpss_", "shpca_", "shppa_"},
+			re:       regexp.MustCompile(`\bshp(?:at|ss|ca|pa)_[a-fA-F0-9]{32}\b`),
+		},
+		{
+			id: "square-token", category: "Square", title: "Square access token", severity: shared.SeverityHigh,
+			keywords: []string{"sq0atp-", "sq0csp-", "EAAA"},
+			re:       regexp.MustCompile(`\b(?:sq0atp-[A-Za-z0-9_-]{22}|sq0csp-[A-Za-z0-9_-]{43}|EAAA[A-Za-z0-9_-]{60,})\b`),
+		},
+		{
+			id: "telegram-bot-token", category: "Telegram", title: "Telegram bot token", severity: shared.SeverityMedium,
+			keywords: []string{":AA"},
+			re:       regexp.MustCompile(`\b[0-9]{8,10}:AA[A-Za-z0-9_-]{33}\b`),
+		},
+		{
+			id: "new-relic-key", category: "NewRelic", title: "New Relic API key", severity: shared.SeverityHigh,
+			keywords: []string{"NRAK-", "NRAA-", "NRJS-", "NRII-", "NRRA-"},
+			re:       regexp.MustCompile(`\bNR(?:AK|AA|JS|II|RA)-[A-Za-z0-9]{27}\b`),
+		},
+		{
+			id: "dynatrace-token", category: "Dynatrace", title: "Dynatrace token", severity: shared.SeverityHigh,
+			keywords: []string{"dt0c01."},
+			re:       regexp.MustCompile(`\bdt0c01\.[A-Z0-9]{24}\.[A-Z0-9]{64}\b`),
+		},
+		{
+			id: "grafana-token", category: "Grafana", title: "Grafana service account token", severity: shared.SeverityHigh,
+			keywords: []string{"glc_", "glsa_"},
+			re:       regexp.MustCompile(`\bgl(?:c|sa)_[A-Za-z0-9_]{32,}\b`),
+		},
+		{
+			id: "planetscale-token", category: "PlanetScale", title: "PlanetScale token", severity: shared.SeverityHigh,
+			keywords: []string{"pscale_pw_", "pscale_tkn_"},
+			re:       regexp.MustCompile(`\bpscale_(?:pw|tkn)_[A-Za-z0-9_-]{32,}\b`),
+		},
+		{
+			id: "doppler-token", category: "Doppler", title: "Doppler token", severity: shared.SeverityHigh,
+			keywords: []string{"dp.pt.", "dp.st.", "dp.ct.", "dp.sa."},
+			re:       regexp.MustCompile(`\bdp\.(?:pt|st|ct|sa|scim|audit)\.[A-Za-z0-9]{40,}\b`),
+		},
+		{
+			id: "postman-api-key", category: "Postman", title: "Postman API key", severity: shared.SeverityHigh,
+			keywords: []string{"PMAK-"},
+			re:       regexp.MustCompile(`\bPMAK-[a-f0-9]{24}-[a-f0-9]{34}\b`),
+		},
+		{
+			id: "huggingface-token", category: "HuggingFace", title: "Hugging Face token", severity: shared.SeverityHigh,
+			keywords: []string{"hf_"},
+			re:       regexp.MustCompile(`\bhf_[A-Za-z0-9]{34}\b`),
+		},
+		{
+			id: "sentry-dsn", category: "Sentry", title: "Sentry DSN with secret", severity: shared.SeverityMedium,
+			keywords: []string{"sentry.io"},
+			re:       regexp.MustCompile(`https://[a-f0-9]{32}(?::[a-f0-9]{32})?@[a-z0-9.-]*sentry\.io/[0-9]+`),
+		},
+		// ── infra / CI tokens ────────────────────────────────────────────────────
+		{
+			id: "vault-token", category: "Vault", title: "HashiCorp Vault token", severity: shared.SeverityHigh,
+			keywords: []string{"hvs.", "hvb."},
+			re:       regexp.MustCompile(`\bhv[sb]\.[A-Za-z0-9_-]{20,}\b`),
+		},
+		{
+			id: "terraform-cloud-token", category: "Terraform", title: "Terraform Cloud API token", severity: shared.SeverityHigh,
+			keywords: []string{".atlasv1."},
+			re:       regexp.MustCompile(`\b[A-Za-z0-9]{14}\.atlasv1\.[A-Za-z0-9_-]{60,}\b`),
+		},
+		{
+			id: "datadog-api-key", category: "Datadog", title: "Datadog API key", severity: shared.SeverityMedium,
+			keywords: []string{"datadog", "Datadog", "DATADOG", "dd_api", "DD_API"},
+			re:       regexp.MustCompile(`(?i)(?:datadog|dd)[_-]?api[_-]?key["']?\s*[:=]\s*["']([a-f0-9]{32})["']`),
+			group:    1, minEnt: 3.0,
+		},
+		// ── connection strings / other private-key formats ──────────────────────
+		{
+			id: "db-connection-string", category: "Database", title: "Database connection string with credentials", severity: shared.SeverityHigh,
+			keywords: []string{"://"},
+			re:       regexp.MustCompile(`\b(?:postgres|postgresql|mysql|mongodb(?:\+srv)?|redis|amqp|mssql)://[^:@\s/"']+:[^@\s/"']{3,}@[^\s"']+`),
+		},
+		{
+			id: "putty-private-key", category: "PrivateKey", title: "PuTTY private key", severity: shared.SeverityCritical,
+			keywords: []string{"PuTTY-User-Key-File"},
+			re:       regexp.MustCompile(`PuTTY-User-Key-File-\d`),
+		},
+		{
+			id: "age-secret-key", category: "Age", title: "age secret key", severity: shared.SeverityHigh,
+			keywords: []string{"AGE-SECRET-KEY-1"},
+			re:       regexp.MustCompile(`AGE-SECRET-KEY-1[0-9A-Z]{58}`),
+		},
+		{
+			id: "databricks-token", category: "Databricks", title: "Databricks personal access token", severity: shared.SeverityHigh,
+			keywords: []string{"dapi"},
+			re:       regexp.MustCompile(`\bdapi[0-9a-f]{32}\b`),
+		},
+		{
+			id: "linear-api-key", category: "Linear", title: "Linear API key", severity: shared.SeverityHigh,
+			keywords: []string{"lin_api_"},
+			re:       regexp.MustCompile(`\blin_api_[A-Za-z0-9]{40}\b`),
+		},
+		{
+			id: "jfrog-token", category: "JFrog", title: "JFrog Artifactory token", severity: shared.SeverityHigh,
+			keywords: []string{"AKCp8"},
+			re:       regexp.MustCompile(`\bAKCp8[A-Za-z0-9]{50,}\b`),
+		},
 		{
 			id: "generic-secret", category: "Generic", title: "Hardcoded secret", severity: shared.SeverityMedium,
 			keywords: []string{"secret", "token", "passwd", "password", "api_key", "apikey", "access_key", "SECRET", "TOKEN", "API_KEY"},
