@@ -25,6 +25,19 @@ var javaRules = map[string]pythonRule{
 	"if-return-bool":     {"quality", "java-ast-if-return-boolean", "", "low", "if returning boolean literals", "if (c) return true; else return false; is just `return c;`."},
 	"large-class":        {"quality", "java-ast-large-class", "", "low", "Class has too many methods", "A class with a very large number of methods likely has too many responsibilities; consider splitting it."},
 	"many-returns":       {"quality", "java-ast-too-many-returns", "", "low", "Method has too many return statements", "A method with many return points is hard to follow; simplify the control flow."},
+	"too-many-fields":    {"quality", "java-ast-too-many-fields", "", "low", "Class has too many fields", "A class with a very large number of fields likely holds too much state; group related fields or split the class."},
+	"deep-nesting":       {"quality", "java-ast-deep-nesting", "", "medium", "Deeply nested control flow", "Control flow nested more than four levels deep is hard to read and test; use guard clauses or extract methods."},
+	"nested-loop":        {"quality", "java-ast-nested-loop", "", "medium", "Deeply nested loops", "Three or more loops nested inside each other are hard to follow and often costly; extract or rethink them."},
+	"complex-condition":  {"quality", "java-ast-complex-condition", "", "low", "Overly complex boolean condition", "A condition combining many && / || operators is hard to reason about; name the sub-conditions."},
+}
+
+// javaControlTypes / javaLoopTypes are the node kinds counted for nesting-depth metrics.
+var javaControlTypes = map[string]bool{
+	"if_statement": true, "for_statement": true, "while_statement": true, "do_statement": true,
+	"enhanced_for_statement": true, "switch_statement": true, "switch_expression": true, "try_statement": true,
+}
+var javaLoopTypes = map[string]bool{
+	"for_statement": true, "while_statement": true, "do_statement": true, "enhanced_for_statement": true,
 }
 
 func javaFinding(key string, n *sitter.Node, rel string) QualityFinding {
@@ -54,6 +67,14 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			if body := n.ChildByFieldName("body"); countReturnsBounded(body, map[string]bool{"method_declaration": true, "lambda_expression": true, "class_declaration": true}) > 6 {
 				out = append(out, javaFinding("many-returns", n, rel))
 			}
+			if body := n.ChildByFieldName("body"); body != nil {
+				if javaMaxDepthByType(body, javaControlTypes) > 4 {
+					out = append(out, javaFinding("deep-nesting", n, rel))
+				}
+				if javaMaxDepthByType(body, javaLoopTypes) >= 3 {
+					out = append(out, javaFinding("nested-loop", n, rel))
+				}
+			}
 		case "ternary_expression":
 			if javaHasDescendantType(n, "ternary_expression") {
 				out = append(out, javaFinding("nested-ternary", n, rel))
@@ -61,6 +82,9 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 		case "for_statement", "while_statement", "do_statement", "enhanced_for_statement":
 			if body := n.ChildByFieldName("body"); body != nil && body.Type() == "block" && body.NamedChildCount() == 0 {
 				out = append(out, javaFinding("empty-loop", n, rel))
+			}
+			if cond := n.ChildByFieldName("condition"); cond != nil && javaCountBoolOps(cond, src) > 4 {
+				out = append(out, javaFinding("complex-condition", n, rel))
 			}
 		case "switch_expression", "switch_statement":
 			if !javaSwitchHasDefault(n, src) {
@@ -86,6 +110,9 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 				if ct == "(true)" || ct == "(false)" {
 					out = append(out, javaFinding("constant-if", n, rel))
 				}
+				if javaCountBoolOps(cond, src) > 4 {
+					out = append(out, javaFinding("complex-condition", n, rel))
+				}
 			}
 			if alt := n.ChildByFieldName("alternative"); alt != nil && alt.Type() == "block" && cons != nil && cons.Type() == "block" {
 				if strings.TrimSpace(cons.Content(src)) == strings.TrimSpace(alt.Content(src)) {
@@ -99,13 +126,20 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 		case "class_declaration":
 			if body := n.ChildByFieldName("body"); body != nil {
 				methods := 0
+				fields := 0
 				for i := 0; i < int(body.NamedChildCount()); i++ {
-					if body.NamedChild(i).Type() == "method_declaration" {
+					switch body.NamedChild(i).Type() {
+					case "method_declaration":
 						methods++
+					case "field_declaration":
+						fields++
 					}
 				}
 				if methods > 20 {
 					out = append(out, javaFinding("large-class", n, rel))
+				}
+				if fields > 15 {
+					out = append(out, javaFinding("too-many-fields", n, rel))
 				}
 			}
 		}
@@ -190,6 +224,37 @@ func javaParamCount(params *sitter.Node) int {
 		}
 	}
 	return cnt
+}
+
+// javaMaxDepthByType returns the maximum nesting depth of nodes whose type is in types within n's
+// subtree (each matching node adds one level). Used for control-flow and loop nesting metrics.
+func javaMaxDepthByType(n *sitter.Node, types map[string]bool) int {
+	best := 0
+	for i := 0; i < int(n.ChildCount()); i++ {
+		if d := javaMaxDepthByType(n.Child(i), types); d > best {
+			best = d
+		}
+	}
+	if types[n.Type()] {
+		return best + 1
+	}
+	return best
+}
+
+// javaCountBoolOps counts the && and || operators in n's subtree (condition complexity).
+func javaCountBoolOps(n *sitter.Node, src []byte) int {
+	count := 0
+	if n.Type() == "binary_expression" {
+		if op := n.ChildByFieldName("operator"); op != nil {
+			if t := op.Content(src); t == "&&" || t == "||" {
+				count++
+			}
+		}
+	}
+	for i := 0; i < int(n.ChildCount()); i++ {
+		count += javaCountBoolOps(n.Child(i), src)
+	}
+	return count
 }
 
 // javaCollapsibleIf reports whether a then-block's single statement is an if with no else.
