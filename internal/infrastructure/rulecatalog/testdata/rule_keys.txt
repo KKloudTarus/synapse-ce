@@ -276,6 +276,8 @@ js-ast-too-many-returns
 js-ast-unnecessary-else
 js-ast-useless-catch
 js-buffer-constructor
+js-charat-startswith
+js-charcodeat
 js-compare-boolean-literal
 js-cookie-httponly-false
 js-cookie-samesite-none
@@ -296,6 +298,7 @@ js-execscript
 js-foreach-async
 js-global-isnan
 js-implicit-string-coercion
+js-indexof-minus-one
 js-indexof-startswith
 js-inner-html-append
 js-inner-html-assign
@@ -353,6 +356,7 @@ js-no-useless-concat
 js-no-var
 js-no-void
 js-no-with
+js-parentnode-removechild
 js-parseint-radix
 js-postmessage-wildcard
 js-prefer-array-find
@@ -889,10 +893,12 @@ terraform-wildcard-principal
 ts-array-type-generic
 ts-as-any-cast
 ts-ban-boxed-types
+ts-ban-tslint-comment
 ts-explicit-any
 ts-no-empty-interface
 ts-no-inferrable-types
 ts-no-nocheck
+ts-no-this-alias
 ts-non-null-assertion
 ts-prefer-namespace
 ts-triple-slash-reference
