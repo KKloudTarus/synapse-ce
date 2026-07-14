@@ -124,6 +124,7 @@ java-ast-empty-else
 java-ast-empty-if-block
 java-ast-empty-loop-body
 java-ast-empty-method
+java-ast-high-complexity
 java-ast-identical-branches
 java-ast-if-return-boolean
 java-ast-large-class
@@ -132,6 +133,7 @@ java-ast-missing-switch-default
 java-ast-nested-loop
 java-ast-nested-ternary
 java-ast-nested-try
+java-ast-switch-many-cases
 java-ast-too-many-fields
 java-ast-too-many-params
 java-ast-too-many-returns
@@ -250,12 +252,14 @@ js-array-sort-no-compare
 js-ast-complex-condition
 js-ast-deep-nesting
 js-ast-empty-function
+js-ast-high-complexity
 js-ast-identical-branches
 js-ast-large-class
 js-ast-long-function
 js-ast-missing-switch-default
 js-ast-nested-loop
 js-ast-return-in-finally
+js-ast-switch-many-cases
 js-ast-too-many-params
 js-ast-too-many-returns
 js-buffer-constructor
@@ -513,6 +517,7 @@ python-hashlib-md5
 python-hashlib-new-md5
 python-hashlib-new-sha1
 python-hashlib-sha1
+python-high-complexity
 python-is-literal
 python-jinja-autoescape-off
 python-jwt-algorithms-none

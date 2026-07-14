@@ -591,3 +591,23 @@ func TestQualityForPyJsStructural(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForComplexityMetrics(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "C.java", "class C {\n  int complex(int x) {\n    int sum = 0;\n    if (x == 0) sum++;\n    if (x == 1) sum++;\n    if (x == 2) sum++;\n    if (x == 3) sum++;\n    if (x == 4) sum++;\n    if (x == 5) sum++;\n    if (x == 6) sum++;\n    if (x == 7) sum++;\n    if (x == 8) sum++;\n    if (x == 9) sum++;\n    if (x == 10) sum++;\n    if (x == 11) sum++;\n    if (x == 12) sum++;\n    if (x == 13) sum++;\n    if (x == 14) sum++;\n    if (x == 15) sum++;\n    if (x == 16) sum++;\n    if (x == 17) sum++;\n    if (x == 18) sum++;\n    if (x == 19) sum++;\n    return sum;\n  }\n  int many(int status) {\n    switch (status) {\n      case 0: return 0;\n      case 1: return 1;\n      case 2: return 2;\n      case 3: return 3;\n      case 4: return 4;\n      case 5: return 5;\n      case 6: return 6;\n      case 7: return 7;\n      case 8: return 8;\n      case 9: return 9;\n      case 10: return 10;\n      case 11: return 11;\n      case 12: return 12;\n      case 13: return 13;\n      case 14: return 14;\n      case 15: return 15;\n      case 16: return 16;\n      case 17: return 17;\n      case 18: return 18;\n      case 19: return 19;\n      default: return -1;\n    }\n  }\n}\n")
+	writeFile(t, root, "m.js", "function complex(x) {\n  let sum = 0;\n  if (x === 0) sum++;\n  if (x === 1) sum++;\n  if (x === 2) sum++;\n  if (x === 3) sum++;\n  if (x === 4) sum++;\n  if (x === 5) sum++;\n  if (x === 6) sum++;\n  if (x === 7) sum++;\n  if (x === 8) sum++;\n  if (x === 9) sum++;\n  if (x === 10) sum++;\n  if (x === 11) sum++;\n  if (x === 12) sum++;\n  if (x === 13) sum++;\n  if (x === 14) sum++;\n  if (x === 15) sum++;\n  if (x === 16) sum++;\n  if (x === 17) sum++;\n  if (x === 18) sum++;\n  if (x === 19) sum++;\n  return sum;\n}\nfunction many(status) {\n  switch (status) {\n    case 0: return 0;\n    case 1: return 1;\n    case 2: return 2;\n    case 3: return 3;\n    case 4: return 4;\n    case 5: return 5;\n    case 6: return 6;\n    case 7: return 7;\n    case 8: return 8;\n    case 9: return 9;\n    case 10: return 10;\n    case 11: return 11;\n    case 12: return 12;\n    case 13: return 13;\n    case 14: return 14;\n    case 15: return 15;\n    case 16: return 16;\n    case 17: return 17;\n    case 18: return 18;\n    case 19: return 19;\n    default: return -1;\n  }\n}\n")
+	writeFile(t, root, "m.py", "def complex_fn(x):\n    total = 0\n    if x == 0:\n        total += 1\n    if x == 1:\n        total += 1\n    if x == 2:\n        total += 1\n    if x == 3:\n        total += 1\n    if x == 4:\n        total += 1\n    if x == 5:\n        total += 1\n    if x == 6:\n        total += 1\n    if x == 7:\n        total += 1\n    if x == 8:\n        total += 1\n    if x == 9:\n        total += 1\n    if x == 10:\n        total += 1\n    if x == 11:\n        total += 1\n    if x == 12:\n        total += 1\n    if x == 13:\n        total += 1\n    if x == 14:\n        total += 1\n    if x == 15:\n        total += 1\n    if x == 16:\n        total += 1\n    if x == 17:\n        total += 1\n    if x == 18:\n        total += 1\n    if x == 19:\n        total += 1\n    return total\n")
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"java-ast-high-complexity", "java-ast-switch-many-cases", "js-ast-high-complexity", "js-ast-switch-many-cases", "python-high-complexity"} {
+		if !got[rule] {
+			t.Errorf("missing %s", rule)
+		}
+	}
+}

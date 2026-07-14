@@ -29,6 +29,8 @@ var javaRules = map[string]pythonRule{
 	"deep-nesting":       {"quality", "java-ast-deep-nesting", "", "medium", "Deeply nested control flow", "Control flow nested more than four levels deep is hard to read and test; use guard clauses or extract methods."},
 	"nested-loop":        {"quality", "java-ast-nested-loop", "", "medium", "Deeply nested loops", "Three or more loops nested inside each other are hard to follow and often costly; extract or rethink them."},
 	"complex-condition":  {"quality", "java-ast-complex-condition", "", "low", "Overly complex boolean condition", "A condition combining many && / || operators is hard to reason about; name the sub-conditions."},
+	"high-complexity":    {"quality", "java-ast-high-complexity", "", "medium", "Method has high cyclomatic complexity", "A method with many decision points (if/loop/case/catch/&&/||) is hard to test; reduce branching or split it."},
+	"switch-many-cases":  {"quality", "java-ast-switch-many-cases", "", "low", "switch has too many cases", "A switch with a very large number of cases is often better modeled with a map or polymorphism."},
 }
 
 // javaControlTypes / javaLoopTypes are the node kinds counted for nesting-depth metrics.
@@ -74,6 +76,9 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 				if javaMaxDepthByType(body, javaLoopTypes) >= 3 {
 					out = append(out, javaFinding("nested-loop", n, rel))
 				}
+				if javaComplexity(body, src) > 15 {
+					out = append(out, javaFinding("high-complexity", n, rel))
+				}
 			}
 		case "ternary_expression":
 			if javaHasDescendantType(n, "ternary_expression") {
@@ -89,6 +94,9 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 		case "switch_expression", "switch_statement":
 			if !javaSwitchHasDefault(n, src) {
 				out = append(out, javaFinding("missing-default", n, rel))
+			}
+			if javaCountByType(n, map[string]bool{"switch_label": true, "switch_rule": true}) > 15 {
+				out = append(out, javaFinding("switch-many-cases", n, rel))
 			}
 		case "try_statement":
 			if javaHasNestedTry(n) {
@@ -255,6 +263,38 @@ func javaCountBoolOps(n *sitter.Node, src []byte) int {
 		count += javaCountBoolOps(n.Child(i), src)
 	}
 	return count
+}
+
+// javaCountByType returns the total number of nodes in n's subtree whose type is in types.
+func javaCountByType(n *sitter.Node, types map[string]bool) int {
+	count := 0
+	if types[n.Type()] {
+		count++
+	}
+	for i := 0; i < int(n.ChildCount()); i++ {
+		count += javaCountByType(n.Child(i), types)
+	}
+	return count
+}
+
+// javaComplexity approximates cyclomatic complexity by counting decision points in n's subtree.
+func javaComplexity(n *sitter.Node, src []byte) int {
+	c := 0
+	switch n.Type() {
+	case "if_statement", "for_statement", "while_statement", "do_statement", "enhanced_for_statement",
+		"catch_clause", "ternary_expression", "switch_label", "switch_rule":
+		c++
+	case "binary_expression":
+		if op := n.ChildByFieldName("operator"); op != nil {
+			if t := op.Content(src); t == "&&" || t == "||" {
+				c++
+			}
+		}
+	}
+	for i := 0; i < int(n.ChildCount()); i++ {
+		c += javaComplexity(n.Child(i), src)
+	}
+	return c
 }
 
 // javaCollapsibleIf reports whether a then-block's single statement is an if with no else.

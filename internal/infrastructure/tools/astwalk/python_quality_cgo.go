@@ -56,6 +56,7 @@ var pythonRules = map[string]pythonRule{
 	"deep-nesting":       {"quality", "python-deep-nesting", "", "medium", "Deeply nested control flow", "Control flow nested more than four levels deep is hard to read and test; use guard clauses or extract functions."},
 	"nested-loop":        {"quality", "python-nested-loop", "", "medium", "Deeply nested loops", "Three or more loops nested inside each other are hard to follow and often costly; extract or rethink them."},
 	"complex-condition":  {"quality", "python-complex-condition", "", "low", "Overly complex boolean condition", "A condition combining many and/or operators is hard to reason about; name the sub-conditions."},
+	"high-complexity":    {"quality", "python-high-complexity", "", "medium", "Function has high cyclomatic complexity", "A function with many decision points (if/elif/loop/except/and/or) is hard to test; reduce branching or split it."},
 }
 
 // pyControlTypes / pyLoopTypes are the node kinds counted for nesting-depth metrics.
@@ -92,6 +93,20 @@ func pyCountBoolOps(n *sitter.Node) int {
 		count += pyCountBoolOps(n.Child(i))
 	}
 	return count
+}
+
+// pyComplexity approximates cyclomatic complexity by counting decision points in n's subtree.
+func pyComplexity(n *sitter.Node) int {
+	c := 0
+	switch n.Type() {
+	case "if_statement", "elif_clause", "for_statement", "while_statement", "except_clause",
+		"conditional_expression", "boolean_operator", "case_clause":
+		c++
+	}
+	for i := 0; i < int(n.ChildCount()); i++ {
+		c += pyComplexity(n.Child(i))
+	}
+	return c
 }
 
 // countReturnsBounded counts return_statement nodes under body without descending into nested scopes
@@ -256,6 +271,9 @@ func pythonFindings(root *sitter.Node, src []byte, rel string) []QualityFinding 
 				}
 				if pyMaxDepthByType(body, pyLoopTypes) >= 3 {
 					out = append(out, pythonFinding("nested-loop", n, rel))
+				}
+				if pyComplexity(body) > 15 {
+					out = append(out, pythonFinding("high-complexity", n, rel))
 				}
 			}
 		case "if_statement", "while_statement":

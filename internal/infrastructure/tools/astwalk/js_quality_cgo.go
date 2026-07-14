@@ -21,6 +21,8 @@ var jsRules = map[string]pythonRule{
 	"deep-nesting":       {"quality", "js-ast-deep-nesting", "", "medium", "Deeply nested control flow", "Control flow nested more than four levels deep is hard to read and test; use guard clauses or extract functions."},
 	"nested-loop":        {"quality", "js-ast-nested-loop", "", "medium", "Deeply nested loops", "Three or more loops nested inside each other are hard to follow and often costly; extract or rethink them."},
 	"complex-condition":  {"quality", "js-ast-complex-condition", "", "low", "Overly complex boolean condition", "A condition combining many && / || operators is hard to reason about; name the sub-conditions."},
+	"high-complexity":    {"quality", "js-ast-high-complexity", "", "medium", "Function has high cyclomatic complexity", "A function with many decision points (if/loop/case/catch/&&/||) is hard to test; reduce branching or split it."},
+	"switch-many-cases":  {"quality", "js-ast-switch-many-cases", "", "low", "switch has too many cases", "A switch with a very large number of cases is often better modeled with a map or lookup object."},
 }
 
 // jsControlTypes / jsLoopTypes are the node kinds counted for nesting-depth metrics.
@@ -68,10 +70,16 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 				if jsMaxDepthByType(body, jsLoopTypes) >= 3 {
 					out = append(out, jsFinding("nested-loop", n, rel))
 				}
+				if jsComplexity(body, src) > 15 {
+					out = append(out, jsFinding("high-complexity", n, rel))
+				}
 			}
 		case "switch_statement":
 			if body := n.ChildByFieldName("body"); body != nil && !jsSwitchHasDefault(body) {
 				out = append(out, jsFinding("missing-default", n, rel))
+			}
+			if jsCountByType(n, map[string]bool{"switch_case": true}) > 15 {
+				out = append(out, jsFinding("switch-many-cases", n, rel))
 			}
 		case "class_declaration", "class":
 			if body := n.ChildByFieldName("body"); body != nil {
@@ -139,6 +147,38 @@ func jsCountBoolOps(n *sitter.Node, src []byte) int {
 		count += jsCountBoolOps(n.Child(i), src)
 	}
 	return count
+}
+
+// jsCountByType returns the total number of nodes in n's subtree whose type is in types.
+func jsCountByType(n *sitter.Node, types map[string]bool) int {
+	count := 0
+	if types[n.Type()] {
+		count++
+	}
+	for i := 0; i < int(n.ChildCount()); i++ {
+		count += jsCountByType(n.Child(i), types)
+	}
+	return count
+}
+
+// jsComplexity approximates cyclomatic complexity by counting decision points in n's subtree.
+func jsComplexity(n *sitter.Node, src []byte) int {
+	c := 0
+	switch n.Type() {
+	case "if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement",
+		"catch_clause", "ternary_expression", "switch_case":
+		c++
+	case "binary_expression":
+		if op := n.ChildByFieldName("operator"); op != nil {
+			if t := op.Content(src); t == "&&" || t == "||" {
+				c++
+			}
+		}
+	}
+	for i := 0; i < int(n.ChildCount()); i++ {
+		c += jsComplexity(n.Child(i), src)
+	}
+	return c
 }
 
 // jsHasDescendantType reports whether n has a descendant of the given type (used for finally-return).
