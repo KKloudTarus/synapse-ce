@@ -31,20 +31,27 @@ func scanDockerfile(rel string, data []byte) []ports.MisconfigRawFinding {
 	lastUserRoot := true // no USER yet ⇒ root
 	haveStage := false
 	haveHealthcheck := false
+	cmdCount := 0        // CMD instructions in the current stage (only the last one takes effect)
+	entrypointCount := 0 // ENTRYPOINT instructions in the current stage (only the last one takes effect)
 
 	for _, in := range instrs {
 		switch in.cmd {
 		case "FROM":
-			// New stage: reset the per-stage user state.
+			// New stage: reset the per-stage user + CMD state.
 			haveStage = true
 			lastFromLine = in.line
 			lastUserLine = 0
 			lastUserRoot = true
+			cmdCount = 0
+			entrypointCount = 0
 			img, alias := parseFrom(in.args)
 			if alias != "" {
 				stageNames[strings.ToLower(alias)] = true
 			}
 			if r, ok := checkBaseImageTag(img, stageNames, rel, in.line); ok {
+				out = append(out, r)
+			}
+			if r, ok := checkFromPlatform(in.args, rel, in.line); ok {
 				out = append(out, r)
 			}
 		case "USER":
@@ -54,6 +61,51 @@ func scanDockerfile(rel string, data []byte) []ports.MisconfigRawFinding {
 			if !strings.EqualFold(strings.TrimSpace(in.args), "NONE") {
 				haveHealthcheck = true
 			}
+		case "MAINTAINER":
+			out = append(out, ports.MisconfigRawFinding{
+				File: rel, Line: in.line, RuleID: "dockerfile-maintainer-deprecated",
+				Title: "Deprecated MAINTAINER instruction", Severity: shared.SeverityLow,
+				Resource:    "Dockerfile MAINTAINER",
+				Description: "MAINTAINER is deprecated. Record authorship with a LABEL (for example org.opencontainers.image.authors) so image metadata stays standard and machine-readable.",
+			})
+		case "WORKDIR":
+			if r, ok := checkWorkdirRelative(in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
+		case "EXPOSE":
+			if r, ok := checkExposeSSH(in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
+		case "CMD":
+			cmdCount++
+			if cmdCount > 1 {
+				out = append(out, ports.MisconfigRawFinding{
+					File: rel, Line: in.line, RuleID: "dockerfile-multiple-cmd",
+					Title: "Multiple CMD instructions", Severity: shared.SeverityLow,
+					Resource:    "Dockerfile CMD",
+					Description: "This build stage has more than one CMD; only the last CMD takes effect, so the earlier ones are dead configuration and usually signal a mistake. Keep a single CMD per stage.",
+				})
+			}
+		case "ENTRYPOINT":
+			entrypointCount++
+			if entrypointCount > 1 {
+				out = append(out, ports.MisconfigRawFinding{
+					File: rel, Line: in.line, RuleID: "dockerfile-multiple-entrypoint",
+					Title: "Multiple ENTRYPOINT instructions", Severity: shared.SeverityLow,
+					Resource:    "Dockerfile ENTRYPOINT",
+					Description: "This build stage has more than one ENTRYPOINT; only the last one takes effect, so the earlier ones are dead configuration and usually signal a mistake. Keep a single ENTRYPOINT per stage.",
+				})
+			}
+			if r, ok := checkShellFormEntrypoint(in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
+		case "COPY":
+			if r, ok := checkCopyToRoot("COPY", in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
+			if r, ok := checkKeyMaterialCopy("COPY", in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
 		case "ENV", "ARG":
 			if r, ok := checkSecretEnv(in.cmd, in.args, rel, in.line); ok {
 				out = append(out, r)
@@ -62,6 +114,12 @@ func scanDockerfile(rel string, data []byte) []ports.MisconfigRawFinding {
 			if r, ok := checkAddRemote(in.args, rel, in.line); ok {
 				out = append(out, r)
 			} else if r, ok := checkAddLocal(in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
+			if r, ok := checkCopyToRoot("ADD", in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
+			if r, ok := checkKeyMaterialCopy("ADD", in.args, rel, in.line); ok {
 				out = append(out, r)
 			}
 		case "RUN":
@@ -308,8 +366,73 @@ var (
 	insecureDownloadRe = regexp.MustCompile(`(?i)(?:curl\b[^|&;]*\s(?:-k|--insecure)|wget\b[^|&;]*\s--no-check-certificate)`)
 	aptInstallRe       = regexp.MustCompile(`(?i)\bapt(?:-get)?\s+(?:-[a-z]+\s+)*install\b`)
 	aptCleanRe         = regexp.MustCompile(`(?i)rm\s+-rf?\s+[^\n]*/var/lib/apt/lists`)
+	aptUpgradeRe       = regexp.MustCompile(`(?i)\bapt(?:-get)?\s+(?:-[a-z]+\s+)*(?:dist-upgrade|upgrade)\b`)
+	aptYesRe           = regexp.MustCompile(`(?i)(?:--yes|--assume-yes|(?:^|\s)-[a-z]*y[a-z]*(?:\s|$))`)
+	apkAddRe           = regexp.MustCompile(`(?i)\bapk\s+(?:-[a-z]+\s+)*add\b`)
+	yumInstallRe       = regexp.MustCompile(`(?i)\b(?:yum|dnf|microdnf)\s+(?:-[a-z]+\s+)*install\b`)
+	yumCleanRe         = regexp.MustCompile(`(?i)\b(?:yum|dnf|microdnf)\s+clean\b`)
+	pipInstallRe       = regexp.MustCompile(`(?i)\bpip[0-9]*\s+install\b`)
+	cdInRunRe          = regexp.MustCompile(`(?i)(?:^|&&|;|\|)\s*cd\s+\S`)
+	worldWritableRe    = regexp.MustCompile(`(?i)\bchmod\s+(?:-[a-zA-Z]+\s+)*(?:0?777|a\+rwx|o\+w)\b`)
+	setuidRe           = regexp.MustCompile(`(?i)\bchmod\s+(?:-[a-zA-Z]+\s+)*(?:[2467][0-7]{3}|[ugo]*\+s)\b`)
+	secretInRunRe      = regexp.MustCompile(`(?i)\b(?:password|passwd|secret|token|api[_-]?key|access[_-]?key)\s*=\s*["']?[A-Za-z0-9/+_.-]{4,}`)
+	fromPlatformRe     = regexp.MustCompile(`(?i)--platform=(\S+)`)
+	keyMaterialRe      = regexp.MustCompile(`(?i)(?:^|/)(?:id_rsa|id_dsa|id_ecdsa|id_ed25519)\b|\.(?:pem|key|pfx|p12|ppk)\b`)
 	sudoRe             = regexp.MustCompile(`(?i)(?:^|[|&;]\s*|\s)sudo\s`)
+	// plainHTTPRe matches a curl/wget download whose URL uses cleartext http:// (not https). `[^|&;]*?`
+	// keeps the match inside a single shell command segment; `http://` never matches `https://`.
+	plainHTTPRe = regexp.MustCompile(`(?i)\b(?:curl|wget)\b[^|&;]*?\bhttp://`)
+	// aptCliRe matches the `apt` command (not `apt-get`/`apt-cache`) invoked at a command boundary; after
+	// `apt-get` comes `-`, not whitespace, so that form is excluded.
+	aptCliRe = regexp.MustCompile(`(?i)(?:^|&&|;|\|)\s*apt\s+(?:-[a-zA-Z]+\s+)*(?:install|update|upgrade|full-upgrade|remove|purge)\b`)
+	// yumYesRe matches an assume-yes flag for yum/dnf (-y or --assumeyes).
+	yumYesRe = regexp.MustCompile(`(?i)(?:--assumeyes|(?:^|\s)-[a-zA-Z]*y[a-zA-Z]*(?:\s|$))`)
+	// pkgNameRe matches a bare package operand (a plain name, not a flag, path, URL, or pinned pkg=ver).
+	pkgNameRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._+-]*$`)
+	// runSegRe splits a RUN body into shell command segments on && ; | so a package-install check reasons
+	// about one command at a time.
+	runSegRe = regexp.MustCompile(`&&|[;|]`)
 )
+
+// valueFlags are package-manager flags that consume the FOLLOWING token as their value, so that token
+// is not a package name (avoids flagging, e.g., the release after `apt-get install -t bookworm`).
+var valueFlags = map[string]bool{
+	"-t": true, "--target-release": true, "-o": true, "--option": true,
+	"-c": true, "--config-file": true, "-p": true, "--repository": true,
+	"-X": true, "--virtual": true,
+}
+
+// hasUnpinnedPackage reports whether an install segment names at least one package with no "=version"
+// pin. Flags, flag values, variable refs, and paths/local files are ignored to keep false positives low.
+func hasUnpinnedPackage(seg, keyword string) bool {
+	toks := fields(seg)
+	idx := -1
+	for i, t := range toks {
+		if strings.EqualFold(t, keyword) {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return false
+	}
+	operands := toks[idx+1:]
+	for i, t := range operands {
+		if strings.HasPrefix(t, "-") {
+			continue // a flag
+		}
+		if i > 0 && valueFlags[operands[i-1]] {
+			continue // the value of a preceding flag, not a package
+		}
+		if strings.ContainsAny(t, "=$/") {
+			continue // pinned (=), variable ($), or a path/URL (/)
+		}
+		if pkgNameRe.MatchString(t) {
+			return true // a bare package name with no version pin
+		}
+	}
+	return false
+}
 
 // checkRunStep runs the RUN-instruction checks other than pipe-to-shell: sudo use, TLS-disabling
 // downloads, and apt installs that never prune the package cache.
@@ -339,7 +462,254 @@ func checkRunStep(args, rel string, line int) []ports.MisconfigRawFinding {
 			Description: "An apt/apt-get install in this RUN step does not remove /var/lib/apt/lists afterward, leaving the package index in the image layer (larger image, stale metadata). Append: rm -rf /var/lib/apt/lists/*.",
 		})
 	}
+	if aptInstallRe.MatchString(args) && !strings.Contains(strings.ToLower(args), "--no-install-recommends") {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-apt-no-norecommends",
+			Title: "apt install without --no-install-recommends", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "An apt/apt-get install in this RUN step omits --no-install-recommends, so recommended-but-unneeded packages are pulled in, enlarging the image and its attack surface. Add --no-install-recommends (or set APT::Install-Recommends \"false\").",
+		})
+	}
+	if aptUpgradeRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-apt-upgrade",
+			Title: "apt upgrade in a RUN step", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step runs apt-get upgrade or dist-upgrade, which upgrades base-image packages non-deterministically and defeats reproducible, pinned builds. Update the base image tag instead and pin the packages you install.",
+		})
+	}
+	if aptInstallRe.MatchString(args) && !aptYesRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-apt-no-yes",
+			Title: "apt install without -y", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "An apt/apt-get install runs without -y/--yes, so a non-interactive image build hangs waiting for a confirmation prompt. Add -y (or --assume-yes).",
+		})
+	}
+	if apkAddRe.MatchString(args) && !strings.Contains(strings.ToLower(args), "--no-cache") {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-apk-no-cache",
+			Title: "apk add without --no-cache", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "An apk add omits --no-cache, so the Alpine package index is written into the image layer (larger image, stale metadata). Add --no-cache.",
+		})
+	}
+	if yumInstallRe.MatchString(args) && !yumCleanRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-yum-no-clean",
+			Title: "yum/dnf install without clean", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "A yum/dnf install in this RUN step does not run `clean all` afterward, leaving package caches in the image layer. Append `&& yum clean all` (or `dnf clean all`).",
+		})
+	}
+	if pipInstallRe.MatchString(args) && !strings.Contains(strings.ToLower(args), "--no-cache-dir") {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-pip-no-cache-dir",
+			Title: "pip install without --no-cache-dir", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "A pip install omits --no-cache-dir, so the wheel/download cache is baked into the image layer, enlarging it. Add --no-cache-dir.",
+		})
+	}
+	if cdInRunRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-cd-in-run",
+			Title: "cd used in a RUN step", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step changes directory with `cd`. Each RUN is a fresh shell, so the cd does not persist to later instructions and makes the build fragile. Set the directory with WORKDIR instead.",
+		})
+	}
+	if worldWritableRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-world-writable",
+			Title: "World-writable permissions set", Severity: shared.SeverityMedium,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step grants world-writable permissions (chmod 777 / a+rwx), so any user in the container can modify the file, enabling tampering or privilege abuse. Grant only the permissions the process needs.",
+		})
+	}
+	if setuidRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-setuid-chmod",
+			Title: "setuid/setgid bit set", Severity: shared.SeverityMedium,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step sets a setuid/setgid bit (chmod u+s / 4xxx), so the binary runs with the file owner's privileges regardless of the caller, a classic privilege-escalation primitive. Avoid setuid binaries in images; prefer capabilities or a non-root design.",
+		})
+	}
+	if secretInRunRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-secret-in-run",
+			Title: "Secret literal in a RUN step", Severity: shared.SeverityHigh,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step assigns a credential as a literal value (a password/token/key), so the secret is persisted in an image layer and the build cache. Use BuildKit `--mount=type=secret` or inject the value at runtime instead of baking it in.",
+		})
+	}
+	if plainHTTPRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-plaintext-download",
+			Title: "Download over cleartext HTTP", Severity: shared.SeverityMedium,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step fetches content with curl/wget over cleartext http://, so a network attacker can tamper with the payload in transit (and it is silently trusted at build time). Use https:// and verify a checksum or signature.",
+		})
+	}
+	if aptCliRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-apt-cli",
+			Title: "apt used instead of apt-get", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step invokes the apt CLI, which is intended for interactive use and warns that it has no stable interface for scripts, so its behaviour can change across releases and break the build. Use apt-get (and apt-cache) in image builds.",
+		})
+	}
+	if yumInstallRe.MatchString(args) && !yumYesRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-yum-no-yes",
+			Title: "yum/dnf install without -y", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "A yum/dnf install runs without -y/--assumeyes, so a non-interactive image build hangs waiting for a confirmation prompt. Add -y.",
+		})
+	}
+	for _, seg := range runSegRe.Split(args, -1) {
+		if aptInstallRe.MatchString(seg) && hasUnpinnedPackage(seg, "install") {
+			out = append(out, ports.MisconfigRawFinding{
+				File: rel, Line: line, RuleID: "dockerfile-apt-version-pin",
+				Title: "apt install without a pinned version", Severity: shared.SeverityLow,
+				Resource:    "Dockerfile RUN",
+				Description: "An apt/apt-get install names a package with no pinned version (package=version), so a later build can pull a different, untested release and silently change or break the image. Pin each package, for example `curl=7.88.1-10+deb12u5`.",
+			})
+			break
+		}
+	}
+	for _, seg := range runSegRe.Split(args, -1) {
+		if apkAddRe.MatchString(seg) && hasUnpinnedPackage(seg, "add") {
+			out = append(out, ports.MisconfigRawFinding{
+				File: rel, Line: line, RuleID: "dockerfile-apk-version-pin",
+				Title: "apk add without a pinned version", Severity: shared.SeverityLow,
+				Resource:    "Dockerfile RUN",
+				Description: "An apk add names a package with no pinned version (package=version), so a later build can pull a different, untested release and silently change or break the image. Pin each package, for example `curl=8.5.0-r0`.",
+			})
+			break
+		}
+	}
 	return out
+}
+
+// checkWorkdirRelative flags a WORKDIR set to a relative path. A relative WORKDIR resolves against the
+// previous WORKDIR (or /), so the effective directory is order-dependent and easy to get wrong; an
+// absolute path is unambiguous. A variable-templated ($X) or Windows path is left alone.
+func checkWorkdirRelative(args, rel string, line int) (ports.MisconfigRawFinding, bool) {
+	p := strings.Trim(strings.TrimSpace(args), `"'`)
+	if p == "" || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "$") || strings.HasPrefix(p, `\`) {
+		return ports.MisconfigRawFinding{}, false
+	}
+	if len(p) >= 2 && p[1] == ':' { // Windows drive, e.g. C:\app
+		return ports.MisconfigRawFinding{}, false
+	}
+	return ports.MisconfigRawFinding{
+		File: rel, Line: line, RuleID: "dockerfile-workdir-relative",
+		Title: "WORKDIR uses a relative path", Severity: shared.SeverityLow,
+		Resource:    "Dockerfile WORKDIR " + clip(p),
+		Description: "WORKDIR is a relative path, so the effective working directory depends on the previous WORKDIR and is easy to get wrong across stages or edits. Use an absolute path (for example /app).",
+	}, true
+}
+
+// checkExposeSSH flags EXPOSE 22 (the SSH port). Running an SSH daemon inside an application container
+// is an anti-pattern that adds a remote-login attack surface and credential-management burden.
+func checkExposeSSH(args, rel string, line int) (ports.MisconfigRawFinding, bool) {
+	for _, f := range fields(args) {
+		port := f
+		if i := strings.IndexByte(port, '/'); i >= 0 { // drop /tcp, /udp
+			port = port[:i]
+		}
+		if port == "22" {
+			return ports.MisconfigRawFinding{
+				File: rel, Line: line, RuleID: "dockerfile-expose-ssh",
+				Title: "SSH port (22) exposed", Severity: shared.SeverityMedium,
+				Resource:    "Dockerfile EXPOSE",
+				Description: "The image EXPOSEs port 22, implying an in-container SSH daemon. SSH inside an application container is an anti-pattern that widens the attack surface and adds credential management; use `docker exec` or your orchestrator's tooling for shell access instead.",
+			}, true
+		}
+	}
+	return ports.MisconfigRawFinding{}, false
+}
+
+// checkFromPlatform flags a FROM that hardcodes --platform to a concrete value; a build-arg-templated
+// platform ($TARGETPLATFORM / $BUILDPLATFORM) is fine and left alone.
+func checkFromPlatform(args, rel string, line int) (ports.MisconfigRawFinding, bool) {
+	m := fromPlatformRe.FindStringSubmatch(args)
+	if m == nil || strings.HasPrefix(m[1], "$") {
+		return ports.MisconfigRawFinding{}, false
+	}
+	return ports.MisconfigRawFinding{
+		File: rel, Line: line, RuleID: "dockerfile-from-platform-pinned",
+		Title: "Hardcoded --platform in FROM", Severity: shared.SeverityLow,
+		Resource:    "Dockerfile FROM",
+		Description: "FROM pins a hardcoded --platform (for example linux/amd64), forcing a single architecture and breaking multi-arch builds. Drop the flag and let the builder choose, or use the $TARGETPLATFORM build arg.",
+	}, true
+}
+
+// checkShellFormEntrypoint flags an ENTRYPOINT written in shell form (not a JSON array). Shell form runs
+// the process under `/bin/sh -c` as a child of PID 1, so it never receives SIGTERM/SIGINT and cannot
+// shut down gracefully.
+func checkShellFormEntrypoint(args, rel string, line int) (ports.MisconfigRawFinding, bool) {
+	a := strings.TrimSpace(args)
+	if a == "" || strings.HasPrefix(a, "[") {
+		return ports.MisconfigRawFinding{}, false
+	}
+	return ports.MisconfigRawFinding{
+		File: rel, Line: line, RuleID: "dockerfile-shell-form-entrypoint",
+		Title: "ENTRYPOINT in shell form", Severity: shared.SeverityLow,
+		Resource:    "Dockerfile ENTRYPOINT",
+		Description: "ENTRYPOINT uses shell form, so the process runs under `/bin/sh -c` as a child of PID 1 and does not receive SIGTERM/SIGINT, preventing graceful shutdown. Use the JSON exec form, e.g. ENTRYPOINT [\"app\"].",
+	}, true
+}
+
+// checkCopyToRoot flags a COPY/ADD whose destination is the container root (/); files belong in a
+// dedicated application directory, not scattered across system paths.
+func checkCopyToRoot(cmd, args, rel string, line int) (ports.MisconfigRawFinding, bool) {
+	var toks []string
+	for _, t := range fields(args) {
+		if !strings.HasPrefix(t, "--") {
+			toks = append(toks, t)
+		}
+	}
+	if len(toks) < 2 {
+		return ports.MisconfigRawFinding{}, false
+	}
+	if strings.Trim(toks[len(toks)-1], `"'`) != "/" {
+		return ports.MisconfigRawFinding{}, false
+	}
+	return ports.MisconfigRawFinding{
+		File: rel, Line: line, RuleID: "dockerfile-copy-to-root",
+		Title: "Files copied into the container root", Severity: shared.SeverityLow,
+		Resource:    "Dockerfile " + cmd,
+		Description: "A " + cmd + " writes into the container root (/), scattering files across system directories and risking overwrites of base-image paths. Copy into a dedicated application directory (for example /app) instead.",
+	}, true
+}
+
+// checkKeyMaterialCopy flags a COPY/ADD that brings a private key or certificate file into the image
+// (a baked-in secret recoverable from the layer). A public key (.pub) is skipped.
+func checkKeyMaterialCopy(cmd, args, rel string, line int) (ports.MisconfigRawFinding, bool) {
+	var toks []string
+	for _, t := range fields(args) {
+		if !strings.HasPrefix(t, "--") {
+			toks = append(toks, t)
+		}
+	}
+	if len(toks) < 2 {
+		return ports.MisconfigRawFinding{}, false
+	}
+	for _, s := range toks[:len(toks)-1] { // sources (all but the destination)
+		if strings.Contains(strings.ToLower(s), ".pub") {
+			continue // a public key is not a secret
+		}
+		if keyMaterialRe.MatchString(s) {
+			return ports.MisconfigRawFinding{
+				File: rel, Line: line, RuleID: "dockerfile-private-key-copy",
+				Title: "Private key or certificate copied into image", Severity: shared.SeverityHigh,
+				Resource:    "Dockerfile " + cmd,
+				Description: "A " + cmd + " brings a private key or certificate file (for example id_rsa, *.pem, *.key) into the image, persisting the secret in a layer that anyone who can pull the image can extract. Use a runtime secret or BuildKit `--mount=type=secret` instead.",
+			}, true
+		}
+	}
+	return ports.MisconfigRawFinding{}, false
 }
 
 // envAssignments parses an ENV/ARG argument into (key, value) pairs, handling the modern "K=V K2=V2"

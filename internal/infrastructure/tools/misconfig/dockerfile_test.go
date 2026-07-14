@@ -26,3 +26,129 @@ func TestDockerfileAptNoCleanStillFlagged(t *testing.T) {
 		t.Errorf("apt install without cleanup should still be flagged; got %v", keys(got))
 	}
 }
+
+func TestDockerfileRulePackAdditions(t *testing.T) {
+	cases := []struct {
+		name     string
+		df       string
+		wantRule string
+	}{
+		{"maintainer", "FROM alpine:3.19\nMAINTAINER team@example.com\n", "dockerfile-maintainer-deprecated"},
+		{"workdir relative", "FROM alpine:3.19\nWORKDIR app\n", "dockerfile-workdir-relative"},
+		{"apt no-recommends", "FROM debian:bookworm-slim\nRUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*\n", "dockerfile-apt-no-norecommends"},
+		{"apt upgrade", "FROM debian:bookworm-slim\nRUN apt-get update && apt-get upgrade -y\n", "dockerfile-apt-upgrade"},
+		{"expose ssh", "FROM alpine:3.19\nEXPOSE 22\n", "dockerfile-expose-ssh"},
+		{"multiple cmd", "FROM alpine:3.19\nCMD [\"one\"]\nCMD [\"two\"]\n", "dockerfile-multiple-cmd"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ruleIDs(scan(t, map[string]string{"Dockerfile": tc.df}))
+			if _, ok := got[tc.wantRule]; !ok {
+				t.Errorf("expected %s, got %v", tc.wantRule, keys(got))
+			}
+		})
+	}
+}
+
+func TestDockerfileRulePackNoFalsePositives(t *testing.T) {
+	// A tidy Dockerfile must trigger none of the new rules.
+	df := "FROM debian:bookworm-slim\n" +
+		"LABEL org.opencontainers.image.authors=\"team@example.com\"\n" +
+		"WORKDIR /app\n" +
+		"RUN apt-get update && apt-get install -y --no-install-recommends curl=7.88.1-10+deb12u5 && rm -rf /var/lib/apt/lists/*\n" +
+		"EXPOSE 8080\n" +
+		"USER app\n" +
+		"HEALTHCHECK CMD curl -f http://localhost:8080/ || exit 1\n" +
+		"CMD [\"app\"]\n"
+	got := ruleIDs(scan(t, map[string]string{"Dockerfile": df}))
+	for _, r := range []string{
+		"dockerfile-maintainer-deprecated", "dockerfile-workdir-relative",
+		"dockerfile-apt-no-norecommends", "dockerfile-apt-upgrade",
+		"dockerfile-expose-ssh", "dockerfile-multiple-cmd",
+		"dockerfile-apt-cli", "dockerfile-apt-version-pin",
+	} {
+		if _, bad := got[r]; bad {
+			t.Errorf("clean Dockerfile must not trigger %q; got %v", r, keys(got))
+		}
+	}
+}
+
+func TestDockerfileFullPackNoFalsePositives(t *testing.T) {
+	// A realistic, well-formed Dockerfile must trigger none of the pack's rules.
+	df := "FROM debian:bookworm-slim\n" +
+		"LABEL org.opencontainers.image.authors=\"team@example.com\"\n" +
+		"WORKDIR /app\n" +
+		"RUN apt-get update && apt-get install -y --no-install-recommends curl=7.88.1-10+deb12u5 && rm -rf /var/lib/apt/lists/*\n" +
+		"COPY app.py /app/\n" +
+		"RUN chmod 0755 /app/app.py\n" +
+		"EXPOSE 8080\n" +
+		"USER app\n" +
+		"HEALTHCHECK CMD curl -f http://localhost:8080/ || exit 1\n" +
+		"ENTRYPOINT [\"python\", \"/app/app.py\"]\n"
+	got := ruleIDs(scan(t, map[string]string{"Dockerfile": df}))
+	for _, r := range []string{
+		"dockerfile-multiple-entrypoint", "dockerfile-shell-form-entrypoint", "dockerfile-from-platform-pinned",
+		"dockerfile-copy-to-root", "dockerfile-private-key-copy", "dockerfile-world-writable",
+		"dockerfile-setuid-chmod", "dockerfile-secret-in-run", "dockerfile-apt-no-yes",
+		"dockerfile-apk-no-cache", "dockerfile-yum-no-clean", "dockerfile-pip-no-cache-dir", "dockerfile-cd-in-run",
+		"dockerfile-plaintext-download", "dockerfile-apt-cli", "dockerfile-yum-no-yes",
+		"dockerfile-apt-version-pin", "dockerfile-apk-version-pin",
+	} {
+		if _, bad := got[r]; bad {
+			t.Errorf("clean Dockerfile must not trigger %q; got %v", r, keys(got))
+		}
+	}
+}
+
+func TestDockerfileRulePackGapAdditions(t *testing.T) {
+	// The five rules added to close the coverage gaps must each fire on a genuine violation.
+	cases := []struct {
+		name     string
+		df       string
+		wantRule string
+	}{
+		{"plaintext http download", "FROM alpine:3.19\nRUN wget http://example.com/app.tar.gz -O /tmp/app.tar.gz\n", "dockerfile-plaintext-download"},
+		{"apt cli instead of apt-get", "FROM debian:bookworm-slim\nRUN apt update && apt install -y curl=7.88.1-10+deb12u5\n", "dockerfile-apt-cli"},
+		{"yum install without -y", "FROM fedora:39\nRUN yum install nginx && yum clean all\n", "dockerfile-yum-no-yes"},
+		{"dnf install without -y", "FROM fedora:39\nRUN dnf install nginx && dnf clean all\n", "dockerfile-yum-no-yes"},
+		{"apt unpinned package", "FROM debian:bookworm-slim\nRUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*\n", "dockerfile-apt-version-pin"},
+		{"apk unpinned package", "FROM alpine:3.19\nRUN apk add --no-cache curl\n", "dockerfile-apk-version-pin"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ruleIDs(scan(t, map[string]string{"Dockerfile": tc.df}))
+			if _, ok := got[tc.wantRule]; !ok {
+				t.Errorf("expected %s, got %v", tc.wantRule, keys(got))
+			}
+		})
+	}
+}
+
+func TestDockerfilePackEdgeCaseNoFalsePositives(t *testing.T) {
+	cases := []struct {
+		name    string
+		df      string
+		notRule string
+	}{
+		{"password-stdin is safe", "FROM alpine:3.19\nRUN echo x | docker login -u u --password-stdin\n", "dockerfile-secret-in-run"},
+		{"public key is not a secret", "FROM alpine:3.19\nCOPY id_rsa.pub /home/app/.ssh/id_rsa.pub\n", "dockerfile-private-key-copy"},
+		{"non-setuid chmod is fine", "FROM alpine:3.19\nRUN chmod 0644 /etc/app.conf\n", "dockerfile-setuid-chmod"},
+		{"templated platform is fine", "FROM --platform=$TARGETPLATFORM alpine:3.19\n", "dockerfile-from-platform-pinned"},
+		{"env-var secret ref is fine", "FROM alpine:3.19\nRUN ./deploy --token-file=/run/secrets/token\n", "dockerfile-secret-in-run"},
+		{"https download is fine", "FROM alpine:3.19\nRUN wget https://example.com/app.tar.gz -O /tmp/app.tar.gz\n", "dockerfile-plaintext-download"},
+		{"apt-get is not the apt cli", "FROM debian:bookworm-slim\nRUN apt-get update && apt-get install -y curl=7.88.1-10+deb12u5 && rm -rf /var/lib/apt/lists/*\n", "dockerfile-apt-cli"},
+		{"yum with -y is fine", "FROM fedora:39\nRUN yum install -y nginx && yum clean all\n", "dockerfile-yum-no-yes"},
+		{"pinned apt package is fine", "FROM debian:bookworm-slim\nRUN apt-get install -y --no-install-recommends curl=7.88.1-10+deb12u5 && rm -rf /var/lib/apt/lists/*\n", "dockerfile-apt-version-pin"},
+		{"apt target-release value is not a package", "FROM debian:bookworm-slim\nRUN apt-get install -y -t bookworm-backports curl=7.88.1-10+deb12u5 && rm -rf /var/lib/apt/lists/*\n", "dockerfile-apt-version-pin"},
+		{"pinned apk package is fine", "FROM alpine:3.19\nRUN apk add --no-cache curl=8.5.0-r0\n", "dockerfile-apk-version-pin"},
+		{"apk virtual name is not a package", "FROM alpine:3.19\nRUN apk add --no-cache --virtual build-deps gcc=13.2.1-r0\n", "dockerfile-apk-version-pin"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ruleIDs(scan(t, map[string]string{"Dockerfile": tc.df}))
+			if _, bad := got[tc.notRule]; bad {
+				t.Errorf("%s: must not trigger %q; got %v", tc.name, tc.notRule, keys(got))
+			}
+		})
+	}
+}
