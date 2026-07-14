@@ -18,29 +18,41 @@ type pythonRule struct {
 }
 
 var pythonRules = map[string]pythonRule{
-	"mutable-default": {"reliability", "python-mutable-default-argument", "CWE-398", "high", "Mutable default argument", "A mutable default value is shared by every call. Use None and create the value inside the function."},
-	"bare-except":     {"reliability", "python-bare-except", "CWE-396", "medium", "Bare except catches every exception", "Catching every exception can hide unexpected failures. Catch the expected exception type instead."},
-	"return-finally":  {"reliability", "python-return-in-finally", "CWE-584", "medium", "Control flow in finally suppresses exceptions", "Returning or breaking from finally can discard an active exception or return value."},
-	"duplicate-dict":  {"reliability", "python-duplicate-dict-key", "CWE-561", "medium", "Duplicate dictionary key", "A later dictionary entry overwrites an earlier entry with the same literal key."},
-	"assert":          {"sast", "python-assert-for-validation", "CWE-617", "medium", "Runtime assert used for validation", "Assertions can be disabled at runtime. Raise an explicit exception for input validation."},
-	"none":            {"quality", "python-eq-none", "", "low", "Compare None with is", "Use is None or is not None for singleton identity checks."},
-	"star-import":     {"quality", "python-star-import", "", "low", "Wildcard import", "Wildcard imports hide a module's dependencies and can overwrite names."},
-	"open":            {"quality", "python-open-no-context", "", "low", "File opened without a context manager", "Use with open(...) so the file closes reliably when an error occurs."},
-	"type-eq":         {"quality", "python-type-eq-vs-isinstance", "", "low", "Use isinstance instead of type equality", "isinstance supports subclasses while a direct type comparison does not."},
-	"global":          {"quality", "python-global-statement", "", "low", "Global statement", "Global state makes data flow harder to understand and test."},
-	"args":            {"quality", "python-too-many-args", "", "low", "Function has too many arguments", "A long parameter list makes an API hard to call and evolve. Group related values into an object."},
-	"f-log":           {"quality", "python-f-string-logging", "", "info", "Eager f-string logging", "Use logger parameter formatting so message construction is deferred when the log level is disabled."},
-	"len-zero":        {"quality", "python-len-eq-zero", "", "info", "Compare a collection directly", "Use collection truthiness instead of comparing len(collection) to zero."},
-	"unused-import":   {"quality", "python-unused-import", "", "info", "Unused import", "Remove imports that are not referenced by the module."},
-	"broad-raise":     {"quality", "python-broad-raise", "", "low", "Broad Exception raised", "Raise a specific exception type so callers can handle the failure deliberately."},
+	"mutable-default":  {"reliability", "python-mutable-default-argument", "CWE-398", "high", "Mutable default argument", "A mutable default value is shared by every call. Use None and create the value inside the function."},
+	"bare-except":      {"reliability", "python-bare-except", "CWE-396", "medium", "Bare except catches every exception", "Catching every exception can hide unexpected failures. Catch the expected exception type instead."},
+	"return-finally":   {"reliability", "python-return-in-finally", "CWE-584", "medium", "Control flow in finally suppresses exceptions", "Returning or breaking from finally can discard an active exception or return value."},
+	"duplicate-dict":   {"reliability", "python-duplicate-dict-key", "CWE-561", "medium", "Duplicate dictionary key", "A later dictionary entry overwrites an earlier entry with the same literal key."},
+	"assert":           {"sast", "python-assert-for-validation", "CWE-617", "medium", "Runtime assert used for validation", "Assertions can be disabled at runtime. Raise an explicit exception for input validation."},
+	"none":             {"quality", "python-eq-none", "", "low", "Compare None with is", "Use is None or is not None for singleton identity checks."},
+	"star-import":      {"quality", "python-star-import", "", "low", "Wildcard import", "Wildcard imports hide a module's dependencies and can overwrite names."},
+	"open":             {"quality", "python-open-no-context", "", "low", "File opened without a context manager", "Use with open(...) so the file closes reliably when an error occurs."},
+	"type-eq":          {"quality", "python-type-eq-vs-isinstance", "", "low", "Use isinstance instead of type equality", "isinstance supports subclasses while a direct type comparison does not."},
+	"global":           {"quality", "python-global-statement", "", "low", "Global statement", "Global state makes data flow harder to understand and test."},
+	"args":             {"quality", "python-too-many-args", "", "low", "Function has too many arguments", "A long parameter list makes an API hard to call and evolve. Group related values into an object."},
+	"f-log":            {"quality", "python-f-string-logging", "", "info", "Eager f-string logging", "Use logger parameter formatting so message construction is deferred when the log level is disabled."},
+	"len-zero":         {"quality", "python-len-eq-zero", "", "info", "Compare a collection directly", "Use collection truthiness instead of comparing len(collection) to zero."},
+	"unused-import":    {"quality", "python-unused-import", "", "info", "Unused import", "Remove imports that are not referenced by the module."},
+	"broad-raise":      {"quality", "python-broad-raise", "", "low", "Broad Exception raised", "Raise a specific exception type so callers can handle the failure deliberately."},
+	"is-literal":       {"reliability", "python-is-literal", "CWE-480", "medium", "Identity check against a literal", "`is` compares object identity, not value; comparing to a literal is unreliable (CPython caches only some small values). Use ==."},
+	"broad-except":     {"reliability", "python-broad-except", "CWE-396", "medium", "Broad except clause", "Catching Exception/BaseException traps almost every error, including bugs. Catch the specific exception types the code can recover from."},
+	"lambda-assign":    {"quality", "python-lambda-assignment", "", "low", "Lambda assigned to a variable", "Binding a lambda to a name gives it a worse repr and traceback than a def; use a def statement."},
+	"multi-import":     {"quality", "python-multiple-imports", "", "low", "Multiple imports on one line", "Importing several modules in one statement is harder to read and diff. Put each import on its own line."},
+	"fstring-empty":    {"quality", "python-fstring-no-placeholder", "", "info", "f-string without placeholders", "An f-string with no {…} placeholder is just a string literal; drop the f prefix."},
+	"subprocess-shell": {"sast", "python-subprocess-shell", "CWE-78", "high", "subprocess with shell=True", "shell=True runs the command through a shell, so any input in the command string can inject OS commands. Pass an argument list and shell=False."},
 }
 
 var (
-	noneCompareRE = regexp.MustCompile(`(?s)(==|!=)\s*None\b|\bNone\s*(==|!=)`)
-	typeCompareRE = regexp.MustCompile(`(?s)\btype\s*\([^)]*\)\s*(==|!=)`)
-	lenZeroRE     = regexp.MustCompile(`(?s)\blen\s*\([^)]*\)\s*(==|!=)\s*0\b|\b0\s*(==|!=)\s*len\s*\(`)
-	fStringRE     = regexp.MustCompile(`(?s)\bf["']`)
-	broadRaiseRE  = regexp.MustCompile(`(?s)^\s*raise\s+(Exception|BaseException)\s*(\(|$)`)
+	noneCompareRE     = regexp.MustCompile(`(?s)(==|!=)\s*None\b|\bNone\s*(==|!=)`)
+	typeCompareRE     = regexp.MustCompile(`(?s)\btype\s*\([^)]*\)\s*(==|!=)`)
+	lenZeroRE         = regexp.MustCompile(`(?s)\blen\s*\([^)]*\)\s*(==|!=)\s*0\b|\b0\s*(==|!=)\s*len\s*\(`)
+	fStringRE         = regexp.MustCompile(`(?s)\bf["']`)
+	broadRaiseRE      = regexp.MustCompile(`(?s)^\s*raise\s+(Exception|BaseException)\s*(\(|$)`)
+	isLiteralRE       = regexp.MustCompile(`(?s)\bis\s+(not\s+)?(-?[0-9]|['"]|\[|\()`)
+	broadExceptRE     = regexp.MustCompile(`(?s)^\s*except\s+(Exception|BaseException)\b`)
+	lambdaAssignRE    = regexp.MustCompile(`(?s)^\s*[A-Za-z_]\w*\s*(:[^=]+)?=\s*lambda\b`)
+	multiImportRE     = regexp.MustCompile(`(?s)^\s*import\s+[^\n,]+,`)
+	fStringEmptyRE    = regexp.MustCompile(`(?s)^[rR]?[fF][rR]?["']`)
+	subprocessShellRE = regexp.MustCompile(`(?s)\bshell\s*=\s*True\b`)
 )
 
 // QualityFor parses Python files and returns the precision-biased seed quality rules. It deliberately does
@@ -97,6 +109,16 @@ func pythonFindings(root *sitter.Node, src []byte, rel string) []QualityFinding 
 		case "except_clause":
 			if strings.HasPrefix(strings.TrimSpace(text), "except:") {
 				out = append(out, pythonFinding("bare-except", n, rel))
+			} else if broadExceptRE.MatchString(text) {
+				out = append(out, pythonFinding("broad-except", n, rel))
+			}
+		case "assignment":
+			if lambdaAssignRE.MatchString(text) {
+				out = append(out, pythonFinding("lambda-assign", n, rel))
+			}
+		case "string":
+			if fStringEmptyRE.MatchString(text) && !strings.Contains(text, "{") {
+				out = append(out, pythonFinding("fstring-empty", n, rel))
 			}
 		case "finally_clause":
 			if controlInFinally(n, src) {
@@ -111,6 +133,9 @@ func pythonFindings(root *sitter.Node, src []byte, rel string) []QualityFinding 
 		case "comparison_operator":
 			if noneCompareRE.MatchString(text) {
 				out = append(out, pythonFinding("none", n, rel))
+			}
+			if isLiteralRE.MatchString(text) {
+				out = append(out, pythonFinding("is-literal", n, rel))
 			}
 			if typeCompareRE.MatchString(text) {
 				out = append(out, pythonFinding("type-eq", n, rel))
@@ -128,6 +153,9 @@ func pythonFindings(root *sitter.Node, src []byte, rel string) []QualityFinding 
 				}
 			}
 		case "import_statement":
+			if multiImportRE.MatchString(text) {
+				out = append(out, pythonFinding("multi-import", n, rel))
+			}
 			if !isTypeCheckingImport(n, src) {
 				for name := range importBindings(text) {
 					imports[name] = n
@@ -145,6 +173,9 @@ func pythonFindings(root *sitter.Node, src []byte, rel string) []QualityFinding 
 			}
 			if fStringLog(n, src) {
 				out = append(out, pythonFinding("f-log", n, rel))
+			}
+			if subprocessShellRE.MatchString(text) {
+				out = append(out, pythonFinding("subprocess-shell", n, rel))
 			}
 		}
 		for i := 0; i < int(n.ChildCount()); i++ {

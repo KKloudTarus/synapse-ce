@@ -143,3 +143,66 @@ used.dumps({})
 		t.Errorf("guard corpus produced findings: %+v", res.Findings)
 	}
 }
+
+func TestQualityForPythonExtendedRules(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "extended.py", `
+if status is 404:
+    handle()
+
+try:
+    work()
+except Exception:
+    recover()
+
+area = lambda r: r * r
+import os, sys
+message = f'ready'
+subprocess.run(command, shell=True)
+`)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{
+		"python-is-literal", "python-broad-except", "python-lambda-assignment",
+		"python-multiple-imports", "python-fstring-no-placeholder", "python-subprocess-shell",
+	} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
+
+func TestQualityForPythonExtendedNoFalsePositives(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "clean.py", `
+if value is None:
+    return
+
+try:
+    work()
+except ValueError:
+    recover()
+
+handler = compute
+import os
+message = f'hello {name}'
+subprocess.run(['ls', '-la'])
+`)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	for _, f := range res.Findings {
+		switch f.Rule {
+		case "python-is-literal", "python-broad-except", "python-lambda-assignment",
+			"python-multiple-imports", "python-fstring-no-placeholder", "python-subprocess-shell":
+			t.Errorf("false positive %s on clean code: %+v", f.Rule, f)
+		}
+	}
+}

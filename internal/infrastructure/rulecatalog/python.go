@@ -29,6 +29,12 @@ func pythonRules() []rule.Rule {
 		{"python-len-eq-zero", "Compare a collection directly", "", "if not items:\n    return", "if len(items) == 0:\n    return", "Use the collection's truth value instead of comparing its length to zero.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityInfo},
 		{"python-unused-import", "Unused import", "", "import json\njson.dumps({})", "import json\nreturn 1", "Remove the import or reference the bound name.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityInfo},
 		{"python-broad-raise", "Broad Exception raised", "", "raise ValueError('invalid value')", "raise Exception('invalid value')", "Raise the narrowest exception type callers can handle deliberately.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow},
+		{"python-is-literal", "Identity check against a literal", "CWE-480", "if status == 404:\n    handle()", "if status is 404:\n    handle()", "Use == to compare values; reserve is for None and other singletons.", rule.TypeBug, rule.QualityReliability, shared.SeverityMedium},
+		{"python-broad-except", "Broad except clause", "CWE-396", "try:\n    work()\nexcept ValueError:\n    recover()", "try:\n    work()\nexcept Exception:\n    recover()", "Catch the specific exception types the operation can raise, not Exception/BaseException.", rule.TypeBug, rule.QualityReliability, shared.SeverityMedium},
+		{"python-lambda-assignment", "Lambda assigned to a variable", "", "def area(r):\n    return r * r", "area = lambda r: r * r", "Use a def statement so the function has a proper name in tracebacks.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow},
+		{"python-multiple-imports", "Multiple imports on one line", "", "import os\nimport sys", "import os, sys", "Put each import on its own line.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow},
+		{"python-fstring-no-placeholder", "f-string without placeholders", "", "message = 'ready'", "message = f'ready'", "Drop the f prefix from a string that has no placeholders.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityInfo},
+		{"python-subprocess-shell", "subprocess with shell=True", "CWE-78", "subprocess.run(['ls', '-la'])", "subprocess.run(command, shell=True)", "Pass an argument list and shell=False so shell metacharacters cannot inject commands.", rule.TypeVulnerability, rule.QualitySecurity, shared.SeverityHigh},
 	}
 	rules := make([]rule.Rule, 0, len(specs))
 	for _, s := range specs {
