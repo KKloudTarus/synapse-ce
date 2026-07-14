@@ -40,6 +40,8 @@ func pythonRules() []rule.Rule {
 		{"python-bind-all-interfaces", "Bind to all network interfaces", "CWE-605", "sock.bind(('127.0.0.1', 8080))", "sock.bind(('0.0.0.0', 8080))", "Bind to a specific interface address instead of 0.0.0.0 unless external exposure is intended.", rule.TypeSecurityHotspot, rule.QualitySecurity, shared.SeverityMedium},
 		{"python-mktemp-insecure", "Insecure tempfile.mktemp", "CWE-377", "fd, path = tempfile.mkstemp()", "path = tempfile.mktemp()", "Use tempfile.mkstemp or NamedTemporaryFile, which create the file atomically.", rule.TypeSecurityHotspot, rule.QualitySecurity, shared.SeverityMedium},
 		{"python-yaml-unsafe-load", "Unsafe yaml.load", "CWE-502", "data = yaml.safe_load(text)", "data = yaml.load(text)", "Use yaml.safe_load for untrusted input.", rule.TypeVulnerability, rule.QualitySecurity, shared.SeverityHigh},
+		{"python-return-in-init", "Return value in __init__", "", "def __init__(self):\n    self.value = 0", "def __init__(self):\n    return self.value", "Do not return a value from __init__; it must return None.", rule.TypeBug, rule.QualityReliability, shared.SeverityLow},
+		{"python-too-long-function", "Overly long function", "", "def build():\n    return assemble(parts)", "def build():\n    # more than fifty sequential statements\n    return result", "Split the function into smaller, focused functions.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow},
 	}
 	rules := make([]rule.Rule, 0, len(specs))
 	for _, s := range specs {

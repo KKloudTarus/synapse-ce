@@ -4,6 +4,7 @@ package astwalk
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -331,6 +332,31 @@ class B {
 	for _, rule := range []string{
 		"java-ast-empty-loop-body", "java-ast-too-many-params",
 		"java-ast-empty-else", "java-ast-constant-condition",
+	} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
+
+func TestQualityForAstMetricsAndStructure(t *testing.T) {
+	root := t.TempDir()
+	// >50-statement bodies generated to exercise the length rules.
+	javaStmts := strings.Repeat("        x++;\n", 55)
+	pyStmts := strings.Repeat("    x += 1\n", 55)
+	writeFile(t, root, "M.java", "class M {\n    int tier(boolean base, int score) { return base ? 1 : score > 90 ? 3 : 2; }\n    void big() {\n"+javaStmts+"    }\n}\n")
+	writeFile(t, root, "m.py", "def __init__(self):\n    return self.value\n\ndef big():\n"+pyStmts+"    return 0\n")
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{
+		"java-ast-nested-ternary", "java-ast-long-method",
+		"python-return-in-init", "python-too-long-function",
 	} {
 		if !got[rule] {
 			t.Errorf("missing %s in %+v", rule, res.Findings)

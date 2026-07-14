@@ -19,6 +19,8 @@ var javaRules = map[string]pythonRule{
 	"too-many-params": {"quality", "java-ast-too-many-params", "", "low", "Method has too many parameters", "A long parameter list is hard to call correctly; group related parameters into an object."},
 	"empty-else":      {"reliability", "java-ast-empty-else", "", "low", "Empty else block", "An empty else block is dead code; remove it."},
 	"constant-if":     {"reliability", "java-ast-constant-condition", "", "medium", "Constant if condition", "An if with a literal true/false condition has a dead branch and is usually leftover debugging."},
+	"nested-ternary":  {"quality", "java-ast-nested-ternary", "", "low", "Nested ternary expression", "A ternary inside another ternary is hard to read; use if/else or extract a method."},
+	"long-method":     {"quality", "java-ast-long-method", "", "low", "Overly long method", "A method with a very large number of statements is hard to understand and test; split it into smaller methods."},
 }
 
 func javaFinding(key string, n *sitter.Node, rel string) QualityFinding {
@@ -41,6 +43,13 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			}
 			if p := n.ChildByFieldName("parameters"); p != nil && javaParamCount(p) > 7 {
 				out = append(out, javaFinding("too-many-params", n, rel))
+			}
+			if body := n.ChildByFieldName("body"); body != nil && body.Type() == "block" && int(body.NamedChildCount()) > 50 {
+				out = append(out, javaFinding("long-method", n, rel))
+			}
+		case "ternary_expression":
+			if javaHasDescendantType(n, "ternary_expression") {
+				out = append(out, javaFinding("nested-ternary", n, rel))
 			}
 		case "for_statement", "while_statement", "do_statement", "enhanced_for_statement":
 			if body := n.ChildByFieldName("body"); body != nil && body.Type() == "block" && body.NamedChildCount() == 0 {
@@ -114,6 +123,17 @@ func javaHasNestedTry(n *sitter.Node) bool {
 		return false
 	}
 	return walk(n)
+}
+
+// javaHasDescendantType reports whether n has a descendant (excluding itself) of the given type.
+func javaHasDescendantType(n *sitter.Node, typ string) bool {
+	for i := 0; i < int(n.ChildCount()); i++ {
+		ch := n.Child(i)
+		if ch.Type() == typ || javaHasDescendantType(ch, typ) {
+			return true
+		}
+	}
+	return false
 }
 
 // javaParamCount counts declared parameters in a formal_parameters node.

@@ -122,7 +122,9 @@ java-ast-empty-else
 java-ast-empty-if-block
 java-ast-empty-loop-body
 java-ast-empty-method
+java-ast-long-method
 java-ast-missing-switch-default
+java-ast-nested-ternary
 java-ast-nested-try
 java-ast-too-many-params
 java-bigdecimal-double
@@ -376,9 +378,11 @@ python-multiple-imports
 python-mutable-default-argument
 python-open-no-context
 python-return-in-finally
+python-return-in-init
 python-shadow-builtin
 python-star-import
 python-subprocess-shell
+python-too-long-function
 python-too-many-args
 python-type-eq-vs-isinstance
 python-unused-import

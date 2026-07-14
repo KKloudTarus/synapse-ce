@@ -44,6 +44,32 @@ var pythonRules = map[string]pythonRule{
 	"bind-all":         {"sast", "python-bind-all-interfaces", "CWE-605", "medium", "Bind to all network interfaces", "Binding to 0.0.0.0 exposes the service on every interface, including untrusted networks. Bind to a specific address."},
 	"mktemp":           {"sast", "python-mktemp-insecure", "CWE-377", "medium", "Insecure tempfile.mktemp", "mktemp only returns a name, leaving a race window before the file is created. Use mkstemp or NamedTemporaryFile."},
 	"yaml-unsafe":      {"sast", "python-yaml-unsafe-load", "CWE-502", "high", "Unsafe yaml.load", "yaml.load with the default loader can construct arbitrary Python objects from untrusted input. Use yaml.safe_load."},
+	"return-in-init":   {"reliability", "python-return-in-init", "", "low", "Return value in __init__", "__init__ must return None; returning a value raises TypeError at call time."},
+	"long-function":    {"quality", "python-too-long-function", "", "low", "Overly long function", "A function with a very large number of statements is hard to understand and test; split it into smaller functions."},
+}
+
+// pyInitReturnsValue reports whether a function body contains a return statement with a value,
+// without descending into nested function/class definitions.
+func pyInitReturnsValue(fn *sitter.Node) bool {
+	body := fn.ChildByFieldName("body")
+	if body == nil {
+		return false
+	}
+	stack := []*sitter.Node{body}
+	for len(stack) > 0 {
+		c := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if c.Type() == "return_statement" && c.NamedChildCount() > 0 {
+			return true
+		}
+		if c != body && (c.Type() == "function_definition" || c.Type() == "class_definition") {
+			continue // do not descend into nested scopes
+		}
+		for i := 0; i < int(c.ChildCount()); i++ {
+			stack = append(stack, c.Child(i))
+		}
+	}
+	return false
 }
 
 var (
@@ -120,6 +146,12 @@ func pythonFindings(root *sitter.Node, src []byte, rel string) []QualityFinding 
 				if explicitParams(params.Content(src)) > 7 {
 					out = append(out, pythonFinding("args", n, rel))
 				}
+			}
+			if nm := n.ChildByFieldName("name"); nm != nil && nm.Content(src) == "__init__" && pyInitReturnsValue(n) {
+				out = append(out, pythonFinding("return-in-init", n, rel))
+			}
+			if body := n.ChildByFieldName("body"); body != nil && int(body.NamedChildCount()) > 50 {
+				out = append(out, pythonFinding("long-function", n, rel))
 			}
 		case "except_clause":
 			if strings.HasPrefix(strings.TrimSpace(text), "except:") {
