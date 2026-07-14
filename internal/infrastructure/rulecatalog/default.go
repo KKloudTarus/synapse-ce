@@ -10,6 +10,7 @@ func Default() (*Catalog, error) {
 	var all []rule.Rule
 
 	all = append(all, sastRules()...)
+	all = append(all, langPackCatalog()...)
 	all = append(all, secretRules()...)
 	all = append(all, misconfigRules()...)
 	all = append(all, qualityRules()...)

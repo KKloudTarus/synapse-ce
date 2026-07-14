@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 
+	domainrule "github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -11,6 +12,10 @@ import (
 // yields. skipFn is an optional false-positive filter (e.g. drop env-ref "secrets"). exts, when non-nil,
 // restricts the rule to those file extensions (lower-case, dot-prefixed) so a language-specific idiom
 // (e.g. a C string function) can't false-positive on a same-named safe function in another language.
+//
+// rtype/rquality classify the finding. They are optional: the zero value means a security vulnerability
+// (Vulnerability + Security), which is what the security-focused tier-1 rules are. Correctness/style
+// rules set them explicitly (e.g. Bug+Reliability, CodeSmell+Maintainability).
 type rule struct {
 	id       string
 	cwe      string
@@ -20,6 +25,24 @@ type rule struct {
 	re       *regexp.Regexp
 	skipFn   func(line string) bool
 	exts     map[string]bool
+	rtype    domainrule.Type
+	rquality domainrule.Quality
+}
+
+// ruleType returns the finding type, defaulting to a security vulnerability.
+func (r *rule) ruleType() domainrule.Type {
+	if r.rtype == "" {
+		return domainrule.TypeVulnerability
+	}
+	return r.rtype
+}
+
+// ruleQuality returns the finding quality, defaulting to the security dimension.
+func (r *rule) ruleQuality() domainrule.Quality {
+	if r.rquality == "" {
+		return domainrule.QualitySecurity
+	}
+	return r.rquality
 }
 
 func (r *rule) skip(line string) bool { return r.skipFn != nil && r.skipFn(line) }
@@ -39,6 +62,7 @@ var cSourceExts = map[string]bool{
 // false-positive on a same-named construct in another language (e.g. the "Python SQLAlchemy" rule
 // firing on a .java file, or a Prisma rule on Go). nil exts stays language-agnostic.
 var pyExts = map[string]bool{".py": true, ".pyi": true, ".pyw": true, ".pyx": true}
+var javaExts = map[string]bool{".java": true}
 var jsExts = map[string]bool{
 	".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
 	".ts": true, ".tsx": true, ".mts": true, ".cts": true, // .mts/.cts are first-class TS ESM/CJS extensions
@@ -106,7 +130,7 @@ func skipUnlessRegexContext(line string) bool {
 }
 
 func builtinRules() []rule {
-	return []rule{
+	core := []rule{
 		{
 			id: "weak-hash-md5", cwe: "CWE-327", severity: shared.SeverityMedium, title: "Weak hash: MD5",
 			desc: "MD5 is cryptographically broken; use SHA-256+ for integrity/signatures and a salted KDF (bcrypt/scrypt/argon2) for passwords.",
@@ -413,4 +437,5 @@ func builtinRules() []rule {
 			skipFn: commentOnlyLine,
 		},
 	}
+	return append(core, langPackRules()...)
 }
