@@ -294,12 +294,14 @@ node-dynamic-require
 node-env-in-log
 node-error-stack-in-response
 node-execsync-dynamic
+node-fast-hash-password
 node-fs-chmod-world-writable
 node-fs-exists-deprecated
 node-header-injection-user
 node-jwt-alg-none
 node-jwt-decode-no-verify
 node-legacy-url-parse
+node-mongo-find-req-body
 node-new-buffer
 node-process-binding
 node-process-exit-lib
@@ -311,6 +313,7 @@ node-sequelize-literal
 node-set-insecure-cookie-samesite-none
 node-static-dotfiles-allow
 node-sys-module
+node-timing-unsafe-compare
 node-tls-reject-unauthorized-env
 node-tls-weak-ciphers
 node-trust-proxy-true
