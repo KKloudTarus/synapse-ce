@@ -181,6 +181,8 @@ java-classforname-param
 java-classloader-getresource-param
 java-collection-size-zero
 java-command-exec-concat
+java-commons-collections3
+java-commons-escapehtml
 java-commons-lang2-import
 java-cond-assign
 java-content-type-options-disable
@@ -232,12 +234,19 @@ java-format-string-var
 java-getbytes-no-charset
 java-getrealpath-param
 java-groovy-shell
+java-guava-charsets
 java-guava-files-tostring
 java-guava-first-non-null
+java-guava-function
 java-guava-lists-newarraylist
 java-guava-maps-newhashmap
 java-guava-md5
+java-guava-optional
+java-guava-predicate
 java-guava-sha1
+java-guava-supplier
+java-guava-throwables-propagate
+java-guava-tostringhelper
 java-hardcoded-tmp-path
 java-header-crlf-param
 java-hibernate-create-criteria
@@ -305,6 +314,7 @@ java-path-traversal-param
 java-pattern-from-param
 java-pbe-md5-des
 java-posix-world-permissions
+java-powermock-import
 java-printstacktrace
 java-processbuilder-param
 java-public-finalize

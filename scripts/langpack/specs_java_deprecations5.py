@@ -39,7 +39,7 @@ RULES = [
       source=G, re=r"Throwables\.propagate\s*\(", nc="throw Throwables.propagate(e);", c="throw new IllegalStateException(e);"),
     r(id="java-guava-tostringhelper", title="Objects.toStringHelper()", desc="Guava Objects.toStringHelper moved to MoreObjects.",
       rationale="Objects.toStringHelper is deprecated in favor of MoreObjects.toStringHelper.", remediation="Use MoreObjects.toStringHelper.",
-      source=G, re=r"Objects\.toStringHelper\s*\(", nc="return Objects.toStringHelper(this).add(\"id\", id).toString();", c="return MoreObjects.toStringHelper(this).add(\"id\", id).toString();"),
+      source=G, re=r"\bObjects\.toStringHelper\s*\(", nc="return Objects.toStringHelper(this).add(\"id\", id).toString();", c="return MoreObjects.toStringHelper(this).add(\"id\", id).toString();"),
     r(id="java-commons-escapehtml", title="StringEscapeUtils.escapeHtml (deprecated)", desc="escapeHtml is deprecated in commons-lang3.",
       rationale="Commons-lang3 deprecated escapeHtml in favor of escapeHtml4.", remediation="Use escapeHtml4 (or a context-aware encoder like OWASP Encoder).",
       source="https://commons.apache.org/proper/commons-lang/", re=r"StringEscapeUtils\.escapeHtml\b", nc="String safe = StringEscapeUtils.escapeHtml(input);", c="String safe = StringEscapeUtils.escapeHtml4(input);"),
