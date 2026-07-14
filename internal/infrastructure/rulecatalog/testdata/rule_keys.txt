@@ -327,6 +327,7 @@ js-document-domain-write
 js-document-write
 js-dom-xss-outerhtml
 js-dot-notation
+js-double-await
 js-empty-catch
 js-eq-null
 js-eqeqeq
@@ -374,6 +375,8 @@ js-jwt-alg-none
 js-jwt-decode-no-verify
 js-keycode-deprecated
 js-legacy-escape
+js-length-gte-zero
+js-length-lt-zero
 js-libxml-noent
 js-localstorage-sensitive
 js-lodash-chain
@@ -512,6 +515,8 @@ js-throw-new-error
 js-tls-reject-unauthorized-env
 js-tofixed-no-digits
 js-trim-left-right
+js-triple-negation
+js-typeof-typeof
 js-unneeded-ternary
 js-use-isnan
 js-useless-undefined
@@ -541,6 +546,7 @@ js-vue-v-html
 js-vue-v-on-native
 js-web-attach-event
 js-web-capture-events
+js-web-char-code
 js-web-create-attribute
 js-web-create-event
 js-web-create-touch
@@ -548,11 +554,13 @@ js-web-create-touchlist
 js-web-detach-event
 js-web-document-all
 js-web-document-charset
+js-web-event-layerxy
 js-web-execcommand
 js-web-get-attribute-node
 js-web-get-prevent-default
 js-web-getmatchedcssrules
 js-web-init-event
+js-web-key-identifier
 js-web-navigator-getusermedia
 js-web-prefixed-fullscreen
 js-web-prefixed-matches
@@ -560,11 +568,13 @@ js-web-prefixed-raf
 js-web-prefixed-slice
 js-web-register-element
 js-web-release-events
+js-web-scroll-into-view-if-needed
 js-web-set-attribute-node
 js-web-show-modal-dialog
 js-web-to-gmt-string
 js-web-tolocaleformat
 js-web-window-event
+js-web-window-orientation
 js-yoda-condition
 jwt
 jwt-hardcoded-secret-or-none
