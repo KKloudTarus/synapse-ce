@@ -724,3 +724,24 @@ func TestQualityForJSASTBehavioral2(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForJSASTBehavioral3(t *testing.T) {
+	root := t.TempDir()
+	js := "class C {\n  open() {}\n  open() {}\n}\n" +
+		"function f(x) {\n  return 1;\n  console.log(x);\n}\n" +
+		"function g(count, next) {\n  count = count;\n  if (next === next) { return count; }\n  return next;\n}\n"
+	writeFile(t, root, "b3.js", js)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"js-ast-duplicate-class-member", "js-ast-unreachable-code", "js-ast-self-assign", "js-ast-self-comparison"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}

@@ -271,6 +271,7 @@ js-ast-await-in-loop
 js-ast-complex-condition
 js-ast-constructor-return
 js-ast-deep-nesting
+js-ast-duplicate-class-member
 js-ast-duplicate-key
 js-ast-empty-function
 js-ast-getter-no-return
@@ -285,12 +286,15 @@ js-ast-nested-switch
 js-ast-no-param-reassign
 js-ast-require-await
 js-ast-return-in-finally
+js-ast-self-assign
+js-ast-self-comparison
 js-ast-small-switch
 js-ast-switch-many-cases
 js-ast-ternary-boolean
 js-ast-too-many-params
 js-ast-too-many-returns
 js-ast-unnecessary-else
+js-ast-unreachable-code
 js-ast-useless-catch
 js-buffer-allocunsafe
 js-buffer-constructor

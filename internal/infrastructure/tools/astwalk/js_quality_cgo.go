@@ -35,6 +35,27 @@ var jsRules = map[string]pythonRule{
 	"param-reassign":     {"quality", "js-ast-no-param-reassign", "", "low", "Reassigned function parameter", "Reassigning a parameter hides the original argument and is confusing; use a local variable."},
 	"dupe-keys":          {"reliability", "js-ast-duplicate-key", "", "medium", "Duplicate object key", "An object literal with the same key twice silently keeps only the last value."},
 	"constructor-return": {"reliability", "js-ast-constructor-return", "", "medium", "Return value in a constructor", "Returning a value from a constructor is ignored (for objects) and confuses readers."},
+	"dupe-class-members": {"reliability", "js-ast-duplicate-class-member", "", "medium", "Duplicate class member", "A class declaring the same member twice silently keeps only the last definition."},
+	"unreachable":        {"reliability", "js-ast-unreachable-code", "", "medium", "Unreachable code", "Code after a return/throw/break/continue can never execute."},
+	"self-assign":        {"reliability", "js-ast-self-assign", "", "medium", "Self assignment", "Assigning a variable to itself has no effect and is usually a mistake."},
+	"self-compare":       {"reliability", "js-ast-self-comparison", "", "medium", "Self comparison", "Comparing a value to itself is constant (and misses the intended operand)."},
+}
+
+// jsMethodKey builds a comparison key for a class method, including static/get/set/async modifiers
+// so that legitimate getter/setter and static/instance pairs are not treated as duplicates.
+func jsMethodKey(m *sitter.Node, src []byte) string {
+	prefix := ""
+	for i := 0; i < int(m.ChildCount()); i++ {
+		switch m.Child(i).Type() {
+		case "static", "get", "set", "async", "*":
+			prefix += m.Child(i).Type() + " "
+		}
+	}
+	nm := m.ChildByFieldName("name")
+	if nm == nil {
+		return ""
+	}
+	return prefix + strings.TrimSpace(nm.Content(src))
 }
 
 // jsParamNames returns the set of simple identifier parameter names of a function node.
@@ -220,13 +241,25 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 		case "class_declaration", "class":
 			if body := n.ChildByFieldName("body"); body != nil {
 				methods := 0
+				seen := map[string]bool{}
+				dupe := false
 				for i := 0; i < int(body.NamedChildCount()); i++ {
-					if body.NamedChild(i).Type() == "method_definition" {
+					m := body.NamedChild(i)
+					if m.Type() == "method_definition" {
 						methods++
+						if key := jsMethodKey(m, src); key != "" {
+							if seen[key] {
+								dupe = true
+							}
+							seen[key] = true
+						}
 					}
 				}
 				if methods > 20 {
 					out = append(out, jsFinding("large-class", n, rel))
+				}
+				if dupe {
+					out = append(out, jsFinding("dupe-class-members", n, rel))
 				}
 			}
 		case "if_statement":
@@ -266,6 +299,29 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 		case "object":
 			if jsHasDuplicateKey(n, src) {
 				out = append(out, jsFinding("dupe-keys", n, rel))
+			}
+		case "statement_block":
+			for i := 0; i < int(n.NamedChildCount())-1; i++ {
+				if jsJumpTypes[n.NamedChild(i).Type()] && n.NamedChild(i+1).Type() != "function_declaration" {
+					out = append(out, jsFinding("unreachable", n, rel))
+					break
+				}
+			}
+		case "assignment_expression":
+			l, rr := n.ChildByFieldName("left"), n.ChildByFieldName("right")
+			if l != nil && rr != nil && l.Type() == "identifier" && rr.Type() == "identifier" &&
+				strings.TrimSpace(l.Content(src)) == strings.TrimSpace(rr.Content(src)) {
+				out = append(out, jsFinding("self-assign", n, rel))
+			}
+		case "binary_expression":
+			if op := n.ChildByFieldName("operator"); op != nil {
+				switch op.Content(src) {
+				case "===", "==", "<", ">", "<=", ">=":
+					l, rr := n.ChildByFieldName("left"), n.ChildByFieldName("right")
+					if l != nil && rr != nil && strings.TrimSpace(l.Content(src)) == strings.TrimSpace(rr.Content(src)) {
+						out = append(out, jsFinding("self-compare", n, rel))
+					}
+				}
 			}
 		}
 		for i := 0; i < int(n.ChildCount()); i++ {
