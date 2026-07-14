@@ -35,6 +35,60 @@ var javaRules = map[string]pythonRule{
 	"unnecessary-else":   {"quality", "java-ast-unnecessary-else", "", "low", "Unnecessary else after a jump", "When the if branch always returns/throws, the else is redundant; dedent its body."},
 	"nested-switch":      {"quality", "java-ast-nested-switch", "", "low", "Nested switch statement", "A switch inside another switch is hard to follow; extract the inner switch into a method."},
 	"ternary-boolean":    {"quality", "java-ast-ternary-boolean", "", "low", "Ternary returning boolean literals", "cond ? true : false is just the condition (or its negation)."},
+	"param-reassign":     {"quality", "java-ast-param-reassign", "", "low", "Reassigned method parameter", "Reassigning a parameter hides the original argument; use a local variable."},
+	"small-switch":       {"quality", "java-ast-small-switch", "", "low", "switch with very few cases", "A switch with only one or two cases is clearer as an if/else."},
+	"self-assign":        {"reliability", "java-ast-self-assign", "", "medium", "Self assignment", "Assigning a variable to itself has no effect and is usually a mistake."},
+	"self-compare":       {"reliability", "java-ast-self-comparison", "", "medium", "Self comparison", "Comparing a value to itself is constant and misses the intended operand."},
+}
+
+// javaFuncTypes bound "within this method/lambda" searches.
+var javaFuncTypes = map[string]bool{
+	"method_declaration": true, "constructor_declaration": true, "lambda_expression": true, "class_declaration": true,
+}
+
+// javaMethodParamNames returns the declared parameter names of a method/constructor node.
+func javaMethodParamNames(n *sitter.Node, src []byte) map[string]bool {
+	out := map[string]bool{}
+	p := n.ChildByFieldName("parameters")
+	if p == nil {
+		return out
+	}
+	for i := 0; i < int(p.NamedChildCount()); i++ {
+		c := p.NamedChild(i)
+		if c.Type() == "formal_parameter" || c.Type() == "spread_parameter" {
+			if nm := c.ChildByFieldName("name"); nm != nil {
+				out[strings.TrimSpace(nm.Content(src))] = true
+			}
+		}
+	}
+	return out
+}
+
+// javaHasParamReassign reports whether n's subtree assigns to one of the given parameter names,
+// without descending into nested methods/lambdas.
+func javaHasParamReassign(n *sitter.Node, params map[string]bool, src []byte) bool {
+	for i := 0; i < int(n.ChildCount()); i++ {
+		c := n.Child(i)
+		if javaFuncTypes[c.Type()] {
+			continue
+		}
+		switch c.Type() {
+		case "assignment_expression":
+			if l := c.ChildByFieldName("left"); l != nil && l.Type() == "identifier" && params[strings.TrimSpace(l.Content(src))] {
+				return true
+			}
+		case "update_expression":
+			for j := 0; j < int(c.NamedChildCount()); j++ {
+				if o := c.NamedChild(j); o.Type() == "identifier" && params[strings.TrimSpace(o.Content(src))] {
+					return true
+				}
+			}
+		}
+		if javaHasParamReassign(c, params, src) {
+			return true
+		}
+	}
+	return false
 }
 
 // javaControlTypes / javaLoopTypes are the node kinds counted for nesting-depth metrics.
@@ -83,6 +137,9 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 				if javaComplexity(body, src) > 15 {
 					out = append(out, javaFinding("high-complexity", n, rel))
 				}
+				if params := javaMethodParamNames(n, src); len(params) > 0 && javaHasParamReassign(body, params, src) {
+					out = append(out, javaFinding("param-reassign", n, rel))
+				}
 			}
 		case "ternary_expression":
 			if javaHasDescendantType(n, "ternary_expression") {
@@ -113,6 +170,27 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			}
 			if javaHasDescendantType(n, "switch_statement") || javaHasDescendantType(n, "switch_expression") {
 				out = append(out, javaFinding("nested-switch", n, rel))
+			}
+			if labels := javaCountByType(n, map[string]bool{"switch_label": true, "switch_rule": true}); labels >= 1 && labels < 3 {
+				out = append(out, javaFinding("small-switch", n, rel))
+			}
+		case "assignment_expression":
+			if op := n.ChildByFieldName("operator"); op != nil && strings.TrimSpace(op.Content(src)) == "=" {
+				l, rr := n.ChildByFieldName("left"), n.ChildByFieldName("right")
+				if l != nil && rr != nil && l.Type() == "identifier" && rr.Type() == "identifier" &&
+					strings.TrimSpace(l.Content(src)) == strings.TrimSpace(rr.Content(src)) {
+					out = append(out, javaFinding("self-assign", n, rel))
+				}
+			}
+		case "binary_expression":
+			if op := n.ChildByFieldName("operator"); op != nil {
+				switch strings.TrimSpace(op.Content(src)) {
+				case "==", "<", ">", "<=", ">=":
+					l, rr := n.ChildByFieldName("left"), n.ChildByFieldName("right")
+					if l != nil && rr != nil && strings.TrimSpace(l.Content(src)) == strings.TrimSpace(rr.Content(src)) {
+						out = append(out, javaFinding("self-compare", n, rel))
+					}
+				}
 			}
 		case "try_statement":
 			if javaHasNestedTry(n) {

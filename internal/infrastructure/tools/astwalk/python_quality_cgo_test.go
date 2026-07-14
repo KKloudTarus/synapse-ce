@@ -775,3 +775,26 @@ func TestQualityForJSUselessConstructor(t *testing.T) {
 	}
 	t.Errorf("missing js-ast-useless-constructor in %+v", res.Findings)
 }
+
+func TestQualityForJavaASTBehavioral2(t *testing.T) {
+	root := t.TempDir()
+	src := "class C {\n" +
+		"  int add(int base, int extra) {\n    base = base + extra;\n    return base;\n  }\n" +
+		"  void toggle(int state) {\n    switch (state) {\n      case 1: on(); break;\n      default: off();\n    }\n  }\n" +
+		"  void f(int count) {\n    count = count;\n    if (count == count) { run(); }\n  }\n" +
+		"}\n"
+	writeFile(t, root, "C.java", src)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"java-ast-param-reassign", "java-ast-small-switch", "java-ast-self-assign", "java-ast-self-comparison"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
