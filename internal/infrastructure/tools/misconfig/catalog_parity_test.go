@@ -12,7 +12,7 @@ import (
 )
 
 var explicitInventory = []string{
-	"cloudformation-iam-wildcard", "cloudformation-open-security-group", "cloudformation-plaintext-secret", "cloudformation-public-bucket-acl", "cloudformation-rds-unencrypted", "cloudformation-s3-no-encryption",
+	"cloudformation-api-no-auth", "cloudformation-apigw-no-logging", "cloudformation-cloudfront-no-default-root", "cloudformation-cloudfront-no-logging", "cloudformation-cloudtrail-no-log-validation", "cloudformation-cloudtrail-not-multi-region", "cloudformation-dynamodb-unencrypted", "cloudformation-ebs-unencrypted", "cloudformation-ec2-imdsv2", "cloudformation-ecr-no-scan", "cloudformation-efs-unencrypted", "cloudformation-eks-public-endpoint", "cloudformation-iam-wildcard", "cloudformation-kms-no-rotation", "cloudformation-lambda-no-dlq", "cloudformation-lambda-public", "cloudformation-log-retention-missing", "cloudformation-open-security-group", "cloudformation-plaintext-secret", "cloudformation-public-bucket-acl", "cloudformation-rds-no-backup", "cloudformation-rds-no-deletion-protection", "cloudformation-rds-public", "cloudformation-rds-unencrypted", "cloudformation-redshift-unencrypted", "cloudformation-s3-no-encryption", "cloudformation-s3-no-logging", "cloudformation-s3-no-public-access-block", "cloudformation-s3-no-versioning", "cloudformation-sg-open-egress", "cloudformation-sns-no-encryption", "cloudformation-sqs-no-dlq", "cloudformation-sqs-no-encryption", "cloudformation-wildcard-principal",
 	"compose-dangerous-capability", "compose-docker-socket-mount", "compose-host-ipc", "compose-host-network", "compose-host-pid", "compose-image-unpinned", "compose-privileged", "compose-secret-in-env", "compose-unconfined-security-opt", "compose-userns-host",
 	"dockerfile-add-instead-of-copy", "dockerfile-add-remote-url", "dockerfile-apt-no-clean", "dockerfile-apt-no-norecommends", "dockerfile-apt-upgrade", "dockerfile-expose-ssh", "dockerfile-image-no-tag", "dockerfile-insecure-download", "dockerfile-maintainer-deprecated", "dockerfile-multiple-cmd", "dockerfile-no-healthcheck", "dockerfile-run-as-root", "dockerfile-run-pipe-shell", "dockerfile-run-sudo", "dockerfile-secret-in-arg", "dockerfile-secret-in-env", "dockerfile-workdir-relative", "dockerfile-multiple-entrypoint", "dockerfile-shell-form-entrypoint", "dockerfile-from-platform-pinned", "dockerfile-copy-to-root", "dockerfile-private-key-copy", "dockerfile-world-writable", "dockerfile-setuid-chmod", "dockerfile-secret-in-run", "dockerfile-apt-no-yes", "dockerfile-apk-no-cache", "dockerfile-yum-no-clean", "dockerfile-pip-no-cache-dir", "dockerfile-cd-in-run", "dockerfile-plaintext-download", "dockerfile-apt-cli", "dockerfile-yum-no-yes", "dockerfile-apt-version-pin", "dockerfile-apk-version-pin",
 	"gha-permissions-write-all", "gha-pull-request-target", "gha-script-injection", "gha-unpinned-action",
@@ -90,7 +90,7 @@ func TestCatalogParity(t *testing.T) {
 	}
 
 	// 2. Table-Driven Example Verification
-	// Validate key, name, severity, and example-behavior for all 147 misconfiguration rules.
+	// Validate key, name, severity, and example-behavior for all 175 misconfiguration rules.
 	for _, id := range explicitInventory {
 		catRule, ok := catalogMap[id]
 		if !ok {

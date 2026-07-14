@@ -92,11 +92,21 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: aws:kms
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LoggingConfiguration:
+        DestinationBucketName: log-bucket
+      VersioningConfiguration:
+        Status: Enabled
   Db:
     Type: AWS::RDS::DBInstance
     Properties:
       Engine: postgres
       StorageEncrypted: true
+      DeletionProtection: true
       MasterUserPassword: "{{resolve:secretsmanager:db:SecretString:password}}"
   Sg:
     Type: AWS::EC2::SecurityGroup
@@ -163,5 +173,71 @@ Resources:
 	}
 	if _, ok := got["cloudformation-s3-no-encryption"]; !ok {
 		t.Errorf("template with intrinsics must still parse and flag the unencrypted bucket, got %v", keys(got))
+	}
+}
+
+func TestCloudFormationRulePackTriggers(t *testing.T) {
+	// Representative new rules across families must each fire on a genuine violation.
+	cases := []struct{ name, tmpl, want string }{
+		{"rds public", "Resources:\n  DB:\n    Type: AWS::RDS::DBInstance\n    Properties:\n      StorageEncrypted: true\n      PubliclyAccessible: true\n", "cloudformation-rds-public"},
+		{"sg open egress", "Resources:\n  SG:\n    Type: AWS::EC2::SecurityGroup\n    Properties:\n      SecurityGroupEgress:\n        - CidrIp: \"0.0.0.0/0\"\n", "cloudformation-sg-open-egress"},
+		{"lambda public", "Resources:\n  P:\n    Type: AWS::Lambda::Permission\n    Properties:\n      Principal: \"*\"\n", "cloudformation-lambda-public"},
+		{"eks public", "Resources:\n  C:\n    Type: AWS::EKS::Cluster\n    Properties:\n      ResourcesVpcConfig:\n        EndpointPublicAccess: true\n", "cloudformation-eks-public-endpoint"},
+		{"api no auth", "Resources:\n  M:\n    Type: AWS::ApiGateway::Method\n    Properties:\n      AuthorizationType: NONE\n", "cloudformation-api-no-auth"},
+		{"wildcard principal", "Resources:\n  BP:\n    Type: AWS::S3::BucketPolicy\n    Properties:\n      PolicyDocument:\n        Statement:\n          - Effect: Allow\n            Principal: \"*\"\n            Action: s3:GetObject\n", "cloudformation-wildcard-principal"},
+		{"ebs unencrypted", "Resources:\n  V:\n    Type: AWS::EC2::Volume\n    Properties:\n      Size: 20\n", "cloudformation-ebs-unencrypted"},
+		{"redshift unencrypted", "Resources:\n  C:\n    Type: AWS::Redshift::Cluster\n    Properties:\n      Encrypted: false\n", "cloudformation-redshift-unencrypted"},
+		{"kms no rotation", "Resources:\n  K:\n    Type: AWS::KMS::Key\n    Properties:\n      Description: app\n", "cloudformation-kms-no-rotation"},
+		{"ecr no scan", "Resources:\n  R:\n    Type: AWS::ECR::Repository\n    Properties:\n      RepositoryName: app\n", "cloudformation-ecr-no-scan"},
+		{"cloudtrail no validation", "Resources:\n  T:\n    Type: AWS::CloudTrail::Trail\n    Properties:\n      IsMultiRegionTrail: true\n", "cloudformation-cloudtrail-no-log-validation"},
+		{"ec2 imdsv2", "Resources:\n  I:\n    Type: AWS::EC2::Instance\n    Properties:\n      ImageId: ami-123\n", "cloudformation-ec2-imdsv2"},
+		{"log retention", "Resources:\n  LG:\n    Type: AWS::Logs::LogGroup\n    Properties:\n      LogGroupName: /app\n", "cloudformation-log-retention-missing"},
+		{"lambda no dlq", "Resources:\n  F:\n    Type: AWS::Lambda::Function\n    Properties:\n      FunctionName: w\n", "cloudformation-lambda-no-dlq"},
+		{"rds no backup", "Resources:\n  DB:\n    Type: AWS::RDS::DBInstance\n    Properties:\n      StorageEncrypted: true\n      BackupRetentionPeriod: 0\n", "cloudformation-rds-no-backup"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ruleIDs(scan(t, map[string]string{"template.yaml": tc.tmpl}))
+			if _, ok := got[tc.want]; !ok {
+				t.Errorf("expected %s, got %v", tc.want, keys(got))
+			}
+		})
+	}
+}
+
+func TestCloudFormationRulePackNoFalsePositives(t *testing.T) {
+	// A hardened stack touching the new resource types must yield zero findings.
+	tmpl := `Resources:
+  Vol:
+    Type: AWS::EC2::Volume
+    Properties:
+      Size: 20
+      Encrypted: true
+  Queue:
+    Type: AWS::SQS::Queue
+    Properties:
+      SqsManagedSseEnabled: true
+      RedrivePolicy: '{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:111122223333:dlq","maxReceiveCount":5}'
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      KmsMasterKeyId: alias/aws/sns
+  Key:
+    Type: AWS::KMS::Key
+    Properties:
+      EnableKeyRotation: true
+  Repo:
+    Type: AWS::ECR::Repository
+    Properties:
+      ImageScanningConfiguration:
+        ScanOnPush: true
+  Trail:
+    Type: AWS::CloudTrail::Trail
+    Properties:
+      IsMultiRegionTrail: true
+      EnableLogFileValidation: true
+`
+	if got := scan(t, map[string]string{"stack.yaml": tmpl}); len(got) != 0 {
+		t.Errorf("hardened CloudFormation should yield no findings, got %+v", got)
 	}
 }
