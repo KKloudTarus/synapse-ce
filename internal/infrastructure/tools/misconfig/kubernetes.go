@@ -35,7 +35,12 @@ type k8sDoc struct {
 		Name      string `yaml:"name"`
 		Namespace string `yaml:"namespace"`
 	} `yaml:"metadata"`
-	Spec k8sSpec `yaml:"spec"`
+	Spec                         k8sSpec           `yaml:"spec"`
+	AutomountServiceAccountToken *bool             `yaml:"automountServiceAccountToken"`
+	Rules                        []k8sRBACRule     `yaml:"rules"`
+	RoleRef                      k8sRoleRef        `yaml:"roleRef"`
+	Data                         map[string]string `yaml:"data"`
+	StringData                   map[string]string `yaml:"stringData"`
 }
 
 type k8sSpec struct {
@@ -43,6 +48,8 @@ type k8sSpec struct {
 	HostPID                      bool           `yaml:"hostPID"`
 	HostIPC                      bool           `yaml:"hostIPC"`
 	AutomountServiceAccountToken *bool          `yaml:"automountServiceAccountToken"`
+	ServiceAccountName           string         `yaml:"serviceAccountName"`
+	ServiceAccount               string         `yaml:"serviceAccount"` // deprecated Kubernetes alias
 	Containers                   []k8sContainer `yaml:"containers"`
 	InitContainers               []k8sContainer `yaml:"initContainers"`
 	Volumes                      []k8sVolume    `yaml:"volumes"`
@@ -50,6 +57,26 @@ type k8sSpec struct {
 	Template                     *struct {
 		Spec k8sSpec `yaml:"spec"`
 	} `yaml:"template"`
+	JobTemplate *struct {
+		Spec k8sSpec `yaml:"spec"`
+	} `yaml:"jobTemplate"`
+	TLS []k8sIngressTLS `yaml:"tls"`
+}
+
+type k8sRBACRule struct {
+	APIGroups       []string `yaml:"apiGroups"`
+	Resources       []string `yaml:"resources"`
+	Verbs           []string `yaml:"verbs"`
+	NonResourceURLs []string `yaml:"nonResourceURLs"`
+}
+
+type k8sRoleRef struct {
+	Kind string `yaml:"kind"`
+	Name string `yaml:"name"`
+}
+
+type k8sIngressTLS struct {
+	SecretName string `yaml:"secretName"`
 }
 
 // podSecCtx is the pod-level securityContext; runAsNonRoot / runAsUser / seccompProfile set here are
@@ -80,6 +107,13 @@ type k8sContainer struct {
 	Ports []struct {
 		HostPort int `yaml:"hostPort"`
 	} `yaml:"ports"`
+	Env []k8sEnvVar `yaml:"env"`
+}
+
+type k8sEnvVar struct {
+	Name      string `yaml:"name"`
+	Value     string `yaml:"value"`
+	ValueFrom any    `yaml:"valueFrom"`
 }
 
 type ctnSecCtx struct {
@@ -98,25 +132,42 @@ type ctnSecCtx struct {
 	} `yaml:"seccompProfile"`
 }
 
-// podSpec resolves the effective pod spec: a workload's spec.template.spec, or the object's own spec.
+// podSpec resolves the effective pod spec: CronJobs nest it under jobTemplate.spec.template.spec,
+// other workloads use template.spec, and a bare Pod uses spec directly.
 func (s k8sSpec) podSpec() k8sSpec {
+	if s.JobTemplate != nil {
+		return s.JobTemplate.Spec.podSpec()
+	}
 	if s.Template != nil {
 		return s.Template.Spec
 	}
 	return s
 }
 
-// scanKubernetes decodes every YAML document in data and returns located misconfig findings. Best-effort:
+type k8sWorkloadFact struct {
+	namespace string
+	file      string
+	line      int
+	resource  string
+}
+
+type k8sScanResult struct {
+	findings         []ports.MisconfigRawFinding
+	workloads        []k8sWorkloadFact
+	policyNamespaces map[string]struct{}
+}
+
+// scanKubernetes decodes every YAML document in data and returns findings plus namespace facts. Best-effort:
 // a document that decodes but does not fit our shape (or has no kind) is skipped and later documents are
-// still scanned; a YAML *stream* syntax error halts parsing of the rest of THIS file (prior findings are
+// still scanned; a YAML *stream* syntax error halts parsing of the rest of THIS file (prior results are
 // kept), because yaml.v3 cannot reliably resume mid-stream. Either way the overall scan never fails.
-func scanKubernetes(rel string, data []byte) []ports.MisconfigRawFinding {
-	var out []ports.MisconfigRawFinding
+func scanKubernetes(rel string, data []byte) k8sScanResult {
+	out := k8sScanResult{policyNamespaces: make(map[string]struct{})}
 	// Refuse pathologically deep documents BEFORE decoding: yaml.v3 recurses per nesting level with no
 	// depth cap, so a crafted deep document would overflow the goroutine stack (an unrecoverable fatal),
 	// not merely return an error. This keeps a malformed file a per-file skip, per the port contract.
 	if tooDeepYAML(data) {
-		return nil
+		return out
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	for {
@@ -131,7 +182,56 @@ func scanKubernetes(rel string, data []byte) []ports.MisconfigRawFinding {
 		if err := node.Decode(&doc); err != nil || doc.Kind == "" {
 			continue // not a manifest we recognise; try the next document
 		}
-		out = append(out, checkK8sDoc(rel, doc, &node)...)
+		out.findings = append(out.findings, checkK8sDoc(rel, doc, &node)...)
+		namespace := k8sNamespace(doc.Metadata.Namespace)
+		if isWorkloadKind(doc.Kind) {
+			resource := clip(doc.Kind)
+			if doc.Metadata.Name != "" {
+				resource += "/" + clip(doc.Metadata.Name)
+			}
+			out.workloads = append(out.workloads, k8sWorkloadFact{namespace: namespace, file: rel, line: firstKeyLine(&node, "kind"), resource: resource})
+		}
+		if doc.Kind == "NetworkPolicy" {
+			out.policyNamespaces[namespace] = struct{}{}
+		}
+	}
+	return out
+}
+
+func k8sNamespace(namespace string) string {
+	if strings.TrimSpace(namespace) == "" {
+		return "default"
+	}
+	return namespace
+}
+
+func mergeK8sScanResult(dst *k8sScanResult, src k8sScanResult) {
+	dst.findings = append(dst.findings, src.findings...)
+	dst.workloads = append(dst.workloads, src.workloads...)
+	if dst.policyNamespaces == nil {
+		dst.policyNamespaces = make(map[string]struct{})
+	}
+	for namespace := range src.policyNamespaces {
+		dst.policyNamespaces[namespace] = struct{}{}
+	}
+}
+
+func networkPolicyFindings(result k8sScanResult) []ports.MisconfigRawFinding {
+	seen := make(map[string]struct{})
+	var out []ports.MisconfigRawFinding
+	for _, workload := range result.workloads {
+		if _, ok := result.policyNamespaces[workload.namespace]; ok {
+			continue
+		}
+		if _, ok := seen[workload.namespace]; ok {
+			continue
+		}
+		seen[workload.namespace] = struct{}{}
+		out = append(out, ports.MisconfigRawFinding{
+			File: workload.file, Line: workload.line, RuleID: "kubernetes-namespace-no-network-policy",
+			Title: "Namespace has no NetworkPolicy", Severity: shared.SeverityLow, Resource: workload.resource,
+			Description: "No NetworkPolicy manifest declares coverage for namespace " + clip(workload.namespace) + ". Add a default-deny policy and explicit traffic rules for this workload namespace.",
+		})
 	}
 	return out
 }
@@ -159,10 +259,48 @@ func checkK8sDoc(rel string, doc k8sDoc, node *yaml.Node) []ports.MisconfigRawFi
 			"The workload has no namespace or uses \"default\", so it shares a namespace with unrelated workloads and weakens RBAC/network-policy scoping. Deploy it to a dedicated namespace.",
 			shared.SeverityLow, "metadata")
 	}
-	if isWorkloadKind(doc.Kind) && (spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken) {
+	if isWorkloadKind(doc.Kind) && usesDefaultServiceAccount(spec) {
+		add("kubernetes-default-service-account", "Workload uses the default ServiceAccount",
+			"serviceAccountName is omitted or set to default, so the workload shares the namespace default identity. Create and assign a dedicated ServiceAccount with only the permissions it needs.",
+			shared.SeverityLow, "serviceAccountName")
+	}
+	if (isWorkloadKind(doc.Kind) && (spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken)) ||
+		(doc.Kind == "ServiceAccount" && (doc.AutomountServiceAccountToken == nil || *doc.AutomountServiceAccountToken)) {
 		add("kubernetes-automount-sa-token", "Service-account token auto-mounted",
-			"automountServiceAccountToken is not set to false, so the pod receives the API token even if it never calls the API server, widening the blast radius of a compromise. Set it to false unless API access is needed.",
+			"automountServiceAccountToken is not set to false, so a pod receives the API token even if it never calls the API server, widening the blast radius of a compromise. Set it to false unless API access is needed.",
 			shared.SeverityLow, "automountServiceAccountToken")
+	}
+	if isRBACRoleKind(doc.Kind) {
+		if rbacHasWildcard(doc.Rules) {
+			add("kubernetes-rbac-wildcard-permissions", "RBAC rule grants wildcard permissions",
+				"The RBAC rule uses a wildcard in its API groups, resources, verbs, or non-resource URLs. Replace it with the smallest explicit permission set required.", shared.SeverityHigh, "rules")
+		}
+		if rbacHasEscalationVerb(doc.Rules) {
+			add("kubernetes-rbac-escalation-verbs", "RBAC rule grants escalation permissions",
+				"The RBAC rule grants bind, escalate, or impersonate, which can be used to obtain broader privileges. Remove these verbs unless an administrator explicitly requires them.", shared.SeverityHigh, "verbs")
+		}
+	}
+	if isRBACBindingKind(doc.Kind) && doc.RoleRef.Kind == "ClusterRole" && doc.RoleRef.Name == "cluster-admin" {
+		add("kubernetes-rbac-cluster-admin-binding", "Binding grants cluster-admin",
+			"The binding assigns the built-in cluster-admin ClusterRole, which grants unrestricted control-plane access. Bind a narrowly scoped Role or ClusterRole instead.", shared.SeverityHigh, "roleRef")
+	}
+	if doc.Kind == "Secret" && (len(doc.Data) != 0 || len(doc.StringData) != 0) {
+		add("kubernetes-secret-in-manifest", "Secret value stored in manifest",
+			"The Secret embeds data directly in a manifest, which can expose credentials through source control, reviews, and build artifacts. Reference a managed secret source or inject the value at deployment time.", shared.SeverityMedium, "data")
+	}
+	if doc.Kind == "Ingress" {
+		if len(doc.Spec.TLS) == 0 {
+			add("kubernetes-ingress-no-tls", "Ingress has no TLS configuration",
+				"The Ingress declares routes without a TLS entry, so clients may connect without transport encryption. Configure TLS for every hostname that serves sensitive traffic.", shared.SeverityLow, "spec")
+		} else {
+			for _, tls := range doc.Spec.TLS {
+				if strings.TrimSpace(tls.SecretName) == "" {
+					add("kubernetes-ingress-tls-no-secret", "Ingress TLS entry has no secret",
+						"The Ingress TLS entry omits secretName, so the controller has no named certificate secret to use. Set secretName to the TLS certificate Secret.", shared.SeverityLow, "tls")
+					break
+				}
+			}
+		}
 	}
 	if spec.HostNetwork {
 		add("kubernetes-host-network", "Pod shares the host network namespace",
@@ -194,6 +332,11 @@ func checkK8sDoc(rel string, doc k8sDoc, node *yaml.Node) []ports.MisconfigRawFi
 		// KSV/CIS hardening: fire when a recommended secure setting is MISSING (the comprehensive
 		// posture that matches Trivy/kube-bench), regardless of whether a securityContext block exists.
 		out = append(out, k8sHardening(rel, node, cres, docLine, sc, c, spec.SecurityContext)...)
+		if hasLiteralSecretEnv(c.Env) {
+			out = append(out, k8sContainerFinding(rel, node, cres, "kubernetes-secret-in-env",
+				"Literal secret in environment variable", shared.SeverityMedium, "env",
+				"A secret-named environment variable is assigned a literal value, which can leak through manifests, process inspection, logs, and debugging output. Load it from a Secret reference or a managed secret provider instead.", docLine))
+		}
 		if sc == nil {
 			continue // the explicit-insecure checks below need a securityContext to inspect
 		}
@@ -299,6 +442,54 @@ func k8sHardening(rel string, node *yaml.Node, cres string, docLine int, sc *ctn
 		}
 	}
 	return out
+}
+
+func usesDefaultServiceAccount(spec k8sSpec) bool {
+	name := spec.ServiceAccountName
+	if name == "" {
+		name = spec.ServiceAccount
+	}
+	return name == "" || name == "default"
+}
+
+func isRBACRoleKind(kind string) bool { return kind == "Role" || kind == "ClusterRole" }
+
+func isRBACBindingKind(kind string) bool {
+	return kind == "RoleBinding" || kind == "ClusterRoleBinding"
+}
+
+func rbacHasWildcard(rules []k8sRBACRule) bool {
+	for _, rule := range rules {
+		for _, values := range [][]string{rule.APIGroups, rule.Resources, rule.Verbs, rule.NonResourceURLs} {
+			for _, value := range values {
+				if strings.TrimSpace(value) == "*" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func rbacHasEscalationVerb(rules []k8sRBACRule) bool {
+	for _, rule := range rules {
+		for _, verb := range rule.Verbs {
+			switch strings.ToLower(strings.TrimSpace(verb)) {
+			case "bind", "escalate", "impersonate":
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasLiteralSecretEnv(env []k8sEnvVar) bool {
+	for _, entry := range env {
+		if secretKeyRe.MatchString(entry.Name) && strings.TrimSpace(entry.Value) != "" && entry.ValueFrom == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // isWorkloadKind reports whether a Kubernetes kind carries a pod template / runs workloads (so pod-level

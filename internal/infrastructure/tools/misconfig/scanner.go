@@ -78,6 +78,7 @@ const (
 // Best-effort: an unreadable or unparsable file is skipped.
 func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.MisconfigRawFinding, error) {
 	var out []ports.MisconfigRawFinding
+	var kubernetes k8sScanResult
 	count := 0  // config files actually scanned
 	walked := 0 // total tree entries visited
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -109,7 +110,10 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			if !strings.Contains(path, string(os.PathSeparator)+"charts"+string(os.PathSeparator)) && count < maxFiles {
 				count++
 				relDir := strings.TrimPrefix(strings.TrimPrefix(filepath.Dir(path), root), string(os.PathSeparator))
-				out = append(out, scanHelmChart(ctx, s.helmRun, s.helmDir, s.helmBin, filepath.Dir(path), relDir)...)
+				result := scanHelmChart(ctx, s.helmRun, s.helmDir, s.helmBin, filepath.Dir(path), relDir)
+				out = append(out, result.findings...)
+				result.findings = nil
+				mergeK8sScanResult(&kubernetes, result)
 			}
 			return nil
 		}
@@ -151,7 +155,7 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 		case cfgDockerfile:
 			out = append(out, scanDockerfile(rel, data)...)
 		case cfgKubernetes:
-			out = append(out, scanKubernetes(rel, data)...)
+			mergeK8sScanResult(&kubernetes, scanKubernetes(rel, data))
 		case cfgTerraform:
 			out = append(out, scanTerraform(rel, data)...)
 		case cfgCloudFormation:
@@ -166,6 +170,8 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 	if walkErr != nil {
 		return out, fmt.Errorf("misconfig scan: %w", walkErr) // e.g. context cancellation
 	}
+	out = append(out, kubernetes.findings...)
+	out = append(out, networkPolicyFindings(kubernetes)...)
 	return out, nil
 }
 

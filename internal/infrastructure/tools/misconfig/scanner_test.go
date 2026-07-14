@@ -152,6 +152,7 @@ metadata:
   namespace: prod
 spec:
   automountServiceAccountToken: false
+  serviceAccountName: safe
   securityContext:
     seccompProfile:
       type: RuntimeDefault
@@ -171,9 +172,64 @@ spec:
         readOnlyRootFilesystem: true
         capabilities:
           drop: ["ALL"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: prod
+spec:
+  podSelector: {}
 `
 	if got := scan(t, map[string]string{"pod.yaml": manifest}); len(got) != 0 {
 		t.Errorf("fully hardened Pod should yield no findings, got %+v", got)
+	}
+}
+
+func TestKubernetesDeprecatedServiceAccountAlias(t *testing.T) {
+	manifest := `apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+spec:
+  serviceAccount: app
+  containers:
+  - name: app
+    image: app:1
+`
+	if _, bad := ruleIDs(scan(t, map[string]string{"pod.yaml": manifest}))["kubernetes-default-service-account"]; bad {
+		t.Error("dedicated deprecated serviceAccount alias must not trigger the default-service-account rule")
+	}
+}
+
+func TestKubernetesCronJobPodSpec(t *testing.T) {
+	manifest := `apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: app
+  namespace: prod
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          automountServiceAccountToken: false
+          serviceAccountName: app
+          containers:
+          - name: app
+            image: app:1
+            env:
+            - name: API_TOKEN
+              value: literal
+`
+	got := ruleIDs(scan(t, map[string]string{"cronjob.yaml": manifest}))
+	if _, ok := got["kubernetes-secret-in-env"]; !ok {
+		t.Errorf("CronJob literal secret env must be flagged, got %v", keys(got))
+	}
+	for _, rule := range []string{"kubernetes-default-service-account", "kubernetes-automount-sa-token"} {
+		if _, bad := got[rule]; bad {
+			t.Errorf("CronJob with secure pod spec must not trigger %q", rule)
+		}
 	}
 }
 
@@ -199,6 +255,160 @@ spec:
 	} {
 		if _, ok := got[want]; !ok {
 			t.Errorf("unhardened container must flag %q, got %v", want, keys(got))
+		}
+	}
+}
+
+func TestKubernetesRulePackAdditions(t *testing.T) {
+	files := map[string]string{
+		"rbac.yaml": `apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: unsafe
+rules:
+- apiGroups: ["*"]
+  resources: ["pods"]
+  verbs: ["bind"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: admin
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+`,
+		"secrets.yaml": `apiVersion: v1
+kind: Secret
+metadata:
+  name: api
+stringData:
+  token: literal
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+  namespace: prod
+spec:
+  serviceAccountName: default
+  containers:
+  - name: app
+    image: app:1
+    env:
+    - name: API_TOKEN
+      value: literal
+`,
+		"ingress.yaml": `apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app
+spec:
+  tls:
+  - hosts: [app.example.test]
+`,
+	}
+	got := ruleIDs(scan(t, files))
+	for _, want := range []string{
+		"kubernetes-rbac-wildcard-permissions", "kubernetes-rbac-escalation-verbs",
+		"kubernetes-rbac-cluster-admin-binding", "kubernetes-default-service-account",
+		"kubernetes-secret-in-env", "kubernetes-secret-in-manifest", "kubernetes-ingress-tls-no-secret",
+		"kubernetes-namespace-no-network-policy",
+	} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("expected rule %q, got %v", want, keys(got))
+		}
+	}
+	if _, bad := got["kubernetes-ingress-no-tls"]; bad {
+		t.Error("Ingress with a TLS entry must not trigger no-tls")
+	}
+}
+
+func TestKubernetesNetworkPolicyNamespaceCoverage(t *testing.T) {
+	files := map[string]string{
+		"workloads.yaml": `apiVersion: v1
+kind: Pod
+metadata:
+  name: one
+  namespace: protected
+spec:
+  serviceAccountName: app
+  containers:
+  - name: app
+    image: app:1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: two
+  namespace: unprotected
+spec:
+  serviceAccountName: app
+  containers:
+  - name: app
+    image: app:1
+`,
+		"policy.yaml": `apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: protected
+spec:
+  podSelector: {}
+`,
+	}
+	var count int
+	for _, finding := range scan(t, files) {
+		if finding.RuleID == "kubernetes-namespace-no-network-policy" {
+			count++
+			if finding.Resource != "Pod/two" {
+				t.Errorf("policy finding must identify unprotected workload, got %q", finding.Resource)
+			}
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected one unprotected-namespace finding, got %d", count)
+	}
+}
+
+func TestKubernetesSecretReferenceAndIngressTLSAreCompliant(t *testing.T) {
+	manifest := `apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+  namespace: prod
+spec:
+  serviceAccountName: app
+  containers:
+  - name: app
+    image: app:1
+    env:
+    - name: API_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: api
+          key: token
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app
+spec:
+  tls:
+  - secretName: app-tls
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: prod
+spec:
+  podSelector: {}
+`
+	got := ruleIDs(scan(t, map[string]string{"manifest.yaml": manifest}))
+	for _, rule := range []string{"kubernetes-secret-in-env", "kubernetes-ingress-no-tls", "kubernetes-ingress-tls-no-secret", "kubernetes-namespace-no-network-policy"} {
+		if _, bad := got[rule]; bad {
+			t.Errorf("compliant manifest must not trigger %q", rule)
 		}
 	}
 }

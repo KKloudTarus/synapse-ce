@@ -23,9 +23,9 @@ const (
 // maven/gradle resolvers exactly – a caller-supplied ToolRunner confines the exec (the API path, with
 // egress denied), or an explicit trusted-local direct exec is used (the CLI). With NEITHER set, Helm
 // rendering is skipped. Always argv (never a shell), fixed release name, no chart hooks; best-effort.
-func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, helmBin, chartDir, relDir string) []ports.MisconfigRawFinding {
+func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, helmBin, chartDir, relDir string) k8sScanResult {
 	if helmBin == "" {
-		return nil
+		return k8sScanResult{}
 	}
 	args := []string{"template", "synapse-scan", chartDir, "--skip-tests"}
 	var rendered []byte
@@ -44,14 +44,14 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 			// depend on the egress applier being present. This neutralizes Helm's Sprig getHostByName.
 		})
 		if err != nil || res.ExitCode != 0 {
-			return nil
+			return k8sScanResult{}
 		}
 		rendered = res.Stdout
 	case direct:
 		// Trusted-local (CLI) direct exec, matching the CLI's maven/gradle posture. Output is capped
 		// DURING capture so a chart rendering gigabytes cannot OOM the process before a post-hoc cap.
 		if _, err := exec.LookPath(helmBin); err != nil {
-			return nil
+			return k8sScanResult{}
 		}
 		cctx, cancel := context.WithTimeout(ctx, helmRenderTimeout)
 		defer cancel()
@@ -59,11 +59,11 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 		cw := &cappedBuffer{max: maxRenderedBytes}
 		cmd.Stdout, cmd.Stderr = cw, io.Discard
 		if err := cmd.Run(); err != nil {
-			return nil
+			return k8sScanResult{}
 		}
 		rendered = cw.buf.Bytes()
 	default:
-		return nil // Helm rendering not enabled (no sandbox runner, not trusted-local)
+		return k8sScanResult{} // Helm rendering not enabled (no sandbox runner, not trusted-local)
 	}
 	if len(rendered) > maxRenderedBytes {
 		rendered = rendered[:maxRenderedBytes]
