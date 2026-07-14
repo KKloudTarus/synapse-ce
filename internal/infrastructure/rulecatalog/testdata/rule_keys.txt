@@ -250,6 +250,11 @@ java-weak-hash-md5
 java-weak-hash-sha1
 java-xml-decoder
 jfrog-token
+js-a11y-anchor-href-hash
+js-a11y-distracting-element
+js-a11y-no-access-key
+js-a11y-no-autofocus
+js-a11y-positive-tabindex
 js-angular-bypass-security
 js-angular-component-factory-resolver
 js-angular-entry-components
@@ -291,6 +296,8 @@ js-cors-reflect-origin
 js-cors-wildcard
 js-crypto-createcipher
 js-crypto-createdecipher
+js-crypto-hash-md5
+js-crypto-hash-sha1
 js-dangerously-set-inner-html
 js-date-getyear
 js-date-setyear
@@ -358,6 +365,7 @@ js-no-labels
 js-no-loss-of-precision
 js-no-multi-assign
 js-no-nested-ternary
+js-no-new-bigint
 js-no-new-object
 js-no-new-require
 js-no-new-symbol
