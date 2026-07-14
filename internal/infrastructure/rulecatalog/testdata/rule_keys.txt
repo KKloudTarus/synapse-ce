@@ -20,10 +20,13 @@ debug-mode-enabled
 dockerfile-add-instead-of-copy
 dockerfile-add-remote-url
 dockerfile-apk-no-cache
+dockerfile-apk-version-pin
+dockerfile-apt-cli
 dockerfile-apt-no-clean
 dockerfile-apt-no-norecommends
 dockerfile-apt-no-yes
 dockerfile-apt-upgrade
+dockerfile-apt-version-pin
 dockerfile-cd-in-run
 dockerfile-copy-to-root
 dockerfile-expose-ssh
@@ -35,6 +38,7 @@ dockerfile-multiple-cmd
 dockerfile-multiple-entrypoint
 dockerfile-no-healthcheck
 dockerfile-pip-no-cache-dir
+dockerfile-plaintext-download
 dockerfile-private-key-copy
 dockerfile-run-as-root
 dockerfile-run-pipe-shell
@@ -47,6 +51,7 @@ dockerfile-shell-form-entrypoint
 dockerfile-workdir-relative
 dockerfile-world-writable
 dockerfile-yum-no-clean
+dockerfile-yum-no-yes
 dom-xss-inner-html
 dynamic-code-eval
 generic-command-injection-sink

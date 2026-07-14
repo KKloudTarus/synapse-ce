@@ -379,7 +379,60 @@ var (
 	fromPlatformRe     = regexp.MustCompile(`(?i)--platform=(\S+)`)
 	keyMaterialRe      = regexp.MustCompile(`(?i)(?:^|/)(?:id_rsa|id_dsa|id_ecdsa|id_ed25519)\b|\.(?:pem|key|pfx|p12|ppk)\b`)
 	sudoRe             = regexp.MustCompile(`(?i)(?:^|[|&;]\s*|\s)sudo\s`)
+	// plainHTTPRe matches a curl/wget download whose URL uses cleartext http:// (not https). `[^|&;]*?`
+	// keeps the match inside a single shell command segment; `http://` never matches `https://`.
+	plainHTTPRe = regexp.MustCompile(`(?i)\b(?:curl|wget)\b[^|&;]*?\bhttp://`)
+	// aptCliRe matches the `apt` command (not `apt-get`/`apt-cache`) invoked at a command boundary; after
+	// `apt-get` comes `-`, not whitespace, so that form is excluded.
+	aptCliRe = regexp.MustCompile(`(?i)(?:^|&&|;|\|)\s*apt\s+(?:-[a-zA-Z]+\s+)*(?:install|update|upgrade|full-upgrade|remove|purge)\b`)
+	// yumYesRe matches an assume-yes flag for yum/dnf (-y or --assumeyes).
+	yumYesRe = regexp.MustCompile(`(?i)(?:--assumeyes|(?:^|\s)-[a-zA-Z]*y[a-zA-Z]*(?:\s|$))`)
+	// pkgNameRe matches a bare package operand (a plain name, not a flag, path, URL, or pinned pkg=ver).
+	pkgNameRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._+-]*$`)
+	// runSegRe splits a RUN body into shell command segments on && ; | so a package-install check reasons
+	// about one command at a time.
+	runSegRe = regexp.MustCompile(`&&|[;|]`)
 )
+
+// valueFlags are package-manager flags that consume the FOLLOWING token as their value, so that token
+// is not a package name (avoids flagging, e.g., the release after `apt-get install -t bookworm`).
+var valueFlags = map[string]bool{
+	"-t": true, "--target-release": true, "-o": true, "--option": true,
+	"-c": true, "--config-file": true, "-p": true, "--repository": true,
+	"-X": true, "--virtual": true,
+}
+
+// hasUnpinnedPackage reports whether an install segment names at least one package with no "=version"
+// pin. Flags, flag values, variable refs, and paths/local files are ignored to keep false positives low.
+func hasUnpinnedPackage(seg, keyword string) bool {
+	toks := fields(seg)
+	idx := -1
+	for i, t := range toks {
+		if strings.EqualFold(t, keyword) {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return false
+	}
+	operands := toks[idx+1:]
+	for i, t := range operands {
+		if strings.HasPrefix(t, "-") {
+			continue // a flag
+		}
+		if i > 0 && valueFlags[operands[i-1]] {
+			continue // the value of a preceding flag, not a package
+		}
+		if strings.ContainsAny(t, "=$/") {
+			continue // pinned (=), variable ($), or a path/URL (/)
+		}
+		if pkgNameRe.MatchString(t) {
+			return true // a bare package name with no version pin
+		}
+	}
+	return false
+}
 
 // checkRunStep runs the RUN-instruction checks other than pipe-to-shell: sudo use, TLS-disabling
 // downloads, and apt installs that never prune the package cache.
@@ -488,6 +541,52 @@ func checkRunStep(args, rel string, line int) []ports.MisconfigRawFinding {
 			Resource:    "Dockerfile RUN",
 			Description: "A RUN step assigns a credential as a literal value (a password/token/key), so the secret is persisted in an image layer and the build cache. Use BuildKit `--mount=type=secret` or inject the value at runtime instead of baking it in.",
 		})
+	}
+	if plainHTTPRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-plaintext-download",
+			Title: "Download over cleartext HTTP", Severity: shared.SeverityMedium,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step fetches content with curl/wget over cleartext http://, so a network attacker can tamper with the payload in transit (and it is silently trusted at build time). Use https:// and verify a checksum or signature.",
+		})
+	}
+	if aptCliRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-apt-cli",
+			Title: "apt used instead of apt-get", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step invokes the apt CLI, which is intended for interactive use and warns that it has no stable interface for scripts, so its behaviour can change across releases and break the build. Use apt-get (and apt-cache) in image builds.",
+		})
+	}
+	if yumInstallRe.MatchString(args) && !yumYesRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-yum-no-yes",
+			Title: "yum/dnf install without -y", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "A yum/dnf install runs without -y/--assumeyes, so a non-interactive image build hangs waiting for a confirmation prompt. Add -y.",
+		})
+	}
+	for _, seg := range runSegRe.Split(args, -1) {
+		if aptInstallRe.MatchString(seg) && hasUnpinnedPackage(seg, "install") {
+			out = append(out, ports.MisconfigRawFinding{
+				File: rel, Line: line, RuleID: "dockerfile-apt-version-pin",
+				Title: "apt install without a pinned version", Severity: shared.SeverityLow,
+				Resource:    "Dockerfile RUN",
+				Description: "An apt/apt-get install names a package with no pinned version (package=version), so a later build can pull a different, untested release and silently change or break the image. Pin each package, for example `curl=7.88.1-10+deb12u5`.",
+			})
+			break
+		}
+	}
+	for _, seg := range runSegRe.Split(args, -1) {
+		if apkAddRe.MatchString(seg) && hasUnpinnedPackage(seg, "add") {
+			out = append(out, ports.MisconfigRawFinding{
+				File: rel, Line: line, RuleID: "dockerfile-apk-version-pin",
+				Title: "apk add without a pinned version", Severity: shared.SeverityLow,
+				Resource:    "Dockerfile RUN",
+				Description: "An apk add names a package with no pinned version (package=version), so a later build can pull a different, untested release and silently change or break the image. Pin each package, for example `curl=8.5.0-r0`.",
+			})
+			break
+		}
 	}
 	return out
 }
