@@ -488,6 +488,7 @@ python-crypto-mode-ecb
 python-datetime-utcnow
 python-deep-nesting
 python-dict-get-none-default
+python-dill-load
 python-django-allowed-hosts-wildcard
 python-django-csrf-cookie-insecure
 python-django-csrf-exempt
@@ -495,6 +496,7 @@ python-django-debug
 python-django-extra
 python-django-mark-safe
 python-django-raw-sql
+python-django-safestring
 python-django-session-cookie-insecure
 python-django-ssl-redirect-off
 python-double-negation
@@ -506,6 +508,7 @@ python-exec-call
 python-f-string-logging
 python-flask-bind-all
 python-flask-debug
+python-flask-render-template-string
 python-fstring-no-placeholder
 python-ftplib-cleartext
 python-function-call-in-default
@@ -520,6 +523,7 @@ python-hashlib-sha1
 python-high-complexity
 python-is-literal
 python-jinja-autoescape-off
+python-jsonpickle-decode
 python-jwt-algorithms-none
 python-jwt-verify-false
 python-jwt-verify-signature-off
@@ -527,6 +531,7 @@ python-lambda-assignment
 python-large-class
 python-len-eq-zero
 python-len-gt-zero
+python-logging-percent-format
 python-marshal-load
 python-mktemp-insecure
 python-multiple-imports
@@ -574,7 +579,9 @@ python-too-many-args
 python-too-many-returns
 python-torch-load
 python-type-eq-vs-isinstance
+python-unnecessary-dict-call
 python-unnecessary-dunder-call
+python-unnecessary-list-call
 python-unused-import
 python-use-dict-literal
 python-use-list-literal
