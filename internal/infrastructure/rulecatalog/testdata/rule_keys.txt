@@ -258,6 +258,7 @@ js-ast-nested-loop
 js-ast-return-in-finally
 js-ast-too-many-params
 js-ast-too-many-returns
+js-buffer-constructor
 js-compare-boolean-literal
 js-cookie-httponly-false
 js-cookie-samesite-none
@@ -277,6 +278,7 @@ js-eval-call
 js-execscript
 js-foreach-async
 js-global-isnan
+js-implicit-string-coercion
 js-inner-html-append
 js-inner-html-assign
 js-insecure-websocket
@@ -313,6 +315,8 @@ js-no-new-require
 js-no-new-symbol
 js-no-new-wrappers
 js-no-obj-calls
+js-no-path-concat
+js-no-process-exit
 js-no-proto
 js-no-return-assign
 js-no-return-await
@@ -332,6 +336,8 @@ js-prefer-exponentiation
 js-prefer-includes
 js-prefer-object-spread
 js-prefer-promise-reject-errors
+js-prefer-regex-literal
+js-prefer-rest-params
 js-prefer-spread
 js-prefer-template
 js-proto-assign
