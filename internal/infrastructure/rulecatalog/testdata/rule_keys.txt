@@ -150,6 +150,7 @@ java-boxed-constructor
 java-catch-error
 java-catch-generic
 java-catch-npe
+java-catch-throwable
 java-cipher-3des
 java-cipher-aes-default-ecb
 java-cipher-blowfish
@@ -183,6 +184,8 @@ java-equals-null
 java-exception-no-message
 java-explicit-finalize-call
 java-explicit-gc
+java-extends-thread
+java-fastjson-parseobject
 java-file-world-readable
 java-file-world-writable
 java-finalize-override
@@ -203,7 +206,9 @@ java-insecure-random
 java-jackson-activate-default-typing
 java-jackson-default-typing
 java-jjwt-unsigned
+java-jndi-injection
 java-legacy-collection
+java-literals-first-equals
 java-log-injection
 java-long-literal-lowercase-l
 java-modifier-order
@@ -221,6 +226,7 @@ java-ognl-injection
 java-open-redirect
 java-path-traversal-param
 java-printstacktrace
+java-public-finalize
 java-redundant-intvalue
 java-return-in-finally
 java-runtime-exec-var
@@ -235,6 +241,7 @@ java-spel-parser
 java-spring-crossorigin-default
 java-sql-string-concat
 java-ssl-context-insecure
+java-ssrf-url-param
 java-star-import
 java-static-iv
 java-string-equals-empty
@@ -258,6 +265,9 @@ java-weak-hash-md5
 java-weak-hash-sha1
 java-xml-decoder
 java-xstream-deserialization
+java-xxe-saxbuilder
+java-xxe-saxreader
+java-xxe-xmlreaderfactory
 java-zip-slip
 jfrog-token
 js-a11y-anchor-href-hash
