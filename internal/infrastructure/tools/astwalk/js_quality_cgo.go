@@ -23,6 +23,11 @@ var jsRules = map[string]pythonRule{
 	"complex-condition":  {"quality", "js-ast-complex-condition", "", "low", "Overly complex boolean condition", "A condition combining many && / || operators is hard to reason about; name the sub-conditions."},
 	"high-complexity":    {"quality", "js-ast-high-complexity", "", "medium", "Function has high cyclomatic complexity", "A function with many decision points (if/loop/case/catch/&&/||) is hard to test; reduce branching or split it."},
 	"switch-many-cases":  {"quality", "js-ast-switch-many-cases", "", "low", "switch has too many cases", "A switch with a very large number of cases is often better modeled with a map or lookup object."},
+	"require-await":      {"reliability", "js-ast-require-await", "", "low", "async function without await", "An async function that never awaits adds overhead and usually signals a mistake; drop async or add the await."},
+	"await-in-loop":      {"quality", "js-ast-await-in-loop", "", "medium", "await inside a loop", "Awaiting inside a loop serializes the iterations; use Promise.all for independent work."},
+	"useless-catch":      {"quality", "js-ast-useless-catch", "", "low", "catch clause only rethrows", "A catch that just rethrows the caught error adds nothing; remove the try/catch or handle the error."},
+	"lonely-if":          {"quality", "js-ast-lonely-if", "", "low", "else block contains only an if", "An else whose only statement is an if can be written as else if."},
+	"getter-no-return":   {"reliability", "js-ast-getter-no-return", "", "medium", "getter without a return", "A getter that never returns a value yields undefined; return the property value."},
 }
 
 // jsControlTypes / jsLoopTypes are the node kinds counted for nesting-depth metrics.
@@ -74,6 +79,22 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 					out = append(out, jsFinding("high-complexity", n, rel))
 				}
 			}
+			if body := n.ChildByFieldName("body"); body != nil && body.Type() == "statement_block" && jsIsAsync(n) && !jsHasAwait(body) {
+				out = append(out, jsFinding("require-await", n, rel))
+			}
+			if n.Type() == "method_definition" && jsIsGetter(n) {
+				if body := n.ChildByFieldName("body"); body != nil && !jsHasReturnValue(body) {
+					out = append(out, jsFinding("getter-no-return", n, rel))
+				}
+			}
+		case "for_statement", "for_in_statement", "while_statement", "do_statement":
+			if body := n.ChildByFieldName("body"); body != nil && jsHasAwait(body) {
+				out = append(out, jsFinding("await-in-loop", n, rel))
+			}
+		case "catch_clause":
+			if jsIsUselessCatch(n, src) {
+				out = append(out, jsFinding("useless-catch", n, rel))
+			}
 		case "switch_statement":
 			if body := n.ChildByFieldName("body"); body != nil && !jsSwitchHasDefault(body) {
 				out = append(out, jsFinding("missing-default", n, rel))
@@ -97,6 +118,11 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			if cond := n.ChildByFieldName("condition"); cond != nil && jsCountBoolOps(cond, src) > 4 {
 				out = append(out, jsFinding("complex-condition", n, rel))
 			}
+			if rawAlt := n.ChildByFieldName("alternative"); rawAlt != nil && rawAlt.Type() == "else_clause" && rawAlt.NamedChildCount() == 1 {
+				if b := rawAlt.NamedChild(0); b != nil && b.Type() == "statement_block" && b.NamedChildCount() == 1 && b.NamedChild(0).Type() == "if_statement" {
+					out = append(out, jsFinding("lonely-if", n, rel))
+				}
+			}
 			cons := n.ChildByFieldName("consequence")
 			alt := n.ChildByFieldName("alternative")
 			if alt != nil && alt.Type() == "else_clause" && alt.NamedChildCount() > 0 {
@@ -116,6 +142,80 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 		}
 	}
 	return dedupeQuality(out)
+}
+
+// jsFuncTypes are the function-like node kinds that bound "does this scope contain X" searches.
+var jsFuncTypes = map[string]bool{
+	"function_declaration": true, "function_expression": true, "arrow_function": true,
+	"generator_function_declaration": true, "method_definition": true,
+}
+
+// jsIsAsync reports whether a function node carries the async keyword token.
+func jsIsAsync(n *sitter.Node) bool {
+	for i := 0; i < int(n.ChildCount()); i++ {
+		if n.Child(i).Type() == "async" {
+			return true
+		}
+	}
+	return false
+}
+
+// jsIsGetter reports whether a method_definition is a getter (has the get keyword token).
+func jsIsGetter(n *sitter.Node) bool {
+	for i := 0; i < int(n.ChildCount()); i++ {
+		if n.Child(i).Type() == "get" {
+			return true
+		}
+	}
+	return false
+}
+
+// jsHasAwait reports whether n's subtree contains an await expression, without descending into
+// nested functions (which have their own async scope).
+func jsHasAwait(n *sitter.Node) bool {
+	for i := 0; i < int(n.ChildCount()); i++ {
+		c := n.Child(i)
+		if jsFuncTypes[c.Type()] {
+			continue
+		}
+		if c.Type() == "await_expression" || jsHasAwait(c) {
+			return true
+		}
+	}
+	return false
+}
+
+// jsHasReturnValue reports whether n's subtree contains a return statement with a value, without
+// descending into nested functions.
+func jsHasReturnValue(n *sitter.Node) bool {
+	for i := 0; i < int(n.ChildCount()); i++ {
+		c := n.Child(i)
+		if jsFuncTypes[c.Type()] {
+			continue
+		}
+		if c.Type() == "return_statement" && c.NamedChildCount() > 0 {
+			return true
+		}
+		if jsHasReturnValue(c) {
+			return true
+		}
+	}
+	return false
+}
+
+// jsIsUselessCatch reports whether a catch clause's body only rethrows the caught binding unchanged.
+func jsIsUselessCatch(n *sitter.Node, src []byte) bool {
+	param := n.ChildByFieldName("parameter")
+	body := n.ChildByFieldName("body")
+	if param == nil || body == nil || body.Type() != "statement_block" || body.NamedChildCount() != 1 {
+		return false
+	}
+	st := body.NamedChild(0)
+	if st.Type() != "throw_statement" || st.NamedChildCount() != 1 {
+		return false
+	}
+	thrown := st.NamedChild(0)
+	return thrown.Type() == "identifier" && strings.TrimSpace(thrown.Content(src)) == strings.TrimSpace(param.Content(src))
 }
 
 // jsMaxDepthByType returns the maximum nesting depth of nodes whose type is in types within n's

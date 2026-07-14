@@ -611,3 +611,26 @@ func TestQualityForComplexityMetrics(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForJSASTBehavioral(t *testing.T) {
+	root := t.TempDir()
+	js := "async function noawait() {\n  return compute();\n}\n" +
+		"async function loop(items) {\n  for (const it of items) {\n    await handle(it);\n  }\n}\n" +
+		"function wrap() {\n  try {\n    run();\n  } catch (err) {\n    throw err;\n  }\n}\n" +
+		"function lonely(a, b) {\n  if (a) {\n    one();\n  } else {\n    if (b) {\n      two();\n    }\n  }\n}\n" +
+		"class C {\n  get name() {\n    this._name;\n  }\n}\n"
+	writeFile(t, root, "b.js", js)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"js-ast-require-await", "js-ast-await-in-loop", "js-ast-useless-catch", "js-ast-lonely-if", "js-ast-getter-no-return"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
