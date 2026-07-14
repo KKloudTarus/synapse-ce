@@ -11,8 +11,8 @@ import json, re, sys, importlib.util, os
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-LANG_EXTS = {"js": "jsExts", "java": "javaExts"}
-LANG_LABEL = {"js": "JavaScript/TypeScript", "java": "Java"}
+LANG_EXTS = {"js": "jsExts", "java": "javaExts", "py": "pyExts"}
+LANG_LABEL = {"js": "JavaScript/TypeScript", "java": "Java", "py": "Python"}
 TYPE_CONST = {"vuln": "TypeVulnerability", "bug": "TypeBug", "smell": "TypeCodeSmell", "hotspot": "TypeSecurityHotspot"}
 QUAL_CONST = {"sec": "QualitySecurity", "rel": "QualityReliability", "maint": "QualityMaintainability"}
 SEV_CONST = {"critical": "SeverityCritical", "high": "SeverityHigh", "medium": "SeverityMedium", "low": "SeverityLow", "info": "SeverityInfo"}
@@ -123,18 +123,23 @@ if __name__ == "__main__":
     n = validate(specs)
     open(os.path.join(ROOT, "internal/infrastructure/tools/sast/patterns_langpack.go"), "w").write(emit_engine_v2(specs))
     open(os.path.join(ROOT, "internal/infrastructure/rulecatalog/langpacks.go"), "w").write(emit_catalog(specs))
-    # golden keys
+    # golden keys. Track exactly which keys we generated last time in a sidecar so the refresh
+    # removes stale/renamed spec keys without depending on prefix heuristics, and never touches
+    # hand-written keys (e.g. the tree-sitter AST rules java-ast-*, js-ast-*, python-*).
     gp = os.path.join(ROOT, "internal/infrastructure/rulecatalog/testdata/rule_keys.txt")
-    PREFIXES = ("js-", "ts-", "java-", "node-")
-
-    def is_generated_line_rule(k):
-        # Strip only the generated line-regex langpack keys; preserve the hand-written
-        # tree-sitter AST keys (java-ast-*, js-ast-*), which are not produced from specs.
-        return k.startswith(PREFIXES) and "-ast-" not in k
-
-    existing = set(l.strip() for l in open(gp) if l.strip() and not is_generated_line_rule(l.strip()))
-    keys = existing | set(s["id"] for s in specs)
+    sidecar = os.path.join(os.path.dirname(__file__), ".generated_keys.json")
+    current = set(s["id"] for s in specs)
+    golden = set(l.strip() for l in open(gp) if l.strip())
+    if os.path.exists(sidecar):
+        previous = set(json.load(open(sidecar)))
+    else:
+        # First run under the sidecar scheme: seed from the old prefix rule (line-regex langpack
+        # keys only), preserving the AST keys that were never spec-generated.
+        PREFIXES = ("js-", "ts-", "java-", "node-")
+        previous = set(k for k in golden if k.startswith(PREFIXES) and "-ast-" not in k)
+    keys = (golden - previous) | current
     open(gp, "w").write("\n".join(sorted(keys)) + "\n")
+    json.dump(sorted(current), open(sidecar, "w"), indent=0)
     by_lang = {}
     for s in specs:
         by_lang[s["lang"]] = by_lang.get(s["lang"], 0) + 1
