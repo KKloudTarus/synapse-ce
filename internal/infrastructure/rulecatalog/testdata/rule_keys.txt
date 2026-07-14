@@ -135,6 +135,7 @@ java-empty-statement
 java-empty-synchronized
 java-empty-while
 java-enumeration
+java-equals-null
 java-exception-no-message
 java-explicit-finalize-call
 java-explicit-gc
@@ -152,6 +153,7 @@ java-notify-not-notifyall
 java-numberformat-static
 java-octal-literal
 java-printstacktrace
+java-redundant-intvalue
 java-return-in-finally
 java-runtime-exec-var
 java-runtime-halt
@@ -159,13 +161,17 @@ java-simpledateformat-static
 java-star-import
 java-string-equals-empty
 java-string-intern
+java-string-length-zero
 java-string-ref-equality
 java-stringbuffer
 java-system-exit
 java-system-out-print
+java-thread-yield
 java-throw-in-finally
+java-throw-npe
 java-toarray-noarg
 jfrog-token
+js-array-sort-no-compare
 js-document-cookie-write
 js-dom-xss-outerhtml
 js-dot-notation
@@ -177,6 +183,7 @@ js-insert-adjacent-html
 js-localstorage-sensitive
 js-no-alert
 js-no-array-constructor
+js-no-array-delete
 js-no-async-promise-executor
 js-no-caller
 js-no-compare-neg-zero
@@ -216,10 +223,12 @@ js-parseint-radix
 js-postmessage-wildcard
 js-prefer-exponentiation
 js-prefer-object-spread
+js-prefer-spread
 js-prefer-template
 js-prototype-builtins
 js-script-url
 js-settimeout-string
+js-symbol-no-description
 js-use-isnan
 js-yoda-condition
 jwt
@@ -274,9 +283,12 @@ node-error-stack-in-response
 node-execsync-dynamic
 node-fs-chmod-world-writable
 node-fs-exists-deprecated
+node-header-injection-user
+node-jwt-alg-none
 node-jwt-decode-no-verify
 node-legacy-url-parse
 node-new-buffer
+node-process-binding
 node-process-exit-lib
 node-sendfile-user-input
 node-sequelize-literal
@@ -284,6 +296,7 @@ node-set-insecure-cookie-samesite-none
 node-tls-reject-unauthorized-env
 node-unsafe-yaml-load
 node-vm-run-dynamic
+node-vm2-usage
 node-weak-tls-protocol
 nosql-injection-request
 npm-token
