@@ -266,6 +266,7 @@ js-angular-testbed-get
 js-angular-trust-as-html
 js-arguments-callee
 js-arguments-caller
+js-array-observe
 js-array-sort-no-compare
 js-assert-deepequal-loose
 js-assert-equal-loose
@@ -317,6 +318,7 @@ js-crypto-createcipher
 js-crypto-createdecipher
 js-crypto-hash-md5
 js-crypto-hash-sha1
+js-css-getpropertycssvalue
 js-dangerously-set-inner-html
 js-date-getyear
 js-date-setyear
@@ -325,6 +327,10 @@ js-delete-var
 js-document-cookie-write
 js-document-domain-write
 js-document-write
+js-dom-create-entity-reference
+js-dom-init-custom-event
+js-dom-init-keyboard-event
+js-dom-init-mouse-event
 js-dom-xss-outerhtml
 js-dot-notation
 js-double-await
@@ -445,14 +451,17 @@ js-no-useless-concat
 js-no-var
 js-no-void
 js-no-with
+js-node-allocunsafeslow
 js-node-constants-module
 js-node-crypto-createcredentials
 js-node-crypto-default-encoding
 js-node-domain-module
 js-node-fs-exists
 js-node-fs-rmdir-recursive
+js-node-mainmodule
 js-node-module-parent
 js-node-os-tmpdir
+js-node-process-assert
 js-node-process-binding
 js-node-process-eventemitter
 js-node-punycode-module
@@ -464,7 +473,9 @@ js-node-util-extend
 js-node-util-isarray
 js-node-util-print
 js-node-util-types
+js-object-getnotifier
 js-object-observe
+js-object-unobserve
 js-parentnode-removechild
 js-parseint-radix
 js-postmessage-wildcard
