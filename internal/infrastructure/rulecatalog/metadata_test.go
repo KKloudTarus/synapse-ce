@@ -198,6 +198,7 @@ func TestMetadata_ApprovedLanguage(t *testing.T) {
 		"GitHub Actions":        true,
 		"Secrets":               true,
 		"XML":                   true,
+		"Java":                  true,
 	}
 
 	for _, r := range rules {

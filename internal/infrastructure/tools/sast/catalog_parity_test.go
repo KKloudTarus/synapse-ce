@@ -60,6 +60,8 @@ func TestCatalogParity(t *testing.T) {
 			expectedLang = "JavaScript/TypeScript"
 		case tc.exts != nil && tc.exts[".py"]:
 			expectedLang = "Python"
+		case tc.exts != nil && tc.exts[".java"]:
+			expectedLang = "Java"
 		case tc.exts != nil && tc.exts[".c"]:
 			expectedLang = "C/C++/Objective-C"
 		case explicitSASTLanguages[tc.id] != "":
@@ -90,11 +92,11 @@ func TestCatalogParity(t *testing.T) {
 		if catRule.Detection != domainrule.DetectionPattern {
 			t.Errorf("Rule %s Detection mode mismatch: expected Pattern", tc.id)
 		}
-		if catRule.Type != domainrule.TypeVulnerability {
-			t.Errorf("Rule %s Type mismatch: expected Vulnerability", tc.id)
+		if catRule.Type != tc.ruleType() {
+			t.Errorf("Rule %s Type mismatch: catalog=%v engine=%v", tc.id, catRule.Type, tc.ruleType())
 		}
-		if len(catRule.Qualities) != 1 || catRule.Qualities[0] != domainrule.QualitySecurity {
-			t.Errorf("Rule %s Quality mismatch: expected exactly Security", tc.id)
+		if len(catRule.Qualities) != 1 || catRule.Qualities[0] != tc.ruleQuality() {
+			t.Errorf("Rule %s Quality mismatch: catalog=%v engine=%v", tc.id, catRule.Qualities, tc.ruleQuality())
 		}
 
 		// Example parity verification
