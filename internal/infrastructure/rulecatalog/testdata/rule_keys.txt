@@ -117,6 +117,12 @@ insecure-randomness-security-context
 insecure-temp-file
 insecure-tls-verify-disabled
 java-access-controller
+java-android-js-interface
+java-android-rawquery-concat
+java-android-webview-file-access
+java-android-webview-js
+java-android-world-readable
+java-android-world-writeable
 java-apache-default-httpclient
 java-apache-httpclient3
 java-append-char-with-string
@@ -249,6 +255,7 @@ java-guava-throwables-propagate
 java-guava-tostringhelper
 java-hardcoded-tmp-path
 java-header-crlf-param
+java-hessian-input
 java-hibernate-create-criteria
 java-hibernate-create-sql-query
 java-hibernate-detached-criteria
@@ -304,6 +311,7 @@ java-mockito-anyobject
 java-mockito-initmocks
 java-modifier-order
 java-mutable-public-static-array
+java-mvel-eval
 java-mysql-allow-load-local
 java-nan-comparison
 java-native-sql-concat
@@ -394,6 +402,7 @@ java-unnecessary-temporary-conversion
 java-unnecessary-unboxing
 java-upload-original-filename-path
 java-vector-elementat
+java-velocity-evaluate
 java-weak-hash-md5
 java-weak-hash-sha1
 java-weak-password-encoder
