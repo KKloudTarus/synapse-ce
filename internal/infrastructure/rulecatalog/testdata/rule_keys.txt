@@ -356,6 +356,9 @@ js-no-useless-concat
 js-no-var
 js-no-void
 js-no-with
+js-node-domain-module
+js-node-fs-exists
+js-node-url-parse
 js-parentnode-removechild
 js-parseint-radix
 js-postmessage-wildcard
@@ -377,6 +380,13 @@ js-proto-assign
 js-proto-constructor-bracket
 js-proto-pollution-bracket
 js-prototype-builtins
+js-react-children-prop
+js-react-createclass
+js-react-deprecated-lifecycle
+js-react-dom-render
+js-react-finddomnode
+js-react-proptypes
+js-react-string-ref
 js-reject-unauthorized-false
 js-script-url
 js-sessionstorage-sensitive
@@ -393,6 +403,10 @@ js-trim-left-right
 js-unneeded-ternary
 js-use-isnan
 js-useless-undefined
+js-vue-dollar-listeners
+js-vue-dollar-scopedslots
+js-vue-events-api
+js-vue-slot-attribute
 js-vue-v-html
 js-yoda-condition
 jwt
