@@ -703,3 +703,75 @@ func TestQualityForJSASTStructural2(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForJSASTBehavioral2(t *testing.T) {
+	root := t.TempDir()
+	js := "function add(items, extra) {\n  items = items.concat(extra);\n  return items;\n}\n" +
+		"const config = {\n  host: \"a\",\n  host: \"b\",\n};\n" +
+		"class Box {\n  constructor(v) {\n    return v;\n  }\n}\n"
+	writeFile(t, root, "b2.js", js)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"js-ast-no-param-reassign", "js-ast-duplicate-key", "js-ast-constructor-return"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
+
+func TestQualityForJSASTBehavioral3(t *testing.T) {
+	root := t.TempDir()
+	js := "class C {\n  open() {}\n  open() {}\n}\n" +
+		"function f(x) {\n  return 1;\n  console.log(x);\n}\n" +
+		"function g(count, next) {\n  count = count;\n  if (next === next) { return count; }\n  return next;\n}\n"
+	writeFile(t, root, "b3.js", js)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"js-ast-duplicate-class-member", "js-ast-unreachable-code", "js-ast-self-assign", "js-ast-self-comparison"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
+
+func TestQualityForJSCollapsibleIf(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "c.js", "function f(a, b) {\n  if (a) {\n    if (b) {\n      run();\n    }\n  }\n}\n")
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	for _, x := range res.Findings {
+		if x.Rule == "js-ast-collapsible-if" {
+			return
+		}
+	}
+	t.Errorf("missing js-ast-collapsible-if in %+v", res.Findings)
+}
+
+func TestQualityForJSUselessConstructor(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "u.js", "class Derived extends Base {\n  constructor(...args) {\n    super(...args);\n  }\n}\n")
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	for _, x := range res.Findings {
+		if x.Rule == "js-ast-useless-constructor" {
+			return
+		}
+	}
+	t.Errorf("missing js-ast-useless-constructor in %+v", res.Findings)
+}

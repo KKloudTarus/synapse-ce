@@ -32,6 +32,119 @@ var jsRules = map[string]pythonRule{
 	"nested-switch":      {"quality", "js-ast-nested-switch", "", "low", "Nested switch statement", "A switch inside another switch is hard to follow; extract the inner switch into a function."},
 	"ternary-boolean":    {"quality", "js-ast-ternary-boolean", "", "low", "Ternary returning boolean literals", "cond ? true : false is just the condition (or its negation)."},
 	"small-switch":       {"quality", "js-ast-small-switch", "", "low", "switch with very few cases", "A switch with only one or two cases is clearer as an if/else."},
+	"param-reassign":     {"quality", "js-ast-no-param-reassign", "", "low", "Reassigned function parameter", "Reassigning a parameter hides the original argument and is confusing; use a local variable."},
+	"dupe-keys":          {"reliability", "js-ast-duplicate-key", "", "medium", "Duplicate object key", "An object literal with the same key twice silently keeps only the last value."},
+	"constructor-return": {"reliability", "js-ast-constructor-return", "", "medium", "Return value in a constructor", "Returning a value from a constructor is ignored (for objects) and confuses readers."},
+	"dupe-class-members": {"reliability", "js-ast-duplicate-class-member", "", "medium", "Duplicate class member", "A class declaring the same member twice silently keeps only the last definition."},
+	"unreachable":        {"reliability", "js-ast-unreachable-code", "", "medium", "Unreachable code", "Code after a return/throw/break/continue can never execute."},
+	"self-assign":        {"reliability", "js-ast-self-assign", "", "medium", "Self assignment", "Assigning a variable to itself has no effect and is usually a mistake."},
+	"self-compare":       {"reliability", "js-ast-self-comparison", "", "medium", "Self comparison", "Comparing a value to itself is constant (and misses the intended operand)."},
+	"collapsible-if":     {"quality", "js-ast-collapsible-if", "", "low", "Collapsible if statement", "An if whose only statement is another if (with no else) can be merged with &&."},
+	"useless-ctor":       {"quality", "js-ast-useless-constructor", "", "low", "Useless constructor", "A constructor that only forwards its arguments to super adds nothing and can be removed."},
+}
+
+// jsIsSuperOnlyBody reports whether a constructor body's only statement is a call to super(...).
+func jsIsSuperOnlyBody(body *sitter.Node, src []byte) bool {
+	if body.Type() != "statement_block" || body.NamedChildCount() != 1 {
+		return false
+	}
+	st := body.NamedChild(0)
+	if st.Type() != "expression_statement" || st.NamedChildCount() != 1 {
+		return false
+	}
+	call := st.NamedChild(0)
+	if call.Type() != "call_expression" {
+		return false
+	}
+	fn := call.ChildByFieldName("function")
+	return fn != nil && strings.TrimSpace(fn.Content(src)) == "super"
+}
+
+// jsMethodKey builds a comparison key for a class method, including static/get/set/async modifiers
+// so that legitimate getter/setter and static/instance pairs are not treated as duplicates.
+func jsMethodKey(m *sitter.Node, src []byte) string {
+	prefix := ""
+	for i := 0; i < int(m.ChildCount()); i++ {
+		switch m.Child(i).Type() {
+		case "static", "get", "set", "async", "*":
+			prefix += m.Child(i).Type() + " "
+		}
+	}
+	nm := m.ChildByFieldName("name")
+	if nm == nil {
+		return ""
+	}
+	return prefix + strings.TrimSpace(nm.Content(src))
+}
+
+// jsParamNames returns the set of simple identifier parameter names of a function node.
+func jsParamNames(n *sitter.Node, src []byte) map[string]bool {
+	out := map[string]bool{}
+	p := n.ChildByFieldName("parameters")
+	if p == nil {
+		return out
+	}
+	for i := 0; i < int(p.NamedChildCount()); i++ {
+		c := p.NamedChild(i)
+		if c.Type() == "identifier" {
+			out[strings.TrimSpace(c.Content(src))] = true
+			continue
+		}
+		// TS required_parameter / optional_parameter wrap the identifier.
+		for j := 0; j < int(c.NamedChildCount()); j++ {
+			if c.NamedChild(j).Type() == "identifier" {
+				out[strings.TrimSpace(c.NamedChild(j).Content(src))] = true
+				break
+			}
+		}
+	}
+	return out
+}
+
+// jsHasParamReassign reports whether n's subtree assigns to one of the given parameter names,
+// without descending into nested functions.
+func jsHasParamReassign(n *sitter.Node, params map[string]bool, src []byte) bool {
+	for i := 0; i < int(n.ChildCount()); i++ {
+		c := n.Child(i)
+		if jsFuncTypes[c.Type()] {
+			continue
+		}
+		switch c.Type() {
+		case "assignment_expression", "augmented_assignment_expression":
+			if l := c.ChildByFieldName("left"); l != nil && l.Type() == "identifier" && params[strings.TrimSpace(l.Content(src))] {
+				return true
+			}
+		case "update_expression":
+			if a := c.ChildByFieldName("argument"); a != nil && a.Type() == "identifier" && params[strings.TrimSpace(a.Content(src))] {
+				return true
+			}
+		}
+		if jsHasParamReassign(c, params, src) {
+			return true
+		}
+	}
+	return false
+}
+
+// jsHasDuplicateKey reports whether an object literal declares the same key more than once.
+func jsHasDuplicateKey(n *sitter.Node, src []byte) bool {
+	seen := map[string]bool{}
+	for i := 0; i < int(n.NamedChildCount()); i++ {
+		c := n.NamedChild(i)
+		if c.Type() != "pair" {
+			continue
+		}
+		k := c.ChildByFieldName("key")
+		if k == nil {
+			continue
+		}
+		key := strings.TrimSpace(k.Content(src))
+		if seen[key] {
+			return true
+		}
+		seen[key] = true
+	}
+	return false
 }
 
 // jsJumpTypes are statements that unconditionally leave the current block.
@@ -110,6 +223,23 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 					out = append(out, jsFinding("getter-no-return", n, rel))
 				}
 			}
+			if n.Type() == "method_definition" {
+				if nm := n.ChildByFieldName("name"); nm != nil && strings.TrimSpace(nm.Content(src)) == "constructor" {
+					if body := n.ChildByFieldName("body"); body != nil {
+						if jsHasReturnValue(body) {
+							out = append(out, jsFinding("constructor-return", n, rel))
+						}
+						if jsIsSuperOnlyBody(body, src) {
+							out = append(out, jsFinding("useless-ctor", n, rel))
+						}
+					}
+				}
+			}
+			if body := n.ChildByFieldName("body"); body != nil {
+				if params := jsParamNames(n, src); len(params) > 0 && jsHasParamReassign(body, params, src) {
+					out = append(out, jsFinding("param-reassign", n, rel))
+				}
+			}
 		case "for_statement", "for_in_statement", "while_statement", "do_statement":
 			if body := n.ChildByFieldName("body"); body != nil && jsHasAwait(body) {
 				out = append(out, jsFinding("await-in-loop", n, rel))
@@ -135,13 +265,25 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 		case "class_declaration", "class":
 			if body := n.ChildByFieldName("body"); body != nil {
 				methods := 0
+				seen := map[string]bool{}
+				dupe := false
 				for i := 0; i < int(body.NamedChildCount()); i++ {
-					if body.NamedChild(i).Type() == "method_definition" {
+					m := body.NamedChild(i)
+					if m.Type() == "method_definition" {
 						methods++
+						if key := jsMethodKey(m, src); key != "" {
+							if seen[key] {
+								dupe = true
+							}
+							seen[key] = true
+						}
 					}
 				}
 				if methods > 20 {
 					out = append(out, jsFinding("large-class", n, rel))
+				}
+				if dupe {
+					out = append(out, jsFinding("dupe-class-members", n, rel))
 				}
 			}
 		case "if_statement":
@@ -165,6 +307,11 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			if n.ChildByFieldName("alternative") != nil && jsBlockEndsInJump(cons) {
 				out = append(out, jsFinding("unnecessary-else", n, rel))
 			}
+			if n.ChildByFieldName("alternative") == nil && cons != nil && cons.Type() == "statement_block" && cons.NamedChildCount() == 1 {
+				if inner := cons.NamedChild(0); inner.Type() == "if_statement" && inner.ChildByFieldName("alternative") == nil {
+					out = append(out, jsFinding("collapsible-if", n, rel))
+				}
+			}
 		case "ternary_expression":
 			if c := n.ChildByFieldName("consequence"); c != nil {
 				if a := n.ChildByFieldName("alternative"); a != nil {
@@ -177,6 +324,33 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 		case "finally_clause":
 			if jsHasDescendantType(n, "return_statement") {
 				out = append(out, jsFinding("return-in-finally", n, rel))
+			}
+		case "object":
+			if jsHasDuplicateKey(n, src) {
+				out = append(out, jsFinding("dupe-keys", n, rel))
+			}
+		case "statement_block":
+			for i := 0; i < int(n.NamedChildCount())-1; i++ {
+				if jsJumpTypes[n.NamedChild(i).Type()] && n.NamedChild(i+1).Type() != "function_declaration" {
+					out = append(out, jsFinding("unreachable", n, rel))
+					break
+				}
+			}
+		case "assignment_expression":
+			l, rr := n.ChildByFieldName("left"), n.ChildByFieldName("right")
+			if l != nil && rr != nil && l.Type() == "identifier" && rr.Type() == "identifier" &&
+				strings.TrimSpace(l.Content(src)) == strings.TrimSpace(rr.Content(src)) {
+				out = append(out, jsFinding("self-assign", n, rel))
+			}
+		case "binary_expression":
+			if op := n.ChildByFieldName("operator"); op != nil {
+				switch op.Content(src) {
+				case "===", "==", "<", ">", "<=", ">=":
+					l, rr := n.ChildByFieldName("left"), n.ChildByFieldName("right")
+					if l != nil && rr != nil && strings.TrimSpace(l.Content(src)) == strings.TrimSpace(rr.Content(src)) {
+						out = append(out, jsFinding("self-compare", n, rel))
+					}
+				}
 			}
 		}
 		for i := 0; i < int(n.ChildCount()); i++ {
