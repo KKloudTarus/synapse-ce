@@ -577,6 +577,7 @@ func TestTerraformGapPackTriggers(t *testing.T) {
 	}{
 		{"iam resource wildcard", "resource \"aws_iam_policy\" \"p\" {\n  policy = jsonencode({ Statement = [{ Effect = \"Allow\", Action = \"s3:GetObject\", Resource = \"*\" }] })\n}\n", "terraform-iam-wildcard-resource"},
 		{"wildcard principal", "resource \"aws_sqs_queue_policy\" \"p\" {\n  policy = jsonencode({ Statement = [{ Effect = \"Allow\", Principal = \"*\", Action = \"sqs:SendMessage\" }] })\n}\n", "terraform-wildcard-principal"},
+		{"wildcard principal nested", "resource \"aws_kms_key\" \"k\" {\n  policy = jsonencode({ Statement = [{ Principal = { AWS = \"*\" }, Action = \"kms:Decrypt\" }] })\n}\n", "terraform-wildcard-principal"},
 		{"lambda public", "resource \"aws_lambda_permission\" \"p\" {\n  action        = \"lambda:InvokeFunction\"\n  function_name = \"f\"\n  principal     = \"*\"\n}\n", "terraform-lambda-public"},
 		{"api no auth", "resource \"aws_api_gateway_method\" \"m\" {\n  authorization = \"NONE\"\n}\n", "terraform-api-gateway-no-auth"},
 		{"azure public container", "resource \"azurerm_storage_container\" \"c\" {\n  container_access_type = \"blob\"\n}\n", "terraform-azure-storage-public-container"},
@@ -647,6 +648,9 @@ func TestTerraformGapPackNoFalsePositives(t *testing.T) {
 		{"specific member is fine", "resource \"google_storage_bucket_iam_member\" \"m\" {\n  member = \"user:alice@example.com\"\n}\n", "terraform-gcp-public-iam-member"},
 		{"private instance is fine", "resource \"aws_instance\" \"i\" {\n  associate_public_ip_address = false\n  metadata_options {\n    http_tokens = \"required\"\n  }\n}\n", "terraform-instance-public-ip"},
 		{"apt-target-release style safe pin", "resource \"aws_db_instance\" \"db\" {\n  storage_encrypted       = true\n  backup_retention_period = 7\n}\n", "terraform-rds-no-backup"},
+		{"admin policy data-source ref is not an attachment", "data \"aws_iam_policy\" \"admin\" {\n  arn = \"arn:aws:iam::aws:policy/AdministratorAccess\"\n}\n", "terraform-iam-admin-policy"},
+		{"remote archive module takes no version", "module \"vpc\" {\n  source = \"https://example.com/vpc.zip\"\n}\n", "terraform-module-no-version"},
+		{"s3 archive module takes no version", "module \"vpc\" {\n  source = \"s3::https://s3.amazonaws.com/b/vpc.zip\"\n}\n", "terraform-module-no-version"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -30,7 +30,7 @@ var (
 	// authz — public access / over-broad grants (some case-sensitive to separate IAM "Principal" from
 	// the lower-case `principal` attribute on aws_lambda_permission).
 	tfResourceWildcard  = regexp.MustCompile(`("Resource"\s*:\s*"\*"|\bResource\s*=\s*"\*"|\bresources\s*=\s*\[\s*"\*"\s*\])`)
-	tfWildcardPrincipal = regexp.MustCompile(`("Principal"\s*:\s*"?\*|\bPrincipal\s*=\s*"\*"|\bidentifiers\s*=\s*\[\s*"\*"\s*\])`)
+	tfWildcardPrincipal = regexp.MustCompile(`("Principal"\s*:\s*"?\*|\bPrincipal\s*=\s*"\*"|\bPrincipal"?\s*[:=]\s*\{[^}]*\*|\bidentifiers\s*=\s*\[\s*"\*"\s*\])`)
 	tfLambdaPublic      = regexp.MustCompile(`\bprincipal\s*=\s*"\*"`)
 	tfApiNoAuth         = regexp.MustCompile(`\bauthorization\s*=\s*"NONE"`)
 	tfAzureContainerPub = regexp.MustCompile(`\bcontainer_access_type\s*=\s*"(blob|container)"`)
@@ -56,6 +56,9 @@ var (
 	tfIgnoreAll    = regexp.MustCompile(`\bignore_changes\s*=\s*all\b`)
 	tfModuleSource = regexp.MustCompile(`\bsource\s*=\s*"([^"]+)"`)
 	tfModuleRef    = regexp.MustCompile(`\bversion\s*=`)
+	// tfRegistryModule matches a Terraform-registry source shape (NAMESPACE/NAME/PROVIDER, optionally
+	// with a //submodule), which is the only source kind that takes a version constraint.
+	tfRegistryModule = regexp.MustCompile(`^[0-9A-Za-z._-]+/[0-9A-Za-z._-]+/[0-9A-Za-z._-]+(//.+)?$`)
 )
 
 // scanTerraform runs the owned Terraform checks over one .tf file.
@@ -419,7 +422,7 @@ func tfLineRules(rel string, line int, text, resType, subBlock string) []ports.M
 		add("terraform-azure-nsg-open", "Network security rule open to the whole internet", shared.SeverityHigh,
 			"An Azure network security rule sets source_address_prefix to \"*\" or 0.0.0.0/0, exposing the port to the entire internet. Restrict the source to the specific address ranges that need access.")
 	}
-	if tfAdminPolicy.MatchString(text) {
+	if tfAdminPolicy.MatchString(text) && (strings.Contains(text, "policy_arn") || strings.Contains(text, "managed_policy_arns")) {
 		add("terraform-iam-admin-policy", "Full administrator policy attached", shared.SeverityHigh,
 			"A principal is granted the AdministratorAccess managed policy, which permits every action on every resource, violating least privilege. Attach a policy scoped to the actions the principal actually needs.")
 	}
@@ -484,6 +487,9 @@ func tfModuleRules(rel string, line int, body string) []ports.MisconfigRawFindin
 	}
 	isLocal := strings.HasPrefix(src, "./") || strings.HasPrefix(src, "../")
 	isGit := strings.Contains(src, "git::") || strings.HasPrefix(src, "git@") || strings.Contains(src, "github.com/") || strings.Contains(src, "bitbucket.org/") || strings.HasSuffix(src, ".git") || strings.Contains(src, ".git//")
+	// A remote archive / VCS-other source (http(s), s3::, gcs::, hg::). version is not valid for these,
+	// so nothing is pinned here. Checked after isGit so git::https URLs still go through the git branch.
+	isRemote := strings.Contains(src, "://") || strings.HasPrefix(src, "s3::") || strings.HasPrefix(src, "gcs::") || strings.HasPrefix(src, "hg::")
 	switch {
 	case isLocal:
 		// A local path module is versioned with the repository itself; nothing to pin.
@@ -492,8 +498,10 @@ func tfModuleRules(rel string, line int, body string) []ports.MisconfigRawFindin
 			add("terraform-module-unpinned-git", "Git-sourced module is not pinned to a ref", shared.SeverityLow,
 				"The module is sourced from a git URL with no ?ref= revision, so a future apply can pull a different commit and change infrastructure unexpectedly. Pin the source to a tag or commit with ?ref=.")
 		}
-	default:
-		// A registry source (namespace/name/provider). It should pin a version constraint.
+	case isRemote:
+		// A remote archive source (http/s3/gcs/hg); version is not applicable, nothing to pin.
+	case tfRegistryModule.MatchString(src):
+		// A registry source (NAMESPACE/NAME/PROVIDER). It should pin a version constraint.
 		if !tfModuleRef.MatchString(body) {
 			add("terraform-module-no-version", "Registry module has no version constraint", shared.SeverityLow,
 				"The module is sourced from a registry but sets no version, so a future apply can resolve a different, untested module release. Add a version constraint (for example version = \"~> 5.0\").")
