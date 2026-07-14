@@ -269,7 +269,9 @@ js-arguments-caller
 js-array-sort-no-compare
 js-ast-await-in-loop
 js-ast-complex-condition
+js-ast-constructor-return
 js-ast-deep-nesting
+js-ast-duplicate-key
 js-ast-empty-function
 js-ast-getter-no-return
 js-ast-high-complexity
@@ -280,6 +282,7 @@ js-ast-long-function
 js-ast-missing-switch-default
 js-ast-nested-loop
 js-ast-nested-switch
+js-ast-no-param-reassign
 js-ast-require-await
 js-ast-return-in-finally
 js-ast-small-switch

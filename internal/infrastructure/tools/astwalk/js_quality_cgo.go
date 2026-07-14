@@ -32,6 +32,79 @@ var jsRules = map[string]pythonRule{
 	"nested-switch":      {"quality", "js-ast-nested-switch", "", "low", "Nested switch statement", "A switch inside another switch is hard to follow; extract the inner switch into a function."},
 	"ternary-boolean":    {"quality", "js-ast-ternary-boolean", "", "low", "Ternary returning boolean literals", "cond ? true : false is just the condition (or its negation)."},
 	"small-switch":       {"quality", "js-ast-small-switch", "", "low", "switch with very few cases", "A switch with only one or two cases is clearer as an if/else."},
+	"param-reassign":     {"quality", "js-ast-no-param-reassign", "", "low", "Reassigned function parameter", "Reassigning a parameter hides the original argument and is confusing; use a local variable."},
+	"dupe-keys":          {"reliability", "js-ast-duplicate-key", "", "medium", "Duplicate object key", "An object literal with the same key twice silently keeps only the last value."},
+	"constructor-return": {"reliability", "js-ast-constructor-return", "", "medium", "Return value in a constructor", "Returning a value from a constructor is ignored (for objects) and confuses readers."},
+}
+
+// jsParamNames returns the set of simple identifier parameter names of a function node.
+func jsParamNames(n *sitter.Node, src []byte) map[string]bool {
+	out := map[string]bool{}
+	p := n.ChildByFieldName("parameters")
+	if p == nil {
+		return out
+	}
+	for i := 0; i < int(p.NamedChildCount()); i++ {
+		c := p.NamedChild(i)
+		if c.Type() == "identifier" {
+			out[strings.TrimSpace(c.Content(src))] = true
+			continue
+		}
+		// TS required_parameter / optional_parameter wrap the identifier.
+		for j := 0; j < int(c.NamedChildCount()); j++ {
+			if c.NamedChild(j).Type() == "identifier" {
+				out[strings.TrimSpace(c.NamedChild(j).Content(src))] = true
+				break
+			}
+		}
+	}
+	return out
+}
+
+// jsHasParamReassign reports whether n's subtree assigns to one of the given parameter names,
+// without descending into nested functions.
+func jsHasParamReassign(n *sitter.Node, params map[string]bool, src []byte) bool {
+	for i := 0; i < int(n.ChildCount()); i++ {
+		c := n.Child(i)
+		if jsFuncTypes[c.Type()] {
+			continue
+		}
+		switch c.Type() {
+		case "assignment_expression", "augmented_assignment_expression":
+			if l := c.ChildByFieldName("left"); l != nil && l.Type() == "identifier" && params[strings.TrimSpace(l.Content(src))] {
+				return true
+			}
+		case "update_expression":
+			if a := c.ChildByFieldName("argument"); a != nil && a.Type() == "identifier" && params[strings.TrimSpace(a.Content(src))] {
+				return true
+			}
+		}
+		if jsHasParamReassign(c, params, src) {
+			return true
+		}
+	}
+	return false
+}
+
+// jsHasDuplicateKey reports whether an object literal declares the same key more than once.
+func jsHasDuplicateKey(n *sitter.Node, src []byte) bool {
+	seen := map[string]bool{}
+	for i := 0; i < int(n.NamedChildCount()); i++ {
+		c := n.NamedChild(i)
+		if c.Type() != "pair" {
+			continue
+		}
+		k := c.ChildByFieldName("key")
+		if k == nil {
+			continue
+		}
+		key := strings.TrimSpace(k.Content(src))
+		if seen[key] {
+			return true
+		}
+		seen[key] = true
+	}
+	return false
 }
 
 // jsJumpTypes are statements that unconditionally leave the current block.
@@ -110,6 +183,18 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 					out = append(out, jsFinding("getter-no-return", n, rel))
 				}
 			}
+			if n.Type() == "method_definition" {
+				if nm := n.ChildByFieldName("name"); nm != nil && strings.TrimSpace(nm.Content(src)) == "constructor" {
+					if body := n.ChildByFieldName("body"); body != nil && jsHasReturnValue(body) {
+						out = append(out, jsFinding("constructor-return", n, rel))
+					}
+				}
+			}
+			if body := n.ChildByFieldName("body"); body != nil {
+				if params := jsParamNames(n, src); len(params) > 0 && jsHasParamReassign(body, params, src) {
+					out = append(out, jsFinding("param-reassign", n, rel))
+				}
+			}
 		case "for_statement", "for_in_statement", "while_statement", "do_statement":
 			if body := n.ChildByFieldName("body"); body != nil && jsHasAwait(body) {
 				out = append(out, jsFinding("await-in-loop", n, rel))
@@ -177,6 +262,10 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 		case "finally_clause":
 			if jsHasDescendantType(n, "return_statement") {
 				out = append(out, jsFinding("return-in-finally", n, rel))
+			}
+		case "object":
+			if jsHasDuplicateKey(n, src) {
+				out = append(out, jsFinding("dupe-keys", n, rel))
 			}
 		}
 		for i := 0; i < int(n.ChildCount()); i++ {

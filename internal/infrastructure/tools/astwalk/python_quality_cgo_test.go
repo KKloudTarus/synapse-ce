@@ -703,3 +703,24 @@ func TestQualityForJSASTStructural2(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForJSASTBehavioral2(t *testing.T) {
+	root := t.TempDir()
+	js := "function add(items, extra) {\n  items = items.concat(extra);\n  return items;\n}\n" +
+		"const config = {\n  host: \"a\",\n  host: \"b\",\n};\n" +
+		"class Box {\n  constructor(v) {\n    return v;\n  }\n}\n"
+	writeFile(t, root, "b2.js", js)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"js-ast-no-param-reassign", "js-ast-duplicate-key", "js-ast-constructor-return"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
