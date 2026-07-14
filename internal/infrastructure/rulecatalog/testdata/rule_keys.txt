@@ -163,6 +163,7 @@ java-cipher-ecb
 java-cipher-rc4
 java-cipher-rsa-default
 java-cipher-rsa-pkcs1
+java-classforname-param
 java-collection-size-zero
 java-command-exec-concat
 java-cond-assign
@@ -203,8 +204,10 @@ java-getbytes-no-charset
 java-groovy-shell
 java-guava-md5
 java-guava-sha1
+java-header-crlf-param
 java-hmac-md5
 java-hostname-verifier-allow-all
+java-hql-concat
 java-hsts-disable
 java-import-java-lang
 java-import-sun
@@ -223,6 +226,7 @@ java-modifier-order
 java-mutable-public-static-array
 java-mysql-allow-load-local
 java-nan-comparison
+java-native-sql-concat
 java-new-string-literal
 java-new-threadgroup
 java-noop-hostname-verifier
@@ -235,6 +239,7 @@ java-octal-literal
 java-ognl-injection
 java-open-redirect
 java-path-traversal-param
+java-pattern-from-param
 java-printstacktrace
 java-public-finalize
 java-redundant-intvalue
@@ -244,6 +249,7 @@ java-runtime-exec-var
 java-runtime-halt
 java-scriptengine-manager
 java-securerandom-constant-seed
+java-servlet-print-param
 java-set-default-hostname-verifier
 java-setaccessible-true
 java-simpledateformat-static
@@ -262,6 +268,7 @@ java-string-intern
 java-string-length-zero
 java-string-ref-equality
 java-stringbuffer
+java-stringbuilder-char-arg
 java-substring-zero
 java-system-exit
 java-system-out-print
@@ -270,6 +277,8 @@ java-thread-yield
 java-throw-in-finally
 java-throw-npe
 java-throw-raw-runtime
+java-throws-exception
+java-throws-throwable
 java-tls-deprecated-version
 java-toarray-noarg
 java-tolowercase-no-locale
@@ -278,6 +287,7 @@ java-weak-hash-md5
 java-weak-hash-sha1
 java-weak-password-encoder
 java-xml-decoder
+java-xpath-eval-param
 java-xstream-deserialization
 java-xxe-saxbuilder
 java-xxe-saxreader
