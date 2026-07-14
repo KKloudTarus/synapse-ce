@@ -131,12 +131,16 @@ java-ast-large-class
 java-ast-long-method
 java-ast-missing-switch-default
 java-ast-nested-loop
+java-ast-nested-switch
 java-ast-nested-ternary
 java-ast-nested-try
 java-ast-switch-many-cases
+java-ast-ternary-boolean
 java-ast-too-many-fields
 java-ast-too-many-params
 java-ast-too-many-returns
+java-ast-unnecessary-else
+java-ast-useless-catch
 java-bigdecimal-double
 java-biginteger-literal
 java-boolean-getboolean

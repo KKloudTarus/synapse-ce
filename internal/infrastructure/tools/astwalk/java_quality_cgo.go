@@ -31,6 +31,10 @@ var javaRules = map[string]pythonRule{
 	"complex-condition":  {"quality", "java-ast-complex-condition", "", "low", "Overly complex boolean condition", "A condition combining many && / || operators is hard to reason about; name the sub-conditions."},
 	"high-complexity":    {"quality", "java-ast-high-complexity", "", "medium", "Method has high cyclomatic complexity", "A method with many decision points (if/loop/case/catch/&&/||) is hard to test; reduce branching or split it."},
 	"switch-many-cases":  {"quality", "java-ast-switch-many-cases", "", "low", "switch has too many cases", "A switch with a very large number of cases is often better modeled with a map or polymorphism."},
+	"useless-catch":      {"quality", "java-ast-useless-catch", "", "low", "catch clause only rethrows", "A catch that just rethrows the caught exception adds nothing; remove it or handle the error."},
+	"unnecessary-else":   {"quality", "java-ast-unnecessary-else", "", "low", "Unnecessary else after a jump", "When the if branch always returns/throws, the else is redundant; dedent its body."},
+	"nested-switch":      {"quality", "java-ast-nested-switch", "", "low", "Nested switch statement", "A switch inside another switch is hard to follow; extract the inner switch into a method."},
+	"ternary-boolean":    {"quality", "java-ast-ternary-boolean", "", "low", "Ternary returning boolean literals", "cond ? true : false is just the condition (or its negation)."},
 }
 
 // javaControlTypes / javaLoopTypes are the node kinds counted for nesting-depth metrics.
@@ -84,6 +88,15 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			if javaHasDescendantType(n, "ternary_expression") {
 				out = append(out, javaFinding("nested-ternary", n, rel))
 			}
+			if c := n.ChildByFieldName("consequence"); c != nil {
+				if a := n.ChildByFieldName("alternative"); a != nil && javaIsBoolLiteral(c, src) && javaIsBoolLiteral(a, src) {
+					out = append(out, javaFinding("ternary-boolean", n, rel))
+				}
+			}
+		case "catch_clause":
+			if javaIsUselessCatch(n, src) {
+				out = append(out, javaFinding("useless-catch", n, rel))
+			}
 		case "for_statement", "while_statement", "do_statement", "enhanced_for_statement":
 			if body := n.ChildByFieldName("body"); body != nil && body.Type() == "block" && body.NamedChildCount() == 0 {
 				out = append(out, javaFinding("empty-loop", n, rel))
@@ -97,6 +110,9 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			}
 			if javaCountByType(n, map[string]bool{"switch_label": true, "switch_rule": true}) > 15 {
 				out = append(out, javaFinding("switch-many-cases", n, rel))
+			}
+			if javaHasDescendantType(n, "switch_statement") || javaHasDescendantType(n, "switch_expression") {
+				out = append(out, javaFinding("nested-switch", n, rel))
 			}
 		case "try_statement":
 			if javaHasNestedTry(n) {
@@ -130,6 +146,9 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 				if cv != "" && av != "" && cv != av {
 					out = append(out, javaFinding("if-return-bool", n, rel))
 				}
+			}
+			if n.ChildByFieldName("alternative") != nil && javaBlockEndsInJump(cons) {
+				out = append(out, javaFinding("unnecessary-else", n, rel))
 			}
 		case "class_declaration":
 			if body := n.ChildByFieldName("body"); body != nil {
@@ -263,6 +282,65 @@ func javaCountBoolOps(n *sitter.Node, src []byte) int {
 		count += javaCountBoolOps(n.Child(i), src)
 	}
 	return count
+}
+
+// javaJumpTypes are statements that unconditionally leave the current block.
+var javaJumpTypes = map[string]bool{
+	"return_statement": true, "throw_statement": true, "break_statement": true, "continue_statement": true,
+}
+
+// javaBlockEndsInJump reports whether n is a jump statement, or a block whose last statement is one.
+func javaBlockEndsInJump(n *sitter.Node) bool {
+	if n == nil {
+		return false
+	}
+	if javaJumpTypes[n.Type()] {
+		return true
+	}
+	if n.Type() == "block" && n.NamedChildCount() > 0 {
+		return javaJumpTypes[n.NamedChild(int(n.NamedChildCount())-1).Type()]
+	}
+	return false
+}
+
+// javaIsBoolLiteral reports whether n is the literal true or false.
+func javaIsBoolLiteral(n *sitter.Node, src []byte) bool {
+	t := strings.TrimSpace(n.Content(src))
+	return t == "true" || t == "false"
+}
+
+// javaIsUselessCatch reports whether a catch clause's body only rethrows the caught exception.
+func javaIsUselessCatch(n *sitter.Node, src []byte) bool {
+	var block, param *sitter.Node
+	for i := 0; i < int(n.ChildCount()); i++ {
+		switch n.Child(i).Type() {
+		case "block":
+			block = n.Child(i)
+		case "catch_formal_parameter":
+			param = n.Child(i)
+		}
+	}
+	if block == nil || param == nil || block.NamedChildCount() != 1 {
+		return false
+	}
+	name := ""
+	if nm := param.ChildByFieldName("name"); nm != nil {
+		name = strings.TrimSpace(nm.Content(src))
+	} else {
+		for i := 0; i < int(param.NamedChildCount()); i++ {
+			if param.NamedChild(i).Type() == "identifier" {
+				name = strings.TrimSpace(param.NamedChild(i).Content(src))
+			}
+		}
+	}
+	if name == "" {
+		return false
+	}
+	st := block.NamedChild(0)
+	if st.Type() != "throw_statement" || st.NamedChildCount() != 1 {
+		return false
+	}
+	return strings.TrimSpace(st.NamedChild(0).Content(src)) == name
 }
 
 // javaCountByType returns the total number of nodes in n's subtree whose type is in types.

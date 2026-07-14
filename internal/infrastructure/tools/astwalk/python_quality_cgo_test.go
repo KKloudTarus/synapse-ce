@@ -634,3 +634,50 @@ func TestQualityForJSASTBehavioral(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForJavaASTBehavioral(t *testing.T) {
+	root := t.TempDir()
+	src := "class C {\n" +
+		"  void wrap() {\n" +
+		"    try {\n" +
+		"      run();\n" +
+		"    } catch (Exception e) {\n" +
+		"      throw e;\n" +
+		"    }\n" +
+		"  }\n" +
+		"  int classify(int x) {\n" +
+		"    if (x < 0) {\n" +
+		"      return -1;\n" +
+		"    } else {\n" +
+		"      return score(x);\n" +
+		"    }\n" +
+		"  }\n" +
+		"  int pick(int a, int b) {\n" +
+		"    switch (a) {\n" +
+		"      case 1:\n" +
+		"        switch (b) {\n" +
+		"          case 2: return 3;\n" +
+		"          default: return 0;\n" +
+		"        }\n" +
+		"      default: return -1;\n" +
+		"    }\n" +
+		"  }\n" +
+		"  boolean flag(int c) {\n" +
+		"    return c > 0 ? true : false;\n" +
+		"  }\n" +
+		"}\n"
+	writeFile(t, root, "C.java", src)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"java-ast-useless-catch", "java-ast-unnecessary-else", "java-ast-nested-switch", "java-ast-ternary-boolean"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
