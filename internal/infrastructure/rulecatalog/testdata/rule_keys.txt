@@ -214,7 +214,9 @@ java-csrf-disabled
 java-date-getday
 java-date-gethours
 java-date-int-ctor
+java-date-parse-static
 java-date-tolocalestring
+java-date-utc
 java-date-year-month-ctor
 java-des-keygen
 java-des-keyspec
@@ -261,6 +263,12 @@ java-guava-function
 java-guava-lists-newarraylist
 java-guava-maps-newhashmap
 java-guava-md5
+java-guava-new-concurrentmap
+java-guava-new-hashset
+java-guava-new-linkedlist
+java-guava-new-treemap
+java-guava-objects-equal
+java-guava-objects-hashcode
 java-guava-optional
 java-guava-predicate
 java-guava-sha1
@@ -305,6 +313,7 @@ java-jjwt-unsigned
 java-jndi-injection
 java-joda-time-import
 java-junit3-import
+java-junit3-testcase-extend
 java-junit4-after
 java-junit4-afterclass
 java-junit4-assert-that
@@ -406,6 +415,7 @@ java-stringbuffer
 java-stringbuilder-char-arg
 java-substring-zero
 java-system-exit
+java-system-get-security-manager
 java-system-load-param
 java-system-out-print
 java-temp-file-insecure
