@@ -116,6 +116,8 @@ insecure-cookie-flags
 insecure-randomness-security-context
 insecure-temp-file
 insecure-tls-verify-disabled
+java-apache-default-httpclient
+java-apache-httpclient3
 java-ast-collapsible-if
 java-ast-complex-condition
 java-ast-constant-condition
@@ -170,6 +172,7 @@ java-classforname-param
 java-classloader-getresource-param
 java-collection-size-zero
 java-command-exec-concat
+java-commons-lang2-import
 java-cond-assign
 java-content-type-options-disable
 java-cookie-httponly-false
@@ -209,10 +212,14 @@ java-format-string-var
 java-getbytes-no-charset
 java-groovy-shell
 java-guava-first-non-null
+java-guava-lists-newarraylist
+java-guava-maps-newhashmap
 java-guava-md5
 java-guava-sha1
 java-header-crlf-param
+java-hibernate-create-criteria
 java-hibernate-create-sql-query
+java-hibernate-detached-criteria
 java-hibernate-sqlrestriction
 java-hmac-md5
 java-hostname-verifier-allow-all
@@ -227,6 +234,7 @@ java-jackson-activate-default-typing
 java-jackson-default-typing
 java-jjwt-unsigned
 java-jndi-injection
+java-joda-time-import
 java-junit3-import
 java-junit4-runwith
 java-junit4-test-import
@@ -235,6 +243,7 @@ java-ldap-filter-concat
 java-legacy-collection
 java-literals-first-equals
 java-log-injection
+java-log4j1-import
 java-long-literal-lowercase-l
 java-loose-coupling-collection
 java-modifier-order
@@ -276,9 +285,13 @@ java-snakeyaml-unsafe-constructor
 java-spel-parser
 java-spring-crossorigin-default
 java-spring-enable-global-method-security
+java-spring-enable-oauth2-sso
+java-spring-enable-webmvc-security
 java-spring-frame-options-disable
 java-spring-handler-interceptor-adapter
 java-spring-hibernate-template
+java-spring-oauth2-resttemplate
+java-spring-resource-server-adapter
 java-spring-webmvc-adapter
 java-spring-websecurity-adapter
 java-sql-string-concat
