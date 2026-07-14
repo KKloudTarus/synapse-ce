@@ -425,3 +425,32 @@ func TestQualityForPythonASTStructure(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForJavaScriptAST(t *testing.T) {
+	root := t.TempDir()
+	var big strings.Builder
+	big.WriteString("class Big {\n")
+	for i := 0; i < 25; i++ {
+		big.WriteString("  m")
+		big.WriteByte(byte('a' + i%26))
+		big.WriteString("() { return 1; }\n")
+	}
+	big.WriteString("}\n")
+	writeFile(t, root, "a.js", "function empty() {}\n"+
+		"function many(a, b, c, d, e, f, g, h) { return a; }\n"+
+		"function pick(s) {\n  switch (s) {\n    case 1: return 1;\n  }\n}\n"+
+		big.String())
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"js-ast-empty-function", "js-ast-too-many-params", "js-ast-missing-switch-default", "js-ast-large-class"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}

@@ -193,6 +193,11 @@ java-throw-raw-runtime
 java-toarray-noarg
 jfrog-token
 js-array-sort-no-compare
+js-ast-empty-function
+js-ast-large-class
+js-ast-long-function
+js-ast-missing-switch-default
+js-ast-too-many-params
 js-document-cookie-write
 js-dom-xss-outerhtml
 js-dot-notation
