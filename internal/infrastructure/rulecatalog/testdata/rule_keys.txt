@@ -385,6 +385,11 @@ js-lookup-getter-setter
 js-map-flat
 js-mocha-timeout-zero
 js-mongo-where
+js-nav-appname
+js-nav-appversion
+js-nav-platform
+js-nav-product
+js-nav-vendor
 js-new-array
 js-new-function
 js-no-alert
@@ -562,10 +567,14 @@ js-web-getmatchedcssrules
 js-web-init-event
 js-web-key-identifier
 js-web-navigator-getusermedia
+js-web-prefixed-cancel-fullscreen
 js-web-prefixed-fullscreen
+js-web-prefixed-fullscreen-element
+js-web-prefixed-hidden
 js-web-prefixed-matches
 js-web-prefixed-raf
 js-web-prefixed-slice
+js-web-prefixed-visibility-state
 js-web-register-element
 js-web-release-events
 js-web-scroll-into-view-if-needed
