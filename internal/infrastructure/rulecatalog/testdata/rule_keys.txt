@@ -196,6 +196,7 @@ java-jackson-default-typing
 java-jjwt-unsigned
 java-legacy-collection
 java-long-literal-lowercase-l
+java-modifier-order
 java-mutable-public-static-array
 java-nan-comparison
 java-new-string-literal
@@ -257,6 +258,7 @@ js-ast-nested-loop
 js-ast-return-in-finally
 js-ast-too-many-params
 js-ast-too-many-returns
+js-compare-boolean-literal
 js-cookie-httponly-false
 js-cookie-samesite-none
 js-cookie-secure-false
@@ -461,12 +463,15 @@ python-broad-raise
 python-compare-bool-literal
 python-compare-empty-collection
 python-complex-condition
+python-consider-using-enumerate
+python-constant-if-test
 python-cors-allow-all
 python-crypto-arc4
 python-crypto-blowfish
 python-crypto-des
 python-crypto-des3
 python-crypto-mode-ecb
+python-datetime-utcnow
 python-deep-nesting
 python-django-allowed-hosts-wildcard
 python-django-csrf-exempt
@@ -474,6 +479,7 @@ python-django-debug
 python-django-extra
 python-django-mark-safe
 python-django-raw-sql
+python-double-negation
 python-duplicate-dict-key
 python-eq-none
 python-eval-call
@@ -486,6 +492,7 @@ python-fstring-no-placeholder
 python-ftplib-cleartext
 python-global-statement
 python-hardcoded-tmp-path
+python-has-key
 python-hashlib-md5
 python-hashlib-new-md5
 python-hashlib-sha1
@@ -511,6 +518,7 @@ python-os-system
 python-paramiko-autoadd-policy
 python-pickle-load
 python-pty-spawn
+python-raise-notimplemented
 python-requests-verify-false
 python-return-in-finally
 python-return-in-init
@@ -522,8 +530,10 @@ python-ssl-insecure-protocol
 python-ssl-unverified-context
 python-ssl-wrap-socket
 python-star-import
+python-statement-semicolon
 python-subprocess-getoutput
 python-subprocess-shell
+python-super-with-arguments
 python-tar-zip-extractall
 python-telnetlib
 python-too-long-function
