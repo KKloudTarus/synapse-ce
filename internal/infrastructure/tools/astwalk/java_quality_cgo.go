@@ -43,6 +43,9 @@ var javaRules = map[string]pythonRule{
 	"empty-try":          {"reliability", "java-ast-empty-try", "", "low", "Empty try block", "A try with an empty body guards nothing."},
 	"switch-fallthrough": {"reliability", "java-ast-switch-fallthrough", "", "medium", "switch case falls through", "A non-empty case that does not end in break/return/throw/continue falls through to the next case."},
 	"useless-ctor":       {"quality", "java-ast-useless-constructor", "", "low", "Useless constructor", "A constructor that only forwards its arguments to super adds nothing and can be removed."},
+	"negated-if-else":    {"quality", "java-ast-negated-if-else", "", "low", "Negated condition with else", "if (!cond) A else B reads more clearly when the condition is positive: if (cond) B else A."},
+	"dup-if-cond":        {"reliability", "java-ast-duplicate-if-condition", "", "medium", "Duplicate condition in if/else-if chain", "Two branches in the same if/else-if chain test the identical condition, so the later branch is unreachable."},
+	"if-chain-no-else":   {"quality", "java-ast-if-chain-no-else", "", "low", "if/else-if chain without a final else", "An if/else-if chain with no closing else silently ignores the remaining cases; add an else, even one that throws."},
 }
 
 // javaSwitchJumps are statements that terminate a switch case group.
@@ -283,6 +286,27 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			if n.ChildByFieldName("alternative") != nil && javaBlockEndsInJump(cons) {
 				out = append(out, javaFinding("unnecessary-else", n, rel))
 			}
+			if alt := n.ChildByFieldName("alternative"); alt != nil && alt.Type() == "block" {
+				if cond := n.ChildByFieldName("condition"); cond != nil {
+					inner := cond
+					if cond.Type() == "parenthesized_expression" && cond.NamedChildCount() > 0 {
+						inner = cond.NamedChild(0)
+					}
+					if inner != nil && inner.Type() == "unary_expression" && strings.HasPrefix(strings.TrimSpace(inner.Content(src)), "!") {
+						out = append(out, javaFinding("negated-if-else", n, rel))
+					}
+				}
+			}
+			if !javaIsElseIf(n) {
+				if conds, endsElse := javaIfChain(n, src); len(conds) >= 2 {
+					if javaHasDupString(conds) {
+						out = append(out, javaFinding("dup-if-cond", n, rel))
+					}
+					if !endsElse {
+						out = append(out, javaFinding("if-chain-no-else", n, rel))
+					}
+				}
+			}
 		case "class_declaration":
 			if body := n.ChildByFieldName("body"); body != nil {
 				methods := 0
@@ -308,6 +332,50 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 		}
 	}
 	return dedupeQuality(out)
+}
+
+// javaIsElseIf reports whether n is the "else if" arm of an enclosing if statement
+// (i.e. its parent's alternative), so chain-level checks run only once at the head.
+func javaIsElseIf(n *sitter.Node) bool {
+	p := n.Parent()
+	if p == nil || p.Type() != "if_statement" {
+		return false
+	}
+	alt := p.ChildByFieldName("alternative")
+	return alt != nil && alt.StartByte() == n.StartByte() && alt.EndByte() == n.EndByte()
+}
+
+// javaIfChain walks an if/else-if chain from its head, returning each branch's
+// condition text and whether the chain closes with a plain else block.
+func javaIfChain(n *sitter.Node, src []byte) ([]string, bool) {
+	var conds []string
+	for cur := n; cur != nil && cur.Type() == "if_statement"; {
+		if c := cur.ChildByFieldName("condition"); c != nil {
+			conds = append(conds, strings.TrimSpace(c.Content(src)))
+		}
+		alt := cur.ChildByFieldName("alternative")
+		if alt == nil {
+			return conds, false
+		}
+		if alt.Type() == "if_statement" {
+			cur = alt
+			continue
+		}
+		return conds, true
+	}
+	return conds, false
+}
+
+// javaHasDupString reports whether ss contains a repeated element.
+func javaHasDupString(ss []string) bool {
+	seen := make(map[string]bool, len(ss))
+	for _, s := range ss {
+		if seen[s] {
+			return true
+		}
+		seen[s] = true
+	}
+	return false
 }
 
 // javaSwitchHasDefault reports whether a switch node contains a default label.

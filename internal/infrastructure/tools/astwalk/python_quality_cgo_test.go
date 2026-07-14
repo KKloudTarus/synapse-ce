@@ -822,6 +822,28 @@ func TestQualityForJavaASTMore(t *testing.T) {
 	}
 }
 
+func TestQualityForJavaIfChain(t *testing.T) {
+	root := t.TempDir()
+	src := "class Z {\n" +
+		"  void m(boolean ready) {\n    if (!ready) {\n      wait();\n    } else {\n      start();\n    }\n  }\n" +
+		"  void n(int x) {\n    if (x == 1) {\n      a();\n    } else if (x == 1) {\n      b();\n    }\n  }\n" +
+		"}\n"
+	writeFile(t, root, "Z.java", src)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"java-ast-negated-if-else", "java-ast-duplicate-if-condition", "java-ast-if-chain-no-else"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
+
 func TestQualityForJavaUselessCtor(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "D.java", "class Derived extends Base {\n  Derived(String name) {\n    super(name);\n  }\n}\n")
