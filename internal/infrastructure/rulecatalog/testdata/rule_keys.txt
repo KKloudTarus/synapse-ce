@@ -117,11 +117,16 @@ insecure-randomness-security-context
 insecure-temp-file
 insecure-tls-verify-disabled
 java-access-controller
+java-android-device-id
 java-android-external-storage
 java-android-file-access-from-file
 java-android-js-interface
+java-android-line1-number
+java-android-loadurl-javascript
 java-android-mixed-content
 java-android-rawquery-concat
+java-android-save-password
+java-android-sim-serial
 java-android-universal-file-access
 java-android-webview-debugging
 java-android-webview-file-access
@@ -264,6 +269,8 @@ java-hessian-input
 java-hibernate-create-criteria
 java-hibernate-create-sql-query
 java-hibernate-detached-criteria
+java-hibernate-load
+java-hibernate-saveorupdate
 java-hibernate-sqlrestriction
 java-hmac-md5
 java-hostname-verifier-allow-all
@@ -344,6 +351,7 @@ java-public-finalize
 java-redundant-double-negation
 java-redundant-intvalue
 java-request-dispatcher-param
+java-response-exception-message
 java-return-in-finally
 java-rsa-no-padding
 java-run-finalization
