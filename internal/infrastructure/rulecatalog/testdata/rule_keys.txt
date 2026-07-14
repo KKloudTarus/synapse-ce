@@ -251,6 +251,9 @@ java-weak-hash-sha1
 java-xml-decoder
 jfrog-token
 js-angular-bypass-security
+js-angular-component-factory-resolver
+js-angular-entry-components
+js-angular-http-module
 js-angular-trust-as-html
 js-arguments-callee
 js-arguments-caller
@@ -286,6 +289,8 @@ js-cookie-samesite-none
 js-cookie-secure-false
 js-cors-reflect-origin
 js-cors-wildcard
+js-crypto-createcipher
+js-crypto-createdecipher
 js-dangerously-set-inner-html
 js-date-getyear
 js-date-setyear
@@ -375,6 +380,10 @@ js-no-void
 js-no-with
 js-node-domain-module
 js-node-fs-exists
+js-node-os-tmpdir
+js-node-process-binding
+js-node-punycode-module
+js-node-sys-module
 js-node-url-parse
 js-object-observe
 js-parentnode-removechild
@@ -401,6 +410,7 @@ js-proto-assign
 js-proto-constructor-bracket
 js-proto-pollution-bracket
 js-prototype-builtins
+js-pseudo-random-bytes
 js-react-children-prop
 js-react-createclass
 js-react-deprecated-lifecycle
