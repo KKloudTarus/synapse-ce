@@ -48,7 +48,7 @@ RULES = [
       title="XStream deserialization", desc="XStream.fromXML can instantiate arbitrary types (gadget RCE).",
       rationale="An unhardened XStream deserializes arbitrary classes from XML, enabling RCE.",
       remediation="Configure XStream security permissions with a type allowlist.", source="https://cwe.mitre.org/data/definitions/502.html",
-      re=r"new\s+XStream\s*\(", nc="Object o = new XStream().fromXML(xml);", c="XStream xs = new XStream(); xs.allowTypes(allowed);"),
+      re=r"new\s+XStream\s*\(", nc="Object o = new XStream().fromXML(xml);", c="Object o = createHardenedXStream().fromXML(xml);"),
     r(id="java-log-injection", type="hotspot", qual="sec", sev="medium", cwe="CWE-117", owasp="A09:2021",
       title="Log entry from request parameter", desc="Logging raw request input allows log forging/injection.",
       rationale="Concatenating untrusted input into a log message allows newline/CRLF log forging.",

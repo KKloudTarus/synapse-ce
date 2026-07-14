@@ -159,6 +159,7 @@ java-cipher-rc4
 java-cipher-rsa-default
 java-cipher-rsa-pkcs1
 java-collection-size-zero
+java-command-exec-concat
 java-cond-assign
 java-cookie-httponly-false
 java-cookie-secure-false
@@ -187,7 +188,9 @@ java-file-world-writable
 java-finalize-override
 java-float-equality
 java-format-newline
+java-format-string-var
 java-getbytes-no-charset
+java-groovy-shell
 java-guava-md5
 java-guava-sha1
 java-hmac-md5
@@ -201,6 +204,7 @@ java-jackson-activate-default-typing
 java-jackson-default-typing
 java-jjwt-unsigned
 java-legacy-collection
+java-log-injection
 java-long-literal-lowercase-l
 java-modifier-order
 java-mutable-public-static-array
@@ -213,6 +217,9 @@ java-null-cipher
 java-numberformat-static
 java-object-input-stream
 java-octal-literal
+java-ognl-injection
+java-open-redirect
+java-path-traversal-param
 java-printstacktrace
 java-redundant-intvalue
 java-return-in-finally
@@ -226,6 +233,7 @@ java-simpledateformat-static
 java-snakeyaml-unsafe-constructor
 java-spel-parser
 java-spring-crossorigin-default
+java-sql-string-concat
 java-ssl-context-insecure
 java-star-import
 java-static-iv
@@ -249,6 +257,8 @@ java-touppercase-no-locale
 java-weak-hash-md5
 java-weak-hash-sha1
 java-xml-decoder
+java-xstream-deserialization
+java-zip-slip
 jfrog-token
 js-a11y-anchor-href-hash
 js-a11y-distracting-element
