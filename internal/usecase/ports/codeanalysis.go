@@ -6,10 +6,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// CodeAnalysisRawFinding is one maintainability ("quality") or likely-bug ("reliability") issue located
-// at a source file:line, before promotion to a finding.Finding. Kind is "quality" or "reliability".
+// CodeAnalysisRawFinding is one deterministic source issue located at a source file:line before promotion
+// to a finding.Finding. Kind is "quality", "reliability", or "sast".
 type CodeAnalysisRawFinding struct {
-	Kind        string // "quality" | "reliability"
+	Kind        string // "quality" | "reliability" | "sast"
 	RuleID      string
 	CWE         string
 	Severity    shared.Severity

@@ -59,6 +59,25 @@ type Bugs struct {
 	Truncated bool  `json:"truncated,omitempty"`
 }
 
+// QualityFinding is one language-aware code-quality result emitted by the optional AST sidecar. Kind is
+// quality, reliability, or sast; the caller promotes it using the same raw-analysis contract as Go rules.
+type QualityFinding struct {
+	Kind        string `json:"kind"`
+	Rule        string `json:"rule"`
+	CWE         string `json:"cwe,omitempty"`
+	Severity    string `json:"severity"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	File        string `json:"file"`
+	Line        int    `json:"line"`
+}
+
+// Quality is the `quality` wire output.
+type Quality struct {
+	Findings  []QualityFinding `json:"findings"`
+	Truncated bool             `json:"truncated,omitempty"`
+}
+
 const (
 	maxFileBytes = 4 << 20
 	maxFiles     = 200_000

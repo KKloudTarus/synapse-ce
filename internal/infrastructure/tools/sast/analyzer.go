@@ -157,6 +157,9 @@ func (a *Analyzer) scanLines(rel string, lines []string, project projectContext)
 			if !r.appliesTo(ext) {
 				continue // language-gated rule on a non-matching file type
 			}
+			if r.id == "generic-sql-dynamic-execute" && pyExts[ext] && a.matchesRule("sqlalchemy-raw-sql-dynamic", ext, text) {
+				continue // specialized SQLAlchemy rule owns this Python sink
+			}
 			if r.re.MatchString(text) && !r.skip(text) {
 				h := ports.SASTRawFinding{
 					File: rel, Line: line, RuleID: r.id, CWE: r.cwe,
@@ -169,6 +172,16 @@ func (a *Analyzer) scanLines(rel string, lines []string, project projectContext)
 	}
 	hits = append(hits, a.contextualFindings(rel, lines, project)...)
 	return dedupeFindings(hits)
+}
+
+func (a *Analyzer) matchesRule(id, ext, text string) bool {
+	for i := range a.rules {
+		r := &a.rules[i]
+		if r.id == id {
+			return r.appliesTo(ext) && r.re.MatchString(text) && !r.skip(text)
+		}
+	}
+	return false
 }
 
 func (a *Analyzer) contextualFindings(rel string, lines []string, project projectContext) []ports.SASTRawFinding {

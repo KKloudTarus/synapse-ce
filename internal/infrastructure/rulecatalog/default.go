@@ -16,6 +16,7 @@ func Default() (*Catalog, error) {
 	all = append(all, qualityRules()...)
 	all = append(all, reliabilityRules()...)
 	all = append(all, xmlRules()...)
+	all = append(all, pythonRules()...)
 
 	return New(all)
 }

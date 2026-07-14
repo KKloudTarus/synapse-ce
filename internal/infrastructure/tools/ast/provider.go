@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -97,6 +98,7 @@ var (
 	_ ports.ASTProvider         = (*Provider)(nil)
 	_ ports.CodeMetricsProvider = (*Provider)(nil)
 	_ ports.BugDetector         = (*Provider)(nil)
+	_ ports.CodeAnalyzer        = (*Provider)(nil)
 )
 
 // FunctionCounts runs `synapse-ast functions <root>` and returns per-language function counts. A sidecar
@@ -177,6 +179,41 @@ func (p *Provider) Bugs(ctx context.Context, root string) ([]ports.BugFinding, b
 	return findings, true, nil
 }
 
+// Analyze runs `synapse-ast quality <root>` and returns language-aware structural findings. An absent or
+// CGO-free sidecar is optional enrichment and returns no findings without an error.
+func (p *Provider) Analyze(ctx context.Context, root string) ([]ports.CodeAnalysisRawFinding, error) {
+	if strings.TrimSpace(root) == "" {
+		return nil, nil
+	}
+	out, exit, err := p.run(ctx, "quality", root)
+	if exit == exitUnavailable {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var wire struct {
+		Findings []struct {
+			Kind        string          `json:"kind"`
+			Rule        string          `json:"rule"`
+			CWE         string          `json:"cwe"`
+			Severity    shared.Severity `json:"severity"`
+			Title       string          `json:"title"`
+			Description string          `json:"description"`
+			File        string          `json:"file"`
+			Line        int             `json:"line"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal(out, &wire); err != nil {
+		return nil, fmt.Errorf("parse synapse-ast quality: %w", err)
+	}
+	findings := make([]ports.CodeAnalysisRawFinding, 0, len(wire.Findings))
+	for _, f := range wire.Findings {
+		findings = append(findings, ports.CodeAnalysisRawFinding{Kind: f.Kind, RuleID: f.Rule, CWE: f.CWE, Severity: f.Severity, Title: f.Title, Description: f.Description, File: f.File, Line: f.Line})
+	}
+	return findings, nil
+}
+
 // run executes the sidecar (sandboxed when a runner is set, else direct os/exec) and returns stdout, the
 // process exit code, and any error. argv only (no shell).
 func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, error) {
@@ -188,6 +225,12 @@ func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, erro
 			ReadOnlyPaths: []string{root},
 		})
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, 0, ctx.Err()
+			}
+			if res.TimedOut {
+				return nil, 0, err
+			}
 			// The sidecar could not be run (absent binary / sandbox setup). Like the direct path, degrade
 			// to unavailable rather than failing the inventory – this provider is optional enrichment.
 			return nil, exitUnavailable, nil

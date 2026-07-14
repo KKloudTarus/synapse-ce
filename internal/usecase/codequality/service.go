@@ -34,6 +34,7 @@ type Service struct {
 	metrics           ports.CodeMetricsProvider
 	inventory         ports.CodeInventoryScanner
 	bugs              ports.BugDetector
+	structural        ports.CodeAnalyzer
 	complexityMin     int
 	includeTestSmells bool
 }
@@ -52,6 +53,12 @@ func WithInventory(inv ports.CodeInventoryScanner) Option {
 // WithBugs wires the deeper AST bug detector (unreachable code, constant conditions), emitting its
 // findings as Kind=reliability. Requires the synapse-ast sidecar; degrades to nothing without it.
 func WithBugs(b ports.BugDetector) Option { return func(s *Service) { s.bugs = b } }
+
+// WithStructuralAnalyzer adds language-aware AST findings. It is optional; an unavailable sidecar returns
+// no findings through its adapter.
+func WithStructuralAnalyzer(a ports.CodeAnalyzer) Option {
+	return func(s *Service) { s.structural = a }
+}
 
 // bugCWE maps a deeper-bug rule id to its CWE for the finding.
 var bugCWE = map[string]string{
@@ -109,11 +116,29 @@ func (s *Service) analyze(ctx context.Context, root string) ([]finding.Finding, 
 	if err != nil {
 		return nil, measure.DuplicationReport{}, fmt.Errorf("code analysis: %w", err)
 	}
-	for _, r := range raws {
-		if !s.includeTestSmells && r.Severity == shared.SeverityInfo && isTestPath(r.File) {
-			continue // low-value info smell in test code – suppressed by default (see WithTestScopedSmells)
+	appendRaws := func(raws []ports.CodeAnalysisRawFinding) error {
+		for _, r := range raws {
+			if r.Kind != "quality" && r.Kind != "reliability" && r.Kind != "sast" {
+				return fmt.Errorf("unknown code-analysis finding kind %q", r.Kind)
+			}
+			if !s.includeTestSmells && r.Severity == shared.SeverityInfo && isTestPath(r.File) {
+				continue // low-value info smell in test code – suppressed by default (see WithTestScopedSmells)
+			}
+			out = append(out, newFinding(r.Kind, r.RuleID, r.CWE, r.Severity, r.Title, r.Description, r.File, r.Line))
 		}
-		out = append(out, newFinding(r.Kind, r.RuleID, r.CWE, r.Severity, r.Title, r.Description, r.File, r.Line))
+		return nil
+	}
+	if err := appendRaws(raws); err != nil {
+		return nil, measure.DuplicationReport{}, err
+	}
+	if s.structural != nil {
+		structural, serr := s.structural.Analyze(ctx, root)
+		if serr != nil {
+			return nil, measure.DuplicationReport{}, fmt.Errorf("structural analysis: %w", serr)
+		}
+		if err := appendRaws(structural); err != nil {
+			return nil, measure.DuplicationReport{}, err
+		}
 	}
 
 	if s.dup != nil {
@@ -171,8 +196,11 @@ func (s *Service) analyze(ctx context.Context, root string) ([]finding.Finding, 
 func newFinding(kind, ruleID, cwe string, sev shared.Severity, title, desc, file string, line int) finding.Finding {
 	dedup := kind + ":" + ruleID + ":" + file + ":" + strconv.Itoa(line)
 	k := finding.KindQuality
-	if kind == "reliability" {
+	switch kind {
+	case "reliability":
 		k = finding.KindReliability
+	case "sast":
+		k = finding.KindSAST
 	}
 	return finding.Finding{
 		ID:          deterministicID(dedup),

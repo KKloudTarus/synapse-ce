@@ -426,6 +426,7 @@ func TestLanguageGatedRulesRespectExtensions(t *testing.T) {
 		quietIn string // foreign extension where the rule must stay silent
 	}{
 		{"sqlalchemy-raw-sql-dynamic", `db.session.execute(f"SELECT * FROM users WHERE n = '{q}'")`, "svc.py", "Svc.java"},
+		{"sqlalchemy-raw-sql-dynamic", `db.session.execute("SELECT * FROM users WHERE id={}".format(userID))`, "svc.py", "Svc.java"},
 		{"prisma-raw-sql-unsafe", `await prisma.$queryRawUnsafe(sql)`, "db.ts", "db.go"},
 		{"react-dangerous-html", `<div dangerouslySetInnerHTML={{ __html: note }} />`, "View.tsx", "view.py"},
 		{"unsafe-deserialization-node-serialize", `const o = unserialize(req.body.data)`, "d.js", "d.go"},

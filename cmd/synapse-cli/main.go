@@ -457,11 +457,13 @@ func runQuality(args []string) error {
 		}
 	}
 
+	astProvider := ast.New(os.Getenv("SYNAPSE_AST_BIN"))
 	svc := codequality.New(
 		codeanalysis.New(),
 		codequality.WithDuplication(duplication.New(0)),
-		codequality.WithComplexity(ast.New(os.Getenv("SYNAPSE_AST_BIN")), complexityMin),
-		codequality.WithBugs(ast.New(os.Getenv("SYNAPSE_AST_BIN"))),
+		codequality.WithComplexity(astProvider, complexityMin),
+		codequality.WithBugs(astProvider),
+		codequality.WithStructuralAnalyzer(astProvider),
 		codequality.WithTestScopedSmells(includeTestSmells),
 	)
 	findings, err := svc.Analyze(context.Background(), dir)
@@ -483,7 +485,7 @@ func runQuality(args []string) error {
 		for _, f := range findings {
 			byKind[f.Kind]++
 		}
-		fmt.Printf("  findings: %d (quality: %d, reliability: %d)\n", len(findings), byKind[finding.KindQuality], byKind[finding.KindReliability])
+		fmt.Printf("  findings: %d (quality: %d, reliability: %d, sast: %d)\n", len(findings), byKind[finding.KindQuality], byKind[finding.KindReliability], byKind[finding.KindSAST])
 		if !includeTestSmells {
 			fmt.Println("  note: info-severity smells in test code are hidden (--include-test-smells to show)")
 		}
@@ -536,11 +538,13 @@ func runRating(args []string) error {
 	}
 	loc := inv.Totals().CodeLines
 
+	astProvider := ast.New(os.Getenv("SYNAPSE_AST_BIN"))
 	svc := codequality.New(
 		codeanalysis.New(),
 		codequality.WithDuplication(duplication.New(0)),
-		codequality.WithComplexity(ast.New(os.Getenv("SYNAPSE_AST_BIN")), codequality.DefaultComplexityThreshold),
-		codequality.WithBugs(ast.New(os.Getenv("SYNAPSE_AST_BIN"))),
+		codequality.WithComplexity(astProvider, codequality.DefaultComplexityThreshold),
+		codequality.WithBugs(astProvider),
+		codequality.WithStructuralAnalyzer(astProvider),
 	)
 	findings, err := svc.Analyze(ctx, dir)
 	if err != nil {
@@ -636,11 +640,13 @@ func runGate(args []string) error {
 	ctx := context.Background()
 
 	// 1. Gather findings: code quality (quality+reliability, + duplication/complexity bridges) + SAST.
+	astProvider := ast.New(os.Getenv("SYNAPSE_AST_BIN"))
 	svc := codequality.New(
 		codeanalysis.New(),
 		codequality.WithDuplication(duplication.New(0)),
-		codequality.WithComplexity(ast.New(os.Getenv("SYNAPSE_AST_BIN")), codequality.DefaultComplexityThreshold),
-		codequality.WithBugs(ast.New(os.Getenv("SYNAPSE_AST_BIN"))),
+		codequality.WithComplexity(astProvider, codequality.DefaultComplexityThreshold),
+		codequality.WithBugs(astProvider),
+		codequality.WithStructuralAnalyzer(astProvider),
 	)
 	findings, err := svc.Analyze(ctx, dir)
 	if err != nil {

@@ -18,3 +18,7 @@ func MetricsFor(ctx context.Context, root string) (Metrics, error) {
 func BugsFor(ctx context.Context, root string) (Bugs, error) {
 	return Bugs{}, ErrUnavailable
 }
+
+func QualityFor(ctx context.Context, root string) (Quality, error) {
+	return Quality{}, ErrUnavailable
+}
