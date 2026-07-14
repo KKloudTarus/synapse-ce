@@ -760,3 +760,18 @@ func TestQualityForJSCollapsibleIf(t *testing.T) {
 	}
 	t.Errorf("missing js-ast-collapsible-if in %+v", res.Findings)
 }
+
+func TestQualityForJSUselessConstructor(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "u.js", "class Derived extends Base {\n  constructor(...args) {\n    super(...args);\n  }\n}\n")
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	for _, x := range res.Findings {
+		if x.Rule == "js-ast-useless-constructor" {
+			return
+		}
+	}
+	t.Errorf("missing js-ast-useless-constructor in %+v", res.Findings)
+}

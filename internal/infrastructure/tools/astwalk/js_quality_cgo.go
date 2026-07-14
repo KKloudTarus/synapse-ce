@@ -40,6 +40,24 @@ var jsRules = map[string]pythonRule{
 	"self-assign":        {"reliability", "js-ast-self-assign", "", "medium", "Self assignment", "Assigning a variable to itself has no effect and is usually a mistake."},
 	"self-compare":       {"reliability", "js-ast-self-comparison", "", "medium", "Self comparison", "Comparing a value to itself is constant (and misses the intended operand)."},
 	"collapsible-if":     {"quality", "js-ast-collapsible-if", "", "low", "Collapsible if statement", "An if whose only statement is another if (with no else) can be merged with &&."},
+	"useless-ctor":       {"quality", "js-ast-useless-constructor", "", "low", "Useless constructor", "A constructor that only forwards its arguments to super adds nothing and can be removed."},
+}
+
+// jsIsSuperOnlyBody reports whether a constructor body's only statement is a call to super(...).
+func jsIsSuperOnlyBody(body *sitter.Node, src []byte) bool {
+	if body.Type() != "statement_block" || body.NamedChildCount() != 1 {
+		return false
+	}
+	st := body.NamedChild(0)
+	if st.Type() != "expression_statement" || st.NamedChildCount() != 1 {
+		return false
+	}
+	call := st.NamedChild(0)
+	if call.Type() != "call_expression" {
+		return false
+	}
+	fn := call.ChildByFieldName("function")
+	return fn != nil && strings.TrimSpace(fn.Content(src)) == "super"
 }
 
 // jsMethodKey builds a comparison key for a class method, including static/get/set/async modifiers
@@ -207,8 +225,13 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			}
 			if n.Type() == "method_definition" {
 				if nm := n.ChildByFieldName("name"); nm != nil && strings.TrimSpace(nm.Content(src)) == "constructor" {
-					if body := n.ChildByFieldName("body"); body != nil && jsHasReturnValue(body) {
-						out = append(out, jsFinding("constructor-return", n, rel))
+					if body := n.ChildByFieldName("body"); body != nil {
+						if jsHasReturnValue(body) {
+							out = append(out, jsFinding("constructor-return", n, rel))
+						}
+						if jsIsSuperOnlyBody(body, src) {
+							out = append(out, jsFinding("useless-ctor", n, rel))
+						}
 					}
 				}
 			}

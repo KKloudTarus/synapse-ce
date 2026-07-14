@@ -39,6 +39,7 @@ func jsASTRules() []rule.Rule {
 		{"js-ast-self-assign", "Self assignment", "", "count = next;", "count = count;", "Remove the no-op, or assign the intended value.", "an assignment of a variable to itself", rule.TypeBug, rule.QualityReliability, shared.SeverityMedium},
 		{"js-ast-self-comparison", "Self comparison", "", "if (a === b) {\n    merge();\n}", "if (a === a) {\n    merge();\n}", "Compare against the intended operand.", "a comparison of a value to itself", rule.TypeBug, rule.QualityReliability, shared.SeverityMedium},
 		{"js-ast-collapsible-if", "Collapsible if statement", "", "if (a && b) {\n    run();\n}", "if (a) {\n    if (b) {\n        run();\n    }\n}", "Combine the two conditions with && into a single if.", "an if whose only statement is another if with no else", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow},
+		{"js-ast-useless-constructor", "Useless constructor", "", "class Derived extends Base {\n    greet() {}\n}", "class Derived extends Base {\n    constructor(...args) {\n        super(...args);\n    }\n}", "Remove the constructor; the implicit one forwards to super.", "a constructor that only forwards its arguments to super", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow},
 	}
 	rules := make([]rule.Rule, 0, len(specs))
 	for _, s := range specs {
