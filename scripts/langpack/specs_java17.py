@@ -47,5 +47,5 @@ RULES = [
       title="Hostname verifier that returns true", desc="A verifier lambda returning true accepts any hostname.",
       rationale="A hostname verifier that always returns true disables TLS identity checks (MITM).",
       remediation="Use the default verifier, or one that actually validates the hostname.", source="https://cwe.mitre.org/data/definitions/295.html",
-      re=r"hostnameVerifier\s*\([^)]*->\s*true", nc="builder.hostnameVerifier((host, session) -> true);", c="builder.hostnameVerifier(OkHostnameVerifier.INSTANCE);"),
+      re=r"hostnameVerifier\s*\([^;{]*->\s*true", nc="builder.hostnameVerifier((host, session) -> true);", c="builder.hostnameVerifier(OkHostnameVerifier.INSTANCE);"),
 ]
