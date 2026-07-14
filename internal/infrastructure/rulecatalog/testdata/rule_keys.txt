@@ -185,6 +185,7 @@ java-catch-error
 java-catch-generic
 java-catch-npe
 java-catch-throwable
+java-cglib-import
 java-character-isjavaletterordigit
 java-character-isspace
 java-cipher-3des
@@ -199,6 +200,7 @@ java-cipher-rc4
 java-cipher-rsa-default
 java-cipher-rsa-pkcs1
 java-class-name-lowercase
+java-class-newinstance
 java-classforname-param
 java-classloader-getresource-param
 java-collection-size-zero
@@ -206,6 +208,7 @@ java-command-exec-concat
 java-commons-beanutils-import
 java-commons-collections3
 java-commons-configuration1-import
+java-commons-digester1-import
 java-commons-escapehtml
 java-commons-lang2-import
 java-commons-logging-import
@@ -234,6 +237,7 @@ java-desede-keygen
 java-desede-keyspec
 java-desede-secretkeyfactory
 java-digest-md2
+java-digest-md4
 java-digestutils-md5
 java-digestutils-sha1
 java-double-brace-init
@@ -258,6 +262,7 @@ java-explicit-finalize-call
 java-explicit-gc
 java-extends-thread
 java-fastjson-parseobject
+java-file-delete-on-exit
 java-file-world-readable
 java-file-world-writable
 java-fileutils-read-no-charset
@@ -315,14 +320,19 @@ java-jackson-default-typing
 java-jackson1-import
 java-javax-annotation
 java-javax-ejb
+java-javax-el
+java-javax-enterprise
 java-javax-faces
 java-javax-inject
 java-javax-jaxrs
 java-javax-jms
+java-javax-json
 java-javax-mail
 java-javax-persistence
 java-javax-servlet
+java-javax-transaction
 java-javax-validation
+java-javax-websocket
 java-jdbc-get-unicode-stream
 java-jdbctemplate-concat
 java-jdk-activation-import
@@ -335,6 +345,7 @@ java-jdk-pack200-import
 java-jdk-rmi-activation-import
 java-jdk-security-acl-import
 java-jdk-soap-import
+java-jdom1-import
 java-jersey1-import
 java-jexl-createscript
 java-jjwt-unsigned
@@ -376,6 +387,14 @@ java-mvel-eval
 java-mysql-allow-load-local
 java-nan-comparison
 java-native-sql-concat
+java-new-boolean
+java-new-byte
+java-new-character
+java-new-double
+java-new-float
+java-new-integer
+java-new-long
+java-new-short
 java-new-string-literal
 java-new-threadgroup
 java-noop-hostname-verifier
@@ -389,6 +408,7 @@ java-octal-literal
 java-ognl-injection
 java-okhttp-hostname-verifier-true
 java-open-redirect
+java-oro-import
 java-path-traversal-param
 java-pattern-from-param
 java-pbe-md5-des
@@ -426,7 +446,9 @@ java-snakeyaml-unsafe-constructor
 java-spel-parser
 java-spring-antmatchers
 java-spring-authorize-requests
+java-spring-autowired-field
 java-spring-crossorigin-default
+java-spring-crossorigin-wildcard
 java-spring-enable-global-method-security
 java-spring-enable-oauth2-sso
 java-spring-enable-webmvc-security
@@ -455,6 +477,7 @@ java-stringbuffer
 java-stringbuilder-char-arg
 java-struts1-import
 java-substring-zero
+java-synchronized-on-string-literal
 java-system-exit
 java-system-get-security-manager
 java-system-load-param
@@ -486,12 +509,18 @@ java-weak-password-encoder
 java-write-request-header
 java-write-request-uri
 java-x-forwarded-for-trust
+java-xalan-import
 java-xerces-import
 java-xml-decoder
 java-xpath-eval-param
 java-xstream-deserialization
+java-xxe-documentbuilder-factory
 java-xxe-saxbuilder
+java-xxe-saxparser-factory
 java-xxe-saxreader
+java-xxe-schema-factory
+java-xxe-transformer-factory
+java-xxe-xmlinput-factory
 java-xxe-xmlreaderfactory
 java-zip-slip
 jfrog-token
