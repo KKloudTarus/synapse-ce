@@ -139,5 +139,7 @@ weak-hash-md5
 weak-hash-sha1
 weak-rsa-key-size
 world-writable-permissions
+xml:duplicate-attribute
+xml:not-well-formed
 xpath-injection
 xxe-insecure-xml-parsing

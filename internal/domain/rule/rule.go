@@ -51,12 +51,13 @@ type Detection string
 const (
 	DetectionAST     Detection = "ast"
 	DetectionPattern Detection = "pattern"
+	DetectionParse   Detection = "parse"
 	DetectionMetric  Detection = "metric"
 )
 
 func (d Detection) Valid() bool {
 	switch d {
-	case DetectionAST, DetectionPattern, DetectionMetric:
+	case DetectionAST, DetectionPattern, DetectionParse, DetectionMetric:
 		return true
 	default:
 		return false

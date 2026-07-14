@@ -515,6 +515,7 @@ components:
       enum:
         - ast
         - pattern
+        - parse
         - metric
 
     RuleSummary:

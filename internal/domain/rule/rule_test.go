@@ -52,6 +52,7 @@ func TestDetectionValid(t *testing.T) {
 	}{
 		{rule.DetectionAST, true},
 		{rule.DetectionPattern, true},
+		{rule.DetectionParse, true},
 		{rule.DetectionMetric, true},
 		{"", false},
 		{"unknown", false},

@@ -92,6 +92,57 @@ func TestCatalogParity(t *testing.T) {
 		}
 	}
 
+	seenXML := map[string]bool{}
+	for _, tc := range builtinXMLRules() {
+		seenXML[tc.id] = true
+		catRule, ok := catalogMap[tc.id]
+		if !ok {
+			t.Errorf("Rule %s missing from catalog", tc.id)
+			continue
+		}
+
+		if catRule.Name != tc.title {
+			t.Errorf("Rule %s Title mismatch: catalog=%q engine=%q", tc.id, catRule.Name, tc.title)
+		}
+		if catRule.DefaultSeverity != tc.severity {
+			t.Errorf("Rule %s Severity mismatch: catalog=%v engine=%v", tc.id, catRule.DefaultSeverity, tc.severity)
+		}
+		if catRule.Language != "XML" {
+			t.Errorf("Rule %s Language mismatch: expected XML", tc.id)
+		}
+		if catRule.Type != domainrule.TypeBug {
+			t.Errorf("Rule %s Type mismatch: expected Bug", tc.id)
+		}
+		if len(catRule.Qualities) != 1 || catRule.Qualities[0] != domainrule.QualityReliability {
+			t.Errorf("Rule %s Quality mismatch: expected Reliability", tc.id)
+		}
+		if catRule.Detection != domainrule.DetectionParse {
+			t.Errorf("Rule %s Detection mode mismatch: expected Parse", tc.id)
+		}
+
+		matched := false
+		for _, f := range scanXMLFile("fixture.xml", []byte(catRule.NoncompliantExample)) {
+			if f.RuleID == tc.id {
+				matched = true
+				if f.Title != tc.title {
+					t.Errorf("Rule %s Title mismatch in finding: got %q", tc.id, f.Title)
+				}
+				if f.Severity != tc.severity {
+					t.Errorf("Rule %s Severity mismatch in finding: got %v", tc.id, f.Severity)
+				}
+			}
+		}
+		if !matched {
+			t.Errorf("Rule %s noncompliant example does not trigger detector", tc.id)
+		}
+
+		for _, f := range scanXMLFile("fixture.xml", []byte(catRule.CompliantExample)) {
+			if f.RuleID == tc.id {
+				t.Errorf("Rule %s compliant example unexpectedly triggered detector", tc.id)
+			}
+		}
+	}
+
 	for _, r := range rules {
 		if r.Key == "quality-todo-comment" || r.Key == "quality-commented-out-code" || r.Key == "reliability-empty-catch" || r.Key == "reliability-self-assignment" || r.Key == "reliability-self-comparison" {
 			found := false
@@ -104,6 +155,9 @@ func TestCatalogParity(t *testing.T) {
 			if !found {
 				t.Errorf("Rule %s in catalog but missing from builtinRules", r.Key)
 			}
+		}
+		if r.Language == "XML" && !seenXML[string(r.Key)] {
+			t.Errorf("Rule %s in XML catalog but missing from builtinXMLRules", r.Key)
 		}
 	}
 }

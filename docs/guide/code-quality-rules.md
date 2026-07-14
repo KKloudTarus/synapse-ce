@@ -22,7 +22,7 @@ copy. Specifically:
   [OWASP](https://owasp.org/), [SEI CERT](https://wiki.sei.cmu.edu/confluence/display/seccode) secure-coding
   standards, and [ISO/IEC 25010](https://www.iso.org/standard/78176.html) software-quality attributes.
 - **Do** write our own rule title, description, rationale, remediation, and code examples, and our own
-  detection (AST query, token/line pattern, or metric threshold).
+  detection (AST query, structured parser check, token/line pattern, or metric threshold).
 - **Do not** copy any third-party rule's text, description, examples, or detection code, and **do not**
   attribute our rules to a specific commercial product. Cite the *concept's* origin (a CWE id, a
   style-guide section, a linter category) — not another tool's rule prose.
@@ -102,15 +102,15 @@ Rule {
   CompliantExample    // compliant code example
   NoncompliantExample // non-compliant code example
   RemediationEffort // minutes, for the tech-debt measure
-  Detection      // ast | pattern | metric
+  Detection      // ast | parse | pattern | metric
 }
 ```
 
 ## Detection & the parser
 
 Detection is one of: an **AST query** (via the sandboxed `synapse-ast` sidecar, tree-sitter), a
-**token/line pattern**, or a **metric threshold** (complexity, size, duplication). Prefer AST rules
-where a grammar exists.
+**structured parser check**, a **token/line pattern**, or a **metric threshold** (complexity, size,
+duplication). Prefer AST rules where a grammar exists.
 
 The sidecar currently parses **Python, JavaScript, Java** for function-level metrics (via go-enry for
 line counts of many more). Languages that need a new tree-sitter grammar (or a structured-config

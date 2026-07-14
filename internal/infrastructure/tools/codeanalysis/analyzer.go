@@ -76,20 +76,26 @@ func (a *Analyzer) Analyze(ctx context.Context, root string) ([]ports.CodeAnalys
 		if enry.IsVendor(path) || enry.IsDotFile(path) || enry.IsGenerated(path, content) || enry.IsBinary(content) {
 			return nil
 		}
+		ext := strings.ToLower(filepath.Ext(path))
 		lang := enry.GetLanguage(filepath.Base(path), content)
-		if lang == "" {
+		isXML := isXMLSource(ext, lang)
+		if lang == "" && !isXML {
 			return nil
 		}
-		switch enry.GetLanguageType(lang) {
-		case enry.Programming, enry.Markup:
-		default:
-			return nil
+		if !isXML {
+			switch enry.GetLanguageType(lang) {
+			case enry.Programming, enry.Markup:
+			default:
+				return nil
+			}
 		}
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
 			rel = path
 		}
-		ext := strings.ToLower(filepath.Ext(path))
+		if isXML {
+			out = append(out, scanXMLFile(rel, content)...)
+		}
 		out = append(out, a.scanFile(rel, ext, content)...)
 		return nil
 	})
