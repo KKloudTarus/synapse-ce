@@ -31,7 +31,8 @@ func scanDockerfile(rel string, data []byte) []ports.MisconfigRawFinding {
 	lastUserRoot := true // no USER yet ⇒ root
 	haveStage := false
 	haveHealthcheck := false
-	cmdCount := 0 // CMD instructions in the current stage (only the last one takes effect)
+	cmdCount := 0        // CMD instructions in the current stage (only the last one takes effect)
+	entrypointCount := 0 // ENTRYPOINT instructions in the current stage (only the last one takes effect)
 
 	for _, in := range instrs {
 		switch in.cmd {
@@ -42,11 +43,15 @@ func scanDockerfile(rel string, data []byte) []ports.MisconfigRawFinding {
 			lastUserLine = 0
 			lastUserRoot = true
 			cmdCount = 0
+			entrypointCount = 0
 			img, alias := parseFrom(in.args)
 			if alias != "" {
 				stageNames[strings.ToLower(alias)] = true
 			}
 			if r, ok := checkBaseImageTag(img, stageNames, rel, in.line); ok {
+				out = append(out, r)
+			}
+			if r, ok := checkFromPlatform(in.args, rel, in.line); ok {
 				out = append(out, r)
 			}
 		case "USER":
@@ -81,6 +86,26 @@ func scanDockerfile(rel string, data []byte) []ports.MisconfigRawFinding {
 					Description: "This build stage has more than one CMD; only the last CMD takes effect, so the earlier ones are dead configuration and usually signal a mistake. Keep a single CMD per stage.",
 				})
 			}
+		case "ENTRYPOINT":
+			entrypointCount++
+			if entrypointCount > 1 {
+				out = append(out, ports.MisconfigRawFinding{
+					File: rel, Line: in.line, RuleID: "dockerfile-multiple-entrypoint",
+					Title: "Multiple ENTRYPOINT instructions", Severity: shared.SeverityLow,
+					Resource:    "Dockerfile ENTRYPOINT",
+					Description: "This build stage has more than one ENTRYPOINT; only the last one takes effect, so the earlier ones are dead configuration and usually signal a mistake. Keep a single ENTRYPOINT per stage.",
+				})
+			}
+			if r, ok := checkShellFormEntrypoint(in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
+		case "COPY":
+			if r, ok := checkCopyToRoot("COPY", in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
+			if r, ok := checkKeyMaterialCopy("COPY", in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
 		case "ENV", "ARG":
 			if r, ok := checkSecretEnv(in.cmd, in.args, rel, in.line); ok {
 				out = append(out, r)
@@ -89,6 +114,12 @@ func scanDockerfile(rel string, data []byte) []ports.MisconfigRawFinding {
 			if r, ok := checkAddRemote(in.args, rel, in.line); ok {
 				out = append(out, r)
 			} else if r, ok := checkAddLocal(in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
+			if r, ok := checkCopyToRoot("ADD", in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
+			if r, ok := checkKeyMaterialCopy("ADD", in.args, rel, in.line); ok {
 				out = append(out, r)
 			}
 		case "RUN":
@@ -336,6 +367,17 @@ var (
 	aptInstallRe       = regexp.MustCompile(`(?i)\bapt(?:-get)?\s+(?:-[a-z]+\s+)*install\b`)
 	aptCleanRe         = regexp.MustCompile(`(?i)rm\s+-rf?\s+[^\n]*/var/lib/apt/lists`)
 	aptUpgradeRe       = regexp.MustCompile(`(?i)\bapt(?:-get)?\s+(?:-[a-z]+\s+)*(?:dist-upgrade|upgrade)\b`)
+	aptYesRe           = regexp.MustCompile(`(?i)(?:--yes|--assume-yes|(?:^|\s)-[a-z]*y[a-z]*(?:\s|$))`)
+	apkAddRe           = regexp.MustCompile(`(?i)\bapk\s+(?:-[a-z]+\s+)*add\b`)
+	yumInstallRe       = regexp.MustCompile(`(?i)\b(?:yum|dnf|microdnf)\s+(?:-[a-z]+\s+)*install\b`)
+	yumCleanRe         = regexp.MustCompile(`(?i)\b(?:yum|dnf|microdnf)\s+clean\b`)
+	pipInstallRe       = regexp.MustCompile(`(?i)\bpip[0-9]*\s+install\b`)
+	cdInRunRe          = regexp.MustCompile(`(?i)(?:^|&&|;|\|)\s*cd\s+\S`)
+	worldWritableRe    = regexp.MustCompile(`(?i)\bchmod\s+(?:-[a-zA-Z]+\s+)*(?:0?777|a\+rwx|o\+w)\b`)
+	setuidRe           = regexp.MustCompile(`(?i)\bchmod\s+(?:-[a-zA-Z]+\s+)*(?:[2467][0-7]{3}|[ugo]*\+s)\b`)
+	secretInRunRe      = regexp.MustCompile(`(?i)\b(?:password|passwd|secret|token|api[_-]?key|access[_-]?key)\s*=\s*["']?[A-Za-z0-9/+_.-]{4,}`)
+	fromPlatformRe     = regexp.MustCompile(`(?i)--platform=(\S+)`)
+	keyMaterialRe      = regexp.MustCompile(`(?i)(?:^|/)(?:id_rsa|id_dsa|id_ecdsa|id_ed25519)\b|\.(?:pem|key|pfx|p12|ppk)\b`)
 	sudoRe             = regexp.MustCompile(`(?i)(?:^|[|&;]\s*|\s)sudo\s`)
 )
 
@@ -383,6 +425,70 @@ func checkRunStep(args, rel string, line int) []ports.MisconfigRawFinding {
 			Description: "A RUN step runs apt-get upgrade or dist-upgrade, which upgrades base-image packages non-deterministically and defeats reproducible, pinned builds. Update the base image tag instead and pin the packages you install.",
 		})
 	}
+	if aptInstallRe.MatchString(args) && !aptYesRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-apt-no-yes",
+			Title: "apt install without -y", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "An apt/apt-get install runs without -y/--yes, so a non-interactive image build hangs waiting for a confirmation prompt. Add -y (or --assume-yes).",
+		})
+	}
+	if apkAddRe.MatchString(args) && !strings.Contains(strings.ToLower(args), "--no-cache") {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-apk-no-cache",
+			Title: "apk add without --no-cache", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "An apk add omits --no-cache, so the Alpine package index is written into the image layer (larger image, stale metadata). Add --no-cache.",
+		})
+	}
+	if yumInstallRe.MatchString(args) && !yumCleanRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-yum-no-clean",
+			Title: "yum/dnf install without clean", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "A yum/dnf install in this RUN step does not run `clean all` afterward, leaving package caches in the image layer. Append `&& yum clean all` (or `dnf clean all`).",
+		})
+	}
+	if pipInstallRe.MatchString(args) && !strings.Contains(strings.ToLower(args), "--no-cache-dir") {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-pip-no-cache-dir",
+			Title: "pip install without --no-cache-dir", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "A pip install omits --no-cache-dir, so the wheel/download cache is baked into the image layer, enlarging it. Add --no-cache-dir.",
+		})
+	}
+	if cdInRunRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-cd-in-run",
+			Title: "cd used in a RUN step", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step changes directory with `cd`. Each RUN is a fresh shell, so the cd does not persist to later instructions and makes the build fragile. Set the directory with WORKDIR instead.",
+		})
+	}
+	if worldWritableRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-world-writable",
+			Title: "World-writable permissions set", Severity: shared.SeverityMedium,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step grants world-writable permissions (chmod 777 / a+rwx), so any user in the container can modify the file, enabling tampering or privilege abuse. Grant only the permissions the process needs.",
+		})
+	}
+	if setuidRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-setuid-chmod",
+			Title: "setuid/setgid bit set", Severity: shared.SeverityMedium,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step sets a setuid/setgid bit (chmod u+s / 4xxx), so the binary runs with the file owner's privileges regardless of the caller, a classic privilege-escalation primitive. Avoid setuid binaries in images; prefer capabilities or a non-root design.",
+		})
+	}
+	if secretInRunRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-secret-in-run",
+			Title: "Secret literal in a RUN step", Severity: shared.SeverityHigh,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step assigns a credential as a literal value (a password/token/key), so the secret is persisted in an image layer and the build cache. Use BuildKit `--mount=type=secret` or inject the value at runtime instead of baking it in.",
+		})
+	}
 	return out
 }
 
@@ -419,6 +525,88 @@ func checkExposeSSH(args, rel string, line int) (ports.MisconfigRawFinding, bool
 				Title: "SSH port (22) exposed", Severity: shared.SeverityMedium,
 				Resource:    "Dockerfile EXPOSE",
 				Description: "The image EXPOSEs port 22, implying an in-container SSH daemon. SSH inside an application container is an anti-pattern that widens the attack surface and adds credential management; use `docker exec` or your orchestrator's tooling for shell access instead.",
+			}, true
+		}
+	}
+	return ports.MisconfigRawFinding{}, false
+}
+
+// checkFromPlatform flags a FROM that hardcodes --platform to a concrete value; a build-arg-templated
+// platform ($TARGETPLATFORM / $BUILDPLATFORM) is fine and left alone.
+func checkFromPlatform(args, rel string, line int) (ports.MisconfigRawFinding, bool) {
+	m := fromPlatformRe.FindStringSubmatch(args)
+	if m == nil || strings.HasPrefix(m[1], "$") {
+		return ports.MisconfigRawFinding{}, false
+	}
+	return ports.MisconfigRawFinding{
+		File: rel, Line: line, RuleID: "dockerfile-from-platform-pinned",
+		Title: "Hardcoded --platform in FROM", Severity: shared.SeverityLow,
+		Resource:    "Dockerfile FROM",
+		Description: "FROM pins a hardcoded --platform (for example linux/amd64), forcing a single architecture and breaking multi-arch builds. Drop the flag and let the builder choose, or use the $TARGETPLATFORM build arg.",
+	}, true
+}
+
+// checkShellFormEntrypoint flags an ENTRYPOINT written in shell form (not a JSON array). Shell form runs
+// the process under `/bin/sh -c` as a child of PID 1, so it never receives SIGTERM/SIGINT and cannot
+// shut down gracefully.
+func checkShellFormEntrypoint(args, rel string, line int) (ports.MisconfigRawFinding, bool) {
+	a := strings.TrimSpace(args)
+	if a == "" || strings.HasPrefix(a, "[") {
+		return ports.MisconfigRawFinding{}, false
+	}
+	return ports.MisconfigRawFinding{
+		File: rel, Line: line, RuleID: "dockerfile-shell-form-entrypoint",
+		Title: "ENTRYPOINT in shell form", Severity: shared.SeverityLow,
+		Resource:    "Dockerfile ENTRYPOINT",
+		Description: "ENTRYPOINT uses shell form, so the process runs under `/bin/sh -c` as a child of PID 1 and does not receive SIGTERM/SIGINT, preventing graceful shutdown. Use the JSON exec form, e.g. ENTRYPOINT [\"app\"].",
+	}, true
+}
+
+// checkCopyToRoot flags a COPY/ADD whose destination is the container root (/); files belong in a
+// dedicated application directory, not scattered across system paths.
+func checkCopyToRoot(cmd, args, rel string, line int) (ports.MisconfigRawFinding, bool) {
+	var toks []string
+	for _, t := range fields(args) {
+		if !strings.HasPrefix(t, "--") {
+			toks = append(toks, t)
+		}
+	}
+	if len(toks) < 2 {
+		return ports.MisconfigRawFinding{}, false
+	}
+	if strings.Trim(toks[len(toks)-1], `"'`) != "/" {
+		return ports.MisconfigRawFinding{}, false
+	}
+	return ports.MisconfigRawFinding{
+		File: rel, Line: line, RuleID: "dockerfile-copy-to-root",
+		Title: "Files copied into the container root", Severity: shared.SeverityLow,
+		Resource:    "Dockerfile " + cmd,
+		Description: "A " + cmd + " writes into the container root (/), scattering files across system directories and risking overwrites of base-image paths. Copy into a dedicated application directory (for example /app) instead.",
+	}, true
+}
+
+// checkKeyMaterialCopy flags a COPY/ADD that brings a private key or certificate file into the image
+// (a baked-in secret recoverable from the layer). A public key (.pub) is skipped.
+func checkKeyMaterialCopy(cmd, args, rel string, line int) (ports.MisconfigRawFinding, bool) {
+	var toks []string
+	for _, t := range fields(args) {
+		if !strings.HasPrefix(t, "--") {
+			toks = append(toks, t)
+		}
+	}
+	if len(toks) < 2 {
+		return ports.MisconfigRawFinding{}, false
+	}
+	for _, s := range toks[:len(toks)-1] { // sources (all but the destination)
+		if strings.Contains(strings.ToLower(s), ".pub") {
+			continue // a public key is not a secret
+		}
+		if keyMaterialRe.MatchString(s) {
+			return ports.MisconfigRawFinding{
+				File: rel, Line: line, RuleID: "dockerfile-private-key-copy",
+				Title: "Private key or certificate copied into image", Severity: shared.SeverityHigh,
+				Resource:    "Dockerfile " + cmd,
+				Description: "A " + cmd + " brings a private key or certificate file (for example id_rsa, *.pem, *.key) into the image, persisting the secret in a layer that anyone who can pull the image can extract. Use a runtime secret or BuildKit `--mount=type=secret` instead.",
 			}, true
 		}
 	}
