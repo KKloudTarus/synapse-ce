@@ -153,6 +153,7 @@ java-ast-too-many-params
 java-ast-too-many-returns
 java-ast-unnecessary-else
 java-ast-useless-catch
+java-ast-useless-constructor
 java-bigdecimal-double
 java-biginteger-literal
 java-boolean-getboolean
@@ -188,6 +189,8 @@ java-cookie-secure-false
 java-cors-allow-all-origin
 java-cors-allowed-methods-wildcard
 java-csrf-disabled
+java-date-getday
+java-date-gethours
 java-date-int-ctor
 java-date-tolocalestring
 java-date-year-month-ctor
@@ -220,6 +223,7 @@ java-extends-thread
 java-fastjson-parseobject
 java-file-world-readable
 java-file-world-writable
+java-fileutils-read-no-charset
 java-finalize-override
 java-float-equality
 java-for-empty-init-while
@@ -228,6 +232,7 @@ java-format-string-var
 java-getbytes-no-charset
 java-getrealpath-param
 java-groovy-shell
+java-guava-files-tostring
 java-guava-first-non-null
 java-guava-lists-newarraylist
 java-guava-maps-newhashmap
@@ -248,6 +253,7 @@ java-import-sun
 java-indexof-char
 java-inefficient-append-concat
 java-insecure-random
+java-ioutils-closequietly
 java-jackson-activate-default-typing
 java-jackson-default-typing
 java-jjwt-unsigned
@@ -314,6 +320,7 @@ java-runtime-halt
 java-scriptengine-manager
 java-securerandom-constant-seed
 java-securerandom-sha1prng
+java-securerandom-time-seed
 java-servlet-print-param
 java-set-default-hostname-verifier
 java-set-security-manager

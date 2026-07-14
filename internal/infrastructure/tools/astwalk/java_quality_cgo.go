@@ -42,6 +42,7 @@ var javaRules = map[string]pythonRule{
 	"empty-switch":       {"reliability", "java-ast-empty-switch", "", "low", "Empty switch statement", "A switch with no cases does nothing; remove it or add cases."},
 	"empty-try":          {"reliability", "java-ast-empty-try", "", "low", "Empty try block", "A try with an empty body guards nothing."},
 	"switch-fallthrough": {"reliability", "java-ast-switch-fallthrough", "", "medium", "switch case falls through", "A non-empty case that does not end in break/return/throw/continue falls through to the next case."},
+	"useless-ctor":       {"quality", "java-ast-useless-constructor", "", "low", "Useless constructor", "A constructor that only forwards its arguments to super adds nothing and can be removed."},
 }
 
 // javaSwitchJumps are statements that terminate a switch case group.
@@ -191,6 +192,13 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 		case "catch_clause":
 			if javaIsUselessCatch(n, src) {
 				out = append(out, javaFinding("useless-catch", n, rel))
+			}
+		case "constructor_declaration":
+			if body := n.ChildByFieldName("body"); body != nil && body.NamedChildCount() == 1 {
+				st := body.NamedChild(0)
+				if st.Type() == "explicit_constructor_invocation" && strings.HasPrefix(strings.TrimSpace(st.Content(src)), "super") {
+					out = append(out, javaFinding("useless-ctor", n, rel))
+				}
 			}
 		case "for_statement", "while_statement", "do_statement", "enhanced_for_statement":
 			if body := n.ChildByFieldName("body"); body != nil && body.Type() == "block" && body.NamedChildCount() == 0 {

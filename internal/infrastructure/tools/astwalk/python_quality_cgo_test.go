@@ -821,3 +821,18 @@ func TestQualityForJavaASTMore(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForJavaUselessCtor(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "D.java", "class Derived extends Base {\n  Derived(String name) {\n    super(name);\n  }\n}\n")
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	for _, x := range res.Findings {
+		if x.Rule == "java-ast-useless-constructor" {
+			return
+		}
+	}
+	t.Errorf("missing java-ast-useless-constructor in %+v", res.Findings)
+}
