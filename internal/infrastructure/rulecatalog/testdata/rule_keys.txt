@@ -116,9 +116,11 @@ insecure-cookie-flags
 insecure-randomness-security-context
 insecure-temp-file
 insecure-tls-verify-disabled
+java-access-controller
 java-apache-default-httpclient
 java-apache-httpclient3
 java-append-char-with-string
+java-applet
 java-ast-collapsible-if
 java-ast-complex-condition
 java-ast-constant-condition
@@ -231,6 +233,7 @@ java-guava-lists-newarraylist
 java-guava-maps-newhashmap
 java-guava-md5
 java-guava-sha1
+java-hardcoded-tmp-path
 java-header-crlf-param
 java-hibernate-create-criteria
 java-hibernate-create-sql-query
@@ -287,6 +290,7 @@ java-notify-not-notifyall
 java-null-cipher
 java-numberformat-static
 java-object-input-stream
+java-observable-observer
 java-octal-literal
 java-ognl-injection
 java-okhttp-hostname-verifier-true
@@ -303,6 +307,8 @@ java-redundant-intvalue
 java-request-dispatcher-param
 java-return-in-finally
 java-rsa-no-padding
+java-run-finalization
+java-run-finalizers-on-exit
 java-runtime-exec-var
 java-runtime-halt
 java-scriptengine-manager
@@ -310,6 +316,7 @@ java-securerandom-constant-seed
 java-securerandom-sha1prng
 java-servlet-print-param
 java-set-default-hostname-verifier
+java-set-security-manager
 java-setaccessible-true
 java-simpledateformat-static
 java-snakeyaml-unsafe-constructor
@@ -335,6 +342,7 @@ java-string-equals-empty
 java-string-intern
 java-string-length-zero
 java-string-ref-equality
+java-string-tokenizer
 java-string-valueof-literal
 java-stringbuffer
 java-stringbuilder-char-arg
@@ -343,6 +351,7 @@ java-system-exit
 java-system-load-param
 java-system-out-print
 java-temp-file-insecure
+java-thread-suspend
 java-thread-yield
 java-throw-in-finally
 java-throw-npe
@@ -357,6 +366,7 @@ java-touppercase-no-locale
 java-unnecessary-temporary-conversion
 java-unnecessary-unboxing
 java-upload-original-filename-path
+java-vector-elementat
 java-weak-hash-md5
 java-weak-hash-sha1
 java-weak-password-encoder
