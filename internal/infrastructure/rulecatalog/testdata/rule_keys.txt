@@ -252,6 +252,8 @@ java-xml-decoder
 jfrog-token
 js-angular-bypass-security
 js-angular-trust-as-html
+js-arguments-callee
+js-arguments-caller
 js-array-sort-no-compare
 js-ast-await-in-loop
 js-ast-complex-condition
@@ -285,6 +287,9 @@ js-cookie-secure-false
 js-cors-reflect-origin
 js-cors-wildcard
 js-dangerously-set-inner-html
+js-date-getyear
+js-date-setyear
+js-define-getter-setter
 js-document-cookie-write
 js-document-domain-write
 js-document-write
@@ -296,6 +301,13 @@ js-eqeqeq
 js-error-no-message
 js-eval-call
 js-execscript
+js-express-app-del
+js-express-bodyparser
+js-express-configure
+js-express-logger
+js-express-req-param
+js-express-res-send-status
+js-express-res-sendfile
 js-foreach-async
 js-global-isnan
 js-implicit-string-coercion
@@ -314,6 +326,7 @@ js-jwt-decode-no-verify
 js-keycode-deprecated
 js-legacy-escape
 js-localstorage-sensitive
+js-lodash-removed-methods
 js-map-flat
 js-mongo-where
 js-new-array
@@ -363,6 +376,7 @@ js-no-with
 js-node-domain-module
 js-node-fs-exists
 js-node-url-parse
+js-object-observe
 js-parentnode-removechild
 js-parseint-radix
 js-postmessage-wildcard
@@ -403,6 +417,7 @@ js-setimmediate-string
 js-setinterval-string
 js-settimeout-string
 js-shadow-restricted-name
+js-string-html-methods
 js-structured-clone
 js-substr-deprecated
 js-symbol-no-description
@@ -415,6 +430,7 @@ js-trim-left-right
 js-unneeded-ternary
 js-use-isnan
 js-useless-undefined
+js-void-zero
 js-vue-dollar-listeners
 js-vue-dollar-scopedslots
 js-vue-events-api
