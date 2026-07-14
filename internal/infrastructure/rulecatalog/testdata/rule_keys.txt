@@ -473,10 +473,12 @@ python-bare-except
 python-bind-all-interfaces
 python-broad-except
 python-broad-raise
+python-class-name-not-capwords
 python-compare-bool-literal
 python-compare-empty-collection
 python-comparison-of-constants
 python-complex-condition
+python-comprehension-in-call
 python-consider-iterating-dict
 python-consider-sys-exit
 python-consider-using-enumerate
@@ -511,6 +513,7 @@ python-except-pass
 python-exec-call
 python-f-string-logging
 python-flask-bind-all
+python-flask-cors-wildcard
 python-flask-debug
 python-flask-render-template-string
 python-fstring-no-placeholder
@@ -548,12 +551,15 @@ python-nested-loop
 python-not-in
 python-not-is
 python-numpy-allow-pickle
+python-numpy-deprecated-alias
 python-open-no-context
 python-os-chmod-world
 python-os-exec-family
 python-os-popen
 python-os-spawn
 python-os-system
+python-pandas-inplace
+python-pandas-ix
 python-pandas-read-pickle
 python-paramiko-autoadd-policy
 python-pickle-load
@@ -578,6 +584,7 @@ python-ssl-unverified-context
 python-ssl-wrap-socket
 python-star-import
 python-statement-semicolon
+python-strip-multichar
 python-subprocess-getoutput
 python-subprocess-shell
 python-super-with-arguments
@@ -591,6 +598,7 @@ python-type-eq-vs-isinstance
 python-unnecessary-dict-call
 python-unnecessary-dunder-call
 python-unnecessary-list-call
+python-unnecessary-tuple-call
 python-unused-import
 python-use-dict-literal
 python-use-list-literal
