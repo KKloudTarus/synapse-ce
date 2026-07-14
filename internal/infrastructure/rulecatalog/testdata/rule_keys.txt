@@ -293,6 +293,7 @@ js-dot-notation
 js-empty-catch
 js-eq-null
 js-eqeqeq
+js-error-no-message
 js-eval-call
 js-execscript
 js-foreach-async
@@ -305,6 +306,9 @@ js-inner-html-assign
 js-insecure-websocket
 js-insert-adjacent-html
 js-instanceof-array
+js-jasmine-globals
+js-jest-alias-methods
+js-join-no-separator
 js-jwt-alg-none
 js-jwt-decode-no-verify
 js-keycode-deprecated
@@ -388,6 +392,7 @@ js-react-finddomnode
 js-react-proptypes
 js-react-string-ref
 js-reject-unauthorized-false
+js-rxjs-topromise
 js-script-url
 js-sessionstorage-sensitive
 js-setimmediate-string
@@ -396,6 +401,8 @@ js-settimeout-string
 js-shadow-restricted-name
 js-substr-deprecated
 js-symbol-no-description
+js-test-disabled
+js-test-focused
 js-throw-new-error
 js-tls-reject-unauthorized-env
 js-tofixed-no-digits
