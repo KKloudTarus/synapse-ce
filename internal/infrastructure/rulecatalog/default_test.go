@@ -11,6 +11,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/rulecatalog"
+	"gopkg.in/yaml.v3"
 )
 
 func TestDefault_Validation(t *testing.T) {
@@ -153,6 +154,48 @@ func TestDefault_NoDuplicates(t *testing.T) {
 
 	if len(seen) != len(list) {
 		t.Fatalf("Length mismatch: %d unique keys vs %d listed rules", len(seen), len(list))
+	}
+}
+
+func TestDefault_DetectionValuesDocumentedInOpenAPI(t *testing.T) {
+	cat, err := rulecatalog.Default()
+	if err != nil {
+		t.Fatalf("Default() failed: %v", err)
+	}
+	rules, err := cat.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "api", "openapi.yaml"))
+	if err != nil {
+		t.Fatalf("read OpenAPI spec: %v", err)
+	}
+
+	var spec struct {
+		Components struct {
+			Schemas map[string]struct {
+				Enum []rule.Detection `yaml:"enum"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse OpenAPI spec: %v", err)
+	}
+
+	enum := spec.Components.Schemas["RuleDetection"].Enum
+	if len(enum) == 0 {
+		t.Fatal("OpenAPI RuleDetection enum is missing or empty")
+	}
+	allowed := make(map[rule.Detection]bool, len(enum))
+	for _, detection := range enum {
+		allowed[detection] = true
+	}
+
+	for _, r := range rules {
+		if !allowed[r.Detection] {
+			t.Errorf("rule %s uses detection %q missing from OpenAPI RuleDetection enum", r.Key, r.Detection)
+		}
 	}
 }
 
