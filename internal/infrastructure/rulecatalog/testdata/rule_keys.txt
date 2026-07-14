@@ -455,6 +455,7 @@ private-key
 private-key-material
 putty-private-key
 pypi-token
+python-assert-false
 python-assert-for-validation
 python-assert-tuple
 python-bare-except
@@ -497,6 +498,8 @@ python-flask-bind-all
 python-flask-debug
 python-fstring-no-placeholder
 python-ftplib-cleartext
+python-function-call-in-default
+python-getattr-constant
 python-global-statement
 python-hardcoded-tmp-path
 python-has-key
@@ -531,12 +534,15 @@ python-pandas-read-pickle
 python-paramiko-autoadd-policy
 python-pickle-load
 python-pty-spawn
+python-raise-literal
 python-raise-notimplemented
+python-redundant-except-tuple
 python-redundant-u-prefix
 python-requests-verify-false
 python-return-in-finally
 python-return-in-init
 python-rsa-key-size-weak
+python-setattr-constant
 python-shadow-builtin
 python-sql-fstring-execute
 python-sql-percent-execute
@@ -559,9 +565,12 @@ python-torch-load
 python-type-eq-vs-isinstance
 python-unnecessary-dunder-call
 python-unused-import
+python-use-dict-literal
+python-use-list-literal
 python-useless-object-inheritance
 python-xml-parse-xxe
 python-yaml-unsafe-load
+python-yaml-unsafe-loader
 quality-commented-out-code
 quality-duplicated-block
 quality-high-complexity
