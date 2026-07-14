@@ -393,3 +393,35 @@ func TestQualityForJavaASTBatch3(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForPythonASTStructure(t *testing.T) {
+	root := t.TempDir()
+	var big strings.Builder
+	big.WriteString("class Big:\n")
+	for i := 0; i < 25; i++ {
+		big.WriteString("    def m")
+		big.WriteByte(byte('a' + i%26))
+		big.WriteString("(self):\n        return 1\n")
+	}
+	writeFile(t, root, "s.py", "class Cart:\n    items = []\n\n"+
+		"grade = high if s > 90 else (mid if s > 70 else low)\n"+
+		"if data == []:\n    stop()\n"+
+		"try:\n    work()\nexcept ValueError:\n    pass\n\n"+
+		big.String())
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{
+		"python-mutable-class-attribute", "python-nested-conditional",
+		"python-large-class", "python-compare-empty-collection", "python-except-pass",
+	} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
