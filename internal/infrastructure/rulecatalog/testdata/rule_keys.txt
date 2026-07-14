@@ -162,9 +162,11 @@ java-cipher-rsa-pkcs1
 java-collection-size-zero
 java-command-exec-concat
 java-cond-assign
+java-content-type-options-disable
 java-cookie-httponly-false
 java-cookie-secure-false
 java-cors-allow-all-origin
+java-cors-allowed-methods-wildcard
 java-csrf-disabled
 java-date-int-ctor
 java-des-keygen
@@ -182,6 +184,7 @@ java-empty-while
 java-enumeration
 java-equals-null
 java-exception-no-message
+java-exec-shell-array
 java-explicit-finalize-call
 java-explicit-gc
 java-extends-thread
@@ -198,6 +201,7 @@ java-guava-md5
 java-guava-sha1
 java-hmac-md5
 java-hostname-verifier-allow-all
+java-hsts-disable
 java-import-java-lang
 java-import-sun
 java-indexof-char
@@ -213,10 +217,12 @@ java-log-injection
 java-long-literal-lowercase-l
 java-modifier-order
 java-mutable-public-static-array
+java-mysql-allow-load-local
 java-nan-comparison
 java-new-string-literal
 java-new-threadgroup
 java-noop-hostname-verifier
+java-noop-password-encoder
 java-notify-not-notifyall
 java-null-cipher
 java-numberformat-static
@@ -228,6 +234,7 @@ java-path-traversal-param
 java-printstacktrace
 java-public-finalize
 java-redundant-intvalue
+java-request-dispatcher-param
 java-return-in-finally
 java-runtime-exec-var
 java-runtime-halt
@@ -239,9 +246,11 @@ java-simpledateformat-static
 java-snakeyaml-unsafe-constructor
 java-spel-parser
 java-spring-crossorigin-default
+java-spring-frame-options-disable
 java-sql-string-concat
 java-ssl-context-insecure
 java-ssrf-url-param
+java-standard-password-encoder
 java-star-import
 java-static-iv
 java-string-equals-empty
@@ -263,6 +272,7 @@ java-tolowercase-no-locale
 java-touppercase-no-locale
 java-weak-hash-md5
 java-weak-hash-sha1
+java-weak-password-encoder
 java-xml-decoder
 java-xstream-deserialization
 java-xxe-saxbuilder
