@@ -366,9 +366,12 @@ js-node-url-parse
 js-parentnode-removechild
 js-parseint-radix
 js-postmessage-wildcard
+js-prefer-add-event-listener
 js-prefer-array-find
 js-prefer-array-some
+js-prefer-dataset
 js-prefer-date-now
+js-prefer-dom-append
 js-prefer-exponentiation
 js-prefer-includes
 js-prefer-node-protocol
@@ -391,6 +394,7 @@ js-react-dom-render
 js-react-finddomnode
 js-react-proptypes
 js-react-string-ref
+js-reflect-apply
 js-reject-unauthorized-false
 js-rxjs-topromise
 js-script-url
@@ -399,6 +403,7 @@ js-setimmediate-string
 js-setinterval-string
 js-settimeout-string
 js-shadow-restricted-name
+js-structured-clone
 js-substr-deprecated
 js-symbol-no-description
 js-test-disabled
@@ -916,14 +921,17 @@ ts-as-any-cast
 ts-ban-boxed-types
 ts-ban-tslint-comment
 ts-explicit-any
+ts-extra-non-null
 ts-no-empty-interface
 ts-no-inferrable-types
 ts-no-nocheck
 ts-no-this-alias
 ts-non-null-assertion
+ts-non-null-optional-chain
 ts-prefer-namespace
 ts-triple-slash-reference
 ts-ts-ignore
+ts-unsafe-function-type
 twilio-api-key
 unsafe-c-string-function
 unsafe-deserialization-generic
