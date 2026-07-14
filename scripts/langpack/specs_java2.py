@@ -1,0 +1,43 @@
+CC = "commentOnlyLine"
+def r(**k):
+    k.setdefault("lang","java"); k.setdefault("owasp",""); k.setdefault("effort",15)
+    k.setdefault("tags",["sast","java"]); k.setdefault("cat_desc",k["desc"]); k.setdefault("skip",CC)
+    return k
+RULES = [
+    r(id="java-notify-not-notifyall", type="bug", qual="rel", sev="medium", cwe="", title="notify() instead of notifyAll()",
+      desc="notify() wakes one arbitrary waiter and can strand others.",
+      rationale="With multiple waiters and differing wait conditions, notify() may wake a thread that cannot proceed, deadlocking the rest (SEI CERT THI02-J).",
+      remediation="Use notifyAll() unless a single interchangeable waiter is guaranteed.",
+      source="https://wiki.sei.cmu.edu/confluence/display/java/THI02-J.+Notify+all+waiting+threads+rather+than+a+single+thread",
+      re=r"\.notify\s*\(\s*\)", nc="synchronized (lock) { lock.notify(); }", c="synchronized (lock) { lock.notifyAll(); }"),
+    r(id="java-collection-size-zero", type="smell", qual="maint", sev="low", cwe="", title="size() == 0 instead of isEmpty()",
+      desc="`isEmpty()` states intent and is O(1) for every collection.",
+      rationale="size() == 0 is less readable and, for some collections (e.g. ConcurrentLinkedQueue), size() is O(n) while isEmpty() is O(1).",
+      remediation="Use isEmpty().",
+      source="https://errorprone.info/bugpattern/SizeGreaterThanOrEqualsZero",
+      re=r"\.size\s*\(\s*\)\s*==\s*0", nc="if (items.size() == 0) return;", c="if (items.isEmpty()) return;"),
+    r(id="java-boxed-constructor", type="smell", qual="maint", sev="low", cwe="", title="Deprecated boxed-primitive constructor",
+      desc="`new Integer(...)` etc. are deprecated; use valueOf to reuse the cache.",
+      rationale="Boxed-primitive constructors always allocate and are deprecated for removal; valueOf reuses cached instances.",
+      remediation="Use Integer.valueOf(...) (or autoboxing).",
+      source="https://docs.oracle.com/javase/9/docs/api/java/lang/Integer.html",
+      re=r"\bnew\s+(Integer|Long|Double|Boolean|Character|Short|Byte|Float)\s*\(", nc="Integer n = new Integer(5);", c="Integer n = Integer.valueOf(5);"),
+    r(id="java-getbytes-no-charset", type="bug", qual="rel", sev="medium", cwe="", title="String.getBytes() without a charset",
+      desc="getBytes() uses the platform default charset, producing machine-dependent bytes.",
+      rationale="Without an explicit charset, getBytes()/new String(bytes) depend on the platform default, so output differs across environments and can corrupt data.",
+      remediation="Pass an explicit charset, e.g. getBytes(StandardCharsets.UTF_8).",
+      source="https://wiki.sei.cmu.edu/confluence/display/java/STR04-J.+Use+compatible+character+encodings+when+communicating+string+data+between+JVMs",
+      re=r"\.getBytes\s*\(\s*\)", nc="byte[] b = payload.getBytes();", c="byte[] b = payload.getBytes(StandardCharsets.UTF_8);"),
+    r(id="java-new-string-literal", type="smell", qual="maint", sev="low", cwe="", title="Redundant new String(literal)",
+      desc="`new String(\"x\")` allocates a needless copy of an interned literal.",
+      rationale="A string literal is already a String; wrapping it in new String allocates an extra object with no benefit.",
+      remediation="Use the string literal directly.",
+      source="https://spotbugs.readthedocs.io/en/stable/bugDescriptions.html",
+      re=r"\bnew\s+String\s*\(\s*\"", nc='String s = new String("ready");', c='String s = "ready";'),
+    r(id="java-runtime-halt", type="smell", qual="maint", sev="medium", cwe="", title="Runtime.halt() forcibly stops the JVM",
+      desc="Runtime.halt() terminates the JVM without running shutdown hooks or finalizers.",
+      rationale="halt() stops the JVM abruptly, skipping shutdown hooks and cleanup — even more dangerous than System.exit in shared code.",
+      remediation="Signal termination via an exception; reserve halt for last-resort process supervisors.",
+      source="https://docs.oracle.com/javase/8/docs/api/java/lang/Runtime.html#halt-int-",
+      re=r"Runtime\.getRuntime\(\)\.halt\s*\(", nc="Runtime.getRuntime().halt(1);", c="throw new IllegalStateException(\"fatal\");"),
+]
