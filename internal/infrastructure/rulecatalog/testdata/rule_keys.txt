@@ -117,6 +117,7 @@ insecure-randomness-security-context
 insecure-temp-file
 insecure-tls-verify-disabled
 java-bigdecimal-double
+java-biginteger-literal
 java-boolean-getboolean
 java-boolean-literal-compare
 java-boolean-return-ternary
@@ -130,18 +131,23 @@ java-date-int-ctor
 java-empty-catch
 java-empty-finally
 java-empty-if
+java-empty-statement
 java-empty-synchronized
 java-empty-while
 java-enumeration
 java-exception-no-message
+java-explicit-finalize-call
 java-explicit-gc
 java-finalize-override
 java-float-equality
 java-getbytes-no-charset
+java-import-java-lang
+java-inefficient-append-concat
 java-legacy-collection
 java-long-literal-lowercase-l
 java-mutable-public-static-array
 java-new-string-literal
+java-new-threadgroup
 java-notify-not-notifyall
 java-numberformat-static
 java-octal-literal
@@ -150,6 +156,7 @@ java-return-in-finally
 java-runtime-exec-var
 java-runtime-halt
 java-simpledateformat-static
+java-star-import
 java-string-equals-empty
 java-string-intern
 java-string-ref-equality
@@ -179,11 +186,13 @@ js-no-constant-condition
 js-no-debugger
 js-no-double-negation
 js-no-empty-block
+js-no-empty-pattern
 js-no-extend-native
 js-no-extra-semi
 js-no-global-assign
 js-no-iterator
 js-no-labels
+js-no-loss-of-precision
 js-no-multi-assign
 js-no-nested-ternary
 js-no-new-object
@@ -198,6 +207,7 @@ js-no-sparse-array
 js-no-template-in-regular-string
 js-no-throw-literal
 js-no-unsafe-negation
+js-no-useless-computed-key
 js-no-useless-concat
 js-no-var
 js-no-void
@@ -211,6 +221,7 @@ js-prototype-builtins
 js-script-url
 js-settimeout-string
 js-use-isnan
+js-yoda-condition
 jwt
 jwt-hardcoded-secret-or-none
 kubernetes-allow-priv-escalation
@@ -258,6 +269,7 @@ node-domain-module
 node-dynamic-require
 node-execsync-dynamic
 node-fs-chmod-world-writable
+node-legacy-url-parse
 node-new-buffer
 node-process-exit-lib
 node-set-insecure-cookie-samesite-none
@@ -385,6 +397,7 @@ terraform-sqs-no-dlq
 terraform-sqs-unencrypted
 terraform-wildcard-principal
 ts-array-type-generic
+ts-ban-boxed-types
 ts-explicit-any
 ts-no-empty-interface
 ts-no-inferrable-types
