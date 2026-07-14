@@ -31,15 +31,17 @@ func scanDockerfile(rel string, data []byte) []ports.MisconfigRawFinding {
 	lastUserRoot := true // no USER yet ⇒ root
 	haveStage := false
 	haveHealthcheck := false
+	cmdCount := 0 // CMD instructions in the current stage (only the last one takes effect)
 
 	for _, in := range instrs {
 		switch in.cmd {
 		case "FROM":
-			// New stage: reset the per-stage user state.
+			// New stage: reset the per-stage user + CMD state.
 			haveStage = true
 			lastFromLine = in.line
 			lastUserLine = 0
 			lastUserRoot = true
+			cmdCount = 0
 			img, alias := parseFrom(in.args)
 			if alias != "" {
 				stageNames[strings.ToLower(alias)] = true
@@ -53,6 +55,31 @@ func scanDockerfile(rel string, data []byte) []ports.MisconfigRawFinding {
 		case "HEALTHCHECK":
 			if !strings.EqualFold(strings.TrimSpace(in.args), "NONE") {
 				haveHealthcheck = true
+			}
+		case "MAINTAINER":
+			out = append(out, ports.MisconfigRawFinding{
+				File: rel, Line: in.line, RuleID: "dockerfile-maintainer-deprecated",
+				Title: "Deprecated MAINTAINER instruction", Severity: shared.SeverityLow,
+				Resource:    "Dockerfile MAINTAINER",
+				Description: "MAINTAINER is deprecated. Record authorship with a LABEL (for example org.opencontainers.image.authors) so image metadata stays standard and machine-readable.",
+			})
+		case "WORKDIR":
+			if r, ok := checkWorkdirRelative(in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
+		case "EXPOSE":
+			if r, ok := checkExposeSSH(in.args, rel, in.line); ok {
+				out = append(out, r)
+			}
+		case "CMD":
+			cmdCount++
+			if cmdCount > 1 {
+				out = append(out, ports.MisconfigRawFinding{
+					File: rel, Line: in.line, RuleID: "dockerfile-multiple-cmd",
+					Title: "Multiple CMD instructions", Severity: shared.SeverityLow,
+					Resource:    "Dockerfile CMD",
+					Description: "This build stage has more than one CMD; only the last CMD takes effect, so the earlier ones are dead configuration and usually signal a mistake. Keep a single CMD per stage.",
+				})
 			}
 		case "ENV", "ARG":
 			if r, ok := checkSecretEnv(in.cmd, in.args, rel, in.line); ok {
@@ -308,6 +335,7 @@ var (
 	insecureDownloadRe = regexp.MustCompile(`(?i)(?:curl\b[^|&;]*\s(?:-k|--insecure)|wget\b[^|&;]*\s--no-check-certificate)`)
 	aptInstallRe       = regexp.MustCompile(`(?i)\bapt(?:-get)?\s+(?:-[a-z]+\s+)*install\b`)
 	aptCleanRe         = regexp.MustCompile(`(?i)rm\s+-rf?\s+[^\n]*/var/lib/apt/lists`)
+	aptUpgradeRe       = regexp.MustCompile(`(?i)\bapt(?:-get)?\s+(?:-[a-z]+\s+)*(?:dist-upgrade|upgrade)\b`)
 	sudoRe             = regexp.MustCompile(`(?i)(?:^|[|&;]\s*|\s)sudo\s`)
 )
 
@@ -339,7 +367,62 @@ func checkRunStep(args, rel string, line int) []ports.MisconfigRawFinding {
 			Description: "An apt/apt-get install in this RUN step does not remove /var/lib/apt/lists afterward, leaving the package index in the image layer (larger image, stale metadata). Append: rm -rf /var/lib/apt/lists/*.",
 		})
 	}
+	if aptInstallRe.MatchString(args) && !strings.Contains(strings.ToLower(args), "--no-install-recommends") {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-apt-no-norecommends",
+			Title: "apt install without --no-install-recommends", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "An apt/apt-get install in this RUN step omits --no-install-recommends, so recommended-but-unneeded packages are pulled in, enlarging the image and its attack surface. Add --no-install-recommends (or set APT::Install-Recommends \"false\").",
+		})
+	}
+	if aptUpgradeRe.MatchString(args) {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: line, RuleID: "dockerfile-apt-upgrade",
+			Title: "apt upgrade in a RUN step", Severity: shared.SeverityLow,
+			Resource:    "Dockerfile RUN",
+			Description: "A RUN step runs apt-get upgrade or dist-upgrade, which upgrades base-image packages non-deterministically and defeats reproducible, pinned builds. Update the base image tag instead and pin the packages you install.",
+		})
+	}
 	return out
+}
+
+// checkWorkdirRelative flags a WORKDIR set to a relative path. A relative WORKDIR resolves against the
+// previous WORKDIR (or /), so the effective directory is order-dependent and easy to get wrong; an
+// absolute path is unambiguous. A variable-templated ($X) or Windows path is left alone.
+func checkWorkdirRelative(args, rel string, line int) (ports.MisconfigRawFinding, bool) {
+	p := strings.Trim(strings.TrimSpace(args), `"'`)
+	if p == "" || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "$") || strings.HasPrefix(p, `\`) {
+		return ports.MisconfigRawFinding{}, false
+	}
+	if len(p) >= 2 && p[1] == ':' { // Windows drive, e.g. C:\app
+		return ports.MisconfigRawFinding{}, false
+	}
+	return ports.MisconfigRawFinding{
+		File: rel, Line: line, RuleID: "dockerfile-workdir-relative",
+		Title: "WORKDIR uses a relative path", Severity: shared.SeverityLow,
+		Resource:    "Dockerfile WORKDIR " + clip(p),
+		Description: "WORKDIR is a relative path, so the effective working directory depends on the previous WORKDIR and is easy to get wrong across stages or edits. Use an absolute path (for example /app).",
+	}, true
+}
+
+// checkExposeSSH flags EXPOSE 22 (the SSH port). Running an SSH daemon inside an application container
+// is an anti-pattern that adds a remote-login attack surface and credential-management burden.
+func checkExposeSSH(args, rel string, line int) (ports.MisconfigRawFinding, bool) {
+	for _, f := range fields(args) {
+		port := f
+		if i := strings.IndexByte(port, '/'); i >= 0 { // drop /tcp, /udp
+			port = port[:i]
+		}
+		if port == "22" {
+			return ports.MisconfigRawFinding{
+				File: rel, Line: line, RuleID: "dockerfile-expose-ssh",
+				Title: "SSH port (22) exposed", Severity: shared.SeverityMedium,
+				Resource:    "Dockerfile EXPOSE",
+				Description: "The image EXPOSEs port 22, implying an in-container SSH daemon. SSH inside an application container is an anti-pattern that widens the attack surface and adds credential management; use `docker exec` or your orchestrator's tooling for shell access instead.",
+			}, true
+		}
+	}
+	return ports.MisconfigRawFinding{}, false
 }
 
 // envAssignments parses an ENV/ARG argument into (key, value) pairs, handling the modern "K=V K2=V2"

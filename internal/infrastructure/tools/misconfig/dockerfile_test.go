@@ -26,3 +26,48 @@ func TestDockerfileAptNoCleanStillFlagged(t *testing.T) {
 		t.Errorf("apt install without cleanup should still be flagged; got %v", keys(got))
 	}
 }
+
+func TestDockerfileRulePackAdditions(t *testing.T) {
+	cases := []struct {
+		name     string
+		df       string
+		wantRule string
+	}{
+		{"maintainer", "FROM alpine:3.19\nMAINTAINER team@example.com\n", "dockerfile-maintainer-deprecated"},
+		{"workdir relative", "FROM alpine:3.19\nWORKDIR app\n", "dockerfile-workdir-relative"},
+		{"apt no-recommends", "FROM debian:bookworm-slim\nRUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*\n", "dockerfile-apt-no-norecommends"},
+		{"apt upgrade", "FROM debian:bookworm-slim\nRUN apt-get update && apt-get upgrade -y\n", "dockerfile-apt-upgrade"},
+		{"expose ssh", "FROM alpine:3.19\nEXPOSE 22\n", "dockerfile-expose-ssh"},
+		{"multiple cmd", "FROM alpine:3.19\nCMD [\"one\"]\nCMD [\"two\"]\n", "dockerfile-multiple-cmd"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ruleIDs(scan(t, map[string]string{"Dockerfile": tc.df}))
+			if _, ok := got[tc.wantRule]; !ok {
+				t.Errorf("expected %s, got %v", tc.wantRule, keys(got))
+			}
+		})
+	}
+}
+
+func TestDockerfileRulePackNoFalsePositives(t *testing.T) {
+	// A tidy Dockerfile must trigger none of the new rules.
+	df := "FROM debian:bookworm-slim\n" +
+		"LABEL org.opencontainers.image.authors=\"team@example.com\"\n" +
+		"WORKDIR /app\n" +
+		"RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*\n" +
+		"EXPOSE 8080\n" +
+		"USER app\n" +
+		"HEALTHCHECK CMD curl -f http://localhost:8080/ || exit 1\n" +
+		"CMD [\"app\"]\n"
+	got := ruleIDs(scan(t, map[string]string{"Dockerfile": df}))
+	for _, r := range []string{
+		"dockerfile-maintainer-deprecated", "dockerfile-workdir-relative",
+		"dockerfile-apt-no-norecommends", "dockerfile-apt-upgrade",
+		"dockerfile-expose-ssh", "dockerfile-multiple-cmd",
+	} {
+		if _, bad := got[r]; bad {
+			t.Errorf("clean Dockerfile must not trigger %q; got %v", r, keys(got))
+		}
+	}
+}
