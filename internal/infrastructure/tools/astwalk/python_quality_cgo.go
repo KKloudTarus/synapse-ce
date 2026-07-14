@@ -51,9 +51,36 @@ var pythonRules = map[string]pythonRule{
 	"large-class":        {"quality", "python-large-class", "", "low", "Class has too many methods", "A class with a very large number of methods likely has too many responsibilities; consider splitting it."},
 	"compare-empty":      {"quality", "python-compare-empty-collection", "", "low", "Comparison to an empty collection", "Comparing to [] / {} / () is less clear than a truthiness check; use `if not x`."},
 	"except-pass":        {"reliability", "python-except-pass", "CWE-390", "low", "Exception silently passed", "An except whose only statement is pass swallows the error with no handling or logging."},
+	"compare-bool":       {"quality", "python-compare-bool-literal", "", "low", "Comparison to a boolean literal", "Comparing to True/False is redundant; use the value directly (or `not value`)."},
+	"too-many-returns":   {"quality", "python-too-many-returns", "", "low", "Function has too many return statements", "A function with many return points is hard to follow; simplify the control flow."},
 }
 
 var emptyCompareRE = regexp.MustCompile(`(?s)(==|!=)\s*(\[\s*\]|\{\s*\}|\(\s*\))|(\[\s*\]|\{\s*\})\s*(==|!=)`)
+var boolCompareRE = regexp.MustCompile(`(?s)(==|!=)\s*(True|False)\b|\b(True|False)\s*(==|!=)`)
+
+// countReturnsBounded counts return_statement nodes under body without descending into nested scopes
+// (functions/lambdas/classes) named in stop. Shared by the Python/Java/JS quality walkers.
+func countReturnsBounded(body *sitter.Node, stop map[string]bool) int {
+	if body == nil {
+		return 0
+	}
+	cnt := 0
+	stack := []*sitter.Node{body}
+	for len(stack) > 0 {
+		c := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if c.Type() == "return_statement" {
+			cnt++
+		}
+		if c != body && stop[c.Type()] {
+			continue
+		}
+		for i := 0; i < int(c.ChildCount()); i++ {
+			stack = append(stack, c.Child(i))
+		}
+	}
+	return cnt
+}
 
 // pyHasDescendantType reports whether n has a descendant (excluding itself) of the given type.
 func pyHasDescendantType(n *sitter.Node, typ string) bool {
@@ -184,6 +211,9 @@ func pythonFindings(root *sitter.Node, src []byte, rel string) []QualityFinding 
 			if body := n.ChildByFieldName("body"); body != nil && int(body.NamedChildCount()) > 50 {
 				out = append(out, pythonFinding("long-function", n, rel))
 			}
+			if body := n.ChildByFieldName("body"); countReturnsBounded(body, map[string]bool{"function_definition": true, "lambda": true}) > 6 {
+				out = append(out, pythonFinding("too-many-returns", n, rel))
+			}
 		case "except_clause":
 			if strings.HasPrefix(strings.TrimSpace(text), "except:") {
 				out = append(out, pythonFinding("bare-except", n, rel))
@@ -252,6 +282,9 @@ func pythonFindings(root *sitter.Node, src []byte, rel string) []QualityFinding 
 			}
 			if emptyCompareRE.MatchString(text) {
 				out = append(out, pythonFinding("compare-empty", n, rel))
+			}
+			if boolCompareRE.MatchString(text) {
+				out = append(out, pythonFinding("compare-bool", n, rel))
 			}
 			if typeCompareRE.MatchString(text) {
 				out = append(out, pythonFinding("type-eq", n, rel))

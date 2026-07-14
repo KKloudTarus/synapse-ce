@@ -473,3 +473,23 @@ func TestQualityForJavaScriptASTBatch2(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForTooManyReturns(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "r.py", "def classify(x):\n    if x == True:\n        return 0\n    if x == 1: return 1\n    if x == 2: return 2\n    if x == 3: return 3\n    if x == 4: return 4\n    if x == 5: return 5\n    if x == 6: return 6\n    return 7\n")
+	writeFile(t, root, "R.java", "class R {\n  int classify(int x) {\n    if (x==1) return 1;\n    if (x==2) return 2;\n    if (x==3) return 3;\n    if (x==4) return 4;\n    if (x==5) return 5;\n    if (x==6) return 6;\n    if (x==7) return 7;\n    return 0;\n  }\n}\n")
+	writeFile(t, root, "r.js", "function classify(x) {\n  if (x===1) return 1;\n  if (x===2) return 2;\n  if (x===3) return 3;\n  if (x===4) return 4;\n  if (x===5) return 5;\n  if (x===6) return 6;\n  if (x===7) return 7;\n  return 0;\n}\n")
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"python-too-many-returns", "python-compare-bool-literal", "java-ast-too-many-returns", "js-ast-too-many-returns"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
