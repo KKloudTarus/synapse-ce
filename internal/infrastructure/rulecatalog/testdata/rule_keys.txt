@@ -156,6 +156,7 @@ java-cors-allow-all-origin
 java-csrf-disabled
 java-date-int-ctor
 java-des-keygen
+java-desede-keygen
 java-digestutils-md5
 java-digestutils-sha1
 java-double-brace-init
@@ -207,6 +208,7 @@ java-return-in-finally
 java-runtime-exec-var
 java-runtime-halt
 java-scriptengine-manager
+java-securerandom-constant-seed
 java-set-default-hostname-verifier
 java-setaccessible-true
 java-simpledateformat-static
@@ -215,6 +217,7 @@ java-spel-parser
 java-spring-crossorigin-default
 java-ssl-context-insecure
 java-star-import
+java-static-iv
 java-string-equals-empty
 java-string-intern
 java-string-length-zero
@@ -237,6 +240,7 @@ java-weak-hash-sha1
 java-xml-decoder
 jfrog-token
 js-angular-bypass-security
+js-angular-trust-as-html
 js-array-sort-no-compare
 js-ast-empty-function
 js-ast-identical-branches
@@ -249,6 +253,7 @@ js-ast-too-many-returns
 js-cookie-httponly-false
 js-cookie-samesite-none
 js-cookie-secure-false
+js-cors-reflect-origin
 js-cors-wildcard
 js-dangerously-set-inner-html
 js-document-cookie-write
@@ -263,6 +268,7 @@ js-eval-call
 js-execscript
 js-foreach-async
 js-global-isnan
+js-inner-html-append
 js-inner-html-assign
 js-insecure-websocket
 js-insert-adjacent-html
@@ -325,6 +331,7 @@ js-proto-pollution-bracket
 js-prototype-builtins
 js-reject-unauthorized-false
 js-script-url
+js-sessionstorage-sensitive
 js-setinterval-string
 js-settimeout-string
 js-symbol-no-description
@@ -450,10 +457,12 @@ python-cors-allow-all
 python-crypto-arc4
 python-crypto-blowfish
 python-crypto-des
+python-crypto-des3
 python-crypto-mode-ecb
 python-django-allowed-hosts-wildcard
 python-django-csrf-exempt
 python-django-debug
+python-django-extra
 python-django-mark-safe
 python-django-raw-sql
 python-duplicate-dict-key
@@ -462,15 +471,18 @@ python-eval-call
 python-except-pass
 python-exec-call
 python-f-string-logging
+python-flask-bind-all
 python-flask-debug
 python-fstring-no-placeholder
 python-ftplib-cleartext
 python-global-statement
 python-hardcoded-tmp-path
 python-hashlib-md5
+python-hashlib-new-md5
 python-hashlib-sha1
 python-is-literal
 python-jinja-autoescape-off
+python-jwt-algorithms-none
 python-jwt-verify-false
 python-lambda-assignment
 python-large-class
@@ -483,10 +495,12 @@ python-mutable-default-argument
 python-nested-conditional
 python-open-no-context
 python-os-chmod-world
+python-os-exec-family
 python-os-popen
 python-os-system
 python-paramiko-autoadd-policy
 python-pickle-load
+python-pty-spawn
 python-requests-verify-false
 python-return-in-finally
 python-return-in-init
@@ -496,6 +510,7 @@ python-sql-percent-execute
 python-ssl-check-hostname-false
 python-ssl-insecure-protocol
 python-ssl-unverified-context
+python-ssl-wrap-socket
 python-star-import
 python-subprocess-getoutput
 python-subprocess-shell
