@@ -162,9 +162,12 @@ java-catch-npe
 java-catch-throwable
 java-cipher-3des
 java-cipher-aes-default-ecb
+java-cipher-arcfour
 java-cipher-blowfish
 java-cipher-des
 java-cipher-ecb
+java-cipher-idea
+java-cipher-rc2
 java-cipher-rc4
 java-cipher-rsa-default
 java-cipher-rsa-pkcs1
@@ -184,7 +187,12 @@ java-date-int-ctor
 java-date-tolocalestring
 java-date-year-month-ctor
 java-des-keygen
+java-des-keyspec
+java-des-secretkeyfactory
 java-desede-keygen
+java-desede-keyspec
+java-desede-secretkeyfactory
+java-digest-md2
 java-digestutils-md5
 java-digestutils-sha1
 java-double-brace-init
@@ -265,6 +273,8 @@ java-okhttp-hostname-verifier-true
 java-open-redirect
 java-path-traversal-param
 java-pattern-from-param
+java-pbe-md5-des
+java-posix-world-permissions
 java-printstacktrace
 java-processbuilder-param
 java-public-finalize
