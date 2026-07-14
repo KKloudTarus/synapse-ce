@@ -212,10 +212,12 @@ func cfnResourceRules(rel string, resLine int, logicalID, resType string, props 
 				"No DeadLetterConfig is set, so asynchronous invocations that exhaust retries are dropped silently. Configure a DeadLetterConfig target (SQS or SNS).")
 		}
 	case "AWS::EKS::Cluster":
-		rvc := mapValue(props, "ResourcesVpcConfig")
-		if litTrue(mapValue(rvc, "EndpointPublicAccess")) {
+		// EndpointPublicAccess defaults to true, so a missing key is the same insecure state as an explicit
+		// true. Fire unless it is explicitly false (a dynamic !Ref value is left alone to avoid a false positive).
+		ep := mapValue(mapValue(props, "ResourcesVpcConfig"), "EndpointPublicAccess")
+		if epv, ok := literalScalar(ep); ep == nil || (ok && !strings.EqualFold(epv, "false")) {
 			add("cloudformation-eks-public-endpoint", "EKS API endpoint publicly accessible", shared.SeverityMedium, resLine,
-				"EndpointPublicAccess is true, so the Kubernetes API server is reachable from the internet. Disable public access or restrict it with PublicAccessCidrs, and enable private access.")
+				"EndpointPublicAccess is not disabled (it defaults to true), so the Kubernetes API server is reachable from the internet. Set EndpointPublicAccess: false, or restrict it with PublicAccessCidrs and enable private access.")
 		}
 	case "AWS::CloudTrail::Trail":
 		if secureBoolNotTrue("EnableLogFileValidation") {
@@ -239,8 +241,12 @@ func cfnResourceRules(rel string, resLine int, logicalID, resType string, props 
 			}
 		}
 	case "AWS::EC2::Instance":
+		// HttpTokens defaults to "optional" (IMDSv1 allowed), so both a missing MetadataOptions block and a
+		// present block without HttpTokens are insecure. A dynamic !Ref HttpTokens is left alone.
 		mo := mapValue(props, "MetadataOptions")
-		if ht, ok := literalScalar(mapValue(mo, "HttpTokens")); mo == nil || (ok && ht != "required") {
+		ht := mapValue(mo, "HttpTokens")
+		htv, htok := literalScalar(ht)
+		if mo == nil || ht == nil || (htok && htv != "required") {
 			add("cloudformation-ec2-imdsv2", "IMDSv2 not enforced", shared.SeverityMedium, resLine,
 				"MetadataOptions does not require IMDSv2 (HttpTokens: required), leaving the metadata service reachable via the SSRF-prone IMDSv1. Set HttpTokens: required.")
 		}
@@ -271,7 +277,7 @@ func cfnResourceRules(rel string, resLine int, logicalID, resType string, props 
 		}
 	case "AWS::S3::BucketPolicy", "AWS::SQS::QueuePolicy", "AWS::SNS::TopicPolicy":
 		pd := mapValue(props, "PolicyDocument")
-		for _, st := range seqItems(mapValue(pd, "Statement")) {
+		for _, st := range cfnStatements(mapValue(pd, "Statement")) {
 			if eff, ok := literalScalar(mapValue(st, "Effect")); ok && !strings.EqualFold(eff, "Allow") {
 				continue
 			}
@@ -358,6 +364,18 @@ func cfnPolicyDocuments(props *yaml.Node) []*yaml.Node {
 		}
 	}
 	return docs
+}
+
+// cfnStatements returns a policy's Statement entries, tolerating both the list form (Statement: [ ... ])
+// and the single-object form (Statement: { ... }), which is valid IAM/resource-policy JSON.
+func cfnStatements(n *yaml.Node) []*yaml.Node {
+	if n == nil {
+		return nil
+	}
+	if n.Kind == yaml.MappingNode {
+		return []*yaml.Node{n}
+	}
+	return seqItems(n)
 }
 
 // cfnPrincipalWildcard reports whether a policy statement's Principal grants access to any principal:

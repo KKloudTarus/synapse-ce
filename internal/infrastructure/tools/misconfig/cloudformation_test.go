@@ -241,3 +241,25 @@ func TestCloudFormationRulePackNoFalsePositives(t *testing.T) {
 		t.Errorf("hardened CloudFormation should yield no findings, got %+v", got)
 	}
 }
+
+func TestCloudFormationReviewFixes(t *testing.T) {
+	// go-arch review fixes: AWS insecure-by-default cases + single-statement policy.
+	cases := []struct{ name, tmpl, want string }{
+		{"eks endpoint default public (omitted)", "Resources:\n  C:\n    Type: AWS::EKS::Cluster\n    Properties:\n      ResourcesVpcConfig:\n        SubnetIds: [subnet-1]\n", "cloudformation-eks-public-endpoint"},
+		{"imdsv2 metadata without httptokens", "Resources:\n  I:\n    Type: AWS::EC2::Instance\n    Properties:\n      ImageId: ami-123\n      MetadataOptions:\n        HttpEndpoint: enabled\n", "cloudformation-ec2-imdsv2"},
+		{"single-statement policy wildcard principal", "Resources:\n  BP:\n    Type: AWS::S3::BucketPolicy\n    Properties:\n      PolicyDocument:\n        Statement:\n          Effect: Allow\n          Principal: \"*\"\n          Action: s3:GetObject\n", "cloudformation-wildcard-principal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ruleIDs(scan(t, map[string]string{"template.yaml": tc.tmpl}))
+			if _, ok := got[tc.want]; !ok {
+				t.Errorf("expected %s, got %v", tc.want, keys(got))
+			}
+		})
+	}
+	// The EKS compliant form (explicitly false) must NOT fire.
+	got := ruleIDs(scan(t, map[string]string{"template.yaml": "Resources:\n  C:\n    Type: AWS::EKS::Cluster\n    Properties:\n      ResourcesVpcConfig:\n        EndpointPublicAccess: false\n"}))
+	if _, bad := got["cloudformation-eks-public-endpoint"]; bad {
+		t.Errorf("EndpointPublicAccess:false must not fire; got %v", keys(got))
+	}
+}
