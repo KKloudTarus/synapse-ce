@@ -681,3 +681,25 @@ func TestQualityForJavaASTBehavioral(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForJSASTStructural2(t *testing.T) {
+	root := t.TempDir()
+	js := "function classify(x) {\n  if (x < 0) {\n    return -1;\n  } else {\n    return score(x);\n  }\n}\n" +
+		"function pick(a, b) {\n  switch (a) {\n    case 1:\n      switch (b) {\n        case 2: return 3;\n        default: return 0;\n      }\n    default: return -1;\n  }\n}\n" +
+		"function flag(c) {\n  return c > 0 ? true : false;\n}\n" +
+		"function toggle(state) {\n  switch (state) {\n    case 'on': return 1;\n    default: return 0;\n  }\n}\n"
+	writeFile(t, root, "s.js", js)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"js-ast-unnecessary-else", "js-ast-nested-switch", "js-ast-ternary-boolean", "js-ast-small-switch"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}

@@ -265,11 +265,15 @@ js-ast-lonely-if
 js-ast-long-function
 js-ast-missing-switch-default
 js-ast-nested-loop
+js-ast-nested-switch
 js-ast-require-await
 js-ast-return-in-finally
+js-ast-small-switch
 js-ast-switch-many-cases
+js-ast-ternary-boolean
 js-ast-too-many-params
 js-ast-too-many-returns
+js-ast-unnecessary-else
 js-ast-useless-catch
 js-buffer-constructor
 js-compare-boolean-literal

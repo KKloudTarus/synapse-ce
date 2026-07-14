@@ -28,6 +28,29 @@ var jsRules = map[string]pythonRule{
 	"useless-catch":      {"quality", "js-ast-useless-catch", "", "low", "catch clause only rethrows", "A catch that just rethrows the caught error adds nothing; remove the try/catch or handle the error."},
 	"lonely-if":          {"quality", "js-ast-lonely-if", "", "low", "else block contains only an if", "An else whose only statement is an if can be written as else if."},
 	"getter-no-return":   {"reliability", "js-ast-getter-no-return", "", "medium", "getter without a return", "A getter that never returns a value yields undefined; return the property value."},
+	"unnecessary-else":   {"quality", "js-ast-unnecessary-else", "", "low", "Unnecessary else after a jump", "When the if branch always returns/throws, the else is redundant; dedent its body."},
+	"nested-switch":      {"quality", "js-ast-nested-switch", "", "low", "Nested switch statement", "A switch inside another switch is hard to follow; extract the inner switch into a function."},
+	"ternary-boolean":    {"quality", "js-ast-ternary-boolean", "", "low", "Ternary returning boolean literals", "cond ? true : false is just the condition (or its negation)."},
+	"small-switch":       {"quality", "js-ast-small-switch", "", "low", "switch with very few cases", "A switch with only one or two cases is clearer as an if/else."},
+}
+
+// jsJumpTypes are statements that unconditionally leave the current block.
+var jsJumpTypes = map[string]bool{
+	"return_statement": true, "throw_statement": true, "break_statement": true, "continue_statement": true,
+}
+
+// jsBlockEndsInJump reports whether n is a jump statement, or a block whose last statement is one.
+func jsBlockEndsInJump(n *sitter.Node) bool {
+	if n == nil {
+		return false
+	}
+	if jsJumpTypes[n.Type()] {
+		return true
+	}
+	if n.Type() == "statement_block" && n.NamedChildCount() > 0 {
+		return jsJumpTypes[n.NamedChild(int(n.NamedChildCount())-1).Type()]
+	}
+	return false
 }
 
 // jsControlTypes / jsLoopTypes are the node kinds counted for nesting-depth metrics.
@@ -99,8 +122,15 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			if body := n.ChildByFieldName("body"); body != nil && !jsSwitchHasDefault(body) {
 				out = append(out, jsFinding("missing-default", n, rel))
 			}
-			if jsCountByType(n, map[string]bool{"switch_case": true}) > 15 {
+			cases := jsCountByType(n, map[string]bool{"switch_case": true})
+			if cases > 15 {
 				out = append(out, jsFinding("switch-many-cases", n, rel))
+			}
+			if cases >= 1 && cases < 3 {
+				out = append(out, jsFinding("small-switch", n, rel))
+			}
+			if jsCountByType(n, map[string]bool{"switch_statement": true}) > 1 {
+				out = append(out, jsFinding("nested-switch", n, rel))
 			}
 		case "class_declaration", "class":
 			if body := n.ChildByFieldName("body"); body != nil {
@@ -131,6 +161,18 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			if cons != nil && alt != nil && cons.Type() == "statement_block" && alt.Type() == "statement_block" &&
 				strings.TrimSpace(cons.Content(src)) == strings.TrimSpace(alt.Content(src)) {
 				out = append(out, jsFinding("identical-branches", n, rel))
+			}
+			if n.ChildByFieldName("alternative") != nil && jsBlockEndsInJump(cons) {
+				out = append(out, jsFinding("unnecessary-else", n, rel))
+			}
+		case "ternary_expression":
+			if c := n.ChildByFieldName("consequence"); c != nil {
+				if a := n.ChildByFieldName("alternative"); a != nil {
+					ct, at := strings.TrimSpace(c.Content(src)), strings.TrimSpace(a.Content(src))
+					if (ct == "true" || ct == "false") && (at == "true" || at == "false") {
+						out = append(out, jsFinding("ternary-boolean", n, rel))
+					}
+				}
 			}
 		case "finally_clause":
 			if jsHasDescendantType(n, "return_statement") {
