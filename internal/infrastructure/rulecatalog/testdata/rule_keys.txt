@@ -341,6 +341,7 @@ js-prototype-builtins
 js-reject-unauthorized-false
 js-script-url
 js-sessionstorage-sensitive
+js-setimmediate-string
 js-setinterval-string
 js-settimeout-string
 js-symbol-no-description
@@ -463,6 +464,8 @@ python-broad-raise
 python-compare-bool-literal
 python-compare-empty-collection
 python-complex-condition
+python-consider-iterating-dict
+python-consider-sys-exit
 python-consider-using-enumerate
 python-constant-if-test
 python-cors-allow-all
@@ -473,6 +476,7 @@ python-crypto-des3
 python-crypto-mode-ecb
 python-datetime-utcnow
 python-deep-nesting
+python-dict-get-none-default
 python-django-allowed-hosts-wildcard
 python-django-csrf-exempt
 python-django-debug
@@ -514,17 +518,21 @@ python-open-no-context
 python-os-chmod-world
 python-os-exec-family
 python-os-popen
+python-os-spawn
 python-os-system
 python-paramiko-autoadd-policy
 python-pickle-load
 python-pty-spawn
 python-raise-notimplemented
+python-redundant-u-prefix
 python-requests-verify-false
 python-return-in-finally
 python-return-in-init
+python-rsa-key-size-weak
 python-shadow-builtin
 python-sql-fstring-execute
 python-sql-percent-execute
+python-ssl-cert-none
 python-ssl-check-hostname-false
 python-ssl-insecure-protocol
 python-ssl-unverified-context
@@ -641,6 +649,7 @@ ts-no-inferrable-types
 ts-no-nocheck
 ts-non-null-assertion
 ts-prefer-namespace
+ts-triple-slash-reference
 ts-ts-ignore
 twilio-api-key
 unsafe-c-string-function
