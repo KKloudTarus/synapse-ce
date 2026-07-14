@@ -469,6 +469,7 @@ pypi-token
 python-assert-false
 python-assert-for-validation
 python-assert-tuple
+python-asyncio-coroutine-decorator
 python-bare-except
 python-bind-all-interfaces
 python-broad-except
@@ -489,8 +490,13 @@ python-crypto-blowfish
 python-crypto-des
 python-crypto-des3
 python-crypto-mode-ecb
+python-datetime-fromtimestamp-naive
+python-datetime-now-naive
+python-datetime-today
 python-datetime-utcnow
 python-deep-nesting
+python-deprecated-collections-abc
+python-deprecated-imp-module
 python-dict-get-none-default
 python-dill-load
 python-django-allowed-hosts-wildcard
@@ -507,6 +513,7 @@ python-django-session-httponly-off
 python-django-ssl-redirect-off
 python-double-negation
 python-duplicate-dict-key
+python-elementtree-getchildren
 python-eq-none
 python-eval-call
 python-except-pass
@@ -528,6 +535,7 @@ python-hashlib-new-md5
 python-hashlib-new-sha1
 python-hashlib-sha1
 python-high-complexity
+python-io-open-alias
 python-is-literal
 python-jinja-autoescape-off
 python-jsonpickle-decode
@@ -586,6 +594,7 @@ python-star-import
 python-statement-semicolon
 python-strip-multichar
 python-subprocess-getoutput
+python-subprocess-preexec-fn
 python-subprocess-shell
 python-super-with-arguments
 python-tar-zip-extractall
@@ -595,6 +604,7 @@ python-too-many-args
 python-too-many-returns
 python-torch-load
 python-type-eq-vs-isinstance
+python-typing-text-alias
 python-unnecessary-dict-call
 python-unnecessary-dunder-call
 python-unnecessary-list-call
