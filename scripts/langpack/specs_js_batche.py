@@ -47,7 +47,7 @@ RULES = [
       source=MDN, re=r"\.(moz|webkit)Slice\s*\(", nc="const part = blob.webkitSlice(0, 1024);", c="const part = blob.slice(0, 1024);"),
     r(id="js-web-getmatchedcssrules", type="bug", qual="rel", sev="medium", title="getMatchedCSSRules()", desc="getMatchedCSSRules was removed.",
       rationale="window.getMatchedCSSRules was removed from browsers.", remediation="Use getComputedStyle or inspect stylesheets.",
-      source=MDN, re=r"\.getMatchedCSSRules\s*\(", nc="const rules = getMatchedCSSRules(el);", c="const style = getComputedStyle(el);"),
+      source=MDN, re=r"\.getMatchedCSSRules\s*\(", nc="const rules = window.getMatchedCSSRules(el);", c="const style = getComputedStyle(el);"),
     r(id="js-web-create-touch", type="bug", qual="rel", sev="medium", title="document.createTouch()", desc="createTouch was removed.",
       rationale="document.createTouch is a removed legacy touch API.", remediation="Use the Touch constructor.",
       source=MDN, re=r"\.createTouch\s*\(", nc="const t = document.createTouch(view, target, 1, 0, 0, 0, 0);", c="const t = new Touch({ identifier: 1, target });"),
