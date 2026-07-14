@@ -354,6 +354,7 @@ js-sessionstorage-sensitive
 js-setimmediate-string
 js-setinterval-string
 js-settimeout-string
+js-shadow-restricted-name
 js-symbol-no-description
 js-tls-reject-unauthorized-env
 js-unneeded-ternary
@@ -474,6 +475,7 @@ python-broad-except
 python-broad-raise
 python-compare-bool-literal
 python-compare-empty-collection
+python-comparison-of-constants
 python-complex-condition
 python-consider-iterating-dict
 python-consider-sys-exit
@@ -494,10 +496,12 @@ python-django-csrf-cookie-insecure
 python-django-csrf-exempt
 python-django-debug
 python-django-extra
+python-django-hsts-zero
 python-django-mark-safe
 python-django-raw-sql
 python-django-safestring
 python-django-session-cookie-insecure
+python-django-session-httponly-off
 python-django-ssl-redirect-off
 python-double-negation
 python-duplicate-dict-key
@@ -537,8 +541,12 @@ python-mktemp-insecure
 python-multiple-imports
 python-mutable-class-attribute
 python-mutable-default-argument
+python-negated-equality
+python-negated-inequality
 python-nested-conditional
 python-nested-loop
+python-not-in
+python-not-is
 python-numpy-allow-pickle
 python-open-no-context
 python-os-chmod-world
@@ -562,6 +570,7 @@ python-setattr-constant
 python-shadow-builtin
 python-sql-fstring-execute
 python-sql-percent-execute
+python-sqlite-executescript
 python-ssl-cert-none
 python-ssl-check-hostname-false
 python-ssl-insecure-protocol
@@ -589,6 +598,7 @@ python-useless-object-inheritance
 python-xml-parse-xxe
 python-yaml-unsafe-load
 python-yaml-unsafe-loader
+python-yoda-condition
 quality-commented-out-code
 quality-duplicated-block
 quality-high-complexity
