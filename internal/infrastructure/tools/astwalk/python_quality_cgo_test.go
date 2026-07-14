@@ -745,3 +745,18 @@ func TestQualityForJSASTBehavioral3(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForJSCollapsibleIf(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "c.js", "function f(a, b) {\n  if (a) {\n    if (b) {\n      run();\n    }\n  }\n}\n")
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	for _, x := range res.Findings {
+		if x.Rule == "js-ast-collapsible-if" {
+			return
+		}
+	}
+	t.Errorf("missing js-ast-collapsible-if in %+v", res.Findings)
+}

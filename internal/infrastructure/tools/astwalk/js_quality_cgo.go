@@ -39,6 +39,7 @@ var jsRules = map[string]pythonRule{
 	"unreachable":        {"reliability", "js-ast-unreachable-code", "", "medium", "Unreachable code", "Code after a return/throw/break/continue can never execute."},
 	"self-assign":        {"reliability", "js-ast-self-assign", "", "medium", "Self assignment", "Assigning a variable to itself has no effect and is usually a mistake."},
 	"self-compare":       {"reliability", "js-ast-self-comparison", "", "medium", "Self comparison", "Comparing a value to itself is constant (and misses the intended operand)."},
+	"collapsible-if":     {"quality", "js-ast-collapsible-if", "", "low", "Collapsible if statement", "An if whose only statement is another if (with no else) can be merged with &&."},
 }
 
 // jsMethodKey builds a comparison key for a class method, including static/get/set/async modifiers
@@ -282,6 +283,11 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			}
 			if n.ChildByFieldName("alternative") != nil && jsBlockEndsInJump(cons) {
 				out = append(out, jsFinding("unnecessary-else", n, rel))
+			}
+			if n.ChildByFieldName("alternative") == nil && cons != nil && cons.Type() == "statement_block" && cons.NamedChildCount() == 1 {
+				if inner := cons.NamedChild(0); inner.Type() == "if_statement" && inner.ChildByFieldName("alternative") == nil {
+					out = append(out, jsFinding("collapsible-if", n, rel))
+				}
 			}
 		case "ternary_expression":
 			if c := n.ChildByFieldName("consequence"); c != nil {
