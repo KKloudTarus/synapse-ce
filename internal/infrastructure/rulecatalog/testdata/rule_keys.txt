@@ -122,6 +122,9 @@ java-ast-empty-else
 java-ast-empty-if-block
 java-ast-empty-loop-body
 java-ast-empty-method
+java-ast-identical-branches
+java-ast-if-return-boolean
+java-ast-large-class
 java-ast-long-method
 java-ast-missing-switch-default
 java-ast-nested-ternary

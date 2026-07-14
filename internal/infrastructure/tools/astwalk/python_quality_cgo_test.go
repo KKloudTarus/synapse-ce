@@ -363,3 +363,33 @@ func TestQualityForAstMetricsAndStructure(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForJavaASTBatch3(t *testing.T) {
+	root := t.TempDir()
+	methods := strings.Repeat("    void m%d() {}\n", 0)
+	_ = methods
+	var mb strings.Builder
+	for i := 0; i < 25; i++ {
+		mb.WriteString("    void m")
+		mb.WriteByte(byte('a' + i%26))
+		mb.WriteString("() { work(); }\n")
+	}
+	writeFile(t, root, "C.java", "class C {\n"+
+		"    boolean check(boolean found) {\n        if (found) {\n            return true;\n        } else {\n            return false;\n        }\n    }\n"+
+		"    void pick(boolean found) {\n        if (found) {\n            save();\n        } else {\n            save();\n        }\n    }\n"+
+		mb.String()+
+		"}\n")
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"java-ast-identical-branches", "java-ast-if-return-boolean", "java-ast-large-class"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
