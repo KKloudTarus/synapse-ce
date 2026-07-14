@@ -11,8 +11,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	enry "github.com/go-enry/go-enry/v2"
+
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/notebook"
 )
 
 // ErrUnavailable is returned by the FunctionsFor/MetricsFor entry points in a CGO-free build: no grammar
@@ -79,8 +82,9 @@ type Quality struct {
 }
 
 const (
-	maxFileBytes = 4 << 20
-	maxFiles     = 200_000
+	maxFileBytes     = 4 << 20
+	maxNotebookBytes = 16 << 20
+	maxFiles         = 200_000
 )
 
 var skipDirs = map[string]bool{
@@ -91,8 +95,8 @@ var skipDirs = map[string]bool{
 
 // walkSource traverses root and calls visit(rel, language, content) for each regular, non-vendored,
 // non-binary source file (rel is the path relative to root). It follows no symlinks, bounds file size and
-// count, and honors ctx cancellation, mirroring the codeinventory and enry adapters. truncated is true
-// when the file cap tripped (a signalled undercount, not a silent one).
+// count, and honors ctx cancellation, mirroring the codeinventory and enry adapters. Notebook code cells
+// are presented as Python with a stable #cell-N path. truncated is true when the file cap tripped.
 func walkSource(ctx context.Context, root string, visit func(rel, lang string, content []byte)) (truncated bool, err error) {
 	if root == "" {
 		return false, nil
@@ -119,7 +123,11 @@ func walkSource(ctx context.Context, root string, visit func(rel, lang string, c
 			return fs.SkipAll
 		}
 		fi, lerr := os.Lstat(path)
-		if lerr != nil || !fi.Mode().IsRegular() || fi.Size() > maxFileBytes {
+		maxBytes := int64(maxFileBytes)
+		if notebook.IsPath(path) {
+			maxBytes = maxNotebookBytes
+		}
+		if lerr != nil || !fi.Mode().IsRegular() || fi.Size() > maxBytes {
 			return nil
 		}
 		content, rerr := os.ReadFile(path) // #nosec G304 -- regular file, size-capped via Lstat above, under the walked root
@@ -129,13 +137,28 @@ func walkSource(ctx context.Context, root string, visit func(rel, lang string, c
 		if enry.IsVendor(path) || enry.IsDotFile(path) || enry.IsGenerated(path, content) || enry.IsBinary(content) {
 			return nil
 		}
-		lang := enry.GetLanguage(filepath.Base(path), content)
-		if lang == "" {
-			return nil
-		}
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
 			rel = path
+		}
+		if notebook.IsPath(path) {
+			doc, err := notebook.Parse(content)
+			if err != nil {
+				return nil // malformed notebooks are source data, not scan failures
+			}
+			if !strings.EqualFold(doc.KernelLanguage, "python") {
+				return nil
+			}
+			for _, cell := range doc.Cells {
+				if cell.Type == "code" && strings.TrimSpace(cell.Source) != "" {
+					visit(notebook.Location(rel, cell.Index), "Python", []byte(cell.Source))
+				}
+			}
+			return nil
+		}
+		lang := enry.GetLanguage(filepath.Base(path), content)
+		if lang == "" {
+			return nil
 		}
 		visit(rel, lang, content)
 		return nil

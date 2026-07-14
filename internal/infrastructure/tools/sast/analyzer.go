@@ -16,13 +16,15 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/notebook"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 const (
-	maxFileBytes = 1 << 20 // skip files larger than 1 MiB (generated/data, not hand-written source)
-	maxLineBytes = 4096    // skip minified/blob lines
-	maxFindings  = 500     // cap total hits so a hostile/huge tree can't flood the report
+	maxFileBytes     = 1 << 20 // skip files larger than 1 MiB (generated/data, not hand-written source)
+	maxNotebookBytes = 16 << 20
+	maxLineBytes     = 4096 // skip minified/blob lines
+	maxFindings      = 500  // cap total hits so a hostile/huge tree can't flood the report
 )
 
 // skipDirs are heavy vendored/build trees never worth scanning for first-party weaknesses.
@@ -42,6 +44,7 @@ type sourceFile struct {
 	Path  string
 	Rel   string
 	Lines []string
+	Ext   string
 }
 
 // New returns an analyzer with the built-in tier-1 rule set.
@@ -82,11 +85,33 @@ func (a *Analyzer) AnalyzeSource(ctx context.Context, root string) ([]ports.SAST
 		if relErr != nil {
 			rel = path
 		}
+		if notebook.IsPath(path) {
+			info, statErr := os.Lstat(path)
+			if statErr != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > maxNotebookBytes {
+				return nil
+			}
+			data, readErr := os.ReadFile(path) // #nosec G304 -- regular, size-capped file from WalkDir under root
+			if readErr != nil {
+				return nil
+			}
+			doc, parseErr := notebook.Parse(data)
+			if parseErr != nil {
+				return nil
+			}
+			if strings.EqualFold(doc.KernelLanguage, "python") {
+				for _, cell := range doc.Cells {
+					if cell.Type == "code" {
+						files = append(files, sourceFile{Path: path, Rel: notebook.Location(rel, cell.Index), Lines: strings.Split(cell.Source, "\n"), Ext: ".py"})
+					}
+				}
+			}
+			return nil
+		}
 		lines := readSourceLines(path)
 		if len(lines) == 0 {
 			return nil
 		}
-		files = append(files, sourceFile{Path: path, Rel: rel, Lines: lines})
+		files = append(files, sourceFile{Path: path, Rel: rel, Lines: lines, Ext: strings.ToLower(filepath.Ext(path))})
 		return nil
 	})
 	if walkErr != nil {
@@ -96,7 +121,7 @@ func (a *Analyzer) AnalyzeSource(ctx context.Context, root string) ([]ports.SAST
 	project := buildProjectContext(files)
 	var out []ports.SASTRawFinding
 	for _, file := range files {
-		for _, h := range a.scanLines(file.Rel, file.Lines, project) {
+		for _, h := range a.scanLines(file.Rel, file.Ext, file.Lines, project) {
 			if len(out) >= maxFindings {
 				break
 			}
@@ -137,16 +162,13 @@ func readSourceLines(path string) []string {
 	for sc.Scan() {
 		lines = append(lines, sc.Text())
 	}
-	// A mid-file read error, or an over-long line (only possible above the file-size cap, so not
-	// reachable here), stops the scanner; return the hits gathered so far rather than failing the scan.
 	_ = sc.Err()
 	return lines
 }
 
 // scanLines applies rules to an already-read source file.
-func (a *Analyzer) scanLines(rel string, lines []string, project projectContext) []ports.SASTRawFinding {
+func (a *Analyzer) scanLines(rel, ext string, lines []string, project projectContext) []ports.SASTRawFinding {
 	var hits []ports.SASTRawFinding
-	ext := strings.ToLower(filepath.Ext(rel))
 	for i, text := range lines {
 		line := i + 1
 		if len(text) > maxLineBytes {
@@ -170,7 +192,7 @@ func (a *Analyzer) scanLines(rel string, lines []string, project projectContext)
 			}
 		}
 	}
-	hits = append(hits, a.contextualFindings(rel, lines, project)...)
+	hits = append(hits, a.contextualFindings(rel, ext, lines, project)...)
 	return dedupeFindings(hits)
 }
 
@@ -184,7 +206,7 @@ func (a *Analyzer) matchesRule(id, ext, text string) bool {
 	return false
 }
 
-func (a *Analyzer) contextualFindings(rel string, lines []string, project projectContext) []ports.SASTRawFinding {
+func (a *Analyzer) contextualFindings(rel, ext string, lines []string, project projectContext) []ports.SASTRawFinding {
 	var hits []ports.SASTRawFinding
 	for i := 0; i < len(lines); i++ {
 		line := i + 1
@@ -199,12 +221,12 @@ func (a *Analyzer) contextualFindings(rel string, lines []string, project projec
 		lowerBlock := strings.ToLower(block)
 		switch {
 		case looksLikePrismaObjectByID(lowerBlock):
-			if h, ok := a.findingFromRule(rel, line, "possible-idor-prisma-id-only", lines, project); ok {
+			if h, ok := a.findingFromRule(rel, ext, line, "possible-idor-prisma-id-only", lines, project); ok {
 				calibrateContextBlockFinding(&h, block, line)
 				hits = append(hits, h)
 			}
 		case looksLikeMassAssignment(lowerBlock):
-			if h, ok := a.findingFromRule(rel, line, "mass-assignment-request-body", lines, project); ok {
+			if h, ok := a.findingFromRule(rel, ext, line, "mass-assignment-request-body", lines, project); ok {
 				calibrateContextBlockFinding(&h, block, line)
 				hits = append(hits, h)
 			}
@@ -276,8 +298,7 @@ func sourceFromContextBlock(lower string, line int) (source, evidence string) {
 	}
 }
 
-func (a *Analyzer) findingFromRule(rel string, line int, ruleID string, lines []string, project projectContext) (ports.SASTRawFinding, bool) {
-	ext := strings.ToLower(filepath.Ext(rel))
+func (a *Analyzer) findingFromRule(rel, ext string, line int, ruleID string, lines []string, project projectContext) (ports.SASTRawFinding, bool) {
 	for ri := range a.rules {
 		r := &a.rules[ri]
 		if r.id != ruleID {

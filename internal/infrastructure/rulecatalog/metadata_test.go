@@ -199,6 +199,7 @@ func TestMetadata_ApprovedLanguage(t *testing.T) {
 		"Secrets":               true,
 		"XML":                   true,
 		"Java":                  true,
+		"IPython Notebooks":     true,
 	}
 
 	for _, r := range rules {

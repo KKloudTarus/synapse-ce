@@ -16,13 +16,15 @@ import (
 
 	enry "github.com/go-enry/go-enry/v2"
 
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/notebook"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 const (
-	maxFileBytes = 1 << 20
-	maxLineBytes = 4096
-	maxFindings  = 2000
+	maxFileBytes     = 1 << 20
+	maxNotebookBytes = 16 << 20
+	maxLineBytes     = 4096
+	maxFindings      = 2000
 )
 
 var skipDirs = map[string]bool{
@@ -66,7 +68,11 @@ func (a *Analyzer) Analyze(ctx context.Context, root string) ([]ports.CodeAnalys
 			return fs.SkipAll
 		}
 		fi, lerr := os.Lstat(path)
-		if lerr != nil || !fi.Mode().IsRegular() || fi.Size() > maxFileBytes {
+		maxBytes := int64(maxFileBytes)
+		if notebook.IsPath(path) {
+			maxBytes = maxNotebookBytes
+		}
+		if lerr != nil || !fi.Mode().IsRegular() || fi.Size() > maxBytes {
 			return nil
 		}
 		content, rerr := os.ReadFile(path) // #nosec G304 -- regular file, size-capped via Lstat above, under the walked root
@@ -74,6 +80,42 @@ func (a *Analyzer) Analyze(ctx context.Context, root string) ([]ports.CodeAnalys
 			return nil
 		}
 		if enry.IsVendor(path) || enry.IsDotFile(path) || enry.IsGenerated(path, content) || enry.IsBinary(content) {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			rel = path
+		}
+		if notebook.IsPath(path) {
+			doc, err := notebook.Parse(content)
+			if err != nil {
+				return nil
+			}
+			hits := notebookFindings(doc, rel)
+			remaining := maxFindings - len(out)
+			if len(hits) > remaining {
+				hits = hits[:remaining]
+			}
+			out = append(out, hits...)
+			if strings.EqualFold(doc.KernelLanguage, "python") {
+				for _, cell := range doc.Cells {
+					if cell.Type != "code" {
+						continue
+					}
+					remaining := maxFindings - len(out)
+					if remaining <= 0 {
+						return fs.SkipAll
+					}
+					hits := a.scanFile(notebook.Location(rel, cell.Index), ".py", []byte(cell.Source))
+					if len(hits) > remaining {
+						hits = hits[:remaining]
+					}
+					out = append(out, hits...)
+				}
+			}
+			if len(out) >= maxFindings {
+				return fs.SkipAll
+			}
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
@@ -88,10 +130,6 @@ func (a *Analyzer) Analyze(ctx context.Context, root string) ([]ports.CodeAnalys
 			default:
 				return nil
 			}
-		}
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			rel = path
 		}
 		if isXML {
 			out = append(out, scanXMLFile(rel, content)...)
