@@ -265,6 +265,16 @@ java-insecure-random
 java-ioutils-closequietly
 java-jackson-activate-default-typing
 java-jackson-default-typing
+java-jdk-activation-import
+java-jdk-applet-import
+java-jdk-corba-import
+java-jdk-jaxb-import
+java-jdk-jaxws-import
+java-jdk-nashorn-import
+java-jdk-pack200-import
+java-jdk-rmi-activation-import
+java-jdk-security-acl-import
+java-jdk-soap-import
 java-jjwt-unsigned
 java-jndi-injection
 java-joda-time-import
