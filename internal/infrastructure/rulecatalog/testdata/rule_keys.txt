@@ -117,8 +117,13 @@ insecure-randomness-security-context
 insecure-temp-file
 insecure-tls-verify-disabled
 java-access-controller
+java-android-external-storage
+java-android-file-access-from-file
 java-android-js-interface
+java-android-mixed-content
 java-android-rawquery-concat
+java-android-universal-file-access
+java-android-webview-debugging
 java-android-webview-file-access
 java-android-webview-js
 java-android-world-readable
@@ -356,6 +361,8 @@ java-setaccessible-true
 java-simpledateformat-static
 java-snakeyaml-unsafe-constructor
 java-spel-parser
+java-spring-antmatchers
+java-spring-authorize-requests
 java-spring-crossorigin-default
 java-spring-enable-global-method-security
 java-spring-enable-oauth2-sso
@@ -363,6 +370,7 @@ java-spring-enable-webmvc-security
 java-spring-frame-options-disable
 java-spring-handler-interceptor-adapter
 java-spring-hibernate-template
+java-spring-mvcmatchers
 java-spring-oauth2-resttemplate
 java-spring-resource-server-adapter
 java-spring-webmvc-adapter
