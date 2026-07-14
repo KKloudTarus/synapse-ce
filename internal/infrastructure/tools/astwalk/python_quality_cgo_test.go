@@ -255,3 +255,45 @@ data = yaml.safe_load(text)
 		}
 	}
 }
+
+func TestQualityForJavaAST(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "App.java", `
+class App {
+    void empty() {}
+    void handle(int state) {
+        switch (state) {
+            case 1: open(); break;
+        }
+    }
+    void nested() {
+        try {
+            try { step1(); } finally { cleanup(); }
+        } catch (Exception e) { log(e); }
+    }
+    void guard(boolean ready, boolean a, boolean b) {
+        if (ready) {
+        }
+        if (a) {
+            if (b) { run(); }
+        }
+    }
+}
+`)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{
+		"java-ast-empty-method", "java-ast-missing-switch-default",
+		"java-ast-nested-try", "java-ast-empty-if-block", "java-ast-collapsible-if",
+	} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}

@@ -70,14 +70,19 @@ var (
 func QualityFor(ctx context.Context, root string) (Quality, error) {
 	out := Quality{Findings: []QualityFinding{}}
 	truncated, err := walkSource(ctx, root, func(rel, lang string, content []byte) {
-		if lang != "Python" {
+		if lang != "Python" && lang != "Java" {
 			return
 		}
 		tree := parseRoot(ctx, specs[lang], content)
 		if tree == nil {
 			return
 		}
-		out.Findings = append(out.Findings, pythonFindings(tree, content, rel)...)
+		switch lang {
+		case "Python":
+			out.Findings = append(out.Findings, pythonFindings(tree, content, rel)...)
+		case "Java":
+			out.Findings = append(out.Findings, javaFindings(tree, content, rel)...)
+		}
 	})
 	if err != nil {
 		return Quality{}, err

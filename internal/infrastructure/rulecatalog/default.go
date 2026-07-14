@@ -11,6 +11,7 @@ func Default() (*Catalog, error) {
 
 	all = append(all, sastRules()...)
 	all = append(all, langPackCatalog()...)
+	all = append(all, javaASTRules()...)
 	all = append(all, secretRules()...)
 	all = append(all, misconfigRules()...)
 	all = append(all, qualityRules()...)
