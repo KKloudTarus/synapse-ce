@@ -118,6 +118,7 @@ insecure-temp-file
 insecure-tls-verify-disabled
 java-apache-default-httpclient
 java-apache-httpclient3
+java-append-char-with-string
 java-ast-collapsible-if
 java-ast-complex-condition
 java-ast-constant-condition
@@ -155,6 +156,7 @@ java-biginteger-literal
 java-boolean-getboolean
 java-boolean-literal-compare
 java-boolean-return-ternary
+java-boolean-valueof-literal
 java-boxed-constructor
 java-catch-error
 java-catch-generic
@@ -196,6 +198,7 @@ java-digest-md2
 java-digestutils-md5
 java-digestutils-sha1
 java-double-brace-init
+java-double-tostring
 java-empty-catch
 java-empty-finally
 java-empty-if
@@ -207,6 +210,7 @@ java-enumeration
 java-equals-null
 java-exception-no-message
 java-exec-shell-array
+java-explicit-boolean-compare-tostring
 java-explicit-finalize-call
 java-explicit-gc
 java-extends-thread
@@ -215,6 +219,7 @@ java-file-world-readable
 java-file-world-writable
 java-finalize-override
 java-float-equality
+java-for-empty-init-while
 java-format-newline
 java-format-string-var
 java-getbytes-no-charset
@@ -250,6 +255,7 @@ java-jwt-signwith-none
 java-ldap-filter-concat
 java-legacy-collection
 java-literals-first-equals
+java-literals-first-equalsignorecase
 java-log-injection
 java-log4j1-import
 java-long-literal-lowercase-l
@@ -314,6 +320,7 @@ java-string-equals-empty
 java-string-intern
 java-string-length-zero
 java-string-ref-equality
+java-string-valueof-literal
 java-stringbuffer
 java-stringbuilder-char-arg
 java-substring-zero
@@ -331,9 +338,12 @@ java-tls-deprecated-version
 java-toarray-noarg
 java-tolowercase-no-locale
 java-touppercase-no-locale
+java-unnecessary-temporary-conversion
+java-unnecessary-unboxing
 java-weak-hash-md5
 java-weak-hash-sha1
 java-weak-password-encoder
+java-x-forwarded-for-trust
 java-xml-decoder
 java-xpath-eval-param
 java-xstream-deserialization
