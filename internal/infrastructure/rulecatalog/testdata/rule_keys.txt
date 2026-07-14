@@ -172,6 +172,7 @@ java-ast-too-many-returns
 java-ast-unnecessary-else
 java-ast-useless-catch
 java-ast-useless-constructor
+java-beanshell-interpreter
 java-bigdecimal-double
 java-biginteger-literal
 java-boolean-getboolean
@@ -204,6 +205,8 @@ java-command-exec-concat
 java-commons-collections3
 java-commons-escapehtml
 java-commons-lang2-import
+java-commons-random-string
+java-commons-random-utils
 java-cond-assign
 java-content-type-options-disable
 java-cookie-httponly-false
@@ -229,6 +232,7 @@ java-digestutils-md5
 java-digestutils-sha1
 java-double-brace-init
 java-double-tostring
+java-el-processor
 java-empty-catch
 java-empty-finally
 java-empty-if
@@ -256,6 +260,7 @@ java-format-string-var
 java-getbytes-no-charset
 java-getrealpath-param
 java-groovy-shell
+java-gson-jsonparser-instance
 java-guava-charsets
 java-guava-files-tostring
 java-guava-first-non-null
@@ -309,6 +314,7 @@ java-jdk-pack200-import
 java-jdk-rmi-activation-import
 java-jdk-security-acl-import
 java-jdk-soap-import
+java-jexl-createscript
 java-jjwt-unsigned
 java-jndi-injection
 java-joda-time-import
@@ -325,6 +331,7 @@ java-junit4-rule
 java-junit4-runwith
 java-junit4-test-import
 java-jwt-signwith-none
+java-jython-interpreter
 java-ldap-anonymous-auth
 java-ldap-filter-concat
 java-legacy-collection
@@ -337,6 +344,7 @@ java-loose-coupling-collection
 java-method-name-uppercase
 java-mockito-anyobject
 java-mockito-initmocks
+java-mockito-verify-zero-interactions
 java-modifier-order
 java-mutable-public-static-array
 java-mvel-eval
@@ -369,6 +377,7 @@ java-redundant-intvalue
 java-request-dispatcher-param
 java-response-exception-message
 java-return-in-finally
+java-rhino-evaluate-string
 java-rsa-no-padding
 java-run-finalization
 java-run-finalizers-on-exit
