@@ -172,6 +172,7 @@ java-ast-too-many-returns
 java-ast-unnecessary-else
 java-ast-useless-catch
 java-ast-useless-constructor
+java-axis1-import
 java-beanshell-interpreter
 java-bigdecimal-double
 java-biginteger-literal
@@ -232,6 +233,8 @@ java-digestutils-md5
 java-digestutils-sha1
 java-double-brace-init
 java-double-tostring
+java-ejb2-entity-bean
+java-ejb2-session-bean
 java-el-processor
 java-empty-catch
 java-empty-finally
@@ -315,11 +318,13 @@ java-jdk-pack200-import
 java-jdk-rmi-activation-import
 java-jdk-security-acl-import
 java-jdk-soap-import
+java-jersey1-import
 java-jexl-createscript
 java-jjwt-unsigned
 java-jndi-injection
 java-jndi-lookup-string
 java-joda-time-import
+java-jsf-managed-bean
 java-junit3-import
 java-junit3-testcase-extend
 java-junit4-after
@@ -370,6 +375,7 @@ java-open-redirect
 java-path-traversal-param
 java-pattern-from-param
 java-pbe-md5-des
+java-pbe-sha1
 java-posix-world-permissions
 java-powermock-import
 java-preparecall-concat
@@ -392,7 +398,9 @@ java-scriptengine-manager
 java-securerandom-constant-seed
 java-securerandom-sha1prng
 java-securerandom-time-seed
+java-servlet-httputils
 java-servlet-print-param
+java-servlet-single-thread-model
 java-set-default-hostname-verifier
 java-set-security-manager
 java-setaccessible-true
@@ -456,6 +464,8 @@ java-velocity-evaluate
 java-weak-hash-md5
 java-weak-hash-sha1
 java-weak-password-encoder
+java-write-request-header
+java-write-request-uri
 java-x-forwarded-for-trust
 java-xml-decoder
 java-xpath-eval-param
