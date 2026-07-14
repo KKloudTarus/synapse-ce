@@ -128,6 +128,7 @@ java-catch-npe
 java-collection-size-zero
 java-cond-assign
 java-date-int-ctor
+java-double-brace-init
 java-empty-catch
 java-empty-finally
 java-empty-if
@@ -141,6 +142,7 @@ java-explicit-finalize-call
 java-explicit-gc
 java-finalize-override
 java-float-equality
+java-format-newline
 java-getbytes-no-charset
 java-import-java-lang
 java-inefficient-append-concat
@@ -178,6 +180,7 @@ js-dot-notation
 js-empty-catch
 js-eq-null
 js-eqeqeq
+js-global-isnan
 js-insecure-websocket
 js-insert-adjacent-html
 js-localstorage-sensitive
@@ -222,6 +225,7 @@ js-no-with
 js-parseint-radix
 js-postmessage-wildcard
 js-prefer-exponentiation
+js-prefer-includes
 js-prefer-object-spread
 js-prefer-spread
 js-prefer-template
@@ -269,12 +273,16 @@ mailchimp-api-key
 mailgun-api-key
 mass-assignment-request-body
 new-relic-key
+node-body-parser-deprecated
 node-buffer-allocunsafe
 node-child-shell-true
 node-cipher-ecb
 node-cors-reflect-origin
 node-createhash-weak
 node-crypto-createcipher
+node-csp-unsafe-eval
+node-csp-unsafe-inline
+node-csurf-deprecated
 node-deprecated-request-lib
 node-domain-module
 node-dynamic-require
@@ -290,11 +298,17 @@ node-legacy-url-parse
 node-new-buffer
 node-process-binding
 node-process-exit-lib
+node-process-umask-zero
+node-punycode-deprecated
 node-sendfile-user-input
 node-sequelize-literal
 node-set-insecure-cookie-samesite-none
+node-sys-module
 node-tls-reject-unauthorized-env
+node-tls-weak-ciphers
+node-trust-proxy-true
 node-unsafe-yaml-load
+node-util-isarray
 node-vm-run-dynamic
 node-vm2-usage
 node-weak-tls-protocol
