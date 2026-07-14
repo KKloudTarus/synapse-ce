@@ -311,6 +311,7 @@ js-dangerously-set-inner-html
 js-date-getyear
 js-date-setyear
 js-define-getter-setter
+js-delete-var
 js-document-cookie-write
 js-document-domain-write
 js-document-write
@@ -408,6 +409,7 @@ js-no-useless-concat
 js-no-var
 js-no-void
 js-no-with
+js-node-constants-module
 js-node-crypto-createcredentials
 js-node-crypto-default-encoding
 js-node-domain-module
@@ -415,6 +417,7 @@ js-node-fs-exists
 js-node-fs-rmdir-recursive
 js-node-os-tmpdir
 js-node-process-binding
+js-node-process-eventemitter
 js-node-punycode-module
 js-node-require-extensions
 js-node-sys-module
@@ -450,6 +453,7 @@ js-proto-constructor-bracket
 js-proto-pollution-bracket
 js-prototype-builtins
 js-pseudo-random-bytes
+js-push-no-args
 js-react-children-prop
 js-react-createclass
 js-react-deprecated-lifecycle
@@ -1008,6 +1012,7 @@ ts-array-type-generic
 ts-as-any-cast
 ts-ban-boxed-types
 ts-ban-tslint-comment
+ts-double-assertion
 ts-explicit-any
 ts-extra-non-null
 ts-no-empty-interface
