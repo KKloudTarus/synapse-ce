@@ -133,6 +133,7 @@ java-empty-catch
 java-empty-finally
 java-empty-if
 java-empty-statement
+java-empty-static-block
 java-empty-synchronized
 java-empty-while
 java-enumeration
@@ -145,6 +146,8 @@ java-float-equality
 java-format-newline
 java-getbytes-no-charset
 java-import-java-lang
+java-import-sun
+java-indexof-char
 java-inefficient-append-concat
 java-legacy-collection
 java-long-literal-lowercase-l
@@ -159,6 +162,7 @@ java-redundant-intvalue
 java-return-in-finally
 java-runtime-exec-var
 java-runtime-halt
+java-setaccessible-true
 java-simpledateformat-static
 java-star-import
 java-string-equals-empty
@@ -171,6 +175,7 @@ java-system-out-print
 java-thread-yield
 java-throw-in-finally
 java-throw-npe
+java-throw-raw-runtime
 java-toarray-noarg
 jfrog-token
 js-array-sort-no-compare
@@ -199,6 +204,7 @@ js-no-empty-block
 js-no-empty-pattern
 js-no-extend-native
 js-no-extra-semi
+js-no-floating-decimal
 js-no-global-assign
 js-no-iterator
 js-no-labels
@@ -216,6 +222,7 @@ js-no-return-await
 js-no-sparse-array
 js-no-template-in-regular-string
 js-no-throw-literal
+js-no-undef-init
 js-no-unsafe-negation
 js-no-useless-computed-key
 js-no-useless-concat
@@ -227,6 +234,7 @@ js-postmessage-wildcard
 js-prefer-exponentiation
 js-prefer-includes
 js-prefer-object-spread
+js-prefer-promise-reject-errors
 js-prefer-spread
 js-prefer-template
 js-prototype-builtins
@@ -303,6 +311,7 @@ node-jwt-decode-no-verify
 node-legacy-url-parse
 node-mongo-find-req-body
 node-new-buffer
+node-path-concat
 node-process-binding
 node-process-exit-lib
 node-process-umask-zero
