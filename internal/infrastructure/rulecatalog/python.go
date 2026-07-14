@@ -35,6 +35,11 @@ func pythonRules() []rule.Rule {
 		{"python-multiple-imports", "Multiple imports on one line", "", "import os\nimport sys", "import os, sys", "Put each import on its own line.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow},
 		{"python-fstring-no-placeholder", "f-string without placeholders", "", "message = 'ready'", "message = f'ready'", "Drop the f prefix from a string that has no placeholders.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityInfo},
 		{"python-subprocess-shell", "subprocess with shell=True", "CWE-78", "subprocess.run(['ls', '-la'])", "subprocess.run(command, shell=True)", "Pass an argument list and shell=False so shell metacharacters cannot inject commands.", rule.TypeVulnerability, rule.QualitySecurity, shared.SeverityHigh},
+		{"python-shadow-builtin", "Shadowing a builtin name", "", "item_list = fetch()", "list = fetch()", "Rename the variable so it does not shadow a builtin.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow},
+		{"python-assert-tuple", "Assert on a tuple is always true", "CWE-571", "assert count > 0, 'count must be positive'", "assert (count > 0, 'count must be positive')", "Remove the parentheses so the message is the second assert argument, not part of a tuple.", rule.TypeBug, rule.QualityReliability, shared.SeverityHigh},
+		{"python-bind-all-interfaces", "Bind to all network interfaces", "CWE-605", "sock.bind(('127.0.0.1', 8080))", "sock.bind(('0.0.0.0', 8080))", "Bind to a specific interface address instead of 0.0.0.0 unless external exposure is intended.", rule.TypeSecurityHotspot, rule.QualitySecurity, shared.SeverityMedium},
+		{"python-mktemp-insecure", "Insecure tempfile.mktemp", "CWE-377", "fd, path = tempfile.mkstemp()", "path = tempfile.mktemp()", "Use tempfile.mkstemp or NamedTemporaryFile, which create the file atomically.", rule.TypeSecurityHotspot, rule.QualitySecurity, shared.SeverityMedium},
+		{"python-yaml-unsafe-load", "Unsafe yaml.load", "CWE-502", "data = yaml.safe_load(text)", "data = yaml.load(text)", "Use yaml.safe_load for untrusted input.", rule.TypeVulnerability, rule.QualitySecurity, shared.SeverityHigh},
 	}
 	rules := make([]rule.Rule, 0, len(specs))
 	for _, s := range specs {

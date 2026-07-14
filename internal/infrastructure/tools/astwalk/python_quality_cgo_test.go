@@ -206,3 +206,52 @@ subprocess.run(['ls', '-la'])
 		}
 	}
 }
+
+func TestQualityForPythonSecurityRules(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "sec.py", `
+list = fetch()
+assert (count > 0, "count must be positive")
+sock.bind(("0.0.0.0", 8080))
+path = tempfile.mktemp()
+data = yaml.load(text)
+`)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{
+		"python-shadow-builtin", "python-assert-tuple", "python-bind-all-interfaces",
+		"python-mktemp-insecure", "python-yaml-unsafe-load",
+	} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}
+
+func TestQualityForPythonSecurityNoFalsePositives(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "secclean.py", `
+item_list = fetch()
+assert count > 0, "count must be positive"
+sock.bind(("127.0.0.1", 8080))
+fd, path = tempfile.mkstemp()
+data = yaml.safe_load(text)
+`)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	for _, f := range res.Findings {
+		switch f.Rule {
+		case "python-shadow-builtin", "python-assert-tuple", "python-bind-all-interfaces",
+			"python-mktemp-insecure", "python-yaml-unsafe-load":
+			t.Errorf("false positive %s: %+v", f.Rule, f)
+		}
+	}
+}

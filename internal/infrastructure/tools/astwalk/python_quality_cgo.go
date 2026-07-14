@@ -39,6 +39,11 @@ var pythonRules = map[string]pythonRule{
 	"multi-import":     {"quality", "python-multiple-imports", "", "low", "Multiple imports on one line", "Importing several modules in one statement is harder to read and diff. Put each import on its own line."},
 	"fstring-empty":    {"quality", "python-fstring-no-placeholder", "", "info", "f-string without placeholders", "An f-string with no {…} placeholder is just a string literal; drop the f prefix."},
 	"subprocess-shell": {"sast", "python-subprocess-shell", "CWE-78", "high", "subprocess with shell=True", "shell=True runs the command through a shell, so any input in the command string can inject OS commands. Pass an argument list and shell=False."},
+	"shadow-builtin":   {"quality", "python-shadow-builtin", "", "low", "Shadowing a builtin name", "Reassigning a builtin (list, dict, id, ...) hides it for the rest of the scope. Use a different name."},
+	"assert-tuple":     {"reliability", "python-assert-tuple", "CWE-571", "high", "Assert on a tuple is always true", "assert (a, b) tests a non-empty tuple, which is always truthy, so the assertion never fails. Use `assert a, b` or separate asserts."},
+	"bind-all":         {"sast", "python-bind-all-interfaces", "CWE-605", "medium", "Bind to all network interfaces", "Binding to 0.0.0.0 exposes the service on every interface, including untrusted networks. Bind to a specific address."},
+	"mktemp":           {"sast", "python-mktemp-insecure", "CWE-377", "medium", "Insecure tempfile.mktemp", "mktemp only returns a name, leaving a race window before the file is created. Use mkstemp or NamedTemporaryFile."},
+	"yaml-unsafe":      {"sast", "python-yaml-unsafe-load", "CWE-502", "high", "Unsafe yaml.load", "yaml.load with the default loader can construct arbitrary Python objects from untrusted input. Use yaml.safe_load."},
 }
 
 var (
@@ -53,6 +58,11 @@ var (
 	multiImportRE     = regexp.MustCompile(`(?s)^\s*import\s+[^\n,]+,`)
 	fStringEmptyRE    = regexp.MustCompile(`(?s)^[rR]?[fF][rR]?["']`)
 	subprocessShellRE = regexp.MustCompile(`(?s)\bshell\s*=\s*True\b`)
+	builtinShadowRE   = regexp.MustCompile(`(?s)^\s*(list|dict|set|str|int|float|bool|id|type|input|max|min|sum|len|filter|map|next|iter|open|vars|dir|hash|bytes|object)\s*=\s*[^=]`)
+	assertTupleRE     = regexp.MustCompile(`(?s)^\s*assert\s*\([^)]*,[^)]*\)`)
+	bindAllRE         = regexp.MustCompile(`(?s)['"]0\.0\.0\.0['"]`)
+	mktempRE          = regexp.MustCompile(`(?s)\btempfile\.mktemp\s*\(|\bmktemp\s*\(`)
+	yamlLoadRE        = regexp.MustCompile(`(?s)\byaml\.load\s*\(`)
 )
 
 // QualityFor parses Python files and returns the precision-biased seed quality rules. It deliberately does
@@ -116,6 +126,9 @@ func pythonFindings(root *sitter.Node, src []byte, rel string) []QualityFinding 
 			if lambdaAssignRE.MatchString(text) {
 				out = append(out, pythonFinding("lambda-assign", n, rel))
 			}
+			if builtinShadowRE.MatchString(text) {
+				out = append(out, pythonFinding("shadow-builtin", n, rel))
+			}
 		case "string":
 			if fStringEmptyRE.MatchString(text) && !strings.Contains(text, "{") {
 				out = append(out, pythonFinding("fstring-empty", n, rel))
@@ -130,6 +143,9 @@ func pythonFindings(root *sitter.Node, src []byte, rel string) []QualityFinding 
 			}
 		case "assert_statement":
 			out = append(out, pythonFinding("assert", n, rel))
+			if assertTupleRE.MatchString(text) {
+				out = append(out, pythonFinding("assert-tuple", n, rel))
+			}
 		case "comparison_operator":
 			if noneCompareRE.MatchString(text) {
 				out = append(out, pythonFinding("none", n, rel))
@@ -176,6 +192,15 @@ func pythonFindings(root *sitter.Node, src []byte, rel string) []QualityFinding 
 			}
 			if subprocessShellRE.MatchString(text) {
 				out = append(out, pythonFinding("subprocess-shell", n, rel))
+			}
+			if bindAllRE.MatchString(text) {
+				out = append(out, pythonFinding("bind-all", n, rel))
+			}
+			if mktempRE.MatchString(text) {
+				out = append(out, pythonFinding("mktemp", n, rel))
+			}
+			if yamlLoadRE.MatchString(text) && !strings.Contains(text, "Loader") {
+				out = append(out, pythonFinding("yaml-unsafe", n, rel))
 			}
 		}
 		for i := 0; i < int(n.ChildCount()); i++ {
