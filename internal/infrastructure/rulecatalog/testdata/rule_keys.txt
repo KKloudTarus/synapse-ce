@@ -130,6 +130,7 @@ java-ast-missing-switch-default
 java-ast-nested-ternary
 java-ast-nested-try
 java-ast-too-many-params
+java-ast-too-many-returns
 java-bigdecimal-double
 java-biginteger-literal
 java-boolean-getboolean
@@ -200,6 +201,7 @@ js-ast-long-function
 js-ast-missing-switch-default
 js-ast-return-in-finally
 js-ast-too-many-params
+js-ast-too-many-returns
 js-document-cookie-write
 js-dom-xss-outerhtml
 js-dot-notation
@@ -375,6 +377,7 @@ python-bare-except
 python-bind-all-interfaces
 python-broad-except
 python-broad-raise
+python-compare-bool-literal
 python-compare-empty-collection
 python-duplicate-dict-key
 python-eq-none
@@ -399,6 +402,7 @@ python-star-import
 python-subprocess-shell
 python-too-long-function
 python-too-many-args
+python-too-many-returns
 python-type-eq-vs-isinstance
 python-unused-import
 python-yaml-unsafe-load

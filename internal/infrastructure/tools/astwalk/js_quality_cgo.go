@@ -17,6 +17,7 @@ var jsRules = map[string]pythonRule{
 	"large-class":        {"quality", "js-ast-large-class", "", "low", "Class has too many methods", "A class with a very large number of methods likely has too many responsibilities; consider splitting it."},
 	"identical-branches": {"reliability", "js-ast-identical-branches", "", "medium", "if and else branches are identical", "The then and else blocks are the same, so the condition has no effect; one branch is redundant or wrong."},
 	"return-in-finally":  {"reliability", "js-ast-return-in-finally", "", "medium", "return inside finally", "A return in finally overrides any value returned or exception thrown in the try/catch, silently discarding it."},
+	"many-returns":       {"quality", "js-ast-too-many-returns", "", "low", "Function has too many return statements", "A function with many return points is hard to follow; simplify the control flow."},
 }
 
 func jsFinding(key string, n *sitter.Node, rel string) QualityFinding {
@@ -44,6 +45,9 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			}
 			if p := n.ChildByFieldName("parameters"); p != nil && int(p.NamedChildCount()) > 7 {
 				out = append(out, jsFinding("too-many-params", n, rel))
+			}
+			if body := n.ChildByFieldName("body"); countReturnsBounded(body, map[string]bool{"function_declaration": true, "function_expression": true, "arrow_function": true, "method_definition": true, "class_declaration": true}) > 6 {
+				out = append(out, jsFinding("many-returns", n, rel))
 			}
 		case "switch_statement":
 			if body := n.ChildByFieldName("body"); body != nil && !jsSwitchHasDefault(body) {

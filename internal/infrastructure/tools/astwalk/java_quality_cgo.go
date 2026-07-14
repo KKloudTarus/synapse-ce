@@ -24,6 +24,7 @@ var javaRules = map[string]pythonRule{
 	"identical-branches": {"reliability", "java-ast-identical-branches", "", "medium", "if and else branches are identical", "The then and else blocks have the same code, so the condition has no effect; one branch is redundant or wrong."},
 	"if-return-bool":     {"quality", "java-ast-if-return-boolean", "", "low", "if returning boolean literals", "if (c) return true; else return false; is just `return c;`."},
 	"large-class":        {"quality", "java-ast-large-class", "", "low", "Class has too many methods", "A class with a very large number of methods likely has too many responsibilities; consider splitting it."},
+	"many-returns":       {"quality", "java-ast-too-many-returns", "", "low", "Method has too many return statements", "A method with many return points is hard to follow; simplify the control flow."},
 }
 
 func javaFinding(key string, n *sitter.Node, rel string) QualityFinding {
@@ -49,6 +50,9 @@ func javaFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			}
 			if body := n.ChildByFieldName("body"); body != nil && body.Type() == "block" && int(body.NamedChildCount()) > 50 {
 				out = append(out, javaFinding("long-method", n, rel))
+			}
+			if body := n.ChildByFieldName("body"); countReturnsBounded(body, map[string]bool{"method_declaration": true, "lambda_expression": true, "class_declaration": true}) > 6 {
+				out = append(out, javaFinding("many-returns", n, rel))
 			}
 		case "ternary_expression":
 			if javaHasDescendantType(n, "ternary_expression") {
