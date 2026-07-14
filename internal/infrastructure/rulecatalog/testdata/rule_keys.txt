@@ -173,6 +173,7 @@ java-cipher-rc2
 java-cipher-rc4
 java-cipher-rsa-default
 java-cipher-rsa-pkcs1
+java-class-name-lowercase
 java-classforname-param
 java-classloader-getresource-param
 java-collection-size-zero
@@ -223,6 +224,7 @@ java-for-empty-init-while
 java-format-newline
 java-format-string-var
 java-getbytes-no-charset
+java-getrealpath-param
 java-groovy-shell
 java-guava-first-non-null
 java-guava-lists-newarraylist
@@ -252,6 +254,7 @@ java-junit3-import
 java-junit4-runwith
 java-junit4-test-import
 java-jwt-signwith-none
+java-ldap-anonymous-auth
 java-ldap-filter-concat
 java-legacy-collection
 java-literals-first-equals
@@ -260,6 +263,7 @@ java-log-injection
 java-log4j1-import
 java-long-literal-lowercase-l
 java-loose-coupling-collection
+java-method-name-uppercase
 java-modifier-order
 java-mutable-public-static-array
 java-mysql-allow-load-local
@@ -284,6 +288,7 @@ java-posix-world-permissions
 java-printstacktrace
 java-processbuilder-param
 java-public-finalize
+java-redundant-double-negation
 java-redundant-intvalue
 java-request-dispatcher-param
 java-return-in-finally
@@ -335,11 +340,13 @@ java-throw-raw-runtime
 java-throws-exception
 java-throws-throwable
 java-tls-deprecated-version
+java-tls-no-endpoint-identification
 java-toarray-noarg
 java-tolowercase-no-locale
 java-touppercase-no-locale
 java-unnecessary-temporary-conversion
 java-unnecessary-unboxing
+java-upload-original-filename-path
 java-weak-hash-md5
 java-weak-hash-sha1
 java-weak-password-encoder
