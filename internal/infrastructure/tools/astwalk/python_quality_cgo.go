@@ -53,10 +53,46 @@ var pythonRules = map[string]pythonRule{
 	"except-pass":        {"reliability", "python-except-pass", "CWE-390", "low", "Exception silently passed", "An except whose only statement is pass swallows the error with no handling or logging."},
 	"compare-bool":       {"quality", "python-compare-bool-literal", "", "low", "Comparison to a boolean literal", "Comparing to True/False is redundant; use the value directly (or `not value`)."},
 	"too-many-returns":   {"quality", "python-too-many-returns", "", "low", "Function has too many return statements", "A function with many return points is hard to follow; simplify the control flow."},
+	"deep-nesting":       {"quality", "python-deep-nesting", "", "medium", "Deeply nested control flow", "Control flow nested more than four levels deep is hard to read and test; use guard clauses or extract functions."},
+	"nested-loop":        {"quality", "python-nested-loop", "", "medium", "Deeply nested loops", "Three or more loops nested inside each other are hard to follow and often costly; extract or rethink them."},
+	"complex-condition":  {"quality", "python-complex-condition", "", "low", "Overly complex boolean condition", "A condition combining many and/or operators is hard to reason about; name the sub-conditions."},
 }
+
+// pyControlTypes / pyLoopTypes are the node kinds counted for nesting-depth metrics.
+var pyControlTypes = map[string]bool{
+	"if_statement": true, "for_statement": true, "while_statement": true, "try_statement": true, "with_statement": true,
+}
+var pyLoopTypes = map[string]bool{"for_statement": true, "while_statement": true}
 
 var emptyCompareRE = regexp.MustCompile(`(?s)(==|!=)\s*(\[\s*\]|\{\s*\}|\(\s*\))|(\[\s*\]|\{\s*\})\s*(==|!=)`)
 var boolCompareRE = regexp.MustCompile(`(?s)(==|!=)\s*(True|False)\b|\b(True|False)\s*(==|!=)`)
+
+// pyMaxDepthByType returns the maximum nesting depth of nodes whose type is in types within n's
+// subtree (each matching node adds one level). Used for control-flow and loop nesting metrics.
+func pyMaxDepthByType(n *sitter.Node, types map[string]bool) int {
+	best := 0
+	for i := 0; i < int(n.ChildCount()); i++ {
+		if d := pyMaxDepthByType(n.Child(i), types); d > best {
+			best = d
+		}
+	}
+	if types[n.Type()] {
+		return best + 1
+	}
+	return best
+}
+
+// pyCountBoolOps counts the boolean_operator nodes (and/or) in n's subtree (condition complexity).
+func pyCountBoolOps(n *sitter.Node) int {
+	count := 0
+	if n.Type() == "boolean_operator" {
+		count++
+	}
+	for i := 0; i < int(n.ChildCount()); i++ {
+		count += pyCountBoolOps(n.Child(i))
+	}
+	return count
+}
 
 // countReturnsBounded counts return_statement nodes under body without descending into nested scopes
 // (functions/lambdas/classes) named in stop. Shared by the Python/Java/JS quality walkers.
@@ -213,6 +249,18 @@ func pythonFindings(root *sitter.Node, src []byte, rel string) []QualityFinding 
 			}
 			if body := n.ChildByFieldName("body"); countReturnsBounded(body, map[string]bool{"function_definition": true, "lambda": true}) > 6 {
 				out = append(out, pythonFinding("too-many-returns", n, rel))
+			}
+			if body := n.ChildByFieldName("body"); body != nil {
+				if pyMaxDepthByType(body, pyControlTypes) > 4 {
+					out = append(out, pythonFinding("deep-nesting", n, rel))
+				}
+				if pyMaxDepthByType(body, pyLoopTypes) >= 3 {
+					out = append(out, pythonFinding("nested-loop", n, rel))
+				}
+			}
+		case "if_statement", "while_statement":
+			if cond := n.ChildByFieldName("condition"); cond != nil && pyCountBoolOps(cond) > 4 {
+				out = append(out, pythonFinding("complex-condition", n, rel))
 			}
 		case "except_clause":
 			if strings.HasPrefix(strings.TrimSpace(text), "except:") {

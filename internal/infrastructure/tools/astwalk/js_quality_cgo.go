@@ -18,6 +18,18 @@ var jsRules = map[string]pythonRule{
 	"identical-branches": {"reliability", "js-ast-identical-branches", "", "medium", "if and else branches are identical", "The then and else blocks are the same, so the condition has no effect; one branch is redundant or wrong."},
 	"return-in-finally":  {"reliability", "js-ast-return-in-finally", "", "medium", "return inside finally", "A return in finally overrides any value returned or exception thrown in the try/catch, silently discarding it."},
 	"many-returns":       {"quality", "js-ast-too-many-returns", "", "low", "Function has too many return statements", "A function with many return points is hard to follow; simplify the control flow."},
+	"deep-nesting":       {"quality", "js-ast-deep-nesting", "", "medium", "Deeply nested control flow", "Control flow nested more than four levels deep is hard to read and test; use guard clauses or extract functions."},
+	"nested-loop":        {"quality", "js-ast-nested-loop", "", "medium", "Deeply nested loops", "Three or more loops nested inside each other are hard to follow and often costly; extract or rethink them."},
+	"complex-condition":  {"quality", "js-ast-complex-condition", "", "low", "Overly complex boolean condition", "A condition combining many && / || operators is hard to reason about; name the sub-conditions."},
+}
+
+// jsControlTypes / jsLoopTypes are the node kinds counted for nesting-depth metrics.
+var jsControlTypes = map[string]bool{
+	"if_statement": true, "for_statement": true, "for_in_statement": true, "while_statement": true,
+	"do_statement": true, "switch_statement": true, "try_statement": true,
+}
+var jsLoopTypes = map[string]bool{
+	"for_statement": true, "for_in_statement": true, "while_statement": true, "do_statement": true,
 }
 
 func jsFinding(key string, n *sitter.Node, rel string) QualityFinding {
@@ -49,6 +61,14 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			if body := n.ChildByFieldName("body"); countReturnsBounded(body, map[string]bool{"function_declaration": true, "function_expression": true, "arrow_function": true, "method_definition": true, "class_declaration": true}) > 6 {
 				out = append(out, jsFinding("many-returns", n, rel))
 			}
+			if body := n.ChildByFieldName("body"); body != nil {
+				if jsMaxDepthByType(body, jsControlTypes) > 4 {
+					out = append(out, jsFinding("deep-nesting", n, rel))
+				}
+				if jsMaxDepthByType(body, jsLoopTypes) >= 3 {
+					out = append(out, jsFinding("nested-loop", n, rel))
+				}
+			}
 		case "switch_statement":
 			if body := n.ChildByFieldName("body"); body != nil && !jsSwitchHasDefault(body) {
 				out = append(out, jsFinding("missing-default", n, rel))
@@ -66,6 +86,9 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 				}
 			}
 		case "if_statement":
+			if cond := n.ChildByFieldName("condition"); cond != nil && jsCountBoolOps(cond, src) > 4 {
+				out = append(out, jsFinding("complex-condition", n, rel))
+			}
 			cons := n.ChildByFieldName("consequence")
 			alt := n.ChildByFieldName("alternative")
 			if alt != nil && alt.Type() == "else_clause" && alt.NamedChildCount() > 0 {
@@ -85,6 +108,37 @@ func jsFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 		}
 	}
 	return dedupeQuality(out)
+}
+
+// jsMaxDepthByType returns the maximum nesting depth of nodes whose type is in types within n's
+// subtree (each matching node adds one level). Used for control-flow and loop nesting metrics.
+func jsMaxDepthByType(n *sitter.Node, types map[string]bool) int {
+	best := 0
+	for i := 0; i < int(n.ChildCount()); i++ {
+		if d := jsMaxDepthByType(n.Child(i), types); d > best {
+			best = d
+		}
+	}
+	if types[n.Type()] {
+		return best + 1
+	}
+	return best
+}
+
+// jsCountBoolOps counts the && and || operators in n's subtree (condition complexity).
+func jsCountBoolOps(n *sitter.Node, src []byte) int {
+	count := 0
+	if n.Type() == "binary_expression" {
+		if op := n.ChildByFieldName("operator"); op != nil {
+			if t := op.Content(src); t == "&&" || t == "||" {
+				count++
+			}
+		}
+	}
+	for i := 0; i < int(n.ChildCount()); i++ {
+		count += jsCountBoolOps(n.Child(i), src)
+	}
+	return count
 }
 
 // jsHasDescendantType reports whether n has a descendant of the given type (used for finally-return).

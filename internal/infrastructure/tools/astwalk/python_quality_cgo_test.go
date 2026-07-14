@@ -536,3 +536,58 @@ func TestQualityForJavaASTStructural(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityForPyJsStructural(t *testing.T) {
+	root := t.TempDir()
+	py := "def deep(x):\n" +
+		"    if a:\n" +
+		"        for i in items:\n" +
+		"            while b:\n" +
+		"                with lock:\n" +
+		"                    if c:\n" +
+		"                        run()\n" +
+		"def loops():\n" +
+		"    for i in rows:\n" +
+		"        for j in cols:\n" +
+		"            for k in depth:\n" +
+		"                total += grid[i][j][k]\n" +
+		"def cond():\n" +
+		"    if a and b and c and d and e and f:\n" +
+		"        accept()\n"
+	writeFile(t, root, "m.py", py)
+	js := "function deep(x) {\n" +
+		"  if (a) {\n" +
+		"    for (const i of items) {\n" +
+		"      while (b) {\n" +
+		"        try {\n" +
+		"          if (c) { run(); }\n" +
+		"        } finally { cleanup(); }\n" +
+		"      }\n" +
+		"    }\n" +
+		"  }\n" +
+		"}\n" +
+		"function loops() {\n" +
+		"  for (let i = 0; i < n; i++) {\n" +
+		"    for (let j = 0; j < n; j++) {\n" +
+		"      for (let k = 0; k < n; k++) { sum += g[i][j][k]; }\n" +
+		"    }\n" +
+		"  }\n" +
+		"}\n" +
+		"function cond() {\n" +
+		"  if (a && b && c && d && e && f) { accept(); }\n" +
+		"}\n"
+	writeFile(t, root, "m.js", js)
+	res, err := QualityFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("QualityFor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range res.Findings {
+		got[f.Rule] = true
+	}
+	for _, rule := range []string{"python-deep-nesting", "python-nested-loop", "python-complex-condition", "js-ast-deep-nesting", "js-ast-nested-loop", "js-ast-complex-condition"} {
+		if !got[rule] {
+			t.Errorf("missing %s in %+v", rule, res.Findings)
+		}
+	}
+}

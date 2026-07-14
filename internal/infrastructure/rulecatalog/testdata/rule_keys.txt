@@ -246,11 +246,14 @@ jfrog-token
 js-angular-bypass-security
 js-angular-trust-as-html
 js-array-sort-no-compare
+js-ast-complex-condition
+js-ast-deep-nesting
 js-ast-empty-function
 js-ast-identical-branches
 js-ast-large-class
 js-ast-long-function
 js-ast-missing-switch-default
+js-ast-nested-loop
 js-ast-return-in-finally
 js-ast-too-many-params
 js-ast-too-many-returns
@@ -457,12 +460,14 @@ python-broad-except
 python-broad-raise
 python-compare-bool-literal
 python-compare-empty-collection
+python-complex-condition
 python-cors-allow-all
 python-crypto-arc4
 python-crypto-blowfish
 python-crypto-des
 python-crypto-des3
 python-crypto-mode-ecb
+python-deep-nesting
 python-django-allowed-hosts-wildcard
 python-django-csrf-exempt
 python-django-debug
@@ -497,6 +502,7 @@ python-multiple-imports
 python-mutable-class-attribute
 python-mutable-default-argument
 python-nested-conditional
+python-nested-loop
 python-open-no-context
 python-os-chmod-world
 python-os-exec-family
