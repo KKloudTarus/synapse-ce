@@ -16,6 +16,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/ignore"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedsbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -37,6 +38,13 @@ type IDGenerator interface {
 
 // EngagementRepository persists engagements. Returned aggregates are read-only –
 // callers must not mutate them (implementations may return shared instances).
+type ProjectRepository interface {
+	Create(ctx context.Context, p *project.Project) error
+	List(ctx context.Context, tenantID shared.ID) ([]*project.Project, error)
+	GetByKey(ctx context.Context, tenantID shared.ID, key string) (*project.Project, error)
+	DeleteByKey(ctx context.Context, tenantID shared.ID, key string) error
+}
+
 type EngagementRepository interface {
 	Create(ctx context.Context, e *engagement.Engagement) error
 	// GetByID loads an engagement by id WITHOUT a tenant predicate. It is reserved for INTERNAL

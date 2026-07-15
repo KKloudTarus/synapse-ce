@@ -59,6 +59,7 @@ type Router struct {
 	threatModels threatModelService  // optional; nil ⇒ threat-model routes are not registered
 	drafts       writeupDraftService // optional; nil ⇒ writeup-draft sign-off routes are not registered
 	codeQuality  codeQualityService  // optional; nil ⇒ the code-quality route is not registered
+	projects     projectService      // optional; nil ⇒ project routes are not registered
 	rules        rulesService        // optional; nil ⇒ rule catalog routes are not registered
 }
 
@@ -188,6 +189,11 @@ func (rt *Router) routes() *http.ServeMux {
 	// caller then hits the tenant 404. Machine (mcp/agent) roles are granted nothing here.
 	mux.HandleFunc("GET /api/v1/aup", rt.getAUP)
 	mux.HandleFunc("POST /api/v1/aup/accept", rt.acceptAUP)
+	if rt.projects != nil {
+		mux.HandleFunc("POST /api/v1/projects", rt.authz(userdom.PermOperate, rt.createProject))
+		mux.HandleFunc("GET /api/v1/projects", rt.authz(userdom.PermView, rt.listProjects))
+		mux.HandleFunc("GET /api/v1/projects/{key}", rt.authz(userdom.PermView, rt.getProject))
+	}
 	mux.HandleFunc("POST /api/v1/engagements", rt.authz(userdom.PermOperate, rt.createEngagement))
 	mux.HandleFunc("GET /api/v1/engagements", rt.authz(userdom.PermView, rt.listEngagements))
 	mux.HandleFunc("GET /api/v1/engagements/{id}", rt.authz(userdom.PermView, rt.getEngagement))

@@ -584,6 +584,30 @@ export interface ThreatModel {
 
 // ---- Code quality (Phase 6 dashboard) ----
 
+export type ProjectSourceKind = 'local' | 'git' | 'archive'
+
+export interface ProjectSourceBinding {
+  kind: ProjectSourceKind
+  value: string
+  ref: string
+}
+
+export interface Project {
+  id: string
+  name: string
+  key: string
+  sourceBinding: ProjectSourceBinding
+  defaultProfileByLang: Record<string, string>
+  gateId: string
+  createdAt: string | null
+}
+
+export interface CreateProjectInput {
+  name: string
+  key: string
+  sourceBinding: ProjectSourceBinding
+}
+
 export interface LanguageInventory {
   language: string
   files: number

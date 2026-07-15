@@ -10,6 +10,8 @@ import { Engagements } from './pages/Engagements'
 import { Team } from './pages/Team'
 import Rules from './pages/Rules'
 import RuleDetail from './pages/RuleDetail'
+import { CodeQualityProject } from './pages/CodeQualityProject'
+import { CodeQualityProjects } from './pages/CodeQualityProjects'
 
 export default function App() {
   return (
@@ -28,6 +30,8 @@ function Gate() {
         <Route index element={<Navigate to="/engagements" replace />} />
         <Route path="engagements" element={<Engagements />} />
         <Route path="engagements/:id" element={<EngagementDetail />} />
+        <Route path="code-quality" element={<CodeQualityProjects />} />
+        <Route path="code-quality/projects/:key" element={<CodeQualityProject />} />
         <Route path="rules" element={<Rules />} />
         <Route path="rules/:key" element={<RuleDetail />} />
         <Route path="audit" element={<Audit />} />

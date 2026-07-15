@@ -10,7 +10,9 @@ import type {
   Component,
   PendingApproval,
   CreateEngagementInput,
+  CreateProjectInput,
   Engagement,
+  Project,
   EvidenceItem,
   EvidenceLedger,
   Finding,
@@ -91,6 +93,22 @@ async function req(path: string, init?: RequestInit): Promise<any> {
 }
 
 // ---- mappers: raw API JSON (mixed casing) → clean types ----
+
+function mapProject(r: any): Project {
+  return {
+    id: r.ID ?? '',
+    name: r.Name ?? '',
+    key: r.Key ?? '',
+    sourceBinding: {
+      kind: r.SourceBinding?.Kind ?? 'local',
+      value: r.SourceBinding?.Value ?? '',
+      ref: r.SourceBinding?.Ref ?? '',
+    },
+    defaultProfileByLang: r.DefaultProfileByLang ?? {},
+    gateId: r.GateID ?? '',
+    createdAt: r.Audit?.CreatedAt ?? null,
+  }
+}
 
 function mapEngagement(r: any): Engagement {
   const targets = (xs: any[]): { kind: string; value: string }[] =>
@@ -688,6 +706,28 @@ export const api = {
   getRule: async (key: string): Promise<RuleDetail> => {
     return mapRuleDetail(await req(`/rules/${encodeURIComponent(key)}`))
   },
+
+  listProjects: async (): Promise<Project[]> =>
+    ((await req('/projects')) ?? []).map(mapProject),
+
+  createProject: async (input: CreateProjectInput): Promise<Project> =>
+    mapProject(
+      await req('/projects', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: input.name,
+          key: input.key,
+          source_binding: {
+            Kind: input.sourceBinding.kind,
+            Value: input.sourceBinding.value,
+            Ref: input.sourceBinding.ref,
+          },
+        }),
+      }),
+    ),
+
+  getProject: async (key: string): Promise<Project> =>
+    mapProject(await req(`/projects/${encodeURIComponent(key)}`)),
 
   // the engagement's code-quality report (inventory + findings + duplication + A-E ratings). Computed
   // over an in-scope local source directory; an engagement without one returns available=false. 404 (the

@@ -47,7 +47,7 @@ func (rt *Router) codeQualityReport(w http.ResponseWriter, r *http.Request) {
 	if root == "" {
 		writeJSON(w, http.StatusOK, codeQualityReportView{
 			Available: false,
-			Reason:    "code quality requires an in-scope local source directory; this engagement has none",
+			Reason:    "Code Quality requires an in-scope local source directory; this engagement has none",
 		})
 		return
 	}

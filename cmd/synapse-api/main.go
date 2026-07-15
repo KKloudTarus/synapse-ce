@@ -107,6 +107,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/llmverifier"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/pyreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachability"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachproof"
@@ -158,6 +159,7 @@ func main() {
 
 	// Persistence: PostgreSQL when configured, else file + in-memory (dev).
 	var repo ports.EngagementRepository
+	var projectRepo ports.ProjectRepository
 	var findingRepo ports.FindingRepository
 	var judgmentStore analysisuc.Store // postgres or memory; satisfies both the narrow Store + ports.JudgmentStore
 	var commentRepo ports.CommentRepository
@@ -254,6 +256,7 @@ func main() {
 		defer lockConn.Release()
 		log.Info("acquired single-instance advisory lock")
 		repo = postgres.NewEngagementRepository(pool)
+		projectRepo = postgres.NewProjectRepository(pool)
 		findingRepo = postgres.NewFindingRepository(pool)
 		judgmentStore = postgres.NewJudgmentRepository(pool)
 		commentRepo = postgres.NewCommentRepository(pool)
@@ -287,6 +290,7 @@ func main() {
 		log.Info("persistence: postgres")
 	} else {
 		repo = memory.NewEngagementRepository()
+		projectRepo = memory.NewProjectRepository()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
 		commentRepo = memory.NewCommentRepository()
@@ -326,6 +330,7 @@ func main() {
 
 	// Use cases.
 	engService := enguc.NewService(repo, clock, ids, auditLog)
+	projectService := projectuc.NewService(projectRepo, clock, ids, auditLog)
 	// Evidence artifact blob store: MinIO/S3 when configured, else in-memory (dev).
 	var blobStore ports.BlobStore
 	if cfg.BlobEndpoint != "" {
@@ -832,6 +837,7 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
+	router.SetProjects(projectService)
 	router.SetExploitation(exploitationService) // evidence-gated finding verify endpoint
 	// Read-only code-quality dashboard. Server-side analysis is PURE-GO and memory-safe only (pattern
 	// rules + duplication + Go-parser inventory); tree-sitter complexity is intentionally NOT wired here

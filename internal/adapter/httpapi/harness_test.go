@@ -9,6 +9,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	projectdom "github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/threatmodel"
@@ -18,6 +19,7 @@ import (
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
+	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 )
@@ -111,14 +113,23 @@ func TestHostileHarness(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed engagement: %v", err)
 	}
+	projectRepo := memory.NewProjectRepository()
+	projectSvc := projectuc.NewService(projectRepo, fixedClock{}, engIDs{}, &fakeAudit{})
+	if _, err := projectSvc.Create(context.Background(), projectuc.CreateInput{
+		TenantID: "tenantA", CreatedBy: "p", Name: "Project A", Key: "project-a",
+		SourceBinding: projectdom.SourceBinding{Kind: projectdom.SourceLocal, Value: "/repo"},
+	}); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
 	usersSvc, err := usersuc.NewService(memory.NewUserRepository(), &fakeAudit{}, fixedClock{}, engIDs{})
 	if err != nil {
 		t.Fatalf("users svc: %v", err)
 	}
 	rt := &Router{
-		log:   discardLog(),
-		eng:   enguc.NewService(engRepo, fixedClock{}, engIDs{}, &fakeAudit{}),
-		users: usersSvc,
+		log:      discardLog(),
+		eng:      enguc.NewService(engRepo, fixedClock{}, engIDs{}, &fakeAudit{}),
+		projects: projectSvc,
+		users:    usersSvc,
 	}
 	// Register the two CONDITIONAL sign-off routes so the harness guards their gates too: the
 	// PermReview /verify route (needs a non-nil exploitation verifier) and the agent routes incl.
@@ -159,8 +170,12 @@ func TestHostileHarness(t *testing.T) {
 		// RBAC allow (view): every human role reads.
 		{"readonly may list", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements", http.StatusOK},
 		{"readonly may get own-tenant engagement", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA", http.StatusOK},
+		{"readonly may list projects", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects", http.StatusOK},
+		{"readonly may get own-tenant project", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a", http.StatusOK},
 		// RBAC deny: readonly holds only view.
 		{"readonly may not create (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/engagements", http.StatusForbidden},
+		{"readonly may not create project (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/projects", http.StatusForbidden},
+		{"machine may not list projects", "agent", "tenantA", true, http.MethodGet, "/api/v1/projects", http.StatusForbidden},
 		{"readonly may not author finding (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/findings", http.StatusForbidden},
 		{"readonly may not triage (triage)", "readonly", "tenantA", true, http.MethodPatch, "/api/v1/engagements/engA/findings/f1", http.StatusForbidden},
 		{"readonly may not run scan (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/sca/scans", http.StatusForbidden},
@@ -178,6 +193,8 @@ func TestHostileHarness(t *testing.T) {
 		{"cross-tenant child resource → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/findings", http.StatusNotFound},
 		// Same-tenant read still works (isolation does not over-block).
 		{"same-tenant engagement read → 200", "consultant", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA", http.StatusOK},
+		{"cross-tenant project read → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/projects/project-a", http.StatusNotFound},
+		{"same-tenant project read → 200", "consultant", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a", http.StatusOK},
 		// Sign-off routes (PermReview) – the crown-jewel separation-of-duties gates. A machine role
 		// can never verify a finding nor decide an agent approval; a consultant lacks review; a
 		// reviewer in another tenant is tenant-blocked (404) before the sign-off runs.

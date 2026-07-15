@@ -10,6 +10,8 @@ vi.mock('./lib/api', () => ({
     listRules: vi.fn(),
     getRule: vi.fn(),
     listEngagements: vi.fn(),
+    listProjects: vi.fn(),
+    getProject: vi.fn(),
     getAuditLogs: vi.fn(),
     getTeam: vi.fn(),
   },
@@ -29,6 +31,7 @@ describe('App Routing - Rules', () => {
   beforeEach(() => {
     vi.mocked(api.listRules).mockResolvedValue([])
     vi.mocked(api.listEngagements).mockResolvedValue([])
+    vi.mocked(api.listProjects).mockResolvedValue([])
     vi.mocked(api.getRule).mockResolvedValue({
       key: 'go:sql',
       name: 'SQL Injection',
@@ -95,6 +98,16 @@ describe('App Routing - Rules', () => {
 
     const rulesLink = screen.getByRole('link', { name: /Rules/i })
     expect(rulesLink.className).toMatch(/bg-brand\/10|text-branddim/)
+  })
+
+  it('keeps Code Quality active on project shells', () => {
+    render(
+      <MemoryRouter initialEntries={['/code-quality/projects/synapse']}>
+        <Sidebar />
+      </MemoryRouter>
+    )
+    const link = screen.getByRole('link', { name: /Code Quality/i })
+    expect(link.className).toMatch(/bg-brand\/10|text-branddim/)
   })
 
   it('opens mobile navigation and navigates to Rules', async () => {

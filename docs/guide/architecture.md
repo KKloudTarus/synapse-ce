@@ -23,6 +23,14 @@ interfaces in `internal/usecase/ports`. The domain stays pure, with no framework
 tool types in it. `cmd/*` is the composition root: it wires concrete implementations into the
 interfaces in `main`, and holds no business logic.
 
+## Projects and engagements
+
+A **Project** is a long-lived code-quality identity: it binds source and configuration and will
+own its analysis history. An **Engagement** is a time-bounded security assessment whose scope,
+authorization window, and lifecycle gate all execution. They are independent aggregates; neither
+owns the other. Both may invoke the same analysis pipeline, while future project analyses reference
+their Project instead of duplicating or forking that engine.
+
 ## Binaries
 
 | Binary | Role |
