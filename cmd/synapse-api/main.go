@@ -330,7 +330,8 @@ func main() {
 
 	// Use cases.
 	engService := enguc.NewService(repo, clock, ids, auditLog)
-	projectService := projectuc.NewService(projectRepo, clock, ids, auditLog)
+	projectService := projectuc.NewService(projectRepo, repo, clock, ids, auditLog, !cfg.IsProduction())
+	projectService.SetArchiveStore(file.NewProjectArchiveStore(cfg.ProjectUploadDir, cfg.MaxWorkspaceBytes))
 	// Evidence artifact blob store: MinIO/S3 when configured, else in-memory (dev).
 	var blobStore ports.BlobStore
 	if cfg.BlobEndpoint != "" {
@@ -837,16 +838,19 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
+	projectService.SetScanner(scaService)
 	router.SetProjects(projectService)
 	router.SetExploitation(exploitationService) // evidence-gated finding verify endpoint
 	// Read-only code-quality dashboard. Server-side analysis is PURE-GO and memory-safe only (pattern
 	// rules + duplication + Go-parser inventory); tree-sitter complexity is intentionally NOT wired here
 	// so the server never runs C parsers over untrusted source (that stays a local-CLI capability).
-	router.SetCodeQuality(codequality.New(
+	codeQualityService := codequality.New(
 		codeanalysis.New(),
 		codequality.WithDuplication(duplication.New(0)),
 		codequality.WithInventory(codeinventory.New()),
-	))
+	)
+	router.SetCodeQuality(codeQualityService)
+	scaService.SetCodeQuality(codeQualityService)
 	if ruleCat, rerr := rulecatalog.Default(); rerr != nil {
 		log.Error("rule catalog init failed", "err", rerr)
 		os.Exit(1)

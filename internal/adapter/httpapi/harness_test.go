@@ -114,7 +114,7 @@ func TestHostileHarness(t *testing.T) {
 		t.Fatalf("seed engagement: %v", err)
 	}
 	projectRepo := memory.NewProjectRepository()
-	projectSvc := projectuc.NewService(projectRepo, fixedClock{}, engIDs{}, &fakeAudit{})
+	projectSvc := projectuc.NewService(projectRepo, engRepo, fixedClock{}, engIDs{}, &fakeAudit{}, true)
 	if _, err := projectSvc.Create(context.Background(), projectuc.CreateInput{
 		TenantID: "tenantA", CreatedBy: "p", Name: "Project A", Key: "project-a",
 		SourceBinding: projectdom.SourceBinding{Kind: projectdom.SourceLocal, Value: "/repo"},
@@ -172,9 +172,12 @@ func TestHostileHarness(t *testing.T) {
 		{"readonly may get own-tenant engagement", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA", http.StatusOK},
 		{"readonly may list projects", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects", http.StatusOK},
 		{"readonly may get own-tenant project", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a", http.StatusOK},
+		{"readonly may read project analysis status", "readonly", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/analysis-status", http.StatusNotFound},
 		// RBAC deny: readonly holds only view.
 		{"readonly may not create (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/engagements", http.StatusForbidden},
 		{"readonly may not create project (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/projects", http.StatusForbidden},
+		{"readonly may not start project analysis", "readonly", "tenantA", true, http.MethodPost, "/api/v1/projects/project-a/analyses", http.StatusForbidden},
+		{"machine may not start project analysis", "agent", "tenantA", true, http.MethodPost, "/api/v1/projects/project-a/analyses", http.StatusForbidden},
 		{"machine may not list projects", "agent", "tenantA", true, http.MethodGet, "/api/v1/projects", http.StatusForbidden},
 		{"readonly may not author finding (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/findings", http.StatusForbidden},
 		{"readonly may not triage (triage)", "readonly", "tenantA", true, http.MethodPatch, "/api/v1/engagements/engA/findings/f1", http.StatusForbidden},
@@ -194,6 +197,7 @@ func TestHostileHarness(t *testing.T) {
 		// Same-tenant read still works (isolation does not over-block).
 		{"same-tenant engagement read → 200", "consultant", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA", http.StatusOK},
 		{"cross-tenant project read → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/projects/project-a", http.StatusNotFound},
+		{"cross-tenant project analysis → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/projects/project-a/analysis", http.StatusNotFound},
 		{"same-tenant project read → 200", "consultant", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a", http.StatusOK},
 		// Sign-off routes (PermReview) – the crown-jewel separation-of-duties gates. A machine role
 		// can never verify a finding nor decide an agent approval; a consultant lacks review; a

@@ -60,6 +60,10 @@ synapse-cli scan alpine:3.19 --image --offline
 The exit code is 0 when no finding meets the `--fail-on` threshold, and non-zero otherwise.
 Wire it straight into a pipeline step.
 
+### Project analysis parity
+
+`synapse-cli scan <local-path>` runs the same governed security scan path used by a Code Quality Project analysis and creates an ephemeral, scope-checked engagement around the target. The CLI does not attach the Project's combined code-quality report, create a Project, retain async job status, or persist the result; use `synapse-cli gate` for local code-quality gating. Git cloning and archive uploads are managed by the server-side Project flow, so clone or extract the source first for a serverless run.
+
 ## False-positive gate
 
 A scan of a real repository surfaces findings in test files and deliberately-insecure fixtures. Synapse

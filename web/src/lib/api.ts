@@ -6,6 +6,7 @@ import type {
   AgentSession,
   AupStatus,
   CodeQualityView,
+  CodeQualityReport,
   CodeRating,
   Component,
   PendingApproval,
@@ -507,6 +508,38 @@ function mapScanDebugEvent(r: any) {
   }
 }
 
+function mapCodeQualityReport(rep: any): CodeQualityReport {
+  return {
+    inventory: (rep?.inventory?.languages ?? []).map((l: any) => ({
+      language: l.language,
+      files: l.files ?? 0,
+      codeLines: l.code_lines ?? 0,
+      commentLines: l.comment_lines ?? 0,
+      blankLines: l.blank_lines ?? 0,
+      functions: l.functions ?? 0,
+      functionsKnown: !!l.functions_known,
+    })),
+    findings: (rep?.findings ?? []).map(mapFinding),
+    duplication: {
+      blocks: (rep?.duplication?.blocks ?? []).map((b: any) => ({
+        tokens: b.tokens ?? 0,
+        occurrences: (b.occurrences ?? []).map((o: any) => ({ file: o.file, startLine: o.start_line ?? 0, endLine: o.end_line ?? 0 })),
+      })),
+      duplicatedLines: rep?.duplication?.duplicated_lines ?? 0,
+      totalLines: rep?.duplication?.total_lines ?? 0,
+      files: rep?.duplication?.files ?? 0,
+    },
+    rating: {
+      security: (rep?.rating?.security ?? 'A') as CodeRating['security'],
+      reliability: (rep?.rating?.reliability ?? 'A') as CodeRating['reliability'],
+      maintainability: (rep?.rating?.maintainability ?? 'A') as CodeRating['maintainability'],
+      techDebtMinutes: rep?.rating?.tech_debt_minutes ?? 0,
+      debtRatioPct: rep?.rating?.debt_ratio_pct ?? 0,
+      linesOfCode: rep?.rating?.lines_of_code ?? 0,
+    },
+  }
+}
+
 function mapScanResult(r: any): ScanResult {
   return {
     target: r.target ?? '',
@@ -561,6 +594,7 @@ function mapScanResult(r: any): ScanResult {
       pinnedInputs: r.manifest?.pinned_inputs ?? [],
       unpinnedInputs: r.manifest?.unpinned_inputs ?? [],
     },
+    codeQuality: r.code_quality ? mapCodeQualityReport(r.code_quality) : undefined,
     debugEvents: (r.debug_events ?? []).map(mapScanDebugEvent),
   }
 }
@@ -726,8 +760,48 @@ export const api = {
       }),
     ),
 
+  createProjectFromArchive: async (name: string, key: string, archive: File): Promise<Project> => {
+    const form = new FormData()
+    form.append('name', name)
+    form.append('key', key)
+    form.append('archive', archive)
+    const res = await fetch('/api/v1/projects', {
+      method: 'POST',
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+      body: form,
+    })
+    if (res.status === 401 && onUnauthorized) onUnauthorized()
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`
+      try { message = (await res.json())?.error ?? message } catch { /* non-JSON */ }
+      throw new ApiError(res.status, message)
+    }
+    return mapProject(await res.json())
+  },
+
   getProject: async (key: string): Promise<Project> =>
     mapProject(await req(`/projects/${encodeURIComponent(key)}`)),
+
+  startProjectAnalysis: async (key: string): Promise<ScanJob> =>
+    mapScanJob(await req(`/projects/${encodeURIComponent(key)}/analyses`, { method: 'POST' })),
+
+  projectAnalysisStatus: async (key: string): Promise<ScanJob | null> => {
+    try {
+      return mapScanJob(await req(`/projects/${encodeURIComponent(key)}/analysis-status`))
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return null
+      throw e
+    }
+  },
+
+  latestProjectAnalysis: async (key: string): Promise<ScanResult | null> => {
+    try {
+      return mapScanResult(await req(`/projects/${encodeURIComponent(key)}/analysis`))
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return null
+      throw e
+    }
+  },
 
   // the engagement's code-quality report (inventory + findings + duplication + A-E ratings). Computed
   // over an in-scope local source directory; an engagement without one returns available=false. 404 (the
@@ -741,39 +815,7 @@ export const api = {
       throw e
     }
     if (!r?.available || !r.report) return { available: false, reason: r?.reason }
-    const rep = r.report
-    return {
-      available: true,
-      report: {
-        inventory: (rep.inventory?.languages ?? []).map((l: any) => ({
-          language: l.language,
-          files: l.files ?? 0,
-          codeLines: l.code_lines ?? 0,
-          commentLines: l.comment_lines ?? 0,
-          blankLines: l.blank_lines ?? 0,
-          functions: l.functions ?? 0,
-          functionsKnown: !!l.functions_known,
-        })),
-        findings: (rep.findings ?? []).map(mapFinding),
-        duplication: {
-          blocks: (rep.duplication?.blocks ?? []).map((b: any) => ({
-            tokens: b.tokens ?? 0,
-            occurrences: (b.occurrences ?? []).map((o: any) => ({ file: o.file, startLine: o.start_line ?? 0, endLine: o.end_line ?? 0 })),
-          })),
-          duplicatedLines: rep.duplication?.duplicated_lines ?? 0,
-          totalLines: rep.duplication?.total_lines ?? 0,
-          files: rep.duplication?.files ?? 0,
-        },
-        rating: {
-          security: (rep.rating?.security ?? 'A') as CodeRating['security'],
-          reliability: (rep.rating?.reliability ?? 'A') as CodeRating['reliability'],
-          maintainability: (rep.rating?.maintainability ?? 'A') as CodeRating['maintainability'],
-          techDebtMinutes: rep.rating?.tech_debt_minutes ?? 0,
-          debtRatioPct: rep.rating?.debt_ratio_pct ?? 0,
-          linesOfCode: rep.rating?.lines_of_code ?? 0,
-        },
-      },
-    }
+    return { available: true, report: mapCodeQualityReport(r.report) }
   },
 
   // the engagement's architecture threat model (DFD). 404 (not ingested) → null.

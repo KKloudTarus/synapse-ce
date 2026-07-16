@@ -4,6 +4,7 @@ package ports
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
@@ -42,6 +43,12 @@ type ProjectRepository interface {
 	List(ctx context.Context, tenantID shared.ID) ([]*project.Project, error)
 	GetByKey(ctx context.Context, tenantID shared.ID, key string) (*project.Project, error)
 	DeleteByKey(ctx context.Context, tenantID shared.ID, key string) error
+}
+
+// ProjectArchiveStore retains uploaded source archives so a Project can be re-analyzed.
+type ProjectArchiveStore interface {
+	Save(ctx context.Context, projectID shared.ID, filename string, src io.Reader) (string, error)
+	Delete(ctx context.Context, projectID shared.ID) error
 }
 
 // EngagementRepository persists engagements. Returned aggregates are read-only –

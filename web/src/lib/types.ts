@@ -294,6 +294,7 @@ export interface ScanResult {
   licenseCoverage: LicenseCoverage
   manifest: ScanManifest
   findingQuality: FindingQuality
+  codeQuality?: CodeQualityReport
   debugEvents: ScanDebugEvent[]
 }
 

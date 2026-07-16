@@ -17,6 +17,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -126,6 +127,13 @@ func (c *countingLic) Scan(context.Context, *sbom.SBOM) ([]ports.LicenseFinding,
 	return []ports.LicenseFinding{{License: "MIT", Category: sbom.LicensePermissive, Verdict: ports.LicenseAllow, Components: []string{"pkg"}}}, nil
 }
 
+type countingCodeQuality struct{ calls int }
+
+func (c *countingCodeQuality) BuildReport(context.Context, string) (codequality.Report, error) {
+	c.calls++
+	return codequality.Report{}, nil
+}
+
 func engagementWithScope(t *testing.T, inScope ...string) *engdom.Engagement {
 	t.Helper()
 	e, err := engdom.New("e1", "", "test", "", time.Unix(0, 0).UTC())
@@ -176,6 +184,29 @@ func TestScanInScopeRunsAndAudits(t *testing.T) {
 	}
 	assertDebugEvent(t, res.DebugEvents, stageVulns, "fake", ports.ScanDebugSucceeded)
 	assertDebugEvent(t, res.DebugEvents, stageLicense, "license-policy", ports.ScanDebugSucceeded)
+}
+
+func TestCodeQualityRequiresExplicitScanOption(t *testing.T) {
+	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
+	quality := &countingCodeQuality{}
+	svc := newSvc(repo, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{})
+	svc.SetCodeQuality(quality)
+
+	ordinary, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
+	if err != nil {
+		t.Fatalf("ordinary scan: %v", err)
+	}
+	if quality.calls != 0 || ordinary.CodeQuality != nil {
+		t.Fatalf("ordinary scan attached code quality: calls=%d report=%v", quality.calls, ordinary.CodeQuality != nil)
+	}
+
+	project, err := svc.ScanWithOptions(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, CodeQuality: true})
+	if err != nil {
+		t.Fatalf("project scan: %v", err)
+	}
+	if quality.calls != 1 || project.CodeQuality == nil {
+		t.Fatalf("opted-in scan code quality: calls=%d report=%v", quality.calls, project.CodeQuality != nil)
+	}
 }
 
 func TestScanStampsSBOMCreationTime(t *testing.T) {

@@ -16,7 +16,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-const engagementCols = `id, tenant_id, name, client, status, authorized_from, authorized_to, created_at, updated_at, timezone, roe, live_recon, created_by, updated_by`
+const engagementCols = `id, tenant_id, project_id, name, client, status, authorized_from, authorized_to, created_at, updated_at, timezone, roe, live_recon, created_by, updated_by`
 
 // EngagementRepository persists engagements and their scope to PostgreSQL.
 type EngagementRepository struct{ pool *pgxpool.Pool }
@@ -41,8 +41,8 @@ func (r *EngagementRepository) Create(ctx context.Context, e *engagement.Engagem
 		return fmt.Errorf("marshal roe: %w", err)
 	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO engagements (`+engagementCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-		e.ID.String(), e.TenantID.String(), e.Name, e.Client, string(e.Status),
+		`INSERT INTO engagements (`+engagementCols+`) VALUES ($1,$2,NULLIF($3,''),$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+		e.ID.String(), e.TenantID.String(), e.ProjectID.String(), e.Name, e.Client, string(e.Status),
 		e.AuthorizedFrom, e.AuthorizedTo, e.Audit.CreatedAt, e.Audit.UpdatedAt, e.Timezone, roeJSON, e.LiveReconEnabled,
 		e.Audit.CreatedBy, e.Audit.UpdatedBy); err != nil {
 		return fmt.Errorf("insert engagement: %w", err)
@@ -160,7 +160,7 @@ func (r *EngagementRepository) GetByID(ctx context.Context, id shared.ID) (*enga
 // not revealed).
 func (r *EngagementRepository) GetByIDInTenant(ctx context.Context, tenantID, id shared.ID) (*engagement.Engagement, error) {
 	e, err := scanEngagement(r.pool.QueryRow(ctx,
-		`SELECT `+engagementCols+` FROM engagements WHERE id=$1 AND (tenant_id=$2 OR $2='')`,
+		`SELECT `+engagementCols+` FROM engagements WHERE id=$1 AND project_id IS NULL AND (tenant_id=$2 OR $2='')`,
 		id.String(), tenantID.String()))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, shared.ErrNotFound
@@ -176,6 +176,24 @@ func (r *EngagementRepository) GetByIDInTenant(ctx context.Context, tenantID, id
 	return e, nil
 }
 
+func (r *EngagementRepository) GetByProjectID(ctx context.Context, tenantID, projectID shared.ID) (*engagement.Engagement, error) {
+	e, err := scanEngagement(r.pool.QueryRow(ctx,
+		`SELECT `+engagementCols+` FROM engagements WHERE project_id=$1 AND (tenant_id=$2 OR $2='')`,
+		projectID.String(), tenantID.String()))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, shared.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("select project analysis context: %w", err)
+	}
+	scope, err := r.loadScope(ctx, e.ID)
+	if err != nil {
+		return nil, err
+	}
+	e.Scope = scope
+	return e, nil
+}
+
 // List returns the tenant's engagements, each with its scope loaded (consistent
 // with the in-memory repository; the UI and the scope gate both rely on scope).
 func (r *EngagementRepository) List(ctx context.Context, tenantID shared.ID) ([]*engagement.Engagement, error) {
@@ -184,9 +202,9 @@ func (r *EngagementRepository) List(ctx context.Context, tenantID shared.ID) ([]
 		err  error
 	)
 	if tenantID.IsZero() {
-		rows, err = r.pool.Query(ctx, `SELECT `+engagementCols+` FROM engagements ORDER BY created_at DESC`)
+		rows, err = r.pool.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE project_id IS NULL ORDER BY created_at DESC`)
 	} else {
-		rows, err = r.pool.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 ORDER BY created_at DESC`, tenantID.String())
+		rows, err = r.pool.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 AND project_id IS NULL ORDER BY created_at DESC`, tenantID.String())
 	}
 	if err != nil {
 		return nil, fmt.Errorf("list engagements: %w", err)
@@ -255,10 +273,11 @@ func scanEngagement(row rowScanner) (*engagement.Engagement, error) {
 	var (
 		e              engagement.Engagement
 		idStr, ten, st string
+		projectID      pgtype.Text
 		af, at         pgtype.Timestamptz
 		roeJSON        []byte
 	)
-	if err := row.Scan(&idStr, &ten, &e.Name, &e.Client, &st, &af, &at, &e.Audit.CreatedAt, &e.Audit.UpdatedAt, &e.Timezone, &roeJSON, &e.LiveReconEnabled, &e.Audit.CreatedBy, &e.Audit.UpdatedBy); err != nil {
+	if err := row.Scan(&idStr, &ten, &projectID, &e.Name, &e.Client, &st, &af, &at, &e.Audit.CreatedAt, &e.Audit.UpdatedAt, &e.Timezone, &roeJSON, &e.LiveReconEnabled, &e.Audit.CreatedBy, &e.Audit.UpdatedBy); err != nil {
 		return nil, err
 	}
 	if len(roeJSON) > 0 {
@@ -268,6 +287,9 @@ func scanEngagement(row rowScanner) (*engagement.Engagement, error) {
 	}
 	e.ID = shared.ID(idStr)
 	e.TenantID = shared.ID(ten)
+	if projectID.Valid {
+		e.ProjectID = shared.ID(projectID.String)
+	}
 	e.Status = engagement.Status(st)
 	if af.Valid {
 		t := af.Time

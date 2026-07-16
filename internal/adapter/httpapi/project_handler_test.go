@@ -10,11 +10,22 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 )
 
+func TestProjectAnalysisJobHidesInternalEngagement(t *testing.T) {
+	data, err := json.Marshal(projectAnalysisJob(ports.ScanJob{ID: "job-1", EngagementID: "hidden-engagement"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "engagement") {
+		t.Fatalf("Project analysis response leaked hidden engagement: %s", data)
+	}
+}
+
 func TestProjectHandlers(t *testing.T) {
-	svc := projectuc.NewService(memory.NewProjectRepository(), fixedClock{t: time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)}, engIDs{}, &fakeAudit{})
+	svc := projectuc.NewService(memory.NewProjectRepository(), memory.NewEngagementRepository(), fixedClock{t: time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)}, engIDs{}, &fakeAudit{}, true)
 	rt := &Router{log: discardLog(), projects: svc}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Synapse","key":"synapse","source_binding":{"Kind":"local","Value":"/repo"}}`))

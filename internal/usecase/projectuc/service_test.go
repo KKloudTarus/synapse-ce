@@ -30,7 +30,7 @@ func (a *captureAudit) Record(_ context.Context, e ports.AuditEntry) error {
 func TestServiceCRUDAndAudit(t *testing.T) {
 	ctx := context.Background()
 	audit := &captureAudit{}
-	svc := NewService(memory.NewProjectRepository(), fixedClock{time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)}, fixedIDs{}, audit)
+	svc := NewService(memory.NewProjectRepository(), memory.NewEngagementRepository(), fixedClock{time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)}, fixedIDs{}, audit, true)
 	p, err := svc.Create(ctx, CreateInput{TenantID: "tenant-a", CreatedBy: "alice", Name: "Project", Key: "project", SourceBinding: project.SourceBinding{Kind: project.SourceLocal, Value: "/repo"}})
 	if err != nil {
 		t.Fatal(err)
@@ -54,8 +54,19 @@ func TestServiceCRUDAndAudit(t *testing.T) {
 }
 
 func TestServiceRequiresActor(t *testing.T) {
-	svc := NewService(memory.NewProjectRepository(), fixedClock{}, fixedIDs{}, &captureAudit{})
+	svc := NewService(memory.NewProjectRepository(), memory.NewEngagementRepository(), fixedClock{}, fixedIDs{}, &captureAudit{}, true)
 	if _, err := svc.Create(context.Background(), CreateInput{Name: "P", Key: "p", SourceBinding: project.SourceBinding{Kind: project.SourceLocal, Value: "/repo"}}); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("got %v, want validation", err)
+	}
+}
+
+func TestServiceRejectsLocalSourceOutsideDevelopment(t *testing.T) {
+	svc := NewService(memory.NewProjectRepository(), memory.NewEngagementRepository(), fixedClock{}, fixedIDs{}, &captureAudit{}, false)
+	_, err := svc.Create(context.Background(), CreateInput{
+		TenantID: "tenant-a", CreatedBy: "alice", Name: "Project", Key: "project",
+		SourceBinding: project.SourceBinding{Kind: project.SourceLocal, Value: "/repo"},
+	})
+	if !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("got %v, want validation", err)
 	}
 }

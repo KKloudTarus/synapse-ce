@@ -23,7 +23,8 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/synapse-api ./cmd/synapse-api
 # synapse-cli is bundled too so the image doubles as a cross-platform scanner
 # (`docker run … synapse-cli scan /scan`) – the SCA path runs identically on any host
 # that runs Linux containers (Windows/macOS via Docker Desktop, Linux natively).
-RUN CGO_ENABLED=0 go build -trimpath -o /out/synapse-cli ./cmd/synapse-cli
+RUN CGO_ENABLED=0 go build -trimpath -o /out/synapse-cli ./cmd/synapse-cli \
+    && mkdir -p /out/project-uploads
 
 # Pinned SCA tool binaries, shelled out at runtime.
 FROM anchore/syft:v1.45.1 AS syft
@@ -55,6 +56,7 @@ ENV SYNAPSE_SYFT_BIN=/usr/local/bin/syft \
     SYNAPSE_GRYPE_BIN=/usr/local/bin/grype \
     SYNAPSE_MVN_BIN=/usr/bin/mvn \
     SYNAPSE_GRADLE_BIN=/usr/local/bin/gradle \
+    SYNAPSE_PROJECT_UPLOAD_DIR=/home/synapse/project-uploads \
     JAVA_HOME=/opt/java-home
 EXPOSE 8080
 USER synapse:synapse
@@ -71,8 +73,11 @@ COPY --from=build /out/synapse-api /synapse-api
 COPY --from=build /out/synapse-cli /synapse-cli
 COPY --from=syft /syft /usr/local/bin/syft
 COPY --from=grype /grype /usr/local/bin/grype
+COPY --from=build --chown=nonroot:nonroot /out/project-uploads /project-uploads
 ENV SYNAPSE_SYFT_BIN=/usr/local/bin/syft
 ENV SYNAPSE_GRYPE_BIN=/usr/local/bin/grype
+ENV SYNAPSE_PROJECT_UPLOAD_DIR=/project-uploads
+VOLUME ["/project-uploads"]
 EXPOSE 8080
 USER nonroot:nonroot
 # Default to the API server; override for a one-off scan, e.g.:

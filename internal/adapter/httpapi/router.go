@@ -193,6 +193,9 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/projects", rt.authz(userdom.PermOperate, rt.createProject))
 		mux.HandleFunc("GET /api/v1/projects", rt.authz(userdom.PermView, rt.listProjects))
 		mux.HandleFunc("GET /api/v1/projects/{key}", rt.authz(userdom.PermView, rt.getProject))
+		mux.HandleFunc("POST /api/v1/projects/{key}/analyses", rt.authz(userdom.PermOperate, rt.startProjectAnalysis))
+		mux.HandleFunc("GET /api/v1/projects/{key}/analysis-status", rt.authz(userdom.PermView, rt.projectAnalysisStatus))
+		mux.HandleFunc("GET /api/v1/projects/{key}/analysis", rt.authz(userdom.PermView, rt.latestProjectAnalysis))
 	}
 	mux.HandleFunc("POST /api/v1/engagements", rt.authz(userdom.PermOperate, rt.createEngagement))
 	mux.HandleFunc("GET /api/v1/engagements", rt.authz(userdom.PermView, rt.listEngagements))
