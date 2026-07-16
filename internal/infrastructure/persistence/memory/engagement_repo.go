@@ -52,10 +52,21 @@ func (r *EngagementRepository) GetByIDInTenant(_ context.Context, tenantID, id s
 	if !ok {
 		return nil, shared.ErrNotFound
 	}
-	if !tenantID.IsZero() && e.TenantID != tenantID {
-		return nil, shared.ErrNotFound // cross-tenant access – do not reveal existence
+	if !e.ProjectID.IsZero() || (!tenantID.IsZero() && e.TenantID != tenantID) {
+		return nil, shared.ErrNotFound // cross-tenant/internal access – do not reveal existence
 	}
 	return e, nil
+}
+
+func (r *EngagementRepository) GetByProjectID(_ context.Context, tenantID, projectID shared.ID) (*engagement.Engagement, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, e := range r.data {
+		if e.ProjectID == projectID && (tenantID.IsZero() || e.TenantID == tenantID) {
+			return e, nil
+		}
+	}
+	return nil, shared.ErrNotFound
 }
 
 func (r *EngagementRepository) Update(_ context.Context, e *engagement.Engagement) error {
@@ -83,7 +94,7 @@ func (r *EngagementRepository) List(_ context.Context, tenantID shared.ID) ([]*e
 	defer r.mu.RUnlock()
 	out := make([]*engagement.Engagement, 0, len(r.data))
 	for _, e := range r.data {
-		if tenantID.IsZero() || e.TenantID == tenantID {
+		if e.ProjectID.IsZero() && (tenantID.IsZero() || e.TenantID == tenantID) {
 			out = append(out, e)
 		}
 	}

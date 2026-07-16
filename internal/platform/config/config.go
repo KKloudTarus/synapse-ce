@@ -72,6 +72,8 @@ type Config struct {
 	// MaxWorkspaceBytes caps the total size of a prepared SCA workspace: the
 	// acquirer rejects a target whose files exceed it. <=0 keeps the 2 GiB default.
 	MaxWorkspaceBytes int64
+	// ProjectUploadDir retains uploaded Project source archives for repeat analysis.
+	ProjectUploadDir string
 	// Evidence artifact blob store: when BlobEndpoint is set, artifacts go to
 	// MinIO/S3; empty = in-memory (dev). Bucket defaults to synapse-evidence.
 	BlobEndpoint  string
@@ -344,6 +346,7 @@ func Load() Config {
 		IgnoreUnfixed:      getbool("SYNAPSE_IGNORE_UNFIXED", false),
 		Offline:            getbool("SYNAPSE_OFFLINE", false),
 		MaxWorkspaceBytes:  getint64("SYNAPSE_MAX_WORKSPACE_BYTES", 2<<30),
+		ProjectUploadDir:   getenv("SYNAPSE_PROJECT_UPLOAD_DIR", "data/project-uploads"),
 		BlobEndpoint:       getenv("SYNAPSE_BLOB_ENDPOINT", ""),
 		BlobAccessKey:      getenv("SYNAPSE_BLOB_ACCESS_KEY", ""),
 		BlobSecretKey:      getenv("SYNAPSE_BLOB_SECRET_KEY", ""),

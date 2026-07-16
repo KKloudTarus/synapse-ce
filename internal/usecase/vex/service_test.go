@@ -22,6 +22,9 @@ func (fakeEngRepo) GetByID(_ context.Context, id shared.ID) (*engagement.Engagem
 func (fakeEngRepo) GetByIDInTenant(_ context.Context, _ shared.ID, id shared.ID) (*engagement.Engagement, error) {
 	return &engagement.Engagement{ID: id, Status: engagement.StatusActive}, nil
 }
+func (fakeEngRepo) GetByProjectID(context.Context, shared.ID, shared.ID) (*engagement.Engagement, error) {
+	return nil, shared.ErrNotFound
+}
 
 type fakeRepo struct {
 	ports.FindingRepository // embedded: unused methods panic if called
@@ -123,6 +126,9 @@ func (missingEngRepo) GetByID(context.Context, shared.ID) (*engagement.Engagemen
 	return nil, shared.ErrNotFound
 }
 func (missingEngRepo) GetByIDInTenant(context.Context, shared.ID, shared.ID) (*engagement.Engagement, error) {
+	return nil, shared.ErrNotFound
+}
+func (missingEngRepo) GetByProjectID(context.Context, shared.ID, shared.ID) (*engagement.Engagement, error) {
 	return nil, shared.ErrNotFound
 }
 

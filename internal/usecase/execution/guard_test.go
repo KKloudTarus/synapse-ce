@@ -27,6 +27,9 @@ func (f *fakeEngRepo) GetByID(context.Context, shared.ID) (*engagement.Engagemen
 func (f *fakeEngRepo) GetByIDInTenant(context.Context, shared.ID, shared.ID) (*engagement.Engagement, error) {
 	return f.eng, f.err
 }
+func (*fakeEngRepo) GetByProjectID(context.Context, shared.ID, shared.ID) (*engagement.Engagement, error) {
+	return nil, shared.ErrNotFound
+}
 func (f *fakeEngRepo) List(context.Context, shared.ID) ([]*engagement.Engagement, error) {
 	return nil, nil
 }

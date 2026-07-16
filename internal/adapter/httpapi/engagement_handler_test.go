@@ -54,6 +54,14 @@ func (r *engRepoFake) GetByIDInTenant(_ context.Context, tenantID, id shared.ID)
 	}
 	return e, nil
 }
+func (r *engRepoFake) GetByProjectID(_ context.Context, tenantID, projectID shared.ID) (*engdom.Engagement, error) {
+	for _, e := range r.data {
+		if e.ProjectID == projectID && (tenantID.IsZero() || e.TenantID == tenantID) {
+			return e, nil
+		}
+	}
+	return nil, shared.ErrNotFound
+}
 func (r *engRepoFake) List(context.Context, shared.ID) ([]*engdom.Engagement, error) { return nil, nil }
 
 type engIDs struct{}

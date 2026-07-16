@@ -1,18 +1,37 @@
-import { ArrowRight, FolderGit2, Gauge, GitBranch, Plus, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { ArrowRight, FolderGit2, Gauge, GitBranch, Plus, Upload, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
-import type { Project, ProjectSourceKind } from '../lib/types'
+import type { Project, ProjectSourceKind, ScanJob } from '../lib/types'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../components/ui'
+
+const allowLocalSource = import.meta.env.DEV
 
 export function CodeQualityProjects() {
   const [projects, setProjects] = useState<Project[] | null>(null)
+  const [statuses, setStatuses] = useState<Record<string, ScanJob | null | Error>>({})
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
 
   function load() {
     setError(null)
-    api.listProjects().then(setProjects).catch((e) => setError(e instanceof Error ? e.message : 'Failed to load projects'))
+    setProjects(null)
+    setStatuses({})
+    api.listProjects()
+      .then(async (next) => {
+        setProjects(next)
+        const entries = await Promise.all(next.map(async (project) => {
+          try {
+            return [project.key, await api.projectAnalysisStatus(project.key)] as const
+          } catch (error) {
+            return [project.key, error instanceof Error ? error : new Error('Status unavailable')] as const
+          }
+        }))
+        setStatuses(Object.fromEntries(entries))
+        const failed = entries.map(([, status]) => status).find((status): status is Error => status instanceof Error)
+        if (failed) setError(failed.message)
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load projects'))
   }
   useEffect(load, [])
 
@@ -36,18 +55,19 @@ export function CodeQualityProjects() {
       {error && <div className="space-y-3"><ErrorState message={error} /><Button variant="secondary" onClick={load}>Retry</Button></div>}
       {!projects && !error && <Spinner label="Loading projects…" />}
       {projects && projects.length === 0 && !creating && (
-        <EmptyState icon={FolderGit2} title="No code quality projects yet" hint="Create a project to define its source. Project analyses arrive in the next Code Quality phase." action={<Button variant="brand" onClick={() => setCreating(true)}><Plus className="size-4" aria-hidden="true" /> New project</Button>} />
+        <EmptyState icon={FolderGit2} title="No code quality projects yet" hint={`Create a project from Git${allowLocalSource ? ', a server-local path,' : ''} or an uploaded archive. Its first analysis starts automatically.`} action={<Button variant="brand" onClick={() => setCreating(true)}><Plus className="size-4" aria-hidden="true" /> New project</Button>} />
       )}
       {projects && projects.length > 0 && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {projects.map((project) => <ProjectCard key={project.id} project={project} />)}
+          {projects.map((project) => <ProjectCard key={project.id} project={project} job={statuses[project.key]} />)}
         </div>
       )}
     </div>
   )
 }
 
-function ProjectCard({ project }: { project: Project }) {
+function ProjectCard({ project, job }: { project: Project; job?: ScanJob | null | Error }) {
+  const status = job instanceof Error ? 'Unknown' : job?.status === 'running' ? 'Analyzing' : job?.status === 'succeeded' ? 'Analyzed' : job?.status === 'failed' ? 'Failed' : 'Not analyzed'
   return (
     <Link to={`/code-quality/projects/${encodeURIComponent(project.key)}`} className="lift card-sheen elev group flex min-h-64 flex-col rounded-xl border border-border bg-card p-5 transition-colors hover:border-brand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50">
       <div className="flex items-start justify-between gap-3">
@@ -56,7 +76,7 @@ function ProjectCard({ project }: { project: Project }) {
           <h2 className="truncate text-lg font-semibold text-foreground">{project.name}</h2>
           <p className="mt-1 truncate font-mono text-xs text-subtlefg">{project.key}</p>
         </div>
-        <Pill className="shrink-0 bg-elevated ring-1 ring-inset ring-border"><Gauge className="size-3" aria-hidden="true" /> Not analyzed</Pill>
+        <Pill className="shrink-0 bg-elevated ring-1 ring-inset ring-border"><Gauge className="size-3" aria-hidden="true" /> {status}</Pill>
       </div>
 
       <dl className="mt-6 flex-1 space-y-4 text-sm">
@@ -93,17 +113,37 @@ function CreateProjectForm() {
   const [kind, setKind] = useState<ProjectSourceKind>('git')
   const [value, setValue] = useState('')
   const [ref, setRef] = useState('')
+  const [archive, setArchive] = useState<File | null>(null)
+  const [dragging, setDragging] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const archiveInput = useRef<HTMLInputElement>(null)
+
+  function chooseArchive(file: File | undefined) {
+    if (!file) return
+    const supported = /\.(zip|tgz|tar\.gz)$/i.test(file.name)
+    if (!supported) { setError('Choose a .zip, .tar.gz, or .tgz archive.'); return }
+    if (file.size > 512 * 1024 * 1024) { setError('Archive must be 512 MiB or smaller.'); return }
+    setArchive(file); setError(null)
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (!name.trim() || !key.trim() || !value.trim()) { setError('Name, key, and source are required.'); return }
+    if (!name.trim() || !key.trim() || (kind === 'archive' ? !archive : !value.trim())) { setError('Name, key, and source are required.'); return }
     setSubmitting(true); setError(null)
     try {
-      const project = await api.createProject({ name: name.trim(), key: key.trim(), sourceBinding: { kind, value: value.trim(), ref: kind === 'git' ? ref.trim() : '' } })
-      navigate(`/code-quality/projects/${encodeURIComponent(project.key)}`)
+      const project = kind === 'archive'
+        ? await api.createProjectFromArchive(name.trim(), key.trim(), archive!)
+        : await api.createProject({ name: name.trim(), key: key.trim(), sourceBinding: { kind, value: value.trim(), ref: kind === 'git' ? ref.trim() : '' } })
+      try {
+        await api.startProjectAnalysis(project.key)
+        navigate(`/code-quality/projects/${encodeURIComponent(project.key)}`)
+      } catch (e) {
+        navigate(`/code-quality/projects/${encodeURIComponent(project.key)}`, {
+          state: { analysisStartError: e instanceof Error ? e.message : 'Failed to start analysis' },
+        })
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create project')
     } finally { setSubmitting(false) }
@@ -117,8 +157,18 @@ function CreateProjectForm() {
           <Field label="Key" hint="Lowercase letters, numbers, and hyphens" htmlFor="project-key"><Input id="project-key" className="font-mono" value={key} onChange={(e) => { setKeyEdited(true); setKey(e.target.value) }} placeholder="synapse-ce" /></Field>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-[10rem_1fr]">
-          <Field label="Source kind" htmlFor="project-source-kind"><Select id="project-source-kind" value={kind} onValueChange={(next) => setKind(next as ProjectSourceKind)} ariaLabel="Source kind" className="w-full" options={[{ value: 'git', label: 'Git URL' }, { value: 'local', label: 'Local path' }, { value: 'archive', label: 'Archive path' }]} /></Field>
-          <Field label="Source" htmlFor="project-source"><Input id="project-source" className="font-mono" value={value} onChange={(e) => setValue(e.target.value)} placeholder={kind === 'git' ? 'https://github.com/acme/app.git' : '/path/to/source'} /></Field>
+          <Field label="Source kind" htmlFor="project-source-kind"><Select id="project-source-kind" value={kind} onValueChange={(next) => { setKind(next as ProjectSourceKind); setArchive(null); setError(null) }} ariaLabel="Source kind" className="w-full" options={[{ value: 'git', label: 'Git URL' }, ...(allowLocalSource ? [{ value: 'local', label: 'Local path' }] : []), { value: 'archive', label: 'Upload archive' }]} /></Field>
+          {kind === 'archive' ? (
+            <Field label="Source archive" htmlFor="project-archive" hint=".zip, .tar.gz, or .tgz · max 512 MiB">
+              <input ref={archiveInput} id="project-archive" type="file" accept=".zip,.tar.gz,.tgz" className="sr-only" onChange={(e) => { chooseArchive(e.target.files?.[0]); e.target.value = '' }} />
+              <button type="button" onClick={() => archiveInput.current?.click()} onDragEnter={(e) => { e.preventDefault(); setDragging(true) }} onDragOver={(e) => e.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(e) => { e.preventDefault(); setDragging(false); chooseArchive(e.dataTransfer.files[0]) }} className={`flex min-h-20 w-full items-center justify-center gap-2 rounded-lg border border-dashed px-4 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg ${dragging ? 'border-brand bg-brand/10 text-foreground' : 'border-border bg-elevated text-mutedfg hover:border-brand/50'}`}>
+                <Upload className="size-4" aria-hidden="true" />
+                {archive ? `${archive.name} (${(archive.size / 1024 / 1024).toFixed(1)} MiB)` : 'Drop an archive here or choose a file'}
+              </button>
+            </Field>
+          ) : (
+            <Field label="Source" htmlFor="project-source"><Input id="project-source" className="font-mono" value={value} onChange={(e) => setValue(e.target.value)} placeholder={kind === 'git' ? 'https://github.com/acme/app.git' : '/path/to/source'} /></Field>
+          )}
         </div>
         {kind === 'git' && <Field label="Branch or tag" hint="Optional; uses the default branch when empty" htmlFor="project-ref"><Input id="project-ref" className="font-mono" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="main" /></Field>}
         {error && <ErrorState message={error} />}

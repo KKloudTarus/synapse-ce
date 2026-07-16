@@ -25,6 +25,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -87,6 +88,9 @@ type Service struct {
 	sevEnricher       ports.SeverityEnricher          // optional NVD CVSS backfill for unknown-severity vulns
 	ignoreUnfixed     bool                            // when set, don't promote no-fix vulns to findings (Trivy --ignore-unfixed)
 	guard             *execution.Guard                // shared scope + window + audit gate; built in NewService
+	codeQuality       interface {
+		BuildReport(context.Context, string) (codequality.Report, error)
+	}
 }
 
 // SetSeverityEnricher configures optional severity backfill (NVD CVSS) for vulnerabilities the
@@ -96,6 +100,12 @@ func (s *Service) SetSeverityEnricher(e ports.SeverityEnricher) { s.sevEnricher 
 
 // SetImportedSBOMStore configures the engagement-scoped client SBOM artifact store.
 func (s *Service) SetImportedSBOMStore(store ports.ImportedSBOMStore) { s.importedSBOM = store }
+
+func (s *Service) SetCodeQuality(q interface {
+	BuildReport(context.Context, string) (codequality.Report, error)
+}) {
+	s.codeQuality = q
+}
 
 // SetIgnoreUnfixed controls whether vulnerabilities with no available fix are promoted to
 // findings. true = suppress them (Trivy's --ignore-unfixed); they stay in the vuln inventory.
@@ -466,6 +476,7 @@ type ScanResult struct {
 	Manifest                 ports.ScanManifest       `json:"manifest"`
 	RiskMatches              map[string]int           `json:"risk_matches"` // kev/epss match counts (diagnostic)
 	FindingQuality           FindingQuality           `json:"finding_quality"`
+	CodeQuality              *codequality.Report      `json:"code_quality,omitempty"`
 	// Coverage is the per-ecosystem component tally: components + resolved-version counts per
 	// ecosystem, so a thin / partially-resolved ecosystem is VISIBLE rather than hidden behind the single
 	// global Completeness number ("no silent gap").
@@ -539,6 +550,7 @@ type ScanOptions struct {
 	Mode string `json:"mode"`
 	// DetectionPriority selects comprehensive (default) or precise; see the Detection* consts.
 	DetectionPriority string `json:"detection_priority,omitempty"`
+	CodeQuality       bool   `json:"code_quality,omitempty"`
 }
 
 func normalizeScanOptions(opts ScanOptions) (ScanOptions, error) {
@@ -2088,6 +2100,13 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	result.VulnsBelowThreshold = countBelowThreshold(vulns, s.minSeverity)
 	result.UnfixedSuppressed = countUnfixedSuppressed(vulns, s.minSeverity, s.ignoreUnfixed)
 	result.FindingQuality = computeFindingQuality(result)
+	if opts.CodeQuality && s.codeQuality != nil {
+		report, qerr := s.codeQuality.BuildReport(ctx, ws.Dir)
+		if qerr != nil {
+			return nil, fmt.Errorf("analyze code quality: %w", qerr)
+		}
+		result.CodeQuality = &report
+	}
 	trace.succeed(step, "Findings derived", map[string]int{"vulnerabilities": len(vulns), "licenses": len(lics), "findings": len(result.Findings)})
 	result.DebugEvents = trace.snapshot()
 	if result.SBOM != nil {

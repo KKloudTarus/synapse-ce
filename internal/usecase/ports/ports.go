@@ -4,6 +4,7 @@ package ports
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
@@ -44,6 +45,12 @@ type ProjectRepository interface {
 	DeleteByKey(ctx context.Context, tenantID shared.ID, key string) error
 }
 
+// ProjectArchiveStore retains uploaded source archives so a Project can be re-analyzed.
+type ProjectArchiveStore interface {
+	Save(ctx context.Context, projectID shared.ID, filename string, src io.Reader) (string, error)
+	Delete(ctx context.Context, projectID shared.ID) error
+}
+
 // EngagementRepository persists engagements. Returned aggregates are read-only –
 // callers must not mutate them (implementations may return shared instances).
 type EngagementRepository interface {
@@ -61,6 +68,9 @@ type EngagementRepository interface {
 	// admin) matches any row; a non-empty tenant matches only its own, so tenant A cannot reach
 	// tenant B's engagement (returns shared.ErrNotFound – existence is not revealed).
 	GetByIDInTenant(ctx context.Context, tenantID, id shared.ID) (*engagement.Engagement, error)
+	// GetByProjectID loads the hidden Project analysis context scoped to tenantID.
+	// It is only for Project use-case internals; normal engagement reads must use GetByIDInTenant.
+	GetByProjectID(ctx context.Context, tenantID, projectID shared.ID) (*engagement.Engagement, error)
 	List(ctx context.Context, tenantID shared.ID) ([]*engagement.Engagement, error)
 	// Update persists changes to an existing engagement aggregate – its row
 	// (name/client/status/authorization window/timezone) and its full scope target
