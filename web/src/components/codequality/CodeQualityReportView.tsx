@@ -128,7 +128,7 @@ export function CodeQualityReportView({ report, empty }: { report?: CodeQualityR
 
       <Card
         title="Duplicated blocks"
-        actions={<Pill>{dupDensity.toFixed(1)}% density</Pill>}
+        actions={<div className="flex items-center gap-2"><Pill>{dupDensity.toFixed(1)}% density</Pill>{report.duplication.blocks.length > duplicateBlocks.length && <span className="text-xs text-subtlefg">Showing {duplicateBlocks.length.toLocaleString()} of {report.duplication.blocks.length.toLocaleString()}</span>}</div>}
         bodyClass={duplicateBlocks.length === 0 ? undefined : 'p-0'}
       >
         {duplicateBlocks.length === 0 ? (

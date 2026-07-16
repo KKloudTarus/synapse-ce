@@ -10,6 +10,40 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
+func TestProjectRepositoryZeroTenantSelectionIsDeterministic(t *testing.T) {
+	ctx := context.Background()
+	r := NewProjectRepository()
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	for _, p := range []*project.Project{
+		mustProject(t, "p2", "tenant-b", now),
+		mustProject(t, "p1", "tenant-a", now),
+	} {
+		if err := r.Create(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := r.GetByKey(ctx, "", "project")
+	if err != nil || got.ID != "p1" {
+		t.Fatalf("zero-tenant get = %+v, %v; want p1", got, err)
+	}
+	if err := r.DeleteByKey(ctx, "", "project"); err != nil {
+		t.Fatal(err)
+	}
+	got, err = r.GetByKey(ctx, "", "project")
+	if err != nil || got.ID != "p2" {
+		t.Fatalf("zero-tenant get after delete = %+v, %v; want p2", got, err)
+	}
+}
+
+func mustProject(t *testing.T, id, tenant string, now time.Time) *project.Project {
+	t.Helper()
+	p, err := project.New(shared.ID(id), shared.ID(tenant), "Project", "project", project.SourceBinding{Kind: project.SourceLocal, Value: "/repo"}, nil, "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func TestProjectRepository(t *testing.T) {
 	ctx := context.Background()
 	r := NewProjectRepository()

@@ -75,7 +75,7 @@ func (r *ProjectRepository) List(ctx context.Context, tenantID shared.ID) ([]*pr
 func (r *ProjectRepository) GetByKey(ctx context.Context, tenantID shared.ID, key string) (*project.Project, error) {
 	var row pgx.Row
 	if tenantID.IsZero() {
-		row = r.pool.QueryRow(ctx, `SELECT `+projectCols+` FROM projects WHERE key=$1 ORDER BY created_at LIMIT 1`, key)
+		row = r.pool.QueryRow(ctx, `SELECT `+projectCols+` FROM projects WHERE key=$1 ORDER BY created_at, id LIMIT 1`, key)
 	} else {
 		row = r.pool.QueryRow(ctx, `SELECT `+projectCols+` FROM projects WHERE tenant_id=$1 AND key=$2`, tenantID.String(), key)
 	}
@@ -95,7 +95,7 @@ func (r *ProjectRepository) DeleteByKey(ctx context.Context, tenantID shared.ID,
 		err error
 	)
 	if tenantID.IsZero() {
-		ct, err = r.pool.Exec(ctx, `DELETE FROM projects WHERE id=(SELECT id FROM projects WHERE key=$1 ORDER BY created_at LIMIT 1)`, key)
+		ct, err = r.pool.Exec(ctx, `DELETE FROM projects WHERE id=(SELECT id FROM projects WHERE key=$1 ORDER BY created_at, id LIMIT 1)`, key)
 	} else {
 		ct, err = r.pool.Exec(ctx, `DELETE FROM projects WHERE tenant_id=$1 AND key=$2`, tenantID.String(), key)
 	}

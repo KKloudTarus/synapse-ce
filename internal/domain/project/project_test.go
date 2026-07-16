@@ -2,6 +2,7 @@ package project
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -21,6 +22,17 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestNewCleansFilesystemSource(t *testing.T) {
+	want := filepath.Join(string(filepath.Separator), "repo")
+	p, err := New("p1", "tenant-a", "Project", "project", SourceBinding{Kind: SourceLocal, Value: filepath.Join(want, "..", "repo")}, nil, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.SourceBinding.Value != want {
+		t.Fatalf("source = %q, want %q", p.SourceBinding.Value, want)
+	}
+}
+
 func TestNewRejectsInvalidInput(t *testing.T) {
 	now := time.Now()
 	valid := SourceBinding{Kind: SourceLocal, Value: "/repo"}
@@ -35,6 +47,8 @@ func TestNewRejectsInvalidInput(t *testing.T) {
 		{"missing source", "ok", "p1", SourceBinding{Kind: SourceLocal}},
 		{"bad kind", "ok", "p1", SourceBinding{Kind: "image", Value: "x"}},
 		{"insecure git", "ok", "p1", SourceBinding{Kind: SourceGit, Value: "http://example.com/repo.git"}},
+		{"git without host", "ok", "p1", SourceBinding{Kind: SourceGit, Value: "https://"}},
+		{"git with credentials", "ok", "p1", SourceBinding{Kind: SourceGit, Value: "https://user:token@example.com/repo.git"}},
 		{"bad git ref", "ok", "p1", SourceBinding{Kind: SourceGit, Value: "https://example.com/repo.git", Ref: "--depth=2"}},
 		{"ref on local", "ok", "p1", SourceBinding{Kind: SourceLocal, Value: "/repo", Ref: "main"}},
 	}

@@ -51,6 +51,9 @@ describe('Code Quality projects', () => {
       </MemoryRouter>,
     )
     fireEvent.click(await screen.findByRole('button', { name: /New project/i }))
+    const sourceKind = screen.getByRole('combobox', { name: 'Source kind' })
+    expect(sourceKind).toHaveAttribute('id', 'project-source-kind')
+    expect(document.querySelector('label[for="project-source-kind"]')).toHaveTextContent('Source kind')
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Synapse' } })
     fireEvent.change(screen.getByLabelText('Source'), { target: { value: 'https://example.com/repo.git' } })
     fireEvent.click(screen.getByRole('button', { name: /Create project/i }))

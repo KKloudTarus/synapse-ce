@@ -3,6 +3,8 @@ package project
 
 import (
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -61,9 +63,14 @@ func New(id, tenantID shared.ID, name, key string, source SourceBinding, profile
 		if source.Ref != "" {
 			return nil, fmt.Errorf("%w: source ref is only valid for git", shared.ErrValidation)
 		}
+		source.Value = filepath.Clean(source.Value)
 	case SourceGit:
-		if !strings.HasPrefix(strings.ToLower(source.Value), "https://") {
-			return nil, fmt.Errorf("%w: git source must be https://", shared.ErrValidation)
+		u, err := url.Parse(source.Value)
+		if err != nil || u.Scheme != "https" || u.Host == "" {
+			return nil, fmt.Errorf("%w: git source must be an https URL with a host", shared.ErrValidation)
+		}
+		if u.User != nil {
+			return nil, fmt.Errorf("%w: git source must not contain embedded credentials", shared.ErrValidation)
 		}
 		if len(source.Ref) > 255 || (source.Ref != "" && !gitRefPattern.MatchString(source.Ref)) {
 			return nil, fmt.Errorf("%w: invalid git source ref", shared.ErrValidation)

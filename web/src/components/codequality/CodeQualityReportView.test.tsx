@@ -53,6 +53,12 @@ describe('CodeQualityReportView', () => {
     expect(within(languageTable).getByText('TypeScript')).toBeInTheDocument()
   })
 
+  it('discloses when duplicated blocks are limited', () => {
+    const blocks = Array.from({ length: 21 }, (_, index) => ({ tokens: index + 1, occurrences: [{ file: `file-${index}.go`, startLine: 1, endLine: 2 }] }))
+    render(<CodeQualityReportView report={{ ...report, duplication: { ...report.duplication, blocks } }} empty={<div>Unavailable</div>} />)
+    expect(screen.getByText('Showing 20 of 21')).toBeInTheDocument()
+  })
+
   it('renders duplicate locations and quality findings', () => {
     render(<CodeQualityReportView report={report} empty={<div>Unavailable</div>} />)
 

@@ -117,7 +117,7 @@ function CreateProjectForm() {
           <Field label="Key" hint="Lowercase letters, numbers, and hyphens" htmlFor="project-key"><Input id="project-key" className="font-mono" value={key} onChange={(e) => { setKeyEdited(true); setKey(e.target.value) }} placeholder="synapse-ce" /></Field>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-[10rem_1fr]">
-          <Field label="Source kind"><Select value={kind} onValueChange={(next) => setKind(next as ProjectSourceKind)} ariaLabel="Source kind" className="w-full" options={[{ value: 'git', label: 'Git URL' }, { value: 'local', label: 'Local path' }, { value: 'archive', label: 'Archive path' }]} /></Field>
+          <Field label="Source kind" htmlFor="project-source-kind"><Select id="project-source-kind" value={kind} onValueChange={(next) => setKind(next as ProjectSourceKind)} ariaLabel="Source kind" className="w-full" options={[{ value: 'git', label: 'Git URL' }, { value: 'local', label: 'Local path' }, { value: 'archive', label: 'Archive path' }]} /></Field>
           <Field label="Source" htmlFor="project-source"><Input id="project-source" className="font-mono" value={value} onChange={(e) => setValue(e.target.value)} placeholder={kind === 'git' ? 'https://github.com/acme/app.git' : '/path/to/source'} /></Field>
         </div>
         {kind === 'git' && <Field label="Branch or tag" hint="Optional; uses the default branch when empty" htmlFor="project-ref"><Input id="project-ref" className="font-mono" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="main" /></Field>}

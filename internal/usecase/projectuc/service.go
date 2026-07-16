@@ -52,11 +52,19 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*project.Project,
 }
 
 func (s *Service) List(ctx context.Context, tenantID shared.ID) ([]*project.Project, error) {
-	return s.repo.List(ctx, tenantID)
+	list, err := s.repo.List(ctx, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list projects: %w", err)
+	}
+	return list, nil
 }
 
 func (s *Service) Get(ctx context.Context, tenantID shared.ID, key string) (*project.Project, error) {
-	return s.repo.GetByKey(ctx, tenantID, strings.TrimSpace(key))
+	p, err := s.repo.GetByKey(ctx, tenantID, strings.TrimSpace(key))
+	if err != nil {
+		return nil, fmt.Errorf("get project: %w", err)
+	}
+	return p, nil
 }
 
 func (s *Service) Delete(ctx context.Context, actor string, tenantID shared.ID, key string) error {

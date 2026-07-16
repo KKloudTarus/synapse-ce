@@ -167,6 +167,7 @@ export function Field({
 export type SelectOption = { value: string; label: ReactNode }
 
 export function Select({
+  id,
   value,
   onValueChange,
   options,
@@ -175,6 +176,7 @@ export function Select({
   size = 'md',
   className,
 }: {
+  id?: string
   value: string
   onValueChange: (value: string) => void
   options: SelectOption[]
@@ -186,6 +188,7 @@ export function Select({
   return (
     <RSelect.Root value={value} onValueChange={onValueChange} disabled={disabled}>
       <RSelect.Trigger
+        id={id}
         aria-label={ariaLabel}
         className={cn(
           'input-inset group inline-flex items-center justify-between gap-2 rounded-lg border border-border bg-elevated text-foreground transition-colors',

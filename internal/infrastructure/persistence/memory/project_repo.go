@@ -63,16 +63,24 @@ func (r *ProjectRepository) List(_ context.Context, tenantID shared.ID) ([]*proj
 	return out, nil
 }
 
+func olderProject(a, b *project.Project) bool {
+	return a.Audit.CreatedAt.Before(b.Audit.CreatedAt) || (a.Audit.CreatedAt.Equal(b.Audit.CreatedAt) && a.ID < b.ID)
+}
+
 func (r *ProjectRepository) GetByKey(_ context.Context, tenantID shared.ID, key string) (*project.Project, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if tenantID.IsZero() {
+		var found *project.Project
 		for _, p := range r.data {
-			if p.Key == key {
-				return cloneProject(p), nil
+			if p.Key == key && (found == nil || olderProject(p, found)) {
+				found = p
 			}
 		}
-		return nil, shared.ErrNotFound
+		if found == nil {
+			return nil, shared.ErrNotFound
+		}
+		return cloneProject(found), nil
 	}
 	p, ok := r.data[projectStoreKey(tenantID, key)]
 	if !ok {
@@ -85,13 +93,18 @@ func (r *ProjectRepository) DeleteByKey(_ context.Context, tenantID shared.ID, k
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if tenantID.IsZero() {
+		var foundKey string
+		var found *project.Project
 		for storeKey, p := range r.data {
-			if p.Key == key {
-				delete(r.data, storeKey)
-				return nil
+			if p.Key == key && (found == nil || olderProject(p, found)) {
+				foundKey, found = storeKey, p
 			}
 		}
-		return shared.ErrNotFound
+		if found == nil {
+			return shared.ErrNotFound
+		}
+		delete(r.data, foundKey)
+		return nil
 	}
 	storeKey := projectStoreKey(tenantID, key)
 	if _, ok := r.data[storeKey]; !ok {

@@ -36,8 +36,7 @@ type IDGenerator interface {
 	NewID() shared.ID
 }
 
-// EngagementRepository persists engagements. Returned aggregates are read-only –
-// callers must not mutate them (implementations may return shared instances).
+// ProjectRepository persists tenant-scoped Project aggregates.
 type ProjectRepository interface {
 	Create(ctx context.Context, p *project.Project) error
 	List(ctx context.Context, tenantID shared.ID) ([]*project.Project, error)
@@ -45,6 +44,8 @@ type ProjectRepository interface {
 	DeleteByKey(ctx context.Context, tenantID shared.ID, key string) error
 }
 
+// EngagementRepository persists engagements. Returned aggregates are read-only –
+// callers must not mutate them (implementations may return shared instances).
 type EngagementRepository interface {
 	Create(ctx context.Context, e *engagement.Engagement) error
 	// GetByID loads an engagement by id WITHOUT a tenant predicate. It is reserved for INTERNAL
