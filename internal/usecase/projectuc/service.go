@@ -16,14 +16,9 @@ import (
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 )
 
-type analysisContextRepository interface {
-	GetByProjectID(context.Context, shared.ID, shared.ID) (*engagement.Engagement, error)
-}
-
 type Service struct {
 	repo             ports.ProjectRepository
 	engagements      ports.EngagementRepository
-	analysisContexts analysisContextRepository
 	clock            ports.Clock
 	ids              ports.IDGenerator
 	audit            ports.AuditLogger
@@ -33,8 +28,7 @@ type Service struct {
 }
 
 func NewService(repo ports.ProjectRepository, engagements ports.EngagementRepository, clock ports.Clock, ids ports.IDGenerator, audit ports.AuditLogger, allowLocalSource bool) *Service {
-	contexts, _ := engagements.(analysisContextRepository)
-	return &Service{repo: repo, engagements: engagements, analysisContexts: contexts, clock: clock, ids: ids, audit: audit, allowLocalSource: allowLocalSource}
+	return &Service{repo: repo, engagements: engagements, clock: clock, ids: ids, audit: audit, allowLocalSource: allowLocalSource}
 }
 
 func (s *Service) SetScanner(scanner *scauc.Service)               { s.scanner = scanner }
@@ -78,7 +72,7 @@ func (s *Service) create(ctx context.Context, in CreateInput, id shared.ID) (*pr
 	if err := requireActor(in.CreatedBy); err != nil {
 		return nil, err
 	}
-	if s.engagements == nil || s.analysisContexts == nil {
+	if s.engagements == nil {
 		return nil, fmt.Errorf("%w: project analysis context repository is required", shared.ErrValidation)
 	}
 	if in.SourceBinding.Kind == project.SourceLocal && !s.allowLocalSource {
@@ -138,7 +132,7 @@ func (s *Service) analysisContext(ctx context.Context, tenantID shared.ID, key s
 	if err != nil {
 		return nil, nil, err
 	}
-	e, err := s.analysisContexts.GetByProjectID(ctx, tenantID, p.ID)
+	e, err := s.engagements.GetByProjectID(ctx, tenantID, p.ID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get project analysis context: %w", err)
 	}
@@ -197,7 +191,7 @@ func (s *Service) Delete(ctx context.Context, actor string, tenantID shared.ID, 
 		return err
 	}
 	if s.engagements != nil {
-		if e, err := s.analysisContexts.GetByProjectID(ctx, tenantID, p.ID); err == nil {
+		if e, err := s.engagements.GetByProjectID(ctx, tenantID, p.ID); err == nil {
 			if err := s.engagements.Delete(ctx, e.ID); err != nil {
 				return fmt.Errorf("delete project analysis context: %w", err)
 			}

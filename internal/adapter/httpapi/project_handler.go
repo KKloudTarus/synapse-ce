@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -138,7 +140,68 @@ func (rt *Router) latestProjectAnalysis(w http.ResponseWriter, r *http.Request) 
 		writeError(w, rt.log, err)
 		return
 	}
+	data, err = redactProjectAnalysisEngagementIDs(data)
+	if err != nil {
+		writeError(w, rt.log, fmt.Errorf("sanitize project analysis: %w", err))
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+func redactProjectAnalysisEngagementIDs(data []byte) ([]byte, error) {
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, fmt.Errorf("analysis result must be an object")
+	}
+	if err := redactFindingEngagementIDs(result, "findings"); err != nil {
+		return nil, err
+	}
+	if raw, ok := result["code_quality"]; ok && !bytes.Equal(raw, []byte("null")) {
+		var report map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &report); err != nil {
+			return nil, fmt.Errorf("decode code_quality: %w", err)
+		}
+		if report == nil {
+			return nil, fmt.Errorf("code_quality must be an object")
+		}
+		if err := redactFindingEngagementIDs(report, "findings"); err != nil {
+			return nil, fmt.Errorf("sanitize code_quality: %w", err)
+		}
+		encoded, err := json.Marshal(report)
+		if err != nil {
+			return nil, fmt.Errorf("encode code_quality: %w", err)
+		}
+		result["code_quality"] = encoded
+	}
+	return json.Marshal(result)
+}
+
+func redactFindingEngagementIDs(object map[string]json.RawMessage, key string) error {
+	raw, ok := object[key]
+	if !ok || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+	var findings []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &findings); err != nil {
+		return fmt.Errorf("decode %s: %w", key, err)
+	}
+	for _, finding := range findings {
+		if finding == nil {
+			return fmt.Errorf("%s contains a non-object finding", key)
+		}
+		delete(finding, "EngagementID")
+		delete(finding, "engagement_id")
+		delete(finding, "engagementId")
+	}
+	encoded, err := json.Marshal(findings)
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", key, err)
+	}
+	object[key] = encoded
+	return nil
 }

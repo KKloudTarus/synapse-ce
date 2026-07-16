@@ -68,6 +68,9 @@ type EngagementRepository interface {
 	// admin) matches any row; a non-empty tenant matches only its own, so tenant A cannot reach
 	// tenant B's engagement (returns shared.ErrNotFound – existence is not revealed).
 	GetByIDInTenant(ctx context.Context, tenantID, id shared.ID) (*engagement.Engagement, error)
+	// GetByProjectID loads the hidden Project analysis context scoped to tenantID.
+	// It is only for Project use-case internals; normal engagement reads must use GetByIDInTenant.
+	GetByProjectID(ctx context.Context, tenantID, projectID shared.ID) (*engagement.Engagement, error)
 	List(ctx context.Context, tenantID shared.ID) ([]*engagement.Engagement, error)
 	// Update persists changes to an existing engagement aggregate – its row
 	// (name/client/status/authorization window/timezone) and its full scope target

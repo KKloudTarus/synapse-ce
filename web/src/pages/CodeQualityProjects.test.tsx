@@ -46,6 +46,34 @@ describe('Code Quality projects', () => {
     expect(screen.getByText('Open project')).toBeInTheDocument()
   })
 
+  it('renders not analyzed only for a missing status', async () => {
+    vi.mocked(api.listProjects).mockResolvedValue([project])
+    renderList()
+    expect(await screen.findByText('Not analyzed')).toBeInTheDocument()
+  })
+
+  it('keeps projects visible when a status fetch fails', async () => {
+    vi.mocked(api.listProjects).mockResolvedValue([project])
+    vi.mocked(api.projectAnalysisStatus).mockRejectedValue(new Error('Status unavailable'))
+    renderList()
+    expect(await screen.findByText('Status unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Synapse' })).toBeInTheDocument()
+    expect(screen.getByText('Unknown')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.queryByText('Not analyzed')).not.toBeInTheDocument()
+  })
+
+  it('adds a visible focus style to the archive picker', async () => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
+    vi.mocked(api.listProjects).mockResolvedValue([])
+    renderList()
+    fireEvent.click(await screen.findByRole('button', { name: /New project/i }))
+    fireEvent.click(screen.getByRole('combobox', { name: 'Source kind' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Upload archive' }))
+    const picker = screen.getByRole('button', { name: /Drop an archive here or choose a file/i })
+    expect(picker).toHaveClass('focus-visible:outline-none', 'focus-visible:ring-2', 'focus-visible:ring-brand/60', 'focus-visible:ring-offset-2', 'focus-visible:ring-offset-bg')
+  })
+
   it('creates and navigates to the shell', async () => {
     vi.mocked(api.listProjects).mockResolvedValue([])
     vi.mocked(api.createProject).mockResolvedValue(project)

@@ -9,17 +9,27 @@ const allowLocalSource = import.meta.env.DEV
 
 export function CodeQualityProjects() {
   const [projects, setProjects] = useState<Project[] | null>(null)
-  const [statuses, setStatuses] = useState<Record<string, ScanJob | null>>({})
+  const [statuses, setStatuses] = useState<Record<string, ScanJob | null | Error>>({})
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
 
   function load() {
     setError(null)
+    setProjects(null)
+    setStatuses({})
     api.listProjects()
       .then(async (next) => {
         setProjects(next)
-        const entries = await Promise.all(next.map(async (project) => [project.key, await api.projectAnalysisStatus(project.key).catch(() => null)] as const))
+        const entries = await Promise.all(next.map(async (project) => {
+          try {
+            return [project.key, await api.projectAnalysisStatus(project.key)] as const
+          } catch (error) {
+            return [project.key, error instanceof Error ? error : new Error('Status unavailable')] as const
+          }
+        }))
         setStatuses(Object.fromEntries(entries))
+        const failed = entries.map(([, status]) => status).find((status): status is Error => status instanceof Error)
+        if (failed) setError(failed.message)
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load projects'))
   }
@@ -56,8 +66,8 @@ export function CodeQualityProjects() {
   )
 }
 
-function ProjectCard({ project, job }: { project: Project; job?: ScanJob | null }) {
-  const status = job?.status === 'running' ? 'Analyzing' : job?.status === 'succeeded' ? 'Analyzed' : job?.status === 'failed' ? 'Failed' : 'Not analyzed'
+function ProjectCard({ project, job }: { project: Project; job?: ScanJob | null | Error }) {
+  const status = job instanceof Error ? 'Unknown' : job?.status === 'running' ? 'Analyzing' : job?.status === 'succeeded' ? 'Analyzed' : job?.status === 'failed' ? 'Failed' : 'Not analyzed'
   return (
     <Link to={`/code-quality/projects/${encodeURIComponent(project.key)}`} className="lift card-sheen elev group flex min-h-64 flex-col rounded-xl border border-border bg-card p-5 transition-colors hover:border-brand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50">
       <div className="flex items-start justify-between gap-3">
@@ -151,7 +161,7 @@ function CreateProjectForm() {
           {kind === 'archive' ? (
             <Field label="Source archive" htmlFor="project-archive" hint=".zip, .tar.gz, or .tgz · max 512 MiB">
               <input ref={archiveInput} id="project-archive" type="file" accept=".zip,.tar.gz,.tgz" className="sr-only" onChange={(e) => { chooseArchive(e.target.files?.[0]); e.target.value = '' }} />
-              <button type="button" onClick={() => archiveInput.current?.click()} onDragEnter={(e) => { e.preventDefault(); setDragging(true) }} onDragOver={(e) => e.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(e) => { e.preventDefault(); setDragging(false); chooseArchive(e.dataTransfer.files[0]) }} className={`flex min-h-20 w-full items-center justify-center gap-2 rounded-lg border border-dashed px-4 text-sm transition-colors ${dragging ? 'border-brand bg-brand/10 text-foreground' : 'border-border bg-elevated text-mutedfg hover:border-brand/50'}`}>
+              <button type="button" onClick={() => archiveInput.current?.click()} onDragEnter={(e) => { e.preventDefault(); setDragging(true) }} onDragOver={(e) => e.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(e) => { e.preventDefault(); setDragging(false); chooseArchive(e.dataTransfer.files[0]) }} className={`flex min-h-20 w-full items-center justify-center gap-2 rounded-lg border border-dashed px-4 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg ${dragging ? 'border-brand bg-brand/10 text-foreground' : 'border-border bg-elevated text-mutedfg hover:border-brand/50'}`}>
                 <Upload className="size-4" aria-hidden="true" />
                 {archive ? `${archive.name} (${(archive.size / 1024 / 1024).toFixed(1)} MiB)` : 'Drop an archive here or choose a file'}
               </button>

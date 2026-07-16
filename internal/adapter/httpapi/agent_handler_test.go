@@ -62,6 +62,9 @@ func (f engRepoH) GetByID(context.Context, shared.ID) (*engagement.Engagement, e
 func (f engRepoH) GetByIDInTenant(context.Context, shared.ID, shared.ID) (*engagement.Engagement, error) {
 	return f.eng, nil
 }
+func (engRepoH) GetByProjectID(context.Context, shared.ID, shared.ID) (*engagement.Engagement, error) {
+	return nil, shared.ErrNotFound
+}
 func (engRepoH) List(context.Context, shared.ID) ([]*engagement.Engagement, error) { return nil, nil }
 
 type findReadH struct{}
