@@ -59,9 +59,9 @@ describe('Projects API', () => {
         status: 'failed',
         failedConditions: [{ metric: 'new_high', operator: '<=', threshold: 0, actual: 2 }],
       },
-      issues: {
-        new: { availability: 'available', value: 4, unavailableReason: null },
-        accepted: { availability: 'unavailable', value: null, unavailableReason: 'issue_lifecycle_not_available' },
+      issueSummary: {
+        newCodeTotal: { availability: 'available', value: 4, unavailableReason: null },
+        acceptedOverallTotal: { availability: 'unavailable', value: null, unavailableReason: 'issue_lifecycle_not_available' },
       },
       lenses: {
         overall: { coverage: { availability: 'available', value: 72.349 } },
@@ -76,9 +76,17 @@ describe('Projects API', () => {
       state: 'not_analyzed',
       latestAnalysis: null,
       gate: null,
-      issues: { new: { value: null, unavailableReason: 'no_analysis' } },
+      issueSummary: { newCodeTotal: { value: null, unavailableReason: 'no_analysis' } },
       lenses: { overall: { security: { grade: null, unavailableReason: 'no_analysis' } } },
     })
+  })
+
+  it('accepts every project overview gate operator', () => {
+    for (const operator of ['<=', '>=', '==', '<', '>']) {
+      const raw = overviewAnalyzedWire()
+      raw.gate.failed_conditions[0].operator = operator
+      expect(mapProjectOverviewResponse(raw).gate?.failedConditions[0].operator).toBe(operator)
+    }
   })
 
   it('does not convert project overview 404 to null', async () => {
@@ -95,10 +103,28 @@ describe('Projects API', () => {
       ['unavailable rating with grade', raw => { raw.lenses.new_code.maintainability.grade = 'A' }],
       ['available percentage null', raw => { raw.lenses.overall.coverage.value = null }],
       ['out of range percentage', raw => { raw.lenses.overall.coverage.value = 101 }],
-      ['negative count', raw => { raw.issues.new.value = -1 }],
-      ['fractional count', raw => { raw.issues.new.value = 1.5 }],
-      ['unknown reason', raw => { raw.issues.accepted.unavailable_reason = 'later' }],
+      ['negative count', raw => { raw.issue_summary.new_code_total.value = -1 }],
+      ['fractional count', raw => { raw.issue_summary.new_code_total.value = 1.5 }],
+      ['unknown reason', raw => { raw.issue_summary.accepted_overall_total.unavailable_reason = 'later' }],
       ['invalid timestamp', raw => { raw.latest_analysis.created_at = 'not-a-date' }],
+      ['date-only timestamp', raw => { raw.latest_analysis.created_at = '2026-07-17' }],
+      ['empty analysis id', raw => { raw.latest_analysis.id = '' }],
+      ['empty project key', raw => { raw.project.key = ' ' }],
+      ['whitespace metric', raw => { raw.gate.failed_conditions[0].metric = ' ' }],
+      ['unknown metric', raw => { raw.gate.failed_conditions[0].metric = 'unknown_metric' }],
+      ['invalid operator', raw => { raw.gate.failed_conditions[0].operator = '!=' }],
+      ['invalid word operator', raw => { raw.gate.failed_conditions[0].operator = 'approximately' }],
+      ['empty operator', raw => { raw.gate.failed_conditions[0].operator = '' }],
+      ['whitespace operator', raw => { raw.gate.failed_conditions[0].operator = ' ' }],
+      ['invalid gate source', raw => { raw.gate.source = 'imported' }],
+      ['passed gate with failed conditions', raw => { raw.gate.status = 'passed' }],
+      ['failed gate without conditions', raw => { raw.gate.failed_conditions = [] }],
+      ['first analysis with baseline', raw => { raw.latest_analysis.new_code = { first_analysis: true, has_baseline: true, baseline_analysis_id: 'analysis-41' } }],
+      ['false false new-code period', raw => { raw.latest_analysis.new_code = { first_analysis: false, has_baseline: false, baseline_analysis_id: null } }],
+      ['baseline id without baseline', raw => { raw.latest_analysis.new_code = { first_analysis: true, has_baseline: false, baseline_analysis_id: 'analysis-41' } }],
+      ['baseline without id', raw => { raw.latest_analysis.new_code = { first_analysis: false, has_baseline: true, baseline_analysis_id: null } }],
+      ['blank baseline id', raw => { raw.latest_analysis.new_code = { first_analysis: false, has_baseline: true, baseline_analysis_id: ' ' } }],
+      ['unavailable value/reason mismatch', raw => { raw.lenses.new_code.coverage.unavailable_reason = null }],
       ['non-finite gate number', raw => { raw.gate.failed_conditions[0].actual = Number.POSITIVE_INFINITY }],
     ]
     for (const [name, mutate] of cases) {
@@ -169,9 +195,9 @@ function overviewAnalyzedWire(): any {
       source: 'managed',
       failed_conditions: [{ metric: 'new_high', operator: '<=', threshold: 0, actual: 2 }],
     },
-    issues: {
-      new: { availability: 'available', value: 4, unavailable_reason: null },
-      accepted: { availability: 'unavailable', value: null, unavailable_reason: 'issue_lifecycle_not_available' },
+    issue_summary: {
+      new_code_total: { availability: 'available', value: 4, unavailable_reason: null },
+      accepted_overall_total: { availability: 'unavailable', value: null, unavailable_reason: 'issue_lifecycle_not_available' },
     },
     lenses: {
       overall: {
@@ -202,9 +228,9 @@ function overviewNotAnalyzedWire(): any {
     project: { key: 'payments-api', name: 'Payments API' },
     latest_analysis: null,
     gate: null,
-    issues: {
-      new: { availability: 'unavailable', value: null, unavailable_reason: 'no_analysis' },
-      accepted: { availability: 'unavailable', value: null, unavailable_reason: 'no_analysis' },
+    issue_summary: {
+      new_code_total: { availability: 'unavailable', value: null, unavailable_reason: 'no_analysis' },
+      accepted_overall_total: { availability: 'unavailable', value: null, unavailable_reason: 'no_analysis' },
     },
     lenses: {
       overall: {

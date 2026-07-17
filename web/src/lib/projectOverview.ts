@@ -18,6 +18,26 @@ export type UnavailableReason =
 
 export type OverviewGrade = 'A' | 'B' | 'C' | 'D' | 'E'
 export type OverviewGateStatus = 'passed' | 'failed'
+export type ProjectOverviewGateOperator =
+  | '<='
+  | '>='
+  | '=='
+  | '<'
+  | '>'
+export type ProjectOverviewGateSource = 'default' | 'repository' | 'managed'
+export type ProjectOverviewGateMetric =
+  | 'new_critical'
+  | 'new_high'
+  | 'new_medium'
+  | 'new_secret'
+  | 'new_vulnerability'
+  | 'new_issues'
+  | 'total_critical'
+  | 'duplication_density'
+  | 'coverage'
+  | 'security_rating'
+  | 'reliability_rating'
+  | 'maintainability_rating'
 
 export interface RatingMetric {
   availability: MetricAvailability
@@ -53,20 +73,20 @@ export interface ProjectOverviewGate {
   status: OverviewGateStatus
   key: string | null
   name: string | null
-  source: string | null
+  source: ProjectOverviewGateSource | null
   failedConditions: ProjectOverviewGateCondition[]
 }
 
 export interface ProjectOverviewGateCondition {
-  metric: string
-  operator: string
+  metric: ProjectOverviewGateMetric
+  operator: ProjectOverviewGateOperator
   threshold: number
   actual: number
 }
 
 export interface ProjectOverviewIssueSummary {
-  new: CountMetric
-  accepted: CountMetric
+  newCodeTotal: CountMetric
+  acceptedOverallTotal: CountMetric
 }
 
 export interface ProjectOverviewLens {
@@ -86,7 +106,7 @@ export interface ProjectOverview {
   }
   latestAnalysis: ProjectOverviewAnalysis | null
   gate: ProjectOverviewGate | null
-  issues: ProjectOverviewIssueSummary
+  issueSummary: ProjectOverviewIssueSummary
   lenses: {
     overall: ProjectOverviewLens
     newCode: ProjectOverviewLens
@@ -107,6 +127,23 @@ const REASONS = new Set<UnavailableReason>([
 ])
 const GRADES = new Set<OverviewGrade>(['A', 'B', 'C', 'D', 'E'])
 const GATE_STATUSES = new Set<OverviewGateStatus>(['passed', 'failed'])
+const GATE_OPERATORS = new Set<ProjectOverviewGateOperator>(['<=', '>=', '==', '<', '>'])
+const GATE_SOURCES = new Set<ProjectOverviewGateSource>(['default', 'repository', 'managed'])
+const GATE_METRICS = new Set<ProjectOverviewGateMetric>([
+  'new_critical',
+  'new_high',
+  'new_medium',
+  'new_secret',
+  'new_vulnerability',
+  'new_issues',
+  'total_critical',
+  'duplication_density',
+  'coverage',
+  'security_rating',
+  'reliability_rating',
+  'maintainability_rating',
+])
+const RFC3339_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
 
 const INVALID_PROJECT_OVERVIEW_RESPONSE = 'Invalid project overview response'
 
@@ -128,9 +165,15 @@ function stringValue(value: unknown): string {
   return value
 }
 
-function nullableString(value: unknown): string | null {
+function nonEmptyString(value: unknown): string {
+  const s = stringValue(value)
+  if (s.trim() === '') invalid()
+  return s
+}
+
+function nullableNonEmptyString(value: unknown): string | null {
   if (value === null) return null
-  return stringValue(value)
+  return nonEmptyString(value)
 }
 
 function booleanValue(value: unknown): boolean {
@@ -144,7 +187,7 @@ function finiteNumber(value: unknown): number {
 }
 
 function stringEnum<T extends string>(value: unknown, allowed: Set<T>): T {
-  const v = stringValue(value)
+  const v = nonEmptyString(value)
   if (!allowed.has(v as T)) invalid()
   return v as T
 }
@@ -194,22 +237,24 @@ function countMetric(value: unknown): CountMetric {
 }
 
 function parseTimestamp(value: unknown): string {
-  const s = stringValue(value)
-  if (Number.isNaN(Date.parse(s))) invalid()
+  const s = nonEmptyString(value)
+  if (!RFC3339_INSTANT.test(s) || Number.isNaN(Date.parse(s))) invalid()
   return s
 }
 
 function projectAnalysis(value: unknown): ProjectOverviewAnalysis {
   const raw = record(value)
   const newCode = record(raw.new_code)
-  const baselineAnalysisId = nullableString(newCode.baseline_analysis_id)
+  const baselineAnalysisId = nullableNonEmptyString(newCode.baseline_analysis_id)
   const firstAnalysis = booleanValue(newCode.first_analysis)
   const hasBaseline = booleanValue(newCode.has_baseline)
-  if (firstAnalysis && hasBaseline) invalid()
-  if (!hasBaseline && baselineAnalysisId !== null) invalid()
-  if (hasBaseline && (!baselineAnalysisId || baselineAnalysisId.trim() === '')) invalid()
+  if (firstAnalysis) {
+    if (hasBaseline || baselineAnalysisId !== null) invalid()
+  } else {
+    if (!hasBaseline || baselineAnalysisId === null || baselineAnalysisId.trim() === '') invalid()
+  }
   return {
-    id: stringValue(raw.id),
+    id: nonEmptyString(raw.id),
     createdAt: parseTimestamp(raw.created_at),
     sourceRef: stringValue(raw.source_ref),
     sourceCommit: stringValue(raw.source_commit),
@@ -220,16 +265,19 @@ function projectAnalysis(value: unknown): ProjectOverviewAnalysis {
 function projectGate(value: unknown): ProjectOverviewGate {
   const raw = record(value)
   if (!Array.isArray(raw.failed_conditions)) invalid()
+  const status = stringEnum(raw.status, GATE_STATUSES)
+  if (status === 'passed' && raw.failed_conditions.length !== 0) invalid()
+  if (status === 'failed' && raw.failed_conditions.length === 0) invalid()
   return {
-    status: stringEnum(raw.status, GATE_STATUSES),
-    key: nullableString(raw.key),
-    name: nullableString(raw.name),
-    source: nullableString(raw.source),
+    status,
+    key: nullableNonEmptyString(raw.key),
+    name: nullableNonEmptyString(raw.name),
+    source: raw.source === null ? null : stringEnum(raw.source, GATE_SOURCES),
     failedConditions: raw.failed_conditions.map((item) => {
       const condition = record(item)
       return {
-        metric: stringValue(condition.metric),
-        operator: stringValue(condition.operator),
+        metric: stringEnum(condition.metric, GATE_METRICS),
+        operator: stringEnum(condition.operator, GATE_OPERATORS),
         threshold: finiteNumber(condition.threshold),
         actual: finiteNumber(condition.actual),
       }
@@ -253,7 +301,7 @@ export function mapProjectOverviewResponse(raw: unknown): ProjectOverview {
   const root = record(raw)
   const state = stringEnum(root.state, STATES)
   const project = record(root.project)
-  const issues = record(root.issues)
+  const issueSummary = record(root.issue_summary)
   const lenses = record(root.lenses)
   const latestAnalysis = root.latest_analysis === null ? null : projectAnalysis(root.latest_analysis)
   const gate = root.gate === null ? null : projectGate(root.gate)
@@ -262,14 +310,14 @@ export function mapProjectOverviewResponse(raw: unknown): ProjectOverview {
   return {
     state,
     project: {
-      key: stringValue(project.key),
-      name: stringValue(project.name),
+      key: nonEmptyString(project.key),
+      name: nonEmptyString(project.name),
     },
     latestAnalysis,
     gate,
-    issues: {
-      new: countMetric(issues.new),
-      accepted: countMetric(issues.accepted),
+    issueSummary: {
+      newCodeTotal: countMetric(issueSummary.new_code_total),
+      acceptedOverallTotal: countMetric(issueSummary.accepted_overall_total),
     },
     lenses: {
       overall: overviewLens(lenses.overall),
