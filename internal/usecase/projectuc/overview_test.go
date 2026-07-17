@@ -128,8 +128,8 @@ func TestOverviewNotAnalyzedUsesExplicitUnavailableMetrics(t *testing.T) {
 	assertRatingUnavailable(t, got.NewCode.Maintainability, ReasonNoAnalysis)
 	assertPercentageUnavailable(t, got.Overall.Coverage, MetricUnavailable, ReasonNoAnalysis)
 	assertPercentageUnavailable(t, got.NewCode.Duplications, MetricUnavailable, ReasonNoAnalysis)
-	assertCountUnavailable(t, got.Issues.New, ReasonNoAnalysis)
-	assertCountUnavailable(t, got.Issues.Accepted, ReasonNoAnalysis)
+	assertCountUnavailable(t, got.IssueSummary.NewCodeTotal, ReasonNoAnalysis)
+	assertCountUnavailable(t, got.IssueSummary.AcceptedOverallTotal, ReasonNoAnalysis)
 }
 
 func TestOverviewAnalyzedMapsImmutableSnapshot(t *testing.T) {
@@ -174,8 +174,8 @@ func TestOverviewAnalyzedMapsImmutableSnapshot(t *testing.T) {
 	assertPercentageAvailable(t, got.Overall.Duplications, 4.25)
 	assertPercentageUnavailable(t, got.NewCode.Coverage, MetricUnavailable, ReasonChangedLineMetricsNotAvailable)
 	assertPercentageUnavailable(t, got.Overall.SecurityHotspotsReviewed, MetricUnavailable, ReasonSecurityHotspotsNotAvailable)
-	assertCountAvailable(t, got.Issues.New, 4)
-	assertCountUnavailable(t, got.Issues.Accepted, ReasonIssueLifecycleNotAvailable)
+	assertCountAvailable(t, got.IssueSummary.NewCodeTotal, 4)
+	assertCountUnavailable(t, got.IssueSummary.AcceptedOverallTotal, ReasonIssueLifecycleNotAvailable)
 	if got.Gate == nil || got.Gate.Status != OverviewGateFailed || len(got.Gate.FailedConditions) != 1 || got.Gate.FailedConditions[0].Metric != "new_high" {
 		t.Fatalf("gate=%+v", got.Gate)
 	}
@@ -250,6 +250,42 @@ func TestOverviewRejectsInvalidPersistedEvidence(t *testing.T) {
 			a.Gate = qualitygate.Result{Passed: false, Results: []qualitygate.ConditionResult{{Condition: qualitygate.Condition{Metric: "coverage", Op: qualitygate.OpGE, Threshold: math.NaN()}, Actual: 1}}}
 			return a
 		},
+		"bad gate actual": func(a projectanalysis.Analysis) projectanalysis.Analysis {
+			a.Gate = qualitygate.Result{Passed: false, Results: []qualitygate.ConditionResult{{Condition: qualitygate.Condition{Metric: "coverage", Op: qualitygate.OpGE, Threshold: 80}, Actual: math.Inf(1)}}}
+			return a
+		},
+		"bad gate metric": func(a projectanalysis.Analysis) projectanalysis.Analysis {
+			a.Gate = qualitygate.Result{Passed: false, Results: []qualitygate.ConditionResult{{Condition: qualitygate.Condition{Metric: "mystery", Op: qualitygate.OpGE, Threshold: 80}, Actual: 70}}}
+			return a
+		},
+		"bad gate operator": func(a projectanalysis.Analysis) projectanalysis.Analysis {
+			a.Gate = qualitygate.Result{Passed: false, Results: []qualitygate.ConditionResult{{Condition: qualitygate.Condition{Metric: "coverage", Op: qualitygate.Op("!="), Threshold: 80}, Actual: 70}}}
+			return a
+		},
+		"bad gate source": func(a projectanalysis.Analysis) projectanalysis.Analysis {
+			a.GateInfo.Source = "custom"
+			return a
+		},
+		"inconsistent passed gate": func(a projectanalysis.Analysis) projectanalysis.Analysis {
+			a.Gate = qualitygate.Result{Passed: true, Results: []qualitygate.ConditionResult{{Condition: qualitygate.Condition{Metric: "coverage", Op: qualitygate.OpGE, Threshold: 80}, Actual: 70, Passed: false}}}
+			return a
+		},
+		"inconsistent failed gate": func(a projectanalysis.Analysis) projectanalysis.Analysis {
+			a.Gate = qualitygate.Result{Passed: false, Results: []qualitygate.ConditionResult{{Condition: qualitygate.Condition{Metric: "coverage", Op: qualitygate.OpGE, Threshold: 80}, Actual: 90, Passed: true}}}
+			return a
+		},
+		"empty analysis id": func(a projectanalysis.Analysis) projectanalysis.Analysis {
+			a.ID = " "
+			return a
+		},
+		"zero timestamp": func(a projectanalysis.Analysis) projectanalysis.Analysis {
+			a.CreatedAt = time.Time{}
+			return a
+		},
+		"blank baseline id": func(a projectanalysis.Analysis) projectanalysis.Analysis {
+			a.NewCode.PreviousID = " "
+			return a
+		},
 		"bad count": func(a projectanalysis.Analysis) projectanalysis.Analysis {
 			a.NewCode.Counts.Total = -1
 			return a
@@ -263,6 +299,127 @@ func TestOverviewRejectsInvalidPersistedEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestOverviewGateAcceptsSupportedOperators(t *testing.T) {
+	for _, op := range []qualitygate.Op{qualitygate.OpLE, qualitygate.OpGE, qualitygate.OpEQ, qualitygate.OpLT, qualitygate.OpGT} {
+		t.Run(string(op), func(t *testing.T) {
+			gate, err := overviewGate(qualitygate.Result{
+				Passed: false,
+				Results: []qualitygate.ConditionResult{{
+					Condition: qualitygate.Condition{Metric: qualitygate.MetricNewHigh, Op: op, Threshold: 1},
+					Actual:    2,
+					Passed:    false,
+				}},
+			}, projectanalysis.GateInfo{Source: "managed"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := gate.FailedConditions[0].Operator; string(got) != string(op) {
+				t.Fatalf("operator=%q, want %q", got, op)
+			}
+		})
+	}
+}
+
+func TestOverviewGateRejectsInvalidConditionEvidence(t *testing.T) {
+	tests := map[string]qualitygate.ConditionResult{
+		"empty metric":       {Condition: qualitygate.Condition{Metric: "", Op: qualitygate.OpLE, Threshold: 0}, Actual: 1},
+		"whitespace metric":  {Condition: qualitygate.Condition{Metric: " ", Op: qualitygate.OpLE, Threshold: 0}, Actual: 1},
+		"unknown metric":     {Condition: qualitygate.Condition{Metric: "unknown", Op: qualitygate.OpLE, Threshold: 0}, Actual: 1},
+		"nan threshold":      {Condition: qualitygate.Condition{Metric: qualitygate.MetricNewHigh, Op: qualitygate.OpLE, Threshold: math.NaN()}, Actual: 1},
+		"positive threshold": {Condition: qualitygate.Condition{Metric: qualitygate.MetricNewHigh, Op: qualitygate.OpLE, Threshold: math.Inf(1)}, Actual: 1},
+		"negative threshold": {Condition: qualitygate.Condition{Metric: qualitygate.MetricNewHigh, Op: qualitygate.OpLE, Threshold: math.Inf(-1)}, Actual: 1},
+		"nan actual":         {Condition: qualitygate.Condition{Metric: qualitygate.MetricNewHigh, Op: qualitygate.OpLE, Threshold: 0}, Actual: math.NaN()},
+		"positive actual":    {Condition: qualitygate.Condition{Metric: qualitygate.MetricNewHigh, Op: qualitygate.OpLE, Threshold: 0}, Actual: math.Inf(1)},
+		"negative actual":    {Condition: qualitygate.Condition{Metric: qualitygate.MetricNewHigh, Op: qualitygate.OpLE, Threshold: 0}, Actual: math.Inf(-1)},
+		"bad operator":       {Condition: qualitygate.Condition{Metric: qualitygate.MetricNewHigh, Op: qualitygate.Op("approximately"), Threshold: 0}, Actual: 1},
+	}
+	for name, result := range tests {
+		t.Run(name, func(t *testing.T) {
+			result.Passed = false
+			_, err := overviewGate(qualitygate.Result{Passed: false, Results: []qualitygate.ConditionResult{result}}, projectanalysis.GateInfo{Source: "managed"})
+			if err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
+func TestOverviewGateSources(t *testing.T) {
+	for _, source := range []string{"", "default", "repository", "managed", " managed "} {
+		t.Run(source, func(t *testing.T) {
+			_, err := overviewGate(qualitygate.Result{Passed: true}, projectanalysis.GateInfo{Source: source})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	if _, err := overviewGate(qualitygate.Result{Passed: true}, projectanalysis.GateInfo{Source: "imported"}); err == nil {
+		t.Fatal("expected error for unknown gate source")
+	}
+}
+
+func TestOverviewGateConsistencyAndOrder(t *testing.T) {
+	gate, err := overviewGate(qualitygate.Result{Passed: false, Results: []qualitygate.ConditionResult{
+		{Condition: qualitygate.Condition{Metric: qualitygate.MetricNewHigh, Op: qualitygate.OpLE, Threshold: 0}, Actual: 2, Passed: false},
+		{Condition: qualitygate.Condition{Metric: qualitygate.MetricCoveragePct, Op: qualitygate.OpGE, Threshold: 80}, Actual: 90, Passed: true},
+		{Condition: qualitygate.Condition{Metric: qualitygate.MetricNewCritical, Op: qualitygate.OpLE, Threshold: 0}, Actual: 1, Passed: false},
+	}}, projectanalysis.GateInfo{Source: "repository"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gate.FailedConditions) != 2 || gate.FailedConditions[0].Metric != qualitygate.MetricNewHigh || gate.FailedConditions[1].Metric != qualitygate.MetricNewCritical {
+		t.Fatalf("failed conditions=%+v", gate.FailedConditions)
+	}
+	if _, err := overviewGate(qualitygate.Result{Passed: false}, projectanalysis.GateInfo{}); err == nil {
+		t.Fatal("expected failed gate with no results to fail closed")
+	}
+	if _, err := overviewGate(qualitygate.Result{Passed: true}, projectanalysis.GateInfo{}); err != nil {
+		t.Fatalf("passed gate with no results should remain valid for legacy snapshots: %v", err)
+	}
+}
+
+func TestOverviewRejectsInvalidProjectIdentity(t *testing.T) {
+	for name, mutate := range map[string]func(*project.Project){
+		"empty key":  func(p *project.Project) { p.Key = " " },
+		"empty name": func(p *project.Project) { p.Name = " " },
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := overviewTestProject()
+			mutate(p)
+			if _, err := validateOverviewProject(p); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
+func TestOverviewNewCodePeriodRequiresExactStates(t *testing.T) {
+	id := "analysis-1"
+	valid := []OverviewNewCodePeriod{
+		{FirstAnalysis: true},
+		{HasBaseline: true, BaselineAnalysisID: &id},
+	}
+	for _, period := range valid {
+		if err := validateNewCodePeriod(period); err != nil {
+			t.Fatalf("period=%+v error=%v", period, err)
+		}
+	}
+	invalid := []OverviewNewCodePeriod{
+		{FirstAnalysis: true, HasBaseline: true, BaselineAnalysisID: &id},
+		{},
+		{BaselineAnalysisID: &id},
+		{HasBaseline: true},
+		{HasBaseline: true, BaselineAnalysisID: ptrString(" ")},
+	}
+	for _, period := range invalid {
+		if err := validateNewCodePeriod(period); err == nil {
+			t.Fatalf("period=%+v expected error", period)
+		}
+	}
+}
+
+func ptrString(value string) *string { return &value }
 
 func assertRatingAvailable(t *testing.T, got RatingMetric, grade OverviewGrade) {
 	t.Helper()

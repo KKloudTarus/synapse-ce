@@ -114,6 +114,29 @@ func TestProjectOverviewPassedGateEmitsEmptyFailedConditions(t *testing.T) {
 	}
 }
 
+func TestProjectOverviewFailedConditionsPreserveOrder(t *testing.T) {
+	overview := analyzedProjectOverviewFixture()
+	overview.Gate.FailedConditions = []projectuc.OverviewGateCondition{
+		{Metric: "new_high", Operator: projectuc.OverviewGateOperatorLE, Threshold: 0, Actual: 2},
+		{Metric: "new_critical", Operator: projectuc.OverviewGateOperatorLE, Threshold: 0, Actual: 1},
+	}
+	rt := &Router{log: discardLog(), projects: &projectOverviewServiceStub{overview: overview}}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/payments-api/overview", nil)
+	req.SetPathValue("key", "payments-api")
+	rec := httptest.NewRecorder()
+
+	rt.projectOverview(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	first := strings.Index(rec.Body.String(), `"metric":"new_high"`)
+	second := strings.Index(rec.Body.String(), `"metric":"new_critical"`)
+	if first < 0 || second < 0 || first > second {
+		t.Fatalf("failed conditions order not preserved: %s", rec.Body.String())
+	}
+}
+
 func TestProjectOverviewErrors(t *testing.T) {
 	for name, tc := range map[string]struct {
 		err       error
@@ -187,7 +210,8 @@ func analyzedProjectOverviewFixture() projectuc.Overview {
 	reasonChanged := projectuc.ReasonChangedLineMetricsNotAvailable
 	reasonHotspots := projectuc.ReasonSecurityHotspotsNotAvailable
 	reasonAccepted := projectuc.ReasonIssueLifecycleNotAvailable
-	gateKey, gateName, gateSource := "release", "Release", "managed"
+	gateKey, gateName := "release", "Release"
+	gateSource := projectuc.OverviewGateSourceManaged
 	baselineID := "analysis-41"
 	return projectuc.Overview{
 		State: projectuc.OverviewStateAnalyzed,
@@ -205,11 +229,11 @@ func analyzedProjectOverviewFixture() projectuc.Overview {
 		},
 		Gate: &projectuc.OverviewGate{
 			Status: projectuc.OverviewGateFailed, Key: &gateKey, Name: &gateName, Source: &gateSource,
-			FailedConditions: []projectuc.OverviewGateCondition{{Metric: "new_high", Operator: "<=", Threshold: 0, Actual: 2}},
+			FailedConditions: []projectuc.OverviewGateCondition{{Metric: "new_high", Operator: projectuc.OverviewGateOperatorLE, Threshold: 0, Actual: 2}},
 		},
-		Issues: projectuc.OverviewIssueSummary{
-			New:      projectuc.CountMetric{Availability: projectuc.MetricAvailable, Value: &newIssues},
-			Accepted: projectuc.CountMetric{Availability: projectuc.MetricUnavailable, UnavailableReason: &reasonAccepted},
+		IssueSummary: projectuc.OverviewIssueSummary{
+			NewCodeTotal:         projectuc.CountMetric{Availability: projectuc.MetricAvailable, Value: &newIssues},
+			AcceptedOverallTotal: projectuc.CountMetric{Availability: projectuc.MetricUnavailable, UnavailableReason: &reasonAccepted},
 		},
 		Overall: projectuc.OverviewLens{
 			Security:                 projectuc.RatingMetric{Availability: projectuc.MetricAvailable, Grade: &gradeB},
@@ -237,9 +261,9 @@ func notAnalyzedProjectOverviewFixture() projectuc.Overview {
 	return projectuc.Overview{
 		State:   projectuc.OverviewStateNotAnalyzed,
 		Project: projectuc.OverviewProject{Key: "payments-api", Name: "Payments API"},
-		Issues: projectuc.OverviewIssueSummary{
-			New:      projectuc.CountMetric{Availability: projectuc.MetricUnavailable, UnavailableReason: &reason},
-			Accepted: projectuc.CountMetric{Availability: projectuc.MetricUnavailable, UnavailableReason: &reason},
+		IssueSummary: projectuc.OverviewIssueSummary{
+			NewCodeTotal:         projectuc.CountMetric{Availability: projectuc.MetricUnavailable, UnavailableReason: &reason},
+			AcceptedOverallTotal: projectuc.CountMetric{Availability: projectuc.MetricUnavailable, UnavailableReason: &reason},
 		},
 		Overall: projectuc.OverviewLens{
 			Security: unavailableRating, Reliability: unavailableRating, Maintainability: unavailableRating,

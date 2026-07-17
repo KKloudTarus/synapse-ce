@@ -61,6 +61,24 @@ const (
 	OverviewGateFailed OverviewGateStatus = "failed"
 )
 
+type OverviewGateOperator string
+
+const (
+	OverviewGateOperatorLE OverviewGateOperator = "<="
+	OverviewGateOperatorGE OverviewGateOperator = ">="
+	OverviewGateOperatorEQ OverviewGateOperator = "=="
+	OverviewGateOperatorLT OverviewGateOperator = "<"
+	OverviewGateOperatorGT OverviewGateOperator = ">"
+)
+
+type OverviewGateSource string
+
+const (
+	OverviewGateSourceDefault    OverviewGateSource = "default"
+	OverviewGateSourceRepository OverviewGateSource = "repository"
+	OverviewGateSourceManaged    OverviewGateSource = "managed"
+)
+
 type RatingMetric struct {
 	Availability      MetricAvailability
 	Grade             *OverviewGrade
@@ -100,7 +118,7 @@ type OverviewAnalysis struct {
 
 type OverviewGateCondition struct {
 	Metric    string
-	Operator  string
+	Operator  OverviewGateOperator
 	Threshold float64
 	Actual    float64
 }
@@ -109,13 +127,13 @@ type OverviewGate struct {
 	Status           OverviewGateStatus
 	Key              *string
 	Name             *string
-	Source           *string
+	Source           *OverviewGateSource
 	FailedConditions []OverviewGateCondition
 }
 
 type OverviewIssueSummary struct {
-	New      CountMetric
-	Accepted CountMetric
+	NewCodeTotal         CountMetric
+	AcceptedOverallTotal CountMetric
 }
 
 type OverviewLens struct {
@@ -132,13 +150,20 @@ type Overview struct {
 	Project        OverviewProject
 	LatestAnalysis *OverviewAnalysis
 	Gate           *OverviewGate
-	Issues         OverviewIssueSummary
+	IssueSummary   OverviewIssueSummary
 	Overall        OverviewLens
 	NewCode        OverviewLens
 }
 
 func (s *Service) Overview(ctx context.Context, tenantID shared.ID, key string) (Overview, error) {
+	if strings.TrimSpace(key) == "" {
+		return Overview{}, fmt.Errorf("%w: project key is required", shared.ErrValidation)
+	}
 	p, err := s.Get(ctx, tenantID, key)
+	if err != nil {
+		return Overview{}, err
+	}
+	projectView, err := validateOverviewProject(p)
 	if err != nil {
 		return Overview{}, err
 	}
@@ -151,19 +176,19 @@ func (s *Service) Overview(ctx context.Context, tenantID shared.ID, key string) 
 	}
 	analysis, ok := latest[p.ID]
 	if !ok {
-		return notAnalyzedOverview(p), nil
+		return notAnalyzedOverview(projectView), nil
 	}
 	return analyzedOverview(p, analysis)
 }
 
-func notAnalyzedOverview(p *project.Project) Overview {
+func notAnalyzedOverview(p OverviewProject) Overview {
 	reason := ReasonNoAnalysis
 	return Overview{
 		State:   OverviewStateNotAnalyzed,
-		Project: overviewProject(p),
-		Issues: OverviewIssueSummary{
-			New:      unavailableCount(reason),
-			Accepted: unavailableCount(reason),
+		Project: p,
+		IssueSummary: OverviewIssueSummary{
+			NewCodeTotal:         unavailableCount(reason),
+			AcceptedOverallTotal: unavailableCount(reason),
 		},
 		Overall: noAnalysisLens(),
 		NewCode: noAnalysisLens(),
@@ -171,6 +196,10 @@ func notAnalyzedOverview(p *project.Project) Overview {
 }
 
 func analyzedOverview(p *project.Project, analysis projectanalysis.Analysis) (Overview, error) {
+	projectView, err := validateOverviewProject(p)
+	if err != nil {
+		return Overview{}, err
+	}
 	overall, err := overallLens(analysis)
 	if err != nil {
 		return Overview{}, err
@@ -187,18 +216,21 @@ func analyzedOverview(p *project.Project, analysis projectanalysis.Analysis) (Ov
 	if err != nil {
 		return Overview{}, fmt.Errorf("invalid new issue count: %w", err)
 	}
-	latest := overviewAnalysis(analysis)
+	latest, err := overviewAnalysis(analysis)
+	if err != nil {
+		return Overview{}, err
+	}
 	if err := validateNewCodePeriod(latest.NewCode); err != nil {
 		return Overview{}, err
 	}
 	return Overview{
 		State:          OverviewStateAnalyzed,
-		Project:        overviewProject(p),
+		Project:        projectView,
 		LatestAnalysis: &latest,
 		Gate:           &gate,
-		Issues: OverviewIssueSummary{
-			New:      newIssues,
-			Accepted: unavailableCount(ReasonIssueLifecycleNotAvailable),
+		IssueSummary: OverviewIssueSummary{
+			NewCodeTotal:         newIssues,
+			AcceptedOverallTotal: unavailableCount(ReasonIssueLifecycleNotAvailable),
 		},
 		Overall: overall,
 		NewCode: newCode,
@@ -206,28 +238,60 @@ func analyzedOverview(p *project.Project, analysis projectanalysis.Analysis) (Ov
 }
 
 func overviewProject(p *project.Project) OverviewProject {
-	return OverviewProject{Key: p.Key, Name: p.Name}
+	key, name := strings.TrimSpace(p.Key), strings.TrimSpace(p.Name)
+	return OverviewProject{Key: key, Name: name}
 }
 
-func overviewAnalysis(analysis projectanalysis.Analysis) OverviewAnalysis {
+func validateOverviewProject(p *project.Project) (OverviewProject, error) {
+	if p == nil {
+		return OverviewProject{}, fmt.Errorf("project snapshot is required")
+	}
+	out := overviewProject(p)
+	if out.Key == "" {
+		return OverviewProject{}, fmt.Errorf("project key is required")
+	}
+	if out.Name == "" {
+		return OverviewProject{}, fmt.Errorf("project name is required")
+	}
+	return out, nil
+}
+
+func overviewAnalysis(analysis projectanalysis.Analysis) (OverviewAnalysis, error) {
+	id := strings.TrimSpace(analysis.ID)
+	if id == "" {
+		return OverviewAnalysis{}, fmt.Errorf("analysis id is required")
+	}
+	if analysis.CreatedAt.IsZero() {
+		return OverviewAnalysis{}, fmt.Errorf("analysis created_at is required")
+	}
 	period := OverviewNewCodePeriod{FirstAnalysis: true}
-	if previous := strings.TrimSpace(analysis.NewCode.PreviousID); previous != "" {
+	if analysis.NewCode.PreviousID != "" {
+		previous := strings.TrimSpace(analysis.NewCode.PreviousID)
+		if previous == "" {
+			return OverviewAnalysis{}, fmt.Errorf("baseline analysis id is required")
+		}
 		period = OverviewNewCodePeriod{HasBaseline: true, BaselineAnalysisID: &previous}
 	}
 	return OverviewAnalysis{
-		ID: analysis.ID, CreatedAt: analysis.CreatedAt, SourceRef: analysis.SourceRef,
+		ID: id, CreatedAt: analysis.CreatedAt, SourceRef: analysis.SourceRef,
 		SourceCommit: analysis.SourceCommit, NewCode: period,
-	}
+	}, nil
 }
 
 func validateNewCodePeriod(period OverviewNewCodePeriod) error {
 	if period.FirstAnalysis && period.HasBaseline {
 		return fmt.Errorf("invalid new-code period: first analysis cannot have a baseline")
 	}
-	if !period.HasBaseline && period.BaselineAnalysisID != nil {
-		return fmt.Errorf("invalid new-code period: baseline id without baseline")
+	if period.FirstAnalysis {
+		if period.BaselineAnalysisID != nil {
+			return fmt.Errorf("invalid new-code period: baseline id without baseline")
+		}
+		return nil
 	}
-	if period.HasBaseline && (period.BaselineAnalysisID == nil || strings.TrimSpace(*period.BaselineAnalysisID) == "") {
+	if !period.HasBaseline {
+		return fmt.Errorf("invalid new-code period: baseline is required after first analysis")
+	}
+	if period.BaselineAnalysisID == nil || strings.TrimSpace(*period.BaselineAnalysisID) == "" {
 		return fmt.Errorf("invalid new-code period: baseline id is required")
 	}
 	return nil
@@ -402,31 +466,97 @@ func overviewGate(gate qualitygate.Result, info projectanalysis.GateInfo) (Overv
 	if gate.Passed {
 		status = OverviewGatePassed
 	}
+	source, err := overviewGateSource(info.Source)
+	if err != nil {
+		return OverviewGate{}, err
+	}
 	out := OverviewGate{
 		Status:           status,
 		Key:              nonEmptyString(info.Key),
 		Name:             nonEmptyString(info.Name),
-		Source:           nonEmptyString(info.Source),
+		Source:           source,
 		FailedConditions: []OverviewGateCondition{},
 	}
+	allPassed := true
 	for _, result := range gate.Results {
-		if math.IsNaN(result.Condition.Threshold) || math.IsInf(result.Condition.Threshold, 0) || math.IsNaN(result.Actual) || math.IsInf(result.Actual, 0) {
+		metric := strings.TrimSpace(result.Condition.Metric)
+		if metric == "" {
+			return OverviewGate{}, fmt.Errorf("gate condition metric is required")
+		}
+		if !qualitygate.ValidMetric(metric) {
+			return OverviewGate{}, fmt.Errorf("unsupported gate condition metric")
+		}
+		operator, err := overviewGateOperator(result.Condition.Op)
+		if err != nil {
+			return OverviewGate{}, err
+		}
+		if !finiteNumber(result.Condition.Threshold) || !finiteNumber(result.Actual) {
 			return OverviewGate{}, fmt.Errorf("invalid gate condition evidence")
 		}
-		if result.Passed {
-			continue
+		if !result.Passed {
+			allPassed = false
+			out.FailedConditions = append(out.FailedConditions, OverviewGateCondition{
+				Metric: metric, Operator: operator,
+				Threshold: result.Condition.Threshold, Actual: result.Actual,
+			})
 		}
-		out.FailedConditions = append(out.FailedConditions, OverviewGateCondition{
-			Metric: result.Condition.Metric, Operator: string(result.Condition.Op),
-			Threshold: result.Condition.Threshold, Actual: result.Actual,
-		})
+	}
+	if gate.Passed != allPassed {
+		return OverviewGate{}, fmt.Errorf("inconsistent gate result")
+	}
+	if gate.Passed && len(out.FailedConditions) != 0 {
+		return OverviewGate{}, fmt.Errorf("passed gate has failed conditions")
+	}
+	if !gate.Passed && len(out.FailedConditions) == 0 {
+		return OverviewGate{}, fmt.Errorf("failed gate has no failed conditions")
 	}
 	return out, nil
 }
 
 func nonEmptyString(value string) *string {
+	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil
 	}
 	return &value
+}
+
+func overviewGateOperator(op qualitygate.Op) (OverviewGateOperator, error) {
+	switch op {
+	case qualitygate.OpLE:
+		return OverviewGateOperatorLE, nil
+	case qualitygate.OpGE:
+		return OverviewGateOperatorGE, nil
+	case qualitygate.OpEQ:
+		return OverviewGateOperatorEQ, nil
+	case qualitygate.OpLT:
+		return OverviewGateOperatorLT, nil
+	case qualitygate.OpGT:
+		return OverviewGateOperatorGT, nil
+	default:
+		return "", fmt.Errorf("unsupported gate operator")
+	}
+}
+
+func overviewGateSource(source string) (*OverviewGateSource, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return nil, nil
+	}
+	var out OverviewGateSource
+	switch source {
+	case string(OverviewGateSourceDefault):
+		out = OverviewGateSourceDefault
+	case string(OverviewGateSourceRepository):
+		out = OverviewGateSourceRepository
+	case string(OverviewGateSourceManaged):
+		out = OverviewGateSourceManaged
+	default:
+		return nil, fmt.Errorf("unsupported gate source")
+	}
+	return &out, nil
+}
+
+func finiteNumber(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
 }

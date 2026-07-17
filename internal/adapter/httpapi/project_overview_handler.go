@@ -13,7 +13,7 @@ type projectOverviewResponse struct {
 	Project        projectOverviewProjectDTO   `json:"project"`
 	LatestAnalysis *projectOverviewAnalysisDTO `json:"latest_analysis"`
 	Gate           *projectOverviewGateDTO     `json:"gate"`
-	Issues         projectOverviewIssuesDTO    `json:"issues"`
+	IssueSummary   projectOverviewIssuesDTO    `json:"issue_summary"`
 	Lenses         projectOverviewLensesDTO    `json:"lenses"`
 }
 
@@ -52,8 +52,8 @@ type projectOverviewGateConditionDTO struct {
 }
 
 type projectOverviewIssuesDTO struct {
-	New      projectOverviewCountMetricDTO `json:"new"`
-	Accepted projectOverviewCountMetricDTO `json:"accepted"`
+	NewCodeTotal         projectOverviewCountMetricDTO `json:"new_code_total"`
+	AcceptedOverallTotal projectOverviewCountMetricDTO `json:"accepted_overall_total"`
 }
 
 type projectOverviewLensesDTO struct {
@@ -118,12 +118,12 @@ func projectOverviewDTO(overview projectuc.Overview) projectOverviewResponse {
 			Status:           string(overview.Gate.Status),
 			Key:              overview.Gate.Key,
 			Name:             overview.Gate.Name,
-			Source:           overview.Gate.Source,
+			Source:           overviewGateSourceString(overview.Gate.Source),
 			FailedConditions: make([]projectOverviewGateConditionDTO, len(overview.Gate.FailedConditions)),
 		}
 		for i, condition := range overview.Gate.FailedConditions {
 			gate.FailedConditions[i] = projectOverviewGateConditionDTO{
-				Metric: condition.Metric, Operator: condition.Operator,
+				Metric: condition.Metric, Operator: string(condition.Operator),
 				Threshold: condition.Threshold, Actual: condition.Actual,
 			}
 		}
@@ -136,9 +136,9 @@ func projectOverviewDTO(overview projectuc.Overview) projectOverviewResponse {
 		},
 		LatestAnalysis: latest,
 		Gate:           gate,
-		Issues: projectOverviewIssuesDTO{
-			New:      projectOverviewCountMetricDTOFromUsecase(overview.Issues.New),
-			Accepted: projectOverviewCountMetricDTOFromUsecase(overview.Issues.Accepted),
+		IssueSummary: projectOverviewIssuesDTO{
+			NewCodeTotal:         projectOverviewCountMetricDTOFromUsecase(overview.IssueSummary.NewCodeTotal),
+			AcceptedOverallTotal: projectOverviewCountMetricDTOFromUsecase(overview.IssueSummary.AcceptedOverallTotal),
 		},
 		Lenses: projectOverviewLensesDTO{
 			Overall: projectOverviewLensDTOFromUsecase(overview.Overall),
@@ -195,5 +195,13 @@ func overviewReasonString(reason *projectuc.UnavailableReason) *string {
 		return nil
 	}
 	value := string(*reason)
+	return &value
+}
+
+func overviewGateSourceString(source *projectuc.OverviewGateSource) *string {
+	if source == nil {
+		return nil
+	}
+	value := string(*source)
 	return &value
 }
