@@ -49,6 +49,7 @@ import type {
   QualityGate,
   Grade,
 } from './types'
+import { mapProjectOverviewResponse, type ProjectOverview } from './projectOverview'
 
 export class ApiError extends Error {
   constructor(
@@ -838,6 +839,9 @@ export const api = {
 
   getProject: async (key: string): Promise<Project> =>
     mapProject(await req(`/projects/${encodeURIComponent(key)}`)),
+
+  projectOverview: async (key: string): Promise<ProjectOverview> =>
+    mapProjectOverviewResponse(await req(`/projects/${encodeURIComponent(key)}/overview`)),
 
   assignProjectGate: async (key: string, gateId: string): Promise<Project> =>
     mapProject(await req(`/projects/${encodeURIComponent(key)}/gate`, { method: 'PUT', body: JSON.stringify({ gate_id: gateId }) })),

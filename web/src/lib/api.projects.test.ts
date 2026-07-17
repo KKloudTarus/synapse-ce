@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from './api'
+import { mapProjectOverviewResponse } from './projectOverview'
 
 describe('Projects API', () => {
   let fetchSpy: any
@@ -42,6 +43,84 @@ describe('Projects API', () => {
     expect(fetchSpy).toHaveBeenCalledWith('/api/v1/projects/a%20b', expect.any(Object))
   })
 
+  it('maps project overview and encodes project keys', async () => {
+    fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => overviewAnalyzedWire() } as Response)
+    const overview = await api.projectOverview('a b')
+    expect(fetchSpy).toHaveBeenCalledWith('/api/v1/projects/a%20b/overview', expect.any(Object))
+    expect(overview).toMatchObject({
+      state: 'analyzed',
+      project: { key: 'payments-api', name: 'Payments API' },
+      latestAnalysis: {
+        id: 'analysis-42',
+        sourceRef: 'main',
+        newCode: { hasBaseline: true, baselineAnalysisId: 'analysis-41' },
+      },
+      gate: {
+        status: 'failed',
+        failedConditions: [{ metric: 'new_high', operator: '<=', threshold: 0, actual: 2 }],
+      },
+      issues: {
+        new: { availability: 'available', value: 4, unavailableReason: null },
+        accepted: { availability: 'unavailable', value: null, unavailableReason: 'issue_lifecycle_not_available' },
+      },
+      lenses: {
+        overall: { coverage: { availability: 'available', value: 72.349 } },
+        newCode: { coverage: { availability: 'unavailable', unavailableReason: 'changed_line_metrics_not_available' } },
+      },
+    })
+  })
+
+  it('preserves not-analyzed overview nulls', () => {
+    const overview = mapProjectOverviewResponse(overviewNotAnalyzedWire())
+    expect(overview).toMatchObject({
+      state: 'not_analyzed',
+      latestAnalysis: null,
+      gate: null,
+      issues: { new: { value: null, unavailableReason: 'no_analysis' } },
+      lenses: { overall: { security: { grade: null, unavailableReason: 'no_analysis' } } },
+    })
+  })
+
+  it('does not convert project overview 404 to null', async () => {
+    fetchSpy.mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ error: 'not found' }) } as Response)
+    await expect(api.projectOverview('missing')).rejects.toThrow('not found')
+  })
+
+  it('rejects malformed project overview contracts without raw payload leakage', () => {
+    const cases: Array<[string, (raw: any) => void]> = [
+      ['unknown state', raw => { raw.state = 'done' }],
+      ['unknown availability', raw => { raw.lenses.overall.coverage.availability = 'maybe' }],
+      ['unknown grade', raw => { raw.lenses.overall.security.grade = 'S' }],
+      ['available rating missing grade', raw => { raw.lenses.overall.security.grade = null }],
+      ['unavailable rating with grade', raw => { raw.lenses.new_code.maintainability.grade = 'A' }],
+      ['available percentage null', raw => { raw.lenses.overall.coverage.value = null }],
+      ['out of range percentage', raw => { raw.lenses.overall.coverage.value = 101 }],
+      ['negative count', raw => { raw.issues.new.value = -1 }],
+      ['fractional count', raw => { raw.issues.new.value = 1.5 }],
+      ['unknown reason', raw => { raw.issues.accepted.unavailable_reason = 'later' }],
+      ['invalid timestamp', raw => { raw.latest_analysis.created_at = 'not-a-date' }],
+      ['non-finite gate number', raw => { raw.gate.failed_conditions[0].actual = Number.POSITIVE_INFINITY }],
+    ]
+    for (const [name, mutate] of cases) {
+      const raw = overviewAnalyzedWire()
+      mutate(raw)
+      expect(() => mapProjectOverviewResponse(raw), name).toThrow('Invalid project overview response')
+      try {
+        mapProjectOverviewResponse(raw)
+      } catch (err) {
+        expect(String(err)).not.toContain('payments-api')
+        expect(String(err)).not.toContain('secret')
+      }
+    }
+  })
+
+  it('does not mutate project overview raw responses', () => {
+    const raw = overviewAnalyzedWire()
+    const before = JSON.stringify(raw)
+    mapProjectOverviewResponse(raw)
+    expect(JSON.stringify(raw)).toBe(before)
+  })
+
   it('keeps an unavailable first delta null', async () => {
     fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ items: [{ id: 'a1', delta: null, gate: { passed: true, results: [] } }] }) } as Response)
     const page = await api.projectAnalyses('project')
@@ -71,3 +150,79 @@ describe('Projects API', () => {
     expect(fetchSpy).toHaveBeenCalledWith('/api/v1/projects/a%20b/analyses?limit=25&before_created_at=2026-07-18T00%3A00%3A00Z&before_id=a2', expect.any(Object))
   })
 })
+
+function overviewAnalyzedWire(): any {
+  return {
+    state: 'analyzed',
+    project: { key: 'payments-api', name: 'Payments API' },
+    latest_analysis: {
+      id: 'analysis-42',
+      created_at: '2026-07-17T10:00:00Z',
+      source_ref: 'main',
+      source_commit: 'abc123',
+      new_code: { first_analysis: false, has_baseline: true, baseline_analysis_id: 'analysis-41' },
+    },
+    gate: {
+      status: 'failed',
+      key: 'release',
+      name: 'Release',
+      source: 'managed',
+      failed_conditions: [{ metric: 'new_high', operator: '<=', threshold: 0, actual: 2 }],
+    },
+    issues: {
+      new: { availability: 'available', value: 4, unavailable_reason: null },
+      accepted: { availability: 'unavailable', value: null, unavailable_reason: 'issue_lifecycle_not_available' },
+    },
+    lenses: {
+      overall: {
+        security: { availability: 'available', grade: 'B', unavailable_reason: null },
+        reliability: { availability: 'available', grade: 'A', unavailable_reason: null },
+        maintainability: { availability: 'available', grade: 'C', unavailable_reason: null },
+        security_hotspots_reviewed: { availability: 'unavailable', value: null, unavailable_reason: 'security_hotspots_not_available' },
+        coverage: { availability: 'available', value: 72.349, unavailable_reason: null },
+        duplications: { availability: 'available', value: 4.25, unavailable_reason: null },
+      },
+      new_code: {
+        security: { availability: 'available', grade: 'A', unavailable_reason: null },
+        reliability: { availability: 'available', grade: 'B', unavailable_reason: null },
+        maintainability: { availability: 'unavailable', grade: null, unavailable_reason: 'changed_line_metrics_not_available' },
+        security_hotspots_reviewed: { availability: 'unavailable', value: null, unavailable_reason: 'security_hotspots_not_available' },
+        coverage: { availability: 'unavailable', value: null, unavailable_reason: 'changed_line_metrics_not_available' },
+        duplications: { availability: 'unavailable', value: null, unavailable_reason: 'changed_line_metrics_not_available' },
+      },
+    },
+  }
+}
+
+function overviewNotAnalyzedWire(): any {
+  const rating = { availability: 'unavailable', grade: null, unavailable_reason: 'no_analysis' }
+  const percentage = { availability: 'unavailable', value: null, unavailable_reason: 'no_analysis' }
+  return {
+    state: 'not_analyzed',
+    project: { key: 'payments-api', name: 'Payments API' },
+    latest_analysis: null,
+    gate: null,
+    issues: {
+      new: { availability: 'unavailable', value: null, unavailable_reason: 'no_analysis' },
+      accepted: { availability: 'unavailable', value: null, unavailable_reason: 'no_analysis' },
+    },
+    lenses: {
+      overall: {
+        security: { ...rating },
+        reliability: { ...rating },
+        maintainability: { ...rating },
+        security_hotspots_reviewed: { ...percentage },
+        coverage: { ...percentage },
+        duplications: { ...percentage },
+      },
+      new_code: {
+        security: { ...rating },
+        reliability: { ...rating },
+        maintainability: { ...rating },
+        security_hotspots_reviewed: { ...percentage },
+        coverage: { ...percentage },
+        duplications: { ...percentage },
+      },
+    },
+  }
+}
