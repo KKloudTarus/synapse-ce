@@ -279,9 +279,9 @@ paths:
                       source: managed
                       failed_conditions:
                         - { metric: new_high, operator: "<=", threshold: 0, actual: 2 }
-                    issues:
-                      new: { availability: available, value: 4, unavailable_reason: null }
-                      accepted: { availability: unavailable, value: null, unavailable_reason: issue_lifecycle_not_available }
+                    issue_summary:
+                      new_code_total: { availability: available, value: 4, unavailable_reason: null }
+                      accepted_overall_total: { availability: unavailable, value: null, unavailable_reason: issue_lifecycle_not_available }
                     lenses:
                       overall:
                         security: { availability: available, grade: B, unavailable_reason: null }
@@ -303,9 +303,9 @@ paths:
                     project: { key: payments-api, name: Payments API }
                     latest_analysis: null
                     gate: null
-                    issues:
-                      new: { availability: unavailable, value: null, unavailable_reason: no_analysis }
-                      accepted: { availability: unavailable, value: null, unavailable_reason: no_analysis }
+                    issue_summary:
+                      new_code_total: { availability: unavailable, value: null, unavailable_reason: no_analysis }
+                      accepted_overall_total: { availability: unavailable, value: null, unavailable_reason: no_analysis }
                     lenses:
                       overall:
                         security: { availability: unavailable, grade: null, unavailable_reason: no_analysis }
@@ -606,48 +606,108 @@ components:
       type: string
       enum: [passed, failed]
 
+    ProjectOverviewGateOperator:
+      type: string
+      enum: ["<=", ">=", "==", "<", ">"]
+
+    ProjectOverviewGateSource:
+      type: string
+      description: >
+        Supported immutable gate policy sources currently produced by the
+        application. Legacy empty source values are represented as null.
+      enum: [default, repository, managed]
+
+    ProjectOverviewGateMetric:
+      type: string
+      enum:
+        - new_critical
+        - new_high
+        - new_medium
+        - new_secret
+        - new_vulnerability
+        - new_issues
+        - total_critical
+        - duplication_density
+        - coverage
+        - security_rating
+        - reliability_rating
+        - maintainability_rating
+
     ProjectOverview:
+      oneOf:
+        - $ref: "#/components/schemas/ProjectOverviewNotAnalyzed"
+        - $ref: "#/components/schemas/ProjectOverviewAnalyzed"
+
+    ProjectOverviewNotAnalyzed:
       type: object
-      required: [state, project, latest_analysis, gate, issues, lenses]
+      required: [state, project, latest_analysis, gate, issue_summary, lenses]
       properties:
-        state: { $ref: "#/components/schemas/ProjectOverviewState" }
+        state:
+          type: string
+          enum: [not_analyzed]
         project: { $ref: "#/components/schemas/ProjectOverviewProject" }
         latest_analysis:
-          anyOf:
-            - $ref: "#/components/schemas/ProjectOverviewAnalysis"
-            - type: "null"
+          type: "null"
         gate:
-          anyOf:
-            - $ref: "#/components/schemas/ProjectOverviewGate"
-            - type: "null"
-        issues: { $ref: "#/components/schemas/ProjectOverviewIssueSummary" }
+          type: "null"
+        issue_summary: { $ref: "#/components/schemas/ProjectOverviewIssueSummary" }
+        lenses: { $ref: "#/components/schemas/ProjectOverviewLenses" }
+
+    ProjectOverviewAnalyzed:
+      type: object
+      required: [state, project, latest_analysis, gate, issue_summary, lenses]
+      properties:
+        state:
+          type: string
+          enum: [analyzed]
+        project: { $ref: "#/components/schemas/ProjectOverviewProject" }
+        latest_analysis: { $ref: "#/components/schemas/ProjectOverviewAnalysis" }
+        gate: { $ref: "#/components/schemas/ProjectOverviewGate" }
+        issue_summary: { $ref: "#/components/schemas/ProjectOverviewIssueSummary" }
         lenses: { $ref: "#/components/schemas/ProjectOverviewLenses" }
 
     ProjectOverviewProject:
       type: object
       required: [key, name]
       properties:
-        key: { type: string }
-        name: { type: string }
+        key: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1 }
 
     ProjectOverviewAnalysis:
       type: object
       required: [id, created_at, source_ref, source_commit, new_code]
       properties:
-        id: { type: string }
+        id: { type: string, minLength: 1 }
         created_at: { type: string, format: date-time }
         source_ref: { type: string }
         source_commit: { type: string }
         new_code: { $ref: "#/components/schemas/ProjectOverviewNewCodePeriod" }
 
     ProjectOverviewNewCodePeriod:
-      type: object
-      required: [first_analysis, has_baseline, baseline_analysis_id]
-      properties:
-        first_analysis: { type: boolean }
-        has_baseline: { type: boolean }
-        baseline_analysis_id:
-          type: [string, "null"]
+      oneOf:
+        - type: object
+          required: [first_analysis, has_baseline, baseline_analysis_id]
+          properties:
+            first_analysis:
+              type: boolean
+              const: true
+            has_baseline:
+              type: boolean
+              const: false
+            baseline_analysis_id:
+              type: "null"
+        - type: object
+          required: [first_analysis, has_baseline, baseline_analysis_id]
+          properties:
+            first_analysis:
+              type: boolean
+              const: false
+            has_baseline:
+              type: boolean
+              const: true
+            baseline_analysis_id:
+              type: string
+              minLength: 1
 
     ProjectOverviewGate:
       type: object
@@ -659,7 +719,9 @@ components:
         name:
           type: [string, "null"]
         source:
-          type: [string, "null"]
+          anyOf:
+            - $ref: "#/components/schemas/ProjectOverviewGateSource"
+            - type: "null"
         failed_conditions:
           type: array
           items: { $ref: "#/components/schemas/ProjectOverviewGateCondition" }
@@ -668,17 +730,21 @@ components:
       type: object
       required: [metric, operator, threshold, actual]
       properties:
-        metric: { type: string }
-        operator: { type: string }
+        metric: { $ref: "#/components/schemas/ProjectOverviewGateMetric" }
+        operator: { $ref: "#/components/schemas/ProjectOverviewGateOperator" }
         threshold: { type: number }
         actual: { type: number }
 
     ProjectOverviewIssueSummary:
       type: object
-      required: [new, accepted]
+      required: [new_code_total, accepted_overall_total]
       properties:
-        new: { $ref: "#/components/schemas/ProjectOverviewCountMetric" }
-        accepted: { $ref: "#/components/schemas/ProjectOverviewCountMetric" }
+        new_code_total:
+          description: Total findings newly introduced in the immutable New Code snapshot.
+          $ref: "#/components/schemas/ProjectOverviewCountMetric"
+        accepted_overall_total:
+          description: Total accepted findings across the whole project. Unavailable until issue lifecycle data lands.
+          $ref: "#/components/schemas/ProjectOverviewCountMetric"
 
     ProjectOverviewLenses:
       type: object
