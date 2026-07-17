@@ -29,6 +29,7 @@ type projectService interface {
 	StartAnalysis(context.Context, string, shared.ID, string, *measure.CoverageReport) (ports.ScanJob, error)
 	AnalysisStatus(context.Context, shared.ID, string) (ports.ScanJob, error)
 	LatestAnalysis(context.Context, shared.ID, string) (projectuc.LatestAnalysis, error)
+	Overview(context.Context, shared.ID, string) (projectuc.Overview, error)
 	ListAnalyses(context.Context, shared.ID, string, int, time.Time, shared.ID) ([]projectanalysis.Analysis, bool, error)
 	GetAnalysis(context.Context, shared.ID, string, string) (projectanalysis.Analysis, error)
 }
