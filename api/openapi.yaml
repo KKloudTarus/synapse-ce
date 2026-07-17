@@ -30,6 +30,8 @@ tags:
   - name: findings
   - name: sca
   - name: export
+  - name: projects
+    description: Long-lived code-quality Projects and immutable analysis read models
   - name: rules
     description: Built-in code-quality and security rule catalog
 
@@ -234,6 +236,95 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/projects/{key}/overview:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
+        example: payments-api
+    get:
+      tags: [projects]
+      summary: Get the latest Project quality overview
+      operationId: getProjectOverview
+      description: >
+        Returns the latest immutable Project analysis overview without loading the
+        full scan-result blob. Existing Projects without an analysis return
+        `state=not_analyzed` with explicit unavailable metric values.
+      responses:
+        "200":
+          description: Project overview
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectOverview" }
+              examples:
+                analyzed:
+                  value:
+                    state: analyzed
+                    project: { key: payments-api, name: Payments API }
+                    latest_analysis:
+                      id: analysis-42
+                      created_at: "2026-07-17T10:00:00Z"
+                      source_ref: main
+                      source_commit: abc123
+                      new_code:
+                        first_analysis: false
+                        has_baseline: true
+                        baseline_analysis_id: analysis-41
+                    gate:
+                      status: failed
+                      key: synapse-way
+                      name: Synapse way
+                      source: managed
+                      failed_conditions:
+                        - { metric: new_high, operator: "<=", threshold: 0, actual: 2 }
+                    issues:
+                      new: { availability: available, value: 4, unavailable_reason: null }
+                      accepted: { availability: unavailable, value: null, unavailable_reason: issue_lifecycle_not_available }
+                    lenses:
+                      overall:
+                        security: { availability: available, grade: B, unavailable_reason: null }
+                        reliability: { availability: available, grade: A, unavailable_reason: null }
+                        maintainability: { availability: available, grade: C, unavailable_reason: null }
+                        security_hotspots_reviewed: { availability: unavailable, value: null, unavailable_reason: security_hotspots_not_available }
+                        coverage: { availability: available, value: 72.349, unavailable_reason: null }
+                        duplications: { availability: available, value: 4.25, unavailable_reason: null }
+                      new_code:
+                        security: { availability: available, grade: A, unavailable_reason: null }
+                        reliability: { availability: available, grade: B, unavailable_reason: null }
+                        maintainability: { availability: unavailable, grade: null, unavailable_reason: changed_line_metrics_not_available }
+                        security_hotspots_reviewed: { availability: unavailable, value: null, unavailable_reason: security_hotspots_not_available }
+                        coverage: { availability: unavailable, value: null, unavailable_reason: changed_line_metrics_not_available }
+                        duplications: { availability: unavailable, value: null, unavailable_reason: changed_line_metrics_not_available }
+                notAnalyzed:
+                  value:
+                    state: not_analyzed
+                    project: { key: payments-api, name: Payments API }
+                    latest_analysis: null
+                    gate: null
+                    issues:
+                      new: { availability: unavailable, value: null, unavailable_reason: no_analysis }
+                      accepted: { availability: unavailable, value: null, unavailable_reason: no_analysis }
+                    lenses:
+                      overall:
+                        security: { availability: unavailable, grade: null, unavailable_reason: no_analysis }
+                        reliability: { availability: unavailable, grade: null, unavailable_reason: no_analysis }
+                        maintainability: { availability: unavailable, grade: null, unavailable_reason: no_analysis }
+                        security_hotspots_reviewed: { availability: unavailable, value: null, unavailable_reason: no_analysis }
+                        coverage: { availability: unavailable, value: null, unavailable_reason: no_analysis }
+                        duplications: { availability: unavailable, value: null, unavailable_reason: no_analysis }
+                      new_code:
+                        security: { availability: unavailable, grade: null, unavailable_reason: no_analysis }
+                        reliability: { availability: unavailable, grade: null, unavailable_reason: no_analysis }
+                        maintainability: { availability: unavailable, grade: null, unavailable_reason: no_analysis }
+                        security_hotspots_reviewed: { availability: unavailable, value: null, unavailable_reason: no_analysis }
+                        coverage: { availability: unavailable, value: null, unavailable_reason: no_analysis }
+                        duplications: { availability: unavailable, value: null, unavailable_reason: no_analysis }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
 
   /api/v1/rules:
     get:
@@ -486,6 +577,167 @@ components:
           type: object
           additionalProperties: { type: string }
         vuln_db_snapshot: { type: string }
+
+    ProjectOverviewState:
+      type: string
+      enum: [not_analyzed, analyzed]
+
+    ProjectOverviewMetricAvailability:
+      type: string
+      enum: [available, unavailable, not_supplied, not_applicable]
+
+    ProjectOverviewUnavailableReason:
+      type: string
+      enum:
+        - no_analysis
+        - rating_not_available
+        - issue_lifecycle_not_available
+        - security_hotspots_not_available
+        - changed_line_metrics_not_available
+        - coverage_not_supplied
+        - no_executable_lines
+        - duplication_not_available
+
+    ProjectOverviewGrade:
+      type: string
+      enum: [A, B, C, D, E]
+
+    ProjectOverviewGateStatus:
+      type: string
+      enum: [passed, failed]
+
+    ProjectOverview:
+      type: object
+      required: [state, project, latest_analysis, gate, issues, lenses]
+      properties:
+        state: { $ref: "#/components/schemas/ProjectOverviewState" }
+        project: { $ref: "#/components/schemas/ProjectOverviewProject" }
+        latest_analysis:
+          anyOf:
+            - $ref: "#/components/schemas/ProjectOverviewAnalysis"
+            - type: "null"
+        gate:
+          anyOf:
+            - $ref: "#/components/schemas/ProjectOverviewGate"
+            - type: "null"
+        issues: { $ref: "#/components/schemas/ProjectOverviewIssueSummary" }
+        lenses: { $ref: "#/components/schemas/ProjectOverviewLenses" }
+
+    ProjectOverviewProject:
+      type: object
+      required: [key, name]
+      properties:
+        key: { type: string }
+        name: { type: string }
+
+    ProjectOverviewAnalysis:
+      type: object
+      required: [id, created_at, source_ref, source_commit, new_code]
+      properties:
+        id: { type: string }
+        created_at: { type: string, format: date-time }
+        source_ref: { type: string }
+        source_commit: { type: string }
+        new_code: { $ref: "#/components/schemas/ProjectOverviewNewCodePeriod" }
+
+    ProjectOverviewNewCodePeriod:
+      type: object
+      required: [first_analysis, has_baseline, baseline_analysis_id]
+      properties:
+        first_analysis: { type: boolean }
+        has_baseline: { type: boolean }
+        baseline_analysis_id:
+          type: [string, "null"]
+
+    ProjectOverviewGate:
+      type: object
+      required: [status, key, name, source, failed_conditions]
+      properties:
+        status: { $ref: "#/components/schemas/ProjectOverviewGateStatus" }
+        key:
+          type: [string, "null"]
+        name:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+        failed_conditions:
+          type: array
+          items: { $ref: "#/components/schemas/ProjectOverviewGateCondition" }
+
+    ProjectOverviewGateCondition:
+      type: object
+      required: [metric, operator, threshold, actual]
+      properties:
+        metric: { type: string }
+        operator: { type: string }
+        threshold: { type: number }
+        actual: { type: number }
+
+    ProjectOverviewIssueSummary:
+      type: object
+      required: [new, accepted]
+      properties:
+        new: { $ref: "#/components/schemas/ProjectOverviewCountMetric" }
+        accepted: { $ref: "#/components/schemas/ProjectOverviewCountMetric" }
+
+    ProjectOverviewLenses:
+      type: object
+      required: [overall, new_code]
+      properties:
+        overall: { $ref: "#/components/schemas/ProjectOverviewLens" }
+        new_code: { $ref: "#/components/schemas/ProjectOverviewLens" }
+
+    ProjectOverviewLens:
+      type: object
+      required: [security, reliability, maintainability, security_hotspots_reviewed, coverage, duplications]
+      properties:
+        security: { $ref: "#/components/schemas/ProjectOverviewRatingMetric" }
+        reliability: { $ref: "#/components/schemas/ProjectOverviewRatingMetric" }
+        maintainability: { $ref: "#/components/schemas/ProjectOverviewRatingMetric" }
+        security_hotspots_reviewed: { $ref: "#/components/schemas/ProjectOverviewPercentageMetric" }
+        coverage: { $ref: "#/components/schemas/ProjectOverviewPercentageMetric" }
+        duplications: { $ref: "#/components/schemas/ProjectOverviewPercentageMetric" }
+
+    ProjectOverviewRatingMetric:
+      type: object
+      required: [availability, grade, unavailable_reason]
+      properties:
+        availability: { $ref: "#/components/schemas/ProjectOverviewMetricAvailability" }
+        grade:
+          anyOf:
+            - $ref: "#/components/schemas/ProjectOverviewGrade"
+            - type: "null"
+        unavailable_reason:
+          anyOf:
+            - $ref: "#/components/schemas/ProjectOverviewUnavailableReason"
+            - type: "null"
+
+    ProjectOverviewPercentageMetric:
+      type: object
+      required: [availability, value, unavailable_reason]
+      properties:
+        availability: { $ref: "#/components/schemas/ProjectOverviewMetricAvailability" }
+        value:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+        unavailable_reason:
+          anyOf:
+            - $ref: "#/components/schemas/ProjectOverviewUnavailableReason"
+            - type: "null"
+
+    ProjectOverviewCountMetric:
+      type: object
+      required: [availability, value, unavailable_reason]
+      properties:
+        availability: { $ref: "#/components/schemas/ProjectOverviewMetricAvailability" }
+        value:
+          type: [integer, "null"]
+          minimum: 0
+        unavailable_reason:
+          anyOf:
+            - $ref: "#/components/schemas/ProjectOverviewUnavailableReason"
+            - type: "null"
 
     RuleType:
       type: string
