@@ -49,6 +49,22 @@ describe('overviewDetailTarget', () => {
     },
   )
 
+  it('returns no target when an available metric has no typed value', () => {
+    const security = cards.find((card) => card.key === 'security')
+    const coverage = cards.find((card) => card.key === 'coverage')
+    if (!security || security.kind !== 'rating') throw new Error('Security rating fixture is missing')
+    if (!coverage || coverage.kind !== 'percentage') throw new Error('Coverage percentage fixture is missing')
+
+    expect(overviewDetailTarget('synapse', 'overall', {
+      ...security,
+      metric: { availability: 'available', grade: null, unavailableReason: null },
+    })).toBeNull()
+    expect(overviewDetailTarget('synapse', 'overall', {
+      ...coverage,
+      metric: { availability: 'available', value: null, unavailableReason: null },
+    })).toBeNull()
+  })
+
   it('keeps Hotspots and New Code measures non-interactive even if unexpectedly available', () => {
     const byKey = Object.fromEntries(cards.map((card) => [card.key, card])) as Record<OverviewMetricCardModel['key'], OverviewMetricCardModel>
     expect(overviewDetailTarget('synapse', 'overall', byKey.securityHotspotsReviewed)).toBeNull()
