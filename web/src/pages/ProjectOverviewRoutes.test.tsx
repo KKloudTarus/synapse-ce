@@ -215,7 +215,7 @@ describe('Project Overview drill-down routes', () => {
     const router = renderProjectRoute('/code-quality/projects/synapse?lens=new-code')
     fireEvent.click(await screen.findByRole('link', { name: 'View Security details' }))
 
-    expect(await screen.findByText('Individual New Code issue drill-down will be available in the Issues Explorer.')).toBeInTheDocument()
+    expect(await screen.findByText('Individual New Code issues are not available in this view.')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('heading', { name: 'New Code period' })).toHaveFocus())
     expect(screen.getByRole('combobox', { name: 'Filter findings by kind' })).toHaveTextContent('All kinds')
     expect(screen.queryByText('New Code findings')).not.toBeInTheDocument()

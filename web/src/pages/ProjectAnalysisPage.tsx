@@ -151,7 +151,7 @@ function LatestAnalysisView({
             {snapshot.newCode.rating.maintainability && <GradeBadge compact label="Maintainability" grade={snapshot.newCode.rating.maintainability} />}
           </div>
           {!snapshot.newCode.rating.maintainability && <p className="mt-3 text-xs text-mutedfg">New Code maintainability is unavailable until source-diff changed lines are measured.</p>}
-          <p className="mt-3 text-xs text-mutedfg">Individual New Code issue drill-down will be available in the Issues Explorer.</p>
+          <p className="mt-3 text-xs text-mutedfg">Individual New Code issues are not available in this view.</p>
         </Card>
         <Card title="Overall health" actions={<span className="flex items-center gap-1.5 text-xs text-mutedfg"><CalendarClock className="size-3.5" aria-hidden="true" />{formatDate(snapshot.createdAt)}</span>}>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
