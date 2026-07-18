@@ -2,6 +2,7 @@ import { AlertTriangle, CalendarClock, ShieldAlert } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { CodeQualityReportView } from '../components/codequality/CodeQualityReportView'
 import { FindingExplorer } from '../components/codequality/FindingExplorer'
+import { ProjectCoverageDetail } from '../components/codequality/ProjectCoverageDetail'
 import { GateEvidence, GradeBadge } from '../components/codequality/qualityPresentation'
 import { Button, Card, EmptyState, ErrorState, Pill } from '../components/ui'
 import { api } from '../lib/api'
@@ -94,6 +95,7 @@ function LatestAnalysisView({ latest, running }: { latest: LatestProjectAnalysis
           </div>
         </Card>
       </div>
+      <ProjectCoverageDetail coverage={snapshot.coverage} />
       <Card title="Security analysis">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <HealthMetric label="Findings" value={scan.findings.length} />
