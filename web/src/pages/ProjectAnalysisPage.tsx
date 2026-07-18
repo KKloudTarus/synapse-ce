@@ -15,6 +15,7 @@ import {
   type ProjectAnalysisFocus,
   type ProjectCodeLens,
 } from '../lib/projectAnalysisNavigation'
+import { formatOverviewPercentage } from '../lib/projectOverviewPresentation'
 import type { RatedFindingDimension } from '../lib/ratedFindingDimensions'
 import type { LatestProjectAnalysis } from '../lib/types'
 import { ProjectRouteEmpty, useProjectRouteContext } from './CodeQualityProject'
@@ -154,8 +155,8 @@ function LatestAnalysisView({
         <Card title="Overall health" actions={<span className="flex items-center gap-1.5 text-xs text-mutedfg"><CalendarClock className="size-3.5" aria-hidden="true" />{formatDate(snapshot.createdAt)}</span>}>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <HealthMetric label="Issues" value={withDelta(snapshot.issues.total, snapshot.delta?.issues.total)} />
-            <HealthMetric label="Coverage" value={coverage === null ? 'Not supplied' : `${coverage.toFixed(1)}%`} />
-            <HealthMetric label="Duplication" value={`${duplication.toFixed(1)}%`} hint={snapshot.delta ? `${signed(snapshot.delta.measures.duplication_density ?? 0)}% vs previous` : undefined} />
+            <HealthMetric label="Coverage" value={coverage === null ? 'Not supplied' : formatOverviewPercentage(coverage)} />
+            <HealthMetric label="Duplication" value={formatOverviewPercentage(duplication)} hint={snapshot.delta ? `${signed(snapshot.delta.measures.duplication_density ?? 0)}% vs previous` : undefined} />
             <HealthMetric label="Code lines" value={snapshot.rating.linesOfCode.toLocaleString()} />
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
