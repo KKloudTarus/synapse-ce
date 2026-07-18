@@ -1,7 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { createMemoryRouter, RouterProvider } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
+import { createMemoryRouter, Outlet, RouterProvider, useParams } from 'react-router-dom'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../lib/api'
+import type { Project, ProjectAnalysis, ScanJob } from '../lib/types'
 import { buildAnalyzedOverview, buildNotAnalyzedOverview } from '../test/projectOverviewFixtures'
 import { CodeQualityProject } from './CodeQualityProject'
 import { ProjectActivityPage } from './ProjectActivityPage'
@@ -21,16 +23,65 @@ vi.mock('../lib/api', () => ({
   },
 }))
 
-const project = {
-  id: 'p1',
-  name: 'Synapse',
-  key: 'synapse',
+const project = buildProject('synapse', 'Synapse')
+
+function buildProject(key: string, name = key): Project {
+  return {
+  id: `project-${key}`,
+  name,
+  key,
   sourceBinding: { kind: 'git' as const, value: 'https://example.com/repo.git', ref: 'main' },
   defaultProfileByLang: {},
   gateId: '',
   createdAt: null,
   latestAnalysis: null,
   latestJob: null,
+  }
+}
+
+function buildJob(id: string, status: ScanJob['status'], error = ''): ScanJob {
+  return {
+    id,
+    engagementId: '',
+    target: id,
+    kind: 'code-quality',
+    status,
+    stage: status,
+    progress: status === 'running' ? 50 : 100,
+    error,
+    startedAt: '2026-07-18T00:00:00Z',
+    finishedAt: status === 'running' ? null : '2026-07-18T00:01:00Z',
+    debugEvents: [],
+  }
+}
+
+function buildAnalysis(id: string, sourceRef: string): ProjectAnalysis {
+  const counts = { total: 1, byKind: {}, bySeverity: {}, byStatus: {} }
+  return {
+    id,
+    createdAt: '2026-07-18T00:00:00Z',
+    sourceRef,
+    sourceCommit: `${id}abcdef1234567890`,
+    gate: { passed: true, results: [] },
+    gateInfo: { key: 'synapse-way', name: 'Synapse way', source: 'default' },
+    issues: counts,
+    newCode: { previousId: 'previous', counts, rating: { security: 'A', reliability: 'A', maintainability: 'A' } },
+    delta: null,
+    measures: {},
+    coverage: null,
+    duplication: { blocks: [], duplicatedLines: 0, totalLines: 0, files: 0 },
+    rating: { security: 'A', reliability: 'A', maintainability: 'A', techDebtMinutes: 0, debtRatioPct: 0, linesOfCode: 1 },
+  }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
 describe('Project Overview routes', () => {
@@ -104,6 +155,251 @@ describe('Project Overview routes', () => {
   })
 })
 
+describe('project analysis polling lifecycle', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(api.getProject).mockImplementation((key) => Promise.resolve(buildProject(key, key === 'alpha' ? 'Alpha' : 'Beta')))
+    vi.mocked(api.projectOverview).mockResolvedValue(buildAnalyzedOverview())
+    vi.mocked(api.listQualityGates).mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('ignores a Project A polling response after navigation to Project B', async () => {
+    const stale = deferred<ScanJob | null>()
+    let alphaCalls = 0
+    vi.mocked(api.projectAnalysisStatus).mockImplementation((key) => {
+      if (key === 'alpha') {
+        alphaCalls += 1
+        return alphaCalls === 1 ? Promise.resolve(null) : stale.promise
+      }
+      return Promise.resolve(null)
+    })
+    vi.mocked(api.startProjectAnalysis).mockResolvedValue(buildJob('alpha-running', 'running'))
+    const router = renderProjectRoute('/code-quality/projects/alpha')
+    expect(await screen.findByRole('heading', { name: 'Alpha' })).toBeInTheDocument()
+
+    vi.useFakeTimers()
+    await startAnalysisPoll()
+    await act(async () => vi.advanceTimersByTimeAsync(1500))
+    expect(alphaCalls).toBe(2)
+
+    await act(async () => {
+      await router.navigate('/code-quality/projects/beta')
+      await Promise.resolve()
+    })
+    expect(screen.getByRole('heading', { name: 'Beta' })).toBeInTheDocument()
+    stale.resolve(buildJob('alpha-stale', 'running'))
+    await settle()
+
+    expect(screen.getByText('Ready')).toBeInTheDocument()
+    expect(screen.queryByText('Analyzing')).not.toBeInTheDocument()
+  })
+
+  it('does not let a stale terminal response stop the active Project B poll', async () => {
+    const staleTerminal = deferred<ScanJob | null>()
+    const betaThirdRequest = deferred<ScanJob | null>()
+    let alphaCalls = 0
+    let betaCalls = 0
+    vi.mocked(api.projectAnalysisStatus).mockImplementation((key) => {
+      if (key === 'alpha') {
+        alphaCalls += 1
+        return alphaCalls === 1 ? Promise.resolve(null) : staleTerminal.promise
+      }
+      betaCalls += 1
+      if (betaCalls <= 2) return Promise.resolve(buildJob('beta-running', 'running'))
+      return betaThirdRequest.promise
+    })
+    vi.mocked(api.startProjectAnalysis).mockResolvedValue(buildJob('alpha-running', 'running'))
+    const router = renderProjectRoute('/code-quality/projects/alpha')
+    expect(await screen.findByRole('heading', { name: 'Alpha' })).toBeInTheDocument()
+
+    vi.useFakeTimers()
+    await startAnalysisPoll()
+    await act(async () => vi.advanceTimersByTimeAsync(1500))
+    await act(async () => {
+      await router.navigate('/code-quality/projects/beta')
+      await Promise.resolve()
+    })
+    await act(async () => vi.advanceTimersByTimeAsync(1500))
+    expect(betaCalls).toBe(2)
+
+    const betaOverviewCalls = vi.mocked(api.projectOverview).mock.calls.filter(([key]) => key === 'beta').length
+    staleTerminal.resolve(buildJob('alpha-succeeded', 'succeeded'))
+    await settle()
+    expect(vi.mocked(api.projectOverview).mock.calls.filter(([key]) => key === 'beta')).toHaveLength(betaOverviewCalls)
+
+    await act(async () => vi.advanceTimersByTimeAsync(1500))
+    expect(betaCalls).toBe(3)
+  })
+
+  it('does not overlap slow analysis-status requests', async () => {
+    const slow = deferred<ScanJob | null>()
+    const next = deferred<ScanJob | null>()
+    let calls = 0
+    vi.mocked(api.projectAnalysisStatus).mockImplementation(() => {
+      calls += 1
+      if (calls === 1) return Promise.resolve(null)
+      if (calls === 2) return slow.promise
+      return next.promise
+    })
+    vi.mocked(api.startProjectAnalysis).mockResolvedValue(buildJob('alpha-running', 'running'))
+    renderProjectRoute('/code-quality/projects/alpha')
+    expect(await screen.findByRole('heading', { name: 'Alpha' })).toBeInTheDocument()
+
+    vi.useFakeTimers()
+    await startAnalysisPoll()
+    await act(async () => vi.advanceTimersByTimeAsync(1500))
+    await act(async () => vi.advanceTimersByTimeAsync(10_000))
+    expect(calls).toBe(2)
+
+    slow.resolve(buildJob('alpha-running', 'running'))
+    await settle()
+    await act(async () => vi.advanceTimersByTimeAsync(1499))
+    expect(calls).toBe(2)
+    await act(async () => vi.advanceTimersByTimeAsync(1))
+    expect(calls).toBe(3)
+  })
+
+  it('refreshes the active Overview exactly once after a succeeded job', async () => {
+    let calls = 0
+    vi.mocked(api.projectAnalysisStatus).mockImplementation(() => {
+      calls += 1
+      return Promise.resolve(calls === 1 ? null : buildJob('alpha-succeeded', 'succeeded'))
+    })
+    vi.mocked(api.startProjectAnalysis).mockResolvedValue(buildJob('alpha-running', 'running'))
+    renderProjectRoute('/code-quality/projects/alpha')
+    expect(await screen.findByText('Quality Gate Failed')).toBeInTheDocument()
+
+    vi.useFakeTimers()
+    await startAnalysisPoll()
+    await act(async () => vi.advanceTimersByTimeAsync(1500))
+    await settle()
+    expect(api.projectOverview).toHaveBeenCalledTimes(2)
+
+    await act(async () => vi.advanceTimersByTimeAsync(10_000))
+    expect(api.projectOverview).toHaveBeenCalledTimes(2)
+    expect(calls).toBe(2)
+  })
+
+  it('does not refresh Overview after a failed job', async () => {
+    let calls = 0
+    vi.mocked(api.projectAnalysisStatus).mockImplementation(() => {
+      calls += 1
+      return Promise.resolve(calls === 1 ? null : buildJob('alpha-failed', 'failed', 'analysis failed'))
+    })
+    vi.mocked(api.startProjectAnalysis).mockResolvedValue(buildJob('alpha-running', 'running'))
+    renderProjectRoute('/code-quality/projects/alpha')
+    expect(await screen.findByText('Quality Gate Failed')).toBeInTheDocument()
+
+    vi.useFakeTimers()
+    await startAnalysisPoll()
+    await act(async () => vi.advanceTimersByTimeAsync(1500))
+    await settle()
+
+    expect(screen.getByText('analysis failed')).toBeInTheDocument()
+    expect(api.projectOverview).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('project Activity pagination lifecycle', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+  })
+
+  it('ignores an older Project A page after navigation to Project B', async () => {
+    const staleOlder = deferred<Awaited<ReturnType<typeof api.projectAnalyses>>>()
+    vi.mocked(api.projectAnalyses).mockImplementation((key, cursor) => {
+      if (key === 'alpha' && cursor) return staleOlder.promise
+      if (key === 'alpha') return Promise.resolve(activityPage('alpha-latest', 'ref-alpha-latest', alphaCursor))
+      return Promise.resolve(activityPage('beta-latest', 'ref-beta-latest'))
+    })
+    const router = renderActivityLifecycleRoute('/projects/alpha/activity')
+    expect(await screen.findByText('ref-alpha-latest')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Load older analyses' }))
+
+    await act(async () => {
+      await router.navigate('/projects/beta/activity')
+    })
+    expect(await screen.findByText('ref-beta-latest')).toBeInTheDocument()
+    staleOlder.resolve(activityPage('alpha-older', 'ref-alpha-stale'))
+    await settle()
+
+    expect(screen.queryByText('ref-alpha-stale')).not.toBeInTheDocument()
+    expect(screen.getByText('ref-beta-latest')).toBeInTheDocument()
+  })
+
+  it('ignores an older page from a previous analysis revision', async () => {
+    const staleOlder = deferred<Awaited<ReturnType<typeof api.projectAnalyses>>>()
+    let firstPageCalls = 0
+    vi.mocked(api.projectAnalyses).mockImplementation((_key, cursor) => {
+      if (cursor) return staleOlder.promise
+      firstPageCalls += 1
+      return Promise.resolve(firstPageCalls === 1
+        ? activityPage('latest-1', 'ref-before-refresh', alphaCursor)
+        : activityPage('latest-2', 'ref-after-refresh'))
+    })
+    renderActivityLifecycleRoute('/projects/alpha/activity')
+    expect(await screen.findByText('ref-before-refresh')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Load older analyses' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh activity revision' }))
+    expect(await screen.findByText('ref-after-refresh')).toBeInTheDocument()
+
+    staleOlder.resolve(activityPage('older-stale', 'ref-older-stale'))
+    await settle()
+    expect(screen.queryByText('ref-older-stale')).not.toBeInTheDocument()
+  })
+
+  it('keeps current rows visible when loading an older page fails', async () => {
+    vi.mocked(api.projectAnalyses).mockImplementation((_key, cursor) => cursor
+      ? Promise.reject(new Error('older page offline'))
+      : Promise.resolve(activityPage('latest', 'ref-current', alphaCursor)))
+    renderActivityLifecycleRoute('/projects/alpha/activity')
+    expect(await screen.findByText('ref-current')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Load older analyses' }))
+
+    expect(await screen.findByText('older page offline')).toBeInTheDocument()
+    expect(screen.getByText('ref-current')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Load older analyses' })).toBeEnabled()
+  })
+
+  it('retries a failed older page and appends the successful result', async () => {
+    let olderCalls = 0
+    vi.mocked(api.projectAnalyses).mockImplementation((_key, cursor) => {
+      if (!cursor) return Promise.resolve(activityPage('latest', 'ref-current', alphaCursor))
+      olderCalls += 1
+      return olderCalls === 1
+        ? Promise.reject(new Error('older page offline'))
+        : Promise.resolve(activityPage('older', 'ref-older'))
+    })
+    renderActivityLifecycleRoute('/projects/alpha/activity')
+    expect(await screen.findByText('ref-current')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Load older analyses' }))
+    expect(await screen.findByText('older page offline')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load older analyses' }))
+    expect(await screen.findByText('ref-older')).toBeInTheDocument()
+    expect(screen.queryByText('older page offline')).not.toBeInTheDocument()
+    expect(olderCalls).toBe(2)
+  })
+
+  it('coalesces duplicate load-older clicks into one request', async () => {
+    const older = deferred<Awaited<ReturnType<typeof api.projectAnalyses>>>()
+    vi.mocked(api.projectAnalyses).mockImplementation((_key, cursor) => cursor
+      ? older.promise
+      : Promise.resolve(activityPage('latest', 'ref-current', alphaCursor)))
+    renderActivityLifecycleRoute('/projects/alpha/activity')
+    expect(await screen.findByText('ref-current')).toBeInTheDocument()
+    const button = screen.getByRole('button', { name: 'Load older analyses' })
+    fireEvent.click(button)
+    fireEvent.click(button)
+
+    expect(api.projectAnalyses).toHaveBeenCalledTimes(2)
+  })
+})
+
 function renderProjectRoute(initialPath: string) {
   const router = createMemoryRouter([
     {
@@ -118,4 +414,47 @@ function renderProjectRoute(initialPath: string) {
   ], { initialEntries: [initialPath] })
   render(<RouterProvider router={router} />)
   return router
+}
+
+const alphaCursor = { beforeCreatedAt: '2026-07-17T00:00:00Z', beforeId: 'alpha-cursor' }
+
+function activityPage(id: string, sourceRef: string, next: typeof alphaCursor | null = null) {
+  return { items: [buildAnalysis(id, sourceRef)], next }
+}
+
+function ActivityLifecycleShell() {
+  const { key = '' } = useParams()
+  const [analysisRevision, setAnalysisRevision] = useState(0)
+  return (
+    <>
+      <button type="button" onClick={() => setAnalysisRevision((value) => value + 1)}>Refresh activity revision</button>
+      <Outlet context={{ projectKey: key, analysisRevision }} />
+    </>
+  )
+}
+
+function renderActivityLifecycleRoute(initialPath: string) {
+  const router = createMemoryRouter([
+    {
+      path: '/projects/:key/activity',
+      element: <ActivityLifecycleShell />,
+      children: [{ index: true, element: <ProjectActivityPage /> }],
+    },
+  ], { initialEntries: [initialPath] })
+  render(<RouterProvider router={router} />)
+  return router
+}
+
+async function startAnalysisPoll() {
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Run analysis' }))
+    await Promise.resolve()
+  })
+}
+
+async function settle() {
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+  })
 }
