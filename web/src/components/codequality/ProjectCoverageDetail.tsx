@@ -33,9 +33,9 @@ export function ProjectCoverageDetail({ coverage }: { coverage: ProjectAnalysis[
 
 function CoverageCount({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-border bg-bg px-4 py-3">
-      <dd className="font-mono text-xl font-semibold tabular-nums text-foreground">{value.toLocaleString()}</dd>
-      <dt className="text-xs text-mutedfg">{label}</dt>
+    <div className="flex flex-col rounded-lg border border-border bg-bg px-4 py-3">
+      <dt className="order-2 text-xs text-mutedfg">{label}</dt>
+      <dd className="order-1 font-mono text-xl font-semibold tabular-nums text-foreground">{value.toLocaleString()}</dd>
     </div>
   )
 }
