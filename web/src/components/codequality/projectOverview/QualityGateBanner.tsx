@@ -31,7 +31,9 @@ export function QualityGateBanner({ gate }: { gate: ProjectOverviewGate }) {
       </div>
       {!passed && (
         <div className="mt-5">
-          <p className="text-sm font-medium text-foreground">{gate.failedConditions.length} conditions failed</p>
+          <p className="text-sm font-medium text-foreground">
+            {gate.failedConditions.length} {gate.failedConditions.length === 1 ? 'condition' : 'conditions'} failed
+          </p>
           <ol className="mt-3 grid gap-2">
             {gate.failedConditions.map((condition, index) => (
               <li key={`${condition.metric}-${index}`} className="rounded-lg border border-critical/25 bg-bg px-4 py-3">

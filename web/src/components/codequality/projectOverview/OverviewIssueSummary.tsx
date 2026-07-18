@@ -8,7 +8,7 @@ export function OverviewIssueSummary({ summary }: { summary: ProjectOverviewIssu
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <SummaryItem label="New Code issues" display={newCode} />
-      <SummaryItem label="Accepted issues" display={accepted} />
+      <SummaryItem label="Accepted issues (Overall Code)" display={accepted} />
     </div>
   )
 }

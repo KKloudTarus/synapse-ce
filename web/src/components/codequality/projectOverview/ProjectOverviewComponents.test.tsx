@@ -33,11 +33,17 @@ describe('Project Overview components', () => {
     expect(screen.getByText('72.3% — expected >= 80%')).toBeInTheDocument()
   })
 
+  it('uses singular copy for one failed gate condition', () => {
+    const gate = buildFailedGate()
+    render(<QualityGateBanner gate={{ ...gate, failedConditions: gate.failedConditions.slice(0, 1) }} />)
+    expect(screen.getByText('1 condition failed')).toBeInTheDocument()
+  })
+
   it('renders issue summaries without fabricating unavailable accepted issues', () => {
     const overview = buildAnalyzedOverview()
     render(<OverviewIssueSummary summary={overview.issueSummary} />)
     expect(screen.getByText('New Code issues')).toBeInTheDocument()
-    expect(screen.getByText('Accepted issues')).toBeInTheDocument()
+    expect(screen.getByText('Accepted issues (Overall Code)')).toBeInTheDocument()
     expect(screen.getByText('4')).toBeInTheDocument()
     expect(screen.getByText('—')).toBeInTheDocument()
     expect(screen.queryByText('0')).not.toBeInTheDocument()
