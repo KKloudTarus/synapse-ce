@@ -75,11 +75,13 @@ function LatestAnalysisView({ latest, running }: { latest: LatestProjectAnalysis
             <HealthMetric label="New critical" value={snapshot.newCode.counts.bySeverity.critical ?? 0} />
             <HealthMetric label="New high" value={snapshot.newCode.counts.bySeverity.high ?? 0} />
           </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <GradeBadge compact label="Security" grade={snapshot.newCode.rating.security} />
             <GradeBadge compact label="Reliability" grade={snapshot.newCode.rating.reliability} />
+            {snapshot.newCode.rating.maintainability && <GradeBadge compact label="Maintainability" grade={snapshot.newCode.rating.maintainability} />}
           </div>
-          <p className="mt-3 text-xs text-mutedfg">New Code maintainability is unavailable until source-diff changed lines are measured.</p>
+          {!snapshot.newCode.rating.maintainability && <p className="mt-3 text-xs text-mutedfg">New Code maintainability is unavailable until source-diff changed lines are measured.</p>}
+          <p className="mt-3 text-xs text-mutedfg">Individual New Code issue drill-down will be available in the Issues Explorer.</p>
         </Card>
         <Card title="Overall health" actions={<span className="flex items-center gap-1.5 text-xs text-mutedfg"><CalendarClock className="size-3.5" aria-hidden="true" />{formatDate(snapshot.createdAt)}</span>}>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
