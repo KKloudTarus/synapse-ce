@@ -51,7 +51,11 @@ export function isValidCodeLens(value: string | null): value is CodeLens {
 }
 
 export function formatOverviewPercentage(value: number): string {
-  return `${percentFormatter.format(value)}%`
+  if (value === 0) return '0%'
+  if (value > 0 && value < 0.05) return '<0.1%'
+  const rounded = Math.round((value + Number.EPSILON) * 10) / 10
+  if (value < 100 && rounded >= 100) return `${percentFormatter.format(99.9)}%`
+  return `${percentFormatter.format(rounded)}%`
 }
 
 export function formatOverviewCount(value: number): string {

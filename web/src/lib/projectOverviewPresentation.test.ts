@@ -41,9 +41,12 @@ describe('projectOverviewPresentation', () => {
   it('formats percentages and counts for display without mutating inputs', () => {
     const value = 72.34
     expect(formatOverviewPercentage(0)).toBe('0%')
-    expect(formatOverviewPercentage(72)).toBe('72%')
+    expect(formatOverviewPercentage(0.01)).toBe('<0.1%')
+    expect(formatOverviewPercentage(0.04)).toBe('<0.1%')
+    expect(formatOverviewPercentage(0.05)).toBe('0.1%')
     expect(formatOverviewPercentage(value)).toBe('72.3%')
-    expect(formatOverviewPercentage(99.96)).toBe('100%')
+    expect(formatOverviewPercentage(99.94)).toBe('99.9%')
+    expect(formatOverviewPercentage(99.96)).toBe('99.9%')
     expect(formatOverviewPercentage(100)).toBe('100%')
     expect(value).toBe(72.34)
     expect(formatOverviewCount(0)).toBe('0')
@@ -80,6 +83,7 @@ describe('projectOverviewPresentation', () => {
     expect(gateMetricLabel('duplication_density')).toBe('Duplications')
     expect(formatGateEvidenceValue('new_high', 2)).toBe('2')
     expect(formatGateEvidenceValue('coverage', 72.34)).toBe('72.3%')
+    expect(formatGateEvidenceValue('coverage', 99.96)).toBe('99.9%')
     expect(formatGateEvidenceValue('security_rating', 2)).toBe('B')
   })
 
