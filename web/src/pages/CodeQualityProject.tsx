@@ -33,13 +33,16 @@ export function CodeQualityProject() {
   const [coverageFile, setCoverageFile] = useState<File | null>(null)
   const [gates, setGates] = useState<QualityGate[]>([])
   const [analysisRevision, setAnalysisRevision] = useState(0)
-  const poll = useRef<ReturnType<typeof setInterval> | null>(null)
+  const poll = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollGeneration = useRef<symbol | null>(null)
   const lastTerminalJob = useRef<string | null>(null)
 
   const isRunning = job?.status === 'running'
 
-  function stopPoll() {
-    if (poll.current) clearInterval(poll.current)
+  function stopPoll(generation?: symbol) {
+    if (generation && pollGeneration.current !== generation) return
+    pollGeneration.current = null
+    if (poll.current) clearTimeout(poll.current)
     poll.current = null
   }
 
@@ -50,25 +53,37 @@ export function CodeQualityProject() {
     return true
   }
 
-  function startPoll() {
+  function startPoll(projectKey: string) {
     stopPoll()
-    poll.current = setInterval(async () => {
+    const generation = Symbol()
+    pollGeneration.current = generation
+
+    const pollOnce = async () => {
+      if (pollGeneration.current !== generation) return
+      poll.current = null
       try {
-        const next = await api.projectAnalysisStatus(key)
+        const next = await api.projectAnalysisStatus(projectKey)
+        if (pollGeneration.current !== generation) return
         if (!next) throw new Error('Analysis status is unavailable')
         setJob(next)
-        if (next.status === 'running') return
-        stopPoll()
+        if (next.status === 'running') {
+          poll.current = setTimeout(pollOnce, 1500)
+          return
+        }
+        stopPoll(generation)
         if (next.status === 'succeeded') {
           if (noteTerminalJob(next)) setAnalysisRevision((value) => value + 1)
         } else {
           setOperationError(next.error || 'Analysis failed')
         }
       } catch (e) {
-        stopPoll()
+        if (pollGeneration.current !== generation) return
+        stopPoll(generation)
         setOperationError(e instanceof Error ? e.message : 'Failed to refresh analysis status')
       }
-    }, 1500)
+    }
+
+    poll.current = setTimeout(pollOnce, 1500)
   }
 
   useEffect(() => {
@@ -84,7 +99,7 @@ export function CodeQualityProject() {
         if (!live) return
         setProject(nextProject)
         setJob(nextJob)
-        if (nextJob?.status === 'running') startPoll()
+        if (nextJob?.status === 'running') startPoll(key)
         else if (nextJob?.status === 'failed') setOperationError(nextJob.error || 'Analysis failed')
         else if (nextJob) noteTerminalJob(nextJob)
       })
@@ -121,7 +136,7 @@ export function CodeQualityProject() {
       const next = await api.startProjectAnalysis(key, coverageFile ?? undefined)
       setCoverageFile(null)
       setJob(next)
-      startPoll()
+      startPoll(key)
     } catch (e) {
       setOperationError(e instanceof Error ? e.message : 'Failed to start analysis')
     }
