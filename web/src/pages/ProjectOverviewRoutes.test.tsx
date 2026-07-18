@@ -136,6 +136,28 @@ describe('Project Overview routes', () => {
     expect(api.latestProjectAnalysis).not.toHaveBeenCalled()
   })
 
+  it('preserves Quality Gate assignment on the Project shell', async () => {
+    vi.mocked(api.listQualityGates).mockResolvedValue([{ key: 'strict', name: 'Strict', conditions: [], builtIn: false }])
+    vi.mocked(api.assignProjectGate).mockResolvedValue({ ...project, gateId: 'strict' })
+    renderProjectRoute('/code-quality/projects/synapse')
+
+    const gate = await screen.findByRole('combobox', { name: 'Quality gate' })
+    fireEvent.change(gate, { target: { value: 'strict' } })
+    await waitFor(() => expect(api.assignProjectGate).toHaveBeenCalledWith('synapse', 'strict'))
+    expect(api.latestProjectAnalysis).not.toHaveBeenCalled()
+  })
+
+  it('preserves coverage upload when starting an analysis from the shell', async () => {
+    vi.mocked(api.startProjectAnalysis).mockResolvedValue(buildJob('analysis-running', 'running'))
+    renderProjectRoute('/code-quality/projects/synapse')
+
+    const file = new File(['TN:\n'], 'coverage.lcov', { type: 'text/plain' })
+    fireEvent.change(await screen.findByLabelText('Coverage report (optional)'), { target: { files: [file] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Run analysis' }))
+    await waitFor(() => expect(api.startProjectAnalysis).toHaveBeenCalledWith('synapse', file))
+    expect(api.latestProjectAnalysis).not.toHaveBeenCalled()
+  })
+
   it('scopes Analysis and Activity requests to their routes', async () => {
     renderProjectRoute('/code-quality/projects/synapse/analysis')
     expect(await screen.findByText('No completed analysis yet')).toBeInTheDocument()
