@@ -13,7 +13,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-func TestProjectHotspotStoreIntegration(t *testing.T) {
+func setupProjectHotspotStore(t *testing.T) (*ProjectAnalysisStore, func()) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -26,7 +26,15 @@ func TestProjectHotspotStoreIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	store := NewProjectAnalysisStore(pool)
+	return store, func() { pool.Close() }
+}
+
+func TestProjectHotspotStoreIntegration(t *testing.T) {
+	store, cleanup := setupProjectHotspotStore(t)
+	defer cleanup()
+	ctx := context.Background()
+	pool := store.pool
 	// Make reruns safe when a previous process was interrupted before t.Cleanup ran.
 	if _, err := pool.Exec(ctx, `ALTER TABLE project_hotspots DROP CONSTRAINT IF EXISTS project_hotspots_test_rollback`); err != nil {
 		t.Fatal(err)
@@ -48,7 +56,6 @@ func TestProjectHotspotStoreIntegration(t *testing.T) {
 	if err := NewProjectRepository(pool).Create(ctx, p); err != nil {
 		t.Fatal(err)
 	}
-	store := NewProjectAnalysisStore(pool)
 	firstAt := time.Date(2026, 7, 19, 1, 0, 0, 0, time.UTC)
 	candidate := hotspot.Candidate{Key: "sast:hotspot-rule:main.go:7", FindingIdentity: "sast:hotspot-rule:main.go:7", RuleKey: "hotspot-rule", Title: "first", Description: "description", Severity: shared.SeverityHigh, Kind: finding.KindSAST, Location: "main.go:7"}
 	if err := store.SaveWithResultAndHotspots(ctx, projectanalysis.Analysis{ID: "hotspot-analysis-1", TenantID: tenantID.String(), ProjectID: projectID.String(), CreatedAt: firstAt}, []byte(`{"result":1}`), []hotspot.Candidate{candidate}); err != nil {

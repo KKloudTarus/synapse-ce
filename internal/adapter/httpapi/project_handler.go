@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,7 +37,7 @@ type projectService interface {
 	GetAnalysis(context.Context, shared.ID, string, string) (projectanalysis.Analysis, error)
 	ListHotspots(context.Context, shared.ID, string, hotspot.ListFilter) (hotspot.Page, error)
 	GetHotspot(context.Context, shared.ID, string, shared.ID) (hotspot.Hotspot, error)
-	TransitionHotspot(context.Context, string, shared.ID, string, shared.ID, hotspot.Status, string, int) (hotspot.Hotspot, error)
+	TransitionHotspot(context.Context, string, shared.ID, string, shared.ID, hotspot.Status, string, int) (hotspot.Hotspot, hotspot.ReviewEvent, error)
 	HotspotHistory(context.Context, shared.ID, string, shared.ID) ([]hotspot.ReviewEvent, error)
 }
 
