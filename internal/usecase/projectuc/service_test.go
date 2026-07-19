@@ -351,3 +351,51 @@ func TestRecordProjectAnalysisExcludesCatalogHotspotsFromProjectMetrics(t *testi
 		t.Fatalf("snapshot root should have AttributionAvailable=false due to un-attributed hotspots")
 	}
 }
+
+func TestRecordProjectAnalysisSnapshotFiltersNonRuleFindings(t *testing.T) {
+	ctx := context.Background()
+	projects := memory.NewProjectRepository()
+	engagements := memory.NewEngagementRepository()
+	analyses := memory.NewProjectAnalysisStore()
+	svc := NewService(projects, engagements, fixedClock{}, fixedIDs{}, &captureAudit{}, true)
+	svc.SetAnalysisStore(analyses)
+	svc.SetRuleCatalog(projectRuleCatalog{rules: map[rule.Key]rule.Rule{
+		"code-smell": {Key: "code-smell", Type: rule.TypeCodeSmell, Qualities: []rule.Quality{rule.QualityMaintainability}, RemediationEffort: 5},
+	}})
+	p, err := svc.Create(ctx, CreateInput{TenantID: "tenant", CreatedBy: "alice", Name: "Project", Key: "project", SourceBinding: project.SourceBinding{Kind: project.SourceLocal, Value: "/repo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := engagements.GetByProjectID(ctx, p.TenantID, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := &scauc.ScanResult{Findings: []finding.Finding{
+		{ID: "sca-finding", DedupKey: "sca", RuleKey: "", Kind: finding.KindSCA, Severity: shared.SeverityHigh, Status: finding.StatusOpen},
+		{ID: "quality-finding", DedupKey: "quality", RuleKey: "code-smell", Kind: finding.KindQuality, Severity: shared.SeverityMedium, Status: finding.StatusOpen},
+	}}
+	if err := svc.RecordProjectAnalysis(ctx, e.ID, "job-2", time.Unix(2, 0), result); err != nil {
+		t.Fatal(err)
+	}
+	list, _, err := analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
+	if err != nil || len(list) != 1 {
+		t.Fatalf("analysis=%+v err=%v", list, err)
+	}
+	analysis := list[0]
+	// Assert SCA is in general issue metrics
+	if analysis.Issues.Total != 2 {
+		t.Fatalf("analysis.Issues.Total=%d, want 2", analysis.Issues.Total)
+	}
+
+	// Assert Snapshot root node constraints
+	root := analysis.Snapshot.Nodes[0]
+	if !root.IssueTypeAvailable || !root.TechDebtAvailable {
+		t.Fatalf("snapshot should be fully available because SCA findings were correctly filtered, got IssueTypeAvailable=%v TechDebtAvailable=%v", root.IssueTypeAvailable, root.TechDebtAvailable)
+	}
+	if root.Counters.IssuesByType[string(rule.TypeCodeSmell)] != 1 {
+		t.Fatalf("snapshot IssuesByType[code_smell]=%d, want 1", root.Counters.IssuesByType[string(rule.TypeCodeSmell)])
+	}
+	if root.Counters.RemediationEffortMinutes != 5 {
+		t.Fatalf("snapshot RemediationEffortMinutes=%d, want 5", root.Counters.RemediationEffortMinutes)
+	}
+}
