@@ -120,3 +120,112 @@ func TestProjectHotspotProjectionRejectsCandidateAtomically(t *testing.T) {
 		t.Fatalf("hotspot committed despite projection validation: %+v err=%v", page, err)
 	}
 }
+
+func TestProjectHotspot_ReopenAsNewCode(t *testing.T) {
+	ctx := context.Background()
+	store := NewProjectAnalysisStore()
+	
+	t1 := time.Date(2026, 7, 18, 1, 0, 0, 0, time.UTC)
+	t2 := t1.Add(time.Hour)
+	
+	// 1. Analysis 1 detects hotspot
+	c := projectionCandidate("sast:rule-a:main.go:1", "reopen-test")
+	analysis1 := projectionAnalysis("a1", t1)
+	if err := store.SaveWithResultAndHotspots(ctx, analysis1, nil, []hotspot.Candidate{c}); err != nil {
+		t.Fatal(err)
+	}
+	
+	// 2. Human marks it Fixed
+	id := hotspot.DeterministicID("tenant-a", "project-a", c.Key)
+	item, err := store.GetHotspot(ctx, "tenant-a", "project-a", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.Status, item.Version = hotspot.StatusFixed, 2
+	store.hotspots[0] = item
+	
+	// 3. Later analysis detects it again
+	analysis2 := projectionAnalysis("a2", t2)
+	if err := store.SaveWithResultAndHotspots(ctx, analysis2, nil, []hotspot.Candidate{c}); err != nil {
+		t.Fatal(err)
+	}
+	
+	// Assertions
+	reopened, err := store.GetHotspot(ctx, "tenant-a", "project-a", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Status != hotspot.StatusToReview {
+		t.Fatalf("expected to_review, got %s", reopened.Status)
+	}
+	
+	history, err := store.HotspotHistory(ctx, "tenant-a", "project-a", id)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("expected 1 system event, got %d", len(history))
+	}
+	
+	summary, err := store.CurrentAnalysisHotspotSummary(ctx, "tenant-a", "project-a", shared.ID(analysis2.ID), hotspot.LensNewCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Total != 1 {
+		t.Fatalf("expected 1 new code hotspot, got %d", summary.Total)
+	}
+}
+
+func TestProjectHotspotProjectionUpdatesFindingIdentityFromLaterAnalysis(t *testing.T) {
+	ctx := context.Background()
+	store := NewProjectAnalysisStore()
+
+	t0 := time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)
+	t1 := t0.Add(time.Hour)
+	t2 := t1.Add(time.Hour)
+
+	// a1: key stable, finding_identity = old
+	c1 := hotspot.Candidate{
+		Key: "k1", FindingIdentity: "old", RuleKey: "r1", Title: "t1", Description: "d1",
+		Severity: shared.SeverityHigh, Kind: finding.KindSAST, CWE: "cwe-1", Location: "loc",
+	}
+	a1 := projectionAnalysis("a1", t1)
+	if err := store.SaveWithResultAndHotspots(ctx, a1, nil, []hotspot.Candidate{c1}); err != nil {
+		t.Fatal(err)
+	}
+
+	// a2: newer analysis: same key, finding_identity = new
+	c2 := hotspot.Candidate{
+		Key: "k1", FindingIdentity: "new", RuleKey: "r1", Title: "t1", Description: "d1",
+		Severity: shared.SeverityHigh, Kind: finding.KindSAST, CWE: "cwe-1", Location: "loc",
+	}
+	a2 := projectionAnalysis("a2", t2)
+	if err := store.SaveWithResultAndHotspots(ctx, a2, nil, []hotspot.Candidate{c2}); err != nil {
+		t.Fatal(err)
+	}
+
+	id := hotspot.DeterministicID("tenant-a", "project-a", "k1")
+	h, err := store.GetHotspot(ctx, "tenant-a", "project-a", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.FindingIdentity != "new" {
+		t.Fatalf("expected finding identity 'new', got '%s'", h.FindingIdentity)
+	}
+
+	// a0: older analysis arrives late: identity = stale
+	c0 := hotspot.Candidate{
+		Key: "k1", FindingIdentity: "stale", RuleKey: "r1", Title: "t1", Description: "d1",
+		Severity: shared.SeverityHigh, Kind: finding.KindSAST, CWE: "cwe-1", Location: "loc",
+	}
+	a0 := projectionAnalysis("a0", t0)
+	if err := store.SaveWithResultAndHotspots(ctx, a0, nil, []hotspot.Candidate{c0}); err != nil {
+		t.Fatal(err)
+	}
+
+	// identity must remain 'new'
+	h, err = store.GetHotspot(ctx, "tenant-a", "project-a", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.FindingIdentity != "new" {
+		t.Fatalf("expected finding identity 'new', got '%s'", h.FindingIdentity)
+	}
+}

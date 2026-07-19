@@ -68,6 +68,8 @@ type Hotspot struct {
 	LastSeenAnalysisID  string
 	FirstSeenAt         time.Time
 	LastSeenAt          time.Time
+	LastReviewedBy      string
+	LastReviewedAt      *time.Time
 	Audit               shared.Audit
 }
 
@@ -95,7 +97,7 @@ func (h Hotspot) Validate() error {
 	if !h.Severity.Valid() {
 		return fmt.Errorf("%w: hotspot severity is invalid", shared.ErrValidation)
 	}
-	if !Status(h.Status).Valid() {
+	if !h.Status.Valid() {
 		return fmt.Errorf("%w: hotspot status is invalid", shared.ErrValidation)
 	}
 	if h.Version < 1 {
@@ -110,8 +112,50 @@ func (h Hotspot) Validate() error {
 	return nil
 }
 
+// Project creates and validates the initial Project-scoped projection for a
+// hotspot candidate detected in one analysis.
+func Project(
+	tenantID shared.ID,
+	projectID shared.ID,
+	analysisID string,
+	createdAt time.Time,
+	candidate Candidate,
+) (Hotspot, error) {
+	item := Hotspot{
+		ID:              DeterministicID(tenantID, projectID, candidate.Key),
+		TenantID:        tenantID,
+		ProjectID:       projectID,
+		Key:             candidate.Key,
+		FindingIdentity: candidate.FindingIdentity,
+		RuleKey:         candidate.RuleKey,
+		Title:           candidate.Title,
+		Description:     candidate.Description,
+		Severity:        candidate.Severity,
+		Kind:            candidate.Kind,
+		CWE:             candidate.CWE,
+		Location:        candidate.Location,
+		Status:          StatusToReview,
+		Version:         1,
+
+		FirstSeenAnalysisID: analysisID,
+		LastSeenAnalysisID:  analysisID,
+		FirstSeenAt:         createdAt,
+		LastSeenAt:          createdAt,
+
+		Audit: shared.Audit{
+			CreatedAt: createdAt,
+			UpdatedAt: createdAt,
+		},
+	}
+	if err := item.Validate(); err != nil {
+		return Hotspot{}, err
+	}
+	return item, nil
+}
+
 // ListFilter describes the read API's tenant/project-local filters.
 type ListFilter struct {
+	Lens             Lens
 	Status           *Status
 	RuleKey          string
 	Severity         *shared.Severity
@@ -134,7 +178,8 @@ type Facets struct {
 }
 
 type Page struct {
-	Items  []Hotspot
-	Next   *Cursor
-	Facets Facets
+	Items   []Hotspot
+	Facets  Facets
+	Next    *Cursor
+	Summary Summary
 }

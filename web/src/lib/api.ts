@@ -26,6 +26,7 @@ import type {
   Judgment,
   ScanJob,
   ScanResult,
+  Severity,
   AuditEntry,
   AuditReport,
   CurrentUser,
@@ -48,6 +49,11 @@ import type {
   RuleDetection,
   QualityGate,
   Grade,
+  Hotspot,
+  HotspotStatus,
+  HotspotListFilter,
+  HotspotPage,
+  HotspotReviewEvent,
 } from './types'
 import { mapProjectOverviewResponse, type ProjectOverview } from './projectOverview'
 
@@ -762,6 +768,36 @@ function mapRuleDetail(raw: any): RuleDetail {
   }
 }
 
+function mapHotspot(r: any): Hotspot {
+  return {
+    id: r.id ?? '',
+    ruleKey: r.rule_key ?? '',
+    ruleName: r.rule_name ?? '',
+    title: r.title ?? '',
+    description: r.description ?? '',
+    severity: (r.severity ?? 'unknown') as Severity,
+    kind: r.finding_kind ?? '',
+    cwe: r.cwe ?? '',
+    location: r.location ?? '',
+    status: (r.status ?? 'to_review') as HotspotStatus,
+    version: r.version ?? 1,
+    firstSeenAnalysisId: r.first_seen_analysis_id ?? '',
+    lastSeenAnalysisId: r.last_seen_analysis_id ?? '',
+    firstSeenAt: r.first_seen_at ?? '',
+    lastSeenAt: r.last_seen_at ?? '',
+  }
+}
+
+function mapHotspotReviewEvent(r: any): HotspotReviewEvent {
+  return {
+    actor: r.actor ?? '',
+    status: (r.to || r.status || 'to_review') as HotspotStatus,
+    rationale: r.rationale ?? '',
+    version: r.version ?? (r.previous_version ? r.previous_version + 1 : 1),
+    at: r.created_at || r.at || '',
+  }
+}
+
 export const api = {
   aup: (): Promise<AupStatus> => req('/aup'),
 
@@ -842,6 +878,56 @@ export const api = {
 
   projectOverview: async (key: string): Promise<ProjectOverview> =>
     mapProjectOverviewResponse(await req(`/projects/${encodeURIComponent(key)}/overview`)),
+
+  // --- Hotspots ---
+  listProjectHotspots: async (projectKey: string, lens: 'overall' | 'new-code', filter: HotspotListFilter): Promise<HotspotPage> => {
+    const q = new URLSearchParams()
+    q.set('lens', lens)
+    if (filter.status) q.set('status', filter.status)
+    if (filter.rule) q.set('rule', filter.rule)
+    if (filter.severity) q.set('severity', filter.severity)
+    if (filter.search?.trim()) q.set('search', filter.search.trim())
+    if (filter.limit) q.set('limit', String(filter.limit))
+    if (filter.before_last_seen_at) q.set('before_last_seen_at', filter.before_last_seen_at)
+    if (filter.before_id) q.set('before_id', filter.before_id)
+    const qs = q.toString()
+    const res = await req(`/projects/${encodeURIComponent(projectKey)}/hotspots${qs ? `?${qs}` : ''}`)
+    return {
+      items: (res.items ?? []).map(mapHotspot),
+      next: res.next ? { beforeLastSeenAt: res.next.before_last_seen_at ?? '', beforeId: res.next.before_id ?? '' } : null,
+      facets: {
+        statuses: res.facets?.statuses ?? {},
+        ruleKeys: res.facets?.rule_keys ?? {},
+        severities: res.facets?.severities ?? {},
+      },
+      summary: {
+        total: res.summary?.total ?? 0,
+        reviewed: res.summary?.reviewed ?? 0,
+        reviewedPct: res.summary?.reviewed_pct ?? 100,
+        grade: (res.summary?.grade ?? 'A') as Grade,
+      },
+    }
+  },
+
+  getProjectHotspot: async (projectKey: string, id: string): Promise<Hotspot> => {
+    return mapHotspot(await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}`))
+  },
+
+  transitionProjectHotspot: async (projectKey: string, id: string, status: HotspotStatus, rationale: string, expectedVersion: number): Promise<{ hotspot: Hotspot, event: HotspotReviewEvent }> => {
+    const res = await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}/transitions`, {
+      method: 'POST',
+      body: JSON.stringify({ to: status, rationale, expected_version: expectedVersion }),
+    })
+    return {
+      hotspot: mapHotspot(res.hotspot),
+      event: mapHotspotReviewEvent(res.event)
+    }
+  },
+
+  getProjectHotspotHistory: async (projectKey: string, id: string): Promise<HotspotReviewEvent[]> => {
+    const res = await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}/history`)
+    return (res ?? []).map(mapHotspotReviewEvent)
+  },
 
   assignProjectGate: async (key: string, gateId: string): Promise<Project> =>
     mapProject(await req(`/projects/${encodeURIComponent(key)}/gate`, { method: 'PUT', body: JSON.stringify({ gate_id: gateId }) })),

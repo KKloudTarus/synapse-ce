@@ -6,11 +6,12 @@ export const metricLabels: Record<string, string> = {
   new_critical: 'New critical issues', new_high: 'New high issues', new_medium: 'New medium issues', new_secret: 'New secrets',
   new_vulnerability: 'New vulnerabilities', new_issues: 'New issues', total_critical: 'Total critical issues', coverage: 'Line coverage',
   duplication_density: 'Duplication density', security_rating: 'Security rating', reliability_rating: 'Reliability rating', maintainability_rating: 'Maintainability rating',
+  security_hotspots_reviewed: 'Security Hotspots Reviewed', new_security_hotspots_reviewed: 'New Security Hotspots Reviewed',
 }
 
 export function metricLabel(metric: string) { return metricLabels[metric] ?? metric.replaceAll('_', ' ') }
 export function metricValue(metric: string, value: number) {
-  if (metric === 'coverage' || metric === 'duplication_density') return `${value.toFixed(1)}%`
+  if (metric === 'coverage' || metric === 'duplication_density' || metric.endsWith('_reviewed')) return `${value.toFixed(1)}%`
   if (metric.endsWith('_rating')) return gradeFromNumber(value)
   return Number.isInteger(value) ? value.toLocaleString() : value.toFixed(2)
 }

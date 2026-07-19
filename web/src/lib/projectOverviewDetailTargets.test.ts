@@ -21,20 +21,29 @@ describe('overviewDetailTarget', () => {
       expect(target?.focus ?? null).toBe(expected[card.key])
       if (target) {
         expect(target.lens).toBe('overall')
-        expect(target.to).toBe(`/code-quality/projects/synapse/analysis?focus=${target.focus}&lens=overall`)
-        expect(target.label).toBe(`View ${card.label} details`)
+        if (card.key === 'securityHotspotsReviewed') {
+          expect(target.to).toBe('/code-quality/projects/synapse/hotspots?lens=overall')
+        } else {
+          expect(target.to).toBe(`/code-quality/projects/synapse/analysis?focus=${target.focus}&lens=overall`)
+        }
+        expect(target.label).toBe(card.key === 'securityHotspotsReviewed' ? 'View security hotspots' : `View ${card.label} details`)
       }
     }
   })
 
   it('maps only truthful New Code rating destinations', () => {
-    const expected = new Set(['security', 'reliability', 'maintainability'])
+    const expected = new Set(['security', 'reliability', 'maintainability', 'securityHotspotsReviewed'])
     for (const card of cards) {
       const target = overviewDetailTarget('synapse', 'new-code', card)
       expect(target !== null).toBe(expected.has(card.key))
       if (target) {
-        expect(target.focus).toBe(card.key)
-        expect(target.lens).toBe('new-code')
+        if (card.key === 'securityHotspotsReviewed') {
+          expect(target.destination).toBe('hotspots')
+          expect(target.lens).toBe('new-code')
+        } else {
+          expect(target.focus).toBe(card.key)
+          expect(target.lens).toBe('new-code')
+        }
       }
     }
   })
@@ -67,7 +76,6 @@ describe('overviewDetailTarget', () => {
 
   it('keeps Hotspots and New Code measures non-interactive even if unexpectedly available', () => {
     const byKey = Object.fromEntries(cards.map((card) => [card.key, card])) as Record<OverviewMetricCardModel['key'], OverviewMetricCardModel>
-    expect(overviewDetailTarget('synapse', 'overall', byKey.securityHotspotsReviewed)).toBeNull()
     expect(overviewDetailTarget('synapse', 'new-code', byKey.coverage)).toBeNull()
     expect(overviewDetailTarget('synapse', 'new-code', byKey.duplications)).toBeNull()
   })

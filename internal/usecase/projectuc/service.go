@@ -373,6 +373,9 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 		}
 	}
 	all = finding.Publishable(all)
+	if s.ruleCatalog == nil {
+		return fmt.Errorf("classify project hotspots: rule catalog is not configured")
+	}
 	issues, candidates, err := hotspotsuc.Classify(ctx, all, s.ruleCatalog)
 	if err != nil {
 		return fmt.Errorf("classify project hotspots: %w", err)
@@ -381,6 +384,71 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 	if result.CodeQuality != nil {
 		loc = result.CodeQuality.Inventory.Totals().CodeLines
 	}
+
+	// Compute Hotspot Summaries
+	var existingHotspots []hotspot.Hotspot
+	if s.hotspots != nil {
+		var beforeID shared.ID
+		var beforeLastSeenAt time.Time
+		for {
+			page, err := s.hotspots.ListHotspots(ctx, p.TenantID, p.ID, hotspot.ListFilter{Limit: 1000, BeforeID: beforeID, BeforeLastSeenAt: beforeLastSeenAt})
+			if err != nil {
+				break
+			}
+			existingHotspots = append(existingHotspots, page.Items...)
+			if page.Next == nil {
+				break
+			}
+			beforeID = page.Next.BeforeID
+			beforeLastSeenAt = page.Next.BeforeLastSeenAt
+		}
+	}
+	existingMap := make(map[string]hotspot.Hotspot, len(existingHotspots))
+	for _, h := range existingHotspots {
+		existingMap[h.Key] = h
+	}
+
+	hsTotal := len(candidates)
+	hsReviewed := 0
+	newHsTotal := 0
+	newHsReviewed := 0
+
+	for _, c := range candidates {
+		ex, found := existingMap[c.Key]
+		isNew := !found
+		if found && baseline != nil && ex.FirstSeenAt.After(baseline.CreatedAt) {
+			isNew = true
+		} else if !found {
+			// if baseline is nil, everything is new code
+			isNew = true
+		} else if found && baseline == nil {
+			isNew = true
+		}
+
+		if isNew {
+			newHsTotal++
+		}
+
+		if found {
+			// Reappearance of a fixed hotspot => becomes to_review (unreviewed)
+			if ex.Status == hotspot.StatusFixed && completedAt.After(ex.LastSeenAt) {
+				if !isNew {
+					newHsTotal++ // Reopened hotspot is tracked as new code
+				}
+				continue
+			}
+			if ex.Status.Reviewed() {
+				hsReviewed++
+				if isNew {
+					newHsReviewed++
+				}
+			}
+		}
+	}
+
+	overallHsSummary, _ := hotspot.NewSummary(hsTotal, hsReviewed)
+	newHsSummary, _ := hotspot.NewSummary(newHsTotal, newHsReviewed)
+
 	gate := result.Gate
 	gateSource := ""
 	if p.GateID != "" {
@@ -400,6 +468,7 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 		ID: jobID, TenantID: p.TenantID, ProjectID: p.ID, ProjectKey: p.Key, CreatedAt: completedAt,
 		SourceRef: result.SourceRef, SourceCommit: result.SourceCommit, Findings: issues, Gate: gate, GateSource: gateSource, GateExempt: result.GateExemptKeys(issues), LinesOfCode: loc,
 		Coverage: result.LineCoverage, Duplication: duplicationOf(result), Previous: baseline,
+		Hotspots: overallHsSummary, NewHotspots: newHsSummary,
 	})
 	if err != nil {
 		return fmt.Errorf("build project analysis: %w", err)
@@ -420,16 +489,32 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 	return nil
 }
 
-// ListHotspots returns only projections belonging to the requested tenant and Project.
+// ListHotspots returns projections belonging to the requested tenant and Project for the current analysis lens.
 func (s *Service) ListHotspots(ctx context.Context, tenantID shared.ID, key string, filter hotspot.ListFilter) (hotspot.Page, error) {
-	if s.hotspots == nil {
+	if s.hotspots == nil || s.analyses == nil {
 		return hotspot.Page{}, shared.ErrNotFound
 	}
 	p, err := s.Get(ctx, tenantID, key)
 	if err != nil {
 		return hotspot.Page{}, err
 	}
-	return s.hotspots.ListHotspots(ctx, tenantID, p.ID, filter)
+	latestMap, err := s.analyses.LatestForProjects(ctx, tenantID, []shared.ID{p.ID})
+	if err != nil {
+		return hotspot.Page{}, err
+	}
+	latest, ok := latestMap[p.ID]
+	if !ok {
+		// Empty page with A-grade summary
+		summary, _ := hotspot.NewSummary(0, 0)
+		return hotspot.Page{Summary: summary, Facets: hotspot.Facets{Statuses: map[string]int{}, RuleKeys: map[string]int{}, Severities: map[string]int{}}}, nil
+	}
+
+	page, summary, err := s.hotspots.ListAnalysisHotspots(ctx, tenantID, p.ID, shared.ID(latest.ID), filter.Lens, filter)
+	if err != nil {
+		return hotspot.Page{}, err
+	}
+	page.Summary = summary
+	return page, nil
 }
 
 // GetHotspot returns one projection only after the Project has been resolved in the caller's tenant.
@@ -442,6 +527,63 @@ func (s *Service) GetHotspot(ctx context.Context, tenantID shared.ID, key string
 		return hotspot.Hotspot{}, err
 	}
 	return s.hotspots.GetHotspot(ctx, tenantID, p.ID, hotspotID)
+}
+
+// TransitionHotspot applies a human review decision to a hotspot.
+func (s *Service) TransitionHotspot(ctx context.Context, actor string, tenantID shared.ID, key string, hotspotID shared.ID, to hotspot.Status, rationale string, expectedVersion int) (hotspot.Hotspot, hotspot.ReviewEvent, error) {
+	if err := requireActor(actor); err != nil {
+		return hotspot.Hotspot{}, hotspot.ReviewEvent{}, err
+	}
+	if s.hotspots == nil {
+		return hotspot.Hotspot{}, hotspot.ReviewEvent{}, shared.ErrNotFound
+	}
+	p, err := s.Get(ctx, tenantID, key)
+	if err != nil {
+		return hotspot.Hotspot{}, hotspot.ReviewEvent{}, err
+	}
+
+	cmd := hotspot.TransitionCommand{
+		TenantID:        p.TenantID,
+		ProjectID:       p.ID,
+		HotspotID:       hotspotID,
+		EventID:         s.ids.NewID(),
+		To:              to,
+		Actor:           actor,
+		Rationale:       rationale,
+		ExpectedVersion: expectedVersion,
+	}
+	updated, event, err := s.hotspots.TransitionHotspot(ctx, cmd)
+	if err != nil {
+		return hotspot.Hotspot{}, hotspot.ReviewEvent{}, fmt.Errorf("transition hotspot: %w", err)
+	}
+
+	if err := s.audit.Record(ctx, ports.AuditEntry{
+		Actor:    actor,
+		Action:   "project.hotspot.review",
+		Target:   p.ID.String(),
+		Metadata: map[string]string{
+			"project":    p.Key,
+			"hotspot_id": hotspotID.String(),
+			"to":         string(to),
+		},
+		At: s.clock.Now(),
+	}); err != nil {
+		return hotspot.Hotspot{}, hotspot.ReviewEvent{}, fmt.Errorf("audit hotspot review: %w", err)
+	}
+
+	return updated, event, nil
+}
+
+// HotspotHistory returns the immutable review event history of a hotspot.
+func (s *Service) HotspotHistory(ctx context.Context, tenantID shared.ID, key string, hotspotID shared.ID) ([]hotspot.ReviewEvent, error) {
+	if s.hotspots == nil {
+		return nil, shared.ErrNotFound
+	}
+	p, err := s.Get(ctx, tenantID, key)
+	if err != nil {
+		return nil, err
+	}
+	return s.hotspots.HotspotHistory(ctx, p.TenantID, p.ID, hotspotID)
 }
 
 func (s *Service) resolveManagedGate(ctx context.Context, tenantID shared.ID, key string) (qualitygate.Gate, error) {

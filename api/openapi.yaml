@@ -17,23 +17,23 @@ info:
     including the rule catalog API, use the field names documented below.
 
 servers:
-  - url: http://localhost:8080
-    description: Local API
+- url: http://localhost:8080
+  description: Local API
 
 security:
-  - bearerAuth: []
+- bearerAuth: []
 
 tags:
-  - name: health
-  - name: aup
-  - name: engagements
-  - name: findings
-  - name: sca
-  - name: export
-  - name: projects
-    description: Long-lived code-quality Projects and immutable analysis read models
-  - name: rules
-    description: Built-in code-quality and security rule catalog
+- name: health
+- name: aup
+- name: engagements
+- name: findings
+- name: sca
+- name: export
+- name: projects
+  description: Long-lived code-quality Projects and immutable analysis read models
+- name: rules
+  description: Built-in code-quality and security rule catalog
 
 paths:
   /healthz:
@@ -49,8 +49,8 @@ paths:
               schema:
                 type: object
                 properties:
-                  status: { type: string, example: ok }
-                  service: { type: string, example: synapse-api }
+                  status: {type: string, example: ok}
+                  service: {type: string, example: synapse-api}
 
   /api/v1/aup:
     get:
@@ -61,8 +61,8 @@ paths:
           description: The active AUP
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/AupStatus" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
+              schema: {$ref: "#/components/schemas/AupStatus"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
 
   /api/v1/aup/accept:
     post:
@@ -76,11 +76,11 @@ paths:
               type: object
               required: [version]
               properties:
-                version: { type: string, example: "1.0" }
+                version: {type: string, example: "1.0"}
       responses:
-        "200": { description: Accepted }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
+        "200": {description: Accepted}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
 
   /api/v1/engagements:
     get:
@@ -93,9 +93,9 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: "#/components/schemas/Engagement" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+                items: {$ref: "#/components/schemas/Engagement"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
     post:
       tags: [engagements]
       summary: Create an engagement
@@ -103,24 +103,25 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/CreateEngagementRequest" }
+            schema: {$ref: "#/components/schemas/CreateEngagementRequest"}
       responses:
         "201":
           description: Created
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Engagement" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+              schema: {$ref: "#/components/schemas/Engagement"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/engagements/{id}/findings:
     parameters:
-      - $ref: "#/components/parameters/EngagementId"
+    - $ref: "#/components/parameters/EngagementId"
     get:
       tags: [findings]
       summary: List an engagement's findings (highest risk first)
-      description: Ordered by CISA KEV, then EPSS x CVSS, then severity – never raw CVSS.
+      description: Ordered by CISA KEV, then EPSS x CVSS, then severity – never raw
+        CVSS.
       responses:
         "200":
           description: Findings
@@ -128,17 +129,17 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: "#/components/schemas/Finding" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+                items: {$ref: "#/components/schemas/Finding"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/engagements/{id}/findings/{fid}:
     parameters:
-      - $ref: "#/components/parameters/EngagementId"
-      - name: fid
-        in: path
-        required: true
-        schema: { type: string }
+    - $ref: "#/components/parameters/EngagementId"
+    - name: fid
+      in: path
+      required: true
+      schema: {type: string}
     patch:
       tags: [findings]
       summary: Change a finding's triage status (audited)
@@ -153,21 +154,21 @@ paths:
                 status:
                   type: string
                   enum: [open, triage, confirmed, false_positive, remediated]
-                note: { type: string }
+                note: {type: string}
       responses:
         "200":
           description: The updated finding
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Finding" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/NotFound" }
+              schema: {$ref: "#/components/schemas/Finding"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/engagements/{id}/export/sarif:
     parameters:
-      - $ref: "#/components/parameters/EngagementId"
+    - $ref: "#/components/parameters/EngagementId"
     get:
       tags: [export]
       summary: Export findings as SARIF 2.1.0
@@ -176,13 +177,13 @@ paths:
           description: SARIF document
           content:
             application/sarif+json:
-              schema: { type: object }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+              schema: {type: object}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/engagements/{id}/export/openvex:
     parameters:
-      - $ref: "#/components/parameters/EngagementId"
+    - $ref: "#/components/parameters/EngagementId"
     get:
       tags: [export]
       summary: Export findings as OpenVEX 0.2
@@ -191,29 +192,30 @@ paths:
           description: OpenVEX document
           content:
             application/json:
-              schema: { type: object }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+              schema: {type: object}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/engagements/{id}/report.pdf:
     parameters:
-      - $ref: "#/components/parameters/EngagementId"
+    - $ref: "#/components/parameters/EngagementId"
     get:
       tags: [export]
       summary: Deterministic PDF report, SHA-256 sealed
-      description: Templated from stored data (no LLM). The body's SHA-256 is returned in `X-Report-SHA256`.
+      description: Templated from stored data (no LLM). The body's SHA-256 is returned
+        in `X-Report-SHA256`.
       responses:
         "200":
           description: PDF report
           headers:
             X-Report-SHA256:
               description: Hex SHA-256 of the PDF bytes (integrity seal)
-              schema: { type: string }
+              schema: {type: string}
           content:
             application/pdf:
-              schema: { type: string, format: binary }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+              schema: {type: string, format: binary}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/sca/scans:
     post:
@@ -226,24 +228,24 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/ScanRequest" }
+            schema: {$ref: "#/components/schemas/ScanRequest"}
       responses:
         "200":
           description: Scan result (SBOM, vulnerabilities, licenses, findings, provenance)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ScanResult" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+              schema: {$ref: "#/components/schemas/ScanResult"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/projects/{key}/overview:
     parameters:
-      - name: key
-        in: path
-        required: true
-        schema: { type: string }
-        example: payments-api
+    - name: key
+      in: path
+      required: true
+      schema: {type: string}
+      example: payments-api
     get:
       tags: [projects]
       summary: Get the latest Project quality overview
@@ -257,12 +259,12 @@ paths:
           description: Project overview
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ProjectOverview" }
+              schema: {$ref: "#/components/schemas/ProjectOverview"}
               examples:
                 analyzed:
                   value:
                     state: analyzed
-                    project: { key: payments-api, name: Payments API }
+                    project: {key: payments-api, name: Payments API}
                     latest_analysis:
                       id: analysis-42
                       created_at: "2026-07-17T10:00:00Z"
@@ -278,112 +280,121 @@ paths:
                       name: Synapse way
                       source: managed
                       failed_conditions:
-                        - { metric: new_high, operator: "<=", threshold: 0, actual: 2 }
+                      - {metric: new_high, operator: "<=", threshold: 0, actual: 2}
                     issue_summary:
-                      new_code_total: { availability: available, value: 4, unavailable_reason: null }
-                      accepted_overall_total: { availability: unavailable, value: null, unavailable_reason: issue_lifecycle_not_available }
+                      new_code_total: {availability: available, value: 4, unavailable_reason: null}
+                      accepted_overall_total: {availability: unavailable, value: null,
+                        unavailable_reason: issue_lifecycle_not_available}
                     lenses:
                       overall:
-                        security: { availability: available, grade: B, unavailable_reason: null }
-                        reliability: { availability: available, grade: A, unavailable_reason: null }
-                        maintainability: { availability: available, grade: C, unavailable_reason: null }
-                        security_hotspots_reviewed: { availability: unavailable, value: null, unavailable_reason: security_hotspots_not_available }
-                        coverage: { availability: available, value: 72.349, unavailable_reason: null }
-                        duplications: { availability: available, value: 4.25, unavailable_reason: null }
+                        security: {availability: available, grade: B, unavailable_reason: null}
+                        reliability: {availability: available, grade: A, unavailable_reason: null}
+                        maintainability: {availability: available, grade: C, unavailable_reason: null}
+                        security_hotspots_reviewed: {availability: unavailable, value: null,
+                          unavailable_reason: security_hotspots_not_available}
+                        coverage: {availability: available, value: 72.349, unavailable_reason: null}
+                        duplications: {availability: available, value: 4.25, unavailable_reason: null}
                       new_code:
-                        security: { availability: available, grade: A, unavailable_reason: null }
-                        reliability: { availability: available, grade: B, unavailable_reason: null }
-                        maintainability: { availability: unavailable, grade: null, unavailable_reason: changed_line_metrics_not_available }
-                        security_hotspots_reviewed: { availability: unavailable, value: null, unavailable_reason: security_hotspots_not_available }
-                        coverage: { availability: unavailable, value: null, unavailable_reason: changed_line_metrics_not_available }
-                        duplications: { availability: unavailable, value: null, unavailable_reason: changed_line_metrics_not_available }
+                        security: {availability: available, grade: A, unavailable_reason: null}
+                        reliability: {availability: available, grade: B, unavailable_reason: null}
+                        maintainability: {availability: unavailable, grade: null,
+                          unavailable_reason: changed_line_metrics_not_available}
+                        security_hotspots_reviewed: {availability: unavailable, value: null,
+                          unavailable_reason: security_hotspots_not_available}
+                        coverage: {availability: unavailable, value: null, unavailable_reason: changed_line_metrics_not_available}
+                        duplications: {availability: unavailable, value: null, unavailable_reason: changed_line_metrics_not_available}
                 notAnalyzed:
                   value:
                     state: not_analyzed
-                    project: { key: payments-api, name: Payments API }
-                    latest_analysis: null
-                    gate: null
+                    project: {key: payments-api, name: Payments API}
+                    latest_analysis:
+                    gate:
                     issue_summary:
-                      new_code_total: { availability: unavailable, value: null, unavailable_reason: no_analysis }
-                      accepted_overall_total: { availability: unavailable, value: null, unavailable_reason: no_analysis }
+                      new_code_total: {availability: unavailable, value: null, unavailable_reason: no_analysis}
+                      accepted_overall_total: {availability: unavailable, value: null,
+                        unavailable_reason: no_analysis}
                     lenses:
                       overall:
-                        security: { availability: unavailable, grade: null, unavailable_reason: no_analysis }
-                        reliability: { availability: unavailable, grade: null, unavailable_reason: no_analysis }
-                        maintainability: { availability: unavailable, grade: null, unavailable_reason: no_analysis }
-                        security_hotspots_reviewed: { availability: unavailable, value: null, unavailable_reason: no_analysis }
-                        coverage: { availability: unavailable, value: null, unavailable_reason: no_analysis }
-                        duplications: { availability: unavailable, value: null, unavailable_reason: no_analysis }
+                        security: {availability: unavailable, grade: null, unavailable_reason: no_analysis}
+                        reliability: {availability: unavailable, grade: null, unavailable_reason: no_analysis}
+                        maintainability: {availability: unavailable, grade: null,
+                          unavailable_reason: no_analysis}
+                        security_hotspots_reviewed: {availability: unavailable, value: null,
+                          unavailable_reason: no_analysis}
+                        coverage: {availability: unavailable, value: null, unavailable_reason: no_analysis}
+                        duplications: {availability: unavailable, value: null, unavailable_reason: no_analysis}
                       new_code:
-                        security: { availability: unavailable, grade: null, unavailable_reason: no_analysis }
-                        reliability: { availability: unavailable, grade: null, unavailable_reason: no_analysis }
-                        maintainability: { availability: unavailable, grade: null, unavailable_reason: no_analysis }
-                        security_hotspots_reviewed: { availability: unavailable, value: null, unavailable_reason: no_analysis }
-                        coverage: { availability: unavailable, value: null, unavailable_reason: no_analysis }
-                        duplications: { availability: unavailable, value: null, unavailable_reason: no_analysis }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "500": { $ref: "#/components/responses/InternalServerError" }
+                        security: {availability: unavailable, grade: null, unavailable_reason: no_analysis}
+                        reliability: {availability: unavailable, grade: null, unavailable_reason: no_analysis}
+                        maintainability: {availability: unavailable, grade: null,
+                          unavailable_reason: no_analysis}
+                        security_hotspots_reviewed: {availability: unavailable, value: null,
+                          unavailable_reason: no_analysis}
+                        coverage: {availability: unavailable, value: null, unavailable_reason: no_analysis}
+                        duplications: {availability: unavailable, value: null, unavailable_reason: no_analysis}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalServerError"}
 
   /api/v1/projects/{key}/hotspots:
     parameters:
-      - name: key
-        in: path
-        required: true
-        schema: { type: string }
+    - name: key
+      in: path
+      required: true
+      schema: {type: string}
     get:
       tags: [projects]
       summary: List Project Security Hotspot projections
       operationId: listProjectHotspots
       description: >
-        Returns catalog-classified Project Security Hotspots without loading a
-        full scan-result blob. This PR is read-only; review transitions are not
-        exposed here.
+        Returns catalog-classified Project Security Hotspots without loading a full
+        scan-result blob.
       parameters:
-        - name: status
-          in: query
-          schema: { $ref: "#/components/schemas/ProjectHotspotStatus" }
-        - name: rule
-          in: query
-          schema: { type: string, maxLength: 256 }
-        - name: severity
-          in: query
-          schema: { $ref: "#/components/schemas/ProjectHotspotSeverity" }
-        - name: search
-          in: query
-          schema: { type: string, maxLength: 256 }
-        - name: limit
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
-        - name: before_last_seen_at
-          in: query
-          schema: { type: string, format: date-time }
-        - name: before_id
-          in: query
-          schema: { type: string }
+      - name: status
+        in: query
+        schema: {$ref: "#/components/schemas/ProjectHotspotStatus"}
+      - name: rule
+        in: query
+        schema: {type: string, maxLength: 256}
+      - name: severity
+        in: query
+        schema: {$ref: "#/components/schemas/ProjectHotspotSeverity"}
+      - name: search
+        in: query
+        schema: {type: string, maxLength: 256}
+      - name: limit
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 100, default: 25}
+      - name: before_last_seen_at
+        in: query
+        schema: {type: string, format: date-time}
+      - name: before_id
+        in: query
+        schema: {type: string}
+      - $ref: '#/components/parameters/LensParam'
       responses:
         "200":
           description: Project hotspot page
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ProjectHotspotPage" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "500": { $ref: "#/components/responses/InternalServerError" }
+              schema: {$ref: "#/components/schemas/ProjectHotspotPage"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalServerError"}
 
   /api/v1/projects/{key}/hotspots/{id}:
     parameters:
-      - name: key
-        in: path
-        required: true
-        schema: { type: string }
-      - name: id
-        in: path
-        required: true
-        schema: { type: string }
+    - name: key
+      in: path
+      required: true
+      schema: {type: string}
+    - name: id
+      in: path
+      required: true
+      schema: {type: string}
     get:
       tags: [projects]
       summary: Get one Project Security Hotspot projection
@@ -393,11 +404,17 @@ paths:
           description: Project hotspot
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ProjectHotspot" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "500": { $ref: "#/components/responses/InternalServerError" }
+              schema: {$ref: "#/components/schemas/ProjectHotspot"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalServerError"}
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/v1/rules:
     get:
@@ -406,60 +423,61 @@ paths:
       operationId: listRules
       description: Returns the immutable first-party rule catalog with optional filters.
       parameters:
-        - name: q
-          in: query
-          description: Search term. Max length 256. (Total filter values across all dimensions limit is 64).
-          schema:
+      - name: q
+        in: query
+        description: Search term. Max length 256. (Total filter values across all
+          dimensions limit is 64).
+        schema:
+          type: string
+          maxLength: 256
+      - name: language
+        in: query
+        style: form
+        explode: true
+        schema:
+          type: array
+          maxItems: 32
+          items:
             type: string
-            maxLength: 256
-        - name: language
-          in: query
-          style: form
-          explode: true
-          schema:
-            type: array
-            maxItems: 32
-            items:
-              type: string
-              maxLength: 128
-        - name: type
-          in: query
-          style: form
-          explode: true
-          schema:
-            type: array
-            maxItems: 32
-            items:
-              $ref: "#/components/schemas/RuleType"
-        - name: severity
-          in: query
-          style: form
-          explode: true
-          schema:
-            type: array
-            maxItems: 32
-            items:
-              $ref: "#/components/schemas/RuleSeverity"
-        - name: tag
-          in: query
-          style: form
-          explode: true
-          schema:
-            type: array
-            maxItems: 32
-            items:
-              type: string
-              maxLength: 128
-        - name: cwe
-          in: query
-          style: form
-          explode: true
-          schema:
-            type: array
-            maxItems: 32
-            items:
-              type: string
-              maxLength: 128
+            maxLength: 128
+      - name: type
+        in: query
+        style: form
+        explode: true
+        schema:
+          type: array
+          maxItems: 32
+          items:
+            $ref: "#/components/schemas/RuleType"
+      - name: severity
+        in: query
+        style: form
+        explode: true
+        schema:
+          type: array
+          maxItems: 32
+          items:
+            $ref: "#/components/schemas/RuleSeverity"
+      - name: tag
+        in: query
+        style: form
+        explode: true
+        schema:
+          type: array
+          maxItems: 32
+          items:
+            type: string
+            maxLength: 128
+      - name: cwe
+        in: query
+        style: form
+        explode: true
+        schema:
+          type: array
+          maxItems: 32
+          items:
+            type: string
+            maxLength: 128
       responses:
         "200":
           description: A list of rule summaries
@@ -467,20 +485,20 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: "#/components/schemas/RuleSummary" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "500": { $ref: "#/components/responses/InternalServerError" }
+                items: {$ref: "#/components/schemas/RuleSummary"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalServerError"}
 
   /api/v1/rules/{key}:
     parameters:
-      - name: key
-        in: path
-        required: true
-        schema:
-          type: string
-        example: go:sql-injection
+    - name: key
+      in: path
+      required: true
+      schema:
+        type: string
+      example: go:sql-injection
     get:
       tags: [rules]
       summary: Get rule by exact key
@@ -490,12 +508,88 @@ paths:
           description: The full rule detail
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RuleDetail" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "500": { $ref: "#/components/responses/InternalServerError" }
-        "404": { $ref: "#/components/responses/NotFound" }
+              schema: {$ref: "#/components/schemas/RuleDetail"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalServerError"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/v1/projects/{key}/hotspots/{id}/transitions:
+    post:
+      tags:
+      - projects
+      summary: Transition a project security hotspot
+      operationId: transitionProjectHotspot
+      parameters:
+      - $ref: '#/components/parameters/ProjectKey'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectHotspotTransitionRequest'
+      responses:
+        '200':
+          description: Hotspot successfully transitioned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectHotspotTransitionResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict (version mismatch)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /api/v1/projects/{key}/hotspots/{id}/history:
+    get:
+      tags:
+      - projects
+      summary: Get project security hotspot history
+      operationId: getProjectHotspotHistory
+      parameters:
+      - $ref: '#/components/parameters/ProjectKey'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Hotspot history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectHotspotReviewEvent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
 components:
   securitySchemes:
@@ -508,47 +602,64 @@ components:
       name: id
       in: path
       required: true
-      schema: { type: string }
+      schema: {type: string}
+    ProjectKey:
+      name: key
+      in: path
+      required: true
+      description: Unique identifier of the project
+      schema:
+        type: string
+        pattern: ^[a-z0-9_-]+$
+    LensParam:
+      name: lens
+      in: query
+      description: Filter by lens (overall or new-code)
+      schema:
+        type: string
+        enum:
+        - overall
+        - new-code
 
   responses:
     BadRequest:
       description: Invalid request
       content:
         application/json:
-          schema: { $ref: "#/components/schemas/Error" }
+          schema: {$ref: "#/components/schemas/Error"}
     Unauthorized:
       description: Missing or invalid bearer token
       content:
         application/json:
-          schema: { $ref: "#/components/schemas/Error" }
+          schema: {$ref: "#/components/schemas/Error"}
     Forbidden:
       description: AUP not accepted, or target outside scope / authorization window
       content:
         application/json:
-          schema: { $ref: "#/components/schemas/Error" }
+          schema: {$ref: "#/components/schemas/Error"}
     NotFound:
       description: Resource not found
       content:
         application/json:
-          schema: { $ref: "#/components/schemas/Error" }
+          schema: {$ref: "#/components/schemas/Error"}
     InternalServerError:
       description: Internal server error
       content:
         application/json:
-          schema: { $ref: "#/components/schemas/Error" }
+          schema: {$ref: "#/components/schemas/Error"}
 
   schemas:
     Error:
       type: object
       properties:
-        error: { type: string }
+        error: {type: string}
 
     AupStatus:
       type: object
       properties:
-        version: { type: string }
-        text: { type: string }
-        accepted: { type: boolean }
+        version: {type: string}
+        text: {type: string}
+        accepted: {type: boolean}
 
     ScopeTargetRequest:
       type: object
@@ -556,29 +667,29 @@ components:
         kind:
           type: string
           enum: [repo, domain, host, url, image, cidr]
-        value: { type: string }
+        value: {type: string}
 
     CreateEngagementRequest:
       type: object
       required: [name]
       properties:
-        name: { type: string, example: acme-q3-2026 }
-        client: { type: string, example: Acme Corp }
+        name: {type: string, example: acme-q3-2026}
+        client: {type: string, example: Acme Corp}
         in_scope:
           type: array
-          items: { $ref: "#/components/schemas/ScopeTargetRequest" }
+          items: {$ref: "#/components/schemas/ScopeTargetRequest"}
         out_of_scope:
           type: array
-          items: { $ref: "#/components/schemas/ScopeTargetRequest" }
+          items: {$ref: "#/components/schemas/ScopeTargetRequest"}
 
     Engagement:
       type: object
       description: Serialized from the domain struct (PascalCase keys).
       properties:
-        ID: { type: string }
-        Name: { type: string }
-        Client: { type: string }
-        Status: { type: string, enum: [draft, active, completed, archived] }
+        ID: {type: string}
+        Name: {type: string}
+        Client: {type: string}
+        Status: {type: string, enum: [draft, active, completed, archived]}
         Scope:
           type: object
           properties:
@@ -587,41 +698,41 @@ components:
               items:
                 type: object
                 properties:
-                  Kind: { type: string }
-                  Value: { type: string }
+                  Kind: {type: string}
+                  Value: {type: string}
             OutOfScope:
               type: array
               items:
                 type: object
                 properties:
-                  Kind: { type: string }
-                  Value: { type: string }
-        AuthorizedFrom: { type: [string, "null"], format: date-time }
-        AuthorizedTo: { type: [string, "null"], format: date-time }
+                  Kind: {type: string}
+                  Value: {type: string}
+        AuthorizedFrom: {type: [string, "null"], format: date-time}
+        AuthorizedTo: {type: [string, "null"], format: date-time}
 
     Finding:
       type: object
       description: Serialized from the domain struct (PascalCase keys).
       properties:
-        ID: { type: string }
-        EngagementID: { type: string }
-        Title: { type: string }
-        Description: { type: string }
-        Severity: { type: string, enum: [critical, high, medium, low, info, unknown] }
-        CVSSVector: { type: string }
-        CWE: { type: string }
-        Status: { type: string, enum: [open, triage, confirmed, false_positive, remediated] }
-        KEV: { type: boolean }
-        RiskScore: { type: number }
-        DedupKey: { type: string }
-        EvidenceScore: { type: integer }
+        ID: {type: string}
+        EngagementID: {type: string}
+        Title: {type: string}
+        Description: {type: string}
+        Severity: {type: string, enum: [critical, high, medium, low, info, unknown]}
+        CVSSVector: {type: string}
+        CWE: {type: string}
+        Status: {type: string, enum: [open, triage, confirmed, false_positive, remediated]}
+        KEV: {type: boolean}
+        RiskScore: {type: number}
+        DedupKey: {type: string}
+        EvidenceScore: {type: integer}
 
     ScanRequest:
       type: object
       required: [engagement_id, target]
       properties:
-        engagement_id: { type: string }
-        target: { type: string, description: path / git URL / archive / image ref }
+        engagement_id: {type: string}
+        target: {type: string, description: path / git URL / archive / image ref}
         kind:
           type: string
           enum: [local, git, archive, image]
@@ -630,26 +741,26 @@ components:
     ScanResult:
       type: object
       properties:
-        target: { type: string }
+        target: {type: string}
         languages:
           type: array
-          items: { type: object }
+          items: {type: object}
         sbom:
           type: object
           description: SBOM with Components and Dependencies (PascalCase keys).
         vulnerabilities:
           type: array
-          items: { type: object }
+          items: {type: object}
         licenses:
           type: array
-          items: { type: object }
+          items: {type: object}
         findings:
           type: array
-          items: { $ref: "#/components/schemas/Finding" }
+          items: {$ref: "#/components/schemas/Finding"}
         tool_versions:
           type: object
-          additionalProperties: { type: string }
-        vuln_db_snapshot: { type: string }
+          additionalProperties: {type: string}
+        vuln_db_snapshot: {type: string}
 
     ProjectOverviewState:
       type: string
@@ -662,14 +773,14 @@ components:
     ProjectOverviewUnavailableReason:
       type: string
       enum:
-        - no_analysis
-        - rating_not_available
-        - issue_lifecycle_not_available
-        - security_hotspots_not_available
-        - changed_line_metrics_not_available
-        - coverage_not_supplied
-        - no_executable_lines
-        - duplication_not_available
+      - no_analysis
+      - rating_not_available
+      - issue_lifecycle_not_available
+      - security_hotspots_not_available
+      - changed_line_metrics_not_available
+      - coverage_not_supplied
+      - no_executable_lines
+      - duplication_not_available
 
     ProjectOverviewGrade:
       type: string
@@ -693,23 +804,25 @@ components:
     ProjectOverviewGateMetric:
       type: string
       enum:
-        - new_critical
-        - new_high
-        - new_medium
-        - new_secret
-        - new_vulnerability
-        - new_issues
-        - total_critical
-        - duplication_density
-        - coverage
-        - security_rating
-        - reliability_rating
-        - maintainability_rating
+      - new_critical
+      - new_high
+      - new_medium
+      - new_secret
+      - new_vulnerability
+      - new_issues
+      - total_critical
+      - duplication_density
+      - coverage
+      - security_rating
+      - reliability_rating
+      - maintainability_rating
 
+      - security_hotspots_reviewed
+      - new_security_hotspots_reviewed
     ProjectOverview:
       oneOf:
-        - $ref: "#/components/schemas/ProjectOverviewNotAnalyzed"
-        - $ref: "#/components/schemas/ProjectOverviewAnalyzed"
+      - $ref: "#/components/schemas/ProjectOverviewNotAnalyzed"
+      - $ref: "#/components/schemas/ProjectOverviewAnalyzed"
 
     ProjectOverviewNotAnalyzed:
       type: object
@@ -718,13 +831,13 @@ components:
         state:
           type: string
           enum: [not_analyzed]
-        project: { $ref: "#/components/schemas/ProjectOverviewProject" }
+        project: {$ref: "#/components/schemas/ProjectOverviewProject"}
         latest_analysis:
           type: "null"
         gate:
           type: "null"
-        issue_summary: { $ref: "#/components/schemas/ProjectOverviewIssueSummary" }
-        lenses: { $ref: "#/components/schemas/ProjectOverviewLenses" }
+        issue_summary: {$ref: "#/components/schemas/ProjectOverviewIssueSummary"}
+        lenses: {$ref: "#/components/schemas/ProjectOverviewLenses"}
 
     ProjectOverviewAnalyzed:
       type: object
@@ -733,80 +846,80 @@ components:
         state:
           type: string
           enum: [analyzed]
-        project: { $ref: "#/components/schemas/ProjectOverviewProject" }
-        latest_analysis: { $ref: "#/components/schemas/ProjectOverviewAnalysis" }
-        gate: { $ref: "#/components/schemas/ProjectOverviewGate" }
-        issue_summary: { $ref: "#/components/schemas/ProjectOverviewIssueSummary" }
-        lenses: { $ref: "#/components/schemas/ProjectOverviewLenses" }
+        project: {$ref: "#/components/schemas/ProjectOverviewProject"}
+        latest_analysis: {$ref: "#/components/schemas/ProjectOverviewAnalysis"}
+        gate: {$ref: "#/components/schemas/ProjectOverviewGate"}
+        issue_summary: {$ref: "#/components/schemas/ProjectOverviewIssueSummary"}
+        lenses: {$ref: "#/components/schemas/ProjectOverviewLenses"}
 
     ProjectOverviewProject:
       type: object
       required: [key, name]
       properties:
-        key: { type: string, minLength: 1 }
-        name: { type: string, minLength: 1 }
+        key: {type: string, minLength: 1}
+        name: {type: string, minLength: 1}
 
     ProjectOverviewAnalysis:
       type: object
       required: [id, created_at, source_ref, source_commit, new_code]
       properties:
-        id: { type: string, minLength: 1 }
-        created_at: { type: string, format: date-time }
-        source_ref: { type: string }
-        source_commit: { type: string }
-        new_code: { $ref: "#/components/schemas/ProjectOverviewNewCodePeriod" }
+        id: {type: string, minLength: 1}
+        created_at: {type: string, format: date-time}
+        source_ref: {type: string}
+        source_commit: {type: string}
+        new_code: {$ref: "#/components/schemas/ProjectOverviewNewCodePeriod"}
 
     ProjectOverviewNewCodePeriod:
       oneOf:
-        - type: object
-          required: [first_analysis, has_baseline, baseline_analysis_id]
-          properties:
-            first_analysis:
-              type: boolean
-              const: true
-            has_baseline:
-              type: boolean
-              const: false
-            baseline_analysis_id:
-              type: "null"
-        - type: object
-          required: [first_analysis, has_baseline, baseline_analysis_id]
-          properties:
-            first_analysis:
-              type: boolean
-              const: false
-            has_baseline:
-              type: boolean
-              const: true
-            baseline_analysis_id:
-              type: string
-              minLength: 1
+      - type: object
+        required: [first_analysis, has_baseline, baseline_analysis_id]
+        properties:
+          first_analysis:
+            type: boolean
+            const: true
+          has_baseline:
+            type: boolean
+            const: false
+          baseline_analysis_id:
+            type: "null"
+      - type: object
+        required: [first_analysis, has_baseline, baseline_analysis_id]
+        properties:
+          first_analysis:
+            type: boolean
+            const: false
+          has_baseline:
+            type: boolean
+            const: true
+          baseline_analysis_id:
+            type: string
+            minLength: 1
 
     ProjectOverviewGate:
       type: object
       required: [status, key, name, source, failed_conditions]
       properties:
-        status: { $ref: "#/components/schemas/ProjectOverviewGateStatus" }
+        status: {$ref: "#/components/schemas/ProjectOverviewGateStatus"}
         key:
           type: [string, "null"]
         name:
           type: [string, "null"]
         source:
           anyOf:
-            - $ref: "#/components/schemas/ProjectOverviewGateSource"
-            - type: "null"
+          - $ref: "#/components/schemas/ProjectOverviewGateSource"
+          - type: "null"
         failed_conditions:
           type: array
-          items: { $ref: "#/components/schemas/ProjectOverviewGateCondition" }
+          items: {$ref: "#/components/schemas/ProjectOverviewGateCondition"}
 
     ProjectOverviewGateCondition:
       type: object
       required: [metric, operator, threshold, actual]
       properties:
-        metric: { $ref: "#/components/schemas/ProjectOverviewGateMetric" }
-        operator: { $ref: "#/components/schemas/ProjectOverviewGateOperator" }
-        threshold: { type: number }
-        actual: { type: number }
+        metric: {$ref: "#/components/schemas/ProjectOverviewGateMetric"}
+        operator: {$ref: "#/components/schemas/ProjectOverviewGateOperator"}
+        threshold: {type: number}
+        actual: {type: number}
 
     ProjectOverviewIssueSummary:
       type: object
@@ -816,67 +929,71 @@ components:
           description: Total findings newly introduced in the immutable New Code snapshot.
           $ref: "#/components/schemas/ProjectOverviewCountMetric"
         accepted_overall_total:
-          description: Total accepted findings across the whole project. Unavailable until issue lifecycle data lands.
+          description: Total accepted findings across the whole project. Unavailable
+            until issue lifecycle data lands.
           $ref: "#/components/schemas/ProjectOverviewCountMetric"
 
     ProjectOverviewLenses:
       type: object
       required: [overall, new_code]
       properties:
-        overall: { $ref: "#/components/schemas/ProjectOverviewLens" }
-        new_code: { $ref: "#/components/schemas/ProjectOverviewLens" }
+        overall: {$ref: "#/components/schemas/ProjectOverviewLens"}
+        new_code: {$ref: "#/components/schemas/ProjectOverviewLens"}
 
     ProjectOverviewLens:
       type: object
-      required: [security, reliability, maintainability, security_hotspots_reviewed, coverage, duplications]
+      required: [security, reliability, maintainability, security_hotspots_reviewed,
+        coverage, duplications]
       properties:
-        security: { $ref: "#/components/schemas/ProjectOverviewRatingMetric" }
-        reliability: { $ref: "#/components/schemas/ProjectOverviewRatingMetric" }
-        maintainability: { $ref: "#/components/schemas/ProjectOverviewRatingMetric" }
-        security_hotspots_reviewed: { $ref: "#/components/schemas/ProjectOverviewPercentageMetric" }
-        coverage: { $ref: "#/components/schemas/ProjectOverviewPercentageMetric" }
-        duplications: { $ref: "#/components/schemas/ProjectOverviewPercentageMetric" }
+        security: {$ref: "#/components/schemas/ProjectOverviewRatingMetric"}
+        reliability: {$ref: "#/components/schemas/ProjectOverviewRatingMetric"}
+        maintainability: {$ref: "#/components/schemas/ProjectOverviewRatingMetric"}
+        security_hotspots_reviewed: {$ref: "#/components/schemas/ProjectOverviewPercentageMetric"}
+        coverage: {$ref: "#/components/schemas/ProjectOverviewPercentageMetric"}
+        duplications: {$ref: "#/components/schemas/ProjectOverviewPercentageMetric"}
 
     ProjectOverviewRatingMetric:
       type: object
       required: [availability, grade, unavailable_reason]
       properties:
-        availability: { $ref: "#/components/schemas/ProjectOverviewMetricAvailability" }
+        availability: {$ref: "#/components/schemas/ProjectOverviewMetricAvailability"}
         grade:
           anyOf:
-            - $ref: "#/components/schemas/ProjectOverviewGrade"
-            - type: "null"
+          - $ref: "#/components/schemas/ProjectOverviewGrade"
+          - type: "null"
         unavailable_reason:
           anyOf:
-            - $ref: "#/components/schemas/ProjectOverviewUnavailableReason"
-            - type: "null"
+          - $ref: "#/components/schemas/ProjectOverviewUnavailableReason"
+          - type: "null"
 
     ProjectOverviewPercentageMetric:
       type: object
       required: [availability, value, unavailable_reason]
       properties:
-        availability: { $ref: "#/components/schemas/ProjectOverviewMetricAvailability" }
+        availability: {$ref: "#/components/schemas/ProjectOverviewMetricAvailability"}
         value:
           type: [number, "null"]
           minimum: 0
           maximum: 100
         unavailable_reason:
           anyOf:
-            - $ref: "#/components/schemas/ProjectOverviewUnavailableReason"
-            - type: "null"
+          - $ref: "#/components/schemas/ProjectOverviewUnavailableReason"
+          - type: "null"
 
+        grade:
+          type: string
     ProjectOverviewCountMetric:
       type: object
       required: [availability, value, unavailable_reason]
       properties:
-        availability: { $ref: "#/components/schemas/ProjectOverviewMetricAvailability" }
+        availability: {$ref: "#/components/schemas/ProjectOverviewMetricAvailability"}
         value:
           type: [integer, "null"]
           minimum: 0
         unavailable_reason:
           anyOf:
-            - $ref: "#/components/schemas/ProjectOverviewUnavailableReason"
-            - type: "null"
+          - $ref: "#/components/schemas/ProjectOverviewUnavailableReason"
+          - type: "null"
 
     ProjectHotspotStatus:
       type: string
@@ -889,175 +1006,252 @@ components:
     ProjectHotspot:
       type: object
       required:
-        - id
-        - rule_key
-        - rule_name
-        - title
-        - description
-        - severity
-        - finding_kind
-        - cwe
-        - location
-        - status
-        - version
-        - first_seen_analysis_id
-        - last_seen_analysis_id
-        - first_seen_at
-        - last_seen_at
+      - id
+      - rule_key
+      - rule_name
+      - title
+      - description
+      - severity
+      - finding_kind
+      - cwe
+      - location
+      - status
+      - version
+      - first_seen_analysis_id
+      - last_seen_analysis_id
+      - first_seen_at
+      - last_seen_at
       properties:
-        id: { type: string }
-        rule_key: { type: string }
-        rule_name: { type: string }
-        title: { type: string }
-        description: { type: string }
-        severity: { $ref: "#/components/schemas/ProjectHotspotSeverity" }
-        finding_kind: { type: string }
-        cwe: { type: string }
-        location: { type: string }
-        status: { $ref: "#/components/schemas/ProjectHotspotStatus" }
-        version: { type: integer, minimum: 1 }
-        first_seen_analysis_id: { type: string }
-        last_seen_analysis_id: { type: string }
-        first_seen_at: { type: string, format: date-time }
-        last_seen_at: { type: string, format: date-time }
+        id: {type: string}
+        rule_key: {type: string}
+        rule_name: {type: string}
+        title: {type: string}
+        description: {type: string}
+        severity: {$ref: "#/components/schemas/ProjectHotspotSeverity"}
+        finding_kind: {type: string}
+        cwe: {type: string}
+        location: {type: string}
+        status: {$ref: "#/components/schemas/ProjectHotspotStatus"}
+        version: {type: integer, minimum: 1}
+        first_seen_analysis_id: {type: string}
+        last_seen_analysis_id: {type: string}
+        first_seen_at: {type: string, format: date-time}
+        last_seen_at: {type: string, format: date-time}
 
     ProjectHotspotCursor:
       type: object
       required: [before_last_seen_at, before_id]
       properties:
-        before_last_seen_at: { type: string, format: date-time }
-        before_id: { type: string }
+        before_last_seen_at: {type: string, format: date-time}
+        before_id: {type: string}
 
     ProjectHotspotFacets:
       type: object
       required: [statuses, rule_keys, severities]
       properties:
-        statuses: { type: object, additionalProperties: { type: integer, minimum: 0 } }
-        rule_keys: { type: object, additionalProperties: { type: integer, minimum: 0 } }
-        severities: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+        statuses: {type: object, additionalProperties: {type: integer, minimum: 0}}
+        rule_keys: {type: object, additionalProperties: {type: integer, minimum: 0}}
+        severities: {type: object, additionalProperties: {type: integer, minimum: 0}}
 
     ProjectHotspotPage:
       type: object
-      required: [items, next, facets]
+      required:
+      - items
+      - next
+      - facets
+      - summary
       properties:
         items:
           type: array
-          items: { $ref: "#/components/schemas/ProjectHotspot" }
+          items: {$ref: "#/components/schemas/ProjectHotspot"}
         next:
           anyOf:
-            - $ref: "#/components/schemas/ProjectHotspotCursor"
-            - type: "null"
-        facets: { $ref: "#/components/schemas/ProjectHotspotFacets" }
+          - $ref: "#/components/schemas/ProjectHotspotCursor"
+          - type: "null"
+        facets: {$ref: "#/components/schemas/ProjectHotspotFacets"}
+        summary:
+          $ref: '#/components/schemas/ProjectHotspotSummary'
 
     RuleType:
       type: string
       enum:
-        - bug
-        - vulnerability
-        - code_smell
-        - security_hotspot
+      - bug
+      - vulnerability
+      - code_smell
+      - security_hotspot
 
     RuleQuality:
       type: string
       enum:
-        - security
-        - reliability
-        - maintainability
+      - security
+      - reliability
+      - maintainability
 
     RuleSeverity:
       type: string
       enum:
-        - low
-        - medium
-        - high
-        - critical
+      - low
+      - medium
+      - high
+      - critical
 
     RuleDetection:
       type: string
       enum:
-        - ast
-        - pattern
-        - parse
-        - metric
+      - ast
+      - pattern
+      - parse
+      - metric
 
     RuleSummary:
       type: object
       required:
-        - key
-        - name
-        - language
-        - type
-        - qualities
-        - default_severity
-        - tags
-        - cwe
-        - owasp
-        - description
-        - remediation_effort
-        - detection
+      - key
+      - name
+      - language
+      - type
+      - qualities
+      - default_severity
+      - tags
+      - cwe
+      - owasp
+      - description
+      - remediation_effort
+      - detection
       properties:
-        key: { type: string }
-        name: { type: string }
-        language: { type: string }
-        type: { $ref: "#/components/schemas/RuleType" }
+        key: {type: string}
+        name: {type: string}
+        language: {type: string}
+        type: {$ref: "#/components/schemas/RuleType"}
         qualities:
           type: array
-          items: { $ref: "#/components/schemas/RuleQuality" }
-        default_severity: { $ref: "#/components/schemas/RuleSeverity" }
+          items: {$ref: "#/components/schemas/RuleQuality"}
+        default_severity: {$ref: "#/components/schemas/RuleSeverity"}
         tags:
           type: array
-          items: { type: string }
+          items: {type: string}
         cwe:
           type: array
-          items: { type: string }
+          items: {type: string}
         owasp:
           type: array
-          items: { type: string }
-        description: { type: string }
-        remediation_effort: { type: integer }
-        detection: { $ref: "#/components/schemas/RuleDetection" }
+          items: {type: string}
+        description: {type: string}
+        remediation_effort: {type: integer}
+        detection: {$ref: "#/components/schemas/RuleDetection"}
 
     RuleDetail:
       type: object
       required:
-        - key
-        - name
-        - language
-        - type
-        - qualities
-        - default_severity
-        - tags
-        - cwe
-        - owasp
-        - description
-        - rationale
-        - remediation
-        - compliant_example
-        - noncompliant_example
-        - remediation_effort
-        - detection
+      - key
+      - name
+      - language
+      - type
+      - qualities
+      - default_severity
+      - tags
+      - cwe
+      - owasp
+      - description
+      - rationale
+      - remediation
+      - compliant_example
+      - noncompliant_example
+      - remediation_effort
+      - detection
       properties:
-        key: { type: string }
-        name: { type: string }
-        language: { type: string }
-        type: { $ref: "#/components/schemas/RuleType" }
+        key: {type: string}
+        name: {type: string}
+        language: {type: string}
+        type: {$ref: "#/components/schemas/RuleType"}
         qualities:
           type: array
-          items: { $ref: "#/components/schemas/RuleQuality" }
-        default_severity: { $ref: "#/components/schemas/RuleSeverity" }
+          items: {$ref: "#/components/schemas/RuleQuality"}
+        default_severity: {$ref: "#/components/schemas/RuleSeverity"}
         tags:
           type: array
-          items: { type: string }
+          items: {type: string}
         cwe:
           type: array
-          items: { type: string }
+          items: {type: string}
         owasp:
           type: array
-          items: { type: string }
-        description: { type: string }
-        rationale: { type: string }
-        remediation: { type: string }
-        compliant_example: { type: string }
-        noncompliant_example: { type: string }
-        remediation_effort: { type: integer }
-        detection: { $ref: "#/components/schemas/RuleDetection" }
+          items: {type: string}
+        description: {type: string}
+        rationale: {type: string}
+        remediation: {type: string}
+        compliant_example: {type: string}
+        noncompliant_example: {type: string}
+        remediation_effort: {type: integer}
+        detection: {$ref: "#/components/schemas/RuleDetection"}
+    ProjectHotspotTransitionRequest:
+      type: object
+      properties:
+        to:
+          $ref: '#/components/schemas/ProjectHotspotStatus'
+        rationale:
+          type: string
+          minLength: 3
+          maxLength: 4000
+        expected_version:
+          type: integer
+          minimum: 1
+      required:
+      - to
+      - rationale
+      - expected_version
+    ProjectHotspotTransitionResponse:
+      type: object
+      properties:
+        hotspot:
+          $ref: '#/components/schemas/ProjectHotspot'
+        event:
+          $ref: '#/components/schemas/ProjectHotspotReviewEvent'
+      required:
+      - hotspot
+      - event
+    ProjectHotspotReviewEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        actor:
+          type: string
+        rationale:
+          type: string
+        previous_version:
+          type: integer
+        version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - id
+      - from
+      - to
+      - actor
+      - rationale
+      - previous_version
+      - version
+      - created_at
+    ProjectHotspotSummary:
+      type: object
+      properties:
+        total:
+          type: integer
+        reviewed:
+          type: integer
+        reviewed_pct:
+          type: number
+        grade:
+          type: string
+      required:
+      - total
+      - reviewed
+      - reviewed_pct
+      - grade

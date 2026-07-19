@@ -121,7 +121,9 @@ func TestHostileHarness(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
-	projectSvc.SetHotspotStore(memory.NewProjectAnalysisStore())
+	analysisStore := memory.NewProjectAnalysisStore()
+	projectSvc.SetHotspotStore(analysisStore)
+	projectSvc.SetAnalysisStore(analysisStore)
 	usersSvc, err := usersuc.NewService(memory.NewUserRepository(), &fakeAudit{}, fixedClock{}, engIDs{})
 	if err != nil {
 		t.Fatalf("users svc: %v", err)
@@ -146,14 +148,14 @@ func TestHostileHarness(t *testing.T) {
 	rt.EnableAgent(nil, nil, nil, nil, nil, 1, 8)
 	mux := rt.routes()
 
-	send := func(role, tenant, method, path string, authed bool) int {
+	send := func(role, tenant, method, path string, authed bool) (int, string) {
 		req := httptest.NewRequest(method, path, nil)
 		if authed {
 			req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "p", Role: role, TenantID: tenant}))
 		}
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
-		return rec.Code
+		return rec.Code, rec.Body.String()
 	}
 
 	cases := []struct {
@@ -248,8 +250,8 @@ func TestHostileHarness(t *testing.T) {
 		{"readonly may get rule (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/rules/go:sql-injection", http.StatusOK},
 	}
 	for _, c := range cases {
-		if got := send(c.role, c.tenant, c.method, c.path, c.authed); got != c.want {
-			t.Errorf("%s: %s %s (role=%q tenant=%q) → %d, want %d", c.name, c.method, c.path, c.role, c.tenant, got, c.want)
+		if got, body := send(c.role, c.tenant, c.method, c.path, c.authed); got != c.want {
+			t.Errorf("%s: %s %s (role=%q tenant=%q) → %d, body: %s, want %d", c.name, c.method, c.path, c.role, c.tenant, got, body, c.want)
 		}
 	}
 }

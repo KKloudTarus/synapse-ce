@@ -794,3 +794,77 @@ export interface RuleFacets {
   tags: string[]
   cwe: string[]
 }
+
+// --- Security Hotspots ---
+
+export type HotspotStatus = 'to_review' | 'acknowledged' | 'fixed' | 'safe'
+
+export interface Hotspot {
+  id: string
+  ruleKey: string
+  ruleName: string
+  title: string
+  description: string
+  severity: Severity
+  kind: string
+  cwe: string
+  location: string
+  status: HotspotStatus
+  version: number
+  firstSeenAnalysisId: string
+  lastSeenAnalysisId: string
+  firstSeenAt: string
+  lastSeenAt: string
+}
+
+export interface HotspotListFilter {
+  lens?: 'overall' | 'new-code'
+  status?: HotspotStatus
+  rule?: string
+  severity?: Severity
+  search?: string
+  limit?: number
+  before_last_seen_at?: string
+  before_id?: string
+}
+
+export interface HotspotPage {
+  items: Hotspot[]
+  next: { beforeLastSeenAt: string; beforeId: string } | null
+  facets: {
+    statuses: Record<string, number>
+    ruleKeys: Record<string, number>
+    severities: Record<string, number>
+  }
+  summary: HotspotSummary
+}
+
+export function CanTransitionTo(from: HotspotStatus, to: HotspotStatus): boolean {
+  if (from === to) return false;
+  switch (from) {
+    case 'to_review':
+      return to === 'acknowledged' || to === 'fixed' || to === 'safe';
+    case 'acknowledged':
+      return to === 'fixed' || to === 'safe' || to === 'to_review';
+    case 'fixed':
+      return to === 'to_review';
+    case 'safe':
+      return to === 'to_review';
+  }
+  return false;
+}
+
+export interface HotspotSummary {
+  total: number
+  reviewed: number
+  reviewedPct: number
+  grade: Grade
+}
+
+export interface HotspotReviewEvent {
+  actor: string
+  status: HotspotStatus
+  rationale: string
+  version: number
+  at: string
+}

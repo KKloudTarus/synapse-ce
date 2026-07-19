@@ -13,9 +13,11 @@ const (
 	MetricTotalCritical    = "total_critical"    // whole-codebase critical findings
 	MetricDuplicationPct   = "duplication_density"
 	MetricCoveragePct      = "coverage"
-	MetricSecurityRating   = "security_rating"
-	MetricReliability      = "reliability_rating"
-	MetricMaintainability  = "maintainability_rating"
+	MetricSecurityRating              = "security_rating"
+	MetricReliability                 = "reliability_rating"
+	MetricMaintainability             = "maintainability_rating"
+	MetricSecurityHotspotsReviewed    = "security_hotspots_reviewed"
+	MetricNewSecurityHotspotsReviewed = "new_security_hotspots_reviewed"
 )
 
 // knownMetrics is the set a gate condition may reference, so a typo'd metric name is rejected at load
@@ -27,6 +29,7 @@ var knownMetrics = map[string]bool{
 	MetricNewVulnerability: true, MetricNewIssues: true, MetricTotalCritical: true,
 	MetricDuplicationPct: true, MetricCoveragePct: true,
 	MetricSecurityRating: true, MetricReliability: true, MetricMaintainability: true,
+	MetricSecurityHotspotsReviewed: true, MetricNewSecurityHotspotsReviewed: true,
 }
 
 // ValidMetric reports whether name is a recognized gate metric.

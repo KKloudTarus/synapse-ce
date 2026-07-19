@@ -79,6 +79,7 @@ type projectOverviewRatingMetricDTO struct {
 type projectOverviewPercentageMetricDTO struct {
 	Availability      string   `json:"availability"`
 	Value             *float64 `json:"value"`
+	Grade             *string  `json:"grade,omitempty"`
 	UnavailableReason *string  `json:"unavailable_reason"`
 }
 
@@ -170,6 +171,7 @@ func projectOverviewPercentageMetricDTOFromUsecase(metric projectuc.PercentageMe
 	return projectOverviewPercentageMetricDTO{
 		Availability:      string(metric.Availability),
 		Value:             metric.Value,
+		Grade:             overviewGradeString((*projectuc.OverviewGrade)(metric.Grade)),
 		UnavailableReason: overviewReasonString(metric.UnavailableReason),
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/hotspot"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rating"
@@ -77,6 +78,8 @@ type Analysis struct {
 	Coverage       *measure.CoverageReport   `json:"coverage"`
 	Duplication    measure.DuplicationReport `json:"duplication"`
 	Rating         rating.Report             `json:"rating"`
+	Hotspots       hotspot.Summary           `json:"hotspots"`
+	NewHotspots    hotspot.Summary           `json:"new_hotspots"`
 }
 
 // Input supplies one completed scan's project-facing facts. Findings must be the
@@ -97,6 +100,8 @@ type Input struct {
 	Coverage     *measure.CoverageReport
 	Duplication  measure.DuplicationReport
 	Previous     *Analysis
+	Hotspots     hotspot.Summary
+	NewHotspots  hotspot.Summary
 }
 
 // Build returns one immutable snapshot and evaluates the built-in gate at creation.
@@ -146,7 +151,7 @@ func Build(in Input) (Analysis, error) {
 	overallRating := rating.Compute(normalized, in.LinesOfCode)
 	newRating := rating.Compute(newFindings, 0)
 	gateOverallRating := rating.Compute(gateFindings, in.LinesOfCode)
-	measures := buildMeasures(countIssues(gateIssues), countIssues(gateNewIssues), gateOverallRating, in.Duplication, in.Coverage)
+	measures := buildMeasures(countIssues(gateIssues), countIssues(gateNewIssues), gateOverallRating, in.Duplication, in.Coverage, in.Hotspots, in.NewHotspots)
 	gateDef := in.Gate
 	gateSource := in.GateSource
 	if len(gateDef.Conditions) == 0 {
@@ -171,6 +176,7 @@ func Build(in Input) (Analysis, error) {
 		InternalIssues: issues, NewCode: NewCode{PreviousID: previousID, Counts: newCounts, Rating: NewCodeRating{Security: newRating.Security, Reliability: newRating.Reliability}},
 		Delta: buildDelta(counts, measures, overallRating, in.Previous), Coverage: in.Coverage,
 		Duplication: in.Duplication, Rating: overallRating,
+		Hotspots: in.Hotspots, NewHotspots: in.NewHotspots,
 	}, nil
 }
 
@@ -255,7 +261,7 @@ func countIssues(issues []Issue) Counts {
 	return counts
 }
 
-func buildMeasures(all, new Counts, overallRating rating.Report, duplication measure.DuplicationReport, coverage *measure.CoverageReport) qualitygate.Snapshot {
+func buildMeasures(all, new Counts, overallRating rating.Report, duplication measure.DuplicationReport, coverage *measure.CoverageReport, hotspots, newHotspots hotspot.Summary) qualitygate.Snapshot {
 	metrics := qualitygate.Snapshot{
 		qualitygate.MetricNewIssues:       float64(new.Total),
 		qualitygate.MetricNewCritical:     float64(new.BySeverity[string(shared.SeverityCritical)]),
@@ -270,6 +276,8 @@ func buildMeasures(all, new Counts, overallRating rating.Report, duplication mea
 	if coverage != nil {
 		metrics[qualitygate.MetricCoveragePct] = coverage.Percent()
 	}
+	metrics[qualitygate.MetricSecurityHotspotsReviewed] = hotspots.ReviewedPct
+	metrics[qualitygate.MetricNewSecurityHotspotsReviewed] = newHotspots.ReviewedPct
 	metrics[qualitygate.MetricNewSecret] = float64(new.ByKind[string(finding.KindSecret)])
 	for _, kind := range []finding.Kind{finding.KindSCA, finding.KindSAST, finding.KindSecret, finding.KindMisconfig, finding.KindExploitation, finding.KindDAST} {
 		metrics[qualitygate.MetricNewVulnerability] += float64(new.ByKind[string(kind)])

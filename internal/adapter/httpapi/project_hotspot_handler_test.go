@@ -63,7 +63,7 @@ func hotspotFixture() hotspot.Hotspot {
 
 func TestListProjectHotspotsReturnsScopedProjectionAndFacets(t *testing.T) {
 	stub := &projectHotspotServiceStub{page: hotspot.Page{Items: []hotspot.Hotspot{hotspotFixture()}, Next: &hotspot.Cursor{BeforeLastSeenAt: time.Unix(2, 0), BeforeID: "cursor"}, Facets: hotspot.Facets{Statuses: map[string]int{"to_review": 1}, RuleKeys: map[string]int{"rule": 1}, Severities: map[string]int{"high": 1}}}}
-	rt := &Router{log: discardLog(), projects: stub, rules: hotspotRulesStub{item: rule.Rule{Name: "Sensitive rule"}}}
+	rt := &Router{log: discardLog(), projects: stub, rules: hotspotRulesStub{item: rule.Rule{Name: "Sensitive rule", Key: "rule"}}}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/payments/hotspots?status=to_review&severity=high&limit=10", nil)
 	req.SetPathValue("key", "payments")
 	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice", TenantID: "tenant-a"}))
@@ -114,5 +114,49 @@ func TestGetProjectHotspotMapsCrossTenantToNotFound(t *testing.T) {
 	rt.getProjectHotspot(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("cross-tenant code=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+type trackingHotspotRulesStub struct {
+	rulesService
+	item      rule.Rule
+	listCalls int
+	getCalls  int
+}
+
+func (s *trackingHotspotRulesStub) Get(context.Context, rule.Key) (rule.Rule, error) {
+	s.getCalls++
+	return s.item, nil
+}
+func (s *trackingHotspotRulesStub) List(context.Context, rules.Filter) ([]rule.Rule, error) {
+	s.listCalls++
+	return []rule.Rule{s.item}, nil
+}
+
+func TestListProjectHotspotsBatchesRuleLookup(t *testing.T) {
+	items := make([]hotspot.Hotspot, 25)
+	for i := range items {
+		items[i] = hotspotFixture()
+		items[i].RuleKey = fmt.Sprintf("rule-%d", i)
+	}
+	stub := &projectHotspotServiceStub{page: hotspot.Page{Items: items}}
+	rulesStub := &trackingHotspotRulesStub{item: rule.Rule{Name: "Sensitive rule", Key: "rule-0"}}
+	rt := &Router{log: discardLog(), projects: stub, rules: rulesStub}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/payments/hotspots", nil)
+	req.SetPathValue("key", "payments")
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice", TenantID: "tenant-a"}))
+	rec := httptest.NewRecorder()
+	
+	rt.listProjectHotspots(rec, req)
+	
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rulesStub.listCalls != 1 {
+		t.Fatalf("expected 1 list call, got %d", rulesStub.listCalls)
+	}
+	if rulesStub.getCalls != 0 {
+		t.Fatalf("expected 0 get calls, got %d", rulesStub.getCalls)
 	}
 }
