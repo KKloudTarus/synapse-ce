@@ -1,0 +1,152 @@
+package httpapi
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/hotspot"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+)
+
+type projectHotspotResponse struct {
+	ID                  string    `json:"id"`
+	RuleKey             string    `json:"rule_key"`
+	RuleName            string    `json:"rule_name"`
+	Title               string    `json:"title"`
+	Description         string    `json:"description"`
+	Severity            string    `json:"severity"`
+	FindingKind         string    `json:"finding_kind"`
+	CWE                 string    `json:"cwe"`
+	Location            string    `json:"location"`
+	Status              string    `json:"status"`
+	Version             int       `json:"version"`
+	FirstSeenAnalysisID string    `json:"first_seen_analysis_id"`
+	LastSeenAnalysisID  string    `json:"last_seen_analysis_id"`
+	FirstSeenAt         time.Time `json:"first_seen_at"`
+	LastSeenAt          time.Time `json:"last_seen_at"`
+}
+
+type projectHotspotCursorResponse struct {
+	BeforeLastSeenAt time.Time `json:"before_last_seen_at"`
+	BeforeID         string    `json:"before_id"`
+}
+
+type projectHotspotFacetsResponse struct {
+	Statuses   map[string]int `json:"statuses"`
+	RuleKeys   map[string]int `json:"rule_keys"`
+	Severities map[string]int `json:"severities"`
+}
+
+type projectHotspotPageResponse struct {
+	Items  []projectHotspotResponse      `json:"items"`
+	Next   *projectHotspotCursorResponse `json:"next"`
+	Facets projectHotspotFacetsResponse  `json:"facets"`
+}
+
+var projectHotspotQueryParameters = map[string]bool{
+	"status": true, "rule": true, "severity": true, "search": true,
+	"limit": true, "before_last_seen_at": true, "before_id": true,
+}
+
+func (rt *Router) listProjectHotspots(w http.ResponseWriter, r *http.Request) {
+	filter, err := projectHotspotListParams(r)
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	page, err := rt.projects.ListHotspots(r.Context(), shared.ID(TenantFrom(r.Context())), r.PathValue("key"), filter)
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	out := projectHotspotPageResponse{
+		Items:  make([]projectHotspotResponse, len(page.Items)),
+		Facets: projectHotspotFacetsResponse{Statuses: page.Facets.Statuses, RuleKeys: page.Facets.RuleKeys, Severities: page.Facets.Severities},
+	}
+	for i, item := range page.Items {
+		out.Items[i] = rt.projectHotspotDTO(r.Context(), item)
+	}
+	if page.Next != nil {
+		out.Next = &projectHotspotCursorResponse{BeforeLastSeenAt: page.Next.BeforeLastSeenAt, BeforeID: page.Next.BeforeID.String()}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (rt *Router) getProjectHotspot(w http.ResponseWriter, r *http.Request) {
+	item, err := rt.projects.GetHotspot(r.Context(), shared.ID(TenantFrom(r.Context())), r.PathValue("key"), shared.ID(r.PathValue("id")))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rt.projectHotspotDTO(r.Context(), item))
+}
+
+func (rt *Router) projectHotspotDTO(ctx context.Context, item hotspot.Hotspot) projectHotspotResponse {
+	ruleName := ""
+	if rt.rules != nil {
+		if catalogRule, err := rt.rules.Get(ctx, rule.Key(item.RuleKey)); err == nil {
+			ruleName = catalogRule.Name
+		}
+	}
+	return projectHotspotResponse{
+		ID: item.ID.String(), RuleKey: item.RuleKey, RuleName: ruleName, Title: item.Title, Description: item.Description,
+		Severity: string(item.Severity), FindingKind: string(item.Kind), CWE: item.CWE, Location: item.Location,
+		Status: string(item.Status), Version: item.Version, FirstSeenAnalysisID: item.FirstSeenAnalysisID,
+		LastSeenAnalysisID: item.LastSeenAnalysisID, FirstSeenAt: item.FirstSeenAt, LastSeenAt: item.LastSeenAt,
+	}
+}
+
+func projectHotspotListParams(r *http.Request) (hotspot.ListFilter, error) {
+	for key := range r.URL.Query() {
+		if !projectHotspotQueryParameters[key] {
+			return hotspot.ListFilter{}, fmt.Errorf("%w: unsupported query parameter: %s", shared.ErrValidation, key)
+		}
+	}
+	q := r.URL.Query()
+	filter := hotspot.ListFilter{RuleKey: strings.TrimSpace(q.Get("rule")), Search: strings.TrimSpace(q.Get("search")), Limit: 25}
+	if filter.RuleKey != "" && utf8.RuneCountInString(filter.RuleKey) > 256 {
+		return hotspot.ListFilter{}, fmt.Errorf("%w: rule exceeds maximum length", shared.ErrValidation)
+	}
+	if utf8.RuneCountInString(filter.Search) > 256 {
+		return hotspot.ListFilter{}, fmt.Errorf("%w: search exceeds maximum length", shared.ErrValidation)
+	}
+	if raw := strings.TrimSpace(q.Get("status")); raw != "" {
+		status := hotspot.Status(raw)
+		if !status.Valid() {
+			return hotspot.ListFilter{}, fmt.Errorf("%w: invalid hotspot status", shared.ErrValidation)
+		}
+		filter.Status = &status
+	}
+	if raw := strings.TrimSpace(q.Get("severity")); raw != "" {
+		severity := shared.Severity(raw)
+		if !severity.Valid() || severity == shared.SeverityUnknown {
+			return hotspot.ListFilter{}, fmt.Errorf("%w: invalid hotspot severity", shared.ErrValidation)
+		}
+		filter.Severity = &severity
+	}
+	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit < 1 || limit > 100 {
+			return hotspot.ListFilter{}, fmt.Errorf("%w: limit must be between 1 and 100", shared.ErrValidation)
+		}
+		filter.Limit = limit
+	}
+	rawTime, rawID := strings.TrimSpace(q.Get("before_last_seen_at")), strings.TrimSpace(q.Get("before_id"))
+	if (rawTime == "") != (rawID == "") {
+		return hotspot.ListFilter{}, fmt.Errorf("%w: before_last_seen_at and before_id must be supplied together", shared.ErrValidation)
+	}
+	if rawTime != "" {
+		before, err := time.Parse(time.RFC3339Nano, rawTime)
+		if err != nil {
+			return hotspot.ListFilter{}, fmt.Errorf("%w: before_last_seen_at must be RFC3339", shared.ErrValidation)
+		}
+		filter.BeforeLastSeenAt, filter.BeforeID = before, shared.ID(rawID)
+	}
+	return filter, nil
+}

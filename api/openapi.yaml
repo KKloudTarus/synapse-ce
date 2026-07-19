@@ -326,6 +326,79 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalServerError" }
 
+  /api/v1/projects/{key}/hotspots:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [projects]
+      summary: List Project Security Hotspot projections
+      operationId: listProjectHotspots
+      description: >
+        Returns catalog-classified Project Security Hotspots without loading a
+        full scan-result blob. This PR is read-only; review transitions are not
+        exposed here.
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/ProjectHotspotStatus" }
+        - name: rule
+          in: query
+          schema: { type: string, maxLength: 256 }
+        - name: severity
+          in: query
+          schema: { $ref: "#/components/schemas/ProjectHotspotSeverity" }
+        - name: search
+          in: query
+          schema: { type: string, maxLength: 256 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+        - name: before_last_seen_at
+          in: query
+          schema: { type: string, format: date-time }
+        - name: before_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Project hotspot page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectHotspotPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  /api/v1/projects/{key}/hotspots/{id}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [projects]
+      summary: Get one Project Security Hotspot projection
+      operationId: getProjectHotspot
+      responses:
+        "200":
+          description: Project hotspot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectHotspot" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
   /api/v1/rules:
     get:
       tags: [rules]
@@ -804,6 +877,77 @@ components:
           anyOf:
             - $ref: "#/components/schemas/ProjectOverviewUnavailableReason"
             - type: "null"
+
+    ProjectHotspotStatus:
+      type: string
+      enum: [to_review, acknowledged, fixed, safe]
+
+    ProjectHotspotSeverity:
+      type: string
+      enum: [low, medium, high, critical]
+
+    ProjectHotspot:
+      type: object
+      required:
+        - id
+        - rule_key
+        - rule_name
+        - title
+        - description
+        - severity
+        - finding_kind
+        - cwe
+        - location
+        - status
+        - version
+        - first_seen_analysis_id
+        - last_seen_analysis_id
+        - first_seen_at
+        - last_seen_at
+      properties:
+        id: { type: string }
+        rule_key: { type: string }
+        rule_name: { type: string }
+        title: { type: string }
+        description: { type: string }
+        severity: { $ref: "#/components/schemas/ProjectHotspotSeverity" }
+        finding_kind: { type: string }
+        cwe: { type: string }
+        location: { type: string }
+        status: { $ref: "#/components/schemas/ProjectHotspotStatus" }
+        version: { type: integer, minimum: 1 }
+        first_seen_analysis_id: { type: string }
+        last_seen_analysis_id: { type: string }
+        first_seen_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+
+    ProjectHotspotCursor:
+      type: object
+      required: [before_last_seen_at, before_id]
+      properties:
+        before_last_seen_at: { type: string, format: date-time }
+        before_id: { type: string }
+
+    ProjectHotspotFacets:
+      type: object
+      required: [statuses, rule_keys, severities]
+      properties:
+        statuses: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+        rule_keys: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+        severities: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+
+    ProjectHotspotPage:
+      type: object
+      required: [items, next, facets]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ProjectHotspot" }
+        next:
+          anyOf:
+            - $ref: "#/components/schemas/ProjectHotspotCursor"
+            - type: "null"
+        facets: { $ref: "#/components/schemas/ProjectHotspotFacets" }
 
     RuleType:
       type: string
