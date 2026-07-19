@@ -118,10 +118,11 @@ func (a *Analyzer) Inventory(ctx context.Context, root string) (measure.Inventor
 		li.CodeLines += code
 		li.CommentLines += comment
 		li.BlankLines += blank
-		if fn, supported, ok := countFunctions(lang, content); supported {
+		fnCount, supported, ok := countFunctions(lang, content)
+		if supported {
 			li.FunctionsKnown = true // the language has a first-party parser
 			if ok {
-				li.Functions += fn
+				li.Functions += fnCount
 			} else {
 				brokenFuncs[lang] = true // one file did not parse; the aggregate is an undercount
 			}
@@ -142,10 +143,10 @@ func (a *Analyzer) Inventory(ctx context.Context, root string) (measure.Inventor
 			CommentLines: comment,
 			BlankLines:   blank,
 		}
-		if fn, supported, ok := countFunctions(lang, content); supported {
-			fileFact.FunctionsKnown = true
+		if supported {
+			fileFact.FunctionsKnown = ok
 			if ok {
-				fileFact.Functions = fn
+				fileFact.Functions = fnCount
 			}
 		}
 		fileFacts = append(fileFacts, fileFact)

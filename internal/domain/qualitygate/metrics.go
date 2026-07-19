@@ -4,15 +4,15 @@ package qualitygate
 // (Clean as You Code); the others are whole-codebase. Ratings are numeric: A=1, B=2, C=3, D=4, E=5, so
 // `security_rating <= 1` means "must be A".
 const (
-	MetricNewCritical      = "new_critical"      // new findings with critical severity
-	MetricNewHigh          = "new_high"          // new findings with high severity
-	MetricNewMedium        = "new_medium"        // new findings with medium severity
-	MetricNewSecret        = "new_secret"        // new secret findings
-	MetricNewVulnerability = "new_vulnerability" // new security findings (sca/sast/secret/misconfig/exploitation/dast)
-	MetricNewIssues        = "new_issues"        // all new findings
-	MetricTotalCritical    = "total_critical"    // whole-codebase critical findings
-	MetricDuplicationPct   = "duplication_density"
-	MetricCoveragePct      = "coverage"
+	MetricNewCritical                 = "new_critical"      // new findings with critical severity
+	MetricNewHigh                     = "new_high"          // new findings with high severity
+	MetricNewMedium                   = "new_medium"        // new findings with medium severity
+	MetricNewSecret                   = "new_secret"        // new secret findings
+	MetricNewVulnerability            = "new_vulnerability" // new security findings (sca/sast/secret/misconfig/exploitation/dast)
+	MetricNewIssues                   = "new_issues"        // all new findings
+	MetricTotalCritical               = "total_critical"    // whole-codebase critical findings
+	MetricDuplicationPct              = "duplication_density"
+	MetricCoveragePct                 = "coverage"
 	MetricSecurityRating              = "security_rating"
 	MetricReliability                 = "reliability_rating"
 	MetricMaintainability             = "maintainability_rating"

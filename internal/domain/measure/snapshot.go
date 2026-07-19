@@ -2,6 +2,7 @@ package measure
 
 import (
 	"errors"
+	"fmt"
 	"path"
 	"sort"
 	"strings"
@@ -72,6 +73,8 @@ type Node struct {
 	CoverageAvailable    bool `json:"coverage_available"`
 	DuplicationAvailable bool `json:"duplication_available"`
 	TechDebtAvailable    bool `json:"tech_debt_available"`
+	IssueTypeAvailable   bool `json:"issue_type_available"`
+	AttributionAvailable bool `json:"attribution_available"`
 }
 
 func (n Node) CommentDensity() DecimalMetric {
@@ -118,13 +121,51 @@ type IssueInput struct {
 	Severity shared.Severity
 }
 
+type RuleResolver interface {
+	Get(key rule.Key) (rule.Rule, error)
+}
+
 type BuildSnapshotInput struct {
 	Inventory   Inventory
 	Complexity  *ComplexityReport
 	Coverage    *CoverageReport
 	Duplication *DuplicationReport
 	Issues      []IssueInput
-	RuleCatalog map[rule.Key]rule.Rule
+	RuleCatalog RuleResolver
+}
+
+// CanonicalPath normalizes a file path and strictly rejects traversal and absolute paths.
+func CanonicalPath(p string) (string, error) {
+	p = strings.ReplaceAll(p, "\\", "/")
+	if p == "" || p == "." {
+		return "", nil
+	}
+	if strings.HasPrefix(p, "/") {
+		return "", errors.New("canonical path: unix absolute paths are not allowed")
+	}
+	// Reject Windows drive letters/UNC
+	if len(p) >= 2 && p[1] == ':' {
+		return "", errors.New("canonical path: windows drive absolute paths are not allowed")
+	}
+	if strings.Contains(p, "//") {
+		return "", errors.New("canonical path: repeated separators are not allowed")
+	}
+
+	parts := strings.Split(p, "/")
+	var clean []string
+	for _, part := range parts {
+		if part == "" {
+			return "", errors.New("canonical path: empty segments are not allowed")
+		}
+		if part == "." {
+			continue // usually fine to ignore but we can also reject. Let's just ignore `.`.
+		}
+		if part == ".." {
+			return "", errors.New("canonical path: directory traversal is not allowed")
+		}
+		clean = append(clean, part)
+	}
+	return strings.Join(clean, "/"), nil
 }
 
 // BuildSnapshot creates an immutable measure snapshot from engine outputs.
@@ -169,36 +210,29 @@ func BuildSnapshot(in BuildSnapshotInput) (Snapshot, error) {
 			CoverageAvailable:    in.Coverage != nil,
 			DuplicationAvailable: in.Duplication != nil,
 			TechDebtAvailable:    true,
+			IssueTypeAvailable:   true,
+			AttributionAvailable: true,
 		}
 		nodesByPath[p] = n
 		return n
 	}
 
-	normalizePath := func(p string) string {
-		p = strings.ReplaceAll(p, "\\", "/")
-		if p == "" || p == "." {
-			return ""
-		}
-		parts := strings.Split(p, "/")
-		var clean []string
-		for _, part := range parts {
-			if part == "" || part == "." {
-				continue
-			}
-			if part == ".." {
-				return "" // Reject traversal, fallback to root or ignore in valid usage
-			}
-			clean = append(clean, part)
-		}
-		return strings.Join(clean, "/")
-	}
+	seenFilePaths := make(map[string]bool)
 
 	// 1. Files from Inventory
 	for _, f := range in.Inventory.Files {
-		p := normalizePath(f.Path)
-		if p == "" {
-			continue
+		p, err := CanonicalPath(f.Path)
+		if err != nil {
+			return Snapshot{}, err
 		}
+		if p == "" {
+			return Snapshot{}, errors.New("measure snapshot: inventory file path cannot be root")
+		}
+		if seenFilePaths[p] {
+			return Snapshot{}, errors.New("measure snapshot: duplicate canonical file path in inventory: " + p)
+		}
+		seenFilePaths[p] = true
+
 		n := getNode(p)
 		n.Kind = NodeFile
 		n.Language = f.Language
@@ -237,7 +271,10 @@ func BuildSnapshot(in BuildSnapshotInput) (Snapshot, error) {
 	// 2. Complexity
 	if in.Complexity != nil {
 		for _, cx := range in.Complexity.Functions {
-			p := normalizePath(cx.File)
+			p, err := CanonicalPath(cx.File)
+			if err != nil {
+				continue // Skip invalid paths in secondary reports
+			}
 			n := nodesByPath[p]
 			if n != nil && n.Kind == NodeFile {
 				n.Counters.Cyclomatic += cx.Cyclomatic
@@ -253,7 +290,10 @@ func BuildSnapshot(in BuildSnapshotInput) (Snapshot, error) {
 	// 3. Coverage
 	if in.Coverage != nil {
 		for _, fc := range in.Coverage.Files {
-			p := normalizePath(fc.File)
+			p, err := CanonicalPath(fc.File)
+			if err != nil {
+				continue
+			}
 			n := nodesByPath[p]
 			if n != nil && n.Kind == NodeFile {
 				n.Counters.CoverableLines = fc.TotalLines
@@ -272,7 +312,10 @@ func BuildSnapshot(in BuildSnapshotInput) (Snapshot, error) {
 				if occ.StartLine < 1 || occ.EndLine < occ.StartLine {
 					continue
 				}
-				p := normalizePath(occ.File)
+				p, err := CanonicalPath(occ.File)
+				if err != nil {
+					continue
+				}
 				n := nodesByPath[p]
 				if n == nil || n.Kind != NodeFile {
 					continue
@@ -309,19 +352,24 @@ func BuildSnapshot(in BuildSnapshotInput) (Snapshot, error) {
 
 	// 5. Issues
 	for _, issue := range in.Issues {
-		p := normalizePath(issue.Path)
+		p, err := CanonicalPath(issue.Path)
 		n := nodesByPath[p]
-		if n == nil {
-			n = getNode("") // Add to root if path is missing or unmatched
+		if err != nil || n == nil {
+			n = getNode("") // Add to root if path is missing, invalid, or unmatched
+			n.AttributionAvailable = false
 		}
 
 		if string(issue.Severity) != "" {
 			n.Counters.IssuesBySeverity[string(issue.Severity)]++
 		}
 
-		r, ok := in.RuleCatalog[issue.RuleKey]
-		if !ok {
+		r, err := in.RuleCatalog.Get(issue.RuleKey)
+		if err != nil {
+			if !errors.Is(err, shared.ErrNotFound) {
+				return Snapshot{}, fmt.Errorf("measure snapshot: resolve rule %q: %w", issue.RuleKey, err)
+			}
 			n.TechDebtAvailable = false
+			n.IssueTypeAvailable = false
 			continue
 		}
 

@@ -10,12 +10,12 @@ import (
 
 func TestNewSummary(t *testing.T) {
 	tests := []struct {
-		name        string
-		total       int
-		reviewed    int
-		wantErr     error
-		wantPct     float64
-		wantGrade   rating.Grade
+		name      string
+		total     int
+		reviewed  int
+		wantErr   error
+		wantPct   float64
+		wantGrade rating.Grade
 	}{
 		{
 			name:      "zero hotspots",
@@ -74,16 +74,16 @@ func TestNewSummary(t *testing.T) {
 			wantGrade: rating.GradeE,
 		},
 		{
-			name:      "invalid - negative total",
-			total:     -1,
-			reviewed:  0,
-			wantErr:   shared.ErrValidation,
+			name:     "invalid - negative total",
+			total:    -1,
+			reviewed: 0,
+			wantErr:  shared.ErrValidation,
 		},
 		{
-			name:      "invalid - reviewed > total",
-			total:     5,
-			reviewed:  6,
-			wantErr:   shared.ErrValidation,
+			name:     "invalid - reviewed > total",
+			total:    5,
+			reviewed: 6,
+			wantErr:  shared.ErrValidation,
 		},
 	}
 

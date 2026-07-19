@@ -190,14 +190,14 @@ func TestProjectHotspotStoreIntegration(t *testing.T) {
 func TestProjectHotspot_ReopenAsNewCode(t *testing.T) {
 	ctx := context.Background()
 	store := setupProjectHotspotStore(t)
-	
+
 	tenant := shared.ID("hotspot-reopen-tenant")
 	projectID := shared.ID("hotspot-reopen-project")
 	seedHotspotProject(t, store, tenant, projectID, "hotspot-reopen")
-	
+
 	t1 := time.Date(2026, 7, 18, 1, 0, 0, 0, time.UTC)
 	t2 := t1.Add(time.Hour)
-	
+
 	// 1. Analysis 1 detects hotspot
 	c := hotspot.Candidate{
 		Key: "sast:rule-a:main.go:1", FindingIdentity: "reopen-test", RuleKey: "rule-a", Title: "test", Description: "desc",
@@ -207,7 +207,7 @@ func TestProjectHotspot_ReopenAsNewCode(t *testing.T) {
 	if err := store.SaveWithResultAndHotspots(ctx, a1, nil, []hotspot.Candidate{c}); err != nil {
 		t.Fatal(err)
 	}
-	
+
 	// 2. Human marks it Fixed
 	id := hotspot.DeterministicID(tenant, projectID, c.Key)
 	item, err := store.GetHotspot(ctx, tenant, projectID, id)
@@ -227,13 +227,13 @@ func TestProjectHotspot_ReopenAsNewCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	// 3. Later analysis detects it again
 	a2 := projectanalysis.Analysis{ID: "hotspot-reopen-a2", TenantID: tenant.String(), ProjectID: projectID.String(), CreatedAt: t2}
 	if err := store.SaveWithResultAndHotspots(ctx, a2, nil, []hotspot.Candidate{c}); err != nil {
 		t.Fatal(err)
 	}
-	
+
 	// Assertions
 	reopened, err := store.GetHotspot(ctx, tenant, projectID, id)
 	if err != nil {
@@ -242,12 +242,12 @@ func TestProjectHotspot_ReopenAsNewCode(t *testing.T) {
 	if reopened.Status != hotspot.StatusToReview {
 		t.Fatalf("expected to_review, got %s", reopened.Status)
 	}
-	
+
 	history, err := store.HotspotHistory(ctx, tenant, projectID, id)
 	if err != nil || len(history) != 2 {
 		t.Fatalf("expected 2 history events (1 manual + 1 system), got %d", len(history))
 	}
-	
+
 	summary, err := store.CurrentAnalysisHotspotSummary(ctx, tenant, projectID, shared.ID(a2.ID), hotspot.LensNewCode)
 	if err != nil {
 		t.Fatal(err)

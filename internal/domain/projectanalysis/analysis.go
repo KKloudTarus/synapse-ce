@@ -2,6 +2,7 @@
 package projectanalysis
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -81,6 +82,42 @@ type Analysis struct {
 	Hotspots       hotspot.Summary           `json:"hotspots"`
 	NewHotspots    hotspot.Summary           `json:"new_hotspots"`
 	Snapshot       measure.Snapshot          `json:"snapshot"`
+}
+
+// UnmarshalJSON handles legacy decoding where Snapshot might be empty or missing.
+func (a *Analysis) UnmarshalJSON(data []byte) error {
+	type Alias Analysis
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(a),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if len(a.Snapshot.Nodes) == 0 {
+		a.Snapshot = measure.Snapshot{
+			Nodes: []measure.Node{
+				{
+					Path: "",
+					Kind: measure.NodeProject,
+					Counters: measure.Counters{
+						IssuesByType:     make(map[string]int),
+						IssuesBySeverity: make(map[string]int),
+					},
+					FunctionsKnown:       false,
+					ComplexityAvailable:  false,
+					CoverageAvailable:    false,
+					DuplicationAvailable: false,
+					TechDebtAvailable:    false,
+					IssueTypeAvailable:   false,
+					AttributionAvailable: false,
+				},
+			},
+			NewCodeCoverage: measure.DecimalMetric{Availability: measure.AvailabilityUnavailable, Reason: "legacy_analysis"},
+		}
+	}
+	return nil
 }
 
 // Input supplies one completed scan's project-facing facts. Findings must be the

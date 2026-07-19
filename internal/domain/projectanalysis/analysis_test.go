@@ -1,10 +1,12 @@
 package projectanalysis
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
@@ -31,6 +33,27 @@ func TestBuildFirstAnalysisTreatsEveryIssueAsNew(t *testing.T) {
 	}
 	if analysis.Delta != nil {
 		t.Fatalf("first analysis delta=%+v, want nil", analysis.Delta)
+	}
+}
+
+func TestLegacyAnalysisDecode(t *testing.T) {
+	data := []byte(`{"id":"legacy1","tenant_id":"tenant"}`)
+	var analysis Analysis
+	if err := json.Unmarshal(data, &analysis); err != nil {
+		t.Fatal(err)
+	}
+	if len(analysis.Snapshot.Nodes) != 1 {
+		t.Fatalf("expected 1 fallback root node, got %d", len(analysis.Snapshot.Nodes))
+	}
+	root := analysis.Snapshot.Nodes[0]
+	if root.Path != "" || root.Kind != measure.NodeProject {
+		t.Fatalf("expected project root node, got %+v", root)
+	}
+	if root.TechDebtAvailable || root.IssueTypeAvailable || root.AttributionAvailable || root.FunctionsKnown {
+		t.Fatalf("legacy root must have strictly unavailable measures")
+	}
+	if analysis.Snapshot.NewCodeCoverage.Availability != measure.AvailabilityUnavailable {
+		t.Fatalf("legacy new code coverage must be unavailable")
 	}
 }
 

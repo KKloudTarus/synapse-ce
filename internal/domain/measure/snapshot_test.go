@@ -2,16 +2,32 @@ package measure
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
+type mockResolver struct {
+	m map[rule.Key]rule.Rule
+	err error
+}
+func (r *mockResolver) Get(k rule.Key) (rule.Rule, error) {
+	if r.err != nil {
+		return rule.Rule{}, r.err
+	}
+	if rule, ok := r.m[k]; ok {
+		return rule, nil
+	}
+	return rule.Rule{}, shared.ErrNotFound
+}
+
 func TestBuildSnapshot(t *testing.T) {
 	// Setup dummy rule catalog
-	catalog := map[rule.Key]rule.Rule{
+	catalog := &mockResolver{m: map[rule.Key]rule.Rule{
 		"bug-rule": {
 			Key:               "bug-rule",
 			Type:              rule.TypeBug,
@@ -27,7 +43,7 @@ func TestBuildSnapshot(t *testing.T) {
 			Type:              rule.TypeSecurityHotspot,
 			RemediationEffort: 15, // Hotspots should NOT add to effort
 		},
-	}
+	}}
 
 	// 10. nil catalog behavior
 	_, err := BuildSnapshot(BuildSnapshotInput{
@@ -208,40 +224,88 @@ func TestBuildSnapshot(t *testing.T) {
 	b, _ := json.Marshal(snap)
 	var snap2 Snapshot
 	json.Unmarshal(b, &snap2)
-
+	
 	if snap2.Nodes[0].Counters.Files != snap.Nodes[0].Counters.Files {
 		t.Fatalf("json roundtrip failed")
 	}
 }
 
 func TestSnapshotNormalization(t *testing.T) {
-	catalog := map[rule.Key]rule.Rule{}
+	tests := []struct {
+		name    string
+		paths   []string
+		wantErr string
+	}{
+		{
+			name:    "valid paths",
+			paths:   []string{"src/win.go", "dir/double.go", "dot.go"},
+			wantErr: "",
+		},
+		{
+			name:    "unix absolute",
+			paths:   []string{"/abs.go"},
+			wantErr: "unix absolute",
+		},
+		{
+			name:    "windows absolute",
+			paths:   []string{"C:\\abs.go"},
+			wantErr: "windows drive absolute",
+		},
+		{
+			name:    "directory traversal",
+			paths:   []string{"dir/../up.go"},
+			wantErr: "directory traversal",
+		},
+		{
+			name:    "repeated separators",
+			paths:   []string{"dir//double.go"},
+			wantErr: "repeated separators",
+		},
+		{
+			name:    "duplicate canonical path",
+			paths:   []string{"src/win.go", "src\\win.go"},
+			wantErr: "duplicate canonical file path",
+		},
+		{
+			name:    "root as file",
+			paths:   []string{""},
+			wantErr: "inventory file path cannot be root",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files := make([]FileInventory, len(tt.paths))
+			for i, p := range tt.paths {
+				files[i] = FileInventory{Path: p, Language: "Go", CodeLines: 10}
+			}
+			input := BuildSnapshotInput{
+				RuleCatalog: &mockResolver{},
+				Inventory:   NewInventory(nil, files...),
+			}
+
+			_, err := BuildSnapshot(input)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			} else {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+				}
+			}
+		})
+	}
+}
+
+func TestSnapshotCatalogFailure(t *testing.T) {
 	input := BuildSnapshotInput{
-		RuleCatalog: catalog,
-		Inventory: NewInventory(nil,
-			FileInventory{Path: "src\\win.go", Language: "Go", CodeLines: 10},
-			FileInventory{Path: "/abs.go", Language: "Go", CodeLines: 10},
-			FileInventory{Path: "dir/../up.go", Language: "Go", CodeLines: 10},
-			FileInventory{Path: "dir//double.go", Language: "Go", CodeLines: 10},
-			FileInventory{Path: "./dot.go", Language: "Go", CodeLines: 10},
-		),
+		RuleCatalog: &mockResolver{err: errors.New("infra failure")},
+		Inventory:   NewInventory(nil, FileInventory{Path: "src/a.go", Language: "Go", CodeLines: 10}),
+		Issues:      []IssueInput{{Path: "src/a.go", RuleKey: "bug", Severity: shared.SeverityHigh}},
 	}
-
-	snap, _ := BuildSnapshot(input)
-
-	paths := []string{}
-	for _, n := range snap.Nodes {
-		paths = append(paths, n.Path)
-	}
-
-	// '..' is rejected (returns empty path, appended to root).
-	// '/abs.go' becomes 'abs.go'.
-	// 'src\win.go' becomes 'src/win.go'.
-	// 'dir//double.go' becomes 'dir/double.go'.
-	// './dot.go' becomes 'dot.go'.
-
-	expectedPaths := []string{"", "abs.go", "dir", "dir/double.go", "dot.go", "src", "src/win.go"}
-	if !reflect.DeepEqual(paths, expectedPaths) {
-		t.Fatalf("expected paths %v, got %v", expectedPaths, paths)
+	_, err := BuildSnapshot(input)
+	if err == nil || !strings.Contains(err.Error(), "infra failure") {
+		t.Fatalf("expected infra failure error, got %v", err)
 	}
 }

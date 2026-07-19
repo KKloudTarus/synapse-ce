@@ -231,6 +231,10 @@ func cloneProjectAnalysis(in projectanalysis.Analysis) projectanalysis.Analysis 
 			out.Snapshot.Nodes[i].Counters.IssuesBySeverity = maps.Clone(out.Snapshot.Nodes[i].Counters.IssuesBySeverity)
 		}
 	}
+	if in.Snapshot.NewCodeCoverage.Value != nil {
+		val := *in.Snapshot.NewCodeCoverage.Value
+		out.Snapshot.NewCodeCoverage.Value = &val
+	}
 	return out
 }
 

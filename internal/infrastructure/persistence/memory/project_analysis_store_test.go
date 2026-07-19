@@ -27,13 +27,28 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 		Coverage:       &measure.CoverageReport{Files: []measure.FileCoverage{{File: "a.go", CoveredLines: 5, TotalLines: 10}}},
 		Duplication:    measure.DuplicationReport{Blocks: []measure.DuplicationBlock{{Occurrences: []measure.CodeRange{{File: "a.go", StartLine: 1, EndLine: 2}}}}},
 		Rating:         rating.Report{Security: rating.GradeA},
+		Snapshot: measure.Snapshot{
+			Nodes: []measure.Node{
+				{
+					Path: "src/a.go",
+					Counters: measure.Counters{
+						IssuesByType: map[string]int{"bug": 1},
+					},
+				},
+			},
+			NewCodeCoverage: measure.DecimalMetric{Value: new(float64)},
+		},
 	}
+	*analysis.Snapshot.NewCodeCoverage.Value = 10.0
+
 	if err := store.Save(ctx, analysis); err != nil {
 		t.Fatal(err)
 	}
 	analysis.Measures["coverage"] = 0
 	analysis.Coverage.Files[0].File = "mutated.go"
 	analysis.Duplication.Blocks[0].Occurrences[0].File = "mutated.go"
+	analysis.Snapshot.Nodes[0].Counters.IssuesByType["bug"] = 0
+	*analysis.Snapshot.NewCodeCoverage.Value = 0.0
 
 	got, err := store.Get(ctx, "tenant", "project", "a1")
 	if err != nil {
@@ -45,6 +60,8 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 	got.Coverage.Files[0].File = "returned.go"
 	got.Duplication.Blocks[0].Occurrences[0].File = "returned.go"
 	got.Delta.Measures["coverage"] = 0
+	got.Snapshot.Nodes[0].Counters.IssuesByType["bug"] = 0
+	*got.Snapshot.NewCodeCoverage.Value = 0.0
 
 	list, _, err := store.List(ctx, "tenant", "project", 1, time.Time{}, "")
 	if err != nil {
@@ -52,6 +69,12 @@ func TestProjectAnalysisStoreClonesMutableSnapshots(t *testing.T) {
 	}
 	if list[0].Measures["coverage"] != 50 || list[0].Issues.ByKind["sca"] != 1 || list[0].Gate.Results[0].Actual != 50 || list[0].Coverage.Files[0].File != "a.go" || list[0].Duplication.Blocks[0].Occurrences[0].File != "a.go" || list[0].Delta.Measures["coverage"] != 1 {
 		t.Fatalf("stored snapshot mutated: %+v", list[0])
+	}
+	if list[0].Snapshot.Nodes[0].Counters.IssuesByType["bug"] != 1 {
+		t.Fatalf("snapshot node counters mutated")
+	}
+	if list[0].Snapshot.NewCodeCoverage.Value == nil || *list[0].Snapshot.NewCodeCoverage.Value != 10.0 {
+		t.Fatalf("snapshot new code coverage mutated")
 	}
 }
 
