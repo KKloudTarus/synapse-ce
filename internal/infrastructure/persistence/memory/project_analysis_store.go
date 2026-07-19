@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"time"
@@ -246,7 +247,7 @@ func (s *ProjectAnalysisStore) upsertHotspotLocked(analysis projectanalysis.Anal
 			candidate,
 		)
 		if err != nil {
-			panic(fmt.Sprintf("validated hotspot projection failed: %v", err))
+			return err
 		}
 
 		itemID = item.ID
@@ -259,7 +260,7 @@ func (s *ProjectAnalysisStore) upsertHotspotLocked(analysis projectanalysis.Anal
 	// Avoid duplicates in analysisHotspots if called multiple times somehow
 	for _, ah := range s.analysisHotspots {
 		if ah.AnalysisID.String() == analysis.ID && ah.HotspotID == itemID {
-			return
+			return nil
 		}
 	}
 	s.analysisHotspots = append(s.analysisHotspots, analysisHotspot{

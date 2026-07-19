@@ -178,3 +178,64 @@ func TestProjectHotspot_ReopenAsNewCode(t *testing.T) {
 		t.Fatalf("expected 1 new code hotspot, got %d", summary.Total)
 	}
 }
+
+func TestProjectHotspotProjectionUpdatesFindingIdentityFromLaterAnalysis(t *testing.T) {
+	ctx := context.Background()
+	store, cleanup := setupProjectHotspotStore(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)
+	t1 := t0.Add(time.Hour)
+	t2 := t1.Add(time.Hour)
+
+	tenant := shared.ID("t1")
+	project := shared.ID("p1")
+
+	// a1
+	c1 := hotspot.Candidate{
+		Key: "k1", FindingIdentity: "old", RuleKey: "r1", Title: "t1", Description: "d1",
+		Severity: shared.SeverityHigh, Kind: finding.KindSAST, CWE: "cwe", Location: "loc",
+	}
+	a1 := projectanalysis.Analysis{ID: "a1", TenantID: tenant.String(), ProjectID: project.String(), CreatedAt: t1}
+	if err := store.SaveWithResultAndHotspots(ctx, a1, nil, []hotspot.Candidate{c1}); err != nil {
+		t.Fatal(err)
+	}
+
+	// a2 (newer)
+	c2 := hotspot.Candidate{
+		Key: "k1", FindingIdentity: "new", RuleKey: "r1", Title: "t1", Description: "d1",
+		Severity: shared.SeverityHigh, Kind: finding.KindSAST, CWE: "cwe", Location: "loc",
+	}
+	a2 := projectanalysis.Analysis{ID: "a2", TenantID: tenant.String(), ProjectID: project.String(), CreatedAt: t2}
+	if err := store.SaveWithResultAndHotspots(ctx, a2, nil, []hotspot.Candidate{c2}); err != nil {
+		t.Fatal(err)
+	}
+
+	id := hotspot.DeterministicID(tenant, project, "k1")
+	h, err := store.GetHotspot(ctx, tenant, project, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.FindingIdentity != "new" {
+		t.Fatalf("expected 'new', got '%s'", h.FindingIdentity)
+	}
+
+	// a0 (arrives late, older)
+	c0 := hotspot.Candidate{
+		Key: "k1", FindingIdentity: "stale", RuleKey: "r1", Title: "t1", Description: "d1",
+		Severity: shared.SeverityHigh, Kind: finding.KindSAST, CWE: "cwe", Location: "loc",
+	}
+	a0 := projectanalysis.Analysis{ID: "a0", TenantID: tenant.String(), ProjectID: project.String(), CreatedAt: t0}
+	if err := store.SaveWithResultAndHotspots(ctx, a0, nil, []hotspot.Candidate{c0}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Still 'new'
+	h, err = store.GetHotspot(ctx, tenant, project, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.FindingIdentity != "new" {
+		t.Fatalf("expected 'new' after old arrival, got '%s'", h.FindingIdentity)
+	}
+}

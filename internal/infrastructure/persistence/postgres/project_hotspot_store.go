@@ -249,6 +249,14 @@ func (r *ProjectAnalysisStore) ListHotspots(ctx context.Context, tenantID, proje
 	return page, facetRows.Err()
 }
 
+func hotspotSearchPattern(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `%`, `\%`)
+	value = strings.ReplaceAll(value, `_`, `\_`)
+	return "%" + value + "%"
+}
+
 func hotspotWhere(tenantID, projectID shared.ID, filter hotspot.ListFilter, cursor bool) (string, []any, string) {
 	args := []any{tenantID.String(), projectID.String()}
 	parts := []string{"ph.tenant_id = $1", "ph.project_id = $2"}
@@ -267,11 +275,9 @@ func hotspotWhere(tenantID, projectID shared.ID, filter hotspot.ListFilter, curs
 	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
 		searchArg := len(args) + 1
-		search = strings.ReplaceAll(search, "\\", "\\\\")
-		search = strings.ReplaceAll(search, "%", "\\%")
-		search = strings.ReplaceAll(search, "_", "\\_")
+		pattern := hotspotSearchPattern(search)
 
-		args = append(args, "%"+search+"%", "%"+search+"%", "%"+search+"%", "%"+search+"%", "%"+search+"%")
+		args = append(args, pattern, pattern, pattern, pattern, pattern)
 		parts = append(parts, fmt.Sprintf("(ph.hotspot_key ILIKE $%d OR ph.rule_key ILIKE $%d OR ph.title ILIKE $%d OR ph.description ILIKE $%d OR ph.location ILIKE $%d)", searchArg, searchArg+1, searchArg+2, searchArg+3, searchArg+4))
 	}
 
@@ -425,10 +431,23 @@ func (r *ProjectAnalysisStore) ListAnalysisHotspots(ctx context.Context, tenantI
 	if filter.RuleKey != "" {
 		add("h.rule_key = $%d", filter.RuleKey)
 	}
-	if filter.Search != "" {
+	if search := strings.TrimSpace(filter.Search); search != "" {
 		searchArg := len(args) + 1
-		args = append(args, "%"+filter.Search+"%", "%"+filter.Search+"%", "%"+filter.Search+"%", "%"+filter.Search+"%", "%"+filter.Search+"%")
-		parts = append(parts, fmt.Sprintf("(h.hotspot_key ILIKE $%d OR h.rule_key ILIKE $%d OR h.title ILIKE $%d OR h.description ILIKE $%d OR h.location ILIKE $%d)", searchArg, searchArg+1, searchArg+2, searchArg+3, searchArg+4))
+		pattern := hotspotSearchPattern(search)
+
+		args = append(args, pattern, pattern, pattern, pattern, pattern)
+		parts = append(parts, fmt.Sprintf(
+			`(h.hotspot_key ILIKE $%d OR
+			  h.rule_key ILIKE $%d OR
+			  h.title ILIKE $%d OR
+			  h.description ILIKE $%d OR
+			  h.location ILIKE $%d)`,
+			searchArg,
+			searchArg+1,
+			searchArg+2,
+			searchArg+3,
+			searchArg+4,
+		))
 	}
 
 	where := strings.Join(parts, " AND ")
