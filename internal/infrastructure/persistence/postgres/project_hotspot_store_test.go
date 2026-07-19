@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -314,5 +315,89 @@ func TestProjectHotspotProjectionUpdatesFindingIdentityFromLaterAnalysis(t *test
 	}
 	if h.FindingIdentity != "new" {
 		t.Fatalf("expected 'new' after old arrival, got '%s'", h.FindingIdentity)
+	}
+}
+
+func TestProjectHotspotPagination(t *testing.T) {
+	ctx := context.Background()
+	store := setupProjectHotspotStore(t)
+
+	tenant := shared.ID("hotspot-pagination-tenant")
+	projectID := shared.ID("hotspot-pagination-project")
+	seedHotspotProject(t, store, tenant, projectID, "hotspot-pagination")
+
+	now := time.Now().UTC()
+	var candidates []hotspot.Candidate
+	for i := 0; i < 3; i++ {
+		candidates = append(candidates, hotspot.Candidate{
+			Key:             fmt.Sprintf("k%d", i),
+			FindingIdentity: fmt.Sprintf("id%d", i),
+			RuleKey:         "r1",
+			Title:           "title",
+			Description:     "desc",
+			Severity:        shared.SeverityHigh,
+			Kind:            finding.KindSAST,
+			Location:        "loc",
+		})
+	}
+
+	analysis := projectanalysis.Analysis{
+		ID:        "hotspot-pagination-a1",
+		TenantID:  tenant.String(),
+		ProjectID: projectID.String(),
+		CreatedAt: now,
+	}
+
+	if err := store.SaveWithResultAndHotspots(ctx, analysis, nil, candidates); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fetch page 1
+	page1, summary1, err := store.ListAnalysisHotspots(ctx, tenant, projectID, shared.ID(analysis.ID), hotspot.LensOverall, hotspot.ListFilter{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page1.Items) != 2 {
+		t.Fatalf("expected 2 items on page 1, got %d", len(page1.Items))
+	}
+	if summary1.Total != 3 {
+		t.Fatalf("expected summary total 3, got %d", summary1.Total)
+	}
+	if page1.Facets.Statuses["to_review"] != 3 {
+		t.Fatalf("expected 3 'to_review' in facets on page 1, got %d", page1.Facets.Statuses["to_review"])
+	}
+	if page1.Next == nil {
+		t.Fatal("expected page 1 to have next cursor")
+	}
+
+	// Fetch page 2
+	page2, summary2, err := store.ListAnalysisHotspots(ctx, tenant, projectID, shared.ID(analysis.ID), hotspot.LensOverall, hotspot.ListFilter{
+		Limit:            2,
+		BeforeLastSeenAt: page1.Next.BeforeLastSeenAt,
+		BeforeID:         page1.Next.BeforeID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page2.Items) != 1 {
+		t.Fatalf("expected 1 item on page 2, got %d", len(page2.Items))
+	}
+	if summary2.Total != 3 {
+		t.Fatalf("expected summary total 3 on page 2, got %d", summary2.Total)
+	}
+	if page2.Facets.Statuses["to_review"] != 3 {
+		t.Fatalf("expected 3 'to_review' in facets on page 2, got %d", page2.Facets.Statuses["to_review"])
+	}
+	if page2.Next != nil {
+		t.Fatal("expected page 2 to have nil next cursor")
+	}
+
+	// Ensure no items from page 1 repeat on page 2
+	for _, item1 := range page1.Items {
+		for _, item2 := range page2.Items {
+			if item1.ID == item2.ID {
+				t.Fatalf("item %s repeated on page 2", item1.ID)
+			}
+		}
 	}
 }

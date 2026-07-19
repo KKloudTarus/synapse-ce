@@ -450,6 +450,9 @@ func (r *ProjectAnalysisStore) ListAnalysisHotspots(ctx context.Context, tenantI
 		))
 	}
 
+	facetWhere := strings.Join(parts, " AND ")
+	facetArgs := append([]any(nil), args...)
+
 	if !filter.BeforeLastSeenAt.IsZero() {
 		args = append(
 			args,
@@ -468,7 +471,7 @@ func (r *ProjectAnalysisStore) ListAnalysisHotspots(ctx context.Context, tenantI
 		))
 	}
 
-	where := strings.Join(parts, " AND ")
+	listWhere := strings.Join(parts, " AND ")
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 25
@@ -478,7 +481,7 @@ func (r *ProjectAnalysisStore) ListAnalysisHotspots(ctx context.Context, tenantI
 		h.status, h.version, h.first_seen_analysis_id, h.last_seen_analysis_id, h.first_seen_at, h.last_seen_at, h.created_at, h.updated_at, h.last_reviewed_by, h.last_reviewed_at
 		FROM project_hotspots h
 		JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id
-		WHERE ` + where + ` ORDER BY h.last_seen_at DESC, h.id COLLATE "C" DESC LIMIT $` + fmt.Sprint(len(args)+1)
+		WHERE ` + listWhere + ` ORDER BY h.last_seen_at DESC, h.id COLLATE "C" DESC LIMIT $` + fmt.Sprint(len(args)+1)
 
 	args = append(args, limit+1)
 
@@ -509,10 +512,9 @@ func (r *ProjectAnalysisStore) ListAnalysisHotspots(ctx context.Context, tenantI
 	page.Items = items
 
 	// Facets (current statuses, etc)
-	facetArgs := args[:len(args)-1] // remove limit
-	facetRows, err := r.pool.Query(ctx, `SELECT 'status', h.status, count(*) FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id WHERE `+where+` GROUP BY h.status
-		UNION ALL SELECT 'rule', h.rule_key, count(*) FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id WHERE `+where+` GROUP BY h.rule_key
-		UNION ALL SELECT 'severity', h.severity, count(*) FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id WHERE `+where+` GROUP BY h.severity`, facetArgs...)
+	facetRows, err := r.pool.Query(ctx, `SELECT 'status', h.status, count(*) FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id WHERE `+facetWhere+` GROUP BY h.status
+		UNION ALL SELECT 'rule', h.rule_key, count(*) FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id WHERE `+facetWhere+` GROUP BY h.rule_key
+		UNION ALL SELECT 'severity', h.severity, count(*) FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id WHERE `+facetWhere+` GROUP BY h.severity`, facetArgs...)
 	if err != nil {
 		return hotspot.Page{}, hotspot.Summary{}, fmt.Errorf("facet analysis hotspots: %w", err)
 	}
