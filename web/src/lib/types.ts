@@ -868,3 +868,93 @@ export interface HotspotReviewEvent {
   version: number
   at: string
 }
+
+// --- Project Issues (code-quality triage) ---
+
+export type IssueStatus = 'open' | 'accepted' | 'false_positive' | 'wont_fix'
+
+export interface ProjectIssue {
+  id: string
+  ruleKey: string
+  ruleName: string
+  type: RuleType
+  title: string
+  description: string
+  severity: Severity
+  findingKind: string
+  cwe: string
+  language: string
+  file: string
+  location: string
+  status: IssueStatus
+  version: number
+  isNew: boolean
+  firstSeenAnalysisId: string
+  lastSeenAnalysisId: string
+  firstSeenAt: string
+  lastSeenAt: string
+}
+
+export interface IssueListFilter {
+  lens?: 'overall' | 'new-code'
+  status?: IssueStatus
+  type?: RuleType
+  severity?: Severity
+  rule?: string
+  language?: string
+  path?: string
+  newCode?: boolean
+  search?: string
+  limit?: number
+  before_last_seen_at?: string
+  before_id?: string
+}
+
+export interface IssueFacets {
+  types: Record<string, number>
+  statuses: Record<string, number>
+  severities: Record<string, number>
+  ruleKeys: Record<string, number>
+  languages: Record<string, number>
+}
+
+export interface IssueSummary {
+  total: number
+  open: number
+  resolved: number
+}
+
+export interface IssuePage {
+  items: ProjectIssue[]
+  next: { beforeLastSeenAt: string; beforeId: string } | null
+  facets: IssueFacets
+  summary: IssueSummary
+}
+
+export interface IssueReviewEvent {
+  from: IssueStatus
+  to: IssueStatus
+  actor: string
+  rationale: string
+  version: number
+  createdAt: string
+}
+
+export const ISSUE_STATUSES: IssueStatus[] = ['open', 'accepted', 'false_positive', 'wont_fix']
+
+// canTransitionIssue mirrors the server lifecycle graph (domain/issue/review.go).
+export function canTransitionIssue(from: IssueStatus, to: IssueStatus): boolean {
+  if (from === to) return false
+  const resolved = (s: IssueStatus) => s === 'accepted' || s === 'false_positive' || s === 'wont_fix'
+  if (from === 'open') return resolved(to)
+  return to === 'open' || resolved(to)
+}
+
+export function issueStatusLabel(s: IssueStatus): string {
+  switch (s) {
+    case 'open': return 'Open'
+    case 'accepted': return 'Accepted'
+    case 'false_positive': return 'False positive'
+    case 'wont_fix': return "Won't fix"
+  }
+}

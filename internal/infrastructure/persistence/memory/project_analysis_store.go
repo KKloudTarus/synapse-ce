@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hotspot"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/issue"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -35,6 +36,8 @@ type ProjectAnalysisStore struct {
 	hotspots         []hotspot.Hotspot
 	reviewEvents     []hotspot.ReviewEvent
 	analysisHotspots []analysisHotspot
+	issues           []issue.Issue
+	issueEvents      []issue.ReviewEvent
 }
 
 func NewProjectAnalysisStore() *ProjectAnalysisStore { return &ProjectAnalysisStore{} }
@@ -51,10 +54,19 @@ func (s *ProjectAnalysisStore) SaveWithResult(_ context.Context, analysis projec
 	return s.saveWithResultLocked(analysis, result)
 }
 
-func (s *ProjectAnalysisStore) SaveWithResultAndHotspots(_ context.Context, analysis projectanalysis.Analysis, result []byte, candidates []hotspot.Candidate) error {
+// SaveWithResultAndHotspots satisfies ports.ProjectAnalysisProjectionStore; it is the
+// hotspot-only projection (no issues), delegating to the combined path.
+func (s *ProjectAnalysisStore) SaveWithResultAndHotspots(ctx context.Context, analysis projectanalysis.Analysis, result []byte, candidates []hotspot.Candidate) error {
+	return s.SaveWithResultAndProjections(ctx, analysis, result, candidates, nil)
+}
+
+func (s *ProjectAnalysisStore) SaveWithResultAndProjections(_ context.Context, analysis projectanalysis.Analysis, result []byte, candidates []hotspot.Candidate, issues []issue.Candidate) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := validateCandidates(analysis, candidates); err != nil {
+		return err
+	}
+	if err := validateIssueCandidates(analysis, issues); err != nil {
 		return err
 	}
 	if err := s.saveWithResultLocked(analysis, result); err != nil {
@@ -65,6 +77,53 @@ func (s *ProjectAnalysisStore) SaveWithResultAndHotspots(_ context.Context, anal
 			return err
 		}
 	}
+	for _, candidate := range issues {
+		if err := s.upsertIssueLocked(analysis, candidate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateIssueCandidates(analysis projectanalysis.Analysis, candidates []issue.Candidate) error {
+	for _, candidate := range candidates {
+		if _, err := issue.Project(shared.ID(analysis.TenantID), shared.ID(analysis.ProjectID), analysis.ID, analysis.CreatedAt, candidate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// upsertIssueLocked projects one issue candidate, preserving the triage lifecycle
+// (status/version/review metadata) across rescans; only the descriptive fields and
+// last-seen metadata move forward. An issue seen in more than one analysis is no
+// longer New Code.
+func (s *ProjectAnalysisStore) upsertIssueLocked(analysis projectanalysis.Analysis, candidate issue.Candidate) error {
+	for i := range s.issues {
+		current := &s.issues[i]
+		if current.TenantID != shared.ID(analysis.TenantID) || current.ProjectID != shared.ID(analysis.ProjectID) || current.Key != candidate.Key {
+			continue
+		}
+		if analysis.CreatedAt.Before(current.FirstSeenAt) || (analysis.CreatedAt.Equal(current.FirstSeenAt) && analysis.ID < current.FirstSeenAnalysisID) {
+			current.FirstSeenAnalysisID, current.FirstSeenAt = analysis.ID, analysis.CreatedAt
+			current.Audit.CreatedAt = analysis.CreatedAt
+		}
+		if analysis.CreatedAt.After(current.LastSeenAt) || (analysis.CreatedAt.Equal(current.LastSeenAt) && analysis.ID > current.LastSeenAnalysisID) {
+			current.FindingIdentity = candidate.FindingIdentity
+			current.RuleKey, current.Type, current.Title, current.Description = candidate.RuleKey, candidate.Type, candidate.Title, candidate.Description
+			current.Severity, current.Kind, current.CWE = candidate.Severity, candidate.Kind, candidate.CWE
+			current.Language, current.File, current.Location = candidate.Language, candidate.File, candidate.Location
+			current.LastSeenAnalysisID, current.LastSeenAt = analysis.ID, analysis.CreatedAt
+			current.Audit.UpdatedAt = analysis.CreatedAt
+		}
+		current.IsNew = current.FirstSeenAnalysisID == current.LastSeenAnalysisID
+		return nil
+	}
+	item, err := issue.Project(shared.ID(analysis.TenantID), shared.ID(analysis.ProjectID), analysis.ID, analysis.CreatedAt, candidate)
+	if err != nil {
+		return err
+	}
+	s.issues = append(s.issues, item)
 	return nil
 }
 

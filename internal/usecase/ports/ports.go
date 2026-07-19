@@ -17,6 +17,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hotspot"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/ignore"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedsbom"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/issue"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
@@ -86,6 +87,25 @@ type ProjectAnalysisStore interface {
 // smaller contract; production stores implement it.
 type ProjectAnalysisProjectionStore interface {
 	SaveWithResultAndHotspots(ctx context.Context, analysis projectanalysis.Analysis, result []byte, candidates []hotspot.Candidate) error
+}
+
+// ProjectIssueProjectionStore is the atomic write capability for projecting a
+// completed analysis's non-hotspot findings into Project issue records. A store that
+// implements it persists the analysis, its hotspots, and its issues together.
+type ProjectIssueProjectionStore interface {
+	SaveWithResultAndProjections(ctx context.Context, analysis projectanalysis.Analysis, result []byte, hotspots []hotspot.Candidate, issues []issue.Candidate) error
+}
+
+// ProjectIssueStore reads and mutates tenant- and Project-scoped code-quality issue
+// projections and their append-only triage lifecycle. It mirrors ProjectHotspotStore.
+type ProjectIssueStore interface {
+	ListIssues(ctx context.Context, tenantID, projectID shared.ID, filter issue.ListFilter) (issue.Page, error)
+	GetIssue(ctx context.Context, tenantID, projectID, issueID shared.ID) (issue.Issue, error)
+	TransitionIssue(ctx context.Context, cmd issue.TransitionCommand) (issue.Issue, issue.ReviewEvent, error)
+	IssueHistory(ctx context.Context, tenantID, projectID, issueID shared.ID) ([]issue.ReviewEvent, error)
+	// ResolvedIssueKeys returns the projection keys currently in a resolved (gate-exempt)
+	// status for a Project, so a subsequent analysis can carry the triage forward.
+	ResolvedIssueKeys(ctx context.Context, tenantID, projectID shared.ID) (map[string]bool, error)
 }
 
 // ProjectHotspotStore reads tenant- and Project-scoped hotspot projections.

@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -20,38 +19,20 @@ import (
 var _ ports.ProjectAnalysisProjectionStore = (*ProjectAnalysisStore)(nil)
 var _ ports.ProjectHotspotStore = (*ProjectAnalysisStore)(nil)
 
-// SaveWithResultAndHotspots commits the immutable analysis and its projection in
-// one PostgreSQL transaction. A projection write failure rolls the analysis back,
-// so the scan worker cannot publish a successful analysis without its hotspots.
+// SaveWithResultAndHotspots commits the immutable analysis and its Security Hotspot
+// projection in one PostgreSQL transaction. It delegates to SaveWithResultAndProjections
+// with no issue projection, so both write paths share the same single-transaction body:
+// a projection write failure rolls the analysis back, and the scan worker cannot publish
+// a successful analysis without its projections.
 func (r *ProjectAnalysisStore) SaveWithResultAndHotspots(ctx context.Context, analysis projectanalysis.Analysis, result []byte, candidates []hotspot.Candidate) error {
-	items := make([]hotspot.Hotspot, len(candidates))
-	for i, candidate := range candidates {
-		item, err := hotspot.Project(
-			shared.ID(analysis.TenantID),
-			shared.ID(analysis.ProjectID),
-			analysis.ID,
-			analysis.CreatedAt,
-			candidate,
-		)
-		if err != nil {
-			return err
-		}
-		items[i] = item
-	}
-	payload, err := json.Marshal(analysis)
-	if err != nil {
-		return fmt.Errorf("marshal project analysis: %w", err)
-	}
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin project analysis transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `INSERT INTO project_analyses (id, tenant_id, project_id, created_at, payload, result)
-		VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
-		analysis.ID, analysis.TenantID, analysis.ProjectID, analysis.CreatedAt, payload, result); err != nil {
-		return fmt.Errorf("insert project analysis: %w", err)
-	}
+	return r.SaveWithResultAndProjections(ctx, analysis, result, candidates, nil)
+}
+
+// upsertHotspotsTx projects each hotspot within the caller's transaction, reopening a
+// previously fixed hotspot that reappears in a strictly later analysis and recording
+// the per-analysis membership row. It is shared by both the hotspot-only and combined
+// projection write paths.
+func upsertHotspotsTx(ctx context.Context, tx pgx.Tx, analysis projectanalysis.Analysis, items []hotspot.Hotspot) error {
 	keys := make([]string, len(items))
 	for i, it := range items {
 		keys[i] = it.Key
@@ -170,9 +151,6 @@ func (r *ProjectAnalysisStore) SaveWithResultAndHotspots(ctx context.Context, an
 			item.TenantID, item.ProjectID, analysis.ID, item.ID, actualIsNew, item.Status, item.Version); err != nil {
 			return fmt.Errorf("insert project analysis hotspot: %w", err)
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit project analysis transaction: %w", err)
 	}
 	return nil
 }

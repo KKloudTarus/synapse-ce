@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hotspot"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/issue"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
@@ -39,6 +40,10 @@ type projectService interface {
 	GetHotspot(context.Context, shared.ID, string, shared.ID) (hotspot.Hotspot, error)
 	TransitionHotspot(context.Context, string, shared.ID, string, shared.ID, hotspot.Status, string, int) (hotspot.Hotspot, hotspot.ReviewEvent, error)
 	HotspotHistory(context.Context, shared.ID, string, shared.ID) ([]hotspot.ReviewEvent, error)
+	ListIssues(context.Context, shared.ID, string, issue.ListFilter) (issue.Page, error)
+	GetIssue(context.Context, shared.ID, string, shared.ID) (issue.Issue, error)
+	TransitionIssue(context.Context, string, shared.ID, string, shared.ID, issue.Status, string, int) (issue.Issue, issue.ReviewEvent, error)
+	IssueHistory(context.Context, shared.ID, string, shared.ID) ([]issue.ReviewEvent, error)
 }
 
 func (rt *Router) SetProjects(s projectService) { rt.projects = s }
