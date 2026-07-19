@@ -111,3 +111,64 @@ func TestProjectHotspotStoreIntegration(t *testing.T) {
 		t.Fatalf("analysis committed despite hotspot failure: count=%d", analyses)
 	}
 }
+
+func TestProjectHotspot_ReopenAsNewCode(t *testing.T) {
+	ctx := context.Background()
+	store, cleanup := setupProjectHotspotStore(t)
+	defer cleanup()
+	
+	t1 := time.Date(2026, 7, 18, 1, 0, 0, 0, time.UTC)
+	t2 := t1.Add(time.Hour)
+	
+	// 1. Analysis 1 detects hotspot
+	c := hotspot.Candidate{
+		Key: "sast:rule-a:main.go:1", FindingIdentity: "reopen-test", RuleKey: "rule-a", Title: "test", Description: "desc",
+		Severity: shared.SeverityHigh, Kind: "sast",
+	}
+	a1 := projectanalysis.Analysis{ID: "a1", TenantID: "t1", ProjectID: "p1", CreatedAt: t1}
+	if err := store.SaveWithResultAndHotspots(ctx, a1, nil, []hotspot.Candidate{c}); err != nil {
+		t.Fatal(err)
+	}
+	
+	// 2. Human marks it Fixed
+	id := hotspot.DeterministicID("t1", "p1", c.Key)
+	item, err := store.GetHotspot(ctx, "t1", "p1", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = store.TransitionHotspot(ctx, hotspot.TransitionCommand{
+		TenantID: "t1", ProjectID: "p1", HotspotID: id,
+		To: hotspot.StatusFixed, Actor: "user1", ExpectedVersion: item.Version,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	
+	// 3. Later analysis detects it again
+	a2 := projectanalysis.Analysis{ID: "a2", TenantID: "t1", ProjectID: "p1", CreatedAt: t2}
+	if err := store.SaveWithResultAndHotspots(ctx, a2, nil, []hotspot.Candidate{c}); err != nil {
+		t.Fatal(err)
+	}
+	
+	// Assertions
+	reopened, err := store.GetHotspot(ctx, "t1", "p1", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Status != hotspot.StatusToReview {
+		t.Fatalf("expected to_review, got %s", reopened.Status)
+	}
+	
+	history, err := store.HotspotHistory(ctx, "t1", "p1", id)
+	if err != nil || len(history) != 2 {
+		t.Fatalf("expected 2 history events (1 manual + 1 system), got %d", len(history))
+	}
+	
+	summary, err := store.CurrentAnalysisHotspotSummary(ctx, "t1", "p1", shared.ID(a2.ID), hotspot.LensNewCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Total != 1 {
+		t.Fatalf("expected 1 new code hotspot, got %d", summary.Total)
+	}
+}

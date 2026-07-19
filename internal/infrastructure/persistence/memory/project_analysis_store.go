@@ -191,6 +191,7 @@ func (s *ProjectAnalysisStore) upsertHotspotLocked(analysis projectanalysis.Anal
 	var isNew bool
 	var finalStatus hotspot.Status
 	var finalVersion int
+	var reopened bool
 
 	found := false
 	for i := range s.hotspots {
@@ -222,6 +223,7 @@ func (s *ProjectAnalysisStore) upsertHotspotLocked(analysis projectanalysis.Anal
 			
 			current.Status = newStatus
 			current.Version = newVersion
+			reopened = true
 		}
 		
 		if analysis.CreatedAt.Before(current.FirstSeenAt) || (analysis.CreatedAt.Equal(current.FirstSeenAt) && analysis.ID < current.FirstSeenAnalysisID) {
@@ -235,7 +237,7 @@ func (s *ProjectAnalysisStore) upsertHotspotLocked(analysis projectanalysis.Anal
 			current.Audit.UpdatedAt = analysis.CreatedAt
 		}
 		
-		isNew = current.FirstSeenAnalysisID == analysis.ID && current.LastSeenAnalysisID == analysis.ID
+		isNew = reopened || (current.FirstSeenAnalysisID == analysis.ID && current.LastSeenAnalysisID == analysis.ID)
 		finalStatus = current.Status
 		finalVersion = current.Version
 		break
