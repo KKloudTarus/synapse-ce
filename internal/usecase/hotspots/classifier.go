@@ -57,7 +57,7 @@ func classifyOne(ctx context.Context, item finding.Finding, catalog ports.RuleCa
 	if err != nil {
 		return hotspot.Candidate{}, false, fmt.Errorf("resolve hotspot rule %q: %w", item.RuleKey, err)
 	}
-	if r.Type != rule.TypeSecurityHotspot || !containsQuality(r.Qualities, rule.QualitySecurity) {
+	if r.Type != rule.TypeSecurityHotspot {
 		return hotspot.Candidate{}, false, nil
 	}
 	location := ""
@@ -75,15 +75,6 @@ func classifyOne(ctx context.Context, item finding.Finding, catalog ports.RuleCa
 		CWE:             item.CWE,
 		Location:        location,
 	}, true, nil
-}
-
-func containsQuality(qualities []rule.Quality, want rule.Quality) bool {
-	for _, quality := range qualities {
-		if quality == want {
-			return true
-		}
-	}
-	return false
 }
 
 func candidateLess(a, b hotspot.Candidate) bool {

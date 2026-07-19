@@ -36,7 +36,7 @@ func testFinding(key, ruleKey string, kind finding.Kind) finding.Finding {
 }
 
 func TestClassifyUsesCatalogTypeAndKeepsInputImmutable(t *testing.T) {
-	hotspotRule := testRule("hotspot-rule", rule.TypeSecurityHotspot, rule.QualitySecurity)
+	hotspotRule := testRule("hotspot-rule", rule.TypeSecurityHotspot)
 	bugRule := testRule("bug-rule", rule.TypeBug, rule.QualityReliability)
 	input := []finding.Finding{
 		testFinding("z", "hotspot-rule", finding.KindSAST),
@@ -56,7 +56,7 @@ func TestClassifyUsesCatalogTypeAndKeepsInputImmutable(t *testing.T) {
 	}
 }
 
-func TestClassifyDoesNotUseKindSeverityOrSecurityQualityAlone(t *testing.T) {
+func TestClassifyUsesRuleTypeOnly(t *testing.T) {
 	cases := []struct {
 		name string
 		item finding.Finding
@@ -74,6 +74,15 @@ func TestClassifyDoesNotUseKindSeverityOrSecurityQualityAlone(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("hotspot type without security quality", func(t *testing.T) {
+		item := testFinding("hotspot", "hotspot-rule", finding.KindQuality)
+		r := testRule("hotspot-rule", rule.TypeSecurityHotspot, rule.QualityMaintainability)
+		issues, candidates, err := Classify(context.Background(), []finding.Finding{item}, fakeCatalog{rules: map[rule.Key]rule.Rule{r.Key: r}})
+		if err != nil || len(issues) != 0 || len(candidates) != 1 {
+			t.Fatalf("issues=%+v candidates=%+v err=%v", issues, candidates, err)
+		}
+	})
 }
 
 func TestClassifyDeduplicatesAndSortsCandidates(t *testing.T) {
