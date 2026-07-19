@@ -13,6 +13,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hotspot"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	rulesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
 )
 
 type projectHotspotResponse struct {
@@ -85,16 +86,19 @@ func (rt *Router) listProjectHotspots(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	ruleNames := make(map[string]string)
-	if rt.rules != nil {
-		for _, item := range page.Items {
-			if _, ok := ruleNames[item.RuleKey]; !ok {
-				catalogRule, err := rt.rules.Get(r.Context(), rule.Key(item.RuleKey))
-				if err != nil {
-					writeError(w, rt.log, fmt.Errorf("failed to load rule catalog for %s: %w", item.RuleKey, err))
-					return
-				}
-				ruleNames[item.RuleKey] = catalogRule.Name
-			}
+	if rt.rules != nil && len(page.Items) > 0 {
+		catalogRules, err := rt.rules.List(
+			r.Context(),
+			rulesuc.Filter{
+				Types: []rule.Type{rule.TypeSecurityHotspot},
+			},
+		)
+		if err != nil {
+			writeError(w, rt.log, fmt.Errorf("load security hotspot rule catalog: %w", err))
+			return
+		}
+		for _, catalogRule := range catalogRules {
+			ruleNames[string(catalogRule.Key)] = catalogRule.Name
 		}
 	}
 

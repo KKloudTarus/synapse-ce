@@ -112,6 +112,47 @@ func (h Hotspot) Validate() error {
 	return nil
 }
 
+// Project creates and validates the initial Project-scoped projection for a
+// hotspot candidate detected in one analysis.
+func Project(
+	tenantID shared.ID,
+	projectID shared.ID,
+	analysisID string,
+	createdAt time.Time,
+	candidate Candidate,
+) (Hotspot, error) {
+	item := Hotspot{
+		ID:              DeterministicID(tenantID, projectID, candidate.Key),
+		TenantID:        tenantID,
+		ProjectID:       projectID,
+		Key:             candidate.Key,
+		FindingIdentity: candidate.FindingIdentity,
+		RuleKey:         candidate.RuleKey,
+		Title:           candidate.Title,
+		Description:     candidate.Description,
+		Severity:        candidate.Severity,
+		Kind:            candidate.Kind,
+		CWE:             candidate.CWE,
+		Location:        candidate.Location,
+		Status:          StatusToReview,
+		Version:         1,
+
+		FirstSeenAnalysisID: analysisID,
+		LastSeenAnalysisID:  analysisID,
+		FirstSeenAt:         createdAt,
+		LastSeenAt:          createdAt,
+
+		Audit: shared.Audit{
+			CreatedAt: createdAt,
+			UpdatedAt: createdAt,
+		},
+	}
+	if err := item.Validate(); err != nil {
+		return Hotspot{}, err
+	}
+	return item, nil
+}
+
 // ListFilter describes the read API's tenant/project-local filters.
 type ListFilter struct {
 	Lens             Lens

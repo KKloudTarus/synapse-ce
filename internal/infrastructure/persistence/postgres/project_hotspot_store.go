@@ -26,7 +26,13 @@ var _ ports.ProjectHotspotStore = (*ProjectAnalysisStore)(nil)
 func (r *ProjectAnalysisStore) SaveWithResultAndHotspots(ctx context.Context, analysis projectanalysis.Analysis, result []byte, candidates []hotspot.Candidate) error {
 	items := make([]hotspot.Hotspot, len(candidates))
 	for i, candidate := range candidates {
-		item, err := projectedHotspot(analysis, candidate)
+		item, err := hotspot.Project(
+			shared.ID(analysis.TenantID),
+			shared.ID(analysis.ProjectID),
+			analysis.ID,
+			analysis.CreatedAt,
+			candidate,
+		)
 		if err != nil {
 			return err
 		}
@@ -120,7 +126,7 @@ func (r *ProjectAnalysisStore) SaveWithResultAndHotspots(ctx context.Context, an
 			 status, version, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$17,$18)
 			ON CONFLICT (tenant_id, project_id, hotspot_key) DO UPDATE SET
-				finding_identity = EXCLUDED.finding_identity,
+				finding_identity = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_hotspots.last_seen_at, project_hotspots.last_seen_analysis_id) THEN EXCLUDED.finding_identity ELSE project_hotspots.finding_identity END,
 				first_seen_analysis_id = CASE WHEN (EXCLUDED.first_seen_at, EXCLUDED.first_seen_analysis_id) < (project_hotspots.first_seen_at, project_hotspots.first_seen_analysis_id) THEN EXCLUDED.first_seen_analysis_id ELSE project_hotspots.first_seen_analysis_id END,
 				first_seen_at = CASE WHEN (EXCLUDED.first_seen_at, EXCLUDED.first_seen_analysis_id) < (project_hotspots.first_seen_at, project_hotspots.first_seen_analysis_id) THEN EXCLUDED.first_seen_at ELSE project_hotspots.first_seen_at END,
 				created_at = CASE WHEN (EXCLUDED.first_seen_at, EXCLUDED.first_seen_analysis_id) < (project_hotspots.first_seen_at, project_hotspots.first_seen_analysis_id) THEN EXCLUDED.created_at ELSE project_hotspots.created_at END,
@@ -169,23 +175,6 @@ func (r *ProjectAnalysisStore) SaveWithResultAndHotspots(ctx context.Context, an
 		return fmt.Errorf("commit project analysis transaction: %w", err)
 	}
 	return nil
-}
-
-func projectedHotspot(analysis projectanalysis.Analysis, candidate hotspot.Candidate) (hotspot.Hotspot, error) {
-	item := hotspot.Hotspot{
-		ID:       hotspot.DeterministicID(shared.ID(analysis.TenantID), shared.ID(analysis.ProjectID), candidate.Key),
-		TenantID: shared.ID(analysis.TenantID), ProjectID: shared.ID(analysis.ProjectID), Key: candidate.Key,
-		FindingIdentity: candidate.FindingIdentity, RuleKey: candidate.RuleKey, Title: candidate.Title,
-		Description: candidate.Description, Severity: candidate.Severity, Kind: candidate.Kind, CWE: candidate.CWE,
-		Location: candidate.Location, Status: hotspot.StatusToReview, Version: 1,
-		FirstSeenAnalysisID: analysis.ID, LastSeenAnalysisID: analysis.ID,
-		FirstSeenAt: analysis.CreatedAt, LastSeenAt: analysis.CreatedAt,
-		Audit: shared.Audit{CreatedAt: analysis.CreatedAt, UpdatedAt: analysis.CreatedAt},
-	}
-	if err := item.Validate(); err != nil {
-		return hotspot.Hotspot{}, err
-	}
-	return item, nil
 }
 
 func (r *ProjectAnalysisStore) ListHotspots(ctx context.Context, tenantID, projectID shared.ID, filter hotspot.ListFilter) (hotspot.Page, error) {
