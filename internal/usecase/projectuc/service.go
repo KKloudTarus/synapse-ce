@@ -14,12 +14,14 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hotspot"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/issue"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	hotspotsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/hotspots"
+	issuesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/issues"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	qualitygatesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/qualitygates"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
@@ -35,6 +37,7 @@ type Service struct {
 	archives         ports.ProjectArchiveStore
 	analyses         ports.ProjectAnalysisStore
 	hotspots         ports.ProjectHotspotStore
+	issues           ports.ProjectIssueStore
 	ruleCatalog      ports.RuleCatalog
 	findings         ports.FindingRepository
 	gates            *qualitygatesuc.Service
@@ -50,6 +53,7 @@ func (s *Service) SetScanner(scanner *scauc.Service)                      { s.sc
 func (s *Service) SetArchiveStore(store ports.ProjectArchiveStore)        { s.archives = store }
 func (s *Service) SetAnalysisStore(store ports.ProjectAnalysisStore)      { s.analyses = store }
 func (s *Service) SetHotspotStore(store ports.ProjectHotspotStore)        { s.hotspots = store }
+func (s *Service) SetIssueStore(store ports.ProjectIssueStore)            { s.issues = store }
 func (s *Service) SetRuleCatalog(catalog ports.RuleCatalog)               { s.ruleCatalog = catalog }
 func (s *Service) SetFindingRepository(repo ports.FindingRepository)      { s.findings = repo }
 func (s *Service) SetQualityGates(gates *qualitygatesuc.Service)          { s.gates = gates }
@@ -464,9 +468,25 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 	if p.GateID == "" && len(gate.Conditions) > 0 {
 		gateSource = "repository"
 	}
+	issueCandidates, err := issuesuc.Project(ctx, issues, s.ruleCatalog)
+	if err != nil {
+		return fmt.Errorf("project issues: %w", err)
+	}
+	// A prior triage decision (accepted/false-positive/won't-fix) carries forward:
+	// the resolved issue stays exempt from this analysis's quality gate.
+	exempt := result.GateExemptKeys(issues)
+	if s.issues != nil {
+		resolved, rErr := s.issues.ResolvedIssueKeys(ctx, p.TenantID, p.ID)
+		if rErr != nil {
+			return fmt.Errorf("carry forward resolved issues: %w", rErr)
+		}
+		for k := range resolved {
+			exempt[k] = true
+		}
+	}
 	analysis, err := projectanalysis.Build(projectanalysis.Input{
 		ID: jobID, TenantID: p.TenantID, ProjectID: p.ID, ProjectKey: p.Key, CreatedAt: completedAt,
-		SourceRef: result.SourceRef, SourceCommit: result.SourceCommit, Findings: issues, Gate: gate, GateSource: gateSource, GateExempt: result.GateExemptKeys(issues), LinesOfCode: loc,
+		SourceRef: result.SourceRef, SourceCommit: result.SourceCommit, Findings: issues, Gate: gate, GateSource: gateSource, GateExempt: exempt, LinesOfCode: loc,
 		Coverage: result.LineCoverage, Duplication: duplicationOf(result), Previous: baseline,
 		Hotspots: overallHsSummary, NewHotspots: newHsSummary,
 	})
@@ -477,7 +497,11 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 	if err != nil {
 		return fmt.Errorf("marshal project analysis result: %w", err)
 	}
-	if projectionStore, ok := s.analyses.(ports.ProjectAnalysisProjectionStore); ok {
+	if projectionStore, ok := s.analyses.(ports.ProjectIssueProjectionStore); ok {
+		if err := projectionStore.SaveWithResultAndProjections(ctx, analysis, data, candidates, issueCandidates); err != nil {
+			return fmt.Errorf("save project analysis and projections: %w", err)
+		}
+	} else if projectionStore, ok := s.analyses.(ports.ProjectAnalysisProjectionStore); ok {
 		if err := projectionStore.SaveWithResultAndHotspots(ctx, analysis, data, candidates); err != nil {
 			return fmt.Errorf("save project analysis and hotspots: %w", err)
 		}
@@ -584,6 +608,85 @@ func (s *Service) HotspotHistory(ctx context.Context, tenantID shared.ID, key st
 		return nil, err
 	}
 	return s.hotspots.HotspotHistory(ctx, p.TenantID, p.ID, hotspotID)
+}
+
+// ListIssues returns the tenant- and Project-scoped code-quality issues for the
+// faceted explorer. Cross-tenant/unknown projects resolve to not-found via Get.
+func (s *Service) ListIssues(ctx context.Context, tenantID shared.ID, key string, filter issue.ListFilter) (issue.Page, error) {
+	if s.issues == nil {
+		return issue.Page{}, shared.ErrNotFound
+	}
+	p, err := s.Get(ctx, tenantID, key)
+	if err != nil {
+		return issue.Page{}, err
+	}
+	return s.issues.ListIssues(ctx, p.TenantID, p.ID, filter)
+}
+
+// GetIssue returns one issue only after the Project is resolved in the caller's tenant.
+func (s *Service) GetIssue(ctx context.Context, tenantID shared.ID, key string, issueID shared.ID) (issue.Issue, error) {
+	if s.issues == nil {
+		return issue.Issue{}, shared.ErrNotFound
+	}
+	p, err := s.Get(ctx, tenantID, key)
+	if err != nil {
+		return issue.Issue{}, err
+	}
+	return s.issues.GetIssue(ctx, p.TenantID, p.ID, issueID)
+}
+
+// TransitionIssue applies an attributable, gate-affecting triage decision to an issue.
+func (s *Service) TransitionIssue(ctx context.Context, actor string, tenantID shared.ID, key string, issueID shared.ID, to issue.Status, rationale string, expectedVersion int) (issue.Issue, issue.ReviewEvent, error) {
+	if err := requireActor(actor); err != nil {
+		return issue.Issue{}, issue.ReviewEvent{}, err
+	}
+	if s.issues == nil {
+		return issue.Issue{}, issue.ReviewEvent{}, shared.ErrNotFound
+	}
+	p, err := s.Get(ctx, tenantID, key)
+	if err != nil {
+		return issue.Issue{}, issue.ReviewEvent{}, err
+	}
+	cmd := issue.TransitionCommand{
+		TenantID:        p.TenantID,
+		ProjectID:       p.ID,
+		IssueID:         issueID,
+		EventID:         s.ids.NewID(),
+		To:              to,
+		Actor:           actor,
+		Rationale:       rationale,
+		ExpectedVersion: expectedVersion,
+	}
+	updated, event, err := s.issues.TransitionIssue(ctx, cmd)
+	if err != nil {
+		return issue.Issue{}, issue.ReviewEvent{}, fmt.Errorf("transition issue: %w", err)
+	}
+	if err := s.audit.Record(ctx, ports.AuditEntry{
+		Actor:  actor,
+		Action: "project.issue.transition",
+		Target: p.ID.String(),
+		Metadata: map[string]string{
+			"project":  p.Key,
+			"issue_id": issueID.String(),
+			"to":       string(to),
+		},
+		At: s.clock.Now(),
+	}); err != nil {
+		return issue.Issue{}, issue.ReviewEvent{}, fmt.Errorf("audit issue transition: %w", err)
+	}
+	return updated, event, nil
+}
+
+// IssueHistory returns the immutable, append-only lifecycle history of an issue.
+func (s *Service) IssueHistory(ctx context.Context, tenantID shared.ID, key string, issueID shared.ID) ([]issue.ReviewEvent, error) {
+	if s.issues == nil {
+		return nil, shared.ErrNotFound
+	}
+	p, err := s.Get(ctx, tenantID, key)
+	if err != nil {
+		return nil, err
+	}
+	return s.issues.IssueHistory(ctx, p.TenantID, p.ID, issueID)
 }
 
 func (s *Service) resolveManagedGate(ctx context.Context, tenantID shared.ID, key string) (qualitygate.Gate, error) {

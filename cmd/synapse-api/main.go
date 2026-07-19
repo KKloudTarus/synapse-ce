@@ -344,6 +344,9 @@ func main() {
 	projectService := projectuc.NewService(projectRepo, repo, clock, ids, auditLog, !cfg.IsProduction())
 	projectService.SetArchiveStore(file.NewProjectArchiveStore(cfg.ProjectUploadDir, cfg.MaxWorkspaceBytes))
 	projectService.SetAnalysisStore(projectAnalysisStore)
+	if issueStore, ok := projectAnalysisStore.(ports.ProjectIssueStore); ok {
+		projectService.SetIssueStore(issueStore)
+	}
 	if hotspotStore, ok := projectAnalysisStore.(ports.ProjectHotspotStore); ok {
 		projectService.SetHotspotStore(hotspotStore)
 	} else {
