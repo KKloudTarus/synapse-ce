@@ -124,17 +124,17 @@ func TestProjectHotspotProjectionRejectsCandidateAtomically(t *testing.T) {
 func TestProjectHotspot_ReopenAsNewCode(t *testing.T) {
 	ctx := context.Background()
 	store := NewProjectAnalysisStore()
-
+	
 	t1 := time.Date(2026, 7, 18, 1, 0, 0, 0, time.UTC)
 	t2 := t1.Add(time.Hour)
-
+	
 	// 1. Analysis 1 detects hotspot
 	c := projectionCandidate("sast:rule-a:main.go:1", "reopen-test")
 	analysis1 := projectionAnalysis("a1", t1)
 	if err := store.SaveWithResultAndHotspots(ctx, analysis1, nil, []hotspot.Candidate{c}); err != nil {
 		t.Fatal(err)
 	}
-
+	
 	// 2. Human marks it Fixed
 	id := hotspot.DeterministicID("tenant-a", "project-a", c.Key)
 	item, err := store.GetHotspot(ctx, "tenant-a", "project-a", id)
@@ -143,13 +143,13 @@ func TestProjectHotspot_ReopenAsNewCode(t *testing.T) {
 	}
 	item.Status, item.Version = hotspot.StatusFixed, 2
 	store.hotspots[0] = item
-
+	
 	// 3. Later analysis detects it again
 	analysis2 := projectionAnalysis("a2", t2)
 	if err := store.SaveWithResultAndHotspots(ctx, analysis2, nil, []hotspot.Candidate{c}); err != nil {
 		t.Fatal(err)
 	}
-
+	
 	// Assertions
 	reopened, err := store.GetHotspot(ctx, "tenant-a", "project-a", id)
 	if err != nil {
@@ -158,12 +158,12 @@ func TestProjectHotspot_ReopenAsNewCode(t *testing.T) {
 	if reopened.Status != hotspot.StatusToReview {
 		t.Fatalf("expected to_review, got %s", reopened.Status)
 	}
-
+	
 	history, err := store.HotspotHistory(ctx, "tenant-a", "project-a", id)
 	if err != nil || len(history) != 1 {
 		t.Fatalf("expected 1 system event, got %d", len(history))
 	}
-
+	
 	summary, err := store.CurrentAnalysisHotspotSummary(ctx, "tenant-a", "project-a", shared.ID(analysis2.ID), hotspot.LensNewCode)
 	if err != nil {
 		t.Fatal(err)
