@@ -54,6 +54,11 @@ import type {
   HotspotListFilter,
   HotspotPage,
   HotspotReviewEvent,
+  ProjectIssue,
+  IssueStatus,
+  IssueListFilter,
+  IssuePage,
+  IssueReviewEvent,
 } from './types'
 import { mapProjectOverviewResponse, type ProjectOverview } from './projectOverview'
 
@@ -798,6 +803,41 @@ function mapHotspotReviewEvent(r: any): HotspotReviewEvent {
   }
 }
 
+function mapProjectIssue(r: any): ProjectIssue {
+  return {
+    id: r.id ?? '',
+    ruleKey: r.rule_key ?? '',
+    ruleName: r.rule_name ?? '',
+    type: asRuleType(r.type),
+    title: r.title ?? '',
+    description: r.description ?? '',
+    severity: (r.severity ?? 'unknown') as Severity,
+    findingKind: r.finding_kind ?? '',
+    cwe: r.cwe ?? '',
+    language: r.language ?? '',
+    file: r.file ?? '',
+    location: r.location ?? '',
+    status: (r.status ?? 'open') as IssueStatus,
+    version: r.version ?? 1,
+    isNew: r.is_new ?? false,
+    firstSeenAnalysisId: r.first_seen_analysis_id ?? '',
+    lastSeenAnalysisId: r.last_seen_analysis_id ?? '',
+    firstSeenAt: r.first_seen_at ?? '',
+    lastSeenAt: r.last_seen_at ?? '',
+  }
+}
+
+function mapIssueReviewEvent(r: any): IssueReviewEvent {
+  return {
+    from: (r.from ?? 'open') as IssueStatus,
+    to: (r.to ?? 'open') as IssueStatus,
+    actor: r.actor ?? '',
+    rationale: r.rationale ?? '',
+    version: r.version ?? 1,
+    createdAt: r.created_at ?? '',
+  }
+}
+
 export const api = {
   aup: (): Promise<AupStatus> => req('/aup'),
 
@@ -927,6 +967,54 @@ export const api = {
   getProjectHotspotHistory: async (projectKey: string, id: string): Promise<HotspotReviewEvent[]> => {
     const res = await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}/history`)
     return (res ?? []).map(mapHotspotReviewEvent)
+  },
+
+  listProjectIssues: async (projectKey: string, filter: IssueListFilter): Promise<IssuePage> => {
+    const q = new URLSearchParams()
+    if (filter.lens) q.set('lens', filter.lens)
+    if (filter.status) q.set('status', filter.status)
+    if (filter.type) q.set('type', filter.type)
+    if (filter.severity) q.set('severity', filter.severity)
+    if (filter.rule) q.set('rule', filter.rule)
+    if (filter.language) q.set('language', filter.language)
+    if (filter.path) q.set('path', filter.path)
+    if (filter.newCode) q.set('new_code', 'true')
+    if (filter.search?.trim()) q.set('search', filter.search.trim())
+    if (filter.limit) q.set('limit', String(filter.limit))
+    if (filter.before_last_seen_at) q.set('before_last_seen_at', filter.before_last_seen_at)
+    if (filter.before_id) q.set('before_id', filter.before_id)
+    const qs = q.toString()
+    const res = await req(`/projects/${encodeURIComponent(projectKey)}/issues${qs ? `?${qs}` : ''}`)
+    return {
+      items: (res.items ?? []).map(mapProjectIssue),
+      next: res.next ? { beforeLastSeenAt: res.next.before_last_seen_at ?? '', beforeId: res.next.before_id ?? '' } : null,
+      facets: {
+        types: res.facets?.types ?? {},
+        statuses: res.facets?.statuses ?? {},
+        severities: res.facets?.severities ?? {},
+        ruleKeys: res.facets?.rule_keys ?? {},
+        languages: res.facets?.languages ?? {},
+      },
+      summary: {
+        total: res.summary?.total ?? 0,
+        open: res.summary?.open ?? 0,
+        resolved: res.summary?.resolved ?? 0,
+      },
+    }
+  },
+
+  getProjectIssue: async (projectKey: string, id: string): Promise<ProjectIssue> =>
+    mapProjectIssue(await req(`/projects/${encodeURIComponent(projectKey)}/issues/${encodeURIComponent(id)}`)),
+
+  transitionProjectIssue: async (projectKey: string, id: string, status: IssueStatus, rationale: string, expectedVersion: number): Promise<ProjectIssue> =>
+    mapProjectIssue(await req(`/projects/${encodeURIComponent(projectKey)}/issues/${encodeURIComponent(id)}/transitions`, {
+      method: 'POST',
+      body: JSON.stringify({ to: status, rationale, expected_version: expectedVersion }),
+    })),
+
+  getProjectIssueHistory: async (projectKey: string, id: string): Promise<IssueReviewEvent[]> => {
+    const res = await req(`/projects/${encodeURIComponent(projectKey)}/issues/${encodeURIComponent(id)}/history`)
+    return (res ?? []).map(mapIssueReviewEvent)
   },
 
   assignProjectGate: async (key: string, gateId: string): Promise<Project> =>
