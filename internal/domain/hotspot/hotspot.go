@@ -68,6 +68,8 @@ type Hotspot struct {
 	LastSeenAnalysisID  string
 	FirstSeenAt         time.Time
 	LastSeenAt          time.Time
+	LastReviewedBy      string
+	LastReviewedAt      *time.Time
 	Audit               shared.Audit
 }
 

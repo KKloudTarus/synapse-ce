@@ -13,6 +13,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rating"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/hotspot"
 )
 
 type OverviewState string
@@ -88,6 +89,7 @@ type RatingMetric struct {
 type PercentageMetric struct {
 	Availability      MetricAvailability
 	Value             *float64
+	Grade             *OverviewGrade
 	UnavailableReason *UnavailableReason
 }
 
@@ -177,6 +179,14 @@ func (s *Service) Overview(ctx context.Context, tenantID shared.ID, key string) 
 	analysis, ok := latest[p.ID]
 	if !ok {
 		return notAnalyzedOverview(projectView), nil
+	}
+	if s.hotspots != nil {
+		if overallSum, err := s.hotspots.CurrentAnalysisHotspotSummary(ctx, tenantID, p.ID, shared.ID(analysis.ID), hotspot.LensOverall); err == nil {
+			analysis.Hotspots = overallSum
+		}
+		if newCodeSum, err := s.hotspots.CurrentAnalysisHotspotSummary(ctx, tenantID, p.ID, shared.ID(analysis.ID), hotspot.LensNewCode); err == nil {
+			analysis.NewHotspots = newCodeSum
+		}
 	}
 	return analyzedOverview(p, analysis)
 }
@@ -330,9 +340,18 @@ func overallLens(analysis projectanalysis.Analysis) (OverviewLens, error) {
 	if err != nil {
 		return OverviewLens{}, err
 	}
+	var hotspotsReviewed PercentageMetric
+	if analysis.Hotspots.Grade == "" {
+		hotspotsReviewed = unavailablePercentage(ReasonSecurityHotspotsNotAvailable)
+	} else {
+		hotspotsReviewed, err = availablePercentage(analysis.Hotspots.ReviewedPct, &analysis.Hotspots.Grade)
+		if err != nil {
+			return OverviewLens{}, err
+		}
+	}
 	return OverviewLens{
 		Security: security, Reliability: reliability, Maintainability: maintainability,
-		SecurityHotspotsReviewed: unavailablePercentage(ReasonSecurityHotspotsNotAvailable),
+		SecurityHotspotsReviewed: hotspotsReviewed,
 		Coverage:                 coverage, Duplications: duplication,
 	}, nil
 }
@@ -353,9 +372,18 @@ func newCodeLens(analysis projectanalysis.Analysis) (OverviewLens, error) {
 			return OverviewLens{}, fmt.Errorf("invalid new-code maintainability rating: %w", err)
 		}
 	}
+	var newHotspotsReviewed PercentageMetric
+	if analysis.NewHotspots.Grade == "" {
+		newHotspotsReviewed = unavailablePercentage(ReasonSecurityHotspotsNotAvailable)
+	} else {
+		newHotspotsReviewed, err = availablePercentage(analysis.NewHotspots.ReviewedPct, &analysis.NewHotspots.Grade)
+		if err != nil {
+			return OverviewLens{}, err
+		}
+	}
 	return OverviewLens{
 		Security: security, Reliability: reliability, Maintainability: maintainability,
-		SecurityHotspotsReviewed: unavailablePercentage(ReasonSecurityHotspotsNotAvailable),
+		SecurityHotspotsReviewed: newHotspotsReviewed,
 		Coverage:                 unavailablePercentage(ReasonChangedLineMetricsNotAvailable),
 		Duplications:             unavailablePercentage(ReasonChangedLineMetricsNotAvailable),
 	}, nil
@@ -390,12 +418,19 @@ func unavailableRating(reason UnavailableReason) RatingMetric {
 	return RatingMetric{Availability: MetricUnavailable, UnavailableReason: &r}
 }
 
-func availablePercentage(value float64) (PercentageMetric, error) {
+func availablePercentage(value float64, grade *rating.Grade) (PercentageMetric, error) {
 	if !finitePercent(value) {
 		return PercentageMetric{}, fmt.Errorf("invalid percentage %v", value)
 	}
 	v := value
-	return PercentageMetric{Availability: MetricAvailable, Value: &v}, nil
+	var overviewGrade *OverviewGrade
+	if grade != nil {
+		gm, err := ratingMetric(*grade)
+		if err == nil && gm.Grade != nil {
+			overviewGrade = gm.Grade
+		}
+	}
+	return PercentageMetric{Availability: MetricAvailable, Value: &v, Grade: overviewGrade}, nil
 }
 
 func unavailablePercentage(reason UnavailableReason) PercentageMetric {
@@ -440,7 +475,7 @@ func coverageMetric(report *measure.CoverageReport) (PercentageMetric, error) {
 	if !finitePercent(value) {
 		return PercentageMetric{}, fmt.Errorf("invalid coverage percentage %v", value)
 	}
-	return availablePercentage(value)
+	return availablePercentage(value, nil)
 }
 
 func duplicationMetric(report measure.DuplicationReport) (PercentageMetric, error) {
@@ -454,7 +489,7 @@ func duplicationMetric(report measure.DuplicationReport) (PercentageMetric, erro
 	if !finitePercent(value) {
 		return PercentageMetric{}, fmt.Errorf("invalid duplication density %v", value)
 	}
-	return availablePercentage(value)
+	return availablePercentage(value, nil)
 }
 
 func finitePercent(value float64) bool {

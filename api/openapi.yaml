@@ -399,6 +399,72 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalServerError" }
 
+
+  /api/v1/projects/{key}/hotspots/{id}/transition:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [projects]
+      summary: Transition a Project Security Hotspot
+      operationId: transitionProjectHotspot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, rationale, expected_version]
+              properties:
+                to: { $ref: "#/components/schemas/ProjectHotspotStatus" }
+                rationale: { type: string, minLength: 1 }
+                expected_version: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Transition successful
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectHotspot" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Optimistic concurrency failure, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  /api/v1/projects/{key}/hotspots/{id}/history:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [projects]
+      summary: Get review history of a Project Security Hotspot
+      operationId: getProjectHotspotHistory
+      responses:
+        "200":
+          description: Review events history
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProjectHotspotReviewEvent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
   /api/v1/rules:
     get:
       tags: [rules]
@@ -860,6 +926,10 @@ components:
           type: [number, "null"]
           minimum: 0
           maximum: 100
+        grade:
+          anyOf:
+            - $ref: "#/components/schemas/ProjectOverviewGrade"
+            - type: "null"
         unavailable_reason:
           anyOf:
             - $ref: "#/components/schemas/ProjectOverviewUnavailableReason"
@@ -1061,3 +1131,15 @@ components:
         noncompliant_example: { type: string }
         remediation_effort: { type: integer }
         detection: { $ref: "#/components/schemas/RuleDetection" }
+
+    ProjectHotspotReviewEvent:
+      type: object
+      properties:
+        id: { type: string }
+        from: { $ref: "#/components/schemas/ProjectHotspotStatus" }
+        to: { $ref: "#/components/schemas/ProjectHotspotStatus" }
+        actor: { type: string }
+        rationale: { type: string }
+        previous_version: { type: integer }
+        version: { type: integer }
+        created_at: { type: string, format: date-time }

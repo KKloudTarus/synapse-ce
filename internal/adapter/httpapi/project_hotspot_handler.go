@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -149,4 +150,63 @@ func projectHotspotListParams(r *http.Request) (hotspot.ListFilter, error) {
 		filter.BeforeLastSeenAt, filter.BeforeID = before, shared.ID(rawID)
 	}
 	return filter, nil
+}
+
+type transitionHotspotRequest struct {
+	To              string `json:"to"`
+	Rationale       string `json:"rationale"`
+	ExpectedVersion int    `json:"expected_version"`
+}
+
+type reviewEventResponse struct {
+	ID              string    `json:"id"`
+	From            string    `json:"from"`
+	To              string    `json:"to"`
+	Actor           string    `json:"actor"`
+	Rationale       string    `json:"rationale"`
+	PreviousVersion int       `json:"previous_version"`
+	Version         int       `json:"version"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+func (rt *Router) transitionProjectHotspot(w http.ResponseWriter, r *http.Request) {
+	var req transitionHotspotRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
+		return
+	}
+	actor := PrincipalFrom(r.Context())
+	toStatus := hotspot.Status(req.To)
+	if !toStatus.Valid() {
+		writeError(w, rt.log, fmt.Errorf("%w: invalid transition target status", shared.ErrValidation))
+		return
+	}
+	updated, err := rt.projects.TransitionHotspot(r.Context(), actor, shared.ID(TenantFrom(r.Context())), r.PathValue("key"), shared.ID(r.PathValue("id")), toStatus, req.Rationale, req.ExpectedVersion)
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rt.projectHotspotDTO(r.Context(), updated))
+}
+
+func (rt *Router) projectHotspotHistory(w http.ResponseWriter, r *http.Request) {
+	events, err := rt.projects.HotspotHistory(r.Context(), shared.ID(TenantFrom(r.Context())), r.PathValue("key"), shared.ID(r.PathValue("id")))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	out := make([]reviewEventResponse, len(events))
+	for i, e := range events {
+		out[i] = reviewEventResponse{
+			ID:              e.ID.String(),
+			From:            string(e.From),
+			To:              string(e.To),
+			Actor:           e.Actor,
+			Rationale:       e.Rationale,
+			PreviousVersion: e.PreviousVersion,
+			Version:         e.Version,
+			CreatedAt:       e.CreatedAt,
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }

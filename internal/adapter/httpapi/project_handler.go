@@ -14,6 +14,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/coverage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -35,6 +36,8 @@ type projectService interface {
 	GetAnalysis(context.Context, shared.ID, string, string) (projectanalysis.Analysis, error)
 	ListHotspots(context.Context, shared.ID, string, hotspot.ListFilter) (hotspot.Page, error)
 	GetHotspot(context.Context, shared.ID, string, shared.ID) (hotspot.Hotspot, error)
+	TransitionHotspot(context.Context, string, shared.ID, string, shared.ID, hotspot.Status, string, int) (hotspot.Hotspot, error)
+	HotspotHistory(context.Context, shared.ID, string, shared.ID) ([]hotspot.ReviewEvent, error)
 }
 
 func (rt *Router) SetProjects(s projectService) { rt.projects = s }
@@ -261,7 +264,7 @@ func (rt *Router) latestProjectAnalysis(w http.ResponseWriter, r *http.Request) 
 		writeError(w, rt.log, err)
 		return
 	}
-	data, err := redactProjectAnalysisEngagementIDs(latest.Result)
+	data, err := rt.sanitizeProjectAnalysisResult(r.Context(), latest.Result)
 	if err != nil {
 		writeError(w, rt.log, fmt.Errorf("sanitize project analysis: %w", err))
 		return
@@ -273,7 +276,7 @@ func (rt *Router) latestProjectAnalysis(w http.ResponseWriter, r *http.Request) 
 	}{Analysis: projectAnalysisDTO(latest.Analysis), Result: result})
 }
 
-func redactProjectAnalysisEngagementIDs(data []byte) ([]byte, error) {
+func (rt *Router) sanitizeProjectAnalysisResult(ctx context.Context, data []byte) ([]byte, error) {
 	var result map[string]json.RawMessage
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, err
@@ -281,7 +284,7 @@ func redactProjectAnalysisEngagementIDs(data []byte) ([]byte, error) {
 	if result == nil {
 		return nil, fmt.Errorf("analysis result must be an object")
 	}
-	if err := redactFindingEngagementIDs(result, "findings"); err != nil {
+	if err := rt.filterFindings(ctx, result, "findings"); err != nil {
 		return nil, err
 	}
 	if raw, ok := result["code_quality"]; ok && !bytes.Equal(raw, []byte("null")) {
@@ -292,7 +295,7 @@ func redactProjectAnalysisEngagementIDs(data []byte) ([]byte, error) {
 		if report == nil {
 			return nil, fmt.Errorf("code_quality must be an object")
 		}
-		if err := redactFindingEngagementIDs(report, "findings"); err != nil {
+		if err := rt.filterFindings(ctx, report, "findings"); err != nil {
 			return nil, fmt.Errorf("sanitize code_quality: %w", err)
 		}
 		encoded, err := json.Marshal(report)
@@ -304,7 +307,7 @@ func redactProjectAnalysisEngagementIDs(data []byte) ([]byte, error) {
 	return json.Marshal(result)
 }
 
-func redactFindingEngagementIDs(object map[string]json.RawMessage, key string) error {
+func (rt *Router) filterFindings(ctx context.Context, object map[string]json.RawMessage, key string) error {
 	raw, ok := object[key]
 	if !ok || bytes.Equal(raw, []byte("null")) {
 		return nil
@@ -313,6 +316,7 @@ func redactFindingEngagementIDs(object map[string]json.RawMessage, key string) e
 	if err := json.Unmarshal(raw, &findings); err != nil {
 		return fmt.Errorf("decode %s: %w", key, err)
 	}
+	filtered := make([]map[string]json.RawMessage, 0, len(findings))
 	for _, finding := range findings {
 		if finding == nil {
 			return fmt.Errorf("%s contains a non-object finding", key)
@@ -320,11 +324,38 @@ func redactFindingEngagementIDs(object map[string]json.RawMessage, key string) e
 		delete(finding, "EngagementID")
 		delete(finding, "engagement_id")
 		delete(finding, "engagementId")
+		
+		isHotspot := false
+		if rt.rules != nil {
+			if ruleKeyRaw, ok := finding["RuleKey"]; ok {
+				var ruleKey string
+				_ = json.Unmarshal(ruleKeyRaw, &ruleKey)
+				if catalogRule, err := rt.rules.Get(ctx, rule.Key(strings.TrimSpace(ruleKey))); err == nil {
+					if catalogRule.Type == rule.TypeSecurityHotspot {
+						isHotspot = true
+					}
+				}
+			} else if ruleKeyRaw, ok := finding["rule_key"]; ok {
+				var ruleKey string
+				_ = json.Unmarshal(ruleKeyRaw, &ruleKey)
+				if catalogRule, err := rt.rules.Get(ctx, rule.Key(strings.TrimSpace(ruleKey))); err == nil {
+					if catalogRule.Type == rule.TypeSecurityHotspot {
+						isHotspot = true
+					}
+				}
+			}
+		}
+		
+		if !isHotspot {
+			filtered = append(filtered, finding)
+		}
 	}
-	encoded, err := json.Marshal(findings)
+	encoded, err := json.Marshal(filtered)
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", key, err)
 	}
 	object[key] = encoded
 	return nil
 }
+
+

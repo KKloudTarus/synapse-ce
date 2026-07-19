@@ -22,10 +22,20 @@ type storedProjectAnalysis struct {
 	result   []byte
 }
 
+type analysisHotspot struct {
+	AnalysisID shared.ID
+	HotspotID  shared.ID
+	IsNew      bool
+	Status     hotspot.Status
+	Version    int
+}
+
 type ProjectAnalysisStore struct {
-	mu       sync.RWMutex
-	data     []storedProjectAnalysis
-	hotspots []hotspot.Hotspot
+	mu               sync.RWMutex
+	data             []storedProjectAnalysis
+	hotspots         []hotspot.Hotspot
+	reviewEvents     []hotspot.ReviewEvent
+	analysisHotspots []analysisHotspot
 }
 
 func NewProjectAnalysisStore() *ProjectAnalysisStore { return &ProjectAnalysisStore{} }
@@ -177,11 +187,43 @@ func validateCandidates(analysis projectanalysis.Analysis, candidates []hotspot.
 }
 
 func (s *ProjectAnalysisStore) upsertHotspotLocked(analysis projectanalysis.Analysis, candidate hotspot.Candidate) {
+	var itemID shared.ID
+	var isNew bool
+	var finalStatus hotspot.Status
+	var finalVersion int
+
+	found := false
 	for i := range s.hotspots {
 		current := &s.hotspots[i]
 		if current.TenantID != shared.ID(analysis.TenantID) || current.ProjectID != shared.ID(analysis.ProjectID) || current.Key != candidate.Key {
 			continue
 		}
+		found = true
+		itemID = current.ID
+		
+		if current.Status == hotspot.StatusFixed && analysis.CreatedAt.After(current.LastSeenAt) {
+			eID := hotspot.DeterministicID(shared.ID(analysis.ID), current.ID, "reopen")
+			newVersion := current.Version + 1
+			newStatus := hotspot.StatusToReview
+			
+			s.reviewEvents = append(s.reviewEvents, hotspot.ReviewEvent{
+				ID:              eID,
+				TenantID:        current.TenantID,
+				ProjectID:       current.ProjectID,
+				HotspotID:       current.ID,
+				From:            current.Status,
+				To:              newStatus,
+				Actor:           "system:project-analysis",
+				Rationale:       "Automatically reopened: hotspot detected in later analysis.",
+				PreviousVersion: current.Version,
+				Version:         newVersion,
+				CreatedAt:       analysis.CreatedAt,
+			})
+			
+			current.Status = newStatus
+			current.Version = newVersion
+		}
+		
 		if analysis.CreatedAt.Before(current.FirstSeenAt) || (analysis.CreatedAt.Equal(current.FirstSeenAt) && analysis.ID < current.FirstSeenAnalysisID) {
 			current.FirstSeenAnalysisID, current.FirstSeenAt = analysis.ID, analysis.CreatedAt
 			current.Audit.CreatedAt = analysis.CreatedAt
@@ -192,17 +234,42 @@ func (s *ProjectAnalysisStore) upsertHotspotLocked(analysis projectanalysis.Anal
 			current.LastSeenAnalysisID, current.LastSeenAt = analysis.ID, analysis.CreatedAt
 			current.Audit.UpdatedAt = analysis.CreatedAt
 		}
-		return
+		
+		isNew = current.FirstSeenAnalysisID == analysis.ID && current.LastSeenAnalysisID == analysis.ID
+		finalStatus = current.Status
+		finalVersion = current.Version
+		break
 	}
-	s.hotspots = append(s.hotspots, hotspot.Hotspot{
-		ID:       hotspot.DeterministicID(shared.ID(analysis.TenantID), shared.ID(analysis.ProjectID), candidate.Key),
-		TenantID: shared.ID(analysis.TenantID), ProjectID: shared.ID(analysis.ProjectID), Key: candidate.Key,
-		FindingIdentity: candidate.FindingIdentity, RuleKey: candidate.RuleKey, Title: candidate.Title,
-		Description: candidate.Description, Severity: candidate.Severity, Kind: candidate.Kind, CWE: candidate.CWE,
-		Location: candidate.Location, Status: hotspot.StatusToReview, Version: 1,
-		FirstSeenAnalysisID: analysis.ID, LastSeenAnalysisID: analysis.ID,
-		FirstSeenAt: analysis.CreatedAt, LastSeenAt: analysis.CreatedAt,
-		Audit: shared.Audit{CreatedAt: analysis.CreatedAt, UpdatedAt: analysis.CreatedAt},
+	
+	if !found {
+		itemID = hotspot.DeterministicID(shared.ID(analysis.TenantID), shared.ID(analysis.ProjectID), candidate.Key)
+		s.hotspots = append(s.hotspots, hotspot.Hotspot{
+			ID:       itemID,
+			TenantID: shared.ID(analysis.TenantID), ProjectID: shared.ID(analysis.ProjectID), Key: candidate.Key,
+			FindingIdentity: candidate.FindingIdentity, RuleKey: candidate.RuleKey, Title: candidate.Title,
+			Description: candidate.Description, Severity: candidate.Severity, Kind: candidate.Kind, CWE: candidate.CWE,
+			Location: candidate.Location, Status: hotspot.StatusToReview, Version: 1,
+			FirstSeenAnalysisID: analysis.ID, LastSeenAnalysisID: analysis.ID,
+			FirstSeenAt: analysis.CreatedAt, LastSeenAt: analysis.CreatedAt,
+			Audit: shared.Audit{CreatedAt: analysis.CreatedAt, UpdatedAt: analysis.CreatedAt},
+		})
+		isNew = true
+		finalStatus = hotspot.StatusToReview
+		finalVersion = 1
+	}
+	
+	// Avoid duplicates in analysisHotspots if called multiple times somehow
+	for _, ah := range s.analysisHotspots {
+		if ah.AnalysisID.String() == analysis.ID && ah.HotspotID == itemID {
+			return
+		}
+	}
+	s.analysisHotspots = append(s.analysisHotspots, analysisHotspot{
+		AnalysisID: shared.ID(analysis.ID),
+		HotspotID:  itemID,
+		IsNew:      isNew,
+		Status:     finalStatus,
+		Version:    finalVersion,
 	})
 }
 

@@ -217,6 +217,8 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/projects/{key}/overview", rt.authz(userdom.PermView, rt.projectOverview))
 		mux.HandleFunc("GET /api/v1/projects/{key}/hotspots", rt.authz(userdom.PermView, rt.listProjectHotspots))
 		mux.HandleFunc("GET /api/v1/projects/{key}/hotspots/{id}", rt.authz(userdom.PermView, rt.getProjectHotspot))
+		mux.HandleFunc("POST /api/v1/projects/{key}/hotspots/{id}/transition", rt.authz(userdom.PermReview, rt.transitionProjectHotspot))
+		mux.HandleFunc("GET /api/v1/projects/{key}/hotspots/{id}/history", rt.authz(userdom.PermView, rt.projectHotspotHistory))
 		mux.HandleFunc("PUT /api/v1/projects/{key}/gate", rt.authz(userdom.PermOperate, rt.assignProjectGate))
 		mux.HandleFunc("POST /api/v1/projects/{key}/analyses", rt.authz(userdom.PermOperate, rt.startProjectAnalysis))
 		mux.HandleFunc("GET /api/v1/projects/{key}/analyses", rt.authz(userdom.PermView, rt.listProjectAnalyses))
