@@ -152,12 +152,12 @@ func (s *ProjectAnalysisStore) ListAnalysisHotspots(ctx context.Context, tenantI
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
+	
 	summary, err := s.currentAnalysisHotspotSummaryLocked(tenantID, projectID, analysisID, lens)
 	if err != nil {
 		return hotspot.Page{}, hotspot.Summary{}, err
 	}
-
+	
 	var items []hotspot.Hotspot
 	for _, ah := range s.analysisHotspots {
 		if ah.AnalysisID != analysisID {
@@ -175,23 +175,21 @@ func (s *ProjectAnalysisStore) ListAnalysisHotspots(ctx context.Context, tenantI
 			}
 		}
 	}
-
+	
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].LastSeenAt.Equal(items[j].LastSeenAt) {
 			return items[i].ID > items[j].ID
 		}
 		return items[i].LastSeenAt.After(items[j].LastSeenAt)
 	})
-
+	
 	page := hotspot.Page{Facets: facets(items)}
 	if !filter.BeforeLastSeenAt.IsZero() {
 		items = afterCursor(items, filter.BeforeLastSeenAt, filter.BeforeID)
 	}
 	limit := filter.Limit
-	if limit <= 0 {
-		limit = 25
-	}
-
+	if limit <= 0 { limit = 25 }
+	
 	page.Items = items
 	if len(items) > limit {
 		page.Items = items[:limit]
