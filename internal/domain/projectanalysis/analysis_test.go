@@ -8,6 +8,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -57,17 +58,38 @@ func TestLegacyAnalysisDecode(t *testing.T) {
 	}
 }
 
+type mockCatalog struct{}
+
+func (m mockCatalog) Get(k rule.Key) (rule.Rule, error) {
+	return rule.Rule{}, shared.ErrNotFound
+}
+
 func TestEmptyCurrentSnapshotNotLegacy(t *testing.T) {
-	data := []byte(`{"id":"empty1","tenant_id":"tenant","snapshot":{"nodes":[]}}`)
-	var analysis Analysis
-	if err := json.Unmarshal(data, &analysis); err != nil {
+	snap, err := measure.BuildSnapshot(measure.BuildSnapshotInput{
+		RuleCatalog: mockCatalog{},
+		Inventory:   measure.NewInventory(nil),
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(analysis.Snapshot.Nodes) != 0 {
-		t.Fatalf("expected 0 nodes from explicit empty snapshot, got %d", len(analysis.Snapshot.Nodes))
+	if len(snap.Nodes) != 1 {
+		t.Fatalf("expected 1 root node from empty snapshot, got %d", len(snap.Nodes))
 	}
-	if analysis.Snapshot.NewCodeCoverage.Reason == "legacy_analysis" {
-		t.Fatalf("empty modern snapshot incorrectly treated as legacy")
+	analysis := Analysis{ID: "empty1", TenantID: "tenant", Snapshot: snap}
+	b, err := json.Marshal(analysis)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded Analysis
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Snapshot.Nodes) != 1 {
+		t.Fatalf("expected 1 root node after roundtrip, got %d", len(decoded.Snapshot.Nodes))
+	}
+	if decoded.Snapshot.NewCodeCoverage.Reason == "legacy_analysis" {
+		t.Fatalf("empty modern snapshot incorrectly treated as legacy after roundtrip")
 	}
 }
 

@@ -339,4 +339,15 @@ func TestRecordProjectAnalysisExcludesCatalogHotspotsFromProjectMetrics(t *testi
 	if err != nil || projected.Status != hotspot.StatusToReview || projected.Location != "src/main.go:7" {
 		t.Fatalf("projection=%+v err=%v", projected, err)
 	}
+
+	root := analysis.Snapshot.Nodes[0]
+	if root.Counters.IssuesByType["security_hotspot"] != 1 {
+		t.Fatalf("snapshot root IssuesByType[security_hotspot]=%d, want 1", root.Counters.IssuesByType["security_hotspot"])
+	}
+	if root.Counters.RemediationEffortMinutes != 0 {
+		t.Fatalf("snapshot root remediation effort=%d, want 0", root.Counters.RemediationEffortMinutes)
+	}
+	if root.AttributionAvailable {
+		t.Fatalf("snapshot root should have AttributionAvailable=false due to un-attributed hotspots")
+	}
 }
