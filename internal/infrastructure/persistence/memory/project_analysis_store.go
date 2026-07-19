@@ -8,10 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
-	"time"
-
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hotspot"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
