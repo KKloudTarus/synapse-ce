@@ -6,8 +6,8 @@ import {
 import type { OverviewMetricCardModel } from './projectOverviewPresentation'
 
 export interface OverviewDetailTarget {
-  destination: 'analysis'
-  focus: ProjectAnalysisFocus
+  destination: 'analysis' | 'hotspots'
+  focus?: ProjectAnalysisFocus
   lens: ProjectCodeLens
   to: string
   label: string
@@ -19,7 +19,14 @@ export function overviewDetailTarget(
   card: OverviewMetricCardModel,
 ): OverviewDetailTarget | null {
   if (!metricHasValue(card)) return null
-  if (card.key === 'securityHotspotsReviewed') return null
+  if (card.key === 'securityHotspotsReviewed') {
+    return {
+      destination: 'hotspots',
+      lens,
+      to: `/code-quality/projects/${encodeURIComponent(projectKey)}/hotspots?lens=${lens}`,
+      label: 'View security hotspots',
+    }
+  }
   if (lens === 'new-code' && (card.key === 'coverage' || card.key === 'duplications')) return null
 
   const focus: ProjectAnalysisFocus = card.key

@@ -274,6 +274,7 @@ export function CodeQualityProject() {
       </header>
       <nav className="mb-6 flex gap-4 border-b border-border" aria-label="Project views">
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}`} end>Overview</ProjectNavLink>
+        <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/hotspots`}>Security Hotspots</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/analysis`}>Analysis details</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/activity`}>Activity</ProjectNavLink>
       </nav>

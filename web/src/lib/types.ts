@@ -794,3 +794,61 @@ export interface RuleFacets {
   tags: string[]
   cwe: string[]
 }
+
+// --- Security Hotspots ---
+
+export type HotspotStatus = 'to_review' | 'acknowledged' | 'fixed' | 'safe'
+
+export interface Hotspot {
+  id: string
+  key: string
+  findingIdentity: string
+  ruleKey: string
+  title: string
+  description: string
+  severity: Severity
+  kind: string
+  cwe: string
+  location: string
+  status: HotspotStatus
+  version: number
+  firstSeenAnalysisId: string
+  lastSeenAnalysisId: string
+  firstSeenAt: string
+  lastSeenAt: string
+}
+
+export interface HotspotListFilter {
+  status?: HotspotStatus
+  ruleKey?: string
+  severity?: Severity
+  search?: string
+  limit?: number
+  beforeLastSeenAt?: string
+  beforeId?: string
+}
+
+export interface HotspotPage {
+  items: Hotspot[]
+  next: { beforeLastSeenAt: string; beforeId: string } | null
+  facets: {
+    statuses: Record<string, number>
+    ruleKeys: Record<string, number>
+    severities: Record<string, number>
+  }
+}
+
+export interface HotspotSummary {
+  total: number
+  reviewed: number
+  reviewedPct: number
+  grade: Grade
+}
+
+export interface HotspotReviewEvent {
+  actor: string
+  status: HotspotStatus
+  rationale: string
+  version: number
+  at: string
+}

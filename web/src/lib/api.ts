@@ -26,6 +26,7 @@ import type {
   Judgment,
   ScanJob,
   ScanResult,
+  Severity,
   AuditEntry,
   AuditReport,
   CurrentUser,
@@ -48,6 +49,11 @@ import type {
   RuleDetection,
   QualityGate,
   Grade,
+  Hotspot,
+  HotspotStatus,
+  HotspotListFilter,
+  HotspotPage,
+  HotspotReviewEvent,
 } from './types'
 import { mapProjectOverviewResponse, type ProjectOverview } from './projectOverview'
 
@@ -762,6 +768,37 @@ function mapRuleDetail(raw: any): RuleDetail {
   }
 }
 
+function mapHotspot(r: any): Hotspot {
+  return {
+    id: r.id ?? '',
+    key: r.key ?? '',
+    findingIdentity: r.finding_identity ?? '',
+    ruleKey: r.rule_key ?? '',
+    title: r.title ?? '',
+    description: r.description ?? '',
+    severity: (r.severity ?? 'unknown') as Severity,
+    kind: r.kind ?? '',
+    cwe: r.cwe ?? '',
+    location: r.location ?? '',
+    status: (r.status ?? 'to_review') as HotspotStatus,
+    version: r.version ?? 1,
+    firstSeenAnalysisId: r.first_seen_analysis_id ?? '',
+    lastSeenAnalysisId: r.last_seen_analysis_id ?? '',
+    firstSeenAt: r.first_seen_at ?? '',
+    lastSeenAt: r.last_seen_at ?? '',
+  }
+}
+
+function mapHotspotReviewEvent(r: any): HotspotReviewEvent {
+  return {
+    actor: r.actor ?? '',
+    status: (r.status ?? 'to_review') as HotspotStatus,
+    rationale: r.rationale ?? '',
+    version: r.version ?? 1,
+    at: r.at ?? '',
+  }
+}
+
 export const api = {
   aup: (): Promise<AupStatus> => req('/aup'),
 
@@ -842,6 +879,47 @@ export const api = {
 
   projectOverview: async (key: string): Promise<ProjectOverview> =>
     mapProjectOverviewResponse(await req(`/projects/${encodeURIComponent(key)}/overview`)),
+
+  // --- Hotspots ---
+  listProjectHotspots: async (projectKey: string, lens: 'overall' | 'new_code', filter: HotspotListFilter): Promise<HotspotPage> => {
+    const q = new URLSearchParams()
+    q.set('lens', lens)
+    if (filter.status) q.set('status', filter.status)
+    if (filter.ruleKey) q.set('ruleKey', filter.ruleKey)
+    if (filter.severity) q.set('severity', filter.severity)
+    if (filter.search?.trim()) q.set('q', filter.search.trim())
+    if (filter.limit) q.set('limit', String(filter.limit))
+    if (filter.beforeLastSeenAt) q.set('beforeLastSeenAt', filter.beforeLastSeenAt)
+    if (filter.beforeId) q.set('beforeId', filter.beforeId)
+    const qs = q.toString()
+    const res = await req(`/projects/${encodeURIComponent(projectKey)}/hotspots${qs ? `?${qs}` : ''}`)
+    return {
+      items: (res.items ?? []).map(mapHotspot),
+      next: res.next ? { beforeLastSeenAt: res.next.before_last_seen_at ?? '', beforeId: res.next.before_id ?? '' } : null,
+      facets: {
+        statuses: res.facets?.statuses ?? {},
+        ruleKeys: res.facets?.rule_keys ?? {},
+        severities: res.facets?.severities ?? {},
+      },
+    }
+  },
+
+  getProjectHotspot: async (projectKey: string, id: string): Promise<Hotspot> => {
+    return mapHotspot(await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}`))
+  },
+
+  transitionProjectHotspot: async (projectKey: string, id: string, status: HotspotStatus, rationale: string, expectedVersion: number): Promise<{ hotspot: Hotspot, event: HotspotReviewEvent }> => {
+    const res = await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}/transition`, {
+      method: 'POST',
+      body: JSON.stringify({ status, rationale, expected_version: expectedVersion }),
+    })
+    return { hotspot: mapHotspot(res.hotspot), event: mapHotspotReviewEvent(res.event) }
+  },
+
+  getProjectHotspotHistory: async (projectKey: string, id: string): Promise<HotspotReviewEvent[]> => {
+    const res = await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}/history`)
+    return (res ?? []).map(mapHotspotReviewEvent)
+  },
 
   assignProjectGate: async (key: string, gateId: string): Promise<Project> =>
     mapProject(await req(`/projects/${encodeURIComponent(key)}/gate`, { method: 'PUT', body: JSON.stringify({ gate_id: gateId }) })),
