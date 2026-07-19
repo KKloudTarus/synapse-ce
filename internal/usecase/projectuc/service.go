@@ -502,6 +502,11 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 			return fmt.Errorf("save project analysis and projections: %w", err)
 		}
 	} else if projectionStore, ok := s.analyses.(ports.ProjectAnalysisProjectionStore); ok {
+		// A store that can persist hotspots but not issues must not silently drop the
+		// issue projection while marking the analysis complete: fail closed instead.
+		if len(issueCandidates) > 0 {
+			return fmt.Errorf("save project analysis and projections: store cannot persist issue projections")
+		}
 		if err := projectionStore.SaveWithResultAndHotspots(ctx, analysis, data, candidates); err != nil {
 			return fmt.Errorf("save project analysis and hotspots: %w", err)
 		}

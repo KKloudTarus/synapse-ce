@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Bug, ShieldAlert, Wrench, X } from 'lucide-react'
 import { useProjectRouteContext } from './CodeQualityProject'
@@ -77,7 +77,8 @@ export function ProjectIssuesPage() {
           <Stat label="Open" value={page.summary.open} />
           <Stat label="Resolved" value={page.summary.resolved} />
           <label className="ml-auto flex items-center gap-2 text-sm text-mutedfg">
-            <input type="checkbox" checked={newCode} onChange={(e) => patch('new_code', e.target.checked ? 'true' : null)} />
+            <input type="checkbox" checked={newCode} onChange={(e) => patch('new_code', e.target.checked ? 'true' : null)}
+              className="size-4 accent-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60" />
             New code only
           </label>
         </div>
@@ -128,7 +129,8 @@ export function ProjectIssuesPage() {
               })}
               {page.next && (
                 <div className="p-3">
-                  <Button variant="secondary" onClick={() => {
+                  <Button variant="secondary" loading={loading} disabled={loading} onClick={() => {
+                    if (loading) return
                     setLoading(true)
                     api.listProjectIssues(projectKey, { ...filter, before_last_seen_at: page.next!.beforeLastSeenAt, before_id: page.next!.beforeId })
                       .then((res) => setPage((prev) => (prev ? { ...res, items: [...prev.items, ...res.items] } : res)))
@@ -173,12 +175,17 @@ function IssueDetail({ projectKey, issue, onClose, onTransitioned }: {
   const [rationale, setRationale] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const panelRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // Move focus into the panel when it opens for a new issue so keyboard and
+  // screen-reader users are not left parked on the triggering list row.
+  useEffect(() => { panelRef.current?.focus() }, [issue.id])
 
   const targets = ISSUE_STATUSES.filter((s) => canTransitionIssue(issue.status, s))
 
@@ -193,8 +200,8 @@ function IssueDetail({ projectKey, issue, onClose, onTransitioned }: {
   }
 
   return (
-    <aside role="dialog" aria-modal="true" aria-labelledby="issue-detail-title"
-      className="w-[24rem] shrink-0 overflow-y-auto rounded-xl border border-border bg-bg p-5">
+    <aside ref={panelRef} tabIndex={-1} role="region" aria-labelledby="issue-detail-title"
+      className="w-[24rem] shrink-0 overflow-y-auto rounded-xl border border-border bg-bg p-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <SevBadge sev={issue.severity} />

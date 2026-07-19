@@ -346,6 +346,9 @@ func main() {
 	projectService.SetAnalysisStore(projectAnalysisStore)
 	if issueStore, ok := projectAnalysisStore.(ports.ProjectIssueStore); ok {
 		projectService.SetIssueStore(issueStore)
+	} else {
+		log.Error("project issue store is not configured")
+		os.Exit(1)
 	}
 	if hotspotStore, ok := projectAnalysisStore.(ports.ProjectHotspotStore); ok {
 		projectService.SetHotspotStore(hotspotStore)
