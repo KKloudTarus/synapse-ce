@@ -1,3 +1,4 @@
+-- +goose Up
 CREATE TABLE project_hotspot_review_events (
     id               TEXT PRIMARY KEY,
     tenant_id        TEXT NOT NULL REFERENCES tenants(id),
@@ -43,7 +44,6 @@ CREATE INDEX idx_project_analysis_hotspots_new
 CREATE INDEX idx_project_analysis_hotspots_hotspot
     ON project_analysis_hotspots (tenant_id, project_id, hotspot_id);
 
----- create above / drop below ----
-
+-- +goose Down
 DROP TABLE project_analysis_hotspots;
 DROP TABLE project_hotspot_review_events;
