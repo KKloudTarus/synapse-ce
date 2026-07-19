@@ -57,6 +57,20 @@ func TestLegacyAnalysisDecode(t *testing.T) {
 	}
 }
 
+func TestEmptyCurrentSnapshotNotLegacy(t *testing.T) {
+	data := []byte(`{"id":"empty1","tenant_id":"tenant","snapshot":{"nodes":[]}}`)
+	var analysis Analysis
+	if err := json.Unmarshal(data, &analysis); err != nil {
+		t.Fatal(err)
+	}
+	if len(analysis.Snapshot.Nodes) != 0 {
+		t.Fatalf("expected 0 nodes from explicit empty snapshot, got %d", len(analysis.Snapshot.Nodes))
+	}
+	if analysis.Snapshot.NewCodeCoverage.Reason == "legacy_analysis" {
+		t.Fatalf("empty modern snapshot incorrectly treated as legacy")
+	}
+}
+
 func TestBuildRecordsDefaultGateInfo(t *testing.T) {
 	analysis, err := Build(Input{ID: "a1", TenantID: "tenant", ProjectID: "project", ProjectKey: "demo", CreatedAt: time.Now()})
 	if err != nil {

@@ -506,6 +506,13 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 			Severity: f.Severity,
 		})
 	}
+	for _, candidate := range candidates {
+		issueInputs = append(issueInputs, measure.IssueInput{
+			Path:     "", // Phase A: finding model lacks explicit path; triggers AttributionAvailable=false
+			RuleKey:  rule.Key(candidate.RuleKey),
+			Severity: candidate.Severity,
+		})
+	}
 
 	resolver := &ruleResolver{catalog: s.ruleCatalog, ctx: ctx}
 
@@ -529,10 +536,15 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 	if err != nil {
 		return fmt.Errorf("build measure snapshot: %w", err)
 	}
+	var analysisDuplication measure.DuplicationReport
+	if dupPtr != nil {
+		analysisDuplication = *dupPtr
+	}
+
 	analysis, err := projectanalysis.Build(projectanalysis.Input{
 		ID: jobID, TenantID: p.TenantID, ProjectID: p.ID, ProjectKey: p.Key, CreatedAt: completedAt,
 		SourceRef: result.SourceRef, SourceCommit: result.SourceCommit, Findings: issues, Gate: gate, GateSource: gateSource, GateExempt: exempt, LinesOfCode: loc,
-		Coverage: result.LineCoverage, Duplication: duplicationOf(result), Previous: baseline,
+		Coverage: result.LineCoverage, Duplication: analysisDuplication, Previous: baseline,
 		Hotspots: overallHsSummary, NewHotspots: newHsSummary, Snapshot: snapshot,
 	})
 	if err != nil {

@@ -12,9 +12,10 @@ import (
 )
 
 type mockResolver struct {
-	m map[rule.Key]rule.Rule
+	m   map[rule.Key]rule.Rule
 	err error
 }
+
 func (r *mockResolver) Get(k rule.Key) (rule.Rule, error) {
 	if r.err != nil {
 		return rule.Rule{}, r.err
@@ -224,7 +225,7 @@ func TestBuildSnapshot(t *testing.T) {
 	b, _ := json.Marshal(snap)
 	var snap2 Snapshot
 	json.Unmarshal(b, &snap2)
-	
+
 	if snap2.Nodes[0].Counters.Files != snap.Nodes[0].Counters.Files {
 		t.Fatalf("json roundtrip failed")
 	}
@@ -307,5 +308,47 @@ func TestSnapshotCatalogFailure(t *testing.T) {
 	_, err := BuildSnapshot(input)
 	if err == nil || !strings.Contains(err.Error(), "infra failure") {
 		t.Fatalf("expected infra failure error, got %v", err)
+	}
+}
+
+func TestSnapshotHotspotsIncluded(t *testing.T) {
+	input := BuildSnapshotInput{
+		RuleCatalog: &mockResolver{m: map[rule.Key]rule.Rule{
+			"hotspot-rule": {Key: "hotspot-rule", Type: rule.TypeSecurityHotspot, RemediationEffort: 15},
+		}},
+		Inventory: NewInventory(nil),
+		Issues: []IssueInput{
+			{Path: "", RuleKey: "hotspot-rule", Severity: shared.SeverityHigh}, // hotspot with empty path
+		},
+	}
+	snap, err := BuildSnapshot(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	root := snap.Nodes[0]
+	if root.Counters.IssuesByType[string(rule.TypeSecurityHotspot)] != 1 {
+		t.Fatalf("expected 1 security hotspot, got %d", root.Counters.IssuesByType[string(rule.TypeSecurityHotspot)])
+	}
+	if root.Counters.RemediationEffortMinutes != 0 {
+		t.Fatalf("hotspots must not add to remediation effort, got %d", root.Counters.RemediationEffortMinutes)
+	}
+	if root.AttributionAvailable {
+		t.Fatalf("empty path must trigger attribution unavailable")
+	}
+}
+
+func TestSnapshotInvalidRuleType(t *testing.T) {
+	input := BuildSnapshotInput{
+		RuleCatalog: &mockResolver{m: map[rule.Key]rule.Rule{
+			"bad-rule": {Key: "bad-rule", Type: rule.Type("invalid_type"), RemediationEffort: 10},
+		}},
+		Inventory: NewInventory(nil),
+		Issues: []IssueInput{
+			{Path: "", RuleKey: "bad-rule", Severity: shared.SeverityHigh},
+		},
+	}
+	_, err := BuildSnapshot(input)
+	if err == nil || !strings.Contains(err.Error(), "invalid rule type") {
+		t.Fatalf("expected invalid rule type error, got %v", err)
 	}
 }

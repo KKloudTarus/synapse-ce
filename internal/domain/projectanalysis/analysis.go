@@ -86,6 +86,12 @@ type Analysis struct {
 
 // UnmarshalJSON handles legacy decoding where Snapshot might be empty or missing.
 func (a *Analysis) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	_, hasSnapshot := raw["snapshot"]
+
 	type Alias Analysis
 	aux := &struct {
 		*Alias
@@ -95,7 +101,7 @@ func (a *Analysis) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
-	if len(a.Snapshot.Nodes) == 0 {
+	if !hasSnapshot {
 		a.Snapshot = measure.Snapshot{
 			Nodes: []measure.Node{
 				{

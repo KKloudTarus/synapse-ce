@@ -220,6 +220,8 @@ func BuildSnapshot(in BuildSnapshotInput) (Snapshot, error) {
 		return n
 	}
 
+	getNode("") // Always create root node unconditionally
+
 	seenFilePaths := make(map[string]bool)
 
 	markAttributionUnavailable := func() {
