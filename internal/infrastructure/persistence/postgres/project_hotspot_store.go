@@ -450,6 +450,24 @@ func (r *ProjectAnalysisStore) ListAnalysisHotspots(ctx context.Context, tenantI
 		))
 	}
 
+	if !filter.BeforeLastSeenAt.IsZero() {
+		args = append(
+			args,
+			filter.BeforeLastSeenAt,
+			filter.BeforeID.String(),
+		)
+		atArg := len(args) - 1
+		idArg := len(args)
+
+		parts = append(parts, fmt.Sprintf(
+			`(h.last_seen_at < $%d OR
+			  (h.last_seen_at = $%d AND h.id COLLATE "C" < $%d))`,
+			atArg,
+			atArg,
+			idArg,
+		))
+	}
+
 	where := strings.Join(parts, " AND ")
 	limit := filter.Limit
 	if limit <= 0 {

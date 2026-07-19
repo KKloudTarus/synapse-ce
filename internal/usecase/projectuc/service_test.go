@@ -174,6 +174,7 @@ func TestRecordProjectAnalysisUsesAssignedGate(t *testing.T) {
 	gateService.SetMutator(mutator)
 	svc.SetQualityGates(gateService)
 	svc.SetQualityGateMutator(mutator)
+	svc.SetRuleCatalog(projectRuleCatalog{})
 	if _, err := svc.gates.Create(ctx, "alice", "tenant", qualitygate.Gate{Key: "relaxed", Name: "Relaxed", Conditions: []qualitygate.Condition{{Metric: qualitygate.MetricNewHigh, Op: qualitygate.OpLE, Threshold: 1}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -204,6 +205,7 @@ func TestRecordProjectAnalysisUsesRepositoryGate(t *testing.T) {
 	analyses := memory.NewProjectAnalysisStore()
 	svc := NewService(projects, engagements, fixedClock{}, fixedIDs{}, &captureAudit{}, true)
 	svc.SetAnalysisStore(analyses)
+	svc.SetRuleCatalog(projectRuleCatalog{})
 	p, err := svc.Create(ctx, CreateInput{TenantID: "tenant", CreatedBy: "alice", Name: "Project", Key: "project", SourceBinding: project.SourceBinding{Kind: project.SourceLocal, Value: "/repo"}})
 	if err != nil {
 		t.Fatal(err)
@@ -229,6 +231,7 @@ func TestRecordProjectAnalysisPersistsLineCoverage(t *testing.T) {
 	analyses := memory.NewProjectAnalysisStore()
 	svc := NewService(projects, engagements, fixedClock{}, fixedIDs{}, &captureAudit{}, true)
 	svc.SetAnalysisStore(analyses)
+	svc.SetRuleCatalog(projectRuleCatalog{})
 	p, err := svc.Create(ctx, CreateInput{TenantID: "tenant", CreatedBy: "alice", Name: "Project", Key: "project", SourceBinding: project.SourceBinding{Kind: project.SourceLocal, Value: "/repo"}})
 	if err != nil {
 		t.Fatal(err)
@@ -256,6 +259,7 @@ func TestRecordProjectAnalysisHydratesCurrentTriageOnly(t *testing.T) {
 	svc := NewService(projects, engagements, fixedClock{}, fixedIDs{}, &captureAudit{}, true)
 	svc.SetAnalysisStore(analyses)
 	svc.SetFindingRepository(findings)
+	svc.SetRuleCatalog(projectRuleCatalog{})
 	p, err := svc.Create(ctx, CreateInput{TenantID: "tenant-a", CreatedBy: "alice", Name: "Project", Key: "project", SourceBinding: project.SourceBinding{Kind: project.SourceLocal, Value: "/repo"}})
 	if err != nil {
 		t.Fatal(err)

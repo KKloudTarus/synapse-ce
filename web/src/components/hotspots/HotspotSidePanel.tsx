@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { X, CalendarClock, ShieldAlert, CheckCircle2, ShieldCheck, Shield, AlertTriangle } from 'lucide-react'
 import { api, ApiError } from '../../lib/api'
 import type { Hotspot, HotspotReviewEvent, HotspotStatus } from '../../lib/types'
@@ -8,10 +8,10 @@ import type { CurrentUser } from '../../lib/types'
 
 function StatusIcon({ status, className }: { status: HotspotStatus; className?: string }) {
   switch (status) {
-    case 'to_review': return <ShieldAlert className={cn('text-orange-500', className)} />
-    case 'acknowledged': return <AlertTriangle className={cn('text-yellow-500', className)} />
-    case 'fixed': return <CheckCircle2 className={cn('text-green-500', className)} />
-    case 'safe': return <ShieldCheck className={cn('text-blue-500', className)} />
+    case 'to_review': return <ShieldAlert className={cn('text-high', className)} />
+    case 'acknowledged': return <AlertTriangle className={cn('text-medium', className)} />
+    case 'fixed': return <CheckCircle2 className={cn('text-accent', className)} />
+    case 'safe': return <ShieldCheck className={cn('text-brand', className)} />
     default: return <Shield className={className} />
   }
 }
@@ -42,6 +42,22 @@ export function HotspotSidePanel({
   const [me, setMe] = useState<CurrentUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (hotspot && panelRef.current) {
+      panelRef.current.focus()
+    }
+  }, [hotspot])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
   
   const canReview = me && (me.role === 'admin' || me.role === 'reviewer')
 
@@ -146,13 +162,21 @@ export function HotspotSidePanel({
   if (!hotspot) return null
 
   return (
-    <div className="flex h-full flex-col">
+    <div 
+      className="flex h-full flex-col"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="hotspot-dialog-title"
+      tabIndex={-1}
+      ref={panelRef}
+    >
       <div className="flex items-start justify-between border-b border-border bg-surface p-4">
         <div className="flex items-center gap-2">
           <StatusIcon status={hotspot.status} className="size-5" />
-          <h2 className="font-semibold">{formatHotspotStatus(hotspot.status)}</h2>
+          <h2 id="hotspot-dialog-title" className="font-semibold">{formatHotspotStatus(hotspot.status)}</h2>
         </div>
         <button
+          aria-label="Close dialog"
           onClick={onClose}
           className="rounded-md p-1 text-mutedfg hover:bg-bg hover:text-foreground focus:outline-none focus:ring-2 focus:ring-brand/60"
         >
@@ -187,7 +211,7 @@ export function HotspotSidePanel({
             <h4 className="text-sm font-semibold text-foreground">Review Decision</h4>
             
             {!canReview ? (
-              <div className="mt-3 text-sm text-muted-foreground p-3 bg-muted/50 rounded-md">
+              <div className="mt-3 text-sm text-mutedfg p-3 bg-elevated rounded-md">
                 You do not have permission to review Security Hotspots.
               </div>
             ) : (
@@ -222,7 +246,7 @@ export function HotspotSidePanel({
                 />
               </div>
               {submitError && (
-                <div className="text-xs text-red-500 dark:text-red-400">{submitError}</div>
+                <div className="text-xs text-critical">{submitError}</div>
               )}
               <Button
                 type="submit"

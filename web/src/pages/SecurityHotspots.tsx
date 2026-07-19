@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useProjectRouteContext } from './CodeQualityProject'
 import { api, ApiError } from '../lib/api'
+import { formatOverviewPercentage } from '../lib/projectOverviewPresentation'
 import type { HotspotListFilter, HotspotPage } from '../lib/types'
 import { HotspotList } from '../components/hotspots/HotspotList'
 import { HotspotSidePanel } from '../components/hotspots/HotspotSidePanel'
@@ -70,27 +71,29 @@ export function SecurityHotspotsPage() {
       {page?.summary && (
         <div className="flex items-center gap-6 rounded-xl border border-border bg-card p-4 shadow-sm">
           <div>
-            <div className="text-sm font-medium text-muted-foreground">Total Hotspots</div>
+            <div className="text-sm font-medium text-mutedfg">Total Hotspots</div>
             <div className="text-2xl font-bold">{page.summary.total}</div>
           </div>
           <div>
-            <div className="text-sm font-medium text-muted-foreground">Reviewed</div>
-            <div className="text-2xl font-bold">{page.summary.reviewed} ({page.summary.reviewedPct.toFixed(1)}%)</div>
+            <div className="text-sm font-medium text-mutedfg">Reviewed</div>
+            <div className="text-2xl font-bold">{page.summary.reviewed} ({formatOverviewPercentage(page.summary.reviewedPct)})</div>
           </div>
           <div>
-            <div className="text-sm font-medium text-muted-foreground">Security Review Grade</div>
+            <div className="text-sm font-medium text-mutedfg">Security Review Grade</div>
             <div className="text-2xl font-bold">{page.summary.grade}</div>
           </div>
           <div className="ml-auto flex items-center rounded-md border border-border bg-muted/50 p-1">
             <button
+              aria-pressed={lens === 'overall'}
               onClick={() => { const next = new URLSearchParams(params); next.set('lens', 'overall'); setParams(next) }}
-              className={`px-3 py-1 text-sm font-medium rounded-sm ${lens === 'overall' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              className={`px-3 py-1 text-sm font-medium rounded-sm ${lens === 'overall' ? 'bg-bg shadow-sm text-foreground' : 'text-mutedfg hover:text-foreground'}`}
             >
               Overall
             </button>
             <button
+              aria-pressed={lens === 'new-code'}
               onClick={() => { const next = new URLSearchParams(params); next.set('lens', 'new-code'); setParams(next) }}
-              className={`px-3 py-1 text-sm font-medium rounded-sm ${lens === 'new-code' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              className={`px-3 py-1 text-sm font-medium rounded-sm ${lens === 'new-code' ? 'bg-bg shadow-sm text-foreground' : 'text-mutedfg hover:text-foreground'}`}
             >
               New Code
             </button>

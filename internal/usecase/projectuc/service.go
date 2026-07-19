@@ -557,13 +557,19 @@ func (s *Service) TransitionHotspot(ctx context.Context, actor string, tenantID 
 		return hotspot.Hotspot{}, hotspot.ReviewEvent{}, fmt.Errorf("transition hotspot: %w", err)
 	}
 
-	_ = s.audit.Record(ctx, ports.AuditEntry{
+	if err := s.audit.Record(ctx, ports.AuditEntry{
 		Actor:    actor,
-		Action:   "project.hotspot.transition",
+		Action:   "project.hotspot.review",
 		Target:   p.ID.String(),
-		Metadata: map[string]string{"project": p.Key, "hotspot_id": hotspotID.String(), "to": string(to)},
-		At:       s.clock.Now(),
-	})
+		Metadata: map[string]string{
+			"project":    p.Key,
+			"hotspot_id": hotspotID.String(),
+			"to":         string(to),
+		},
+		At: s.clock.Now(),
+	}); err != nil {
+		return hotspot.Hotspot{}, hotspot.ReviewEvent{}, fmt.Errorf("audit hotspot review: %w", err)
+	}
 
 	return updated, event, nil
 }

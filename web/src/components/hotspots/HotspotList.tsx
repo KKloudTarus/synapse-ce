@@ -16,10 +16,10 @@ export function formatHotspotStatus(status: HotspotStatus) {
 
 function StatusIcon({ status, className }: { status: HotspotStatus; className?: string }) {
   switch (status) {
-    case 'to_review': return <ShieldAlert className={cn('text-orange-500', className)} />
-    case 'acknowledged': return <AlertTriangle className={cn('text-yellow-500', className)} />
-    case 'fixed': return <CheckCircle2 className={cn('text-green-500', className)} />
-    case 'safe': return <ShieldCheck className={cn('text-blue-500', className)} />
+    case 'to_review': return <ShieldAlert className={cn('text-high', className)} />
+    case 'acknowledged': return <AlertTriangle className={cn('text-medium', className)} />
+    case 'fixed': return <CheckCircle2 className={cn('text-accent', className)} />
+    case 'safe': return <ShieldCheck className={cn('text-brand', className)} />
     default: return <Shield className={className} />
   }
 }

@@ -93,7 +93,13 @@ func (h Hotspot) Transition(
 		return Hotspot{}, ReviewEvent{}, fmt.Errorf("%w: version mismatch (expected %d, got %d)", shared.ErrConflict, expectedVersion, h.Version)
 	}
 	if !h.Status.CanTransitionTo(to) {
-		return Hotspot{}, ReviewEvent{}, fmt.Errorf("%w: cannot transition from %s to %s", ErrInvalidTransition, h.Status, to)
+		return Hotspot{}, ReviewEvent{}, fmt.Errorf(
+			"%w: %w: cannot transition from %s to %s",
+			shared.ErrValidation,
+			ErrInvalidTransition,
+			h.Status,
+			to,
+		)
 	}
 
 	actorTrimmed := strings.TrimSpace(actor)
