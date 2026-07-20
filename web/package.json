@@ -12,28 +12,28 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@radix-ui/react-select": "^2.3.3",
-    "@tanstack/react-virtual": "^3.14.5",
+    "@radix-ui/react-select": "^2.3.4",
+    "@tanstack/react-virtual": "^3.14.7",
     "@xyflow/react": "^12.11.2",
     "fflate": "0.8.3",
-    "lucide-react": "^1.23.0",
+    "lucide-react": "^1.25.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.18.1",
     "xlsx-js-style": "1.2.0"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.2",
-    "@testing-library/jest-dom": "^6.4.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.5.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.3",
-    "jsdom": "^24.0.0",
-    "tailwindcss": "^4.3.2",
-    "typescript": "^6.0.3",
-    "vite": "^8.1.3",
-    "vitest": "^3.0.0"
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
   }
 }
