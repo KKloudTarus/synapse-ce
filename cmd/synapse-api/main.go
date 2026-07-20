@@ -367,6 +367,29 @@ func main() {
 		os.Exit(1)
 	}
 	projectService.SetRuleCatalog(ruleCatalog)
+	// Measures API cursor signing: an HMAC-SHA256 key that prevents pagination token tampering.
+	// Production MUST supply at least 32 bytes via SYNAPSE_MEASURE_CURSOR_SECRET; dev gets an
+	// ephemeral random key (cursors won't survive a restart, which is acceptable for dev).
+	{
+		var cursorKey []byte
+		if raw := cfg.MeasureCursorSecret; raw != "" {
+			cursorKey = []byte(raw)
+		} else if cfg.IsProduction() {
+			log.Error("SYNAPSE_MEASURE_CURSOR_SECRET is required in production (at least 32 bytes); set it, e.g. `openssl rand -hex 32`")
+			os.Exit(1)
+		} else {
+			cursorKey = make([]byte, 32)
+			if _, err := rand.Read(cursorKey); err != nil {
+				log.Error("measure cursor secret ephemeral key generation failed", "err", err)
+				os.Exit(1)
+			}
+			log.Warn("measure cursor signing key is ephemeral – set SYNAPSE_MEASURE_CURSOR_SECRET; tokens won't survive restart")
+		}
+		if err := projectService.SetCursorSecret(cursorKey); err != nil {
+			log.Error("measure cursor signing key rejected", "err", err)
+			os.Exit(1)
+		}
+	}
 	// Evidence artifact blob store: MinIO/S3 when configured, else in-memory (dev).
 	var blobStore ports.BlobStore
 	if cfg.BlobEndpoint != "" {

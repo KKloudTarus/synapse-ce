@@ -306,6 +306,11 @@ type Config struct {
 	// VerifierModel is the model for the adversarial finding verifier (defaults to LLMModel).
 	VerifierModel string
 
+	// MeasureCursorSecret is the HMAC-SHA256 key used to sign pagination cursors for
+	// the Measures API. Must be at least 32 bytes (hex or raw). Never logged.
+	// Required in production; in development an ephemeral key is generated.
+	MeasureCursorSecret string
+
 	// MCP server: exposes the agent tool catalog to external MCP clients,
 	// bearer-locked (role "mcp") and pinned to one engagement. Token is never logged.
 	MCPToken        string
@@ -440,6 +445,8 @@ func Load() Config {
 		AgentReconConcurrency: getint("SYNAPSE_AGENT_RECON_CONCURRENCY", 3),
 		ApprovalSweepInterval: getduration("SYNAPSE_APPROVAL_SWEEP_INTERVAL", time.Minute),
 		VerifierModel:         getenv("SYNAPSE_VERIFIER_MODEL", getenv("SYNAPSE_LLM_MODEL", "")),
+
+		MeasureCursorSecret: getenv("SYNAPSE_MEASURE_CURSOR_SECRET", ""),
 
 		MCPToken:        getenv("SYNAPSE_MCP_TOKEN", ""),
 		MCPAddr:         getenv("SYNAPSE_MCP_ADDR", ":8081"),

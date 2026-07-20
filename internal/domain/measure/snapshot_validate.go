@@ -172,6 +172,17 @@ func (s Snapshot) Validate() error {
 		}
 	}
 
+	// validAvailability is the closed set of supported Availability values.
+	// An empty string is the zero-value default and is treated as AvailabilityUnavailable.
+	validAvailability := map[Availability]bool{
+		AvailabilityAvailable:   true,
+		AvailabilityUnavailable: true,
+		"":                      true, // zero-value treated as unavailable
+	}
+
+	if !validAvailability[s.NewCodeCoverage.Availability] {
+		return fmt.Errorf("measure snapshot: invalid new_code_coverage availability %q", s.NewCodeCoverage.Availability)
+	}
 	if s.NewCodeCoverage.Availability == AvailabilityAvailable {
 		if s.NewCodeCoverage.Value == nil {
 			return errors.New("measure snapshot: available new code coverage has null value")

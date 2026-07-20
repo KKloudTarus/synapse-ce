@@ -178,6 +178,13 @@ func TestSnapshot_Validate(t *testing.T) {
 			},
 			wantErr: "unavailable new code coverage has non-null value",
 		},
+		{
+			name: "corrupt availability string",
+			mutate: func(s *measure.Snapshot) {
+				s.NewCodeCoverage = measure.DecimalMetric{Availability: measure.Availability("corrupt"), Value: nil}
+			},
+			wantErr: "invalid new_code_coverage availability",
+		},
 	}
 
 	for _, tt := range tests {

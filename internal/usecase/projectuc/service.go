@@ -60,7 +60,27 @@ func (s *Service) SetRuleCatalog(catalog ports.RuleCatalog)               { s.ru
 func (s *Service) SetFindingRepository(repo ports.FindingRepository)      { s.findings = repo }
 func (s *Service) SetQualityGates(gates *qualitygatesuc.Service)          { s.gates = gates }
 func (s *Service) SetQualityGateMutator(mutator ports.QualityGateMutator) { s.gateMutator = mutator }
-func (s *Service) SetCursorSecret(secret []byte)                          { s.cursorSecret = secret }
+
+// ValidateCursorSecret returns an error when key is nil or shorter than 32 bytes.
+func ValidateCursorSecret(key []byte) error {
+	if len(key) < 32 {
+		return fmt.Errorf("measure cursor secret must be at least 32 bytes, got %d", len(key))
+	}
+	return nil
+}
+
+// SetCursorSecret injects the HMAC signing key for pagination cursors.
+// Returns an error when the key is absent or shorter than 32 bytes.
+// The byte slice is copied so later caller mutation cannot alter the service key.
+func (s *Service) SetCursorSecret(secret []byte) error {
+	if err := ValidateCursorSecret(secret); err != nil {
+		return err
+	}
+	copied := make([]byte, len(secret))
+	copy(copied, secret)
+	s.cursorSecret = copied
+	return nil
+}
 
 type ruleResolver struct {
 	catalog ports.RuleCatalog

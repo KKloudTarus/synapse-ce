@@ -26,10 +26,11 @@ var validDomains = map[string]bool{
 
 // GetMeasures retrieves the measure node and its direct children for a specific path.
 func (s *Service) GetMeasures(ctx context.Context, tenantID, projectKey, path string, domains []string, limit int, cursorStr string) (ProjectMeasureResponse, error) {
-	if limit < 1 {
-		limit = 50
-	} else if limit > 200 {
-		limit = 200
+	if s.cursorSecret == nil {
+		return ProjectMeasureResponse{}, fmt.Errorf("measure cursor signing key is not configured")
+	}
+	if limit < 1 || limit > 200 {
+		return ProjectMeasureResponse{}, fmt.Errorf("%w: limit must be between 1 and 200", shared.ErrValidation)
 	}
 
 	p, err := s.repo.GetByKey(ctx, shared.ID(tenantID), strings.TrimSpace(projectKey))
@@ -292,7 +293,7 @@ func toDecimal(m measure.DecimalMetric) MeasureDecimalMetric {
 	if m.Availability == measure.AvailabilityAvailable {
 		return MeasureDecimalMetric{Availability: AvailabilityAvailable, Value: m.Value, Reason: nil}
 	}
-	
+
 	avail := AvailabilityUnavailable
 
 	var reason *string
@@ -321,7 +322,7 @@ func mapDomainMeasures(n *measure.Node, domains map[string]bool, analysis *proje
 			r := "no_commentable_lines"
 			cdDec.Reason = &r
 		}
-		
+
 		mn.Size = &SizeMeasures{
 			Files:          toCount(n.Counters.Files, AvailabilityAvailable, nil),
 			NCLOC:          toCount(n.Counters.CodeLines, AvailabilityAvailable, nil),
@@ -363,7 +364,7 @@ func mapDomainMeasures(n *measure.Node, domains map[string]bool, analysis *proje
 		} else if coverageDec.Availability == AvailabilityUnavailable {
 			coverageDec.Reason = cvReason
 		}
-		
+
 		mn.Coverage = &CoverageMeasures{
 			CoveredLines:    toCount(n.Counters.CoveredLines, cvAvail, cvReason),
 			CoverableLines:  toCount(n.Counters.CoverableLines, cvAvail, cvReason),
