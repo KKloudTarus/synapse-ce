@@ -364,7 +364,7 @@ func TestSnapshotAttributionUnavailable(t *testing.T) {
 			FileInventory{Path: "src/b.go", Language: "Go", CodeLines: 20},
 		),
 		Issues: []IssueInput{
-			{Path: "", RuleKey: "rule1", Severity: shared.SeverityHigh}, // No path
+			{Path: "", RuleKey: "rule1", Severity: shared.SeverityHigh},         // No path
 			{Path: "src/c.go", RuleKey: "rule2", Severity: shared.SeverityHigh}, // Missing file
 		},
 	}
