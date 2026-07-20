@@ -20,7 +20,7 @@ jobs:
     steps:
       # This workflow holds contents:write + packages:write, so third-party actions are pinned to an
       # immutable commit SHA (with the version tag in a comment). Dependabot bumps the SHA + comment.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # goreleaser needs full history + tags to compute the version and changelog.
           fetch-depth: 0
