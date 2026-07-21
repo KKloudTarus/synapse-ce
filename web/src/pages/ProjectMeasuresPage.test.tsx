@@ -202,9 +202,77 @@ describe('Project Measures route and logic', () => {
     })
   })
 
-  it('stale responses cannot replace newer path results', async () => {
-    let resolveFirst!: (val: any) => void
-    const firstPromise = new Promise(res => { resolveFirst = res })
+  it('renders correct severity keys for issues', async () => {
+    vi.mocked(api.projectMeasures).mockResolvedValue(buildResponse({
+      node: {
+        path: '', name: 'Synapse', kind: 'project', language: '', size: null, complexity: null, coverage: null, duplication: null, debt: null, ratings: null,
+        issues: {
+          byType: {},
+          bySeverity: {
+            critical: { availability: 'available', value: 5, reason: null },
+            high: { availability: 'available', value: 4, reason: null },
+            medium: { availability: 'available', value: 3, reason: null },
+            low: { availability: 'available', value: 2, reason: null },
+            info: { availability: 'available', value: 1, reason: null },
+          }
+        }
+      },
+      children: { items: [], nextCursor: null }
+    }))
+    
+    renderRoute('/code-quality/projects/synapse/measures?domain=issues')
+    
+    expect(await screen.findByText('Current Node Metrics')).toBeInTheDocument()
+    
+    expect(screen.getByText('Critical')).toBeInTheDocument()
+    expect(screen.getByText('5')).toBeInTheDocument()
+    
+    expect(screen.getByText('High')).toBeInTheDocument()
+    expect(screen.getByText('4')).toBeInTheDocument()
+    
+    expect(screen.getByText('Medium')).toBeInTheDocument()
+    expect(screen.getByText('3')).toBeInTheDocument()
+    
+    expect(screen.getByText('Low')).toBeInTheDocument()
+    expect(screen.getByText('2')).toBeInTheDocument()
+    
+    expect(screen.getByText('Info')).toBeInTheDocument()
+    expect(screen.getByText('1')).toBeInTheDocument()
+  })
+
+  it('normal load more appends children and deduplicates', async () => {
+    vi.mocked(api.projectMeasures).mockResolvedValueOnce(buildResponse({
+      children: {
+        items: [{ path: '1', name: '1', kind: 'file', language: '', size: null, complexity: null, coverage: null, duplication: null, issues: null, debt: null, ratings: null } as any],
+        nextCursor: 'next-page'
+      }
+    }))
+    
+    renderRoute('/code-quality/projects/synapse/measures')
+    expect(await screen.findByText('1')).toBeInTheDocument()
+    
+    vi.mocked(api.projectMeasures).mockResolvedValueOnce(buildResponse({
+      children: {
+        // returning 1 again to test deduplication, and a new item 2
+        items: [
+          { path: '1', name: '1', kind: 'file', language: '', size: null, complexity: null, coverage: null, duplication: null, issues: null, debt: null, ratings: null } as any,
+          { path: '2', name: '2', kind: 'file', language: '', size: null, complexity: null, coverage: null, duplication: null, issues: null, debt: null, ratings: null } as any
+        ],
+        nextCursor: null
+      }
+    }))
+    
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+    
+    expect(await screen.findByText('2')).toBeInTheDocument()
+    // It should render 1 only once. We can query getAllByText('1') but the breadcrumb and metric might interfere if they are named 1. 
+    // The link for '1' is rendered.
+    expect(screen.getAllByRole('button', { name: '1' }).length).toBe(1)
+  })
+
+  it('stale aborted responses do not replace newer path results or show error', async () => {
+    let rejectFirst!: (err: any) => void
+    const firstPromise = new Promise((_, rej) => { rejectFirst = rej })
     
     let resolveSecond!: (val: any) => void
     const secondPromise = new Promise(res => { resolveSecond = res })
@@ -238,20 +306,18 @@ describe('Project Measures route and logic', () => {
     expect(await screen.findByText('B1')).toBeInTheDocument()
     expect(screen.queryByText('A1')).not.toBeInTheDocument()
 
-    // 5. Now resolve the stale load more for A
+    // 5. Now resolve the stale load more for A by throwing AbortError
     act(() => {
-      resolveFirst(buildResponse({
-        path: 'A',
-        children: { items: [{ path: 'A/2', name: 'A2', kind: 'file', language: '', size: null, complexity: null, coverage: null, duplication: null, issues: null, debt: null, ratings: null } as any], nextCursor: null }
-      }))
+      rejectFirst(new DOMException('Aborted', 'AbortError'))
     })
 
     // Wait a bit to ensure no state updates happen
     await new Promise(r => setTimeout(r, 50))
     
-    // Assert only B1 remains, A2 was ignored
+    // Assert only B1 remains, no error state is shown
     expect(screen.getByText('B1')).toBeInTheDocument()
-    expect(screen.queryByText('A2')).not.toBeInTheDocument()
+    expect(screen.queryByText('Failed to load more')).not.toBeInTheDocument()
+    expect(screen.queryByText('Cannot reach the API')).not.toBeInTheDocument()
   })
 
   it('renders VirtualTable for >50 rows', async () => {

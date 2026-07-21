@@ -107,8 +107,11 @@ export function ProjectMeasuresPage() {
           }
         }
       })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load more')
+    } catch (error) {
+      if (generation !== requestGenerationRef.current) return
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      
+      setError(error instanceof Error ? error.message : 'Failed to load more')
     } finally {
       setLoadingMore(false)
     }
@@ -308,10 +311,10 @@ function CurrentNodeMeasures({ node, domain }: { node: MeasureNode, domain: stri
       { label: 'Vulnerabilities', m: node.issues?.byType['vulnerability'] },
       { label: 'Code Smells', m: node.issues?.byType['code_smell'] },
       { label: 'Security Hotspots', m: node.issues?.byType['security_hotspot'] },
-      { label: 'Blocker', m: node.issues?.bySeverity['blocker'] },
       { label: 'Critical', m: node.issues?.bySeverity['critical'] },
-      { label: 'Major', m: node.issues?.bySeverity['major'] },
-      { label: 'Minor', m: node.issues?.bySeverity['minor'] },
+      { label: 'High', m: node.issues?.bySeverity['high'] },
+      { label: 'Medium', m: node.issues?.bySeverity['medium'] },
+      { label: 'Low', m: node.issues?.bySeverity['low'] },
       { label: 'Info', m: node.issues?.bySeverity['info'] }
     )
   } else if (domain === 'debt') {

@@ -94,7 +94,10 @@ async function req(path: string, init?: RequestInit): Promise<any> {
         ...(init?.headers ?? {}),
       },
     })
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error
+    }
     throw new ApiError(0, 'Cannot reach the API. Is the server running on :8080?')
   }
   if (res.status === 401 && onUnauthorized) onUnauthorized()
