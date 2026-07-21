@@ -17,6 +17,7 @@ import { ProjectAnalysisPage } from './pages/ProjectAnalysisPage'
 import { ProjectOverviewPage } from './pages/ProjectOverviewPage'
 import { SecurityHotspotsPage } from './pages/SecurityHotspots'
 import { ProjectIssuesPage } from './pages/ProjectIssues'
+import { ProjectMeasuresPage } from './pages/ProjectMeasuresPage'
 import { QualityGates } from './pages/QualityGates'
 
 export default function App() {
@@ -42,6 +43,7 @@ function Gate() {
           <Route index element={<ProjectOverviewPage />} />
           <Route path="hotspots" element={<SecurityHotspotsPage />} />
           <Route path="issues" element={<ProjectIssuesPage />} />
+          <Route path="measures" element={<ProjectMeasuresPage />} />
           <Route path="analysis" element={<ProjectAnalysisPage />} />
           <Route path="activity" element={<ProjectActivityPage />} />
         </Route>

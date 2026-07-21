@@ -61,6 +61,7 @@ import type {
   IssueReviewEvent,
 } from './types'
 import { mapProjectOverviewResponse, type ProjectOverview } from './projectOverview'
+import { mapProjectMeasureResponse, type MeasuresQuery, type ProjectMeasureResponse } from './projectMeasures'
 
 export class ApiError extends Error {
   constructor(
@@ -93,7 +94,10 @@ async function req(path: string, init?: RequestInit): Promise<any> {
         ...(init?.headers ?? {}),
       },
     })
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error
+    }
     throw new ApiError(0, 'Cannot reach the API. Is the server running on :8080?')
   }
   if (res.status === 401 && onUnauthorized) onUnauthorized()
@@ -110,6 +114,22 @@ async function req(path: string, init?: RequestInit): Promise<any> {
   if (res.status === 204) return null
   return res.json()
 }
+
+export async function projectMeasures(projectKey: string, query: MeasuresQuery, signal?: AbortSignal): Promise<ProjectMeasureResponse> {
+  const q = new URLSearchParams()
+  if (query.path) q.set('path', query.path)
+  if (query.limit) q.set('limit', query.limit.toString())
+  if (query.cursor) q.set('cursor', query.cursor) // Never decode or mutate cursor
+  if (query.domain) {
+    for (const d of query.domain) {
+      if (d) q.append('domain', d)
+    }
+  }
+  const qs = q.toString()
+  const raw = await req(`/projects/${encodeURIComponent(projectKey)}/measures${qs ? `?${qs}` : ''}`, { signal })
+  return mapProjectMeasureResponse(raw)
+}
+
 
 // ---- mappers: raw API JSON (mixed casing) → clean types ----
 
@@ -839,6 +859,7 @@ function mapIssueReviewEvent(r: any): IssueReviewEvent {
 }
 
 export const api = {
+  projectMeasures,
   aup: (): Promise<AupStatus> => req('/aup'),
 
   // --- Quality gates ---
