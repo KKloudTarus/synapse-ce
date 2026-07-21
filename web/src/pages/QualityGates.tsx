@@ -5,7 +5,7 @@ import type { QualityGate, QualityGateCondition } from '../lib/types'
 import { metricLabel } from '../components/codequality/qualityPresentation'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../components/ui'
 
-const metrics = ['new_critical', 'new_high', 'new_medium', 'new_secret', 'new_vulnerability', 'new_issues', 'total_critical', 'coverage', 'duplication_density', 'security_rating', 'reliability_rating', 'maintainability_rating', 'security_hotspots_reviewed', 'new_security_hotspots_reviewed']
+const metrics = ['new_critical', 'new_high', 'new_medium', 'new_secret', 'new_vulnerability', 'new_issues', 'total_critical', 'coverage', 'new_coverage', 'duplication_density', 'new_duplication', 'security_rating', 'reliability_rating', 'maintainability_rating', 'security_hotspots_reviewed', 'new_security_hotspots_reviewed']
 const operators: QualityGateCondition['op'][] = ['<=', '>=', '==', '<', '>']
 const blankCondition = (): QualityGateCondition => ({ metric: 'new_high', op: '<=', threshold: 0 })
 

@@ -47,3 +47,30 @@ func TestDefaultGate(t *testing.T) {
 		t.Error("a new critical must fail the default gate")
 	}
 }
+
+func TestValidMetricAcceptsNewCodeCoverageAndDuplication(t *testing.T) {
+	for _, m := range []string{MetricNewCoverage, MetricNewDuplication, MetricSecurityHotspotsReviewed} {
+		if !ValidMetric(m) {
+			t.Errorf("metric %q must be a valid gate condition metric", m)
+		}
+	}
+	if ValidMetric("not_a_metric") {
+		t.Error("an unknown metric must be rejected")
+	}
+	// A custom gate using the new-code metrics validates, and — since neither is measured yet — a
+	// `new_coverage >= 80` condition reads 0 and fails closed while `new_duplication <= 3` passes at 0.
+	g := Gate{Key: "clean-as-you-code", Name: "Clean as You Code", Conditions: []Condition{
+		{Metric: MetricNewCoverage, Op: OpGE, Threshold: 80},
+		{Metric: MetricNewDuplication, Op: OpLE, Threshold: 3},
+	}}
+	if _, err := g.Normalize(); err != nil {
+		t.Fatalf("custom gate with new-code metrics must validate: %v", err)
+	}
+	res := Evaluate(g, Snapshot{})
+	if res.Passed {
+		t.Error("an unmeasured new_coverage>=80 must fail closed on an empty snapshot")
+	}
+	if len(res.Failures()) != 1 || res.Failures()[0].Condition.Metric != MetricNewCoverage {
+		t.Errorf("only new_coverage should fail closed at 0; failures=%+v", res.Failures())
+	}
+}

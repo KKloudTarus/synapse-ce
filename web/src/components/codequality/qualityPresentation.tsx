@@ -7,6 +7,7 @@ export const metricLabels: Record<string, string> = {
   new_vulnerability: 'New vulnerabilities', new_issues: 'New issues', total_critical: 'Total critical issues', coverage: 'Line coverage',
   duplication_density: 'Duplication density', security_rating: 'Security rating', reliability_rating: 'Reliability rating', maintainability_rating: 'Maintainability rating',
   security_hotspots_reviewed: 'Security Hotspots Reviewed', new_security_hotspots_reviewed: 'New Security Hotspots Reviewed',
+  new_coverage: 'New Code coverage', new_duplication: 'New Code duplication',
 }
 
 export function metricLabel(metric: string) { return metricLabels[metric] ?? metric.replaceAll('_', ' ') }
