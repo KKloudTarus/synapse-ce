@@ -157,18 +157,20 @@ export function ProjectMeasuresPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         {/* Breadcrumbs */}
         <nav className="flex items-center text-sm font-medium text-mutedfg" aria-label="Breadcrumb">
-          <button 
+          <button
             onClick={() => setPath('')}
-            className="hover:text-foreground transition-colors"
+            aria-current={breadcrumbs.length === 0 ? 'page' : undefined}
+            className="rounded-sm hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
           >
             {data.project.name}
           </button>
           {breadcrumbs.map((b, i) => (
             <div key={b.path} className="flex items-center">
               <ChevronRight className="size-4 mx-1" aria-hidden="true" />
-              <button 
+              <button
                 onClick={() => setPath(b.path)}
-                className={cn("hover:text-foreground transition-colors", i === breadcrumbs.length - 1 && "text-foreground")}
+                aria-current={i === breadcrumbs.length - 1 ? 'page' : undefined}
+                className={cn("rounded-sm hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60", i === breadcrumbs.length - 1 && "text-foreground")}
               >
                 {b.label}
               </button>
@@ -182,8 +184,9 @@ export function ProjectMeasuresPage() {
             <button
               key={d.key}
               onClick={() => setDomain(d.key)}
+              aria-pressed={domain === d.key}
               className={cn(
-                "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+                "px-3 py-1.5 text-xs font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60",
                 domain === d.key ? "bg-bg text-foreground shadow-sm ring-1 ring-border" : "text-mutedfg hover:text-foreground hover:bg-elevated/50"
               )}
             >
@@ -200,7 +203,7 @@ export function ProjectMeasuresPage() {
       )}
 
       {data.node?.kind !== 'file' && (
-        <div className="bg-bg border border-border rounded-xl overflow-hidden">
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
           {sortedItems.length === 0 ? (
             <EmptyState
               icon={Folder}
@@ -219,16 +222,16 @@ export function ProjectMeasuresPage() {
             <table className="min-w-full text-left text-sm whitespace-nowrap">
               <thead className="bg-elevated/95 text-[11px] uppercase tracking-[0.14em] text-foreground border-b border-borderstrong sticky top-0">
                 <tr>
-                  {columns(setPath).map((c, i) => (
-                    <th key={i} className={cn("px-4 py-3 font-semibold", c.className)}>{c.header}</th>
+                  {columns(setPath).map((c) => (
+                    <th key={c.header} scope="col" className={cn("px-4 py-3 font-semibold", c.className)}>{c.header}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
                 {sortedItems.map(item => (
                   <tr key={item.path} className="hover:bg-elevated/40 transition-colors">
-                    {columns(setPath).map((c, i) => (
-                      <td key={i} className={cn("px-4 py-3 min-w-0 truncate", c.className)}>
+                    {columns(setPath).map((c) => (
+                      <td key={c.header} className={cn("px-4 py-3 min-w-0 truncate", c.className)}>
                         {c.cell(item)}
                       </td>
                     ))}
@@ -271,8 +274,10 @@ function MetricValue({ m }: { m: MeasureCountMetric | MeasureDecimalMetric | Mea
   }
   
   if (m.value === null) return <span className="text-mutedfg">-</span>
-  
-  return <span className="tabular-nums font-mono">{m.value}</span>
+
+  // Round decimals (e.g. coverage/density percentages) and group large counts, matching the
+  // sibling tabs; small integers render unchanged.
+  return <span className="tabular-nums font-mono">{m.value.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
 }
 
 function CurrentNodeMeasures({ node, domain }: { node: MeasureNode, domain: string }) {
@@ -330,11 +335,11 @@ function CurrentNodeMeasures({ node, domain }: { node: MeasureNode, domain: stri
   }
 
   return (
-    <div className="bg-bg border border-border rounded-xl p-4">
+    <div className="bg-card border border-border rounded-xl p-4">
       <h3 className="text-sm font-semibold mb-3">Current Node Metrics</h3>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-        {metrics.map((item, i) => (
-          <div key={i} className="flex flex-col gap-1">
+        {metrics.map((item) => (
+          <div key={item.label} className="flex flex-col gap-1">
             <span className="text-xs font-medium text-mutedfg">{item.label}</span>
             <div className="text-sm"><MetricValue m={item.m} /></div>
           </div>
@@ -353,11 +358,11 @@ function getDomainColumns(domain: string): (setPath: (p: string) => void) => Col
         const navigable = item.kind === 'directory' || item.kind === 'file'
         return (
           <div className="flex items-center gap-2">
-            {item.kind === 'directory' ? <Folder className="size-4 text-branddim shrink-0" /> : <File className="size-4 text-mutedfg shrink-0" />}
+            {item.kind === 'directory' ? <Folder className="size-4 text-branddim shrink-0" aria-hidden="true" /> : <File className="size-4 text-mutedfg shrink-0" aria-hidden="true" />}
             {navigable ? (
-              <button 
+              <button
                 onClick={() => setPath(item.path)}
-                className="font-medium hover:underline hover:text-brand text-left truncate"
+                className="rounded-sm font-medium hover:underline hover:text-brand text-left truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
                 title={item.name}
               >
                 {item.name}

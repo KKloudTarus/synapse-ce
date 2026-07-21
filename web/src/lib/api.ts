@@ -126,8 +126,6 @@ export async function projectMeasures(projectKey: string, query: MeasuresQuery, 
     }
   }
   const qs = q.toString()
-  // Add signal parameter to the req function if it supports it, or use fetch directly if needed.
-  // wait, the `req` function has an `init?: RequestInit` argument, so we can pass { signal }.
   const raw = await req(`/projects/${encodeURIComponent(projectKey)}/measures${qs ? `?${qs}` : ''}`, { signal })
   return mapProjectMeasureResponse(raw)
 }
