@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
@@ -108,6 +109,24 @@ func (r *ProjectRepository) UpdateGate(_ context.Context, tenantID shared.ID, ke
 		return shared.ErrNotFound
 	}
 	p.GateID = gateID
+	return nil
+}
+
+func (r *ProjectRepository) AssignProfile(_ context.Context, tenantID shared.ID, projectKey, language, profileKey string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, found := r.data[projectStoreKey(tenantID, projectKey)]
+	if !found {
+		return shared.ErrNotFound
+	}
+	if p.DefaultProfileByLang == nil {
+		p.DefaultProfileByLang = map[string]string{}
+	}
+	if strings.TrimSpace(profileKey) == "" {
+		delete(p.DefaultProfileByLang, language)
+		return nil
+	}
+	p.DefaultProfileByLang[language] = profileKey
 	return nil
 }
 

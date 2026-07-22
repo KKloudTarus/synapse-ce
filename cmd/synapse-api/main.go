@@ -111,6 +111,7 @@ import (
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/pyreach"
 	qualitygatesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/qualitygates"
+	qualityprofilesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/qualityprofiles"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachability"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachproof"
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
@@ -175,6 +176,7 @@ func main() {
 	var scanRunStore ports.ScanRunStore
 	var projectAnalysisStore ports.ProjectAnalysisStore
 	var qualityGateStore ports.QualityGateStore
+	var qualityProfileStore ports.QualityProfileStore
 	var qualityGateMutator ports.QualityGateMutator
 	var reconRunStore ports.ReconRunStore
 	var evidenceStore ports.EvidenceStore
@@ -274,6 +276,7 @@ func main() {
 		scanRunStore = postgres.NewScanRunStore(pool)
 		projectAnalysisStore = postgres.NewProjectAnalysisStore(pool)
 		qualityGateStore = postgres.NewQualityGateStore(pool)
+		qualityProfileStore = postgres.NewQualityProfileStore(pool)
 		reconRunStore = postgres.NewReconRunStore(pool)
 		evidenceStore = postgres.NewEvidenceStore(pool)
 		advisoryStore = postgres.NewAdvisoryRepository(pool)
@@ -311,6 +314,7 @@ func main() {
 		scanRunStore = memory.NewScanRunStore()
 		projectAnalysisStore = memory.NewProjectAnalysisStore()
 		qualityGateStore = memory.NewQualityGateStore()
+		qualityProfileStore = memory.NewQualityProfileStore()
 		reconRunStore = memory.NewReconRunRepository()
 		evidenceStore = memory.NewEvidenceStore()
 		advisoryStore = memory.NewAdvisoryStore()
@@ -367,6 +371,8 @@ func main() {
 		os.Exit(1)
 	}
 	projectService.SetRuleCatalog(ruleCatalog)
+	qualityProfileService := qualityprofilesuc.NewService(qualityProfileStore, ruleCatalog, projectRepo, auditLog, clock)
+	projectService.SetQualityProfiles(qualityProfileService)
 	// Measures API cursor signing: an HMAC-SHA256 key that prevents pagination token tampering.
 	// Production MUST supply at least 32 bytes via SYNAPSE_MEASURE_CURSOR_SECRET; dev gets an
 	// ephemeral random key (cursors won't survive a restart, which is acceptable for dev).
@@ -901,6 +907,7 @@ func main() {
 	scaService.SetProjectAnalysisRecorder(projectService)
 	router.SetProjects(projectService)
 	router.SetQualityGates(qualityGateService)
+	router.SetQualityProfiles(qualityProfileService)
 	router.SetExploitation(exploitationService) // evidence-gated finding verify endpoint
 	// Read-only code-quality dashboard. Server-side analysis is PURE-GO and memory-safe only (pattern
 	// rules + duplication + Go-parser inventory); tree-sitter complexity is intentionally NOT wired here

@@ -22,6 +22,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/qualityprofile"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -50,6 +51,9 @@ type ProjectRepository interface {
 	UpdateGate(ctx context.Context, tenantID shared.ID, key, gateID string) error
 	CountByGate(ctx context.Context, tenantID shared.ID, gateID string) (int, error)
 	DeleteByKey(ctx context.Context, tenantID shared.ID, key string) error
+	// AssignProfile sets (or clears, with an empty profileKey) the quality profile assigned to a
+	// language for a project (project.DefaultProfileByLang[language]).
+	AssignProfile(ctx context.Context, tenantID shared.ID, projectKey, language, profileKey string) error
 }
 
 // QualityGateStore persists tenant-scoped custom gate definitions.
@@ -60,6 +64,16 @@ type QualityGateStore interface {
 	Update(ctx context.Context, tenantID shared.ID, gate qualitygate.Gate) error
 	Delete(ctx context.Context, tenantID shared.ID, key string) error
 	DeleteIfUnassigned(ctx context.Context, tenantID shared.ID, key string) error
+}
+
+// QualityProfileStore persists tenant-scoped custom quality profiles (named, per-language rule sets).
+// Built-in profiles are generated from the rule catalog and are never stored.
+type QualityProfileStore interface {
+	Create(ctx context.Context, tenantID shared.ID, profile qualityprofile.Profile) error
+	List(ctx context.Context, tenantID shared.ID) ([]qualityprofile.Profile, error)
+	Get(ctx context.Context, tenantID shared.ID, key string) (qualityprofile.Profile, error)
+	Update(ctx context.Context, tenantID shared.ID, profile qualityprofile.Profile) error
+	Delete(ctx context.Context, tenantID shared.ID, key string) error
 }
 
 // QualityGateMutator coordinates managed-gate writes, audit records, and safe custom-gate Project references.

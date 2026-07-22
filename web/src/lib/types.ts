@@ -625,6 +625,15 @@ export interface QualityGate {
   builtIn: boolean
 }
 
+export interface QualityProfile {
+  key: string
+  name: string
+  language: string
+  parent: string
+  activatedRules: Record<string, { severity: string }>
+  builtIn: boolean
+}
+
 export interface LanguageInventory {
   language: string
   files: number

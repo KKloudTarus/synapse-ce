@@ -43,7 +43,7 @@ export function CodeQualityProjects() {
           <h1 className="text-3xl font-bold tracking-tight">Code Quality</h1>
           <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-mutedfg">See what needs attention, enforce quality policy, and track every successful analysis against its previous baseline.</p>
         </div>
-        <div className="flex gap-2"><Link to="/code-quality/gates"><Button variant="secondary">Quality gates</Button></Link><Button variant="brand" onClick={() => setCreating((value) => !value)}>{creating ? <><X className="size-4" aria-hidden="true" /> Cancel</> : <><Plus className="size-4" aria-hidden="true" /> New project</>}</Button></div>
+        <div className="flex gap-2"><Link to="/code-quality/profiles"><Button variant="secondary">Quality profiles</Button></Link><Link to="/code-quality/gates"><Button variant="secondary">Quality gates</Button></Link><Button variant="brand" onClick={() => setCreating((value) => !value)}>{creating ? <><X className="size-4" aria-hidden="true" /> Cancel</> : <><Plus className="size-4" aria-hidden="true" /> New project</>}</Button></div>
       </header>
 
       {creating && <div className="mb-6"><CreateProjectForm /></div>}

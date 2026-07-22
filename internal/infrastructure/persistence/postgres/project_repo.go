@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -118,6 +119,29 @@ func (r *ProjectRepository) UpdateGate(ctx context.Context, tenantID shared.ID, 
 	ct, err := r.pool.Exec(ctx, `UPDATE projects SET gate_id=$3, updated_at=now() WHERE tenant_id=$1 AND key=$2`, tenantID.String(), key, gateID)
 	if err != nil {
 		return fmt.Errorf("update project gate: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return shared.ErrNotFound
+	}
+	return nil
+}
+
+// AssignProfile sets or clears the quality profile for a language in the project's JSONB
+// default_profile_by_lang map, atomically at the column level (no read-modify-write race).
+func (r *ProjectRepository) AssignProfile(ctx context.Context, tenantID shared.ID, projectKey, language, profileKey string) error {
+	var (
+		ct  pgconn.CommandTag
+		err error
+	)
+	if strings.TrimSpace(profileKey) == "" {
+		ct, err = r.pool.Exec(ctx, `UPDATE projects SET default_profile_by_lang = coalesce(default_profile_by_lang, '{}'::jsonb) - $3::text, updated_at=now() WHERE tenant_id=$1 AND key=$2`,
+			tenantID.String(), projectKey, language)
+	} else {
+		ct, err = r.pool.Exec(ctx, `UPDATE projects SET default_profile_by_lang = jsonb_set(coalesce(default_profile_by_lang, '{}'::jsonb), ARRAY[$3::text], to_jsonb($4::text), true), updated_at=now() WHERE tenant_id=$1 AND key=$2`,
+			tenantID.String(), projectKey, language, profileKey)
+	}
+	if err != nil {
+		return fmt.Errorf("assign project profile: %w", err)
 	}
 	if ct.RowsAffected() == 0 {
 		return shared.ErrNotFound

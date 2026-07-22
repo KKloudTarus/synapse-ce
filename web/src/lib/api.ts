@@ -48,6 +48,7 @@ import type {
   RuleSeverity,
   RuleDetection,
   QualityGate,
+  QualityProfile,
   Grade,
   Hotspot,
   HotspotStatus,
@@ -132,6 +133,21 @@ export async function projectMeasures(projectKey: string, query: MeasuresQuery, 
 
 
 // ---- mappers: raw API JSON (mixed casing) → clean types ----
+
+function mapQualityProfile(r: any): QualityProfile {
+  const activatedRules: Record<string, { severity: string }> = {}
+  for (const [k, v] of Object.entries(r?.activated_rules ?? {})) {
+    activatedRules[k] = { severity: (v as any)?.severity ?? '' }
+  }
+  return {
+    key: r?.key ?? '',
+    name: r?.name ?? '',
+    language: r?.language ?? '',
+    parent: r?.parent ?? '',
+    activatedRules,
+    builtIn: r?.built_in ?? false,
+  }
+}
 
 function mapQualityGate(r: any): QualityGate {
   return {
@@ -874,6 +890,30 @@ export const api = {
 
   deleteQualityGate: async (key: string): Promise<void> => {
     await req(`/quality-gates/${encodeURIComponent(key)}`, { method: 'DELETE' })
+  },
+
+  // --- Quality profiles ---
+  listQualityProfiles: async (language?: string): Promise<QualityProfile[]> =>
+    ((await req(`/quality-profiles${language ? `?language=${encodeURIComponent(language)}` : ''}`)) ?? []).map(mapQualityProfile),
+
+  copyQualityProfile: async (sourceKey: string, key: string, name: string): Promise<QualityProfile> =>
+    mapQualityProfile(await req(`/quality-profiles/${encodeURIComponent(sourceKey)}/copy`, { method: 'POST', body: JSON.stringify({ key, name }) })),
+
+  activateProfileRule: async (key: string, rule: string, severity = ''): Promise<QualityProfile> =>
+    mapQualityProfile(await req(`/quality-profiles/${encodeURIComponent(key)}/activate`, { method: 'POST', body: JSON.stringify({ rule, severity }) })),
+
+  deactivateProfileRule: async (key: string, rule: string): Promise<QualityProfile> =>
+    mapQualityProfile(await req(`/quality-profiles/${encodeURIComponent(key)}/deactivate`, { method: 'POST', body: JSON.stringify({ rule }) })),
+
+  setProfileRuleSeverity: async (key: string, rule: string, severity: string): Promise<QualityProfile> =>
+    mapQualityProfile(await req(`/quality-profiles/${encodeURIComponent(key)}/severity`, { method: 'POST', body: JSON.stringify({ rule, severity }) })),
+
+  deleteQualityProfile: async (key: string): Promise<void> => {
+    await req(`/quality-profiles/${encodeURIComponent(key)}`, { method: 'DELETE' })
+  },
+
+  assignProjectProfile: async (projectKey: string, language: string, profile: string): Promise<void> => {
+    await req(`/projects/${encodeURIComponent(projectKey)}/profiles/${encodeURIComponent(language)}`, { method: 'PUT', body: JSON.stringify({ profile }) })
   },
 
   // --- Rules ---

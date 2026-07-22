@@ -35,33 +35,34 @@ import (
 
 // Router wires HTTP routes to use case services.
 type Router struct {
-	log          *slog.Logger
-	auth         *Authenticator
-	eng          *enguc.Service
-	sca          *scauc.Service
-	aup          *aupuc.Service
-	findings     *findingsuc.Service
-	export       *exportuc.Service
-	report       *reportuc.Service
-	evidence     *evidenceuc.Service
-	recon        *reconuc.Service
-	logs         ports.LogStream
-	transfer     *transferuc.Service
-	audit        *audituc.Service
-	vex          *vexuc.Service
-	users        *usersuc.Service
-	credentials  *credentialsuc.Service
-	dastVerifier runtimeVerifierService
-	dastWorkflow dastWorkflowService
-	agent        *agentDeps          // optional; nil ⇒ agent routes are not registered
-	exploitation findingVerifier     // optional; nil ⇒ the verify route is not registered
-	judgments    judgmentService     // optional; nil ⇒ judgment routes are not registered
-	autoVerifier autoVerifierService // optional; nil ⇒ the LLM auto-verify route is not registered
-	threatModels threatModelService  // optional; nil ⇒ threat-model routes are not registered
-	drafts       writeupDraftService // optional; nil ⇒ writeup-draft sign-off routes are not registered
-	projects     projectService      // optional; nil ⇒ project routes are not registered
-	qualityGates qualityGateService  // optional; nil ⇒ quality-gate routes are not registered
-	rules        rulesService        // optional; nil ⇒ rule catalog routes are not registered
+	log             *slog.Logger
+	auth            *Authenticator
+	eng             *enguc.Service
+	sca             *scauc.Service
+	aup             *aupuc.Service
+	findings        *findingsuc.Service
+	export          *exportuc.Service
+	report          *reportuc.Service
+	evidence        *evidenceuc.Service
+	recon           *reconuc.Service
+	logs            ports.LogStream
+	transfer        *transferuc.Service
+	audit           *audituc.Service
+	vex             *vexuc.Service
+	users           *usersuc.Service
+	credentials     *credentialsuc.Service
+	dastVerifier    runtimeVerifierService
+	dastWorkflow    dastWorkflowService
+	agent           *agentDeps            // optional; nil ⇒ agent routes are not registered
+	exploitation    findingVerifier       // optional; nil ⇒ the verify route is not registered
+	judgments       judgmentService       // optional; nil ⇒ judgment routes are not registered
+	autoVerifier    autoVerifierService   // optional; nil ⇒ the LLM auto-verify route is not registered
+	threatModels    threatModelService    // optional; nil ⇒ threat-model routes are not registered
+	drafts          writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
+	projects        projectService        // optional; nil ⇒ project routes are not registered
+	qualityGates    qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
+	qualityProfiles qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
+	rules           rulesService          // optional; nil ⇒ rule catalog routes are not registered
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -209,6 +210,15 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("PUT /api/v1/quality-gates/{key}", rt.authz(userdom.PermOperate, rt.updateQualityGate))
 		mux.HandleFunc("DELETE /api/v1/quality-gates/{key}", rt.authz(userdom.PermOperate, rt.deleteQualityGate))
 	}
+	if rt.qualityProfiles != nil {
+		mux.HandleFunc("GET /api/v1/quality-profiles", rt.authz(userdom.PermView, rt.listQualityProfiles))
+		mux.HandleFunc("GET /api/v1/quality-profiles/{key}", rt.authz(userdom.PermView, rt.getQualityProfile))
+		mux.HandleFunc("POST /api/v1/quality-profiles/{key}/copy", rt.authz(userdom.PermOperate, rt.copyQualityProfile))
+		mux.HandleFunc("POST /api/v1/quality-profiles/{key}/activate", rt.authz(userdom.PermOperate, rt.activateProfileRule))
+		mux.HandleFunc("POST /api/v1/quality-profiles/{key}/deactivate", rt.authz(userdom.PermOperate, rt.deactivateProfileRule))
+		mux.HandleFunc("POST /api/v1/quality-profiles/{key}/severity", rt.authz(userdom.PermOperate, rt.setProfileRuleSeverity))
+		mux.HandleFunc("DELETE /api/v1/quality-profiles/{key}", rt.authz(userdom.PermOperate, rt.deleteQualityProfile))
+	}
 	if rt.projects != nil {
 		mux.HandleFunc("POST /api/v1/projects", rt.authz(userdom.PermOperate, rt.createProject))
 		mux.HandleFunc("GET /api/v1/projects", rt.authz(userdom.PermView, rt.listProjects))
@@ -224,6 +234,9 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/projects/{key}/issues/{id}/transitions", rt.authz(userdom.PermReview, rt.transitionProjectIssue))
 		mux.HandleFunc("GET /api/v1/projects/{key}/issues/{id}/history", rt.authz(userdom.PermView, rt.projectIssueHistory))
 		mux.HandleFunc("PUT /api/v1/projects/{key}/gate", rt.authz(userdom.PermOperate, rt.assignProjectGate))
+		if rt.qualityProfiles != nil {
+			mux.HandleFunc("PUT /api/v1/projects/{key}/profiles/{language}", rt.authz(userdom.PermOperate, rt.assignProjectProfile))
+		}
 		mux.HandleFunc("POST /api/v1/projects/{key}/analyses", rt.authz(userdom.PermOperate, rt.startProjectAnalysis))
 		mux.HandleFunc("GET /api/v1/projects/{key}/analyses", rt.authz(userdom.PermView, rt.listProjectAnalyses))
 		mux.HandleFunc("GET /api/v1/projects/{key}/analyses/{id}", rt.authz(userdom.PermView, rt.getProjectAnalysis))

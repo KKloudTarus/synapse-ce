@@ -19,6 +19,7 @@ import { SecurityHotspotsPage } from './pages/SecurityHotspots'
 import { ProjectIssuesPage } from './pages/ProjectIssues'
 import { ProjectMeasuresPage } from './pages/ProjectMeasuresPage'
 import { QualityGates } from './pages/QualityGates'
+import { QualityProfiles } from './pages/QualityProfiles'
 
 export default function App() {
   return (
@@ -39,6 +40,7 @@ function Gate() {
         <Route path="engagements/:id" element={<EngagementDetail />} />
         <Route path="code-quality" element={<CodeQualityProjects />} />
         <Route path="code-quality/gates" element={<QualityGates />} />
+        <Route path="code-quality/profiles" element={<QualityProfiles />} />
         <Route path="code-quality/projects/:key" element={<CodeQualityProject />}>
           <Route index element={<ProjectOverviewPage />} />
           <Route path="hotspots" element={<SecurityHotspotsPage />} />

@@ -25,6 +25,7 @@ import (
 	issuesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/issues"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	qualitygatesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/qualitygates"
+	qualityprofilesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/qualityprofiles"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 )
 
@@ -43,6 +44,7 @@ type Service struct {
 	findings         ports.FindingRepository
 	gates            *qualitygatesuc.Service
 	gateMutator      ports.QualityGateMutator
+	profiles         *qualityprofilesuc.Service
 	allowLocalSource bool
 	cursorSecret     []byte
 }
@@ -57,6 +59,7 @@ func (s *Service) SetAnalysisStore(store ports.ProjectAnalysisStore)      { s.an
 func (s *Service) SetHotspotStore(store ports.ProjectHotspotStore)        { s.hotspots = store }
 func (s *Service) SetIssueStore(store ports.ProjectIssueStore)            { s.issues = store }
 func (s *Service) SetRuleCatalog(catalog ports.RuleCatalog)               { s.ruleCatalog = catalog }
+func (s *Service) SetQualityProfiles(profiles *qualityprofilesuc.Service) { s.profiles = profiles }
 func (s *Service) SetFindingRepository(repo ports.FindingRepository)      { s.findings = repo }
 func (s *Service) SetQualityGates(gates *qualitygatesuc.Service)          { s.gates = gates }
 func (s *Service) SetQualityGateMutator(mutator ports.QualityGateMutator) { s.gateMutator = mutator }
@@ -409,6 +412,16 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 		}
 	}
 	all = finding.Publishable(all)
+	// Honor the project's assigned quality profiles: deactivate rules and apply severity overrides
+	// before classification, so both issues and hotspots reflect the profile (P9, #183). Languages with
+	// no assignment (or assigned to the built-in default) contribute nothing.
+	if s.profiles != nil {
+		overlay, err := s.profiles.OverlayForProject(ctx, p.TenantID, p.DefaultProfileByLang)
+		if err != nil {
+			return fmt.Errorf("resolve project quality profiles: %w", err)
+		}
+		all = overlay.Apply(all)
+	}
 	if s.ruleCatalog == nil {
 		return fmt.Errorf("classify project hotspots: rule catalog is not configured")
 	}
