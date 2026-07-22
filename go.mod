@@ -6,6 +6,7 @@ require (
 	github.com/cilium/ebpf v0.22.0
 	github.com/digitorus/timestamp v0.0.0-20250524132541-c45532741eea
 	github.com/go-enry/go-enry/v2 v2.9.6
+	github.com/google/go-containerregistry v0.20.6
 	github.com/google/licensecheck v0.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
@@ -25,6 +26,7 @@ require (
 	github.com/boombuler/barcode v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
+	github.com/containerd/stargz-snapshotter/estargz v0.16.3 // indirect
 	github.com/digitorus/pkcs7 v0.0.0-20230713084857-e76b763bdc49 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/f-amaral/go-async v0.3.0 // indirect
@@ -45,6 +47,8 @@ require (
 	github.com/minio/crc64nvme v1.1.1 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/opencontainers/go-digest v1.0.0 // indirect
+	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pdfcpu/pdfcpu v0.11.1 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -53,6 +57,7 @@ require (
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/tinylib/msgp v1.6.1 // indirect
+	github.com/vbatts/tar-split v0.12.1 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect

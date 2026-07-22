@@ -292,6 +292,12 @@ var imageRefRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@-]*$`)
 // with egress restricted to the registry. syft auto-detects the layout (oci-dir scan).
 func (a *Acquirer) acquireImage(ctx context.Context, ref string) (*ports.Workspace, error) {
 	ref = strings.TrimSpace(ref)
+	// Airgapped path: a local `docker save` tarball (offline delivery, e.g. an SFTP bundle)
+	// is loaded in-process into an OCI layout — no registry, no crane. A bare registry
+	// reference has no archive suffix / is not a file on disk, so this never intercepts one.
+	if isLocalImageArchive(ref) {
+		return a.acquireImageArchive(ctx, ref)
+	}
 	if err := validateImageRef(ref); err != nil {
 		return nil, err
 	}
