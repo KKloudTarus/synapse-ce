@@ -49,6 +49,10 @@ jobs:
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           version: "~> v2"
-          args: release --clean
+          # --skip=docker: the `dockers_v2` multi-platform image build needs a Dockerfile.cli
+          # context fix (the per-platform binary path); tracked separately. Binaries + archives +
+          # the GitHub Release still publish, which is what the `KKloudTarus/synapse-ce` action and
+          # the CI workflows install from. Re-enable the image (drop this skip) once dockers_v2 is fixed.
+          args: release --clean --skip=docker
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
