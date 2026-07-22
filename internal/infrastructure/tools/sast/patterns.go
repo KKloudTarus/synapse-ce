@@ -64,6 +64,9 @@ var cSourceExts = map[string]bool{
 var pyExts = map[string]bool{".py": true, ".pyi": true, ".pyw": true, ".pyx": true}
 var javaExts = map[string]bool{".java": true}
 var goExts = map[string]bool{".go": true}
+var csExts = map[string]bool{".cs": true}
+var cExts = map[string]bool{".c": true, ".h": true}
+var cppExts = map[string]bool{".cpp": true, ".cc": true, ".cxx": true, ".c++": true, ".hpp": true, ".hh": true, ".hxx": true, ".h++": true}
 var jsExts = map[string]bool{
 	".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
 	".ts": true, ".tsx": true, ".mts": true, ".cts": true, // .mts/.cts are first-class TS ESM/CJS extensions

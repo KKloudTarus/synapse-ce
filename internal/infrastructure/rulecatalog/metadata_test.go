@@ -170,10 +170,11 @@ func TestMetadata_NoPlaceholders(t *testing.T) {
 		for _, f := range fields {
 			for _, b := range bad {
 				if strings.Contains(f, b) {
-					// EXCEPTION: rules that are legitimately ABOUT the TODO/FIXME markers or the
-					// context.TODO() API name — the tokens are the subject, not placeholder text.
+					// EXCEPTION: rules that are legitimately ABOUT the TODO/FIXME/XXX markers or the
+					// context.TODO() API name — the tokens are the subject, not placeholder text. Any
+					// per-language "*-todo-*" marker rule qualifies.
 					if (b == "TODO" || b == "FIXME" || b == "XXX") &&
-						(r.Key == "quality-todo-comment" || r.Key == "go-todo-marker" || r.Key == "go-context-todo") {
+						(strings.Contains(string(r.Key), "todo") || r.Key == "quality-todo-comment") {
 						continue
 					}
 					t.Errorf("Rule %s leaked placeholder/generic text %q in metadata", r.Key, b)
@@ -191,6 +192,9 @@ func TestMetadata_ApprovedLanguage(t *testing.T) {
 		"Python":                true,
 		"JavaScript/TypeScript": true,
 		"C/C++/Objective-C":     true,
+		"C#":                    true,
+		"C":                     true,
+		"C++":                   true,
 		"Go":                    true,
 		"Dockerfile":            true,
 		"Docker Compose":        true,

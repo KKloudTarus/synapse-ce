@@ -64,8 +64,14 @@ func TestCatalogParity(t *testing.T) {
 			expectedLang = "Java"
 		case tc.exts != nil && tc.exts[".go"]:
 			expectedLang = "Go"
+		case tc.exts != nil && tc.exts[".cs"]:
+			expectedLang = "C#"
+		case tc.exts != nil && tc.exts[".c"] && tc.exts[".cpp"]:
+			expectedLang = "C/C++/Objective-C" // legacy combined cSourceExts rule
 		case tc.exts != nil && tc.exts[".c"]:
-			expectedLang = "C/C++/Objective-C"
+			expectedLang = "C" // cExts (C-only, no .cpp)
+		case tc.exts != nil && tc.exts[".cpp"]:
+			expectedLang = "C++" // cppExts (C++-only, no .c)
 		case explicitSASTLanguages[tc.id] != "":
 			expectedLang = explicitSASTLanguages[tc.id]
 		default:
