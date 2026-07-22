@@ -598,6 +598,11 @@ const (
 
 type ScanOptions struct {
 	Mode string `json:"mode"`
+	// PolicyDir overrides where the repo-committed accepted-risk policy (.synapseignore / OpenVEX) is read
+	// from. Empty ⇒ the scanned workspace (ws.Dir), correct for a source/repo scan where the policy travels
+	// with the code. For an IMAGE scan the workspace is the materialized image, which does NOT carry the
+	// operator's CI-repo governance, so the CLI sets this to the invocation CWD (the checked-out repo).
+	PolicyDir string `json:"policy_dir,omitempty"`
 	// DetectionPriority selects comprehensive (default) or precise; see the Detection* consts.
 	DetectionPriority string                  `json:"detection_priority,omitempty"`
 	CodeQuality       bool                    `json:"code_quality,omitempty"`
@@ -2194,8 +2199,14 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// accepted-risk (SuppressedFindings) so a CI --fail-on gate can exempt them, but does NOT remove them:
 	// they stay reported, persisted, and evidence-sealed, so an acceptance can never hide a finding from a
 	// deliverable or the tamper-evident record. Expired/malformed rules are surfaced, not applied. Best-effort.
+	// The accepted-risk policy is CI-repo governance: read it from opts.PolicyDir when set (the invocation
+	// CWD for an image scan), else from the scanned workspace (a source/repo scan carries its own policy).
+	policyDir := ws.Dir
+	if opts.PolicyDir != "" {
+		policyDir = opts.PolicyDir
+	}
 	if s.suppression != nil {
-		if set, serr := s.suppression.Load(ctx, ws.Dir); serr == nil {
+		if set, serr := s.suppression.Load(ctx, policyDir); serr == nil {
 			applySuppressions(result, set, now)
 		}
 	}
@@ -2203,7 +2214,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// accepted-risk on the SAME surface (gate-exempt, still reported + sealed). A malformed doc is surfaced,
 	// not silently ignored, and fail-safe (nothing suppressed).
 	if s.vexLoader != nil {
-		if doc, verr := s.vexLoader.Load(ctx, ws.Dir); verr != nil {
+		if doc, verr := s.vexLoader.Load(ctx, policyDir); verr != nil {
 			result.SourceWarnings = append(result.SourceWarnings, "in-repo VEX (.synapse.vex.json) was not applied (unreadable or not a valid OpenVEX document)")
 		} else {
 			applyVEX(result, doc)

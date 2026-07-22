@@ -1328,7 +1328,16 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		return fmt.Errorf("register ephemeral engagement: %w", err)
 	}
 
-	res, err := sca.ScanWithOptions(ctx, "synapse-cli", eng.ID, ports.AcquireRequest{Kind: acqKind, Value: target}, scauc.ScanOptions{Mode: mode, DetectionPriority: priority})
+	// For an image scan the workspace is the materialized image, which does not carry the CI repo's
+	// accepted-risk policy (.synapseignore / OpenVEX). Read that policy from the invocation CWD (the
+	// checked-out repo) instead. Source scans leave PolicyDir empty (policy travels with the scanned tree).
+	policyDir := ""
+	if image {
+		if cwd, werr := os.Getwd(); werr == nil {
+			policyDir = cwd
+		}
+	}
+	res, err := sca.ScanWithOptions(ctx, "synapse-cli", eng.ID, ports.AcquireRequest{Kind: acqKind, Value: target}, scauc.ScanOptions{Mode: mode, DetectionPriority: priority, PolicyDir: policyDir})
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
