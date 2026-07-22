@@ -36,62 +36,63 @@ import (
 
 // Service orchestrates the SCA pipeline over swappable ports.
 type Service struct {
-	engagements       ports.EngagementRepository
-	findings          ports.FindingRepository
-	scans             ports.ScanRepository
-	results           ports.ScanResultStore
-	importedSBOM      ports.ImportedSBOMStore
-	jobs              ports.ScanJobStore
-	runs              ports.ScanRunStore
-	evidence          *evidenceuc.Service
-	ids               ports.IDGenerator
-	jobQueue          ports.JobQueue  // optional; when set, StartScan defers to the durable queue
-	runLock           ports.RunLocker // optional; guards single active execution per scan job
-	prov              ports.Provenance
-	clock             ports.Clock
-	audit             ports.AuditLogger
-	minSeverity       shared.Severity
-	timeout           time.Duration
-	acquirer          ports.Acquirer
-	detector          ports.LanguageDetector
-	sbomGen           ports.SBOMGenerator
-	sources           []ports.DetectionSource
-	riskEnricher      ports.RiskEnricher
-	licScan           ports.LicenseScanner
-	licEnricher       ports.LicenseEnricher
-	sbomEnricher      ports.SBOMEnricher              // optional manifest enrichment (gem edges, maven/gradle deps, pnpm scope)
-	licCoord          ports.MavenCoordResolver        // optional: recover real Maven coords from JAR pom.properties before license lookup
-	jarChecksum       ports.JarChecksumResolver       // optional: capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
-	jarHash           ports.JarHashResolver           // optional: recover coords of shaded/metadata-less JARs via SHA-1
-	licFile           ports.LicenseFileResolver       // optional offline license-text fallback from JAR LICENSE files
-	sastAnalyzer      ports.SASTAnalyzer              // optional deterministic pattern-SAST over the live workspace
-	secretScanner     ports.SecretScanner             // optional deterministic secret scan over the live workspace
-	misconfig         ports.MisconfigScanner          // optional deterministic IaC/config misconfig scan over the live workspace
-	fpTriager         ports.FPTriager                 // optional LLM false-positive critique of production-scope source findings
-	osPkgCataloger    ports.OSPackageCataloger        // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
-	instCataloger     ports.InstalledPackageCataloger // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
-	suppression       ports.SuppressionLoader         // optional repo-committed .synapseignore accepted-risk policy
-	vexLoader         ports.VEXLoader                 // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
-	complianceOn      bool                            // when set, attach the AppSec-baseline compliance report to a scan
-	dbMaxAgeDays      int                             // when > 0, warn if a reference DB (KEV/EPSS/vuln-DB) is older than this
-	detectionPriority string                          // server default detection priority (comprehensive|precise); empty = comprehensive
-	reachability      ports.ReachabilityRecorder      // optional deterministic Tier-2 reachability proof (Go call-graph)
-	pyReachability    ports.ReachabilityRecorder      // optional deterministic Tier-1 Python import-reachability proof
-	correlation       ports.CorrelationRecorder       // optional cross-check disagreement → judgment minter
-	sbomGen2          ports.SBOMGenerator             // optional 2nd SBOM producer for the cross-check
-	sbomCache         ports.SBOMCache                 // optional content+version-addressed cache of the generated SBOM
-	sbomCrossCheck    ports.SBOMCrossCheckRecorder    // optional SBOM-producer disagreement → judgment minter
-	taint             ports.TaintScanner              // optional deterministic taint-analysis → gated CapSAST proposals
-	graphResolver     ports.DependencyGraphResolver   // optional transitive-edge resolver (Go via `go mod graph`)
-	mavenResolver     ports.MavenResolver             // optional Maven transitive-tree resolver (`mvn dependency:list`)
-	gradleResolver    ports.GradleResolver            // optional Gradle transitive-tree resolver (`gradle dependencies`)
-	npmResolver       ports.NPMResolver               // optional npm resolver (`npm install --package-lock-only`) for a lockfile-less package.json
-	manifestResolvers []ports.ManifestResolver        // optional lockfile-less resolvers for composer.json / Gemfile / pyproject.toml / ...
-	jvmReach          ports.JVMReachabilityAnalyzer   // optional coarse JVM class-reachability tagger
-	sevEnricher       ports.SeverityEnricher          // optional NVD CVSS backfill for unknown-severity vulns
-	ignoreUnfixed     bool                            // when set, don't promote no-fix vulns to findings (Trivy --ignore-unfixed)
-	guard             *execution.Guard                // shared scope + window + audit gate; built in NewService
-	codeQuality       interface {
+	engagements        ports.EngagementRepository
+	findings           ports.FindingRepository
+	scans              ports.ScanRepository
+	results            ports.ScanResultStore
+	importedSBOM       ports.ImportedSBOMStore
+	jobs               ports.ScanJobStore
+	runs               ports.ScanRunStore
+	evidence           *evidenceuc.Service
+	ids                ports.IDGenerator
+	jobQueue           ports.JobQueue  // optional; when set, StartScan defers to the durable queue
+	runLock            ports.RunLocker // optional; guards single active execution per scan job
+	prov               ports.Provenance
+	clock              ports.Clock
+	audit              ports.AuditLogger
+	minSeverity        shared.Severity
+	timeout            time.Duration
+	acquirer           ports.Acquirer
+	detector           ports.LanguageDetector
+	sbomGen            ports.SBOMGenerator
+	sources            []ports.DetectionSource
+	riskEnricher       ports.RiskEnricher
+	licScan            ports.LicenseScanner
+	licEnricher        ports.LicenseEnricher
+	sbomEnricher       ports.SBOMEnricher              // optional manifest enrichment (gem edges, maven/gradle deps, pnpm scope)
+	licCoord           ports.MavenCoordResolver        // optional: recover real Maven coords from JAR pom.properties before license lookup
+	jarChecksum        ports.JarChecksumResolver       // optional: capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
+	jarHash            ports.JarHashResolver           // optional: recover coords of shaded/metadata-less JARs via SHA-1
+	licFile            ports.LicenseFileResolver       // optional offline license-text fallback from JAR LICENSE files
+	sastAnalyzer       ports.SASTAnalyzer              // optional deterministic pattern-SAST over the live workspace
+	secretScanner      ports.SecretScanner             // optional deterministic secret scan over the live workspace
+	includeTestSecrets bool                            // report secrets in test/fixture/docs paths (default false: suppress)
+	misconfig          ports.MisconfigScanner          // optional deterministic IaC/config misconfig scan over the live workspace
+	fpTriager          ports.FPTriager                 // optional LLM false-positive critique of production-scope source findings
+	osPkgCataloger     ports.OSPackageCataloger        // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
+	instCataloger      ports.InstalledPackageCataloger // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
+	suppression        ports.SuppressionLoader         // optional repo-committed .synapseignore accepted-risk policy
+	vexLoader          ports.VEXLoader                 // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
+	complianceOn       bool                            // when set, attach the AppSec-baseline compliance report to a scan
+	dbMaxAgeDays       int                             // when > 0, warn if a reference DB (KEV/EPSS/vuln-DB) is older than this
+	detectionPriority  string                          // server default detection priority (comprehensive|precise); empty = comprehensive
+	reachability       ports.ReachabilityRecorder      // optional deterministic Tier-2 reachability proof (Go call-graph)
+	pyReachability     ports.ReachabilityRecorder      // optional deterministic Tier-1 Python import-reachability proof
+	correlation        ports.CorrelationRecorder       // optional cross-check disagreement → judgment minter
+	sbomGen2           ports.SBOMGenerator             // optional 2nd SBOM producer for the cross-check
+	sbomCache          ports.SBOMCache                 // optional content+version-addressed cache of the generated SBOM
+	sbomCrossCheck     ports.SBOMCrossCheckRecorder    // optional SBOM-producer disagreement → judgment minter
+	taint              ports.TaintScanner              // optional deterministic taint-analysis → gated CapSAST proposals
+	graphResolver      ports.DependencyGraphResolver   // optional transitive-edge resolver (Go via `go mod graph`)
+	mavenResolver      ports.MavenResolver             // optional Maven transitive-tree resolver (`mvn dependency:list`)
+	gradleResolver     ports.GradleResolver            // optional Gradle transitive-tree resolver (`gradle dependencies`)
+	npmResolver        ports.NPMResolver               // optional npm resolver (`npm install --package-lock-only`) for a lockfile-less package.json
+	manifestResolvers  []ports.ManifestResolver        // optional lockfile-less resolvers for composer.json / Gemfile / pyproject.toml / ...
+	jvmReach           ports.JVMReachabilityAnalyzer   // optional coarse JVM class-reachability tagger
+	sevEnricher        ports.SeverityEnricher          // optional NVD CVSS backfill for unknown-severity vulns
+	ignoreUnfixed      bool                            // when set, don't promote no-fix vulns to findings (Trivy --ignore-unfixed)
+	guard              *execution.Guard                // shared scope + window + audit gate; built in NewService
+	codeQuality        interface {
 		BuildReport(context.Context, string) (codequality.Report, error)
 	}
 	projectAnalysisRecorder interface {
@@ -158,6 +159,11 @@ func (s *Service) SetSASTAnalyzer(a ports.SASTAnalyzer) { s.sastAnalyzer = a }
 
 // SetSecretScanner configures the optional deterministic secret scanner. nil ⇒ no secret scanning.
 func (s *Service) SetSecretScanner(sc ports.SecretScanner) { s.secretScanner = sc }
+
+// SetIncludeTestSecrets controls whether secret hits in test/fixture/docs/detector-pattern paths are
+// reported. Default false: they are suppressed (they are overwhelmingly fake credentials, not leaked
+// production secrets), so a customer report is not flooded with test-double noise.
+func (s *Service) SetIncludeTestSecrets(v bool) { s.includeTestSecrets = v }
 
 // SetFPTriage injects the optional LLM false-positive triager. When set, the pipeline critiques the
 // production-scope first-party source findings after they are built and records the advisory verdicts on
@@ -2167,7 +2173,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		if serr != nil {
 			return nil, fmt.Errorf("scan secrets: %w", serr)
 		}
-		result.Findings = append(result.Findings, buildSecretFindings(engagementID, secretRaws, now, s.minSeverity)...)
+		result.Findings = append(result.Findings, buildSecretFindings(engagementID, secretRaws, now, s.minSeverity, s.includeTestSecrets)...)
 	}
 	if opts.scansVulnerabilities() && s.misconfig != nil {
 		misRaws, merr := s.misconfig.ScanConfigs(ctx, ws.Dir)

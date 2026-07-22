@@ -186,6 +186,7 @@ func (a *Analyzer) scanLines(rel, ext string, lines []string, project projectCon
 				h := ports.SASTRawFinding{
 					File: rel, Line: line, RuleID: r.id, CWE: r.cwe,
 					Severity: r.severity, Title: r.title, Description: r.desc,
+					RuleType: string(r.ruleType()), RuleQuality: string(r.ruleQuality()),
 				}
 				enrichAppSecContext(&h, lines, line, rel, project)
 				hits = append(hits, h)
@@ -310,6 +311,7 @@ func (a *Analyzer) findingFromRule(rel, ext string, line int, ruleID string, lin
 		h := ports.SASTRawFinding{
 			File: rel, Line: line, RuleID: r.id, CWE: r.cwe,
 			Severity: r.severity, Title: r.title, Description: r.desc,
+			RuleType: string(r.ruleType()), RuleQuality: string(r.ruleQuality()),
 		}
 		enrichAppSecContext(&h, lines, line, rel, project)
 		return h, true

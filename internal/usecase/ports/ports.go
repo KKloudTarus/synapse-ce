@@ -1041,6 +1041,13 @@ type SASTRawFinding struct {
 	Severity    shared.Severity
 	Title       string
 	Description string
+	// RuleType / RuleQuality carry the rule's classification so the finding pipeline can route a
+	// security weakness (Kind=sast) apart from a maintainability code-smell (Kind=quality) or a
+	// likely bug (Kind=reliability) — empty ⇒ security vulnerability. Values are the domain/rule
+	// Type ("vulnerability"/"code_smell"/"bug"/"security_hotspot") and Quality
+	// ("security"/"maintainability"/"reliability") strings.
+	RuleType    string
+	RuleQuality string
 	// AppSec proof fields are deterministic, bounded context extracted by the in-tree analyzer.
 	// They are not exploit proof by themselves; they give the agent/human a static-analysis-grade
 	// validation envelope without sending raw source to an LLM or running active probes.
