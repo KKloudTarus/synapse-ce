@@ -2131,7 +2131,15 @@ weak-hash-md5
 weak-hash-sha1
 weak-rsa-key-size
 world-writable-permissions
+xml:doctype-present
 xml:duplicate-attribute
+xml:entity-expansion
+xml:external-dtd
+xml:external-entity
+xml:external-parameter-entity
+xml:external-schema-location
+xml:hardcoded-secret
 xml:not-well-formed
+xml:xinclude
 xpath-injection
 xxe-insecure-xml-parsing
