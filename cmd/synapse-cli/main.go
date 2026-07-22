@@ -8,9 +8,11 @@
 package main
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -96,6 +98,14 @@ func main() {
 			usage() // missing <dir> exits 2, consistent with scan's missing-path
 		}
 		if err := syncAdvisories(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
+			os.Exit(1)
+		}
+	case "build-cvss-db":
+		if len(os.Args) < 4 {
+			usage() // need <out> + at least one NVD json input
+		}
+		if err := runBuildCVSSDB(os.Args[2], os.Args[3:]); err != nil {
 			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 			os.Exit(1)
 		}
@@ -263,6 +273,41 @@ func printable(s string) string {
 
 // runInventory prints a per-language code-size inventory for a local source tree (the Phase-0
 // code-quality surface). Pure-Go, read-only; no engagement/DB needed.
+// runBuildCVSSDB parses NVD JSON feed files into a compact local CVSS database (JSONL, gzip if the
+// out path ends .gz) that the offline severity enricher (SYNAPSE_NVD_CVSS_DB) reads to backfill CVSS
+// with no network and no rate limit. Inputs may be plain or .gz NVD JSON (API 2.0 or legacy 1.1) and
+// may be shell globs.
+func runBuildCVSSDB(out string, inputs []string) error {
+	var paths []string
+	for _, in := range inputs {
+		if matches, gerr := filepath.Glob(in); gerr == nil && len(matches) > 0 {
+			paths = append(paths, matches...)
+		} else {
+			paths = append(paths, in)
+		}
+	}
+	if len(paths) == 0 {
+		return fmt.Errorf("no NVD json inputs")
+	}
+	f, err := os.Create(out)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", out, err)
+	}
+	defer f.Close()
+	var w io.Writer = f
+	if strings.HasSuffix(strings.ToLower(out), ".gz") {
+		gz := gzip.NewWriter(f)
+		defer gz.Close()
+		w = gz
+	}
+	n, err := nvd.BuildDB(paths, w)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "synapse-cli: built CVSS DB %s – %d CVE entries from %d file(s)\n", out, n, len(paths))
+	return nil
+}
+
 func runInventory(dir string) error {
 	// Wire the synapse-ast sidecar so non-Go languages get accurate function counts too. If the binary is
 	// absent or built without the tree-sitter backend, the provider reports unavailable and the inventory
@@ -921,6 +966,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-distros # fetch + ingest OS-package advisories (Debian/Alpine) from OSV (large; requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --csaf <dir> # ingest a local CSAF 2.0 advisory dump (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --oval <dir> # ingest a local Ubuntu OVAL dump (com.ubuntu.*.cve.oval.xml[.bz2]; requires SYNAPSE_DB_DSN)")
+	fmt.Fprintln(os.Stderr, "  synapse-cli build-cvss-db <out.jsonl[.gz]> <nvd-*.json[.gz]...>  # build an OFFLINE CVSS DB from NVD JSON feeds; use it via SYNAPSE_NVD_CVSS_DB to backfill CVSS with no network/rate-limit")
 	os.Exit(2)
 }
 
@@ -1195,12 +1241,6 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		sca.SetSecretScanner(secretscan.New()) // deterministic, redacted secret scan (CI-friendly)
 		sca.SetIncludeTestSecrets(includeTest) // by default suppress test/fixture/docs/detector-pattern secrets (fake creds)
 	}
-	// Optional NVD CVSS backfill for CVEs the detection sources left without a CVSS score
-	// (opt-in + online only; NVD is rate-limited, so this is bounded/best-effort).
-	if !(offline || cfg.Offline) && strings.EqualFold(os.Getenv("SYNAPSE_NVD_ENRICH_ENABLED"), "true") {
-		sca.SetSeverityEnricher(nvd.New(os.Getenv("SYNAPSE_NVD_BASE_URL"), os.Getenv("SYNAPSE_NVD_API_KEY"), nil))
-		fmt.Fprintln(os.Stderr, "synapse-cli: NVD CVSS enrichment ON (backfills unknown-severity CVEs from NVD; rate-limited, best-effort)")
-	}
 	if cfg.MisconfigEnabled {
 		// Trusted-local model (like the CLI's maven/gradle resolvers): render Helm charts via a direct
 		// `helm template` exec. It runs the chart's templates on the host, so use it only on a project you trust.
@@ -1233,8 +1273,21 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	}
 	// JAR-embedded licenses + workspace LICENSE files for every ecosystem.
 	sca.SetLicenseFileResolver(licensefile.NewChain(jarlicense.New(), licensefile.New()))
-	// Backfill unknown vuln severities from NVD CVSS (best-effort; set SYNAPSE_NVD_API_KEY for throughput).
-	sca.SetSeverityEnricher(nvd.New(cfg.NVDAPIURL, cfg.NVDAPIKey, nil).WithBudget(cfg.NVDBudget))
+	// Backfill CVSS. Prefer a LOCAL NVD CVSS DB (offline: no network, no rate limit, fills EVERY
+	// missing CVSS — the airgapped path and the way to give large dependency trees real CVSS scores)
+	// when SYNAPSE_NVD_CVSS_DB points to a DB built by `synapse-cli build-cvss-db`; otherwise fall
+	// back to the online NVD enricher (rate-limited, best-effort, unknown-severity only).
+	if p := strings.TrimSpace(os.Getenv("SYNAPSE_NVD_CVSS_DB")); p != "" {
+		if oe, oerr := nvd.LoadOffline(p); oerr != nil {
+			fmt.Fprintf(os.Stderr, "synapse-cli: NVD offline CVSS DB %q not usable (%v) – falling back to online NVD\n", p, oerr)
+			sca.SetSeverityEnricher(nvd.New(cfg.NVDAPIURL, cfg.NVDAPIKey, nil).WithBudget(cfg.NVDBudget))
+		} else {
+			sca.SetSeverityEnricher(oe)
+			fmt.Fprintf(os.Stderr, "synapse-cli: NVD offline CVSS DB ON (%d CVEs) – backfills missing CVSS locally, no network/rate-limit\n", oe.Size())
+		}
+	} else {
+		sca.SetSeverityEnricher(nvd.New(cfg.NVDAPIURL, cfg.NVDAPIKey, nil).WithBudget(cfg.NVDBudget))
+	}
 	// --ignore-unfixed (or SYNAPSE_IGNORE_UNFIXED) drops vulns with no upstream fix – the
 	// classic distro-noise reducer for OS-package scans (matches Trivy's --ignore-unfixed).
 	sca.SetIgnoreUnfixed(ignoreUnfixed || cfg.IgnoreUnfixed)
