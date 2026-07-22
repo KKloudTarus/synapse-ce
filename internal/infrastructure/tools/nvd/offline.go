@@ -41,7 +41,7 @@ func LoadOffline(path string) (*OfflineEnricher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open cvss db: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var r io.Reader = f
 	if strings.HasSuffix(strings.ToLower(path), ".gz") {
@@ -49,7 +49,7 @@ func LoadOffline(path string) (*OfflineEnricher, error) {
 		if gerr != nil {
 			return nil, fmt.Errorf("gunzip cvss db: %w", gerr)
 		}
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		r = gz
 	}
 

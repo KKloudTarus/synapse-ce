@@ -48,7 +48,7 @@ func (r Reader) Snippet(ctx context.Context, file string, line, radius int) (str
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	data, err := io.ReadAll(io.LimitReader(f, maxSnippetFileBytes))
 	if err != nil {
 		return "", err

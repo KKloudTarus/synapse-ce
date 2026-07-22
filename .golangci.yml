@@ -40,15 +40,29 @@ linters:
         - G302
         - G304
         - G306
+        - G703 # taint-based path-traversal variant of G304; same architectural mitigation (path validation + bounded walks)
         - G704
+    misspell:
+      # "alse" is flagged as a misspelling of "else" inside the literal `[Ff]alse` in generated
+      # language-pack regexes (e.g. the C# `Encrypt = false` rule) — a false positive on "false".
+      ignore-rules:
+        - alse
 
   exclusions:
     rules:
-      # Tests may skip error checks and security rules on fixtures.
+      # The rule catalog is literally a catalog of secret-detection patterns and example strings, so
+      # gosec's hardcoded-credential heuristic (G101) fires on the rule data itself — a false positive.
+      - path: internal/infrastructure/rulecatalog/
+        linters:
+          - gosec
+        text: "G101"
+      # Tests may skip error checks and security rules on fixtures, and keep mock scaffolding
+      # (unused struct fields / helper funcs) that documents an interface shape.
       - path: _test\.go
         linters:
           - gosec
           - errcheck
+          - unused
       # Quickfix refactor hints (QF*) are suggestions, not defects; S1021 conflicts with the
       # recursive-closure idiom (a declared name the closure references).
       - linters:

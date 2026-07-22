@@ -19,7 +19,7 @@ import (
 // with no CVSS vector is skipped (nothing to store). Returns the number of entries written.
 func BuildDB(inPaths []string, out io.Writer) (int, error) {
 	w := bufio.NewWriter(out)
-	defer w.Flush()
+	defer func() { _ = w.Flush() }()
 	enc := json.NewEncoder(w)
 	total := 0
 	for _, p := range inPaths {
@@ -37,14 +37,14 @@ func ingestFile(path string, enc *json.Encoder) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var r io.Reader = f
 	if strings.HasSuffix(strings.ToLower(path), ".gz") {
 		gz, gerr := gzip.NewReader(f)
 		if gerr != nil {
 			return 0, fmt.Errorf("gunzip: %w", gerr)
 		}
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		r = gz
 	}
 	var doc nvdFeed

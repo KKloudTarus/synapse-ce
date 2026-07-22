@@ -71,14 +71,14 @@ func (rt *Router) createProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.MultipartForm != nil {
-			defer r.MultipartForm.RemoveAll()
+			defer func() { _ = r.MultipartForm.RemoveAll() }()
 		}
 		f, h, ferr := r.FormFile("archive")
 		if ferr != nil {
 			writeJSON(w, http.StatusBadRequest, errorBody{Error: "archive file is required"})
 			return
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		in.Name, in.Key, in.GateID = r.FormValue("name"), r.FormValue("key"), r.FormValue("gate_id")
 		p, err = rt.projects.CreateFromArchive(r.Context(), in, h.Filename, f)
 	} else {
@@ -238,13 +238,13 @@ func parseCoverageUpload(w http.ResponseWriter, r *http.Request) (*measure.Cover
 		return nil, fmt.Errorf("%w: invalid or oversized coverage upload", shared.ErrValidation)
 	}
 	if r.MultipartForm != nil {
-		defer r.MultipartForm.RemoveAll()
+		defer func() { _ = r.MultipartForm.RemoveAll() }()
 	}
 	file, _, err := r.FormFile("coverage")
 	if err != nil {
 		return nil, fmt.Errorf("%w: coverage file is required", shared.ErrValidation)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, maxCoverageUploadBytes+1))
 	if err != nil || len(data) == 0 || len(data) > maxCoverageUploadBytes {
 		return nil, fmt.Errorf("%w: coverage file is empty or oversized", shared.ErrValidation)

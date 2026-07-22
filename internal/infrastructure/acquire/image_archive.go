@@ -96,17 +96,17 @@ func gunzipTo(src, dst string, maxBytes int64) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	gz, err := gzip.NewReader(in)
 	if err != nil {
 		return err
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	// +1 so an archive exactly at the cap isn't falsely flagged; >limit is the failure.
 	n, err := io.Copy(out, io.LimitReader(gz, limit+1))
 	if err != nil {

@@ -293,11 +293,11 @@ func runBuildCVSSDB(out string, inputs []string) error {
 	if err != nil {
 		return fmt.Errorf("create %s: %w", out, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var w io.Writer = f
 	if strings.HasSuffix(strings.ToLower(out), ".gz") {
 		gz := gzip.NewWriter(f)
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		w = gz
 	}
 	n, err := nvd.BuildDB(paths, w)

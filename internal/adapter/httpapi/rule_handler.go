@@ -139,12 +139,10 @@ func (rt *Router) listRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// make with an explicit length is never nil, so an empty result still marshals to `[]`, not null.
 	views := make([]ruleSummaryView, len(res))
 	for i, rl := range res {
 		views[i] = toRuleSummary(rl)
-	}
-	if views == nil {
-		views = []ruleSummaryView{}
 	}
 
 	writeJSON(w, http.StatusOK, views)

@@ -59,7 +59,6 @@ func stripComments(line string, syn commentSyntax, inBlock *bool) string {
 		return ""
 	}
 	// earliest of: a block-start or any line-comment marker
-	cut := -1
 	blockAt := -1
 	if syn.blockStart != "" {
 		blockAt = strings.Index(line, syn.blockStart)
@@ -84,8 +83,7 @@ func stripComments(line string, syn commentSyntax, inBlock *bool) string {
 		*inBlock = true
 		return line[:blockAt]
 	case lineAt >= 0:
-		cut = lineAt
-		return line[:cut]
+		return line[:lineAt]
 	default:
 		return line
 	}
