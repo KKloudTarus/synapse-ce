@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -210,7 +211,7 @@ func buildFindings(engagementID shared.ID, res *ScanResult, now time.Time, minSe
 			Impact:       vulnerability.Impact(sr.Severity, scope),
 			Priority:     sastPriority(sr.Severity),
 			Status:       finding.StatusOpen,
-			Kind:         finding.KindSAST,
+			Kind:         sastKind(sr),
 			RuleKey:      sr.RuleID,
 			DedupKey:     dedup,
 			Audit:        shared.Audit{CreatedAt: now, UpdatedAt: now},
@@ -219,14 +220,56 @@ func buildFindings(engagementID shared.ID, res *ScanResult, now time.Time, minSe
 	return out
 }
 
+// sastKind routes a pattern-SAST raw to the right finding kind so security weaknesses (Kind=sast)
+// are not diluted by style/quality lint in the output: a maintainability code-smell becomes
+// Kind=quality and a likely bug becomes Kind=reliability. An empty classification (the default for
+// the security-focused rules) stays Kind=sast.
+func sastKind(sr ports.SASTRawFinding) finding.Kind {
+	switch sr.RuleQuality {
+	case "maintainability":
+		return finding.KindQuality
+	case "reliability":
+		return finding.KindReliability
+	default:
+		return finding.KindSAST
+	}
+}
+
+// nonProductionSecretPath reports whether a secret hit sits in a test/fixture/example/docs/detector
+// path rather than shippable code. Such hits are overwhelmingly fake credentials (test doubles,
+// documentation samples, docker-compose dev defaults) or the secret-scanner's OWN detector patterns —
+// reporting them as leaked production credentials is noise. Suppressed by default; --include-test keeps them.
+func nonProductionSecretPath(p string) bool {
+	lp := strings.ToLower(filepath.ToSlash(p))
+	base := lp[strings.LastIndex(lp, "/")+1:]
+	for _, seg := range []string{"/test/", "/tests/", "/testdata/", "/fixtures/", "/fixture/",
+		"/examples/", "/example/", "/mock/", "/mocks/", "/docs/", "/doc/", "/samples/", "/testing/"} {
+		if strings.Contains(lp, seg) {
+			return true
+		}
+	}
+	if strings.HasSuffix(lp, "_test.go") || strings.HasSuffix(lp, ".test.js") || strings.HasSuffix(lp, ".test.ts") ||
+		strings.HasSuffix(lp, ".spec.js") || strings.HasSuffix(lp, ".spec.ts") || strings.Contains(base, "_test.") ||
+		strings.HasSuffix(lp, ".md") || strings.HasSuffix(lp, ".sample") || strings.HasSuffix(lp, ".example") ||
+		strings.HasPrefix(base, "docker-compose") || base == "patterns.yaml" || base == "patterns.yml" {
+		return true
+	}
+	return false
+}
+
 // buildSecretFindings turns redacted secret hits into ungated Kind=secret findings (deterministic,
 // publishable like SCA). The Match is already redacted by the scanner, so the raw credential is never
 // stored in the finding, the evidence seal, or the report.
-func buildSecretFindings(engagementID shared.ID, raws []ports.SecretRawFinding, now time.Time, minSeverity shared.Severity) []finding.Finding {
+func buildSecretFindings(engagementID shared.ID, raws []ports.SecretRawFinding, now time.Time, minSeverity shared.Severity, includeTest bool) []finding.Finding {
 	min := shared.SeverityRank(minSeverity)
 	out := make([]finding.Finding, 0, len(raws))
 	for _, sr := range raws {
 		if sr.Severity != shared.SeverityUnknown && shared.SeverityRank(sr.Severity) < min {
+			continue
+		}
+		// Suppress test/fixture/docs/detector-pattern hits by default (fake creds, not leaked
+		// production secrets); --include-test keeps them for completeness.
+		if !includeTest && nonProductionSecretPath(sr.File) {
 			continue
 		}
 		// Dedup on rule+file+line so a re-scan updates in place (1:1).

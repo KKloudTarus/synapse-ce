@@ -247,7 +247,7 @@ func TestBuildSecretFindings(t *testing.T) {
 		{File: "main.go", Line: 10, RuleID: "aws-key", Severity: shared.SeverityHigh, Title: "Hardcoded key"},
 	}
 	now := time.Now().UTC()
-	got := buildSecretFindings("eng1", raws, now, shared.SeverityMedium)
+	got := buildSecretFindings("eng1", raws, now, shared.SeverityMedium, true)
 	if len(got) != 1 {
 		t.Fatalf("want 1 secret finding, got %d", len(got))
 	}

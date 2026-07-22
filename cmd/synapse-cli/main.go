@@ -1184,11 +1184,22 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	if jvmReachOn {
 		sca.SetJVMReachability(jvmreach.New())
 	}
-	if cfg.SASTEnabled {
+	if cfg.SASTEnabled && !image {
 		sca.SetSASTAnalyzer(sast.New()) // deterministic pattern-SAST (CI-friendly)
+	} else if cfg.SASTEnabled && image {
+		// Source SAST over an assembled image rootfs is low-value (compiled artifacts, vendored trees)
+		// and scans the whole filesystem, which times out on large images. Scan SAST at the SOURCE repo.
+		fmt.Fprintln(os.Stderr, "synapse-cli: image mode – source SAST skipped (run SAST at source; image scan covers SCA/OS-CVE + secret + misconfig)")
 	}
 	if cfg.SecretScanEnabled {
 		sca.SetSecretScanner(secretscan.New()) // deterministic, redacted secret scan (CI-friendly)
+		sca.SetIncludeTestSecrets(includeTest) // by default suppress test/fixture/docs/detector-pattern secrets (fake creds)
+	}
+	// Optional NVD CVSS backfill for CVEs the detection sources left without a CVSS score
+	// (opt-in + online only; NVD is rate-limited, so this is bounded/best-effort).
+	if !(offline || cfg.Offline) && strings.EqualFold(os.Getenv("SYNAPSE_NVD_ENRICH_ENABLED"), "true") {
+		sca.SetSeverityEnricher(nvd.New(os.Getenv("SYNAPSE_NVD_BASE_URL"), os.Getenv("SYNAPSE_NVD_API_KEY"), nil))
+		fmt.Fprintln(os.Stderr, "synapse-cli: NVD CVSS enrichment ON (backfills unknown-severity CVEs from NVD; rate-limited, best-effort)")
 	}
 	if cfg.MisconfigEnabled {
 		// Trusted-local model (like the CLI's maven/gradle resolvers): render Helm charts via a direct
