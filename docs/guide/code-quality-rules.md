@@ -5,8 +5,9 @@
 This guide is for contributors adding or reviewing **code-quality rules**. Synapse's code-quality
 engine (see the [Features](features.md) guide) turns parsed source into `Kind=quality` /
 `Kind=reliability` findings and the A–E ratings. Each language ships a built-in **"Synapse way"**
-quality profile — a curated set of rules. This page defines how those rules are modelled, how they are
-authored, and the authoritative sources each language draws on.
+quality profile — **generated automatically from the catalog rules for that language** (every rule whose
+`Language` matches, at its default severity). This page defines how those rules are modelled, how they
+are authored, and the authoritative sources each language draws on.
 
 Tracking epic: [Code Quality as a product](https://github.com/KKloudTarus/synapse-ce/issues/174) ·
 language rule-pack tracker: [#185](https://github.com/KKloudTarus/synapse-ce/issues/185).
@@ -124,9 +125,35 @@ analyzer) before AST rules are possible are noted in the matrix below.
    rationale, and a compliant + non-compliant example.
 3. Implement detection (AST query preferred) and add a **golden test** per rule: a fixture that must
    flag and one that must not.
-4. Add the rule to the language's built-in "Synapse way" profile ([#183](https://github.com/KKloudTarus/synapse-ce/issues/183)).
-5. Keep the rule catalogue browsable ([#182](https://github.com/KKloudTarus/synapse-ce/issues/182)) and
-   gate-eligible ([#184](https://github.com/KKloudTarus/synapse-ce/issues/184)).
+4. Catalogue the rule ([#182](https://github.com/KKloudTarus/synapse-ce/issues/182)) with its
+   `Language` set. That is all that is required to ship it: the built-in **"Synapse way (<language>)"**
+   profile is generated from the catalog, so a correctly-`Language`-tagged rule is automatically active
+   in that language's default profile ([#183](https://github.com/KKloudTarus/synapse-ce/issues/183)),
+   browsable in the Rules explorer, and gate-eligible ([#184](https://github.com/KKloudTarus/synapse-ce/issues/184)).
+
+## Built-in profiles, custom profiles & the gate
+
+How a rule flows from the catalogue to an enforced gate result (the shipped
+[#182](https://github.com/KKloudTarus/synapse-ce/issues/182)/[#183](https://github.com/KKloudTarus/synapse-ce/issues/183)/[#184](https://github.com/KKloudTarus/synapse-ce/issues/184)
+plumbing):
+
+- **Built-in profile (generated, immutable).** For each language, `qualityprofile.BuiltIn` activates
+  every catalog rule for that `Language` at its default severity, under the key `synapse-way-<slug>`. It
+  is never stored and never edited — it always reflects the current catalogue.
+- **Custom profile (copy, editable).** A user copies a built-in into a tenant-scoped custom profile,
+  then **deactivates** rules or **overrides** severities. Deactivating/overriding is `PermOperate`-gated
+  and audited; it never touches SCA advisory findings (a profile can only affect first-party catalog
+  rules, so it can't suppress a dependency vulnerability).
+- **Assignment.** A profile is assigned per language per project. At analysis time the assigned profiles
+  are resolved into one overlay that drops deactivated rules and applies severity overrides before the
+  findings are classified, rated, and gated — so **analyses honor the assigned profile**.
+- **Gate.** Metrics feed the Quality Gate ([#184](https://github.com/KKloudTarus/synapse-ce/issues/184)):
+  the whole-codebase and Clean-as-You-Code (`new_*`) counts, ratings, hotspots-reviewed, and the
+  coverage/duplication metrics (`coverage`, `new_coverage`, `duplication_density`, `new_duplication`).
+
+The acceptance invariant — *every shipped language has a non-empty built-in profile* — is enforced by a
+test over the real catalogue (`internal/infrastructure/rulecatalog` → `qualityprofile.BuiltIn` per
+language), so adding the first rule for a new language automatically gives it a "Synapse way" profile.
 
 ## Language source matrix
 
