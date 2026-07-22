@@ -1,0 +1,185 @@
+# C++ language-pack rule specs, batch 5 (#199). Clean-room, line-detectable — removed/deprecated STL,
+# thread-lock temporaries, unscoped enum, remaining obsolete C APIs and format/varargs sinks. Origins cited.
+CC = "commentOnlyLine"
+
+
+def r(**k):
+    k.setdefault("lang", "cpp")
+    k.setdefault("owasp", "")
+    k.setdefault("effort", 15)
+    k.setdefault("tags", ["sast", "cpp"])
+    k.setdefault("cat_desc", k["desc"])
+    k.setdefault("skip", CC)
+    return k
+
+
+def removed(id_, name, re_, repl, ver, nc, c):
+    return r(id=id_, type="smell", qual="maint", sev="low", cwe="",
+             title=f"Use of {name}",
+             desc=f"{name} was removed/deprecated in {ver}.",
+             rationale=f"{name} is no longer part of modern C++ and should be replaced.",
+             remediation=f"Use {repl}.",
+             source="https://en.cppreference.com/w/cpp/keyword",
+             re=re_, nc=nc, c=c)
+
+
+def obsolete_c(id_, fn, repl, re_, nc, c, cwe=""):
+    return r(id=id_, type="smell", qual="maint", sev="info", cwe=cwe,
+             title=f"Use of {fn}()",
+             desc=f"{fn}() is an obsolete C-library function.",
+             rationale=f"{fn} is deprecated/non-portable; a modern replacement is clearer and safer.",
+             remediation=f"Use {repl}.",
+             source=f"https://man7.org/linux/man-pages/man3/{fn}.3.html",
+             re=re_, nc=nc, c=c)
+
+
+def fmtsink(id_, fn, re_, nc, c):
+    return r(id=id_, type="vuln", qual="sec", sev="high", cwe="CWE-134",
+             title=f"{fn}() with a non-literal format",
+             desc=f"{fn}() is called with a variable as the format string.",
+             rationale="An attacker-controlled format string enables memory disclosure/corruption (CWE-134).",
+             remediation="Use a literal format string.",
+             source="https://cwe.mitre.org/data/definitions/134.html",
+             re=re_, nc=nc, c=c)
+
+
+def reent(id_, fn, rfn):
+    return r(id=id_, type="smell", qual="maint", sev="low", cwe="CWE-676",
+             title=f"Use of {fn}()",
+             desc=f"{fn}() returns a pointer to shared static storage.",
+             rationale=f"Concurrent calls overwrite the shared result; {fn} is not thread-safe (CWE-676).",
+             remediation=f"Use {rfn}().",
+             source="https://cwe.mitre.org/data/definitions/676.html",
+             re=rf'\b{fn}\s*\(', nc=f'auto* p = {fn}(x);', c=f'{rfn}(x, &out, buf, sizeof(buf));')
+
+
+def locktemp(id_, name):
+    return r(id=id_, type="bug", qual="rel", sev="high", cwe="CWE-667",
+             title=f"Temporary std::{name}",
+             desc=f"A std::{name} is created as an unnamed temporary.",
+             rationale="An unnamed lock object is destroyed at the end of the full expression, so the critical section is unprotected (CWE-667).",
+             remediation="Give the lock a name so it lives for the intended scope.",
+             source="https://cwe.mitre.org/data/definitions/667.html",
+             re=rf'\b{name}\s*(<[^>]*>)?\s*\(',
+             nc=f'std::{name}(mtx);',
+             c=f'std::{name} guard(mtx);')
+
+
+RULES = [
+    r(id="cpp-unscoped-enum", type="smell", qual="maint", sev="low", cwe="",
+      title="Unscoped enum",
+      desc="A plain (unscoped) enum is declared.",
+      rationale="Unscoped enums leak their enumerators into the surrounding scope and convert implicitly to int (Core Guidelines Enum.3).",
+      remediation="Use an enum class.",
+      source="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#enum3-prefer-class-enums-over-plain-enums",
+      re=r'\benum\s+[A-Za-z_]\w*\s*\{',
+      nc='enum Color { Red, Green };',
+      c='enum class Color { Red, Green };'),
+    r(id="cpp-c-varargs", type="smell", qual="maint", sev="info", cwe="",
+      title="C-style variadic function",
+      desc="A function uses a C-style ... parameter pack.",
+      rationale="C varargs are not type-safe and bypass overload resolution; variadic templates are type-checked (Core Guidelines).",
+      remediation="Use a variadic template (or std::initializer_list).",
+      source="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#f55-dont-use-va_arg-arguments",
+      re=r',\s*\.\.\.\s*\)',
+      nc='void logf(const char* fmt, ...);',
+      c='template <class... Args> void logf(Args&&... args);'),
+    r(id="cpp-thread-detach", type="smell", qual="maint", sev="info", cwe="",
+      title="std::thread::detach()",
+      desc="A thread is detached from its handle.",
+      rationale="A detached thread can outlive the resources it uses, causing hard-to-debug lifetime bugs.",
+      remediation="Prefer joining (or std::jthread), and ensure captured state outlives the thread.",
+      source="https://en.cppreference.com/w/cpp/thread/thread/detach",
+      re=r'\.detach\(\)',
+      nc='worker.detach();',
+      c='worker.join();'),
+    locktemp("cpp-lock-guard-temp", "lock_guard"),
+    locktemp("cpp-unique-lock-temp", "unique_lock"),
+    locktemp("cpp-scoped-lock-temp", "scoped_lock"),
+    r(id="cpp-vector-bool", type="smell", qual="maint", sev="info", cwe="",
+      title="std::vector<bool>",
+      desc="std::vector<bool> is a space-optimized specialization, not a normal container.",
+      rationale="It does not store real bools; operator[] returns a proxy, breaking references/&data and many generic algorithms.",
+      remediation="Use std::vector<char>/std::uint8_t or std::bitset for real bytes.",
+      source="https://en.cppreference.com/w/cpp/container/vector_bool",
+      re=r'vector\s*<\s*bool\s*>',
+      nc='std::vector<bool> flags(n);',
+      c='std::vector<std::uint8_t> flags(n);'),
+    removed("cpp-strstream", "std::strstream", r'\bstrstream\b', "std::stringstream", "C++ (deprecated)",
+            'std::strstream ss;', 'std::stringstream ss;'),
+    removed("cpp-ostrstream", "std::ostrstream", r'\bostrstream\b', "std::ostringstream", "C++ (deprecated)",
+            'std::ostrstream os;', 'std::ostringstream os;'),
+    removed("cpp-istrstream", "std::istrstream", r'\bistrstream\b', "std::istringstream", "C++ (deprecated)",
+            'std::istrstream is(buf);', 'std::istringstream is(buf);'),
+    removed("cpp-unary-binary-function", "std::unary_function/binary_function", r'\b(unary_function|binary_function)\b',
+            "a plain functor or lambda", "C++17", 'struct F : std::unary_function<int, int> {};', 'struct F { int operator()(int x) const; };'),
+    removed("cpp-ptr-fun", "std::ptr_fun", r'\bptr_fun\s*\(', "a lambda", "C++17",
+            'auto f = std::ptr_fun(&isReady);', 'auto f = [](auto x) { return isReady(x); };'),
+    removed("cpp-not1-not2", "std::not1/not2", r'\b(not1|not2)\s*\(', "std::not_fn", "C++17",
+            'auto f = std::not1(pred);', 'auto f = std::not_fn(pred);'),
+    removed("cpp-result-of", "std::result_of", r'\bresult_of\b', "std::invoke_result", "C++20",
+            'using R = std::result_of<F(int)>::type;', 'using R = std::invoke_result_t<F, int>;'),
+    removed("cpp-uncaught-exception", "std::uncaught_exception()", r'\buncaught_exception\s*\(', "std::uncaught_exceptions()", "C++17",
+            'if (std::uncaught_exception()) rollback();', 'if (std::uncaught_exceptions() > 0) rollback();'),
+    removed("cpp-wstring-convert", "std::wstring_convert", r'\bwstring_convert\b', "a dedicated encoding library", "C++17 (deprecated)",
+            'std::wstring_convert<Cvt> conv;', 'auto s = encode_utf8(wide);'),
+    removed("cpp-std-iterator-base", "std::iterator base class", r'std::iterator\s*<', "explicit member typedefs", "C++17 (deprecated)",
+            'struct It : std::iterator<std::forward_iterator_tag, int> {};', 'struct It { using value_type = int; };'),
+    r(id="cpp-rsa-generate-key", type="smell", qual="maint", sev="low", cwe="",
+      title="Use of RSA_generate_key()",
+      desc="The deprecated OpenSSL RSA_generate_key() is used.",
+      rationale="RSA_generate_key is deprecated and its callback-based API is error-prone.",
+      remediation="Use RSA_generate_key_ex()/EVP_PKEY_keygen() with a 2048-bit+ key.",
+      source="https://www.openssl.org/docs/man1.1.1/man3/RSA_generate_key.html",
+      re=r'\bRSA_generate_key\s*\(', nc='RSA* r = RSA_generate_key(1024, 3, nullptr, nullptr);', c='RSA_generate_key_ex(rsa, 2048, e, nullptr);'),
+    r(id="cpp-md2", type="vuln", qual="sec", sev="medium", cwe="CWE-327",
+      title="Weak hash function MD2",
+      desc="MD2 computes a cryptographically broken digest.",
+      rationale="MD2 is obsolete and broken; unsuitable for any security use (CWE-327).",
+      remediation="Use SHA-256.",
+      source="https://cwe.mitre.org/data/definitions/327.html",
+      re=r'\bMD2(_Init)?\s*\(', nc='MD2(data, len, digest);', c='SHA256(data, len, digest);'),
+    r(id="cpp-getwd", type="vuln", qual="sec", sev="high", cwe="CWE-120",
+      title="Use of getwd()",
+      desc="getwd() writes the working directory into a buffer with no size argument.",
+      rationale="getwd cannot bound the write and can overflow (CWE-120).",
+      remediation="Use getcwd() with an explicit buffer size (or std::filesystem::current_path).",
+      source="https://cwe.mitre.org/data/definitions/120.html",
+      re=r'\bgetwd\s*\(', nc='getwd(path);', c='auto p = std::filesystem::current_path();'),
+    fmtsink("cpp-vprintf-nonliteral", "vprintf", r'\bvprintf\s*\(\s*[a-zA-Z_]\w*\s*,', 'vprintf(fmt, ap);', 'vprintf("%s", ap);'),
+    fmtsink("cpp-vfprintf-nonliteral", "vfprintf", r'\bvfprintf\s*\([^,)]*,\s*[a-zA-Z_]\w*\s*,', 'vfprintf(stderr, fmt, ap);', 'vfprintf(stderr, "%s", ap);'),
+    fmtsink("cpp-syslog-nonliteral", "syslog", r'\bsyslog\s*\([^,)]*,\s*[a-zA-Z_]\w*\s*\)', 'syslog(LOG_ERR, msg);', 'syslog(LOG_ERR, "%s", msg);'),
+    r(id="cpp-atol", type="bug", qual="rel", sev="low", cwe="CWE-190",
+      title="Use of atol()",
+      desc="atol() reports no error and has UB on overflow.",
+      rationale="Invalid/out-of-range input silently yields 0 or UB (CWE-190).",
+      remediation="Use std::from_chars / std::stol with error handling.",
+      source="https://cwe.mitre.org/data/definitions/190.html",
+      re=r'\batol\s*\(', nc='long n = atol(arg);', c='auto [p, ec] = std::from_chars(b, e, n);'),
+    r(id="cpp-atoll", type="bug", qual="rel", sev="low", cwe="CWE-190",
+      title="Use of atoll()",
+      desc="atoll() reports no error and has UB on overflow.",
+      rationale="Invalid/out-of-range input silently yields 0 or UB (CWE-190).",
+      remediation="Use std::from_chars / std::stoll with error handling.",
+      source="https://cwe.mitre.org/data/definitions/190.html",
+      re=r'\batoll\s*\(', nc='long long n = atoll(arg);', c='auto [p, ec] = std::from_chars(b, e, n);'),
+    reent("cpp-getlogin", "getlogin", "getlogin_r"),
+    reent("cpp-ttyname", "ttyname", "ttyname_r"),
+    reent("cpp-ctermid", "ctermid", "ctermid_r"),
+    reent("cpp-getgrgid", "getgrgid", "getgrgid_r"),
+    reent("cpp-inet-ntoa", "inet_ntoa", "inet_ntop"),
+    obsolete_c("cpp-cuserid", "cuserid", "getpwuid(getuid())", r'\bcuserid\s*\(', 'cuserid(name);', 'auto* pw = getpwuid(getuid());', "CWE-676"),
+    obsolete_c("cpp-toascii", "toascii", "an explicit mask (c & 0x7f)", r'\btoascii\s*\(', 'int a = toascii(c);', 'int a = c & 0x7f;'),
+    obsolete_c("cpp-ecvt", "ecvt", "std::to_chars / snprintf", r'\becvt\s*\(', 'char* s = ecvt(v, 6, &d, &sg);', 'auto [p, ec] = std::to_chars(buf, end, v);'),
+    obsolete_c("cpp-fcvt", "fcvt", "std::to_chars / snprintf", r'\bfcvt\s*\(', 'char* s = fcvt(v, 6, &d, &sg);', 'auto [p, ec] = std::to_chars(buf, end, v);'),
+    obsolete_c("cpp-gcvt", "gcvt", "std::to_chars / snprintf", r'\bgcvt\s*\(', 'gcvt(v, 6, buf);', 'auto [p, ec] = std::to_chars(buf, end, v);'),
+    obsolete_c("cpp-valloc", "valloc", "aligned allocation (std::aligned_alloc)", r'\bvalloc\s*\(', 'void* p = valloc(size);', 'void* p = std::aligned_alloc(page, size);'),
+    obsolete_c("cpp-memalign", "memalign", "std::aligned_alloc / posix_memalign", r'\bmemalign\s*\(', 'void* p = memalign(a, size);', 'void* p = std::aligned_alloc(a, size);'),
+    obsolete_c("cpp-usleep", "usleep", "std::this_thread::sleep_for", r'\busleep\s*\(', 'usleep(1000);', 'std::this_thread::sleep_for(1ms);'),
+    obsolete_c("cpp-gettimeofday", "gettimeofday", "std::chrono / clock_gettime", r'\bgettimeofday\s*\(', 'gettimeofday(&tv, nullptr);', 'auto t = std::chrono::steady_clock::now();'),
+    obsolete_c("cpp-ftime", "ftime", "std::chrono", r'\bftime\s*\(', 'ftime(&tb);', 'auto t = std::chrono::system_clock::now();'),
+    obsolete_c("cpp-bcopy", "bcopy", "std::copy / memmove", r'\bbcopy\s*\(', 'bcopy(src, dst, n);', 'std::memmove(dst, src, n);'),
+    obsolete_c("cpp-bzero", "bzero", "std::fill / memset", r'\bbzero\s*\(', 'bzero(buf, n);', 'std::memset(buf, 0, n);'),
+    obsolete_c("cpp-bcmp", "bcmp", "std::memcmp", r'\bbcmp\s*\(', 'if (bcmp(a, b, n)) return -1;', 'if (std::memcmp(a, b, n)) return -1;'),
+    obsolete_c("cpp-sbrk", "sbrk", "operator new / mmap", r'\bsbrk\s*\(', 'void* p = sbrk(size);', 'void* p = ::operator new(size);'),
+]
