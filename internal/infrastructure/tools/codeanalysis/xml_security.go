@@ -25,8 +25,12 @@ func scanXMLSecurityTokens(rel string, content []byte, declaredEntities map[stri
 		}
 	}
 
-	var currentElement string
-	var currentLine int
+	type xmlElementFrame struct {
+		name string
+		line int
+		text strings.Builder
+	}
+	var stack []*xmlElementFrame
 
 	for {
 		posLine, _ := dec.InputPos()
@@ -41,8 +45,8 @@ func scanXMLSecurityTokens(rel string, content []byte, declaredEntities map[stri
 
 		switch t := tok.(type) {
 		case xml.StartElement:
-			currentElement = t.Name.Local
-			currentLine = posLine
+			frame := &xmlElementFrame{name: t.Name.Local, line: posLine}
+			stack = append(stack, frame)
 
 			// 1. Check XInclude
 			if isXIncludeElement(t) {
@@ -85,14 +89,22 @@ func scanXMLSecurityTokens(rel string, content []byte, declaredEntities map[stri
 			}
 
 		case xml.CharData:
-			text := strings.TrimSpace(string(t))
-			if text != "" && currentElement != "" {
-				if isHardcodedSecretField(currentElement, text) {
+			if len(stack) > 0 {
+				stack[len(stack)-1].text.Write(t)
+			}
+
+		case xml.EndElement:
+			if len(stack) > 0 {
+				frame := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+
+				text := strings.TrimSpace(frame.text.String())
+				if text != "" && isHardcodedSecretField(frame.name, text) {
 					out = append(out, xmlRawFinding(
 						xmlHardcodedSecretRuleID,
 						rel,
-						currentLine,
-						fmt.Sprintf("Hardcoded secret detected in element <%s>.", currentElement),
+						frame.line,
+						fmt.Sprintf("Hardcoded secret detected in element <%s>.", frame.name),
 					))
 				}
 			}
@@ -103,18 +115,7 @@ func scanXMLSecurityTokens(rel string, content []byte, declaredEntities map[stri
 }
 
 func isXIncludeElement(e xml.StartElement) bool {
-	if !strings.EqualFold(e.Name.Local, "include") {
-		return false
-	}
-	if e.Name.Space == "http://www.w3.org/2001/XInclude" {
-		return true
-	}
-	for _, a := range e.Attr {
-		if (a.Name.Local == "xmlns" || a.Name.Space == "xmlns") && a.Value == "http://www.w3.org/2001/XInclude" {
-			return true
-		}
-	}
-	return false
+	return e.Name.Local == "include" && e.Name.Space == "http://www.w3.org/2001/XInclude"
 }
 
 func buildNamespaceMap(attrs []xml.Attr) map[string]string {

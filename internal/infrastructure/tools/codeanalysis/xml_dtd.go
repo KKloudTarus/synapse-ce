@@ -23,7 +23,7 @@ type entityDecl struct {
 
 func parseDeclaredEntities(content []byte) map[string]string {
 	out := make(map[string]string)
-	decls := scanEntityDeclarations(content)
+	_, _, decls := parseXMLDeclarations(content)
 	for _, d := range decls {
 		if !d.isParam {
 			out[d.name] = d.val
@@ -32,143 +32,20 @@ func parseDeclaredEntities(content []byte) map[string]string {
 	return out
 }
 
-func scanEntityDeclarations(content []byte) []entityDecl {
-	var decls []entityDecl
-	line := 1
-	for i := 0; i < len(content); {
-		if content[i] == '\n' {
-			line++
-			i++
-			continue
-		}
-		if content[i] != '<' {
-			i++
-			continue
-		}
-
-		switch {
-		case hasPrefix(content, i, "<!--"):
-			i = skipUntil(content, i+4, []byte("-->"), &line)
-			continue
-		case hasPrefix(content, i, "<![CDATA["):
-			i = skipUntil(content, i+9, []byte("]]>"), &line)
-			continue
-		case i+1 < len(content) && content[i+1] == '?':
-			i = skipUntil(content, i+2, []byte("?>"), &line)
-			continue
-		case hasPrefix(content, i, "<!ENTITY") || hasPrefix(content, i, "<!entity"):
-			declStartLine := line
-			i += 8
-			i = skipXMLSpace(content, i, &line)
-
-			isParam := false
-			if i < len(content) && content[i] == '%' {
-				isParam = true
-				i++
-				i = skipXMLSpace(content, i, &line)
-			}
-
-			nameStart := i
-			for i < len(content) && isXMLNameByte(content[i]) {
-				i++
-			}
-			if nameStart == i {
-				continue
-			}
-			name := string(content[nameStart:i])
-
-			i = skipXMLSpace(content, i, &line)
-
-			isExt := false
-			val := ""
-
-			// Check for SYSTEM or PUBLIC
-			if hasWordPrefix(content, i, "SYSTEM") || hasWordPrefix(content, i, "system") {
-				isExt = true
-			} else if hasWordPrefix(content, i, "PUBLIC") || hasWordPrefix(content, i, "public") {
-				isExt = true
-			}
-
-			// Capture literal value if quotes exist before '>'
-			quoteStart := skipToQuote(content, i, &line)
-			if quoteStart < len(content) {
-				q := content[quoteStart]
-				valStart := quoteStart + 1
-				valEnd := skipXMLAttributeValue(content, quoteStart, &line)
-				if valEnd > valStart {
-					if content[valEnd-1] == q {
-						val = string(content[valStart : valEnd-1])
-					} else {
-						val = string(content[valStart:valEnd])
-					}
-				}
-			}
-
-			i = skipUntil(content, i, []byte(">"), &line)
-
-			decls = append(decls, entityDecl{
-				name:    name,
-				val:     val,
-				line:    declStartLine,
-				isParam: isParam,
-				isExt:   isExt,
-			})
-			if len(decls) >= maxEntityDeclarations {
-				return decls
-			}
-		default:
-			i++
-		}
-	}
-	return decls
-}
-
 func scanXMLDTD(rel string, content []byte) []ports.CodeAnalysisRawFinding {
 	var out []ports.CodeAnalysisRawFinding
 
-	line := 1
-	doctypeLine := 0
-	hasExtDTD := false
+	doctypeLine, hasExtDTD, decls := parseXMLDeclarations(content)
 
-	// Scan DOCTYPE
-	for i := 0; i < len(content); {
-		if content[i] == '\n' {
-			line++
-			i++
-			continue
-		}
-		if content[i] != '<' {
-			i++
-			continue
-		}
-		switch {
-		case hasPrefix(content, i, "<!--"):
-			i = skipUntil(content, i+4, []byte("-->"), &line)
-		case hasPrefix(content, i, "<![CDATA["):
-			i = skipUntil(content, i+9, []byte("]]>"), &line)
-		case i+1 < len(content) && content[i+1] == '?':
-			i = skipUntil(content, i+2, []byte("?>"), &line)
-		case hasPrefix(content, i, "<!DOCTYPE") || hasPrefix(content, i, "<!doctype"):
-			doctypeLine = line
-			endDoc := skipUntil(content, i+9, []byte(">"), &line)
-			docChunk := string(content[i:endDoc])
-			if containsKeyword(docChunk, "SYSTEM") || containsKeyword(docChunk, "PUBLIC") {
-				hasExtDTD = true
-				out = append(out, xmlRawFinding(
-					xmlExternalDTDRuleID,
-					rel,
-					doctypeLine,
-					"External DOCTYPE reference can lead to XML External Entity (XXE) vulnerabilities or server-side request forgery.",
-				))
-			}
-			i = endDoc
-		default:
-			i++
-		}
+	if hasExtDTD {
+		out = append(out, xmlRawFinding(
+			xmlExternalDTDRuleID,
+			rel,
+			doctypeLine,
+			"External DOCTYPE reference can lead to XML External Entity (XXE) vulnerabilities or server-side request forgery.",
+		))
 	}
 
-	// Scan Entities
-	decls := scanEntityDeclarations(content)
 	hasExtEntity := false
 	hasExtParamEntity := false
 	hasEntityExpansion := false
@@ -201,7 +78,6 @@ func scanXMLDTD(rel string, content []byte) []ports.CodeAnalysisRawFinding {
 		}
 	}
 
-	// Analyze internal entity expansion graphs
 	reportedExpansion := make(map[string]bool)
 	for name, val := range internalMap {
 		declLine := internalLines[name]
@@ -221,7 +97,6 @@ func scanXMLDTD(rel string, content []byte) []ports.CodeAnalysisRawFinding {
 		}
 	}
 
-	// Noise control for doctype-present
 	if doctypeLine > 0 && !hasExtDTD && !hasExtEntity && !hasExtParamEntity && !hasEntityExpansion {
 		out = append(out, xmlRawFinding(
 			xmlDoctypePresentRuleID,
@@ -239,7 +114,7 @@ func hasDangerousExpansion(name, val string, decls map[string]string, visited ma
 		return true, maxEntityExpansionLimit + 1
 	}
 	if visited[name] {
-		return true, maxEntityExpansionLimit + 1 // Cycle / self-reference
+		return true, maxEntityExpansionLimit + 1
 	}
 	visited[name] = true
 	defer func() { visited[name] = false }()
@@ -284,42 +159,290 @@ func extractEntityRefs(val string) []string {
 	return refs
 }
 
-func hasWordPrefix(content []byte, i int, word string) bool {
-	if i+len(word) > len(content) {
+func isXMLSpaceByte(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\r' || b == '\n'
+}
+
+type lexState int
+
+const (
+	stateNormal lexState = iota
+	stateDoctype
+	stateInternalSubset
+	stateEntity
+)
+
+func parseXMLDeclarations(content []byte) (int, bool, []entityDecl) {
+	line := 1
+	var doctypeLine int
+	var hasExtDTD bool
+	var decls []entityDecl
+	var entityBuf []byte
+	var doctypeBuf []byte
+	var entityStartLine int
+
+	state := stateNormal
+
+	i := 0
+	for i < len(content) {
+		if content[i] == '\n' {
+			line++
+		}
+
+		if (state == stateNormal || state == stateInternalSubset) && content[i] == '<' {
+			if hasPrefixExact(content, i, "<!--") {
+				i = skipUntilExact(content, i+4, "-->", &line)
+				continue
+			}
+			if hasPrefixExact(content, i, "<?") {
+				i = skipUntilExact(content, i+2, "?>", &line)
+				continue
+			}
+			if hasPrefixExact(content, i, "<![CDATA[") {
+				i = skipUntilExact(content, i+9, "]]>", &line)
+				continue
+			}
+		}
+
+		switch state {
+		case stateNormal:
+			if content[i] == '<' && hasPrefixExact(content, i, "<!DOCTYPE") {
+				if i+9 < len(content) && isXMLSpaceByte(content[i+9]) {
+					doctypeLine = line
+					state = stateDoctype
+					doctypeBuf = doctypeBuf[:0]
+					i += 9
+					continue
+				}
+			}
+			i++
+
+		case stateDoctype:
+			if content[i] == '"' || content[i] == '\'' {
+				q := content[i]
+				doctypeBuf = append(doctypeBuf, q)
+				i++
+				for i < len(content) {
+					if content[i] == '\n' {
+						line++
+					}
+					doctypeBuf = append(doctypeBuf, content[i])
+					if content[i] == q {
+						i++
+						break
+					}
+					i++
+				}
+				continue
+			}
+			if content[i] == '[' {
+				if checkExternalDTD(doctypeBuf) {
+					hasExtDTD = true
+				}
+				state = stateInternalSubset
+				i++
+				continue
+			}
+			if content[i] == '>' {
+				if checkExternalDTD(doctypeBuf) {
+					hasExtDTD = true
+				}
+				state = stateNormal
+				i++
+				continue
+			}
+			doctypeBuf = append(doctypeBuf, content[i])
+			i++
+
+		case stateInternalSubset:
+			if content[i] == ']' {
+				state = stateNormal
+				i++
+				continue
+			}
+			if content[i] == '<' && hasPrefixExact(content, i, "<!ENTITY") {
+				if i+8 < len(content) && isXMLSpaceByte(content[i+8]) {
+					state = stateEntity
+					entityBuf = entityBuf[:0]
+					entityStartLine = line
+					i += 8
+					continue
+				}
+			}
+			if content[i] == '"' || content[i] == '\'' {
+				q := content[i]
+				i++
+				for i < len(content) {
+					if content[i] == '\n' {
+						line++
+					}
+					if content[i] == q {
+						i++
+						break
+					}
+					i++
+				}
+				continue
+			}
+			i++
+
+		case stateEntity:
+			if content[i] == '"' || content[i] == '\'' {
+				q := content[i]
+				entityBuf = append(entityBuf, q)
+				i++
+				for i < len(content) {
+					if content[i] == '\n' {
+						line++
+					}
+					entityBuf = append(entityBuf, content[i])
+					if content[i] == q {
+						i++
+						break
+					}
+					i++
+				}
+				continue
+			}
+			if content[i] == '>' {
+				if decl := parseEntityBuffer(entityBuf); decl != nil {
+					decl.line = entityStartLine
+					decls = append(decls, *decl)
+					if len(decls) >= maxEntityDeclarations {
+						return doctypeLine, hasExtDTD, decls
+					}
+				}
+				state = stateInternalSubset
+				i++
+				continue
+			}
+			entityBuf = append(entityBuf, content[i])
+			i++
+		}
+	}
+	return doctypeLine, hasExtDTD, decls
+}
+
+func hasPrefixExact(content []byte, i int, prefix string) bool {
+	if i+len(prefix) > len(content) {
 		return false
 	}
-	if !strings.EqualFold(string(content[i:i+len(word)]), word) {
-		return false
-	}
-	if i+len(word) < len(content) {
-		next := content[i+len(word)]
-		if !isXMLSpaceByte(next) && next != '>' && next != '[' {
+	for j := 0; j < len(prefix); j++ {
+		if content[i+j] != prefix[j] {
 			return false
 		}
 	}
 	return true
 }
 
-func containsKeyword(s, kw string) bool {
-	return strings.Contains(strings.ToUpper(s), kw)
-}
-
-func isXMLSpaceByte(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\r' || b == '\n'
-}
-
-func skipToQuote(content []byte, i int, line *int) int {
+func skipUntilExact(content []byte, i int, suffix string, line *int) int {
 	for i < len(content) {
 		if content[i] == '\n' {
 			*line++
 		}
-		if content[i] == '>' {
-			return len(content)
-		}
-		if content[i] == '"' || content[i] == '\'' {
-			return i
+		if hasPrefixExact(content, i, suffix) {
+			return i + len(suffix)
 		}
 		i++
 	}
 	return i
+}
+
+func checkExternalDTD(buf []byte) bool {
+	tokens := parseTokensQuoteAware(string(buf))
+	for _, t := range tokens {
+		if t == "SYSTEM" || t == "PUBLIC" {
+			return true
+		}
+	}
+	return false
+}
+
+func parseEntityBuffer(buf []byte) *entityDecl {
+	tokens := parseTokensQuoteAware(string(buf))
+	if len(tokens) == 0 {
+		return nil
+	}
+
+	isParam := false
+	idx := 0
+	if tokens[idx] == "%" {
+		isParam = true
+		idx++
+	} else if strings.HasPrefix(tokens[idx], "%") && len(tokens[idx]) > 1 {
+		isParam = true
+		tokens[idx] = tokens[idx][1:]
+	}
+
+	if idx >= len(tokens) {
+		return nil
+	}
+	name := tokens[idx]
+	idx++
+
+	isExt := false
+	val := ""
+
+	if idx < len(tokens) {
+		if tokens[idx] == "SYSTEM" || tokens[idx] == "PUBLIC" {
+			isExt = true
+			idx++
+			if isExt && tokens[idx-1] == "PUBLIC" && idx < len(tokens) {
+				idx++
+			}
+		}
+
+		if idx < len(tokens) {
+			val = stripQuotes(tokens[idx])
+		}
+	}
+
+	return &entityDecl{
+		name:    name,
+		val:     val,
+		isParam: isParam,
+		isExt:   isExt,
+	}
+}
+
+func stripQuotes(s string) string {
+	if len(s) >= 2 && (s[0] == '"' || s[0] == '\'') && s[len(s)-1] == s[0] {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
+func parseTokensQuoteAware(s string) []string {
+	var tokens []string
+	var current strings.Builder
+	inQuote := false
+	var quoteChar rune
+
+	for _, r := range s {
+		if inQuote {
+			current.WriteRune(r)
+			if r == quoteChar {
+				inQuote = false
+				tokens = append(tokens, current.String())
+				current.Reset()
+			}
+		} else {
+			if r == '"' || r == '\'' {
+				inQuote = true
+				quoteChar = r
+				current.WriteRune(r)
+			} else if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+				if current.Len() > 0 {
+					tokens = append(tokens, current.String())
+					current.Reset()
+				}
+			} else {
+				current.WriteRune(r)
+			}
+		}
+	}
+	if current.Len() > 0 {
+		tokens = append(tokens, current.String())
+	}
+	return tokens
 }
