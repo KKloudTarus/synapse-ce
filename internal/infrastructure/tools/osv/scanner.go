@@ -54,6 +54,16 @@ var _ ports.DetectionSource = (*Scanner)(nil)
 // Name identifies this detection source.
 func (*Scanner) Name() string { return "osv" }
 
+// isOSDistroPURL reports whether a PURL is an OS-distro package (rpm/deb/apk). Their advisory matching must
+// be scoped to the distro RELEASE (redhat:9, debian:12, …); that is handled by Grype + the owned OVAL/CSAF
+// feeds, not by OSV.dev's release-unaware PURL query. Excluding them from OSV removes cross-stream
+// false positives without losing coverage (Grype scans every OS package).
+func isOSDistroPURL(purl string) bool {
+	return strings.HasPrefix(purl, "pkg:rpm/") ||
+		strings.HasPrefix(purl, "pkg:deb/") ||
+		strings.HasPrefix(purl, "pkg:apk/")
+}
+
 // Scan batches the components' PURLs to OSV.dev, fetches details for each unique
 // advisory, and maps them to raw findings (correlation merges across sources).
 func (s *Scanner) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawFinding, error) {
@@ -67,9 +77,19 @@ func (s *Scanner) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.Raw
 	}
 	var items []item
 	for i, c := range doc.Components {
-		if c.PURL != "" {
-			items = append(items, item{compIdx: i, purl: c.PURL})
+		if c.PURL == "" {
+			continue
 		}
+		// OS-distro packages (rpm/deb/apk) are matched by Grype + the owned OVAL/CSAF feeds, which scope to
+		// the package's distro RELEASE. OSV.dev's PURL query is NOT release-scoped for these, so it returns
+		// advisories from every stream (e.g. a RHEL-8-Satellite "el8sat" fix reported against an el9 package)
+		// - a large false-positive inflation (a clean ubi9 base yielded 555 OSV RHSA matches vs Grype's 31).
+		// Route OS packages to the distro-scoped sources only; OSV keeps the language ecosystems
+		// (Go/npm/PyPI/Maven/…), where its PURL matching is authoritative.
+		if isOSDistroPURL(c.PURL) {
+			continue
+		}
+		items = append(items, item{compIdx: i, purl: c.PURL})
 	}
 	if len(items) == 0 {
 		return nil, nil

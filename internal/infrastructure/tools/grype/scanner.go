@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -164,14 +165,25 @@ type cdxBOM struct {
 	BomFormat   string         `json:"bomFormat"`
 	SpecVersion string         `json:"specVersion"`
 	Version     int            `json:"version"`
+	Metadata    *cdxMetadata   `json:"metadata,omitempty"`
 	Components  []cdxComponent `json:"components"`
 }
 
+type cdxMetadata struct {
+	Component *cdxComponent `json:"component,omitempty"`
+}
+
 type cdxComponent struct {
-	Type    string `json:"type"`
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	PURL    string `json:"purl,omitempty"`
+	Type       string        `json:"type"`
+	Name       string        `json:"name"`
+	Version    string        `json:"version,omitempty"`
+	PURL       string        `json:"purl,omitempty"`
+	Properties []cdxProperty `json:"properties,omitempty"`
+}
+
+type cdxProperty struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // writeCycloneDX stages the SBOM for Grype: the generator's original CycloneDX
@@ -181,6 +193,20 @@ func writeCycloneDX(doc *sbom.SBOM) (path string, cleanup func(), err error) {
 	data := doc.Raw
 	if len(data) == 0 {
 		bom := cdxBOM{BomFormat: "CycloneDX", SpecVersion: "1.5", Version: 1}
+		// The OS distro (from an OS-package PURL's `distro=` qualifier) MUST be carried into the SBOM as
+		// a metadata.component of type operating-system. Grype scopes OS-package matching to that distro's
+		// advisory namespace (e.g. redhat:9); without it, an el9 package is matched against EVERY RHEL
+		// stream's advisories (el6/el7/el8/el10) - a large false-positive inflation. The generator's own
+		// CycloneDX (doc.Raw path) already carries this; the reconstruction must reproduce it.
+		if id, ver := distroFromComponents(doc.Components); id != "" {
+			bom.Metadata = &cdxMetadata{Component: &cdxComponent{
+				Type: "operating-system", Name: id, Version: ver,
+				Properties: []cdxProperty{
+					{Name: "syft:distro:id", Value: id},
+					{Name: "syft:distro:versionID", Value: ver},
+				},
+			}}
+		}
 		for _, c := range doc.Components {
 			if c.PURL == "" {
 				continue // grype matches by PURL/CPE; un-purled entries cannot match
@@ -205,6 +231,37 @@ func writeCycloneDX(doc *sbom.SBOM) (path string, cleanup func(), err error) {
 		return "", func() {}, err
 	}
 	return path, cleanup, nil
+}
+
+// distroFromComponents extracts the OS distro (id, versionID) from the `distro=<id>-<versionID>` qualifier
+// the OS-package catalogers attach to rpm/deb/apk PURLs (e.g. "pkg:rpm/rhel/openssl@...?distro=rhel-9.8").
+// It returns the first one found, or ("","") when no component carries a distro. Grype needs the distro on
+// the SBOM's metadata.component to scope OS-package matching to the correct advisory namespace.
+func distroFromComponents(comps []sbom.Component) (id, versionID string) {
+	for _, c := range comps {
+		tag := purlDistroTag(c.PURL)
+		if tag == "" {
+			continue
+		}
+		if i := strings.IndexByte(tag, '-'); i > 0 {
+			return tag[:i], tag[i+1:]
+		}
+		return tag, "" // id with no version still lets grype resolve the family
+	}
+	return "", ""
+}
+
+// purlDistroTag returns a PURL's `distro` qualifier value, or "" when absent/unparseable.
+func purlDistroTag(purl string) string {
+	q := strings.IndexByte(purl, '?')
+	if q < 0 {
+		return ""
+	}
+	vals, err := url.ParseQuery(purl[q+1:])
+	if err != nil {
+		return ""
+	}
+	return vals.Get("distro")
 }
 
 // ---- Grype JSON output ----

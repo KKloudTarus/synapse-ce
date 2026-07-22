@@ -3,6 +3,7 @@ package grype
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
@@ -99,5 +100,63 @@ func TestGrypeEmptySBOM(t *testing.T) {
 	raws, err := s.Scan(context.Background(), &sbom.SBOM{})
 	if err != nil || raws != nil {
 		t.Fatalf("empty sbom: want nil,nil; got %v,%v", raws, err)
+	}
+}
+
+// TestWriteCycloneDXCarriesDistro verifies the reconstructed SBOM (doc.Raw empty) puts the OS distro on
+// metadata.component so Grype scopes OS-package matching to the right advisory namespace (e.g. redhat:9).
+// Without it, an el9 package is matched against every RHEL stream's advisories - a large false-positive
+// inflation (a clean ubi9 base went from 30 to 555 RHSA matches before this fix).
+func TestWriteCycloneDXCarriesDistro(t *testing.T) {
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		{Name: "openssl", Version: "1:3.5.5-5.el9_8", PURL: "pkg:rpm/rhel/openssl@1:3.5.5-5.el9_8?arch=x86_64&distro=rhel-9.8"},
+		{Name: "some-app", Version: "1.0.0", PURL: "pkg:golang/example.com/app@1.0.0"},
+	}}
+	path, cleanup, err := writeCycloneDX(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bom cdxBOM
+	if err := json.Unmarshal(data, &bom); err != nil {
+		t.Fatal(err)
+	}
+	if bom.Metadata == nil || bom.Metadata.Component == nil {
+		t.Fatalf("SBOM has no metadata.component distro; grype cannot scope OS matching")
+	}
+	mc := bom.Metadata.Component
+	if mc.Type != "operating-system" || mc.Name != "rhel" || mc.Version != "9.8" {
+		t.Errorf("distro component = {%q %q %q}, want {operating-system rhel 9.8}", mc.Type, mc.Name, mc.Version)
+	}
+	props := map[string]string{}
+	for _, p := range mc.Properties {
+		props[p.Name] = p.Value
+	}
+	if props["syft:distro:id"] != "rhel" || props["syft:distro:versionID"] != "9.8" {
+		t.Errorf("syft:distro props = %v, want id=rhel versionID=9.8", props)
+	}
+}
+
+func TestDistroFromComponents(t *testing.T) {
+	tests := []struct {
+		name, purl, wantID, wantVer string
+	}{
+		{"rhel rpm", "pkg:rpm/rhel/openssl@1:3.5.5-5.el9_8?arch=x86_64&distro=rhel-9.8", "rhel", "9.8"},
+		{"debian deb", "pkg:deb/debian/libc6@2.36?arch=amd64&distro=debian-12", "debian", "12"},
+		{"ubuntu multi-dot", "pkg:deb/ubuntu/bash@5.1?distro=ubuntu-22.04", "ubuntu", "22.04"},
+		{"no distro qualifier", "pkg:golang/example.com/app@1.0.0", "", ""},
+		{"no qualifiers at all", "pkg:rpm/rhel/openssl@1.0", "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			id, ver := distroFromComponents([]sbom.Component{{PURL: tc.purl}})
+			if id != tc.wantID || ver != tc.wantVer {
+				t.Errorf("distroFromComponents(%q) = (%q,%q), want (%q,%q)", tc.purl, id, ver, tc.wantID, tc.wantVer)
+			}
+		})
 	}
 }
