@@ -243,3 +243,32 @@ func TestIsTestPath(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceBridgesXMLSASTFindings(t *testing.T) {
+	analyzer := fakeAnalyzer{raws: []ports.CodeAnalysisRawFinding{
+		{Kind: "sast", RuleID: "xml:external-entity", CWE: "CWE-611", Severity: shared.SeverityHigh, Title: "External general entity declaration", File: "config.xml", Line: 2},
+		{Kind: "sast", RuleID: "xml:entity-expansion", CWE: "CWE-776", Severity: shared.SeverityMedium, Title: "Dangerous XML entity expansion structure", File: "payload.xml", Line: 5},
+		{Kind: "reliability", RuleID: "xml:not-well-formed", CWE: "", Severity: shared.SeverityMedium, Title: "XML document is not well formed", File: "bad.xml", Line: 1},
+	}}
+
+	svc := New(analyzer)
+	fs, err := svc.Analyze(context.Background(), "root")
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+
+	xxe := byRule(fs, "xml:external-entity")
+	if xxe == nil || xxe.Kind != finding.KindSAST {
+		t.Fatalf("expected XML external-entity to become KindSAST, got %+v", xxe)
+	}
+
+	exp := byRule(fs, "xml:entity-expansion")
+	if exp == nil || exp.Kind != finding.KindSAST {
+		t.Fatalf("expected XML entity-expansion to become KindSAST, got %+v", exp)
+	}
+
+	mal := byRule(fs, "xml:not-well-formed")
+	if mal == nil || mal.Kind != finding.KindReliability {
+		t.Fatalf("expected XML not-well-formed to remain KindReliability, got %+v", mal)
+	}
+}

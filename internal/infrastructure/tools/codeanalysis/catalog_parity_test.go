@@ -110,11 +110,11 @@ func TestCatalogParity(t *testing.T) {
 		if catRule.Language != "XML" {
 			t.Errorf("Rule %s Language mismatch: expected XML", tc.id)
 		}
-		if catRule.Type != domainrule.TypeBug {
-			t.Errorf("Rule %s Type mismatch: expected Bug", tc.id)
+		if catRule.Type != tc.ruleType {
+			t.Errorf("Rule %s Type mismatch: catalog=%v engine=%v", tc.id, catRule.Type, tc.ruleType)
 		}
-		if len(catRule.Qualities) != 1 || catRule.Qualities[0] != domainrule.QualityReliability {
-			t.Errorf("Rule %s Quality mismatch: expected Reliability", tc.id)
+		if len(catRule.Qualities) != 1 || catRule.Qualities[0] != tc.quality {
+			t.Errorf("Rule %s Quality mismatch: catalog=%v engine=%v", tc.id, catRule.Qualities, tc.quality)
 		}
 		if catRule.Detection != domainrule.DetectionParse {
 			t.Errorf("Rule %s Detection mode mismatch: expected Parse", tc.id)
@@ -129,6 +129,12 @@ func TestCatalogParity(t *testing.T) {
 				}
 				if f.Severity != tc.severity {
 					t.Errorf("Rule %s Severity mismatch in finding: got %v", tc.id, f.Severity)
+				}
+				if f.Kind != tc.kind {
+					t.Errorf("Rule %s Kind mismatch in finding: got %q expected %q", tc.id, f.Kind, tc.kind)
+				}
+				if f.CWE != tc.cwe {
+					t.Errorf("Rule %s CWE mismatch in finding: got %q expected %q", tc.id, f.CWE, tc.cwe)
 				}
 			}
 		}
