@@ -52,9 +52,13 @@ cs-activator-createinstance-var
 cs-aes-managed-obsolete
 cs-antiforgery-ignore
 cs-append-single-char-string
+cs-argnull-manual-check
 cs-array-empty-alloc
 cs-as-cast-deref
 cs-assembly-loadfrom
+cs-assert-equal-null
+cs-assert-false-equality
+cs-assert-true-equality
 cs-assignment-in-condition
 cs-async-no-await
 cs-async-task-delay-result
@@ -62,6 +66,7 @@ cs-async-void
 cs-basic-auth-literal
 cs-binaryformatter
 cs-boxing-in-string-concat
+cs-cast-after-int-division
 cs-catch-and-continue-loop
 cs-catch-general
 cs-catch-nullreference
@@ -98,6 +103,8 @@ cs-debug-assert-sideeffect
 cs-debugger-break
 cs-des-cipher
 cs-developer-exception-page
+cs-dictionary-keys-contains
+cs-divide-by-zero-literal
 cs-do-while-false
 cs-double-cast
 cs-double-cast-object
@@ -134,6 +141,7 @@ cs-explicit-finalizer
 cs-file-read-request
 cs-fire-and-forget-task
 cs-first-without-check
+cs-float-equality-literal
 cs-for-no-braces
 cs-formsauth-weak-hash
 cs-ftp-cleartext
@@ -151,12 +159,14 @@ cs-hardcoded-symmetric-key
 cs-hmac-md5
 cs-html-raw
 cs-htmlstring-raw
+cs-httpclient-dangerous-cert
 cs-httpclient-per-request
 cs-httpcontext-current
 cs-if-empty-then-else
 cs-if-single-statement-no-braces
 cs-index-at-length
 cs-indexof-no-comparison
+cs-indexof-vs-contains
 cs-insert-at-zero
 cs-int-cast-double-div
 cs-interface-naming
@@ -223,6 +233,7 @@ cs-redundant-boolean-return
 cs-reflection-nonpublic
 cs-regex-from-input
 cs-region
+cs-replace-single-char
 cs-response-end
 cs-response-write-var
 cs-return-in-finally
@@ -237,6 +248,7 @@ cs-smtpclient-obsolete
 cs-soapformatter
 cs-sql-concat
 cs-sqlite-command-concat
+cs-ssl2
 cs-ssl3-tls10-protocol
 cs-startswith-no-comparison
 cs-static-iv
@@ -253,6 +265,7 @@ cs-substring-zero
 cs-suppressmessage
 cs-task-factory-startnew
 cs-task-result-blocking
+cs-task-run-fire-forget
 cs-task-run-in-controller
 cs-tempfile-predictable
 cs-thread-abort
@@ -265,12 +278,15 @@ cs-throw-ex-loses-stack
 cs-throw-in-finally
 cs-throw-null
 cs-throw-reserved-exception
+cs-tls11
 cs-todo-marker
 cs-tolist-count
 cs-tolist-foreach
 cs-tolist-toarray-redundant
+cs-tolist-tolist-redundant
 cs-tolower-compare
 cs-tostring-culture
+cs-tostring-format-no-culture
 cs-tostring-in-interpolation
 cs-tostring-in-log-arg
 cs-toupper-no-culture
