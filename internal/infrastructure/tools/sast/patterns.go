@@ -63,6 +63,7 @@ var cSourceExts = map[string]bool{
 // firing on a .java file, or a Prisma rule on Go). nil exts stays language-agnostic.
 var pyExts = map[string]bool{".py": true, ".pyi": true, ".pyw": true, ".pyx": true}
 var javaExts = map[string]bool{".java": true}
+var goExts = map[string]bool{".go": true}
 var jsExts = map[string]bool{
 	".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
 	".ts": true, ".tsx": true, ".mts": true, ".cts": true, // .mts/.cts are first-class TS ESM/CJS extensions

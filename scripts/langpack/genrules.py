@@ -11,8 +11,8 @@ import json, re, sys, importlib.util, os
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-LANG_EXTS = {"js": "jsExts", "java": "javaExts", "py": "pyExts"}
-LANG_LABEL = {"js": "JavaScript/TypeScript", "java": "Java", "py": "Python"}
+LANG_EXTS = {"js": "jsExts", "java": "javaExts", "py": "pyExts", "go": "goExts"}
+LANG_LABEL = {"js": "JavaScript/TypeScript", "java": "Java", "py": "Python", "go": "Go"}
 TYPE_CONST = {"vuln": "TypeVulnerability", "bug": "TypeBug", "smell": "TypeCodeSmell", "hotspot": "TypeSecurityHotspot"}
 QUAL_CONST = {"sec": "QualitySecurity", "rel": "QualityReliability", "maint": "QualityMaintainability"}
 SEV_CONST = {"critical": "SeverityCritical", "high": "SeverityHigh", "medium": "SeverityMedium", "low": "SeverityLow", "info": "SeverityInfo"}

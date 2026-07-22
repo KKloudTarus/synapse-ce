@@ -62,6 +62,8 @@ func TestCatalogParity(t *testing.T) {
 			expectedLang = "Python"
 		case tc.exts != nil && tc.exts[".java"]:
 			expectedLang = "Java"
+		case tc.exts != nil && tc.exts[".go"]:
+			expectedLang = "Go"
 		case tc.exts != nil && tc.exts[".c"]:
 			expectedLang = "C/C++/Objective-C"
 		case explicitSASTLanguages[tc.id] != "":

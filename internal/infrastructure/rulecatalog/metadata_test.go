@@ -170,8 +170,10 @@ func TestMetadata_NoPlaceholders(t *testing.T) {
 		for _, f := range fields {
 			for _, b := range bad {
 				if strings.Contains(f, b) {
-					// EXCEPTION: quality-todo-comment is about TODO/FIXME
-					if r.Key == "quality-todo-comment" && (b == "TODO" || b == "FIXME" || b == "XXX") {
+					// EXCEPTION: rules that are legitimately ABOUT the TODO/FIXME markers or the
+					// context.TODO() API name — the tokens are the subject, not placeholder text.
+					if (b == "TODO" || b == "FIXME" || b == "XXX") &&
+						(r.Key == "quality-todo-comment" || r.Key == "go-todo-marker" || r.Key == "go-context-todo") {
 						continue
 					}
 					t.Errorf("Rule %s leaked placeholder/generic text %q in metadata", r.Key, b)
