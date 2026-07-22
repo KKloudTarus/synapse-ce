@@ -59,6 +59,7 @@ cs-assembly-loadfrom
 cs-assert-equal-null
 cs-assert-false-equality
 cs-assert-true-equality
+cs-assert-true-notnull
 cs-assignment-in-condition
 cs-async-no-await
 cs-async-task-delay-result
@@ -85,6 +86,7 @@ cs-connstring-encrypt-false
 cs-connstring-password-literal
 cs-connstring-trustservercert
 cs-console-writeline-lib
+cs-contains-single-char
 cs-convert-tostring-null
 cs-cookie-not-httponly
 cs-cookie-not-secure
@@ -94,6 +96,7 @@ cs-cors-header-wildcard
 cs-cors-withorigins-wildcard
 cs-count-property-linq-enumerable
 cs-count-vs-any
+cs-cryptoconfig-createfromname
 cs-csp-unsafe-inline
 cs-datatable-select-injection
 cs-datetime-add-result-ignored
@@ -114,6 +117,7 @@ cs-dynamic-keyword
 cs-ef-include-string
 cs-ef-raw-sql-interp
 cs-ef-tolist-then-where
+cs-elementat-zero
 cs-else-no-braces
 cs-empty-array-length-check
 cs-empty-block
@@ -130,6 +134,7 @@ cs-empty-string-compare
 cs-empty-switch
 cs-empty-while
 cs-encoding-default
+cs-endswith-no-comparison
 cs-enum-parse-unchecked
 cs-environment-exit
 cs-environment-failfast
@@ -166,11 +171,13 @@ cs-if-empty-then-else
 cs-if-single-statement-no-braces
 cs-index-at-length
 cs-indexof-no-comparison
+cs-indexof-not-contains
 cs-indexof-vs-contains
 cs-insert-at-zero
 cs-int-cast-double-div
 cs-interface-naming
 cs-interpolated-log
+cs-interpolation-no-holes
 cs-json-typenamehandling
 cs-jsonconvert-nontyped
 cs-jsserializer-typeresolver
@@ -201,6 +208,7 @@ cs-new-thread
 cs-not-implemented
 cs-not-supported-stub
 cs-npgsql-command-concat
+cs-null-coalesce-assign
 cs-null-equality
 cs-null-forgiving-operator
 cs-objectstateformatter
@@ -234,18 +242,21 @@ cs-reflection-nonpublic
 cs-regex-from-input
 cs-region
 cs-replace-single-char
+cs-request-unvalidated
 cs-response-end
 cs-response-write-var
 cs-return-in-finally
 cs-rijndael-managed
 cs-rsa-pkcs1-padding
 cs-rsa-small-key
+cs-select-async-lambda
 cs-server-mappath-tainted
 cs-servercert-handler-true
 cs-servicepoint-cert-bypass
 cs-smtp-no-ssl
 cs-smtpclient-obsolete
 cs-soapformatter
+cs-sortedlist-nongeneric
 cs-sql-concat
 cs-sqlite-command-concat
 cs-ssl2
@@ -263,6 +274,7 @@ cs-string-plus-empty
 cs-string-result-ignored
 cs-substring-zero
 cs-suppressmessage
+cs-task-delay-zero
 cs-task-factory-startnew
 cs-task-result-blocking
 cs-task-run-fire-forget
@@ -279,6 +291,7 @@ cs-throw-in-finally
 cs-throw-null
 cs-throw-reserved-exception
 cs-tls11
+cs-tochararray-foreach
 cs-todo-marker
 cs-tolist-count
 cs-tolist-foreach
@@ -291,6 +304,7 @@ cs-tostring-in-interpolation
 cs-tostring-in-log-arg
 cs-toupper-no-culture
 cs-tripledes-weak
+cs-tryparse-result-ignored
 cs-tuple-item1
 cs-typeof-name-vs-nameof
 cs-unsafe-block
@@ -304,9 +318,11 @@ cs-weak-hash-sha1
 cs-weak-pbkdf-iterations
 cs-webrequest-create
 cs-where-any
+cs-where-async-lambda
 cs-where-first
 cs-while-no-braces
 cs-x509-ignore-flags
+cs-x509-password-literal
 cs-x509-revocation-nocheck
 cs-xamlreader-load
 cs-xmldocument-load
@@ -314,7 +330,9 @@ cs-xmlurlresolver
 cs-xpath-injection
 cs-xslt-enable-script
 cs-xxe-dtd-parse
+cs-yoda-condition
 cs-zip-extract-slip
+cs-zip-slip-fullname
 databricks-token
 datadog-api-key
 db-connection-string
