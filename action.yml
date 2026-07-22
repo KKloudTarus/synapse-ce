@@ -7,9 +7,13 @@ branding:
 
 inputs:
   path:
-    description: "Path to scan."
+    description: "Path to scan. A source directory, or — with image: true — a container image reference or a local `docker save` tarball (.tar/.tar.gz)."
     required: false
     default: "."
+  image:
+    description: "When true, scan `path` as a container image (registry ref or local docker-save tarball) instead of a source tree. Runs SCA + OS-package CVE + secret + misconfig; source SAST is skipped for images."
+    required: false
+    default: "false"
   fail-on:
     description: "Minimum severity that fails the build: critical | high | medium | low | info | none."
     required: false
@@ -129,6 +133,7 @@ runs:
       shell: bash
       env:
         SYNAPSE_PATH: ${{ inputs.path }}
+        SYNAPSE_IMAGE: ${{ inputs.image }}
         SYNAPSE_FAIL_ON: ${{ inputs.fail-on }}
         SYNAPSE_SARIF: ${{ inputs.sarif }}
         SYNAPSE_OFFLINE: ${{ inputs.offline }}
@@ -138,6 +143,9 @@ runs:
         # the SARIF output is still recorded when the gate fails (an `if: always()` upload keeps working).
         set -uo pipefail
         args=(scan "${SYNAPSE_PATH}" --fail-on "${SYNAPSE_FAIL_ON}")
+        if [ "${SYNAPSE_IMAGE}" = "true" ]; then
+          args+=(--image)
+        fi
         if [ "${SYNAPSE_OFFLINE}" = "true" ]; then
           args+=(--offline)
         fi
