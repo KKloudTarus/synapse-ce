@@ -221,27 +221,29 @@ func scanXMLFile(rel string, content []byte) []ports.CodeAnalysisRawFinding {
 	// 1. Lexical / DTD Scan
 	out = append(out, scanXMLDTD(rel, content)...)
 
-	// 2. Duplicate attributes scan
-	out = append(out, scanXMLDuplicateAttributes(rel, content)...)
-
-	// 3. XInclude, Schema Locations, Hardcoded Secrets
+	// 2. XInclude, Schema Locations, Hardcoded Secrets
 	out = append(out, scanXMLSecurityTokens(rel, content, declaredEntities)...)
 
-	// 4. Well-formedness check (with custom entity pre-registration)
+	// 3. Well-formedness check (with custom entity pre-registration).
+	// This runs first to obtain parserFailureOffset, which is used as a
+	// hard barrier for all downstream scanners.
 	var parserFailureOffset int64 = -1
 	if f, offset, ok := scanXMLWellFormed(rel, content, declaredEntities); ok {
 		parserFailureOffset = offset
 		out = append(out, f)
 	}
 
-	// 5. Structural scan (comments, char refs, namespaces, structure)
-	// Structural scan uses parserFailureOffset as a hard barrier.
+	// 4. Structural scan (comments, char refs, namespaces, structure, duplicate attrs).
+	// Raw duplicate-attribute detection has been moved into the structural scanner so
+	// it is subject to the same parserFailureOffset barrier.
 	structuralRes := scanXMLStructural(rel, content, parserFailureOffset)
-	
-	// Deduplicate specific terminal structural failures that overlap with generic parsing failure.
+
+	// Suppress the generic parser failure when the structural scanner identified a
+	// more specific terminal rule at the same offset.
 	for _, sf := range structuralRes.Findings {
-		if structuralRes.Terminal != nil && sf.RuleID == structuralRes.Terminal.kind && parserFailureOffset >= structuralRes.Terminal.startOffset && parserFailureOffset <= structuralRes.Terminal.endOffset {
-			// Suppress the generic parser failure if the structural scanner found a specific terminal failure encompassing the exact failure offset.
+		if structuralRes.Terminal != nil && sf.RuleID == structuralRes.Terminal.kind &&
+			parserFailureOffset >= structuralRes.Terminal.startOffset &&
+			parserFailureOffset <= structuralRes.Terminal.endOffset {
 			for i, gen := range out {
 				if gen.RuleID == xmlNotWellFormedRuleID {
 					out = append(out[:i], out[i+1:]...)

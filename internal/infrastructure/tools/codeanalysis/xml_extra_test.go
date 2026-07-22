@@ -648,21 +648,58 @@ func TestXML_TokenCompletenessMatrix(t *testing.T) {
 		},
 		{
 			name:       "malformed attribute QName",
-			xml:        "<a x@y=\"1\"/><b/>",
+			xml:        `<a x@y="1"/><b/>`,
 			expected:   []string{xmlNotWellFormedRuleID},
 			unexpected: []string{},
 		},
 		{
 			name:       "malformed token instead of attr val",
-			xml:        "<a x=\"<\"/><b/>",
+			xml:        `<a x="<"/><b/>`,
 			expected:   []string{xmlNotWellFormedRuleID},
 			unexpected: []string{},
 		},
 		{
 			name:       "undefined entity in attr",
-			xml:        "<a x=\"&bogus;\"/><b/>",
+			xml:        `<a x="&bogus;"/><b/>`,
 			expected:   []string{xmlNotWellFormedRuleID},
 			unexpected: []string{},
+		},
+		// ── Duplicate-attribute: barrier-aware ──────────────────────────
+		{
+			name:     "raw duplicate attribute in valid doc",
+			xml:      `<a x="1" x="2"/>`,
+			expected: []string{xmlDuplicateAttributeRuleID},
+		},
+		{
+			name:     "no duplicate when first root is malformed",
+			xml:      `<a@b/><d x="1" x="2"/>`,
+			expected: []string{xmlNotWellFormedRuleID},
+		},
+		{
+			name:     "no duplicate when attr parse fails first",
+			xml:      `<a bad=oops x="1" x="2"/>`,
+			expected: []string{xmlNotWellFormedRuleID},
+		},
+		{
+			name:     "expanded duplicate only when doc is valid",
+			xml:      `<a xmlns:p="u" xmlns:q="u" p:x="1" q:x="2"/>`,
+			expected: []string{xmlDuplicateAttributeRuleID},
+		},
+		// ── Barrier at exact offset (bogus entity) ───────────────────────
+		{
+			name:     "bogus entity + mismatched end tag: not-well-formed only",
+			xml:      `<a>&bogus;</b>`,
+			expected: []string{xmlNotWellFormedRuleID},
+		},
+		{
+			name:     "bogus entity + matching end tag: not-well-formed only, no unclosed",
+			xml:      `<a>&bogus;</a>`,
+			expected: []string{xmlNotWellFormedRuleID},
+		},
+		{
+			name:     "bogus entity + second root: not-well-formed only",
+			xml:      `<a>&bogus;</a><b/>`,
+			expected: []string{xmlNotWellFormedRuleID},
 		},
 	}
 

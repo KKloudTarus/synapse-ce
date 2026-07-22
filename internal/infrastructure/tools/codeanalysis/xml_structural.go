@@ -50,7 +50,8 @@ func scanXMLStructural(rel string, content []byte, parserFailureOffset int64) xm
 
 Outer:
 	for i < len(content) {
-		if parserFailureOffset != -1 && int64(i) > parserFailureOffset {
+		if parserFailureOffset >= 0 && int64(i) >= parserFailureOffset {
+			recoveryLost = true
 			break Outer
 		}
 		if content[i] == '&' && i+1 < len(content) && content[i+1] == '#' {
@@ -557,8 +558,15 @@ Outer:
 				expandedAttrs := make(map[string]bool)
 
 				for _, attr := range attrs {
-					// Duplicate check for legacy compatibility: let the old scanner handle literal identical QNames
+					// Duplicate check for raw literal QNames (before namespace expansion).
+					// Emitting here ensures it is barrier-aware and won't fire after a parser failure.
 					if rawSeen[attr.name] {
+						res.Findings = append(res.Findings, xmlRawFinding(
+							xmlDuplicateAttributeRuleID,
+							rel,
+							attr.nameLine,
+							fmt.Sprintf("Duplicate attribute %q.", attr.name),
+						))
 						continue
 					}
 					rawSeen[attr.name] = true
@@ -625,6 +633,15 @@ Outer:
 		}
 
 		advance(1)
+	}
+
+	// If the generic parser failed before EOF but the structural scanner never
+	// reached that offset (e.g. early break), treat recovery as lost so we do
+	// not emit unclosed-element from an untrustworthy stack.
+	if parserFailureOffset >= 0 &&
+		parserFailureOffset < int64(len(content)) &&
+		res.Terminal == nil {
+		recoveryLost = true
 	}
 
 	if !recoveryLost && len(elemStack) > 0 {
