@@ -19,9 +19,21 @@ import (
 	"context"
 
 	sitter "github.com/smacker/go-tree-sitter"
+	"github.com/smacker/go-tree-sitter/c"
+	"github.com/smacker/go-tree-sitter/cpp"
+	"github.com/smacker/go-tree-sitter/csharp"
+	"github.com/smacker/go-tree-sitter/css"
+	"github.com/smacker/go-tree-sitter/golang"
+	"github.com/smacker/go-tree-sitter/html"
 	"github.com/smacker/go-tree-sitter/java"
 	"github.com/smacker/go-tree-sitter/javascript"
+	"github.com/smacker/go-tree-sitter/kotlin"
+	"github.com/smacker/go-tree-sitter/php"
 	"github.com/smacker/go-tree-sitter/python"
+	"github.com/smacker/go-tree-sitter/ruby"
+	"github.com/smacker/go-tree-sitter/rust"
+	"github.com/smacker/go-tree-sitter/scala"
+	"github.com/smacker/go-tree-sitter/swift"
 )
 
 func set(types ...string) map[string]bool {
@@ -71,6 +83,100 @@ var specs = map[string]spec{
 		cogIncrement: set("if_statement", "for_statement", "enhanced_for_statement", "while_statement", "do_statement", "switch_expression", "catch_clause", "ternary_expression"),
 		cogElse:      set(), // Java `else` is a token inside if_statement, not a node; else-if is a nested if (documented)
 		boolOpBinry:  set("binary_expression"),
+	},
+	// Grammars below are bundled by go-tree-sitter; registering them removes the "needs-grammar" parser
+	// prerequisite so contributors can author AST rule packs (#185/#186–#209). Function-count node types
+	// are verified by parse_langs_cgo_test.go; complexity node sets follow each grammar and are refined
+	// incrementally (per the package doc).
+	"Go": {
+		lang:         golang.GetLanguage(),
+		funcType:     set("function_declaration", "method_declaration", "func_literal"),
+		cycDecision:  set("if_statement", "for_statement", "expression_case", "type_case", "communication_case", "select_statement"),
+		cogIncrement: set("if_statement", "for_statement", "expression_switch_statement", "type_switch_statement", "select_statement"),
+		cogElse:      set(), // Go `else` is an `alternative` field, not a node
+		boolOpBinry:  set("binary_expression"),
+	},
+	"C": {
+		lang:         c.GetLanguage(),
+		funcType:     set("function_definition"),
+		cycDecision:  set("if_statement", "for_statement", "while_statement", "do_statement", "case_statement", "conditional_expression"),
+		cogIncrement: set("if_statement", "for_statement", "while_statement", "do_statement", "switch_statement", "conditional_expression"),
+		cogElse:      set(),
+		boolOpBinry:  set("binary_expression"),
+	},
+	"C++": {
+		lang:         cpp.GetLanguage(),
+		funcType:     set("function_definition", "lambda_expression"),
+		cycDecision:  set("if_statement", "for_statement", "for_range_loop", "while_statement", "do_statement", "case_statement", "catch_clause", "conditional_expression"),
+		cogIncrement: set("if_statement", "for_statement", "for_range_loop", "while_statement", "do_statement", "switch_statement", "catch_clause", "conditional_expression"),
+		cogElse:      set(),
+		boolOpBinry:  set("binary_expression"),
+	},
+	"C#": {
+		lang:         csharp.GetLanguage(),
+		funcType:     set("method_declaration", "constructor_declaration", "local_function_statement", "lambda_expression"),
+		cycDecision:  set("if_statement", "for_statement", "for_each_statement", "while_statement", "do_statement", "switch_section", "catch_clause", "conditional_expression"),
+		cogIncrement: set("if_statement", "for_statement", "for_each_statement", "while_statement", "do_statement", "switch_statement", "catch_clause", "conditional_expression"),
+		cogElse:      set("else_clause"),
+		boolOpBinry:  set("binary_expression"),
+	},
+	"Rust": {
+		lang:         rust.GetLanguage(),
+		funcType:     set("function_item", "closure_expression"),
+		cycDecision:  set("if_expression", "for_expression", "while_expression", "loop_expression", "match_arm"),
+		cogIncrement: set("if_expression", "for_expression", "while_expression", "loop_expression", "match_expression"),
+		cogElse:      set("else_clause"),
+		boolOpBinry:  set("binary_expression"),
+	},
+	"Ruby": {
+		lang:         ruby.GetLanguage(),
+		funcType:     set("method", "singleton_method"),
+		cycDecision:  set("if", "elsif", "unless", "while", "until", "for", "when", "rescue", "conditional"),
+		cogIncrement: set("if", "unless", "while", "until", "for", "case", "rescue", "conditional"),
+		cogElse:      set("elsif", "else"),
+		boolOpBinry:  set("binary"),
+	},
+	"PHP": {
+		lang:         php.GetLanguage(),
+		funcType:     set("function_definition", "method_declaration", "arrow_function", "anonymous_function_creation_expression"),
+		cycDecision:  set("if_statement", "else_if_clause", "for_statement", "foreach_statement", "while_statement", "do_statement", "case_statement", "catch_clause", "conditional_expression"),
+		cogIncrement: set("if_statement", "for_statement", "foreach_statement", "while_statement", "do_statement", "switch_statement", "catch_clause", "conditional_expression"),
+		cogElse:      set("else_if_clause", "else_clause"),
+		boolOpBinry:  set("binary_expression"),
+	},
+	"Scala": {
+		lang:         scala.GetLanguage(),
+		funcType:     set("function_definition"),
+		cycDecision:  set("if_expression", "for_expression", "while_expression", "case_clause", "catch_clause"),
+		cogIncrement: set("if_expression", "for_expression", "while_expression", "match_expression", "catch_clause"),
+		cogElse:      set(),
+		boolOpBinry:  set("infix_expression"),
+	},
+	"Swift": {
+		lang:         swift.GetLanguage(),
+		funcType:     set("function_declaration", "lambda_literal"),
+		cycDecision:  set("if_statement", "for_statement", "while_statement", "guard_statement", "switch_entry", "catch_block"),
+		cogIncrement: set("if_statement", "for_statement", "while_statement", "guard_statement", "switch_statement", "catch_block"),
+		cogElse:      set(),
+		boolOpBinry:  set("prefix_expression"),
+	},
+	"Kotlin": {
+		lang:         kotlin.GetLanguage(),
+		funcType:     set("function_declaration", "anonymous_function", "lambda_literal"),
+		cycDecision:  set("if_expression", "for_statement", "while_statement", "do_while_statement", "when_entry", "catch_block"),
+		cogIncrement: set("if_expression", "for_statement", "while_statement", "do_while_statement", "when_expression", "catch_block"),
+		cogElse:      set(),
+		boolOpBinry:  set("conjunction_expression", "disjunction_expression"),
+	},
+	// CSS and HTML are markup: no functions/complexity. Registering the grammar enables AST rule authoring
+	// (selectors/declarations, elements/attributes) — the metrics maps are intentionally empty.
+	"CSS": {
+		lang:     css.GetLanguage(),
+		funcType: set(),
+	},
+	"HTML": {
+		lang:     html.GetLanguage(),
+		funcType: set(),
 	},
 }
 
