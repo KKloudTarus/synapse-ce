@@ -143,7 +143,8 @@ Outer:
 				if end < len(content) {
 					advance(end - i + 3)
 				} else {
-					advance(len(content) - i)
+					recoveryLost = true
+					break Outer
 				}
 				continue
 			}
@@ -160,7 +161,8 @@ Outer:
 				if end < len(content) {
 					advance(end - i + 2)
 				} else {
-					advance(len(content) - i)
+					recoveryLost = true
+					break Outer
 				}
 				continue
 			}
@@ -244,6 +246,9 @@ Outer:
 				}
 				if i < len(content) {
 					advance(1)
+				} else {
+					recoveryLost = true
+					break Outer
 				}
 				continue
 			}
@@ -260,12 +265,18 @@ Outer:
 				name := string(content[i:end])
 
 				endTagSyntaxValid := true
+				if !isValidXMLName(name) {
+					endTagSyntaxValid = false
+				}
 				cursor := end
 				for cursor < len(content) && content[cursor] != '>' {
 					if !isXMLSpaceByte(content[cursor]) {
 						endTagSyntaxValid = false
 					}
 					cursor++
+				}
+				if cursor >= len(content) {
+					endTagSyntaxValid = false
 				}
 
 				for end < len(content) && content[end] != '>' {
@@ -274,12 +285,14 @@ Outer:
 				if end < len(content) {
 					advance(end - i + 1)
 				} else {
-					advance(end - i)
+					recoveryLost = true
+					break Outer
 				}
 				tagEnd := i
 
 				if !endTagSyntaxValid {
 					recoveryLost = true
+					break Outer
 				}
 
 				if len(elemStack) > 0 {
@@ -300,20 +313,18 @@ Outer:
 								startLine,
 								fmt.Sprintf("Mismatched end tag </%s>. Expected </%s>.", name, top.name),
 							))
-							if endTagSyntaxValid {
-								if res.Terminal == nil {
-									res.Terminal = &xmlTerminalFailure{
-										kind:        xmlMismatchedTagRuleID,
-										reportLine:  startLine,
-										startOffset: int64(tagStart),
-										endOffset:   int64(tagEnd),
-									}
+							if res.Terminal == nil {
+								res.Terminal = &xmlTerminalFailure{
+									kind:        xmlMismatchedTagRuleID,
+									reportLine:  startLine,
+									startOffset: int64(tagStart),
+									endOffset:   int64(tagEnd),
 								}
-								elemStack = elemStack[:found]
-								nsStack = nsStack[:found]
-								recoveryLost = true
-								break Outer
 							}
+							elemStack = elemStack[:found]
+							nsStack = nsStack[:found]
+							recoveryLost = true
+							break Outer
 						} else {
 							res.Findings = append(res.Findings, xmlRawFinding(
 								xmlMismatchedTagRuleID,
@@ -321,25 +332,21 @@ Outer:
 								startLine,
 								fmt.Sprintf("Mismatched end tag </%s> with no matching open element.", name),
 							))
-							if endTagSyntaxValid {
-								if res.Terminal == nil {
-									res.Terminal = &xmlTerminalFailure{
-										kind:        xmlMismatchedTagRuleID,
-										reportLine:  startLine,
-										startOffset: int64(tagStart),
-										endOffset:   int64(tagEnd),
-									}
+							if res.Terminal == nil {
+								res.Terminal = &xmlTerminalFailure{
+									kind:        xmlMismatchedTagRuleID,
+									reportLine:  startLine,
+									startOffset: int64(tagStart),
+									endOffset:   int64(tagEnd),
 								}
-								recoveryLost = true
-								break Outer
 							}
+							recoveryLost = true
+							break Outer
 						}
 					} else {
-						if endTagSyntaxValid {
-							elemStack = elemStack[:len(elemStack)-1]
-							if len(nsStack) > 0 {
-								nsStack = nsStack[:len(nsStack)-1]
-							}
+						elemStack = elemStack[:len(elemStack)-1]
+						if len(nsStack) > 0 {
+							nsStack = nsStack[:len(nsStack)-1]
 						}
 					}
 				} else {
@@ -349,18 +356,16 @@ Outer:
 						startLine,
 						fmt.Sprintf("Mismatched end tag </%s> with no open element.", name),
 					))
-					if endTagSyntaxValid {
-						if res.Terminal == nil {
-							res.Terminal = &xmlTerminalFailure{
-								kind:        xmlMismatchedTagRuleID,
-								reportLine:  startLine,
-								startOffset: int64(tagStart),
-								endOffset:   int64(tagEnd),
-							}
+					if res.Terminal == nil {
+						res.Terminal = &xmlTerminalFailure{
+							kind:        xmlMismatchedTagRuleID,
+							reportLine:  startLine,
+							startOffset: int64(tagStart),
+							endOffset:   int64(tagEnd),
 						}
-						recoveryLost = true
-						break Outer
 					}
+					recoveryLost = true
+					break Outer
 				}
 
 				if recoveryLost {
@@ -381,8 +386,9 @@ Outer:
 					end++
 				}
 				name := string(content[i:end])
-				if name == "" {
-					continue
+				if !isValidXMLName(name) {
+					recoveryLost = true
+					break Outer
 				}
 
 				advance(end - i)
@@ -397,12 +403,7 @@ Outer:
 				var attrs []attrToken
 				selfClosing := false
 
-				for i < len(content) && content[i] != '>' {
-					if content[i] == '/' && i+1 < len(content) && content[i+1] == '>' {
-						selfClosing = true
-						advance(2)
-						break
-					}
+				for i < len(content) && content[i] != '>' && content[i] != '/' {
 					if isXMLSpaceByte(content[i]) {
 						advance(1)
 						continue
@@ -416,7 +417,8 @@ Outer:
 					attrName := string(content[attrStart:i])
 
 					if attrName == "" {
-						break
+						recoveryLost = true
+						break Outer
 					}
 
 					for i < len(content) && isXMLSpaceByte(content[i]) {
@@ -442,6 +444,37 @@ Outer:
 							if i < len(content) && content[i] == q {
 								attrVal = string(content[valStart:i])
 								advance(1)
+
+								vBytes := []byte(attrVal)
+								vLine := valueLine
+								vIdx := 0
+								for vIdx < len(vBytes) {
+									if vBytes[vIdx] == '\n' {
+										vLine++
+									}
+									if vBytes[vIdx] == '&' && vIdx+1 < len(vBytes) && vBytes[vIdx+1] == '#' {
+										vConsumed, vFinding, vTerminal := checkCharRef(vBytes, vIdx+2, vLine, rel, true)
+										vConsumed += 2
+										if vFinding != nil {
+											res.Findings = append(res.Findings, *vFinding)
+											if vTerminal {
+												if res.Terminal == nil {
+													res.Terminal = &xmlTerminalFailure{
+														kind:        vFinding.RuleID,
+														reportLine:  vLine,
+														startOffset: int64(valStart + vIdx),
+														endOffset:   int64(valStart + len(attrVal) + 1),
+													}
+												}
+												recoveryLost = true
+												break Outer
+											}
+										}
+										vIdx += vConsumed
+										continue
+									}
+									vIdx++
+								}
 							} else {
 								recoveryLost = true
 								break Outer
@@ -457,8 +490,14 @@ Outer:
 					attrs = append(attrs, attrToken{name: attrName, val: attrVal, startOffset: valStart, nameLine: nameLine, valueLine: valueLine})
 				}
 
-				if i < len(content) && !selfClosing && content[i] == '>' {
+				if i < len(content) && content[i] == '>' {
 					advance(1)
+				} else if i+1 < len(content) && content[i] == '/' && content[i+1] == '>' {
+					selfClosing = true
+					advance(2)
+				} else {
+					recoveryLost = true
+					break Outer
 				}
 				tagEnd := i
 
@@ -572,38 +611,7 @@ Outer:
 					checkPrefix(attr.name, attr.nameLine)
 				}
 
-				for _, attr := range attrs {
-					vBytes := []byte(attr.val)
-					vLine := attr.valueLine
-					vIdx := 0
-					for vIdx < len(vBytes) {
-						if vBytes[vIdx] == '\n' {
-							vLine++
-						}
-						if vBytes[vIdx] == '&' && vIdx+1 < len(vBytes) && vBytes[vIdx+1] == '#' {
-							vConsumed, vFinding, vTerminal := checkCharRef(vBytes, vIdx+2, vLine, rel, true)
-							vConsumed += 2
-							if vFinding != nil {
-								res.Findings = append(res.Findings, *vFinding)
-								if vTerminal {
-									if res.Terminal == nil {
-										res.Terminal = &xmlTerminalFailure{
-											kind:        vFinding.RuleID,
-											reportLine:  vLine,
-											startOffset: int64(attr.startOffset + vIdx),
-											endOffset:   int64(attr.startOffset + len(attr.val) + 1),
-										}
-									}
-									recoveryLost = true
-									break Outer
-								}
-							}
-							vIdx += vConsumed
-							continue
-						}
-						vIdx++
-					}
-				}
+				// Character references are now checked during attribute parsing.
 
 				if !selfClosing {
 					elemStack = append(elemStack, elem{name: name, line: startLine})
@@ -704,4 +712,21 @@ func isValidCharRef(ref string) bool {
 		(val >= 0x20 && val <= 0xD7FF) ||
 		(val >= 0xE000 && val <= 0xFFFD) ||
 		(val >= 0x10000 && val <= 0x10FFFF)
+}
+
+func isValidXMLName(name string) bool {
+	if name == "" {
+		return false
+	}
+	c := name[0]
+	if (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '!' || c == '?' || c == '/' {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c == '!' || c == '?' || c == '/' || c == '<' || c == '>' || c == '=' || c == ' ' || c == '\n' || c == '\t' || c == '\r' || c == '&' || c == '"' || c == '\'' {
+			return false
+		}
+	}
+	return true
 }

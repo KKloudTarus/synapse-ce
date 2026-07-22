@@ -476,20 +476,20 @@ func TestXML_FullPipelineSuppression(t *testing.T) {
 		{
 			name:       "malformed end tag attribute",
 			xml:        `<a></b bad=oops>`,
-			expected:   []string{xmlMismatchedTagRuleID, xmlNotWellFormedRuleID},
-			unexpected: []string{},
+			expected:   []string{xmlNotWellFormedRuleID},
+			unexpected: []string{xmlMismatchedTagRuleID},
 		},
 		{
 			name:       "malformed end tag token",
 			xml:        `<a></b x>`,
-			expected:   []string{xmlMismatchedTagRuleID, xmlNotWellFormedRuleID},
-			unexpected: []string{},
+			expected:   []string{xmlNotWellFormedRuleID},
+			unexpected: []string{xmlMismatchedTagRuleID},
 		},
 		{
 			name:       "nested malformed end tag",
 			xml:        `<root><a></wrong bad=oops></root>`,
-			expected:   []string{xmlMismatchedTagRuleID, xmlNotWellFormedRuleID},
-			unexpected: []string{},
+			expected:   []string{xmlNotWellFormedRuleID},
+			unexpected: []string{xmlMismatchedTagRuleID},
 		},
 		{
 			name:       "mismatched tag matching name but bad syntax",
@@ -548,6 +548,119 @@ func TestXML_FullPipelineSuppression(t *testing.T) {
 					if got[i] != expected[i] {
 						t.Errorf("expected %v, got %v\nfindings: %+v", expected, got, findings)
 						break
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestXML_TokenCompletenessMatrix(t *testing.T) {
+	tests := []struct {
+		name       string
+		xml        string
+		expected   []string
+		unexpected []string
+	}{
+		{
+			name:       "unterminated start tag",
+			xml:        "<a x=\"v\"",
+			expected:   []string{xmlNotWellFormedRuleID},
+			unexpected: []string{xmlUnclosedElementRuleID},
+		},
+		{
+			name:       "incomplete second root",
+			xml:        "<a /><b x=\"v\"",
+			expected:   []string{xmlNotWellFormedRuleID},
+			unexpected: []string{xmlMultipleRootElementsRuleID, xmlUnclosedElementRuleID},
+		},
+		{
+			name:       "malformed self-closing",
+			xml:        "<a / x>",
+			expected:   []string{xmlNotWellFormedRuleID},
+			unexpected: []string{xmlUnclosedElementRuleID},
+		},
+		{
+			name:       "invalid qname first root",
+			xml:        "<1a/><b/>",
+			expected:   []string{xmlNotWellFormedRuleID},
+			unexpected: []string{xmlMultipleRootElementsRuleID},
+		},
+		{
+			name:       "unterminated end tag",
+			xml:        "<a></b",
+			expected:   []string{xmlNotWellFormedRuleID},
+			unexpected: []string{xmlMismatchedTagRuleID},
+		},
+		{
+			name:       "empty end tag",
+			xml:        "<a></>",
+			expected:   []string{xmlNotWellFormedRuleID},
+			unexpected: []string{xmlMismatchedTagRuleID},
+		},
+		{
+			name:       "invalid qname end tag",
+			xml:        "<a></1bad>",
+			expected:   []string{xmlNotWellFormedRuleID},
+			unexpected: []string{xmlMismatchedTagRuleID},
+		},
+		{
+			name:       "clean mismatched end tag with space",
+			xml:        "<a></b >",
+			expected:   []string{xmlMismatchedTagRuleID},
+			unexpected: []string{xmlNotWellFormedRuleID},
+		},
+		{
+			name:       "unterminated CDATA",
+			xml:        "<root><![CDATA[unfinished",
+			expected:   []string{xmlNotWellFormedRuleID},
+			unexpected: []string{xmlUnclosedElementRuleID},
+		},
+		{
+			name:       "unterminated PI",
+			xml:        "<root><?pi unfinished",
+			expected:   []string{xmlNotWellFormedRuleID},
+			unexpected: []string{xmlUnclosedElementRuleID},
+		},
+		{
+			name:       "unterminated DOCTYPE",
+			xml:        "<root><!DOCTYPE root [<!ELEMENT root EMPTY>",
+			expected:   []string{xmlDoctypePresentRuleID, xmlNotWellFormedRuleID},
+			unexpected: []string{xmlUnclosedElementRuleID},
+		},
+		{
+			name:       "invalid char ref before malformed attribute",
+			xml:        "<a x=\"&#0;\" y=oops>",
+			expected:   []string{xmlInvalidCharacterReferenceRuleID},
+			unexpected: []string{xmlNotWellFormedRuleID},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := scanXMLFile("test.xml", []byte(tt.xml))
+			findingIDs := []string{}
+			for _, f := range res {
+				findingIDs = append(findingIDs, f.RuleID)
+			}
+
+			for _, exp := range tt.expected {
+				found := false
+				for _, act := range findingIDs {
+					if act == exp {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected %s, got %+v", exp, findingIDs)
+				}
+			}
+
+			for _, unexp := range tt.unexpected {
+				for _, act := range findingIDs {
+					if act == unexp {
+						t.Errorf("unexpected %s found in %+v", unexp, findingIDs)
 					}
 				}
 			}
