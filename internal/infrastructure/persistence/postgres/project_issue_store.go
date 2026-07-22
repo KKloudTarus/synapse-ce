@@ -79,10 +79,11 @@ func (r *ProjectAnalysisStore) SaveWithResultAndProjections(ctx context.Context,
 // It mirrors the memory store's upsertIssueLocked exactly.
 func upsertIssuesTx(ctx context.Context, tx pgx.Tx, items []issue.Issue) error {
 	for _, item := range items {
+		sourceFile, startLine, endLine, startColumn, endColumn := sourceLocationFields(item.SourceLocation)
 		if _, err := tx.Exec(ctx, `INSERT INTO project_issues
-			(id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location,
+			(id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location, source_file, start_line, end_line, start_column, end_column,
 			 status, version, is_new, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$21,$22)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$26,$27)
 			ON CONFLICT (tenant_id, project_id, issue_key) DO UPDATE SET
 				first_seen_analysis_id = CASE WHEN (EXCLUDED.first_seen_at, EXCLUDED.first_seen_analysis_id) < (project_issues.first_seen_at, project_issues.first_seen_analysis_id) THEN EXCLUDED.first_seen_analysis_id ELSE project_issues.first_seen_analysis_id END,
 				first_seen_at = CASE WHEN (EXCLUDED.first_seen_at, EXCLUDED.first_seen_analysis_id) < (project_issues.first_seen_at, project_issues.first_seen_analysis_id) THEN EXCLUDED.first_seen_at ELSE project_issues.first_seen_at END,
@@ -98,6 +99,11 @@ func upsertIssuesTx(ctx context.Context, tx pgx.Tx, items []issue.Issue) error {
 				language = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_issues.last_seen_at, project_issues.last_seen_analysis_id) THEN EXCLUDED.language ELSE project_issues.language END,
 				file = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_issues.last_seen_at, project_issues.last_seen_analysis_id) THEN EXCLUDED.file ELSE project_issues.file END,
 				location = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_issues.last_seen_at, project_issues.last_seen_analysis_id) THEN EXCLUDED.location ELSE project_issues.location END,
+				source_file = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_issues.last_seen_at, project_issues.last_seen_analysis_id) THEN EXCLUDED.source_file ELSE project_issues.source_file END,
+				start_line = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_issues.last_seen_at, project_issues.last_seen_analysis_id) THEN EXCLUDED.start_line ELSE project_issues.start_line END,
+				end_line = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_issues.last_seen_at, project_issues.last_seen_analysis_id) THEN EXCLUDED.end_line ELSE project_issues.end_line END,
+				start_column = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_issues.last_seen_at, project_issues.last_seen_analysis_id) THEN EXCLUDED.start_column ELSE project_issues.start_column END,
+				end_column = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_issues.last_seen_at, project_issues.last_seen_analysis_id) THEN EXCLUDED.end_column ELSE project_issues.end_column END,
 				last_seen_analysis_id = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_issues.last_seen_at, project_issues.last_seen_analysis_id) THEN EXCLUDED.last_seen_analysis_id ELSE project_issues.last_seen_analysis_id END,
 				last_seen_at = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_issues.last_seen_at, project_issues.last_seen_analysis_id) THEN EXCLUDED.last_seen_at ELSE project_issues.last_seen_at END,
 				updated_at = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_issues.last_seen_at, project_issues.last_seen_analysis_id) THEN EXCLUDED.updated_at ELSE project_issues.updated_at END,
@@ -110,6 +116,7 @@ func upsertIssuesTx(ctx context.Context, tx pgx.Tx, items []issue.Issue) error {
 				)`,
 			item.ID, item.TenantID, item.ProjectID, item.Key, item.FindingIdentity, item.RuleKey, string(item.Type), item.Title, item.Description,
 			string(item.Severity), string(item.Kind), item.CWE, item.Language, item.File, item.Location,
+			sourceFile, startLine, endLine, startColumn, endColumn,
 			string(item.Status), item.Version, item.IsNew, item.FirstSeenAnalysisID, item.LastSeenAnalysisID, item.FirstSeenAt, item.LastSeenAt); err != nil {
 			return fmt.Errorf("upsert project issue: %w", err)
 		}
@@ -124,7 +131,7 @@ func (r *ProjectAnalysisStore) ListIssues(ctx context.Context, tenantID, project
 		limit = 25
 	}
 	args = append(args, limit+1)
-	query := `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location,
+	query := `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location, source_file, start_line, end_line, start_column, end_column,
 		status, version, is_new, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at
 		FROM project_issues WHERE ` + where + ` ORDER BY last_seen_at DESC, id COLLATE "C" DESC LIMIT $` + fmt.Sprint(len(args))
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -246,7 +253,7 @@ func issueWhere(tenantID, projectID shared.ID, filter issue.ListFilter, cursor b
 }
 
 func (r *ProjectAnalysisStore) GetIssue(ctx context.Context, tenantID, projectID, issueID shared.ID) (issue.Issue, error) {
-	row := r.pool.QueryRow(ctx, `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location,
+	row := r.pool.QueryRow(ctx, `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location, source_file, start_line, end_line, start_column, end_column,
 		status, version, is_new, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at
 		FROM project_issues WHERE tenant_id=$1 AND project_id=$2 AND id=$3`, tenantID.String(), projectID.String(), issueID.String())
 	item, err := scanIssue(row)
@@ -262,17 +269,20 @@ func (r *ProjectAnalysisStore) GetIssue(ctx context.Context, tenantID, projectID
 func scanIssue(row rowScanner) (issue.Issue, error) {
 	var item issue.Issue
 	var tenantID, projectID, issueType, severity, kind, status string
+	var sourceFile *string
+	var startLine, endLine, startColumn, endColumn *int
 	var createdAt, updatedAt time.Time
 	var lastReviewedBy *string
 	var lastReviewedAt *time.Time
 	if err := row.Scan(&item.ID, &tenantID, &projectID, &item.Key, &item.FindingIdentity, &item.RuleKey, &issueType, &item.Title, &item.Description,
-		&severity, &kind, &item.CWE, &item.Language, &item.File, &item.Location, &status, &item.Version, &item.IsNew,
+		&severity, &kind, &item.CWE, &item.Language, &item.File, &item.Location, &sourceFile, &startLine, &endLine, &startColumn, &endColumn, &status, &item.Version, &item.IsNew,
 		&item.FirstSeenAnalysisID, &item.LastSeenAnalysisID, &item.FirstSeenAt, &item.LastSeenAt, &createdAt, &updatedAt, &lastReviewedBy, &lastReviewedAt); err != nil {
 		return issue.Issue{}, err
 	}
 	if lastReviewedBy != nil {
 		item.LastReviewedBy = *lastReviewedBy
 	}
+	item.SourceLocation = sourceLocationFromFields(sourceFile, startLine, endLine, startColumn, endColumn)
 	item.LastReviewedAt = lastReviewedAt
 	item.TenantID, item.ProjectID = shared.ID(tenantID), shared.ID(projectID)
 	item.Type = rule.Type(issueType)
@@ -288,7 +298,7 @@ func (r *ProjectAnalysisStore) TransitionIssue(ctx context.Context, cmd issue.Tr
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	row := tx.QueryRow(ctx, `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location,
+	row := tx.QueryRow(ctx, `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location, source_file, start_line, end_line, start_column, end_column,
 		status, version, is_new, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at
 		FROM project_issues WHERE tenant_id=$1 AND project_id=$2 AND id=$3 FOR UPDATE`, cmd.TenantID.String(), cmd.ProjectID.String(), cmd.IssueID.String())
 	item, err := scanIssue(row)
@@ -345,6 +355,50 @@ func (r *ProjectAnalysisStore) IssueHistory(ctx context.Context, tenantID, proje
 		events = append(events, e)
 	}
 	return events, rows.Err()
+}
+
+func sourceLocationFields(location *finding.SourceLocation) (any, any, any, any, any) {
+	if location == nil {
+		return nil, nil, nil, nil, nil
+	}
+	var startColumn, endColumn any
+	if location.StartColumn != nil {
+		startColumn = *location.StartColumn
+		endColumn = *location.EndColumn
+	}
+	return location.File, location.StartLine, location.EndLine, startColumn, endColumn
+}
+
+func sourceLocationFromFields(file *string, startLine, endLine, startColumn, endColumn *int) *finding.SourceLocation {
+	if file == nil || startLine == nil || endLine == nil {
+		return nil
+	}
+	location := &finding.SourceLocation{File: *file, StartLine: *startLine, EndLine: *endLine, StartColumn: startColumn, EndColumn: endColumn}
+	if location.Validate() != nil {
+		return nil
+	}
+	return location
+}
+
+func (r *ProjectAnalysisStore) CurrentFindingStatuses(ctx context.Context, tenantID, projectID shared.ID, keys []string) (map[string]string, error) {
+	if len(keys) == 0 {
+		return map[string]string{}, nil
+	}
+	rows, err := r.pool.Query(ctx, `SELECT issue_key, status FROM project_issues WHERE tenant_id=$1 AND project_id=$2 AND issue_key = ANY($3)
+		UNION ALL SELECT hotspot_key, status FROM project_hotspots WHERE tenant_id=$1 AND project_id=$2 AND hotspot_key = ANY($3)`, tenantID.String(), projectID.String(), keys)
+	if err != nil {
+		return nil, fmt.Errorf("query current finding statuses: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]string, len(keys))
+	for rows.Next() {
+		var key, status string
+		if err := rows.Scan(&key, &status); err != nil {
+			return nil, fmt.Errorf("scan current finding status: %w", err)
+		}
+		out[key] = status
+	}
+	return out, rows.Err()
 }
 
 func (r *ProjectAnalysisStore) ResolvedIssueKeys(ctx context.Context, tenantID, projectID shared.ID) (map[string]bool, error) {

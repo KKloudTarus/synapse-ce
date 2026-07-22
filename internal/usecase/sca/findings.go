@@ -197,24 +197,25 @@ func buildFindings(engagementID shared.ID, res *ScanResult, now time.Time, minSe
 			confidence = vulnerability.ConfidenceForSources(1)
 		}
 		out = append(out, finding.Finding{
-			ID:           findingID(engagementID, dedup),
-			EngagementID: engagementID,
-			Title:        fmt.Sprintf("%s (%s:%d)", sr.Title, sr.File, sr.Line),
-			Description:  sastDescription(sr),
-			Severity:     sr.Severity,
-			CWE:          sr.CWE,
-			Sources:      []string{"synapse-pattern-sast"},
-			Confidence:   confidence,
-			Class:        finding.ClassFirstParty,
-			Scope:        scope,
-			Reachability: vulnerability.Reachability(scope, true),
-			Impact:       vulnerability.Impact(sr.Severity, scope),
-			Priority:     sastPriority(sr.Severity),
-			Status:       finding.StatusOpen,
-			Kind:         sastKind(sr),
-			RuleKey:      sr.RuleID,
-			DedupKey:     dedup,
-			Audit:        shared.Audit{CreatedAt: now, UpdatedAt: now},
+			ID:             findingID(engagementID, dedup),
+			EngagementID:   engagementID,
+			Title:          fmt.Sprintf("%s (%s:%d)", sr.Title, sr.File, sr.Line),
+			Description:    sastDescription(sr),
+			Severity:       sr.Severity,
+			CWE:            sr.CWE,
+			Sources:        []string{"synapse-pattern-sast"},
+			Confidence:     confidence,
+			Class:          finding.ClassFirstParty,
+			Scope:          scope,
+			Reachability:   vulnerability.Reachability(scope, true),
+			Impact:         vulnerability.Impact(sr.Severity, scope),
+			Priority:       sastPriority(sr.Severity),
+			Status:         finding.StatusOpen,
+			Kind:           sastKind(sr),
+			RuleKey:        sr.RuleID,
+			DedupKey:       dedup,
+			SourceLocation: sourceLocation(sr.File, sr.Line),
+			Audit:          shared.Audit{CreatedAt: now, UpdatedAt: now},
 		})
 	}
 	return out
@@ -287,12 +288,13 @@ func buildSecretFindings(engagementID shared.ID, raws []ports.SecretRawFinding, 
 			Scope:        scope,
 			// Reachability/Impact are left empty on purpose: a hardcoded secret is a PRESENCE fact, not a
 			// reachable-code weakness, so the scope+severity impact model the SAST loop uses does not apply.
-			Priority: sastPriority(sr.Severity),
-			Status:   finding.StatusOpen,
-			Kind:     finding.KindSecret,
-			RuleKey:  sr.RuleID,
-			DedupKey: dedup,
-			Audit:    shared.Audit{CreatedAt: now, UpdatedAt: now},
+			Priority:       sastPriority(sr.Severity),
+			Status:         finding.StatusOpen,
+			Kind:           finding.KindSecret,
+			RuleKey:        sr.RuleID,
+			DedupKey:       dedup,
+			SourceLocation: sourceLocation(sr.File, sr.Line),
+			Audit:          shared.Audit{CreatedAt: now, UpdatedAt: now},
 		})
 	}
 	return out
@@ -328,12 +330,13 @@ func buildMisconfigFindings(engagementID shared.ID, raws []ports.MisconfigRawFin
 			// Reachability/Impact are left empty on purpose: a misconfiguration is a static PRESENCE fact
 			// in a config file, not a reachable-code weakness, so the SAST scope+severity impact model
 			// does not apply.
-			Priority: sastPriority(mr.Severity),
-			Status:   finding.StatusOpen,
-			Kind:     finding.KindMisconfig,
-			RuleKey:  mr.RuleID,
-			DedupKey: dedup,
-			Audit:    shared.Audit{CreatedAt: now, UpdatedAt: now},
+			Priority:       sastPriority(mr.Severity),
+			Status:         finding.StatusOpen,
+			Kind:           finding.KindMisconfig,
+			RuleKey:        mr.RuleID,
+			DedupKey:       dedup,
+			SourceLocation: sourceLocation(mr.File, mr.Line),
+			Audit:          shared.Audit{CreatedAt: now, UpdatedAt: now},
 		})
 	}
 	return out
@@ -439,6 +442,14 @@ func sastDescription(sr ports.SASTRawFinding) string {
 
 // sastPriority maps a SAST severity to the unified risk priority (1 highest.. 5). SAST hits have no
 // KEV/EPSS, so priority comes straight from severity; 1 stays reserved for KEV-driven SCA findings.
+func sourceLocation(file string, line int) *finding.SourceLocation {
+	location := &finding.SourceLocation{File: file, StartLine: line, EndLine: line}
+	if location.Validate() != nil {
+		return nil
+	}
+	return location
+}
+
 func sastPriority(sev shared.Severity) int {
 	switch sev {
 	case shared.SeverityCritical, shared.SeverityHigh:

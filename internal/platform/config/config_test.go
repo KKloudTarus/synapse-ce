@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // TestIsProductionFailsClosed pins the env-gate hardening: IsProduction normalizes
 // (trim + lowercase) and treats anything that is NOT an explicitly recognized
@@ -143,6 +146,19 @@ func TestLoadSBOMProducer(t *testing.T) {
 
 // TestLoadMaxWorkspaceBytes confirms the acquire workspace cap defaults to 2 GiB and honors a
 // byte override (including values beyond int32) via SYNAPSE_MAX_WORKSPACE_BYTES.
+func TestProjectSourceCaptureDefaults(t *testing.T) {
+	for _, key := range []string{
+		"SYNAPSE_PROJECT_SOURCE_ARTIFACT_DIR", "SYNAPSE_PROJECT_SOURCE_RETENTION",
+		"SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES", "SYNAPSE_PROJECT_SOURCE_MAX_FILES", "SYNAPSE_PROJECT_SOURCE_MAX_BYTES",
+	} {
+		t.Setenv(key, "")
+	}
+	cfg := Load()
+	if cfg.ProjectSourceArtifactDir != "data/project-source-artifacts" || cfg.ProjectSourceRetention != 90*24*time.Hour || cfg.ProjectSourceMaxFileBytes != 2<<20 || cfg.ProjectSourceMaxFiles != 10_000 || cfg.ProjectSourceMaxBytes != 500<<20 {
+		t.Fatalf("source capture defaults = %+v", cfg)
+	}
+}
+
 func TestLoadMaxWorkspaceBytes(t *testing.T) {
 	t.Setenv("SYNAPSE_MAX_WORKSPACE_BYTES", "")
 	if got := Load().MaxWorkspaceBytes; got != 2<<30 {

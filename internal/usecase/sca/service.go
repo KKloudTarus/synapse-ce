@@ -24,10 +24,12 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedsbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
@@ -99,7 +101,8 @@ type Service struct {
 	projectAnalysisRecorder interface {
 		RecordProjectAnalysis(context.Context, shared.ID, string, time.Time, *ScanResult) error
 	}
-	gateDecoder ports.GateDecoder
+	sourceArtifacts ports.ProjectSourceArtifactStore
+	gateDecoder     ports.GateDecoder
 }
 
 // SetSeverityEnricher configures optional severity backfill (NVD CVSS) for vulnerabilities the
@@ -122,6 +125,12 @@ func (s *Service) SetProjectAnalysisRecorder(r interface {
 	RecordProjectAnalysis(context.Context, shared.ID, string, time.Time, *ScanResult) error
 }) {
 	s.projectAnalysisRecorder = r
+}
+
+// SetProjectSourceArtifactStore captures immutable source for Project analyses while
+// the acquired workspace still exists. Nil keeps non-Code deployments unchanged.
+func (s *Service) SetProjectSourceArtifactStore(store ports.ProjectSourceArtifactStore) {
+	s.sourceArtifacts = store
 }
 
 func (s *Service) SetGateDecoder(decoder ports.GateDecoder) { s.gateDecoder = decoder }
@@ -531,6 +540,13 @@ type ScanResult struct {
 	// deletion. Populated by the injected ports.FPTriager for BOTH the CLI and the durable API scan job;
 	// empty unless the FP-triage gate ran.
 	AITriage []ports.AICritique `json:"ai_triage,omitempty"`
+	// SourceCapture is analysis-owned source availability metadata. Content is held by
+	// ProjectSourceArtifactStore, never embedded in this scan result.
+	SourceCapture *projectanalysis.SourceCapture `json:"source_capture,omitempty"`
+	// Comparison is persisted scan-time Git metadata and base artifact inventory.
+	// It is empty or unavailable for non-Git/first analyses.
+	Comparison  projectanalysis.Comparison   `json:"comparison,omitempty"`
+	FileChanges []projectanalysis.FileChange `json:"file_changes,omitempty"`
 }
 
 // SuspectedFPKeys returns the set of finding DedupKeys the AI triage marked as suspected false positives
@@ -610,9 +626,12 @@ type ScanOptions struct {
 	// operator's CI-repo governance, so the CLI sets this to the invocation CWD (the checked-out repo).
 	PolicyDir string `json:"policy_dir,omitempty"`
 	// DetectionPriority selects comprehensive (default) or precise; see the Detection* consts.
-	DetectionPriority string                  `json:"detection_priority,omitempty"`
-	CodeQuality       bool                    `json:"code_quality,omitempty"`
-	ProjectAnalysis   bool                    `json:"project_analysis,omitempty"`
+	DetectionPriority string `json:"detection_priority,omitempty"`
+	CodeQuality       bool   `json:"code_quality,omitempty"`
+	ProjectAnalysis   bool   `json:"project_analysis,omitempty"`
+	// ProjectAnalysisID is assigned after the durable job is created. It is not
+	// caller input and binds captured artifacts to the immutable analysis snapshot.
+	ProjectAnalysisID string                  `json:"project_analysis_id,omitempty"`
 	LineCoverage      *measure.CoverageReport `json:"line_coverage,omitempty"`
 	Gate              qualitygate.Gate        `json:"gate,omitempty"`
 }
@@ -1410,6 +1429,9 @@ func (s *Service) runScanJob(actor string, engagementID shared.ID, now time.Time
 			return
 		}
 	}
+	if opts.ProjectAnalysis {
+		opts.ProjectAnalysisID = job.ID
+	}
 	ctx := context.Background()
 	if s.timeout > 0 {
 		var cancel context.CancelFunc
@@ -2173,6 +2195,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		DebugEvents:              trace.snapshot(),
 		LineCoverage:             opts.LineCoverage,
 		Gate:                     opts.Gate,
+		Comparison:               comparisonFromWorkspace(req, ws),
 	}
 	// Container-image layer attribution (Epic D): join each vuln to the layer that introduced
 	// its component, and classify base vs application layers. No-op for non-image scans.
@@ -2373,7 +2396,84 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			_ = s.results.SaveResult(ctx, engagementID, data)
 		}
 	}
+	// Capture only after all source readers have completed, but before deferred
+	// workspace cleanup. Capture failure is explicit metadata, never a scan failure.
+	if opts.ProjectAnalysis {
+		s.captureProjectSource(ctx, engagementID, opts.ProjectAnalysisID, ws.Dir, result)
+		s.captureProjectComparison(ctx, engagementID, opts.ProjectAnalysisID, ws.Dir, ws.Commit, result)
+	}
 	return result, nil
+}
+
+func (s *Service) captureProjectComparison(ctx context.Context, engagementID shared.ID, analysisID, sourceDir, head string, result *ScanResult) {
+	if result == nil || !result.Comparison.Available || s.sourceArtifacts == nil {
+		return
+	}
+	changes, err := gitdiff.FileChanges(ctx, sourceDir, result.Comparison.MergeBase, head)
+	if err != nil {
+		result.Comparison = projectanalysis.Comparison{Reason: projectanalysis.UnavailableNoComparableBase}
+		return
+	}
+	baseFiles := make(map[string][]byte)
+	for _, change := range changes {
+		if change.OldPath == "" || change.Binary || change.Status == projectanalysis.FileStatusAdded {
+			continue
+		}
+		data, err := gitdiff.FileAtRevision(ctx, sourceDir, result.Comparison.MergeBase, change.OldPath)
+		if err != nil {
+			result.Comparison = projectanalysis.Comparison{Reason: projectanalysis.UnavailableCaptureFailed}
+			return
+		}
+		baseFiles[change.OldPath] = data
+	}
+	engagement, err := s.engagements.GetByID(ctx, engagementID)
+	if err != nil || engagement.ProjectID.IsZero() || strings.TrimSpace(analysisID) == "" {
+		result.Comparison = projectanalysis.Comparison{Reason: projectanalysis.UnavailableCaptureFailed}
+		return
+	}
+	manifest, err := s.sourceArtifacts.CaptureBase(ctx, engagement.TenantID, engagement.ProjectID, analysisID, baseFiles)
+	if err != nil {
+		result.Comparison = projectanalysis.Comparison{Reason: projectanalysis.UnavailableCaptureFailed}
+		return
+	}
+	result.FileChanges, result.Comparison.BaseManifest = changes, manifest
+}
+
+func comparisonFromWorkspace(req ports.AcquireRequest, ws *ports.Workspace) projectanalysis.Comparison {
+	if req.Kind != ports.TargetGit {
+		return projectanalysis.Comparison{Reason: projectanalysis.UnavailableUnsupportedTarget}
+	}
+	if ws == nil || ws.BaseCommit == "" || ws.MergeBase == "" {
+		return projectanalysis.Comparison{Reason: projectanalysis.UnavailableNoComparableBase}
+	}
+	return projectanalysis.Comparison{Available: true, BaseRef: req.BaseRef, BaseCommit: ws.BaseCommit, MergeBase: ws.MergeBase}
+}
+
+func (s *Service) captureProjectSource(ctx context.Context, engagementID shared.ID, analysisID, sourceDir string, result *ScanResult) {
+	if s.sourceArtifacts == nil || result == nil {
+		return
+	}
+	engagement, err := s.engagements.GetByID(ctx, engagementID)
+	if err != nil || engagement.ProjectID.IsZero() {
+		result.SourceCapture = &projectanalysis.SourceCapture{Capabilities: unavailableSourceCapabilities(projectanalysis.UnavailableCaptureFailed)}
+		return
+	}
+	if strings.TrimSpace(analysisID) == "" {
+		result.SourceCapture = &projectanalysis.SourceCapture{Capabilities: unavailableSourceCapabilities(projectanalysis.UnavailableCaptureFailed)}
+		return
+	}
+	capture, err := s.sourceArtifacts.Capture(ctx, engagement.TenantID, engagement.ProjectID, analysisID, sourceDir)
+	if err != nil {
+		capture = projectanalysis.SourceCapture{Capabilities: unavailableSourceCapabilities(projectanalysis.UnavailableCaptureFailed)}
+	}
+	result.SourceCapture = &capture
+}
+
+func unavailableSourceCapabilities(reason projectanalysis.UnavailableReason) projectanalysis.SourceCapabilities {
+	return projectanalysis.SourceCapabilities{
+		Source: projectanalysis.Capability{Reason: reason}, Comparison: projectanalysis.Capability{Reason: reason},
+		UnifiedDiff: projectanalysis.Capability{Reason: reason}, SplitDiff: projectanalysis.Capability{Reason: reason}, Highlighting: projectanalysis.Capability{Reason: reason},
+	}
 }
 
 func mergeCachedScanResult(current *ScanResult, previous ScanResult, opts ScanOptions) {

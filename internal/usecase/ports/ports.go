@@ -112,6 +112,12 @@ type ProjectIssueProjectionStore interface {
 
 // ProjectIssueStore reads and mutates tenant- and Project-scoped code-quality issue
 // projections and their append-only triage lifecycle. It mirrors ProjectHotspotStore.
+// ProjectFindingStatusStore resolves current mutable triage by immutable finding key.
+// It is optional for Code reads, which remain available when projections are absent.
+type ProjectFindingStatusStore interface {
+	CurrentFindingStatuses(ctx context.Context, tenantID, projectID shared.ID, keys []string) (map[string]string, error)
+}
+
 type ProjectIssueStore interface {
 	ListIssues(ctx context.Context, tenantID, projectID shared.ID, filter issue.ListFilter) (issue.Page, error)
 	GetIssue(ctx context.Context, tenantID, projectID, issueID shared.ID) (issue.Issue, error)
@@ -132,6 +138,19 @@ type ProjectHotspotStore interface {
 	HotspotHistory(ctx context.Context, tenantID, projectID, hotspotID shared.ID) ([]hotspot.ReviewEvent, error)
 	ListAnalysisHotspots(ctx context.Context, tenantID, projectID, analysisID shared.ID, lens hotspot.Lens, filter hotspot.ListFilter) (hotspot.Page, hotspot.Summary, error)
 	CurrentAnalysisHotspotSummary(ctx context.Context, tenantID, projectID, analysisID shared.ID, lens hotspot.Lens) (hotspot.Summary, error)
+}
+
+// ProjectSourceArtifactStore captures and serves immutable, analysis-owned source.
+// Capture must run before the acquired workspace is closed; failures are returned as
+// unavailable metadata so they never turn a completed analysis into a failed scan.
+type ProjectSourceArtifactStore interface {
+	Capture(ctx context.Context, tenantID, projectID shared.ID, analysisID string, sourceDir string) (projectanalysis.SourceCapture, error)
+	CaptureBase(ctx context.Context, tenantID, projectID shared.ID, analysisID string, files map[string][]byte) (projectanalysis.SourceManifest, error)
+	Load(ctx context.Context, tenantID, projectID shared.ID, analysisID, path string) ([]byte, projectanalysis.SourceFile, error)
+	LoadBase(ctx context.Context, tenantID, projectID shared.ID, analysisID, path string) ([]byte, projectanalysis.SourceFile, error)
+	DeleteAnalysis(ctx context.Context, tenantID, projectID shared.ID, analysisID string) error
+	DeleteProject(ctx context.Context, tenantID, projectID shared.ID) error
+	CleanupExpired(ctx context.Context, before time.Time) error
 }
 
 // ProjectArchiveStore retains uploaded source archives so a Project can be re-analyzed.
@@ -623,9 +642,11 @@ const (
 
 // AcquireRequest identifies a scan target and how to obtain it.
 type AcquireRequest struct {
-	Kind  string // local | git | archive | image (default: local)
-	Value string // path, git URL, archive path, or image ref
-	Ref   string // optional git branch/tag to clone (git kind only)
+	Kind       string // local | git | archive | image (default: local)
+	Value      string // path, git URL, archive path, or image ref
+	Ref        string // optional git branch/tag to clone (git kind only)
+	BaseRef    string // optional validated Git comparison base ref
+	BaseCommit string // optional immutable base commit from a previous analysis
 }
 
 // Workspace is an isolated directory holding a target to analyze (never execute).
@@ -633,6 +654,8 @@ type AcquireRequest struct {
 type Workspace struct {
 	Dir          string
 	Commit       string   // resolved Git HEAD for cloned sources; empty for local/archive/image targets
+	BaseCommit   string   // resolved immutable Git comparison base; empty when unavailable
+	MergeBase    string   // resolved Git merge-base; empty when unavailable
 	Lockfiles    []string // recognized lockfile basenames present (scan-completeness signal)
 	LocalModules []string // module paths declared in the repo (go.mod module, package.json name) – first-party identities
 	// UnresolvedEcosystems are build systems present in the repo whose dependencies

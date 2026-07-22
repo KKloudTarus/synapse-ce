@@ -33,6 +33,7 @@ type Candidate struct {
 	Language        string
 	File            string
 	Location        string
+	SourceLocation  *finding.SourceLocation
 }
 
 // Issue is a tenant- and Project-scoped read model. It deliberately carries no
@@ -53,6 +54,7 @@ type Issue struct {
 	Language        string
 	File            string
 	Location        string
+	SourceLocation  *finding.SourceLocation
 	Status          Status
 	Version         int
 	// IsNew marks an issue that has only been observed in its latest analysis (i.e.
@@ -91,6 +93,9 @@ func (i Issue) Validate() error {
 	if !i.Type.Valid() {
 		return fmt.Errorf("%w: issue type is invalid", shared.ErrValidation)
 	}
+	if i.SourceLocation != nil && i.SourceLocation.Validate() != nil {
+		return fmt.Errorf("%w: issue source location is invalid", shared.ErrValidation)
+	}
 	if !i.Status.Valid() {
 		return fmt.Errorf("%w: issue status is invalid", shared.ErrValidation)
 	}
@@ -125,6 +130,7 @@ func Project(tenantID, projectID shared.ID, analysisID string, createdAt time.Ti
 		Language:            candidate.Language,
 		File:                candidate.File,
 		Location:            candidate.Location,
+		SourceLocation:      candidate.SourceLocation,
 		Status:              StatusOpen,
 		Version:             1,
 		IsNew:               true,

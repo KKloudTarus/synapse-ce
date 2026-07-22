@@ -195,6 +195,9 @@ func TestBuildFindingsSAST(t *testing.T) {
 	if md5.RuleKey != "weak-hash-md5" {
 		t.Fatalf("SAST finding RuleKey = %q, want 'weak-hash-md5'", md5.RuleKey)
 	}
+	if md5.SourceLocation == nil || md5.SourceLocation.File != "cmd/app/main.go" || md5.SourceLocation.StartLine != 42 || md5.SourceLocation.EndLine != 42 {
+		t.Fatalf("SAST source location=%+v", md5.SourceLocation)
+	}
 
 	// verify the colon-containing finding
 	var colon *finding.Finding
@@ -260,6 +263,9 @@ func TestBuildSecretFindings(t *testing.T) {
 	}
 	if f.DedupKey != "secret:aws-key:main.go:10" {
 		t.Errorf("DedupKey = %q, want 'secret:aws-key:main.go:10'", f.DedupKey)
+	}
+	if f.SourceLocation == nil || f.SourceLocation.File != "main.go" || f.SourceLocation.StartLine != 10 {
+		t.Fatalf("secret source location=%+v", f.SourceLocation)
 	}
 }
 

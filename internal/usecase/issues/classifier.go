@@ -71,9 +71,14 @@ func projectOne(ctx context.Context, item finding.Finding, catalog RuleCatalog) 
 		}
 	}
 	file, location := "", ""
-	if f, line, ok := qualitygate.FileLineOf(item.DedupKey); ok {
+	sourceLocation := item.SourceLocation
+	if sourceLocation != nil && sourceLocation.Validate() == nil {
+		file = sourceLocation.File
+		location = fmt.Sprintf("%s:%d", sourceLocation.File, sourceLocation.StartLine)
+	} else if f, line, ok := qualitygate.FileLineOf(item.DedupKey); ok {
 		file = f
 		location = fmt.Sprintf("%s:%d", f, line)
+		sourceLocation = &finding.SourceLocation{File: f, StartLine: line, EndLine: line}
 	}
 	return issue.Candidate{
 		Key:             key,
@@ -88,6 +93,7 @@ func projectOne(ctx context.Context, item finding.Finding, catalog RuleCatalog) 
 		Language:        language,
 		File:            file,
 		Location:        location,
+		SourceLocation:  sourceLocation,
 	}, true, nil
 }
 

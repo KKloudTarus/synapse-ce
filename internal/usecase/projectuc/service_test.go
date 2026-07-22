@@ -46,6 +46,38 @@ func (c projectRuleCatalog) Get(_ context.Context, key rule.Key) (rule.Rule, err
 	return item, nil
 }
 
+func TestReconcileSourceCaptureKeepsOnlySnapshotFiles(t *testing.T) {
+	available := projectanalysis.SourceCapabilities{
+		Source:       projectanalysis.Capability{Available: true},
+		Comparison:   projectanalysis.Capability{Reason: projectanalysis.UnavailableFirstAnalysis},
+		UnifiedDiff:  projectanalysis.Capability{Reason: projectanalysis.UnavailableFirstAnalysis},
+		SplitDiff:    projectanalysis.Capability{Reason: projectanalysis.UnavailableFirstAnalysis},
+		Highlighting: projectanalysis.Capability{Available: true},
+	}
+	snapshot := measure.Snapshot{Nodes: []measure.Node{{Path: "", Kind: measure.NodeProject}, {Path: "main.go", Kind: measure.NodeFile}}}
+	caps, manifest := reconcileSourceCapture(snapshot, available, projectanalysis.SourceManifest{Files: []projectanalysis.SourceFile{
+		{Path: "main.go", Digest: "digest", Available: true},
+		{Path: "ignored.txt", Digest: "digest", Available: true},
+	}})
+	if !caps.Source.Available || len(manifest.Files) != 1 || manifest.Files[0].Path != "main.go" {
+		t.Fatalf("caps=%+v manifest=%+v", caps, manifest)
+	}
+}
+
+func TestReconcileSourceCaptureFailsClosedWhenSnapshotIsMissingCapturedFiles(t *testing.T) {
+	available := projectanalysis.SourceCapabilities{
+		Source:       projectanalysis.Capability{Available: true},
+		Comparison:   projectanalysis.Capability{Reason: projectanalysis.UnavailableFirstAnalysis},
+		UnifiedDiff:  projectanalysis.Capability{Reason: projectanalysis.UnavailableFirstAnalysis},
+		SplitDiff:    projectanalysis.Capability{Reason: projectanalysis.UnavailableFirstAnalysis},
+		Highlighting: projectanalysis.Capability{Available: true},
+	}
+	caps, manifest := reconcileSourceCapture(measure.Snapshot{Nodes: []measure.Node{{Path: "", Kind: measure.NodeProject}, {Path: "main.go", Kind: measure.NodeFile}}}, available, projectanalysis.SourceManifest{})
+	if caps.Source.Available || caps.Source.Reason != projectanalysis.UnavailableCaptureFailed || len(manifest.Files) != 0 {
+		t.Fatalf("caps=%+v manifest=%+v", caps, manifest)
+	}
+}
+
 func TestServiceCRUDAndAudit(t *testing.T) {
 	ctx := context.Background()
 	audit := &captureAudit{}
@@ -275,7 +307,7 @@ func TestRecordProjectAnalysisHydratesCurrentTriageOnly(t *testing.T) {
 	if err := findings.Upsert(ctx, persisted); err != nil {
 		t.Fatal(err)
 	}
-	result := &scauc.ScanResult{Findings: []finding.Finding{{ID: "new-id", EngagementID: e.ID, DedupKey: "current", Status: finding.StatusOpen, Severity: shared.SeverityHigh, Kind: finding.KindSCA}}}
+	result := &scauc.ScanResult{Findings: []finding.Finding{{ID: "new-id", EngagementID: e.ID, DedupKey: "current", Status: finding.StatusOpen, Severity: shared.SeverityHigh, Kind: finding.KindSCA, SourceLocation: &finding.SourceLocation{File: "main.go", StartLine: 7, EndLine: 7}}}}
 	if err := svc.RecordProjectAnalysis(ctx, e.ID, "job-1", time.Unix(1, 0), result); err != nil {
 		t.Fatal(err)
 	}
@@ -288,6 +320,44 @@ func TestRecordProjectAnalysisHydratesCurrentTriageOnly(t *testing.T) {
 	}
 	if list[0].Issues.Total != 1 || len(list[0].InternalIssues) != 1 || list[0].InternalIssues[0].Key != "current" {
 		t.Fatalf("stale finding leaked into snapshot: %+v", list[0])
+	}
+	if len(list[0].Annotations) != 1 || list[0].Annotations[0].Status != finding.StatusOpen || list[0].Annotations[0].Location.File != "main.go" {
+		t.Fatalf("historical annotation=%+v", list[0].Annotations)
+	}
+}
+
+func TestBuildAnnotationsMarksOnlyFindingsAbsentFromBaselineAsNew(t *testing.T) {
+	baseline := &projectanalysis.Analysis{InternalIssues: []projectanalysis.Issue{{Key: "old"}}}
+	annotations := buildAnnotations([]finding.Finding{
+		{DedupKey: "old", Kind: finding.KindSAST, Severity: shared.SeverityHigh, Status: finding.StatusOpen, SourceLocation: &finding.SourceLocation{File: "a.go", StartLine: 1, EndLine: 1}},
+		{DedupKey: "new", Kind: finding.KindSAST, Severity: shared.SeverityHigh, Status: finding.StatusOpen, SourceLocation: &finding.SourceLocation{File: "b.go", StartLine: 1, EndLine: 1}},
+		{DedupKey: "sast:rule:c.go:7", Kind: finding.KindSAST, Severity: shared.SeverityHigh, Status: finding.StatusOpen},
+	}, baseline)
+	if len(annotations) != 3 || annotations[0].FindingKey != "new" || !annotations[0].New || annotations[1].FindingKey != "old" || annotations[1].New || annotations[2].Location.File != "c.go" || annotations[2].Location.StartLine != 7 {
+		t.Fatalf("annotations=%+v", annotations)
+	}
+}
+
+func TestBuildAnnotationsUsesPriorAnnotationsForHotspots(t *testing.T) {
+	baseline := &projectanalysis.Analysis{Annotations: []projectanalysis.Annotation{{FindingKey: "hotspot", Kind: finding.KindSAST, Severity: shared.SeverityHigh, Status: finding.StatusOpen, Location: finding.SourceLocation{File: "main.go", StartLine: 7, EndLine: 7}}}}
+	annotations := buildAnnotations([]finding.Finding{
+		{DedupKey: "hotspot", Kind: finding.KindSAST, Severity: shared.SeverityHigh, Status: finding.StatusOpen, SourceLocation: &finding.SourceLocation{File: "main.go", StartLine: 7, EndLine: 7}},
+		{DedupKey: "new-hotspot", Kind: finding.KindSAST, Severity: shared.SeverityHigh, Status: finding.StatusOpen, SourceLocation: &finding.SourceLocation{File: "main.go", StartLine: 9, EndLine: 9}},
+	}, baseline)
+	if len(annotations) != 2 || annotations[0].FindingKey != "hotspot" || annotations[0].New || annotations[1].FindingKey != "new-hotspot" || !annotations[1].New {
+		t.Fatalf("annotations=%+v", annotations)
+	}
+}
+
+func TestReconcileSourceCapturePreservesTruncation(t *testing.T) {
+	capabilities := projectanalysis.SourceCapabilities{Source: projectanalysis.Capability{Available: true}}
+	_, manifest := reconcileSourceCapture(
+		measure.Snapshot{Nodes: []measure.Node{{Path: "", Kind: measure.NodeProject}, {Path: "main.go", Kind: measure.NodeFile}}},
+		capabilities,
+		projectanalysis.SourceManifest{Truncated: true, Files: []projectanalysis.SourceFile{{Path: "main.go", Digest: "digest", Available: true}}},
+	)
+	if !manifest.Truncated {
+		t.Fatal("source truncation was lost during snapshot reconciliation")
 	}
 }
 

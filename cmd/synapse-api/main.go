@@ -39,6 +39,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/rulecatalog"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourcesnippet"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
@@ -159,7 +160,7 @@ func main() {
 
 	clock := idgen.SystemClock{}
 	ids := idgen.RandomID{}
-	acquirer := acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled)
+	acquirer := acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled).WithComparisonDepth(cfg.ProjectGitComparisonDepth)
 
 	// Persistence: PostgreSQL when configured, else file + in-memory (dev).
 	var repo ports.EngagementRepository
@@ -907,6 +908,15 @@ func main() {
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
 	projectService.SetScanner(scaService)
 	scaService.SetProjectAnalysisRecorder(projectService)
+	sourceArtifacts := sourceartifact.New(cfg.ProjectSourceArtifactDir, cfg.ProjectSourceMaxFileBytes, cfg.ProjectSourceMaxFiles, cfg.ProjectSourceMaxBytes)
+	projectService.SetSourceArtifactStore(sourceArtifacts)
+	scaService.SetProjectSourceArtifactStore(sourceArtifacts)
+	if cfg.ProjectSourceRetention > 0 {
+		if err := sourceArtifacts.CleanupExpired(context.Background(), time.Now().Add(-cfg.ProjectSourceRetention)); err != nil {
+			log.Warn("source artifact retention cleanup failed", "err", err)
+		}
+	}
+	log.Info("immutable project source capture ENABLED", "retention", cfg.ProjectSourceRetention, "dir", cfg.ProjectSourceArtifactDir)
 	router.SetProjects(projectService)
 	router.SetQualityGates(qualityGateService)
 	router.SetQualityProfiles(qualityProfileService)

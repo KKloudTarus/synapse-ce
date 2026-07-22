@@ -61,8 +61,12 @@ func classifyOne(ctx context.Context, item finding.Finding, catalog ports.RuleCa
 		return hotspot.Candidate{}, false, nil
 	}
 	location := ""
-	if file, line, ok := qualitygate.FileLineOf(item.DedupKey); ok {
+	sourceLocation := item.SourceLocation
+	if sourceLocation != nil && sourceLocation.Validate() == nil {
+		location = fmt.Sprintf("%s:%d", sourceLocation.File, sourceLocation.StartLine)
+	} else if file, line, ok := qualitygate.FileLineOf(item.DedupKey); ok {
 		location = fmt.Sprintf("%s:%d", file, line)
+		sourceLocation = &finding.SourceLocation{File: file, StartLine: line, EndLine: line}
 	}
 	return hotspot.Candidate{
 		Key:             key,
@@ -74,6 +78,7 @@ func classifyOne(ctx context.Context, item finding.Finding, catalog ports.RuleCa
 		Kind:            item.Kind,
 		CWE:             item.CWE,
 		Location:        location,
+		SourceLocation:  sourceLocation,
 	}, true, nil
 }
 

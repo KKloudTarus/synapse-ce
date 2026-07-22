@@ -203,17 +203,18 @@ func newFinding(kind, ruleID, cwe string, sev shared.Severity, title, desc, file
 		k = finding.KindSAST
 	}
 	return finding.Finding{
-		ID:          deterministicID(dedup),
-		Title:       fmt.Sprintf("%s (%s:%d)", title, file, line),
-		Description: desc,
-		Severity:    sev,
-		CWE:         cwe,
-		Sources:     []string{"synapse-codeanalysis"},
-		Class:       finding.ClassFirstParty,
-		Status:      finding.StatusOpen,
-		Kind:        k,
-		RuleKey:     ruleID,
-		DedupKey:    dedup,
+		ID:             deterministicID(dedup),
+		Title:          fmt.Sprintf("%s (%s:%d)", title, file, line),
+		Description:    desc,
+		Severity:       sev,
+		CWE:            cwe,
+		Sources:        []string{"synapse-codeanalysis"},
+		Class:          finding.ClassFirstParty,
+		Status:         finding.StatusOpen,
+		Kind:           k,
+		RuleKey:        ruleID,
+		DedupKey:       dedup,
+		SourceLocation: &finding.SourceLocation{File: file, StartLine: line, EndLine: line},
 	}
 }
 

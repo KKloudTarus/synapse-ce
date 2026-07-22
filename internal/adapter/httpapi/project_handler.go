@@ -29,6 +29,7 @@ type projectService interface {
 	List(context.Context, shared.ID) ([]*project.Project, error)
 	ListSummaries(context.Context, shared.ID) ([]projectuc.ProjectSummary, error)
 	Get(context.Context, shared.ID, string) (*project.Project, error)
+	Delete(context.Context, string, shared.ID, string) error
 	AssignGate(context.Context, string, shared.ID, string, string) (*project.Project, error)
 	StartAnalysis(context.Context, string, shared.ID, string, *measure.CoverageReport) (ports.ScanJob, error)
 	AnalysisStatus(context.Context, shared.ID, string) (ports.ScanJob, error)
@@ -37,6 +38,10 @@ type projectService interface {
 	GetMeasures(context.Context, string, string, string, []string, int, string) (projectuc.ProjectMeasureResponse, error)
 	ListAnalyses(context.Context, shared.ID, string, int, time.Time, shared.ID) ([]projectanalysis.Analysis, bool, error)
 	GetAnalysis(context.Context, shared.ID, string, string) (projectanalysis.Analysis, error)
+	ListCodeFiles(context.Context, shared.ID, string, string) ([]projectuc.CodeFile, projectanalysis.SourceCapabilities, error)
+	ListCodeFilesWithFilter(context.Context, shared.ID, string, string, projectuc.CodeFileFilter) ([]projectuc.CodeFile, projectanalysis.SourceCapabilities, error)
+	ReadCodeFile(context.Context, shared.ID, string, string, string, int, int) (projectuc.CodeFileView, projectanalysis.SourceCapabilities, error)
+	ReadCodeDiff(context.Context, shared.ID, string, string, string, string, int) (projectuc.CodeDiffView, projectanalysis.SourceCapabilities, error)
 	ListHotspots(context.Context, shared.ID, string, hotspot.ListFilter) (hotspot.Page, error)
 	GetHotspot(context.Context, shared.ID, string, shared.ID) (hotspot.Hotspot, error)
 	TransitionHotspot(context.Context, string, shared.ID, string, shared.ID, hotspot.Status, string, int) (hotspot.Hotspot, hotspot.ReviewEvent, error)
@@ -174,6 +179,14 @@ func (rt *Router) getProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
+}
+
+func (rt *Router) deleteProject(w http.ResponseWriter, r *http.Request) {
+	if err := rt.projects.Delete(r.Context(), PrincipalFrom(r.Context()), shared.ID(TenantFrom(r.Context())), r.PathValue("key")); err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (rt *Router) assignProjectGate(w http.ResponseWriter, r *http.Request) {

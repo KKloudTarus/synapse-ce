@@ -42,9 +42,36 @@ type coverageStartStub struct {
 	received *measure.CoverageReport
 }
 
+type deleteProjectStub struct {
+	projectService
+	actor, key string
+	tenant     shared.ID
+	err        error
+}
+
+func (s *deleteProjectStub) Delete(_ context.Context, actor string, tenant shared.ID, key string) error {
+	s.actor, s.tenant, s.key = actor, tenant, key
+	return s.err
+}
+
 func (s *coverageStartStub) StartAnalysis(_ context.Context, _ string, _ shared.ID, _ string, coverage *measure.CoverageReport) (ports.ScanJob, error) {
 	s.received = coverage
 	return ports.ScanJob{ID: "job-1"}, nil
+}
+
+func TestDeleteProject(t *testing.T) {
+	stub := &deleteProjectStub{}
+	rt := &Router{log: discardLog(), projects: stub}
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/projects/project", nil)
+	req.SetPathValue("key", "project")
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice", TenantID: "tenant"}))
+	rec := httptest.NewRecorder()
+
+	rt.deleteProject(rec, req)
+
+	if rec.Code != http.StatusNoContent || stub.actor != "alice" || stub.tenant != "tenant" || stub.key != "project" {
+		t.Fatalf("code=%d stub=%+v body=%s", rec.Code, stub, rec.Body.String())
+	}
 }
 
 func TestParseCoverageUpload(t *testing.T) {

@@ -25,9 +25,11 @@ var (
 
 // SourceBinding identifies source that a later analysis run can acquire.
 type SourceBinding struct {
-	Kind  string
-	Value string
-	Ref   string
+	Kind          string `json:"kind"`
+	Value         string `json:"value"`
+	Ref           string `json:"ref,omitempty"`
+	DefaultBranch string `json:"default_branch,omitempty"`
+	BaseRef       string `json:"base_ref,omitempty"`
 }
 
 // Project is a long-lived code-quality identity, independent of an Engagement.
@@ -55,13 +57,14 @@ func New(id, tenantID shared.ID, name, key string, source SourceBinding, profile
 		return nil, fmt.Errorf("%w: project key must be a lowercase hyphenated slug", shared.ErrValidation)
 	}
 	source.Kind, source.Value, source.Ref = strings.TrimSpace(source.Kind), strings.TrimSpace(source.Value), strings.TrimSpace(source.Ref)
+	source.DefaultBranch, source.BaseRef = strings.TrimSpace(source.DefaultBranch), strings.TrimSpace(source.BaseRef)
 	if source.Value == "" {
 		return nil, fmt.Errorf("%w: project source value is required", shared.ErrValidation)
 	}
 	switch source.Kind {
 	case SourceLocal, SourceArchive:
-		if source.Ref != "" {
-			return nil, fmt.Errorf("%w: source ref is only valid for git", shared.ErrValidation)
+		if source.Ref != "" || source.DefaultBranch != "" || source.BaseRef != "" {
+			return nil, fmt.Errorf("%w: source refs are only valid for git", shared.ErrValidation)
 		}
 		source.Value = filepath.Clean(source.Value)
 	case SourceGit:
@@ -72,8 +75,10 @@ func New(id, tenantID shared.ID, name, key string, source SourceBinding, profile
 		if u.User != nil {
 			return nil, fmt.Errorf("%w: git source must not contain embedded credentials", shared.ErrValidation)
 		}
-		if len(source.Ref) > 255 || (source.Ref != "" && !gitRefPattern.MatchString(source.Ref)) {
-			return nil, fmt.Errorf("%w: invalid git source ref", shared.ErrValidation)
+		for _, ref := range []string{source.Ref, source.DefaultBranch, source.BaseRef} {
+			if len(ref) > 255 || (ref != "" && !gitRefPattern.MatchString(ref)) {
+				return nil, fmt.Errorf("%w: invalid git source ref", shared.ErrValidation)
+			}
 		}
 	default:
 		return nil, fmt.Errorf("%w: unknown project source kind %q", shared.ErrValidation, source.Kind)

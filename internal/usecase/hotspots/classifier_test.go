@@ -56,6 +56,21 @@ func TestClassifyUsesCatalogTypeAndKeepsInputImmutable(t *testing.T) {
 	}
 }
 
+func TestClassifyUsesStructuredSourceLocation(t *testing.T) {
+	r := testRule("hotspot", rule.TypeSecurityHotspot, rule.QualitySecurity)
+	start, end := 1, 4
+	location := &finding.SourceLocation{File: "pkg/auth.go", StartLine: 22, EndLine: 22, StartColumn: &start, EndColumn: &end}
+	item := testFinding("legacy:wrong.go:1", "hotspot", finding.KindSAST)
+	item.SourceLocation = location
+	_, candidates, err := Classify(context.Background(), []finding.Finding{item}, fakeCatalog{rules: map[rule.Key]rule.Rule{r.Key: r}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].SourceLocation == nil || candidates[0].Location != "pkg/auth.go:22" {
+		t.Fatalf("candidates=%+v", candidates)
+	}
+}
+
 func TestClassifyUsesRuleTypeOnly(t *testing.T) {
 	cases := []struct {
 		name string

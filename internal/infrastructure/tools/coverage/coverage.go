@@ -57,7 +57,9 @@ func ParseBytes(data []byte) (measure.CoverageReport, LineCoverage, error) {
 	if err != nil {
 		return measure.CoverageReport{}, nil, err
 	}
-	return measure.NewCoverageReport(lc), lc, nil
+	report := measure.NewCoverageReport(lc)
+	report.Lines = measure.CloneLines(measure.LineCoverage(lc))
+	return report, lc, nil
 }
 
 // peek returns the first chunk of the data (to sniff the root element past an <?xml?>/doctype prolog).

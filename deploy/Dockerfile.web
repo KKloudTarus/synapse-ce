@@ -17,7 +17,7 @@ COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 # pnpm 11 reads build-script approval from pnpm-workspace.yaml (`allowBuilds`),
 # not from package.json or .npmrc. The project file approves esbuild's
 # postinstall; without it, pnpm exits with ERR_PNPM_IGNORED_BUILDS.
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --config.trustLockfile=true
 
 # The rest of the source – bind-mount in dev for hot reload (see compose).
 COPY web/ .
@@ -29,6 +29,8 @@ USER node
 
 # Vite dev server. --host 0.0.0.0 so it's reachable from the host.
 # VITE_API_PROXY_TARGET is the in-network API URL (compose DNS resolves the service name).
+ENV CI=true
+ENV NPM_CONFIG_TRUST_LOCKFILE=true
 ENV VITE_API_PROXY_TARGET=http://synapse-api:8080
 EXPOSE 5173
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
