@@ -160,18 +160,28 @@ func acquireFileArtifact(value string, size, maxBytes int64) (*ports.Workspace, 
 		_ = cleanup()
 		return nil, fmt.Errorf("stage file artifact: %w", err)
 	}
-	// A Python wheel/egg is a ZIP the SBOM generator does not catalog as a loose file, but whose
-	// <dist-info|EGG-INFO> manifest it DOES read once on disk. Unpack it (bounded, zip-slip-safe) alongside
-	// the raw file so the package is identified. Best-effort: a corrupt/oversized archive just leaves the
-	// raw file staged (no worse than before). Other formats (.rpm/.deb/.msi/.jar) are cataloged directly.
+	// Some package artifacts bundle files the SBOM generator can only catalog once they are on disk. Best-
+	// effort: a corrupt/oversized archive just leaves the raw file staged (no worse than before). The
+	// extraction budget is what remains under the workspace cap after the raw copy, so the raw file plus
+	// the extracted tree never exceed it.
+	unpackDir := filepath.Join(dir, filepath.Base(value)+"-unpacked")
+	budget := maxBytes - size
+	if budget < 0 {
+		budget = 0
+	}
 	switch strings.ToLower(filepath.Ext(value)) {
 	case ".whl", ".egg":
 		// Extract ONLY the package metadata (<name>.dist-info / *.egg-info / EGG-INFO) — enough for the
 		// generator to identify the package + version, WITHOUT unpacking its source modules. This keeps a
 		// wheel/egg a package artifact (SCA identity + advisory match, like .rpm/.deb/.msi) rather than
 		// turning it into a source tree that also draws SAST/quality findings on third-party library code.
-		unpackDir := filepath.Join(dir, filepath.Base(value)+"-unpacked")
-		_ = unpackZipBounded(dst, unpackDir, maxBytes, isPyDistMetadata)
+		_ = unpackZipBounded(dst, unpackDir, budget, isPyDistMetadata)
+	case ".rpm":
+		// Extract the cpio payload so the generator catalogs the binaries the package SHIPS (e.g. a bundled
+		// Go binary + its embedded module list), surfacing bundled-dependency CVEs the rpm header alone hides.
+		_ = extractRPMPayload(dst, unpackDir, budget)
+	case ".deb":
+		_ = extractDebPayload(dst, unpackDir, budget) // ditto for a .deb's data.tar
 	}
 	lockfiles, localModules, unresolved, err := inspectWorkspace(dir, maxBytes)
 	if err != nil {
