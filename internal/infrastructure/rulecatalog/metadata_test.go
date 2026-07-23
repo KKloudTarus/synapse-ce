@@ -206,6 +206,7 @@ func TestMetadata_ApprovedLanguage(t *testing.T) {
 		"XML":                   true,
 		"Java":                  true,
 		"IPython Notebooks":     true,
+		"Rust":                  true,
 	}
 
 	for _, r := range rules {
