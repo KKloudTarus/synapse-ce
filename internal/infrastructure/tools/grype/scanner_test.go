@@ -125,19 +125,74 @@ func TestWriteCycloneDXCarriesDistro(t *testing.T) {
 	if err := json.Unmarshal(data, &bom); err != nil {
 		t.Fatal(err)
 	}
-	if bom.Metadata == nil || bom.Metadata.Component == nil {
-		t.Fatalf("SBOM has no metadata.component distro; grype cannot scope OS matching")
+	// Grype scopes OS-package matching from an operating-system COMPONENT in components[] (NOT
+	// metadata.component), so the distro must be injected there.
+	var osc *cdxComponent
+	for i := range bom.Components {
+		if bom.Components[i].Type == "operating-system" {
+			osc = &bom.Components[i]
+			break
+		}
 	}
-	mc := bom.Metadata.Component
-	if mc.Type != "operating-system" || mc.Name != "rhel" || mc.Version != "9.8" {
-		t.Errorf("distro component = {%q %q %q}, want {operating-system rhel 9.8}", mc.Type, mc.Name, mc.Version)
+	if osc == nil {
+		t.Fatalf("SBOM has no operating-system component; grype cannot scope OS matching")
+	}
+	if osc.Name != "rhel" || osc.Version != "9.8" {
+		t.Errorf("distro component = {%q %q}, want {rhel 9.8}", osc.Name, osc.Version)
 	}
 	props := map[string]string{}
-	for _, p := range mc.Properties {
+	for _, p := range osc.Properties {
 		props[p.Name] = p.Value
 	}
 	if props["syft:distro:id"] != "rhel" || props["syft:distro:versionID"] != "9.8" {
 		t.Errorf("syft:distro props = %v, want id=rhel versionID=9.8", props)
+	}
+}
+
+// TestDistroFromRPMRelease covers inferring the distro from a standalone rpm's release suffix (a loose
+// .rpm carries no distro= qualifier, but its release encodes the target distro), plus injecting it into a
+// raw SBOM that has no operating-system component.
+func TestDistroFromRPMRelease(t *testing.T) {
+	cases := map[string][2]string{
+		"7.61.1-33.el8":  {"rhel", "8"},
+		"0:1.2-3.el9_8":  {"rhel", "9"},
+		"2.0-1.fc39":     {"fedora", "39"},
+		"1.0-2.amzn2":    {"amzn", "2"},
+		"1.0-1":          {"", ""},       // no dist tag
+		"1.0-1.suse":     {"", ""},       // unmapped
+	}
+	for ver, want := range cases {
+		id, v := distroFromRPMRelease(ver)
+		if id != want[0] || v != want[1] {
+			t.Errorf("distroFromRPMRelease(%q) = (%q,%q), want (%q,%q)", ver, id, v, want[0], want[1])
+		}
+	}
+
+	// A standalone rpm (no distro= qualifier) gets its distro inferred + injected as an OS component.
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		{Name: "curl", Version: "0:7.61.1-33.el8", PURL: "pkg:rpm/curl@7.61.1-33.el8?arch=x86_64&epoch=0"},
+	}}
+	if id, ver := distroFromComponents(doc.Components); id != "rhel" || ver != "8" {
+		t.Fatalf("distroFromComponents inference = (%q,%q), want (rhel,8)", id, ver)
+	}
+	path, cleanup, err := writeCycloneDX(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	data, _ := os.ReadFile(path)
+	var bom cdxBOM
+	if err := json.Unmarshal(data, &bom); err != nil {
+		t.Fatal(err)
+	}
+	hasOS := false
+	for _, c := range bom.Components {
+		if c.Type == "operating-system" && c.Name == "rhel" && c.Version == "8" {
+			hasOS = true
+		}
+	}
+	if !hasOS {
+		t.Errorf("standalone rpm SBOM missing inferred operating-system component (rhel 8): %+v", bom.Components)
 	}
 }
 

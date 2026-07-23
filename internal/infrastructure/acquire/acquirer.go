@@ -122,6 +122,13 @@ func acquireLocal(value string, maxBytes int64) (*ports.Workspace, error) {
 	if fi.Mode()&fs.ModeSymlink != 0 {
 		return nil, fmt.Errorf("%w: target path is a symlink", shared.ErrValidation)
 	}
+	// A single-file target (e.g. a .rpm / .deb / .msi / .jar package artifact) is staged into a fresh
+	// workspace directory so the catalogers — which walk a directory — can process it. This lets Syft's
+	// rpm-archive / deb-archive / java-archive catalogers (and the owned MSI cataloger) identify a loose
+	// package for a supply-chain / pre-install scan, not only packages already installed in an image.
+	if fi.Mode().IsRegular() {
+		return acquireFileArtifact(value, fi.Size(), maxBytes)
+	}
 	lockfiles, localModules, unresolved, err := inspectWorkspace(value, maxBytes)
 	if err != nil {
 		return nil, err
@@ -129,6 +136,59 @@ func acquireLocal(value string, maxBytes int64) (*ports.Workspace, error) {
 	// Scanned in place (no container isolation until P3); per-file symlink/special
 	// guards live in the detector, which re-walks this dir.
 	return &ports.Workspace{Dir: value, Lockfiles: lockfiles, LocalModules: localModules, UnresolvedEcosystems: unresolved}, nil
+}
+
+// acquireFileArtifact stages a single regular file into a temp workspace dir (bounded copy), so a loose
+// package artifact can be cataloged. The workspace carries a Cleanup that removes the temp dir.
+func acquireFileArtifact(value string, size, maxBytes int64) (*ports.Workspace, error) {
+	if maxBytes <= 0 {
+		maxBytes = MaxWorkspaceBytes
+	}
+	if size > maxBytes {
+		return nil, fmt.Errorf("%w: file %q (%d bytes) exceeds the workspace cap (%d bytes)", shared.ErrValidation, filepath.Base(value), size, maxBytes)
+	}
+	dir, err := os.MkdirTemp("", "synapse-ws-*")
+	if err != nil {
+		return nil, fmt.Errorf("stage file artifact: %w", err)
+	}
+	cleanup := func() error { return os.RemoveAll(dir) }
+	// Keep the original basename so extension-based catalogers (rpm/deb/msi/jar) recognize the artifact.
+	dst := filepath.Join(dir, filepath.Base(value))
+	if err := copyFileBounded(value, dst, maxBytes); err != nil {
+		_ = cleanup()
+		return nil, fmt.Errorf("stage file artifact: %w", err)
+	}
+	lockfiles, localModules, unresolved, err := inspectWorkspace(dir, maxBytes)
+	if err != nil {
+		_ = cleanup()
+		return nil, err
+	}
+	return &ports.Workspace{Dir: dir, Lockfiles: lockfiles, LocalModules: localModules, UnresolvedEcosystems: unresolved, Cleanup: cleanup}, nil
+}
+
+// copyFileBounded copies src to dst, failing if src exceeds maxBytes (defense against a size that changed
+// between stat and copy). dst is created 0600 under the caller's fresh temp dir.
+func copyFileBounded(src, dst string, maxBytes int64) error {
+	in, err := os.Open(src) // #nosec G304 -- caller-supplied scan target, opened read-only
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	n, err := io.Copy(out, io.LimitReader(in, maxBytes+1))
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if n > maxBytes {
+		return fmt.Errorf("%w: file exceeds the workspace cap (%d bytes)", shared.ErrValidation, maxBytes)
+	}
+	return nil
 }
 
 func (a *Acquirer) acquireGit(ctx context.Context, url, ref string) (*ports.Workspace, error) {

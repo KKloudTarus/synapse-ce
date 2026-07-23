@@ -914,6 +914,14 @@ type SBOMEnricher interface {
 	Enrich(ctx context.Context, dir string, doc *sbom.SBOM) SBOMEnrichment
 }
 
+// ArtifactCataloger catalogs standalone package/installer artifacts under a scanned directory that the SBOM
+// generator does not parse (e.g. a Windows Installer .msi, whose product identity lives in an OLE2 compound
+// file). It reads the artifact's own manifest — never executes it — and returns one component per artifact.
+// It runs on the workspace Dir (a file-target or source tree), not a materialized image rootfs.
+type ArtifactCataloger interface {
+	CatalogArtifacts(ctx context.Context, dir string) ([]sbom.Component, error)
+}
+
 // DetectionSource is one vulnerability detector (OSV, Grype, …). The SCA service
 // runs EVERY source against the same Syft SBOM and correlates the results, so
 // sources augment – not replace – each other. A source returns raw

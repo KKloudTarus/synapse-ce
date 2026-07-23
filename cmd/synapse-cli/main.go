@@ -56,6 +56,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensemeta"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/manifest"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/manifestresolve"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/msi"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavencoord"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavenresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/misconfig"
@@ -1150,6 +1151,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	)
 	sca.SetGateDecoder(qualityprofile.LoadGateBytes)
 	sca.SetSBOMEnricher(manifest.New())
+	sca.SetArtifactCataloger(msi.New()) // recover Windows Installer (.msi) product identity into the SBOM
 	sca.SetMavenCoordResolver(mavencoord.New())   // recover real Maven coords from JAR pom.properties (offline) before license lookup
 	sca.SetJarChecksumResolver(jarchecksum.New()) // capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
 	// SHA-1 coordinate recovery for shaded/metadata-less JARs: offline trivy-java-db index

@@ -71,6 +71,7 @@ type Service struct {
 	fpTriager          ports.FPTriager                 // optional LLM false-positive critique of production-scope source findings
 	osPkgCataloger     ports.OSPackageCataloger        // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
 	instCataloger      ports.InstalledPackageCataloger // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
+	artifactCataloger  ports.ArtifactCataloger         // optional owned standalone-artifact cataloging (.msi product identity) from the workspace dir
 	suppression        ports.SuppressionLoader         // optional repo-committed .synapseignore accepted-risk policy
 	vexLoader          ports.VEXLoader                 // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
 	complianceOn       bool                            // when set, attach the AppSec-baseline compliance report to a scan
@@ -180,6 +181,11 @@ func (s *Service) SetOSPackageCataloger(c ports.OSPackageCataloger) { s.osPkgCat
 func (s *Service) SetInstalledPackageCataloger(c ports.InstalledPackageCataloger) {
 	s.instCataloger = c
 }
+
+// SetArtifactCataloger configures optional owned cataloging of standalone package/installer artifacts (a
+// Windows Installer .msi) discovered under the workspace directory. nil ⇒ off. It runs on any target
+// (file-target or source tree), independent of image-rootfs materialization.
+func (s *Service) SetArtifactCataloger(c ports.ArtifactCataloger) { s.artifactCataloger = c }
 
 // SetSBOMCache configures the optional generated-SBOM cache. nil ⇒ always regenerate. Best-effort: a cache
 // miss or error never affects correctness, only whether the cataloging step is skipped.
@@ -1752,6 +1758,19 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		step = trace.start(stageSBOM, "sbom-enrichment", "manifest-enricher", "Enrich SBOM from manifests", map[string]int{"components": before})
 		s.sbomEnricher.Enrich(ctx, ws.Dir, doc)
 		trace.succeed(step, "SBOM enrichment completed", map[string]int{"components_before": before, "components": countComponents(doc)})
+	}
+	// Owned standalone-artifact cataloging (.msi product identity) over the workspace dir: the SBOM generator
+	// has no cataloger for a Windows Installer, so recover each installer's product from its OLE2 Property
+	// table and add it to the SBOM. Best-effort; deduped by name@version. Runs on any target (file or tree),
+	// independent of image-rootfs materialization.
+	if s.artifactCataloger != nil && ws.Dir != "" {
+		before := countComponents(doc)
+		step = trace.start(stageSBOM, "artifact-catalog", "artifact-cataloger", "Catalog standalone artifacts (.msi)", map[string]int{"components": before})
+		if artComps, aerr := s.artifactCataloger.CatalogArtifacts(ctx, ws.Dir); aerr != nil {
+			trace.fail(step, aerr)
+		} else {
+			trace.succeed(step, "Artifact cataloging completed", map[string]int{"artifacts_added": mergeComponents(doc, artComps)})
+		}
 	}
 	// Owned OS-package cataloging (dpkg/apk) from a materialized image rootfs: detection-independent OS
 	// packages, added BEFORE detection so they get advisory-matched. Best-effort, and deduped by name@version
