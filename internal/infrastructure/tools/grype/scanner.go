@@ -237,8 +237,9 @@ func writeCycloneDX(doc *sbom.SBOM) (path string, cleanup func(), err error) {
 
 // distroFromComponents determines the OS distro (id, versionID) for Grype scoping. It first uses the
 // `distro=<id>-<versionID>` qualifier the OS-package catalogers attach to rpm/deb/apk PURLs from an
-// INSTALLED OS (e.g. "…?distro=rhel-9.8"); failing that, it infers the distro from a standalone rpm's
-// release suffix (a loose .rpm carries no OS context, but its release encodes the target: `.el8`→rhel 8).
+// INSTALLED OS (e.g. "…?distro=rhel-9.8"); failing that, it infers the distro from a standalone package's
+// version — a loose .rpm/.deb carries no OS context, but its release/version can encode the target
+// (`.el8`→rhel 8; `+deb11`→debian 11; an `ubuntu…~20.04` backport→ubuntu 20.04).
 // Returns ("","") when nothing indicates a distro.
 func distroFromComponents(comps []sbom.Component) (id, versionID string) {
 	for _, c := range comps {
@@ -256,6 +257,14 @@ func distroFromComponents(comps []sbom.Component) (id, versionID string) {
 			continue
 		}
 		if did, dver := distroFromRPMRelease(c.Version); did != "" {
+			return did, dver
+		}
+	}
+	for _, c := range comps {
+		if !strings.HasPrefix(c.PURL, "pkg:deb/") {
+			continue
+		}
+		if did, dver := distroFromDebVersion(c.Version); did != "" {
 			return did, dver
 		}
 	}
@@ -280,6 +289,27 @@ func distroFromRPMRelease(version string) (id, versionID string) {
 		return "fedora", m[2]
 	case "amzn":
 		return "amzn", m[2]
+	}
+	return "", ""
+}
+
+// Debian security updates encode the release in the version (`1.1.1n-0+deb11u5` → debian 11); Ubuntu
+// backports carry the release after a `~` (`…1ubuntu4.22~20.04.2` → ubuntu 20.04). A base Debian/Ubuntu
+// package version carries no such marker, so nothing is inferred (never guess a distro for a security tool).
+var (
+	debReleaseRE   = regexp.MustCompile(`\+deb(\d+)u`)
+	ubuntuBackREel = regexp.MustCompile(`ubuntu.*~(\d+\.\d+)`)
+)
+
+// distroFromDebVersion infers (grype distro id, versionID) from a standalone .deb's version. Returns
+// ("","") for a base package whose version encodes no release (the common case), so grype is never scoped
+// to a wrong Debian/Ubuntu release.
+func distroFromDebVersion(version string) (id, versionID string) {
+	if m := debReleaseRE.FindStringSubmatch(version); m != nil {
+		return "debian", m[1]
+	}
+	if m := ubuntuBackREel.FindStringSubmatch(version); m != nil {
+		return "ubuntu", m[1]
 	}
 	return "", ""
 }

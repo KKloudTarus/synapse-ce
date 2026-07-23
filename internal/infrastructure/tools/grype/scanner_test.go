@@ -154,12 +154,12 @@ func TestWriteCycloneDXCarriesDistro(t *testing.T) {
 // raw SBOM that has no operating-system component.
 func TestDistroFromRPMRelease(t *testing.T) {
 	cases := map[string][2]string{
-		"7.61.1-33.el8":  {"rhel", "8"},
-		"0:1.2-3.el9_8":  {"rhel", "9"},
-		"2.0-1.fc39":     {"fedora", "39"},
-		"1.0-2.amzn2":    {"amzn", "2"},
-		"1.0-1":          {"", ""},       // no dist tag
-		"1.0-1.suse":     {"", ""},       // unmapped
+		"7.61.1-33.el8": {"rhel", "8"},
+		"0:1.2-3.el9_8": {"rhel", "9"},
+		"2.0-1.fc39":    {"fedora", "39"},
+		"1.0-2.amzn2":   {"amzn", "2"},
+		"1.0-1":         {"", ""}, // no dist tag
+		"1.0-1.suse":    {"", ""}, // unmapped
 	}
 	for ver, want := range cases {
 		id, v := distroFromRPMRelease(ver)
@@ -193,6 +193,53 @@ func TestDistroFromRPMRelease(t *testing.T) {
 	}
 	if !hasOS {
 		t.Errorf("standalone rpm SBOM missing inferred operating-system component (rhel 8): %+v", bom.Components)
+	}
+}
+
+// TestDistroFromDebVersion covers inferring the distro from a standalone .deb's version — Debian security
+// updates encode the release (+debNN), Ubuntu backports encode it after ~; a base package encodes nothing
+// (must NOT be guessed).
+func TestDistroFromDebVersion(t *testing.T) {
+	cases := map[string][2]string{
+		"1.1.1n-0+deb11u5":          {"debian", "11"},
+		"7.88.1-10+deb12u12":        {"debian", "12"},
+		"2.4.7-1ubuntu4.22~20.04.2": {"ubuntu", "20.04"},
+		"1.2.13.dfsg-1":             {"", ""}, // base package: no release marker -> do not guess
+		"1:1.2.11.dfsg-2.1":         {"", ""},
+		"3.0.2-0ubuntu1.10":         {"", ""}, // ubuntu but no ~release backport marker -> do not guess
+	}
+	for ver, want := range cases {
+		id, v := distroFromDebVersion(ver)
+		if id != want[0] || v != want[1] {
+			t.Errorf("distroFromDebVersion(%q) = (%q,%q), want (%q,%q)", ver, id, v, want[0], want[1])
+		}
+	}
+
+	// A standalone Debian .deb (no distro= qualifier) gets its distro inferred + injected as an OS component.
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		{Name: "libssl1.1", Version: "1.1.1n-0+deb11u5", PURL: "pkg:deb/libssl1.1@1.1.1n-0+deb11u5?arch=amd64"},
+	}}
+	if id, ver := distroFromComponents(doc.Components); id != "debian" || ver != "11" {
+		t.Fatalf("distroFromComponents deb inference = (%q,%q), want (debian,11)", id, ver)
+	}
+	path, cleanup, err := writeCycloneDX(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	data, _ := os.ReadFile(path)
+	var bom cdxBOM
+	if err := json.Unmarshal(data, &bom); err != nil {
+		t.Fatal(err)
+	}
+	hasOS := false
+	for _, c := range bom.Components {
+		if c.Type == "operating-system" && c.Name == "debian" && c.Version == "11" {
+			hasOS = true
+		}
+	}
+	if !hasOS {
+		t.Errorf("standalone deb SBOM missing inferred operating-system component (debian 11): %+v", bom.Components)
 	}
 }
 
