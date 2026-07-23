@@ -262,3 +262,35 @@ func TestBuildSecretFindings(t *testing.T) {
 		t.Errorf("DedupKey = %q, want 'secret:aws-key:main.go:10'", f.DedupKey)
 	}
 }
+
+// TestClassifyVulns_UnversionedClearsFix verifies that a vulnerability matched to a component with no
+// resolvable installed version (e.g. a vendored dep whose package.json has the version stripped, like
+// Next.js dist/compiled/*) is marked Unversioned and has its FixedVersion cleared — so --ignore-unfixed
+// keeps it out of the actionable gate instead of matching every historical CVE for the bare name. A
+// component WITH a resolvable version keeps its fix and gates normally.
+func TestClassifyVulns_UnversionedClearsFix(t *testing.T) {
+	doc := &sbom.SBOM{}
+	vulns := []vulnerability.Vulnerability{
+		{ID: "CVE-2015-8860", Component: "tar", Version: "", FixedVersion: "2.0.0", FixState: "fixed", Severity: shared.SeverityHigh},
+		{ID: "CVE-2026-64642", Component: "next", Version: "16.2.10", FixedVersion: "16.2.11", FixState: "fixed", Severity: shared.SeverityHigh},
+	}
+	classifyVulns(doc, vulns)
+
+	// Unversioned dep: fix cleared, so ignore-unfixed drops it from the gate.
+	if !vulns[0].Unversioned {
+		t.Errorf("tar (empty version) should be Unversioned")
+	}
+	if vulns[0].FixedVersion != "" {
+		t.Errorf("tar FixedVersion should be cleared (unconfirmable), got %q", vulns[0].FixedVersion)
+	}
+	if vulns[0].FixState == "fixed" {
+		t.Errorf("tar FixState should not remain %q for an unversioned match", vulns[0].FixState)
+	}
+	// Resolved-version dep: keeps its real fix and gates.
+	if vulns[1].Unversioned {
+		t.Errorf("next@16.2.10 should NOT be Unversioned")
+	}
+	if vulns[1].FixedVersion != "16.2.11" {
+		t.Errorf("next FixedVersion should be preserved, got %q", vulns[1].FixedVersion)
+	}
+}

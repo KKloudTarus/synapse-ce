@@ -2455,6 +2455,18 @@ func classifyVulns(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) {
 	for i := range vulns {
 		v := &vulns[i]
 		v.Unversioned = !sbom.IsResolvedVersion(v.Version)
+		if v.Unversioned {
+			// No resolvable installed version → the advisory cannot be confirmed to apply (the
+			// source matched by NAME only, e.g. a vendored dep whose package.json has the version
+			// stripped, like Next.js dist/compiled/*). A "fixed in X" is not actionable without a
+			// known current version, so drop it: the finding stays as a historical/informational
+			// advisory (ClassFirstPartyHistoric) but is treated as no-fix, so --ignore-unfixed keeps
+			// it out of the actionable gate instead of matching every historical CVE for the name.
+			v.FixedVersion = ""
+			if v.FixState == "fixed" {
+				v.FixState = "unknown"
+			}
+		}
 		if firstParty[v.Component] {
 			v.FirstParty = true
 		}
