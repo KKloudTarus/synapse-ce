@@ -6,8 +6,10 @@
 package acquire
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -158,6 +160,19 @@ func acquireFileArtifact(value string, size, maxBytes int64) (*ports.Workspace, 
 		_ = cleanup()
 		return nil, fmt.Errorf("stage file artifact: %w", err)
 	}
+	// A Python wheel/egg is a ZIP the SBOM generator does not catalog as a loose file, but whose
+	// <dist-info|EGG-INFO> manifest it DOES read once on disk. Unpack it (bounded, zip-slip-safe) alongside
+	// the raw file so the package is identified. Best-effort: a corrupt/oversized archive just leaves the
+	// raw file staged (no worse than before). Other formats (.rpm/.deb/.msi/.jar) are cataloged directly.
+	switch strings.ToLower(filepath.Ext(value)) {
+	case ".whl", ".egg":
+		// Extract ONLY the package metadata (<name>.dist-info / *.egg-info / EGG-INFO) — enough for the
+		// generator to identify the package + version, WITHOUT unpacking its source modules. This keeps a
+		// wheel/egg a package artifact (SCA identity + advisory match, like .rpm/.deb/.msi) rather than
+		// turning it into a source tree that also draws SAST/quality findings on third-party library code.
+		unpackDir := filepath.Join(dir, filepath.Base(value)+"-unpacked")
+		_ = unpackZipBounded(dst, unpackDir, maxBytes, isPyDistMetadata)
+	}
 	lockfiles, localModules, unresolved, err := inspectWorkspace(dir, maxBytes)
 	if err != nil {
 		_ = cleanup()
@@ -189,6 +204,99 @@ func copyFileBounded(src, dst string, maxBytes int64) error {
 		return fmt.Errorf("%w: file exceeds the workspace cap (%d bytes)", shared.ErrValidation, maxBytes)
 	}
 	return nil
+}
+
+// unpackZipBounded extracts a ZIP (a Python wheel/egg) into destDir with hard bounds: every entry is
+// confined to destDir (zip-slip / path-traversal rejected), the cumulative uncompressed size is capped and
+// the entry count is capped (decompression bomb), and symlink/device entries are skipped (never created or
+// followed). It only ever writes regular files under a caller-owned fresh temp dir. Any malformed entry
+// aborts extraction with an error; callers treat it as best-effort.
+func unpackZipBounded(zipPath, destDir string, maxTotalBytes int64, keep func(name string) bool) error {
+	const maxEntries = 20000
+	zr, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = zr.Close() }()
+	if len(zr.File) > maxEntries {
+		return errors.New("zip: too many entries")
+	}
+	if err := os.MkdirAll(destDir, 0o750); err != nil {
+		return err
+	}
+	clean := filepath.Clean(destDir)
+	var written int64
+	for _, f := range zr.File {
+		if keep != nil && !keep(f.Name) {
+			continue // caller only wants a subset (e.g. a wheel's metadata, not its source); a kept
+			// file's parent dirs are created on write, so filtered-out directory entries need no MkdirAll
+		}
+		target := filepath.Join(clean, f.Name) // #nosec G305 -- Join cleans the path; the very next line rejects any target that escapes the (cleaned) destination root
+		if target != clean && !strings.HasPrefix(target, clean+string(os.PathSeparator)) {
+			return fmt.Errorf("zip: entry %q escapes destination", f.Name)
+		}
+		info := f.FileInfo()
+		if info.IsDir() {
+			if err := os.MkdirAll(target, 0o750); err != nil {
+				return err
+			}
+			continue
+		}
+		if !info.Mode().IsRegular() { // skip symlinks/devices encoded in the archive
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
+			return err
+		}
+		n, err := extractZipEntry(f, target, maxTotalBytes-written)
+		if err != nil {
+			return err
+		}
+		if written += n; written > maxTotalBytes {
+			return errors.New("zip: uncompressed size exceeds cap")
+		}
+	}
+	return nil
+}
+
+// isPyDistMetadata reports whether a zip entry path is Python package metadata — a wheel's
+// "<name>-<ver>.dist-info/…" or an egg's "*.egg-info/…" / "EGG-INFO/…" — which the SBOM generator reads to
+// identify the package. Source modules (.py, etc.) are excluded so a wheel stays a package artifact.
+func isPyDistMetadata(name string) bool {
+	for _, seg := range strings.Split(name, "/") {
+		if seg == "EGG-INFO" || strings.HasSuffix(seg, ".dist-info") || strings.HasSuffix(seg, ".egg-info") {
+			return true
+		}
+	}
+	return false
+}
+
+// extractZipEntry writes one zip entry to target, copying at most remaining+1 bytes so the caller's
+// cumulative cap is enforced (defends against a compression bomb). Returns the bytes written.
+func extractZipEntry(f *zip.File, target string, remaining int64) (int64, error) {
+	if remaining <= 0 {
+		return 0, errors.New("zip: uncompressed size exceeds cap")
+	}
+	rc, err := f.Open()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rc.Close() }()
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return 0, err
+	}
+	n, err := io.Copy(out, io.LimitReader(rc, remaining+1))
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return n, err
+	}
+	if n > remaining {
+		return n, errors.New("zip: uncompressed size exceeds cap")
+	}
+	return n, nil
 }
 
 func (a *Acquirer) acquireGit(ctx context.Context, url, ref string) (*ports.Workspace, error) {
