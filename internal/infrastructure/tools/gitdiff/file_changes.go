@@ -12,7 +12,21 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+// ComparisonSource adapts Git-backed comparison reads to the use-case port.
+type ComparisonSource struct{}
+
+var _ ports.ProjectComparisonSource = (*ComparisonSource)(nil)
+
+func (*ComparisonSource) FileChanges(ctx context.Context, dir, base, head string) ([]projectanalysis.FileChange, error) {
+	return FileChanges(ctx, dir, base, head)
+}
+
+func (*ComparisonSource) FileAtRevision(ctx context.Context, dir, revision, path string) ([]byte, error) {
+	return FileAtRevision(ctx, dir, revision, path)
+}
 
 var fullHunkRE = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
 

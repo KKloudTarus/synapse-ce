@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ChevronLeft, ChevronRight, FileCode2, Files, GitCompareArrows, Search, X } from 'lucide-react'
 import { Button, EmptyState, Input, Pill, Select, SevBadge, Skeleton, cn } from '../ui'
@@ -65,6 +65,13 @@ export function ProjectCodeWorkspace({
   const findings = useMemo(() => [...(source?.findings ?? [])].sort((a, b) => a.location.startLine - b.location.startLine || a.id.localeCompare(b.id)), [source])
   const selectedFinding = findings.find((finding) => finding.id === selectedFindingId) ?? null
   const selectedFile = index.files.find((file) => file.path === selectedPath) ?? null
+  const workspaceStatus = !selectedFile
+    ? 'No source file selected'
+    : sourceError || diffError
+      ? `${selectedFile.path}: ${sourceError ?? diffError}`
+      : view === 'source' && !source || view !== 'source' && !diff
+        ? `Loading ${view} view for ${selectedFile.path}`
+        : `${selectedFile.path}, ${view} view${selectedFinding ? `, finding ${findings.indexOf(selectedFinding) + 1} of ${findings.length}` : ''}`
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -118,7 +125,8 @@ export function ProjectCodeWorkspace({
   />
 
   return (
-    <div className="space-y-3" aria-live="polite">
+    <div className="space-y-3">
+      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{workspaceStatus}</div>
       <div className="flex items-center justify-between gap-3 lg:hidden">
         <Button variant="secondary" onClick={(event) => { filesButton.current = event.currentTarget; setFilesOpen(true) }} aria-haspopup="dialog"><Files className="size-4" /> Browse files</Button>
         <span className="min-w-0 truncate font-mono text-xs text-mutedfg">{selectedFile?.path ?? 'Select a file'}</span>
@@ -267,14 +275,14 @@ function SourcePane({ source, selectedFinding, onSelectFinding, onNavigateLine }
         <Button variant="ghost" className="h-8 px-2" disabled={!hasNext} onClick={() => onNavigateLine?.(source.toLine + 1)} aria-label="Next 1,000 lines">Next <ChevronRight className="size-4" /></Button>
       </div>}
     </div>
-    <div ref={parent} role="grid" aria-label="Source code" className="min-h-0 flex-1 overflow-auto bg-bg font-mono text-xs">
-      <div className="relative min-w-max" style={{ height: `${Math.max(virtual.getTotalSize(), source.lines.length * rowHeight)}px` }}>{visible.map((item) => {
+    <div ref={parent} role="grid" aria-label="Source code" aria-rowcount={source.lines.length} className="min-h-0 flex-1 overflow-auto bg-bg font-mono text-xs">
+      <div role="rowgroup" className="relative min-w-max" style={{ height: `${Math.max(virtual.getTotalSize(), source.lines.length * rowHeight)}px` }}>{visible.map((item) => {
         const line = source.lines[item.index]
         const findings = byLine[line.number] ?? []
         const selected = !!selectedFinding && line.number >= selectedFinding.location.startLine && line.number <= selectedFinding.location.endLine
-        return <div key={line.number} role="row" aria-label={`Line ${line.number}${line.change === 'addition' ? ', added' : ''}${line.duplicated ? ', duplicated' : ''}${line.coverage ? `, ${line.coverage}` : ''}`} className={cn('absolute left-0 top-0 flex w-full border-b border-border/20', selected && 'bg-brand/15', line.change === 'addition' && !selected && 'bg-accent/[0.06]', line.duplicated && !selected && 'bg-medium/[0.05]')} style={{ height: item.size, transform: `translateY(${item.start}px)` }}>
+        return <div key={line.number} role="row" aria-rowindex={item.index + 1} aria-label={`Line ${line.number}${line.change === 'addition' ? ', added' : ''}${line.duplicated ? ', duplicated' : ''}${line.coverage ? `, ${line.coverage}` : ''}`} className={cn('absolute left-0 top-0 flex w-full border-b border-border/20', selected && 'bg-brand/15', line.change === 'addition' && !selected && 'bg-accent/[0.06]', line.duplicated && !selected && 'bg-medium/[0.05]')} style={{ height: item.size, transform: `translateY(${item.start}px)` }}>
           <span role="rowheader" className={cn('sticky left-0 z-10 w-14 shrink-0 select-none border-r border-border bg-bg px-2 text-right leading-7 tabular-nums text-subtlefg', selected && 'bg-brand/15', line.change === 'addition' && 'border-l-2 border-l-accent')}>{line.number}</span>
-          <span className={cn('sticky left-14 z-10 flex w-8 shrink-0 items-center justify-center border-r border-border bg-bg', selected && 'bg-brand/15')}>
+          <span role="gridcell" className={cn('sticky left-14 z-10 flex w-8 shrink-0 items-center justify-center border-r border-border bg-bg', selected && 'bg-brand/15')}>
             {findings.length > 0 && <button type="button" aria-label={`${findings.length} finding${findings.length === 1 ? '' : 's'} on line ${line.number}`} onClick={() => onSelectFinding(findings[0])} className="min-w-5 rounded bg-critical/20 px-1 text-[10px] font-bold text-critical ring-1 ring-inset ring-critical/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand">{findings.length}</button>}
           </span>
           <code role="gridcell" className={cn('whitespace-pre px-3 leading-7', line.coverage === 'uncovered' && 'decoration-critical underline decoration-dotted underline-offset-4')}>{renderLine(line.content, selectedFinding, line.number)}</code>
@@ -293,38 +301,61 @@ function renderLine(content: string, finding: ProjectCodeFinding | null, line: n
   return <>{content.slice(0, from)}<mark className="bg-critical/25 text-inherit">{content.slice(from, to)}</mark>{content.slice(to)}</>
 }
 
+type DiffEntry =
+  | { kind: 'hunk'; hunk: ProjectCodeDiffHunk; index: number; count: number }
+  | { kind: 'unified'; row: ProjectCodeDiffRow; key: string }
+  | { kind: 'split'; left: ProjectCodeDiffRow | null; right: ProjectCodeDiffRow | null; key: string }
+
 function DiffPane({ diff, split }: { diff: ProjectCodeDiffResponse; split: boolean }) {
   const hunks = diff.diff.change.hunks
+  const entries = useMemo<DiffEntry[]>(() => hunks.flatMap((hunk, hunkIndex) => {
+    const header: DiffEntry = { kind: 'hunk', hunk, index: hunkIndex, count: hunks.length }
+    if (split) return [header, ...pairRows(hunk.rows).map((pair, rowIndex): DiffEntry => ({ kind: 'split', ...pair, key: `${hunkIndex}-${rowIndex}` }))]
+    return [header, ...hunk.rows.map((row, rowIndex): DiffEntry => ({ kind: 'unified', row, key: `${hunkIndex}-${rowIndex}` }))]
+  }), [hunks, split])
+  const parent = useRef<HTMLDivElement>(null)
+  const virtual = useVirtualizer({ count: entries.length, getScrollElement: () => parent.current, estimateSize: () => rowHeight, overscan: 30, initialRect: { width: 900, height: 512 } })
   if (!hunks.length) return <EmptyState icon={GitCompareArrows} title="No textual changes" hint={diff.diff.change.status === 'mode_only' ? `File mode changed from ${diff.diff.change.modeOld || 'unknown'} to ${diff.diff.change.modeNew || 'unknown'}.` : 'This persisted change has no text rows to display.'} />
-  return <div role="table" aria-label={split ? 'Split code diff' : 'Unified code diff'} className="min-h-0 flex-1 overflow-auto bg-bg font-mono text-xs">
+  const virtualItems = virtual.getVirtualItems()
+  const visible = virtualItems.length ? virtualItems : entries.slice(0, 50).map((_, index) => ({ index, size: rowHeight, start: index * rowHeight }))
+  return <div ref={parent} role="table" aria-label={split ? 'Split code diff' : 'Unified code diff'} aria-rowcount={entries.length + 1} className="min-h-0 flex-1 overflow-auto bg-bg font-mono text-xs">
     <div className={cn('min-w-max', split ? 'w-[72rem]' : 'w-full')}>
-      <div className={cn('sticky top-0 z-20 grid h-8 border-b border-border bg-card/95 text-[10px] uppercase tracking-wider text-subtlefg backdrop-blur', split ? 'grid-cols-2' : 'grid-cols-[4rem_4rem_2rem_minmax(30rem,1fr)]')}>
-        {split ? <><span className="px-3 leading-8">Base</span><span className="border-l border-border px-3 leading-8">Head</span></> : <><span className="px-2 text-right leading-8">Old</span><span className="px-2 text-right leading-8">New</span><span /><span className="px-3 leading-8">Content</span></>}
+      <div className="sticky top-0 z-20 bg-card/95 backdrop-blur">
+        <div role="rowgroup"><div role="row" aria-rowindex={1} className={cn('grid h-8 border-b border-border text-[10px] uppercase tracking-wider text-subtlefg', split ? 'grid-cols-2' : 'grid-cols-[4rem_4rem_2rem_minmax(30rem,1fr)]')}>
+          {split ? <><span role="columnheader" className="px-3 leading-8">Base</span><span role="columnheader" className="border-l border-border px-3 leading-8">Head</span></> : <><span role="columnheader" className="px-2 text-right leading-8">Old</span><span role="columnheader" className="px-2 text-right leading-8">New</span><span role="columnheader" aria-label="Change" /><span role="columnheader" className="px-3 leading-8">Content</span></>}
+        </div></div>
+        {diff.diff.contextTruncated && <p role="note" className="border-b border-border bg-medium/10 px-3 py-2 font-sans text-xs text-mutedfg">Unchanged context is limited around each change.</p>}
       </div>
-      {hunks.map((hunk, hunkIndex) => <DiffHunk key={`${hunk.oldStart}-${hunk.newStart}-${hunkIndex}`} hunk={hunk} index={hunkIndex} count={hunks.length} split={split} />)}
+      <div role="rowgroup" className="relative" style={{ height: `${Math.max(virtual.getTotalSize(), entries.length * rowHeight)}px` }}>
+        {visible.map((item) => {
+          const entry = entries[item.index]
+          return <div key={entry.kind === 'hunk' ? `hunk-${entry.index}` : entry.key} className="absolute left-0 top-0 w-full" style={{ height: item.size, transform: `translateY(${item.start}px)` }}>
+            {entry.kind === 'hunk' ? <DiffHunkRow hunk={entry.hunk} index={entry.index} count={entry.count} rowIndex={item.index + 2} />
+              : entry.kind === 'split' ? <SplitRow left={entry.left} right={entry.right} rowIndex={item.index + 2} />
+                : <UnifiedRow row={entry.row} rowIndex={item.index + 2} />}
+          </div>
+        })}
+      </div>
     </div>
   </div>
 }
 
-function DiffHunk({ hunk, index, count, split }: { hunk: ProjectCodeDiffHunk; index: number; count: number; split: boolean }) {
+function DiffHunkRow({ hunk, index, count, rowIndex }: { hunk: ProjectCodeDiffHunk; index: number; count: number; rowIndex: number }) {
   const header = `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`
-  return <section aria-label={`Hunk ${index + 1} of ${count}`}>
-    <div className="sticky top-8 z-10 flex items-center justify-between border-y border-border bg-elevated/95 px-3 py-1.5 text-branddim backdrop-blur"><span>{header}</span><span className="text-[10px] text-subtlefg">Hunk {index + 1} / {count}</span></div>
-    {split ? pairRows(hunk.rows).map((pair, rowIndex) => <SplitRow key={rowIndex} left={pair.left} right={pair.right} />) : hunk.rows.map((row, rowIndex) => <UnifiedRow key={`${row.oldLine}-${row.newLine}-${rowIndex}`} row={row} />)}
-  </section>
+  return <div role="row" aria-rowindex={rowIndex} aria-label={`Hunk ${index + 1} of ${count}`} className="flex h-full items-center justify-between border-y border-border bg-elevated px-3 text-branddim"><span role="cell">{header}</span><span role="cell" className="text-[10px] text-subtlefg">Hunk {index + 1} / {count}</span></div>
 }
 
-function UnifiedRow({ row }: { row: ProjectCodeDiffRow }) {
-  return <div role="row" aria-label={`${row.kind} line ${row.newLine ?? row.oldLine ?? ''}`} className={cn('grid min-h-7 grid-cols-[4rem_4rem_2rem_minmax(30rem,1fr)] border-b border-border/20', row.kind === 'added' && 'bg-accent/[0.08]', row.kind === 'removed' && 'bg-critical/[0.08]')}>
-    <span className="select-none border-r border-border/60 px-2 text-right leading-7 tabular-nums text-subtlefg">{row.oldLine ?? ''}</span>
-    <span className="select-none border-r border-border/60 px-2 text-right leading-7 tabular-nums text-subtlefg">{row.newLine ?? ''}</span>
-    <span aria-hidden="true" className={cn('select-none text-center leading-7', row.kind === 'added' && 'text-accent', row.kind === 'removed' && 'text-critical')}>{row.kind === 'added' ? '+' : row.kind === 'removed' ? '−' : ''}</span>
-    <code className="whitespace-pre px-3 leading-7">{row.text}{row.noFinalNewline && <span className="ml-4 select-none text-subtlefg">No newline at end of file</span>}</code>
+function UnifiedRow({ row, rowIndex }: { row: ProjectCodeDiffRow; rowIndex: number }) {
+  return <div role="row" aria-rowindex={rowIndex} aria-label={`${row.kind} line ${row.newLine ?? row.oldLine ?? ''}`} className={cn('grid h-full grid-cols-[4rem_4rem_2rem_minmax(30rem,1fr)] border-b border-border/20', row.kind === 'added' && 'bg-accent/[0.08]', row.kind === 'removed' && 'bg-critical/[0.08]')}>
+    <span role="cell" className="select-none border-r border-border/60 px-2 text-right leading-7 tabular-nums text-subtlefg">{row.oldLine ?? ''}</span>
+    <span role="cell" className="select-none border-r border-border/60 px-2 text-right leading-7 tabular-nums text-subtlefg">{row.newLine ?? ''}</span>
+    <span role="cell" aria-label={row.kind} className={cn('select-none text-center leading-7', row.kind === 'added' && 'text-accent', row.kind === 'removed' && 'text-critical')}>{row.kind === 'added' ? '+' : row.kind === 'removed' ? '−' : ''}</span>
+    <code role="cell" className="whitespace-pre px-3 leading-7">{row.text}{row.noFinalNewline && <span className="ml-4 select-none text-subtlefg">No newline at end of file</span>}</code>
   </div>
 }
 
-function SplitRow({ left, right }: { left: ProjectCodeDiffRow | null; right: ProjectCodeDiffRow | null }) {
-  return <div role="row" className="grid min-h-7 grid-cols-2 border-b border-border/20">
+function SplitRow({ left, right, rowIndex }: { left: ProjectCodeDiffRow | null; right: ProjectCodeDiffRow | null; rowIndex: number }) {
+  return <div role="row" aria-rowindex={rowIndex} className="grid h-full grid-cols-2 border-b border-border/20">
     <DiffSide row={left} side="old" />
     <DiffSide row={right} side="new" />
   </div>
@@ -333,7 +364,7 @@ function SplitRow({ left, right }: { left: ProjectCodeDiffRow | null; right: Pro
 function DiffSide({ row, side }: { row: ProjectCodeDiffRow | null; side: 'old' | 'new' }) {
   const removed = row?.kind === 'removed'
   const added = row?.kind === 'added'
-  return <div aria-label={row ? `${row.kind} ${side} line ${side === 'old' ? row.oldLine ?? '' : row.newLine ?? ''}` : `${side} placeholder`} className={cn('grid grid-cols-[4rem_2rem_minmax(28rem,1fr)]', removed && 'bg-critical/[0.08]', added && 'bg-accent/[0.08]', side === 'new' && 'border-l border-border')}>
+  return <div role="cell" aria-label={row ? `${row.kind} ${side} line ${side === 'old' ? row.oldLine ?? '' : row.newLine ?? ''}` : `${side} placeholder`} className={cn('grid grid-cols-[4rem_2rem_minmax(28rem,1fr)]', removed && 'bg-critical/[0.08]', added && 'bg-accent/[0.08]', side === 'new' && 'border-l border-border')}>
     <span className="select-none border-r border-border/60 px-2 text-right leading-7 tabular-nums text-subtlefg">{row ? (side === 'old' ? row.oldLine : row.newLine) ?? '' : ''}</span>
     <span aria-hidden="true" className={cn('select-none text-center leading-7', removed && 'text-critical', added && 'text-accent')}>{removed ? '−' : added ? '+' : ''}</span>
     <code className="whitespace-pre px-3 leading-7">{row?.text ?? ''}{row?.noFinalNewline && <span className="ml-4 select-none text-subtlefg">No newline at end of file</span>}</code>
@@ -361,11 +392,11 @@ function FindingPanel({ findings, selected, onSelect }: { findings: ProjectCodeF
   const panel = useRef<HTMLElement>(null)
   const drag = useRef<{ y: number; height: number } | null>(null)
   const [height, setHeight] = useState(192)
-  const resize = (next: number) => {
+  const resize = useCallback((next: number) => {
     const workspaceHeight = panel.current?.parentElement?.clientHeight ?? 0
     const max = workspaceHeight ? Math.max(128, Math.min(480, Math.floor(workspaceHeight * 0.6))) : 480
     setHeight(Math.max(128, Math.min(max, next)))
-  }
+  }, [])
   useEffect(() => {
     const onMove = (event: PointerEvent) => { if (drag.current) resize(drag.current.height + drag.current.y - event.clientY) }
     const onUp = () => { drag.current = null }
@@ -377,7 +408,7 @@ function FindingPanel({ findings, selected, onSelect }: { findings: ProjectCodeF
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
     }
-  })
+  }, [resize])
   if (!findings.length) return null
   const index = selected ? findings.findIndex((finding) => finding.id === selected.id) : -1
   return <aside ref={panel} aria-label="Findings" className="flex shrink-0 flex-col border-t border-border bg-surface" style={selected ? { height } : undefined}>

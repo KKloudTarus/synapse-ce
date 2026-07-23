@@ -1096,6 +1096,7 @@ export interface ProjectCodeDiffView {
   head: ProjectCodeRevision
   path: string
   view: 'unified' | 'split'
+  contextTruncated: boolean
   change: ProjectCodeFileChange
 }
 

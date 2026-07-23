@@ -959,7 +959,7 @@ func reconcileSourceCapture(snapshot measure.Snapshot, capabilities projectanaly
 			files[node.Path] = struct{}{}
 		}
 	}
-	out := projectanalysis.SourceManifest{Files: make([]projectanalysis.SourceFile, 0, len(manifest.Files)), Truncated: manifest.Truncated, Digest: manifest.Digest}
+	out := projectanalysis.SourceManifest{Files: make([]projectanalysis.SourceFile, 0, len(manifest.Files)), Truncated: manifest.Truncated}
 	for _, file := range manifest.Files {
 		if _, ok := files[file.Path]; ok {
 			out.Files = append(out.Files, file)
@@ -971,6 +971,7 @@ func reconcileSourceCapture(snapshot measure.Snapshot, capabilities projectanaly
 			UnifiedDiff: projectanalysis.Capability{Reason: projectanalysis.UnavailableCaptureFailed}, SplitDiff: projectanalysis.Capability{Reason: projectanalysis.UnavailableCaptureFailed}, Highlighting: projectanalysis.Capability{Reason: projectanalysis.UnavailableCaptureFailed},
 		}
 	}
+	out.SetArtifactDigest()
 	return capabilities, out
 }
 

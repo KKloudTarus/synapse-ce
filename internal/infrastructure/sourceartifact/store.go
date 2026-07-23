@@ -294,6 +294,9 @@ func (s *Store) loadFrom(ctx context.Context, root, canonical string) ([]byte, p
 	if err := json.Unmarshal(manifestData, &manifest); err != nil {
 		return nil, projectanalysis.SourceFile{}, projectanalysis.ErrSourceIntegrity
 	}
+	if manifest.Digest != "" && manifest.Digest != manifest.ArtifactDigest() {
+		return nil, projectanalysis.SourceFile{}, projectanalysis.ErrSourceIntegrity
+	}
 	for _, file := range manifest.Files {
 		if file.Path != canonical {
 			continue
@@ -311,9 +314,12 @@ func (s *Store) loadFrom(ctx context.Context, root, canonical string) ([]byte, p
 		if err := ctx.Err(); err != nil {
 			return nil, projectanalysis.SourceFile{}, err
 		}
-		data, err := readGzip(filepath.Join(root, "blobs", file.Digest+".gz"))
+		if !validDigest(file.Digest) {
+			return nil, projectanalysis.SourceFile{}, projectanalysis.ErrSourceIntegrity
+		}
+		data, err := readGzip(filepath.Join(root, "blobs", file.Digest+".gz"), s.maxFileBytes)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if os.IsNotExist(err) || errors.Is(err, projectanalysis.ErrSourceIntegrity) {
 				return nil, projectanalysis.SourceFile{}, projectanalysis.ErrSourceIntegrity
 			}
 			return nil, projectanalysis.SourceFile{}, projectanalysis.ErrSourceTransient
@@ -459,6 +465,18 @@ func hashID(value string) string {
 	return hex.EncodeToString(digest[:])
 }
 
+func validDigest(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 func safeLegacyComponent(value string) bool {
 	return strings.TrimSpace(value) != "" && value != "." && value != ".." && !strings.ContainsAny(value, `/\\`)
 }
@@ -530,7 +548,7 @@ func writeGzip(path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	writer := gzip.NewWriter(file)
 	if _, err := writer.Write(data); err != nil {
 		_ = writer.Close()
@@ -542,16 +560,23 @@ func writeGzip(path string, data []byte) error {
 	return file.Close()
 }
 
-func readGzip(path string) ([]byte, error) {
+func readGzip(path string, maxBytes int64) ([]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	reader, err := gzip.NewReader(file)
 	if err != nil {
 		return nil, err
 	}
-	defer reader.Close()
-	return io.ReadAll(reader)
+	defer func() { _ = reader.Close() }()
+	data, err := io.ReadAll(io.LimitReader(reader, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, projectanalysis.ErrSourceIntegrity
+	}
+	return data, nil
 }

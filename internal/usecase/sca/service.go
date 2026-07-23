@@ -30,7 +30,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
@@ -103,9 +102,10 @@ type Service struct {
 	projectAnalysisRecorder interface {
 		RecordProjectAnalysis(context.Context, shared.ID, string, time.Time, *ScanResult) error
 	}
-	sourceArtifacts ports.ProjectSourceArtifactStore
-	log             *slog.Logger
-	gateDecoder     ports.GateDecoder
+	sourceArtifacts  ports.ProjectSourceArtifactStore
+	comparisonSource ports.ProjectComparisonSource
+	log              *slog.Logger
+	gateDecoder      ports.GateDecoder
 }
 
 // SetSeverityEnricher configures optional severity backfill (NVD CVSS) for vulnerabilities the
@@ -141,6 +141,11 @@ func (s *Service) SetProjectAnalysisCompletionTimeout(timeout time.Duration) {
 // the acquired workspace still exists. Nil keeps non-Code deployments unchanged.
 func (s *Service) SetProjectSourceArtifactStore(store ports.ProjectSourceArtifactStore) {
 	s.sourceArtifacts = store
+}
+
+// SetProjectComparisonSource reads persisted Git changes before workspace cleanup.
+func (s *Service) SetProjectComparisonSource(source ports.ProjectComparisonSource) {
+	s.comparisonSource = source
 }
 
 // SetLogger records operational warnings that do not contain source data or paths.
@@ -2438,7 +2443,11 @@ func (s *Service) captureProjectComparison(ctx context.Context, engagementID sha
 	if result == nil || !result.Comparison.Available || s.sourceArtifacts == nil {
 		return
 	}
-	changes, err := gitdiff.FileChanges(ctx, sourceDir, result.Comparison.MergeBase, head)
+	if s.comparisonSource == nil {
+		result.Comparison = projectanalysis.Comparison{Reason: projectanalysis.UnavailableCaptureFailed}
+		return
+	}
+	changes, err := s.comparisonSource.FileChanges(ctx, sourceDir, result.Comparison.MergeBase, head)
 	if err != nil {
 		result.Comparison = projectanalysis.Comparison{Reason: projectanalysis.UnavailableNoComparableBase}
 		return
@@ -2448,7 +2457,7 @@ func (s *Service) captureProjectComparison(ctx context.Context, engagementID sha
 		if change.OldPath == "" || change.Binary || change.Status == projectanalysis.FileStatusAdded {
 			continue
 		}
-		data, err := gitdiff.FileAtRevision(ctx, sourceDir, result.Comparison.MergeBase, change.OldPath)
+		data, err := s.comparisonSource.FileAtRevision(ctx, sourceDir, result.Comparison.MergeBase, change.OldPath)
 		if err != nil {
 			result.Comparison = projectanalysis.Comparison{Reason: projectanalysis.UnavailableCaptureFailed}
 			return

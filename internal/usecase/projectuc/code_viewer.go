@@ -90,14 +90,15 @@ type CodeFileView struct {
 }
 
 type CodeDiffView struct {
-	AnalysisID string                     `json:"analysis_id"`
-	Base       *CodeRevision              `json:"base,omitempty"`
-	Head       CodeRevision               `json:"head"`
-	Path       string                     `json:"path"`
-	View       string                     `json:"view"`
-	Change     projectanalysis.FileChange `json:"change"`
-	BaseFile   projectanalysis.SourceFile `json:"base_file,omitempty"`
-	SourceFile projectanalysis.SourceFile `json:"source_file,omitempty"`
+	AnalysisID       string                     `json:"analysis_id"`
+	Base             *CodeRevision              `json:"base,omitempty"`
+	Head             CodeRevision               `json:"head"`
+	Path             string                     `json:"path"`
+	View             string                     `json:"view"`
+	ContextTruncated bool                       `json:"context_truncated"`
+	Change           projectanalysis.FileChange `json:"change"`
+	BaseFile         projectanalysis.SourceFile `json:"base_file,omitempty"`
+	SourceFile       projectanalysis.SourceFile `json:"source_file,omitempty"`
 }
 
 // ListCodeFiles returns the immutable snapshot inventory enriched with retained-source state.
@@ -233,7 +234,8 @@ func (s *Service) ReadCodeDiff(ctx context.Context, tenantID shared.ID, key, ana
 		if change.Binary {
 			return CodeDiffView{}, analysis.Capabilities, projectanalysis.ErrSourceUnsupported
 		}
-		out := CodeDiffView{AnalysisID: analysis.ID, Base: codeBaseRevision(analysis), Head: codeHeadRevision(analysis), Path: canonical, View: view, Change: trimFileChange(change, contextLines)}
+		trimmed, truncated := trimFileChange(change, contextLines)
+		out := CodeDiffView{AnalysisID: analysis.ID, Base: codeBaseRevision(analysis), Head: codeHeadRevision(analysis), Path: canonical, View: view, ContextTruncated: truncated, Change: trimmed}
 		if change.OldPath != "" && manifestOmittedByLimit(analysis.Comparison.BaseManifest, change.OldPath) {
 			return CodeDiffView{}, analysis.Capabilities, projectanalysis.ErrSourceLimit
 		}
@@ -257,8 +259,9 @@ func (s *Service) ReadCodeDiff(ctx context.Context, tenantID shared.ID, key, ana
 	return CodeDiffView{}, analysis.Capabilities, shared.ErrNotFound
 }
 
-func trimFileChange(change projectanalysis.FileChange, contextLines int) projectanalysis.FileChange {
+func trimFileChange(change projectanalysis.FileChange, contextLines int) (projectanalysis.FileChange, bool) {
 	out := change
+	truncated := false
 	out.Hunks = make([]projectanalysis.DiffHunk, 0, len(change.Hunks))
 	for _, hunk := range change.Hunks {
 		keep := make([]bool, len(hunk.Rows))
@@ -273,6 +276,7 @@ func trimFileChange(change projectanalysis.FileChange, contextLines int) project
 		}
 		for start := 0; start < len(hunk.Rows); {
 			for start < len(hunk.Rows) && !keep[start] {
+				truncated = true
 				start++
 			}
 			end := start
@@ -283,26 +287,28 @@ func trimFileChange(change projectanalysis.FileChange, contextLines int) project
 				continue
 			}
 			rows := append([]projectanalysis.DiffRow(nil), hunk.Rows[start:end]...)
-			trimmed := projectanalysis.DiffHunk{Rows: rows}
+			trimmed := projectanalysis.DiffHunk{OldStart: hunk.OldStart, NewStart: hunk.NewStart, Rows: rows}
+			for _, row := range hunk.Rows[:start] {
+				if row.Kind != projectanalysis.DiffRowAdded {
+					trimmed.OldStart++
+				}
+				if row.Kind != projectanalysis.DiffRowRemoved {
+					trimmed.NewStart++
+				}
+			}
 			for _, row := range rows {
 				if row.Kind != projectanalysis.DiffRowAdded {
 					trimmed.OldLines++
-					if trimmed.OldStart == 0 {
-						trimmed.OldStart = row.OldLine
-					}
 				}
 				if row.Kind != projectanalysis.DiffRowRemoved {
 					trimmed.NewLines++
-					if trimmed.NewStart == 0 {
-						trimmed.NewStart = row.NewLine
-					}
 				}
 			}
 			out.Hunks = append(out.Hunks, trimmed)
 			start = end
 		}
 	}
-	return out
+	return out, truncated
 }
 
 func codeFiles(analysis projectanalysis.Analysis) []CodeFile {

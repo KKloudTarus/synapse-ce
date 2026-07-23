@@ -985,6 +985,7 @@ function mapProjectCodeDiffResponse(r: any): ProjectCodeDiffResponse {
       head: mapProjectCodeRevision(diff.head),
       path: diff.path ?? '',
       view: diff.view === 'split' ? 'split' : 'unified',
+      contextTruncated: diff.context_truncated === true,
       change: {
         oldPath: diff.change?.old_path ?? '',
         newPath: diff.change?.new_path ?? '',

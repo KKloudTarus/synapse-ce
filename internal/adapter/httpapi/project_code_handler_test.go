@@ -98,7 +98,7 @@ func TestListProjectCodeFilesReturnsDocumentedRevisionAndCapabilities(t *testing
 }
 
 func TestGetProjectCodeDiffHonorsETag(t *testing.T) {
-	stub := &projectCodeServiceStub{diff: projectuc.CodeDiffView{Path: "main.go", View: "unified", Change: projectanalysis.FileChange{Status: projectanalysis.FileStatusModified, OldPath: "main.go", NewPath: "main.go"}}}
+	stub := &projectCodeServiceStub{diff: projectuc.CodeDiffView{Path: "main.go", View: "unified", ContextTruncated: true, Change: projectanalysis.FileChange{Status: projectanalysis.FileStatusModified, OldPath: "main.go", NewPath: "main.go"}}}
 	rt := &Router{log: discardLog(), projects: stub}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/p/analyses/a/code/diff?path=main.go", nil)
 	req.SetPathValue("key", "p")
@@ -107,6 +107,13 @@ func TestGetProjectCodeDiffHonorsETag(t *testing.T) {
 	rt.getProjectCodeDiff(rec, req)
 	if rec.Code != http.StatusOK || rec.Header().Get("ETag") == "" || rec.Header().Get("Cache-Control") != "private, max-age=300" {
 		t.Fatalf("code=%d headers=%v body=%s", rec.Code, rec.Header(), rec.Body.String())
+	}
+	var response codeDiffResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Diff.ContextTruncated {
+		t.Fatalf("response=%+v", response)
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 
 var _ ports.ProjectIssueStore = (*ProjectAnalysisStore)(nil)
 var _ ports.ProjectIssueProjectionStore = (*ProjectAnalysisStore)(nil)
+var _ ports.ProjectFindingStatusStore = (*ProjectAnalysisStore)(nil)
 
 // SaveWithResultAndProjections commits the immutable analysis, its Security Hotspot
 // projection, and its code-quality issue projection in a single PostgreSQL

@@ -274,6 +274,72 @@ func TestLineCountUsesPhysicalLines(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsTamperedManifest(t *testing.T) {
+	store := New(filepath.Join(t.TempDir(), "source"), 8, 0, 0)
+	root := store.analysisDir("tenant", "project", "analysis")
+	writeLegacyArtifact(t, root, "main.go", []byte("original"))
+	manifestData, err := os.ReadFile(filepath.Join(root, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest projectanalysis.SourceManifest
+	if err := json.Unmarshal(manifestData, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Files[0].Path = "other.go"
+	encoded, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "manifest.json"), encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Load(context.Background(), "tenant", "project", "analysis", "other.go"); !errors.Is(err, projectanalysis.ErrSourceIntegrity) {
+		t.Fatalf("Load() error=%v, want integrity error", err)
+	}
+}
+
+func TestLoadRejectsMalformedManifestDigest(t *testing.T) {
+	store := New(filepath.Join(t.TempDir(), "source"), 8, 0, 0)
+	root := store.analysisDir("tenant", "project", "analysis")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := projectanalysis.SourceManifest{Files: []projectanalysis.SourceFile{{Path: "main.go", Digest: "../outside", Bytes: 1, Lines: 1, Available: true}}}
+	manifest.SetArtifactDigest()
+	encoded, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "manifest.json"), encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Load(context.Background(), "tenant", "project", "analysis", "main.go"); !errors.Is(err, projectanalysis.ErrSourceIntegrity) {
+		t.Fatalf("Load() error=%v, want integrity error", err)
+	}
+}
+
+func TestLoadRejectsOversizedDecompressedBlob(t *testing.T) {
+	store := New(filepath.Join(t.TempDir(), "source"), 8, 0, 0)
+	root := store.analysisDir("tenant", "project", "analysis")
+	data := []byte("123456789")
+	writeLegacyArtifact(t, root, "main.go", data)
+	if _, _, err := store.Load(context.Background(), "tenant", "project", "analysis", "main.go"); !errors.Is(err, projectanalysis.ErrSourceIntegrity) {
+		t.Fatalf("Load() error=%v, want integrity error", err)
+	}
+}
+
+func TestLoadAcceptsConfiguredFileBoundary(t *testing.T) {
+	store := New(filepath.Join(t.TempDir(), "source"), 8, 0, 0)
+	root := store.analysisDir("tenant", "project", "analysis")
+	data := []byte("12345678")
+	writeLegacyArtifact(t, root, "main.go", data)
+	got, _, err := store.Load(context.Background(), "tenant", "project", "analysis", "main.go")
+	if err != nil || string(got) != string(data) {
+		t.Fatalf("Load() data=%q error=%v", got, err)
+	}
+}
+
 func TestLoadRejectsArtifactTampering(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "main.go"), []byte("package main\n"), 0o600); err != nil {

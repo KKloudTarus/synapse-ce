@@ -446,6 +446,73 @@ func (f failingSourceArtifacts) DeleteProject(context.Context, shared.ID, shared
 }
 func (f failingSourceArtifacts) CleanupExpired(context.Context, time.Time) error { return f.err }
 
+type comparisonSourceStub struct {
+	changes []projectanalysis.FileChange
+	files   map[string][]byte
+	err     error
+	fileErr error
+}
+
+func (s comparisonSourceStub) FileChanges(context.Context, string, string, string) ([]projectanalysis.FileChange, error) {
+	return s.changes, s.err
+}
+
+func (s comparisonSourceStub) FileAtRevision(_ context.Context, _ string, _ string, path string) ([]byte, error) {
+	if s.fileErr != nil {
+		return nil, s.fileErr
+	}
+	return s.files[path], nil
+}
+
+type recordingSourceArtifacts struct {
+	failingSourceArtifacts
+	baseFiles map[string][]byte
+}
+
+func (s *recordingSourceArtifacts) CaptureBase(_ context.Context, _ shared.ID, _ shared.ID, _ string, files map[string][]byte) (projectanalysis.SourceManifest, error) {
+	s.baseFiles = files
+	return projectanalysis.SourceManifest{Files: []projectanalysis.SourceFile{{Path: "main.go", Available: true}}}, nil
+}
+
+func TestProjectComparisonUsesInjectedSource(t *testing.T) {
+	change := projectanalysis.FileChange{Status: projectanalysis.FileStatusModified, OldPath: "main.go", NewPath: "main.go"}
+	artifacts := &recordingSourceArtifacts{}
+	svc := newSvc(&fakeEngRepo{eng: &engdom.Engagement{TenantID: "tenant", ProjectID: "project"}}, fakeClock{}, &fakeAcquirer{}, &fakeAudit{}, &fakeDetector{})
+	svc.SetProjectSourceArtifactStore(artifacts)
+	svc.SetProjectComparisonSource(comparisonSourceStub{changes: []projectanalysis.FileChange{change}, files: map[string][]byte{"main.go": []byte("base\n")}})
+	result := &ScanResult{Comparison: projectanalysis.Comparison{Available: true, MergeBase: "base"}}
+
+	svc.captureProjectComparison(context.Background(), "engagement", "analysis", "/workspace", "head", result)
+
+	if len(result.FileChanges) != 1 || string(artifacts.baseFiles["main.go"]) != "base\n" || len(result.Comparison.BaseManifest.Files) != 1 {
+		t.Fatalf("result=%+v baseFiles=%q", result, artifacts.baseFiles)
+	}
+}
+
+func TestProjectComparisonSourceFailuresDegradeCapability(t *testing.T) {
+	change := projectanalysis.FileChange{Status: projectanalysis.FileStatusModified, OldPath: "main.go", NewPath: "main.go"}
+	for _, tc := range []struct {
+		name   string
+		source ports.ProjectComparisonSource
+		want   projectanalysis.UnavailableReason
+	}{
+		{name: "missing adapter", want: projectanalysis.UnavailableCaptureFailed},
+		{name: "list changes", source: comparisonSourceStub{err: errors.New("diff")}, want: projectanalysis.UnavailableNoComparableBase},
+		{name: "read base file", source: comparisonSourceStub{changes: []projectanalysis.FileChange{change}, fileErr: errors.New("show")}, want: projectanalysis.UnavailableCaptureFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newSvc(&fakeEngRepo{eng: &engdom.Engagement{TenantID: "tenant", ProjectID: "project"}}, fakeClock{}, &fakeAcquirer{}, &fakeAudit{}, &fakeDetector{})
+			svc.SetProjectSourceArtifactStore(&recordingSourceArtifacts{})
+			svc.SetProjectComparisonSource(tc.source)
+			result := &ScanResult{Comparison: projectanalysis.Comparison{Available: true, MergeBase: "base"}}
+			svc.captureProjectComparison(context.Background(), "engagement", "analysis", "/workspace", "head", result)
+			if result.Comparison.Reason != tc.want {
+				t.Fatalf("reason=%q, want %q", result.Comparison.Reason, tc.want)
+			}
+		})
+	}
+}
+
 func TestProjectCaptureFailureIsSafeAndNonFatal(t *testing.T) {
 	var logs bytes.Buffer
 	svc := newSvc(&fakeEngRepo{eng: &engdom.Engagement{TenantID: "tenant", ProjectID: "project"}}, fakeClock{}, &fakeAcquirer{}, &fakeAudit{}, &fakeDetector{})

@@ -1140,13 +1140,14 @@ components:
 
     ProjectCodeDiffView:
       type: object
-      required: [analysis_id, head, path, view, change]
+      required: [analysis_id, head, path, view, context_truncated, change]
       properties:
         analysis_id: {type: string}
         base: {$ref: '#/components/schemas/ProjectCodeRevision'}
         head: {$ref: '#/components/schemas/ProjectCodeRevision'}
         path: {type: string}
         view: {type: string, enum: [unified, split]}
+        context_truncated: {type: boolean, description: True when unchanged context outside the requested window was omitted}
         change: {$ref: '#/components/schemas/ProjectCodeFileChange'}
         base_file: {$ref: '#/components/schemas/ProjectCodeSourceFile'}
         source_file: {$ref: '#/components/schemas/ProjectCodeSourceFile'}

@@ -197,10 +197,10 @@ describe('Projects API', () => {
 
     fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({
       capabilities: { source: { available: true }, comparison: { available: true }, unified_diff: { available: true }, split_diff: { available: false, reason: 'unsupported_target' }, highlighting: { available: false } },
-      diff: { analysis_id: 'a1', head: {}, path: 'src/main.go', view: 'unified', change: { status: 'modified', binary: false, hunks: [{ old_start: 1, old_lines: 1, new_start: 1, new_lines: 1, rows: [{ kind: 'added', new_line: 1, text: 'x' }] }] } },
+      diff: { analysis_id: 'a1', head: {}, path: 'src/main.go', view: 'unified', context_truncated: true, change: { status: 'modified', binary: false, hunks: [{ old_start: 1, old_lines: 1, new_start: 1, new_lines: 1, rows: [{ kind: 'added', new_line: 1, text: 'x' }] }] } },
     }) } as Response)
     const diff = await api.projectCodeDiff('p', 'a1', 'src/main.go', 'unified')
-    expect(diff).toMatchObject({ capabilities: { splitDiff: { available: false, reason: 'unsupported_target' } }, diff: { change: { hunks: [{ rows: [{ oldLine: null, newLine: 1 }] }] } } })
+    expect(diff).toMatchObject({ capabilities: { splitDiff: { available: false, reason: 'unsupported_target' } }, diff: { contextTruncated: true, change: { hunks: [{ rows: [{ oldLine: null, newLine: 1 }] }] } } })
   })
 })
 

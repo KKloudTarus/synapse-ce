@@ -110,14 +110,14 @@ type ProjectIssueProjectionStore interface {
 	SaveWithResultAndProjections(ctx context.Context, analysis projectanalysis.Analysis, result []byte, hotspots []hotspot.Candidate, issues []issue.Candidate) error
 }
 
-// ProjectIssueStore reads and mutates tenant- and Project-scoped code-quality issue
-// projections and their append-only triage lifecycle. It mirrors ProjectHotspotStore.
 // ProjectFindingStatusStore resolves current mutable triage by immutable finding key.
 // It is optional for Code reads, which remain available when projections are absent.
 type ProjectFindingStatusStore interface {
 	CurrentFindingStatuses(ctx context.Context, tenantID, projectID shared.ID, keys []string) (map[string]string, error)
 }
 
+// ProjectIssueStore reads and mutates tenant- and Project-scoped code-quality issue
+// projections and their append-only triage lifecycle. It mirrors ProjectHotspotStore.
 type ProjectIssueStore interface {
 	ListIssues(ctx context.Context, tenantID, projectID shared.ID, filter issue.ListFilter) (issue.Page, error)
 	GetIssue(ctx context.Context, tenantID, projectID, issueID shared.ID) (issue.Issue, error)
@@ -138,6 +138,13 @@ type ProjectHotspotStore interface {
 	HotspotHistory(ctx context.Context, tenantID, projectID, hotspotID shared.ID) ([]hotspot.ReviewEvent, error)
 	ListAnalysisHotspots(ctx context.Context, tenantID, projectID, analysisID shared.ID, lens hotspot.Lens, filter hotspot.ListFilter) (hotspot.Page, hotspot.Summary, error)
 	CurrentAnalysisHotspotSummary(ctx context.Context, tenantID, projectID, analysisID shared.ID, lens hotspot.Lens) (hotspot.Summary, error)
+}
+
+// ProjectComparisonSource reads immutable Git comparison data while the acquired
+// workspace still exists.
+type ProjectComparisonSource interface {
+	FileChanges(ctx context.Context, dir, base, head string) ([]projectanalysis.FileChange, error)
+	FileAtRevision(ctx context.Context, dir, revision, path string) ([]byte, error)
 }
 
 // ProjectSourceArtifactStore captures and serves immutable, analysis-owned source.

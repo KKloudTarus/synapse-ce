@@ -207,6 +207,23 @@ func TestReadCodeDiffServesPersistedUnifiedAndSplitData(t *testing.T) {
 	}
 }
 
+func TestTrimFileChangeReportsOmittedContext(t *testing.T) {
+	change := projectanalysis.FileChange{Hunks: []projectanalysis.DiffHunk{{OldStart: 1, NewStart: 1, Rows: []projectanalysis.DiffRow{
+		{Kind: projectanalysis.DiffRowContext, OldLine: 1, NewLine: 1, Text: "far"},
+		{Kind: projectanalysis.DiffRowContext, OldLine: 2, NewLine: 2, Text: "near"},
+		{Kind: projectanalysis.DiffRowRemoved, OldLine: 3, Text: "old"},
+		{Kind: projectanalysis.DiffRowAdded, NewLine: 3, Text: "new", NoFinalNewline: true},
+	}}}}
+	trimmed, truncated := trimFileChange(change, 1)
+	if !truncated || len(trimmed.Hunks) != 1 || len(trimmed.Hunks[0].Rows) != 3 || trimmed.Hunks[0].OldStart != 2 || trimmed.Hunks[0].NewStart != 2 || trimmed.Hunks[0].Rows[2].Text != "new" || !trimmed.Hunks[0].Rows[2].NoFinalNewline {
+		t.Fatalf("trimmed=%+v truncated=%v", trimmed, truncated)
+	}
+	_, truncated = trimFileChange(change, 100)
+	if truncated {
+		t.Fatal("reported truncation when all context was retained")
+	}
+}
+
 func TestReadCodeDiffReportsTruncatedBaseAsLimit(t *testing.T) {
 	artifacts := &codeArtifactStub{}
 	svc, analyses, p := newCodeService(t, artifacts)

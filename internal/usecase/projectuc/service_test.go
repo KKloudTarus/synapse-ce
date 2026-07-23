@@ -131,7 +131,7 @@ func TestReconcileSourceCaptureKeepsOnlySnapshotFiles(t *testing.T) {
 		{Path: "main.go", Digest: "digest", Available: true},
 		{Path: "ignored.txt", Digest: "digest", Available: true},
 	}})
-	if !caps.Source.Available || len(manifest.Files) != 1 || manifest.Files[0].Path != "main.go" {
+	if !caps.Source.Available || len(manifest.Files) != 1 || manifest.Files[0].Path != "main.go" || manifest.Digest != manifest.ArtifactDigest() {
 		t.Fatalf("caps=%+v manifest=%+v", caps, manifest)
 	}
 }

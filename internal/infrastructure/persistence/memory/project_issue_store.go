@@ -13,6 +13,7 @@ import (
 
 var _ ports.ProjectIssueStore = (*ProjectAnalysisStore)(nil)
 var _ ports.ProjectIssueProjectionStore = (*ProjectAnalysisStore)(nil)
+var _ ports.ProjectFindingStatusStore = (*ProjectAnalysisStore)(nil)
 
 func (s *ProjectAnalysisStore) ListIssues(ctx context.Context, tenantID, projectID shared.ID, filter issue.ListFilter) (issue.Page, error) {
 	if err := ctx.Err(); err != nil {

@@ -86,7 +86,7 @@ describe('ProjectCodeWorkspace', () => {
   it('renders aligned split rows and newline markers', () => {
     const diff = {
       capabilities: { source: { available: true, reason: null }, comparison: { available: true, reason: null }, unifiedDiff: { available: true, reason: null }, splitDiff: { available: true, reason: null }, highlighting: { available: false, reason: 'unsupported' } },
-      diff: { analysisId: 'a1', base: index.head, head: index.head, path: 'src/main.ts', view: 'split' as const, change: { oldPath: 'src/main.ts', newPath: 'src/main.ts', status: 'modified' as const, binary: false, modeOld: '100644', modeNew: '100644', hunks: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, rows: [{ kind: 'removed' as const, oldLine: 1, newLine: null, text: 'old', noFinalNewline: false }, { kind: 'added' as const, oldLine: null, newLine: 1, text: 'new', noFinalNewline: true }] }] } },
+      diff: { analysisId: 'a1', base: index.head, head: index.head, path: 'src/main.ts', view: 'split' as const, contextTruncated: true, change: { oldPath: 'src/main.ts', newPath: 'src/main.ts', status: 'modified' as const, binary: false, modeOld: '100644', modeNew: '100644', hunks: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, rows: [{ kind: 'removed' as const, oldLine: 1, newLine: null, text: 'old', noFinalNewline: false }, { kind: 'added' as const, oldLine: null, newLine: 1, text: 'new', noFinalNewline: true }] }] } },
     }
     render(<ProjectCodeWorkspace index={index} source={source} diff={diff} selectedPath="src/main.ts" selectedFindingId={null} view="split" onSelectFile={vi.fn()} onSelectFinding={vi.fn()} onView={vi.fn()} onRetrySource={vi.fn()} sourceError={null} diffError={null} />)
 
@@ -94,6 +94,23 @@ describe('ProjectCodeWorkspace', () => {
     expect(screen.getByText('old')).toBeInTheDocument()
     expect(screen.getByText('new')).toBeInTheDocument()
     expect(screen.getByText('No newline at end of file')).toBeInTheDocument()
+    expect(screen.getByRole('note')).toHaveTextContent('Unchanged context is limited')
+    expect(screen.getAllByRole('columnheader')).toHaveLength(2)
+    expect(screen.getAllByRole('rowgroup')).toHaveLength(2)
+  })
+
+  it('virtualizes large diffs and scopes live announcements', () => {
+    const rows = Array.from({ length: 500 }, (_, offset) => ({ kind: 'added' as const, oldLine: null, newLine: offset + 1, text: `line-${offset + 1}`, noFinalNewline: false }))
+    const diff = {
+      capabilities: { source: { available: true, reason: null }, comparison: { available: true, reason: null }, unifiedDiff: { available: true, reason: null }, splitDiff: { available: true, reason: null }, highlighting: { available: false, reason: 'unsupported' } },
+      diff: { analysisId: 'a1', base: index.head, head: index.head, path: 'src/main.ts', view: 'unified' as const, contextTruncated: false, change: { oldPath: 'src/main.ts', newPath: 'src/main.ts', status: 'modified' as const, binary: false, modeOld: '100644', modeNew: '100644', hunks: [{ oldStart: 1, oldLines: 0, newStart: 1, newLines: rows.length, rows }] } },
+    }
+    const { container } = render(<ProjectCodeWorkspace index={index} source={source} diff={diff} selectedPath="src/main.ts" selectedFindingId={null} view="unified" onSelectFile={vi.fn()} onSelectFinding={vi.fn()} onView={vi.fn()} onRetrySource={vi.fn()} sourceError={null} diffError={null} />)
+
+    expect(screen.getByRole('table', { name: 'Unified code diff' })).toHaveAttribute('aria-rowcount', '502')
+    expect(screen.getAllByRole('row').length).toBeLessThan(100)
+    expect(screen.getByRole('status')).toHaveTextContent('src/main.ts, unified view')
+    expect(container.firstElementChild).not.toHaveAttribute('aria-live')
   })
 
   it('opens and closes the mobile file dialog', () => {
