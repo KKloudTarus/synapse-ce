@@ -1,9 +1,12 @@
 package sca
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,11 +19,13 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedsbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -416,6 +421,153 @@ func TestScanUsesImportedSBOMWithoutAcquiringTarget(t *testing.T) {
 	}
 	if res.Target != "product-service" || len(res.SBOM.Components) != 1 || len(res.SBOM.Dependencies) != 1 {
 		t.Fatalf("result imported SBOM = target %q comps %d deps %d", res.Target, len(res.SBOM.Components), len(res.SBOM.Dependencies))
+	}
+}
+
+type failingSourceArtifacts struct{ err error }
+
+func (f failingSourceArtifacts) Capture(context.Context, shared.ID, shared.ID, string, string) (projectanalysis.SourceCapture, error) {
+	return projectanalysis.SourceCapture{}, f.err
+}
+func (f failingSourceArtifacts) CaptureBase(context.Context, shared.ID, shared.ID, string, map[string][]byte) (projectanalysis.SourceManifest, error) {
+	return projectanalysis.SourceManifest{}, f.err
+}
+func (f failingSourceArtifacts) Load(context.Context, shared.ID, shared.ID, string, string) ([]byte, projectanalysis.SourceFile, error) {
+	return nil, projectanalysis.SourceFile{}, f.err
+}
+func (f failingSourceArtifacts) LoadBase(context.Context, shared.ID, shared.ID, string, string) ([]byte, projectanalysis.SourceFile, error) {
+	return nil, projectanalysis.SourceFile{}, f.err
+}
+func (f failingSourceArtifacts) DeleteAnalysis(context.Context, shared.ID, shared.ID, string) error {
+	return f.err
+}
+func (f failingSourceArtifacts) DeleteProject(context.Context, shared.ID, shared.ID) error {
+	return f.err
+}
+func (f failingSourceArtifacts) CleanupExpired(context.Context, time.Time) error { return f.err }
+
+type comparisonSourceStub struct {
+	changes []projectanalysis.FileChange
+	files   map[string][]byte
+	err     error
+	fileErr error
+}
+
+func (s comparisonSourceStub) FileChanges(context.Context, string, string, string) ([]projectanalysis.FileChange, error) {
+	return s.changes, s.err
+}
+
+func (s comparisonSourceStub) FileAtRevision(_ context.Context, _ string, _ string, path string) ([]byte, error) {
+	if s.fileErr != nil {
+		return nil, s.fileErr
+	}
+	return s.files[path], nil
+}
+
+type recordingSourceArtifacts struct {
+	failingSourceArtifacts
+	baseFiles map[string][]byte
+}
+
+func (s *recordingSourceArtifacts) CaptureBase(_ context.Context, _ shared.ID, _ shared.ID, _ string, files map[string][]byte) (projectanalysis.SourceManifest, error) {
+	s.baseFiles = files
+	return projectanalysis.SourceManifest{Files: []projectanalysis.SourceFile{{Path: "main.go", Available: true}}}, nil
+}
+
+func TestProjectComparisonUsesInjectedSource(t *testing.T) {
+	change := projectanalysis.FileChange{Status: projectanalysis.FileStatusModified, OldPath: "main.go", NewPath: "main.go"}
+	artifacts := &recordingSourceArtifacts{}
+	svc := newSvc(&fakeEngRepo{eng: &engdom.Engagement{TenantID: "tenant", ProjectID: "project"}}, fakeClock{}, &fakeAcquirer{}, &fakeAudit{}, &fakeDetector{})
+	svc.SetProjectSourceArtifactStore(artifacts)
+	svc.SetProjectComparisonSource(comparisonSourceStub{changes: []projectanalysis.FileChange{change}, files: map[string][]byte{"main.go": []byte("base\n")}})
+	result := &ScanResult{Comparison: projectanalysis.Comparison{Available: true, MergeBase: "base"}}
+
+	svc.captureProjectComparison(context.Background(), "engagement", "analysis", "/workspace", "head", result)
+
+	if len(result.FileChanges) != 1 || string(artifacts.baseFiles["main.go"]) != "base\n" || len(result.Comparison.BaseManifest.Files) != 1 {
+		t.Fatalf("result=%+v baseFiles=%q", result, artifacts.baseFiles)
+	}
+}
+
+func TestProjectComparisonSourceFailuresDegradeCapability(t *testing.T) {
+	change := projectanalysis.FileChange{Status: projectanalysis.FileStatusModified, OldPath: "main.go", NewPath: "main.go"}
+	for _, tc := range []struct {
+		name   string
+		source ports.ProjectComparisonSource
+		want   projectanalysis.UnavailableReason
+	}{
+		{name: "missing adapter", want: projectanalysis.UnavailableCaptureFailed},
+		{name: "list changes", source: comparisonSourceStub{err: errors.New("diff")}, want: projectanalysis.UnavailableNoComparableBase},
+		{name: "read base file", source: comparisonSourceStub{changes: []projectanalysis.FileChange{change}, fileErr: errors.New("show")}, want: projectanalysis.UnavailableCaptureFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newSvc(&fakeEngRepo{eng: &engdom.Engagement{TenantID: "tenant", ProjectID: "project"}}, fakeClock{}, &fakeAcquirer{}, &fakeAudit{}, &fakeDetector{})
+			svc.SetProjectSourceArtifactStore(&recordingSourceArtifacts{})
+			svc.SetProjectComparisonSource(tc.source)
+			result := &ScanResult{Comparison: projectanalysis.Comparison{Available: true, MergeBase: "base"}}
+			svc.captureProjectComparison(context.Background(), "engagement", "analysis", "/workspace", "head", result)
+			if result.Comparison.Reason != tc.want {
+				t.Fatalf("reason=%q, want %q", result.Comparison.Reason, tc.want)
+			}
+		})
+	}
+}
+
+func TestProjectCaptureFailureIsSafeAndNonFatal(t *testing.T) {
+	var logs bytes.Buffer
+	svc := newSvc(&fakeEngRepo{eng: &engdom.Engagement{TenantID: "tenant", ProjectID: "project"}}, fakeClock{}, &fakeAcquirer{}, &fakeAudit{}, &fakeDetector{})
+	svc.SetProjectSourceArtifactStore(failingSourceArtifacts{err: fmt.Errorf("capture failed at /secret/workspace/main.go")})
+	svc.SetLogger(slog.New(slog.NewTextHandler(&logs, nil)))
+	result := &ScanResult{}
+	svc.captureProjectSource(context.Background(), "engagement", "analysis", "/secret/workspace", result)
+	if result.SourceCapture == nil || result.SourceCapture.Capabilities.Source.Reason != projectanalysis.UnavailableCaptureFailed {
+		t.Fatalf("source capture=%+v", result.SourceCapture)
+	}
+	output := logs.String()
+	if !strings.Contains(output, "analysis") || !strings.Contains(output, "stage=head") || strings.Contains(output, "/secret/workspace") || strings.Contains(output, "main.go") {
+		t.Fatalf("unsafe capture log %q", output)
+	}
+}
+
+func TestProjectAnalysisCapturesSourceWhenImportedSBOMIsActive(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","metadata":{"component":{"name":"product-service"}},"components":[{"name":"pkg","version":"1.0.0","purl":"pkg:npm/pkg@1.0.0"}]}`)
+	store := memory.NewImportedSBOMStore()
+	if err := store.SaveActive(context.Background(), importedsbom.Record{
+		ID: "sbom-1", TenantID: "tenant-1", EngagementID: "e1", Filename: "SBOM.json",
+		Format: importedsbom.FormatCycloneDX, SpecVersion: "1.4", TargetRef: "product-service", ComponentCount: 1,
+		SHA256: hashHex(data), RawJSON: data, CreatedBy: "operator", CreatedAt: time.Unix(100, 0).UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eng := engagementWithScope(t, "myrepo")
+	eng.TenantID, eng.ProjectID = "tenant-1", "project-1"
+	acq := &fakeAcquirer{dir: workspace}
+	jobs := newFakeJobStore()
+	svc := newAsyncSvc(&fakeEngRepo{eng: eng}, fakeClock{t: time.Unix(200, 0).UTC()}, acq, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
+	svc.SetImportedSBOMStore(store)
+	svc.SetProjectSourceArtifactStore(sourceartifact.New(filepath.Join(t.TempDir(), "artifacts"), 0, 0, 0))
+	recorder := &contextRecorder{}
+	svc.SetProjectAnalysisRecorder(recorder)
+	job := ports.ScanJob{ID: "analysis-1", EngagementID: "e1", Status: ports.ScanRunning, StartedAt: time.Unix(200, 0).UTC()}
+
+	svc.runScanJob("operator", "e1", time.Unix(200, 0).UTC(), ports.AcquireRequest{Kind: ports.TargetLocal, Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, ProjectAnalysis: true}, job)
+
+	if !acq.called {
+		t.Fatal("Project analysis must acquire its configured source, not use the imported SBOM")
+	}
+	if !recorder.called || recorder.result == nil || recorder.result.SourceCapture == nil || !recorder.result.SourceCapture.Capabilities.Source.Available {
+		t.Fatalf("Project source capture = %+v", recorder.result)
+	}
+	if files := recorder.result.SourceCapture.Manifest.Files; len(files) != 1 || files[0].Path != "main.go" || !files[0].Available {
+		t.Fatalf("captured manifest = %+v", files)
+	}
+	final, err := jobs.LatestForEngagement(context.Background(), "e1")
+	if err != nil || final.Status != ports.ScanSucceeded {
+		t.Fatalf("job=%+v err=%v", final, err)
 	}
 }
 
@@ -859,14 +1011,23 @@ func newAsyncSvc(repo ports.EngagementRepository, clk ports.Clock, acq ports.Acq
 }
 
 type contextRecorder struct {
-	called bool
-	live   bool
-	err    error
+	called          bool
+	live            bool
+	deadline        time.Time
+	waitForDeadline bool
+	result          *ScanResult
+	err             error
 }
 
-func (r *contextRecorder) RecordProjectAnalysis(ctx context.Context, _ shared.ID, _ string, _ time.Time, _ *ScanResult) error {
+func (r *contextRecorder) RecordProjectAnalysis(ctx context.Context, _ shared.ID, _ string, _ time.Time, result *ScanResult) error {
 	r.called = true
 	r.live = ctx.Err() == nil
+	r.deadline, _ = ctx.Deadline()
+	r.result = result
+	if r.waitForDeadline {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return r.err
 }
 
@@ -947,6 +1108,26 @@ func TestProjectRecorderUsesFreshCompletionContext(t *testing.T) {
 	}
 	if final.Status != ports.ScanSucceeded {
 		t.Fatalf("status=%q err=%q, want succeeded", final.Status, final.Error)
+	}
+}
+
+func TestProjectRecorderUsesConfiguredCompletionTimeout(t *testing.T) {
+	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
+	jobs := newFakeJobStore()
+	svc := newAsyncSvc(repo, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
+	recorder := &contextRecorder{waitForDeadline: true}
+	svc.SetProjectAnalysisRecorder(recorder)
+	svc.SetProjectAnalysisCompletionTimeout(20 * time.Millisecond)
+	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, StartedAt: time.Unix(0, 0).UTC()}
+
+	start := time.Now()
+	svc.runScanJob("operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, ProjectAnalysis: true}, job)
+	if !recorder.called || recorder.deadline.Sub(start) > time.Second {
+		t.Fatalf("recorder deadline=%s start=%s", recorder.deadline, start)
+	}
+	final, err := jobs.LatestForEngagement(context.Background(), "e1")
+	if err != nil || final.Status != ports.ScanFailed || !strings.Contains(final.Error, context.DeadlineExceeded.Error()) {
+		t.Fatalf("job=%+v err=%v", final, err)
 	}
 }
 

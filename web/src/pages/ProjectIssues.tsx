@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Bug, ShieldAlert, Wrench, X } from 'lucide-react'
 import { useProjectRouteContext } from './CodeQualityProject'
 import { api, ApiError } from '../lib/api'
@@ -14,6 +14,7 @@ import {
   type RuleType,
 } from '../lib/types'
 import { Button, EmptyState, ErrorState, Field, Input, Pill, Select, SevBadge, Spinner } from '../components/ui'
+import { projectCodePath } from '../lib/projectCodeNavigation'
 
 const TYPE_OPTIONS: { value: RuleType; label: string }[] = [
   { value: 'bug', label: 'Bug' },
@@ -119,7 +120,7 @@ export function ProjectIssuesPage() {
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-mutedfg">
                         <span className="inline-flex items-center gap-1"><Icon className="size-3.5" aria-hidden="true" />{it.type}</span>
                         {it.language && <span className="font-mono">{it.language}</span>}
-                        {it.location && <span className="font-mono">{it.location}</span>}
+                        {issueCodeLink(projectKey, it) ? <Link to={issueCodeLink(projectKey, it)!} onClick={(event) => event.stopPropagation()} className="font-mono text-branddim hover:underline">{it.location}</Link> : it.location && <span className="font-mono">{it.location}</span>}
                         <span className="capitalize">{issueStatusLabel(it.status)}</span>
                         {it.isNew && <Pill>New</Pill>}
                       </div>
@@ -154,6 +155,12 @@ export function ProjectIssuesPage() {
       </div>
     </div>
   )
+}
+
+function issueCodeLink(projectKey: string, issue: ProjectIssue): string | null {
+  const line = /:(\d+)$/.exec(issue.location)?.[1]
+  if (!issue.file || !line || !issue.lastSeenAnalysisId) return null
+  return projectCodePath(projectKey, { analysisId: issue.lastSeenAnalysisId, path: issue.file, view: 'source', line: Number(line), findingId: null })
 }
 
 function Stat({ label, value }: { label: string; value: number }) {

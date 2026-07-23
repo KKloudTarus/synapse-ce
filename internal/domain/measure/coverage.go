@@ -17,11 +17,56 @@ func (f FileCoverage) Percent() float64 {
 	return 100 * float64(f.CoveredLines) / float64(f.TotalLines)
 }
 
+// LineCoverage is immutable executable-line state. A missing line is unknown,
+// never inferred as uncovered.
+type LineCoverage map[string]map[int]bool
+
 // CoverageReport is the whole-tree line coverage parsed from a report file (lcov / cobertura / jacoco).
 type CoverageReport struct {
 	Files        []FileCoverage `json:"files"`
 	CoveredLines int            `json:"covered_lines"`
 	TotalLines   int            `json:"total_lines"`
+	Lines        LineCoverage   `json:"lines,omitempty"`
+}
+
+// CloneLines keeps analysis snapshots independent from parser/request maps.
+func CloneLines(in LineCoverage) LineCoverage {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(LineCoverage, len(in))
+	for path, lines := range in {
+		copyLines := make(map[int]bool, len(lines))
+		for line, covered := range lines {
+			copyLines[line] = covered
+		}
+		out[path] = copyLines
+	}
+	return out
+}
+
+// NormalizeLines removes invalid and non-snapshot paths without creating false
+// uncovered state. allowed must contain canonical project-relative file paths.
+func (r *CoverageReport) NormalizeLines(allowed map[string]struct{}) {
+	if r == nil {
+		return
+	}
+	out := make(LineCoverage)
+	for path, lines := range r.Lines {
+		if _, ok := allowed[path]; !ok {
+			continue
+		}
+		for line, covered := range lines {
+			if line < 1 {
+				continue
+			}
+			if out[path] == nil {
+				out[path] = map[int]bool{}
+			}
+			out[path][line] = covered
+		}
+	}
+	r.Lines = out
 }
 
 // Percent is the overall line-coverage percentage (0 when nothing is measurable).

@@ -102,10 +102,11 @@ func upsertHotspotsTx(ctx context.Context, tx pgx.Tx, analysis projectanalysis.A
 			}
 		}
 
+		sourceFile, startLine, endLine, startColumn, endColumn := sourceLocationFields(item.SourceLocation)
 		if err := tx.QueryRow(ctx, `INSERT INTO project_hotspots
-			(id, tenant_id, project_id, hotspot_key, finding_identity, rule_key, title, description, severity, finding_kind, cwe, location,
+			(id, tenant_id, project_id, hotspot_key, finding_identity, rule_key, title, description, severity, finding_kind, cwe, location, source_file, start_line, end_line, start_column, end_column,
 			 status, version, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$17,$18)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$22,$23)
 			ON CONFLICT (tenant_id, project_id, hotspot_key) DO UPDATE SET
 				finding_identity = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_hotspots.last_seen_at, project_hotspots.last_seen_analysis_id) THEN EXCLUDED.finding_identity ELSE project_hotspots.finding_identity END,
 				first_seen_analysis_id = CASE WHEN (EXCLUDED.first_seen_at, EXCLUDED.first_seen_analysis_id) < (project_hotspots.first_seen_at, project_hotspots.first_seen_analysis_id) THEN EXCLUDED.first_seen_analysis_id ELSE project_hotspots.first_seen_analysis_id END,
@@ -118,6 +119,11 @@ func upsertHotspotsTx(ctx context.Context, tx pgx.Tx, analysis projectanalysis.A
 				finding_kind = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_hotspots.last_seen_at, project_hotspots.last_seen_analysis_id) THEN EXCLUDED.finding_kind ELSE project_hotspots.finding_kind END,
 				cwe = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_hotspots.last_seen_at, project_hotspots.last_seen_analysis_id) THEN EXCLUDED.cwe ELSE project_hotspots.cwe END,
 				location = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_hotspots.last_seen_at, project_hotspots.last_seen_analysis_id) THEN EXCLUDED.location ELSE project_hotspots.location END,
+				source_file = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_hotspots.last_seen_at, project_hotspots.last_seen_analysis_id) THEN EXCLUDED.source_file ELSE project_hotspots.source_file END,
+				start_line = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_hotspots.last_seen_at, project_hotspots.last_seen_analysis_id) THEN EXCLUDED.start_line ELSE project_hotspots.start_line END,
+				end_line = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_hotspots.last_seen_at, project_hotspots.last_seen_analysis_id) THEN EXCLUDED.end_line ELSE project_hotspots.end_line END,
+				start_column = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_hotspots.last_seen_at, project_hotspots.last_seen_analysis_id) THEN EXCLUDED.start_column ELSE project_hotspots.start_column END,
+				end_column = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_hotspots.last_seen_at, project_hotspots.last_seen_analysis_id) THEN EXCLUDED.end_column ELSE project_hotspots.end_column END,
 				last_seen_analysis_id = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_hotspots.last_seen_at, project_hotspots.last_seen_analysis_id) THEN EXCLUDED.last_seen_analysis_id ELSE project_hotspots.last_seen_analysis_id END,
 				last_seen_at = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_hotspots.last_seen_at, project_hotspots.last_seen_analysis_id) THEN EXCLUDED.last_seen_at ELSE project_hotspots.last_seen_at END,
 				updated_at = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_hotspots.last_seen_at, project_hotspots.last_seen_analysis_id) THEN EXCLUDED.updated_at ELSE project_hotspots.updated_at END,
@@ -125,7 +131,7 @@ func upsertHotspotsTx(ctx context.Context, tx pgx.Tx, analysis projectanalysis.A
 				version = CASE WHEN (EXCLUDED.last_seen_at, EXCLUDED.last_seen_analysis_id) > (project_hotspots.last_seen_at, project_hotspots.last_seen_analysis_id) AND EXCLUDED.version > project_hotspots.version THEN EXCLUDED.version ELSE project_hotspots.version END
 			RETURNING status, version, first_seen_analysis_id, last_seen_analysis_id`,
 			item.ID, item.TenantID, item.ProjectID, item.Key, item.FindingIdentity, item.RuleKey, item.Title, item.Description,
-			item.Severity, item.Kind, item.CWE, item.Location, item.Status, item.Version, item.FirstSeenAnalysisID,
+			item.Severity, item.Kind, item.CWE, item.Location, sourceFile, startLine, endLine, startColumn, endColumn, item.Status, item.Version, item.FirstSeenAnalysisID,
 			item.LastSeenAnalysisID, item.FirstSeenAt, item.LastSeenAt).Scan(&item.Status, &item.Version, &item.FirstSeenAnalysisID, &item.LastSeenAnalysisID); err != nil {
 			return fmt.Errorf("upsert project hotspot: %w", err)
 		}
@@ -162,7 +168,7 @@ func (r *ProjectAnalysisStore) ListHotspots(ctx context.Context, tenantID, proje
 		limit = 25
 	}
 	args = append(args, limit+1)
-	query := `SELECT ph.id, ph.tenant_id, ph.project_id, ph.hotspot_key, ph.finding_identity, ph.rule_key, ph.title, ph.description, ph.severity, ph.finding_kind, ph.cwe, ph.location,
+	query := `SELECT ph.id, ph.tenant_id, ph.project_id, ph.hotspot_key, ph.finding_identity, ph.rule_key, ph.title, ph.description, ph.severity, ph.finding_kind, ph.cwe, ph.location, ph.source_file, ph.start_line, ph.end_line, ph.start_column, ph.end_column,
 		ph.status, ph.version, ph.first_seen_analysis_id, ph.last_seen_analysis_id, ph.first_seen_at, ph.last_seen_at, ph.created_at, ph.updated_at, ph.last_reviewed_by, ph.last_reviewed_at
 		FROM project_hotspots ph ` + joins + ` WHERE ` + where + ` ORDER BY ph.last_seen_at DESC, ph.id COLLATE "C" DESC LIMIT $` + fmt.Sprint(len(args))
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -269,7 +275,7 @@ func hotspotWhere(tenantID, projectID shared.ID, filter hotspot.ListFilter, curs
 	return strings.Join(parts, " AND "), args, joins
 }
 func (r *ProjectAnalysisStore) GetHotspot(ctx context.Context, tenantID, projectID, hotspotID shared.ID) (hotspot.Hotspot, error) {
-	row := r.pool.QueryRow(ctx, `SELECT id, tenant_id, project_id, hotspot_key, finding_identity, rule_key, title, description, severity, finding_kind, cwe, location,
+	row := r.pool.QueryRow(ctx, `SELECT id, tenant_id, project_id, hotspot_key, finding_identity, rule_key, title, description, severity, finding_kind, cwe, location, source_file, start_line, end_line, start_column, end_column,
 		status, version, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at
 		FROM project_hotspots WHERE tenant_id=$1 AND project_id=$2 AND id=$3`, tenantID.String(), projectID.String(), hotspotID.String())
 	item, err := scanHotspot(row)
@@ -285,17 +291,20 @@ func (r *ProjectAnalysisStore) GetHotspot(ctx context.Context, tenantID, project
 func scanHotspot(row rowScanner) (hotspot.Hotspot, error) {
 	var item hotspot.Hotspot
 	var tenantID, projectID, status, kind, severity string
+	var sourceFile *string
+	var startLine, endLine, startColumn, endColumn *int
 	var createdAt, updatedAt time.Time
 	var lastReviewedBy *string
 	var lastReviewedAt *time.Time
 	if err := row.Scan(&item.ID, &tenantID, &projectID, &item.Key, &item.FindingIdentity, &item.RuleKey, &item.Title, &item.Description,
-		&severity, &kind, &item.CWE, &item.Location, &status, &item.Version, &item.FirstSeenAnalysisID, &item.LastSeenAnalysisID,
+		&severity, &kind, &item.CWE, &item.Location, &sourceFile, &startLine, &endLine, &startColumn, &endColumn, &status, &item.Version, &item.FirstSeenAnalysisID, &item.LastSeenAnalysisID,
 		&item.FirstSeenAt, &item.LastSeenAt, &createdAt, &updatedAt, &lastReviewedBy, &lastReviewedAt); err != nil {
 		return hotspot.Hotspot{}, err
 	}
 	if lastReviewedBy != nil {
 		item.LastReviewedBy = *lastReviewedBy
 	}
+	item.SourceLocation = sourceLocationFromFields(sourceFile, startLine, endLine, startColumn, endColumn)
 	item.LastReviewedAt = lastReviewedAt
 	item.TenantID, item.ProjectID = shared.ID(tenantID), shared.ID(projectID)
 	item.Severity, item.Kind, item.Status = shared.Severity(severity), finding.Kind(kind), hotspot.Status(status)
@@ -311,7 +320,7 @@ func (r *ProjectAnalysisStore) TransitionHotspot(ctx context.Context, cmd hotspo
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Lock the row
-	row := tx.QueryRow(ctx, `SELECT id, tenant_id, project_id, hotspot_key, finding_identity, rule_key, title, description, severity, finding_kind, cwe, location,
+	row := tx.QueryRow(ctx, `SELECT id, tenant_id, project_id, hotspot_key, finding_identity, rule_key, title, description, severity, finding_kind, cwe, location, source_file, start_line, end_line, start_column, end_column,
 		status, version, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at
 		FROM project_hotspots WHERE tenant_id=$1 AND project_id=$2 AND id=$3 FOR UPDATE`, cmd.TenantID.String(), cmd.ProjectID.String(), cmd.HotspotID.String())
 	item, err := scanHotspot(row)
@@ -455,7 +464,7 @@ func (r *ProjectAnalysisStore) ListAnalysisHotspots(ctx context.Context, tenantI
 		limit = 25
 	}
 
-	query := `SELECT h.id, h.tenant_id, h.project_id, h.hotspot_key, h.finding_identity, h.rule_key, h.title, h.description, h.severity, h.finding_kind, h.cwe, h.location,
+	query := `SELECT h.id, h.tenant_id, h.project_id, h.hotspot_key, h.finding_identity, h.rule_key, h.title, h.description, h.severity, h.finding_kind, h.cwe, h.location, h.source_file, h.start_line, h.end_line, h.start_column, h.end_column,
 		h.status, h.version, h.first_seen_analysis_id, h.last_seen_analysis_id, h.first_seen_at, h.last_seen_at, h.created_at, h.updated_at, h.last_reviewed_by, h.last_reviewed_at
 		FROM project_hotspots h
 		JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id

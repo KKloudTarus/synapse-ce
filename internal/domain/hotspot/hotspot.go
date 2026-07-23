@@ -45,6 +45,7 @@ type Candidate struct {
 	Kind            finding.Kind
 	CWE             string
 	Location        string
+	SourceLocation  *finding.SourceLocation
 }
 
 // Hotspot is a tenant- and Project-scoped read model. It deliberately contains no
@@ -62,6 +63,7 @@ type Hotspot struct {
 	Kind                finding.Kind
 	CWE                 string
 	Location            string
+	SourceLocation      *finding.SourceLocation
 	Status              Status
 	Version             int
 	FirstSeenAnalysisID string
@@ -96,6 +98,9 @@ func (h Hotspot) Validate() error {
 	}
 	if !h.Severity.Valid() {
 		return fmt.Errorf("%w: hotspot severity is invalid", shared.ErrValidation)
+	}
+	if h.SourceLocation != nil && h.SourceLocation.Validate() != nil {
+		return fmt.Errorf("%w: hotspot source location is invalid", shared.ErrValidation)
 	}
 	if !h.Status.Valid() {
 		return fmt.Errorf("%w: hotspot status is invalid", shared.ErrValidation)
@@ -134,6 +139,7 @@ func Project(
 		Kind:            candidate.Kind,
 		CWE:             candidate.CWE,
 		Location:        candidate.Location,
+		SourceLocation:  candidate.SourceLocation,
 		Status:          StatusToReview,
 		Version:         1,
 

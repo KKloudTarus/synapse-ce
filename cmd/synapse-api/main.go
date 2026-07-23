@@ -39,6 +39,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/rulecatalog"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourcesnippet"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
@@ -47,6 +48,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gomodgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/govulncheck"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
@@ -61,10 +63,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensemeta"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/manifest"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/manifestresolve"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/msi"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavencoord"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavenresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/misconfig"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/msi"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/npmresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/nvd"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ospkg"
@@ -159,7 +161,7 @@ func main() {
 
 	clock := idgen.SystemClock{}
 	ids := idgen.RandomID{}
-	acquirer := acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled)
+	acquirer := acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled).WithComparisonDepth(cfg.ProjectGitComparisonDepth)
 
 	// Persistence: PostgreSQL when configured, else file + in-memory (dev).
 	var repo ports.EngagementRepository
@@ -560,7 +562,7 @@ func main() {
 	scaService.SetImportedSBOMStore(importedSBOMStore)
 	scaService.SetGateDecoder(qualityprofile.LoadGateBytes)
 	scaService.SetSBOMEnricher(manifest.New())
-	scaService.SetArtifactCataloger(msi.New()) // recover Windows Installer (.msi) product identity into the SBOM
+	scaService.SetArtifactCataloger(msi.New())           // recover Windows Installer (.msi) product identity into the SBOM
 	scaService.SetMavenCoordResolver(mavencoord.New())   // recover real Maven coords from JAR pom.properties (offline) before license lookup
 	scaService.SetJarChecksumResolver(jarchecksum.New()) // capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
 	// SHA-1 coordinate recovery for shaded/metadata-less JARs: offline trivy-java-db-format
@@ -907,6 +909,19 @@ func main() {
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
 	projectService.SetScanner(scaService)
 	scaService.SetProjectAnalysisRecorder(projectService)
+	scaService.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)
+	projectService.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)
+	scaService.SetLogger(log)
+	sourceArtifacts := sourceartifact.New(cfg.ProjectSourceArtifactDir, cfg.ProjectSourceMaxFileBytes, cfg.ProjectSourceMaxFiles, cfg.ProjectSourceMaxBytes)
+	projectService.SetSourceArtifactStore(sourceArtifacts)
+	scaService.SetProjectSourceArtifactStore(sourceArtifacts)
+	scaService.SetProjectComparisonSource(&gitdiff.ComparisonSource{})
+	if cfg.ProjectSourceRetention > 0 {
+		if err := sourceArtifacts.CleanupExpired(context.Background(), time.Now().Add(-cfg.ProjectSourceRetention)); err != nil {
+			log.Warn("source artifact retention cleanup failed", "err", err)
+		}
+	}
+	log.Info("immutable project source capture ENABLED", "retention", cfg.ProjectSourceRetention)
 	router.SetProjects(projectService)
 	router.SetQualityGates(qualityGateService)
 	router.SetQualityProfiles(qualityProfileService)

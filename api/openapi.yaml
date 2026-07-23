@@ -239,6 +239,143 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
+  /api/v1/projects/{key}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectKey'
+    delete:
+      tags: [projects]
+      summary: Delete a Project and its retained source artifacts
+      operationId: deleteProject
+      responses:
+        "204": {description: Project deleted}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalServerError"}
+
+  /api/v1/projects/{key}/analyses/{id}/code/files:
+    parameters:
+    - $ref: '#/components/parameters/ProjectKey'
+    - $ref: '#/components/parameters/AnalysisId'
+    get:
+      tags: [projects]
+      summary: List immutable source files for one Project analysis
+      operationId: listProjectCodeFiles
+      parameters:
+      - name: include_generated
+        in: query
+        schema: {type: boolean, default: false}
+      - name: changed
+        in: query
+        schema: {type: boolean}
+      - name: has_findings
+        in: query
+        schema: {type: boolean}
+      - name: prefix
+        in: query
+        schema: {type: string, maxLength: 256}
+      - name: status
+        in: query
+        schema: {type: string, enum: [unchanged, added, modified, deleted, renamed, copied, mode_only]}
+      responses:
+        "200":
+          description: Immutable analysis source inventory and capabilities
+          headers:
+            ETag:
+              description: Immutable file-index entity tag
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProjectCodeFilesResponse"}
+        "304": {description: File index is unchanged}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalServerError"}
+
+  /api/v1/projects/{key}/analyses/{id}/code/diff:
+    parameters:
+    - $ref: '#/components/parameters/ProjectKey'
+    - $ref: '#/components/parameters/AnalysisId'
+    get:
+      tags: [projects]
+      summary: Read a persisted immutable Git diff for one Project analysis
+      operationId: getProjectCodeDiff
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema: {type: string, minLength: 1}
+      - name: view
+        in: query
+        schema: {type: string, enum: [unified, split], default: unified}
+      - name: context
+        in: query
+        schema: {type: integer, minimum: 0, maximum: 100}
+      responses:
+        "200":
+          description: Persisted immutable diff representation
+          headers:
+            ETag:
+              description: Immutable diff entity tag
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProjectCodeDiffResponse"}
+        "304": {description: Diff is unchanged}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Source artifact integrity mismatch}
+        "410": {description: Comparison data was not retained or is unavailable}
+        "413": {description: Diff content exceeds retained limits}
+        "415": {description: Binary or unsupported diff content}
+        "503": {description: Source artifact storage is temporarily unavailable}
+        "500": {$ref: "#/components/responses/InternalServerError"}
+
+  /api/v1/projects/{key}/analyses/{id}/code/file:
+    parameters:
+    - $ref: '#/components/parameters/ProjectKey'
+    - $ref: '#/components/parameters/AnalysisId'
+    get:
+      tags: [projects]
+      summary: Read a bounded immutable source window for one Project analysis
+      operationId: getProjectCodeFile
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema: {type: string, minLength: 1}
+      - name: from_line
+        in: query
+        schema: {type: integer, minimum: 1, default: 1}
+      - name: to_line
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 1000}
+      responses:
+        "200":
+          description: Immutable source window
+          headers:
+            ETag:
+              description: Immutable source-window entity tag
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProjectCodeFileResponse"}
+        "304": {description: Source window is unchanged}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Source artifact integrity mismatch}
+        "410": {description: Source was not retained for this analysis}
+        "413": {description: Source content exceeds retained limits}
+        "415": {description: Binary or unsupported source content}
+        "503": {description: Source artifact storage is temporarily unavailable}
+        "500": {$ref: "#/components/responses/InternalServerError"}
+
   /api/v1/projects/{key}/overview:
     parameters:
     - name: key
@@ -764,6 +901,12 @@ components:
       schema:
         type: string
         pattern: ^[a-z0-9_-]+$
+    AnalysisId:
+      name: id
+      in: path
+      required: true
+      description: Immutable Project analysis identifier
+      schema: {type: string, minLength: 1}
     LensParam:
       name: lens
       in: query
@@ -806,6 +949,215 @@ components:
       type: object
       properties:
         error: {type: string}
+
+    ProjectCodeCapability:
+      type: object
+      required: [available]
+      properties:
+        available: {type: boolean}
+        reason:
+          type: string
+          enum: [not_retained, capture_failed, first_analysis, no_comparable_base, unsupported_target, limit_exceeded, binary, non_utf8]
+
+    ProjectCodeCapabilities:
+      type: object
+      required: [source, comparison, unified_diff, split_diff, highlighting]
+      properties:
+        source: {$ref: '#/components/schemas/ProjectCodeCapability'}
+        comparison: {$ref: '#/components/schemas/ProjectCodeCapability'}
+        unified_diff: {$ref: '#/components/schemas/ProjectCodeCapability'}
+        split_diff: {$ref: '#/components/schemas/ProjectCodeCapability'}
+        highlighting: {$ref: '#/components/schemas/ProjectCodeCapability'}
+
+    ProjectCodeRevision:
+      type: object
+      required: [artifact_digest]
+      properties:
+        ref: {type: string}
+        commit: {type: string}
+        artifact_digest: {type: string, description: Immutable manifest SHA-256 identity}
+
+    ProjectCodeSourceFile:
+      type: object
+      required: [path, bytes, lines, generated, available]
+      properties:
+        path: {type: string}
+        digest: {type: string}
+        bytes: {type: integer, minimum: 0}
+        lines: {type: integer, minimum: 0}
+        generated: {type: boolean}
+        available: {type: boolean}
+        reason: {type: string}
+
+    ProjectCodeLineRange:
+      type: object
+      required: [start, end]
+      properties:
+        start: {type: integer, minimum: 1}
+        end: {type: integer, minimum: 1}
+
+    ProjectCodeDiffRow:
+      type: object
+      required: [kind, text]
+      properties:
+        kind: {type: string, enum: [context, added, removed]}
+        old_line: {type: integer, minimum: 1}
+        new_line: {type: integer, minimum: 1}
+        text: {type: string}
+        no_final_newline: {type: boolean}
+
+    ProjectCodeDiffHunk:
+      type: object
+      required: [old_start, old_lines, new_start, new_lines, rows]
+      properties:
+        old_start: {type: integer, minimum: 0}
+        old_lines: {type: integer, minimum: 0}
+        new_start: {type: integer, minimum: 0}
+        new_lines: {type: integer, minimum: 0}
+        rows:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectCodeDiffRow'}
+
+    ProjectCodeFileChange:
+      type: object
+      required: [status, binary]
+      properties:
+        status: {type: string, enum: [added, modified, deleted, renamed, copied, mode_only]}
+        old_path: {type: string}
+        new_path: {type: string}
+        binary: {type: boolean}
+        mode_old: {type: string}
+        mode_new: {type: string}
+        added:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectCodeLineRange'}
+        removed:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectCodeLineRange'}
+        modified:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectCodeLineRange'}
+        hunks:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectCodeDiffHunk'}
+
+    ProjectCodeFile:
+      type: object
+      required: [path, status, lines, finding_count, changed_line_count, binary, generated, source_available]
+      properties:
+        path: {type: string}
+        old_path: {type: string}
+        status: {type: string, enum: [unchanged, added, modified, deleted, renamed, copied, mode_only]}
+        language: {type: string}
+        lines: {type: integer, minimum: 0}
+        finding_count: {type: integer, minimum: 0}
+        changed_line_count: {type: integer, minimum: 0}
+        binary: {type: boolean}
+        generated: {type: boolean}
+        source_available: {type: boolean}
+        source_reason: {type: string}
+
+    ProjectCodeFilesResponse:
+      type: object
+      required: [analysis_id, head, capabilities, files]
+      properties:
+        analysis_id: {type: string}
+        base: {$ref: '#/components/schemas/ProjectCodeRevision'}
+        head: {$ref: '#/components/schemas/ProjectCodeRevision'}
+        capabilities: {$ref: '#/components/schemas/ProjectCodeHTTPMetadata'}
+        files:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectCodeFile'}
+
+    ProjectCodeFinding:
+      type: object
+      required: [id, kind, severity, detection_status, location, new]
+      properties:
+        id: {type: string}
+        kind: {type: string, enum: [issue, hotspot]}
+        rule_key: {type: string}
+        rule_name: {type: string}
+        type: {type: string, enum: [bug, vulnerability, code_smell, security_hotspot]}
+        severity: {type: string}
+        detection_status: {type: string}
+        current_status: {type: string, description: Current mutable issue or hotspot triage state}
+        message: {type: string}
+        new: {type: boolean}
+        location:
+          type: object
+          required: [file, start_line, end_line]
+          properties:
+            file: {type: string}
+            start_line: {type: integer, minimum: 1}
+            end_line: {type: integer, minimum: 1}
+            start_column: {type: integer, minimum: 0, description: UTF-16 display column}
+            end_column: {type: integer, minimum: 0, description: UTF-16 display column, end-exclusive}
+
+    ProjectCodeLine:
+      type: object
+      required: [number, content, change, duplicated, coverage]
+      properties:
+        number: {type: integer, minimum: 1}
+        content: {type: string}
+        change: {type: string, enum: [unchanged, addition]}
+        duplicated: {type: boolean}
+        coverage: {type: [string, 'null'], enum: [covered, uncovered, partial, null]}
+
+    ProjectCodeFileView:
+      type: object
+      required: [analysis_id, head, file, from_line, to_line, total_lines, lines, findings]
+      properties:
+        analysis_id: {type: string}
+        base: {$ref: '#/components/schemas/ProjectCodeRevision'}
+        head: {$ref: '#/components/schemas/ProjectCodeRevision'}
+        file: {$ref: '#/components/schemas/ProjectCodeFile'}
+        from_line: {type: integer, minimum: 1}
+        to_line: {type: integer, minimum: 0}
+        total_lines: {type: integer, minimum: 0}
+        lines:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectCodeLine'}
+        findings:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectCodeFinding'}
+
+    ProjectCodeFileResponse:
+      allOf:
+      - $ref: '#/components/schemas/ProjectCodeFileView'
+      - type: object
+        required: [capabilities]
+        properties:
+          capabilities: {$ref: '#/components/schemas/ProjectCodeHTTPMetadata'}
+
+    ProjectCodeHTTPMetadata:
+      type: object
+      required: [source, unified_diff, split_diff, line_coverage]
+      properties:
+        source: {type: boolean}
+        unified_diff: {type: boolean}
+        split_diff: {type: boolean}
+        line_coverage: {type: boolean}
+
+    ProjectCodeDiffView:
+      type: object
+      required: [analysis_id, head, path, view, context_truncated, change]
+      properties:
+        analysis_id: {type: string}
+        base: {$ref: '#/components/schemas/ProjectCodeRevision'}
+        head: {$ref: '#/components/schemas/ProjectCodeRevision'}
+        path: {type: string}
+        view: {type: string, enum: [unified, split]}
+        context_truncated: {type: boolean, description: True when unchanged context outside the requested window was omitted}
+        change: {$ref: '#/components/schemas/ProjectCodeFileChange'}
+        base_file: {$ref: '#/components/schemas/ProjectCodeSourceFile'}
+        source_file: {$ref: '#/components/schemas/ProjectCodeSourceFile'}
+
+    ProjectCodeDiffResponse:
+      type: object
+      required: [capabilities, diff]
+      properties:
+        capabilities: {$ref: '#/components/schemas/ProjectCodeCapabilities'}
+        diff: {$ref: '#/components/schemas/ProjectCodeDiffView'}
 
     AupStatus:
       type: object

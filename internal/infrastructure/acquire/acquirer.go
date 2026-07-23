@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -40,10 +41,22 @@ type Acquirer struct {
 	imageTool         string           // crane (go-containerregistry CLI) binary for daemonless image pulls
 	maxWorkspaceBytes int64            // prepared-workspace size cap; <=0 ⇒ the MaxWorkspaceBytes default
 	materializeRootFS bool             // when true, an image pull also assembles the layers into a walkable rootfs
+	comparisonDepth   int              // bounded history depth for Code comparison resolution
 }
 
 // New returns a new Acquirer.
-func New() *Acquirer { return &Acquirer{imageTool: "crane", maxWorkspaceBytes: MaxWorkspaceBytes} }
+func New() *Acquirer {
+	return &Acquirer{imageTool: "crane", maxWorkspaceBytes: MaxWorkspaceBytes, comparisonDepth: 256}
+}
+
+// WithComparisonDepth bounds Git history fetched for immutable Code comparisons.
+// A non-positive value retains the conservative default.
+func (a *Acquirer) WithComparisonDepth(depth int) *Acquirer {
+	if depth > 0 {
+		a.comparisonDepth = depth
+	}
+	return a
+}
 
 // WithImageTool overrides the crane binary used for container-image acquisition.
 func (a *Acquirer) WithImageTool(bin string) *Acquirer {
@@ -103,7 +116,7 @@ func (a *Acquirer) Acquire(ctx context.Context, req ports.AcquireRequest) (*port
 	case "", ports.TargetLocal:
 		return acquireLocal(req.Value, a.maxWorkspaceBytes)
 	case ports.TargetGit:
-		return a.acquireGit(ctx, req.Value, req.Ref)
+		return a.acquireGit(ctx, req.Value, req.Ref, req.BaseRef, req.BaseCommit)
 	case ports.TargetArchive:
 		return acquireArchive(req.Value, a.maxWorkspaceBytes)
 	case ports.TargetImage:
@@ -309,12 +322,17 @@ func extractZipEntry(f *zip.File, target string, remaining int64) (int64, error)
 	return n, nil
 }
 
-func (a *Acquirer) acquireGit(ctx context.Context, url, ref string) (*ports.Workspace, error) {
+func (a *Acquirer) acquireGit(ctx context.Context, url, ref, baseRef, baseCommit string) (*ports.Workspace, error) {
 	if err := validateGitURL(url); err != nil {
 		return nil, err
 	}
-	if err := validateGitRef(ref); err != nil {
-		return nil, err
+	for _, candidate := range []string{ref, baseRef} {
+		if err := validateGitRef(candidate); err != nil {
+			return nil, err
+		}
+	}
+	if baseCommit != "" && !gitCommitRE.MatchString(baseCommit) {
+		return nil, fmt.Errorf("%w: invalid git base commit", shared.ErrValidation)
 	}
 	dir, err := os.MkdirTemp("", "synapse-ws-*")
 	if err != nil {
@@ -380,12 +398,99 @@ func (a *Acquirer) acquireGit(ctx context.Context, url, ref string) (*ports.Work
 		_ = cleanup()
 		return nil, err
 	}
+	base, mergeBase := a.resolveComparison(ctx, dir, url, gitEnv, commit, ref, baseRef, baseCommit)
 	lockfiles, localModules, unresolved, err := inspectWorkspace(dir, a.maxWorkspaceBytes)
 	if err != nil {
 		_ = cleanup()
 		return nil, err
 	}
-	return &ports.Workspace{Dir: dir, Commit: commit, Lockfiles: lockfiles, LocalModules: localModules, UnresolvedEcosystems: unresolved, Cleanup: cleanup}, nil
+	return &ports.Workspace{Dir: dir, Commit: commit, BaseCommit: base, MergeBase: mergeBase, Lockfiles: lockfiles, LocalModules: localModules, UnresolvedEcosystems: unresolved, Cleanup: cleanup}, nil
+}
+
+// resolveComparison is deliberately best-effort: an unavailable base never turns a
+// successful source scan into a failure. Git refs were validated before acquisition.
+func (a *Acquirer) resolveComparison(ctx context.Context, dir, url string, gitEnv []string, head, headRef, baseRef, baseCommit string) (string, string) {
+	candidate := strings.TrimSpace(baseCommit)
+	if candidate == "" {
+		candidate = strings.TrimSpace(baseRef)
+	}
+	if candidate == "" {
+		return "", ""
+	}
+	// A depth-one clone does not have the head's parents. Fetch the selected
+	// refs into private local names: a plain fetch updates only FETCH_HEAD, which
+	// cannot be resolved reliably after fetching another ref.
+	if headRef != "" && !a.gitFetch(ctx, dir, url, gitEnv, headRef, "refs/synapse-comparison/head") {
+		return "", ""
+	}
+	if baseRef != "" && !a.gitFetch(ctx, dir, url, gitEnv, baseRef, "refs/synapse-comparison/base") {
+		return "", ""
+	}
+	if baseRef != "" && baseCommit == "" {
+		candidate = "refs/synapse-comparison/base"
+	}
+	base, ok := a.gitRevision(ctx, dir, url, gitEnv, candidate)
+	if !ok {
+		return "", ""
+	}
+	mergeBase, ok := a.gitMergeBase(ctx, dir, url, gitEnv, head, base)
+	if !ok {
+		return "", ""
+	}
+	return base, mergeBase
+}
+
+func (a *Acquirer) gitFetch(ctx context.Context, dir, url string, gitEnv []string, ref, destination string) bool {
+	args := []string{"fetch", "--depth", strconv.Itoa(a.comparisonDepth), "--no-tags", "origin", ref + ":" + destination}
+	if a.sandbox != nil {
+		host, err := gitHost(url)
+		if err != nil {
+			return false
+		}
+		egress, hostNet := a.sandboxNet([]string{host})
+		res, err := a.sandbox.Run(ctx, ports.ToolSpec{Name: "git", Args: args, Env: gitEnv, Workdir: dir, EgressPolicy: egress, HostNetwork: hostNet})
+		return err == nil && res.ExitCode == 0
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir, cmd.Env = dir, append(os.Environ(), gitEnv...)
+	return cmd.Run() == nil
+}
+
+func (a *Acquirer) gitRevision(ctx context.Context, dir, url string, gitEnv []string, ref string) (string, bool) {
+	out, ok := a.gitRead(ctx, dir, url, gitEnv, "rev-parse", "--verify", ref+"^{commit}")
+	if !ok {
+		return "", false
+	}
+	commit := strings.TrimSpace(string(out))
+	return commit, gitCommitRE.MatchString(commit)
+}
+
+func (a *Acquirer) gitMergeBase(ctx context.Context, dir, url string, gitEnv []string, head, base string) (string, bool) {
+	out, ok := a.gitRead(ctx, dir, url, gitEnv, "merge-base", "--", head, base)
+	if !ok {
+		return "", false
+	}
+	commit := strings.TrimSpace(string(out))
+	return commit, gitCommitRE.MatchString(commit)
+}
+
+func (a *Acquirer) gitRead(ctx context.Context, dir, url string, gitEnv []string, args ...string) ([]byte, bool) {
+	if a.sandbox != nil {
+		host, err := gitHost(url)
+		if err != nil {
+			return nil, false
+		}
+		egress, hostNet := a.sandboxNet([]string{host})
+		res, err := a.sandbox.Run(ctx, ports.ToolSpec{Name: "git", Args: args, Env: gitEnv, Workdir: dir, EgressPolicy: egress, HostNetwork: hostNet})
+		if err != nil || res.ExitCode != 0 {
+			return nil, false
+		}
+		return res.Stdout, true
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir, cmd.Env = dir, append(os.Environ(), gitEnv...)
+	out, err := cmd.Output()
+	return out, err == nil
 }
 
 var gitCommitRE = regexp.MustCompile(`^[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$`)

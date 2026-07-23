@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hotspot"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -16,21 +17,22 @@ import (
 )
 
 type projectHotspotResponse struct {
-	ID                  string    `json:"id"`
-	RuleKey             string    `json:"rule_key"`
-	RuleName            string    `json:"rule_name"`
-	Title               string    `json:"title"`
-	Description         string    `json:"description"`
-	Severity            string    `json:"severity"`
-	FindingKind         string    `json:"finding_kind"`
-	CWE                 string    `json:"cwe"`
-	Location            string    `json:"location"`
-	Status              string    `json:"status"`
-	Version             int       `json:"version"`
-	FirstSeenAnalysisID string    `json:"first_seen_analysis_id"`
-	LastSeenAnalysisID  string    `json:"last_seen_analysis_id"`
-	FirstSeenAt         time.Time `json:"first_seen_at"`
-	LastSeenAt          time.Time `json:"last_seen_at"`
+	ID                  string                  `json:"id"`
+	RuleKey             string                  `json:"rule_key"`
+	RuleName            string                  `json:"rule_name"`
+	Title               string                  `json:"title"`
+	Description         string                  `json:"description"`
+	Severity            string                  `json:"severity"`
+	FindingKind         string                  `json:"finding_kind"`
+	CWE                 string                  `json:"cwe"`
+	Location            string                  `json:"location"`
+	SourceLocation      *finding.SourceLocation `json:"source_location,omitempty"`
+	Status              string                  `json:"status"`
+	Version             int                     `json:"version"`
+	FirstSeenAnalysisID string                  `json:"first_seen_analysis_id"`
+	LastSeenAnalysisID  string                  `json:"last_seen_analysis_id"`
+	FirstSeenAt         time.Time               `json:"first_seen_at"`
+	LastSeenAt          time.Time               `json:"last_seen_at"`
 }
 
 type projectHotspotCursorResponse struct {
@@ -131,7 +133,7 @@ func (rt *Router) getProjectHotspot(w http.ResponseWriter, r *http.Request) {
 func (rt *Router) projectHotspotDTO(item hotspot.Hotspot, ruleName string) projectHotspotResponse {
 	return projectHotspotResponse{
 		ID: item.ID.String(), RuleKey: item.RuleKey, RuleName: ruleName, Title: item.Title, Description: item.Description,
-		Severity: string(item.Severity), FindingKind: string(item.Kind), CWE: item.CWE, Location: item.Location,
+		Severity: string(item.Severity), FindingKind: string(item.Kind), CWE: item.CWE, Location: item.Location, SourceLocation: item.SourceLocation,
 		Status: string(item.Status), Version: item.Version, FirstSeenAnalysisID: item.FirstSeenAnalysisID,
 		LastSeenAnalysisID: item.LastSeenAnalysisID, FirstSeenAt: item.FirstSeenAt, LastSeenAt: item.LastSeenAt,
 	}

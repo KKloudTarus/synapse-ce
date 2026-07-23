@@ -223,6 +223,7 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/projects", rt.authz(userdom.PermOperate, rt.createProject))
 		mux.HandleFunc("GET /api/v1/projects", rt.authz(userdom.PermView, rt.listProjects))
 		mux.HandleFunc("GET /api/v1/projects/{key}", rt.authz(userdom.PermView, rt.getProject))
+		mux.HandleFunc("DELETE /api/v1/projects/{key}", rt.authz(userdom.PermOperate, rt.deleteProject))
 		mux.HandleFunc("GET /api/v1/projects/{key}/overview", rt.authz(userdom.PermView, rt.projectOverview))
 		mux.HandleFunc("GET /api/v1/projects/{key}/measures", rt.authz(userdom.PermView, rt.getProjectMeasures))
 		mux.HandleFunc("GET /api/v1/projects/{key}/hotspots", rt.authz(userdom.PermView, rt.listProjectHotspots))
@@ -240,6 +241,9 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/projects/{key}/analyses", rt.authz(userdom.PermOperate, rt.startProjectAnalysis))
 		mux.HandleFunc("GET /api/v1/projects/{key}/analyses", rt.authz(userdom.PermView, rt.listProjectAnalyses))
 		mux.HandleFunc("GET /api/v1/projects/{key}/analyses/{id}", rt.authz(userdom.PermView, rt.getProjectAnalysis))
+		mux.HandleFunc("GET /api/v1/projects/{key}/analyses/{id}/code/files", rt.authz(userdom.PermView, rt.listProjectCodeFiles))
+		mux.HandleFunc("GET /api/v1/projects/{key}/analyses/{id}/code/file", rt.authz(userdom.PermView, rt.getProjectCodeFile))
+		mux.HandleFunc("GET /api/v1/projects/{key}/analyses/{id}/code/diff", rt.authz(userdom.PermView, rt.getProjectCodeDiff))
 		mux.HandleFunc("GET /api/v1/projects/{key}/analysis-status", rt.authz(userdom.PermView, rt.projectAnalysisStatus))
 		mux.HandleFunc("GET /api/v1/projects/{key}/analysis", rt.authz(userdom.PermView, rt.latestProjectAnalysis))
 	}

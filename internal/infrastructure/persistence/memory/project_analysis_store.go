@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hotspot"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/issue"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
@@ -113,6 +114,7 @@ func (s *ProjectAnalysisStore) upsertIssueLocked(analysis projectanalysis.Analys
 			current.RuleKey, current.Type, current.Title, current.Description = candidate.RuleKey, candidate.Type, candidate.Title, candidate.Description
 			current.Severity, current.Kind, current.CWE = candidate.Severity, candidate.Kind, candidate.CWE
 			current.Language, current.File, current.Location = candidate.Language, candidate.File, candidate.Location
+			current.SourceLocation = cloneSourceLocation(candidate.SourceLocation)
 			current.LastSeenAnalysisID, current.LastSeenAt = analysis.ID, analysis.CreatedAt
 			current.Audit.UpdatedAt = analysis.CreatedAt
 		}
@@ -204,11 +206,33 @@ func (s *ProjectAnalysisStore) List(_ context.Context, tenantID, projectID share
 	return out, hasMore, nil
 }
 
+func cloneSourceLocation(in *finding.SourceLocation) *finding.SourceLocation {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	if in.StartColumn != nil {
+		column := *in.StartColumn
+		out.StartColumn = &column
+	}
+	if in.EndColumn != nil {
+		column := *in.EndColumn
+		out.EndColumn = &column
+	}
+	return &out
+}
+
 func cloneProjectAnalysis(in projectanalysis.Analysis) projectanalysis.Analysis {
 	out := in
 	out.Measures = maps.Clone(in.Measures)
 	out.Gate.Results = slices.Clone(in.Gate.Results)
 	out.InternalIssues = slices.Clone(in.InternalIssues)
+	out.SourceManifest.Files = slices.Clone(in.SourceManifest.Files)
+	out.FileChanges = slices.Clone(in.FileChanges)
+	out.Annotations = slices.Clone(in.Annotations)
+	for i := range out.Annotations {
+		out.Annotations[i].Location = *cloneSourceLocation(&in.Annotations[i].Location)
+	}
 	out.Issues = cloneCounts(in.Issues)
 	out.NewCode.Counts = cloneCounts(in.NewCode.Counts)
 	if in.Delta != nil {
@@ -221,6 +245,7 @@ func cloneProjectAnalysis(in projectanalysis.Analysis) projectanalysis.Analysis 
 	if in.Coverage != nil {
 		coverage := *in.Coverage
 		coverage.Files = slices.Clone(in.Coverage.Files)
+		coverage.Lines = measure.CloneLines(in.Coverage.Lines)
 		out.Coverage = &coverage
 	}
 	out.Duplication = cloneDuplication(in.Duplication)
@@ -296,6 +321,7 @@ func (s *ProjectAnalysisStore) upsertHotspotLocked(analysis projectanalysis.Anal
 			current.FindingIdentity = candidate.FindingIdentity
 			current.RuleKey, current.Title, current.Description = candidate.RuleKey, candidate.Title, candidate.Description
 			current.Severity, current.Kind, current.CWE, current.Location = candidate.Severity, candidate.Kind, candidate.CWE, candidate.Location
+			current.SourceLocation = cloneSourceLocation(candidate.SourceLocation)
 			current.LastSeenAnalysisID, current.LastSeenAt = analysis.ID, analysis.CreatedAt
 			current.Audit.UpdatedAt = analysis.CreatedAt
 		}

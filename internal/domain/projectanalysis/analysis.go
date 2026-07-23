@@ -69,6 +69,12 @@ type Analysis struct {
 	CreatedAt      time.Time                 `json:"created_at"`
 	SourceRef      string                    `json:"source_ref,omitempty"`
 	SourceCommit   string                    `json:"source_commit,omitempty"`
+	SourceRevision SourceRevision            `json:"source_revision,omitempty"`
+	Capabilities   SourceCapabilities        `json:"capabilities,omitempty"`
+	SourceManifest SourceManifest            `json:"source_manifest,omitempty"`
+	Comparison     Comparison                `json:"comparison,omitempty"`
+	FileChanges    []FileChange              `json:"file_changes,omitempty"`
+	Annotations    []Annotation              `json:"annotations,omitempty"`
 	Measures       qualitygate.Snapshot      `json:"measures"`
 	Gate           qualitygate.Result        `json:"gate"`
 	GateInfo       GateInfo                  `json:"gate_info"`
@@ -129,24 +135,30 @@ func (a *Analysis) UnmarshalJSON(data []byte) error {
 // Input supplies one completed scan's project-facing facts. Findings must be the
 // merged root and code-quality findings, not two independently counted lists.
 type Input struct {
-	ID           string
-	TenantID     shared.ID
-	ProjectID    shared.ID
-	ProjectKey   string
-	CreatedAt    time.Time
-	SourceRef    string
-	SourceCommit string
-	Findings     []finding.Finding
-	Gate         qualitygate.Gate
-	GateSource   string
-	GateExempt   map[string]bool
-	LinesOfCode  int
-	Coverage     *measure.CoverageReport
-	Duplication  measure.DuplicationReport
-	Previous     *Analysis
-	Hotspots     hotspot.Summary
-	NewHotspots  hotspot.Summary
-	Snapshot     measure.Snapshot
+	ID             string
+	TenantID       shared.ID
+	ProjectID      shared.ID
+	ProjectKey     string
+	CreatedAt      time.Time
+	SourceRef      string
+	SourceCommit   string
+	SourceRevision SourceRevision
+	Capabilities   SourceCapabilities
+	SourceManifest SourceManifest
+	Comparison     Comparison
+	FileChanges    []FileChange
+	Annotations    []Annotation
+	Findings       []finding.Finding
+	Gate           qualitygate.Gate
+	GateSource     string
+	GateExempt     map[string]bool
+	LinesOfCode    int
+	Coverage       *measure.CoverageReport
+	Duplication    measure.DuplicationReport
+	Previous       *Analysis
+	Hotspots       hotspot.Summary
+	NewHotspots    hotspot.Summary
+	Snapshot       measure.Snapshot
 }
 
 // Build returns one immutable snapshot and evaluates the built-in gate at creation.
@@ -216,7 +228,9 @@ func Build(in Input) (Analysis, error) {
 	return Analysis{
 		ID: in.ID, TenantID: in.TenantID.String(), ProjectID: in.ProjectID.String(),
 		ProjectKey: in.ProjectKey, CreatedAt: in.CreatedAt, SourceRef: in.SourceRef,
-		SourceCommit: in.SourceCommit, Measures: measures, Gate: gate,
+		SourceCommit: in.SourceCommit, SourceRevision: in.SourceRevision,
+		Capabilities: in.Capabilities, SourceManifest: in.SourceManifest, Comparison: in.Comparison, FileChanges: in.FileChanges, Annotations: in.Annotations,
+		Measures: measures, Gate: gate,
 		GateInfo: GateInfo{Key: gateDef.Key, Name: gateName, Source: gateSource}, Issues: counts,
 		InternalIssues: issues, NewCode: NewCode{PreviousID: previousID, Counts: newCounts, Rating: NewCodeRating{Security: newRating.Security, Reliability: newRating.Reliability}},
 		Delta: buildDelta(counts, measures, overallRating, in.Previous), Coverage: in.Coverage,

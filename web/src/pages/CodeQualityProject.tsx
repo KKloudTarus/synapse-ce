@@ -272,10 +272,11 @@ export function CodeQualityProject() {
           </div>
         )}
       </header>
-      <nav className="mb-6 flex gap-4 border-b border-border" aria-label="Project views">
+      <nav className="mb-6 flex gap-4 overflow-x-auto border-b border-border whitespace-nowrap" aria-label="Project views">
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}`} end>Overview</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/hotspots`}>Security Hotspots</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/issues`}>Issues</ProjectNavLink>
+        <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/code`}>Code</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/measures`}>Measures</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/analysis`}>Analysis details</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/activity`}>Activity</ProjectNavLink>
@@ -292,7 +293,7 @@ function ProjectNavLink({ to, end = false, children }: { to: string; end?: boole
       to={to}
       end={end}
       className={({ isActive }) => cn(
-        'border-b-2 px-1 pb-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60',
+        'shrink-0 border-b-2 px-1 pb-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60',
         isActive ? 'border-brand text-foreground' : 'border-transparent text-mutedfg',
       )}
     >

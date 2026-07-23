@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -24,6 +25,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedsbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -36,70 +38,74 @@ import (
 
 // Service orchestrates the SCA pipeline over swappable ports.
 type Service struct {
-	engagements        ports.EngagementRepository
-	findings           ports.FindingRepository
-	scans              ports.ScanRepository
-	results            ports.ScanResultStore
-	importedSBOM       ports.ImportedSBOMStore
-	jobs               ports.ScanJobStore
-	runs               ports.ScanRunStore
-	evidence           *evidenceuc.Service
-	ids                ports.IDGenerator
-	jobQueue           ports.JobQueue  // optional; when set, StartScan defers to the durable queue
-	runLock            ports.RunLocker // optional; guards single active execution per scan job
-	prov               ports.Provenance
-	clock              ports.Clock
-	audit              ports.AuditLogger
-	minSeverity        shared.Severity
-	timeout            time.Duration
-	acquirer           ports.Acquirer
-	detector           ports.LanguageDetector
-	sbomGen            ports.SBOMGenerator
-	sources            []ports.DetectionSource
-	riskEnricher       ports.RiskEnricher
-	licScan            ports.LicenseScanner
-	licEnricher        ports.LicenseEnricher
-	sbomEnricher       ports.SBOMEnricher              // optional manifest enrichment (gem edges, maven/gradle deps, pnpm scope)
-	licCoord           ports.MavenCoordResolver        // optional: recover real Maven coords from JAR pom.properties before license lookup
-	jarChecksum        ports.JarChecksumResolver       // optional: capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
-	jarHash            ports.JarHashResolver           // optional: recover coords of shaded/metadata-less JARs via SHA-1
-	licFile            ports.LicenseFileResolver       // optional offline license-text fallback from JAR LICENSE files
-	sastAnalyzer       ports.SASTAnalyzer              // optional deterministic pattern-SAST over the live workspace
-	secretScanner      ports.SecretScanner             // optional deterministic secret scan over the live workspace
-	includeTestSecrets bool                            // report secrets in test/fixture/docs paths (default false: suppress)
-	misconfig          ports.MisconfigScanner          // optional deterministic IaC/config misconfig scan over the live workspace
-	fpTriager          ports.FPTriager                 // optional LLM false-positive critique of production-scope source findings
-	osPkgCataloger     ports.OSPackageCataloger        // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
-	instCataloger      ports.InstalledPackageCataloger // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
-	artifactCataloger  ports.ArtifactCataloger         // optional owned standalone-artifact cataloging (.msi product identity) from the workspace dir
-	suppression        ports.SuppressionLoader         // optional repo-committed .synapseignore accepted-risk policy
-	vexLoader          ports.VEXLoader                 // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
-	complianceOn       bool                            // when set, attach the AppSec-baseline compliance report to a scan
-	dbMaxAgeDays       int                             // when > 0, warn if a reference DB (KEV/EPSS/vuln-DB) is older than this
-	detectionPriority  string                          // server default detection priority (comprehensive|precise); empty = comprehensive
-	reachability       ports.ReachabilityRecorder      // optional deterministic Tier-2 reachability proof (Go call-graph)
-	pyReachability     ports.ReachabilityRecorder      // optional deterministic Tier-1 Python import-reachability proof
-	correlation        ports.CorrelationRecorder       // optional cross-check disagreement → judgment minter
-	sbomGen2           ports.SBOMGenerator             // optional 2nd SBOM producer for the cross-check
-	sbomCache          ports.SBOMCache                 // optional content+version-addressed cache of the generated SBOM
-	sbomCrossCheck     ports.SBOMCrossCheckRecorder    // optional SBOM-producer disagreement → judgment minter
-	taint              ports.TaintScanner              // optional deterministic taint-analysis → gated CapSAST proposals
-	graphResolver      ports.DependencyGraphResolver   // optional transitive-edge resolver (Go via `go mod graph`)
-	mavenResolver      ports.MavenResolver             // optional Maven transitive-tree resolver (`mvn dependency:list`)
-	gradleResolver     ports.GradleResolver            // optional Gradle transitive-tree resolver (`gradle dependencies`)
-	npmResolver        ports.NPMResolver               // optional npm resolver (`npm install --package-lock-only`) for a lockfile-less package.json
-	manifestResolvers  []ports.ManifestResolver        // optional lockfile-less resolvers for composer.json / Gemfile / pyproject.toml / ...
-	jvmReach           ports.JVMReachabilityAnalyzer   // optional coarse JVM class-reachability tagger
-	sevEnricher        ports.SeverityEnricher          // optional NVD CVSS backfill for unknown-severity vulns
-	ignoreUnfixed      bool                            // when set, don't promote no-fix vulns to findings (Trivy --ignore-unfixed)
-	guard              *execution.Guard                // shared scope + window + audit gate; built in NewService
-	codeQuality        interface {
+	engagements                      ports.EngagementRepository
+	findings                         ports.FindingRepository
+	scans                            ports.ScanRepository
+	results                          ports.ScanResultStore
+	importedSBOM                     ports.ImportedSBOMStore
+	jobs                             ports.ScanJobStore
+	runs                             ports.ScanRunStore
+	evidence                         *evidenceuc.Service
+	ids                              ports.IDGenerator
+	jobQueue                         ports.JobQueue  // optional; when set, StartScan defers to the durable queue
+	runLock                          ports.RunLocker // optional; guards single active execution per scan job
+	prov                             ports.Provenance
+	clock                            ports.Clock
+	audit                            ports.AuditLogger
+	minSeverity                      shared.Severity
+	timeout                          time.Duration
+	projectAnalysisCompletionTimeout time.Duration
+	acquirer                         ports.Acquirer
+	detector                         ports.LanguageDetector
+	sbomGen                          ports.SBOMGenerator
+	sources                          []ports.DetectionSource
+	riskEnricher                     ports.RiskEnricher
+	licScan                          ports.LicenseScanner
+	licEnricher                      ports.LicenseEnricher
+	sbomEnricher                     ports.SBOMEnricher              // optional manifest enrichment (gem edges, maven/gradle deps, pnpm scope)
+	licCoord                         ports.MavenCoordResolver        // optional: recover real Maven coords from JAR pom.properties before license lookup
+	jarChecksum                      ports.JarChecksumResolver       // optional: capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
+	jarHash                          ports.JarHashResolver           // optional: recover coords of shaded/metadata-less JARs via SHA-1
+	licFile                          ports.LicenseFileResolver       // optional offline license-text fallback from JAR LICENSE files
+	sastAnalyzer                     ports.SASTAnalyzer              // optional deterministic pattern-SAST over the live workspace
+	secretScanner                    ports.SecretScanner             // optional deterministic secret scan over the live workspace
+	includeTestSecrets               bool                            // report secrets in test/fixture/docs paths (default false: suppress)
+	misconfig                        ports.MisconfigScanner          // optional deterministic IaC/config misconfig scan over the live workspace
+	fpTriager                        ports.FPTriager                 // optional LLM false-positive critique of production-scope source findings
+	osPkgCataloger                   ports.OSPackageCataloger        // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
+	instCataloger                    ports.InstalledPackageCataloger // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
+	artifactCataloger                ports.ArtifactCataloger         // optional owned standalone-artifact cataloging (.msi product identity) from the workspace dir
+	suppression                      ports.SuppressionLoader         // optional repo-committed .synapseignore accepted-risk policy
+	vexLoader                        ports.VEXLoader                 // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
+	complianceOn                     bool                            // when set, attach the AppSec-baseline compliance report to a scan
+	dbMaxAgeDays                     int                             // when > 0, warn if a reference DB (KEV/EPSS/vuln-DB) is older than this
+	detectionPriority                string                          // server default detection priority (comprehensive|precise); empty = comprehensive
+	reachability                     ports.ReachabilityRecorder      // optional deterministic Tier-2 reachability proof (Go call-graph)
+	pyReachability                   ports.ReachabilityRecorder      // optional deterministic Tier-1 Python import-reachability proof
+	correlation                      ports.CorrelationRecorder       // optional cross-check disagreement → judgment minter
+	sbomGen2                         ports.SBOMGenerator             // optional 2nd SBOM producer for the cross-check
+	sbomCache                        ports.SBOMCache                 // optional content+version-addressed cache of the generated SBOM
+	sbomCrossCheck                   ports.SBOMCrossCheckRecorder    // optional SBOM-producer disagreement → judgment minter
+	taint                            ports.TaintScanner              // optional deterministic taint-analysis → gated CapSAST proposals
+	graphResolver                    ports.DependencyGraphResolver   // optional transitive-edge resolver (Go via `go mod graph`)
+	mavenResolver                    ports.MavenResolver             // optional Maven transitive-tree resolver (`mvn dependency:list`)
+	gradleResolver                   ports.GradleResolver            // optional Gradle transitive-tree resolver (`gradle dependencies`)
+	npmResolver                      ports.NPMResolver               // optional npm resolver (`npm install --package-lock-only`) for a lockfile-less package.json
+	manifestResolvers                []ports.ManifestResolver        // optional lockfile-less resolvers for composer.json / Gemfile / pyproject.toml / ...
+	jvmReach                         ports.JVMReachabilityAnalyzer   // optional coarse JVM class-reachability tagger
+	sevEnricher                      ports.SeverityEnricher          // optional NVD CVSS backfill for unknown-severity vulns
+	ignoreUnfixed                    bool                            // when set, don't promote no-fix vulns to findings (Trivy --ignore-unfixed)
+	guard                            *execution.Guard                // shared scope + window + audit gate; built in NewService
+	codeQuality                      interface {
 		BuildReport(context.Context, string) (codequality.Report, error)
 	}
 	projectAnalysisRecorder interface {
 		RecordProjectAnalysis(context.Context, shared.ID, string, time.Time, *ScanResult) error
 	}
-	gateDecoder ports.GateDecoder
+	sourceArtifacts  ports.ProjectSourceArtifactStore
+	comparisonSource ports.ProjectComparisonSource
+	log              *slog.Logger
+	gateDecoder      ports.GateDecoder
 }
 
 // SetSeverityEnricher configures optional severity backfill (NVD CVSS) for vulnerabilities the
@@ -122,6 +128,34 @@ func (s *Service) SetProjectAnalysisRecorder(r interface {
 	RecordProjectAnalysis(context.Context, shared.ID, string, time.Time, *ScanResult) error
 }) {
 	s.projectAnalysisRecorder = r
+}
+
+// SetProjectAnalysisCompletionTimeout bounds post-scan immutable Project persistence.
+func (s *Service) SetProjectAnalysisCompletionTimeout(timeout time.Duration) {
+	if timeout > 0 {
+		s.projectAnalysisCompletionTimeout = timeout
+	}
+}
+
+// SetProjectSourceArtifactStore captures immutable source for Project analyses while
+// the acquired workspace still exists. Nil keeps non-Code deployments unchanged.
+func (s *Service) SetProjectSourceArtifactStore(store ports.ProjectSourceArtifactStore) {
+	s.sourceArtifacts = store
+}
+
+// SetProjectComparisonSource reads persisted Git changes before workspace cleanup.
+func (s *Service) SetProjectComparisonSource(source ports.ProjectComparisonSource) {
+	s.comparisonSource = source
+}
+
+// SetLogger records operational warnings that do not contain source data or paths.
+func (s *Service) SetLogger(log *slog.Logger) { s.log = log }
+
+func (s *Service) logger() *slog.Logger {
+	if s.log != nil {
+		return s.log
+	}
+	return slog.Default()
 }
 
 func (s *Service) SetGateDecoder(decoder ports.GateDecoder) { s.gateDecoder = decoder }
@@ -434,7 +468,7 @@ func NewService(
 ) *Service {
 	svc := &Service{
 		engagements: engagements, findings: findings, scans: scans, results: results, jobs: jobs, runs: runs, evidence: ev, ids: ids, prov: prov, clock: clock, audit: audit,
-		minSeverity: minSeverity, timeout: timeout, acquirer: a,
+		minSeverity: minSeverity, timeout: timeout, projectAnalysisCompletionTimeout: completionTimeout(timeout), acquirer: a,
 		detector: d, sbomGen: s, sources: sources, riskEnricher: r, licScan: l, licEnricher: le,
 	}
 	// Build the shared execution guard from the service's own scope/clock/audit
@@ -447,6 +481,13 @@ func NewService(
 		svc.guard = g
 	}
 	return svc
+}
+
+func completionTimeout(timeout time.Duration) time.Duration {
+	if timeout > 0 {
+		return timeout
+	}
+	return time.Minute
 }
 
 // ScanResult is the aggregate output of an SCA scan.
@@ -531,6 +572,13 @@ type ScanResult struct {
 	// deletion. Populated by the injected ports.FPTriager for BOTH the CLI and the durable API scan job;
 	// empty unless the FP-triage gate ran.
 	AITriage []ports.AICritique `json:"ai_triage,omitempty"`
+	// SourceCapture is analysis-owned source availability metadata. Content is held by
+	// ProjectSourceArtifactStore, never embedded in this scan result.
+	SourceCapture *projectanalysis.SourceCapture `json:"source_capture,omitempty"`
+	// Comparison is persisted scan-time Git metadata and base artifact inventory.
+	// It is empty or unavailable for non-Git/first analyses.
+	Comparison  projectanalysis.Comparison   `json:"comparison,omitempty"`
+	FileChanges []projectanalysis.FileChange `json:"file_changes,omitempty"`
 }
 
 // SuspectedFPKeys returns the set of finding DedupKeys the AI triage marked as suspected false positives
@@ -610,9 +658,12 @@ type ScanOptions struct {
 	// operator's CI-repo governance, so the CLI sets this to the invocation CWD (the checked-out repo).
 	PolicyDir string `json:"policy_dir,omitempty"`
 	// DetectionPriority selects comprehensive (default) or precise; see the Detection* consts.
-	DetectionPriority string                  `json:"detection_priority,omitempty"`
-	CodeQuality       bool                    `json:"code_quality,omitempty"`
-	ProjectAnalysis   bool                    `json:"project_analysis,omitempty"`
+	DetectionPriority string `json:"detection_priority,omitempty"`
+	CodeQuality       bool   `json:"code_quality,omitempty"`
+	ProjectAnalysis   bool   `json:"project_analysis,omitempty"`
+	// ProjectAnalysisID is assigned after the durable job is created. It is not
+	// caller input and binds captured artifacts to the immutable analysis snapshot.
+	ProjectAnalysisID string                  `json:"project_analysis_id,omitempty"`
 	LineCoverage      *measure.CoverageReport `json:"line_coverage,omitempty"`
 	Gate              qualitygate.Gate        `json:"gate,omitempty"`
 }
@@ -1050,7 +1101,7 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 		ctx, cancel = context.WithTimeout(ctx, s.timeout)
 		defer cancel()
 	}
-	if imported, doc, ok, err := s.loadImportedSBOM(ctx, engagementID); err != nil {
+	if imported, doc, ok, err := s.loadImportedSBOM(ctx, engagementID, opts); err != nil {
 		return nil, err
 	} else if ok {
 		now, err := s.gateImportedSBOMAndAudit(ctx, actor, engagementID, imported, opts)
@@ -1086,7 +1137,7 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 	var imported importedsbom.Record
 	var importedDoc *sbom.SBOM
 	var useImported bool
-	if imported, importedDoc, useImported, err = s.loadImportedSBOM(ctx, engagementID); err != nil {
+	if imported, importedDoc, useImported, err = s.loadImportedSBOM(ctx, engagementID, opts); err != nil {
 		return ports.ScanJob{}, err
 	}
 	var now time.Time
@@ -1325,8 +1376,10 @@ func (s *Service) gateImportedSBOMAndAudit(ctx context.Context, actor string, en
 	})
 }
 
-func (s *Service) loadImportedSBOM(ctx context.Context, engagementID shared.ID) (importedsbom.Record, *sbom.SBOM, bool, error) {
-	if s.importedSBOM == nil {
+func (s *Service) loadImportedSBOM(ctx context.Context, engagementID shared.ID, opts ScanOptions) (importedsbom.Record, *sbom.SBOM, bool, error) {
+	// Project analyses must acquire their configured source so the snapshot and
+	// persisted diff describe the exact bytes that were analyzed.
+	if opts.ProjectAnalysis || s.importedSBOM == nil {
 		return importedsbom.Record{}, nil, false, nil
 	}
 	eng, err := s.engagements.GetByID(ctx, engagementID)
@@ -1410,6 +1463,9 @@ func (s *Service) runScanJob(actor string, engagementID shared.ID, now time.Time
 			return
 		}
 	}
+	if opts.ProjectAnalysis {
+		opts.ProjectAnalysisID = job.ID
+	}
 	ctx := context.Background()
 	if s.timeout > 0 {
 		var cancel context.CancelFunc
@@ -1428,7 +1484,7 @@ func (s *Service) runScanJob(actor string, engagementID shared.ID, now time.Time
 		result *ScanResult
 		err    error
 	)
-	if imported, doc, ok, loadErr := s.loadImportedSBOM(ctx, engagementID); loadErr != nil {
+	if imported, doc, ok, loadErr := s.loadImportedSBOM(ctx, engagementID, opts); loadErr != nil {
 		err = loadErr
 	} else if ok {
 		result, err = s.runImportedSBOMPipeline(ctx, actor, engagementID, now, imported, doc, opts, report)
@@ -1438,7 +1494,7 @@ func (s *Service) runScanJob(actor string, engagementID shared.ID, now time.Time
 
 	fin := s.clock.Now()
 	if err == nil && opts.ProjectAnalysis && s.projectAnalysisRecorder != nil {
-		completionCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		completionCtx, cancel := context.WithTimeout(context.Background(), s.projectAnalysisCompletionTimeout)
 		err = s.projectAnalysisRecorder.RecordProjectAnalysis(completionCtx, engagementID, job.ID, fin, result)
 		cancel()
 	}
@@ -2173,6 +2229,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		DebugEvents:              trace.snapshot(),
 		LineCoverage:             opts.LineCoverage,
 		Gate:                     opts.Gate,
+		Comparison:               comparisonFromWorkspace(req, ws),
 	}
 	// Container-image layer attribution (Epic D): join each vuln to the layer that introduced
 	// its component, and classify base vs application layers. No-op for non-image scans.
@@ -2373,7 +2430,90 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			_ = s.results.SaveResult(ctx, engagementID, data)
 		}
 	}
+	// Capture only after all source readers have completed, but before deferred
+	// workspace cleanup. Capture failure is explicit metadata, never a scan failure.
+	if opts.ProjectAnalysis {
+		s.captureProjectSource(ctx, engagementID, opts.ProjectAnalysisID, ws.Dir, result)
+		s.captureProjectComparison(ctx, engagementID, opts.ProjectAnalysisID, ws.Dir, ws.Commit, result)
+	}
 	return result, nil
+}
+
+func (s *Service) captureProjectComparison(ctx context.Context, engagementID shared.ID, analysisID, sourceDir, head string, result *ScanResult) {
+	if result == nil || !result.Comparison.Available || s.sourceArtifacts == nil {
+		return
+	}
+	if s.comparisonSource == nil {
+		result.Comparison = projectanalysis.Comparison{Reason: projectanalysis.UnavailableCaptureFailed}
+		return
+	}
+	changes, err := s.comparisonSource.FileChanges(ctx, sourceDir, result.Comparison.MergeBase, head)
+	if err != nil {
+		result.Comparison = projectanalysis.Comparison{Reason: projectanalysis.UnavailableNoComparableBase}
+		return
+	}
+	baseFiles := make(map[string][]byte)
+	for _, change := range changes {
+		if change.OldPath == "" || change.Binary || change.Status == projectanalysis.FileStatusAdded {
+			continue
+		}
+		data, err := s.comparisonSource.FileAtRevision(ctx, sourceDir, result.Comparison.MergeBase, change.OldPath)
+		if err != nil {
+			result.Comparison = projectanalysis.Comparison{Reason: projectanalysis.UnavailableCaptureFailed}
+			return
+		}
+		baseFiles[change.OldPath] = data
+	}
+	engagement, err := s.engagements.GetByID(ctx, engagementID)
+	if err != nil || engagement.ProjectID.IsZero() || strings.TrimSpace(analysisID) == "" {
+		result.Comparison = projectanalysis.Comparison{Reason: projectanalysis.UnavailableCaptureFailed}
+		return
+	}
+	manifest, err := s.sourceArtifacts.CaptureBase(ctx, engagement.TenantID, engagement.ProjectID, analysisID, baseFiles)
+	if err != nil {
+		s.logger().Warn("project source snapshot unavailable", "analysis_id", analysisID, "stage", "base", "reason", projectanalysis.UnavailableCaptureFailed)
+		result.Comparison = projectanalysis.Comparison{Reason: projectanalysis.UnavailableCaptureFailed}
+		return
+	}
+	result.FileChanges, result.Comparison.BaseManifest = changes, manifest
+}
+
+func comparisonFromWorkspace(req ports.AcquireRequest, ws *ports.Workspace) projectanalysis.Comparison {
+	if req.Kind != ports.TargetGit {
+		return projectanalysis.Comparison{Reason: projectanalysis.UnavailableUnsupportedTarget}
+	}
+	if ws == nil || ws.BaseCommit == "" || ws.MergeBase == "" {
+		return projectanalysis.Comparison{Reason: projectanalysis.UnavailableNoComparableBase}
+	}
+	return projectanalysis.Comparison{Available: true, BaseRef: req.BaseRef, BaseCommit: ws.BaseCommit, MergeBase: ws.MergeBase}
+}
+
+func (s *Service) captureProjectSource(ctx context.Context, engagementID shared.ID, analysisID, sourceDir string, result *ScanResult) {
+	if s.sourceArtifacts == nil || result == nil {
+		return
+	}
+	engagement, err := s.engagements.GetByID(ctx, engagementID)
+	if err != nil || engagement.ProjectID.IsZero() {
+		result.SourceCapture = &projectanalysis.SourceCapture{Capabilities: unavailableSourceCapabilities(projectanalysis.UnavailableCaptureFailed)}
+		return
+	}
+	if strings.TrimSpace(analysisID) == "" {
+		result.SourceCapture = &projectanalysis.SourceCapture{Capabilities: unavailableSourceCapabilities(projectanalysis.UnavailableCaptureFailed)}
+		return
+	}
+	capture, err := s.sourceArtifacts.Capture(ctx, engagement.TenantID, engagement.ProjectID, analysisID, sourceDir)
+	if err != nil {
+		s.logger().Warn("project source snapshot unavailable", "analysis_id", analysisID, "stage", "head", "reason", projectanalysis.UnavailableCaptureFailed)
+		capture = projectanalysis.SourceCapture{Capabilities: unavailableSourceCapabilities(projectanalysis.UnavailableCaptureFailed)}
+	}
+	result.SourceCapture = &capture
+}
+
+func unavailableSourceCapabilities(reason projectanalysis.UnavailableReason) projectanalysis.SourceCapabilities {
+	return projectanalysis.SourceCapabilities{
+		Source: projectanalysis.Capability{Reason: reason}, Comparison: projectanalysis.Capability{Reason: reason},
+		UnifiedDiff: projectanalysis.Capability{Reason: reason}, SplitDiff: projectanalysis.Capability{Reason: reason}, Highlighting: projectanalysis.Capability{Reason: reason},
+	}
 }
 
 func mergeCachedScanResult(current *ScanResult, previous ScanResult, opts ScanOptions) {

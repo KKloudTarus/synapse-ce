@@ -3,7 +3,9 @@ package acquire
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -55,6 +57,49 @@ func TestAcquireUnknownAndUnimplementedKinds(t *testing.T) {
 			t.Errorf("kind %q: want error", kind)
 		}
 	}
+}
+
+func TestResolveComparisonUsesFetchedBaseRef(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	git(t, repo, "config", "user.email", "test@example.com")
+	git(t, repo, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "add", "main.go")
+	git(t, repo, "commit", "-m", "base")
+	git(t, repo, "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("feature\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "commit", "-am", "feature")
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	git(t, repo, "init", "--bare", bare)
+	git(t, repo, "remote", "add", "origin", bare)
+	git(t, repo, "push", "--all", "origin")
+
+	acquirer := New().WithComparisonDepth(16)
+	workspace := t.TempDir()
+	git(t, workspace, "clone", "--depth", "1", "--branch", "feature", "file://"+bare, ".")
+	head := strings.TrimSpace(git(t, workspace, "rev-parse", "HEAD"))
+	base, mergeBase := acquirer.resolveComparison(context.Background(), workspace, "https://example.invalid/repo.git", nil, head, "feature", "main", "")
+	if base == "" || mergeBase == "" {
+		t.Fatalf("base=%q mergeBase=%q, want resolved comparison", base, mergeBase)
+	}
+	if got := strings.TrimSpace(git(t, workspace, "rev-parse", "refs/synapse-comparison/base")); got != base {
+		t.Fatalf("stored base=%q, want %q", got, base)
+	}
+}
+
+func git(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
 }
 
 func TestValidateGitURL(t *testing.T) {

@@ -46,6 +46,19 @@ func TestProjectUsesCatalogTypeAndLanguage(t *testing.T) {
 	}
 }
 
+func TestProjectUsesStructuredSourceLocation(t *testing.T) {
+	cat := fakeCatalog{rules: map[string]rule.Rule{"go-x": {Key: "go-x", Type: rule.TypeBug, Language: "Go"}}}
+	start, end := 3, 8
+	location := &finding.SourceLocation{File: "internal/api.go", StartLine: 12, EndLine: 13, StartColumn: &start, EndColumn: &end}
+	got, err := Project(context.Background(), []finding.Finding{{DedupKey: "legacy:wrong.go:1", RuleKey: "go-x", Kind: finding.KindSAST, SourceLocation: location}}, cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].SourceLocation == nil || got[0].SourceLocation.File != "internal/api.go" || got[0].Location != "internal/api.go:12" {
+		t.Fatalf("candidate=%+v", got)
+	}
+}
+
 func TestProjectFallsBackToKindType(t *testing.T) {
 	cat := fakeCatalog{rules: map[string]rule.Rule{}} // unknown rule -> NotFound
 	findings := []finding.Finding{

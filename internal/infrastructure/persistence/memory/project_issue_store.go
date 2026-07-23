@@ -13,6 +13,7 @@ import (
 
 var _ ports.ProjectIssueStore = (*ProjectAnalysisStore)(nil)
 var _ ports.ProjectIssueProjectionStore = (*ProjectAnalysisStore)(nil)
+var _ ports.ProjectFindingStatusStore = (*ProjectAnalysisStore)(nil)
 
 func (s *ProjectAnalysisStore) ListIssues(ctx context.Context, tenantID, projectID shared.ID, filter issue.ListFilter) (issue.Page, error) {
 	if err := ctx.Err(); err != nil {
@@ -25,7 +26,7 @@ func (s *ProjectAnalysisStore) ListIssues(ctx context.Context, tenantID, project
 		if item.TenantID != tenantID || item.ProjectID != projectID || !issueMatches(item, filter) {
 			continue
 		}
-		items = append(items, item)
+		items = append(items, cloneIssue(item))
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].LastSeenAt.Equal(items[j].LastSeenAt) {
@@ -58,7 +59,7 @@ func (s *ProjectAnalysisStore) GetIssue(ctx context.Context, tenantID, projectID
 	defer s.mu.RUnlock()
 	for _, item := range s.issues {
 		if item.TenantID == tenantID && item.ProjectID == projectID && item.ID == issueID {
-			return item, nil
+			return cloneIssue(item), nil
 		}
 	}
 	return issue.Issue{}, shared.ErrNotFound
@@ -105,6 +106,34 @@ func (s *ProjectAnalysisStore) IssueHistory(ctx context.Context, tenantID, proje
 	return out, nil
 }
 
+func (s *ProjectAnalysisStore) CurrentFindingStatuses(ctx context.Context, tenantID, projectID shared.ID, keys []string) (map[string]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	wanted := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		wanted[key] = struct{}{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]string, len(wanted))
+	for _, item := range s.issues {
+		if item.TenantID == tenantID && item.ProjectID == projectID {
+			if _, ok := wanted[item.Key]; ok {
+				out[item.Key] = string(item.Status)
+			}
+		}
+	}
+	for _, item := range s.hotspots {
+		if item.TenantID == tenantID && item.ProjectID == projectID {
+			if _, ok := wanted[item.Key]; ok {
+				out[item.Key] = string(item.Status)
+			}
+		}
+	}
+	return out, nil
+}
+
 func (s *ProjectAnalysisStore) ResolvedIssueKeys(ctx context.Context, tenantID, projectID shared.ID) (map[string]bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -118,6 +147,12 @@ func (s *ProjectAnalysisStore) ResolvedIssueKeys(ctx context.Context, tenantID, 
 		}
 	}
 	return out, nil
+}
+
+func cloneIssue(in issue.Issue) issue.Issue {
+	out := in
+	out.SourceLocation = cloneSourceLocation(in.SourceLocation)
+	return out
 }
 
 func issueMatches(item issue.Issue, filter issue.ListFilter) bool {

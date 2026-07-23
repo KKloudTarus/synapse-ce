@@ -967,3 +967,140 @@ export function issueStatusLabel(s: IssueStatus): string {
     case 'wont_fix': return "Won't fix"
   }
 }
+
+export type ProjectCodeView = 'source' | 'unified' | 'split'
+export type ProjectCodeFileStatus = 'unchanged' | 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'mode_only'
+export type ProjectCodeCoverage = 'covered' | 'uncovered' | 'partial' | null
+export type ProjectCodeDiffRowKind = 'context' | 'added' | 'removed'
+
+export interface ProjectCodeRevision {
+  ref: string
+  commit: string
+  artifactDigest: string
+}
+
+export interface ProjectCodeCapabilities {
+  source: boolean
+  unifiedDiff: boolean
+  splitDiff: boolean
+  lineCoverage: boolean
+}
+
+export interface ProjectCodeCapability {
+  available: boolean
+  reason: string | null
+}
+
+export interface ProjectCodeDiffCapabilities {
+  source: ProjectCodeCapability
+  comparison: ProjectCodeCapability
+  unifiedDiff: ProjectCodeCapability
+  splitDiff: ProjectCodeCapability
+  highlighting: ProjectCodeCapability
+}
+
+export interface ProjectCodeFile {
+  path: string
+  oldPath: string | null
+  status: ProjectCodeFileStatus
+  language: string
+  lines: number
+  findingCount: number
+  changedLineCount: number
+  binary: boolean
+  generated: boolean
+  sourceAvailable: boolean
+  sourceReason: string | null
+}
+
+export interface ProjectCodeLine {
+  number: number
+  content: string
+  change: 'unchanged' | 'addition'
+  duplicated: boolean
+  coverage: ProjectCodeCoverage
+}
+
+export interface ProjectCodeLocation {
+  file: string
+  startLine: number
+  endLine: number
+  startColumn: number | null
+  endColumn: number | null
+}
+
+export interface ProjectCodeFinding {
+  id: string
+  kind: 'issue' | 'hotspot'
+  ruleKey: string
+  ruleName: string
+  type: RuleType | 'security_hotspot' | ''
+  severity: Severity
+  detectionStatus: string
+  currentStatus: string | null
+  message: string
+  location: ProjectCodeLocation
+  isNew: boolean
+}
+
+export interface ProjectCodeFileIndex {
+  analysisId: string
+  base: ProjectCodeRevision | null
+  head: ProjectCodeRevision
+  capabilities: ProjectCodeCapabilities
+  files: ProjectCodeFile[]
+}
+
+export interface ProjectCodeFileView {
+  analysisId: string
+  base: ProjectCodeRevision | null
+  head: ProjectCodeRevision
+  file: ProjectCodeFile
+  fromLine: number
+  toLine: number
+  totalLines: number
+  lines: ProjectCodeLine[]
+  findings: ProjectCodeFinding[]
+  capabilities: ProjectCodeCapabilities
+}
+
+export interface ProjectCodeDiffRow {
+  kind: ProjectCodeDiffRowKind
+  oldLine: number | null
+  newLine: number | null
+  text: string
+  noFinalNewline: boolean
+}
+
+export interface ProjectCodeDiffHunk {
+  oldStart: number
+  oldLines: number
+  newStart: number
+  newLines: number
+  rows: ProjectCodeDiffRow[]
+}
+
+export interface ProjectCodeFileChange {
+  oldPath: string
+  newPath: string
+  status: ProjectCodeFileStatus
+  binary: boolean
+  modeOld: string
+  modeNew: string
+  hunks: ProjectCodeDiffHunk[]
+}
+
+export interface ProjectCodeDiffView {
+  analysisId: string
+  base: ProjectCodeRevision | null
+  head: ProjectCodeRevision
+  path: string
+  view: 'unified' | 'split'
+  contextTruncated: boolean
+  change: ProjectCodeFileChange
+}
+
+export interface ProjectCodeDiffResponse {
+  capabilities: ProjectCodeDiffCapabilities
+  diff: ProjectCodeDiffView
+}

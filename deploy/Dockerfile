@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/synapse-api ./cmd/synapse-api
 # (`docker run … synapse-cli scan /scan`) – the SCA path runs identically on any host
 # that runs Linux containers (Windows/macOS via Docker Desktop, Linux natively).
 RUN CGO_ENABLED=0 go build -trimpath -o /out/synapse-cli ./cmd/synapse-cli \
-    && mkdir -p /out/project-uploads
+    && mkdir -p /out/project-uploads /out/project-source-artifacts
 
 # Pinned SCA tool binaries, shelled out at runtime.
 FROM anchore/syft:v1.45.1 AS syft
@@ -46,7 +46,7 @@ RUN apt-get update \
     && ln -s "$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")" /opt/java-home \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -r -u 10001 -m -d /home/synapse synapse \
-    && mkdir -p /home/synapse/.m2 /home/synapse/.gradle \
+    && mkdir -p /home/synapse/.m2 /home/synapse/.gradle /home/synapse/project-source-artifacts \
     && chown -R synapse:synapse /home/synapse
 COPY --from=build /out/synapse-api /usr/local/bin/synapse-api
 COPY --from=build /out/synapse-cli /usr/local/bin/synapse-cli
@@ -57,6 +57,7 @@ ENV SYNAPSE_SYFT_BIN=/usr/local/bin/syft \
     SYNAPSE_MVN_BIN=/usr/bin/mvn \
     SYNAPSE_GRADLE_BIN=/usr/local/bin/gradle \
     SYNAPSE_PROJECT_UPLOAD_DIR=/home/synapse/project-uploads \
+    SYNAPSE_PROJECT_SOURCE_ARTIFACT_DIR=/home/synapse/project-source-artifacts \
     JAVA_HOME=/opt/java-home
 EXPOSE 8080
 USER synapse:synapse
@@ -74,10 +75,11 @@ COPY --from=build /out/synapse-cli /synapse-cli
 COPY --from=syft /syft /usr/local/bin/syft
 COPY --from=grype /grype /usr/local/bin/grype
 COPY --from=build --chown=nonroot:nonroot /out/project-uploads /project-uploads
+COPY --from=build --chown=nonroot:nonroot /out/project-source-artifacts /project-source-artifacts
 ENV SYNAPSE_SYFT_BIN=/usr/local/bin/syft
 ENV SYNAPSE_GRYPE_BIN=/usr/local/bin/grype
 ENV SYNAPSE_PROJECT_UPLOAD_DIR=/project-uploads
-VOLUME ["/project-uploads"]
+ENV SYNAPSE_PROJECT_SOURCE_ARTIFACT_DIR=/project-source-artifacts
 EXPOSE 8080
 USER nonroot:nonroot
 # Default to the API server; override for a one-off scan, e.g.:

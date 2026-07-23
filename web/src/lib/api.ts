@@ -60,6 +60,15 @@ import type {
   IssueListFilter,
   IssuePage,
   IssueReviewEvent,
+  ProjectCodeCapabilities,
+  ProjectCodeCapability,
+  ProjectCodeDiffCapabilities,
+  ProjectCodeDiffResponse,
+  ProjectCodeFile,
+  ProjectCodeFileIndex,
+  ProjectCodeFileView,
+  ProjectCodeRevision,
+  ProjectCodeView,
 } from './types'
 import { mapProjectOverviewResponse, type ProjectOverview } from './projectOverview'
 import { mapProjectMeasureResponse, type MeasuresQuery, type ProjectMeasureResponse } from './projectMeasures'
@@ -874,6 +883,134 @@ function mapIssueReviewEvent(r: any): IssueReviewEvent {
   }
 }
 
+function mapProjectCodeRevision(r: any): ProjectCodeRevision {
+  return { ref: r?.ref ?? '', commit: r?.commit ?? '', artifactDigest: r?.artifact_digest ?? '' }
+}
+
+function mapProjectCodeCapabilities(r: any): ProjectCodeCapabilities {
+  return {
+    source: r?.source === true,
+    unifiedDiff: r?.unified_diff === true,
+    splitDiff: r?.split_diff === true,
+    lineCoverage: r?.line_coverage === true,
+  }
+}
+
+function mapProjectCodeCapability(r: any): ProjectCodeCapability {
+  return { available: r?.available === true, reason: typeof r?.reason === 'string' ? r.reason : null }
+}
+
+function mapProjectCodeDiffCapabilities(r: any): ProjectCodeDiffCapabilities {
+  return {
+    source: mapProjectCodeCapability(r?.source),
+    comparison: mapProjectCodeCapability(r?.comparison),
+    unifiedDiff: mapProjectCodeCapability(r?.unified_diff),
+    splitDiff: mapProjectCodeCapability(r?.split_diff),
+    highlighting: mapProjectCodeCapability(r?.highlighting),
+  }
+}
+
+function mapProjectCodeFile(r: any): ProjectCodeFile {
+  return {
+    path: r?.path ?? '',
+    oldPath: typeof r?.old_path === 'string' && r.old_path ? r.old_path : null,
+    status: r?.status ?? 'unchanged',
+    language: r?.language ?? '',
+    lines: r?.lines ?? 0,
+    findingCount: r?.finding_count ?? 0,
+    changedLineCount: r?.changed_line_count ?? 0,
+    binary: r?.binary === true,
+    generated: r?.generated === true,
+    sourceAvailable: r?.source_available === true,
+    sourceReason: typeof r?.source_reason === 'string' ? r.source_reason : null,
+  }
+}
+
+function mapProjectCodeFileIndex(r: any): ProjectCodeFileIndex {
+  return {
+    analysisId: r?.analysis_id ?? '',
+    base: r?.base ? mapProjectCodeRevision(r.base) : null,
+    head: mapProjectCodeRevision(r?.head),
+    capabilities: mapProjectCodeCapabilities(r?.capabilities),
+    files: (r?.files ?? []).map(mapProjectCodeFile),
+  }
+}
+
+function mapProjectCodeFileView(r: any): ProjectCodeFileView {
+  return {
+    analysisId: r?.analysis_id ?? '',
+    base: r?.base ? mapProjectCodeRevision(r.base) : null,
+    head: mapProjectCodeRevision(r?.head),
+    file: mapProjectCodeFile(r?.file),
+    fromLine: r?.from_line ?? 0,
+    toLine: r?.to_line ?? 0,
+    totalLines: r?.total_lines ?? 0,
+    lines: (r?.lines ?? []).map((line: any) => ({
+      number: line?.number ?? 0,
+      content: line?.content ?? '',
+      change: line?.change === 'addition' ? 'addition' : 'unchanged',
+      duplicated: line?.duplicated === true,
+      coverage: ['covered', 'uncovered', 'partial'].includes(line?.coverage) ? line.coverage : null,
+    })),
+    findings: (r?.findings ?? []).map((finding: any) => ({
+      id: finding?.id ?? '',
+      kind: finding?.kind === 'hotspot' ? 'hotspot' : 'issue',
+      ruleKey: finding?.rule_key ?? '',
+      ruleName: finding?.rule_name ?? '',
+      type: finding?.type ?? '',
+      severity: finding?.severity ?? 'unknown',
+      detectionStatus: finding?.detection_status ?? '',
+      currentStatus: typeof finding?.current_status === 'string' ? finding.current_status : null,
+      message: finding?.message ?? '',
+      location: {
+        file: finding?.location?.file ?? '',
+        startLine: finding?.location?.start_line ?? 0,
+        endLine: finding?.location?.end_line ?? 0,
+        startColumn: typeof finding?.location?.start_column === 'number' ? finding.location.start_column : null,
+        endColumn: typeof finding?.location?.end_column === 'number' ? finding.location.end_column : null,
+      },
+      isNew: finding?.new === true,
+    })),
+    capabilities: mapProjectCodeCapabilities(r?.capabilities),
+  }
+}
+
+function mapProjectCodeDiffResponse(r: any): ProjectCodeDiffResponse {
+  const diff = r?.diff ?? {}
+  return {
+    capabilities: mapProjectCodeDiffCapabilities(r?.capabilities),
+    diff: {
+      analysisId: diff.analysis_id ?? '',
+      base: diff.base ? mapProjectCodeRevision(diff.base) : null,
+      head: mapProjectCodeRevision(diff.head),
+      path: diff.path ?? '',
+      view: diff.view === 'split' ? 'split' : 'unified',
+      contextTruncated: diff.context_truncated === true,
+      change: {
+        oldPath: diff.change?.old_path ?? '',
+        newPath: diff.change?.new_path ?? '',
+        status: diff.change?.status ?? 'unchanged',
+        binary: diff.change?.binary === true,
+        modeOld: diff.change?.mode_old ?? '',
+        modeNew: diff.change?.mode_new ?? '',
+        hunks: (diff.change?.hunks ?? []).map((hunk: any) => ({
+          oldStart: hunk?.old_start ?? 0,
+          oldLines: hunk?.old_lines ?? 0,
+          newStart: hunk?.new_start ?? 0,
+          newLines: hunk?.new_lines ?? 0,
+          rows: (hunk?.rows ?? []).map((row: any) => ({
+            kind: ['context', 'added', 'removed'].includes(row?.kind) ? row.kind : 'context',
+            oldLine: typeof row?.old_line === 'number' && row.old_line > 0 ? row.old_line : null,
+            newLine: typeof row?.new_line === 'number' && row.new_line > 0 ? row.new_line : null,
+            text: row?.text ?? '',
+            noFinalNewline: row?.no_final_newline === true,
+          })),
+        })),
+      },
+    },
+  }
+}
+
 export const api = {
   projectMeasures,
   aup: (): Promise<AupStatus> => req('/aup'),
@@ -979,6 +1116,19 @@ export const api = {
 
   projectOverview: async (key: string): Promise<ProjectOverview> =>
     mapProjectOverviewResponse(await req(`/projects/${encodeURIComponent(key)}/overview`)),
+
+  listProjectCodeFiles: async (projectKey: string, analysisId: string, signal?: AbortSignal): Promise<ProjectCodeFileIndex> =>
+    mapProjectCodeFileIndex(await req(`/projects/${encodeURIComponent(projectKey)}/analyses/${encodeURIComponent(analysisId)}/code/files`, { signal })),
+
+  projectCodeFile: async (projectKey: string, analysisId: string, path: string, fromLine: number, signal?: AbortSignal): Promise<ProjectCodeFileView> => {
+    const query = new URLSearchParams({ path, from_line: String(fromLine) })
+    return mapProjectCodeFileView(await req(`/projects/${encodeURIComponent(projectKey)}/analyses/${encodeURIComponent(analysisId)}/code/file?${query}`, { signal }))
+  },
+
+  projectCodeDiff: async (projectKey: string, analysisId: string, path: string, view: Extract<ProjectCodeView, 'unified' | 'split'>, signal?: AbortSignal): Promise<ProjectCodeDiffResponse> => {
+    const query = new URLSearchParams({ path, view })
+    return mapProjectCodeDiffResponse(await req(`/projects/${encodeURIComponent(projectKey)}/analyses/${encodeURIComponent(analysisId)}/code/diff?${query}`, { signal }))
+  },
 
   // --- Hotspots ---
   listProjectHotspots: async (projectKey: string, lens: 'overall' | 'new-code', filter: HotspotListFilter): Promise<HotspotPage> => {

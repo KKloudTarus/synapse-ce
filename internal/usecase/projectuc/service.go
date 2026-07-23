@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,32 +31,42 @@ import (
 )
 
 type Service struct {
-	repo             ports.ProjectRepository
-	engagements      ports.EngagementRepository
-	clock            ports.Clock
-	ids              ports.IDGenerator
-	audit            ports.AuditLogger
-	scanner          *scauc.Service
-	archives         ports.ProjectArchiveStore
-	analyses         ports.ProjectAnalysisStore
-	hotspots         ports.ProjectHotspotStore
-	issues           ports.ProjectIssueStore
-	ruleCatalog      ports.RuleCatalog
-	findings         ports.FindingRepository
-	gates            *qualitygatesuc.Service
-	gateMutator      ports.QualityGateMutator
-	profiles         *qualityprofilesuc.Service
-	allowLocalSource bool
-	cursorSecret     []byte
+	repo                             ports.ProjectRepository
+	engagements                      ports.EngagementRepository
+	clock                            ports.Clock
+	ids                              ports.IDGenerator
+	audit                            ports.AuditLogger
+	scanner                          *scauc.Service
+	archives                         ports.ProjectArchiveStore
+	sourceArtifacts                  ports.ProjectSourceArtifactStore
+	analyses                         ports.ProjectAnalysisStore
+	hotspots                         ports.ProjectHotspotStore
+	issues                           ports.ProjectIssueStore
+	ruleCatalog                      ports.RuleCatalog
+	findings                         ports.FindingRepository
+	gates                            *qualitygatesuc.Service
+	gateMutator                      ports.QualityGateMutator
+	profiles                         *qualityprofilesuc.Service
+	allowLocalSource                 bool
+	projectAnalysisCompletionTimeout time.Duration
+	cursorSecret                     []byte
 }
 
 func NewService(repo ports.ProjectRepository, engagements ports.EngagementRepository, clock ports.Clock, ids ports.IDGenerator, audit ports.AuditLogger, allowLocalSource bool) *Service {
 	return &Service{repo: repo, engagements: engagements, clock: clock, ids: ids, audit: audit, allowLocalSource: allowLocalSource}
 }
 
-func (s *Service) SetScanner(scanner *scauc.Service)                      { s.scanner = scanner }
-func (s *Service) SetArchiveStore(store ports.ProjectArchiveStore)        { s.archives = store }
-func (s *Service) SetAnalysisStore(store ports.ProjectAnalysisStore)      { s.analyses = store }
+func (s *Service) SetScanner(scanner *scauc.Service)               { s.scanner = scanner }
+func (s *Service) SetArchiveStore(store ports.ProjectArchiveStore) { s.archives = store }
+func (s *Service) SetSourceArtifactStore(store ports.ProjectSourceArtifactStore) {
+	s.sourceArtifacts = store
+}
+func (s *Service) SetAnalysisStore(store ports.ProjectAnalysisStore) { s.analyses = store }
+func (s *Service) SetProjectAnalysisCompletionTimeout(timeout time.Duration) {
+	if timeout > 0 {
+		s.projectAnalysisCompletionTimeout = timeout
+	}
+}
 func (s *Service) SetHotspotStore(store ports.ProjectHotspotStore)        { s.hotspots = store }
 func (s *Service) SetIssueStore(store ports.ProjectIssueStore)            { s.issues = store }
 func (s *Service) SetRuleCatalog(catalog ports.RuleCatalog)               { s.ruleCatalog = catalog }
@@ -63,6 +74,13 @@ func (s *Service) SetQualityProfiles(profiles *qualityprofilesuc.Service) { s.pr
 func (s *Service) SetFindingRepository(repo ports.FindingRepository)      { s.findings = repo }
 func (s *Service) SetQualityGates(gates *qualitygatesuc.Service)          { s.gates = gates }
 func (s *Service) SetQualityGateMutator(mutator ports.QualityGateMutator) { s.gateMutator = mutator }
+
+func (s *Service) completionTimeout() time.Duration {
+	if s.projectAnalysisCompletionTimeout > 0 {
+		return s.projectAnalysisCompletionTimeout
+	}
+	return time.Minute
+}
 
 // ValidateCursorSecret returns an error when key is nil or shorter than 32 bytes.
 func ValidateCursorSecret(key []byte) error {
@@ -302,9 +320,30 @@ func (s *Service) StartAnalysis(ctx context.Context, actor string, tenantID shar
 	if err != nil {
 		return ports.ScanJob{}, err
 	}
-	return s.scanner.StartScanWithOptions(ctx, actor, e.ID, ports.AcquireRequest{
-		Kind: p.SourceBinding.Kind, Value: p.SourceBinding.Value, Ref: p.SourceBinding.Ref,
-	}, scauc.ScanOptions{Mode: scauc.ScanModeFull, CodeQuality: true, ProjectAnalysis: true, LineCoverage: coverage, Gate: gate})
+	request, err := s.projectAcquireRequest(ctx, p)
+	if err != nil {
+		return ports.ScanJob{}, err
+	}
+	return s.scanner.StartScanWithOptions(ctx, actor, e.ID, request, scauc.ScanOptions{Mode: scauc.ScanModeFull, CodeQuality: true, ProjectAnalysis: true, LineCoverage: coverage, Gate: gate})
+}
+
+func (s *Service) projectAcquireRequest(ctx context.Context, p *project.Project) (ports.AcquireRequest, error) {
+	request := ports.AcquireRequest{Kind: p.SourceBinding.Kind, Value: p.SourceBinding.Value, Ref: p.SourceBinding.Ref}
+	if p.SourceBinding.Kind != project.SourceGit || p.SourceBinding.BaseRef != "" {
+		request.BaseRef = p.SourceBinding.BaseRef
+		return request, nil
+	}
+	if p.SourceBinding.Ref == "" || s.analyses == nil {
+		return request, nil
+	}
+	previous, _, err := s.analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
+	if err != nil {
+		return ports.AcquireRequest{}, fmt.Errorf("list comparison baseline: %w", err)
+	}
+	if len(previous) > 0 && previous[0].SourceRevision.Kind == projectanalysis.ScanKindGit && previous[0].SourceCommit != "" {
+		request.BaseRef, request.BaseCommit = p.SourceBinding.Ref, previous[0].SourceCommit
+	}
+	return request, nil
 }
 
 func (s *Service) AnalysisStatus(ctx context.Context, tenantID shared.ID, key string) (ports.ScanJob, error) {
@@ -364,7 +403,7 @@ func (s *Service) GetAnalysis(ctx context.Context, tenantID shared.ID, key, id s
 
 // RecordProjectAnalysis is called by SCA only after a successful pipeline and
 // before its ScanJob becomes succeeded. Non-Project scans intentionally no-op.
-func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared.ID, jobID string, completedAt time.Time, result *scauc.ScanResult) error {
+func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared.ID, jobID string, completedAt time.Time, result *scauc.ScanResult) (recordErr error) {
 	if result == nil {
 		return fmt.Errorf("project analysis result is required")
 	}
@@ -382,6 +421,17 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 	if err != nil {
 		return fmt.Errorf("get project for analysis: %w", err)
 	}
+	defer func() {
+		if recordErr == nil || s.sourceArtifacts == nil {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), s.completionTimeout())
+		defer cancel()
+		if _, err := s.analyses.Get(cleanupCtx, p.TenantID, p.ID, shared.ID(jobID)); err == nil || !errors.Is(err, shared.ErrNotFound) {
+			return
+		}
+		_ = s.sourceArtifacts.DeleteAnalysis(cleanupCtx, p.TenantID, p.ID, jobID)
+	}()
 	previous, _, err := s.analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
 	if err != nil {
 		return fmt.Errorf("list project analyses: %w", err)
@@ -390,10 +440,21 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 	if len(previous) > 0 {
 		baseline = &previous[0]
 	}
-	all := append([]finding.Finding{}, result.Findings...)
+	detection := append([]finding.Finding{}, result.Findings...)
 	if result.CodeQuality != nil {
-		all = append(all, result.CodeQuality.Findings...)
+		detection = append(detection, result.CodeQuality.Findings...)
 	}
+	detection = finding.Publishable(detection)
+	// Profiles describe the rules active at detection time. Apply them before the
+	// mutable issue/hotspot lifecycle is overlaid so immutable Code annotations stay historical.
+	if s.profiles != nil {
+		overlay, err := s.profiles.OverlayForProject(ctx, p.TenantID, p.DefaultProfileByLang)
+		if err != nil {
+			return fmt.Errorf("resolve project quality profiles: %w", err)
+		}
+		detection = overlay.Apply(detection)
+	}
+	all := append([]finding.Finding(nil), detection...)
 	if s.findings != nil {
 		persisted, err := s.findings.ListByEngagement(ctx, engagementID)
 		if err != nil {
@@ -410,17 +471,6 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 				all[i].Status = status
 			}
 		}
-	}
-	all = finding.Publishable(all)
-	// Honor the project's assigned quality profiles: deactivate rules and apply severity overrides
-	// before classification, so both issues and hotspots reflect the profile (P9, #183). Languages with
-	// no assignment (or assigned to the built-in default) contribute nothing.
-	if s.profiles != nil {
-		overlay, err := s.profiles.OverlayForProject(ctx, p.TenantID, p.DefaultProfileByLang)
-		if err != nil {
-			return fmt.Errorf("resolve project quality profiles: %w", err)
-		}
-		all = overlay.Apply(all)
 	}
 	if s.ruleCatalog == nil {
 		return fmt.Errorf("classify project hotspots: rule catalog is not configured")
@@ -464,15 +514,7 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 
 	for _, c := range candidates {
 		ex, found := existingMap[c.Key]
-		isNew := !found
-		if found && baseline != nil && ex.FirstSeenAt.After(baseline.CreatedAt) {
-			isNew = true
-		} else if !found {
-			// if baseline is nil, everything is new code
-			isNew = true
-		} else if found && baseline == nil {
-			isNew = true
-		}
+		isNew := !found || baseline == nil || ex.FirstSeenAt.After(baseline.CreatedAt)
 
 		if isNew {
 			newHsTotal++
@@ -535,7 +577,12 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 		if !f.Kind.IsRuleBased() {
 			continue
 		}
-		path, _, _ := qualitygate.FileLineOf(f.DedupKey)
+		path := ""
+		if f.SourceLocation != nil && f.SourceLocation.Validate() == nil {
+			path = f.SourceLocation.File
+		} else {
+			path, _, _ = qualitygate.FileLineOf(f.DedupKey)
+		}
 		issueInputs = append(issueInputs, measure.IssueInput{
 			Path:     path,
 			RuleKey:  rule.Key(f.RuleKey),
@@ -543,9 +590,11 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 		})
 	}
 	for _, candidate := range candidates {
-		path := candidate.Location
-		if path == "" {
-			path, _, _ = qualitygate.FileLineOf(candidate.FindingIdentity)
+		path := ""
+		if candidate.SourceLocation != nil && candidate.SourceLocation.Validate() == nil {
+			path = candidate.SourceLocation.File
+		} else if legacyPath, _, ok := qualitygate.FileLineOf(candidate.FindingIdentity); ok {
+			path = legacyPath
 		}
 		issueInputs = append(issueInputs, measure.IssueInput{
 			Path:     path,
@@ -580,11 +629,49 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 	if dupPtr != nil {
 		analysisDuplication = *dupPtr
 	}
+	analysisCoverage := cloneCoverageReport(result.LineCoverage)
+	if analysisCoverage != nil {
+		allowed := make(map[string]struct{})
+		for _, node := range snapshot.Nodes {
+			if node.Kind == measure.NodeFile {
+				allowed[node.Path] = struct{}{}
+			}
+		}
+		analysisCoverage.NormalizeLines(allowed)
+	}
 
+	capabilities := projectanalysis.SourceCapabilities{
+		Source: projectanalysis.Capability{Reason: projectanalysis.UnavailableNotRetained}, Comparison: projectanalysis.Capability{Reason: projectanalysis.UnavailableNotRetained},
+		UnifiedDiff: projectanalysis.Capability{Reason: projectanalysis.UnavailableNotRetained}, SplitDiff: projectanalysis.Capability{Reason: projectanalysis.UnavailableNotRetained}, Highlighting: projectanalysis.Capability{Reason: projectanalysis.UnavailableNotRetained},
+	}
+	manifest := projectanalysis.SourceManifest{}
+	if result.SourceCapture != nil {
+		capabilities, manifest = result.SourceCapture.Capabilities, result.SourceCapture.Manifest
+	}
+	capabilities, manifest = reconcileSourceCapture(snapshot, capabilities, manifest)
+	comparison := result.Comparison
+	if comparison.Available && comparison.Validate() == nil && capabilities.Source.Available {
+		capabilities.Comparison = projectanalysis.Capability{Available: true}
+		capabilities.UnifiedDiff = projectanalysis.Capability{Available: true}
+		capabilities.SplitDiff = projectanalysis.Capability{Available: true}
+	} else if capabilities.Source.Available {
+		reason := comparison.Reason
+		if !reason.Valid() {
+			reason = projectanalysis.UnavailableNoComparableBase
+		}
+		comparison = projectanalysis.Comparison{Reason: reason}
+		capabilities.Comparison = projectanalysis.Capability{Reason: reason}
+		capabilities.UnifiedDiff = projectanalysis.Capability{Reason: reason}
+		capabilities.SplitDiff = projectanalysis.Capability{Reason: reason}
+	}
+	annotations := buildAnnotationsWithCatalog(ctx, detection, baseline, s.ruleCatalog)
 	analysis, err := projectanalysis.Build(projectanalysis.Input{
 		ID: jobID, TenantID: p.TenantID, ProjectID: p.ID, ProjectKey: p.Key, CreatedAt: completedAt,
-		SourceRef: result.SourceRef, SourceCommit: result.SourceCommit, Findings: issues, Gate: gate, GateSource: gateSource, GateExempt: exempt, LinesOfCode: loc,
-		Coverage: result.LineCoverage, Duplication: analysisDuplication, Previous: baseline,
+		SourceRef: result.SourceRef, SourceCommit: result.SourceCommit,
+		SourceRevision: projectanalysis.SourceRevision{Kind: projectScanKind(p.SourceBinding.Kind), Head: result.SourceCommit, Base: comparison.BaseCommit, MergeBase: comparison.MergeBase, AnalysisID: jobID},
+		Capabilities:   capabilities, SourceManifest: manifest, Comparison: comparison, FileChanges: result.FileChanges, Annotations: annotations,
+		Findings: issues, Gate: gate, GateSource: gateSource, GateExempt: exempt, LinesOfCode: loc,
+		Coverage: analysisCoverage, Duplication: analysisDuplication, Previous: baseline,
 		Hotspots: overallHsSummary, NewHotspots: newHsSummary, Snapshot: snapshot,
 	})
 	if err != nil {
@@ -805,6 +892,89 @@ func (s *Service) resolveManagedGate(ctx context.Context, tenantID shared.ID, ke
 	return gate, nil
 }
 
+func buildAnnotations(findings []finding.Finding, baseline *projectanalysis.Analysis) []projectanalysis.Annotation {
+	return buildAnnotationsWithCatalog(context.Background(), findings, baseline, nil)
+}
+
+func buildAnnotationsWithCatalog(ctx context.Context, findings []finding.Finding, baseline *projectanalysis.Analysis, catalog ports.RuleCatalog) []projectanalysis.Annotation {
+	metadata := make(map[string]rule.Rule)
+	for _, item := range findings {
+		key := strings.TrimSpace(item.RuleKey)
+		if key == "" || catalog == nil {
+			continue
+		}
+		if _, ok := metadata[key]; ok {
+			continue
+		}
+		if resolved, err := catalog.Get(ctx, rule.Key(key)); err == nil {
+			metadata[key] = resolved
+		}
+	}
+	previous := make(map[string]struct{})
+	if baseline != nil {
+		for _, item := range baseline.InternalIssues {
+			previous[item.Key] = struct{}{}
+		}
+		for _, item := range baseline.Annotations {
+			previous[item.FindingKey] = struct{}{}
+		}
+	}
+	seen := make(map[string]struct{})
+	out := make([]projectanalysis.Annotation, 0, len(findings))
+	for _, item := range findings {
+		key := finding.Identity(item)
+		location := item.SourceLocation
+		if location == nil || location.Validate() != nil {
+			if file, line, ok := qualitygate.FileLineOf(item.DedupKey); ok {
+				location = &finding.SourceLocation{File: file, StartLine: line, EndLine: line}
+			}
+		}
+		if key == "" || location == nil || location.Validate() != nil {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		resolved := metadata[item.RuleKey]
+		out = append(out, projectanalysis.Annotation{
+			FindingKey: key, RuleKey: item.RuleKey, RuleName: resolved.Name, RuleType: resolved.Type, Message: item.Description,
+			Kind: item.Kind, Severity: item.Severity, Status: item.Status, Location: *location, New: baseline == nil,
+		})
+		if _, existed := previous[key]; !existed && baseline != nil {
+			out[len(out)-1].New = true
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].FindingKey < out[j].FindingKey })
+	return out
+}
+
+func reconcileSourceCapture(snapshot measure.Snapshot, capabilities projectanalysis.SourceCapabilities, manifest projectanalysis.SourceManifest) (projectanalysis.SourceCapabilities, projectanalysis.SourceManifest) {
+	if !capabilities.Source.Available {
+		return capabilities, projectanalysis.SourceManifest{}
+	}
+	files := make(map[string]struct{})
+	for _, node := range snapshot.Nodes {
+		if node.Kind == measure.NodeFile {
+			files[node.Path] = struct{}{}
+		}
+	}
+	out := projectanalysis.SourceManifest{Files: make([]projectanalysis.SourceFile, 0, len(manifest.Files)), Truncated: manifest.Truncated}
+	for _, file := range manifest.Files {
+		if _, ok := files[file.Path]; ok {
+			out.Files = append(out.Files, file)
+		}
+	}
+	if len(out.Files) == 0 && len(files) > 0 {
+		capabilities = projectanalysis.SourceCapabilities{
+			Source: projectanalysis.Capability{Reason: projectanalysis.UnavailableCaptureFailed}, Comparison: projectanalysis.Capability{Reason: projectanalysis.UnavailableCaptureFailed},
+			UnifiedDiff: projectanalysis.Capability{Reason: projectanalysis.UnavailableCaptureFailed}, SplitDiff: projectanalysis.Capability{Reason: projectanalysis.UnavailableCaptureFailed}, Highlighting: projectanalysis.Capability{Reason: projectanalysis.UnavailableCaptureFailed},
+		}
+	}
+	out.SetArtifactDigest()
+	return capabilities, out
+}
+
 func (s *Service) Delete(ctx context.Context, actor string, tenantID shared.ID, key string) error {
 	if err := requireActor(actor); err != nil {
 		return err
@@ -822,6 +992,11 @@ func (s *Service) Delete(ctx context.Context, actor string, tenantID shared.ID, 
 			return fmt.Errorf("get project analysis context: %w", err)
 		}
 	}
+	if s.sourceArtifacts != nil {
+		if err := s.sourceArtifacts.DeleteProject(ctx, p.TenantID, p.ID); err != nil {
+			return fmt.Errorf("delete project source artifacts: %w", err)
+		}
+	}
 	if err := s.repo.DeleteByKey(ctx, tenantID, p.Key); err != nil {
 		return fmt.Errorf("delete project: %w", err)
 	}
@@ -829,6 +1004,27 @@ func (s *Service) Delete(ctx context.Context, actor string, tenantID shared.ID, 
 		return fmt.Errorf("audit project.delete: %w", err)
 	}
 	return nil
+}
+
+func cloneCoverageReport(in *measure.CoverageReport) *measure.CoverageReport {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.Files = append([]measure.FileCoverage(nil), in.Files...)
+	out.Lines = measure.CloneLines(in.Lines)
+	return &out
+}
+
+func projectScanKind(kind string) projectanalysis.ScanKind {
+	switch kind {
+	case ports.TargetGit:
+		return projectanalysis.ScanKindGit
+	case ports.TargetArchive:
+		return projectanalysis.ScanKindArchive
+	default:
+		return projectanalysis.ScanKindLocal
+	}
 }
 
 func requireActor(actor string) error {

@@ -91,6 +91,21 @@ Most of these ship ON by default (safe, best-effort). See [Features](features.md
 | `SYNAPSE_SCAN_CACHE_DIR` | (per-user) | Cache location. Empty uses a per-user cache directory. |
 | `SYNAPSE_IMAGE_ROOTFS_ENABLED` | `true` | Materialize a container image root filesystem so the owned OS-package catalogers (dpkg, apk, and the rpm sqlite database) and installed-binary catalogers (Go build info, Python dist-info) can run. Best-effort. |
 
+## Project Code artifact retention and historical comparisons
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_PROJECT_SOURCE_ARTIFACT_DIR` | `data/project-source-artifacts` | Operator-owned local storage for immutable, gzip-compressed Project Code head/base artifacts. Restrict OS access, encrypt/back up it according to source-data policy, and do not place it on a shared writable volume. The full Compose stack mounts its dedicated `project-source-artifacts` named volume here. |
+| `SYNAPSE_PROJECT_SOURCE_RETENTION` | `2160h` (90 days) | How long captured analysis artifacts remain available. Startup cleanup removes expired analysis directories; project deletion removes all of that project's artifacts. Legacy analyses are never backfilled. |
+| `SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES` | `2097152` | Maximum captured source file size. Bigger files are retained as unavailable metadata. |
+| `SYNAPSE_PROJECT_SOURCE_MAX_FILES` | `10000` | Maximum source files captured for one analysis. |
+| `SYNAPSE_PROJECT_SOURCE_MAX_BYTES` | `524288000` | Total source-artifact capture budget per analysis. |
+| `SYNAPSE_PROJECT_GIT_COMPARISON_DEPTH` | `256` | Maximum Git history depth fetched to resolve a persisted comparison base. A missing/too-old base leaves source readable but comparison/unified/split capabilities unavailable. |
+
+Historical Code reads are analysis-scoped and private-cacheable. Source and diff APIs never fetch the current repository or read mutable local paths. Git comparison requires configured, validated head/base/default-branch refs; local and archive scans intentionally expose source-only capability. Generated files are hidden by default from the Code inventory but remain retained and explicitly addressable. Binary/non-UTF-8/limited artifacts expose an unavailable reason instead of content.
+
+For `docker run`, mount durable storage at the image's configured artifact path (the API image uses `/project-source-artifacts`): `--mount type=volume,source=synapse-project-source-artifacts,target=/project-source-artifacts`. Removing that volume permanently removes retained historical Code source and diffs.
+
 ## Recon and execution sandbox (sandbox required in production)
 
 | Variable | Default | Description |

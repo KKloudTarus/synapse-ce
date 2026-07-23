@@ -3,9 +3,11 @@ package finding
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"unicode"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/verdict"
 )
@@ -22,9 +24,12 @@ const (
 )
 
 var (
-	ErrRuleKeyRequired  = errors.New("rule key is required")
-	ErrRuleKeyForbidden = errors.New("rule key is not allowed")
-	ErrRuleKeyInvalid   = errors.New("rule key is invalid")
+	ErrRuleKeyRequired       = errors.New("rule key is required")
+	ErrRuleKeyForbidden      = errors.New("rule key is not allowed")
+	ErrRuleKeyInvalid        = errors.New("rule key is invalid")
+	ErrSourceLocationFile    = errors.New("source location file is invalid")
+	ErrSourceLocationLines   = errors.New("source location lines are invalid")
+	ErrSourceLocationColumns = errors.New("source location columns are invalid")
 )
 
 // Finding classes: third-party findings are actionable; first-party
@@ -87,6 +92,56 @@ func (s Status) Valid() bool {
 	return false
 }
 
+// SourceLocation is a producer-owned source range. Lines are one-based and
+// inclusive; columns are UTF-8 byte offsets, zero-based and end-exclusive.
+// Nil columns mean that the producer knows only the line range.
+type SourceLocation struct {
+	File        string `json:"file"`
+	StartLine   int    `json:"start_line"`
+	EndLine     int    `json:"end_line"`
+	StartColumn *int   `json:"start_column,omitempty"`
+	EndColumn   *int   `json:"end_column,omitempty"`
+}
+
+// Validate rejects ambiguous, unsafe, and non-canonical source ranges.
+func (l SourceLocation) Validate() error {
+	canonical, err := measure.CanonicalPath(l.File)
+	if err != nil || canonical == "" || canonical != l.File {
+		return ErrSourceLocationFile
+	}
+	if l.StartLine < 1 || l.EndLine < l.StartLine {
+		return ErrSourceLocationLines
+	}
+	if (l.StartColumn == nil) != (l.EndColumn == nil) {
+		return ErrSourceLocationColumns
+	}
+	if l.StartColumn != nil {
+		if *l.StartColumn < 0 || *l.EndColumn < 0 || (l.StartLine == l.EndLine && *l.EndColumn < *l.StartColumn) {
+			return ErrSourceLocationColumns
+		}
+	}
+	return nil
+}
+
+// SourceLocationFromLegacy converts an unambiguous legacy file:line value. It
+// deliberately rejects Windows paths and malformed locations rather than guessing.
+func SourceLocationFromLegacy(value string) (SourceLocation, bool) {
+	value = strings.TrimSpace(value)
+	i := strings.LastIndexByte(value, ':')
+	if i <= 0 || i == len(value)-1 {
+		return SourceLocation{}, false
+	}
+	line, err := strconv.Atoi(value[i+1:])
+	if err != nil {
+		return SourceLocation{}, false
+	}
+	location := SourceLocation{File: value[:i], StartLine: line, EndLine: line}
+	if location.Validate() != nil {
+		return SourceLocation{}, false
+	}
+	return location, true
+}
+
 // Finding is a confirmed or candidate security issue within an engagement.
 type Finding struct {
 	ID           shared.ID
@@ -105,6 +160,10 @@ type Finding struct {
 
 	// RuleKey is the stable catalog rule identifier emitted by the producer.
 	RuleKey string
+
+	// SourceLocation is the structured source position emitted by first-party
+	// analyzers. Legacy DedupKey locations remain supported during migration.
+	SourceLocation *SourceLocation
 
 	// Workflow: the human assignee, and an optimistic-concurrency version that
 	// Kanban/status/assignee edits check to prevent lost updates.

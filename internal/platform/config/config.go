@@ -59,6 +59,9 @@ type Config struct {
 	NVDBudget time.Duration
 	// ScanTimeout bounds a single SCA scan; 0 disables.
 	ScanTimeout time.Duration
+	// ProjectAnalysisCompletionTimeout bounds immutable Project snapshot persistence
+	// after a scan completes. It must remain positive even when scan timeout is disabled.
+	ProjectAnalysisCompletionTimeout time.Duration
 	// FindingMinSeverity is the lowest vuln severity promoted to a finding.
 	FindingMinSeverity string
 	// IgnoreUnfixed, when true, does NOT promote vulnerabilities that have no available fix
@@ -74,6 +77,16 @@ type Config struct {
 	MaxWorkspaceBytes int64
 	// ProjectUploadDir retains uploaded Project source archives for repeat analysis.
 	ProjectUploadDir string
+	// ProjectSourceArtifactDir retains immutable, analysis-owned Code source snapshots.
+	// It must be operator-owned; source contents are never fetched again at read time.
+	ProjectSourceArtifactDir  string
+	ProjectSourceRetention    time.Duration
+	ProjectSourceMaxFileBytes int64
+	ProjectSourceMaxFiles     int
+	ProjectSourceMaxBytes     int64
+	// ProjectGitComparisonDepth bounds history fetched to resolve an immutable
+	// Code comparison base; comparison degrades gracefully when insufficient.
+	ProjectGitComparisonDepth int
 	// Evidence artifact blob store: when BlobEndpoint is set, artifacts go to
 	// MinIO/S3; empty = in-memory (dev). Bucket defaults to synapse-evidence.
 	BlobEndpoint  string
@@ -320,47 +333,63 @@ type Config struct {
 
 // Load reads configuration from environment variables with sane defaults.
 func Load() Config {
+	scanTimeout := getduration("SYNAPSE_SCAN_TIMEOUT", 10*time.Minute)
+	completionTimeout := scanTimeout
+	if completionTimeout <= 0 {
+		completionTimeout = time.Minute
+	}
+	completionTimeout = getduration("SYNAPSE_PROJECT_ANALYSIS_COMPLETION_TIMEOUT", completionTimeout)
+	if completionTimeout <= 0 {
+		completionTimeout = time.Minute
+	}
 	return Config{
-		HTTPAddr:     getenv("SYNAPSE_HTTP_ADDR", ":8080"),
-		Environment:  normalizeEnv(getenv("SYNAPSE_ENV", "development")),
-		LogLevel:     getenv("SYNAPSE_LOG_LEVEL", "info"),
-		SingleTenant: getbool("SYNAPSE_SINGLE_TENANT", true),
-		APIToken:     getenv("SYNAPSE_API_TOKEN", ""),
-		AUPVersion:   getenv("SYNAPSE_AUP_VERSION", "1.0"),
-		AUPFile:      getenv("SYNAPSE_AUP_FILE", "data/aup-accepted.json"),
-		AuditFile:    getenv("SYNAPSE_AUDIT_FILE", "data/audit.jsonl"),
-		DBDSN:        getenv("SYNAPSE_DB_DSN", ""),
-		SyftBin:      getenv("SYNAPSE_SYFT_BIN", "syft"),
-		SBOMProducer: getenv("SYNAPSE_SBOM_PRODUCER", "syft"),
-		GrypeBin:     getenv("SYNAPSE_GRYPE_BIN", "grype"),
-		GrypeDBDir:   getenv("SYNAPSE_GRYPE_DB_DIR", ""),
-		OSVBaseURL:   getenv("SYNAPSE_OSV_URL", ""),
-		OSVBulkURL:   getenv("SYNAPSE_OSV_BULK_URL", ""),
-		DepsDevURL:   getenv("SYNAPSE_DEPSDEV_URL", ""),
-		KEVURL:       getenv("SYNAPSE_KEV_URL", ""),
-		EPSSURL:      getenv("SYNAPSE_EPSS_URL", ""),
-		NVDAPIURL:    getenv("SYNAPSE_NVD_API_URL", ""),
-		NVDAPIKey:    getenv("SYNAPSE_NVD_API_KEY", ""),
-		NVDBudget:    getduration("SYNAPSE_NVD_BUDGET", 20*time.Second),
-		ScanTimeout:  getduration("SYNAPSE_SCAN_TIMEOUT", 10*time.Minute),
+		HTTPAddr:                         getenv("SYNAPSE_HTTP_ADDR", ":8080"),
+		Environment:                      normalizeEnv(getenv("SYNAPSE_ENV", "development")),
+		LogLevel:                         getenv("SYNAPSE_LOG_LEVEL", "info"),
+		SingleTenant:                     getbool("SYNAPSE_SINGLE_TENANT", true),
+		APIToken:                         getenv("SYNAPSE_API_TOKEN", ""),
+		AUPVersion:                       getenv("SYNAPSE_AUP_VERSION", "1.0"),
+		AUPFile:                          getenv("SYNAPSE_AUP_FILE", "data/aup-accepted.json"),
+		AuditFile:                        getenv("SYNAPSE_AUDIT_FILE", "data/audit.jsonl"),
+		DBDSN:                            getenv("SYNAPSE_DB_DSN", ""),
+		SyftBin:                          getenv("SYNAPSE_SYFT_BIN", "syft"),
+		SBOMProducer:                     getenv("SYNAPSE_SBOM_PRODUCER", "syft"),
+		GrypeBin:                         getenv("SYNAPSE_GRYPE_BIN", "grype"),
+		GrypeDBDir:                       getenv("SYNAPSE_GRYPE_DB_DIR", ""),
+		OSVBaseURL:                       getenv("SYNAPSE_OSV_URL", ""),
+		OSVBulkURL:                       getenv("SYNAPSE_OSV_BULK_URL", ""),
+		DepsDevURL:                       getenv("SYNAPSE_DEPSDEV_URL", ""),
+		KEVURL:                           getenv("SYNAPSE_KEV_URL", ""),
+		EPSSURL:                          getenv("SYNAPSE_EPSS_URL", ""),
+		NVDAPIURL:                        getenv("SYNAPSE_NVD_API_URL", ""),
+		NVDAPIKey:                        getenv("SYNAPSE_NVD_API_KEY", ""),
+		NVDBudget:                        getduration("SYNAPSE_NVD_BUDGET", 20*time.Second),
+		ScanTimeout:                      scanTimeout,
+		ProjectAnalysisCompletionTimeout: completionTimeout,
 		// Promote EVERY detected vulnerability by default (info = lowest rank), matching
 		// Grype/Trivy/OSV-Scanner – a higher floor silently hides detected vulns and reads as
 		// "missing vulns". Prioritization is done by risk priority (KEV→EPSS×CVSS), not by
 		// dropping findings; raise this floor explicitly to trim a report's actionable set.
-		FindingMinSeverity: getenv("SYNAPSE_FINDING_MIN_SEVERITY", "info"),
-		IgnoreUnfixed:      getbool("SYNAPSE_IGNORE_UNFIXED", false),
-		Offline:            getbool("SYNAPSE_OFFLINE", false),
-		MaxWorkspaceBytes:  getint64("SYNAPSE_MAX_WORKSPACE_BYTES", 2<<30),
-		ProjectUploadDir:   getenv("SYNAPSE_PROJECT_UPLOAD_DIR", "data/project-uploads"),
-		BlobEndpoint:       getenv("SYNAPSE_BLOB_ENDPOINT", ""),
-		BlobAccessKey:      getenv("SYNAPSE_BLOB_ACCESS_KEY", ""),
-		BlobSecretKey:      getenv("SYNAPSE_BLOB_SECRET_KEY", ""),
-		BlobBucket:         getenv("SYNAPSE_BLOB_BUCKET", "synapse-evidence"),
-		BlobUseSSL:         getbool("SYNAPSE_BLOB_USE_SSL", false),
-		ReconTimeout:       getduration("SYNAPSE_RECON_TIMEOUT", 3*time.Minute),
-		ReconMaxOutput:     getint("SYNAPSE_RECON_MAX_OUTPUT", 8<<20),
-		ReconConcurrency:   getint("SYNAPSE_RECON_CONCURRENCY", 3),
-		ReconQueueSize:     getint("SYNAPSE_RECON_QUEUE", 64),
+		FindingMinSeverity:        getenv("SYNAPSE_FINDING_MIN_SEVERITY", "info"),
+		IgnoreUnfixed:             getbool("SYNAPSE_IGNORE_UNFIXED", false),
+		Offline:                   getbool("SYNAPSE_OFFLINE", false),
+		MaxWorkspaceBytes:         getint64("SYNAPSE_MAX_WORKSPACE_BYTES", 2<<30),
+		ProjectUploadDir:          getenv("SYNAPSE_PROJECT_UPLOAD_DIR", "data/project-uploads"),
+		ProjectSourceArtifactDir:  getenv("SYNAPSE_PROJECT_SOURCE_ARTIFACT_DIR", "data/project-source-artifacts"),
+		ProjectSourceRetention:    getduration("SYNAPSE_PROJECT_SOURCE_RETENTION", 90*24*time.Hour),
+		ProjectSourceMaxFileBytes: getint64("SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES", 2<<20),
+		ProjectSourceMaxFiles:     getint("SYNAPSE_PROJECT_SOURCE_MAX_FILES", 10_000),
+		ProjectSourceMaxBytes:     getint64("SYNAPSE_PROJECT_SOURCE_MAX_BYTES", 500<<20),
+		ProjectGitComparisonDepth: getint("SYNAPSE_PROJECT_GIT_COMPARISON_DEPTH", 256),
+		BlobEndpoint:              getenv("SYNAPSE_BLOB_ENDPOINT", ""),
+		BlobAccessKey:             getenv("SYNAPSE_BLOB_ACCESS_KEY", ""),
+		BlobSecretKey:             getenv("SYNAPSE_BLOB_SECRET_KEY", ""),
+		BlobBucket:                getenv("SYNAPSE_BLOB_BUCKET", "synapse-evidence"),
+		BlobUseSSL:                getbool("SYNAPSE_BLOB_USE_SSL", false),
+		ReconTimeout:              getduration("SYNAPSE_RECON_TIMEOUT", 3*time.Minute),
+		ReconMaxOutput:            getint("SYNAPSE_RECON_MAX_OUTPUT", 8<<20),
+		ReconConcurrency:          getint("SYNAPSE_RECON_CONCURRENCY", 3),
+		ReconQueueSize:            getint("SYNAPSE_RECON_QUEUE", 64),
 
 		ReconAllowCapabilitySensitive: getbool("SYNAPSE_RECON_ALLOW_CAPABILITY_SENSITIVE", false),
 

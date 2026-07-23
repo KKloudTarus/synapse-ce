@@ -175,6 +175,33 @@ describe('Projects API', () => {
     expect(page.next).toEqual({ beforeCreatedAt: '2026-07-16T00:00:00Z', beforeId: 'a0' })
     expect(fetchSpy).toHaveBeenCalledWith('/api/v1/projects/a%20b/analyses?limit=25&before_created_at=2026-07-18T00%3A00%3A00Z&before_id=a2', expect.any(Object))
   })
+
+  it('maps the immutable Code source and diff contracts', async () => {
+    fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({
+      analysis_id: 'a1', head: { ref: 'main', artifact_digest: 'sha256:head' },
+      capabilities: { source: true, unified_diff: true, split_diff: false, line_coverage: true },
+      files: [{ path: 'src/main.go', status: 'modified', lines: 2, finding_count: 1, changed_line_count: 1, binary: false, generated: false, source_available: true }],
+    }) } as Response)
+    const index = await api.listProjectCodeFiles('a b', 'a1')
+    expect(index).toMatchObject({ analysisId: 'a1', head: { artifactDigest: 'sha256:head' }, capabilities: { unifiedDiff: true }, files: [{ path: 'src/main.go', sourceReason: null }] })
+    expect(fetchSpy).toHaveBeenLastCalledWith('/api/v1/projects/a%20b/analyses/a1/code/files', expect.any(Object))
+
+    fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({
+      analysis_id: 'a1', head: {}, file: { path: 'src/main.go', status: 'modified', lines: 2, finding_count: 1, changed_line_count: 1, binary: false, generated: false, source_available: true }, from_line: 1, to_line: 2, total_lines: 2,
+      lines: [{ number: 1, content: '<script>', change: 'addition', duplicated: false }],
+      findings: [{ id: 'f1', kind: 'issue', severity: 'high', detection_status: 'open', new: true, location: { file: 'src/main.go', start_line: 1, end_line: 1, start_column: 0, end_column: 2 } }],
+      capabilities: { source: true, unified_diff: true, split_diff: false, line_coverage: false },
+    }) } as Response)
+    const source = await api.projectCodeFile('p', 'a1', 'src/main.go', 1)
+    expect(source).toMatchObject({ lines: [{ content: '<script>', coverage: null }], findings: [{ detectionStatus: 'open', currentStatus: null, location: { startColumn: 0 } }] })
+
+    fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({
+      capabilities: { source: { available: true }, comparison: { available: true }, unified_diff: { available: true }, split_diff: { available: false, reason: 'unsupported_target' }, highlighting: { available: false } },
+      diff: { analysis_id: 'a1', head: {}, path: 'src/main.go', view: 'unified', context_truncated: true, change: { status: 'modified', binary: false, hunks: [{ old_start: 1, old_lines: 1, new_start: 1, new_lines: 1, rows: [{ kind: 'added', new_line: 1, text: 'x' }] }] } },
+    }) } as Response)
+    const diff = await api.projectCodeDiff('p', 'a1', 'src/main.go', 'unified')
+    expect(diff).toMatchObject({ capabilities: { splitDiff: { available: false, reason: 'unsupported_target' } }, diff: { contextTruncated: true, change: { hunks: [{ rows: [{ oldLine: null, newLine: 1 }] }] } } })
+  })
 })
 
 function overviewAnalyzedWire(): any {

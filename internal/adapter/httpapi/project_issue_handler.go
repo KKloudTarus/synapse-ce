@@ -9,31 +9,33 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/issue"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 type projectIssueResponse struct {
-	ID                  string    `json:"id"`
-	RuleKey             string    `json:"rule_key"`
-	RuleName            string    `json:"rule_name"`
-	Type                string    `json:"type"`
-	Title               string    `json:"title"`
-	Description         string    `json:"description"`
-	Severity            string    `json:"severity"`
-	FindingKind         string    `json:"finding_kind"`
-	CWE                 string    `json:"cwe"`
-	Language            string    `json:"language"`
-	File                string    `json:"file"`
-	Location            string    `json:"location"`
-	Status              string    `json:"status"`
-	Version             int       `json:"version"`
-	IsNew               bool      `json:"is_new"`
-	FirstSeenAnalysisID string    `json:"first_seen_analysis_id"`
-	LastSeenAnalysisID  string    `json:"last_seen_analysis_id"`
-	FirstSeenAt         time.Time `json:"first_seen_at"`
-	LastSeenAt          time.Time `json:"last_seen_at"`
+	ID                  string                  `json:"id"`
+	RuleKey             string                  `json:"rule_key"`
+	RuleName            string                  `json:"rule_name"`
+	Type                string                  `json:"type"`
+	Title               string                  `json:"title"`
+	Description         string                  `json:"description"`
+	Severity            string                  `json:"severity"`
+	FindingKind         string                  `json:"finding_kind"`
+	CWE                 string                  `json:"cwe"`
+	Language            string                  `json:"language"`
+	File                string                  `json:"file"`
+	Location            string                  `json:"location"`
+	SourceLocation      *finding.SourceLocation `json:"source_location,omitempty"`
+	Status              string                  `json:"status"`
+	Version             int                     `json:"version"`
+	IsNew               bool                    `json:"is_new"`
+	FirstSeenAnalysisID string                  `json:"first_seen_analysis_id"`
+	LastSeenAnalysisID  string                  `json:"last_seen_analysis_id"`
+	FirstSeenAt         time.Time               `json:"first_seen_at"`
+	LastSeenAt          time.Time               `json:"last_seen_at"`
 }
 
 type projectIssueCursorResponse struct {
@@ -158,7 +160,7 @@ func projectIssueDTO(item issue.Issue, ruleName string) projectIssueResponse {
 	return projectIssueResponse{
 		ID: item.ID.String(), RuleKey: item.RuleKey, RuleName: ruleName, Type: string(item.Type),
 		Title: item.Title, Description: item.Description, Severity: string(item.Severity), FindingKind: string(item.Kind),
-		CWE: item.CWE, Language: item.Language, File: item.File, Location: item.Location,
+		CWE: item.CWE, Language: item.Language, File: item.File, Location: item.Location, SourceLocation: item.SourceLocation,
 		Status: string(item.Status), Version: item.Version, IsNew: item.IsNew,
 		FirstSeenAnalysisID: item.FirstSeenAnalysisID, LastSeenAnalysisID: item.LastSeenAnalysisID,
 		FirstSeenAt: item.FirstSeenAt, LastSeenAt: item.LastSeenAt,
