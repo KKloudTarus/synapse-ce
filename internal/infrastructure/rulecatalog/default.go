@@ -20,6 +20,7 @@ func Default() (*Catalog, error) {
 	all = append(all, xmlRules()...)
 	all = append(all, pythonRules()...)
 	all = append(all, notebookRules()...)
+	all = append(all, cssRules()...)
 
 	return New(all)
 }

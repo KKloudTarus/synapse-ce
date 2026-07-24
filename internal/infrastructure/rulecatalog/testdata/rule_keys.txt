@@ -650,6 +650,14 @@ cs-xxe-dtd-parse
 cs-yoda-condition
 cs-zip-extract-slip
 cs-zip-slip-fullname
+css:duplicate-property
+css:invalid-font-weight
+css:invalid-hex-color
+css:invalid-keyframe-selector
+css:invalid-unit
+css:negative-animation-duration
+css:negative-flex-factor
+css:unknown-property
 databricks-token
 datadog-api-key
 db-connection-string
