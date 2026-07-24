@@ -230,6 +230,7 @@ Synapse was built by its founding team.
 | <img src="https://github.com/nghiadaulau.png?size=80" width="46" height="46" alt="nghiadaulau"> | [**nghiadaulau**](https://github.com/nghiadaulau) | Engineer |
 | <img src="https://github.com/nnatuan03.png?size=80" width="46" height="46" alt="nnatuan03"> | [**nnatuan03**](https://github.com/nnatuan03) | Engineer |
 | <img src="https://github.com/lethanhsang188.png?size=80" width="46" height="46" alt="lethanhsang188"> | [**lethanhsang188**](https://github.com/lethanhsang188) | Engineer |
+| <img src="https://github.com/VietSory.png?size=80" width="46" height="46" alt="VietSory"> | [**VietSory**](https://github.com/VietSory) | Engineer |
 | <img src="https://github.com/tuu-ngo.png?size=80" width="46" height="46" alt="tuu-ngo"> | [**tuu-ngo**](https://github.com/tuu-ngo) | Brand identity designer |
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), the
