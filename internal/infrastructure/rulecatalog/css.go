@@ -6,7 +6,7 @@ import (
 )
 
 func cssRules() []rule.Rule {
-	return []rule.Rule{
+	rules := []rule.Rule{
 		{
 			Key:                 "css:duplicate-property",
 			Name:                "Duplicate property declaration",
@@ -152,4 +152,5 @@ func cssRules() []rule.Rule {
 			Detection:           rule.DetectionAST,
 		},
 	}
+	return append(rules, cssMaintainabilityRules...)
 }
