@@ -179,6 +179,29 @@ var cssRules = map[string]cssQualityRule{
 	"negative-animation-duration": {"reliability", "css:negative-animation-duration", "", "medium", "Negative animation duration", "Negative literal animation duration."},
 	"invalid-font-weight":         {"reliability", "css:invalid-font-weight", "", "low", "Invalid font weight", "Literal font weight outside 1–1000."},
 	"negative-flex-factor":        {"reliability", "css:negative-flex-factor", "", "low", "Negative flex factor", "Negative flex-grow or flex-shrink factor."},
+
+	"empty-block":                 {"maintainability", "css:empty-block", "", "info", "Empty declaration block", "Declaration block contains no property declarations."},
+	"important-overuse":           {"maintainability", "css:important-overuse", "", "low", "Use of !important flag", "Property declaration uses !important."},
+	"duplicate-selector":          {"maintainability", "css:duplicate-selector", "", "low", "Duplicate selector within scope", "Rule set repeats a selector with identical canonical form within the same scope."},
+	"zero-with-unit":              {"maintainability", "css:zero-with-unit", "", "info", "Zero length value with unit", "Zero length value specifies a unit."},
+	"font-no-fallback":            {"maintainability", "css:font-no-fallback", "", "low", "Font family missing generic fallback", "font-family declaration lacks a generic family fallback."},
+	"id-selector-overuse":         {"maintainability", "css:id-selector-overuse", "", "low", "Use of ID selector", "Selector includes an ID selector."},
+	"vendor-prefix-no-standard":   {"maintainability", "css:vendor-prefix-no-standard", "", "low", "Vendor-prefixed property without standard", "Vendor-prefixed property declared without corresponding standard property."},
+	"shorthand-redundant":         {"maintainability", "css:shorthand-redundant", "", "info", "Longhand property before shorthand", "Longhand property specified prior to matching shorthand property."},
+	"negative-zindex":             {"maintainability", "css:negative-zindex", "", "info", "Negative z-index value", "z-index declaration specifies a negative integer."},
+	"duplicate-font-face":         {"maintainability", "css:duplicate-font-face", "", "info", "Duplicate @font-face definition", "@font-face block duplicates property declarations of a prior @font-face block."},
+	"todo-marker":                 {"maintainability", "css:todo-marker", "", "info", "TODO or FIXME comment marker", "Comment contains a TODO or FIXME marker."},
+	"selector-specificity-high":   {"maintainability", "css:selector-specificity-high", "", "low", "High selector specificity", "Compound selector exceeds recommended specificity threshold."},
+	"selector-depth-high":         {"maintainability", "css:selector-depth-high", "", "low", "High selector depth", "Compound selector exceeds max combinator depth."},
+	"selector-list-too-long":      {"maintainability", "css:selector-list-too-long", "", "low", "Selector list contains too many selectors", "Selector list contains more than 8 comma-separated selectors."},
+	"declaration-block-too-large": {"maintainability", "css:declaration-block-too-large", "", "low", "Declaration block contains too many declarations", "Declaration block contains more than 20 property declarations."},
+	"overqualified-selector":      {"maintainability", "css:overqualified-selector", "", "low", "Overqualified selector", "Selector qualifies a class or ID selector with an unnecessary element type."},
+	"duplicate-keyframes":         {"maintainability", "css:duplicate-keyframes", "", "low", "Duplicate @keyframes name within scope", "@keyframes block repeats an animation name within the same scope."},
+	"duplicate-media-query":       {"maintainability", "css:duplicate-media-query", "", "low", "Duplicate @media query condition within scope", "@media block repeats a media query condition within the same scope."},
+	"duplicate-import":            {"maintainability", "css:duplicate-import", "", "low", "Duplicate @import statement", "@import statement repeats a target URI and media condition."},
+	"legacy-property":             {"maintainability", "css:legacy-property", "", "low", "Use of deprecated or legacy CSS property", "Declaration uses a deprecated or legacy CSS property."},
+	"legacy-pseudo-element":       {"maintainability", "css:legacy-pseudo-element", "", "low", "Use of single-colon legacy pseudo-element", "Pseudo-element uses single colon syntax instead of double colon syntax."},
+	"redundant-value-list":        {"maintainability", "css:redundant-value-list", "", "low", "Redundant value list in multi-sided property", "Property value list repeats identical values that can be simplified."},
 }
 
 func cssFindingAtLine(key string, rel string, line int) QualityFinding {
@@ -418,6 +441,8 @@ func cssFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			stack = append(stack, cssStackFrame{node: n.Child(i), ctx: childCtx})
 		}
 	}
+
+	collectCSSMaintainabilityFindings(root, src, rel, collector)
 
 	return collector.findings
 }

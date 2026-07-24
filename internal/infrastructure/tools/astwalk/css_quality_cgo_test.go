@@ -51,7 +51,7 @@ func assertExactCSSRules(t *testing.T, cssSource string, expected ...string) {
 	}
 
 	for i := range got {
-		if got[i].Rule != want[i] || got[i].Kind != "reliability" || got[i].Severity == "" || got[i].File == "" || got[i].Line <= 0 {
+		if got[i].Rule != want[i] || (got[i].Kind != "reliability" && got[i].Kind != "maintainability") || got[i].Severity == "" || got[i].File == "" || got[i].Line <= 0 {
 			t.Errorf("Finding %d: got %+v, want rule %q with full hygiene metadata", i, got[i], want[i])
 		}
 	}
@@ -101,7 +101,7 @@ func TestCSSDuplicateProperty(t *testing.T) {
 	assertExactCSSRules(t, "a { color: red; color: red; }", "css:duplicate-property")
 	assertExactCSSRules(t, "a { COLOR: red; color: red; }", "css:duplicate-property")
 	assertExactCSSRules(t, "a { color: red; color: blue; }")
-	assertExactCSSRules(t, "a { color: red; color: red !important; }")
+	assertExactCSSRules(t, "a { color: red; color: red !important; }", "css:important-overuse")
 	assertExactCSSRules(t, "a { color: red; } b { color: red; }")
 	assertExactCSSRules(t, "@keyframes fade { 0% { color: red; } 100% { color: red; } }")
 	assertExactCSSRules(t, "a { --theme: red; --theme: red; }")
@@ -157,7 +157,7 @@ func TestCSSInvalidUnit(t *testing.T) {
 	assertExactCSSRules(t, "a { animation-duration: 2sec; }", "css:invalid-unit")
 	assertExactCSSRules(t, "a { margin: 3pixels; }", "css:invalid-unit")
 	assertExactCSSRules(t, "a { width: 0; }")
-	assertExactCSSRules(t, "a { width: 0px; }")
+	assertExactCSSRules(t, "a { width: 0px; }", "css:zero-with-unit")
 	assertExactCSSRules(t, "a { width: 10PX; }")
 	assertExactCSSRules(t, "a { --size: 10pzz; }")
 	assertExactCSSRules(t, "a { content: '10pzz'; }")
@@ -566,7 +566,7 @@ func TestCSSDescriptorNamesAreNotOrdinaryProperties(t *testing.T) {
 	assertExactCSSRules(t, "a { size-adjust: 100%; }", "css:unknown-property")          //nolint:misspell
 	assertExactCSSRules(t, "a { syntax: '<length>'; }", "css:unknown-property")         //nolint:misspell
 	assertExactCSSRules(t, "a { inherits: false; }", "css:unknown-property")            //nolint:misspell
-	assertExactCSSRules(t, "a { initial-value: 0px; }", "css:unknown-property")         //nolint:misspell
+	assertExactCSSRules(t, "a { initial-value: 10px; }", "css:unknown-property")         //nolint:misspell
 }
 
 func TestCSSDescriptorContexts(t *testing.T) {
