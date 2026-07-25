@@ -210,7 +210,7 @@ func QualityFor(ctx context.Context, root string) (Quality, error) {
 	}
 	notebooks := map[string][]notebookChunk{}
 	truncated, err := walkSource(ctx, root, func(rel, lang string, content []byte) {
-		if lang != "Python" && lang != "Java" && lang != "JavaScript" && lang != "CSS" {
+		if lang != "Python" && lang != "Java" && lang != "JavaScript" && lang != "CSS" && lang != "HTML" {
 			return
 		}
 		if lang == "Python" {
@@ -234,6 +234,12 @@ func QualityFor(ctx context.Context, root string) (Quality, error) {
 			out.Findings = append(out.Findings, jsFindings(tree, content, rel)...)
 		case "CSS":
 			out.Findings = append(out.Findings, cssFindings(tree, content, rel)...)
+		case "HTML":
+			ext := strings.ToLower(filepath.Ext(rel))
+			if ext == ".xhtml" || ext == ".xml" || ext == ".jsx" || ext == ".tsx" || ext == ".vue" || ext == ".svelte" {
+				return
+			}
+			out.Findings = append(out.Findings, htmlFindings(tree, content, rel)...)
 		}
 	})
 	if err != nil {

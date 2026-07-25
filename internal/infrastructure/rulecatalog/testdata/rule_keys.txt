@@ -785,6 +785,16 @@ google-api-key
 grafana-token
 hardcoded-aws-access-key
 hardcoded-credential
+html:doctype-invalid
+html:doctype-missing
+html:duplicate-attribute
+html:duplicate-document-element
+html:duplicate-id
+html:invalid-id
+html:nested-form
+html:nonvoid-self-closing
+html:unclosed-tag
+html:unexpected-end-tag
 huggingface-token
 insecure-cookie-flags
 insecure-randomness-security-context
