@@ -21,6 +21,7 @@ func Default() (*Catalog, error) {
 	all = append(all, pythonRules()...)
 	all = append(all, notebookRules()...)
 	all = append(all, cssRules()...)
+	all = append(all, htmlRules()...)
 
 	return New(all)
 }
