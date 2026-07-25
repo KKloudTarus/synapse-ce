@@ -4,6 +4,7 @@ package astwalk
 
 import (
 	stdhtml "html"
+	"sort"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
@@ -145,12 +146,14 @@ func htmlTagNameWithSrc(node *sitter.Node, src []byte) string {
 }
 
 type htmlAttrInfo struct {
-	name      string
-	lowerName string
-	value     string
-	hasValue  bool
-	node      *sitter.Node
-	line      int
+	name       string
+	lowerName  string
+	value      string
+	hasValue   bool
+	complete   bool
+	node       *sitter.Node
+	line       int
+	byteOffset uint32
 }
 
 func parseHTMLAttributes(tagNode *sitter.Node, src []byte) []htmlAttrInfo {
@@ -183,22 +186,45 @@ func parseHTMLAttributes(tagNode *sitter.Node, src []byte) []htmlAttrInfo {
 				attrName = attrName[:idx]
 			}
 		}
+
+		rawCh := ch.Content(src)
+		complete := !ch.HasError()
+		if nameNode == nil || attrName == "" {
+			complete = false
+		}
+
 		attrVal := ""
 		hasValue := false
 		if valNode != nil {
 			hasValue = true
-			attrVal = valNode.Content(src)
-			if len(attrVal) >= 2 && ((attrVal[0] == '"' && attrVal[len(attrVal)-1] == '"') || (attrVal[0] == '\'' && attrVal[len(attrVal)-1] == '\'')) {
-				attrVal = attrVal[1 : len(attrVal)-1]
+			if valNode.HasError() {
+				complete = false
+			}
+			rawVal := valNode.Content(src)
+			if valNode.Type() == "quoted_attribute_value" {
+				if len(rawVal) >= 2 && ((rawVal[0] == '"' && rawVal[len(rawVal)-1] == '"') || (rawVal[0] == '\'' && rawVal[len(rawVal)-1] == '\'')) {
+					attrVal = rawVal[1 : len(rawVal)-1]
+				} else {
+					complete = false
+				}
+			} else {
+				attrVal = rawVal
+			}
+		} else {
+			if strings.Contains(rawCh, "=") {
+				complete = false
 			}
 		}
+
 		attrs = append(attrs, htmlAttrInfo{
-			name:      attrName,
-			lowerName: htmlASCIILower(attrName),
-			value:     attrVal,
-			hasValue:  hasValue,
-			node:      ch,
-			line:      int(ch.StartPoint().Row) + 1,
+			name:       attrName,
+			lowerName:  htmlASCIILower(attrName),
+			value:      attrVal,
+			hasValue:   hasValue,
+			complete:   complete,
+			node:       ch,
+			line:       int(ch.StartPoint().Row) + 1,
+			byteOffset: ch.StartByte(),
 		})
 	}
 	return attrs
@@ -324,6 +350,26 @@ func htmlFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			tName := htmlTagNameWithSrc(n, src)
 			attrs := parseHTMLAttributes(n, src)
 
+			type tagFindingCandidate struct {
+				offset uint32
+				rule   string
+				line   int
+				order  int
+			}
+
+			var tagCandidates []tagFindingCandidate
+			orderIdx := 0
+
+			addCandidate := func(ruleKey string, line int, offset uint32) {
+				tagCandidates = append(tagCandidates, tagFindingCandidate{
+					offset: offset,
+					rule:   ruleKey,
+					line:   line,
+					order:  orderIdx,
+				})
+				orderIdx++
+			}
+
 			// Rule 3: html:duplicate-attribute
 			seenTagAttrs := make(map[string]bool)
 			var firstIDAttr *htmlAttrInfo
@@ -331,7 +377,7 @@ func htmlFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			for idx := range attrs {
 				attr := &attrs[idx]
 				if seenTagAttrs[attr.lowerName] {
-					collector.emit("duplicate-attribute", attr.line)
+					addCandidate("duplicate-attribute", attr.line, attr.byteOffset)
 				} else {
 					seenTagAttrs[attr.lowerName] = true
 				}
@@ -344,17 +390,17 @@ func htmlFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			// Rules 4 & 5: html:duplicate-id & html:invalid-id
 			if firstIDAttr != nil {
 				if !firstIDAttr.hasValue {
-					collector.emit("invalid-id", firstIDAttr.line)
+					addCandidate("invalid-id", firstIDAttr.line, firstIDAttr.byteOffset)
 				} else {
 					rawVal := firstIDAttr.value
 					decodedVal := stdhtml.UnescapeString(rawVal)
 
 					if !htmlIsTemplateExpression(rawVal) && !htmlIsTemplateExpression(decodedVal) {
 						if decodedVal == "" || htmlASCIIWhitespace(decodedVal) {
-							collector.emit("invalid-id", firstIDAttr.line)
+							addCandidate("invalid-id", firstIDAttr.line, firstIDAttr.byteOffset)
 						} else {
 							if seenIDs[decodedVal] {
-								collector.emit("duplicate-id", firstIDAttr.line)
+								addCandidate("duplicate-id", firstIDAttr.line, firstIDAttr.byteOffset)
 							} else {
 								if len(seenIDs) < maxTrackedIDs {
 									seenIDs[decodedVal] = true
@@ -368,7 +414,7 @@ func htmlFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			// Rule 10: html:duplicate-document-element
 			if tName == "html" || tName == "head" || tName == "body" {
 				if seenDocElems[tName] {
-					collector.emit("duplicate-document-element", line)
+					addCandidate("duplicate-document-element", line, n.StartByte())
 				} else {
 					seenDocElems[tName] = true
 				}
@@ -377,7 +423,7 @@ func htmlFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			// Rule 8: html:nonvoid-self-closing
 			if ntype == "self_closing_tag" {
 				if !htmlIsVoidElement(tName) && !htmlIsInForeignContent(n, src, maxHTMLDepth) {
-					collector.emit("nonvoid-self-closing", line)
+					addCandidate("nonvoid-self-closing", line, n.StartByte())
 				}
 			}
 
@@ -401,9 +447,26 @@ func htmlFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 					startText := n.Content(src)
 					if strings.HasSuffix(strings.TrimSpace(startText), ">") {
 						unclosedEmittedOffset[n.StartByte()] = true
-						collector.emit("unclosed-tag", line)
+						addCandidate("unclosed-tag", line, n.StartByte())
 					}
 				}
+			}
+
+			// Security rules inspection
+			secCandidates := collectHTMLSecurityCandidates(n, tName, attrs, src)
+			for _, sc := range secCandidates {
+				addCandidate(sc.rule, sc.line, sc.offset)
+			}
+
+			sort.SliceStable(tagCandidates, func(i, j int) bool {
+				if tagCandidates[i].offset != tagCandidates[j].offset {
+					return tagCandidates[i].offset < tagCandidates[j].offset
+				}
+				return tagCandidates[i].order < tagCandidates[j].order
+			})
+
+			for _, tc := range tagCandidates {
+				collector.emit(tc.rule, tc.line)
 			}
 
 		case "element", "script_element", "style_element":

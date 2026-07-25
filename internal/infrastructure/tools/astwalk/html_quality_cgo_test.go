@@ -38,8 +38,8 @@ func assertExactHTMLRules(t *testing.T, source string, expected ...string) {
 	findings := scanHTMLFixture(source)
 
 	for _, f := range findings {
-		if f.Kind != "reliability" {
-			t.Errorf("expected Kind == reliability, got %q for rule %s", f.Kind, f.Rule)
+		if f.Kind == "" {
+			t.Errorf("empty Kind for rule %s", f.Rule)
 		}
 		if f.Severity == "" {
 			t.Errorf("empty Severity for rule %s", f.Rule)
@@ -271,12 +271,12 @@ func TestHTMLInventoryAndSeverityParity(t *testing.T) {
 		}
 	}
 
-	if len(catHTMLRules) != 10 {
-		t.Fatalf("expected 10 catalog rules for HTML, got %d", len(catHTMLRules))
+	if len(catHTMLRules) != 18 {
+		t.Fatalf("expected 18 catalog rules for HTML, got %d", len(catHTMLRules))
 	}
 
-	if len(htmlRuntimeRules) != 10 {
-		t.Fatalf("expected 10 runtime rules for HTML, got %d", len(htmlRuntimeRules))
+	if len(htmlRuntimeRules) != 18 {
+		t.Fatalf("expected 18 runtime rules for HTML, got %d", len(htmlRuntimeRules))
 	}
 
 	for key, rtRule := range htmlRuntimeRules {
