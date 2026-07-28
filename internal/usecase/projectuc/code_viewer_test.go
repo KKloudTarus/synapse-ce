@@ -186,7 +186,7 @@ func TestCodeFindingsConvertsMultilineColumnsToUTF16(t *testing.T) {
 }
 
 func TestReadCodeDiffServesPersistedUnifiedAndSplitData(t *testing.T) {
-	artifacts := &codeArtifactStub{data: []byte("new\n"), baseData: []byte("old\n")}
+	artifacts := &codeArtifactStub{err: projectanalysis.ErrSourceIntegrity, baseErr: projectanalysis.ErrSourceIntegrity}
 	svc, analyses, p := newCodeService(t, artifacts)
 	saveCodeAnalysis(t, analyses, p, projectanalysis.Analysis{
 		Capabilities: projectanalysis.SourceCapabilities{
@@ -202,8 +202,8 @@ func TestReadCodeDiffServesPersistedUnifiedAndSplitData(t *testing.T) {
 			t.Fatalf("view=%s diff=%+v err=%v", view, diff, err)
 		}
 	}
-	if !artifacts.loaded || !artifacts.baseLoaded {
-		t.Fatalf("immutable artifacts not loaded: %+v", artifacts)
+	if artifacts.loaded || artifacts.baseLoaded {
+		t.Fatalf("diff read should not load source artifacts: %+v", artifacts)
 	}
 }
 
