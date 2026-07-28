@@ -8,7 +8,7 @@ describe('Projects API', () => {
   beforeEach(() => { fetchSpy = vi.spyOn(globalThis, 'fetch') })
 
   it('maps project fields and portfolio summaries', async () => {
-    fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => [{ ID: 'p1', Name: 'Synapse', Key: 'synapse', SourceBinding: { Kind: 'git', Value: 'https://example.com/repo.git', Ref: 'main' }, DefaultProfileByLang: { go: 'default' }, GateID: 'gate', Audit: { CreatedAt: '2026-07-15T00:00:00Z' }, latest_analysis: { id: 'a1', gate: { passed: false, results: [] }, gate_info: { key: 'release', name: 'Release', source: 'managed' } }, latest_job: { id: 'j1', status: 'succeeded' } }] } as Response)
+    fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => [{ ID: 'p1', Name: 'Synapse', Key: 'synapse', SourceBinding: { kind: 'git', value: 'https://example.com/repo.git', ref: 'main' }, DefaultProfileByLang: { go: 'default' }, GateID: 'gate', Audit: { CreatedAt: '2026-07-15T00:00:00Z' }, latest_analysis: { id: 'a1', gate: { passed: false, results: [] }, gate_info: { key: 'release', name: 'Release', source: 'managed' } }, latest_job: { id: 'j1', status: 'succeeded' } }] } as Response)
     const projects = await api.listProjects()
     expect(projects[0]).toMatchObject({ id: 'p1', key: 'synapse', gateId: 'gate', sourceBinding: { kind: 'git', ref: 'main' }, latestAnalysis: { id: 'a1', gateInfo: { name: 'Release', source: 'managed' }, rating: { security: '?', reliability: '?', maintainability: '?' }, newCode: { rating: { security: '?', reliability: '?', maintainability: null } } }, latestJob: { id: 'j1', status: 'succeeded' } })
     expect(fetchSpy).toHaveBeenCalledWith('/api/v1/projects', expect.any(Object))
@@ -21,11 +21,11 @@ describe('Projects API', () => {
   })
 
   it('creates with the backend source and gate contract', async () => {
-    fetchSpy.mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ ID: 'p1', Key: 'synapse', SourceBinding: { Kind: 'local', Value: '/repo' } }) } as Response)
+    fetchSpy.mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ ID: 'p1', Key: 'synapse', SourceBinding: { kind: 'local', value: '/repo' } }) } as Response)
     await api.createProject({ name: 'Synapse', key: 'synapse', gateId: 'release', sourceBinding: { kind: 'local', value: '/repo', ref: '' } })
     const init = fetchSpy.mock.calls[0][1] as RequestInit
     expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/projects')
-    expect(JSON.parse(String(init.body))).toEqual({ name: 'Synapse', key: 'synapse', gate_id: 'release', source_binding: { Kind: 'local', Value: '/repo', Ref: '' } })
+    expect(JSON.parse(String(init.body))).toEqual({ name: 'Synapse', key: 'synapse', gate_id: 'release', source_binding: { kind: 'local', value: '/repo', ref: '' } })
   })
 
   it('manages quality gates', async () => {
