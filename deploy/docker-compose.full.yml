@@ -63,20 +63,32 @@ services:
       mc mb --ignore-existing local/${BLOB_BUCKET:-synapse-evidence} &&
       echo 'bucket ready'"
 
+  # A named volume is mounted after image build, so Docker creates it root-owned;
+  # initialize it before the non-root API starts.
+  project-source-artifacts-init:
+    image: alpine:3.22
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 10001:999 /project-source-artifacts"]
+    volumes:
+      - project-source-artifacts:/project-source-artifacts
+
   synapse-api:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-      target: full            # batteries-included: JDK + Maven + Gradle + git + syft + grype
     depends_on:
+      project-source-artifacts-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: full            # batteries-included: JDK + Maven + Gradle + git + syft + grype
     ports:
       - "8080:8080"
     volumes:
       - scancache:/home/synapse   # persist the Maven/Gradle caches across CLI scans
+      - project-source-artifacts:/home/synapse/project-source-artifacts
       # - ../:/scan:ro            # uncomment to `synapse-cli scan /scan` this repo
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS localhost:8080/healthz || exit 1"]
@@ -170,3 +182,4 @@ volumes:
   pgdata:
   miniodata:
   scancache:
+  project-source-artifacts:

@@ -83,12 +83,12 @@ describe('ProjectCodeWorkspace', () => {
     expect(navigate).toHaveBeenCalledWith(1001)
   })
 
-  it('renders aligned split rows and newline markers', () => {
+  it('renders persisted diff rows when source loading fails', () => {
     const diff = {
       capabilities: { source: { available: true, reason: null }, comparison: { available: true, reason: null }, unifiedDiff: { available: true, reason: null }, splitDiff: { available: true, reason: null }, highlighting: { available: false, reason: 'unsupported' } },
       diff: { analysisId: 'a1', base: index.head, head: index.head, path: 'src/main.ts', view: 'split' as const, contextTruncated: true, change: { oldPath: 'src/main.ts', newPath: 'src/main.ts', status: 'modified' as const, binary: false, modeOld: '100644', modeNew: '100644', hunks: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, rows: [{ kind: 'removed' as const, oldLine: 1, newLine: null, text: 'old', noFinalNewline: false }, { kind: 'added' as const, oldLine: null, newLine: 1, text: 'new', noFinalNewline: true }] }] } },
     }
-    render(<ProjectCodeWorkspace index={index} source={source} diff={diff} selectedPath="src/main.ts" selectedFindingId={null} view="split" onSelectFile={vi.fn()} onSelectFinding={vi.fn()} onView={vi.fn()} onRetrySource={vi.fn()} sourceError={null} diffError={null} />)
+    render(<ProjectCodeWorkspace index={index} source={null} diff={diff} selectedPath="src/main.ts" selectedFindingId={null} view="split" onSelectFile={vi.fn()} onSelectFinding={vi.fn()} onView={vi.fn()} onRetrySource={vi.fn()} sourceError="source artifact integrity check failed" diffError={null} />)
 
     expect(screen.getByRole('table', { name: 'Split code diff' })).toBeInTheDocument()
     expect(screen.getByText('old')).toBeInTheDocument()
@@ -108,6 +108,7 @@ describe('ProjectCodeWorkspace', () => {
     const { container } = render(<ProjectCodeWorkspace index={index} source={source} diff={diff} selectedPath="src/main.ts" selectedFindingId={null} view="unified" onSelectFile={vi.fn()} onSelectFinding={vi.fn()} onView={vi.fn()} onRetrySource={vi.fn()} sourceError={null} diffError={null} />)
 
     expect(screen.getByRole('table', { name: 'Unified code diff' })).toHaveAttribute('aria-rowcount', '502')
+    expect(screen.getByText('line-1')).toBeInTheDocument()
     expect(screen.getAllByRole('row').length).toBeLessThan(100)
     expect(screen.getByRole('status')).toHaveTextContent('src/main.ts, unified view')
     expect(container.firstElementChild).not.toHaveAttribute('aria-live')

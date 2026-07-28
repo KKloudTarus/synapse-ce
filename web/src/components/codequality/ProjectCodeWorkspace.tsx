@@ -65,10 +65,11 @@ export function ProjectCodeWorkspace({
   const findings = useMemo(() => [...(source?.findings ?? [])].sort((a, b) => a.location.startLine - b.location.startLine || a.id.localeCompare(b.id)), [source])
   const selectedFinding = findings.find((finding) => finding.id === selectedFindingId) ?? null
   const selectedFile = index.files.find((file) => file.path === selectedPath) ?? null
+  const contentError = view === 'source' ? sourceError : diffError
   const workspaceStatus = !selectedFile
     ? 'No source file selected'
-    : sourceError || diffError
-      ? `${selectedFile.path}: ${sourceError ?? diffError}`
+    : contentError
+      ? `${selectedFile.path}: ${contentError}`
       : view === 'source' && !source || view !== 'source' && !diff
         ? `Loading ${view} view for ${selectedFile.path}`
         : `${selectedFile.path}, ${view} view${selectedFinding ? `, finding ${findings.indexOf(selectedFinding) + 1} of ${findings.length}` : ''}`
@@ -148,17 +149,14 @@ export function ProjectCodeWorkspace({
         <section className="flex min-w-0 flex-1 flex-col">
           <WorkspaceHeader file={selectedFile} index={index} view={view} diff={diff} onView={onView} />
           {!selectedFile ? <EmptyState icon={FileCode2} title="Select a source file" hint="Choose a captured file to inspect the immutable analysis snapshot." />
-            : !selectedFile.sourceAvailable ? <Unavailable file={selectedFile} />
-              : sourceError ? <PaneError message={sourceError} onRetry={onRetrySource} />
-                : !source ? <CodeSkeleton />
-                  : <>
-                    {view === 'source'
-                      ? <SourcePane source={source} selectedFinding={selectedFinding} onSelectFinding={onSelectFinding} onNavigateLine={onNavigateLine} />
-                      : diffError ? <PaneError message={diffError} onRetry={onRetrySource} />
-                        : diff ? <DiffPane diff={diff} split={view === 'split'} />
-                          : <CodeSkeleton />}
-                    <FindingPanel findings={findings} selected={selectedFinding} onSelect={onSelectFinding} />
-                  </>}
+            : view === 'source'
+              ? !selectedFile.sourceAvailable ? <Unavailable file={selectedFile} />
+                : sourceError ? <PaneError message={sourceError} onRetry={onRetrySource} />
+                  : !source ? <CodeSkeleton />
+                    : <><SourcePane source={source} selectedFinding={selectedFinding} onSelectFinding={onSelectFinding} onNavigateLine={onNavigateLine} /><FindingPanel findings={findings} selected={selectedFinding} onSelect={onSelectFinding} /></>
+              : diffError ? <PaneError message={diffError} onRetry={onRetrySource} />
+                : diff ? <><DiffPane diff={diff} split={view === 'split'} /><FindingPanel findings={findings} selected={selectedFinding} onSelect={onSelectFinding} /></>
+                  : <CodeSkeleton />}
         </section>
       </div>
     </div>

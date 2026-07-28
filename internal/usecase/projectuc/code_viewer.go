@@ -242,18 +242,6 @@ func (s *Service) ReadCodeDiff(ctx context.Context, tenantID shared.ID, key, ana
 		if change.NewPath != "" && manifestOmittedByLimit(analysis.SourceManifest, change.NewPath) {
 			return CodeDiffView{}, analysis.Capabilities, projectanalysis.ErrSourceLimit
 		}
-		if change.OldPath != "" && s.sourceArtifacts != nil {
-			_, out.BaseFile, err = s.sourceArtifacts.LoadBase(ctx, tenantID, shared.ID(analysis.ProjectID), analysis.ID, change.OldPath)
-			if err != nil {
-				return CodeDiffView{}, analysis.Capabilities, err
-			}
-		}
-		if change.NewPath != "" && s.sourceArtifacts != nil {
-			_, out.SourceFile, err = s.sourceArtifacts.Load(ctx, tenantID, shared.ID(analysis.ProjectID), analysis.ID, change.NewPath)
-			if err != nil {
-				return CodeDiffView{}, analysis.Capabilities, err
-			}
-		}
 		return out, analysis.Capabilities, nil
 	}
 	return CodeDiffView{}, analysis.Capabilities, shared.ErrNotFound
