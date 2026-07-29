@@ -253,6 +253,7 @@ func htmlFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 
 	var nodes []*sitter.Node
 	workStack := []stackItem{{node: root, depth: 0}}
+	traversalComplete := true
 
 	for len(workStack) > 0 {
 		item := workStack[len(workStack)-1]
@@ -271,6 +272,8 @@ func htmlFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 					workStack = append(workStack, stackItem{node: ch, depth: item.depth + 1})
 				}
 			}
+		} else if n.ChildCount() > 0 {
+			traversalComplete = false
 		}
 	}
 
@@ -338,6 +341,12 @@ func htmlFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			missingLine = 1
 		}
 		collector.emit("doctype-missing", missingLine)
+	}
+
+	maintainabilityFacts := htmlBuildMaintainabilityFacts(nodes, src, traversalComplete)
+	maintainabilityState := &htmlMaintainabilityState{
+		nestedInteractiveSeen: make(map[uint32]bool),
+		mainLandmarkNames:     make(map[string]bool),
 	}
 
 	// Main node inspection pass for other rules
@@ -456,6 +465,18 @@ func htmlFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 			secCandidates := collectHTMLSecurityCandidates(n, tName, attrs, src)
 			for _, sc := range secCandidates {
 				addCandidate(sc.rule, sc.line, sc.offset)
+			}
+
+			maintCandidates := collectHTMLMaintainabilityCandidates(
+				n,
+				tName,
+				attrs,
+				src,
+				maintainabilityFacts,
+				maintainabilityState,
+			)
+			for _, mc := range maintCandidates {
+				addCandidate(mc.rule, mc.line, mc.offset)
 			}
 
 			sort.SliceStable(tagCandidates, func(i, j int) bool {

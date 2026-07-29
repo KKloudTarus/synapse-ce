@@ -36,6 +36,7 @@ func scanHTMLFixture(source string) []QualityFinding {
 func assertExactHTMLRules(t *testing.T, source string, expected ...string) {
 	t.Helper()
 	findings := scanHTMLFixture(source)
+	var existingFamilyFindings []QualityFinding
 
 	for _, f := range findings {
 		if f.Kind == "" {
@@ -56,10 +57,13 @@ func assertExactHTMLRules(t *testing.T, source string, expected ...string) {
 		if f.Line <= 0 {
 			t.Errorf("invalid Line %d for rule %s", f.Line, f.Rule)
 		}
+		if f.Kind != "quality" {
+			existingFamilyFindings = append(existingFamilyFindings, f)
+		}
 	}
 
-	gotRules := make([]string, len(findings))
-	for i, f := range findings {
+	gotRules := make([]string, len(existingFamilyFindings))
+	for i, f := range existingFamilyFindings {
 		gotRules[i] = f.Rule
 	}
 
@@ -271,12 +275,12 @@ func TestHTMLInventoryAndSeverityParity(t *testing.T) {
 		}
 	}
 
-	if len(catHTMLRules) != 18 {
-		t.Fatalf("expected 18 catalog rules for HTML, got %d", len(catHTMLRules))
+	if len(catHTMLRules) != 50 {
+		t.Fatalf("expected 50 catalog rules for HTML, got %d", len(catHTMLRules))
 	}
 
-	if len(htmlRuntimeRules) != 18 {
-		t.Fatalf("expected 18 runtime rules for HTML, got %d", len(htmlRuntimeRules))
+	if len(htmlRuntimeRules) != 50 {
+		t.Fatalf("expected 50 runtime rules for HTML, got %d", len(htmlRuntimeRules))
 	}
 
 	for key, rtRule := range htmlRuntimeRules {

@@ -6,7 +6,7 @@ import (
 )
 
 func htmlRules() []rule.Rule {
-	return append([]rule.Rule{
+	correctness := []rule.Rule{
 		{
 			Key:                 "html:doctype-missing",
 			Name:                "Missing HTML DOCTYPE declaration",
@@ -187,5 +187,7 @@ func htmlRules() []rule.Rule {
 			RemediationEffort:   5,
 			Detection:           rule.DetectionAST,
 		},
-	}, htmlSecurityRules...)
+	}
+	rules := append(correctness, htmlSecurityRules...)
+	return append(rules, htmlMaintainabilityRules...)
 }
