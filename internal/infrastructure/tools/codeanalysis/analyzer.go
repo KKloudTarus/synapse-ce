@@ -159,12 +159,8 @@ func (a *Analyzer) analyze(ctx context.Context, root string, limits scanLimits) 
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			hits, findingsErr := notebookFindings(ctx, doc, rel)
-			if findingsErr != nil {
+			if findingsErr := notebookFindings(ctx, doc, rel, collector.add); findingsErr != nil {
 				return findingsErr
-			}
-			for _, hit := range hits {
-				collector.add(hit)
 			}
 			if strings.EqualFold(doc.KernelLanguage, "python") {
 				for _, cell := range doc.Cells {

@@ -87,6 +87,110 @@ func TestSARIFPhysicalLocationForFirstParty(t *testing.T) {
 // TestSARIFNoLogicalOnlyLocation guards the GitHub-ingestion invariant: a result must never carry a
 // location that has only a logicalLocation (GitHub rejects the whole file with "expected a physical
 // location"). Without a manifest resolver, an SCA finding therefore gets NO location, not a logical-only one.
+func TestSARIFColonRuleKeyUsesStructuredIdentity(t *testing.T) {
+	f := finding.Finding{
+		ID:             "text-1",
+		Title:          "Bidirectional Unicode control character",
+		Severity:       shared.SeverityHigh,
+		Status:         finding.StatusOpen,
+		Kind:           finding.KindSAST,
+		RuleKey:        "text:bidi-unicode",
+		SourceLocation: &finding.SourceLocation{File: "src/app.go", StartLine: 42, EndLine: 42},
+		DedupKey:       "cq:sast:text:bidi-unicode:src/app.go:42",
+	}
+
+	log := buildSARIF([]finding.Finding{f}, "v9", SARIFOptions{})
+	if len(log.Runs[0].Tool.Driver.Rules) != 1 || log.Runs[0].Tool.Driver.Rules[0].ID != f.RuleKey {
+		t.Fatalf("driver rules = %+v, want rule %q", log.Runs[0].Tool.Driver.Rules, f.RuleKey)
+	}
+	result := log.Runs[0].Results[0]
+	if result.RuleID != f.RuleKey {
+		t.Errorf("result ruleId = %q, want %q", result.RuleID, f.RuleKey)
+	}
+	if len(result.Locations) != 1 || result.Locations[0].PhysicalLocation == nil {
+		t.Fatalf("locations = %+v, want one physical location", result.Locations)
+	}
+	physical := result.Locations[0].PhysicalLocation
+	if physical.ArtifactLocation.URI != f.SourceLocation.File {
+		t.Errorf("uri = %q, want %q", physical.ArtifactLocation.URI, f.SourceLocation.File)
+	}
+	if physical.Region == nil || physical.Region.StartLine != f.SourceLocation.StartLine {
+		t.Errorf("region = %+v, want startLine %d", physical.Region, f.SourceLocation.StartLine)
+	}
+}
+
+func TestSARIFStructuredRuleUsesValidatedLegacyLocation(t *testing.T) {
+	f := finding.Finding{
+		ID:       "stored-text",
+		Title:    "Stored Text finding",
+		Severity: shared.SeverityHigh,
+		Status:   finding.StatusOpen,
+		Kind:     finding.KindSAST,
+		RuleKey:  "text:bidi-unicode",
+		DedupKey: "cq:sast:text:bidi-unicode:src/app.go:42",
+	}
+
+	result := buildSARIF([]finding.Finding{f}, "v9", SARIFOptions{}).Runs[0].Results[0]
+	if result.RuleID != f.RuleKey {
+		t.Errorf("ruleId = %q, want %q", result.RuleID, f.RuleKey)
+	}
+	if len(result.Locations) != 1 || result.Locations[0].PhysicalLocation == nil {
+		t.Fatalf("locations = %+v, want one physical location", result.Locations)
+	}
+	physical := result.Locations[0].PhysicalLocation
+	if physical.ArtifactLocation.URI != "src/app.go" || physical.Region == nil || physical.Region.StartLine != 42 {
+		t.Errorf("physical location = %+v, want src/app.go:42", physical)
+	}
+}
+
+func TestSARIFInvalidStructuredLocationDoesNotParseDedup(t *testing.T) {
+	for _, dedupKey := range []string{
+		"cq:sast:text:bidi-unicode:src/app.go:7",
+		"sast:ai:judgment-anchor",
+		"vuln:CVE-2020-7471:django:2.2.0",
+	} {
+		t.Run(dedupKey, func(t *testing.T) {
+			f := finding.Finding{
+				ID:                "structured",
+				Title:             "Structured finding",
+				Severity:          shared.SeverityHigh,
+				Status:            finding.StatusOpen,
+				Kind:              finding.KindSAST,
+				RuleKey:           "text:bidi-unicode",
+				SourceLocation:    &finding.SourceLocation{File: "../outside.go", StartLine: 99, EndLine: 99},
+				DedupKey:          dedupKey,
+				ClassReachability: "reachable",
+			}
+
+			result := buildSARIF([]finding.Finding{f}, "v9", SARIFOptions{
+				Manifest: func(finding.Finding) string { return "requirements.txt" },
+				Fix:      func(finding.Finding) string { return "9.9.9" },
+			}).Runs[0].Results[0]
+			if result.RuleID != f.RuleKey {
+				t.Errorf("ruleId = %q, want %q", result.RuleID, f.RuleKey)
+			}
+			if len(result.Locations) != 0 {
+				t.Errorf("locations = %+v, want none for invalid structured location", result.Locations)
+			}
+			if _, ok := result.Properties["fixedVersion"]; ok {
+				t.Errorf("structured finding inherited dependency fix: %+v", result.Properties)
+			}
+			if _, ok := result.Properties["componentReachability"]; ok {
+				t.Errorf("structured finding inherited dependency reachability: %+v", result.Properties)
+			}
+		})
+	}
+}
+
+func TestSARIFRejectsInvalidManifestLocation(t *testing.T) {
+	log := buildSARIF(firstPartyFindings(), "v9", SARIFOptions{Manifest: func(finding.Finding) string { return "../outside.lock" }})
+	for _, result := range log.Runs[0].Results {
+		if result.RuleID == "CVE-2020-7471" && len(result.Locations) != 0 {
+			t.Errorf("invalid manifest produced locations: %+v", result.Locations)
+		}
+	}
+}
+
 func TestSARIFNoLogicalOnlyLocation(t *testing.T) {
 	log := buildSARIF(firstPartyFindings(), "v9", SARIFOptions{}) // no manifest resolver
 	for _, r := range log.Runs[0].Results {
@@ -143,6 +247,9 @@ func TestFirstPartyLocParsing(t *testing.T) {
 		{"code-quality", "cq:quality:quality-todo:app/main.go:6", true, "quality-todo", "app/main.go", 6},
 		{"code-quality-sast", "cq:sast:weak-crypto-md5:app/main.go:42", true, "weak-crypto-md5", "app/main.go", 42},
 		{"path-with-colon", "sast:rule:weird:path.go:7", true, "rule", "weird:path.go", 7},
+		{"absolute-path", "sast:rule:/etc/passwd:7", false, "", "", 0},
+		{"traversal-path", "sast:rule:../secret.go:7", false, "", "", 0},
+		{"windows-path", `sast:rule:C:\\Users\\alice\\secret.go:7`, false, "", "", 0},
 		{"sca-vuln", "vuln:CVE-2020-7471:django:2.2.0", false, "", "", 0},
 		{"license", "license:GPL-3.0-only", false, "", "", 0},
 		{"non-numeric-line", "sast:rule:file.go:notaline", false, "", "", 0},
