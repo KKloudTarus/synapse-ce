@@ -2,6 +2,7 @@ package codeanalysis
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -169,8 +170,10 @@ func TestAnalyzerNotebookCapsFindings(t *testing.T) {
 	cell := `{"cell_type":"code","source":"api_key = '` + strings.Repeat("a", 15) + `'"}`
 	writeNotebook(t, root, `{"metadata":{"kernelspec":{"name":"python3","language":"python"}},"cells":[`+strings.TrimSuffix(strings.Repeat(cell+",", maxFindings+1), ",")+`]}`)
 	findings, err := New().Analyze(context.Background(), root)
-	if err != nil {
-		t.Fatalf("Analyze: %v", err)
+	// The priority collector caps at maxFindings and reports truncation via
+	// ErrFindingsTruncated; both behaviors must hold.
+	if !errors.Is(err, ErrFindingsTruncated) {
+		t.Fatalf("expected ErrFindingsTruncated, got: %v", err)
 	}
 	if len(findings) != maxFindings {
 		t.Fatalf("finding count = %d, want cap %d", len(findings), maxFindings)

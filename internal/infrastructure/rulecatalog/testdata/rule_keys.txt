@@ -2270,6 +2270,14 @@ terraform-sns-unencrypted
 terraform-sqs-no-dlq
 terraform-sqs-unencrypted
 terraform-wildcard-principal
+text:bidi-unicode
+text:invisible-unicode
+text:missing-final-newline
+text:mixed-line-endings
+text:overlong-line
+text:oversized-file
+text:trailing-whitespace
+text:utf8-bom
 ts-array-type-generic
 ts-as-any-cast
 ts-ban-boxed-types

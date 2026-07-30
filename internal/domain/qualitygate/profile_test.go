@@ -74,3 +74,39 @@ func TestEmptyProfileNoOp(t *testing.T) {
 		t.Errorf("empty profile must pass findings through, got %d", len(got))
 	}
 }
+
+func TestProfileApplyPrefersColonRuleKey(t *testing.T) {
+	disabled := false
+	p := Profile{Rules: map[string]RuleConfig{
+		"text:bidi-unicode": {Enabled: &disabled},
+	}}
+	got := p.Apply([]finding.Finding{{
+		Kind: finding.KindSAST, RuleKey: "text:bidi-unicode",
+		DedupKey: "cq:sast:text:bidi-unicode:a.go:1", Severity: shared.SeverityHigh,
+	}})
+	if len(got) != 0 {
+		t.Fatalf("disabled colon-bearing RuleKey retained %d findings", len(got))
+	}
+}
+
+func TestProfileApplyOverridesColonRuleKeySeverity(t *testing.T) {
+	p := Profile{Rules: map[string]RuleConfig{
+		"xml:external-entity": {Severity: string(shared.SeverityCritical)},
+	}}
+	got := p.Apply([]finding.Finding{{
+		Kind: finding.KindSAST, RuleKey: "xml:external-entity",
+		DedupKey: "cq:sast:xml:external-entity:a.xml:1", Severity: shared.SeverityHigh,
+	}})
+	if len(got) != 1 || got[0].Severity != shared.SeverityCritical {
+		t.Fatalf("severity override result = %+v", got)
+	}
+}
+
+func TestProfileApplyFallsBackForLegacyFinding(t *testing.T) {
+	disabled := false
+	p := Profile{Rules: map[string]RuleConfig{"weak-hash-md5": {Enabled: &disabled}}}
+	got := p.Apply([]finding.Finding{{DedupKey: "sast:weak-hash-md5:a.go:1"}})
+	if len(got) != 0 {
+		t.Fatalf("legacy disabled rule retained %d findings", len(got))
+	}
+}

@@ -24,13 +24,21 @@ type Profile struct {
 
 // Apply drops findings whose rule is disabled and overrides severities per the profile. A finding whose
 // rule is not in the profile passes through unchanged. Returns the input as-is when the profile is empty.
+//
+// For rule-based findings the stable catalog RuleKey is preferred over
+// DedupKey parsing: RuleKey is a direct catalog key and avoids any
+// ambiguity introduced by the cq:<kind>: prefix or file:line suffix.
 func (p Profile) Apply(findings []finding.Finding) []finding.Finding {
 	if len(p.Rules) == 0 {
 		return findings
 	}
 	out := make([]finding.Finding, 0, len(findings)) // fresh slice: never mutate the caller's backing array
 	for _, f := range findings {
-		cfg, ok := p.Rules[RuleIDOf(f.DedupKey)]
+		ruleID := RuleIDOf(f.DedupKey)
+		if f.Kind.IsRuleBased() && f.RuleKey != "" {
+			ruleID = f.RuleKey
+		}
+		cfg, ok := p.Rules[ruleID]
 		if !ok {
 			out = append(out, f)
 			continue

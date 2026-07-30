@@ -209,6 +209,7 @@ func TestMetadata_ApprovedLanguage(t *testing.T) {
 		"Rust":                  true,
 		"CSS":                   true,
 		"HTML":                  true,
+		"Text":                  true,
 	}
 
 	for _, r := range rules {

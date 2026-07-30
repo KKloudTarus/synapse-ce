@@ -1,6 +1,7 @@
 package codeanalysis
 
 import (
+	"context"
 	"regexp"
 	"strings"
 
@@ -29,7 +30,7 @@ var (
 	notebookRoutineTracebackPath = []string{"site-packages", "dist-packages", "/.venv/", "/venv/", "/virtualenv/"}
 )
 
-func notebookFindings(doc notebook.Document, rel string) []ports.CodeAnalysisRawFinding {
+func notebookFindings(ctx context.Context, doc notebook.Document, rel string) ([]ports.CodeAnalysisRawFinding, error) {
 	var out []ports.CodeAnalysisRawFinding
 	add := func(cell notebook.Cell, ruleID, cwe string, severity shared.Severity, title, description string) {
 		out = append(out, ports.CodeAnalysisRawFinding{
@@ -51,6 +52,9 @@ func notebookFindings(doc notebook.Document, rel string) []ports.CodeAnalysisRaw
 	}
 	lastExecution := 0
 	for _, cell := range doc.Cells {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if cell.Type != "code" {
 			continue
 		}
@@ -110,7 +114,7 @@ func notebookFindings(doc notebook.Document, rel string) []ports.CodeAnalysisRaw
 			add(cell, "ipynb-traceback-sensitive-path", "CWE-200", shared.SeverityMedium, "Sensitive path saved in notebook output", "Saved output exposes traceback or local path details that can reveal environment structure.")
 		}
 	}
-	return out
+	return out, nil
 }
 
 func hasSuspiciousScript(output string) bool {

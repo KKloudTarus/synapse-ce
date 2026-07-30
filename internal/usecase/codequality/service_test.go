@@ -265,6 +265,9 @@ func TestServiceBridgesXMLSASTFindings(t *testing.T) {
 	if xxe == nil || xxe.Kind != finding.KindSAST {
 		t.Fatalf("expected XML external-entity to become KindSAST, got %+v", xxe)
 	}
+	if xxe.RuleKey != "xml:external-entity" || xxe.SourceLocation == nil || xxe.SourceLocation.File != "config.xml" || xxe.SourceLocation.StartLine != 2 {
+		t.Fatalf("colon-bearing rule identity/location lost: %+v", xxe)
+	}
 
 	exp := byRule(fs, "xml:entity-expansion")
 	if exp == nil || exp.Kind != finding.KindSAST {
