@@ -41,10 +41,18 @@ func htmlFirstCompleteAttribute(attrs []htmlAttrInfo, name string) *htmlAttrInfo
 }
 
 func htmlAttributeTokens(attr *htmlAttrInfo) []string {
-	if attr == nil || !attr.hasValue {
+	tokens := htmlAttributeIDReferenceTokens(attr)
+	for index := range tokens {
+		tokens[index] = htmlASCIILower(tokens[index])
+	}
+	return tokens
+}
+
+func htmlAttributeIDReferenceTokens(attr *htmlAttrInfo) []string {
+	val, ok := htmlDecodedAttributeValue(attr)
+	if !ok {
 		return nil
 	}
-	val := stdhtml.UnescapeString(attr.value)
 	var tokens []string
 	start := -1
 	for i := 0; i <= len(val); i++ {
@@ -57,7 +65,7 @@ func htmlAttributeTokens(attr *htmlAttrInfo) []string {
 		}
 		if isSpace {
 			if start >= 0 {
-				tokens = append(tokens, htmlASCIILower(val[start:i]))
+				tokens = append(tokens, val[start:i])
 				start = -1
 			}
 		} else if start < 0 {

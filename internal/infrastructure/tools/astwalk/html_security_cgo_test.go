@@ -296,7 +296,7 @@ func TestHTMLSecurityFamilyCountsAndTypes(t *testing.T) {
 		t.Fatalf("cat.List: %v", err)
 	}
 
-	var bugs, vulns, hotspots int
+	var bugs, vulns, hotspots, smells int
 	var htmlCount int
 	for _, r := range rules {
 		if r.Language == "HTML" {
@@ -308,12 +308,14 @@ func TestHTMLSecurityFamilyCountsAndTypes(t *testing.T) {
 				vulns++
 			case rule.TypeSecurityHotspot:
 				hotspots++
+			case rule.TypeCodeSmell:
+				smells++
 			}
 		}
 	}
 
-	if htmlCount != 18 {
-		t.Fatalf("expected 18 HTML catalog rules, got %d", htmlCount)
+	if htmlCount != 50 {
+		t.Fatalf("expected 50 HTML catalog rules, got %d", htmlCount)
 	}
 	if bugs != 10 {
 		t.Fatalf("expected 10 bug rules for HTML, got %d", bugs)
@@ -323,6 +325,9 @@ func TestHTMLSecurityFamilyCountsAndTypes(t *testing.T) {
 	}
 	if hotspots != 6 {
 		t.Fatalf("expected 6 security_hotspot rules for HTML, got %d", hotspots)
+	}
+	if smells != 32 {
+		t.Fatalf("expected 32 code_smell rules for HTML, got %d", smells)
 	}
 }
 
