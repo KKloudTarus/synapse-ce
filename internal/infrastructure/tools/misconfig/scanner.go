@@ -69,6 +69,7 @@ const (
 	cfgDockerfile
 	cfgKubernetes
 	cfgTerraform
+	cfgARM
 	cfgCloudFormation
 	cfgCompose
 	cfgGithubActions
@@ -145,6 +146,8 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 				kind = cfgCompose
 			case looksKubernetes(data):
 				kind = cfgKubernetes
+			case looksARM(data):
+				kind = cfgARM
 			case looksCloudFormation(data):
 				kind = cfgCloudFormation
 			default:
@@ -158,6 +161,8 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			mergeK8sScanResult(&kubernetes, scanKubernetes(rel, data))
 		case cfgTerraform:
 			out = append(out, scanTerraform(rel, data)...)
+		case cfgARM:
+			out = append(out, scanARM(rel, data)...)
 		case cfgCloudFormation:
 			out = append(out, scanCloudFormation(rel, data)...)
 		case cfgCompose:

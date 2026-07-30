@@ -7,6 +7,7 @@ import (
 
 func misconfigRules() []rule.Rule {
 	var rules []rule.Rule
+	rules = append(rules, armRules()...)
 	rules = append(rules, cfnRules()...)
 	rules = append(rules, composeRules()...)
 	rules = append(rules, dockerfileRules()...)
