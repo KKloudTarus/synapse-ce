@@ -36,5 +36,3 @@ prompt.txt
 
 # goreleaser build output
 dist/
-
-/.claude/
