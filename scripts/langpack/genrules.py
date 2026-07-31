@@ -7,12 +7,12 @@ Reads spec modules (specs_*.py) and emits BOTH:
 so the engine rule and its catalog entry cannot drift. The Go parity test verifies each
 example actually triggers / does not trigger the regex.
 """
-import json, re, sys, importlib.util, os
+import json, re, sys, importlib.util, os, subprocess
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-LANG_EXTS = {"js": "jsExts", "java": "javaExts", "py": "pyExts", "go": "goExts", "cs": "csExts", "c": "cExts", "cpp": "cppExts", "rust": "rustExts"}
-LANG_LABEL = {"js": "JavaScript/TypeScript", "java": "Java", "py": "Python", "go": "Go", "cs": "C#", "c": "C", "cpp": "C++", "rust": "Rust"}
+LANG_EXTS = {"js": "jsExts", "java": "javaExts", "py": "pyExts", "go": "goExts", "cs": "csExts", "c": "cExts", "cpp": "cppExts", "rust": "rustExts", "scala": "scalaExts"}
+LANG_LABEL = {"js": "JavaScript/TypeScript", "java": "Java", "py": "Python", "go": "Go", "cs": "C#", "c": "C", "cpp": "C++", "rust": "Rust", "scala": "Scala"}
 TYPE_CONST = {"vuln": "TypeVulnerability", "bug": "TypeBug", "smell": "TypeCodeSmell", "hotspot": "TypeSecurityHotspot"}
 QUAL_CONST = {"sec": "QualitySecurity", "rel": "QualityReliability", "maint": "QualityMaintainability"}
 SEV_CONST = {"critical": "SeverityCritical", "high": "SeverityHigh", "medium": "SeverityMedium", "low": "SeverityLow", "info": "SeverityInfo"}
@@ -121,8 +121,11 @@ def emit_catalog(specs):
 if __name__ == "__main__":
     specs = load_specs()
     n = validate(specs)
-    open(os.path.join(ROOT, "internal/infrastructure/tools/sast/patterns_langpack.go"), "w").write(emit_engine_v2(specs))
-    open(os.path.join(ROOT, "internal/infrastructure/rulecatalog/langpacks.go"), "w").write(emit_catalog(specs))
+    engine_path = os.path.join(ROOT, "internal/infrastructure/tools/sast/patterns_langpack.go")
+    catalog_path = os.path.join(ROOT, "internal/infrastructure/rulecatalog/langpacks.go")
+    open(engine_path, "w").write(emit_engine_v2(specs))
+    open(catalog_path, "w").write(emit_catalog(specs))
+    subprocess.run(["gofmt", "-w", engine_path, catalog_path], check=True)
     # golden keys. Track exactly which keys we generated last time in a sidecar so the refresh
     # removes stale/renamed spec keys without depending on prefix heuristics, and never touches
     # hand-written keys (e.g. the tree-sitter AST rules java-ast-*, js-ast-*, python-*).
