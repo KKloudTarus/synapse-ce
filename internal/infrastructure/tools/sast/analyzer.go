@@ -169,8 +169,14 @@ func readSourceLines(path string) []string {
 // scanLines applies rules to an already-read source file.
 func (a *Analyzer) scanLines(rel, ext string, lines []string, project projectContext) []ports.SASTRawFinding {
 	var hits []ports.SASTRawFinding
+	var scalaLex scalaLexState
 	for i, text := range lines {
 		line := i + 1
+		matchText := text
+		isScala := scalaExts[ext]
+		if isScala {
+			matchText = scalaLex.codeOnly(text)
+		}
 		if len(text) > maxLineBytes {
 			continue // minified/blob line
 		}
@@ -182,7 +188,13 @@ func (a *Analyzer) scanLines(rel, ext string, lines []string, project projectCon
 			if r.id == "generic-sql-dynamic-execute" && pyExts[ext] && a.matchesRule("sqlalchemy-raw-sql-dynamic", ext, text) {
 				continue // specialized SQLAlchemy rule owns this Python sink
 			}
-			if r.re.MatchString(text) && !r.skip(text) {
+			var matched bool
+			if isScala && strings.HasPrefix(r.id, "scala:") {
+				matched = scalaRuleMatches(r, text, matchText)
+			} else {
+				matched = r.re.MatchString(text) && !r.skip(text)
+			}
+			if matched {
 				h := ports.SASTRawFinding{
 					File: rel, Line: line, RuleID: r.id, CWE: r.cwe,
 					Severity: r.severity, Title: r.title, Description: r.desc,
