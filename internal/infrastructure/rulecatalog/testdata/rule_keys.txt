@@ -2198,6 +2198,7 @@ scala:asinstanceof
 scala:blocking-in-future
 scala:catch-all
 scala:catch-throwable
+scala:cognitive-complexity
 scala:collection-apply-index
 scala:collection-breakout-deprecated
 scala:collection-head
