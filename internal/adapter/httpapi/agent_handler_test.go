@@ -183,7 +183,8 @@ func TestReserveAgentSlot_DurableAlwaysReserves(t *testing.T) {
 }
 
 func withPrincipal(req *http.Request, id, role string) *http.Request {
-	return req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: id, Name: id, Role: role}))
+	ctx := context.WithValue(req.Context(), principalKey, Principal{ID: id, Name: id, Role: role})
+	return req.WithContext(shared.WithTenant(ctx, ""))
 }
 
 func TestStartAgentSessionReturnsSession(t *testing.T) {

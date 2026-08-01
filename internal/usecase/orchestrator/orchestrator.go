@@ -465,19 +465,30 @@ func lastPendingCall(transcript []agent.Message) (agent.ToolCall, bool) {
 
 // agentJob is the durable-queue payload for an agent run.
 type agentJob struct {
-	Op        string `json:"op"` // "drive" | "resume"
-	SessionID string `json:"session_id"`
-	ActionID  string `json:"action_id,omitempty"`
+	Op        string  `json:"op"` // "drive" | "resume"
+	TenantID  *string `json:"tenant_id"`
+	SessionID string  `json:"session_id"`
+	ActionID  string  `json:"action_id,omitempty"`
 }
 
-// DriveJob encodes a job that drives a started session to completion.
-func DriveJob(sessionID shared.ID) ([]byte, error) {
-	return json.Marshal(agentJob{Op: "drive", SessionID: sessionID.String()})
+// DriveJob encodes a tenant-bound job that drives a started session to completion.
+func DriveJob(ctx context.Context, sessionID shared.ID) ([]byte, error) {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return nil, fmt.Errorf("%w: tenant context is required for agent job", shared.ErrValidation)
+	}
+	tenant := tenantID.String()
+	return json.Marshal(agentJob{Op: "drive", TenantID: &tenant, SessionID: sessionID.String()})
 }
 
-// ResumeJob encodes a job that resumes a session after the given action was decided.
-func ResumeJob(sessionID, actionID shared.ID) ([]byte, error) {
-	return json.Marshal(agentJob{Op: "resume", SessionID: sessionID.String(), ActionID: actionID.String()})
+// ResumeJob encodes a tenant-bound job that resumes a session after the given action was decided.
+func ResumeJob(ctx context.Context, sessionID, actionID shared.ID) ([]byte, error) {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return nil, fmt.Errorf("%w: tenant context is required for agent job", shared.ErrValidation)
+	}
+	tenant := tenantID.String()
+	return json.Marshal(agentJob{Op: "resume", TenantID: &tenant, SessionID: sessionID.String(), ActionID: actionID.String()})
 }
 
 // RunJob is the worker handler (JobKind). It drives or resumes a session. A genuine
@@ -489,6 +500,10 @@ func (o *Orchestrator) RunJob(ctx context.Context, payload []byte) error {
 	if err := json.Unmarshal(payload, &j); err != nil {
 		return fmt.Errorf("%w: malformed agent job: %v", shared.ErrValidation, err)
 	}
+	if j.TenantID == nil {
+		return fmt.Errorf("%w: agent job is missing tenant context", shared.ErrValidation)
+	}
+	ctx = shared.WithTenant(ctx, shared.ID(*j.TenantID))
 	var sess agent.Session
 	var err error
 	switch j.Op {
@@ -514,6 +529,10 @@ func (o *Orchestrator) FailStrandedJob(ctx context.Context, payload []byte, caus
 	if err := json.Unmarshal(payload, &j); err != nil {
 		return fmt.Errorf("%w: malformed agent job: %v", shared.ErrValidation, err)
 	}
+	if j.TenantID == nil {
+		return fmt.Errorf("%w: agent job is missing tenant context", shared.ErrValidation)
+	}
+	ctx = shared.WithTenant(ctx, shared.ID(*j.TenantID))
 	sessionID := shared.ID(j.SessionID)
 	release, ok, err := o.lock(ctx, sessionID)
 	if err != nil {

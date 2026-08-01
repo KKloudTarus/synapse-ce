@@ -65,7 +65,7 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (int, error) {
 			r.log.Info("reconcile: session awaiting approval (not auto-driven)", "session", sess.ID.String())
 			continue
 		}
-		payload, err := DriveJob(sess.ID)
+		payload, err := DriveJob(shared.WithTenant(ctx, sess.TenantID), sess.ID)
 		if err != nil {
 			r.log.Error("reconcile: build drive job", "session", sess.ID.String(), "err", err)
 			continue

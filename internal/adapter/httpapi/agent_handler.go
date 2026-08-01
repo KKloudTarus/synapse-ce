@@ -162,7 +162,7 @@ func (rt *Router) startAgentSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	payload, err := orchestrator.DriveJob(sess.ID)
+	payload, err := orchestrator.DriveJob(r.Context(), sess.ID)
 	if err != nil {
 		release()
 		writeError(w, rt.log, err)
@@ -292,7 +292,7 @@ func (rt *Router) decideAgentApproval(w http.ResponseWriter, r *http.Request) {
 	}
 	// Resume either way: an approval executes the action; a denial is fed back and the loop
 	// continues so the agent can adapt.
-	payload, err := orchestrator.ResumeJob(prop.SessionID, actionID)
+	payload, err := orchestrator.ResumeJob(r.Context(), prop.SessionID, actionID)
 	if err != nil {
 		release()
 		writeError(w, rt.log, err)

@@ -315,7 +315,7 @@ func main() {
 			os.Exit(1)
 		}
 		approvalSvc.SetResumeEnqueuer(func(ctx context.Context, sid, aid shared.ID) error {
-			p, err := orchestrator.ResumeJob(sid, aid)
+			p, err := orchestrator.ResumeJob(ctx, sid, aid)
 			if err != nil {
 				return err
 			}
