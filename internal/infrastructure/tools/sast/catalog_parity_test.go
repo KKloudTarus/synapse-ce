@@ -74,6 +74,8 @@ func TestCatalogParity(t *testing.T) {
 			expectedLang = "C++" // cppExts (C++-only, no .c)
 		case tc.exts != nil && tc.exts[".rs"]:
 			expectedLang = "Rust" // rustExts (Rust-only)
+		case tc.exts != nil && tc.exts[".scala"]:
+			expectedLang = "Scala" // scalaExts (Scala-only)
 		case explicitSASTLanguages[tc.id] != "":
 			expectedLang = explicitSASTLanguages[tc.id]
 		default:
