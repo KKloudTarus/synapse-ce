@@ -72,7 +72,7 @@ func (r *EngagementRepository) Create(ctx context.Context, e *engagement.Engagem
 // full scope target set, replaced atomically in one transaction (E1 scope CRUD +
 // lifecycle). Returns shared.ErrNotFound if the engagement does not exist. Unlike
 // Create's deterministic scope PKs, the replace path uses generated IDs.
-func (r *EngagementRepository) ProjectContexts(ctx context.Context, tenantID shared.ID, projectIDs []shared.ID) (map[shared.ID]*engagement.Engagement, error) {
+func (r *EngagementRepository) ProjectContexts(ctx context.Context, tenantID shared.ID, projectIDs []shared.ID) (out map[shared.ID]*engagement.Engagement, err error) {
 	ids := make([]string, len(projectIDs))
 	for i, id := range projectIDs {
 		ids[i] = id.String()
@@ -80,20 +80,23 @@ func (r *EngagementRepository) ProjectContexts(ctx context.Context, tenantID sha
 	if len(ids) == 0 {
 		return map[shared.ID]*engagement.Engagement{}, nil
 	}
-	rows, err := r.pool.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 AND project_id = ANY($2)`, tenantID.String(), ids)
-	if err != nil {
-		return nil, fmt.Errorf("list project contexts: %w", err)
-	}
-	defer rows.Close()
-	out := map[shared.ID]*engagement.Engagement{}
-	for rows.Next() {
-		e, err := scanEngagement(rows)
+	out = map[shared.ID]*engagement.Engagement{}
+	err = WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 AND project_id = ANY($2)`, tenantID.String(), ids)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("list project contexts: %w", err)
 		}
-		out[e.ProjectID] = e
-	}
-	return out, rows.Err()
+		defer rows.Close()
+		for rows.Next() {
+			e, err := scanEngagement(rows)
+			if err != nil {
+				return err
+			}
+			out[e.ProjectID] = e
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 
 func (r *EngagementRepository) Update(ctx context.Context, e *engagement.Engagement) error {
@@ -175,79 +178,67 @@ func (r *EngagementRepository) GetByID(ctx context.Context, id shared.ID) (*enga
 // tenant of ” (single-tenant / default-tenant admin) matches any row; a non-empty tenant
 // matches only its own – tenant A cannot read tenant B's engagement (ErrNotFound, existence
 // not revealed).
-func (r *EngagementRepository) GetByIDInTenant(ctx context.Context, tenantID, id shared.ID) (*engagement.Engagement, error) {
-	e, err := scanEngagement(r.pool.QueryRow(ctx,
-		`SELECT `+engagementCols+` FROM engagements WHERE id=$1 AND project_id IS NULL AND (tenant_id=$2 OR $2='')`,
-		id.String(), tenantID.String()))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, shared.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("select engagement: %w", err)
-	}
-	scope, err := r.loadScope(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	e.Scope = scope
-	return e, nil
-}
-
-func (r *EngagementRepository) GetByProjectID(ctx context.Context, tenantID, projectID shared.ID) (*engagement.Engagement, error) {
-	e, err := scanEngagement(r.pool.QueryRow(ctx,
-		`SELECT `+engagementCols+` FROM engagements WHERE project_id=$1 AND (tenant_id=$2 OR $2='')`,
-		projectID.String(), tenantID.String()))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, shared.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("select project analysis context: %w", err)
-	}
-	scope, err := r.loadScope(ctx, e.ID)
-	if err != nil {
-		return nil, err
-	}
-	e.Scope = scope
-	return e, nil
-}
-
-// List returns the tenant's engagements, each with its scope loaded (consistent
-// with the in-memory repository; the UI and the scope gate both rely on scope).
-func (r *EngagementRepository) List(ctx context.Context, tenantID shared.ID) ([]*engagement.Engagement, error) {
-	var (
-		rows pgx.Rows
-		err  error
-	)
-	if tenantID.IsZero() {
-		rows, err = r.pool.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE project_id IS NULL ORDER BY created_at DESC`)
-	} else {
-		rows, err = r.pool.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 AND project_id IS NULL ORDER BY created_at DESC`, tenantID.String())
-	}
-	if err != nil {
-		return nil, fmt.Errorf("list engagements: %w", err)
-	}
-	defer rows.Close()
-
-	out := make([]*engagement.Engagement, 0)
-	for rows.Next() {
-		e, err := scanEngagement(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan engagement: %w", err)
+func (r *EngagementRepository) GetByIDInTenant(ctx context.Context, tenantID, id shared.ID) (out *engagement.Engagement, err error) {
+	err = WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		e, err := scanEngagement(tx.QueryRow(ctx, `SELECT `+engagementCols+` FROM engagements WHERE id=$1 AND project_id IS NULL AND tenant_id=$2`, id.String(), tenantID.String()))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return shared.ErrNotFound
 		}
-		out = append(out, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list engagements: %w", err)
-	}
-	// Rows are exhausted (auto-closed) here, so the pool conn is free to load scope.
-	for _, e := range out {
-		scope, err := r.loadScope(ctx, e.ID)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("select engagement: %w", err)
+		}
+		scope, err := loadScopeTx(ctx, tx, id)
+		if err != nil {
+			return err
 		}
 		e.Scope = scope
-	}
-	return out, nil
+		out = e
+		return nil
+	})
+	return out, err
+}
+func (r *EngagementRepository) GetByProjectID(ctx context.Context, tenantID, projectID shared.ID) (out *engagement.Engagement, err error) {
+	err = WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		e, err := scanEngagement(tx.QueryRow(ctx, `SELECT `+engagementCols+` FROM engagements WHERE project_id=$1 AND tenant_id=$2`, projectID.String(), tenantID.String()))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("select project analysis context: %w", err)
+		}
+		scope, err := loadScopeTx(ctx, tx, e.ID)
+		if err != nil {
+			return err
+		}
+		e.Scope = scope
+		out = e
+		return nil
+	})
+	return out, err
+}
+
+func (r *EngagementRepository) List(ctx context.Context, tenantID shared.ID) (out []*engagement.Engagement, err error) {
+	err = WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 AND project_id IS NULL ORDER BY created_at DESC`, tenantID.String())
+		if err != nil {
+			return fmt.Errorf("list engagements: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			e, err := scanEngagement(rows)
+			if err != nil {
+				return fmt.Errorf("scan engagement: %w", err)
+			}
+			scope, err := loadScopeTx(ctx, tx, e.ID)
+			if err != nil {
+				return err
+			}
+			e.Scope = scope
+			out = append(out, e)
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 
 func (r *EngagementRepository) loadScope(ctx context.Context, id shared.ID) (engagement.Scope, error) {
@@ -276,6 +267,32 @@ func (r *EngagementRepository) loadScope(ctx context.Context, id shared.ID) (eng
 			scope.InScope = append(scope.InScope, normalized)
 		} else {
 			scope.OutOfScope = append(scope.OutOfScope, normalized)
+		}
+	}
+	return scope, rows.Err()
+}
+
+func loadScopeTx(ctx context.Context, tx pgx.Tx, id shared.ID) (engagement.Scope, error) {
+	rows, err := tx.Query(ctx, `SELECT in_scope, kind, value FROM scope_targets WHERE engagement_id=$1 ORDER BY id`, id.String())
+	if err != nil {
+		return engagement.Scope{}, fmt.Errorf("select scope: %w", err)
+	}
+	defer rows.Close()
+	var scope engagement.Scope
+	for rows.Next() {
+		var inScope bool
+		var kind, value string
+		if err := rows.Scan(&inScope, &kind, &value); err != nil {
+			return engagement.Scope{}, fmt.Errorf("scan scope: %w", err)
+		}
+		target, err := engagement.NormalizeTarget(engagement.Target{Kind: engagement.TargetKind(kind), Value: value}, true)
+		if err != nil {
+			return engagement.Scope{}, fmt.Errorf("normalize stored scope target kind=%q value=%q: %w", kind, value, err)
+		}
+		if inScope {
+			scope.InScope = append(scope.InScope, target)
+		} else {
+			scope.OutOfScope = append(scope.OutOfScope, target)
 		}
 	}
 	return scope, rows.Err()
