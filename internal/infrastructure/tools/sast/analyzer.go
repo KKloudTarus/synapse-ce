@@ -188,6 +188,9 @@ func (a *Analyzer) scanLines(rel, ext string, lines []string, project projectCon
 			if r.id == "generic-sql-dynamic-execute" && pyExts[ext] && a.matchesRule("sqlalchemy-raw-sql-dynamic", ext, text) {
 				continue // specialized SQLAlchemy rule owns this Python sink
 			}
+			if ktExts[ext] && kotlinRuleOwnsGeneric(r.id, a, ext, text) {
+				continue
+			}
 			var matched bool
 			if isScala && strings.HasPrefix(r.id, "scala:") {
 				matched = scalaRuleMatches(r, text, matchText)
@@ -214,6 +217,22 @@ func (a *Analyzer) matchesRule(id, ext, text string) bool {
 		r := &a.rules[i]
 		if r.id == id {
 			return r.appliesTo(ext) && r.re.MatchString(text) && !r.skip(text)
+		}
+	}
+	return false
+}
+
+func kotlinRuleOwnsGeneric(generic string, a *Analyzer, ext, text string) bool {
+	owners := map[string][]string{
+		"generic-sql-dynamic-execute":    {"kotlin-sql-concat", "kotlin-sql-template"},
+		"generic-command-injection-sink": {"kotlin-runtime-exec", "kotlin-process-builder-string"},
+		"weak-hash-md5":                  {"kotlin-weak-hash"},
+		"weak-hash-sha1":                 {"kotlin-weak-hash"},
+		"weak-cipher":                    {"kotlin-weak-cipher"},
+	}
+	for _, owner := range owners[generic] {
+		if a.matchesRule(owner, ext, text) {
+			return true
 		}
 	}
 	return false

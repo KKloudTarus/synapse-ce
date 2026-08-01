@@ -82,7 +82,7 @@ func TestCatalogParity(t *testing.T) {
 		var expectedDetection rule.Detection
 
 		switch ruleID {
-		case "quality-duplicated-block", "quality-high-complexity":
+		case "quality-duplicated-block", "quality-high-complexity", "kotlin-cognitive-complexity":
 			expectedType = rule.TypeCodeSmell
 			expectedQuality = rule.QualityMaintainability
 			expectedDetection = rule.DetectionMetric

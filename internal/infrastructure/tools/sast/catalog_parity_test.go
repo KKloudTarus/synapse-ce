@@ -76,6 +76,8 @@ func TestCatalogParity(t *testing.T) {
 			expectedLang = "Rust" // rustExts (Rust-only)
 		case tc.exts != nil && tc.exts[".scala"]:
 			expectedLang = "Scala" // scalaExts (Scala-only)
+		case tc.exts != nil && tc.exts[".kt"]:
+			expectedLang = "Kotlin"
 		case explicitSASTLanguages[tc.id] != "":
 			expectedLang = explicitSASTLanguages[tc.id]
 		default:
@@ -151,7 +153,7 @@ func TestCatalogParity(t *testing.T) {
 			}
 		}
 
-		if isSast && !seenInBuiltin[string(r.Key)] {
+		if isSast && r.Detection == domainrule.DetectionPattern && !seenInBuiltin[string(r.Key)] {
 			t.Errorf("Extra stale SAST entry in catalog: %s", r.Key)
 		}
 	}

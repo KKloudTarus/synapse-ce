@@ -69,6 +69,7 @@ var cExts = map[string]bool{".c": true, ".h": true}
 var cppExts = map[string]bool{".cpp": true, ".cc": true, ".cxx": true, ".c++": true, ".hpp": true, ".hh": true, ".hxx": true, ".h++": true}
 var rustExts = map[string]bool{".rs": true}
 var scalaExts = map[string]bool{".scala": true, ".sc": true}
+var ktExts = map[string]bool{".kt": true, ".kts": true}
 var jsExts = map[string]bool{
 	".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
 	".ts": true, ".tsx": true, ".mts": true, ".cts": true, // .mts/.cts are first-class TS ESM/CJS extensions

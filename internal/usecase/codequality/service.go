@@ -165,10 +165,20 @@ func (s *Service) analyze(ctx context.Context, root string) ([]finding.Finding, 
 		}
 		if available {
 			compReport = &rep
-			for _, f := range rep.OverCyclomatic(s.complexityMin) {
-				title := fmt.Sprintf("High cyclomatic complexity: %d (%s)", f.Cyclomatic, f.Name)
-				desc := fmt.Sprintf("Function %q has cyclomatic complexity %d (cognitive %d), above %d. Break it into smaller units to improve testability and readability.", f.Name, f.Cyclomatic, f.Cognitive, s.complexityMin)
-				out = append(out, newFinding("quality", "quality-high-complexity", "CWE-1120", shared.SeverityMedium, title, desc, f.File, f.Line))
+			for _, f := range rep.Functions {
+				if f.Language == "Kotlin" {
+					if f.Cognitive > s.complexityMin {
+						title := fmt.Sprintf("High cognitive complexity: %d (%s)", f.Cognitive, f.Name)
+						desc := fmt.Sprintf("Kotlin function %q has cognitive complexity %d, above %d. Use guard clauses or extract focused functions.", f.Name, f.Cognitive, s.complexityMin)
+						out = append(out, newFinding("quality", "kotlin-cognitive-complexity", "CWE-1120", shared.SeverityMedium, title, desc, f.File, f.Line))
+					}
+					continue
+				}
+				if f.Cyclomatic > s.complexityMin {
+					title := fmt.Sprintf("High cyclomatic complexity: %d (%s)", f.Cyclomatic, f.Name)
+					desc := fmt.Sprintf("Function %q has cyclomatic complexity %d (cognitive %d), above %d. Break it into smaller units to improve testability and readability.", f.Name, f.Cyclomatic, f.Cognitive, s.complexityMin)
+					out = append(out, newFinding("quality", "quality-high-complexity", "CWE-1120", shared.SeverityMedium, title, desc, f.File, f.Line))
+				}
 			}
 		}
 	}

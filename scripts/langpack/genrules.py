@@ -11,8 +11,8 @@ import json, re, sys, importlib.util, os, subprocess
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-LANG_EXTS = {"js": "jsExts", "java": "javaExts", "py": "pyExts", "go": "goExts", "cs": "csExts", "c": "cExts", "cpp": "cppExts", "rust": "rustExts", "scala": "scalaExts"}
-LANG_LABEL = {"js": "JavaScript/TypeScript", "java": "Java", "py": "Python", "go": "Go", "cs": "C#", "c": "C", "cpp": "C++", "rust": "Rust", "scala": "Scala"}
+LANG_EXTS = {"js": "jsExts", "java": "javaExts", "py": "pyExts", "go": "goExts", "cs": "csExts", "c": "cExts", "cpp": "cppExts", "rust": "rustExts", "kt": "ktExts", "scala": "scalaExts"}
+LANG_LABEL = {"js": "JavaScript/TypeScript", "java": "Java", "py": "Python", "go": "Go", "cs": "C#", "c": "C", "cpp": "C++", "rust": "Rust", "kt": "Kotlin", "scala": "Scala"}
 TYPE_CONST = {"vuln": "TypeVulnerability", "bug": "TypeBug", "smell": "TypeCodeSmell", "hotspot": "TypeSecurityHotspot"}
 QUAL_CONST = {"sec": "QualitySecurity", "rel": "QualityReliability", "maint": "QualityMaintainability"}
 SEV_CONST = {"critical": "SeverityCritical", "high": "SeverityHigh", "medium": "SeverityMedium", "low": "SeverityLow", "info": "SeverityInfo"}
@@ -41,11 +41,12 @@ def validate(specs):
     for s in specs:
         assert s["id"] not in seen, "dup id " + s["id"]
         seen.add(s["id"])
-        rx = re.compile(s["re"])
-        nc_ok = any(rx.search(l) for l in s["nc"].split("\n"))
-        assert nc_ok, "NONCOMPLIANT does not match: " + s["id"] + " :: " + s["nc"]
-        c_hit = [l for l in s["c"].split("\n") if rx.search(l)]
-        assert not c_hit, "COMPLIANT matches: " + s["id"] + " :: " + repr(c_hit)
+        if s.get("detection", "pattern") == "pattern":
+            rx = re.compile(s["re"])
+            nc_ok = any(rx.search(l) for l in s["nc"].split("\n"))
+            assert nc_ok, "NONCOMPLIANT does not match: " + s["id"] + " :: " + s["nc"]
+            c_hit = [l for l in s["c"].split("\n") if rx.search(l)]
+            assert not c_hit, "COMPLIANT matches: " + s["id"] + " :: " + repr(c_hit)
         assert s["sev"] in SEV_CONST and s["type"] in TYPE_CONST and s["qual"] in QUAL_CONST
     return len(specs)
 
@@ -80,6 +81,8 @@ def emit_engine_v2(specs):
              "// do not edit by hand so the engine and catalog stay in lock-step.",
              "func langPackRules() []rule {", "\treturn []rule{"]
     for s in specs:
+        if s.get("detection", "pattern") != "pattern":
+            continue
         parts = [f'id: {gostr(s["id"])}', f'cwe: {gostr(s.get("cwe",""))}',
                  f'severity: shared.{SEV_CONST[s["sev"]]}', f'title: {gostr(s["title"])}',
                  f'desc: {gostr(s["desc"])}', f're: regexp.MustCompile({goregex(s["re"])})',
@@ -106,7 +109,8 @@ def emit_catalog(specs):
         owasp = f'[]string{{{gostr(s["owasp"])}}}' if s.get("owasp") else "[]string{}"
         tags = ", ".join(gostr(t) for t in s.get("tags", []))
         lines.append("\t\t{")
-        lines.append(f'\t\t\tKey: rule.Key({gostr(s["id"])}), Name: {gostr(s["title"])}, Language: {gostr(LANG_LABEL[s["lang"]])}, Type: rule.{TYPE_CONST[s["type"]]}, Qualities: []rule.Quality{{rule.{QUAL_CONST[s["qual"]]}}}, DefaultSeverity: shared.{SEV_CONST[s["sev"]]}, Tags: []string{{{tags}}}, CWE: {cwe}, OWASP: {owasp}, Detection: rule.DetectionPattern,')
+        detection = "DetectionAST" if s.get("detection", "pattern") == "ast" else "DetectionPattern"
+        lines.append(f'\t\t\tKey: rule.Key({gostr(s["id"])}), Name: {gostr(s["title"])}, Language: {gostr(LANG_LABEL[s["lang"]])}, Type: rule.{TYPE_CONST[s["type"]]}, Qualities: []rule.Quality{{rule.{QUAL_CONST[s["qual"]]}}}, DefaultSeverity: shared.{SEV_CONST[s["sev"]]}, Tags: []string{{{tags}}}, CWE: {cwe}, OWASP: {owasp}, Detection: rule.{detection},')
         rationale = s["rationale"] + "\n\nSource: " + s["source"]
         lines.append(f'\t\t\tDescription: {gostr(s["cat_desc"])},')
         lines.append(f'\t\t\tRationale: {gostr(rationale)},')
