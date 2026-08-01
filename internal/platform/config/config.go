@@ -24,8 +24,11 @@ type Config struct {
 	AUPFile string
 	// AuditFile is the append-only audit log (file-backed until Postgres).
 	AuditFile string
-	// DBDSN, when set, enables PostgreSQL persistence; empty = in-memory (dev).
+	// DBDSN is the non-superuser application DSN. Empty selects in-memory persistence in dev.
 	DBDSN string
+	// DBMigrateDSN is an optional privileged DSN used only to apply schema migrations.
+	// Production deployments should keep it distinct from DBDSN so the runtime role cannot bypass RLS.
+	DBMigrateDSN string
 	// SyftBin is the Syft executable used for SBOM generation (shell-out).
 	SyftBin string
 	// SBOMProducer selects the SBOM-generation producer: "syft" (default – the pinned
@@ -352,6 +355,7 @@ func Load() Config {
 		AUPFile:                          getenv("SYNAPSE_AUP_FILE", "data/aup-accepted.json"),
 		AuditFile:                        getenv("SYNAPSE_AUDIT_FILE", "data/audit.jsonl"),
 		DBDSN:                            getenv("SYNAPSE_DB_DSN", ""),
+		DBMigrateDSN:                     getenv("SYNAPSE_DB_MIGRATE_DSN", ""),
 		SyftBin:                          getenv("SYNAPSE_SYFT_BIN", "syft"),
 		SBOMProducer:                     getenv("SYNAPSE_SBOM_PRODUCER", "syft"),
 		GrypeBin:                         getenv("SYNAPSE_GRYPE_BIN", "grype"),

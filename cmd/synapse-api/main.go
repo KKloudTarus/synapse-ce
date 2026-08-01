@@ -237,7 +237,11 @@ func main() {
 		// until multi-replica horizontal scaling lands (P5).
 		startup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		if err := postgres.Migrate(startup, cfg.DBDSN); err != nil {
+		migrateDSN := cfg.DBMigrateDSN
+		if migrateDSN == "" {
+			migrateDSN = cfg.DBDSN
+		}
+		if err := postgres.Migrate(startup, migrateDSN); err != nil {
 			log.Error("db migrate failed", "err", err)
 			os.Exit(1)
 		}
