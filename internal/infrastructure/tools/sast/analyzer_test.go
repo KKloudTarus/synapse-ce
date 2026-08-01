@@ -418,6 +418,31 @@ func TestRuleCorpus(t *testing.T) {
 // TestLanguageGatedRulesRespectExtensions locks the fix for the language-scoping bug: a rule whose
 // idiom belongs to one ecosystem (Python SQLAlchemy, Prisma, React/DOM, node-serialize) must fire on
 // its own file type and stay silent on a foreign one, so it can never mislabel e.g. a .java file.
+func TestKotlinSpecializedRulesOwnGenericMatches(t *testing.T) {
+	a := New()
+	for _, tc := range []struct {
+		line string
+		want string
+	}{
+		{`val digest = MessageDigest.getInstance("MD5")`, "kotlin-weak-hash"},
+		{`statement.execute("SELECT * FROM users WHERE id=" + id)`, "kotlin-sql-concat"},
+	} {
+		hits := a.scanLines("Main.kt", ".kt", []string{tc.line}, projectContext{})
+		seen := map[string]bool{}
+		for _, hit := range hits {
+			seen[hit.RuleID] = true
+		}
+		if !seen[tc.want] {
+			t.Fatalf("%q missing specialized rule %q: %+v", tc.line, tc.want, hits)
+		}
+		for _, generic := range []string{"weak-hash-md5", "weak-hash-sha1", "generic-sql-dynamic-execute"} {
+			if seen[generic] {
+				t.Fatalf("%q emitted duplicate generic rule %q: %+v", tc.line, generic, hits)
+			}
+		}
+	}
+}
+
 func TestLanguageGatedRulesRespectExtensions(t *testing.T) {
 	cases := []struct {
 		rule    string

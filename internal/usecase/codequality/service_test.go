@@ -153,6 +153,33 @@ func TestBugsBridgeEmitsReliability(t *testing.T) {
 	}
 }
 
+func TestKotlinCognitiveComplexityOwnsKotlinFinding(t *testing.T) {
+	metrics := fakeMetrics{available: true, rep: measure.ComplexityReport{Functions: []measure.FunctionComplexity{
+		{File: "High.kt", Line: 4, Name: "classify", Language: "Kotlin", Cyclomatic: 25, Cognitive: 30},
+		{File: "Low.kt", Line: 2, Name: "simple", Language: "Kotlin", Cyclomatic: 20, Cognitive: 1},
+		{File: "high.py", Line: 3, Name: "branch", Language: "Python", Cyclomatic: 25, Cognitive: 30},
+	}}}
+	fs, err := New(fakeAnalyzer{}, WithComplexity(metrics, 15)).Analyze(context.Background(), "root")
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	if byRule(fs, "kotlin-cognitive-complexity") == nil {
+		t.Fatal("expected Kotlin cognitive-complexity finding")
+	}
+	generic := byRule(fs, "quality-high-complexity")
+	if generic == nil || !strings.Contains(generic.Title, "high.py") {
+		t.Fatalf("expected unchanged non-Kotlin complexity finding: %+v", generic)
+	}
+	for _, f := range fs {
+		if f.RuleKey == "quality-high-complexity" && strings.Contains(f.Title, "High.kt") {
+			t.Fatalf("Kotlin function was reported by generic rule: %+v", f)
+		}
+		if strings.Contains(f.Title, "simple") {
+			t.Fatalf("low Kotlin complexity reported: %+v", f)
+		}
+	}
+}
+
 func TestComplexityUnavailableSkipsBridge(t *testing.T) {
 	svc := New(fakeAnalyzer{}, WithComplexity(fakeMetrics{available: false, rep: measure.ComplexityReport{
 		Functions: []measure.FunctionComplexity{{Name: "x", Cyclomatic: 99}},
