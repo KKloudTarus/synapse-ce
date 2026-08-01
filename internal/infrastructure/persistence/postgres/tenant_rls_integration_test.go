@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -40,7 +41,7 @@ func TestTenantRLSIsolation(t *testing.T) {
 	}
 
 	suffix := fmt.Sprintf("rls-%d", time.Now().UnixNano())
-	tenantA, tenantB, projectID := suffix+"-a", suffix+"-b", suffix+"-project"
+	tenantA, tenantB, projectID, engagementID := suffix+"-a", suffix+"-b", suffix+"-project", suffix+"-engagement"
 	for _, tenant := range []string{tenantA, tenantB} {
 		if _, err := admin.Exec(ctx, `INSERT INTO tenants (id, name) VALUES ($1, $2)`, tenant, tenant); err != nil {
 			t.Fatalf("insert tenant %q: %v", tenant, err)
@@ -48,6 +49,7 @@ func TestTenantRLSIsolation(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_, _ = admin.Exec(ctx, `DELETE FROM projects WHERE id=$1`, projectID)
+		_, _ = admin.Exec(ctx, `DELETE FROM engagements WHERE id=$1`, engagementID)
 		_, _ = admin.Exec(ctx, `DELETE FROM tenants WHERE id = ANY($1)`, []string{tenantA, tenantB})
 	})
 
@@ -80,5 +82,30 @@ func TestTenantRLSIsolation(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("tenant A count = %d, want 1", count)
+	}
+
+	eng, err := engagement.New(shared.ID(engagementID), shared.ID(tenantA), "RLS engagement", "", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("new engagement: %v", err)
+	}
+	eng.Scope = engagement.Scope{InScope: []engagement.Target{{Kind: engagement.TargetDomain, Value: "example.test"}}}
+	if err := NewEngagementRepository(runtime).Create(ctx, eng); err != nil {
+		t.Fatalf("create tenant A engagement: %v", err)
+	}
+	if err := WithTenantTx(ctx, runtime, shared.ID(tenantB), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM engagements WHERE id=$1`, engagementID).Scan(&count)
+	}); err != nil {
+		t.Fatalf("query tenant B engagement: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("tenant B exposed %d tenant A engagements", count)
+	}
+	if err := WithTenantTx(ctx, runtime, shared.ID(tenantB), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM scope_targets WHERE engagement_id=$1`, engagementID).Scan(&count)
+	}); err != nil {
+		t.Fatalf("query tenant B scope: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("tenant B exposed %d tenant A scope targets", count)
 	}
 }

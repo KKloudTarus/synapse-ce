@@ -18,7 +18,7 @@ func TestEngagementRepository(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "")
 
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -159,17 +159,16 @@ func TestEngagementRepository(t *testing.T) {
 	if err := repo.Create(ctx, ea); err != nil {
 		t.Fatalf("create tenantA: %v", err)
 	}
-	// Owner (created_by/updated_by) round-trips.
-	if g, err := repo.GetByID(ctx, idA); err != nil || g.Audit.CreatedBy != "alice" || g.Audit.UpdatedBy != "alice" {
+	// Owner round-trips within the tenant-bound internal execution context.
+	ctxA := shared.WithTenant(context.Background(), tenA)
+	if g, err := repo.GetByID(ctxA, idA); err != nil || g.Audit.CreatedBy != "alice" || g.Audit.UpdatedBy != "alice" {
 		t.Fatalf("ownership round-trip: g=%+v err=%v", g, err)
 	}
-	// Same tenant reads it; a zero tenant (single-tenant / admin) reads it; tenant B cannot
-	// (ErrNotFound – existence is not revealed cross-tenant).
 	if _, err := repo.GetByIDInTenant(ctx, tenA, idA); err != nil {
 		t.Errorf("same-tenant GetByIDInTenant: %v", err)
 	}
-	if _, err := repo.GetByIDInTenant(ctx, "", idA); err != nil {
-		t.Errorf("zero-tenant GetByIDInTenant must see any row: %v", err)
+	if _, err := repo.GetByIDInTenant(ctx, "", idA); err != shared.ErrNotFound {
+		t.Errorf("default-tenant GetByIDInTenant = %v, want ErrNotFound", err)
 	}
 	if _, err := repo.GetByIDInTenant(ctx, tenB, idA); err != shared.ErrNotFound {
 		t.Errorf("cross-tenant GetByIDInTenant = %v, want ErrNotFound", err)
@@ -190,7 +189,7 @@ func TestEngagementRepository(t *testing.T) {
 	if err := repo.Update(ctx, &cp); err != nil {
 		t.Fatalf("update tenantA: %v", err)
 	}
-	if g, err := repo.GetByID(ctx, idA); err != nil || g.Audit.CreatedBy != "alice" || g.Audit.UpdatedBy != "bob" {
+	if g, err := repo.GetByID(ctxA, idA); err != nil || g.Audit.CreatedBy != "alice" || g.Audit.UpdatedBy != "bob" {
 		t.Fatalf("after update, owner must be immutable + updated_by=bob: g=%+v err=%v", g, err)
 	}
 }

@@ -142,36 +142,36 @@ func (r *EngagementRepository) Update(ctx context.Context, e *engagement.Engagem
 	})
 }
 
-// Delete removes an engagement; ON DELETE CASCADE drops its scope, findings,
-// comments, evidence, recon runs, and retests. Idempotent (no error if absent).
-// Used to roll back a partially-materialized import.
+// Delete removes an engagement only within an explicitly bound tenant context.
 func (r *EngagementRepository) Delete(ctx context.Context, id shared.ID) error {
-	if _, err := r.pool.Exec(ctx, `DELETE FROM engagements WHERE id=$1`, id.String()); err != nil {
-		return fmt.Errorf("delete engagement: %w", err)
-	}
-	return nil
+	return WithContextTenantTx(ctx, r.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM engagements WHERE id=$1`, id.String()); err != nil {
+			return fmt.Errorf("delete engagement: %w", err)
+		}
+		return nil
+	})
 }
 
-// GetByID returns the engagement with its full scope WITHOUT a tenant predicate. It is the
-// INTERNAL execution-gate read (see ports.EngagementRepository.GetByID): the scope/window/RoE
-// guard and the worker/agent execution paths, which act on an engagement a queued/authorized run
-// already belongs to. User-facing access uses GetByIDInTenant (below), which adds the tenant
-// predicate that blocks cross-tenant reads.
-func (r *EngagementRepository) GetByID(ctx context.Context, id shared.ID) (*engagement.Engagement, error) {
-	e, err := scanEngagement(r.pool.QueryRow(ctx,
-		`SELECT `+engagementCols+` FROM engagements WHERE id=$1`, id.String()))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, shared.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("select engagement: %w", err)
-	}
-	scope, err := r.loadScope(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	e.Scope = scope
-	return e, nil
+// GetByID is an internal execution-gate read. Its caller must bind the tenant
+// when admitting a durable job; an unbound context fails closed.
+func (r *EngagementRepository) GetByID(ctx context.Context, id shared.ID) (out *engagement.Engagement, err error) {
+	err = WithContextTenantTx(ctx, r.pool, func(tx pgx.Tx) error {
+		e, err := scanEngagement(tx.QueryRow(ctx, `SELECT `+engagementCols+` FROM engagements WHERE id=$1`, id.String()))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("select engagement: %w", err)
+		}
+		scope, err := loadScopeTx(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		e.Scope = scope
+		out = e
+		return nil
+	})
+	return out, err
 }
 
 // GetByIDInTenant loads an engagement scoped to tenantID (tenant isolation). A caller
@@ -239,37 +239,6 @@ func (r *EngagementRepository) List(ctx context.Context, tenantID shared.ID) (ou
 		return rows.Err()
 	})
 	return out, err
-}
-
-func (r *EngagementRepository) loadScope(ctx context.Context, id shared.ID) (engagement.Scope, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT in_scope, kind, value FROM scope_targets WHERE engagement_id=$1 ORDER BY id`, id.String())
-	if err != nil {
-		return engagement.Scope{}, fmt.Errorf("select scope: %w", err)
-	}
-	defer rows.Close()
-
-	var scope engagement.Scope
-	for rows.Next() {
-		var (
-			inScope     bool
-			kind, value string
-		)
-		if err := rows.Scan(&inScope, &kind, &value); err != nil {
-			return engagement.Scope{}, fmt.Errorf("scan scope: %w", err)
-		}
-		t := engagement.Target{Kind: engagement.TargetKind(kind), Value: value}
-		normalized, err := engagement.NormalizeTarget(t, true)
-		if err != nil {
-			return engagement.Scope{}, fmt.Errorf("normalize stored scope target kind=%q value=%q: %w", kind, value, err)
-		}
-		if inScope {
-			scope.InScope = append(scope.InScope, normalized)
-		} else {
-			scope.OutOfScope = append(scope.OutOfScope, normalized)
-		}
-	}
-	return scope, rows.Err()
 }
 
 func loadScopeTx(ctx context.Context, tx pgx.Tx, id shared.ID) (engagement.Scope, error) {
