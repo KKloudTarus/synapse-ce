@@ -71,35 +71,33 @@ func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Findi
 // UpdateStatus sets the triage status with optimistic concurrency: the row is
 // updated only if version matches expectedVersion, then version is bumped. On a
 // miss it distinguishes ErrConflict (exists, version moved) from ErrNotFound.
-func (r *FindingRepository) UpdateStatus(ctx context.Context, engagementID, findingID shared.ID, status finding.Status, expectedVersion int) (finding.Finding, error) {
-	f, err := scanFinding(r.pool.QueryRow(ctx,
-		`UPDATE findings SET status=$1, version=version+1, updated_at=now()
-		 WHERE id=$2 AND engagement_id=$3 AND version=$4
-		 RETURNING `+findingCols,
-		string(status), findingID.String(), engagementID.String(), expectedVersion))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return finding.Finding{}, r.classifyUpdateMiss(ctx, engagementID, findingID)
-	}
-	if err != nil {
-		return finding.Finding{}, fmt.Errorf("update finding status: %w", err)
-	}
-	return f, nil
+func (r *FindingRepository) UpdateStatus(ctx context.Context, engagementID, findingID shared.ID, status finding.Status, expectedVersion int) (out finding.Finding, err error) {
+	err = WithContextTenantTx(ctx, r.pool, func(tx pgx.Tx) error {
+		out, err = scanFinding(tx.QueryRow(ctx, `UPDATE findings SET status=$1, version=version+1, updated_at=now() WHERE id=$2 AND engagement_id=$3 AND version=$4 RETURNING `+findingCols, string(status), findingID.String(), engagementID.String(), expectedVersion))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return classifyFindingUpdateMiss(ctx, tx, engagementID, findingID)
+		}
+		if err != nil {
+			return fmt.Errorf("update finding status: %w", err)
+		}
+		return nil
+	})
+	return out, err
 }
 
 // SetAssignee sets the assignee with the same optimistic-concurrency guard.
-func (r *FindingRepository) SetAssignee(ctx context.Context, engagementID, findingID shared.ID, assignee string, expectedVersion int) (finding.Finding, error) {
-	f, err := scanFinding(r.pool.QueryRow(ctx,
-		`UPDATE findings SET assignee=$1, version=version+1, updated_at=now()
-		 WHERE id=$2 AND engagement_id=$3 AND version=$4
-		 RETURNING `+findingCols,
-		assignee, findingID.String(), engagementID.String(), expectedVersion))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return finding.Finding{}, r.classifyUpdateMiss(ctx, engagementID, findingID)
-	}
-	if err != nil {
-		return finding.Finding{}, fmt.Errorf("set finding assignee: %w", err)
-	}
-	return f, nil
+func (r *FindingRepository) SetAssignee(ctx context.Context, engagementID, findingID shared.ID, assignee string, expectedVersion int) (out finding.Finding, err error) {
+	err = WithContextTenantTx(ctx, r.pool, func(tx pgx.Tx) error {
+		out, err = scanFinding(tx.QueryRow(ctx, `UPDATE findings SET assignee=$1, version=version+1, updated_at=now() WHERE id=$2 AND engagement_id=$3 AND version=$4 RETURNING `+findingCols, assignee, findingID.String(), engagementID.String(), expectedVersion))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return classifyFindingUpdateMiss(ctx, tx, engagementID, findingID)
+		}
+		if err != nil {
+			return fmt.Errorf("set finding assignee: %w", err)
+		}
+		return nil
+	})
+	return out, err
 }
 
 // SetEvidenceScore sets a finding's evidence score with the same optimistic-concurrency
@@ -107,28 +105,25 @@ func (r *FindingRepository) SetAssignee(ctx context.Context, engagementID, findi
 // updated only if version matches, then version is bumped. Note the Upsert ON CONFLICT set
 // deliberately omits evidence_score, so this is the only path that moves it for an
 // already-stored finding.
-func (r *FindingRepository) SetEvidenceScore(ctx context.Context, engagementID, findingID shared.ID, score, expectedVersion int) (finding.Finding, error) {
-	f, err := scanFinding(r.pool.QueryRow(ctx,
-		`UPDATE findings SET evidence_score=$1, version=version+1, updated_at=now()
-		 WHERE id=$2 AND engagement_id=$3 AND version=$4
-		 RETURNING `+findingCols,
-		score, findingID.String(), engagementID.String(), expectedVersion))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return finding.Finding{}, r.classifyUpdateMiss(ctx, engagementID, findingID)
-	}
-	if err != nil {
-		return finding.Finding{}, fmt.Errorf("set finding evidence score: %w", err)
-	}
-	return f, nil
+func (r *FindingRepository) SetEvidenceScore(ctx context.Context, engagementID, findingID shared.ID, score, expectedVersion int) (out finding.Finding, err error) {
+	err = WithContextTenantTx(ctx, r.pool, func(tx pgx.Tx) error {
+		out, err = scanFinding(tx.QueryRow(ctx, `UPDATE findings SET evidence_score=$1, version=version+1, updated_at=now() WHERE id=$2 AND engagement_id=$3 AND version=$4 RETURNING `+findingCols, score, findingID.String(), engagementID.String(), expectedVersion))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return classifyFindingUpdateMiss(ctx, tx, engagementID, findingID)
+		}
+		if err != nil {
+			return fmt.Errorf("set finding evidence score: %w", err)
+		}
+		return nil
+	})
+	return out, err
 }
 
 // classifyUpdateMiss maps a no-row optimistic UPDATE to ErrConflict (the finding
 // exists but its version moved – lost-update guard) or ErrNotFound.
-func (r *FindingRepository) classifyUpdateMiss(ctx context.Context, engagementID, findingID shared.ID) error {
+func classifyFindingUpdateMiss(ctx context.Context, tx pgx.Tx, engagementID, findingID shared.ID) error {
 	var exists bool
-	if err := r.pool.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM findings WHERE id=$1 AND engagement_id=$2)`,
-		findingID.String(), engagementID.String()).Scan(&exists); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM findings WHERE id=$1 AND engagement_id=$2)`, findingID.String(), engagementID.String()).Scan(&exists); err != nil {
 		return fmt.Errorf("classify update miss: %w", err)
 	}
 	if exists {
@@ -139,30 +134,23 @@ func (r *FindingRepository) classifyUpdateMiss(ctx context.Context, engagementID
 
 // ListByEngagement returns the engagement's findings, highest risk first
 // (CISA KEV, then EPSS x CVSS, then severity).
-func (r *FindingRepository) ListByEngagement(ctx context.Context, engagementID shared.ID) ([]finding.Finding, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT `+findingCols+`
-		 FROM findings WHERE engagement_id=$1
-		 ORDER BY priority ASC, kev DESC, risk_score DESC,
-		          CASE severity
-		            WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3
-		            WHEN 'low' THEN 2 WHEN 'info' THEN 1 ELSE 0 END DESC,
-		          title COLLATE "C" ASC, COALESCE(dedup_key,'') COLLATE "C" ASC, id COLLATE "C" ASC`,
-		engagementID.String())
-	if err != nil {
-		return nil, fmt.Errorf("list findings: %w", err)
-	}
-	defer rows.Close()
-
-	out := make([]finding.Finding, 0)
-	for rows.Next() {
-		f, err := scanFinding(rows)
+func (r *FindingRepository) ListByEngagement(ctx context.Context, engagementID shared.ID) (out []finding.Finding, err error) {
+	err = WithContextTenantTx(ctx, r.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+findingCols+` FROM findings WHERE engagement_id=$1 ORDER BY priority ASC, kev DESC, risk_score DESC, CASE severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 WHEN 'info' THEN 1 ELSE 0 END DESC, title COLLATE "C" ASC, COALESCE(dedup_key,'') COLLATE "C" ASC, id COLLATE "C" ASC`, engagementID.String())
 		if err != nil {
-			return nil, fmt.Errorf("scan finding: %w", err)
+			return fmt.Errorf("list findings: %w", err)
 		}
-		out = append(out, f)
-	}
-	return out, rows.Err()
+		defer rows.Close()
+		for rows.Next() {
+			f, err := scanFinding(rows)
+			if err != nil {
+				return fmt.Errorf("scan finding: %w", err)
+			}
+			out = append(out, f)
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 
 // ListPublishableByEngagement returns only the engagement's findings that clear the
