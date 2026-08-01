@@ -115,10 +115,12 @@ type ConditionResult struct {
 	Passed    bool
 }
 
-// Result is the gate outcome.
+// Result is the gate outcome. Incomplete reports that analysis reached a limit, so
+// Passed is false even when every evaluated condition held.
 type Result struct {
-	Passed  bool
-	Results []ConditionResult
+	Passed     bool
+	Incomplete bool
+	Results    []ConditionResult
 }
 
 // Failures returns the conditions that did not hold.

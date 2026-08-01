@@ -537,7 +537,7 @@ func TestAnalyzerIntegration_UnknownExtension_GetsTextFindings(t *testing.T) {
 		t.Fatalf("Analyze: %v", err)
 	}
 	found := false
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if f.RuleID == textTrailingWSID && f.File == "config.data" {
 			found = true
 		}
@@ -560,7 +560,7 @@ func TestAnalyzerIntegration_NormalSource_GetsTextAndLegacy(t *testing.T) {
 	hasTodo := false
 	hasTrailingWS := false
 
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if f.RuleID == "quality-todo-comment" && f.File == "main.go" {
 			hasTodo = true
 		}
@@ -587,7 +587,7 @@ func TestAnalyzerIntegration_Dotfile_GetsTextFindings(t *testing.T) {
 		t.Fatalf("Analyze: %v", err)
 	}
 	found := false
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if f.RuleID == textTrailingWSID && f.File == ".editorconfig" {
 			found = true
 		}
@@ -615,7 +615,7 @@ func TestAnalyzerIntegration_Dotfile_GetsTextButNoLegacy(t *testing.T) {
 
 	hasLegacyTodo := false
 	hasTrailingWS := false
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if f.File != ".hidden.go" {
 			continue
 		}
@@ -649,7 +649,7 @@ func TestAnalyzerIntegration_BinaryExcluded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if f.File == "helper.py" {
 			t.Errorf("binary file must receive neither Text nor legacy findings, got: %+v", f)
 		}
@@ -674,7 +674,7 @@ func TestAnalyzerIntegration_VendorExcluded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if strings.Contains(f.File, "vendor") {
 			t.Errorf("vendor file must receive neither Text nor legacy findings, got: %+v", f)
 		}
@@ -695,7 +695,7 @@ func TestAnalyzerIntegration_GeneratedExcluded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if f.File == "model.pb.go" {
 			t.Errorf("generated file must receive neither Text nor legacy findings, got: %+v", f)
 		}
@@ -713,7 +713,7 @@ func TestAnalyzerIntegration_DetachedTailDoesNotClassifyFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	for _, finding := range findings {
+	for _, finding := range findings.Findings {
 		if finding.RuleID == textOversizedFileID && finding.File == "tail.go" {
 			return
 		}
@@ -734,7 +734,7 @@ func TestAnalyzerIntegration_SymlinkNotScanned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	if len(findings) != 0 {
+	if len(findings.Findings) != 0 {
 		t.Fatalf("symlink was scanned: %+v", findings)
 	}
 }
@@ -850,7 +850,7 @@ func TestAnalyzerIntegration_OversizedScansPastParserPrefix(t *testing.T) {
 		t.Fatalf("Analyze: %v", err)
 	}
 	seen := map[string]bool{}
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		seen[f.RuleID] = true
 	}
 	for _, id := range []string{textOversizedFileID, textBidiUnicodeID, textInvisibleUnicodeID, textMissingFinalNLID} {
@@ -885,10 +885,10 @@ func TestAnalyzerIntegration_GlobalFindingCapPrioritizesSecurity(t *testing.T) {
 		t.Fatal(err)
 	}
 	findings, err := New().Analyze(context.Background(), root)
-	if !errors.Is(err, ErrFindingsTruncated) || len(findings) != maxFindings {
-		t.Fatalf("findings=%d err=%v", len(findings), err)
+	if err != nil || len(findings.Findings) != maxFindings || !findings.Truncated {
+		t.Fatalf("findings=%d truncated=%t err=%v", len(findings.Findings), findings.Truncated, err)
 	}
-	for _, finding := range findings {
+	for _, finding := range findings.Findings {
 		if finding.RuleID == textBidiUnicodeID && finding.File == "z-security.txt" {
 			return
 		}
@@ -907,7 +907,7 @@ func TestAnalyzerIntegration_FindingsHaveDescription(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if strings.HasPrefix(f.RuleID, "text:") && f.Description == "" {
 			t.Errorf("text finding %s missing Description", f.RuleID)
 		}
@@ -977,7 +977,7 @@ func TestAnalyzerIntegration_NormalNotebook_GetsTextAndParserFindings(t *testing
 		t.Fatalf("Analyze: %v", err)
 	}
 	hasText, hasNotebook := false, false
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if f.RuleID == textTrailingWSID && f.File == "test.ipynb" {
 			hasText = true
 		}
@@ -1004,7 +1004,7 @@ func TestAnalyzerIntegration_OversizedNotebook_GetsTextAndNotebookFindings(t *te
 	}
 	hasOversized := false
 	hasNotebookRule := false
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if f.RuleID == textOversizedFileID && f.File == "big.ipynb" {
 			hasOversized = true
 		}
@@ -1032,7 +1032,7 @@ func TestAnalyzerIntegration_DotfileNotebook_GetsTextButNoParserFindings(t *test
 
 	hasNotebookRule := false
 	hasTrailingWS := false
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if f.RuleID == textTrailingWSID && f.File == ".hidden.ipynb" {
 			hasTrailingWS = true
 		}
@@ -1068,7 +1068,7 @@ func TestAnalyzerIntegration_VeryLargeNotebook_BoundedTextNoParser(t *testing.T)
 	}
 	hasOversized := false
 	hasNotebookRule := false
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if f.RuleID == textOversizedFileID && f.File == "huge.ipynb" {
 			hasOversized = true
 		}
@@ -1172,7 +1172,7 @@ func TestAnalyzerIntegration_PriorityCollectorRetainedSAST(t *testing.T) {
 	hasQuality := false
 	hasTrailingWS := false
 
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if f.Kind == "quality" && f.File == "test.py" {
 			hasQuality = true
 		}
@@ -1252,7 +1252,7 @@ func TestAnalyzerIntegration_NULByteAt8001(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if f.File == "nul.go" {
 			t.Errorf("file with NUL byte at 8001 must be rejected, got finding: %+v", f)
 		}
@@ -1275,7 +1275,7 @@ func TestAnalyzerIntegration_GeneratedHeadUnderSmallBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		if f.File == "model.pb.go" {
 			t.Errorf("generated file must be rejected under small budget, got finding: %+v", f)
 		}
@@ -1288,7 +1288,7 @@ func TestAnalyzerIntegration_GeneratedHeadUnderSmallBudget(t *testing.T) {
 // for concise assertions in direct legacy-scanner tests.
 func legacyScanFile(a *Analyzer, rel, ext string, content []byte) []ports.CodeAnalysisRawFinding {
 	var out []ports.CodeAnalysisRawFinding
-	if err := a.scanFile(context.Background(), rel, ext, content, func(f ports.CodeAnalysisRawFinding) {
+	if _, err := a.scanFile(context.Background(), rel, ext, content, func(f ports.CodeAnalysisRawFinding) {
 		out = append(out, f)
 	}); err != nil {
 		panic(err)
@@ -1353,7 +1353,7 @@ func TestScanFile_Cancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	a := New()
-	err := a.scanFile(ctx, "f.go", ".go", []byte("// TODO: fix\n"), func(f ports.CodeAnalysisRawFinding) {
+	_, err := a.scanFile(ctx, "f.go", ".go", []byte("// TODO: fix\n"), func(f ports.CodeAnalysisRawFinding) {
 		t.Errorf("unexpected finding after cancellation: %+v", f)
 	})
 	if !errors.Is(err, context.Canceled) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -349,7 +350,7 @@ func isXMLSource(ext, lang string) bool {
 		return true
 	}
 	switch ext {
-	case ".xml", ".xsd", ".xsl", ".xslt", ".wsdl":
+	case ".xml", ".xsd", ".xsl", ".xslt", ".wsdl", ".plist":
 		return true
 	default:
 		return false
@@ -357,9 +358,15 @@ func isXMLSource(ext, lang string) bool {
 }
 
 func scanXMLFile(rel string, content []byte) []ports.CodeAnalysisRawFinding {
+	findings, _ := scanXMLFileWithTruncation(rel, content)
+	return findings
+}
+
+func scanXMLFileWithTruncation(rel string, content []byte) ([]ports.CodeAnalysisRawFinding, bool) {
 	declaredEntities := parseDeclaredEntities(content)
 
 	var out []ports.CodeAnalysisRawFinding
+	truncated := false
 
 	// 1. Lexical / DTD Scan
 	out = append(out, scanXMLDTD(rel, content)...)
@@ -399,13 +406,38 @@ func scanXMLFile(rel string, content []byte) []ports.CodeAnalysisRawFinding {
 
 	sortXMLFindings(out)
 
-	// 5. Maintainability scan — only when parser accepted the full document.
+	// 5. Maintainability and property-list scans — only when parser accepted the full document.
 	if parserFailureOffset < 0 {
-		out = append(out, scanXMLMaintainability(rel, content)...)
+		if len(out) >= maxFindings {
+			return out[:maxFindings], true
+		}
+		// Property lists use a fixed Apple schema; generic XML maintainability
+		// heuristics (such as a missing schema) are not actionable there.
+		if !strings.EqualFold(filepath.Ext(rel), ".plist") {
+			out = append(out, scanXMLMaintainability(rel, content)...)
+		}
+		if strings.EqualFold(filepath.Base(rel), "Info.plist") {
+			remaining := maxFindings - len(out)
+			if remaining > 0 {
+				ats, capped := scanSwiftATSPlistWithTruncation(rel, content)
+				if capped {
+					truncated = true
+				}
+				if len(ats) > remaining {
+					ats = ats[:remaining]
+					truncated = true
+				}
+				out = append(out, ats...)
+			}
+		}
+		if len(out) > maxFindings {
+			out = out[:maxFindings]
+			truncated = true
+		}
 		sortXMLFindings(out)
 	}
 
-	return out
+	return out, truncated
 }
 
 func sortXMLFindings(findings []ports.CodeAnalysisRawFinding) {

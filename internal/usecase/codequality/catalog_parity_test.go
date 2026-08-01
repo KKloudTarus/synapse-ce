@@ -34,8 +34,8 @@ func (f fakeBugs2) Bugs(context.Context, string) ([]ports.BugFinding, bool, erro
 
 type fakeAnalyzer2 struct{}
 
-func (f fakeAnalyzer2) Analyze(context.Context, string) ([]ports.CodeAnalysisRawFinding, error) {
-	return nil, nil
+func (f fakeAnalyzer2) Analyze(context.Context, string) (ports.CodeAnalysisReport, error) {
+	return ports.CodeAnalysisReport{}, nil
 }
 
 func TestCatalogParity(t *testing.T) {

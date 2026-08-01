@@ -45,6 +45,27 @@ func (r ComplexityReport) OverCyclomatic(threshold int) []FunctionComplexity {
 	return over
 }
 
+// OverCognitive returns functions whose cognitive complexity is strictly greater than threshold, sorted
+// most-cognitively-complex first with stable file and line tiebreakers.
+func (r ComplexityReport) OverCognitive(threshold int) []FunctionComplexity {
+	var over []FunctionComplexity
+	for _, f := range r.Functions {
+		if f.Cognitive > threshold {
+			over = append(over, f)
+		}
+	}
+	sort.Slice(over, func(i, j int) bool {
+		if over[i].Cognitive != over[j].Cognitive {
+			return over[i].Cognitive > over[j].Cognitive
+		}
+		if over[i].File != over[j].File {
+			return over[i].File < over[j].File
+		}
+		return over[i].Line < over[j].Line
+	})
+	return over
+}
+
 // TopByCyclomatic returns up to n functions with the highest cyclomatic complexity, most-complex first.
 func (r ComplexityReport) TopByCyclomatic(n int) []FunctionComplexity {
 	sorted := make([]FunctionComplexity, len(r.Functions))

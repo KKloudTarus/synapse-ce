@@ -66,21 +66,21 @@ type scanLimits struct {
 	bytes int64
 }
 
-func (a *Analyzer) Analyze(ctx context.Context, root string) ([]ports.CodeAnalysisRawFinding, error) {
+func (a *Analyzer) Analyze(ctx context.Context, root string) (ports.CodeAnalysisReport, error) {
 	return a.analyze(ctx, root, scanLimits{files: maxVisitedRegularFiles, bytes: maxTotalScanBytes})
 }
 
-func (a *Analyzer) analyze(ctx context.Context, root string, limits scanLimits) (out []ports.CodeAnalysisRawFinding, err error) {
+func (a *Analyzer) analyze(ctx context.Context, root string, limits scanLimits) (report ports.CodeAnalysisReport, err error) {
 	if root == "" {
-		return nil, nil
+		return ports.CodeAnalysisReport{}, nil
 	}
 	rootAbs, err := filepath.Abs(filepath.Clean(root))
 	if err != nil {
-		return nil, fmt.Errorf("analyze root %q: %w", root, err)
+		return ports.CodeAnalysisReport{}, fmt.Errorf("analyze root %q: %w", root, err)
 	}
 	rootDir, err := os.OpenRoot(rootAbs)
 	if err != nil {
-		return nil, fmt.Errorf("open analysis root %q: %w", root, err)
+		return ports.CodeAnalysisReport{}, fmt.Errorf("open analysis root %q: %w", root, err)
 	}
 	defer func() {
 		if closeErr := rootDir.Close(); closeErr != nil {
@@ -146,7 +146,11 @@ func (a *Analyzer) analyze(ctx context.Context, root string, limits scanLimits) 
 		collector.merge(result.textFindings, result.textObserved)
 
 		if result.notebook {
-			if result.actualSize > maxNotebookBytes || enry.IsDotFile(path) {
+			if result.actualSize > maxNotebookBytes {
+				report.Truncated = true
+				return nil
+			}
+			if enry.IsDotFile(path) {
 				return nil
 			}
 			if err := ctx.Err(); err != nil {
@@ -170,7 +174,9 @@ func (a *Analyzer) analyze(ctx context.Context, root string, limits scanLimits) 
 					if cell.Type != "code" {
 						continue
 					}
-					if err := a.scanFile(ctx, notebook.Location(rel, cell.Index), ".py", []byte(cell.Source), collector.add); err != nil {
+					truncated, err := a.scanFile(ctx, notebook.Location(rel, cell.Index), ".py", []byte(cell.Source), collector.add)
+					report.Truncated = report.Truncated || truncated
+					if err != nil {
 						return err
 					}
 				}
@@ -178,7 +184,15 @@ func (a *Analyzer) analyze(ctx context.Context, root string, limits scanLimits) 
 			return nil
 		}
 
-		if enry.IsDotFile(path) || result.actualSize > maxFileBytes {
+		if enry.IsDotFile(path) {
+			return nil
+		}
+		if result.actualSize > maxFileBytes {
+			ext := strings.ToLower(filepath.Ext(path))
+			lang := enry.GetLanguage(filepath.Base(path), result.prefix)
+			if isXMLSource(ext, lang) || enry.GetLanguageType(lang) == enry.Programming || enry.GetLanguageType(lang) == enry.Markup {
+				report.Truncated = true
+			}
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
@@ -198,29 +212,33 @@ func (a *Analyzer) analyze(ctx context.Context, root string, limits scanLimits) 
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			for _, hit := range scanXMLFile(rel, result.prefix) {
+			findings, truncated := scanXMLFileWithTruncation(rel, result.prefix)
+			for _, hit := range findings {
 				collector.add(hit)
 			}
+			report.Truncated = report.Truncated || truncated
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 		}
-		if err := a.scanFile(ctx, rel, ext, result.prefix, collector.add); err != nil {
+		truncated, err := a.scanFile(ctx, rel, ext, result.prefix, collector.add)
+		report.Truncated = report.Truncated || truncated
+		if err != nil {
 			return err
 		}
 		return ctx.Err()
 	})
+	report.Findings = collector.findings()
+	if collector.truncated() {
+		report.Truncated = true
+	}
 	if walkErr != nil {
-		return collector.findings(), fmt.Errorf("analyze %q: walk source tree: %w", root, walkErr)
+		return report, fmt.Errorf("analyze %q: walk source tree: %w", root, walkErr)
 	}
 	if err := ctx.Err(); err != nil {
-		return collector.findings(), fmt.Errorf("analyze %q: %w", root, err)
+		return report, fmt.Errorf("analyze %q: %w", root, err)
 	}
-	out = collector.findings()
-	if collector.truncated() {
-		return out, fmt.Errorf("%w: %d retained of %d observed", ErrFindingsTruncated, len(out), collector.observed)
-	}
-	return out, nil
+	return report, nil
 }
 
 func openRegularBeneath(root *os.Root, rel string, walkInfo fs.FileInfo) (*os.File, fs.FileInfo, error) {
@@ -383,9 +401,9 @@ const legacyContextPoll = 64 << 10 // 64 KiB
 // so that physical line numbers stay correct. The ctx is polled periodically so
 // long scans remain cancellable; the caller receives context.Canceled or
 // context.DeadlineExceeded when the context expires.
-func (a *Analyzer) scanFile(ctx context.Context, rel, ext string, content []byte, emit func(ports.CodeAnalysisRawFinding)) error {
+func (a *Analyzer) scanFile(ctx context.Context, rel, ext string, content []byte, emit func(ports.CodeAnalysisRawFinding)) (truncated bool, err error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
 	nextPoll := legacyContextPoll
 	checkCtx := func(offset int) error {
@@ -397,39 +415,44 @@ func (a *Analyzer) scanFile(ctx context.Context, rel, ext string, content []byte
 		}
 		return nil
 	}
-	scanLine := func(lineNo int, line []byte) error {
-		if len(line) <= maxRuleScanLine {
-			for j := range a.rules {
-				r := &a.rules[j]
-				if !r.appliesTo(ext) || !r.hit(string(line)) {
-					continue
-				}
-				emit(ports.CodeAnalysisRawFinding{
-					Kind: r.kind, RuleID: r.id, CWE: r.cwe, Severity: r.severity,
-					Title: r.title, Description: r.desc, File: rel, Line: lineNo,
-				})
-			}
+	scanLine := func(lineNo int, line []byte) (bool, error) {
+		if len(line) > maxRuleScanLine {
+			return true, nil
 		}
-		return nil
+		for j := range a.rules {
+			r := &a.rules[j]
+			if !r.appliesTo(ext) || !r.hit(string(line)) {
+				continue
+			}
+			emit(ports.CodeAnalysisRawFinding{
+				Kind: r.kind, RuleID: r.id, CWE: r.cwe, Severity: r.severity,
+				Title: r.title, Description: r.desc, File: rel, Line: lineNo,
+			})
+		}
+		return false, nil
 	}
 	lineNo := 0
 	start := 0
 	for i := 0; i < len(content); {
 		if err := checkCtx(i); err != nil {
-			return err
+			return truncated, err
 		}
 		if content[i] == '\n' {
 			lineNo++
-			if err := scanLine(lineNo, trimCR(content[start:i])); err != nil {
-				return err
+			lineTruncated, err := scanLine(lineNo, trimCR(content[start:i]))
+			if err != nil {
+				return truncated, err
 			}
+			truncated = truncated || lineTruncated
 			i++
 			start = i
 		} else if content[i] == '\r' {
 			lineNo++
-			if err := scanLine(lineNo, trimCR(content[start:i])); err != nil {
-				return err
+			lineTruncated, err := scanLine(lineNo, trimCR(content[start:i]))
+			if err != nil {
+				return truncated, err
 			}
+			truncated = truncated || lineTruncated
 			i++
 			if i < len(content) && content[i] == '\n' {
 				i++ // consume LF in CRLF
@@ -442,14 +465,16 @@ func (a *Analyzer) scanFile(ctx context.Context, rel, ext string, content []byte
 	// Final unterminated line.
 	if start < len(content) {
 		lineNo++
-		if err := scanLine(lineNo, trimCR(content[start:])); err != nil {
-			return err
+		lineTruncated, err := scanLine(lineNo, trimCR(content[start:]))
+		if err != nil {
+			return truncated, err
 		}
+		truncated = truncated || lineTruncated
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return truncated, err
 	}
-	return nil
+	return truncated, nil
 }
 
 // trimCR removes a trailing \r from the byte slice (handles bare CR at end of CRLF).

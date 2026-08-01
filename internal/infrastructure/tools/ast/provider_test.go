@@ -56,12 +56,23 @@ func TestComplexityUnavailableWhenBinaryMissing(t *testing.T) {
 }
 
 func TestAnalyzeUnavailableWhenBinaryMissing(t *testing.T) {
-	findings, err := New("/nonexistent/synapse-ast-does-not-exist").Analyze(context.Background(), t.TempDir())
+	report, err := New("/nonexistent/synapse-ast-does-not-exist").Analyze(context.Background(), t.TempDir())
 	if err != nil {
 		t.Fatalf("missing binary must not error, got %v", err)
 	}
-	if len(findings) != 0 {
-		t.Errorf("missing binary must return no findings, got %+v", findings)
+	if len(report.Findings) != 0 || report.Truncated {
+		t.Errorf("missing binary must return an empty complete report, got %+v", report)
+	}
+}
+
+func TestAnalyzePropagatesTruncated(t *testing.T) {
+	p := New("synapse-ast").WithRunner(fakeRunner{stdout: []byte(`{"findings":[{"kind":"quality","rule":"swift:force-unwrap","file":"a.swift","line":1}],"truncated":true}`)})
+	report, err := p.Analyze(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if !report.Truncated || len(report.Findings) != 1 {
+		t.Fatalf("report = %+v, want truncated report with one finding", report)
 	}
 }
 

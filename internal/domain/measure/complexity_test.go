@@ -34,6 +34,19 @@ func TestOverCyclomatic(t *testing.T) {
 	}
 }
 
+func TestOverCognitive(t *testing.T) {
+	over := sampleReport().OverCognitive(3)
+	if len(over) != 2 {
+		t.Fatalf("OverCognitive(3) = %d functions, want 2 (%+v)", len(over), over)
+	}
+	if over[0].Name != "b" || over[1].Name != "c" {
+		t.Errorf("ordering wrong: got %s,%s want b,c", over[0].Name, over[1].Name)
+	}
+	if len(sampleReport().OverCognitive(100)) != 0 {
+		t.Error("OverCognitive(100) should be empty")
+	}
+}
+
 func TestTopByCyclomatic(t *testing.T) {
 	top := sampleReport().TopByCyclomatic(2)
 	if len(top) != 2 || top[0].Cyclomatic != 9 || top[1].Cyclomatic != 9 {
