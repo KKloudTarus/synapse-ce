@@ -704,9 +704,11 @@ func runGate(args []string) error {
 	}
 	for _, sr := range sastRaws {
 		findings = append(findings, finding.Finding{
-			Kind:     finding.KindSAST,
-			Severity: sr.Severity,
-			DedupKey: "sast:" + sr.RuleID + ":" + sr.File + ":" + strconv.Itoa(sr.Line),
+			Kind:           finding.KindSAST,
+			Severity:       sr.Severity,
+			RuleKey:        sr.RuleID,
+			DedupKey:       "sast:" + sr.RuleID + ":" + sr.File + ":" + strconv.Itoa(sr.Line),
+			SourceLocation: sastLocation(sr.File, sr.Line),
 		})
 	}
 
@@ -885,10 +887,12 @@ func printGateMarkdown(dir, scope string, rep rating.Report, dupDensity float64,
 }
 
 // filterNewCode keeps only line-anchored findings that sit on a changed line.
+// SourceLocation (when valid) is preferred over DedupKey parsing so text:*
+// findings that carry structured SourceLocation are handled correctly.
 func filterNewCode(findings []finding.Finding, changed gitdiff.ChangedLines) []finding.Finding {
 	var out []finding.Finding
 	for _, f := range findings {
-		file, line, ok := qualitygate.FileLineOf(f.DedupKey)
+		file, line, ok := findingFileLine(f)
 		if !ok {
 			continue // not line-anchored (e.g. SCA): not attributable to a changed line
 		}
@@ -897,6 +901,24 @@ func filterNewCode(findings []finding.Finding, changed gitdiff.ChangedLines) []f
 		}
 	}
 	return out
+}
+
+// findingFileLine extracts the source file and 1-based line from a finding.
+// SourceLocation is preferred when it validates; DedupKey is the fallback.
+func findingFileLine(f finding.Finding) (string, int, bool) {
+	if f.SourceLocation != nil && f.SourceLocation.Validate() == nil {
+		return f.SourceLocation.File, f.SourceLocation.StartLine, true
+	}
+	return qualitygate.FileLineOf(f.DedupKey)
+}
+
+func sastLocation(file string, line int) *finding.SourceLocation {
+	file = strings.ReplaceAll(file, "\\", "/")
+	canonical, err := measure.CanonicalPath(file)
+	if err != nil || canonical == "" || canonical != file || line < 1 {
+		return nil
+	}
+	return &finding.SourceLocation{File: file, StartLine: line, EndLine: line}
 }
 
 // buildSnapshot turns the scoped findings + ratings + duplication into gate metrics.

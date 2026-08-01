@@ -108,20 +108,27 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 			ruleID = f.ID.String()
 		}
 
+		structuredRule := f.Kind.IsRuleBased() && f.RuleKey != ""
+		if structuredRule {
+			ruleID = f.RuleKey
+		}
+
 		var locations []SARIFLocation
-		if rid, file, line, ok := firstPartyLoc(f.DedupKey); ok {
-			// SAST/secret/misconfig: the engine's own rule id + the source file:line it flagged.
-			ruleID = rid
+		if rid, file, line, ok := firstPartyFindingLoc(f); ok {
+			// First-party rule finding: the engine's own rule id + the source file:line it flagged.
+			if !structuredRule {
+				ruleID = rid
+			}
 			phys := &SARIFPhysicalLocation{ArtifactLocation: SARIFArtifactLocation{URI: file}}
 			if line >= 1 {
 				phys.Region = &SARIFRegion{StartLine: line}
 			}
 			locations = []SARIFLocation{{PhysicalLocation: phys}}
-		} else if strings.HasPrefix(f.DedupKey, "sast:ai:") {
+		} else if !structuredRule && strings.HasPrefix(f.DedupKey, "sast:ai:") {
 			// A gated taint (E39) SAST finding is judgment-anchored, not file:line-anchored – group
 			// them under one stable rule id rather than leaking the per-finding anchor as the rule id.
 			ruleID = "synapse-taint-sast"
-		} else if p.component != "" {
+		} else if !structuredRule && p.component != "" {
 			// SCA: point at the manifest/lockfile that declares the vulnerable dependency, so a
 			// code-scanning UI annotates it (GitHub rejects a location that has only a logical/module
 			// location). When the manifest is unknown, emit NO location – a result with no location is a
@@ -131,10 +138,13 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 				manifest = opts.Manifest(f)
 			}
 			if manifest != "" {
-				locations = []SARIFLocation{{
-					PhysicalLocation: &SARIFPhysicalLocation{ArtifactLocation: SARIFArtifactLocation{URI: manifest}},
-					LogicalLocations: []SARIFLogicalLocation{{Name: p.component + "@" + p.version, Kind: "module"}},
-				}}
+				location := finding.SourceLocation{File: manifest, StartLine: 1, EndLine: 1}
+				if location.Validate() == nil {
+					locations = []SARIFLocation{{
+						PhysicalLocation: &SARIFPhysicalLocation{ArtifactLocation: SARIFArtifactLocation{URI: manifest}},
+						LogicalLocations: []SARIFLogicalLocation{{Name: p.component + "@" + p.version, Kind: "module"}},
+					}}
+				}
 			}
 		}
 
@@ -167,12 +177,12 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 		if f.CVSSVector != "" {
 			res.Properties["cvssVector"] = f.CVSSVector
 		}
-		if f.ClassReachability != "" {
+		if !structuredRule && p.component != "" && f.ClassReachability != "" {
 			// Coarse JVM class-reachability: "reachable" | "unreferenced". Advisory – lets a
 			// consumer separate/deprioritize deps the app never references (priority already reflects it).
 			res.Properties["componentReachability"] = f.ClassReachability
 		}
-		if p.component != "" && opts.Fix != nil {
+		if !structuredRule && p.component != "" && opts.Fix != nil {
 			// Only dependency (SCA) findings have a fix version; the p.component gate makes that structural
 			// rather than relying on the resolver returning "". Surface it as a property and inline in the
 			// message so a code-scanning alert shows the fix without opening the finding.
@@ -199,9 +209,44 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 	}
 }
 
-// firstPartyLoc parses a first-party finding dedup key of the form
+// firstPartyFindingLoc prefers producer-owned structured identity because a
+// colon-bearing rule key cannot be recovered unambiguously from DedupKey. Stored
+// findings created before SourceLocation persistence use a RuleKey-anchored
+// legacy fallback; findings without RuleKey retain the original parser.
+func firstPartyFindingLoc(f finding.Finding) (ruleID, file string, line int, ok bool) {
+	if f.Kind.IsRuleBased() && f.RuleKey != "" {
+		if f.SourceLocation != nil {
+			if f.SourceLocation.Validate() == nil {
+				return f.RuleKey, f.SourceLocation.File, f.SourceLocation.StartLine, true
+			}
+			return "", "", 0, false
+		}
+		if file, line, ok := legacyLocationForRule(f.DedupKey, f.RuleKey); ok {
+			return f.RuleKey, file, line, true
+		}
+		return "", "", 0, false
+	}
+	return firstPartyLoc(f.DedupKey)
+}
+
+func legacyLocationForRule(key, ruleID string) (file string, line int, ok bool) {
+	var rest string
+	for _, kind := range []string{"cq:sast:", "cq:quality:", "cq:reliability:", "sast:", "secret:", "misconfig:"} {
+		if value, has := strings.CutPrefix(key, kind); has {
+			rest = value
+			break
+		}
+	}
+	location, has := strings.CutPrefix(rest, ruleID+":")
+	if !has {
+		return "", 0, false
+	}
+	return validatedLegacyLocation(location)
+}
+
+// firstPartyLoc parses a legacy first-party finding dedup key of the form
 // "<kind>:<ruleID>:<file>:<line>" or "cq:<kind>:<ruleID>:<file>:<line>" into the engine rule id
-// and its physical file:line. The rule id and trailing line never contain ':', so a file path that does
+// and its physical file:line. Legacy rule ids and trailing lines never contain ':', so a file path that does
 // is recovered as the middle join. Returns ok=false for SCA "vuln:...", "license:...", or malformed keys.
 func firstPartyLoc(key string) (ruleID, file string, line int, ok bool) {
 	var rest string
@@ -215,19 +260,23 @@ func firstPartyLoc(key string) (ruleID, file string, line int, ok bool) {
 	if !matched {
 		return "", "", 0, false
 	}
-	parts := strings.Split(rest, ":")
-	if len(parts) < 3 {
+	separator := strings.IndexByte(rest, ':')
+	if separator <= 0 || separator == len(rest)-1 {
 		return "", "", 0, false
 	}
-	n, err := strconv.Atoi(parts[len(parts)-1])
-	if err != nil || n < 1 {
+	file, line, ok = validatedLegacyLocation(rest[separator+1:])
+	if !ok {
 		return "", "", 0, false
 	}
-	file = strings.Join(parts[1:len(parts)-1], ":")
-	if parts[0] == "" || file == "" {
-		return "", "", 0, false
+	return rest[:separator], file, line, true
+}
+
+func validatedLegacyLocation(value string) (file string, line int, ok bool) {
+	location, ok := finding.SourceLocationFromLegacy(value)
+	if !ok {
+		return "", 0, false
 	}
-	return parts[0], file, n, true
+	return location.File, location.StartLine, true
 }
 
 // ruleTitle strips a trailing " (file:line)" occurrence marker from a first-party finding title so a

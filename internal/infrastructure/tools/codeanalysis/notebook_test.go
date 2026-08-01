@@ -2,6 +2,7 @@ package codeanalysis
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -91,6 +92,32 @@ func TestAnalyzerNotebookCompliantCases(t *testing.T) {
 	}
 }
 
+func TestAnalyzerNotebookFindsSensitiveAssignmentAfterBenignAssignment(t *testing.T) {
+	root := t.TempDir()
+	writeNotebook(t, root, `{"metadata":{"kernelspec":{"name":"python3","language":"python"}},"cells":[{"cell_type":"code","source":"name = 'ordinary'; api_key = '`+strings.Repeat("a", 15)+`'"}]}`)
+	if _, ok := ruleFiles(notebookAnalysis(t, root))["ipynb-hardcoded-credential"]; !ok {
+		t.Fatal("sensitive assignment after benign assignment was not flagged")
+	}
+}
+
+func TestAnalyzerNotebookReportsCellLineWithoutSplit(t *testing.T) {
+	root := t.TempDir()
+	writeNotebook(t, root, `{"metadata":{"kernelspec":{"name":"python3","language":"python"}},"cells":[{"cell_type":"code","source":"pass\npass\napi_key = '`+strings.Repeat("a", 15)+`'"}]}`)
+	findings, err := New().Analyze(context.Background(), root)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	for _, got := range findings {
+		if got.RuleID == "ipynb-hardcoded-credential" {
+			if got.File != "analysis.ipynb#cell-1" || got.Line != 3 {
+				t.Fatalf("location = %s:%d, want analysis.ipynb#cell-1:3", got.File, got.Line)
+			}
+			return
+		}
+	}
+	t.Fatal("missing ipynb-hardcoded-credential finding")
+}
+
 func TestAnalyzerNotebookFlagsDuplicateExecutionCount(t *testing.T) {
 	root := t.TempDir()
 	writeNotebook(t, root, `{"metadata":{"kernelspec":{"name":"python3","language":"python"}},"cells":[{"cell_type":"code","execution_count":1},{"cell_type":"code","execution_count":1}]}`)
@@ -169,8 +196,10 @@ func TestAnalyzerNotebookCapsFindings(t *testing.T) {
 	cell := `{"cell_type":"code","source":"api_key = '` + strings.Repeat("a", 15) + `'"}`
 	writeNotebook(t, root, `{"metadata":{"kernelspec":{"name":"python3","language":"python"}},"cells":[`+strings.TrimSuffix(strings.Repeat(cell+",", maxFindings+1), ",")+`]}`)
 	findings, err := New().Analyze(context.Background(), root)
-	if err != nil {
-		t.Fatalf("Analyze: %v", err)
+	// The priority collector caps at maxFindings and reports truncation via
+	// ErrFindingsTruncated; both behaviors must hold.
+	if !errors.Is(err, ErrFindingsTruncated) {
+		t.Fatalf("expected ErrFindingsTruncated, got: %v", err)
 	}
 	if len(findings) != maxFindings {
 		t.Fatalf("finding count = %d, want cap %d", len(findings), maxFindings)

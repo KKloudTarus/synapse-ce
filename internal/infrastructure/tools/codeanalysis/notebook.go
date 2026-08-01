@@ -1,6 +1,7 @@
 package codeanalysis
 
 import (
+	"context"
 	"regexp"
 	"strings"
 
@@ -29,28 +30,30 @@ var (
 	notebookRoutineTracebackPath = []string{"site-packages", "dist-packages", "/.venv/", "/venv/", "/virtualenv/"}
 )
 
-func notebookFindings(doc notebook.Document, rel string) []ports.CodeAnalysisRawFinding {
-	var out []ports.CodeAnalysisRawFinding
+func notebookFindings(ctx context.Context, doc notebook.Document, rel string, emit func(ports.CodeAnalysisRawFinding)) error {
 	add := func(cell notebook.Cell, ruleID, cwe string, severity shared.Severity, title, description string) {
-		out = append(out, ports.CodeAnalysisRawFinding{
+		emit(ports.CodeAnalysisRawFinding{
 			Kind: "sast", RuleID: ruleID, CWE: cwe, Severity: severity, Title: title, Description: description,
 			File: notebook.Location(rel, cell.Index), Line: 1,
 		})
 	}
 	addQuality := func(cell notebook.Cell, ruleID, title, description string) {
-		out = append(out, ports.CodeAnalysisRawFinding{
+		emit(ports.CodeAnalysisRawFinding{
 			Kind: "quality", RuleID: ruleID, Severity: shared.SeverityLow, Title: title, Description: description,
 			File: notebook.Location(rel, cell.Index), Line: 1,
 		})
 	}
 	if !doc.HasKernelspec {
-		out = append(out, ports.CodeAnalysisRawFinding{
+		emit(ports.CodeAnalysisRawFinding{
 			Kind: "quality", RuleID: "ipynb-missing-kernelspec", Severity: shared.SeverityLow,
 			Title: "Notebook has no kernel specification", Description: "Without kernelspec metadata, notebook execution is less reproducible.", File: rel, Line: 1,
 		})
 	}
 	lastExecution := 0
 	for _, cell := range doc.Cells {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if cell.Type != "code" {
 			continue
 		}
@@ -64,21 +67,31 @@ func notebookFindings(doc notebook.Document, rel string) []ports.CodeAnalysisRaw
 		} else if cell.HasOutput {
 			addQuality(cell, "ipynb-stale-output", "Unexecuted cell retains output", "The cell has saved output but no execution count, which can misrepresent the current notebook state.")
 		}
-		for line, text := range strings.Split(cell.Source, "\n") {
-			lineCell := cell
-			lineCell.Source = text
+		for start, line := 0, 1; ; line++ {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			end := strings.IndexByte(cell.Source[start:], '\n')
+			text := cell.Source[start:]
+			if end >= 0 {
+				text = cell.Source[start : start+end]
+			}
 			if containsSensitiveAssignment(notebookCodeAssignmentRE, text) {
-				addAt(&out, rel, lineCell, line+1, "ipynb-hardcoded-credential", "CWE-798", shared.SeverityHigh, "Credential literal in notebook cell", "A notebook cell assigns a likely credential literal. Load it from a protected runtime secret instead.")
+				addAt(emit, rel, cell, line, "ipynb-hardcoded-credential", "CWE-798", shared.SeverityHigh, "Credential literal in notebook cell", "A notebook cell assigns a likely credential literal. Load it from a protected runtime secret instead.")
 			}
 			if notebookShellRE.MatchString(text) && notebookInterpolationRE.MatchString(text) {
-				addAt(&out, rel, lineCell, line+1, "ipynb-shell-magic-injection", "CWE-78", shared.SeverityHigh, "Shell magic interpolates a variable", "A shell escape interpolates a Python variable; validate it or avoid shell execution.")
+				addAt(emit, rel, cell, line, "ipynb-shell-magic-injection", "CWE-78", shared.SeverityHigh, "Shell magic interpolates a variable", "A shell escape interpolates a Python variable; validate it or avoid shell execution.")
 			}
 			if notebookSystemRE.MatchString(text) && notebookInterpolationRE.MatchString(text) {
-				addAt(&out, rel, lineCell, line+1, "ipynb-system-magic-injection", "CWE-78", shared.SeverityHigh, "System magic interpolates a variable", "A %system command interpolates a Python variable; use fixed arguments or strict allowlists.")
+				addAt(emit, rel, cell, line, "ipynb-system-magic-injection", "CWE-78", shared.SeverityHigh, "System magic interpolates a variable", "A %system command interpolates a Python variable; use fixed arguments or strict allowlists.")
 			}
 			if match := notebookInstallRE.FindStringSubmatch(text); len(match) == 3 && hasUnpinnedDependency(match[1], match[2]) {
-				addQualityAt(&out, rel, lineCell, line+1, "ipynb-unpinned-cell-dependency", "Notebook installs an unpinned dependency", "A notebook installation command has no exact version pin, reducing reproducibility.")
+				addQualityAt(emit, rel, cell, line, "ipynb-unpinned-cell-dependency", "Notebook installs an unpinned dependency", "A notebook installation command has no exact version pin, reducing reproducibility.")
 			}
+			if end < 0 {
+				break
+			}
+			start += end + 1
 		}
 		if notebookBashRE.MatchString(cell.Source) && notebookInterpolationRE.MatchString(cell.Source) {
 			add(cell, "ipynb-bash-cell-magic-injection", "CWE-78", shared.SeverityHigh, "Bash cell magic interpolates a variable", "A %%bash cell contains Python-style interpolation; avoid passing unvalidated values to a shell.")
@@ -110,7 +123,7 @@ func notebookFindings(doc notebook.Document, rel string) []ports.CodeAnalysisRaw
 			add(cell, "ipynb-traceback-sensitive-path", "CWE-200", shared.SeverityMedium, "Sensitive path saved in notebook output", "Saved output exposes traceback or local path details that can reveal environment structure.")
 		}
 	}
-	return out
+	return nil
 }
 
 func hasSuspiciousScript(output string) bool {
@@ -140,24 +153,30 @@ func hasSensitiveTracebackPath(traceback string) bool {
 }
 
 func containsSensitiveAssignment(pattern *regexp.Regexp, text string) bool {
-	match := pattern.FindStringSubmatch(text)
-	if len(match) != 2 {
-		return false
-	}
-	name := strings.ToLower(strings.ReplaceAll(match[1], "-", "_"))
-	parts := strings.Split(name, "_")
-	last := parts[len(parts)-1]
-	sensitiveSuffixes := []string{"secret", "token", "pwd", "pass" + "wd", "pass" + "word"}
-	for _, suffix := range sensitiveSuffixes {
-		if last == suffix {
+	for _, match := range pattern.FindAllStringSubmatch(text, -1) {
+		if len(match) != 2 {
+			continue
+		}
+		name := strings.ToLower(strings.ReplaceAll(match[1], "-", "_"))
+		separator := strings.LastIndexByte(name, '_')
+		previous, last := "", name
+		if separator >= 0 {
+			previous, last = name[:separator], name[separator+1:]
+			if i := strings.LastIndexByte(previous, '_'); i >= 0 {
+				previous = previous[i+1:]
+			}
+		}
+		sensitiveSuffixes := []string{"secret", "token", "pwd", "pass" + "wd", "pass" + "word"}
+		for _, suffix := range sensitiveSuffixes {
+			if last == suffix {
+				return true
+			}
+		}
+		if previous == "api" && last == "key" || (previous == "access" || previous == "auth") && last == "token" {
 			return true
 		}
 	}
-	if len(parts) < 2 {
-		return false
-	}
-	previous := parts[len(parts)-2]
-	return previous == "api" && last == "key" || (previous == "access" || previous == "auth") && last == "token"
+	return false
 }
 
 func hasUnpinnedDependency(tool, args string) bool {
@@ -186,10 +205,10 @@ func hasUnpinnedDependency(tool, args string) bool {
 	return false
 }
 
-func addQualityAt(out *[]ports.CodeAnalysisRawFinding, rel string, cell notebook.Cell, line int, ruleID, title, description string) {
-	*out = append(*out, ports.CodeAnalysisRawFinding{Kind: "quality", RuleID: ruleID, Severity: shared.SeverityLow, Title: title, Description: description, File: notebook.Location(rel, cell.Index), Line: line})
+func addQualityAt(emit func(ports.CodeAnalysisRawFinding), rel string, cell notebook.Cell, line int, ruleID, title, description string) {
+	emit(ports.CodeAnalysisRawFinding{Kind: "quality", RuleID: ruleID, Severity: shared.SeverityLow, Title: title, Description: description, File: notebook.Location(rel, cell.Index), Line: line})
 }
 
-func addAt(out *[]ports.CodeAnalysisRawFinding, rel string, cell notebook.Cell, line int, ruleID, cwe string, severity shared.Severity, title, description string) {
-	*out = append(*out, ports.CodeAnalysisRawFinding{Kind: "sast", RuleID: ruleID, CWE: cwe, Severity: severity, Title: title, Description: description, File: notebook.Location(rel, cell.Index), Line: line})
+func addAt(emit func(ports.CodeAnalysisRawFinding), rel string, cell notebook.Cell, line int, ruleID, cwe string, severity shared.Severity, title, description string) {
+	emit(ports.CodeAnalysisRawFinding{Kind: "sast", RuleID: ruleID, CWE: cwe, Severity: severity, Title: title, Description: description, File: notebook.Location(rel, cell.Index), Line: line})
 }
