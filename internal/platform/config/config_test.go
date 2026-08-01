@@ -37,6 +37,18 @@ func TestLoadNormalizesEnvironment(t *testing.T) {
 	}
 }
 
+func TestLoadDatabaseMigrationDSN(t *testing.T) {
+	t.Setenv("SYNAPSE_DB_DSN", "postgres://runtime.example/synapse")
+	t.Setenv("SYNAPSE_DB_MIGRATE_DSN", "postgres://migrator.example/synapse")
+	c := Load()
+	if c.DBDSN != "postgres://runtime.example/synapse" {
+		t.Fatalf("DBDSN = %q", c.DBDSN)
+	}
+	if c.DBMigrateDSN != "postgres://migrator.example/synapse" {
+		t.Fatalf("DBMigrateDSN = %q", c.DBMigrateDSN)
+	}
+}
+
 // TestFindingMinSeverityDefaultsToInfo pins the default vuln severity floor at "info" so EVERY
 // detected vulnerability is promoted to a finding (matching Grype/Trivy/OSV-Scanner). A higher
 // default silently hides detected vulns and reads as "missing vulns"; prioritization is by risk
