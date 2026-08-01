@@ -15,7 +15,7 @@ import (
 // writers (API + worker) can never fork the hash chain. Gated on SYNAPSE_TEST_DB_DSN.
 func TestPostgresEvidenceForkGuard(t *testing.T) {
 	dsn := testDSN(t)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "")
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestPostgresEvidenceForkGuard(t *testing.T) {
 // round-trip (the hash truncates the timestamp to µs to match timestamptz precision).
 func TestPostgresEvidenceVerifyRoundTrip(t *testing.T) {
 	dsn := testDSN(t)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "")
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
