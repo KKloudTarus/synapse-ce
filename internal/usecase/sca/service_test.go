@@ -554,7 +554,7 @@ func TestProjectAnalysisCapturesSourceWhenImportedSBOMIsActive(t *testing.T) {
 	svc.SetProjectAnalysisRecorder(recorder)
 	job := ports.ScanJob{ID: "analysis-1", EngagementID: "e1", Status: ports.ScanRunning, StartedAt: time.Unix(200, 0).UTC()}
 
-	svc.runScanJob("operator", "e1", time.Unix(200, 0).UTC(), ports.AcquireRequest{Kind: ports.TargetLocal, Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, ProjectAnalysis: true}, job)
+	svc.runScanJob(context.Background(), "operator", "e1", time.Unix(200, 0).UTC(), ports.AcquireRequest{Kind: ports.TargetLocal, Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, ProjectAnalysis: true}, job)
 
 	if !acq.called {
 		t.Fatal("Project analysis must acquire its configured source, not use the imported SBOM")
@@ -730,7 +730,7 @@ func TestStartScanWithOptionsLicenseOnlySkipsVulnerabilitySources(t *testing.T) 
 		[]ports.DetectionSource{vulnSrc}, nil, licScan, nil,
 	)
 
-	job, err := svc.StartScanWithOptions(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeLicenses})
+	job, err := svc.StartScanWithOptions(shared.WithTenant(context.Background(), ""), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeLicenses})
 	if err != nil {
 		t.Fatalf("StartScanWithOptions: %v", err)
 	}
@@ -1048,7 +1048,7 @@ func TestStartScanAsyncCompletes(t *testing.T) {
 	jobs := newFakeJobStore()
 	svc := newAsyncSvc(repo, fakeClock{t: time.Unix(0, 0).UTC()}, acq, audit, &fakeDetector{}, jobs, fakeIDs{})
 
-	job, err := svc.StartScan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
+	job, err := svc.StartScan(shared.WithTenant(context.Background(), ""), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
 	if err != nil {
 		t.Fatalf("StartScan: %v", err)
 	}
@@ -1097,7 +1097,7 @@ func TestProjectRecorderUsesFreshCompletionContext(t *testing.T) {
 	svc.SetProjectAnalysisRecorder(recorder)
 	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, StartedAt: time.Unix(0, 0).UTC()}
 
-	svc.runScanJob("operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, ProjectAnalysis: true}, job)
+	svc.runScanJob(context.Background(), "operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, ProjectAnalysis: true}, job)
 
 	final, err := jobs.LatestForEngagement(context.Background(), "e1")
 	if err != nil {
@@ -1121,7 +1121,7 @@ func TestProjectRecorderUsesConfiguredCompletionTimeout(t *testing.T) {
 	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, StartedAt: time.Unix(0, 0).UTC()}
 
 	start := time.Now()
-	svc.runScanJob("operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, ProjectAnalysis: true}, job)
+	svc.runScanJob(context.Background(), "operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, ProjectAnalysis: true}, job)
 	if !recorder.called || recorder.deadline.Sub(start) > time.Second {
 		t.Fatalf("recorder deadline=%s start=%s", recorder.deadline, start)
 	}
@@ -1138,7 +1138,7 @@ func TestOrdinaryScanSkipsProjectRecorder(t *testing.T) {
 	svc.SetProjectAnalysisRecorder(&contextRecorder{err: errors.New("snapshot unavailable")})
 	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, StartedAt: time.Unix(0, 0).UTC()}
 
-	svc.runScanJob("operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull}, job)
+	svc.runScanJob(context.Background(), "operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull}, job)
 
 	final, err := jobs.LatestForEngagement(context.Background(), "e1")
 	if err != nil {
@@ -1156,7 +1156,7 @@ func TestProjectRecorderFailureFailsJob(t *testing.T) {
 	svc.SetProjectAnalysisRecorder(&contextRecorder{err: errors.New("snapshot unavailable")})
 	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, StartedAt: time.Unix(0, 0).UTC()}
 
-	svc.runScanJob("operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, ProjectAnalysis: true}, job)
+	svc.runScanJob(context.Background(), "operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, ProjectAnalysis: true}, job)
 
 	final, err := jobs.LatestForEngagement(context.Background(), "e1")
 	if err != nil {
@@ -1186,11 +1186,12 @@ func TestFailStrandedScanJobFinalizes(t *testing.T) {
 	jobs := newFakeJobStore()
 	svc := newAsyncSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(100, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
 	ctx := context.Background()
+	tenant := ""
 	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, Stage: "sbom", Progress: 40}
 	if err := jobs.Save(ctx, job); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(scaJobPayload{Actor: "operator", EngagementID: "e1", Job: job})
+	payload, err := json.Marshal(scaJobPayload{Actor: "operator", TenantID: &tenant, EngagementID: "e1", Job: job})
 	if err != nil {
 		t.Fatal(err)
 	}
