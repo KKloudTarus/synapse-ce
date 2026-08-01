@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 // PrincipalOperator is the fallback principal id (the bootstrap admin also uses it,
@@ -82,7 +84,7 @@ func (a *Authenticator) Middleware(publicPaths map[string]bool, next http.Handle
 			unauthorized(w)
 			return
 		}
-		ctx := context.WithValue(r.Context(), principalKey, principal)
+		ctx := shared.WithTenant(context.WithValue(r.Context(), principalKey, principal), shared.ID(principal.TenantID))
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

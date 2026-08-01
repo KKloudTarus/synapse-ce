@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 // TestTenantPropagatesThroughContext covers the tenant foundation: the tenant the resolver
@@ -15,9 +17,12 @@ func TestTenantPropagatesThroughContext(t *testing.T) {
 		return Principal{ID: "u1", Name: "T", Role: "member", TenantID: "acme"}, true
 	})
 	var gotTenant, gotActor string
+	var gotPersistenceTenant shared.ID
+	var tenantBound bool
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		gotTenant = TenantFrom(r.Context())
 		gotActor = PrincipalFrom(r.Context())
+		gotPersistenceTenant, tenantBound = shared.TenantFrom(r.Context())
 	})
 	h := auth.Middleware(map[string]bool{}, next)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/engagements", nil)
@@ -28,6 +33,9 @@ func TestTenantPropagatesThroughContext(t *testing.T) {
 	}
 	if gotActor != "u1" {
 		t.Errorf("PrincipalFrom = %q, want u1", gotActor)
+	}
+	if !tenantBound || gotPersistenceTenant != "acme" {
+		t.Errorf("shared.TenantFrom = %q, bound=%v; want acme,true", gotPersistenceTenant, tenantBound)
 	}
 }
 

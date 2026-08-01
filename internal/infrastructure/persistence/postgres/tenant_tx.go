@@ -31,3 +31,14 @@ func WithTenantTx(ctx context.Context, pool *pgxpool.Pool, tenantID shared.ID, f
 	}
 	return nil
 }
+
+// WithContextTenantTx is for ports whose historic signature does not carry a
+// tenant ID. HTTP authentication and durable jobs must bind the context first;
+// missing context fails closed rather than becoming a cross-tenant wildcard.
+func WithContextTenantTx(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) error {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return fmt.Errorf("tenant context is required")
+	}
+	return WithTenantTx(ctx, pool, tenantID, fn)
+}
