@@ -249,6 +249,12 @@ func main() {
 			log.Error("db connect failed", "err", err)
 			os.Exit(1)
 		}
+		if cfg.IsProduction() {
+			if err := postgres.RequireNonSuperuser(startup, pool); err != nil {
+				log.Error("unsafe postgres application role", "err", err)
+				os.Exit(1)
+			}
+		}
 		defer pool.Close()
 		// Single-instance guard: until horizontal scaling the repos
 		// ignore tenant_id and there is no leader election, so two writers would race. A

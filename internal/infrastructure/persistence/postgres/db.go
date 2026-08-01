@@ -87,6 +87,19 @@ func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	return ConnectPool(ctx, dsn, PoolConfig{})
 }
 
+// RequireNonSuperuser rejects a PostgreSQL superuser as the runtime role.
+// Superusers bypass RLS even when table owners are forced through policies.
+func RequireNonSuperuser(ctx context.Context, pool *pgxpool.Pool) error {
+	var isSuperuser bool
+	if err := pool.QueryRow(ctx, `SELECT rolsuper FROM pg_roles WHERE rolname = current_user`).Scan(&isSuperuser); err != nil {
+		return fmt.Errorf("check postgres application role: %w", err)
+	}
+	if isSuperuser {
+		return fmt.Errorf("postgres application role must not be a superuser when row-level security is enabled")
+	}
+	return nil
+}
+
 // singletonLockKey derives a stable advisory-lock key PER ROLE. Scoping by
 // role lets one synapse-api AND one synapse-worker run together (each a singleton in its
 // own role) while still refusing a second instance of the SAME role – the multi-process
