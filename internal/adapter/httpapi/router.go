@@ -63,6 +63,7 @@ type Router struct {
 	qualityGates    qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
 	qualityProfiles qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
 	rules           rulesService          // optional; nil ⇒ rule catalog routes are not registered
+	assetInventory assetInventoryService // optional; nil ⇒ Asset Inventory routes are not registered
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -192,6 +193,17 @@ func (rt *Router) withEngTenant(h http.HandlerFunc) http.HandlerFunc {
 // without the auth/AUP middleware (which are validated separately).
 func (rt *Router) routes() *http.ServeMux {
 	mux := http.NewServeMux()
+	if rt.assetInventory != nil {
+		mux.HandleFunc("GET /api/v1/appsec/business-services", rt.authz(userdom.PermView, rt.listBusinessServices))
+		mux.HandleFunc("POST /api/v1/appsec/business-services", rt.authz(userdom.PermOperate, rt.createBusinessService))
+		mux.HandleFunc("POST /api/v1/appsec/business-services/{id}/assets", rt.authz(userdom.PermOperate, rt.linkBusinessServiceAsset))
+		mux.HandleFunc("GET /api/v1/appsec/assets", rt.authz(userdom.PermView, rt.listAssets))
+		mux.HandleFunc("POST /api/v1/appsec/assets", rt.authz(userdom.PermOperate, rt.createAsset))
+		mux.HandleFunc("GET /api/v1/appsec/assets/{id}", rt.authz(userdom.PermView, rt.getAsset))
+		mux.HandleFunc("POST /api/v1/appsec/assets/{id}/versions", rt.authz(userdom.PermOperate, rt.addAssetVersion))
+		mux.HandleFunc("GET /api/v1/appsec/assets/{id}/relationships", rt.authz(userdom.PermView, rt.listAssetRelationships))
+		mux.HandleFunc("POST /api/v1/appsec/assets/{id}/relationships", rt.authz(userdom.PermOperate, rt.addAssetRelationship))
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "synapse-api"})
 	})

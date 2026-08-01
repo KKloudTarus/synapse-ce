@@ -21,6 +21,7 @@ import { ProjectMeasuresPage } from './pages/ProjectMeasuresPage'
 import { ProjectCodePage } from './pages/ProjectCodePage'
 import { QualityGates } from './pages/QualityGates'
 import { QualityProfiles } from './pages/QualityProfiles'
+import { AppSecInventory } from './pages/AppSecInventory'
 
 export default function App() {
   return (
@@ -39,6 +40,7 @@ function Gate() {
         <Route index element={<Navigate to="/engagements" replace />} />
         <Route path="engagements" element={<Engagements />} />
         <Route path="engagements/:id" element={<EngagementDetail />} />
+        <Route path="appsec" element={<AppSecInventory />} />
         <Route path="code-quality" element={<CodeQualityProjects />} />
         <Route path="code-quality/gates" element={<QualityGates />} />
         <Route path="code-quality/profiles" element={<QualityProfiles />} />

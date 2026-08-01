@@ -881,6 +881,84 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/appsec/business-services:
+    get:
+      tags: [appsec]
+      summary: List tenant-scoped AppSec Business Services
+      responses:
+        '200': {description: Business Services}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [appsec]
+      summary: Create an AppSec Business Service
+      responses:
+        '201': {description: Created}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/appsec/business-services/{id}/assets:
+    post:
+      tags: [appsec]
+      summary: Link an existing Asset to a Business Service
+      responses:
+        '201': {description: Linked}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/appsec/assets:
+    get:
+      tags: [appsec]
+      summary: List tenant-scoped AppSec Assets
+      responses:
+        '200': {description: Assets}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [appsec]
+      summary: Create an AppSec Asset
+      responses:
+        '201': {description: Created}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/appsec/assets/{id}:
+    get:
+      tags: [appsec]
+      summary: Get a tenant-scoped AppSec Asset
+      responses:
+        '200': {description: Asset}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/appsec/assets/{id}/versions:
+    post:
+      tags: [appsec]
+      summary: Add an immutable Asset version
+      responses:
+        '201': {description: Created}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/appsec/assets/{id}/relationships:
+    get:
+      tags: [appsec]
+      summary: List Asset relationship edges
+      responses:
+        '200': {description: Relationships}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    post:
+      tags: [appsec]
+      summary: Create a typed Asset relationship
+      responses:
+        '201': {description: Created}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
 components:
   securitySchemes:
     bearerAuth:

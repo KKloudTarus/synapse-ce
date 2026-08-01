@@ -1104,3 +1104,23 @@ export interface ProjectCodeDiffResponse {
   capabilities: ProjectCodeDiffCapabilities
   diff: ProjectCodeDiffView
 }
+
+
+export interface AppSecBusinessService {
+  id: string
+  name: string
+  code: string
+  owner: string
+  criticality: string
+}
+
+export interface AppSecAsset {
+  id: string
+  name: string
+  category: string
+  identity: { kind: string; value: string }
+  lifecycle: string
+  owner: string
+  criticality: string
+  exposure: string
+}

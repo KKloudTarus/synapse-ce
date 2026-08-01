@@ -69,6 +69,8 @@ import type {
   ProjectCodeFileView,
   ProjectCodeRevision,
   ProjectCodeView,
+  AppSecAsset,
+  AppSecBusinessService,
 } from './types'
 import { mapProjectOverviewResponse, type ProjectOverview } from './projectOverview'
 import { mapProjectMeasureResponse, type MeasuresQuery, type ProjectMeasureResponse } from './projectMeasures'
@@ -1702,4 +1704,9 @@ export const api = {
     const id = encodeURIComponent(engagementId)
     await blobDownload(`/api/v1/engagements/${id}/evidence/${encodeURIComponent(sha)}`, filename || `${sha.slice(0, 12)}.bin`)
   },
+  listAppSecBusinessServices: async (): Promise<AppSecBusinessService[]> =>
+    ((await req('/appsec/business-services')) ?? []).map((s: { ID: string; Name: string; Code: string; Owner: string; Criticality: string }) => ({ id: s.ID, name: s.Name, code: s.Code, owner: s.Owner, criticality: s.Criticality })),
+
+  listAppSecAssets: async (): Promise<AppSecAsset[]> =>
+    ((await req('/appsec/assets')) ?? []).map((a: { ID: string; Name: string; Category: string; Identity: { kind: string; value: string }; Lifecycle: string; Owner: string; Criticality: string; Exposure: string }) => ({ id: a.ID, name: a.Name, category: a.Category, identity: a.Identity, lifecycle: a.Lifecycle, owner: a.Owner, criticality: a.Criticality, exposure: a.Exposure })),
 }

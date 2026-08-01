@@ -90,6 +90,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/jobs"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/logging"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
+	assetinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assetinventory"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
@@ -166,6 +167,7 @@ func main() {
 	// Persistence: PostgreSQL when configured, else file + in-memory (dev).
 	var repo ports.EngagementRepository
 	var projectRepo ports.ProjectRepository
+	var assetInventoryRepo ports.AssetInventoryRepository
 	var findingRepo ports.FindingRepository
 	var judgmentStore analysisuc.Store // postgres or memory; satisfies both the narrow Store + ports.JudgmentStore
 	var commentRepo ports.CommentRepository
@@ -267,6 +269,7 @@ func main() {
 		log.Info("acquired single-instance advisory lock")
 		repo = postgres.NewEngagementRepository(pool)
 		projectRepo = postgres.NewProjectRepository(pool)
+		assetInventoryRepo = postgres.NewAssetInventoryRepository(pool)
 		findingRepo = postgres.NewFindingRepository(pool)
 		judgmentStore = postgres.NewJudgmentRepository(pool)
 		commentRepo = postgres.NewCommentRepository(pool)
@@ -305,6 +308,7 @@ func main() {
 	} else {
 		repo = memory.NewEngagementRepository()
 		projectRepo = memory.NewProjectRepository()
+		assetInventoryRepo = memory.NewAssetInventoryRepository()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
 		commentRepo = memory.NewCommentRepository()
@@ -349,6 +353,7 @@ func main() {
 	// Use cases.
 	engService := enguc.NewService(repo, clock, ids, auditLog)
 	projectService := projectuc.NewService(projectRepo, repo, clock, ids, auditLog, !cfg.IsProduction())
+	assetInventoryService := assetinventoryuc.NewService(assetInventoryRepo, clock, ids, auditLog)
 	projectService.SetArchiveStore(file.NewProjectArchiveStore(cfg.ProjectUploadDir, cfg.MaxWorkspaceBytes))
 	projectService.SetAnalysisStore(projectAnalysisStore)
 	if issueStore, ok := projectAnalysisStore.(ports.ProjectIssueStore); ok {
@@ -923,6 +928,7 @@ func main() {
 	}
 	log.Info("immutable project source capture ENABLED", "retention", cfg.ProjectSourceRetention)
 	router.SetProjects(projectService)
+	router.SetAssetInventory(assetInventoryService)
 	router.SetQualityGates(qualityGateService)
 	router.SetQualityProfiles(qualityProfileService)
 	router.SetExploitation(exploitationService) // evidence-gated finding verify endpoint

@@ -21,6 +21,21 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
       </div>
       <nav className="flex-1 space-y-1 p-3">
         <NavLink
+          to="/appsec"
+          onClick={onNavigate}
+          className={({ isActive }) =>
+            cn(
+              'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+              isActive
+                ? 'bg-brand/10 font-semibold text-branddim before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-brand before:content-[""]'
+                : 'text-mutedfg hover:bg-elevated hover:text-foreground',
+            )
+          }
+        >
+          <Boxes className="size-[18px]" />
+          Asset Inventory
+        </NavLink>
+        <NavLink
           to="/engagements"
           onClick={onNavigate}
           className={({ isActive }) =>
