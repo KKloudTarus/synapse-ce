@@ -40,35 +40,32 @@ func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Findi
 	if len(findings) == 0 {
 		return nil
 	}
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin: %w", err)
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return fmt.Errorf("tenant context is required")
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	for _, f := range findings {
-		// tenant_id '' = the seeded default tenant. Finding READS are tenant-isolated via the
-		// tenant-scoped engagement gate; deriving this row's tenant_id from the engagement
-		// is a remaining row-level follow-up and does not affect read isolation today.
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO findings (id, tenant_id, engagement_id, title, description, severity, cvss_vector, cwe, status, evidence_score, dedup_key, kev, risk_score, created_at, updated_at, sources, confidence, class, scope, reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key)
-			 VALUES ($1, '', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
-			 ON CONFLICT (engagement_id, dedup_key) WHERE dedup_key IS NOT NULL
-			 DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description,
-			               severity = EXCLUDED.severity, cvss_vector = EXCLUDED.cvss_vector, kev = EXCLUDED.kev, risk_score = EXCLUDED.risk_score,
-			               sources = EXCLUDED.sources, confidence = EXCLUDED.confidence, class = EXCLUDED.class,
-			               scope = EXCLUDED.scope, reachability = EXCLUDED.reachability, impact = EXCLUDED.impact, priority = EXCLUDED.priority,
-			               kind = EXCLUDED.kind, class_reachability = EXCLUDED.class_reachability,
-			               rule_key = EXCLUDED.rule_key, updated_at = EXCLUDED.updated_at`,
-			f.ID.String(), f.EngagementID.String(), f.Title, f.Description, string(f.Severity),
-			f.CVSSVector, f.CWE, string(f.Status), f.EvidenceScore, f.DedupKey,
-			f.KEV, f.RiskScore, f.Audit.CreatedAt, f.Audit.UpdatedAt, strings.Join(f.Sources, ","), f.Confidence, classOrDefault(f.Class),
-			scopeOrDefault(f.Scope), reachOrDefault(f.Reachability), f.Impact, priorityOrDefault(f.Priority), kindOrDefault(string(f.Kind)),
-			f.Assignee, versionOrDefault(f.Version), f.ProposedBy, f.ClassReachability, f.RuleKey); err != nil {
-			return fmt.Errorf("upsert finding: %w", err)
+	return WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		for _, f := range findings {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO findings (id, tenant_id, engagement_id, title, description, severity, cvss_vector, cwe, status, evidence_score, dedup_key, kev, risk_score, created_at, updated_at, sources, confidence, class, scope, reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+				 ON CONFLICT (engagement_id, dedup_key) WHERE dedup_key IS NOT NULL
+				 DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description,
+				               severity = EXCLUDED.severity, cvss_vector = EXCLUDED.cvss_vector, kev = EXCLUDED.kev, risk_score = EXCLUDED.risk_score,
+				               sources = EXCLUDED.sources, confidence = EXCLUDED.confidence, class = EXCLUDED.class,
+				               scope = EXCLUDED.scope, reachability = EXCLUDED.reachability, impact = EXCLUDED.impact, priority = EXCLUDED.priority,
+				               kind = EXCLUDED.kind, class_reachability = EXCLUDED.class_reachability,
+				               rule_key = EXCLUDED.rule_key, updated_at = EXCLUDED.updated_at`,
+				f.ID.String(), tenantID.String(), f.EngagementID.String(), f.Title, f.Description, string(f.Severity),
+				f.CVSSVector, f.CWE, string(f.Status), f.EvidenceScore, f.DedupKey,
+				f.KEV, f.RiskScore, f.Audit.CreatedAt, f.Audit.UpdatedAt, strings.Join(f.Sources, ","), f.Confidence, classOrDefault(f.Class),
+				scopeOrDefault(f.Scope), reachOrDefault(f.Reachability), f.Impact, priorityOrDefault(f.Priority), kindOrDefault(string(f.Kind)),
+				f.Assignee, versionOrDefault(f.Version), f.ProposedBy, f.ClassReachability, f.RuleKey); err != nil {
+				return fmt.Errorf("upsert finding: %w", err)
+			}
 		}
-	}
-	return tx.Commit(ctx)
+		return nil
+	})
 }
 
 // UpdateStatus sets the triage status with optimistic concurrency: the row is
