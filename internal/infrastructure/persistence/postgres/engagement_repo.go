@@ -30,46 +30,42 @@ var _ ports.EngagementRepository = (*EngagementRepository)(nil)
 
 // Create inserts the engagement and its scope targets in one transaction.
 func (r *EngagementRepository) Create(ctx context.Context, e *engagement.Engagement) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	return WithTenantTx(ctx, r.pool, e.TenantID, func(tx pgx.Tx) error {
+		roeJSON, err := json.Marshal(e.RoE)
+		if err != nil {
+			return fmt.Errorf("marshal roe: %w", err)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO engagements (`+engagementCols+`) VALUES ($1,$2,NULLIF($3,''),$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+			e.ID.String(), e.TenantID.String(), e.ProjectID.String(), e.Name, e.Client, string(e.Status),
+			e.AuthorizedFrom, e.AuthorizedTo, e.Audit.CreatedAt, e.Audit.UpdatedAt, e.Timezone, roeJSON, e.LiveReconEnabled,
+			e.Audit.CreatedBy, e.Audit.UpdatedBy); err != nil {
+			return fmt.Errorf("insert engagement: %w", err)
+		}
 
-	roeJSON, err := json.Marshal(e.RoE)
-	if err != nil {
-		return fmt.Errorf("marshal roe: %w", err)
-	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO engagements (`+engagementCols+`) VALUES ($1,$2,NULLIF($3,''),$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-		e.ID.String(), e.TenantID.String(), e.ProjectID.String(), e.Name, e.Client, string(e.Status),
-		e.AuthorizedFrom, e.AuthorizedTo, e.Audit.CreatedAt, e.Audit.UpdatedAt, e.Timezone, roeJSON, e.LiveReconEnabled,
-		e.Audit.CreatedBy, e.Audit.UpdatedBy); err != nil {
-		return fmt.Errorf("insert engagement: %w", err)
-	}
-
-	// Insert-only path: deterministic scope_target PKs are fine here. A future
-	// "replace scope" path should switch to generated IDs (IDGenerator / gen_random_uuid).
-	i := 0
-	insert := func(targets []engagement.Target, inScope bool) error {
-		for _, t := range targets {
-			stID := e.ID.String() + "-st-" + strconv.Itoa(i)
-			i++
-			if _, err := tx.Exec(ctx,
-				`INSERT INTO scope_targets (id, engagement_id, in_scope, kind, value) VALUES ($1,$2,$3,$4,$5)`,
-				stID, e.ID.String(), inScope, string(t.Kind), t.Value); err != nil {
-				return fmt.Errorf("insert scope target: %w", err)
+		// Insert-only path: deterministic scope_target PKs are fine here. A future
+		// "replace scope" path should switch to generated IDs (IDGenerator / gen_random_uuid).
+		i := 0
+		insert := func(targets []engagement.Target, inScope bool) error {
+			for _, t := range targets {
+				stID := e.ID.String() + "-st-" + strconv.Itoa(i)
+				i++
+				if _, err := tx.Exec(ctx,
+					`INSERT INTO scope_targets (id, engagement_id, in_scope, kind, value) VALUES ($1,$2,$3,$4,$5)`,
+					stID, e.ID.String(), inScope, string(t.Kind), t.Value); err != nil {
+					return fmt.Errorf("insert scope target: %w", err)
+				}
 			}
+			return nil
+		}
+		if err := insert(e.Scope.InScope, true); err != nil {
+			return err
+		}
+		if err := insert(e.Scope.OutOfScope, false); err != nil {
+			return err
 		}
 		return nil
-	}
-	if err := insert(e.Scope.InScope, true); err != nil {
-		return err
-	}
-	if err := insert(e.Scope.OutOfScope, false); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	})
 }
 
 // Update persists an existing engagement aggregate: the engagement row and its
@@ -101,49 +97,46 @@ func (r *EngagementRepository) ProjectContexts(ctx context.Context, tenantID sha
 }
 
 func (r *EngagementRepository) Update(ctx context.Context, e *engagement.Engagement) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	return WithTenantTx(ctx, r.pool, e.TenantID, func(tx pgx.Tx) error {
 
-	roeJSON, err := json.Marshal(e.RoE)
-	if err != nil {
-		return fmt.Errorf("marshal roe: %w", err)
-	}
-	// created_by is intentionally NOT updated – the owner is immutable; only updated_by changes.
-	ct, err := tx.Exec(ctx,
-		`UPDATE engagements SET name=$2, client=$3, status=$4, authorized_from=$5, authorized_to=$6, timezone=$7, updated_at=$8, roe=$9, live_recon=$10, updated_by=$11 WHERE id=$1`,
-		e.ID.String(), e.Name, e.Client, string(e.Status),
-		e.AuthorizedFrom, e.AuthorizedTo, e.Timezone, e.Audit.UpdatedAt, roeJSON, e.LiveReconEnabled, e.Audit.UpdatedBy)
-	if err != nil {
-		return fmt.Errorf("update engagement: %w", err)
-	}
-	if ct.RowsAffected() == 0 {
-		return shared.ErrNotFound
-	}
+		roeJSON, err := json.Marshal(e.RoE)
+		if err != nil {
+			return fmt.Errorf("marshal roe: %w", err)
+		}
+		// created_by is intentionally NOT updated – the owner is immutable; only updated_by changes.
+		ct, err := tx.Exec(ctx,
+			`UPDATE engagements SET name=$2, client=$3, status=$4, authorized_from=$5, authorized_to=$6, timezone=$7, updated_at=$8, roe=$9, live_recon=$10, updated_by=$11 WHERE id=$1`,
+			e.ID.String(), e.Name, e.Client, string(e.Status),
+			e.AuthorizedFrom, e.AuthorizedTo, e.Timezone, e.Audit.UpdatedAt, roeJSON, e.LiveReconEnabled, e.Audit.UpdatedBy)
+		if err != nil {
+			return fmt.Errorf("update engagement: %w", err)
+		}
+		if ct.RowsAffected() == 0 {
+			return shared.ErrNotFound
+		}
 
-	// Replace the scope atomically: clear then re-insert with generated PKs.
-	if _, err := tx.Exec(ctx, `DELETE FROM scope_targets WHERE engagement_id=$1`, e.ID.String()); err != nil {
-		return fmt.Errorf("clear scope: %w", err)
-	}
-	insert := func(targets []engagement.Target, inScope bool) error {
-		for _, t := range targets {
-			if _, err := tx.Exec(ctx,
-				`INSERT INTO scope_targets (id, engagement_id, in_scope, kind, value) VALUES (gen_random_uuid()::text,$1,$2,$3,$4)`,
-				e.ID.String(), inScope, string(t.Kind), t.Value); err != nil {
-				return fmt.Errorf("insert scope target: %w", err)
+		// Replace the scope atomically: clear then re-insert with generated PKs.
+		if _, err := tx.Exec(ctx, `DELETE FROM scope_targets WHERE engagement_id=$1`, e.ID.String()); err != nil {
+			return fmt.Errorf("clear scope: %w", err)
+		}
+		insert := func(targets []engagement.Target, inScope bool) error {
+			for _, t := range targets {
+				if _, err := tx.Exec(ctx,
+					`INSERT INTO scope_targets (id, engagement_id, in_scope, kind, value) VALUES (gen_random_uuid()::text,$1,$2,$3,$4)`,
+					e.ID.String(), inScope, string(t.Kind), t.Value); err != nil {
+					return fmt.Errorf("insert scope target: %w", err)
+				}
 			}
+			return nil
+		}
+		if err := insert(e.Scope.InScope, true); err != nil {
+			return err
+		}
+		if err := insert(e.Scope.OutOfScope, false); err != nil {
+			return err
 		}
 		return nil
-	}
-	if err := insert(e.Scope.InScope, true); err != nil {
-		return err
-	}
-	if err := insert(e.Scope.OutOfScope, false); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	})
 }
 
 // Delete removes an engagement; ON DELETE CASCADE drops its scope, findings,
