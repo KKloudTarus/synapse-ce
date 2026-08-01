@@ -134,12 +134,12 @@ func (s *Service) SetRunLock(l ports.RunLocker) { s.runLock = l }
 // JobKind is the queue Kind for a recon run.
 const JobKind = "recon"
 
-// reconJob is the durable-queue payload for one recon run.
 type reconJob struct {
-	Actor  string `json:"actor"`
-	RunID  string `json:"run_id"`
-	Tool   string `json:"tool"`
-	Target string `json:"target"`
+	Actor    string  `json:"actor"`
+	TenantID *string `json:"tenant_id"`
+	RunID    string  `json:"run_id"`
+	Tool     string  `json:"tool"`
+	Target   string  `json:"target"`
 }
 
 // SetQueue routes recon runs through the durable job queue: Start enqueues, and a
@@ -154,6 +154,10 @@ func (s *Service) RunJob(ctx context.Context, payload []byte) error {
 	if err := json.Unmarshal(payload, &j); err != nil {
 		return fmt.Errorf("%w: malformed recon job payload: %v", shared.ErrValidation, err)
 	}
+	if j.TenantID == nil {
+		return fmt.Errorf("%w: recon job is missing tenant context", shared.ErrValidation)
+	}
+	ctx = shared.WithTenant(ctx, shared.ID(*j.TenantID))
 	if err := engagement.ValidateTargetValue(j.Target); err != nil {
 		return fmt.Errorf("%w: invalid recon job target: %v", shared.ErrValidation, err)
 	}
@@ -411,7 +415,12 @@ func (s *Service) Start(ctx context.Context, actor string, engagementID shared.I
 	// it (survives restart; runs under the worker's sandbox/egress/privilege). Otherwise
 	// the in-process dispatcher runs it (dev / single-process).
 	if s.jobQueue != nil {
-		payload, err := json.Marshal(reconJob{Actor: actor, RunID: run.ID.String(), Tool: toolName, Target: target.Value})
+		tenantID, ok := shared.TenantFrom(ctx)
+		if !ok {
+			return recon.Run{}, fmt.Errorf("%w: tenant context is required for durable recon", shared.ErrValidation)
+		}
+		tenant := tenantID.String()
+		payload, err := json.Marshal(reconJob{Actor: actor, TenantID: &tenant, RunID: run.ID.String(), Tool: toolName, Target: target.Value})
 		if err != nil {
 			s.finishFailed(ctx, &run, "queue", "marshal job: "+err.Error())
 			return run, fmt.Errorf("marshal recon job: %w", err)

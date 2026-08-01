@@ -379,7 +379,7 @@ func TestStartViaDurableQueue(t *testing.T) {
 	q := memory.NewJobQueue(&seqIDs{}, nil)
 	h.svc.SetQueue(q)
 
-	run, err := h.svc.Start(context.Background(), "alice", "e1", "subfinder", "example.com")
+	run, err := h.svc.Start(shared.WithTenant(context.Background(), ""), "alice", "e1", "subfinder", "example.com")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -416,7 +416,7 @@ func TestFailStrandedJobFinalizesRun(t *testing.T) {
 	q := memory.NewJobQueue(&seqIDs{}, nil)
 	h.svc.SetQueue(q)
 
-	run, err := h.svc.Start(context.Background(), "alice", "e1", "subfinder", "example.com")
+	run, err := h.svc.Start(shared.WithTenant(context.Background(), ""), "alice", "e1", "subfinder", "example.com")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -527,12 +527,13 @@ func TestRunJobAbortsOnLeaseLoss(t *testing.T) {
 	h := newHarness(t, ctxRunner{}, subfinderTool(), false)
 	h.seedEngagement(t, true)
 	h.svc.SetRunLock(fakeLeaseLock{})
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "")
 	run := recon.Run{ID: "run-1", EngagementID: "e1", Tool: "subfinder", Target: "example.com", Status: recon.StatusRunning, StartedAt: time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)}
 	if err := h.runs.Save(ctx, run); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(reconJob{Actor: "alice", RunID: "run-1", Tool: "subfinder", Target: "example.com"})
+	tenant := ""
+	payload, err := json.Marshal(reconJob{Actor: "alice", TenantID: &tenant, RunID: "run-1", Tool: "subfinder", Target: "example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
