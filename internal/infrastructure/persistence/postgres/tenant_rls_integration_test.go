@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -107,5 +109,24 @@ func TestTenantRLSIsolation(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("tenant B exposed %d tenant A scope targets", count)
+	}
+
+	ctxA := shared.WithTenant(ctx, shared.ID(tenantA))
+	findingID := suffix + "-finding"
+	if err := NewFindingRepository(runtime).Upsert(ctxA, []finding.Finding{{ID: shared.ID(findingID), EngagementID: shared.ID(engagementID), Title: "RLS finding", Severity: shared.SeverityHigh, Status: finding.StatusOpen, DedupKey: suffix + "-dedup"}}); err != nil {
+		t.Fatalf("create tenant A finding: %v", err)
+	}
+	if err := NewEvidenceStore(runtime).Append(ctxA, []evidence.Evidence{{ID: shared.ID(suffix + "-evidence"), EngagementID: shared.ID(engagementID), FindingID: shared.ID(findingID), Kind: "scan", Content: []byte("rls evidence"), Hash: suffix + "-hash", CreatedAt: time.Now().UTC()}}); err != nil {
+		t.Fatalf("create tenant A evidence: %v", err)
+	}
+	for _, table := range []string{"findings", "evidence"} {
+		if err := WithTenantTx(ctx, runtime, shared.ID(tenantB), func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(*) FROM `+table+` WHERE engagement_id=$1`, engagementID).Scan(&count)
+		}); err != nil {
+			t.Fatalf("query tenant B %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("tenant B exposed %d tenant A %s rows", count, table)
+		}
 	}
 }
