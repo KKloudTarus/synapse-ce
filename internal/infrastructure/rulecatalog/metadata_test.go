@@ -210,6 +210,7 @@ func TestMetadata_ApprovedLanguage(t *testing.T) {
 		"IPython Notebooks":      true,
 		"Rust":                   true,
 		"Scala":                  true,
+		"Ruby":                   true,
 		"CSS":                    true,
 		"HTML":                   true,
 		"Text":                   true,

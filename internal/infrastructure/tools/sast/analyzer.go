@@ -111,7 +111,7 @@ func (a *Analyzer) AnalyzeSource(ctx context.Context, root string) ([]ports.SAST
 		if len(lines) == 0 {
 			return nil
 		}
-		files = append(files, sourceFile{Path: path, Rel: rel, Lines: lines, Ext: strings.ToLower(filepath.Ext(path))})
+		files = append(files, sourceFile{Path: path, Rel: rel, Lines: lines, Ext: sastSourceExt(path)})
 		return nil
 	})
 	if walkErr != nil {
@@ -170,12 +170,21 @@ func readSourceLines(path string) []string {
 func (a *Analyzer) scanLines(rel, ext string, lines []string, project projectContext) []ports.SASTRawFinding {
 	var hits []ports.SASTRawFinding
 	var scalaLex scalaLexState
+	var rubyLex rubyLexState
+	var rubyERBLex rubyERBLexState
 	for i, text := range lines {
 		line := i + 1
 		matchText := text
 		isScala := scalaExts[ext]
+		isRuby := rubyExts[ext]
 		if isScala {
 			matchText = scalaLex.codeOnly(text)
+		} else if isRuby {
+			if ext == ".erb" {
+				matchText = rubyERBLex.codeOnly(text)
+			} else {
+				matchText = rubyLex.codeOnly(text)
+			}
 		}
 		if len(text) > maxLineBytes {
 			continue // minified/blob line
@@ -194,6 +203,8 @@ func (a *Analyzer) scanLines(rel, ext string, lines []string, project projectCon
 			var matched bool
 			if isScala && strings.HasPrefix(r.id, "scala:") {
 				matched = scalaRuleMatches(r, text, matchText)
+			} else if isRuby && strings.HasPrefix(r.id, "rb:") {
+				matched = rubyRuleMatches(r, text, matchText)
 			} else {
 				matched = r.re.MatchString(text) && !r.skip(text)
 			}
