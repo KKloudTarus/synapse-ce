@@ -28,48 +28,42 @@ func (s *ImportedSBOMStore) SaveActive(ctx context.Context, record importedsbom.
 	if err := record.Validate(); err != nil {
 		return err
 	}
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO imported_sboms (
-			id, tenant_id, engagement_id, filename, format, spec_version, target_ref,
-			component_count, dependency_count, sha256, raw_json, created_by, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		ON CONFLICT (tenant_id, engagement_id) DO UPDATE SET
-			id = EXCLUDED.id,
-			filename = EXCLUDED.filename,
-			format = EXCLUDED.format,
-			spec_version = EXCLUDED.spec_version,
-			target_ref = EXCLUDED.target_ref,
-			component_count = EXCLUDED.component_count,
-			dependency_count = EXCLUDED.dependency_count,
-			sha256 = EXCLUDED.sha256,
-			raw_json = EXCLUDED.raw_json,
-			created_by = EXCLUDED.created_by,
-			created_at = EXCLUDED.created_at`,
-		record.ID.String(), record.TenantID.String(), record.EngagementID.String(), record.Filename,
-		record.Format, record.SpecVersion, record.TargetRef, record.ComponentCount, record.DependencyCount,
-		record.SHA256, record.RawJSON, record.CreatedBy, record.CreatedAt)
-	if err != nil {
-		return fmt.Errorf("save imported SBOM: %w", err)
-	}
-	return nil
+	return WithTenantTx(ctx, s.pool, record.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO imported_sboms (
+				id, tenant_id, engagement_id, filename, format, spec_version, target_ref,
+				component_count, dependency_count, sha256, raw_json, created_by, created_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			ON CONFLICT (tenant_id, engagement_id) DO UPDATE SET
+				id = EXCLUDED.id, filename = EXCLUDED.filename, format = EXCLUDED.format,
+				spec_version = EXCLUDED.spec_version, target_ref = EXCLUDED.target_ref,
+				component_count = EXCLUDED.component_count, dependency_count = EXCLUDED.dependency_count,
+				sha256 = EXCLUDED.sha256, raw_json = EXCLUDED.raw_json,
+				created_by = EXCLUDED.created_by, created_at = EXCLUDED.created_at`,
+			record.ID.String(), record.TenantID.String(), record.EngagementID.String(), record.Filename,
+			record.Format, record.SpecVersion, record.TargetRef, record.ComponentCount, record.DependencyCount,
+			record.SHA256, record.RawJSON, record.CreatedBy, record.CreatedAt)
+		if err != nil {
+			return fmt.Errorf("save imported SBOM: %w", err)
+		}
+		return nil
+	})
 }
 
 // LatestByEngagement returns the active imported SBOM for a tenant-scoped engagement.
-func (s *ImportedSBOMStore) LatestByEngagement(ctx context.Context, tenantID, engagementID shared.ID) (importedsbom.Record, error) {
-	var record importedsbom.Record
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, tenant_id, engagement_id, filename, format, spec_version, target_ref,
-		       component_count, dependency_count, sha256, raw_json, created_by, created_at
-		FROM imported_sboms
-		WHERE tenant_id = $1 AND engagement_id = $2`, tenantID.String(), engagementID.String()).Scan(
-		&record.ID, &record.TenantID, &record.EngagementID, &record.Filename, &record.Format,
-		&record.SpecVersion, &record.TargetRef, &record.ComponentCount, &record.DependencyCount,
-		&record.SHA256, &record.RawJSON, &record.CreatedBy, &record.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return importedsbom.Record{}, fmt.Errorf("imported SBOM for engagement %s: %w", engagementID, shared.ErrNotFound)
-	}
-	if err != nil {
-		return importedsbom.Record{}, fmt.Errorf("load imported SBOM: %w", err)
-	}
-	return record, nil
+func (s *ImportedSBOMStore) LatestByEngagement(ctx context.Context, tenantID, engagementID shared.ID) (record importedsbom.Record, err error) {
+	err = WithTenantTx(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT id, tenant_id, engagement_id, filename, format, spec_version, target_ref, component_count, dependency_count, sha256, raw_json, created_by, created_at FROM imported_sboms WHERE tenant_id = $1 AND engagement_id = $2`, tenantID.String(), engagementID.String()).Scan(
+			&record.ID, &record.TenantID, &record.EngagementID, &record.Filename, &record.Format,
+			&record.SpecVersion, &record.TargetRef, &record.ComponentCount, &record.DependencyCount,
+			&record.SHA256, &record.RawJSON, &record.CreatedBy, &record.CreatedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("imported SBOM for engagement %s: %w", engagementID, shared.ErrNotFound)
+		}
+		if err != nil {
+			return fmt.Errorf("load imported SBOM: %w", err)
+		}
+		return nil
+	})
+	return record, err
 }
