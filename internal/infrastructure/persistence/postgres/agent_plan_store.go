@@ -34,18 +34,24 @@ func (s *AgentPlanStore) CreatePlan(ctx context.Context, p agent.Plan) error {
 	if err != nil {
 		return fmt.Errorf("marshal plan nodes: %w", err)
 	}
-	_, err = s.pool.Exec(ctx,
-		`INSERT INTO agent_plans (id, session_id, engagement_id, goal, status, revision, nodes, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		p.ID.String(), p.SessionID.String(), p.EngagementID.String(), p.Goal, string(p.Status), p.Revision, nodes, p.CreatedAt, p.UpdatedAt)
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // session_id UNIQUE – fork guard
-			return fmt.Errorf("plan for session %s already exists: %w", p.SessionID, shared.ErrConflict)
-		}
-		return fmt.Errorf("create agent plan: %w", err)
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return fmt.Errorf("create agent plan: %w", shared.ErrValidation)
 	}
-	return nil
+	return WithTenantTx(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx,
+			`INSERT INTO agent_plans (id, tenant_id, session_id, engagement_id, goal, status, revision, nodes, created_at, updated_at)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+			p.ID.String(), tenantID.String(), p.SessionID.String(), p.EngagementID.String(), p.Goal, string(p.Status), p.Revision, nodes, p.CreatedAt, p.UpdatedAt)
+		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return fmt.Errorf("plan for session %s already exists: %w", p.SessionID, shared.ErrConflict)
+			}
+			return fmt.Errorf("create agent plan: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *AgentPlanStore) GetBySession(ctx context.Context, sessionID shared.ID) (agent.Plan, bool, error) {

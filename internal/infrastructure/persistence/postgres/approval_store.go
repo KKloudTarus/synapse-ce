@@ -30,17 +30,23 @@ var _ ports.ApprovalStore = (*ApprovalStore)(nil)
 func (s *ApprovalStore) Enqueue(ctx context.Context, a agent.ProposedAction) error {
 	argv, _ := json.Marshal(a.Argv)
 	egress, _ := json.Marshal(a.EgressPreview)
-	_, err := s.pool.Exec(ctx,
-		`INSERT INTO agent_approvals
-		   (action_id, session_id, engagement_id, tool, action, target_kind, target_value, argv, egress_preview, risk, rationale, proposed_at, decision_state)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending')
-		 ON CONFLICT (action_id) DO NOTHING`, // idempotent re-enqueue on resume
-		a.ID.String(), a.SessionID.String(), a.EngagementID.String(), a.Tool, a.Action,
-		string(a.Target.Kind), a.Target.Value, argv, egress, string(a.Risk), a.Rationale, a.ProposedAt)
-	if err != nil {
-		return fmt.Errorf("enqueue approval: %w", err)
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return fmt.Errorf("enqueue approval: %w", shared.ErrValidation)
 	}
-	return nil
+	return WithTenantTx(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx,
+			`INSERT INTO agent_approvals
+			   (action_id, tenant_id, session_id, engagement_id, tool, action, target_kind, target_value, argv, egress_preview, risk, rationale, proposed_at, decision_state)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending')
+			 ON CONFLICT (action_id) DO NOTHING`,
+			a.ID.String(), tenantID.String(), a.SessionID.String(), a.EngagementID.String(), a.Tool, a.Action,
+			string(a.Target.Kind), a.Target.Value, argv, egress, string(a.Risk), a.Rationale, a.ProposedAt)
+		if err != nil {
+			return fmt.Errorf("enqueue approval: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *ApprovalStore) Pending(ctx context.Context, engagementID shared.ID) ([]agent.ProposedAction, error) {
