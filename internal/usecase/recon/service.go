@@ -287,16 +287,17 @@ func (s *Service) SweepStaleRuns(ctx context.Context, staleFor time.Duration) (i
 	n := 0
 	for i := range runs {
 		run := runs[i]
-		release, ok, lerr := s.runLock.TryLock(ctx, run.ID.String())
+		tenantCtx := shared.WithTenant(ctx, run.TenantID)
+		release, ok, lerr := s.runLock.TryLock(tenantCtx, run.ID.String())
 		if lerr != nil || !ok {
 			continue // can't acquire (DB hiccup) or a live owner holds it → leave for next pass
 		}
 		// Re-read under the lock: a final delivery may have just finished it.
-		if fresh, gerr := s.runs.Get(ctx, run.ID); gerr == nil && fresh.Status.Terminal() {
+		if fresh, gerr := s.runs.Get(tenantCtx, run.ID); gerr == nil && fresh.Status.Terminal() {
 			release()
 			continue
 		}
-		s.finishFailed(ctx, &run, "swept", "run stranded running past staleFor with no live owner – reclaimed by sweeper")
+		s.finishFailed(tenantCtx, &run, "swept", "run stranded running past staleFor with no live owner – reclaimed by sweeper")
 		release()
 		n++
 	}

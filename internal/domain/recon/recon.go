@@ -38,6 +38,7 @@ func (s Status) Terminal() bool { return s == StatusSucceeded || s == StatusFail
 // track progress, survive reloads, and link to the sealed evidence.
 type Run struct {
 	ID           shared.ID  `json:"id"`
+	TenantID     shared.ID  `json:"-"`
 	EngagementID shared.ID  `json:"engagementId"`
 	Tool         string     `json:"tool"`   // recon tool name, e.g. "subfinder"
 	Target       string     `json:"target"` // the in-scope target value the run was launched against

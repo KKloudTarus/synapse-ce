@@ -104,6 +104,6 @@ func scanReconRun(row rowScanner) (recon.Run, error) {
 	if err := row.Scan(&id, &tenant, &eng, &run.Tool, &run.Target, &status, &run.Stage, &run.Error, &run.ResultCount, &evID, &run.StartedAt, &finishedAt, &run.Containment); err != nil {
 		return recon.Run{}, err
 	}
-	run.ID, run.EngagementID, run.EvidenceID, run.Status, run.FinishedAt = shared.ID(id), shared.ID(eng), shared.ID(evID), recon.Status(status), finishedAt
+	run.ID, run.TenantID, run.EngagementID, run.EvidenceID, run.Status, run.FinishedAt = shared.ID(id), shared.ID(tenant), shared.ID(eng), shared.ID(evID), recon.Status(status), finishedAt
 	return run, nil
 }

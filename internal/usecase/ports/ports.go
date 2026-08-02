@@ -354,6 +354,7 @@ type ScanDebugEvent struct {
 // progress bar and survive a page reload (the pipeline runs server-side).
 type ScanJob struct {
 	ID           string           `json:"id"`
+	TenantID     shared.ID        `json:"-"`
 	EngagementID string           `json:"engagement_id"`
 	Target       string           `json:"target"`
 	Kind         string           `json:"kind"`
