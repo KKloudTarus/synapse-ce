@@ -162,75 +162,77 @@ func upsertHotspotsTx(ctx context.Context, tx pgx.Tx, analysis projectanalysis.A
 }
 
 func (r *ProjectAnalysisStore) ListHotspots(ctx context.Context, tenantID, projectID shared.ID, filter hotspot.ListFilter) (hotspot.Page, error) {
-	where, args, joins := hotspotWhere(tenantID, projectID, filter, true)
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 25
-	}
-	args = append(args, limit+1)
-	query := `SELECT ph.id, ph.tenant_id, ph.project_id, ph.hotspot_key, ph.finding_identity, ph.rule_key, ph.title, ph.description, ph.severity, ph.finding_kind, ph.cwe, ph.location, ph.source_file, ph.start_line, ph.end_line, ph.start_column, ph.end_column,
-		ph.status, ph.version, ph.first_seen_analysis_id, ph.last_seen_analysis_id, ph.first_seen_at, ph.last_seen_at, ph.created_at, ph.updated_at, ph.last_reviewed_by, ph.last_reviewed_at
-		FROM project_hotspots ph ` + joins + ` WHERE ` + where + ` ORDER BY ph.last_seen_at DESC, ph.id COLLATE "C" DESC LIMIT $` + fmt.Sprint(len(args))
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return hotspot.Page{}, fmt.Errorf("list project hotspots: %w", err)
-	}
-	defer rows.Close()
-	items := make([]hotspot.Hotspot, 0, limit+1)
-	for rows.Next() {
-		item, err := scanHotspot(rows)
-		if err != nil {
-			return hotspot.Page{}, fmt.Errorf("scan project hotspot: %w", err)
+	var page hotspot.Page
+	err := WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		where, args, joins := hotspotWhere(tenantID, projectID, filter, true)
+		limit := filter.Limit
+		if limit <= 0 {
+			limit = 25
 		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
+		args = append(args, limit+1)
+		query := `SELECT ph.id, ph.tenant_id, ph.project_id, ph.hotspot_key, ph.finding_identity, ph.rule_key, ph.title, ph.description, ph.severity, ph.finding_kind, ph.cwe, ph.location, ph.source_file, ph.start_line, ph.end_line, ph.start_column, ph.end_column,
+			ph.status, ph.version, ph.first_seen_analysis_id, ph.last_seen_analysis_id, ph.first_seen_at, ph.last_seen_at, ph.created_at, ph.updated_at, ph.last_reviewed_by, ph.last_reviewed_at
+			FROM project_hotspots ph ` + joins + ` WHERE ` + where + ` ORDER BY ph.last_seen_at DESC, ph.id COLLATE "C" DESC LIMIT $` + fmt.Sprint(len(args))
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list project hotspots: %w", err)
+		}
+		items := make([]hotspot.Hotspot, 0, limit+1)
+		for rows.Next() {
+			item, err := scanHotspot(rows)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("scan project hotspot: %w", err)
+			}
+			items = append(items, item)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		if len(items) > limit {
+			last := items[limit-1]
+			page.Next = &hotspot.Cursor{BeforeLastSeenAt: last.LastSeenAt, BeforeID: last.ID}
+			items = items[:limit]
+		}
+		page.Items = items
+		facetWhere, facetArgs, facetJoins := hotspotWhere(tenantID, projectID, filter, false)
+		var total, reviewed int
+		if err := tx.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE ph.status IN ('acknowledged', 'fixed', 'safe')) FROM project_hotspots ph `+facetJoins+` WHERE `+facetWhere, facetArgs...).Scan(&total, &reviewed); err != nil {
+			return fmt.Errorf("summary project hotspots: %w", err)
+		}
+		summary, _ := hotspot.NewSummary(total, reviewed)
+		page.Summary = summary
+		facetRows, err := tx.Query(ctx, `SELECT 'status' as kind, ph.status as value, count(*) FROM project_hotspots ph `+facetJoins+` WHERE `+facetWhere+` GROUP BY ph.status
+			UNION ALL SELECT 'rule', ph.rule_key, count(*) FROM project_hotspots ph `+facetJoins+` WHERE `+facetWhere+` GROUP BY ph.rule_key
+			UNION ALL SELECT 'severity', ph.severity, count(*) FROM project_hotspots ph `+facetJoins+` WHERE `+facetWhere+` GROUP BY ph.severity`, facetArgs...)
+		if err != nil {
+			return fmt.Errorf("facet project hotspots: %w", err)
+		}
+		defer facetRows.Close()
+		page.Facets = hotspot.Facets{Statuses: map[string]int{}, RuleKeys: map[string]int{}, Severities: map[string]int{}}
+		for facetRows.Next() {
+			var kind, value string
+			var count int
+			if err := facetRows.Scan(&kind, &value, &count); err != nil {
+				return fmt.Errorf("scan project hotspot facet: %w", err)
+			}
+			switch kind {
+			case "status":
+				page.Facets.Statuses[value] = count
+			case "rule":
+				page.Facets.RuleKeys[value] = count
+			case "severity":
+				page.Facets.Severities[value] = count
+			}
+		}
+		return facetRows.Err()
+	})
+	if err != nil {
 		return hotspot.Page{}, err
 	}
-	page := hotspot.Page{}
-	if len(items) > limit {
-		last := items[limit-1]
-		page.Next = &hotspot.Cursor{BeforeLastSeenAt: last.LastSeenAt, BeforeID: last.ID}
-		items = items[:limit]
-	}
-	page.Items = items
-
-	facetWhere, facetArgs, facetJoins := hotspotWhere(tenantID, projectID, filter, false)
-
-	// Query Summary
-	var total, reviewed int
-	err = r.pool.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE ph.status IN ('acknowledged', 'fixed', 'safe')) FROM project_hotspots ph `+facetJoins+` WHERE `+facetWhere, facetArgs...).Scan(&total, &reviewed)
-	if err != nil {
-		return hotspot.Page{}, fmt.Errorf("summary project hotspots: %w", err)
-	}
-
-	summary, _ := hotspot.NewSummary(total, reviewed)
-	page.Summary = summary
-
-	facetRows, err := r.pool.Query(ctx, `SELECT 'status' as kind, ph.status as value, count(*) FROM project_hotspots ph `+facetJoins+` WHERE `+facetWhere+` GROUP BY ph.status
-		UNION ALL SELECT 'rule', ph.rule_key, count(*) FROM project_hotspots ph `+facetJoins+` WHERE `+facetWhere+` GROUP BY ph.rule_key
-		UNION ALL SELECT 'severity', ph.severity, count(*) FROM project_hotspots ph `+facetJoins+` WHERE `+facetWhere+` GROUP BY ph.severity`, facetArgs...)
-	if err != nil {
-		return hotspot.Page{}, fmt.Errorf("facet project hotspots: %w", err)
-	}
-	defer facetRows.Close()
-	page.Facets = hotspot.Facets{Statuses: map[string]int{}, RuleKeys: map[string]int{}, Severities: map[string]int{}}
-	for facetRows.Next() {
-		var kind, value string
-		var count int
-		if err := facetRows.Scan(&kind, &value, &count); err != nil {
-			return hotspot.Page{}, fmt.Errorf("scan project hotspot facet: %w", err)
-		}
-		switch kind {
-		case "status":
-			page.Facets.Statuses[value] = count
-		case "rule":
-			page.Facets.RuleKeys[value] = count
-		case "severity":
-			page.Facets.Severities[value] = count
-		}
-	}
-	return page, facetRows.Err()
+	return page, nil
 }
 
 func hotspotSearchPattern(value string) string {
