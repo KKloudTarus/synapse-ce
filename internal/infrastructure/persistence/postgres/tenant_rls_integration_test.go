@@ -157,7 +157,10 @@ func TestTenantRLSIsolation(t *testing.T) {
 	if err := NewScanJobStore(runtime).CreateRunning(ctxA, ports.ScanJob{ID: suffix + "-scan", EngagementID: engagementID, Target: "example.test", Kind: "local", Status: ports.ScanRunning, StartedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("create tenant A scan job: %v", err)
 	}
-	for _, table := range []string{"recon_runs", "scan_jobs"} {
+	if err := NewScanRunStore(runtime).Save(ctxA, ports.ScanRun{ID: suffix + "-scan-run", EngagementID: engagementID, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("create tenant A scan run: %v", err)
+	}
+	for _, table := range []string{"recon_runs", "scan_jobs", "scan_runs"} {
 		if err := WithTenantTx(ctx, runtime, shared.ID(tenantB), func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx, `SELECT count(*) FROM `+table+` WHERE tenant_id=$1`, tenantA).Scan(&count)
 		}); err != nil {
