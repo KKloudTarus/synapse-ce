@@ -32,17 +32,19 @@ func (r *ScanJobStore) CreateRunning(ctx context.Context, j ports.ScanJob) error
 	if !ok {
 		return fmt.Errorf("create scan job: %w", shared.ErrValidation)
 	}
-	_, err = r.pool.Exec(ctx, `INSERT INTO scan_jobs (id, tenant_id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-		j.ID, tenantID.String(), j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents)
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return shared.ErrConflict
+	return WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO scan_jobs (id, tenant_id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			j.ID, tenantID.String(), j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents)
+		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return shared.ErrConflict
+			}
+			return fmt.Errorf("create scan job: %w", err)
 		}
-		return fmt.Errorf("create scan job: %w", err)
-	}
-	return nil
+		return nil
+	})
 }
 
 // Save upserts a scan job (used on create and on every stage/status update).
@@ -55,17 +57,19 @@ func (r *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
 	if !ok {
 		return fmt.Errorf("save scan job: %w", shared.ErrValidation)
 	}
-	_, err = r.pool.Exec(ctx,
-		`INSERT INTO scan_jobs (id, tenant_id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-		 ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, stage=EXCLUDED.stage,
-		     progress=EXCLUDED.progress, error=EXCLUDED.error, finished_at=EXCLUDED.finished_at,
-		     debug_events=EXCLUDED.debug_events`,
-		j.ID, tenantID.String(), j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents)
-	if err != nil {
-		return fmt.Errorf("save scan job: %w", err)
-	}
-	return nil
+	return WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx,
+			`INSERT INTO scan_jobs (id, tenant_id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+			 ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, stage=EXCLUDED.stage,
+			     progress=EXCLUDED.progress, error=EXCLUDED.error, finished_at=EXCLUDED.finished_at,
+			     debug_events=EXCLUDED.debug_events`,
+			j.ID, tenantID.String(), j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents)
+		if err != nil {
+			return fmt.Errorf("save scan job: %w", err)
+		}
+		return nil
+	})
 }
 
 // ListStaleRunning enumerates tenant identities before reading tenant-owned jobs.
