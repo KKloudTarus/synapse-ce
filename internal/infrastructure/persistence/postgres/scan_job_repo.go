@@ -164,45 +164,51 @@ func (r *ScanJobStore) LatestForEngagements(ctx context.Context, engagementIDs [
 	if len(ids) == 0 {
 		return map[shared.ID]ports.ScanJob{}, nil
 	}
-	rows, err := r.pool.Query(ctx, `SELECT DISTINCT ON (engagement_id) id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at FROM scan_jobs WHERE engagement_id = ANY($1) ORDER BY engagement_id, started_at DESC, id DESC`, ids)
-	if err != nil {
-		return nil, fmt.Errorf("list latest scan jobs: %w", err)
-	}
-	defer rows.Close()
 	out := map[shared.ID]ports.ScanJob{}
-	for rows.Next() {
-		var j ports.ScanJob
-		var status string
-		var finished *time.Time
-		if err := rows.Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished); err != nil {
-			return nil, fmt.Errorf("scan latest scan job: %w", err)
+	err := WithContextTenantTx(ctx, r.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT DISTINCT ON (engagement_id) id, tenant_id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at FROM scan_jobs WHERE engagement_id = ANY($1) ORDER BY engagement_id, started_at DESC, id DESC`, ids)
+		if err != nil {
+			return fmt.Errorf("list latest scan jobs: %w", err)
 		}
-		j.Status, j.FinishedAt, j.DebugEvents = ports.ScanStatus(status), finished, []ports.ScanDebugEvent{}
-		out[shared.ID(j.EngagementID)] = j
+		defer rows.Close()
+		for rows.Next() {
+			var j ports.ScanJob
+			var tenant, status string
+			var finished *time.Time
+			if err := rows.Scan(&j.ID, &tenant, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished); err != nil {
+				return fmt.Errorf("scan latest scan job: %w", err)
+			}
+			j.TenantID, j.Status, j.FinishedAt, j.DebugEvents = shared.ID(tenant), ports.ScanStatus(status), finished, []ports.ScanDebugEvent{}
+			out[shared.ID(j.EngagementID)] = j
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (r *ScanJobStore) LatestForEngagement(ctx context.Context, engagementID shared.ID) (ports.ScanJob, error) {
-	var (
-		j           ports.ScanJob
-		status      string
-		finished    *time.Time
-		debugEvents []byte
-	)
-	err := r.pool.QueryRow(ctx,
-		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events
-		 FROM scan_jobs WHERE engagement_id=$1 ORDER BY started_at DESC LIMIT 1`, engagementID.String()).
-		Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ports.ScanJob{}, fmt.Errorf("scan job for %s: %w", engagementID, shared.ErrNotFound)
-	}
+	var j ports.ScanJob
+	err := WithContextTenantTx(ctx, r.pool, func(tx pgx.Tx) error {
+		var tenant, status string
+		var finished *time.Time
+		var debugEvents []byte
+		err := tx.QueryRow(ctx,
+			`SELECT id, tenant_id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events
+			 FROM scan_jobs WHERE engagement_id=$1 ORDER BY started_at DESC LIMIT 1`, engagementID.String()).
+			Scan(&j.ID, &tenant, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("scan job for %s: %w", engagementID, shared.ErrNotFound)
+		}
+		if err != nil {
+			return fmt.Errorf("load scan job: %w", err)
+		}
+		j.TenantID, j.Status, j.FinishedAt = shared.ID(tenant), ports.ScanStatus(status), finished
+		return decodeScanDebugEvents(debugEvents, &j)
+	})
 	if err != nil {
-		return ports.ScanJob{}, fmt.Errorf("load scan job: %w", err)
-	}
-	j.Status = ports.ScanStatus(status)
-	j.FinishedAt = finished
-	if err := decodeScanDebugEvents(debugEvents, &j); err != nil {
 		return ports.ScanJob{}, err
 	}
 	return j, nil
