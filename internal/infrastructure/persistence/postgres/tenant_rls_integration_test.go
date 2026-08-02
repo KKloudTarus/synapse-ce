@@ -151,6 +151,21 @@ func TestTenantRLSIsolation(t *testing.T) {
 		}
 	}
 
+	if err := WithTenantTx(ctx, runtime, shared.ID(tenantA), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO agent_approvals (action_id, tenant_id, session_id, engagement_id, tool, action, risk, proposed_at) VALUES ($1,$2,$3,$4,'subfinder','recon','read',now())`, suffix+"-approval", tenantA, sessionID, engagementID)
+		return err
+	}); err != nil {
+		t.Fatalf("create tenant A approval: %v", err)
+	}
+	if err := WithTenantTx(ctx, runtime, shared.ID(tenantB), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM agent_approvals WHERE tenant_id=$1`, tenantA).Scan(&count)
+	}); err != nil {
+		t.Fatalf("query tenant B approvals: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("tenant B exposed %d tenant A approvals", count)
+	}
+
 	if err := NewReconRunStore(runtime).Save(ctxA, recon.Run{ID: shared.ID(suffix + "-recon"), EngagementID: shared.ID(engagementID), Tool: "subfinder", Target: "example.test", Status: recon.StatusRunning, StartedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("create tenant A recon run: %v", err)
 	}
