@@ -13,6 +13,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -128,51 +129,43 @@ func (w *Worker) safeHandle(ctx context.Context, h Handler, job ports.QueuedJob)
 // process dispatches one job, heartbeating its lease until the handler returns, then
 // Completes or Fails it.
 func (w *Worker) process(ctx context.Context, job ports.QueuedJob) {
+	jobCtx := shared.WithTenant(ctx, job.TenantID)
 	h, ok := w.handlers[job.Kind]
 	if !ok {
-		// Unknown kind: there is no handler in this build. Park it (Complete) so it does
-		// not spin forever, and log loudly – a silent drop would hide a misconfiguration.
 		w.log.Error("no handler for job kind – parking job", "kind", job.Kind, "job", job.ID)
-		w.complete(job.ID)
+		w.complete(jobCtx, job.ID)
 		return
 	}
 
-	hbCtx, stopHB := context.WithCancel(ctx)
+	hbCtx, stopHB := context.WithCancel(jobCtx)
 	go w.heartbeat(hbCtx, job.ID)
 
-	err := w.safeHandle(ctx, h, job)
+	err := w.safeHandle(jobCtx, h, job)
 	stopHB()
 
 	if err == nil {
-		w.complete(job.ID)
+		w.complete(jobCtx, job.ID)
 		return
 	}
 	if job.Attempts >= w.cfg.MaxAttempts {
 		w.log.Error("job failed permanently – dead-lettering", "kind", job.Kind, "job", job.ID, "attempts", job.Attempts, "err", err)
-		// Drive the backing domain entity terminal BEFORE flipping the job row, so a reconciler
-		// keyed on the entity's status (not the job's) stops re-enqueuing it – closing the
-		// dead-letter → re-drive livelock. Best-effort + logged; never blocks the dead-letter.
 		if dl, ok := h.(DeadLetterer); ok {
-			if derr := dl.OnDeadLetter(context.Background(), job, err); derr != nil {
+			if derr := dl.OnDeadLetter(context.WithoutCancel(jobCtx), job, err); derr != nil {
 				w.log.Error("dead-letter entity finalize failed", "kind", job.Kind, "job", job.ID, "err", derr)
 			}
 		}
-		// Terminal FAILED state (not done): an abandoned authorized scan stays operator-
-		// visible + queryable, never silently indistinguishable from a success.
-		if derr := w.queue.Deadletter(context.Background(), job.ID); derr != nil {
+		if derr := w.queue.Deadletter(context.WithoutCancel(jobCtx), job.ID); derr != nil {
 			w.log.Error("dead-letter failed", "job", job.ID, "err", derr)
 		}
 		return
 	}
 	w.log.Warn("job failed – requeueing with backoff", "kind", job.Kind, "job", job.ID, "attempt", job.Attempts, "err", err)
-	if ferr := w.queue.Fail(ctx, job.ID, w.cfg.Backoff); ferr != nil {
+	if ferr := w.queue.Fail(jobCtx, job.ID, w.cfg.Backoff); ferr != nil {
 		w.log.Error("requeue failed", "job", job.ID, "err", ferr)
 	}
 }
 
-// heartbeat extends the job's lease on an interval until its context is cancelled (the
-// handler returned). Uses context.Background for the extension call so a cancelled
-// parent (shutdown) still lets the in-flight handler finish under a valid lease.
+// heartbeat extends the job's lease until its handler returns.
 func (w *Worker) heartbeat(ctx context.Context, id string) {
 	t := time.NewTicker(w.cfg.Heartbeat)
 	defer t.Stop()
@@ -181,15 +174,15 @@ func (w *Worker) heartbeat(ctx context.Context, id string) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := w.queue.Heartbeat(context.Background(), id, w.cfg.Visibility); err != nil {
+			if err := w.queue.Heartbeat(context.WithoutCancel(ctx), id, w.cfg.Visibility); err != nil {
 				w.log.Warn("heartbeat failed", "job", id, "err", err)
 			}
 		}
 	}
 }
 
-func (w *Worker) complete(id string) {
-	if err := w.queue.Complete(context.Background(), id); err != nil {
+func (w *Worker) complete(ctx context.Context, id string) {
+	if err := w.queue.Complete(context.WithoutCancel(ctx), id); err != nil {
 		w.log.Error("complete failed", "job", id, "err", err)
 	}
 }

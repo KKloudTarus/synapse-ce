@@ -34,12 +34,16 @@ func (q *JobQueue) Enqueue(ctx context.Context, kind string, payload []byte) (st
 		return "", fmt.Errorf("%w: job kind is required", shared.ErrValidation)
 	}
 	id := q.ids.NewID().String()
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return "", fmt.Errorf("%w: tenant context is required for durable job", shared.ErrValidation)
+	}
 	if payload == nil {
 		payload = []byte{} // a nil []byte encodes as SQL NULL; the column is NOT NULL and empty is valid
 	}
 	if _, err := q.pool.Exec(ctx,
-		`INSERT INTO jobs (id, kind, payload, status, available_at) VALUES ($1, $2, $3, 'queued', now())`,
-		id, kind, payload); err != nil {
+		`INSERT INTO jobs (id, tenant_id, kind, payload, status, available_at) VALUES ($1, $2, $3, $4, 'queued', now())`,
+		id, tenantID.String(), kind, payload); err != nil {
 		return "", fmt.Errorf("enqueue job: %w", err)
 	}
 	return id, nil
@@ -65,8 +69,8 @@ func (q *JobQueue) Claim(ctx context.Context, visibility time.Duration, kinds ..
 		     FOR UPDATE SKIP LOCKED
 		     LIMIT 1
 		 )
-		 RETURNING id, kind, payload, attempts`,
-		args...).Scan(&j.ID, &j.Kind, &j.Payload, &j.Attempts)
+		 RETURNING id, tenant_id, kind, payload, attempts`,
+		args...).Scan(&j.ID, &j.TenantID, &j.Kind, &j.Payload, &j.Attempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil // nothing ready
 	}
