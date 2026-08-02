@@ -19,6 +19,9 @@ type AgentSessionStore interface {
 	ListByEngagement(ctx context.Context, engagementID shared.ID) ([]agent.Session, error)
 	AppendMessage(ctx context.Context, sessionID shared.ID, seq int, m agent.Message) error
 	Messages(ctx context.Context, sessionID shared.ID) ([]agent.Message, error)
+	// TenantIDs returns tenant identities from the registry for worker fan-out.
+	// Callers must bind one before any tenant-scoped session query.
+	TenantIDs(ctx context.Context) ([]shared.ID, error)
 	// ListResumable returns non-terminal sessions (running / awaiting_approval) not updated
 	// since now-staleFor, oldest first, capped at limit – the startup reconciler's input for
 	// re-driving sessions a crash stranded.

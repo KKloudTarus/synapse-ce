@@ -58,6 +58,21 @@ func (s *AgentSessionStore) ListByEngagement(_ context.Context, engagementID sha
 	return out, nil
 }
 
+func (s *AgentSessionStore) TenantIDs(_ context.Context) ([]shared.ID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := map[shared.ID]struct{}{}
+	for _, sess := range s.sessions {
+		seen[sess.TenantID] = struct{}{}
+	}
+	out := make([]shared.ID, 0, len(seen))
+	for tenantID := range seen {
+		out = append(out, tenantID)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out, nil
+}
+
 func (s *AgentSessionStore) ListResumable(_ context.Context, staleFor time.Duration, now time.Time, limit int) ([]agent.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

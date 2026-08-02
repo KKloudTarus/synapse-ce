@@ -6,10 +6,15 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 )
 
 type fakeResumableLister struct{ sessions []agent.Session }
+
+func (f fakeResumableLister) TenantIDs(_ context.Context) ([]shared.ID, error) {
+	return []shared.ID{""}, nil
+}
 
 func (f fakeResumableLister) ListResumable(_ context.Context, _ time.Duration, _ time.Time, _ int) ([]agent.Session, error) {
 	return f.sessions, nil

@@ -77,26 +77,54 @@ func (s *AgentSessionStore) ListByEngagement(ctx context.Context, engagementID s
 	return out, rows.Err()
 }
 
+// TenantIDs reads the tenant registry, not tenant-owned session rows; the worker
+// uses each returned ID to open a separately bound RLS transaction.
+func (s *AgentSessionStore) TenantIDs(ctx context.Context) ([]shared.ID, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list agent session tenants: %w", err)
+	}
+	defer rows.Close()
+	var out []shared.ID
+	for rows.Next() {
+		var tenantID string
+		if err := rows.Scan(&tenantID); err != nil {
+			return nil, fmt.Errorf("scan agent session tenant: %w", err)
+		}
+		out = append(out, shared.ID(tenantID))
+	}
+	return out, rows.Err()
+}
+
 func (s *AgentSessionStore) ListResumable(ctx context.Context, staleFor time.Duration, now time.Time, limit int) ([]agent.Session, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at FROM agent_sessions WHERE status IN ('running','awaiting_approval') AND updated_at < $1 ORDER BY updated_at LIMIT $2`, now.Add(-staleFor), limit)
-	if err != nil {
-		return nil, fmt.Errorf("list resumable sessions: %w", err)
-	}
-	defer rows.Close()
 	var out []agent.Session
-	for rows.Next() {
-		var e agent.Session
-		var status string
-		if err := rows.Scan(&e.ID, &e.TenantID, &e.EngagementID, &e.InitiatedBy, &e.Goal, &e.Model, &e.ProviderBase, &e.PromptHash, &status, &e.Steps, &e.TokensUsed, &e.TokenBudgetMax, &e.CreatedAt, &e.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("scan resumable session: %w", err)
+	err := WithContextTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx,
+			`SELECT id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at
+			 FROM agent_sessions WHERE status IN ('running','awaiting_approval') AND updated_at < $1
+			 ORDER BY updated_at LIMIT $2`, now.Add(-staleFor), limit)
+		if err != nil {
+			return fmt.Errorf("list resumable sessions: %w", err)
 		}
-		e.Status = agent.Status(status)
-		out = append(out, e)
+		defer rows.Close()
+		for rows.Next() {
+			var e agent.Session
+			var status string
+			if err := rows.Scan(&e.ID, &e.TenantID, &e.EngagementID, &e.InitiatedBy, &e.Goal, &e.Model, &e.ProviderBase, &e.PromptHash, &status, &e.Steps, &e.TokensUsed, &e.TokenBudgetMax, &e.CreatedAt, &e.UpdatedAt); err != nil {
+				return fmt.Errorf("scan resumable session: %w", err)
+			}
+			e.Status = agent.Status(status)
+			out = append(out, e)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *AgentSessionStore) AppendMessage(ctx context.Context, sessionID shared.ID, seq int, m agent.Message) error {

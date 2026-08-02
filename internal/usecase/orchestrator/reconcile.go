@@ -15,6 +15,7 @@ import (
 // here (not imported from usecase/worker) so the orchestrator stays off the worker package –
 // the concrete ports.JobQueue satisfies it.
 type resumableLister interface {
+	TenantIDs(ctx context.Context) ([]shared.ID, error)
 	ListResumable(ctx context.Context, staleFor time.Duration, now time.Time, limit int) ([]agent.Session, error)
 }
 type enqueuer interface {
@@ -54,28 +55,34 @@ func NewReconciler(sessions resumableLister, enqueue enqueuer, clock ports.Clock
 // re-enqueued. Idempotent: re-driving is safe (Drive no-ops a terminal session, the run lock
 // serializes, and fail-closed per-action idempotency prevents a double-run).
 func (r *Reconciler) ReconcileOnce(ctx context.Context) (int, error) {
-	sessions, err := r.sessions.ListResumable(ctx, r.staleFor, r.clock.Now(), r.limit)
+	tenantIDs, err := r.sessions.TenantIDs(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("list resumable sessions: %w", err)
+		return 0, fmt.Errorf("list session tenants: %w", err)
 	}
 	n := 0
-	for _, sess := range sessions {
-		if sess.Status == agent.StatusAwaitingApproval {
-			// A human owes a decision; never auto-drive an action that is awaiting approval.
-			r.log.Info("reconcile: session awaiting approval (not auto-driven)", "session", sess.ID.String())
-			continue
-		}
-		payload, err := DriveJob(shared.WithTenant(ctx, sess.TenantID), sess.ID)
+	for _, tenantID := range tenantIDs {
+		tenantCtx := shared.WithTenant(ctx, tenantID)
+		sessions, err := r.sessions.ListResumable(tenantCtx, r.staleFor, r.clock.Now(), r.limit)
 		if err != nil {
-			r.log.Error("reconcile: build drive job", "session", sess.ID.String(), "err", err)
-			continue
+			return n, fmt.Errorf("list resumable sessions for tenant %s: %w", tenantID, err)
 		}
-		if _, err := r.enqueue.Enqueue(ctx, JobKind, payload); err != nil {
-			r.log.Error("reconcile: re-enqueue drive job", "session", sess.ID.String(), "err", err)
-			continue
+		for _, sess := range sessions {
+			if sess.Status == agent.StatusAwaitingApproval {
+				r.log.Info("reconcile: session awaiting approval (not auto-driven)", "session", sess.ID.String())
+				continue
+			}
+			payload, err := DriveJob(tenantCtx, sess.ID)
+			if err != nil {
+				r.log.Error("reconcile: build drive job", "session", sess.ID.String(), "err", err)
+				continue
+			}
+			if _, err := r.enqueue.Enqueue(tenantCtx, JobKind, payload); err != nil {
+				r.log.Error("reconcile: re-enqueue drive job", "session", sess.ID.String(), "err", err)
+				continue
+			}
+			r.log.Info("reconcile: re-enqueued stranded running session", "session", sess.ID.String())
+			n++
 		}
-		r.log.Info("reconcile: re-enqueued stranded running session", "session", sess.ID.String())
-		n++
 	}
 	return n, nil
 }
