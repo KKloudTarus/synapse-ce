@@ -54,6 +54,9 @@ func (r *ProjectAnalysisStore) SaveWithResultAndProjections(ctx context.Context,
 		return fmt.Errorf("begin project analysis transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", analysis.TenantID); err != nil {
+		return fmt.Errorf("set project analysis tenant context: %w", err)
+	}
 
 	if _, err := tx.Exec(ctx, `INSERT INTO project_analyses (id, tenant_id, project_id, created_at, payload, result)
 		VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
@@ -298,6 +301,9 @@ func (r *ProjectAnalysisStore) TransitionIssue(ctx context.Context, cmd issue.Tr
 		return issue.Issue{}, issue.ReviewEvent{}, fmt.Errorf("begin issue transition tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", cmd.TenantID.String()); err != nil {
+		return issue.Issue{}, issue.ReviewEvent{}, fmt.Errorf("set issue transition tenant context: %w", err)
+	}
 
 	row := tx.QueryRow(ctx, `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location, source_file, start_line, end_line, start_column, end_column,
 		status, version, is_new, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at

@@ -318,6 +318,9 @@ func (r *ProjectAnalysisStore) TransitionHotspot(ctx context.Context, cmd hotspo
 		return hotspot.Hotspot{}, hotspot.ReviewEvent{}, fmt.Errorf("begin transition tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", cmd.TenantID.String()); err != nil {
+		return hotspot.Hotspot{}, hotspot.ReviewEvent{}, fmt.Errorf("set hotspot transition tenant context: %w", err)
+	}
 
 	// Lock the row
 	row := tx.QueryRow(ctx, `SELECT id, tenant_id, project_id, hotspot_key, finding_identity, rule_key, title, description, severity, finding_kind, cwe, location, source_file, start_line, end_line, start_column, end_column,
