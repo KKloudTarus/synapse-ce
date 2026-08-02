@@ -68,72 +68,90 @@ func (r *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
 	return nil
 }
 
-// ListStaleRunning returns scan jobs still 'running' that started before olderThan (≤ limit),
-// oldest first – the stale-scan sweeper's input.
+// ListStaleRunning enumerates tenant identities before reading tenant-owned jobs.
 func (r *ScanJobStore) ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]ports.ScanJob, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := r.pool.Query(ctx,
-		`SELECT id, tenant_id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events
-		 FROM scan_jobs WHERE status='running' AND started_at < $1 ORDER BY started_at LIMIT $2`,
-		olderThan, limit)
+	tenantRows, err := r.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
 	if err != nil {
-		return nil, fmt.Errorf("list stale scan jobs: %w", err)
+		return nil, fmt.Errorf("list scan job tenants: %w", err)
 	}
-	defer rows.Close()
-	out := []ports.ScanJob{}
-	for rows.Next() {
-		var (
-			j        ports.ScanJob
-			tenant   string
-			status   string
-			finished *time.Time
-		)
-		var debugEvents []byte
-		if err := rows.Scan(&j.ID, &tenant, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents); err != nil {
-			return nil, fmt.Errorf("scan scan job: %w", err)
+	tenantIDs := []shared.ID{}
+	for tenantRows.Next() {
+		var tenant string
+		if err := tenantRows.Scan(&tenant); err != nil {
+			tenantRows.Close()
+			return nil, fmt.Errorf("scan scan job tenant: %w", err)
 		}
-		j.Status = ports.ScanStatus(status)
-		j.TenantID = shared.ID(tenant)
-		j.FinishedAt = finished
-		if err := decodeScanDebugEvents(debugEvents, &j); err != nil {
+		tenantIDs = append(tenantIDs, shared.ID(tenant))
+	}
+	if err := tenantRows.Err(); err != nil {
+		tenantRows.Close()
+		return nil, fmt.Errorf("list scan job tenants: %w", err)
+	}
+	tenantRows.Close()
+	out := []ports.ScanJob{}
+	for _, tenantID := range tenantIDs {
+		if len(out) == limit {
+			break
+		}
+		if err := WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx,
+				`SELECT id, tenant_id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events
+				 FROM scan_jobs WHERE status='running' AND started_at < $1 ORDER BY started_at LIMIT $2`,
+				olderThan, limit-len(out))
+			if err != nil {
+				return fmt.Errorf("list stale scan jobs: %w", err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var j ports.ScanJob
+				var tenant, status string
+				var finished *time.Time
+				var debugEvents []byte
+				if err := rows.Scan(&j.ID, &tenant, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents); err != nil {
+					return fmt.Errorf("scan scan job: %w", err)
+				}
+				j.TenantID, j.Status, j.FinishedAt = shared.ID(tenant), ports.ScanStatus(status), finished
+				if err := decodeScanDebugEvents(debugEvents, &j); err != nil {
+					return err
+				}
+				out = append(out, j)
+			}
+			return rows.Err()
+		}); err != nil {
 			return nil, err
 		}
-		out = append(out, j)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // GetJob returns a scan job by its own id, or ErrNotFound.
 func (r *ScanJobStore) GetJob(ctx context.Context, id string) (ports.ScanJob, error) {
-	var (
-		j           ports.ScanJob
-		tenant      string
-		status      string
-		finished    *time.Time
-		debugEvents []byte
-	)
-	err := r.pool.QueryRow(ctx,
-		`SELECT id, tenant_id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events
-		 FROM scan_jobs WHERE id=$1`, id).
-		Scan(&j.ID, &tenant, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ports.ScanJob{}, fmt.Errorf("scan job %s: %w", id, shared.ErrNotFound)
-	}
+	var j ports.ScanJob
+	err := WithContextTenantTx(ctx, r.pool, func(tx pgx.Tx) error {
+		var tenant, status string
+		var finished *time.Time
+		var debugEvents []byte
+		err := tx.QueryRow(ctx,
+			`SELECT id, tenant_id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events
+			 FROM scan_jobs WHERE id=$1`, id).
+			Scan(&j.ID, &tenant, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("scan job %s: %w", id, shared.ErrNotFound)
+		}
+		if err != nil {
+			return fmt.Errorf("load scan job: %w", err)
+		}
+		j.TenantID, j.Status, j.FinishedAt = shared.ID(tenant), ports.ScanStatus(status), finished
+		return decodeScanDebugEvents(debugEvents, &j)
+	})
 	if err != nil {
-		return ports.ScanJob{}, fmt.Errorf("load scan job: %w", err)
-	}
-	j.Status = ports.ScanStatus(status)
-	j.TenantID = shared.ID(tenant)
-	j.FinishedAt = finished
-	if err := decodeScanDebugEvents(debugEvents, &j); err != nil {
 		return ports.ScanJob{}, err
 	}
 	return j, nil
 }
-
-// LatestForEngagement returns the engagement's most recent scan job, or ErrNotFound.
 func (r *ScanJobStore) LatestForEngagements(ctx context.Context, engagementIDs []shared.ID) (map[shared.ID]ports.ScanJob, error) {
 	ids := make([]string, len(engagementIDs))
 	for i, id := range engagementIDs {
