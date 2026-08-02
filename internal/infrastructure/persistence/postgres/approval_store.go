@@ -93,50 +93,58 @@ func (s *ApprovalStore) EngagementsWithPending(ctx context.Context) ([]shared.ID
 }
 
 func (s *ApprovalStore) Get(ctx context.Context, actionID shared.ID) (agent.ProposedAction, agent.ApprovalDecision, error) {
-	row := s.pool.QueryRow(ctx,
-		`SELECT action_id, session_id, engagement_id, tool, action, target_kind, target_value, argv, egress_preview, risk, rationale, proposed_at,
-		        decision_state, decided_by, decision_reason, COALESCE(decided_at, to_timestamp(0))
-		 FROM agent_approvals WHERE action_id=$1`, actionID.String())
-	var (
-		a                       agent.ProposedAction
-		tkind, tval             string
-		argv, egress            []byte
-		risk, state, by, reason string
-	)
+	var a agent.ProposedAction
 	d := agent.ApprovalDecision{ActionID: actionID}
-	err := row.Scan(&a.ID, &a.SessionID, &a.EngagementID, &a.Tool, &a.Action, &tkind, &tval, &argv, &egress, &risk, &a.Rationale, &a.ProposedAt,
-		&state, &by, &reason, &d.DecidedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return agent.ProposedAction{}, agent.ApprovalDecision{}, fmt.Errorf("approval %s: %w", actionID, shared.ErrNotFound)
-	}
+	err := WithContextTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var tkind, tval string
+		var argv, egress []byte
+		var risk, state, by, reason string
+		err := tx.QueryRow(ctx,
+			`SELECT action_id, session_id, engagement_id, tool, action, target_kind, target_value, argv, egress_preview, risk, rationale, proposed_at,
+			        decision_state, decided_by, decision_reason, COALESCE(decided_at, to_timestamp(0))
+			 FROM agent_approvals WHERE action_id=$1`, actionID.String()).
+			Scan(&a.ID, &a.SessionID, &a.EngagementID, &a.Tool, &a.Action, &tkind, &tval, &argv, &egress, &risk, &a.Rationale, &a.ProposedAt,
+				&state, &by, &reason, &d.DecidedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("approval %s: %w", actionID, shared.ErrNotFound)
+		}
+		if err != nil {
+			return fmt.Errorf("get approval: %w", err)
+		}
+		a.Target = engagement.Target{Kind: engagement.TargetKind(tkind), Value: tval}
+		a.Risk = agent.RiskClass(risk)
+		_ = json.Unmarshal(argv, &a.Argv)
+		_ = json.Unmarshal(egress, &a.EgressPreview)
+		d.State, d.DecidedBy, d.Reason = agent.ApprovalState(state), by, reason
+		return nil
+	})
 	if err != nil {
-		return agent.ProposedAction{}, agent.ApprovalDecision{}, fmt.Errorf("get approval: %w", err)
+		return agent.ProposedAction{}, agent.ApprovalDecision{}, err
 	}
-	a.Target = engagement.Target{Kind: engagement.TargetKind(tkind), Value: tval}
-	a.Risk = agent.RiskClass(risk)
-	_ = json.Unmarshal(argv, &a.Argv)
-	_ = json.Unmarshal(egress, &a.EgressPreview)
-	d.State, d.DecidedBy, d.Reason = agent.ApprovalState(state), by, reason
 	return a, d, nil
 }
 
 func (s *ApprovalStore) Decide(ctx context.Context, d agent.ApprovalDecision) error {
-	tag, err := s.pool.Exec(ctx,
-		`UPDATE agent_approvals SET decision_state=$2, decided_by=$3, decision_reason=$4, decided_at=$5
-		 WHERE action_id=$1 AND decision_state='pending'`,
-		d.ActionID.String(), string(d.State), d.DecidedBy, d.Reason, d.DecidedAt)
-	if err != nil {
-		return fmt.Errorf("decide approval: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		// Either it does not exist, or it was already decided (the guarded WHERE missed).
+	return WithContextTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx,
+			`UPDATE agent_approvals SET decision_state=$2, decided_by=$3, decision_reason=$4, decided_at=$5
+			 WHERE action_id=$1 AND decision_state='pending'`,
+			d.ActionID.String(), string(d.State), d.DecidedBy, d.Reason, d.DecidedAt)
+		if err != nil {
+			return fmt.Errorf("decide approval: %w", err)
+		}
+		if tag.RowsAffected() != 0 {
+			return nil
+		}
 		var exists bool
-		if e := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_approvals WHERE action_id=$1)`, d.ActionID.String()).Scan(&exists); e == nil && exists {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_approvals WHERE action_id=$1)`, d.ActionID.String()).Scan(&exists); err != nil {
+			return fmt.Errorf("check approval: %w", err)
+		}
+		if exists {
 			return fmt.Errorf("approval %s already decided: %w", d.ActionID, shared.ErrConflict)
 		}
 		return fmt.Errorf("approval %s: %w", d.ActionID, shared.ErrNotFound)
-	}
-	return nil
+	})
 }
 
 func scanProposed(rows pgx.Rows) (agent.ProposedAction, error) {
