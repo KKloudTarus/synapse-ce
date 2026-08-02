@@ -59,22 +59,28 @@ func (s *AgentSessionStore) GetSession(ctx context.Context, id shared.ID) (agent
 }
 
 func (s *AgentSessionStore) ListByEngagement(ctx context.Context, engagementID shared.ID) ([]agent.Session, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at FROM agent_sessions WHERE engagement_id=$1 ORDER BY created_at`, engagementID.String())
-	if err != nil {
-		return nil, fmt.Errorf("list agent sessions: %w", err)
-	}
-	defer rows.Close()
 	var out []agent.Session
-	for rows.Next() {
-		var e agent.Session
-		var status string
-		if err := rows.Scan(&e.ID, &e.TenantID, &e.EngagementID, &e.InitiatedBy, &e.Goal, &e.Model, &e.ProviderBase, &e.PromptHash, &status, &e.Steps, &e.TokensUsed, &e.TokenBudgetMax, &e.CreatedAt, &e.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("scan agent session: %w", err)
+	err := WithContextTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at FROM agent_sessions WHERE engagement_id=$1 ORDER BY created_at`, engagementID.String())
+		if err != nil {
+			return fmt.Errorf("list agent sessions: %w", err)
 		}
-		e.Status = agent.Status(status)
-		out = append(out, e)
+		defer rows.Close()
+		for rows.Next() {
+			var e agent.Session
+			var status string
+			if err := rows.Scan(&e.ID, &e.TenantID, &e.EngagementID, &e.InitiatedBy, &e.Goal, &e.Model, &e.ProviderBase, &e.PromptHash, &status, &e.Steps, &e.TokensUsed, &e.TokenBudgetMax, &e.CreatedAt, &e.UpdatedAt); err != nil {
+				return fmt.Errorf("scan agent session: %w", err)
+			}
+			e.Status = agent.Status(status)
+			out = append(out, e)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // TenantIDs reads the tenant registry, not tenant-owned session rows; the worker
