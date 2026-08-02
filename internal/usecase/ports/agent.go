@@ -35,11 +35,10 @@ type AgentSessionStore interface {
 type ApprovalStore interface {
 	Enqueue(ctx context.Context, a agent.ProposedAction) error
 	Pending(ctx context.Context, engagementID shared.ID) ([]agent.ProposedAction, error)
-	// Get returns the proposed action and its current decision (state ApprovalPending until decided).
+	// TenantIDs returns registry identities for timeout-sweeper fan-out.
+	TenantIDs(ctx context.Context) ([]shared.ID, error)
 	Get(ctx context.Context, actionID shared.ID) (agent.ProposedAction, agent.ApprovalDecision, error)
 	Decide(ctx context.Context, d agent.ApprovalDecision) error
-	// EngagementsWithPending lists the engagements that have at least one pending approval –
-	// so the prod timeout sweeper can fan out across them without a global scan.
 	EngagementsWithPending(ctx context.Context) ([]shared.ID, error)
 }
 

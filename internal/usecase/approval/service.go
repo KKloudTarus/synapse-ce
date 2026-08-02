@@ -132,17 +132,24 @@ func (s *Service) SweepAllExpired(ctx context.Context) (int, error) {
 	if s.timeout <= 0 {
 		return 0, nil
 	}
-	engs, err := s.store.EngagementsWithPending(ctx)
+	tenantIDs, err := s.store.TenantIDs(ctx)
 	if err != nil {
 		return 0, err
 	}
 	total := 0
-	for _, e := range engs {
-		n, err := s.SweepExpired(ctx, e)
+	for _, tenantID := range tenantIDs {
+		tenantCtx := shared.WithTenant(ctx, tenantID)
+		engs, err := s.store.EngagementsWithPending(tenantCtx)
 		if err != nil {
 			return total, err
 		}
-		total += n
+		for _, engagementID := range engs {
+			n, err := s.SweepExpired(tenantCtx, engagementID)
+			if err != nil {
+				return total, err
+			}
+			total += n
+		}
 	}
 	return total, nil
 }

@@ -49,6 +49,24 @@ func (s *ApprovalStore) Enqueue(ctx context.Context, a agent.ProposedAction) err
 	})
 }
 
+// TenantIDs reads registry identities for tenant-by-tenant timeout sweeping.
+func (s *ApprovalStore) TenantIDs(ctx context.Context) ([]shared.ID, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list approval tenants: %w", err)
+	}
+	defer rows.Close()
+	var out []shared.ID
+	for rows.Next() {
+		var tenant string
+		if err := rows.Scan(&tenant); err != nil {
+			return nil, fmt.Errorf("scan approval tenant: %w", err)
+		}
+		out = append(out, shared.ID(tenant))
+	}
+	return out, rows.Err()
+}
+
 func (s *ApprovalStore) Pending(ctx context.Context, engagementID shared.ID) ([]agent.ProposedAction, error) {
 	var out []agent.ProposedAction
 	err := WithContextTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -73,25 +91,28 @@ func (s *ApprovalStore) Pending(ctx context.Context, engagementID shared.ID) ([]
 	}
 	return out, nil
 }
-
 func (s *ApprovalStore) EngagementsWithPending(ctx context.Context) ([]shared.ID, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT DISTINCT engagement_id FROM agent_approvals WHERE decision_state='pending' ORDER BY engagement_id`)
-	if err != nil {
-		return nil, fmt.Errorf("list engagements with pending approvals: %w", err)
-	}
-	defer rows.Close()
 	var out []shared.ID
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan engagement id: %w", err)
+	err := WithContextTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT DISTINCT engagement_id FROM agent_approvals WHERE decision_state='pending' ORDER BY engagement_id`)
+		if err != nil {
+			return fmt.Errorf("list engagements with pending approvals: %w", err)
 		}
-		out = append(out, shared.ID(id))
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("scan engagement id: %w", err)
+			}
+			out = append(out, shared.ID(id))
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
-
 func (s *ApprovalStore) Get(ctx context.Context, actionID shared.ID) (agent.ProposedAction, agent.ApprovalDecision, error) {
 	var a agent.ProposedAction
 	d := agent.ApprovalDecision{ActionID: actionID}

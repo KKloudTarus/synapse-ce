@@ -51,6 +51,10 @@ func (s *ApprovalStore) Pending(_ context.Context, engagementID shared.ID) ([]ag
 	return out, nil
 }
 
+func (s *ApprovalStore) TenantIDs(_ context.Context) ([]shared.ID, error) {
+	return []shared.ID{""}, nil
+}
+
 func (s *ApprovalStore) EngagementsWithPending(_ context.Context) ([]shared.ID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
