@@ -13,10 +13,9 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// ScanRunStore persists scan-run manifests + finding keys.
+// ScanRunStore persists scan-run manifests + finding keys in tenant-bound transactions.
 type ScanRunStore struct{ pool *pgxpool.Pool }
 
-// NewScanRunStore returns a store backed by the given pool.
 func NewScanRunStore(pool *pgxpool.Pool) *ScanRunStore { return &ScanRunStore{pool: pool} }
 
 var _ ports.ScanRunStore = (*ScanRunStore)(nil)
@@ -30,54 +29,62 @@ func (r *ScanRunStore) Save(ctx context.Context, run ports.ScanRun) error {
 	if err != nil {
 		return fmt.Errorf("marshal finding keys: %w", err)
 	}
-	if _, err := r.pool.Exec(ctx,
-		`INSERT INTO scan_runs (id, engagement_id, created_at, manifest, finding_keys) VALUES ($1,$2,$3,$4,$5)`,
-		run.ID, run.EngagementID, run.CreatedAt, manifest, keys); err != nil {
-		return fmt.Errorf("insert scan run: %w", err)
-	}
-	return nil
+	return WithContextTenantTx(ctx, r.pool, func(tx pgx.Tx) error {
+		tenantID, _ := shared.TenantFrom(ctx)
+		if _, err := tx.Exec(ctx, `INSERT INTO scan_runs (id, tenant_id, engagement_id, created_at, manifest, finding_keys) VALUES ($1,$2,$3,$4,$5,$6)`, run.ID, tenantID.String(), run.EngagementID, run.CreatedAt, manifest, keys); err != nil {
+			return fmt.Errorf("insert scan run: %w", err)
+		}
+		return nil
+	})
 }
 
 func (r *ScanRunStore) List(ctx context.Context, engagementID shared.ID) ([]ports.ScanRun, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT id, engagement_id, created_at, manifest, finding_keys
-		 FROM scan_runs WHERE engagement_id=$1 ORDER BY created_at DESC`, engagementID.String())
-	if err != nil {
-		return nil, fmt.Errorf("list scan runs: %w", err)
-	}
-	defer rows.Close()
 	var out []ports.ScanRun
-	for rows.Next() {
-		run, err := scanRunRow(rows)
+	err := WithContextTenantTx(ctx, r.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id, tenant_id, engagement_id, created_at, manifest, finding_keys FROM scan_runs WHERE engagement_id=$1 ORDER BY created_at DESC`, engagementID.String())
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("list scan runs: %w", err)
 		}
-		out = append(out, run)
+		defer rows.Close()
+		for rows.Next() {
+			run, err := scanRunRow(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, run)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (r *ScanRunStore) Get(ctx context.Context, runID string) (ports.ScanRun, error) {
-	row := r.pool.QueryRow(ctx,
-		`SELECT id, engagement_id, created_at, manifest, finding_keys FROM scan_runs WHERE id=$1`, runID)
-	run, err := scanRunRow(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ports.ScanRun{}, fmt.Errorf("scan run %s: %w", runID, shared.ErrNotFound)
-	}
+	var out ports.ScanRun
+	err := WithContextTenantTx(ctx, r.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = scanRunRow(tx.QueryRow(ctx, `SELECT id, tenant_id, engagement_id, created_at, manifest, finding_keys FROM scan_runs WHERE id=$1`, runID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("scan run %s: %w", runID, shared.ErrNotFound)
+		}
+		return err
+	})
 	if err != nil {
-		return ports.ScanRun{}, fmt.Errorf("get scan run: %w", err)
+		return ports.ScanRun{}, err
 	}
-	return run, nil
+	return out, nil
 }
 
 func scanRunRow(row rowScanner) (ports.ScanRun, error) {
-	var (
-		run            ports.ScanRun
-		manifest, keys []byte
-	)
-	if err := row.Scan(&run.ID, &run.EngagementID, &run.CreatedAt, &manifest, &keys); err != nil {
+	var run ports.ScanRun
+	var tenant string
+	var manifest, keys []byte
+	if err := row.Scan(&run.ID, &tenant, &run.EngagementID, &run.CreatedAt, &manifest, &keys); err != nil {
 		return ports.ScanRun{}, err
 	}
+	run.TenantID = shared.ID(tenant)
 	if err := json.Unmarshal(manifest, &run.Manifest); err != nil {
 		return ports.ScanRun{}, fmt.Errorf("decode manifest: %w", err)
 	}

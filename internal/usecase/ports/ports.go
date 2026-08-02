@@ -295,6 +295,7 @@ type ScanManifest struct {
 // keys, enough to list history and compute drift between two runs.
 type ScanRun struct {
 	ID           string       `json:"id"`
+	TenantID     shared.ID    `json:"-"`
 	EngagementID string       `json:"engagement_id"`
 	CreatedAt    time.Time    `json:"created_at"`
 	Manifest     ScanManifest `json:"manifest"`
