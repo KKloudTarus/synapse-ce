@@ -403,37 +403,49 @@ func (r *ProjectAnalysisStore) CurrentFindingStatuses(ctx context.Context, tenan
 	if len(keys) == 0 {
 		return map[string]string{}, nil
 	}
-	rows, err := r.pool.Query(ctx, `SELECT issue_key, status FROM project_issues WHERE tenant_id=$1 AND project_id=$2 AND issue_key = ANY($3)
-		UNION ALL SELECT hotspot_key, status FROM project_hotspots WHERE tenant_id=$1 AND project_id=$2 AND hotspot_key = ANY($3)`, tenantID.String(), projectID.String(), keys)
-	if err != nil {
-		return nil, fmt.Errorf("query current finding statuses: %w", err)
-	}
-	defer rows.Close()
 	out := make(map[string]string, len(keys))
-	for rows.Next() {
-		var key, status string
-		if err := rows.Scan(&key, &status); err != nil {
-			return nil, fmt.Errorf("scan current finding status: %w", err)
+	err := WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT issue_key, status FROM project_issues WHERE tenant_id=$1 AND project_id=$2 AND issue_key = ANY($3)
+			UNION ALL SELECT hotspot_key, status FROM project_hotspots WHERE tenant_id=$1 AND project_id=$2 AND hotspot_key = ANY($3)`, tenantID.String(), projectID.String(), keys)
+		if err != nil {
+			return fmt.Errorf("query current finding statuses: %w", err)
 		}
-		out[key] = status
+		defer rows.Close()
+		for rows.Next() {
+			var key, status string
+			if err := rows.Scan(&key, &status); err != nil {
+				return fmt.Errorf("scan current finding status: %w", err)
+			}
+			out[key] = status
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (r *ProjectAnalysisStore) ResolvedIssueKeys(ctx context.Context, tenantID, projectID shared.ID) (map[string]bool, error) {
-	rows, err := r.pool.Query(ctx, `SELECT issue_key FROM project_issues
-		WHERE tenant_id=$1 AND project_id=$2 AND status IN ('accepted','false_positive','wont_fix')`, tenantID.String(), projectID.String())
-	if err != nil {
-		return nil, fmt.Errorf("query resolved issue keys: %w", err)
-	}
-	defer rows.Close()
 	out := map[string]bool{}
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, fmt.Errorf("scan resolved issue key: %w", err)
+	err := WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT issue_key FROM project_issues
+			WHERE tenant_id=$1 AND project_id=$2 AND status IN ('accepted','false_positive','wont_fix')`, tenantID.String(), projectID.String())
+		if err != nil {
+			return fmt.Errorf("query resolved issue keys: %w", err)
 		}
-		out[key] = true
+		defer rows.Close()
+		for rows.Next() {
+			var key string
+			if err := rows.Scan(&key); err != nil {
+				return fmt.Errorf("scan resolved issue key: %w", err)
+			}
+			out[key] = true
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
