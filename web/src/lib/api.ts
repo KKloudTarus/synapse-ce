@@ -68,6 +68,9 @@ import type {
   ProjectCodeFileIndex,
   ProjectCodeFileView,
   ProjectCodeRevision,
+  BusinessService,
+  Assessment,
+  AssessmentPolicy,
   ProjectCodeView,
 } from './types'
 import { mapProjectOverviewResponse, type ProjectOverview } from './projectOverview'
@@ -1014,6 +1017,32 @@ function mapProjectCodeDiffResponse(r: any): ProjectCodeDiffResponse {
 export const api = {
   projectMeasures,
   aup: (): Promise<AupStatus> => req('/aup'),
+
+  // --- Business Service management ---
+  listBusinessServices: async (): Promise<BusinessService[]> =>
+    (await req('/appsec/business-services')) ?? [],
+
+  createBusinessService: async (input: Omit<BusinessService, 'id'>): Promise<BusinessService> =>
+    req('/appsec/business-services', { method: 'POST', body: JSON.stringify(input) }),
+
+  updateBusinessService: async (id: string, input: Omit<BusinessService, 'id'>): Promise<BusinessService> =>
+    req(`/appsec/business-services/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) }),
+
+  deleteBusinessService: async (id: string): Promise<void> => {
+    await req(`/appsec/business-services/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  },
+
+  listAssessments: async (serviceId: string): Promise<Assessment[]> =>
+    (await req(`/appsec/business-services/${encodeURIComponent(serviceId)}/assessments`)) ?? [],
+
+  createAssessment: async (
+    serviceId: string,
+    input: { name: string; objective: string; policy: AssessmentPolicy; engagements: Array<{ name: string; client: string }> },
+  ): Promise<Assessment> =>
+    req(`/appsec/business-services/${encodeURIComponent(serviceId)}/assessments`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
 
   // --- Quality gates ---
   listQualityGates: async (): Promise<QualityGate[]> =>

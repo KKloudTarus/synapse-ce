@@ -1104,3 +1104,30 @@ export interface ProjectCodeDiffResponse {
   capabilities: ProjectCodeDiffCapabilities
   diff: ProjectCodeDiffView
 }
+
+
+export type BusinessServiceCriticality = 'low' | 'medium' | 'high' | 'critical'
+export type BusinessServiceLifecycle = 'planned' | 'active' | 'retired'
+
+export interface BusinessService {
+  id: string
+  name: string
+  description: string
+  criticality: BusinessServiceCriticality
+  lifecycle: BusinessServiceLifecycle
+}
+
+export interface AssessmentPolicy {
+  cadence: string
+  release: string
+  environment: string
+}
+
+export interface Assessment {
+  id: string
+  businessServiceId: string
+  name: string
+  objective: string
+  status: 'draft' | 'active' | 'closed'
+  policy: AssessmentPolicy
+}
