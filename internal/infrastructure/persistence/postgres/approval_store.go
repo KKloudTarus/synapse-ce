@@ -50,22 +50,28 @@ func (s *ApprovalStore) Enqueue(ctx context.Context, a agent.ProposedAction) err
 }
 
 func (s *ApprovalStore) Pending(ctx context.Context, engagementID shared.ID) ([]agent.ProposedAction, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT action_id, session_id, engagement_id, tool, action, target_kind, target_value, argv, egress_preview, risk, rationale, proposed_at
-		 FROM agent_approvals WHERE engagement_id=$1 AND decision_state='pending' ORDER BY proposed_at`, engagementID.String())
-	if err != nil {
-		return nil, fmt.Errorf("list pending approvals: %w", err)
-	}
-	defer rows.Close()
 	var out []agent.ProposedAction
-	for rows.Next() {
-		a, err := scanProposed(rows)
+	err := WithContextTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx,
+			`SELECT action_id, session_id, engagement_id, tool, action, target_kind, target_value, argv, egress_preview, risk, rationale, proposed_at
+			 FROM agent_approvals WHERE engagement_id=$1 AND decision_state='pending' ORDER BY proposed_at`, engagementID.String())
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("list pending approvals: %w", err)
 		}
-		out = append(out, a)
+		defer rows.Close()
+		for rows.Next() {
+			a, err := scanProposed(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, a)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *ApprovalStore) EngagementsWithPending(ctx context.Context) ([]shared.ID, error) {
