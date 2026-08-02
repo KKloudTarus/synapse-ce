@@ -129,82 +129,85 @@ func upsertIssuesTx(ctx context.Context, tx pgx.Tx, items []issue.Issue) error {
 }
 
 func (r *ProjectAnalysisStore) ListIssues(ctx context.Context, tenantID, projectID shared.ID, filter issue.ListFilter) (issue.Page, error) {
-	where, args := issueWhere(tenantID, projectID, filter, true)
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 25
-	}
-	args = append(args, limit+1)
-	query := `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location, source_file, start_line, end_line, start_column, end_column,
-		status, version, is_new, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at
-		FROM project_issues WHERE ` + where + ` ORDER BY last_seen_at DESC, id COLLATE "C" DESC LIMIT $` + fmt.Sprint(len(args))
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return issue.Page{}, fmt.Errorf("list project issues: %w", err)
-	}
-	defer rows.Close()
-	items := make([]issue.Issue, 0, limit+1)
-	for rows.Next() {
-		item, err := scanIssue(rows)
-		if err != nil {
-			return issue.Page{}, fmt.Errorf("scan project issue: %w", err)
+	var page issue.Page
+	err := WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		where, args := issueWhere(tenantID, projectID, filter, true)
+		limit := filter.Limit
+		if limit <= 0 {
+			limit = 25
 		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
+		args = append(args, limit+1)
+		query := `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location, source_file, start_line, end_line, start_column, end_column,
+			status, version, is_new, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at
+			FROM project_issues WHERE ` + where + ` ORDER BY last_seen_at DESC, id COLLATE "C" DESC LIMIT $` + fmt.Sprint(len(args))
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list project issues: %w", err)
+		}
+		items := make([]issue.Issue, 0, limit+1)
+		for rows.Next() {
+			item, err := scanIssue(rows)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("scan project issue: %w", err)
+			}
+			items = append(items, item)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		if len(items) > limit {
+			last := items[limit-1]
+			page.Next = &issue.Cursor{BeforeLastSeenAt: last.LastSeenAt, BeforeID: last.ID}
+			items = items[:limit]
+		}
+		page.Items = items
+		facetWhere, facetArgs := issueWhere(tenantID, projectID, filter, false)
+		var total, open, resolved int
+		if err := tx.QueryRow(ctx, `SELECT count(*),
+			count(*) FILTER (WHERE status = 'open'),
+			count(*) FILTER (WHERE status IN ('accepted','false_positive','wont_fix'))
+			FROM project_issues WHERE `+facetWhere, facetArgs...).Scan(&total, &open, &resolved); err != nil {
+			return fmt.Errorf("summary project issues: %w", err)
+		}
+		page.Summary = issue.Summary{Total: total, Open: open, Resolved: resolved}
+		facetRows, err := tx.Query(ctx, `SELECT 'type' AS kind, issue_type AS value, count(*) FROM project_issues WHERE `+facetWhere+` GROUP BY issue_type
+			UNION ALL SELECT 'status', status, count(*) FROM project_issues WHERE `+facetWhere+` GROUP BY status
+			UNION ALL SELECT 'severity', severity, count(*) FROM project_issues WHERE `+facetWhere+` GROUP BY severity
+			UNION ALL SELECT 'rule', rule_key, count(*) FROM project_issues WHERE `+facetWhere+` GROUP BY rule_key
+			UNION ALL SELECT 'language', language, count(*) FROM project_issues WHERE `+facetWhere+` AND language <> '' GROUP BY language`, facetArgs...)
+		if err != nil {
+			return fmt.Errorf("facet project issues: %w", err)
+		}
+		defer facetRows.Close()
+		page.Facets = issue.Facets{Types: map[string]int{}, Statuses: map[string]int{}, Severities: map[string]int{}, RuleKeys: map[string]int{}, Languages: map[string]int{}}
+		for facetRows.Next() {
+			var kind, value string
+			var count int
+			if err := facetRows.Scan(&kind, &value, &count); err != nil {
+				return fmt.Errorf("scan project issue facet: %w", err)
+			}
+			switch kind {
+			case "type":
+				page.Facets.Types[value] = count
+			case "status":
+				page.Facets.Statuses[value] = count
+			case "severity":
+				page.Facets.Severities[value] = count
+			case "rule":
+				page.Facets.RuleKeys[value] = count
+			case "language":
+				page.Facets.Languages[value] = count
+			}
+		}
+		return facetRows.Err()
+	})
+	if err != nil {
 		return issue.Page{}, err
 	}
-	page := issue.Page{}
-	if len(items) > limit {
-		last := items[limit-1]
-		page.Next = &issue.Cursor{BeforeLastSeenAt: last.LastSeenAt, BeforeID: last.ID}
-		items = items[:limit]
-	}
-	page.Items = items
-
-	// Facets and summary are computed over the filtered (but unpaginated) set: the
-	// cursor is deliberately excluded so paging never shrinks the counts.
-	facetWhere, facetArgs := issueWhere(tenantID, projectID, filter, false)
-
-	var total, open, resolved int
-	if err := r.pool.QueryRow(ctx, `SELECT count(*),
-		count(*) FILTER (WHERE status = 'open'),
-		count(*) FILTER (WHERE status IN ('accepted','false_positive','wont_fix'))
-		FROM project_issues WHERE `+facetWhere, facetArgs...).Scan(&total, &open, &resolved); err != nil {
-		return issue.Page{}, fmt.Errorf("summary project issues: %w", err)
-	}
-	page.Summary = issue.Summary{Total: total, Open: open, Resolved: resolved}
-
-	facetRows, err := r.pool.Query(ctx, `SELECT 'type' AS kind, issue_type AS value, count(*) FROM project_issues WHERE `+facetWhere+` GROUP BY issue_type
-		UNION ALL SELECT 'status', status, count(*) FROM project_issues WHERE `+facetWhere+` GROUP BY status
-		UNION ALL SELECT 'severity', severity, count(*) FROM project_issues WHERE `+facetWhere+` GROUP BY severity
-		UNION ALL SELECT 'rule', rule_key, count(*) FROM project_issues WHERE `+facetWhere+` GROUP BY rule_key
-		UNION ALL SELECT 'language', language, count(*) FROM project_issues WHERE `+facetWhere+` AND language <> '' GROUP BY language`, facetArgs...)
-	if err != nil {
-		return issue.Page{}, fmt.Errorf("facet project issues: %w", err)
-	}
-	defer facetRows.Close()
-	page.Facets = issue.Facets{Types: map[string]int{}, Statuses: map[string]int{}, Severities: map[string]int{}, RuleKeys: map[string]int{}, Languages: map[string]int{}}
-	for facetRows.Next() {
-		var kind, value string
-		var count int
-		if err := facetRows.Scan(&kind, &value, &count); err != nil {
-			return issue.Page{}, fmt.Errorf("scan project issue facet: %w", err)
-		}
-		switch kind {
-		case "type":
-			page.Facets.Types[value] = count
-		case "status":
-			page.Facets.Statuses[value] = count
-		case "severity":
-			page.Facets.Severities[value] = count
-		case "rule":
-			page.Facets.RuleKeys[value] = count
-		case "language":
-			page.Facets.Languages[value] = count
-		}
-	}
-	return page, facetRows.Err()
+	return page, nil
 }
 
 func issueLikeEscape(value string) string {
