@@ -22,7 +22,7 @@ export function Engagements() {
     api
       .listEngagements()
       .then(setList)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load engagements'))
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load assets'))
   }
   useEffect(load, [])
 
@@ -34,7 +34,7 @@ export function Engagements() {
     setImportErr(null)
     try {
       const eng = await api.importBundle(await file.text())
-      navigate(`/engagements/${eng.id}`)
+      navigate(`/assets/${eng.id}`)
     } catch (err) {
       setImportErr(err instanceof Error ? err.message : 'Import failed')
     } finally {
@@ -46,9 +46,9 @@ export function Engagements() {
     <div className="mx-auto max-w-6xl animate-fade-in">
       <header className="bg-hero mb-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border p-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Engagements</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Assets</h1>
           <p className="mt-1.5 max-w-xl text-sm text-mutedfg">
-            Authorized testing scopes – every scan is gated by an engagement's scope and window, server-side.
+            Authorized testing assets – every scan is gated by an asset's scope and authorization window, server-side.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -63,7 +63,7 @@ export function Engagements() {
               </>
             ) : (
               <>
-                <Plus className="size-4" /> New engagement
+                <Plus className="size-4" /> New asset
               </>
             )}
           </Button>
@@ -88,15 +88,15 @@ export function Engagements() {
       )}
 
       {error && <ErrorState message={error} />}
-      {!list && !error && <Spinner label="Loading engagements…" />}
+      {!list && !error && <Spinner label="Loading assets…" />}
       {list && list.length === 0 && !creating && (
         <EmptyState
           icon={Target}
-          title="No engagements yet"
-          hint="Create one to define an authorized testing scope, then run an SCA scan against it."
+          title="No assets yet"
+          hint="Create one to define an authorized testing asset, then run an SCA scan against it."
           action={
             <Button variant="brand" onClick={() => setCreating(true)}>
-              <Plus className="size-4" /> New engagement
+              <Plus className="size-4" /> New asset
             </Button>
           }
         />
@@ -115,7 +115,7 @@ export function Engagements() {
 function EngagementCard({ e }: { e: Engagement }) {
   return (
     <Link
-      to={`/engagements/${e.id}`}
+      to={`/assets/${e.id}`}
       className="lift card-sheen elev group block rounded-xl border border-border bg-card p-5 hover:border-brand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50"
     >
       <div className="flex items-start justify-between gap-2">
@@ -142,7 +142,7 @@ function EngagementCard({ e }: { e: Engagement }) {
 
 export function StatusPill({ status }: { status: string }) {
   const s = (status || 'draft').toLowerCase()
-  // Engagement lifecycle vocabulary: draft -> active -> completed -> archived.
+  // Asset lifecycle vocabulary: draft -> active -> completed -> archived.
   const tone =
     s === 'active'
       ? 'bg-accent/10 text-accent ring-accent/25'
@@ -206,14 +206,14 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
       })
       onCreated()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create engagement')
+      setError(err instanceof Error ? err.message : 'Failed to create asset')
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Card title="New engagement" className="animate-fade-in">
+    <Card title="New asset" className="animate-fade-in">
       <form onSubmit={submit} className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Name">
@@ -273,7 +273,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
         {error && <ErrorState message={error} />}
         <div className="flex justify-end">
           <Button variant="brand" type="submit" loading={submitting}>
-            Create engagement
+            Create asset
           </Button>
         </div>
       </form>

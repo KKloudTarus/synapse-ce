@@ -20,7 +20,7 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
       </div>
       <nav className="flex-1 space-y-1 p-3">
         <NavLink
-          to="/engagements"
+          to="/assets"
           onClick={onNavigate}
           className={({ isActive }) =>
             cn(
@@ -32,7 +32,7 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           }
         >
           <Target className="size-[18px]" />
-          Engagements
+          Assets
         </NavLink>
 
         <NavLink

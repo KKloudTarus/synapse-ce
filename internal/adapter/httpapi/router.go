@@ -250,6 +250,7 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/appsec/business-services/{sid}/assessments", rt.authz(userdom.PermOperate, rt.createAssessment))
 		mux.HandleFunc("GET /api/v1/appsec/business-services/{sid}/assessments", rt.authz(userdom.PermView, rt.listAssessments))
 		mux.HandleFunc("GET /api/v1/appsec/business-services/{sid}/assessments/{id}", rt.authz(userdom.PermView, rt.getAssessment))
+		mux.HandleFunc("GET /api/v1/appsec/business-services/{sid}/assessments/{id}/assets", rt.authz(userdom.PermView, rt.listAssessmentAssets))
 	}
 	if rt.projects != nil {
 		mux.HandleFunc("POST /api/v1/projects", rt.authz(userdom.PermOperate, rt.createProject))

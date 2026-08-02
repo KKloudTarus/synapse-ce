@@ -37,8 +37,10 @@ function Gate() {
   return (
     <Routes>
       <Route element={<Shell />}>
-        <Route index element={<Navigate to="/engagements" replace />} />
-        <Route path="engagements" element={<Engagements />} />
+        <Route index element={<Navigate to="/assets" replace />} />
+        <Route path="assets" element={<Engagements />} />
+        <Route path="assets/:id" element={<EngagementDetail />} />
+        <Route path="engagements" element={<Navigate to="/assets" replace />} />
         <Route path="engagements/:id" element={<EngagementDetail />} />
         <Route path="business-services" element={<BusinessServices />} />
         <Route path="code-quality" element={<CodeQualityProjects />} />
@@ -57,7 +59,7 @@ function Gate() {
         <Route path="rules/:key" element={<RuleDetail />} />
         <Route path="audit" element={<Audit />} />
         <Route path="team" element={<Team />} />
-        <Route path="*" element={<Navigate to="/engagements" replace />} />
+        <Route path="*" element={<Navigate to="/assets" replace />} />
       </Route>
     </Routes>
   )

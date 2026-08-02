@@ -26,7 +26,7 @@ func TestAssessmentRoutesRequireNestedTenantContext(t *testing.T) {
 	}
 	rt := &Router{log: discardLog()}
 	rt.SetAssessments(svc)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/appsec/business-services/service-a/assessments", strings.NewReader(`{"name":"Release","engagements":[{"name":"Transfer"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/appsec/business-services/service-a/assessments", strings.NewReader(`{"name":"Release","assets":[{"name":"Transfer"}]}`))
 	req = req.WithContext(shared.WithTenant(context.WithValue(req.Context(), principalKey, Principal{ID: "admin", Role: "admin", TenantID: "tenant-a"}), "tenant-a"))
 	rec := httptest.NewRecorder()
 	rt.routes().ServeHTTP(rec, req)

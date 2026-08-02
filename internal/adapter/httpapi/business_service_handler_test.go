@@ -13,6 +13,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	assessmentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentuc"
 	assetuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assetuc"
+	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 )
 
 func TestBusinessServiceManagementRoutes(t *testing.T) {
@@ -29,6 +30,7 @@ func TestBusinessServiceManagementRoutes(t *testing.T) {
 	rt := &Router{log: discardLog()}
 	rt.SetBusinessServices(assets)
 	rt.SetAssessments(assessments)
+	rt.eng = enguc.NewService(engagements, idgen.SystemClock{}, idgen.RandomID{}, nil)
 	do := func(tenant, role, method, target, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, target, bytes.NewBufferString(body))
 		req = req.WithContext(shared.WithTenant(context.WithValue(req.Context(), principalKey, Principal{ID: "operator", Role: role, TenantID: tenant}), shared.ID(tenant)))
@@ -56,13 +58,13 @@ func TestBusinessServiceManagementRoutes(t *testing.T) {
 	if got := do("tenant-b", "consultant", http.MethodGet, "/api/v1/appsec/business-services/"+service.ID, "").Code; got != http.StatusNotFound {
 		t.Fatalf("cross tenant get=%d", got)
 	}
-	if got := do("tenant-a", "consultant", http.MethodPost, "/api/v1/appsec/business-services/missing/assessments", `{"name":"A","engagements":[{"name":"E"}]}`).Code; got != http.StatusNotFound {
+	if got := do("tenant-a", "consultant", http.MethodPost, "/api/v1/appsec/business-services/missing/assessments", `{"name":"A","assets":[{"name":"E"}]}`).Code; got != http.StatusNotFound {
 		t.Fatalf("missing parent create=%d", got)
 	}
-	if got := do("tenant-a", "consultant", http.MethodPost, "/api/v1/appsec/business-services/"+service.ID+"/assessments", `{"name":"A","engagements":[]}`).Code; got != http.StatusBadRequest {
+	if got := do("tenant-a", "consultant", http.MethodPost, "/api/v1/appsec/business-services/"+service.ID+"/assessments", `{"name":"A","assets":[]}`).Code; got != http.StatusBadRequest {
 		t.Fatalf("zero children=%d", got)
 	}
-	assessment := do("tenant-a", "consultant", http.MethodPost, "/api/v1/appsec/business-services/"+service.ID+"/assessments", `{"name":"A","engagements":[{"name":"E","client":"Client"}]}`)
+	assessment := do("tenant-a", "consultant", http.MethodPost, "/api/v1/appsec/business-services/"+service.ID+"/assessments", `{"name":"A","assets":[{"name":"E","client":"Client"}]}`)
 	if assessment.Code != http.StatusCreated {
 		t.Fatalf("assessment=%d %s", assessment.Code, assessment.Body.String())
 	}
@@ -71,6 +73,10 @@ func TestBusinessServiceManagementRoutes(t *testing.T) {
 	}
 	if err := json.Unmarshal(assessment.Body.Bytes(), &createdAssessment); err != nil {
 		t.Fatal(err)
+	}
+	assetsForAssessment := do("tenant-a", "readonly", http.MethodGet, "/api/v1/appsec/business-services/"+service.ID+"/assessments/"+createdAssessment.ID+"/assets", "")
+	if assetsForAssessment.Code != http.StatusOK || !bytes.Contains(assetsForAssessment.Body.Bytes(), []byte(`"name":"E"`)) {
+		t.Fatalf("assessment assets=%d %s", assetsForAssessment.Code, assetsForAssessment.Body.String())
 	}
 	other := do("tenant-a", "consultant", http.MethodPost, "/api/v1/appsec/business-services", `{"name":"Other","criticality":"medium","lifecycle":"planned"}`)
 	var otherService struct {

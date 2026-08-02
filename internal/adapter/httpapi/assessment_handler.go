@@ -10,13 +10,13 @@ import (
 )
 
 type createAssessmentRequest struct {
-	Name        string            `json:"name"`
-	Objective   string            `json:"objective"`
-	Policy      assessment.Policy `json:"policy"`
-	Engagements []struct {
+	Name      string            `json:"name"`
+	Objective string            `json:"objective"`
+	Policy    assessment.Policy `json:"policy"`
+	Assets    []struct {
 		Name   string `json:"name"`
 		Client string `json:"client"`
-	} `json:"engagements"`
+	} `json:"assets"`
 }
 
 type assessmentResponse struct {
@@ -26,6 +26,14 @@ type assessmentResponse struct {
 	Objective         string            `json:"objective"`
 	Status            assessment.Status `json:"status"`
 	Policy            assessment.Policy `json:"policy"`
+}
+
+type assessmentAssetResponse struct {
+	ID           string `json:"id"`
+	AssessmentID string `json:"assessment_id"`
+	Name         string `json:"name"`
+	Client       string `json:"client"`
+	Status       string `json:"status"`
 }
 
 func assessmentDTO(a assessment.Assessment) assessmentResponse {
@@ -38,11 +46,11 @@ func (rt *Router) createAssessment(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
 		return
 	}
-	children := make([]assessmentuc.EngagementInput, len(req.Engagements))
-	for i, e := range req.Engagements {
-		children[i] = assessmentuc.EngagementInput{Name: e.Name, Client: e.Client}
+	children := make([]assessmentuc.AssetInput, len(req.Assets))
+	for i, asset := range req.Assets {
+		children[i] = assessmentuc.AssetInput{Name: asset.Name, Client: asset.Client}
 	}
-	a, err := rt.assessments.Create(r.Context(), assessmentuc.CreateInput{TenantID: shared.ID(TenantFrom(r.Context())), BusinessServiceID: shared.ID(r.PathValue("sid")), Actor: PrincipalFrom(r.Context()), Name: req.Name, Objective: req.Objective, Policy: req.Policy, Engagements: children})
+	a, err := rt.assessments.Create(r.Context(), assessmentuc.CreateInput{TenantID: shared.ID(TenantFrom(r.Context())), BusinessServiceID: shared.ID(r.PathValue("sid")), Actor: PrincipalFrom(r.Context()), Name: req.Name, Objective: req.Objective, Policy: req.Policy, Assets: children})
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
@@ -68,4 +76,24 @@ func (rt *Router) getAssessment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, assessmentDTO(a))
+}
+
+func (rt *Router) listAssessmentAssets(w http.ResponseWriter, r *http.Request) {
+	serviceID, assessmentID := shared.ID(r.PathValue("sid")), shared.ID(r.PathValue("id"))
+	if _, err := rt.assessments.Get(r.Context(), serviceID, assessmentID); err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	items, err := rt.eng.List(r.Context(), shared.ID(TenantFrom(r.Context())))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	out := make([]assessmentAssetResponse, 0)
+	for _, item := range items {
+		if item.AssessmentID == assessmentID {
+			out = append(out, assessmentAssetResponse{ID: item.ID.String(), AssessmentID: assessmentID.String(), Name: item.Name, Client: item.Client, Status: string(item.Status)})
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }

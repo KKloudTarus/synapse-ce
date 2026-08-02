@@ -30,7 +30,7 @@ func New(repo ports.AssessmentRepository, businessServices BusinessServiceReader
 	return &Service{repo: repo, businessServices: businessServices, clock: clock, ids: ids}, nil
 }
 
-type EngagementInput struct {
+type AssetInput struct {
 	Name   string
 	Client string
 }
@@ -39,7 +39,7 @@ type CreateInput struct {
 	TenantID, BusinessServiceID shared.ID
 	Actor, Name, Objective      string
 	Policy                      assessment.Policy
-	Engagements                 []EngagementInput
+	Assets                      []AssetInput
 }
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (assessment.Assessment, error) {
@@ -47,8 +47,8 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (assessment.Assess
 	if !ok || tenantID != in.TenantID {
 		return assessment.Assessment{}, fmt.Errorf("%w: assessment tenant context", shared.ErrValidation)
 	}
-	if len(in.Engagements) == 0 || len(in.Engagements) > 128 {
-		return assessment.Assessment{}, fmt.Errorf("%w: assessment requires 1-128 engagements", shared.ErrValidation)
+	if len(in.Assets) == 0 || len(in.Assets) > 128 {
+		return assessment.Assessment{}, fmt.Errorf("%w: assessment requires 1-128 assets", shared.ErrValidation)
 	}
 	if _, err := s.businessServices.GetBusinessService(ctx, in.BusinessServiceID); err != nil {
 		return assessment.Assessment{}, err
@@ -59,8 +59,8 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (assessment.Assess
 		return assessment.Assessment{}, err
 	}
 	a.Audit.CreatedBy, a.Audit.UpdatedBy = in.Actor, in.Actor
-	children := make([]*engagement.Engagement, 0, len(in.Engagements))
-	for _, input := range in.Engagements {
+	children := make([]*engagement.Engagement, 0, len(in.Assets))
+	for _, input := range in.Assets {
 		e, err := engagement.New(s.ids.NewID(), in.TenantID, strings.TrimSpace(input.Name), strings.TrimSpace(input.Client), now)
 		if err != nil {
 			return assessment.Assessment{}, err

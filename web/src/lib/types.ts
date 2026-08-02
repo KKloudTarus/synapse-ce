@@ -1131,3 +1131,11 @@ export interface Assessment {
   status: 'draft' | 'active' | 'closed'
   policy: AssessmentPolicy
 }
+
+export interface AssessmentAsset {
+  id: string
+  assessmentId: string
+  name: string
+  client: string
+  status: string
+}

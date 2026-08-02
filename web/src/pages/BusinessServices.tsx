@@ -1,7 +1,7 @@
 import { BriefcaseBusiness, ClipboardCheck, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
-import type { Assessment, BusinessService, BusinessServiceCriticality, BusinessServiceLifecycle } from '../lib/types'
+import type { Assessment, AssessmentAsset, BusinessService, BusinessServiceCriticality, BusinessServiceLifecycle } from '../lib/types'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../components/ui'
 
 const criticalityOptions = ['low', 'medium', 'high', 'critical'].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) }))
@@ -51,7 +51,7 @@ export function BusinessServices() {
         <div>
           <div className="mb-2 flex items-center gap-2 text-brand"><BriefcaseBusiness className="size-5" /><span className="text-xs font-semibold uppercase tracking-widest">AppSec management</span></div>
           <h1 className="text-2xl font-bold tracking-tight">Business Services</h1>
-          <p className="mt-1 max-w-2xl text-sm text-mutedfg">Define the services your program protects, then record the assessments and engagements that prove their coverage.</p>
+          <p className="mt-1 max-w-2xl text-sm text-mutedfg">Define the services your program protects, then record assessments and their scoped assets.</p>
         </div>
         <Button onClick={() => setEditing(emptyService())}><Plus className="size-4" /> Add service</Button>
       </header>
@@ -71,7 +71,7 @@ export function BusinessServices() {
               <p className="mt-5 whitespace-pre-wrap text-sm leading-6 text-mutedfg">{selected.description || 'No description has been provided.'}</p>
             </Card>
             <Card title="Assessments" actions={<Button variant="secondary" onClick={() => setAssessmentForm(true)}><Plus className="size-4" /> Add assessment</Button>}>
-              {assessments === null ? <Spinner label="Loading assessments…" /> : assessments.length === 0 ? <EmptyState icon={ClipboardCheck} title="No Assessments" hint="Create an assessment with at least one engagement to establish coverage." /> : <div className="divide-y divide-border">{assessments.map((assessment) => <div key={assessment.id} className="py-4 first:pt-0 last:pb-0"><div className="flex items-center justify-between gap-3"><p className="font-medium">{assessment.name}</p><Pill className="bg-info/10 text-info">{assessment.status}</Pill></div><p className="mt-1 text-sm text-mutedfg">{assessment.objective || 'No objective provided.'}</p>{(assessment.policy.release || assessment.policy.environment || assessment.policy.cadence) && <p className="mt-2 text-xs text-subtlefg">{[assessment.policy.release, assessment.policy.environment, assessment.policy.cadence].filter(Boolean).join(' · ')}</p>}</div>)}</div>}
+              {assessments === null ? <Spinner label="Loading assessments…" /> : assessments.length === 0 ? <EmptyState icon={ClipboardCheck} title="No Assessments" hint="Create an assessment with at least one scoped asset to establish coverage." /> : <div className="divide-y divide-border">{assessments.map((assessment) => <AssessmentRow key={assessment.id} serviceId={selected.id} assessment={assessment} />)}</div>}
             </Card>
           </> : <EmptyState icon={BriefcaseBusiness} title="Select a service" hint="Choose a Business Service to view its assessments." />}
         </section>
@@ -105,21 +105,27 @@ function ServiceForm({ initial, serviceId, isUpdate, onCancel, onSaved }: { init
 }
 
 function AssessmentForm({ service, onCancel, onSaved }: { service: BusinessService; onCancel: () => void; onSaved: () => Promise<void> }) {
-  const [name, setName] = useState(''); const [objective, setObjective] = useState(''); const [engagement, setEngagement] = useState(''); const [error, setError] = useState<string | null>(null); const [saving, setSaving] = useState(false)
-  async function submit(event: React.FormEvent) { event.preventDefault(); setSaving(true); setError(null); try { await api.createAssessment(service.id, { name, objective, policy: { cadence: '', release: '', environment: '' }, engagements: [{ name: engagement, client: '' }] }); onCancel(); await onSaved() } catch (err) { setError(err instanceof Error ? err.message : 'Unable to create assessment') } finally { setSaving(false) } }
+  const [name, setName] = useState(''); const [objective, setObjective] = useState(''); const [assetName, setAssetName] = useState(''); const [error, setError] = useState<string | null>(null); const [saving, setSaving] = useState(false)
+  async function submit(event: React.FormEvent) { event.preventDefault(); setSaving(true); setError(null); try { await api.createAssessment(service.id, { name, objective, policy: { cadence: '', release: '', environment: '' }, assets: [{ name: assetName, client: '' }] }); onCancel(); await onSaved() } catch (err) { setError(err instanceof Error ? err.message : 'Unable to create assessment') } finally { setSaving(false) } }
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="assessment-form-title">
       <form onSubmit={submit} className="w-full max-w-xl rounded-xl border border-border bg-surface p-6 shadow-xl">
         <h2 id="assessment-form-title" className="text-lg font-semibold">New Assessment</h2>
-        <p className="mt-1 text-sm text-mutedfg">{service.name} · an assessment must begin with one engagement.</p>
+        <p className="mt-1 text-sm text-mutedfg">{service.name} · an assessment must begin with one scoped asset.</p>
         {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
         <div className="mt-5 space-y-4">
           <Field label="Assessment name" htmlFor="assessment-name"><Input id="assessment-name" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
           <Field label="Objective" htmlFor="assessment-objective"><textarea id="assessment-objective" className="min-h-20 w-full rounded-md border border-border bg-page px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/25" value={objective} onChange={(e) => setObjective(e.target.value)} /></Field>
-          <Field label="First engagement" hint="Required" htmlFor="assessment-engagement"><Input id="assessment-engagement" required value={engagement} onChange={(e) => setEngagement(e.target.value)} /></Field>
+          <Field label="First assessment asset" hint="Required" htmlFor="assessment-asset"><Input id="assessment-asset" required value={assetName} onChange={(e) => setAssetName(e.target.value)} /></Field>
         </div>
         <div className="mt-6 flex justify-end gap-3"><Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button><Button type="submit" loading={saving}>Create assessment</Button></div>
       </form>
     </div>
   )
+}
+
+function AssessmentRow({ serviceId, assessment }: { serviceId: string; assessment: Assessment }) {
+  const [assets, setAssets] = useState<AssessmentAsset[] | null>(null)
+  useEffect(() => { void api.listAssessmentAssets(serviceId, assessment.id).then(setAssets).catch(() => setAssets([])) }, [assessment.id, serviceId])
+  return <div className="py-4 first:pt-0 last:pb-0"><div className="flex items-center justify-between gap-3"><p className="font-medium">{assessment.name}</p><Pill className="bg-info/10 text-info">{assessment.status}</Pill></div><p className="mt-1 text-sm text-mutedfg">{assessment.objective || 'No objective provided.'}</p><p className="mt-2 text-xs text-subtlefg">{assets === null ? 'Loading assets…' : assets.length === 0 ? 'No scoped assets' : `Assets · ${assets.map((asset) => asset.name).join(', ')}`}</p>{(assessment.policy.release || assessment.policy.environment || assessment.policy.cadence) && <p className="mt-1 text-xs text-subtlefg">{[assessment.policy.release, assessment.policy.environment, assessment.policy.cadence].filter(Boolean).join(' · ')}</p>}</div>
 }

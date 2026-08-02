@@ -31,13 +31,13 @@ func TestAssessmentHierarchyAndEngagementDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Create(ctx, CreateInput{TenantID: "tenant-a", BusinessServiceID: "missing", Name: "A", Engagements: []EngagementInput{{Name: "E"}}}); !errors.Is(err, shared.ErrNotFound) {
+	if _, err := svc.Create(ctx, CreateInput{TenantID: "tenant-a", BusinessServiceID: "missing", Name: "A", Assets: []AssetInput{{Name: "E"}}}); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("missing parent=%v", err)
 	}
 	if _, err := svc.Create(ctx, CreateInput{TenantID: "tenant-a", BusinessServiceID: "service-a", Name: "A"}); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("zero children=%v", err)
 	}
-	created, err := svc.Create(ctx, CreateInput{TenantID: "tenant-a", BusinessServiceID: "service-a", Actor: "operator", Name: "A", Engagements: []EngagementInput{{Name: "E", Client: "Client"}}})
+	created, err := svc.Create(ctx, CreateInput{TenantID: "tenant-a", BusinessServiceID: "service-a", Actor: "operator", Name: "A", Assets: []AssetInput{{Name: "E", Client: "Client"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestAssessmentHierarchyAndEngagementDefaults(t *testing.T) {
 	if _, err := svc.List(ctx, "other"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("nonexistent parent list=%v", err)
 	}
-	if _, err := svc.Create(shared.WithTenant(context.Background(), "tenant-b"), CreateInput{TenantID: "tenant-b", BusinessServiceID: "service-a", Name: "Cross", Engagements: []EngagementInput{{Name: "E"}}}); !errors.Is(err, shared.ErrNotFound) {
+	if _, err := svc.Create(shared.WithTenant(context.Background(), "tenant-b"), CreateInput{TenantID: "tenant-b", BusinessServiceID: "service-a", Name: "Cross", Assets: []AssetInput{{Name: "E"}}}); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("cross parent=%v", err)
 	}
 }

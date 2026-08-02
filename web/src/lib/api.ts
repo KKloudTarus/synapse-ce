@@ -71,6 +71,7 @@ import type {
   BusinessService,
   Assessment,
   AssessmentPolicy,
+  AssessmentAsset,
   ProjectCodeView,
 } from './types'
 import { mapProjectOverviewResponse, type ProjectOverview } from './projectOverview'
@@ -1037,12 +1038,15 @@ export const api = {
 
   createAssessment: async (
     serviceId: string,
-    input: { name: string; objective: string; policy: AssessmentPolicy; engagements: Array<{ name: string; client: string }> },
+    input: { name: string; objective: string; policy: AssessmentPolicy; assets: Array<{ name: string; client: string }> },
   ): Promise<Assessment> =>
     req(`/appsec/business-services/${encodeURIComponent(serviceId)}/assessments`, {
       method: 'POST',
       body: JSON.stringify(input),
     }),
+
+  listAssessmentAssets: async (serviceId: string, assessmentId: string): Promise<AssessmentAsset[]> =>
+    (await req(`/appsec/business-services/${encodeURIComponent(serviceId)}/assessments/${encodeURIComponent(assessmentId)}/assets`)) ?? [],
 
   // --- Quality gates ---
   listQualityGates: async (): Promise<QualityGate[]> =>

@@ -16,7 +16,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-const engagementCols = `id, tenant_id, project_id, name, client, status, authorized_from, authorized_to, created_at, updated_at, timezone, roe, live_recon, created_by, updated_by`
+const engagementCols = `id, tenant_id, project_id, assessment_id, name, client, status, authorized_from, authorized_to, created_at, updated_at, timezone, roe, live_recon, created_by, updated_by`
 
 // EngagementRepository persists engagements and their scope to PostgreSQL.
 type EngagementRepository struct{ pool *pgxpool.Pool }
@@ -36,8 +36,8 @@ func (r *EngagementRepository) Create(ctx context.Context, e *engagement.Engagem
 			return fmt.Errorf("marshal roe: %w", err)
 		}
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO engagements (`+engagementCols+`) VALUES ($1,$2,NULLIF($3,''),$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-			e.ID.String(), e.TenantID.String(), e.ProjectID.String(), e.Name, e.Client, string(e.Status),
+			`INSERT INTO engagements (`+engagementCols+`) VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+			e.ID.String(), e.TenantID.String(), e.ProjectID.String(), e.AssessmentID.String(), e.Name, e.Client, string(e.Status),
 			e.AuthorizedFrom, e.AuthorizedTo, e.Audit.CreatedAt, e.Audit.UpdatedAt, e.Timezone, roeJSON, e.LiveReconEnabled,
 			e.Audit.CreatedBy, e.Audit.UpdatedBy); err != nil {
 			return fmt.Errorf("insert engagement: %w", err)
@@ -274,13 +274,13 @@ type rowScanner interface {
 
 func scanEngagement(row rowScanner) (*engagement.Engagement, error) {
 	var (
-		e              engagement.Engagement
-		idStr, ten, st string
-		projectID      pgtype.Text
-		af, at         pgtype.Timestamptz
-		roeJSON        []byte
+		e                       engagement.Engagement
+		idStr, ten, st          string
+		projectID, assessmentID pgtype.Text
+		af, at                  pgtype.Timestamptz
+		roeJSON                 []byte
 	)
-	if err := row.Scan(&idStr, &ten, &projectID, &e.Name, &e.Client, &st, &af, &at, &e.Audit.CreatedAt, &e.Audit.UpdatedAt, &e.Timezone, &roeJSON, &e.LiveReconEnabled, &e.Audit.CreatedBy, &e.Audit.UpdatedBy); err != nil {
+	if err := row.Scan(&idStr, &ten, &projectID, &assessmentID, &e.Name, &e.Client, &st, &af, &at, &e.Audit.CreatedAt, &e.Audit.UpdatedAt, &e.Timezone, &roeJSON, &e.LiveReconEnabled, &e.Audit.CreatedBy, &e.Audit.UpdatedBy); err != nil {
 		return nil, err
 	}
 	if len(roeJSON) > 0 {
@@ -292,6 +292,9 @@ func scanEngagement(row rowScanner) (*engagement.Engagement, error) {
 	e.TenantID = shared.ID(ten)
 	if projectID.Valid {
 		e.ProjectID = shared.ID(projectID.String)
+	}
+	if assessmentID.Valid {
+		e.AssessmentID = shared.ID(assessmentID.String)
 	}
 	e.Status = engagement.Status(st)
 	if af.Valid {
