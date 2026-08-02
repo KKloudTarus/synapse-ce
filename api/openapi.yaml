@@ -950,7 +950,7 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
     post:
       tags: [appsec]
-      summary: Atomically create an assessment and required engagement children
+      summary: Atomically create an assessment and required scoped assets
       operationId: createAppSecAssessment
       parameters: [{name: sid, in: path, required: true, schema: {type: string}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateAppSecAssessmentRequest'}}}}
@@ -971,6 +971,19 @@ paths:
       - {name: id, in: path, required: true, schema: {type: string}}
       responses:
         '200': {description: Assessment, content: {application/json: {schema: {$ref: '#/components/schemas/AppSecAssessment'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/appsec/business-services/{sid}/assessments/{id}/assets:
+    get:
+      tags: [appsec]
+      summary: List scoped assets belonging to an assessment
+      operationId: listAppSecAssessmentAssets
+      parameters:
+      - {name: sid, in: path, required: true, schema: {type: string}}
+      - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Assessment assets, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AppSecAssessmentAsset'}}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
@@ -1084,24 +1097,33 @@ components:
         objective: {type: string, maxLength: 4000}
         status: {type: string, enum: [draft, active, closed]}
         policy: {$ref: '#/components/schemas/AppSecAssessmentPolicy'}
-    CreateAppSecEngagementRequest:
+    AppSecAssessmentAsset:
+      type: object
+      required: [id, assessment_id, name, client, status]
+      properties:
+        id: {type: string}
+        assessment_id: {type: string}
+        name: {type: string, maxLength: 256}
+        client: {type: string, maxLength: 256}
+        status: {type: string, enum: [draft, active, completed, archived]}
+    CreateAppSecAssessmentRequest:
+      type: object
+      required: [name, assets]
+      properties:
+        name: {type: string, maxLength: 256}
+        objective: {type: string, maxLength: 4000}
+        policy: {$ref: '#/components/schemas/AppSecAssessmentPolicy'}
+        assets:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items: {$ref: '#/components/schemas/AppSecAssessmentAssetInput'}
+    AppSecAssessmentAssetInput:
       type: object
       required: [name]
       properties:
         name: {type: string, maxLength: 256}
         client: {type: string, maxLength: 256}
-    CreateAppSecAssessmentRequest:
-      type: object
-      required: [name, engagements]
-      properties:
-        name: {type: string, maxLength: 256}
-        objective: {type: string, maxLength: 4000}
-        policy: {$ref: '#/components/schemas/AppSecAssessmentPolicy'}
-        engagements:
-          type: array
-          minItems: 1
-          maxItems: 128
-          items: {$ref: '#/components/schemas/CreateAppSecEngagementRequest'}
 
     ProjectCodeCapability:
       type: object
