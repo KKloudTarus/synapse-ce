@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
@@ -122,6 +123,24 @@ func TestTenantRLSIsolation(t *testing.T) {
 	for _, table := range []string{"findings", "evidence"} {
 		if err := WithTenantTx(ctx, runtime, shared.ID(tenantB), func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx, `SELECT count(*) FROM `+table+` WHERE engagement_id=$1`, engagementID).Scan(&count)
+		}); err != nil {
+			t.Fatalf("query tenant B %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("tenant B exposed %d tenant A %s rows", count, table)
+		}
+	}
+
+	sessionID := shared.ID(suffix + "-session")
+	if err := NewAgentSessionStore(runtime).SaveSession(ctxA, agent.Session{ID: sessionID, EngagementID: shared.ID(engagementID), InitiatedBy: "operator", Goal: "RLS session", Status: agent.StatusRunning, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("create tenant A agent session: %v", err)
+	}
+	if err := NewAgentSessionStore(runtime).AppendMessage(ctxA, sessionID, 0, agent.Message{Role: agent.RoleUser, Content: "RLS message"}); err != nil {
+		t.Fatalf("create tenant A agent message: %v", err)
+	}
+	for _, table := range []string{"agent_sessions", "agent_messages"} {
+		if err := WithTenantTx(ctx, runtime, shared.ID(tenantB), func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(*) FROM `+table+` WHERE tenant_id=$1`, tenantA).Scan(&count)
 		}); err != nil {
 			t.Fatalf("query tenant B %s: %v", table, err)
 		}
