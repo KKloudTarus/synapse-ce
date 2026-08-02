@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/hotspot"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rating"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/hotspot"
 )
 
 type OverviewState string
@@ -58,8 +58,9 @@ const (
 type OverviewGateStatus string
 
 const (
-	OverviewGatePassed OverviewGateStatus = "passed"
-	OverviewGateFailed OverviewGateStatus = "failed"
+	OverviewGatePassed     OverviewGateStatus = "passed"
+	OverviewGateFailed     OverviewGateStatus = "failed"
+	OverviewGateIncomplete OverviewGateStatus = "incomplete"
 )
 
 type OverviewGateOperator string
@@ -498,7 +499,9 @@ func finitePercent(value float64) bool {
 
 func overviewGate(gate qualitygate.Result, info projectanalysis.GateInfo) (OverviewGate, error) {
 	status := OverviewGateFailed
-	if gate.Passed {
+	if gate.Incomplete {
+		status = OverviewGateIncomplete
+	} else if gate.Passed {
 		status = OverviewGatePassed
 	}
 	source, err := overviewGateSource(info.Source)
@@ -536,13 +539,13 @@ func overviewGate(gate qualitygate.Result, info projectanalysis.GateInfo) (Overv
 			})
 		}
 	}
-	if gate.Passed != allPassed {
+	if gate.Passed != (allPassed && !gate.Incomplete) {
 		return OverviewGate{}, fmt.Errorf("inconsistent gate result")
 	}
 	if gate.Passed && len(out.FailedConditions) != 0 {
 		return OverviewGate{}, fmt.Errorf("passed gate has failed conditions")
 	}
-	if !gate.Passed && len(out.FailedConditions) == 0 {
+	if !gate.Passed && !gate.Incomplete && len(out.FailedConditions) == 0 {
 		return OverviewGate{}, fmt.Errorf("failed gate has no failed conditions")
 	}
 	return out, nil

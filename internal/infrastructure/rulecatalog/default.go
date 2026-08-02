@@ -26,6 +26,7 @@ func Default() (*Catalog, error) {
 	all = append(all, cssRules()...)
 	all = append(all, htmlRules()...)
 	all = append(all, textRules()...)
+	all = append(all, swiftRules()...)
 
 	return New(all)
 }

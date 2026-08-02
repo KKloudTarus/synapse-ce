@@ -135,30 +135,31 @@ func (a *Analysis) UnmarshalJSON(data []byte) error {
 // Input supplies one completed scan's project-facing facts. Findings must be the
 // merged root and code-quality findings, not two independently counted lists.
 type Input struct {
-	ID             string
-	TenantID       shared.ID
-	ProjectID      shared.ID
-	ProjectKey     string
-	CreatedAt      time.Time
-	SourceRef      string
-	SourceCommit   string
-	SourceRevision SourceRevision
-	Capabilities   SourceCapabilities
-	SourceManifest SourceManifest
-	Comparison     Comparison
-	FileChanges    []FileChange
-	Annotations    []Annotation
-	Findings       []finding.Finding
-	Gate           qualitygate.Gate
-	GateSource     string
-	GateExempt     map[string]bool
-	LinesOfCode    int
-	Coverage       *measure.CoverageReport
-	Duplication    measure.DuplicationReport
-	Previous       *Analysis
-	Hotspots       hotspot.Summary
-	NewHotspots    hotspot.Summary
-	Snapshot       measure.Snapshot
+	ID                string
+	TenantID          shared.ID
+	ProjectID         shared.ID
+	ProjectKey        string
+	CreatedAt         time.Time
+	SourceRef         string
+	SourceCommit      string
+	SourceRevision    SourceRevision
+	Capabilities      SourceCapabilities
+	SourceManifest    SourceManifest
+	Comparison        Comparison
+	FileChanges       []FileChange
+	Annotations       []Annotation
+	Findings          []finding.Finding
+	Gate              qualitygate.Gate
+	GateSource        string
+	GateExempt        map[string]bool
+	LinesOfCode       int
+	Coverage          *measure.CoverageReport
+	Duplication       measure.DuplicationReport
+	AnalysisTruncated bool
+	Previous          *Analysis
+	Hotspots          hotspot.Summary
+	NewHotspots       hotspot.Summary
+	Snapshot          measure.Snapshot
 }
 
 // Build returns one immutable snapshot and evaluates the built-in gate at creation.
@@ -224,6 +225,8 @@ func Build(in Input) (Analysis, error) {
 		}
 	}
 	gate := qualitygate.Evaluate(gateDef, measures)
+	gate.Incomplete = in.AnalysisTruncated
+	gate.Passed = gate.Passed && !gate.Incomplete
 
 	return Analysis{
 		ID: in.ID, TenantID: in.TenantID.String(), ProjectID: in.ProjectID.String(),

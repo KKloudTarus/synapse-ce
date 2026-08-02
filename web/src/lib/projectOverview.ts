@@ -17,7 +17,7 @@ export type UnavailableReason =
   | 'duplication_not_available'
 
 export type OverviewGrade = 'A' | 'B' | 'C' | 'D' | 'E'
-export type OverviewGateStatus = 'passed' | 'failed'
+export type OverviewGateStatus = 'passed' | 'failed' | 'incomplete'
 export type ProjectOverviewGateOperator =
   | '<='
   | '>='
@@ -126,7 +126,7 @@ const REASONS = new Set<UnavailableReason>([
   'duplication_not_available',
 ])
 const GRADES = new Set<OverviewGrade>(['A', 'B', 'C', 'D', 'E'])
-const GATE_STATUSES = new Set<OverviewGateStatus>(['passed', 'failed'])
+const GATE_STATUSES = new Set<OverviewGateStatus>(['passed', 'failed', 'incomplete'])
 const GATE_OPERATORS = new Set<ProjectOverviewGateOperator>(['<=', '>=', '==', '<', '>'])
 const GATE_SOURCES = new Set<ProjectOverviewGateSource>(['default', 'repository', 'managed'])
 const GATE_METRICS = new Set<ProjectOverviewGateMetric>([
@@ -266,7 +266,7 @@ function projectGate(value: unknown): ProjectOverviewGate {
   const raw = record(value)
   if (!Array.isArray(raw.failed_conditions)) invalid()
   const status = stringEnum(raw.status, GATE_STATUSES)
-  if (status === 'passed' && raw.failed_conditions.length !== 0) invalid()
+  if ((status === 'passed' || status === 'incomplete') && raw.failed_conditions.length !== 0) invalid()
   if (status === 'failed' && raw.failed_conditions.length === 0) invalid()
   return {
     status,

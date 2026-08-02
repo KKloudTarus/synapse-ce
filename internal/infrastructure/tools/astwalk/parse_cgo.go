@@ -153,12 +153,14 @@ var specs = map[string]spec{
 		boolOpBinry:  set("infix_expression"),
 	},
 	"Swift": {
-		lang:         swift.GetLanguage(),
-		funcType:     set("function_declaration", "lambda_literal"),
-		cycDecision:  set("if_statement", "for_statement", "while_statement", "guard_statement", "switch_entry", "catch_block"),
-		cogIncrement: set("if_statement", "for_statement", "while_statement", "guard_statement", "switch_statement", "catch_block"),
-		cogElse:      set(),
-		boolOpBinry:  set("prefix_expression"),
+		lang:     swift.GetLanguage(),
+		funcType: set("function_declaration", "protocol_function_declaration", "init_declaration", "deinit_declaration", "subscript_declaration", "lambda_literal"),
+		// conjunction_expression/disjunction_expression are counted only by boolOpNode.
+		// Including them here would double-count one logical decision.
+		cycDecision:  set("if_statement", "for_statement", "while_statement", "repeat_while_statement", "guard_statement", "switch_entry", "catch_block", "ternary_expression"),
+		cogIncrement: set("if_statement", "for_statement", "while_statement", "repeat_while_statement", "guard_statement", "switch_statement", "catch_block", "ternary_expression"),
+		cogElse:      set("else"),
+		boolOpNode:   set("conjunction_expression", "disjunction_expression"),
 	},
 	"Kotlin": {
 		lang:         kotlin.GetLanguage(),
@@ -205,9 +207,13 @@ func FunctionsFor(ctx context.Context, root string) (Result, error) {
 // MetricsFor parses every supported-language file under root and returns one record per function with its
 // cyclomatic and cognitive complexity.
 func MetricsFor(ctx context.Context, root string) (Metrics, error) {
-	var m Metrics
+	var (
+		m               Metrics
+		parserTruncated bool
+		err             error
+	)
 	m.Functions = []FunctionMetric{}
-	truncated, err := walkSource(ctx, root, func(rel, lang string, content []byte) {
+	walkTruncated, err := walkSource(ctx, root, func(rel, lang string, content []byte) {
 		sp, ok := specs[lang]
 		if !ok {
 			return
@@ -216,7 +222,14 @@ func MetricsFor(ctx context.Context, root string) (Metrics, error) {
 		if root == nil {
 			return
 		}
+		if root.HasError() {
+			parserTruncated = true
+		}
 		for _, fn := range collectFunctions(root, sp) {
+			if fn.HasError() {
+				parserTruncated = true
+				continue
+			}
 			cyc, cog := complexity(fn, sp)
 			m.Functions = append(m.Functions, FunctionMetric{
 				File:       rel,
@@ -231,7 +244,7 @@ func MetricsFor(ctx context.Context, root string) (Metrics, error) {
 	if err != nil {
 		return Metrics{}, err
 	}
-	m.Truncated = truncated
+	m.Truncated = walkTruncated || parserTruncated
 	return m, nil
 }
 
@@ -279,8 +292,16 @@ func collectFunctions(root *sitter.Node, sp spec) []*sitter.Node {
 	return out
 }
 
-// functionName returns the function's declared name from src, or "<anonymous>" (arrow/expression functions).
+// functionName returns the function's declared name from src, or a stable synthetic name.
 func functionName(fn *sitter.Node, src []byte) string {
+	switch fn.Type() {
+	case "init_declaration":
+		return "<init>"
+	case "deinit_declaration":
+		return "<deinit>"
+	case "subscript_declaration":
+		return "<subscript>"
+	}
 	if name := fn.ChildByFieldName("name"); name != nil {
 		return name.Content(src)
 	}
@@ -340,7 +361,7 @@ func complexity(fn *sitter.Node, sp spec) (cyc, cog int) {
 		case sp.cogIncrement[ct]:
 			cog += 1 + f.depth
 			push(c, f.depth+1)
-		case sp.cogElse[ct]:
+		case sp.cogElse[ct] && (ct != "else" || (c.Parent() != nil && c.Parent().Type() == "if_statement")):
 			cog++
 			push(c, f.depth+1)
 		default:

@@ -202,6 +202,9 @@ var (
 // not attempt alias, import-resolution, or interprocedural analysis.
 func QualityFor(ctx context.Context, root string) (Quality, error) {
 	out := Quality{Findings: []QualityFinding{}}
+	swiftPerRule := map[string]int{}
+	swiftTruncated := false
+	swiftParserTruncated := false
 	type notebookChunk struct {
 		location string
 		content  []byte
@@ -210,7 +213,7 @@ func QualityFor(ctx context.Context, root string) (Quality, error) {
 	}
 	notebooks := map[string][]notebookChunk{}
 	truncated, err := walkSource(ctx, root, func(rel, lang string, content []byte) {
-		if lang != "Python" && lang != "Java" && lang != "JavaScript" && lang != "Kotlin" && lang != "Scala" && lang != "Ruby" && lang != "CSS" && lang != "HTML" {
+		if lang != "Python" && lang != "Java" && lang != "JavaScript" && lang != "Kotlin" && lang != "Scala" && lang != "Ruby" && lang != "CSS" && lang != "HTML" && lang != "Swift" {
 			return
 		}
 		if lang == "Python" {
@@ -246,11 +249,24 @@ func QualityFor(ctx context.Context, root string) (Quality, error) {
 				return
 			}
 			out.Findings = append(out.Findings, htmlFindings(tree, content, rel)...)
+		case "Swift":
+			if tree.HasError() {
+				swiftParserTruncated = true
+			}
+			remaining := maxSwiftTotal - swiftFindingCount(out.Findings)
+			if remaining <= 0 {
+				swiftTruncated = true
+				return
+			}
+			findings, fileTruncated := swiftFindingsLimitWithCounts(tree, content, rel, remaining, swiftPerRule)
+			out.Findings = append(out.Findings, findings...)
+			swiftTruncated = swiftTruncated || fileTruncated
 		}
 	})
 	if err != nil {
 		return Quality{}, err
 	}
+	truncated = truncated || swiftTruncated || swiftParserTruncated
 	for base, chunks := range notebooks {
 		var source strings.Builder
 		line := 1

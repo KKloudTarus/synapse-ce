@@ -2,7 +2,6 @@ package codeanalysis
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -107,7 +106,7 @@ func TestAnalyzerNotebookReportsCellLineWithoutSplit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	for _, got := range findings {
+	for _, got := range findings.Findings {
 		if got.RuleID == "ipynb-hardcoded-credential" {
 			if got.File != "analysis.ipynb#cell-1" || got.Line != 3 {
 				t.Fatalf("location = %s:%d, want analysis.ipynb#cell-1:3", got.File, got.Line)
@@ -191,18 +190,50 @@ func TestAnalyzerNotebookFlagsWindowsProjectTracebackPath(t *testing.T) {
 	}
 }
 
+func TestAnalyzerMarksOversizedSupportedFilesTruncated(t *testing.T) {
+	root := t.TempDir()
+	for name, size := range map[string]int{"large.go": maxFileBytes + 1, "large.ipynb": maxNotebookBytes + 1} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(strings.Repeat("x", size)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	findings, err := New().Analyze(context.Background(), root)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if !findings.Truncated {
+		t.Fatal("oversized supported input did not truncate analysis")
+	}
+}
+
+func TestAnalyzerMarksScannerTokenLimitTruncated(t *testing.T) {
+	root := t.TempDir()
+	content := "package p\n//" + strings.Repeat("x", maxRuleScanLine*16+1)
+	if err := os.WriteFile(filepath.Join(root, "large.go"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := New().Analyze(context.Background(), root)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if !findings.Truncated {
+		t.Fatal("scanner token limit did not truncate analysis")
+	}
+}
+
 func TestAnalyzerNotebookCapsFindings(t *testing.T) {
 	root := t.TempDir()
 	cell := `{"cell_type":"code","source":"api_key = '` + strings.Repeat("a", 15) + `'"}`
 	writeNotebook(t, root, `{"metadata":{"kernelspec":{"name":"python3","language":"python"}},"cells":[`+strings.TrimSuffix(strings.Repeat(cell+",", maxFindings+1), ",")+`]}`)
 	findings, err := New().Analyze(context.Background(), root)
-	// The priority collector caps at maxFindings and reports truncation via
-	// ErrFindingsTruncated; both behaviors must hold.
-	if !errors.Is(err, ErrFindingsTruncated) {
-		t.Fatalf("expected ErrFindingsTruncated, got: %v", err)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
 	}
-	if len(findings) != maxFindings {
-		t.Fatalf("finding count = %d, want cap %d", len(findings), maxFindings)
+	if len(findings.Findings) != maxFindings {
+		t.Fatalf("finding count = %d, want cap %d", len(findings.Findings), maxFindings)
+	}
+	if !findings.Truncated {
+		t.Fatal("finding cap must mark analysis truncated")
 	}
 }
 
@@ -235,8 +266,8 @@ func notebookAnalysis(t *testing.T, root string) []struct{ RuleID, File string }
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	out := make([]struct{ RuleID, File string }, len(findings))
-	for i, finding := range findings {
+	out := make([]struct{ RuleID, File string }, len(findings.Findings))
+	for i, finding := range findings.Findings {
 		out[i] = struct{ RuleID, File string }{finding.RuleID, finding.File}
 	}
 	return out
