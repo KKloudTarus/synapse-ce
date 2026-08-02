@@ -111,70 +111,82 @@ func (q *JobQueue) Claim(ctx context.Context, visibility time.Duration, kinds ..
 }
 
 func (q *JobQueue) Heartbeat(ctx context.Context, id string, extend time.Duration) error {
-	tag, err := q.pool.Exec(ctx,
-		`UPDATE jobs SET claimed_until = now() + make_interval(secs => $2), updated_at = now()
-		 WHERE id = $1 AND status = 'claimed'`,
-		id, extend.Seconds())
-	if err != nil {
-		return fmt.Errorf("heartbeat job: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
-	}
-	return nil
+	return WithContextTenantTx(ctx, q.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx,
+			`UPDATE jobs SET claimed_until = now() + make_interval(secs => $2), updated_at = now()
+			 WHERE id = $1 AND status = 'claimed'`,
+			id, extend.Seconds())
+		if err != nil {
+			return fmt.Errorf("heartbeat job: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
+		}
+		return nil
+	})
 }
 
 func (q *JobQueue) Complete(ctx context.Context, id string) error {
-	tag, err := q.pool.Exec(ctx,
-		`UPDATE jobs SET status='done', claimed_until=NULL, updated_at=now() WHERE id=$1`, id)
-	if err != nil {
-		return fmt.Errorf("complete job: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
-	}
-	return nil
+	return WithContextTenantTx(ctx, q.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE jobs SET status='done', claimed_until=NULL, updated_at=now() WHERE id=$1`, id)
+		if err != nil {
+			return fmt.Errorf("complete job: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
+		}
+		return nil
+	})
 }
 
 func (q *JobQueue) Deadletter(ctx context.Context, id string) error {
-	tag, err := q.pool.Exec(ctx,
-		`UPDATE jobs SET status='failed', claimed_until=NULL, updated_at=now() WHERE id=$1`, id)
-	if err != nil {
-		return fmt.Errorf("deadletter job: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
-	}
-	return nil
+	return WithContextTenantTx(ctx, q.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE jobs SET status='failed', claimed_until=NULL, updated_at=now() WHERE id=$1`, id)
+		if err != nil {
+			return fmt.Errorf("deadletter job: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
+		}
+		return nil
+	})
 }
 
 // Depth counts not-yet-terminal jobs (queued or claimed) – the durable-backpressure
 // admission signal. 'done' and 'failed' are terminal and excluded. Optional kind filter.
 func (q *JobQueue) Depth(ctx context.Context, kinds ...string) (int, error) {
-	query := `SELECT count(*) FROM jobs WHERE status IN ('queued','claimed')`
-	var args []any
-	if len(kinds) > 0 {
-		query += ` AND kind = ANY($1)`
-		args = append(args, kinds)
-	}
 	var n int
-	if err := q.pool.QueryRow(ctx, query, args...).Scan(&n); err != nil {
-		return 0, fmt.Errorf("queue depth: %w", err)
+	err := WithContextTenantTx(ctx, q.pool, func(tx pgx.Tx) error {
+		query := `SELECT count(*) FROM jobs WHERE status IN ('queued','claimed')`
+		var args []any
+		if len(kinds) > 0 {
+			query += ` AND kind = ANY($1)`
+			args = append(args, kinds)
+		}
+		if err := tx.QueryRow(ctx, query, args...).Scan(&n); err != nil {
+			return fmt.Errorf("queue depth: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
 	}
 	return n, nil
 }
 
 func (q *JobQueue) Fail(ctx context.Context, id string, retryIn time.Duration) error {
-	tag, err := q.pool.Exec(ctx,
-		`UPDATE jobs SET status='queued', claimed_until=NULL,
-		        available_at = now() + make_interval(secs => $2), updated_at = now()
-		 WHERE id = $1`,
-		id, retryIn.Seconds())
-	if err != nil {
-		return fmt.Errorf("fail job: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
-	}
-	return nil
+	return WithContextTenantTx(ctx, q.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx,
+			`UPDATE jobs SET status='queued', claimed_until=NULL,
+			        available_at = now() + make_interval(secs => $2), updated_at = now()
+			 WHERE id = $1`,
+			id, retryIn.Seconds())
+		if err != nil {
+			return fmt.Errorf("fail job: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
+		}
+		return nil
+	})
 }
