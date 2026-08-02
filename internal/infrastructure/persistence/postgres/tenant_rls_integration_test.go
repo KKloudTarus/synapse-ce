@@ -85,8 +85,29 @@ func TestTenantRLSIsolation(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("query tenant A: %v", err)
 	}
+
 	if count != 1 {
 		t.Fatalf("tenant A count = %d, want 1", count)
+	}
+	now := time.Now().UTC()
+	if err := WithTenantTx(ctx, runtime, shared.ID(tenantA), func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO project_issues (id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, file, location, status, version, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at) VALUES ($1,$2,$3,'issue','issue','rule','bug','RLS issue','desc','medium','sast','main.go','main.go:1','open',1,'analysis','analysis',$4,$4,$4,$4)`, suffix+"-project-issue", tenantA, projectID, now); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO project_hotspots (id, tenant_id, project_id, hotspot_key, finding_identity, rule_key, title, description, severity, finding_kind, location, status, version, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at) VALUES ($1,$2,$3,'hotspot','hotspot','rule','RLS hotspot','desc','medium','sast','main.go:1','to_review',1,'analysis','analysis',$4,$4,$4,$4)`, suffix+"-project-hotspot", tenantA, projectID, now)
+		return err
+	}); err != nil {
+		t.Fatalf("create tenant A project artifacts: %v", err)
+	}
+	for _, table := range []string{"project_issues", "project_hotspots"} {
+		if err := WithTenantTx(ctx, runtime, shared.ID(tenantB), func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(*) FROM `+table+` WHERE tenant_id=$1`, tenantA).Scan(&count)
+		}); err != nil {
+			t.Fatalf("query tenant B %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("tenant B exposed %d tenant A %s rows", count, table)
+		}
 	}
 
 	eng, err := engagement.New(shared.ID(engagementID), shared.ID(tenantA), "RLS engagement", "", time.Now().UTC())
