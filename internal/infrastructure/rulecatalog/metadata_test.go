@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/rulecatalog"
 )
 
@@ -29,6 +30,36 @@ func mustDefaultRules(t *testing.T) []rule.Rule {
 		t.Fatal("List() returned empty rules slice")
 	}
 	return rules
+}
+
+func TestMetadata_ProducerRuleContracts(t *testing.T) {
+	expected := map[rule.Key]struct {
+		severity  shared.Severity
+		type_     rule.Type
+		quality   rule.Quality
+		detection rule.Detection
+	}{
+		"quality-duplicated-block":       {shared.SeverityLow, rule.TypeCodeSmell, rule.QualityMaintainability, rule.DetectionMetric},
+		"quality-high-complexity":        {shared.SeverityMedium, rule.TypeCodeSmell, rule.QualityMaintainability, rule.DetectionMetric},
+		"kotlin-cognitive-complexity":    {shared.SeverityMedium, rule.TypeCodeSmell, rule.QualityMaintainability, rule.DetectionMetric},
+		"php:cognitive-complexity":       {shared.SeverityMedium, rule.TypeCodeSmell, rule.QualityMaintainability, rule.DetectionMetric},
+		"reliability-unreachable-code":   {shared.SeverityMedium, rule.TypeBug, rule.QualityReliability, rule.DetectionAST},
+		"reliability-constant-condition": {shared.SeverityMedium, rule.TypeBug, rule.QualityReliability, rule.DetectionAST},
+	}
+
+	for _, r := range mustDefaultRules(t) {
+		want, ok := expected[r.Key]
+		if !ok {
+			continue
+		}
+		if r.DefaultSeverity != want.severity || r.Type != want.type_ || len(r.Qualities) != 1 || r.Qualities[0] != want.quality || r.Detection != want.detection {
+			t.Errorf("Rule %s metadata = severity=%v type=%v qualities=%v detection=%v", r.Key, r.DefaultSeverity, r.Type, r.Qualities, r.Detection)
+		}
+		delete(expected, r.Key)
+	}
+	for key := range expected {
+		t.Errorf("Rule %s missing from catalog", key)
+	}
 }
 
 func TestMetadata_NoEmptyFields(t *testing.T) {
@@ -207,6 +238,7 @@ func TestMetadata_ApprovedLanguage(t *testing.T) {
 		"XML":                    true,
 		"Java":                   true,
 		"Kotlin":                 true,
+		"PHP":                    true,
 		"IPython Notebooks":      true,
 		"Rust":                   true,
 		"Scala":                  true,

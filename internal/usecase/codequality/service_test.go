@@ -85,7 +85,7 @@ func TestServiceMapsAndBridges(t *testing.T) {
 	}
 
 	dupF := byRule(fs, "quality-duplicated-block")
-	if dupF == nil || dupF.Kind != finding.KindQuality || !strings.Contains(dupF.Title, "x.go") {
+	if dupF == nil || dupF.Kind != finding.KindQuality || dupF.Severity != shared.SeverityLow || !strings.Contains(dupF.Title, "x.go") {
 		t.Errorf("duplication bridge wrong: %+v", dupF)
 	}
 	if dupF.RuleKey != "quality-duplicated-block" {
@@ -93,7 +93,7 @@ func TestServiceMapsAndBridges(t *testing.T) {
 	}
 
 	hc := byRule(fs, "quality-high-complexity")
-	if hc == nil || !strings.Contains(hc.Title, "25") {
+	if hc == nil || hc.Kind != finding.KindQuality || hc.Severity != shared.SeverityMedium || !strings.Contains(hc.Title, "25") {
 		t.Errorf("complexity bridge should flag the cyclomatic-25 function: %+v", hc)
 	}
 	if hc.RuleKey != "quality-high-complexity" {
@@ -139,11 +139,11 @@ func TestBugsBridgeEmitsReliability(t *testing.T) {
 		t.Fatalf("analyze: %v", err)
 	}
 	unr := byRule(fs, "reliability-unreachable-code")
-	if unr == nil || unr.Kind != finding.KindReliability || unr.DedupKey != "cq:reliability:reliability-unreachable-code:a.go:7" {
+	if unr == nil || unr.Kind != finding.KindReliability || unr.Severity != shared.SeverityMedium || unr.DedupKey != "cq:reliability:reliability-unreachable-code:a.go:7" {
 		t.Errorf("unreachable bug mapping wrong: %+v", unr)
 	}
 	cc := byRule(fs, "reliability-constant-condition")
-	if cc == nil || cc.Kind != finding.KindReliability {
+	if cc == nil || cc.Kind != finding.KindReliability || cc.Severity != shared.SeverityMedium {
 		t.Errorf("constant-condition bug missing/wrong: %+v", cc)
 	}
 	// unavailable detector emits nothing.
@@ -164,8 +164,9 @@ func TestKotlinCognitiveComplexityOwnsKotlinFinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
-	if byRule(fs, "kotlin-cognitive-complexity") == nil {
-		t.Fatal("expected Kotlin cognitive-complexity finding")
+	kotlin := byRule(fs, "kotlin-cognitive-complexity")
+	if kotlin == nil || kotlin.Kind != finding.KindQuality || kotlin.Severity != shared.SeverityMedium {
+		t.Fatalf("expected Kotlin cognitive-complexity quality/medium finding: %+v", kotlin)
 	}
 	generic := byRule(fs, "quality-high-complexity")
 	if generic == nil || !strings.Contains(generic.Title, "high.py") {
@@ -197,6 +198,29 @@ func TestSwiftCognitiveComplexityBridge(t *testing.T) {
 	}
 	if byRule(fs, "quality-high-complexity") == nil {
 		t.Fatal("generic cyclomatic bridge must coexist")
+	}
+}
+
+func TestPHPCognitiveComplexityOwnsPHPFinding(t *testing.T) {
+	metrics := fakeMetrics{available: true, rep: measure.ComplexityReport{Functions: []measure.FunctionComplexity{
+		{File: "High.php", Line: 4, Name: "classify", Language: "PHP", Cyclomatic: 25, Cognitive: 30},
+		{File: "Low.php", Line: 2, Name: "simple", Language: "PHP", Cyclomatic: 20, Cognitive: 1},
+	}}}
+	fs, err := New(fakeAnalyzer{}, WithComplexity(metrics, 15)).Analyze(context.Background(), "root")
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	php := byRule(fs, "php:cognitive-complexity")
+	if php == nil || php.Kind != finding.KindQuality || php.Severity != shared.SeverityMedium || !strings.Contains(php.Title, "classify") {
+		t.Fatalf("expected PHP cognitive-complexity finding: %+v", fs)
+	}
+	for _, f := range fs {
+		if f.RuleKey == "quality-high-complexity" && strings.Contains(f.Title, ".php") {
+			t.Fatalf("PHP function was reported by generic rule: %+v", f)
+		}
+		if strings.Contains(f.Title, "simple") {
+			t.Fatalf("low-cognitive PHP function reported: %+v", f)
+		}
 	}
 }
 

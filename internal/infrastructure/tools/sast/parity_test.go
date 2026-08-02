@@ -253,7 +253,7 @@ def lookup():
 <?php
 mysqli_query($db, "SELECT * FROM users WHERE name = '" . $_GET["q"] . "'");
 `},
-			rule:             "generic-sql-dynamic-execute",
+			rule:             "php:sql-concat",
 			cwe:              "CWE-89",
 			owasp:            "A05:2025 Injection",
 			sourceContains:   "HTTP query parameter",
@@ -696,16 +696,16 @@ func runParityCase(t *testing.T, tc parityCase) ports.SASTRawFinding {
 	for rel, content := range tc.files {
 		writeFile(t, root, rel, content)
 	}
-	got, err := New().AnalyzeSource(context.Background(), root)
+	hits, err := New().AnalyzeSource(context.Background(), root)
 	if err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
-	for i := range got {
-		if got[i].RuleID == tc.rule {
-			return got[i]
+	for i := range hits {
+		if hits[i].RuleID == tc.rule {
+			return hits[i]
 		}
 	}
-	t.Fatalf("missing rule %s in findings: %+v", tc.rule, got)
+	t.Fatalf("missing rule %s in findings: %+v", tc.rule, hits)
 	return ports.SASTRawFinding{}
 }
 

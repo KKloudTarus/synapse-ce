@@ -72,7 +72,10 @@ func TestVBRuleMatchingRespectsCodeAndLiterals(t *testing.T) {
 func TestVBGenericRulesIgnoreCommentsButKeepExecutableLiterals(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "Secrets.VB", "' password = \"notasecretvalue\"\nREM api_key = \"notasecretvalue\"\nDim password = \"strongvalue987\"\n")
-	hits, err := New().AnalyzeSource(context.Background(), root)
+	hits, err := func() ([]ports.SASTRawFinding, error) {
+		hits, err := New().AnalyzeSource(context.Background(), root)
+		return hits, err
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +134,10 @@ func TestVBExtensionGate(t *testing.T) {
 			if err := os.WriteFile(path, []byte("On Error Resume Next\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			hits, err := New().AnalyzeSource(context.Background(), root)
+			hits, err := func() ([]ports.SASTRawFinding, error) {
+				hits, err := New().AnalyzeSource(context.Background(), root)
+				return hits, err
+			}()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -210,7 +216,10 @@ func analyzeVB(t *testing.T, source string) []ports.SASTRawFinding {
 	if err := os.WriteFile(filepath.Join(root, "Sample.vb"), []byte(source+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	hits, err := New().AnalyzeSource(context.Background(), root)
+	hits, err := func() ([]ports.SASTRawFinding, error) {
+		hits, err := New().AnalyzeSource(context.Background(), root)
+		return hits, err
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
