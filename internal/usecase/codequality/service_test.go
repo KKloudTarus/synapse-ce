@@ -15,11 +15,12 @@ import (
 )
 
 type fakeAnalyzer struct {
-	raws []ports.CodeAnalysisRawFinding
+	raws      []ports.CodeAnalysisRawFinding
+	truncated bool
 }
 
-func (f fakeAnalyzer) Analyze(context.Context, string) ([]ports.CodeAnalysisRawFinding, error) {
-	return f.raws, nil
+func (f fakeAnalyzer) Analyze(context.Context, string) (ports.CodeAnalysisReport, error) {
+	return ports.CodeAnalysisReport{Findings: f.raws, Truncated: f.truncated}, nil
 }
 
 type fakeDup struct{ rep measure.DuplicationReport }
@@ -180,6 +181,25 @@ func TestKotlinCognitiveComplexityOwnsKotlinFinding(t *testing.T) {
 	}
 }
 
+func TestSwiftCognitiveComplexityBridge(t *testing.T) {
+	metrics := fakeMetrics{available: true, rep: measure.ComplexityReport{Functions: []measure.FunctionComplexity{
+		{File: "a.swift", Line: 7, Name: "complex", Language: "Swift", Cyclomatic: 16, Cognitive: 20},
+		{File: "b.swift", Line: 3, Name: "simple", Language: "Swift", Cyclomatic: 2, Cognitive: 15},
+		{File: "c.go", Line: 1, Name: "other", Language: "Go", Cyclomatic: 2, Cognitive: 30},
+	}}}
+	fs, err := New(fakeAnalyzer{}, WithComplexity(metrics, 15)).Analyze(context.Background(), "root")
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	f := byRule(fs, "swift:cognitive-complexity")
+	if f == nil || f.Kind != finding.KindQuality || f.SourceLocation.StartLine != 7 || f.DedupKey != "cq:quality:swift:cognitive-complexity:a.swift:7" {
+		t.Fatalf("Swift cognitive finding = %+v", f)
+	}
+	if byRule(fs, "quality-high-complexity") == nil {
+		t.Fatal("generic cyclomatic bridge must coexist")
+	}
+}
+
 func TestComplexityUnavailableSkipsBridge(t *testing.T) {
 	svc := New(fakeAnalyzer{}, WithComplexity(fakeMetrics{available: false, rep: measure.ComplexityReport{
 		Functions: []measure.FunctionComplexity{{Name: "x", Cyclomatic: 99}},
@@ -192,6 +212,36 @@ func TestComplexityUnavailableSkipsBridge(t *testing.T) {
 		if strings.Contains(f.DedupKey, "high-complexity") {
 			t.Errorf("unavailable metrics must not produce complexity findings: %+v", f)
 		}
+	}
+}
+
+func TestBuildReportMarksTruncatedCodeAnalysis(t *testing.T) {
+	report, err := New(fakeAnalyzer{truncated: true}).BuildReport(context.Background(), "root")
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if !report.Truncated {
+		t.Fatal("truncated analyzer output must mark the code-quality report incomplete")
+	}
+}
+
+func TestSwiftCognitiveComplexityBridgeDoesNotCapFindings(t *testing.T) {
+	functions := make([]measure.FunctionComplexity, 21)
+	for i := range functions {
+		functions[i] = measure.FunctionComplexity{File: "a.swift", Line: i + 1, Name: "complex", Language: "Swift", Cognitive: 16}
+	}
+	fs, err := New(fakeAnalyzer{}, WithComplexity(fakeMetrics{available: true, rep: measure.ComplexityReport{Functions: functions}}, 15)).Analyze(context.Background(), "root")
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	var cognitive int
+	for _, f := range fs {
+		if f.RuleKey == "swift:cognitive-complexity" {
+			cognitive++
+		}
+	}
+	if cognitive != len(functions) {
+		t.Fatalf("cognitive findings = %d, want %d", cognitive, len(functions))
 	}
 }
 

@@ -181,16 +181,16 @@ func (p *Provider) Bugs(ctx context.Context, root string) ([]ports.BugFinding, b
 
 // Analyze runs `synapse-ast quality <root>` and returns language-aware structural findings. An absent or
 // CGO-free sidecar is optional enrichment and returns no findings without an error.
-func (p *Provider) Analyze(ctx context.Context, root string) ([]ports.CodeAnalysisRawFinding, error) {
+func (p *Provider) Analyze(ctx context.Context, root string) (ports.CodeAnalysisReport, error) {
 	if strings.TrimSpace(root) == "" {
-		return nil, nil
+		return ports.CodeAnalysisReport{}, nil
 	}
 	out, exit, err := p.run(ctx, "quality", root)
 	if exit == exitUnavailable {
-		return nil, nil
+		return ports.CodeAnalysisReport{}, nil
 	}
 	if err != nil {
-		return nil, err
+		return ports.CodeAnalysisReport{}, err
 	}
 	var wire struct {
 		Findings []struct {
@@ -203,15 +203,16 @@ func (p *Provider) Analyze(ctx context.Context, root string) ([]ports.CodeAnalys
 			File        string          `json:"file"`
 			Line        int             `json:"line"`
 		} `json:"findings"`
+		Truncated bool `json:"truncated"`
 	}
 	if err := json.Unmarshal(out, &wire); err != nil {
-		return nil, fmt.Errorf("parse synapse-ast quality: %w", err)
+		return ports.CodeAnalysisReport{}, fmt.Errorf("parse synapse-ast quality: %w", err)
 	}
 	findings := make([]ports.CodeAnalysisRawFinding, 0, len(wire.Findings))
 	for _, f := range wire.Findings {
 		findings = append(findings, ports.CodeAnalysisRawFinding{Kind: f.Kind, RuleID: f.Rule, CWE: f.CWE, Severity: f.Severity, Title: f.Title, Description: f.Description, File: f.File, Line: f.Line})
 	}
-	return findings, nil
+	return ports.CodeAnalysisReport{Findings: findings, Truncated: wire.Truncated}, nil
 }
 
 // run executes the sidecar (sandboxed when a runner is set, else direct os/exec) and returns stdout, the

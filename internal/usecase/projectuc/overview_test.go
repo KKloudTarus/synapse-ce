@@ -348,6 +348,20 @@ func TestOverviewGateRejectsInvalidConditionEvidence(t *testing.T) {
 	}
 }
 
+func TestOverviewGateReportsIncompleteAnalysis(t *testing.T) {
+	gate, err := overviewGate(qualitygate.Result{
+		Incomplete: true,
+		Results: []qualitygate.ConditionResult{{
+			Condition: qualitygate.Condition{Metric: qualitygate.MetricNewHigh, Op: qualitygate.OpLE, Threshold: 0},
+			Actual:    0,
+			Passed:    true,
+		}},
+	}, projectanalysis.GateInfo{Source: "managed"})
+	if err != nil || gate.Status != OverviewGateIncomplete || len(gate.FailedConditions) != 0 {
+		t.Fatalf("gate=%+v err=%v", gate, err)
+	}
+}
+
 func TestOverviewGateSources(t *testing.T) {
 	for _, source := range []string{"", "default", "repository", "managed", " managed "} {
 		t.Run(source, func(t *testing.T) {

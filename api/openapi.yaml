@@ -1293,7 +1293,7 @@ components:
 
     ProjectOverviewGateStatus:
       type: string
-      enum: [passed, failed]
+      enum: [passed, failed, incomplete]
 
     ProjectOverviewGateOperator:
       type: string

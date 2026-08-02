@@ -15,6 +15,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	qualitygatesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/qualitygates"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
@@ -299,6 +300,39 @@ func TestRecordProjectAnalysisUsesAssignedGate(t *testing.T) {
 	}
 	if list[0].GateInfo.Key != "relaxed" || list[0].GateInfo.Name != "Relaxed" || list[0].GateInfo.Source != "managed" {
 		t.Fatalf("gate info=%+v", list[0].GateInfo)
+	}
+}
+
+func TestRecordProjectAnalysisMarksTruncatedCodeQualityGateIncomplete(t *testing.T) {
+	ctx := context.Background()
+	projects := memory.NewProjectRepository()
+	engagements := memory.NewEngagementRepository()
+	analyses := memory.NewProjectAnalysisStore()
+	svc := NewService(projects, engagements, fixedClock{}, fixedIDs{}, &captureAudit{}, true)
+	svc.SetAnalysisStore(analyses)
+	svc.SetRuleCatalog(projectRuleCatalog{})
+	p, err := svc.Create(ctx, CreateInput{TenantID: "tenant", CreatedBy: "alice", Name: "Project", Key: "project", SourceBinding: project.SourceBinding{Kind: project.SourceLocal, Value: "/repo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := engagements.GetByProjectID(ctx, p.TenantID, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := &scauc.ScanResult{
+		CodeQuality: &codequality.Report{Truncated: true},
+		Gate:        qualitygate.Gate{Conditions: []qualitygate.Condition{{Metric: qualitygate.MetricNewHigh, Op: qualitygate.OpLE, Threshold: 0}}},
+	}
+	if err := svc.RecordProjectAnalysis(ctx, e.ID, "job-1", time.Unix(1, 0), result); err != nil {
+		t.Fatal(err)
+	}
+	list, _, err := analyses.List(ctx, p.TenantID, p.ID, 1, time.Time{}, "")
+	if err != nil || len(list) != 1 {
+		t.Fatalf("analysis=%+v err=%v", list, err)
+	}
+	gate := list[0].Gate
+	if gate.Passed || !gate.Incomplete || len(gate.Results) != 1 || !gate.Results[0].Passed {
+		t.Fatalf("truncated analysis gate=%+v", gate)
 	}
 }
 

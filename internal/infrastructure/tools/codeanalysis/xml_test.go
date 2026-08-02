@@ -26,7 +26,7 @@ func TestXMLBugRules(t *testing.T) {
 	}
 
 	byRuleFile := map[string]bool{}
-	for _, f := range findings {
+	for _, f := range findings.Findings {
 		byRuleFile[f.RuleID+":"+f.File] = true
 	}
 

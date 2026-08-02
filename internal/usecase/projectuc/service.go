@@ -629,6 +629,8 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 	if dupPtr != nil {
 		analysisDuplication = *dupPtr
 	}
+	analysisTruncated := result.CodeQuality != nil && result.CodeQuality.Truncated ||
+		compPtr != nil && compPtr.Truncated || dupPtr != nil && dupPtr.Truncated
 	analysisCoverage := cloneCoverageReport(result.LineCoverage)
 	if analysisCoverage != nil {
 		allowed := make(map[string]struct{})
@@ -671,7 +673,7 @@ func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared
 		SourceRevision: projectanalysis.SourceRevision{Kind: projectScanKind(p.SourceBinding.Kind), Head: result.SourceCommit, Base: comparison.BaseCommit, MergeBase: comparison.MergeBase, AnalysisID: jobID},
 		Capabilities:   capabilities, SourceManifest: manifest, Comparison: comparison, FileChanges: result.FileChanges, Annotations: annotations,
 		Findings: issues, Gate: gate, GateSource: gateSource, GateExempt: exempt, LinesOfCode: loc,
-		Coverage: analysisCoverage, Duplication: analysisDuplication, Previous: baseline,
+		Coverage: analysisCoverage, Duplication: analysisDuplication, AnalysisTruncated: analysisTruncated, Previous: baseline,
 		Hotspots: overallHsSummary, NewHotspots: newHsSummary, Snapshot: snapshot,
 	})
 	if err != nil {

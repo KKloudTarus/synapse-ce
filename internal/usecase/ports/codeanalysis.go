@@ -19,8 +19,15 @@ type CodeAnalysisRawFinding struct {
 	Line        int    // 1-based
 }
 
+// CodeAnalysisReport is deterministic source-analysis output. Truncated means an analyzer cap stopped the
+// scan, so Findings are incomplete and must not be used to claim a clean result.
+type CodeAnalysisReport struct {
+	Findings  []CodeAnalysisRawFinding
+	Truncated bool
+}
+
 // CodeAnalyzer runs deterministic maintainability/reliability rules over a local source tree. It reads the
 // tree only (never executes it) and honors context cancellation.
 type CodeAnalyzer interface {
-	Analyze(ctx context.Context, root string) ([]CodeAnalysisRawFinding, error)
+	Analyze(ctx context.Context, root string) (CodeAnalysisReport, error)
 }

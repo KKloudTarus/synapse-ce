@@ -40,6 +40,13 @@ describe('Project Overview components', () => {
     expect(screen.getByText('1 condition failed')).toBeInTheDocument()
   })
 
+  it('renders incomplete gates as inconclusive rather than failed', () => {
+    render(<QualityGateBanner gate={{ ...buildPassedGate(), status: 'incomplete' }} />)
+    expect(screen.getByText('Quality Gate Incomplete')).toBeInTheDocument()
+    expect(screen.getByText('Analysis was incomplete, so this quality gate cannot be used as a passing result.')).toBeInTheDocument()
+    expect(screen.queryByText(/conditions failed/)).not.toBeInTheDocument()
+  })
+
   it('renders issue summaries without fabricating unavailable accepted issues', () => {
     const overview = buildAnalyzedOverview()
     render(<OverviewIssueSummary summary={overview.issueSummary} />)

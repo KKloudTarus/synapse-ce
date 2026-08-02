@@ -89,6 +89,13 @@ describe('Projects API', () => {
     }
   })
 
+  it('parses an incomplete project overview gate without failed conditions', () => {
+    const raw = overviewAnalyzedWire()
+    raw.gate.status = 'incomplete'
+    raw.gate.failed_conditions = []
+    expect(mapProjectOverviewResponse(raw).gate).toMatchObject({ status: 'incomplete', failedConditions: [] })
+  })
+
   it('does not convert project overview 404 to null', async () => {
     fetchSpy.mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ error: 'not found' }) } as Response)
     await expect(api.projectOverview('missing')).rejects.toThrow('not found')
