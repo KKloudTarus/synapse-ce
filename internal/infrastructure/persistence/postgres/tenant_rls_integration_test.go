@@ -170,4 +170,19 @@ func TestTenantRLSIsolation(t *testing.T) {
 			t.Fatalf("tenant B exposed %d tenant A %s rows", count, table)
 		}
 	}
+
+	if err := WithTenantTx(ctx, runtime, shared.ID(tenantA), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO jobs (id, tenant_id, kind, payload) VALUES ($1,$2,'sca','{}')`, suffix+"-job", tenantA)
+		return err
+	}); err != nil {
+		t.Fatalf("create tenant A durable job: %v", err)
+	}
+	if err := WithTenantTx(ctx, runtime, shared.ID(tenantB), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE tenant_id=$1`, tenantA).Scan(&count)
+	}); err != nil {
+		t.Fatalf("query tenant B jobs: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("tenant B exposed %d tenant A jobs", count)
+	}
 }
