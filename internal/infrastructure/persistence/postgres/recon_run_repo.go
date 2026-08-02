@@ -75,26 +75,54 @@ func (r *ReconRunStore) ListByEngagement(ctx context.Context, engagementID share
 	return out, nil
 }
 
-// ListStaleRunning is intentionally not RLS-backed yet: the global worker
-// reconciler must first enumerate tenant work before rebinding each row.
+// ListStaleRunning enumerates tenant identities from the registry, then queries
+// each tenant's rows in an RLS-bound transaction.
 func (r *ReconRunStore) ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]recon.Run, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := r.pool.Query(ctx, `SELECT `+reconRunCols+` FROM recon_runs WHERE status='running' AND started_at < $1 ORDER BY started_at LIMIT $2`, olderThan, limit)
+	tenantRows, err := r.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
 	if err != nil {
-		return nil, fmt.Errorf("list stale recon runs: %w", err)
+		return nil, fmt.Errorf("list recon tenants: %w", err)
 	}
-	defer rows.Close()
-	out := []recon.Run{}
-	for rows.Next() {
-		run, err := scanReconRun(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan recon run: %w", err)
+	tenantIDs := []shared.ID{}
+	for tenantRows.Next() {
+		var tenant string
+		if err := tenantRows.Scan(&tenant); err != nil {
+			tenantRows.Close()
+			return nil, fmt.Errorf("scan recon tenant: %w", err)
 		}
-		out = append(out, run)
+		tenantIDs = append(tenantIDs, shared.ID(tenant))
 	}
-	return out, rows.Err()
+	if err := tenantRows.Err(); err != nil {
+		tenantRows.Close()
+		return nil, fmt.Errorf("list recon tenants: %w", err)
+	}
+	tenantRows.Close()
+	out := []recon.Run{}
+	for _, tenantID := range tenantIDs {
+		if len(out) == limit {
+			break
+		}
+		if err := WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx, `SELECT `+reconRunCols+` FROM recon_runs WHERE status='running' AND started_at < $1 ORDER BY started_at LIMIT $2`, olderThan, limit-len(out))
+			if err != nil {
+				return fmt.Errorf("list stale recon runs: %w", err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				run, err := scanReconRun(rows)
+				if err != nil {
+					return fmt.Errorf("scan recon run: %w", err)
+				}
+				out = append(out, run)
+			}
+			return rows.Err()
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func scanReconRun(row rowScanner) (recon.Run, error) {
