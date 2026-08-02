@@ -400,142 +400,104 @@ func (r *ProjectAnalysisStore) HotspotHistory(ctx context.Context, tenantID, pro
 }
 
 func (r *ProjectAnalysisStore) ListAnalysisHotspots(ctx context.Context, tenantID, projectID, analysisID shared.ID, lens hotspot.Lens, filter hotspot.ListFilter) (hotspot.Page, hotspot.Summary, error) {
-	// First compute summary
 	summary, err := r.CurrentAnalysisHotspotSummary(ctx, tenantID, projectID, analysisID, lens)
 	if err != nil {
 		return hotspot.Page{}, hotspot.Summary{}, err
 	}
-
-	// We join project_hotspots with project_analysis_hotspots.
-	// Since we need to use the mutable status for ListHotspots (as required by "Overview updates immediately after a review"),
-	// the list returns the CURRENT state of hotspots that were present in that analysis.
-	// We filter by `is_new` if lens == NewCode.
-
-	args := []any{tenantID.String(), projectID.String(), analysisID.String()}
-	parts := []string{"h.tenant_id = $1", "h.project_id = $2", "ah.analysis_id = $3"}
-	add := func(part string, value any) {
-		args = append(args, value)
-		parts = append(parts, fmt.Sprintf(part, len(args)))
-	}
-
-	if lens == hotspot.LensNewCode {
-		parts = append(parts, "ah.is_new = true")
-	}
-
-	if filter.Status != nil {
-		add("h.status = $%d", string(*filter.Status))
-	}
-	if filter.Severity != nil {
-		add("h.severity = $%d", string(*filter.Severity))
-	}
-	if filter.RuleKey != "" {
-		add("h.rule_key = $%d", filter.RuleKey)
-	}
-	if search := strings.TrimSpace(filter.Search); search != "" {
-		searchArg := len(args) + 1
-		pattern := hotspotSearchPattern(search)
-
-		args = append(args, pattern, pattern, pattern, pattern, pattern)
-		parts = append(parts, fmt.Sprintf(
-			`(h.hotspot_key ILIKE $%d OR
-			  h.rule_key ILIKE $%d OR
-			  h.title ILIKE $%d OR
-			  h.description ILIKE $%d OR
-			  h.location ILIKE $%d)`,
-			searchArg,
-			searchArg+1,
-			searchArg+2,
-			searchArg+3,
-			searchArg+4,
-		))
-	}
-
-	facetWhere := strings.Join(parts, " AND ")
-	facetArgs := append([]any(nil), args...)
-
-	if !filter.BeforeLastSeenAt.IsZero() {
-		args = append(
-			args,
-			filter.BeforeLastSeenAt,
-			filter.BeforeID.String(),
-		)
-		atArg := len(args) - 1
-		idArg := len(args)
-
-		parts = append(parts, fmt.Sprintf(
-			`(h.last_seen_at < $%d OR
-			  (h.last_seen_at = $%d AND h.id COLLATE "C" < $%d))`,
-			atArg,
-			atArg,
-			idArg,
-		))
-	}
-
-	listWhere := strings.Join(parts, " AND ")
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 25
-	}
-
-	query := `SELECT h.id, h.tenant_id, h.project_id, h.hotspot_key, h.finding_identity, h.rule_key, h.title, h.description, h.severity, h.finding_kind, h.cwe, h.location, h.source_file, h.start_line, h.end_line, h.start_column, h.end_column,
-		h.status, h.version, h.first_seen_analysis_id, h.last_seen_analysis_id, h.first_seen_at, h.last_seen_at, h.created_at, h.updated_at, h.last_reviewed_by, h.last_reviewed_at
-		FROM project_hotspots h
-		JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id
-		WHERE ` + listWhere + ` ORDER BY h.last_seen_at DESC, h.id COLLATE "C" DESC LIMIT $` + fmt.Sprint(len(args)+1)
-
-	args = append(args, limit+1)
-
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return hotspot.Page{}, hotspot.Summary{}, fmt.Errorf("list analysis hotspots: %w", err)
-	}
-	defer rows.Close()
-
-	var items []hotspot.Hotspot
-	for rows.Next() {
-		item, err := scanHotspot(rows)
-		if err != nil {
-			return hotspot.Page{}, hotspot.Summary{}, fmt.Errorf("scan analysis hotspot: %w", err)
+	var page hotspot.Page
+	err = WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		args := []any{tenantID.String(), projectID.String(), analysisID.String()}
+		parts := []string{"h.tenant_id = $1", "h.project_id = $2", "ah.analysis_id = $3"}
+		add := func(part string, value any) {
+			args = append(args, value)
+			parts = append(parts, fmt.Sprintf(part, len(args)))
 		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
+		if lens == hotspot.LensNewCode {
+			parts = append(parts, "ah.is_new = true")
+		}
+		if filter.Status != nil {
+			add("h.status = $%d", string(*filter.Status))
+		}
+		if filter.Severity != nil {
+			add("h.severity = $%d", string(*filter.Severity))
+		}
+		if filter.RuleKey != "" {
+			add("h.rule_key = $%d", filter.RuleKey)
+		}
+		if search := strings.TrimSpace(filter.Search); search != "" {
+			searchArg := len(args) + 1
+			pattern := hotspotSearchPattern(search)
+			args = append(args, pattern, pattern, pattern, pattern, pattern)
+			parts = append(parts, fmt.Sprintf(`(h.hotspot_key ILIKE $%d OR h.rule_key ILIKE $%d OR h.title ILIKE $%d OR h.description ILIKE $%d OR h.location ILIKE $%d)`, searchArg, searchArg+1, searchArg+2, searchArg+3, searchArg+4))
+		}
+		facetWhere := strings.Join(parts, " AND ")
+		facetArgs := append([]any(nil), args...)
+		if !filter.BeforeLastSeenAt.IsZero() {
+			args = append(args, filter.BeforeLastSeenAt, filter.BeforeID.String())
+			atArg, idArg := len(args)-1, len(args)
+			parts = append(parts, fmt.Sprintf(`(h.last_seen_at < $%d OR (h.last_seen_at = $%d AND h.id COLLATE "C" < $%d))`, atArg, atArg, idArg))
+		}
+		limit := filter.Limit
+		if limit <= 0 {
+			limit = 25
+		}
+		query := `SELECT h.id, h.tenant_id, h.project_id, h.hotspot_key, h.finding_identity, h.rule_key, h.title, h.description, h.severity, h.finding_kind, h.cwe, h.location, h.source_file, h.start_line, h.end_line, h.start_column, h.end_column,
+			h.status, h.version, h.first_seen_analysis_id, h.last_seen_analysis_id, h.first_seen_at, h.last_seen_at, h.created_at, h.updated_at, h.last_reviewed_by, h.last_reviewed_at
+			FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id
+			WHERE ` + strings.Join(parts, " AND ") + ` ORDER BY h.last_seen_at DESC, h.id COLLATE "C" DESC LIMIT $` + fmt.Sprint(len(args)+1)
+		args = append(args, limit+1)
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list analysis hotspots: %w", err)
+		}
+		var items []hotspot.Hotspot
+		for rows.Next() {
+			item, err := scanHotspot(rows)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("scan analysis hotspot: %w", err)
+			}
+			items = append(items, item)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		if len(items) > limit {
+			last := items[limit-1]
+			page.Next = &hotspot.Cursor{BeforeLastSeenAt: last.LastSeenAt, BeforeID: last.ID}
+			items = items[:limit]
+		}
+		page.Items = items
+		facetRows, err := tx.Query(ctx, `SELECT 'status', h.status, count(*) FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id WHERE `+facetWhere+` GROUP BY h.status
+			UNION ALL SELECT 'rule', h.rule_key, count(*) FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id WHERE `+facetWhere+` GROUP BY h.rule_key
+			UNION ALL SELECT 'severity', h.severity, count(*) FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id WHERE `+facetWhere+` GROUP BY h.severity`, facetArgs...)
+		if err != nil {
+			return fmt.Errorf("facet analysis hotspots: %w", err)
+		}
+		defer facetRows.Close()
+		page.Facets = hotspot.Facets{Statuses: map[string]int{}, RuleKeys: map[string]int{}, Severities: map[string]int{}}
+		for facetRows.Next() {
+			var kind, value string
+			var count int
+			if err := facetRows.Scan(&kind, &value, &count); err != nil {
+				return fmt.Errorf("scan analysis hotspot facet: %w", err)
+			}
+			switch kind {
+			case "status":
+				page.Facets.Statuses[value] = count
+			case "rule":
+				page.Facets.RuleKeys[value] = count
+			case "severity":
+				page.Facets.Severities[value] = count
+			}
+		}
+		return facetRows.Err()
+	})
+	if err != nil {
 		return hotspot.Page{}, hotspot.Summary{}, err
 	}
-
-	page := hotspot.Page{}
-	if len(items) > limit {
-		last := items[limit-1]
-		page.Next = &hotspot.Cursor{BeforeLastSeenAt: last.LastSeenAt, BeforeID: last.ID}
-		items = items[:limit]
-	}
-	page.Items = items
-
-	// Facets (current statuses, etc)
-	facetRows, err := r.pool.Query(ctx, `SELECT 'status', h.status, count(*) FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id WHERE `+facetWhere+` GROUP BY h.status
-		UNION ALL SELECT 'rule', h.rule_key, count(*) FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id WHERE `+facetWhere+` GROUP BY h.rule_key
-		UNION ALL SELECT 'severity', h.severity, count(*) FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id WHERE `+facetWhere+` GROUP BY h.severity`, facetArgs...)
-	if err != nil {
-		return hotspot.Page{}, hotspot.Summary{}, fmt.Errorf("facet analysis hotspots: %w", err)
-	}
-	defer facetRows.Close()
-	page.Facets = hotspot.Facets{Statuses: map[string]int{}, RuleKeys: map[string]int{}, Severities: map[string]int{}}
-	for facetRows.Next() {
-		var kind, value string
-		var count int
-		if err := facetRows.Scan(&kind, &value, &count); err != nil {
-			return hotspot.Page{}, hotspot.Summary{}, fmt.Errorf("scan analysis hotspot facet: %w", err)
-		}
-		switch kind {
-		case "status":
-			page.Facets.Statuses[value] = count
-		case "rule":
-			page.Facets.RuleKeys[value] = count
-		case "severity":
-			page.Facets.Severities[value] = count
-		}
-	}
-
 	return page, summary, nil
 }
 
