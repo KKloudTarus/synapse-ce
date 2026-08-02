@@ -13,7 +13,9 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // TestTenantRLSIsolation exercises actual PostgreSQL policies. It is opt-in so
@@ -139,6 +141,23 @@ func TestTenantRLSIsolation(t *testing.T) {
 		t.Fatalf("create tenant A agent message: %v", err)
 	}
 	for _, table := range []string{"agent_sessions", "agent_messages"} {
+		if err := WithTenantTx(ctx, runtime, shared.ID(tenantB), func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(*) FROM `+table+` WHERE tenant_id=$1`, tenantA).Scan(&count)
+		}); err != nil {
+			t.Fatalf("query tenant B %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("tenant B exposed %d tenant A %s rows", count, table)
+		}
+	}
+
+	if err := NewReconRunStore(runtime).Save(ctxA, recon.Run{ID: shared.ID(suffix + "-recon"), EngagementID: shared.ID(engagementID), Tool: "subfinder", Target: "example.test", Status: recon.StatusRunning, StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("create tenant A recon run: %v", err)
+	}
+	if err := NewScanJobStore(runtime).CreateRunning(ctxA, ports.ScanJob{ID: suffix + "-scan", EngagementID: engagementID, Target: "example.test", Kind: "local", Status: ports.ScanRunning, StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("create tenant A scan job: %v", err)
+	}
+	for _, table := range []string{"recon_runs", "scan_jobs"} {
 		if err := WithTenantTx(ctx, runtime, shared.ID(tenantB), func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx, `SELECT count(*) FROM `+table+` WHERE tenant_id=$1`, tenantA).Scan(&count)
 		}); err != nil {
