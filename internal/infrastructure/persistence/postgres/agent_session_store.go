@@ -104,36 +104,45 @@ func (s *AgentSessionStore) AppendMessage(ctx context.Context, sessionID shared.
 	if len(m.ToolCalls) > 0 {
 		toolCalls, _ = json.Marshal(m.ToolCalls)
 	}
-	_, err := s.pool.Exec(ctx, `INSERT INTO agent_messages (session_id, seq, role, content, tool_calls, tool_call_id) VALUES ($1,$2,$3,$4,$5,$6)`, sessionID.String(), seq, string(m.Role), m.Content, toolCalls, m.ToolCallID)
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return fmt.Errorf("agent message (%s, seq %d) already exists: %w", sessionID, seq, shared.ErrConflict)
+	return WithContextTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tenantID, _ := shared.TenantFrom(ctx)
+		_, err := tx.Exec(ctx, `INSERT INTO agent_messages (tenant_id, session_id, seq, role, content, tool_calls, tool_call_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`, tenantID.String(), sessionID.String(), seq, string(m.Role), m.Content, toolCalls, m.ToolCallID)
+		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return fmt.Errorf("agent message (%s, seq %d) already exists: %w", sessionID, seq, shared.ErrConflict)
+			}
+			return fmt.Errorf("append agent message: %w", err)
 		}
-		return fmt.Errorf("append agent message: %w", err)
-	}
-	return nil
+		return nil
+	})
 }
 
 func (s *AgentSessionStore) Messages(ctx context.Context, sessionID shared.ID) ([]agent.Message, error) {
-	rows, err := s.pool.Query(ctx, `SELECT role, content, tool_calls, tool_call_id FROM agent_messages WHERE session_id=$1 ORDER BY seq`, sessionID.String())
-	if err != nil {
-		return nil, fmt.Errorf("list agent messages: %w", err)
-	}
-	defer rows.Close()
 	var out []agent.Message
-	for rows.Next() {
-		var m agent.Message
-		var role string
-		var toolCalls []byte
-		if err := rows.Scan(&role, &m.Content, &toolCalls, &m.ToolCallID); err != nil {
-			return nil, fmt.Errorf("scan agent message: %w", err)
+	err := WithContextTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT role, content, tool_calls, tool_call_id FROM agent_messages WHERE session_id=$1 ORDER BY seq`, sessionID.String())
+		if err != nil {
+			return fmt.Errorf("list agent messages: %w", err)
 		}
-		m.Role = agent.Role(role)
-		if len(toolCalls) > 0 {
-			_ = json.Unmarshal(toolCalls, &m.ToolCalls)
+		defer rows.Close()
+		for rows.Next() {
+			var m agent.Message
+			var role string
+			var toolCalls []byte
+			if err := rows.Scan(&role, &m.Content, &toolCalls, &m.ToolCallID); err != nil {
+				return fmt.Errorf("scan agent message: %w", err)
+			}
+			m.Role = agent.Role(role)
+			if len(toolCalls) > 0 {
+				_ = json.Unmarshal(toolCalls, &m.ToolCalls)
+			}
+			out = append(out, m)
 		}
-		out = append(out, m)
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
