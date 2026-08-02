@@ -92,6 +92,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
+	assessmentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentuc"
+	assetuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assetuc"
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
@@ -197,6 +199,8 @@ func main() {
 	var approvalStore ports.ApprovalStore         // durable HITL approval queue
 	var planStore ports.PlanStore                 // agent execution-plan DAG
 	var decisionStore ports.DecisionStore         // structured decision log
+	var assetInventoryRepo ports.AssetInventoryRepository
+	var assessmentRepo ports.AssessmentRepository
 
 	// Credential vault cipher: a configured master key gives durable
 	// encryption; an empty key yields an ephemeral one (dev only – stored secrets won't
@@ -311,9 +315,12 @@ func main() {
 		approvalStore = postgres.NewApprovalStore(pool)
 		planStore = postgres.NewAgentPlanStore(pool)
 		decisionStore = postgres.NewAgentDecisionStore(pool)
+		assetInventoryRepo = postgres.NewAssetInventoryRepository(pool)
+		assessmentRepo = postgres.NewAssessmentRepository(pool)
 		log.Info("persistence: postgres")
 	} else {
-		repo = memory.NewEngagementRepository()
+		memoryEngagementRepo := memory.NewEngagementRepository()
+		repo = memoryEngagementRepo
 		projectRepo = memory.NewProjectRepository()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
@@ -343,6 +350,9 @@ func main() {
 		approvalStore = memory.NewApprovalStore()
 		planStore = memory.NewPlanStore()
 		decisionStore = memory.NewDecisionStore()
+		memoryAssetRepo := memory.NewAssetInventoryRepository()
+		assetInventoryRepo = memoryAssetRepo
+		assessmentRepo = memory.NewAssessmentRepository(memoryAssetRepo, memoryEngagementRepo)
 		log.Info("persistence: in-memory + file (set SYNAPSE_DB_DSN for postgres)")
 	}
 
@@ -916,6 +926,16 @@ func main() {
 		log.Error("safety gate init failed", "err", err)
 		os.Exit(1)
 	}
+	assetInventoryService, err := assetuc.New(assetInventoryRepo, clock, ids)
+	if err != nil {
+		log.Error("asset inventory service init failed", "err", err)
+		os.Exit(1)
+	}
+	assessmentService, err := assessmentuc.New(assessmentRepo, assetInventoryRepo, clock, ids)
+	if err != nil {
+		log.Error("assessment service init failed", "err", err)
+		os.Exit(1)
+	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
 	projectService.SetScanner(scaService)
 	scaService.SetProjectAnalysisRecorder(projectService)
@@ -936,6 +956,8 @@ func main() {
 	router.SetQualityGates(qualityGateService)
 	router.SetQualityProfiles(qualityProfileService)
 	router.SetExploitation(exploitationService) // evidence-gated finding verify endpoint
+	router.SetBusinessServices(assetInventoryService)
+	router.SetAssessments(assessmentService)
 	// Read-only code-quality dashboard. Server-side analysis is PURE-GO and memory-safe only (pattern
 	// rules + duplication + Go-parser inventory); tree-sitter complexity is intentionally NOT wired here
 	// so the server never runs C parsers over untrusted source (that stays a local-CLI capability).

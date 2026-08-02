@@ -8,12 +8,15 @@ import (
 	"path"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeupdraft"
+	assessmentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentuc"
+	assetuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assetuc"
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
 	credentialsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/credentials"
@@ -35,34 +38,36 @@ import (
 
 // Router wires HTTP routes to use case services.
 type Router struct {
-	log             *slog.Logger
-	auth            *Authenticator
-	eng             *enguc.Service
-	sca             *scauc.Service
-	aup             *aupuc.Service
-	findings        *findingsuc.Service
-	export          *exportuc.Service
-	report          *reportuc.Service
-	evidence        *evidenceuc.Service
-	recon           *reconuc.Service
-	logs            ports.LogStream
-	transfer        *transferuc.Service
-	audit           *audituc.Service
-	vex             *vexuc.Service
-	users           *usersuc.Service
-	credentials     *credentialsuc.Service
-	dastVerifier    runtimeVerifierService
-	dastWorkflow    dastWorkflowService
-	agent           *agentDeps            // optional; nil ⇒ agent routes are not registered
-	exploitation    findingVerifier       // optional; nil ⇒ the verify route is not registered
-	judgments       judgmentService       // optional; nil ⇒ judgment routes are not registered
-	autoVerifier    autoVerifierService   // optional; nil ⇒ the LLM auto-verify route is not registered
-	threatModels    threatModelService    // optional; nil ⇒ threat-model routes are not registered
-	drafts          writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
-	projects        projectService        // optional; nil ⇒ project routes are not registered
-	qualityGates    qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
-	qualityProfiles qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
-	rules           rulesService          // optional; nil ⇒ rule catalog routes are not registered
+	log              *slog.Logger
+	auth             *Authenticator
+	eng              *enguc.Service
+	sca              *scauc.Service
+	aup              *aupuc.Service
+	findings         *findingsuc.Service
+	export           *exportuc.Service
+	report           *reportuc.Service
+	evidence         *evidenceuc.Service
+	recon            *reconuc.Service
+	logs             ports.LogStream
+	transfer         *transferuc.Service
+	audit            *audituc.Service
+	vex              *vexuc.Service
+	users            *usersuc.Service
+	credentials      *credentialsuc.Service
+	dastVerifier     runtimeVerifierService
+	dastWorkflow     dastWorkflowService
+	agent            *agentDeps             // optional; nil ⇒ agent routes are not registered
+	exploitation     findingVerifier        // optional; nil ⇒ the verify route is not registered
+	judgments        judgmentService        // optional; nil ⇒ judgment routes are not registered
+	autoVerifier     autoVerifierService    // optional; nil ⇒ the LLM auto-verify route is not registered
+	threatModels     threatModelService     // optional; nil ⇒ threat-model routes are not registered
+	drafts           writeupDraftService    // optional; nil ⇒ writeup-draft sign-off routes are not registered
+	projects         projectService         // optional; nil ⇒ project routes are not registered
+	qualityGates     qualityGateService     // optional; nil ⇒ quality-gate routes are not registered
+	qualityProfiles  qualityProfileService  // optional; nil ⇒ quality-profile routes are not registered
+	rules            rulesService           // optional; nil ⇒ rule catalog routes are not registered
+	businessServices businessServiceService // optional; nil ⇒ Business Service routes are not registered
+	assessments      *assessmentuc.Service  // optional; nil ⇒ assessment routes are not registered
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -74,6 +79,21 @@ type findingVerifier interface {
 
 // SetExploitation wires the evidence-gated finding-verify endpoint.
 func (rt *Router) SetExploitation(v findingVerifier) { rt.exploitation = v }
+
+// businessServiceService is the complete public Business Service management slice.
+type businessServiceService interface {
+	CreateBusinessService(context.Context, assetuc.CreateBusinessServiceInput) (asset.BusinessService, error)
+	UpdateBusinessService(context.Context, shared.ID, assetuc.UpdateBusinessServiceInput) (asset.BusinessService, error)
+	GetBusinessService(context.Context, shared.ID) (asset.BusinessService, error)
+	ListBusinessServices(context.Context) ([]asset.BusinessService, error)
+	DeleteBusinessService(context.Context, shared.ID) error
+}
+
+// SetBusinessServices wires tenant-scoped AppSec Business Service management routes.
+func (rt *Router) SetBusinessServices(s businessServiceService) { rt.businessServices = s }
+
+// SetAssessments wires nested Assessment routes.
+func (rt *Router) SetAssessments(s *assessmentuc.Service) { rt.assessments = s }
 
 // judgmentService is the narrow slice of the analysis use-case the HTTP layer needs: list
 // the engagement's AI judgments (read) and apply a distinct-verifier verdict / human acceptance.
@@ -218,6 +238,18 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/quality-profiles/{key}/deactivate", rt.authz(userdom.PermOperate, rt.deactivateProfileRule))
 		mux.HandleFunc("POST /api/v1/quality-profiles/{key}/severity", rt.authz(userdom.PermOperate, rt.setProfileRuleSeverity))
 		mux.HandleFunc("DELETE /api/v1/quality-profiles/{key}", rt.authz(userdom.PermOperate, rt.deleteQualityProfile))
+	}
+	if rt.businessServices != nil {
+		mux.HandleFunc("POST /api/v1/appsec/business-services", rt.authz(userdom.PermOperate, rt.createBusinessService))
+		mux.HandleFunc("GET /api/v1/appsec/business-services", rt.authz(userdom.PermView, rt.listBusinessServices))
+		mux.HandleFunc("GET /api/v1/appsec/business-services/{id}", rt.authz(userdom.PermView, rt.getBusinessService))
+		mux.HandleFunc("PUT /api/v1/appsec/business-services/{id}", rt.authz(userdom.PermOperate, rt.updateBusinessService))
+		mux.HandleFunc("DELETE /api/v1/appsec/business-services/{id}", rt.authz(userdom.PermOperate, rt.deleteBusinessService))
+	}
+	if rt.assessments != nil {
+		mux.HandleFunc("POST /api/v1/appsec/business-services/{sid}/assessments", rt.authz(userdom.PermOperate, rt.createAssessment))
+		mux.HandleFunc("GET /api/v1/appsec/business-services/{sid}/assessments", rt.authz(userdom.PermView, rt.listAssessments))
+		mux.HandleFunc("GET /api/v1/appsec/business-services/{sid}/assessments/{id}", rt.authz(userdom.PermView, rt.getAssessment))
 	}
 	if rt.projects != nil {
 		mux.HandleFunc("POST /api/v1/projects", rt.authz(userdom.PermOperate, rt.createProject))

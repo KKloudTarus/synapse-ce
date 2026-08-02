@@ -881,6 +881,100 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/appsec/business-services:
+    get:
+      tags: [appsec]
+      summary: List tenant-scoped business services
+      operationId: listAppSecBusinessServices
+      responses:
+        '200':
+          description: Business services
+          content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AppSecBusinessService'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [appsec]
+      summary: Create a business service
+      operationId: createAppSecBusinessService
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateAppSecBusinessServiceRequest'}}}}
+      responses:
+        '201': {description: Business service created, content: {application/json: {schema: {$ref: '#/components/schemas/AppSecBusinessService'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/appsec/business-services/{id}:
+    get:
+      tags: [appsec]
+      summary: Get a business service
+      operationId: getAppSecBusinessService
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Business service, content: {application/json: {schema: {$ref: '#/components/schemas/AppSecBusinessService'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    put:
+      tags: [appsec]
+      summary: Fully replace a business service
+      operationId: updateAppSecBusinessService
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/UpdateAppSecBusinessServiceRequest'}}}}
+      responses:
+        '200': {description: Business service updated, content: {application/json: {schema: {$ref: '#/components/schemas/AppSecBusinessService'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Business service name conflict}
+    delete:
+      tags: [appsec]
+      summary: Delete an empty business service
+      operationId: deleteAppSecBusinessService
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses:
+        '204': {description: Business service deleted}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Business Service has Assessments}
+  /api/v1/appsec/business-services/{sid}/assessments:
+    get:
+      tags: [appsec]
+      summary: List assessments for a business service
+      operationId: listAppSecAssessments
+      parameters: [{name: sid, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Assessments, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AppSecAssessment'}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    post:
+      tags: [appsec]
+      summary: Atomically create an assessment and required engagement children
+      operationId: createAppSecAssessment
+      parameters: [{name: sid, in: path, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateAppSecAssessmentRequest'}}}}
+      responses:
+        '201': {description: Assessment created, content: {application/json: {schema: {$ref: '#/components/schemas/AppSecAssessment'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Assessment name conflict}
+  /api/v1/appsec/business-services/{sid}/assessments/{id}:
+    get:
+      tags: [appsec]
+      summary: Get an assessment beneath its business service
+      operationId: getAppSecAssessment
+      parameters:
+      - {name: sid, in: path, required: true, schema: {type: string}}
+      - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Assessment, content: {application/json: {schema: {$ref: '#/components/schemas/AppSecAssessment'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -949,6 +1043,65 @@ components:
       type: object
       properties:
         error: {type: string}
+    AppSecBusinessService:
+      type: object
+      required: [id, name, criticality, lifecycle]
+      properties:
+        id: {type: string}
+        name: {type: string, maxLength: 256}
+        description: {type: string, maxLength: 4000}
+        criticality: {type: string, enum: [low, medium, high, critical]}
+        lifecycle: {type: string, enum: [planned, active, retired]}
+    CreateAppSecBusinessServiceRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, maxLength: 256}
+        description: {type: string, maxLength: 4000}
+        criticality: {type: string, enum: [low, medium, high, critical], default: medium}
+        lifecycle: {type: string, enum: [planned, active, retired], default: planned}
+    UpdateAppSecBusinessServiceRequest:
+      type: object
+      required: [name, criticality, lifecycle]
+      properties:
+        name: {type: string, maxLength: 256}
+        description: {type: string, maxLength: 4000}
+        criticality: {type: string, enum: [low, medium, high, critical]}
+        lifecycle: {type: string, enum: [planned, active, retired]}
+    AppSecAssessmentPolicy:
+      type: object
+      properties:
+        cadence: {type: string, maxLength: 128}
+        release: {type: string, maxLength: 256}
+        environment: {type: string, maxLength: 128}
+    AppSecAssessment:
+      type: object
+      required: [id, business_service_id, name, objective, status, policy]
+      properties:
+        id: {type: string}
+        business_service_id: {type: string}
+        name: {type: string, maxLength: 256}
+        objective: {type: string, maxLength: 4000}
+        status: {type: string, enum: [draft, active, closed]}
+        policy: {$ref: '#/components/schemas/AppSecAssessmentPolicy'}
+    CreateAppSecEngagementRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, maxLength: 256}
+        client: {type: string, maxLength: 256}
+    CreateAppSecAssessmentRequest:
+      type: object
+      required: [name, engagements]
+      properties:
+        name: {type: string, maxLength: 256}
+        objective: {type: string, maxLength: 4000}
+        policy: {$ref: '#/components/schemas/AppSecAssessmentPolicy'}
+        engagements:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items: {$ref: '#/components/schemas/CreateAppSecEngagementRequest'}
 
     ProjectCodeCapability:
       type: object

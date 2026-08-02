@@ -250,3 +250,39 @@ func TestOpenAPI_StrictValidation(t *testing.T) {
 		})
 	})
 }
+
+func TestOpenAPI_AppSecManagementContract(t *testing.T) {
+	b, err := os.ReadFile("openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec map[string]any
+	if err := yaml.Unmarshal(b, &spec); err != nil {
+		t.Fatal(err)
+	}
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		t.Fatal("paths is not a mapping")
+	}
+	required := map[string][]string{
+		"/api/v1/appsec/business-services": {"get", "post"},
+		"/api/v1/appsec/business-services/{id}": {"get", "put", "delete"},
+		"/api/v1/appsec/business-services/{sid}/assessments": {"get", "post"},
+		"/api/v1/appsec/business-services/{sid}/assessments/{id}": {"get"},
+	}
+	for path, methods := range required {
+		item, ok := paths[path].(map[string]any)
+		if !ok {
+			t.Errorf("missing path %s", path)
+			continue
+		}
+		for _, method := range methods {
+			if _, ok := item[method]; !ok {
+				t.Errorf("missing %s %s", method, path)
+			}
+		}
+	}
+	if _, exists := paths["/api/v1/appsec/assets"]; exists {
+		t.Error("public asset inventory path must be absent")
+	}
+}
