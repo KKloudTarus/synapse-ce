@@ -50,34 +50,64 @@ func (q *JobQueue) Enqueue(ctx context.Context, kind string, payload []byte) (st
 }
 
 func (q *JobQueue) Claim(ctx context.Context, visibility time.Duration, kinds ...string) (*ports.QueuedJob, error) {
-	// Optional kind filter: only claim the kinds this worker handles (empty = any).
-	kindFilter, args := "", []any{visibility.Seconds()}
-	if len(kinds) > 0 {
-		kindFilter = " AND kind = ANY($2)"
-		args = append(args, kinds)
-	}
-	var j ports.QueuedJob
-	err := q.pool.QueryRow(ctx,
-		`UPDATE jobs SET status='claimed', attempts=attempts+1,
-		        claimed_until = now() + make_interval(secs => $1), updated_at = now()
-		 WHERE id = (
-		     SELECT id FROM jobs
-		     WHERE status <> 'done'
-		       AND available_at <= now()
-		       AND (status = 'queued' OR claimed_until < now())`+kindFilter+`
-		     ORDER BY available_at
-		     FOR UPDATE SKIP LOCKED
-		     LIMIT 1
-		 )
-		 RETURNING id, tenant_id, kind, payload, attempts`,
-		args...).Scan(&j.ID, &j.TenantID, &j.Kind, &j.Payload, &j.Attempts)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil // nothing ready
-	}
+	tenantRows, err := q.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
 	if err != nil {
-		return nil, fmt.Errorf("claim job: %w", err)
+		return nil, fmt.Errorf("list queue tenants: %w", err)
 	}
-	return &j, nil
+	tenantIDs := []shared.ID{}
+	for tenantRows.Next() {
+		var tenant string
+		if err := tenantRows.Scan(&tenant); err != nil {
+			tenantRows.Close()
+			return nil, fmt.Errorf("scan queue tenant: %w", err)
+		}
+		tenantIDs = append(tenantIDs, shared.ID(tenant))
+	}
+	if err := tenantRows.Err(); err != nil {
+		tenantRows.Close()
+		return nil, fmt.Errorf("list queue tenants: %w", err)
+	}
+	tenantRows.Close()
+	for _, tenantID := range tenantIDs {
+		var job *ports.QueuedJob
+		err := WithTenantTx(ctx, q.pool, tenantID, func(tx pgx.Tx) error {
+			kindFilter, args := "", []any{visibility.Seconds()}
+			if len(kinds) > 0 {
+				kindFilter = " AND kind = ANY($2)"
+				args = append(args, kinds)
+			}
+			var claimed ports.QueuedJob
+			err := tx.QueryRow(ctx,
+				`UPDATE jobs SET status='claimed', attempts=attempts+1,
+				        claimed_until = now() + make_interval(secs => $1), updated_at = now()
+				 WHERE id = (
+				     SELECT id FROM jobs
+				     WHERE status <> 'done'
+				       AND available_at <= now()
+				       AND (status = 'queued' OR claimed_until < now())`+kindFilter+`
+				     ORDER BY available_at
+				     FOR UPDATE SKIP LOCKED
+				     LIMIT 1
+				 )
+				 RETURNING id, tenant_id, kind, payload, attempts`,
+				args...).Scan(&claimed.ID, &claimed.TenantID, &claimed.Kind, &claimed.Payload, &claimed.Attempts)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("claim job: %w", err)
+			}
+			job = &claimed
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if job != nil {
+			return job, nil
+		}
+	}
+	return nil, nil
 }
 
 func (q *JobQueue) Heartbeat(ctx context.Context, id string, extend time.Duration) error {
