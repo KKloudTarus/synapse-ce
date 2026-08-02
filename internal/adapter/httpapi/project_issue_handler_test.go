@@ -1,10 +1,14 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/issue"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
@@ -45,5 +49,33 @@ func TestProjectIssueListParams(t *testing.T) {
 				t.Fatalf("want ErrValidation, got %v", err)
 			}
 		})
+	}
+}
+
+type projectIssueServiceStub struct {
+	projectService
+	getErr error
+	tenant shared.ID
+}
+
+func (s *projectIssueServiceStub) GetIssue(_ context.Context, tenantID shared.ID, _ string, _ shared.ID) (issue.Issue, error) {
+	s.tenant = tenantID
+	return issue.Issue{}, s.getErr
+}
+
+func TestGetProjectIssueMapsCrossTenantToNotFound(t *testing.T) {
+	stub := &projectIssueServiceStub{getErr: fmt.Errorf("cross-tenant: %w", shared.ErrNotFound)}
+	rt := &Router{log: discardLog(), projects: stub}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/p/issues/id", nil)
+	req.SetPathValue("key", "p")
+	req.SetPathValue("id", "id")
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "bob", TenantID: "tenant-b"}))
+	rec := httptest.NewRecorder()
+	rt.getProjectIssue(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("cross-tenant code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if stub.tenant != "tenant-b" {
+		t.Fatalf("tenant=%q, want tenant-b", stub.tenant)
 	}
 }
