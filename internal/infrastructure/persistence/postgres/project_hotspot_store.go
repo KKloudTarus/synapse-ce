@@ -540,35 +540,31 @@ func (r *ProjectAnalysisStore) ListAnalysisHotspots(ctx context.Context, tenantI
 }
 
 func (r *ProjectAnalysisStore) CurrentAnalysisHotspotSummary(ctx context.Context, tenantID, projectID, analysisID shared.ID, lens hotspot.Lens) (hotspot.Summary, error) {
-	// Query current statuses of hotspots that were in the analysis
-	q := `SELECT h.status FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id WHERE h.tenant_id=$1 AND h.project_id=$2 AND ah.analysis_id=$3`
-	if lens == hotspot.LensNewCode {
-		q += ` AND ah.is_new = true`
-	}
-
-	rows, err := r.pool.Query(ctx, q, tenantID.String(), projectID.String(), analysisID.String())
+	var total, reviewed int
+	err := WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		q := `SELECT h.status FROM project_hotspots h JOIN project_analysis_hotspots ah ON h.id = ah.hotspot_id WHERE h.tenant_id=$1 AND h.project_id=$2 AND ah.analysis_id=$3`
+		if lens == hotspot.LensNewCode {
+			q += ` AND ah.is_new = true`
+		}
+		rows, err := tx.Query(ctx, q, tenantID.String(), projectID.String(), analysisID.String())
+		if err != nil {
+			return fmt.Errorf("query analysis hotspot summary: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var status string
+			if err := rows.Scan(&status); err != nil {
+				return err
+			}
+			total++
+			if hotspot.Status(status).Reviewed() {
+				reviewed++
+			}
+		}
+		return rows.Err()
+	})
 	if err != nil {
-		return hotspot.Summary{}, fmt.Errorf("query analysis hotspot summary: %w", err)
-	}
-	defer rows.Close()
-
-	total := 0
-	reviewed := 0
-
-	for rows.Next() {
-		var status string
-		if err := rows.Scan(&status); err != nil {
-			return hotspot.Summary{}, err
-		}
-		total++
-		if hotspot.Status(status).Reviewed() {
-			reviewed++
-		}
-	}
-
-	if err := rows.Err(); err != nil {
 		return hotspot.Summary{}, err
 	}
-
 	return hotspot.NewSummary(total, reviewed)
 }
