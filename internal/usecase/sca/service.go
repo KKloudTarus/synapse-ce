@@ -1316,18 +1316,19 @@ func (s *Service) SweepStaleScans(ctx context.Context, staleFor time.Duration) (
 	}
 	n := 0
 	for _, job := range stale {
-		release, ok, lerr := s.runLock.TryLock(ctx, job.ID)
+		tenantCtx := shared.WithTenant(ctx, job.TenantID)
+		release, ok, lerr := s.runLock.TryLock(tenantCtx, job.ID)
 		if lerr != nil || !ok {
 			continue // can't acquire or a live owner holds it → leave for next pass
 		}
-		if fresh, gerr := s.jobs.GetJob(ctx, job.ID); gerr == nil && (fresh.Status == ports.ScanSucceeded || fresh.Status == ports.ScanFailed) {
+		if fresh, gerr := s.jobs.GetJob(tenantCtx, job.ID); gerr == nil && (fresh.Status == ports.ScanSucceeded || fresh.Status == ports.ScanFailed) {
 			release()
 			continue
 		}
 		fin := s.clock.Now()
 		job.FinishedAt, job.Progress = &fin, 100
 		job.Status, job.Stage, job.Error = ports.ScanFailed, "swept", "scan stranded running past staleFor with no live owner – reclaimed by sweeper"
-		_ = s.jobs.Save(ctx, job)
+		_ = s.jobs.Save(tenantCtx, job)
 		release()
 		n++
 	}

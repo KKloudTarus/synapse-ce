@@ -28,9 +28,13 @@ func (r *ScanJobStore) CreateRunning(ctx context.Context, j ports.ScanJob) error
 	if err != nil {
 		return fmt.Errorf("marshal scan job debug events: %w", err)
 	}
-	_, err = r.pool.Exec(ctx, `INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents)
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return fmt.Errorf("create scan job: %w", shared.ErrValidation)
+	}
+	_, err = r.pool.Exec(ctx, `INSERT INTO scan_jobs (id, tenant_id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		j.ID, tenantID.String(), j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -47,13 +51,17 @@ func (r *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
 	if err != nil {
 		return fmt.Errorf("marshal scan job debug events: %w", err)
 	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return fmt.Errorf("save scan job: %w", shared.ErrValidation)
+	}
 	_, err = r.pool.Exec(ctx,
-		`INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		`INSERT INTO scan_jobs (id, tenant_id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		 ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, stage=EXCLUDED.stage,
 		     progress=EXCLUDED.progress, error=EXCLUDED.error, finished_at=EXCLUDED.finished_at,
 		     debug_events=EXCLUDED.debug_events`,
-		j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents)
+		j.ID, tenantID.String(), j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents)
 	if err != nil {
 		return fmt.Errorf("save scan job: %w", err)
 	}
@@ -67,7 +75,7 @@ func (r *ScanJobStore) ListStaleRunning(ctx context.Context, olderThan time.Time
 		limit = 100
 	}
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events
+		`SELECT id, tenant_id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events
 		 FROM scan_jobs WHERE status='running' AND started_at < $1 ORDER BY started_at LIMIT $2`,
 		olderThan, limit)
 	if err != nil {
@@ -78,14 +86,16 @@ func (r *ScanJobStore) ListStaleRunning(ctx context.Context, olderThan time.Time
 	for rows.Next() {
 		var (
 			j        ports.ScanJob
+			tenant   string
 			status   string
 			finished *time.Time
 		)
 		var debugEvents []byte
-		if err := rows.Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents); err != nil {
+		if err := rows.Scan(&j.ID, &tenant, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents); err != nil {
 			return nil, fmt.Errorf("scan scan job: %w", err)
 		}
 		j.Status = ports.ScanStatus(status)
+		j.TenantID = shared.ID(tenant)
 		j.FinishedAt = finished
 		if err := decodeScanDebugEvents(debugEvents, &j); err != nil {
 			return nil, err
@@ -99,14 +109,15 @@ func (r *ScanJobStore) ListStaleRunning(ctx context.Context, olderThan time.Time
 func (r *ScanJobStore) GetJob(ctx context.Context, id string) (ports.ScanJob, error) {
 	var (
 		j           ports.ScanJob
+		tenant      string
 		status      string
 		finished    *time.Time
 		debugEvents []byte
 	)
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events
+		`SELECT id, tenant_id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events
 		 FROM scan_jobs WHERE id=$1`, id).
-		Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents)
+		Scan(&j.ID, &tenant, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ports.ScanJob{}, fmt.Errorf("scan job %s: %w", id, shared.ErrNotFound)
 	}
@@ -114,6 +125,7 @@ func (r *ScanJobStore) GetJob(ctx context.Context, id string) (ports.ScanJob, er
 		return ports.ScanJob{}, fmt.Errorf("load scan job: %w", err)
 	}
 	j.Status = ports.ScanStatus(status)
+	j.TenantID = shared.ID(tenant)
 	j.FinishedAt = finished
 	if err := decodeScanDebugEvents(debugEvents, &j); err != nil {
 		return ports.ScanJob{}, err
