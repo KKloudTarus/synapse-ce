@@ -369,31 +369,32 @@ func (r *ProjectAnalysisStore) TransitionHotspot(ctx context.Context, cmd hotspo
 }
 
 func (r *ProjectAnalysisStore) HotspotHistory(ctx context.Context, tenantID, projectID, hotspotID shared.ID) ([]hotspot.ReviewEvent, error) {
-	rows, err := r.pool.Query(ctx, `SELECT id, tenant_id, project_id, hotspot_id, from_status, to_status, actor, rationale, previous_version, version, created_at
-		FROM project_hotspot_review_events 
-		WHERE tenant_id=$1 AND project_id=$2 AND hotspot_id=$3 
-		ORDER BY version DESC, id COLLATE "C" DESC`, tenantID.String(), projectID.String(), hotspotID.String())
-	if err != nil {
-		return nil, fmt.Errorf("query review events: %w", err)
-	}
-	defer rows.Close()
-
 	var events []hotspot.ReviewEvent
-	for rows.Next() {
-		var e hotspot.ReviewEvent
-		var id, tID, pID, hID, from, to string
-		if err := rows.Scan(&id, &tID, &pID, &hID, &from, &to, &e.Actor, &e.Rationale, &e.PreviousVersion, &e.Version, &e.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan review event: %w", err)
+	err := WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id, tenant_id, project_id, hotspot_id, from_status, to_status, actor, rationale, previous_version, version, created_at
+			FROM project_hotspot_review_events
+			WHERE tenant_id=$1 AND project_id=$2 AND hotspot_id=$3
+			ORDER BY version DESC, id COLLATE "C" DESC`, tenantID.String(), projectID.String(), hotspotID.String())
+		if err != nil {
+			return fmt.Errorf("query review events: %w", err)
 		}
-		e.ID = shared.ID(id)
-		e.TenantID = shared.ID(tID)
-		e.ProjectID = shared.ID(pID)
-		e.HotspotID = shared.ID(hID)
-		e.From = hotspot.Status(from)
-		e.To = hotspot.Status(to)
-		events = append(events, e)
+		defer rows.Close()
+		for rows.Next() {
+			var e hotspot.ReviewEvent
+			var id, tID, pID, hID, from, to string
+			if err := rows.Scan(&id, &tID, &pID, &hID, &from, &to, &e.Actor, &e.Rationale, &e.PreviousVersion, &e.Version, &e.CreatedAt); err != nil {
+				return fmt.Errorf("scan review event: %w", err)
+			}
+			e.ID, e.TenantID, e.ProjectID, e.HotspotID = shared.ID(id), shared.ID(tID), shared.ID(pID), shared.ID(hID)
+			e.From, e.To = hotspot.Status(from), hotspot.Status(to)
+			events = append(events, e)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return events, rows.Err()
+	return events, nil
 }
 
 func (r *ProjectAnalysisStore) ListAnalysisHotspots(ctx context.Context, tenantID, projectID, analysisID shared.ID, lens hotspot.Lens, filter hotspot.ListFilter) (hotspot.Page, hotspot.Summary, error) {

@@ -348,27 +348,32 @@ func (r *ProjectAnalysisStore) TransitionIssue(ctx context.Context, cmd issue.Tr
 }
 
 func (r *ProjectAnalysisStore) IssueHistory(ctx context.Context, tenantID, projectID, issueID shared.ID) ([]issue.ReviewEvent, error) {
-	rows, err := r.pool.Query(ctx, `SELECT id, tenant_id, project_id, issue_id, from_status, to_status, actor, rationale, previous_version, version, created_at
-		FROM project_issue_review_events
-		WHERE tenant_id=$1 AND project_id=$2 AND issue_id=$3
-		ORDER BY version DESC, id COLLATE "C" DESC`, tenantID.String(), projectID.String(), issueID.String())
-	if err != nil {
-		return nil, fmt.Errorf("query issue review events: %w", err)
-	}
-	defer rows.Close()
-
 	var events []issue.ReviewEvent
-	for rows.Next() {
-		var e issue.ReviewEvent
-		var id, tID, pID, iID, from, to string
-		if err := rows.Scan(&id, &tID, &pID, &iID, &from, &to, &e.Actor, &e.Rationale, &e.PreviousVersion, &e.Version, &e.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan issue review event: %w", err)
+	err := WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id, tenant_id, project_id, issue_id, from_status, to_status, actor, rationale, previous_version, version, created_at
+			FROM project_issue_review_events
+			WHERE tenant_id=$1 AND project_id=$2 AND issue_id=$3
+			ORDER BY version DESC, id COLLATE "C" DESC`, tenantID.String(), projectID.String(), issueID.String())
+		if err != nil {
+			return fmt.Errorf("query issue review events: %w", err)
 		}
-		e.ID, e.TenantID, e.ProjectID, e.IssueID = shared.ID(id), shared.ID(tID), shared.ID(pID), shared.ID(iID)
-		e.From, e.To = issue.Status(from), issue.Status(to)
-		events = append(events, e)
+		defer rows.Close()
+		for rows.Next() {
+			var e issue.ReviewEvent
+			var id, tID, pID, iID, from, to string
+			if err := rows.Scan(&id, &tID, &pID, &iID, &from, &to, &e.Actor, &e.Rationale, &e.PreviousVersion, &e.Version, &e.CreatedAt); err != nil {
+				return fmt.Errorf("scan issue review event: %w", err)
+			}
+			e.ID, e.TenantID, e.ProjectID, e.IssueID = shared.ID(id), shared.ID(tID), shared.ID(pID), shared.ID(iID)
+			e.From, e.To = issue.Status(from), issue.Status(to)
+			events = append(events, e)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return events, rows.Err()
+	return events, nil
 }
 
 func sourceLocationFields(location *finding.SourceLocation) (any, any, any, any, any) {
