@@ -16,12 +16,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// AgentSessionStore is the durable ports.AgentSessionStore on PostgreSQL:
-// agent_sessions + agent_messages (migration 0027). The (session_id, seq) primary key is
-// the transcript fork-guard – a duplicate seq is a unique violation → ErrConflict.
 type AgentSessionStore struct{ pool *pgxpool.Pool }
 
-// NewAgentSessionStore returns a Postgres-backed agent session store.
 func NewAgentSessionStore(pool *pgxpool.Pool) *AgentSessionStore {
 	return &AgentSessionStore{pool: pool}
 }
@@ -34,14 +30,7 @@ func (s *AgentSessionStore) SaveSession(ctx context.Context, e agent.Session) er
 		return fmt.Errorf("save agent session: %w", shared.ErrValidation)
 	}
 	return WithTenantTx(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx,
-			`INSERT INTO agent_sessions
-			   (id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-			 ON CONFLICT (id) DO UPDATE SET
-			   status=$9, steps=$10, tokens_used=$11, token_budget_max=$12, updated_at=$14`,
-			e.ID.String(), tenantID.String(), e.EngagementID.String(), e.InitiatedBy, e.Goal, e.Model, e.ProviderBase, e.PromptHash,
-			string(e.Status), e.Steps, e.TokensUsed, e.TokenBudgetMax, e.CreatedAt, e.UpdatedAt)
+		_, err := tx.Exec(ctx, `INSERT INTO agent_sessions (id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (id) DO UPDATE SET status=$9, steps=$10, tokens_used=$11, token_budget_max=$12, updated_at=$14`, e.ID.String(), tenantID.String(), e.EngagementID.String(), e.InitiatedBy, e.Goal, e.Model, e.ProviderBase, e.PromptHash, string(e.Status), e.Steps, e.TokensUsed, e.TokenBudgetMax, e.CreatedAt, e.UpdatedAt)
 		if err != nil {
 			return fmt.Errorf("save agent session: %w", err)
 		}
@@ -50,26 +39,27 @@ func (s *AgentSessionStore) SaveSession(ctx context.Context, e agent.Session) er
 }
 
 func (s *AgentSessionStore) GetSession(ctx context.Context, id shared.ID) (agent.Session, error) {
-	var e agent.Session
-	var status string
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at
-		 FROM agent_sessions WHERE id=$1`, id.String()).
-		Scan(&e.ID, &e.TenantID, &e.EngagementID, &e.InitiatedBy, &e.Goal, &e.Model, &e.ProviderBase, &e.PromptHash, &status, &e.Steps, &e.TokensUsed, &e.TokenBudgetMax, &e.CreatedAt, &e.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return agent.Session{}, fmt.Errorf("agent session %s: %w", id, shared.ErrNotFound)
-	}
+	var out agent.Session
+	err := WithContextTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var status string
+		err := tx.QueryRow(ctx, `SELECT id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at FROM agent_sessions WHERE id=$1`, id.String()).Scan(&out.ID, &out.TenantID, &out.EngagementID, &out.InitiatedBy, &out.Goal, &out.Model, &out.ProviderBase, &out.PromptHash, &status, &out.Steps, &out.TokensUsed, &out.TokenBudgetMax, &out.CreatedAt, &out.UpdatedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("agent session %s: %w", id, shared.ErrNotFound)
+		}
+		if err != nil {
+			return fmt.Errorf("get agent session: %w", err)
+		}
+		out.Status = agent.Status(status)
+		return nil
+	})
 	if err != nil {
-		return agent.Session{}, fmt.Errorf("get agent session: %w", err)
+		return agent.Session{}, err
 	}
-	e.Status = agent.Status(status)
-	return e, nil
+	return out, nil
 }
 
 func (s *AgentSessionStore) ListByEngagement(ctx context.Context, engagementID shared.ID) ([]agent.Session, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at
-		 FROM agent_sessions WHERE engagement_id=$1 ORDER BY created_at`, engagementID.String())
+	rows, err := s.pool.Query(ctx, `SELECT id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at FROM agent_sessions WHERE engagement_id=$1 ORDER BY created_at`, engagementID.String())
 	if err != nil {
 		return nil, fmt.Errorf("list agent sessions: %w", err)
 	}
@@ -91,10 +81,7 @@ func (s *AgentSessionStore) ListResumable(ctx context.Context, staleFor time.Dur
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at
-		 FROM agent_sessions WHERE status IN ('running','awaiting_approval') AND updated_at < $1
-		 ORDER BY updated_at LIMIT $2`, now.Add(-staleFor), limit)
+	rows, err := s.pool.Query(ctx, `SELECT id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at FROM agent_sessions WHERE status IN ('running','awaiting_approval') AND updated_at < $1 ORDER BY updated_at LIMIT $2`, now.Add(-staleFor), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list resumable sessions: %w", err)
 	}
