@@ -275,15 +275,22 @@ func hotspotWhere(tenantID, projectID shared.ID, filter hotspot.ListFilter, curs
 	return strings.Join(parts, " AND "), args, joins
 }
 func (r *ProjectAnalysisStore) GetHotspot(ctx context.Context, tenantID, projectID, hotspotID shared.ID) (hotspot.Hotspot, error) {
-	row := r.pool.QueryRow(ctx, `SELECT id, tenant_id, project_id, hotspot_key, finding_identity, rule_key, title, description, severity, finding_kind, cwe, location, source_file, start_line, end_line, start_column, end_column,
-		status, version, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at
-		FROM project_hotspots WHERE tenant_id=$1 AND project_id=$2 AND id=$3`, tenantID.String(), projectID.String(), hotspotID.String())
-	item, err := scanHotspot(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return hotspot.Hotspot{}, shared.ErrNotFound
-	}
+	var item hotspot.Hotspot
+	err := WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		var err error
+		item, err = scanHotspot(tx.QueryRow(ctx, `SELECT id, tenant_id, project_id, hotspot_key, finding_identity, rule_key, title, description, severity, finding_kind, cwe, location, source_file, start_line, end_line, start_column, end_column,
+			status, version, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at
+			FROM project_hotspots WHERE tenant_id=$1 AND project_id=$2 AND id=$3`, tenantID.String(), projectID.String(), hotspotID.String()))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("get project hotspot: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return hotspot.Hotspot{}, fmt.Errorf("get project hotspot: %w", err)
+		return hotspot.Hotspot{}, err
 	}
 	return item, nil
 }

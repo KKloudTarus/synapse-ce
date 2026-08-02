@@ -257,15 +257,22 @@ func issueWhere(tenantID, projectID shared.ID, filter issue.ListFilter, cursor b
 }
 
 func (r *ProjectAnalysisStore) GetIssue(ctx context.Context, tenantID, projectID, issueID shared.ID) (issue.Issue, error) {
-	row := r.pool.QueryRow(ctx, `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location, source_file, start_line, end_line, start_column, end_column,
-		status, version, is_new, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at
-		FROM project_issues WHERE tenant_id=$1 AND project_id=$2 AND id=$3`, tenantID.String(), projectID.String(), issueID.String())
-	item, err := scanIssue(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return issue.Issue{}, shared.ErrNotFound
-	}
+	var item issue.Issue
+	err := WithTenantTx(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		var err error
+		item, err = scanIssue(tx.QueryRow(ctx, `SELECT id, tenant_id, project_id, issue_key, finding_identity, rule_key, issue_type, title, description, severity, finding_kind, cwe, language, file, location, source_file, start_line, end_line, start_column, end_column,
+			status, version, is_new, first_seen_analysis_id, last_seen_analysis_id, first_seen_at, last_seen_at, created_at, updated_at, last_reviewed_by, last_reviewed_at
+			FROM project_issues WHERE tenant_id=$1 AND project_id=$2 AND id=$3`, tenantID.String(), projectID.String(), issueID.String()))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("get project issue: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return issue.Issue{}, fmt.Errorf("get project issue: %w", err)
+		return issue.Issue{}, err
 	}
 	return item, nil
 }
