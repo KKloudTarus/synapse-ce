@@ -48,10 +48,9 @@ type Critique struct {
 	Err             error
 }
 
-// SuspectedFP reports whether this critique refutes the finding with at least minConfidence — the only
-// condition under which the caller exempts it from the gate. When a distinct verifier was required
-// (VerifyAttempted), BOTH the proposer and the verifier must refute at/above the bar; a verifier that
-// disagreed, was inconclusive, or failed to respond keeps the finding gating (conservative, fail-safe).
+// SuspectedFP reports the AI's advisory false-positive opinion. When a distinct verifier was attempted,
+// BOTH models must refute at/above the bar. In single-model mode it can still return true for visibility,
+// but the scan's deterministic policy never grants a gate exemption unless VerifiedConsensus is true.
 func (c Critique) SuspectedFP(minConfidence int) bool {
 	if c.Err != nil {
 		return false
@@ -64,6 +63,15 @@ func (c Critique) SuspectedFP(minConfidence int) bool {
 		return true // single-model mode: no distinct verifier configured
 	}
 	return c.Verifier != nil && c.Verifier.Verdict == judgment.CritiqueRefuted && c.Verifier.Confidence >= minConfidence
+}
+
+// VerifiedConsensus reports whether two distinct configured model IDs independently refuted the finding
+// at/above the confidence bar. This is necessary, but not sufficient, for a gate exemption: the scan policy
+// also applies severity/kind/CWE floors that force dangerous classes to human review.
+func (c Critique) VerifiedConsensus(minConfidence int) bool {
+	return c.Err == nil && c.VerifyAttempted && c.Verifier != nil &&
+		c.Claim.Verdict == judgment.CritiqueRefuted && c.Claim.Confidence >= minConfidence &&
+		c.Verifier.Verdict == judgment.CritiqueRefuted && c.Verifier.Confidence >= minConfidence
 }
 
 // Coordinator critiques findings through an LLM proposer, and (when configured) a DISTINCT verifier.
@@ -96,10 +104,9 @@ func (c *Coordinator) WithMinConfidence(n int) *Coordinator {
 	return c
 }
 
-// WithVerifier attaches a DISTINCT verifier model: after the proposer refutes a finding at/above the
-// bar, the verifier independently re-assesses and the refutation only stands (exempts the gate) if the
-// verifier agrees — mirroring the judgment gate's distinct-verifier rule in the stateless CLI. A no-op
-// if llm is nil or the verifier model equals the proposer model (not a distinct verifier).
+// WithVerifier attaches a DISTINCT verifier model. Agreement creates VerifiedConsensus, which the
+// scan policy may authorize only after applying severity/kind/CWE human-review floors. A no-op if llm
+// is nil or the verifier model equals the proposer model (not a distinct verifier).
 func (c *Coordinator) WithVerifier(llm ports.LLM, model string) *Coordinator {
 	model = strings.TrimSpace(model)
 	if llm != nil && model != "" && model != c.model {
@@ -111,6 +118,9 @@ func (c *Coordinator) WithVerifier(llm ports.LLM, model string) *Coordinator {
 
 // VerifierModel returns the distinct verifier model in effect, or "" when single-model.
 func (c *Coordinator) VerifierModel() string { return c.verifierModel }
+
+// ProposerModel returns the configured proposer model ID for audit metadata.
+func (c *Coordinator) ProposerModel() string { return c.model }
 
 // MinConfidence is the confidence bar in effect.
 func (c *Coordinator) MinConfidence() int { return c.minConf }

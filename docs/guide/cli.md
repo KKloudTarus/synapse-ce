@@ -79,15 +79,15 @@ stays in the report, it is only held back from the `--fail-on` gate).
    (`SYNAPSE_LLM_BASE_URL`, `SYNAPSE_LLM_API_KEY`, and `SYNAPSE_FP_TRIAGE_MODEL` or `SYNAPSE_LLM_MODEL`).
    After the deterministic pass, the model adjudicates the remaining production-scope first-party source
    findings (SAST/secret/misconfig) and returns a typed verdict — `refuted` (suspected false positive),
-   `sound`, or `uncertain` — with a confidence. The model only proposes: a `refuted` verdict at or above
-   the confidence bar marks the finding a suspected false positive and holds it back from the gate; it is
-   still reported (see `ai_triage` in `--json`) and sealed, never deleted, and an `uncertain` verdict
-   keeps the finding gating. Best-effort: if the model can't be reached the scan proceeds unchanged.
+   `sound`, or `uncertain` — with a confidence. The proposer only advises: single-model output can never
+   change the gate. Set `SYNAPSE_VERIFIER_MODEL` to a **different** model to enable consensus. A finding is
+   gate-exempt only when both models independently refute it at/above the bar and the deterministic
+   human-review floor permits it. High/critical findings, secrets, and dangerous injection/auth/access-
+   control/SSRF/traversal/upload/deserialization CWEs always stay gating.
 
-   For a stricter, hallucination-resistant gate, set `SYNAPSE_VERIFIER_MODEL` to a **different** model:
-   a refutation then only exempts the gate if that distinct verifier independently agrees (two-model
-   consensus — a single model cannot flip the gate on its own). `ai_triage` entries confirmed this way
-   carry `"verified": true`.
+   Every finding remains in JSON/SARIF/compliance. The `ai_triage` JSON separates `suspected_fp`,
+   `verified`, `gate_exempt`, and `review_required`, and carries model/prompt/policy metadata. These
+   fields are sealed into the scan evidence hash-chain. Model or verifier failure leaves the gate unchanged.
 
 ```bash
 export SYNAPSE_LLM_BASE_URL=http://localhost:8081/v1
@@ -96,12 +96,9 @@ SYNAPSE_FP_TRIAGE_ENABLED=true SYNAPSE_FP_TRIAGE_MODEL=<model> \
   synapse-cli scan . --fail-on high --json
 ```
 
-The AI critique reads the target's own source into the prompt, so treat it as a trusted-local convenience:
-on a scan of an **untrusted PR**, a contributor could add a comment that tries to talk the model into
-refuting their finding. The blast radius is bounded — the finding is still reported and in the SARIF/JSON
-(only the `--fail-on` exit code is affected), the model only proposes (a gate exemption, never a sealed
-suppression or a deletion), and the run prints how many findings were held back — but for gating untrusted
-PRs, upload the SARIF to code-scanning (which shows every finding) and treat the AI verdict as advisory.
+The AI critique reads the target's own source into the prompt, so an **untrusted PR** can still try prompt
+injection through comments or strings. Distinct consensus and the human-review floor bound the risk, and
+the finding always remains in SARIF/JSON, but treat AI triage as advisory for untrusted contributor code.
 
 ## Container image (Docker)
 

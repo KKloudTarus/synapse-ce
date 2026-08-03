@@ -80,6 +80,9 @@ Most of these ship ON by default (safe, best-effort). See [Features](features.md
 | --- | --- | --- |
 | `SYNAPSE_SECRET_SCAN_ENABLED` | `true` | Secret scanning over the workspace (regex plus entropy). Matches are redacted; the raw secret never reaches logs, evidence, or the report. |
 | `SYNAPSE_MISCONFIG_ENABLED` | `true` | Misconfiguration and IaC scanning of Dockerfiles and Kubernetes manifests. |
+| `SYNAPSE_FP_TRIAGE_ENABLED` | `false` | Enable advisory LLM false-positive analysis over production-scope SAST/secret/misconfig findings. A proposer alone never changes a gate. |
+| `SYNAPSE_FP_TRIAGE_MODEL` | `SYNAPSE_LLM_MODEL` | Proposer model for false-positive analysis. |
+| `SYNAPSE_VERIFIER_MODEL` | `SYNAPSE_LLM_MODEL` | Must name a different model for AI gate exemptions. Two-model consensus is still subject to high/critical, secret, and dangerous-CWE human-review floors. |
 | `SYNAPSE_DETECTION_PRIORITY` | `comprehensive` | `comprehensive` reports every match. `precise` quarantines single-source, non-KEV findings into a needs-verify queue that is still reported and sealed but exempt from the `--fail-on` gate. |
 | `SYNAPSE_OFFLINE` | `false` | Skip the live advisory source and detect with the offline database only. |
 | `SYNAPSE_IGNORE_UNFIXED` | `false` | Drop vulnerabilities that have no fixed version. |
