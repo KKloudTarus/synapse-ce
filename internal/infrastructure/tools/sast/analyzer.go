@@ -21,10 +21,12 @@ import (
 )
 
 const (
-	maxFileBytes     = 1 << 20 // skip files larger than 1 MiB (generated/data, not hand-written source)
-	maxNotebookBytes = 16 << 20
-	maxLineBytes     = 4096 // skip minified/blob lines
-	maxFindings      = 500  // cap total hits so a hostile/huge tree can't flood the report
+	maxFileBytes           = 1 << 20 // skip files larger than 1 MiB (generated/data, not hand-written source)
+	maxNotebookBytes       = 16 << 20
+	maxSourceFiles         = 100_000  // cap retained source units; each notebook code cell is one unit
+	maxRetainedSourceBytes = 64 << 20 // cap source held for cross-file context analysis
+	maxLineBytes           = 4096     // skip minified/blob lines
+	maxFindings            = 500      // cap total hits so a hostile/huge tree can't flood the report
 )
 
 // skipDirs are heavy vendored/build trees never worth scanning for first-party weaknesses.
@@ -58,10 +60,23 @@ func (a *Analyzer) Name() string { return "synapse-pattern-sast" }
 // AnalyzeSource walks root and returns deterministic SAST findings, oldest-path first. It honors ctx
 // cancellation and never aborts the whole scan on a single unreadable file.
 func (a *Analyzer) AnalyzeSource(ctx context.Context, root string) ([]ports.SASTRawFinding, error) {
+	return a.analyzeSource(ctx, root, maxSourceFiles, maxRetainedSourceBytes)
+}
+
+func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int, maxBytes int64) ([]ports.SASTRawFinding, error) {
 	if root == "" {
 		return nil, nil
 	}
 	var files []sourceFile
+	var retainedBytes int64
+	appendFile := func(file sourceFile, bytes int64) bool {
+		if len(files) >= maxFiles || bytes > maxBytes-retainedBytes {
+			return false
+		}
+		files = append(files, file)
+		retainedBytes += bytes
+		return true
+	}
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries; don't abort the engagement's scan
@@ -100,8 +115,11 @@ func (a *Analyzer) AnalyzeSource(ctx context.Context, root string) ([]ports.SAST
 			}
 			if strings.EqualFold(doc.KernelLanguage, "python") {
 				for _, cell := range doc.Cells {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
 					if cell.Type == "code" {
-						files = append(files, sourceFile{Path: path, Rel: notebook.Location(rel, cell.Index), Lines: strings.Split(cell.Source, "\n"), Ext: ".py"})
+						appendFile(sourceFile{Path: path, Rel: notebook.Location(rel, cell.Index), Lines: strings.Split(cell.Source, "\n"), Ext: ".py"}, int64(len(cell.Source)))
 					}
 				}
 			}
@@ -111,27 +129,41 @@ func (a *Analyzer) AnalyzeSource(ctx context.Context, root string) ([]ports.SAST
 		if len(lines) == 0 {
 			return nil
 		}
-		files = append(files, sourceFile{Path: path, Rel: rel, Lines: lines, Ext: sastSourceExt(path)})
+		appendFile(sourceFile{Path: path, Rel: rel, Lines: lines, Ext: sastSourceExt(path)}, sourceLinesBytes(lines))
 		return nil
 	})
 	if walkErr != nil {
 		return nil, walkErr // only ctx cancellation reaches here (fs.SkipDir is swallowed)
 	}
 
-	project := buildProjectContext(files)
-	var out []ports.SASTRawFinding
+	project, err := buildProjectContext(ctx, files)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ports.SASTRawFinding, 0, maxFindings)
 	for _, file := range files {
-		for _, h := range a.scanLines(file.Rel, file.Ext, file.Lines, project) {
-			if len(out) >= maxFindings {
-				break
-			}
-			out = append(out, h)
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		if len(out) >= maxFindings {
+		if err := a.scanLines(ctx, file.Rel, file.Ext, file.Lines, project, &out, maxFindings); err != nil {
+			return nil, err
+		}
+		if len(out) == maxFindings {
 			break
 		}
 	}
-	return out, nil
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return dedupeFindings(out), nil
+}
+
+func sourceLinesBytes(lines []string) int64 {
+	var total int64
+	for _, line := range lines {
+		total += int64(len(line) + 1)
+	}
+	return total
 }
 
 // readSourceLines reads one file (bounded, binary-skipping) and returns source lines.
@@ -166,17 +198,26 @@ func readSourceLines(path string) []string {
 	return lines
 }
 
-// scanLines applies rules to an already-read source file.
-func (a *Analyzer) scanLines(rel, ext string, lines []string, project projectContext) []ports.SASTRawFinding {
-	var hits []ports.SASTRawFinding
+// scanLines applies rules to an already-read source file without exceeding the shared finding budget.
+func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []string, project projectContext, out *[]ports.SASTRawFinding, limit int) error {
 	var scalaLex scalaLexState
 	var rubyLex rubyLexState
 	var rubyERBLex rubyERBLexState
 	for i, text := range lines {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if len(*out) == limit {
+			return nil
+		}
+		if len(text) > maxLineBytes {
+			continue // minified/blob line; do not lex it
+		}
 		line := i + 1
 		matchText := text
 		isScala := scalaExts[ext]
 		isRuby := rubyExts[ext]
+		isVB := vbExts[ext]
 		if isScala {
 			matchText = scalaLex.codeOnly(text)
 		} else if isRuby {
@@ -185,11 +226,13 @@ func (a *Analyzer) scanLines(rel, ext string, lines []string, project projectCon
 			} else {
 				matchText = rubyLex.codeOnly(text)
 			}
-		}
-		if len(text) > maxLineBytes {
-			continue // minified/blob line
+		} else if isVB {
+			matchText = vbCodeOnly(text)
 		}
 		for ri := range a.rules {
+			if len(*out) == limit {
+				return nil
+			}
 			r := &a.rules[ri]
 			if !r.appliesTo(ext) {
 				continue // language-gated rule on a non-matching file type
@@ -200,27 +243,38 @@ func (a *Analyzer) scanLines(rel, ext string, lines []string, project projectCon
 			if ktExts[ext] && kotlinRuleOwnsGeneric(r.id, a, ext, text) {
 				continue
 			}
+			if r.id == "vb:empty-catch" || r.id == "vb:idisposable-not-disposed" {
+				continue // bounded VB passes own these block-sensitive rules
+			}
 			var matched bool
-			if isScala && strings.HasPrefix(r.id, "scala:") {
+			switch {
+			case isScala && strings.HasPrefix(r.id, "scala:"):
 				matched = scalaRuleMatches(r, text, matchText)
-			} else if isRuby && strings.HasPrefix(r.id, "rb:") {
+			case isRuby && strings.HasPrefix(r.id, "rb:"):
 				matched = rubyRuleMatches(r, text, matchText)
-			} else {
+			case isVB && strings.HasPrefix(r.id, "vb:"):
+				matched = vbRuleMatches(r, text, matchText)
+			case isVB:
+				matched = vbGenericRuleMatches(r, text, matchText)
+			default:
 				matched = r.re.MatchString(text) && !r.skip(text)
 			}
-			if matched {
-				h := ports.SASTRawFinding{
-					File: rel, Line: line, RuleID: r.id, CWE: r.cwe,
-					Severity: r.severity, Title: r.title, Description: r.desc,
-					RuleType: string(r.ruleType()), RuleQuality: string(r.ruleQuality()),
-				}
-				enrichAppSecContext(&h, lines, line, rel, project)
-				hits = append(hits, h)
+			if !matched {
+				continue
 			}
+			h := ports.SASTRawFinding{
+				File: rel, Line: line, RuleID: r.id, CWE: r.cwe,
+				Severity: r.severity, Title: r.title, Description: r.desc,
+				RuleType: string(r.ruleType()), RuleQuality: string(r.ruleQuality()),
+			}
+			enrichAppSecContext(&h, lines, line, rel, project)
+			*out = append(*out, h)
 		}
 	}
-	hits = append(hits, a.contextualFindings(rel, ext, lines, project)...)
-	return dedupeFindings(hits)
+	if err := a.contextualFindings(ctx, rel, ext, lines, project, out, limit); err != nil {
+		return err
+	}
+	return a.vbContextualFindings(ctx, rel, ext, lines, project, out, limit)
 }
 
 func (a *Analyzer) matchesRule(id, ext, text string) bool {
@@ -249,9 +303,14 @@ func kotlinRuleOwnsGeneric(generic string, a *Analyzer, ext, text string) bool {
 	return false
 }
 
-func (a *Analyzer) contextualFindings(rel, ext string, lines []string, project projectContext) []ports.SASTRawFinding {
-	var hits []ports.SASTRawFinding
+func (a *Analyzer) contextualFindings(ctx context.Context, rel, ext string, lines []string, project projectContext, out *[]ports.SASTRawFinding, limit int) error {
 	for i := 0; i < len(lines); i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if len(*out) == limit {
+			return nil
+		}
 		line := i + 1
 		text := lines[i]
 		if len(text) > maxLineBytes || commentOnlyLine(text) {
@@ -266,16 +325,16 @@ func (a *Analyzer) contextualFindings(rel, ext string, lines []string, project p
 		case looksLikePrismaObjectByID(lowerBlock):
 			if h, ok := a.findingFromRule(rel, ext, line, "possible-idor-prisma-id-only", lines, project); ok {
 				calibrateContextBlockFinding(&h, block, line)
-				hits = append(hits, h)
+				*out = append(*out, h)
 			}
 		case looksLikeMassAssignment(lowerBlock):
 			if h, ok := a.findingFromRule(rel, ext, line, "mass-assignment-request-body", lines, project); ok {
 				calibrateContextBlockFinding(&h, block, line)
-				hits = append(hits, h)
+				*out = append(*out, h)
 			}
 		}
 	}
-	return dedupeFindings(hits)
+	return nil
 }
 
 func contextualStartLine(line string) bool {
@@ -368,6 +427,9 @@ func boundedStatementBlock(lines []string, start, maxLines int) string {
 	started := false
 	for i := start; i < end; i++ {
 		line := lines[i]
+		if len(line) > maxLineBytes {
+			continue
+		}
 		out = append(out, line)
 		for _, ch := range line {
 			switch ch {
@@ -417,7 +479,7 @@ func dedupeFindings(in []ports.SASTRawFinding) []ports.SASTRawFinding {
 	seen := map[string]bool{}
 	out := make([]ports.SASTRawFinding, 0, len(in))
 	for _, h := range in {
-		key := h.File + "\x00" + h.RuleID + "\x00" + h.CWE + "\x00" + h.Route + "\x00" + h.Sink
+		key := h.File + "\x00" + strconv.Itoa(h.Line) + "\x00" + h.RuleID + "\x00" + h.CWE + "\x00" + h.Route + "\x00" + h.Sink
 		if seen[key] {
 			continue
 		}

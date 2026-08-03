@@ -215,6 +215,7 @@ func TestMetadata_ApprovedLanguage(t *testing.T) {
 		"HTML":                   true,
 		"Text":                   true,
 		"Swift":                  true,
+		"VB.NET":                 true,
 	}
 
 	for _, r := range rules {

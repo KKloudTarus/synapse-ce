@@ -1,6 +1,7 @@
 package sast
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -78,19 +79,41 @@ var sanitizerTokens = []string{
 	"parseint", "number(", "uuid.validate", "isuuid",
 }
 
-func buildProjectContext(files []sourceFile) projectContext {
-	ctx := projectContext{
+func buildProjectContext(ctx context.Context, files []sourceFile) (projectContext, error) {
+	project := projectContext{
 		Files:     make([]projectFile, 0, len(files)),
 		Summaries: map[string]functionSummary{},
 	}
 	for _, f := range files {
-		ctx.Files = append(ctx.Files, projectFile{Rel: f.Rel, Lines: f.Lines})
-		for name, summary := range summarizeLocalFunctions(f.Lines, 1, len(f.Lines)) {
+		if err := ctx.Err(); err != nil {
+			return projectContext{}, err
+		}
+		lines := sourceContextLines(f.Lines)
+		project.Files = append(project.Files, projectFile{Rel: f.Rel, Lines: lines})
+		for name, summary := range summarizeLocalFunctions(lines, 1, len(lines)) {
 			summary.File = f.Rel
-			ctx.Summaries[name] = summary
+			project.Summaries[name] = summary
 		}
 	}
-	return ctx
+	return project, nil
+}
+
+func sourceContextLines(lines []string) []string {
+	for i, line := range lines {
+		if len(line) > maxLineBytes {
+			if lines == nil {
+				return nil
+			}
+			out := append([]string(nil), lines...)
+			for j := i; j < len(out); j++ {
+				if len(out[j]) > maxLineBytes {
+					out[j] = ""
+				}
+			}
+			return out
+		}
+	}
+	return lines
 }
 
 func enrichAppSecContext(h *ports.SASTRawFinding, lines []string, line int, rel string, project projectContext) {

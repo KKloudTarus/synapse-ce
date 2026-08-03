@@ -25,7 +25,7 @@ func TestKotlinPatternCorpusRunsThroughAnalyzer(t *testing.T) {
 		if catalogRule.Language != "Kotlin" || catalogRule.Detection != domainrule.DetectionPattern {
 			continue
 		}
-		engineRule := kotlinPatternRule(analyzer, string(catalogRule.Key))
+		engineRule := patternRule(analyzer, string(catalogRule.Key))
 		if engineRule == nil {
 			t.Errorf("%s missing from pattern analyzer", catalogRule.Key)
 			continue
@@ -58,7 +58,7 @@ func TestKotlinPatternCorpusRunsThroughAnalyzer(t *testing.T) {
 	}
 }
 
-func kotlinPatternRule(analyzer *Analyzer, id string) *rule {
+func patternRule(analyzer *Analyzer, id string) *rule {
 	for i := range analyzer.rules {
 		if analyzer.rules[i].id == id {
 			return &analyzer.rules[i]

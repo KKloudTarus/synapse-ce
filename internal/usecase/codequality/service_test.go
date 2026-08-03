@@ -309,6 +309,11 @@ func TestIsTestPath(t *testing.T) {
 		"a/__tests__/b.js":                  true,
 		"Bar.kt":                            false,
 		"BarTest.kt":                        true,
+		"Parser.vb":                         false,
+		"ParserTest.vb":                     true,
+		"ParserTests.vb":                    true,
+		"ParserTest.VB":                     true,
+		"ParserTests.vB":                    true,
 		// Production files that must NOT be misclassified (the substring-match FP class).
 		"src/main/java/com/x/Latest.java":   false,
 		"src/main/java/com/x/Contest.java":  false,

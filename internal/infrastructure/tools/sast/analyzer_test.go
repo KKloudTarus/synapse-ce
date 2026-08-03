@@ -64,6 +64,70 @@ func TestAnalyzerFindsAndSkips(t *testing.T) {
 	}
 }
 
+func TestAnalyzeSourceAcquisitionLimits(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "a.go", "import \"crypto/md5\"\n")
+	writeFile(t, root, "b.go", "import \"crypto/md5\"\n")
+	findings, err := New().analyzeSource(context.Background(), root, 1, maxRetainedSourceBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].File != "a.go" {
+		t.Fatalf("file limit findings = %+v, want only a.go", findings)
+	}
+
+	findings, err = New().analyzeSource(context.Background(), root, maxSourceFiles, int64(len("import \"crypto/md5\"\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].File != "a.go" {
+		t.Fatalf("byte limit findings = %+v, want only a.go", findings)
+	}
+}
+
+func TestAnalyzeSourceAcquisitionLimitsCountNotebookCells(t *testing.T) {
+	root := t.TempDir()
+	data := `{"metadata":{"kernelspec":{"name":"python3","language":"python"}},"cells":[{"cell_type":"code","source":"hashlib.md5(a)"},{"cell_type":"code","source":"hashlib.md5(b)"}]}`
+	writeFile(t, root, "security.ipynb", data)
+	findings, err := New().analyzeSource(context.Background(), root, 1, maxRetainedSourceBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) == 0 || findings[0].File != "security.ipynb#cell-1" {
+		t.Fatalf("notebook cell limit findings = %+v, want findings only from cell 1", findings)
+	}
+	for _, finding := range findings {
+		if finding.File != "security.ipynb#cell-1" {
+			t.Fatalf("notebook cell limit retained %s, want only cell 1", finding.File)
+		}
+	}
+
+	findings, err = New().analyzeSource(context.Background(), root, maxSourceFiles, int64(len("hashlib.md5(a)")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) == 0 || findings[0].File != "security.ipynb#cell-1" {
+		t.Fatalf("notebook byte limit findings = %+v, want findings only from cell 1", findings)
+	}
+	for _, finding := range findings {
+		if finding.File != "security.ipynb#cell-1" {
+			t.Fatalf("notebook byte limit retained %s, want only cell 1", finding.File)
+		}
+	}
+}
+
+func TestDedupeFindingsKeepsDistinctLines(t *testing.T) {
+	in := []ports.SASTRawFinding{
+		{File: "sample.vb", Line: 4, RuleID: "vb:option-strict-off", CWE: "CWE-000"},
+		{File: "sample.vb", Line: 7, RuleID: "vb:option-strict-off", CWE: "CWE-000"},
+		{File: "sample.vb", Line: 4, RuleID: "vb:option-strict-off", CWE: "CWE-000"},
+	}
+	got := dedupeFindings(in)
+	if len(got) != 2 || got[0].Line != 4 || got[1].Line != 7 {
+		t.Fatalf("dedupeFindings() = %+v, want distinct findings on lines 4 and 7", got)
+	}
+}
+
 func TestDebugModeDetection(t *testing.T) {
 	root := t.TempDir()
 	// positives – a literal debug=true (Django/generic), Flask app.run(debug=True), Gin debug mode.
@@ -427,7 +491,10 @@ func TestKotlinSpecializedRulesOwnGenericMatches(t *testing.T) {
 		{`val digest = MessageDigest.getInstance("MD5")`, "kotlin-weak-hash"},
 		{`statement.execute("SELECT * FROM users WHERE id=" + id)`, "kotlin-sql-concat"},
 	} {
-		hits := a.scanLines("Main.kt", ".kt", []string{tc.line}, projectContext{})
+		var hits []ports.SASTRawFinding
+		if err := a.scanLines(context.Background(), "Main.kt", ".kt", []string{tc.line}, projectContext{}, &hits, maxFindings); err != nil {
+			t.Fatal(err)
+		}
 		seen := map[string]bool{}
 		for _, hit := range hits {
 			seen[hit.RuleID] = true

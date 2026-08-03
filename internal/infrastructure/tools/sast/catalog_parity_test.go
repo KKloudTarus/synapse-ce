@@ -80,6 +80,8 @@ func TestCatalogParity(t *testing.T) {
 			expectedLang = "Kotlin"
 		case tc.exts != nil && tc.exts[".rb"]:
 			expectedLang = "Ruby" // rubyExts (Ruby/Rails)
+		case tc.exts != nil && tc.exts[".vb"]:
+			expectedLang = "VB.NET"
 		case explicitSASTLanguages[tc.id] != "":
 			expectedLang = explicitSASTLanguages[tc.id]
 		default:

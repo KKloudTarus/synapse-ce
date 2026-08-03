@@ -275,10 +275,14 @@ func isTestPath(p string) bool {
 	// CamelCase suffix conventions (JUnit/Kotlin/C#/Scala). Matched case-sensitively on the ORIGINAL
 	// basename so a capital T distinguishes FooTest.java from production files like Latest.java/Contest.java.
 	obase := filepath.Base(slash)
-	for _, suf := range []string{"Test.java", "Tests.java", "Test.kt", "Tests.kt", "Test.cs", "Tests.cs", "Spec.scala"} {
+	for _, suf := range []string{"Test.java", "Tests.java", "Test.kt", "Tests.kt", "Test.cs", "Tests.cs", "Test.vb", "Tests.vb", "Spec.scala"} {
 		if strings.HasSuffix(obase, suf) {
 			return true
 		}
+	}
+	baseNoExt := strings.TrimSuffix(obase, filepath.Ext(obase))
+	if strings.EqualFold(filepath.Ext(obase), ".vb") && (strings.HasSuffix(baseNoExt, "Test") || strings.HasSuffix(baseNoExt, "Tests")) {
+		return true
 	}
 	return false
 }

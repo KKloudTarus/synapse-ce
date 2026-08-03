@@ -117,10 +117,11 @@ The sidecar parses, via bundled tree-sitter grammars, **Python, JavaScript, Java
 Ruby, PHP, Scala, Swift, Kotlin, CSS, and HTML** (registered in `internal/infrastructure/tools/astwalk`;
 each grammar's function/complexity node types are verified by `parse_langs_cgo_test.go`). go-enry
 supplies line counts for many more. A language whose grammar is registered is ready for AST rule
-authoring — only **VB.NET** still lacks a bundled grammar (author its rules as token/line patterns, or
-reuse the C# .NET rule *concepts*). Structured-config languages (Docker, CloudFormation, Terraform,
-Kubernetes, Azure Resource Manager) use the misconfig analyzer, and XML/Secrets/Text use token/parse —
-none needs a grammar. The matrix below records each language's parser status.
+authoring. **VB.NET** ships 140 deterministic pattern rules for `.vb` files but has no bundled grammar;
+where relevant, C#/.NET concepts are re-authored for VB syntax. Structured-config languages (Docker,
+CloudFormation, Terraform, Kubernetes, Azure Resource Manager) use the misconfig analyzer, and
+XML/Secrets/Text use token/parse — none needs a grammar. The matrix below records each language's parser
+status.
 
 ## Authoring workflow
 
