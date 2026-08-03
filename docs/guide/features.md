@@ -120,6 +120,11 @@ with a lifecycle of propose, verify, confirm. Gated capabilities promote only on
 verifier's sealed verdict above the evidence threshold. Ungated ones need a human accept. The
 agent can never confirm its own claim, and no model ever sits in the report path.
 
+False-positive triage keeps the opinion/authorization boundary explicit: a single model can mark a
+finding `suspected_fp` but cannot affect a gate. A distinct verifier must agree, then a deterministic
+policy keeps high/critical, secret, and dangerous-CWE findings in human review. The full typed decision
+and model/prompt/policy metadata are sealed into the scan evidence chain.
+
 Capabilities include reachability proposals, pattern SAST, a taint engine over the call graph,
 threat modeling over an architecture seam, AI critique and risk narrative, and human-gated
 write-up drafts.

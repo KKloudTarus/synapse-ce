@@ -202,8 +202,9 @@ func (s *Service) SetIncludeTestSecrets(v bool) { s.includeTestSecrets = v }
 
 // SetFPTriage injects the optional LLM false-positive triager. When set, the pipeline critiques the
 // production-scope first-party source findings after they are built and records the advisory verdicts on
-// ScanResult.AITriage; a suspected-FP is retain-and-mark (gate-exempt via SuspectedFPKeys, still
-// reported + sealed). Best-effort; nil = no triage.
+// ScanResult.AITriage. The deterministic AI gate policy separately decides whether a verified consensus
+// clears the human-review floor; a suspected-FP opinion alone has no gate authority. Best-effort; nil =
+// no triage.
 func (s *Service) SetFPTriage(t ports.FPTriager) { s.fpTriager = t }
 
 // SetOSPackageCataloger configures optional owned OS-package cataloging (dpkg/apk) from a materialized image
@@ -566,11 +567,10 @@ type ScanResult struct {
 	// producer + pinned advisory/DB snapshot ⇒ same digest. Excludes timestamps + per-run metadata.
 	ReproDigest string                 `json:"repro_digest"`
 	DebugEvents []ports.ScanDebugEvent `json:"debug_events"`
-	// AITriage holds an optional LLM false-positive critique of first-party source findings (opt-in,
-	// best-effort). Each entry is the model's PROPOSED verdict; a suspected-FP entry is retain-and-mark
-	// (the finding stays reported here and sealed, it is only held back from the CI gate), never a
-	// deletion. Populated by the injected ports.FPTriager for BOTH the CLI and the durable API scan job;
-	// empty unless the FP-triage gate ran.
+	// AITriage holds optional LLM false-positive critiques plus the deterministic policy decision for each
+	// finding. SuspectedFP is advisory; only GateExempt=true may affect a CI/project gate, and that requires
+	// distinct-model consensus plus clearance of the high-risk human-review floor. Findings are never
+	// deleted. The complete array is sealed into the scan evidence link.
 	AITriage []ports.AICritique `json:"ai_triage,omitempty"`
 	// SourceCapture is analysis-owned source availability metadata. Content is held by
 	// ProjectSourceArtifactStore, never embedded in this scan result.
@@ -581,9 +581,8 @@ type ScanResult struct {
 	FileChanges []projectanalysis.FileChange `json:"file_changes,omitempty"`
 }
 
-// SuspectedFPKeys returns the set of finding DedupKeys the AI triage marked as suspected false positives
-// (retain-and-mark). A --fail-on gate exempts these (still reported + sealed), the same way it exempts
-// accepted-risk and needs-verify findings.
+// SuspectedFPKeys returns advisory model opinions. Consumers MUST NOT use this set to authorize a gate
+// exemption; use AIGateExemptKeys, whose values have passed the deterministic P0 policy.
 func (r *ScanResult) SuspectedFPKeys() map[string]bool {
 	out := map[string]bool{}
 	for _, c := range r.AITriage {
@@ -594,10 +593,46 @@ func (r *ScanResult) SuspectedFPKeys() map[string]bool {
 	return out
 }
 
+// AIGateExemptKeys returns only AI critiques that the server-owned policy authorized to affect a gate.
+func (r *ScanResult) AIGateExemptKeys() map[string]bool {
+	out := map[string]bool{}
+	findings := make(map[string]finding.Finding, len(r.Findings))
+	for _, item := range r.Findings {
+		if key := strings.TrimSpace(item.DedupKey); key != "" {
+			findings[key] = item
+		}
+	}
+	for _, c := range r.AITriage {
+		key := strings.TrimSpace(c.DedupKey)
+		item, found := findings[key]
+		if c.GateExempt &&
+			c.PolicyVersion == aiTriagePolicyVersion &&
+			c.PolicyReason == aiPolicyVerifiedConsensus &&
+			hasVerifiedConsensus(c) &&
+			found && humanReviewFloor(item) == "" {
+			out[key] = true
+		}
+	}
+	return out
+}
+
+// AIReviewRequiredKeys returns suspected false positives held in the human-review floor.
+func (r *ScanResult) AIReviewRequiredKeys() map[string]bool {
+	out := map[string]bool{}
+	for _, c := range r.AITriage {
+		if c.ReviewRequired {
+			if key := strings.TrimSpace(c.DedupKey); key != "" {
+				out[key] = true
+			}
+		}
+	}
+	return out
+}
+
 // GateExemptKeys returns retain-and-mark findings excluded from a Project quality gate.
 func (r *ScanResult) GateExemptKeys(items []finding.Finding) map[string]bool {
 	exempt := map[string]bool{}
-	for _, keys := range []map[string]bool{r.SuppressedKeys(), r.NeedsVerifyKeys(), r.SuspectedFPKeys()} {
+	for _, keys := range []map[string]bool{r.SuppressedKeys(), r.NeedsVerifyKeys(), r.AIGateExemptKeys()} {
 		for key := range keys {
 			if key = strings.TrimSpace(key); key != "" {
 				exempt[key] = true
@@ -2297,14 +2332,21 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 	}
 	// AI false-positive triage (opt-in, best-effort, PROPOSE-ONLY). After the deterministic pass, the
-	// injected triager critiques the remaining production-scope first-party source findings and records
-	// advisory verdicts on AITriage; a suspected-FP is retain-and-mark (held back from the gate via
-	// SuspectedFPKeys, still reported + sealed). Runs for BOTH the CLI and the durable API scan job.
+	// injected triager critiques production-scope first-party findings. The server-owned policy then
+	// separates advisory suspected-FP opinions from verified, low-risk gate exemptions. Single-model,
+	// high/critical, secret, and dangerous-CWE refutations stay gating for human review.
 	if s.fpTriager != nil {
 		if cands := fpTriageCandidates(result.Findings); len(cands) > 0 {
 			tstep := trace.start(stageFindings, "ai-fp-triage", "fp-triager", "AI false-positive triage", map[string]int{"candidates": len(cands)})
 			result.AITriage = s.fpTriager.Triage(ctx, cands, ws.Dir)
-			trace.succeed(tstep, "AI false-positive triage", map[string]int{"candidates": len(cands), "critiqued": len(result.AITriage), "suspected_fp": len(result.SuspectedFPKeys())})
+			applyAIGatePolicy(result)
+			trace.succeed(tstep, "AI false-positive triage", map[string]int{
+				"candidates":      len(cands),
+				"critiqued":       len(result.AITriage),
+				"suspected_fp":    len(result.SuspectedFPKeys()),
+				"gate_exempt":     len(result.AIGateExemptKeys()),
+				"review_required": len(result.AIReviewRequiredKeys()),
+			})
 		}
 	}
 	result.MinSeverity = s.minSeverity
@@ -2885,14 +2927,21 @@ func isPinnedVersion(v string) bool {
 // job.Error – a second layer beyond the acquirer's own redaction.
 var credInErr = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@`)
 
-// sealEvidence appends one tamper-evident link summarizing this scan to the
-// engagement's hash chain. Content is a canonical digest of the run:
-// SBOM hash, finding keys, and the manifest – so any later tampering is detectable
-// by re-verification. Best-effort: a ledger write must not fail a good scan.
-func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID shared.ID, now time.Time, result *ScanResult) {
-	if s.evidence == nil {
-		return
-	}
+type scanEvidencePayload struct {
+	SBOMSHA256     string             `json:"sbom_sha256"`
+	Findings       []string           `json:"findings"`
+	Suppressed     []string           `json:"suppressed,omitempty"`
+	AITriagePolicy string             `json:"ai_triage_policy,omitempty"`
+	AITriage       []ports.AICritique `json:"ai_triage,omitempty"`
+	Manifest       ports.ScanManifest `json:"manifest"`
+	SealedAt       string             `json:"sealed_at"`
+	Actor          string             `json:"actor"`
+}
+
+// scanEvidenceContent builds the canonical scan evidence payload. AI decisions are sorted and sealed
+// alongside findings, so changing a verdict, verifier identity, policy reason, or gate authorization is
+// detectable even when the finding set itself is unchanged.
+func scanEvidenceContent(actor string, now time.Time, result *ScanResult) ([]byte, error) {
 	keys := make([]string, 0, len(result.Findings))
 	for _, f := range result.Findings {
 		keys = append(keys, f.DedupKey)
@@ -2906,15 +2955,40 @@ func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID s
 		suppressed = append(suppressed, sf.RuleID+"="+sf.DedupKey)
 	}
 	sort.Strings(suppressed)
-	payload := struct {
-		SBOMSHA256 string             `json:"sbom_sha256"`
-		Findings   []string           `json:"findings"`
-		Suppressed []string           `json:"suppressed,omitempty"`
-		Manifest   ports.ScanManifest `json:"manifest"`
-		SealedAt   string             `json:"sealed_at"`
-		Actor      string             `json:"actor"`
-	}{result.Manifest.SBOMSHA256, keys, suppressed, result.Manifest, now.UTC().Format(time.RFC3339), actor}
-	content, err := json.Marshal(payload)
+	aiTriage := append([]ports.AICritique(nil), result.AITriage...)
+	sort.Slice(aiTriage, func(i, j int) bool {
+		if aiTriage[i].DedupKey != aiTriage[j].DedupKey {
+			return aiTriage[i].DedupKey < aiTriage[j].DedupKey
+		}
+		if aiTriage[i].FindingID != aiTriage[j].FindingID {
+			return aiTriage[i].FindingID < aiTriage[j].FindingID
+		}
+		return aiTriage[i].ProposerModel < aiTriage[j].ProposerModel
+	})
+	policyVersion := ""
+	if len(aiTriage) > 0 {
+		policyVersion = aiTriagePolicyVersion
+	}
+	return json.Marshal(scanEvidencePayload{
+		SBOMSHA256:     result.Manifest.SBOMSHA256,
+		Findings:       keys,
+		Suppressed:     suppressed,
+		AITriagePolicy: policyVersion,
+		AITriage:       aiTriage,
+		Manifest:       result.Manifest,
+		SealedAt:       now.UTC().Format(time.RFC3339),
+		Actor:          actor,
+	})
+}
+
+// sealEvidence appends one tamper-evident link summarizing this scan to the engagement's hash chain.
+// Best-effort: a ledger write must not fail a good scan, but any written link covers every gate-affecting
+// AI field as well as the deterministic finding/suppression set.
+func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID shared.ID, now time.Time, result *ScanResult) {
+	if s.evidence == nil {
+		return
+	}
+	content, err := scanEvidenceContent(actor, now, result)
 	if err != nil {
 		return
 	}
