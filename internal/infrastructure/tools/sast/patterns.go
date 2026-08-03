@@ -71,6 +71,7 @@ var rustExts = map[string]bool{".rs": true}
 var ktExts = map[string]bool{".kt": true, ".kts": true}
 var scalaExts = map[string]bool{".scala": true, ".sc": true}
 var rubyExts = map[string]bool{".rb": true, ".rake": true, ".ru": true, ".gemspec": true, ".erb": true}
+var vbExts = map[string]bool{".vb": true}
 var jsExts = map[string]bool{
 	".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
 	".ts": true, ".tsx": true, ".mts": true, ".cts": true, // .mts/.cts are first-class TS ESM/CJS extensions
