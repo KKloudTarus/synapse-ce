@@ -13,13 +13,13 @@
   },
   "dependencies": {
     "@radix-ui/react-select": "^2.3.7",
-    "@tanstack/react-virtual": "^3.14.8",
+    "@tanstack/react-virtual": "^3.14.9",
     "@xyflow/react": "^12.11.2",
     "fflate": "0.8.3",
-    "lucide-react": "^1.27.0",
+    "lucide-react": "^1.28.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router-dom": "^7.18.1",
+    "react-router-dom": "^7.18.2",
     "xlsx-js-style": "1.2.0"
   },
   "devDependencies": {
@@ -27,13 +27,13 @@
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.5.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^6.0.4",
-    "jsdom": "^30.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "jsdom": "^30.0.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
-    "vite": "^8.1.5",
+    "vite": "^8.2.0",
     "vitest": "^4.1.10"
   }
 }
