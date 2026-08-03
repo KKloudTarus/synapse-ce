@@ -6,7 +6,7 @@ require (
 	github.com/cilium/ebpf v0.22.0
 	github.com/digitorus/timestamp v0.0.0-20250524132541-c45532741eea
 	github.com/go-enry/go-enry/v2 v2.9.6
-	github.com/google/go-containerregistry v0.21.7
+	github.com/google/go-containerregistry v0.21.8
 	github.com/google/licensecheck v0.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
@@ -21,7 +21,7 @@ require (
 	golang.org/x/sys v0.47.0
 	golang.org/x/tools v0.48.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.54.0
+	modernc.org/sqlite v1.55.0
 )
 
 require (
