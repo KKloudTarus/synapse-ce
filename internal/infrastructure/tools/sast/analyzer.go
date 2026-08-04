@@ -26,7 +26,7 @@ const (
 	maxSourceFiles         = 100_000  // cap retained source units; each notebook code cell is one unit
 	maxRetainedSourceBytes = 64 << 20 // cap source held for cross-file context analysis
 	maxLineBytes           = 4096     // skip minified/blob lines
-	maxFindings            = 500      // cap total hits so a hostile/huge tree can't flood the report
+	maxFindings            = 500      // cap unique hits so a hostile/huge tree can't flood the report
 )
 
 // skipDirs are heavy vendored/build trees never worth scanning for first-party weaknesses.
@@ -40,17 +40,28 @@ var skipExts = map[string]bool{
 }
 
 // Analyzer is the pure-Go pattern-SAST adapter.
-type Analyzer struct{ rules []rule }
+type Analyzer struct {
+	rules []rule
+	byID  map[string]*rule
+}
 
 type sourceFile struct {
-	Path  string
-	Rel   string
-	Lines []string
-	Ext   string
+	Path         string
+	Rel          string
+	Lines        []string
+	ContextLines []string
+	Ext          string
 }
 
 // New returns an analyzer with the built-in tier-1 rule set.
-func New() *Analyzer { return &Analyzer{rules: builtinRules()} }
+func New() *Analyzer {
+	rules := builtinRules()
+	a := &Analyzer{rules: rules, byID: make(map[string]*rule, len(rules))}
+	for i := range a.rules {
+		a.byID[a.rules[i].id] = &a.rules[i]
+	}
+	return a
+}
 
 var _ ports.SASTAnalyzer = (*Analyzer)(nil)
 
@@ -81,8 +92,8 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 		if err != nil {
 			return nil // skip unreadable entries; don't abort the engagement's scan
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		if d.IsDir() {
 			if skipDirs[d.Name()] {
@@ -100,6 +111,7 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 		if relErr != nil {
 			rel = path
 		}
+		rel = filepath.ToSlash(rel)
 		if notebook.IsPath(path) {
 			info, statErr := os.Lstat(path)
 			if statErr != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > maxNotebookBytes {
@@ -125,15 +137,23 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 			}
 			return nil
 		}
-		lines := readSourceLines(path)
+		lines, readErr := readSourceLines(ctx, path)
+		if readErr != nil {
+			return readErr
+		}
 		if len(lines) == 0 {
 			return nil
 		}
-		appendFile(sourceFile{Path: path, Rel: rel, Lines: lines, Ext: sastSourceExt(path)}, sourceLinesBytes(lines))
+		ext := sastSourceExt(path)
+		contextLines := lines
+		if phpExts[ext] {
+			contextLines, _ = phpContextLines(ext, lines, phpLineViews(ext, lines))
+		}
+		appendFile(sourceFile{Path: path, Rel: rel, Lines: lines, ContextLines: contextLines, Ext: ext}, sourceLinesBytes(lines))
 		return nil
 	})
 	if walkErr != nil {
-		return nil, walkErr // only ctx cancellation reaches here (fs.SkipDir is swallowed)
+		return nil, walkErr
 	}
 
 	project, err := buildProjectContext(ctx, files)
@@ -141,12 +161,15 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 		return nil, err
 	}
 	out := make([]ports.SASTRawFinding, 0, maxFindings)
+	seen := make(map[string]bool, maxFindings)
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if err := a.scanLines(ctx, file.Rel, file.Ext, file.Lines, project, &out, maxFindings); err != nil {
-			return nil, err
+		hits, _, scanErr := a.scanLines(ctx, file.Rel, file.Ext, file.Lines, project, seen, maxFindings-len(out))
+		out = append(out, hits...)
+		if scanErr != nil {
+			return nil, scanErr
 		}
 		if len(out) == maxFindings {
 			break
@@ -167,14 +190,14 @@ func sourceLinesBytes(lines []string) int64 {
 }
 
 // readSourceLines reads one file (bounded, binary-skipping) and returns source lines.
-func readSourceLines(path string) []string {
+func readSourceLines(ctx context.Context, path string) ([]string, error) {
 	info, err := os.Lstat(path)
 	if err != nil || info.Size() == 0 || info.Size() > maxFileBytes {
-		return nil
+		return nil, nil
 	}
 	f, err := os.Open(path) // #nosec G304 -- path is from WalkDir under the acquired workspace root, verified a regular (non-symlink) file via d.Type().IsRegular() + os.Lstat
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	defer func() { _ = f.Close() }()
 
@@ -182,39 +205,67 @@ func readSourceLines(path string) []string {
 	head := make([]byte, 512)
 	n, _ := io.ReadFull(f, head)
 	if bytes.IndexByte(head[:n], 0) >= 0 {
-		return nil
+		return nil, nil
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return nil
+		return nil, nil
 	}
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), maxFileBytes)
 	var lines []string
 	for sc.Scan() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		lines = append(lines, sc.Text())
 	}
-	_ = sc.Err()
-	return lines
+	if err := sc.Err(); err != nil {
+		return nil, nil
+	}
+	return lines, nil
 }
 
-// scanLines applies rules to an already-read source file without exceeding the shared finding budget.
-func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []string, project projectContext, out *[]ports.SASTRawFinding, limit int) error {
+type scanStatus struct {
+	findingsTruncated     bool
+	lineLimitReached      bool
+	statementLimitReached bool
+}
+
+// scanLines applies rules to an already-read source file. The shared seen set makes the
+// finding cap count unique physical findings rather than repeated line/multiline passes.
+func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []string, project projectContext, seen map[string]bool, limit int) ([]ports.SASTRawFinding, scanStatus, error) {
+	var hits []ports.SASTRawFinding
+	var status scanStatus
+	add := func(h ports.SASTRawFinding) bool {
+		key := findingIdentity(h)
+		if seen[key] {
+			return true
+		}
+		if len(hits) >= limit {
+			return false
+		}
+		seen[key] = true
+		hits = append(hits, h)
+		return true
+	}
 	var scalaLex scalaLexState
 	var rubyLex rubyLexState
 	var rubyERBLex rubyERBLexState
+	isPHP := phpExts[ext]
+	var phpViews []phpLineView
+	phpTextLines, phpCodeLines := lines, lines
+	if isPHP {
+		phpViews = phpLineViews(ext, lines)
+		phpTextLines, phpCodeLines = phpContextLines(ext, lines, phpViews)
+	}
 	for i, text := range lines {
 		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if len(*out) == limit {
-			return nil
-		}
-		if len(text) > maxLineBytes {
-			continue // minified/blob line; do not lex it
+			return hits, status, err
 		}
 		line := i + 1
 		matchText := text
+		phpText := text
 		isScala := scalaExts[ext]
 		isRuby := rubyExts[ext]
 		isVB := vbExts[ext]
@@ -228,10 +279,19 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			}
 		} else if isVB {
 			matchText = vbCodeOnly(text)
+		} else if isPHP {
+			phpText = phpViews[i].text
+			matchText = phpViews[i].code
+		}
+		if len(text) > maxLineBytes {
+			status.lineLimitReached = true
+			continue // advance lexer state; callers mark the bounded scan incomplete
 		}
 		for ri := range a.rules {
-			if len(*out) == limit {
-				return nil
+			if ri%64 == 0 {
+				if err := ctx.Err(); err != nil {
+					return hits, status, err
+				}
 			}
 			r := &a.rules[ri]
 			if !r.appliesTo(ext) {
@@ -247,55 +307,103 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 				continue // bounded VB passes own these block-sensitive rules
 			}
 			var matched bool
-			switch {
-			case isScala && strings.HasPrefix(r.id, "scala:"):
+			if isScala && strings.HasPrefix(r.id, "scala:") {
 				matched = scalaRuleMatches(r, text, matchText)
-			case isRuby && strings.HasPrefix(r.id, "rb:"):
+			} else if isRuby && strings.HasPrefix(r.id, "rb:") {
 				matched = rubyRuleMatches(r, text, matchText)
-			case isVB && strings.HasPrefix(r.id, "vb:"):
+			} else if isVB && strings.HasPrefix(r.id, "vb:") {
 				matched = vbRuleMatches(r, text, matchText)
-			case isVB:
+			} else if isVB {
 				matched = vbGenericRuleMatches(r, text, matchText)
-			default:
+			} else if isPHP && r.id == "php:closing-tag" {
+				matched = phpClosingTagEligible(ext) && phpRuleMatches(r, phpText, matchText)
+			} else if isPHP && phpRuleNeedsCodePosition(r.id) {
+				matched = phpRuleMatches(r, phpText, matchText)
+			} else if isPHP {
+				matched = r.re.MatchString(phpText) && !r.skip(phpText)
+			} else {
 				matched = r.re.MatchString(text) && !r.skip(text)
 			}
-			if !matched {
+			if matched && isPHP && phpRuleOwnsGeneric(r.id, a, ext, phpText, matchText) {
 				continue
 			}
-			h := ports.SASTRawFinding{
-				File: rel, Line: line, RuleID: r.id, CWE: r.cwe,
-				Severity: r.severity, Title: r.title, Description: r.desc,
-				RuleType: string(r.ruleType()), RuleQuality: string(r.ruleQuality()),
+			if matched {
+				h := ports.SASTRawFinding{
+					File: rel, Line: line, RuleID: r.id, CWE: r.cwe,
+					Severity: r.severity, Title: r.title, Description: r.desc,
+					RuleType: string(r.ruleType()), RuleQuality: string(r.ruleQuality()),
+				}
+				enrichAppSecContext(&h, phpTextLines, line, rel, project)
+				if !add(h) {
+					status.findingsTruncated = true
+					return hits, status, nil
+				}
 			}
-			enrichAppSecContext(&h, lines, line, rel, project)
-			*out = append(*out, h)
 		}
 	}
-	if err := a.contextualFindings(ctx, rel, ext, lines, project, out, limit); err != nil {
-		return err
+	if phpExts[ext] {
+		for start := range lines {
+			if err := ctx.Err(); err != nil {
+				return hits, status, err
+			}
+			text, code, ok, truncated := phpStatement(lines, phpViews, start)
+			if truncated {
+				status.statementLimitReached = true
+			}
+			if !ok {
+				continue
+			}
+			for ri := range a.rules {
+				r := &a.rules[ri]
+				matchAt, matched := phpRuleMatchIndex(r, text, code)
+				if !r.appliesTo(ext) || !matched || r.id == "php:closing-tag" && !phpClosingTagEligible(ext) || phpRuleOwnsGeneric(r.id, a, ext, text, code) {
+					continue
+				}
+				line := start + 1 + strings.Count(text[:matchAt], "\n")
+				h := ports.SASTRawFinding{
+					File: rel, Line: line, RuleID: r.id, CWE: r.cwe,
+					Severity: r.severity, Title: r.title, Description: r.desc,
+					RuleType: string(r.ruleType()), RuleQuality: string(r.ruleQuality()),
+				}
+				enrichAppSecContext(&h, phpTextLines, line, rel, project)
+				if !add(h) {
+					status.findingsTruncated = true
+					return hits, status, nil
+				}
+			}
+		}
 	}
-	return a.vbContextualFindings(ctx, rel, ext, lines, project, out, limit)
+	contextual, err := a.contextualFindings(ctx, rel, ext, phpCodeLines, phpTextLines, project)
+	if err != nil {
+		return hits, status, err
+	}
+	for _, h := range contextual {
+		if !add(h) {
+			status.findingsTruncated = true
+			return hits, status, nil
+		}
+	}
+	if err := a.vbContextualFindings(ctx, rel, ext, lines, project, &hits, limit); err != nil {
+		return hits, status, err
+	}
+	return hits, status, nil
 }
 
 func (a *Analyzer) matchesRule(id, ext, text string) bool {
-	for i := range a.rules {
-		r := &a.rules[i]
-		if r.id == id {
-			return r.appliesTo(ext) && r.re.MatchString(text) && !r.skip(text)
-		}
-	}
-	return false
+	r := a.byID[id]
+	return r != nil && r.appliesTo(ext) && r.re.MatchString(text) && !r.skip(text)
+}
+
+var kotlinGenericOwners = map[string][]string{
+	"generic-sql-dynamic-execute":    {"kotlin-sql-concat", "kotlin-sql-template"},
+	"generic-command-injection-sink": {"kotlin-runtime-exec", "kotlin-process-builder-string"},
+	"weak-hash-md5":                  {"kotlin-weak-hash"},
+	"weak-hash-sha1":                 {"kotlin-weak-hash"},
+	"weak-cipher":                    {"kotlin-weak-cipher"},
 }
 
 func kotlinRuleOwnsGeneric(generic string, a *Analyzer, ext, text string) bool {
-	owners := map[string][]string{
-		"generic-sql-dynamic-execute":    {"kotlin-sql-concat", "kotlin-sql-template"},
-		"generic-command-injection-sink": {"kotlin-runtime-exec", "kotlin-process-builder-string"},
-		"weak-hash-md5":                  {"kotlin-weak-hash"},
-		"weak-hash-sha1":                 {"kotlin-weak-hash"},
-		"weak-cipher":                    {"kotlin-weak-cipher"},
-	}
-	for _, owner := range owners[generic] {
+	for _, owner := range kotlinGenericOwners[generic] {
 		if a.matchesRule(owner, ext, text) {
 			return true
 		}
@@ -303,38 +411,62 @@ func kotlinRuleOwnsGeneric(generic string, a *Analyzer, ext, text string) bool {
 	return false
 }
 
-func (a *Analyzer) contextualFindings(ctx context.Context, rel, ext string, lines []string, project projectContext, out *[]ports.SASTRawFinding, limit int) error {
-	for i := 0; i < len(lines); i++ {
-		if err := ctx.Err(); err != nil {
-			return err
+var phpGenericOwners = map[string][]string{
+	"generic-sql-dynamic-execute":          {"php:sql-concat", "php:sql-interpolation", "php:mysqli-query-request", "php:pdo-query-request"},
+	"generic-command-injection-sink":       {"php:command-exec", "php:proc-open-string"},
+	"unsafe-deserialization-generic":       {"php:unserialize-untrusted"},
+	"dynamic-code-eval":                    {"php:eval-usage"},
+	"weak-hash-md5":                        {"php:md5-usage", "php:weak-password-hash"},
+	"weak-hash-sha1":                       {"php:sha1-usage", "php:weak-password-hash"},
+	"weak-cipher":                          {"php:weak-cipher"},
+	"generic-ssrf-request-url":             {"php:ssrf-file-get-contents", "php:curl-url-request"},
+	"path-traversal-file-access":           {"php:file-read-request-path", "php:file-write-request-path"},
+	"open-redirect-user-url":               {"php:open-redirect-request"},
+	"insecure-tls-verify-disabled":         {"php:tls-peer-verification-off"},
+	"insecure-randomness-security-context": {"php:insecure-random"},
+}
+
+func phpRuleOwnsGeneric(generic string, a *Analyzer, ext, raw, code string) bool {
+	for _, owner := range phpGenericOwners[generic] {
+		r := a.byID[owner]
+		if r != nil && r.appliesTo(ext) && phpRuleMatches(r, raw, code) {
+			return true
 		}
-		if len(*out) == limit {
-			return nil
+	}
+	return false
+}
+
+func (a *Analyzer) contextualFindings(ctx context.Context, rel, ext string, codeLines, contextLines []string, project projectContext) ([]ports.SASTRawFinding, error) {
+	var hits []ports.SASTRawFinding
+	for i := 0; i < len(codeLines); i++ {
+		if err := ctx.Err(); err != nil {
+			return hits, err
 		}
 		line := i + 1
-		text := lines[i]
+		text := codeLines[i]
 		if len(text) > maxLineBytes || commentOnlyLine(text) {
 			continue
 		}
 		if !contextualStartLine(strings.ToLower(text)) {
 			continue
 		}
-		block := boundedStatementBlock(lines, i, 18)
-		lowerBlock := strings.ToLower(block)
+		codeBlock := boundedStatementBlock(codeLines, i, 18)
+		contextBlock := boundedStatementBlock(contextLines, i, 18)
+		lowerBlock := strings.ToLower(codeBlock)
 		switch {
 		case looksLikePrismaObjectByID(lowerBlock):
-			if h, ok := a.findingFromRule(rel, ext, line, "possible-idor-prisma-id-only", lines, project); ok {
-				calibrateContextBlockFinding(&h, block, line)
-				*out = append(*out, h)
+			if h, ok := a.findingFromRule(rel, ext, line, "possible-idor-prisma-id-only", contextLines, project); ok {
+				calibrateContextBlockFinding(&h, contextBlock, line)
+				hits = append(hits, h)
 			}
 		case looksLikeMassAssignment(lowerBlock):
-			if h, ok := a.findingFromRule(rel, ext, line, "mass-assignment-request-body", lines, project); ok {
-				calibrateContextBlockFinding(&h, block, line)
-				*out = append(*out, h)
+			if h, ok := a.findingFromRule(rel, ext, line, "mass-assignment-request-body", contextLines, project); ok {
+				calibrateContextBlockFinding(&h, contextBlock, line)
+				hits = append(hits, h)
 			}
 		}
 	}
-	return nil
+	return dedupeFindings(hits), nil
 }
 
 func contextualStartLine(line string) bool {
@@ -345,8 +477,7 @@ func contextualStartLine(line string) bool {
 }
 
 func calibrateContextBlockFinding(h *ports.SASTRawFinding, block string, line int) {
-	lower := strings.ToLower(block)
-	source, sourceEvidence := sourceFromContextBlock(lower, line)
+	source, sourceEvidence := sourceFromContextBlock(block, line)
 	if source != "" {
 		h.Source = source
 		h.SourceEvidence = sourceEvidence
@@ -387,13 +518,17 @@ func calibrateContextBlockFinding(h *ports.SASTRawFinding, block string, line in
 	}
 }
 
-func sourceFromContextBlock(lower string, line int) (source, evidence string) {
+func sourceFromContextBlock(block string, line int) (source, evidence string) {
+	if label := phpSuperglobalSourceLabel(block); label != "" {
+		return label, "bounded statement block near line " + strconv.Itoa(line) + ": " + label + " cue"
+	}
+	lower := strings.ToLower(block)
 	switch {
 	case strings.Contains(lower, "req.params") || strings.Contains(lower, "params[") || strings.Contains(lower, "c.param"):
 		return "HTTP route parameter", "bounded statement block near line " + strconv.Itoa(line) + ": HTTP route parameter cue"
 	case strings.Contains(lower, "req.query") || strings.Contains(lower, "request.args"):
 		return "HTTP query parameter", "bounded statement block near line " + strconv.Itoa(line) + ": HTTP query parameter cue"
-	case strings.Contains(lower, "req.body") || strings.Contains(lower, "request.body") || strings.Contains(lower, "request.data") || strings.Contains(lower, "$_post"):
+	case strings.Contains(lower, "req.body") || strings.Contains(lower, "request.body") || strings.Contains(lower, "request.data"):
 		return "HTTP request body", "bounded statement block near line " + strconv.Itoa(line) + ": HTTP request body cue"
 	default:
 		return "", ""
@@ -427,9 +562,6 @@ func boundedStatementBlock(lines []string, start, maxLines int) string {
 	started := false
 	for i := start; i < end; i++ {
 		line := lines[i]
-		if len(line) > maxLineBytes {
-			continue
-		}
 		out = append(out, line)
 		for _, ch := range line {
 			switch ch {
@@ -475,11 +607,15 @@ func looksLikeMassAssignment(block string) bool {
 		strings.Contains(block, "params")
 }
 
+func findingIdentity(h ports.SASTRawFinding) string {
+	return h.File + "\x00" + strconv.Itoa(h.Line) + "\x00" + h.RuleID + "\x00" + h.CWE + "\x00" + h.Route + "\x00" + h.Sink
+}
+
 func dedupeFindings(in []ports.SASTRawFinding) []ports.SASTRawFinding {
 	seen := map[string]bool{}
 	out := make([]ports.SASTRawFinding, 0, len(in))
 	for _, h := range in {
-		key := h.File + "\x00" + strconv.Itoa(h.Line) + "\x00" + h.RuleID + "\x00" + h.CWE + "\x00" + h.Route + "\x00" + h.Sink
+		key := findingIdentity(h)
 		if seen[key] {
 			continue
 		}

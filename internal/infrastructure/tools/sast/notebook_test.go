@@ -13,11 +13,11 @@ func TestAnalyzerNotebookReusesPythonRules(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "security.ipynb"), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := New().AnalyzeSource(context.Background(), root)
+	hits, err := New().AnalyzeSource(context.Background(), root)
 	if err != nil {
 		t.Fatalf("AnalyzeSource: %v", err)
 	}
-	for _, finding := range findings {
+	for _, finding := range hits {
 		if finding.RuleID == "weak-hash-md5" {
 			if finding.File != "security.ipynb#cell-2" || finding.Line != 1 {
 				t.Fatalf("unexpected finding: %+v", finding)
@@ -25,5 +25,5 @@ func TestAnalyzerNotebookReusesPythonRules(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("weak-hash-md5 missing: %+v", findings)
+	t.Fatalf("weak-hash-md5 missing: %+v", hits)
 }

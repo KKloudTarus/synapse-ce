@@ -12,6 +12,7 @@ func Default() (*Catalog, error) {
 	all = append(all, sastRules()...)
 	all = append(all, langPackCatalog()...)
 	all = append(all, kotlinMetricRules()...)
+	all = append(all, phpMetricRules()...)
 	all = append(all, scalaASTRules()...)
 	all = append(all, rubyASTRules()...)
 	all = append(all, javaASTRules()...)

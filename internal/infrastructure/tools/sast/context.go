@@ -67,7 +67,7 @@ var simpleCallPattern = regexp.MustCompile(`(?i)\b([A-Za-z_$][\w$]*)\s*\(([^)]*)
 
 var sourceCueTokens = []string{
 	"req.body", "req.query", "req.params", "request.args", "request.form", "request.data",
-	"request.get", "request.post", "$_get", "$_post", "$_request", "r.url.query", "formvalue", "postformvalue",
+	"request.get", "request.post", "$_GET", "$_POST", "$_REQUEST", "r.url.query", "formvalue", "postformvalue",
 	"c.query", "c.param", "c.postform", "@query", "@param", "@body", "@args", "args.", "input.",
 	"context.args", "context.params", "ctx.args", "ctx.params", "originalname", "filename", "params[", "localstorage", "url",
 }
@@ -88,7 +88,10 @@ func buildProjectContext(ctx context.Context, files []sourceFile) (projectContex
 		if err := ctx.Err(); err != nil {
 			return projectContext{}, err
 		}
-		lines := sourceContextLines(f.Lines)
+		lines := f.ContextLines
+		if lines == nil {
+			lines = sourceContextLines(f.Lines)
+		}
 		project.Files = append(project.Files, projectFile{Rel: f.Rel, Lines: lines})
 		for name, summary := range summarizeLocalFunctions(lines, 1, len(lines)) {
 			summary.File = f.Rel
@@ -414,9 +417,6 @@ func inferSource(ruleID, cwe string, lines []string, firstLine int) (source, evi
 		{"request.data", "HTTP request body"},
 		{"request.get", "HTTP query parameter"},
 		{"request.post", "HTTP form body"},
-		{"$_get", "HTTP query parameter"},
-		{"$_post", "HTTP form body"},
-		{"$_request", "HTTP request parameter"},
 		{"r.url.query", "HTTP query parameter"},
 		{"formvalue", "HTTP form/query value"},
 		{"postformvalue", "HTTP form body"},
@@ -434,6 +434,9 @@ func inferSource(ruleID, cwe string, lines []string, firstLine int) (source, evi
 		{"url", "URL variable"},
 	}
 	for i, raw := range lines {
+		if label := phpSuperglobalSourceLabel(raw); label != "" {
+			return label, fmt.Sprintf("line %d: %s cue", firstLine+i, label)
+		}
 		line := strings.ToLower(raw)
 		for _, cue := range cues {
 			if strings.Contains(line, cue.token) {
@@ -475,7 +478,7 @@ func dataFlowEvidence(lines []string, firstLine, sinkLine int, source, cwe, rel 
 		}
 		return "missing: attacker-controlled source was not identified", "missing"
 	}
-	sinkText := strings.ToLower(lines[sinkIdx])
+	sinkText := lines[sinkIdx]
 	for _, token := range sourceCueTokens {
 		if directSourceCueInSink(token, sinkText) {
 			return fmt.Sprintf("direct: sink line %d contains %s", sinkLine, source), "direct"
@@ -1308,8 +1311,14 @@ func firstVariableUse(vars map[string]taintState, line string) (name string, sta
 }
 
 func hasSourceCue(line string) bool {
+	if phpSuperglobalSourceLabel(line) != "" {
+		return true
+	}
 	lower := strings.ToLower(line)
 	for _, token := range sourceCueTokens {
+		if strings.HasPrefix(token, "$_") {
+			continue
+		}
 		if strings.Contains(lower, token) {
 			return true
 		}
@@ -1318,12 +1327,14 @@ func hasSourceCue(line string) bool {
 }
 
 func directSourceCueInSink(token, sinkText string) bool {
-	token = strings.ToLower(strings.TrimSpace(token))
+	token = strings.TrimSpace(token)
 	switch token {
 	case "", "url", "filename", "originalname", "localstorage":
 		return false
-	default:
+	case "$_GET", "$_POST", "$_REQUEST":
 		return strings.Contains(sinkText, token)
+	default:
+		return strings.Contains(strings.ToLower(sinkText), token)
 	}
 }
 
@@ -1986,4 +1997,17 @@ func clampContext(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+func phpSuperglobalSourceLabel(line string) string {
+	switch {
+	case strings.Contains(line, "$_GET"):
+		return "HTTP query parameter"
+	case strings.Contains(line, "$_POST"):
+		return "HTTP form body"
+	case strings.Contains(line, "$_REQUEST"):
+		return "HTTP request parameter"
+	default:
+		return ""
+	}
 }

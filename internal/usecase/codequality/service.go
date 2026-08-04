@@ -168,11 +168,15 @@ func (s *Service) analyze(ctx context.Context, root string) ([]finding.Finding, 
 		if available {
 			compReport = &rep
 			for _, f := range rep.Functions {
-				if f.Language == "Kotlin" {
+				if f.Language == "Kotlin" || f.Language == "PHP" {
 					if f.Cognitive > s.complexityMin {
+						ruleID := "kotlin-cognitive-complexity"
+						if f.Language == "PHP" {
+							ruleID = "php:cognitive-complexity"
+						}
 						title := fmt.Sprintf("High cognitive complexity: %d (%s)", f.Cognitive, f.Name)
-						desc := fmt.Sprintf("Kotlin function %q has cognitive complexity %d, above %d. Use guard clauses or extract focused functions.", f.Name, f.Cognitive, s.complexityMin)
-						out = append(out, newFinding("quality", "kotlin-cognitive-complexity", "CWE-1120", shared.SeverityMedium, title, desc, f.File, f.Line))
+						desc := fmt.Sprintf("%s function %q has cognitive complexity %d, above %d. Use guard clauses or extract focused functions.", f.Language, f.Name, f.Cognitive, s.complexityMin)
+						out = append(out, newFinding("quality", ruleID, "CWE-1120", shared.SeverityMedium, title, desc, f.File, f.Line))
 					}
 					continue
 				}

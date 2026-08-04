@@ -9,10 +9,12 @@ example actually triggers / does not trigger the regex.
 """
 import json, re, sys, importlib.util, os, subprocess
 
+sys.dont_write_bytecode = True
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-LANG_EXTS = {"js": "jsExts", "java": "javaExts", "py": "pyExts", "go": "goExts", "cs": "csExts", "c": "cExts", "cpp": "cppExts", "rust": "rustExts", "kt": "ktExts", "scala": "scalaExts", "rb": "rubyExts", "vb": "vbExts"}
-LANG_LABEL = {"js": "JavaScript/TypeScript", "java": "Java", "py": "Python", "go": "Go", "cs": "C#", "c": "C", "cpp": "C++", "rust": "Rust", "kt": "Kotlin", "scala": "Scala", "rb": "Ruby", "vb": "VB.NET"}
+LANG_EXTS = {"js": "jsExts", "java": "javaExts", "py": "pyExts", "go": "goExts", "cs": "csExts", "c": "cExts", "cpp": "cppExts", "rust": "rustExts", "kt": "ktExts", "scala": "scalaExts", "rb": "rubyExts", "vb": "vbExts", "php": "phpExts"}
+LANG_LABEL = {"js": "JavaScript/TypeScript", "java": "Java", "py": "Python", "go": "Go", "cs": "C#", "c": "C", "cpp": "C++", "rust": "Rust", "kt": "Kotlin", "scala": "Scala", "rb": "Ruby", "vb": "VB.NET", "php": "PHP"}
 TYPE_CONST = {"vuln": "TypeVulnerability", "bug": "TypeBug", "smell": "TypeCodeSmell", "hotspot": "TypeSecurityHotspot"}
 QUAL_CONST = {"sec": "QualitySecurity", "rel": "QualityReliability", "maint": "QualityMaintainability"}
 SEV_CONST = {"critical": "SeverityCritical", "high": "SeverityHigh", "medium": "SeverityMedium", "low": "SeverityLow", "info": "SeverityInfo"}
@@ -49,6 +51,84 @@ def validate(specs):
             assert not c_hit, "COMPLIANT matches: " + s["id"] + " :: " + repr(c_hit)
         assert s["sev"] in SEV_CONST and s["type"] in TYPE_CONST and s["qual"] in QUAL_CONST
     return len(specs)
+
+def php_casefold(rx):
+    # PHP keywords, built-ins, methods, and constants are case-insensitive. Keep
+    # variable identifiers case-sensitive by folding only words outside escapes/classes.
+    out = []
+    i = 0
+    in_class = False
+    while i < len(rx):
+        ch = rx[i]
+        if ch == "\\" and i + 1 < len(rx):
+            if rx[i + 1] == "$":
+                end = i + 2
+                while end < len(rx) and (rx[end].isalnum() or rx[end] == "_"):
+                    end += 1
+                if end < len(rx) and rx[end] == "(":
+                    depth = 1
+                    end += 1
+                    while end < len(rx) and depth:
+                        if rx[end] == "(":
+                            depth += 1
+                        elif rx[end] == ")":
+                            depth -= 1
+                        end += 1
+                out.append(rx[i:end])
+                i = end
+                continue
+            out.append(rx[i:i + 2])
+            i += 2
+            continue
+        if ch == "$":
+            end = i + 1
+            while end < len(rx) and (rx[end].isalnum() or rx[end] == "_"):
+                end += 1
+            if end < len(rx) and rx[end] == "(":
+                depth = 1
+                end += 1
+                while end < len(rx) and depth:
+                    if rx[end] == "(":
+                        depth += 1
+                    elif rx[end] == ")":
+                        depth -= 1
+                    end += 1
+            out.append(rx[i:end])
+            i = end
+            continue
+        if ch == "[":
+            in_class = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "]":
+            in_class = False
+            out.append(ch)
+            i += 1
+            continue
+        if not in_class and (ch.isalpha() or ch == "_"):
+            end = i + 1
+            while end < len(rx) and (rx[end].isalnum() or rx[end] == "_"):
+                end += 1
+            prev = rx[i - 1] if i else ""
+            word = rx[i:end]
+            out.append(word if prev == "$" else "(?i:" + word + ")")
+            i = end
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def normalize_specs(specs):
+    for s in specs:
+        if s.get("lang") == "php" and s.get("detection", "pattern") == "pattern":
+            rx = s["re"]
+            if rx.startswith("(?i)"):
+                rx = rx[4:]
+            s["re"] = php_casefold(rx)
+    return specs
+
 
 def emit_engine(specs):
     out = ["package sast", "", "import (", '\t"regexp"', "",
@@ -123,7 +203,7 @@ def emit_catalog(specs):
     return "\n".join(lines) + "\n"
 
 if __name__ == "__main__":
-    specs = load_specs()
+    specs = normalize_specs(load_specs())
     n = validate(specs)
     engine_path = os.path.join(ROOT, "internal/infrastructure/tools/sast/patterns_langpack.go")
     catalog_path = os.path.join(ROOT, "internal/infrastructure/rulecatalog/langpacks.go")

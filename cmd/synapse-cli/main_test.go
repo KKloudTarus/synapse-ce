@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
 )
 
 func TestSASTLocationNormalizesPath(t *testing.T) {
@@ -45,5 +50,32 @@ func TestFilterNewCodeUsesStructuredLocationForColonRule(t *testing.T) {
 	got := filterNewCode([]finding.Finding{f}, gitdiff.ChangedLines{"src/main.go": {10: true}})
 	if len(got) != 1 {
 		t.Fatalf("filterNewCode returned %d findings", len(got))
+	}
+}
+
+func TestRunGateFailsForRubyEvalRequestData(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "app.rb"), []byte("def run(x)\n eval(params[:x])\nend\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := sast.New().AnalyzeSource(context.Background(), root)
+	if err != nil {
+		t.Fatalf("analyze Ruby source: %v", err)
+	}
+	var found bool
+	for _, raw := range findings {
+		if raw.RuleID == "rb:eval-request-data" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("SAST findings do not include rb:eval-request-data: %+v", findings)
+	}
+
+	err = runGate([]string{root})
+	if err == nil || !strings.Contains(err.Error(), "quality gate FAILED") {
+		t.Fatalf("runGate error = %v, want critical Ruby SAST finding to fail the gate", err)
 	}
 }

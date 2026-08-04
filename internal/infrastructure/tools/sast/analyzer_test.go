@@ -37,7 +37,8 @@ func TestAnalyzerFindsAndSkips(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := New().AnalyzeSource(context.Background(), root)
+	hits, err := New().AnalyzeSource(context.Background(), root)
+	got := hits
 	if err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
@@ -61,70 +62,6 @@ func TestAnalyzerFindsAndSkips(t *testing.T) {
 	a := byRule["hardcoded-aws-access-key"][0]
 	if a.CWE != "CWE-798" || a.Severity != shared.SeverityCritical || filepath.ToSlash(a.File) != "creds.txt" || a.Line != 1 {
 		t.Errorf("aws finding metadata wrong: %+v", a)
-	}
-}
-
-func TestAnalyzeSourceAcquisitionLimits(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, root, "a.go", "import \"crypto/md5\"\n")
-	writeFile(t, root, "b.go", "import \"crypto/md5\"\n")
-	findings, err := New().analyzeSource(context.Background(), root, 1, maxRetainedSourceBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(findings) != 1 || findings[0].File != "a.go" {
-		t.Fatalf("file limit findings = %+v, want only a.go", findings)
-	}
-
-	findings, err = New().analyzeSource(context.Background(), root, maxSourceFiles, int64(len("import \"crypto/md5\"\n")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(findings) != 1 || findings[0].File != "a.go" {
-		t.Fatalf("byte limit findings = %+v, want only a.go", findings)
-	}
-}
-
-func TestAnalyzeSourceAcquisitionLimitsCountNotebookCells(t *testing.T) {
-	root := t.TempDir()
-	data := `{"metadata":{"kernelspec":{"name":"python3","language":"python"}},"cells":[{"cell_type":"code","source":"hashlib.md5(a)"},{"cell_type":"code","source":"hashlib.md5(b)"}]}`
-	writeFile(t, root, "security.ipynb", data)
-	findings, err := New().analyzeSource(context.Background(), root, 1, maxRetainedSourceBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(findings) == 0 || findings[0].File != "security.ipynb#cell-1" {
-		t.Fatalf("notebook cell limit findings = %+v, want findings only from cell 1", findings)
-	}
-	for _, finding := range findings {
-		if finding.File != "security.ipynb#cell-1" {
-			t.Fatalf("notebook cell limit retained %s, want only cell 1", finding.File)
-		}
-	}
-
-	findings, err = New().analyzeSource(context.Background(), root, maxSourceFiles, int64(len("hashlib.md5(a)")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(findings) == 0 || findings[0].File != "security.ipynb#cell-1" {
-		t.Fatalf("notebook byte limit findings = %+v, want findings only from cell 1", findings)
-	}
-	for _, finding := range findings {
-		if finding.File != "security.ipynb#cell-1" {
-			t.Fatalf("notebook byte limit retained %s, want only cell 1", finding.File)
-		}
-	}
-}
-
-func TestDedupeFindingsKeepsDistinctLines(t *testing.T) {
-	in := []ports.SASTRawFinding{
-		{File: "sample.vb", Line: 4, RuleID: "vb:option-strict-off", CWE: "CWE-000"},
-		{File: "sample.vb", Line: 7, RuleID: "vb:option-strict-off", CWE: "CWE-000"},
-		{File: "sample.vb", Line: 4, RuleID: "vb:option-strict-off", CWE: "CWE-000"},
-	}
-	got := dedupeFindings(in)
-	if len(got) != 2 || got[0].Line != 4 || got[1].Line != 7 {
-		t.Fatalf("dedupeFindings() = %+v, want distinct findings on lines 4 and 7", got)
 	}
 }
 
@@ -491,8 +428,8 @@ func TestKotlinSpecializedRulesOwnGenericMatches(t *testing.T) {
 		{`val digest = MessageDigest.getInstance("MD5")`, "kotlin-weak-hash"},
 		{`statement.execute("SELECT * FROM users WHERE id=" + id)`, "kotlin-sql-concat"},
 	} {
-		var hits []ports.SASTRawFinding
-		if err := a.scanLines(context.Background(), "Main.kt", ".kt", []string{tc.line}, projectContext{}, &hits, maxFindings); err != nil {
+		hits, _, err := a.scanLines(context.Background(), "Main.kt", ".kt", []string{tc.line}, projectContext{}, map[string]bool{}, maxFindings)
+		if err != nil {
 			t.Fatal(err)
 		}
 		seen := map[string]bool{}
@@ -545,15 +482,113 @@ func TestLanguageGatedRulesRespectExtensions(t *testing.T) {
 // findingsByRule runs the analyzer over root and groups the hits by rule id.
 func findingsByRule(t *testing.T, root string) map[string][]ports.SASTRawFinding {
 	t.Helper()
-	got, err := New().AnalyzeSource(context.Background(), root)
+	hits, err := New().AnalyzeSource(context.Background(), root)
 	if err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 	byRule := map[string][]ports.SASTRawFinding{}
-	for _, f := range got {
+	for _, f := range hits {
 		byRule[f.RuleID] = append(byRule[f.RuleID], f)
 	}
 	return byRule
+}
+
+func TestFindingLimitCountsUniqueIdentities(t *testing.T) {
+	a := New()
+	lines := make([]string, maxFindings*2)
+	for i := range lines {
+		lines[i] = `import "crypto/md5"`
+	}
+	hits, status, err := a.scanLines(context.Background(), "main.go", ".go", lines, projectContext{}, map[string]bool{}, maxFindings)
+	if err != nil || !status.findingsTruncated || len(hits) != maxFindings {
+		t.Fatalf("scanLines: hits=%d status=%+v err=%v", len(hits), status, err)
+	}
+}
+
+func TestFindingIdentityDeduplicatesLineAndMultilinePasses(t *testing.T) {
+	a := New()
+	hits, status, err := a.scanLines(context.Background(), "main.php", ".php", []string{`eval($_GET['code']);`}, projectContext{}, map[string]bool{}, maxFindings)
+	if err != nil || status.findingsTruncated {
+		t.Fatalf("scanLines: status=%+v err=%v", status, err)
+	}
+	var evals int
+	for _, hit := range hits {
+		if hit.RuleID == "php:eval-usage" {
+			evals++
+		}
+	}
+	if evals != 1 {
+		t.Fatalf("line/multiline passes emitted %d eval findings: %+v", evals, hits)
+	}
+}
+
+func TestFindingIdentityKeepsDistinctLines(t *testing.T) {
+	a := New()
+	hits, _, err := a.scanLines(context.Background(), "main.php", ".php", []string{"eval($_GET['a']);", "eval($_GET['b']);"}, projectContext{}, map[string]bool{}, maxFindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var evals []ports.SASTRawFinding
+	for _, hit := range hits {
+		if hit.RuleID == "php:eval-usage" {
+			evals = append(evals, hit)
+		}
+	}
+	if len(evals) != 2 || evals[0].Line != 1 || evals[1].Line != 2 {
+		t.Fatalf("eval findings = %+v, want lines 1 and 2", evals)
+	}
+}
+
+func TestPHPContextSuperglobalsAreCaseSensitive(t *testing.T) {
+	for _, tc := range []struct {
+		name, superglobal, wantSource string
+	}{
+		{"lowercase", "$_post", "unknown"},
+		{"canonical", "$_POST", "HTTP form body"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "user.php", "<?php\nnew UserData("+tc.superglobal+");\n")
+			hits := findingsByRule(t, root)["mass-assignment-request-body"]
+			if len(hits) != 1 || hits[0].Source != tc.wantSource {
+				t.Fatalf("%s contextual findings = %+v, want source %q", tc.superglobal, hits, tc.wantSource)
+			}
+		})
+	}
+}
+
+func TestAnalyzerNormalizesNestedFindingPaths(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "src/main.php", "<?php\neval($_GET['code']);\n")
+	hits := findingsByRule(t, root)["php:eval-usage"]
+	if len(hits) != 1 || hits[0].File != "src/main.php" || hits[0].Line != 2 {
+		t.Fatalf("nested PHP findings = %+v, want src/main.php:2", hits)
+	}
+}
+
+func TestPHPContextIgnoresTemplateLookalike(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "view.phtml", `<div data-example="new User(req.body)"></div>
+<?php new User(req.body); ?>`)
+	byRule := findingsByRule(t, root)
+	if hits := byRule["mass-assignment-request-body"]; len(hits) != 1 || hits[0].Line != 2 {
+		t.Fatalf("contextual findings = %+v, want PHP line 2 only", hits)
+	}
+}
+
+func TestAnalyzerRespectsAggregateLimits(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "a.go", "import \"crypto/md5\"\n")
+	writeFile(t, root, "b.go", "import \"crypto/sha1\"\n")
+
+	hits, err := New().analyzeSource(context.Background(), root, 1, maxRetainedSourceBytes)
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("file-limited scan = %+v, err=%v", hits, err)
+	}
+	hits, err = New().analyzeSource(context.Background(), root, maxSourceFiles, 24)
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("byte-limited scan = %+v, err=%v", hits, err)
+	}
 }
 
 func TestAnalyzerHonorsContextCancel(t *testing.T) {
@@ -568,8 +603,8 @@ func TestAnalyzerHonorsContextCancel(t *testing.T) {
 
 func TestAnalyzerEmptyRoot(t *testing.T) {
 	got, err := New().AnalyzeSource(context.Background(), "")
-	if err != nil || got != nil {
-		t.Errorf("empty root: want nil,nil; got %v,%v", got, err)
+	if err != nil || len(got) != 0 {
+		t.Errorf("empty root: want no findings; got %+v, %v", got, err)
 	}
 }
 

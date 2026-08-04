@@ -231,6 +231,30 @@ func TestBuildFindingsSAST(t *testing.T) {
 	}
 }
 
+func TestBuildFindingsSASTKeepsNonReportableValidation(t *testing.T) {
+	now := time.Unix(0, 0).UTC()
+	for _, tc := range []struct {
+		name, ruleID, disposition string
+	}{
+		{"Ruby eval request data", "rb:eval-request-data", "needs-runtime-proof"},
+		{"PHP eval usage", "php:eval-usage", "false-positive-static"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			findings := buildFindings("eng1", &ScanResult{}, now, shared.SeverityInfo, false, []ports.SASTRawFinding{{
+				File: "app/source", Line: 7, RuleID: tc.ruleID, Severity: shared.SeverityHigh,
+				ValidationDisposition: tc.disposition,
+			}})
+			if len(findings) != 1 || findings[0].Kind != finding.KindSAST {
+				t.Fatalf("findings = %+v, want one SAST finding", findings)
+			}
+			result := ScanResult{}
+			if result.GateExemptKeys(findings)[findings[0].DedupKey] {
+				t.Fatalf("non-reportable validation disposition exempted %q from the gate", tc.ruleID)
+			}
+		})
+	}
+}
+
 func TestCodeQualityFindingsUseDistinctSASTNamespace(t *testing.T) {
 	now := time.Unix(0, 0).UTC()
 	pattern := buildFindings("eng1", &ScanResult{}, now, shared.SeverityInfo, false, []ports.SASTRawFinding{{

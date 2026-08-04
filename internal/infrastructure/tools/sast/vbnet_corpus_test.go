@@ -37,6 +37,7 @@ func TestVBNetPatternCorpusRunsThroughAnalyzer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			if !hasSASTRule(hits, string(catalogRule.Key)) {
 				t.Errorf("noncompliant VB.NET did not emit %s: %+v", catalogRule.Key, hits)
 			}
@@ -49,6 +50,7 @@ func TestVBNetPatternCorpusRunsThroughAnalyzer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			if hasSASTRule(hits, string(catalogRule.Key)) {
 				t.Errorf("compliant VB.NET emitted %s: %+v", catalogRule.Key, hits)
 			}
