@@ -87,7 +87,7 @@ jobs:
           node-version: 20
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.9
         with:
           version: 9
 
