@@ -10,6 +10,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -140,6 +141,24 @@ func TestParseCycloneDXRejectsNonCycloneDX(t *testing.T) {
 	}
 	if _, err := parseCycloneDX([]byte(`not json`)); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("bad json: want ErrValidation, got %v", err)
+	}
+}
+
+func TestImportSBOMSealFailurePreventsPersistence(t *testing.T) {
+	store := memory.NewImportedSBOMStore()
+	evidenceStore := &fakeEvidence{err: errors.New("evidence unavailable")}
+	evidenceService, err := evidenceuc.NewService(evidenceStore, nil, &fakeAudit{}, fakeClock{t: time.Unix(200, 0).UTC()}, fakeIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, nil, nil, nil, nil, nil, evidenceService, fakeIDs{}, ports.Provenance{}, fakeClock{t: time.Unix(200, 0).UTC()}, &fakeAudit{}, shared.SeverityHigh, 0, &fakeAcquirer{}, &fakeDetector{}, fakeSBOM{}, nil, nil, fakeLic{}, nil)
+	svc.SetImportedSBOMStore(store)
+	data := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","metadata":{"component":{"name":"product-service"}},"components":[{"name":"pkg","version":"1.0.0","purl":"pkg:npm/pkg@1.0.0"}]}`)
+	if _, err := svc.ImportSBOMFile(context.Background(), "operator", "tenant-1", "e1", "SBOM.json", data); err == nil || !strings.Contains(err.Error(), "seal scan evidence") {
+		t.Fatalf("ImportSBOMFile error=%v", err)
+	}
+	if _, err := store.LatestByEngagement(context.Background(), "tenant-1", "e1"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("imported artifact persisted after seal failure: %v", err)
 	}
 }
 

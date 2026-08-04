@@ -1139,12 +1139,18 @@ type SecretRawFinding struct {
 	Match    string // REDACTED preview only (e.g. "AKIA****...**7X"), never the full secret
 }
 
+// SecretScanReport is the bounded output of a deterministic secret scan. Truncated means the scan was incomplete due to a child-file failure or safety cap, so Findings is a lower bound.
+type SecretScanReport struct {
+	Findings  []SecretRawFinding
+	Truncated bool
+}
+
 // SecretScanner detects hardcoded secrets (tokens, keys, private-key blocks) in a prepared workspace. It is
-// deterministic and READ-ONLY, and it must redact every match before returning it. Best-effort: a walk
-// error is a per-file skip, never a scan failure. Results become ungated Kind=secret findings.
+// deterministic and READ-ONLY, and it must redact every match before returning it. Child file errors are
+// best-effort; root, traversal, and context errors fail the scan. Results become ungated Kind=secret findings.
 type SecretScanner interface {
 	Name() string
-	ScanFiles(ctx context.Context, root string) ([]SecretRawFinding, error)
+	ScanFiles(ctx context.Context, root string) (SecretScanReport, error)
 }
 
 // MisconfigRawFinding is one insecure infrastructure-as-code / config setting located at file:line, tied

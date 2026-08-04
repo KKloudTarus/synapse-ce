@@ -73,6 +73,10 @@ func (s *Service) ImportSBOMFile(ctx context.Context, actor string, tenantID, en
 		Manifest: ports.ScanManifest{SBOMSHA256: hashHex(data)},
 	}
 
+	if err := s.sealEvidence(ctx, actor, engagementID, now, res); err != nil {
+		return nil, err
+	}
+
 	if s.importedSBOM != nil {
 		if strings.TrimSpace(filename) == "" {
 			filename = importedsbom.DefaultFilename
@@ -106,8 +110,6 @@ func (s *Service) ImportSBOMFile(ctx context.Context, actor string, tenantID, en
 			return nil, fmt.Errorf("save imported result: %w", err)
 		}
 	}
-	// Seal a tamper-evident summary into the chain + audit.
-	s.sealEvidence(ctx, actor, engagementID, now, res)
 	_ = s.audit.Record(ctx, ports.AuditEntry{
 		Actor: actor, Action: "sca.sbom.imported", Target: target,
 		Metadata: map[string]string{"engagement": engagementID.String(), "components": strconv.Itoa(len(comps)), "dependencies": strconv.Itoa(len(parsed.Dependencies)), "format": "cyclonedx", "spec_version": parsed.SpecVersion, "sha256": hashHex(data)},

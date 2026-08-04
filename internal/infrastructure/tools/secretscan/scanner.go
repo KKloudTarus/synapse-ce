@@ -10,7 +10,9 @@ package secretscan
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math"
 	"os"
@@ -18,15 +20,18 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 const (
-	maxFiles     = 50000   // bound the workspace walk
-	maxFileBytes = 5 << 20 // skip files larger than 5 MiB (secrets live in small config/source)
-	sniffBytes   = 8 << 10 // read this much to decide binary-or-text
+	maxFiles          = 50000     // bound the workspace walk
+	maxFileBytes      = 5 << 20   // skip files larger than 5 MiB (secrets live in small config/source)
+	maxTotalScanBytes = 100 << 20 // bound aggregate source reads
+	maxFindings       = 2000      // bound aggregate redacted output
+	sniffBytes        = 8 << 10   // read this much to decide binary-or-text
 )
 
 // rule is one detector. keywords pre-filter the file (cheap Contains) before the regex runs; group selects
@@ -45,10 +50,11 @@ type rule struct {
 
 // Scanner implements ports.SecretScanner with an owned ruleset.
 type Scanner struct {
-	rules    []rule
-	allow    []*regexp.Regexp // global allow-list (placeholders, docs examples)
-	skipDirs map[string]bool
-	skipExt  map[string]bool
+	rules       []rule
+	allow       []*regexp.Regexp // global allow-list (placeholders, docs examples)
+	skipDirs    map[string]bool
+	skipExt     map[string]bool
+	openAndRead func(*os.Root, string, fs.FileInfo, int64) ([]byte, error)
 }
 
 var _ ports.SecretScanner = (*Scanner)(nil)
@@ -67,61 +73,144 @@ func New() *Scanner {
 		skipExt: set(".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg", ".pdf", ".zip", ".gz",
 			".tar", ".jar", ".war", ".class", ".exe", ".so", ".dll", ".dylib", ".woff", ".woff2",
 			".ttf", ".eot", ".mp4", ".mp3", ".mov", ".bin", ".wasm", ".lock", ".sum"),
+		openAndRead: openAndReadRegular,
 	}
 }
 
 // Name identifies the source on findings.
 func (s *Scanner) Name() string { return "synapse-secret-scan" }
 
-// ScanFiles walks root and returns redacted secret hits. Best-effort: an unreadable file is skipped.
-func (s *Scanner) ScanFiles(ctx context.Context, root string) ([]ports.SecretRawFinding, error) {
-	var out []ports.SecretRawFinding
-	seen := map[string]bool{} // dedup rule+file+line
-	count := 0
-	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
+// ScanFiles walks root and returns redacted secret hits. It confines every open to root and stops
+// when an aggregate byte, file, or finding limit is reached. Child-file failures mark the report truncated and are otherwise skipped.
+func (s *Scanner) ScanFiles(ctx context.Context, root string) (ports.SecretScanReport, error) {
+	return s.scanFiles(ctx, root, scanLimits{files: maxFiles, bytes: maxTotalScanBytes, findings: maxFindings})
+}
+
+type scanLimits struct {
+	files    int
+	bytes    int64
+	findings int
+}
+
+func (s *Scanner) scanFiles(ctx context.Context, root string, limits scanLimits) (report ports.SecretScanReport, err error) {
+	if err := ctx.Err(); err != nil {
+		return report, fmt.Errorf("secret scan: %w", err)
+	}
+	rootAbs, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return report, fmt.Errorf("secret scan root %q: %w", root, err)
+	}
+	rootDir, err := os.OpenRoot(rootAbs)
+	if err != nil {
+		return report, fmt.Errorf("open secret scan root %q: %w", root, err)
+	}
+	defer func() {
+		if closeErr := rootDir.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close secret scan root %q: %w", root, closeErr))
+		}
+	}()
+
+	seen := map[string]bool{}
+	visited := 0
+	var bytesRead int64
+	walkErr := fs.WalkDir(rootDir.FS(), ".", func(path string, d fs.DirEntry, walkEntryErr error) error {
+		if walkEntryErr != nil {
+			if path == "." {
+				return fmt.Errorf("walk root: %w", walkEntryErr)
+			}
+			report.Truncated = true
 			return nil
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		if d.IsDir() {
-			if s.skipDirs[d.Name()] {
-				return filepath.SkipDir
+			if path != "." && s.skipDirs[d.Name()] {
+				return fs.SkipDir
 			}
 			return nil
 		}
-		// Only read regular files: never follow a symlink out of the (untrusted) workspace, so a planted
-		// link cannot exfiltrate an out-of-root file's path or a redacted preview into a finding.
-		if !d.Type().IsRegular() {
+		if !d.Type().IsRegular() || s.skipExt[strings.ToLower(filepath.Ext(path))] {
 			return nil
 		}
-		if s.skipExt[strings.ToLower(filepath.Ext(path))] {
+		visited++
+		if visited > limits.files {
+			report.Truncated = true
+			return fs.SkipAll
+		}
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			report.Truncated = true
 			return nil
 		}
-		if count >= maxFiles {
-			return filepath.SkipAll
-		}
-		count++
-		info, e := d.Info()
-		if e != nil || info.Size() == 0 || info.Size() > maxFileBytes {
+		if !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > maxFileBytes {
 			return nil
 		}
-		data, e := os.ReadFile(path)
-		if e != nil || isBinary(data) {
+		if len(report.Findings) >= limits.findings || info.Size() > limits.bytes-bytesRead {
+			report.Truncated = true
+			return fs.SkipAll
+		}
+		data, readErr := s.openAndRead(rootDir, path, info, limits.bytes-bytesRead)
+		if readErr != nil {
+			if errors.Is(readErr, context.Canceled) || errors.Is(readErr, context.DeadlineExceeded) {
+				return readErr
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			report.Truncated = true
 			return nil
 		}
-		rel := strings.TrimPrefix(strings.TrimPrefix(path, root), string(os.PathSeparator))
-		s.scanContent(rel, data, seen, &out)
+		bytesRead += int64(len(data))
+		if isBinary(data) {
+			return nil
+		}
+		if s.scanContent(filepath.ToSlash(path), data, seen, &report.Findings, limits.findings) {
+			report.Truncated = true
+			return fs.SkipAll
+		}
 		return nil
 	})
 	if walkErr != nil {
-		return out, fmt.Errorf("secret scan: %w", walkErr) // e.g. context cancellation
+		return report, fmt.Errorf("secret scan: %w", walkErr)
 	}
-	return out, nil
+	if err := ctx.Err(); err != nil {
+		return report, fmt.Errorf("secret scan: %w", err)
+	}
+	return report, nil
 }
 
-func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out *[]ports.SecretRawFinding) {
+func openAndReadRegular(root *os.Root, rel string, walkInfo fs.FileInfo, limit int64) ([]byte, error) {
+	f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	openedInfo, err := f.Stat()
+	if err != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(walkInfo, openedInfo) ||
+		openedInfo.Size() == 0 || openedInfo.Size() > maxFileBytes || openedInfo.Size() > limit {
+		return nil, fmt.Errorf("opened file %q changed", rel)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil || int64(len(data)) > limit {
+		return nil, fmt.Errorf("read file %q", rel)
+	}
+	after, err := f.Stat()
+	if err != nil || !stableFileSnapshot(openedInfo, after, int64(len(data))) {
+		return nil, fmt.Errorf("file %q changed during scan", rel)
+	}
+	return data, nil
+}
+
+func stableFileSnapshot(before, after fs.FileInfo, bytesRead int64) bool {
+	return before.Mode().IsRegular() && after.Mode().IsRegular() && os.SameFile(before, after) &&
+		before.Size() == after.Size() && before.ModTime().Equal(after.ModTime()) && after.Size() == bytesRead
+}
+
+func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out *[]ports.SecretRawFinding, limit int) bool {
+	if strings.EqualFold(filepath.Ext(rel), ".vb") {
+		data = maskVBComments(data)
+	}
 	text := string(data)
 	for i := range s.rules {
 		r := &s.rules[i]
@@ -129,6 +218,9 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 			continue
 		}
 		for _, m := range r.re.FindAllStringSubmatchIndex(text, -1) {
+			if len(*out) >= limit {
+				return true
+			}
 			start, end := m[0], m[1]
 			if r.group > 0 && len(m) > 2*r.group+1 && m[2*r.group] >= 0 {
 				start, end = m[2*r.group], m[2*r.group+1]
@@ -157,6 +249,60 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 			})
 		}
 	}
+	return false
+}
+
+// maskVBComments preserves byte offsets and newlines while blanking apostrophe and statement Rem comments.
+// Doubled quotes remain inside string literals, so an apostrophe or Rem in a VB string is not misread.
+func maskVBComments(data []byte) []byte {
+	out := append([]byte(nil), data...)
+	for start := 0; start < len(out); {
+		end := start
+		for end < len(out) && out[end] != '\n' {
+			end++
+		}
+		inString, statementStart := false, true
+		for i := start; i < end; i++ {
+			if inString {
+				if out[i] == '"' {
+					if i+1 < end && out[i+1] == '"' {
+						i++
+						continue
+					}
+					inString = false
+				}
+				continue
+			}
+			if out[i] == '"' {
+				inString = true
+				statementStart = false
+				continue
+			}
+			if out[i] == '\'' {
+				for j := i; j < end; j++ {
+					out[j] = ' '
+				}
+				break
+			}
+			if out[i] == ':' {
+				statementStart = true
+				continue
+			}
+			if out[i] == ' ' || out[i] == '\t' || out[i] == '\r' {
+				continue
+			}
+			if statementStart && i+3 <= end && strings.EqualFold(string(out[i:i+3]), "rem") &&
+				(i+3 == end || out[i+3] == ' ' || out[i+3] == '\t') {
+				for j := i; j < end; j++ {
+					out[j] = ' '
+				}
+				break
+			}
+			statementStart = false
+		}
+		start = end + 1
+	}
+	return out
 }
 
 func (s *Scanner) allowed(secret string, ruleAllow []*regexp.Regexp) bool {
@@ -190,8 +336,9 @@ func hasAnyKeyword(text string, kws []string) bool {
 	if len(kws) == 0 {
 		return true
 	}
+	text = strings.ToLower(text)
 	for _, k := range kws {
-		if strings.Contains(text, k) {
+		if strings.Contains(text, strings.ToLower(k)) {
 			return true
 		}
 	}
@@ -473,8 +620,8 @@ func defaultRules() []rule {
 		},
 		{
 			id: "generic-secret", category: "Generic", title: "Hardcoded secret", severity: shared.SeverityMedium,
-			keywords: []string{"secret", "token", "passwd", "password", "api_key", "apikey", "access_key", "SECRET", "TOKEN", "API_KEY"},
-			re:       regexp.MustCompile(`(?i)(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)["']?\s*[:=]\s*["']([A-Za-z0-9/+=_\-]{16,})["']`),
+			keywords: []string{"secret", "token", "passwd", "password", "api_key", "apikey", "apiKey", "access_key", "SECRET", "TOKEN", "API_KEY"},
+			re:       regexp.MustCompile(`(?i)(?:(?:(?:public|private|protected|friend|shared|static|readonly|writable|shadows|overrides|overridable|notinheritable|mustinherit)\s+)*(?:dim|const)\s+)?(?:\[(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)\]|(?:api[_-]?key|secret|token|passwd|password|access[_-]?key))\$?\s*(?:as\s+[A-Za-z_][A-Za-z0-9_.]*)?\s*["']?\s*[:=]\s*["']([A-Za-z0-9/+=_\-]{16,})["']`),
 			group:    1,
 			minEnt:   3.5,
 			allow:    compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),

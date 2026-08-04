@@ -123,6 +123,13 @@ func (c *countingVuln) Scan(context.Context, *sbom.SBOM) ([]vulnerability.RawFin
 	return []vulnerability.RawFinding{{Source: "counting", AdvisoryID: "CVE-1", Component: "pkg", Version: "1.0.0", Severity: shared.SeverityHigh}}, nil
 }
 
+type staticVuln []vulnerability.RawFinding
+
+func (staticVuln) Name() string { return "static" }
+func (v staticVuln) Scan(context.Context, *sbom.SBOM) ([]vulnerability.RawFinding, error) {
+	return v, nil
+}
+
 type fakeLic struct{}
 
 func (fakeLic) Scan(_ context.Context, _ *sbom.SBOM) ([]ports.LicenseFinding, error) {
@@ -826,6 +833,39 @@ func TestScanWithOptionsMergesCachedComplementaryModeData(t *testing.T) {
 	}
 }
 
+func TestPartialScanEvidenceSealsMergedCachedFindings(t *testing.T) {
+	ctx := context.Background()
+	evidenceStore := &fakeEvidence{}
+	evidenceService, err := evidenceuc.NewService(evidenceStore, nil, &fakeAudit{}, fakeClock{t: time.Unix(100, 0).UTC()}, fakeIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := memory.NewScanResultStore()
+	vulnSrc := &countingVuln{}
+	licScan := staticLic{findings: []ports.LicenseFinding{{License: "GPL-3.0-only", Category: sbom.LicenseCopyleft, Verdict: ports.LicenseDeny, Components: []string{"pkg"}}}}
+	svc := NewService(
+		&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, nil, nil, results, nil, nil, evidenceService, fakeIDs{},
+		ports.Provenance{}, fakeClock{t: time.Unix(100, 0).UTC()}, &fakeAudit{}, shared.SeverityHigh, 0,
+		&fakeAcquirer{dir: t.TempDir()}, &fakeDetector{}, staticSBOM{doc: &sbom.SBOM{Components: []sbom.Component{{Name: "pkg", Version: "1.0.0", PURL: "pkg:npm/pkg@1.0.0", Licenses: []sbom.License{{SPDXID: "MIT"}}}}}},
+		[]ports.DetectionSource{vulnSrc}, nil, licScan, nil,
+	)
+	if _, err := svc.ScanWithOptions(ctx, "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeVulnerabilities}); err != nil {
+		t.Fatalf("vulnerability scan: %v", err)
+	}
+	if _, err := svc.ScanWithOptions(ctx, "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeLicenses}); err != nil {
+		t.Fatalf("license scan: %v", err)
+	}
+	if len(evidenceStore.items) != 2 {
+		t.Fatalf("sealed evidence count=%d, want 2", len(evidenceStore.items))
+	}
+	content := string(evidenceStore.items[1].Content)
+	for _, key := range []string{"vuln:CVE-1:pkg:1.0.0", "license:GPL-3.0-only"} {
+		if !strings.Contains(content, key) {
+			t.Fatalf("merged finding %q absent from evidence: %s", key, content)
+		}
+	}
+}
+
 func TestScanWithOptionsInvalidMode(t *testing.T) {
 	svc := newSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{})
 	_, err := svc.ScanWithOptions(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: "secrets"})
@@ -900,6 +940,73 @@ func TestMergeCachedScanResultPreservesComplementaryModeData(t *testing.T) {
 	}
 	if current.Findings[0].DedupKey != "vuln:CVE-1:pkg:1.0.0" || current.Findings[1].DedupKey != "license:GPL-3.0-only:pkg" {
 		t.Fatalf("unexpected merged findings: %+v", current.Findings)
+	}
+}
+
+func TestMergeCachedScanResultPreservesVulnerabilityProvenanceAndAnnotations(t *testing.T) {
+	const vulnKey = "vuln:CVE-1:pkg:1.0.0"
+	previous := ScanResult{
+		Vulnerabilities:       []vulnerability.Vulnerability{{ID: "CVE-1", Component: "pkg", Version: "1.0.0", Severity: shared.SeverityHigh}},
+		Findings:              []finding.Finding{{DedupKey: vulnKey}},
+		ToolVersions:          map[string]string{"grype": "old"},
+		VulnDBSnapshot:        "osv.dev@T1",
+		Manifest:              ports.ScanManifest{VulnDBSnapshot: "osv.dev@T1", GrypeDBVersion: "db-T1"},
+		SourceWarnings:        []string{"secret scan incomplete or truncated; secret findings are a lower bound"},
+		SuppressedFindings:    []SuppressedFinding{{DedupKey: vulnKey, RuleID: "CVE-1"}},
+		ExpiredSuppressions:   []string{"expired-vuln-rule"},
+		MalformedSuppressions: []string{"malformed-vuln-rule"},
+		NeedsVerification:     []NeedsVerifyFinding{{DedupKey: vulnKey, Reason: "prior triage"}},
+		AITriage:              []ports.AICritique{{DedupKey: vulnKey, SuspectedFP: true}},
+	}
+	current := &ScanResult{
+		ScanMode:       ScanModeLicenses,
+		Findings:       []finding.Finding{{DedupKey: "license:MIT:pkg"}},
+		ToolVersions:   map[string]string{"grype": "new"},
+		VulnDBSnapshot: "osv.dev@T2",
+		Manifest:       ports.ScanManifest{VulnDBSnapshot: "osv.dev@T2", GrypeDBVersion: "db-T2"},
+		AITriage:       []ports.AICritique{{DedupKey: "stale:unmerged"}},
+	}
+
+	mergeCachedScanResult(current, previous, ScanOptions{Mode: ScanModeLicenses})
+
+	if current.VulnDBSnapshot != "osv.dev@T1" || current.Manifest.VulnDBSnapshot != "osv.dev@T1" || current.Manifest.GrypeDBVersion != "db-T1" || current.ToolVersions["grype"] != "old" {
+		t.Fatalf("retained vulnerability provenance is inconsistent: %+v", current)
+	}
+	if len(current.SourceWarnings) != 1 || len(current.SuppressedFindings) != 1 || len(current.ExpiredSuppressions) != 1 || len(current.MalformedSuppressions) != 1 || len(current.NeedsVerification) != 1 || len(current.AITriage) != 1 {
+		t.Fatalf("retained annotations=%+v", current)
+	}
+	if current.AITriage[0].DedupKey != vulnKey || current.SuppressedFindings[0].DedupKey != vulnKey || current.NeedsVerification[0].DedupKey != vulnKey {
+		t.Fatalf("annotations must only reference merged findings: %+v", current)
+	}
+}
+
+func TestPartialScanRecomputesMergedCounters(t *testing.T) {
+	results := memory.NewScanResultStore()
+	vulnSrc := staticVuln{
+		{Source: "static", AdvisoryID: "CVE-fixed", Component: "pkg", Version: "1.0.0", Severity: shared.SeverityHigh, FixedVersion: "1.0.1"},
+		{Source: "static", AdvisoryID: "CVE-unfixed", Component: "pkg", Version: "1.0.0", Severity: shared.SeverityHigh},
+	}
+	svc := NewService(
+		&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, nil, nil, results, nil, nil, nil, nil,
+		ports.Provenance{}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAudit{}, shared.SeverityHigh, 0,
+		&fakeAcquirer{dir: t.TempDir()}, &fakeDetector{}, staticSBOM{doc: &sbom.SBOM{Components: []sbom.Component{{Name: "pkg", Version: "1.0.0", PURL: "pkg:npm/pkg@1.0.0"}}}},
+		[]ports.DetectionSource{vulnSrc}, nil, fakeLic{}, nil,
+	)
+	svc.SetIgnoreUnfixed(true)
+
+	first, err := svc.ScanWithOptions(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeVulnerabilities})
+	if err != nil {
+		t.Fatalf("vulnerability scan: %v", err)
+	}
+	if first.UnfixedSuppressed != 1 || first.FindingQuality.RawFindings != 1 {
+		t.Fatalf("first derived values=%+v", first)
+	}
+	second, err := svc.ScanWithOptions(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeLicenses})
+	if err != nil {
+		t.Fatalf("license scan: %v", err)
+	}
+	if second.VulnsBelowThreshold != 0 || second.UnfixedSuppressed != 1 || second.FindingQuality.RawFindings != 1 {
+		t.Fatalf("final derived values=%+v", second)
 	}
 }
 
@@ -1312,9 +1419,15 @@ func TestBuildManifestReproScore(t *testing.T) {
 }
 
 // fakeEvidence is a tamperable in-test evidence ledger.
-type fakeEvidence struct{ items []evidence.Evidence }
+type fakeEvidence struct {
+	items []evidence.Evidence
+	err   error
+}
 
 func (f *fakeEvidence) Append(_ context.Context, items []evidence.Evidence) error {
+	if f.err != nil {
+		return f.err
+	}
 	f.items = append(f.items, items...)
 	return nil
 }
@@ -1326,6 +1439,50 @@ func (f *fakeEvidence) Head(_ context.Context, _ shared.ID) (string, error) {
 		return "", nil
 	}
 	return f.items[len(f.items)-1].Hash, nil
+}
+
+type truncatedSecretScanner struct{}
+
+func (truncatedSecretScanner) Name() string { return "test-secret-scanner" }
+func (truncatedSecretScanner) ScanFiles(context.Context, string) (ports.SecretScanReport, error) {
+	return ports.SecretScanReport{Truncated: true}, nil
+}
+
+func TestSecretScanTruncationWarning(t *testing.T) {
+	svc := newSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: t.TempDir()}, &fakeAudit{}, &fakeDetector{})
+	svc.SetSecretScanner(truncatedSecretScanner{})
+	result, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.SourceWarnings) != 1 || result.SourceWarnings[0] != "secret scan incomplete or truncated; secret findings are a lower bound" {
+		t.Fatalf("SourceWarnings=%v", result.SourceWarnings)
+	}
+}
+
+func TestEvidenceFailurePreventsPersistence(t *testing.T) {
+	ctx := context.Background()
+	findings := memory.NewFindingRepository()
+	runs := memory.NewScanRunStore()
+	results := memory.NewScanResultStore()
+	evidenceStore := &fakeEvidence{err: errors.New("evidence unavailable")}
+	evidenceService, err := evidenceuc.NewService(evidenceStore, nil, &fakeAudit{}, fakeClock{t: time.Unix(100, 0).UTC()}, fakeIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, findings, nil, results, nil, runs, evidenceService, fakeIDs{}, ports.Provenance{}, fakeClock{t: time.Unix(100, 0).UTC()}, &fakeAudit{}, shared.SeverityHigh, 0, &fakeAcquirer{dir: t.TempDir()}, &fakeDetector{}, fakeSBOM{}, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil)
+	if _, err := svc.Scan(ctx, "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}); err == nil || !strings.Contains(err.Error(), "seal scan evidence") {
+		t.Fatalf("Scan error=%v", err)
+	}
+	if got, _ := findings.ListByEngagement(ctx, "e1"); len(got) != 0 {
+		t.Fatalf("findings persisted after seal failure: %+v", got)
+	}
+	if got, _ := runs.List(ctx, "e1"); len(got) != 0 {
+		t.Fatalf("runs persisted after seal failure: %+v", got)
+	}
+	if _, err := results.LatestResult(ctx, "e1"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("result persisted after seal failure: %v", err)
+	}
 }
 
 func TestEvidenceSealedAndVerifiable(t *testing.T) {

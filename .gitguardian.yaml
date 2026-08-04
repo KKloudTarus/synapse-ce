@@ -4,6 +4,8 @@
 # and were never used for any real service, so there is nothing to rotate.
 version: 2
 secret:
+  ignored-paths:
+    - "**/secretscan/*_test.go" # secret-scanner test fixtures: synthetic high-entropy values, not real credentials
   ignored-matches:
     - name: "Local dev docker stack password (Postgres/MinIO); dev-only default, not a real secret"
       match: synapse-secret
