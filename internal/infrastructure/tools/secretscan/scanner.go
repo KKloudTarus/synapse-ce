@@ -185,7 +185,7 @@ func openAndReadRegular(root *os.Root, rel string, walkInfo fs.FileInfo, limit i
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	openedInfo, err := f.Stat()
 	if err != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(walkInfo, openedInfo) ||
 		openedInfo.Size() == 0 || openedInfo.Size() > maxFileBytes || openedInfo.Size() > limit {
