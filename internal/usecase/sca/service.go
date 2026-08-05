@@ -1650,12 +1650,28 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	result.DebugEvents = trace.snapshot()
 	result.Coverage = sbom.CoverageByEcosystem(*result.SBOM)
 	result.SBOMQuality = sbom.Quality(*result.SBOM)
-	result.ReproDigest = ReproDigest(result)
 
 	if opts.scansVulnerabilities() && s.correlation != nil {
 		if report := vulnerability.CrossCheck(detectionSourceNames(s.sources), raws); len(report.Disagreements) > 0 {
 			_, _ = s.correlation.Record(ctx, engagementID, report)
 		}
+	}
+	if s.results != nil {
+		if previousData, loadErr := s.results.LatestResult(ctx, engagementID); loadErr == nil {
+			var previous ScanResult
+			if json.Unmarshal(previousData, &previous) == nil {
+				mergeCachedScanResult(result, previous, opts)
+			}
+		}
+	}
+	result.VulnsBelowThreshold = countBelowThreshold(result.Vulnerabilities, s.minSeverity)
+	result.UnfixedSuppressed = countUnfixedSuppressed(result.Vulnerabilities, s.minSeverity, s.ignoreUnfixed)
+	result.FindingQuality = computeFindingQuality(result)
+	applyDetectionPriority(result, opts.DetectionPriority)
+	s.attachCompliance(result)
+	result.ReproDigest = ReproDigest(result)
+	if err := s.sealEvidence(ctx, actor, engagementID, now, result); err != nil {
+		return nil, err
 	}
 	if s.runs != nil {
 		keys := make([]string, 0, len(result.Findings))
@@ -1664,7 +1680,6 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		}
 		_ = s.runs.Save(ctx, ports.ScanRun{ID: s.newRunID(), EngagementID: engagementID.String(), CreatedAt: now, Manifest: manifest, FindingKeys: keys})
 	}
-	s.sealEvidence(ctx, actor, engagementID, now, result)
 	if s.scans != nil {
 		skipped, err := s.scans.SaveScan(ctx, engagementID, doc, vulns, snap)
 		if err != nil {
@@ -1681,19 +1696,6 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 			return nil, fmt.Errorf("persist findings: %w", err)
 		}
 	}
-	if s.results != nil {
-		if previousData, loadErr := s.results.LatestResult(ctx, engagementID); loadErr == nil {
-			var previous ScanResult
-			if json.Unmarshal(previousData, &previous) == nil {
-				mergeCachedScanResult(result, previous, opts)
-			}
-		}
-	}
-	// Run over the FINAL findings (after any partial-rescan merge): quarantine lower-confidence vulns into
-	// the needs-verify queue (precise mode), then compute compliance – both must see the merged set so
-	// derived data can never go stale/false-clean.
-	applyDetectionPriority(result, opts.DetectionPriority)
-	s.attachCompliance(result)
 	if s.results != nil {
 		if data, mErr := json.Marshal(result); mErr == nil {
 			_ = s.results.SaveResult(ctx, engagementID, data)
@@ -2250,11 +2252,14 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Deterministic secret scan over the LIVE workspace: hardcoded credentials, redacted before they
 	// leave the scanner. Ungated Kind=secret findings, publishable like SCA. Best-effort.
 	if opts.scansVulnerabilities() && s.secretScanner != nil {
-		secretRaws, serr := s.secretScanner.ScanFiles(ctx, ws.Dir)
+		secretReport, serr := s.secretScanner.ScanFiles(ctx, ws.Dir)
 		if serr != nil {
 			return nil, fmt.Errorf("scan secrets: %w", serr)
 		}
-		result.Findings = append(result.Findings, buildSecretFindings(engagementID, secretRaws, now, s.minSeverity, s.includeTestSecrets)...)
+		if secretReport.Truncated {
+			result.SourceWarnings = append(result.SourceWarnings, "secret scan incomplete or truncated; secret findings are a lower bound")
+		}
+		result.Findings = append(result.Findings, buildSecretFindings(engagementID, secretReport.Findings, now, s.minSeverity, s.includeTestSecrets)...)
 	}
 	if opts.scansVulnerabilities() && s.misconfig != nil {
 		misRaws, merr := s.misconfig.ScanConfigs(ctx, ws.Dir)
@@ -2360,11 +2365,28 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 	}
 
-	// Reproducibility fingerprint: a stable content digest of the SBOM + findings, so the same
+	if s.results != nil {
+		if previousData, loadErr := s.results.LatestResult(ctx, engagementID); loadErr == nil {
+			var previous ScanResult
+			if json.Unmarshal(previousData, &previous) == nil {
+				mergeCachedScanResult(result, previous, opts)
+			}
+		}
+	}
+	result.VulnsBelowThreshold = countBelowThreshold(result.Vulnerabilities, s.minSeverity)
+	result.UnfixedSuppressed = countUnfixedSuppressed(result.Vulnerabilities, s.minSeverity, s.ignoreUnfixed)
+	result.FindingQuality = computeFindingQuality(result)
+	applyDetectionPriority(result, opts.DetectionPriority)
+	s.attachCompliance(result)
+	// Reproducibility fingerprint: a stable content digest of the final SBOM + findings, so the same
 	// inputs (target + pinned producer + pinned advisory/DB snapshot) verifiably yield the same scan.
 	result.ReproDigest = ReproDigest(result)
 
-	// Persist this run's manifest + finding keys for history + drift.
+	// Seal this scan into the engagement's append-only hash-chained evidence ledger
+	// before writing any run, scan, finding, or result state.
+	if err := s.sealEvidence(ctx, actor, engagementID, now, result); err != nil {
+		return nil, err
+	}
 	if s.runs != nil {
 		keys := make([]string, 0, len(result.Findings))
 		for _, f := range result.Findings {
@@ -2378,10 +2400,6 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			FindingKeys:  keys,
 		})
 	}
-
-	// Seal this scan into the engagement's append-only hash-chained evidence ledger
-	// One tamper-evident link per scan, bound to the prior link.
-	s.sealEvidence(ctx, actor, engagementID, now, result)
 
 	// The scan snapshot and the findings are written in SEPARATE transactions. A
 	// SaveScan that commits without its findings is tolerated: findings are
@@ -2412,19 +2430,6 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	}
 	// Cache the full result so the UI can re-display it after a reload (best-effort;
 	// a cache-write failure must not fail an otherwise-successful scan).
-	if s.results != nil {
-		if previousData, loadErr := s.results.LatestResult(ctx, engagementID); loadErr == nil {
-			var previous ScanResult
-			if json.Unmarshal(previousData, &previous) == nil {
-				mergeCachedScanResult(result, previous, opts)
-			}
-		}
-	}
-	// Run over the FINAL findings (after any partial-rescan merge): quarantine lower-confidence vulns into
-	// the needs-verify queue (precise mode), then compute compliance – both must see the merged set so
-	// derived data can never go stale/false-clean.
-	applyDetectionPriority(result, opts.DetectionPriority)
-	s.attachCompliance(result)
 	if s.results != nil {
 		if data, mErr := json.Marshal(result); mErr == nil {
 			_ = s.results.SaveResult(ctx, engagementID, data)
@@ -2521,11 +2526,16 @@ func mergeCachedScanResult(current *ScanResult, previous ScanResult, opts ScanOp
 		return
 	}
 	preserved := false
+	preservedVulnerabilities := false
 	if !opts.scansVulnerabilities() {
 		current.Vulnerabilities = previous.Vulnerabilities
 		current.VulnDBSnapshot = previous.VulnDBSnapshot
+		current.ToolVersions = previous.ToolVersions
+		current.Manifest = previous.Manifest
+		current.RiskMatches = previous.RiskMatches
 		current.Findings = mergeFindingsByKind(previous.Findings, current.Findings, true)
-		preserved = len(previous.Vulnerabilities) > 0 || hasFindingKind(previous.Findings, false)
+		preservedVulnerabilities = len(previous.Vulnerabilities) > 0 || hasFindingKind(previous.Findings, false)
+		preserved = preservedVulnerabilities
 	}
 	if !opts.scansLicenses() {
 		current.Licenses = previous.Licenses
@@ -2533,11 +2543,100 @@ func mergeCachedScanResult(current *ScanResult, previous ScanResult, opts ScanOp
 		current.LicenseCoverage = previous.LicenseCoverage
 		current.LicenseCoverageBreakdown = previous.LicenseCoverageBreakdown
 		current.Findings = mergeFindingsByKind(current.Findings, previous.Findings, true)
-		preserved = len(previous.Licenses) > 0 || len(previous.ComponentLicenses) > 0 || hasFindingKind(previous.Findings, true)
+		preserved = preserved || len(previous.Licenses) > 0 || len(previous.ComponentLicenses) > 0 || hasFindingKind(previous.Findings, true)
 	}
-	if preserved {
-		current.ScanMode = ScanModeFull
+	if !preserved {
+		return
 	}
+	current.ScanMode = ScanModeFull
+	mergeCachedAnnotations(current, previous, preservedVulnerabilities)
+}
+
+func mergeCachedAnnotations(current *ScanResult, previous ScanResult, preservePrevious bool) {
+	keys := make(map[string]struct{}, len(current.Findings))
+	for _, item := range current.Findings {
+		keys[item.DedupKey] = struct{}{}
+	}
+	current.SuppressedFindings = mergeSuppressedFindings(current.SuppressedFindings, previous.SuppressedFindings, keys)
+	current.NeedsVerification = mergeNeedsVerification(current.NeedsVerification, previous.NeedsVerification, keys)
+	current.AITriage = mergeAITriage(current.AITriage, previous.AITriage, keys)
+	if preservePrevious {
+		current.SourceWarnings = mergeStrings(current.SourceWarnings, previous.SourceWarnings)
+		current.ExpiredSuppressions = mergeStrings(current.ExpiredSuppressions, previous.ExpiredSuppressions)
+		current.MalformedSuppressions = mergeStrings(current.MalformedSuppressions, previous.MalformedSuppressions)
+	}
+}
+
+func mergeSuppressedFindings(current, previous []SuppressedFinding, keys map[string]struct{}) []SuppressedFinding {
+	out := make([]SuppressedFinding, 0, len(current)+len(previous))
+	seen := make(map[string]struct{}, len(current)+len(previous))
+	for _, items := range [][]SuppressedFinding{current, previous} {
+		for _, item := range items {
+			if _, ok := keys[item.DedupKey]; !ok {
+				continue
+			}
+			if _, ok := seen[item.DedupKey]; ok {
+				continue
+			}
+			seen[item.DedupKey] = struct{}{}
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func mergeNeedsVerification(current, previous []NeedsVerifyFinding, keys map[string]struct{}) []NeedsVerifyFinding {
+	out := make([]NeedsVerifyFinding, 0, len(current)+len(previous))
+	seen := make(map[string]struct{}, len(current)+len(previous))
+	for _, items := range [][]NeedsVerifyFinding{current, previous} {
+		for _, item := range items {
+			if _, ok := keys[item.DedupKey]; !ok {
+				continue
+			}
+			if _, ok := seen[item.DedupKey]; ok {
+				continue
+			}
+			seen[item.DedupKey] = struct{}{}
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func mergeAITriage(current, previous []ports.AICritique, keys map[string]struct{}) []ports.AICritique {
+	out := make([]ports.AICritique, 0, len(current)+len(previous))
+	seen := make(map[string]struct{}, len(current)+len(previous))
+	for _, items := range [][]ports.AICritique{current, previous} {
+		for _, item := range items {
+			if _, ok := keys[item.DedupKey]; !ok {
+				continue
+			}
+			if _, ok := seen[item.DedupKey]; ok {
+				continue
+			}
+			seen[item.DedupKey] = struct{}{}
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func mergeStrings(current, previous []string) []string {
+	out := make([]string, 0, len(current)+len(previous))
+	seen := make(map[string]struct{}, len(current)+len(previous))
+	for _, items := range [][]string{current, previous} {
+		for _, item := range items {
+			if item == "" {
+				continue
+			}
+			if _, ok := seen[item]; ok {
+				continue
+			}
+			seen[item] = struct{}{}
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func mergeFindingsByKind(primary, secondary []finding.Finding, takeLicenseFromSecondary bool) []finding.Finding {
@@ -2888,10 +2987,10 @@ var credInErr = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@`)
 // sealEvidence appends one tamper-evident link summarizing this scan to the
 // engagement's hash chain. Content is a canonical digest of the run:
 // SBOM hash, finding keys, and the manifest – so any later tampering is detectable
-// by re-verification. Best-effort: a ledger write must not fail a good scan.
-func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID shared.ID, now time.Time, result *ScanResult) {
+// by re-verification. A configured ledger failure prevents result persistence.
+func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID shared.ID, now time.Time, result *ScanResult) error {
 	if s.evidence == nil {
-		return
+		return nil
 	}
 	keys := make([]string, 0, len(result.Findings))
 	for _, f := range result.Findings {
@@ -2916,12 +3015,15 @@ func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID s
 	}{result.Manifest.SBOMSHA256, keys, suppressed, result.Manifest, now.UTC().Format(time.RFC3339), actor}
 	content, err := json.Marshal(payload)
 	if err != nil {
-		return
+		return fmt.Errorf("marshal scan evidence: %w", err)
 	}
 	// Append through the evidence vault – one tamper-evident chain + verify path per
 	// engagement. The vault binds the link to the current head; a transient
 	// Head failure fails the seal rather than forking the chain.
-	_, _ = s.evidence.Seal(ctx, engagementID, "scan", content, actor)
+	if _, err := s.evidence.Seal(ctx, engagementID, "scan", content, actor); err != nil {
+		return fmt.Errorf("seal scan evidence: %w", err)
+	}
+	return nil
 }
 
 // ReportInsight assembles the scan-level context the executive report needs:
