@@ -126,8 +126,8 @@ func (c *Client) Chat(ctx context.Context, req ports.ChatRequest) (ports.ChatRes
 		// 400; the orchestrator may retry without the schema (tool-calling still works).
 		body.ResponseFormat = &wireRespFmt{Type: "json_schema", JSONSchema: req.ResponseSchema}
 	}
-	if req.Temperature > 0 {
-		t := req.Temperature
+	if req.Temperature != nil {
+		t := *req.Temperature
 		body.Temperature = &t
 	}
 	// NOTE: no max_tokens/max_completion_tokens – the field name differs across OpenAI model

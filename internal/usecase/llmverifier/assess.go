@@ -73,7 +73,7 @@ func (c *Coordinator) assess(ctx context.Context, j judgment.Judgment) (int, str
 
 	resp, err := c.llm.Chat(ctx, ports.ChatRequest{
 		Model:          c.model,
-		Temperature:    0,
+		Temperature:    ports.Temp(0), // greedy: a sealed verdict must be reproducible from the audit record
 		MaxTokens:      maxTokens,
 		ResponseSchema: responseSchema,
 		Messages: []agent.Message{

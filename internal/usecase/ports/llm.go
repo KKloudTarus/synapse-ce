@@ -25,9 +25,16 @@ type ChatRequest struct {
 	Messages       []agent.Message
 	Tools          []agent.ToolSchema // the catalog advertised as function-calling tools
 	ResponseSchema json.RawMessage    // optional JSON Schema for a constrained response
-	Temperature    float64
-	MaxTokens      int
+	// Temperature is a pointer so an explicit 0 is distinguishable from "unset": nil leaves the
+	// choice to the provider default, non-nil is sent verbatim – and 0 means greedy decoding, which
+	// is what a caller whose verdict must be reproducible asks for. Use Temp.
+	Temperature *float64
+	MaxTokens   int
 }
+
+// Temp returns a pointer to v for ChatRequest.Temperature, so a deterministic caller can ask for an
+// explicit 0 without declaring a local variable at every call site.
+func Temp(v float64) *float64 { return &v }
 
 // ChatResponse is the model's turn. ToolCalls are PROPOSALS – the orchestrator decides what
 // (if anything) runs. FinishReason is the provider's stop reason ("stop"|"tool_calls"|"length").

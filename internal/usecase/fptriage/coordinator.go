@@ -166,8 +166,8 @@ func (c *Coordinator) assessOne(ctx context.Context, f finding.Finding, src Sour
 	}
 	req := ports.ChatRequest{
 		Model:          c.model,
-		Temperature:    0,
-		MaxTokens:      512, // headroom if the model emits a short rationale field before the JSON object
+		Temperature:    ports.Temp(0), // greedy: the same finding must critique the same way twice
+		MaxTokens:      512,           // headroom if the model emits a short rationale field before the JSON object
 		ResponseSchema: critiqueSchema,
 		Messages: []agent.Message{
 			{Role: "system", Content: systemPrompt},
@@ -205,7 +205,7 @@ func (c *Coordinator) verify(ctx context.Context, f finding.Finding, snippet str
 	}
 	resp, err := c.verifier.Chat(ctx, ports.ChatRequest{
 		Model:          c.verifierModel,
-		Temperature:    0,
+		Temperature:    ports.Temp(0), // greedy: consensus is only meaningful if the verifier is reproducible
 		MaxTokens:      512,
 		ResponseSchema: critiqueSchema,
 		Messages: []agent.Message{

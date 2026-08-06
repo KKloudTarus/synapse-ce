@@ -114,6 +114,38 @@ func TestAutoVerifyBestEffortOnLLMError(t *testing.T) {
 	}
 }
 
+// recordingLLM keeps every request so a test can assert what the verifier asked the provider for.
+type recordingLLM struct {
+	content string
+	reqs    []ports.ChatRequest
+}
+
+func (r *recordingLLM) Chat(_ context.Context, req ports.ChatRequest) (ports.ChatResponse, error) {
+	r.reqs = append(r.reqs, req)
+	return ports.ChatResponse{Content: r.content}, nil
+}
+
+// TestAssessRequestIsGreedy pins the sampling this verifier seals a verdict with: an explicit
+// temperature 0. Left unset, the provider's default applies and the same claim could score either side
+// of the 75 bar across runs — a sealed verdict must be reproducible from the audit record.
+func TestAssessRequestIsGreedy(t *testing.T) {
+	llm := &recordingLLM{content: `{"score":90,"rationale":"clearly a false positive"}`}
+	c := New(llm, "cx/verifier", &fakeVerifier{},
+		fakeLister{js: []judgment.Judgment{critique("1", "agent:x", judgment.StateProposed)}})
+	if _, err := c.AutoVerify(context.Background(), "eng", "human:tester"); err != nil {
+		t.Fatalf("AutoVerify: %v", err)
+	}
+	if len(llm.reqs) != 1 {
+		t.Fatalf("want 1 assess call, got %d", len(llm.reqs))
+	}
+	if llm.reqs[0].Temperature == nil {
+		t.Fatal("assess left temperature unset – the provider default applies")
+	}
+	if *llm.reqs[0].Temperature != 0 {
+		t.Errorf("temperature = %v, want 0", *llm.reqs[0].Temperature)
+	}
+}
+
 func TestParseVerdict(t *testing.T) {
 	for _, bad := range []string{"", "no json", `{"rationale":"x"}` /* no score */} {
 		if _, _, ok := parseVerdict(bad); ok {

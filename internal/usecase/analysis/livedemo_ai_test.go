@@ -78,7 +78,7 @@ func TestLiveAIRuntimeConfirmToDAST(t *testing.T) {
 	// The model proposes the typed SAST hypothesis (mirrors the agent's propose_sast_validation tool).
 	resp, cerr := llm.Chat(context.Background(), ports.ChatRequest{
 		Model:       model,
-		Temperature: 0,
+		Temperature: ports.Temp(0),
 		MaxTokens:   300,
 		Messages: []agent.Message{
 			{Role: agent.RoleSystem, Content: "You are a SAST triage assistant. Output ONLY a JSON object " +

@@ -88,7 +88,7 @@ func TestLiveAIRiskNarrativeToReport(t *testing.T) {
 
 	resp, err := llm.Chat(context.Background(), ports.ChatRequest{
 		Model:       model,
-		Temperature: 0,
+		Temperature: ports.Temp(0),
 		MaxTokens:   400,
 		Messages: []agent.Message{
 			{Role: agent.RoleSystem, Content: sys},
