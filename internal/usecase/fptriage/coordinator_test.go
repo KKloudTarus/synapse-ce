@@ -128,6 +128,41 @@ func TestVerifierConsensus(t *testing.T) {
 	}
 }
 
+// recordingLLM answers like roleLLM but keeps every request, so a test can assert what the coordinator
+// actually asked the provider for.
+type recordingLLM struct {
+	reply string
+	reqs  []ports.ChatRequest
+}
+
+func (r *recordingLLM) Chat(_ context.Context, req ports.ChatRequest) (ports.ChatResponse, error) {
+	r.reqs = append(r.reqs, req)
+	return ports.ChatResponse{Content: r.reply, FinishReason: "stop"}, nil
+}
+
+// TestCritiqueRequestsAreGreedy guards the determinism the gate exemption rests on: both the proposer
+// and the distinct verifier must ask for temperature 0 explicitly. A nil temperature would leave the
+// adjudication to the provider's default sampling, so the same finding could land on either side of the
+// confidence bar across two runs.
+func TestCritiqueRequestsAreGreedy(t *testing.T) {
+	llm := &recordingLLM{reply: `{"verdict":"refuted","driver":"not_reachable","confidence":92}`}
+	c := New(llm, "proposer-model").WithVerifier(llm, "verifier-model")
+	c.Assess(context.Background(), []finding.Finding{mkFinding("1", "X (a/b.go:1)")}, nil)
+
+	if len(llm.reqs) != 2 {
+		t.Fatalf("want a proposer and a verifier call, got %d", len(llm.reqs))
+	}
+	for i, req := range llm.reqs {
+		if req.Temperature == nil {
+			t.Errorf("request %d (%s) left temperature unset – the provider default applies", i, req.Model)
+			continue
+		}
+		if *req.Temperature != 0 {
+			t.Errorf("request %d (%s) temperature = %v, want 0", i, req.Model, *req.Temperature)
+		}
+	}
+}
+
 func TestAssessBestEffortOnLLMError(t *testing.T) {
 	cands := []finding.Finding{mkFinding("1", "X (a/b.go:1)")}
 	got := New(fakeLLM{err: errors.New("gateway 503")}, "m").Assess(context.Background(), cands, nil)

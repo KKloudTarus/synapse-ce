@@ -119,7 +119,7 @@ type Config struct {
 	Model               string
 	ProviderBase        string // recorded on the session for attribution; NEVER the API key
 	SystemPrompt        string // optional; defaults to DefaultSystemPrompt
-	Temperature         float64
+	Temperature         float64       // 0 = provider default (not sent)
 	MaxTokens           int           // per Chat call (0 = provider default)
 	MaxSteps            int           // hard cap on planning turns (default 16)
 	TokenBudget         int           // session token budget (0 = unbounded)
@@ -288,13 +288,19 @@ func (o *Orchestrator) loop(ctx context.Context, sess agent.Session) (agent.Sess
 		sess.Status = agent.StatusRunning
 	}
 
+	// The agent leaves sampling to the provider unless the run explicitly configured a temperature.
+	var temperature *float64
+	if o.cfg.Temperature > 0 {
+		temperature = ports.Temp(o.cfg.Temperature)
+	}
+
 	for {
 		if over, why := o.overBudget(ctx, sess); over {
 			return o.finish(ctx, sess, agent.StatusFailed, why)
 		}
 		resp, err := o.llm.Chat(ctx, ports.ChatRequest{
 			Model: o.cfg.Model, Messages: transcript, Tools: tools,
-			Temperature: o.cfg.Temperature, MaxTokens: o.cfg.MaxTokens,
+			Temperature: temperature, MaxTokens: o.cfg.MaxTokens,
 		})
 		if err != nil {
 			return o.fail(ctx, sess, fmt.Errorf("llm chat: %w", err))

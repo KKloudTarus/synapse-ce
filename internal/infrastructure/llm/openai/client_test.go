@@ -97,6 +97,57 @@ func TestChatTerminalOnBadRequest(t *testing.T) {
 	}
 }
 
+// TestChatSendsExplicitTemperatureZero pins the wire contract deterministic callers depend on: an
+// explicit temperature 0 (greedy decoding) must reach the provider. Dropping it silently falls back to
+// the provider default (~1.0), which is the difference between a reproducible verdict and a sampled one
+// — the FP-triage proposer/verifier and the judgment verifier all ask for 0.
+func TestChatSendsExplicitTemperatureZero(t *testing.T) {
+	body := captureChatBody(t, ports.ChatRequest{
+		Temperature: ports.Temp(0),
+		Messages:    []agent.Message{{Role: agent.RoleUser, Content: "hi"}},
+	})
+	got, ok := body["temperature"]
+	if !ok {
+		t.Fatal("temperature omitted from the request – the provider default applies")
+	}
+	if got != float64(0) {
+		t.Errorf("temperature = %v, want 0", got)
+	}
+}
+
+// TestChatOmitsTemperatureWhenUnset is the other half of that contract: a caller expressing no
+// preference must not be forced onto 0 – the provider default still applies.
+func TestChatOmitsTemperatureWhenUnset(t *testing.T) {
+	body := captureChatBody(t, ports.ChatRequest{
+		Messages: []agent.Message{{Role: agent.RoleUser, Content: "hi"}},
+	})
+	if v, ok := body["temperature"]; ok {
+		t.Errorf("temperature sent (%v) although the caller expressed no preference", v)
+	}
+}
+
+// captureChatBody runs one Chat against a stub gateway and returns the decoded request body.
+func captureChatBody(t *testing.T, req ports.ChatRequest) map[string]any {
+	t.Helper()
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(b, &body); err != nil {
+			t.Errorf("request body is not JSON: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"{}"},"finish_reason":"stop"}],"usage":{}}`))
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL, "", "m", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Chat(context.Background(), req); err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	return body
+}
+
 func TestNewValidates(t *testing.T) {
 	if _, err := New("", "k", "m", 0); !errors.Is(err, shared.ErrValidation) {
 		t.Error("empty base must fail validation")

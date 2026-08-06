@@ -47,6 +47,15 @@ capabilities below are already shipped on `main`.
 
 ### Fixed
 
+- **Deterministic AI adjudication.** An explicit `temperature: 0` never reached the provider: the
+  OpenAI-compatible adapter only sent the field when it was greater than zero, so the value a
+  deterministic caller asks for was indistinguishable from "unset" and was dropped from the request. The
+  AI false-positive proposer, its distinct verifier, and the automated judgment verifier all request 0 and
+  were therefore adjudicating at the provider's default sampling — the same finding could land on either
+  side of the evidence threshold across two runs, so a gate exemption and a sealed verdict were not
+  reproducible. `ChatRequest.Temperature` is now a `*float64` (nil leaves the provider default; a non-nil
+  value, including 0, is sent verbatim), so those three call sites decode greedily as intended. The agent
+  orchestrator is unchanged: it still leaves sampling to the provider unless a run configures one.
 - **Config docs.** `docs/guide/configuration.md` listed the analysis-brain flags (judgments, SAST,
   reachability, secret and misconfig scanning, cross-check, compliance, scan cache, image rootfs, owned
   advisory, gomodgraph) as default `false`; they ship `true`. Corrected the defaults to match the code.

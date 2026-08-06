@@ -74,7 +74,7 @@ func TestLiveAIPyReachAuthoritative(t *testing.T) {
 	// is what gets sealed + consumed by OpenVEX. We log its verdict and whether it corroborated.
 	resp, cerr := llm.Chat(context.Background(), ports.ChatRequest{
 		Model:       model,
-		Temperature: 0,
+		Temperature: ports.Temp(0),
 		MaxTokens:   50,
 		Messages: []agent.Message{
 			{Role: agent.RoleSystem, Content: "Answer with a single word: YES or NO."},
