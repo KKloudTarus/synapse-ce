@@ -49,7 +49,7 @@ func TestInventoryBuilderYarnWorkspaceObject(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	writeJSON(t, filepath.Join(root, "package.json"), map[string]any{
-		"private": true,
+		"private":    true,
 		"workspaces": map[string]any{"packages": []string{"apps/*"}},
 	})
 	writeJSON(t, filepath.Join(root, "apps", "web", "package.json"), map[string]any{"name": "web"})

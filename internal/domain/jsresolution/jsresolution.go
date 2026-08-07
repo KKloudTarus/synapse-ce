@@ -55,17 +55,17 @@ type ImportResolution struct {
 type CoverageIssueKind string
 
 const (
-	CoverageUnreadableMetadata         CoverageIssueKind = "unreadable-metadata"
-	CoverageMalformedMetadata          CoverageIssueKind = "malformed-metadata"
-	CoverageUnsupportedMetadata        CoverageIssueKind = "unsupported-metadata"
-	CoverageMetadataBudgetExceeded     CoverageIssueKind = "metadata-budget-exceeded"
-	CoverageWorkspaceRootEscape        CoverageIssueKind = "workspace-root-escape"
-	CoverageSymlinkWorkspace           CoverageIssueKind = "symlink-workspace"
-	CoverageWorkspaceNameConflict      CoverageIssueKind = "workspace-name-conflict"
-	CoverageUnresolvedAlias            CoverageIssueKind = "unresolved-alias"
-	CoverageUnsupportedAlias           CoverageIssueKind = "unsupported-alias"
-	CoverageMissingSBOMComponent       CoverageIssueKind = "missing-sbom-component"
-	CoverageAmbiguousSBOMComponent     CoverageIssueKind = "ambiguous-sbom-component"
+	CoverageUnreadableMetadata        CoverageIssueKind = "unreadable-metadata"
+	CoverageMalformedMetadata         CoverageIssueKind = "malformed-metadata"
+	CoverageUnsupportedMetadata       CoverageIssueKind = "unsupported-metadata"
+	CoverageMetadataBudgetExceeded    CoverageIssueKind = "metadata-budget-exceeded"
+	CoverageWorkspaceRootEscape       CoverageIssueKind = "workspace-root-escape"
+	CoverageSymlinkWorkspace          CoverageIssueKind = "symlink-workspace"
+	CoverageWorkspaceNameConflict     CoverageIssueKind = "workspace-name-conflict"
+	CoverageUnresolvedAlias           CoverageIssueKind = "unresolved-alias"
+	CoverageUnsupportedAlias          CoverageIssueKind = "unsupported-alias"
+	CoverageMissingSBOMComponent      CoverageIssueKind = "missing-sbom-component"
+	CoverageAmbiguousSBOMComponent    CoverageIssueKind = "ambiguous-sbom-component"
 	CoverageUnsupportedPackageManager CoverageIssueKind = "unsupported-package-manager"
 )
 
