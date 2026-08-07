@@ -2,7 +2,6 @@ package ports
 
 import (
 	"context"
-	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/modulegraph"
 )
@@ -13,10 +12,4 @@ func (compileTimeJSImportScanner) Scan(context.Context, string) (modulegraph.Gra
 	return modulegraph.Graph{}, nil
 }
 
-func TestJSImportScannerContract(t *testing.T) {
-	t.Parallel()
-	var scanner JSImportScanner = compileTimeJSImportScanner{}
-	if scanner == nil {
-		t.Fatal("scanner is nil")
-	}
-}
+var _ JSImportScanner = compileTimeJSImportScanner{}
