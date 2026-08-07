@@ -30,6 +30,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/threatmodel"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeupdraft"
 )
 
@@ -71,6 +72,26 @@ type AssetRepository interface {
 	UpsertBusinessService(ctx context.Context, s *asset.BusinessService) error
 	GetBusinessServiceByName(ctx context.Context, tenantID shared.ID, name string) (*asset.BusinessService, error)
 	ListBusinessServices(ctx context.Context, tenantID shared.ID) ([]*asset.BusinessService, error)
+}
+
+// WorkOrderStore persists the tenant-scoped fleet work order lifecycle. Postgres routes every
+// method through WithTenant so Row Level Security isolates by tenant at the database. Issue is
+// idempotent by (tenant, idempotency key) and rejects a second live order for the same
+// (tenant, asset, capability, time bucket) with shared.ErrConflict. Claim returns only unexpired
+// orders addressed to the given agent.
+type WorkOrderStore interface {
+	Issue(ctx context.Context, wo *workorder.WorkOrder) (*workorder.WorkOrder, error)
+	GetByID(ctx context.Context, tenantID, id shared.ID) (*workorder.WorkOrder, error)
+	Claim(ctx context.Context, tenantID, agentID shared.ID, max int, now time.Time) ([]*workorder.WorkOrder, error)
+	Transition(ctx context.Context, tenantID, id shared.ID, to workorder.State, reason string, expected workorder.State) error
+}
+
+// WorkOrderSigner signs and verifies the canonical signing payload of a work order. The
+// implementation holds the key; the control plane signs at issue time and the agent verifies
+// before acting. Kept as a port so the key material stays in an infrastructure/platform adapter.
+type WorkOrderSigner interface {
+	Sign(payload string) string
+	Verify(payload, signature string) bool
 }
 
 // QualityGateStore persists tenant-scoped custom gate definitions.
