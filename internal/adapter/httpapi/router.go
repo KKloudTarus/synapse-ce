@@ -60,6 +60,7 @@ type Router struct {
 	threatModels    threatModelService    // optional; nil ⇒ threat-model routes are not registered
 	drafts          writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
 	projects        projectService        // optional; nil ⇒ project routes are not registered
+	assets          assetService          // optional; nil ⇒ fleet asset routes are not registered
 	qualityGates    qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
 	qualityProfiles qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
 	rules           rulesService          // optional; nil ⇒ rule catalog routes are not registered
@@ -218,6 +219,14 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/quality-profiles/{key}/deactivate", rt.authz(userdom.PermOperate, rt.deactivateProfileRule))
 		mux.HandleFunc("POST /api/v1/quality-profiles/{key}/severity", rt.authz(userdom.PermOperate, rt.setProfileRuleSeverity))
 		mux.HandleFunc("DELETE /api/v1/quality-profiles/{key}", rt.authz(userdom.PermOperate, rt.deleteQualityProfile))
+	}
+	if rt.assets != nil {
+		mux.HandleFunc("POST /api/v1/assets", rt.authz(userdom.PermOperate, rt.createAsset))
+		mux.HandleFunc("GET /api/v1/assets", rt.authz(userdom.PermView, rt.listAssets))
+		mux.HandleFunc("POST /api/v1/assets/edges", rt.authz(userdom.PermOperate, rt.createAssetEdge))
+		mux.HandleFunc("GET /api/v1/assets/edges", rt.authz(userdom.PermView, rt.listAssetEdges))
+		mux.HandleFunc("POST /api/v1/assets/services", rt.authz(userdom.PermOperate, rt.createBusinessService))
+		mux.HandleFunc("GET /api/v1/assets/services", rt.authz(userdom.PermView, rt.listBusinessServices))
 	}
 	if rt.projects != nil {
 		mux.HandleFunc("POST /api/v1/projects", rt.authz(userdom.PermOperate, rt.createProject))

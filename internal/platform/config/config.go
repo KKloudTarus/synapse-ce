@@ -180,6 +180,10 @@ type Config struct {
 
 	// JudgmentsEnabled turns on the AI judgment lifecycle HTTP routes; off by default.
 	JudgmentsEnabled bool
+	// FleetAssetsEnabled turns on the multi-tenant fleet asset model (assets, edges, business
+	// services) and its HTTP routes; off by default. When on with Postgres, startup refuses to
+	// serve unless the DB role can enforce Row Level Security (not SUPERUSER/BYPASSRLS).
+	FleetAssetsEnabled bool
 	// SASTEnabled turns on the deterministic pattern-SAST analyzer in the scan pipeline; off by default.
 	SASTEnabled bool
 	// SecretScanEnabled turns on the deterministic secret scanner in the scan pipeline; off by default.
@@ -426,6 +430,7 @@ func Load() Config {
 		CrossCheckEnabled:      getbool("SYNAPSE_CROSSCHECK_ENABLED", true),
 		SBOMCrossCheckEnabled:  getbool("SYNAPSE_SBOM_CROSSCHECK_ENABLED", true),
 		WriteupDraftsEnabled:   getbool("SYNAPSE_WRITEUP_DRAFTS_ENABLED", false), // needs agent → opt-in
+		FleetAssetsEnabled:     getbool("SYNAPSE_FLEET_ASSETS_ENABLED", false),
 		GovulncheckBin:         getenv("SYNAPSE_GOVULNCHECK_BIN", "govulncheck"),
 		GoModGraphEnabled:      getbool("SYNAPSE_GOMODGRAPH_ENABLED", true),
 		GoBin:                  getenv("SYNAPSE_GO_BIN", "go"),
