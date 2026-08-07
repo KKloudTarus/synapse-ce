@@ -411,7 +411,14 @@ func addWorkspaceSource(out *[]workspaceSource, source workspaceSource, total *i
 		}
 		return
 	}
-	patterns := deduplicateStringsStable(source.patterns)
+	var patterns []string
+	if source.negationMode == workspaceNegationOrdered {
+		// Ordered npm semantics can use a later repeated positive pattern to
+		// re-include a path. Exact duplicate removal would change that meaning.
+		patterns = append([]string(nil), source.patterns...)
+	} else {
+		patterns = deduplicateStringsStable(source.patterns)
+	}
 	if len(patterns) > limits.maxPatternsPerSource {
 		coverage.add(jsresolution.CoverageIssue{Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: source.source, Detail: fmt.Sprintf("workspace pattern budget per source exceeded (%d)", limits.maxPatternsPerSource)})
 		patterns = patterns[:limits.maxPatternsPerSource]
@@ -488,6 +495,11 @@ func normalizeWorkspacePattern(baseDir, raw string, maxSegments int) (string, bo
 	if value == "" {
 		return "", false, fmt.Errorf("empty workspace pattern")
 	}
+	// Detect extglob before interpreting a leading ! as whole-pattern
+	// negation. In particular, !(...) is extglob, not an exclusion wrapper.
+	if usesUnsupportedExtglob(value) {
+		return "", false, fmt.Errorf("workspace pattern %q uses unsupported extended glob syntax", raw)
+	}
 	negated := strings.HasPrefix(value, "!")
 	if negated {
 		value = strings.TrimPrefix(value, "!")
@@ -501,9 +513,6 @@ func normalizeWorkspacePattern(baseDir, raw string, maxSegments int) (string, bo
 	value = strings.ReplaceAll(value, "\\", "/")
 	if strings.ContainsAny(value, "{}") {
 		return "", false, fmt.Errorf("workspace pattern %q uses unsupported brace expansion", raw)
-	}
-	if usesUnsupportedExtglob(value) {
-		return "", false, fmt.Errorf("workspace pattern %q uses unsupported extended glob syntax", raw)
 	}
 	segments := collapseDoubleStarSegments(strings.Split(value, "/"))
 	if len(segments) > maxSegments {
