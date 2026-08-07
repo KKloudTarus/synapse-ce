@@ -112,6 +112,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/llmverifier"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -173,6 +174,7 @@ func main() {
 	var assetStore ports.AssetRepository
 	var workOrderStore ports.WorkOrderStore
 	var fleetAgentStore ports.FleetAgentStore
+	var leaderStore ports.LeaderStore // postgres only; nil in memory mode (single process)
 	var findingRepo ports.FindingRepository
 	var judgmentStore analysisuc.Store // postgres or memory; satisfies both the narrow Store + ports.JudgmentStore
 	var commentRepo ports.CommentRepository
@@ -295,6 +297,7 @@ func main() {
 		assetStore = postgres.NewAssetRepository(pool)
 		workOrderStore = postgres.NewWorkOrderRepository(pool)
 		fleetAgentStore = postgres.NewFleetAgentRepository(pool)
+		leaderStore = postgres.NewLeaderStore(pool)
 		// SECURITY (#431 req 6, #432, #409): the fleet_* tables are RLS-protected, but RLS is a
 		// silent no-op if the runtime DB role is SUPERUSER or holds BYPASSRLS. When any fleet
 		// feature is enabled we refuse to serve unless the role can actually enforce isolation.
@@ -1294,6 +1297,21 @@ func main() {
 				}
 			}
 		}()
+	}
+
+	// Leader election (#406): run the fenced-lease elector so a future scheduler can gate periodic
+	// dispatch on IsLeader when running more than one instance. Postgres only. The elector resigns
+	// on shutdown so a follower takes over without waiting for the term. NOTE: this ships the
+	// election mechanism; removing the single-instance lock and gating dispatch on IsLeader (true
+	// horizontal scale) is the tracked follow-on.
+	if cfg.LeaderElectionEnabled && leaderStore != nil {
+		elector, eerr := leaderuc.NewElector(leaderStore, auditLog, clock, cfg.LeaderResource, ids.NewID().String(), cfg.LeaderTerm, cfg.LeaderRenew)
+		if eerr != nil {
+			log.Error("leader election enabled but misconfigured (require 0 < renew < term/2)", "err", eerr)
+			os.Exit(1)
+		}
+		go elector.Run(ctx)
+		log.Info("leader election ENABLED", "resource", cfg.LeaderResource, "term", cfg.LeaderTerm, "renew", cfg.LeaderRenew)
 	}
 
 	if err := httpserver.Run(ctx, cfg.HTTPAddr, router.Handler(), log); err != nil {
