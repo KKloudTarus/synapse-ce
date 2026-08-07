@@ -112,6 +112,22 @@ func (s *WorkOrderStore) Transition(_ context.Context, tenantID, id shared.ID, t
 	return nil
 }
 
+// CancelForAgent cancels every live order addressed to agentID and returns the count.
+func (s *WorkOrderStore) CancelForAgent(_ context.Context, tenantID, agentID shared.ID, reason string, now time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, o := range s.byID {
+		if o.TenantID == tenantID && o.AgentID == agentID && isLive(o.State) {
+			o.State = workorder.StateCancelled
+			o.RefuseReason = reason
+			o.Audit.UpdatedAt = now
+			n++
+		}
+	}
+	return n, nil
+}
+
 func isLive(s workorder.State) bool {
 	return s == workorder.StateIssued || s == workorder.StateClaimed || s == workorder.StateRunning
 }

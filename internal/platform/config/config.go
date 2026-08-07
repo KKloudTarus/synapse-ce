@@ -191,6 +191,16 @@ type Config struct {
 	// FleetSignerKey is the HMAC key that signs agent work orders. Required and at least 32 bytes
 	// when FleetEnabled; a missing/short key fails startup closed rather than boot a forgeable signer.
 	FleetSignerKey string
+	// FleetCACertPEM / FleetCAKeyPEM are the control-plane CA that issues agent client certificates
+	// (#408). When both are set and FleetEnabled, enrolment with a CSR returns a client certificate.
+	FleetCACertPEM string
+	FleetCAKeyPEM  string
+	// FleetCertTTL is the issued client certificate lifetime (default 720h).
+	FleetCertTTL time.Duration
+	// FleetClientCertHeader, when set, is the header a trusted mutual-TLS-terminating proxy uses to
+	// pass the verified client certificate to the agent plane. Empty = certificate auth disabled
+	// (bearer token only). Trust it ONLY behind a proxy that strips any client-supplied value.
+	FleetClientCertHeader string
 	// LeaderElectionEnabled runs the fenced-lease leader elector (#406). Off by default. Postgres
 	// only (a single in-memory process is trivially the leader). Renewing < Term/2 is enforced.
 	LeaderElectionEnabled bool
@@ -448,6 +458,10 @@ func Load() Config {
 		FleetAssetsEnabled:     getbool("SYNAPSE_FLEET_ASSETS_ENABLED", false),
 		FleetEnabled:           getbool("SYNAPSE_FLEET_ENABLED", false),
 		FleetSignerKey:         getenv("SYNAPSE_FLEET_SIGNER_KEY", ""),
+		FleetCACertPEM:         getenv("SYNAPSE_FLEET_CA_CERT", ""),
+		FleetCAKeyPEM:          getenv("SYNAPSE_FLEET_CA_KEY", ""),
+		FleetCertTTL:           getduration("SYNAPSE_FLEET_CERT_TTL", 720*time.Hour),
+		FleetClientCertHeader:  getenv("SYNAPSE_FLEET_CLIENT_CERT_HEADER", ""),
 		LeaderElectionEnabled:  getbool("SYNAPSE_LEADER_ENABLED", false),
 		LeaderResource:         getenv("SYNAPSE_LEADER_RESOURCE", "scheduler"),
 		LeaderTerm:             getduration("SYNAPSE_LEADER_TERM", 15*time.Second),

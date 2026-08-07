@@ -29,6 +29,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
 	egressinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/egress"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetca"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/file"
@@ -1068,7 +1069,20 @@ func main() {
 			log.Error("fleet work service init failed", "err", werr)
 			os.Exit(1)
 		}
-		router.SetFleet(agentSvc, workSvc, clock.Now)
+		// Revoking an agent cancels its in-flight work orders (#408).
+		agentSvc.SetWorkOrders(workOrderStore)
+		// Optional certificate identity (#408): when a control-plane CA is configured, enrolment
+		// with a CSR issues a client certificate. Fail closed on a misconfigured CA.
+		if cfg.FleetCACertPEM != "" && cfg.FleetCAKeyPEM != "" {
+			ca, cerr := fleetca.New([]byte(cfg.FleetCACertPEM), []byte(cfg.FleetCAKeyPEM), cfg.FleetCertTTL)
+			if cerr != nil {
+				log.Error("fleet CA configured but invalid – check SYNAPSE_FLEET_CA_CERT/KEY", "err", cerr)
+				os.Exit(1)
+			}
+			agentSvc.SetCA(ca)
+			log.Info("fleet agent certificate identity ENABLED (CSR enrolment issues client certs)")
+		}
+		router.SetFleet(agentSvc, workSvc, clock.Now, cfg.FleetClientCertHeader)
 		router.SetFleetAdmin(agentSvc)
 		log.Info("fleet agent transport ENABLED (agent-auth plane; operator agent-admin routes)")
 	}

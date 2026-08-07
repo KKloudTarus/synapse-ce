@@ -22,11 +22,12 @@ type State string
 
 const (
 	StateActive  State = "active"
+	StateStale   State = "stale" // last seen longer ago than the freshness threshold (computed by fleet coverage)
 	StateRevoked State = "revoked"
 )
 
 // Valid reports whether s is a known state.
-func (s State) Valid() bool { return s == StateActive || s == StateRevoked }
+func (s State) Valid() bool { return s == StateActive || s == StateStale || s == StateRevoked }
 
 // Agent is an enrolled fleet agent. TokenHash is the hash of the bearer credential presented on
 // every call; the plaintext is shown once at enrolment and never stored.
@@ -39,9 +40,28 @@ type Agent struct {
 	AgentVersion string
 	Capabilities []string
 	TokenHash    string
+	// Fingerprint is the SHA-256 of the agent's issued client certificate (#408). Empty until a
+	// certificate is issued from a CSR; it is the cryptographic identity used by mutual-TLS auth.
+	Fingerprint  string
 	State        State
 	Audit        shared.Audit
 	LastSeenAt   time.Time
+	RevokedAt    *time.Time
+	RevokedBy    shared.ID
+	RevokeReason string
+}
+
+// AttestCertificate records the SHA-256 fingerprint of the client certificate issued to the agent.
+func (a *Agent) AttestCertificate(fingerprint string) { a.Fingerprint = fingerprint }
+
+// Revoke marks the agent revoked with attribution, so its credential no longer authenticates.
+func (a *Agent) Revoke(by shared.ID, reason string, now time.Time) {
+	a.State = StateRevoked
+	a.RevokedBy = by
+	a.RevokeReason = reason
+	t := now
+	a.RevokedAt = &t
+	a.Audit.UpdatedAt = now
 }
 
 // NewAgent validates and constructs an active agent. tokenHash must be the (non-empty) hash of the
