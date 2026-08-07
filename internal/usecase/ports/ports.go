@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/audit"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/aup"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/callgraph"
@@ -54,6 +55,22 @@ type ProjectRepository interface {
 	// AssignProfile sets (or clears, with an empty profileKey) the quality profile assigned to a
 	// language for a project (project.DefaultProfileByLang[language]).
 	AssignProfile(ctx context.Context, tenantID shared.ID, projectKey, language, profileKey string) error
+}
+
+// AssetRepository persists the tenant-scoped fleet asset model (assets, typed edges, business
+// services). Every method is tenant-scoped; the Postgres implementation routes all access through
+// WithTenant so Row Level Security enforces isolation at the database. Upserts are idempotent by
+// natural key so re-observing an unchanged asset produces no churn. Lists return deterministically
+// ordered results.
+type AssetRepository interface {
+	UpsertAsset(ctx context.Context, a *asset.Asset) error
+	GetAssetByKey(ctx context.Context, tenantID shared.ID, kind asset.Kind, key string) (*asset.Asset, error)
+	ListAssets(ctx context.Context, tenantID shared.ID) ([]*asset.Asset, error)
+	UpsertEdge(ctx context.Context, e *asset.Edge) error
+	ListEdges(ctx context.Context, tenantID shared.ID) ([]*asset.Edge, error)
+	UpsertBusinessService(ctx context.Context, s *asset.BusinessService) error
+	GetBusinessServiceByName(ctx context.Context, tenantID shared.ID, name string) (*asset.BusinessService, error)
+	ListBusinessServices(ctx context.Context, tenantID shared.ID) ([]*asset.BusinessService, error)
 }
 
 // QualityGateStore persists tenant-scoped custom gate definitions.

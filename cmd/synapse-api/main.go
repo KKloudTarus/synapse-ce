@@ -92,6 +92,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/assetuc"
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
@@ -166,6 +167,7 @@ func main() {
 	// Persistence: PostgreSQL when configured, else file + in-memory (dev).
 	var repo ports.EngagementRepository
 	var projectRepo ports.ProjectRepository
+	var assetStore ports.AssetRepository
 	var findingRepo ports.FindingRepository
 	var judgmentStore analysisuc.Store // postgres or memory; satisfies both the narrow Store + ports.JudgmentStore
 	var commentRepo ports.CommentRepository
@@ -285,6 +287,16 @@ func main() {
 		advisoryStore = postgres.NewAdvisoryRepository(pool)
 		threatModelStore = postgres.NewThreatModelRepository(pool)
 		writeupDraftStore = postgres.NewWriteupDraftRepository(pool)
+		assetStore = postgres.NewAssetRepository(pool)
+		// SECURITY (#431 req 6, #432): the fleet_assets tables are RLS-protected, but RLS is a
+		// silent no-op if the runtime DB role is SUPERUSER or holds BYPASSRLS. When the asset model
+		// is enabled we refuse to serve unless the role can actually enforce isolation.
+		if cfg.FleetAssetsEnabled {
+			if rerr := postgres.CheckRLSRuntimeRole(startup, pool); rerr != nil {
+				log.Error("fleet assets enabled but the DB role cannot enforce row level security – refusing to serve", "err", rerr)
+				os.Exit(1)
+			}
+		}
 		aupStore = postgres.NewAUPStore(pool)
 		pgAudit := postgres.NewAuditLog(pool)
 		auditLog, auditReader = pgAudit, pgAudit
@@ -305,6 +317,7 @@ func main() {
 	} else {
 		repo = memory.NewEngagementRepository()
 		projectRepo = memory.NewProjectRepository()
+		assetStore = memory.NewAssetStore()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
 		commentRepo = memory.NewCommentRepository()
@@ -1015,6 +1028,15 @@ func main() {
 		writeupDraftSvc.SetFindingWriteupApplier(findingsService) // on accept, apply the draft's prose to its finding (validated finding∈engagement + audited)
 		router.SetWriteupDrafts(writeupDraftSvc)                  // human sign-off HTTP routes (list/edit/accept/reject; PermReview + SoD + withEngTenant)
 		log.Info("writeup draft proposals ENABLED (agent proposes prose; a distinct human signs off)")
+	}
+	if cfg.FleetAssetsEnabled {
+		svc, derr := assetuc.NewService(assetStore, auditLog, clock, ids)
+		if derr != nil {
+			log.Error("asset service init failed", "err", derr)
+			os.Exit(1)
+		}
+		router.SetAssets(svc)
+		log.Info("fleet asset model ENABLED (multi-tenant, Postgres RLS-enforced)")
 	}
 	// deterministic Tier-2 reachability proof in the scan pipeline (opt-in). It mints reachability
 	// judgments, so it requires the judgment lifecycle. The govulncheck builder shares the SCA sandbox when
