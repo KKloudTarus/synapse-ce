@@ -40,16 +40,41 @@ func TestNormalizePackageName(t *testing.T) {
 	}
 }
 
+func TestNormalizeRepositoryLocationPreservesFilesystemNames(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		input string
+		want  string
+	}{
+		{input: "c:tmp", want: "c:tmp"},
+		{input: `packages\private`, want: `packages\private`},
+		{input: "packages/./a", want: "packages/a"},
+	} {
+		got, err := NormalizeRepositoryLocation(test.input)
+		if err != nil {
+			t.Fatalf("NormalizeRepositoryLocation(%q): %v", test.input, err)
+		}
+		if got != test.want {
+			t.Fatalf("NormalizeRepositoryLocation(%q) = %q, want %q", test.input, got, test.want)
+		}
+	}
+	for _, input := range []string{"/absolute", "../escape", "a/../../escape", "bad\x00name"} {
+		if _, err := NormalizeRepositoryLocation(input); err == nil {
+			t.Fatalf("NormalizeRepositoryLocation(%q) error = nil", input)
+		}
+	}
+}
+
 func TestNormalizeInventoryDeterministicAndNonMutating(t *testing.T) {
 	t.Parallel()
 	input := Inventory{
 		Packages: []PackageMetadata{
-			{Name: "@Scope/B", Path: `packages\\b`, Workspace: true, DeclaredBy: []MetadataDeclaration{{Source: "package.json", Pattern: "packages/*"}}},
+			{Name: "@Scope/B", Path: "packages/b", Workspace: true, DeclaredBy: []MetadataDeclaration{{Source: "package.json", Pattern: `packages\*`}}},
 			{Name: "a", Path: "packages/a", Workspace: true},
 			{Name: "a", Path: "packages/a", Workspace: true},
 		},
 		Coverage: []CoverageIssue{
-			{Kind: CoverageMalformedMetadata, Path: `packages\\b\\package.json`, Detail: " malformed "},
+			{Kind: CoverageMalformedMetadata, Path: "packages/b/package.json", Detail: " malformed "},
 			{Kind: CoverageMalformedMetadata, Path: "packages/b/package.json", Detail: "malformed"},
 		},
 		EntriesScanned: 10,
@@ -68,6 +93,9 @@ func TestNormalizeInventoryDeterministicAndNonMutating(t *testing.T) {
 	}
 	if got.Packages[0].Path != "packages/a" || got.Packages[1].Name != "@scope/b" {
 		t.Fatalf("unexpected deterministic ordering: %#v", got.Packages)
+	}
+	if got.Packages[1].DeclaredBy[0].Pattern != "packages/*" {
+		t.Fatalf("declared pattern = %q", got.Packages[1].DeclaredBy[0].Pattern)
 	}
 	if !reflect.DeepEqual(input.Packages, before) {
 		t.Fatalf("NormalizeInventory mutated input: %#v", input.Packages)
