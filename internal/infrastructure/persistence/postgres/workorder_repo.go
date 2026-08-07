@@ -167,6 +167,23 @@ func (r *WorkOrderRepository) Transition(ctx context.Context, tenantID, id share
 	})
 }
 
+// CancelForAgent cancels every live order addressed to agentID (used on agent revocation).
+func (r *WorkOrderRepository) CancelForAgent(ctx context.Context, tenantID, agentID shared.ID, reason string, now time.Time) (int, error) {
+	var n int
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		tag, e := tx.Exec(ctx, `
+			UPDATE work_orders SET state='cancelled', refuse_reason=$3, updated_at=$4
+			WHERE tenant_id=$1 AND agent_id=$2 AND state IN ('issued','claimed','running')`,
+			tenantID.String(), agentID.String(), reason, now)
+		if e != nil {
+			return e
+		}
+		n = int(tag.RowsAffected())
+		return nil
+	})
+	return n, err
+}
+
 func scanWorkOrder(row rowScanner) (*workorder.WorkOrder, error) {
 	var (
 		id, tid, asset, agent, cap, auth, idem, state, reason, sig string

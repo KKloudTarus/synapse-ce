@@ -87,7 +87,7 @@ func TestFleetAgentRepository(t *testing.T) {
 	if got.AgentVersion != "0.2.0" || len(got.Capabilities) != 2 {
 		t.Fatalf("heartbeat did not update: %+v", got)
 	}
-	if err := repo.Revoke(ctx, "ft", "ag1", now.Add(2*time.Minute)); err != nil {
+	if err := repo.Revoke(ctx, "ft", "ag1", "op", "test", now.Add(2*time.Minute)); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	got, _ = repo.GetAgent(ctx, "ft", "ag1")

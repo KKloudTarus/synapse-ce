@@ -85,6 +85,9 @@ type WorkOrderStore interface {
 	GetByID(ctx context.Context, tenantID, id shared.ID) (*workorder.WorkOrder, error)
 	Claim(ctx context.Context, tenantID, agentID shared.ID, max int, now time.Time) ([]*workorder.WorkOrder, error)
 	Transition(ctx context.Context, tenantID, id shared.ID, to workorder.State, reason string, expected workorder.State, now time.Time) error
+	// CancelForAgent moves every live (issued/claimed/running) order addressed to agentID into the
+	// cancelled state, returning how many were cancelled. Used when an agent is revoked.
+	CancelForAgent(ctx context.Context, tenantID, agentID shared.ID, reason string, now time.Time) (int, error)
 }
 
 // FleetAgentStore persists tenant-scoped fleet agent identities and their single-use enrolment
@@ -98,7 +101,10 @@ type FleetAgentStore interface {
 	CreateAgent(ctx context.Context, a *fleetagent.Agent) error
 	GetAgent(ctx context.Context, tenantID, id shared.ID) (*fleetagent.Agent, error)
 	Heartbeat(ctx context.Context, tenantID, id shared.ID, platform, osVersion, agentVersion string, capabilities []string, now time.Time) error
-	Revoke(ctx context.Context, tenantID, id shared.ID, now time.Time) error
+	// SetFingerprint records the SHA-256 of the client certificate issued to the agent from a CSR.
+	SetFingerprint(ctx context.Context, tenantID, id shared.ID, fingerprint string, now time.Time) error
+	// Revoke marks the agent revoked with operator attribution and a reason.
+	Revoke(ctx context.Context, tenantID, id, by shared.ID, reason string, now time.Time) error
 	ListAgents(ctx context.Context, tenantID shared.ID) ([]*fleetagent.Agent, error)
 }
 
@@ -109,6 +115,14 @@ type FleetAgentStore interface {
 type LeaderStore interface {
 	Acquire(ctx context.Context, resource, holder string, term time.Duration, now time.Time) (held bool, fence int64, err error)
 	Resign(ctx context.Context, resource, holder string, now time.Time) error
+}
+
+// CertificateIssuer issues a client certificate for a fleet agent from a certificate signing
+// request, binding it to (agentID, tenantID) and returning the certificate PEM and its SHA-256
+// fingerprint. Implemented by the control-plane CA in infrastructure; the usecase depends only on
+// this port. The agent's private key is never seen (only its CSR).
+type CertificateIssuer interface {
+	Issue(csrPEM []byte, agentID, tenantID string, now time.Time) (certPEM []byte, fingerprint string, err error)
 }
 
 // WorkOrderSigner signs and verifies the canonical signing payload of a work order. The

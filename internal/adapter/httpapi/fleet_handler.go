@@ -2,11 +2,15 @@ package httpapi
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,8 +33,9 @@ const (
 
 // fleetAgentService is the narrow view of fleet agent identity the transport needs.
 type fleetAgentService interface {
-	Enrol(ctx context.Context, enrolToken string, in fleetagentuc.EnrolInput) (*fleetagent.Agent, string, error)
+	Enrol(ctx context.Context, enrolToken string, in fleetagentuc.EnrolInput) (*fleetagent.Agent, string, []byte, error)
 	Authenticate(ctx context.Context, token string) (*fleetagent.Agent, error)
+	AuthenticateCertificate(ctx context.Context, tenantID, agentID shared.ID, fingerprint string) (*fleetagent.Agent, error)
 	Heartbeat(ctx context.Context, agent *fleetagent.Agent, in fleetagentuc.HeartbeatInput) error
 }
 
@@ -42,28 +47,68 @@ type fleetWorkService interface {
 }
 
 type fleetRouter struct {
-	agents   fleetAgentService
-	work     fleetWorkService
-	log      *slog.Logger
-	agentLim *keyedLimiter // post-auth, keyed by agent id
-	ipLim    *keyedLimiter // pre-auth, keyed by client IP (throttles enrol + failed auth)
+	agents           fleetAgentService
+	work             fleetWorkService
+	log              *slog.Logger
+	agentLim         *keyedLimiter // post-auth, keyed by agent id
+	ipLim            *keyedLimiter // pre-auth, keyed by client IP (throttles enrol + failed auth)
+	clientCertHeader string        // when set, a trusted proxy passes the verified client cert here
 }
 
 // SetFleet wires the untrusted agent transport plane. When nil, /api/v1/fleet is not served.
-func (rt *Router) SetFleet(agents fleetAgentService, work fleetWorkService, now func() time.Time) {
+// clientCertHeader, when non-empty, is the header a trusted mutual-TLS-terminating proxy uses to
+// pass the verified client certificate; empty disables certificate auth and uses the bearer token.
+func (rt *Router) SetFleet(agents fleetAgentService, work fleetWorkService, now func() time.Time, clientCertHeader string) {
 	rt.fleet = &fleetRouter{
-		agents:   agents,
-		work:     work,
-		log:      rt.log,
-		agentLim: newKeyedLimiter(fleetRatePerMin, now),
-		ipLim:    newKeyedLimiter(fleetIPRatePerMin, now),
+		agents:           agents,
+		work:             work,
+		log:              rt.log,
+		agentLim:         newKeyedLimiter(fleetRatePerMin, now),
+		ipLim:            newKeyedLimiter(fleetIPRatePerMin, now),
+		clientCertHeader: clientCertHeader,
 	}
+}
+
+// authByClientCert authenticates an agent from a verified client certificate the trusted proxy
+// passed in a header. It reads the tenant (OU) and agent id (CN) from the certificate subject and
+// verifies the fingerprint against the stored one. Parsing failure is an unauthenticated result,
+// never a 500, so a malformed header cannot be distinguished from a wrong credential.
+func (f *fleetRouter) authByClientCert(ctx context.Context, headerVal string) (*fleetagent.Agent, error) {
+	raw := headerVal
+	// A raw PEM already contains the literal header; only URL-unescape when it does not (some proxies
+	// pass the certificate URL-escaped). Unescaping a raw PEM would corrupt its base64 '+' bytes.
+	if !strings.Contains(raw, "BEGIN CERTIFICATE") {
+		if unesc, err := url.QueryUnescape(headerVal); err == nil {
+			raw = unesc
+		}
+	}
+	block, _ := pem.Decode([]byte(raw))
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, fleetagentuc.ErrUnauthenticated
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fleetagentuc.ErrUnauthenticated
+	}
+	// Enforce the certificate validity window at the app layer too, not only at the proxy handshake:
+	// a stored fingerprint outlives the cert, so an expired certificate must not authenticate.
+	now := time.Now()
+	if now.Before(cert.NotBefore) || now.After(cert.NotAfter) {
+		return nil, fleetagentuc.ErrUnauthenticated
+	}
+	agentID := cert.Subject.CommonName
+	if agentID == "" || len(cert.Subject.OrganizationalUnit) == 0 || cert.Subject.OrganizationalUnit[0] == "" {
+		return nil, fleetagentuc.ErrUnauthenticated
+	}
+	tenant := cert.Subject.OrganizationalUnit[0]
+	fingerprint := fleetagent.CertFingerprint(cert.Raw)
+	return f.agents.AuthenticateCertificate(ctx, shared.ID(tenant), shared.ID(agentID), fingerprint)
 }
 
 // fleetAdminService is the operator-facing (human, RBAC-gated) view of fleet agent management.
 type fleetAdminService interface {
 	MintEnrolToken(ctx context.Context, actor string, tenantID shared.ID, ttl time.Duration) (string, error)
-	Revoke(ctx context.Context, actor string, tenantID, id shared.ID) error
+	Revoke(ctx context.Context, actor string, tenantID, id shared.ID, reason string) error
 	ListAgents(ctx context.Context, tenantID shared.ID) ([]*fleetagent.Agent, error)
 }
 
@@ -131,7 +176,11 @@ func (rt *Router) listFleetAgents(w http.ResponseWriter, r *http.Request) {
 
 func (rt *Router) revokeFleetAgent(w http.ResponseWriter, r *http.Request) {
 	id := shared.ID(r.PathValue("id"))
-	if err := rt.fleetAdmin.Revoke(r.Context(), PrincipalFrom(r.Context()), fleetTenant(r.Context()), id); err != nil {
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, fleetBodyCap)).Decode(&req)
+	if err := rt.fleetAdmin.Revoke(r.Context(), PrincipalFrom(r.Context()), fleetTenant(r.Context()), id, req.Reason); err != nil {
 		writeError(w, rt.log, err)
 		return
 	}
@@ -191,12 +240,28 @@ func clientIP(r *http.Request) string {
 // the context. The tenant comes from the authenticated agent, never from the request.
 func (f *fleetRouter) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token, ok := bearerToken(r)
-		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorBody{Error: "unauthenticated"})
-			return
+		var (
+			agent *fleetagent.Agent
+			err   error
+		)
+		// Certificate identity takes precedence when the mutual-TLS-terminating proxy is configured
+		// to pass the verified client certificate in clientCertHeader. SECURITY: this header is
+		// trusted only because the operator asserts (via config) that a trusted proxy verifies mTLS
+		// and STRIPS any client-supplied value; the app must not be directly reachable. When the
+		// header is absent we fall back to the bearer credential.
+		// When the cert header is configured but absent, we fall back to the bearer token (a
+		// reasonable migration posture). A strict certificate-required mode that refuses the bearer
+		// fallback is a documented follow-up for deployments where mTLS supersedes the token.
+		if f.clientCertHeader != "" && r.Header.Get(f.clientCertHeader) != "" {
+			agent, err = f.authByClientCert(r.Context(), r.Header.Get(f.clientCertHeader))
+		} else {
+			token, ok := bearerToken(r)
+			if !ok {
+				writeJSON(w, http.StatusUnauthorized, errorBody{Error: "unauthenticated"})
+				return
+			}
+			agent, err = f.agents.Authenticate(r.Context(), token)
 		}
-		agent, err := f.agents.Authenticate(r.Context(), token)
 		if err != nil {
 			switch {
 			case errors.Is(err, fleetagentuc.ErrRevoked):
@@ -230,14 +295,15 @@ func (f *fleetRouter) enrol(w http.ResponseWriter, r *http.Request) {
 		OSVersion    string   `json:"os_version"`
 		AgentVersion string   `json:"agent_version"`
 		Capabilities []string `json:"capabilities"`
+		CSRPEM       string   `json:"csr_pem"` // optional PEM CSR for certificate identity (#408)
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, fleetBodyCap)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid enrol body"})
 		return
 	}
-	agent, agentToken, err := f.agents.Enrol(r.Context(), token, fleetagentuc.EnrolInput{
+	agent, agentToken, certPEM, err := f.agents.Enrol(r.Context(), token, fleetagentuc.EnrolInput{
 		Name: req.Name, Platform: req.Platform, OSVersion: req.OSVersion,
-		AgentVersion: req.AgentVersion, Capabilities: req.Capabilities,
+		AgentVersion: req.AgentVersion, Capabilities: req.Capabilities, CSRPEM: []byte(req.CSRPEM),
 	})
 	if err != nil {
 		if errors.Is(err, fleetagentuc.ErrUnauthenticated) {
@@ -247,8 +313,12 @@ func (f *fleetRouter) enrol(w http.ResponseWriter, r *http.Request) {
 		writeError(w, f.log, err)
 		return
 	}
-	// The agent token is returned exactly once here; it is never stored in the clear or logged.
-	writeJSON(w, http.StatusCreated, map[string]string{"agent_id": agent.ID.String(), "token": agentToken})
+	// The agent token and certificate are returned exactly once here; never stored in the clear or logged.
+	resp := map[string]string{"agent_id": agent.ID.String(), "token": agentToken}
+	if len(certPEM) > 0 {
+		resp["certificate_pem"] = string(certPEM)
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (f *fleetRouter) heartbeat(w http.ResponseWriter, r *http.Request) {

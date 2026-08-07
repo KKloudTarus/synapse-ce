@@ -26,7 +26,7 @@ func NewFleetAgentRepository(pool *pgxpool.Pool) *FleetAgentRepository {
 
 var _ ports.FleetAgentStore = (*FleetAgentRepository)(nil)
 
-const fleetAgentCols = `id, tenant_id, name, platform, os_version, agent_version, capabilities, token_hash, state, created_at, updated_at, last_seen_at`
+const fleetAgentCols = `id, tenant_id, name, platform, os_version, agent_version, capabilities, token_hash, state, created_at, updated_at, last_seen_at, fingerprint, revoked_at, revoked_by, revoke_reason`
 
 func (r *FleetAgentRepository) CreateEnrolToken(ctx context.Context, t *fleetagent.EnrolToken) error {
 	return WithTenant(ctx, r.pool, t.TenantID.String(), func(tx pgx.Tx) error {
@@ -69,9 +69,10 @@ func (r *FleetAgentRepository) CreateAgent(ctx context.Context, a *fleetagent.Ag
 	return WithTenant(ctx, r.pool, a.TenantID.String(), func(tx pgx.Tx) error {
 		_, e := tx.Exec(ctx, `
 			INSERT INTO fleet_agents (`+fleetAgentCols+`)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 			a.ID.String(), a.TenantID.String(), a.Name, a.Platform, a.OSVersion, a.AgentVersion,
-			caps, a.TokenHash, string(a.State), a.Audit.CreatedAt, a.Audit.UpdatedAt, a.LastSeenAt)
+			caps, a.TokenHash, string(a.State), a.Audit.CreatedAt, a.Audit.UpdatedAt, a.LastSeenAt,
+			a.Fingerprint, a.RevokedAt, a.RevokedBy.String(), a.RevokeReason)
 		return e
 	})
 }
@@ -123,10 +124,26 @@ func (r *FleetAgentRepository) Heartbeat(ctx context.Context, tenantID, id share
 	})
 }
 
-func (r *FleetAgentRepository) Revoke(ctx context.Context, tenantID, id shared.ID, now time.Time) error {
+func (r *FleetAgentRepository) SetFingerprint(ctx context.Context, tenantID, id shared.ID, fingerprint string, now time.Time) error {
 	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
-		tag, e := tx.Exec(ctx, `UPDATE fleet_agents SET state='revoked', updated_at=$3 WHERE tenant_id=$1 AND id=$2`,
-			tenantID.String(), id.String(), now)
+		tag, e := tx.Exec(ctx, `UPDATE fleet_agents SET fingerprint=$3, updated_at=$4 WHERE tenant_id=$1 AND id=$2`,
+			tenantID.String(), id.String(), fingerprint, now)
+		if e != nil {
+			return e
+		}
+		if tag.RowsAffected() == 0 {
+			return shared.ErrNotFound
+		}
+		return nil
+	})
+}
+
+func (r *FleetAgentRepository) Revoke(ctx context.Context, tenantID, id, by shared.ID, reason string, now time.Time) error {
+	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		tag, e := tx.Exec(ctx, `UPDATE fleet_agents
+			SET state='revoked', revoked_at=$3, revoked_by=$4, revoke_reason=$5, updated_at=$3
+			WHERE tenant_id=$1 AND id=$2`,
+			tenantID.String(), id.String(), now, by.String(), reason)
 		if e != nil {
 			return e
 		}
@@ -163,11 +180,14 @@ func (r *FleetAgentRepository) ListAgents(ctx context.Context, tenantID shared.I
 func scanAgent(row rowScanner) (*fleetagent.Agent, error) {
 	var (
 		id, tid, name, platform, osv, ver, hash, state string
+		fingerprint, revokedBy, revokeReason           string
+		revokedAt                                      *time.Time
 		caps                                           []byte
 		a                                              fleetagent.Agent
 	)
 	if err := row.Scan(&id, &tid, &name, &platform, &osv, &ver, &caps, &hash, &state,
-		&a.Audit.CreatedAt, &a.Audit.UpdatedAt, &a.LastSeenAt); err != nil {
+		&a.Audit.CreatedAt, &a.Audit.UpdatedAt, &a.LastSeenAt,
+		&fingerprint, &revokedAt, &revokedBy, &revokeReason); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, shared.ErrNotFound
 		}
@@ -181,6 +201,10 @@ func scanAgent(row rowScanner) (*fleetagent.Agent, error) {
 	a.AgentVersion = ver
 	a.TokenHash = hash
 	a.State = fleetagent.State(state)
+	a.Fingerprint = fingerprint
+	a.RevokedAt = revokedAt
+	a.RevokedBy = shared.ID(revokedBy)
+	a.RevokeReason = revokeReason
 	if len(caps) > 0 {
 		if err := json.Unmarshal(caps, &a.Capabilities); err != nil {
 			return nil, err

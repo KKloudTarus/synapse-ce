@@ -95,15 +95,26 @@ func (s *FleetAgentStore) Heartbeat(_ context.Context, tenantID, id shared.ID, p
 	return nil
 }
 
-func (s *FleetAgentStore) Revoke(_ context.Context, tenantID, id shared.ID, now time.Time) error {
+func (s *FleetAgentStore) SetFingerprint(_ context.Context, tenantID, id shared.ID, fingerprint string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	a, ok := s.agents[agentKey(tenantID, id)]
 	if !ok {
 		return shared.ErrNotFound
 	}
-	a.State = fleetagent.StateRevoked
+	a.Fingerprint = fingerprint
 	a.Audit.UpdatedAt = now
+	return nil
+}
+
+func (s *FleetAgentStore) Revoke(_ context.Context, tenantID, id, by shared.ID, reason string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.agents[agentKey(tenantID, id)]
+	if !ok {
+		return shared.ErrNotFound
+	}
+	a.Revoke(by, reason, now)
 	return nil
 }
 

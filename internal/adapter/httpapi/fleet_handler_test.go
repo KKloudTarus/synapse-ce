@@ -3,8 +3,16 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +20,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetca"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/worksign"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
@@ -46,7 +55,7 @@ func setupFleet(t *testing.T) (http.Handler, *fleetagentuc.Service, *fleetwork.S
 		t.Fatalf("work svc: %v", err)
 	}
 	rt := &Router{log: discardLog()}
-	rt.SetFleet(agentSvc, workSvc, func() time.Time { return time.Now().UTC() })
+	rt.SetFleet(agentSvc, workSvc, func() time.Time { return time.Now().UTC() }, "")
 	rt.SetFleetAdmin(agentSvc)
 	return rt.fleet.handler(), agentSvc, workSvc
 }
@@ -153,10 +162,75 @@ func TestFleetAPIEndToEnd(t *testing.T) {
 	}
 
 	// Revoke the agent; its credential no longer authenticates.
-	if err := agentSvc.Revoke(ctx, "op", "default", agentID); err != nil {
+	if err := agentSvc.Revoke(ctx, "op", "default", agentID, "test revoke"); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/heartbeat", agentTok, map[string]string{}, true); w.Code != http.StatusForbidden {
 		t.Fatalf("revoked agent should be 403, got %d", w.Code)
+	}
+}
+
+func TestFleetAuthByClientCert(t *testing.T) {
+	ctx := context.Background()
+	// Real CA so the issued certificate parses and its fingerprint matches what the agent stores.
+	caCertPEM, caKeyPEM, err := fleetca.GenerateCA("test-ca", time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("gen ca: %v", err)
+	}
+	ca, err := fleetca.New(caCertPEM, caKeyPEM, time.Hour)
+	if err != nil {
+		t.Fatalf("new ca: %v", err)
+	}
+	agentSvc, _ := fleetagentuc.NewService(memory.NewFleetAgentStore(), ftAudit{}, ftClock{}, &ftIDs{})
+	agentSvc.SetCA(ca)
+
+	enrolTok, _ := agentSvc.MintEnrolToken(ctx, "op", "default", time.Hour)
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	csrDER, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "agent"}}, key)
+	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
+	agent, _, certPEM, err := agentSvc.Enrol(ctx, enrolTok, fleetagentuc.EnrolInput{Name: "a", CSRPEM: csrPEM})
+	if err != nil || len(certPEM) == 0 {
+		t.Fatalf("enrol with csr: err=%v certlen=%d", err, len(certPEM))
+	}
+
+	f := &fleetRouter{agents: agentSvc, clientCertHeader: "X-Client-Cert", log: discardLog()}
+
+	// The issued certificate authenticates the agent.
+	got, err := f.authByClientCert(ctx, string(certPEM))
+	if err != nil || got.ID != agent.ID {
+		t.Fatalf("cert auth should succeed: got=%v err=%v", got, err)
+	}
+	// A malformed header is unauthenticated, never a 500.
+	if _, err := f.authByClientCert(ctx, "not a cert"); !errors.Is(err, fleetagentuc.ErrUnauthenticated) {
+		t.Fatalf("malformed cert must be unauthenticated, got %v", err)
+	}
+	// After revocation the certificate no longer authenticates.
+	if err := agentSvc.Revoke(ctx, "op", "default", agent.ID, "test"); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if _, err := f.authByClientCert(ctx, string(certPEM)); !errors.Is(err, fleetagentuc.ErrRevoked) {
+		t.Fatalf("revoked cert must return ErrRevoked, got %v", err)
+	}
+}
+
+func TestFleetAuthByClientCertRejectsExpired(t *testing.T) {
+	ctx := context.Background()
+	agentSvc, _ := fleetagentuc.NewService(memory.NewFleetAgentStore(), ftAudit{}, ftClock{}, &ftIDs{})
+	f := &fleetRouter{agents: agentSvc, clientCertHeader: "X-Client-Cert", log: discardLog()}
+
+	// A self-signed certificate whose validity window is entirely in the past.
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "ag", OrganizationalUnit: []string{"default"}},
+		NotBefore:    time.Now().Add(-2 * time.Hour),
+		NotAfter:     time.Now().Add(-1 * time.Hour),
+	}
+	der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+
+	// Expiry is rejected before any store lookup, so the result is unauthenticated.
+	if _, err := f.authByClientCert(ctx, string(certPEM)); !errors.Is(err, fleetagentuc.ErrUnauthenticated) {
+		t.Fatalf("expired certificate must be unauthenticated, got %v", err)
 	}
 }
