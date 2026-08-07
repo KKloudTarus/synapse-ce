@@ -43,20 +43,22 @@ func validPackagePart(part string) bool {
 	return true
 }
 
-// NormalizeRepositoryLocation canonicalizes a repository-relative file or
-// directory location. The repository root is represented as ".".
+// NormalizeRepositoryLocation canonicalizes a slash-separated repository
+// location. Filesystem adapters are responsible for converting native path
+// separators before constructing domain values. Backslash and colon remain
+// ordinary filename characters here so POSIX paths such as "c:tmp" and
+// "packages\\private" cannot be conflated with Windows path syntax.
 func NormalizeRepositoryLocation(raw string) (string, error) {
 	if strings.IndexByte(raw, 0) >= 0 {
 		return "", fmt.Errorf("jsresolution: repository location contains NUL")
 	}
-	slashed := strings.ReplaceAll(raw, "\\", "/")
-	if slashed == "" || slashed == "." {
+	if raw == "" || raw == "." {
 		return ".", nil
 	}
-	if strings.HasPrefix(slashed, "/") || hasWindowsVolumePrefix(slashed) {
+	if strings.HasPrefix(raw, "/") {
 		return "", fmt.Errorf("jsresolution: absolute repository location %q", raw)
 	}
-	cleaned := path.Clean(slashed)
+	cleaned := path.Clean(raw)
 	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 		return "", fmt.Errorf("jsresolution: repository location %q escapes root", raw)
 	}
@@ -145,6 +147,8 @@ func normalizeDeclarations(in []MetadataDeclaration) ([]MetadataDeclaration, err
 			return nil, err
 		}
 		decl.Source = loc
+		// Pattern is declared metadata, not a filesystem-derived location, so
+		// Windows-style separators are normalized here intentionally.
 		decl.Pattern = strings.TrimSpace(strings.ReplaceAll(decl.Pattern, "\\", "/"))
 		out = append(out, decl)
 	}
@@ -189,8 +193,4 @@ func deduplicateCoverage(in []CoverageIssue) []CoverageIssue {
 		}
 	}
 	return out
-}
-
-func hasWindowsVolumePrefix(p string) bool {
-	return len(p) >= 2 && ((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z')) && p[1] == ':'
 }
