@@ -60,7 +60,7 @@ func rpmComponents(ctx context.Context, rootfsDir, namespace, tag string) (out [
 			out, err = nil, nil
 		}
 	}()
-	path := filepath.Join(rootfsDir, "var/lib/rpm/rpmdb.sqlite")
+	path := filepath.Join(rootfsDir, rpmDBPath)
 	fi, statErr := os.Lstat(path) // regular-file guard: never follow a symlinked DB out of the rootfs
 	if statErr != nil || !fi.Mode().IsRegular() {
 		return nil, nil

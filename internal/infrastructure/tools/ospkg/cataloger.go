@@ -32,6 +32,20 @@ const (
 	maxFieldChars = 512       // clip an over-long name/version (rune-safe) before it enters a PURL
 )
 
+// DB paths (relative to a rootfs) this cataloger reads. Exported so a coverage probe (the fleet host
+// collector) can enumerate exactly what is read without re-hardcoding the list and silently drifting.
+const (
+	dpkgDBPath = "var/lib/dpkg/status"
+	apkDBPath  = "lib/apk/db/installed"
+	rpmDBPath  = "var/lib/rpm/rpmdb.sqlite"
+)
+
+// SupportedDBPaths returns the rootfs-relative OS package database paths Catalog reads, in a fresh
+// slice. It is the single source of truth for "which databases does the engine know about".
+func SupportedDBPaths() []string {
+	return []string{dpkgDBPath, apkDBPath, rpmDBPath}
+}
+
 // debianFamilyIDs are the dpkg os-release IDs the advisory matcher can key (osDistroEcosystem handles Debian +
 // Ubuntu); only these get a distro tag, so any other/garbled/mismatched ID yields an unresolved result.
 var debianFamilyIDs = map[string]bool{"debian": true, "ubuntu": true}
@@ -62,7 +76,7 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 	if debianFamilyIDs[id] && versionID != "" {
 		debNS, debTag = id, id+"-"+versionID
 	}
-	comps, err := parseOSDB(ctx, filepath.Join(rootfsDir, "var/lib/dpkg/status"), dpkgFieldKeys, dpkgExtract, "deb", debNS, debTag)
+	comps, err := parseOSDB(ctx, filepath.Join(rootfsDir, dpkgDBPath), dpkgFieldKeys, dpkgExtract, "deb", debNS, debTag)
 	if err != nil {
 		return ports.OSPackageResult{}, err
 	}
@@ -78,7 +92,7 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 	if id == "alpine" && versionID != "" {
 		apkTag = "alpine-" + versionID
 	}
-	comps, err = parseOSDB(ctx, filepath.Join(rootfsDir, "lib/apk/db/installed"), apkFieldKeys, apkExtract, "apk", "alpine", apkTag)
+	comps, err = parseOSDB(ctx, filepath.Join(rootfsDir, apkDBPath), apkFieldKeys, apkExtract, "apk", "alpine", apkTag)
 	if err != nil {
 		return ports.OSPackageResult{}, err
 	}

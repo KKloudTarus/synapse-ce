@@ -1,0 +1,9 @@
+Package: acl
+Status: install ok installed
+Version: 2.3.1-3
+Architecture: amd64
+
+Package: zlib1g
+Status: install ok installed
+Version: 1:1.2.13.dfsg-1
+Architecture: amd64
