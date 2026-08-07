@@ -78,7 +78,7 @@ stays in the report, it is only held back from the `--fail-on` gate).
 2. **AI critique (opt-in).** Set `SYNAPSE_FP_TRIAGE_ENABLED=true` with an LLM endpoint configured
    (`SYNAPSE_LLM_BASE_URL`, `SYNAPSE_LLM_API_KEY`, and `SYNAPSE_FP_TRIAGE_MODEL` or `SYNAPSE_LLM_MODEL`).
    After the deterministic pass, the model adjudicates the remaining production-scope first-party source
-   findings (SAST/secret/misconfig) and returns a typed verdict — `refuted` (suspected false positive),
+   findings (SAST/misconfig; secret findings are never sent to the LLM) and returns a typed verdict — `refuted` (suspected false positive),
    `sound`, or `uncertain` — with a confidence. The proposer only advises: single-model output can never
    change the gate. Set `SYNAPSE_VERIFIER_MODEL` to a **different** model to enable consensus. A finding is
    gate-exempt only when both models independently refute it at/above the bar and the deterministic
@@ -87,7 +87,9 @@ stays in the report, it is only held back from the `--fail-on` gate).
 
    Every finding remains in JSON/SARIF/compliance. The `ai_triage` JSON separates `suspected_fp`,
    `verified`, `gate_exempt`, and `review_required`, and carries model/prompt/policy metadata. These
-   fields are sealed into the scan evidence hash-chain. Model or verifier failure leaves the gate unchanged.
+   fields are sealed into the scan evidence hash-chain when a ledger is configured. The standalone CLI
+   currently has no evidence vault, so AI triage there is advisory-only and never exempts the gate. Model,
+   verifier, or evidence availability failure leaves the gate unchanged.
 
 ```bash
 export SYNAPSE_LLM_BASE_URL=http://localhost:8081/v1

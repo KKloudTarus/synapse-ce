@@ -1470,7 +1470,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		fmt.Fprintf(os.Stderr, "synapse-cli: %d background/test-scope finding(s) at or above %s reported but exempt from the gate (use --include-test to gate them)\n", bgExempt, failOn)
 	}
 	if fpExempt > 0 {
-		fmt.Fprintf(os.Stderr, "synapse-cli: %d verified low-risk false-positive candidate(s) at or above %s held back from the gate by policy (reported + evidence-sealed; not deleted)\n", fpExempt, failOn)
+		fmt.Fprintf(os.Stderr, "synapse-cli: %d verified low-risk false-positive candidate(s) at or above %s held back from the gate by policy (reported; not deleted)\n", fpExempt, failOn)
 	}
 	if over > 0 {
 		return fmt.Errorf("%d finding(s) at or above %s", over, failOn)

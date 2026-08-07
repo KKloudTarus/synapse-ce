@@ -1,5 +1,6 @@
-// Package fptriage runs an LLM-assisted false-positive critique over first-party source-analysis
-// findings (SAST, secret, misconfig). It fits the judgment model exactly: the model is a PROPOSER
+// Package fptriage runs an LLM-assisted false-positive critique over safe-to-transmit first-party
+// source-analysis findings (SAST and misconfig). Secret findings are excluded before this layer so raw
+// credential-bearing source context never enters an LLM transcript. The model is a PROPOSER
 // only — it returns a typed judgment.CritiqueClaim (verdict ∈ refuted|sound|uncertain, a closed driver
 // token, a 0..100 confidence), NEVER free prose and NEVER a suppression. The caller applies a "refuted"
 // verdict as retain-and-mark: the finding stays reported and sealed, it is only held back from the CI
@@ -109,7 +110,7 @@ func (c *Coordinator) WithMinConfidence(n int) *Coordinator {
 // is nil or the verifier model equals the proposer model (not a distinct verifier).
 func (c *Coordinator) WithVerifier(llm ports.LLM, model string) *Coordinator {
 	model = strings.TrimSpace(model)
-	if llm != nil && model != "" && model != c.model {
+	if llm != nil && model != "" && !agent.SameModel(model, c.model) {
 		c.verifier = llm
 		c.verifierModel = model
 	}
@@ -126,7 +127,7 @@ func (c *Coordinator) ProposerModel() string { return c.model }
 func (c *Coordinator) MinConfidence() int { return c.minConf }
 
 // Assess critiques every candidate finding concurrently (bounded). The caller passes only the findings
-// worth spending a model call on (typically production-scope first-party SAST/secret/misconfig). Order
+// worth spending a model call on (production-scope first-party SAST/misconfig; never secrets). Order
 // of the returned slice matches candidates. Best-effort: a per-finding failure is captured as
 // Critique.Err, never returned as a batch error.
 func (c *Coordinator) Assess(ctx context.Context, candidates []finding.Finding, src SourceReader) []Critique {

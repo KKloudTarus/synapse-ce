@@ -3,6 +3,7 @@ package sca
 import (
 	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -12,15 +13,17 @@ import (
 
 // aiTriagePolicyVersion is sealed with every scan that carries AI triage. Bump it whenever the
 // authorization contract changes so an audit can replay which policy could affect a CI gate.
-const aiTriagePolicyVersion = "fp-gate-v1"
+const aiTriagePolicyVersion = "fp-gate-v2"
 
 const (
 	aiPolicyNotSuspected      = "not_suspected_false_positive"
 	aiPolicyVerifierRequired  = "distinct_verifier_required"
 	aiPolicyFindingMissing    = "finding_not_found"
+	aiPolicyFindingIneligible = "finding_not_eligible"
 	aiPolicySeverityFloor     = "severity_requires_human"
 	aiPolicySecretFloor       = "secret_requires_human"
 	aiPolicyDangerousCWEFloor = "cwe_requires_human"
+	aiPolicyEvidenceRequired  = "evidence_ledger_required"
 	aiPolicyVerifiedConsensus = "verified_consensus"
 )
 
@@ -35,12 +38,16 @@ var humanReviewCWEs = map[string]struct{}{
 	"CWE-79":  {}, // XSS / output injection
 	"CWE-89":  {}, // SQL injection
 	"CWE-94":  {}, // code injection
+	"CWE-259": {}, // hard-coded password
+	"CWE-321": {}, // hard-coded cryptographic key
 	"CWE-284": {}, // access control
 	"CWE-285": {},
 	"CWE-287": {}, // authentication
 	"CWE-306": {},
 	"CWE-434": {}, // unrestricted upload
 	"CWE-502": {}, // unsafe deserialization
+	"CWE-522": {}, // insufficiently protected credentials
+	"CWE-798": {}, // hard-coded credentials
 	"CWE-862": {},
 	"CWE-863": {},
 	"CWE-918": {}, // SSRF
@@ -49,7 +56,7 @@ var humanReviewCWEs = map[string]struct{}{
 // applyAIGatePolicy separates an AI opinion from authorization to change a gate. It is the single
 // policy point used by both CLI and API scans. The triager may propose SuspectedFP, but only a complete
 // distinct-model consensus that clears the human-review floor receives GateExempt.
-func applyAIGatePolicy(result *ScanResult) {
+func applyAIGatePolicy(result *ScanResult, evidenceAvailable bool) {
 	if result == nil || len(result.AITriage) == 0 {
 		return
 	}
@@ -85,6 +92,16 @@ func applyAIGatePolicy(result *ScanResult) {
 			critique.ReviewRequired = true
 			continue
 		}
+		if !isFPTriageEligible(item) {
+			critique.PolicyReason = aiPolicyFindingIneligible
+			critique.ReviewRequired = true
+			continue
+		}
+		if !evidenceAvailable {
+			critique.PolicyReason = aiPolicyEvidenceRequired
+			critique.ReviewRequired = true
+			continue
+		}
 		critique.PolicyReason = aiPolicyVerifiedConsensus
 		critique.GateExempt = true
 	}
@@ -93,8 +110,8 @@ func applyAIGatePolicy(result *ScanResult) {
 // hasVerifiedConsensus validates the full DTO rather than trusting its Verified boolean. This keeps a
 // buggy or alternate FPTriager implementation from granting itself gate authority by setting one field.
 func hasVerifiedConsensus(c ports.AICritique) bool {
-	proposer := strings.TrimSpace(c.ProposerModel)
-	verifierModel := strings.TrimSpace(c.VerifierModel)
+	proposer := agent.CanonicalModelID(c.ProposerModel)
+	verifierModel := agent.CanonicalModelID(c.VerifierModel)
 	return c.Verified &&
 		proposer != "" && verifierModel != "" && proposer != verifierModel &&
 		c.Verdict == string(judgment.CritiqueRefuted) && c.Confidence >= verdict.EvidenceThreshold &&
@@ -109,12 +126,32 @@ func humanReviewFloor(item finding.Finding) string {
 	if item.Kind == finding.KindSecret {
 		return aiPolicySecretFloor
 	}
-	for _, token := range strings.FieldsFunc(strings.ToUpper(item.CWE), func(r rune) bool {
-		return r == ',' || r == ';' || r == '|' || r == '/' || r == ' ' || r == '\t' || r == '\n'
-	}) {
+	tokens := cweTokens(item.CWE)
+	for _, token := range tokens {
 		if _, protected := humanReviewCWEs[token]; protected {
 			return aiPolicyDangerousCWEFloor
 		}
 	}
+	// Unknown weakness identity is not evidence that a source/config finding is low risk. Until a
+	// producer supplies a CWE, keep it in human review rather than defaulting to exemptible.
+	if len(tokens) == 0 && (item.Kind == finding.KindSAST || item.Kind == finding.KindMisconfig) {
+		return aiPolicyDangerousCWEFloor
+	}
 	return ""
+}
+
+func cweTokens(value string) []string {
+	return strings.FieldsFunc(strings.ToUpper(value), func(r rune) bool {
+		return r == ',' || r == ';' || r == '|' || r == '/' || r == ' ' || r == '\t' || r == '\n'
+	})
+}
+
+func hasCredentialCWE(value string) bool {
+	for _, token := range cweTokens(value) {
+		switch token {
+		case "CWE-259", "CWE-321", "CWE-522", "CWE-798":
+			return true
+		}
+	}
+	return false
 }

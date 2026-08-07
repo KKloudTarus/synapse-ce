@@ -703,7 +703,11 @@ func main() {
 			if cfg.VerifierModel != "" && cfg.VerifierModel != cfg.FPTriageModel {
 				if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
 					coord.WithVerifier(vllm, cfg.VerifierModel)
-					mode = "verified by " + cfg.VerifierModel
+					if coord.VerifierModel() != "" {
+						mode = "verified by " + coord.VerifierModel()
+					} else {
+						log.Warn("AI FP-triage verifier aliases the proposer after canonicalization; triage remains advisory-only", "verifier_model", cfg.VerifierModel)
+					}
 				} else {
 					log.Warn("AI FP-triage verifier unavailable; triage remains advisory-only", "err", verr)
 				}

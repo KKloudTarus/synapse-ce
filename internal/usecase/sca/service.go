@@ -595,9 +595,16 @@ func (r *ScanResult) SuspectedFPKeys() map[string]bool {
 
 // AIGateExemptKeys returns only AI critiques that the server-owned policy authorized to affect a gate.
 func (r *ScanResult) AIGateExemptKeys() map[string]bool {
+	return r.aiGateExemptKeys(r.Findings)
+}
+
+// aiGateExemptKeys revalidates decisions against the exact finding view a gate will consume. Project
+// quality profiles may overlay severity, so using r.Findings here could exempt a finding the tenant
+// deliberately escalated to High/Critical.
+func (r *ScanResult) aiGateExemptKeys(items []finding.Finding) map[string]bool {
 	out := map[string]bool{}
-	findings := make(map[string]finding.Finding, len(r.Findings))
-	for _, item := range r.Findings {
+	findings := make(map[string]finding.Finding, len(items))
+	for _, item := range items {
 		if key := strings.TrimSpace(item.DedupKey); key != "" {
 			findings[key] = item
 		}
@@ -609,7 +616,7 @@ func (r *ScanResult) AIGateExemptKeys() map[string]bool {
 			c.PolicyVersion == aiTriagePolicyVersion &&
 			c.PolicyReason == aiPolicyVerifiedConsensus &&
 			hasVerifiedConsensus(c) &&
-			found && humanReviewFloor(item) == "" {
+			found && humanReviewFloor(item) == "" && isFPTriageEligible(item) {
 			out[key] = true
 		}
 	}
@@ -632,7 +639,7 @@ func (r *ScanResult) AIReviewRequiredKeys() map[string]bool {
 // GateExemptKeys returns retain-and-mark findings excluded from a Project quality gate.
 func (r *ScanResult) GateExemptKeys(items []finding.Finding) map[string]bool {
 	exempt := map[string]bool{}
-	for _, keys := range []map[string]bool{r.SuppressedKeys(), r.NeedsVerifyKeys(), r.AIGateExemptKeys()} {
+	for _, keys := range []map[string]bool{r.SuppressedKeys(), r.NeedsVerifyKeys(), r.aiGateExemptKeys(items)} {
 		for key := range keys {
 			if key = strings.TrimSpace(key); key != "" {
 				exempt[key] = true
@@ -652,17 +659,24 @@ func (r *ScanResult) GateExemptKeys(items []finding.Finding) map[string]bool {
 	return exempt
 }
 
-// fpTriageCandidates selects the findings worth an LLM critique: production-scope, first-party source
-// analysis (SAST/secret/misconfig). Background-scope findings are already gate-exempt deterministically,
-// and SCA/advisory findings are DB-backed facts, so neither is critiqued.
+// isFPTriageEligible is shared by candidate selection and the authorization re-check. Secrets are
+// deliberately excluded: even a redacted finding description cannot make the surrounding raw source
+// snippet safe to send to an external model.
+func isFPTriageEligible(f finding.Finding) bool {
+	if f.Class != finding.ClassFirstParty || f.Scope != sbom.ScopeProduction ||
+		f.Kind == finding.KindSecret || hasCredentialCWE(f.CWE) {
+		return false
+	}
+	return f.Kind == finding.KindSAST || f.Kind == finding.KindMisconfig
+}
+
+// fpTriageCandidates selects production-scope first-party SAST/misconfig findings worth an LLM
+// critique. Background findings are already gate-exempt deterministically; SCA findings are DB-backed
+// facts; secret source context must never enter an LLM transcript.
 func fpTriageCandidates(fs []finding.Finding) []finding.Finding {
 	out := make([]finding.Finding, 0, len(fs))
 	for _, f := range fs {
-		if sbom.IsBackgroundScope(f.Scope) {
-			continue
-		}
-		switch f.Kind {
-		case finding.KindSAST, finding.KindSecret, finding.KindMisconfig:
+		if isFPTriageEligible(f) {
 			out = append(out, f)
 		}
 	}
@@ -2344,7 +2358,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		if cands := fpTriageCandidates(result.Findings); len(cands) > 0 {
 			tstep := trace.start(stageFindings, "ai-fp-triage", "fp-triager", "AI false-positive triage", map[string]int{"candidates": len(cands)})
 			result.AITriage = s.fpTriager.Triage(ctx, cands, ws.Dir)
-			applyAIGatePolicy(result)
+			applyAIGatePolicy(result, s.evidence != nil)
 			trace.succeed(tstep, "AI false-positive triage", map[string]int{
 				"candidates":      len(cands),
 				"critiqued":       len(result.AITriage),
@@ -3027,14 +3041,26 @@ func isPinnedVersion(v string) bool {
 var credInErr = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@`)
 
 type scanEvidencePayload struct {
-	SBOMSHA256     string             `json:"sbom_sha256"`
-	Findings       []string           `json:"findings"`
-	Suppressed     []string           `json:"suppressed,omitempty"`
-	AITriagePolicy string             `json:"ai_triage_policy,omitempty"`
-	AITriage       []ports.AICritique `json:"ai_triage,omitempty"`
-	Manifest       ports.ScanManifest `json:"manifest"`
-	SealedAt       string             `json:"sealed_at"`
-	Actor          string             `json:"actor"`
+	SBOMSHA256       string                  `json:"sbom_sha256"`
+	Findings         []string                `json:"findings"`
+	Suppressed       []string                `json:"suppressed,omitempty"`
+	AITriagePolicy   string                  `json:"ai_triage_policy,omitempty"`
+	AITriage         []ports.AICritique      `json:"ai_triage,omitempty"`
+	AITriageFindings []scanEvidenceAIFinding `json:"ai_triage_findings,omitempty"`
+	Manifest         ports.ScanManifest      `json:"manifest"`
+	SealedAt         string                  `json:"sealed_at"`
+	Actor            string                  `json:"actor"`
+}
+
+// scanEvidenceAIFinding seals every input the gate policy reads. Sealing a dedup key alone would not
+// detect a later severity/CWE/kind/scope/class mutation that changes the human-review floor.
+type scanEvidenceAIFinding struct {
+	DedupKey string          `json:"dedup_key"`
+	Severity shared.Severity `json:"severity"`
+	CWE      string          `json:"cwe,omitempty"`
+	Kind     finding.Kind    `json:"kind"`
+	Scope    string          `json:"scope,omitempty"`
+	Class    string          `json:"class,omitempty"`
 }
 
 // scanEvidenceContent builds the canonical scan evidence payload. AI decisions are sorted and sealed
@@ -3055,7 +3081,7 @@ func scanEvidenceContent(actor string, now time.Time, result *ScanResult) ([]byt
 	}
 	sort.Strings(suppressed)
 	aiTriage := append([]ports.AICritique(nil), result.AITriage...)
-	sort.Slice(aiTriage, func(i, j int) bool {
+	sort.SliceStable(aiTriage, func(i, j int) bool {
 		if aiTriage[i].DedupKey != aiTriage[j].DedupKey {
 			return aiTriage[i].DedupKey < aiTriage[j].DedupKey
 		}
@@ -3064,19 +3090,59 @@ func scanEvidenceContent(actor string, now time.Time, result *ScanResult) ([]byt
 		}
 		return aiTriage[i].ProposerModel < aiTriage[j].ProposerModel
 	})
+	triagedKeys := make(map[string]struct{}, len(aiTriage))
+	for _, critique := range aiTriage {
+		if key := strings.TrimSpace(critique.DedupKey); key != "" {
+			triagedKeys[key] = struct{}{}
+		}
+	}
+	var aiFindings []scanEvidenceAIFinding
+	for _, item := range result.Findings {
+		key := strings.TrimSpace(item.DedupKey)
+		if _, triaged := triagedKeys[key]; !triaged {
+			continue
+		}
+		aiFindings = append(aiFindings, scanEvidenceAIFinding{
+			DedupKey: key,
+			Severity: item.Severity,
+			CWE:      item.CWE,
+			Kind:     item.Kind,
+			Scope:    item.Scope,
+			Class:    item.Class,
+		})
+	}
+	sort.SliceStable(aiFindings, func(i, j int) bool {
+		if aiFindings[i].DedupKey != aiFindings[j].DedupKey {
+			return aiFindings[i].DedupKey < aiFindings[j].DedupKey
+		}
+		if aiFindings[i].Severity != aiFindings[j].Severity {
+			return aiFindings[i].Severity < aiFindings[j].Severity
+		}
+		if aiFindings[i].CWE != aiFindings[j].CWE {
+			return aiFindings[i].CWE < aiFindings[j].CWE
+		}
+		if aiFindings[i].Kind != aiFindings[j].Kind {
+			return aiFindings[i].Kind < aiFindings[j].Kind
+		}
+		if aiFindings[i].Scope != aiFindings[j].Scope {
+			return aiFindings[i].Scope < aiFindings[j].Scope
+		}
+		return aiFindings[i].Class < aiFindings[j].Class
+	})
 	policyVersion := ""
 	if len(aiTriage) > 0 {
 		policyVersion = aiTriagePolicyVersion
 	}
 	return json.Marshal(scanEvidencePayload{
-		SBOMSHA256:     result.Manifest.SBOMSHA256,
-		Findings:       keys,
-		Suppressed:     suppressed,
-		AITriagePolicy: policyVersion,
-		AITriage:       aiTriage,
-		Manifest:       result.Manifest,
-		SealedAt:       now.UTC().Format(time.RFC3339),
-		Actor:          actor,
+		SBOMSHA256:       result.Manifest.SBOMSHA256,
+		Findings:         keys,
+		Suppressed:       suppressed,
+		AITriagePolicy:   policyVersion,
+		AITriage:         aiTriage,
+		AITriageFindings: aiFindings,
+		Manifest:         result.Manifest,
+		SealedAt:         now.UTC().Format(time.RFC3339),
+		Actor:            actor,
 	})
 }
 

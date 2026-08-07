@@ -131,6 +131,16 @@ func TestVerifierConsensus(t *testing.T) {
 	}
 }
 
+func TestVerifierMustBeCanonicallyDistinct(t *testing.T) {
+	llm := roleLLM{}
+	for _, verifier := range []string{"PROPOSER-MODEL", "openai/proposer-model", "router/openai/PROPOSER-MODEL"} {
+		c := New(llm, "proposer-model").WithVerifier(llm, verifier)
+		if c.VerifierModel() != "" {
+			t.Errorf("verifier %q self-confirmed proposer through an alias", verifier)
+		}
+	}
+}
+
 // recordingLLM answers like roleLLM but keeps every request, so a test can assert what the coordinator
 // actually asked the provider for.
 type recordingLLM struct {
