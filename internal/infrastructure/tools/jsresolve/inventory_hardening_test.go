@@ -107,8 +107,8 @@ func TestWorkspaceMatcherAdversarialPatternIsBounded(t *testing.T) {
 	}()
 	select {
 	case err := <-done:
-		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatal(err)
+		if err != nil {
+			t.Fatalf("memoized matcher did not complete before the deadline: %v", err)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("Build did not return within the adversarial matcher time bound")
