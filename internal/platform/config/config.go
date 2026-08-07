@@ -184,6 +184,13 @@ type Config struct {
 	// services) and its HTTP routes; off by default. When on with Postgres, startup refuses to
 	// serve unless the DB role can enforce Row Level Security (not SUPERUSER/BYPASSRLS).
 	FleetAssetsEnabled bool
+	// FleetEnabled turns on the agent-facing transport (#409: enrol/heartbeat/work) plus the
+	// operator agent-admin routes; off by default. When on with Postgres, startup fails closed
+	// unless the DB role can enforce RLS.
+	FleetEnabled bool
+	// FleetSignerKey is the HMAC key that signs agent work orders. Required and at least 32 bytes
+	// when FleetEnabled; a missing/short key fails startup closed rather than boot a forgeable signer.
+	FleetSignerKey string
 	// SASTEnabled turns on the deterministic pattern-SAST analyzer in the scan pipeline; off by default.
 	SASTEnabled bool
 	// SecretScanEnabled turns on the deterministic secret scanner in the scan pipeline; off by default.
@@ -431,6 +438,8 @@ func Load() Config {
 		SBOMCrossCheckEnabled:  getbool("SYNAPSE_SBOM_CROSSCHECK_ENABLED", true),
 		WriteupDraftsEnabled:   getbool("SYNAPSE_WRITEUP_DRAFTS_ENABLED", false), // needs agent → opt-in
 		FleetAssetsEnabled:     getbool("SYNAPSE_FLEET_ASSETS_ENABLED", false),
+		FleetEnabled:           getbool("SYNAPSE_FLEET_ENABLED", false),
+		FleetSignerKey:         getenv("SYNAPSE_FLEET_SIGNER_KEY", ""),
 		GovulncheckBin:         getenv("SYNAPSE_GOVULNCHECK_BIN", "govulncheck"),
 		GoModGraphEnabled:      getbool("SYNAPSE_GOMODGRAPH_ENABLED", true),
 		GoBin:                  getenv("SYNAPSE_GO_BIN", "go"),

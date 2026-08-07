@@ -15,6 +15,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hotspot"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/ignore"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedsbom"
@@ -84,6 +85,21 @@ type WorkOrderStore interface {
 	GetByID(ctx context.Context, tenantID, id shared.ID) (*workorder.WorkOrder, error)
 	Claim(ctx context.Context, tenantID, agentID shared.ID, max int, now time.Time) ([]*workorder.WorkOrder, error)
 	Transition(ctx context.Context, tenantID, id shared.ID, to workorder.State, reason string, expected workorder.State, now time.Time) error
+}
+
+// FleetAgentStore persists tenant-scoped fleet agent identities and their single-use enrolment
+// tokens. Postgres routes every method through WithTenant so Row Level Security isolates by tenant.
+// The auth lookup is tenant-scoped because the credential carries a (non-secret) tenant prefix.
+type FleetAgentStore interface {
+	CreateEnrolToken(ctx context.Context, t *fleetagent.EnrolToken) error
+	// ConsumeEnrolToken atomically marks a usable token used and returns it; shared.ErrNotFound if
+	// no usable (unused, unexpired) token with that hash exists for the tenant.
+	ConsumeEnrolToken(ctx context.Context, tenantID shared.ID, hash string, now time.Time) (*fleetagent.EnrolToken, error)
+	CreateAgent(ctx context.Context, a *fleetagent.Agent) error
+	GetAgent(ctx context.Context, tenantID, id shared.ID) (*fleetagent.Agent, error)
+	Heartbeat(ctx context.Context, tenantID, id shared.ID, platform, osVersion, agentVersion string, capabilities []string, now time.Time) error
+	Revoke(ctx context.Context, tenantID, id shared.ID, now time.Time) error
+	ListAgents(ctx context.Context, tenantID shared.ID) ([]*fleetagent.Agent, error)
 }
 
 // WorkOrderSigner signs and verifies the canonical signing payload of a work order. The
