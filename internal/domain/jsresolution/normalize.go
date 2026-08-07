@@ -147,9 +147,9 @@ func normalizeDeclarations(in []MetadataDeclaration) ([]MetadataDeclaration, err
 			return nil, err
 		}
 		decl.Source = loc
-		// Pattern is declared metadata, not a filesystem-derived location, so
-		// Windows-style separators are normalized here intentionally.
-		decl.Pattern = strings.TrimSpace(strings.ReplaceAll(decl.Pattern, "\\", "/"))
+		// Pattern is declared metadata, not a filesystem-derived location. Keep
+		// its literal whitespace intact; only normalize the declared separator.
+		decl.Pattern = strings.ReplaceAll(decl.Pattern, "\\", "/")
 		out = append(out, decl)
 	}
 	sort.Slice(out, func(i, j int) bool {
