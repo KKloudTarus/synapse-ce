@@ -4,11 +4,15 @@ package jsresolution
 
 import "github.com/KKloudTarus/synapse-ce/internal/domain/modulegraph"
 
-// Status is the explicit package-identity resolution state for an external import.
+// Status is the explicit package-identity resolution state for an observed import.
 type Status string
 
 const (
-	StatusBuiltin     Status = "builtin"
+	StatusBuiltin Status = "builtin"
+	// StatusLocal closes an external-looking alias back onto source inside the
+	// same non-workspace package. Keeping it explicit prevents supported local
+	// aliases from being mistaken for third-party npm dependencies.
+	StatusLocal       Status = "local"
 	StatusWorkspace   Status = "workspace"
 	StatusComponent   Status = "component"
 	StatusUnresolved  Status = "unresolved"
@@ -19,7 +23,7 @@ const (
 // Valid reports whether s is a supported resolution status.
 func (s Status) Valid() bool {
 	switch s {
-	case StatusBuiltin, StatusWorkspace, StatusComponent, StatusUnresolved, StatusAmbiguous, StatusUnsupported:
+	case StatusBuiltin, StatusLocal, StatusWorkspace, StatusComponent, StatusUnresolved, StatusAmbiguous, StatusUnsupported:
 		return true
 	default:
 		return false
@@ -62,6 +66,8 @@ const (
 	CoverageWorkspaceRootEscape       CoverageIssueKind = "workspace-root-escape"
 	CoverageSymlinkWorkspace          CoverageIssueKind = "symlink-workspace"
 	CoverageWorkspaceNameConflict     CoverageIssueKind = "workspace-name-conflict"
+	CoverageUnresolvedSpecifier       CoverageIssueKind = "unresolved-specifier"
+	CoverageUnsupportedSpecifier      CoverageIssueKind = "unsupported-specifier"
 	CoverageUnresolvedAlias           CoverageIssueKind = "unresolved-alias"
 	CoverageUnsupportedAlias          CoverageIssueKind = "unsupported-alias"
 	CoverageMissingSBOMComponent      CoverageIssueKind = "missing-sbom-component"
@@ -79,6 +85,8 @@ func (k CoverageIssueKind) Valid() bool {
 		CoverageWorkspaceRootEscape,
 		CoverageSymlinkWorkspace,
 		CoverageWorkspaceNameConflict,
+		CoverageUnresolvedSpecifier,
+		CoverageUnsupportedSpecifier,
 		CoverageUnresolvedAlias,
 		CoverageUnsupportedAlias,
 		CoverageMissingSBOMComponent,
