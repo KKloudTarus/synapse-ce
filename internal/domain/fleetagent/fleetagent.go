@@ -10,12 +10,22 @@
 package fleetagent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
+
+// CertFingerprint is the canonical agent certificate fingerprint: the hex SHA-256 of the
+// certificate DER. It is the single source of truth shared by the issuing CA (infrastructure) and
+// the authentication path (adapter), so the two can never drift.
+func CertFingerprint(der []byte) string {
+	sum := sha256.Sum256(der)
+	return hex.EncodeToString(sum[:])
+}
 
 // State is the agent lifecycle.
 type State string

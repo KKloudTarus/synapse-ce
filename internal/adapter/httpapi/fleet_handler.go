@@ -2,9 +2,7 @@ package httpapi
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -92,13 +90,18 @@ func (f *fleetRouter) authByClientCert(ctx context.Context, headerVal string) (*
 	if err != nil {
 		return nil, fleetagentuc.ErrUnauthenticated
 	}
+	// Enforce the certificate validity window at the app layer too, not only at the proxy handshake:
+	// a stored fingerprint outlives the cert, so an expired certificate must not authenticate.
+	now := time.Now()
+	if now.Before(cert.NotBefore) || now.After(cert.NotAfter) {
+		return nil, fleetagentuc.ErrUnauthenticated
+	}
 	agentID := cert.Subject.CommonName
 	if agentID == "" || len(cert.Subject.OrganizationalUnit) == 0 || cert.Subject.OrganizationalUnit[0] == "" {
 		return nil, fleetagentuc.ErrUnauthenticated
 	}
 	tenant := cert.Subject.OrganizationalUnit[0]
-	sum := sha256.Sum256(cert.Raw)
-	fingerprint := hex.EncodeToString(sum[:])
+	fingerprint := fleetagent.CertFingerprint(cert.Raw)
 	return f.agents.AuthenticateCertificate(ctx, shared.ID(tenant), shared.ID(agentID), fingerprint)
 }
 
@@ -246,6 +249,9 @@ func (f *fleetRouter) authed(next http.HandlerFunc) http.HandlerFunc {
 		// trusted only because the operator asserts (via config) that a trusted proxy verifies mTLS
 		// and STRIPS any client-supplied value; the app must not be directly reachable. When the
 		// header is absent we fall back to the bearer credential.
+		// When the cert header is configured but absent, we fall back to the bearer token (a
+		// reasonable migration posture). A strict certificate-required mode that refuses the bearer
+		// fallback is a documented follow-up for deployments where mTLS supersedes the token.
 		if f.clientCertHeader != "" && r.Header.Get(f.clientCertHeader) != "" {
 			agent, err = f.authByClientCert(r.Context(), r.Header.Get(f.clientCertHeader))
 		} else {

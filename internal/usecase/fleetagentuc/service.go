@@ -98,20 +98,40 @@ func (s *Service) Enrol(ctx context.Context, enrolToken string, in EnrolInput) (
 	}
 	now := s.clock.Now()
 	tenantID := shared.ID(tenantStr)
+	agentID := s.ids.NewID()
+	token, hash, err := agenttoken.Mint(agenttoken.KindAgent, tenantID.String(), agentID.String())
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("enrol: mint agent token: %w", err)
+	}
+
+	// Issue the certificate FIRST (before consuming the single-use token or creating the agent) so a
+	// malformed/weak CSR is a clean validation error with no side effect: the enrol token is not
+	// burned and no orphan agent row is left behind.
+	var (
+		certPEM     []byte
+		fingerprint string
+	)
+	if len(in.CSRPEM) > 0 && s.ca != nil {
+		cp, fp, cerr := s.ca.Issue(in.CSRPEM, agentID.String(), tenantID.String(), now)
+		if cerr != nil {
+			return nil, "", nil, fmt.Errorf("%w: enrol: invalid certificate signing request: %s", shared.ErrValidation, cerr.Error())
+		}
+		certPEM, fingerprint = cp, fp
+	}
+
+	// Consume the single-use enrol token only after the CSR has been accepted.
 	if _, err := s.store.ConsumeEnrolToken(ctx, tenantID, agenttoken.Hash(secret), now); err != nil {
 		if errors.Is(err, shared.ErrNotFound) {
 			return nil, "", nil, ErrUnauthenticated
 		}
 		return nil, "", nil, fmt.Errorf("enrol: consume token: %w", err)
 	}
-	agentID := s.ids.NewID()
-	token, hash, err := agenttoken.Mint(agenttoken.KindAgent, tenantID.String(), agentID.String())
-	if err != nil {
-		return nil, "", nil, fmt.Errorf("enrol: mint agent token: %w", err)
-	}
 	agent, err := fleetagent.NewAgent(agentID, tenantID, in.Name, in.Platform, in.OSVersion, in.AgentVersion, in.Capabilities, hash, now)
 	if err != nil {
 		return nil, "", nil, err
+	}
+	if fingerprint != "" {
+		agent.AttestCertificate(fingerprint) // persisted in the single CreateAgent insert
 	}
 	if err := s.store.CreateAgent(ctx, agent); err != nil {
 		return nil, "", nil, fmt.Errorf("enrol: create agent: %w", err)
@@ -123,23 +143,10 @@ func (s *Service) Enrol(ctx context.Context, enrolToken string, in EnrolInput) (
 	}); err != nil {
 		return nil, "", nil, fmt.Errorf("enrol: audit: %w", err)
 	}
-
-	// Optional certificate identity: if the agent sent a CSR and a CA is configured, issue a client
-	// certificate and record its fingerprint. The agent's private key is never seen.
-	var certPEM []byte
-	if len(in.CSRPEM) > 0 && s.ca != nil {
-		cp, fp, cerr := s.ca.Issue(in.CSRPEM, agentID.String(), tenantID.String(), now)
-		if cerr != nil {
-			return nil, "", nil, fmt.Errorf("enrol: issue certificate: %w", cerr)
-		}
-		if err := s.store.SetFingerprint(ctx, tenantID, agentID, fp, now); err != nil {
-			return nil, "", nil, fmt.Errorf("enrol: record fingerprint: %w", err)
-		}
-		agent.AttestCertificate(fp)
-		certPEM = cp
+	if fingerprint != "" {
 		if err := s.audit.Record(ctx, ports.AuditEntry{
 			Actor: agentID.String(), Action: "agent.certificate_issued", Target: agentID.String(),
-			Metadata: map[string]string{"tenant_id": tenantID.String(), "fingerprint": fp}, At: now,
+			Metadata: map[string]string{"tenant_id": tenantID.String(), "fingerprint": fingerprint}, At: now,
 		}); err != nil {
 			return nil, "", nil, fmt.Errorf("enrol: audit certificate: %w", err)
 		}

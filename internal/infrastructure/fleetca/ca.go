@@ -11,15 +11,14 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"math/big"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -46,6 +45,9 @@ func New(certPEM, keyPEM []byte, ttl time.Duration) (*CA, error) {
 	}
 	if !cert.IsCA {
 		return nil, fmt.Errorf("fleetca: signing certificate is not a CA")
+	}
+	if cert.KeyUsage&x509.KeyUsageCertSign == 0 {
+		return nil, fmt.Errorf("fleetca: signing certificate lacks the certificate-sign key usage")
 	}
 	key, err := parseKeyPEM(keyPEM)
 	if err != nil {
@@ -95,10 +97,10 @@ func (c *CA) Issue(csrPEM []byte, agentID, tenantID string, now time.Time) (cert
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), FingerprintDER(der), nil
 }
 
-// FingerprintDER returns the hex SHA-256 of a certificate's DER bytes.
+// FingerprintDER returns the certificate fingerprint. It delegates to the domain's single
+// definition so the CA and the auth path can never compute it differently.
 func FingerprintDER(der []byte) string {
-	sum := sha256.Sum256(der)
-	return hex.EncodeToString(sum[:])
+	return fleetagent.CertFingerprint(der)
 }
 
 func checkKeyStrength(pub any) error {
@@ -109,6 +111,9 @@ func checkKeyStrength(pub any) error {
 		}
 		return nil
 	case *ecdsa.PublicKey:
+		if k.Curve.Params().BitSize < 256 {
+			return fmt.Errorf("fleetca: ecdsa curve too small (%d bits, need >= 256)", k.Curve.Params().BitSize)
+		}
 		return nil
 	default:
 		return fmt.Errorf("fleetca: unsupported csr public key type %T (use RSA >= 2048 or ECDSA)", pub)

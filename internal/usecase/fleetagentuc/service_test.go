@@ -221,3 +221,25 @@ func TestRevokeCancelsInFlightOrders(t *testing.T) {
 		t.Fatalf("revoke must cancel the agent's in-flight orders, calls=%d", canceller.cancelled)
 	}
 }
+
+type failCA struct{}
+
+func (failCA) Issue([]byte, string, string, time.Time) ([]byte, string, error) {
+	return nil, "", errors.New("bad csr")
+}
+
+func TestBadCSRDoesNotBurnEnrolToken(t *testing.T) {
+	svc := newSvc(t)
+	svc.SetCA(failCA{})
+	ctx := context.Background()
+	enrolTok, _ := svc.MintEnrolToken(ctx, "op", "t1", time.Hour)
+	// A bad CSR fails as a validation error, with no side effect (token not consumed).
+	if _, _, _, err := svc.Enrol(ctx, enrolTok, EnrolInput{Name: "a", CSRPEM: []byte("bad")}); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("bad CSR should be a validation error, got %v", err)
+	}
+	// The same enrol token still works afterwards (it was not burned).
+	svc.SetCA(&fakeCA{})
+	if _, _, _, err := svc.Enrol(ctx, enrolTok, EnrolInput{Name: "a"}); err != nil {
+		t.Fatalf("enrol token must survive a failed CSR, got %v", err)
+	}
+}

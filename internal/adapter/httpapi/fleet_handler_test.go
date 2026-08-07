@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -209,5 +210,27 @@ func TestFleetAuthByClientCert(t *testing.T) {
 	}
 	if _, err := f.authByClientCert(ctx, string(certPEM)); !errors.Is(err, fleetagentuc.ErrRevoked) {
 		t.Fatalf("revoked cert must return ErrRevoked, got %v", err)
+	}
+}
+
+func TestFleetAuthByClientCertRejectsExpired(t *testing.T) {
+	ctx := context.Background()
+	agentSvc, _ := fleetagentuc.NewService(memory.NewFleetAgentStore(), ftAudit{}, ftClock{}, &ftIDs{})
+	f := &fleetRouter{agents: agentSvc, clientCertHeader: "X-Client-Cert", log: discardLog()}
+
+	// A self-signed certificate whose validity window is entirely in the past.
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "ag", OrganizationalUnit: []string{"default"}},
+		NotBefore:    time.Now().Add(-2 * time.Hour),
+		NotAfter:     time.Now().Add(-1 * time.Hour),
+	}
+	der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+
+	// Expiry is rejected before any store lookup, so the result is unauthenticated.
+	if _, err := f.authByClientCert(ctx, string(certPEM)); !errors.Is(err, fleetagentuc.ErrUnauthenticated) {
+		t.Fatalf("expired certificate must be unauthenticated, got %v", err)
 	}
 }
