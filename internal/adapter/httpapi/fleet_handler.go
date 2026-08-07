@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -20,9 +21,10 @@ import (
 const FleetProtoVersion = "1"
 
 const (
-	fleetBodyCap    = 1 << 20 // 1 MiB agent request cap
-	fleetMaxClaim   = 20      // maximum work orders per claim
-	fleetRatePerMin = 120     // per-agent requests per minute
+	fleetBodyCap      = 1 << 20 // 1 MiB agent request cap
+	fleetMaxClaim     = 20      // maximum work orders per claim
+	fleetRatePerMin   = 120     // per-agent requests per minute (post-auth)
+	fleetIPRatePerMin = 60      // per-client-IP requests per minute (pre-auth: enrol + failed auth)
 )
 
 // fleetAgentService is the narrow view of fleet agent identity the transport needs.
@@ -40,19 +42,21 @@ type fleetWorkService interface {
 }
 
 type fleetRouter struct {
-	agents  fleetAgentService
-	work    fleetWorkService
-	log     *slog.Logger
-	limiter *agentRateLimiter
+	agents   fleetAgentService
+	work     fleetWorkService
+	log      *slog.Logger
+	agentLim *keyedLimiter // post-auth, keyed by agent id
+	ipLim    *keyedLimiter // pre-auth, keyed by client IP (throttles enrol + failed auth)
 }
 
 // SetFleet wires the untrusted agent transport plane. When nil, /api/v1/fleet is not served.
 func (rt *Router) SetFleet(agents fleetAgentService, work fleetWorkService, now func() time.Time) {
 	rt.fleet = &fleetRouter{
-		agents:  agents,
-		work:    work,
-		log:     rt.log,
-		limiter: newAgentRateLimiter(fleetRatePerMin, now),
+		agents:   agents,
+		work:     work,
+		log:      rt.log,
+		agentLim: newKeyedLimiter(fleetRatePerMin, now),
+		ipLim:    newKeyedLimiter(fleetIPRatePerMin, now),
 	}
 }
 
@@ -72,7 +76,7 @@ func (rt *Router) mintEnrolToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TTLSeconds int `json:"ttl_seconds"`
 	}
-	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, assetBodyCap)).Decode(&req)
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, fleetBodyCap)).Decode(&req)
 	ttl := time.Duration(req.TTLSeconds) * time.Second
 	if ttl <= 0 {
 		ttl = defaultEnrolTTL
@@ -86,16 +90,43 @@ func (rt *Router) mintEnrolToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"enrolment_token": tok})
 }
 
+// agentView is the transport DTO for an agent. It deliberately OMITS TokenHash: the credential
+// verifier material must never leave the server, even though its preimage is infeasible.
+type agentView struct {
+	ID           string    `json:"id"`
+	TenantID     string    `json:"tenant_id"`
+	Name         string    `json:"name"`
+	Platform     string    `json:"platform"`
+	OSVersion    string    `json:"os_version"`
+	AgentVersion string    `json:"agent_version"`
+	Capabilities []string  `json:"capabilities"`
+	State        string    `json:"state"`
+	LastSeenAt   time.Time `json:"last_seen_at"`
+}
+
+func toAgentView(a *fleetagent.Agent) agentView {
+	caps := a.Capabilities
+	if caps == nil {
+		caps = []string{}
+	}
+	return agentView{
+		ID: a.ID.String(), TenantID: a.TenantID.String(), Name: a.Name, Platform: a.Platform,
+		OSVersion: a.OSVersion, AgentVersion: a.AgentVersion, Capabilities: caps,
+		State: string(a.State), LastSeenAt: a.LastSeenAt,
+	}
+}
+
 func (rt *Router) listFleetAgents(w http.ResponseWriter, r *http.Request) {
 	list, err := rt.fleetAdmin.ListAgents(r.Context(), fleetTenant(r.Context()))
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
 	}
-	if list == nil {
-		list = []*fleetagent.Agent{}
+	views := make([]agentView, 0, len(list))
+	for _, a := range list {
+		views = append(views, toAgentView(a))
 	}
-	writeJSON(w, http.StatusOK, list)
+	writeJSON(w, http.StatusOK, views)
 }
 
 func (rt *Router) revokeFleetAgent(w http.ResponseWriter, r *http.Request) {
@@ -120,23 +151,40 @@ func agentFrom(ctx context.Context) (*fleetagent.Agent, bool) {
 // enrol requires a valid agent bearer credential (agent-auth, NOT the human RBAC plane).
 func (f *fleetRouter) handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/v1/fleet/enrol", f.version(f.enrol))
-	mux.HandleFunc("POST /api/v1/fleet/heartbeat", f.version(f.authed(f.heartbeat)))
-	mux.HandleFunc("POST /api/v1/fleet/work/claim", f.version(f.authed(f.claim)))
-	mux.HandleFunc("POST /api/v1/fleet/work/{id}/progress", f.version(f.authed(f.progress)))
-	mux.HandleFunc("POST /api/v1/fleet/work/{id}/result", f.version(f.authed(f.result)))
+	mux.HandleFunc("POST /api/v1/fleet/enrol", f.entry(f.enrol))
+	mux.HandleFunc("POST /api/v1/fleet/heartbeat", f.entry(f.authed(f.heartbeat)))
+	mux.HandleFunc("POST /api/v1/fleet/work/claim", f.entry(f.authed(f.claim)))
+	mux.HandleFunc("POST /api/v1/fleet/work/{id}/progress", f.entry(f.authed(f.progress)))
+	mux.HandleFunc("POST /api/v1/fleet/work/{id}/result", f.entry(f.authed(f.result)))
 	return mux
 }
 
-// version enforces the supported protocol version, returning 400 unsupported_version otherwise.
-func (f *fleetRouter) version(next http.HandlerFunc) http.HandlerFunc {
+// entry is the outermost wrapper on every fleet route. It throttles per client IP BEFORE any
+// database work (so unauthenticated enrol and failed-auth attempts cannot amplify into unbounded
+// DB lookups on this untrusted plane), then enforces the supported protocol version.
+func (f *fleetRouter) entry(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !f.ipLim.allow(clientIP(r)) {
+			w.Header().Set("Retry-After", "1")
+			writeJSON(w, http.StatusTooManyRequests, errorBody{Error: "rate_limited"})
+			return
+		}
 		if r.Header.Get("X-Synapse-Fleet-Proto") != FleetProtoVersion {
 			writeJSON(w, http.StatusBadRequest, errorBody{Error: "unsupported_version"})
 			return
 		}
 		next(w, r)
 	}
+}
+
+// clientIP returns the request's source host (no port). RemoteAddr is used rather than a spoofable
+// X-Forwarded-For header, because this is a throttling key, not an authorization input.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // authed resolves the agent bearer credential, rate-limits per agent, and stamps the agent into
@@ -160,7 +208,7 @@ func (f *fleetRouter) authed(next http.HandlerFunc) http.HandlerFunc {
 			}
 			return
 		}
-		if !f.limiter.allow(agent.ID.String()) {
+		if !f.agentLim.allow(agent.ID.String()) {
 			w.Header().Set("Retry-After", "1")
 			writeJSON(w, http.StatusTooManyRequests, errorBody{Error: "rate_limited"})
 			return
@@ -307,33 +355,40 @@ func (f *fleetRouter) applyTransition(w http.ResponseWriter, r *http.Request, ag
 	writeJSON(w, http.StatusOK, map[string]string{"state": string(to)})
 }
 
-// agentRateLimiter is a minimal per-agent fixed-window limiter with an injectable clock.
-type agentRateLimiter struct {
+// keyedLimiter is a minimal fixed-window rate limiter keyed by an arbitrary string (agent id or
+// client IP) with an injectable clock. Its key map is bounded: when it grows past maxKeys, expired
+// windows are pruned so an untrusted key space (client IPs) cannot grow it without bound.
+type keyedLimiter struct {
 	mu      sync.Mutex
 	perMin  int
 	now     func() time.Time
 	windows map[string]*rateWindow
 }
 
+const limiterMaxKeys = 8192
+
 type rateWindow struct {
 	start time.Time
 	count int
 }
 
-func newAgentRateLimiter(perMin int, now func() time.Time) *agentRateLimiter {
+func newKeyedLimiter(perMin int, now func() time.Time) *keyedLimiter {
 	if now == nil {
 		now = time.Now
 	}
-	return &agentRateLimiter{perMin: perMin, now: now, windows: map[string]*rateWindow{}}
+	return &keyedLimiter{perMin: perMin, now: now, windows: map[string]*rateWindow{}}
 }
 
-func (l *agentRateLimiter) allow(agentID string) bool {
+func (l *keyedLimiter) allow(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	t := l.now()
-	win, ok := l.windows[agentID]
+	win, ok := l.windows[key]
 	if !ok || t.Sub(win.start) >= time.Minute {
-		l.windows[agentID] = &rateWindow{start: t, count: 1}
+		if !ok && len(l.windows) >= limiterMaxKeys {
+			l.pruneLocked(t)
+		}
+		l.windows[key] = &rateWindow{start: t, count: 1}
 		return true
 	}
 	if win.count >= l.perMin {
@@ -341,4 +396,13 @@ func (l *agentRateLimiter) allow(agentID string) bool {
 	}
 	win.count++
 	return true
+}
+
+// pruneLocked drops windows whose fixed window has fully elapsed. Callers hold l.mu.
+func (l *keyedLimiter) pruneLocked(t time.Time) {
+	for k, w := range l.windows {
+		if t.Sub(w.start) >= time.Minute {
+			delete(l.windows, k)
+		}
+	}
 }

@@ -386,13 +386,14 @@ func (rt *Router) Handler() http.Handler {
 		"/api/v1/aup/accept": true,
 		"/api/v1/me":         true,
 	}
-	human := normalizePath(rt.auth.Middleware(public, rt.requireAUP(aupExempt, rt.routes())))
+	human := rt.auth.Middleware(public, rt.requireAUP(aupExempt, rt.routes()))
 	if rt.fleet == nil {
-		return human
+		return normalizePath(human)
 	}
 	// The untrusted agent transport is a SEPARATE auth plane: it must not pass through the human
 	// bearer-token authenticator or the AUP gate. Mount it at the top level so /api/v1/fleet is
-	// served by the agent-auth handler and everything else by the human chain.
+	// served by the agent-auth handler and everything else by the human chain. normalizePath wraps
+	// the whole top mux once, so both planes are normalized without double-wrapping.
 	top := http.NewServeMux()
 	top.Handle("/api/v1/fleet/", rt.fleet.handler())
 	top.Handle("/", human)
