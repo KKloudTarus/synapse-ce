@@ -26,9 +26,17 @@ type fakeAudit struct{ n int }
 
 func (a *fakeAudit) Record(context.Context, ports.AuditEntry) error { a.n++; return nil }
 
+// compile-time check that the concrete signer satisfies the port (the package itself is
+// deliberately stdlib-only, so the assertion lives here where ports is already imported).
+var _ ports.WorkOrderSigner = (*worksign.Signer)(nil)
+
 func newSvc(t *testing.T) *Service {
 	t.Helper()
-	svc, err := NewService(memory.NewWorkOrderStore(), worksign.New([]byte("test-key")), &fakeAudit{}, fakeClock{t: time.Unix(1000, 0).UTC()}, &fakeIDs{})
+	signer, err := worksign.New([]byte("test-key-32-bytes-000000000000000"))
+	if err != nil {
+		t.Fatalf("new signer: %v", err)
+	}
+	svc, err := NewService(memory.NewWorkOrderStore(), signer, &fakeAudit{}, fakeClock{t: time.Unix(1000, 0).UTC()}, &fakeIDs{})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}

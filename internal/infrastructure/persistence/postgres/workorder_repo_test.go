@@ -102,12 +102,17 @@ func TestWorkOrderRepository(t *testing.T) {
 	}
 
 	// Transition CAS: claimed -> running with correct expected state.
-	if err := repo.Transition(ctx, "wt", wo.ID, workorder.StateRunning, "", workorder.StateClaimed); err != nil {
+	tnow := time.Now().UTC()
+	if err := repo.Transition(ctx, "wt", wo.ID, workorder.StateRunning, "", workorder.StateClaimed, tnow); err != nil {
 		t.Fatalf("claimed->running: %v", err)
 	}
 	// Stale expected state now conflicts.
-	if err := repo.Transition(ctx, "wt", wo.ID, workorder.StateSucceeded, "", workorder.StateClaimed); !errors.Is(err, shared.ErrConflict) {
+	if err := repo.Transition(ctx, "wt", wo.ID, workorder.StateSucceeded, "", workorder.StateClaimed, tnow); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("stale expected state must ErrConflict, got %v", err)
+	}
+	// A transition on a non-existent order is ErrNotFound, not ErrConflict.
+	if err := repo.Transition(ctx, "wt", "missing", workorder.StateRunning, "", workorder.StateClaimed, tnow); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("transition on missing order must ErrNotFound, got %v", err)
 	}
 
 	// GetByID + not found.

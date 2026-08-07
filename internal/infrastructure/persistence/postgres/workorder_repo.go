@@ -55,13 +55,17 @@ func (r *WorkOrderRepository) Issue(ctx context.Context, wo *workorder.WorkOrder
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(insertErr, &pgErr) && pgErr.Code == "23505" {
-		switch pgErr.ConstraintName {
-		case "work_orders_idem":
-			// Idempotent issue: return the existing order.
-			return r.getByIdem(ctx, wo.TenantID, wo.IdempotencyKey)
-		case "work_orders_inflight":
-			return nil, shared.ErrConflict
+		// A concurrent issue committed between our pre-check and this insert. Regardless of which
+		// unique index Postgres reported (idempotency vs in-flight are checked in index-OID order,
+		// which we do not want to depend on), prefer returning the existing same-key order so an
+		// idempotent retry is idempotent; only a genuinely different order colliding on the
+		// in-flight slot is a conflict.
+		if existing, gerr := r.getByIdem(ctx, wo.TenantID, wo.IdempotencyKey); gerr == nil {
+			return existing, nil
+		} else if !errors.Is(gerr, shared.ErrNotFound) {
+			return nil, gerr
 		}
+		return nil, shared.ErrConflict
 	}
 	return nil, insertErr
 }
@@ -137,16 +141,26 @@ func (r *WorkOrderRepository) Claim(ctx context.Context, tenantID, agentID share
 
 // Transition applies to with an optimistic expected-state check. It returns shared.ErrConflict when
 // no row matched (the state changed concurrently or the order does not exist under this tenant).
-func (r *WorkOrderRepository) Transition(ctx context.Context, tenantID, id shared.ID, to workorder.State, reason string, expected workorder.State) error {
+func (r *WorkOrderRepository) Transition(ctx context.Context, tenantID, id shared.ID, to workorder.State, reason string, expected workorder.State, now time.Time) error {
 	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
-			UPDATE work_orders SET state=$3, refuse_reason=$4, updated_at=now()
+			UPDATE work_orders SET state=$3, refuse_reason=$4, updated_at=$6
 			WHERE tenant_id=$1 AND id=$2 AND state=$5`,
-			tenantID.String(), id.String(), string(to), reason, string(expected))
+			tenantID.String(), id.String(), string(to), reason, string(expected), now)
 		if err != nil {
 			return err
 		}
 		if tag.RowsAffected() == 0 {
+			// Distinguish "no such order under this tenant" (ErrNotFound) from "state no longer
+			// matches expected" (ErrConflict), matching the memory store's contract.
+			var exists bool
+			if e := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM work_orders WHERE tenant_id=$1 AND id=$2)`,
+				tenantID.String(), id.String()).Scan(&exists); e != nil {
+				return e
+			}
+			if !exists {
+				return shared.ErrNotFound
+			}
 			return shared.ErrConflict
 		}
 		return nil

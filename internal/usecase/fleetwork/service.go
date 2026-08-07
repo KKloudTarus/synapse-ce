@@ -86,6 +86,11 @@ func (s *Service) Verify(wo *workorder.WorkOrder) bool {
 // Claim atomically claims up to max unexpired orders addressed to agentID, moving them from issued
 // to claimed, and audits each claim.
 func (s *Service) Claim(ctx context.Context, actor string, tenantID, agentID shared.ID, max int) ([]*workorder.WorkOrder, error) {
+	if max <= 0 {
+		// Nothing to claim; return empty consistently rather than letting a negative LIMIT diverge
+		// between the Postgres and memory stores.
+		return nil, nil
+	}
 	now := s.clock.Now()
 	claimed, err := s.store.Claim(ctx, tenantID, agentID, max, now)
 	if err != nil {
@@ -122,7 +127,7 @@ func (s *Service) Transition(ctx context.Context, actor string, tenantID, id sha
 	if to == workorder.StateRefused && reason == "" {
 		return fmt.Errorf("%w: a refusal requires a reason", shared.ErrValidation)
 	}
-	if err := s.store.Transition(ctx, tenantID, id, to, reason, current.State); err != nil {
+	if err := s.store.Transition(ctx, tenantID, id, to, reason, current.State, now); err != nil {
 		return fmt.Errorf("work order transition: %w", err)
 	}
 	if err := s.audit.Record(ctx, ports.AuditEntry{

@@ -94,8 +94,9 @@ func (s *WorkOrderStore) Claim(_ context.Context, tenantID, agentID shared.ID, m
 	return out, nil
 }
 
-// Transition applies to with an optimistic expected-state check (shared.ErrConflict on mismatch).
-func (s *WorkOrderStore) Transition(_ context.Context, tenantID, id shared.ID, to workorder.State, reason string, expected workorder.State) error {
+// Transition applies to with an optimistic expected-state check: shared.ErrNotFound when the order
+// does not exist under the tenant, shared.ErrConflict when its state no longer matches expected.
+func (s *WorkOrderStore) Transition(_ context.Context, tenantID, id shared.ID, to workorder.State, reason string, expected workorder.State, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	o, ok := s.byID[woKey(tenantID, id)]
@@ -107,6 +108,7 @@ func (s *WorkOrderStore) Transition(_ context.Context, tenantID, id shared.ID, t
 	}
 	o.State = to
 	o.RefuseReason = reason
+	o.Audit.UpdatedAt = now
 	return nil
 }
 

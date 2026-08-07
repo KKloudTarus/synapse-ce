@@ -83,7 +83,7 @@ type WorkOrderStore interface {
 	Issue(ctx context.Context, wo *workorder.WorkOrder) (*workorder.WorkOrder, error)
 	GetByID(ctx context.Context, tenantID, id shared.ID) (*workorder.WorkOrder, error)
 	Claim(ctx context.Context, tenantID, agentID shared.ID, max int, now time.Time) ([]*workorder.WorkOrder, error)
-	Transition(ctx context.Context, tenantID, id shared.ID, to workorder.State, reason string, expected workorder.State) error
+	Transition(ctx context.Context, tenantID, id shared.ID, to workorder.State, reason string, expected workorder.State, now time.Time) error
 }
 
 // WorkOrderSigner signs and verifies the canonical signing payload of a work order. The
