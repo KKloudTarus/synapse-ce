@@ -48,19 +48,25 @@ func TestInventoryBuilderPNPMOmittedPackagesMeansRootOnlyWorkspace(t *testing.T)
 
 func TestInventoryBuilderUnsupportedExtglobCannotLookComplete(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
-	writeJSON(t, filepath.Join(root, "package.json"), map[string]any{
-		"name": "root", "private": true, "workspaces": []string{"packages/@(a|b)"},
-	})
-	writeJSON(t, filepath.Join(root, "packages", "a", "package.json"), map[string]any{"name": "a"})
-	writeJSON(t, filepath.Join(root, "packages", "b", "package.json"), map[string]any{"name": "b"})
+	for _, pattern := range []string{"packages/@(a|b)", "packages/!(private)"} {
+		pattern := pattern
+		t.Run(pattern, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeJSON(t, filepath.Join(root, "package.json"), map[string]any{
+				"name": "root", "private": true, "workspaces": []string{pattern},
+			})
+			writeJSON(t, filepath.Join(root, "packages", "a", "package.json"), map[string]any{"name": "a"})
+			writeJSON(t, filepath.Join(root, "packages", "b", "package.json"), map[string]any{"name": "b"})
 
-	got, err := NewInventoryBuilder().Build(context.Background(), root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Complete || !coverageKinds(got.Coverage)[jsresolution.CoverageUnsupportedMetadata] {
-		t.Fatalf("unsupported extglob was not explicit incomplete coverage: %#v", got)
+			got, err := NewInventoryBuilder().Build(context.Background(), root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Complete || !coverageKinds(got.Coverage)[jsresolution.CoverageUnsupportedMetadata] {
+				t.Fatalf("unsupported extglob was not explicit incomplete coverage: %#v", got)
+			}
+		})
 	}
 }
 
@@ -86,8 +92,9 @@ func TestInventoryBuilderWorkspacePatternWhitespaceIsMeaningful(t *testing.T) {
 	}
 	t.Parallel()
 	root := t.TempDir()
+	const pattern = " packages/a "
 	writeJSON(t, filepath.Join(root, "package.json"), map[string]any{
-		"name": "root", "private": true, "workspaces": []string{" packages/a "},
+		"name": "root", "private": true, "workspaces": []string{pattern},
 	})
 	writeJSON(t, filepath.Join(root, " packages", "a ", "package.json"), map[string]any{"name": "spaced"})
 
@@ -98,8 +105,12 @@ func TestInventoryBuilderWorkspacePatternWhitespaceIsMeaningful(t *testing.T) {
 	if !got.Complete {
 		t.Fatalf("literal whitespace path unexpectedly incomplete: %#v", got.Coverage)
 	}
-	if !packagesByPath(got.Packages)[" packages/a "].Workspace {
+	pkg := packagesByPath(got.Packages)[" packages/a "]
+	if !pkg.Workspace {
 		t.Fatalf("workspace pattern whitespace was not preserved: %#v", got.Packages)
+	}
+	if len(pkg.DeclaredBy) != 1 || pkg.DeclaredBy[0].Pattern != pattern {
+		t.Fatalf("workspace declaration provenance lost literal whitespace: %#v", pkg.DeclaredBy)
 	}
 }
 
@@ -121,6 +132,27 @@ func TestInventoryBuilderNPMOrderedNegationCanReinclude(t *testing.T) {
 	}
 	if !packagesByPath(got.Packages)["packages/b/a"].Workspace {
 		t.Fatalf("npm positive pattern did not re-include workspace: %#v", got.Packages)
+	}
+}
+
+func TestInventoryBuilderNPMOrderedDuplicateCanReinclude(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeJSON(t, filepath.Join(root, "package.json"), map[string]any{
+		"name": "root", "private": true, "packageManager": "npm@12.0.1",
+		"workspaces": []string{"packages/**", "!packages/**", "packages/**"},
+	})
+	writeJSON(t, filepath.Join(root, "packages", "a", "package.json"), map[string]any{"name": "a"})
+
+	got, err := NewInventoryBuilder().Build(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Complete {
+		t.Fatalf("valid npm workspace unexpectedly incomplete: %#v", got.Coverage)
+	}
+	if !packagesByPath(got.Packages)["packages/a"].Workspace {
+		t.Fatalf("ordered duplicate positive pattern was incorrectly deduplicated: %#v", got.Packages)
 	}
 }
 
