@@ -26,6 +26,23 @@ func (rt *Router) SetAssets(s assetService) { rt.assets = s }
 
 const assetBodyCap = 64 << 10
 
+// DefaultFleetTenant is the non-empty tenant id used when the principal is on the empty-string
+// default tenant (single-tenant deployments). RLS-protected fleet tables cannot use the empty
+// string, because under the 0057 policy the empty string is DENY, not a tenant. Mapping the empty
+// default to a real, non-empty tenant here is what lets the fleet asset model work in a
+// single-tenant deployment while still being isolated at the database. Migration 0058 seeds this
+// tenant row so the fleet_assets FK to tenants is satisfied.
+const DefaultFleetTenant shared.ID = "default"
+
+// fleetTenant resolves the effective tenant for fleet asset operations: the request principal's
+// tenant, or DefaultFleetTenant when that is the empty-string default tenant.
+func fleetTenant(ctx context.Context) shared.ID {
+	if t := TenantFrom(ctx); t != "" {
+		return shared.ID(t)
+	}
+	return DefaultFleetTenant
+}
+
 type upsertAssetRequest struct {
 	Kind       string            `json:"kind"`
 	Key        string            `json:"key"`
@@ -40,7 +57,7 @@ func (rt *Router) createAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a, err := rt.assets.UpsertAsset(r.Context(), PrincipalFrom(r.Context()), assetuc.UpsertAssetInput{
-		TenantID:   shared.ID(TenantFrom(r.Context())),
+		TenantID:   fleetTenant(r.Context()),
 		Kind:       asset.Kind(req.Kind),
 		Key:        req.Key,
 		Name:       req.Name,
@@ -54,10 +71,13 @@ func (rt *Router) createAsset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rt *Router) listAssets(w http.ResponseWriter, r *http.Request) {
-	list, err := rt.assets.ListAssets(r.Context(), shared.ID(TenantFrom(r.Context())))
+	list, err := rt.assets.ListAssets(r.Context(), fleetTenant(r.Context()))
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
+	}
+	if list == nil {
+		list = []*asset.Asset{}
 	}
 	writeJSON(w, http.StatusOK, list)
 }
@@ -76,7 +96,7 @@ func (rt *Router) createAssetEdge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := rt.assets.UpsertEdge(r.Context(), PrincipalFrom(r.Context()), assetuc.EdgeInput{
-		TenantID:   shared.ID(TenantFrom(r.Context())),
+		TenantID:   fleetTenant(r.Context()),
 		From:       shared.ID(req.From),
 		To:         shared.ID(req.To),
 		Kind:       asset.EdgeKind(req.Kind),
@@ -89,10 +109,13 @@ func (rt *Router) createAssetEdge(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rt *Router) listAssetEdges(w http.ResponseWriter, r *http.Request) {
-	list, err := rt.assets.ListEdges(r.Context(), shared.ID(TenantFrom(r.Context())))
+	list, err := rt.assets.ListEdges(r.Context(), fleetTenant(r.Context()))
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
+	}
+	if list == nil {
+		list = []*asset.Edge{}
 	}
 	writeJSON(w, http.StatusOK, list)
 }
@@ -109,7 +132,7 @@ func (rt *Router) createBusinessService(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	svc, err := rt.assets.UpsertBusinessService(r.Context(), PrincipalFrom(r.Context()), assetuc.BusinessServiceInput{
-		TenantID: shared.ID(TenantFrom(r.Context())),
+		TenantID: fleetTenant(r.Context()),
 		Name:     req.Name,
 		Owner:    req.Owner,
 	})
@@ -121,10 +144,13 @@ func (rt *Router) createBusinessService(w http.ResponseWriter, r *http.Request) 
 }
 
 func (rt *Router) listBusinessServices(w http.ResponseWriter, r *http.Request) {
-	list, err := rt.assets.ListBusinessServices(r.Context(), shared.ID(TenantFrom(r.Context())))
+	list, err := rt.assets.ListBusinessServices(r.Context(), fleetTenant(r.Context()))
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
+	}
+	if list == nil {
+		list = []*asset.BusinessService{}
 	}
 	writeJSON(w, http.StatusOK, list)
 }

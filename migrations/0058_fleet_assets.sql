@@ -12,6 +12,11 @@
 -- fleet asset model is enabled and refuse to serve on error (#431 requirement 6, #432). This
 -- migration cannot enforce that; the composition root does.
 
+-- Seed the non-empty default fleet tenant. RLS-protected tables cannot use the empty-string
+-- default tenant (empty = DENY), so the single-tenant / default deployment maps the empty
+-- principal tenant to 'default' (see httpapi.DefaultFleetTenant); this row satisfies the FK.
+INSERT INTO tenants (id, name) VALUES ('default', 'default fleet tenant') ON CONFLICT (id) DO NOTHING;
+
 CREATE TABLE fleet_assets (
     id          TEXT PRIMARY KEY,
     tenant_id   TEXT NOT NULL REFERENCES tenants(id),
@@ -21,18 +26,26 @@ CREATE TABLE fleet_assets (
     attributes  JSONB NOT NULL DEFAULT '{}',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, kind, "key")
+    UNIQUE (tenant_id, kind, "key"),
+    -- FK target for the composite edge references below (id is already unique via the PK, but a
+    -- composite FK needs a unique constraint on exactly (tenant_id, id)).
+    UNIQUE (tenant_id, id)
 );
 CREATE INDEX idx_fleet_assets_tenant_created ON fleet_assets(tenant_id, created_at DESC);
 CALL synapse_enable_tenant_rls('fleet_assets');
 
+-- Edges reference assets via a COMPOSITE FK that includes tenant_id, so an edge can only point at
+-- assets in its own tenant. Referential-integrity checks bypass RLS in PostgreSQL, so the tenant_id
+-- in the FK is what prevents a cross-tenant reference; it also rejects dangling edges.
 CREATE TABLE fleet_asset_edges (
     tenant_id  TEXT NOT NULL REFERENCES tenants(id),
     from_asset TEXT NOT NULL,
     to_asset   TEXT NOT NULL,
     kind       TEXT NOT NULL,
     provenance TEXT NOT NULL,
-    PRIMARY KEY (tenant_id, from_asset, to_asset, kind, provenance)
+    PRIMARY KEY (tenant_id, from_asset, to_asset, kind, provenance),
+    FOREIGN KEY (tenant_id, from_asset) REFERENCES fleet_assets(tenant_id, id),
+    FOREIGN KEY (tenant_id, to_asset) REFERENCES fleet_assets(tenant_id, id)
 );
 CALL synapse_enable_tenant_rls('fleet_asset_edges');
 

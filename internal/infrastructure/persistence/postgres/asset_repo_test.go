@@ -86,8 +86,15 @@ func TestAssetRepository(t *testing.T) {
 		t.Fatalf("tenant scoping failed: %+v", list)
 	}
 
+	// A second asset in tenant ta so the edge references two assets in the SAME tenant (the
+	// composite FK forbids cross-tenant edges).
+	a3, _ := asset.New("as3", "ta", asset.KindWorkload, "wl-1", "wl", nil, now)
+	if err := repo.UpsertAsset(ctx, a3); err != nil {
+		t.Fatalf("upsert as3: %v", err)
+	}
+
 	// Edge roundtrip + idempotency (ON CONFLICT DO NOTHING).
-	e, _ := asset.NewEdge("ta", "as1", "as2", asset.EdgeRuns, "obs1")
+	e, _ := asset.NewEdge("ta", "as1", "as3", asset.EdgeRuns, "obs1")
 	if err := repo.UpsertEdge(ctx, e); err != nil {
 		t.Fatalf("upsert edge: %v", err)
 	}
