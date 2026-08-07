@@ -97,18 +97,28 @@ func newInventoryBuilderWithLimits(limits inventoryLimits) *InventoryBuilder {
 }
 
 type packageFile struct {
-	file     string
-	dir      string
-	name     string
-	version  string
-	private  bool
-	patterns []string
+	file           string
+	dir            string
+	name           string
+	version        string
+	private        bool
+	patterns       []string
+	packageManager string
 }
 
+type workspaceNegationMode uint8
+
+const (
+	workspaceNegationExcludeAlways workspaceNegationMode = iota
+	workspaceNegationOrdered
+)
+
 type workspaceSource struct {
-	source   string
-	baseDir  string
-	patterns []string
+	source       string
+	baseDir      string
+	patterns     []string
+	negationMode workspaceNegationMode
+	includeBase  bool
 }
 
 type coverageSink struct {
@@ -212,17 +222,12 @@ func (b *InventoryBuilder) Build(ctx context.Context, root string) (jsresolution
 			if rel == "." {
 				return fmt.Errorf("walk repository root: %w", walkErr)
 			}
-			coverage.add(jsresolution.CoverageIssue{
-				Kind: jsresolution.CoverageUnreadableMetadata, Path: rel, Detail: "filesystem entry could not be inspected",
-			})
+			coverage.add(jsresolution.CoverageIssue{Kind: jsresolution.CoverageUnreadableMetadata, Path: rel, Detail: "filesystem entry could not be inspected"})
 			return nil
 		}
 		inventory.EntriesScanned++
 		if inventory.EntriesScanned > b.limits.maxEntries {
-			coverage.add(jsresolution.CoverageIssue{
-				Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: ".",
-				Detail: fmt.Sprintf("filesystem entry budget exceeded (%d)", b.limits.maxEntries),
-			})
+			coverage.add(jsresolution.CoverageIssue{Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: ".", Detail: fmt.Sprintf("filesystem entry budget exceeded (%d)", b.limits.maxEntries)})
 			return fs.SkipAll
 		}
 		if entry.IsDir() {
@@ -246,25 +251,17 @@ func (b *InventoryBuilder) Build(ctx context.Context, root string) (jsresolution
 			return nil
 		}
 		if inventory.FilesScanned >= b.limits.maxMetadataFiles {
-			coverage.add(jsresolution.CoverageIssue{
-				Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: rel,
-				Detail: fmt.Sprintf("metadata file budget exceeded (%d)", b.limits.maxMetadataFiles),
-			})
+			coverage.add(jsresolution.CoverageIssue{Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: rel, Detail: fmt.Sprintf("metadata file budget exceeded (%d)", b.limits.maxMetadataFiles)})
 			return fs.SkipAll
 		}
 		info, infoErr := entry.Info()
 		if infoErr != nil || !info.Mode().IsRegular() {
-			coverage.add(jsresolution.CoverageIssue{
-				Kind: jsresolution.CoverageUnreadableMetadata, Path: rel, Detail: "metadata entry is not a stable regular file",
-			})
+			coverage.add(jsresolution.CoverageIssue{Kind: jsresolution.CoverageUnreadableMetadata, Path: rel, Detail: "metadata entry is not a stable regular file"})
 			return nil
 		}
 		remaining := b.limits.maxTotalMetadataBytes - metadataBytes
 		if remaining <= 0 || info.Size() > remaining {
-			coverage.add(jsresolution.CoverageIssue{
-				Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: rel,
-				Detail: fmt.Sprintf("aggregate metadata byte budget exceeded (%d)", b.limits.maxTotalMetadataBytes),
-			})
+			coverage.add(jsresolution.CoverageIssue{Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: rel, Detail: fmt.Sprintf("aggregate metadata byte budget exceeded (%d)", b.limits.maxTotalMetadataBytes)})
 			return fs.SkipAll
 		}
 		inventory.FilesScanned++
@@ -303,7 +300,10 @@ func (b *InventoryBuilder) Build(ctx context.Context, root string) (jsresolution
 				}
 			}
 			packages[pkg.dir] = pkg
-			addWorkspaceSource(&sources, workspaceSource{source: pkg.file, baseDir: pkg.dir, patterns: pkg.patterns}, &patternsTotal, b.limits, &coverage)
+			addWorkspaceSource(&sources, workspaceSource{
+				source: pkg.file, baseDir: pkg.dir, patterns: pkg.patterns,
+				negationMode: workspaceModeForPackageManager(pkg.packageManager),
+			}, &patternsTotal, b.limits, &coverage)
 			return nil
 		}
 
@@ -312,7 +312,10 @@ func (b *InventoryBuilder) Build(ctx context.Context, root string) (jsresolution
 			coverage.add(jsresolution.CoverageIssue{Kind: jsresolution.CoverageMalformedMetadata, Path: rel, Detail: parseErr.Error()})
 			return nil
 		}
-		addWorkspaceSource(&sources, workspaceSource{source: rel, baseDir: path.Dir(rel), patterns: patterns}, &patternsTotal, b.limits, &coverage)
+		addWorkspaceSource(&sources, workspaceSource{
+			source: rel, baseDir: path.Dir(rel), patterns: patterns,
+			negationMode: workspaceNegationExcludeAlways, includeBase: true,
+		}, &patternsTotal, b.limits, &coverage)
 		return nil
 	})
 	if walkErr != nil {
@@ -335,11 +338,16 @@ func (b *InventoryBuilder) Build(ctx context.Context, root string) (jsresolution
 		if err := ctx.Err(); err != nil {
 			return jsresolution.Inventory{}, err
 		}
+		if source.includeBase {
+			if _, ok := packages[source.baseDir]; ok {
+				workspaceDecls[source.baseDir] = append(workspaceDecls[source.baseDir], jsresolution.MetadataDeclaration{Source: source.source, Pattern: "."})
+			}
+		}
 		compiled, issues := compileWorkspacePatterns(source, b.limits.maxWorkspaceSegments)
 		coverage.addAll(issues)
 		candidates := candidatePackageDirs(compiled, packageDirs, &matchWork)
 		for _, dir := range candidates {
-			decl, ok, selectErr := selectWorkspaceDeclaration(ctx, compiled, dir, &matchWork)
+			decl, ok, selectErr := selectWorkspaceDeclaration(ctx, compiled, dir, &matchWork, source.negationMode)
 			if selectErr != nil {
 				if errors.Is(selectErr, context.Canceled) || errors.Is(selectErr, context.DeadlineExceeded) {
 					return jsresolution.Inventory{}, selectErr
@@ -354,10 +362,7 @@ func (b *InventoryBuilder) Build(ctx context.Context, root string) (jsresolution
 			}
 		}
 		if matchWork.exceeded {
-			coverage.add(jsresolution.CoverageIssue{
-				Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: source.source,
-				Detail: fmt.Sprintf("workspace match work budget exceeded (%d)", b.limits.maxWorkspaceMatchWork),
-			})
+			coverage.add(jsresolution.CoverageIssue{Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: source.source, Detail: fmt.Sprintf("workspace match work budget exceeded (%d)", b.limits.maxWorkspaceMatchWork)})
 			break
 		}
 	}
@@ -367,9 +372,7 @@ func (b *InventoryBuilder) Build(ctx context.Context, root string) (jsresolution
 		decls := workspaceDecls[dir]
 		isWorkspace := len(decls) > 0
 		if isWorkspace && pkg.name == "" {
-			coverage.add(jsresolution.CoverageIssue{
-				Kind: jsresolution.CoverageMalformedMetadata, Path: pkg.file, Detail: "workspace package must declare a valid name",
-			})
+			coverage.add(jsresolution.CoverageIssue{Kind: jsresolution.CoverageMalformedMetadata, Path: pkg.file, Detail: "workspace package must declare a valid name"})
 		}
 		inventory.Packages = append(inventory.Packages, jsresolution.PackageMetadata{
 			Name: pkg.name, Version: strings.TrimSpace(pkg.version), Path: dir, Private: pkg.private,
@@ -393,31 +396,37 @@ func isMetadataFile(name string) bool {
 	return name == "package.json" || name == "pnpm-workspace.yaml"
 }
 
+func workspaceModeForPackageManager(raw string) workspaceNegationMode {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "npm" || strings.HasPrefix(value, "npm@") {
+		return workspaceNegationOrdered
+	}
+	return workspaceNegationExcludeAlways
+}
+
 func addWorkspaceSource(out *[]workspaceSource, source workspaceSource, total *int, limits inventoryLimits, coverage *coverageSink) {
 	if len(source.patterns) == 0 {
+		if source.includeBase {
+			*out = append(*out, source)
+		}
 		return
 	}
 	patterns := deduplicateStringsStable(source.patterns)
 	if len(patterns) > limits.maxPatternsPerSource {
-		coverage.add(jsresolution.CoverageIssue{
-			Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: source.source,
-			Detail: fmt.Sprintf("workspace pattern budget per source exceeded (%d)", limits.maxPatternsPerSource),
-		})
+		coverage.add(jsresolution.CoverageIssue{Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: source.source, Detail: fmt.Sprintf("workspace pattern budget per source exceeded (%d)", limits.maxPatternsPerSource)})
 		patterns = patterns[:limits.maxPatternsPerSource]
 	}
 	remaining := limits.maxPatternsTotal - *total
 	if remaining <= 0 {
-		coverage.add(jsresolution.CoverageIssue{
-			Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: source.source,
-			Detail: fmt.Sprintf("total workspace pattern budget exceeded (%d)", limits.maxPatternsTotal),
-		})
+		coverage.add(jsresolution.CoverageIssue{Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: source.source, Detail: fmt.Sprintf("total workspace pattern budget exceeded (%d)", limits.maxPatternsTotal)})
+		if source.includeBase {
+			source.patterns = nil
+			*out = append(*out, source)
+		}
 		return
 	}
 	if len(patterns) > remaining {
-		coverage.add(jsresolution.CoverageIssue{
-			Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: source.source,
-			Detail: fmt.Sprintf("total workspace pattern budget exceeded (%d)", limits.maxPatternsTotal),
-		})
+		coverage.add(jsresolution.CoverageIssue{Kind: jsresolution.CoverageMetadataBudgetExceeded, Path: source.source, Detail: fmt.Sprintf("total workspace pattern budget exceeded (%d)", limits.maxPatternsTotal)})
 		patterns = patterns[:remaining]
 	}
 	*total += len(patterns)
@@ -458,28 +467,30 @@ func compileWorkspacePatterns(source workspaceSource, maxSegments int) ([]compil
 			issues = append(issues, jsresolution.CoverageIssue{Kind: kind, Path: source.source, Detail: err.Error()})
 			continue
 		}
-		out = append(out, compiledPattern{source: source.source, pattern: strings.TrimSpace(raw), match: pattern, negated: negated})
+		out = append(out, compiledPattern{source: source.source, pattern: raw, match: pattern, negated: negated})
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].negated != out[j].negated {
-			return !out[i].negated
-		}
-		if out[i].match != out[j].match {
-			return out[i].match < out[j].match
-		}
-		return out[i].pattern < out[j].pattern
-	})
+	if source.negationMode == workspaceNegationExcludeAlways {
+		sort.Slice(out, func(i, j int) bool {
+			if out[i].negated != out[j].negated {
+				return !out[i].negated
+			}
+			if out[i].match != out[j].match {
+				return out[i].match < out[j].match
+			}
+			return out[i].pattern < out[j].pattern
+		})
+	}
 	return out, issues
 }
 
 func normalizeWorkspacePattern(baseDir, raw string, maxSegments int) (string, bool, error) {
-	value := strings.TrimSpace(raw)
+	value := raw
 	if value == "" {
 		return "", false, fmt.Errorf("empty workspace pattern")
 	}
 	negated := strings.HasPrefix(value, "!")
 	if negated {
-		value = strings.TrimSpace(strings.TrimPrefix(value, "!"))
+		value = strings.TrimPrefix(value, "!")
 		if value == "" {
 			return "", false, fmt.Errorf("empty negated workspace pattern")
 		}
@@ -490,6 +501,9 @@ func normalizeWorkspacePattern(baseDir, raw string, maxSegments int) (string, bo
 	value = strings.ReplaceAll(value, "\\", "/")
 	if strings.ContainsAny(value, "{}") {
 		return "", false, fmt.Errorf("workspace pattern %q uses unsupported brace expansion", raw)
+	}
+	if usesUnsupportedExtglob(value) {
+		return "", false, fmt.Errorf("workspace pattern %q uses unsupported extended glob syntax", raw)
 	}
 	segments := collapseDoubleStarSegments(strings.Split(value, "/"))
 	if len(segments) > maxSegments {
@@ -516,6 +530,15 @@ func normalizeWorkspacePattern(baseDir, raw string, maxSegments int) (string, bo
 		return ".", negated, nil
 	}
 	return strings.TrimPrefix(joined, "./"), negated, nil
+}
+
+func usesUnsupportedExtglob(value string) bool {
+	for _, marker := range []string{"@(", "+(", "?(", "*(", "!("} {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func collapseDoubleStarSegments(in []string) []string {
@@ -596,7 +619,14 @@ func literalPatternPrefix(pattern string) string {
 	return strings.Join(literal, "/")
 }
 
-func selectWorkspaceDeclaration(ctx context.Context, patterns []compiledPattern, target string, budget *workBudget) (jsresolution.MetadataDeclaration, bool, error) {
+func selectWorkspaceDeclaration(ctx context.Context, patterns []compiledPattern, target string, budget *workBudget, mode workspaceNegationMode) (jsresolution.MetadataDeclaration, bool, error) {
+	if mode == workspaceNegationOrdered {
+		return selectOrderedWorkspaceDeclaration(ctx, patterns, target, budget)
+	}
+	return selectExcludeAlwaysWorkspaceDeclaration(ctx, patterns, target, budget)
+}
+
+func selectExcludeAlwaysWorkspaceDeclaration(ctx context.Context, patterns []compiledPattern, target string, budget *workBudget) (jsresolution.MetadataDeclaration, bool, error) {
 	var selected *compiledPattern
 	for i := range patterns {
 		pattern := &patterns[i]
@@ -637,9 +667,38 @@ func selectWorkspaceDeclaration(ctx context.Context, patterns []compiledPattern,
 	return jsresolution.MetadataDeclaration{Source: selected.source, Pattern: selected.pattern}, true, nil
 }
 
+func selectOrderedWorkspaceDeclaration(ctx context.Context, patterns []compiledPattern, target string, budget *workBudget) (jsresolution.MetadataDeclaration, bool, error) {
+	var selected *compiledPattern
+	included := false
+	for i := range patterns {
+		pattern := &patterns[i]
+		if !budget.consume() {
+			return jsresolution.MetadataDeclaration{}, false, nil
+		}
+		matched, err := matchWorkspacePattern(ctx, pattern.match, target)
+		if err != nil {
+			return jsresolution.MetadataDeclaration{}, false, err
+		}
+		if !matched {
+			continue
+		}
+		if pattern.negated {
+			included = false
+			selected = nil
+			continue
+		}
+		included = true
+		selected = pattern
+	}
+	if !included || selected == nil {
+		return jsresolution.MetadataDeclaration{}, false, nil
+	}
+	return jsresolution.MetadataDeclaration{Source: selected.source, Pattern: selected.pattern}, true, nil
+}
+
 func matchWorkspacePattern(ctx context.Context, pattern, target string) (bool, error) {
-	pattern = strings.Trim(strings.TrimSpace(pattern), "/")
-	target = strings.Trim(strings.TrimSpace(target), "/")
+	pattern = strings.Trim(pattern, "/")
+	target = strings.Trim(target, "/")
 	if pattern == "" || pattern == "." {
 		return target == "" || target == ".", ctx.Err()
 	}
@@ -697,17 +756,21 @@ func splitPathSegments(value string) []string {
 
 func parsePackageJSON(rel string, content []byte) (packageFile, error) {
 	var raw struct {
-		Name       string          `json:"name"`
-		Version    string          `json:"version"`
-		Private    bool            `json:"private"`
-		Workspaces json.RawMessage `json:"workspaces"`
+		Name           string          `json:"name"`
+		Version        string          `json:"version"`
+		Private        bool            `json:"private"`
+		Workspaces     json.RawMessage `json:"workspaces"`
+		PackageManager string          `json:"packageManager"`
 	}
 	if err := json.Unmarshal(content, &raw); err != nil {
 		return packageFile{}, fmt.Errorf("parse package.json: %w", err)
 	}
 	patterns, workspaceErr := parseJSONWorkspaces(raw.Workspaces)
 	dir := path.Dir(rel)
-	pkg := packageFile{file: rel, dir: dir, name: raw.Name, version: raw.Version, private: raw.Private, patterns: patterns}
+	pkg := packageFile{
+		file: rel, dir: dir, name: raw.Name, version: raw.Version, private: raw.Private,
+		patterns: patterns, packageManager: raw.PackageManager,
+	}
 	if workspaceErr != nil {
 		return pkg, workspaceErr
 	}
@@ -796,6 +859,9 @@ func parsePNPMWorkspace(content []byte) ([]string, error) {
 		if item == "" {
 			return nil, fmt.Errorf("pnpm-workspace.yaml contains an empty package pattern")
 		}
+		if hasUnsupportedYAMLScalarSyntax(item) {
+			return nil, fmt.Errorf("pnpm-workspace.yaml package pattern uses unsupported YAML scalar syntax")
+		}
 		value, err := unquoteYAMLScalar(item)
 		if err != nil {
 			return nil, fmt.Errorf("pnpm-workspace.yaml package pattern: %w", err)
@@ -806,12 +872,24 @@ func parsePNPMWorkspace(content []byte) ([]string, error) {
 		return nil, fmt.Errorf("read pnpm-workspace.yaml: %w", err)
 	}
 	if !found {
-		return nil, fmt.Errorf("pnpm-workspace.yaml has no packages list")
+		return nil, nil
 	}
 	if len(patterns) == 0 {
 		return nil, fmt.Errorf("pnpm-workspace.yaml packages list is empty or unsupported")
 	}
 	return patterns, nil
+}
+
+func hasUnsupportedYAMLScalarSyntax(item string) bool {
+	if item == "" || strings.HasPrefix(item, "'") || strings.HasPrefix(item, "\"") {
+		return false
+	}
+	switch item[0] {
+	case '&', '*', '!', '|', '>', '{', '[':
+		return true
+	default:
+		return false
+	}
 }
 
 func stripYAMLComment(line string) string {
@@ -936,10 +1014,7 @@ func addWorkspaceConflicts(inventory *jsresolution.Inventory, coverage *coverage
 			continue
 		}
 		sort.Strings(paths)
-		coverage.add(jsresolution.CoverageIssue{
-			Kind:   jsresolution.CoverageWorkspaceNameConflict,
-			Detail: fmt.Sprintf("workspace package %q is declared at multiple roots: %s", name, strings.Join(paths, ", ")),
-		})
+		coverage.add(jsresolution.CoverageIssue{Kind: jsresolution.CoverageWorkspaceNameConflict, Detail: fmt.Sprintf("workspace package %q is declared at multiple roots: %s", name, strings.Join(paths, ", "))})
 	}
 }
 
