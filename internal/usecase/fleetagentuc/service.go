@@ -1,0 +1,173 @@
+// Package fleetagentuc is the use-case layer for fleet agent identity (#409, epic #405): an
+// operator mints a single-use enrolment token; an agent exchanges it for a long-lived bearer
+// credential; the API authenticates every subsequent call by that credential. Secret material is
+// generated and hashed here; only hashes reach the store, and the plaintext is returned once.
+package fleetagentuc
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/platform/agenttoken"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+)
+
+// ErrUnauthenticated means the presented credential is missing, malformed, unknown, or its secret
+// does not match. ErrRevoked means the agent exists but has been revoked. Both are mapped to HTTP
+// at the adapter edge (401 / 403).
+var (
+	ErrUnauthenticated = errors.New("fleetagent: unauthenticated")
+	ErrRevoked         = errors.New("fleetagent: agent revoked")
+)
+
+// Service is the fleet agent identity use case.
+type Service struct {
+	store ports.FleetAgentStore
+	audit ports.AuditLogger
+	clock ports.Clock
+	ids   ports.IDGenerator
+}
+
+// NewService validates its dependencies and returns the service.
+func NewService(store ports.FleetAgentStore, audit ports.AuditLogger, clock ports.Clock, ids ports.IDGenerator) (*Service, error) {
+	if store == nil || audit == nil || clock == nil || ids == nil {
+		return nil, fmt.Errorf("%w: fleet agent service needs store + audit + clock + ids", shared.ErrValidation)
+	}
+	return &Service{store: store, audit: audit, clock: clock, ids: ids}, nil
+}
+
+// MintEnrolToken issues a single-use enrolment token for tenantID valid for ttl, and returns the
+// plaintext once. Only its hash is stored. This is an operator action (RBAC-gated at the adapter).
+func (s *Service) MintEnrolToken(ctx context.Context, actor string, tenantID shared.ID, ttl time.Duration) (string, error) {
+	if tenantID.IsZero() {
+		return "", fmt.Errorf("%w: tenant id is required to mint an enrolment token", shared.ErrValidation)
+	}
+	now := s.clock.Now()
+	token, hash, err := agenttoken.Mint(agenttoken.KindEnrol, tenantID.String(), "")
+	if err != nil {
+		return "", fmt.Errorf("mint enrol token: %w", err)
+	}
+	rec, err := fleetagent.NewEnrolToken(hash, tenantID, actor, now.Add(ttl), now)
+	if err != nil {
+		return "", err
+	}
+	if err := s.store.CreateEnrolToken(ctx, rec); err != nil {
+		return "", fmt.Errorf("mint enrol token: %w", err)
+	}
+	if err := s.audit.Record(ctx, ports.AuditEntry{
+		Actor: actor, Action: "agent.enrol_token_minted", Target: tenantID.String(),
+		Metadata: map[string]string{"tenant_id": tenantID.String()}, At: now,
+	}); err != nil {
+		return "", fmt.Errorf("mint enrol token: audit: %w", err)
+	}
+	return token, nil
+}
+
+// EnrolInput describes the enrolling agent.
+type EnrolInput struct {
+	Name         string
+	Platform     string
+	OSVersion    string
+	AgentVersion string
+	Capabilities []string
+}
+
+// Enrol exchanges a valid enrolment token for a new agent identity and returns its bearer
+// credential once. The tenant is taken from the enrolment token, never from the caller.
+func (s *Service) Enrol(ctx context.Context, enrolToken string, in EnrolInput) (*fleetagent.Agent, string, error) {
+	kind, tenantStr, _, secret, ok := agenttoken.Parse(enrolToken)
+	if !ok || kind != agenttoken.KindEnrol {
+		return nil, "", ErrUnauthenticated
+	}
+	now := s.clock.Now()
+	tenantID := shared.ID(tenantStr)
+	if _, err := s.store.ConsumeEnrolToken(ctx, tenantID, agenttoken.Hash(secret), now); err != nil {
+		if errors.Is(err, shared.ErrNotFound) {
+			return nil, "", ErrUnauthenticated
+		}
+		return nil, "", fmt.Errorf("enrol: consume token: %w", err)
+	}
+	agentID := s.ids.NewID()
+	token, hash, err := agenttoken.Mint(agenttoken.KindAgent, tenantID.String(), agentID.String())
+	if err != nil {
+		return nil, "", fmt.Errorf("enrol: mint agent token: %w", err)
+	}
+	agent, err := fleetagent.NewAgent(agentID, tenantID, in.Name, in.Platform, in.OSVersion, in.AgentVersion, in.Capabilities, hash, now)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := s.store.CreateAgent(ctx, agent); err != nil {
+		return nil, "", fmt.Errorf("enrol: create agent: %w", err)
+	}
+	if err := s.audit.Record(ctx, ports.AuditEntry{
+		Actor: agentID.String(), Action: "agent.enrolled", Target: agentID.String(),
+		Metadata: map[string]string{"tenant_id": tenantID.String(), "name": agent.Name, "platform": agent.Platform},
+		At:       now,
+	}); err != nil {
+		return nil, "", fmt.Errorf("enrol: audit: %w", err)
+	}
+	return agent, token, nil
+}
+
+// Authenticate resolves and verifies an agent bearer credential. It returns ErrUnauthenticated for
+// any missing/malformed/unknown credential or secret mismatch, and ErrRevoked for a revoked agent.
+func (s *Service) Authenticate(ctx context.Context, token string) (*fleetagent.Agent, error) {
+	kind, tenantStr, idStr, secret, ok := agenttoken.Parse(token)
+	if !ok || kind != agenttoken.KindAgent {
+		return nil, ErrUnauthenticated
+	}
+	agent, err := s.store.GetAgent(ctx, shared.ID(tenantStr), shared.ID(idStr))
+	if err != nil {
+		if errors.Is(err, shared.ErrNotFound) {
+			return nil, ErrUnauthenticated
+		}
+		return nil, fmt.Errorf("authenticate: %w", err)
+	}
+	if !agenttoken.Equal(secret, agent.TokenHash) {
+		return nil, ErrUnauthenticated
+	}
+	if agent.Revoked() {
+		return nil, ErrRevoked
+	}
+	return agent, nil
+}
+
+// HeartbeatInput carries the liveness-report fields.
+type HeartbeatInput struct {
+	Platform     string
+	OSVersion    string
+	AgentVersion string
+	Capabilities []string
+}
+
+// Heartbeat records liveness and refreshes the agent's reported attributes.
+func (s *Service) Heartbeat(ctx context.Context, agent *fleetagent.Agent, in HeartbeatInput) error {
+	if err := s.store.Heartbeat(ctx, agent.TenantID, agent.ID, in.Platform, in.OSVersion, in.AgentVersion, in.Capabilities, s.clock.Now()); err != nil {
+		return fmt.Errorf("heartbeat: %w", err)
+	}
+	return nil
+}
+
+// Revoke marks an agent revoked so its credential no longer authenticates.
+func (s *Service) Revoke(ctx context.Context, actor string, tenantID, id shared.ID) error {
+	now := s.clock.Now()
+	if err := s.store.Revoke(ctx, tenantID, id, now); err != nil {
+		return fmt.Errorf("revoke agent: %w", err)
+	}
+	if err := s.audit.Record(ctx, ports.AuditEntry{
+		Actor: actor, Action: "agent.revoked", Target: id.String(),
+		Metadata: map[string]string{"tenant_id": tenantID.String()}, At: now,
+	}); err != nil {
+		return fmt.Errorf("revoke agent: audit: %w", err)
+	}
+	return nil
+}
+
+// ListAgents returns the tenant's agents.
+func (s *Service) ListAgents(ctx context.Context, tenantID shared.ID) ([]*fleetagent.Agent, error) {
+	return s.store.ListAgents(ctx, tenantID)
+}

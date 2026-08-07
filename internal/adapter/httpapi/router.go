@@ -61,6 +61,8 @@ type Router struct {
 	drafts          writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
 	projects        projectService        // optional; nil ⇒ project routes are not registered
 	assets          assetService          // optional; nil ⇒ fleet asset routes are not registered
+	fleet           *fleetRouter          // optional; nil ⇒ agent transport plane is not served
+	fleetAdmin      fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
 	qualityGates    qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
 	qualityProfiles qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
 	rules           rulesService          // optional; nil ⇒ rule catalog routes are not registered
@@ -219,6 +221,11 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/quality-profiles/{key}/deactivate", rt.authz(userdom.PermOperate, rt.deactivateProfileRule))
 		mux.HandleFunc("POST /api/v1/quality-profiles/{key}/severity", rt.authz(userdom.PermOperate, rt.setProfileRuleSeverity))
 		mux.HandleFunc("DELETE /api/v1/quality-profiles/{key}", rt.authz(userdom.PermOperate, rt.deleteQualityProfile))
+	}
+	if rt.fleetAdmin != nil {
+		mux.HandleFunc("POST /api/v1/agents/enrolment-tokens", rt.authz(userdom.PermAdminister, rt.mintEnrolToken))
+		mux.HandleFunc("GET /api/v1/agents", rt.authz(userdom.PermView, rt.listFleetAgents))
+		mux.HandleFunc("POST /api/v1/agents/{id}/revoke", rt.authz(userdom.PermAdminister, rt.revokeFleetAgent))
 	}
 	if rt.assets != nil {
 		mux.HandleFunc("POST /api/v1/assets", rt.authz(userdom.PermOperate, rt.createAsset))
@@ -379,7 +386,17 @@ func (rt *Router) Handler() http.Handler {
 		"/api/v1/aup/accept": true,
 		"/api/v1/me":         true,
 	}
-	return normalizePath(rt.auth.Middleware(public, rt.requireAUP(aupExempt, rt.routes())))
+	human := normalizePath(rt.auth.Middleware(public, rt.requireAUP(aupExempt, rt.routes())))
+	if rt.fleet == nil {
+		return human
+	}
+	// The untrusted agent transport is a SEPARATE auth plane: it must not pass through the human
+	// bearer-token authenticator or the AUP gate. Mount it at the top level so /api/v1/fleet is
+	// served by the agent-auth handler and everything else by the human chain.
+	top := http.NewServeMux()
+	top.Handle("/api/v1/fleet/", rt.fleet.handler())
+	top.Handle("/", human)
+	return normalizePath(top)
 }
 
 // normalizePath rejects non-canonical request paths (e.g. `/a//b`, `/a/../b`,

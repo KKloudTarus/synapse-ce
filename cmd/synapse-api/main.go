@@ -89,6 +89,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/jobs"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/logging"
+	"github.com/KKloudTarus/synapse-ce/internal/platform/worksign"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
@@ -108,6 +109,8 @@ import (
 	exploitationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/exploitation"
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/llmverifier"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
@@ -168,6 +171,8 @@ func main() {
 	var repo ports.EngagementRepository
 	var projectRepo ports.ProjectRepository
 	var assetStore ports.AssetRepository
+	var workOrderStore ports.WorkOrderStore
+	var fleetAgentStore ports.FleetAgentStore
 	var findingRepo ports.FindingRepository
 	var judgmentStore analysisuc.Store // postgres or memory; satisfies both the narrow Store + ports.JudgmentStore
 	var commentRepo ports.CommentRepository
@@ -288,12 +293,14 @@ func main() {
 		threatModelStore = postgres.NewThreatModelRepository(pool)
 		writeupDraftStore = postgres.NewWriteupDraftRepository(pool)
 		assetStore = postgres.NewAssetRepository(pool)
-		// SECURITY (#431 req 6, #432): the fleet_assets tables are RLS-protected, but RLS is a
-		// silent no-op if the runtime DB role is SUPERUSER or holds BYPASSRLS. When the asset model
-		// is enabled we refuse to serve unless the role can actually enforce isolation.
-		if cfg.FleetAssetsEnabled {
+		workOrderStore = postgres.NewWorkOrderRepository(pool)
+		fleetAgentStore = postgres.NewFleetAgentRepository(pool)
+		// SECURITY (#431 req 6, #432, #409): the fleet_* tables are RLS-protected, but RLS is a
+		// silent no-op if the runtime DB role is SUPERUSER or holds BYPASSRLS. When any fleet
+		// feature is enabled we refuse to serve unless the role can actually enforce isolation.
+		if cfg.FleetAssetsEnabled || cfg.FleetEnabled {
 			if rerr := postgres.CheckRLSRuntimeRole(startup, pool); rerr != nil {
-				log.Error("fleet assets enabled but the DB role cannot enforce row level security – refusing to serve", "err", rerr)
+				log.Error("a fleet feature is enabled but the DB role cannot enforce row level security – refusing to serve", "err", rerr)
 				os.Exit(1)
 			}
 		}
@@ -318,6 +325,8 @@ func main() {
 		repo = memory.NewEngagementRepository()
 		projectRepo = memory.NewProjectRepository()
 		assetStore = memory.NewAssetStore()
+		workOrderStore = memory.NewWorkOrderStore()
+		fleetAgentStore = memory.NewFleetAgentStore()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
 		commentRepo = memory.NewCommentRepository()
@@ -1037,6 +1046,28 @@ func main() {
 		}
 		router.SetAssets(svc)
 		log.Info("fleet asset model ENABLED (multi-tenant, Postgres RLS-enforced)")
+	}
+	if cfg.FleetEnabled {
+		// SECURITY: a missing/short signer key fails startup closed rather than boot a forgeable
+		// work-order signer (worksign.New rejects keys under 32 bytes).
+		signer, serr := worksign.New([]byte(cfg.FleetSignerKey))
+		if serr != nil {
+			log.Error("fleet enabled but the work-order signer key is missing or too short – set SYNAPSE_FLEET_SIGNER_KEY (>=32 bytes)", "err", serr)
+			os.Exit(1)
+		}
+		agentSvc, aerr := fleetagentuc.NewService(fleetAgentStore, auditLog, clock, ids)
+		if aerr != nil {
+			log.Error("fleet agent service init failed", "err", aerr)
+			os.Exit(1)
+		}
+		workSvc, werr := fleetwork.NewService(workOrderStore, signer, auditLog, clock, ids)
+		if werr != nil {
+			log.Error("fleet work service init failed", "err", werr)
+			os.Exit(1)
+		}
+		router.SetFleet(agentSvc, workSvc, clock.Now)
+		router.SetFleetAdmin(agentSvc)
+		log.Info("fleet agent transport ENABLED (agent-auth plane; operator agent-admin routes)")
 	}
 	// deterministic Tier-2 reachability proof in the scan pipeline (opt-in). It mints reachability
 	// judgments, so it requires the judgment lifecycle. The govulncheck builder shares the SCA sandbox when
