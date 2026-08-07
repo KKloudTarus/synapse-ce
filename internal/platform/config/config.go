@@ -191,6 +191,14 @@ type Config struct {
 	// FleetSignerKey is the HMAC key that signs agent work orders. Required and at least 32 bytes
 	// when FleetEnabled; a missing/short key fails startup closed rather than boot a forgeable signer.
 	FleetSignerKey string
+	// LeaderElectionEnabled runs the fenced-lease leader elector (#406). Off by default. Postgres
+	// only (a single in-memory process is trivially the leader). Renewing < Term/2 is enforced.
+	LeaderElectionEnabled bool
+	// LeaderResource is the lease key elected over (default "scheduler").
+	LeaderResource string
+	// LeaderTerm is the lease term; LeaderRenew is the renewal interval (must be < Term/2).
+	LeaderTerm  time.Duration
+	LeaderRenew time.Duration
 	// SASTEnabled turns on the deterministic pattern-SAST analyzer in the scan pipeline; off by default.
 	SASTEnabled bool
 	// SecretScanEnabled turns on the deterministic secret scanner in the scan pipeline; off by default.
@@ -440,6 +448,10 @@ func Load() Config {
 		FleetAssetsEnabled:     getbool("SYNAPSE_FLEET_ASSETS_ENABLED", false),
 		FleetEnabled:           getbool("SYNAPSE_FLEET_ENABLED", false),
 		FleetSignerKey:         getenv("SYNAPSE_FLEET_SIGNER_KEY", ""),
+		LeaderElectionEnabled:  getbool("SYNAPSE_LEADER_ENABLED", false),
+		LeaderResource:         getenv("SYNAPSE_LEADER_RESOURCE", "scheduler"),
+		LeaderTerm:             getduration("SYNAPSE_LEADER_TERM", 15*time.Second),
+		LeaderRenew:            getduration("SYNAPSE_LEADER_RENEW", 5*time.Second),
 		GovulncheckBin:         getenv("SYNAPSE_GOVULNCHECK_BIN", "govulncheck"),
 		GoModGraphEnabled:      getbool("SYNAPSE_GOMODGRAPH_ENABLED", true),
 		GoBin:                  getenv("SYNAPSE_GO_BIN", "go"),

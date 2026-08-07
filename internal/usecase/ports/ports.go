@@ -102,6 +102,15 @@ type FleetAgentStore interface {
 	ListAgents(ctx context.Context, tenantID shared.ID) ([]*fleetagent.Agent, error)
 }
 
+// LeaderStore is the fenced-lease backing store for leader election. Acquire atomically takes or
+// renews leadership of resource for holder: it returns held=true when this instance holds the
+// lease after the call, plus the current fence token (bumped on every takeover). It is global
+// control-plane state, not tenant-scoped.
+type LeaderStore interface {
+	Acquire(ctx context.Context, resource, holder string, term time.Duration, now time.Time) (held bool, fence int64, err error)
+	Resign(ctx context.Context, resource, holder string, now time.Time) error
+}
+
 // WorkOrderSigner signs and verifies the canonical signing payload of a work order. The
 // implementation holds the key; the control plane signs at issue time and the agent verifies
 // before acting. Kept as a port so the key material stays in an infrastructure/platform adapter.
