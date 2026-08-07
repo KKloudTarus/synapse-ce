@@ -1752,6 +1752,6 @@ func reportSourceRetention(res *scauc.ScanResult, retain sourceRetention) {
 	if res.SourceCapture.Manifest.Truncated {
 		truncated = ", truncated by capture limits"
 	}
-	fmt.Fprintf(os.Stderr, "synapse-cli: source snapshot retained for project %s analysis %s (%d file(s), digest %s%s)\n",
+	fmt.Fprintf(os.Stderr, "synapse-cli: source snapshot retained for project %s analysis %s, replacing any prior snapshot for that analysis (%d file(s), digest %s%s)\n",
 		retain.ProjectID, retain.AnalysisID, len(res.SourceCapture.Manifest.Files), res.SourceCapture.Manifest.ArtifactDigest(), truncated)
 }
