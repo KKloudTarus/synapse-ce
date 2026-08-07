@@ -1,0 +1,85 @@
+package postgres
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// WithTenant runs fn inside a transaction whose `app.current_tenant` session variable is set to
+// tenantID for the life of that transaction only. Stores of Row-Level-Security-protected tables
+// (see migration 0057 and its synapse_enable_tenant_rls procedure) MUST route reads and writes
+// through this helper: the policy denies every row when the tenant resolves to NULL, so a query
+// that runs outside WithTenant sees nothing rather than leaking across tenants. The setting is
+// applied with set_config(..., is_local => true), which is transaction-scoped.
+//
+// Fail-closed semantics: an empty tenantID resolves (via synapse_current_tenant's NULLIF) to NULL
+// and therefore matches no row. Under RLS the empty string is DENY, not the default tenant, so
+// callers of RLS-protected tables must pass a non-empty tenant id. This closes the placeholder-GUC
+// reset hazard: app.current_tenant reverts to the empty string (not "unset") after a transaction,
+// and mapping the empty string to NULL means a connection reused outside WithTenant still denies
+// rather than exposing default-tenant rows.
+func WithTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) (err error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("rls: begin tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		// Roll back on any non-committed exit (error OR a panic in fn) with a fresh, bounded
+		// context so an already-canceled request context cannot skip releasing the connection.
+		// Keying on a committed flag rather than on err also rolls back when fn panics, which
+		// would otherwise leak the connection back to the pool with an open transaction.
+		rbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(rbCtx)
+	}()
+	if _, err = tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", tenantID); err != nil {
+		return fmt.Errorf("rls: set tenant: %w", err)
+	}
+	if err = fn(tx); err != nil {
+		return err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("rls: commit: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+// CheckRLSRuntimeRole reports whether the role the pool connects as can actually be constrained by
+// Row Level Security. RLS is bypassed entirely by SUPERUSER and BYPASSRLS roles regardless of
+// FORCE ROW LEVEL SECURITY, so if the runtime role holds either attribute the whole tenant
+// isolation guarantee is silently a no-op. It returns a non-nil error naming the offending
+// attribute when the role would bypass RLS.
+//
+// This is intended to gate multi-tenant enablement (fail-closed): the caller that turns on
+// RLS-protected tables must refuse to serve if this returns an error. It is exported and separate
+// so that path can enforce it at startup, while single-tenant deployments that connect as a
+// superuser and use no RLS-protected table are not forced to change their role.
+func CheckRLSRuntimeRole(ctx context.Context, pool *pgxpool.Pool) error {
+	var super, bypass bool
+	err := pool.QueryRow(ctx,
+		`SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+	).Scan(&super, &bypass)
+	if err != nil {
+		return fmt.Errorf("rls: inspect runtime role: %w", err)
+	}
+	switch {
+	case super:
+		return fmt.Errorf("rls: runtime DB role %w: role is SUPERUSER, which bypasses row level security", errRLSRoleBypasses)
+	case bypass:
+		return fmt.Errorf("rls: runtime DB role %w: role has BYPASSRLS, which bypasses row level security", errRLSRoleBypasses)
+	default:
+		return nil
+	}
+}
+
+// errRLSRoleBypasses is the sentinel wrapped by CheckRLSRuntimeRole so callers can match it.
+var errRLSRoleBypasses = fmt.Errorf("cannot enforce isolation")
