@@ -12,6 +12,12 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- `synapse-cli scan --retain-source --project-id ID --analysis-id ID [--tenant-id ID]` captures an
+  immutable Code Quality source snapshot for an analysis the server already owns, writing it to the
+  configured project-source artifact directory in the same layout the API's `/code/file` serves. The
+  identity flags are required and validated (fail closed, exit 2) so a CI job can never believe it
+  retained source when it did not; without the flag, scan behaviour is unchanged. (#402)
+
 - **Immutable Project Code workspace.** Capture bounded analysis-time source and Git comparison artifacts so historical source, unified/split diffs, and finding locations remain inspectable without reconstructing mutable workspaces; large source and diff views use bounded windows or virtualization.
 - **Deterministic reachability for Python (Tier-1 import-reachability).** Extends deterministic call-graph reachability beyond Go/JVM. A source-only scanner (`SYNAPSE_PYREACH_ENABLED`, opt-in) determines which declared PyPI packages first-party code actually imports; a declared-but-never-imported package (a dead dependency) mints a deterministic **Tier-1 `not_reachable`** judgment that the OpenVEX export consumes as a `vulnerable_code_not_in_execute_path` justification. It is source-only (no compile/execute, so in-process like the lockfile parsers), and conservative by design: a non-Python target, a target using dynamic imports (`importlib`/`__import__`), or an unresolvable import name yields *no* verdict rather than a false "not reachable". Honestly tiered — import-level, weaker than the Go call-graph Tier-2 proof.
 - **Taint findings cite `file:line` (def-use precision).** The SSA call-graph builder now records first-party symbols' definition positions as a `relpath:line` side table (never an absolute host path, never file contents), carried across the sandboxed `synapse-callgraph` exec boundary. A confirmed taint `CapSAST` finding's location is now a `file:line` — like the pattern engine — instead of only a symbol, and the sealed witness records source→sink positions. It is a coarse, function-granular over-approximation (the function's definition line) and falls back to the symbol when a position is unavailable.

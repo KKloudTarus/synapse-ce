@@ -33,6 +33,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourcesnippet"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
@@ -971,7 +972,7 @@ func gradeNum(g rating.Grade) float64 {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  synapse-cli doctor [path] [--json]       # offline pre-scan readiness: toolchain, markers, and dimension coverage")
-	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--include-test] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
+	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--include-test] [--ignore-unfixed] [--detection-priority comprehensive|precise] [--retain-source --project-id ID --analysis-id ID [--tenant-id ID]]")
 	fmt.Fprintln(os.Stderr, "      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  skip the live OSV.dev source; detect with Grype's offline DB only (air-gapped / fast)")
@@ -993,6 +994,42 @@ func usage() {
 	os.Exit(2)
 }
 
+// sourceRetention is the opt-in project-analysis capture context for a CLI scan. The CLI never mints
+// these identities: the analysis is created server-side (its id is the durable job id) and CI passes it
+// in, so a capture lands under the same tenant/project/analysis key the API's /code/file serves.
+type sourceRetention struct {
+	Enabled    bool
+	TenantID   string
+	ProjectID  string
+	AnalysisID string
+}
+
+// validateSourceRetention keeps --retain-source honest: capture needs a project and an analysis to key
+// the snapshot on, and the identity flags are meaningless without it. Both directions are usage errors
+// rather than a silent skip, so retention can never be quietly absent from a CI run that asked for it.
+func validateSourceRetention(r sourceRetention) error {
+	project, analysis, tenant := strings.TrimSpace(r.ProjectID), strings.TrimSpace(r.AnalysisID), strings.TrimSpace(r.TenantID)
+	if !r.Enabled {
+		if project != "" || analysis != "" || tenant != "" {
+			return fmt.Errorf("--project-id/--analysis-id/--tenant-id require --retain-source")
+		}
+		return nil
+	}
+	if project == "" || analysis == "" {
+		return fmt.Errorf("--retain-source requires --project-id and --analysis-id (the server owns the analysis identity)")
+	}
+	return nil
+}
+
+// normalized returns the retention context with its identities trimmed, so a stray shell space cannot
+// produce a snapshot under a key the API will never look up.
+func (r sourceRetention) normalized() sourceRetention {
+	r.TenantID = strings.TrimSpace(r.TenantID)
+	r.ProjectID = strings.TrimSpace(r.ProjectID)
+	r.AnalysisID = strings.TrimSpace(r.AnalysisID)
+	return r
+}
+
 func runScan() {
 	if len(os.Args) < 3 {
 		usage()
@@ -1006,10 +1043,22 @@ func runScan() {
 	jsonOut := false
 	sarifOut := false
 	includeTest := false
+	retain := sourceRetention{}
 	for i := 3; i < len(os.Args); i++ {
 		switch {
 		case os.Args[i] == "--fail-on" && i+1 < len(os.Args):
 			failOn = shared.Severity(os.Args[i+1])
+			i++
+		case os.Args[i] == "--retain-source":
+			retain.Enabled = true
+		case os.Args[i] == "--project-id" && i+1 < len(os.Args):
+			retain.ProjectID = os.Args[i+1]
+			i++
+		case os.Args[i] == "--analysis-id" && i+1 < len(os.Args):
+			retain.AnalysisID = os.Args[i+1]
+			i++
+		case os.Args[i] == "--tenant-id" && i+1 < len(os.Args):
+			retain.TenantID = os.Args[i+1]
 			i++
 		case os.Args[i] == "--include-test":
 			includeTest = true
@@ -1040,6 +1089,11 @@ func runScan() {
 		fmt.Fprintf(os.Stderr, "synapse-cli: invalid --fail-on %q (want critical|high|medium|low|info)\n", failOn)
 		os.Exit(2)
 	}
+	if err := validateSourceRetention(retain); err != nil {
+		// Fail closed and loudly: a CI job must never believe it retained source when it did not.
+		fmt.Fprintf(os.Stderr, "synapse-cli: %v\n", err)
+		os.Exit(2)
+	}
 	if priority == "" { // resolve the configured default here so an invalid env value gets this same exit-2 message
 		priority = os.Getenv("SYNAPSE_DETECTION_PRIORITY")
 	}
@@ -1051,7 +1105,7 @@ func runScan() {
 		fmt.Fprintln(os.Stderr, "synapse-cli: choose only one of --json or --sarif")
 		os.Exit(2)
 	}
-	if err := run(os.Args[2], failOn, mode, priority, ignoreUnfixed, image, offline, jsonOut, sarifOut, includeTest); err != nil {
+	if err := run(os.Args[2], failOn, mode, priority, ignoreUnfixed, image, offline, jsonOut, sarifOut, includeTest, retain.normalized()); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 		os.Exit(1)
 	}
@@ -1129,7 +1183,7 @@ func (stderrAudit) Record(_ context.Context, e ports.AuditEntry) error {
 
 var _ ports.AuditLogger = stderrAudit{}
 
-func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfixed, image, offline, jsonOut, sarifOut, includeTest bool) error {
+func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfixed, image, offline, jsonOut, sarifOut, includeTest bool, retain sourceRetention) error {
 	// An image target is an OCI reference (acquired via crane → OCI layout); a local
 	// target is a filesystem path that must be absolute for the scope check.
 	target := strings.TrimSpace(path)
@@ -1172,6 +1226,13 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil)),
 	)
 	sca.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)
+	if retain.Enabled {
+		// Same store, dir and limits the API composition root uses, so a CLI capture is byte-identical in
+		// layout to a server-side one and /code/file can serve it from a shared artifact volume.
+		sca.SetProjectSourceArtifactStore(sourceartifact.New(
+			cfg.ProjectSourceArtifactDir, cfg.ProjectSourceMaxFileBytes, cfg.ProjectSourceMaxFiles, cfg.ProjectSourceMaxBytes,
+		))
+	}
 	sca.SetProjectComparisonSource(&gitdiff.ComparisonSource{})
 	sca.SetGateDecoder(qualityprofile.LoadGateBytes)
 	sca.SetSBOMEnricher(manifest.New())
@@ -1341,10 +1402,13 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	}
 
 	// Ephemeral engagement covering the target so the real (gated) Scan path runs.
-	eng, err := engagement.New(ids.NewID(), "", "synapse-cli dogfood", "", clock.Now())
+	eng, err := engagement.New(ids.NewID(), shared.ID(retain.TenantID), "synapse-cli dogfood", "", clock.Now())
 	if err != nil {
 		return fmt.Errorf("build ephemeral engagement: %w", err)
 	}
+	// A non-zero ProjectID is what turns this ephemeral engagement into a Project analysis context, which
+	// is the precondition the capture path checks before it retains any source.
+	eng.ProjectID = shared.ID(retain.ProjectID)
 	scopeKind, acqKind := engagement.TargetRepo, ports.TargetLocal
 	if image {
 		scopeKind, acqKind = engagement.TargetImage, ports.TargetImage
@@ -1363,9 +1427,14 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 			policyDir = cwd
 		}
 	}
-	res, err := sca.ScanWithOptions(ctx, "synapse-cli", eng.ID, ports.AcquireRequest{Kind: acqKind, Value: target}, scauc.ScanOptions{Mode: mode, DetectionPriority: priority, PolicyDir: policyDir})
+	res, err := sca.ScanWithOptions(ctx, "synapse-cli", eng.ID, ports.AcquireRequest{Kind: acqKind, Value: target}, scauc.ScanOptions{Mode: mode, DetectionPriority: priority, PolicyDir: policyDir, ProjectAnalysis: retain.Enabled, ProjectAnalysisID: retain.AnalysisID})
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
+	}
+	if retain.Enabled {
+		// Capture failure is explicit metadata, never a scan failure - so say which happened, with the
+		// reason, rather than letting a CI log imply a snapshot exists.
+		reportSourceRetention(res, retain)
 	}
 
 	// The scan pipeline ran the AI false-positive triage (if injected above); report the outcome. A
@@ -1660,4 +1729,24 @@ func countReachability(comps []sbom.Component) (referenced, unreferenced int) {
 		}
 	}
 	return referenced, unreferenced
+}
+
+// reportSourceRetention tells the operator whether the immutable source snapshot was actually retained.
+// The scan itself never fails on capture, so without this a CI log would look identical either way.
+func reportSourceRetention(res *scauc.ScanResult, retain sourceRetention) {
+	if res == nil || res.SourceCapture == nil {
+		fmt.Fprintf(os.Stderr, "synapse-cli: source retention requested but no capture was reported (project %s, analysis %s)\n", retain.ProjectID, retain.AnalysisID)
+		return
+	}
+	src := res.SourceCapture.Capabilities.Source
+	if !src.Available {
+		fmt.Fprintf(os.Stderr, "synapse-cli: source snapshot NOT retained for analysis %s (reason %s)\n", retain.AnalysisID, src.Reason)
+		return
+	}
+	truncated := ""
+	if res.SourceCapture.Manifest.Truncated {
+		truncated = ", truncated by capture limits"
+	}
+	fmt.Fprintf(os.Stderr, "synapse-cli: source snapshot retained for project %s analysis %s (%d file(s), digest %s%s)\n",
+		retain.ProjectID, retain.AnalysisID, len(res.SourceCapture.Manifest.Files), res.SourceCapture.Manifest.ArtifactDigest(), truncated)
 }
