@@ -63,13 +63,17 @@ func TestLeaderStore(t *testing.T) {
 		t.Fatalf("takeover must bump the fence: %d -> %d", fenceA, fenceB)
 	}
 
-	// B resigns; A can acquire immediately even before the term expires.
+	// B resigns; A can acquire immediately even before the term expires, and the fence must NOT
+	// go backwards across the resign+reacquire (Resign expires, it does not drop the row).
 	if err := s.Resign(ctx, "sched-test", "inst-b", now.Add(term+11*time.Second)); err != nil {
 		t.Fatalf("resign: %v", err)
 	}
-	heldA3, _, err := s.Acquire(ctx, "sched-test", "inst-a", term, now.Add(term+12*time.Second))
+	heldA3, fenceA3, err := s.Acquire(ctx, "sched-test", "inst-a", term, now.Add(term+12*time.Second))
 	if err != nil || !heldA3 {
 		t.Fatalf("A should acquire immediately after B resigned: held=%v err=%v", heldA3, err)
+	}
+	if fenceA3 <= fenceB {
+		t.Fatalf("fence must not decrease across resign+reacquire: fenceB=%d fenceA3=%d", fenceB, fenceA3)
 	}
 }
 

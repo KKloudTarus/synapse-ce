@@ -1304,6 +1304,9 @@ func main() {
 	// on shutdown so a follower takes over without waiting for the term. NOTE: this ships the
 	// election mechanism; removing the single-instance lock and gating dispatch on IsLeader (true
 	// horizontal scale) is the tracked follow-on.
+	if cfg.LeaderElectionEnabled && leaderStore == nil {
+		log.Warn("leader election enabled but ignored: it requires Postgres (a single in-memory process is trivially the leader)")
+	}
 	if cfg.LeaderElectionEnabled && leaderStore != nil {
 		elector, eerr := leaderuc.NewElector(leaderStore, auditLog, clock, cfg.LeaderResource, ids.NewID().String(), cfg.LeaderTerm, cfg.LeaderRenew)
 		if eerr != nil {

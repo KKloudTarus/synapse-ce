@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -44,13 +45,21 @@ func (s *LeaderStore) Acquire(ctx context.Context, resource, holder string, term
 		RETURNING holder, fence`,
 		resource, holder, expires, now).Scan(&winner, &fence)
 	if err != nil {
-		return false, 0, err
+		return false, 0, fmt.Errorf("acquire leader lease: %w", err)
 	}
 	return winner == holder, fence, nil
 }
 
-// Resign releases the lease if held by holder.
-func (s *LeaderStore) Resign(ctx context.Context, resource, holder string, _ time.Time) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM leader_leases WHERE resource=$1 AND holder=$2`, resource, holder)
-	return err
+// Resign releases the lease if held by holder. It EXPIRES the lease (clears the holder and sets the
+// term to now) rather than deleting the row, so the fence survives: a graceful handover keeps the
+// fence monotonic (the next acquirer takes over an expired row and bumps it), which a fresh INSERT
+// with fence=1 would not. A challenger sees the expired row immediately and can take over without
+// waiting out the term.
+func (s *LeaderStore) Resign(ctx context.Context, resource, holder string, now time.Time) error {
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE leader_leases SET holder='', term_expires=$3, updated_at=$3 WHERE resource=$1 AND holder=$2`,
+		resource, holder, now); err != nil {
+		return fmt.Errorf("resign leader lease: %w", err)
+	}
+	return nil
 }

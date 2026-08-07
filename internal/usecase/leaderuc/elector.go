@@ -44,9 +44,13 @@ func NewElector(store ports.LeaderStore, audit ports.AuditLogger, clock ports.Cl
 }
 
 // IsLeader reports the cached leadership view without blocking.
+//
+// Note: IsLeader and Fence are independent atomics. That is fine for the current callers (gauging
+// leadership only). When a downstream first GATES on the pair "am I leader, and with which fence",
+// expose a single combined accessor so the two cannot be read torn across a transition.
 func (e *Elector) IsLeader() bool { return e.leader.Load() }
 
-// Fence returns the last observed fence token.
+// Fence returns the last observed fence token. See the note on IsLeader about reading the pair.
 func (e *Elector) Fence() int64 { return e.fence.Load() }
 
 // tick performs one acquire/renew and updates the cached view, auditing any transition. It is the

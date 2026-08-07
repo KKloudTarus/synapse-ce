@@ -8,6 +8,15 @@
 --
 -- `fence` is a monotonically increasing token bumped on every takeover; a partitioned old leader
 -- that later tries to act can be rejected by comparing its stale fence against the current one.
+-- Resign expires the lease (it does not delete the row), so the fence survives a graceful handover
+-- and never resets to 1.
+--
+-- CLOCK: the lease term is currently compared against each instance's own wall clock (the elector
+-- passes its clock's now into Acquire). This is safe against two simultaneous leaders regardless of
+-- skew (the DB serializes the takeover upsert, so only one challenger wins), but a fast-clocked
+-- challenger can take over up to its skew early. Operating assumption: NTP-bounded skew much
+-- smaller than (term - 2*renew). Moving the arithmetic onto the database clock (now()) removes the
+-- assumption entirely and is the hardening to do when a downstream first gates on the fence.
 CREATE TABLE leader_leases (
     resource     TEXT PRIMARY KEY,
     holder       TEXT NOT NULL,

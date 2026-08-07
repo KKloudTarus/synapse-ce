@@ -50,12 +50,15 @@ func (s *LeaderStore) Acquire(_ context.Context, resource, holder string, term t
 	}
 }
 
-// Resign releases the lease if held by holder.
-func (s *LeaderStore) Resign(_ context.Context, resource, holder string, _ time.Time) error {
+// Resign releases the lease if held by holder. It expires the lease (clears the holder, sets the
+// term to now) rather than dropping the row, so the fence survives and stays monotonic across a
+// graceful handover, matching the Postgres store.
+func (s *LeaderStore) Resign(_ context.Context, resource, holder string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if l, ok := s.leases[resource]; ok && l.holder == holder {
-		delete(s.leases, resource)
+		l.holder = ""
+		l.expires = now
 	}
 	return nil
 }

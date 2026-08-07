@@ -3,13 +3,57 @@ package leaderuc
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+// fakeLeaderStore is an in-file ports.LeaderStore for these usecase tests, mirroring the fenced
+// lease semantics. Keeping it here avoids a usecase -> infrastructure import edge in the test.
+type fakeLeaderStore struct {
+	mu      sync.Mutex
+	holder  string
+	fence   int64
+	expires time.Time
+	present bool
+}
+
+func newFakeLeaderStore() *fakeLeaderStore { return &fakeLeaderStore{} }
+
+var _ ports.LeaderStore = (*fakeLeaderStore)(nil)
+
+func (s *fakeLeaderStore) Acquire(_ context.Context, _, holder string, term time.Duration, now time.Time) (bool, int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case !s.present:
+		s.holder, s.fence, s.expires, s.present = holder, 1, now.Add(term), true
+		return true, s.fence, nil
+	case s.holder == holder:
+		s.expires = now.Add(term)
+		return true, s.fence, nil
+	case !s.expires.After(now):
+		s.holder, s.expires = holder, now.Add(term)
+		s.fence++
+		return true, s.fence, nil
+	default:
+		return false, s.fence, nil
+	}
+}
+
+func (s *fakeLeaderStore) Resign(_ context.Context, _, holder string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.present && s.holder == holder {
+		// Expire, keep the fence (matches the production stores): monotonic across handover.
+		s.holder = ""
+		s.expires = now
+	}
+	return nil
+}
 
 type fakeClock struct{ t time.Time }
 
@@ -26,7 +70,7 @@ func (a *fakeAudit) Record(_ context.Context, e ports.AuditEntry) error {
 }
 
 func TestNewElectorValidation(t *testing.T) {
-	store := memory.NewLeaderStore()
+	store := newFakeLeaderStore()
 	clk := &fakeClock{t: time.Unix(1000, 0)}
 	cases := []struct{ term, renew time.Duration }{
 		{0, time.Second},
@@ -49,7 +93,7 @@ func TestNewElectorValidation(t *testing.T) {
 
 func TestElectorSingleLeaderAndHandover(t *testing.T) {
 	ctx := context.Background()
-	store := memory.NewLeaderStore()
+	store := newFakeLeaderStore()
 	clk := &fakeClock{t: time.Unix(1000, 0)}
 	const term, renew = 15 * time.Second, 5 * time.Second
 
@@ -103,7 +147,7 @@ func TestElectorSingleLeaderAndHandover(t *testing.T) {
 
 func TestElectorResignFreesLease(t *testing.T) {
 	ctx := context.Background()
-	store := memory.NewLeaderStore()
+	store := newFakeLeaderStore()
 	clk := &fakeClock{t: time.Unix(1000, 0)}
 	const term, renew = 15 * time.Second, 5 * time.Second
 	audit := &fakeAudit{}
