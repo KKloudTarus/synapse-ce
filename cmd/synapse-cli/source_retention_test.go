@@ -18,6 +18,7 @@ func TestValidateSourceRetention(t *testing.T) {
 	tests := []struct {
 		name    string
 		in      sourceRetention
+		image   bool
 		wantErr bool
 	}{
 		{name: "disabled and empty", in: sourceRetention{}},
@@ -29,16 +30,19 @@ func TestValidateSourceRetention(t *testing.T) {
 		{name: "enabled with blank project", in: sourceRetention{Enabled: true, ProjectID: "   ", AnalysisID: "a1"}, wantErr: true},
 		{name: "ids without the flag", in: sourceRetention{ProjectID: "p1", AnalysisID: "a1"}, wantErr: true},
 		{name: "tenant without the flag", in: sourceRetention{TenantID: "t1"}, wantErr: true},
+		// An image workspace is a container rootfs, not project source: refuse rather than snapshot OS files.
+		{name: "image scan rejects retention", in: sourceRetention{Enabled: true, ProjectID: "p1", AnalysisID: "a1"}, image: true, wantErr: true},
+		{name: "image scan without retention is fine", in: sourceRetention{}, image: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			err := validateSourceRetention(test.in)
+			err := validateSourceRetention(test.in, test.image)
 			if test.wantErr && err == nil {
-				t.Fatalf("validateSourceRetention(%+v) = nil, want an error", test.in)
+				t.Fatalf("validateSourceRetention(%+v, image=%v) = nil, want an error", test.in, test.image)
 			}
 			if !test.wantErr && err != nil {
-				t.Fatalf("validateSourceRetention(%+v) = %v, want nil", test.in, err)
+				t.Fatalf("validateSourceRetention(%+v, image=%v) = %v, want nil", test.in, test.image, err)
 			}
 		})
 	}
@@ -68,7 +72,7 @@ func TestCLICaptureIsServableByCodeFile(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	retain := sourceRetention{Enabled: true, TenantID: "", ProjectID: "proj-1", AnalysisID: "analysis-1"}.normalized()
-	if err := validateSourceRetention(retain); err != nil {
+	if err := validateSourceRetention(retain, false); err != nil {
 		t.Fatalf("fixture retention is invalid: %v", err)
 	}
 

@@ -41,7 +41,7 @@ synapse-cli scan <path|image-ref> [flags]
 | `--offline` | Skip the live advisory source and detect with the offline database only. |
 | `--ignore-unfixed` | Ignore vulnerabilities that have no fix available. |
 | `--detection-priority comprehensive\|precise` | `comprehensive` (default) reports every match. `precise` moves single-source, non-KEV findings into a needs-verify queue that does not trip `--fail-on`. |
-| `--retain-source` | Retain an immutable Code Quality source snapshot for a **server-owned** analysis. Requires `--project-id` and `--analysis-id`; the CLI never mints those identities. Off by default. |
+| `--retain-source` | Retain an immutable Code Quality source snapshot for a **server-owned** analysis. Requires `--project-id` and `--analysis-id`; the CLI never mints those identities. Not valid with `--image` (an image workspace is a container rootfs, not source). Off by default. |
 | `--project-id ID` / `--analysis-id ID` / `--tenant-id ID` | The project-analysis context a `--retain-source` capture is keyed on. The snapshot is written to `SYNAPSE_PROJECT_SOURCE_ARTIFACT_DIR` in the same layout the API serves from, so `/code/file` can serve a CLI capture over a shared volume. `--tenant-id` defaults to the single-tenant zero value. |
 | `--json` | Print the full scan result as JSON to stdout, for machine consumption in CI. |
 | `--sarif` | Print a SARIF 2.1.0 report to stdout, ready to upload to GitHub code scanning. Covers every finding kind; SAST, secret and misconfig findings carry a file and line so the platform annotates the exact source line. `--fail-on` still sets the exit code. Cannot be combined with `--json`. |

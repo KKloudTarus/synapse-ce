@@ -1007,7 +1007,7 @@ type sourceRetention struct {
 // validateSourceRetention keeps --retain-source honest: capture needs a project and an analysis to key
 // the snapshot on, and the identity flags are meaningless without it. Both directions are usage errors
 // rather than a silent skip, so retention can never be quietly absent from a CI run that asked for it.
-func validateSourceRetention(r sourceRetention) error {
+func validateSourceRetention(r sourceRetention, image bool) error {
 	project, analysis, tenant := strings.TrimSpace(r.ProjectID), strings.TrimSpace(r.AnalysisID), strings.TrimSpace(r.TenantID)
 	if !r.Enabled {
 		if project != "" || analysis != "" || tenant != "" {
@@ -1017,6 +1017,11 @@ func validateSourceRetention(r sourceRetention) error {
 	}
 	if project == "" || analysis == "" {
 		return fmt.Errorf("--retain-source requires --project-id and --analysis-id (the server owns the analysis identity)")
+	}
+	if image {
+		// An image workspace is a materialized container rootfs, not project source. Capturing it would
+		// store OS files under a "source snapshot" key and mislead the Code workspace, so refuse instead.
+		return fmt.Errorf("--retain-source is a source-scan feature and cannot be combined with --image (an image workspace is a container rootfs, not Code Quality source)")
 	}
 	return nil
 }
@@ -1089,7 +1094,7 @@ func runScan() {
 		fmt.Fprintf(os.Stderr, "synapse-cli: invalid --fail-on %q (want critical|high|medium|low|info)\n", failOn)
 		os.Exit(2)
 	}
-	if err := validateSourceRetention(retain); err != nil {
+	if err := validateSourceRetention(retain, image); err != nil {
 		// Fail closed and loudly: a CI job must never believe it retained source when it did not.
 		fmt.Fprintf(os.Stderr, "synapse-cli: %v\n", err)
 		os.Exit(2)
