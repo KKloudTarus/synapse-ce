@@ -42,6 +42,7 @@ type Service struct {
 	findings                         ports.FindingRepository
 	scans                            ports.ScanRepository
 	results                          ports.ScanResultStore
+	scannedImages                    ports.ScannedImageStore
 	importedSBOM                     ports.ImportedSBOMStore
 	jobs                             ports.ScanJobStore
 	runs                             ports.ScanRunStore
@@ -115,6 +116,12 @@ func (s *Service) SetSeverityEnricher(e ports.SeverityEnricher) { s.sevEnricher 
 
 // SetImportedSBOMStore configures the engagement-scoped client SBOM artifact store.
 func (s *Service) SetImportedSBOMStore(store ports.ImportedSBOMStore) { s.importedSBOM = store }
+
+// SetScannedImageRecorder wires the scanned-image digest index (#446). When set, a completed image
+// scan records its manifest digest under the engagement's tenant, so the fleet cluster agent can
+// later correlate a running digest with this prior scan. Recording is best-effort — a failure never
+// fails the scan.
+func (s *Service) SetScannedImageRecorder(store ports.ScannedImageStore) { s.scannedImages = store }
 
 func (s *Service) SetCodeQuality(q interface {
 	BuildReport(context.Context, string) (codequality.Report, error)
@@ -1704,6 +1711,25 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	return result, nil
 }
 
+// recordScannedImage records a completed image scan's manifest digest under the engagement's tenant
+// (#446), so the fleet cluster agent can correlate a running digest with this scan. Best-effort:
+// every failure (no recorder, non-image scan, tenant lookup, or store write) is a no-op/logged and
+// never fails the scan — a missed record just surfaces later as a conservative "unscanned" gap. It is
+// a small helper (rather than inline) so it is unit-testable without the full scan pipeline.
+func (s *Service) recordScannedImage(ctx context.Context, engagementID shared.ID, result *ScanResult) {
+	if s.scannedImages == nil || result == nil || result.Image == nil || result.Image.Digest == "" {
+		return
+	}
+	eng, err := s.engagements.GetByID(ctx, engagementID)
+	if err != nil {
+		s.logger().Warn("record scanned image: engagement lookup failed (best-effort)", "digest", result.Image.Digest, "err", err)
+		return
+	}
+	if err := s.scannedImages.MarkScanned(ctx, eng.TenantID, result.Image.Digest, s.clock.Now()); err != nil {
+		s.logger().Warn("record scanned image digest failed (best-effort)", "digest", result.Image.Digest, "err", err)
+	}
+}
+
 func importedCompleteness(doc *sbom.SBOM) ports.Completeness {
 	resolved := 0
 	for _, c := range doc.Components {
@@ -2441,6 +2467,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		s.captureProjectSource(ctx, engagementID, opts.ProjectAnalysisID, ws.Dir, result)
 		s.captureProjectComparison(ctx, engagementID, opts.ProjectAnalysisID, ws.Dir, ws.Commit, result)
 	}
+	// Record the image's manifest digest so the fleet cluster agent can correlate a running digest
+	// with this scan (#446). This is the pipeline that populates result.Image (image scans).
+	s.recordScannedImage(ctx, engagementID, result)
 	return result, nil
 }
 

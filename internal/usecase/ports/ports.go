@@ -67,6 +67,15 @@ type SnapshotSource interface {
 	Snapshot(ctx context.Context, cluster string) (clusterinventory.Snapshot, error)
 }
 
+// ScannedImageStore records which container-image manifest digests the engine has already scanned,
+// per tenant, so the cluster agent can correlate a running digest with a prior scan (#446) — an
+// unscanned running digest is a coverage gap. Tenant-scoped (Postgres routes through WithTenant so
+// RLS isolates by tenant). MarkScanned is idempotent by (tenant, digest).
+type ScannedImageStore interface {
+	MarkScanned(ctx context.Context, tenantID shared.ID, digest string, at time.Time) error
+	ScannedDigests(ctx context.Context, tenantID shared.ID) (map[string]bool, error)
+}
+
 // AssetRepository persists the tenant-scoped fleet asset model (assets, typed edges, business
 // services). Every method is tenant-scoped; the Postgres implementation routes all access through
 // WithTenant so Row Level Security enforces isolation at the database. Upserts are idempotent by

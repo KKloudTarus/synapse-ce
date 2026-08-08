@@ -13,6 +13,21 @@ type ID string
 func (id ID) String() string { return string(id) }
 func (id ID) IsZero() bool   { return id == "" }
 
+// DefaultTenant is the non-empty tenant id the empty-string (single-tenant) default maps to. RLS
+// tables treat the empty string as DENY, so the default deployment uses this id (it matches the
+// fleet DefaultFleetTenant and the seeded 'default' tenant row). Use TenantOrDefault to normalize.
+const DefaultTenant ID = "default"
+
+// TenantOrDefault returns id, or DefaultTenant when id is empty — so a single-tenant empty tenant and
+// the fleet 'default' tenant resolve to the same RLS partition (letting, e.g., an image scan and the
+// cluster/host agent that observes it correlate under one tenant).
+func TenantOrDefault(id ID) ID {
+	if id.IsZero() {
+		return DefaultTenant
+	}
+	return id
+}
+
 // Severity is the normalized severity scale shared by findings and vulnerabilities.
 type Severity string
 

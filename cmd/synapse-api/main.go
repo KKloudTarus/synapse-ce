@@ -175,6 +175,7 @@ func main() {
 	var repo ports.EngagementRepository
 	var projectRepo ports.ProjectRepository
 	var assetStore ports.AssetRepository
+	var scannedImageStore ports.ScannedImageStore
 	var workOrderStore ports.WorkOrderStore
 	var fleetAgentStore ports.FleetAgentStore
 	var leaderStore ports.LeaderStore // postgres only; nil in memory mode (single process)
@@ -298,6 +299,7 @@ func main() {
 		threatModelStore = postgres.NewThreatModelRepository(pool)
 		writeupDraftStore = postgres.NewWriteupDraftRepository(pool)
 		assetStore = postgres.NewAssetRepository(pool)
+		scannedImageStore = postgres.NewScannedImageStore(pool)
 		workOrderStore = postgres.NewWorkOrderRepository(pool)
 		fleetAgentStore = postgres.NewFleetAgentRepository(pool)
 		leaderStore = postgres.NewLeaderStore(pool)
@@ -331,6 +333,7 @@ func main() {
 		repo = memory.NewEngagementRepository()
 		projectRepo = memory.NewProjectRepository()
 		assetStore = memory.NewAssetStore()
+		scannedImageStore = memory.NewScannedImageStore()
 		workOrderStore = memory.NewWorkOrderStore()
 		fleetAgentStore = memory.NewFleetAgentStore()
 		findingRepo = memory.NewFindingRepository()
@@ -588,6 +591,8 @@ func main() {
 		detectionSources,
 		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil)))
 	scaService.SetImportedSBOMStore(importedSBOMStore)
+	// Record scanned image digests so the fleet cluster agent can correlate running images (#446).
+	scaService.SetScannedImageRecorder(scannedImageStore)
 	scaService.SetGateDecoder(qualityprofile.LoadGateBytes)
 	scaService.SetSBOMEnricher(manifest.New())
 	scaService.SetArtifactCataloger(msi.New())           // recover Windows Installer (.msi) product identity into the SBOM
@@ -1102,6 +1107,9 @@ func main() {
 				log.Error("cluster inventory ingest init failed", "err", cierr)
 				os.Exit(1)
 			}
+			// Correlate running image digests with prior scans (#446): an unscanned running digest is a
+			// coverage gap rather than every digest reported unscanned.
+			ciSvc.SetScannedImages(scannedImageStore)
 			router.SetFleetClusterInventory(ciSvc)
 			log.Info("fleet cluster inventory ingest ENABLED (agents persist snapshots into the asset model)")
 		}
