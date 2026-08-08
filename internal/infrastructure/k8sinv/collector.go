@@ -29,7 +29,11 @@ import (
 
 	dci "github.com/KKloudTarus/synapse-ce/internal/domain/clusterinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+// Collector implements the SnapshotSource port consumed by the composition root.
+var _ ports.SnapshotSource = (*Collector)(nil)
 
 const (
 	defaultPageSize = 500
