@@ -9,6 +9,7 @@
 /synapse-worker
 /synapse-mcp
 /synapse-agent
+/synapse-cluster-agent
 
 # Env / secrets (never commit)
 .env

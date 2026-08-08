@@ -1,0 +1,95 @@
+# Synapse Kubernetes cluster agent (#411, epic #405).
+#
+# Least privilege: the ClusterRole grants get/list/watch on EXACTLY the resources the collector
+# reads (internal/infrastructure/k8sinv) and nothing more — no secrets, no configmaps, no write verbs.
+# A missing permission makes the agent fail loud (naming the resource), never report fewer objects.
+#
+# Set SYNAPSE_CLUSTER to a UNIQUE identity per cluster: it is part of every asset key, so two clusters
+# with identical namespace/workload names never collide.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: synapse-cluster-agent
+  namespace: synapse
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: synapse-cluster-agent-readonly
+rules:
+  # Core: namespaces (scope), pods (workloads + running digests), services (exposure),
+  # serviceaccounts (identity).
+  - apiGroups: [""]
+    resources: ["namespaces", "pods", "services", "serviceaccounts"]
+    verbs: ["get", "list", "watch"]
+  # Apps: replicasets (Pod -> ReplicaSet -> Deployment owner resolution).
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+  # Networking: ingresses (exposure) + networkpolicies (exposure posture).
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  # NOTE: roles/rolebindings/clusterroles/clusterrolebindings are intentionally NOT granted yet — the
+  # collector does not read them. They will be added here (read-only) only when the RBAC identity-graph
+  # collection lands, keeping the role scoped to exactly what is read.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: synapse-cluster-agent-readonly
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: synapse-cluster-agent-readonly
+subjects:
+  - kind: ServiceAccount
+    name: synapse-cluster-agent
+    namespace: synapse
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: synapse-cluster-agent
+  namespace: synapse
+  labels:
+    app.kubernetes.io/name: synapse-cluster-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: synapse-cluster-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: synapse-cluster-agent
+    spec:
+      serviceAccountName: synapse-cluster-agent
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: ghcr.io/kkloudtarus/synapse-cluster-agent:latest # pin to a digest in production
+          args: ["-cluster", "$(SYNAPSE_CLUSTER)"]
+          env:
+            - name: SYNAPSE_CLUSTER
+              value: "REPLACE-with-unique-cluster-identity"
+            # Optional: restrict scope. Empty = all namespaces.
+            - name: SYNAPSE_CLUSTER_NAMESPACES
+              value: ""
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

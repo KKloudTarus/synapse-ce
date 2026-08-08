@@ -12,6 +12,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/audit"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/aup"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/callgraph"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/clusterinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
@@ -57,6 +58,13 @@ type ProjectRepository interface {
 	// AssignProfile sets (or clears, with an empty profileKey) the quality profile assigned to a
 	// language for a project (project.DefaultProfileByLang[language]).
 	AssignProfile(ctx context.Context, tenantID shared.ID, projectKey, language, profileKey string) error
+}
+
+// SnapshotSource reads a live cluster into the vendor-neutral cluster-inventory snapshot the mapper
+// consumes. The Kubernetes adapter (internal/infrastructure/k8sinv) implements it; the composition
+// root wires it to the cluster-inventory use case. cluster is the cluster identity keyed into assets.
+type SnapshotSource interface {
+	Snapshot(ctx context.Context, cluster string) (clusterinventory.Snapshot, error)
 }
 
 // AssetRepository persists the tenant-scoped fleet asset model (assets, typed edges, business
