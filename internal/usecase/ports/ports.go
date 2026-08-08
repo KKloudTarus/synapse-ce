@@ -105,6 +105,9 @@ type WorkOrderStore interface {
 	// CancelForAgent moves every live (issued/claimed/running) order addressed to agentID into the
 	// cancelled state, returning how many were cancelled. Used when an agent is revoked.
 	CancelForAgent(ctx context.Context, tenantID, agentID shared.ID, reason string, now time.Time) (int, error)
+	// ListByTenant returns every work order for the tenant, deterministically ordered. Read-only,
+	// used by the coverage projection (#413). Tenant-scoped (Postgres routes through WithTenant).
+	ListByTenant(ctx context.Context, tenantID shared.ID) ([]*workorder.WorkOrder, error)
 }
 
 // FleetAgentStore persists tenant-scoped fleet agent identities and their single-use enrolment

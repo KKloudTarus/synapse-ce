@@ -61,6 +61,7 @@ type Router struct {
 	drafts          writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
 	projects        projectService        // optional; nil ⇒ project routes are not registered
 	assets          assetService          // optional; nil ⇒ fleet asset routes are not registered
+	coverage        coverageService       // optional; nil ⇒ fleet coverage/agent-view routes are not registered
 	fleet           *fleetRouter          // optional; nil ⇒ agent transport plane is not served
 	fleetAdmin      fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
 	qualityGates    qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
@@ -234,6 +235,15 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/assets/edges", rt.authz(userdom.PermView, rt.listAssetEdges))
 		mux.HandleFunc("POST /api/v1/assets/services", rt.authz(userdom.PermOperate, rt.createBusinessService))
 		mux.HandleFunc("GET /api/v1/assets/services", rt.authz(userdom.PermView, rt.listBusinessServices))
+	}
+	if rt.coverage != nil {
+		// Fleet coverage + agent-health views (#413): operator reads, RBAC PermView, tenant-scoped via
+		// fleetTenant. No default-to-clean — verdicts distinguish unknown/stale/refused/unauthorized.
+		mux.HandleFunc("GET /api/v1/fleet/agents", rt.authz(userdom.PermView, rt.listFleetAgentHealth))
+		mux.HandleFunc("GET /api/v1/fleet/agents/{id}", rt.authz(userdom.PermView, rt.getFleetAgentHealth))
+		mux.HandleFunc("GET /api/v1/fleet/coverage", rt.authz(userdom.PermView, rt.listFleetCoverage))
+		mux.HandleFunc("GET /api/v1/fleet/coverage/summary", rt.authz(userdom.PermView, rt.fleetCoverageSummary))
+		mux.HandleFunc("GET /api/v1/fleet/coverage/export", rt.authz(userdom.PermView, rt.exportFleetCoverage))
 	}
 	if rt.projects != nil {
 		mux.HandleFunc("POST /api/v1/projects", rt.authz(userdom.PermOperate, rt.createProject))

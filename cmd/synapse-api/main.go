@@ -111,6 +111,7 @@ import (
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
 	clusterinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/clusterinventory"
+	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
 	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
@@ -1062,6 +1063,19 @@ func main() {
 		assetSvc = svc
 		router.SetAssets(assetSvc)
 		log.Info("fleet asset model ENABLED (multi-tenant, Postgres RLS-enforced)")
+
+		// Fleet coverage + agent-health views (#413): a read projection over agents, work orders and
+		// the asset model. Needs the fleet transport (agent + work-order stores); enabled when both the
+		// asset model and the transport are on.
+		if cfg.FleetEnabled {
+			covSvc, cerr := coverageuc.NewService(fleetAgentStore, workOrderStore, assetStore, clock, cfg.FleetAgentStaleAfter, cfg.FleetCoverageFreshnessTarget)
+			if cerr != nil {
+				log.Error("fleet coverage service init failed", "err", cerr)
+				os.Exit(1)
+			}
+			router.SetFleetCoverage(covSvc)
+			log.Info("fleet coverage + agent-health views ENABLED (no default-to-clean; tenant-scoped)")
+		}
 	}
 	if cfg.FleetEnabled {
 		// SECURITY: a missing/short signer key fails startup closed rather than boot a forgeable
