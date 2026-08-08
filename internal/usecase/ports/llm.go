@@ -29,7 +29,10 @@ type ChatRequest struct {
 	// choice to the provider default, non-nil is sent verbatim – and 0 means greedy decoding, which
 	// is what a caller whose verdict must be reproducible asks for. Use Temp.
 	Temperature *float64
-	MaxTokens   int
+	// MaxTokens bounds generated output. The OpenAI adapter sends the current max_completion_tokens
+	// field and negotiates the deprecated max_tokens spelling only for a legacy-compatible gateway.
+	// Non-positive leaves the provider default unchanged.
+	MaxTokens int
 }
 
 // Temp returns a pointer to v for ChatRequest.Temperature, so a deterministic caller can ask for an

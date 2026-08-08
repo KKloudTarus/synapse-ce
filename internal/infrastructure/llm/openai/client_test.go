@@ -126,6 +126,134 @@ func TestChatOmitsTemperatureWhenUnset(t *testing.T) {
 	}
 }
 
+// TestChatSendsCurrentOutputTokenLimit pins the current OpenAI Chat Completions contract:
+// MaxTokens is a provider-neutral port field, and the adapter spells it max_completion_tokens.
+func TestChatSendsCurrentOutputTokenLimit(t *testing.T) {
+	body := captureChatBody(t, ports.ChatRequest{
+		MaxTokens: 512,
+		Messages:  []agent.Message{{Role: agent.RoleUser, Content: "hi"}},
+	})
+	if got := body["max_completion_tokens"]; got != float64(512) {
+		t.Errorf("max_completion_tokens = %v, want 512", got)
+	}
+	if got, ok := body["max_tokens"]; ok {
+		t.Errorf("deprecated max_tokens also sent: %v", got)
+	}
+}
+
+func TestChatOmitsNonPositiveOutputTokenLimit(t *testing.T) {
+	for _, limit := range []int{0, -1} {
+		body := captureChatBody(t, ports.ChatRequest{
+			MaxTokens: limit,
+			Messages:  []agent.Message{{Role: agent.RoleUser, Content: "hi"}},
+		})
+		if got, ok := body["max_completion_tokens"]; ok {
+			t.Errorf("limit %d sent max_completion_tokens=%v", limit, got)
+		}
+		if got, ok := body["max_tokens"]; ok {
+			t.Errorf("limit %d sent max_tokens=%v", limit, got)
+		}
+	}
+}
+
+func TestChatFallsBackToLegacyOutputTokenLimitAndCachesDialect(t *testing.T) {
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		bodies = append(bodies, body)
+		if _, modern := body["max_completion_tokens"]; modern && body["model"] == "m" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"unknown field max_completion_tokens; use max_tokens"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{}}`))
+	}))
+	defer srv.Close()
+
+	c, _ := New(srv.URL, "", "m", time.Second)
+	req := ports.ChatRequest{MaxTokens: 64, Messages: []agent.Message{{Role: agent.RoleUser, Content: "hi"}}}
+	for i := 0; i < 2; i++ {
+		resp, err := c.Chat(context.Background(), req)
+		if err != nil || resp.Content != "OK" {
+			t.Fatalf("call %d: resp=%+v err=%v", i+1, resp, err)
+		}
+	}
+	// Dialect learning is per model. A current model routed through the same gateway must still start
+	// with max_completion_tokens rather than inheriting the legacy model's max_tokens spelling.
+	modernReq := req
+	modernReq.Model = "current-model"
+	if _, err := c.Chat(context.Background(), modernReq); err != nil {
+		t.Fatalf("current model after legacy negotiation: %v", err)
+	}
+	if len(bodies) != 4 {
+		t.Fatalf("requests = %d, want modern probe + legacy retry + cached legacy call + current-model call", len(bodies))
+	}
+	if got := bodies[0]["max_completion_tokens"]; got != float64(64) {
+		t.Errorf("modern probe max_completion_tokens = %v, want 64", got)
+	}
+	for i := 1; i < len(bodies); i++ {
+		if i == 3 {
+			if got := bodies[i]["max_completion_tokens"]; got != float64(64) {
+				t.Errorf("current model max_completion_tokens = %v, want 64", got)
+			}
+			if got, ok := bodies[i]["max_tokens"]; ok {
+				t.Errorf("current model inherited legacy max_tokens=%v", got)
+			}
+			continue
+		}
+		if got := bodies[i]["max_tokens"]; got != float64(64) {
+			t.Errorf("legacy request %d max_tokens = %v, want 64", i, got)
+		}
+		if got, ok := bodies[i]["max_completion_tokens"]; ok {
+			t.Errorf("legacy request %d also sent max_completion_tokens=%v", i, got)
+		}
+	}
+}
+
+func TestChatDoesNotFallbackOnUnrelatedBadRequest(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"messages are invalid"}}`))
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "", "m", time.Second)
+
+	_, err := c.Chat(context.Background(), ports.ChatRequest{
+		MaxTokens: 64,
+		Messages:  []agent.Message{{Role: agent.RoleUser, Content: "hi"}},
+	})
+	if !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("unrelated 400 must remain terminal validation error, got %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("unrelated 400 was retried %d time(s)", got)
+	}
+}
+
+func TestChatFailsClosedOnTruncatedOutput(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"{\"score\": 90"},"finish_reason":"length"}],"usage":{"completion_tokens":16}}`))
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "", "m", time.Second)
+
+	resp, err := c.Chat(context.Background(), ports.ChatRequest{
+		MaxTokens: 16,
+		Messages:  []agent.Message{{Role: agent.RoleUser, Content: "hi"}},
+	})
+	if !errors.Is(err, ErrOutputTruncated) {
+		t.Fatalf("finish_reason=length error = %v, want ErrOutputTruncated", err)
+	}
+	if resp.FinishReason != "length" || resp.Usage.CompletionTokens != 16 {
+		t.Errorf("truncated response metadata lost: %+v", resp)
+	}
+}
+
 // captureChatBody runs one Chat against a stub gateway and returns the decoded request body.
 func captureChatBody(t *testing.T, req ports.ChatRequest) map[string]any {
 	t.Helper()
