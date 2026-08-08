@@ -73,6 +73,9 @@ func TestAssessAppliesVerdicts(t *testing.T) {
 	if !got[3].SuspectedFP(75) {
 		t.Errorf("constant-input refutation must be a suspected FP: %+v", got[3])
 	}
+	if got[1].VerifiedConsensus(75) || got[3].VerifiedConsensus(75) {
+		t.Error("single-model suspected FPs must remain advisory, never verified consensus")
+	}
 }
 
 // roleLLM answers differently for the proposer vs the verifier pass (the verifier user prompt carries
@@ -107,7 +110,7 @@ func TestVerifierConsensus(t *testing.T) {
 		return c.Assess(context.Background(), cand, nil)[0]
 	}
 	// Both agree → suspected FP, verified.
-	if got := run(roleLLM{proposer: refuted, verifier: `{"verdict":"refuted","driver":"not_reachable","confidence":85}`}); !got.SuspectedFP(75) || !got.VerifyAttempted || got.Verifier == nil {
+	if got := run(roleLLM{proposer: refuted, verifier: `{"verdict":"refuted","driver":"not_reachable","confidence":85}`}); !got.SuspectedFP(75) || !got.VerifiedConsensus(75) || !got.VerifyAttempted || got.Verifier == nil {
 		t.Errorf("consensus refuted must be suspected-FP + verified: %+v", got)
 	}
 	// Verifier disagrees (sound) → NOT suspected FP (finding gates).
@@ -125,6 +128,16 @@ func TestVerifierConsensus(t *testing.T) {
 	// Proposer says sound → no verify attempted, not FP.
 	if got := run(roleLLM{proposer: `{"verdict":"sound","driver":"attacker_controlled","confidence":88}`, verifier: refuted}); got.SuspectedFP(75) || got.VerifyAttempted {
 		t.Errorf("a sound proposer must not trigger verification or FP: %+v", got)
+	}
+}
+
+func TestVerifierMustBeCanonicallyDistinct(t *testing.T) {
+	llm := roleLLM{}
+	for _, verifier := range []string{"PROPOSER-MODEL", "openai/proposer-model", "router/openai/PROPOSER-MODEL"} {
+		c := New(llm, "proposer-model").WithVerifier(llm, verifier)
+		if c.VerifierModel() != "" {
+			t.Errorf("verifier %q self-confirmed proposer through an alias", verifier)
+		}
 	}
 }
 

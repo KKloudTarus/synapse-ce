@@ -725,27 +725,30 @@ func main() {
 		log.Info("misconfig scanning ENABLED (Dockerfile + Kubernetes + Terraform); " + helmMode)
 	}
 	// AI false-positive triage in the scan pipeline (opt-in, best-effort, PROPOSE-ONLY). Independent of
-	// the agent: it critiques production-scope source findings and marks suspected FPs retain-and-mark
-	// (held back from the gate via ScanResult.SuspectedFPKeys, still reported + sealed). A distinct
-	// SYNAPSE_VERIFIER_MODEL enables two-model consensus.
+	// the agent: it critiques production-scope source findings. Single-model output is advisory-only; a
+	// distinct verifier is required before the deterministic high-risk floor may grant a gate exemption.
 	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" {
 		if tllm, terr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); terr != nil {
 			log.Warn("AI false-positive triage DISABLED (LLM unavailable)", "err", terr)
 		} else {
 			coord := fptriage.New(tllm, cfg.FPTriageModel)
-			mode := "single-model"
+			mode := "advisory-only (distinct verifier required for gate exemption)"
 			if cfg.VerifierModel != "" && cfg.VerifierModel != cfg.FPTriageModel {
 				if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
 					coord.WithVerifier(vllm, cfg.VerifierModel)
-					mode = "verified by " + cfg.VerifierModel
+					if coord.VerifierModel() != "" {
+						mode = "verified by " + coord.VerifierModel()
+					} else {
+						log.Warn("AI FP-triage verifier aliases the proposer after canonicalization; triage remains advisory-only", "verifier_model", cfg.VerifierModel)
+					}
 				} else {
-					log.Warn("AI FP-triage verifier unavailable, single-model", "err", verr)
+					log.Warn("AI FP-triage verifier unavailable; triage remains advisory-only", "err", verr)
 				}
 			}
 			scaService.SetFPTriage(fptriage.NewTriager(coord, func(root string) ports.SourceSnippetReader {
 				return sourcesnippet.Reader{Root: root}
 			}))
-			log.Info("AI false-positive triage ENABLED ("+mode+"); suspected FPs held back from the gate, still reported", "model", cfg.FPTriageModel)
+			log.Info("AI false-positive triage ENABLED ("+mode+"); only verified low-risk consensus can affect gates", "model", cfg.FPTriageModel)
 		}
 	}
 	if cfg.SuppressionEnabled {

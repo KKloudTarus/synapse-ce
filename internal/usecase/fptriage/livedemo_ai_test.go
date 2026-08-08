@@ -3,9 +3,9 @@ package fptriage_test
 // Live-AI demonstration for #165 (AI false-positive triage in the scan pipeline, with the #156 distinct-
 // verifier consensus). It drives the REAL Coordinator against a live OpenAI-compatible gateway (9router):
 // a clearly PARAMETERIZED query (not injectable) is critiqued as a false positive by the proposer AND
-// confirmed by a DISTINCT verifier → suspected-FP (retain-and-mark, exempt from the gate); a clearly
-// INJECTABLE string-concatenation stays gating (not refuted). This proves the pipeline's FP gate + the
-// two-model consensus are effective end-to-end, and — critically — that a real weakness is NOT dismissed.
+// confirmed by a DISTINCT verifier → verified suspected-FP (eligible for the separate deterministic
+// gate policy); a clearly INJECTABLE string-concatenation stays gating. This proves the model-consensus
+// seam and — critically — that a real weakness is NOT dismissed.
 //
 // Gated behind SYNAPSE_LIVE_AI=1 so the normal suite stays hermetic. Run:
 //   SYNAPSE_LIVE_AI=1 SYNAPSE_LLM_BASE_URL=http://localhost:20128/v1 \

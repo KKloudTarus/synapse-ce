@@ -146,9 +146,10 @@ type Config struct {
 	LLMModel   string
 	LLMTimeout time.Duration
 
-	// FPTriageEnabled turns on the opt-in LLM false-positive gate: after a scan, the configured model
-	// critiques the remaining production-scope first-party source findings and a "refuted" verdict marks
-	// the finding suspected-FP (retain-and-mark, exempt from the gate). Off by default; needs an LLM.
+	// FPTriageEnabled turns on opt-in LLM false-positive analysis. A proposer may mark a finding
+	// suspected-FP, but it remains advisory unless a distinct verifier agrees and the deterministic
+	// human-review floor permits a gate exemption. High/critical, secrets, and dangerous CWEs always gate.
+	// Off by default; needs an LLM.
 	// FPTriageModel is the model to critique with (defaults to LLMModel).
 	FPTriageEnabled bool
 	FPTriageModel   string

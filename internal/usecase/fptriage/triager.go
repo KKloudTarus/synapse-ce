@@ -46,16 +46,24 @@ func (t *Triager) Triage(ctx context.Context, candidates []finding.Finding, work
 		if c.Err != nil {
 			continue
 		}
-		fp := c.SuspectedFP(t.minConf)
-		out = append(out, ports.AICritique{
-			FindingID:   c.FindingID,
-			DedupKey:    c.DedupKey,
-			Verdict:     string(c.Claim.Verdict),
-			Driver:      c.Claim.Driver,
-			Confidence:  c.Claim.Confidence,
-			SuspectedFP: fp,
-			Verified:    fp && c.VerifyAttempted, // a suspected-FP a DISTINCT verifier confirmed
-		})
+		critique := ports.AICritique{
+			FindingID:     c.FindingID,
+			DedupKey:      c.DedupKey,
+			Verdict:       string(c.Claim.Verdict),
+			Driver:        c.Claim.Driver,
+			Confidence:    c.Claim.Confidence,
+			SuspectedFP:   c.SuspectedFP(t.minConf),
+			Verified:      c.VerifiedConsensus(t.minConf),
+			ProposerModel: t.coord.ProposerModel(),
+			VerifierModel: t.coord.VerifierModel(),
+			PromptVersion: promptVersion,
+		}
+		if c.Verifier != nil {
+			critique.VerifierVerdict = string(c.Verifier.Verdict)
+			critique.VerifierDriver = c.Verifier.Driver
+			critique.VerifierConfidence = c.Verifier.Confidence
+		}
+		out = append(out, critique)
 	}
 	return out
 }

@@ -1319,9 +1319,9 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	sca.SetIgnoreUnfixed(ignoreUnfixed || cfg.IgnoreUnfixed)
 
 	// AI false-positive triage (opt-in). Inject an LLM critic the scan pipeline runs over the remaining
-	// production-scope first-party source findings; a "refuted" verdict marks the finding suspected-FP
-	// (retain-and-mark, held back from the gate below), never a deletion. Propose-only + best-effort. A
-	// distinct SYNAPSE_VERIFIER_MODEL enables two-model consensus. Skipped for image targets (no source).
+	// production-scope first-party source findings. A refutation is advisory unless a distinct verifier
+	// agrees and the deterministic human-review floor allows a gate exemption. High/critical, secrets,
+	// and dangerous CWEs always keep gating. Findings are never deleted. Skipped for image targets.
 	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" && !image {
 		if llm, lerr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); lerr != nil {
 			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage disabled: %v\n", lerr)
@@ -1331,7 +1331,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 				if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
 					coord.WithVerifier(vllm, cfg.VerifierModel)
 				} else {
-					fmt.Fprintf(os.Stderr, "synapse-cli: verifier model %q unavailable, falling back to single-model triage: %v\n", cfg.VerifierModel, verr)
+					fmt.Fprintf(os.Stderr, "synapse-cli: verifier model %q unavailable; AI triage remains advisory-only: %v\n", cfg.VerifierModel, verr)
 				}
 			}
 			sca.SetFPTriage(fptriage.NewTriager(coord, func(root string) ports.SourceSnippetReader {
@@ -1368,15 +1368,20 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		return fmt.Errorf("scan: %w", err)
 	}
 
-	// The scan pipeline ran the AI false-positive triage (if injected above); report the outcome. A
-	// suspected-FP is held back from the --fail-on gate (retain-and-mark), still reported in ai_triage.
+	// Report advisory opinions separately from the smaller policy-authorized gate-exempt set.
 	fpSuspect := res.SuspectedFPKeys()
+	fpGateExempt := res.AIGateExemptKeys()
+	fpReview := res.AIReviewRequiredKeys()
 	if len(res.AITriage) > 0 {
-		mode := "single-model"
-		if cfg.VerifierModel != "" && cfg.VerifierModel != cfg.FPTriageModel {
-			mode = "verified by " + cfg.VerifierModel
+		mode := "advisory-only"
+		for _, critique := range res.AITriage {
+			if critique.VerifierModel != "" {
+				mode = "verified by " + critique.VerifierModel
+				break
+			}
 		}
-		fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage (%s, %s): critiqued %d finding(s), %d suspected false positive(s) held back from the gate\n", cfg.FPTriageModel, mode, len(res.AITriage), len(fpSuspect))
+		fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage (%s, %s): critiqued %d, suspected %d, gate-exempt %d, human-review %d\n",
+			cfg.FPTriageModel, mode, len(res.AITriage), len(fpSuspect), len(fpGateExempt), len(fpReview))
 	}
 
 	switch {
@@ -1438,7 +1443,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	verify := res.NeedsVerifyKeys()  // precise-mode needs-verify: lower-confidence, exempt from the gate too
 	over := 0
 	bgExempt := 0 // background-scope (test/fixture/example/...) findings held back from the gate
-	fpExempt := 0 // AI-critiqued suspected false positives held back from the gate
+	fpExempt := 0 // verified low-risk AI consensus findings held back from the gate
 	for _, f := range res.Findings {
 		if accepted[f.DedupKey] || verify[f.DedupKey] {
 			continue
@@ -1453,8 +1458,9 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 			bgExempt++
 			continue
 		}
-		// The AI critique refuted this finding (retain-and-mark: reported above, held back from the gate).
-		if fpSuspect[f.DedupKey] {
+		// Only a distinct-model consensus that cleared the deterministic human-review floor may affect
+		// the gate. A single-model or high-risk suspected-FP remains visible AND gating.
+		if fpGateExempt[f.DedupKey] {
 			fpExempt++
 			continue
 		}
@@ -1464,7 +1470,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		fmt.Fprintf(os.Stderr, "synapse-cli: %d background/test-scope finding(s) at or above %s reported but exempt from the gate (use --include-test to gate them)\n", bgExempt, failOn)
 	}
 	if fpExempt > 0 {
-		fmt.Fprintf(os.Stderr, "synapse-cli: %d suspected false positive(s) at or above %s held back from the gate by AI triage (reported with a verdict; not deleted)\n", fpExempt, failOn)
+		fmt.Fprintf(os.Stderr, "synapse-cli: %d verified low-risk false-positive candidate(s) at or above %s held back from the gate by policy (reported; not deleted)\n", fpExempt, failOn)
 	}
 	if over > 0 {
 		return fmt.Errorf("%d finding(s) at or above %s", over, failOn)

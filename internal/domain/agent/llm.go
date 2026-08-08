@@ -7,7 +7,10 @@
 // inside the sandboxed child at exec time and never enter a Message.
 package agent
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Role is a chat message author. Mirrors the OpenAI-compatible roles so the provider
 // adapter is a thin mapping, but it is provider-agnostic domain vocabulary.
@@ -53,4 +56,42 @@ type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+}
+
+// CanonicalModelID normalizes a configured model identity for separation-of-duties checks.
+// Routers commonly accept both "provider/model" and "model", and model identifiers are
+// case-insensitive in the supported OpenAI-compatible APIs. Treating those spellings as distinct
+// would let one model verify its own proposal.
+func CanonicalModelID(id string) string {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if slash := strings.LastIndexByte(id, '/'); slash >= 0 {
+		id = strings.TrimSpace(id[slash+1:])
+	}
+	// OpenAI-style dated aliases (model-YYYY-MM-DD) often point at the same weights as the
+	// corresponding rolling model name. Conservatively collapse that spelling too.
+	if n := len(id); n > 11 && id[n-11] == '-' &&
+		allASCIIDigits(id[n-10:n-6]) && id[n-6] == '-' &&
+		allASCIIDigits(id[n-5:n-3]) && id[n-3] == '-' &&
+		allASCIIDigits(id[n-2:]) {
+		id = id[:n-11]
+	}
+	return id
+}
+
+func allASCIIDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// SameModel reports whether two non-empty configured identifiers resolve to the same canonical model.
+func SameModel(a, b string) bool {
+	a, b = CanonicalModelID(a), CanonicalModelID(b)
+	return a != "" && b != "" && a == b
 }
