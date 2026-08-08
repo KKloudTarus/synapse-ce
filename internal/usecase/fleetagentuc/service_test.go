@@ -148,6 +148,9 @@ func (f *fakeCanceller) Claim(context.Context, shared.ID, shared.ID, int, time.T
 func (f *fakeCanceller) Transition(context.Context, shared.ID, shared.ID, workorder.State, string, workorder.State, time.Time) error {
 	return nil
 }
+func (f *fakeCanceller) ListByTenant(context.Context, shared.ID) ([]*workorder.WorkOrder, error) {
+	return nil, nil
+}
 func (f *fakeCanceller) CancelForAgent(_ context.Context, _, _ shared.ID, _ string, _ time.Time) (int, error) {
 	f.cancelled++
 	return 3, nil
