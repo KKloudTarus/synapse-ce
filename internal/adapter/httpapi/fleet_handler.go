@@ -16,6 +16,7 @@ import (
 
 	dci "github.com/KKloudTarus/synapse-ce/internal/domain/clusterinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetversion"
 	dhi "github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
@@ -69,6 +70,8 @@ type fleetRouter struct {
 	work             fleetWorkService
 	clusterInv       fleetClusterInventory // optional; nil ⇒ cluster inventory ingest is not served
 	hostInv          fleetHostInventory    // optional; nil ⇒ host inventory ingest is not served
+	minAgentVersion  string                // #412 version skew: agents below this are refused work; "" = no floor
+	cpVersion        string                // control-plane version advertised to agents (min_control_plane check)
 	log              *slog.Logger
 	agentLim         *keyedLimiter // post-auth, keyed by agent id
 	ipLim            *keyedLimiter // pre-auth, keyed by client IP (throttles enrol + failed auth)
@@ -148,6 +151,17 @@ func (rt *Router) SetFleetClusterInventory(s fleetClusterInventory) {
 func (rt *Router) SetFleetHostInventory(s fleetHostInventory) {
 	if rt.fleet != nil {
 		rt.fleet.hostInv = s
+	}
+}
+
+// SetFleetVersionPolicy wires the version-skew policy (#412): minAgentVersion is the minimum agent
+// version allowed to claim work (empty = no floor), and cpVersion is the control-plane version
+// advertised to agents so they can enforce their own minimum control-plane requirement. Must be
+// called after SetFleet.
+func (rt *Router) SetFleetVersionPolicy(minAgentVersion, cpVersion string) {
+	if rt.fleet != nil {
+		rt.fleet.minAgentVersion = strings.TrimSpace(minAgentVersion)
+		rt.fleet.cpVersion = strings.TrimSpace(cpVersion)
 	}
 }
 
@@ -377,11 +391,30 @@ func (f *fleetRouter) heartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, f.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"proto": FleetProtoVersion})
+	// Advertise the protocol version, the control-plane version, and the minimum supported agent
+	// version so the agent can act on version skew (#412): update itself, or refuse to run against a
+	// control plane older than it requires.
+	writeJSON(w, http.StatusOK, map[string]string{
+		"proto":                       FleetProtoVersion,
+		"control_plane_version":       f.cpVersion,
+		"min_supported_agent_version": f.minAgentVersion,
+	})
 }
 
 func (f *fleetRouter) claim(w http.ResponseWriter, r *http.Request) {
 	agent, _ := agentFrom(r.Context())
+	// Version skew (#412): an agent below the minimum supported version is refused work with a clear
+	// instruction to update, rather than handed orders it may mishandle. Fail-closed: an agent that
+	// does not state a parseable version under an active floor is refused too.
+	if !fleetversion.MeetsFloor(agent.AgentVersion, f.minAgentVersion) {
+		writeJSON(w, http.StatusUpgradeRequired, map[string]string{
+			"error":                       "agent version below minimum supported",
+			"your_version":                agent.AgentVersion,
+			"min_supported_agent_version": f.minAgentVersion,
+			"instruction":                 "update the agent to at least the minimum supported version, then resume claiming work",
+		})
+		return
+	}
 	var req struct {
 		Max int `json:"max"`
 	}

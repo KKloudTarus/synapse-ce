@@ -197,6 +197,11 @@ type Config struct {
 	// its collected host inventory (facts + packages + coverage) to be persisted as a Kind=host asset.
 	// Off by default; requires FleetEnabled + FleetAssetsEnabled.
 	FleetHostIngestEnabled bool
+	// FleetMinAgentVersion is the minimum supported agent version (#412 version skew). An agent whose
+	// reported version is below it is refused work with an instruction to update. Empty = no floor. A
+	// malformed value is treated as no floor (a config typo must not brick the fleet). Parsed loosely
+	// as major.minor.patch (see domain/fleetversion).
+	FleetMinAgentVersion string
 	// FleetSignerKey is the HMAC key that signs agent work orders. Required and at least 32 bytes
 	// when FleetEnabled; a missing/short key fails startup closed rather than boot a forgeable signer.
 	FleetSignerKey string
@@ -468,6 +473,7 @@ func Load() Config {
 		FleetEnabled:              getbool("SYNAPSE_FLEET_ENABLED", false),
 		FleetClusterIngestEnabled: getbool("SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED", false),
 		FleetHostIngestEnabled:    getbool("SYNAPSE_FLEET_HOST_INGEST_ENABLED", false),
+		FleetMinAgentVersion:      strings.TrimSpace(os.Getenv("SYNAPSE_FLEET_MIN_AGENT_VERSION")),
 		FleetSignerKey:            getenv("SYNAPSE_FLEET_SIGNER_KEY", ""),
 		FleetCACertPEM:            getenv("SYNAPSE_FLEET_CA_CERT", ""),
 		FleetCAKeyPEM:             getenv("SYNAPSE_FLEET_CA_KEY", ""),

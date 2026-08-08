@@ -1,0 +1,67 @@
+name: Release Scan Gate
+
+# #412 req 6: the release job scans every artifact and the container image and FAILS CLOSED — if the
+# scanner binary is missing, errors, or reports a finding above the floor, the job fails. No step in
+# the release path may swallow a non-zero exit (asserted by the lint step below).
+#
+# STATUS: authored to the #412 spec. GitHub Actions is currently disabled for this repository, so this
+# workflow does not run yet; it is the gate that activates when Actions is enabled. Its logic is
+# deliberately fail-closed so a dormant/misconfigured scanner can never masquerade as "0 findings".
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  no-exit-swallow-lint:
+    name: Release path must not swallow exits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Lint release workflows for exit-swallowing constructs
+        run: ./scripts/release/check-no-exit-swallow.sh
+
+  scan-gate:
+    name: Fail-closed release scan
+    runs-on: ubuntu-latest
+    needs: no-exit-swallow-lint
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build the scanner (fail if it cannot be built)
+        run: go build -o ./dist/synapse-cli ./cmd/synapse-cli
+
+      - name: Fail closed if the scanner is absent
+        # Requirement 6: a missing scanner must FAIL the job, never be skipped or exit-swallowed.
+        run: test -x ./dist/synapse-cli || { echo "scanner binary missing — failing the release"; exit 1; }
+
+      - name: Download release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ./release-artifacts
+          gh release download "${{ github.event.release.tag_name }}" --dir ./release-artifacts
+
+      - name: Scan every artifact and the image, fail on findings at/above the floor
+        # Each invocation must propagate its exit; `set -e` + no swallowing. --fail-on high makes the
+        # scanner exit non-zero on a High/Critical finding, which fails the job.
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          scanned=0
+          for art in ./release-artifacts/*; do
+            echo "scanning ${art}"
+            ./dist/synapse-cli scan --fail-on high "${art}"
+            scanned=$((scanned + 1))
+          done
+          # Fail closed: a release with no scannable artifact must NOT pass vacuously.
+          test "${scanned}" -gt 0 || { echo "no artifacts were scanned — failing the release"; exit 1; }
+          # The container image is scanned the same way once dockers_v2 image publishing is re-enabled.

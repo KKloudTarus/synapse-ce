@@ -26,22 +26,31 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetversion"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/hostinv"
+	"github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo"
 )
 
-// agentVersion is reported to the control plane and gated by its version check.
-const agentVersion = "0.1.0"
+// agentVersion is reported to the control plane and gated by its version-skew floor. It reflects the
+// real build (a release tag via ldflags; "devel" for an untagged build) so the fleet floor can
+// distinguish agent releases in the field, matching how the control plane reports its own version.
+var agentVersion = buildinfo.App()
 
 // hostInventoryCapability is the work-order capability this agent fulfils. It follows the platform's
 // dotted capability namespace (cf. scan.source, detect.rules — workorder.WorkOrder.Capability).
 const hostInventoryCapability = "scan.host"
 
+// minControlPlaneVersion is the minimum control-plane version this agent requires (#412 version skew).
+// If the heartbeat reports an older control plane, the agent refuses to claim work this cycle rather
+// than risk acting against an incompatible transport contract.
+const minControlPlaneVersion = "0.1.0"
+
 // fleetAPI is the subset of the fleet client the run loop needs; a fake implements it in tests.
 type fleetAPI interface {
 	Enrol(ctx context.Context, enrolToken string, req fleetclient.EnrolRequest) (fleetclient.EnrolResponse, error)
-	Heartbeat(ctx context.Context, token string, req fleetclient.EnrolRequest) error
+	Heartbeat(ctx context.Context, token string, req fleetclient.EnrolRequest) (fleetclient.HeartbeatResponse, error)
 	ClaimWork(ctx context.Context, token string, max int) ([]fleetclient.Order, error)
 	Progress(ctx context.Context, token, orderID string) error
 	SubmitResult(ctx context.Context, token, orderID, status, reason string) error
@@ -150,10 +159,26 @@ func (r *runner) ensureEnrolled(ctx context.Context) (fleetclient.Credential, er
 }
 
 func (r *runner) cycle(ctx context.Context, cred fleetclient.Credential) error {
-	if err := r.api.Heartbeat(ctx, cred.Token, fleetclient.EnrolRequest{
+	hb, err := r.api.Heartbeat(ctx, cred.Token, fleetclient.EnrolRequest{
 		Name: r.cfg.name, Platform: runtime.GOOS, AgentVersion: agentVersion,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("heartbeat: %w", err)
+	}
+	// Version skew (#412): if this agent is below the control plane's minimum, it will be refused work
+	// server-side anyway — surface a clear update instruction. If the control plane is DEMONSTRABLY
+	// older than this agent requires, refuse to claim this cycle. This check fails OPEN (availability):
+	// an empty or unparseable control-plane version (e.g. an untagged "devel" build) is treated as
+	// "unknown, proceed" — only a parseable CP version strictly below the floor skips the cycle. (This
+	// is the opposite of the SERVER-side agent-version check, which fails closed for security.)
+	if !fleetversion.MeetsFloor(agentVersion, hb.MinSupportedAgentVersion) {
+		log.Printf("version skew: agent %s is below the control plane minimum %s — update this agent", agentVersion, hb.MinSupportedAgentVersion)
+	}
+	if cp, ok := fleetversion.Parse(hb.ControlPlaneVersion); ok {
+		if floor, fok := fleetversion.Parse(minControlPlaneVersion); fok && cp.Less(floor) {
+			log.Printf("version skew: control plane %s is older than this agent requires (%s) — skipping claim this cycle", hb.ControlPlaneVersion, minControlPlaneVersion)
+			return nil
+		}
 	}
 	orders, err := r.api.ClaimWork(ctx, cred.Token, r.cfg.maxOrders)
 	if err != nil {
