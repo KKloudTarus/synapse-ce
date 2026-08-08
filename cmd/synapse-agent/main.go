@@ -45,6 +45,7 @@ type fleetAPI interface {
 	ClaimWork(ctx context.Context, token string, max int) ([]fleetclient.Order, error)
 	Progress(ctx context.Context, token, orderID string) error
 	SubmitResult(ctx context.Context, token, orderID, status, reason string) error
+	SendHostInventory(ctx context.Context, token string, inv any) error
 }
 
 type config struct {
@@ -181,19 +182,25 @@ func (r *runner) handle(ctx context.Context, cred fleetclient.Credential, o flee
 		_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "collect: "+err.Error())
 		return
 	}
-	// The control-plane result endpoint records only the outcome; this on-disk buffer is the ONLY
-	// place the actual inventory (including its machine-readable coverage) is preserved for the
-	// forthcoming ingest surface. If buffering fails the inventory is lost, so the order is not a
-	// success — fail it rather than report a green order with nothing behind it.
+	// Keep a durable local copy first (the buffer survives a transient reporting failure). If buffering
+	// fails the inventory is lost, so the order is not a success.
 	if err := r.buffer(o.ID, inv); err != nil {
 		log.Printf("order %s: buffer: %v", o.ID, err)
 		_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "buffer inventory: "+err.Error())
 		return
 	}
+	// Report the inventory to the control plane, which persists the host into the asset model (#446).
+	// The control plane records the coverage/degraded flags on the asset. If reporting fails the data
+	// did not land, so the order is not a clean success — fail it (the local buffer preserves the data).
+	if err := r.api.SendHostInventory(ctx, cred.Token, inv); err != nil {
+		log.Printf("order %s: report inventory: %v", o.ID, err)
+		_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "report inventory: "+err.Error())
+		return
+	}
 	// Fail closed when the collected package data is untrustworthy (a package DB that exists but could
 	// not be read): a consumer must never treat a poisoned inventory as a clean success. An inventory
 	// that is merely incomplete for expected reasons (dimensions not yet collected) still succeeds, with
-	// the incompleteness stated in the reason and preserved structurally in the buffered inventory.
+	// the incompleteness stated in the reason and preserved on the persisted asset.
 	status := "succeeded"
 	if inv.Degraded() {
 		status = "failed"

@@ -16,9 +16,11 @@ import (
 
 	dci "github.com/KKloudTarus/synapse-ce/internal/domain/clusterinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
+	dhi "github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
 	clusterinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/clusterinventory"
+	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 )
 
@@ -56,10 +58,17 @@ type fleetClusterInventory interface {
 	Sync(ctx context.Context, actor string, in clusterinventoryuc.SyncInput) (*clusterinventoryuc.SyncResult, error)
 }
 
+// fleetHostInventory persists a VM host inventory an agent reports (#446). The host-inventory use
+// case implements it; nil means the host ingest route is not served.
+type fleetHostInventory interface {
+	Sync(ctx context.Context, actor string, in hostinventoryuc.SyncInput) (*hostinventoryuc.SyncResult, error)
+}
+
 type fleetRouter struct {
 	agents           fleetAgentService
 	work             fleetWorkService
 	clusterInv       fleetClusterInventory // optional; nil ⇒ cluster inventory ingest is not served
+	hostInv          fleetHostInventory    // optional; nil ⇒ host inventory ingest is not served
 	log              *slog.Logger
 	agentLim         *keyedLimiter // post-auth, keyed by agent id
 	ipLim            *keyedLimiter // pre-auth, keyed by client IP (throttles enrol + failed auth)
@@ -131,6 +140,14 @@ func (rt *Router) SetFleetAdmin(s fleetAdminService) { rt.fleetAdmin = s }
 func (rt *Router) SetFleetClusterInventory(s fleetClusterInventory) {
 	if rt.fleet != nil {
 		rt.fleet.clusterInv = s
+	}
+}
+
+// SetFleetHostInventory wires the VM host inventory ingest use case onto the agent transport plane.
+// It must be called after SetFleet; a nil fleet (transport disabled) makes it a no-op.
+func (rt *Router) SetFleetHostInventory(s fleetHostInventory) {
+	if rt.fleet != nil {
+		rt.fleet.hostInv = s
 	}
 }
 
@@ -225,6 +242,7 @@ func (f *fleetRouter) handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/fleet/work/{id}/progress", f.entry(f.authed(f.progress)))
 	mux.HandleFunc("POST /api/v1/fleet/work/{id}/result", f.entry(f.authed(f.result)))
 	mux.HandleFunc("POST /api/v1/fleet/inventory/cluster", f.entry(f.authed(f.clusterInventory)))
+	mux.HandleFunc("POST /api/v1/fleet/inventory/host", f.entry(f.authed(f.hostInventory)))
 	return mux
 }
 
@@ -440,6 +458,38 @@ func (f *fleetRouter) clusterInventory(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]int{
 		"assets": res.Assets, "edges": res.Edges, "coverage_gaps": len(res.Gaps),
+	})
+}
+
+// hostInventory ingests a VM host inventory the agent collected and persists the host into the asset
+// model via the host-inventory use case. Tenant and actor come from the authenticated agent (never
+// the request body). The coverage summary (complete/degraded/gaps) is returned so a partial host
+// inventory is visible, never silently treated as clean.
+func (f *fleetRouter) hostInventory(w http.ResponseWriter, r *http.Request) {
+	if f.hostInv == nil {
+		writeJSON(w, http.StatusNotFound, errorBody{Error: "host inventory ingest not enabled"})
+		return
+	}
+	agent, ok := agentFrom(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, errorBody{Error: "unauthenticated"})
+		return
+	}
+	var inv dhi.HostInventory
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, fleetInventoryCap)).Decode(&inv); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid host inventory body"})
+		return
+	}
+	res, err := f.hostInv.Sync(r.Context(), agent.ID.String(), hostinventoryuc.SyncInput{
+		TenantID:  agent.TenantID,
+		Inventory: inv,
+	})
+	if err != nil {
+		writeError(w, f.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"asset_id": res.AssetID.String(), "complete": res.Complete, "degraded": res.Degraded, "coverage_gaps": res.Coverage,
 	})
 }
 

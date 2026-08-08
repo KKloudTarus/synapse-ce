@@ -99,6 +99,13 @@ func (c *Client) SendClusterInventory(ctx context.Context, token string, snap an
 	return c.do(ctx, http.MethodPost, "/api/v1/fleet/inventory/cluster", token, snap, nil)
 }
 
+// SendHostInventory posts a collected VM host inventory to the control plane, which persists the host
+// into the asset model (#446). inv must be a JSON-tagged hostinventory.HostInventory; the caller
+// passes it as the marshalable value so this package keeps no domain dependency.
+func (c *Client) SendHostInventory(ctx context.Context, token string, inv any) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/fleet/inventory/host", token, inv, nil)
+}
+
 func (c *Client) do(ctx context.Context, method, path, token string, body, out any) error {
 	var reader io.Reader
 	if body != nil {

@@ -192,6 +192,10 @@ type Config struct {
 	// POSTs a Kubernetes snapshot that is persisted into the asset model. Off by default. It requires
 	// both FleetEnabled (transport) and FleetAssetsEnabled (persistence); it is a no-op otherwise.
 	FleetClusterIngestEnabled bool
+	// FleetHostIngestEnabled turns on the host-inventory ingest endpoint (#446), where a VM agent POSTs
+	// its collected host inventory (facts + packages + coverage) to be persisted as a Kind=host asset.
+	// Off by default; requires FleetEnabled + FleetAssetsEnabled.
+	FleetHostIngestEnabled bool
 	// FleetSignerKey is the HMAC key that signs agent work orders. Required and at least 32 bytes
 	// when FleetEnabled; a missing/short key fails startup closed rather than boot a forgeable signer.
 	FleetSignerKey string
@@ -462,6 +466,7 @@ func Load() Config {
 		FleetAssetsEnabled:        getbool("SYNAPSE_FLEET_ASSETS_ENABLED", false),
 		FleetEnabled:              getbool("SYNAPSE_FLEET_ENABLED", false),
 		FleetClusterIngestEnabled: getbool("SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED", false),
+		FleetHostIngestEnabled:    getbool("SYNAPSE_FLEET_HOST_INGEST_ENABLED", false),
 		FleetSignerKey:            getenv("SYNAPSE_FLEET_SIGNER_KEY", ""),
 		FleetCACertPEM:            getenv("SYNAPSE_FLEET_CA_CERT", ""),
 		FleetCAKeyPEM:             getenv("SYNAPSE_FLEET_CA_KEY", ""),
