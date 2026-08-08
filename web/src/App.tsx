@@ -21,6 +21,9 @@ import { ProjectMeasuresPage } from './pages/ProjectMeasuresPage'
 import { ProjectCodePage } from './pages/ProjectCodePage'
 import { QualityGates } from './pages/QualityGates'
 import { QualityProfiles } from './pages/QualityProfiles'
+import { FleetLayout } from './pages/FleetLayout'
+import { FleetCoverage } from './pages/FleetCoverage'
+import { FleetAgents } from './pages/FleetAgents'
 
 export default function App() {
   return (
@@ -50,6 +53,10 @@ function Gate() {
           <Route path="measures" element={<ProjectMeasuresPage />} />
           <Route path="analysis" element={<ProjectAnalysisPage />} />
           <Route path="activity" element={<ProjectActivityPage />} />
+        </Route>
+        <Route path="fleet" element={<FleetLayout />}>
+          <Route index element={<FleetCoverage />} />
+          <Route path="agents" element={<FleetAgents />} />
         </Route>
         <Route path="rules" element={<Rules />} />
         <Route path="rules/:key" element={<RuleDetail />} />

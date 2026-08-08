@@ -1,4 +1,4 @@
-import { Boxes, FileText, Gauge, Radar, ScrollText, Settings, Target, Users, X, Library, type LucideIcon } from 'lucide-react'
+import { Boxes, FileText, Gauge, Radar, ScrollText, Server, Settings, Target, Users, X, Library, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { cn } from './ui'
@@ -82,6 +82,22 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         >
           <Gauge className="size-[18px]" />
           Code Quality
+        </NavLink>
+
+        <NavLink
+          to="/fleet"
+          onClick={onNavigate}
+          className={() =>
+            cn(
+              'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+              location.pathname.startsWith('/fleet')
+                ? 'bg-brand/10 font-semibold text-branddim before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-brand before:content-[""]'
+                : 'text-mutedfg hover:bg-elevated hover:text-foreground',
+            )
+          }
+        >
+          <Server className="size-[18px]" />
+          Fleet
         </NavLink>
 
         <NavLink
