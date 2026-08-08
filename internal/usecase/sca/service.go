@@ -211,7 +211,8 @@ func (s *Service) SetIncludeTestSecrets(v bool) { s.includeTestSecrets = v }
 // production-scope first-party source findings after they are built and records the advisory verdicts on
 // ScanResult.AITriage. The deterministic AI gate policy separately decides whether a verified consensus
 // clears the human-review floor; a suspected-FP opinion alone has no gate authority. Best-effort; nil =
-// no triage.
+// no triage. Implementations are trusted in-process components; policy revalidation contains buggy DTOs,
+// not malicious code that already holds process authority.
 func (s *Service) SetFPTriage(t ports.FPTriager) { s.fpTriager = t }
 
 // SetOSPackageCataloger configures optional owned OS-package cataloging (dpkg/apk) from a materialized image

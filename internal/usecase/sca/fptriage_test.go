@@ -159,6 +159,66 @@ func TestApplyAIGatePolicyRejectsForgedVerifiedFlag(t *testing.T) {
 	}
 }
 
+func TestCWETokensCanonicalizeLeadingZerosWithoutSubstringMatching(t *testing.T) {
+	got := cweTokens(" cwe-0079, CWE-0890 / CWE-0798 | custom-token ")
+	want := []string{"CWE-79", "CWE-890", "CWE-798", "CUSTOM-TOKEN"}
+	if len(got) != len(want) {
+		t.Fatalf("cweTokens = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("cweTokens[%d] = %q, want %q (%v)", i, got[i], want[i], got)
+		}
+	}
+
+	protected := finding.Finding{Kind: finding.KindSAST, Severity: shared.SeverityMedium, CWE: "CWE-0079"}
+	if got := humanReviewFloor(protected); got != aiPolicyDangerousCWEFloor {
+		t.Fatalf("zero-padded protected CWE bypassed human-review floor: %q", got)
+	}
+	nonCollision := finding.Finding{Kind: finding.KindSAST, Severity: shared.SeverityMedium, CWE: "CWE-0890"}
+	if got := humanReviewFloor(nonCollision); got != "" {
+		t.Fatalf("CWE-0890 must canonicalize to exact CWE-890, not collide with CWE-89: %q", got)
+	}
+	if !hasCredentialCWE("CWE-0798") {
+		t.Fatal("zero-padded credential CWE must remain excluded from LLM candidate selection")
+	}
+}
+
+func TestHumanReviewFloorFailsClosedOnEmbeddedSeparatorsAndMalformedCWE(t *testing.T) {
+	// A dangerous CWE spelled with an embedded separator/punctuation, or a malformed CWE token, must
+	// still be held for human review — the tokenizer's separators are as wide as the canonicalizer's
+	// tolerance, and any unparseable CWE-* token fails closed.
+	protected := []struct {
+		name, cwe string
+	}{
+		{"colon-space suffix", "CWE-79: Cross-site Scripting"},
+		{"trailing dot", "CWE-89."},
+		{"parenthesized", "CWE-798 (hard-coded credentials)"},
+		{"nbsp separator", "CWE-89 notes"},
+		{"form-feed separator", "CWE-89\fnotes"},
+		{"zero-padded with suffix", "CWE-0022: path traversal"},
+		{"malformed non-digit suffix", "CWE-79A"},
+		{"bare prefix", "CWE-"},
+	}
+	for _, tc := range protected {
+		item := finding.Finding{Kind: finding.KindSAST, Severity: shared.SeverityMedium, CWE: tc.cwe}
+		if got := humanReviewFloor(item); got != aiPolicyDangerousCWEFloor {
+			t.Errorf("%s (%q): floor = %q, want %q (must fail closed)", tc.name, tc.cwe, got, aiPolicyDangerousCWEFloor)
+		}
+	}
+
+	// A genuinely benign, well-formed, non-protected CWE still clears the CWE floor (no over-blocking).
+	benign := finding.Finding{Kind: finding.KindSAST, Severity: shared.SeverityMedium, CWE: "CWE-327"}
+	if got := humanReviewFloor(benign); got != "" {
+		t.Errorf("well-formed non-protected CWE must not trip the floor, got %q", got)
+	}
+
+	// Credential CWEs are detected even with embedded punctuation.
+	if !hasCredentialCWE("CWE-798: hard-coded credentials") {
+		t.Error("credential CWE with a colon suffix must still be detected")
+	}
+}
+
 func TestApplyAIGatePolicyRequiresEvidenceLedger(t *testing.T) {
 	result := &ScanResult{
 		Findings: []finding.Finding{{DedupKey: "safe", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"}},

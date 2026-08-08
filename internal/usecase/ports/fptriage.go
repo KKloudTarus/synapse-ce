@@ -44,7 +44,11 @@ type AICritique struct {
 // FPTriager runs an LLM false-positive critique over candidate findings from a workspace and returns a
 // per-candidate advisory verdict. It is best-effort and PROPOSE-ONLY: it never mutates or deletes a
 // finding. The caller applies the deterministic gate policy; only a verified critique that clears the
-// human-review floor can be retain-and-mark gate-exempt. Injected optionally into the scan pipeline;
+// human-review floor can be retain-and-mark gate-exempt.
+//
+// FPTriager is a trusted in-process boundary. The caller defensively revalidates its DTOs to contain a
+// buggy implementation or forged decision fields; it does not sandbox a malicious implementation that
+// already has the process's memory/filesystem authority. Injected optionally into the scan pipeline;
 // nil = no triage.
 type FPTriager interface {
 	Triage(ctx context.Context, candidates []finding.Finding, workspaceDir string) []AICritique

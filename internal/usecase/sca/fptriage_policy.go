@@ -2,6 +2,7 @@ package sca
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
@@ -131,6 +132,13 @@ func humanReviewFloor(item finding.Finding) string {
 		if _, protected := humanReviewCWEs[token]; protected {
 			return aiPolicyDangerousCWEFloor
 		}
+		// A token that claims to be a CWE but is not well-formed CWE-<digits> after canonicalization
+		// (e.g. "CWE-79:" from an embedded separator, "CWE-79A", or a bare "CWE-") must fail closed to
+		// human review rather than be treated as a known-but-unprotected weakness — otherwise a
+		// dangerous class could slip the floor on a malformed spelling.
+		if isMalformedCWE(token) {
+			return aiPolicyDangerousCWEFloor
+		}
 	}
 	// Unknown weakness identity is not evidence that a source/config finding is low risk. Until a
 	// producer supplies a CWE, keep it in human review rather than defaulting to exemptible.
@@ -141,9 +149,65 @@ func humanReviewFloor(item finding.Finding) string {
 }
 
 func cweTokens(value string) []string {
-	return strings.FieldsFunc(strings.ToUpper(value), func(r rune) bool {
-		return r == ',' || r == ';' || r == '|' || r == '/' || r == ' ' || r == '\t' || r == '\n'
+	// Split on every listed delimiter plus ALL unicode whitespace (incl. NBSP/\f/\v) and the
+	// punctuation that commonly trails a CWE id in imported text ("CWE-79: XSS", "CWE-79."). The
+	// separator set must be at least as wide as the canonicalizer's tolerance, or a dangerous CWE
+	// spelled with an embedded separator would slip the human-review floor.
+	tokens := strings.FieldsFunc(strings.ToUpper(value), func(r rune) bool {
+		switch r {
+		case ',', ';', '|', '/', ':', '.', '(', ')':
+			return true
+		}
+		return unicode.IsSpace(r)
 	})
+	for i := range tokens {
+		tokens[i] = canonicalCWEToken(tokens[i])
+	}
+	return tokens
+}
+
+// isMalformedCWE reports a token that claims to be a CWE ("CWE-" prefix) but is not well-formed
+// CWE-<digits>. Such a token is treated as unparseable and fails closed to human review rather than
+// being read as a known-but-unprotected weakness (#452 review follow-up, defense in depth).
+func isMalformedCWE(token string) bool {
+	const prefix = "CWE-"
+	if !strings.HasPrefix(token, prefix) {
+		return false
+	}
+	digits := strings.TrimPrefix(token, prefix)
+	if digits == "" {
+		return true
+	}
+	for _, r := range digits {
+		if r < '0' || r > '9' {
+			return true
+		}
+	}
+	return false
+}
+
+// canonicalCWEToken normalizes numeric CWE aliases without weakening exact-token matching. Synapse's
+// rule catalog emits canonical IDs, but imported findings may spell CWE-79 as CWE-0079. Malformed and
+// non-CWE tokens are left intact so normalization never guesses at an identifier.
+func canonicalCWEToken(token string) string {
+	const prefix = "CWE-"
+	if !strings.HasPrefix(token, prefix) {
+		return token
+	}
+	digits := strings.TrimPrefix(token, prefix)
+	if digits == "" {
+		return token
+	}
+	for _, r := range digits {
+		if r < '0' || r > '9' {
+			return token
+		}
+	}
+	digits = strings.TrimLeft(digits, "0")
+	if digits == "" {
+		digits = "0"
+	}
+	return prefix + digits
 }
 
 func hasCredentialCWE(value string) bool {
