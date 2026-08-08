@@ -47,6 +47,26 @@ subjects:
     name: synapse-cluster-agent
     namespace: synapse
 ---
+# The one-time enrolment token is provisioned OUT OF BAND by an operator (never committed). Create the
+# Secret before applying this manifest, e.g.:
+#   kubectl -n synapse create secret generic synapse-cluster-agent-enrol \
+#     --from-literal=enrol-token="<one-time token minted by the control plane>"
+# It is consumed on first enrolment; the agent then persists a long-lived credential in its state
+# volume, so a restart does not re-enrol. The Deployment reads it via secretKeyRef below.
+---
+# Persists the agent credential across restarts (without it a restart would re-enrol with an
+# already-consumed one-time token and fail).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: synapse-cluster-agent-state
+  namespace: synapse
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 64Mi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -56,6 +76,8 @@ metadata:
     app.kubernetes.io/name: synapse-cluster-agent
 spec:
   replicas: 1
+  strategy:
+    type: Recreate # single writer of the state PVC
   selector:
     matchLabels:
       app.kubernetes.io/name: synapse-cluster-agent
@@ -69,18 +91,34 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
+        fsGroup: 65532 # so the agent can write the state PVC
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: agent
           image: ghcr.io/kkloudtarus/synapse-cluster-agent:latest # pin to a digest in production
-          args: ["-cluster", "$(SYNAPSE_CLUSTER)"]
           env:
             - name: SYNAPSE_CLUSTER
-              value: "REPLACE-with-unique-cluster-identity"
+              value: "REPLACE-with-unique-cluster-identity" # keys every asset; unique per cluster
+            # Control-plane fleet API. Must be https (a loopback host is the only http exception).
+            - name: SYNAPSE_FLEET_URL
+              value: "https://REPLACE-with-control-plane"
+            # One-time enrolment token, read from a mounted file (first run only). A file is preferred
+            # over an env var: an env secret is readable via /proc/<pid>/environ and can leak into
+            # crash dumps / child processes.
+            - name: SYNAPSE_FLEET_ENROL_TOKEN_FILE
+              value: /var/run/synapse/enrol-token
+            - name: SYNAPSE_AGENT_STATE_DIR
+              value: /var/lib/synapse-cluster-agent
             # Optional: restrict scope. Empty = all namespaces.
             - name: SYNAPSE_CLUSTER_NAMESPACES
               value: ""
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/synapse-cluster-agent
+            - name: enrol-token
+              mountPath: /var/run/synapse
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -93,3 +131,7 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: synapse-cluster-agent-state

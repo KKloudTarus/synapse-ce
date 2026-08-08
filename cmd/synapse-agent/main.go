@@ -18,8 +18,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -60,31 +58,23 @@ type config struct {
 	once       bool
 }
 
-// credential is the persisted agent identity. The token is a secret; the file is written 0600 and
-// its contents are never logged.
-type credential struct {
-	AgentID        string `json:"agent_id"`
-	Token          string `json:"token"`
-	CertificatePEM string `json:"certificate_pem,omitempty"`
-}
-
 func main() {
 	log.SetFlags(0)
 	cfg := parseConfig()
 	if cfg.baseURL == "" {
 		log.Fatal("synapse-agent: SYNAPSE_FLEET_URL (or -url) is required")
 	}
-	if err := validateControlPlaneURL(cfg.baseURL); err != nil {
+	if err := fleetclient.ValidateControlPlaneURL(cfg.baseURL); err != nil {
 		log.Fatalf("synapse-agent: %v", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	r := &runner{
-		api:      fleetclient.New(cfg.baseURL, 30*time.Second),
-		collect:  hostinv.Collect,
-		cfg:      cfg,
-		hostname: hostname(),
+		api:     fleetclient.New(cfg.baseURL, 30*time.Second),
+		collect: hostinv.Collect,
+		cfg:     cfg,
+		store:   fleetclient.NewCredentialStore(cfg.stateDir),
 	}
 	if err := r.run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("synapse-agent: %v", err)
@@ -116,42 +106,12 @@ func parseConfig() config {
 	return cfg
 }
 
-// validateControlPlaneURL refuses a cleartext control-plane URL so the bearer credential cannot
-// traverse plaintext HTTP. http is allowed only for a loopback host (local development/testing).
-func validateControlPlaneURL(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("invalid control-plane URL: %w", err)
-	}
-	switch u.Scheme {
-	case "https":
-		return nil
-	case "http":
-		if isLoopbackHost(u.Hostname()) {
-			return nil
-		}
-		return fmt.Errorf("refusing cleartext http:// control-plane URL %q (the agent token would traverse plaintext); use https, or a loopback host for local testing", raw)
-	default:
-		return fmt.Errorf("unsupported control-plane URL scheme %q (want https)", u.Scheme)
-	}
-}
-
-func isLoopbackHost(host string) bool {
-	if host == "localhost" {
-		return true
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
-	}
-	return false
-}
-
 // runner holds the run-loop dependencies so the loop can be tested with a fake API + collector.
 type runner struct {
-	api      fleetAPI
-	collect  func(ctx context.Context, root string) (hostinventory.HostInventory, error)
-	cfg      config
-	hostname string
+	api     fleetAPI
+	collect func(ctx context.Context, root string) (hostinventory.HostInventory, error)
+	cfg     config
+	store   *fleetclient.CredentialStore
 }
 
 func (r *runner) run(ctx context.Context) error {
@@ -177,37 +137,18 @@ func (r *runner) run(ctx context.Context) error {
 	}
 }
 
-// ensureEnrolled loads a persisted credential or, on first run, generates a key + CSR and enrols.
-func (r *runner) ensureEnrolled(ctx context.Context) (credential, error) {
-	if cred, ok := r.loadCredential(); ok {
-		return cred, nil
-	}
-	if r.cfg.enrolToken == "" {
-		return credential{}, errors.New("no stored credential and no enrolment token provided")
-	}
-	csrPEM, keyPEM, err := fleetclient.GenerateKeyAndCSR(r.cfg.name)
-	if err != nil {
-		return credential{}, err
-	}
-	resp, err := r.api.Enrol(ctx, r.cfg.enrolToken, fleetclient.EnrolRequest{
+// ensureEnrolled loads a persisted credential or, on first run, generates a key + CSR and enrols,
+// using the shared fleetclient helper so credential persistence lives in one place.
+func (r *runner) ensureEnrolled(ctx context.Context) (fleetclient.Credential, error) {
+	return fleetclient.EnsureEnrolled(ctx, r.api, r.store, r.cfg.enrolToken, fleetclient.EnrolRequest{
 		Name:         r.cfg.name,
 		Platform:     runtime.GOOS,
 		AgentVersion: agentVersion,
 		Capabilities: []string{hostInventoryCapability},
-		CSRPEM:       string(csrPEM),
 	})
-	if err != nil {
-		return credential{}, fmt.Errorf("enrol: %w", err)
-	}
-	cred := credential{AgentID: resp.AgentID, Token: resp.Token, CertificatePEM: resp.CertificatePEM}
-	if err := r.persist(cred, keyPEM); err != nil {
-		return credential{}, err
-	}
-	log.Printf("enrolled as agent %s", cred.AgentID)
-	return cred, nil
 }
 
-func (r *runner) cycle(ctx context.Context, cred credential) error {
+func (r *runner) cycle(ctx context.Context, cred fleetclient.Credential) error {
 	if err := r.api.Heartbeat(ctx, cred.Token, fleetclient.EnrolRequest{
 		Name: r.cfg.name, Platform: runtime.GOOS, AgentVersion: agentVersion,
 	}); err != nil {
@@ -227,7 +168,7 @@ func (r *runner) cycle(ctx context.Context, cred credential) error {
 }
 
 // handle runs one order to completion, reporting a terminal result either way.
-func (r *runner) handle(ctx context.Context, cred credential, o fleetclient.Order) {
+func (r *runner) handle(ctx context.Context, cred fleetclient.Credential, o fleetclient.Order) {
 	if o.Capability != "" && o.Capability != hostInventoryCapability {
 		_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "unsupported capability: "+o.Capability)
 		return
@@ -276,54 +217,11 @@ func summary(inv hostinventory.HostInventory) string {
 
 // --- state persistence ---------------------------------------------------
 
-func (r *runner) credentialPath() string { return filepath.Join(r.cfg.stateDir, "credential.json") }
-func (r *runner) keyPath() string        { return filepath.Join(r.cfg.stateDir, "agent.key") }
-
-func (r *runner) loadCredential() (credential, bool) {
-	b, err := os.ReadFile(r.credentialPath())
-	if err != nil {
-		return credential{}, false
-	}
-	var c credential
-	if err := json.Unmarshal(b, &c); err != nil || c.Token == "" {
-		return credential{}, false
-	}
-	return c, true
-}
-
-func (r *runner) persist(cred credential, keyPEM []byte) error {
-	if err := os.MkdirAll(r.cfg.stateDir, 0o700); err != nil {
-		return fmt.Errorf("state dir: %w", err)
-	}
-	if len(keyPEM) > 0 {
-		if err := writeSecret(r.keyPath(), keyPEM, 0o600); err != nil {
-			return fmt.Errorf("write key: %w", err)
-		}
-	}
-	b, err := json.MarshalIndent(cred, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal credential: %w", err)
-	}
-	if err := writeSecret(r.credentialPath(), b, 0o600); err != nil {
-		return fmt.Errorf("write credential: %w", err)
-	}
-	return nil
-}
-
-// writeSecret writes secret material and enforces the mode even if the file pre-existed with looser
-// permissions (os.WriteFile applies the mode only on create). The explicit Chmod closes the window
-// where a pre-seeded, world-readable credential/key file would keep its old mode after a rewrite.
-func writeSecret(path string, data []byte, mode os.FileMode) error {
-	if err := os.WriteFile(path, data, mode); err != nil {
-		return err
-	}
-	return os.Chmod(path, mode)
-}
-
 // buffer writes the collected inventory to the state dir as a local artifact and reports whether it
 // succeeded. The control plane's result endpoint records only the order outcome; this on-disk buffer
 // preserves the actual inventory for the forthcoming ingest surface and survives a transient
-// reporting failure.
+// reporting failure. It reuses fleetclient.WriteSecret (0600 + chmod) so on-disk-secret handling is
+// not duplicated.
 func (r *runner) buffer(orderID string, inv hostinventory.HostInventory) error {
 	if err := os.MkdirAll(r.cfg.stateDir, 0o700); err != nil {
 		return fmt.Errorf("state dir: %w", err)
@@ -332,7 +230,7 @@ func (r *runner) buffer(orderID string, inv hostinventory.HostInventory) error {
 	if err != nil {
 		return fmt.Errorf("marshal inventory: %w", err)
 	}
-	if err := writeSecret(filepath.Join(r.cfg.stateDir, "inventory-"+safe(orderID)+".json"), b, 0o600); err != nil {
+	if err := fleetclient.WriteSecret(filepath.Join(r.cfg.stateDir, "inventory-"+safe(orderID)+".json"), b, 0o600); err != nil {
 		return fmt.Errorf("write inventory: %w", err)
 	}
 	return nil

@@ -54,6 +54,7 @@ func newRunner(t *testing.T, api fleetAPI, orders []fleetclient.Order, collect f
 		api:     api,
 		collect: collect,
 		cfg:     config{stateDir: dir, root: dir, name: "host1", enrolToken: "enrol", once: true, maxOrders: 8},
+		store:   fleetclient.NewCredentialStore(dir),
 	}
 }
 
@@ -74,10 +75,10 @@ func TestFirstRunEnrolsAndPersists(t *testing.T) {
 		t.Fatalf("first run must enrol")
 	}
 	// Credential + key persisted, key is 0600 and the token is not in the key file.
-	if _, err := os.Stat(r.keyPath()); err != nil {
+	if _, err := os.Stat(filepath.Join(r.cfg.stateDir, "agent.key")); err != nil {
 		t.Fatalf("key must be persisted: %v", err)
 	}
-	info, _ := os.Stat(r.credentialPath())
+	info, _ := os.Stat(filepath.Join(r.cfg.stateDir, "credential.json"))
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("credential must be 0600, got %v", info.Mode().Perm())
 	}
@@ -98,7 +99,7 @@ func TestSecondRunReusesCredentialNoEnrol(t *testing.T) {
 	api := &fakeAPI{enrolResp: fleetclient.EnrolResponse{AgentID: "a1", Token: "secret"}}
 	r := newRunner(t, api, nil, okCollect(hostinventory.HostInventory{}))
 	// Pre-persist a credential.
-	if err := r.persist(credential{AgentID: "a1", Token: "secret"}, []byte("KEY")); err != nil {
+	if err := r.store.Persist(fleetclient.Credential{AgentID: "a1", Token: "secret"}, []byte("KEY")); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.run(context.Background()); err != nil {
@@ -170,7 +171,7 @@ func TestBufferFailureFailsOrder(t *testing.T) {
 	inv := hostinventory.HostInventory{Facts: hostinventory.HostFacts{OS: "linux"}}
 	r := newRunner(t, api, []fleetclient.Order{{ID: "o1", Capability: "scan.host"}}, okCollect(inv))
 	// Pre-seed a credential so enrolment is skipped and we reach the buffering step.
-	if err := r.persist(credential{AgentID: "a1", Token: "secret"}, []byte("KEY")); err != nil {
+	if err := r.store.Persist(fleetclient.Credential{AgentID: "a1", Token: "secret"}, []byte("KEY")); err != nil {
 		t.Fatal(err)
 	}
 	// Make ONLY the inventory-file write fail: create a directory exactly where the buffer file goes,
@@ -186,21 +187,6 @@ func TestBufferFailureFailsOrder(t *testing.T) {
 	}
 	if !strings.Contains(api.results[0].reason, "buffer") {
 		t.Fatalf("reason must indicate a buffer failure, got %q", api.results[0].reason)
-	}
-}
-
-func TestControlPlaneURLValidation(t *testing.T) {
-	ok := []string{"https://cp.example.com", "https://cp.example.com:8443/base", "http://localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080"}
-	for _, u := range ok {
-		if err := validateControlPlaneURL(u); err != nil {
-			t.Errorf("%q should be accepted: %v", u, err)
-		}
-	}
-	bad := []string{"http://cp.example.com", "http://10.0.0.5:8080", "ftp://cp.example.com", "ws://localhost"}
-	for _, u := range bad {
-		if err := validateControlPlaneURL(u); err == nil {
-			t.Errorf("%q should be rejected (cleartext/unsupported scheme)", u)
-		}
 	}
 }
 
