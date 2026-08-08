@@ -110,6 +110,7 @@ import (
 	exploitationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/exploitation"
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
+	clusterinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/clusterinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
@@ -1042,13 +1043,15 @@ func main() {
 		router.SetWriteupDrafts(writeupDraftSvc)                  // human sign-off HTTP routes (list/edit/accept/reject; PermReview + SoD + withEngTenant)
 		log.Info("writeup draft proposals ENABLED (agent proposes prose; a distinct human signs off)")
 	}
+	var assetSvc *assetuc.Service
 	if cfg.FleetAssetsEnabled {
 		svc, derr := assetuc.NewService(assetStore, auditLog, clock, ids)
 		if derr != nil {
 			log.Error("asset service init failed", "err", derr)
 			os.Exit(1)
 		}
-		router.SetAssets(svc)
+		assetSvc = svc
+		router.SetAssets(assetSvc)
 		log.Info("fleet asset model ENABLED (multi-tenant, Postgres RLS-enforced)")
 	}
 	if cfg.FleetEnabled {
@@ -1085,6 +1088,22 @@ func main() {
 		router.SetFleet(agentSvc, workSvc, clock.Now, cfg.FleetClientCertHeader)
 		router.SetFleetAdmin(agentSvc)
 		log.Info("fleet agent transport ENABLED (agent-auth plane; operator agent-admin routes)")
+
+		// Cluster snapshot ingest (#446): agents POST a collected cluster inventory which is persisted
+		// into the asset model. Gated by its own flag AND requires the asset model (persistence target).
+		if cfg.FleetClusterIngestEnabled {
+			if assetSvc == nil {
+				log.Error("SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED requires the fleet asset model – set SYNAPSE_FLEET_ASSETS_ENABLED")
+				os.Exit(1)
+			}
+			ciSvc, cierr := clusterinventoryuc.NewService(assetSvc, auditLog, clock)
+			if cierr != nil {
+				log.Error("cluster inventory ingest init failed", "err", cierr)
+				os.Exit(1)
+			}
+			router.SetFleetClusterInventory(ciSvc)
+			log.Info("fleet cluster inventory ingest ENABLED (agents persist snapshots into the asset model)")
+		}
 	}
 	// deterministic Tier-2 reachability proof in the scan pipeline (opt-in). It mints reachability
 	// judgments, so it requires the judgment lifecycle. The govulncheck builder shares the SCA sandbox when

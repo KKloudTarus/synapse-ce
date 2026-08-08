@@ -11,48 +11,53 @@ import (
 
 // Snapshot is the vendor-neutral view of a cluster the infrastructure informer produces and this
 // package maps. No Kubernetes type appears here — that is the whole point of the boundary.
+//
+// The json tags are the explicit wire contract shared by the agent (which encodes a Snapshot) and the
+// control-plane ingest endpoint (which decodes it): the tag, not the Go field name, is the API, so a
+// field rename never silently changes the wire format, and the keys stay snake_case like the rest of
+// the fleet transport.
 type Snapshot struct {
-	Cluster    string      // cluster identity; part of every non-image asset key (multi-cluster)
-	InScope    []string    // namespaces in scope; empty means every namespace is in scope
-	Namespaces []Namespace // observed namespaces (both in and out of scope)
+	Cluster    string      `json:"cluster"`              // cluster identity; part of every non-image asset key
+	InScope    []string    `json:"in_scope,omitempty"`   // namespaces in scope; empty means all in scope
+	Namespaces []Namespace `json:"namespaces,omitempty"` // observed namespaces (both in and out of scope)
 }
 
 // Namespace is one observed namespace and its contents.
 type Namespace struct {
-	Name             string
-	HasNetworkPolicy bool // whether any NetworkPolicy exists in the namespace (exposure posture)
-	Workloads        []Workload
-	Exposures        []Exposure
-	ServiceAccounts  []string // service account names declared in the namespace
+	Name             string     `json:"name"`
+	HasNetworkPolicy bool       `json:"has_network_policy"` // any NetworkPolicy present (exposure posture)
+	Workloads        []Workload `json:"workloads,omitempty"`
+	Exposures        []Exposure `json:"exposures,omitempty"`
+	ServiceAccounts  []string   `json:"service_accounts,omitempty"` // SA names declared in the namespace
 }
 
 // Workload is a controller (Deployment/StatefulSet/DaemonSet/...) and its containers.
 type Workload struct {
-	Kind           string // controller kind
-	Name           string
-	ServiceAccount string // service account the pods run as; empty means "default"
-	Containers     []Container
+	Kind           string      `json:"kind"` // controller kind
+	Name           string      `json:"name"`
+	ServiceAccount string      `json:"service_account,omitempty"` // pods' SA; empty means "default"
+	Containers     []Container `json:"containers,omitempty"`
 }
 
 // Container is one running container, with the resolved image digest when known.
 type Container struct {
-	Name   string
-	Image  string // image reference as declared (may be a mutable tag)
-	Digest string // resolved image digest; empty means unresolved
+	Name   string `json:"name"`
+	Image  string `json:"image"`            // image reference as declared (may be a mutable tag)
+	Digest string `json:"digest,omitempty"` // resolved image digest; empty means unresolved
 }
 
 // Exposure is a Service or Ingress and the workloads it fronts.
 type Exposure struct {
-	Name    string
-	Type    string   // ClusterIP / NodePort / LoadBalancer / Ingress
-	Hosts   []string // ingress hosts, when any
-	Targets []Target // workloads this exposure fronts
+	Name    string   `json:"name"`
+	Type    string   `json:"type"`              // ClusterIP / NodePort / LoadBalancer / Ingress
+	Hosts   []string `json:"hosts,omitempty"`   // ingress hosts, when any
+	Targets []Target `json:"targets,omitempty"` // workloads this exposure fronts
 }
 
 // Target references the workload an exposure fronts, by controller kind + name (same namespace).
 type Target struct {
-	Kind string
-	Name string
+	Kind string `json:"kind"`
+	Name string `json:"name"`
 }
 
 // Validate reports whether the snapshot can be mapped: cluster identity is mandatory because it is
@@ -293,12 +298,23 @@ func scopeSet(in []string) map[string]bool {
 	return s
 }
 
+// joinKey builds a '/'-separated asset key. Each segment is escaped so the join is INJECTIVE: a
+// crafted name containing '/' (or '%') cannot collide with a different tuple. Real Kubernetes names
+// are DNS-1123 (no '/' or '%'), so escaping is a no-op for legitimate input and keys are unchanged;
+// it only defends against an agent that reports a malformed name within its own tenant.
 func joinKey(parts ...string) string {
 	clean := make([]string, 0, len(parts))
 	for _, p := range parts {
-		clean = append(clean, strings.TrimSpace(p))
+		clean = append(clean, escapeSegment(strings.TrimSpace(p)))
 	}
 	return strings.Join(clean, "/")
+}
+
+// escapeSegment percent-escapes '%' then '/' so no segment can introduce or forge a separator. '%'
+// must be escaped first to keep the mapping reversible/injective.
+func escapeSegment(s string) string {
+	s = strings.ReplaceAll(s, "%", "%25")
+	return strings.ReplaceAll(s, "/", "%2F")
 }
 
 func workloadLabel(namespace, kind, name string) string { return joinKey(namespace, kind, name) }

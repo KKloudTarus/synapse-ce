@@ -279,6 +279,20 @@ func TestGapsAreDeduplicated(t *testing.T) {
 	}
 }
 
+func TestJoinKeyIsInjectiveAgainstCraftedSeparators(t *testing.T) {
+	// A '/' (or '%') in a segment must not let one tuple forge another's key.
+	if joinKey("a/b", "c") == joinKey("a", "b/c") {
+		t.Fatal("joinKey must escape '/' so segments cannot be re-partitioned into a colliding key")
+	}
+	if joinKey("a%2Fb", "c") == joinKey("a", "b", "c") {
+		t.Fatal("a literal '%2F' must not collide with an escaped '/'")
+	}
+	// Legitimate DNS-1123 names (no '/' or '%') are unchanged.
+	if joinKey("prod-eu", "payments", "Deployment", "api") != "prod-eu/payments/Deployment/api" {
+		t.Fatalf("normal names must be unescaped, got %q", joinKey("prod-eu", "payments", "Deployment", "api"))
+	}
+}
+
 func TestGapKindValid(t *testing.T) {
 	for _, g := range []GapKind{GapUnscannedDigest, GapUnresolvedDigest, GapOutOfScopeNamespace} {
 		if !g.Valid() {
