@@ -14,9 +14,11 @@ import (
 	"sync"
 	"time"
 
+	dci "github.com/KKloudTarus/synapse-ce/internal/domain/clusterinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
+	clusterinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/clusterinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 )
 
@@ -25,10 +27,12 @@ import (
 const FleetProtoVersion = "1"
 
 const (
-	fleetBodyCap      = 1 << 20 // 1 MiB agent request cap
-	fleetMaxClaim     = 20      // maximum work orders per claim
-	fleetRatePerMin   = 120     // per-agent requests per minute (post-auth)
-	fleetIPRatePerMin = 60      // per-client-IP requests per minute (pre-auth: enrol + failed auth)
+	fleetBodyCap      = 1 << 20  // 1 MiB agent request cap (enrol/heartbeat/claim/result)
+	fleetInventoryCap = 16 << 20 // 16 MiB cap for an inventory snapshot — generous for a large cluster
+	//                             (replicas dedupe to controllers) while bounding decode cost per request
+	fleetMaxClaim     = 20  // maximum work orders per claim
+	fleetRatePerMin   = 120 // per-agent requests per minute (post-auth)
+	fleetIPRatePerMin = 60  // per-client-IP requests per minute (pre-auth: enrol + failed auth)
 )
 
 // fleetAgentService is the narrow view of fleet agent identity the transport needs.
@@ -46,9 +50,16 @@ type fleetWorkService interface {
 	GetByID(ctx context.Context, tenantID, id shared.ID) (*workorder.WorkOrder, error)
 }
 
+// fleetClusterInventory persists a Kubernetes cluster snapshot an agent reports (#446). The
+// cluster-inventory use case implements it; nil means the ingest route is not served.
+type fleetClusterInventory interface {
+	Sync(ctx context.Context, actor string, in clusterinventoryuc.SyncInput) (*clusterinventoryuc.SyncResult, error)
+}
+
 type fleetRouter struct {
 	agents           fleetAgentService
 	work             fleetWorkService
+	clusterInv       fleetClusterInventory // optional; nil ⇒ cluster inventory ingest is not served
 	log              *slog.Logger
 	agentLim         *keyedLimiter // post-auth, keyed by agent id
 	ipLim            *keyedLimiter // pre-auth, keyed by client IP (throttles enrol + failed auth)
@@ -114,6 +125,14 @@ type fleetAdminService interface {
 
 // SetFleetAdmin wires the operator agent-admin routes (mint enrolment token, list, revoke).
 func (rt *Router) SetFleetAdmin(s fleetAdminService) { rt.fleetAdmin = s }
+
+// SetFleetClusterInventory wires the cluster snapshot ingest use case onto the agent transport plane.
+// It must be called after SetFleet; a nil fleet (transport disabled) makes it a no-op.
+func (rt *Router) SetFleetClusterInventory(s fleetClusterInventory) {
+	if rt.fleet != nil {
+		rt.fleet.clusterInv = s
+	}
+}
 
 const defaultEnrolTTL = 15 * time.Minute
 
@@ -205,6 +224,7 @@ func (f *fleetRouter) handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/fleet/work/claim", f.entry(f.authed(f.claim)))
 	mux.HandleFunc("POST /api/v1/fleet/work/{id}/progress", f.entry(f.authed(f.progress)))
 	mux.HandleFunc("POST /api/v1/fleet/work/{id}/result", f.entry(f.authed(f.result)))
+	mux.HandleFunc("POST /api/v1/fleet/inventory/cluster", f.entry(f.authed(f.clusterInventory)))
 	return mux
 }
 
@@ -384,6 +404,43 @@ func (f *fleetRouter) result(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.applyTransition(w, r, agent, id, to, req.Reason)
+}
+
+// clusterInventory ingests a Kubernetes cluster snapshot the agent collected and persists it into the
+// asset model via the cluster-inventory use case. The tenant and actor come from the authenticated
+// agent (never the request body), and provenance is the agent id — stable across resyncs, so the
+// persisted edge set converges instead of churning. The coverage gaps are returned so a partial
+// inventory is visible, never silently treated as clean.
+func (f *fleetRouter) clusterInventory(w http.ResponseWriter, r *http.Request) {
+	if f.clusterInv == nil {
+		writeJSON(w, http.StatusNotFound, errorBody{Error: "cluster inventory ingest not enabled"})
+		return
+	}
+	agent, ok := agentFrom(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, errorBody{Error: "unauthenticated"})
+		return
+	}
+	var snap dci.Snapshot
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, fleetInventoryCap)).Decode(&snap); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid cluster snapshot body"})
+		return
+	}
+	res, err := f.clusterInv.Sync(r.Context(), agent.ID.String(), clusterinventoryuc.SyncInput{
+		TenantID: agent.TenantID,
+		Snapshot: snap,
+		// Provenance is the agent id: stable across resyncs while one agent owns a cluster, so edges
+		// converge (no churn). A re-enrolled/replacement agent (new id) re-reports edges under the new
+		// provenance until the old set ages out — an accepted tradeoff, documented on SyncInput.
+		Provenance: agent.ID,
+	})
+	if err != nil {
+		writeError(w, f.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{
+		"assets": res.Assets, "edges": res.Edges, "coverage_gaps": len(res.Gaps),
+	})
 }
 
 func (f *fleetRouter) transitionTo(w http.ResponseWriter, r *http.Request, to workorder.State, reason string) {
