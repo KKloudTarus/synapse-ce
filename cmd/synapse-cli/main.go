@@ -1339,9 +1339,6 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 			if cfg.VerifierModel != "" && cfg.VerifierModel != cfg.FPTriageModel {
 				if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
 					coord.WithVerifier(vllm, cfg.VerifierModel)
-					if coord.VerifierModel() == "" {
-						fmt.Fprintf(os.Stderr, "synapse-cli: verifier model %q aliases the proposer after canonicalization; AI triage remains advisory-only\n", cfg.VerifierModel)
-					}
 				} else {
 					fmt.Fprintf(os.Stderr, "synapse-cli: verifier model %q unavailable; AI triage remains advisory-only: %v\n", cfg.VerifierModel, verr)
 				}
