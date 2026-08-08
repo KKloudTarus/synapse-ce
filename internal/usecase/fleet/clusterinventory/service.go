@@ -38,9 +38,10 @@ var _ AssetWriter = (*assetuc.Service)(nil)
 
 // Service maps and persists a cluster inventory.
 type Service struct {
-	assets AssetWriter
-	audit  ports.AuditLogger
-	clock  ports.Clock
+	assets  AssetWriter
+	audit   ports.AuditLogger
+	clock   ports.Clock
+	scanned ports.ScannedImageStore // optional; when set, supplies the scanned-digest set for coverage
 }
 
 // NewService validates its dependencies and constructs the service.
@@ -57,13 +58,18 @@ func NewService(assets AssetWriter, audit ports.AuditLogger, clock ports.Clock) 
 	return &Service{assets: assets, audit: audit, clock: clock}, nil
 }
 
+// SetScannedImages wires the scanned-image digest source (#446). When set, a Sync whose SyncInput
+// does not carry an explicit ScannedDigests set looks up the tenant's scanned digests here, so an
+// unscanned running digest is an accurate coverage gap rather than every digest reported unscanned.
+func (s *Service) SetScannedImages(store ports.ScannedImageStore) { s.scanned = store }
+
 // SyncInput describes one observation of a cluster.
 type SyncInput struct {
 	TenantID shared.ID
 	Snapshot dci.Snapshot
 	// ScannedDigests is the set of image digests the engine has already scanned. A running digest
-	// absent from it becomes a coverage gap (never omitted). The informer/caller supplies it; a
-	// dedicated scanned-image lookup port is a follow-up.
+	// absent from it becomes a coverage gap (never omitted). When nil, the service looks it up from the
+	// wired ScannedImageStore (SetScannedImages); a caller may still pass an explicit set to override.
 	ScannedDigests map[string]bool
 	// Provenance identifies the observation source that produced the assets/edges. It is required (an
 	// unattributable edge cannot be trusted by attack-path traversal) and MUST be STABLE for a given
@@ -97,7 +103,19 @@ func (s *Service) Sync(ctx context.Context, actor string, in SyncInput) (*SyncRe
 		return nil, fmt.Errorf("cluster inventory: invalid snapshot: %w", err)
 	}
 
-	inv := dci.Map(in.Snapshot, in.ScannedDigests)
+	// Resolve the scanned-digest set: an explicit set in the input wins; otherwise consult the store
+	// (when wired). A lookup failure is a hard error rather than a silent fall-back to "nothing
+	// scanned" — that would over-report unscanned gaps and mask the real coverage.
+	scanned := in.ScannedDigests
+	if scanned == nil && s.scanned != nil {
+		var err error
+		scanned, err = s.scanned.ScannedDigests(ctx, in.TenantID)
+		if err != nil {
+			return nil, fmt.Errorf("cluster inventory: scanned digests: %w", err)
+		}
+	}
+
+	inv := dci.Map(in.Snapshot, scanned)
 
 	// Upsert every observed asset first, recording the resolved id per natural-key ref so edges can be
 	// wired. UpsertAsset resolves the stable id by (tenant, kind, key).

@@ -2,6 +2,7 @@ package clusterinventory
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -229,5 +230,64 @@ func TestNewServiceValidatesDeps(t *testing.T) {
 	}
 	if _, err := NewService(newFakeWriter(), &fakeAudit{}, nil); err == nil {
 		t.Error("nil clock must be rejected")
+	}
+}
+
+// fakeScanned is a scanned-image source for testing the coverage correlation.
+type fakeScanned struct {
+	set map[string]bool
+	err error
+}
+
+func (f fakeScanned) MarkScanned(context.Context, shared.ID, string, time.Time) error { return nil }
+func (f fakeScanned) ScannedDigests(context.Context, shared.ID) (map[string]bool, error) {
+	return f.set, f.err
+}
+
+func TestSyncUsesScannedImageSourceForCoverage(t *testing.T) {
+	// With the running digest sha256:aaa marked scanned in the store, it must NOT be an unscanned gap.
+	w, a := newFakeWriter(), &fakeAudit{}
+	s := newService(t, w, a)
+	s.SetScannedImages(fakeScanned{set: map[string]bool{"sha256:aaa": true}})
+
+	res, err := s.Sync(context.Background(), "agent-1", SyncInput{
+		TenantID: "tenant-1", Snapshot: sample(), Provenance: "sync-1",
+		// ScannedDigests deliberately nil -> the service consults the store.
+	})
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	for _, g := range res.Gaps {
+		if g.Kind == dci.GapUnscannedDigest {
+			t.Fatalf("a scanned digest must not be an unscanned gap: %+v", g)
+		}
+	}
+}
+
+func TestSyncScannedSourceErrorFailsLoud(t *testing.T) {
+	// A store lookup failure must not silently fall back to "nothing scanned" (which would over-report
+	// gaps and mask coverage).
+	s := newService(t, newFakeWriter(), &fakeAudit{})
+	s.SetScannedImages(fakeScanned{err: errors.New("db down")})
+	if _, err := s.Sync(context.Background(), "a", SyncInput{TenantID: "t", Snapshot: sample(), Provenance: "p"}); err == nil {
+		t.Fatal("a scanned-digest lookup failure must fail the sync, not silently proceed")
+	}
+}
+
+func TestSyncExplicitScannedDigestsOverrideStore(t *testing.T) {
+	// An explicit set in the input wins over the store.
+	s := newService(t, newFakeWriter(), &fakeAudit{})
+	s.SetScannedImages(fakeScanned{err: errors.New("must not be consulted")})
+	res, err := s.Sync(context.Background(), "a", SyncInput{
+		TenantID: "t", Snapshot: sample(), Provenance: "p",
+		ScannedDigests: map[string]bool{"sha256:aaa": true},
+	})
+	if err != nil {
+		t.Fatalf("explicit ScannedDigests must bypass the store: %v", err)
+	}
+	for _, g := range res.Gaps {
+		if g.Kind == dci.GapUnscannedDigest {
+			t.Fatalf("explicit scanned set must suppress the unscanned gap: %+v", g)
+		}
 	}
 }

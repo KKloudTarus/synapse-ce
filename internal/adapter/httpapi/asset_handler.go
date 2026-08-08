@@ -31,8 +31,9 @@ const assetBodyCap = 64 << 10
 // string, because under the 0057 policy the empty string is DENY, not a tenant. Mapping the empty
 // default to a real, non-empty tenant here is what lets the fleet asset model work in a
 // single-tenant deployment while still being isolated at the database. Migration 0058 seeds this
-// tenant row so the fleet_assets FK to tenants is satisfied.
-const DefaultFleetTenant shared.ID = "default"
+// tenant row so the fleet_assets FK to tenants is satisfied. It aliases shared.DefaultTenant (the
+// inner-layer canonical value) so the two cannot drift.
+const DefaultFleetTenant = shared.DefaultTenant
 
 // fleetTenant resolves the effective tenant for fleet asset operations: the request principal's
 // tenant, or DefaultFleetTenant when that is the empty-string default tenant.
