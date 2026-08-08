@@ -1104,3 +1104,58 @@ export interface ProjectCodeDiffResponse {
   capabilities: ProjectCodeDiffCapabilities
   diff: ProjectCodeDiffView
 }
+
+// ---- Fleet coverage & agent health (#413) ----
+
+export type FleetAgentHealth = 'healthy' | 'stale' | 'revoked'
+
+// The full verdict set the read model can emit. Order matters for the operator: unknown/stale/
+// refused/unauthorized/agent_missing are DISTINCT states, never collapsed into "covered".
+export type FleetVerdict =
+  | 'unauthorized'
+  | 'agent_missing'
+  | 'refused'
+  | 'never'
+  | 'stale'
+  | 'partial'
+  | 'covered'
+
+export interface FleetAgentRow {
+  id: string
+  name: string
+  platform: string
+  agentVersion: string
+  state: FleetAgentHealth
+  lastSeen: string
+  capabilities: string[]
+  currentWork: number
+}
+
+export interface FleetOrderBrief {
+  id: string
+  capability: string
+  assetId: string
+  state: string
+  updatedAt: string
+}
+
+export interface FleetAgentDetail {
+  agent: FleetAgentRow
+  recentWork: FleetOrderBrief[]
+}
+
+export interface FleetCoverageRow {
+  assetId: string
+  capability: string
+  verdict: FleetVerdict
+  detail: string
+  lastRun: string
+  agentId: string
+}
+
+export interface FleetCoverageSummary {
+  agentsByState: Record<string, number>
+  rowsByVerdict: Record<string, number>
+  oldestPerCapability: Record<string, string>
+  assetsWithoutAgent: number
+}
