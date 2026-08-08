@@ -184,6 +184,41 @@ func TestCWETokensCanonicalizeLeadingZerosWithoutSubstringMatching(t *testing.T)
 	}
 }
 
+func TestHumanReviewFloorFailsClosedOnEmbeddedSeparatorsAndMalformedCWE(t *testing.T) {
+	// A dangerous CWE spelled with an embedded separator/punctuation, or a malformed CWE token, must
+	// still be held for human review — the tokenizer's separators are as wide as the canonicalizer's
+	// tolerance, and any unparseable CWE-* token fails closed.
+	protected := []struct {
+		name, cwe string
+	}{
+		{"colon-space suffix", "CWE-79: Cross-site Scripting"},
+		{"trailing dot", "CWE-89."},
+		{"parenthesized", "CWE-798 (hard-coded credentials)"},
+		{"nbsp separator", "CWE-89 notes"},
+		{"form-feed separator", "CWE-89\fnotes"},
+		{"zero-padded with suffix", "CWE-0022: path traversal"},
+		{"malformed non-digit suffix", "CWE-79A"},
+		{"bare prefix", "CWE-"},
+	}
+	for _, tc := range protected {
+		item := finding.Finding{Kind: finding.KindSAST, Severity: shared.SeverityMedium, CWE: tc.cwe}
+		if got := humanReviewFloor(item); got != aiPolicyDangerousCWEFloor {
+			t.Errorf("%s (%q): floor = %q, want %q (must fail closed)", tc.name, tc.cwe, got, aiPolicyDangerousCWEFloor)
+		}
+	}
+
+	// A genuinely benign, well-formed, non-protected CWE still clears the CWE floor (no over-blocking).
+	benign := finding.Finding{Kind: finding.KindSAST, Severity: shared.SeverityMedium, CWE: "CWE-327"}
+	if got := humanReviewFloor(benign); got != "" {
+		t.Errorf("well-formed non-protected CWE must not trip the floor, got %q", got)
+	}
+
+	// Credential CWEs are detected even with embedded punctuation.
+	if !hasCredentialCWE("CWE-798: hard-coded credentials") {
+		t.Error("credential CWE with a colon suffix must still be detected")
+	}
+}
+
 func TestApplyAIGatePolicyRequiresEvidenceLedger(t *testing.T) {
 	result := &ScanResult{
 		Findings: []finding.Finding{{DedupKey: "safe", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"}},
