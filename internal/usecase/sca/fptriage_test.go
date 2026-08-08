@@ -159,6 +159,31 @@ func TestApplyAIGatePolicyRejectsForgedVerifiedFlag(t *testing.T) {
 	}
 }
 
+func TestCWETokensCanonicalizeLeadingZerosWithoutSubstringMatching(t *testing.T) {
+	got := cweTokens(" cwe-0079, CWE-0890 / CWE-0798 | custom-token ")
+	want := []string{"CWE-79", "CWE-890", "CWE-798", "CUSTOM-TOKEN"}
+	if len(got) != len(want) {
+		t.Fatalf("cweTokens = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("cweTokens[%d] = %q, want %q (%v)", i, got[i], want[i], got)
+		}
+	}
+
+	protected := finding.Finding{Kind: finding.KindSAST, Severity: shared.SeverityMedium, CWE: "CWE-0079"}
+	if got := humanReviewFloor(protected); got != aiPolicyDangerousCWEFloor {
+		t.Fatalf("zero-padded protected CWE bypassed human-review floor: %q", got)
+	}
+	nonCollision := finding.Finding{Kind: finding.KindSAST, Severity: shared.SeverityMedium, CWE: "CWE-0890"}
+	if got := humanReviewFloor(nonCollision); got != "" {
+		t.Fatalf("CWE-0890 must canonicalize to exact CWE-890, not collide with CWE-89: %q", got)
+	}
+	if !hasCredentialCWE("CWE-0798") {
+		t.Fatal("zero-padded credential CWE must remain excluded from LLM candidate selection")
+	}
+}
+
 func TestApplyAIGatePolicyRequiresEvidenceLedger(t *testing.T) {
 	result := &ScanResult{
 		Findings: []finding.Finding{{DedupKey: "safe", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"}},

@@ -141,9 +141,37 @@ func humanReviewFloor(item finding.Finding) string {
 }
 
 func cweTokens(value string) []string {
-	return strings.FieldsFunc(strings.ToUpper(value), func(r rune) bool {
+	tokens := strings.FieldsFunc(strings.ToUpper(value), func(r rune) bool {
 		return r == ',' || r == ';' || r == '|' || r == '/' || r == ' ' || r == '\t' || r == '\n'
 	})
+	for i := range tokens {
+		tokens[i] = canonicalCWEToken(tokens[i])
+	}
+	return tokens
+}
+
+// canonicalCWEToken normalizes numeric CWE aliases without weakening exact-token matching. Synapse's
+// rule catalog emits canonical IDs, but imported findings may spell CWE-79 as CWE-0079. Malformed and
+// non-CWE tokens are left intact so normalization never guesses at an identifier.
+func canonicalCWEToken(token string) string {
+	const prefix = "CWE-"
+	if !strings.HasPrefix(token, prefix) {
+		return token
+	}
+	digits := strings.TrimPrefix(token, prefix)
+	if digits == "" {
+		return token
+	}
+	for _, r := range digits {
+		if r < '0' || r > '9' {
+			return token
+		}
+	}
+	digits = strings.TrimLeft(digits, "0")
+	if digits == "" {
+		digits = "0"
+	}
+	return prefix + digits
 }
 
 func hasCredentialCWE(value string) bool {
