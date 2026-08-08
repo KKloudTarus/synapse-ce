@@ -20,6 +20,8 @@ type fakeAPI struct {
 	results     []result
 	progressed  []string
 	heartbeats  int
+	sent        int
+	sendErr     error
 }
 
 type result struct{ orderID, status, reason string }
@@ -42,6 +44,10 @@ func (f *fakeAPI) Progress(_ context.Context, _, orderID string) error {
 func (f *fakeAPI) SubmitResult(_ context.Context, _, orderID, status, reason string) error {
 	f.results = append(f.results, result{orderID, status, reason})
 	return nil
+}
+func (f *fakeAPI) SendHostInventory(_ context.Context, _ string, _ any) error {
+	f.sent++
+	return f.sendErr
 }
 
 func newRunner(t *testing.T, api fleetAPI, orders []fleetclient.Order, collect func(context.Context, string) (hostinventory.HostInventory, error)) *runner {
@@ -85,6 +91,10 @@ func TestFirstRunEnrolsAndPersists(t *testing.T) {
 	// The order was progressed and reported succeeded with a coverage-honest summary.
 	if len(api.results) != 1 || api.results[0].status != "succeeded" {
 		t.Fatalf("expected one succeeded result, got %+v", api.results)
+	}
+	// The inventory was reported to the control plane (persisted into the asset model).
+	if api.sent != 1 {
+		t.Fatalf("the collected inventory must be reported to the control plane, sent=%d", api.sent)
 	}
 	if len(api.progressed) != 1 {
 		t.Fatalf("order should be moved to running, got %v", api.progressed)
@@ -147,6 +157,21 @@ func TestNoCredentialNoTokenErrors(t *testing.T) {
 	r.cfg.enrolToken = ""
 	if err := r.run(context.Background()); err == nil {
 		t.Fatalf("run with neither credential nor enrol token must error")
+	}
+}
+
+func TestReportFailureFailsOrder(t *testing.T) {
+	api := &fakeAPI{enrolResp: fleetclient.EnrolResponse{AgentID: "a1", Token: "secret"}, sendErr: errors.New("503")}
+	inv := hostinventory.HostInventory{Facts: hostinventory.HostFacts{OS: "linux"}}
+	r := newRunner(t, api, []fleetclient.Order{{ID: "o1", Capability: "scan.host"}}, okCollect(inv))
+	if err := r.run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(api.results) != 1 || api.results[0].status != "failed" {
+		t.Fatalf("a failed report to the control plane must fail the order, got %+v", api.results)
+	}
+	if !strings.Contains(api.results[0].reason, "report inventory") {
+		t.Fatalf("reason must indicate a reporting failure, got %q", api.results[0].reason)
 	}
 }
 

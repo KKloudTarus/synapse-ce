@@ -50,30 +50,31 @@ func (k CoverageKind) Degraded() bool {
 	return k == CoverageUnreadableDB
 }
 
-// CoverageIssue is one reason the inventory is not fully trustworthy.
+// CoverageIssue is one reason the inventory is not fully trustworthy. The json tags are the wire
+// contract shared by the agent (encoder) and the control-plane ingest endpoint (decoder).
 type CoverageIssue struct {
-	Kind   CoverageKind
-	Detail string
+	Kind   CoverageKind `json:"kind"`
+	Detail string       `json:"detail,omitempty"`
 }
 
 // HostFacts identify the host and are the substrate for the asset inventory (#431).
 type HostFacts struct {
-	Hostname      string
-	OS            string // e.g. linux
-	OSVersion     string // from /etc/os-release
-	Kernel        string
-	Arch          string
-	MachineID     string // stable per-host identifier
-	CloudInstance string // cloud instance id when available; empty otherwise
+	Hostname      string `json:"hostname,omitempty"`
+	OS            string `json:"os,omitempty"`         // e.g. linux
+	OSVersion     string `json:"os_version,omitempty"` // from /etc/os-release
+	Kernel        string `json:"kernel,omitempty"`
+	Arch          string `json:"arch,omitempty"`
+	MachineID     string `json:"machine_id,omitempty"`     // stable per-host identifier
+	CloudInstance string `json:"cloud_instance,omitempty"` // cloud instance id when available; empty otherwise
 }
 
 // HostInventory is a point-in-time host assessment. Complete is derived from Coverage: it is true
 // only when there are no coverage issues.
 type HostInventory struct {
-	Facts    HostFacts
-	Packages []sbom.Component
-	Coverage []CoverageIssue
-	Complete bool
+	Facts    HostFacts        `json:"facts"`
+	Packages []sbom.Component `json:"packages,omitempty"`
+	Coverage []CoverageIssue  `json:"coverage,omitempty"`
+	Complete bool             `json:"complete"`
 }
 
 // Normalize deterministically orders packages and coverage and derives Complete. It never mutates

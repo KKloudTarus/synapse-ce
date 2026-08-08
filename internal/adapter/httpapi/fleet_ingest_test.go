@@ -8,10 +8,12 @@ import (
 	"time"
 
 	dci "github.com/KKloudTarus/synapse-ce/internal/domain/clusterinventory"
+	dhi "github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/worksign"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/assetuc"
 	clusterinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/clusterinventory"
+	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
 )
@@ -41,10 +43,15 @@ func setupFleetWithIngest(t *testing.T) (http.Handler, *fleetagentuc.Service, *m
 	if err != nil {
 		t.Fatalf("cluster inventory svc: %v", err)
 	}
+	hiSvc, err := hostinventoryuc.NewService(assetSvc, ftAudit{}, ftClock{})
+	if err != nil {
+		t.Fatalf("host inventory svc: %v", err)
+	}
 	rt := &Router{log: discardLog()}
 	rt.SetFleet(agentSvc, workSvc, func() time.Time { return time.Now().UTC() }, "")
 	rt.SetFleetAdmin(agentSvc)
 	rt.SetFleetClusterInventory(ciSvc)
+	rt.SetFleetHostInventory(hiSvc)
 	return rt.fleet.handler(), agentSvc, store
 }
 
@@ -171,5 +178,52 @@ func TestClusterInventoryIngestNotEnabled(t *testing.T) {
 	w := fleetCall(h, http.MethodPost, "/api/v1/fleet/inventory/cluster", token, sampleClusterSnapshot(), true)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("ingest without the use case wired must be 404, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+func sampleHostInventory() dhi.HostInventory {
+	return dhi.HostInventory{
+		Facts:    dhi.HostFacts{Hostname: "web01", OS: "linux", OSVersion: "12", MachineID: "abc123"},
+		Complete: true,
+	}
+}
+
+func TestHostInventoryIngestPersists(t *testing.T) {
+	h, agentSvc, store := setupFleetWithIngest(t)
+	token := enrolAgentToken(t, h, agentSvc)
+
+	w := fleetCall(h, http.MethodPost, "/api/v1/fleet/inventory/host", token, sampleHostInventory(), true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("host ingest should be 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	assets, err := store.ListAssets(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("list assets: %v", err)
+	}
+	var haveHost bool
+	for _, a := range assets {
+		if a.Kind == "host" && a.Key == "machine-id/abc123" {
+			haveHost = true
+		}
+	}
+	if !haveHost {
+		t.Fatalf("expected the host asset persisted under tenant default, got %d assets", len(assets))
+	}
+}
+
+func TestHostInventoryIngestRequiresAuth(t *testing.T) {
+	h, _, _ := setupFleetWithIngest(t)
+	w := fleetCall(h, http.MethodPost, "/api/v1/fleet/inventory/host", "", sampleHostInventory(), true)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated host ingest must be 401, got %d", w.Code)
+	}
+}
+
+func TestHostInventoryIngestNotEnabled(t *testing.T) {
+	h, agentSvc, _ := setupFleet(t)
+	token := enrolAgentToken(t, h, agentSvc)
+	w := fleetCall(h, http.MethodPost, "/api/v1/fleet/inventory/host", token, sampleHostInventory(), true)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("host ingest without the use case wired must be 404, got %d", w.Code)
 	}
 }

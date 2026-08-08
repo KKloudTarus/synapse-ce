@@ -111,6 +111,7 @@ import (
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
 	clusterinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/clusterinventory"
+	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
@@ -1103,6 +1104,22 @@ func main() {
 			}
 			router.SetFleetClusterInventory(ciSvc)
 			log.Info("fleet cluster inventory ingest ENABLED (agents persist snapshots into the asset model)")
+		}
+
+		// VM host snapshot ingest (#446): agents POST a collected host inventory persisted as a
+		// Kind=host asset. Gated by its own flag AND requires the asset model.
+		if cfg.FleetHostIngestEnabled {
+			if assetSvc == nil {
+				log.Error("SYNAPSE_FLEET_HOST_INGEST_ENABLED requires the fleet asset model – set SYNAPSE_FLEET_ASSETS_ENABLED")
+				os.Exit(1)
+			}
+			hiSvc, hierr := hostinventoryuc.NewService(assetSvc, auditLog, clock)
+			if hierr != nil {
+				log.Error("host inventory ingest init failed", "err", hierr)
+				os.Exit(1)
+			}
+			router.SetFleetHostInventory(hiSvc)
+			log.Info("fleet host inventory ingest ENABLED (VM agents persist host inventories into the asset model)")
 		}
 	}
 	// deterministic Tier-2 reachability proof in the scan pipeline (opt-in). It mints reachability
