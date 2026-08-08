@@ -1,0 +1,52 @@
+name: K8s Integration (kind)
+
+# Runs the cluster-agent integration tests (#411) against a real Kubernetes API server provisioned
+# with kind. These tests are skipped in the normal Go CI job (they require SYNAPSE_K8S_INTEGRATION=1
+# and a reachable cluster); this workflow is where they actually run.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - "internal/infrastructure/k8sinv/**"
+      - "internal/domain/clusterinventory/**"
+      - "cmd/synapse-cluster-agent/**"
+      - "deploy/k8s/cluster-agent.yaml"
+      - ".github/workflows/k8s-integration.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  kind-integration:
+    name: cluster-agent (kind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: synapse-ci
+
+      - name: Apply read-only RBAC (the shipped ClusterRole)
+        run: |
+          kubectl create namespace synapse
+          kubectl apply -f deploy/k8s/cluster-agent.yaml
+          # The Deployment references a not-yet-published image; the integration tests exercise the
+          # RBAC via impersonation, so an ImagePullBackOff on that pod is expected and harmless.
+          kubectl -n synapse get serviceaccount synapse-cluster-agent
+          kubectl get clusterrole synapse-cluster-agent-readonly
+
+      - name: Run integration tests
+        env:
+          SYNAPSE_K8S_INTEGRATION: "1"
+        run: go test ./internal/infrastructure/k8sinv/... -run TestIntegration -v -count=1
