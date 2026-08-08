@@ -31,6 +31,21 @@ func idemKey(tenant shared.ID, idem string) string {
 	return tenant.String() + "|" + idem
 }
 
+// ListByTenant returns every work order for the tenant, ordered by id for determinism.
+func (s *WorkOrderStore) ListByTenant(_ context.Context, tenantID shared.ID) ([]*workorder.WorkOrder, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*workorder.WorkOrder
+	for _, wo := range s.byID {
+		if wo.TenantID == tenantID {
+			cp := *wo
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
 // Issue stores wo. It is idempotent by (tenant, idempotency key) and rejects a second live order
 // for the same (tenant, asset, capability, time bucket) with shared.ErrConflict.
 func (s *WorkOrderStore) Issue(_ context.Context, wo *workorder.WorkOrder) (*workorder.WorkOrder, error) {

@@ -4,10 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetcoverage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	projectdom "github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
@@ -19,6 +21,7 @@ import (
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
+	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
@@ -35,6 +38,37 @@ func (fakeJudgments) Verify(context.Context, string, shared.ID, shared.ID, int, 
 }
 func (fakeJudgments) Accept(context.Context, string, shared.ID, shared.ID, int) (judgment.Judgment, error) {
 	return judgment.Judgment{}, nil
+}
+
+// harnessCoverage is a tenant-aware coverageService: it holds one asset for tenantA only, so the
+// harness can prove a tenantB principal reads NOTHING of tenantA's fleet (the #413 isolation gate).
+type harnessCoverage struct{}
+
+func (harnessCoverage) Agents(_ context.Context, tenant shared.ID, _ fleetcoverage.AgentHealth) ([]coverageuc.AgentRow, error) {
+	if tenant == "tenantA" {
+		return []coverageuc.AgentRow{{ID: "ag1", Health: fleetcoverage.AgentHealthy}}, nil
+	}
+	return nil, nil
+}
+func (harnessCoverage) AgentDetail(_ context.Context, tenant, id shared.ID) (coverageuc.AgentRow, []coverageuc.OrderBrief, error) {
+	if tenant == "tenantA" && id == "ag1" {
+		return coverageuc.AgentRow{ID: "ag1"}, nil, nil
+	}
+	return coverageuc.AgentRow{}, nil, shared.ErrNotFound
+}
+func (harnessCoverage) Coverage(_ context.Context, tenant shared.ID) ([]coverageuc.CoverageRow, error) {
+	if tenant == "tenantA" {
+		return []coverageuc.CoverageRow{{AssetID: "asset-A", Capability: "scan.host", Verdict: fleetcoverage.VerdictCovered, AgentID: "ag1"}}, nil
+	}
+	return nil, nil
+}
+func (harnessCoverage) Summary(_ context.Context, tenant shared.ID) (coverageuc.Summary, error) {
+	rows, _ := harnessCoverage{}.Coverage(context.Background(), tenant)
+	sum := coverageuc.Summary{RowsByVerdict: map[fleetcoverage.Verdict]int{}}
+	for _, r := range rows {
+		sum.RowsByVerdict[r.Verdict]++
+	}
+	return sum, nil
 }
 
 type fakeRuntimeVerifier struct{}
@@ -145,6 +179,7 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetThreatModel(&fakeThreatModel{})     // register the threat-model ingest/read routes so the harness guards their gates
 	rt.SetWriteupDrafts(&fakeWriteupDrafts{}) // register the writeup-draft sign-off routes so the harness guards their SoD gates
 	rt.SetRules(&fakeRules{})                 // register rule catalog routes so the harness guards their gates
+	rt.SetFleetCoverage(harnessCoverage{})    // register #413 fleet-coverage routes so the harness guards their view/tenant gates
 	rt.EnableAgent(nil, nil, nil, nil, nil, 1, 8)
 	mux := rt.routes()
 
@@ -248,10 +283,35 @@ func TestHostileHarness(t *testing.T) {
 		{"machine may not get rule (view/SoD)", "agent", "tenantA", true, http.MethodGet, "/api/v1/rules/go:sql-injection", http.StatusForbidden},
 		{"readonly may list rules (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/rules", http.StatusOK},
 		{"readonly may get rule (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/rules/go:sql-injection", http.StatusOK},
+		// Fleet coverage (#413, PermView): machine roles denied; readonly may read; cross-tenant agent
+		// detail is 404 (never an existence-revealing 403). The cross-tenant LIST emptiness (a 200 that
+		// leaks nothing) is asserted on the body just below the table.
+		{"machine may not list fleet agents (view/SoD)", "agent", "tenantA", true, http.MethodGet, "/api/v1/fleet/agents", http.StatusForbidden},
+		{"machine may not list fleet coverage (view/SoD)", "agent", "tenantA", true, http.MethodGet, "/api/v1/fleet/coverage", http.StatusForbidden},
+		{"readonly may list fleet agents (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/fleet/agents", http.StatusOK},
+		{"readonly may read fleet coverage (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/fleet/coverage", http.StatusOK},
+		{"readonly may read fleet coverage summary (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/fleet/coverage/summary", http.StatusOK},
+		{"readonly may export fleet coverage (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/fleet/coverage/export", http.StatusOK},
+		{"same-tenant fleet agent detail → 200", "readonly", "tenantA", true, http.MethodGet, "/api/v1/fleet/agents/ag1", http.StatusOK},
+		{"cross-tenant fleet agent detail → 404", "readonly", "tenantB", true, http.MethodGet, "/api/v1/fleet/agents/ag1", http.StatusNotFound},
 	}
 	for _, c := range cases {
 		if got, body := send(c.role, c.tenant, c.method, c.path, c.authed); got != c.want {
 			t.Errorf("%s: %s %s (role=%q tenant=%q) → %d, body: %s, want %d", c.name, c.method, c.path, c.role, c.tenant, got, body, c.want)
+		}
+	}
+
+	// Cross-tenant fleet reads must return NOTHING, not merely a 200. tenantA's asset id must never
+	// appear in tenantB's coverage or agent list (the #413 no-cross-tenant-aggregate requirement).
+	for _, path := range []string{"/api/v1/fleet/coverage", "/api/v1/fleet/agents", "/api/v1/fleet/coverage/export"} {
+		if code, body := send("readonly", "tenantA", http.MethodGet, path, true); code != http.StatusOK || !strings.Contains(body, "asset-A") && !strings.Contains(body, "ag1") {
+			// sanity: tenantA genuinely sees its own data, so the emptiness below is meaningful.
+			t.Fatalf("tenantA must see its own fleet data at %s (code=%d body=%s)", path, code, body)
+		}
+		if code, body := send("readonly", "tenantB", http.MethodGet, path, true); code != http.StatusOK {
+			t.Errorf("cross-tenant %s should be an empty 200, got %d", path, code)
+		} else if strings.Contains(body, "asset-A") || strings.Contains(body, "ag1") {
+			t.Errorf("cross-tenant %s leaked tenantA data: %s", path, body)
 		}
 	}
 }

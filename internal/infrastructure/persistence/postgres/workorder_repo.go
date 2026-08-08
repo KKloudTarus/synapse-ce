@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -135,6 +136,31 @@ func (r *WorkOrderRepository) Claim(ctx context.Context, tenantID, agentID share
 	})
 	if err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// ListByTenant returns every work order for the tenant, ordered deterministically. Read-only, used by
+// the coverage projection (#413); routed through WithTenant so RLS scopes it to the tenant.
+func (r *WorkOrderRepository) ListByTenant(ctx context.Context, tenantID shared.ID) ([]*workorder.WorkOrder, error) {
+	var out []*workorder.WorkOrder
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, e := tx.Query(ctx, `SELECT `+workOrderCols+` FROM work_orders WHERE tenant_id=$1 ORDER BY id`, tenantID.String())
+		if e != nil {
+			return e
+		}
+		defer rows.Close()
+		for rows.Next() {
+			wo, e := scanWorkOrder(rows)
+			if e != nil {
+				return e
+			}
+			out = append(out, wo)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list work orders by tenant: %w", err)
 	}
 	return out, nil
 }

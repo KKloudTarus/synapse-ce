@@ -122,6 +122,28 @@ func TestWorkOrderRepository(t *testing.T) {
 	if _, err := repo.GetByID(ctx, "wt", "missing"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
+
+	// ListByTenant (coverage projection, #413): returns this tenant's orders and is tenant-scoped —
+	// a different tenant sees none of them (RLS + explicit tenant_id filter).
+	mine, err := repo.ListByTenant(ctx, "wt")
+	if err != nil {
+		t.Fatalf("list by tenant: %v", err)
+	}
+	if len(mine) == 0 {
+		t.Fatalf("ListByTenant(wt) must return the seeded orders, got 0")
+	}
+	for _, o := range mine {
+		if o.TenantID != "wt" {
+			t.Fatalf("ListByTenant leaked a foreign tenant's order: %q", o.TenantID)
+		}
+	}
+	other, err := repo.ListByTenant(ctx, "someone-else")
+	if err != nil {
+		t.Fatalf("list by other tenant: %v", err)
+	}
+	if len(other) != 0 {
+		t.Fatalf("ListByTenant must be tenant-scoped; foreign tenant saw %d orders", len(other))
+	}
 }
 
 // TestMigration0059 exercises the migration down and back up.
