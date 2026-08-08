@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,9 +70,21 @@ func (c *Client) Enrol(ctx context.Context, enrolToken string, req EnrolRequest)
 	return out, err
 }
 
-// Heartbeat reports liveness and current attributes.
-func (c *Client) Heartbeat(ctx context.Context, token string, req EnrolRequest) error {
-	return c.do(ctx, http.MethodPost, "/api/v1/fleet/heartbeat", token, req, nil)
+// HeartbeatResponse carries the control plane's version-skew signals (#412): its own version and the
+// minimum agent version it will serve. An agent uses these to update itself or to refuse running
+// against a control plane older than it requires.
+type HeartbeatResponse struct {
+	Proto                    string `json:"proto"`
+	ControlPlaneVersion      string `json:"control_plane_version"`
+	MinSupportedAgentVersion string `json:"min_supported_agent_version"`
+}
+
+// Heartbeat reports liveness and current attributes and returns the control plane's version-skew
+// signals.
+func (c *Client) Heartbeat(ctx context.Context, token string, req EnrolRequest) (HeartbeatResponse, error) {
+	var out HeartbeatResponse
+	err := c.do(ctx, http.MethodPost, "/api/v1/fleet/heartbeat", token, req, &out)
+	return out, err
 }
 
 // ClaimWork claims up to max orders addressed to this agent.
@@ -135,8 +148,9 @@ func (c *Client) do(ctx context.Context, method, path, token string, body, out a
 	}
 	if out != nil {
 		// Cap the decoded body: Timeout bounds time, not size, and the control plane is not fully
-		// trusted by the agent. 8 MiB is far above any legitimate claim/enrol response.
-		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(out); err != nil {
+		// trusted by the agent. 8 MiB is far above any legitimate claim/enrol response. An empty 2xx
+		// body (io.EOF) is tolerated — the caller keeps a zero-valued out rather than erroring.
+		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(out); err != nil && !errors.Is(err, io.EOF) {
 			return fmt.Errorf("fleetclient: decode: %w", err)
 		}
 	}

@@ -1096,6 +1096,12 @@ func main() {
 		}
 		router.SetFleet(agentSvc, workSvc, clock.Now, cfg.FleetClientCertHeader)
 		router.SetFleetAdmin(agentSvc)
+		// Version skew (#412): refuse work below the configured minimum agent version and advertise the
+		// control-plane version + floor to agents. Empty floor = disabled.
+		router.SetFleetVersionPolicy(cfg.FleetMinAgentVersion, buildinfo.App())
+		if cfg.FleetMinAgentVersion != "" {
+			log.Info("fleet version skew ENABLED", "min_supported_agent_version", cfg.FleetMinAgentVersion)
+		}
 		log.Info("fleet agent transport ENABLED (agent-auth plane; operator agent-admin routes)")
 
 		// Cluster snapshot ingest (#446): agents POST a collected cluster inventory which is persisted

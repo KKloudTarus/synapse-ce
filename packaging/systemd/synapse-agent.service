@@ -1,0 +1,40 @@
+[Unit]
+Description=Synapse fleet VM agent
+Documentation=https://github.com/KKloudTarus/synapse-ce/blob/main/docs/guide/fleet-agent-packaging.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Dedicated, unprivileged service account created by the package (see nfpm.yaml scripts).
+User=synapse-agent
+Group=synapse-agent
+# Config carries the enrolment token / control-plane URL; it is 0640 root:synapse-agent.
+EnvironmentFile=/etc/synapse-agent/agent.env
+ExecStart=/usr/bin/synapse-agent
+Restart=on-failure
+RestartSec=5s
+
+# --- Hardening: the agent only reads the host and talks to the control plane over https. ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# The agent's only writable location is its state directory (credential 0600, offline buffer).
+StateDirectory=synapse-agent
+ReadWritePaths=/var/lib/synapse-agent
+
+[Install]
+WantedBy=multi-user.target

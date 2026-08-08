@@ -59,7 +59,7 @@ func TestClientRoundTrips(t *testing.T) {
 		t.Fatalf("enrol should use the enrol token, got %q", gotAuth)
 	}
 
-	if err := c.Heartbeat(ctx, enr.Token, EnrolRequest{Name: "host1"}); err != nil {
+	if _, err := c.Heartbeat(ctx, enr.Token, EnrolRequest{Name: "host1"}); err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
 	orders, err := c.ClaimWork(ctx, enr.Token, 4)
@@ -83,7 +83,7 @@ func TestClientNon2xxIsError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	c := New(srv.URL, 5*time.Second)
-	if err := c.Heartbeat(context.Background(), "t", EnrolRequest{}); err == nil {
+	if _, err := c.Heartbeat(context.Background(), "t", EnrolRequest{}); err == nil {
 		t.Fatalf("a 500 must surface as an error")
 	}
 }

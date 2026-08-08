@@ -1,0 +1,56 @@
+# nfpm configuration for the Synapse fleet VM agent native packages (#412).
+#
+# STATUS: this is the release-engineering foundation. It is authored to the #412 spec but is NOT yet
+# wired into a running pipeline in this repository (GitHub Actions is currently disabled, and package
+# signing needs the project GPG key + hosts). Building/signing/validating it on the support matrix is
+# the CI step that lands when Actions + keys + matrix hosts are available. See
+# docs/guide/fleet-agent-packaging.md.
+#
+# nfpm produces rpm + deb from this single spec:
+#   SYNAPSE_LIBC_FLOOR=2.28 nfpm package -f packaging/nfpm.yaml -p rpm
+#   SYNAPSE_LIBC_FLOOR=2.28 nfpm package -f packaging/nfpm.yaml -p deb
+name: synapse-agent
+arch: ${SYNAPSE_ARCH}
+platform: linux
+version: ${SYNAPSE_VERSION}
+section: admin
+maintainer: KKloudTarus <security@kkloudtarus.example>
+description: Synapse fleet VM agent — inventories a host and reports to the control plane.
+license: proprietary
+vendor: KKloudTarus
+
+# libc floor, enforced ONCE here as a package dependency (the package manager refuses an install
+# below it). The preinstall script enforces it a SECOND time against the actual runtime (#412 req 2).
+overrides:
+  rpm:
+    depends:
+      - glibc >= ${SYNAPSE_LIBC_FLOOR}
+  deb:
+    depends:
+      - libc6 (>= ${SYNAPSE_LIBC_FLOOR})
+
+contents:
+  - src: ./dist/synapse-agent
+    dst: /usr/bin/synapse-agent
+    file_info:
+      mode: 0755
+  - src: ./packaging/systemd/synapse-agent.service
+    dst: /lib/systemd/system/synapse-agent.service
+    file_info:
+      mode: 0644
+  # Config carries the control-plane URL + enrolment-token file path; restrictive perms + kept on upgrade.
+  - src: ./packaging/agent.env.example
+    dst: /etc/synapse-agent/agent.env
+    type: config|noreplace
+    file_info:
+      mode: 0640
+      owner: root
+      group: synapse-agent
+
+scripts:
+  preinstall: ./packaging/scripts/preinstall.sh
+  preremove: ./packaging/scripts/preremove.sh
+
+# Signing (rpm --addsign / deb debsigs) is configured in the pipeline with the project GPG key whose
+# public key ships in packaging/keys/ (see README). A release with an unsigned artifact must fail the
+# pipeline (#412 req 4).

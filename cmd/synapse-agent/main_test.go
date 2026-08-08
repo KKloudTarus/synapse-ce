@@ -22,6 +22,8 @@ type fakeAPI struct {
 	heartbeats  int
 	sent        int
 	sendErr     error
+	hbResp      fleetclient.HeartbeatResponse
+	claims      int
 }
 
 type result struct{ orderID, status, reason string }
@@ -30,11 +32,12 @@ func (f *fakeAPI) Enrol(_ context.Context, _ string, _ fleetclient.EnrolRequest)
 	f.enrolCalled = true
 	return f.enrolResp, nil
 }
-func (f *fakeAPI) Heartbeat(_ context.Context, _ string, _ fleetclient.EnrolRequest) error {
+func (f *fakeAPI) Heartbeat(_ context.Context, _ string, _ fleetclient.EnrolRequest) (fleetclient.HeartbeatResponse, error) {
 	f.heartbeats++
-	return nil
+	return f.hbResp, nil
 }
 func (f *fakeAPI) ClaimWork(_ context.Context, _ string, _ int) ([]fleetclient.Order, error) {
+	f.claims++
 	return f.orders, nil
 }
 func (f *fakeAPI) Progress(_ context.Context, _, orderID string) error {
@@ -221,5 +224,36 @@ func TestSummaryIsCoverageHonest(t *testing.T) {
 	inv = inv.Normalize()
 	if got := summary(inv); got == "" || !strings.Contains(got, "INCOMPLETE") {
 		t.Fatalf("incomplete inventory summary must say INCOMPLETE, got %q", got)
+	}
+}
+
+func TestCycleProceedsAgainstDevelControlPlane(t *testing.T) {
+	// A "devel" (untagged) control-plane version must NOT skip claiming — the agent-side CP check
+	// fails OPEN on an unparseable version (availability), unlike the server-side agent check.
+	api := &fakeAPI{
+		enrolResp: fleetclient.EnrolResponse{AgentID: "a1", Token: "secret"},
+		hbResp:    fleetclient.HeartbeatResponse{ControlPlaneVersion: "devel", MinSupportedAgentVersion: ""},
+	}
+	r := newRunner(t, api, nil, okCollect(hostinventory.HostInventory{}))
+	if err := r.run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if api.claims != 1 {
+		t.Fatalf("a devel control-plane version must not skip claim; claims=%d", api.claims)
+	}
+}
+
+func TestCycleSkipsClaimAgainstTooOldControlPlane(t *testing.T) {
+	// A parseable CP version strictly below the agent's required floor skips the claim this cycle.
+	api := &fakeAPI{
+		enrolResp: fleetclient.EnrolResponse{AgentID: "a1", Token: "secret"},
+		hbResp:    fleetclient.HeartbeatResponse{ControlPlaneVersion: "0.0.1"},
+	}
+	r := newRunner(t, api, nil, okCollect(hostinventory.HostInventory{}))
+	if err := r.run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if api.claims != 0 {
+		t.Fatalf("an older-than-required control plane must skip claim; claims=%d", api.claims)
 	}
 }
