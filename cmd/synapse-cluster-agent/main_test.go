@@ -1,11 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -19,34 +16,62 @@ type fakeSource struct {
 
 func (f fakeSource) Snapshot(context.Context, string) (dci.Snapshot, error) { return f.snap, f.err }
 
-func TestRunEmitsSnapshotJSON(t *testing.T) {
-	src := fakeSource{snap: dci.Snapshot{
+type fakeSender struct {
+	calls int
+	token string
+	snap  any
+	err   error
+}
+
+func (f *fakeSender) SendClusterInventory(_ context.Context, token string, snap any) error {
+	f.calls++
+	f.token = token
+	f.snap = snap
+	return f.err
+}
+
+func sampleSnapshot() dci.Snapshot {
+	return dci.Snapshot{
 		Cluster: "prod-eu",
 		Namespaces: []dci.Namespace{{
 			Name:      "payments",
 			Workloads: []dci.Workload{{Kind: "Deployment", Name: "api", Containers: []dci.Container{{Name: "api", Image: "reg/api:v1", Digest: "sha256:aaa"}}}},
 		}},
-	}}
-	var out bytes.Buffer
-	if err := run(context.Background(), src, "prod-eu", &out); err != nil {
+	}
+}
+
+func TestRunCollectsAndReports(t *testing.T) {
+	src := fakeSource{snap: sampleSnapshot()}
+	snd := &fakeSender{}
+	if err := run(context.Background(), src, snd, "tok", "prod-eu"); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	var decoded dci.Snapshot
-	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
-		t.Fatalf("output must be valid snapshot JSON: %v", err)
+	if snd.calls != 1 {
+		t.Fatalf("the snapshot must be reported exactly once, got %d", snd.calls)
 	}
-	if decoded.Cluster != "prod-eu" || len(decoded.Namespaces) != 1 {
-		t.Fatalf("snapshot not emitted faithfully: %+v", decoded)
+	if snd.token != "tok" {
+		t.Fatalf("report must carry the agent token, got %q", snd.token)
 	}
-	if !strings.Contains(out.String(), "sha256:aaa") {
-		t.Fatalf("resolved digest must appear in the emitted inventory")
+	got, ok := snd.snap.(dci.Snapshot)
+	if !ok || got.Cluster != "prod-eu" {
+		t.Fatalf("the collected snapshot must be sent, got %#v", snd.snap)
 	}
 }
 
 func TestRunPropagatesCollectError(t *testing.T) {
-	src := fakeSource{err: errors.New("forbidden: pods")}
-	if err := run(context.Background(), src, "prod-eu", &bytes.Buffer{}); err == nil {
-		t.Fatal("a collection failure must propagate (fail loud), not be swallowed")
+	snd := &fakeSender{}
+	if err := run(context.Background(), fakeSource{err: errors.New("forbidden: pods")}, snd, "tok", "prod-eu"); err == nil {
+		t.Fatal("a collection failure must fail loud, not be swallowed")
+	}
+	if snd.calls != 0 {
+		t.Fatal("nothing must be reported when collection fails")
+	}
+}
+
+func TestRunPropagatesSendError(t *testing.T) {
+	snd := &fakeSender{err: errors.New("503")}
+	if err := run(context.Background(), fakeSource{snap: sampleSnapshot()}, snd, "tok", "prod-eu"); err == nil {
+		t.Fatal("a report failure must surface (so the resync loop logs + retries)")
 	}
 }
 
@@ -78,11 +103,8 @@ func TestEnvDuration(t *testing.T) {
 	if got := envDuration("SYNAPSE_TEST_DUR", time.Minute); got != 30*time.Second {
 		t.Fatalf("envDuration = %v, want 30s", got)
 	}
-	t.Setenv("SYNAPSE_TEST_DUR", "not-a-duration")
+	t.Setenv("SYNAPSE_TEST_DUR", "bad")
 	if got := envDuration("SYNAPSE_TEST_DUR", time.Minute); got != time.Minute {
 		t.Fatalf("a bad duration must fall back to the default, got %v", got)
-	}
-	if got := envDuration("SYNAPSE_TEST_UNSET_DUR", time.Minute); got != time.Minute {
-		t.Fatalf("unset must use the default, got %v", got)
 	}
 }

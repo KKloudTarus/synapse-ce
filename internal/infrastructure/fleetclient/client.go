@@ -92,6 +92,13 @@ func (c *Client) SubmitResult(ctx context.Context, token, orderID, status, reaso
 		map[string]string{"status": status, "reason": reason}, nil)
 }
 
+// SendClusterInventory posts a collected Kubernetes cluster snapshot to the control plane, which maps
+// and persists it into the asset model (#446). snap must be a JSON-tagged clusterinventory.Snapshot;
+// the caller passes it as the marshalable value so this package keeps no domain dependency.
+func (c *Client) SendClusterInventory(ctx context.Context, token string, snap any) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/fleet/inventory/cluster", token, snap, nil)
+}
+
 func (c *Client) do(ctx context.Context, method, path, token string, body, out any) error {
 	var reader io.Reader
 	if body != nil {
