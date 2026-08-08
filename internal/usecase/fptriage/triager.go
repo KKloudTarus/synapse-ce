@@ -56,7 +56,7 @@ func (t *Triager) Triage(ctx context.Context, candidates []finding.Finding, work
 			Verified:      c.VerifiedConsensus(t.minConf),
 			ProposerModel: t.coord.ProposerModel(),
 			VerifierModel: t.coord.VerifierModel(),
-			PromptVersion: promptVersion,
+			PromptVersion: PromptVersion,
 		}
 		if c.Verifier != nil {
 			critique.VerifierVerdict = string(c.Verifier.Verdict)

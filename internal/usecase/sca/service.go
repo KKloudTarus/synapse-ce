@@ -73,6 +73,7 @@ type Service struct {
 	includeTestSecrets               bool                                  // report secrets in test/fixture/docs paths (default false: suppress)
 	misconfig                        ports.MisconfigScanner                // optional deterministic IaC/config misconfig scan over the live workspace
 	fpTriager                        ports.FPTriager                       // optional LLM false-positive critique of production-scope source findings
+	fpTriageMode                     AITriageMode                          // shadow by default; enforce must be selected explicitly
 	osPkgCataloger                   ports.OSPackageCataloger              // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
 	instCataloger                    ports.InstalledPackageCataloger       // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
 	artifactCataloger                ports.ArtifactCataloger               // optional owned standalone-artifact cataloging (.msi product identity) from the workspace dir
@@ -217,6 +218,16 @@ func (s *Service) SetIncludeTestSecrets(v bool) { s.includeTestSecrets = v }
 // no triage. Implementations are trusted in-process components; policy revalidation contains buggy DTOs,
 // not malicious code that already holds process authority.
 func (s *Service) SetFPTriage(t ports.FPTriager) { s.fpTriager = t }
+
+// SetFPTriageMode selects shadow observation or enforced gate authorization. Unknown and empty values
+// fail closed to shadow. This setting never changes the human-review floors.
+func (s *Service) SetFPTriageMode(mode AITriageMode) {
+	if mode == AITriageModeEnforce {
+		s.fpTriageMode = mode
+		return
+	}
+	s.fpTriageMode = AITriageModeShadow
+}
 
 // SetOSPackageCataloger configures optional owned OS-package cataloging (dpkg/apk) from a materialized image
 // rootfs (Workspace.RootFS). nil ⇒ no owned OS cataloging. It only runs when a rootfs was materialized.
@@ -667,11 +678,37 @@ func (r *ScanResult) aiGateExemptKeys(items []finding.Finding) map[string]bool {
 	for _, c := range r.AITriage {
 		key := strings.TrimSpace(c.DedupKey)
 		item, found := findings[key]
-		if c.GateExempt &&
-			c.PolicyVersion == aiTriagePolicyVersion &&
+		if !c.Shadow && c.GateExempt &&
+			c.PolicyVersion == AITriagePolicyVersion &&
 			c.PolicyReason == aiPolicyVerifiedConsensus &&
 			hasVerifiedConsensus(c) &&
 			found && humanReviewFloor(item) == "" && isFPTriageEligible(item) {
+			out[key] = true
+		}
+	}
+	return out
+}
+
+// AIWouldGateExemptKeys returns shadow observations that passed every enforced-policy check except the
+// rollout-mode switch. This set is for evaluation/observability only and MUST NOT authorize a gate.
+func (r *ScanResult) AIWouldGateExemptKeys() map[string]bool {
+	return r.aiWouldGateExemptKeys(r.Findings)
+}
+
+func (r *ScanResult) aiWouldGateExemptKeys(items []finding.Finding) map[string]bool {
+	out := map[string]bool{}
+	findings := make(map[string]finding.Finding, len(items))
+	for _, item := range items {
+		if key := strings.TrimSpace(item.DedupKey); key != "" {
+			findings[key] = item
+		}
+	}
+	for _, c := range r.AITriage {
+		key := strings.TrimSpace(c.DedupKey)
+		item, found := findings[key]
+		if c.Shadow && c.WouldGateExempt && !c.GateExempt &&
+			c.PolicyVersion == AITriagePolicyVersion && c.PolicyReason == aiPolicyShadowMode &&
+			hasVerifiedConsensus(c) && found && humanReviewFloor(item) == "" && isFPTriageEligible(item) {
 			out[key] = true
 		}
 	}
@@ -2432,12 +2469,13 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		if cands := fpTriageCandidates(result.Findings); len(cands) > 0 {
 			tstep := trace.start(stageFindings, "ai-fp-triage", "fp-triager", "AI false-positive triage", map[string]int{"candidates": len(cands)})
 			result.AITriage = s.fpTriager.Triage(ctx, cands, ws.Dir)
-			applyAIGatePolicy(result, s.evidence != nil)
+			applyAIGatePolicy(result, s.evidence != nil, s.fpTriageMode)
 			trace.succeed(tstep, "AI false-positive triage", map[string]int{
 				"candidates":      len(cands),
 				"critiqued":       len(result.AITriage),
 				"suspected_fp":    len(result.SuspectedFPKeys()),
 				"gate_exempt":     len(result.AIGateExemptKeys()),
+				"would_exempt":    len(result.AIWouldGateExemptKeys()),
 				"review_required": len(result.AIReviewRequiredKeys()),
 			})
 		}
@@ -3241,7 +3279,7 @@ func scanEvidenceContent(actor string, now time.Time, result *ScanResult) ([]byt
 	})
 	policyVersion := ""
 	if len(aiTriage) > 0 {
-		policyVersion = aiTriagePolicyVersion
+		policyVersion = AITriagePolicyVersion
 	}
 	return json.Marshal(scanEvidencePayload{
 		SBOMSHA256:       result.Manifest.SBOMSHA256,

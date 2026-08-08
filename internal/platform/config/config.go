@@ -153,6 +153,9 @@ type Config struct {
 	// FPTriageModel is the model to critique with (defaults to LLMModel).
 	FPTriageEnabled bool
 	FPTriageModel   string
+	// FPTriageMode is shadow|enforce. Shadow is the fail-closed default: decisions are persisted for
+	// evaluation but can never set gate_exempt. Enforce requires a deliberate operator choice.
+	FPTriageMode string
 
 	// Agent orchestration policy. ApprovalMode: manual|filter|auto (manual is
 	// the safe default – a human approves every action). The rest bound a run.
@@ -551,6 +554,7 @@ func Load() Config {
 		LLMTimeout:                   getduration("SYNAPSE_LLM_TIMEOUT", 60*time.Second),
 		FPTriageEnabled:              getbool("SYNAPSE_FP_TRIAGE_ENABLED", false),
 		FPTriageModel:                getenv("SYNAPSE_FP_TRIAGE_MODEL", getenv("SYNAPSE_LLM_MODEL", "")),
+		FPTriageMode:                 normalizeFPTriageMode(getenv("SYNAPSE_FP_TRIAGE_MODE", "shadow")),
 
 		AgentApprovalMode:    getenv("SYNAPSE_AGENT_APPROVAL_MODE", "manual"),
 		AgentApprovalTimeout: getduration("SYNAPSE_AGENT_APPROVAL_TIMEOUT", 30*time.Minute),
@@ -612,6 +616,13 @@ func parsePins(s string) map[string]string {
 // normalizeEnv canonicalizes a SYNAPSE_ENV value: trim surrounding whitespace and
 // lowercase it, so "Production", " production\n", and "PRODUCTION" are one value.
 func normalizeEnv(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+func normalizeFPTriageMode(s string) string {
+	if strings.EqualFold(strings.TrimSpace(s), "enforce") {
+		return "enforce"
+	}
+	return "shadow"
+}
 
 // IsProduction reports whether this is a production-grade deployment, in which the
 // security gates (credential-vault master key, evidence/audit chain-head signing,

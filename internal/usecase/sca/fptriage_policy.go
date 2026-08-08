@@ -12,9 +12,18 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// aiTriagePolicyVersion is sealed with every scan that carries AI triage. Bump it whenever the
+// AITriagePolicyVersion is sealed with every scan that carries AI triage. Bump it whenever the
 // authorization contract changes so an audit can replay which policy could affect a CI gate.
-const aiTriagePolicyVersion = "fp-gate-v2"
+const AITriagePolicyVersion = "fp-gate-v3"
+
+// AITriageMode controls whether an otherwise-authorized AI consensus can affect a quality gate.
+// The zero value is deliberately shadow so missing/invalid composition fails closed.
+type AITriageMode string
+
+const (
+	AITriageModeShadow  AITriageMode = "shadow"
+	AITriageModeEnforce AITriageMode = "enforce"
+)
 
 const (
 	aiPolicyNotSuspected      = "not_suspected_false_positive"
@@ -25,6 +34,7 @@ const (
 	aiPolicySecretFloor       = "secret_requires_human"
 	aiPolicyDangerousCWEFloor = "cwe_requires_human"
 	aiPolicyEvidenceRequired  = "evidence_ledger_required"
+	aiPolicyShadowMode        = "shadow_mode"
 	aiPolicyVerifiedConsensus = "verified_consensus"
 )
 
@@ -57,7 +67,7 @@ var humanReviewCWEs = map[string]struct{}{
 // applyAIGatePolicy separates an AI opinion from authorization to change a gate. It is the single
 // policy point used by both CLI and API scans. The triager may propose SuspectedFP, but only a complete
 // distinct-model consensus that clears the human-review floor receives GateExempt.
-func applyAIGatePolicy(result *ScanResult, evidenceAvailable bool) {
+func applyAIGatePolicy(result *ScanResult, evidenceAvailable bool, mode AITriageMode) {
 	if result == nil || len(result.AITriage) == 0 {
 		return
 	}
@@ -69,7 +79,9 @@ func applyAIGatePolicy(result *ScanResult, evidenceAvailable bool) {
 	}
 	for i := range result.AITriage {
 		critique := &result.AITriage[i]
-		critique.PolicyVersion = aiTriagePolicyVersion
+		critique.PolicyVersion = AITriagePolicyVersion
+		critique.Shadow = mode != AITriageModeEnforce
+		critique.WouldGateExempt = false
 		critique.GateExempt = false
 		critique.ReviewRequired = false
 
@@ -100,6 +112,12 @@ func applyAIGatePolicy(result *ScanResult, evidenceAvailable bool) {
 		}
 		if !evidenceAvailable {
 			critique.PolicyReason = aiPolicyEvidenceRequired
+			critique.ReviewRequired = true
+			continue
+		}
+		if mode != AITriageModeEnforce {
+			critique.PolicyReason = aiPolicyShadowMode
+			critique.WouldGateExempt = true
 			critique.ReviewRequired = true
 			continue
 		}

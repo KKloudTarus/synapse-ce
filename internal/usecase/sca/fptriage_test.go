@@ -38,7 +38,7 @@ func TestFPTriageCandidates(t *testing.T) {
 func TestSuspectedFPKeys(t *testing.T) {
 	consensus := verifiedCritique("c")
 	consensus.GateExempt = true
-	consensus.PolicyVersion = aiTriagePolicyVersion
+	consensus.PolicyVersion = AITriagePolicyVersion
 	consensus.PolicyReason = aiPolicyVerifiedConsensus
 	res := &ScanResult{AITriage: []ports.AICritique{
 		{DedupKey: "a", SuspectedFP: true, GateExempt: false},
@@ -100,11 +100,11 @@ func TestApplyAIGatePolicy(t *testing.T) {
 		},
 	}
 
-	applyAIGatePolicy(result, true)
+	applyAIGatePolicy(result, true, AITriageModeEnforce)
 	byKey := map[string]ports.AICritique{}
 	for _, c := range result.AITriage {
 		byKey[c.DedupKey] = c
-		if c.PolicyVersion != aiTriagePolicyVersion {
+		if c.PolicyVersion != AITriagePolicyVersion {
 			t.Errorf("%s policy version = %q", c.DedupKey, c.PolicyVersion)
 		}
 	}
@@ -153,7 +153,7 @@ func TestApplyAIGatePolicyRejectsForgedVerifiedFlag(t *testing.T) {
 		},
 		AITriage: cases,
 	}
-	applyAIGatePolicy(result, true)
+	applyAIGatePolicy(result, true, AITriageModeEnforce)
 	if got := result.AIGateExemptKeys(); len(got) != 0 {
 		t.Fatalf("forged/incomplete consensus must never receive gate authority: %v", got)
 	}
@@ -224,10 +224,28 @@ func TestApplyAIGatePolicyRequiresEvidenceLedger(t *testing.T) {
 		Findings: []finding.Finding{{DedupKey: "safe", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"}},
 		AITriage: []ports.AICritique{verifiedCritique("safe")},
 	}
-	applyAIGatePolicy(result, false)
+	applyAIGatePolicy(result, false, AITriageModeEnforce)
 	c := result.AITriage[0]
 	if c.GateExempt || !c.ReviewRequired || c.PolicyReason != aiPolicyEvidenceRequired {
 		t.Fatalf("no-ledger scan must remain gating: %+v", c)
+	}
+}
+
+func TestApplyAIGatePolicyShadowNeverExempts(t *testing.T) {
+	result := &ScanResult{
+		Findings: []finding.Finding{{DedupKey: "safe", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"}},
+		AITriage: []ports.AICritique{verifiedCritique("safe")},
+	}
+	applyAIGatePolicy(result, true, AITriageModeShadow)
+	c := result.AITriage[0]
+	if !c.Shadow || !c.WouldGateExempt || c.GateExempt || !c.ReviewRequired || c.PolicyReason != aiPolicyShadowMode {
+		t.Fatalf("shadow policy must retain a would-exempt observation without gate authority: %+v", c)
+	}
+	if got := result.AIGateExemptKeys(); len(got) != 0 {
+		t.Fatalf("shadow decisions must never enter the gate exemption set: %v", got)
+	}
+	if got := result.AIWouldGateExemptKeys(); !got["safe"] || len(got) != 1 {
+		t.Fatalf("shadow observation set = %v, want safe", got)
 	}
 }
 
@@ -236,7 +254,7 @@ func TestApplyAIGatePolicyRejectsIneligibleAlternateTriagerResult(t *testing.T) 
 		Findings: []finding.Finding{{DedupKey: "sca", Kind: finding.KindSCA, Class: finding.ClassThirdParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"}},
 		AITriage: []ports.AICritique{verifiedCritique("sca")},
 	}
-	applyAIGatePolicy(result, true)
+	applyAIGatePolicy(result, true, AITriageModeEnforce)
 	c := result.AITriage[0]
 	if c.GateExempt || !c.ReviewRequired || c.PolicyReason != aiPolicyFindingIneligible {
 		t.Fatalf("alternate triager cannot grant authority outside the candidate set: %+v", c)
@@ -246,7 +264,7 @@ func TestApplyAIGatePolicyRejectsIneligibleAlternateTriagerResult(t *testing.T) 
 func TestGateExemptKeysRevalidatesOverlaidSeverity(t *testing.T) {
 	base := finding.Finding{DedupKey: "profiled", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"}
 	result := &ScanResult{Findings: []finding.Finding{base}, AITriage: []ports.AICritique{verifiedCritique("profiled")}}
-	applyAIGatePolicy(result, true)
+	applyAIGatePolicy(result, true, AITriageModeEnforce)
 	if !result.AIGateExemptKeys()["profiled"] {
 		t.Fatal("baseline medium finding should pass the low-risk policy")
 	}
@@ -260,7 +278,7 @@ func TestGateExemptKeysRevalidatesOverlaidSeverity(t *testing.T) {
 func TestAIGateExemptKeysRevalidatesPersistedDecision(t *testing.T) {
 	forged := verifiedCritique("high")
 	forged.GateExempt = true
-	forged.PolicyVersion = aiTriagePolicyVersion
+	forged.PolicyVersion = AITriagePolicyVersion
 	forged.PolicyReason = aiPolicyVerifiedConsensus
 	result := &ScanResult{
 		Findings: []finding.Finding{{DedupKey: "high", Kind: finding.KindSAST, Severity: shared.SeverityHigh}},
@@ -279,8 +297,8 @@ func TestScanEvidenceContentSealsAIDecisions(t *testing.T) {
 		},
 		Manifest: ports.ScanManifest{SBOMSHA256: "sha256:abc"},
 		AITriage: []ports.AICritique{
-			{DedupKey: "z", FindingID: "fz", ProposerModel: "p", PolicyVersion: aiTriagePolicyVersion, PolicyReason: aiPolicyVerifierRequired, ReviewRequired: true},
-			{DedupKey: "a", FindingID: "fa", ProposerModel: "p", VerifierModel: "v", PolicyVersion: aiTriagePolicyVersion, PolicyReason: aiPolicyVerifiedConsensus, Verified: true, GateExempt: true},
+			{DedupKey: "z", FindingID: "fz", ProposerModel: "p", PolicyVersion: AITriagePolicyVersion, PolicyReason: aiPolicyVerifierRequired, ReviewRequired: true},
+			{DedupKey: "a", FindingID: "fa", ProposerModel: "p", VerifierModel: "v", PolicyVersion: AITriagePolicyVersion, PolicyReason: aiPolicyVerifiedConsensus, Verified: true, GateExempt: true},
 		},
 	}
 	content, err := scanEvidenceContent("tester", time.Date(2026, 8, 3, 1, 2, 3, 0, time.UTC), result)
@@ -291,7 +309,7 @@ func TestScanEvidenceContentSealsAIDecisions(t *testing.T) {
 	if err := json.Unmarshal(content, &payload); err != nil {
 		t.Fatalf("decode evidence payload: %v", err)
 	}
-	if payload.AITriagePolicy != aiTriagePolicyVersion || len(payload.AITriage) != 2 {
+	if payload.AITriagePolicy != AITriagePolicyVersion || len(payload.AITriage) != 2 {
 		t.Fatalf("AI policy/decisions missing from sealed payload: %+v", payload)
 	}
 	if payload.Findings[0] != "a" || payload.AITriage[0].DedupKey != "a" {
@@ -304,5 +322,26 @@ func TestScanEvidenceContentSealsAIDecisions(t *testing.T) {
 		payload.AITriageFindings[0].Severity != shared.SeverityMedium ||
 		payload.AITriageFindings[1].CWE != "CWE-89" || payload.AITriageFindings[1].Kind != finding.KindSAST {
 		t.Errorf("gate-floor inputs missing or non-canonical in evidence: %+v", payload.AITriageFindings)
+	}
+}
+
+func TestScanEvidenceContentSealsShadowDecision(t *testing.T) {
+	result := &ScanResult{
+		Findings: []finding.Finding{{DedupKey: "safe", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"}},
+		Manifest: ports.ScanManifest{SBOMSHA256: "sha256:shadow"},
+		AITriage: []ports.AICritique{verifiedCritique("safe")},
+	}
+	applyAIGatePolicy(result, true, AITriageModeShadow)
+	content, err := scanEvidenceContent("tester", time.Date(2026, 8, 8, 1, 2, 3, 0, time.UTC), result)
+	if err != nil {
+		t.Fatalf("scanEvidenceContent: %v", err)
+	}
+	var payload scanEvidencePayload
+	if err := json.Unmarshal(content, &payload); err != nil {
+		t.Fatalf("decode evidence payload: %v", err)
+	}
+	if len(payload.AITriage) != 1 || !payload.AITriage[0].Shadow || !payload.AITriage[0].WouldGateExempt ||
+		payload.AITriage[0].GateExempt || payload.AITriage[0].PolicyReason != aiPolicyShadowMode {
+		t.Fatalf("shadow decision missing from sealed payload: %+v", payload.AITriage)
 	}
 }

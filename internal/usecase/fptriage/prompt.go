@@ -10,9 +10,9 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 )
 
-// promptVersion is persisted with every critique so an audit can identify the exact prompt contract
+// PromptVersion is persisted with every critique so an audit can identify the exact prompt contract
 // that produced a decision without retaining raw source or model chain-of-thought.
-const promptVersion = "fp-triage-v1"
+const PromptVersion = "fp-triage-v1"
 
 // systemPrompt frames the model as a propose-only false-positive adjudicator. It must answer ONLY with
 // the schema-constrained JSON — the driver is a closed token, so no prose can reach a deliverable.

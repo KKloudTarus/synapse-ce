@@ -740,6 +740,7 @@ func main() {
 	// the agent: it critiques production-scope source findings. Single-model output is advisory-only; a
 	// distinct verifier is required before the deterministic high-risk floor may grant a gate exemption.
 	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" {
+		scaService.SetFPTriageMode(scauc.AITriageMode(cfg.FPTriageMode))
 		if tllm, terr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); terr != nil {
 			log.Warn("AI false-positive triage DISABLED (LLM unavailable)", "err", terr)
 		} else {
@@ -760,7 +761,7 @@ func main() {
 			scaService.SetFPTriage(fptriage.NewTriager(coord, func(root string) ports.SourceSnippetReader {
 				return sourcesnippet.Reader{Root: root}
 			}))
-			log.Info("AI false-positive triage ENABLED ("+mode+"); only verified low-risk consensus can affect gates", "model", cfg.FPTriageModel)
+			log.Info("AI false-positive triage ENABLED ("+mode+")", "model", cfg.FPTriageModel, "triage_mode", cfg.FPTriageMode)
 		}
 	}
 	if cfg.SuppressionEnabled {

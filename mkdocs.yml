@@ -54,6 +54,7 @@ nav:
   - Features: features.md
   - Configuration: configuration.md
   - CLI: cli.md
+  - AI triage evaluation: ai-triage-evaluation.md
   - Architecture: architecture.md
   - Deployment: deployment.md
   - Security model: security.md
