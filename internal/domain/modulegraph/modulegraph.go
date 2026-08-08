@@ -112,6 +112,15 @@ const (
 	CoverageUnresolvedRelativeImport  CoverageIssueKind = "unresolved-relative-import"
 	CoverageAmbiguousRelativeImport   CoverageIssueKind = "ambiguous-relative-import"
 	CoverageRelativeImportEscapesRoot CoverageIssueKind = "relative-import-escapes-root"
+	// The remaining budgets are distinct kinds so a consumer can tell WHICH bound fired. Reusing one
+	// kind for several bounds hides, for example, a truncated coverage list behind a file-count message.
+	CoverageEntryBudgetExceeded CoverageIssueKind = "entry-budget-exceeded"
+	CoverageEdgeBudgetExceeded  CoverageIssueKind = "edge-budget-exceeded"
+	CoverageIssueBudgetExceeded CoverageIssueKind = "issue-budget-exceeded"
+	// CoverageSkippedDirectory records a directory excluded from the scan that nonetheless contained
+	// supported source. Excluding build output or a tool directory is a policy choice, but the modules
+	// inside it are unobserved, so their imports must not be read as absent.
+	CoverageSkippedDirectory CoverageIssueKind = "skipped-directory"
 )
 
 // Valid reports whether k is a known R1 coverage issue kind.
@@ -135,7 +144,11 @@ func (k CoverageIssueKind) Valid() bool {
 		CoverageUnsupportedLoader,
 		CoverageUnresolvedRelativeImport,
 		CoverageAmbiguousRelativeImport,
-		CoverageRelativeImportEscapesRoot:
+		CoverageRelativeImportEscapesRoot,
+		CoverageEntryBudgetExceeded,
+		CoverageEdgeBudgetExceeded,
+		CoverageIssueBudgetExceeded,
+		CoverageSkippedDirectory:
 		return true
 	default:
 		return false
