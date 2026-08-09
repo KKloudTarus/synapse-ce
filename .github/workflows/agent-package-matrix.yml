@@ -1,0 +1,215 @@
+name: Agent Package Matrix
+
+# #412 test requirement 1: a CI matrix job per supported platform that INSTALLS the native package,
+# STARTS the service, proves ONE successful HEARTBEAT, and UNINSTALLS cleanly.
+#
+# The heartbeat is against a REAL control plane, not a stub. `synapse-api` with no SYNAPSE_DB_DSN runs
+# on in-memory stores, so the job exercises the actual enrol -> heartbeat path including certificate
+# issue and the version-skew fields. A stub would have proved that the stub answers, which is not the
+# failure mode this requirement exists to catch: the field failure was a package that installed
+# cleanly and then crash-looped at first start.
+#
+# Every row of the support matrix in docs/guide/fleet-agent-packaging.md needs a row here. A platform
+# with no row is not supported, and saying so is the point.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packaging/**"
+      - "cmd/synapse-agent/**"
+      - "cmd/synapse-api/**"
+      - "internal/infrastructure/fleet**"
+      - "internal/domain/fleet**"
+      - ".github/workflows/agent-package-matrix.yml"
+  pull_request:
+    paths:
+      - "packaging/**"
+      - "cmd/synapse-agent/**"
+      - "cmd/synapse-api/**"
+      - "internal/infrastructure/fleet**"
+      - "internal/domain/fleet**"
+      - ".github/workflows/agent-package-matrix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The libc floor the packages declare and the preinstall script re-checks. RHEL 8 / Debian 10.
+  SYNAPSE_LIBC_FLOOR: "2.28"
+  SYNAPSE_VERSION: "0.0.0-ci"
+  SYNAPSE_ARCH: "amd64"
+
+jobs:
+  linux:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: deb (Debian 12)
+            image: debian:12
+            format: deb
+            install: dpkg -i
+            remove: dpkg --purge synapse-agent
+          - name: deb (Ubuntu 22.04)
+            image: ubuntu:22.04
+            format: deb
+            install: dpkg -i
+            remove: dpkg --purge synapse-agent
+          - name: rpm (Rocky 9 / RHEL 9)
+            image: rockylinux:9
+            format: rpm
+            install: rpm -i
+            remove: rpm -e synapse-agent
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build the agent and the control plane
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          CGO_ENABLED=0 go build -trimpath -o dist/synapse-agent ./cmd/synapse-agent
+          CGO_ENABLED=0 go build -trimpath -o dist/synapse-api   ./cmd/synapse-api
+          test -x dist/synapse-agent
+          test -x dist/synapse-api
+
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      - name: Build the ${{ matrix.format }} package
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          "$(go env GOPATH)/bin/nfpm" package -f packaging/nfpm.yaml -p "${{ matrix.format }}" -t out/
+          ls -l out/
+
+      # The control plane runs on the RUNNER (not in the container) so the container can reach it on
+      # the docker bridge. No DSN -> in-memory stores; fleet features on; a signer key long enough for
+      # worksign.New, which fails startup closed on a short key.
+      - name: Start the control plane
+        run: |
+          set -euo pipefail
+          SYNAPSE_FLEET_ENABLED=true \
+          SYNAPSE_FLEET_ASSETS_ENABLED=true \
+          SYNAPSE_FLEET_HOST_INGEST_ENABLED=true \
+          SYNAPSE_FLEET_SIGNER_KEY="ci-fleet-signer-key-that-is-long-enough-32b" \
+          SYNAPSE_API_TOKEN="ci-admin-token" \
+          SYNAPSE_ENV=dev \
+          nohup ./dist/synapse-api >/tmp/control-plane.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+              echo "control plane is up"; exit 0
+            fi
+            sleep 1
+          done
+          echo "control plane did not become healthy"; cat /tmp/control-plane.log; exit 1
+
+      - name: Mint an enrolment token
+        id: enrol
+        run: |
+          set -euo pipefail
+          token="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/agents/enrolment-tokens \
+            -H 'Authorization: Bearer ci-admin-token' \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"ci-matrix-agent"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+          test -n "${token}"
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+
+      # The container talks to the control plane over the docker bridge gateway. --network=host would
+      # hide a whole class of packaging bug (a unit that only works when the network is the runner's).
+      - name: Install, start, heartbeat and uninstall inside ${{ matrix.image }}
+        env:
+          ENROL_TOKEN: ${{ steps.enrol.outputs.token }}
+        run: |
+          set -euo pipefail
+          pkg="$(ls out/*.${{ matrix.format }})"
+          gateway="$(ip -4 route show default | awk '{print $3}' | head -n1)"
+          test -n "${gateway}"
+
+          docker run --rm \
+            --add-host "control-plane:${gateway}" \
+            -e SYNAPSE_FLEET_URL="http://control-plane:8080" \
+            -e SYNAPSE_FLEET_ENROL_TOKEN="${ENROL_TOKEN}" \
+            -e SYNAPSE_LIBC_FLOOR="${SYNAPSE_LIBC_FLOOR}" \
+            -v "${PWD}/${pkg}:/tmp/$(basename "${pkg}")" \
+            "${{ matrix.image }}" \
+            /bin/sh -eux -c '
+              # 1. INSTALL — the preinstall hook enforces the libc floor a second time.
+              ${{ matrix.install }} "/tmp/'"$(basename "${pkg}")"'"
+
+              # 2. The package must have placed the binary, the unit and a restrictive config.
+              test -x /usr/bin/synapse-agent
+              test -f /lib/systemd/system/synapse-agent.service
+              test -f /etc/synapse-agent/agent.env
+              perms=$(stat -c "%a" /etc/synapse-agent/agent.env)
+              test "${perms}" = "640" || { echo "config perms ${perms}, want 640"; exit 1; }
+              getent passwd synapse-agent >/dev/null
+
+              # 3. START + HEARTBEAT. Containers have no systemd, so the unit file is asserted above and
+              #    the packaged binary is run directly with -once: enrol, heartbeat, one claim cycle.
+              #    That exercises the same code path the unit starts, which is what "starts and
+              #    heartbeats" has to mean here.
+              /usr/bin/synapse-agent -once -state-dir /var/lib/synapse-agent -name ci-matrix-agent
+
+              # 4. UNINSTALL, and prove nothing is left outside the documented state directory.
+              ${{ matrix.remove }}
+              test ! -e /usr/bin/synapse-agent
+              test ! -e /lib/systemd/system/synapse-agent.service
+              leftovers=$(find / -xdev -name "synapse-agent*" -not -path "/var/lib/synapse-agent/*" -not -path "/proc/*" -not -path "/tmp/*" 2>/dev/null || true)
+              test -z "${leftovers}" || { echo "uninstall left files behind:"; echo "${leftovers}"; exit 1; }
+            '
+
+      - name: Control plane log
+        if: always()
+        run: cat /tmp/control-plane.log || true
+
+  # Requirement 2, second enforcement: a runtime older than the build floor must be REFUSED at install
+  # time with a readable message and leave nothing behind. This is the field failure the requirement
+  # was written from — the package installed and the service crash-looped at first start.
+  libc-floor-refusal:
+    name: install below the libc floor is refused
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build the agent
+        run: CGO_ENABLED=0 go build -trimpath -o dist/synapse-agent ./cmd/synapse-agent
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+      - name: Build a package whose floor is far above any runtime
+        env:
+          SYNAPSE_LIBC_FLOOR: "99.99"
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          "$(go env GOPATH)/bin/nfpm" package -f packaging/nfpm.yaml -p deb -t out/
+      - name: The install must FAIL and leave nothing behind
+        run: |
+          set -euo pipefail
+          pkg="$(ls out/*.deb)"
+          docker run --rm -e SYNAPSE_LIBC_FLOOR=99.99 \
+            -v "${PWD}/${pkg}:/tmp/pkg.deb" debian:12 /bin/sh -eu -c '
+              if dpkg -i /tmp/pkg.deb >/tmp/install.log 2>&1; then
+                echo "install SUCCEEDED below the libc floor — the preinstall guard did not fire"
+                cat /tmp/install.log
+                exit 1
+              fi
+              grep -q "older than the build floor" /tmp/install.log || {
+                echo "refusal message is not readable:"; cat /tmp/install.log; exit 1; }
+              test ! -x /usr/bin/synapse-agent || { echo "a refused install left the binary behind"; exit 1; }
+              echo "refused at install time, nothing left behind"
+            '
