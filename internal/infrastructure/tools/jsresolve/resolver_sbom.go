@@ -266,6 +266,8 @@ func (r *Resolver) correlateComponent(
 	base jsresolution.ImportResolution,
 	packageName string,
 	components *componentIndex,
+	resolutions *importerResolutions,
+	packages []jsresolution.PackageMetadata,
 	candidateWork *resolverWorkBudget,
 	coverage *resolutionCoverageSink,
 ) jsresolution.ImportResolution {
@@ -317,6 +319,15 @@ func (r *Resolver) correlateComponent(
 		base.Reason = ""
 		return base
 	default:
+		// Several versions are installed. The lockfile records which one THIS importer resolves, so
+		// consult it before giving up: that is the difference between an actionable identity and a
+		// permanent ambiguity in any monorepo that pins two versions.
+		if selected, ok := disambiguateByImporter(matches, resolutions, packages, base.From, packageName); ok && !folded {
+			base.Status = jsresolution.StatusComponent
+			base.Package = selected
+			base.Reason = ""
+			return base
+		}
 		base.Status = jsresolution.StatusAmbiguous
 		base.Candidates = append([]jsresolution.PackageIdentity(nil), matches...)
 		base.Reason = "package name matches more than one sbom component version and importer context does not select one"

@@ -20,6 +20,7 @@ const (
 	defaultMaxResolverCandidateWork      = 1000000
 	defaultMaxResolverCandidates         = 256
 	defaultMaxResolverComponents         = 200000
+	defaultMaxResolverLockfileBytes      = 32 << 20
 	defaultMaxResolverCoverage           = 4096
 )
 
@@ -36,6 +37,7 @@ type resolverLimits struct {
 	maxCandidateWork      int
 	maxCandidates         int
 	maxComponents         int
+	maxLockfileBytes      int64
 	maxCoverageIssues     int
 }
 
@@ -53,6 +55,7 @@ func defaultResolverLimits() resolverLimits {
 		maxCandidateWork:      defaultMaxResolverCandidateWork,
 		maxCandidates:         defaultMaxResolverCandidates,
 		maxComponents:         defaultMaxResolverComponents,
+		maxLockfileBytes:      defaultMaxResolverLockfileBytes,
 		maxCoverageIssues:     defaultMaxResolverCoverage,
 	}
 }
@@ -61,7 +64,7 @@ func (l resolverLimits) validate() error {
 	if l.maxModules <= 0 || l.maxEdges <= 0 || l.maxGraphCoverage <= 0 || l.maxBindingsPerEdge <= 0 ||
 		l.maxTotalBindings <= 0 || l.maxSpecifierBytes <= 0 || l.maxModulePathBytes <= 0 || l.maxModulePathSegments <= 0 ||
 		l.maxAliasWork <= 0 || l.maxCandidateWork <= 0 || l.maxCandidates <= 0 ||
-		l.maxComponents <= 0 || l.maxCoverageIssues <= 0 {
+		l.maxComponents <= 0 || l.maxLockfileBytes <= 0 || l.maxCoverageIssues <= 0 {
 		return fmt.Errorf("%w: resolver limits must be positive", shared.ErrValidation)
 	}
 	return nil

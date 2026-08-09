@@ -30,6 +30,7 @@ func (r *Resolver) resolvePackageRoot(
 	workspaces map[string][]jsresolution.PackageIdentity,
 	packages []jsresolution.PackageMetadata,
 	components *componentIndex,
+	resolutions *importerResolutions,
 	candidateWork *resolverWorkBudget,
 	coverage *resolutionCoverageSink,
 ) jsresolution.ImportResolution {
@@ -48,7 +49,7 @@ func (r *Resolver) resolvePackageRoot(
 			})
 			return base
 		}
-		return r.correlateComponent(base, target, components, candidateWork, coverage)
+		return r.correlateComponent(base, target, components, resolutions, packages, candidateWork, coverage)
 	}
 
 	// A workspace declaration proves that a local package with this name exists,

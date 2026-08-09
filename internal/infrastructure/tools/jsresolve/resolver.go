@@ -86,6 +86,7 @@ func (r *Resolver) Resolve(ctx context.Context, root string, graph modulegraph.G
 	}
 	workspaceByName := indexWorkspacesByName(inventory.Packages)
 	components := newComponentIndex(doc, r.limits.maxComponents, r.limits.maxCandidates, &coverage)
+	resolutions := r.readImporterResolutions(ctx, root, &coverage)
 
 	result := jsresolution.Result{GraphCoverage: append([]modulegraph.CoverageIssue(nil), normalizedGraph.Coverage...)}
 	for _, edge := range normalizedGraph.Edges {
@@ -137,7 +138,7 @@ func (r *Resolver) Resolve(ctx context.Context, root string, graph modulegraph.G
 					Detail: fmt.Sprintf("specifier %q may be a package self-reference", resolution.Specifier),
 				})
 			} else {
-				resolution = r.resolvePackageRoot(resolution, classified.PackageName, workspaceByName, inventory.Packages, components, &candidateWork, &coverage)
+				resolution = r.resolvePackageRoot(resolution, classified.PackageName, workspaceByName, inventory.Packages, components, resolutions, &candidateWork, &coverage)
 			}
 		default:
 			if aliasResolution, handled := r.resolveTSPaths(ctx, resolution, aliases.mappings, aliases.configs, aliases.scopeDiscoveryComplete, workspaceByName, inventory.Packages, components, modulePaths, &aliasWork, &candidateWork, &coverage); handled {
