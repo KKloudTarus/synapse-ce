@@ -737,3 +737,35 @@ func jsReachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vu
 	}
 	return subs
 }
+
+// ecosystemReachabilitySubjects builds Tier-1 subjects for a package-URL ecosystem whose reachability is
+// answered by NAME (Rust crates, Composer packages, Ruby gems), mirroring the Python builder. The
+// JavaScript ecosystem is deliberately not built this way: it installs several versions of one package,
+// so its subjects carry the exact component purl instead.
+func ecosystemReachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vulnerability, doc *sbom.SBOM, purlPrefix string) []ports.ReachabilitySubject {
+	if doc == nil {
+		return nil
+	}
+	names := map[string]bool{}
+	for _, c := range doc.Components {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.PURL)), purlPrefix) {
+			names[strings.ToLower(c.Name)] = true
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	byDedup := make(map[string]vulnerability.Vulnerability, len(vulns))
+	for _, v := range vulns {
+		byDedup[vulnDedupKey(v)] = v
+	}
+	var subs []ports.ReachabilitySubject
+	for _, f := range findings {
+		v, ok := byDedup[f.DedupKey]
+		if !ok || !names[strings.ToLower(v.Component)] {
+			continue
+		}
+		subs = append(subs, ports.ReachabilitySubject{FindingID: f.ID, Symbols: []string{v.Component}})
+	}
+	return subs
+}

@@ -63,41 +63,42 @@ type Service struct {
 	riskEnricher                     ports.RiskEnricher
 	licScan                          ports.LicenseScanner
 	licEnricher                      ports.LicenseEnricher
-	sbomEnricher                     ports.SBOMEnricher              // optional manifest enrichment (gem edges, maven/gradle deps, pnpm scope)
-	licCoord                         ports.MavenCoordResolver        // optional: recover real Maven coords from JAR pom.properties before license lookup
-	jarChecksum                      ports.JarChecksumResolver       // optional: capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
-	jarHash                          ports.JarHashResolver           // optional: recover coords of shaded/metadata-less JARs via SHA-1
-	licFile                          ports.LicenseFileResolver       // optional offline license-text fallback from JAR LICENSE files
-	sastAnalyzer                     ports.SASTAnalyzer              // optional deterministic pattern-SAST over the live workspace
-	secretScanner                    ports.SecretScanner             // optional deterministic secret scan over the live workspace
-	includeTestSecrets               bool                            // report secrets in test/fixture/docs paths (default false: suppress)
-	misconfig                        ports.MisconfigScanner          // optional deterministic IaC/config misconfig scan over the live workspace
-	fpTriager                        ports.FPTriager                 // optional LLM false-positive critique of production-scope source findings
-	osPkgCataloger                   ports.OSPackageCataloger        // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
-	instCataloger                    ports.InstalledPackageCataloger // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
-	artifactCataloger                ports.ArtifactCataloger         // optional owned standalone-artifact cataloging (.msi product identity) from the workspace dir
-	suppression                      ports.SuppressionLoader         // optional repo-committed .synapseignore accepted-risk policy
-	vexLoader                        ports.VEXLoader                 // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
-	complianceOn                     bool                            // when set, attach the AppSec-baseline compliance report to a scan
-	dbMaxAgeDays                     int                             // when > 0, warn if a reference DB (KEV/EPSS/vuln-DB) is older than this
-	detectionPriority                string                          // server default detection priority (comprehensive|precise); empty = comprehensive
-	reachability                     ports.ReachabilityRecorder      // optional deterministic Tier-2 reachability proof (Go call-graph)
-	pyReachability                   ports.ReachabilityRecorder      // optional deterministic Tier-1 Python import-reachability proof
-	jsReachability                   jsReachabilityRecorder          // optional deterministic Tier-1 JavaScript import-reachability proof
-	correlation                      ports.CorrelationRecorder       // optional cross-check disagreement → judgment minter
-	sbomGen2                         ports.SBOMGenerator             // optional 2nd SBOM producer for the cross-check
-	sbomCache                        ports.SBOMCache                 // optional content+version-addressed cache of the generated SBOM
-	sbomCrossCheck                   ports.SBOMCrossCheckRecorder    // optional SBOM-producer disagreement → judgment minter
-	taint                            ports.TaintScanner              // optional deterministic taint-analysis → gated CapSAST proposals
-	graphResolver                    ports.DependencyGraphResolver   // optional transitive-edge resolver (Go via `go mod graph`)
-	mavenResolver                    ports.MavenResolver             // optional Maven transitive-tree resolver (`mvn dependency:list`)
-	gradleResolver                   ports.GradleResolver            // optional Gradle transitive-tree resolver (`gradle dependencies`)
-	npmResolver                      ports.NPMResolver               // optional npm resolver (`npm install --package-lock-only`) for a lockfile-less package.json
-	manifestResolvers                []ports.ManifestResolver        // optional lockfile-less resolvers for composer.json / Gemfile / pyproject.toml / ...
-	jvmReach                         ports.JVMReachabilityAnalyzer   // optional coarse JVM class-reachability tagger
-	sevEnricher                      ports.SeverityEnricher          // optional NVD CVSS backfill for unknown-severity vulns
-	ignoreUnfixed                    bool                            // when set, don't promote no-fix vulns to findings (Trivy --ignore-unfixed)
-	guard                            *execution.Guard                // shared scope + window + audit gate; built in NewService
+	sbomEnricher                     ports.SBOMEnricher                    // optional manifest enrichment (gem edges, maven/gradle deps, pnpm scope)
+	licCoord                         ports.MavenCoordResolver              // optional: recover real Maven coords from JAR pom.properties before license lookup
+	jarChecksum                      ports.JarChecksumResolver             // optional: capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
+	jarHash                          ports.JarHashResolver                 // optional: recover coords of shaded/metadata-less JARs via SHA-1
+	licFile                          ports.LicenseFileResolver             // optional offline license-text fallback from JAR LICENSE files
+	sastAnalyzer                     ports.SASTAnalyzer                    // optional deterministic pattern-SAST over the live workspace
+	secretScanner                    ports.SecretScanner                   // optional deterministic secret scan over the live workspace
+	includeTestSecrets               bool                                  // report secrets in test/fixture/docs paths (default false: suppress)
+	misconfig                        ports.MisconfigScanner                // optional deterministic IaC/config misconfig scan over the live workspace
+	fpTriager                        ports.FPTriager                       // optional LLM false-positive critique of production-scope source findings
+	osPkgCataloger                   ports.OSPackageCataloger              // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
+	instCataloger                    ports.InstalledPackageCataloger       // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
+	artifactCataloger                ports.ArtifactCataloger               // optional owned standalone-artifact cataloging (.msi product identity) from the workspace dir
+	suppression                      ports.SuppressionLoader               // optional repo-committed .synapseignore accepted-risk policy
+	vexLoader                        ports.VEXLoader                       // optional in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
+	complianceOn                     bool                                  // when set, attach the AppSec-baseline compliance report to a scan
+	dbMaxAgeDays                     int                                   // when > 0, warn if a reference DB (KEV/EPSS/vuln-DB) is older than this
+	detectionPriority                string                                // server default detection priority (comprehensive|precise); empty = comprehensive
+	reachability                     ports.ReachabilityRecorder            // optional deterministic Tier-2 reachability proof (Go call-graph)
+	pyReachability                   ports.ReachabilityRecorder            // optional deterministic Tier-1 Python import-reachability proof
+	jsReachability                   jsReachabilityRecorder                // optional deterministic Tier-1 JavaScript import-reachability proof
+	srcReachability                  map[string]ports.ReachabilityRecorder // optional Tier-1 provers keyed by package-URL type
+	correlation                      ports.CorrelationRecorder             // optional cross-check disagreement → judgment minter
+	sbomGen2                         ports.SBOMGenerator                   // optional 2nd SBOM producer for the cross-check
+	sbomCache                        ports.SBOMCache                       // optional content+version-addressed cache of the generated SBOM
+	sbomCrossCheck                   ports.SBOMCrossCheckRecorder          // optional SBOM-producer disagreement → judgment minter
+	taint                            ports.TaintScanner                    // optional deterministic taint-analysis → gated CapSAST proposals
+	graphResolver                    ports.DependencyGraphResolver         // optional transitive-edge resolver (Go via `go mod graph`)
+	mavenResolver                    ports.MavenResolver                   // optional Maven transitive-tree resolver (`mvn dependency:list`)
+	gradleResolver                   ports.GradleResolver                  // optional Gradle transitive-tree resolver (`gradle dependencies`)
+	npmResolver                      ports.NPMResolver                     // optional npm resolver (`npm install --package-lock-only`) for a lockfile-less package.json
+	manifestResolvers                []ports.ManifestResolver              // optional lockfile-less resolvers for composer.json / Gemfile / pyproject.toml / ...
+	jvmReach                         ports.JVMReachabilityAnalyzer         // optional coarse JVM class-reachability tagger
+	sevEnricher                      ports.SeverityEnricher                // optional NVD CVSS backfill for unknown-severity vulns
+	ignoreUnfixed                    bool                                  // when set, don't promote no-fix vulns to findings (Trivy --ignore-unfixed)
+	guard                            *execution.Guard                      // shared scope + window + audit gate; built in NewService
 	codeQuality                      interface {
 		BuildReport(context.Context, string) (codequality.Report, error)
 	}
@@ -325,6 +326,27 @@ func (s *Service) SetPyReachability(r ports.ReachabilityRecorder) { s.pyReachabi
 // rather than re-deriving one that could differ.
 type jsReachabilityRecorder interface {
 	RecordWithSBOM(ctx context.Context, engagementID shared.ID, targetRef string, doc *sbom.SBOM, subjects []ports.ReachabilitySubject) (int, error)
+}
+
+// sourceReachabilityEcosystems is the fixed, ordered set of name-addressed ecosystems, so the pass runs
+// deterministically regardless of registration order.
+var sourceReachabilityEcosystems = []struct {
+	purlType string
+	prefix   string
+}{
+	{purlType: "cargo", prefix: "pkg:cargo/"},
+	{purlType: "composer", prefix: "pkg:composer/"},
+	{purlType: "gem", prefix: "pkg:gem/"},
+}
+
+// SetSourceReachability registers a deterministic Tier-1 import-reachability prover for one package-URL
+// ecosystem ("cargo", "composer", "gem"). Best-effort and opt-in; a prover that reports no coverage
+// leaves the prior tier standing.
+func (s *Service) SetSourceReachability(purlType string, r ports.ReachabilityRecorder) {
+	if s.srcReachability == nil {
+		s.srcReachability = map[string]ports.ReachabilityRecorder{}
+	}
+	s.srcReachability[purlType] = r
 }
 
 // SetJSReachability configures the optional deterministic Tier-1 JavaScript import-reachability prover.
@@ -2439,6 +2461,20 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if opts.scansVulnerabilities() && s.pyReachability != nil {
 		if subs := pyReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
 			_, _ = s.pyReachability.Record(ctx, engagementID, ws.Dir, subs)
+		}
+	}
+
+	// Deterministic TIER-1 reachability for the name-addressed ecosystems (Rust, PHP, Ruby). Each is
+	// best-effort and opt-in; a no-coverage result is ignored so the scan is never failed by it.
+	if opts.scansVulnerabilities() && len(s.srcReachability) > 0 {
+		for _, eco := range sourceReachabilityEcosystems {
+			recorder, ok := s.srcReachability[eco.purlType]
+			if !ok || recorder == nil {
+				continue
+			}
+			if subs := ecosystemReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM, eco.prefix); len(subs) > 0 {
+				_, _ = recorder.Record(ctx, engagementID, ws.Dir, subs)
+			}
 		}
 	}
 

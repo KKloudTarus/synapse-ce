@@ -294,6 +294,16 @@ type Config struct {
 	// first-party import graph cannot prove a transitive package unused. Also requires the judgment
 	// lifecycle (SYNAPSE_JUDGMENTS_ENABLED).
 	JSReachabilityEnabled bool
+
+	// RustReachabilityEnabled, PHPReachabilityEnabled and RubyReachabilityEnabled turn on deterministic
+	// Tier-1 import-reachability for those ecosystems: a declared dependency that first-party source
+	// never references becomes not_reachable, which the export path turns into an OpenVEX not_affected
+	// justification. All are source-only (nothing is executed, installed or resolved over the network),
+	// best-effort and opt-in, and each refuses a verdict whenever a dynamic construct could hide a
+	// reference. All require the judgment lifecycle (SYNAPSE_JUDGMENTS_ENABLED).
+	RustReachabilityEnabled bool
+	PHPReachabilityEnabled  bool
+	RubyReachabilityEnabled bool
 	// TaintCallgraphBin is the pinned synapse-callgraph binary: the sandboxed go/ssa call-graph builder
 	// the taint analyzer shells out to. In-repo cmd (built by `make build` into bin/); pin its hash via
 	// SYNAPSE_TOOL_HASHES, like any other tool binary.
@@ -482,6 +492,9 @@ func Load() Config {
 		ReachabilityEnabled:          getbool("SYNAPSE_REACHABILITY_ENABLED", true),
 		PyReachabilityEnabled:        getbool("SYNAPSE_PYREACH_ENABLED", false),
 		JSReachabilityEnabled:        getbool("SYNAPSE_JSREACH_ENABLED", false),
+		RustReachabilityEnabled:      getbool("SYNAPSE_REACH_RUST", false),
+		PHPReachabilityEnabled:       getbool("SYNAPSE_REACH_PHP", false),
+		RubyReachabilityEnabled:      getbool("SYNAPSE_REACH_RUBY", false),
 		CrossCheckEnabled:            getbool("SYNAPSE_CROSSCHECK_ENABLED", true),
 		SBOMCrossCheckEnabled:        getbool("SYNAPSE_SBOM_CROSSCHECK_ENABLED", true),
 		WriteupDraftsEnabled:         getbool("SYNAPSE_WRITEUP_DRAFTS_ENABLED", false), // needs agent → opt-in
