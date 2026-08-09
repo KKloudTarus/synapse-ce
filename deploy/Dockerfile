@@ -19,7 +19,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -o /out/synapse-api ./cmd/synapse-api
+RUN CGO_ENABLED=0 go build -trimpath -o /out/synapse-api ./cmd/synapse-api \
+    && CGO_ENABLED=0 go build -trimpath -o /out/synapse-dast-helper ./cmd/synapse-dast-helper
 # synapse-cli is bundled too so the image doubles as a cross-platform scanner
 # (`docker run … synapse-cli scan /scan`) – the SCA path runs identically on any host
 # that runs Linux containers (Windows/macOS via Docker Desktop, Linux natively).
@@ -49,6 +50,7 @@ RUN apt-get update \
     && mkdir -p /home/synapse/.m2 /home/synapse/.gradle /home/synapse/project-source-artifacts \
     && chown -R synapse:synapse /home/synapse
 COPY --from=build /out/synapse-api /usr/local/bin/synapse-api
+COPY --from=build /out/synapse-dast-helper /usr/local/bin/synapse-dast-helper
 COPY --from=build /out/synapse-cli /usr/local/bin/synapse-cli
 COPY --from=syft /syft /usr/local/bin/syft
 COPY --from=grype /grype /usr/local/bin/grype
@@ -71,6 +73,7 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/synapse-api"]
 # ---------------------------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot AS api
 COPY --from=build /out/synapse-api /synapse-api
+COPY --from=build /out/synapse-dast-helper /synapse-dast-helper
 COPY --from=build /out/synapse-cli /synapse-cli
 COPY --from=syft /syft /usr/local/bin/syft
 COPY --from=grype /grype /usr/local/bin/grype

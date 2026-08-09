@@ -83,4 +83,14 @@ func TestPostgresAgentStores(t *testing.T) {
 	if dec.State != agent.ApprovalApproved || dec.DecidedBy != "bob" {
 		t.Fatalf("decision round-trip wrong: %+v", dec)
 	}
+	if err := as.Consume(ctx, "actA"); err != nil {
+		t.Fatal(err)
+	}
+	if err := as.Consume(ctx, "actA"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("2nd consume must be ErrConflict, got %v", err)
+	}
+	_, dec, _ = as.Get(ctx, "actA")
+	if dec.State != agent.ApprovalConsumed || dec.State.Admitted() {
+		t.Fatalf("consumed approval must not remain admitted: %+v", dec)
+	}
 }

@@ -27,6 +27,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastchecks"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastengine"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
 	egressinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/egress"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetca"
@@ -105,6 +107,7 @@ import (
 	credentialsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/credentials"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/crosscheckjudge"
 	dastrunneruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
+	dastsessionuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastsession"
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
 	egresspolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/egress"
@@ -1057,13 +1060,31 @@ func main() {
 					log.Error("DAST safe verifier runner init failed", "err", derr)
 					os.Exit(1)
 				}
-				dastWorkflowSvc, werr := dastworkflowuc.NewService(safetyGate, approvalSvc, approvalStore, dastRunnerSvc, clock, ids)
+				dastWorkflowSvc, werr := dastworkflowuc.NewService(safetyGate, approvalSvc, approvalStore, dastRunnerSvc, evidenceService, clock, ids)
 				if werr != nil {
 					log.Error("DAST verifier workflow init failed", "err", werr)
 					os.Exit(1)
 				}
 				router.SetDASTWorkflow(dastWorkflowSvc)
-				log.Info("DAST verifier workflow ENABLED (sandbox egress-enforced)")
+				engine, eerr := dastengine.New(reconRunner, cfg.DASTHelperBin, cfg.DASTMaxWallClock, cfg.ReconMaxOutput)
+				if eerr != nil {
+					log.Error("authenticated DAST engine init failed", "err", eerr)
+					os.Exit(1)
+				}
+				sessionSvc, serr := dastsessionuc.NewService(engine, reconGuard, evidenceService)
+				if serr != nil {
+					log.Error("authenticated DAST session init failed", "err", serr)
+					os.Exit(1)
+				}
+				ceilings := dastworkflowuc.DefaultScanCeilings()
+				ceilings.MaxReauth, ceilings.RatePerSec, ceilings.Concurrency = cfg.DASTMaxReauth, cfg.DASTRatePerSec, cfg.DASTConcurrency
+				ceilings.Limits.Depth, ceilings.Limits.Pages, ceilings.Limits.Requests, ceilings.Limits.WallClock = cfg.DASTMaxDepth, cfg.DASTMaxPages, cfg.DASTMaxRequests, cfg.DASTMaxWallClock
+				if err := dastWorkflowSvc.SetScan(sessionSvc, cfg.DASTHelperBin, evidenceService, dastchecks.NewEvaluator(), dastchecks.NewEvaluator(), judgmentSvc, runtimeVerifierSvc, ceilings); err != nil {
+					log.Error("authenticated DAST scan workflow init failed", "err", err)
+					os.Exit(1)
+				}
+				router.SetDASTScan(dastWorkflowSvc)
+				log.Info("DAST verifier and authenticated scan workflows ENABLED (sandbox egress-enforced)")
 			} else {
 				log.Warn("DAST verifier workflow DISABLED: sandbox kernel egress enforcement is unavailable")
 			}

@@ -76,27 +76,19 @@ func TestScopeOutOfScopeWins(t *testing.T) {
 	}
 }
 
-func TestScopeOutOfScopeURLDeniesHostWide(t *testing.T) {
+func TestScopeURLDenyIsPathAware(t *testing.T) {
 	s := Scope{
-		InScope:    []Target{{Kind: TargetDomain, Value: "*.acme.io"}},
-		OutOfScope: []Target{{Kind: TargetURL, Value: "https://payments.acme.io/"}},
+		InScope:    []Target{{Kind: TargetURL, Value: "https://payments.acme.io/"}},
+		OutOfScope: []Target{{Kind: TargetURL, Value: "https://payments.acme.io/admin"}},
 	}
-	cases := []Target{
-		{Kind: TargetURL, Value: "https://payments.acme.io/checkout"},
-		{Kind: TargetURL, Value: "http://payments.acme.io/checkout"},
-		{Kind: TargetURL, Value: "https://payments.acme.io:8443/checkout"},
-		{Kind: TargetDomain, Value: "payments.acme.io"},
+	if s.AllowsTarget(Target{Kind: TargetURL, Value: "https://payments.acme.io/admin/users"}) {
+		t.Error("out-of-scope URL path must deny its descendants")
 	}
-	for _, req := range cases {
-		if s.AllowsTarget(req) {
-			t.Errorf("out-of-scope URL host must deny %+v", req)
-		}
+	if !s.AllowsTarget(Target{Kind: TargetURL, Value: "https://payments.acme.io/checkout"}) {
+		t.Error("URL deny must not deny a sibling path")
 	}
-	if s.Allows("payments.acme.io") {
-		t.Error("value-only matching must preserve the URL host carve-out")
-	}
-	if !s.Allows("api.acme.io") {
-		t.Error("the carve-out must not deny a different in-scope host")
+	if !s.AllowsTarget(Target{Kind: TargetURL, Value: "https://payments.acme.io/administrator"}) {
+		t.Error("URL deny must use path segments, not string prefixes")
 	}
 }
 
@@ -106,6 +98,7 @@ func TestScopeInScopeURLRemainsSchemeAndPortSpecific(t *testing.T) {
 		req  Target
 		want bool
 	}{
+		{req: Target{Kind: TargetURL, Value: "https://app.acme.io/login/reset"}, want: true},
 		{req: Target{Kind: TargetURL, Value: "https://app.acme.io/other"}, want: true},
 		{req: Target{Kind: TargetURL, Value: "https://app.acme.io:443/other"}, want: true},
 		{req: Target{Kind: TargetURL, Value: "http://app.acme.io/other"}, want: false},
@@ -240,7 +233,8 @@ func TestScopeAllowsTarget(t *testing.T) {
 		{"subdomain of exact host not covered", Target{Kind: TargetDomain, Value: "x.host.example.com"}, false},
 		{"exact ip", Target{Kind: TargetIP, Value: "192.168.1.5"}, true},
 		{"url host falls inside cidr", Target{Kind: TargetURL, Value: "http://10.0.0.9:8080/x"}, true},
-		{"url matches URL entry by scheme host and effective port", Target{Kind: TargetURL, Value: "https://app.acme.io/other"}, true},
+		{"url matches URL entry path prefix", Target{Kind: TargetURL, Value: "https://app.acme.io/login/reset"}, true},
+		{"domain scope remains host-wide alongside URL path scope", Target{Kind: TargetURL, Value: "https://app.acme.io/other"}, true},
 		{"domain scope remains intentionally host-wide", Target{Kind: TargetURL, Value: "http://app.acme.io/other"}, true},
 		{"userinfo is rejected", Target{Kind: TargetURL, Value: "https://app.acme.io@evil.com/x"}, false},
 		{"unrelated host", Target{Kind: TargetDomain, Value: "evil.com"}, false},

@@ -201,3 +201,17 @@ func TestLoadMaxWorkspaceBytes(t *testing.T) {
 		t.Errorf("MaxWorkspaceBytes from env = %d, want 8589934592", got)
 	}
 }
+
+func TestLoadDASTCeilingsFailClosed(t *testing.T) {
+	t.Setenv("SYNAPSE_DAST_MAX_REAUTH", "3")
+	t.Setenv("SYNAPSE_DAST_RATE_PER_SEC", "6")
+	t.Setenv("SYNAPSE_DAST_CONCURRENCY", "5")
+	t.Setenv("SYNAPSE_DAST_MAX_DEPTH", "9")
+	t.Setenv("SYNAPSE_DAST_MAX_PAGES", "2001")
+	t.Setenv("SYNAPSE_DAST_MAX_REQUESTS", "20001")
+	t.Setenv("SYNAPSE_DAST_MAX_WALL_CLOCK", "31m")
+	config := Load()
+	if config.DASTMaxReauth != 2 || config.DASTRatePerSec != 5 || config.DASTConcurrency != 4 || config.DASTMaxDepth != 8 || config.DASTMaxPages != 2000 || config.DASTMaxRequests != 20000 || config.DASTMaxWallClock != 30*time.Minute {
+		t.Fatalf("DAST ceilings did not fail closed: %+v", config)
+	}
+}

@@ -17,6 +17,7 @@ import (
 // model can never smuggle a free-text sentence into the one []string field of a Claim (so
 // no LLM prose reaches a deliverable).
 var driverRE = regexp.MustCompile(`^[a-z][a-z0-9_]*((<=|>=|==|!=|<|>)[0-9]+(\.[0-9]+)?)?$`)
+var fingerprintRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$|^[a-z][a-z0-9_]{0,15}_[a-f0-9]{64}$`)
 
 // These fields can be proposed by an LLM before a verifier reviews the claim. Keep their wire
 // representation bounded and token-shaped at the domain seam so model prose/control characters
@@ -148,6 +149,35 @@ type SASTClaim struct {
 	CWE      string `json:"cwe"`
 	Location string `json:"location"` // path[:line]
 	Rule     string `json:"rule"`
+}
+
+// DASTClaim is the typed result of a dynamic check. Source and Fingerprint are
+// stable tokens supplied by the first-party check corpus and identify the exact
+// runtime observation without carrying response content or credentials.
+type DASTClaim struct {
+	CWE             string `json:"cwe"`
+	Location        string `json:"location"`
+	Rule            string `json:"rule"`
+	Source          string `json:"source"`
+	Fingerprint     string `json:"fingerprint"`
+	ProofEvidenceID string `json:"proof_evidence_id"`
+}
+
+// Capability identifies this claim's brain.
+func (DASTClaim) Capability() Capability { return CapDAST }
+
+// Validate requires structured finding fields and stable, secret-free dedup tokens.
+func (c DASTClaim) Validate() error {
+	if strings.TrimSpace(c.CWE) == "" || strings.TrimSpace(c.Location) == "" || strings.TrimSpace(c.Rule) == "" {
+		return fmt.Errorf("%w: dast claim requires a CWE, location, and rule", shared.ErrValidation)
+	}
+	if !driverRE.MatchString(c.Source) || !fingerprintRE.MatchString(c.Fingerprint) {
+		return fmt.Errorf("%w: dast claim source and fingerprint must be lowercase tokens", shared.ErrValidation)
+	}
+	if strings.TrimSpace(c.ProofEvidenceID) == "" {
+		return fmt.Errorf("%w: dast claim requires sealed proof evidence", shared.ErrValidation)
+	}
+	return nil
 }
 
 // Capability identifies this claim's brain.
@@ -400,6 +430,12 @@ func UnmarshalClaim(data []byte) (Claim, error) {
 			return nil, err
 		}
 		c = sc
+	case CapDAST:
+		var dc DASTClaim
+		if err := strictDecode(env.Claim, &dc); err != nil {
+			return nil, err
+		}
+		c = dc
 	case CapCritique:
 		var cc CritiqueClaim
 		if err := strictDecode(env.Claim, &cc); err != nil {

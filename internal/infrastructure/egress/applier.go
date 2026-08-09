@@ -22,6 +22,8 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -184,7 +186,9 @@ func (a *Applier) Setup(ctx context.Context, name string, idx int, p ports.Egres
 	// dynamic subdomain pinning is a follow-up).
 	denyRules := filterRules(p.Rules, false)
 	allowRules := filterRules(p.Rules, true)
-	hosts, allowDomainRules := a.resolvePins(ctx, domainRules(p.AllowDomains, p.AllowDomainRules))
+	hosts := pinnedHosts(p.PinnedHosts)
+	resolvedHosts, allowDomainRules := a.resolvePins(ctx, domainRules(p.AllowDomains, p.AllowDomainRules))
+	hosts += resolvedHosts
 	allowRules = append(allowRules, allowDomainRules...)
 	ns.AllowedRules = allowRules // expose the resolved allow-set for the connection-observer verdict
 	if _, deny := a.resolvePins(ctx, domainRules(p.DenyDomains, p.DenyDomainRules)); len(deny) > 0 {
@@ -254,7 +258,8 @@ func (a *Applier) resolvePins(ctx context.Context, domains []ports.DomainRule) (
 			rules = append(rules, ports.EgressRule{Allow: true, Net: netip.PrefixFrom(ip, ip.BitLen()), Ports: domain.Ports})
 			line := ip.String() + " " + host
 			if !seen[line] {
-				b.WriteString(line + "\n")
+				b.WriteString(line)
+				b.WriteByte('\n')
 				seen[line] = true
 			}
 		}
@@ -282,6 +287,28 @@ func writeHostsFile(pinned string) (string, error) {
 }
 
 // filterRules returns the rules with the given Allow value, preserving order.
+func pinnedHosts(pins map[string][]netip.Addr) string {
+	if len(pins) == 0 {
+		return ""
+	}
+	hosts := make([]string, 0, len(pins))
+	for host := range pins {
+		hosts = append(hosts, host)
+	}
+	sort.Strings(hosts)
+	var b strings.Builder
+	for _, host := range hosts {
+		addrs := append([]netip.Addr(nil), pins[host]...)
+		slices.SortFunc(addrs, func(a, b netip.Addr) int { return a.Compare(b) })
+		for _, addr := range addrs {
+			if addr.IsValid() {
+				fmt.Fprintf(&b, "%s %s\n", addr.Unmap(), host)
+			}
+		}
+	}
+	return b.String()
+}
+
 func filterRules(rules []ports.EgressRule, allow bool) []ports.EgressRule {
 	var out []ports.EgressRule
 	for _, r := range rules {

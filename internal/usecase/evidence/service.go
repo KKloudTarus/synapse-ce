@@ -315,6 +315,20 @@ func (s *Service) List(ctx context.Context, engagementID shared.ID) ([]evdom.Evi
 	return s.store.ListByEngagement(ctx, engagementID)
 }
 
+// Get returns one evidence item only when it belongs to engagementID.
+func (s *Service) Get(ctx context.Context, engagementID, evidenceID shared.ID) (evdom.Evidence, error) {
+	items, err := s.store.ListByEngagement(ctx, engagementID)
+	if err != nil {
+		return evdom.Evidence{}, fmt.Errorf("list evidence: %w", err)
+	}
+	for _, item := range items {
+		if item.ID == evidenceID {
+			return item, nil
+		}
+	}
+	return evdom.Evidence{}, fmt.Errorf("evidence %s: %w", evidenceID, shared.ErrNotFound)
+}
+
 var _ ports.ReportEvidenceProvider = (*Service)(nil)
 
 // ListArtifacts returns the captured binary artifacts in the engagement's chain

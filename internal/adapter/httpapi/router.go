@@ -71,6 +71,7 @@ type Router struct {
 	qualityGates      qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
 	qualityProfiles   qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
 	rules             rulesService          // optional; nil ⇒ rule catalog routes are not registered
+	dastScan          dastScanService
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -129,6 +130,14 @@ type dastWorkflowService interface {
 
 // SetDASTWorkflow wires the governed safe-DAST proposal/approval/run endpoints.
 func (rt *Router) SetDASTWorkflow(s dastWorkflowService) { rt.dastWorkflow = s }
+
+type dastScanService interface {
+	ProposeScan(context.Context, string, shared.ID, dastworkflowuc.ScanConfig) (dastworkflowuc.Proposal, error)
+	RunScan(context.Context, string, shared.ID, shared.ID, dastworkflowuc.ScanConfig) (dastworkflowuc.ScanResult, error)
+}
+
+// SetDASTScan wires secret-free authenticated DAST scan endpoints.
+func (rt *Router) SetDASTScan(s dastScanService) { rt.dastScan = s }
 
 // SetThreatModel wires the architecture threat-model ingest/read endpoints. nil ⇒ not registered.
 func (rt *Router) SetThreatModel(s threatModelService) { rt.threatModels = s }
@@ -356,6 +365,10 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/engagements/{id}/judgments/{jid}/runtime-verification/proposals", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.proposeRuntimeVerification)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/dast/approvals/{aid}/decide", rt.authz(userdom.PermReview, rt.withEngTenant(rt.decideRuntimeVerification)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/judgments/{jid}/runtime-verification/proposals/{aid}/run", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.runRuntimeVerification)))
+	}
+	if rt.dastScan != nil {
+		mux.HandleFunc("POST /api/v1/engagements/{id}/dast/proposals", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.proposeDASTScan)))
+		mux.HandleFunc("POST /api/v1/engagements/{id}/dast/proposals/{aid}/run", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.runDASTScan)))
 	}
 	if rt.threatModels != nil { // architecture threat-model ingest (PermOperate) + read (PermView)
 		mux.HandleFunc("PUT /api/v1/engagements/{id}/threat-model", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.putThreatModel)))

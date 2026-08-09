@@ -4,6 +4,7 @@ package toolrunner
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -69,5 +70,20 @@ func readPID(t *testing.T, path string) int {
 
 // alive reports whether pid exists (signal 0 probes without killing).
 func alive(pid int) bool {
-	return syscall.Kill(pid, 0) == nil
+	if syscall.Kill(pid, 0) != nil {
+		return false
+	}
+	// kill(pid, 0) succeeds for zombies, which can linger under a container PID 1
+	// that does not reap children. A zombie cannot execute after the group kill.
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return true
+	}
+	prefix := fmt.Sprintf("%d (", pid)
+	rest, ok := strings.CutPrefix(string(stat), prefix)
+	if !ok {
+		return true
+	}
+	i := strings.LastIndex(rest, ") ")
+	return i < 0 || !strings.HasPrefix(rest[i+2:], "Z")
 }

@@ -50,3 +50,25 @@ func TestMemApprovalIdempotentDecide(t *testing.T) {
 		t.Error("decided action must leave the pending queue")
 	}
 }
+
+func TestMemApprovalConsumeIsSingleUse(t *testing.T) {
+	st := NewApprovalStore()
+	ctx := context.Background()
+	p := agent.ProposedAction{ID: "a1", EngagementID: "e1", Risk: agent.RiskActive, ProposedAt: time.Unix(1, 0)}
+	if err := st.Enqueue(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Decide(ctx, agent.ApprovalDecision{ActionID: "a1", State: agent.ApprovalApproved, DecidedBy: "bob"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Consume(ctx, "a1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Consume(ctx, "a1"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("a second consume must be ErrConflict, got %v", err)
+	}
+	_, decision, err := st.Get(ctx, "a1")
+	if err != nil || decision.State != agent.ApprovalConsumed || decision.State.Admitted() {
+		t.Fatalf("consumed approval must not remain admitted: %+v err=%v", decision, err)
+	}
+}
