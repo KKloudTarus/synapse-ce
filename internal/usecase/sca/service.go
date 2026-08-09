@@ -84,6 +84,7 @@ type Service struct {
 	reachability                     ports.ReachabilityRecorder            // optional deterministic Tier-2 reachability proof (Go call-graph)
 	pyReachability                   ports.ReachabilityRecorder            // optional deterministic Tier-1 Python import-reachability proof
 	jsReachability                   jsReachabilityRecorder                // optional deterministic Tier-1 JavaScript import-reachability proof
+	jsSymbolReachability             jsReachabilityRecorder                // optional deterministic Tier-2 JavaScript affected-export proof
 	srcReachability                  map[string]ports.ReachabilityRecorder // optional Tier-1 provers keyed by package-URL type
 	correlation                      ports.CorrelationRecorder             // optional cross-check disagreement → judgment minter
 	sbomGen2                         ports.SBOMGenerator                   // optional 2nd SBOM producer for the cross-check
@@ -353,6 +354,13 @@ func (s *Service) SetSourceReachability(purlType string, r ports.ReachabilityRec
 // A dependency declared but never imported becomes not_reachable, which the export path turns into an
 // OpenVEX not_affected justification. Best-effort and opt-in; nil disables it.
 func (s *Service) SetJSReachability(r jsReachabilityRecorder) { s.jsReachability = r }
+
+// SetJSSymbolReachability configures the optional deterministic TIER-2 JavaScript prover: not "is this
+// package imported" but "is the affected EXPORT reached". It runs alongside Tier-1 rather than replacing
+// it — a Tier-2 answer supersedes the Tier-1 judgment for the same subject under the existing
+// stronger-tier-wins rule, and a subject Tier-2 cannot answer leaves the Tier-1 judgment standing.
+// Best-effort and opt-in; nil disables it.
+func (s *Service) SetJSSymbolReachability(r jsReachabilityRecorder) { s.jsSymbolReachability = r }
 
 // SetCorrelation configures the optional cross-check disagreement→judgment minter. nil ⇒ no
 // correlation judgments. Best-effort + opt-in: a recorder error is ignored (the scan never fails). A setter
@@ -2481,6 +2489,13 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Deterministic TIER-1 JavaScript import-reachability, best-effort + opt-in. The scan's own SBOM is
 	// handed over so the subjects and the analysis reason over the SAME document. A no-coverage result
 	// is IGNORED here: reachability is an enhancement, so the prior tier stands and the scan never fails.
+	if opts.scansVulnerabilities() && s.jsSymbolReachability != nil {
+		// Tier-2 runs FIRST so the stronger proof is minted before the weaker one; the supersession rule
+		// is order-independent, but recording the specific answer first keeps the audit trail readable.
+		if subs := jsSymbolReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
+			_, _ = s.jsSymbolReachability.RecordWithSBOM(ctx, engagementID, ws.Dir, result.SBOM, subs)
+		}
+	}
 	if opts.scansVulnerabilities() && s.jsReachability != nil {
 		if subs := jsReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
 			_, _ = s.jsReachability.RecordWithSBOM(ctx, engagementID, ws.Dir, result.SBOM, subs)

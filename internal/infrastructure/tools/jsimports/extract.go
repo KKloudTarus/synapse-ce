@@ -11,10 +11,12 @@ type rawImport struct {
 	position  modulegraph.Position
 }
 
-// extraction is everything one source file yields: its import sites and its coverage hazards.
+// extraction is everything one source file yields: its import sites, the references it makes to its own
+// locals (Tier-2 symbol evidence) and its coverage hazards.
 type extraction struct {
-	imports []rawImport
-	hazards []hazard
+	imports   []rawImport
+	localUses []rawLocalUse
+	hazards   []hazard
 }
 
 // indirectLoaders are call-shaped module loaders this scanner does not extract specifiers from. Each one
@@ -73,7 +75,11 @@ type extractor struct {
 	lex *lexer
 	// buf holds tokens pushed back by the recognisers (single-token lookahead is not always enough).
 	buf []token
-	out extraction
+	// history is the recently consumed main-loop tokens, used to recover a CommonJS binding pattern
+	// (`const { a } = require('pkg')`) whose left-hand side has already been passed.
+	history           []token
+	localUseBudgetHit bool
+	out               extraction
 }
 
 func newExtractor(src []byte, jsxAware bool) *extractor {
@@ -125,6 +131,12 @@ func (e *extractor) run() extraction {
 		t := e.next()
 		if t.kind == tokenEOF {
 			break
+		}
+
+		// Tier-2 symbol evidence. Identifiers consumed inside an import clause never reach here, so a
+		// binding site introduces a local without also counting as a use of it.
+		if t.kind == tokenIdent {
+			e.observeLocal(t, prev, havePrev)
 		}
 
 		switch {
@@ -184,10 +196,12 @@ func (e *extractor) run() extraction {
 			}
 		}
 
+		e.recordHistory(t)
 		prev2, prev, havePrev = prev, t, true
 	}
 
 	e.out.hazards = append(e.out.hazards, e.lex.hazards...)
+	e.out.localUses = keepImportedLocals(e.out.imports, e.out.localUses)
 	return e.out
 }
 
@@ -633,7 +647,11 @@ func (e *extractor) handleRequire(kw, prev, prev2 token, havePrev bool) {
 			e.addImport(rawImport{
 				specifier: spec,
 				kind:      modulegraph.ImportCommonJS,
-				position:  modulegraph.Position{Line: kw.line, Column: kw.column},
+				// The binding pattern is recovered from the tokens already consumed. When it cannot be
+				// modelled the bindings are nil, which downstream means the whole module object is bound
+				// and any export could be reached.
+				bindings: commonJSBindings(e.history),
+				position: modulegraph.Position{Line: kw.line, Column: kw.column},
 			}, escaped)
 			return
 		}

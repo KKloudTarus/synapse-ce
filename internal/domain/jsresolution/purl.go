@@ -120,3 +120,34 @@ func IsRuntimeImport(imp ImportResolution, declarationOnlyModules map[string]boo
 	}
 	return !declarationOnlyModules[imp.From]
 }
+
+// A Tier-2 subject names both a component and one of its exports, because "is this package used" and
+// "is this export reached" are different questions with different answers. The fragment form keeps the
+// component PURL intact and appends the symbol, so a Tier-1 subject and a Tier-2 subject can never be
+// mistaken for one another and neither can be silently reinterpreted as the other.
+
+// NPMSymbolSubject renders the Tier-2 subject for one export of one component.
+func NPMSymbolSubject(purl, symbol string) string {
+	return purl + "#" + symbol
+}
+
+// ParseNPMSymbolSubject splits a Tier-2 subject back into its component PURL and export name.
+//
+// It is strict: the PURL half must itself be a valid npm component PURL and the symbol half must be
+// non-empty and free of the separator. A subject that does not round-trip is REFUSED rather than
+// half-interpreted, because a subject whose symbol was misread would be compared against export names it
+// can never equal and would come back not-reachable for every package.
+func ParseNPMSymbolSubject(raw string) (string, string, bool) {
+	hash := strings.LastIndexByte(raw, '#')
+	if hash <= 0 || hash == len(raw)-1 {
+		return "", "", false
+	}
+	purl, symbol := raw[:hash], raw[hash+1:]
+	if strings.ContainsAny(symbol, "#") || strings.TrimSpace(symbol) != symbol {
+		return "", "", false
+	}
+	if _, _, ok := ParseNPMPURL(purl); !ok {
+		return "", "", false
+	}
+	return purl, symbol, true
+}

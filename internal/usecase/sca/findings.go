@@ -11,6 +11,8 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/ignore"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/jsresolution"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/jssymbols"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
@@ -734,6 +736,61 @@ func jsReachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vu
 			continue
 		}
 		subs = append(subs, ports.ReachabilitySubject{FindingID: f.ID, Symbols: []string{purl}})
+	}
+	return subs
+}
+
+// jsSymbolReachabilitySubjects builds TIER-2 JavaScript subjects: one per (component, affected export)
+// pair, encoded as `pkg:npm/name@version#export`.
+//
+// It runs only for findings whose advisory names affected symbols. A vulnerability with no symbol has no
+// Tier-2 question to ask — "which export" is the whole point — and asking it anyway would compare the
+// package name against export names and come back not-reached for everything.
+//
+// A symbol the domain cannot place onto an export name (a deep import path, a nested member) is DROPPED
+// rather than passed through, for the same reason: it could never match, so it would be sealed as a
+// false negative at full confidence.
+func jsSymbolReachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vulnerability, doc *sbom.SBOM) []ports.ReachabilitySubject {
+	if doc == nil {
+		return nil
+	}
+	purlByComponent := map[string]string{}
+	for _, c := range doc.Components {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.PURL)), "pkg:npm/") {
+			purlByComponent[strings.ToLower(c.Name)+"\x00"+c.Version] = c.PURL
+		}
+	}
+	if len(purlByComponent) == 0 {
+		return nil
+	}
+	byDedup := make(map[string]vulnerability.Vulnerability, len(vulns))
+	for _, v := range vulns {
+		byDedup[vulnDedupKey(v)] = v
+	}
+
+	var subs []ports.ReachabilitySubject
+	for _, f := range findings {
+		v, ok := byDedup[f.DedupKey]
+		if !ok || len(v.AffectedSymbols) == 0 {
+			continue
+		}
+		purl, ok := purlByComponent[strings.ToLower(v.Component)+"\x00"+v.Version]
+		if !ok {
+			continue
+		}
+		symbols := make([]string, 0, len(v.AffectedSymbols))
+		seen := map[string]bool{}
+		for _, raw := range v.AffectedSymbols {
+			export, ok := jssymbols.NormalizeAffectedSymbol(v.Component, raw)
+			if !ok || seen[export] {
+				continue
+			}
+			seen[export] = true
+			symbols = append(symbols, jsresolution.NPMSymbolSubject(purl, export))
+		}
+		if len(symbols) > 0 {
+			subs = append(subs, ports.ReachabilitySubject{FindingID: f.ID, Symbols: symbols})
+		}
 	}
 	return subs
 }

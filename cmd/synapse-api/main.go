@@ -1245,6 +1245,15 @@ func main() {
 		scaService.SetJSReachability(jsRecorder)
 		log.Info("Tier-1 JavaScript import-reachability ENABLED (source-only, direct dependencies only → OpenVEX not_affected; best-effort)")
 	}
+	if cfg.JSSymbolReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_JSREACH_TIER2_ENABLED", "javascript affected-export reachability") {
+		jsSymbolRecorder, serr := jsreach.NewSymbolRecorder(jsimports.New(), jsresolve.NewResolver(), judgmentSvc, auditLog, clock)
+		if serr != nil {
+			log.Error("javascript tier-2 reachability init failed", "err", serr)
+			os.Exit(1)
+		}
+		scaService.SetJSSymbolReachability(jsSymbolRecorder)
+		log.Info("javascript TIER-2 affected-export reachability ENABLED (a binding that escapes observation yields no conclusion, never not-reachable)")
+	}
 
 	// Deterministic Tier-1 import-reachability for Rust, PHP and Ruby. Each scanner is SOURCE-ONLY: it
 	// lexes text and never runs cargo, composer, bundler or a language runtime, so no sandbox is needed

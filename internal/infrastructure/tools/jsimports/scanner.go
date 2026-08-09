@@ -191,6 +191,7 @@ func (s *Scanner) Scan(ctx context.Context, root string) (modulegraph.Graph, err
 	graph := modulegraph.Graph{
 		Modules:      sc.modules,
 		Edges:        sc.edges,
+		LocalUses:    sc.localUses,
 		Coverage:     sc.coverage.issues(),
 		FilesScanned: sc.filesScanned,
 		BytesScanned: sc.bytesScanned,
@@ -226,6 +227,8 @@ type scanState struct {
 
 	modules []modulegraph.Module
 	edges   []modulegraph.Edge
+	// localUses is Tier-2 symbol evidence: what each module does with its own local names.
+	localUses []modulegraph.LocalUse
 
 	coverage     *coverageSink
 	filesScanned int
@@ -455,6 +458,7 @@ func (sc *scanState) parseAll(ctx context.Context) error {
 		for _, imp := range result.imports {
 			sc.recordImport(src.relPath, imp)
 		}
+		sc.recordLocalUses(src.relPath, result.localUses)
 	}
 	return nil
 }
