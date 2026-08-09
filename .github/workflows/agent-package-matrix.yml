@@ -113,6 +113,23 @@ jobs:
           done
           echo "control plane did not become healthy"; cat /tmp/control-plane.log; exit 1
 
+      # ADR-0008: no protected route serves until the acceptable-use policy is accepted. A fresh
+      # machine has not accepted it, so the fleet cannot be enrolled without an operator saying so
+      # first — the gate is correct, and the job has to pass through it explicitly rather than around
+      # it. This is what a real first run looks like.
+      - name: Accept the acceptable-use policy
+        run: |
+          set -euo pipefail
+          version="$(curl -fsS http://127.0.0.1:8080/api/v1/aup \
+            -H 'Authorization: Bearer ci-admin-token' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+          test -n "${version}"
+          curl -fsS -X POST http://127.0.0.1:8080/api/v1/aup/accept \
+            -H 'Authorization: Bearer ci-admin-token' \
+            -H 'Content-Type: application/json' \
+            -d "{\"version\":\"${version}\"}" >/dev/null
+          echo "accepted acceptable-use policy ${version}"
+
       - name: Mint an enrolment token
         id: enrol
         run: |
