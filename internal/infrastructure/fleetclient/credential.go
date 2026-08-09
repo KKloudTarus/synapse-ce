@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // ValidateControlPlaneURL refuses a cleartext control-plane URL so the bearer credential cannot
@@ -134,6 +136,33 @@ func WriteSecret(path string, data []byte, mode os.FileMode) error {
 // It is false on Windows, where os.Chmod only toggles the read-only attribute. Callers use it to
 // state the guarantee they actually have rather than the one they wrote down.
 func SecretModeEnforced() bool { return runtime.GOOS != "windows" }
+
+// ReadEnrolTokenFile reads a one-time enrolment token from path, treating an ABSENT file as "no token
+// supplied" rather than as an error.
+//
+// The distinction is the whole point. An enrolment token is consumed on first use, after which the
+// agent holds a long-lived credential and the token is dead weight — so an operator deleting the
+// consumed secret is doing the right thing. If a missing file were fatal, that correct hygiene would
+// mean the agent could never restart, which is how a Kubernetes deployment ends up unable to come back
+// after its Secret is cleaned up. EnsureEnrolled already decides correctly from here: a stored
+// credential wins, and only "no credential AND no token" is an error.
+//
+// Every OTHER read failure stays an error. A file that exists but cannot be read — wrong mode, a
+// directory, a broken mount — is a misconfiguration, and silently treating it as "no token" would
+// convert it into a confusing enrolment failure somewhere further away.
+func ReadEnrolTokenFile(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("fleetclient: read enrolment token file: %w", err)
+	}
+	return strings.TrimSpace(string(b)), nil
+}
 
 // Enroller is the subset of the client EnsureEnrolled needs; *Client satisfies it, and an agent's
 // test fake can too.
