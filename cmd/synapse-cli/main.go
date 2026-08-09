@@ -1013,6 +1013,7 @@ func runScan() {
 	offline := false
 	jsonOut := false
 	sarifOut := false
+	sbomOut := false
 	includeTest := false
 	for i := 3; i < len(os.Args); i++ {
 		switch {
@@ -1037,6 +1038,8 @@ func runScan() {
 			jsonOut = true
 		case os.Args[i] == "--sarif":
 			sarifOut = true
+		case os.Args[i] == "--sbom":
+			sbomOut = true
 		default:
 			fmt.Fprintf(os.Stderr, "synapse-cli: unknown or incomplete option %q\n", os.Args[i])
 			os.Exit(2)
@@ -1055,11 +1058,19 @@ func runScan() {
 		fmt.Fprintf(os.Stderr, "synapse-cli: %v (mode want full|vulnerabilities|licenses; detection-priority want comprehensive|precise)\n", err)
 		os.Exit(2)
 	}
-	if jsonOut && sarifOut {
-		fmt.Fprintln(os.Stderr, "synapse-cli: choose only one of --json or --sarif")
+	// The three output modes each own stdout completely, so they are mutually exclusive rather than
+	// silently last-one-wins.
+	chosen := 0
+	for _, on := range []bool{jsonOut, sarifOut, sbomOut} {
+		if on {
+			chosen++
+		}
+	}
+	if chosen > 1 {
+		fmt.Fprintln(os.Stderr, "synapse-cli: choose only one of --json, --sarif or --sbom")
 		os.Exit(2)
 	}
-	if err := run(os.Args[2], failOn, mode, priority, ignoreUnfixed, image, offline, jsonOut, sarifOut, includeTest); err != nil {
+	if err := run(os.Args[2], failOn, mode, priority, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 		os.Exit(1)
 	}
@@ -1137,7 +1148,7 @@ func (stderrAudit) Record(_ context.Context, e ports.AuditEntry) error {
 
 var _ ports.AuditLogger = stderrAudit{}
 
-func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfixed, image, offline, jsonOut, sarifOut, includeTest bool) error {
+func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest bool) error {
 	// An image target is an OCI reference (acquired via crane → OCI layout); a local
 	// target is a filesystem path that must be absolute for the scope check.
 	target := strings.TrimSpace(path)
@@ -1396,6 +1407,19 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	}
 
 	switch {
+	case sbomOut:
+		// CycloneDX to stdout, so nothing else mixes in. This is the SAME renderer the engagement
+		// export uses (#412 req 5): a release SBOM produced by a separate path could drift from the one
+		// customers get, and an engine we would not trust to describe our own artifact has no business
+		// describing theirs.
+		doc, mErr := scauc.MarshalCycloneDX(res.SBOM, res.Target, time.Now().UTC())
+		if mErr != nil {
+			return mErr
+		}
+		// A short write to stdout is a truncated SBOM, which must not read as a successful one.
+		if _, wErr := os.Stdout.Write(append(doc, '\n')); wErr != nil {
+			return fmt.Errorf("write sbom: %w", wErr)
+		}
 	case sarifOut:
 		// SARIF 2.1.0 for a code-scanning uploader (e.g. GitHub codeql-action/upload-sarif), to stdout so
 		// nothing else mixes in. Covers every finding kind (SCA/SAST/secret/misconfig); first-party kinds
