@@ -5,7 +5,7 @@ import { Button } from './ui'
 export function Topbar({ onMenu }: { onMenu?: () => void }) {
   const { logout } = useAuth()
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-bg/60 px-4 backdrop-blur sm:px-6">
+    <header className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-border bg-surface/90 px-4 backdrop-blur sm:px-6">
       <div className="flex items-center gap-2">
         {onMenu && (
           <button
@@ -17,9 +17,13 @@ export function Topbar({ onMenu }: { onMenu?: () => void }) {
           </button>
         )}
         <div className="flex items-center gap-2 text-sm text-mutedfg">
-          <ShieldCheck className="size-4 text-accent" />
-          <span className="hidden sm:inline">Authorized testing · scope-enforced server-side</span>
-          <span className="sm:hidden">Scope-enforced</span>
+          <span className="flex size-8 items-center justify-center rounded-lg bg-accent/10 text-accent">
+            <ShieldCheck className="size-4" />
+          </span>
+          <div>
+            <div className="font-medium text-foreground">Security operations</div>
+            <div className="hidden text-xs text-subtlefg sm:block">Authorized testing · scope enforced server-side</div>
+          </div>
         </div>
       </div>
       <Button variant="ghost" onClick={logout} className="shrink-0 px-2.5 py-1.5" aria-label="Disconnect">

@@ -1,47 +1,72 @@
 @import "tailwindcss";
 
-/* Synapse design tokens – Linear/Vercel-grade dark. A layered surface model,
-   restrained indigo accent; green is reserved for semantic success/allow/live.
-   Tailwind v4 maps --color-x → bg-x / text-x / border-x / ring-x. */
+/* Synapse workspace tokens. The main workspace is light by default while the
+   navigation stays navy in both themes. Tailwind v4 maps --color-x utilities. */
 @theme {
-  /* layered surfaces: darkest background → raised hover */
-  --color-bg: #0a0a0f; /* app background */
-  --color-surface: #0d0d13; /* sidebar / top bar */
-  --color-card: #111118; /* cards / panels (surface-1) */
-  --color-elevated: #1a1a24; /* inputs / nested (surface-2) */
-  --color-raised: #24242f; /* hover (surface-3) */
-  --color-muted: #1a1a24; /* chips / track */
+  --color-bg: #f5f7fb;
+  --color-surface: #ffffff;
+  --color-card: #ffffff;
+  --color-elevated: #f7f8fb;
+  --color-raised: #eef1f6;
+  --color-muted: #eef1f6;
 
-  /* text */
-  --color-foreground: #ededf2; /* primary */
-  --color-mutedfg: #9a9aae; /* secondary */
-  --color-subtlefg: #7c7c90; /* hints/captions (nudged from #6a6a7e to clear WCAG AA) */
+  --color-foreground: #172033;
+  --color-mutedfg: #5c667a;
+  --color-subtlefg: #7e8799;
 
-  /* borders */
-  --color-border: #2a2a38; /* subtle, ~1px */
-  --color-borderstrong: #3a3a4a;
+  --color-border: #dfe3eb;
+  --color-borderstrong: #c8ced9;
 
-  /* indigo accent – used sparingly (primary actions, nav-active, focus) */
-  --color-brand: #6366f1;
-  --color-brandhover: #5558e0;
+  --color-brand: #4f46e5;
+  --color-brandhover: #4338ca;
   --color-brandfg: #ffffff;
-  --color-branddim: #8b8efc; /* indigo for links/labels on dark */
+  --color-branddim: #4f46e5;
+
+  --color-nav: #101a33;
+  --color-navborder: #22304e;
+  --color-navfg: #f8fafc;
+  --color-navmuted: #aeb8cc;
+  --color-navsubtle: #71809b;
+  --color-navhover: #182642;
+  --color-navactive: #23345a;
 
   /* green – semantic success / allow / live only */
   --color-accent: #22c55e;
   --color-accentfg: #04210f;
   --color-info: #38bdf8;
 
-  /* severity scale (vivid on dark) */
+  --color-critical: #dc2945;
+  --color-criticalfg: #ffffff;
+  --color-high: #e7661d;
+  --color-medium: #b97a0f;
+  --color-low: #168b48;
+  --color-infosev: #64748b;
+
+  --font-sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+:root[data-theme='dark'] {
+  --color-bg: #0a0a0f;
+  --color-surface: #0d0d13;
+  --color-card: #111118;
+  --color-elevated: #1a1a24;
+  --color-raised: #24242f;
+  --color-muted: #1a1a24;
+  --color-foreground: #ededf2;
+  --color-mutedfg: #9a9aae;
+  --color-subtlefg: #7c7c90;
+  --color-border: #2a2a38;
+  --color-borderstrong: #3a3a4a;
+  --color-brand: #6366f1;
+  --color-brandhover: #5558e0;
+  --color-branddim: #8b8efc;
   --color-critical: #fb4d63;
   --color-criticalfg: #2a0710;
   --color-high: #fb8b3c;
   --color-medium: #f5bb3f;
   --color-low: #22c55e;
   --color-infosev: #8593aa;
-
-  --font-sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
 @layer base {
@@ -57,6 +82,10 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    color-scheme: light;
+  }
+  :root[data-theme='dark'] body {
+    color-scheme: dark;
   }
   h1,
   h2,
@@ -90,17 +119,20 @@
   /* soft elevation + a 1px "lit from above" top highlight */
   .elev {
     box-shadow:
-      inset 0 1px 0 0 rgb(255 255 255 / 0.05),
-      0 1px 2px rgb(0 0 0 / 0.4),
-      0 16px 32px -18px rgb(0 0 0 / 0.6);
+      inset 0 1px 0 0 rgb(255 255 255 / 0.35),
+      0 1px 2px rgb(15 23 42 / 0.06),
+      0 12px 28px -18px rgb(15 23 42 / 0.24);
   }
   /* subtle top sheen gradient (layers under .elev's hairline) */
   .card-sheen {
+    background-image: linear-gradient(180deg, color-mix(in srgb, white 45%, transparent), transparent 42%);
+  }
+  :root[data-theme='dark'] .card-sheen {
     background-image: linear-gradient(180deg, color-mix(in srgb, white 4%, transparent), transparent 40%);
   }
   /* recessed input – subtle inset so form fields read as fields, not flat blocks */
   .input-inset {
-    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.28);
+    box-shadow: inset 0 1px 2px rgb(15 23 42 / 0.06);
   }
   /* premium primary button: indigo gradient + top highlight + indigo glow */
   .btn-primary {
@@ -114,7 +146,7 @@
     background:
       radial-gradient(
         130% 130% at 100% 0%,
-        color-mix(in srgb, var(--color-brand) 22%, transparent) 0%,
+        color-mix(in srgb, var(--color-brand) 12%, transparent) 0%,
         transparent 55%
       ),
       linear-gradient(180deg, var(--color-elevated), var(--color-card));

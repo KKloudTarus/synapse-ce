@@ -88,7 +88,7 @@ describe('App Routing - Rules', () => {
     )
 
     const rulesLink = screen.getByRole('link', { name: /Rules/i })
-    expect(rulesLink.className).toMatch(/bg-brand\/10|text-branddim/)
+    expect(rulesLink.className).toMatch(/bg-navactive|text-white/)
   })
 
   it('maintains active state on Rules detail', async () => {
@@ -99,7 +99,7 @@ describe('App Routing - Rules', () => {
     )
 
     const rulesLink = screen.getByRole('link', { name: /Rules/i })
-    expect(rulesLink.className).toMatch(/bg-brand\/10|text-branddim/)
+    expect(rulesLink.className).toMatch(/bg-navactive|text-white/)
   })
 
   it('keeps Code Quality active on project shells', () => {
@@ -109,7 +109,22 @@ describe('App Routing - Rules', () => {
       </MemoryRouter>
     )
     const link = screen.getByRole('link', { name: /Code Quality/i })
-    expect(link.className).toMatch(/bg-brand\/10|text-branddim/)
+    expect(link.className).toMatch(/bg-navactive|text-white/)
+  })
+
+  it('supports collapsed navigation and theme switching', () => {
+    render(
+      <MemoryRouter initialEntries={['/assets']}>
+        <Sidebar />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Dark theme' }))
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    fireEvent.click(screen.getByRole('button', { name: 'Light theme' }))
+    expect(document.documentElement.dataset.theme).toBe('light')
   })
 
   it('opens mobile navigation and navigates to Rules', async () => {

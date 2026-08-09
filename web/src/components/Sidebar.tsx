@@ -1,8 +1,51 @@
-import { Boxes, FileText, Gauge, Radar, ScrollText, Server, Settings, Target, Users, X, Library, type LucideIcon } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import {
+  Boxes,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Gauge,
+  Library,
+  Moon,
+  Radar,
+  ScrollText,
+  Server,
+  Settings,
+  Sun,
+  Target,
+  Users,
+  X,
+  type LucideIcon,
+} from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { cn } from './ui'
 import logo from '../assets/logo.png'
+import { cn } from './ui'
+
+const NAV_GROUPS: Array<{
+  label: string
+  items: Array<{ icon: LucideIcon; label: string; to: string; prefix?: string }>
+}> = [
+  {
+    label: 'Security operations',
+    items: [
+      { icon: Boxes, label: 'Assets', to: '/assets', prefix: '/assets' },
+      { icon: Target, label: 'Engagements', to: '/engagements', prefix: '/engagements' },
+      { icon: ScrollText, label: 'Audit log', to: '/audit' },
+    ],
+  },
+  {
+    label: 'Engineering',
+    items: [
+      { icon: Gauge, label: 'Code Quality', to: '/code-quality', prefix: '/code-quality' },
+      { icon: Library, label: 'Rules', to: '/rules', prefix: '/rules' },
+      { icon: Server, label: 'Fleet', to: '/fleet', prefix: '/fleet' },
+    ],
+  },
+  {
+    label: 'Administration',
+    items: [{ icon: Users, label: 'Team', to: '/team' }],
+  },
+]
 
 const SOON: { icon: LucideIcon; label: string }[] = [
   { icon: Radar, label: 'Recon' },
@@ -10,175 +53,174 @@ const SOON: { icon: LucideIcon; label: string }[] = [
   { icon: Settings, label: 'Settings' },
 ]
 
-function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+type Theme = 'light' | 'dark'
+
+function storageGet(key: string) {
+  try {
+    return typeof globalThis.localStorage?.getItem === 'function' ? globalThis.localStorage.getItem(key) : null
+  } catch {
+    return null
+  }
+}
+
+function storageSet(key: string, value: string) {
+  try {
+    if (typeof globalThis.localStorage?.setItem === 'function') globalThis.localStorage.setItem(key, value)
+  } catch {}
+}
+
+function currentTheme(): Theme {
+  return storageGet('synapse-theme') === 'dark' ? 'dark' : 'light'
+}
+
+function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const location = useLocation()
+  const [theme, setTheme] = useState<Theme>(currentTheme)
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    storageSet('synapse-theme', theme)
+  }, [theme])
+
+  useEffect(() => {
+    const synchronize = (event: Event) => setTheme((event as CustomEvent<Theme>).detail)
+    window.addEventListener('synapse-theme-change', synchronize)
+    return () => window.removeEventListener('synapse-theme-change', synchronize)
+  }, [])
+
+  function toggleTheme() {
+    setTheme((value) => {
+      const next = value === 'light' ? 'dark' : 'light'
+      window.dispatchEvent(new CustomEvent<Theme>('synapse-theme-change', { detail: next }))
+      return next
+    })
+  }
+
   return (
     <>
-      <div className="flex h-14 items-center gap-2 border-b border-border px-5">
-        <img src={logo} alt="" className="size-6" />
-        <span className="text-lg font-bold tracking-tight">Synapse</span>
-      </div>
-      <nav className="flex-1 space-y-1 p-3">
-        <NavLink
-          to="/engagements"
-          onClick={onNavigate}
-          className={({ isActive }) =>
-            cn(
-              'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-              isActive
-                ? 'bg-brand/10 font-semibold text-branddim before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-brand before:content-[""]'
-                : 'text-mutedfg hover:bg-elevated hover:text-foreground',
-            )
-          }
-        >
-          <Target className="size-[18px]" />
-          Engagements
-        </NavLink>
-
-        <NavLink
-          to="/assets"
-          onClick={onNavigate}
-          className={() =>
-            cn(
-              'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-              location.pathname.startsWith('/assets')
-                ? 'bg-brand/10 font-semibold text-branddim before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-brand before:content-[""]'
-                : 'text-mutedfg hover:bg-elevated hover:text-foreground',
-            )
-          }
-        >
-          <Boxes className="size-[18px]" />
-          Assets
-        </NavLink>
-
-        <NavLink
-          to="/audit"
-          onClick={onNavigate}
-          className={({ isActive }) =>
-            cn(
-              'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-              isActive
-                ? 'bg-brand/10 font-semibold text-branddim before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-brand before:content-[""]'
-                : 'text-mutedfg hover:bg-elevated hover:text-foreground',
-            )
-          }
-        >
-          <ScrollText className="size-[18px]" />
-          Audit log
-        </NavLink>
-
-        <NavLink
-          to="/rules"
-          onClick={onNavigate}
-          className={({ isActive }) =>
-            cn(
-              'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-              isActive || location.pathname.startsWith('/rules')
-                ? 'bg-brand/10 font-semibold text-branddim before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-brand before:content-[""]'
-                : 'text-mutedfg hover:bg-elevated hover:text-foreground',
-            )
-          }
-        >
-          <Library className="size-[18px]" />
-          Rules
-        </NavLink>
-
-        <NavLink
-          to="/code-quality"
-          onClick={onNavigate}
-          className={() =>
-            cn(
-              'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-              location.pathname.startsWith('/code-quality')
-                ? 'bg-brand/10 font-semibold text-branddim before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-brand before:content-[""]'
-                : 'text-mutedfg hover:bg-elevated hover:text-foreground',
-            )
-          }
-        >
-          <Gauge className="size-[18px]" />
-          Code Quality
-        </NavLink>
-
-        <NavLink
-          to="/fleet"
-          onClick={onNavigate}
-          className={() =>
-            cn(
-              'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-              location.pathname.startsWith('/fleet')
-                ? 'bg-brand/10 font-semibold text-branddim before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-brand before:content-[""]'
-                : 'text-mutedfg hover:bg-elevated hover:text-foreground',
-            )
-          }
-        >
-          <Server className="size-[18px]" />
-          Fleet
-        </NavLink>
-
-        <NavLink
-          to="/team"
-          onClick={onNavigate}
-          className={({ isActive }) =>
-            cn(
-              'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-              isActive
-                ? 'bg-brand/10 font-semibold text-branddim before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-brand before:content-[""]'
-                : 'text-mutedfg hover:bg-elevated hover:text-foreground',
-            )
-          }
-        >
-          <Users className="size-[18px]" />
-          Team
-        </NavLink>
-
-        <div className="px-3 pb-1 pt-5 text-[11px] font-medium uppercase tracking-wider text-subtlefg">
-          Coming soon
+      <div className={cn('flex h-16 items-center border-b border-navborder', collapsed ? 'justify-center px-3' : 'gap-3 px-5')}>
+        <img src={logo} alt="" className="size-7 shrink-0" />
+        <div className={cn('min-w-0', collapsed && 'sr-only')}>
+          <div className="text-base font-bold tracking-tight text-navfg">Synapse</div>
+          <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-navmuted">Security workspace</div>
         </div>
-        {SOON.map(({ icon: Icon, label }) => (
-          <span
-            key={label}
-            title="Coming soon"
-            className="flex cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-sm text-mutedfg/40"
-          >
-            <Icon className="size-[18px]" />
-            {label}
-          </span>
+      </div>
+
+      <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Primary navigation">
+        {NAV_GROUPS.map((group, index) => (
+          <div key={group.label} className={cn(index > 0 && 'mt-5')}>
+            <div className={cn('mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-navsubtle', collapsed && 'sr-only')}>
+              {group.label}
+            </div>
+            <div className="space-y-1">
+              {group.items.map(({ icon: Icon, label, to, prefix }) => {
+                const active = prefix ? location.pathname.startsWith(prefix) : location.pathname === to
+                return (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    title={collapsed ? label : undefined}
+                    aria-label={collapsed ? label : undefined}
+                    onClick={onNavigate}
+                    className={cn(
+                      'relative flex min-h-10 items-center rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70',
+                      collapsed ? 'justify-center px-2' : 'gap-3 px-3',
+                      active ? 'bg-navactive font-semibold text-white' : 'text-navmuted hover:bg-navhover hover:text-navfg',
+                    )}
+                  >
+                    <Icon className="size-[18px] shrink-0" aria-hidden="true" />
+                    <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
+                    {active && <span className="absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-brand" />}
+                  </NavLink>
+                )
+              })}
+            </div>
+          </div>
         ))}
+
+        <div className="mt-5">
+          <div className={cn('mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-navsubtle', collapsed && 'sr-only')}>
+            Coming soon
+          </div>
+          <div className="space-y-1">
+            {SOON.map(({ icon: Icon, label }) => (
+              <span
+                key={label}
+                title={collapsed ? `${label} · Coming soon` : 'Coming soon'}
+                className={cn(
+                  'flex min-h-10 cursor-not-allowed items-center rounded-lg text-sm text-navsubtle/60',
+                  collapsed ? 'justify-center px-2' : 'gap-3 px-3',
+                )}
+              >
+                <Icon className="size-[18px] shrink-0" aria-hidden="true" />
+                <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
+              </span>
+            ))}
+          </div>
+        </div>
       </nav>
-      <div className="border-t border-border p-3 text-xs text-mutedfg">
-        <div className="flex items-center gap-2">
-          <span className="size-2 rounded-full bg-accent" />
-          self-host · single-tenant
+
+      <div className="border-t border-navborder p-3">
+        <button
+          type="button"
+          onClick={toggleTheme}
+          title={collapsed ? `Use ${theme === 'light' ? 'dark' : 'light'} theme` : undefined}
+          className={cn(
+            'flex min-h-10 w-full items-center rounded-lg text-sm text-navmuted transition-colors hover:bg-navhover hover:text-navfg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70',
+            collapsed ? 'justify-center px-2' : 'gap-3 px-3',
+          )}
+        >
+          {theme === 'light' ? <Moon className="size-[18px]" /> : <Sun className="size-[18px]" />}
+          <span className={collapsed ? 'sr-only' : undefined}>{theme === 'light' ? 'Dark theme' : 'Light theme'}</span>
+        </button>
+        <div className={cn('mt-2 flex items-center text-xs text-navsubtle', collapsed ? 'justify-center' : 'gap-2 px-3')}>
+          <span className="size-2 shrink-0 rounded-full bg-accent" />
+          <span className={collapsed ? 'sr-only' : undefined}>self-host · single-tenant</span>
         </div>
       </div>
     </>
   )
 }
 
-/** Desktop sidebar (>= md). */
 export function Sidebar() {
+  const [collapsed, setCollapsed] = useState(() => storageGet('synapse-sidebar-collapsed') === 'true')
+
+  function toggle() {
+    setCollapsed((value) => {
+      storageSet('synapse-sidebar-collapsed', String(!value))
+      return !value
+    })
+  }
+
   return (
-    <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-surface md:flex">
-      <SidebarNav />
+    <aside className={cn('relative hidden shrink-0 flex-col border-r border-navborder bg-nav transition-[width] duration-200 md:flex', collapsed ? 'w-20' : 'w-64')}>
+      <SidebarNav collapsed={collapsed} />
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        className="absolute -right-3 top-20 z-10 flex size-6 items-center justify-center rounded-full border border-navborder bg-nav text-navmuted shadow-sm transition-colors hover:text-navfg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70"
+      >
+        {collapsed ? <ChevronRight className="size-3.5" /> : <ChevronLeft className="size-3.5" />}
+      </button>
     </aside>
   )
 }
 
-/** Mobile slide-over drawer (< md): a modal surface with Escape-to-close +
- *  focus move-in/restore + reduced-motion guards. */
 export function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const panelRef = useRef<HTMLElement>(null)
+
   useEffect(() => {
     if (!open) return
-    const prev = document.activeElement as HTMLElement | null
+    const previous = document.activeElement as HTMLElement | null
     panelRef.current?.focus()
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('keydown', onKey)
-      prev?.focus?.()
+      previous?.focus?.()
     }
   }, [open, onClose])
 
@@ -189,10 +231,7 @@ export function MobileSidebar({ open, onClose }: { open: boolean; onClose: () =>
         aria-label="Close menu"
         tabIndex={open ? undefined : -1}
         onClick={onClose}
-        className={cn(
-          'absolute inset-0 bg-black/50 transition-opacity motion-reduce:transition-none',
-          open ? 'opacity-100' : 'opacity-0',
-        )}
+        className={cn('absolute inset-0 bg-black/50 transition-opacity motion-reduce:transition-none', open ? 'opacity-100' : 'opacity-0')}
       />
       <aside
         ref={panelRef}
@@ -201,14 +240,15 @@ export function MobileSidebar({ open, onClose }: { open: boolean; onClose: () =>
         aria-modal="true"
         aria-label="Navigation"
         className={cn(
-          'absolute inset-y-0 left-0 flex w-64 flex-col border-r border-border bg-surface shadow-xl outline-none transition-transform duration-200 motion-reduce:transition-none',
+          'absolute inset-y-0 left-0 flex w-72 flex-col border-r border-navborder bg-nav shadow-xl outline-none transition-transform duration-200 motion-reduce:transition-none',
           open ? 'translate-x-0' : '-translate-x-full',
         )}
       >
         <button
+          type="button"
           onClick={onClose}
           aria-label="Close menu"
-          className="absolute right-2 top-2 inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-mutedfg transition-colors hover:bg-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+          className="absolute right-2 top-2 inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-navmuted transition-colors hover:bg-navhover hover:text-navfg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70"
         >
           <X className="size-5" />
         </button>
