@@ -23,6 +23,7 @@ var _ ports.ConfirmedThreatRecorder = (*Service)(nil)
 var _ ports.ConfirmedSASTRecorder = (*Service)(nil)
 var _ ports.ConfirmedDASTRecorder = (*Service)(nil)
 var _ ports.FindingWriteupApplier = (*Service)(nil)
+var _ ports.AITriageFindingDecision = (*Service)(nil)
 
 // Service lists findings and applies authoring/triage/assignment/comment/retest changes.
 type Service struct {
@@ -430,6 +431,27 @@ func (s *Service) UpdateStatus(ctx context.Context, engagementID, findingID shar
 		return finding.Finding{}, err
 	}
 	return f, nil
+}
+
+// ApplyAITriageReview applies the human's decision to the authoritative finding.
+// Accept means the reviewer accepts the AI false-positive recommendation; Reject
+// explicitly reopens the finding so it is counted by subsequent gates.
+func (s *Service) ApplyAITriageReview(ctx context.Context, actor string, engagementID, findingID shared.ID, accepted bool, rationale string) error {
+	current, err := s.loadFinding(ctx, engagementID, findingID)
+	if err != nil {
+		return err
+	}
+	target := finding.StatusOpen
+	if accepted {
+		target = finding.StatusFalsePos
+	}
+	if current.Status == target {
+		return nil
+	}
+	if _, err := s.UpdateStatus(ctx, engagementID, findingID, target, rationale, actor, current.Version); err != nil {
+		return err
+	}
+	return nil
 }
 
 // SetAssignee assigns/unassigns a finding with the same optimistic-concurrency

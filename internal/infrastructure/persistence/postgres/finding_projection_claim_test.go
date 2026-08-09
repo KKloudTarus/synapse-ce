@@ -86,8 +86,15 @@ func TestFindingProjectionClaimPostgresAtomicAndRLS(t *testing.T) {
 	if err := repo.ClaimFindingProjection(ctx, tenant, engagementID, judgmentID, ports.FindingProjectionMode(mode)); err != nil {
 		t.Fatalf("same-mode retry: %v", err)
 	}
-	if err := repo.ClaimFindingProjection(ctx, otherTenant, engagementID, "other-"+judgmentID, ports.FindingProjectionSAST); !errors.Is(err, shared.ErrConflict) {
-		t.Fatalf("wrong tenant must fail closed with conflict, got %v", err)
+	// ErrNotFound, not ErrConflict, and that is the DESIRABLE answer rather than a near miss. The insert
+	// is guarded by WHERE EXISTS (SELECT 1 FROM engagements ...) under the other tenant's RLS scope, so
+	// the engagement is simply not visible. Reporting a conflict would confirm that this engagement
+	// exists in some other tenant, which is a disclosure a tenant-isolation boundary should not make.
+	if err := repo.ClaimFindingProjection(ctx, otherTenant, engagementID, "other-"+judgmentID, ports.FindingProjectionSAST); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("a cross-tenant claim must fail closed as not-found (no existence disclosure), got %v", err)
+	}
+	if err := repo.ClaimFindingProjection(ctx, otherTenant, engagementID, "other-"+judgmentID, ports.FindingProjectionSAST); errors.Is(err, shared.ErrConflict) {
+		t.Fatal("a cross-tenant claim must not report a conflict: that discloses the engagement exists elsewhere")
 	}
 
 	role := "projection_claim_role"

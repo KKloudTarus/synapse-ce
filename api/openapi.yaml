@@ -1082,6 +1082,68 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [asset_id], properties: {asset_id: {type: string, description: Empty string clears assignment}}}}}}
       responses: {'204': {description: Assignment updated}, '400': {$ref: '#/components/responses/BadRequest'}, '404': {$ref: '#/components/responses/NotFound'}}
 
+  /api/v1/ai-triage/reviews:
+    get:
+      tags: [ai-triage]
+      operationId: listAITriageReviews
+      summary: List the tenant's durable human-review queue
+      parameters:
+      - {name: severity, in: query, schema: {type: string, enum: [critical, high, medium, low, info, unknown]}}
+      - {name: cwe, in: query, schema: {type: string}}
+      - {name: project, in: query, schema: {type: string}}
+      - {name: state, in: query, schema: {type: string, enum: [pending, accepted, rejected]}}
+      responses:
+        '200':
+          description: Review queue
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reviews]
+                properties:
+                  reviews: {type: array, items: {$ref: '#/components/schemas/AITriageReview'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/ai-triage/reviews/{rid}/claim:
+    parameters: [{$ref: '#/components/parameters/AITriageReviewId'}]
+    post:
+      tags: [ai-triage]
+      operationId: claimAITriageReview
+      summary: Assign an unowned review to the authenticated reviewer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AITriageReviewClaimRequest'}
+      responses:
+        '200': {description: Claimed review, content: {application/json: {schema: {$ref: '#/components/schemas/AITriageReview'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Version or ownership conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
+  /api/v1/ai-triage/reviews/{rid}/decision:
+    parameters: [{$ref: '#/components/parameters/AITriageReviewId'}]
+    post:
+      tags: [ai-triage]
+      operationId: decideAITriageReview
+      summary: Accept or reject an owned AI false-positive recommendation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AITriageReviewDecisionRequest'}
+      responses:
+        '200': {description: Decided review, content: {application/json: {schema: {$ref: '#/components/schemas/AITriageReview'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Version, state, or ownership conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1096,6 +1158,11 @@ components:
       schema: {type: string}
     BusinessAssetId:
       name: assetID
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    AITriageReviewId:
+      name: rid
       in: path
       required: true
       schema: {type: string, minLength: 1}
@@ -1155,6 +1222,60 @@ components:
       type: object
       properties:
         error: {type: string}
+
+    AITriageReview:
+      type: object
+      required: [id, tenant_id, engagement_id, finding_id, dedup_key, title, severity, state, verdict, driver, confidence, suspected_fp, proposer_model, prompt_version, verified, policy_version, policy_reason, shadow, would_gate_exempt, gate_exempt, review_required, evidence_ref, created_at, updated_at, version]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        engagement_id: {type: string}
+        project_id: {type: string}
+        finding_id: {type: string}
+        dedup_key: {type: string}
+        title: {type: string}
+        severity: {type: string, enum: [critical, high, medium, low, info, unknown]}
+        cwe: {type: string}
+        owner: {type: string}
+        state: {type: string, enum: [pending, accepted, rejected]}
+        verdict: {type: string}
+        driver: {type: string}
+        confidence: {type: integer, minimum: 0, maximum: 100}
+        suspected_fp: {type: boolean}
+        proposer_model: {type: string}
+        verifier_model: {type: string}
+        prompt_version: {type: string}
+        verified: {type: boolean}
+        verifier_verdict: {type: string}
+        verifier_driver: {type: string}
+        verifier_confidence: {type: integer, minimum: 0, maximum: 100}
+        policy_version: {type: string}
+        policy_reason: {type: string}
+        shadow: {type: boolean}
+        would_gate_exempt: {type: boolean}
+        gate_exempt: {type: boolean}
+        review_required: {type: boolean}
+        evidence_ref: {type: string}
+        decided_by: {type: string}
+        decision_rationale: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        decided_at: {type: [string, 'null'], format: date-time}
+        version: {type: integer, minimum: 1}
+    AITriageReviewClaimRequest:
+      type: object
+      required: [version]
+      additionalProperties: false
+      properties:
+        version: {type: integer, minimum: 1}
+    AITriageReviewDecisionRequest:
+      type: object
+      required: [decision, rationale, version]
+      additionalProperties: false
+      properties:
+        decision: {type: string, enum: [accept, reject]}
+        rationale: {type: string, minLength: 3, maxLength: 4000}
+        version: {type: integer, minimum: 1}
 
     BusinessAsset:
       type: object

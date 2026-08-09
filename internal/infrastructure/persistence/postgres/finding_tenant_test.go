@@ -41,6 +41,10 @@ func TestFindingRepositoryDerivesEngagementTenant(t *testing.T) {
 		{name: "default", tenant: "default"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			// Each case ACTS AS the tenant it expects the finding to be projected into: the repositories
+			// refuse an unbound tenant, and binding one fixed tenant for both cases would defeat the point
+			// of the "default" case, which is that an engagement with no tenant projects into "default".
+			ctx := shared.WithTenant(context.Background(), shared.ID(tc.tenant))
 			engagementID := shared.ID(tc.name + "-engagement-" + id)
 			engagementTenant := shared.ID("")
 			if tc.tenant != "default" {

@@ -8,6 +8,7 @@ import (
 	"path"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/aitriagereview"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
@@ -59,6 +60,7 @@ type Router struct {
 	autoVerifier      autoVerifierService   // optional; nil ⇒ the LLM auto-verify route is not registered
 	threatModels      threatModelService    // optional; nil ⇒ threat-model routes are not registered
 	drafts            writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
+	aiTriageReviews   aiTriageReviewService // optional; nil ⇒ AI-triage review queue routes are not registered
 	projects          projectService        // optional; nil ⇒ project routes are not registered
 	assets            assetService          // optional; nil ⇒ fleet asset routes are not registered
 	businessAssets    businessAssetService  // optional; nil ⇒ business-level Asset routes are not registered
@@ -106,6 +108,12 @@ type writeupDraftService interface {
 	Reject(ctx context.Context, principal string, engagementID, id shared.ID) (writeupdraft.Draft, error)
 }
 
+type aiTriageReviewService interface {
+	List(ctx context.Context, tenantID shared.ID, filter ports.AITriageReviewFilter) ([]aitriagereview.Review, error)
+	Claim(ctx context.Context, tenantID, id shared.ID, actor string, expectedVersion int) (aitriagereview.Review, error)
+	Decide(ctx context.Context, tenantID, id shared.ID, actor string, decision aitriagereview.Decision, rationale string, expectedVersion int) (aitriagereview.Review, error)
+}
+
 // SetJudgments wires the AI judgment lifecycle endpoints. nil ⇒ routes are not registered.
 func (rt *Router) SetJudgments(s judgmentService) { rt.judgments = s }
 
@@ -145,6 +153,9 @@ func (rt *Router) SetThreatModel(s threatModelService) { rt.threatModels = s }
 
 // SetWriteupDrafts wires the human sign-off endpoints for AI-proposed write-up drafts. nil ⇒ not registered.
 func (rt *Router) SetWriteupDrafts(s writeupDraftService) { rt.drafts = s }
+
+// SetAITriageReviews wires the tenant-scoped human review queue.
+func (rt *Router) SetAITriageReviews(s aiTriageReviewService) { rt.aiTriageReviews = s }
 
 // qualityGateService is the HTTP slice for tenant-scoped gate management.
 type qualityGateService interface {
@@ -236,6 +247,11 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/quality-profiles/{key}/deactivate", rt.authz(userdom.PermOperate, rt.deactivateProfileRule))
 		mux.HandleFunc("POST /api/v1/quality-profiles/{key}/severity", rt.authz(userdom.PermOperate, rt.setProfileRuleSeverity))
 		mux.HandleFunc("DELETE /api/v1/quality-profiles/{key}", rt.authz(userdom.PermOperate, rt.deleteQualityProfile))
+	}
+	if rt.aiTriageReviews != nil {
+		mux.HandleFunc("GET /api/v1/ai-triage/reviews", rt.authz(userdom.PermView, rt.listAITriageReviews))
+		mux.HandleFunc("POST /api/v1/ai-triage/reviews/{rid}/claim", rt.authz(userdom.PermReview, rt.claimAITriageReview))
+		mux.HandleFunc("POST /api/v1/ai-triage/reviews/{rid}/decision", rt.authz(userdom.PermReview, rt.decideAITriageReview))
 	}
 	if rt.fleetAdmin != nil {
 		mux.HandleFunc("POST /api/v1/agents/enrolment-tokens", rt.authz(userdom.PermAdminister, rt.mintEnrolToken))

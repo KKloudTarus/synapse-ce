@@ -258,6 +258,7 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetDASTWorkflow(&fakeDASTWorkflow{})
 	rt.SetThreatModel(&fakeThreatModel{})     // register the threat-model ingest/read routes so the harness guards their gates
 	rt.SetWriteupDrafts(&fakeWriteupDrafts{}) // register the writeup-draft sign-off routes so the harness guards their SoD gates
+	rt.SetAITriageReviews(&aiReviewFake{})    // register AI-triage queue read/claim/decision routes
 	rt.SetRules(&fakeRules{})                 // register rule catalog routes so the harness guards their gates
 	rt.SetFleetCoverage(harnessCoverage{})    // register #413 fleet-coverage routes so the harness guards their view/tenant gates
 	rt.SetAttackPaths(attackSvc)              // real #419 service proves cross-tenant derived data isolation
@@ -362,6 +363,9 @@ func TestHostileHarness(t *testing.T) {
 		{"machine may not edit writeup draft (review)", "agent", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/writeup-drafts/d1/edit", http.StatusForbidden},
 		{"cross-tenant writeup-draft accept → 404", "reviewer", "tenantB", true, http.MethodPost, "/api/v1/engagements/engA/writeup-drafts/d1/accept", http.StatusNotFound},
 		{"readonly may list writeup drafts (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/writeup-drafts", http.StatusOK},
+		{"readonly may list AI-triage reviews (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/ai-triage/reviews", http.StatusOK},
+		{"machine may not claim AI-triage review (review/SoD)", "agent", "tenantA", true, http.MethodPost, "/api/v1/ai-triage/reviews/r1/claim", http.StatusForbidden},
+		{"consultant may not decide AI-triage review (review)", "consultant", "tenantA", true, http.MethodPost, "/api/v1/ai-triage/reviews/r1/decision", http.StatusForbidden},
 		// Rule Catalog (PermView): no tenant context required, but machine roles denied.
 		{"machine may not list rules (view/SoD)", "agent", "tenantA", true, http.MethodGet, "/api/v1/rules", http.StatusForbidden},
 		{"machine may not get rule (view/SoD)", "agent", "tenantA", true, http.MethodGet, "/api/v1/rules/go:sql-injection", http.StatusForbidden},

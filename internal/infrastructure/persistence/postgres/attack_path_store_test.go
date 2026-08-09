@@ -33,7 +33,10 @@ func TestAttackPathStoreRejectsMismatchedBatchAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	// t.Cleanup, not defer: a deferred Close runs when this function RETURNS, which is before any
+	// t.Cleanup callback -- so the cleanups below were dropping objects through an already-closed pool
+	// and, because their errors were discarded, failed in silence. LIFO ordering runs the drops first.
+	t.Cleanup(pool.Close)
 
 	id := randHex(t)
 	tenant, engagementID, assetID, findingID := shared.ID("attack-"+id), shared.ID("eng-"+id), shared.ID("asset-"+id), shared.ID("finding-"+id)
@@ -41,6 +44,12 @@ func TestAttackPathStoreRejectsMismatchedBatchAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM tenants WHERE id=$1`, tenant.String()) })
+	// The repositories run every statement through WithTenant, which refuses an unbound tenant so no
+	// query can silently escape RLS. This helper therefore needs a tenant-bound context for its
+	// repository calls, the same as httpapi/auth.go and the worker provide for real callers. The raw
+	// pool.Exec calls above stay on a plain context: they seed the tenants row itself, before there is
+	// a tenant to act as.
+	ctx = shared.WithTenant(ctx, tenant)
 	now := time.Now().UTC()
 	eng, _ := engagement.New(engagementID, tenant, "eng", "client", now)
 	if err := NewEngagementRepository(pool).Create(ctx, eng); err != nil {
@@ -89,7 +98,7 @@ func TestAttackPathStoreReplaceBindingsSerializesProducer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 
 	id := randHex(t)
 	tenant, engagementID := shared.ID("attack-"+id), shared.ID("eng-"+id)
@@ -106,15 +115,21 @@ func TestAttackPathStoreReplaceBindingsSerializesProducer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _, _ = blocker.Exec(context.Background(), `SELECT pg_advisory_unlock(9419001)`) }()
-	if _, err := pool.Exec(ctx, `CREATE FUNCTION attack_path_pause_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(9419001); RETURN OLD; END $$`); err != nil {
+	if _, err := pool.Exec(ctx, `CREATE OR REPLACE FUNCTION attack_path_pause_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(9419001); RETURN OLD; END $$`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `CREATE TRIGGER attack_path_pause_delete BEFORE DELETE ON attack_path_edges FOR EACH STATEMENT EXECUTE FUNCTION attack_path_pause_delete()`); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS attack_path_pause_delete ON attack_path_edges`)
-		_, _ = pool.Exec(context.Background(), `DROP FUNCTION IF EXISTS attack_path_pause_delete()`)
+		for _, statement := range []string{
+			`DROP TRIGGER IF EXISTS attack_path_pause_delete ON attack_path_edges`,
+			`DROP FUNCTION IF EXISTS attack_path_pause_delete()`,
+		} {
+			if _, err := pool.Exec(context.Background(), statement); err != nil {
+				t.Errorf("cleanup %q: %v (the next run of this test will fail)", statement, err)
+			}
+		}
 	})
 
 	bindings := func(offset int) []attackpath.Binding {
@@ -171,7 +186,7 @@ func TestAttackPathStoreReplaceBindingsSerializesProducer(t *testing.T) {
 	}
 }
 
-func TestMigration0068DownDeduplicatesProducers(t *testing.T) {
+func TestMigration0069DownDeduplicatesProducers(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -189,14 +204,14 @@ func TestMigration0068DownDeduplicatesProducers(t *testing.T) {
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.DownTo(db, ".", 68); err != nil {
+	if err := goose.DownTo(db, ".", 69); err != nil {
 		t.Fatalf("down to 68: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 	id := randHex(t)
 	tenant, engagementID := shared.ID("rollback-"+id), shared.ID("eng-"+id)
 	assetID, findingID := shared.ID("asset-"+id), shared.ID("finding-"+id)
@@ -206,7 +221,7 @@ func TestMigration0068DownDeduplicatesProducers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := goose.DownTo(db, ".", 67); err != nil {
+	if err := goose.DownTo(db, ".", 68); err != nil {
 		t.Fatalf("down to 67: %v", err)
 	}
 	var count int
@@ -216,7 +231,7 @@ func TestMigration0068DownDeduplicatesProducers(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("rollback retained %d legacy rows, want 1", count)
 	}
-	if err := goose.UpTo(db, ".", 70); err != nil {
+	if err := goose.UpTo(db, ".", 71); err != nil {
 		t.Fatalf("restore migrations: %v", err)
 	}
 }
@@ -227,18 +242,22 @@ func seedAttackPathTargets(t *testing.T, pool *pgxpool.Pool, tenant, engagementI
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM tenants WHERE id=$1`, tenant.String()) })
+	// Repositories run every statement through WithTenant, which refuses an unbound tenant so no query
+	// can silently escape RLS. Bind the tenant this test acts as -- after its row exists -- exactly as
+	// httpapi/auth.go and the worker do.
+	ctx := shared.WithTenant(context.Background(), tenant)
 	now := time.Now().UTC()
 	eng, _ := engagement.New(engagementID, tenant, "eng", "client", now)
-	if err := NewEngagementRepository(pool).Create(context.Background(), eng); err != nil {
+	if err := NewEngagementRepository(pool).Create(ctx, eng); err != nil {
 		t.Fatal(err)
 	}
 	for i := range assets {
 		a, _ := asset.New(assets[i], tenant, asset.KindImage, fmt.Sprintf("sha256:%s-%d", suffix, i), "image", nil, now)
-		if err := NewAssetRepository(pool).UpsertAsset(context.Background(), a); err != nil {
+		if err := NewAssetRepository(pool).UpsertAsset(ctx, a); err != nil {
 			t.Fatal(err)
 		}
 		f := finding.Finding{ID: findings[i], EngagementID: engagementID, Title: "finding", Severity: shared.SeverityHigh, Status: finding.StatusOpen, DedupKey: fmt.Sprintf("vuln:%s:%d", suffix, i), Audit: shared.Audit{CreatedAt: now, UpdatedAt: now}}
-		if err := NewFindingRepository(pool).Upsert(context.Background(), []finding.Finding{f}); err != nil {
+		if err := NewFindingRepository(pool).Upsert(ctx, []finding.Finding{f}); err != nil {
 			t.Fatal(err)
 		}
 	}

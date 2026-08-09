@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import App from './App'
@@ -11,6 +11,7 @@ vi.mock('./lib/api', () => ({
     getRule: vi.fn(),
     listEngagements: vi.fn(),
     listBusinessAssets: vi.fn(),
+    fleetCoverageSummary: vi.fn(),
     listProjects: vi.fn(),
     getProject: vi.fn(),
     getAuditLogs: vi.fn(),
@@ -33,6 +34,7 @@ describe('App Routing - Rules', () => {
     vi.mocked(api.listRules).mockResolvedValue([])
     vi.mocked(api.listEngagements).mockResolvedValue([])
     vi.mocked(api.listBusinessAssets).mockResolvedValue({ items: [], total: 0, limit: 200, offset: 0 })
+    vi.mocked(api.fleetCoverageSummary).mockResolvedValue({ agentsByState: {}, rowsByVerdict: {}, oldestPerCapability: {}, assetsWithoutAgent: 0 })
     vi.mocked(api.listProjects).mockResolvedValue([])
     vi.mocked(api.getRule).mockResolvedValue({
       key: 'go:sql',
@@ -64,6 +66,16 @@ describe('App Routing - Rules', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Rules' })).toBeInTheDocument()
     })
+  })
+
+  it('renders Dashboard as the default route', async () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <App />
+      </MemoryRouter>
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Security Operations' })).toBeInTheDocument()
   })
 
   it('renders RuleDetail page on /rules/:key route and decodes colon exactly once', async () => {
@@ -112,6 +124,16 @@ describe('App Routing - Rules', () => {
     expect(link.className).toMatch(/bg-navactive|text-white/)
   })
 
+  it('keeps Dashboard active in the command center', () => {
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <Sidebar />
+      </MemoryRouter>
+    )
+    const link = screen.getByRole('link', { name: /Dashboard/i })
+    expect(link.className).toMatch(/bg-navactive|text-white/)
+  })
+
   it('supports collapsed navigation and theme switching', () => {
     render(
       <MemoryRouter initialEntries={['/assets']}>
@@ -125,6 +147,19 @@ describe('App Routing - Rules', () => {
     expect(document.documentElement.dataset.theme).toBe('dark')
     fireEvent.click(screen.getByRole('button', { name: 'Light theme' }))
     expect(document.documentElement.dataset.theme).toBe('light')
+  })
+
+  it('places New Engagement before the Engagement list', () => {
+    render(
+      <MemoryRouter initialEntries={['/assets']}>
+        <Sidebar />
+      </MemoryRouter>
+    )
+
+    const newEngagement = screen.getByRole('link', { name: 'New Engagement' })
+    const engagements = screen.getByRole('link', { name: 'Engagements' })
+    expect(newEngagement.getAttribute('href')).toBe('/engagements?create=1')
+    expect(newEngagement.compareDocumentPosition(engagements) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('opens mobile navigation and navigates to Rules', async () => {
@@ -164,5 +199,19 @@ describe('App Routing - Rules', () => {
         screen.queryByRole('dialog', { name: /navigation/i }),
       ).not.toBeInTheDocument()
     })
+  })
+
+  it('switches theme from the mobile navigation', async () => {
+    render(
+      <MemoryRouter initialEntries={['/engagements']}>
+        <App />
+      </MemoryRouter>
+    )
+
+    await screen.findByRole('heading', { name: 'Engagements' })
+    fireEvent.click(screen.getByRole('button', { name: /open menu/i }))
+    const dialog = screen.getByRole('dialog', { name: /navigation/i })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Dark theme' }))
+    expect(document.documentElement.dataset.theme).toBe('dark')
   })
 })

@@ -98,6 +98,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/logging"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/worksign"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
+	aitriagereviewuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aitriagereviewuc"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/assetuc"
@@ -206,6 +207,7 @@ func main() {
 	var auditReader ports.AuditReader
 	var scanRepo ports.ScanRepository
 	var scanResultStore ports.ScanResultStore
+	var aiTriageReviewStore ports.AITriageReviewStore
 	var importedSBOMStore ports.ImportedSBOMStore
 	var importedFindingStore ports.ImportedFindingStore // third-party (SARIF) findings under governance
 	var scanJobStore ports.ScanJobStore
@@ -307,6 +309,7 @@ func main() {
 		userRepo = postgres.NewUserRepository(pool)
 		scanRepo = postgres.NewScanRepository(pool)
 		scanResultStore = postgres.NewScanResultStore(pool)
+		aiTriageReviewStore = postgres.NewAITriageReviewRepository(pool)
 		importedSBOMStore = postgres.NewImportedSBOMStore(pool)
 		importedFindingStore = postgres.NewImportedFindingRepository(pool)
 		scanJobStore = postgres.NewScanJobStore(pool)
@@ -370,6 +373,7 @@ func main() {
 		userRepo = memory.NewUserRepository()
 		scanRepo = memory.NewScanRepository()
 		scanResultStore = memory.NewScanResultStore()
+		aiTriageReviewStore = memory.NewAITriageReviewStore()
 		importedSBOMStore = memory.NewImportedSBOMStore()
 		importedFindingStore = memory.NewImportedFindingStore()
 		scanJobStore = memory.NewScanJobStore()
@@ -814,7 +818,16 @@ func main() {
 	aupService := aupuc.NewService(aupStore, auditLog, clock, cfg.AUPVersion)
 	exportService := exportuc.NewService(findingRepo, clock, buildinfo.App())
 	findingsService := findingsuc.NewService(findingRepo, commentRepo, retestRepo, auditLog, clock, ids)
+	// Both additions are independent; the tenant resolver is wired first because the review service
+	// takes findingsService as a dependency.
 	findingsService.SetEngagementTenantResolver(repo)
+
+	aiTriageReviewService, err := aitriagereviewuc.NewService(aiTriageReviewStore, repo, findingsService, auditLog, clock, ids)
+	if err != nil {
+		log.Error("AI-triage review service init failed", "err", err)
+		os.Exit(1)
+	}
+	scaService.SetAITriageReviewRecorder(aiTriageReviewService)
 	// Exploitation needs the SCORE-MUTATING finding store (SetEvidenceScore is on the concrete
 	// repo, NOT ports.FindingRepository – read-only consumers can't move a score). Both the
 	// postgres + memory concrete repos implement it; assert it from the interface-typed var.
@@ -975,6 +988,7 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
+	router.SetAITriageReviews(aiTriageReviewService)
 	projectService.SetScanner(scaService)
 	scaService.SetProjectAnalysisRecorder(projectService)
 	scaService.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)

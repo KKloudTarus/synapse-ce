@@ -44,9 +44,22 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 			t.Errorf("%s must be rejected as append-only, got %v", label, err)
 		}
 	}
+	// refused accepts EITHER mechanism. A plain TRUNCATE can be stopped by a foreign key from any table
+	// referencing evidence before the trigger is reached -- which is incidental protection: it depends on
+	// some other table happening to reference this one, and it disappears the day that table does not.
+	refused := func(label, q string, args ...any) {
+		if _, err := pool.Exec(ctx, q, args...); err == nil {
+			t.Errorf("%s must be refused, got nil", label)
+		}
+	}
 	rejects("DELETE evidence", `DELETE FROM evidence WHERE id=$1`, ev.ID.String())
 	rejects("UPDATE evidence", `UPDATE evidence SET content='y' WHERE id=$1`, ev.ID.String())
-	rejects("TRUNCATE evidence", `TRUNCATE evidence`)
+	refused("TRUNCATE evidence", `TRUNCATE evidence`)
+	// CASCADE is the variant that matters, and the one a foreign key cannot stop: it truncates the
+	// referencing tables too, so the FK objection evaporates and only the append-only trigger is left.
+	// Asserting on the trigger's own message keeps this test measuring the guarantee rather than a
+	// side effect of the current schema.
+	rejects("TRUNCATE evidence CASCADE", `TRUNCATE evidence CASCADE`)
 
 	action := "ao.action-" + randHex(t)
 	if err := NewAuditLog(pool).Record(ctx, ports.AuditEntry{Actor: "op", Action: action, Target: "t", At: time.Now().UTC()}); err != nil {
