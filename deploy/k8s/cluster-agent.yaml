@@ -51,8 +51,13 @@ subjects:
 # Secret before applying this manifest, e.g.:
 #   kubectl -n synapse create secret generic synapse-cluster-agent-enrol \
 #     --from-literal=enrol-token="<one-time token minted by the control plane>"
-# It is consumed on first enrolment; the agent then persists a long-lived credential in its state
-# volume, so a restart does not re-enrol. The Deployment reads it via secretKeyRef below.
+# It is consumed on first enrolment; the agent then persists a long-lived credential in the state PVC,
+# so a restart does not re-enrol. The Deployment mounts it as a FILE (see the enrol-token volume below),
+# not as an env var: an env secret is readable through /proc/<pid>/environ and follows child processes.
+#
+# Once enrolment has happened the Secret is dead weight and DELETING IT IS THE RIGHT THING TO DO. The
+# mount is therefore `optional: true` and the agent treats an absent token file as "no token supplied"
+# rather than as an error — otherwise that correct hygiene would leave a pod that can never restart.
 ---
 # Persists the agent credential across restarts (without it a restart would re-enrol with an
 # already-consumed one-time token and fail).
@@ -135,3 +140,20 @@ spec:
         - name: state
           persistentVolumeClaim:
             claimName: synapse-cluster-agent-state
+        # The one-time enrolment token, mounted read-only as a file.
+        #
+        # optional: true so the pod still starts once the consumed Secret has been deleted — the agent
+        # has its credential in the state PVC by then and an absent token file is not an error. Without
+        # this the correct cleanup of a spent one-time secret would permanently wedge the deployment.
+        #
+        # defaultMode 0440, not 0400: files in a Secret volume are owned root:fsGroup, so owner-only
+        # would lock out the container's own user (65532). 0440 lets the agent read it through fsGroup
+        # and nobody else read it at all.
+        - name: enrol-token
+          secret:
+            secretName: synapse-cluster-agent-enrol
+            optional: true
+            defaultMode: 0440
+            items:
+              - key: enrol-token
+                path: enrol-token

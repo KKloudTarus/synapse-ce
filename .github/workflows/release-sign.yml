@@ -1,0 +1,188 @@
+name: Release Sign and Attest
+
+# #412 requirements 4 and 5: every published artifact is signed, a release cannot be published with an
+# unsigned artifact, and each artifact carries a checksum, an SBOM produced by this project's own
+# engine (the dogfooding gate) and a provenance attestation.
+#
+# The gate that REFUSES an unsigned artifact already existed
+# (scripts/release/verify-artifacts-signed.sh, proven by release-gate-negative.yml). This workflow is
+# the half that produces a signature, so the gate has something to pass.
+#
+# It runs on a published release, signs and attests every asset, and re-uploads them. If any step
+# fails the release is left with its unsigned assets and the job is red — which is the intended
+# outcome, because the alternative is a green release nobody verified.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to sign (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write # re-upload signed assets to the release
+  id-token: write # provenance attestation
+  attestations: write
+
+jobs:
+  sign-and-attest:
+    name: sign, SBOM and attest every artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve the tag
+        id: tag
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          test -n "${tag}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      # Fail closed BEFORE touching a release: a missing signing key must stop the job, never let it
+      # continue and publish unsigned. This is the same failure shape as the missing scanner.
+      - name: Refuse to run without the signing keys
+        env:
+          GPG_KEY: ${{ secrets.SYNAPSE_GPG_PRIVATE_KEY }}
+          GPG_PASS: ${{ secrets.SYNAPSE_GPG_PASSPHRASE }}
+          GPG_ID: ${{ secrets.SYNAPSE_GPG_KEY_ID }}
+          UPDATE_KEY: ${{ secrets.SYNAPSE_UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          missing=""
+          test -n "${GPG_KEY}"    || missing="${missing} SYNAPSE_GPG_PRIVATE_KEY"
+          test -n "${GPG_PASS}"   || missing="${missing} SYNAPSE_GPG_PASSPHRASE"
+          test -n "${GPG_ID}"     || missing="${missing} SYNAPSE_GPG_KEY_ID"
+          test -n "${UPDATE_KEY}" || missing="${missing} SYNAPSE_UPDATE_SIGNING_KEY"
+          if [ -n "${missing}" ]; then
+            echo "release signing keys are not configured:${missing}"
+            echo "refusing to publish an unsigned release"
+            exit 1
+          fi
+          echo "all signing keys present"
+
+      - name: Import the package signing key
+        env:
+          GPG_KEY: ${{ secrets.SYNAPSE_GPG_PRIVATE_KEY }}
+          GPG_PASS: ${{ secrets.SYNAPSE_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="${RUNNER_TEMP}/gnupg"
+          mkdir -p "${GNUPGHOME}" && chmod 700 "${GNUPGHOME}"
+          printf '%s' "${GPG_KEY}" | gpg --batch --import
+          echo "GNUPGHOME=${GNUPGHOME}" >> "$GITHUB_ENV"
+          # The imported public half must match the one committed for consumers to verify against; a
+          # release signed by a key nobody published is unverifiable, which is as bad as unsigned.
+          gpg --batch --yes --armor --export > "${RUNNER_TEMP}/imported.asc"
+          committed_fpr="$(gpg --batch --with-colons --import-options show-only --import < packaging/keys/synapse-packages.gpg | awk -F: '/^fpr:/ {print $10; exit}')"
+          imported_fpr="$(gpg --batch --with-colons --import-options show-only --import < "${RUNNER_TEMP}/imported.asc" | awk -F: '/^fpr:/ {print $10; exit}')"
+          test "${committed_fpr}" = "${imported_fpr}" || {
+            echo "the signing key does not match packaging/keys/synapse-packages.gpg"
+            echo "committed ${committed_fpr}, signing ${imported_fpr}"
+            exit 1
+          }
+          echo "signing key matches the published public key ${imported_fpr}"
+
+      - name: Download the release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p ./artifacts
+          gh release download "${{ steps.tag.outputs.tag }}" --dir ./artifacts
+          ls -l ./artifacts
+
+      # Requirement 4, Windows half: there is no Authenticode certificate, and a self-signed one would
+      # still raise the SmartScreen warning the requirement exists to remove. So a Windows artifact is
+      # REFUSED rather than published unsigned. No Windows package is the honest outcome; a warned-about
+      # one is not.
+      - name: Refuse to publish an unsignable Windows artifact
+        run: |
+          set -euo pipefail
+          windows="$(find ./artifacts -maxdepth 1 -type f \( -name '*.msi' -o -name '*.exe' \) | sort)"
+          if [ -n "${windows}" ]; then
+            echo "Windows artifacts are present but no Authenticode certificate is configured:"
+            echo "${windows}"
+            echo "publishing them unsigned would reproduce the SmartScreen failure #412 requirement 4 removes."
+            exit 1
+          fi
+          echo "no Windows artifacts to sign"
+
+      - name: Sign every artifact
+        env:
+          GPG_PASS: ${{ secrets.SYNAPSE_GPG_PASSPHRASE }}
+          GPG_ID: ${{ secrets.SYNAPSE_GPG_KEY_ID }}
+        run: |
+          set -euo pipefail
+          signed=0
+          for art in ./artifacts/*; do
+            case "${art}" in
+            *.sig | *.asc | *.sha256 | *.sbom.json | *.intoto.jsonl) continue ;;
+            esac
+            gpg --batch --yes --pinentry-mode loopback --passphrase "${GPG_PASS}" \
+              --local-user "${GPG_ID}" --detach-sign --output "${art}.sig" "${art}"
+            gpg --batch --verify "${art}.sig" "${art}"
+            signed=$((signed + 1))
+          done
+          if [ "${signed}" -eq 0 ]; then
+            echo "no artifacts were signed — a release with nothing to sign is a broken build"
+            exit 1
+          fi
+          echo "signed ${signed} artifact(s)"
+
+      # Requirement 5: the SBOM is produced by this project's OWN engine, which makes every release a
+      # dogfooding run. A scanner that cannot describe our own artifact has no business describing a
+      # customer's.
+      - name: Build the scanner and emit an SBOM per artifact
+        run: |
+          set -euo pipefail
+          go build -o ./dist/synapse-cli ./cmd/synapse-cli
+          test -x ./dist/synapse-cli
+          for art in ./artifacts/*; do
+            case "${art}" in
+            *.sig | *.asc | *.sha256 | *.sbom.json | *.intoto.jsonl) continue ;;
+            esac
+            # `scan <path> --sbom` renders CycloneDX to stdout through the SAME renderer the engagement
+            # export uses, so a release SBOM cannot drift from the one customers get.
+            ./dist/synapse-cli scan "${art}" --sbom > "${art}.sbom.json"
+            test -s "${art}.sbom.json"
+          done
+          echo "sbom written for every artifact"
+
+      - name: Checksums over everything published
+        run: |
+          set -euo pipefail
+          cd ./artifacts
+          sha256sum ./* > SHA256SUMS
+          gpg --batch --yes --pinentry-mode loopback --passphrase "${{ secrets.SYNAPSE_GPG_PASSPHRASE }}" \
+            --local-user "${{ secrets.SYNAPSE_GPG_KEY_ID }}" --detach-sign --output SHA256SUMS.sig SHA256SUMS
+          gpg --batch --verify SHA256SUMS.sig SHA256SUMS
+
+      # The gate that the negative workflow proves fails on an unsigned artifact. Running it here is the
+      # point: the release cannot be published unless it passes.
+      - name: Every artifact must now be signed
+        run: ./scripts/release/verify-artifacts-signed.sh ./artifacts
+
+      - name: Provenance attestation
+        uses: actions/attest-build-provenance@92c22c5d770a3f8010cf6c11c8c2b3e4d7bc4d8d # v3.0.0
+        with:
+          subject-path: "./artifacts/*"
+
+      - name: Upload the signatures, SBOMs and checksums to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "${{ steps.tag.outputs.tag }}" \
+            ./artifacts/*.sig ./artifacts/*.sbom.json ./artifacts/SHA256SUMS ./artifacts/SHA256SUMS.sig \
+            --clobber
+          echo "release ${{ steps.tag.outputs.tag }} is signed and attested"

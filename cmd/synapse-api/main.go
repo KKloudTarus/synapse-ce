@@ -117,6 +117,7 @@ import (
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
 	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetrolloutuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/jsreach"
@@ -185,7 +186,8 @@ func main() {
 	var scannedImageStore ports.ScannedImageStore
 	var workOrderStore ports.WorkOrderStore
 	var fleetAgentStore ports.FleetAgentStore
-	var leaderStore ports.LeaderStore // postgres only; nil in memory mode (single process)
+	var fleetRolloutStore ports.FleetRolloutStore // operator update-rollout plans (#412 req 9)
+	var leaderStore ports.LeaderStore             // postgres only; nil in memory mode (single process)
 	var findingRepo ports.FindingRepository
 	var judgmentStore analysisuc.Store // postgres or memory; satisfies both the narrow Store + ports.JudgmentStore
 	var commentRepo ports.CommentRepository
@@ -311,6 +313,7 @@ func main() {
 		scannedImageStore = postgres.NewScannedImageStore(pool)
 		workOrderStore = postgres.NewWorkOrderRepository(pool)
 		fleetAgentStore = postgres.NewFleetAgentRepository(pool)
+		fleetRolloutStore = postgres.NewFleetRolloutRepository(pool)
 		leaderStore = postgres.NewLeaderStore(pool)
 		// SECURITY (#431 req 6, #432, #409): the fleet_* tables are RLS-protected, but RLS is a
 		// silent no-op if the runtime DB role is SUPERUSER or holds BYPASSRLS. When any fleet
@@ -347,6 +350,7 @@ func main() {
 		scannedImageStore = memory.NewScannedImageStore()
 		workOrderStore = memory.NewWorkOrderStore()
 		fleetAgentStore = memory.NewFleetAgentStore()
+		fleetRolloutStore = memory.NewFleetRolloutStore()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
 		commentRepo = memory.NewCommentRepository()
@@ -1143,6 +1147,18 @@ func main() {
 		}
 		router.SetFleet(agentSvc, workSvc, clock.Now, cfg.FleetClientCertHeader)
 		router.SetFleetAdmin(agentSvc)
+
+		// Operator-controlled update rollout (#412 req 9). Wiring it is what makes an update offer
+		// possible at all: with no rollout service the heartbeat offers nothing, because the absence
+		// of a decider must never read as permission to replace a binary on someone's host.
+		rolloutSvc, rerr := fleetrolloutuc.NewService(fleetRolloutStore, auditLog, clock)
+		if rerr != nil {
+			log.Error("fleet rollout service init failed", "err", rerr)
+			os.Exit(1)
+		}
+		router.SetFleetRollout(rolloutSvc)
+		router.SetFleetRolloutAdmin(rolloutSvc)
+		log.Info("fleet update rollout ENABLED (operator-controlled; canary then promote, never fleet-wide by default)")
 		// Version skew (#412): refuse work below the configured minimum agent version and advertise the
 		// control-plane version + floor to agents. Empty floor = disabled.
 		router.SetFleetVersionPolicy(cfg.FleetMinAgentVersion, buildinfo.App())

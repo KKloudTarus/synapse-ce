@@ -41,8 +41,13 @@ func TestEnsureEnrolledFirstRunThenReuse(t *testing.T) {
 	}
 	// credential + key persisted 0600.
 	info, err := os.Stat(store.credentialPath())
-	if err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("credential must be persisted 0600: %v", err)
+	if err != nil {
+		t.Fatalf("credential must be persisted: %v", err)
+	}
+	// The 0600 guarantee is a Unix one. On Windows os.Chmod only toggles the read-only attribute, so
+	// asserting the bits there would assert something no platform enforces — see SecretModeEnforced.
+	if SecretModeEnforced() && info.Mode().Perm() != 0o600 {
+		t.Fatalf("credential must be persisted 0600, got %v", info.Mode().Perm())
 	}
 	if _, err := os.Stat(store.keyPath()); err != nil {
 		t.Fatalf("key must be persisted: %v", err)
