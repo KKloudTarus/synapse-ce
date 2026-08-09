@@ -1,10 +1,11 @@
 # nfpm configuration for the Synapse fleet VM agent native packages (#412).
 #
-# STATUS: this is the release-engineering foundation. It is authored to the #412 spec but is NOT yet
-# wired into a running pipeline in this repository (GitHub Actions is currently disabled, and package
-# signing needs the project GPG key + hosts). Building/signing/validating it on the support matrix is
-# the CI step that lands when Actions + keys + matrix hosts are available. See
-# docs/guide/fleet-agent-packaging.md.
+# STATUS: exercised on every pull request by .github/workflows/agent-package-matrix.yml, which builds
+# from this spec and then installs, starts, heartbeats against a real control plane, and uninstalls on
+# each supported row. Package SIGNING is still not wired: it needs the project GPG key in repository
+# secrets. The gate that refuses an unsigned artifact exists (scripts/release/verify-artifacts-signed.sh)
+# — what is missing is the step that produces a signature, not the check that demands one.
+# See docs/guide/fleet-agent-packaging.md.
 #
 # nfpm produces rpm + deb from this single spec:
 #   SYNAPSE_LIBC_FLOOR=2.28 nfpm package -f packaging/nfpm.yaml -p rpm
@@ -50,6 +51,10 @@ contents:
 scripts:
   preinstall: ./packaging/scripts/preinstall.sh
   preremove: ./packaging/scripts/preremove.sh
+  # Neither rpm nor dpkg removes a directory that once held a config file, so /etc/synapse-agent
+  # survives an erase as an empty orphan (req 11). Removed here, only when empty and only on a final
+  # removal — see the script for why an operator's leftover file is kept.
+  postremove: ./packaging/scripts/postremove.sh
 
 # Signing (rpm --addsign / deb debsigs) is configured in the pipeline with the project GPG key whose
 # public key ships in packaging/keys/ (see README). A release with an unsigned artifact must fail the
