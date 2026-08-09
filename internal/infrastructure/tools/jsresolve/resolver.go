@@ -86,7 +86,7 @@ func (r *Resolver) Resolve(ctx context.Context, root string, graph modulegraph.G
 	}
 	workspaceByName := indexWorkspacesByName(inventory.Packages)
 	components := newComponentIndex(doc, r.limits.maxComponents, r.limits.maxCandidates, &coverage)
-	resolutions := r.readImporterResolutions(ctx, root, &coverage)
+	resolutions := r.readImporterResolutions(ctx, root, inventory.Packages, &coverage)
 
 	result := jsresolution.Result{GraphCoverage: append([]modulegraph.CoverageIssue(nil), normalizedGraph.Coverage...)}
 	for _, edge := range normalizedGraph.Edges {
