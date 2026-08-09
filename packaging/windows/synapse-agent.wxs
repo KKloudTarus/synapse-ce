@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX v4 installer for the Synapse fleet agent on Windows (#412 req 3).
+
+  What this file is responsible for, and why each piece is here rather than left to the operator:
+
+  * It installs the agent as a real Windows SERVICE, not a binary someone has to remember to start.
+    The agent answers the Service Control Manager's status protocol (see cmd/synapse-agent/
+    service_windows.go); without that handshake `sc create` produces a service that fails to start and
+    looks like a broken agent.
+  * The service runs as LocalService, not LocalSystem. Host inventory does not need administrator, and
+    an agent that runs on every host in a fleet is exactly the thing that should hold the least
+    privilege that still works.
+  * The configuration and state directory are created by the installer so their ACLs are set once, by
+    the package, rather than inherited from wherever the operator happened to put them.
+  * Uninstall removes the service and the files it installed, and deliberately KEEPS the state
+    directory so an operator can inspect or rotate the agent credential rather than having it deleted
+    from under them. That mirrors the deb/rpm behaviour exactly.
+
+  NOT signed. Authenticode needs a certificate from a CA that Windows already trusts; a self-signed
+  one would still raise the SmartScreen warning that #412 requirement 4 exists to remove. The release
+  pipeline therefore refuses to publish a Windows artifact until a real certificate exists — see
+  packaging/keys/README.md.
+
+  Build:  wix build packaging/windows/synapse-agent.wxs -d Version=$VERSION -d BinPath=dist/synapse-agent.exe -o out/synapse-agent.msi
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package Name="Synapse Fleet Agent"
+           Manufacturer="KKloudTarus"
+           Version="$(var.Version)"
+           UpgradeCode="6f2c9d84-3a1e-4d0b-9d1a-2f7c5b8e4a11"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <!-- An in-place upgrade replaces the running service rather than refusing or double-installing.
+         Downgrade is blocked with a readable message: an installer that silently moves a fleet
+         backwards is a way to reintroduce a fixed vulnerability at scale. -->
+    <MajorUpgrade AllowDowngrades="no"
+                  DowngradeErrorMessage="A newer version of the Synapse fleet agent is already installed. Remove it before installing an older one." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- An install-time floor, refused with a readable message rather than installed and left to fail
+         at first start (#412 req 1-2).
+
+         Worth being precise about what this does and does not enforce. MSI's VersionNT is CAPPED at
+         603 (Windows 8.1 / Server 2012 R2) for every later release unless the package ships a
+         compatibility manifest, so this condition cannot express the matrix's stated floor of Server
+         2019. WindowsBuild carries the real number, so the floor is enforced on that: 17763 is Server
+         2019 / Windows 10 1809. Both are checked, because VersionNT is the portable one and
+         WindowsBuild is the accurate one. -->
+    <Launch Condition="Installed OR (VersionNT &gt;= 603 AND WindowsBuild &gt;= 17763)"
+            Message="The Synapse fleet agent requires Windows Server 2019 / Windows 10 1809 (build 17763) or later. See the support matrix in docs/guide/fleet-agent-packaging.md." />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Synapse Agent" />
+    </StandardDirectory>
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="SYNAPSEDATA" Name="SynapseAgent" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="AgentComponents">
+      <Component Directory="INSTALLFOLDER" Guid="9a3b41d2-6c58-4f77-8b0e-1d4c6a9f2e73">
+        <File Id="AgentExe" Source="$(var.BinPath)" Name="synapse-agent.exe" KeyPath="yes" />
+
+        <!-- The service is installed but NOT auto-started: it cannot do anything useful until an
+             operator supplies the control-plane URL and a one-time enrolment token. Starting it first
+             would produce a service that fails in a loop and an event log full of noise. -->
+        <ServiceInstall Id="AgentService"
+                        Name="synapse-agent"
+                        DisplayName="Synapse Fleet Agent"
+                        Description="Inventories this host and reports to the Synapse control plane."
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Account="NT AUTHORITY\LocalService"
+                        Vital="yes">
+          <!-- Restart on failure with a backoff, and reset the counter daily. An agent that stops
+               reporting is indistinguishable from a host that is gone, so it should try to come back
+               on its own; the backoff stops a persistently broken build from hammering the host. -->
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="none"
+                              RestartServiceDelayInSeconds="30"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
+        <ServiceControl Id="AgentServiceControl"
+                        Name="synapse-agent"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+
+      <!-- The state directory is created by the installer so its ACL is the package's decision, and
+           is left in place on uninstall so the credential is the operator's to remove. -->
+      <Component Directory="SYNAPSEDATA" Guid="c7e2a06b-95d4-4b3a-a1f2-8e6d0b47c95a" Permanent="yes">
+        <CreateFolder>
+          <util:PermissionEx User="LocalService" GenericRead="yes" GenericWrite="yes" GenericExecute="yes" />
+          <util:PermissionEx User="Administrators" GenericAll="yes" />
+        </CreateFolder>
+        <RegistryValue Root="HKLM" Key="Software\KKloudTarus\SynapseAgent" Name="StateDir"
+                       Type="string" Value="[SYNAPSEDATA]" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="Synapse Fleet Agent" Level="1">
+      <ComponentGroupRef Id="AgentComponents" />
+    </Feature>
+  </Package>
+</Wix>

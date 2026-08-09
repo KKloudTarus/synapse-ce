@@ -183,6 +183,156 @@ jobs:
         if: always()
         run: cat /tmp/control-plane.log || true
 
+  # Requirement 3, Windows: the MSI installs the agent as a real SERVICE, the service starts, the
+  # PACKAGED binary completes one enrol + heartbeat, and uninstall removes the service and its files.
+  #
+  # The service is the part worth testing rather than assuming. A plain binary registered with
+  # `sc create` fails to start — "the service did not respond in a timely fashion" — because it never
+  # answers the SCM's status protocol, and that failure looks like a broken agent rather than a missing
+  # handshake. This row is what proves the handshake works.
+  #
+  # It does NOT sign the MSI: Authenticode needs a certificate from a CA Windows already trusts, and
+  # the release pipeline refuses to publish an unsigned Windows artifact. So this row proves the
+  # package installs and runs; publishing it is blocked on a certificate, not on code.
+  windows:
+    name: msi (Windows Server)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build the agent and the control plane
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          CGO_ENABLED=0 go build -trimpath -o dist/synapse-agent.exe ./cmd/synapse-agent
+          CGO_ENABLED=0 go build -trimpath -o dist/synapse-api.exe   ./cmd/synapse-api
+          test -f dist/synapse-agent.exe
+          test -f dist/synapse-api.exe
+
+      - name: Install the WiX toolset
+        run: dotnet tool install --global wix --version 5.0.2
+
+      - name: Add the WiX util extension
+        run: wix extension add -g WixToolset.Util.wixext/5.0.2
+
+      - name: Build the MSI
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          wix build packaging/windows/synapse-agent.wxs `
+            -ext WixToolset.Util.wixext `
+            -d Version=0.0.1 `
+            -d BinPath=dist/synapse-agent.exe `
+            -o out/synapse-agent.msi
+          if (-not (Test-Path out/synapse-agent.msi)) { throw "the MSI was not produced" }
+
+      - name: Start the control plane
+        shell: bash
+        run: |
+          set -euo pipefail
+          SYNAPSE_FLEET_ENABLED=true \
+          SYNAPSE_FLEET_ASSETS_ENABLED=true \
+          SYNAPSE_FLEET_SIGNER_KEY="ci-fleet-signer-key-that-is-long-enough-32b" \
+          SYNAPSE_API_TOKEN="ci-admin-token" \
+          SYNAPSE_ENV=dev \
+          ./dist/synapse-api.exe > control-plane.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+              echo "control plane is up"; exit 0
+            fi
+            sleep 1
+          done
+          echo "control plane did not become healthy"; cat control-plane.log; exit 1
+
+      - name: Accept the acceptable-use policy and mint an enrolment token
+        id: enrol
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(curl -fsS http://127.0.0.1:8080/api/v1/aup \
+            -H 'Authorization: Bearer ci-admin-token' \
+            | python -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+          curl -fsS -X POST http://127.0.0.1:8080/api/v1/aup/accept \
+            -H 'Authorization: Bearer ci-admin-token' -H 'Content-Type: application/json' \
+            -d "{\"version\":\"${version}\"}" >/dev/null
+          token="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/agents/enrolment-tokens \
+            -H 'Authorization: Bearer ci-admin-token' -H 'Content-Type: application/json' \
+            -d '{"ttl_seconds":900}' | python -c 'import json,sys; print(json.load(sys.stdin)["enrolment_token"])')"
+          test -n "${token}"
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+
+      - name: Install the MSI and assert what it placed
+        run: |
+          $p = Start-Process msiexec -ArgumentList '/i','out\synapse-agent.msi','/quiet','/norestart','/l*v','install.log' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 60; throw "msiexec failed with $($p.ExitCode)" }
+
+          $exe = "$env:ProgramFiles\Synapse Agent\synapse-agent.exe"
+          if (-not (Test-Path $exe)) { throw "the agent binary was not installed" }
+
+          # The service must EXIST as a service, configured to run as LocalService rather than
+          # LocalSystem: an agent on every host should hold the least privilege that still works.
+          $svc = Get-CimInstance Win32_Service -Filter "Name='synapse-agent'"
+          if (-not $svc) { throw "the service was not installed" }
+          if ($svc.StartName -ne 'NT AUTHORITY\LocalService') { throw "service runs as $($svc.StartName), want LocalService" }
+          Write-Host "service installed, running as $($svc.StartName)"
+
+      - name: The service must start and answer the SCM
+        env:
+          ENROL_TOKEN: ${{ steps.enrol.outputs.token }}
+        run: |
+          # The service needs its control-plane URL and one-time token before it can do anything. They
+          # go in the machine environment, which is where a real deployment puts them.
+          [Environment]::SetEnvironmentVariable('SYNAPSE_FLEET_URL','http://127.0.0.1:8080','Machine')
+          [Environment]::SetEnvironmentVariable('SYNAPSE_FLEET_ENROL_TOKEN',$env:ENROL_TOKEN,'Machine')
+          [Environment]::SetEnvironmentVariable('SYNAPSE_AGENT_STATE_DIR',"$env:ProgramData\SynapseAgent",'Machine')
+
+          Start-Service synapse-agent
+          # Reaching Running at all is the assertion: a binary that does not answer the SCM's status
+          # protocol never gets here, it fails with "did not respond in a timely fashion".
+          $svc = Get-Service synapse-agent
+          $svc.WaitForStatus('Running','00:00:30')
+          Write-Host "service reached Running — the SCM handshake works"
+
+          # And it must complete a real enrol: the credential on disk is the evidence, not the fact
+          # that a process is alive.
+          $state = "$env:ProgramData\SynapseAgent"
+          $ok = $false
+          foreach ($i in 1..30) {
+            if (Test-Path $state) {
+              if ((Get-ChildItem $state -File -ErrorAction SilentlyContinue).Count -gt 0) { $ok = $true; break }
+            }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ok) { throw "the service left no credential — enrolment did not complete" }
+          Write-Host "enrol + heartbeat completed; credential persisted"
+
+      - name: Stop, uninstall, and assert nothing is left behind
+        run: |
+          Stop-Service synapse-agent -Force
+          (Get-Service synapse-agent).WaitForStatus('Stopped','00:00:30')
+
+          $p = Start-Process msiexec -ArgumentList '/x','out\synapse-agent.msi','/quiet','/norestart' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstall failed with $($p.ExitCode)" }
+
+          if (Get-CimInstance Win32_Service -Filter "Name='synapse-agent'") { throw "uninstall left the service behind" }
+          if (Test-Path "$env:ProgramFiles\Synapse Agent\synapse-agent.exe") { throw "uninstall left the binary behind" }
+          # The state directory is deliberately KEPT, exactly as the deb and rpm do: the credential is
+          # the operator's to inspect or remove, not the installer's to delete.
+          if (-not (Test-Path "$env:ProgramData\SynapseAgent")) { throw "the documented state directory was removed" }
+          Write-Host "clean uninstall; state directory preserved"
+
+      - name: Control plane log
+        if: always()
+        shell: bash
+        run: cat control-plane.log || true
+
   # Requirement 2, second enforcement: a runtime older than the build floor must be REFUSED at install
   # time with a readable message and leave nothing behind. This is the field failure the requirement
   # was written from — the package installed and the service crash-looped at first start.

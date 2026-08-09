@@ -24,10 +24,12 @@ uninstall/decommission.
 >
 > **Windows is the exception, and it is refused rather than faked.** Authenticode needs a certificate
 > from a CA that Windows already trusts; a self-signed one would still raise the SmartScreen warning
-> that requirement 4 exists to remove. The pipeline therefore fails if a Windows artifact is present.
-> No Windows package is the honest outcome; a warned-about one is not. There is consequently **no
-> Windows row in the matrix below** — a platform with no row is not supported, and saying so is the
-> point.
+> that requirement 4 exists to remove.
+>
+> So the split is precise: the MSI is **built and verified** on every pull request — installed, the
+> service started, one real enrol and heartbeat completed, then uninstalled — but the release pipeline
+> **refuses to publish it** until a real certificate exists. Windows packaging is supported; Windows
+> *publishing* is blocked on a purchase, not on code.
 >
 > **Update rollout is operator-controlled** (`/api/v1/agents/rollout`): a target reaches the canary
 > groups only, promotion to every group is a second deliberate action, pausing needs a reason, and
@@ -44,7 +46,7 @@ and left to crash at first start (#412 req 1).
 | Ubuntu | 20.04 LTS | amd64, arm64 | 2.31 | systemd |
 | RHEL / Rocky / Alma | 8 | amd64, arm64 | 2.28 | systemd |
 | Amazon Linux | 2023 | amd64, arm64 | 2.34 | systemd |
-| Windows Server | 2019 | amd64 | n/a (MSVC runtime) | Windows Service |
+| Windows Server | 2019 (build 17763) | amd64 | n/a | Windows Service (LocalService) |
 
 The **libc floor is enforced twice** (#412 req 2): (1) as a package dependency — rpm
 `Requires: glibc >= X`, deb `Depends: libc6 (>= X)` — so the package manager refuses an install below

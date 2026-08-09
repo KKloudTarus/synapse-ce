@@ -313,10 +313,7 @@ func main() {
 		scannedImageStore = postgres.NewScannedImageStore(pool)
 		workOrderStore = postgres.NewWorkOrderRepository(pool)
 		fleetAgentStore = postgres.NewFleetAgentRepository(pool)
-		// The rollout plan is operator state; it is small and read on every heartbeat, so the memory
-		// store is used even with Postgres configured. A plan lost on restart means no update is
-		// offered until an operator sets one again, which is the fail-closed direction.
-		fleetRolloutStore = memory.NewFleetRolloutStore()
+		fleetRolloutStore = postgres.NewFleetRolloutRepository(pool)
 		leaderStore = postgres.NewLeaderStore(pool)
 		// SECURITY (#431 req 6, #432, #409): the fleet_* tables are RLS-protected, but RLS is a
 		// silent no-op if the runtime DB role is SUPERUSER or holds BYPASSRLS. When any fleet
