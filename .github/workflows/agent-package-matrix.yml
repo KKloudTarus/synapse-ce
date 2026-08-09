@@ -117,10 +117,11 @@ jobs:
         id: enrol
         run: |
           set -euo pipefail
+          # The route takes ttl_seconds and returns the credential once, as "enrolment_token".
           token="$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/agents/enrolment-tokens \
             -H 'Authorization: Bearer ci-admin-token' \
             -H 'Content-Type: application/json' \
-            -d '{"name":"ci-matrix-agent"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+            -d '{"ttl_seconds":900}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["enrolment_token"])')"
           test -n "${token}"
           echo "::add-mask::${token}"
           echo "token=${token}" >> "$GITHUB_OUTPUT"
@@ -136,38 +137,22 @@ jobs:
           gateway="$(ip -4 route show default | awk '{print $3}' | head -n1)"
           test -n "${gateway}"
 
+          # The container reaches the control plane over the docker bridge gateway. --network=host
+          # would hide a class of packaging bug: a unit that only works when the network happens to be
+          # the runner's own.
+          #
+          # The package is mounted at a FIXED path so the in-container script needs no interpolated
+          # basename inside nested quoting.
           docker run --rm \
             --add-host "control-plane:${gateway}" \
             -e SYNAPSE_FLEET_URL="http://control-plane:8080" \
             -e SYNAPSE_FLEET_ENROL_TOKEN="${ENROL_TOKEN}" \
             -e SYNAPSE_LIBC_FLOOR="${SYNAPSE_LIBC_FLOOR}" \
-            -v "${PWD}/${pkg}:/tmp/$(basename "${pkg}")" \
-            "${{ matrix.image }}" \
-            /bin/sh -eux -c '
-              # 1. INSTALL — the preinstall hook enforces the libc floor a second time.
-              ${{ matrix.install }} "/tmp/'"$(basename "${pkg}")"'"
-
-              # 2. The package must have placed the binary, the unit and a restrictive config.
-              test -x /usr/bin/synapse-agent
-              test -f /lib/systemd/system/synapse-agent.service
-              test -f /etc/synapse-agent/agent.env
-              perms=$(stat -c "%a" /etc/synapse-agent/agent.env)
-              test "${perms}" = "640" || { echo "config perms ${perms}, want 640"; exit 1; }
-              getent passwd synapse-agent >/dev/null
-
-              # 3. START + HEARTBEAT. Containers have no systemd, so the unit file is asserted above and
-              #    the packaged binary is run directly with -once: enrol, heartbeat, one claim cycle.
-              #    That exercises the same code path the unit starts, which is what "starts and
-              #    heartbeats" has to mean here.
-              /usr/bin/synapse-agent -once -state-dir /var/lib/synapse-agent -name ci-matrix-agent
-
-              # 4. UNINSTALL, and prove nothing is left outside the documented state directory.
-              ${{ matrix.remove }}
-              test ! -e /usr/bin/synapse-agent
-              test ! -e /lib/systemd/system/synapse-agent.service
-              leftovers=$(find / -xdev -name "synapse-agent*" -not -path "/var/lib/synapse-agent/*" -not -path "/proc/*" -not -path "/tmp/*" 2>/dev/null || true)
-              test -z "${leftovers}" || { echo "uninstall left files behind:"; echo "${leftovers}"; exit 1; }
-            '
+            -e INSTALL_CMD="${{ matrix.install }}" \
+            -e REMOVE_CMD="${{ matrix.remove }}" \
+            -v "${PWD}/${pkg}:/tmp/synapse-agent-package" \
+            -v "${PWD}/.github/scripts/agent-package-smoke.sh:/tmp/smoke.sh:ro" \
+            "${{ matrix.image }}" /bin/sh -eu /tmp/smoke.sh
 
       - name: Control plane log
         if: always()
