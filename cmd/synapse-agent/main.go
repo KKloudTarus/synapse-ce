@@ -22,7 +22,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
@@ -118,12 +117,14 @@ func parseConfig() config {
 	flag.IntVar(&cfg.maxOrders, "max-orders", 8, "max work orders to claim per cycle")
 	flag.BoolVar(&cfg.once, "once", false, "run a single cycle then exit")
 	flag.Parse()
-	if cfg.enrolToken == "" && enrolTokenFile != "" {
-		b, err := os.ReadFile(enrolTokenFile)
+	if cfg.enrolToken == "" {
+		// An absent token file is NOT fatal: it is the normal state after enrolment, once the
+		// one-time secret has been cleaned up. EnsureEnrolled decides from the stored credential.
+		tok, err := fleetclient.ReadEnrolTokenFile(enrolTokenFile)
 		if err != nil {
-			log.Fatalf("synapse-agent: read enrol token file: %v", err)
+			log.Fatalf("synapse-agent: %v", err)
 		}
-		cfg.enrolToken = strings.TrimSpace(string(b))
+		cfg.enrolToken = tok
 	}
 	return cfg
 }
