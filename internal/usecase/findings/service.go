@@ -236,6 +236,9 @@ func (s *Service) RecordConfirmedDAST(ctx context.Context, verifier string, j ju
 		in.CWE, in.Location, in.Rule = claim.CWE, claim.Location, claim.Rule
 		in.Source, in.Fingerprint = claim.Source, claim.Fingerprint
 	case judgment.SASTClaim:
+		if !j.Publishable() {
+			return fmt.Errorf("%w: sast judgment %s is not publishable", shared.ErrValidation, j.ID)
+		}
 		if j.Capability != judgment.CapSAST {
 			return fmt.Errorf("%w: SAST claim has capability %s", shared.ErrValidation, j.Capability)
 		}
