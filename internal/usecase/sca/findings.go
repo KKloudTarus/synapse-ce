@@ -698,3 +698,42 @@ func detectionSourceNames(sources []ports.DetectionSource) []string {
 	}
 	return out
 }
+
+// jsReachabilitySubjects builds Tier-1 JavaScript reachability subjects. Unlike the Python builder, the
+// symbol is the EXACT component purl rather than the package name: npm routinely installs several
+// versions of one package, so a name alone would not say which one a reachability verdict is about.
+func jsReachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vulnerability, doc *sbom.SBOM) []ports.ReachabilitySubject {
+	if doc == nil {
+		return nil
+	}
+	// component name + version -> exact purl, for the npm slice of the document.
+	purlByComponent := map[string]string{}
+	for _, c := range doc.Components {
+		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.PURL)), "pkg:npm/") {
+			continue
+		}
+		purlByComponent[strings.ToLower(c.Name)+"\x00"+c.Version] = c.PURL
+	}
+	if len(purlByComponent) == 0 {
+		return nil
+	}
+	byDedup := make(map[string]vulnerability.Vulnerability, len(vulns))
+	for _, v := range vulns {
+		byDedup[vulnDedupKey(v)] = v
+	}
+	var subs []ports.ReachabilitySubject
+	for _, f := range findings {
+		v, ok := byDedup[f.DedupKey]
+		if !ok {
+			continue
+		}
+		purl, ok := purlByComponent[strings.ToLower(v.Component)+"\x00"+v.Version]
+		if !ok {
+			// Without an exact component identity there is no subject to answer for; saying nothing is
+			// the honest outcome.
+			continue
+		}
+		subs = append(subs, ports.ReachabilitySubject{FindingID: f.ID, Symbols: []string{purl}})
+	}
+	return subs
+}

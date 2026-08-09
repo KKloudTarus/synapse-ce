@@ -24,6 +24,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/modulegraph"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachability"
 )
 
@@ -382,4 +383,43 @@ func dedupeStrings(values []string) []string {
 		}
 	}
 	return out
+}
+
+// answerableSubjects returns the subset of subjects this analyzer can answer for: every symbol must be a
+// component of the analyzed SBOM and a declared direct dependency. A subject that fails either test is
+// dropped, because the caller mints a claim for everything it passes on and would otherwise seal an
+// unanswerable subject as not-reachable.
+//
+// A subject-level drop is not a coverage failure — the analysis of the remaining subjects is still sound
+// — so this reports an error only when the scan or resolution itself could not be completed.
+func (a *Analyzer) answerableSubjects(ctx context.Context, dir string, subjects []ports.ReachabilitySubject) ([]ports.ReachabilitySubject, error) {
+	doc, err := a.sboms.SBOMFor(ctx, dir)
+	if err != nil {
+		return nil, fmt.Errorf("jsreach: sbom unavailable (no coverage - prior tier stands): %w", err)
+	}
+	if doc == nil {
+		return nil, fmt.Errorf("%w: jsreach has no sbom for the target (no coverage)", shared.ErrNotFound)
+	}
+	graph, err := a.scanner.Scan(ctx, dir)
+	if err != nil {
+		return nil, fmt.Errorf("jsreach: javascript import scan (no coverage - prior tier stands): %w", err)
+	}
+	resolution, err := a.resolver.Resolve(ctx, dir, graph, doc)
+	if err != nil {
+		return nil, fmt.Errorf("jsreach: package resolution (no coverage - prior tier stands): %w", err)
+	}
+
+	out := make([]ports.ReachabilitySubject, 0, len(subjects))
+	for _, subject := range subjects {
+		symbols := make([]string, 0, len(subject.Symbols))
+		for _, symbol := range subject.Symbols {
+			if a.assertSubjectsAnswerable([]string{symbol}, doc, resolution) == nil {
+				symbols = append(symbols, symbol)
+			}
+		}
+		if len(symbols) > 0 {
+			out = append(out, ports.ReachabilitySubject{FindingID: subject.FindingID, Symbols: symbols})
+		}
+	}
+	return out, nil
 }
