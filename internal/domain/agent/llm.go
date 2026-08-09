@@ -72,7 +72,13 @@ func CanonicalModelID(id string) string {
 	// provider namespace with a dot, while OpenAI-compatible routers commonly spell that namespace
 	// with a slash (already removed above). Collapse both representations so a profile or provider
 	// spelling cannot make one model look like an independent verifier.
-	if prefix, rest, ok := strings.Cut(id, "."); ok && bedrockScope(prefix) {
+	// Strip a leading geographic scope. Enumerating scopes alone FAILS OPEN as AWS adds regions: an
+	// unlisted prefix leaves "ca.anthropic.claude-x" looking distinct from "anthropic.claude-x", so the
+	// same model would pass a separation-of-duties check as an independent verifier (verified: us/eu/
+	// apac/global collapsed, ca/jp/au/sa did not). So also treat ANY leading segment as a scope when
+	// what follows it starts with a known provider namespace -- the provider set is what a Bedrock model
+	// ID is built from, and it drifts far more slowly than the region list.
+	if prefix, rest, ok := strings.Cut(id, "."); ok && (bedrockScope(prefix) || startsWithBedrockProvider(rest)) {
 		id = rest
 	}
 	if prefix, rest, ok := strings.Cut(id, "."); ok && bedrockProvider(prefix) {
@@ -98,6 +104,13 @@ func CanonicalModelID(id string) string {
 		id = id[:n-11]
 	}
 	return id
+}
+
+// startsWithBedrockProvider reports whether s begins with a known Bedrock provider namespace, which
+// makes whatever preceded it a scope rather than part of the model identity.
+func startsWithBedrockProvider(s string) bool {
+	prefix, _, ok := strings.Cut(s, ".")
+	return ok && bedrockProvider(prefix)
 }
 
 func bedrockScope(s string) bool {
