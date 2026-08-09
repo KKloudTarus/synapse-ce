@@ -109,23 +109,6 @@ func TestAssetRepository(t *testing.T) {
 		t.Fatalf("expected one runs edge, got %+v", edges)
 	}
 
-	// Business service roundtrip + idempotency.
-	svc, _ := asset.NewBusinessService("s1", "ta", "payments", "team-a", now)
-	if err := repo.UpsertBusinessService(ctx, svc); err != nil {
-		t.Fatalf("upsert svc: %v", err)
-	}
-	svc2, _ := asset.NewBusinessService("s1", "ta", "payments", "team-b", now)
-	if err := repo.UpsertBusinessService(ctx, svc2); err != nil {
-		t.Fatalf("re-upsert svc: %v", err)
-	}
-	svcs, err := repo.ListBusinessServices(ctx, "ta")
-	if err != nil {
-		t.Fatalf("list svcs: %v", err)
-	}
-	if len(svcs) != 1 || svcs[0].Owner != "team-b" {
-		t.Fatalf("expected one service with updated owner, got %+v", svcs)
-	}
-
 	// Empty tenant is rejected by the domain before it ever reaches the DB.
 	if _, err := asset.New("z", "", asset.KindHost, "h", "h", nil, now); err == nil {
 		t.Fatalf("empty tenant asset should be rejected by domain")

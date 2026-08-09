@@ -97,6 +97,7 @@ func (rt *Router) admitAgent(ctx context.Context) (release func(), ok bool) {
 	if d.queue == nil || d.queueDepth <= 0 {
 		return func() {}, true // no queue, or depth cap disabled
 	}
+	ctx = shared.WithTenant(ctx, shared.ID(TenantFrom(ctx)))
 	depth, err := d.queue.Depth(ctx, orchestrator.JobKind)
 	if err != nil {
 		rt.log.Error("agent queue depth check failed – rejecting (fail closed)", "err", err)
@@ -117,10 +118,12 @@ func (rt *Router) writeAgentSaturated(w http.ResponseWriter, msg string) {
 
 // spawnAgent runs the job durably (enqueue) or inline (bounded goroutine on the run ctx),
 // consuming the reserved slot. For the durable path the slot is a no-op and freed immediately.
-func (rt *Router) spawnAgent(release func(), payload []byte) {
+
+func (rt *Router) spawnAgent(release func(), tenantID shared.ID, payload []byte) {
+	ctx := shared.WithTenant(rt.agent.runCtx, tenantID)
 	if rt.agent.queue != nil {
 		defer release()
-		if _, err := rt.agent.queue.Enqueue(rt.agent.runCtx, orchestrator.JobKind, payload); err != nil {
+		if _, err := rt.agent.queue.Enqueue(ctx, orchestrator.JobKind, payload); err != nil {
 			rt.log.Error("enqueue agent job failed", "err", err)
 		}
 		return
@@ -129,7 +132,7 @@ func (rt *Router) spawnAgent(release func(), payload []byte) {
 	go func() {
 		defer rt.agent.wg.Done()
 		defer release()
-		if err := rt.agent.orch.RunJob(rt.agent.runCtx, payload); err != nil {
+		if err := rt.agent.orch.RunJob(ctx, payload); err != nil {
 			rt.log.Error("inline agent run failed", "err", err)
 		}
 	}()
@@ -156,19 +159,21 @@ func (rt *Router) startAgentSession(w http.ResponseWriter, r *http.Request) {
 		rt.writeAgentSaturated(w, "agent at capacity, retry shortly")
 		return
 	}
-	sess, err := rt.agent.orch.Start(r.Context(), shared.ID(engID), PrincipalFrom(r.Context()), body.Goal)
+	tenantID := shared.ID(TenantFrom(r.Context()))
+	tenantCtx := shared.WithTenant(r.Context(), tenantID)
+	sess, err := rt.agent.orch.Start(tenantCtx, shared.ID(engID), PrincipalFrom(r.Context()), body.Goal)
 	if err != nil {
 		release()
 		writeError(w, rt.log, err)
 		return
 	}
-	payload, err := orchestrator.DriveJob(sess.ID)
+	payload, err := orchestrator.DriveJob(tenantCtx, sess.ID)
 	if err != nil {
 		release()
 		writeError(w, rt.log, err)
 		return
 	}
-	rt.spawnAgent(release, payload)
+	rt.spawnAgent(release, tenantID, payload)
 	writeJSON(w, http.StatusAccepted, sess)
 }
 
@@ -292,13 +297,15 @@ func (rt *Router) decideAgentApproval(w http.ResponseWriter, r *http.Request) {
 	}
 	// Resume either way: an approval executes the action; a denial is fed back and the loop
 	// continues so the agent can adapt.
-	payload, err := orchestrator.ResumeJob(prop.SessionID, actionID)
+	tenantID := shared.ID(TenantFrom(r.Context()))
+	tenantCtx := shared.WithTenant(r.Context(), tenantID)
+	payload, err := orchestrator.ResumeJob(tenantCtx, prop.SessionID, actionID)
 	if err != nil {
 		release()
 		writeError(w, rt.log, err)
 		return
 	}
-	rt.spawnAgent(release, payload)
+	rt.spawnAgent(release, tenantID, payload)
 	writeJSON(w, http.StatusOK, dec)
 }
 

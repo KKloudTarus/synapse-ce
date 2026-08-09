@@ -7,6 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 // WithTenant runs fn inside a transaction whose `app.current_tenant` session variable is set to
@@ -51,6 +53,15 @@ func WithTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn fun
 	}
 	committed = true
 	return nil
+}
+
+// WithContextTenant runs fn under the immutable tenant previously bound to ctx.
+func WithContextTenant(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) error {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+	}
+	return WithTenant(ctx, pool, tenantID.String(), fn)
 }
 
 // CheckRLSRuntimeRole reports whether the role the pool connects as can actually be constrained by

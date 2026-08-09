@@ -34,54 +34,65 @@ var _ ports.WriteupDraftStore = (*WriteupDraftRepository)(nil)
 // empty-string default tenant (mirrors judgments/findings); reads are tenant-isolated via the engagement
 // gate, and the column is present so the P5/E22 row-scoping sweep covers it.
 func (r *WriteupDraftRepository) Save(ctx context.Context, d writeupdraft.Draft) error {
-	if _, err := r.pool.Exec(ctx,
-		`INSERT INTO writeup_drafts (id, tenant_id, engagement_id, finding_id, description, remediation, state, proposed_by, decided_by, created_at, updated_at)
-		 VALUES ($1, '', $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+	}
+	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO writeup_drafts (id, tenant_id, engagement_id, finding_id, description, remediation, state, proposed_by, decided_by, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		 ON CONFLICT (id) DO UPDATE SET
 		   description = EXCLUDED.description,
 		   remediation = EXCLUDED.remediation,
 		   state       = EXCLUDED.state,
 		   decided_by  = EXCLUDED.decided_by,
 		   updated_at  = EXCLUDED.updated_at`,
-		d.ID.String(), d.EngagementID.String(), d.FindingID.String(), d.Description, d.Remediation,
-		string(d.State), d.ProposedBy, d.DecidedBy, d.CreatedAt, d.UpdatedAt); err != nil {
-		return fmt.Errorf("save writeup draft: %w", err)
-	}
-	return nil
+			d.ID.String(), tenantID.String(), d.EngagementID.String(), d.FindingID.String(), d.Description, d.Remediation,
+			string(d.State), d.ProposedBy, d.DecidedBy, d.CreatedAt, d.UpdatedAt); err != nil {
+			return fmt.Errorf("save writeup draft: %w", err)
+		}
+		return nil
+	})
 }
 
 // Get returns the engagement's draft by id, or shared.ErrNotFound.
-func (r *WriteupDraftRepository) Get(ctx context.Context, engagementID, id shared.ID) (writeupdraft.Draft, error) {
-	d, err := scanWriteupDraft(r.pool.QueryRow(ctx,
-		`SELECT `+writeupDraftCols+` FROM writeup_drafts WHERE id=$1 AND engagement_id=$2`,
-		id.String(), engagementID.String()))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return writeupdraft.Draft{}, fmt.Errorf("writeup draft %s: %w", id, shared.ErrNotFound)
-	}
-	if err != nil {
-		return writeupdraft.Draft{}, fmt.Errorf("get writeup draft: %w", err)
-	}
-	return d, nil
+func (r *WriteupDraftRepository) Get(ctx context.Context, engagementID, id shared.ID) (out writeupdraft.Draft, err error) {
+	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		out, err = scanWriteupDraft(tx.QueryRow(ctx,
+			`SELECT `+writeupDraftCols+` FROM writeup_drafts WHERE id=$1 AND engagement_id=$2`,
+			id.String(), engagementID.String()))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("writeup draft %s: %w", id, shared.ErrNotFound)
+		}
+		if err != nil {
+			return fmt.Errorf("get writeup draft: %w", err)
+		}
+		return nil
+	})
+	return out, err
 }
 
 // ListByEngagement returns the engagement's drafts, oldest first (deterministic order).
-func (r *WriteupDraftRepository) ListByEngagement(ctx context.Context, engagementID shared.ID) ([]writeupdraft.Draft, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT `+writeupDraftCols+` FROM writeup_drafts WHERE engagement_id=$1 ORDER BY created_at ASC, id COLLATE "C" ASC`,
-		engagementID.String())
-	if err != nil {
-		return nil, fmt.Errorf("list writeup drafts: %w", err)
-	}
-	defer rows.Close()
-	out := make([]writeupdraft.Draft, 0)
-	for rows.Next() {
-		d, err := scanWriteupDraft(rows)
+func (r *WriteupDraftRepository) ListByEngagement(ctx context.Context, engagementID shared.ID) (out []writeupdraft.Draft, err error) {
+	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx,
+			`SELECT `+writeupDraftCols+` FROM writeup_drafts WHERE engagement_id=$1 ORDER BY created_at ASC, id COLLATE "C" ASC`,
+			engagementID.String())
 		if err != nil {
-			return nil, fmt.Errorf("scan writeup draft: %w", err)
+			return fmt.Errorf("list writeup drafts: %w", err)
 		}
-		out = append(out, d)
-	}
-	return out, rows.Err()
+		defer rows.Close()
+		for rows.Next() {
+			d, err := scanWriteupDraft(rows)
+			if err != nil {
+				return fmt.Errorf("scan writeup draft: %w", err)
+			}
+			out = append(out, d)
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 
 // scanWriteupDraft scans a writeupDraftCols row into a Draft, fail-closed on a corrupted/hand-edited

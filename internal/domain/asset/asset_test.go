@@ -89,39 +89,12 @@ func TestNewEdge(t *testing.T) {
 		{"missing from", "t1", "", "a2", EdgeRuns, "obs1", true},
 		{"missing to", "t1", "a1", "", EdgeRuns, "obs1", true},
 		{"invalid kind", "t1", "a1", "a2", "points_to", "obs1", true},
+		{"retired member_of kind", "t1", "a1", "a2", "member_of", "obs1", true},
 		{"missing provenance", "t1", "a1", "a2", EdgeRuns, "", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := NewEdge(tc.tenant, tc.from, tc.to, tc.kind, tc.provenance)
-			if tc.wantErr && err == nil {
-				t.Fatalf("expected error, got nil")
-			}
-			if tc.wantErr && !errors.Is(err, shared.ErrValidation) {
-				t.Fatalf("expected ErrValidation, got %v", err)
-			}
-			if !tc.wantErr && err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-func TestNewBusinessService(t *testing.T) {
-	tests := []struct {
-		name, svcName, owner string
-		id, tenant           shared.ID
-		wantErr              bool
-	}{
-		{"ok", "payments", "team-a", "s1", "t1", false},
-		{"missing id", "payments", "team-a", "", "t1", true},
-		{"empty tenant", "payments", "team-a", "s1", "", true},
-		{"missing name", "  ", "team-a", "s1", "t1", true},
-		{"missing owner", "payments", "  ", "s1", "t1", true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := NewBusinessService(tc.id, tc.tenant, tc.svcName, tc.owner, testNow)
 			if tc.wantErr && err == nil {
 				t.Fatalf("expected error, got nil")
 			}

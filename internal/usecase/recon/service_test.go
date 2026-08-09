@@ -164,7 +164,8 @@ func TestStartHappyPathSealsEvidenceAndDropsOutOfScope(t *testing.T) {
 	h := newHarness(t, fakeRunner{res: ports.ToolResult{Stdout: []byte("raw tool output")}}, subfinderTool(), false)
 	h.seedEngagement(t, true)
 
-	run, err := h.svc.Start(context.Background(), "alice", "e1", "subfinder", "example.com")
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
+	run, err := h.svc.Start(ctx, "alice", "e1", "subfinder", "example.com")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -379,7 +380,8 @@ func TestStartViaDurableQueue(t *testing.T) {
 	q := memory.NewJobQueue(&seqIDs{}, nil)
 	h.svc.SetQueue(q)
 
-	run, err := h.svc.Start(context.Background(), "alice", "e1", "subfinder", "example.com")
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
+	run, err := h.svc.Start(ctx, "alice", "e1", "subfinder", "example.com")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -388,11 +390,11 @@ func TestStartViaDurableQueue(t *testing.T) {
 		t.Fatalf("run should be queued (not yet executed), got %s", got.Status)
 	}
 	// The worker claims the job and runs it.
-	job, err := q.Claim(context.Background(), time.Minute)
+	job, err := q.Claim(ctx, time.Minute)
 	if err != nil || job == nil || job.Kind != JobKind {
 		t.Fatalf("expected a recon job on the queue, got %+v err=%v", job, err)
 	}
-	if err := h.svc.RunJob(context.Background(), job.Payload); err != nil {
+	if err := h.svc.RunJob(shared.WithTenant(ctx, job.TenantID), job.Payload); err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
 	if got, _ := h.runs.Get(context.Background(), run.ID); got.Status != recon.StatusSucceeded {
@@ -416,16 +418,18 @@ func TestFailStrandedJobFinalizesRun(t *testing.T) {
 	q := memory.NewJobQueue(&seqIDs{}, nil)
 	h.svc.SetQueue(q)
 
-	run, err := h.svc.Start(context.Background(), "alice", "e1", "subfinder", "example.com")
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
+	run, err := h.svc.Start(ctx, "alice", "e1", "subfinder", "example.com")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	job, err := q.Claim(context.Background(), time.Minute)
+	job, err := q.Claim(ctx, time.Minute)
 	if err != nil || job == nil {
 		t.Fatalf("expected a recon job on the queue, got %+v err=%v", job, err)
 	}
 	// Simulate the worker giving up: the DeadLetterer hook finalizes the run.
-	if err := h.svc.FailStrandedJob(context.Background(), job.Payload, errors.New("boom")); err != nil {
+	jobCtx := shared.WithTenant(ctx, job.TenantID)
+	if err := h.svc.FailStrandedJob(jobCtx, job.Payload, errors.New("boom")); err != nil {
 		t.Fatalf("FailStrandedJob: %v", err)
 	}
 	got, _ := h.runs.Get(context.Background(), run.ID)
@@ -433,7 +437,7 @@ func TestFailStrandedJobFinalizesRun(t *testing.T) {
 		t.Fatalf("a dead-lettered recon run must be finalized failed, got %s", got.Status)
 	}
 	// Idempotent: a second finalize (at-least-once delivery) is a no-op, no error.
-	if err := h.svc.FailStrandedJob(context.Background(), job.Payload, errors.New("boom")); err != nil {
+	if err := h.svc.FailStrandedJob(jobCtx, job.Payload, errors.New("boom")); err != nil {
 		t.Fatalf("second FailStrandedJob must be a no-op, got %v", err)
 	}
 }
@@ -444,7 +448,7 @@ func TestFailStrandedJobFinalizesRun(t *testing.T) {
 func TestSweepStaleRunsReclaims(t *testing.T) {
 	h := newHarness(t, fakeRunner{}, subfinderTool(), false)
 	h.svc.SetRunLock(memory.NewRunLock())
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	// clock Now() = 2026-06-21 12:00; staleFor 5m ⇒ olderThan = 11:55.
 	stale := recon.Run{ID: "run-stale", EngagementID: "e1", Tool: "subfinder", Target: "x", Status: recon.StatusRunning, StartedAt: time.Date(2026, 6, 21, 11, 0, 0, 0, time.UTC)}
 	fresh := recon.Run{ID: "run-fresh", EngagementID: "e1", Tool: "subfinder", Target: "y", Status: recon.StatusRunning, StartedAt: time.Date(2026, 6, 21, 11, 59, 30, 0, time.UTC)}
@@ -527,12 +531,13 @@ func TestRunJobAbortsOnLeaseLoss(t *testing.T) {
 	h := newHarness(t, ctxRunner{}, subfinderTool(), false)
 	h.seedEngagement(t, true)
 	h.svc.SetRunLock(fakeLeaseLock{})
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	run := recon.Run{ID: "run-1", EngagementID: "e1", Tool: "subfinder", Target: "example.com", Status: recon.StatusRunning, StartedAt: time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)}
 	if err := h.runs.Save(ctx, run); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(reconJob{Actor: "alice", RunID: "run-1", Tool: "subfinder", Target: "example.com"})
+	tenant := shared.DefaultTenant.String()
+	payload, err := json.Marshal(reconJob{Actor: "alice", TenantID: &tenant, RunID: "run-1", Tool: "subfinder", Target: "example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}

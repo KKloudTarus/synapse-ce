@@ -23,6 +23,7 @@ type createEngagementRequest struct {
 	AuthorizedFrom string           `json:"authorized_from"` // RFC3339, optional
 	AuthorizedTo   string           `json:"authorized_to"`   // RFC3339, optional
 	Timezone       string           `json:"timezone"`        // IANA, optional (display)
+	AssetID        string           `json:"asset_id"`
 }
 
 // parseRFC3339Ptr parses an optional RFC3339 timestamp. Empty -> (nil, nil).
@@ -67,16 +68,29 @@ func (rt *Router) createEngagement(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	tenantID := shared.TenantOrDefault(shared.ID(TenantFrom(r.Context())))
+	if req.AssetID != "" && rt.businessAssets != nil {
+		a, getErr := rt.businessAssets.Get(r.Context(), tenantID, shared.ID(req.AssetID))
+		if getErr != nil {
+			writeError(w, rt.log, getErr)
+			return
+		}
+		if !a.AcceptsAssignments() {
+			writeJSON(w, http.StatusBadRequest, errorBody{Error: "retired asset is read-only"})
+			return
+		}
+	}
 	e, err := rt.eng.Create(r.Context(), enguc.CreateInput{
-		TenantID:       shared.ID(TenantFrom(r.Context())), // from the authenticated principal; '' = default tenant
-		CreatedBy:      PrincipalFrom(r.Context()),         // engagement owner (ownership)
-		Name:           req.Name,
-		Client:         req.Client,
-		InScope:        toTargets(req.InScope),
-		OutOfScope:     toTargets(req.OutOfScope),
-		AuthorizedFrom: from,
-		AuthorizedTo:   to,
-		Timezone:       req.Timezone,
+		TenantID:        tenantID,
+		BusinessAssetID: shared.ID(req.AssetID),
+		CreatedBy:       PrincipalFrom(r.Context()), // engagement owner (ownership)
+		Name:            req.Name,
+		Client:          req.Client,
+		InScope:         toTargets(req.InScope),
+		OutOfScope:      toTargets(req.OutOfScope),
+		AuthorizedFrom:  from,
+		AuthorizedTo:    to,
+		Timezone:        req.Timezone,
 	})
 	if err != nil {
 		writeError(w, rt.log, err)

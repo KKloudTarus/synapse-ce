@@ -65,12 +65,17 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (int, error) {
 			r.log.Info("reconcile: session awaiting approval (not auto-driven)", "session", sess.ID.String())
 			continue
 		}
-		payload, err := DriveJob(sess.ID)
+		if sess.TenantID.IsZero() {
+			r.log.Error("reconcile: session has no tenant; refusing to enqueue", "session", sess.ID.String())
+			continue
+		}
+		tenantCtx := shared.WithTenant(ctx, sess.TenantID)
+		payload, err := DriveJob(tenantCtx, sess.ID)
 		if err != nil {
 			r.log.Error("reconcile: build drive job", "session", sess.ID.String(), "err", err)
 			continue
 		}
-		if _, err := r.enqueue.Enqueue(ctx, JobKind, payload); err != nil {
+		if _, err := r.enqueue.Enqueue(tenantCtx, JobKind, payload); err != nil {
 			r.log.Error("reconcile: re-enqueue drive job", "session", sess.ID.String(), "err", err)
 			continue
 		}

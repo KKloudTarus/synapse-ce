@@ -30,6 +30,7 @@ func TestEngagementRepository(t *testing.T) {
 	defer pool.Close()
 
 	repo := NewEngagementRepository(pool)
+	defaultCtx := shared.WithTenant(ctx, shared.DefaultTenant)
 	id := shared.ID("it-" + randHex(t))
 	t.Cleanup(func() { _, _ = pool.Exec(ctx, "DELETE FROM engagements WHERE id=$1", id.String()) })
 
@@ -45,12 +46,15 @@ func TestEngagementRepository(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	got, err := repo.GetByID(ctx, id)
+	got, err := repo.GetByID(defaultCtx, id)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
 	if got.Name != "integration" || got.Client != "acme" {
 		t.Errorf("got %+v", got)
+	}
+	if _, err := repo.GetByIDInTenant(ctx, "", id); err != nil {
+		t.Errorf("empty tenant must resolve only to the default partition: %v", err)
 	}
 	if !got.Scope.Allows("/repo") || got.Scope.Allows("secret.io") {
 		t.Errorf("scope round-trip wrong: %+v", got.Scope)
@@ -64,7 +68,7 @@ func TestEngagementRepository(t *testing.T) {
 		id.String()); err != nil {
 		t.Fatalf("seed legacy scope spelling: %v", err)
 	}
-	got, err = repo.GetByID(ctx, id)
+	got, err = repo.GetByID(defaultCtx, id)
 	if err != nil {
 		t.Fatalf("get with canonicalizable legacy scope: %v", err)
 	}
@@ -76,7 +80,7 @@ func TestEngagementRepository(t *testing.T) {
 		id.String()); err != nil {
 		t.Fatalf("seed invalid legacy scope: %v", err)
 	}
-	if _, err := repo.GetByID(ctx, id); err == nil {
+	if _, err := repo.GetByID(defaultCtx, id); err == nil {
 		t.Fatal("invalid persisted scope must fail engagement loading")
 	}
 	if _, err := pool.Exec(ctx,
@@ -102,7 +106,7 @@ func TestEngagementRepository(t *testing.T) {
 		t.Errorf("created engagement %s not in list", id)
 	}
 
-	if _, err := repo.GetByID(ctx, shared.ID("does-not-exist")); err != shared.ErrNotFound {
+	if _, err := repo.GetByID(defaultCtx, shared.ID("does-not-exist")); err != shared.ErrNotFound {
 		t.Errorf("missing GetByID = %v, want ErrNotFound", err)
 	}
 
@@ -125,7 +129,7 @@ func TestEngagementRepository(t *testing.T) {
 	if err := repo.Create(ctx, e2); err != nil {
 		t.Fatalf("create windowed: %v", err)
 	}
-	got2, err := repo.GetByID(ctx, id2)
+	got2, err := repo.GetByID(defaultCtx, id2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,17 +163,18 @@ func TestEngagementRepository(t *testing.T) {
 	if err := repo.Create(ctx, ea); err != nil {
 		t.Fatalf("create tenantA: %v", err)
 	}
+	tenantACtx := shared.WithTenant(ctx, tenA)
 	// Owner (created_by/updated_by) round-trips.
-	if g, err := repo.GetByID(ctx, idA); err != nil || g.Audit.CreatedBy != "alice" || g.Audit.UpdatedBy != "alice" {
+	if g, err := repo.GetByID(tenantACtx, idA); err != nil || g.Audit.CreatedBy != "alice" || g.Audit.UpdatedBy != "alice" {
 		t.Fatalf("ownership round-trip: g=%+v err=%v", g, err)
 	}
-	// Same tenant reads it; a zero tenant (single-tenant / admin) reads it; tenant B cannot
-	// (ErrNotFound – existence is not revealed cross-tenant).
+	// Same tenant reads it; the default tenant and tenant B cannot (ErrNotFound – existence is not
+	// revealed cross-tenant).
 	if _, err := repo.GetByIDInTenant(ctx, tenA, idA); err != nil {
 		t.Errorf("same-tenant GetByIDInTenant: %v", err)
 	}
-	if _, err := repo.GetByIDInTenant(ctx, "", idA); err != nil {
-		t.Errorf("zero-tenant GetByIDInTenant must see any row: %v", err)
+	if _, err := repo.GetByIDInTenant(ctx, "", idA); err != shared.ErrNotFound {
+		t.Errorf("zero-tenant GetByIDInTenant = %v, want ErrNotFound outside default partition", err)
 	}
 	if _, err := repo.GetByIDInTenant(ctx, tenB, idA); err != shared.ErrNotFound {
 		t.Errorf("cross-tenant GetByIDInTenant = %v, want ErrNotFound", err)
@@ -187,10 +192,10 @@ func TestEngagementRepository(t *testing.T) {
 	// Update must NOT change the owner (created_by is immutable) but must update updated_by.
 	cp := *ea
 	cp.Audit.UpdatedBy = "bob"
-	if err := repo.Update(ctx, &cp); err != nil {
+	if err := repo.Update(tenantACtx, &cp); err != nil {
 		t.Fatalf("update tenantA: %v", err)
 	}
-	if g, err := repo.GetByID(ctx, idA); err != nil || g.Audit.CreatedBy != "alice" || g.Audit.UpdatedBy != "bob" {
+	if g, err := repo.GetByID(tenantACtx, idA); err != nil || g.Audit.CreatedBy != "alice" || g.Audit.UpdatedBy != "bob" {
 		t.Fatalf("after update, owner must be immutable + updated_by=bob: g=%+v err=%v", g, err)
 	}
 }

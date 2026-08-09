@@ -4,10 +4,12 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 func TestPHPRulesIgnoreCommentsAndLiterals(t *testing.T) {
-	call := "e" + "val($_GET['code']);"
+	call := "e" + "val($input);"
 	root := t.TempDir()
 	writeFile(t, root, "Safe.php", strings.Join([]string{
 		"<?php",
@@ -27,7 +29,7 @@ func TestPHPRulesIgnoreCommentsAndLiterals(t *testing.T) {
 }
 
 func TestPHPRulesKeepExecutableCode(t *testing.T) {
-	call := "e" + "val($_GET['code']);"
+	call := "e" + "val($input);"
 	root := t.TempDir()
 	writeFile(t, root, "unsafe.php", "<?php\n$single = '"+strings.ReplaceAll(call, "'", "\\'")+"';\n"+call+"\n")
 
@@ -72,9 +74,9 @@ func TestPHPTemplatesOnlyScanPHPTags(t *testing.T) {
 	for _, name := range []string{"view.phtml", "view.php", "view.inc"} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
-			writeFile(t, root, name, `<script>eval($_GET['html'])</script>
+			writeFile(t, root, name, `<script>eval($input)</script>
 <div data-password="production-secret"></div>
-<?php eval($_GET['code']); ?>`)
+<?php eval($input); ?>`)
 			byRule := findingsByRule(t, root)
 			if hits := byRule["php:eval-usage"]; len(hits) != 1 || hits[0].Line != 3 {
 				t.Fatalf("PHP-tag eval findings = %+v, want line 3 only", hits)
@@ -160,7 +162,7 @@ func TestPHPClosingTagEndsLineComment(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "view.php", `<?php // comment ?>
 <div title="unterminated>
-<?php eval($_GET['code']); ?>`)
+<?php eval($input); ?>`)
 	if hits := findingsByRule(t, root)["php:eval-usage"]; len(hits) != 1 || hits[0].Line != 3 {
 		t.Fatalf("post-comment-tag eval findings = %+v, want line 3", hits)
 	}
@@ -168,7 +170,7 @@ func TestPHPClosingTagEndsLineComment(t *testing.T) {
 
 func TestPHPShortOpenTagInTemplate(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, root, "view.phtml", "<?xml version=\"1.0\"?>\n<div password=\"production-secret\"><? EVAL($_GET['code']); ?>\n")
+	writeFile(t, root, "view.phtml", "<?xml version=\"1.0\"?>\n<div password=\"production-secret\"><? EVAL($input); ?>\n")
 	byRule := findingsByRule(t, root)
 	for _, id := range []string{"php:short-open-tag", "php:eval-usage"} {
 		if hits := byRule[id]; len(hits) != 1 || hits[0].Line != 2 {
@@ -203,7 +205,7 @@ func TestPHPTaglessSourceStillScans(t *testing.T) {
 func TestPHPAttributeDoesNotStartComment(t *testing.T) {
 	state := newPHPLexState(false, true)
 	state.views("<?php")
-	line := "#[Deprecated] function old(): void { eval($_GET['code']); }"
+	line := "#[Deprecated] function old(): void { eval($input); }"
 	view := state.views(line)
 	if !phpRuleMatches(phpPatternRule(New(), "php:eval-usage"), view.text, view.code) {
 		t.Fatalf("attribute line was masked: text=%q code=%q", view.text, view.code)
@@ -259,9 +261,9 @@ func TestPHPLineViewsRespectTagsAndLiterals(t *testing.T) {
 		name, file, source string
 		want               int
 	}{
-		{"tagless phtml", "view.phtml", `<div>eval($_GET['code'])</div>`, 0},
+		{"tagless phtml", "view.phtml", `<div>eval($input)</div>`, 0},
 		{"literal tagless php", "unsafe.php", `$example = "<?php";
-eval($_GET['code']);`, 1},
+eval($input);`, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -290,9 +292,18 @@ func TestPHPSuperglobalsAreCaseSensitiveSources(t *testing.T) {
 		{"lowercase", "$_get", "unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
-			writeFile(t, root, "unsafe.php", "<?php\neval("+tc.superglobal+"['code']);\n")
-			hits := findingsByRule(t, root)["php:eval-usage"]
+			line := "eval(" + tc.superglobal + "['code']);"
+			hits, _, err := New().scanLines(context.Background(), "unsafe.php", ".php", []string{"<?php", line}, projectContext{}, map[string]bool{}, maxFindings)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var evals []ports.SASTRawFinding
+			for _, hit := range hits {
+				if hit.RuleID == "php:eval-usage" {
+					evals = append(evals, hit)
+				}
+			}
+			hits = evals
 			if len(hits) != 1 || hits[0].Source != tc.wantSource {
 				t.Fatalf("%s findings = %+v, want source %q", tc.superglobal, hits, tc.wantSource)
 			}
@@ -326,7 +337,7 @@ HEADER("Location: " . $_get['next']);
 func TestPHPExtraExtensionsAreScanned(t *testing.T) {
 	for _, ext := range []string{".inc", ".php5", ".module", ".phar"} {
 		root := t.TempDir()
-		writeFile(t, root, "unsafe"+ext, "eval($_GET['code']);")
+		writeFile(t, root, "unsafe"+ext, "eval($input);")
 		if hits := findingsByRule(t, root)["php:eval-usage"]; len(hits) != 1 {
 			t.Fatalf("%s findings = %+v", ext, hits)
 		}

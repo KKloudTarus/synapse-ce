@@ -13,16 +13,12 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// JobQueue is the durable ports.JobQueue on PostgreSQL. Claim uses FOR UPDATE
-// SKIP LOCKED so concurrent workers never hand the same job to two claimants, and an
-// expired lease (claimed_until < now) makes a job claimable again – at-least-once
-// delivery with crash recovery.
+// JobQueue is the durable PostgreSQL queue with tenant-bound at-least-once delivery.
 type JobQueue struct {
 	pool *pgxpool.Pool
 	ids  ports.IDGenerator
 }
 
-// NewJobQueue returns a Postgres-backed job queue.
 func NewJobQueue(pool *pgxpool.Pool, ids ports.IDGenerator) *JobQueue {
 	return &JobQueue{pool: pool, ids: ids}
 }
@@ -33,114 +29,114 @@ func (q *JobQueue) Enqueue(ctx context.Context, kind string, payload []byte) (st
 	if kind == "" {
 		return "", fmt.Errorf("%w: job kind is required", shared.ErrValidation)
 	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return "", fmt.Errorf("%w: tenant context is required for durable job", shared.ErrValidation)
+	}
 	id := q.ids.NewID().String()
 	if payload == nil {
-		payload = []byte{} // a nil []byte encodes as SQL NULL; the column is NOT NULL and empty is valid
+		payload = []byte{}
 	}
-	if _, err := q.pool.Exec(ctx,
-		`INSERT INTO jobs (id, kind, payload, status, available_at) VALUES ($1, $2, $3, 'queued', now())`,
-		id, kind, payload); err != nil {
+	err := WithTenant(ctx, q.pool, tenantID.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO jobs (id,tenant_id,kind,payload,status,available_at) VALUES ($1,$2,$3,$4,'queued',now())`, id, tenantID.String(), kind, payload)
+		return err
+	})
+	if err != nil {
 		return "", fmt.Errorf("enqueue job: %w", err)
 	}
 	return id, nil
 }
 
 func (q *JobQueue) Claim(ctx context.Context, visibility time.Duration, kinds ...string) (*ports.QueuedJob, error) {
-	// Optional kind filter: only claim the kinds this worker handles (empty = any).
-	kindFilter, args := "", []any{visibility.Seconds()}
-	if len(kinds) > 0 {
-		kindFilter = " AND kind = ANY($2)"
-		args = append(args, kinds)
-	}
-	var j ports.QueuedJob
-	err := q.pool.QueryRow(ctx,
-		`UPDATE jobs SET status='claimed', attempts=attempts+1,
-		        claimed_until = now() + make_interval(secs => $1), updated_at = now()
-		 WHERE id = (
-		     SELECT id FROM jobs
-		     WHERE status <> 'done'
-		       AND available_at <= now()
-		       AND (status = 'queued' OR claimed_until < now())`+kindFilter+`
-		     ORDER BY available_at
-		     FOR UPDATE SKIP LOCKED
-		     LIMIT 1
-		 )
-		 RETURNING id, kind, payload, attempts`,
-		args...).Scan(&j.ID, &j.Kind, &j.Payload, &j.Attempts)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil // nothing ready
-	}
+	rows, err := q.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
 	if err != nil {
-		return nil, fmt.Errorf("claim job: %w", err)
+		return nil, fmt.Errorf("list queue tenants: %w", err)
 	}
-	return &j, nil
+	var tenantIDs []shared.ID
+	for rows.Next() {
+		var tenantID shared.ID
+		if err := rows.Scan(&tenantID); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan queue tenant: %w", err)
+		}
+		tenantIDs = append(tenantIDs, tenantID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("list queue tenants: %w", err)
+	}
+	rows.Close()
+
+	for _, tenantID := range tenantIDs {
+		var claimed *ports.QueuedJob
+		err := WithTenant(ctx, q.pool, tenantID.String(), func(tx pgx.Tx) error {
+			kindFilter, args := "", []any{visibility.Seconds()}
+			if len(kinds) > 0 {
+				kindFilter = " AND kind = ANY($2)"
+				args = append(args, kinds)
+			}
+			var job ports.QueuedJob
+			err := tx.QueryRow(ctx, `UPDATE jobs SET status='claimed',attempts=attempts+1,claimed_until=now()+make_interval(secs=>$1),updated_at=now()
+				WHERE id=(SELECT id FROM jobs WHERE status IN ('queued','claimed') AND available_at<=now() AND (status='queued' OR claimed_until<now())`+kindFilter+`
+				ORDER BY available_at,id FOR UPDATE SKIP LOCKED LIMIT 1)
+				RETURNING id,tenant_id,kind,payload,attempts`, args...).Scan(&job.ID, &job.TenantID, &job.Kind, &job.Payload, &job.Attempts)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("claim job: %w", err)
+			}
+			claimed = &job
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if claimed != nil {
+			return claimed, nil
+		}
+	}
+	return nil, nil
 }
 
 func (q *JobQueue) Heartbeat(ctx context.Context, id string, extend time.Duration) error {
-	tag, err := q.pool.Exec(ctx,
-		`UPDATE jobs SET claimed_until = now() + make_interval(secs => $2), updated_at = now()
-		 WHERE id = $1 AND status = 'claimed'`,
-		id, extend.Seconds())
-	if err != nil {
-		return fmt.Errorf("heartbeat job: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
-	}
-	return nil
+	return q.update(ctx, id, `UPDATE jobs SET claimed_until=now()+make_interval(secs=>$2),updated_at=now() WHERE id=$1 AND status='claimed'`, extend.Seconds())
 }
 
 func (q *JobQueue) Complete(ctx context.Context, id string) error {
-	tag, err := q.pool.Exec(ctx,
-		`UPDATE jobs SET status='done', claimed_until=NULL, updated_at=now() WHERE id=$1`, id)
-	if err != nil {
-		return fmt.Errorf("complete job: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
-	}
-	return nil
+	return q.update(ctx, id, `UPDATE jobs SET status='done',claimed_until=NULL,updated_at=now() WHERE id=$1`)
 }
 
 func (q *JobQueue) Deadletter(ctx context.Context, id string) error {
-	tag, err := q.pool.Exec(ctx,
-		`UPDATE jobs SET status='failed', claimed_until=NULL, updated_at=now() WHERE id=$1`, id)
-	if err != nil {
-		return fmt.Errorf("deadletter job: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
-	}
-	return nil
-}
-
-// Depth counts not-yet-terminal jobs (queued or claimed) – the durable-backpressure
-// admission signal. 'done' and 'failed' are terminal and excluded. Optional kind filter.
-func (q *JobQueue) Depth(ctx context.Context, kinds ...string) (int, error) {
-	query := `SELECT count(*) FROM jobs WHERE status IN ('queued','claimed')`
-	var args []any
-	if len(kinds) > 0 {
-		query += ` AND kind = ANY($1)`
-		args = append(args, kinds)
-	}
-	var n int
-	if err := q.pool.QueryRow(ctx, query, args...).Scan(&n); err != nil {
-		return 0, fmt.Errorf("queue depth: %w", err)
-	}
-	return n, nil
+	return q.update(ctx, id, `UPDATE jobs SET status='failed',claimed_until=NULL,updated_at=now() WHERE id=$1`)
 }
 
 func (q *JobQueue) Fail(ctx context.Context, id string, retryIn time.Duration) error {
-	tag, err := q.pool.Exec(ctx,
-		`UPDATE jobs SET status='queued', claimed_until=NULL,
-		        available_at = now() + make_interval(secs => $2), updated_at = now()
-		 WHERE id = $1`,
-		id, retryIn.Seconds())
-	if err != nil {
-		return fmt.Errorf("fail job: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
-	}
-	return nil
+	return q.update(ctx, id, `UPDATE jobs SET status='queued',claimed_until=NULL,available_at=now()+make_interval(secs=>$2),updated_at=now() WHERE id=$1`, retryIn.Seconds())
+}
+
+func (q *JobQueue) update(ctx context.Context, id, query string, args ...any) error {
+	return WithContextTenant(ctx, q.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, query, append([]any{id}, args...)...)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
+		}
+		return nil
+	})
+}
+
+func (q *JobQueue) Depth(ctx context.Context, kinds ...string) (count int, err error) {
+	err = WithContextTenant(ctx, q.pool, func(tx pgx.Tx) error {
+		query := `SELECT count(*) FROM jobs WHERE status IN ('queued','claimed')`
+		var args []any
+		if len(kinds) > 0 {
+			query += ` AND kind=ANY($1)`
+			args = append(args, kinds)
+		}
+		return tx.QueryRow(ctx, query, args...).Scan(&count)
+	})
+	return count, err
 }

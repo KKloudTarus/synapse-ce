@@ -78,6 +78,10 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+	if err := postgres.CheckRLSRuntimeRole(startup, pool); err != nil {
+		log.Error("the worker DB role cannot enforce row level security – refusing to serve", "err", err)
+		os.Exit(1)
+	}
 	// Role-scoped single-instance lock: one worker, coexisting with one API.
 	lockConn, ok, lerr := postgres.AcquireSingletonLock(startup, pool, "worker")
 	if lerr != nil {
@@ -315,11 +319,16 @@ func main() {
 			os.Exit(1)
 		}
 		approvalSvc.SetResumeEnqueuer(func(ctx context.Context, sid, aid shared.ID) error {
-			p, err := orchestrator.ResumeJob(sid, aid)
+			sess, err := agentSessionStore.GetSession(ctx, sid)
 			if err != nil {
 				return err
 			}
-			_, err = queue.Enqueue(ctx, orchestrator.JobKind, p)
+			tenantCtx := shared.WithTenant(ctx, sess.TenantID)
+			p, err := orchestrator.ResumeJob(tenantCtx, sid, aid)
+			if err != nil {
+				return err
+			}
+			_, err = queue.Enqueue(tenantCtx, orchestrator.JobKind, p)
 			return err
 		})
 		go reconciler.Run(ctx, 5*time.Minute)

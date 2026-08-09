@@ -1316,7 +1316,12 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 	// claims + runs the pipeline with syft/grype sandboxed) – replaces the bare goroutine,
 	// so queued work survives a restart. Without a queue, the in-process goroutine runs it.
 	if s.jobQueue != nil {
-		payload, mErr := json.Marshal(scaJobPayload{Actor: actor, EngagementID: engagementID.String(), Now: now, Req: req, Options: opts, Job: job})
+		tenantID, ok := shared.TenantFrom(ctx)
+		if !ok {
+			return ports.ScanJob{}, fmt.Errorf("%w: tenant context is required for scan job", shared.ErrValidation)
+		}
+		tenant := tenantID.String()
+		payload, mErr := json.Marshal(scaJobPayload{Actor: actor, TenantID: &tenant, EngagementID: engagementID.String(), Now: now, Req: req, Options: opts, Job: job})
 		if mErr != nil {
 			return ports.ScanJob{}, fmt.Errorf("marshal scan job: %w", mErr)
 		}
@@ -1328,7 +1333,11 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 		}
 		return job, nil
 	}
-	go s.runScanJob(actor, engagementID, now, req, opts, job)
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return ports.ScanJob{}, fmt.Errorf("%w: tenant context is required for scan job", shared.ErrValidation)
+	}
+	go s.runScanJob(shared.WithTenant(context.Background(), tenantID), actor, engagementID, now, req, opts, job)
 	return job, nil
 }
 
@@ -1338,6 +1347,7 @@ const ScanJobKind = "sca"
 // scaJobPayload is the durable-queue payload for one SCA scan run.
 type scaJobPayload struct {
 	Actor        string               `json:"actor"`
+	TenantID     *string              `json:"tenant_id"`
 	EngagementID string               `json:"engagement_id"`
 	Now          time.Time            `json:"now"`
 	Req          ports.AcquireRequest `json:"req"`
@@ -1361,6 +1371,10 @@ func (s *Service) RunScanJob(ctx context.Context, payload []byte) error {
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("%w: malformed scan job payload: %v", shared.ErrValidation, err)
 	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || p.TenantID == nil || *p.TenantID != tenantID.String() {
+		return fmt.Errorf("%w: scan job tenant context is missing or mismatched", shared.ErrValidation)
+	}
 	// single-active-execution lease at the JOB boundary (re-audit fix) – a lock ERROR
 	// returns an error so the queue REDELIVERS (never silently completes a never-run scan);
 	// a held lease means another delivery is running it → complete this one (nil).
@@ -1378,7 +1392,7 @@ func (s *Service) RunScanJob(ctx context.Context, payload []byte) error {
 	if err != nil {
 		return err
 	}
-	s.runScanJob(p.Actor, shared.ID(p.EngagementID), p.Now, p.Req, opts, p.Job)
+	s.runScanJob(ctx, p.Actor, shared.ID(p.EngagementID), p.Now, p.Req, opts, p.Job)
 	return nil
 }
 
@@ -1391,6 +1405,10 @@ func (s *Service) FailStrandedScanJob(ctx context.Context, payload []byte, cause
 	var p scaJobPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("%w: malformed scan job payload: %v", shared.ErrValidation, err)
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || p.TenantID == nil || *p.TenantID != tenantID.String() {
+		return fmt.Errorf("%w: scan job tenant context is missing or mismatched", shared.ErrValidation)
 	}
 	if s.jobs == nil {
 		return nil
@@ -1591,7 +1609,7 @@ func looksLikePath(v string) bool {
 
 // runScanJob runs the pipeline on a detached background context (the request that
 // started the scan has returned), advancing + finishing the job.
-func (s *Service) runScanJob(actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, job ports.ScanJob) {
+func (s *Service) runScanJob(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, job ports.ScanJob) {
 	// Idempotency (audit): the durable queue is at-least-once, so a redelivery can
 	// re-invoke a scan a prior delivery already finished. Re-running is read-only (findings
 	// dedup by advisory+component+version) but would seal a DUPLICATE "scan" evidence link
@@ -1599,7 +1617,7 @@ func (s *Service) runScanJob(actor string, engagementID shared.ID, now time.Time
 	// already terminal, skip – the worker then Completes the job. (A newer scan started
 	// between deliveries masks this guard; the only cost there is the duplicate seal.)
 	if s.jobs != nil {
-		if latest, err := s.jobs.LatestForEngagement(context.Background(), engagementID); err == nil &&
+		if latest, err := s.jobs.LatestForEngagement(ctx, engagementID); err == nil &&
 			latest.ID == job.ID && (latest.Status == ports.ScanSucceeded || latest.Status == ports.ScanFailed) {
 			return
 		}
@@ -1607,7 +1625,6 @@ func (s *Service) runScanJob(actor string, engagementID shared.ID, now time.Time
 	if opts.ProjectAnalysis {
 		opts.ProjectAnalysisID = job.ID
 	}
-	ctx := context.Background()
 	if s.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, s.timeout)

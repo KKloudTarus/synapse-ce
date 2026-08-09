@@ -24,6 +24,7 @@ type JobQueue struct {
 
 type memJob struct {
 	id           string
+	tenantID     shared.ID
 	kind         string
 	payload      []byte
 	status       string // queued | claimed | done
@@ -42,14 +43,18 @@ func NewJobQueue(ids ports.IDGenerator, now func() time.Time) *JobQueue {
 
 var _ ports.JobQueue = (*JobQueue)(nil)
 
-func (q *JobQueue) Enqueue(_ context.Context, kind string, payload []byte) (string, error) {
+func (q *JobQueue) Enqueue(ctx context.Context, kind string, payload []byte) (string, error) {
 	if kind == "" {
 		return "", fmt.Errorf("%w: job kind is required", shared.ErrValidation)
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return "", fmt.Errorf("%w: tenant context is required for durable job", shared.ErrValidation)
 	}
 	id := q.ids.NewID().String()
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.jobs[id] = &memJob{id: id, kind: kind, payload: payload, status: "queued", availableAt: q.now()}
+	q.jobs[id] = &memJob{id: id, tenantID: tenantID, kind: kind, payload: payload, status: "queued", availableAt: q.now()}
 	q.order = append(q.order, id)
 	return id, nil
 }
@@ -90,7 +95,7 @@ func (q *JobQueue) Claim(_ context.Context, visibility time.Duration, kinds ...s
 	j.status = "claimed"
 	j.attempts++
 	j.claimedUntil = now.Add(visibility)
-	return &ports.QueuedJob{ID: j.id, Kind: j.kind, Payload: j.payload, Attempts: j.attempts}, nil
+	return &ports.QueuedJob{ID: j.id, TenantID: j.tenantID, Kind: j.kind, Payload: j.payload, Attempts: j.attempts}, nil
 }
 
 func (q *JobQueue) Heartbeat(_ context.Context, id string, extend time.Duration) error {

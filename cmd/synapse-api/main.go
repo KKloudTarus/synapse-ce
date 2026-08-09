@@ -100,6 +100,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/assetuc"
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/businessassetuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	credentialsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/credentials"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/crosscheckjudge"
@@ -189,7 +190,10 @@ func main() {
 	var fleetRolloutStore ports.FleetRolloutStore // operator update-rollout plans (#412 req 9)
 	var leaderStore ports.LeaderStore             // postgres only; nil in memory mode (single process)
 	var findingRepo ports.FindingRepository
-	var judgmentStore analysisuc.Store // postgres or memory; satisfies both the narrow Store + ports.JudgmentStore
+	var judgmentStore interface {
+		analysisuc.Store
+		ports.JudgmentStore
+	}
 	var commentRepo ports.CommentRepository
 	var retestRepo ports.RetestRepository
 	var userRepo ports.UserRepository
@@ -978,6 +982,20 @@ func main() {
 	router.SetProjects(projectService)
 	router.SetQualityGates(qualityGateService)
 	router.SetQualityProfiles(qualityProfileService)
+	if memoryAssets, ok := assetStore.(*memory.AssetStore); ok {
+		memoryAssets.SetEngagementRepository(repo)
+	}
+	businessAssetStore, ok := assetStore.(ports.BusinessAssetRepository)
+	if !ok {
+		log.Error("asset repository does not support business Asset Management")
+		os.Exit(1)
+	}
+	businessAssetService, err := businessassetuc.NewService(businessAssetStore, findingRepo, importedFindingStore, judgmentStore, retestRepo, auditLog, clock, ids)
+	if err != nil {
+		log.Error("business asset service init failed", "err", err)
+		os.Exit(1)
+	}
+	router.SetBusinessAssets(businessAssetService)
 	router.SetExploitation(exploitationService) // evidence-gated finding verify endpoint
 	// Read-only code-quality dashboard. Server-side analysis is PURE-GO and memory-safe only (pattern
 	// rules + duplication + Go-parser inventory); tree-sitter complexity is intentionally NOT wired here

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
@@ -68,7 +69,7 @@ func TestResumeAfterApprovalExecutesAndContinues(t *testing.T) {
 		chatTool(toolCall("c1", agenttools.ToolStartRecon, `{"tool":"subfinder","target":"app.acme.io","rationale":"enum"}`)),
 		chatStop("found hosts"),
 	})
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 
 	sess, err := h.orch.Run(ctx, "eng-1", "alice", "enumerate app.acme.io")
 	if err != nil {
@@ -120,7 +121,7 @@ func TestResumeAfterDenialFeedsBackNeverExecutes(t *testing.T) {
 		chatTool(toolCall("c1", agenttools.ToolStartRecon, `{"tool":"subfinder","target":"app.acme.io","rationale":"enum"}`)),
 		chatStop("understood"),
 	})
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	sess, _ := h.orch.Run(ctx, "eng-1", "alice", "enumerate")
 	pend, _ := h.apprStore.Pending(ctx, "eng-1")
 	actionID := pend[0].ID
@@ -145,7 +146,7 @@ func TestResumeAfterDenialFeedsBackNeverExecutes(t *testing.T) {
 // TestRunJobDispatches: the durable handler drives a started session to completion.
 func TestRunJobDispatches(t *testing.T) {
 	h := newResumeHarness(t, []ports.ChatResponse{chatStop("nothing to do")})
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	sess, err := h.orch.Start(ctx, "eng-1", "alice", "just answer")
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +154,7 @@ func TestRunJobDispatches(t *testing.T) {
 	if sess.Status != agent.StatusRunning {
 		t.Fatalf("Start must leave the session running, got %s", sess.Status)
 	}
-	payload, err := orchestrator.DriveJob(sess.ID)
+	payload, err := orchestrator.DriveJob(ctx, sess.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

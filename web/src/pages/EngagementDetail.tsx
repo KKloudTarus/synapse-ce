@@ -40,7 +40,7 @@ import {
   X,
 } from 'lucide-react'
 import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import {
   Button,
   Card,
@@ -69,6 +69,7 @@ import {
 import { findingKindLabel, kindLabel, statusLabel } from '../lib/format'
 import { CATEGORY_LABEL, sevFill, sevRank, sevSoft, sevText, SEVERITY_ORDER } from '../lib/severity'
 import type {
+  BusinessAsset,
   Engagement,
   EvidenceItem,
   EvidenceLedger,
@@ -99,8 +100,14 @@ const DependencyGraphTab = lazy(() => import('./DependencyGraph').then((m) => ({
 
 type Tab = 'overview' | 'findings' | 'components' | 'vulns' | 'licenses' | 'graph' | 'quality' | 'threats' | 'recon' | 'agent' | 'reviews' | 'evidence' | 'settings'
 
+function findingAnchor(id: string) {
+  return `finding-${id}`
+}
+
 export function EngagementDetail() {
   const { id = '' } = useParams()
+  const { hash } = useLocation()
+  const focusedFindingId = hash.startsWith('#finding-') ? decodeURIComponent(hash.slice(9)) : ''
   const [eng, setEng] = useState<Engagement | null | undefined>(undefined)
   const [engErr, setEngErr] = useState<string | null>(null)
   const [findings, setFindings] = useState<Finding[] | null>(null)
@@ -109,6 +116,10 @@ export function EngagementDetail() {
   const [job, setJob] = useState<ScanJob | null>(null)
   const [tab, setTab] = useState<Tab>('overview')
   const [findingsFilter, setFindingsFilter] = useState<Severity | 'all'>('all')
+
+  useEffect(() => {
+    if (focusedFindingId) setTab('findings')
+  }, [focusedFindingId])
 
   useEffect(() => {
     setEng(undefined)
@@ -151,6 +162,7 @@ export function EngagementDetail() {
 
   // refreshAll re-pulls the latest scan + findings (after an SBOM import or VEX apply).
   function refreshAll() {
+    api.getEngagement(id).then(setEng).catch(() => undefined)
     api.latestScan(id).then((r) => r && setScan(r)).catch(() => undefined)
     api.findings(id).then(setFindings).catch(() => undefined)
     api.importedSBOM(id).then(setImportedSBOM).catch(() => setImportedSBOM(null))
@@ -252,6 +264,7 @@ export function EngagementDetail() {
             engagementId={id}
             filter={findingsFilter}
             setFilter={setFindingsFilter}
+            focusedFindingId={focusedFindingId}
             onUpdated={applyFinding}
             onReload={reloadFindings}
           />
@@ -289,6 +302,7 @@ function Header({ eng, scan, onChanged }: { eng: Engagement; scan: ScanResult | 
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-mutedfg">
         {eng.client && <span>{eng.client}</span>}
+        {eng.businessAssetId ? <Link to={`/assets/${encodeURIComponent(eng.businessAssetId)}`} className="flex items-center gap-1.5 text-branddim hover:underline"><Boxes className="size-3.5" />Asset</Link> : <span className="flex items-center gap-1.5"><Boxes className="size-3.5" />Unassigned</span>}
         <span className="flex items-center gap-1.5">
           <Target className="size-3.5" /> {eng.inScope.length} in scope
         </span>
@@ -298,6 +312,7 @@ function Header({ eng, scan, onChanged }: { eng: Engagement; scan: ScanResult | 
           </span>
         )}
       </div>
+      <AssetAssignment engagement={eng} onChanged={onChanged} />
       {eng.inScope.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
           {eng.inScope.map((t, i) => (
@@ -315,6 +330,15 @@ function Header({ eng, scan, onChanged }: { eng: Engagement; scan: ScanResult | 
       )}
     </div>
   )
+}
+
+function AssetAssignment({ engagement, onChanged }: { engagement: Engagement; onChanged: () => void }) {
+  const [assets, setAssets] = useState<BusinessAsset[]>([])
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => { let live=true; api.listBusinessAssets('limit=200').then(r=>live&&setAssets(r.items)).catch(()=>live&&setAssets([])); return()=>{live=false} }, [])
+  async function assign(assetId:string){setSaving(true);setError(null);try{await api.assignEngagementAsset(engagement.id,assetId);onChanged()}catch(e){setError(e instanceof Error?e.message:'Failed to assign Asset')}finally{setSaving(false)}}
+  return <div className="mt-3 flex flex-wrap items-center gap-3"><span className="text-xs font-semibold uppercase tracking-wide text-subtlefg">Asset assignment</span><Select value={engagement.businessAssetId} onValueChange={assign} disabled={saving} size="sm" options={[{value:'',label:'Unassigned'},...assets.map(a=>({value:a.id,label:`${a.name} (${a.key})`}))]}/>{error&&<span className="text-xs text-critical">{error}</span>}</div>
 }
 
 // EvidenceBadge shows the tamper-evident evidence-chain status and, when
@@ -1733,6 +1757,7 @@ function FindingsTab({
   engagementId,
   filter,
   setFilter,
+  focusedFindingId,
   onUpdated,
   onReload,
 }: {
@@ -1741,6 +1766,7 @@ function FindingsTab({
   engagementId: string
   filter: Severity | 'all'
   setFilter: (v: Severity | 'all') => void
+  focusedFindingId: string
   onUpdated: (f: Finding) => void
   onReload: () => void
 }) {
@@ -1748,6 +1774,15 @@ function FindingsTab({
   const [view, setView] = useState<'table' | 'board'>('table')
   const [creating, setCreating] = useState(false)
   const [kindFilter, setKindFilter] = useState<string>('all') // filter by finding Kind
+
+  useEffect(() => {
+    if (!focusedFindingId || findings === null) return
+    setExpanded((current) => new Set(current).add(focusedFindingId))
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(findingAnchor(focusedFindingId))?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [findings, focusedFindingId])
   const vulnByKey = useMemo(() => {
     const m = new Map<string, Vulnerability>()
     for (const v of scan?.vulnerabilities ?? []) m.set(vulnKey(v), v)
@@ -1842,8 +1877,9 @@ function FindingsTab({
               return (
                 <Fragment key={f.id}>
                   <tr
+                    id={findingAnchor(f.id)}
                     onClick={() => toggle(f.id)}
-                    className="cursor-pointer border-t border-border transition-colors hover:bg-elevated"
+                    className={cn('cursor-pointer border-t border-border transition-colors hover:bg-elevated', focusedFindingId === f.id && 'bg-brand/5 ring-1 ring-inset ring-brand/30')}
                   >
                     <td className="pl-3 align-top">
                       <button

@@ -46,7 +46,8 @@ func cfg() Config {
 // were not recovered it would unwind out of the Run goroutine and crash this test process.
 func TestWorkerRecoversFromHandlerPanic(t *testing.T) {
 	q := memory.NewJobQueue(&seqIDs{}, nil)
-	if _, err := q.Enqueue(context.Background(), "boom", []byte("x")); err != nil {
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
+	if _, err := q.Enqueue(ctx, "boom", []byte("x")); err != nil {
 		t.Fatal(err)
 	}
 	var calls atomic.Int64
@@ -74,7 +75,7 @@ func TestWorkerRecoversFromHandlerPanic(t *testing.T) {
 
 func TestWorkerProcessesAndCompletes(t *testing.T) {
 	q := memory.NewJobQueue(&seqIDs{}, nil)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
 	id, _ := q.Enqueue(ctx, "recon", []byte("payload"))
 
 	var handled atomic.Int64
@@ -111,7 +112,8 @@ func TestWorkerProcessesAndCompletes(t *testing.T) {
 
 func TestWorkerRetriesThenGivesUp(t *testing.T) {
 	q := memory.NewJobQueue(&seqIDs{}, nil)
-	_, _ = q.Enqueue(context.Background(), "flaky", nil)
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
+	_, _ = q.Enqueue(ctx, "flaky", nil)
 
 	var calls atomic.Int64
 	w := New(q, map[string]Handler{
@@ -136,7 +138,7 @@ func TestWorkerRetriesThenGivesUp(t *testing.T) {
 	if got := calls.Load(); got != 3 {
 		t.Fatalf("expected exactly MaxAttempts=3 handler calls, got %d", got)
 	}
-	if j, _ := q.Claim(context.Background(), time.Second); j != nil {
+	if j, _ := q.Claim(ctx, time.Second); j != nil {
 		t.Errorf("after giving up, the job must be dead-lettered (not claimable), got %+v", j)
 	}
 }
@@ -165,7 +167,8 @@ func (h *deadLetterHandler) OnDeadLetter(_ context.Context, job ports.QueuedJob,
 
 func TestWorkerCallsDeadLettererOnGiveUp(t *testing.T) {
 	q := memory.NewJobQueue(&seqIDs{}, nil)
-	_, _ = q.Enqueue(context.Background(), "agent", []byte("sess-payload"))
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
+	_, _ = q.Enqueue(ctx, "agent", []byte("sess-payload"))
 
 	h := &deadLetterHandler{}
 	w := New(q, map[string]Handler{"agent": h}, cfg(), nil)
@@ -196,14 +199,15 @@ func TestWorkerCallsDeadLettererOnGiveUp(t *testing.T) {
 		t.Errorf("OnDeadLetter must receive the dead-lettered job, got payload %q", h.lastJob.Payload)
 	}
 	// The job is still dead-lettered (the hook does not block it).
-	if j, _ := q.Claim(context.Background(), time.Second); j != nil {
+	if j, _ := q.Claim(ctx, time.Second); j != nil {
 		t.Errorf("job must be dead-lettered after give-up, got %+v", j)
 	}
 }
 
 func TestWorkerParksUnknownKind(t *testing.T) {
 	q := memory.NewJobQueue(&seqIDs{}, nil)
-	_, _ = q.Enqueue(context.Background(), "mystery", nil)
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
+	_, _ = q.Enqueue(ctx, "mystery", nil)
 	w := New(q, map[string]Handler{}, cfg(), nil) // no handlers
 
 	runFor(t, w, func(cancel context.CancelFunc) {
@@ -211,7 +215,7 @@ func TestWorkerParksUnknownKind(t *testing.T) {
 		cancel()
 	})
 	// An unknown kind is parked (Completed) so it doesn't spin forever.
-	if j, _ := q.Claim(context.Background(), time.Second); j != nil {
+	if j, _ := q.Claim(ctx, time.Second); j != nil {
 		t.Errorf("an unknown-kind job must be parked, got %+v", j)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 )
 
@@ -15,11 +16,11 @@ import (
 // it and the job/session states no longer permanently disagree.
 func TestFailStrandedJobFinalizesRunningSession(t *testing.T) {
 	orch, _, sessions := newOrch(t, loadLLM{}, &fakeExecutor{}, agent.ModeAuto, orchestrator.Config{MaxSteps: 4})
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	if err := sessions.SaveSession(ctx, agent.Session{ID: "s1", EngagementID: "eng-1", InitiatedBy: "alice", Goal: "g", Status: agent.StatusRunning}); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := orchestrator.DriveJob("s1")
+	payload, err := orchestrator.DriveJob(ctx, "s1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,11 +40,11 @@ func TestFailStrandedJobFinalizesRunningSession(t *testing.T) {
 // already reached a terminal state (e.g. a concurrent delivery succeeded before the dead-letter).
 func TestFailStrandedJobNoOpsOnTerminal(t *testing.T) {
 	orch, _, sessions := newOrch(t, loadLLM{}, &fakeExecutor{}, agent.ModeAuto, orchestrator.Config{MaxSteps: 4})
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	if err := sessions.SaveSession(ctx, agent.Session{ID: "s1", EngagementID: "eng-1", InitiatedBy: "alice", Status: agent.StatusSucceeded}); err != nil {
 		t.Fatal(err)
 	}
-	payload, _ := orchestrator.DriveJob("s1")
+	payload, _ := orchestrator.DriveJob(ctx, "s1")
 	if err := orch.FailStrandedJob(ctx, payload, errors.New("boom")); err != nil {
 		t.Fatalf("FailStrandedJob: %v", err)
 	}
@@ -57,11 +58,11 @@ func TestFailStrandedJobNoOpsOnTerminal(t *testing.T) {
 // plus the reconciler can re-present the same dead-letter – leaving the session failed, no error.
 func TestFailStrandedJobIdempotent(t *testing.T) {
 	orch, _, sessions := newOrch(t, loadLLM{}, &fakeExecutor{}, agent.ModeAuto, orchestrator.Config{MaxSteps: 4})
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	if err := sessions.SaveSession(ctx, agent.Session{ID: "s1", EngagementID: "eng-1", InitiatedBy: "alice", Status: agent.StatusRunning}); err != nil {
 		t.Fatal(err)
 	}
-	payload, _ := orchestrator.DriveJob("s1")
+	payload, _ := orchestrator.DriveJob(ctx, "s1")
 	for i := 0; i < 2; i++ {
 		if err := orch.FailStrandedJob(ctx, payload, errors.New("boom")); err != nil {
 			t.Fatalf("FailStrandedJob #%d: %v", i+1, err)

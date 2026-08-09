@@ -136,10 +136,11 @@ const JobKind = "recon"
 
 // reconJob is the durable-queue payload for one recon run.
 type reconJob struct {
-	Actor  string `json:"actor"`
-	RunID  string `json:"run_id"`
-	Tool   string `json:"tool"`
-	Target string `json:"target"`
+	Actor    string  `json:"actor"`
+	TenantID *string `json:"tenant_id"`
+	RunID    string  `json:"run_id"`
+	Tool     string  `json:"tool"`
+	Target   string  `json:"target"`
 }
 
 // SetQueue routes recon runs through the durable job queue: Start enqueues, and a
@@ -153,6 +154,10 @@ func (s *Service) RunJob(ctx context.Context, payload []byte) error {
 	var j reconJob
 	if err := json.Unmarshal(payload, &j); err != nil {
 		return fmt.Errorf("%w: malformed recon job payload: %v", shared.ErrValidation, err)
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || j.TenantID == nil || *j.TenantID != tenantID.String() {
+		return fmt.Errorf("%w: recon job tenant context is missing or mismatched", shared.ErrValidation)
 	}
 	if err := engagement.ValidateTargetValue(j.Target); err != nil {
 		return fmt.Errorf("%w: invalid recon job target: %v", shared.ErrValidation, err)
@@ -205,7 +210,10 @@ func (s *Service) RunJob(ctx context.Context, payload []byte) error {
 // persisted) when not already terminal, and write an append-only audit entry attributing the
 // abort – a lost lease means another worker may now own the host, so we stopped.
 func (s *Service) finalizeLeaseLost(j reconJob, target engagement.Target) {
-	bg := context.Background()
+	if j.TenantID == nil {
+		return
+	}
+	bg := shared.WithTenant(context.Background(), shared.ID(*j.TenantID))
 	run, err := s.runs.Get(bg, shared.ID(j.RunID))
 	if err != nil {
 		return
@@ -233,6 +241,10 @@ func (s *Service) FailStrandedJob(ctx context.Context, payload []byte, cause err
 	var j reconJob
 	if err := json.Unmarshal(payload, &j); err != nil {
 		return fmt.Errorf("%w: malformed recon job payload: %v", shared.ErrValidation, err)
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || j.TenantID == nil || *j.TenantID != tenantID.String() {
+		return fmt.Errorf("%w: recon job tenant context is missing or mismatched", shared.ErrValidation)
 	}
 	runID := shared.ID(j.RunID)
 	if s.runLock != nil {
@@ -372,6 +384,8 @@ func (s *Service) Start(ctx context.Context, actor string, engagementID shared.I
 	if err != nil {
 		return recon.Run{}, fmt.Errorf("load engagement: %w", err)
 	}
+	tenantID := shared.TenantOrDefault(eng.TenantID)
+	ctx = shared.WithTenant(ctx, tenantID)
 	if !eng.LiveReconEnabled {
 		return recon.Run{}, s.denySubmit(ctx, actor, engagementID, tool, target, "live_recon_disabled",
 			fmt.Errorf("%w: live recon is not enabled for this engagement (lab-only)", shared.ErrForbidden))
@@ -411,7 +425,8 @@ func (s *Service) Start(ctx context.Context, actor string, engagementID shared.I
 	// it (survives restart; runs under the worker's sandbox/egress/privilege). Otherwise
 	// the in-process dispatcher runs it (dev / single-process).
 	if s.jobQueue != nil {
-		payload, err := json.Marshal(reconJob{Actor: actor, RunID: run.ID.String(), Tool: toolName, Target: target.Value})
+		tenant := tenantID.String()
+		payload, err := json.Marshal(reconJob{Actor: actor, TenantID: &tenant, RunID: run.ID.String(), Tool: toolName, Target: target.Value})
 		if err != nil {
 			s.finishFailed(ctx, &run, "queue", "marshal job: "+err.Error())
 			return run, fmt.Errorf("marshal recon job: %w", err)
@@ -423,7 +438,7 @@ func (s *Service) Start(ctx context.Context, actor string, engagementID shared.I
 		return run, nil
 	}
 	if err := s.dispatcher.Submit(func(wctx context.Context) {
-		s.execute(wctx, actor, run.ID, toolName, target)
+		s.execute(shared.WithTenant(wctx, tenantID), actor, run.ID, toolName, target)
 	}); err != nil {
 		s.finishFailed(ctx, &run, "queue", "could not queue run: "+err.Error())
 		return run, fmt.Errorf("enqueue run: %w", err)

@@ -76,8 +76,8 @@ type ScannedImageStore interface {
 	ScannedDigests(ctx context.Context, tenantID shared.ID) (map[string]bool, error)
 }
 
-// AssetRepository persists the tenant-scoped fleet asset model (assets, typed edges, business
-// services). Every method is tenant-scoped; the Postgres implementation routes all access through
+// AssetRepository persists the tenant-scoped fleet asset model (assets and typed edges). Every
+// method is tenant-scoped; the Postgres implementation routes all access through
 // WithTenant so Row Level Security enforces isolation at the database. Upserts are idempotent by
 // natural key so re-observing an unchanged asset produces no churn. Lists return deterministically
 // ordered results.
@@ -87,9 +87,23 @@ type AssetRepository interface {
 	ListAssets(ctx context.Context, tenantID shared.ID) ([]*asset.Asset, error)
 	UpsertEdge(ctx context.Context, e *asset.Edge) error
 	ListEdges(ctx context.Context, tenantID shared.ID) ([]*asset.Edge, error)
-	UpsertBusinessService(ctx context.Context, s *asset.BusinessService) error
-	GetBusinessServiceByName(ctx context.Context, tenantID shared.ID, name string) (*asset.BusinessService, error)
-	ListBusinessServices(ctx context.Context, tenantID shared.ID) ([]*asset.BusinessService, error)
+}
+
+// BusinessAssetRepository persists the business-level Asset model without changing the existing
+// technical/fleet Asset API. All methods are tenant-scoped and PostgreSQL implementations run
+// through WithTenant so RLS and composite foreign keys remain the final isolation boundary.
+type BusinessAssetRepository interface {
+	CreateBusinessAsset(ctx context.Context, a *asset.BusinessAsset) error
+	UpdateBusinessAsset(ctx context.Context, a *asset.BusinessAsset, expectedVersion int) error
+	GetBusinessAssetByID(ctx context.Context, tenantID, id shared.ID) (*asset.BusinessAsset, error)
+	GetBusinessAssetByKey(ctx context.Context, tenantID shared.ID, key string) (*asset.BusinessAsset, error)
+	ListBusinessAssets(ctx context.Context, tenantID shared.ID) ([]*asset.BusinessAsset, error)
+	ReplaceBusinessAssetProjects(ctx context.Context, tenantID, assetID shared.ID, links []asset.ComponentMembership) error
+	ListBusinessAssetProjects(ctx context.Context, tenantID, assetID shared.ID) ([]asset.ComponentMembership, error)
+	ReplaceBusinessAssetTechnicalAssets(ctx context.Context, tenantID, assetID shared.ID, links []asset.ComponentMembership) error
+	ListBusinessAssetTechnicalAssets(ctx context.Context, tenantID, assetID shared.ID) ([]asset.ComponentMembership, error)
+	AssignEngagementBusinessAsset(ctx context.Context, tenantID, engagementID, assetID shared.ID) error
+	ListEngagementsByBusinessAsset(ctx context.Context, tenantID, assetID shared.ID) ([]*engagement.Engagement, error)
 }
 
 // WorkOrderStore persists the tenant-scoped fleet work order lifecycle. Postgres routes every
@@ -275,10 +289,8 @@ type EngagementRepository interface {
 	// caller can only reach engagements in their own tenant. Adding a new GetByID caller on a
 	// request path reintroduces a cross-tenant read – use GetByIDInTenant instead.
 	GetByID(ctx context.Context, id shared.ID) (*engagement.Engagement, error)
-	// GetByIDInTenant loads an engagement by id scoped to tenantID – the tenant-isolated read
-	// for user-facing access. A caller's tenant '' (single-tenant / default-tenant
-	// admin) matches any row; a non-empty tenant matches only its own, so tenant A cannot reach
-	// tenant B's engagement (returns shared.ErrNotFound – existence is not revealed).
+	// GetByIDInTenant loads an engagement by id scoped to tenantID. Empty input normalizes to the
+	// non-empty default tenant and is never a wildcard; cross-tenant access returns ErrNotFound.
 	GetByIDInTenant(ctx context.Context, tenantID, id shared.ID) (*engagement.Engagement, error)
 	// GetByProjectID loads the hidden Project analysis context scoped to tenantID.
 	// It is only for Project use-case internals; normal engagement reads must use GetByIDInTenant.

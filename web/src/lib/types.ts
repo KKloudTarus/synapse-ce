@@ -39,6 +39,7 @@ export interface Engagement {
   roe: RoE
   liveReconEnabled: boolean
   createdAt: string | null
+  businessAssetId: string
 }
 
 export interface CreateEngagementInput {
@@ -49,7 +50,26 @@ export interface CreateEngagementInput {
   authorizedFrom?: string // RFC3339
   authorizedTo?: string // RFC3339
   timezone?: string // IANA
+  assetId?: string
 }
+
+export type BusinessAssetType = 'product' | 'application' | 'system' | 'business_service'
+export type BusinessAssetCriticality = 'critical' | 'high' | 'medium' | 'low'
+export type BusinessAssetLifecycle = 'draft' | 'active' | 'decommissioning' | 'retired'
+export interface BusinessAsset { id:string; key:string; name:string; description:string; type:BusinessAssetType; criticality:BusinessAssetCriticality; lifecycle:BusinessAssetLifecycle; owner:string; metadata:Record<string,string>; version:number; createdAt:string|null; updatedAt:string|null; posture?:string; postureExplanation?:string }
+export interface BusinessAssetInput { key?:string; name:string; description:string; type:BusinessAssetType; criticality:BusinessAssetCriticality; lifecycle?:BusinessAssetLifecycle; owner:string; metadata?:Record<string,string>; version?:number }
+export interface BusinessAssetPage { items:BusinessAsset[]; total:number; limit:number; offset:number }
+export interface AssetMembership { componentId:string; role:'primary'|'supporting'|'dependency'; provenance:string }
+export interface TechnicalAsset { id:string; kind:string; key:string; name:string; attributes:Record<string,string> }
+export type AssetCoverageVerdict = 'covered'|'stale'|'not_assessed'|'unknown'|'excluded'|'failed'|'partial'|'unauthorized'
+export interface AssetCoverageRow { kind:string; componentId:string; name:string; verdict:AssetCoverageVerdict; engagementId:string; lastAssessed:string|null; freshnessTargetDays:number }
+export interface AssetCoverage { rows:AssetCoverageRow[]; counts:Partial<Record<AssetCoverageVerdict,number>>; freshnessTargetDays:number }
+export interface AssetPosture { rating:string; explanation:string; findingCounts:Record<string,number>; coverageCounts:Partial<Record<AssetCoverageVerdict,number>> }
+export interface AssetFindingProvenance { toolName:string; toolVersion:string; ruleId:string; sourceDigest:string; ingestedBy:string; ingestedAt:string|null }
+export interface AssetReachabilityEvidence { judgmentId:string; state:ReachabilityState; tier:ReachabilityTier; confidence:number; path:string[]; status:string; observedAt:string|null }
+export interface AssetReachability { state:ReachabilityState; tier:ReachabilityTier; confidence:number; path:string[]; status:string; source:string; history:AssetReachabilityEvidence[] }
+export interface AssetFinding { finding:Finding; external:boolean; canSelfPromote?:boolean; suppressedByTool:boolean; provenance?:AssetFindingProvenance; reachability:AssetReachability; engagementId:string; engagementName:string }
+export interface AssetHistoryItem { engagementId:string; name:string; status:string; authorizedFrom:string|null; authorizedTo:string|null; scopeCount:number; findingCount:number; retestCount:number; updatedAt:string }
 
 export interface Finding {
   id: string
