@@ -22,6 +22,7 @@ func (r *Resolver) resolveAliasMatches(
 	matches []aliasMapping,
 	workspaces map[string][]jsresolution.PackageIdentity,
 	packages []jsresolution.PackageMetadata,
+	components *componentIndex,
 	modulePaths map[string]struct{},
 	aliasWork *resolverWorkBudget,
 	candidateWork *resolverWorkBudget,
@@ -43,7 +44,7 @@ func (r *Resolver) resolveAliasMatches(
 				return base
 			}
 			expanded := substituteAliasTarget(target, capture)
-			resolved, failure := resolveAliasTargets(mapping, expanded, workspaces, packages, modulePaths, r.limits.maxCandidates)
+			resolved, failure := resolveAliasTargets(mapping, expanded, workspaces, packages, components, modulePaths, r.limits.maxCandidates)
 			if len(resolved) > 0 {
 				if !candidateWork.consumeN(len(resolved)) {
 					return markCandidateBudgetExceeded(base, candidateWork, coverage, r.limits.maxCandidateWork)
@@ -106,6 +107,7 @@ func resolveAliasTargets(
 	target string,
 	workspaces map[string][]jsresolution.PackageIdentity,
 	packages []jsresolution.PackageMetadata,
+	components *componentIndex,
 	modulePaths map[string]struct{},
 	maxCandidates int,
 ) ([]resolvedAliasTarget, jsresolution.CoverageIssueKind) {
@@ -116,24 +118,63 @@ func resolveAliasTargets(
 			return []resolvedAliasTarget{{status: jsresolution.StatusBuiltin, identity: jsresolution.PackageIdentity{Name: classified.BuiltinName}, reason: "resolved through package.json imports"}}, ""
 		case jsresolution.SpecifierPackage:
 			local := workspaces[classified.PackageName]
+			registry, _ := components.lookup(classified.PackageName)
 			if len(local) == 0 {
-				return []resolvedAliasTarget{{status: jsresolution.StatusUnresolved, identity: jsresolution.PackageIdentity{Name: classified.PackageName}, reason: "package.json imports target is an npm package root; SBOM correlation is deferred to R2C"}}, ""
+				// An imports target naming a third-party package is correlated exactly like a bare
+				// import: one component version is a deterministic identity, several stay ambiguous,
+				// and none degrades coverage rather than silently disappearing.
+				switch len(registry) {
+				case 0:
+					return []resolvedAliasTarget{{
+						status:   jsresolution.StatusUnresolved,
+						identity: jsresolution.PackageIdentity{Name: classified.PackageName},
+						reason:   "package.json imports target names an npm package with no matching sbom component",
+					}}, jsresolution.CoverageMissingSBOMComponent
+				case 1:
+					return []resolvedAliasTarget{{
+						status:   jsresolution.StatusComponent,
+						identity: registry[0],
+						reason:   "package.json imports target correlated to an sbom component",
+					}}, ""
+				default:
+					if len(registry) >= maxCandidates {
+						return nil, jsresolution.CoverageMetadataBudgetExceeded
+					}
+					out := make([]resolvedAliasTarget, 0, len(registry))
+					for _, candidate := range registry {
+						out = append(out, resolvedAliasTarget{
+							status:   jsresolution.StatusUnresolved,
+							identity: candidate,
+							reason:   "package.json imports target matches multiple sbom component versions",
+						})
+					}
+					return out, jsresolution.CoverageAmbiguousSBOMComponent
+				}
 			}
-			// A package.json imports target names a package, not a concrete
-			// workspace path. Without importer/lockfile selection, a same-name
-			// registry package remains viable just as it does for a bare import.
-			if len(local) >= maxCandidates {
+			// A package.json imports target names a package, not a concrete workspace path. Without
+			// importer/lockfile selection, a same-name registry package remains viable just as it does
+			// for a bare import.
+			if len(local)+len(registry) >= maxCandidates {
 				return nil, jsresolution.CoverageMetadataBudgetExceeded
 			}
-			out := make([]resolvedAliasTarget, 0, len(local)+1)
+			out := make([]resolvedAliasTarget, 0, len(local)+len(registry)+1)
 			for _, candidate := range local {
 				out = append(out, resolvedAliasTarget{status: jsresolution.StatusWorkspace, identity: candidate, reason: "package.json imports target matches a local workspace"})
 			}
-			out = append(out, resolvedAliasTarget{
-				status:   jsresolution.StatusUnresolved,
-				identity: jsresolution.PackageIdentity{Name: classified.PackageName},
-				reason:   "package.json imports target may resolve to a registry package; importer/lockfile correlation is deferred to R2C",
-			})
+			for _, candidate := range registry {
+				out = append(out, resolvedAliasTarget{
+					status:   jsresolution.StatusUnresolved,
+					identity: candidate,
+					reason:   "package.json imports target may resolve to this registry component; importer context is required to select one",
+				})
+			}
+			if len(registry) == 0 {
+				out = append(out, resolvedAliasTarget{
+					status:   jsresolution.StatusUnresolved,
+					identity: jsresolution.PackageIdentity{Name: classified.PackageName},
+					reason:   "package.json imports target may resolve to a registry package; importer context is required to select one",
+				})
+			}
 			return out, ""
 		default:
 			return nil, jsresolution.CoverageUnsupportedAlias

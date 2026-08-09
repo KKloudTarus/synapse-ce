@@ -18,6 +18,7 @@ func (r *Resolver) resolveTSPaths(
 	scopeDiscoveryComplete bool,
 	workspaces map[string][]jsresolution.PackageIdentity,
 	packages []jsresolution.PackageMetadata,
+	components *componentIndex,
 	modulePaths map[string]struct{},
 	aliasWork *resolverWorkBudget,
 	candidateWork *resolverWorkBudget,
@@ -42,7 +43,7 @@ func (r *Resolver) resolveTSPaths(
 		base.Reason = "applicable tsconfig/jsconfig context uses unsupported project-selection or inheritance semantics"
 		coverage.add(jsresolution.CoverageIssue{
 			Kind: jsresolution.CoverageUnsupportedAlias, Path: base.From,
-			Detail: fmt.Sprintf("specifier %q is under an alias context R2B cannot apply safely", base.Specifier),
+			Detail: fmt.Sprintf("specifier %q is under an alias context this resolver cannot apply safely", base.Specifier),
 		})
 		return base, true
 	case tsAliasContextAmbiguous:
@@ -57,7 +58,7 @@ func (r *Resolver) resolveTSPaths(
 	case tsAliasContextBaseURL:
 		base.Status = jsresolution.StatusUnresolved
 		base.Package = jsresolution.PackageIdentity{}
-		base.Reason = "tsconfig/jsconfig baseUrl may change bare-specifier identity and R2B does not reproduce TypeScript file resolution"
+		base.Reason = "tsconfig/jsconfig baseUrl may change bare-specifier identity and this resolver does not reproduce TypeScript file resolution"
 		coverage.add(jsresolution.CoverageIssue{
 			Kind: jsresolution.CoverageUnsupportedAlias, Path: base.From,
 			Detail: fmt.Sprintf("specifier %q is under a tsconfig/jsconfig baseUrl without a supported paths match", base.Specifier),
@@ -67,7 +68,7 @@ func (r *Resolver) resolveTSPaths(
 	if len(matches) == 0 {
 		return base, false
 	}
-	return r.resolveAliasMatches(ctx, base, matches, workspaces, packages, modulePaths, aliasWork, candidateWork, coverage), true
+	return r.resolveAliasMatches(ctx, base, matches, workspaces, packages, components, modulePaths, aliasWork, candidateWork, coverage), true
 }
 
 func bestAliasMatchesInScope(ctx context.Context, mappings []aliasMapping, kind aliasKind, scopeDir, specifier string, budget *resolverWorkBudget) ([]aliasMapping, bool) {
