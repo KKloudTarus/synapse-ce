@@ -9,6 +9,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/jsresolution"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/jssymbols"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/modulegraph"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachability"
@@ -34,6 +35,13 @@ type SymbolAnalyzer struct {
 	scanner  importScanner
 	resolver importResolver
 	sboms    sbomProvider
+	// cached is this analyzer's ONE view of the target. The analyzer is constructed per pass, so
+	// memoising here does two things: it removes three redundant full lexes of the source tree, and it
+	// guarantees the subject filter and the verdict are computed from the SAME snapshot — otherwise a
+	// subject admitted as answerable could be decided on evidence that changed underneath it.
+	cached    *symbolEvidence
+	cachedDir string
+	cachedErr error
 }
 
 // NewSymbolAnalyzer validates and returns the Tier-2 analyzer.
@@ -62,7 +70,7 @@ func (a *SymbolAnalyzer) Analyze(ctx context.Context, dir string, subjects []str
 		return &reachability.Analysis{}, nil
 	}
 
-	evidence, err := a.gather(ctx, dir)
+	evidence, err := a.evidenceFor(ctx, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -78,11 +86,14 @@ func (a *SymbolAnalyzer) Analyze(ctx context.Context, dir string, subjects []str
 		}
 		seen[subject] = true
 
-		purl, symbol, ok := jsresolution.ParseNPMSymbolSubject(subject)
+		purl, symbol, ok := jssymbols.ParseSubject(subject)
 		if !ok {
 			return nil, fmt.Errorf("%w: jsreach symbol subject %q is not a component purl with an export", shared.ErrValidation, subject)
 		}
-		canonical, _ := jsresolution.CanonicalNPMPURL(purl)
+		canonical, ok := jsresolution.CanonicalNPMPURL(purl)
+		if !ok {
+			return nil, fmt.Errorf("%w: jsreach symbol subject %q does not carry a canonical component identity", shared.ErrValidation, subject)
+		}
 		decision := jssymbols.Decide(symbol, evidence.uses[canonical])
 
 		result := reachability.Result{Symbol: subject}
@@ -107,11 +118,24 @@ func (a *SymbolAnalyzer) Analyze(ctx context.Context, dir string, subjects []str
 	return &reachability.Analysis{Results: results, Entrypoints: roots}, nil
 }
 
-// symbolEvidence is one scan's Tier-2 view: what every module does with every imported package.
+// symbolEvidence is one scan's Tier-2 view: what every module does with every imported package, plus
+// the document and resolution the subjects must be checked against.
 type symbolEvidence struct {
-	uses   map[string][]jssymbols.Use
-	prover *pathProver
-	roots  []string
+	uses       map[string][]jssymbols.Use
+	prover     *pathProver
+	roots      []string
+	doc        *sbom.SBOM
+	resolution jsresolution.Result
+}
+
+// evidenceFor returns the analyzer's single view of dir, computing it at most once.
+func (a *SymbolAnalyzer) evidenceFor(ctx context.Context, dir string) (symbolEvidence, error) {
+	if a.cached != nil && a.cachedDir == dir {
+		return *a.cached, a.cachedErr
+	}
+	evidence, err := a.gather(ctx, dir)
+	a.cached, a.cachedDir, a.cachedErr = &evidence, dir, err
+	return evidence, err
 }
 
 // gather scans, resolves and joins. It refuses — returning a no-coverage error that leaves any prior
@@ -145,26 +169,38 @@ func (a *SymbolAnalyzer) gather(ctx context.Context, dir string) (symbolEvidence
 			shared.ErrValidation, len(resolution.GraphCoverage))
 	}
 
+	// The symbol evidence is a SEPARATE completeness question from the import graph's. A nil evidence
+	// block means it was never collected, and a coverage entry means some module's references could not
+	// be enumerated; in both cases "no reference to this export" is not a fact.
+	if !graph.SymbolEvidence.Complete() {
+		return symbolEvidence{}, fmt.Errorf("%w: symbol evidence is incomplete - javascript symbol reachability is inconclusive (no coverage)",
+			shared.ErrValidation)
+	}
+
 	declarationOnly := make(map[string]bool, len(graph.Modules))
-	dialects := make(map[string]modulegraph.Dialect, len(graph.Modules))
 	for _, module := range graph.Modules {
 		if module.DeclarationOnly {
 			declarationOnly[module.Path] = true
 		}
-		dialects[module.Path] = module.Dialect
+	}
+	jsx := make(map[string]bool, len(graph.SymbolEvidence.JSXModules))
+	for _, module := range graph.SymbolEvidence.JSXModules {
+		jsx[module] = true
 	}
 
 	return symbolEvidence{
-		uses:   collectSymbolUses(graph, resolution, declarationOnly, dialects),
-		prover: newPathProver(graph, declarationOnly),
-		roots:  graph.Roots,
+		uses:       collectSymbolUses(graph, resolution, declarationOnly, jsx),
+		prover:     newPathProver(graph, declarationOnly),
+		roots:      graph.Roots,
+		doc:        doc,
+		resolution: resolution,
 	}, nil
 }
 
 // collectSymbolUses joins the import edges (which name the package and the local bindings) with the
 // module's own references to those locals (which name the exports actually read).
 func collectSymbolUses(graph modulegraph.Graph, resolution jsresolution.Result,
-	declarationOnly map[string]bool, dialects map[string]modulegraph.Dialect) map[string][]jssymbols.Use {
+	declarationOnly map[string]bool, jsx map[string]bool) map[string][]jssymbols.Use {
 	// Index the resolved package identity by (module, specifier); an edge carries the specifier, the
 	// resolution carries the PURL.
 	purlOf := make(map[[2]string]string, len(resolution.Imports))
@@ -181,8 +217,8 @@ func collectSymbolUses(graph modulegraph.Graph, resolution jsresolution.Result,
 	}
 
 	// Index the module's references to its locals.
-	localUses := make(map[[2]string][]modulegraph.LocalUse, len(graph.LocalUses))
-	for _, use := range graph.LocalUses {
+	localUses := make(map[[2]string][]modulegraph.LocalUse, len(graph.SymbolEvidence.Uses))
+	for _, use := range graph.SymbolEvidence.Uses {
 		key := [2]string{use.Module, use.Local}
 		localUses[key] = append(localUses[key], use)
 	}
@@ -220,7 +256,11 @@ func collectSymbolUses(graph modulegraph.Graph, resolution jsresolution.Result,
 			if binding.TypeOnly {
 				continue
 			}
-			if binding.Imported != "" && !binding.Namespace && !binding.Default {
+			// A binding whose imported name is literally "default" binds the module's default export,
+			// which for a CommonJS package IS the module object — `const {default: axios} =
+			// require('axios')` then reaches every export through it. The Default FLAG is not set on that
+			// shape, so the name has to be tested too.
+			if binding.Imported != "" && binding.Imported != "default" && !binding.Namespace && !binding.Default {
 				add(jssymbols.Use{Module: edge.From, PURL: purl, Symbol: binding.Imported, Kind: jssymbols.UseNamed})
 				continue
 			}
@@ -235,12 +275,26 @@ func collectSymbolUses(graph modulegraph.Graph, resolution jsresolution.Result,
 			// JSX desugars into calls on the runtime binding — createElement, jsx, Fragment — that this
 			// scanner never sees as source tokens, so a whole-module binding in a JSX module cannot be
 			// enumerated by its visible property reads.
-			if dialect := dialects[edge.From]; dialect == modulegraph.DialectJSX || dialect == modulegraph.DialectTSX {
+			// The test is whether the module ACTUALLY contains JSX, not what its extension is: JSX is
+			// routine in .js under Babel, CRA and Next, and keying on the extension would leave every
+			// such module narrowable by its visible property reads alone.
+			if jsx[edge.From] {
 				add(jssymbols.Use{Module: edge.From, PURL: purl, Kind: jssymbols.UseOpaque,
 					Reason: "the module contains JSX, which desugars into calls this scanner does not observe"})
 				continue
 			}
-			for _, use := range localUses[[2]string{edge.From, local}] {
+			references := localUses[[2]string{edge.From, local}]
+			if len(references) == 0 {
+				// "Every reference was enumerated and none names this export" and "the binding was never
+				// mentioned again" are different facts, and only the first permits a negative. A
+				// whole-module binding with no observed reference is therefore opaque, not silence:
+				// otherwise a second module's named import would be the only evidence and would decide
+				// the verdict for a package this module holds in full.
+				add(jssymbols.Use{Module: edge.From, PURL: purl, Kind: jssymbols.UseOpaque,
+					Reason: "no reference to the whole-module binding was enumerated"})
+				continue
+			}
+			for _, use := range references {
 				switch use.Kind {
 				case modulegraph.LocalUseProperty:
 					add(jssymbols.Use{Module: edge.From, PURL: purl, Symbol: use.Property, Kind: jssymbols.UseMember})
@@ -295,39 +349,32 @@ func (p *pathProver) proofForModules(modules []string, symbol, subject string) [
 // missing result as not-reachable, so an unanswerable subject reaching it would be sealed as a false
 // negative at full confidence.
 func (a *SymbolAnalyzer) answerableSymbolSubjects(ctx context.Context, dir string, subjects []ports.ReachabilitySubject) ([]ports.ReachabilitySubject, error) {
-	doc, err := a.sboms.SBOMFor(ctx, dir)
-	if err != nil {
-		return nil, fmt.Errorf("jsreach: sbom unavailable (no coverage - prior tier stands): %w", err)
+	if ctx == nil {
+		return nil, fmt.Errorf("%w: jsreach symbol analysis requires a context", shared.ErrValidation)
 	}
-	if doc == nil {
-		return nil, fmt.Errorf("%w: jsreach has no sbom for the target (no coverage)", shared.ErrNotFound)
-	}
-	evidence, err := a.gather(ctx, dir)
+	evidence, err := a.evidenceFor(ctx, dir)
 	if err != nil {
 		return nil, err
 	}
-	graph, err := a.scanner.Scan(ctx, dir)
-	if err != nil {
-		return nil, fmt.Errorf("jsreach: javascript import scan (no coverage - prior tier stands): %w", err)
-	}
-	resolution, err := a.resolver.Resolve(ctx, dir, graph, doc)
-	if err != nil {
-		return nil, fmt.Errorf("jsreach: package resolution (no coverage - prior tier stands): %w", err)
-	}
-	gate := &Analyzer{scanner: a.scanner, resolver: a.resolver, sboms: a.sboms}
 
 	out := make([]ports.ReachabilitySubject, 0, len(subjects))
 	for _, subject := range subjects {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		symbols := make([]string, 0, len(subject.Symbols))
 		for _, raw := range subject.Symbols {
-			purl, symbol, ok := jsresolution.ParseNPMSymbolSubject(raw)
+			purl, symbol, ok := jssymbols.ParseSubject(raw)
 			if !ok {
 				continue
 			}
-			if gate.assertSubjectsAnswerable([]string{purl}, doc, resolution) != nil {
+			if subjectsAnswerable([]string{purl}, evidence.doc, evidence.resolution) != nil {
 				continue
 			}
-			canonical, _ := jsresolution.CanonicalNPMPURL(purl)
+			canonical, ok := jsresolution.CanonicalNPMPURL(purl)
+			if !ok {
+				continue
+			}
 			if jssymbols.Decide(symbol, evidence.uses[canonical]).Verdict == jssymbols.VerdictUnknown {
 				continue
 			}

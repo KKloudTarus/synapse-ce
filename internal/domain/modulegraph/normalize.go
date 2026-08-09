@@ -112,17 +112,47 @@ func Normalize(in Graph) (Graph, error) {
 
 	// Tier-2 symbol evidence is normalized like every other member. A use whose module is not a scanned
 	// module is an error rather than a dropped record: silently discarding a reference is how a symbol
-	// that IS reached comes to look unused.
-	out.LocalUses = make([]LocalUse, 0, len(in.LocalUses))
-	for _, use := range in.LocalUses {
-		normalized, err := normalizeLocalUse(use, moduleByPath)
-		if err != nil {
-			return Graph{}, err
+	// that IS reached comes to look unused. A nil SymbolEvidence stays nil — "not collected" is a
+	// distinct state from "collected and empty".
+	if in.SymbolEvidence != nil {
+		evidence := &SymbolEvidence{
+			Uses:       make([]LocalUse, 0, len(in.SymbolEvidence.Uses)),
+			JSXModules: make([]string, 0, len(in.SymbolEvidence.JSXModules)),
+			Coverage:   make([]CoverageIssue, 0, len(in.SymbolEvidence.Coverage)),
 		}
-		out.LocalUses = append(out.LocalUses, normalized)
+		for _, use := range in.SymbolEvidence.Uses {
+			normalized, err := normalizeLocalUse(use, moduleByPath)
+			if err != nil {
+				return Graph{}, err
+			}
+			evidence.Uses = append(evidence.Uses, normalized)
+		}
+		sort.Slice(evidence.Uses, func(i, j int) bool { return localUseLess(evidence.Uses[i], evidence.Uses[j]) })
+		evidence.Uses = deduplicateLocalUses(evidence.Uses)
+
+		for _, module := range in.SymbolEvidence.JSXModules {
+			normalizedPath, err := NormalizeRepositoryPath(module)
+			if err != nil {
+				return Graph{}, fmt.Errorf("normalize jsx module %q: %w", module, err)
+			}
+			if _, ok := moduleByPath[normalizedPath]; !ok {
+				return Graph{}, fmt.Errorf("modulegraph: jsx module %q is not a known module", normalizedPath)
+			}
+			evidence.JSXModules = append(evidence.JSXModules, normalizedPath)
+		}
+		sort.Strings(evidence.JSXModules)
+		evidence.JSXModules = dedupeSortedStrings(evidence.JSXModules)
+
+		for _, issue := range in.SymbolEvidence.Coverage {
+			if !issue.Kind.Valid() {
+				return Graph{}, fmt.Errorf("modulegraph: invalid symbol coverage kind %q", issue.Kind)
+			}
+			evidence.Coverage = append(evidence.Coverage, issue)
+		}
+		sort.Slice(evidence.Coverage, func(i, j int) bool { return coverageLess(evidence.Coverage[i], evidence.Coverage[j]) })
+		evidence.Coverage = deduplicateCoverage(evidence.Coverage)
+		out.SymbolEvidence = evidence
 	}
-	sort.Slice(out.LocalUses, func(i, j int) bool { return localUseLess(out.LocalUses[i], out.LocalUses[j]) })
-	out.LocalUses = deduplicateLocalUses(out.LocalUses)
 
 	out.Roots = structuralRoots(out.Modules, out.Edges)
 
@@ -156,6 +186,19 @@ func normalizeLocalUse(use LocalUse, modules map[string]Module) (LocalUse, error
 	}
 	use.Module = module
 	return use, nil
+}
+
+func dedupeSortedStrings(sorted []string) []string {
+	if len(sorted) < 2 {
+		return sorted
+	}
+	out := sorted[:1]
+	for _, value := range sorted[1:] {
+		if value != out[len(out)-1] {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func localUseLess(a, b LocalUse) bool {

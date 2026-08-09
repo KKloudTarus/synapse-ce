@@ -2,6 +2,7 @@ package jsimports
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/modulegraph"
@@ -10,7 +11,7 @@ import (
 // usesFor indexes a module's local references by local name.
 func usesFor(graph modulegraph.Graph, module string) map[string][]modulegraph.LocalUse {
 	out := map[string][]modulegraph.LocalUse{}
-	for _, use := range graph.LocalUses {
+	for _, use := range graph.SymbolEvidence.Uses {
 		if use.Module == module {
 			out[use.Local] = append(out[use.Local], use)
 		}
@@ -179,7 +180,7 @@ const config = { template: 1 };
 report(config.template);
 `)
 	graph := scan(t, root)
-	for _, use := range graph.LocalUses {
+	for _, use := range graph.SymbolEvidence.Uses {
 		if use.Local == "template" && use.Kind == modulegraph.LocalUseOpaque && use.Detail == "referenced without a property access" {
 			// `report(config.template)` must not have produced this; the only legitimate opaque use of
 			// `template` here would come from a bare reference, and there is none.
@@ -238,4 +239,133 @@ func mustEdge(t *testing.T, graph modulegraph.Graph, from, specifier string) mod
 		t.Fatalf("no edge from %s for %q", from, specifier)
 	}
 	return edge
+}
+
+// TestLocalReExportIsRecordedAsEscaping is the regression for the worst hole found in review: the
+// identifiers of a `from`-less export clause are consumed by the clause reader, so they never reach the
+// observer. `import * as _; export { _ }` republishes the ENTIRE package to every consumer, and
+// recording nothing made that module look like it used no export at all.
+func TestLocalReExportIsRecordedAsEscaping(t *testing.T) {
+	t.Parallel()
+
+	for _, source := range []string{
+		"import * as lodash from \"lodash\";\nexport { lodash };\n",
+		"import * as lodash from \"lodash\";\nexport { lodash as l };\n",
+		"import * as lodash from \"lodash\";\nexport { lodash as default };\n",
+	} {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "src", "a.ts"), source)
+		graph := scan(t, root)
+		if !hasOpaque(usesFor(graph, "src/a.ts")["lodash"]) {
+			t.Fatalf("re-exporting a namespace must be recorded as escaping:\n%s\ngot %+v",
+				source, usesFor(graph, "src/a.ts")["lodash"])
+		}
+	}
+}
+
+// TestTernaryConsequentIsAReadNotAKey: an identifier followed by ":" is an object key OR a type
+// annotation OR the consequent of a conditional. Treating them all as keys lost the read.
+func TestTernaryConsequentIsAReadNotAKey(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "src", "a.ts"), `
+import * as lodash from "lodash";
+const lib = useReal ? lodash : stubs;
+lodash.map(xs);
+`)
+	graph := scan(t, root)
+	if !hasOpaque(usesFor(graph, "src/a.ts")["lodash"]) {
+		t.Fatalf("a ternary consequent is an escaping read, got %+v", usesFor(graph, "src/a.ts")["lodash"])
+	}
+
+	// A genuine object key must still not be a reference.
+	root2 := t.TempDir()
+	writeFile(t, filepath.Join(root2, "src", "b.ts"), `
+import * as lodash from "lodash";
+const table = { lodash: 1, other: 2 };
+lodash.map(xs);
+`)
+	graph2 := scan(t, root2)
+	if hasOpaque(usesFor(graph2, "src/b.ts")["lodash"]) {
+		t.Fatalf("an object literal key is not a reference, got %+v", usesFor(graph2, "src/b.ts")["lodash"])
+	}
+}
+
+// TestJSXIsDetectedByContentNotExtension: JSX in .js is routine under Babel, CRA and Next, and JSX
+// desugars into calls on the runtime binding that never appear as source tokens.
+func TestJSXIsDetectedByContentNotExtension(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "src", "App.js"), `
+import React from "react";
+export default function App() {
+  const [n] = React.useState(0);
+  return <div>{n}</div>;
+}
+`)
+	writeFile(t, filepath.Join(root, "src", "plain.js"), `
+import React from "react";
+export const value = React.version;
+`)
+	graph := scan(t, root)
+	jsx := map[string]bool{}
+	for _, module := range graph.SymbolEvidence.JSXModules {
+		jsx[module] = true
+	}
+	if !jsx["src/App.js"] {
+		t.Fatalf("a .js file containing JSX must be reported as a JSX module, got %v", graph.SymbolEvidence.JSXModules)
+	}
+	if jsx["src/plain.js"] {
+		t.Fatalf("a .js file with no JSX must not be, got %v", graph.SymbolEvidence.JSXModules)
+	}
+}
+
+// TestMemberAssignmentIsNotALocalBinding: `exports.lodash = require('lodash')` publishes the whole
+// module somewhere unobservable. Recording `lodash` as a local made that escape look like a binding
+// nothing reads.
+func TestMemberAssignmentIsNotALocalBinding(t *testing.T) {
+	t.Parallel()
+
+	for _, source := range []string{
+		`exports.lodash = require("lodash");`,
+		`module.exports.lodash = require("lodash");`,
+		`this.lodash = require("lodash");`,
+		`const settings = require("lodash").templateSettings;`,
+		`const fn = require("lodash")();`,
+	} {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "src", "a.js"), source+"\n")
+		graph := scan(t, root)
+		edge := mustEdge(t, graph, "src/a.js", "lodash")
+		if len(edge.Bindings) != 0 {
+			t.Fatalf("%s must bind nothing this scanner can follow, got %+v", source, edge.Bindings)
+		}
+	}
+}
+
+// A benign file that repeats one reference many times must not exhaust the symbol budget: the budget
+// counts distinct evidence, and charging occurrences would declare ordinary code unobservable — and
+// worse, would refuse the Tier-1 answer, which is unaffected by a Tier-2 limitation.
+func TestRepeatedReferencesDoNotExhaustTheSymbolBudget(t *testing.T) {
+	t.Parallel()
+
+	var b strings.Builder
+	b.WriteString("const lodash = require(\"lodash\");\n")
+	for i := 0; i < 25000; i++ {
+		b.WriteString("lodash.merge;\n")
+	}
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "src", "big.js"), b.String())
+	graph := scan(t, root)
+	if len(graph.Coverage) != 0 {
+		t.Fatalf("a tier-2 budget must never degrade the import graph's coverage, got %+v", graph.Coverage)
+	}
+	if !graph.SymbolEvidence.Complete() {
+		t.Fatalf("25000 identical references are one piece of evidence, got %+v", graph.SymbolEvidence.Coverage)
+	}
+	if !hasProperty(usesFor(graph, "src/big.js")["lodash"], "merge") {
+		t.Fatal("the property read must still be observed")
+	}
 }

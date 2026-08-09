@@ -50,27 +50,27 @@ func TestJSSymbolSubjectsAreBuiltOnlyForAdvisoriesWithSymbols(t *testing.T) {
 	}
 }
 
-// A symbol that cannot be placed onto an export name is DROPPED rather than passed through: it could
-// never match an export, so it would be sealed as a false negative at full confidence.
-func TestUnplaceableSymbolsAreDropped(t *testing.T) {
+// TestAnUnplaceableSymbolDropsTheWholeFinding is the safety rule. The coordinator concludes
+// not-reachable when NONE of the symbols it was handed is reached, so keeping the placeable subset would
+// seal a finding not-reachable on the strength of the symbols that happened to be interpretable — with
+// the one nobody could evaluate silently discarded.
+func TestAnUnplaceableSymbolDropsTheWholeFinding(t *testing.T) {
 	t.Parallel()
 
-	v := vulnWith("lodash", "4.17.15", "lodash/template", "Class.prototype.method", "*", "lodash.merge", "template")
-	subs := jsSymbolReachabilitySubjects([]finding.Finding{findingFor("f-1", v)}, []vulnerability.Vulnerability{v}, npmDoc())
-	if len(subs) != 1 {
-		t.Fatalf("expected one subject, got %+v", subs)
-	}
-	want := map[string]bool{
-		"pkg:npm/lodash@4.17.15#merge":    true,
-		"pkg:npm/lodash@4.17.15#template": true,
-	}
-	if len(subs[0].Symbols) != len(want) {
-		t.Fatalf("symbols = %v, want only the two placeable exports", subs[0].Symbols)
-	}
-	for _, symbol := range subs[0].Symbols {
-		if !want[symbol] {
-			t.Fatalf("unexpected symbol %q", symbol)
+	for _, unplaceable := range []string{"lodash/template", "Class.prototype.method", "*", "with space"} {
+		v := vulnWith("lodash", "4.17.15", "template", unplaceable)
+		subs := jsSymbolReachabilitySubjects([]finding.Finding{findingFor("f-1", v)}, []vulnerability.Vulnerability{v}, npmDoc())
+		if len(subs) != 0 {
+			t.Fatalf("an advisory containing %q must yield no tier-2 subject at all, got %+v", unplaceable, subs)
 		}
+	}
+
+	// When every symbol IS placeable the subject is built, deduplicated, in the package-qualified form
+	// as well as the bare one.
+	v := vulnWith("lodash", "4.17.15", "template", "lodash.template", "merge")
+	subs := jsSymbolReachabilitySubjects([]finding.Finding{findingFor("f-1", v)}, []vulnerability.Vulnerability{v}, npmDoc())
+	if len(subs) != 1 || len(subs[0].Symbols) != 2 {
+		t.Fatalf("placeable symbols must deduplicate to two subjects, got %+v", subs)
 	}
 }
 

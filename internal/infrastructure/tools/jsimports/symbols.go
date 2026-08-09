@@ -114,7 +114,15 @@ func (e *extractor) observeLocal(t, prev token, havePrev bool) {
 		// (`const x = require(...)`) also lands here and is likewise not a use.
 		return
 	case ":":
-		// An object literal key or a TypeScript type annotation position.
+		// `{ key: value }` and `x: Type` bind or annotate a name; `cond ? a : b` READS one. The three are
+		// only distinguishable by what precedes the identifier, and an identifier that is not provably in
+		// a key or annotation position is treated as a read — the ternary consequent is an ordinary
+		// escaping reference, and calling it a key would lose it.
+		if havePrev && prev.kind == tokenPunct && (prev.text == "{" || prev.text == "," || prev.text == ";" || prev.text == "(") {
+			return
+		}
+		e.addLocalUse(rawLocalUse{local: t.text, kind: modulegraph.LocalUseOpaque,
+			detail: "the binding escapes as a value", line: t.line})
 		return
 	default:
 		// Passed as an argument, spread, returned, compared, awaited: the module object escapes.
@@ -123,32 +131,47 @@ func (e *extractor) observeLocal(t, prev token, havePrev bool) {
 	}
 }
 
+// addLocalUse records one reference, deduplicated at the point of record.
+//
+// The budget is charged against DISTINCT records, not raw occurrences: a file that reads `_.merge` twenty
+// thousand times carries exactly one piece of evidence, and charging it twenty thousand times would
+// declare a benign file unobservable. Deduplicating here is safe precisely because identical records
+// carry identical evidence.
 func (e *extractor) addLocalUse(use rawLocalUse) {
-	if len(e.out.localUses) >= maxLocalUsesPerFile {
-		// The budget is a coverage issue, not a silent truncation: a dropped reference could be the one
-		// that reaches the affected symbol, so the whole file's symbol evidence becomes untrustworthy.
-		if !e.localUseBudgetHit {
-			e.localUseBudgetHit = true
-			e.addHazard(hazardUnsupportedLoader, use.line, "local reference budget exceeded")
-		}
+	key := rawLocalUse{local: use.local, property: use.property, kind: use.kind, detail: use.detail}
+	if e.seenLocalUses == nil {
+		e.seenLocalUses = map[rawLocalUse]bool{}
+	}
+	if e.seenLocalUses[key] {
 		return
 	}
+	if len(e.out.localUses) >= maxLocalUsesPerFile {
+		// A dropped reference could be the one that reaches the affected symbol, so the file's symbol
+		// evidence becomes untrustworthy. It is recorded as a SYMBOL limitation, not a graph hazard: the
+		// import graph is unaffected, and a Tier-2 budget must not refuse a sound Tier-1 answer.
+		e.out.symbolBudgetHit = true
+		return
+	}
+	e.seenLocalUses[key] = true
 	e.out.localUses = append(e.out.localUses, use)
 }
 
-// maxLocalUsesPerFile bounds per-file symbol evidence. A file that overruns it degrades coverage rather
-// than contributing a partial reference list.
+// maxLocalUsesPerFile bounds per-file symbol evidence, counted in distinct records.
 const maxLocalUsesPerFile = 20000
 
 // commonJSBindings recovers the binding pattern of a `... = require('pkg')` declaration by looking back
 // over the tokens the main loop has already consumed.
 //
 // It returns nil when the pattern is anything it does not fully understand — a rest element, a default
-// value, a nested pattern, a bare call whose result is not bound. nil means "whole module bound
-// opaquely", which is the conservative reading: downstream, a require edge with no named bindings can
-// reach any export.
-func commonJSBindings(history []token) []modulegraph.Binding {
-	if len(history) == 0 {
+// value, a nested pattern, a member-assignment target, a bare call whose result is not bound. nil means
+// "whole module bound opaquely", which is the conservative reading: downstream, a require edge with no
+// named bindings can reach any export.
+//
+// followedByNavigation reports whether the require CALL is further navigated (`require('x').y`,
+// `require('x')()`); in that case whatever is bound is a sub-object, not the module, and claiming it as
+// the module's own local would attribute the sub-object's property reads to the wrong thing.
+func commonJSBindings(history []token, followedByNavigation bool) []modulegraph.Binding {
+	if len(history) == 0 || followedByNavigation {
 		return nil
 	}
 	last := history[len(history)-1]
@@ -161,8 +184,16 @@ func commonJSBindings(history []token) []modulegraph.Binding {
 		return nil
 	}
 
-	// A single identifier: `const ns = require('pkg')`.
+	// A single identifier: `const ns = require('pkg')`. It must be a genuine DECLARATION, not a member
+	// assignment: `exports.lodash = require('lodash')` publishes the whole module somewhere this scanner
+	// cannot follow, and recording `lodash` as a local would silently model that escape as a binding
+	// nothing ever reads.
 	if tail := pattern[len(pattern)-1]; isLocalName(tail) {
+		if len(pattern) >= 2 {
+			if before := pattern[len(pattern)-2]; before.kind == tokenPunct && (before.text == "." || before.text == "?." || before.text == "[") {
+				return nil
+			}
+		}
 		return []modulegraph.Binding{{Local: tail.text, Namespace: true}}
 	}
 
@@ -239,24 +270,43 @@ func (e *extractor) recordHistory(t token) {
 // Deduplication is safe here and nowhere else: two identical (local, property, kind) references from the
 // same module carry the same evidence, so collapsing them cannot hide a distinct reference. The line is
 // dropped for a duplicate because the FIRST occurrence is the one a reader is pointed at.
-func (sc *scanState) recordLocalUses(modulePath string, uses []rawLocalUse) {
-	seen := make(map[modulegraph.LocalUse]bool, len(uses))
-	for _, use := range uses {
-		record := modulegraph.LocalUse{
+func (sc *scanState) recordLocalUses(modulePath string, result extraction) {
+	if result.sawJSX {
+		sc.jsxModules = append(sc.jsxModules, modulePath)
+	}
+	if result.symbolBudgetHit {
+		sc.symbolCoverage = append(sc.symbolCoverage, modulegraph.CoverageIssue{
+			Kind:   modulegraph.CoverageSymbolEvidenceIncomplete,
+			Path:   modulePath,
+			Detail: "distinct local reference budget exceeded",
+		})
+		return
+	}
+	// A scan-wide bound as well as the per-file one: a hostile repository of many small files would
+	// otherwise exhaust memory that no single file's budget notices. A breach makes the whole scan's
+	// symbol evidence untrustworthy, so it is reported rather than silently truncated.
+	if len(sc.localUses) >= maxLocalUsesPerScan {
+		sc.symbolCoverage = append(sc.symbolCoverage, modulegraph.CoverageIssue{
+			Kind:   modulegraph.CoverageSymbolEvidenceIncomplete,
+			Path:   modulePath,
+			Detail: "scan-wide local reference budget exceeded",
+		})
+		return
+	}
+	for _, use := range result.localUses {
+		sc.localUses = append(sc.localUses, modulegraph.LocalUse{
 			Module:   modulePath,
 			Local:    use.local,
 			Property: use.property,
 			Kind:     use.kind,
 			Detail:   use.detail,
-		}
-		if seen[record] {
-			continue
-		}
-		seen[record] = true
-		record.Line = use.line
-		sc.localUses = append(sc.localUses, record)
+			Line:     use.line,
+		})
 	}
 }
+
+// maxLocalUsesPerScan bounds symbol evidence across the whole scan.
+const maxLocalUsesPerScan = 2_000_000
 
 // keepImportedLocals drops references to locals that no import binds.
 //

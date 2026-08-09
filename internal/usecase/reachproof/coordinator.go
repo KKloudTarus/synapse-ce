@@ -61,6 +61,13 @@ func (l Language) Valid() bool {
 
 func actorsFor(tier judgment.ReachabilityTier, language Language) (proposer, verifier, proofLabel string) {
 	if tier == judgment.Tier2 {
+		// Tier-2 is a STRENGTH of claim, not an engine. Two different engines reach it — the Go call
+		// graph and the JavaScript binding-and-property-read analysis — and a sealed rationale that
+		// named the wrong one would make a module-graph proof indistinguishable from an interprocedural
+		// one in the report and in the audit trail.
+		if language == LanguageJavaScript {
+			return "system:jssymbol-scan", "system:jssymbol-engine", "tier-2 javascript affected-export proof"
+		}
 		return "system:callgraph-scan", "system:callgraph-engine", "tier-2 call-graph proof"
 	}
 	switch language {

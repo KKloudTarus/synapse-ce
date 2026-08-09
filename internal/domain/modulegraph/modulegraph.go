@@ -115,10 +115,10 @@ func (k LocalUseKind) Valid() bool {
 
 // LocalUse is one observed reference to a local name inside a module.
 //
-// The scanner emits these for EVERY local it sees, without knowing which locals are import bindings —
-// the join to a package happens later, against the edges' bindings. Emitting them unfiltered is what
-// keeps the scanner from having to decide what matters, and it means a local that is rebound or shadowed
-// still contributes its references rather than disappearing.
+// The scanner emits one per reference to a local that some import in the same module binds. A local no
+// import binds could never contribute evidence, so filtering those out is a memory decision rather than
+// a semantic one; a local that is rebound or shadowed still contributes ALL its references, which
+// over-approximates toward reachable.
 type LocalUse struct {
 	// Module is the normalized repository-relative path of the referencing module.
 	Module string
@@ -166,6 +166,9 @@ const (
 	// supported source. Excluding build output or a tool directory is a policy choice, but the modules
 	// inside it are unobserved, so their imports must not be read as absent.
 	CoverageSkippedDirectory CoverageIssueKind = "skipped-directory"
+	// CoverageSymbolEvidenceIncomplete records that a module's symbol references could not be fully
+	// enumerated. It appears only in SymbolEvidence.Coverage: the import graph is unaffected.
+	CoverageSymbolEvidenceIncomplete CoverageIssueKind = "symbol-evidence-incomplete"
 )
 
 // Valid reports whether k is a known R1 coverage issue kind.
@@ -193,7 +196,8 @@ func (k CoverageIssueKind) Valid() bool {
 		CoverageEntryBudgetExceeded,
 		CoverageEdgeBudgetExceeded,
 		CoverageIssueBudgetExceeded,
-		CoverageSkippedDirectory:
+		CoverageSkippedDirectory,
+		CoverageSymbolEvidenceIncomplete:
 		return true
 	default:
 		return false
@@ -215,13 +219,35 @@ type Graph struct {
 	// Roots contains structural roots only: modules with no incoming resolved
 	// first-party edge. It is not a set of verified runtime entrypoints.
 	Roots []string
-	// LocalUses records what each module does with its local names. It is populated only for the
-	// Tier-2 symbol pass; a Tier-1 consumer ignores it, and an empty slice is not evidence of absence.
-	LocalUses    []LocalUse
-	Coverage     []CoverageIssue
-	FilesScanned int
-	BytesScanned int64
+	// SymbolEvidence is the Tier-2 view: what each module does with the locals its imports bind. It is
+	// a POINTER so "not collected" and "collected and empty" are different states — the distinction is
+	// the whole safety property, because only the second one permits a negative conclusion. Use
+	// Complete() rather than testing the slice.
+	SymbolEvidence *SymbolEvidence
+	Coverage       []CoverageIssue
+	FilesScanned   int
+	BytesScanned   int64
 }
+
+// SymbolEvidence carries the Tier-2 symbol observations for one scan.
+type SymbolEvidence struct {
+	// Uses are the observed references, deterministically ordered.
+	Uses []LocalUse
+	// JSXModules are the modules that actually contain JSX, whatever their extension. JSX desugars into
+	// calls on the runtime binding that never appear as source tokens, so a whole-module binding in one
+	// of these modules cannot be narrowed by its visible property reads.
+	JSXModules []string
+	// Coverage records limitations of the SYMBOL evidence specifically.
+	//
+	// It is deliberately separate from Graph.Coverage. A Tier-2 budget breach says nothing about whether
+	// the import graph is complete, and folding it into the graph's coverage would make a Tier-2-only
+	// limitation refuse a Tier-1 answer that is still perfectly sound.
+	Coverage []CoverageIssue
+}
+
+// Complete reports whether the symbol evidence may be used to conclude that an export is NOT reached.
+// A nil receiver (never collected) and any coverage limitation both mean no.
+func (e *SymbolEvidence) Complete() bool { return e != nil && len(e.Coverage) == 0 }
 
 // DialectForPath returns the dialect selected by a supported source extension.
 func DialectForPath(p string) (Dialect, bool) {

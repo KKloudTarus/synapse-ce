@@ -195,3 +195,49 @@ func TestUseValidate(t *testing.T) {
 		}
 	}
 }
+
+// TestDecideTreatsAnUninterpretableUseAsOpaque locks that Decide is TOTAL. A use it cannot interpret must
+// contribute opacity, not silence: silence is what turns an unknown into a negative, and a negative is
+// what suppresses a finding.
+func TestDecideTreatsAnUninterpretableUseAsOpaque(t *testing.T) {
+	t.Parallel()
+
+	invalid := []Use{
+		{Module: "src/a.ts", PURL: purl, Kind: "a-kind-added-later"},
+		{Module: "src/a.ts", PURL: purl, Kind: UseMember},                     // member use naming no symbol
+		{Module: "src/a.ts", PURL: purl, Kind: UseOpaque, Symbol: "template"}, // opaque naming a symbol
+	}
+	for _, use := range invalid {
+		got := Decide("template", append([]Use{named("src/b.ts", "merge")}, use))
+		if got.Verdict != VerdictUnknown {
+			t.Fatalf("use %+v must make the answer unknown, got %q", use, got.Verdict)
+		}
+	}
+}
+
+func TestSubjectRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	subject, ok := Subject("pkg:npm/lodash@4.17.15", "template")
+	if !ok {
+		t.Fatal("a valid component and export must be mintable")
+	}
+	gotPURL, gotSymbol, ok := ParseSubject(subject)
+	if !ok || gotPURL != "pkg:npm/lodash@4.17.15" || gotSymbol != "template" {
+		t.Fatalf("round trip gave (%q, %q, %v)", gotPURL, gotSymbol, ok)
+	}
+	// The writer refuses exactly what the reader refuses.
+	for _, bad := range []struct{ purl, symbol string }{
+		{"pkg:pypi/flask@1.0", "run"}, {"not-a-purl", "x"}, {"pkg:npm/lodash@1.0.0", "a.b"},
+		{"pkg:npm/lodash@1.0.0", ""}, {"pkg:npm/lodash@1.0.0", "with space"},
+	} {
+		if _, ok := Subject(bad.purl, bad.symbol); ok {
+			t.Fatalf("Subject(%q, %q) must be refused", bad.purl, bad.symbol)
+		}
+	}
+	for _, malformed := range []string{"pkg:npm/lodash@1.0.0", "#x", "pkg:npm/lodash@1.0.0#", "pkg:npm/lodash@1.0.0#a.b"} {
+		if _, _, ok := ParseSubject(malformed); ok {
+			t.Fatalf("%q must not parse as a subject", malformed)
+		}
+	}
+}

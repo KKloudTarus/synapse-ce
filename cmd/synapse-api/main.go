@@ -1237,22 +1237,31 @@ func main() {
 	// dependencies: a first-party import graph cannot prove a TRANSITIVE package unused, because that
 	// package is loaded by its parent. Requires the judgment lifecycle. Composition-root only.
 	if cfg.JSReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_JSREACH_ENABLED", "javascript reachability") {
-		jsRecorder, jerr := jsreach.NewRecorder(jsimports.New(), jsresolve.NewResolver(), judgmentSvc, auditLog, clock)
+		// One scanner and one resolver serve both tiers: they are stateless, and a second pair would
+		// mean a second full lex of the source tree per scan.
+		jsScanner, jsResolver := jsimports.New(), jsresolve.NewResolver()
+		jsRecorder, jerr := jsreach.NewRecorder(jsScanner, jsResolver, judgmentSvc, auditLog, clock)
 		if jerr != nil {
 			log.Error("javascript reachability recorder init failed", "err", jerr)
 			os.Exit(1)
 		}
 		scaService.SetJSReachability(jsRecorder)
 		log.Info("Tier-1 JavaScript import-reachability ENABLED (source-only, direct dependencies only → OpenVEX not_affected; best-effort)")
-	}
-	if cfg.JSSymbolReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_JSREACH_TIER2_ENABLED", "javascript affected-export reachability") {
-		jsSymbolRecorder, serr := jsreach.NewSymbolRecorder(jsimports.New(), jsresolve.NewResolver(), judgmentSvc, auditLog, clock)
-		if serr != nil {
-			log.Error("javascript tier-2 reachability init failed", "err", serr)
-			os.Exit(1)
+
+		// Tier-2 rides on Tier-1. Every safety statement it makes ends "…leaves the Tier-1 judgment
+		// standing", so enabling it alone would leave nothing standing; the dependency is enforced here
+		// rather than documented.
+		if cfg.JSSymbolReachabilityEnabled {
+			jsSymbolRecorder, serr := jsreach.NewSymbolRecorder(jsScanner, jsResolver, judgmentSvc, auditLog, clock)
+			if serr != nil {
+				log.Error("javascript tier-2 reachability init failed", "err", serr)
+				os.Exit(1)
+			}
+			scaService.SetJSSymbolReachability(jsSymbolRecorder)
+			log.Info("javascript TIER-2 affected-export reachability ENABLED (a binding that escapes observation yields no conclusion, never not-reachable)")
 		}
-		scaService.SetJSSymbolReachability(jsSymbolRecorder)
-		log.Info("javascript TIER-2 affected-export reachability ENABLED (a binding that escapes observation yields no conclusion, never not-reachable)")
+	} else if cfg.JSSymbolReachabilityEnabled {
+		log.Warn("SYNAPSE_JSREACH_TIER2_ENABLED is set but tier-1 javascript reachability is off - tier-2 is SKIPPED, because a tier-2 refusal is only safe when a tier-1 judgment can stand in its place")
 	}
 
 	// Deterministic Tier-1 import-reachability for Rust, PHP and Ruby. Each scanner is SOURCE-ONLY: it

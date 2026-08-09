@@ -11,7 +11,6 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/ignore"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/jsresolution"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/jssymbols"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -778,17 +777,33 @@ func jsSymbolReachabilitySubjects(findings []finding.Finding, vulns []vulnerabil
 		if !ok {
 			continue
 		}
+		// Every affected symbol must be placeable, or the finding gets NO tier-2 subject at all.
+		//
+		// Dropping only the unplaceable ones would leave the rest forming a subject, and the coordinator
+		// concludes not-reachable when none of the symbols it was handed is reached — so an advisory
+		// listing ["template", "Class.prototype.escape"] would be sealed not-reachable on the strength of
+		// `template` alone, with the symbol nobody could evaluate silently discarded.
 		symbols := make([]string, 0, len(v.AffectedSymbols))
 		seen := map[string]bool{}
+		placeable := true
 		for _, raw := range v.AffectedSymbols {
 			export, ok := jssymbols.NormalizeAffectedSymbol(v.Component, raw)
-			if !ok || seen[export] {
+			if !ok {
+				placeable = false
+				break
+			}
+			subject, ok := jssymbols.Subject(purl, export)
+			if !ok {
+				placeable = false
+				break
+			}
+			if seen[export] {
 				continue
 			}
 			seen[export] = true
-			symbols = append(symbols, jsresolution.NPMSymbolSubject(purl, export))
+			symbols = append(symbols, subject)
 		}
-		if len(symbols) > 0 {
+		if placeable && len(symbols) > 0 {
 			subs = append(subs, ports.ReachabilitySubject{FindingID: f.ID, Symbols: symbols})
 		}
 	}

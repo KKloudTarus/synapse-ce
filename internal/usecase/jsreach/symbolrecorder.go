@@ -63,7 +63,7 @@ func (r *SymbolRecorder) RecordWithSBOM(ctx context.Context, engagementID shared
 		return 0, nil
 	}
 
-	coordinator, err := reachproof.NewCoordinatorForTier(analyzer, r.judgments, r.audit, r.clock, judgment.Tier2)
+	coordinator, err := reachproof.NewCoordinatorForLanguage(analyzer, r.judgments, r.audit, r.clock, judgment.Tier2, reachproof.LanguageJavaScript)
 	if err != nil {
 		return 0, err
 	}

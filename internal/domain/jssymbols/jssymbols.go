@@ -21,8 +21,48 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/jsresolution"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
+
+// A Tier-2 subject names both a component and one of its exports, because "is this package used" and
+// "is this export reached" are different questions with different answers. The fragment form keeps the
+// component PURL intact and appends the export, so a Tier-1 subject and a Tier-2 subject can never be
+// mistaken for one another and neither can be silently reinterpreted as the other.
+
+// Subject renders the Tier-2 subject for one export of one component, or reports that it cannot.
+//
+// It validates rather than concatenating, so the writer is the exact mirror of the reader: a constructor
+// that could mint a subject its own parser rejects would produce a claim nothing can ever match, which
+// resolves to not-reachable for every package.
+func Subject(purl, symbol string) (string, bool) {
+	if _, _, ok := jsresolution.ParseNPMPURL(purl); !ok {
+		return "", false
+	}
+	if !isIdentifier(strings.TrimSpace(symbol)) {
+		return "", false
+	}
+	return purl + "#" + strings.TrimSpace(symbol), true
+}
+
+// ParseSubject splits a Tier-2 subject back into its component PURL and export name.
+//
+// It is strict: the PURL half must itself be a valid npm component PURL and the export half must be a
+// plain identifier. A subject that does not round-trip is REFUSED rather than half-interpreted.
+func ParseSubject(raw string) (string, string, bool) {
+	hash := strings.LastIndexByte(raw, '#')
+	if hash <= 0 || hash == len(raw)-1 {
+		return "", "", false
+	}
+	purl, symbol := raw[:hash], raw[hash+1:]
+	if !isIdentifier(symbol) {
+		return "", "", false
+	}
+	if _, _, ok := jsresolution.ParseNPMPURL(purl); !ok {
+		return "", "", false
+	}
+	return purl, symbol, true
+}
 
 // UseKind classifies how first-party source touches an imported package.
 type UseKind string
@@ -137,15 +177,26 @@ func Decide(symbol string, uses []Use) Decision {
 	var reaching, opaque []string
 	opaqueReason := ""
 	for _, use := range uses {
-		switch use.Kind {
-		case UseOpaque:
+		// A use that does not satisfy its own invariants is treated as opaque rather than skipped. A
+		// skipped use contributes nothing, and "contributes nothing" is what turns an unknown into a
+		// negative — the one direction this function must never move in.
+		if err := use.Validate(); err != nil {
 			opaque = append(opaque, use.Module)
 			if opaqueReason == "" {
-				opaqueReason = use.Reason
+				opaqueReason = "a recorded reference was not interpretable"
 			}
+			continue
+		}
+		switch use.Kind {
 		case UseNamed, UseMember:
 			if use.Symbol == wanted {
 				reaching = append(reaching, use.Module)
+			}
+		default:
+			// UseOpaque, and any kind added later that this function has not been taught about.
+			opaque = append(opaque, use.Module)
+			if opaqueReason == "" {
+				opaqueReason = use.Reason
 			}
 		}
 	}

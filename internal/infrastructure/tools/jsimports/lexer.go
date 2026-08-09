@@ -133,6 +133,11 @@ type lexer struct {
 	frames []frame
 	// hazards collects lexical coverage limitations discovered while scanning.
 	hazards []hazard
+	// sawJSX records that a JSX element was actually lexed. Tier-2 needs this fact rather than the file
+	// extension: JSX is routine in .js under Babel, CRA and Next, and JSX desugars into calls on the
+	// runtime binding that never appear as source tokens — so a whole-module binding in such a module
+	// cannot be narrowed by its visible property reads.
+	sawJSX bool
 	// malformed records an unterminated construct: the rest of the file cannot be trusted.
 	malformed bool
 }
@@ -313,6 +318,7 @@ func (l *lexer) next() token {
 			return l.emit(token{kind: tokenIdent, text: l.readNumberLike(), line: startLine, column: startCol})
 		case b == '<' && l.jsxAware && l.jsxElementAhead():
 			l.advance() // '<'
+			l.sawJSX = true
 			if !l.pushFrame(frame{kind: frameJSXTag}) {
 				return token{kind: tokenEOF, line: startLine, column: startCol}
 			}
