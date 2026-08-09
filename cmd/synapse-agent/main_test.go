@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -92,10 +91,9 @@ func TestFirstRunEnrolsAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("credential must be persisted: %v", err)
 	}
-	// Windows represents file access through ACLs and does not expose POSIX permission bits through
-	// FileMode.Perm (regular files report 0666 even after Chmod). Keep the strict mode assertion on
-	// platforms where os.Chmod implements POSIX permissions.
-	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+	// Unix-only guarantee: Windows has no permission bits, so the credential is protected by the
+	// state directory's ACL there instead. Asserting 0600 on Windows would assert nothing real.
+	if fleetclient.SecretModeEnforced() && info.Mode().Perm() != 0o600 {
 		t.Fatalf("credential must be 0600, got %v", info.Mode().Perm())
 	}
 	// The order was progressed and reported succeeded with a coverage-honest summary.

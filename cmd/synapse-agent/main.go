@@ -70,6 +70,11 @@ type config struct {
 
 func main() {
 	log.SetFlags(0)
+	// The host floor is checked before the configuration, because it is the one refusal that no
+	// configuration can make valid.
+	if err := checkOSFloor(); err != nil {
+		log.Fatalf("synapse-agent: %v", err)
+	}
 	cfg := parseConfig()
 	if cfg.baseURL == "" {
 		log.Fatal("synapse-agent: SYNAPSE_FLEET_URL (or -url) is required")
@@ -77,15 +82,22 @@ func main() {
 	if err := fleetclient.ValidateControlPlaneURL(cfg.baseURL); err != nil {
 		log.Fatalf("synapse-agent: %v", err)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	r := &runner{
 		api:     fleetclient.New(cfg.baseURL, 30*time.Second),
 		collect: hostinv.Collect,
 		cfg:     cfg,
 		store:   fleetclient.NewCredentialStore(cfg.stateDir),
 	}
+
+	// On Windows the Service Control Manager starts the binary and expects a status handshake; a
+	// process that just runs is killed as unresponsive. runAsService takes over when we were started
+	// that way and reports false otherwise, so the same binary is still an ordinary command-line tool.
+	if runAsService(r.run) {
+		return
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 	if err := r.run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("synapse-agent: %v", err)
 	}
