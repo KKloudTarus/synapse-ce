@@ -27,6 +27,7 @@ import { FleetCoverage } from './pages/FleetCoverage'
 import { FleetAgents } from './pages/FleetAgents'
 import { Assets } from './pages/Assets'
 import { AssetComponents, AssetCoverageView, AssetDetail, AssetEngagements, AssetFindings, AssetHistory, AssetOverview } from './pages/AssetDetail'
+import { Dashboard } from './pages/Dashboard'
 
 export default function App() {
   return (
@@ -42,7 +43,8 @@ function Gate() {
   return (
     <Routes>
       <Route element={<Shell />}>
-        <Route index element={<Navigate to="/engagements" replace />} />
+        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route path="dashboard" element={<Dashboard />} />
         <Route path="engagements" element={<Engagements />} />
         <Route path="engagements/:id" element={<EngagementDetail />} />
         <Route path="assets" element={<Assets />} />
@@ -75,7 +77,7 @@ function Gate() {
         <Route path="audit" element={<Audit />} />
         <Route path="ai-triage/reviews" element={<AITriageReviews />} />
         <Route path="team" element={<Team />} />
-        <Route path="*" element={<Navigate to="/engagements" replace />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>
     </Routes>
   )

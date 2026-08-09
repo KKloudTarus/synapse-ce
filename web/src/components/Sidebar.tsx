@@ -1,9 +1,11 @@
 import {
   Boxes,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   FileText,
   Gauge,
+  LayoutDashboard,
   Library,
   Moon,
   Radar,
@@ -11,6 +13,7 @@ import {
   Server,
   Settings,
   ShieldQuestion,
+  SquarePen,
   Sun,
   Target,
   Users,
@@ -24,28 +27,38 @@ import { cn } from './ui'
 
 const NAV_GROUPS: Array<{
   label: string
-  items: Array<{ icon: LucideIcon; label: string; to: string; prefix?: string }>
+  items: Array<{ icon: LucideIcon; label: string; to: string; prefix?: string; match?: 'new-engagement' | 'engagements'; action?: boolean }>
 }> = [
   {
-    label: 'Security operations',
+    label: 'Command center',
+    items: [{ icon: LayoutDashboard, label: 'Dashboard', to: '/dashboard' }],
+  },
+  {
+    label: 'Scope & inventory',
+    items: [{ icon: Boxes, label: 'Assets', to: '/assets', prefix: '/assets' }],
+  },
+  {
+    label: 'Assess risk',
     items: [
-      { icon: Boxes, label: 'Assets', to: '/assets', prefix: '/assets' },
-      { icon: Target, label: 'Engagements', to: '/engagements', prefix: '/engagements' },
+      { icon: SquarePen, label: 'New Engagement', to: '/engagements?create=1', match: 'new-engagement', action: true },
+      { icon: Target, label: 'Engagements', to: '/engagements', match: 'engagements' },
       { icon: ShieldQuestion, label: 'AI review queue', to: '/ai-triage/reviews', prefix: '/ai-triage/reviews' },
-      { icon: ScrollText, label: 'Audit log', to: '/audit' },
+      { icon: Library, label: 'Rules', to: '/rules', prefix: '/rules' },
     ],
   },
   {
-    label: 'Engineering',
+    label: 'Security engineering',
     items: [
       { icon: Gauge, label: 'Code Quality', to: '/code-quality', prefix: '/code-quality' },
-      { icon: Library, label: 'Rules', to: '/rules', prefix: '/rules' },
       { icon: Server, label: 'Fleet', to: '/fleet', prefix: '/fleet' },
     ],
   },
   {
-    label: 'Administration',
-    items: [{ icon: Users, label: 'Team', to: '/team' }],
+    label: 'Govern & evidence',
+    items: [
+      { icon: ScrollText, label: 'Audit log', to: '/audit' },
+      { icon: Users, label: 'Team', to: '/team' },
+    ],
   },
 ]
 
@@ -78,6 +91,7 @@ function currentTheme(): Theme {
 function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const location = useLocation()
   const [theme, setTheme] = useState<Theme>(currentTheme)
+  const creatingEngagement = location.pathname === '/engagements' && new URLSearchParams(location.search).get('create') === '1'
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -91,10 +105,42 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
   }, [])
 
   function toggleTheme() {
-    setTheme((value) => {
-      const next = value === 'light' ? 'dark' : 'light'
-      window.dispatchEvent(new CustomEvent<Theme>('synapse-theme-change', { detail: next }))
-      return next
+    const next = theme === 'light' ? 'dark' : 'light'
+    window.dispatchEvent(new CustomEvent<Theme>('synapse-theme-change', { detail: next }))
+    setTheme(next)
+  }
+
+  function renderItems(items: (typeof NAV_GROUPS)[number]['items']) {
+    return items.map(({ icon: Icon, label, to, prefix, match, action }) => {
+      const active = match === 'new-engagement'
+        ? creatingEngagement
+        : match === 'engagements'
+          ? location.pathname.startsWith('/engagements') && !creatingEngagement
+          : prefix
+            ? location.pathname.startsWith(prefix)
+            : location.pathname === to
+      return (
+        <NavLink
+          key={to}
+          to={to}
+          title={collapsed ? label : undefined}
+          aria-label={collapsed ? label : undefined}
+          onClick={onNavigate}
+          className={cn(
+            'relative flex min-h-10 items-center rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70',
+            collapsed ? 'justify-center px-2' : 'gap-3 px-3',
+            active
+              ? 'bg-navactive font-semibold text-white'
+              : action
+                ? 'border border-brand/30 bg-brand/10 font-semibold text-navfg hover:bg-brand/20'
+                : 'text-navmuted hover:bg-navhover hover:text-navfg',
+          )}
+        >
+          <Icon className={cn('size-[18px] shrink-0', action && !active && 'text-branddim')} aria-hidden="true" />
+          <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
+          {active && <span className="absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-brand" />}
+        </NavLink>
+      )
     })
   }
 
@@ -109,35 +155,16 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Primary navigation">
-        {NAV_GROUPS.map((group, index) => (
-          <div key={group.label} className={cn(index > 0 && 'mt-5')}>
-            <div className={cn('mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-navsubtle', collapsed && 'sr-only')}>
+        {NAV_GROUPS.map((group, index) => collapsed ? (
+          <div key={group.label} className={cn('space-y-1', index > 0 && 'mt-3')}>{renderItems(group.items)}</div>
+        ) : (
+          <details key={group.label} open className={cn('group', index > 0 && 'mt-4')}>
+            <summary className="mb-1.5 flex cursor-pointer list-none items-center justify-between rounded-md px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-navsubtle transition-colors hover:text-navmuted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70 [&::-webkit-details-marker]:hidden">
               {group.label}
-            </div>
-            <div className="space-y-1">
-              {group.items.map(({ icon: Icon, label, to, prefix }) => {
-                const active = prefix ? location.pathname.startsWith(prefix) : location.pathname === to
-                return (
-                  <NavLink
-                    key={to}
-                    to={to}
-                    title={collapsed ? label : undefined}
-                    aria-label={collapsed ? label : undefined}
-                    onClick={onNavigate}
-                    className={cn(
-                      'relative flex min-h-10 items-center rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70',
-                      collapsed ? 'justify-center px-2' : 'gap-3 px-3',
-                      active ? 'bg-navactive font-semibold text-white' : 'text-navmuted hover:bg-navhover hover:text-navfg',
-                    )}
-                  >
-                    <Icon className="size-[18px] shrink-0" aria-hidden="true" />
-                    <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
-                    {active && <span className="absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-brand" />}
-                  </NavLink>
-                )
-              })}
-            </div>
-          </div>
+              <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="space-y-1">{renderItems(group.items)}</div>
+          </details>
         ))}
 
         <div className="mt-5">
