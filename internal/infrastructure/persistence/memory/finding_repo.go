@@ -14,16 +14,39 @@ import (
 // FindingRepository is an in-memory finding store (dev/tests), deduped per
 // engagement by dedup key. Replaced by Postgres when a DB is configured.
 type FindingRepository struct {
-	mu   sync.RWMutex
-	data map[shared.ID]map[string]finding.Finding // engagementID -> dedupKey -> finding
+	mu          sync.RWMutex
+	data        map[shared.ID]map[string]finding.Finding // engagementID -> dedupKey -> finding
+	projections map[shared.ID]map[shared.ID]ports.FindingProjectionMode
 }
 
 // NewFindingRepository returns an empty in-memory finding repository.
 func NewFindingRepository() *FindingRepository {
-	return &FindingRepository{data: map[shared.ID]map[string]finding.Finding{}}
+	return &FindingRepository{
+		data:        map[shared.ID]map[string]finding.Finding{},
+		projections: map[shared.ID]map[shared.ID]ports.FindingProjectionMode{},
+	}
 }
 
 var _ ports.FindingRepository = (*FindingRepository)(nil)
+
+// ClaimFindingProjection atomically selects the CapSAST projection mode for a judgment.
+func (r *FindingRepository) ClaimFindingProjection(_ context.Context, _ shared.ID, engagementID, judgmentID shared.ID, mode ports.FindingProjectionMode) error {
+	if mode != ports.FindingProjectionSAST && mode != ports.FindingProjectionDAST {
+		return fmt.Errorf("%w: unknown finding projection mode %q", shared.ErrValidation, mode)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	byJudgment := r.projections[engagementID]
+	if byJudgment == nil {
+		byJudgment = map[shared.ID]ports.FindingProjectionMode{}
+		r.projections[engagementID] = byJudgment
+	}
+	if existing, ok := byJudgment[judgmentID]; ok && existing != mode {
+		return fmt.Errorf("judgment %s already claimed for %s: %w", judgmentID, existing, shared.ErrConflict)
+	}
+	byJudgment[judgmentID] = mode
+	return nil
+}
 
 // Upsert inserts or updates findings, deduped by (engagement, dedup key). On
 // update it preserves the existing triage status + created timestamp.

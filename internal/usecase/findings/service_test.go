@@ -3,7 +3,9 @@ package findings
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,22 +17,36 @@ import (
 var testNow = time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
 
 type fakeRepo struct {
-	upserted []finding.Finding
-	list     []finding.Finding // returned by ListByEngagement (for AddComment scoping)
-	called   bool
-	got      finding.Status
-	gotVer   int
-	assignee string
-	ret      finding.Finding
-	err      error
+	upserted    []finding.Finding
+	projections map[shared.ID]ports.FindingProjectionMode
+	list        []finding.Finding // returned by ListByEngagement (for AddComment scoping)
+	called      bool
+	got         finding.Status
+	gotVer      int
+	assignee    string
+	ret         finding.Finding
+	err         error
+	listErr     error
+}
+
+func (f *fakeRepo) ClaimFindingProjection(_ context.Context, _, _, judgmentID shared.ID, mode ports.FindingProjectionMode) error {
+	if f.projections == nil {
+		f.projections = map[shared.ID]ports.FindingProjectionMode{}
+	}
+	if existing, ok := f.projections[judgmentID]; ok && existing != mode {
+		return fmt.Errorf("projection conflict: %w", shared.ErrConflict)
+	}
+	f.projections[judgmentID] = mode
+	return nil
 }
 
 func (f *fakeRepo) Upsert(_ context.Context, fs []finding.Finding) error {
 	f.upserted = append(f.upserted, fs...)
+	f.list = append(f.list, fs...)
 	return nil
 }
 func (f *fakeRepo) ListByEngagement(context.Context, shared.ID) ([]finding.Finding, error) {
-	return f.list, nil
+	return f.list, f.listErr
 }
 func (f *fakeRepo) ListPublishableByEngagement(context.Context, shared.ID) ([]finding.Finding, error) {
 	return finding.Publishable(f.list), nil
@@ -81,9 +97,17 @@ type fixedClock struct{ t time.Time }
 
 func (c fixedClock) Now() time.Time { return c.t }
 
-type fakeIDs struct{ n int }
+type fakeIDs struct {
+	mu sync.Mutex
+	n  int
+}
 
-func (g *fakeIDs) NewID() shared.ID { g.n++; return shared.ID("id-" + strconv.Itoa(g.n)) }
+func (g *fakeIDs) NewID() shared.ID {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.n++
+	return shared.ID("id-" + strconv.Itoa(g.n))
+}
 
 func newSvc(repo ports.FindingRepository, comments ports.CommentRepository, audit ports.AuditLogger) *Service {
 	return NewService(repo, comments, &fakeRetests{}, audit, fixedClock{t: testNow}, &fakeIDs{})

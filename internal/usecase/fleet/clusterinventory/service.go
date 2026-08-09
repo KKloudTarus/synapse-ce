@@ -150,6 +150,7 @@ func (s *Service) Sync(ctx context.Context, actor string, in SyncInput) (*SyncRe
 			To:         to,
 			Kind:       e.Kind,
 			Provenance: in.Provenance,
+			Confidence: asset.EdgeObserved,
 		}); err != nil {
 			return nil, fmt.Errorf("cluster inventory: upsert edge %s: %w", e.Kind, err)
 		}

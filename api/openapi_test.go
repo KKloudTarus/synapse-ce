@@ -250,3 +250,60 @@ func TestOpenAPI_StrictValidation(t *testing.T) {
 		})
 	})
 }
+
+func TestAttackPathOpenAPIContract(t *testing.T) {
+	b, err := os.ReadFile("openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	schemas := doc["components"].(map[string]any)["schemas"].(map[string]any)
+	enum := func(schema, property string) []string {
+		definition := schemas[schema].(map[string]any)
+		properties, _ := definition["properties"].(map[string]any)
+		if properties == nil {
+			for _, part := range definition["allOf"].([]any) {
+				if properties, _ = part.(map[string]any)["properties"].(map[string]any); properties != nil {
+					break
+				}
+			}
+		}
+		values := properties[property].(map[string]any)["enum"].([]any)
+		got := make([]string, len(values))
+		for i, value := range values {
+			got[i] = value.(string)
+		}
+		return got
+	}
+	assertEnum := func(schema, property string, want []string) {
+		t.Helper()
+		if got := enum(schema, property); strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("%s.%s enum = %v, want %v", schema, property, got, want)
+		}
+	}
+
+	assertEnum("AttackPathAsset", "Kind", []string{"host", "workload", "image", "cloud_account", "storage", "exposure", "identity", "namespace", "cluster", "repository"})
+	assertEnum("Finding", "Kind", []string{"sca", "recon", "exploitation", "manual", "sast", "secret", "misconfig", "dast", "threat", "hypothesis", "quality", "reliability"})
+	assertEnum("AttackPathFindingInput", "reachability", []string{"", "reachable", "not_reachable", "unknown"})
+	assertEnum("AttackPathFindingInput", "tier", []string{"", "tier-0", "tier-1", "tier-1.5", "tier-2"})
+
+	bounds := schemas["AttackPathBounds"].(map[string]any)
+	properties := bounds["properties"].(map[string]any)
+	required := bounds["required"].([]any)
+	for _, field := range []string{"targetPathsHit", "findingPathsHit"} {
+		property, ok := properties[field].(map[string]any)
+		if !ok || property["type"] != "boolean" {
+			t.Errorf("AttackPathBounds.%s must be a boolean", field)
+		}
+		found := false
+		for _, value := range required {
+			found = found || value == field
+		}
+		if !found {
+			t.Errorf("AttackPathBounds.%s must be required", field)
+		}
+	}
+}

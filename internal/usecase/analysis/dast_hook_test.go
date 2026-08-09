@@ -63,6 +63,24 @@ func TestVerifyConfirmedNativeDASTEmitsDAST(t *testing.T) {
 
 // The STATIC path (Verify) confirming a CapSAST judgment fires the SAST recorder, NOT the DAST one — proving
 // the two paths are cleanly separated and neither double-emits.
+func TestVerifyRuntimeConfirmedSASTRetriesProjection(t *testing.T) {
+	svc, _, _, _ := newSvc()
+	rec := &fakeDASTRecorder{err: errors.New("attribution unavailable")}
+	svc.SetDASTRecorder(rec)
+	j, _ := svc.Propose(context.Background(), "system:taint-scan", "e1", judgment.CapSAST, judgment.SubjectDataFlow, "flow1", sastClaim())
+	confirmed, err := svc.VerifyRuntime(context.Background(), "human:bob", "e1", j.ID, 85, "proof_class=runtime_confirmed; observed", j.Version)
+	if err != nil || confirmed.State != judgment.StateConfirmed {
+		t.Fatalf("initial verification = %+v, %v", confirmed, err)
+	}
+	rec.err = nil
+	if _, err := svc.VerifyRuntime(context.Background(), "human:bob", "e1", j.ID, 85, "retry projection", confirmed.Version); err != nil {
+		t.Fatalf("retry confirmed projection: %v", err)
+	}
+	if len(rec.calls) != 2 {
+		t.Fatalf("want confirmation and projection retry, got %d calls", len(rec.calls))
+	}
+}
+
 func TestVerifyStaticConfirmedSASTEmitsSASTNotDAST(t *testing.T) {
 	svc, _, _, _ := newSvc()
 	dast := &fakeDASTRecorder{}

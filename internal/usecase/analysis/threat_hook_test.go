@@ -41,6 +41,24 @@ func TestVerifyConfirmedThreatEmitsFinding(t *testing.T) {
 }
 
 // TestVerifyConfirmedNonThreatDoesNotEmit: confirming a non-threat judgment must NOT touch the recorder.
+func TestVerifyConfirmedThreatRetriesProjection(t *testing.T) {
+	svc, _, _, _ := newSvc()
+	rec := &fakeThreatRecorder{err: errors.New("attribution unavailable")}
+	svc.SetThreatRecorder(rec)
+	j, _ := svc.Propose(context.Background(), "agent:s1", "e1", judgment.CapThreat, judgment.SubjectComponent, "api", threatClaim())
+	confirmed, err := svc.Verify(context.Background(), "human:bob", "e1", j.ID, 80, "real threat", j.Version)
+	if err != nil || confirmed.State != judgment.StateConfirmed {
+		t.Fatalf("initial verification = %+v, %v", confirmed, err)
+	}
+	rec.err = nil
+	if _, err := svc.Verify(context.Background(), "human:bob", "e1", j.ID, 80, "retry projection", confirmed.Version); err != nil {
+		t.Fatalf("retry confirmed projection: %v", err)
+	}
+	if len(rec.calls) != 2 {
+		t.Fatalf("want confirmation and projection retry, got %d calls", len(rec.calls))
+	}
+}
+
 func TestVerifyConfirmedNonThreatDoesNotEmit(t *testing.T) {
 	svc, _, _, _ := newSvc()
 	rec := &fakeThreatRecorder{}

@@ -20,6 +20,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/httpapi"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -101,6 +102,7 @@ import (
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/assetuc"
+	attackpathuc "github.com/KKloudTarus/synapse-ce/internal/usecase/attackpath"
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/businessassetuc"
@@ -188,6 +190,7 @@ func main() {
 	var repo ports.EngagementRepository
 	var projectRepo ports.ProjectRepository
 	var assetStore ports.AssetRepository
+	var attackPathStore ports.AttackPathStore
 	var scannedImageStore ports.ScannedImageStore
 	var workOrderStore ports.WorkOrderStore
 	var fleetAgentStore ports.FleetAgentStore
@@ -320,6 +323,7 @@ func main() {
 		threatModelStore = postgres.NewThreatModelRepository(pool)
 		writeupDraftStore = postgres.NewWriteupDraftRepository(pool)
 		assetStore = postgres.NewAssetRepository(pool)
+		attackPathStore = postgres.NewAttackPathStore(pool)
 		scannedImageStore = postgres.NewScannedImageStore(pool)
 		workOrderStore = postgres.NewWorkOrderRepository(pool)
 		fleetAgentStore = postgres.NewFleetAgentRepository(pool)
@@ -357,6 +361,7 @@ func main() {
 		repo = memory.NewEngagementRepository()
 		projectRepo = memory.NewProjectRepository()
 		assetStore = memory.NewAssetStore()
+		attackPathStore = memory.NewAttackPathStore()
 		scannedImageStore = memory.NewScannedImageStore()
 		workOrderStore = memory.NewWorkOrderStore()
 		fleetAgentStore = memory.NewFleetAgentStore()
@@ -813,6 +818,10 @@ func main() {
 	aupService := aupuc.NewService(aupStore, auditLog, clock, cfg.AUPVersion)
 	exportService := exportuc.NewService(findingRepo, clock, buildinfo.App())
 	findingsService := findingsuc.NewService(findingRepo, commentRepo, retestRepo, auditLog, clock, ids)
+	// Both additions are independent; the tenant resolver is wired first because the review service
+	// takes findingsService as a dependency.
+	findingsService.SetEngagementTenantResolver(repo)
+
 	aiTriageReviewService, err := aitriagereviewuc.NewService(aiTriageReviewStore, repo, findingsService, auditLog, clock, ids)
 	if err != nil {
 		log.Error("AI-triage review service init failed", "err", err)
@@ -1135,7 +1144,32 @@ func main() {
 		}
 		assetSvc = svc
 		router.SetAssets(assetSvc)
+		attributor, aerr := attackpathuc.NewRecorder(assetStore, attackPathStore, repo)
+		if aerr != nil {
+			log.Error("attack path recorder init failed", "err", aerr)
+			os.Exit(1)
+		}
+		findingsService.SetAttributor(attributor)
+		exploitationService.SetAttributor(attributor)
+		if err := scaService.SetFindingAttribution(assetStore, attributor); err != nil {
+			log.Error("SCA finding attribution setup failed", "err", err)
+			os.Exit(1)
+		}
+		judgments, ok := judgmentStore.(ports.JudgmentStore)
+		if !ok {
+			log.Error("judgment store does not support attack-path reads")
+			os.Exit(1)
+		}
+		attackPathSvc, aerr := attackpathuc.NewService(assetStore, attackPathStore, findingRepo, importedFindingStore, judgments, repo, ap.Limits{
+			MaxLength: cfg.AttackPathMaxLen, MaxPaths: cfg.AttackPathMaxPaths, MaxDuration: cfg.AttackPathWallClock,
+		})
+		if aerr != nil {
+			log.Error("attack path service init failed", "err", aerr)
+			os.Exit(1)
+		}
+		router.SetAttackPaths(attackPathSvc)
 		log.Info("fleet asset model ENABLED (multi-tenant, Postgres RLS-enforced)")
+		log.Info("attack-path query ENABLED (tenant-scoped, bounded, evidence-carrying)")
 
 		// Fleet coverage + agent-health views (#413): a read projection over agents, work orders and
 		// the asset model. Needs the fleet transport (agent + work-order stores); enabled when both the
@@ -1155,6 +1189,14 @@ func main() {
 	// authority: an external tool's confidence is not a distinct verifier's sealed verdict.
 	{
 		sarifSvc, serr := sarifingest.NewService(importedFindingStore, findingRepo, repo, auditLog, clock, ids)
+		if assetSvc != nil {
+			attributor, aerr := attackpathuc.NewRecorder(assetStore, attackPathStore, repo)
+			if aerr != nil {
+				log.Error("sarif attribution recorder init failed", "err", aerr)
+				os.Exit(1)
+			}
+			sarifSvc.SetAttributor(attributor)
+		}
 		if serr != nil {
 			log.Error("sarif ingest init failed", "err", serr)
 			os.Exit(1)

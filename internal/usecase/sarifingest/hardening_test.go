@@ -474,8 +474,8 @@ func TestDeduplicatedIngestIsAudited(t *testing.T) {
 	if _, err := ingest(t, svc, doc); err != nil {
 		t.Fatalf("second ingest: %v", err)
 	}
-	if audit.entries != 2 {
-		t.Fatalf("a deduplicated ingest must still be audited, got %d entries", audit.entries)
+	if len(audit.entries) != 2 {
+		t.Fatalf("a deduplicated ingest must still be audited, got %d entries", len(audit.entries))
 	}
 }
 
@@ -740,8 +740,8 @@ func TestIngestRefusesAnEngagementTheCallerCannotSee(t *testing.T) {
 	if len(stored) != 0 {
 		t.Fatalf("nothing may be persisted for an unauthorized engagement, got %d", len(stored))
 	}
-	if audit.entries != 0 {
-		t.Fatalf("a refused ingest is not an audited state change, got %d entries", audit.entries)
+	if len(audit.entries) != 0 {
+		t.Fatalf("a refused ingest is not an audited state change, got %d entries", len(audit.entries))
 	}
 }
 

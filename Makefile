@@ -1,4 +1,4 @@
-.PHONY: help install tools dev build run test vet lint format typecheck tidy ai-triage-eval \
+.PHONY: help install tools dev build run test harness vet lint format typecheck tidy ai-triage-eval \
         docker-build docker-up docker-down clean web-dev web-build smoke
 
 GO ?= go
@@ -27,6 +27,9 @@ run: ## Run the API server (:8080)
 
 test: ## Run Go tests
 	$(GO) test ./...
+
+harness: ## Run the hostile tenant-isolation harness
+	$(GO) test ./internal/adapter/httpapi -run '^TestHostileHarness$$'
 
 vet: ## Run go vet
 	$(GO) vet ./...

@@ -336,6 +336,25 @@ type WriteupDraftStore interface {
 	ListByEngagement(ctx context.Context, engagementID shared.ID) ([]writeupdraft.Draft, error)
 }
 
+// FindingProjectionMode identifies the sole allowed projection for a publishable CapSAST judgment.
+type FindingProjectionMode string
+
+const (
+	FindingProjectionSAST FindingProjectionMode = "sast"
+	FindingProjectionDAST FindingProjectionMode = "dast"
+)
+
+// FindingProjectionClaimer atomically selects a projection mode for a judgment. Repeating the
+// selected mode succeeds; selecting the other mode returns shared.ErrConflict.
+type FindingProjectionClaimer interface {
+	ClaimFindingProjection(ctx context.Context, tenantID, engagementID, judgmentID shared.ID, mode FindingProjectionMode) error
+}
+
+// EngagementTenantResolver resolves the already-authorized engagement's tenant for a projection.
+type EngagementTenantResolver interface {
+	GetByID(ctx context.Context, id shared.ID) (*engagement.Engagement, error)
+}
+
 // FindingRepository upserts findings (idempotent by engagement + dedup key) and
 // lists them for an engagement.
 type FindingRepository interface {

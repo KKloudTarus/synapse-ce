@@ -134,6 +134,24 @@ paths:
                 items: {$ref: "#/components/schemas/Finding"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [findings]
+      summary: Create a manual finding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateManualFindingRequest"}
+      responses:
+        "201":
+          description: Created finding
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Finding"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/engagements/{id}/findings/{fid}:
     parameters:
@@ -163,6 +181,29 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Finding"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/engagements/{id}/sarif:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    post:
+      tags: [findings]
+      summary: Import a third-party SARIF report
+      parameters:
+      - name: asset_id
+        in: query
+        schema: {type: string}
+        description: Authoritative asset ID; required and validated when fleet asset attribution is configured.
+      requestBody:
+        required: true
+        content:
+          application/sarif+json:
+            schema: {type: object}
+      responses:
+        "200": {description: Ingest summary}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -240,6 +281,41 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/attack-paths:
+    get:
+      tags: [findings]
+      summary: List bounded, tenant-scoped derived attack paths
+      description: >
+        Non-empty target, entrypoint, and finding filters compose with AND. Unknown
+        or cross-tenant filter IDs return an empty result to avoid disclosure.
+      parameters:
+      - name: target
+        in: query
+        schema: {type: string}
+        description: Asset ID that a returned path must contain
+      - name: entrypoint
+        in: query
+        schema: {type: string}
+        description: Starting exposure asset ID
+      - name: finding
+        in: query
+        schema: {type: string}
+        description: Finding ID at the path endpoint; without finding_kind, matches either target kind
+      - name: finding_kind
+        in: query
+        schema: {type: string, enum: [canonical, imported]}
+        description: Optional endpoint kind; requires finding and selects its typed target
+      responses:
+        "200":
+          description: Deterministically ordered paths and the applied traversal bounds
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AttackPathResult"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalServerError"}
 
   /api/v1/projects/{key}:
     parameters:
@@ -1594,22 +1670,236 @@ components:
         AuthorizedFrom: {type: [string, "null"], format: date-time}
         AuthorizedTo: {type: [string, "null"], format: date-time}
 
-    Finding:
+    CreateManualFindingRequest:
       type: object
-      description: Serialized from the domain struct (PascalCase keys).
+      required: [title, severity]
+      properties:
+        title: {type: string}
+        description: {type: string}
+        severity: {type: string, enum: [critical, high, medium, low, info, unknown]}
+        cvss_vector: {type: string}
+        cwe: {type: string}
+        asset_id:
+          type: string
+          description: Authoritative asset ID; when supplied it is validated and creates an observed manual attribution.
+
+    AgentProposeFindingInput:
+      type: object
+      required: [title, description, severity]
+      properties:
+        title: {type: string}
+        description: {type: string}
+        severity: {type: string, enum: [critical, high, medium, low, info]}
+        cvss_vector: {type: string}
+        cwe: {type: string}
+        asset_id: {type: string, description: Required and validated when attribution is configured; optional for legacy deployments.}
+
+    AgentProposeHypothesisInput:
+      type: object
+      required: [title, description, constituent_ids]
+      properties:
+        title: {type: string}
+        description: {type: string}
+        constituent_ids: {type: array, minItems: 2, items: {type: string}}
+        severity: {type: string, enum: [critical, high, medium, low, info]}
+        asset_id: {type: string, description: Explicit authoritative asset ID; otherwise a configured attributor requires one unambiguous shared constituent binding.}
+
+    AgentProposeJudgmentClaimInput:
+      type: object
+      properties:
+        asset_id: {type: string, description: Explicit asset attribution for standalone threat claims or SAST claims; subject-finding SAST claims inherit their binding when attribution is configured.}
+      description: Applies to agent proposal claims. Manual, SARIF, exploitation/hypothesis, and judgment proposals never infer an arbitrary asset from prose.
+
+    AttackPathResult:
+      type: object
+      required: [paths, bounds]
+      properties:
+        paths:
+          type: array
+          items: {$ref: "#/components/schemas/AttackPath"}
+        bounds: {$ref: "#/components/schemas/AttackPathBounds"}
+
+    AttackPathBounds:
+      type: object
+      required: [maxLength, maxPaths, maxDuration, truncated, lengthHit, pathsHit, targetPathsHit, findingPathsHit, wallClockHit]
+      properties:
+        maxLength: {type: integer, minimum: 1}
+        maxPaths: {type: integer, minimum: 1}
+        maxDuration: {type: integer, description: Go duration serialized as nanoseconds}
+        truncated: {type: boolean}
+        lengthHit: {type: boolean}
+        pathsHit: {type: boolean}
+        targetPathsHit: {type: boolean}
+        findingPathsHit: {type: boolean}
+        wallClockHit: {type: boolean}
+
+    AttackPath:
+      type: object
+      required: [id, nodes, steps, edges, uncertainties, confident]
+      properties:
+        id: {type: string, description: Stable SHA-256 identity of the path inputs}
+        nodes:
+          type: array
+          items: {$ref: "#/components/schemas/AttackPathNode"}
+        steps:
+          type: array
+          items: {$ref: "#/components/schemas/AttackPathStep"}
+        edges:
+          type: array
+          items: {$ref: "#/components/schemas/AttackPathLogicalEdge"}
+        uncertainties:
+          type: array
+          items: {$ref: "#/components/schemas/AttackPathUncertainty"}
+        confident: {type: boolean}
+
+    AttackPathNode:
+      type: object
+      description: Exactly one of asset or finding is present.
+      properties:
+        asset:
+          type: object
+          required: [asset]
+          properties:
+            asset: {$ref: "#/components/schemas/AttackPathAsset"}
+        finding:
+          type: object
+          required: [input]
+          properties:
+            input: {$ref: "#/components/schemas/AttackPathFindingInput"}
+
+    AttackPathAsset:
+      type: object
+      required: [ID, TenantID, Kind, Key, Name]
       properties:
         ID: {type: string}
-        EngagementID: {type: string}
-        Title: {type: string}
-        Description: {type: string}
+        TenantID: {type: string}
+        Kind: {type: string, enum: [host, workload, image, cloud_account, storage, exposure, identity, namespace, cluster, repository]}
+        Key: {type: string}
+        Name: {type: string}
+        Attributes: {type: object, additionalProperties: {type: string}}
+
+    AttackPathFindingInput:
+      type: object
+      required: [target, finding, reachability, tier, provenance, confirmed, external]
+      properties:
+        target:
+          type: object
+          required: [ID, Kind]
+          properties:
+            ID: {type: string}
+            Kind: {type: string, enum: [canonical, imported]}
+        finding: {$ref: "#/components/schemas/Finding"}
+        reachability: {type: string, enum: ["", reachable, not_reachable, unknown]}
+        tier: {type: string, enum: ["", tier-0, tier-1, tier-1.5, tier-2]}
+        provenance: {type: string}
+        confirmed: {type: boolean}
+        external: {type: boolean, description: True only for an immutable imported finding; the embedded finding retains only shared risk comparison fields.}
+        importedProvenance:
+          $ref: "#/components/schemas/AttackPathImportedFindingProvenance"
+      description: The embedded finding's KEV, RiskScore, CVSSVector, and Severity are the existing comparison components; no weighted path score is emitted.
+
+    AttackPathImportedFindingProvenance:
+      type: object
+      required: [ToolName, ToolVersion, RuleID, SourceDigest, IngestedBy, IngestedAt]
+      description: Immutable provenance for an external imported finding. Present only when target.Kind is imported.
+      properties:
+        ToolName: {type: string}
+        ToolVersion: {type: string}
+        RuleID: {type: string}
+        SourceDigest: {type: string}
+        IngestedBy: {type: string}
+        IngestedAt: {type: string, format: date-time}
+
+    AttackPathLogicalEdge:
+      type: object
+      required: [from, to, kind, evidence, observed, finding]
+      properties:
+        from: {type: string}
+        to: {type: string}
+        toTargetKind: {type: string, enum: [canonical, imported], description: Finding source table when finding is true.}
+        kind: {type: string, enum: [runs, exposes, depends_on, can_assume, reaches, affected_by, mounts, member_of]}
+        evidence:
+          type: array
+          items: {$ref: "#/components/schemas/AttackPathEvidence"}
+        observed: {type: boolean}
+        finding: {type: boolean}
+
+    AttackPathStep:
+      type: object
+      required: [from, to, kind, evidence, observed, toFinding]
+      properties:
+        from: {type: string}
+        to: {type: string}
+        toTargetKind: {type: string, enum: [canonical, imported], description: Finding source table when finding is true.}
+        kind: {type: string, enum: [runs, exposes, depends_on, can_assume, reaches, affected_by, mounts, member_of]}
+        evidence:
+          type: array
+          items: {$ref: "#/components/schemas/AttackPathEvidence"}
+        observed: {type: boolean}
+        toFinding: {type: boolean}
+
+    AttackPathEvidence:
+      type: object
+      required: [producer, provenance, confidence]
+      properties:
+        producer: {type: string, description: Binding producer; empty only for base fleet-edge evidence.}
+        provenance: {type: string, description: Immutable evidence provenance.}
+        confidence: {type: string, enum: [observed, inferred], description: Required producer-supplied evidence confidence; omitted confidence is invalid.}
+
+    AttackPathUncertainty:
+      type: string
+      description: inferred_edge is suffixed with its one-based step index.
+      pattern: '^(inferred_edge:[1-9][0-9]*|missing_reachability|unknown_reachability|unconfirmed_reachability)$'
+
+    AttackPathScoreComponents:
+      type: object
+      description: Existing flat finding risk components used for path comparison; no weighted path score is emitted.
+      properties:
         Severity: {type: string, enum: [critical, high, medium, low, info, unknown]}
         CVSSVector: {type: string}
-        CWE: {type: string}
-        Status: {type: string, enum: [open, triage, confirmed, false_positive, remediated]}
         KEV: {type: boolean}
         RiskScore: {type: number}
-        DedupKey: {type: string}
-        EvidenceScore: {type: integer}
+
+    Finding:
+      allOf:
+      - $ref: "#/components/schemas/AttackPathScoreComponents"
+      - type: object
+        description: Serialized from the domain struct (PascalCase keys).
+        properties:
+          ID: {type: string}
+          EngagementID: {type: string}
+          Title: {type: string}
+          Description: {type: string}
+          CWE: {type: string}
+          Status: {type: string, enum: [open, triage, confirmed, false_positive, remediated]}
+          DedupKey: {type: string}
+          EvidenceScore: {type: integer}
+          Kind: {type: string, enum: [sca, recon, exploitation, manual, sast, secret, misconfig, dast, threat, hypothesis, quality, reliability]}
+          RuleKey: {type: string}
+          SourceLocation:
+            type: [object, "null"]
+            properties:
+              File: {type: string}
+              StartLine: {type: integer}
+              EndLine: {type: integer}
+          Assignee: {type: string}
+          Version: {type: integer}
+          Sources: {type: array, items: {type: string}}
+          Confidence: {type: string}
+          Class: {type: string}
+          Scope: {type: string}
+          Reachability: {type: string}
+          Impact: {type: string}
+          Priority: {type: integer}
+          ClassReachability: {type: string}
+          ProposedBy: {type: string}
+          Audit:
+            type: object
+            properties:
+              CreatedAt: {type: string, format: date-time}
+              UpdatedAt: {type: string, format: date-time}
+              CreatedBy: {type: string}
+              UpdatedBy: {type: string}
 
     ScanRequest:
       type: object

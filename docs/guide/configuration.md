@@ -110,6 +110,18 @@ Historical Code reads are analysis-scoped and private-cacheable. Source and diff
 
 For `docker run`, mount durable storage at the image's configured artifact path (the API image uses `/project-source-artifacts`): `--mount type=volume,source=synapse-project-source-artifacts,target=/project-source-artifacts`. Removing that volume permanently removes retained historical Code source and diffs.
 
+## Fleet attack paths
+
+Attack paths are available when `SYNAPSE_FLEET_ASSETS_ENABLED=true`. They correlate the tenant's
+asset relationships with explicitly attributed findings and reachability judgments. Every response
+reports whether traversal was truncated; lowering a bound never produces a result that looks complete.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_ATTACKPATH_MAX_LEN` | `12` | Maximum number of steps in one path. Must be positive. |
+| `SYNAPSE_ATTACKPATH_MAX_PATHS` | `100` | Maximum retained paths per requested target or finding. Must be positive. |
+| `SYNAPSE_ATTACKPATH_WALLCLOCK` | `2s` | Wall-clock traversal budget. Must be positive. |
+
 ## Recon and execution sandbox (sandbox required in production)
 
 | Variable | Default | Description |

@@ -18,6 +18,7 @@ type HypothesisInput struct {
 	Description    string
 	ConstituentIDs []string        // the finding ids this chain links (>= 2; a chain links multiple findings)
 	Severity       shared.Severity // optional; defaults to Unknown (a human triages the chain's severity)
+	AssetID        shared.ID
 }
 
 // NewHypothesis builds an AI-proposed attack-chain hypothesis finding (Kind=hypothesis). Unlike a threat

@@ -146,9 +146,10 @@ func (c ReachabilityClaim) Validate() error {
 // SASTClaim is the typed result of a SAST judgment: the weakness (CWE), where, and the
 // rule that fired. No free-text – a "hardcoded secret at L42" finding renders from these fields.
 type SASTClaim struct {
-	CWE      string `json:"cwe"`
-	Location string `json:"location"` // path[:line]
-	Rule     string `json:"rule"`
+	CWE      string    `json:"cwe"`
+	Location string    `json:"location"` // path[:line]
+	Rule     string    `json:"rule"`
+	AssetID  shared.ID `json:"asset_id"`
 }
 
 // DASTClaim is the typed result of a dynamic check. Source and Fingerprint are
@@ -309,7 +310,8 @@ func (s StrideCategory) Valid() bool {
 // ratifies it ("human-confirmed"); the agent only ever proposes it at score 0.
 type ThreatClaim struct {
 	Category StrideCategory `json:"category"`
-	Asset    string         `json:"asset"` // optional Asset.ID at risk; "" when none
+	Asset    string         `json:"asset"` // legacy display text; never used for asset attribution
+	AssetID  shared.ID      `json:"asset_id"`
 }
 
 // Capability identifies this claim's brain.

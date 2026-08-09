@@ -6,9 +6,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
+	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetcoverage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetrollout"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
@@ -19,6 +23,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/threatmodel"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeupdraft"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	attackpathuc "github.com/KKloudTarus/synapse-ce/internal/usecase/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
@@ -184,7 +189,43 @@ func TestHostileHarness(t *testing.T) {
 	if err := engRepo.Create(context.Background(), &engdom.Engagement{
 		ID: "engA", TenantID: "tenantA", Name: "A", Client: "A", Status: engdom.StatusActive,
 	}); err != nil {
-		t.Fatalf("seed engagement: %v", err)
+		t.Fatalf("seed engagement A: %v", err)
+	}
+	if err := engRepo.Create(context.Background(), &engdom.Engagement{
+		ID: "engB", TenantID: "tenantB", Name: "B", Client: "B", Status: engdom.StatusActive,
+	}); err != nil {
+		t.Fatalf("seed engagement B: %v", err)
+	}
+	attackAssets := memory.NewAssetStore()
+	attackBindings := memory.NewAttackPathStore()
+	attackFindings := memory.NewFindingRepository()
+	attackImported := memory.NewImportedFindingStore()
+	for _, a := range []*asset.Asset{
+		{ID: "ex-A", TenantID: "tenantA", Kind: asset.KindExposure, Key: "ex-A", Name: "ex-A"},
+		{ID: "app-A", TenantID: "tenantA", Kind: asset.KindWorkload, Key: "app-A", Name: "app-A"},
+		{ID: "ex-B", TenantID: "tenantB", Kind: asset.KindExposure, Key: "ex-B", Name: "ex-B"},
+	} {
+		if err := attackAssets.UpsertAsset(context.Background(), a); err != nil {
+			t.Fatalf("seed attack asset: %v", err)
+		}
+	}
+	edge, _ := asset.NewEdge("tenantA", "ex-A", "app-A", asset.EdgeExposes, "obs-A", asset.EdgeObserved)
+	if err := attackAssets.UpsertEdge(context.Background(), edge); err != nil {
+		t.Fatalf("seed attack edge: %v", err)
+	}
+	attackFinding, err := finding.NewManual("marker-A", "engA", finding.ManualInput{Title: "tenant-A-secret-marker", Severity: shared.SeverityHigh}, time.Unix(1, 0))
+	if err != nil {
+		t.Fatalf("seed attack finding: %v", err)
+	}
+	if err := attackFindings.Upsert(context.Background(), []finding.Finding{attackFinding}); err != nil {
+		t.Fatalf("store attack finding: %v", err)
+	}
+	if err := attackBindings.ReplaceBindings(context.Background(), "tenantA", "engA", "manual:marker-A", []ap.Binding{{TenantID: "tenantA", EngagementID: "engA", AssetID: "app-A", FindingID: "marker-A", Producer: "manual:marker-A", Provenance: "manual:marker-A", Confidence: asset.EdgeObserved}}); err != nil {
+		t.Fatalf("seed attack binding: %v", err)
+	}
+	attackSvc, err := attackpathuc.NewService(attackAssets, attackBindings, attackFindings, attackImported, nil, engRepo, ap.Limits{MaxLength: 12, MaxPaths: 100, MaxDuration: time.Second})
+	if err != nil {
+		t.Fatalf("attack path service: %v", err)
 	}
 	projectRepo := memory.NewProjectRepository()
 	projectSvc := projectuc.NewService(projectRepo, engRepo, fixedClock{}, engIDs{}, &fakeAudit{}, true)
@@ -220,6 +261,7 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetAITriageReviews(&aiReviewFake{})    // register AI-triage queue read/claim/decision routes
 	rt.SetRules(&fakeRules{})                 // register rule catalog routes so the harness guards their gates
 	rt.SetFleetCoverage(harnessCoverage{})    // register #413 fleet-coverage routes so the harness guards their view/tenant gates
+	rt.SetAttackPaths(attackSvc)              // real #419 service proves cross-tenant derived data isolation
 	rt.SetSARIFIngest(harnessSARIF{})         // register the #415 import route so the harness guards its operate/tenant gates
 	rt.SetImportedFindings(harnessImportedFindings{})
 	rt.SetFleetRolloutAdmin(harnessRollout{})
@@ -352,6 +394,8 @@ func TestHostileHarness(t *testing.T) {
 		// detail is 404 (never an existence-revealing 403). The cross-tenant LIST emptiness (a 200 that
 		// leaks nothing) is asserted on the body just below the table.
 		{"machine may not list fleet agents (view/SoD)", "agent", "tenantA", true, http.MethodGet, "/api/v1/fleet/agents", http.StatusForbidden},
+		{"machine may not read attack paths (view/SoD)", "agent", "tenantA", true, http.MethodGet, "/api/v1/attack-paths", http.StatusForbidden},
+		{"readonly may read attack paths (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/attack-paths", http.StatusOK},
 		{"machine may not list fleet coverage (view/SoD)", "agent", "tenantA", true, http.MethodGet, "/api/v1/fleet/coverage", http.StatusForbidden},
 		{"readonly may list fleet agents (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/fleet/agents", http.StatusOK},
 		{"readonly may read fleet coverage (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/fleet/coverage", http.StatusOK},
@@ -364,6 +408,13 @@ func TestHostileHarness(t *testing.T) {
 		if got, body := send(c.role, c.tenant, c.method, c.path, c.authed); got != c.want {
 			t.Errorf("%s: %s %s (role=%q tenant=%q) → %d, body: %s, want %d", c.name, c.method, c.path, c.role, c.tenant, got, body, c.want)
 		}
+	}
+
+	if code, body := send("readonly", "tenantA", http.MethodGet, "/api/v1/attack-paths", true); code != http.StatusOK || !strings.Contains(body, "tenant-A-secret-marker") {
+		t.Fatalf("tenantA must see its own attack path marker (code=%d body=%s)", code, body)
+	}
+	if code, body := send("readonly", "tenantB", http.MethodGet, "/api/v1/attack-paths", true); code != http.StatusOK || strings.Contains(body, "tenant-A-secret-marker") {
+		t.Errorf("tenantB attack paths leaked tenantA data (code=%d body=%s)", code, body)
 	}
 
 	// Cross-tenant fleet reads must return NOTHING, not merely a 200. tenantA's asset id must never

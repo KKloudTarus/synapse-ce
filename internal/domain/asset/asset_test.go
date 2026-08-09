@@ -82,19 +82,23 @@ func TestNewEdge(t *testing.T) {
 		from, to   shared.ID
 		kind       EdgeKind
 		provenance shared.ID
+		confidence EdgeConfidence
 		wantErr    bool
 	}{
-		{"ok", "t1", "a1", "a2", EdgeRuns, "obs1", false},
-		{"empty tenant", "", "a1", "a2", EdgeRuns, "obs1", true},
-		{"missing from", "t1", "", "a2", EdgeRuns, "obs1", true},
-		{"missing to", "t1", "a1", "", EdgeRuns, "obs1", true},
-		{"invalid kind", "t1", "a1", "a2", "points_to", "obs1", true},
-		{"retired member_of kind", "t1", "a1", "a2", "member_of", "obs1", true},
-		{"missing provenance", "t1", "a1", "a2", EdgeRuns, "", true},
+		{"observed", "t1", "a1", "a2", EdgeRuns, "obs1", EdgeObserved, false},
+		{"inferred", "t1", "a1", "a2", EdgeRuns, "obs1", EdgeInferred, false},
+		{"empty tenant", "", "a1", "a2", EdgeRuns, "obs1", EdgeObserved, true},
+		{"missing from", "t1", "", "a2", EdgeRuns, "obs1", EdgeObserved, true},
+		{"missing to", "t1", "a1", "", EdgeRuns, "obs1", EdgeObserved, true},
+		{"invalid kind", "t1", "a1", "a2", "points_to", "obs1", EdgeObserved, true},
+		{"retired member_of kind", "t1", "a1", "a2", "member_of", "obs1", EdgeObserved, true},
+		{"missing provenance", "t1", "a1", "a2", EdgeRuns, "", EdgeObserved, true},
+		{"missing confidence", "t1", "a1", "a2", EdgeRuns, "obs1", "", true},
+		{"invalid confidence", "t1", "a1", "a2", EdgeRuns, "obs1", "certain", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := NewEdge(tc.tenant, tc.from, tc.to, tc.kind, tc.provenance)
+			_, err := NewEdge(tc.tenant, tc.from, tc.to, tc.kind, tc.provenance, tc.confidence)
 			if tc.wantErr && err == nil {
 				t.Fatalf("expected error, got nil")
 			}

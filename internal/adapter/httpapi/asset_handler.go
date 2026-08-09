@@ -86,6 +86,7 @@ type upsertEdgeRequest struct {
 	To         string `json:"to"`
 	Kind       string `json:"kind"`
 	Provenance string `json:"provenance"`
+	Confidence string `json:"confidence"`
 }
 
 func (rt *Router) createAssetEdge(w http.ResponseWriter, r *http.Request) {
@@ -100,6 +101,7 @@ func (rt *Router) createAssetEdge(w http.ResponseWriter, r *http.Request) {
 		To:         shared.ID(req.To),
 		Kind:       asset.EdgeKind(req.Kind),
 		Provenance: shared.ID(req.Provenance),
+		Confidence: asset.EdgeConfidence(req.Confidence),
 	}); err != nil {
 		writeError(w, rt.log, err)
 		return

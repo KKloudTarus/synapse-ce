@@ -1,0 +1,8 @@
+{
+  "ordered_finding_ids": ["F-good", "F-unknown"],
+  "excluded_finding_ids": ["F-forbidden"],
+  "uncertainties": {
+    "F-good": [],
+    "F-unknown": ["inferred_edge:2", "unconfirmed_reachability", "unknown_reachability"]
+  }
+}

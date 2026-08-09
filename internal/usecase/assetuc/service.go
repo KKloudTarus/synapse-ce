@@ -88,13 +88,14 @@ type EdgeInput struct {
 	To         shared.ID
 	Kind       asset.EdgeKind
 	Provenance shared.ID
+	Confidence asset.EdgeConfidence
 }
 
 // UpsertEdge validates and persists an edge. It is idempotent by natural key
 // (tenant, from, to, kind, provenance).
 func (s *Service) UpsertEdge(ctx context.Context, actor string, in EdgeInput) error {
 	now := s.clock.Now()
-	e, err := asset.NewEdge(in.TenantID, in.From, in.To, in.Kind, in.Provenance)
+	e, err := asset.NewEdge(in.TenantID, in.From, in.To, in.Kind, in.Provenance, in.Confidence)
 	if err != nil {
 		return err
 	}
@@ -110,6 +111,7 @@ func (s *Service) UpsertEdge(ctx context.Context, actor string, in EdgeInput) er
 			"to":         e.To.String(),
 			"kind":       string(e.Kind),
 			"provenance": e.Provenance.String(),
+			"confidence": string(e.Confidence),
 		},
 		At: now,
 	}); err != nil {

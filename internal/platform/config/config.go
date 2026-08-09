@@ -197,6 +197,10 @@ type Config struct {
 	// services) and its HTTP routes; off by default. When on with Postgres, startup refuses to
 	// serve unless the DB role can enforce Row Level Security (not SUPERUSER/BYPASSRLS).
 	FleetAssetsEnabled bool
+	// Attack-path traversal is bounded by length, retained paths per target, and wall clock.
+	AttackPathMaxLen    int
+	AttackPathMaxPaths  int
+	AttackPathWallClock time.Duration
 	// FleetEnabled turns on the agent-facing transport (#409: enrol/heartbeat/work) plus the
 	// operator agent-admin routes; off by default. When on with Postgres, startup fails closed
 	// unless the DB role can enforce RLS.
@@ -536,6 +540,9 @@ func Load() Config {
 		SBOMCrossCheckEnabled:        getbool("SYNAPSE_SBOM_CROSSCHECK_ENABLED", true),
 		WriteupDraftsEnabled:         getbool("SYNAPSE_WRITEUP_DRAFTS_ENABLED", false), // needs agent → opt-in
 		FleetAssetsEnabled:           getbool("SYNAPSE_FLEET_ASSETS_ENABLED", false),
+		AttackPathMaxLen:             getint("SYNAPSE_ATTACKPATH_MAX_LEN", 12),
+		AttackPathMaxPaths:           getint("SYNAPSE_ATTACKPATH_MAX_PATHS", 100),
+		AttackPathWallClock:          getduration("SYNAPSE_ATTACKPATH_WALLCLOCK", 2*time.Second),
 		FleetEnabled:                 getbool("SYNAPSE_FLEET_ENABLED", false),
 		FleetClusterIngestEnabled:    getbool("SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED", false),
 		FleetHostIngestEnabled:       getbool("SYNAPSE_FLEET_HOST_INGEST_ENABLED", false),

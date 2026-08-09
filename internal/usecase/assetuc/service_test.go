@@ -81,7 +81,7 @@ func TestUpsertAssetIsIdempotent(t *testing.T) {
 func TestUpsertEdgeRequiresProvenance(t *testing.T) {
 	svc, _ := newTestService(t)
 	ctx := context.Background()
-	err := svc.UpsertEdge(ctx, "actor", EdgeInput{TenantID: "t1", From: "a1", To: "a2", Kind: asset.EdgeRuns})
+	err := svc.UpsertEdge(ctx, "actor", EdgeInput{TenantID: "t1", From: "a1", To: "a2", Kind: asset.EdgeRuns, Confidence: asset.EdgeObserved})
 	if !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("edge without provenance must fail validation, got %v", err)
 	}
@@ -90,15 +90,15 @@ func TestUpsertEdgeRequiresProvenance(t *testing.T) {
 func TestUpsertEdgePersistsAndAudits(t *testing.T) {
 	svc, audit := newTestService(t)
 	ctx := context.Background()
-	if err := svc.UpsertEdge(ctx, "actor", EdgeInput{TenantID: "t1", From: "a1", To: "a2", Kind: asset.EdgeRuns, Provenance: "obs1"}); err != nil {
+	if err := svc.UpsertEdge(ctx, "actor", EdgeInput{TenantID: "t1", From: "a1", To: "a2", Kind: asset.EdgeRuns, Provenance: "obs1", Confidence: asset.EdgeInferred}); err != nil {
 		t.Fatalf("upsert edge: %v", err)
 	}
 	edges, err := svc.ListEdges(ctx, "t1")
 	if err != nil {
 		t.Fatalf("list edges: %v", err)
 	}
-	if len(edges) != 1 || edges[0].Kind != asset.EdgeRuns {
-		t.Fatalf("expected one runs edge, got %+v", edges)
+	if len(edges) != 1 || edges[0].Kind != asset.EdgeRuns || edges[0].Confidence != asset.EdgeInferred {
+		t.Fatalf("expected one inferred runs edge, got %+v", edges)
 	}
 	if len(audit.entries) != 1 || audit.entries[0].Action != "asset.edge_upserted" {
 		t.Fatalf("expected edge audit entry, got %+v", audit.entries)
