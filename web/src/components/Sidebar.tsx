@@ -12,6 +12,7 @@ import {
   ScrollText,
   Server,
   Settings,
+  ShieldQuestion,
   SquarePen,
   Sun,
   Target,
@@ -41,6 +42,7 @@ const NAV_GROUPS: Array<{
     items: [
       { icon: SquarePen, label: 'New Engagement', to: '/engagements?create=1', match: 'new-engagement', action: true },
       { icon: Target, label: 'Engagements', to: '/engagements', match: 'engagements' },
+      { icon: ShieldQuestion, label: 'AI review queue', to: '/ai-triage/reviews', prefix: '/ai-triage/reviews' },
       { icon: Library, label: 'Rules', to: '/rules', prefix: '/rules' },
     ],
   },

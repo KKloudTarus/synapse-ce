@@ -74,6 +74,7 @@ type Service struct {
 	misconfig                        ports.MisconfigScanner                // optional deterministic IaC/config misconfig scan over the live workspace
 	fpTriager                        ports.FPTriager                       // optional LLM false-positive critique of production-scope source findings
 	fpTriageMode                     aiTriageMode                          // shadow by default; enforce must be selected explicitly
+	aiReviews                        ports.AITriageReviewRecorder          // optional durable human-review queue sink
 	osPkgCataloger                   ports.OSPackageCataloger              // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
 	instCataloger                    ports.InstalledPackageCataloger       // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
 	artifactCataloger                ports.ArtifactCataloger               // optional owned standalone-artifact cataloging (.msi product identity) from the workspace dir
@@ -228,6 +229,10 @@ func (s *Service) SetFPTriageMode(mode string) {
 	}
 	s.fpTriageMode = aiTriageModeShadow
 }
+
+// SetAITriageReviewRecorder materializes policy-held critiques after their scan
+// evidence has been sealed. nil keeps CLI/standalone scans free of workflow state.
+func (s *Service) SetAITriageReviewRecorder(r ports.AITriageReviewRecorder) { s.aiReviews = r }
 
 // SetOSPackageCataloger configures optional owned OS-package cataloging (dpkg/apk) from a materialized image
 // rootfs (Workspace.RootFS). nil ⇒ no owned OS cataloging. It only runs when a rootfs was materialized.
@@ -1828,7 +1833,8 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	applyDetectionPriority(result, opts.DetectionPriority)
 	s.attachCompliance(result)
 	result.ReproDigest = ReproDigest(result)
-	if err := s.sealEvidence(ctx, actor, engagementID, now, result); err != nil {
+	evidenceRef, err := s.sealEvidence(ctx, actor, engagementID, now, result)
+	if err != nil {
 		return nil, err
 	}
 	if s.runs != nil {
@@ -1852,6 +1858,11 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	if s.findings != nil {
 		if err := s.findings.Upsert(ctx, result.Findings); err != nil {
 			return nil, fmt.Errorf("persist findings: %w", err)
+		}
+	}
+	if s.aiReviews != nil {
+		if err := s.aiReviews.RecordScan(ctx, engagementID, evidenceRef, result.Findings, result.AITriage); err != nil {
+			return nil, fmt.Errorf("record AI-triage reviews: %w", err)
 		}
 	}
 	if s.results != nil {
@@ -2602,7 +2613,8 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 
 	// Seal this scan into the engagement's append-only hash-chained evidence ledger
 	// before writing any run, scan, finding, or result state.
-	if err := s.sealEvidence(ctx, actor, engagementID, now, result); err != nil {
+	evidenceRef, err := s.sealEvidence(ctx, actor, engagementID, now, result)
+	if err != nil {
 		return nil, err
 	}
 	if s.runs != nil {
@@ -2644,6 +2656,11 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if s.findings != nil {
 		if err := s.findings.Upsert(ctx, result.Findings); err != nil {
 			return nil, fmt.Errorf("persist findings: %w", err)
+		}
+	}
+	if s.aiReviews != nil {
+		if err := s.aiReviews.RecordScan(ctx, engagementID, evidenceRef, result.Findings, result.AITriage); err != nil {
+			return nil, fmt.Errorf("record AI-triage reviews: %w", err)
 		}
 	}
 	// Cache the full result so the UI can re-display it after a reload (best-effort;
@@ -3314,21 +3331,22 @@ func scanEvidenceContent(actor string, now time.Time, result *ScanResult) ([]byt
 // sealEvidence appends one tamper-evident link summarizing this scan to the engagement's hash chain.
 // Content covers every gate-affecting AI field as well as the deterministic finding/suppression set.
 // A configured ledger failure prevents result persistence, preserving the fail-closed contract.
-func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID shared.ID, now time.Time, result *ScanResult) error {
+func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID shared.ID, now time.Time, result *ScanResult) (shared.ID, error) {
 	if s.evidence == nil {
-		return nil
+		return "", nil
 	}
 	content, err := scanEvidenceContent(actor, now, result)
 	if err != nil {
-		return fmt.Errorf("marshal scan evidence: %w", err)
+		return "", fmt.Errorf("marshal scan evidence: %w", err)
 	}
 	// Append through the evidence vault – one tamper-evident chain + verify path per
 	// engagement. The vault binds the link to the current head; a transient
 	// Head failure fails the seal rather than forking the chain.
-	if _, err := s.evidence.Seal(ctx, engagementID, "scan", content, actor); err != nil {
-		return fmt.Errorf("seal scan evidence: %w", err)
+	link, err := s.evidence.Seal(ctx, engagementID, "scan", content, actor)
+	if err != nil {
+		return "", fmt.Errorf("seal scan evidence: %w", err)
 	}
-	return nil
+	return link.ID, nil
 }
 
 // ReportInsight assembles the scan-level context the executive report needs:

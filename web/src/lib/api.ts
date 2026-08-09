@@ -1,5 +1,8 @@
 import type {
   AgentDecision,
+  AITriage,
+  AITriageReview,
+  AITriageReviewFilter,
   AgentReadiness,
   AgentPlan,
   AgentMessage,
@@ -672,6 +675,7 @@ function mapScanResult(r: any): ScanResult {
       components: l.components ?? [],
     })),
     findings: (r.findings ?? []).map(mapFinding),
+    aiTriage: (r.ai_triage ?? []).map(mapAITriage),
     toolVersions: r.tool_versions ?? {},
     vulnDBSnapshot: r.vuln_db_snapshot ?? '',
     completeness: {
@@ -713,6 +717,46 @@ function mapScanResult(r: any): ScanResult {
     },
     codeQuality: r.code_quality ? mapCodeQualityReport(r.code_quality) : undefined,
     debugEvents: (r.debug_events ?? []).map(mapScanDebugEvent),
+  }
+}
+
+function mapAITriage(r: any): AITriage {
+  return {
+    findingId: r.finding_id ?? '',
+    dedupKey: r.dedup_key ?? '',
+    verdict: r.verdict ?? '',
+    driver: r.driver ?? '',
+    confidence: r.confidence ?? 0,
+    suspectedFP: r.suspected_fp ?? false,
+    proposerModel: r.proposer_model ?? '',
+    verifierModel: r.verifier_model ?? '',
+    promptVersion: r.prompt_version ?? '',
+    policyVersion: r.policy_version ?? '',
+    policyReason: r.policy_reason ?? '',
+    shadow: r.shadow ?? false,
+    wouldGateExempt: r.would_gate_exempt ?? false,
+    gateExempt: r.gate_exempt ?? false,
+    reviewRequired: r.review_required ?? false,
+    verified: r.verified ?? false,
+    verifierVerdict: r.verifier_verdict ?? '',
+    verifierDriver: r.verifier_driver ?? '',
+    verifierConfidence: r.verifier_confidence ?? 0,
+  }
+}
+
+function mapAITriageReview(r: any): AITriageReview {
+  return {
+    id: r.id ?? '', tenantId: r.tenant_id ?? '', engagementId: r.engagement_id ?? '', projectId: r.project_id ?? '',
+    findingId: r.finding_id ?? '', dedupKey: r.dedup_key ?? '', title: r.title ?? '', severity: r.severity ?? 'unknown',
+    cwe: r.cwe ?? '', owner: r.owner ?? '', state: r.state ?? 'pending', verdict: r.verdict ?? '', driver: r.driver ?? '',
+    confidence: r.confidence ?? 0, suspectedFP: r.suspected_fp ?? false, proposerModel: r.proposer_model ?? '',
+    verifierModel: r.verifier_model ?? '', promptVersion: r.prompt_version ?? '', verified: r.verified ?? false, verifierVerdict: r.verifier_verdict ?? '',
+    verifierDriver: r.verifier_driver ?? '', verifierConfidence: r.verifier_confidence ?? 0,
+    policyVersion: r.policy_version ?? '', policyReason: r.policy_reason ?? '', shadow: r.shadow ?? false,
+    wouldGateExempt: r.would_gate_exempt ?? false, gateExempt: r.gate_exempt ?? false,
+    reviewRequired: r.review_required ?? false, evidenceRef: r.evidence_ref ?? '', decidedBy: r.decided_by ?? '',
+    decisionRationale: r.decision_rationale ?? '', createdAt: r.created_at ?? '', updatedAt: r.updated_at ?? '',
+    decidedAt: r.decided_at ?? null, version: r.version ?? 1,
   }
 }
 
@@ -1363,6 +1407,28 @@ export const api = {
       throw e
     }
   },
+
+  aiTriageReviews: async (filter: AITriageReviewFilter = {}): Promise<AITriageReview[]> => {
+    const q = new URLSearchParams()
+    if (filter.severity) q.set('severity', filter.severity)
+    if (filter.cwe) q.set('cwe', filter.cwe)
+    if (filter.project) q.set('project', filter.project)
+    if (filter.state) q.set('state', filter.state)
+    const encoded = q.toString()
+    const suffix = encoded ? `?${encoded}` : ''
+    const r = await req(`/ai-triage/reviews${suffix}`)
+    return (r?.reviews ?? []).map(mapAITriageReview)
+  },
+
+  decideAITriageReview: async (reviewId: string, decision: 'accept' | 'reject', rationale: string, version: number): Promise<AITriageReview> =>
+    mapAITriageReview(await req(`/ai-triage/reviews/${encodeURIComponent(reviewId)}/decision`, {
+      method: 'POST', body: JSON.stringify({ decision, rationale, version }),
+    })),
+
+  claimAITriageReview: async (reviewId: string, version: number): Promise<AITriageReview> =>
+    mapAITriageReview(await req(`/ai-triage/reviews/${encodeURIComponent(reviewId)}/claim`, {
+      method: 'POST', body: JSON.stringify({ version }),
+    })),
 
   verifyJudgment: async (
     engagementId: string,
