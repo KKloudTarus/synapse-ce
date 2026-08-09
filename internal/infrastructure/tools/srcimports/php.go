@@ -22,18 +22,21 @@ func (PHPScanner) Lang() string { return "composer" }
 // phpDynamic are constructs under which a package can be reached without a visible `use`: PHP resolves
 // class and function names at runtime from strings, and an include path can be computed.
 var phpDynamic = []dynamicConstruct{
-	{marker: "eval(", reason: "eval executes code this scan cannot observe"},
+	{marker: "eval", reason: "eval executes code this scan cannot observe"},
 	{marker: "call_user_func", reason: "call_user_func resolves a callable from a runtime value"},
-	{marker: "class_exists(", reason: "class_exists resolves a class name from a runtime value"},
+	{marker: "class_exists", reason: "class_exists resolves a class name from a runtime value"},
 	{marker: "new $", reason: "a variable class name is resolved at runtime"},
 	{marker: "$$", reason: "a variable variable is resolved at runtime"},
 	{marker: "spl_autoload_register", reason: "a custom autoloader can load unobserved classes"},
-	{marker: "ReflectionClass", reason: "reflection resolves a class name from a runtime value"},
+	{marker: "Reflection", reason: "reflection resolves a class or method name from a runtime value"},
+	{marker: "is_callable", reason: "is_callable resolves a callable from a runtime value"},
+	{marker: "->make(", reason: "a service container resolves a class name from a runtime value"},
 }
 
 // ScanImports walks dir and returns the package references it can observe.
 func (s *PHPScanner) ScanImports(ctx context.Context, dir string) (ports.SourceImportGraph, error) {
-	walker := newSourceWalker(s.limits, []string{".php"}, phpSkipDir)
+	// Templates and legacy include files are PHP too, and each can reference a package.
+	walker := newSourceWalker(s.limits, []string{".php", ".phtml", ".inc", ".module", ".install"}, phpSkipDir)
 	scan, err := walker.walk(ctx, dir, func(path string, content []byte, out *scanAccumulator) {
 		raw := string(content)
 		// `#[` opens a PHP 8 ATTRIBUTE, not a comment; stripping it would delete real code and hide the
@@ -97,16 +100,27 @@ func phpNamespaceRoots(body string) []string {
 
 // phpHasComputedInclude reports an include/require whose argument is not a literal.
 func phpHasComputedInclude(body string) bool {
-	for _, keyword := range []string{"include", "include_once", "require", "require_once"} {
+	// Longest first, so include_once is not matched as include.
+	for _, keyword := range []string{"include_once", "require_once", "include", "require"} {
 		idx := 0
 		for {
 			i := strings.Index(body[idx:], keyword)
 			if i < 0 {
 				break
 			}
-			pos := idx + i + len(keyword)
-			idx = pos
-			rest := strings.TrimLeft(body[pos:], " \t(")
+			pos := idx + i
+			idx = pos + len(keyword)
+			// The keyword must stand alone. Without this, $includePath, includeTemplate() and the
+			// Laravel validation string 'required|email' all read as a computed include, which makes
+			// every PHP project refuse for a reason that is not true.
+			if pos > 0 && isPHPIdentByte(body[pos-1]) {
+				continue
+			}
+			after := pos + len(keyword)
+			if after < len(body) && isPHPIdentByte(body[after]) {
+				continue
+			}
+			rest := strings.TrimLeft(body[after:], " \t(")
 			if rest == "" {
 				continue
 			}

@@ -110,6 +110,8 @@ type sourceWalker struct {
 	limits     scanLimits
 	extensions []string
 	skipDir    map[string]bool
+	// extraFiles are extension-less files that are nonetheless source (Rakefile, config.ru).
+	extraFiles []string
 }
 
 func newSourceWalker(limits scanLimits, extensions []string, skipDir map[string]bool) *sourceWalker {
@@ -169,6 +171,12 @@ func (w *sourceWalker) walk(ctx context.Context, dir string, visit func(path str
 			}
 			name := d.Name()
 			if w.skipDir[name] || strings.HasPrefix(name, ".") {
+				// Excluding a directory is a policy choice, but source inside it is UNOBSERVED. Only
+				// dependency and VCS directories are exempt; anything else that actually holds source
+				// degrades coverage so its references are never read as absent.
+				if !exemptFromCoverage[name] && w.directoryHasSource(rootDir, p) {
+					out.addReason("an excluded directory contains unscanned source (" + p + ")")
+				}
 				return fs.SkipDir
 			}
 			return nil
@@ -216,7 +224,51 @@ func (w *sourceWalker) supported(p string) bool {
 			return true
 		}
 	}
+	base := p
+	if i := strings.LastIndexByte(base, '/'); i >= 0 {
+		base = base[i+1:]
+	}
+	for _, name := range w.extraFiles {
+		if base == name {
+			return true
+		}
+	}
 	return false
+}
+
+// exemptFromCoverage names excluded directories whose contents are legitimately outside first-party
+// source, so excluding them is not a coverage limitation.
+var exemptFromCoverage = map[string]bool{
+	"vendor": true, "node_modules": true, "target": true,
+	".git": true, ".hg": true, ".svn": true,
+	"tmp": true, "log": true, "cache": true, "var": true, "coverage": true,
+}
+
+// directoryHasSource reports whether an excluded directory holds at least one supported file. The probe
+// is bounded, and exhausting the budget assumes source is present rather than claiming none.
+func (w *sourceWalker) directoryHasSource(rootDir *os.Root, dir string) bool {
+	const probeBudget = 512
+	seen := 0
+	found := false
+	_ = fs.WalkDir(rootDir.FS(), dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return fs.SkipDir
+		}
+		seen++
+		if seen > probeBudget {
+			found = true
+			return fs.SkipAll
+		}
+		if d != nil && d.IsDir() {
+			return nil
+		}
+		if w.supported(p) {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found
 }
 
 // readThroughRoot reads a file through the confined root handle, bounded by the per-file budget.

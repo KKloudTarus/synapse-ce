@@ -22,15 +22,17 @@ func (RubyScanner) Lang() string { return "gem" }
 // constants and methods from strings and rewrites itself at runtime.
 var rubyDynamic = []dynamicConstruct{
 	{marker: "const_get", reason: "const_get resolves a constant from a runtime value"},
-	{marker: ".send(", reason: "send dispatches a method named by a runtime value"},
+	{marker: ".send", reason: "send dispatches a method named by a runtime value"},
 	{marker: "public_send", reason: "public_send dispatches a method named by a runtime value"},
 	{marker: "method_missing", reason: "method_missing handles calls this scan cannot observe"},
 	{marker: "define_method", reason: "define_method creates methods at runtime"},
 	{marker: "instance_eval", reason: "instance_eval executes code this scan cannot observe"},
 	{marker: "class_eval", reason: "class_eval executes code this scan cannot observe"},
-	{marker: "eval(", reason: "eval executes code this scan cannot observe"},
+	{marker: "eval", reason: "eval executes code this scan cannot observe"},
+	{marker: "__send__", reason: "__send__ dispatches a method named by a runtime value"},
 	{marker: "autoload", reason: "autoload defers loading to a runtime constant reference"},
 	{marker: "Kernel.load", reason: "load reads a path resolved at runtime"},
+	{marker: "load ", reason: "load reads a path resolved at runtime"},
 	// Bundler and Rails load the whole Gemfile without any explicit require appearing in source. A
 	// Rails app never writes `require "nokogiri"`, so without these markers every gem it depends on
 	// would be reported unreferenced — a mass false negative on the most common Ruby project shape.
@@ -45,7 +47,10 @@ var rubyDynamic = []dynamicConstruct{
 
 // ScanImports walks dir and returns the gem references it can observe.
 func (s *RubyScanner) ScanImports(ctx context.Context, dir string) (ports.SourceImportGraph, error) {
-	walker := newSourceWalker(s.limits, []string{".rb", ".rake", ".gemspec"}, rubySkipDir)
+	// Views and the extension-less load points carry gem references too: a template writes
+	// `Kaminari.paginate`, and config.ru requires the app's gems.
+	walker := newSourceWalker(s.limits, []string{".rb", ".rake", ".gemspec", ".erb", ".haml", ".slim", ".ru"}, rubySkipDir)
+	walker.extraFiles = []string{"Rakefile", "config.ru", "Gemfile"}
 	scan, err := walker.walk(ctx, dir, func(path string, content []byte, out *scanAccumulator) {
 		raw := string(content)
 		body := stripLineComments(raw, "#")
@@ -77,15 +82,9 @@ var rubySkipDir = map[string]bool{
 // candidate namer expands both forms.
 func rubyRequireRoots(body string) []string {
 	var out []string
-	for _, line := range strings.Split(body, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "require ") && !strings.HasPrefix(trimmed, "require(") {
-			continue
-		}
-		rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(trimmed, "require"), "("))
-		if rest == "" {
-			continue
-		}
+	// A require is not always at the start of a line: a view template writes `<% require "x" %>` and a
+	// conditional writes `x and require "y"`. Scanning by token rather than line prefix reads both.
+	for _, rest := range rubyRequireArguments(body) {
 		quote := rest[0]
 		if quote != '\'' && quote != '"' {
 			continue // computed; recorded separately as a coverage reason
@@ -95,8 +94,7 @@ func rubyRequireRoots(body string) []string {
 		if end < 0 {
 			continue
 		}
-		requirePath := rest[:end]
-		root := requirePath
+		root := rest[:end]
 		if i := strings.IndexByte(root, '/'); i >= 0 {
 			root = root[:i]
 		}
@@ -107,23 +105,50 @@ func rubyRequireRoots(body string) []string {
 	return out
 }
 
-// rubyHasComputedRequire reports a `require` whose argument is not a string literal.
-func rubyHasComputedRequire(body string) bool {
-	for _, line := range strings.Split(body, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "require ") && !strings.HasPrefix(trimmed, "require(") {
+// rubyRequireArguments returns the text following each `require` token, excluding require_relative and
+// require_dependency, which never name a gem.
+func rubyRequireArguments(body string) []string {
+	const keyword = "require"
+	var out []string
+	for idx := 0; ; {
+		i := strings.Index(body[idx:], keyword)
+		if i < 0 {
+			return out
+		}
+		pos := idx + i
+		idx = pos + len(keyword)
+		if pos > 0 && isRubyIdentByte(body[pos-1]) {
 			continue
 		}
-		rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(trimmed, "require"), "("))
+		after := pos + len(keyword)
+		// require_relative names a first-party file; require_dependency defers to the Rails autoloader
+		// and is reported as an unknown region elsewhere.
+		if after < len(body) && isRubyIdentByte(body[after]) {
+			continue
+		}
+		rest := strings.TrimLeft(body[after:], " \t(")
 		if rest == "" {
 			continue
 		}
+		out = append(out, rest)
+	}
+}
+
+func isRubyIdentByte(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+// rubyHasComputedRequire reports a `require` whose argument is not a string literal.
+func rubyHasComputedRequire(body string) bool {
+	for _, rest := range rubyRequireArguments(body) {
 		if rest[0] != '\'' && rest[0] != '"' {
 			return true
 		}
 		// String interpolation makes the path dynamic even inside quotes.
-		if rest[0] == '"' && strings.Contains(rest, "#{") {
-			return true
+		if rest[0] == '"' {
+			if end := strings.IndexByte(rest[1:], '"'); end >= 0 && strings.Contains(rest[:end+2], "#{") {
+				return true
+			}
 		}
 	}
 	return false
