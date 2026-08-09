@@ -58,7 +58,7 @@ func run(ctx context.Context, datasetPath, outputPath string) error {
 	triager := fptriage.NewTriager(coord, func(string) ports.SourceSnippetReader { return reader })
 	report, err := sca.EvaluateFPTriage(ctx, dataset, sca.AIEvaluationRun{
 		ProposerModel: coord.ProposerModel(), VerifierModel: coord.VerifierModel(),
-		PromptVersion: fptriage.PromptVersion, PolicyVersion: sca.AITriagePolicyVersion,
+		PromptVersion: fptriage.EvaluationPromptVersion(), PolicyVersion: sca.EvaluationPolicyVersion(),
 	}, triager)
 	if err != nil {
 		return err

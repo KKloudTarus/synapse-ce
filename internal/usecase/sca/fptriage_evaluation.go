@@ -206,8 +206,8 @@ func EvaluateFPTriage(ctx context.Context, dataset AIEvaluationDataset, run AIEv
 	if agent.SameModel(run.ProposerModel, run.VerifierModel) {
 		return AIEvaluationReport{}, fmt.Errorf("AI evaluation verifier must be distinct from the proposer")
 	}
-	if run.PolicyVersion != AITriagePolicyVersion {
-		return AIEvaluationReport{}, fmt.Errorf("AI evaluation policy version %q is not current %q", run.PolicyVersion, AITriagePolicyVersion)
+	if run.PolicyVersion != EvaluationPolicyVersion() {
+		return AIEvaluationReport{}, fmt.Errorf("AI evaluation policy version %q is not current %q", run.PolicyVersion, EvaluationPolicyVersion())
 	}
 
 	findings := make([]finding.Finding, 0, len(dataset.Cases))
@@ -223,7 +223,7 @@ func EvaluateFPTriage(ctx context.Context, dataset AIEvaluationDataset, run AIEv
 	}
 
 	result := &ScanResult{Findings: findings, AITriage: triager.Triage(ctx, findings, "")}
-	applyAIGatePolicy(result, true, AITriageModeShadow)
+	applyAIGatePolicy(result, true, aiTriageModeShadow)
 	critiqueByKey := make(map[string]ports.AICritique, len(result.AITriage))
 	for _, critique := range result.AITriage {
 		key := strings.TrimSpace(critique.DedupKey)

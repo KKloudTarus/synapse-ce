@@ -1331,7 +1331,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	// agrees and the deterministic human-review floor allows a gate exemption. High/critical, secrets,
 	// and dangerous CWEs always keep gating. Findings are never deleted. Skipped for image targets.
 	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" && !image {
-		sca.SetFPTriageMode(scauc.AITriageMode(cfg.FPTriageMode))
+		sca.SetFPTriageMode(cfg.FPTriageMode)
 		if llm, lerr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); lerr != nil {
 			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage disabled: %v\n", lerr)
 		} else {
@@ -1339,6 +1339,9 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 			if cfg.VerifierModel != "" && cfg.VerifierModel != cfg.FPTriageModel {
 				if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
 					coord.WithVerifier(vllm, cfg.VerifierModel)
+					if coord.VerifierModel() == "" {
+						fmt.Fprintf(os.Stderr, "synapse-cli: verifier model %q aliases the proposer after canonicalization; AI triage remains advisory-only\n", cfg.VerifierModel)
+					}
 				} else {
 					fmt.Fprintf(os.Stderr, "synapse-cli: verifier model %q unavailable; AI triage remains advisory-only: %v\n", cfg.VerifierModel, verr)
 				}

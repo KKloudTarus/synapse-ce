@@ -73,7 +73,7 @@ type Service struct {
 	includeTestSecrets               bool                                  // report secrets in test/fixture/docs paths (default false: suppress)
 	misconfig                        ports.MisconfigScanner                // optional deterministic IaC/config misconfig scan over the live workspace
 	fpTriager                        ports.FPTriager                       // optional LLM false-positive critique of production-scope source findings
-	fpTriageMode                     AITriageMode                          // shadow by default; enforce must be selected explicitly
+	fpTriageMode                     aiTriageMode                          // shadow by default; enforce must be selected explicitly
 	osPkgCataloger                   ports.OSPackageCataloger              // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
 	instCataloger                    ports.InstalledPackageCataloger       // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
 	artifactCataloger                ports.ArtifactCataloger               // optional owned standalone-artifact cataloging (.msi product identity) from the workspace dir
@@ -221,12 +221,12 @@ func (s *Service) SetFPTriage(t ports.FPTriager) { s.fpTriager = t }
 
 // SetFPTriageMode selects shadow observation or enforced gate authorization. Unknown and empty values
 // fail closed to shadow. This setting never changes the human-review floors.
-func (s *Service) SetFPTriageMode(mode AITriageMode) {
-	if mode == AITriageModeEnforce {
-		s.fpTriageMode = mode
+func (s *Service) SetFPTriageMode(mode string) {
+	if strings.EqualFold(strings.TrimSpace(mode), string(aiTriageModeEnforce)) {
+		s.fpTriageMode = aiTriageModeEnforce
 		return
 	}
-	s.fpTriageMode = AITriageModeShadow
+	s.fpTriageMode = aiTriageModeShadow
 }
 
 // SetOSPackageCataloger configures optional owned OS-package cataloging (dpkg/apk) from a materialized image
@@ -679,7 +679,7 @@ func (r *ScanResult) aiGateExemptKeys(items []finding.Finding) map[string]bool {
 		key := strings.TrimSpace(c.DedupKey)
 		item, found := findings[key]
 		if !c.Shadow && c.GateExempt &&
-			c.PolicyVersion == AITriagePolicyVersion &&
+			c.PolicyVersion == aiTriagePolicyVersion &&
 			c.PolicyReason == aiPolicyVerifiedConsensus &&
 			hasVerifiedConsensus(c) &&
 			found && humanReviewFloor(item) == "" && isFPTriageEligible(item) {
@@ -707,7 +707,7 @@ func (r *ScanResult) aiWouldGateExemptKeys(items []finding.Finding) map[string]b
 		key := strings.TrimSpace(c.DedupKey)
 		item, found := findings[key]
 		if c.Shadow && c.WouldGateExempt && !c.GateExempt &&
-			c.PolicyVersion == AITriagePolicyVersion && c.PolicyReason == aiPolicyShadowMode &&
+			c.PolicyVersion == aiTriagePolicyVersion && c.PolicyReason == aiPolicyShadowMode &&
 			hasVerifiedConsensus(c) && found && humanReviewFloor(item) == "" && isFPTriageEligible(item) {
 			out[key] = true
 		}
@@ -3279,7 +3279,7 @@ func scanEvidenceContent(actor string, now time.Time, result *ScanResult) ([]byt
 	})
 	policyVersion := ""
 	if len(aiTriage) > 0 {
-		policyVersion = AITriagePolicyVersion
+		policyVersion = aiTriagePolicyVersion
 	}
 	return json.Marshal(scanEvidencePayload{
 		SBOMSHA256:       result.Manifest.SBOMSHA256,

@@ -57,7 +57,7 @@ func TestEvaluateFPTriageGoldenDataset(t *testing.T) {
 	dataset := loadGoldenEvaluationDataset(t)
 	run := AIEvaluationRun{
 		ProposerModel: "fixture-proposer", VerifierModel: "fixture-verifier",
-		PromptVersion: "fixture-prompt-v1", PolicyVersion: AITriagePolicyVersion,
+		PromptVersion: "fixture-prompt-v1", PolicyVersion: aiTriagePolicyVersion,
 	}
 	report, err := EvaluateFPTriage(context.Background(), dataset, run, fixtureEvaluationTriager{})
 	if err != nil {

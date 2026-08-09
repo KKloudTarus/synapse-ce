@@ -37,7 +37,7 @@ func TestTriagerMapsToPortsDTO(t *testing.T) {
 	if byKey["dk-1"].Verified {
 		t.Error("single-model refutation must not be marked verified")
 	}
-	if c := byKey["dk-1"]; c.GateExempt || c.ProposerModel != "m" || c.VerifierModel != "" || c.PromptVersion != PromptVersion {
+	if c := byKey["dk-1"]; c.GateExempt || c.ProposerModel != "m" || c.VerifierModel != "" || c.PromptVersion != promptVersion {
 		t.Errorf("single-model DTO must be advisory with audit metadata, got %+v", c)
 	}
 }
