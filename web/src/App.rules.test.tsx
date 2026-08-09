@@ -10,6 +10,7 @@ vi.mock('./lib/api', () => ({
     listRules: vi.fn(),
     getRule: vi.fn(),
     listEngagements: vi.fn(),
+    listBusinessAssets: vi.fn(),
     listProjects: vi.fn(),
     getProject: vi.fn(),
     getAuditLogs: vi.fn(),
@@ -31,6 +32,7 @@ describe('App Routing - Rules', () => {
   beforeEach(() => {
     vi.mocked(api.listRules).mockResolvedValue([])
     vi.mocked(api.listEngagements).mockResolvedValue([])
+    vi.mocked(api.listBusinessAssets).mockResolvedValue({ items: [], total: 0, limit: 200, offset: 0 })
     vi.mocked(api.listProjects).mockResolvedValue([])
     vi.mocked(api.getRule).mockResolvedValue({
       key: 'go:sql',

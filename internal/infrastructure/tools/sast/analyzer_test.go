@@ -559,7 +559,7 @@ func TestPHPContextSuperglobalsAreCaseSensitive(t *testing.T) {
 
 func TestAnalyzerNormalizesNestedFindingPaths(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, root, "src/main.php", "<?php\neval($_GET['code']);\n")
+	writeFile(t, root, "src/main.php", "<?php\neval($input);\n")
 	hits := findingsByRule(t, root)["php:eval-usage"]
 	if len(hits) != 1 || hits[0].File != "src/main.php" || hits[0].Line != 2 {
 		t.Fatalf("nested PHP findings = %+v, want src/main.php:2", hits)

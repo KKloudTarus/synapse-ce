@@ -30,7 +30,7 @@ func (c *movableClock) now() time.Time { return c.t }
 func TestJobQueueClaimLeaseAndComplete(t *testing.T) {
 	clk := &movableClock{t: time.Unix(1000, 0).UTC()}
 	q := NewJobQueue(&seqIDs{}, clk.now)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
 
 	id, err := q.Enqueue(ctx, "recon", []byte(`{"x":1}`))
 	if err != nil {
@@ -57,7 +57,7 @@ func TestJobQueueClaimLeaseAndComplete(t *testing.T) {
 func TestJobQueueExpiredLeaseIsReclaimed(t *testing.T) {
 	clk := &movableClock{t: time.Unix(1000, 0).UTC()}
 	q := NewJobQueue(&seqIDs{}, clk.now)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
 	id, _ := q.Enqueue(ctx, "sca", nil)
 
 	first, _ := q.Claim(ctx, 10*time.Second)
@@ -78,7 +78,7 @@ func TestJobQueueExpiredLeaseIsReclaimed(t *testing.T) {
 func TestJobQueueFailBacksOff(t *testing.T) {
 	clk := &movableClock{t: time.Unix(1000, 0).UTC()}
 	q := NewJobQueue(&seqIDs{}, clk.now)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
 	id, _ := q.Enqueue(ctx, "recon", nil)
 	_, _ = q.Claim(ctx, 30*time.Second)
 	// Fail with a 60s backoff: not claimable until the backoff elapses.
@@ -96,7 +96,7 @@ func TestJobQueueFailBacksOff(t *testing.T) {
 
 func TestJobQueueErrorsOnMissing(t *testing.T) {
 	q := NewJobQueue(&seqIDs{}, (&movableClock{t: time.Unix(1, 0)}).now)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
 	if err := q.Complete(ctx, "nope"); !errors.Is(err, shared.ErrNotFound) {
 		t.Errorf("complete missing → ErrNotFound, got %v", err)
 	}
@@ -118,7 +118,7 @@ func TestJobQueueEnqueueRequiresKind(t *testing.T) {
 func TestJobQueueDepth(t *testing.T) {
 	clk := &movableClock{t: time.Unix(1000, 0).UTC()}
 	q := NewJobQueue(&seqIDs{}, clk.now)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
 	if d, _ := q.Depth(ctx); d != 0 {
 		t.Fatalf("empty queue depth = %d, want 0", d)
 	}
@@ -152,7 +152,7 @@ func TestJobQueueDepth(t *testing.T) {
 func TestJobQueueClaimByKind(t *testing.T) {
 	clk := &movableClock{t: time.Unix(1000, 0).UTC()}
 	q := NewJobQueue(&seqIDs{}, clk.now)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
 	_, _ = q.Enqueue(ctx, "recon", []byte("r"))
 	_, _ = q.Enqueue(ctx, "sca", []byte("s"))
 

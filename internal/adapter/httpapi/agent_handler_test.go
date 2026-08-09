@@ -254,7 +254,8 @@ func TestDecideApprovalExecutesOnResume(t *testing.T) {
 		{Content: "done", FinishReason: "stop"},
 	}
 	rig := newAgentRig(t, agent.ModeManual, steps)
-	ctx := context.Background()
+	ctx := context.WithValue(context.Background(), principalKey, Principal{ID: "alice", TenantID: "tenant-test"})
+	ctx = shared.WithTenant(ctx, "tenant-test")
 	sess, err := rig.rt.agent.orch.Run(ctx, "eng-1", "alice", "enumerate")
 	if err != nil {
 		t.Fatal(err)
@@ -302,7 +303,8 @@ func waitFor(t *testing.T, cond func() bool) {
 func TestAdmitAgentDurableBackpressure(t *testing.T) {
 	q := memory.NewJobQueue(idgen.RandomID{}, func() time.Time { return time.Unix(1, 0) })
 	rt := &Router{log: logging.New("error"), agent: &agentDeps{queue: q, queueDepth: 2}}
-	ctx := context.Background()
+	ctx := context.WithValue(context.Background(), principalKey, Principal{ID: "alice", TenantID: "tenant-test"})
+	ctx = shared.WithTenant(ctx, "tenant-test")
 	if _, ok := rt.admitAgent(ctx); !ok {
 		t.Fatal("must admit while under the queue-depth cap")
 	}

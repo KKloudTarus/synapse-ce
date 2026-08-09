@@ -6,7 +6,6 @@ import logo from '../assets/logo.png'
 
 const SOON: { icon: LucideIcon; label: string }[] = [
   { icon: Radar, label: 'Recon' },
-  { icon: Boxes, label: 'Inventory' },
   { icon: FileText, label: 'Reports' },
   { icon: Settings, label: 'Settings' },
 ]
@@ -34,6 +33,22 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         >
           <Target className="size-[18px]" />
           Engagements
+        </NavLink>
+
+        <NavLink
+          to="/assets"
+          onClick={onNavigate}
+          className={() =>
+            cn(
+              'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+              location.pathname.startsWith('/assets')
+                ? 'bg-brand/10 font-semibold text-branddim before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-brand before:content-[""]'
+                : 'text-mutedfg hover:bg-elevated hover:text-foreground',
+            )
+          }
+        >
+          <Boxes className="size-[18px]" />
+          Assets
         </NavLink>
 
         <NavLink

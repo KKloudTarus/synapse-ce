@@ -77,6 +77,7 @@ const (
 // and replayable for audit. ProviderBase + Model + PromptHash pin WHAT reasoned about it.
 type Session struct {
 	ID             shared.ID
+	TenantID       shared.ID
 	EngagementID   shared.ID
 	InitiatedBy    string // the human actor who started it (attribution; never an agent id)
 	Goal           string

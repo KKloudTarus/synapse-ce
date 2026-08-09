@@ -1,8 +1,8 @@
-import { Briefcase, Plus, Target, Trash2, Upload, X } from 'lucide-react'
+import { Boxes, Briefcase, Plus, Target, Trash2, Upload, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
-import type { Engagement, ScopeTarget } from '../lib/types'
+import type { BusinessAsset, Engagement, ScopeTarget } from '../lib/types'
 import { kindLabel } from '../lib/format'
 import { Button, Card, cn, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../components/ui'
 
@@ -10,6 +10,7 @@ const KINDS = ['repo', 'domain', 'host', 'url', 'image', 'cidr']
 
 export function Engagements() {
   const [list, setList] = useState<Engagement[] | null>(null)
+  const [assetNames, setAssetNames] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -23,6 +24,10 @@ export function Engagements() {
       .listEngagements()
       .then(setList)
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load engagements'))
+    api
+      .listBusinessAssets('limit=200')
+      .then((page) => setAssetNames(Object.fromEntries(page.items.map((asset) => [asset.id, asset.name]))))
+      .catch(() => setAssetNames({}))
   }
   useEffect(load, [])
 
@@ -104,7 +109,7 @@ export function Engagements() {
       {list && list.length > 0 && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {list.map((e) => (
-            <EngagementCard key={e.id} e={e} />
+            <EngagementCard key={e.id} e={e} assetName={e.businessAssetId ? assetNames[e.businessAssetId] : undefined} />
           ))}
         </div>
       )}
@@ -112,7 +117,7 @@ export function Engagements() {
   )
 }
 
-function EngagementCard({ e }: { e: Engagement }) {
+function EngagementCard({ e, assetName }: { e: Engagement; assetName?: string }) {
   return (
     <Link
       to={`/engagements/${e.id}`}
@@ -134,6 +139,7 @@ function EngagementCard({ e }: { e: Engagement }) {
           <Target className="size-3" /> {e.inScope.length} in scope
         </Pill>
         {e.outOfScope.length > 0 && <Pill>{e.outOfScope.length} excluded</Pill>}
+        <Pill><Boxes className="size-3" />{e.businessAssetId ? assetName || e.businessAssetId : 'Unassigned'}</Pill>
       </div>
       <p className="mt-4 truncate font-mono text-xs text-subtlefg">{e.id}</p>
     </Link>
@@ -168,6 +174,10 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
   const [authTo, setAuthTo] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [assets, setAssets] = useState<BusinessAsset[]>([])
+  const [assetId, setAssetId] = useState('')
+
+  useEffect(() => { let live=true; api.listBusinessAssets('lifecycle=active&limit=200').then(r=>live&&setAssets(r.items)).catch(()=>live&&setAssets([])); return()=>{live=false} }, [])
 
   function setRow(i: number, patch: Partial<ScopeTarget>) {
     setScope((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
@@ -203,6 +213,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
         authorizedFrom: from,
         authorizedTo: to,
         timezone: from || to ? tz : undefined,
+        assetId,
       })
       onCreated()
     } catch (err) {
@@ -221,6 +232,9 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
           </Field>
           <Field label="Client" hint="Optional">
             <Input value={client} onChange={(e) => setClient(e.target.value)} placeholder="Acme Corp" />
+          </Field>
+          <Field label="Asset" hint="Optional; leave Unassigned for backward compatibility">
+            <Select value={assetId} onValueChange={setAssetId} options={[{value:'',label:'Unassigned'},...assets.map(a=>({value:a.id,label:`${a.name} (${a.key})`}))]}/>
           </Field>
         </div>
 

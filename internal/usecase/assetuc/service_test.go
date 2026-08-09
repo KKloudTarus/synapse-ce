@@ -105,30 +105,6 @@ func TestUpsertEdgePersistsAndAudits(t *testing.T) {
 	}
 }
 
-func TestUpsertBusinessServiceIsIdempotent(t *testing.T) {
-	svc, _ := newTestService(t)
-	ctx := context.Background()
-	in := BusinessServiceInput{TenantID: "t1", Name: "payments", Owner: "team-a"}
-	first, err := svc.UpsertBusinessService(ctx, "actor", in)
-	if err != nil {
-		t.Fatalf("first: %v", err)
-	}
-	second, err := svc.UpsertBusinessService(ctx, "actor", BusinessServiceInput{TenantID: "t1", Name: "payments", Owner: "team-b"})
-	if err != nil {
-		t.Fatalf("second: %v", err)
-	}
-	if first.ID != second.ID {
-		t.Fatalf("service upsert must keep id: %q vs %q", first.ID, second.ID)
-	}
-	list, err := svc.ListBusinessServices(ctx, "t1")
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(list) != 1 || list[0].Owner != "team-b" {
-		t.Fatalf("expected one service with updated owner, got %+v", list)
-	}
-}
-
 func TestListAssetsTenantScoped(t *testing.T) {
 	svc, _ := newTestService(t)
 	ctx := context.Background()

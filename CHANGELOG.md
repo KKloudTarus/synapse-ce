@@ -12,6 +12,8 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **Asset-centric security management.** Promotes the shipped `fleet_business_services` rows in place to stable-keyed Business Assets above Engagements, with tenant/RLS-safe Project and technical-asset memberships, Engagement assignment, Findings/Coverage/Posture/History roll-ups, and UI built from the existing application components. Third-party findings retain provenance and no-promotion authority, while reachability retains proof tier and first-class `unknown`.
+
 - **Immutable Project Code workspace.** Capture bounded analysis-time source and Git comparison artifacts so historical source, unified/split diffs, and finding locations remain inspectable without reconstructing mutable workspaces; large source and diff views use bounded windows or virtualization.
 - **Deterministic reachability for Python (Tier-1 import-reachability).** Extends deterministic call-graph reachability beyond Go/JVM. A source-only scanner (`SYNAPSE_PYREACH_ENABLED`, opt-in) determines which declared PyPI packages first-party code actually imports; a declared-but-never-imported package (a dead dependency) mints a deterministic **Tier-1 `not_reachable`** judgment that the OpenVEX export consumes as a `vulnerable_code_not_in_execute_path` justification. It is source-only (no compile/execute, so in-process like the lockfile parsers), and conservative by design: a non-Python target, a target using dynamic imports (`importlib`/`__import__`), or an unresolvable import name yields *no* verdict rather than a false "not reachable". Honestly tiered — import-level, weaker than the Go call-graph Tier-2 proof.
 - **Taint findings cite `file:line` (def-use precision).** The SSA call-graph builder now records first-party symbols' definition positions as a `relpath:line` side table (never an absolute host path, never file contents), carried across the sandboxed `synapse-callgraph` exec boundary. A confirmed taint `CapSAST` finding's location is now a `file:line` — like the pattern engine — instead of only a symbol, and the sealed witness records source→sink positions. It is a coarse, function-granular over-approximation (the function's definition line) and falls back to the symbol when a position is unavailable.
@@ -44,6 +46,10 @@ capabilities below are already shipped on `main`.
   findings.
 - **CLI merge gate.** `synapse-cli scan . --fail-on <severity>` exits non-zero when a
   finding at or above the threshold is present, for use in CI pipelines.
+
+### Changed
+
+- **Breaking Asset API consolidation.** Removed `POST|GET /api/v1/assets/services`, `asset.BusinessService`, and the unused `member_of` fleet edge. Business-level Asset reads and writes now use `/api/v1/appsec/assets`; technical/fleet `/api/v1/assets` remains unchanged. Existing business-service rows retain their IDs and owners and receive stable keys during migration.
 
 ### Fixed
 

@@ -28,6 +28,11 @@ func (f *fakeEnqueuer) Enqueue(_ context.Context, kind string, payload []byte) (
 
 func reconcilerFor(t *testing.T, sessions []agent.Session) (*orchestrator.Reconciler, *fakeEnqueuer) {
 	t.Helper()
+	for i := range sessions {
+		if sessions[i].TenantID.IsZero() {
+			sessions[i].TenantID = "tenant-test"
+		}
+	}
 	enq := &fakeEnqueuer{}
 	r, err := orchestrator.NewReconciler(fakeResumableLister{sessions: sessions}, enq, fixedClock{time.Unix(1_000_000, 0).UTC()}, 10*time.Minute, nil)
 	if err != nil {

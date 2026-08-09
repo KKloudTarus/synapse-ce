@@ -28,15 +28,16 @@ func NewService(repo ports.EngagementRepository, clock ports.Clock, ids ports.ID
 
 // CreateInput is the input for creating an engagement.
 type CreateInput struct {
-	TenantID       shared.ID
-	CreatedBy      string // the authenticated actor that owns the engagement (ownership)
-	Name           string
-	Client         string
-	InScope        []domain.Target
-	OutOfScope     []domain.Target
-	AuthorizedFrom *time.Time
-	AuthorizedTo   *time.Time
-	Timezone       string
+	TenantID        shared.ID
+	BusinessAssetID shared.ID
+	CreatedBy       string // the authenticated actor that owns the engagement (ownership)
+	Name            string
+	Client          string
+	InScope         []domain.Target
+	OutOfScope      []domain.Target
+	AuthorizedFrom  *time.Time
+	AuthorizedTo    *time.Time
+	Timezone        string
 }
 
 // Create validates and persists a new engagement with its scope.
@@ -46,6 +47,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Engagemen
 	if err != nil {
 		return nil, err
 	}
+	e.BusinessAssetID = in.BusinessAssetID
 	if err := e.SetScope(in.InScope, in.OutOfScope, now); err != nil {
 		return nil, err
 	}

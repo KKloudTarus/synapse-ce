@@ -17,8 +17,6 @@ type assetService interface {
 	ListAssets(context.Context, shared.ID) ([]*asset.Asset, error)
 	UpsertEdge(context.Context, string, assetuc.EdgeInput) error
 	ListEdges(context.Context, shared.ID) ([]*asset.Edge, error)
-	UpsertBusinessService(context.Context, string, assetuc.BusinessServiceInput) (*asset.BusinessService, error)
-	ListBusinessServices(context.Context, shared.ID) ([]*asset.BusinessService, error)
 }
 
 // SetAssets wires the asset service and enables the asset routes.
@@ -117,41 +115,6 @@ func (rt *Router) listAssetEdges(w http.ResponseWriter, r *http.Request) {
 	}
 	if list == nil {
 		list = []*asset.Edge{}
-	}
-	writeJSON(w, http.StatusOK, list)
-}
-
-type upsertServiceRequest struct {
-	Name  string `json:"name"`
-	Owner string `json:"owner"`
-}
-
-func (rt *Router) createBusinessService(w http.ResponseWriter, r *http.Request) {
-	var req upsertServiceRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, assetBodyCap)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid business service body"})
-		return
-	}
-	svc, err := rt.assets.UpsertBusinessService(r.Context(), PrincipalFrom(r.Context()), assetuc.BusinessServiceInput{
-		TenantID: fleetTenant(r.Context()),
-		Name:     req.Name,
-		Owner:    req.Owner,
-	})
-	if err != nil {
-		writeError(w, rt.log, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, svc)
-}
-
-func (rt *Router) listBusinessServices(w http.ResponseWriter, r *http.Request) {
-	list, err := rt.assets.ListBusinessServices(r.Context(), fleetTenant(r.Context()))
-	if err != nil {
-		writeError(w, rt.log, err)
-		return
-	}
-	if list == nil {
-		list = []*asset.BusinessService{}
 	}
 	writeJSON(w, http.StatusOK, list)
 }

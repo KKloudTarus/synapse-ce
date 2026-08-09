@@ -61,6 +61,7 @@ type Router struct {
 	drafts            writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
 	projects          projectService        // optional; nil ⇒ project routes are not registered
 	assets            assetService          // optional; nil ⇒ fleet asset routes are not registered
+	businessAssets    businessAssetService  // optional; nil ⇒ business-level Asset routes are not registered
 	coverage          coverageService       // optional; nil ⇒ fleet coverage/agent-view routes are not registered
 	sarif             sarifIngester         // optional; nil ⇒ the third-party SARIF import route is not registered
 	importedFindings  sarifReader           // optional read side for imported findings
@@ -236,8 +237,22 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/assets", rt.authz(userdom.PermView, rt.listAssets))
 		mux.HandleFunc("POST /api/v1/assets/edges", rt.authz(userdom.PermOperate, rt.createAssetEdge))
 		mux.HandleFunc("GET /api/v1/assets/edges", rt.authz(userdom.PermView, rt.listAssetEdges))
-		mux.HandleFunc("POST /api/v1/assets/services", rt.authz(userdom.PermOperate, rt.createBusinessService))
-		mux.HandleFunc("GET /api/v1/assets/services", rt.authz(userdom.PermView, rt.listBusinessServices))
+	}
+	if rt.businessAssets != nil {
+		mux.HandleFunc("POST /api/v1/appsec/assets", rt.authz(userdom.PermOperate, rt.createBusinessAsset))
+		mux.HandleFunc("GET /api/v1/appsec/assets", rt.authz(userdom.PermView, rt.listBusinessAssets))
+		mux.HandleFunc("GET /api/v1/appsec/assets/{assetID}", rt.authz(userdom.PermView, rt.getBusinessAsset))
+		mux.HandleFunc("PATCH /api/v1/appsec/assets/{assetID}", rt.authz(userdom.PermOperate, rt.updateBusinessAsset))
+		mux.HandleFunc("GET /api/v1/appsec/assets/{assetID}/projects", rt.authz(userdom.PermView, rt.getBusinessAssetProjects))
+		mux.HandleFunc("PUT /api/v1/appsec/assets/{assetID}/projects", rt.authz(userdom.PermOperate, rt.putBusinessAssetProjects))
+		mux.HandleFunc("GET /api/v1/appsec/assets/{assetID}/technical-assets", rt.authz(userdom.PermView, rt.getBusinessAssetTechnicalAssets))
+		mux.HandleFunc("PUT /api/v1/appsec/assets/{assetID}/technical-assets", rt.authz(userdom.PermOperate, rt.putBusinessAssetTechnicalAssets))
+		mux.HandleFunc("GET /api/v1/appsec/assets/{assetID}/engagements", rt.authz(userdom.PermView, rt.getBusinessAssetEngagements))
+		mux.HandleFunc("GET /api/v1/appsec/assets/{assetID}/findings", rt.authz(userdom.PermView, rt.getBusinessAssetFindings))
+		mux.HandleFunc("GET /api/v1/appsec/assets/{assetID}/coverage", rt.authz(userdom.PermView, rt.getBusinessAssetCoverage))
+		mux.HandleFunc("GET /api/v1/appsec/assets/{assetID}/posture", rt.authz(userdom.PermView, rt.getBusinessAssetPosture))
+		mux.HandleFunc("GET /api/v1/appsec/assets/{assetID}/history", rt.authz(userdom.PermView, rt.getBusinessAssetHistory))
+		mux.HandleFunc("PUT /api/v1/engagements/{id}/asset", rt.authz(userdom.PermOperate, rt.assignEngagementBusinessAsset))
 	}
 	if rt.coverage != nil {
 		// Fleet coverage + agent-health views (#413): operator reads, RBAC PermView, tenant-scoped via

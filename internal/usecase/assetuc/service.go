@@ -118,52 +118,6 @@ func (s *Service) UpsertEdge(ctx context.Context, actor string, in EdgeInput) er
 	return nil
 }
 
-// BusinessServiceInput describes a business service grouping.
-type BusinessServiceInput struct {
-	TenantID shared.ID
-	Name     string
-	Owner    string
-}
-
-// UpsertBusinessService creates or updates a business service by (TenantID, Name).
-func (s *Service) UpsertBusinessService(ctx context.Context, actor string, in BusinessServiceInput) (*asset.BusinessService, error) {
-	now := s.clock.Now()
-	id := s.ids.NewID()
-	existing, err := s.repo.GetBusinessServiceByName(ctx, in.TenantID, in.Name)
-	switch {
-	case err == nil:
-		id = existing.ID
-	case errors.Is(err, shared.ErrNotFound):
-		// new service; keep the freshly generated id
-	default:
-		return nil, fmt.Errorf("business service upsert: lookup: %w", err)
-	}
-	svc, err := asset.NewBusinessService(id, in.TenantID, in.Name, in.Owner, now)
-	if err != nil {
-		return nil, err
-	}
-	if existing != nil {
-		svc.Audit.CreatedAt = existing.Audit.CreatedAt
-	}
-	if err := s.repo.UpsertBusinessService(ctx, svc); err != nil {
-		return nil, fmt.Errorf("business service upsert: %w", err)
-	}
-	if err := s.audit.Record(ctx, ports.AuditEntry{
-		Actor:  actor,
-		Action: "asset.business_service_upserted",
-		Target: svc.ID.String(),
-		Metadata: map[string]string{
-			"tenant_id": svc.TenantID.String(),
-			"name":      svc.Name,
-			"owner":     svc.Owner,
-		},
-		At: now,
-	}); err != nil {
-		return nil, fmt.Errorf("business service upsert: audit: %w", err)
-	}
-	return svc, nil
-}
-
 // ListAssets returns the tenant's assets, deterministically ordered.
 func (s *Service) ListAssets(ctx context.Context, tenantID shared.ID) ([]*asset.Asset, error) {
 	return s.repo.ListAssets(ctx, tenantID)
@@ -172,9 +126,4 @@ func (s *Service) ListAssets(ctx context.Context, tenantID shared.ID) ([]*asset.
 // ListEdges returns the tenant's edges, deterministically ordered.
 func (s *Service) ListEdges(ctx context.Context, tenantID shared.ID) ([]*asset.Edge, error) {
 	return s.repo.ListEdges(ctx, tenantID)
-}
-
-// ListBusinessServices returns the tenant's business services, deterministically ordered.
-func (s *Service) ListBusinessServices(ctx context.Context, tenantID shared.ID) ([]*asset.BusinessService, error) {
-	return s.repo.ListBusinessServices(ctx, tenantID)
 }

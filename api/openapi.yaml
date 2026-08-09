@@ -34,6 +34,8 @@ tags:
   description: Long-lived code-quality Projects and immutable analysis read models
 - name: rules
   description: Built-in code-quality and security rule catalog
+- name: assets
+  description: Business-level Asset Management and security posture
 
 paths:
   /healthz:
@@ -881,6 +883,129 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/appsec/assets:
+    get:
+      tags: [assets]
+      operationId: listBusinessAssets
+      summary: List tenant-scoped business Assets
+      parameters:
+      - {name: q, in: query, schema: {type: string, maxLength: 256}}
+      - {name: type, in: query, schema: {type: string, enum: [product, application, system, business_service]}}
+      - {name: criticality, in: query, schema: {type: string, enum: [critical, high, medium, low]}}
+      - {name: lifecycle, in: query, schema: {type: string, enum: [draft, active, decommissioning, retired]}}
+      - {name: owner, in: query, schema: {type: string, maxLength: 256}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        '200': {description: Asset page, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessAssetPage'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [assets]
+      operationId: createBusinessAsset
+      summary: Create a business Asset
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateBusinessAssetRequest'}}}}
+      responses:
+        '201': {description: Created Asset, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessAsset'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '409': {description: Tenant key conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
+  /api/v1/appsec/assets/{assetID}:
+    parameters: [{$ref: '#/components/parameters/BusinessAssetId'}]
+    get:
+      tags: [assets]
+      operationId: getBusinessAsset
+      summary: Get a business Asset
+      responses:
+        '200': {description: Asset, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessAsset'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [assets]
+      operationId: updateBusinessAsset
+      summary: Update metadata or advance Asset lifecycle with optimistic versioning
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/UpdateBusinessAssetRequest'}}}}
+      responses:
+        '200': {description: Updated Asset, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessAsset'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Version conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
+  /api/v1/appsec/assets/{assetID}/projects:
+    parameters: [{$ref: '#/components/parameters/BusinessAssetId'}]
+    get:
+      tags: [assets]
+      operationId: listBusinessAssetProjects
+      responses: {'200': {description: Project memberships, content: {application/json: {schema: {$ref: '#/components/schemas/AssetMemberships'}}}}}
+    put:
+      tags: [assets]
+      operationId: replaceBusinessAssetProjects
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AssetMemberships'}}}}
+      responses: {'204': {description: Memberships replaced}, '400': {$ref: '#/components/responses/BadRequest'}, '404': {$ref: '#/components/responses/NotFound'}}
+
+  /api/v1/appsec/assets/{assetID}/technical-assets:
+    parameters: [{$ref: '#/components/parameters/BusinessAssetId'}]
+    get:
+      tags: [assets]
+      operationId: listBusinessAssetTechnicalAssets
+      responses: {'200': {description: Technical Asset memberships, content: {application/json: {schema: {$ref: '#/components/schemas/AssetMemberships'}}}}}
+    put:
+      tags: [assets]
+      operationId: replaceBusinessAssetTechnicalAssets
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AssetMemberships'}}}}
+      responses: {'204': {description: Memberships replaced}, '400': {$ref: '#/components/responses/BadRequest'}, '404': {$ref: '#/components/responses/NotFound'}}
+
+  /api/v1/appsec/assets/{assetID}/engagements:
+    parameters: [{$ref: '#/components/parameters/BusinessAssetId'}]
+    get:
+      tags: [assets]
+      operationId: listBusinessAssetEngagements
+      responses: {'200': {description: Assigned Engagements, content: {application/json: {schema: {type: array, items: {type: object}}}}}, '404': {$ref: '#/components/responses/NotFound'}}
+
+  /api/v1/appsec/assets/{assetID}/findings:
+    parameters: [{$ref: '#/components/parameters/BusinessAssetId'}]
+    get:
+      tags: [assets]
+      operationId: listBusinessAssetFindings
+      responses:
+        '200':
+          description: First-party and imported Findings resolved through assigned Engagements
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/BusinessAssetFinding'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/appsec/assets/{assetID}/coverage:
+    parameters: [{$ref: '#/components/parameters/BusinessAssetId'}]
+    get:
+      tags: [assets]
+      operationId: getBusinessAssetCoverage
+      responses: {'200': {description: Coverage and freshness projection, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessAssetCoverage'}}}}, '404': {$ref: '#/components/responses/NotFound'}}
+
+  /api/v1/appsec/assets/{assetID}/posture:
+    parameters: [{$ref: '#/components/parameters/BusinessAssetId'}]
+    get:
+      tags: [assets]
+      operationId: getBusinessAssetPosture
+      responses: {'200': {description: Deterministic posture projection, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessAssetPosture'}}}}, '404': {$ref: '#/components/responses/NotFound'}}
+
+  /api/v1/appsec/assets/{assetID}/history:
+    parameters: [{$ref: '#/components/parameters/BusinessAssetId'}]
+    get:
+      tags: [assets]
+      operationId: getBusinessAssetHistory
+      responses: {'200': {description: Assessment history, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/BusinessAssetHistoryItem'}}}}}, '404': {$ref: '#/components/responses/NotFound'}}
+
+  /api/v1/engagements/{id}/asset:
+    parameters: [{$ref: '#/components/parameters/EngagementId'}]
+    put:
+      tags: [assets, engagements]
+      operationId: assignEngagementBusinessAsset
+      summary: Assign or clear an Engagement's primary business Asset
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [asset_id], properties: {asset_id: {type: string, description: Empty string clears assignment}}}}}}
+      responses: {'204': {description: Assignment updated}, '400': {$ref: '#/components/responses/BadRequest'}, '404': {$ref: '#/components/responses/NotFound'}}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -893,6 +1018,11 @@ components:
       in: path
       required: true
       schema: {type: string}
+    BusinessAssetId:
+      name: assetID
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
     ProjectKey:
       name: key
       in: path
@@ -949,6 +1079,134 @@ components:
       type: object
       properties:
         error: {type: string}
+
+    BusinessAsset:
+      type: object
+      required: [ID, TenantID, Key, Name, Type, Criticality, Lifecycle, Owner, Version, Audit]
+      properties:
+        ID: {type: string}
+        TenantID: {type: string}
+        Key: {type: string, maxLength: 128}
+        Name: {type: string, maxLength: 256}
+        Description: {type: string, maxLength: 4000}
+        Type: {type: string, enum: [product, application, system, business_service]}
+        Criticality: {type: string, enum: [critical, high, medium, low]}
+        Lifecycle: {type: string, enum: [draft, active, decommissioning, retired]}
+        Owner: {type: string, maxLength: 256}
+        Metadata: {type: object, additionalProperties: {type: string}}
+        Version: {type: integer, minimum: 1}
+        Audit: {type: object}
+    CreateBusinessAssetRequest:
+      type: object
+      required: [key, name, type, criticality, owner]
+      properties:
+        key: {type: string, minLength: 1, maxLength: 128}
+        name: {type: string, minLength: 1, maxLength: 256}
+        description: {type: string, maxLength: 4000}
+        type: {type: string, enum: [product, application, system, business_service]}
+        criticality: {type: string, enum: [critical, high, medium, low]}
+        owner: {type: string, minLength: 1, maxLength: 256}
+        metadata: {type: object, maxProperties: 32, additionalProperties: {type: string, maxLength: 512}}
+    UpdateBusinessAssetRequest:
+      allOf:
+      - {$ref: '#/components/schemas/CreateBusinessAssetRequest'}
+      - type: object
+        required: [version]
+        properties:
+          version: {type: integer, minimum: 1}
+          lifecycle: {type: string, enum: [draft, active, decommissioning, retired]}
+    BusinessAssetPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/BusinessAsset'}}
+        total: {type: integer, minimum: 0}
+        limit: {type: integer}
+        offset: {type: integer}
+    AssetMembership:
+      type: object
+      required: [id, role, provenance]
+      properties:
+        id: {type: string}
+        role: {type: string, enum: [primary, supporting, dependency]}
+        provenance: {type: string, maxLength: 256}
+    AssetMemberships:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, maxItems: 1000, items: {$ref: '#/components/schemas/AssetMembership'}}
+    BusinessAssetReachabilityEvidence:
+      type: object
+      required: [judgment_id, state, tier, confidence, status, observed_at]
+      properties:
+        judgment_id: {type: string}
+        state: {type: string, enum: [reachable, not_reachable, unknown]}
+        tier: {type: string, enum: [tier-0, tier-1, tier-1.5, tier-2]}
+        confidence: {type: integer, minimum: 0, maximum: 100}
+        path: {type: array, items: {type: string}}
+        status: {type: string}
+        observed_at: {type: string, format: date-time}
+    BusinessAssetReachability:
+      type: object
+      required: [state, tier, confidence, source, history]
+      properties:
+        state: {type: string, enum: [reachable, not_reachable, unknown]}
+        tier: {type: string, enum: [tier-0, tier-1, tier-1.5, tier-2]}
+        confidence: {type: integer, minimum: 0, maximum: 100}
+        path: {type: array, items: {type: string}}
+        status: {type: string}
+        source: {type: string, enum: [none, finding_metadata, judgment, external]}
+        history: {type: array, items: {$ref: '#/components/schemas/BusinessAssetReachabilityEvidence'}}
+    BusinessAssetFindingProvenance:
+      type: object
+      required: [ToolName, ToolVersion, RuleID, SourceDigest, IngestedBy, IngestedAt]
+      properties:
+        ToolName: {type: string}
+        ToolVersion: {type: string}
+        RuleID: {type: string}
+        SourceDigest: {type: string}
+        IngestedBy: {type: string}
+        IngestedAt: {type: string, format: date-time}
+    BusinessAssetFinding:
+      type: object
+      required: [finding, external, suppressed_by_tool, reachability, engagement_id, engagement_name]
+      properties:
+        finding: {$ref: '#/components/schemas/Finding'}
+        external: {type: boolean}
+        can_self_promote: {type: boolean, description: Present for imported findings and always false}
+        suppressed_by_tool: {type: boolean}
+        provenance: {$ref: '#/components/schemas/BusinessAssetFindingProvenance'}
+        reachability: {$ref: '#/components/schemas/BusinessAssetReachability'}
+        engagement_id: {type: string}
+        engagement_name: {type: string}
+    BusinessAssetCoverage:
+      type: object
+      required: [rows, counts, freshness_target_days]
+      properties:
+        rows: {type: array, items: {type: object}}
+        counts: {type: object, additionalProperties: {type: integer}}
+        freshness_target_days: {type: integer, minimum: 1}
+    BusinessAssetPosture:
+      type: object
+      required: [rating, explanation, finding_counts, coverage_counts]
+      properties:
+        rating: {type: string, enum: [good, attention, high_risk, critical, unknown]}
+        explanation: {type: string}
+        finding_counts: {type: object, additionalProperties: {type: integer}}
+        coverage_counts: {type: object, additionalProperties: {type: integer}}
+    BusinessAssetHistoryItem:
+      type: object
+      required: [engagement_id, name, status, scope_count, finding_count, retest_count, updated_at]
+      properties:
+        engagement_id: {type: string}
+        name: {type: string}
+        status: {type: string}
+        authorized_from: {type: [string, 'null'], format: date-time}
+        authorized_to: {type: [string, 'null'], format: date-time}
+        scope_count: {type: integer, minimum: 0}
+        finding_count: {type: integer, minimum: 0}
+        retest_count: {type: integer, minimum: 0}
+        updated_at: {type: string, format: date-time}
 
     ProjectCodeCapability:
       type: object

@@ -24,6 +24,8 @@ import { QualityProfiles } from './pages/QualityProfiles'
 import { FleetLayout } from './pages/FleetLayout'
 import { FleetCoverage } from './pages/FleetCoverage'
 import { FleetAgents } from './pages/FleetAgents'
+import { Assets } from './pages/Assets'
+import { AssetComponents, AssetCoverageView, AssetDetail, AssetEngagements, AssetFindings, AssetHistory, AssetOverview } from './pages/AssetDetail'
 
 export default function App() {
   return (
@@ -42,6 +44,15 @@ function Gate() {
         <Route index element={<Navigate to="/engagements" replace />} />
         <Route path="engagements" element={<Engagements />} />
         <Route path="engagements/:id" element={<EngagementDetail />} />
+        <Route path="assets" element={<Assets />} />
+        <Route path="assets/:key" element={<AssetDetail />}>
+          <Route index element={<AssetOverview />} />
+          <Route path="components" element={<AssetComponents />} />
+          <Route path="engagements" element={<AssetEngagements />} />
+          <Route path="findings" element={<AssetFindings />} />
+          <Route path="coverage" element={<AssetCoverageView />} />
+          <Route path="history" element={<AssetHistory />} />
+        </Route>
         <Route path="code-quality" element={<CodeQualityProjects />} />
         <Route path="code-quality/gates" element={<QualityGates />} />
         <Route path="code-quality/profiles" element={<QualityProfiles />} />

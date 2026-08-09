@@ -21,12 +21,6 @@ func (fakeAssetService) ListAssets(context.Context, shared.ID) ([]*asset.Asset, 
 }
 func (fakeAssetService) UpsertEdge(context.Context, string, assetuc.EdgeInput) error { return nil }
 func (fakeAssetService) ListEdges(context.Context, shared.ID) ([]*asset.Edge, error) { return nil, nil }
-func (fakeAssetService) UpsertBusinessService(context.Context, string, assetuc.BusinessServiceInput) (*asset.BusinessService, error) {
-	return &asset.BusinessService{}, nil
-}
-func (fakeAssetService) ListBusinessServices(context.Context, shared.ID) ([]*asset.BusinessService, error) {
-	return nil, nil
-}
 
 func TestRouter_AssetRoutePresence(t *testing.T) {
 	rt := &Router{log: discardLog()}
@@ -43,7 +37,6 @@ func TestRouter_AssetRoutePresence(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/v1/assets"},
 		{http.MethodGet, "/api/v1/assets/edges"},
-		{http.MethodGet, "/api/v1/assets/services"},
 	}
 
 	// Not registered before SetAssets.
@@ -60,5 +53,8 @@ func TestRouter_AssetRoutePresence(t *testing.T) {
 		if code := call(p.method, p.path); code == http.StatusNotFound {
 			t.Errorf("%s %s: expected route present after SetAssets, got 404", p.method, p.path)
 		}
+	}
+	if code := call(http.MethodPost, "/api/v1/assets/services"); code != http.StatusNotFound {
+		t.Fatalf("retired Business Asset write path returned %d, want 404", code)
 	}
 }

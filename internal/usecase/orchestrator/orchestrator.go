@@ -117,8 +117,8 @@ type approvalReader interface {
 // Config holds the run's tunables. Zero values get safe defaults in New.
 type Config struct {
 	Model               string
-	ProviderBase        string // recorded on the session for attribution; NEVER the API key
-	SystemPrompt        string // optional; defaults to DefaultSystemPrompt
+	ProviderBase        string        // recorded on the session for attribution; NEVER the API key
+	SystemPrompt        string        // optional; defaults to DefaultSystemPrompt
 	Temperature         float64       // 0 = provider default (not sent)
 	MaxTokens           int           // per Chat call (0 = provider default)
 	MaxSteps            int           // hard cap on planning turns (default 16)
@@ -194,6 +194,9 @@ func (o *Orchestrator) Start(ctx context.Context, engagementID shared.ID, initia
 	sess, err := agent.NewSession(o.ids.NewID(), engagementID, initiatedBy, goal, o.cfg.Model, o.cfg.ProviderBase, promptHash(o.cfg.SystemPrompt, o.catalog.Tools()), now, o.cfg.TokenBudget)
 	if err != nil {
 		return agent.Session{}, err
+	}
+	if tenantID, ok := shared.TenantFrom(ctx); ok {
+		sess.TenantID = tenantID
 	}
 	if err := o.sessions.SaveSession(ctx, sess); err != nil {
 		return agent.Session{}, fmt.Errorf("save session: %w", err)
@@ -471,19 +474,30 @@ func lastPendingCall(transcript []agent.Message) (agent.ToolCall, bool) {
 
 // agentJob is the durable-queue payload for an agent run.
 type agentJob struct {
-	Op        string `json:"op"` // "drive" | "resume"
-	SessionID string `json:"session_id"`
-	ActionID  string `json:"action_id,omitempty"`
+	Op        string  `json:"op"` // "drive" | "resume"
+	TenantID  *string `json:"tenant_id"`
+	SessionID string  `json:"session_id"`
+	ActionID  string  `json:"action_id,omitempty"`
 }
 
-// DriveJob encodes a job that drives a started session to completion.
-func DriveJob(sessionID shared.ID) ([]byte, error) {
-	return json.Marshal(agentJob{Op: "drive", SessionID: sessionID.String()})
+// DriveJob encodes a tenant-bound job that drives a started session to completion.
+func DriveJob(ctx context.Context, sessionID shared.ID) ([]byte, error) {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return nil, fmt.Errorf("%w: tenant context is required for agent job", shared.ErrValidation)
+	}
+	tenant := tenantID.String()
+	return json.Marshal(agentJob{Op: "drive", TenantID: &tenant, SessionID: sessionID.String()})
 }
 
-// ResumeJob encodes a job that resumes a session after the given action was decided.
-func ResumeJob(sessionID, actionID shared.ID) ([]byte, error) {
-	return json.Marshal(agentJob{Op: "resume", SessionID: sessionID.String(), ActionID: actionID.String()})
+// ResumeJob encodes a tenant-bound job that resumes a session after the given action was decided.
+func ResumeJob(ctx context.Context, sessionID, actionID shared.ID) ([]byte, error) {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return nil, fmt.Errorf("%w: tenant context is required for agent job", shared.ErrValidation)
+	}
+	tenant := tenantID.String()
+	return json.Marshal(agentJob{Op: "resume", TenantID: &tenant, SessionID: sessionID.String(), ActionID: actionID.String()})
 }
 
 // RunJob is the worker handler (JobKind). It drives or resumes a session. A genuine
@@ -494,6 +508,10 @@ func (o *Orchestrator) RunJob(ctx context.Context, payload []byte) error {
 	var j agentJob
 	if err := json.Unmarshal(payload, &j); err != nil {
 		return fmt.Errorf("%w: malformed agent job: %v", shared.ErrValidation, err)
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || j.TenantID == nil || *j.TenantID != tenantID.String() {
+		return fmt.Errorf("%w: agent job tenant context is missing or mismatched", shared.ErrValidation)
 	}
 	var sess agent.Session
 	var err error
@@ -519,6 +537,10 @@ func (o *Orchestrator) FailStrandedJob(ctx context.Context, payload []byte, caus
 	var j agentJob
 	if err := json.Unmarshal(payload, &j); err != nil {
 		return fmt.Errorf("%w: malformed agent job: %v", shared.ErrValidation, err)
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || j.TenantID == nil || *j.TenantID != tenantID.String() {
+		return fmt.Errorf("%w: agent job tenant context is missing or mismatched", shared.ErrValidation)
 	}
 	sessionID := shared.ID(j.SessionID)
 	release, ok, err := o.lock(ctx, sessionID)

@@ -3,6 +3,8 @@ package ports
 import (
 	"context"
 	"time"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 // QueuedJob is a unit of deferred work claimed from the JobQueue. Payload is an opaque,
@@ -10,6 +12,7 @@ import (
 // been incremented for this claim), so a handler can give up after N tries.
 type QueuedJob struct {
 	ID       string
+	TenantID shared.ID
 	Kind     string // e.g. "recon" | "sca"
 	Payload  []byte
 	Attempts int

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 )
 
@@ -36,7 +37,7 @@ func setupJobQueue(t *testing.T) (*JobQueue, context.Context) {
 	if _, err := pool.Exec(ctx, "TRUNCATE jobs"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
-	return NewJobQueue(pool, idgen.RandomID{}), ctx
+	return NewJobQueue(pool, idgen.RandomID{}), shared.WithTenant(ctx, shared.DefaultTenant)
 }
 
 func TestPostgresJobQueueConcurrentClaimSkipLocked(t *testing.T) {

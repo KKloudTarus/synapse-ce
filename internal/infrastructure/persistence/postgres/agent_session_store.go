@@ -31,27 +31,39 @@ func NewAgentSessionStore(pool *pgxpool.Pool) *AgentSessionStore {
 var _ ports.AgentSessionStore = (*AgentSessionStore)(nil)
 
 func (s *AgentSessionStore) SaveSession(ctx context.Context, e agent.Session) error {
-	_, err := s.pool.Exec(ctx,
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || e.TenantID != tenantID {
+		return fmt.Errorf("%w: agent session tenant context is required and must match", shared.ErrValidation)
+	}
+	tag, err := s.pool.Exec(ctx,
 		`INSERT INTO agent_sessions
-		   (id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		   (id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		 ON CONFLICT (id) DO UPDATE SET
-		   status=$8, steps=$9, tokens_used=$10, token_budget_max=$11, updated_at=$13`,
-		e.ID.String(), e.EngagementID.String(), e.InitiatedBy, e.Goal, e.Model, e.ProviderBase, e.PromptHash,
+		   status=$9, steps=$10, tokens_used=$11, token_budget_max=$12, updated_at=$14
+		 WHERE agent_sessions.tenant_id=$2 AND agent_sessions.engagement_id=$3`,
+		e.ID.String(), tenantID.String(), e.EngagementID.String(), e.InitiatedBy, e.Goal, e.Model, e.ProviderBase, e.PromptHash,
 		string(e.Status), e.Steps, e.TokensUsed, e.TokenBudgetMax, e.CreatedAt, e.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("save agent session: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("agent session %s belongs to another tenant or engagement: %w", e.ID, shared.ErrConflict)
 	}
 	return nil
 }
 
 func (s *AgentSessionStore) GetSession(ctx context.Context, id shared.ID) (agent.Session, error) {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return agent.Session{}, fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+	}
 	var e agent.Session
 	var status string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at
-		 FROM agent_sessions WHERE id=$1`, id.String()).
-		Scan(&e.ID, &e.EngagementID, &e.InitiatedBy, &e.Goal, &e.Model, &e.ProviderBase, &e.PromptHash, &status, &e.Steps, &e.TokensUsed, &e.TokenBudgetMax, &e.CreatedAt, &e.UpdatedAt)
+		`SELECT id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at
+		 FROM agent_sessions WHERE id=$1 AND tenant_id=$2`, id.String(), tenantID.String()).
+		Scan(&e.ID, &e.TenantID, &e.EngagementID, &e.InitiatedBy, &e.Goal, &e.Model, &e.ProviderBase, &e.PromptHash, &status, &e.Steps, &e.TokensUsed, &e.TokenBudgetMax, &e.CreatedAt, &e.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return agent.Session{}, fmt.Errorf("agent session %s: %w", id, shared.ErrNotFound)
 	}
@@ -63,9 +75,13 @@ func (s *AgentSessionStore) GetSession(ctx context.Context, id shared.ID) (agent
 }
 
 func (s *AgentSessionStore) ListByEngagement(ctx context.Context, engagementID shared.ID) ([]agent.Session, error) {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return nil, fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at
-		 FROM agent_sessions WHERE engagement_id=$1 ORDER BY created_at`, engagementID.String())
+		`SELECT id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at
+		 FROM agent_sessions WHERE tenant_id=$1 AND engagement_id=$2 ORDER BY created_at`, tenantID.String(), engagementID.String())
 	if err != nil {
 		return nil, fmt.Errorf("list agent sessions: %w", err)
 	}
@@ -74,7 +90,7 @@ func (s *AgentSessionStore) ListByEngagement(ctx context.Context, engagementID s
 	for rows.Next() {
 		var e agent.Session
 		var status string
-		if err := rows.Scan(&e.ID, &e.EngagementID, &e.InitiatedBy, &e.Goal, &e.Model, &e.ProviderBase, &e.PromptHash, &status, &e.Steps, &e.TokensUsed, &e.TokenBudgetMax, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.TenantID, &e.EngagementID, &e.InitiatedBy, &e.Goal, &e.Model, &e.ProviderBase, &e.PromptHash, &status, &e.Steps, &e.TokensUsed, &e.TokenBudgetMax, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan agent session: %w", err)
 		}
 		e.Status = agent.Status(status)
@@ -88,7 +104,7 @@ func (s *AgentSessionStore) ListResumable(ctx context.Context, staleFor time.Dur
 		limit = 100
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at
+		`SELECT id, tenant_id, engagement_id, initiated_by, goal, model, provider_base, prompt_hash, status, steps, tokens_used, token_budget_max, created_at, updated_at
 		 FROM agent_sessions WHERE status IN ('running','awaiting_approval') AND updated_at < $1
 		 ORDER BY updated_at LIMIT $2`, now.Add(-staleFor), limit)
 	if err != nil {
@@ -99,7 +115,7 @@ func (s *AgentSessionStore) ListResumable(ctx context.Context, staleFor time.Dur
 	for rows.Next() {
 		var e agent.Session
 		var status string
-		if err := rows.Scan(&e.ID, &e.EngagementID, &e.InitiatedBy, &e.Goal, &e.Model, &e.ProviderBase, &e.PromptHash, &status, &e.Steps, &e.TokensUsed, &e.TokenBudgetMax, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.TenantID, &e.EngagementID, &e.InitiatedBy, &e.Goal, &e.Model, &e.ProviderBase, &e.PromptHash, &status, &e.Steps, &e.TokensUsed, &e.TokenBudgetMax, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan resumable session: %w", err)
 		}
 		e.Status = agent.Status(status)
@@ -109,14 +125,18 @@ func (s *AgentSessionStore) ListResumable(ctx context.Context, staleFor time.Dur
 }
 
 func (s *AgentSessionStore) AppendMessage(ctx context.Context, sessionID shared.ID, seq int, m agent.Message) error {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+	}
 	var toolCalls []byte
 	if len(m.ToolCalls) > 0 {
 		toolCalls, _ = json.Marshal(m.ToolCalls)
 	}
-	_, err := s.pool.Exec(ctx,
+	tag, err := s.pool.Exec(ctx,
 		`INSERT INTO agent_messages (session_id, seq, role, content, tool_calls, tool_call_id)
-		 VALUES ($1,$2,$3,$4,$5,$6)`,
-		sessionID.String(), seq, string(m.Role), m.Content, toolCalls, m.ToolCallID)
+		 SELECT $1,$2,$3,$4,$5,$6 FROM agent_sessions WHERE id=$1 AND tenant_id=$7`,
+		sessionID.String(), seq, string(m.Role), m.Content, toolCalls, m.ToolCallID, tenantID.String())
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // (session_id, seq) PK – fork guard
@@ -124,12 +144,21 @@ func (s *AgentSessionStore) AppendMessage(ctx context.Context, sessionID shared.
 		}
 		return fmt.Errorf("append agent message: %w", err)
 	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("agent session %s: %w", sessionID, shared.ErrNotFound)
+	}
 	return nil
 }
 
 func (s *AgentSessionStore) Messages(ctx context.Context, sessionID shared.ID) ([]agent.Message, error) {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return nil, fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT role, content, tool_calls, tool_call_id FROM agent_messages WHERE session_id=$1 ORDER BY seq`, sessionID.String())
+		`SELECT m.role, m.content, m.tool_calls, m.tool_call_id
+		 FROM agent_messages m JOIN agent_sessions s ON s.id=m.session_id
+		 WHERE m.session_id=$1 AND s.tenant_id=$2 ORDER BY m.seq`, sessionID.String(), tenantID.String())
 	if err != nil {
 		return nil, fmt.Errorf("list agent messages: %w", err)
 	}

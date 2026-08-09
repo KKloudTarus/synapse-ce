@@ -13,7 +13,7 @@ import (
 
 func TestPostgresAgentStores(t *testing.T) {
 	dsn := testDSN(t)
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -23,11 +23,12 @@ func TestPostgresAgentStores(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 	_, _ = pool.Exec(ctx, "TRUNCATE agent_messages, agent_sessions, agent_approvals CASCADE")
-	_, _ = pool.Exec(ctx, `INSERT INTO engagements (id, tenant_id, name) VALUES ('engA','','t') ON CONFLICT (id) DO NOTHING`)
+	_, _ = pool.Exec(ctx, `INSERT INTO engagements (id, tenant_id, name) VALUES ('engA','default','t') ON CONFLICT (id) DO NOTHING`)
 
 	ss := NewAgentSessionStore(pool)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	s, _ := agent.NewSession("sA", "engA", "alice", "find subs", "m", "http://localhost:20128/v1", "h", now, 1000)
+	s.TenantID = shared.DefaultTenant
 	if err := ss.SaveSession(ctx, s); err != nil {
 		t.Fatalf("save session: %v", err)
 	}
@@ -39,6 +40,14 @@ func TestPostgresAgentStores(t *testing.T) {
 	got, err := ss.GetSession(ctx, "sA")
 	if err != nil || got.Status != agent.StatusSucceeded || got.Steps != 3 || got.InitiatedBy != "alice" {
 		t.Fatalf("session round-trip wrong: %+v err=%v", got, err)
+	}
+	tenantB := shared.WithTenant(context.Background(), "tenant-b")
+	_, _ = pool.Exec(ctx, `INSERT INTO tenants(id,name) VALUES('tenant-b','Tenant B') ON CONFLICT (id) DO NOTHING`)
+	if _, err := ss.GetSession(tenantB, "sA"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("cross-tenant session lookup must be hidden, got %v", err)
+	}
+	if err := ss.AppendMessage(tenantB, "sA", 9, agent.Message{Role: agent.RoleUser}); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("cross-tenant transcript append must be rejected, got %v", err)
 	}
 	// transcript + fork-guard
 	if err := ss.AppendMessage(ctx, "sA", 0, agent.Message{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{{ID: "c1", Name: "get_scope", Arguments: []byte(`{"engagement_id":"engA"}`)}}}); err != nil {

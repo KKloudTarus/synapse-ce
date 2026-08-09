@@ -1,6 +1,5 @@
-// Package asset is the epic-#405 fleet asset model: one canonical identity per real thing (a
-// host, a workload, an image, a cloud resource), the typed relationships between them, and a
-// business-service grouping. It is pure domain: it imports only shared and the stdlib.
+// Package asset contains the technical fleet Asset and business-level BusinessAsset models. It is
+// pure domain: it imports only shared and the stdlib.
 //
 // Tenancy invariant: every aggregate carries a NON-EMPTY TenantID. Under Row Level Security
 // (migration 0057) the empty string means DENY, not the default tenant, so an empty tenant id is
@@ -95,14 +94,13 @@ const (
 	EdgeReaches    EdgeKind = "reaches"     // reachability edge
 	EdgeAffectedBy EdgeKind = "affected_by" // asset affected by a finding
 	EdgeMounts     EdgeKind = "mounts"      // workload mounts identity/secret
-	EdgeMemberOf   EdgeKind = "member_of"   // asset is a member of a business service
 )
 
 // Valid reports whether e is a known edge kind.
 func (e EdgeKind) Valid() bool {
 	switch e {
 	case EdgeRuns, EdgeExposes, EdgeDependsOn, EdgeCanAssume, EdgeReaches,
-		EdgeAffectedBy, EdgeMounts, EdgeMemberOf:
+		EdgeAffectedBy, EdgeMounts:
 		return true
 	default:
 		return false
@@ -135,42 +133,6 @@ func NewEdge(tenantID, from, to shared.ID, kind EdgeKind, provenance shared.ID) 
 		return nil, fmt.Errorf("%w: edge provenance is required", shared.ErrValidation)
 	}
 	return &Edge{TenantID: tenantID, From: from, To: to, Kind: kind, Provenance: provenance}, nil
-}
-
-// BusinessService groups assets into a named service with an owner so findings and risk can be
-// rolled up to something a stakeholder recognises. Membership is expressed as an EdgeMemberOf
-// edge from an asset to the service.
-type BusinessService struct {
-	ID       shared.ID
-	TenantID shared.ID
-	Name     string
-	Owner    string
-	Audit    shared.Audit
-}
-
-// NewBusinessService validates and constructs a BusinessService.
-func NewBusinessService(id, tenantID shared.ID, name, owner string, now time.Time) (*BusinessService, error) {
-	if id.IsZero() {
-		return nil, fmt.Errorf("%w: business service id is required", shared.ErrValidation)
-	}
-	if tenantID.IsZero() {
-		return nil, fmt.Errorf("%w: business service tenant id is required (empty tenant is DENY under RLS)", shared.ErrValidation)
-	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return nil, fmt.Errorf("%w: business service name is required", shared.ErrValidation)
-	}
-	owner = strings.TrimSpace(owner)
-	if owner == "" {
-		return nil, fmt.Errorf("%w: business service owner is required", shared.ErrValidation)
-	}
-	return &BusinessService{
-		ID:       id,
-		TenantID: tenantID,
-		Name:     name,
-		Owner:    owner,
-		Audit:    shared.Audit{CreatedAt: now, UpdatedAt: now},
-	}, nil
 }
 
 func copyAttrs(in map[string]string) map[string]string {
