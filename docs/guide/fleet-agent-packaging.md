@@ -5,13 +5,33 @@ hosts the project does not own. This document is the release-engineering contrac
 matrix, signing keys, the self-update + rollback procedure, version-skew handling, and clean
 uninstall/decommission.
 
-> **Status.** The Go pieces below — **version skew** enforcement and the **self-update state machine**
-> (verify-then-swap-then-health-gate with automatic rollback) — are implemented and unit-tested. The
-> **packaging + signing + CI matrix** (`packaging/nfpm.yaml`, `packaging/systemd/`,
-> `packaging/scripts/`, `.github/workflows/release-scan-gate.yml`) is authored to spec but **dormant**
-> in this repository: GitHub Actions is currently disabled, and package/Authenticode signing needs the
-> project keys plus matrix hosts. Activating it (building, signing, and CI-verifying an install on
-> every matrix row) is the remaining release-engineering step.
+> **Status.** Live, with one exception named below.
+>
+> **Verified on every pull request.** `agent-package-matrix.yml` builds the rpm and deb from
+> `packaging/nfpm.yaml` and, per matrix row, installs it, asserts the unit / `0640` config / service
+> account, runs the packaged binary against a real control plane to complete one enrol and heartbeat,
+> uninstalls, and fails if anything is left outside `/var/lib/synapse-agent`. A separate job builds a
+> package whose libc floor is above any runtime and asserts the install is refused with a readable
+> message, leaving nothing behind. `release-gate-negative.yml` proves the release gates by breaking
+> them: a missing scanner, an injected exit-swallow, an unsigned artifact and an empty artifact set
+> each fail.
+>
+> **Signed.** rpm and deb are signed with the project GPG key (`packaging/keys/synapse-packages.gpg`);
+> the agent self-update manifest is signed with the project ed25519 key, whose public half is compiled
+> into the agent. `release-sign.yml` refuses to start when a signing key is absent, checks the signing
+> key against the published public key, signs and verifies every artifact, emits an SBOM per artifact
+> from this project's own engine, signs the checksum file, and attests provenance.
+>
+> **Windows is the exception, and it is refused rather than faked.** Authenticode needs a certificate
+> from a CA that Windows already trusts; a self-signed one would still raise the SmartScreen warning
+> that requirement 4 exists to remove. The pipeline therefore fails if a Windows artifact is present.
+> No Windows package is the honest outcome; a warned-about one is not. There is consequently **no
+> Windows row in the matrix below** — a platform with no row is not supported, and saying so is the
+> point.
+>
+> **Update rollout is operator-controlled** (`/api/v1/agents/rollout`): a target reaches the canary
+> groups only, promotion to every group is a second deliberate action, pausing needs a reason, and
+> nothing is ever offered without a plan. See *Update channel* below.
 
 ## Support matrix
 
@@ -75,6 +95,45 @@ Implemented in `internal/infrastructure/fleetupdate`:
 
 Rollout is **operator-controlled**: a target version per agent group, a canary group, and a documented
 pause — never an unconditional auto-update.
+
+## Update rollout is operator-controlled (#412 req 9)
+
+There is no unconditional fleet-wide auto-update. An offer requires an operator to have said three
+things explicitly, and the API is shaped so that saying two of them is not enough.
+
+| | |
+|---|---|
+| `GET /api/v1/agents/rollout` | read the plan — `PermView`, so on-call can see why the fleet is or is not updating |
+| `PUT /api/v1/agents/rollout` | set the target version and the canary groups — `PermAdminister` |
+| `POST /api/v1/agents/rollout/promote` | release the target to every group — `PermAdminister` |
+| `POST /api/v1/agents/rollout/pause` | stop every offer; a reason is required |
+| `POST /api/v1/agents/rollout/resume` | lift the pause without advancing the rollout |
+
+These are operator routes under `/api/v1/agents`, **not** `/api/v1/fleet`. The latter is the untrusted
+agent auth plane, which deliberately bypasses the human authenticator and the acceptable-use gate; an
+operator control mounted there would be authenticated by agent credentials.
+
+Rules the implementation enforces rather than documents:
+
+- **Setting a target always resets promotion.** Otherwise a new version would inherit an operator's
+  decision about a different one and reach the whole fleet at once.
+- **A target with no canary group is refused.** It could only ever go to every host simultaneously.
+- **Promotion of a paused rollout is refused**, not queued.
+- **Downgrade is never offered.** A target older than the running version declines.
+- **Group membership is operator-assigned, never self-declared.** An agent that could name its own
+  group could pin itself to an older, vulnerable version.
+- **No plan, no decider, or a store failure all decline**, each with a reason on the heartbeat, so a
+  fleet that is not updating can explain itself.
+
+The heartbeat response carries the decision:
+
+```json
+{ "proto": "...", "control_plane_version": "...", "min_supported_agent_version": "...",
+  "update": { "available": true, "reason": "the agent is in a canary group for this target",
+              "target_version": "1.4.0" } }
+```
+
+Every mutation is audited. "Who moved the fleet to 1.4.0, and when" is answerable from the record.
 
 ## Version skew (#412 req 10)
 
