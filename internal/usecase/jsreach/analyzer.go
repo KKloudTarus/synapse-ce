@@ -126,7 +126,7 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, subjects []string) (
 	// first-party source could import DIRECTLY. Either gap makes a negative meaningless: an absent
 	// component means the subject came from a different document, and a transitive package is loaded by
 	// its parent rather than by this source tree.
-	if err := a.assertSubjectsAnswerable(wanted, doc, resolution); err != nil {
+	if err := subjectsAnswerable(wanted, doc, resolution); err != nil {
 		return nil, err
 	}
 
@@ -167,7 +167,7 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, subjects []string) (
 // and be sealed as not-reachable. Without the second, a transitive package — the majority of npm
 // findings — would be declared unreachable merely because the first-party graph never names it, which is
 // true of every transitive package and proves nothing.
-func (a *Analyzer) assertSubjectsAnswerable(subjects []string, doc *sbom.SBOM, resolution jsresolution.Result) error {
+func subjectsAnswerable(subjects []string, doc *sbom.SBOM, resolution jsresolution.Result) error {
 	inSBOM := make(map[string]bool, len(doc.Components))
 	for _, component := range doc.Components {
 		if canonical, ok := jsresolution.CanonicalNPMPURL(component.PURL); ok {
@@ -413,7 +413,7 @@ func (a *Analyzer) answerableSubjects(ctx context.Context, dir string, subjects 
 	for _, subject := range subjects {
 		symbols := make([]string, 0, len(subject.Symbols))
 		for _, symbol := range subject.Symbols {
-			if a.assertSubjectsAnswerable([]string{symbol}, doc, resolution) == nil {
+			if subjectsAnswerable([]string{symbol}, doc, resolution) == nil {
 				symbols = append(symbols, symbol)
 			}
 		}

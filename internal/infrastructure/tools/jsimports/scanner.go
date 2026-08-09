@@ -189,8 +189,13 @@ func (s *Scanner) Scan(ctx context.Context, root string) (modulegraph.Graph, err
 	}
 
 	graph := modulegraph.Graph{
-		Modules:      sc.modules,
-		Edges:        sc.edges,
+		Modules: sc.modules,
+		Edges:   sc.edges,
+		SymbolEvidence: &modulegraph.SymbolEvidence{
+			Uses:       sc.localUses,
+			JSXModules: sc.jsxModules,
+			Coverage:   sc.symbolCoverage,
+		},
 		Coverage:     sc.coverage.issues(),
 		FilesScanned: sc.filesScanned,
 		BytesScanned: sc.bytesScanned,
@@ -226,6 +231,12 @@ type scanState struct {
 
 	modules []modulegraph.Module
 	edges   []modulegraph.Edge
+	// Tier-2 symbol evidence: what each module does with the locals its imports bind, which modules
+	// actually contain JSX, and any limitation of that evidence (kept apart from the graph's own
+	// coverage so a Tier-2 budget cannot refuse a Tier-1 answer).
+	localUses      []modulegraph.LocalUse
+	jsxModules     []string
+	symbolCoverage []modulegraph.CoverageIssue
 
 	coverage     *coverageSink
 	filesScanned int
@@ -455,6 +466,7 @@ func (sc *scanState) parseAll(ctx context.Context) error {
 		for _, imp := range result.imports {
 			sc.recordImport(src.relPath, imp)
 		}
+		sc.recordLocalUses(src.relPath, result)
 	}
 	return nil
 }

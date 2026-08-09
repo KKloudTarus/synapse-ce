@@ -83,7 +83,8 @@ type Service struct {
 	detectionPriority                string                                // server default detection priority (comprehensive|precise); empty = comprehensive
 	reachability                     ports.ReachabilityRecorder            // optional deterministic Tier-2 reachability proof (Go call-graph)
 	pyReachability                   ports.ReachabilityRecorder            // optional deterministic Tier-1 Python import-reachability proof
-	jsReachability                   jsReachabilityRecorder                // optional deterministic Tier-1 JavaScript import-reachability proof
+	jsReachability                   jsSBOMReachabilityRecorder            // optional deterministic Tier-1 JavaScript import-reachability proof
+	jsSymbolReachability             jsSBOMReachabilityRecorder            // optional deterministic Tier-2 JavaScript affected-export proof
 	srcReachability                  map[string]ports.ReachabilityRecorder // optional Tier-1 provers keyed by package-URL type
 	correlation                      ports.CorrelationRecorder             // optional cross-check disagreement → judgment minter
 	sbomGen2                         ports.SBOMGenerator                   // optional 2nd SBOM producer for the cross-check
@@ -320,11 +321,14 @@ func (s *Service) SetReachability(r ports.ReachabilityRecorder) { s.reachability
 // "not reachable"). Kept distinct from the Go call-graph prover: it is a WEAKER (Tier-1, import-level) proof.
 func (s *Service) SetPyReachability(r ports.ReachabilityRecorder) { s.pyReachability = r }
 
-// jsReachabilityRecorder is the narrow slice of the JavaScript Tier-1 recorder this service needs. It
-// takes the SBOM explicitly because a component purl is only meaningful relative to one document: the
+// jsSBOMReachabilityRecorder is the narrow slice of a JavaScript reachability recorder this service
+// needs. BOTH tiers satisfy it — the name is deliberately tier-neutral, because Go interfaces are
+// structural and a tier-specific name would imply a distinction the type system does not enforce.
+//
+// It takes the SBOM explicitly because a component purl is only meaningful relative to one document: the
 // subjects are minted from the scan's own SBOM, so the analysis must reason over that same document
 // rather than re-deriving one that could differ.
-type jsReachabilityRecorder interface {
+type jsSBOMReachabilityRecorder interface {
 	RecordWithSBOM(ctx context.Context, engagementID shared.ID, targetRef string, doc *sbom.SBOM, subjects []ports.ReachabilitySubject) (int, error)
 }
 
@@ -352,7 +356,14 @@ func (s *Service) SetSourceReachability(purlType string, r ports.ReachabilityRec
 // SetJSReachability configures the optional deterministic Tier-1 JavaScript import-reachability prover.
 // A dependency declared but never imported becomes not_reachable, which the export path turns into an
 // OpenVEX not_affected justification. Best-effort and opt-in; nil disables it.
-func (s *Service) SetJSReachability(r jsReachabilityRecorder) { s.jsReachability = r }
+func (s *Service) SetJSReachability(r jsSBOMReachabilityRecorder) { s.jsReachability = r }
+
+// SetJSSymbolReachability configures the optional deterministic TIER-2 JavaScript prover: not "is this
+// package imported" but "is the affected EXPORT reached". It runs alongside Tier-1 rather than replacing
+// it — a Tier-2 answer supersedes the Tier-1 judgment for the same subject under the existing
+// stronger-tier-wins rule, and a subject Tier-2 cannot answer leaves the Tier-1 judgment standing.
+// Best-effort and opt-in; nil disables it.
+func (s *Service) SetJSSymbolReachability(r jsSBOMReachabilityRecorder) { s.jsSymbolReachability = r }
 
 // SetCorrelation configures the optional cross-check disagreement→judgment minter. nil ⇒ no
 // correlation judgments. Best-effort + opt-in: a recorder error is ignored (the scan never fails). A setter
@@ -2484,6 +2495,16 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if opts.scansVulnerabilities() && s.jsReachability != nil {
 		if subs := jsReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
 			_, _ = s.jsReachability.RecordWithSBOM(ctx, engagementID, ws.Dir, result.SBOM, subs)
+		}
+	}
+
+	// Deterministic TIER-2 JavaScript affected-export reachability. It runs AFTER Tier-1 on purpose:
+	// supersession is rank-ordered, so a Tier-2 judgment minted first would stop Tier-1 minting at all
+	// and the audit trail would lose the "the package is imported" record entirely. Running it second
+	// leaves both records, with the stronger one superseding.
+	if opts.scansVulnerabilities() && s.jsSymbolReachability != nil {
+		if subs := jsSymbolReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
+			_, _ = s.jsSymbolReachability.RecordWithSBOM(ctx, engagementID, ws.Dir, result.SBOM, subs)
 		}
 	}
 

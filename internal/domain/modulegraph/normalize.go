@@ -109,9 +109,135 @@ func Normalize(in Graph) (Graph, error) {
 	}
 	sort.Slice(out.Coverage, func(i, j int) bool { return coverageLess(out.Coverage[i], out.Coverage[j]) })
 	out.Coverage = deduplicateCoverage(out.Coverage)
+
+	// Tier-2 symbol evidence is normalized like every other member. A use whose module is not a scanned
+	// module is an error rather than a dropped record: silently discarding a reference is how a symbol
+	// that IS reached comes to look unused. A nil SymbolEvidence stays nil — "not collected" is a
+	// distinct state from "collected and empty".
+	if in.SymbolEvidence != nil {
+		evidence := &SymbolEvidence{
+			Uses:       make([]LocalUse, 0, len(in.SymbolEvidence.Uses)),
+			JSXModules: make([]string, 0, len(in.SymbolEvidence.JSXModules)),
+			Coverage:   make([]CoverageIssue, 0, len(in.SymbolEvidence.Coverage)),
+		}
+		for _, use := range in.SymbolEvidence.Uses {
+			normalized, err := normalizeLocalUse(use, moduleByPath)
+			if err != nil {
+				return Graph{}, err
+			}
+			evidence.Uses = append(evidence.Uses, normalized)
+		}
+		sort.Slice(evidence.Uses, func(i, j int) bool { return localUseLess(evidence.Uses[i], evidence.Uses[j]) })
+		evidence.Uses = deduplicateLocalUses(evidence.Uses)
+
+		for _, module := range in.SymbolEvidence.JSXModules {
+			normalizedPath, err := NormalizeRepositoryPath(module)
+			if err != nil {
+				return Graph{}, fmt.Errorf("normalize jsx module %q: %w", module, err)
+			}
+			if _, ok := moduleByPath[normalizedPath]; !ok {
+				return Graph{}, fmt.Errorf("modulegraph: jsx module %q is not a known module", normalizedPath)
+			}
+			evidence.JSXModules = append(evidence.JSXModules, normalizedPath)
+		}
+		sort.Strings(evidence.JSXModules)
+		evidence.JSXModules = dedupeSortedStrings(evidence.JSXModules)
+
+		for _, issue := range in.SymbolEvidence.Coverage {
+			if !issue.Kind.Valid() {
+				return Graph{}, fmt.Errorf("modulegraph: invalid symbol coverage kind %q", issue.Kind)
+			}
+			evidence.Coverage = append(evidence.Coverage, issue)
+		}
+		sort.Slice(evidence.Coverage, func(i, j int) bool { return coverageLess(evidence.Coverage[i], evidence.Coverage[j]) })
+		evidence.Coverage = deduplicateCoverage(evidence.Coverage)
+		out.SymbolEvidence = evidence
+	}
+
 	out.Roots = structuralRoots(out.Modules, out.Edges)
 
 	return out, nil
+}
+
+func normalizeLocalUse(use LocalUse, modules map[string]Module) (LocalUse, error) {
+	if !use.Kind.Valid() {
+		return LocalUse{}, fmt.Errorf("modulegraph: invalid local use kind %q", use.Kind)
+	}
+	if use.Line < 0 {
+		return LocalUse{}, fmt.Errorf("modulegraph: negative local use line in %q", use.Module)
+	}
+	if strings.TrimSpace(use.Local) == "" {
+		return LocalUse{}, fmt.Errorf("modulegraph: local use in %q names no local", use.Module)
+	}
+	// A property use must name the property, and an opaque use must not: an opaque reference is exactly
+	// one whose reached symbol is unknown, so carrying a property would misrepresent it as observed.
+	if use.Kind == LocalUseProperty && strings.TrimSpace(use.Property) == "" {
+		return LocalUse{}, fmt.Errorf("modulegraph: property use of %q names no property", use.Local)
+	}
+	if use.Kind == LocalUseOpaque && strings.TrimSpace(use.Property) != "" {
+		return LocalUse{}, fmt.Errorf("modulegraph: opaque use of %q must not name a property", use.Local)
+	}
+	module, err := NormalizeRepositoryPath(use.Module)
+	if err != nil {
+		return LocalUse{}, fmt.Errorf("normalize local use module %q: %w", use.Module, err)
+	}
+	if _, ok := modules[module]; !ok {
+		return LocalUse{}, fmt.Errorf("modulegraph: local use module %q is not a known module", module)
+	}
+	use.Module = module
+	return use, nil
+}
+
+func dedupeSortedStrings(sorted []string) []string {
+	if len(sorted) < 2 {
+		return sorted
+	}
+	out := sorted[:1]
+	for _, value := range sorted[1:] {
+		if value != out[len(out)-1] {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func localUseLess(a, b LocalUse) bool {
+	if a.Module != b.Module {
+		return a.Module < b.Module
+	}
+	if a.Local != b.Local {
+		return a.Local < b.Local
+	}
+	if a.Kind != b.Kind {
+		return a.Kind < b.Kind
+	}
+	if a.Property != b.Property {
+		return a.Property < b.Property
+	}
+	if a.Detail != b.Detail {
+		return a.Detail < b.Detail
+	}
+	return a.Line < b.Line
+}
+
+// deduplicateLocalUses collapses references that carry identical evidence, keeping the FIRST line so a
+// reader is pointed at the earliest occurrence.
+func deduplicateLocalUses(sorted []LocalUse) []LocalUse {
+	if len(sorted) < 2 {
+		return sorted
+	}
+	same := func(a, b LocalUse) bool {
+		return a.Module == b.Module && a.Local == b.Local && a.Kind == b.Kind &&
+			a.Property == b.Property && a.Detail == b.Detail
+	}
+	out := sorted[:1]
+	for _, use := range sorted[1:] {
+		if same(out[len(out)-1], use) {
+			continue
+		}
+		out = append(out, use)
+	}
+	return out
 }
 
 func normalizeEdge(edge Edge, modules map[string]Module) (Edge, error) {

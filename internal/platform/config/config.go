@@ -295,6 +295,12 @@ type Config struct {
 	// lifecycle (SYNAPSE_JUDGMENTS_ENABLED).
 	JSReachabilityEnabled bool
 
+	// JSSymbolReachabilityEnabled turns on the TIER-2 JavaScript/TypeScript pass: not "is this package
+	// imported" but "is the affected EXPORT reached". It is a strictly stronger and strictly more
+	// dangerous claim — a wrong negative suppresses a real vulnerability — so it is separately gated and
+	// refuses to answer whenever a binding escapes observation.
+	JSSymbolReachabilityEnabled bool
+
 	// RustReachabilityEnabled, PHPReachabilityEnabled and RubyReachabilityEnabled turn on deterministic
 	// Tier-1 import-reachability for those ecosystems: a declared dependency that first-party source
 	// never references becomes not_reachable, which the export path turns into an OpenVEX not_affected
@@ -492,6 +498,7 @@ func Load() Config {
 		ReachabilityEnabled:          getbool("SYNAPSE_REACHABILITY_ENABLED", true),
 		PyReachabilityEnabled:        getbool("SYNAPSE_PYREACH_ENABLED", false),
 		JSReachabilityEnabled:        getbool("SYNAPSE_JSREACH_ENABLED", false),
+		JSSymbolReachabilityEnabled:  getbool("SYNAPSE_JSREACH_TIER2_ENABLED", false),
 		RustReachabilityEnabled:      getbool("SYNAPSE_REACH_RUST", false),
 		PHPReachabilityEnabled:       getbool("SYNAPSE_REACH_PHP", false),
 		RubyReachabilityEnabled:      getbool("SYNAPSE_REACH_RUBY", false),

@@ -11,10 +11,16 @@ type rawImport struct {
 	position  modulegraph.Position
 }
 
-// extraction is everything one source file yields: its import sites and its coverage hazards.
+// extraction is everything one source file yields: its import sites, the references it makes to its own
+// locals (Tier-2 symbol evidence) and its coverage hazards.
 type extraction struct {
-	imports []rawImport
-	hazards []hazard
+	imports   []rawImport
+	localUses []rawLocalUse
+	hazards   []hazard
+	// sawJSX records that this file actually contains JSX, whatever its extension.
+	sawJSX bool
+	// symbolBudgetHit records that the file's symbol references could not be fully enumerated.
+	symbolBudgetHit bool
 }
 
 // indirectLoaders are call-shaped module loaders this scanner does not extract specifiers from. Each one
@@ -73,7 +79,13 @@ type extractor struct {
 	lex *lexer
 	// buf holds tokens pushed back by the recognisers (single-token lookahead is not always enough).
 	buf []token
-	out extraction
+	// history is the recently consumed main-loop tokens, used to recover a CommonJS binding pattern
+	// (`const { a } = require('pkg')`) whose left-hand side has already been passed.
+	history []token
+	// seenLocalUses deduplicates references at the point of record, so the budget counts evidence
+	// rather than occurrences.
+	seenLocalUses map[rawLocalUse]bool
+	out           extraction
 }
 
 func newExtractor(src []byte, jsxAware bool) *extractor {
@@ -125,6 +137,12 @@ func (e *extractor) run() extraction {
 		t := e.next()
 		if t.kind == tokenEOF {
 			break
+		}
+
+		// Tier-2 symbol evidence. Identifiers consumed inside an import clause never reach here, so a
+		// binding site introduces a local without also counting as a use of it.
+		if t.kind == tokenIdent {
+			e.observeLocal(t, prev, havePrev)
 		}
 
 		switch {
@@ -184,10 +202,13 @@ func (e *extractor) run() extraction {
 			}
 		}
 
+		e.recordHistory(t)
 		prev2, prev, havePrev = prev, t, true
 	}
 
 	e.out.hazards = append(e.out.hazards, e.lex.hazards...)
+	e.out.sawJSX = e.lex.sawJSX
+	e.out.localUses = keepImportedLocals(e.out.imports, e.out.localUses)
 	return e.out
 }
 
@@ -548,8 +569,24 @@ func (e *extractor) handleExportKeyword(kw token) {
 			e.addHazard(hazardUnsupportedLoader, kw.line, "unrecognised export clause")
 			return
 		}
-		// A local re-export list (`export {a}`) has no `from` and creates no module edge.
+		// A local re-export list (`export {a}`) creates no module edge — but it is NOT nothing. Re-exporting
+		// a namespace local republishes every export of the package to every consumer, and the identifiers
+		// were consumed by readNamedBindings so they never reach observeLocal. Recording them as escaping
+		// is what stops `import * as _; export { _ }` from looking like an unused package.
 		if from := e.peek(); from.kind != tokenIdent || from.text != "from" {
+			for _, binding := range bindings {
+				// In an EXPORT clause the roles are reversed relative to an import: `export { local as
+				// public }` parses as Imported="local", Local="public", and it is `local` that holds the
+				// package.
+				local := binding.Imported
+				if local == "" {
+					local = binding.Local
+				}
+				if local != "" {
+					e.addLocalUse(rawLocalUse{local: local, kind: modulegraph.LocalUseOpaque,
+						detail: "the binding is re-exported", line: kw.line})
+				}
+			}
 			return
 		}
 		specifier, escaped, sok := e.readFromSpecifier(kw, "export")
@@ -630,10 +667,28 @@ func (e *extractor) handleRequire(kw, prev, prev2 token, havePrev bool) {
 			}
 		}
 		if spec, escaped, ok := e.readLiteralCallArgument(); ok {
+			// A call whose result is immediately navigated (`require('x').y`, `require('x')()`) binds a
+			// sub-object, not the module. The argument reader leaves the call's own ")" pending, so the
+			// look-ahead has to step past it and then put both tokens back.
+			navigated := false
+			closing := e.next()
+			if closing.kind == tokenPunct && closing.text == ")" {
+				if next := e.peek(); next.kind == tokenPunct {
+					switch next.text {
+					case ".", "?.", "[", "(":
+						navigated = true
+					}
+				}
+			}
+			e.push(closing)
 			e.addImport(rawImport{
 				specifier: spec,
 				kind:      modulegraph.ImportCommonJS,
-				position:  modulegraph.Position{Line: kw.line, Column: kw.column},
+				// The binding pattern is recovered from the tokens already consumed. When it cannot be
+				// modelled the bindings are nil, which downstream means the whole module object is bound
+				// and any export could be reached.
+				bindings: commonJSBindings(e.history, navigated),
+				position: modulegraph.Position{Line: kw.line, Column: kw.column},
 			}, escaped)
 			return
 		}
