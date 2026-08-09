@@ -24,6 +24,7 @@ import (
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 )
 
@@ -69,6 +70,14 @@ func (harnessCoverage) Summary(_ context.Context, tenant shared.ID) (coverageuc.
 		sum.RowsByVerdict[r.Verdict]++
 	}
 	return sum, nil
+}
+
+// harnessSARIF is a no-op ingester: every harness assertion on the import route is a DENY that authz or
+// withEngTenant rejects before the handler runs.
+type harnessSARIF struct{}
+
+func (harnessSARIF) Ingest(context.Context, sarifingest.IngestRequest) (sarifingest.IngestResult, error) {
+	return sarifingest.IngestResult{}, nil
 }
 
 type fakeRuntimeVerifier struct{}
@@ -180,6 +189,7 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetWriteupDrafts(&fakeWriteupDrafts{}) // register the writeup-draft sign-off routes so the harness guards their SoD gates
 	rt.SetRules(&fakeRules{})                 // register rule catalog routes so the harness guards their gates
 	rt.SetFleetCoverage(harnessCoverage{})    // register #413 fleet-coverage routes so the harness guards their view/tenant gates
+	rt.SetSARIFIngest(harnessSARIF{})         // register the #415 import route so the harness guards its operate/tenant gates
 	rt.EnableAgent(nil, nil, nil, nil, nil, 1, 8)
 	mux := rt.routes()
 
@@ -283,6 +293,12 @@ func TestHostileHarness(t *testing.T) {
 		{"machine may not get rule (view/SoD)", "agent", "tenantA", true, http.MethodGet, "/api/v1/rules/go:sql-injection", http.StatusForbidden},
 		{"readonly may list rules (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/rules", http.StatusOK},
 		{"readonly may get rule (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/rules/go:sql-injection", http.StatusOK},
+		// Third-party SARIF ingest (#415) is an OPERATE action, tenant-gated like any engagement child.
+		// A machine role may not import, and a readonly principal may not either — an external report
+		// must never enter the queue without an accountable operator behind it.
+		{"machine may not import sarif (operate/SoD)", "agent", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/sarif", http.StatusForbidden},
+		{"readonly may not import sarif (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/sarif", http.StatusForbidden},
+		{"cross-tenant sarif import → 404", "consultant", "tenantB", true, http.MethodPost, "/api/v1/engagements/engA/sarif", http.StatusNotFound},
 		// Fleet coverage (#413, PermView): machine roles denied; readonly may read; cross-tenant agent
 		// detail is 404 (never an existence-revealing 403). The cross-tenant LIST emptiness (a 200 that
 		// leaks nothing) is asserted on the body just below the table.

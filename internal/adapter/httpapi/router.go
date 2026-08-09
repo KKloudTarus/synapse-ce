@@ -62,6 +62,7 @@ type Router struct {
 	projects        projectService        // optional; nil ⇒ project routes are not registered
 	assets          assetService          // optional; nil ⇒ fleet asset routes are not registered
 	coverage        coverageService       // optional; nil ⇒ fleet coverage/agent-view routes are not registered
+	sarif           sarifIngester         // optional; nil ⇒ the third-party SARIF import route is not registered
 	fleet           *fleetRouter          // optional; nil ⇒ agent transport plane is not served
 	fleetAdmin      fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
 	qualityGates    qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
@@ -283,6 +284,12 @@ func (rt *Router) routes() *http.ServeMux {
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/live-recon", rt.authz(userdom.PermOperate, rt.setLiveRecon))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/findings", rt.authz(userdom.PermView, rt.withEngTenant(rt.listFindings)))
 	mux.HandleFunc("POST /api/v1/engagements/{id}/findings", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.createFinding)))
+	if rt.sarif != nil {
+		// Ingesting a third-party report is an OPERATE action on the engagement, tenant-scoped like any
+		// other child resource. It grants no promotion authority: an imported finding can never confirm
+		// itself through the judgment gate.
+		mux.HandleFunc("POST /api/v1/engagements/{id}/sarif", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.importSARIF)))
+	}
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan", rt.authz(userdom.PermView, rt.withEngTenant(rt.latestScan)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan-status", rt.authz(userdom.PermView, rt.withEngTenant(rt.scanStatus)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan-runs", rt.authz(userdom.PermView, rt.withEngTenant(rt.scanRuns)))

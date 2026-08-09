@@ -134,6 +134,7 @@ import (
 	reportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/report"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sbomcrosscheckjudge"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/srcreach"
@@ -1082,6 +1083,19 @@ func main() {
 			log.Info("fleet coverage + agent-health views ENABLED (no default-to-clean; tenant-scoped)")
 		}
 	}
+	// Third-party SARIF ingest (#415). External findings join the same asset model, prioritisation and
+	// governance path as first-party ones, but stay structurally distinguishable and carry NO promotion
+	// authority: an external tool's confidence is not a distinct verifier's sealed verdict.
+	{
+		sarifSvc, serr := sarifingest.NewService(memory.NewImportedFindingStore(), findingRepo, auditLog, clock, ids)
+		if serr != nil {
+			log.Error("sarif ingest init failed", "err", serr)
+			os.Exit(1)
+		}
+		router.SetSARIFIngest(sarifSvc)
+		log.Info("third-party SARIF ingest ENABLED (provenance mandatory; imported findings cannot self-promote)")
+	}
+
 	if cfg.FleetEnabled {
 		// SECURITY: a missing/short signer key fails startup closed rather than boot a forgeable
 		// work-order signer (worksign.New rejects keys under 32 bytes).

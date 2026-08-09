@@ -94,6 +94,11 @@ func main() {
 		}
 	case "scan":
 		runScan()
+	case "import-sarif":
+		if err := importSARIF(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
+			os.Exit(1)
+		}
 	case "sync-advisories":
 		if len(os.Args) < 3 {
 			usage() // missing <dir> exits 2, consistent with scan's missing-path

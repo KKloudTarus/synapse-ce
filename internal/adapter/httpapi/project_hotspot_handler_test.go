@@ -147,9 +147,9 @@ func TestListProjectHotspotsBatchesRuleLookup(t *testing.T) {
 	req.SetPathValue("key", "payments")
 	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice", TenantID: "tenant-a"}))
 	rec := httptest.NewRecorder()
-	
+
 	rt.listProjectHotspots(rec, req)
-	
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
 	}
