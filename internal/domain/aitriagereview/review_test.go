@@ -84,3 +84,35 @@ func TestClaimAssignsOnlyHumanReviewer(t *testing.T) {
 		t.Fatalf("owned review was taken over: %v", err)
 	}
 }
+
+// TestDecideRefusesEveryMachinePrincipalFamily pins the second line of the separation-of-duties check.
+// RBAC is the first line and machine roles hold no human-API permission, but in-process callers do not
+// pass through it -- so this must cover the prefixes the codebase actually mints. "system:" is the
+// largest family (system:dast-engine, system:taint-scan, system:cross-check, ...) and was missing, which
+// left the widest class of machine principal able to decide a human review.
+func TestDecideRefusesEveryMachinePrincipalFamily(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	base, err := NewPending(validInput(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, actor := range []string{
+		"system:dast-engine", "system:taint-scan", "system:cross-check",
+		"machine:worker", "bot:triage", "service:scanner",
+		"SYSTEM:DAST-ENGINE", "  system:dast-engine  ",
+	} {
+		// Claimed by the machine actor too, so the owner check cannot be what refuses it -- the point is
+		// that a machine principal is rejected on its own merits.
+		if _, err := base.Decide(DecisionAccept, actor, "reviewed evidence", 1, now.Add(time.Second)); !errors.Is(err, shared.ErrValidation) {
+			t.Errorf("machine actor %q must be rejected as a machine, got %v", actor, err)
+		}
+	}
+	// A human owner must still be able to decide, or the check would refuse everyone.
+	claimed, err := base.Claim("alice", 1, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := claimed.Decide(DecisionAccept, "alice", "verified unreachable", claimed.Version, now.Add(2*time.Second)); err != nil {
+		t.Fatalf("a human owner must be able to decide: %v", err)
+	}
+}

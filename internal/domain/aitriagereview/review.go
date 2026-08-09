@@ -187,9 +187,29 @@ func (r Review) Claim(actor string, expectedVersion int, now time.Time) (Review,
 	return r, nil
 }
 
+// machineActor reports whether actor is a non-human principal.
+//
+// This is the SECOND line: RBAC is the first, and machine roles are granted nothing on the human REST
+// API (user.rolePermissions), so a machine cannot reach Decide over HTTP at all. This exists for the
+// in-process callers that do not pass through that gate.
+//
+// It must therefore cover the prefixes this codebase actually mints, and "system:" is the largest family
+// of them -- system:dast-engine, system:dast-verifier, system:taint-scan, system:cross-check,
+// system:callgraph-engine and more are all reserved capability identities. Omitting it left the widest
+// class of machine principal able to decide a human review, which is exactly what this check exists to
+// prevent.
+//
+// A prefix DENYLIST fails open on the next identity scheme somebody invents. The durable fix is to
+// invert it -- require an actor to be a known human principal -- but that needs a definition of human
+// identity that this package does not own, so it is left as a follow-up rather than guessed at here.
 func machineActor(actor string) bool {
 	a := strings.ToLower(strings.TrimSpace(actor))
-	return strings.HasPrefix(a, "agent:") || strings.HasPrefix(a, "llm:") || strings.HasPrefix(a, "mcp:")
+	for _, prefix := range []string{"agent:", "llm:", "mcp:", "system:", "machine:", "bot:", "service:"} {
+		if strings.HasPrefix(a, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func sameIdentity(actor, model string) bool {
