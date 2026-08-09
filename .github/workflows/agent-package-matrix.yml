@@ -151,18 +151,26 @@ jobs:
         run: |
           set -euo pipefail
           pkg="$(ls out/*.${{ matrix.format }})"
-          gateway="$(ip -4 route show default | awk '{print $3}' | head -n1)"
-          test -n "${gateway}"
 
-          # The container reaches the control plane over the docker bridge gateway. --network=host
-          # would hide a class of packaging bug: a unit that only works when the network happens to be
-          # the runner's own.
+          # NETWORK CHOICE, stated because it is a real limitation of this test.
+          #
+          # The agent refuses a cleartext control-plane URL unless the host is loopback — the bearer
+          # credential must not traverse plaintext (fleetclient.ValidateControlPlaneURL). That control
+          # is correct and the job must not weaken it, so the container shares the runner's network
+          # namespace and reaches the control plane at 127.0.0.1, which is the loopback exception the
+          # code explicitly sanctions for local testing.
+          #
+          # The cost: this row does NOT exercise TLS, because synapse-api terminates no TLS in
+          # process. What it does exercise is what the requirement asks for — that the PACKAGE
+          # installs, that what it shipped runs, enrols and heartbeats, and that removal is clean.
+          # TLS belongs to the deployment in front of the control plane and is out of this job's
+          # scope; saying so is better than a green tick that implies otherwise.
           #
           # The package is mounted at a FIXED path so the in-container script needs no interpolated
           # basename inside nested quoting.
           docker run --rm \
-            --add-host "control-plane:${gateway}" \
-            -e SYNAPSE_FLEET_URL="http://control-plane:8080" \
+            --network=host \
+            -e SYNAPSE_FLEET_URL="http://127.0.0.1:8080" \
             -e SYNAPSE_FLEET_ENROL_TOKEN="${ENROL_TOKEN}" \
             -e SYNAPSE_LIBC_FLOOR="${SYNAPSE_LIBC_FLOOR}" \
             -e INSTALL_CMD="${{ matrix.install }}" \
