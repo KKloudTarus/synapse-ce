@@ -29,7 +29,7 @@ func NewFindingRepository(pool *pgxpool.Pool) *FindingRepository {
 
 // ClaimFindingProjection atomically reserves the SAST or legacy runtime DAST projection mode for a judgment.
 func (r *FindingRepository) ClaimFindingProjection(ctx context.Context, tenantID, engagementID, judgmentID shared.ID, mode ports.FindingProjectionMode) error {
-	if tenantID == "" || engagementID == "" || judgmentID == "" || !mode.Valid() {
+	if tenantID == "" || engagementID == "" || judgmentID == "" || mode != ports.FindingProjectionSAST && mode != ports.FindingProjectionDAST {
 		return fmt.Errorf("%w: invalid finding projection claim", shared.ErrValidation)
 	}
 	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
