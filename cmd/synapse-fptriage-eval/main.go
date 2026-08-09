@@ -72,13 +72,24 @@ func run(ctx context.Context, datasetPath, outputPath string) error {
 		if err != nil {
 			return fmt.Errorf("create report: %w", err)
 		}
-		defer out.Close()
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(report); err != nil {
+		if out != os.Stdout {
+			_ = out.Close()
+		}
 		return fmt.Errorf("write report: %w", err)
+	}
+	// Close is REPORTED, not deferred-and-dropped. A write can fail at flush time, so a discarded
+	// Close error means a truncated evaluation report written with exit status 0 -- and this report is
+	// the artefact someone reads to decide whether AI triage is good enough to enforce. Reporting a
+	// partial report as a success is the one outcome this command must not produce.
+	if out != os.Stdout {
+		if err := out.Close(); err != nil {
+			return fmt.Errorf("close report (it may be incomplete): %w", err)
+		}
 	}
 	return nil
 }
