@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -159,9 +158,6 @@ func TestRunHelperRateLimit(t *testing.T) {
 }
 
 func TestRunHelperCrawlWallClockCancelsBlockedIO(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows does not interrupt blocked helper HTTP reads")
-	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/slow" {
 			<-r.Context().Done()

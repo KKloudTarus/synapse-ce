@@ -43,13 +43,25 @@ func NewService(engine ports.DASTEngine, guard *execution.Guard, ev *evidence.Se
 	return &Service{engine: engine, guard: guard, evidence: ev}, nil
 }
 
-// Execute requires an already admitted action, then reauthorizes every actual
-// helper request. The helper receives credentials only as vault placeholders in env.
-func (s *Service) Execute(ctx context.Context, admitted safety.AdmittedAction, config dastsession.Config, requests []dastsurface.Request) (ports.DASTOutcome, error) {
-	return s.execute(ctx, admitted, config, requests, ports.DefaultDASTRatePerSec, ports.DefaultDASTConcurrency)
+// Execute refuses, for the same reason Crawl does: without an approval-bound helper and configuration
+// digest there is nothing tying this run to what a human approved, and dastengine.Engine rightly rejects
+// such a plan. Refusing HERE names the missing binding instead of failing deep inside the engine with a
+// message about a digest the caller was never asked to supply.
+//
+// Use ExecuteWithBinding, passing the helper and digest from the approval whose argv commits to them --
+// exactly as dastworkflow/scan.go already does for CrawlWithRate.
+func (s *Service) Execute(_ context.Context, _ safety.AdmittedAction, _ dastsession.Config, _ []dastsurface.Request) (ports.DASTOutcome, error) {
+	return ports.DASTOutcome{}, fmt.Errorf("%w: DAST replay requires an approval-bound helper and configuration digest", shared.ErrValidation)
 }
 
-func (s *Service) execute(ctx context.Context, admitted safety.AdmittedAction, config dastsession.Config, requests []dastsurface.Request, ratePerSec, concurrency int) (ports.DASTOutcome, error) {
+// ExecuteWithBinding replays an approved request set. It reauthorizes every actual helper request; the
+// helper receives credentials only as vault placeholders in env. helperBin and configDigest come from
+// the approval that authorized this exact configuration.
+func (s *Service) ExecuteWithBinding(ctx context.Context, admitted safety.AdmittedAction, helperBin, configDigest string, config dastsession.Config, requests []dastsurface.Request) (ports.DASTOutcome, error) {
+	return s.execute(ctx, admitted, helperBin, configDigest, config, requests, ports.DefaultDASTRatePerSec, ports.DefaultDASTConcurrency)
+}
+
+func (s *Service) execute(ctx context.Context, admitted safety.AdmittedAction, helperBin, configDigest string, config dastsession.Config, requests []dastsurface.Request, ratePerSec, concurrency int) (ports.DASTOutcome, error) {
 	action := admitted.Action()
 	if action.Tool != ToolAuthenticatedDAST || action.Action != ActionAuthenticatedDAST || action.Target.Kind != engagement.TargetURL {
 		return ports.DASTOutcome{}, fmt.Errorf("%w: admitted action is not an authenticated DAST scan", shared.ErrValidation)
@@ -73,6 +85,7 @@ func (s *Service) execute(ctx context.Context, admitted safety.AdmittedAction, c
 		return ports.DASTOutcome{}, err
 	}
 	outcome, runErr := s.engine.Run(ctx, ports.DASTPlan{
+		HelperBin: helperBin, ConfigDigest: configDigest,
 		Target: action.Target.Value, Session: config, Requests: requests,
 		RatePerSec: ratePerSec, Concurrency: concurrency,
 		EngagementID: action.EngagementID, EgressPolicy: egressPolicy,

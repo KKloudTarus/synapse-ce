@@ -51,9 +51,7 @@ func (e *Evaluator) Evaluate(observations []ports.DASTObservation, selected []st
 		if err != nil {
 			continue
 		}
-		for _, result := range evaluate(observation, endpoint, allowed) {
-			findings = append(findings, result)
-		}
+		findings = append(findings, evaluate(observation, endpoint, allowed)...)
 	}
 	sort.Slice(findings, func(i, j int) bool {
 		if findings[i].CheckID != findings[j].CheckID {

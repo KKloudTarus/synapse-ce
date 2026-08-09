@@ -17,7 +17,6 @@ import (
 	"regexp"
 	"sort"
 
-	"golang.org/x/net/html"
 	"strconv"
 	"strings"
 	"time"
@@ -183,7 +182,7 @@ func (r *helperRunner) authenticate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	return success(response, r.session.Success)
 }
 
@@ -210,7 +209,7 @@ func (r *helperRunner) live(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	return success(response, r.session.Success)
 }
 
@@ -219,7 +218,7 @@ func (r *helperRunner) request(ctx context.Context, method, rawURL string) (port
 	if err != nil {
 		return ports.DASTObservation{}, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxProofBodyBytes+1))
 	if err != nil {
 		return ports.DASTObservation{}, errors.New("read DAST response")
@@ -279,11 +278,11 @@ func (r *helperRunner) do(ctx context.Context, method, rawURL string, login bool
 	if response.StatusCode >= 300 && response.StatusCode < 400 && response.Header.Get("Location") != "" {
 		redirect, err := response.Location()
 		if err != nil {
-			response.Body.Close()
+			_ = response.Body.Close()
 			return nil, errors.New("invalid DAST redirect")
 		}
 		if err := r.authorize(ctx, ports.DASTRequest{Method: http.MethodGet, URL: proofURL(redirect.String())}); err != nil {
-			response.Body.Close()
+			_ = response.Body.Close()
 			return nil, errAuthorizationDenied
 		}
 	}
@@ -316,7 +315,9 @@ func (r *helperRunner) applyAuth(req *http.Request) {
 			if field == "" {
 				field = binding.Name
 			}
-			req.AddCookie(&http.Cookie{Name: field, Value: os.Getenv(secretEnvName(binding.Name))})
+			// Request cookie, not a Set-Cookie: Secure/HttpOnly/SameSite are response directives and
+			// AddCookie serialises only Name=Value, so they would have no effect on the wire.
+			req.AddCookie(&http.Cookie{Name: field, Value: os.Getenv(secretEnvName(binding.Name))}) //nolint:gosec // G124 does not apply to an outgoing request cookie
 		}
 	}
 }
@@ -396,49 +397,6 @@ func proofURL(raw string) string {
 	u.RawQuery = query.Encode()
 	u.Fragment = ""
 	return u.String()
-}
-
-func discover(base *url.URL, observation ports.DASTObservation) []dastsurface.Request {
-	root, err := html.Parse(strings.NewReader(observation.BodyExcerpt))
-	if err != nil {
-		return nil
-	}
-	var requests []dastsurface.Request
-	var walk func(*html.Node)
-	walk = func(node *html.Node) {
-		if node.Type == html.ElementNode {
-			for _, attr := range node.Attr {
-				if (node.Data == "a" || node.Data == "area" || node.Data == "link") && strings.EqualFold(attr.Key, "href") {
-					if request, ok := discoveredRequest(base, observation.URL, attr.Val); ok {
-						requests = append(requests, request)
-					}
-				}
-			}
-		}
-		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			walk(child)
-		}
-	}
-	walk(root)
-	sort.Slice(requests, func(i, j int) bool { return requests[i].Key() < requests[j].Key() })
-	return requests
-}
-
-func discoveredRequest(base *url.URL, page, raw string) (dastsurface.Request, bool) {
-	u, err := url.Parse(raw)
-	if err != nil || raw == "" || strings.HasPrefix(raw, "#") || strings.HasPrefix(strings.ToLower(raw), "javascript:") {
-		return dastsurface.Request{}, false
-	}
-	pageURL, err := url.Parse(page)
-	if err != nil {
-		return dastsurface.Request{}, false
-	}
-	u = pageURL.ResolveReference(u)
-	if !sameOrigin(base, u.String()) {
-		return dastsurface.Request{}, false
-	}
-	request, err := dastsurface.NormalizeRequest(http.MethodGet, u.String())
-	return request, err == nil
 }
 
 func sameOrigin(base *url.URL, raw string) bool {

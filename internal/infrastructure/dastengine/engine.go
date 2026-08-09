@@ -76,12 +76,12 @@ func (e *Engine) Run(ctx context.Context, plan ports.DASTPlan, secretEnv []strin
 	if err != nil {
 		return ports.DASTOutcome{}, fmt.Errorf("open DAST authorization request pipe: %w", err)
 	}
-	defer requestR.Close()
+	defer func() { _ = requestR.Close() }()
 	decisionR, decisionW, err := os.Pipe()
 	if err != nil {
 		return ports.DASTOutcome{}, fmt.Errorf("open DAST authorization decision pipe: %w", err)
 	}
-	defer decisionR.Close()
+	defer func() { _ = decisionR.Close() }()
 
 	var authErr error
 	var authOnce sync.Once

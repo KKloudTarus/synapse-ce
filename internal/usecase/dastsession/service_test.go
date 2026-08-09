@@ -3,6 +3,8 @@ package dastsession
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,12 +39,31 @@ func (i *testIDs) NewID() shared.ID {
 	return shared.ID("evidence-" + string(rune('0'+i.next)))
 }
 
+const (
+	// The helper name the engine is configured with, and a 64-hex digest standing in for the hash of an
+	// approved configuration (dastworkflow/scan.go derives the real one and binds it into the approval).
+	testHelperBin    = "synapse-dast-helper"
+	testConfigDigest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+)
+
 type authorizingEngine struct {
 	requests []ports.DASTRequest
 	before   func(int)
 }
 
-func (e *authorizingEngine) Run(ctx context.Context, _ ports.DASTPlan, _ []string, authorize func(context.Context, ports.DASTRequest) error) (ports.DASTOutcome, error) {
+// Run mirrors the REAL engine's plan validation before doing anything else. A fake that accepts any
+// plan cannot disagree with dastengine.Engine about what a valid plan is -- which is exactly how a
+// service building a plan with no ConfigDigest passed its tests while being unable to execute.
+func (e *authorizingEngine) Run(ctx context.Context, plan ports.DASTPlan, _ []string, authorize func(context.Context, ports.DASTRequest) error) (ports.DASTOutcome, error) {
+	if err := plan.Session.Validate(); err != nil {
+		return ports.DASTOutcome{}, err
+	}
+	if strings.TrimSpace(plan.Target) == "" {
+		return ports.DASTOutcome{}, fmt.Errorf("%w: DAST target is required", shared.ErrValidation)
+	}
+	if len(plan.ConfigDigest) != 64 {
+		return ports.DASTOutcome{}, fmt.Errorf("%w: approved DAST configuration digest is required", shared.ErrValidation)
+	}
 	for i, request := range e.requests {
 		if e.before != nil {
 			e.before(i)
@@ -130,7 +151,7 @@ func TestExecuteAuthorizesEveryRequest(t *testing.T) {
 		{Method: "GET", URL: "https://203.0.113.10/one"},
 	}}
 	service, admitted, _, audit := sessionFixture(t, engine)
-	if _, err := service.Execute(context.Background(), admitted, validSession(), []dastsurface.Request{{Method: "GET", URL: "https://203.0.113.10/one"}}); err != nil {
+	if _, err := service.ExecuteWithBinding(context.Background(), admitted, testHelperBin, testConfigDigest, validSession(), []dastsurface.Request{{Method: "GET", URL: "https://203.0.113.10/one"}}); err != nil {
 		t.Fatal(err)
 	}
 	authorized := 0
@@ -162,7 +183,7 @@ func TestExecuteRejectsOriginAndWindowChanges(t *testing.T) {
 			engine := &authorizingEngine{}
 			service, admitted, clock, _ := sessionFixture(t, engine)
 			configure(engine, clock)
-			if _, err := service.Execute(context.Background(), admitted, validSession(), nil); !errors.Is(err, shared.ErrForbidden) {
+			if _, err := service.ExecuteWithBinding(context.Background(), admitted, testHelperBin, testConfigDigest, validSession(), nil); !errors.Is(err, shared.ErrForbidden) {
 				t.Fatalf("Execute err=%v", err)
 			}
 		})
