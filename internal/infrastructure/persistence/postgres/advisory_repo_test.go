@@ -24,11 +24,16 @@ func TestAdvisoryRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer pool.Close()
+	// t.Cleanup is LIFO. Register Close first so fixture deletion runs while the pool is still usable.
+	t.Cleanup(pool.Close)
 
 	repo := NewAdvisoryRepository(pool)
 	id := "GHSA-" + randHex(t)
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, "DELETE FROM advisories WHERE id=$1", id) })
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM advisories WHERE id=$1", id); err != nil {
+			t.Errorf("cleanup advisory %s: %v", id, err)
+		}
+	})
 
 	a := advisory.Advisory{
 		ID: id, Aliases: []string{"CVE-2024-9"}, Summary: "rce", CVSSScore: 9.8,

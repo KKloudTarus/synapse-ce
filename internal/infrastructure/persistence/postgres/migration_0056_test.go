@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pressly/goose/v3"
 
 	"github.com/KKloudTarus/synapse-ce/migrations"
@@ -26,11 +25,18 @@ func TestMigration0056BackfillsOnlyCanonicalRelativePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("goose open db: %v", err)
 	}
-	defer func() { _ = db.Close() }()
+	t.Cleanup(func() { _ = db.Close() })
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatalf("goose set dialect: %v", err)
 	}
+	// Migration tests share the integration database with repository tests. Always restore current
+	// HEAD, including when an assertion fails after a historical DownTo.
+	t.Cleanup(func() {
+		if err := Migrate(context.Background(), dsn); err != nil {
+			t.Errorf("restore latest schema: %v", err)
+		}
+	})
 	if err := goose.DownTo(db, ".", 55); err != nil {
 		t.Fatalf("goose down to 55: %v", err)
 	}
@@ -38,7 +44,7 @@ func TestMigration0056BackfillsOnlyCanonicalRelativePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 
 	tenantID, projectID := uuid.New().String(), uuid.New().String()
 	if _, err := pool.Exec(ctx, `INSERT INTO tenants (id, name) VALUES ($1, 'migration-0056')`, tenantID); err != nil {
@@ -48,15 +54,35 @@ func TestMigration0056BackfillsOnlyCanonicalRelativePaths(t *testing.T) {
 		t.Fatalf("insert project: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM projects WHERE id=$1", projectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM tenants WHERE id=$1", tenantID)
+		cleanupCtx := context.Background()
+		if _, err := pool.Exec(cleanupCtx, "DELETE FROM project_hotspots WHERE project_id=$1", projectID); err != nil {
+			t.Errorf("cleanup project hotspots: %v", err)
+		}
+		if _, err := pool.Exec(cleanupCtx, "DELETE FROM project_issues WHERE project_id=$1", projectID); err != nil {
+			t.Errorf("cleanup project issues: %v", err)
+		}
+		if _, err := pool.Exec(cleanupCtx, "DELETE FROM projects WHERE id=$1", projectID); err != nil {
+			t.Errorf("cleanup project: %v", err)
+		}
+		if _, err := pool.Exec(cleanupCtx, "DELETE FROM tenants WHERE id=$1", tenantID); err != nil {
+			t.Errorf("cleanup tenant: %v", err)
+		}
 	})
 
 	paths := []struct {
-		path     string
-		location string
-		want     *string
-	}{{"src/main.go", "src/main.go:7", stringPtr("src/main.go")}, {"/etc/passwd", "/etc/passwd:7", nil}, {"./main.go", "./main.go:7", nil}, {"../main.go", "../main.go:7", nil}, {"src/stale.go", "src/current.go:7", nil}}
+		path        string
+		location    string
+		issueWant   *string
+		hotspotWant *string
+	}{
+		{"src/main.go", "src/main.go:7", stringPtr("src/main.go"), stringPtr("src/main.go")},
+		{"/etc/passwd", "/etc/passwd:7", nil, nil},
+		{"./main.go", "./main.go:7", nil, nil},
+		{"../main.go", "../main.go:7", nil, nil},
+		// project_issues has both file and location and therefore refuses a mismatch. Hotspots only had
+		// location before v56, so the same canonical location is sufficient evidence to backfill it.
+		{"src/stale.go", "src/current.go:7", nil, stringPtr("src/current.go")},
+	}
 	now := time.Now().UTC()
 	for index, fixture := range paths {
 		issueID, hotspotID := uuid.New().String(), uuid.New().String()
@@ -78,26 +104,40 @@ func TestMigration0056BackfillsOnlyCanonicalRelativePaths(t *testing.T) {
 	}
 	for index, fixture := range paths {
 		ids := splitFixtureIDs(fixture.path)
-		for _, query := range []struct {
+		queries := []struct {
 			table string
 			id    string
-		}{{"project_issues", ids[0]}, {"project_hotspots", ids[1]}} {
+			want  *string
+		}{
+			{"project_issues", ids[0], fixture.issueWant},
+			{"project_hotspots", ids[1], fixture.hotspotWant},
+		}
+		for _, query := range queries {
 			var got *string
 			if err := pool.QueryRow(ctx, "SELECT source_file FROM "+query.table+" WHERE id=$1", query.id).Scan(&got); err != nil {
 				t.Fatalf("query %s %d: %v", query.table, index, err)
 			}
-			if (got == nil) != (fixture.want == nil) || got != nil && *got != *fixture.want {
-				t.Errorf("%s fixture %d source_file=%v, want %v", query.table, index, got, fixture.want)
+			if (got == nil) != (query.want == nil) || got != nil && *got != *query.want {
+				t.Errorf("%s fixture %d source_file=%v, want %v", query.table, index, got, query.want)
 			}
 		}
 	}
 	if err := goose.DownTo(db, ".", 55); err != nil {
 		t.Fatalf("goose down to 55: %v", err)
 	}
-	var value *string
-	err = pool.QueryRow(ctx, "SELECT source_file FROM project_issues LIMIT 1").Scan(&value)
-	if pgErr, ok := err.(*pgconn.PgError); !ok || pgErr.Code != "42703" {
-		t.Fatalf("source_file exists after down: %T %v", err, err)
+	// Check schema state directly instead of depending on whether pgx reports an undefined column as
+	// PgError or wraps it in a PrepareError. The contract is simply that Down removed the columns.
+	for _, table := range []string{"project_issues", "project_hotspots"} {
+		var exists bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema='public' AND table_name=$1 AND column_name='source_file'
+		)`, table).Scan(&exists); err != nil {
+			t.Fatalf("inspect %s schema after down: %v", table, err)
+		}
+		if exists {
+			t.Errorf("source_file still exists on %s after Down", table)
+		}
 	}
 	if err := goose.UpTo(db, ".", 56); err != nil {
 		t.Fatalf("goose up to 56 again: %v", err)

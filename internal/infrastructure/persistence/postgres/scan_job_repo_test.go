@@ -22,7 +22,9 @@ func TestScanJobStorePersistsDebugEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer pool.Close()
+	// t.Cleanup is LIFO. Close must be registered before fixture cleanup so a second suite run sees
+	// the same database state as the first one did.
+	t.Cleanup(pool.Close)
 
 	store := NewScanJobStore(pool)
 	job := ports.ScanJob{
@@ -46,7 +48,11 @@ func TestScanJobStorePersistsDebugEvents(t *testing.T) {
 	if err := store.Save(ctx, job); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, "DELETE FROM scan_jobs WHERE id=$1", job.ID) })
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM scan_jobs WHERE id=$1", job.ID); err != nil {
+			t.Errorf("cleanup scan job %s: %v", job.ID, err)
+		}
+	})
 
 	got, err := store.GetJob(ctx, job.ID)
 	if err != nil {
