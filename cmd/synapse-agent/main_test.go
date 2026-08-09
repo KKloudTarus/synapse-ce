@@ -92,7 +92,7 @@ func TestFirstRunEnrolsAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("credential must be persisted: %v", err)
 	}
-	// Windows protects the file through its ACL and does not expose POSIX permission bits through
+	// Windows represents file access through ACLs and does not expose POSIX permission bits through
 	// FileMode.Perm (regular files report 0666 even after Chmod). Keep the strict mode assertion on
 	// platforms where os.Chmod implements POSIX permissions.
 	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {

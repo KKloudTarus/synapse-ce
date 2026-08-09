@@ -84,7 +84,9 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          # jsdom's locked undici dependency requires worker_threads.markAsUncloneable,
+          # available from Node 22.19.0 onward.
+          node-version: 22.19.0
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6.0.9
