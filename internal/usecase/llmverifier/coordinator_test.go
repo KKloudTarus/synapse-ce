@@ -68,7 +68,7 @@ func TestAutoVerifyConfirmsAndRefutes(t *testing.T) {
 		{ID: "4", Capability: judgment.CapRiskNarrative, State: judgment.StateProposed, ProposedBy: "agent:x"}, // ungated → skip
 	}}
 	ver := &fakeVerifier{}
-	c := New(fakeLLM{content: `{"score":90,"rationale":"clearly a false positive"}`}, "cx/verifier", ver, lister)
+	c := New(fakeLLM{content: `{"score":90,"rationale":"clearly a false positive"}`}, "cx/proposer", "cx/verifier", ver, lister)
 	res, err := c.AutoVerify(context.Background(), "eng", "human:tester")
 	if err != nil {
 		t.Fatalf("AutoVerify: %v", err)
@@ -83,7 +83,7 @@ func TestAutoVerifyConfirmsAndRefutes(t *testing.T) {
 }
 
 func TestAutoVerifyLowScoreRefutes(t *testing.T) {
-	c := New(fakeLLM{content: `{"score":40,"rationale":"finding looks real"}`}, "cx/verifier", &fakeVerifier{},
+	c := New(fakeLLM{content: `{"score":40,"rationale":"finding looks real"}`}, "cx/proposer", "cx/verifier", &fakeVerifier{},
 		fakeLister{js: []judgment.Judgment{critique("1", "agent:x", judgment.StateProposed)}})
 	res, _ := c.AutoVerify(context.Background(), "eng", "human:tester")
 	if res.Confirmed != 0 || res.Refuted != 1 {
@@ -93,7 +93,7 @@ func TestAutoVerifyLowScoreRefutes(t *testing.T) {
 
 func TestAutoVerifySkipsSelfConfirm(t *testing.T) {
 	// A judgment proposed BY this verifier identity must be skipped (never self-confirm).
-	c := New(fakeLLM{content: `{"score":99,"rationale":"x"}`}, "cx/verifier", &fakeVerifier{},
+	c := New(fakeLLM{content: `{"score":99,"rationale":"x"}`}, "cx/proposer", "cx/verifier", &fakeVerifier{},
 		fakeLister{js: []judgment.Judgment{critique("1", "llm:cx/verifier", judgment.StateProposed)}})
 	res, _ := c.AutoVerify(context.Background(), "eng", "human:tester")
 	if res.Attempted != 0 || res.Skipped != 1 {
@@ -103,7 +103,7 @@ func TestAutoVerifySkipsSelfConfirm(t *testing.T) {
 
 func TestAutoVerifyBestEffortOnLLMError(t *testing.T) {
 	ver := &fakeVerifier{}
-	c := New(fakeLLM{err: errors.New("gateway 503")}, "cx/verifier", ver,
+	c := New(fakeLLM{err: errors.New("gateway 503")}, "cx/proposer", "cx/verifier", ver,
 		fakeLister{js: []judgment.Judgment{critique("1", "agent:x", judgment.StateProposed)}})
 	res, err := c.AutoVerify(context.Background(), "eng", "human:tester")
 	if err != nil {
@@ -111,6 +111,51 @@ func TestAutoVerifyBestEffortOnLLMError(t *testing.T) {
 	}
 	if res.Errors != 1 || len(ver.calls) != 0 {
 		t.Errorf("LLM error must skip Verify and count an error, got %+v calls=%v", res, ver.calls)
+	}
+}
+
+func TestAutoVerifyRejectsOutOfRangeScore(t *testing.T) {
+	for _, score := range []string{"-1", "101", "999"} {
+		t.Run(score, func(t *testing.T) {
+			ver := &fakeVerifier{}
+			c := New(fakeLLM{content: `{"score":` + score + `,"rationale":"malformed"}`}, "cx/proposer", "cx/verifier", ver,
+				fakeLister{js: []judgment.Judgment{critique("1", "agent:x", judgment.StateProposed)}})
+			res, err := c.AutoVerify(context.Background(), "eng", "human:tester")
+			if err != nil {
+				t.Fatalf("batch must keep a malformed model reply best-effort: %v", err)
+			}
+			if res.Attempted != 1 || res.Errors != 1 || res.Confirmed != 0 || res.Refuted != 0 {
+				t.Fatalf("out-of-range score must fail closed, got %+v", res)
+			}
+			if len(ver.calls) != 0 {
+				t.Fatalf("out-of-range score reached the judgment gate: %+v", ver.calls)
+			}
+		})
+	}
+}
+
+func TestAutoVerifyRejectsAliasedOrMissingModelIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, proposer, verifier string
+	}{
+		{"same model", "gpt-4o", "gpt-4o"},
+		{"provider alias", "gpt-4o", "router/openai/GPT-4O"},
+		{"dated alias", "gpt-4o", "openai/gpt-4o-2024-08-06"},
+		{"missing proposer", "", "gpt-4o"},
+		{"missing verifier", "gpt-4o", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ver := &fakeVerifier{}
+			c := New(fakeLLM{content: `{"score":99,"rationale":"x"}`}, tc.proposer, tc.verifier, ver,
+				fakeLister{js: []judgment.Judgment{critique("1", "agent:x", judgment.StateProposed)}})
+			res, err := c.AutoVerify(context.Background(), "eng", "human:tester")
+			if err != nil {
+				t.Fatalf("AutoVerify: %v", err)
+			}
+			if res != (Result{}) || len(ver.calls) != 0 {
+				t.Fatalf("non-distinct model identity must disable auto-verify: result=%+v calls=%+v", res, ver.calls)
+			}
+		})
 	}
 }
 
@@ -130,7 +175,7 @@ func (r *recordingLLM) Chat(_ context.Context, req ports.ChatRequest) (ports.Cha
 // of the 75 bar across runs — a sealed verdict must be reproducible from the audit record.
 func TestAssessRequestIsGreedy(t *testing.T) {
 	llm := &recordingLLM{content: `{"score":90,"rationale":"clearly a false positive"}`}
-	c := New(llm, "cx/verifier", &fakeVerifier{},
+	c := New(llm, "cx/proposer", "cx/verifier", &fakeVerifier{},
 		fakeLister{js: []judgment.Judgment{critique("1", "agent:x", judgment.StateProposed)}})
 	if _, err := c.AutoVerify(context.Background(), "eng", "human:tester"); err != nil {
 		t.Fatalf("AutoVerify: %v", err)
@@ -147,14 +192,21 @@ func TestAssessRequestIsGreedy(t *testing.T) {
 }
 
 func TestParseVerdict(t *testing.T) {
-	for _, bad := range []string{"", "no json", `{"rationale":"x"}` /* no score */} {
+	for _, bad := range []string{
+		"",
+		"no json",
+		`{"rationale":"x"}`, // no score
+		`{"score":-1,"rationale":"x"}`,
+		`{"score":101,"rationale":"x"}`,
+		`{"score":999,"rationale":"x"}`,
+	} {
 		if _, _, ok := parseVerdict(bad); ok {
 			t.Errorf("parseVerdict(%q) must fail", bad)
 		}
 	}
-	// clamp + fence + prose tolerance
-	if s, _, ok := parseVerdict("```json\n{\"score\":150,\"rationale\":\"y\"}\n```"); !ok || s != 100 {
-		t.Errorf("fenced/over-100 score: got %d ok=%v, want 100", s, ok)
+	// Fence + prose tolerance remains for a valid score.
+	if s, _, ok := parseVerdict("```json\n{\"score\":100,\"rationale\":\"y\"}\n```"); !ok || s != 100 {
+		t.Errorf("fenced score: got %d ok=%v, want 100", s, ok)
 	}
 	if s, r, ok := parseVerdict(`here: {"score":80,"rationale":"ok"} done`); !ok || s != 80 || r != "ok" {
 		t.Errorf("prose-wrapped: %d %q %v", s, r, ok)

@@ -356,6 +356,64 @@ func TestStepBudgetTerminates(t *testing.T) {
 	}
 }
 
+func TestTokenBudgetBlocksTheCrossingToolCall(t *testing.T) {
+	llm := &scriptLLM{steps: []ports.ChatResponse{{
+		ToolCalls: []agent.ToolCall{toolCall("c1", agenttools.ToolStartRecon,
+			`{"tool":"subfinder","target":"app.acme.io","rationale":"must not run"}`)},
+		FinishReason: "tool_calls",
+		// total_tokens under-reports the components. The orchestrator must account the conservative
+		// prompt+completion sum (12), notice that it crossed the budget (10), and stop before gating or
+		// executing the proposed action.
+		Usage: agent.Usage{PromptTokens: 8, CompletionTokens: 4, TotalTokens: 1},
+	}}}
+	exec := &fakeExecutor{}
+	orch, ev, _ := newOrch(t, llm, exec, agent.ModeAuto, orchestrator.Config{MaxSteps: 8, TokenBudget: 10})
+
+	sess, err := orch.Run(context.Background(), "eng-1", "alice", "stay in budget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.Status != agent.StatusFailed || sess.TokensUsed != 12 {
+		t.Fatalf("crossing turn must fail with conservative accounting, got status=%s tokens=%d", sess.Status, sess.TokensUsed)
+	}
+	if exec.calls != 0 || countKind(t, ev, "agent_admission") != 0 {
+		t.Fatalf("over-budget tool call reached the gate/executor: calls=%d", exec.calls)
+	}
+	if len(llm.reqs) != 1 || llm.reqs[0].MaxTokens != 10 {
+		t.Fatalf("request output cap = %+v, want remaining session budget 10", llm.reqs)
+	}
+}
+
+func TestBudgetedSessionRejectsMissingOrNegativeUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		usage agent.Usage
+	}{
+		{"missing", agent.Usage{}},
+		{"negative prompt", agent.Usage{PromptTokens: -1, TotalTokens: 5}},
+		{"negative completion", agent.Usage{CompletionTokens: -1, TotalTokens: 5}},
+		{"negative total", agent.Usage{TotalTokens: -1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			llm := &scriptLLM{steps: []ports.ChatResponse{{
+				ToolCalls: []agent.ToolCall{toolCall("c1", agenttools.ToolStartRecon,
+					`{"tool":"subfinder","target":"app.acme.io","rationale":"must not run"}`)},
+				FinishReason: "tool_calls", Usage: tc.usage,
+			}}}
+			exec := &fakeExecutor{}
+			orch, _, _ := newOrch(t, llm, exec, agent.ModeAuto, orchestrator.Config{MaxSteps: 8, TokenBudget: 100})
+
+			sess, err := orch.Run(context.Background(), "eng-1", "alice", "validate accounting")
+			if err == nil {
+				t.Fatal("malformed provider usage must fail the run")
+			}
+			if sess.Status != agent.StatusFailed || exec.calls != 0 {
+				t.Fatalf("malformed usage reached execution: status=%s calls=%d", sess.Status, exec.calls)
+			}
+		})
+	}
+}
+
 // TestOneActionPerTurn: if the model emits parallel tool calls in one turn, the orchestrator
 // processes only the FIRST (the rest are dropped, to be re-proposed), so each turn stays
 // balanced/replayable. Here the first is in-scope start_recon; a second (out-of-scope) call in

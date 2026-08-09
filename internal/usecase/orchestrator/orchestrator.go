@@ -117,8 +117,8 @@ type approvalReader interface {
 // Config holds the run's tunables. Zero values get safe defaults in New.
 type Config struct {
 	Model               string
-	ProviderBase        string // recorded on the session for attribution; NEVER the API key
-	SystemPrompt        string // optional; defaults to DefaultSystemPrompt
+	ProviderBase        string        // recorded on the session for attribution; NEVER the API key
+	SystemPrompt        string        // optional; defaults to DefaultSystemPrompt
 	Temperature         float64       // 0 = provider default (not sent)
 	MaxTokens           int           // per Chat call (0 = provider default)
 	MaxSteps            int           // hard cap on planning turns (default 16)
@@ -298,15 +298,42 @@ func (o *Orchestrator) loop(ctx context.Context, sess agent.Session) (agent.Sess
 		if over, why := o.overBudget(ctx, sess); over {
 			return o.finish(ctx, sess, agent.StatusFailed, why)
 		}
+		maxTokens := o.cfg.MaxTokens
+		if sess.TokenBudgetMax > 0 {
+			remaining := sess.TokenBudgetMax - sess.TokensUsed
+			if maxTokens <= 0 || maxTokens > remaining {
+				// Bound this turn's generated output by what remains. Prompt tokens can still make the
+				// provider-reported total cross the session budget, so usage is rechecked below before
+				// any proposed tool call is allowed to proceed.
+				maxTokens = remaining
+			}
+		}
 		resp, err := o.llm.Chat(ctx, ports.ChatRequest{
 			Model: o.cfg.Model, Messages: transcript, Tools: tools,
-			Temperature: temperature, MaxTokens: o.cfg.MaxTokens,
+			Temperature: temperature, MaxTokens: maxTokens,
 		})
 		if err != nil {
 			return o.fail(ctx, sess, fmt.Errorf("llm chat: %w", err))
 		}
 		sess.Steps++
-		sess.TokensUsed += resp.Usage.TotalTokens
+		turnTokens, usageErr := validatedUsageTotal(resp.Usage)
+		if usageErr != nil {
+			return o.fail(ctx, sess, fmt.Errorf("llm chat: %w", usageErr))
+		}
+		if sess.TokenBudgetMax > 0 && turnTokens == 0 {
+			return o.fail(ctx, sess, fmt.Errorf("llm chat: provider omitted token usage for a budgeted session"))
+		}
+		updatedTokens := sess.TokensUsed + turnTokens
+		if updatedTokens < sess.TokensUsed { // both operands are non-negative; a decrease means int overflow
+			return o.fail(ctx, sess, fmt.Errorf("llm chat: token usage overflow"))
+		}
+		sess.TokensUsed = updatedTokens
+		if sess.BudgetExhausted() {
+			// Recheck BEFORE interpreting a tool call. Otherwise the response that crosses the hard
+			// budget can still cause an action, and only the following planning turn notices the cap.
+			return o.finish(ctx, sess, agent.StatusFailed,
+				fmt.Sprintf("token budget reached (%d/%d)", sess.TokensUsed, sess.TokenBudgetMax))
+		}
 
 		if len(resp.ToolCalls) == 0 {
 			// No proposal: the model produced its final answer – the goal is met (or it gave up).
@@ -366,6 +393,23 @@ func (o *Orchestrator) loop(ctx context.Context, sess agent.Session) (agent.Sess
 			return o.fail(ctx, sess, fmt.Errorf("save progress: %w", err))
 		}
 	}
+}
+
+// validatedUsageTotal treats provider accounting as untrusted input. Negative counters are malformed,
+// and total_tokens must never undercount the sum of prompt + completion tokens. Some compatible
+// gateways omit total_tokens while still returning the components, so use the conservative maximum.
+func validatedUsageTotal(u agent.Usage) (int, error) {
+	if u.PromptTokens < 0 || u.CompletionTokens < 0 || u.TotalTokens < 0 {
+		return 0, fmt.Errorf("provider returned negative token usage")
+	}
+	components := u.PromptTokens + u.CompletionTokens
+	if components < u.PromptTokens { // non-negative addition wrapped
+		return 0, fmt.Errorf("provider token usage overflow")
+	}
+	if u.TotalTokens > components {
+		return u.TotalTokens, nil
+	}
+	return components, nil
 }
 
 // lock acquires the single-active-execution guard for a session, or returns ok=true with a

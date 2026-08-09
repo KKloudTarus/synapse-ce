@@ -92,8 +92,9 @@ func (c *Coordinator) assess(ctx context.Context, j judgment.Judgment) (int, str
 }
 
 // parseVerdict extracts {score, rationale} from the model reply, tolerating a markdown fence / prose
-// around the object (the gateway does not reliably honor response_format). Score is clamped to 0..100 and
-// the rationale bounded; a reply with no JSON object or no numeric score fails (ok=false).
+// around the object (the gateway does not reliably honor response_format). Score is strict because it
+// directly controls confirmation at the evidence bar: an absent or out-of-range score fails closed rather
+// than being clamped into a valid decision. The rationale remains bounded audit text.
 func parseVerdict(content string) (int, string, bool) {
 	obj := extractJSONObject(content)
 	if obj == "" {
@@ -107,11 +108,8 @@ func parseVerdict(content string) (int, string, bool) {
 		return 0, "", false
 	}
 	score := *raw.Score
-	if score < 0 {
-		score = 0
-	}
-	if score > 100 {
-		score = 100
+	if score < 0 || score > 100 {
+		return 0, "", false
 	}
 	rationale := strings.TrimSpace(raw.Rationale)
 	if r := []rune(rationale); len(r) > maxRationale {

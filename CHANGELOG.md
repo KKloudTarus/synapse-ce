@@ -47,6 +47,11 @@ capabilities below are already shipped on `main`.
 
 ### Fixed
 
+- **Fail-closed AI validation.** Reject missing or out-of-range false-positive confidence and verifier
+  scores instead of coercing malformed model output into a valid judgment; canonicalize model aliases
+  before enforcing proposer/verifier separation; account conservatively for missing, negative, or
+  under-reported token usage before any tool call; prefer validated structured source locations; and
+  bound/token-check model-proposed SAST claims and risk-narrative driver lists before persistence.
 - **Bounded LLM output.** `ChatRequest.MaxTokens` was set by the agent, false-positive triage, and
   judgment-verifier call sites but never reached the OpenAI-compatible wire request, so provider defaults
   could exceed the intended output budget. The adapter now sends the current `max_completion_tokens`

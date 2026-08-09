@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
@@ -17,6 +18,14 @@ import (
 // no LLM prose reaches a deliverable).
 var driverRE = regexp.MustCompile(`^[a-z][a-z0-9_]*((<=|>=|==|!=|<|>)[0-9]+(\.[0-9]+)?)?$`)
 
+// These fields can be proposed by an LLM before a verifier reviews the claim. Keep their wire
+// representation bounded and token-shaped at the domain seam so model prose/control characters
+// cannot be persisted and later rendered as a deterministic SAST finding.
+var (
+	cweRE      = regexp.MustCompile(`^CWE-[0-9]{1,9}$`)
+	sastRuleRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
+)
+
 // maxClaimPathElems / maxClaimPathElemLen bound a reachability claim's call/dependency path so a
 // hostile or runaway proposer (agent or HTTP) cannot seal an unbounded path into the evidence ledger
 // + claim JSONB. Generous (a real path is far smaller); fail-closed at the one seam every propose
@@ -24,6 +33,9 @@ var driverRE = regexp.MustCompile(`^[a-z][a-z0-9_]*((<=|>=|==|!=|<|>)[0-9]+(\.[0
 const (
 	maxClaimPathElems   = 128
 	maxClaimPathElemLen = 256
+	maxSASTLocationLen  = 512
+	maxSASTRuleLen      = 128
+	maxRiskDrivers      = 32
 )
 
 // Claim is the TYPED, capability-discriminated payload of a Judgment. It is NEVER free prose
@@ -141,16 +153,24 @@ type SASTClaim struct {
 // Capability identifies this claim's brain.
 func (SASTClaim) Capability() Capability { return CapSAST }
 
-// Validate requires the structured fields that make a SAST hit renderable + dedupable.
+// Validate requires bounded, structured fields that make a SAST hit renderable + dedupable.
 func (c SASTClaim) Validate() error {
-	if strings.TrimSpace(c.CWE) == "" {
-		return fmt.Errorf("%w: sast claim requires a CWE", shared.ErrValidation)
+	if !cweRE.MatchString(c.CWE) {
+		return fmt.Errorf("%w: sast claim CWE must be a token like CWE-89", shared.ErrValidation)
 	}
 	if strings.TrimSpace(c.Location) == "" {
 		return fmt.Errorf("%w: sast claim requires a location", shared.ErrValidation)
 	}
-	if strings.TrimSpace(c.Rule) == "" {
-		return fmt.Errorf("%w: sast claim requires the rule id", shared.ErrValidation)
+	if len(c.Location) > maxSASTLocationLen {
+		return fmt.Errorf("%w: sast claim location exceeds %d bytes", shared.ErrValidation, maxSASTLocationLen)
+	}
+	for _, r := range c.Location {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("%w: sast claim location contains control characters", shared.ErrValidation)
+		}
+	}
+	if len(c.Rule) > maxSASTRuleLen || !sastRuleRE.MatchString(c.Rule) {
+		return fmt.Errorf("%w: sast claim rule must be a structured token of at most %d bytes", shared.ErrValidation, maxSASTRuleLen)
 	}
 	return nil
 }
@@ -170,6 +190,9 @@ func (RiskNarrativeClaim) Capability() Capability { return CapRiskNarrative }
 func (c RiskNarrativeClaim) Validate() error {
 	if len(c.Drivers) == 0 {
 		return fmt.Errorf("%w: risk narrative requires at least one driver", shared.ErrValidation)
+	}
+	if len(c.Drivers) > maxRiskDrivers {
+		return fmt.Errorf("%w: risk narrative has too many drivers (%d > %d)", shared.ErrValidation, len(c.Drivers), maxRiskDrivers)
 	}
 	for _, d := range c.Drivers {
 		if len(d) > 64 || !driverRE.MatchString(d) {

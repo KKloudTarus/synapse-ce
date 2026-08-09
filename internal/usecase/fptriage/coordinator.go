@@ -245,19 +245,23 @@ func parseCritique(content string) (judgment.CritiqueClaim, error) {
 	var raw struct {
 		Verdict    string `json:"verdict"`
 		Driver     string `json:"driver"`
-		Confidence int    `json:"confidence"`
+		Confidence *int   `json:"confidence"`
 	}
 	if err := json.Unmarshal([]byte(obj), &raw); err != nil {
 		return judgment.CritiqueClaim{}, fmt.Errorf("critique: decode reply: %w", err)
 	}
+	if raw.Confidence == nil {
+		return judgment.CritiqueClaim{}, fmt.Errorf("critique: confidence is required")
+	}
 	claim := judgment.CritiqueClaim{
 		Verdict:    judgment.CritiqueVerdict(strings.ToLower(strings.TrimSpace(raw.Verdict))),
 		Driver:     normalizeDriver(raw.Driver, raw.Verdict),
-		Confidence: clampConfidence(raw.Confidence),
+		Confidence: *raw.Confidence,
 	}
-	// The VERDICT stays strict (it is the actual decision, and only "refuted" ever suppresses); the driver
-	// is a normalized/defaulted label and the confidence is clamped, so a model that returns a valid
-	// verdict is never discarded over a cosmetic field.
+	// The verdict and confidence stay strict because both participate in the gate decision. In
+	// particular, never clamp an out-of-range model value to 100: that would turn malformed output into
+	// maximum confidence. The driver is only a bounded audit label, so it remains safe to normalize and
+	// default without granting authority.
 	if err := claim.Validate(); err != nil {
 		return judgment.CritiqueClaim{}, fmt.Errorf("critique: %w", err)
 	}
@@ -299,17 +303,6 @@ func normalizeDriver(d, verdict string) string {
 	default:
 		return "insufficient_context"
 	}
-}
-
-// clampConfidence bounds a model confidence into the 0..100 the domain requires.
-func clampConfidence(n int) int {
-	if n < 0 {
-		return 0
-	}
-	if n > 100 {
-		return 100
-	}
-	return n
 }
 
 // extractJSONObject recovers the first {...} object from a model reply, tolerating a leading ```json /
