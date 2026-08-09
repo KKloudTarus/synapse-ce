@@ -84,7 +84,12 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          # vite 8 requires ^20.19 || >=22.12, and vitest's forks pool needs
+          # worker_threads.markAsUncloneable. Node 20 resolved to a build without it, so every web test
+          # failed to start its worker — a red suite that said nothing about the code. Pinned to the
+          # 22 LTS line, which satisfies both, and recorded in web/package.json engines so the
+          # requirement lives with the package rather than only in this file.
+          node-version: 22
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6.0.9

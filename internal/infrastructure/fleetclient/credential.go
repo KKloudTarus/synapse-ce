@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // ValidateControlPlaneURL refuses a cleartext control-plane URL so the bearer credential cannot
@@ -101,8 +102,38 @@ func WriteSecret(path string, data []byte, mode os.FileMode) error {
 	if err := os.WriteFile(path, data, mode); err != nil {
 		return err
 	}
-	return os.Chmod(path, mode)
+	if err := os.Chmod(path, mode); err != nil {
+		return err
+	}
+	if !SecretModeEnforced() {
+		// Windows does not implement Unix permission bits: os.Chmod only toggles the read-only
+		// attribute, so the mode above is NOT the protection it looks like. Verifying it here would
+		// fail on a platform where the guarantee simply does not exist, and asserting it anyway would
+		// be worse — it would read as "the credential is 0600" when nothing enforces that.
+		//
+		// What actually protects the credential on Windows is the ACL on the state directory. That is
+		// a real gap, not a rounding error: see docs/guide/fleet-agent-packaging.md.
+		return nil
+	}
+	// On Unix the mode is a real guarantee, so it is CHECKED rather than assumed. A umask, an
+	// overlay filesystem or a pre-existing file can all leave a credential more permissive than the
+	// mode we asked for, and a silently-wrong permission on a bearer credential is exactly the kind
+	// of thing nobody notices until it matters.
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if got := info.Mode().Perm(); got != mode.Perm() {
+		return fmt.Errorf("fleetclient: %s has mode %v, want %v (the credential is not protected)", path, got, mode.Perm())
+	}
+	return nil
 }
+
+// SecretModeEnforced reports whether this platform enforces Unix permission bits on a file.
+//
+// It is false on Windows, where os.Chmod only toggles the read-only attribute. Callers use it to
+// state the guarantee they actually have rather than the one they wrote down.
+func SecretModeEnforced() bool { return runtime.GOOS != "windows" }
 
 // Enroller is the subset of the client EnsureEnrolled needs; *Client satisfies it, and an agent's
 // test fake can too.
