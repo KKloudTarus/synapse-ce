@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetrollout"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetca"
@@ -233,4 +235,48 @@ func TestFleetAuthByClientCertRejectsExpired(t *testing.T) {
 	if _, err := f.authByClientCert(ctx, string(certPEM)); !errors.Is(err, fleetagentuc.ErrUnauthenticated) {
 		t.Fatalf("expired certificate must be unauthenticated, got %v", err)
 	}
+}
+
+// TestHeartbeatOffersNoUpdateWithoutARolloutService is the fail-closed default that matters most: the
+// absence of a rollout decider must never read as permission to replace a binary on someone's host.
+func TestHeartbeatOffersNoUpdateWithoutARolloutService(t *testing.T) {
+	t.Parallel()
+
+	f := &fleetRouter{}
+	offer := f.updateOffer(context.Background(), &fleetagent.Agent{TenantID: "t1"}, "1.0.0")
+	if offer["available"] != false {
+		t.Fatalf("no rollout service must offer nothing, got %+v", offer)
+	}
+	if offer["reason"] == "" || offer["reason"] == nil {
+		t.Fatal("a declined offer must explain itself")
+	}
+	if _, named := offer["target_version"]; named {
+		t.Fatal("a declined offer must not name a target version")
+	}
+}
+
+// The offer is computed from the agent's OPERATOR-ASSIGNED group, never from anything the agent just
+// reported. An agent that could choose its own group could pin itself to an older, vulnerable version.
+func TestHeartbeatOfferUsesTheStoredGroup(t *testing.T) {
+	t.Parallel()
+
+	f := &fleetRouter{rollout: stubRollout{canary: "canary", target: "2.0.0"}}
+
+	inCanary := f.updateOffer(context.Background(), &fleetagent.Agent{TenantID: "t1", Group: "canary"}, "1.0.0")
+	if inCanary["available"] != true || inCanary["target_version"] != "2.0.0" {
+		t.Fatalf("an agent in the canary group must be offered the target, got %+v", inCanary)
+	}
+	outside := f.updateOffer(context.Background(), &fleetagent.Agent{TenantID: "t1", Group: "prod"}, "1.0.0")
+	if outside["available"] != false {
+		t.Fatalf("an agent outside the canary must not be offered the target, got %+v", outside)
+	}
+}
+
+type stubRollout struct{ canary, target string }
+
+func (s stubRollout) DecideFor(_ context.Context, _ shared.ID, _, group, _ string) fleetrollout.Decision {
+	if group == s.canary {
+		return fleetrollout.Decision{Offer: true, Target: s.target, Reason: fleetrollout.ReasonCanary}
+	}
+	return fleetrollout.Decision{Reason: fleetrollout.ReasonCanaryOnly}
 }

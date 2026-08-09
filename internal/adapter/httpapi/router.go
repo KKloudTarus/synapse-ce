@@ -35,40 +35,41 @@ import (
 
 // Router wires HTTP routes to use case services.
 type Router struct {
-	log              *slog.Logger
-	auth             *Authenticator
-	eng              *enguc.Service
-	sca              *scauc.Service
-	aup              *aupuc.Service
-	findings         *findingsuc.Service
-	export           *exportuc.Service
-	report           *reportuc.Service
-	evidence         *evidenceuc.Service
-	recon            *reconuc.Service
-	logs             ports.LogStream
-	transfer         *transferuc.Service
-	audit            *audituc.Service
-	vex              *vexuc.Service
-	users            *usersuc.Service
-	credentials      *credentialsuc.Service
-	dastVerifier     runtimeVerifierService
-	dastWorkflow     dastWorkflowService
-	agent            *agentDeps            // optional; nil ⇒ agent routes are not registered
-	exploitation     findingVerifier       // optional; nil ⇒ the verify route is not registered
-	judgments        judgmentService       // optional; nil ⇒ judgment routes are not registered
-	autoVerifier     autoVerifierService   // optional; nil ⇒ the LLM auto-verify route is not registered
-	threatModels     threatModelService    // optional; nil ⇒ threat-model routes are not registered
-	drafts           writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
-	projects         projectService        // optional; nil ⇒ project routes are not registered
-	assets           assetService          // optional; nil ⇒ fleet asset routes are not registered
-	coverage         coverageService       // optional; nil ⇒ fleet coverage/agent-view routes are not registered
-	sarif            sarifIngester         // optional; nil ⇒ the third-party SARIF import route is not registered
-	importedFindings sarifReader           // optional read side for imported findings
-	fleet            *fleetRouter          // optional; nil ⇒ agent transport plane is not served
-	fleetAdmin       fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
-	qualityGates     qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
-	qualityProfiles  qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
-	rules            rulesService          // optional; nil ⇒ rule catalog routes are not registered
+	log               *slog.Logger
+	auth              *Authenticator
+	eng               *enguc.Service
+	sca               *scauc.Service
+	aup               *aupuc.Service
+	findings          *findingsuc.Service
+	export            *exportuc.Service
+	report            *reportuc.Service
+	evidence          *evidenceuc.Service
+	recon             *reconuc.Service
+	logs              ports.LogStream
+	transfer          *transferuc.Service
+	audit             *audituc.Service
+	vex               *vexuc.Service
+	users             *usersuc.Service
+	credentials       *credentialsuc.Service
+	dastVerifier      runtimeVerifierService
+	dastWorkflow      dastWorkflowService
+	agent             *agentDeps            // optional; nil ⇒ agent routes are not registered
+	exploitation      findingVerifier       // optional; nil ⇒ the verify route is not registered
+	judgments         judgmentService       // optional; nil ⇒ judgment routes are not registered
+	autoVerifier      autoVerifierService   // optional; nil ⇒ the LLM auto-verify route is not registered
+	threatModels      threatModelService    // optional; nil ⇒ threat-model routes are not registered
+	drafts            writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
+	projects          projectService        // optional; nil ⇒ project routes are not registered
+	assets            assetService          // optional; nil ⇒ fleet asset routes are not registered
+	coverage          coverageService       // optional; nil ⇒ fleet coverage/agent-view routes are not registered
+	sarif             sarifIngester         // optional; nil ⇒ the third-party SARIF import route is not registered
+	importedFindings  sarifReader           // optional read side for imported findings
+	fleetRolloutAdmin fleetRolloutService   // optional; nil ⇒ the operator rollout routes are not served
+	fleet             *fleetRouter          // optional; nil ⇒ agent transport plane is not served
+	fleetAdmin        fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
+	qualityGates      qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
+	qualityProfiles   qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
+	rules             rulesService          // optional; nil ⇒ rule catalog routes are not registered
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -276,6 +277,22 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/projects/{key}/analysis", rt.authz(userdom.PermView, rt.latestProjectAnalysis))
 	}
 	mux.HandleFunc("POST /api/v1/engagements", rt.authz(userdom.PermOperate, rt.createEngagement))
+	if rt.fleetRolloutAdmin != nil {
+		// These are OPERATOR routes and they live under /api/v1/agents, not /api/v1/fleet.
+		// Handler() mounts /api/v1/fleet/ on the untrusted AGENT auth plane, which deliberately
+		// bypasses the human authenticator and the AUP gate — an operator control mounted there
+		// would be authenticated by agent credentials, which is precisely backwards for the one
+		// action that can replace a binary on every host.
+		//
+		// Rollout is ADMINISTER, not operate: it is a larger authority than issuing work to a
+		// single agent. Reading the plan is VIEW, so an on-call engineer can see why the fleet is
+		// or is not updating without holding the power to change it.
+		mux.HandleFunc("GET /api/v1/agents/rollout", rt.authz(userdom.PermView, rt.getFleetRollout))
+		mux.HandleFunc("PUT /api/v1/agents/rollout", rt.authz(userdom.PermAdminister, rt.setFleetRolloutTarget))
+		mux.HandleFunc("POST /api/v1/agents/rollout/promote", rt.authz(userdom.PermAdminister, rt.promoteFleetRollout))
+		mux.HandleFunc("POST /api/v1/agents/rollout/pause", rt.authz(userdom.PermAdminister, rt.pauseFleetRollout))
+		mux.HandleFunc("POST /api/v1/agents/rollout/resume", rt.authz(userdom.PermAdminister, rt.resumeFleetRollout))
+	}
 	mux.HandleFunc("GET /api/v1/engagements", rt.authz(userdom.PermView, rt.listEngagements))
 	mux.HandleFunc("GET /api/v1/engagements/{id}", rt.authz(userdom.PermView, rt.getEngagement))
 	mux.HandleFunc("PATCH /api/v1/engagements/{id}", rt.authz(userdom.PermOperate, rt.transitionEngagement))
