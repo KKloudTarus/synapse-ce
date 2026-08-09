@@ -160,7 +160,10 @@ func TestExtractTypeOnlyClassification(t *testing.T) {
 		{name: "import type clause", src: `import type { T } from "pkg";`, wantTypeOnly: true},
 		{name: "import type default", src: `import type T from "pkg";`, wantTypeOnly: true},
 		{name: "export type clause", src: `export type { T } from "pkg";`, wantTypeOnly: true},
-		{name: "all inline type members", src: `import { type A, type B } from "pkg";`, wantTypeOnly: true},
+		// An all-inline-type binding list is NOT fully erased: under verbatimModuleSyntax tsc emits
+		// `import "pkg";`, a real side-effect module load. Only a keyword-level `import type` is erased,
+		// so treating this as type-only would drop a runtime dependency edge.
+		{name: "all inline type members stay runtime", src: `import { type A, type B } from "pkg";`, wantTypeOnly: false},
 		{name: "mixed inline members stay runtime", src: `import { type A, b } from "pkg";`, wantTypeOnly: false},
 		{name: "value import", src: `import { a } from "pkg";`, wantTypeOnly: false},
 		// A binding literally named "type" is a VALUE import, not a type-only modifier. Reading it as

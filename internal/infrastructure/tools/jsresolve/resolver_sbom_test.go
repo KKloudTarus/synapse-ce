@@ -68,15 +68,15 @@ func TestParseNPMPURL(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			name, version, ok := parseNPMPURL(test.purl)
+			name, version, ok := jsresolution.ParseNPMPURL(test.purl)
 			if ok != test.wantOK {
-				t.Fatalf("parseNPMPURL(%q) ok = %v, want %v (name %q version %q)", test.purl, ok, test.wantOK, name, version)
+				t.Fatalf("ParseNPMPURL(%q) ok = %v, want %v (name %q version %q)", test.purl, ok, test.wantOK, name, version)
 			}
 			if !test.wantOK {
 				return
 			}
 			if name != test.wantName || version != test.wantVersion {
-				t.Fatalf("parseNPMPURL(%q) = (%q, %q), want (%q, %q)", test.purl, name, version, test.wantName, test.wantVersion)
+				t.Fatalf("ParseNPMPURL(%q) = (%q, %q), want (%q, %q)", test.purl, name, version, test.wantName, test.wantVersion)
 			}
 		})
 	}
