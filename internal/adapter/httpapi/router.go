@@ -62,6 +62,7 @@ type Router struct {
 	projects          projectService        // optional; nil ⇒ project routes are not registered
 	assets            assetService          // optional; nil ⇒ fleet asset routes are not registered
 	businessAssets    businessAssetService  // optional; nil ⇒ business-level Asset routes are not registered
+	attackPaths       attackPathService     // optional; nil ⇒ attack-path routes are not registered
 	coverage          coverageService       // optional; nil ⇒ fleet coverage/agent-view routes are not registered
 	sarif             sarifIngester         // optional; nil ⇒ the third-party SARIF import route is not registered
 	importedFindings  sarifReader           // optional read side for imported findings
@@ -262,6 +263,9 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/appsec/assets/{assetID}/posture", rt.authz(userdom.PermView, rt.getBusinessAssetPosture))
 		mux.HandleFunc("GET /api/v1/appsec/assets/{assetID}/history", rt.authz(userdom.PermView, rt.getBusinessAssetHistory))
 		mux.HandleFunc("PUT /api/v1/engagements/{id}/asset", rt.authz(userdom.PermOperate, rt.assignEngagementBusinessAsset))
+	}
+	if rt.attackPaths != nil {
+		mux.HandleFunc("GET /api/v1/attack-paths", rt.authz(userdom.PermView, rt.listAttackPaths))
 	}
 	if rt.coverage != nil {
 		// Fleet coverage + agent-health views (#413): operator reads, RBAC PermView, tenant-scoped via

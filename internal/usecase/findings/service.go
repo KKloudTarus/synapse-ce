@@ -7,9 +7,12 @@ package findings
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -23,17 +26,92 @@ var _ ports.FindingWriteupApplier = (*Service)(nil)
 
 // Service lists findings and applies authoring/triage/assignment/comment/retest changes.
 type Service struct {
-	repo     ports.FindingRepository
-	comments ports.CommentRepository
-	retests  ports.RetestRepository
-	audit    ports.AuditLogger
-	clock    ports.Clock
-	ids      ports.IDGenerator
+	repo        ports.FindingRepository
+	claimer     ports.FindingProjectionClaimer
+	engagements ports.EngagementTenantResolver
+	comments    ports.CommentRepository
+	retests     ports.RetestRepository
+	audit       ports.AuditLogger
+	clock       ports.Clock
+	ids         ports.IDGenerator
+	attributor  ports.FindingAttributor
 }
 
 // NewService wires the findings workflow service.
 func NewService(repo ports.FindingRepository, comments ports.CommentRepository, retests ports.RetestRepository, audit ports.AuditLogger, clock ports.Clock, ids ports.IDGenerator) *Service {
-	return &Service{repo: repo, comments: comments, retests: retests, audit: audit, clock: clock, ids: ids}
+	claimer, _ := repo.(ports.FindingProjectionClaimer)
+	return &Service{repo: repo, claimer: claimer, comments: comments, retests: retests, audit: audit, clock: clock, ids: ids}
+}
+
+// SetEngagementTenantResolver wires the internal engagement lookup used to select the RLS tenant.
+func (s *Service) SetEngagementTenantResolver(r ports.EngagementTenantResolver) { s.engagements = r }
+
+// SetAttributor wires authoritative asset-to-finding bindings; nil preserves legacy internal callers.
+func (s *Service) SetAttributor(a ports.FindingAttributor) { s.attributor = a }
+
+// CreateAttributed requires an explicit asset for a new externally-authored finding.
+func (s *Service) CreateAttributed(ctx context.Context, actor string, engagementID, assetID shared.ID, in finding.ManualInput) (finding.Finding, error) {
+	if s.attributor == nil {
+		return finding.Finding{}, fmt.Errorf("%w: finding attribution is not configured", shared.ErrValidation)
+	}
+	if err := s.attributor.ValidateAsset(ctx, engagementID, assetID); err != nil {
+		return finding.Finding{}, err
+	}
+	key := attributedManualKey(actor, engagementID, assetID, in)
+	f, err := s.findByDedupKey(ctx, engagementID, key)
+	if err != nil {
+		return finding.Finding{}, err
+	}
+	created := f.ID.IsZero()
+	if created {
+		if v := strings.TrimSpace(in.CVSSVector); v != "" {
+			score, ok := shared.CVSSv3BaseScore(v)
+			if !ok {
+				return finding.Finding{}, fmt.Errorf("%w: invalid CVSS v3.1 vector", shared.ErrValidation)
+			}
+			in.Severity = shared.SeverityFromScore(score)
+		}
+		f, err = finding.NewManual(s.ids.NewID(), engagementID, in, s.clock.Now())
+		if err != nil {
+			return finding.Finding{}, err
+		}
+		f.DedupKey = key
+		if err := s.repo.Upsert(ctx, []finding.Finding{f}); err != nil {
+			return f, fmt.Errorf("persist finding: %w", err)
+		}
+		if stored, err := s.findByDedupKey(ctx, engagementID, key); err != nil {
+			return f, err
+		} else if !stored.ID.IsZero() {
+			f = stored
+		}
+	}
+	if created {
+		if err := s.record(ctx, actor, "finding.created", engagementID, f.ID, map[string]string{"severity": string(f.Severity), "kind": string(f.Kind)}); err != nil {
+			return f, &ports.PartialWriteError{Operation: "manual finding", IDs: []shared.ID{f.ID}, Err: err}
+		}
+	}
+	if err := s.attributor.Record(ctx, engagementID, assetID, "manual:"+f.ID, "manual:"+f.ID, asset.EdgeObserved, []shared.ID{f.ID}); err != nil {
+		return f, &ports.PartialWriteError{Operation: "manual finding", IDs: []shared.ID{f.ID}, Err: fmt.Errorf("record finding attribution: %w", err)}
+	}
+	return f, nil
+}
+
+func attributedManualKey(actor string, engagementID, assetID shared.ID, in finding.ManualInput) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{actor, engagementID.String(), assetID.String(), strings.TrimSpace(in.Title), strings.TrimSpace(in.Description), string(in.Severity), strings.TrimSpace(in.CVSSVector), strings.TrimSpace(in.CWE)}, "\x00")))
+	return "manual:attributed:" + hex.EncodeToString(sum[:16])
+}
+
+func (s *Service) findByDedupKey(ctx context.Context, engagementID shared.ID, key string) (finding.Finding, error) {
+	all, err := s.repo.ListByEngagement(ctx, engagementID)
+	if err != nil {
+		return finding.Finding{}, fmt.Errorf("list findings: %w", err)
+	}
+	for _, f := range all {
+		if f.DedupKey == key {
+			return f, nil
+		}
+	}
+	return finding.Finding{}, nil
 }
 
 // List returns an engagement's findings, highest risk first.
@@ -49,9 +127,16 @@ func (s *Service) RecordConfirmedThreat(ctx context.Context, verifier string, j 
 	if j.Capability != judgment.CapThreat {
 		return fmt.Errorf("%w: not a threat judgment (%s)", shared.ErrValidation, j.Capability)
 	}
+	if !j.Publishable() {
+		return fmt.Errorf("%w: threat judgment %s is not publishable", shared.ErrValidation, j.ID)
+	}
 	tc, ok := j.Claim.(judgment.ThreatClaim)
 	if !ok {
 		return fmt.Errorf("%w: threat judgment %s carries no ThreatClaim", shared.ErrValidation, j.ID)
+	}
+	assetID, err := s.projectionAssetID(ctx, j, tc.AssetID)
+	if err != nil {
+		return err
 	}
 	f, err := finding.NewThreat(s.ids.NewID(), j.EngagementID, finding.ThreatInput{
 		JudgmentID: j.ID.String(),
@@ -65,10 +150,21 @@ func (s *Service) RecordConfirmedThreat(ctx context.Context, verifier string, j 
 	if err := s.repo.Upsert(ctx, []finding.Finding{f}); err != nil {
 		return fmt.Errorf("persist threat finding: %w", err)
 	}
+	candidateID := f.ID
+	f, err = s.canonicalProjection(ctx, j.EngagementID, f.DedupKey)
+	if err != nil {
+		return &ports.PartialWriteError{Operation: "threat finding", IDs: []shared.ID{candidateID}, Err: err}
+	}
+	if err := s.recordAttribution(ctx, j.EngagementID, assetID, shared.ID("threat:"+j.ID.String()), f.ID); err != nil {
+		return &ports.PartialWriteError{Operation: "threat finding", IDs: []shared.ID{f.ID}, Err: err}
+	}
 	// Attribute the promotion to the human VERIFIER who ratified the threat (the trigger), not the agent
 	// that originally proposed the judgment – the judgment's own verdict audit already records the proposer.
-	return s.record(ctx, verifier, "finding.threat_promoted", j.EngagementID, f.ID,
-		map[string]string{"judgment": j.ID.String(), "category": string(tc.Category), "element": j.SubjectID.String()})
+	if err := s.record(ctx, verifier, "finding.threat_promoted", j.EngagementID, f.ID,
+		map[string]string{"judgment": j.ID.String(), "category": string(tc.Category), "element": j.SubjectID.String()}); err != nil {
+		return &ports.PartialWriteError{Operation: "threat finding", IDs: []shared.ID{f.ID}, Err: err}
+	}
+	return nil
 }
 
 // RecordConfirmedSAST promotes a verifier-confirmed CapSAST (taint) judgment to a persisted Kind=sast
@@ -79,9 +175,16 @@ func (s *Service) RecordConfirmedSAST(ctx context.Context, verifier string, j ju
 	if j.Capability != judgment.CapSAST {
 		return fmt.Errorf("%w: not a sast judgment (%s)", shared.ErrValidation, j.Capability)
 	}
+	if !j.Publishable() {
+		return fmt.Errorf("%w: sast judgment %s is not publishable", shared.ErrValidation, j.ID)
+	}
 	sc, ok := j.Claim.(judgment.SASTClaim)
 	if !ok {
 		return fmt.Errorf("%w: sast judgment %s carries no SASTClaim", shared.ErrValidation, j.ID)
+	}
+	assetID, err := s.projectionAssetID(ctx, j, sc.AssetID)
+	if err != nil {
+		return err
 	}
 	f, err := finding.NewSAST(s.ids.NewID(), j.EngagementID, finding.SASTInput{
 		JudgmentID: j.ID.String(),
@@ -92,20 +195,43 @@ func (s *Service) RecordConfirmedSAST(ctx context.Context, verifier string, j ju
 	if err != nil {
 		return err
 	}
+	if err := s.claimProjection(ctx, j.EngagementID, j.ID, ports.FindingProjectionSAST); err != nil {
+		return fmt.Errorf("claim sast finding projection: %w", err)
+	}
 	if err := s.repo.Upsert(ctx, []finding.Finding{f}); err != nil {
 		return fmt.Errorf("persist sast finding: %w", err)
 	}
+	candidateID := f.ID
+	f, err = s.canonicalProjection(ctx, j.EngagementID, f.DedupKey)
+	if err != nil {
+		return &ports.PartialWriteError{Operation: "sast finding", IDs: []shared.ID{candidateID}, Err: err}
+	}
+	if err := s.recordAttribution(ctx, j.EngagementID, assetID, shared.ID("sast:"+j.ID.String()), f.ID); err != nil {
+		return &ports.PartialWriteError{Operation: "sast finding", IDs: []shared.ID{f.ID}, Err: err}
+	}
 	// Attribute the promotion to the VERIFIER who confirmed the taint judgment (the trigger), not the
 	// system proposer – the judgment's own verdict audit already records the proposer.
-	return s.record(ctx, verifier, "finding.sast_promoted", j.EngagementID, f.ID,
-		map[string]string{"judgment": j.ID.String(), "cwe": sc.CWE, "rule": sc.Rule, "location": sc.Location})
+	if err := s.record(ctx, verifier, "finding.sast_promoted", j.EngagementID, f.ID,
+		map[string]string{"judgment": j.ID.String(), "cwe": sc.CWE, "rule": sc.Rule, "location": sc.Location}); err != nil {
+		return &ports.PartialWriteError{Operation: "sast finding", IDs: []shared.ID{f.ID}, Err: err}
+	}
+	return nil
 }
 
-// RecordConfirmedDAST promotes a confirmed CapDAST judgment to a persisted
-// Kind=dast finding. Runtime CapSAST confirmations remain supported for the
-// existing safe-probe path and retain their judgment-anchored dedup key.
+// RecordConfirmedDAST promotes a RUNTIME-verifier-confirmed CapSAST judgment to a persisted Kind=dast
+// finding (auto-emit on runtime confirm). It is the runtime twin of RecordConfirmedSAST — the same
+// verifier-confirmed CapSAST judgment, but the confirming verdict came from a safe runtime probe rather
+// than a static/LLM verifier, so it projects to a distinct, dynamically-proven Kind=dast finding.
+// Idempotent via the dast:ai:<judgmentID> dedup key – a re-confirm updates in place. The finding is built
+// DETERMINISTICALLY from the typed SASTClaim (no LLM); severity starts Unknown so a human triages it
+// through the normal finding workflow. Audited.
 func (s *Service) RecordConfirmedDAST(ctx context.Context, verifier string, j judgment.Judgment) error {
+	if !j.Publishable() {
+		return fmt.Errorf("%w: dast judgment %s is not publishable", shared.ErrValidation, j.ID)
+	}
+
 	in := finding.DASTInput{JudgmentID: j.ID.String()}
+	var assetID shared.ID
 	switch claim := j.Claim.(type) {
 	case judgment.DASTClaim:
 		if j.Capability != judgment.CapDAST {
@@ -118,9 +244,18 @@ func (s *Service) RecordConfirmedDAST(ctx context.Context, verifier string, j ju
 			return fmt.Errorf("%w: SAST claim has capability %s", shared.ErrValidation, j.Capability)
 		}
 		in.CWE, in.Location, in.Rule = claim.CWE, claim.Location, claim.Rule
+		var err error
+		assetID, err = s.projectionAssetID(ctx, j, claim.AssetID)
+		if err != nil {
+			return err
+		}
+		if err := s.claimProjection(ctx, j.EngagementID, j.ID, ports.FindingProjectionDAST); err != nil {
+			return fmt.Errorf("claim dast finding projection: %w", err)
+		}
 	default:
 		return fmt.Errorf("%w: DAST judgment %s carries no supported DAST claim", shared.ErrValidation, j.ID)
 	}
+
 	f, err := finding.NewDAST(s.ids.NewID(), j.EngagementID, in, s.clock.Now())
 	if err != nil {
 		return err
@@ -128,8 +263,71 @@ func (s *Service) RecordConfirmedDAST(ctx context.Context, verifier string, j ju
 	if err := s.repo.Upsert(ctx, []finding.Finding{f}); err != nil {
 		return fmt.Errorf("persist dast finding: %w", err)
 	}
-	return s.record(ctx, verifier, "finding.dast_promoted", j.EngagementID, f.ID,
-		map[string]string{"judgment": j.ID.String(), "cwe": in.CWE, "rule": in.Rule, "location": in.Location})
+	candidateID := f.ID
+	f, err = s.canonicalProjection(ctx, j.EngagementID, f.DedupKey)
+	if err != nil {
+		return &ports.PartialWriteError{Operation: "dast finding", IDs: []shared.ID{candidateID}, Err: err}
+	}
+	if err := s.recordAttribution(ctx, j.EngagementID, assetID, shared.ID("dast:"+j.ID.String()), f.ID); err != nil {
+		return &ports.PartialWriteError{Operation: "dast finding", IDs: []shared.ID{f.ID}, Err: err}
+	}
+	if err := s.record(ctx, verifier, "finding.dast_promoted", j.EngagementID, f.ID,
+		map[string]string{"judgment": j.ID.String(), "cwe": in.CWE, "rule": in.Rule, "location": in.Location}); err != nil {
+		return &ports.PartialWriteError{Operation: "dast finding", IDs: []shared.ID{f.ID}, Err: err}
+	}
+	return nil
+}
+
+func (s *Service) claimProjection(ctx context.Context, engagementID, judgmentID shared.ID, mode ports.FindingProjectionMode) error {
+	if s.claimer == nil {
+		return fmt.Errorf("%w: finding projection claim is not configured", shared.ErrValidation)
+	}
+	tenantID := shared.ID("default")
+	if s.engagements != nil {
+		eng, err := s.engagements.GetByID(ctx, engagementID)
+		if err != nil {
+			return fmt.Errorf("load projection engagement: %w", err)
+		}
+		tenantID = shared.TenantOrDefault(eng.TenantID)
+	}
+	return s.claimer.ClaimFindingProjection(ctx, tenantID, engagementID, judgmentID, mode)
+}
+
+func (s *Service) canonicalProjection(ctx context.Context, engagementID shared.ID, dedupKey string) (finding.Finding, error) {
+	stored, err := s.findByDedupKey(ctx, engagementID, dedupKey)
+	if err != nil {
+		return finding.Finding{}, err
+	}
+	if stored.ID.IsZero() {
+		return finding.Finding{}, fmt.Errorf("%w: persisted projection %q was not found", shared.ErrNotFound, dedupKey)
+	}
+	return stored, nil
+}
+
+func (s *Service) projectionAssetID(ctx context.Context, j judgment.Judgment, explicit shared.ID) (shared.ID, error) {
+	if s.attributor == nil {
+		return "", nil
+	}
+	if j.SubjectKind == judgment.SubjectFinding && !j.SubjectID.IsZero() {
+		return s.attributor.InheritedAssetID(ctx, j.EngagementID, []shared.ID{j.SubjectID})
+	}
+	if explicit.IsZero() {
+		return "", fmt.Errorf("%w: standalone %s finding projection requires asset id", shared.ErrValidation, j.Capability)
+	}
+	if err := s.attributor.ValidateAsset(ctx, j.EngagementID, explicit); err != nil {
+		return "", err
+	}
+	return explicit, nil
+}
+
+func (s *Service) recordAttribution(ctx context.Context, engagementID, assetID, provenance, findingID shared.ID) error {
+	if assetID.IsZero() {
+		return nil
+	}
+	if err := s.attributor.Record(ctx, engagementID, assetID, provenance, provenance, asset.EdgeObserved, []shared.ID{findingID}); err != nil {
+		return fmt.Errorf("record finding attribution: %w", err)
+	}
+	return nil
 }
 
 // ApplyWriteupDraft applies an accepted, human-signed-off write-up draft to its finding: it sets the

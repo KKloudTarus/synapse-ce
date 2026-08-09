@@ -30,11 +30,12 @@ func (f *fakeImportedFindings) ListByEngagement(_ context.Context, tenantID, _ s
 type recordingSARIF struct {
 	got    sarifingest.IngestRequest
 	result sarifingest.IngestResult
+	err    error
 }
 
 func (r *recordingSARIF) Ingest(_ context.Context, req sarifingest.IngestRequest) (sarifingest.IngestResult, error) {
 	r.got = req
-	return r.result, nil
+	return r.result, r.err
 }
 
 func sarifRequest(t *testing.T, principal Principal, body string) (*Router, *recordingSARIF, *httptest.ResponseRecorder) {
@@ -85,6 +86,29 @@ func TestSARIFImportPassesTheRawTenant(t *testing.T) {
 
 // TestSARIFResponseSurfacesCoverage locks that what the ingest could NOT represent reaches the caller: a
 // lossy ingest must not be indistinguishable from a complete one.
+func TestSARIFImportPassesAssetID(t *testing.T) {
+	t.Parallel()
+	_, rec, w := sarifRequest(t, Principal{ID: "alice", Role: "consultant"}, `{"version":"2.1.0","runs":[]}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ingest = %d, want 200", w.Code)
+	}
+	if rec.got.AssetID != "" {
+		t.Fatalf("asset without query = %q, want empty", rec.got.AssetID)
+	}
+
+	rt := &Router{}
+	bound := &recordingSARIF{}
+	rt.SetSARIFIngest(bound)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/engagements/eng-1/sarif?asset_id=asset-1", strings.NewReader(`{"version":"2.1.0","runs":[]}`))
+	req.SetPathValue("id", "eng-1")
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice", Role: "consultant"}))
+	w = httptest.NewRecorder()
+	rt.importSARIF(w, req)
+	if w.Code != http.StatusOK || bound.got.AssetID != "asset-1" {
+		t.Fatalf("asset query = %q, status = %d", bound.got.AssetID, w.Code)
+	}
+}
+
 func TestSARIFResponseSurfacesCoverage(t *testing.T) {
 	t.Parallel()
 
@@ -175,5 +199,24 @@ func TestImportedFindingsReadStatesTheGovernancePosition(t *testing.T) {
 	// HERE — after the engagement gate has already authorized the read.
 	if reader.tenant != shared.DefaultTenant {
 		t.Fatalf("store tenant = %q, want the normalized default", reader.tenant)
+	}
+}
+
+func TestSARIFImportRejectsUnknownOrWrongTenantAsset(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"unknown", "wrong-tenant"} {
+		t.Run(name, func(t *testing.T) {
+			rt := &Router{}
+			rec := &recordingSARIF{err: shared.ErrNotFound}
+			rt.SetSARIFIngest(rec)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/engagements/eng-1/sarif?asset_id=asset", strings.NewReader(`{"version":"2.1.0","runs":[]}`))
+			req.SetPathValue("id", "eng-1")
+			req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice", Role: "consultant", TenantID: "tenant-a"}))
+			w := httptest.NewRecorder()
+			rt.importSARIF(w, req)
+			if w.Code != http.StatusNotFound || rec.got.AssetID != "asset" {
+				t.Fatalf("status = %d, asset = %q", w.Code, rec.got.AssetID)
+			}
+		})
 	}
 }

@@ -141,9 +141,11 @@ func (s *Service) Verify(ctx context.Context, verifier string, engagementID, jud
 	return s.verify(ctx, verifier, engagementID, judgmentID, score, rationale, expectedVersion, false)
 }
 
-// VerifyRuntime is Verify for a verdict produced by a runtime probe. It keeps the
-// legacy CapSAST runtime projection as Kind=dast; native CapDAST judgments promote
-// through Verify regardless of verdict transport.
+// VerifyRuntime is Verify for a verdict produced by a RUNTIME probe (the safe HTTP DAST verifier). It is
+// identical to Verify EXCEPT that a confirmed CapSAST judgment auto-emits a Kind=dast finding (dynamically
+// proven) instead of Kind=sast (statically/LLM confirmed). The runtime-probe path (dastverifier) calls this;
+// the static/LLM path (human review, llmverifier) calls Verify. The distinct verifier, score bar, verdict
+// sealing, and self-confirm guard are all unchanged — only the finding projection differs.
 func (s *Service) VerifyRuntime(ctx context.Context, verifier string, engagementID, judgmentID shared.ID, score int, rationale string, expectedVersion int) (judgment.Judgment, error) {
 	return s.verify(ctx, verifier, engagementID, judgmentID, score, rationale, expectedVersion, true)
 }
@@ -156,6 +158,13 @@ func (s *Service) verify(ctx context.Context, verifier string, engagementID, jud
 	cur, err := s.load(ctx, engagementID, judgmentID)
 	if err != nil {
 		return judgment.Judgment{}, err
+	}
+	if cur.Publishable() && (cur.Capability == judgment.CapThreat || cur.Capability == judgment.CapSAST || cur.Capability == judgment.CapDAST) {
+		if cur.Version != expectedVersion {
+			return judgment.Judgment{}, shared.ErrConflict
+		}
+		s.emitFinding(ctx, verifier, cur, runtimeProof)
+		return cur, nil
 	}
 	// Pure transition first: re-asserts gated + self-confirm + proposed-state, so an ineligible
 	// judgment is rejected WITHOUT writing a spurious evidence link.
@@ -181,36 +190,43 @@ func (s *Service) verify(ctx context.Context, verifier string, engagementID, jud
 	}); err != nil {
 		return judgment.Judgment{}, fmt.Errorf("audit judgment verdict: %w", err)
 	}
-	// a ratified STRIDE threat auto-emits a Kind=threat finding. Best-effort – the judgment is
-	// already confirmed + audited; a failed emit is audited, not rolled back (the finding is a
-	// re-derivable projection of the source-of-truth judgment, mirroring the reachproof auto-mint).
-	if s.threatRecorder != nil && saved.State == judgment.StateConfirmed && saved.Capability == judgment.CapThreat {
-		if rerr := s.threatRecorder.RecordConfirmedThreat(ctx, verifier, saved); rerr != nil {
-			_ = s.audit.Record(ctx, ports.AuditEntry{
-				Actor: verifier, Action: "threat_finding.emit_failed", Target: judgmentID.String(),
-				Metadata: map[string]string{"engagement": engagementID.String()}, At: s.clock.Now(),
-			})
-		}
-	}
-	// Native CapDAST judgments always project to DAST. Legacy runtime-confirmed
-	// CapSAST judgments retain their existing projection, while normal CapSAST
-	// verification remains a SAST finding.
-	if saved.State == judgment.StateConfirmed && (saved.Capability == judgment.CapDAST || (saved.Capability == judgment.CapSAST && runtimeProof)) && s.dastRecorder != nil {
-		if rerr := s.dastRecorder.RecordConfirmedDAST(ctx, verifier, saved); rerr != nil {
-			_ = s.audit.Record(ctx, ports.AuditEntry{
-				Actor: verifier, Action: "dast_finding.emit_failed", Target: judgmentID.String(),
-				Metadata: map[string]string{"engagement": engagementID.String()}, At: s.clock.Now(),
-			})
-		}
-	} else if saved.State == judgment.StateConfirmed && saved.Capability == judgment.CapSAST && !runtimeProof && s.sastRecorder != nil {
-		if rerr := s.sastRecorder.RecordConfirmedSAST(ctx, verifier, saved); rerr != nil {
-			_ = s.audit.Record(ctx, ports.AuditEntry{
-				Actor: verifier, Action: "sast_finding.emit_failed", Target: judgmentID.String(),
-				Metadata: map[string]string{"engagement": engagementID.String()}, At: s.clock.Now(),
-			})
-		}
+	if saved.Publishable() {
+		s.emitFinding(ctx, verifier, saved, runtimeProof)
 	}
 	return saved, nil
+}
+
+func (s *Service) emitFinding(ctx context.Context, verifier string, saved judgment.Judgment, runtimeProof bool) {
+	if s.threatRecorder != nil && saved.Capability == judgment.CapThreat {
+		if err := s.threatRecorder.RecordConfirmedThreat(ctx, verifier, saved); err != nil {
+			s.recordProjectionFailure(ctx, verifier, "threat", saved)
+		}
+	}
+	switch saved.Capability {
+	case judgment.CapDAST:
+		if s.dastRecorder != nil {
+			if err := s.dastRecorder.RecordConfirmedDAST(ctx, verifier, saved); err != nil {
+				s.recordProjectionFailure(ctx, verifier, "dast", saved)
+			}
+		}
+	case judgment.CapSAST:
+		if runtimeProof && s.dastRecorder != nil {
+			if err := s.dastRecorder.RecordConfirmedDAST(ctx, verifier, saved); err != nil {
+				s.recordProjectionFailure(ctx, verifier, "dast", saved)
+			}
+		} else if !runtimeProof && s.sastRecorder != nil {
+			if err := s.sastRecorder.RecordConfirmedSAST(ctx, verifier, saved); err != nil {
+				s.recordProjectionFailure(ctx, verifier, "sast", saved)
+			}
+		}
+	}
+}
+
+func (s *Service) recordProjectionFailure(ctx context.Context, verifier, kind string, j judgment.Judgment) {
+	_ = s.audit.Record(ctx, ports.AuditEntry{
+		Actor: verifier, Action: kind + "_finding.emit_failed", Target: j.ID.String(),
+		Metadata: map[string]string{"engagement": j.EngagementID.String()}, At: s.clock.Now(),
+	})
 }
 
 // SetThreatRecorder wires the optional confirmed-threat → finding promoter. nil ⇒ no finding is

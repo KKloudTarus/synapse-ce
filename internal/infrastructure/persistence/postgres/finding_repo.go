@@ -27,6 +27,36 @@ func NewFindingRepository(pool *pgxpool.Pool) *FindingRepository {
 	return &FindingRepository{pool: pool}
 }
 
+// ClaimFindingProjection atomically reserves the SAST or legacy runtime DAST projection mode for a judgment.
+func (r *FindingRepository) ClaimFindingProjection(ctx context.Context, tenantID, engagementID, judgmentID shared.ID, mode ports.FindingProjectionMode) error {
+	if tenantID == "" || engagementID == "" || judgmentID == "" || !mode.Valid() {
+		return fmt.Errorf("%w: invalid finding projection claim", shared.ErrValidation)
+	}
+	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		var claimed ports.FindingProjectionMode
+		err := tx.QueryRow(ctx, `
+			INSERT INTO finding_projection_claims (tenant_id, engagement_id, judgment_id, mode)
+			SELECT $1, $2, $3, $4
+			WHERE EXISTS (
+				SELECT 1 FROM engagements
+				WHERE id = $2 AND COALESCE(NULLIF(tenant_id, ''), 'default') = $1
+			)
+			ON CONFLICT (tenant_id, engagement_id, judgment_id)
+			DO UPDATE SET mode = finding_projection_claims.mode
+			RETURNING mode`, tenantID.String(), engagementID.String(), judgmentID.String(), string(mode)).Scan(&claimed)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("claim finding projection: %w", err)
+		}
+		if claimed != mode {
+			return fmt.Errorf("%w: judgment already projected as %s", shared.ErrConflict, claimed)
+		}
+		return nil
+	})
+}
+
 var _ ports.FindingRepository = (*FindingRepository)(nil)
 
 // Upsert inserts or updates findings, deduped on (engagement_id, dedup_key). On

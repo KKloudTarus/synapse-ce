@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
@@ -20,6 +22,7 @@ type IngestRequest struct {
 	EngagementID shared.ID
 	Document     []byte
 	Actor        shared.ID
+	AssetID      shared.ID
 }
 
 // IngestResult reports exactly what happened, including what was NOT ingested.
@@ -72,6 +75,7 @@ type Service struct {
 	clock       ports.Clock
 	ids         ports.IDGenerator
 	limits      Limits
+	attributor  ports.FindingAttributor
 }
 
 // NewService validates and returns the ingest service.
@@ -81,6 +85,9 @@ func NewService(store ports.ImportedFindingStore, findings findingReader, engage
 	}
 	return &Service{store: store, findings: findings, engagements: engagements, audit: audit, clock: clock, ids: ids, limits: DefaultLimits()}, nil
 }
+
+// SetAttributor wires explicit asset attribution for SARIF producers.
+func (s *Service) SetAttributor(a ports.FindingAttributor) { s.attributor = a }
 
 // withLimits overrides the ingest bounds. It is an unexported seam so a running service's budgets cannot
 // be changed from another package (which would also be a data race on a shared instance).
@@ -115,12 +122,24 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, 
 	// is normalized to its non-empty id at the STORE boundary — after authorization, not before it.
 	tenantID := shared.TenantOrDefault(eng.TenantID)
 
+	if !req.AssetID.IsZero() {
+		if s.attributor == nil {
+			return IngestResult{}, fmt.Errorf("%w: sarif finding attribution is not configured", shared.ErrValidation)
+		}
+		if err := s.attributor.ValidateAsset(ctx, req.EngagementID, req.AssetID); err != nil {
+			return IngestResult{}, fmt.Errorf("validate sarif attribution asset: %w", err)
+		}
+	}
+
 	parsedDoc, err := parseDocument(ctx, req.Document, s.limits)
 	if err != nil {
 		return IngestResult{}, err
 	}
 
 	result := IngestResult{Refused: parsedDoc.refusals, Coverage: parsedDoc.coverage}
+	if req.AssetID.IsZero() {
+		result.Coverage = append(result.Coverage, importedfinding.CoverageIssue{Detail: "asset attribution was not supplied: imported findings cannot enter attack paths"})
+	}
 	if s.findings == nil {
 		// Deduplication against first-party findings is part of what this ingest claims to do. Skipping
 		// it silently would leave Matched=0, which is indistinguishable from "no agreement was found".
@@ -136,6 +155,9 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, 
 	}
 	if alreadyIngested {
 		result.Deduped = len(parsedDoc.results)
+		if err := s.bindDocument(ctx, tenantID, req, parsedDoc.digest); err != nil {
+			return result, err
+		}
 		// A short-circuited ingest is still a state-changing request whose response tells the caller
 		// whether this exact document was seen before, so it is audited like any other.
 		if auditErr := s.audit.Record(ctx, ports.AuditEntry{
@@ -161,6 +183,7 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, 
 
 	now := s.clock.Now().UTC()
 	batch := make([]importedfinding.ImportedFinding, 0, len(parsedDoc.results))
+	matchedIDs := make([]shared.ID, 0, len(parsedDoc.results))
 	for _, c := range parsedDoc.results {
 		imported := importedfinding.ImportedFinding{
 			ID:           s.ids.NewID(),
@@ -195,6 +218,7 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, 
 		// surfaces a severity disagreement instead of silently resolving it.
 		if match, ok := firstParty[dedupKey(c.location.Path, c.location.StartLine)]; ok {
 			imported.FindingID = match.ID
+			matchedIDs = append(matchedIDs, match.ID)
 			result.Matched++
 			if match.Severity != imported.Severity {
 				result.Disagreements = append(result.Disagreements, Disagreement{
@@ -235,7 +259,42 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, 
 		return IngestResult{}, fmt.Errorf("sarif ingest persisted %d findings but could not be audited: %w",
 			result.Accepted, auditErr)
 	}
+	if err := s.bindDocument(ctx, tenantID, req, parsedDoc.digest, matchedIDs...); err != nil {
+		return result, err
+	}
 	return result, nil
+}
+
+func (s *Service) bindDocument(ctx context.Context, tenantID shared.ID, req IngestRequest, digest string, matchedIDs ...shared.ID) error {
+	if req.AssetID.IsZero() {
+		return nil
+	}
+	persisted, err := s.store.ListByEngagement(ctx, tenantID, req.EngagementID)
+	if err != nil {
+		return fmt.Errorf("list persisted sarif findings: %w", err)
+	}
+	bound := make([]attackpath.FindingTarget, 0, len(persisted)+len(matchedIDs))
+	for _, imported := range persisted {
+		if imported.Provenance.SourceDigest == digest {
+			bound = append(bound, attackpath.FindingTarget{ID: imported.ID, Kind: attackpath.TargetImported})
+			if !imported.FindingID.IsZero() {
+				bound = append(bound, attackpath.FindingTarget{ID: imported.FindingID, Kind: attackpath.TargetCanonical})
+			}
+		}
+	}
+	for _, id := range matchedIDs {
+		bound = append(bound, attackpath.FindingTarget{ID: id, Kind: attackpath.TargetCanonical})
+	}
+	bound = uniqueTargets(bound)
+	producer := shared.ID("sarif:" + req.AssetID.String() + ":" + digest)
+	if err := s.attributor.RecordTargets(ctx, req.EngagementID, req.AssetID, producer, shared.ID(digest), asset.EdgeObserved, bound); err != nil {
+		ids := make([]shared.ID, len(bound))
+		for i, target := range bound {
+			ids[i] = target.ID
+		}
+		return &ports.PartialWriteError{Operation: "sarif document", IDs: ids, Err: fmt.Errorf("record sarif finding attribution: %w", err)}
+	}
+	return nil
 }
 
 // firstPartyIndex indexes existing findings by location so an external result can be matched to one.
@@ -304,4 +363,16 @@ func Validate(ctx context.Context, document []byte, limits Limits) (IngestResult
 	}
 	sortRefusals(result.Refused)
 	return result, nil
+}
+
+func uniqueTargets(targets []attackpath.FindingTarget) []attackpath.FindingTarget {
+	seen := make(map[attackpath.FindingTarget]bool, len(targets))
+	out := make([]attackpath.FindingTarget, 0, len(targets))
+	for _, target := range targets {
+		if !seen[target] {
+			seen[target] = true
+			out = append(out, target)
+		}
+	}
+	return out
 }

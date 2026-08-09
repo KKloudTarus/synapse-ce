@@ -78,6 +78,29 @@ func TestProposeFinding_RecordsUnprovenClaim(t *testing.T) {
 	}
 }
 
+func TestProposeFindingSchemaLeavesAssetIDConditional(t *testing.T) {
+	c, _ := newCatalog(t, nil, nil, subfinder())
+	c.EnableFindingProposals(&fakeProposer{})
+	for _, schema := range c.Tools() {
+		if schema.Name != ToolProposeFinding {
+			continue
+		}
+		var parameters struct {
+			Required []string `json:"required"`
+		}
+		if err := json.Unmarshal(schema.Parameters, &parameters); err != nil {
+			t.Fatal(err)
+		}
+		for _, required := range parameters.Required {
+			if required == "asset_id" {
+				t.Fatal("asset_id must remain conditional on attribution configuration")
+			}
+		}
+		return
+	}
+	t.Fatal("propose_finding schema not advertised")
+}
+
 func TestProposeFinding_RejectsBadSeverity(t *testing.T) {
 	c, _ := newCatalog(t, nil, nil, subfinder())
 	c.EnableFindingProposals(&fakeProposer{})

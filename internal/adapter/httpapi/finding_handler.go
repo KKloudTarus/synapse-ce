@@ -78,6 +78,7 @@ type createFindingRequest struct {
 	Severity    string `json:"severity"`
 	CVSSVector  string `json:"cvss_vector"`
 	CWE         string `json:"cwe"`
+	AssetID     string `json:"asset_id"`
 }
 
 // createFinding authors a manual finding. If a CVSS vector is supplied,
@@ -89,13 +90,20 @@ func (rt *Router) createFinding(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid request body"})
 		return
 	}
-	f, err := rt.findings.Create(r.Context(), PrincipalFrom(r.Context()), shared.ID(id), finding.ManualInput{
+	in := finding.ManualInput{
 		Title:       req.Title,
 		Description: req.Description,
 		Severity:    shared.Severity(req.Severity),
 		CVSSVector:  req.CVSSVector,
 		CWE:         req.CWE,
-	})
+	}
+	var f finding.Finding
+	var err error
+	if req.AssetID == "" {
+		f, err = rt.findings.Create(r.Context(), PrincipalFrom(r.Context()), shared.ID(id), in)
+	} else {
+		f, err = rt.findings.CreateAttributed(r.Context(), PrincipalFrom(r.Context()), shared.ID(id), shared.ID(req.AssetID), in)
+	}
 	if err != nil {
 		writeError(w, rt.log, err)
 		return

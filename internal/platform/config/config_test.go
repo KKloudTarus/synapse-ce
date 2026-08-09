@@ -52,6 +52,29 @@ func TestFindingMinSeverityDefaultsToInfo(t *testing.T) {
 	}
 }
 
+// TestLoadAttackPathBounds pins the bounded traversal defaults and environment overrides.
+func TestLoadAttackPathBounds(t *testing.T) {
+	for _, key := range []string{
+		"SYNAPSE_ATTACKPATH_MAX_LEN",
+		"SYNAPSE_ATTACKPATH_MAX_PATHS",
+		"SYNAPSE_ATTACKPATH_WALLCLOCK",
+	} {
+		t.Setenv(key, "")
+	}
+	c := Load()
+	if c.AttackPathMaxLen != 12 || c.AttackPathMaxPaths != 100 || c.AttackPathWallClock != 2*time.Second {
+		t.Fatalf("attack-path defaults = (%d, %d, %s), want (12, 100, 2s)", c.AttackPathMaxLen, c.AttackPathMaxPaths, c.AttackPathWallClock)
+	}
+
+	t.Setenv("SYNAPSE_ATTACKPATH_MAX_LEN", "7")
+	t.Setenv("SYNAPSE_ATTACKPATH_MAX_PATHS", "25")
+	t.Setenv("SYNAPSE_ATTACKPATH_WALLCLOCK", "750ms")
+	c = Load()
+	if c.AttackPathMaxLen != 7 || c.AttackPathMaxPaths != 25 || c.AttackPathWallClock != 750*time.Millisecond {
+		t.Fatalf("attack-path overrides = (%d, %d, %s), want (7, 25, 750ms)", c.AttackPathMaxLen, c.AttackPathMaxPaths, c.AttackPathWallClock)
+	}
+}
+
 // TestLoadReachability confirms the Tier-2 reachability proof is ON by default (effective-by-default
 // policy), that it can be opted out, and the govulncheck binary defaults sensibly.
 func TestLoadReachability(t *testing.T) {

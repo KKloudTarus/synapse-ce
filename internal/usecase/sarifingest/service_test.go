@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
@@ -15,9 +17,12 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-type fakeAudit struct{ entries int }
+type fakeAudit struct{ entries []ports.AuditEntry }
 
-func (f *fakeAudit) Record(context.Context, ports.AuditEntry) error { f.entries++; return nil }
+func (f *fakeAudit) Record(_ context.Context, entry ports.AuditEntry) error {
+	f.entries = append(f.entries, entry)
+	return nil
+}
 
 type fixedClock struct{}
 
@@ -125,8 +130,8 @@ func TestIngestAcceptsAWellFormedDocument(t *testing.T) {
 	if got.Location.Path != "src/app.go" || got.Location.StartLine != 42 {
 		t.Fatalf("location = %+v", got.Location)
 	}
-	if audit.entries != 1 {
-		t.Fatalf("ingest must be audited exactly once, got %d", audit.entries)
+	if len(audit.entries) != 1 {
+		t.Fatalf("ingest must be audited exactly once, got %d", len(audit.entries))
 	}
 }
 
@@ -426,5 +431,126 @@ func TestUnsupportedVersionIsRefused(t *testing.T) {
 	}
 	if _, err := ingest(t, svc, `not json`); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("a non-json document must be refused, got %v", err)
+	}
+}
+
+type recordingAttributor struct {
+	validated  shared.ID
+	asset      shared.ID
+	provenance shared.ID
+	ids        []shared.ID
+	targets    []attackpath.FindingTarget
+	err        error
+	recordErr  error
+}
+
+func (a *recordingAttributor) ValidateAsset(_ context.Context, _ shared.ID, assetID shared.ID) error {
+	a.validated = assetID
+	return a.err
+}
+
+func (a *recordingAttributor) Record(_ context.Context, _ shared.ID, assetID, _, provenance shared.ID, confidence asset.EdgeConfidence, ids []shared.ID) error {
+	if confidence != asset.EdgeObserved {
+		return errors.New("unexpected confidence")
+	}
+	a.asset, a.provenance = assetID, provenance
+	a.ids = append([]shared.ID(nil), ids...)
+	return a.err
+}
+
+func (a *recordingAttributor) RecordTargets(_ context.Context, _ shared.ID, assetID, _, provenance shared.ID, confidence asset.EdgeConfidence, targets []attackpath.FindingTarget) error {
+	if confidence != asset.EdgeObserved {
+		return errors.New("unexpected confidence")
+	}
+	a.asset, a.provenance = assetID, provenance
+	a.targets = append([]attackpath.FindingTarget(nil), targets...)
+	return a.recordErr
+}
+
+func (a *recordingAttributor) InheritedAssetID(context.Context, shared.ID, []shared.ID) (shared.ID, error) {
+	return "", nil
+}
+
+func TestIngestBindsImportedAndMatchedFindingsToDocumentDigest(t *testing.T) {
+	t.Parallel()
+	first := finding.Finding{ID: "first-party", EngagementID: "eng1", Severity: shared.SeverityLow, SourceLocation: &finding.SourceLocation{File: "src/app.go", StartLine: 42, EndLine: 42}}
+	svc, store, _ := newService(t, first)
+	attributor := &recordingAttributor{}
+	svc.SetAttributor(attributor)
+	result, err := svc.Ingest(context.Background(), IngestRequest{TenantID: "t1", EngagementID: "eng1", AssetID: "asset-1", Document: []byte(docWith(resultA)), Actor: "human:alice"})
+	if err != nil || result.Accepted != 1 || result.Matched != 1 {
+		t.Fatalf("ingest = %+v, %v", result, err)
+	}
+	stored, err := store.ListByEngagement(context.Background(), "t1", "eng1")
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("stored = %#v, %v", stored, err)
+	}
+	if attributor.validated != "asset-1" || attributor.asset != "asset-1" || attributor.provenance != shared.ID(stored[0].Provenance.SourceDigest) {
+		t.Fatalf("attribution = %#v, digest = %q", attributor, stored[0].Provenance.SourceDigest)
+	}
+	want := []attackpath.FindingTarget{{ID: stored[0].ID, Kind: attackpath.TargetImported}, {ID: "first-party", Kind: attackpath.TargetCanonical}}
+	if len(attributor.targets) != len(want) || attributor.targets[0] != want[0] || attributor.targets[1] != want[1] {
+		t.Fatalf("bound targets = %#v, want %#v", attributor.targets, want)
+	}
+}
+
+func TestIngestRetryRepairsTypedBindings(t *testing.T) {
+	svc, store, audit := newService(t)
+	attributor := &recordingAttributor{recordErr: errors.New("binding unavailable")}
+	svc.SetAttributor(attributor)
+	req := IngestRequest{TenantID: "t1", EngagementID: "eng1", AssetID: "asset-1", Document: []byte(docWith(resultA)), Actor: "human:alice"}
+	first, err := svc.Ingest(context.Background(), req)
+	var partial *ports.PartialWriteError
+	if !errors.As(err, &partial) || first.Accepted != 1 || len(partial.IDs) != 1 {
+		t.Fatalf("first ingest = %+v, %v", first, err)
+	}
+	if len(audit.entries) != 1 {
+		t.Fatalf("binding failure must audit persisted import once, got %#v", audit.entries)
+	}
+	entry := audit.entries[0]
+	if entry.Action != "finding.imported" || entry.Target != "eng1" || entry.Metadata["accepted"] != "1" || entry.Metadata["deduplicated"] != "0" || entry.Metadata["refused"] != "0" || entry.Metadata["source_digest"] == "" || len(entry.Metadata) != 4 {
+		t.Fatalf("import audit = %#v", entry)
+	}
+	attributor.recordErr = nil
+	second, err := svc.Ingest(context.Background(), req)
+	if err != nil || second.Deduped != 1 || len(attributor.targets) != 1 || attributor.targets[0].Kind != attackpath.TargetImported {
+		t.Fatalf("retry = %+v, %v, targets=%+v", second, err, attributor.targets)
+	}
+	if len(audit.entries) != 2 || audit.entries[1].Action != "finding.imported.deduplicated" {
+		t.Fatalf("retry audit = %#v", audit.entries)
+	}
+	stored, _ := store.ListByEngagement(context.Background(), "t1", "eng1")
+	if len(stored) != 1 || stored[0].ID != partial.IDs[0] {
+		t.Fatalf("stored = %+v, want canonical id %s", stored, partial.IDs[0])
+	}
+}
+
+func TestIngestWithoutAssetReportsCoverageGap(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := newService(t)
+	result, err := ingest(t, svc, docWith(resultA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Coverage) == 0 || result.Coverage[0].Detail != "asset attribution was not supplied: imported findings cannot enter attack paths" {
+		t.Fatalf("coverage = %#v", result.Coverage)
+	}
+}
+
+func TestIngestRejectsUnknownOrWrongTenantAsset(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"unknown", "wrong-tenant"} {
+		t.Run(name, func(t *testing.T) {
+			svc, store, _ := newService(t)
+			svc.SetAttributor(&recordingAttributor{err: shared.ErrNotFound})
+			_, err := svc.Ingest(context.Background(), IngestRequest{TenantID: "t1", EngagementID: "eng1", AssetID: "asset", Document: []byte(docWith(resultA)), Actor: "human:alice"})
+			if !errors.Is(err, shared.ErrNotFound) {
+				t.Fatalf("ingest error = %v, want not found", err)
+			}
+			stored, _ := store.ListByEngagement(context.Background(), "t1", "eng1")
+			if len(stored) != 0 {
+				t.Fatalf("rejected asset persisted findings: %#v", stored)
+			}
+		})
 	}
 }

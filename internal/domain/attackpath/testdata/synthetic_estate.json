@@ -1,0 +1,22 @@
+{
+  "tenant": "tenant",
+  "assets": [
+    {"id": "exposure", "kind": "exposure", "key": "exposure", "name": "exposure"},
+    {"id": "web", "kind": "workload", "key": "web", "name": "web"},
+    {"id": "db", "kind": "storage", "key": "db", "name": "db"}
+  ],
+  "edges": [
+    {"from": "exposure", "to": "web", "kind": "exposes", "provenance": "obs-a", "confidence": "observed"},
+    {"from": "web", "to": "db", "kind": "reaches", "provenance": "obs-b", "confidence": "observed"}
+  ],
+  "findings": [
+    {"id": "F-good", "risk_score": 7, "severity": "high", "kev": true, "reachability": "reachable", "tier": "tier-2", "provenance": "reach-good", "confirmed": true},
+    {"id": "F-unknown", "risk_score": 8, "severity": "critical", "reachability": "unknown", "tier": "tier-1", "provenance": "reach-unknown", "confirmed": false},
+    {"id": "F-forbidden", "risk_score": 10, "severity": "critical", "reachability": "not_reachable", "tier": "tier-2", "provenance": "reach-no", "confirmed": true}
+  ],
+  "bindings": [
+    {"asset_id": "db", "finding_id": "F-good", "producer": "synthetic-estate", "provenance": "bind-good", "confidence": "observed"},
+    {"asset_id": "web", "finding_id": "F-unknown", "producer": "synthetic-estate", "provenance": "bind-unknown", "confidence": "inferred"},
+    {"asset_id": "web", "finding_id": "F-forbidden", "producer": "synthetic-estate", "provenance": "bind-forbidden", "confidence": "observed"}
+  ]
+}

@@ -233,14 +233,14 @@ func (c *Catalog) Tools() []agent.ToolSchema {
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeFinding,
 			Description: "Record a SUSPECTED exploitation finding for the current engagement. This is an UNPROVEN claim: it is stored at evidence score 0 and is NOT reportable. You CANNOT confirm it or raise its score – a separate human/verifier must adversarially verify it out of band. Use only for a concrete, observed exploitation hypothesis.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"severity":{"type":"string","description":"critical|high|medium|low|info"},"cvss_vector":{"type":"string"},"cwe":{"type":"string"}},"required":["title","description","severity"],"additionalProperties":false}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"severity":{"type":"string","description":"critical|high|medium|low|info"},"cvss_vector":{"type":"string"},"cwe":{"type":"string"},"asset_id":{"type":"string","description":"authoritative asset id; required when asset attribution is configured"}},"required":["title","description","severity"],"additionalProperties":false}`),
 		})
 	}
 	if c.hypProposer != nil {
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeAttackChain,
 			Description: "Record an attack-chain HYPOTHESIS: a claim that two or more EXISTING findings chain into an attack path (e.g. SSRF → cloud-metadata creds → admin API). This is an UNPROVEN claim, stored at evidence score 0 and NOT reportable; you CANNOT confirm it or raise its score – a distinct human verifies it out of band. It NEVER modifies or merges the constituent findings, only names them. Give the constituent finding ids (>= 2, from list_findings).",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string","description":"short name of the attack chain"},"description":{"type":"string","description":"how the findings chain into an attack path"},"constituent_ids":{"type":"array","items":{"type":"string"},"minItems":2,"description":"the finding ids this chain links (>= 2, from list_findings)"},"severity":{"type":"string","description":"optional: critical|high|medium|low|info; defaults to unknown for human triage"}},"required":["title","description","constituent_ids"],"additionalProperties":false}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string","description":"short name of the attack chain"},"description":{"type":"string","description":"how the findings chain into an attack path"},"constituent_ids":{"type":"array","items":{"type":"string"},"minItems":2,"description":"the finding ids this chain links (>= 2, from list_findings)"},"severity":{"type":"string","description":"optional: critical|high|medium|low|info; defaults to unknown for human triage"},"asset_id":{"type":"string","description":"optional authoritative asset id; otherwise inherited only when all constituents have one unambiguous binding"}},"required":["title","description","constituent_ids"],"additionalProperties":false}`),
 		})
 	}
 	if c.planning {
@@ -266,7 +266,7 @@ func (c *Catalog) Tools() []agent.ToolSchema {
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeSASTValidation,
 			Description: "Propose a gated SAST/runtime-validation judgment for an existing SAST finding. This records a typed CapSAST claim at score 0 for a distinct verifier/human to confirm or refute; it does NOT run DAST, does NOT execute payloads, and cannot raise evidence score. Use after plan_runtime_verification for needs-runtime-proof candidates.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"finding_id":{"type":"string","description":"the SAST finding id from list_sast_validation"},"cwe":{"type":"string","description":"CWE id, e.g. CWE-89"},"location":{"type":"string","description":"bounded location token such as path:line or finding:<id>; no prose"},"rule":{"type":"string","description":"structured rule/proof token, e.g. runtime-verification-needed, static-source-to-sink, verifier-refutation-needed"}},"required":["finding_id","cwe","location","rule"],"additionalProperties":false}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"finding_id":{"type":"string","description":"the SAST finding id from list_sast_validation"},"cwe":{"type":"string","description":"CWE id, e.g. CWE-89"},"location":{"type":"string","description":"bounded location token such as path:line or finding:<id>; no prose"},"rule":{"type":"string","description":"structured rule/proof token, e.g. runtime-verification-needed, static-source-to-sink, verifier-refutation-needed"},"asset_id":{"type":"string","description":"optional authoritative asset id; a bound subject finding takes precedence"}},"required":["finding_id","cwe","location","rule"],"additionalProperties":false}`),
 		})
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeCritique,
@@ -281,7 +281,7 @@ func (c *Catalog) Tools() []agent.ToolSchema {
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeThreat,
 			Description: "Propose a STRIDE THREAT over the architecture model: pick the category (spoofing/tampering/repudiation/info_disclosure/denial_of_service/elevation_of_privilege) and the model ELEMENT it applies to – a component or a data flow (prefer the flows that CROSS a trust boundary, the attack surface). This is a PROPOSAL recorded at score 0: you CANNOT confirm or rate it; a distinct human ratifies it. Give a structured category + element id, never prose.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"element_kind":{"type":"string","description":"component | data_flow (what the threatened element is)"},"element_id":{"type":"string","description":"the threatened model element's id (a component id or data flow id)"},"category":{"type":"string","description":"spoofing | tampering | repudiation | info_disclosure | denial_of_service | elevation_of_privilege"},"asset":{"type":"string","description":"optional id of the asset at risk (e.g. the classified data an info_disclosure exposes); omit if none"}},"required":["element_kind","element_id","category"],"additionalProperties":false}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"element_kind":{"type":"string","description":"component | data_flow (what the threatened element is)"},"element_id":{"type":"string","description":"the threatened model element's id (a component id or data flow id)"},"category":{"type":"string","description":"spoofing | tampering | repudiation | info_disclosure | denial_of_service | elevation_of_privilege"},"asset":{"type":"string","description":"legacy display label; never used for attribution"},"asset_id":{"type":"string","description":"authoritative asset id for a standalone threat projection"}},"required":["element_kind","element_id","category","asset_id"],"additionalProperties":false}`),
 		})
 		schemas = append(schemas, agent.ToolSchema{
 			Name:        ToolProposeVexJustification,
@@ -1170,7 +1170,8 @@ type proposeThreatArgs struct {
 	ElementKind string `json:"element_kind"`
 	ElementID   string `json:"element_id"`
 	Category    string `json:"category"`
-	Asset       string `json:"asset"`
+	Asset       string `json:"asset"` // legacy display text
+	AssetID     string `json:"asset_id"`
 }
 
 // proposeThreat records a PROPOSED STRIDE threat (score 0) over the architecture model. The agent
@@ -1199,6 +1200,7 @@ func (c *Catalog) proposeThreat(ctx context.Context, sess agent.Session, raw jso
 	claim := judgment.ThreatClaim{
 		Category: judgment.StrideCategory(strings.TrimSpace(a.Category)),
 		Asset:    strings.TrimSpace(a.Asset),
+		AssetID:  shared.ID(strings.TrimSpace(a.AssetID)),
 	}
 	j, err := c.jproposer.Propose(ctx, sess.AgentActor(), sess.EngagementID, judgment.CapThreat, subjectKind, shared.ID(elementID), claim)
 	if err != nil {
@@ -1293,6 +1295,7 @@ type proposeSASTValidationArgs struct {
 	CWE       string `json:"cwe"`
 	Location  string `json:"location"`
 	Rule      string `json:"rule"`
+	AssetID   string `json:"asset_id"`
 }
 
 // proposeSASTValidation records a gated CapSAST judgment at score 0 for an existing SAST
@@ -1314,6 +1317,7 @@ func (c *Catalog) proposeSASTValidation(ctx context.Context, sess agent.Session,
 		CWE:      strings.TrimSpace(a.CWE),
 		Location: strings.TrimSpace(a.Location),
 		Rule:     strings.TrimSpace(a.Rule),
+		AssetID:  shared.ID(strings.TrimSpace(a.AssetID)),
 	}
 	j, err := c.jproposer.Propose(ctx, sess.AgentActor(), sess.EngagementID, judgment.CapSAST, judgment.SubjectFinding, shared.ID(fid), claim)
 	if err != nil {
@@ -1710,6 +1714,7 @@ type proposeFindingArgs struct {
 	Severity    string `json:"severity"`
 	CVSSVector  string `json:"cvss_vector"`
 	CWE         string `json:"cwe"`
+	AssetID     string `json:"asset_id"`
 }
 
 // proposeFinding records a SUSPECTED exploitation finding at EvidenceScore 0, attributed to the
@@ -1731,6 +1736,7 @@ func (c *Catalog) proposeFinding(ctx context.Context, sess agent.Session, raw js
 		Severity:    sev,
 		CVSSVector:  strings.TrimSpace(a.CVSSVector),
 		CWE:         strings.TrimSpace(a.CWE),
+		AssetID:     shared.ID(strings.TrimSpace(a.AssetID)),
 	}
 	f, err := c.proposer.Propose(ctx, sess.AgentActor(), sess.EngagementID, in)
 	if err != nil {
@@ -1752,6 +1758,7 @@ type proposeAttackChainArgs struct {
 	Description    string   `json:"description"`
 	ConstituentIDs []string `json:"constituent_ids"`
 	Severity       string   `json:"severity"`
+	AssetID        string   `json:"asset_id"`
 }
 
 // proposeAttackChain records an attack-chain HYPOTHESIS finding (Kind=hypothesis) at EvidenceScore 0,
@@ -1777,6 +1784,7 @@ func (c *Catalog) proposeAttackChain(ctx context.Context, sess agent.Session, ra
 		Description:    redact.String(strings.TrimSpace(a.Description), nil),
 		ConstituentIDs: a.ConstituentIDs,
 		Severity:       sev,
+		AssetID:        shared.ID(strings.TrimSpace(a.AssetID)),
 	}
 	f, err := c.hypProposer.ProposeHypothesis(ctx, sess.AgentActor(), sess.EngagementID, in)
 	if err != nil {

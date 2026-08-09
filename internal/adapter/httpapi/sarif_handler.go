@@ -69,6 +69,7 @@ func (rt *Router) importSARIF(w http.ResponseWriter, r *http.Request) {
 		EngagementID: shared.ID(r.PathValue("id")),
 		Document:     document,
 		Actor:        shared.ID(PrincipalFrom(r.Context())),
+		AssetID:      shared.ID(r.URL.Query().Get("asset_id")),
 	})
 	if err != nil {
 		writeError(w, rt.log, err)

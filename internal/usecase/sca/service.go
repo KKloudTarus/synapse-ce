@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/compliance"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/distro"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
@@ -39,6 +40,8 @@ import (
 // Service orchestrates the SCA pipeline over swappable ports.
 type Service struct {
 	engagements                      ports.EngagementRepository
+	assets                           ports.AssetRepository
+	attributor                       ports.FindingAttributor
 	findings                         ports.FindingRepository
 	scans                            ports.ScanRepository
 	results                          ports.ScanResultStore
@@ -126,6 +129,16 @@ func (s *Service) SetImportedSBOMStore(store ports.ImportedSBOMStore) { s.import
 // later correlate a running digest with this prior scan. Recording is best-effort — a failure never
 // fails the scan.
 func (s *Service) SetScannedImageRecorder(store ports.ScannedImageStore) { s.scannedImages = store }
+
+// SetFindingAttribution enables explicit SCA producer attribution. A configured
+// service resolves or creates the governed asset and records only persisted IDs.
+func (s *Service) SetFindingAttribution(assets ports.AssetRepository, attributor ports.FindingAttributor) error {
+	if assets == nil || attributor == nil {
+		return fmt.Errorf("%w: SCA finding attribution needs assets and an attributor", shared.ErrValidation)
+	}
+	s.assets, s.attributor = assets, attributor
+	return nil
+}
 
 func (s *Service) SetCodeQuality(q interface {
 	BuildReport(context.Context, string) (codequality.Report, error)
@@ -1853,6 +1866,9 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		if err := s.findings.Upsert(ctx, result.Findings); err != nil {
 			return nil, fmt.Errorf("persist findings: %w", err)
 		}
+		if err := s.attributeFindings(ctx, engagementID, strings.TrimSpace(doc.TargetRef), result); err != nil {
+			s.logger().Warn("attribute SCA findings failed (best-effort)", "err", err)
+		}
 	}
 	if s.results != nil {
 		if data, mErr := json.Marshal(result); mErr == nil {
@@ -1860,6 +1876,78 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		}
 	}
 	return result, nil
+}
+
+// normalizedSourceTarget is the same canonical request identity authorized for a
+// source scan; it never infers an asset from findings, SBOM content, or source prose.
+func normalizedSourceTarget(req ports.AcquireRequest) string {
+	return strings.TrimSpace(normalizeLocalTarget(req).Value)
+}
+
+// attributeFindings binds the final producer-owned finding set to its governed
+// target. An image uses only its exact resolved manifest digest; every other SCA
+// producer uses the normalized authoritative request target. ReproDigest is the
+// reproducibility provenance for the complete observed finding set.
+func (s *Service) attributeFindings(ctx context.Context, engagementID shared.ID, sourceTarget string, result *ScanResult) error {
+	if s.attributor == nil {
+		return nil
+	}
+	if s.assets == nil || result == nil || strings.TrimSpace(result.ReproDigest) == "" {
+		return fmt.Errorf("%w: SCA finding attribution is not fully configured", shared.ErrValidation)
+	}
+	eng, err := s.engagements.GetByID(ctx, engagementID)
+	if err != nil {
+		return fmt.Errorf("load attribution engagement: %w", err)
+	}
+	tenantID := shared.TenantOrDefault(eng.TenantID)
+	kind, key, name := asset.KindRepository, strings.TrimSpace(sourceTarget), strings.TrimSpace(sourceTarget)
+	if result.Image != nil {
+		kind, key, name = asset.KindImage, result.Image.Digest, result.Image.Reference
+		if !validManifestDigest(key) {
+			return fmt.Errorf("%w: image finding attribution requires an exact sha256 manifest digest", shared.ErrValidation)
+		}
+	} else if key == "" {
+		return fmt.Errorf("%w: source finding attribution requires a normalized target", shared.ErrValidation)
+	}
+	a, err := s.assets.GetAssetByKey(ctx, tenantID, kind, key)
+	if errors.Is(err, shared.ErrNotFound) {
+		if s.ids == nil || s.clock == nil {
+			return fmt.Errorf("%w: SCA asset creation needs ids and clock", shared.ErrValidation)
+		}
+		a, err = asset.New(s.ids.NewID(), tenantID, kind, key, name, nil, s.clock.Now())
+		if err != nil {
+			return fmt.Errorf("create attribution asset: %w", err)
+		}
+		if err := s.assets.UpsertAsset(ctx, a); err != nil {
+			return fmt.Errorf("persist attribution asset: %w", err)
+		}
+		// Natural-key upsert may race; use the canonical stored ID for the binding.
+		a, err = s.assets.GetAssetByKey(ctx, tenantID, kind, key)
+	}
+	if err != nil {
+		return fmt.Errorf("resolve attribution asset: %w", err)
+	}
+	findingIDs := make([]shared.ID, 0, len(result.Findings))
+	for _, f := range result.Findings {
+		findingIDs = append(findingIDs, f.ID)
+	}
+	if err := s.attributor.Record(ctx, engagementID, a.ID, "sca:"+a.ID, shared.ID(result.ReproDigest), asset.EdgeObserved, findingIDs); err != nil {
+		return &ports.PartialWriteError{Operation: "sca findings", IDs: findingIDs, Err: fmt.Errorf("record SCA finding attribution: %w", err)}
+	}
+	return nil
+}
+
+func validManifestDigest(digest string) bool {
+	const prefix = "sha256:"
+	if !strings.HasPrefix(digest, prefix) || len(digest) != len(prefix)+64 {
+		return false
+	}
+	for _, r := range digest[len(prefix):] {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // recordScannedImage records a completed image scan's manifest digest under the engagement's tenant
@@ -2644,6 +2732,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if s.findings != nil {
 		if err := s.findings.Upsert(ctx, result.Findings); err != nil {
 			return nil, fmt.Errorf("persist findings: %w", err)
+		}
+		if err := s.attributeFindings(ctx, engagementID, normalizedSourceTarget(req), result); err != nil {
+			s.logger().Warn("attribute SCA findings failed (best-effort)", "err", err)
 		}
 	}
 	// Cache the full result so the UI can re-display it after a reload (best-effort;

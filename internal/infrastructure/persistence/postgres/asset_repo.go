@@ -95,10 +95,11 @@ func (r *AssetRepository) ListAssets(ctx context.Context, tenantID shared.ID) ([
 func (r *AssetRepository) UpsertEdge(ctx context.Context, e *asset.Edge) error {
 	return WithTenant(ctx, r.pool, e.TenantID.String(), func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
-			INSERT INTO fleet_asset_edges (tenant_id, from_asset, to_asset, kind, provenance)
-			VALUES ($1, $2, $3, $4, $5)
-			ON CONFLICT (tenant_id, from_asset, to_asset, kind, provenance) DO NOTHING`,
-			e.TenantID.String(), e.From.String(), e.To.String(), string(e.Kind), e.Provenance.String())
+			INSERT INTO fleet_asset_edges (tenant_id, from_asset, to_asset, kind, provenance, confidence)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (tenant_id, from_asset, to_asset, kind, provenance) DO UPDATE
+			SET confidence = EXCLUDED.confidence`,
+			e.TenantID.String(), e.From.String(), e.To.String(), string(e.Kind), e.Provenance.String(), string(e.Confidence))
 		return err
 	})
 }
@@ -108,15 +109,15 @@ func (r *AssetRepository) ListEdges(ctx context.Context, tenantID shared.ID) ([]
 	var out []*asset.Edge
 	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
 		rows, e := tx.Query(ctx, `
-			SELECT tenant_id, from_asset, to_asset, kind, provenance FROM fleet_asset_edges
+			SELECT tenant_id, from_asset, to_asset, kind, provenance, confidence FROM fleet_asset_edges
 			WHERE tenant_id = $1 ORDER BY from_asset, to_asset, kind, provenance`, tenantID.String())
 		if e != nil {
 			return e
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var tid, from, to, kind, prov string
-			if e := rows.Scan(&tid, &from, &to, &kind, &prov); e != nil {
+			var tid, from, to, kind, prov, confidence string
+			if e := rows.Scan(&tid, &from, &to, &kind, &prov, &confidence); e != nil {
 				return e
 			}
 			out = append(out, &asset.Edge{
@@ -125,6 +126,7 @@ func (r *AssetRepository) ListEdges(ctx context.Context, tenantID shared.ID) ([]
 				To:         shared.ID(to),
 				Kind:       asset.EdgeKind(kind),
 				Provenance: shared.ID(prov),
+				Confidence: asset.EdgeConfidence(confidence),
 			})
 		}
 		return rows.Err()

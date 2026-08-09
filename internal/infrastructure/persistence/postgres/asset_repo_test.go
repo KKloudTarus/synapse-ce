@@ -94,7 +94,7 @@ func TestAssetRepository(t *testing.T) {
 	}
 
 	// Edge roundtrip + idempotency (ON CONFLICT DO NOTHING).
-	e, _ := asset.NewEdge("ta", "as1", "as3", asset.EdgeRuns, "obs1")
+	e, _ := asset.NewEdge("ta", "as1", "as3", asset.EdgeRuns, "obs1", asset.EdgeObserved)
 	if err := repo.UpsertEdge(ctx, e); err != nil {
 		t.Fatalf("upsert edge: %v", err)
 	}
@@ -105,8 +105,8 @@ func TestAssetRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list edges: %v", err)
 	}
-	if len(edges) != 1 || edges[0].Kind != asset.EdgeRuns {
-		t.Fatalf("expected one runs edge, got %+v", edges)
+	if len(edges) != 1 || edges[0].Kind != asset.EdgeRuns || edges[0].Confidence != asset.EdgeObserved {
+		t.Fatalf("expected one observed runs edge, got %+v", edges)
 	}
 
 	// Empty tenant is rejected by the domain before it ever reaches the DB.

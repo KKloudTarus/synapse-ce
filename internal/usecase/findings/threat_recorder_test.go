@@ -15,7 +15,7 @@ func confirmedThreat() judgment.Judgment {
 		ID: "j-1", EngagementID: "eng-1", Capability: judgment.CapThreat,
 		SubjectKind: judgment.SubjectDataFlow, SubjectID: "flow-1",
 		Claim: judgment.ThreatClaim{Category: judgment.InfoDisclosure, Asset: "pii"},
-		State: judgment.StateConfirmed,
+		State: judgment.StateConfirmed, EvidenceScore: finding.EvidenceThreshold,
 	}
 }
 
@@ -45,17 +45,27 @@ func TestRecordConfirmedThreat(t *testing.T) {
 }
 
 func TestRecordConfirmedThreatRejectsWrongInput(t *testing.T) {
-	svc := newSvc(&fakeRepo{}, &fakeComments{}, &fakeAudit{})
-	// not a threat capability
-	j := confirmedThreat()
-	j.Capability = judgment.CapReachability
-	if err := svc.RecordConfirmedThreat(context.Background(), "human:bob", j); !errors.Is(err, shared.ErrValidation) {
-		t.Errorf("non-threat capability must be rejected, got %v", err)
-	}
-	// threat capability but the claim isn't a ThreatClaim (defense-in-depth)
-	j2 := confirmedThreat()
-	j2.Claim = judgment.ReachabilityClaim{Reachable: "unknown", Tier: "tier-0"}
-	if err := svc.RecordConfirmedThreat(context.Background(), "human:bob", j2); !errors.Is(err, shared.ErrValidation) {
-		t.Errorf("a threat judgment without a ThreatClaim must be rejected, got %v", err)
+	for _, tc := range []struct {
+		name string
+		j    judgment.Judgment
+	}{
+		{"wrong capability", func() judgment.Judgment { j := confirmedThreat(); j.Capability = judgment.CapReachability; return j }()},
+		{"wrong claim", func() judgment.Judgment {
+			j := confirmedThreat()
+			j.Claim = judgment.ReachabilityClaim{Reachable: "unknown", Tier: "tier-0"}
+			return j
+		}()},
+		{"proposed", func() judgment.Judgment { j := confirmedThreat(); j.State = judgment.StateProposed; return j }()},
+		{"confirmed below evidence bar", func() judgment.Judgment { j := confirmedThreat(); j.EvidenceScore = 74; return j }()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeRepo{}
+			if err := newSvc(repo, &fakeComments{}, &fakeAudit{}).RecordConfirmedThreat(context.Background(), "human:bob", tc.j); !errors.Is(err, shared.ErrValidation) {
+				t.Fatalf("want ErrValidation, got %v", err)
+			}
+			if len(repo.upserted) != 0 {
+				t.Fatal("non-publishable judgment must not persist a finding")
+			}
+		})
 	}
 }

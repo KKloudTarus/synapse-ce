@@ -27,13 +27,14 @@ const (
 	KindIdentity     Kind = "identity"
 	KindNamespace    Kind = "namespace"
 	KindCluster      Kind = "cluster"
+	KindRepository   Kind = "repository"
 )
 
 // Valid reports whether k is a known kind.
 func (k Kind) Valid() bool {
 	switch k {
 	case KindHost, KindWorkload, KindImage, KindCloudAccount, KindStorage,
-		KindExposure, KindIdentity, KindNamespace, KindCluster:
+		KindExposure, KindIdentity, KindNamespace, KindCluster, KindRepository:
 		return true
 	default:
 		return false
@@ -107,6 +108,19 @@ func (e EdgeKind) Valid() bool {
 	}
 }
 
+// EdgeConfidence states whether an edge was directly observed or inferred from other evidence.
+type EdgeConfidence string
+
+const (
+	EdgeObserved EdgeConfidence = "observed"
+	EdgeInferred EdgeConfidence = "inferred"
+)
+
+// Valid reports whether c is a known edge confidence.
+func (c EdgeConfidence) Valid() bool {
+	return c == EdgeObserved || c == EdgeInferred
+}
+
 // Edge is a typed, provenance-carrying relationship. Provenance references the observation that
 // produced the edge; an edge without provenance is invalid, because an unattributable edge cannot
 // be trusted by the attack-path traversal that consumes it.
@@ -116,10 +130,11 @@ type Edge struct {
 	To         shared.ID
 	Kind       EdgeKind
 	Provenance shared.ID
+	Confidence EdgeConfidence
 }
 
 // NewEdge validates and constructs an Edge.
-func NewEdge(tenantID, from, to shared.ID, kind EdgeKind, provenance shared.ID) (*Edge, error) {
+func NewEdge(tenantID, from, to shared.ID, kind EdgeKind, provenance shared.ID, confidence EdgeConfidence) (*Edge, error) {
 	if tenantID.IsZero() {
 		return nil, fmt.Errorf("%w: edge tenant id is required (empty tenant is DENY under RLS)", shared.ErrValidation)
 	}
@@ -132,7 +147,10 @@ func NewEdge(tenantID, from, to shared.ID, kind EdgeKind, provenance shared.ID) 
 	if provenance.IsZero() {
 		return nil, fmt.Errorf("%w: edge provenance is required", shared.ErrValidation)
 	}
-	return &Edge{TenantID: tenantID, From: from, To: to, Kind: kind, Provenance: provenance}, nil
+	if !confidence.Valid() {
+		return nil, fmt.Errorf("%w: invalid edge confidence %q", shared.ErrValidation, confidence)
+	}
+	return &Edge{TenantID: tenantID, From: from, To: to, Kind: kind, Provenance: provenance, Confidence: confidence}, nil
 }
 
 func copyAttrs(in map[string]string) map[string]string {

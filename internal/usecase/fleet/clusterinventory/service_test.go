@@ -127,6 +127,9 @@ func TestSyncUpsertsAssetsEdgesAndReturnsGaps(t *testing.T) {
 		if e.Provenance != "sync-1" {
 			t.Fatalf("edge must carry provenance, got %q", e.Provenance)
 		}
+		if e.Confidence != asset.EdgeObserved {
+			t.Fatalf("cluster inventory edge must be observed, got %q", e.Confidence)
+		}
 	}
 	// Gaps returned: unscanned digest + unresolved digest, both present.
 	kinds := map[dci.GapKind]bool{}

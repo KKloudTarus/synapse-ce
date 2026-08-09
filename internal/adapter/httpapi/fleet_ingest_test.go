@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	dci "github.com/KKloudTarus/synapse-ce/internal/domain/clusterinventory"
 	dhi "github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
@@ -127,6 +128,13 @@ func TestClusterInventoryIngestPersists(t *testing.T) {
 	}
 	if !haveWorkload {
 		t.Fatalf("expected the api workload asset persisted, got %d assets", len(assets))
+	}
+	edges, err := store.ListEdges(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("list edges: %v", err)
+	}
+	if len(edges) == 0 || edges[0].Confidence != asset.EdgeObserved {
+		t.Fatalf("cluster inventory must persist observed edges, got %+v", edges)
 	}
 }
 
