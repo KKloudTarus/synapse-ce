@@ -14,6 +14,10 @@ import (
 // that produced a decision without retaining raw source or model chain-of-thought.
 const promptVersion = "fp-triage-v1"
 
+// EvaluationPromptVersion returns the immutable prompt identity for evaluation report metadata without
+// exporting the policy constant as part of the package API.
+func EvaluationPromptVersion() string { return promptVersion }
+
 // systemPrompt frames the model as a propose-only false-positive adjudicator. It must answer ONLY with
 // the schema-constrained JSON — the driver is a closed token, so no prose can reach a deliverable.
 const systemPrompt = `You are a security false-positive adjudicator for a static analysis tool.

@@ -20,19 +20,23 @@ type SourceSnippetReader interface {
 // requires distinct-model consensus and must also clear the human-review floor. The complete decision and
 // model metadata are retained in the scan result and its tamper-evident evidence link.
 type AICritique struct {
-	FindingID      string `json:"finding_id"`
-	DedupKey       string `json:"dedup_key"`
-	Verdict        string `json:"verdict"`
-	Driver         string `json:"driver"`
-	Confidence     int    `json:"confidence"`
-	SuspectedFP    bool   `json:"suspected_fp"`
-	ProposerModel  string `json:"proposer_model"`
-	VerifierModel  string `json:"verifier_model,omitempty"`
-	PromptVersion  string `json:"prompt_version"`
-	PolicyVersion  string `json:"policy_version,omitempty"`
-	PolicyReason   string `json:"policy_reason,omitempty"`
-	GateExempt     bool   `json:"gate_exempt"`
-	ReviewRequired bool   `json:"review_required"`
+	FindingID     string `json:"finding_id"`
+	DedupKey      string `json:"dedup_key"`
+	Verdict       string `json:"verdict"`
+	Driver        string `json:"driver"`
+	Confidence    int    `json:"confidence"`
+	SuspectedFP   bool   `json:"suspected_fp"`
+	ProposerModel string `json:"proposer_model"`
+	VerifierModel string `json:"verifier_model,omitempty"`
+	PromptVersion string `json:"prompt_version"`
+	PolicyVersion string `json:"policy_version,omitempty"`
+	PolicyReason  string `json:"policy_reason,omitempty"`
+	// Shadow is server-owned rollout metadata. When true, WouldGateExempt records the decision the
+	// enforced policy would have made, but GateExempt must remain false and the finding keeps gating.
+	Shadow          bool `json:"shadow,omitempty"`
+	WouldGateExempt bool `json:"would_gate_exempt,omitempty"`
+	GateExempt      bool `json:"gate_exempt"`
+	ReviewRequired  bool `json:"review_required"`
 	// Verified is true when a DISTINCT verifier model independently confirmed the refutation (two-model
 	// consensus). Single-model triage can set SuspectedFP but can never set Verified or GateExempt.
 	Verified           bool   `json:"verified"`

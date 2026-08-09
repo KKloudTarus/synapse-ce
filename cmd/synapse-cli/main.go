@@ -1342,6 +1342,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	// agrees and the deterministic human-review floor allows a gate exemption. High/critical, secrets,
 	// and dangerous CWEs always keep gating. Findings are never deleted. Skipped for image targets.
 	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" && !image {
+		sca.SetFPTriageMode(cfg.FPTriageMode)
 		if llm, lerr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); lerr != nil {
 			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage disabled: %v\n", lerr)
 		} else {
@@ -1393,6 +1394,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	// Report advisory opinions separately from the smaller policy-authorized gate-exempt set.
 	fpSuspect := res.SuspectedFPKeys()
 	fpGateExempt := res.AIGateExemptKeys()
+	fpWouldExempt := res.AIWouldGateExemptKeys()
 	fpReview := res.AIReviewRequiredKeys()
 	if len(res.AITriage) > 0 {
 		mode := "advisory-only"
@@ -1402,8 +1404,8 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 				break
 			}
 		}
-		fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage (%s, %s): critiqued %d, suspected %d, gate-exempt %d, human-review %d\n",
-			cfg.FPTriageModel, mode, len(res.AITriage), len(fpSuspect), len(fpGateExempt), len(fpReview))
+		fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage (%s, %s, rollout=%s): critiqued %d, suspected %d, would-exempt %d, gate-exempt %d, human-review %d\n",
+			cfg.FPTriageModel, mode, cfg.FPTriageMode, len(res.AITriage), len(fpSuspect), len(fpWouldExempt), len(fpGateExempt), len(fpReview))
 	}
 
 	switch {

@@ -80,8 +80,11 @@ stays in the report, it is only held back from the `--fail-on` gate).
    After the deterministic pass, the model adjudicates the remaining production-scope first-party source
    findings (SAST/misconfig; secret findings are never sent to the LLM) and returns a typed verdict — `refuted` (suspected false positive),
    `sound`, or `uncertain` — with a confidence. The proposer only advises: single-model output can never
-   change the gate. Set `SYNAPSE_VERIFIER_MODEL` to a **different** model to enable consensus. A finding is
-   gate-exempt only when both models independently refute it at/above the bar and the deterministic
+   change the gate. Set `SYNAPSE_VERIFIER_MODEL` to a **different** model to enable consensus. The rollout
+   mode defaults to `SYNAPSE_FP_TRIAGE_MODE=shadow`: Synapse stores `would_gate_exempt` for measurement,
+   always forces `gate_exempt=false`, and keeps the finding gating. Set the mode explicitly to `enforce`
+   only after the evaluation threshold is approved. In enforced mode, a finding is gate-exempt only when
+   both models independently refute it at/above the bar and the deterministic
    human-review floor permits it. High/critical findings, secrets, and dangerous injection/auth/access-
    control/SSRF/traversal/upload/deserialization CWEs always stay gating.
 
@@ -94,9 +97,21 @@ stays in the report, it is only held back from the `--fail-on` gate).
 ```bash
 export SYNAPSE_LLM_BASE_URL=http://localhost:8081/v1
 export SYNAPSE_LLM_API_KEY=…
-SYNAPSE_FP_TRIAGE_ENABLED=true SYNAPSE_FP_TRIAGE_MODEL=<model> \
+SYNAPSE_FP_TRIAGE_ENABLED=true SYNAPSE_FP_TRIAGE_MODE=shadow SYNAPSE_FP_TRIAGE_MODEL=<model> \
   synapse-cli scan . --fail-on high --json
 ```
+
+To evaluate a model/prompt/policy combination against the repository's versioned non-production golden
+dataset, run `synapse-fptriage-eval`. It emits deterministic JSON with precision, recall, false-negative
+escape rate, disagreement, coverage, and language/kind/CWE/severity/framework breakdowns:
+
+```bash
+SYNAPSE_FP_TRIAGE_MODEL=<proposer> SYNAPSE_VERIFIER_MODEL=<verifier> \
+  go run ./cmd/synapse-fptriage-eval --output ai-triage-eval.json
+```
+
+The evaluator always invokes the server policy in shadow mode. A report containing `gate_exempt=true` is
+rejected, so an evaluation run can never authorize a production quality gate.
 
 The AI critique reads the target's own source into the prompt, so an **untrusted PR** can still try prompt
 injection through comments or strings. Distinct consensus and the human-review floor bound the risk, and
