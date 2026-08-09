@@ -40,9 +40,10 @@ go run ./cmd/synapse-fptriage-eval \
   --output ai-triage-eval.json
 ```
 
-The verifier must remain distinct after model-ID canonicalization. Both calls use temperature zero. A
-provider failure, invalid response, missing verifier, or incomplete consensus remains covered as a
-non-exemption; no error path grants gate authority.
+The verifier must remain distinct after model-family canonicalization. It runs before the proposer result
+exists and receives only the finding plus source context, so the proposer verdict cannot anchor its
+assessment. Both calls use temperature zero. A provider failure, invalid response, missing verifier, or
+incomplete consensus remains covered as a non-exemption; no error path grants gate authority.
 
 ## Report contract
 

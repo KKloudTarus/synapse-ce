@@ -757,13 +757,15 @@ func main() {
 		} else {
 			coord := fptriage.New(tllm, cfg.FPTriageModel)
 			mode := "advisory-only (distinct verifier required for gate exemption)"
-			if cfg.VerifierModel != "" && cfg.VerifierModel != cfg.FPTriageModel {
+			if strings.TrimSpace(cfg.VerifierModel) != "" && agent.SameModel(cfg.FPTriageModel, cfg.VerifierModel) {
+				log.Warn("AI FP-triage verifier aliases the proposer; triage remains advisory-only",
+					"proposer_model", cfg.FPTriageModel, "verifier_model", cfg.VerifierModel,
+					"canonical_model", agent.CanonicalModelID(cfg.FPTriageModel))
+			} else if strings.TrimSpace(cfg.VerifierModel) != "" {
 				if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
 					coord.WithVerifier(vllm, cfg.VerifierModel)
 					if coord.VerifierModel() != "" {
 						mode = "verified by " + coord.VerifierModel()
-					} else {
-						log.Warn("AI FP-triage verifier aliases the proposer after canonicalization; triage remains advisory-only", "verifier_model", cfg.VerifierModel)
 					}
 				} else {
 					log.Warn("AI FP-triage verifier unavailable; triage remains advisory-only", "err", verr)
@@ -1037,7 +1039,12 @@ func main() {
 		// agent's model, a distinct verifier independently scores each proposed gated judgment and seals a
 		// verdict via the same gate a human uses (verifier identity "llm:<model>", never the proposer, so
 		// it can never confirm its own claim). POST .../judgments/auto-verify triggers it. Best-effort.
-		if llmverifier.ConfiguredModelsDistinct(cfg.LLMModel, cfg.VerifierModel) {
+		if strings.TrimSpace(cfg.VerifierModel) != "" && !llmverifier.ConfiguredModelsDistinct(cfg.LLMModel, cfg.VerifierModel) {
+			log.Warn("automated LLM judgment-verifier DISABLED (model independence cannot be established)",
+				"proposer_model", cfg.LLMModel, "verifier_model", cfg.VerifierModel,
+				"proposer_canonical", agent.CanonicalModelID(cfg.LLMModel),
+				"verifier_canonical", agent.CanonicalModelID(cfg.VerifierModel))
+		} else if llmverifier.ConfiguredModelsDistinct(cfg.LLMModel, cfg.VerifierModel) {
 			if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr != nil {
 				log.Warn("automated LLM judgment-verifier DISABLED (LLM unavailable)", "err", verr)
 			} else {
