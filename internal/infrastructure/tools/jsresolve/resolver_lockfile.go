@@ -24,9 +24,10 @@ import (
 // package manager. A lockfile it cannot interpret degrades coverage; it never guesses a version.
 
 const (
-	npmLockfileName  = "package-lock.json"
-	pnpmLockfileName = "pnpm-lock.yaml"
-	yarnLockfileName = "yarn.lock"
+	npmLockfileName   = "package-lock.json"
+	npmShrinkwrapName = "npm-shrinkwrap.json"
+	pnpmLockfileName  = "pnpm-lock.yaml"
+	yarnLockfileName  = "yarn.lock"
 )
 
 // importerResolutions answers "which version of package P does importer directory D resolve to?".
@@ -71,12 +72,25 @@ func (r *Resolver) readImporterResolutions(ctx context.Context, root string, cov
 	}
 	defer func() { _ = rootDir.Close() }()
 
-	for _, name := range []string{pnpmLockfileName, npmLockfileName, yarnLockfileName} {
+	_, shrinkwrapErr := rootDir.Lstat(npmShrinkwrapName)
+	shrinkwrapPresent := shrinkwrapErr == nil
+	for _, name := range []string{pnpmLockfileName, npmShrinkwrapName, npmLockfileName, yarnLockfileName} {
 		if err := ctx.Err(); err != nil {
 			return out
 		}
+		// npm-shrinkwrap.json has the same lock format as package-lock.json but is the authoritative
+		// committed lock when both exist. Never fall back to a stale package-lock after observing it.
+		if name == npmLockfileName && shrinkwrapPresent {
+			continue
+		}
 		data, ok := readBoundedLockfile(rootDir, name, r.limits.maxLockfileBytes)
 		if !ok {
+			if name == npmShrinkwrapName && shrinkwrapPresent {
+				coverage.add(jsresolution.CoverageIssue{
+					Kind: jsresolution.CoverageUnsupportedPackageManager, Path: name,
+					Detail: "npm shrinkwrap is present but cannot be read safely within the lockfile budget",
+				})
+			}
 			continue
 		}
 		switch name {
@@ -86,16 +100,16 @@ func (r *Resolver) readImporterResolutions(ctx context.Context, root string, cov
 			} else {
 				coverage.add(jsresolution.CoverageIssue{
 					Kind: jsresolution.CoverageUnsupportedPackageManager, Path: name,
-					Detail: "pnpm lockfile importers could not be interpreted, so per-importer version selection is unavailable",
+					Detail: "pnpm lockfile importers or v9 package/snapshot identities could not be interpreted safely, so per-importer version selection is unavailable",
 				})
 			}
-		case npmLockfileName:
+		case npmShrinkwrapName, npmLockfileName:
 			if parseNPMImporters(data, out) {
 				out.present = true
 			} else {
 				coverage.add(jsresolution.CoverageIssue{
 					Kind: jsresolution.CoverageUnsupportedPackageManager, Path: name,
-					Detail: "npm lockfile could not be interpreted, so per-importer version selection is unavailable",
+					Detail: "npm lockfile could not be interpreted safely, so per-importer version selection is unavailable",
 				})
 			}
 		case yarnLockfileName:
@@ -131,34 +145,61 @@ func readBoundedLockfile(rootDir *os.Root, name string, maxBytes int64) ([]byte,
 }
 
 // parsePnpmImporters reads the `importers:` block of a pnpm lockfile, which maps each workspace
-// directory to the exact version it resolves for every declared dependency. This is the strongest
-// importer signal any npm-family lockfile provides.
+// directory to the exact version it resolves for every declared dependency. For pnpm v9, importer
+// evidence is accepted only when the same npm identity exists in both `packages` and `snapshots`.
 func parsePnpmImporters(data []byte, out *importerResolutions) bool {
 	lock := struct {
-		Importers map[string]struct {
+		LockfileVersion string `yaml:"lockfileVersion"`
+		Importers       map[string]struct {
 			Dependencies         map[string]pnpmLockDep `yaml:"dependencies"`
 			DevDependencies      map[string]pnpmLockDep `yaml:"devDependencies"`
 			OptionalDependencies map[string]pnpmLockDep `yaml:"optionalDependencies"`
 		} `yaml:"importers"`
 		Dependencies    map[string]pnpmLockDep `yaml:"dependencies"`
 		DevDependencies map[string]pnpmLockDep `yaml:"devDependencies"`
+		Packages        map[string]any         `yaml:"packages"`
+		Snapshots       map[string]any         `yaml:"snapshots"`
 	}{}
 	if err := yaml.Unmarshal(data, &lock); err != nil {
 		return false
 	}
 
+	v9 := isPNPMV9LockfileVersion(lock.LockfileVersion)
+	packageIdentities := pnpmIdentitySet(lock.Packages)
+	snapshotIdentities := pnpmIdentitySet(lock.Snapshots)
+	selected := map[string]map[string]string{}
+	invalidV9Evidence := false
+
 	record := func(dir string, groups ...map[string]pnpmLockDep) {
 		normalized := normalizeImporterDir(dir)
 		for _, group := range groups {
 			for name, dep := range group {
-				version := pnpmVersion(dep.Version)
-				if version == "" || !sbom.IsResolvedVersion(version) {
+				rawVersion := strings.TrimSpace(dep.Version)
+				if strings.HasPrefix(rawVersion, "link:") || strings.HasPrefix(rawVersion, "file:") {
 					continue
 				}
-				if out.byImporter[normalized] == nil {
-					out.byImporter[normalized] = map[string]string{}
+				version, ok := pnpmResolvedBaseVersion(rawVersion)
+				if !ok {
+					if v9 && rawVersion != "" {
+						invalidV9Evidence = true
+					}
+					continue
 				}
-				out.byImporter[normalized][name] = version
+				if v9 {
+					identity := pnpmPackageIdentityKey(name, version)
+					if _, ok := packageIdentities[identity]; !ok {
+						invalidV9Evidence = true
+						continue
+					}
+					if _, ok := snapshotIdentities[identity]; !ok {
+						invalidV9Evidence = true
+						continue
+					}
+				}
+				if selected[normalized] == nil {
+					selected[normalized] = map[string]string{}
+				}
+				selected[normalized][name] = version
 			}
 		}
 	}
@@ -166,26 +207,122 @@ func parsePnpmImporters(data []byte, out *importerResolutions) bool {
 	for dir, importer := range lock.Importers {
 		record(dir, importer.Dependencies, importer.DevDependencies, importer.OptionalDependencies)
 	}
-	// A single-package repository puts its dependencies at the top level instead of under importers.
+	// A single-package repository in older supported layouts may put dependencies at the top level.
 	record(".", lock.Dependencies, lock.DevDependencies)
-	return len(out.byImporter) > 0
+
+	if v9 && (len(lock.Packages) == 0 || len(lock.Snapshots) == 0 || invalidV9Evidence) {
+		return false
+	}
+	if len(selected) == 0 {
+		return false
+	}
+	for dir, versions := range selected {
+		if out.byImporter[dir] == nil {
+			out.byImporter[dir] = map[string]string{}
+		}
+		for name, version := range versions {
+			out.byImporter[dir][name] = version
+		}
+	}
+	return true
 }
 
 type pnpmLockDep struct {
 	Version string `yaml:"version"`
 }
 
-// pnpmVersion strips pnpm's peer-dependency suffix, e.g. "18.2.0(react@18.2.0)" -> "18.2.0".
-func pnpmVersion(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if i := strings.IndexByte(trimmed, '('); i >= 0 {
-		trimmed = trimmed[:i]
+func isPNPMV9LockfileVersion(raw string) bool {
+	value := strings.Trim(strings.TrimSpace(raw), `"'`)
+	return value == "9" || value == "9.0"
+}
+
+func pnpmIdentitySet(entries map[string]any) map[string]struct{} {
+	out := make(map[string]struct{}, len(entries))
+	for key := range entries {
+		name, version, ok := pnpmV9PackageIdentity(key)
+		if !ok {
+			continue
+		}
+		out[pnpmPackageIdentityKey(name, version)] = struct{}{}
 	}
-	// A pnpm link to a local workspace is not a registry version.
-	if strings.HasPrefix(trimmed, "link:") || strings.HasPrefix(trimmed, "file:") {
-		return ""
+	return out
+}
+
+func pnpmV9PackageIdentity(key string) (string, string, bool) {
+	key = strings.TrimSpace(key)
+	baseKey := key
+	if peer := strings.IndexByte(baseKey, '('); peer >= 0 {
+		if !pnpmV9ValidPeerSuffix(baseKey[peer:]) {
+			return "", "", false
+		}
+		baseKey = strings.TrimSpace(baseKey[:peer])
+	} else if strings.ContainsRune(baseKey, ')') {
+		return "", "", false
 	}
-	return strings.TrimSpace(trimmed)
+	separator := strings.LastIndexByte(baseKey, '@')
+	if separator <= 0 || separator == len(baseKey)-1 {
+		return "", "", false
+	}
+	name, err := jsresolution.NormalizePackageName(baseKey[:separator])
+	if err != nil {
+		return "", "", false
+	}
+	version, ok := pnpmResolvedBaseVersion(baseKey[separator+1:])
+	if !ok {
+		return "", "", false
+	}
+	return name, version, true
+}
+
+func pnpmResolvedBaseVersion(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	base := value
+	if peer := strings.IndexByte(base, '('); peer >= 0 {
+		if !pnpmV9ValidPeerSuffix(base[peer:]) {
+			return "", false
+		}
+		base = strings.TrimSpace(base[:peer])
+	} else if strings.ContainsRune(base, ')') {
+		return "", false
+	}
+	if !sbom.IsResolvedVersion(base) {
+		return "", false
+	}
+	return base, true
+}
+
+func pnpmV9ValidPeerSuffix(suffix string) bool {
+	if suffix == "" || suffix[0] != '(' {
+		return false
+	}
+	depth := 0
+	groupHasContent := false
+	for _, r := range suffix {
+		switch r {
+		case '(':
+			if depth == 0 {
+				groupHasContent = false
+			}
+			depth++
+		case ')':
+			if depth <= 0 || !groupHasContent {
+				return false
+			}
+			depth--
+		default:
+			if depth == 0 {
+				return false
+			}
+			if !strings.ContainsRune(" \t\r\n", r) {
+				groupHasContent = true
+			}
+		}
+	}
+	return depth == 0
+}
+
+func pnpmPackageIdentityKey(name, version string) string {
+	return name + "\x00" + version
 }
 
 // npmLockPackage is the subset of a lockfileVersion 2/3 `packages` entry this reader needs.
@@ -201,6 +338,9 @@ type npmLockPackage struct {
 // parseNPMImporters reads a lockfileVersion 2/3 `packages` map and resolves, for each importer, the
 // install that satisfies each declared dependency using npm's nearest-wins hoisting rule.
 func parseNPMImporters(data []byte, out *importerResolutions) bool {
+	if err := validateNoDuplicateJSONKeys(data); err != nil {
+		return false
+	}
 	lock := struct {
 		LockfileVersion int                       `json:"lockfileVersion"`
 		Packages        map[string]npmLockPackage `json:"packages"`
