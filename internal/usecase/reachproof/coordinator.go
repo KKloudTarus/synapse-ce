@@ -34,10 +34,36 @@ import (
 // false. Neither is mintable by the agent/human actor factories. The identities + proof label are
 // tier-specific so a Tier-1 IMPORT proof is never attributed to the call-graph engine (audit accuracy).
 func actorsForTier(tier judgment.ReachabilityTier) (proposer, verifier, proofLabel string) {
-	switch tier {
-	case judgment.Tier2:
+	return actorsFor(tier, LanguagePython)
+}
+
+// Language identifies which source language produced a Tier-1 import proof. Tier-1 identities are
+// per-language for the same reason they are per-tier: an audit reader must not see a JavaScript proof
+// attributed to the Python import engine.
+type Language string
+
+const (
+	LanguagePython     Language = "python"
+	LanguageJavaScript Language = "javascript"
+)
+
+// Valid reports whether l is a supported Tier-1 language.
+func (l Language) Valid() bool {
+	switch l {
+	case LanguagePython, LanguageJavaScript:
+		return true
+	}
+	return false
+}
+
+func actorsFor(tier judgment.ReachabilityTier, language Language) (proposer, verifier, proofLabel string) {
+	if tier == judgment.Tier2 {
 		return "system:callgraph-scan", "system:callgraph-engine", "tier-2 call-graph proof"
-	default: // Tier-1 source-import reachability (e.g. Python)
+	}
+	switch language {
+	case LanguageJavaScript:
+		return "system:jsimport-scan", "system:jsimport-engine", "tier-1 javascript import-reachability proof"
+	default:
 		return "system:pyimport-scan", "system:pyimport-engine", "tier-1 import-reachability proof"
 	}
 }
@@ -94,6 +120,20 @@ func NewCoordinatorForTier(a analyzer, r recorder, audit ports.AuditLogger, cloc
 	}
 	proposer, verifier, label := actorsForTier(tier)
 	return &Coordinator{analyzer: a, recorder: r, audit: audit, clock: clock, tier: tier, proposer: proposer, verifier: verifier, proofLabel: label}, nil
+}
+
+// NewCoordinatorForLanguage is NewCoordinatorForTier with an explicit Tier-1 source language, so the
+// sealed proof and the audit trail name the engine that actually produced it.
+func NewCoordinatorForLanguage(a analyzer, r recorder, audit ports.AuditLogger, clock ports.Clock, tier judgment.ReachabilityTier, language Language) (*Coordinator, error) {
+	coordinator, err := NewCoordinatorForTier(a, r, audit, clock, tier)
+	if err != nil {
+		return nil, err
+	}
+	if !language.Valid() {
+		return nil, fmt.Errorf("%w: reachproof coordinator needs a valid tier-1 language, got %q", shared.ErrValidation, language)
+	}
+	coordinator.proposer, coordinator.verifier, coordinator.proofLabel = actorsFor(tier, language)
+	return coordinator, nil
 }
 
 // Record runs the analyzer over the engagement target ONCE and mints a deterministic reachability judgment

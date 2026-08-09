@@ -58,6 +58,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarchecksum"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarhash"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarlicense"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jsimports"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jsresolve"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jvmreach"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/license"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensefile"
@@ -116,6 +118,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/jsreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/llmverifier"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
@@ -1198,6 +1201,20 @@ func main() {
 		}
 		scaService.SetPyReachability(pyCoord)
 		log.Info("Tier-1 Python import-reachability ENABLED (source-only dead-dependency detection → OpenVEX not_affected; best-effort)")
+	}
+
+	// Deterministic Tier-1 JavaScript/TypeScript import-reachability, opt-in. Source-only like the Python
+	// path (the scanner only lexes text, so it needs no sandbox), and it answers only for DIRECT
+	// dependencies: a first-party import graph cannot prove a TRANSITIVE package unused, because that
+	// package is loaded by its parent. Requires the judgment lifecycle. Composition-root only.
+	if cfg.JSReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_JSREACH_ENABLED", "javascript reachability") {
+		jsRecorder, jerr := jsreach.NewRecorder(jsimports.New(), jsresolve.NewResolver(), judgmentSvc, auditLog, clock)
+		if jerr != nil {
+			log.Error("javascript reachability recorder init failed", "err", jerr)
+			os.Exit(1)
+		}
+		scaService.SetJSReachability(jsRecorder)
+		log.Info("Tier-1 JavaScript import-reachability ENABLED (source-only, direct dependencies only → OpenVEX not_affected; best-effort)")
 	}
 
 	// Deterministic taint-analysis CapSAST proposals, opt-in. Builds the workspace call

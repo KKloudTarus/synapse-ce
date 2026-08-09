@@ -83,6 +83,7 @@ type Service struct {
 	detectionPriority                string                          // server default detection priority (comprehensive|precise); empty = comprehensive
 	reachability                     ports.ReachabilityRecorder      // optional deterministic Tier-2 reachability proof (Go call-graph)
 	pyReachability                   ports.ReachabilityRecorder      // optional deterministic Tier-1 Python import-reachability proof
+	jsReachability                   jsReachabilityRecorder          // optional deterministic Tier-1 JavaScript import-reachability proof
 	correlation                      ports.CorrelationRecorder       // optional cross-check disagreement → judgment minter
 	sbomGen2                         ports.SBOMGenerator             // optional 2nd SBOM producer for the cross-check
 	sbomCache                        ports.SBOMCache                 // optional content+version-addressed cache of the generated SBOM
@@ -317,6 +318,19 @@ func (s *Service) SetReachability(r ports.ReachabilityRecorder) { s.reachability
 // SetReachability (a no-coverage / dynamic-import target leaves the prior tier standing, never a false
 // "not reachable"). Kept distinct from the Go call-graph prover: it is a WEAKER (Tier-1, import-level) proof.
 func (s *Service) SetPyReachability(r ports.ReachabilityRecorder) { s.pyReachability = r }
+
+// jsReachabilityRecorder is the narrow slice of the JavaScript Tier-1 recorder this service needs. It
+// takes the SBOM explicitly because a component purl is only meaningful relative to one document: the
+// subjects are minted from the scan's own SBOM, so the analysis must reason over that same document
+// rather than re-deriving one that could differ.
+type jsReachabilityRecorder interface {
+	RecordWithSBOM(ctx context.Context, engagementID shared.ID, targetRef string, doc *sbom.SBOM, subjects []ports.ReachabilitySubject) (int, error)
+}
+
+// SetJSReachability configures the optional deterministic Tier-1 JavaScript import-reachability prover.
+// A dependency declared but never imported becomes not_reachable, which the export path turns into an
+// OpenVEX not_affected justification. Best-effort and opt-in; nil disables it.
+func (s *Service) SetJSReachability(r jsReachabilityRecorder) { s.jsReachability = r }
 
 // SetCorrelation configures the optional cross-check disagreement→judgment minter. nil ⇒ no
 // correlation judgments. Best-effort + opt-in: a recorder error is ignored (the scan never fails). A setter
@@ -2425,6 +2439,15 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if opts.scansVulnerabilities() && s.pyReachability != nil {
 		if subs := pyReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
 			_, _ = s.pyReachability.Record(ctx, engagementID, ws.Dir, subs)
+		}
+	}
+
+	// Deterministic TIER-1 JavaScript import-reachability, best-effort + opt-in. The scan's own SBOM is
+	// handed over so the subjects and the analysis reason over the SAME document. A no-coverage result
+	// is IGNORED here: reachability is an enhancement, so the prior tier stands and the scan never fails.
+	if opts.scansVulnerabilities() && s.jsReachability != nil {
+		if subs := jsReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
+			_, _ = s.jsReachability.RecordWithSBOM(ctx, engagementID, ws.Dir, result.SBOM, subs)
 		}
 	}
 
