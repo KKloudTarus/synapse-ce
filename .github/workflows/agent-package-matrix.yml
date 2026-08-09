@@ -225,7 +225,11 @@ jobs:
       - name: Build the MSI
         run: |
           New-Item -ItemType Directory -Force -Path out | Out-Null
+          # -arch x64 is REQUIRED, not cosmetic: wix defaults to x86, and a 32-bit package puts the
+          # amd64 agent under "Program Files (x86)" and its registry key under WOW6432Node -- a 64-bit
+          # binary in the 32-bit half of the machine, where nothing looking for it will look.
           wix build packaging/windows/synapse-agent.wxs `
+            -arch x64 `
             -ext WixToolset.Util.wixext `
             -d Version=0.0.1 `
             -d BinPath=dist/synapse-agent.exe `
@@ -284,8 +288,16 @@ jobs:
             throw "msiexec failed with $($p.ExitCode)"
           }
 
+          # The 64-bit location specifically. An amd64 binary landing under "Program Files (x86)" means
+          # the package was built 32-bit, and the assertion says WHERE it looked and what it found
+          # instead -- a bare "not installed" cost a round trip once already.
           $exe = "$env:ProgramFiles\Synapse Agent\synapse-agent.exe"
-          if (-not (Test-Path $exe)) { throw "the agent binary was not installed" }
+          if (-not (Test-Path $exe)) {
+            Write-Host "--- where synapse-agent.exe actually landed ---"
+            Get-ChildItem 'C:\Program Files','C:\Program Files (x86)' -Recurse -Filter 'synapse-agent.exe' `
+              -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+            throw "the agent binary was not installed at $exe"
+          }
 
           # The service must EXIST as a service, configured to run as LocalService rather than
           # LocalSystem: an agent on every host should hold the least privilege that still works.
