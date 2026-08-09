@@ -45,13 +45,19 @@
     <!-- An install-time floor, refused with a readable message rather than installed and left to fail
          at first start (#412 req 1-2).
 
-         Worth being precise about what this does and does not enforce. MSI's VersionNT is CAPPED at
-         603 (Windows 8.1 / Server 2012 R2) for every later release unless the package ships a
-         compatibility manifest, so this condition cannot express the matrix's stated floor of Server
-         2019. WindowsBuild carries the real number, so the floor is enforced on that: 17763 is Server
-         2019 / Windows 10 1809. Both are checked, because VersionNT is the portable one and
-         WindowsBuild is the accurate one. -->
-    <Launch Condition="Installed OR (VersionNT &gt;= 603 AND WindowsBuild &gt;= 17763)"
+         Be precise about what MSI can and cannot enforce here, because getting this wrong produces an
+         installer that refuses every supported host. msiexec.exe reads the OS version through the
+         compatibility shim, so on every release after Windows 8.1 it sees 6.3 build 9600: VersionNT is
+         603 AND **WindowsBuild is 9600**, not the real build. A condition on WindowsBuild therefore
+         rejects Windows Server 2025 as readily as Windows 7 — verified, it failed with 1603 on a
+         build-26100 runner before this comment existed.
+
+         So MSI enforces the floor it can state honestly — VersionNT still reports correctly BELOW 8.1,
+         so this does refuse Windows 7 and 8 — and the real build floor is enforced by the agent itself
+         in cmd/synapse-agent/osfloor_windows.go, which reads it through RtlGetVersion and is not
+         subject to the shim. Neither check is decoration: this one stops the install, that one stops
+         the service from pretending to work. -->
+    <Launch Condition="Installed OR VersionNT &gt;= 603"
             Message="The Synapse fleet agent requires Windows Server 2019 / Windows 10 1809 (build 17763) or later. See the support matrix in docs/guide/fleet-agent-packaging.md." />
 
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -65,9 +71,11 @@
       <Component Directory="INSTALLFOLDER" Guid="9a3b41d2-6c58-4f77-8b0e-1d4c6a9f2e73">
         <File Id="AgentExe" Source="$(var.BinPath)" Name="synapse-agent.exe" KeyPath="yes" />
 
-        <!-- The service is installed but NOT auto-started: it cannot do anything useful until an
-             operator supplies the control-plane URL and a one-time enrolment token. Starting it first
-             would produce a service that fails in a loop and an event log full of noise. -->
+        <!-- Start type is automatic, because a fleet agent that does not come back after a reboot
+             silently turns a live host into a gap in the fleet view. The INSTALLER does not start it
+             (ServiceControl below carries no Start): it cannot do anything useful until an operator
+             supplies the control-plane URL and an enrolment token, and a service failing in a loop
+             during installation is indistinguishable from a broken package. -->
         <ServiceInstall Id="AgentService"
                         Name="synapse-agent"
                         DisplayName="Synapse Fleet Agent"

@@ -54,6 +54,21 @@ it; and (2) by `packaging/scripts/preinstall.sh`, which re-checks the *runtime* 
 install time (leaving nothing behind) for the field case where the dependency is satisfiable but the
 running glibc is older than the build target and the service would crash-loop at first start.
 
+**The Windows floor is enforced twice as well, but split differently, and the reason is worth knowing
+before anyone "tightens" it.** `msiexec.exe` reads the OS version through the compatibility shim, so on
+every release after Windows 8.1 it sees version 6.3 **build 9600** — `WindowsBuild` does *not* carry the
+real number. An MSI launch condition on the build therefore refuses Windows Server 2025 exactly as
+readily as Windows 7 (observed: install failed with 1603 on a build-26100 runner). So:
+
+1. the **MSI** conditions on `VersionNT >= 603`, which is the strongest claim MSI can make honestly —
+   `VersionNT` *is* accurate below 8.1, so this does refuse Windows 7 and 8 at install time; and
+2. the **agent** enforces build ≥ 17763 itself in `cmd/synapse-agent/osfloor_windows.go`, reading it
+   through `RtlGetVersion`, which the shim does not touch, and refusing to start below it.
+
+The second check is not belt-and-braces for its own sake: an agent that runs on an untested platform and
+reports inventory anyway makes the fleet view show a host as covered when it is not, which is worse than
+the host being absent from it.
+
 ## Native packages
 
 `packaging/nfpm.yaml` produces **rpm + deb** from one spec; Windows ships an **MSI**; a plain archive

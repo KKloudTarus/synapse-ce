@@ -70,6 +70,11 @@ type config struct {
 
 func main() {
 	log.SetFlags(0)
+	// The host floor is checked before the configuration, because it is the one refusal that no
+	// configuration can make valid.
+	if err := checkOSFloor(); err != nil {
+		log.Fatalf("synapse-agent: %v", err)
+	}
 	cfg := parseConfig()
 	if cfg.baseURL == "" {
 		log.Fatal("synapse-agent: SYNAPSE_FLEET_URL (or -url) is required")

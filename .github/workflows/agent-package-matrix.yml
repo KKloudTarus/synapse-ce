@@ -271,7 +271,18 @@ jobs:
       - name: Install the MSI and assert what it placed
         run: |
           $p = Start-Process msiexec -ArgumentList '/i','out\synapse-agent.msi','/quiet','/norestart','/l*v','install.log' -Wait -PassThru
-          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 60; throw "msiexec failed with $($p.ExitCode)" }
+          if ($p.ExitCode -ne 0) {
+            # A verbose MSI log ends with a property dump, so the tail is the LEAST informative part of
+            # it — that is how a launch-condition failure first read here as an unexplained 1603. Print
+            # the lines that actually name a cause, and keep the whole log as an artifact.
+            Write-Host "--- lines naming a cause ---"
+            Select-String -Path install.log -Pattern 'Action ended.*: 3\.','returned actual error','Error [0-9]+\.','MainEngineThread is returning','condition','Product: .* -- ' |
+              ForEach-Object { $_.Line.Trim() }
+            Write-Host "--- OS version as msiexec sees it (it reads through the compatibility shim) ---"
+            Select-String -Path install.log -Pattern 'Property\(C\): (VersionNT|WindowsBuild|VersionNT64) =' |
+              ForEach-Object { $_.Line.Trim() }
+            throw "msiexec failed with $($p.ExitCode)"
+          }
 
           $exe = "$env:ProgramFiles\Synapse Agent\synapse-agent.exe"
           if (-not (Test-Path $exe)) { throw "the agent binary was not installed" }
@@ -282,6 +293,16 @@ jobs:
           if (-not $svc) { throw "the service was not installed" }
           if ($svc.StartName -ne 'NT AUTHORITY\LocalService') { throw "service runs as $($svc.StartName), want LocalService" }
           Write-Host "service installed, running as $($svc.StartName)"
+
+      # Kept whether the install passed or failed: on a failure it is the only record of why, and a
+      # future 1603 should not need a second run to become diagnosable.
+      - name: Keep the installer log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: msi-install-log
+          path: install.log
+          if-no-files-found: warn
 
       - name: The service must start and answer the SCM
         env:
