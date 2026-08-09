@@ -328,3 +328,143 @@ func contains(values []string, want string) bool {
 	}
 	return false
 }
+
+// --- regressions for the audited mass false-negative classes ---
+
+func TestRustInlinePathIsAReference(t *testing.T) {
+	t.Parallel()
+
+	// Rust 2018 needs no `use`. Reading only `use` lines would report a crate the code demonstrably
+	// calls as unreferenced.
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "src", "main.rs"), `
+fn main() {
+    let v: serde_json::Value = serde_json::from_str("{}").unwrap();
+    let re = regex::Regex::new("^a+$").unwrap();
+    println!("{} {}", chrono::Utc::now(), re.is_match("aa"));
+}
+`)
+	graph, err := NewRustScanner().ScanImports(context.Background(), root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	got := imported(graph)
+	for _, want := range []string{"serde_json", "regex", "chrono"} {
+		if !got[want] {
+			t.Errorf("an inline path must count as a reference: %q missing from %v", want, graph.ImportedPackages)
+		}
+	}
+}
+
+func TestPHPInlineFullyQualifiedNameIsAReference(t *testing.T) {
+	t.Parallel()
+
+	// PHP requires no `use` either, and PHP 8 attributes carry fully-qualified names.
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "src", "Audit.php"), `<?php
+namespace App;
+#[\Doctrine\ORM\Mapping\Entity]
+class Audit {
+    public function log(string $m): void {
+        $logger = new \Monolog\Logger('audit');
+        \Ramsey\Uuid\Uuid::uuid4();
+    }
+}
+`)
+	graph, err := NewPHPScanner().ScanImports(context.Background(), root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	got := imported(graph)
+	for _, want := range []string{"monolog", "ramsey", "doctrine"} {
+		if !got[want] {
+			t.Errorf("an inline fully-qualified name must count as a reference: %q missing from %v", want, graph.ImportedPackages)
+		}
+	}
+}
+
+func TestRubyBundlerAndRailsLoadingDegradeCoverage(t *testing.T) {
+	t.Parallel()
+
+	// A Rails app never writes `require "nokogiri"` — Bundler loads the whole Gemfile. Without this,
+	// every gem it depends on would be reported unreferenced.
+	for name, src := range map[string]string{
+		"bundler require":   "Bundler.require(*Rails.groups)",
+		"rails all":         `require "rails/all"`,
+		"rails application": "class Application < Rails::Application\nend",
+		"zeitwerk":          "loader = Zeitwerk::Loader.new",
+	} {
+		name, src := name, src
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeFile(t, filepath.Join(root, "config", "application.rb"), "require 'rails'\n"+src)
+
+			graph, err := NewRubyScanner().ScanImports(context.Background(), root)
+			if err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			if graph.Complete() {
+				t.Fatalf("%s must degrade coverage", name)
+			}
+		})
+	}
+}
+
+func TestObservingNoImportAtAllRefuses(t *testing.T) {
+	t.Parallel()
+
+	// A scan that read source but saw no import is the shape of a parser that did not understand the
+	// language, not of a project with no dependencies.
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "lib", "a.rb"), "x = 1\ny = 2\n")
+
+	graph, err := NewRubyScanner().ScanImports(context.Background(), root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if graph.Complete() {
+		t.Fatal("an empty observation must never be treated as authoritative")
+	}
+}
+
+func TestRailsGemCandidatesCoverTheUnderscoreForm(t *testing.T) {
+	t.Parallel()
+
+	// activesupport is required as active_support; these are the highest-advisory gems in the ecosystem.
+	for gem, want := range map[string]string{
+		"activesupport": "active_support",
+		"activerecord":  "active_record",
+		"actionpack":    "action_pack",
+	} {
+		if got := RubyCandidates(gem); !contains(got, want) {
+			t.Errorf("RubyCandidates(%q) must include %q, got %v", gem, want, got)
+		}
+	}
+}
+
+func TestDirectDependencyReaders(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "Cargo.toml"), "[package]\nname = \"app\"\n\n[dependencies]\nserde = \"1\"\nreqwest = { version = \"0.11\" }\n")
+	writeFile(t, filepath.Join(root, "composer.json"), `{"require":{"monolog/monolog":"^3"},"require-dev":{"phpunit/phpunit":"^10"}}`)
+	writeFile(t, filepath.Join(root, "Gemfile"), "source 'https://rubygems.org'\ngem 'rails'\ngem \"nokogiri\", '~> 1.0'\n# gem 'commented'\n")
+
+	cargo, ok := DirectDependencies(context.Background(), root, "cargo")
+	if !ok || !cargo["serde"] || !cargo["reqwest"] {
+		t.Fatalf("cargo direct deps = %v (ok=%v)", cargo, ok)
+	}
+	composer, ok := DirectDependencies(context.Background(), root, "composer")
+	if !ok || !composer["monolog/monolog"] || !composer["phpunit/phpunit"] {
+		t.Fatalf("composer direct deps = %v (ok=%v)", composer, ok)
+	}
+	gems, ok := DirectDependencies(context.Background(), root, "gem")
+	if !ok || !gems["rails"] || !gems["nokogiri"] || gems["commented"] {
+		t.Fatalf("gem direct deps = %v (ok=%v)", gems, ok)
+	}
+	// A missing manifest must be reported as unknown, never as "no direct dependencies".
+	if _, ok := DirectDependencies(context.Background(), t.TempDir(), "cargo"); ok {
+		t.Fatal("a missing manifest must not report a known-empty dependency set")
+	}
+}

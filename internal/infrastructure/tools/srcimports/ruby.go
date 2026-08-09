@@ -31,20 +31,32 @@ var rubyDynamic = []dynamicConstruct{
 	{marker: "eval(", reason: "eval executes code this scan cannot observe"},
 	{marker: "autoload", reason: "autoload defers loading to a runtime constant reference"},
 	{marker: "Kernel.load", reason: "load reads a path resolved at runtime"},
+	// Bundler and Rails load the whole Gemfile without any explicit require appearing in source. A
+	// Rails app never writes `require "nokogiri"`, so without these markers every gem it depends on
+	// would be reported unreferenced — a mass false negative on the most common Ruby project shape.
+	{marker: "Bundler.require", reason: "Bundler.require loads every gem in the Gemfile with no explicit require"},
+	{marker: "Bundler.setup", reason: "Bundler.setup activates gems with no explicit require"},
+	{marker: "rails/all", reason: "rails/all loads framework gems with no explicit require"},
+	{marker: "Rails::Application", reason: "the Rails loader resolves constants without an explicit require"},
+	{marker: "Zeitwerk", reason: "the Zeitwerk autoloader resolves constants without an explicit require"},
+	{marker: "ActiveSupport::Dependencies", reason: "the Rails dependency loader resolves constants at runtime"},
+	{marker: "require_dependency", reason: "require_dependency defers loading to the Rails autoloader"},
 }
 
 // ScanImports walks dir and returns the gem references it can observe.
 func (s *RubyScanner) ScanImports(ctx context.Context, dir string) (ports.SourceImportGraph, error) {
 	walker := newSourceWalker(s.limits, []string{".rb", ".rake", ".gemspec"}, rubySkipDir)
 	scan, err := walker.walk(ctx, dir, func(path string, content []byte, out *scanAccumulator) {
-		body := stripLineComments(string(content), "#")
+		raw := string(content)
+		body := stripLineComments(raw, "#")
 		for _, name := range rubyRequireRoots(body) {
 			out.addPackage(name)
 		}
-		if rubyHasComputedRequire(body) {
+		// Detected on the RAW body: over-stripping must never be able to delete an unknown region.
+		if rubyHasComputedRequire(raw) {
 			out.addReason("a require path is computed at runtime (" + path + ")")
 		}
-		out.noteDynamic(body, rubyDynamic, path)
+		out.noteDynamic(raw, rubyDynamic, path)
 	})
 	if err != nil {
 		return ports.SourceImportGraph{}, err
@@ -140,6 +152,14 @@ func RubyCandidates(packageName string) []string {
 	}
 	if head, _, ok := strings.Cut(name, "-"); ok {
 		candidates = append(candidates, head)
+	}
+	// A compound gem name is required with an underscore inserted: activesupport is required as
+	// active_support, actionpack as action_pack. These are the highest-advisory gems in the ecosystem,
+	// so missing the split would suppress exactly the findings that matter most.
+	for _, prefix := range []string{"active", "action"} {
+		if strings.HasPrefix(name, prefix) && len(name) > len(prefix) {
+			candidates = append(candidates, prefix+"_"+name[len(prefix):])
+		}
 	}
 	return normalizeNames(candidates)
 }

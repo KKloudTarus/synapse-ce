@@ -35,15 +35,22 @@ var phpDynamic = []dynamicConstruct{
 func (s *PHPScanner) ScanImports(ctx context.Context, dir string) (ports.SourceImportGraph, error) {
 	walker := newSourceWalker(s.limits, []string{".php"}, phpSkipDir)
 	scan, err := walker.walk(ctx, dir, func(path string, content []byte, out *scanAccumulator) {
-		body := stripLineComments(stripLineComments(string(content), "//"), "#")
+		raw := string(content)
+		// `#[` opens a PHP 8 ATTRIBUTE, not a comment; stripping it would delete real code and hide the
+		// fully-qualified class names modern Doctrine and Symfony write there.
+		body := stripLineComments(raw, "//")
 		for _, name := range phpNamespaceRoots(body) {
 			out.addPackage(name)
 		}
-		// A computed include path can pull in any file, so it hides references.
-		if phpHasComputedInclude(body) {
+		// PHP does not require a `use`: an inline \Vendor\Class reference is just as real.
+		for _, name := range phpInlineNamespaceRoots(body) {
+			out.addPackage(name)
+		}
+		// Detected on the RAW body: over-stripping must never be able to delete an unknown region.
+		if phpHasComputedInclude(raw) {
 			out.addReason("an include or require path is computed at runtime (" + path + ")")
 		}
-		out.noteDynamic(body, phpDynamic, path)
+		out.noteDynamic(raw, phpDynamic, path)
 	})
 	if err != nil {
 		return ports.SourceImportGraph{}, err
@@ -152,4 +159,37 @@ func PHPCandidates(packageName string) []string {
 			strings.ReplaceAll(pkg, "-", "_"))
 	}
 	return normalizeNames(candidates)
+}
+
+// phpInlineNamespaceRoots finds vendor namespace roots referenced without a `use`, either fully
+// qualified (`new \Monolog\Logger(...)`, `\Ramsey\Uuid\Uuid::uuid4()`) or in an attribute
+// (`#[\Doctrine\ORM\Mapping\Entity]`). PHP requires no import for any of these, so reading only `use`
+// lines would report a package the code demonstrably instantiates as unreferenced.
+func phpInlineNamespaceRoots(body string) []string {
+	var out []string
+	for i := 0; i < len(body); i++ {
+		if body[i] != '\\' {
+			continue
+		}
+		// The root must be preceded by something that can start an expression, so a namespace
+		// continuation (Foo\Bar) does not register Bar as a root.
+		if i > 0 && isPHPIdentByte(body[i-1]) {
+			continue
+		}
+		j := i + 1
+		start := j
+		for j < len(body) && isPHPIdentByte(body[j]) {
+			j++
+		}
+		if j == start || j >= len(body) || body[j] != '\\' {
+			continue // a single leading-slash name is a global function or class, not a vendor root
+		}
+		out = append(out, body[start:j])
+		i = j
+	}
+	return out
+}
+
+func isPHPIdentByte(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }

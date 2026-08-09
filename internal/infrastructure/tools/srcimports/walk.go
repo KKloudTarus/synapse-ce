@@ -2,6 +2,7 @@ package srcimports
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -86,6 +87,14 @@ func (a *scanAccumulator) graph() ports.SourceImportGraph {
 		reasons = append(reasons, reason)
 	}
 	sort.Strings(reasons)
+
+	// A scan that read source but observed NO import at all is the shape of a parser that did not
+	// understand the language, not of a project with no dependencies. Accepting it as authoritative
+	// would answer every subject "not referenced" off an empty observation, so it refuses instead.
+	if len(packages) == 0 && a.files > 0 {
+		reasons = append(reasons, "no import, require or use statement was observed in any scanned source file")
+		sort.Strings(reasons)
+	}
 
 	entrypoints := normalizeNames(a.entrypoints)
 	return ports.SourceImportGraph{
@@ -285,3 +294,104 @@ func normalizeNames(in []string) []string {
 	}
 	return result
 }
+
+// DirectDependencies returns the dependency names a first-party manifest declares, and whether a
+// manifest was found at all.
+//
+// This is the guard that keeps a TRANSITIVE package out of a Tier-1 answer. A lockfile-derived SBOM is a
+// fully resolved graph, so most components are transitive — and first-party source never writes an
+// import for a package it receives through a parent. Reporting those as unreferenced would suppress the
+// majority of real findings, so a subject that is not a declared direct dependency must not be answered.
+func DirectDependencies(ctx context.Context, dir, purlType string) (map[string]bool, bool) {
+	limits := defaultScanLimits()
+	switch purlType {
+	case "cargo":
+		content, ok := readBoundedFile(ctx, dir, "Cargo.toml", limits.maxFileBytes)
+		if !ok {
+			return nil, false
+		}
+		return cargoDirectDependencies(string(content)), true
+	case "composer":
+		content, ok := readBoundedFile(ctx, dir, "composer.json", limits.maxFileBytes)
+		if !ok {
+			return nil, false
+		}
+		return composerDirectDependencies(content), true
+	case "gem":
+		content, ok := readBoundedFile(ctx, dir, "Gemfile", limits.maxFileBytes)
+		if !ok {
+			return nil, false
+		}
+		return gemfileDirectDependencies(string(content)), true
+	}
+	return nil, false
+}
+
+// cargoDirectDependencies reads the [dependencies] style tables of a Cargo manifest.
+func cargoDirectDependencies(body string) map[string]bool {
+	out := map[string]bool{}
+	section := ""
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") {
+			section = strings.Trim(trimmed, "[]")
+			continue
+		}
+		if !strings.HasSuffix(section, "dependencies") {
+			continue
+		}
+		name, _, ok := strings.Cut(trimmed, "=")
+		if !ok {
+			continue
+		}
+		if key := strings.TrimSpace(name); key != "" {
+			out[strings.ToLower(key)] = true
+		}
+	}
+	return out
+}
+
+// composerDirectDependencies reads require and require-dev.
+func composerDirectDependencies(content []byte) map[string]bool {
+	var manifest struct {
+		Require    map[string]string `json:"require"`
+		RequireDev map[string]string `json:"require-dev"`
+	}
+	out := map[string]bool{}
+	if jsonUnmarshal(content, &manifest) != nil {
+		return out
+	}
+	for _, group := range []map[string]string{manifest.Require, manifest.RequireDev} {
+		for name := range group {
+			out[strings.ToLower(name)] = true
+		}
+	}
+	return out
+}
+
+// gemfileDirectDependencies reads the `gem "name"` declarations of a Gemfile.
+func gemfileDirectDependencies(body string) map[string]bool {
+	out := map[string]bool{}
+	for _, line := range strings.Split(stripLineComments(body, "#"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "gem ") {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "gem"))
+		if rest == "" {
+			continue
+		}
+		quote := rest[0]
+		if quote != '\'' && quote != '"' {
+			continue
+		}
+		rest = rest[1:]
+		if end := strings.IndexByte(rest, quote); end > 0 {
+			out[strings.ToLower(rest[:end])] = true
+		}
+	}
+	return out
+}
+
+// jsonUnmarshal is a thin alias so the manifest readers above stay easy to read.
+func jsonUnmarshal(data []byte, v any) error { return json.Unmarshal(data, v) }

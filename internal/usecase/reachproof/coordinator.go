@@ -53,7 +53,7 @@ const (
 // Valid reports whether l is a supported Tier-1 language.
 func (l Language) Valid() bool {
 	switch l {
-	case LanguagePython, LanguageJavaScript:
+	case LanguagePython, LanguageJavaScript, LanguageRust, LanguagePHP, LanguageRuby:
 		return true
 	}
 	return false

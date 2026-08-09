@@ -1240,7 +1240,11 @@ func main() {
 		if !lang.enabled || !requireJudgmentsOrSkip(log, judgmentSvc != nil, lang.env, lang.label) {
 			continue
 		}
-		analyzer, aerr := srcreach.New(lang.scanner, lang.named)
+		purlType := lang.purlType
+		reader := func(ctx context.Context, dir string) (map[string]bool, bool) {
+			return srcimports.DirectDependencies(ctx, dir, purlType)
+		}
+		analyzer, aerr := srcreach.New(lang.scanner, lang.named, reader)
 		if aerr != nil {
 			log.Error(lang.label+" analyzer init failed", "err", aerr)
 			os.Exit(1)

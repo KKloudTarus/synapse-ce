@@ -45,11 +45,18 @@ var rustDynamic = []dynamicConstruct{
 func (s *RustScanner) ScanImports(ctx context.Context, dir string) (ports.SourceImportGraph, error) {
 	walker := newSourceWalker(s.limits, []string{".rs"}, rustSkipDir)
 	scan, err := walker.walk(ctx, dir, func(path string, content []byte, out *scanAccumulator) {
-		body := stripLineComments(string(content), "//")
+		raw := string(content)
+		body := stripLineComments(raw, "//")
 		for _, name := range rustCrateReferences(body) {
 			out.addPackage(name)
 		}
-		out.noteDynamic(body, rustDynamic, path)
+		// Inline paths (serde_json::from_str(...)) and attribute macros (#[tokio::main]) reference a
+		// crate with no `use` at all, so they are read from the stripped body too.
+		for _, name := range rustInlinePathRoots(body) {
+			out.addPackage(name)
+		}
+		// Detected on the RAW body: over-stripping must never be able to delete an unknown region.
+		out.noteDynamic(raw, rustDynamic, path)
 	})
 	if err != nil {
 		return ports.SourceImportGraph{}, err
@@ -186,3 +193,47 @@ func RustCandidates(packageName string) []string {
 	name := strings.ToLower(strings.TrimSpace(packageName))
 	return normalizeNames([]string{name, strings.ReplaceAll(name, "-", "_"), strings.ReplaceAll(name, "_", "-")})
 }
+
+// rustInlinePathRoots finds crate roots referenced by a fully-qualified inline path
+// (`serde_json::from_str(...)`) or an attribute macro (`#[tokio::main]`).
+//
+// Rust 2018 needs no `use` for either, so reading only `use` lines would report a crate that the code
+// demonstrably calls as unreferenced. Over-matching here is the safe direction: a local module path
+// simply adds a name that no dependency subject will match.
+func rustInlinePathRoots(body string) []string {
+	var out []string
+	for i := 0; i+2 < len(body); i++ {
+		if body[i] != ':' || body[i+1] != ':' {
+			continue
+		}
+		// Walk back over the identifier preceding "::".
+		end := i
+		start := end
+		for start > 0 && isRustIdentByte(body[start-1]) {
+			start--
+		}
+		if start == end {
+			continue
+		}
+		// A path segment preceded by "::" is not the root of the path.
+		if start >= 2 && body[start-2] == ':' && body[start-1] == ':' {
+			continue
+		}
+		root := body[start:end]
+		switch root {
+		case "crate", "self", "super", "std", "core", "alloc", "Self":
+			continue
+		}
+		if root != "" && !startsUpper(root) {
+			out = append(out, root)
+		}
+	}
+	return out
+}
+
+func isRustIdentByte(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+// startsUpper reports an identifier in type position (a type or enum name), which is never a crate root.
+func startsUpper(s string) bool { return s != "" && s[0] >= 'A' && s[0] <= 'Z' }

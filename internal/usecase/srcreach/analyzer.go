@@ -35,21 +35,34 @@ type importScanner interface {
 // one piece that differs per language.
 type CandidateNamer func(packageName string) []string
 
+// DirectDependencyReader reports the dependency names a first-party manifest declares.
+//
+// It is the guard that keeps a TRANSITIVE package out of a Tier-1 answer. A lockfile-derived SBOM is a
+// fully resolved graph, so most of its components are transitive — and first-party source never writes
+// an import for a package it receives through a parent. Answering "not referenced" for those would
+// suppress the majority of real findings, so a subject that is not a declared direct dependency is
+// refused instead.
+type DirectDependencyReader func(ctx context.Context, dir string) (map[string]bool, bool)
+
 // Analyzer implements the reachproof analyzer contract over a source import scan.
 type Analyzer struct {
 	scanner    importScanner
 	candidates CandidateNamer
+	directDeps DirectDependencyReader
 }
 
 // New validates and returns the analyzer.
-func New(scanner importScanner, candidates CandidateNamer) (*Analyzer, error) {
+func New(scanner importScanner, candidates CandidateNamer, directDeps DirectDependencyReader) (*Analyzer, error) {
 	if scanner == nil {
 		return nil, fmt.Errorf("%w: srcreach analyzer needs an import scanner", shared.ErrValidation)
 	}
 	if candidates == nil {
 		return nil, fmt.Errorf("%w: srcreach analyzer needs a candidate namer", shared.ErrValidation)
 	}
-	return &Analyzer{scanner: scanner, candidates: candidates}, nil
+	if directDeps == nil {
+		return nil, fmt.Errorf("%w: srcreach analyzer needs a direct-dependency reader", shared.ErrValidation)
+	}
+	return &Analyzer{scanner: scanner, candidates: candidates, directDeps: directDeps}, nil
 }
 
 // Lang reports the ecosystem this analyzer answers for.
@@ -78,6 +91,14 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, subjects []string) (
 		return nil, err
 	}
 
+	// Without a readable manifest there is no way to tell a direct dependency from a transitive one, so
+	// no negative is safe for any subject.
+	direct, ok := a.directDeps(ctx, dir)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s manifest could not be read, so direct dependencies are unknown (no coverage)",
+			shared.ErrValidation, a.scanner.Lang())
+	}
+
 	referenced := make(map[string]bool, len(graph.ImportedPackages))
 	for _, name := range graph.ImportedPackages {
 		referenced[strings.ToLower(strings.TrimSpace(name))] = true
@@ -90,6 +111,12 @@ func (a *Analyzer) Analyze(ctx context.Context, dir string, subjects []string) (
 			continue
 		}
 		seen[subject] = true
+		if !direct[strings.ToLower(strings.TrimSpace(subject))] {
+			// A transitive package is loaded by its parent, so the absence of a first-party import
+			// proves nothing about it. Refuse rather than answer.
+			return nil, fmt.Errorf("%w: %q is not a declared direct dependency, so a first-party import scan cannot prove it unused (no coverage)",
+				shared.ErrValidation, subject)
+		}
 		result := reachability.Result{Symbol: subject}
 		for _, candidate := range a.candidates(subject) {
 			if referenced[candidate] {
