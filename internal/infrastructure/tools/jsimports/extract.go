@@ -364,8 +364,11 @@ func (e *extractor) handleStaticImportClause(kw token) {
 		specifier: specifier,
 		kind:      modulegraph.ImportESMStatic,
 		bindings:  bindings,
-		typeOnly:  typeOnly || allBindingsTypeOnly(bindings),
-		position:  modulegraph.Position{Line: kw.line, Column: kw.column},
+		// Only a KEYWORD-level `import type` is fully erased. An all-inline-type binding list
+		// (`import { type A } from "pkg"`) still emits `import "pkg"` under verbatimModuleSyntax, which
+		// is a real side-effect module load — so it must stay runtime evidence.
+		typeOnly: typeOnly,
+		position: modulegraph.Position{Line: kw.line, Column: kw.column},
 	}, escaped)
 }
 
@@ -557,7 +560,7 @@ func (e *extractor) handleExportKeyword(kw token) {
 			specifier: specifier,
 			kind:      modulegraph.ImportReExport,
 			bindings:  bindings,
-			typeOnly:  typeOnly || allBindingsTypeOnly(bindings),
+			typeOnly:  typeOnly,
 			position:  modulegraph.Position{Line: kw.line, Column: kw.column},
 		}, escaped)
 	default:
@@ -647,18 +650,4 @@ func (e *extractor) handleRequire(kw, prev, prev2 token, havePrev bool) {
 		e.push(t)
 		e.addHazard(hazardDynamicRequire, kw.line, "require referenced outside a call")
 	}
-}
-
-// allBindingsTypeOnly reports whether a non-empty binding list is entirely type-only, which makes the
-// whole edge type-only: no runtime module load survives compilation.
-func allBindingsTypeOnly(bindings []modulegraph.Binding) bool {
-	if len(bindings) == 0 {
-		return false
-	}
-	for _, b := range bindings {
-		if !b.TypeOnly {
-			return false
-		}
-	}
-	return true
 }

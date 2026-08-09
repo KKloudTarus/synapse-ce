@@ -149,8 +149,12 @@ type Inventory struct {
 // Complete is false whenever package-resolution coverage is incomplete; source
 // graph coverage is preserved separately and must also be considered by callers.
 type Result struct {
-	Imports       []ImportResolution
-	Coverage      []CoverageIssue
-	GraphCoverage []modulegraph.CoverageIssue
-	Complete      bool
+	// DeclaredDependencies are the package names first-party manifests declare, sorted and
+	// deduplicated. A package absent from this list is TRANSITIVE: first-party source could not import
+	// it directly, so the absence of a first-party import proves nothing about whether it is loaded.
+	DeclaredDependencies []string
+	Imports              []ImportResolution
+	Coverage             []CoverageIssue
+	GraphCoverage        []modulegraph.CoverageIssue
+	Complete             bool
 }

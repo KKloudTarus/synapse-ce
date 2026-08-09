@@ -157,6 +157,13 @@ func (r *Resolver) Resolve(ctx context.Context, root string, graph modulegraph.G
 		}
 		result.Imports = append(result.Imports, resolution)
 	}
+	// First-party manifests decide which packages source code may import DIRECTLY. A later analyzer
+	// needs this to know when the absence of an import is meaningful at all.
+	for _, pkg := range inventory.Packages {
+		for _, dep := range pkg.Dependencies {
+			result.DeclaredDependencies = append(result.DeclaredDependencies, dep.Name)
+		}
+	}
 	result.Coverage = coverage.issues
 	return jsresolution.NormalizeResult(result)
 }

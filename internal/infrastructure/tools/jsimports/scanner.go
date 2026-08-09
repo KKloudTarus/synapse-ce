@@ -114,7 +114,7 @@ var assetExtensions = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".svg": true, ".webp": true, ".avif": true, ".ico": true, ".bmp": true,
 	".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
 	".mp3": true, ".mp4": true, ".webm": true, ".wav": true, ".ogg": true,
-	".txt": true, ".md": true, ".mdx": true, ".html": true, ".htm": true,
+	".txt":  true,
 	".wasm": true, ".graphql": true, ".gql": true, ".proto": true, ".csv": true, ".xml": true,
 	".sql": true, ".sh": true, ".pdf": true, ".zip": true,
 }
@@ -124,6 +124,10 @@ var assetExtensions = map[string]bool{
 var codeCarryingExtensions = map[string]bool{
 	".vue": true, ".svelte": true, ".astro": true, ".marko": true, ".riot": true,
 	".coffee": true, ".litcoffee": true, ".res": true, ".re": true, ".elm": true,
+	// MDX compiles to JavaScript and routinely carries real ESM imports; HTML carries
+	// <script type="module">. Treating either as an inert asset would let a package imported only
+	// from documentation or a Storybook page look unused.
+	".mdx": true, ".md": true, ".html": true, ".htm": true,
 }
 
 // Scan walks root and returns the normalized first-party module graph.

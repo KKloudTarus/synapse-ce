@@ -9,10 +9,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 )
 
-// npmPURLPrefix is the package-URL type prefix for the npm ecosystem. A component of any other
-// ecosystem must never be correlated to a JavaScript import.
-const npmPURLPrefix = "pkg:npm/"
-
 // componentIndex is the npm slice of a normalized SBOM, indexed by package name for exact-PURL
 // correlation (#400).
 //
@@ -68,11 +64,11 @@ func newComponentIndex(doc *sbom.SBOM, maxComponents, maxCandidates int, coverag
 	unresolvedVersion := 0
 	for i := range components {
 		component := components[i]
-		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(component.PURL)), npmPURLPrefix) {
+		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(component.PURL)), jsresolution.NPMPURLPrefix) {
 			// Another ecosystem, or a component with no PURL: not correlatable to a JS import.
 			continue
 		}
-		name, version, ok := parseNPMPURL(component.PURL)
+		name, version, ok := jsresolution.ParseNPMPURL(component.PURL)
 		if !ok {
 			unparseable++
 			continue
@@ -181,78 +177,6 @@ func (c *componentIndex) dropReason(packageName string) string {
 		return ""
 	}
 	return c.dropped[packageName]
-}
-
-// parseNPMPURL extracts the package name and version from an npm package URL.
-//
-// The repository's parsers encode a scoped package as "pkg:npm/%40scope/name@1.2.3": the scope's leading
-// "@" is percent-encoded, the separating "/" is literal, and the "@" before the version is literal. This
-// decodes that form back to "@scope/name" so it can be compared with a source specifier's package root.
-func parseNPMPURL(purl string) (string, string, bool) {
-	trimmed := strings.TrimSpace(purl)
-	if len(trimmed) <= len(npmPURLPrefix) || !strings.HasPrefix(strings.ToLower(trimmed), npmPURLPrefix) {
-		return "", "", false
-	}
-	body := trimmed[len(npmPURLPrefix):]
-
-	// Qualifiers and subpaths are not part of the identity.
-	if i := strings.IndexAny(body, "?#"); i >= 0 {
-		body = body[:i]
-	}
-	// The version follows the LAST "@": a scoped name's own "@" is percent-encoded, so any literal "@"
-	// that remains is the version separator.
-	at := strings.LastIndex(body, "@")
-	if at <= 0 || at == len(body)-1 {
-		return "", "", false
-	}
-	rawName, version := body[:at], body[at+1:]
-	name := purlDecodeName(rawName)
-	if name == "" || version == "" {
-		return "", "", false
-	}
-	// Validate the name through the domain normalizer (which lowercases) but RETURN the component's own
-	// casing: npm hosts distinct packages that differ only in case, so folding here would let one
-	// package's PURL be attached to another's import.
-	if _, err := jsresolution.NormalizePackageName(name); err != nil {
-		return "", "", false
-	}
-	return name, version, true
-}
-
-// purlDecodeName percent-decodes a PURL name segment. Only the encodings the repository's PURL builders
-// produce are decoded; an unrecognized escape leaves the name unchanged so it fails validation rather
-// than silently naming a different package.
-func purlDecodeName(raw string) string {
-	if !strings.Contains(raw, "%") {
-		return raw
-	}
-	var sb strings.Builder
-	for i := 0; i < len(raw); {
-		if raw[i] == '%' && i+2 < len(raw) {
-			hi, hiOK := hexValue(raw[i+1])
-			lo, loOK := hexValue(raw[i+2])
-			if hiOK && loOK {
-				sb.WriteByte(hi<<4 | lo)
-				i += 3
-				continue
-			}
-		}
-		sb.WriteByte(raw[i])
-		i++
-	}
-	return sb.String()
-}
-
-func hexValue(b byte) (byte, bool) {
-	switch {
-	case b >= '0' && b <= '9':
-		return b - '0', true
-	case b >= 'a' && b <= 'f':
-		return b - 'a' + 10, true
-	case b >= 'A' && b <= 'F':
-		return b - 'A' + 10, true
-	}
-	return 0, false
 }
 
 // correlateComponent resolves a third-party package name against the SBOM.

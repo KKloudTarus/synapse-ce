@@ -13,6 +13,7 @@ import (
 // from package-resolution coverage and explicit unresolved states. Source graph
 // coverage is preserved separately for the later reachability gate.
 func NormalizeResult(in Result) (Result, error) {
+	in.DeclaredDependencies = normalizeNameList(in.DeclaredDependencies)
 	out := Result{}
 	out.Imports = make([]ImportResolution, 0, len(in.Imports))
 	for _, resolution := range in.Imports {
@@ -334,4 +335,29 @@ func deduplicateGraphCoverage(in []modulegraph.CoverageIssue) []modulegraph.Cove
 		}
 	}
 	return out
+}
+
+// normalizeNameList sorts and deduplicates a package-name list so resolution output does not depend on
+// manifest key order.
+func normalizeNameList(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, name := range in {
+		if trimmed := strings.TrimSpace(name); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	result := out[:1]
+	for _, name := range out[1:] {
+		if name != result[len(result)-1] {
+			result = append(result, name)
+		}
+	}
+	return result
 }
