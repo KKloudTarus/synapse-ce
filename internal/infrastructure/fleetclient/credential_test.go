@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -41,8 +42,13 @@ func TestEnsureEnrolledFirstRunThenReuse(t *testing.T) {
 	}
 	// credential + key persisted 0600.
 	info, err := os.Stat(store.credentialPath())
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if err != nil {
 		t.Fatalf("credential must be persisted 0600: %v", err)
+	}
+	// Windows enforces access through ACLs and reports regular files as 0666 through FileMode.Perm.
+	// Assert the requested POSIX mode only where os.Chmod can represent it.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Fatalf("credential must be persisted 0600, got %v", info.Mode().Perm())
 	}
 	if _, err := os.Stat(store.keyPath()); err != nil {
 		t.Fatalf("key must be persisted: %v", err)

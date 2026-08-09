@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -87,8 +88,14 @@ func TestFirstRunEnrolsAndPersists(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(r.cfg.stateDir, "agent.key")); err != nil {
 		t.Fatalf("key must be persisted: %v", err)
 	}
-	info, _ := os.Stat(filepath.Join(r.cfg.stateDir, "credential.json"))
-	if info.Mode().Perm() != 0o600 {
+	info, err := os.Stat(filepath.Join(r.cfg.stateDir, "credential.json"))
+	if err != nil {
+		t.Fatalf("credential must be persisted: %v", err)
+	}
+	// Windows protects the file through its ACL and does not expose POSIX permission bits through
+	// FileMode.Perm (regular files report 0666 even after Chmod). Keep the strict mode assertion on
+	// platforms where os.Chmod implements POSIX permissions.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("credential must be 0600, got %v", info.Mode().Perm())
 	}
 	// The order was progressed and reported succeeded with a coverage-honest summary.
