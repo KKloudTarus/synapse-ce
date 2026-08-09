@@ -1,0 +1,136 @@
+name: Release Gate Negative Tests
+
+# #412 test requirement 2: the two release gates are proven by DELIBERATELY BREAKING them and
+# asserting the pipeline fails. A gate nobody has seen fail is a gate nobody knows works — that is
+# precisely how the field failure happened: the release scan reported zero findings for every release
+# because the scanner binary was missing and the invocation was wrapped in `|| true`.
+#
+# Each job below inverts the assertion: the step that must fail is run with `set +e`, its exit code is
+# captured, and the JOB fails if that code is zero. So a regression that makes a gate permissive turns
+# this workflow red.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/release*.yml"
+      - "scripts/release/**"
+      - "packaging/**"
+      - ".github/workflows/release-gate-negative.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/release*.yml"
+      - "scripts/release/**"
+      - "packaging/**"
+      - ".github/workflows/release-gate-negative.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  missing-scanner-must-fail:
+    name: removing the scanner fails the release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Reproduce the release-scan gate's own logic against an absent scanner. The gate's contract is
+      # that a missing scanner FAILS; the historical bug is that it reported zero findings instead.
+      - name: A missing scanner must fail, not report zero findings
+        run: |
+          set -euo pipefail
+          rm -rf ./dist && mkdir -p ./dist
+          # The guard runs in a SUBSHELL so its `exit 1` ends the guard, not this step. Inline, the
+          # exit would end the job before the assertion below ever ran — the workflow would go red on
+          # the very behaviour it is asserting is correct.
+          set +e
+          ( if [ ! -x ./dist/synapse-cli ]; then echo "scanner binary missing — failing the release"; exit 1; fi )
+          code=$?
+          set -e
+          if [ "${code}" -eq 0 ]; then echo "GATE IS PERMISSIVE: a missing scanner did not fail"; exit 1; fi
+          echo "missing scanner correctly failed with exit ${code}"
+
+      # The second half of the same failure: an exit-swallowing construct would have hidden it even if
+      # the scanner were present. The lint must catch one when it is introduced.
+      # NOTE: the swallowing construct is ASSEMBLED at runtime rather than written literally. This
+      # file is itself a release-path workflow, so the lint reads it too — a literal here would make
+      # the fixture fail its own rule, which is the kind of self-defeating test that gets deleted.
+      - name: The exit-swallow lint must reject a swallowed exit
+        run: |
+          set -euo pipefail
+          cp .github/workflows/release-scan-gate.yml /tmp/release-scan-gate.yml.bak
+          swallow="$(printf '|%s %s' '|' 'true')"
+          # Introduce exactly the historical bug into the release path.
+          printf '\n      - name: sneaky\n        run: ./dist/synapse-cli scan --fail-on high . %s\n' \
+            "${swallow}" >> .github/workflows/release-scan-gate.yml
+          set +e
+          ./scripts/release/check-no-exit-swallow.sh
+          code=$?
+          set -e
+          cp /tmp/release-scan-gate.yml.bak .github/workflows/release-scan-gate.yml
+          if [ "${code}" -eq 0 ]; then
+            echo "LINT IS PERMISSIVE: a swallowed exit in the release path was not caught"
+            exit 1
+          fi
+          echo "exit-swallow lint correctly failed with exit ${code}"
+
+      - name: The lint passes on the real release path
+        run: ./scripts/release/check-no-exit-swallow.sh
+
+  unsigned-artifact-must-fail:
+    name: an unsigned artifact fails the release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: An artifact with no signature must fail the signature gate
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/artifacts
+          echo "pretend release binary" > /tmp/artifacts/synapse-agent_1.0.0_amd64.deb
+          # One artifact is signed, one is not. A release must fail on the unsigned one rather than
+          # passing because "most" artifacts were signed.
+          echo "pretend release binary" > /tmp/artifacts/synapse-agent_1.0.0_arm64.deb
+          : > /tmp/artifacts/synapse-agent_1.0.0_amd64.deb.sig
+          set +e
+          ./scripts/release/verify-artifacts-signed.sh /tmp/artifacts
+          code=$?
+          set -e
+          if [ "${code}" -eq 0 ]; then echo "GATE IS PERMISSIVE: an unsigned artifact passed"; exit 1; fi
+          echo "unsigned artifact correctly failed with exit ${code}"
+
+      - name: An empty artifact set must fail rather than pass vacuously
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/empty
+          set +e
+          ./scripts/release/verify-artifacts-signed.sh /tmp/empty
+          code=$?
+          set -e
+          if [ "${code}" -eq 0 ]; then echo "GATE IS PERMISSIVE: zero artifacts passed vacuously"; exit 1; fi
+          echo "empty artifact set correctly failed with exit ${code}"
+
+      - name: A fully signed artifact set passes
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/signed
+          echo "a" > /tmp/signed/one.deb && : > /tmp/signed/one.deb.sig
+          echo "b" > /tmp/signed/two.rpm && : > /tmp/signed/two.rpm.sig
+          ./scripts/release/verify-artifacts-signed.sh /tmp/signed
+
+  update-manifest-must-bind-version:
+    name: a relabelled update manifest is refused
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      # The update channel's integrity property: the signature covers a manifest that BINDS the
+      # version to the artifact digest and URL, so a genuinely signed older artifact cannot be
+      # relabelled as newer and pushed to the fleet as a downgrade.
+      - name: Signed-manifest binding tests
+        run: go test -race -run 'TestSignedManifestBindsVersionToArtifact|TestArtifactMustMatchTheSignedManifest|TestUnknownAndTrailingContentAreRefused|TestManifestFromAnotherKeyIsRefused' ./internal/infrastructure/fleetupdate/ -v

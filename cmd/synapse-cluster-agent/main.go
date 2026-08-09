@@ -158,12 +158,14 @@ func parseConfig() config {
 	flag.BoolVar(&cfg.once, "once", false, "collect + report once then exit")
 	flag.Parse()
 
-	if cfg.enrolToken == "" && enrolTokenFile != "" {
-		b, err := os.ReadFile(enrolTokenFile)
+	if cfg.enrolToken == "" {
+		// An absent token file is NOT fatal: it is the normal state after enrolment, once the
+		// one-time secret has been cleaned up. EnsureEnrolled decides from the stored credential.
+		tok, err := fleetclient.ReadEnrolTokenFile(enrolTokenFile)
 		if err != nil {
-			log.Fatalf("synapse-cluster-agent: read enrol token file: %v", err)
+			log.Fatalf("synapse-cluster-agent: %v", err)
 		}
-		cfg.enrolToken = strings.TrimSpace(string(b))
+		cfg.enrolToken = tok
 	}
 	return cfg
 }

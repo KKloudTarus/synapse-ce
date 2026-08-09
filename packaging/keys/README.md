@@ -12,5 +12,40 @@ Two distinct keys, published here so anyone can verify what they run (#412 req 4
 Windows artifacts (MSI/EXE) are Authenticode-signed with the project code-signing certificate; verify
 with `signtool verify /pa` or the file's Digital Signatures tab.
 
-> The actual key material is provisioned out of band and published at release time; it is intentionally
-> not committed. This directory documents the contract and is where the published public keys land.
+## The published keys
+
+Both public halves are committed here. Their private counterparts live only in the release secrets and
+in the maintainer's offline copy; they are never in this repository.
+
+| Key | Identity |
+|---|---|
+| `synapse-packages.gpg` | GPG ed25519, sign-only, fingerprint `8F106FEC55FD76D73CC86D2B2EDFBC3AFAB786E1`, expires **2028-08-08** |
+| `synapse-agent-update.ed25519.pub` | `a718c942752776b59d91a6660e3734ad44dbda9ef00bc046d02d855bf824e23d` |
+
+Verify a package before installing it:
+
+```sh
+gpg --import packaging/keys/synapse-packages.gpg
+rpm --import packaging/keys/synapse-packages.gpg && rpm --checksig synapse-agent-*.rpm
+gpg --verify synapse-agent_*.deb.sig synapse-agent_*.deb
+```
+
+## Windows Authenticode
+
+Not yet available. Authenticode requires a code-signing certificate issued by a CA that Windows already
+trusts; a self-signed certificate would still raise the SmartScreen warning that #412 requirement 4 was
+written to eliminate, so it would look like progress while changing nothing.
+
+**Until a real certificate exists the release pipeline refuses to publish a Windows artifact rather than
+publishing an unsigned one.** That is the honest failure: no Windows package, rather than one users are
+warned about.
+
+## Rotation
+
+The signing keys expire in 2028. To rotate earlier — or after any suspected exposure — publish the
+revocation certificate, generate a replacement, replace the `SYNAPSE_GPG_*` and
+`SYNAPSE_UPDATE_SIGNING_KEY` repository secrets, and commit the new public halves here.
+
+Note the asymmetry: a rotated **package** key only affects new installs, but a rotated **update** key is
+rejected by every already-deployed agent until the new public key reaches it. Ship the new public key
+in an agent release signed by the OLD key first.
