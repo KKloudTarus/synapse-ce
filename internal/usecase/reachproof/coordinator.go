@@ -45,6 +45,9 @@ type Language string
 const (
 	LanguagePython     Language = "python"
 	LanguageJavaScript Language = "javascript"
+	LanguageRust       Language = "rust"
+	LanguagePHP        Language = "php"
+	LanguageRuby       Language = "ruby"
 )
 
 // Valid reports whether l is a supported Tier-1 language.
@@ -63,6 +66,12 @@ func actorsFor(tier judgment.ReachabilityTier, language Language) (proposer, ver
 	switch language {
 	case LanguageJavaScript:
 		return "system:jsimport-scan", "system:jsimport-engine", "tier-1 javascript import-reachability proof"
+	case LanguageRust:
+		return "system:rustimport-scan", "system:rustimport-engine", "tier-1 rust import-reachability proof"
+	case LanguagePHP:
+		return "system:phpimport-scan", "system:phpimport-engine", "tier-1 php import-reachability proof"
+	case LanguageRuby:
+		return "system:rubyimport-scan", "system:rubyimport-engine", "tier-1 ruby import-reachability proof"
 	default:
 		return "system:pyimport-scan", "system:pyimport-engine", "tier-1 import-reachability proof"
 	}

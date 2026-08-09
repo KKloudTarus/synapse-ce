@@ -81,6 +81,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/risk"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/secretscan"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/srcimports"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/syft"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/taintcallgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/vexfile"
@@ -135,6 +136,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sbomcrosscheckjudge"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/srcreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/taintscan"
 	threatmodeluc "github.com/KKloudTarus/synapse-ce/internal/usecase/threatmodeluc"
 	transferuc "github.com/KKloudTarus/synapse-ce/internal/usecase/transfer"
@@ -1215,6 +1217,41 @@ func main() {
 		}
 		scaService.SetJSReachability(jsRecorder)
 		log.Info("Tier-1 JavaScript import-reachability ENABLED (source-only, direct dependencies only → OpenVEX not_affected; best-effort)")
+	}
+
+	// Deterministic Tier-1 import-reachability for Rust, PHP and Ruby. Each scanner is SOURCE-ONLY: it
+	// lexes text and never runs cargo, composer, bundler or a language runtime, so no sandbox is needed
+	// and no dependency is resolved over the network. Each refuses a verdict whenever a dynamic
+	// construct (a Rust macro, a PHP variable class name, Ruby metaprogramming) could hide a reference.
+	// Composition-root only.
+	for _, lang := range []struct {
+		enabled  bool
+		env      string
+		label    string
+		purlType string
+		scanner  ports.SourceImportScanner
+		named    srcreach.CandidateNamer
+		language reachproof.Language
+	}{
+		{cfg.RustReachabilityEnabled, "SYNAPSE_REACH_RUST", "rust reachability", "cargo", srcimports.NewRustScanner(), srcimports.RustCandidates, reachproof.LanguageRust},
+		{cfg.PHPReachabilityEnabled, "SYNAPSE_REACH_PHP", "php reachability", "composer", srcimports.NewPHPScanner(), srcimports.PHPCandidates, reachproof.LanguagePHP},
+		{cfg.RubyReachabilityEnabled, "SYNAPSE_REACH_RUBY", "ruby reachability", "gem", srcimports.NewRubyScanner(), srcimports.RubyCandidates, reachproof.LanguageRuby},
+	} {
+		if !lang.enabled || !requireJudgmentsOrSkip(log, judgmentSvc != nil, lang.env, lang.label) {
+			continue
+		}
+		analyzer, aerr := srcreach.New(lang.scanner, lang.named)
+		if aerr != nil {
+			log.Error(lang.label+" analyzer init failed", "err", aerr)
+			os.Exit(1)
+		}
+		coord, cerr := reachproof.NewCoordinatorForLanguage(analyzer, judgmentSvc, auditLog, clock, judgment.Tier1, lang.language)
+		if cerr != nil {
+			log.Error(lang.label+" coordinator init failed", "err", cerr)
+			os.Exit(1)
+		}
+		scaService.SetSourceReachability(lang.purlType, coord)
+		log.Info("Tier-1 " + lang.label + " ENABLED (source-only dead-dependency detection → OpenVEX not_affected; best-effort)")
 	}
 
 	// Deterministic taint-analysis CapSAST proposals, opt-in. Builds the workspace call
