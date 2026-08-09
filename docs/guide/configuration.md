@@ -82,6 +82,7 @@ Most of these ship ON by default (safe, best-effort). See [Features](features.md
 | `SYNAPSE_MISCONFIG_ENABLED` | `true` | Misconfiguration and IaC scanning of Dockerfiles and Kubernetes manifests. |
 | `SYNAPSE_FP_TRIAGE_ENABLED` | `false` | Enable advisory LLM false-positive analysis over production-scope SAST/misconfig findings. Secrets never enter the LLM. A proposer alone or a scan without an evidence ledger never changes a gate. |
 | `SYNAPSE_FP_TRIAGE_MODEL` | `SYNAPSE_LLM_MODEL` | Proposer model for false-positive analysis. |
+| `SYNAPSE_FP_TRIAGE_MODE` | `shadow` | `shadow` records `would_gate_exempt` but always keeps the finding gating. `enforce` permits the verified-consensus policy to set `gate_exempt`. Empty or unknown values fail closed to shadow. |
 | `SYNAPSE_VERIFIER_MODEL` | `SYNAPSE_LLM_MODEL` | Must name a different model for AI gate exemptions. Two-model consensus is still subject to high/critical, secret, and dangerous-CWE human-review floors. |
 | `SYNAPSE_DETECTION_PRIORITY` | `comprehensive` | `comprehensive` reports every match. `precise` quarantines single-source, non-KEV findings into a needs-verify queue that is still reported and sealed but exempt from the `--fail-on` gate. |
 | `SYNAPSE_OFFLINE` | `false` | Skip the live advisory source and detect with the offline database only. |

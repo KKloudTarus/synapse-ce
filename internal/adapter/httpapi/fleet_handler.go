@@ -16,6 +16,7 @@ import (
 
 	dci "github.com/KKloudTarus/synapse-ce/internal/domain/clusterinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetrollout"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetversion"
 	dhi "github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -65,6 +66,12 @@ type fleetHostInventory interface {
 	Sync(ctx context.Context, actor string, in hostinventoryuc.SyncInput) (*hostinventoryuc.SyncResult, error)
 }
 
+// fleetRolloutDecider answers what ONE agent is offered. It is the narrow slice of the rollout service
+// this transport needs; fleetrolloutuc.Service satisfies it.
+type fleetRolloutDecider interface {
+	DecideFor(ctx context.Context, tenantID shared.ID, channel, agentGroup, agentVersion string) fleetrollout.Decision
+}
+
 type fleetRouter struct {
 	agents           fleetAgentService
 	work             fleetWorkService
@@ -72,6 +79,7 @@ type fleetRouter struct {
 	hostInv          fleetHostInventory    // optional; nil ⇒ host inventory ingest is not served
 	minAgentVersion  string                // #412 version skew: agents below this are refused work; "" = no floor
 	cpVersion        string                // control-plane version advertised to agents (min_control_plane check)
+	rollout          fleetRolloutDecider   // optional; nil ⇒ no update is ever offered (#412 req 9)
 	log              *slog.Logger
 	agentLim         *keyedLimiter // post-auth, keyed by agent id
 	ipLim            *keyedLimiter // pre-auth, keyed by client IP (throttles enrol + failed auth)
@@ -137,6 +145,15 @@ type fleetAdminService interface {
 
 // SetFleetAdmin wires the operator agent-admin routes (mint enrolment token, list, revoke).
 func (rt *Router) SetFleetAdmin(s fleetAdminService) { rt.fleetAdmin = s }
+
+// SetFleetRollout wires the operator-controlled update rollout (#412 req 9). Optional: with no
+// decider wired the heartbeat offers no update at all, which is the fail-closed default — an absent
+// rollout service must never read as permission to update.
+func (rt *Router) SetFleetRollout(d fleetRolloutDecider) {
+	if rt.fleet != nil {
+		rt.fleet.rollout = d
+	}
+}
 
 // SetFleetClusterInventory wires the cluster snapshot ingest use case onto the agent transport plane.
 // It must be called after SetFleet; a nil fleet (transport disabled) makes it a no-op.
@@ -394,11 +411,34 @@ func (f *fleetRouter) heartbeat(w http.ResponseWriter, r *http.Request) {
 	// Advertise the protocol version, the control-plane version, and the minimum supported agent
 	// version so the agent can act on version skew (#412): update itself, or refuse to run against a
 	// control plane older than it requires.
-	writeJSON(w, http.StatusOK, map[string]string{
+	out := map[string]any{
 		"proto":                       FleetProtoVersion,
 		"control_plane_version":       f.cpVersion,
 		"min_supported_agent_version": f.minAgentVersion,
-	})
+	}
+	// The update offer (#412 req 9). It is computed from the OPERATOR's rollout plan and the agent's
+	// operator-assigned group — never from anything the agent just reported about itself, which is why
+	// the group comes off the stored agent rather than out of the heartbeat body. With no rollout
+	// service wired, no update is ever offered: the absence of a decider is not permission.
+	out["update"] = f.updateOffer(r.Context(), agent, req.AgentVersion)
+	writeJSON(w, http.StatusOK, out)
+}
+
+// updateOffer computes the heartbeat's update block for ONE agent.
+//
+// The group comes off the STORED agent, never out of the heartbeat body: an agent that could name its
+// own group could place itself in one pinned to an older, vulnerable version. With no rollout decider
+// wired nothing is ever offered — the absence of a decider is not permission.
+func (f *fleetRouter) updateOffer(ctx context.Context, agent *fleetagent.Agent, agentVersion string) map[string]any {
+	if f.rollout == nil {
+		return map[string]any{"available": false, "reason": "no rollout service is configured"}
+	}
+	decision := f.rollout.DecideFor(ctx, agent.TenantID, fleetrollout.DefaultChannel, agent.Group, agentVersion)
+	offer := map[string]any{"available": decision.Offer, "reason": string(decision.Reason)}
+	if decision.Offer {
+		offer["target_version"] = decision.Target
+	}
+	return offer
 }
 
 func (f *fleetRouter) claim(w http.ResponseWriter, r *http.Request) {

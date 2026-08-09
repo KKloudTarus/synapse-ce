@@ -10,6 +10,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetcoverage"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetrollout"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	projectdom "github.com/KKloudTarus/synapse-ce/internal/domain/project"
@@ -23,6 +24,7 @@ import (
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetrolloutuc"
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
@@ -79,6 +81,26 @@ type harnessSARIF struct{}
 
 func (harnessSARIF) Ingest(context.Context, sarifingest.IngestRequest) (sarifingest.IngestResult, error) {
 	return sarifingest.IngestResult{}, nil
+}
+
+// harnessRollout is a no-op rollout service: every rollout assertion below is a DENY except the
+// readonly VIEW, which only needs the route to exist and answer.
+type harnessRollout struct{}
+
+func (harnessRollout) Get(context.Context, shared.ID, string) (*fleetrollout.Plan, error) {
+	return nil, shared.ErrNotFound
+}
+func (harnessRollout) SetTarget(context.Context, fleetrolloutuc.SetTargetInput) (*fleetrollout.Plan, error) {
+	return nil, shared.ErrValidation
+}
+func (harnessRollout) Promote(context.Context, shared.ID, string, shared.ID) (*fleetrollout.Plan, error) {
+	return nil, shared.ErrValidation
+}
+func (harnessRollout) Pause(context.Context, shared.ID, string, shared.ID, string) (*fleetrollout.Plan, error) {
+	return nil, shared.ErrValidation
+}
+func (harnessRollout) Resume(context.Context, shared.ID, string, shared.ID) (*fleetrollout.Plan, error) {
+	return nil, shared.ErrValidation
 }
 
 // harnessImportedFindings is the no-op read side; every assertion on the read route is a DENY too.
@@ -199,6 +221,7 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetFleetCoverage(harnessCoverage{})    // register #413 fleet-coverage routes so the harness guards their view/tenant gates
 	rt.SetSARIFIngest(harnessSARIF{})         // register the #415 import route so the harness guards its operate/tenant gates
 	rt.SetImportedFindings(harnessImportedFindings{})
+	rt.SetFleetRolloutAdmin(harnessRollout{})
 	rt.EnableAgent(nil, nil, nil, nil, nil, 1, 8)
 	mux := rt.routes()
 
@@ -308,6 +331,14 @@ func TestHostileHarness(t *testing.T) {
 		{"machine may not import sarif (operate/SoD)", "agent", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/sarif", http.StatusForbidden},
 		{"readonly may not import sarif (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/sarif", http.StatusForbidden},
 		{"cross-tenant sarif import → 404", "consultant", "tenantB", true, http.MethodPost, "/api/v1/engagements/engA/sarif", http.StatusNotFound},
+		// Update rollout can replace the running binary on every host in the fleet, so it is
+		// ADMINISTER. Reading the plan is VIEW, so on-call can see why the fleet is not updating
+		// without holding the power to change it.
+		{"consultant may not set a rollout target (administer)", "consultant", "tenantA", true, http.MethodPut, "/api/v1/agents/rollout", http.StatusForbidden},
+		{"consultant may not promote a rollout (administer)", "consultant", "tenantA", true, http.MethodPost, "/api/v1/agents/rollout/promote", http.StatusForbidden},
+		{"reviewer may not pause a rollout (administer)", "reviewer", "tenantA", true, http.MethodPost, "/api/v1/agents/rollout/pause", http.StatusForbidden},
+		{"machine may not touch a rollout (SoD)", "agent", "tenantA", true, http.MethodPut, "/api/v1/agents/rollout", http.StatusForbidden},
+		{"readonly may read the rollout (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/agents/rollout", http.StatusOK},
 		// The read side is a VIEW action on the same engagement: readonly may see imported findings,
 		// but only inside its own tenant, and an unauthenticated caller may not see them at all.
 		{"readonly may read imported findings (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/imported-findings", http.StatusOK},

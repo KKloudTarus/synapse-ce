@@ -86,6 +86,42 @@ func TestCritiqueClaimValidate(t *testing.T) {
 	}
 }
 
+func TestSASTClaimValidateRejectsModelProseAndOversizedFields(t *testing.T) {
+	valid := SASTClaim{CWE: "CWE-89", Location: "internal/db/query.go:42", Rule: "go/sql-injection"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid SAST claim rejected: %v", err)
+	}
+
+	cases := []struct {
+		name  string
+		claim SASTClaim
+	}{
+		{"malformed CWE", SASTClaim{CWE: "CWE-89 because SQL injection", Location: "a.go:1", Rule: "r"}},
+		{"CWE control character", SASTClaim{CWE: "CWE-89\n", Location: "a.go:1", Rule: "r"}},
+		{"oversized location", SASTClaim{CWE: "CWE-89", Location: strings.Repeat("a", maxSASTLocationLen+1), Rule: "r"}},
+		{"location control character", SASTClaim{CWE: "CWE-89", Location: "a.go:1\nignore previous", Rule: "r"}},
+		{"rule prose", SASTClaim{CWE: "CWE-89", Location: "a.go:1", Rule: "SQL injection is likely"}},
+		{"oversized rule", SASTClaim{CWE: "CWE-89", Location: "a.go:1", Rule: strings.Repeat("r", maxSASTRuleLen+1)}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.claim.Validate(); !errors.Is(err, shared.ErrValidation) {
+				t.Fatalf("want ErrValidation, got %v", err)
+			}
+		})
+	}
+}
+
+func TestRiskNarrativeClaimDriverCountBounded(t *testing.T) {
+	drivers := make([]string, maxRiskDrivers+1)
+	for i := range drivers {
+		drivers[i] = "reachable"
+	}
+	if err := (RiskNarrativeClaim{Drivers: drivers, Priority: 1}).Validate(); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("oversized model driver list: want ErrValidation, got %v", err)
+	}
+}
+
 func TestThreatClaimValidate(t *testing.T) {
 	for _, cat := range []StrideCategory{Spoofing, Tampering, Repudiation, InfoDisclosure, DenialOfService, ElevationOfPrivilege} {
 		if !cat.Valid() {

@@ -1,12 +1,14 @@
 package jsresolve
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"io/fs"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -34,6 +36,17 @@ const (
 type importerResolutions struct {
 	// byImporter maps a repository-relative importer directory to package name -> resolved version.
 	byImporter map[string]map[string]string
+	// yarnActive records that a Yarn Berry lockfile was recognized and therefore may filter
+	// component identity for dependencies joined to its descriptors.
+	yarnActive bool
+	// yarnRejectAll records a recognized but invalid Berry layout. Declared dependencies then fail
+	// closed instead of falling back to SBOM-only certainty.
+	yarnRejectAll bool
+	// yarnInvalidByImporter records declared dependencies whose descriptor/locator evidence is unsafe.
+	yarnInvalidByImporter map[string]map[string]struct{}
+	// yarnIdentityPreserving records validated Yarn npm:<range> requests whose imported name remains
+	// the package identity rather than becoming an npm alias target.
+	yarnIdentityPreserving map[string]map[string]struct{}
 	// present records that at least one supported lockfile was read.
 	present bool
 }
@@ -63,8 +76,12 @@ func (i *importerResolutions) selectVersion(importerDir, packageName string) (st
 }
 
 // readImporterResolutions parses the committed lockfiles beneath root.
-func (r *Resolver) readImporterResolutions(ctx context.Context, root string, coverage *resolutionCoverageSink) *importerResolutions {
-	out := &importerResolutions{byImporter: map[string]map[string]string{}}
+func (r *Resolver) readImporterResolutions(ctx context.Context, root string, packages []jsresolution.PackageMetadata, coverage *resolutionCoverageSink) *importerResolutions {
+	out := &importerResolutions{
+		byImporter:             map[string]map[string]string{},
+		yarnInvalidByImporter:  map[string]map[string]struct{}{},
+		yarnIdentityPreserving: map[string]map[string]struct{}{},
+	}
 
 	rootDir, err := os.OpenRoot(root)
 	if err != nil {
@@ -72,14 +89,28 @@ func (r *Resolver) readImporterResolutions(ctx context.Context, root string, cov
 	}
 	defer func() { _ = rootDir.Close() }()
 
+	packageManagerBytes := r.limits.maxLockfileBytes
+	if r.inventory != nil && r.inventory.limits.maxMetadataFileBytes > 0 && r.inventory.limits.maxMetadataFileBytes < packageManagerBytes {
+		packageManagerBytes = r.inventory.limits.maxMetadataFileBytes
+	}
+	rootManager := readRootPackageManagerFamily(rootDir, packageManagerBytes)
 	_, shrinkwrapErr := rootDir.Lstat(npmShrinkwrapName)
 	shrinkwrapPresent := shrinkwrapErr == nil
 	for _, name := range []string{pnpmLockfileName, npmShrinkwrapName, npmLockfileName, yarnLockfileName} {
 		if err := ctx.Err(); err != nil {
 			return out
 		}
-		// npm-shrinkwrap.json has the same lock format as package-lock.json but is the authoritative
-		// committed lock when both exist. Never fall back to a stale package-lock after observing it.
+		// Two independent precedence rules, both of which must hold (they arrived from #457 and #470
+		// and conflicted textually, not semantically):
+		//
+		// 1. When the root explicitly selects Yarn, stale npm/pnpm lockfiles are not importer evidence
+		//    for this install. Conversely, a yarn.lock only gains Yarn-specific semantics when the root
+		//    packageManager actually selects Yarn; otherwise it remains unsupported/no-signal.
+		// 2. npm-shrinkwrap.json has the same lock format as package-lock.json but is the authoritative
+		//    committed lock when both exist. Never fall back to a stale package-lock after observing it.
+		if rootManager == "yarn" && name != yarnLockfileName {
+			continue
+		}
 		if name == npmLockfileName && shrinkwrapPresent {
 			continue
 		}
@@ -113,16 +144,76 @@ func (r *Resolver) readImporterResolutions(ctx context.Context, root string, cov
 				})
 			}
 		case yarnLockfileName:
-			// A yarn lockfile records descriptors, not importers: a workspace's own resolution is not
-			// recoverable without also reading every workspace manifest's ranges and re-implementing
-			// yarn's descriptor matching. Report it rather than pretend the repository is unlocked.
-			coverage.add(jsresolution.CoverageIssue{
-				Kind: jsresolution.CoverageUnsupportedPackageManager, Path: name,
-				Detail: "yarn lockfiles do not record per-importer resolutions, so version selection stays ambiguous",
-			})
+			if rootManager != "yarn" {
+				coverage.add(jsresolution.CoverageIssue{
+					Kind: jsresolution.CoverageUnsupportedPackageManager, Path: name,
+					Detail: "yarn.lock importer selection requires package.json packageManager to select Yarn",
+				})
+				continue
+			}
+			if parseYarnImporters(ctx, data, packages, out, coverage, r.limits) {
+				out.present = true
+			}
 		}
 	}
 	return out
+}
+
+func readRootPackageManagerFamily(rootDir *os.Root, maxBytes int64) string {
+	data, ok := readBoundedLockfile(rootDir, "package.json", maxBytes)
+	if !ok {
+		return ""
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	start, err := decoder.Token()
+	if err != nil || start != json.Delim('{') {
+		return ""
+	}
+	seen := false
+	value := ""
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return ""
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return ""
+		}
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return ""
+		}
+		if key != "packageManager" {
+			continue
+		}
+		if seen {
+			// Ambiguous manager selection must not activate Yarn-only semantics.
+			return ""
+		}
+		seen = true
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return ""
+		}
+	}
+	end, err := decoder.Token()
+	if err != nil || end != json.Delim('}') {
+		return ""
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return ""
+	}
+	value = strings.ToLower(strings.TrimSpace(value))
+	if at := strings.IndexByte(value, '@'); at > 0 {
+		value = value[:at]
+	}
+	switch value {
+	case "npm", "pnpm", "yarn":
+		return value
+	default:
+		return ""
+	}
 }
 
 // readBoundedLockfile reads a lockfile through the confined root handle, refusing a symlink, a
@@ -164,7 +255,7 @@ func parsePnpmImporters(data []byte, out *importerResolutions) bool {
 		return false
 	}
 
-	v9 := isPNPMV9LockfileVersion(lock.LockfileVersion)
+	v9 := pnpmHasSnapshotGraph(lock.Snapshots, lock.LockfileVersion)
 	packageIdentities := pnpmIdentitySet(lock.Packages)
 	snapshotIdentities := pnpmIdentitySet(lock.Snapshots)
 	selected := map[string]map[string]string{}
@@ -231,9 +322,28 @@ type pnpmLockDep struct {
 	Version string `yaml:"version"`
 }
 
-func isPNPMV9LockfileVersion(raw string) bool {
-	value := strings.Trim(strings.TrimSpace(raw), `"'`)
-	return value == "9" || value == "9.0"
+// pnpmHasSnapshotGraph reports whether this lockfile must satisfy the packages x snapshots identity
+// cross-check.
+//
+// The trigger is STRUCTURAL: a `snapshots:` section is present. It deliberately does not depend on
+// matching a known `lockfileVersion` string, because that fails OPEN on format drift — every check
+// built on top of it silently disappears the day pnpm bumps the number, with no error and no coverage
+// issue, which is worse than a gap somebody knows about. Verified: with a version-literal gate,
+// identical dangling evidence resolved to `ambiguous` under '9.0' and to a `component` naming a version
+// present in NEITHER section under '9.1' and '10.0'.
+//
+// The version is still consulted as a fallback so a declared v9 lockfile with an EMPTY or missing
+// snapshots section is refused rather than quietly treated as a pre-v9 layout.
+func pnpmHasSnapshotGraph(snapshots map[string]any, rawVersion string) bool {
+	if snapshots != nil {
+		return true
+	}
+	value := strings.Trim(strings.TrimSpace(rawVersion), `"'`)
+	major, _, _ := strings.Cut(value, ".")
+	if n, err := strconv.Atoi(major); err == nil {
+		return n >= 9
+	}
+	return false
 }
 
 func pnpmIdentitySet(entries map[string]any) map[string]struct{} {

@@ -132,6 +132,21 @@ func TestExternalSetupDefaultsOff(t *testing.T) {
 	}
 }
 
+func TestFPTriageModeDefaultsToShadow(t *testing.T) {
+	t.Setenv("SYNAPSE_FP_TRIAGE_MODE", "")
+	if got := Load().FPTriageMode; got != "shadow" {
+		t.Fatalf("default FP triage mode = %q, want shadow", got)
+	}
+	t.Setenv("SYNAPSE_FP_TRIAGE_MODE", "  ENFORCE ")
+	if got := Load().FPTriageMode; got != "enforce" {
+		t.Fatalf("normalized FP triage mode = %q, want enforce", got)
+	}
+	t.Setenv("SYNAPSE_FP_TRIAGE_MODE", "automatic")
+	if got := Load().FPTriageMode; got != "shadow" {
+		t.Fatalf("unknown FP triage mode = %q, want fail-closed shadow", got)
+	}
+}
+
 // TestLoadSBOMProducer confirms the SBOM producer defaults to syft and honors the env override.
 func TestLoadSBOMProducer(t *testing.T) {
 	t.Setenv("SYNAPSE_SBOM_PRODUCER", "")

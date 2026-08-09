@@ -37,8 +37,10 @@ func (r *Resolver) resolvePackageRoot(
 	local := workspaces[packageName]
 	if len(local) == 0 {
 		// The importer's declared dependency spec decides which package the imported NAME refers to: an
-		// npm alias redirects it, and a non-registry source means no component is its identity.
-		target, refusal := resolveDeclaredIdentity(packages, base.From, packageName)
+		// npm alias redirects it, and a non-registry source means no component is its identity. A
+		// validated Yarn Berry npm:<range> descriptor is the one manager-specific exception: in Yarn,
+		// that protocol can preserve the dependency key's identity rather than naming an alias target.
+		target, refusal := resolveDeclaredIdentityWithLockfile(packages, base.From, packageName, resolutions)
 		if refusal != "" {
 			base.Status = jsresolution.StatusUnresolved
 			base.Package = jsresolution.PackageIdentity{Name: packageName}
@@ -48,6 +50,41 @@ func (r *Resolver) resolvePackageRoot(
 				Detail: "dependency " + packageName + " is declared from a non-registry source",
 			})
 			return base
+		}
+
+		// Berry descriptors are stronger evidence than an SBOM name match for the declared importer.
+		// If the descriptor/locator is invalid, or it selects a concrete version that conflicts with
+		// every observed component, do not let SBOM-only correlation manufacture certainty.
+		if version, selected, rejected := yarnImporterEvidence(packages, base.From, packageName, resolutions); rejected {
+			base.Status = jsresolution.StatusUnresolved
+			base.Package = jsresolution.PackageIdentity{Name: target}
+			base.Reason = "Yarn lockfile evidence for this declared dependency is invalid or unsupported"
+			coverage.add(jsresolution.CoverageIssue{
+				Kind: jsresolution.CoverageUnsupportedMetadata, Path: base.From,
+				Detail: fmt.Sprintf("Yarn lockfile cannot establish a trustworthy identity for %q", packageName),
+			})
+			return base
+		} else if selected && components.isSupplied() {
+			matches, _ := components.lookup(target)
+			if len(matches) > 0 {
+				versionPresent := false
+				for _, candidate := range matches {
+					if candidate.Version == version {
+						versionPresent = true
+						break
+					}
+				}
+				if !versionPresent {
+					base.Status = jsresolution.StatusUnresolved
+					base.Package = jsresolution.PackageIdentity{Name: target, Version: version}
+					base.Reason = "Yarn lockfile selects a version that is not present in the SBOM component set"
+					coverage.add(jsresolution.CoverageIssue{
+						Kind: jsresolution.CoverageMissingSBOMComponent, Path: base.From,
+						Detail: fmt.Sprintf("Yarn selects %s@%s but the SBOM has no matching component", target, version),
+					})
+					return base
+				}
+			}
 		}
 		return r.correlateComponent(base, target, components, resolutions, packages, candidateWork, coverage)
 	}
