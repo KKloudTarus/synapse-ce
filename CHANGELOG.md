@@ -47,6 +47,12 @@ capabilities below are already shipped on `main`.
 
 ### Fixed
 
+- **Bounded LLM output.** `ChatRequest.MaxTokens` was set by the agent, false-positive triage, and
+  judgment-verifier call sites but never reached the OpenAI-compatible wire request, so provider defaults
+  could exceed the intended output budget. The adapter now sends the current `max_completion_tokens`
+  field, negotiates and caches the deprecated `max_tokens` spelling only when a legacy gateway explicitly
+  rejects the current field, and fails closed on `finish_reason=length` rather than parsing a potentially
+  truncated structured verdict.
 - **Deterministic AI adjudication.** An explicit `temperature: 0` never reached the provider: the
   OpenAI-compatible adapter only sent the field when it was greater than zero, so the value a
   deterministic caller asks for was indistinguishable from "unset" and was dropped from the request. The

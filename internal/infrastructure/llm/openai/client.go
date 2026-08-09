@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
@@ -22,14 +23,26 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// ErrUnavailable is a TRANSIENT provider failure (timeout / 429 / 5xx / upstream cooldown):
-// the orchestrator may back off + retry. A malformed request maps to shared.ErrValidation.
-var ErrUnavailable = errors.New("llm provider unavailable")
+var (
+	// ErrUnavailable is a TRANSIENT provider failure (timeout / 429 / 5xx / upstream cooldown):
+	// the orchestrator may back off + retry. A malformed request maps to shared.ErrValidation.
+	ErrUnavailable = errors.New("llm provider unavailable")
+	// ErrOutputTruncated means the provider stopped because the configured output-token limit was
+	// reached. Callers must not parse or act on the potentially partial structured response.
+	ErrOutputTruncated = errors.New("llm output truncated")
+)
 
 const (
 	defaultTimeout = 60 * time.Second
 	maxRespBytes   = 8 << 20 // cap the provider response we read
 	retries        = 2       // bounded retries on transient errors
+)
+
+type maxTokensDialect uint32
+
+const (
+	maxTokensCompletion maxTokensDialect = iota + 1 // current OpenAI Chat Completions: max_completion_tokens
+	maxTokensLegacy                                 // legacy OpenAI-compatible gateways: max_tokens
 )
 
 // Client is an OpenAI-compatible Chat Completions client.
@@ -38,6 +51,9 @@ type Client struct {
 	key   string // bearer token; never logged
 	model string // default model id (a ChatRequest.Model overrides)
 	http  *http.Client
+	// maxTokensDialects learns the field per model because one gateway may route both current and
+	// legacy model families. Values are maxTokensDialect; sync.Map keeps concurrent triage calls safe.
+	maxTokensDialects sync.Map
 }
 
 var _ ports.LLM = (*Client)(nil)
@@ -61,12 +77,14 @@ func (c *Client) BaseURL() string { return c.base }
 // --- wire types (OpenAI Chat Completions shape) ---
 
 type wireReq struct {
-	Model          string       `json:"model"`
-	Messages       []wireMsg    `json:"messages"`
-	Tools          []wireTool   `json:"tools,omitempty"`
-	ToolChoice     string       `json:"tool_choice,omitempty"`
-	ResponseFormat *wireRespFmt `json:"response_format,omitempty"`
-	Temperature    *float64     `json:"temperature,omitempty"`
+	Model               string       `json:"model"`
+	Messages            []wireMsg    `json:"messages"`
+	Tools               []wireTool   `json:"tools,omitempty"`
+	ToolChoice          string       `json:"tool_choice,omitempty"`
+	ResponseFormat      *wireRespFmt `json:"response_format,omitempty"`
+	Temperature         *float64     `json:"temperature,omitempty"`
+	MaxCompletionTokens *int         `json:"max_completion_tokens,omitempty"`
+	MaxTokens           *int         `json:"max_tokens,omitempty"`
 }
 type wireMsg struct {
 	Role       string         `json:"role"`
@@ -130,15 +148,58 @@ func (c *Client) Chat(ctx context.Context, req ports.ChatRequest) (ports.ChatRes
 		t := *req.Temperature
 		body.Temperature = &t
 	}
-	// NOTE: no max_tokens/max_completion_tokens – the field name differs across OpenAI model
-	// generations (the upstream is a large model). The agent budget is enforced on OUR side
-	// (max-steps + token accounting), so we don't risk a provider-specific field here.
 
-	raw, err := json.Marshal(body)
+	dialect := maxTokensCompletion
+	if learned, ok := c.maxTokensDialects.Load(model); ok {
+		dialect = learned.(maxTokensDialect)
+	}
+	raw, err := marshalWireRequest(body, req.MaxTokens, dialect)
 	if err != nil {
-		return ports.ChatResponse{}, fmt.Errorf("%w: marshal chat request: %v", shared.ErrValidation, err)
+		return ports.ChatResponse{}, err
+	}
+	resp, err := c.chatRaw(ctx, raw)
+	if err == nil {
+		if req.MaxTokens > 0 {
+			c.maxTokensDialects.Store(model, dialect)
+		}
+		return resp, nil
+	}
+	if req.MaxTokens <= 0 || dialect != maxTokensCompletion || !rejectsMaxCompletionTokens(err) {
+		return resp, err
 	}
 
+	// Some otherwise OpenAI-compatible gateways still expose only the deprecated max_tokens field.
+	// Retry once only when the 400 response explicitly names max_completion_tokens as unsupported;
+	// never retry an unrelated bad request, auth failure, or truncated completion.
+	legacyRaw, marshalErr := marshalWireRequest(body, req.MaxTokens, maxTokensLegacy)
+	if marshalErr != nil {
+		return ports.ChatResponse{}, marshalErr
+	}
+	resp, err = c.chatRaw(ctx, legacyRaw)
+	if err == nil {
+		c.maxTokensDialects.Store(model, maxTokensLegacy)
+	}
+	return resp, err
+}
+
+func marshalWireRequest(body wireReq, maxTokens int, dialect maxTokensDialect) ([]byte, error) {
+	if maxTokens > 0 {
+		limit := maxTokens
+		switch dialect {
+		case maxTokensLegacy:
+			body.MaxTokens = &limit
+		default:
+			body.MaxCompletionTokens = &limit
+		}
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("%w: marshal chat request: %v", shared.ErrValidation, err)
+	}
+	return raw, nil
+}
+
+func (c *Client) chatRaw(ctx context.Context, raw []byte) (ports.ChatResponse, error) {
 	var lastErr error
 	for attempt := 0; attempt <= retries; attempt++ {
 		resp, rerr := c.do(ctx, raw)
@@ -147,7 +208,7 @@ func (c *Client) Chat(ctx context.Context, req ports.ChatRequest) (ports.ChatRes
 		}
 		lastErr = rerr
 		if !errors.Is(rerr, ErrUnavailable) || ctx.Err() != nil {
-			return ports.ChatResponse{}, rerr // terminal (bad request/auth) or cancelled
+			return resp, rerr // terminal (bad request/auth/truncation) or cancelled
 		}
 		// transient: brief backoff, then retry
 		select {
@@ -157,6 +218,35 @@ func (c *Client) Chat(ctx context.Context, req ports.ChatRequest) (ports.ChatRes
 		}
 	}
 	return ports.ChatResponse{}, lastErr
+}
+
+type providerStatusError struct {
+	status int
+	detail string
+	cause  error
+}
+
+func (e *providerStatusError) Error() string {
+	return fmt.Sprintf("%v: provider status %d: %s", e.cause, e.status, e.detail)
+}
+
+func (e *providerStatusError) Unwrap() error { return e.cause }
+
+func rejectsMaxCompletionTokens(err error) bool {
+	var statusErr *providerStatusError
+	if !errors.As(err, &statusErr) || statusErr.status != http.StatusBadRequest {
+		return false
+	}
+	detail := strings.ToLower(statusErr.detail)
+	if !strings.Contains(detail, "max_completion_tokens") {
+		return false
+	}
+	for _, marker := range []string{"unsupported", "not supported", "unknown", "unrecognized", "unexpected", "not permitted", "extra field"} {
+		if strings.Contains(detail, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) do(ctx context.Context, raw []byte) (ports.ChatResponse, error) {
@@ -176,12 +266,12 @@ func (c *Client) do(ctx context.Context, raw []byte) (ports.ChatResponse, error)
 	data, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxRespBytes))
 
 	if httpResp.StatusCode == http.StatusTooManyRequests || httpResp.StatusCode >= 500 {
-		return ports.ChatResponse{}, fmt.Errorf("%w: provider status %d: %s", ErrUnavailable, httpResp.StatusCode, snippet(data))
+		return ports.ChatResponse{}, &providerStatusError{status: httpResp.StatusCode, detail: snippet(data), cause: ErrUnavailable}
 	}
 	if httpResp.StatusCode != http.StatusOK {
 		// 400/401/403 etc. – surface the provider message (which may carry a cooldown hint),
 		// but NEVER echo the request (it never contains secrets anyway). Treat as terminal.
-		return ports.ChatResponse{}, fmt.Errorf("%w: provider status %d: %s", shared.ErrValidation, httpResp.StatusCode, snippet(data))
+		return ports.ChatResponse{}, &providerStatusError{status: httpResp.StatusCode, detail: snippet(data), cause: shared.ErrValidation}
 	}
 	var wr wireResp
 	if err := json.Unmarshal(data, &wr); err != nil {
@@ -203,6 +293,9 @@ func (c *Client) do(ctx context.Context, raw []byte) (ports.ChatResponse, error)
 		// OpenAI sends function.arguments as a JSON string; store its raw JSON bytes so the
 		// orchestrator can unmarshal directly into the tool's typed params.
 		out.ToolCalls = append(out.ToolCalls, agent.ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: json.RawMessage(tc.Function.Arguments)})
+	}
+	if out.FinishReason == "length" {
+		return out, fmt.Errorf("%w: provider reached the configured output-token limit", ErrOutputTruncated)
 	}
 	return out, nil
 }
