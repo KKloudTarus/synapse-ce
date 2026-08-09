@@ -10,6 +10,7 @@ import {
   ScrollText,
   Server,
   Settings,
+  ShieldQuestion,
   Sun,
   Target,
   Users,
@@ -30,6 +31,7 @@ const NAV_GROUPS: Array<{
     items: [
       { icon: Boxes, label: 'Assets', to: '/assets', prefix: '/assets' },
       { icon: Target, label: 'Engagements', to: '/engagements', prefix: '/engagements' },
+      { icon: ShieldQuestion, label: 'AI review queue', to: '/ai-triage/reviews', prefix: '/ai-triage/reviews' },
       { icon: ScrollText, label: 'Audit log', to: '/audit' },
     ],
   },

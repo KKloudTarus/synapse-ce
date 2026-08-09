@@ -182,7 +182,7 @@ function LatestAnalysisView({
           </p>
         )}
       </Card>
-      <FindingExplorer findings={scan.findings} headingId={projectAnalysisLandmarks.findings} initialDimension={dimension} dimensionNavigationKey={navigationKey} />
+      <FindingExplorer findings={scan.findings} aiTriage={scan.aiTriage} headingId={projectAnalysisLandmarks.findings} initialDimension={dimension} dimensionNavigationKey={navigationKey} />
       <CodeQualityReportView
         report={scan.codeQuality}
         empty={<Card title="Code quality"><EmptyState icon={ShieldAlert} title="Code quality unavailable" hint="This completed scan did not produce a code-quality report." /></Card>}

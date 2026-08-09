@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './auth/AuthContext'
 import { MobileSidebar, Sidebar } from './components/Sidebar'
 import { Topbar } from './components/Topbar'
 import { Audit } from './pages/Audit'
+import { AITriageReviews } from './pages/AITriageReviews'
 import { Connect } from './pages/Connect'
 import { EngagementDetail } from './pages/EngagementDetail'
 import { Engagements } from './pages/Engagements'
@@ -72,6 +73,7 @@ function Gate() {
         <Route path="rules" element={<Rules />} />
         <Route path="rules/:key" element={<RuleDetail />} />
         <Route path="audit" element={<Audit />} />
+        <Route path="ai-triage/reviews" element={<AITriageReviews />} />
         <Route path="team" element={<Team />} />
         <Route path="*" element={<Navigate to="/engagements" replace />} />
       </Route>

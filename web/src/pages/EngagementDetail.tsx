@@ -56,6 +56,7 @@ import {
   Spinner,
 } from '../components/ui'
 import { VirtualTable, type Column } from '../components/VirtualTable'
+import { AITriageBadges } from '../components/AITriageBadges'
 import { AgentTab } from './AgentTab'
 import { ThreatModelTab } from './ThreatModelTab'
 import { CodeQualityTab } from './CodeQualityTab'
@@ -1788,6 +1789,14 @@ function FindingsTab({
     for (const v of scan?.vulnerabilities ?? []) m.set(vulnKey(v), v)
     return m
   }, [scan])
+  const triageByKey = useMemo(() => {
+    const map = new Map<string, NonNullable<ScanResult['aiTriage']>[number]>()
+    for (const item of scan?.aiTriage ?? []) {
+      if (item.findingId) map.set(item.findingId, item)
+      if (item.dedupKey) map.set(item.dedupKey, item)
+    }
+    return map
+  }, [scan])
 
   if (findings === null) return <Spinner label="Loading findings…" />
 
@@ -1873,6 +1882,7 @@ function FindingsTab({
           <tbody>
             {rows.map((f) => {
               const v = vulnByKey.get(f.dedupKey)
+              const triage = triageByKey.get(f.id) ?? triageByKey.get(f.dedupKey)
               const isOpen = expanded.has(f.id)
               return (
                 <Fragment key={f.id}>
@@ -1907,6 +1917,7 @@ function FindingsTab({
                         {f.kev && <KevBadge />}
                         {f.kind && f.kind !== 'sca' && <KindBadge kind={f.kind} />}
                         {f.cwe && <span className="font-mono text-[11px] tabular-nums text-subtlefg">{f.cwe}</span>}
+                        {triage && <AITriageBadges triage={triage} />}
                         {v && !v.direct && v.path.length >= 2 && (
                           <span className="text-xs text-subtlefg" title={v.path.map(shortPkg).join(' › ')}>
                             via {shortPkg(v.path[v.path.length - 2])}

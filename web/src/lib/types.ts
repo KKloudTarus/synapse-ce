@@ -308,6 +308,7 @@ export interface ScanResult {
   vulnerabilities: Vulnerability[]
   licenses: LicenseFinding[]
   findings: Finding[]
+  aiTriage?: AITriage[]
   toolVersions: Record<string, string>
   vulnDBSnapshot: string
   completeness: Completeness
@@ -316,6 +317,75 @@ export interface ScanResult {
   findingQuality: FindingQuality
   codeQuality?: CodeQualityReport
   debugEvents: ScanDebugEvent[]
+}
+
+export interface AITriage {
+  findingId: string
+  dedupKey: string
+  verdict: string
+  driver: string
+  confidence: number
+  suspectedFP: boolean
+  proposerModel: string
+  verifierModel: string
+  promptVersion: string
+  policyVersion: string
+  policyReason: string
+  shadow: boolean
+  wouldGateExempt: boolean
+  gateExempt: boolean
+  reviewRequired: boolean
+  verified: boolean
+  verifierVerdict: string
+  verifierDriver: string
+  verifierConfidence: number
+}
+
+export type AITriageReviewState = 'pending' | 'accepted' | 'rejected'
+
+export interface AITriageReview {
+  id: string
+  tenantId: string
+  engagementId: string
+  projectId: string
+  findingId: string
+  dedupKey: string
+  title: string
+  severity: Severity
+  cwe: string
+  owner: string
+  state: AITriageReviewState
+  verdict: string
+  driver: string
+  confidence: number
+  suspectedFP: boolean
+  proposerModel: string
+  verifierModel: string
+  promptVersion: string
+  verified: boolean
+  verifierVerdict: string
+  verifierDriver: string
+  verifierConfidence: number
+  policyVersion: string
+  policyReason: string
+  shadow: boolean
+  wouldGateExempt: boolean
+  gateExempt: boolean
+  reviewRequired: boolean
+  evidenceRef: string
+  decidedBy: string
+  decisionRationale: string
+  createdAt: string
+  updatedAt: string
+  decidedAt: string | null
+  version: number
+}
+
+export interface AITriageReviewFilter {
+  severity?: Severity
+  cwe?: string
+  project?: string
+  state?: AITriageReviewState
 }
 
 export type ScanMode = 'full' | 'vulnerabilities' | 'licenses'

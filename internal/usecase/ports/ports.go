@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/aitriagereview"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/audit"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/aup"
@@ -498,6 +499,35 @@ type ScanJobStore interface {
 type ScanResultStore interface {
 	SaveResult(ctx context.Context, engagementID shared.ID, result []byte) error
 	LatestResult(ctx context.Context, engagementID shared.ID) ([]byte, error)
+}
+
+// AITriageReviewFilter is the tenant-scoped review-queue query.
+type AITriageReviewFilter struct {
+	Severity  shared.Severity
+	CWE       string
+	ProjectID shared.ID
+	State     aitriagereview.State
+}
+
+// AITriageReviewStore persists the mutable queue row. Decisions are separately
+// recorded in the append-only audit chain by the use case.
+type AITriageReviewStore interface {
+	UpsertPending(ctx context.Context, review aitriagereview.Review) error
+	Get(ctx context.Context, tenantID, id shared.ID) (aitriagereview.Review, error)
+	List(ctx context.Context, tenantID shared.ID, filter AITriageReviewFilter) ([]aitriagereview.Review, error)
+	SaveOwner(ctx context.Context, review aitriagereview.Review, expectedVersion int) error
+	SaveDecision(ctx context.Context, review aitriagereview.Review, expectedVersion int) error
+}
+
+// AITriageReviewRecorder is the narrow scan-pipeline sink. A scan only supplies
+// policy-held critiques after its evidence link has been sealed.
+type AITriageReviewRecorder interface {
+	RecordScan(ctx context.Context, engagementID, evidenceRef shared.ID, findings []finding.Finding, critiques []AICritique) error
+}
+
+// AITriageFindingDecision applies the human decision to the authoritative finding.
+type AITriageFindingDecision interface {
+	ApplyAITriageReview(ctx context.Context, actor string, engagementID, findingID shared.ID, accepted bool, rationale string) error
 }
 
 // ImportedSBOMStore persists the active client-supplied SBOM for an engagement.
