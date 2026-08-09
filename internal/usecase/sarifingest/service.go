@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -52,26 +53,38 @@ type findingReader interface {
 	ListByEngagement(ctx context.Context, engagementID shared.ID) ([]finding.Finding, error)
 }
 
+// engagementReader resolves the target engagement WITHIN the caller's tenant.
+//
+// The use case does this itself rather than trusting the HTTP layer, for the same reason the sibling
+// SBOM import does: a second caller (a worker, the CLI, an MCP tool) must not be able to write governed
+// findings into an arbitrary engagement id. It also settles which tenant owns the rows — the
+// engagement's, not the principal's — so the authorization check and the write can never disagree.
+type engagementReader interface {
+	GetByIDInTenant(ctx context.Context, tenantID, id shared.ID) (*engagement.Engagement, error)
+}
+
 // Service ingests SARIF documents.
 type Service struct {
-	store    ports.ImportedFindingStore
-	findings findingReader
-	audit    ports.AuditLogger
-	clock    ports.Clock
-	ids      ports.IDGenerator
-	limits   Limits
+	store       ports.ImportedFindingStore
+	findings    findingReader
+	engagements engagementReader
+	audit       ports.AuditLogger
+	clock       ports.Clock
+	ids         ports.IDGenerator
+	limits      Limits
 }
 
 // NewService validates and returns the ingest service.
-func NewService(store ports.ImportedFindingStore, findings findingReader, audit ports.AuditLogger, clock ports.Clock, ids ports.IDGenerator) (*Service, error) {
-	if store == nil || audit == nil || clock == nil || ids == nil {
-		return nil, fmt.Errorf("%w: sarif ingest needs a store, an audit log, a clock and an id generator", shared.ErrValidation)
+func NewService(store ports.ImportedFindingStore, findings findingReader, engagements engagementReader, audit ports.AuditLogger, clock ports.Clock, ids ports.IDGenerator) (*Service, error) {
+	if store == nil || engagements == nil || audit == nil || clock == nil || ids == nil {
+		return nil, fmt.Errorf("%w: sarif ingest needs a store, an engagement reader, an audit log, a clock and an id generator", shared.ErrValidation)
 	}
-	return &Service{store: store, findings: findings, audit: audit, clock: clock, ids: ids, limits: DefaultLimits()}, nil
+	return &Service{store: store, findings: findings, engagements: engagements, audit: audit, clock: clock, ids: ids, limits: DefaultLimits()}, nil
 }
 
-// WithLimits overrides the ingest bounds; used by tests to exercise each budget.
-func (s *Service) WithLimits(limits Limits) *Service {
+// withLimits overrides the ingest bounds. It is an unexported seam so a running service's budgets cannot
+// be changed from another package (which would also be a data race on a shared instance).
+func (s *Service) withLimits(limits Limits) *Service {
 	s.limits = limits
 	return s
 }
@@ -81,8 +94,8 @@ func (s *Service) WithLimits(limits Limits) *Service {
 // A bound breach or an unparseable document returns an error and persists NOTHING. A result-level
 // problem is a typed refusal, so the caller sees what was dropped.
 func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, error) {
-	if req.EngagementID.IsZero() || req.TenantID.IsZero() {
-		return IngestResult{}, fmt.Errorf("%w: sarif ingest needs a tenant and an engagement", shared.ErrValidation)
+	if req.EngagementID.IsZero() {
+		return IngestResult{}, fmt.Errorf("%w: sarif ingest needs an engagement", shared.ErrValidation)
 	}
 	if req.Actor.IsZero() {
 		// Without an actor the provenance cannot be completed, and an unattributable finding is refused
@@ -90,15 +103,34 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, 
 		return IngestResult{}, fmt.Errorf("%w: sarif ingest needs an ingesting actor", shared.ErrValidation)
 	}
 
+	// Resolve the engagement inside the CALLER's tenant, and then take the row tenant from the
+	// engagement itself. Normalizing the principal's tenant before this check instead would let an
+	// empty-tenant principal pass a wildcard gate and write the rows into a different partition than the
+	// one that authorized them. An engagement the caller cannot see is ErrNotFound, never a 403.
+	eng, err := s.engagements.GetByIDInTenant(ctx, req.TenantID, req.EngagementID)
+	if err != nil {
+		return IngestResult{}, fmt.Errorf("load engagement: %w", err)
+	}
+	// The store is RLS-partitioned and the empty tenant means DENY there, so the single-tenant default
+	// is normalized to its non-empty id at the STORE boundary — after authorization, not before it.
+	tenantID := shared.TenantOrDefault(eng.TenantID)
+
 	parsedDoc, err := parseDocument(ctx, req.Document, s.limits)
 	if err != nil {
 		return IngestResult{}, err
 	}
 
 	result := IngestResult{Refused: parsedDoc.refusals, Coverage: parsedDoc.coverage}
+	if s.findings == nil {
+		// Deduplication against first-party findings is part of what this ingest claims to do. Skipping
+		// it silently would leave Matched=0, which is indistinguishable from "no agreement was found".
+		result.Coverage = append(result.Coverage, importedfinding.CoverageIssue{
+			Detail: "first-party deduplication was not performed: no finding reader was configured, so agreement with existing findings is unknown",
+		})
+	}
 
 	// Idempotency by document digest: re-posting the same report must not duplicate findings.
-	alreadyIngested, err := s.store.ExistsDigest(ctx, req.TenantID, req.EngagementID, parsedDoc.digest)
+	alreadyIngested, err := s.store.ExistsDigest(ctx, tenantID, req.EngagementID, parsedDoc.digest)
 	if err != nil {
 		return IngestResult{}, fmt.Errorf("check sarif document digest: %w", err)
 	}
@@ -132,7 +164,7 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, 
 	for _, c := range parsedDoc.results {
 		imported := importedfinding.ImportedFinding{
 			ID:           s.ids.NewID(),
-			TenantID:     req.TenantID,
+			TenantID:     tenantID,
 			EngagementID: req.EngagementID,
 			Severity:     c.severity,
 			Title:        c.title,
@@ -146,7 +178,7 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, 
 				RuleID:       c.ruleID,
 				SourceDigest: parsedDoc.digest,
 				IngestedBy:   req.Actor,
-				IngestedAt:   now.Format("2006-01-02T15:04:05Z"),
+				IngestedAt:   now,
 			},
 			Audit: shared.Audit{CreatedAt: now, UpdatedAt: now},
 		}
@@ -177,7 +209,7 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, 
 		batch = append(batch, imported)
 	}
 
-	stored, existing, err := s.store.Save(ctx, req.TenantID, batch)
+	stored, existing, err := s.store.Save(ctx, tenantID, batch)
 	if err != nil {
 		return IngestResult{}, fmt.Errorf("persist imported findings: %w", err)
 	}
@@ -197,7 +229,11 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, 
 		},
 		At: now,
 	}); auditErr != nil {
-		return IngestResult{}, fmt.Errorf("audit sarif ingest: %w", auditErr)
+		// The findings are ALREADY persisted at this point. Saying only "audit failed" would leave the
+		// caller believing nothing was written, so the error states both facts: the state change
+		// happened and the record of it did not.
+		return IngestResult{}, fmt.Errorf("sarif ingest persisted %d findings but could not be audited: %w",
+			result.Accepted, auditErr)
 	}
 	return result, nil
 }
@@ -246,4 +282,26 @@ func sortRefusals(in []importedfinding.RefusalReason) {
 		}
 		return in[i].ResultIndex < in[j].ResultIndex
 	})
+}
+
+// Validate parses a document and reports exactly what an ingest WOULD accept and refuse, without a
+// store, an engagement, a tenant or an actor — and therefore without persisting anything.
+//
+// It exists so the CLI can share this package's parsing and refusal rules rather than reimplementing
+// them, while being structurally incapable of writing. A validate-only command backed by a real Service
+// pointed at a throwaway store would print an accepted count that means nothing; this cannot.
+func Validate(ctx context.Context, document []byte, limits Limits) (IngestResult, error) {
+	parsedDoc, err := parseDocument(ctx, document, limits)
+	if err != nil {
+		return IngestResult{}, err
+	}
+	result := IngestResult{
+		Accepted: len(parsedDoc.results),
+		Refused:  parsedDoc.refusals,
+		Coverage: append(parsedDoc.coverage, importedfinding.CoverageIssue{
+			Detail: "validation only: nothing was persisted, and agreement with existing first-party findings was not checked",
+		}),
+	}
+	sortRefusals(result.Refused)
+	return result, nil
 }

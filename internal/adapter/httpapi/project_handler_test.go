@@ -35,9 +35,7 @@ type dummyRulesStub struct {
 	rulesService
 }
 
-func (s dummyRulesStub) Get(context.Context, rule.Key) (rule.Rule, error) {
-	return rule.Rule{}, shared.ErrNotFound
-}
+func (s dummyRulesStub) Get(context.Context, rule.Key) (rule.Rule, error) { return rule.Rule{}, shared.ErrNotFound }
 
 type coverageStartStub struct {
 	projectService

@@ -50,6 +50,11 @@ func (r *ImportedFindingRepository) Save(ctx context.Context, tenantID shared.ID
 			if err := f.Validate(); err != nil {
 				return err
 			}
+			// The row and the partition must agree; see the memory store for why.
+			if f.TenantID != tenantID {
+				return fmt.Errorf("%w: imported finding %s is stamped with tenant %q but was saved into %q",
+					shared.ErrValidation, f.ID, f.TenantID, tenantID)
+			}
 			tag, err := tx.Exec(ctx, `
 				INSERT INTO imported_findings (`+importedFindingCols+`)
 				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
@@ -60,7 +65,7 @@ func (r *ImportedFindingRepository) Save(ctx context.Context, tenantID shared.ID
 				f.Location.StartLine, f.Location.StartColumn, f.Location.LogicalName,
 				f.Suppressed, f.Fingerprint, f.Provenance.ToolName, f.Provenance.ToolVersion,
 				f.Provenance.RuleID, f.Provenance.SourceDigest, f.Provenance.IngestedBy.String(),
-				f.Provenance.IngestedAt, f.Audit.CreatedAt, f.Audit.UpdatedAt)
+				f.Provenance.IngestedAt.UTC(), f.Audit.CreatedAt, f.Audit.UpdatedAt)
 			if err != nil {
 				return fmt.Errorf("insert imported finding: %w", err)
 			}

@@ -13,8 +13,9 @@ package importedfinding
 
 import (
 	"fmt"
-	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
@@ -32,30 +33,36 @@ type Provenance struct {
 	SourceDigest string
 	// IngestedBy is the actor who performed the ingest, and IngestedAt when.
 	IngestedBy shared.ID
-	IngestedAt string
+	IngestedAt time.Time
 }
 
 // Validate reports whether the provenance is complete. A partial provenance is refused rather than
 // stored, because it cannot be attributed.
+//
+// The required fields are checked in a fixed order from a fixed list, so the error text is deterministic
+// without a per-call map allocation and sort — this runs once per finding inside every store's batch.
 func (p Provenance) Validate() error {
-	missing := make([]string, 0, 6)
-	for name, value := range map[string]string{
-		"tool name":     p.ToolName,
-		"tool version":  p.ToolVersion,
-		"rule id":       p.RuleID,
-		"source digest": p.SourceDigest,
-		"ingested at":   p.IngestedAt,
-	} {
-		if strings.TrimSpace(value) == "" {
-			missing = append(missing, name)
+	required := [...]struct{ name, value string }{
+		{"rule id", p.RuleID},
+		{"source digest", p.SourceDigest},
+		{"tool name", p.ToolName},
+		{"tool version", p.ToolVersion},
+	}
+	missing := make([]string, 0, len(required)+2)
+	for _, field := range required {
+		if strings.TrimSpace(field.value) == "" {
+			missing = append(missing, field.name)
 		}
 	}
 	if p.IngestedBy.IsZero() {
 		missing = append(missing, "ingested by")
 	}
+	if p.IngestedAt.IsZero() {
+		missing = append(missing, "ingested at")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("%w: imported finding provenance is incomplete: missing %s",
-			shared.ErrValidation, strings.Join(sortedStrings(missing), ", "))
+			shared.ErrValidation, strings.Join(missing, ", "))
 	}
 	return nil
 }
@@ -71,6 +78,44 @@ type Location struct {
 	StartColumn int
 	// LogicalName is the tool's logical location (a fully-qualified symbol), kept when present.
 	LogicalName string
+}
+
+// Validate enforces the repository-relative invariant HERE, in the domain, rather than leaving it to
+// whichever ingester happens to produce the value.
+//
+// The SARIF ingester already normalizes and percent-decodes its input, but that is one producer. A
+// second one — a native scanner importer, a backfill, a future API — would otherwise be able to persist
+// `../../etc/passwd` through a store that only calls Validate. Decoding stays with the producer; the
+// invariant lives with the type that promises it.
+func (l Location) Validate() error {
+	if l.StartLine < 0 || l.StartColumn < 0 {
+		return fmt.Errorf("%w: imported finding location has a negative position", shared.ErrValidation)
+	}
+	if l.Path == "" {
+		return nil
+	}
+	switch {
+	case strings.IndexByte(l.Path, 0) >= 0, containsControl(l.Path):
+		return fmt.Errorf("%w: imported finding path contains a control character", shared.ErrValidation)
+	case strings.ContainsRune(l.Path, '\\'):
+		return fmt.Errorf("%w: imported finding path %q is not slash-normalized", shared.ErrValidation, l.Path)
+	case strings.HasPrefix(l.Path, "/"):
+		return fmt.Errorf("%w: imported finding path %q is absolute", shared.ErrValidation, l.Path)
+	case l.Path == "..", strings.HasPrefix(l.Path, "../"), strings.Contains(l.Path, "/../"), strings.HasSuffix(l.Path, "/.."):
+		return fmt.Errorf("%w: imported finding path %q escapes the scanned tree", shared.ErrValidation, l.Path)
+	case len(l.Path) >= 2 && l.Path[1] == ':':
+		return fmt.Errorf("%w: imported finding path %q names a volume", shared.ErrValidation, l.Path)
+	}
+	return nil
+}
+
+func containsControl(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 // ImportedFinding is one third-party result under this system's governance.
@@ -117,10 +162,34 @@ func (f ImportedFinding) Validate() error {
 	if err := f.Provenance.Validate(); err != nil {
 		return err
 	}
+	if err := f.Location.Validate(); err != nil {
+		return err
+	}
 	if !validSeverity(f.Severity) {
 		return fmt.Errorf("%w: imported finding severity %q is not a known severity", shared.ErrValidation, f.Severity)
 	}
 	return nil
+}
+
+// IdempotencyKey is the identity that makes a re-ingest a no-op: one finding per tenant, engagement,
+// source document, rule and location.
+//
+// It lives in the domain because every store must agree on it. A store that computed its own would drift
+// from the persistent unique constraint, and the two would then disagree about what "already ingested"
+// means — one duplicating what the other deduplicates.
+//
+// The NUL separator cannot be forged from within a field: the join always emits exactly six separators,
+// so an embedded NUL changes the count rather than shifting a boundary.
+func IdempotencyKey(f ImportedFinding) string {
+	return strings.Join([]string{
+		f.TenantID.String(),
+		f.EngagementID.String(),
+		f.Provenance.SourceDigest,
+		f.Provenance.RuleID,
+		f.Location.Path,
+		strings.TrimSpace(f.Location.LogicalName),
+		strconv.Itoa(f.Location.StartLine),
+	}, "\x00")
 }
 
 func validSeverity(s shared.Severity) bool {
@@ -160,14 +229,17 @@ const (
 	RefusalPathTraversal      RefusalCode = "path-traversal"
 	RefusalAbsolutePath       RefusalCode = "absolute-path"
 	RefusalMalformedResult    RefusalCode = "malformed-result"
-	RefusalCyclicRelation     RefusalCode = "cyclic-related-locations"
+	// RefusalTooManyElements is a result declaring more repeated elements (locations, fingerprints,
+	// tags) than can be held safely. It is a COUNT bound, not a traversal limit: this ingester never
+	// follows a related location, so a cycle among them cannot be entered in the first place.
+	RefusalTooManyElements RefusalCode = "too-many-elements"
 )
 
 // Valid reports whether c is a known refusal code.
 func (c RefusalCode) Valid() bool {
 	switch c {
 	case RefusalNoProvenance, RefusalInvalidLocation, RefusalUnsupportedURI, RefusalUnsupportedURIBase,
-		RefusalPathTraversal, RefusalAbsolutePath, RefusalMalformedResult, RefusalCyclicRelation:
+		RefusalPathTraversal, RefusalAbsolutePath, RefusalMalformedResult, RefusalTooManyElements:
 		return true
 	}
 	return false
@@ -176,10 +248,4 @@ func (c RefusalCode) Valid() bool {
 // CoverageIssue records a limitation of the ingest itself, distinct from a refused result.
 type CoverageIssue struct {
 	Detail string
-}
-
-func sortedStrings(in []string) []string {
-	out := append([]string(nil), in...)
-	slices.Sort(out)
-	return out
 }

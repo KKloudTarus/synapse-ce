@@ -2,10 +2,13 @@
 // asset model, prioritisation and governance path as first-party ones — without ever being presented as
 // this system's own analysis.
 //
-// A SARIF document is UNTRUSTED input. It is decoded as a STREAM so a document that fits the byte bound
-// can never expand into an unbounded number of Go values; every path it names is percent-decoded and
-// checked before use; every bound is enforced before anything is persisted; and every result that cannot
-// be attributed is refused with a typed reason rather than silently dropped.
+// A SARIF document is UNTRUSTED input. It is decoded as a STREAM and every repeated array — runs,
+// results, and the rule tables they reference — is bounded, so a document that fits the byte bound can
+// never expand into an unbounded number of Go values. Everything derived from a rule is computed ONCE
+// per rule rather than once per result, so shared data cannot be multiplied by the result budget. Every
+// path the document names is percent-decoded and checked before use (see uri.go), every bound is
+// enforced before anything is persisted, and every result that cannot be attributed is refused with a
+// typed reason rather than silently dropped.
 package sarifingest
 
 import (
@@ -15,10 +18,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"path"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -27,34 +27,37 @@ import (
 // Bounds on an untrusted document. Exceeding any of them is a typed error and NOTHING is persisted: a
 // partially ingested report is worse than a refused one, because the gap is invisible.
 //
-// The byte bound is deliberately modest. Because the parser streams, peak memory is roughly the document
-// itself plus the text it actually keeps, so the bound is a direct memory ceiling rather than a number
-// that gets multiplied by the decoder. A report larger than this is refused with an explicit error that
-// names the size — never truncated, which would look like a clean ingest of a smaller report.
+// The byte bound is deliberately modest. Because the parser streams and bounds every repeated array,
+// peak memory is roughly the document itself plus the text it actually keeps, so the bound is a direct
+// memory ceiling rather than a number that gets multiplied by the decoder. A report larger than this is
+// refused with an explicit error that names the size — never truncated, which would look like a clean
+// ingest of a smaller report.
 const (
 	DefaultMaxDocumentBytes = 32 << 20
 	DefaultMaxRuns          = 64
 	DefaultMaxResults       = 100000
+	// DefaultMaxRules bounds one tool component's rule table. Without it a document could spend its
+	// whole byte budget on rules: they are held for the length of the run, and a rule is far larger in
+	// memory than the JSON that declares it. Real tools ship hundreds; CodeQL's full suite is under
+	// two thousand.
+	DefaultMaxRules = 20000
 )
 
-// Per-result bounds. Text from an external tool is stored, so it is capped and stripped of control
-// characters HERE rather than trusted to every future renderer to handle safely.
+// Per-result count bounds. Each of these is a repeated array inside ONE result, so without a bound a
+// single result could carry a large fraction of the document.
 const (
-	maxTitleBytes      = 4 << 10
-	maxMessageBytes    = 4 << 10
-	maxIdentifierBytes = 512
-	maxPathBytes       = 4096
-	// maxRelatedLocations and maxLocations bound how many locations a single result may declare. They
-	// are COUNT bounds, not traversal limits: this ingester never follows a related location, so a cycle
-	// among them cannot be entered in the first place.
 	maxRelatedLocations = 1024
 	maxLocations        = 256
 	maxLogicalLocations = 256
-	// maxVersionEcho bounds how much of an attacker-controlled version string is reflected in an error.
-	maxVersionEcho = 32
+	maxFingerprints     = 256
+	maxTags             = 256
+	maxSuppressions     = 256
+	// maxRefusals bounds the refusal list returned to the caller. A breach is itself disclosed as a
+	// coverage issue, so a truncated list is never mistaken for a complete one.
+	maxRefusals = 2000
 	// ctxCheckEvery is how often the result loop observes cancellation; a disconnected client must not
 	// keep the parser running to completion.
-	ctxCheckEvery = 1024
+	ctxCheckEvery = 256
 )
 
 // Limits are the ingest bounds.
@@ -62,6 +65,7 @@ type Limits struct {
 	MaxDocumentBytes int
 	MaxRuns          int
 	MaxResults       int
+	MaxRules         int
 }
 
 // DefaultLimits returns the production bounds.
@@ -70,11 +74,12 @@ func DefaultLimits() Limits {
 		MaxDocumentBytes: DefaultMaxDocumentBytes,
 		MaxRuns:          DefaultMaxRuns,
 		MaxResults:       DefaultMaxResults,
+		MaxRules:         DefaultMaxRules,
 	}
 }
 
 // The subset of SARIF 2.1.0 this ingester reads. It is deliberately permissive about what it ignores and
-// strict about what it uses. Note that no type here holds a whole document: `runs` and `results` are
+// strict about what it uses. No type here holds a whole document: `runs`, `results` and `rules` are all
 // walked as streams.
 
 type sarifTool struct {
@@ -83,10 +88,11 @@ type sarifTool struct {
 }
 
 type sarifDriver struct {
-	Name            string      `json:"name"`
-	Version         string      `json:"version"`
-	SemanticVersion string      `json:"semanticVersion"`
-	Rules           []sarifRule `json:"rules"`
+	Name            string `json:"name"`
+	Version         string `json:"version"`
+	SemanticVersion string `json:"semanticVersion"`
+	// Rules stays raw so the table can be decoded one rule at a time under a count bound.
+	Rules json.RawMessage `json:"rules"`
 }
 
 type sarifRule struct {
@@ -155,6 +161,30 @@ type sarifLogicalLocation struct {
 	Name               string `json:"name"`
 }
 
+// ruleInfo is everything one rule contributes, DERIVED ONCE when the rule table is read.
+//
+// This is the shape that keeps per-result work independent of rule size. Reading a rule's tag list or
+// sanitizing its description inside the result loop would multiply shared data by the result budget: one
+// rule with a million tags and a hundred thousand results referencing it is a few megabytes of JSON and
+// 10^11 units of work.
+type ruleInfo struct {
+	id               string
+	title            string
+	problemSeverity  string
+	tagSeverity      string
+	securitySeverity string
+	level            string
+}
+
+// ruleTable is one run's rules, addressable by id and by index.
+type ruleTable struct {
+	byID map[string]ruleInfo
+	// driverIDs are the driver's rule ids in DOCUMENT order, which is what `ruleIndex` addresses.
+	driverIDs []string
+	// extensionIDs are the extensions' rule ids, used only when the driver declares no rules at all.
+	extensionIDs []string
+}
+
 // parsed is one document's interpretation: the results that can be attributed, the ones that cannot, and
 // the limitations of the ingest itself.
 type parsed struct {
@@ -187,6 +217,7 @@ type ingestStats struct {
 	suppressed      int
 	truncated       int
 	unresolvedIndex int
+	droppedRefusals int
 }
 
 func (s ingestStats) coverage() []importedfinding.CoverageIssue {
@@ -196,10 +227,16 @@ func (s ingestStats) coverage() []importedfinding.CoverageIssue {
 			out = append(out, importedfinding.CoverageIssue{Detail: fmt.Sprintf(format, n)})
 		}
 	}
+	if s.results == 0 {
+		out = append(out, importedfinding.CoverageIssue{
+			Detail: "the document declared no results, so an empty ingest here is not evidence of a clean scan",
+		})
+	}
 	add("%d results carried a severity this ingester cannot map; they are stored as unknown rather than assigned a level", s.unknownSeverity)
 	add("%d results were marked suppressed by the source tool; the flag is recorded but NOT obeyed", s.suppressed)
 	add("%d stored text fields were longer than the stored bound and were truncated", s.truncated)
 	add("%d results addressed a rule by index that the document does not declare", s.unresolvedIndex)
+	add("%d further refusals were not listed: the refusal list is capped, so this ingest refused MORE than it reports", s.droppedRefusals)
 	return out
 }
 
@@ -218,10 +255,6 @@ func errNotJSON() error {
 //
 // A bound breach is an ERROR rather than a partial result, because the caller must persist nothing. A
 // result-level problem is a typed refusal, so the caller can see exactly what was dropped.
-//
-// The document is walked with a streaming decoder: `runs` and `results` are never materialised as whole
-// Go slices, so the number of decoded values a document can force is bounded by the result budget rather
-// than by how many objects fit in the byte budget.
 func parseDocument(ctx context.Context, document []byte, limits Limits) (parsed, error) {
 	if len(document) == 0 {
 		return parsed{}, fmt.Errorf("%w: sarif document is empty", shared.ErrValidation)
@@ -270,6 +303,12 @@ func parseDocument(ctx context.Context, document []byte, limits Limits) (parsed,
 	if _, err := dec.Token(); err != nil { // closing '}'
 		return parsed{}, errNotJSON()
 	}
+	// Anything after the top-level object means the bytes are not one SARIF document. Accepting trailing
+	// content would also hand an attacker a one-byte way to change the digest and force a full re-ingest
+	// of a report that was already stored.
+	if dec.More() {
+		return parsed{}, fmt.Errorf("%w: sarif document has trailing content after the top-level object", shared.ErrValidation)
+	}
 	if !versionSeen {
 		if err := checkVersion(version); err != nil {
 			return parsed{}, err
@@ -279,8 +318,11 @@ func parseDocument(ctx context.Context, document []byte, limits Limits) (parsed,
 	return out, nil
 }
 
+// checkVersion accepts the 2.1 line only. The test is on the MINOR component rather than a string
+// prefix, so "2.15.0" — a different specification — is refused instead of being read as 2.1.
 func checkVersion(version string) error {
-	if strings.HasPrefix(strings.TrimSpace(version), "2.1") {
+	trimmed := strings.TrimSpace(version)
+	if trimmed == "2.1" || strings.HasPrefix(trimmed, "2.1.") {
 		return nil
 	}
 	// The version is attacker-controlled and reflected in the response, so it is stripped of control
@@ -291,12 +333,16 @@ func checkVersion(version string) error {
 
 // walkRuns streams the runs array, enforcing the run bound as it goes.
 func walkRuns(ctx context.Context, dec *json.Decoder, limits Limits, out *parsed, stats *ingestStats) error {
-	if err := expectDelim(dec, '['); err != nil {
+	opened, err := openArray(dec)
+	if err != nil {
 		return errNotJSON()
+	}
+	if !opened {
+		return nil
 	}
 	runIndex := 0
 	for dec.More() {
-		if err := ctx.Err(); err != nil {
+		if err := checkCancelled(ctx); err != nil {
 			return err
 		}
 		if runIndex >= limits.MaxRuns {
@@ -314,14 +360,15 @@ func walkRuns(ctx context.Context, dec *json.Decoder, limits Limits, out *parsed
 	return nil
 }
 
-// walkRun streams one run: the tool component is decoded (it carries the rule table), the results array
-// is consumed one result at a time.
+// walkRun streams one run: the tool component is decoded (its rule table is read under a bound), and the
+// results array is consumed one result at a time.
 func walkRun(ctx context.Context, dec *json.Decoder, runIndex int, limits Limits, out *parsed, stats *ingestStats) error {
 	if err := expectDelim(dec, '{'); err != nil {
 		return errNotJSON()
 	}
 	var (
 		tool       sarifTool
+		rules      ruleTable
 		toolSeen   bool
 		bufResults json.RawMessage
 	)
@@ -335,17 +382,29 @@ func walkRun(ctx context.Context, dec *json.Decoder, runIndex int, limits Limits
 			if err := dec.Decode(&tool); err != nil {
 				return errNotJSON()
 			}
+			rules, err = buildRuleTable(tool, limits, stats)
+			if err != nil {
+				return err
+			}
 			toolSeen = true
 		case "results":
+			if bufResults != nil {
+				// Two results arrays in one run would each be walked, producing duplicate candidates
+				// under colliding (run, result) indexes that no longer locate anything.
+				return fmt.Errorf("%w: sarif run declares more than one results array", shared.ErrValidation)
+			}
 			if !toolSeen {
 				// Every real tool emits `tool` before `results`; a document that does not would lose its
 				// rule metadata, so in that rare case the array is buffered and replayed after the run.
 				if err := dec.Decode(&bufResults); err != nil {
 					return errNotJSON()
 				}
+				if bufResults == nil {
+					bufResults = json.RawMessage("null")
+				}
 				continue
 			}
-			if err := streamResults(ctx, dec, runIndex, tool, limits, out, stats); err != nil {
+			if err := streamResults(ctx, dec, runIndex, tool, rules, limits, out, stats); err != nil {
 				return err
 			}
 		default:
@@ -358,24 +417,27 @@ func walkRun(ctx context.Context, dec *json.Decoder, runIndex int, limits Limits
 		return errNotJSON()
 	}
 	if bufResults != nil {
-		return streamResults(ctx, json.NewDecoder(bytes.NewReader(bufResults)), runIndex, tool, limits, out, stats)
+		return streamResults(ctx, json.NewDecoder(bytes.NewReader(bufResults)), runIndex, tool, rules, limits, out, stats)
 	}
 	return nil
 }
 
 // streamResults decodes one result at a time, so a run cannot force the whole results array into memory.
-func streamResults(ctx context.Context, dec *json.Decoder, runIndex int, tool sarifTool, limits Limits, out *parsed, stats *ingestStats) error {
-	rules, ruleIDs := indexRules(tool)
+func streamResults(ctx context.Context, dec *json.Decoder, runIndex int, tool sarifTool, rules ruleTable, limits Limits, out *parsed, stats *ingestStats) error {
 	toolName, _ := sanitizeText(tool.Driver.Name, maxIdentifierBytes, false)
 	toolVersion, _ := sanitizeText(driverVersion(tool.Driver), maxIdentifierBytes, false)
 
-	if err := expectDelim(dec, '['); err != nil {
+	opened, err := openArray(dec)
+	if err != nil {
 		return errNotJSON()
+	}
+	if !opened {
+		return nil
 	}
 	resultIndex := 0
 	for dec.More() {
 		if resultIndex%ctxCheckEvery == 0 {
-			if err := ctx.Err(); err != nil {
+			if err := checkCancelled(ctx); err != nil {
 				return err
 			}
 		}
@@ -388,10 +450,13 @@ func streamResults(ctx context.Context, dec *json.Decoder, runIndex int, tool sa
 			return errNotJSON()
 		}
 		stats.results++
-		accepted, refusal := interpretResult(runIndex, resultIndex, result, rules, ruleIDs, toolName, toolVersion, stats)
-		if refusal != nil {
+		accepted, refusal := interpretResult(runIndex, resultIndex, result, rules, toolName, toolVersion, stats)
+		switch {
+		case refusal != nil && len(out.refusals) < maxRefusals:
 			out.refusals = append(out.refusals, *refusal)
-		} else {
+		case refusal != nil:
+			stats.droppedRefusals++
+		default:
 			out.results = append(out.results, *accepted)
 		}
 		resultIndex++
@@ -411,36 +476,86 @@ func driverVersion(driver sarifDriver) string {
 	return strings.TrimSpace(driver.Version)
 }
 
-// indexRules collects rule metadata from the driver AND every extension, since tools split their rules
-// across both. It returns the id->rule map and the ids in DOCUMENT order, which is what `ruleIndex`
-// addresses — the order is computed once per run rather than rebuilt per result.
-func indexRules(tool sarifTool) (map[string]sarifRule, []string) {
-	out := map[string]sarifRule{}
-	ordered := make([]string, 0, len(tool.Driver.Rules))
-	add := func(driver sarifDriver) {
-		for _, rule := range driver.Rules {
-			id := strings.TrimSpace(rule.ID)
-			if id == "" {
-				continue
-			}
-			if _, exists := out[id]; !exists {
-				out[id] = rule
-			}
-			ordered = append(ordered, id)
-		}
+// buildRuleTable reads the driver's and the extensions' rule tables under a count bound, deriving each
+// rule's contribution exactly once.
+func buildRuleTable(tool sarifTool, limits Limits, stats *ingestStats) (ruleTable, error) {
+	table := ruleTable{byID: map[string]ruleInfo{}}
+	driverIDs, err := decodeRules(tool.Driver.Rules, limits, table.byID, stats)
+	if err != nil {
+		return ruleTable{}, err
 	}
-	add(tool.Driver)
-	// Extensions follow the driver. A result that addresses a rule by index without naming a tool
-	// component means the driver; extending the addressable range is a deliberate over-approximation so
-	// documents that split rules across components still resolve, and it is deterministic either way.
+	table.driverIDs = driverIDs
 	for _, extension := range tool.Extensions {
-		add(extension)
+		ids, err := decodeRules(extension.Rules, limits, table.byID, stats)
+		if err != nil {
+			return ruleTable{}, err
+		}
+		table.extensionIDs = append(table.extensionIDs, ids...)
 	}
-	return out, ordered
+	return table, nil
+}
+
+// decodeRules streams one rule table, adding each rule's DERIVED form to byID and returning the ids in
+// document order. A rule id already present wins, so the driver's definition is not overwritten.
+func decodeRules(raw json.RawMessage, limits Limits, byID map[string]ruleInfo, stats *ingestStats) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	opened, err := openArray(dec)
+	if err != nil {
+		return nil, errNotJSON()
+	}
+	if !opened {
+		return nil, nil
+	}
+	var ordered []string
+	for dec.More() {
+		if len(ordered) >= limits.MaxRules {
+			return nil, fmt.Errorf("%w: a sarif tool component declares more than %d rules, over the bound; nothing was ingested",
+				shared.ErrValidation, limits.MaxRules)
+		}
+		var rule sarifRule
+		if err := dec.Decode(&rule); err != nil {
+			return nil, errNotJSON()
+		}
+		id, _ := sanitizeText(rule.ID, maxIdentifierBytes, false)
+		if id == "" {
+			// A rule with no id still occupies an INDEX, so it is recorded as an empty slot rather than
+			// skipped: dropping it would shift every later rule's index by one.
+			ordered = append(ordered, "")
+			continue
+		}
+		ordered = append(ordered, id)
+		if _, exists := byID[id]; exists {
+			continue
+		}
+		byID[id] = deriveRule(id, rule, stats)
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, errNotJSON()
+	}
+	return ordered, nil
+}
+
+// deriveRule computes everything a rule contributes, once.
+func deriveRule(id string, rule sarifRule, stats *ingestStats) ruleInfo {
+	title, truncated := sanitizeText(firstNonEmpty(rule.ShortDescription.Text, rule.Name, id), maxTitleBytes, false)
+	if truncated {
+		stats.truncated++
+	}
+	return ruleInfo{
+		id:               id,
+		title:            title,
+		problemSeverity:  strings.TrimSpace(rule.Properties.ProblemSeverity),
+		tagSeverity:      severityFromTags(rule.Properties.Tags),
+		securitySeverity: strings.TrimSpace(rule.Properties.Severity),
+		level:            strings.TrimSpace(rule.DefaultConfig.Level),
+	}
 }
 
 // interpretResult turns one SARIF result into a candidate, or a typed refusal.
-func interpretResult(runIndex, resultIndex int, result sarifResult, rules map[string]sarifRule, ruleIDs []string,
+func interpretResult(runIndex, resultIndex int, result sarifResult, rules ruleTable,
 	toolName, toolVersion string, stats *ingestStats) (*candidate, *importedfinding.RefusalReason) {
 	refuse := func(code importedfinding.RefusalCode, detail string) *importedfinding.RefusalReason {
 		return &importedfinding.RefusalReason{RunIndex: runIndex, ResultIndex: resultIndex, Code: code, Detail: detail}
@@ -450,7 +565,7 @@ func interpretResult(runIndex, resultIndex int, result sarifResult, rules map[st
 	// attributed to a rule, so it cannot be re-checked against its source.
 	ruleID, _ := sanitizeText(result.RuleID, maxIdentifierBytes, false)
 	if ruleID == "" && result.RuleIndex != nil {
-		ruleID = ruleIDAtIndex(ruleIDs, *result.RuleIndex)
+		ruleID = rules.at(*result.RuleIndex)
 		if ruleID == "" {
 			stats.unresolvedIndex++
 		}
@@ -460,15 +575,24 @@ func interpretResult(runIndex, resultIndex int, result sarifResult, rules map[st
 			"result has no establishable tool and rule identity")
 	}
 
-	// Location counts are bounded. This ingester never FOLLOWS a related location, so an unbounded set
-	// cannot be traversed — but an unbounded set is still a memory cost and a sign of a hostile document.
-	if len(result.RelatedLocations) > maxRelatedLocations {
-		return nil, refuse(importedfinding.RefusalCyclicRelation,
-			"result declares more related locations than can be held safely")
-	}
-	if len(result.Locations) > maxLocations {
-		return nil, refuse(importedfinding.RefusalMalformedResult,
-			"result declares more locations than can be held safely")
+	// Every repeated array inside a result is bounded. This ingester never FOLLOWS a related location,
+	// so an unbounded set cannot be traversed — but it is still a memory cost and a sign of a hostile
+	// document, and a bound is the only thing that keeps per-result work bounded.
+	for _, check := range []struct {
+		count int
+		limit int
+		what  string
+	}{
+		{len(result.RelatedLocations), maxRelatedLocations, "related locations"},
+		{len(result.Locations), maxLocations, "locations"},
+		{len(result.PartialFingerprints), maxFingerprints, "partial fingerprints"},
+		{len(result.Properties.Tags), maxTags, "property tags"},
+		{len(result.Suppressions), maxSuppressions, "suppressions"},
+	} {
+		if check.count > check.limit {
+			return nil, refuse(importedfinding.RefusalTooManyElements,
+				"result declares more "+check.what+" than can be held safely")
+		}
 	}
 
 	location, refusal := interpretLocation(result.Locations, refuse)
@@ -476,8 +600,8 @@ func interpretResult(runIndex, resultIndex int, result sarifResult, rules map[st
 		return nil, refusal
 	}
 
-	rule := rules[ruleID]
-	severity := MapSeverity(toolName, result, rule)
+	rule := rules.byID[ruleID]
+	severity := mapSeverity(toolName, result, rule)
 	if severity == shared.SeverityUnknown {
 		stats.unknownSeverity++
 	}
@@ -486,10 +610,13 @@ func interpretResult(runIndex, resultIndex int, result sarifResult, rules map[st
 		stats.suppressed++
 	}
 
-	title, titleCut := sanitizeText(firstNonEmpty(rule.ShortDescription.Text, rule.Name, ruleID), maxTitleBytes, false)
+	title := rule.title
+	if title == "" {
+		title, _ = sanitizeText(ruleID, maxTitleBytes, false)
+	}
 	message, messageCut := sanitizeText(result.Message.Text, maxMessageBytes, true)
 	fingerprint, fingerprintCut := sanitizeText(firstFingerprint(result.PartialFingerprints), maxIdentifierBytes, false)
-	for _, cut := range []bool{titleCut, messageCut, fingerprintCut} {
+	for _, cut := range []bool{messageCut, fingerprintCut} {
 		if cut {
 			stats.truncated++
 		}
@@ -510,12 +637,24 @@ func interpretResult(runIndex, resultIndex int, result sarifResult, rules map[st
 	}, nil
 }
 
-// ruleIDAtIndex resolves a `ruleIndex` against the run's rules in document order.
-func ruleIDAtIndex(ruleIDs []string, index int) string {
-	if index < 0 || index >= len(ruleIDs) {
+// at resolves a `ruleIndex` against the run's rules in document order.
+//
+// The index addresses the DRIVER's rules. Extensions are consulted only when the driver declares no rule
+// table at all — the shape several tools emit — because silently resolving an out-of-range index against
+// an extension would attribute a finding to a rule the tool never associated with it, and provenance is
+// the entire point of this type. An index that resolves to nothing is a disclosed refusal instead.
+func (t ruleTable) at(index int) string {
+	if index < 0 {
 		return ""
 	}
-	return ruleIDs[index]
+	ids := t.driverIDs
+	if len(ids) == 0 {
+		ids = t.extensionIDs
+	}
+	if index >= len(ids) {
+		return ""
+	}
+	return ids[index]
 }
 
 // interpretLocation normalizes the first physical location, refusing anything that points outside the
@@ -528,7 +667,7 @@ func interpretLocation(locations []sarifLocation, refuse func(importedfinding.Re
 	}
 	first := locations[0]
 	if len(first.LogicalLocations) > maxLogicalLocations {
-		return importedfinding.Location{}, refuse(importedfinding.RefusalMalformedResult,
+		return importedfinding.Location{}, refuse(importedfinding.RefusalTooManyElements,
 			"location declares more logical locations than can be held safely")
 	}
 
@@ -570,109 +709,6 @@ func interpretLocation(locations []sarifLocation, refuse func(importedfinding.Re
 	return out, nil
 }
 
-// repositoryRootBase reports whether a uriBaseId denotes the root of the scanned tree. Anything else is
-// refused rather than assumed.
-func repositoryRootBase(base string) bool {
-	switch strings.ToUpper(strings.Trim(strings.TrimSpace(base), "%")) {
-	case "", "SRCROOT", "PROJECTROOT", "REPOROOT", "WORKSPACEROOT", "ROOTPATH":
-		return true
-	}
-	return false
-}
-
-// normalizeArtifactURI converts a SARIF artifact URI into a repository-relative path, or returns the
-// refusal code that explains why it cannot be used.
-//
-// SARIF requires `artifactLocation.uri` to be a URI reference, i.e. percent-ENCODED. The value is
-// therefore decoded BEFORE the traversal and absolute-path checks — checking the encoded form would let
-// `%2e%2e%2f` walk straight past every guard — and a value that still carries an escape after one decode
-// is refused, so double encoding cannot survive to a consumer that decodes again.
-func normalizeArtifactURI(uri string) (string, importedfinding.RefusalCode) {
-	if strings.IndexByte(uri, 0) >= 0 || len(uri) > maxPathBytes {
-		return "", importedfinding.RefusalInvalidLocation
-	}
-
-	rest := uri
-	if i := strings.Index(rest, "://"); i >= 0 {
-		if !strings.EqualFold(rest[:i], "file") {
-			return "", importedfinding.RefusalUnsupportedURI
-		}
-		parsedURI, err := url.Parse(rest)
-		if err != nil {
-			return "", importedfinding.RefusalInvalidLocation
-		}
-		// A file URI with a remote authority is not a local directory: file://evil.example/etc/passwd
-		// must never be reinterpreted as the relative path "evil.example/etc/passwd".
-		if host := parsedURI.Host; host != "" && !strings.EqualFold(host, "localhost") {
-			return "", importedfinding.RefusalUnsupportedURI
-		}
-		rest = parsedURI.EscapedPath()
-		if strings.HasPrefix(rest, "/") {
-			return "", importedfinding.RefusalAbsolutePath
-		}
-	} else if code := refuseBareScheme(rest); code != "" {
-		return "", code
-	}
-
-	decoded, err := url.PathUnescape(rest)
-	if err != nil {
-		return "", importedfinding.RefusalInvalidLocation
-	}
-	if containsPercentEscape(decoded) {
-		return "", importedfinding.RefusalInvalidLocation
-	}
-	if strings.IndexByte(decoded, 0) >= 0 || !utf8.ValidString(decoded) || containsControlOrBidi(decoded) {
-		return "", importedfinding.RefusalInvalidLocation
-	}
-	// Decoding can reveal a scheme or a Windows volume the encoded form hid.
-	if code := refuseBareScheme(decoded); code != "" {
-		return "", code
-	}
-
-	cleaned := strings.ReplaceAll(decoded, "\\", "/")
-	if strings.HasPrefix(cleaned, "/") {
-		return "", importedfinding.RefusalAbsolutePath
-	}
-	cleaned = path.Clean(cleaned)
-	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return "", importedfinding.RefusalPathTraversal
-	}
-	if cleaned == "." || cleaned == "" {
-		return "", importedfinding.RefusalInvalidLocation
-	}
-	return strings.TrimPrefix(cleaned, "./"), ""
-}
-
-// refuseBareScheme rejects anything that is not a plain relative path: a bare scheme such as "mailto:x"
-// or a Windows volume such as "C:\...".
-func refuseBareScheme(p string) importedfinding.RefusalCode {
-	if !strings.Contains(p, ":") || strings.HasPrefix(p, "./") {
-		return ""
-	}
-	if looksLikeWindowsVolume(p) {
-		return importedfinding.RefusalAbsolutePath
-	}
-	return importedfinding.RefusalUnsupportedURI
-}
-
-func looksLikeWindowsVolume(p string) bool {
-	return len(p) >= 2 && p[1] == ':' &&
-		((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z'))
-}
-
-func containsPercentEscape(s string) bool {
-	for i := 0; i+2 < len(s); i++ {
-		if s[i] == '%' && isHexDigit(s[i+1]) && isHexDigit(s[i+2]) {
-			return true
-		}
-	}
-	return false
-}
-
-func isHexDigit(b byte) bool {
-	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')
-}
-
 // isSuppressed reports whether the document marks this result suppressed. The flag is RECORDED, not
 // acted on: an external tool's suppression is information, never authority over this system's gate.
 func isSuppressed(suppressions []sarifSuppression) bool {
@@ -688,8 +724,7 @@ func isSuppressed(suppressions []sarifSuppression) bool {
 }
 
 // firstFingerprint returns a stable fingerprint, chosen deterministically when the tool supplies several.
-// The lowest key wins; it is found by a single scan rather than by sorting, because a result may declare
-// a very large fingerprint map.
+// The lowest key wins; it is found by a single scan rather than by sorting.
 func firstFingerprint(fingerprints map[string]string) string {
 	lowest, found := "", false
 	for key := range fingerprints {
@@ -712,65 +747,14 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// sanitizeText makes untrusted tool text safe to STORE, not merely safe to render.
-//
-// The report path is templated from stored data and the UI, the CSV export and the CLI all read the same
-// row, so normalizing once at ingest is the only place the guarantee holds for every consumer. Control
-// characters (which carry terminal escapes), C1 introducers and bidi overrides (which can make a stored
-// path read as a different path) are dropped; the result is capped, and the caller records a truncation
-// as a coverage issue rather than presenting a shortened value as the tool's own words.
-func sanitizeText(in string, limit int, allowNewlines bool) (string, bool) {
-	trimmed := strings.TrimSpace(in)
-	if trimmed == "" {
-		return "", false
-	}
-	var b strings.Builder
-	b.Grow(min(len(trimmed), limit))
-	truncated := false
-	for _, r := range trimmed {
-		if b.Len()+utf8.RuneLen(r) > limit {
-			truncated = true
-			break
-		}
-		switch {
-		case r == '\t':
-			b.WriteRune(r)
-		case r == '\r':
-			// Dropped: paired with \n it would double the line break, alone it is a cursor control.
-		case r == '\n':
-			if allowNewlines {
-				b.WriteRune('\n')
-			} else {
-				b.WriteRune(' ')
-			}
-		case r < 0x20 || r == 0x7f:
-		case r >= 0x80 && r <= 0x9f:
-		case isBidiOrZeroWidth(r):
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return strings.TrimSpace(b.String()), truncated
-}
-
-func containsControlOrBidi(s string) bool {
-	for _, r := range s {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || isBidiOrZeroWidth(r) {
-			return true
-		}
-	}
-	return false
-}
-
-func isBidiOrZeroWidth(r rune) bool {
-	switch r {
-	case 0x061C, 0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0xFEFF:
-		return true
-	}
-	return (r >= 0x202A && r <= 0x202E) || (r >= 0x2066 && r <= 0x2069)
-}
-
 // Streaming helpers. They keep memory constant regardless of how large an ignored value is.
+
+func checkCancelled(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("parse sarif document: %w", err)
+	}
+	return nil
+}
 
 func expectDelim(dec *json.Decoder, want json.Delim) error {
 	tok, err := dec.Token()
@@ -782,6 +766,24 @@ func expectDelim(dec *json.Decoder, want json.Delim) error {
 		return fmt.Errorf("expected %q", want)
 	}
 	return nil
+}
+
+// openArray consumes an array's opening bracket. It reports opened=false for JSON null, which is a
+// legitimate way to say "no elements" — several tools write `"results": null` for a clean scan, and
+// refusing the whole document for it would turn a clean scan into a parse error.
+func openArray(dec *json.Decoder) (bool, error) {
+	tok, err := dec.Token()
+	if err != nil {
+		return false, err
+	}
+	if tok == nil {
+		return false, nil
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok || delim != '[' {
+		return false, fmt.Errorf("expected an array")
+	}
+	return true, nil
 }
 
 func objectKey(dec *json.Decoder) (string, error) {
@@ -798,6 +800,10 @@ func objectKey(dec *json.Decoder) (string, error) {
 
 // skipValue consumes one JSON value without materialising it, so an unread member (a huge $schema blob,
 // an inlineExternalProperties section) costs nothing.
+//
+// It bounds nesting itself: json.Decoder.Token keeps one stack entry per open bracket and does NOT apply
+// the decoder's depth limit, so a member of nothing but `[[[[…` would otherwise cost memory proportional
+// to the document.
 func skipValue(dec *json.Decoder) error {
 	tok, err := dec.Token()
 	if err != nil {
@@ -812,6 +818,9 @@ func skipValue(dec *json.Decoder) error {
 	}
 	depth := 1
 	for depth > 0 {
+		if depth > maxSkipDepth {
+			return fmt.Errorf("ignored member is nested deeper than %d levels", maxSkipDepth)
+		}
 		next, err := dec.Token()
 		if err != nil {
 			return err
@@ -826,3 +835,6 @@ func skipValue(dec *json.Decoder) error {
 	}
 	return nil
 }
+
+// maxSkipDepth bounds nesting inside a member this ingester does not read.
+const maxSkipDepth = 1000

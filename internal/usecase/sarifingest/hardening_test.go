@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -150,18 +151,30 @@ func TestStoredTextIsSanitizedAndCapped(t *testing.T) {
 		t.Fatalf("expected one finding, got %d", len(stored))
 	}
 	got := stored[0]
-	for _, field := range []string{got.Title, got.Message, got.Provenance.RuleID} {
-		for _, r := range field {
-			if r < 0x20 && r != '\n' && r != '\t' {
-				t.Fatalf("a C0 control byte %U survived into stored text %q", r, field)
-			}
-			if r == 0x7f || (r >= 0x80 && r <= 0x9f) || isBidiOrZeroWidth(r) {
-				t.Fatalf("a control or bidi rune %U survived into stored text %q", r, field)
-			}
+	// Literal expectations, not a predicate: asserting with the same helper the code uses would make a
+	// bug in that helper agree with itself.
+	if got.Title != "safe[31m red title" {
+		t.Fatalf("title = %q, want the ANSI introducer and the bell removed and nothing else", got.Title)
+	}
+	if got.Message != "before  after  nul" {
+		t.Fatalf("message = %q, want the bidi override and the NUL removed and nothing else", got.Message)
+	}
+}
+
+// Zero-width joiners are NOT control characters: stripping them silently rewrites legitimate Persian,
+// Devanagari and emoji text. Only the directional overrides are removed.
+func TestSanitizeKeepsJoinersAndStripsOverrides(t *testing.T) {
+	t.Parallel()
+
+	kept, _ := sanitizeText("\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645 \U0001F468\u200d\U0001F4BB", maxMessageBytes, false)
+	for _, r := range []rune{0x200c, 0x200d} {
+		if !strings.ContainsRune(kept, r) {
+			t.Fatalf("%U is required for correct rendering and must be kept, got %q", r, kept)
 		}
 	}
-	if !strings.Contains(got.Title, "red") || !strings.Contains(got.Message, "after") {
-		t.Fatalf("sanitizing must strip the controls, not the words: %+v", got)
+	stripped, _ := sanitizeText("safe\u202egnp.exe", maxMessageBytes, false)
+	if strings.ContainsRune(stripped, 0x202e) {
+		t.Fatalf("a right-to-left override must be removed: %q", stripped)
 	}
 }
 
@@ -241,24 +254,29 @@ func TestRuleIndexResolvesInDocumentOrder(t *testing.T) {
 	}
 }
 
-// TestLargeRuleTableWithIndexedResultsStaysLinear is the regression for the CPU exhaustion: rebuilding
-// and insertion-sorting the rule ids per result made one request ~O(results x rules^2). With the ids
-// computed once per run this completes in well under a second; before the fix it did not finish.
-func TestLargeRuleTableWithIndexedResultsStaysLinear(t *testing.T) {
+// TestPerResultWorkIsIndependentOfRuleSize is the regression for the CPU exhaustion. The defect was not
+// only the per-result sort: EVERY per-result read of shared rule data — the rule's tag list, its
+// description — multiplies that data by the result budget. One rule with a huge tag list and a hundred
+// thousand results referencing it is a few megabytes of JSON and hours of CPU.
+//
+// The deadline is the assertion. Without it the complexity claim would be enforced only by the package
+// test timeout, so a regression would hang CI instead of failing it.
+func TestPerResultWorkIsIndependentOfRuleSize(t *testing.T) {
 	t.Parallel()
 
-	const rules, results = 2000, 20000
+	const (
+		tags    = 20000
+		results = 20000
+	)
 	var b strings.Builder
-	b.WriteString(`{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"tool","version":"1","rules":[`)
-	for i := 0; i < rules; i++ {
+	b.WriteString(`{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"tool","version":"1","rules":[{"id":"r0","properties":{"tags":[`)
+	for i := 0; i < tags; i++ {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		b.WriteString(`{"id":"r`)
-		b.WriteString(pad(i))
-		b.WriteString(`"}`)
+		b.WriteString(`"noise/` + pad(i) + `"`)
 	}
-	b.WriteString(`]}},"results":[`)
+	b.WriteString(`]},"shortDescription":{"text":"` + strings.Repeat(" ", 1<<20) + `title"}}]}},"results":[`)
 	for i := 0; i < results; i++ {
 		if i > 0 {
 			b.WriteByte(',')
@@ -267,7 +285,20 @@ func TestLargeRuleTableWithIndexedResultsStaysLinear(t *testing.T) {
 	}
 	b.WriteString(`]}]}`)
 
-	parsedDoc, err := parseDocument(context.Background(), []byte(b.String()), DefaultLimits())
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	var parsedDoc parsed
+	var err error
+	go func() {
+		defer close(done)
+		parsedDoc, err = parseDocument(ctx, []byte(b.String()), DefaultLimits())
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("parsing did not finish: per-result work is proportional to the rule's shared data again")
+	}
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -276,13 +307,30 @@ func TestLargeRuleTableWithIndexedResultsStaysLinear(t *testing.T) {
 	}
 }
 
-func pad(n int) string {
-	s := ""
-	for i := 0; i < 5; i++ {
-		s = string(rune('0'+n%10)) + s
-		n /= 10
+// TestRuleTableIsBounded is the memory half: rules are held for the whole run and a rule costs far more
+// in memory than the JSON that declares it, so an unbounded table turns a modest document into gigabytes.
+func TestRuleTableIsBounded(t *testing.T) {
+	t.Parallel()
+
+	var b strings.Builder
+	b.WriteString(`{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"t","version":"1","rules":[`)
+	for i := 0; i < 200; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(`{"id":"r` + pad(i) + `"}`)
 	}
-	return s
+	b.WriteString(`]}},"results":[]}]}`)
+
+	limits := DefaultLimits()
+	limits.MaxRules = 100
+	if _, err := parseDocument(context.Background(), []byte(b.String()), limits); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("exceeding the rule bound must be a typed error, got %v", err)
+	}
+	limits.MaxRules = 200
+	if _, err := parseDocument(context.Background(), []byte(b.String()), limits); err != nil {
+		t.Fatalf("a table at the bound must be accepted: %v", err)
+	}
 }
 
 // TestResultBoundAbortsBeforeDecodingTheRest is the regression for the memory amplification: the result
@@ -442,7 +490,7 @@ func TestFailedBatchPersistsNothingAndRecordsNoDigest(t *testing.T) {
 		ID: "i-1", TenantID: "t1", EngagementID: "eng1", Severity: shared.SeverityHigh,
 		Provenance: importedfinding.Provenance{
 			ToolName: "tool", ToolVersion: "1", RuleID: "r", SourceDigest: "digest",
-			IngestedBy: "human:alice", IngestedAt: "2024-01-01T00:00:00Z",
+			IngestedBy: "human:alice", IngestedAt: time.Unix(1700000000, 0).UTC(),
 		},
 	}
 	bad := good
@@ -472,7 +520,7 @@ func TestDigestHistoryIsTenantScoped(t *testing.T) {
 		ID: "i-1", TenantID: "t1", EngagementID: "eng1", Severity: shared.SeverityHigh,
 		Provenance: importedfinding.Provenance{
 			ToolName: "tool", ToolVersion: "1", RuleID: "r", SourceDigest: "digest",
-			IngestedBy: "human:alice", IngestedAt: "2024-01-01T00:00:00Z",
+			IngestedBy: "human:alice", IngestedAt: time.Unix(1700000000, 0).UTC(),
 		},
 	}
 	if _, _, err := store.Save(context.Background(), "t1", []importedfinding.ImportedFinding{f}); err != nil {
@@ -493,10 +541,19 @@ func TestDigestHistoryIsTenantScoped(t *testing.T) {
 func TestIngestFailsClosedWhenTheAuditLogDoes(t *testing.T) {
 	t.Parallel()
 
-	svc, _, _ := newService(t)
-	svc.audit = failingAudit{}
-	if _, err := ingest(t, svc, docWith(resultA)); err == nil {
+	store := memory.NewImportedFindingStore()
+	svc, err := NewService(store, fakeFindings{}, fakeEngagements{}, failingAudit{}, fixedClock{}, &seqIDs{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	_, err = ingest(t, svc, docWith(resultA))
+	if err == nil {
 		t.Fatal("an ingest that cannot be audited must fail")
+	}
+	// The findings ARE already persisted when the audit write fails, so the error has to say so —
+	// reporting only "audit failed" would leave the caller believing nothing was written.
+	if !strings.Contains(err.Error(), "persisted") {
+		t.Fatalf("the error must state that findings were persisted: %v", err)
 	}
 }
 
@@ -504,4 +561,224 @@ type failingAudit struct{}
 
 func (failingAudit) Record(context.Context, ports.AuditEntry) error {
 	return errors.New("audit log unavailable")
+}
+
+// pad renders a fixed-width numeric suffix so generated rule ids sort and compare predictably.
+func pad(n int) string {
+	out := ""
+	for i := 0; i < 5; i++ {
+		out = string(rune('0'+n%10)) + out
+		n /= 10
+	}
+	return out
+}
+
+// TestRelativePrefixDoesNotDisableTheSchemeGuard is the regression for the `./` escape hatch: the
+// scheme and Windows-volume checks were skipped for any value starting "./", so `./https%3A%2F%2F…`
+// was stored as a "repository-relative path" that is in fact a URL.
+func TestRelativePrefixDoesNotDisableTheSchemeGuard(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		uri  string
+		want importedfinding.RefusalCode
+	}{
+		{"./https%3A%2F%2Fevil.example%2Fpayload", importedfinding.RefusalUnsupportedURI},
+		// The volume is no longer at position 0 once "./" precedes it, so it is refused as an
+		// unsupported scheme rather than as an absolute path. Either way it is refused, and the code
+		// names what was actually seen.
+		{"./C%3A%5CWindows%5Csystem32", importedfinding.RefusalUnsupportedURI},
+		{"./mailto:x", importedfinding.RefusalUnsupportedURI},
+	}
+	for _, test := range tests {
+		got, code := normalizeArtifactURI(test.uri)
+		if code != test.want {
+			t.Fatalf("normalizeArtifactURI(%q) = (%q, %q), want refusal %q", test.uri, got, code, test.want)
+		}
+	}
+	// An ordinary "./" path is still accepted — the guard costs nothing legitimate.
+	if got, code := normalizeArtifactURI("./src/app.go"); code != "" || got != "src/app.go" {
+		t.Fatalf("normalizeArtifactURI(\"./src/app.go\") = (%q, %q), want src/app.go", got, code)
+	}
+}
+
+// TestTrailingContentIsRefused: bytes after the top-level object mean these are not one SARIF document,
+// and accepting them hands an attacker a one-byte way to change the digest and force a full re-ingest of
+// a report that was already stored.
+func TestTrailingContentIsRefused(t *testing.T) {
+	t.Parallel()
+
+	doc := docWith(resultA) + " trailing"
+	if _, err := parseDocument(context.Background(), []byte(doc), DefaultLimits()); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("trailing content must be refused, got %v", err)
+	}
+}
+
+// A tool that writes `null` for an empty array means "none", not "malformed". Refusing the document
+// would turn a clean scan into a parse error.
+func TestNullArraysMeanEmptyNotMalformed(t *testing.T) {
+	t.Parallel()
+
+	for _, doc := range []string{
+		`{"version":"2.1.0","runs":null}`,
+		`{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"t","version":"1","rules":null}},"results":null}]}`,
+	} {
+		result, err := parseDocument(context.Background(), []byte(doc), DefaultLimits())
+		if err != nil {
+			t.Fatalf("a null array must parse as empty, got %v", err)
+		}
+		if len(result.results) != 0 || len(result.refusals) != 0 {
+			t.Fatalf("expected nothing ingested, got %+v", result)
+		}
+		// An empty ingest is disclosed rather than presented as a clean scan.
+		if len(result.coverage) == 0 {
+			t.Fatal("an empty document must be disclosed as coverage, not reported as a clean result")
+		}
+	}
+}
+
+// TestOnlyTheTwoOneLineIsAccepted: a prefix test on "2.1" also matches "2.15", a different specification.
+func TestOnlyTheTwoOneLineIsAccepted(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []string{"2.1", "2.1.0"} {
+		if err := checkVersion(version); err != nil {
+			t.Fatalf("version %q must be accepted: %v", version, err)
+		}
+	}
+	for _, version := range []string{"2.15.0", "2.10", "2.2.0", "1.0.0", "", "2"} {
+		if err := checkVersion(version); err == nil {
+			t.Fatalf("version %q must be refused", version)
+		}
+	}
+}
+
+// TestRuleIndexDoesNotSilentlyBorrowAnExtensionRule: attributing a finding to a rule the tool never
+// associated with it is worse than a disclosed refusal, because provenance is the point of the type.
+func TestRuleIndexDoesNotSilentlyBorrowAnExtensionRule(t *testing.T) {
+	t.Parallel()
+
+	// The driver HAS a rule table, so an out-of-range index is unresolved — not silently taken from the
+	// extension that follows it.
+	doc := `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"t","version":"1","rules":[{"id":"drv.one"}]},
+		"extensions":[{"name":"ext","version":"1","rules":[{"id":"ext.one"}]}]},
+		"results":[{"ruleIndex":1,"level":"error","message":{"text":"x"}}]}]}`
+	svc, _, _ := newService(t)
+	result, err := ingest(t, svc, doc)
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if result.Accepted != 0 || len(result.Refused) != 1 {
+		t.Fatalf("an out-of-range index must be refused, not borrowed: %+v", result)
+	}
+
+	// When the driver declares NO rule table at all, the extension's is the only one there is; that
+	// resolution is documented and deterministic.
+	doc = `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"t","version":"1"},
+		"extensions":[{"name":"ext","version":"1","rules":[{"id":"ext.one"}]}]},
+		"results":[{"ruleIndex":0,"level":"error","message":{"text":"x"}}]}]}`
+	svc2, store, _ := newService(t)
+	if _, err := ingest(t, svc2, doc); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	stored, _ := store.ListByEngagement(context.Background(), "t1", "eng1")
+	if len(stored) != 1 || stored[0].Provenance.RuleID != "ext.one" {
+		t.Fatalf("with no driver rules the extension table resolves, got %+v", stored)
+	}
+}
+
+// TestRefusalListIsCappedAndSaysSo: a truncated refusal list that did not say it was truncated would be
+// read as "these are all the refusals" — the same silent-gap failure the list exists to prevent.
+func TestRefusalListIsCappedAndSaysSo(t *testing.T) {
+	t.Parallel()
+
+	var b strings.Builder
+	b.WriteString(`{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"t","version":"1"}},"results":[`)
+	for i := 0; i < maxRefusals+50; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		// No ruleId and no ruleIndex: unattributable, so every one is refused.
+		b.WriteString(`{"level":"error","message":{"text":"x"}}`)
+	}
+	b.WriteString(`]}]}`)
+
+	result, err := parseDocument(context.Background(), []byte(b.String()), DefaultLimits())
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(result.refusals) != maxRefusals {
+		t.Fatalf("refusals = %d, want the cap %d", len(result.refusals), maxRefusals)
+	}
+	disclosed := false
+	for _, issue := range result.coverage {
+		if strings.Contains(issue.Detail, "refusal list is capped") {
+			disclosed = true
+		}
+	}
+	if !disclosed {
+		t.Fatal("a capped refusal list must disclose that MORE was refused than is reported")
+	}
+}
+
+// TestIngestRefusesAnEngagementTheCallerCannotSee locks that the use case resolves the engagement itself
+// rather than trusting its caller: a worker or CLI must not be able to write governed findings into an
+// arbitrary engagement id, and an engagement outside the tenant is not found, never forbidden.
+func TestIngestRefusesAnEngagementTheCallerCannotSee(t *testing.T) {
+	t.Parallel()
+
+	store := memory.NewImportedFindingStore()
+	audit := &fakeAudit{}
+	svc, err := NewService(store, fakeFindings{}, missingEngagements{}, audit, fixedClock{}, &seqIDs{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	if _, err := ingest(t, svc, docWith(resultA)); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("an engagement the caller cannot see must be not-found, got %v", err)
+	}
+	stored, _ := store.ListByEngagement(context.Background(), "t1", "eng1")
+	if len(stored) != 0 {
+		t.Fatalf("nothing may be persisted for an unauthorized engagement, got %d", len(stored))
+	}
+	if audit.entries != 0 {
+		t.Fatalf("a refused ingest is not an audited state change, got %d entries", audit.entries)
+	}
+}
+
+// TestRowsAreStampedWithTheEngagementsTenant is the other half of that contract: the tenant that owns
+// the rows comes from the engagement that authorized the write, not from the principal.
+func TestRowsAreStampedWithTheEngagementsTenant(t *testing.T) {
+	t.Parallel()
+
+	store := memory.NewImportedFindingStore()
+	svc, err := NewService(store, fakeFindings{}, fakeEngagements{tenant: "tenantB"}, &fakeAudit{}, fixedClock{}, &seqIDs{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	if _, err := ingest(t, svc, docWith(resultA)); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if stored, _ := store.ListByEngagement(context.Background(), "tenantB", "eng1"); len(stored) != 1 {
+		t.Fatalf("the rows must land in the engagement's tenant, got %d", len(stored))
+	}
+	if stored, _ := store.ListByEngagement(context.Background(), "t1", "eng1"); len(stored) != 0 {
+		t.Fatalf("the rows must NOT land in the principal's tenant, got %d", len(stored))
+	}
+}
+
+// A store must refuse a finding whose stamped tenant differs from the partition it is being written to.
+func TestStoreRefusesATenantMismatch(t *testing.T) {
+	t.Parallel()
+
+	store := memory.NewImportedFindingStore()
+	f := importedfinding.ImportedFinding{
+		ID: "i-1", TenantID: "t1", EngagementID: "eng1", Severity: shared.SeverityHigh,
+		Provenance: importedfinding.Provenance{
+			ToolName: "tool", ToolVersion: "1", RuleID: "r", SourceDigest: "digest",
+			IngestedBy: "human:alice", IngestedAt: time.Unix(1700000000, 0).UTC(),
+		},
+	}
+	if _, _, err := store.Save(context.Background(), "t2", []importedfinding.ImportedFinding{f}); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("a finding stamped t1 must not be saved into t2, got %v", err)
+	}
 }

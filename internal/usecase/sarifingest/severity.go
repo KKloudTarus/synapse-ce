@@ -19,24 +19,28 @@ import (
 //  1. a tool-specific severity property, because SARIF's four levels are too coarse for most scanners;
 //  2. the CVSS-style `security-severity` score GitHub's ecosystem popularised;
 //  3. the SARIF `level`, which is the only field the specification guarantees.
-func MapSeverity(toolName string, result sarifResult, rule sarifRule) shared.Severity {
+//
+// The rule's contribution arrives pre-derived (ruleInfo). That is a performance INVARIANT, not a
+// refactor: reading the rule's own tag list here would re-scan shared data once per result, and a
+// document may reference one rule from a hundred thousand results.
+func mapSeverity(toolName string, result sarifResult, rule ruleInfo) shared.Severity {
 	if severity := mapToolSpecific(toolName, result, rule); severity != shared.SeverityUnknown {
 		return severity
 	}
-	if severity := mapSecuritySeverity(firstNonEmpty(result.Properties.Severity, rule.Properties.Severity)); severity != shared.SeverityUnknown {
+	if severity := mapSecuritySeverity(firstNonEmpty(result.Properties.Severity, rule.securitySeverity)); severity != shared.SeverityUnknown {
 		return severity
 	}
-	level := firstNonEmpty(result.Level, rule.DefaultConfig.Level)
-	return mapSARIFLevel(level)
+	return mapSARIFLevel(firstNonEmpty(result.Level, rule.level))
 }
 
 // mapToolSpecific applies the per-tool mappings that SARIF's levels cannot express. Each entry is a
 // documented decision about one tool's own vocabulary.
-func mapToolSpecific(toolName string, result sarifResult, rule sarifRule) shared.Severity {
-	raw := firstNonEmpty(result.Properties.ProblemSeverity, rule.Properties.ProblemSeverity)
+func mapToolSpecific(_ string, result sarifResult, rule ruleInfo) shared.Severity {
+	raw := firstNonEmpty(result.Properties.ProblemSeverity, rule.problemSeverity)
 	if raw == "" {
-		// Several tools express severity as a tag rather than a property.
-		raw = severityFromTags(append(append([]string(nil), result.Properties.Tags...), rule.Properties.Tags...))
+		// Several tools express severity as a tag rather than a property. The rule's tags were scanned
+		// once when the rule table was read; only the result's own tags are scanned here.
+		raw = firstNonEmpty(severityFromTags(result.Properties.Tags), rule.tagSeverity)
 	}
 	if raw == "" {
 		return shared.SeverityUnknown
@@ -58,13 +62,13 @@ func mapToolSpecific(toolName string, result sarifResult, rule sarifRule) shared
 	}
 }
 
-// severityTagPrefixes are the tag namespaces tools use to carry severity.
-var severityTagPrefixes = []string{"severity/", "security-severity/", "priority/"}
-
+// severityFromTags extracts a severity carried as a tag namespace. The prefixes are a fixed array rather
+// than a package-level slice so no other code can mutate them at runtime.
 func severityFromTags(tags []string) string {
+	prefixes := [...]string{"severity/", "security-severity/", "priority/"}
 	for _, tag := range tags {
 		lower := strings.ToLower(strings.TrimSpace(tag))
-		for _, prefix := range severityTagPrefixes {
+		for _, prefix := range prefixes {
 			if strings.HasPrefix(lower, prefix) {
 				return strings.TrimPrefix(lower, prefix)
 			}

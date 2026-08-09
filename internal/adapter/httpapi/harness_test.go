@@ -10,6 +10,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetcoverage"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	projectdom "github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
@@ -78,6 +79,13 @@ type harnessSARIF struct{}
 
 func (harnessSARIF) Ingest(context.Context, sarifingest.IngestRequest) (sarifingest.IngestResult, error) {
 	return sarifingest.IngestResult{}, nil
+}
+
+// harnessImportedFindings is the no-op read side; every assertion on the read route is a DENY too.
+type harnessImportedFindings struct{}
+
+func (harnessImportedFindings) ListByEngagement(context.Context, shared.ID, shared.ID) ([]importedfinding.ImportedFinding, error) {
+	return nil, nil
 }
 
 type fakeRuntimeVerifier struct{}
@@ -190,6 +198,7 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetRules(&fakeRules{})                 // register rule catalog routes so the harness guards their gates
 	rt.SetFleetCoverage(harnessCoverage{})    // register #413 fleet-coverage routes so the harness guards their view/tenant gates
 	rt.SetSARIFIngest(harnessSARIF{})         // register the #415 import route so the harness guards its operate/tenant gates
+	rt.SetImportedFindings(harnessImportedFindings{})
 	rt.EnableAgent(nil, nil, nil, nil, nil, 1, 8)
 	mux := rt.routes()
 
@@ -299,6 +308,11 @@ func TestHostileHarness(t *testing.T) {
 		{"machine may not import sarif (operate/SoD)", "agent", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/sarif", http.StatusForbidden},
 		{"readonly may not import sarif (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/sarif", http.StatusForbidden},
 		{"cross-tenant sarif import → 404", "consultant", "tenantB", true, http.MethodPost, "/api/v1/engagements/engA/sarif", http.StatusNotFound},
+		// The read side is a VIEW action on the same engagement: readonly may see imported findings,
+		// but only inside its own tenant, and an unauthenticated caller may not see them at all.
+		{"readonly may read imported findings (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/imported-findings", http.StatusOK},
+		{"cross-tenant imported-finding read → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/imported-findings", http.StatusNotFound},
+		{"principal-less imported-finding read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/imported-findings", http.StatusForbidden},
 		// Fleet coverage (#413, PermView): machine roles denied; readonly may read; cross-tenant agent
 		// detail is 404 (never an existence-revealing 403). The cross-tenant LIST emptiness (a 200 that
 		// leaks nothing) is asserted on the body just below the table.

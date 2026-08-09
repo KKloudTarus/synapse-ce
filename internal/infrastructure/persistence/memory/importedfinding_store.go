@@ -2,9 +2,8 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"sort"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
@@ -38,20 +37,6 @@ func NewImportedFindingStore() *ImportedFindingStore {
 	}
 }
 
-// idempotencyKey mirrors the persistent unique constraint: one finding per document, rule and location.
-// The NUL separator cannot be forged from within a field, because the join always emits exactly five
-// separators and an embedded NUL changes that count.
-func idempotencyKey(f importedfinding.ImportedFinding) string {
-	return strings.Join([]string{
-		f.EngagementID.String(),
-		f.Provenance.SourceDigest,
-		f.Provenance.RuleID,
-		f.Location.Path,
-		strings.TrimSpace(f.Location.LogicalName),
-		strconv.Itoa(f.Location.StartLine),
-	}, "\x00")
-}
-
 func digestKey(engagementID shared.ID, digest string) string {
 	return engagementID.String() + "\x00" + digest
 }
@@ -76,7 +61,13 @@ func (s *ImportedFindingStore) Save(_ context.Context, tenantID shared.ID, findi
 		if err := f.Validate(); err != nil {
 			return 0, 0, err
 		}
-		key := idempotencyKey(f)
+		// The partition and the row must agree. A finding stamped with one tenant but saved into
+		// another's partition would be returned by a read it does not belong to.
+		if f.TenantID != tenantID {
+			return 0, 0, fmt.Errorf("%w: imported finding %s is stamped with tenant %q but was saved into %q",
+				shared.ErrValidation, f.ID, f.TenantID, tenantID)
+		}
+		key := importedfinding.IdempotencyKey(f)
 		if seen[key] {
 			existing++
 			continue

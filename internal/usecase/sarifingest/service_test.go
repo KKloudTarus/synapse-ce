@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -44,11 +45,30 @@ func (f fakeFindings) ListByEngagement(context.Context, shared.ID) ([]finding.Fi
 	return f.list, nil
 }
 
+// fakeEngagements resolves any engagement id inside the requested tenant. Tests that care about the
+// tenant gate use missingEngagements instead.
+type fakeEngagements struct{ tenant shared.ID }
+
+func (f fakeEngagements) GetByIDInTenant(_ context.Context, tenantID, id shared.ID) (*engagement.Engagement, error) {
+	stamped := f.tenant
+	if stamped == "" {
+		stamped = tenantID
+	}
+	return &engagement.Engagement{ID: id, TenantID: stamped}, nil
+}
+
+// missingEngagements is the gate closing: an engagement the caller cannot see is not found.
+type missingEngagements struct{}
+
+func (missingEngagements) GetByIDInTenant(context.Context, shared.ID, shared.ID) (*engagement.Engagement, error) {
+	return nil, shared.ErrNotFound
+}
+
 func newService(t *testing.T, first ...finding.Finding) (*Service, *memory.ImportedFindingStore, *fakeAudit) {
 	t.Helper()
 	store := memory.NewImportedFindingStore()
 	audit := &fakeAudit{}
-	svc, err := NewService(store, fakeFindings{list: first}, audit, fixedClock{}, &seqIDs{})
+	svc, err := NewService(store, fakeFindings{list: first}, fakeEngagements{}, audit, fixedClock{}, &seqIDs{})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
@@ -184,7 +204,7 @@ func TestCyclicRelatedLocationsAreRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
-	if len(result.Refused) != 1 || result.Refused[0].Code != importedfinding.RefusalCyclicRelation {
+	if len(result.Refused) != 1 || result.Refused[0].Code != importedfinding.RefusalTooManyElements {
 		t.Fatalf("unbounded related locations must be refused, got %+v", result.Refused)
 	}
 }
@@ -220,11 +240,11 @@ func TestBoundsPersistNothing(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			store := memory.NewImportedFindingStore()
-			svc, err := NewService(store, fakeFindings{}, &fakeAudit{}, fixedClock{}, &seqIDs{})
+			svc, err := NewService(store, fakeFindings{}, fakeEngagements{}, &fakeAudit{}, fixedClock{}, &seqIDs{})
 			if err != nil {
 				t.Fatalf("new: %v", err)
 			}
-			svc = svc.WithLimits(test.limits)
+			svc = svc.withLimits(test.limits)
 			if _, err := ingest(t, svc, test.doc); !errors.Is(err, shared.ErrValidation) {
 				t.Fatalf("exceeding the %s bound must be a typed error, got %v", test.name, err)
 			}

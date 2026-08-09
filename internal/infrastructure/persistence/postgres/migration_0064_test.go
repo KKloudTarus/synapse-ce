@@ -60,7 +60,7 @@ func TestImportedFindingsDurabilityAndIsolation(t *testing.T) {
 			Location: importedfinding.Location{Path: "src/app.go", StartLine: 4},
 			Provenance: importedfinding.Provenance{
 				ToolName: "semgrep", ToolVersion: "1.2.3", RuleID: rule, SourceDigest: "digest-a",
-				IngestedBy: "human:alice", IngestedAt: "2024-01-01T00:00:00Z",
+				IngestedBy: "human:alice", IngestedAt: now,
 			},
 			Audit: shared.Audit{CreatedAt: now, UpdatedAt: now},
 		}
