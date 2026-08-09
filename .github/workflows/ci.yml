@@ -30,6 +30,24 @@ jobs:
   backend:
     name: Backend (Go)
     runs-on: ubuntu-latest
+    env:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${{ github.run_id }}
+      POSTGRES_DB: synapse
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ${{ github.run_id }}
+          POSTGRES_DB: synapse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d synapse"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
@@ -39,6 +57,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Configure Postgres integration database
+        run: echo "SYNAPSE_TEST_DB_DSN=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?sslmode=disable" >> "$GITHUB_ENV"
+
+      - name: Require Postgres integration database
+        run: |
+          if [ -z "${SYNAPSE_TEST_DB_DSN:-}" ]; then
+            echo "SYNAPSE_TEST_DB_DSN is required in CI; refusing to silently skip Postgres integration tests"
+            exit 1
+          fi
+
       - name: Build
         run: go build ./...
 
@@ -46,7 +74,10 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ./...
+        run: go test -count=1 ./...
+
+      - name: Test Postgres suite again on the same database
+        run: go test -count=1 ./internal/infrastructure/persistence/postgres
 
       - name: Build (CGO disabled – distroless parity)
         run: CGO_ENABLED=0 go build ./cmd/...
