@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -12,13 +13,19 @@ import (
 )
 
 // ImportedFindingStore is the in-memory third-party finding store.
+//
+// It is EPHEMERAL: everything it holds is lost on restart. It backs tests and the CLI's validate mode;
+// the server uses the Postgres store, which is what makes the audit entry for an ingest true.
 type ImportedFindingStore struct {
 	mu sync.RWMutex
 	// byTenant holds each tenant's findings keyed by the idempotency key, so re-ingesting an identical
 	// document cannot duplicate a finding.
 	byTenant map[shared.ID]map[string]importedfinding.ImportedFinding
-	// digests records which documents an engagement has already ingested.
-	digests map[string]bool
+	// digests records which documents a (tenant, engagement) pair has already ingested. The tenant is
+	// part of the key even though the HTTP path already proves the engagement belongs to the caller's
+	// tenant: a caller that reaches the store another way (a worker, a bulk job) must not be able to
+	// observe or collide with another tenant's ingest history.
+	digests map[shared.ID]map[string]bool
 }
 
 var _ ports.ImportedFindingStore = (*ImportedFindingStore)(nil)
@@ -27,60 +34,77 @@ var _ ports.ImportedFindingStore = (*ImportedFindingStore)(nil)
 func NewImportedFindingStore() *ImportedFindingStore {
 	return &ImportedFindingStore{
 		byTenant: map[shared.ID]map[string]importedfinding.ImportedFinding{},
-		digests:  map[string]bool{},
+		digests:  map[shared.ID]map[string]bool{},
 	}
 }
 
 // idempotencyKey mirrors the persistent unique constraint: one finding per document, rule and location.
+// The NUL separator cannot be forged from within a field, because the join always emits exactly five
+// separators and an embedded NUL changes that count.
 func idempotencyKey(f importedfinding.ImportedFinding) string {
 	return strings.Join([]string{
 		f.EngagementID.String(),
 		f.Provenance.SourceDigest,
 		f.Provenance.RuleID,
 		f.Location.Path,
-		shared.ID(strings.TrimSpace(f.Location.LogicalName)).String(),
-		itoa(f.Location.StartLine),
+		strings.TrimSpace(f.Location.LogicalName),
+		strconv.Itoa(f.Location.StartLine),
 	}, "\x00")
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
 }
 
 func digestKey(engagementID shared.ID, digest string) string {
 	return engagementID.String() + "\x00" + digest
 }
 
-// Save persists a batch, skipping any finding whose idempotency key already exists.
+// Save persists a batch ATOMICALLY: the whole delta is built and validated first, so a finding that
+// fails validation aborts the batch without leaving earlier findings — and without recording the
+// document digest, which would make a retry look like a clean deduplicated ingest while the un-persisted
+// tail was permanently lost.
 func (s *ImportedFindingStore) Save(_ context.Context, tenantID shared.ID, findings []importedfinding.ImportedFinding) (int, int, error) {
+	type entry struct {
+		key string
+		f   importedfinding.ImportedFinding
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.byTenant[tenantID] == nil {
-		s.byTenant[tenantID] = map[string]importedfinding.ImportedFinding{}
-	}
-	stored, existing := 0, 0
+
+	existingForTenant := s.byTenant[tenantID]
+	pending := make([]entry, 0, len(findings))
+	seen := map[string]bool{}
+	existing := 0
 	for _, f := range findings {
 		if err := f.Validate(); err != nil {
-			return stored, existing, err
+			return 0, 0, err
 		}
 		key := idempotencyKey(f)
-		if _, taken := s.byTenant[tenantID][key]; taken {
+		if seen[key] {
 			existing++
 			continue
 		}
-		s.byTenant[tenantID][key] = f
-		s.digests[digestKey(f.EngagementID, f.Provenance.SourceDigest)] = true
-		stored++
+		if _, taken := existingForTenant[key]; taken {
+			existing++
+			continue
+		}
+		seen[key] = true
+		pending = append(pending, entry{key: key, f: f})
 	}
-	return stored, existing, nil
+
+	if existingForTenant == nil && len(pending) > 0 {
+		existingForTenant = map[string]importedfinding.ImportedFinding{}
+		s.byTenant[tenantID] = existingForTenant
+	}
+	for _, e := range pending {
+		existingForTenant[e.key] = e.f
+		s.recordDigestLocked(tenantID, e.f.EngagementID, e.f.Provenance.SourceDigest)
+	}
+	return len(pending), existing, nil
+}
+
+func (s *ImportedFindingStore) recordDigestLocked(tenantID, engagementID shared.ID, digest string) {
+	if s.digests[tenantID] == nil {
+		s.digests[tenantID] = map[string]bool{}
+	}
+	s.digests[tenantID][digestKey(engagementID, digest)] = true
 }
 
 // ListByEngagement returns one engagement's imported findings, deterministically ordered.
@@ -108,9 +132,9 @@ func (s *ImportedFindingStore) ListByEngagement(_ context.Context, tenantID, eng
 	return out, nil
 }
 
-// ExistsDigest reports whether this engagement already ingested a document with this digest.
-func (s *ImportedFindingStore) ExistsDigest(_ context.Context, _ shared.ID, engagementID shared.ID, digest string) (bool, error) {
+// ExistsDigest reports whether this tenant's engagement already ingested a document with this digest.
+func (s *ImportedFindingStore) ExistsDigest(_ context.Context, tenantID, engagementID shared.ID, digest string) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.digests[digestKey(engagementID, digest)], nil
+	return s.digests[tenantID][digestKey(engagementID, digest)], nil
 }

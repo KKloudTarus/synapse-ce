@@ -30,6 +30,9 @@ type sarifIngestResponse struct {
 	Matched       int                        `json:"matched_first_party"`
 	Disagreements []sarifDisagreementPayload `json:"disagreements"`
 	Refused       []sarifRefusalPayload      `json:"refused"`
+	// Coverage states what the ingest could not fully represent (an unmappable severity, a truncated
+	// field). Without it a lossy ingest is indistinguishable from a complete one.
+	Coverage []string `json:"coverage"`
 }
 
 type sarifRefusalPayload struct {
@@ -55,7 +58,9 @@ func (rt *Router) importSARIF(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := rt.sarif.Ingest(r.Context(), sarifingest.IngestRequest{
-		TenantID:     shared.ID(TenantFrom(r.Context())),
+		// TenantFrom is empty in single-tenant mode (and for the bootstrap admin). Normalizing here is
+		// what keeps the route usable in the default deployment instead of rejecting every ingest.
+		TenantID:     shared.TenantOrDefault(shared.ID(TenantFrom(r.Context()))),
 		EngagementID: shared.ID(r.PathValue("id")),
 		Document:     document,
 		Actor:        shared.ID(PrincipalFrom(r.Context())),
@@ -71,6 +76,10 @@ func (rt *Router) importSARIF(w http.ResponseWriter, r *http.Request) {
 		Matched:       result.Matched,
 		Disagreements: make([]sarifDisagreementPayload, 0, len(result.Disagreements)),
 		Refused:       make([]sarifRefusalPayload, 0, len(result.Refused)),
+		Coverage:      make([]string, 0, len(result.Coverage)),
+	}
+	for _, issue := range result.Coverage {
+		payload.Coverage = append(payload.Coverage, issue.Detail)
 	}
 	for _, d := range result.Disagreements {
 		payload.Disagreements = append(payload.Disagreements, sarifDisagreementPayload{

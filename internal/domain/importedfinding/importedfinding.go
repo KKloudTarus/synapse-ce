@@ -13,6 +13,7 @@ package importedfinding
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -152,16 +153,20 @@ const (
 	RefusalNoProvenance    RefusalCode = "no-provenance"
 	RefusalInvalidLocation RefusalCode = "invalid-location"
 	RefusalUnsupportedURI  RefusalCode = "unsupported-uri-scheme"
-	RefusalPathTraversal   RefusalCode = "path-traversal"
-	RefusalAbsolutePath    RefusalCode = "absolute-path"
-	RefusalMalformedResult RefusalCode = "malformed-result"
-	RefusalCyclicRelation  RefusalCode = "cyclic-related-locations"
+	// RefusalUnsupportedURIBase is a location expressed relative to a base directory that is not the
+	// root of the scanned tree. Such a path is NOT repository-relative, so storing it as one would
+	// relabel a file outside the tree as a file inside it.
+	RefusalUnsupportedURIBase RefusalCode = "unsupported-uri-base"
+	RefusalPathTraversal      RefusalCode = "path-traversal"
+	RefusalAbsolutePath       RefusalCode = "absolute-path"
+	RefusalMalformedResult    RefusalCode = "malformed-result"
+	RefusalCyclicRelation     RefusalCode = "cyclic-related-locations"
 )
 
 // Valid reports whether c is a known refusal code.
 func (c RefusalCode) Valid() bool {
 	switch c {
-	case RefusalNoProvenance, RefusalInvalidLocation, RefusalUnsupportedURI,
+	case RefusalNoProvenance, RefusalInvalidLocation, RefusalUnsupportedURI, RefusalUnsupportedURIBase,
 		RefusalPathTraversal, RefusalAbsolutePath, RefusalMalformedResult, RefusalCyclicRelation:
 		return true
 	}
@@ -175,10 +180,6 @@ type CoverageIssue struct {
 
 func sortedStrings(in []string) []string {
 	out := append([]string(nil), in...)
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j] < out[j-1]; j-- {
-			out[j], out[j-1] = out[j-1], out[j]
-		}
-	}
+	slices.Sort(out)
 	return out
 }

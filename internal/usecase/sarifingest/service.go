@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
@@ -89,7 +90,7 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, 
 		return IngestResult{}, fmt.Errorf("%w: sarif ingest needs an ingesting actor", shared.ErrValidation)
 	}
 
-	parsedDoc, err := parseDocument(req.Document, s.limits)
+	parsedDoc, err := parseDocument(ctx, req.Document, s.limits)
 	if err != nil {
 		return IngestResult{}, err
 	}
@@ -103,6 +104,21 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, 
 	}
 	if alreadyIngested {
 		result.Deduped = len(parsedDoc.results)
+		// A short-circuited ingest is still a state-changing request whose response tells the caller
+		// whether this exact document was seen before, so it is audited like any other.
+		if auditErr := s.audit.Record(ctx, ports.AuditEntry{
+			Actor:  req.Actor.String(),
+			Action: "finding.imported.deduplicated",
+			Target: req.EngagementID.String(),
+			Metadata: map[string]string{
+				"source_digest": parsedDoc.digest,
+				"deduplicated":  strconv.Itoa(result.Deduped),
+			},
+			At: s.clock.Now().UTC(),
+		}); auditErr != nil {
+			return IngestResult{}, fmt.Errorf("audit sarif ingest: %w", auditErr)
+		}
+		sortRefusals(result.Refused)
 		return result, nil
 	}
 
@@ -175,9 +191,9 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (IngestResult, 
 		Target: req.EngagementID.String(),
 		Metadata: map[string]string{
 			"source_digest": parsedDoc.digest,
-			"accepted":      fmt.Sprint(result.Accepted),
-			"deduplicated":  fmt.Sprint(result.Deduped),
-			"refused":       fmt.Sprint(len(result.Refused)),
+			"accepted":      strconv.Itoa(result.Accepted),
+			"deduplicated":  strconv.Itoa(result.Deduped),
+			"refused":       strconv.Itoa(len(result.Refused)),
 		},
 		At: now,
 	}); auditErr != nil {
@@ -209,14 +225,18 @@ func (s *Service) firstPartyIndex(ctx context.Context, engagementID shared.ID) (
 	return out, nil
 }
 
-// dedupKey is the documented deduplication key: the normalized file path plus the start line. It is
-// deliberately coarse — matching should surface agreement between tools, not demand identical wording.
+// dedupKey is the documented deduplication key: the file path plus the start line. It is deliberately
+// coarse — matching should surface agreement between tools, not demand identical wording.
+//
+// The path is compared case-SENSITIVELY. Folding the case would conflate src/App.go with src/app.go on
+// the case-sensitive filesystems this system scans, and a false match links an external result to the
+// wrong first-party finding — which is worse than reporting no agreement at all.
 func dedupKey(path string, line int) string {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
 		return ""
 	}
-	return strings.ToLower(trimmed) + ":" + fmt.Sprint(line)
+	return trimmed + ":" + strconv.Itoa(line)
 }
 
 func sortRefusals(in []importedfinding.RefusalReason) {

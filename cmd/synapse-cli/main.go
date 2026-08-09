@@ -94,8 +94,11 @@ func main() {
 		}
 	case "scan":
 		runScan()
-	case "import-sarif":
-		if err := importSARIF(os.Args[2:]); err != nil {
+	// validate-sarif is named for what it does: it reports what the server would accept or refuse and
+	// writes nothing. `import-sarif` is kept as an alias so an existing invocation still works, but it
+	// prints the same "persisted: false" contract rather than implying an ingest happened.
+	case "validate-sarif", "import-sarif":
+		if err := validateSARIF(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 			os.Exit(1)
 		}

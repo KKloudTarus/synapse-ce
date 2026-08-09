@@ -195,6 +195,7 @@ func main() {
 	var scanRepo ports.ScanRepository
 	var scanResultStore ports.ScanResultStore
 	var importedSBOMStore ports.ImportedSBOMStore
+	var importedFindingStore ports.ImportedFindingStore // third-party (SARIF) findings under governance
 	var scanJobStore ports.ScanJobStore
 	var scanRunStore ports.ScanRunStore
 	var projectAnalysisStore ports.ProjectAnalysisStore
@@ -295,6 +296,7 @@ func main() {
 		scanRepo = postgres.NewScanRepository(pool)
 		scanResultStore = postgres.NewScanResultStore(pool)
 		importedSBOMStore = postgres.NewImportedSBOMStore(pool)
+		importedFindingStore = postgres.NewImportedFindingRepository(pool)
 		scanJobStore = postgres.NewScanJobStore(pool)
 		scanRunStore = postgres.NewScanRunStore(pool)
 		projectAnalysisStore = postgres.NewProjectAnalysisStore(pool)
@@ -351,6 +353,7 @@ func main() {
 		scanRepo = memory.NewScanRepository()
 		scanResultStore = memory.NewScanResultStore()
 		importedSBOMStore = memory.NewImportedSBOMStore()
+		importedFindingStore = memory.NewImportedFindingStore()
 		scanJobStore = memory.NewScanJobStore()
 		scanRunStore = memory.NewScanRunStore()
 		projectAnalysisStore = memory.NewProjectAnalysisStore()
@@ -1087,13 +1090,20 @@ func main() {
 	// governance path as first-party ones, but stay structurally distinguishable and carry NO promotion
 	// authority: an external tool's confidence is not a distinct verifier's sealed verdict.
 	{
-		sarifSvc, serr := sarifingest.NewService(memory.NewImportedFindingStore(), findingRepo, auditLog, clock, ids)
+		sarifSvc, serr := sarifingest.NewService(importedFindingStore, findingRepo, auditLog, clock, ids)
 		if serr != nil {
 			log.Error("sarif ingest init failed", "err", serr)
 			os.Exit(1)
 		}
 		router.SetSARIFIngest(sarifSvc)
-		log.Info("third-party SARIF ingest ENABLED (provenance mandatory; imported findings cannot self-promote)")
+		// The ingest writes an append-only audit entry asserting that N external results entered an
+		// engagement. Without Postgres those rows live only in this process, so the banner says so
+		// rather than letting the audit trail imply a durability the deployment does not have.
+		if cfg.DBDSN != "" {
+			log.Info("third-party SARIF ingest ENABLED (durable; provenance mandatory; imported findings cannot self-promote)")
+		} else {
+			log.Warn("third-party SARIF ingest ENABLED but NOT DURABLE - imported findings and their ingest history live in memory and are lost on restart; configure SYNAPSE_DB_DSN for a durable store")
+		}
 	}
 
 	if cfg.FleetEnabled {

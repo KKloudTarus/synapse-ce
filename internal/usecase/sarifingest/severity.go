@@ -1,6 +1,7 @@
 package sarifingest
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -79,7 +80,10 @@ func mapSecuritySeverity(raw string) shared.Severity {
 		return shared.SeverityUnknown
 	}
 	score, err := strconv.ParseFloat(trimmed, 64)
-	if err != nil || score < 0 || score > 10 {
+	// NaN must be excluded explicitly: ParseFloat accepts "NaN", and BOTH `score < 0` and `score > 10`
+	// are false for it, so a range test alone would let an unassessable value fall through the bands to
+	// a concrete severity — exactly the invented risk level this file forbids.
+	if err != nil || math.IsNaN(score) || score < 0 || score > 10 {
 		return shared.SeverityUnknown
 	}
 	switch {
