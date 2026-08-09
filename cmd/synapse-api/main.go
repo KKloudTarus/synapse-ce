@@ -1011,11 +1011,11 @@ func main() {
 		// agent's model, a distinct verifier independently scores each proposed gated judgment and seals a
 		// verdict via the same gate a human uses (verifier identity "llm:<model>", never the proposer, so
 		// it can never confirm its own claim). POST .../judgments/auto-verify triggers it. Best-effort.
-		if cfg.VerifierModel != "" && cfg.VerifierModel != cfg.LLMModel {
+		if llmverifier.ConfiguredModelsDistinct(cfg.LLMModel, cfg.VerifierModel) {
 			if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr != nil {
 				log.Warn("automated LLM judgment-verifier DISABLED (LLM unavailable)", "err", verr)
 			} else {
-				router.SetAutoVerifier(llmverifier.New(vllm, cfg.VerifierModel, judgmentSvc, judgmentStore))
+				router.SetAutoVerifier(llmverifier.New(vllm, cfg.LLMModel, cfg.VerifierModel, judgmentSvc, judgmentStore))
 				log.Info("automated LLM judgment-verifier ENABLED (distinct verifier seals verdicts)", "model", cfg.VerifierModel)
 			}
 		}

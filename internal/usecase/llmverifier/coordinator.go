@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/verdict"
@@ -43,15 +44,29 @@ type Lister interface {
 
 // Coordinator runs the LLM verifier over an engagement's proposed judgments.
 type Coordinator struct {
-	llm      ports.LLM
-	model    string
-	verifier Verifier
-	lister   Lister
+	llm           ports.LLM
+	proposerModel string
+	model         string
+	verifier      Verifier
+	lister        Lister
 }
 
-// New builds a Coordinator. model is the distinct verifier model id; all deps are required.
-func New(llm ports.LLM, model string, v Verifier, l Lister) *Coordinator {
-	return &Coordinator{llm: llm, model: model, verifier: v, lister: l}
+// New builds a Coordinator. proposerModel is the model used by the proposing agent and model is the
+// configured verifier. AutoVerify remains disabled unless both identities are present and canonically
+// distinct; provider prefixes, case, and dated aliases must not let one model verify its own output.
+func New(llm ports.LLM, proposerModel, model string, v Verifier, l Lister) *Coordinator {
+	return &Coordinator{
+		llm: llm, proposerModel: strings.TrimSpace(proposerModel), model: strings.TrimSpace(model),
+		verifier: v, lister: l,
+	}
+}
+
+// ConfiguredModelsDistinct reports whether the configured proposer and verifier identify distinct
+// models after conservative canonicalization. Missing identity fails closed because independence cannot
+// be established from absent metadata.
+func ConfiguredModelsDistinct(proposerModel, verifierModel string) bool {
+	return strings.TrimSpace(proposerModel) != "" && strings.TrimSpace(verifierModel) != "" &&
+		!agent.SameModel(proposerModel, verifierModel)
 }
 
 // Identity is the sealed verifier attribution ("llm:<model>"), distinct from any agent/human proposer.
@@ -72,7 +87,8 @@ type Result struct {
 // accountability (the verdict is still attributed to the "llm:<model>" verifier that produced the score).
 func (c *Coordinator) AutoVerify(ctx context.Context, engagementID shared.ID, triggeredBy string) (Result, error) {
 	var res Result
-	if c == nil || c.llm == nil || c.verifier == nil || c.lister == nil {
+	if c == nil || c.llm == nil || c.verifier == nil || c.lister == nil ||
+		!ConfiguredModelsDistinct(c.proposerModel, c.model) {
 		return res, nil
 	}
 	js, err := c.lister.ListByEngagement(ctx, engagementID)

@@ -121,9 +121,16 @@ func clip(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
-// locationOf extracts the file and 1-based line from a finding title, which the finding builders format
-// as "<message> (<file>:<line>)". Returns ok=false when no trailing (file:line) is present.
+// locationOf returns the producer-owned structured source position when present. Legacy findings stored
+// before SourceLocation was added fall back to the title's "<message> (<file>:<line>)" marker. An invalid
+// structured location fails closed instead of falling back to potentially conflicting display text.
 func locationOf(f finding.Finding) (file string, line int, ok bool) {
+	if f.SourceLocation != nil {
+		if f.SourceLocation.Validate() != nil {
+			return "", 0, false
+		}
+		return f.SourceLocation.File, f.SourceLocation.StartLine, true
+	}
 	t := strings.TrimRight(f.Title, " ")
 	if !strings.HasSuffix(t, ")") {
 		return "", 0, false

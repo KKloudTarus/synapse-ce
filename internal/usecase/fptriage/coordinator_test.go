@@ -188,11 +188,15 @@ func TestAssessBestEffortOnLLMError(t *testing.T) {
 }
 
 func TestParseCritiqueFailClosed(t *testing.T) {
-	// The VERDICT stays strict; an unknown/absent verdict or no JSON at all must fail closed.
+	// Verdict and confidence participate in the gate decision, so malformed values must fail closed.
 	bad := []string{
 		``,
 		`{"verdict":"maybe","driver":"x","confidence":10}`, // unknown verdict
 		`{"driver":"x","confidence":10}`,                   // missing verdict
+		`{"verdict":"refuted","driver":"x"}`,               // missing confidence
+		`{"verdict":"refuted","driver":"x","confidence":-1}`,
+		`{"verdict":"refuted","driver":"x","confidence":101}`,
+		`{"verdict":"refuted","driver":"x","confidence":900}`,
 		`no json at all`,
 	}
 	for _, s := range bad {
@@ -200,9 +204,8 @@ func TestParseCritiqueFailClosed(t *testing.T) {
 			t.Errorf("parseCritique(%q) must fail closed", s)
 		}
 	}
-	// The driver is normalized/defaulted and confidence clamped, so a valid verdict is never discarded
-	// over a cosmetic field — including the shapes the gateway actually returns (fences, prose, extra
-	// keys, empty/spaced drivers).
+	// The driver is normalized/defaulted because it is a cosmetic audit label. Fences, prose, extra keys,
+	// and empty/spaced drivers remain tolerated without relaxing verdict or confidence validation.
 	if c, err := parseCritique(`{"verdict":"refuted","driver":"not_reachable","confidence":85}`); err != nil || c.Driver != "not_reachable" || c.Confidence != 85 {
 		t.Errorf("plain refuted: %+v err=%v", c, err)
 	}
@@ -214,9 +217,6 @@ func TestParseCritiqueFailClosed(t *testing.T) {
 	}
 	if c, err := parseCritique(`{"verdict":"refuted","driver":"the input here is a compile time constant and never attacker controlled at all","confidence":95}`); err != nil || strings.Contains(c.Driver, " ") || len(c.Driver) > 48 {
 		t.Errorf("a sentence driver must fall back to a clean token (no prose): %+v err=%v", c, err)
-	}
-	if c, err := parseCritique(`{"verdict":"refuted","driver":"not_reachable","confidence":900}`); err != nil || c.Confidence != 100 {
-		t.Errorf("confidence must clamp to 100: %+v err=%v", c, err)
 	}
 	if c, err := parseCritique("```json\n{\"verdict\":\"refuted\",\"driver\":\"not_reachable\",\"confidence\":85,\"why\":\"x\"}\n```"); err != nil || c.Verdict != judgment.CritiqueRefuted || c.Driver != "not_reachable" {
 		t.Errorf("fenced JSON with an extra key must parse: %+v err=%v", c, err)
@@ -240,5 +240,21 @@ func TestLocationOf(t *testing.T) {
 		if ok != c.wantOK || f != c.wantFile || l != c.wantLine {
 			t.Errorf("locationOf(%q) = (%q,%d,%v), want (%q,%d,%v)", c.title, f, l, ok, c.wantFile, c.wantLine, c.wantOK)
 		}
+	}
+}
+
+func TestLocationOfPrefersValidatedStructuredLocation(t *testing.T) {
+	structured := finding.Finding{
+		Title:          "conflicting display location (wrong.go:99)",
+		SourceLocation: &finding.SourceLocation{File: "internal/right.go", StartLine: 42, EndLine: 42},
+	}
+	file, line, ok := locationOf(structured)
+	if !ok || file != "internal/right.go" || line != 42 {
+		t.Fatalf("structured location = (%q,%d,%v), want internal/right.go:42", file, line, ok)
+	}
+
+	structured.SourceLocation = &finding.SourceLocation{File: "../outside.go", StartLine: 1, EndLine: 1}
+	if file, line, ok := locationOf(structured); ok || file != "" || line != 0 {
+		t.Fatalf("invalid structured location fell back to title: (%q,%d,%v)", file, line, ok)
 	}
 }

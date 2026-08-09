@@ -100,7 +100,7 @@ func TestLiveAITaintFileLine(t *testing.T) {
 	t.Logf("taint CapSAST proposed with def-use Location=%q", claimLoc)
 
 	// A REAL model adversarially verifies the precise-location taint judgment (the production confirm path).
-	verifier := llmverifier.New(llm, model, analysisSvc, store)
+	verifier := llmverifier.New(llm, "deterministic/taintscan", model, analysisSvc, store)
 	res, err := verifier.AutoVerify(context.Background(), eng, "human:pentester")
 	if err != nil {
 		t.Fatalf("auto-verify: %v", err)
