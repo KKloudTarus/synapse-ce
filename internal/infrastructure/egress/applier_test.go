@@ -2,6 +2,7 @@ package egress
 
 import (
 	"context"
+	"net/netip"
 	"os/exec"
 	"runtime"
 	"testing"
@@ -10,6 +11,17 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	egresspolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/egress"
 )
+
+func TestPinnedHostsAreDeterministic(t *testing.T) {
+	got := pinnedHosts(map[string][]netip.Addr{
+		"b.example": {netip.MustParseAddr("203.0.113.2")},
+		"a.example": {netip.MustParseAddr("203.0.113.3"), netip.MustParseAddr("203.0.113.1")},
+	})
+	want := "203.0.113.1 a.example\n203.0.113.3 a.example\n203.0.113.2 b.example\n"
+	if got != want {
+		t.Fatalf("pinnedHosts()=%q want=%q", got, want)
+	}
+}
 
 func TestLinkAddrsDistinctPerIndex(t *testing.T) {
 	h0, p0, s0 := linkAddrs(0)

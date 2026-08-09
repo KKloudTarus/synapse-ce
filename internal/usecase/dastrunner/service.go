@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -97,6 +98,7 @@ type sealedResult struct {
 	Status            int    `json:"status,omitempty"`
 	BodySHA256        string `json:"body_sha256,omitempty"`
 	BodyTruncated     bool   `json:"body_truncated,omitempty"`
+	BodyExcerpt       string `json:"body_excerpt,omitempty"`
 	BodyMarkerMatched bool   `json:"body_marker_matched"`
 	ProofClass        string `json:"proof_class"`
 	RunnerExitCode    int    `json:"runner_exit_code"`
@@ -150,6 +152,9 @@ func (s *Service) Execute(ctx context.Context, admitted safety.AdmittedAction, p
 	status, body := splitCurlStatus(res.Stdout)
 	markerMatched := probe.ExpectedBodyContains == "" || bytes.Contains(body, []byte(probe.ExpectedBodyContains))
 	proof := classify(runErr, status, markerMatched, probe.ExpectedStatus)
+	if res.Truncated {
+		proof = dastverifier.ProofClassNeedsMoreProof
+	}
 	bodyHash := sha256.Sum256(body)
 	sealed, err := json.Marshal(sealedResult{
 		JudgmentID:        probe.JudgmentID.String(),
@@ -160,6 +165,7 @@ func (s *Service) Execute(ctx context.Context, admitted safety.AdmittedAction, p
 		Status:            status,
 		BodySHA256:        hex.EncodeToString(bodyHash[:]),
 		BodyTruncated:     res.Truncated,
+		BodyExcerpt:       redactProbeExcerpt(body),
 		BodyMarkerMatched: markerMatched,
 		ProofClass:        string(proof),
 		RunnerExitCode:    res.ExitCode,
@@ -327,4 +333,16 @@ func classify(runErr error, status int, markerMatched bool, expectedStatus int) 
 		return dastverifier.ProofClassRuntimeConfirmed
 	}
 	return dastverifier.ProofClassRuntimeRefuted
+}
+
+func redactProbeExcerpt(body []byte) string {
+	const max = 1024
+	if len(body) > max {
+		body = body[:max]
+	}
+	text := redact.String(string(body), nil)
+	for _, key := range []string{"token", "session", "api_key", "key", "secret", "password", "auth", "signature", "cookie"} {
+		text = regexp.MustCompile("(?i)"+key+"[[:space:]]*[:=][[:space:]]*[^[:space:]&<,;]+").ReplaceAllString(text, key+"=[REDACTED]")
+	}
+	return text
 }

@@ -89,3 +89,18 @@ func (s *ApprovalStore) Decide(_ context.Context, d agent.ApprovalDecision) erro
 	s.decisions[d.ActionID] = d
 	return nil
 }
+
+func (s *ApprovalStore) Consume(_ context.Context, actionID shared.ID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.decisions[actionID]
+	if !ok {
+		return fmt.Errorf("approval %s: %w", actionID, shared.ErrNotFound)
+	}
+	if cur.State != agent.ApprovalApproved {
+		return fmt.Errorf("approval %s cannot be consumed from state %s: %w", actionID, cur.State, shared.ErrConflict)
+	}
+	cur.State = agent.ApprovalConsumed
+	s.decisions[actionID] = cur
+	return nil
+}

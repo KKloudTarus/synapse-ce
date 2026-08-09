@@ -173,6 +173,7 @@ const (
 	ApprovalApproved ApprovalState = "approved"
 	ApprovalDenied   ApprovalState = "denied"
 	ApprovalTimeout  ApprovalState = "timeout" // undecided within the window → fail-closed deny
+	ApprovalConsumed ApprovalState = "consumed"
 )
 
 // Admitted reports whether the decision permits execution (only an explicit human approval).

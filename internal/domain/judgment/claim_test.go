@@ -13,6 +13,7 @@ func TestClaimRoundTrip(t *testing.T) {
 	claims := []Claim{
 		ReachabilityClaim{Reachable: Reachable, Tier: Tier2, Path: []string{"main", "vuln"}, Confidence: 95},
 		SASTClaim{CWE: "CWE-327", Location: "auth.go:42", Rule: "weak-hash-md5"},
+		DASTClaim{CWE: "CWE-79", Location: "/search", Rule: "reflected-xss", Source: "first_party", Fingerprint: "search_reflection", ProofEvidenceID: "proof-1"},
 		RiskNarrativeClaim{Drivers: []string{"kev", "cvss>=9"}, Priority: 1},
 		CritiqueClaim{Verdict: CritiqueRefuted, Driver: "version_mismatch", Confidence: 85},
 		ThreatClaim{Category: InfoDisclosure, Asset: "pii"},
@@ -31,6 +32,25 @@ func TestClaimRoundTrip(t *testing.T) {
 		}
 		if got.Capability() != c.Capability() {
 			t.Fatalf("capability changed: %s != %s", got.Capability(), c.Capability())
+		}
+	}
+}
+
+func TestDASTClaimStrictDecode(t *testing.T) {
+	valid := []byte(`{"capability":"dast","claim":{"cwe":"CWE-79","location":"/search","rule":"reflected-xss","source":"first_party","fingerprint":"search_reflection","proof_evidence_id":"proof-1"}}`)
+	claim, err := UnmarshalClaim(valid)
+	if err != nil {
+		t.Fatalf("UnmarshalClaim: %v", err)
+	}
+	if _, ok := claim.(DASTClaim); !ok {
+		t.Fatalf("claim type = %T, want DASTClaim", claim)
+	}
+	for _, raw := range [][]byte{
+		[]byte(`{"capability":"dast","claim":{"cwe":"CWE-79","location":"/search","rule":"x","source":"first_party","fingerprint":"f","notes":"no"}}`),
+		[]byte(`{"capability":"dast","claim":{"cwe":"CWE-79","location":"/search","rule":"x","source":"not valid","fingerprint":"f"}}`),
+	} {
+		if _, err := UnmarshalClaim(raw); err == nil {
+			t.Fatalf("UnmarshalClaim(%s) succeeded", raw)
 		}
 	}
 }

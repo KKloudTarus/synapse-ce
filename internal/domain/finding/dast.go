@@ -15,11 +15,13 @@ import (
 // runtime twin of SASTInput — the SAME structured claim, but confirmed at runtime rather than by a static
 // verifier, so it earns a distinct Kind (stronger, dynamically-proven evidence).
 type DASTInput struct {
-	JudgmentID string          // the confirmed CapSAST judgment (dedup anchor – re-confirming updates in place)
-	CWE        string          // the weakness, e.g. "CWE-89"
-	Location   string          // where: "path[:line]" or the importPath.Symbol of the sink-using function
-	Rule       string          // the taint rule that fired, e.g. "taint-sqli"
-	Severity   shared.Severity // optional; defaults to Unknown (re-triaged via the normal finding workflow)
+	JudgmentID  string          // confirmed judgment ID; legacy CapSAST runtime projections use this as the dedup anchor
+	CWE         string          // the weakness, e.g. "CWE-89"
+	Location    string          // where: URL path or deterministic check location
+	Rule        string          // the check or taint rule that fired
+	Source      string          // stable check source token for native CapDAST findings
+	Fingerprint string          // stable check fingerprint for native CapDAST findings
+	Severity    shared.Severity // optional; defaults to Unknown (re-triaged via the normal finding workflow)
 }
 
 // NewDAST builds a runtime-confirmed DAST finding (Kind=dast) from a judgment a DISTINCT runtime verifier
@@ -37,11 +39,16 @@ func NewDAST(id, engagementID shared.ID, in DASTInput, now time.Time) (Finding, 
 	loc := strings.TrimSpace(in.Location)
 	rule := strings.TrimSpace(in.Rule)
 	anchor := strings.TrimSpace(in.JudgmentID)
+	source := strings.TrimSpace(in.Source)
+	fingerprint := strings.TrimSpace(in.Fingerprint)
 	if cwe == "" || loc == "" || rule == "" {
 		return Finding{}, fmt.Errorf("%w: dast finding needs a CWE, location, and rule", shared.ErrValidation)
 	}
-	if anchor == "" {
-		return Finding{}, fmt.Errorf("%w: dast finding needs a source judgment id (dedup anchor)", shared.ErrValidation)
+	if (source == "") != (fingerprint == "") {
+		return Finding{}, fmt.Errorf("%w: dast finding source and fingerprint must be supplied together", shared.ErrValidation)
+	}
+	if source == "" && anchor == "" {
+		return Finding{}, fmt.Errorf("%w: dast finding needs a source judgment id or a source and fingerprint", shared.ErrValidation)
 	}
 	sev := in.Severity
 	if sev == "" {
@@ -64,9 +71,16 @@ func NewDAST(id, engagementID shared.ID, in DASTInput, now time.Time) (Finding, 
 		Priority:     priorityForSeverity(sev),
 		Status:       StatusOpen,
 		Kind:         KindDAST,
-		DedupKey:     "dast:ai:" + anchor,
+		DedupKey:     dastDedupKey(anchor, source, fingerprint),
 		// ProposedBy LEFT EMPTY (the judgment-layer gate already ran) – see the doc above.
 		Version: 1,
 		Audit:   shared.Audit{CreatedAt: now, UpdatedAt: now},
 	}, nil
+}
+
+func dastDedupKey(judgmentID, source, fingerprint string) string {
+	if source != "" {
+		return "dast:" + source + ":" + fingerprint
+	}
+	return "dast:ai:" + judgmentID
 }

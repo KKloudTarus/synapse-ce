@@ -23,6 +23,7 @@ type Capability string
 const (
 	CapReachability     Capability = "reachability"      // gated
 	CapSAST             Capability = "sast"              // gated
+	CapDAST             Capability = "dast"              // gated
 	CapCritique         Capability = "critique"          // gated (adversarial refutation of a finding)
 	CapRiskNarrative    Capability = "risk_narrative"    // NOT gated (explains, doesn't prove)
 	CapThreat           Capability = "threat"            // gated (STRIDE threat over the model, human-ratified)
@@ -33,7 +34,7 @@ const (
 // Valid reports whether c is a known capability.
 func (c Capability) Valid() bool {
 	switch c {
-	case CapReachability, CapSAST, CapCritique, CapRiskNarrative, CapThreat, CapCorrelation, CapVexJustification:
+	case CapReachability, CapSAST, CapDAST, CapCritique, CapRiskNarrative, CapThreat, CapCorrelation, CapVexJustification:
 		return true
 	}
 	return false
@@ -45,7 +46,7 @@ func (c Capability) Valid() bool {
 // cross-check disagreement) have no "refuted at 75" semantics; they are human-accepted, not score-gated.
 func (c Capability) Gated() bool {
 	switch c {
-	case CapReachability, CapSAST, CapCritique, CapThreat, CapVexJustification:
+	case CapReachability, CapSAST, CapDAST, CapCritique, CapThreat, CapVexJustification:
 		return true
 	}
 	return false

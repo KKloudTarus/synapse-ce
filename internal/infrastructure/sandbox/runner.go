@@ -241,6 +241,10 @@ func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult
 	}
 	const seccompChildFD = 3 // ExtraFiles[0] → child fd 3 (CgroupFD is a SysProcAttr fd, not counted)
 	argv := r.command(spec, egressNS, hostsFile, seccompChildFD, runCG != nil)
+	// Keep seccomp at fd 3. Caller descriptors follow in stable order at fd 4+.
+	extraFiles := make([]*os.File, 0, 1+len(spec.ExtraFiles))
+	extraFiles = append(extraFiles, seccompF)
+	extraFiles = append(extraFiles, spec.ExtraFiles...)
 	wrapped := ports.ToolSpec{
 		Name:           argv[0],
 		Args:           argv[1:],
@@ -248,7 +252,7 @@ func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult
 		Timeout:        spec.Timeout,
 		MaxOutputBytes: spec.MaxOutputBytes,
 		Env:            env,
-		ExtraFiles:     []*os.File{seccompF},
+		ExtraFiles:     extraFiles,
 	}
 	// Clone the tool into the limit cgroup (preferred) or, failing that, the logger's own.
 	if runCG != nil {

@@ -3,15 +3,18 @@ package dastworkflow
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/dastsession"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastcrawl"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
@@ -49,6 +52,53 @@ type fakeApplier struct {
 	calls []dastverifier.Result
 }
 
+type fakeScanSession struct {
+	result dastcrawl.Result
+	err    error
+	calls  int
+}
+
+func (f *fakeScanSession) CrawlWithRate(context.Context, safety.AdmittedAction, string, string, dastsession.Config, dastcrawl.Input, dastcrawl.Limits, int, int) (dastcrawl.Result, error) {
+	f.calls++
+	return f.result, f.err
+}
+
+type fakeScanEvaluator struct {
+	findings []ports.DASTFinding
+	verify   error
+	calls    int
+}
+
+func (f *fakeScanEvaluator) Evaluate([]ports.DASTObservation, []string) ([]ports.DASTFinding, error) {
+	return f.findings, nil
+}
+
+func (f *fakeScanEvaluator) VerifyProof(ports.DASTProof) error {
+	f.calls++
+	return f.verify
+}
+
+type fakeScanJudgments struct {
+	proposed []judgment.Judgment
+}
+
+func (f *fakeScanJudgments) Propose(_ context.Context, proposer string, engagementID shared.ID, capability judgment.Capability, subjectKind judgment.SubjectKind, subjectID shared.ID, claim judgment.Claim) (judgment.Judgment, error) {
+	j, err := judgment.New(shared.ID(fmt.Sprintf("judgment-%d", len(f.proposed)+1)), engagementID, capability, subjectKind, subjectID, claim, proposer, time.Unix(1, 0))
+	if err == nil {
+		f.proposed = append(f.proposed, j)
+	}
+	return j, err
+}
+
+type fakeScanVerifier struct {
+	results []dastverifier.Result
+}
+
+func (f *fakeScanVerifier) Apply(_ context.Context, _ shared.ID, result dastverifier.Result) (judgment.Judgment, error) {
+	f.results = append(f.results, result)
+	return judgment.Judgment{ID: result.JudgmentID, State: judgment.StateConfirmed}, nil
+}
+
 func (a *fakeApplier) Apply(_ context.Context, engagementID shared.ID, r dastverifier.Result) (judgment.Judgment, error) {
 	a.calls = append(a.calls, r)
 	return judgment.Judgment{ID: r.JudgmentID, EngagementID: engagementID, Capability: judgment.CapSAST, State: judgment.StateConfirmed, EvidenceScore: r.Score}, nil
@@ -61,7 +111,7 @@ func workflowForTest(t *testing.T, runner *fakeRunner, applier *fakeApplier) (*S
 	eng.Status = engagement.StatusActive
 	from, to := now.Add(-time.Hour), now.Add(time.Hour)
 	_ = eng.SetAuthorizationWindow(&from, &to, "UTC", now)
-	eng.Scope = engagement.Scope{InScope: []engagement.Target{{Kind: engagement.TargetURL, Value: "https://203.0.113.10/search?q=synapse-canary"}}}
+	eng.Scope = engagement.Scope{InScope: []engagement.Target{{Kind: engagement.TargetURL, Value: "https://203.0.113.10/"}}}
 	repo := memory.NewEngagementRepository()
 	if err := repo.Create(context.Background(), eng); err != nil {
 		t.Fatal(err)
@@ -90,10 +140,11 @@ func workflowForTest(t *testing.T, runner *fakeRunner, applier *fakeApplier) (*S
 	if err != nil {
 		t.Fatal(err)
 	}
-	wf, err := NewService(gate, approvals, approvalStore, dr, clock, ids)
+	wf, err := NewService(gate, approvals, approvalStore, dr, ev, clock, ids)
 	if err != nil {
 		t.Fatal(err)
 	}
+	wf.evidence = ev
 	return wf, approvalStore
 }
 
@@ -166,5 +217,35 @@ func TestRunRejectsMismatchedProbeURL(t *testing.T) {
 	p.URL = "https://203.0.113.11/search?q=synapse-canary"
 	if _, err := wf.Run(context.Background(), "alice", "eng-1", prop.Action.ID, p); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("mismatched run URL must be ErrValidation, got %v", err)
+	}
+}
+
+func TestProposeRejectsSensitiveQuery(t *testing.T) {
+	wf, _ := workflowForTest(t, &fakeRunner{}, &fakeApplier{})
+	probe := testProbe()
+	probe.URL = "https://203.0.113.10/search?api_key=secret"
+	if _, err := wf.Propose(context.Background(), "alice", "eng-1", probe); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("sensitive query accepted: %v", err)
+	}
+}
+
+func TestRunBindsFullProbeAndConsumesApproval(t *testing.T) {
+	runner := &fakeRunner{out: []byte("synapse-canary\nSYNAPSE_HTTP_STATUS:200\n")}
+	wf, _ := workflowForTest(t, runner, &fakeApplier{})
+	probe := testProbe()
+	prop, _ := wf.Propose(context.Background(), "alice", "eng-1", probe)
+	if _, err := wf.Decide(context.Background(), "bob", "eng-1", prop.Action.ID, true, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	changed := probe
+	changed.ExpectedStatus = 201
+	if _, err := wf.Run(context.Background(), "alice", "eng-1", prop.Action.ID, changed); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("changed probe accepted: %v", err)
+	}
+	if _, err := wf.Run(context.Background(), "alice", "eng-1", prop.Action.ID, probe); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wf.Run(context.Background(), "alice", "eng-1", prop.Action.ID, probe); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("repeated approval ran: %v", err)
 	}
 }

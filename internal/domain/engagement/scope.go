@@ -2,6 +2,7 @@ package engagement
 
 import (
 	"net/netip"
+	"net/url"
 	"path"
 	"path/filepath"
 	"strings"
@@ -47,12 +48,11 @@ func (s Scope) Allows(value string) bool {
 	return s.AllowsTarget(Target{Kind: InferTargetKind(value), Value: value})
 }
 
-// AllowsTarget reports whether the requested target is permitted. In-scope URL
-// entries authorize only their canonical scheme, host, and effective port. An
-// out-of-scope URL is intentionally broader: it denies its host for every request
-// kind, scheme, and port. Out-of-scope always wins, and an invalid deny entry makes
-// the scope unenforceable and therefore denies every request. Enforced server-side
-// before any tool runs.
+// AllowsTarget reports whether the requested target is permitted. URL scope entries
+// match their canonical scheme, host, effective port, and a segment-aligned path
+// prefix. Out-of-scope always wins, and an invalid deny entry makes the scope
+// unenforceable and therefore denies every request. Enforced server-side before
+// any tool runs.
 func (s Scope) AllowsTarget(req Target) bool {
 	if strings.TrimSpace(req.Value) == "" {
 		return false
@@ -70,15 +70,17 @@ func (s Scope) AllowsTarget(req Target) bool {
 	return false
 }
 
-// matchesDenyTarget applies the conservative carve-out semantics. A malformed
-// deny cannot be enforced reliably, so it matches every request. URL denies are
-// host-wide even though URL allows are scheme-and-port specific.
+// matchesDenyTarget applies conservative carve-out semantics. A malformed deny
+// cannot be enforced reliably, so it matches every request.
 func matchesDenyTarget(scopeT, req Target) bool {
 	normalized, err := NormalizeTarget(scopeT, true)
 	if err != nil {
 		return true
 	}
 	if normalized.Kind == TargetURL {
+		if req.Kind == TargetURL {
+			return matchScopeTarget(normalized, req)
+		}
 		identity, err := NormalizeURL(normalized.Value)
 		return err == nil && identity.Host == targetHost(req)
 	}
@@ -144,8 +146,7 @@ func matchesAllowTarget(scopeT, req Target) bool {
 
 // matchScopeTarget compares a normalized scope entry with a request. Repo/image
 // values retain their established comparisons; network requests are parsed without
-// DNS resolution. URL entries use the strict allow identity here; deny-side URL
-// host matching is handled separately by matchesDenyTarget.
+// DNS resolution. URL entries match a segment-aligned path prefix.
 func matchScopeTarget(scopeT, req Target) bool {
 	if strings.TrimSpace(req.Value) == "" {
 		return false
@@ -189,9 +190,33 @@ func matchScopeTarget(scopeT, req Target) bool {
 			return false
 		}
 		scopeURL, err := NormalizeURL(scopeT.Value)
-		return err == nil && scopeURL.Scheme == reqURL.Scheme && scopeURL.Host == reqURL.Host && scopeURL.Port == reqURL.Port
+		return err == nil && scopeURL.Scheme == reqURL.Scheme && scopeURL.Host == reqURL.Host && scopeURL.Port == reqURL.Port && urlPathContains(scopeURL.URL, reqURL.URL)
 	}
 	return false
+}
+
+// urlPathContains reports whether child has parent as a segment prefix. Query
+// strings and fragments never affect URL scope authorization.
+func urlPathContains(parent, child string) bool {
+	p, err := NormalizeURL(parent)
+	if err != nil {
+		return false
+	}
+	c, err := NormalizeURL(child)
+	if err != nil {
+		return false
+	}
+	parentPath := path.Clean(pURLPath(p.URL))
+	childPath := path.Clean(pURLPath(c.URL))
+	return parentPath == "/" || childPath == parentPath || strings.HasPrefix(childPath, strings.TrimRight(parentPath, "/")+"/")
+}
+
+func pURLPath(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Path == "" {
+		return "/"
+	}
+	return u.Path
 }
 
 func localPathContains(parent, child string) bool {

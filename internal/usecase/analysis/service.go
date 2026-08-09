@@ -141,11 +141,9 @@ func (s *Service) Verify(ctx context.Context, verifier string, engagementID, jud
 	return s.verify(ctx, verifier, engagementID, judgmentID, score, rationale, expectedVersion, false)
 }
 
-// VerifyRuntime is Verify for a verdict produced by a RUNTIME probe (the safe HTTP DAST verifier). It is
-// identical to Verify EXCEPT that a confirmed CapSAST judgment auto-emits a Kind=dast finding (dynamically
-// proven) instead of Kind=sast (statically/LLM confirmed). The runtime-probe path (dastverifier) calls this;
-// the static/LLM path (human review, llmverifier) calls Verify. The distinct verifier, score bar, verdict
-// sealing, and self-confirm guard are all unchanged — only the finding projection differs.
+// VerifyRuntime is Verify for a verdict produced by a runtime probe. It keeps the
+// legacy CapSAST runtime projection as Kind=dast; native CapDAST judgments promote
+// through Verify regardless of verdict transport.
 func (s *Service) VerifyRuntime(ctx context.Context, verifier string, engagementID, judgmentID shared.ID, score int, rationale string, expectedVersion int) (judgment.Judgment, error) {
 	return s.verify(ctx, verifier, engagementID, judgmentID, score, rationale, expectedVersion, true)
 }
@@ -194,26 +192,22 @@ func (s *Service) verify(ctx context.Context, verifier string, engagementID, jud
 			})
 		}
 	}
-	// a verifier-confirmed CapSAST (taint) judgment auto-emits a finding. Best-effort, same contract as the
-	// threat promoter – the judgment is already confirmed + audited; a failed emit is audited, not rolled
-	// back (the finding is a re-derivable projection of the source-of-truth judgment). The verdict's PROOF
-	// METHOD picks the Kind: a RUNTIME probe (VerifyRuntime) → Kind=dast (dynamically proven); a static/LLM
-	// verdict (Verify) → Kind=sast. Exactly one fires per confirmation, so there is never a duplicate.
-	if saved.State == judgment.StateConfirmed && saved.Capability == judgment.CapSAST {
-		if runtimeProof && s.dastRecorder != nil {
-			if rerr := s.dastRecorder.RecordConfirmedDAST(ctx, verifier, saved); rerr != nil {
-				_ = s.audit.Record(ctx, ports.AuditEntry{
-					Actor: verifier, Action: "dast_finding.emit_failed", Target: judgmentID.String(),
-					Metadata: map[string]string{"engagement": engagementID.String()}, At: s.clock.Now(),
-				})
-			}
-		} else if !runtimeProof && s.sastRecorder != nil {
-			if rerr := s.sastRecorder.RecordConfirmedSAST(ctx, verifier, saved); rerr != nil {
-				_ = s.audit.Record(ctx, ports.AuditEntry{
-					Actor: verifier, Action: "sast_finding.emit_failed", Target: judgmentID.String(),
-					Metadata: map[string]string{"engagement": engagementID.String()}, At: s.clock.Now(),
-				})
-			}
+	// Native CapDAST judgments always project to DAST. Legacy runtime-confirmed
+	// CapSAST judgments retain their existing projection, while normal CapSAST
+	// verification remains a SAST finding.
+	if saved.State == judgment.StateConfirmed && (saved.Capability == judgment.CapDAST || (saved.Capability == judgment.CapSAST && runtimeProof)) && s.dastRecorder != nil {
+		if rerr := s.dastRecorder.RecordConfirmedDAST(ctx, verifier, saved); rerr != nil {
+			_ = s.audit.Record(ctx, ports.AuditEntry{
+				Actor: verifier, Action: "dast_finding.emit_failed", Target: judgmentID.String(),
+				Metadata: map[string]string{"engagement": engagementID.String()}, At: s.clock.Now(),
+			})
+		}
+	} else if saved.State == judgment.StateConfirmed && saved.Capability == judgment.CapSAST && !runtimeProof && s.sastRecorder != nil {
+		if rerr := s.sastRecorder.RecordConfirmedSAST(ctx, verifier, saved); rerr != nil {
+			_ = s.audit.Record(ctx, ports.AuditEntry{
+				Actor: verifier, Action: "sast_finding.emit_failed", Target: judgmentID.String(),
+				Metadata: map[string]string{"engagement": engagementID.String()}, At: s.clock.Now(),
+			})
 		}
 	}
 	return saved, nil

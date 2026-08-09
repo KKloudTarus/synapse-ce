@@ -32,4 +32,5 @@ type EgressPolicy struct {
 	DenyDomains      []string // hostname-wide out-of-scope domains to resolve + deny
 	AllowDomainRules []DomainRule
 	DenyDomainRules  []DomainRule
+	PinnedHosts      map[string][]netip.Addr // prevalidated host-to-address bindings; no second DNS lookup
 }

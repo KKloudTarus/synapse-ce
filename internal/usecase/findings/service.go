@@ -101,37 +101,35 @@ func (s *Service) RecordConfirmedSAST(ctx context.Context, verifier string, j ju
 		map[string]string{"judgment": j.ID.String(), "cwe": sc.CWE, "rule": sc.Rule, "location": sc.Location})
 }
 
-// RecordConfirmedDAST promotes a RUNTIME-verifier-confirmed CapSAST judgment to a persisted Kind=dast
-// finding (auto-emit on runtime confirm). It is the runtime twin of RecordConfirmedSAST — the same
-// verifier-confirmed CapSAST judgment, but the confirming verdict came from a safe runtime probe rather
-// than a static/LLM verifier, so it projects to a distinct, dynamically-proven Kind=dast finding.
-// Idempotent via the dast:ai:<judgmentID> dedup key – a re-confirm updates in place. The finding is built
-// DETERMINISTICALLY from the typed SASTClaim (no LLM); severity starts Unknown so a human triages it
-// through the normal finding workflow. Audited.
+// RecordConfirmedDAST promotes a confirmed CapDAST judgment to a persisted
+// Kind=dast finding. Runtime CapSAST confirmations remain supported for the
+// existing safe-probe path and retain their judgment-anchored dedup key.
 func (s *Service) RecordConfirmedDAST(ctx context.Context, verifier string, j judgment.Judgment) error {
-	if j.Capability != judgment.CapSAST {
-		return fmt.Errorf("%w: not a sast judgment (%s)", shared.ErrValidation, j.Capability)
+	in := finding.DASTInput{JudgmentID: j.ID.String()}
+	switch claim := j.Claim.(type) {
+	case judgment.DASTClaim:
+		if j.Capability != judgment.CapDAST {
+			return fmt.Errorf("%w: DAST claim has capability %s", shared.ErrValidation, j.Capability)
+		}
+		in.CWE, in.Location, in.Rule = claim.CWE, claim.Location, claim.Rule
+		in.Source, in.Fingerprint = claim.Source, claim.Fingerprint
+	case judgment.SASTClaim:
+		if j.Capability != judgment.CapSAST {
+			return fmt.Errorf("%w: SAST claim has capability %s", shared.ErrValidation, j.Capability)
+		}
+		in.CWE, in.Location, in.Rule = claim.CWE, claim.Location, claim.Rule
+	default:
+		return fmt.Errorf("%w: DAST judgment %s carries no supported DAST claim", shared.ErrValidation, j.ID)
 	}
-	sc, ok := j.Claim.(judgment.SASTClaim)
-	if !ok {
-		return fmt.Errorf("%w: sast judgment %s carries no SASTClaim", shared.ErrValidation, j.ID)
-	}
-	f, err := finding.NewDAST(s.ids.NewID(), j.EngagementID, finding.DASTInput{
-		JudgmentID: j.ID.String(),
-		CWE:        sc.CWE,
-		Location:   sc.Location,
-		Rule:       sc.Rule,
-	}, s.clock.Now())
+	f, err := finding.NewDAST(s.ids.NewID(), j.EngagementID, in, s.clock.Now())
 	if err != nil {
 		return err
 	}
 	if err := s.repo.Upsert(ctx, []finding.Finding{f}); err != nil {
 		return fmt.Errorf("persist dast finding: %w", err)
 	}
-	// Attribute the promotion to the VERIFIER whose runtime probe confirmed the judgment (the trigger), not
-	// the system proposer – the judgment's own verdict audit already records the proposer.
 	return s.record(ctx, verifier, "finding.dast_promoted", j.EngagementID, f.ID,
-		map[string]string{"judgment": j.ID.String(), "cwe": sc.CWE, "rule": sc.Rule, "location": sc.Location})
+		map[string]string{"judgment": j.ID.String(), "cwe": in.CWE, "rule": in.Rule, "location": in.Location})
 }
 
 // ApplyWriteupDraft applies an accepted, human-signed-off write-up draft to its finding: it sets the

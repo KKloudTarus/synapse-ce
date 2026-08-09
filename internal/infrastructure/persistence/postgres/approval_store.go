@@ -127,6 +127,23 @@ func (s *ApprovalStore) Decide(ctx context.Context, d agent.ApprovalDecision) er
 	return nil
 }
 
+func (s *ApprovalStore) Consume(ctx context.Context, actionID shared.ID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE agent_approvals SET decision_state='consumed'
+		 WHERE action_id=$1 AND decision_state='approved'`, actionID.String())
+	if err != nil {
+		return fmt.Errorf("consume approval: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		var exists bool
+		if e := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_approvals WHERE action_id=$1)`, actionID.String()).Scan(&exists); e == nil && exists {
+			return fmt.Errorf("approval %s cannot be consumed: %w", actionID, shared.ErrConflict)
+		}
+		return fmt.Errorf("approval %s: %w", actionID, shared.ErrNotFound)
+	}
+	return nil
+}
+
 func scanProposed(rows pgx.Rows) (agent.ProposedAction, error) {
 	var (
 		a            agent.ProposedAction

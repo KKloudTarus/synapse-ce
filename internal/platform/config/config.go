@@ -127,6 +127,15 @@ type Config struct {
 	// trust-on-first-use alone cannot (TOFU only detects post-first-run replacement). Empty
 	// = TOFU only. Parsed from SYNAPSE_TOOL_HASHES.
 	ToolHashes map[string]string
+	// DAST authenticated scan execution ceilings. Per-run values may only lower these.
+	DASTHelperBin    string
+	DASTMaxReauth    int
+	DASTRatePerSec   int
+	DASTConcurrency  int
+	DASTMaxDepth     int
+	DASTMaxPages     int
+	DASTMaxRequests  int
+	DASTMaxWallClock time.Duration
 	// VaultMasterKey is the AES-256 master key for the credential vault: 64 hex
 	// chars or base64 of 32 bytes. Empty = an ephemeral key (dev only; stored secrets do
 	// not survive restart). Required in production. Never logged.
@@ -407,6 +416,16 @@ type Config struct {
 
 // Load reads configuration from environment variables with sane defaults.
 func Load() Config {
+	maxReauth := getint("SYNAPSE_DAST_MAX_REAUTH", 2)
+	ratePerSec := getint("SYNAPSE_DAST_RATE_PER_SEC", 5)
+	concurrency := getint("SYNAPSE_DAST_CONCURRENCY", 4)
+	maxDepth := getint("SYNAPSE_DAST_MAX_DEPTH", 8)
+	maxPages := getint("SYNAPSE_DAST_MAX_PAGES", 2000)
+	maxRequests := getint("SYNAPSE_DAST_MAX_REQUESTS", 20000)
+	maxWallClock := getduration("SYNAPSE_DAST_MAX_WALL_CLOCK", 30*time.Minute)
+	if maxReauth < 0 || maxReauth > 2 || ratePerSec < 1 || ratePerSec > 5 || concurrency < 1 || concurrency > 4 || maxDepth < 1 || maxDepth > 8 || maxPages < 1 || maxPages > 2000 || maxRequests < 1 || maxRequests > 20000 || maxWallClock < time.Second || maxWallClock > 30*time.Minute {
+		maxReauth, ratePerSec, concurrency, maxDepth, maxPages, maxRequests, maxWallClock = 2, 5, 4, 8, 2000, 20000, 30*time.Minute
+	}
 	scanTimeout := getduration("SYNAPSE_SCAN_TIMEOUT", 10*time.Minute)
 	completionTimeout := scanTimeout
 	if completionTimeout <= 0 {
@@ -472,6 +491,14 @@ func Load() Config {
 		SandboxEnabled:      getbool("SYNAPSE_SANDBOX_ENABLED", false),
 		SandboxMemMax:       int64(getint("SYNAPSE_SANDBOX_MEM_MAX", 512<<20)),
 		SandboxPidsMax:      getint("SYNAPSE_SANDBOX_PIDS_MAX", 256),
+		DASTHelperBin:       getenv("SYNAPSE_DAST_HELPER_BIN", "synapse-dast-helper"),
+		DASTMaxReauth:       maxReauth,
+		DASTRatePerSec:      ratePerSec,
+		DASTConcurrency:     concurrency,
+		DASTMaxDepth:        maxDepth,
+		DASTMaxPages:        maxPages,
+		DASTMaxRequests:     maxRequests,
+		DASTMaxWallClock:    maxWallClock,
 		VaultMasterKey:      getenv("SYNAPSE_VAULT_MASTER_KEY", ""),
 		ReconViaWorker:      getbool("SYNAPSE_RECON_VIA_WORKER", false),
 		ToolHashes:          parsePins(getenv("SYNAPSE_TOOL_HASHES", "")),

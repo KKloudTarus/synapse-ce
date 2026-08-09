@@ -42,6 +42,25 @@ func TestVerifyRuntimeConfirmedSASTEmitsDASTNotSAST(t *testing.T) {
 	}
 }
 
+func TestVerifyConfirmedNativeDASTEmitsDAST(t *testing.T) {
+	svc, _, _, _ := newSvc()
+	dast := &fakeDASTRecorder{}
+	sast := &fakeSASTRecorder{}
+	svc.SetDASTRecorder(dast)
+	svc.SetSASTRecorder(sast)
+	claim := judgment.DASTClaim{CWE: "CWE-79", Location: "/search", Rule: "reflected-xss", Source: "first_party", Fingerprint: "search_reflection", ProofEvidenceID: "proof-1"}
+	j, err := svc.Propose(context.Background(), "system:dast", "e1", judgment.CapDAST, judgment.SubjectEngagement, "e1", claim)
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if _, err := svc.Verify(context.Background(), "human:bob", "e1", j.ID, 85, "redacted proof observed", j.Version); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if len(dast.calls) != 1 || len(sast.calls) != 0 {
+		t.Fatalf("native DAST promotion = dast:%d sast:%d", len(dast.calls), len(sast.calls))
+	}
+}
+
 // The STATIC path (Verify) confirming a CapSAST judgment fires the SAST recorder, NOT the DAST one — proving
 // the two paths are cleanly separated and neither double-emits.
 func TestVerifyStaticConfirmedSASTEmitsSASTNotDAST(t *testing.T) {

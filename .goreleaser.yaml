@@ -52,6 +52,16 @@ builds:
     goarch: *build_goarch
     ignore: *build_ignore
 
+  - id: synapse-dast-helper
+    main: ./cmd/synapse-dast-helper
+    binary: synapse-dast-helper
+    env: *build_env
+    flags: *build_flags
+    ldflags: *build_ldflags
+    goos: *build_goos
+    goarch: *build_goarch
+    ignore: *build_ignore
+
   - id: synapse-worker
     main: ./cmd/synapse-worker
     binary: synapse-worker
@@ -88,6 +98,7 @@ archives:
     ids:
       - synapse-cli
       - synapse-api
+      - synapse-dast-helper
       - synapse-worker
       - synapse-callgraph
       - synapse-mcp

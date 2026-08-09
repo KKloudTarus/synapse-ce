@@ -43,6 +43,21 @@ func TestRecordConfirmedDAST(t *testing.T) {
 	}
 }
 
+func TestRecordConfirmedNativeDAST(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := newSvc(repo, &fakeComments{}, &fakeAudit{})
+	j := judgment.Judgment{
+		ID: "j-native", EngagementID: "eng-1", Capability: judgment.CapDAST,
+		Claim: judgment.DASTClaim{CWE: "CWE-79", Location: "/search", Rule: "reflected-xss", Source: "first_party", Fingerprint: "search_reflection", ProofEvidenceID: "proof-1"},
+	}
+	if err := svc.RecordConfirmedDAST(context.Background(), "human:bob", j); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if got := repo.upserted[0].DedupKey; got != "dast:first_party:search_reflection" {
+		t.Fatalf("DedupKey = %q", got)
+	}
+}
+
 func TestRecordConfirmedDASTRejectsWrongInput(t *testing.T) {
 	svc := newSvc(&fakeRepo{}, &fakeComments{}, &fakeAudit{})
 	// not a sast capability

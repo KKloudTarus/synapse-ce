@@ -52,16 +52,18 @@ func (rt *Router) decideRuntimeVerification(w http.ResponseWriter, r *http.Reque
 		Approve bool   `json:"approve"`
 		Reason  string `json:"reason"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body); err != nil {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid request body"})
 		return
 	}
-	dec, err := rt.dastWorkflow.Decide(r.Context(), PrincipalFrom(r.Context()), shared.ID(r.PathValue("id")), shared.ID(r.PathValue("aid")), body.Approve, body.Reason)
+	out, err := rt.dastWorkflow.Decide(r.Context(), PrincipalFrom(r.Context()), shared.ID(r.PathValue("id")), shared.ID(r.PathValue("aid")), body.Approve, body.Reason)
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, dec)
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (rt *Router) runRuntimeVerification(w http.ResponseWriter, r *http.Request) {

@@ -35,6 +35,9 @@ type ApprovalStore interface {
 	// Get returns the proposed action and its current decision (state ApprovalPending until decided).
 	Get(ctx context.Context, actionID shared.ID) (agent.ProposedAction, agent.ApprovalDecision, error)
 	Decide(ctx context.Context, d agent.ApprovalDecision) error
+	// Consume atomically marks an approved action as used. The first caller wins;
+	// later callers receive shared.ErrConflict.
+	Consume(ctx context.Context, actionID shared.ID) error
 	// EngagementsWithPending lists the engagements that have at least one pending approval –
 	// so the prod timeout sweeper can fan out across them without a global scan.
 	EngagementsWithPending(ctx context.Context) ([]shared.ID, error)
