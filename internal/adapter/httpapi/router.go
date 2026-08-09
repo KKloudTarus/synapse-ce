@@ -35,38 +35,40 @@ import (
 
 // Router wires HTTP routes to use case services.
 type Router struct {
-	log             *slog.Logger
-	auth            *Authenticator
-	eng             *enguc.Service
-	sca             *scauc.Service
-	aup             *aupuc.Service
-	findings        *findingsuc.Service
-	export          *exportuc.Service
-	report          *reportuc.Service
-	evidence        *evidenceuc.Service
-	recon           *reconuc.Service
-	logs            ports.LogStream
-	transfer        *transferuc.Service
-	audit           *audituc.Service
-	vex             *vexuc.Service
-	users           *usersuc.Service
-	credentials     *credentialsuc.Service
-	dastVerifier    runtimeVerifierService
-	dastWorkflow    dastWorkflowService
-	agent           *agentDeps            // optional; nil ⇒ agent routes are not registered
-	exploitation    findingVerifier       // optional; nil ⇒ the verify route is not registered
-	judgments       judgmentService       // optional; nil ⇒ judgment routes are not registered
-	autoVerifier    autoVerifierService   // optional; nil ⇒ the LLM auto-verify route is not registered
-	threatModels    threatModelService    // optional; nil ⇒ threat-model routes are not registered
-	drafts          writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
-	projects        projectService        // optional; nil ⇒ project routes are not registered
-	assets          assetService          // optional; nil ⇒ fleet asset routes are not registered
-	coverage        coverageService       // optional; nil ⇒ fleet coverage/agent-view routes are not registered
-	fleet           *fleetRouter          // optional; nil ⇒ agent transport plane is not served
-	fleetAdmin      fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
-	qualityGates    qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
-	qualityProfiles qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
-	rules           rulesService          // optional; nil ⇒ rule catalog routes are not registered
+	log              *slog.Logger
+	auth             *Authenticator
+	eng              *enguc.Service
+	sca              *scauc.Service
+	aup              *aupuc.Service
+	findings         *findingsuc.Service
+	export           *exportuc.Service
+	report           *reportuc.Service
+	evidence         *evidenceuc.Service
+	recon            *reconuc.Service
+	logs             ports.LogStream
+	transfer         *transferuc.Service
+	audit            *audituc.Service
+	vex              *vexuc.Service
+	users            *usersuc.Service
+	credentials      *credentialsuc.Service
+	dastVerifier     runtimeVerifierService
+	dastWorkflow     dastWorkflowService
+	agent            *agentDeps            // optional; nil ⇒ agent routes are not registered
+	exploitation     findingVerifier       // optional; nil ⇒ the verify route is not registered
+	judgments        judgmentService       // optional; nil ⇒ judgment routes are not registered
+	autoVerifier     autoVerifierService   // optional; nil ⇒ the LLM auto-verify route is not registered
+	threatModels     threatModelService    // optional; nil ⇒ threat-model routes are not registered
+	drafts           writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
+	projects         projectService        // optional; nil ⇒ project routes are not registered
+	assets           assetService          // optional; nil ⇒ fleet asset routes are not registered
+	coverage         coverageService       // optional; nil ⇒ fleet coverage/agent-view routes are not registered
+	sarif            sarifIngester         // optional; nil ⇒ the third-party SARIF import route is not registered
+	importedFindings sarifReader           // optional read side for imported findings
+	fleet            *fleetRouter          // optional; nil ⇒ agent transport plane is not served
+	fleetAdmin       fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
+	qualityGates     qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
+	qualityProfiles  qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
+	rules            rulesService          // optional; nil ⇒ rule catalog routes are not registered
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -283,6 +285,16 @@ func (rt *Router) routes() *http.ServeMux {
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/live-recon", rt.authz(userdom.PermOperate, rt.setLiveRecon))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/findings", rt.authz(userdom.PermView, rt.withEngTenant(rt.listFindings)))
 	mux.HandleFunc("POST /api/v1/engagements/{id}/findings", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.createFinding)))
+	if rt.sarif != nil {
+		// Ingesting a third-party report is an OPERATE action on the engagement, tenant-scoped like any
+		// other child resource. It grants no promotion authority: an imported finding can never confirm
+		// itself through the judgment gate.
+		mux.HandleFunc("POST /api/v1/engagements/{id}/sarif", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.importSARIF)))
+		// Reading them back is a VIEW action. The read exists so an imported finding is visible as what
+		// it is: every row carries its provenance and states that it is external and cannot promote
+		// itself, rather than the governance claim being made by a method nothing calls.
+		mux.HandleFunc("GET /api/v1/engagements/{id}/imported-findings", rt.authz(userdom.PermView, rt.withEngTenant(rt.listImportedFindings)))
+	}
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan", rt.authz(userdom.PermView, rt.withEngTenant(rt.latestScan)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan-status", rt.authz(userdom.PermView, rt.withEngTenant(rt.scanStatus)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan-runs", rt.authz(userdom.PermView, rt.withEngTenant(rt.scanRuns)))

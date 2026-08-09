@@ -134,6 +134,7 @@ import (
 	reportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/report"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sbomcrosscheckjudge"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/srcreach"
@@ -194,6 +195,7 @@ func main() {
 	var scanRepo ports.ScanRepository
 	var scanResultStore ports.ScanResultStore
 	var importedSBOMStore ports.ImportedSBOMStore
+	var importedFindingStore ports.ImportedFindingStore // third-party (SARIF) findings under governance
 	var scanJobStore ports.ScanJobStore
 	var scanRunStore ports.ScanRunStore
 	var projectAnalysisStore ports.ProjectAnalysisStore
@@ -294,6 +296,7 @@ func main() {
 		scanRepo = postgres.NewScanRepository(pool)
 		scanResultStore = postgres.NewScanResultStore(pool)
 		importedSBOMStore = postgres.NewImportedSBOMStore(pool)
+		importedFindingStore = postgres.NewImportedFindingRepository(pool)
 		scanJobStore = postgres.NewScanJobStore(pool)
 		scanRunStore = postgres.NewScanRunStore(pool)
 		projectAnalysisStore = postgres.NewProjectAnalysisStore(pool)
@@ -312,11 +315,13 @@ func main() {
 		// SECURITY (#431 req 6, #432, #409): the fleet_* tables are RLS-protected, but RLS is a
 		// silent no-op if the runtime DB role is SUPERUSER or holds BYPASSRLS. When any fleet
 		// feature is enabled we refuse to serve unless the role can actually enforce isolation.
-		if cfg.FleetAssetsEnabled || cfg.FleetEnabled {
-			if rerr := postgres.CheckRLSRuntimeRole(startup, pool); rerr != nil {
-				log.Error("a fleet feature is enabled but the DB role cannot enforce row level security – refusing to serve", "err", rerr)
-				os.Exit(1)
-			}
+		// imported_findings is RLS-protected too (migration 0064), and RLS is a silent no-op under a
+		// SUPERUSER/BYPASSRLS role no matter what FORCE says. The check is unconditional here rather
+		// than fleet-only: a table whose isolation claim is written into its own migration must not be
+		// served by a role that cannot honour it.
+		if rerr := postgres.CheckRLSRuntimeRole(startup, pool); rerr != nil {
+			log.Error("an RLS-protected table is in use but the DB role cannot enforce row level security – refusing to serve", "err", rerr)
+			os.Exit(1)
 		}
 		aupStore = postgres.NewAUPStore(pool)
 		pgAudit := postgres.NewAuditLog(pool)
@@ -350,6 +355,7 @@ func main() {
 		scanRepo = memory.NewScanRepository()
 		scanResultStore = memory.NewScanResultStore()
 		importedSBOMStore = memory.NewImportedSBOMStore()
+		importedFindingStore = memory.NewImportedFindingStore()
 		scanJobStore = memory.NewScanJobStore()
 		scanRunStore = memory.NewScanRunStore()
 		projectAnalysisStore = memory.NewProjectAnalysisStore()
@@ -1082,6 +1088,27 @@ func main() {
 			log.Info("fleet coverage + agent-health views ENABLED (no default-to-clean; tenant-scoped)")
 		}
 	}
+	// Third-party SARIF ingest (#415). External findings join the same asset model, prioritisation and
+	// governance path as first-party ones, but stay structurally distinguishable and carry NO promotion
+	// authority: an external tool's confidence is not a distinct verifier's sealed verdict.
+	{
+		sarifSvc, serr := sarifingest.NewService(importedFindingStore, findingRepo, repo, auditLog, clock, ids)
+		if serr != nil {
+			log.Error("sarif ingest init failed", "err", serr)
+			os.Exit(1)
+		}
+		router.SetSARIFIngest(sarifSvc)
+		router.SetImportedFindings(importedFindingStore)
+		// The ingest writes an append-only audit entry asserting that N external results entered an
+		// engagement. Without Postgres those rows live only in this process, so the banner says so
+		// rather than letting the audit trail imply a durability the deployment does not have.
+		if cfg.DBDSN != "" {
+			log.Info("third-party SARIF ingest ENABLED (durable; provenance mandatory; imported findings cannot self-promote)")
+		} else {
+			log.Warn("third-party SARIF ingest ENABLED but NOT DURABLE - imported findings and their ingest history live in memory and are lost on restart; configure SYNAPSE_DB_DSN for a durable store")
+		}
+	}
+
 	if cfg.FleetEnabled {
 		// SECURITY: a missing/short signer key fails startup closed rather than boot a forgeable
 		// work-order signer (worksign.New rejects keys under 32 bytes).
