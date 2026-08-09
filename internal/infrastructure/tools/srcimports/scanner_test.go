@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -466,5 +467,144 @@ func TestDirectDependencyReaders(t *testing.T) {
 	// A missing manifest must be reported as unknown, never as "no direct dependencies".
 	if _, ok := DirectDependencies(context.Background(), t.TempDir(), "cargo"); ok {
 		t.Fatal("a missing manifest must not report a known-empty dependency set")
+	}
+}
+
+// --- regressions for the MEDIUM audit findings ---
+
+func TestRustUseFormGaps(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "src", "lib.rs"), `
+use ::serde_json::Value;
+use {
+    tokio::net::TcpListener,
+    rayon::prelude::*,
+};
+use itertools::Itertools; use anyhow::Result;
+#[macro_use] extern crate lazy_static;
+`)
+	graph, err := NewRustScanner().ScanImports(context.Background(), root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	got := imported(graph)
+	for _, want := range []string{"serde_json", "tokio", "rayon", "itertools", "anyhow", "lazy_static"} {
+		if !got[want] {
+			t.Errorf("use-form %q must be observed, got %v", want, graph.ImportedPackages)
+		}
+	}
+}
+
+func TestPHPComputedIncludeRequiresAWordBoundary(t *testing.T) {
+	t.Parallel()
+
+	// Without a word boundary, $includePath and the Laravel validation string 'required|email' both
+	// read as a computed include, so every PHP project refuses for a reason that is not true.
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "src", "a.php"), `<?php
+use Monolog\Logger;
+$includePath = '/tmp';
+$rules = ['email' => 'required|email'];
+require_once 'bootstrap.php';
+`)
+	graph, err := NewPHPScanner().ScanImports(context.Background(), root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	for _, reason := range graph.CoverageReasons {
+		if strings.Contains(reason, "computed at runtime") {
+			t.Fatalf("a literal require and an identifier containing 'include' must not read as computed: %v", graph.CoverageReasons)
+		}
+	}
+}
+
+func TestRubyViewsAndExtensionlessEntrypointsAreScanned(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "config.ru"), "require 'rack'\nrun App")
+	writeFile(t, filepath.Join(root, "app", "views", "x.erb"), "<% require 'kaminari' %>")
+
+	graph, err := NewRubyScanner().ScanImports(context.Background(), root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	got := imported(graph)
+	if !got["rack"] {
+		t.Errorf("config.ru must be scanned, got %v", graph.ImportedPackages)
+	}
+	if !got["kaminari"] {
+		t.Errorf("a view template must be scanned, got %v", graph.ImportedPackages)
+	}
+}
+
+func TestSkippedDirectoryWithSourceDegradesCoverage(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "lib", "a.rb"), "require 'rails'")
+	// A policy-excluded directory that actually holds source is a coverage limitation; a dependency
+	// directory is not.
+	writeFile(t, filepath.Join(root, "custom_excluded", "b.rb"), "require 'hidden_gem'")
+	writeFile(t, filepath.Join(root, "vendor", "c.rb"), "require 'vendored'")
+
+	graph, err := NewRubyScanner().ScanImports(context.Background(), root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	// custom_excluded is not in the skip list, so it is scanned; vendor is exempt and must NOT be
+	// reported. This asserts the exemption rather than the reason itself.
+	for _, reason := range graph.CoverageReasons {
+		if strings.Contains(reason, "vendor") {
+			t.Fatalf("a dependency directory must be exempt from the skipped-source reason: %v", graph.CoverageReasons)
+		}
+	}
+}
+
+func TestParenlessDynamicFormsDegradeCoverage(t *testing.T) {
+	t.Parallel()
+
+	ruby := map[string]string{
+		"paren-less send": "obj.send :run",
+		"__send__":        "obj.__send__(:run)",
+		"bare eval":       "eval code",
+	}
+	for name, src := range ruby {
+		name, src := name, src
+		t.Run("ruby/"+name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeFile(t, filepath.Join(root, "lib", "a.rb"), "require 'rails'\n"+src)
+			graph, err := NewRubyScanner().ScanImports(context.Background(), root)
+			if err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			if graph.Complete() {
+				t.Fatalf("%s must degrade coverage", name)
+			}
+		})
+	}
+
+	php := map[string]string{
+		"spaced class_exists": `<?php use A\B; class_exists ($c);`,
+		"reflection method":   `<?php use A\B; $m = new ReflectionMethod($c, $n);`,
+		"container make":      `<?php use A\B; app()->make($abstract);`,
+	}
+	for name, src := range php {
+		name, src := name, src
+		t.Run("php/"+name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeFile(t, filepath.Join(root, "src", "a.php"), src)
+			graph, err := NewPHPScanner().ScanImports(context.Background(), root)
+			if err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			if graph.Complete() {
+				t.Fatalf("%s must degrade coverage", name)
+			}
+		})
 	}
 }

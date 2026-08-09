@@ -78,19 +78,48 @@ var rustSkipDir = map[string]bool{
 // candidate namer must expand both forms.
 func rustCrateReferences(body string) []string {
 	var out []string
-	for _, line := range strings.Split(body, "\n") {
-		trimmed := strings.TrimSpace(line)
+	// Statements, not lines: a `use` group may span lines and two statements may share one line.
+	for _, statement := range splitRustStatements(body) {
+		trimmed := strings.TrimSpace(statement)
 		trimmed = strings.TrimPrefix(trimmed, "pub ")
-		switch {
-		case strings.HasPrefix(trimmed, "use "):
-			out = append(out, rustUseRoot(strings.TrimPrefix(trimmed, "use "))...)
-		case strings.HasPrefix(trimmed, "extern crate "):
-			name := strings.TrimPrefix(trimmed, "extern crate ")
-			name = strings.TrimSuffix(strings.TrimSpace(name), ";")
+		// `#[macro_use] extern crate x;` puts the attribute on the same line.
+		if i := strings.Index(trimmed, "extern crate "); i >= 0 {
+			name := strings.TrimSpace(trimmed[i+len("extern crate "):])
 			if root := rustIdentifier(name); root != "" {
 				out = append(out, root)
 			}
+			continue
 		}
+		if strings.HasPrefix(trimmed, "use ") {
+			out = append(out, rustUseRoot(strings.TrimPrefix(trimmed, "use "))...)
+		}
+	}
+	return out
+}
+
+// splitRustStatements splits a body on semicolons that are not inside a brace group, so a multi-line
+// `use { ... };` stays one statement and `use a::X; use b::Y;` becomes two.
+func splitRustStatements(body string) []string {
+	var out []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(body); i++ {
+		switch body[i] {
+		case '{':
+			depth++
+		case '}':
+			if depth > 0 {
+				depth--
+			}
+		case ';':
+			if depth == 0 {
+				out = append(out, body[start:i])
+				start = i + 1
+			}
+		}
+	}
+	if start < len(body) {
+		out = append(out, body[start:])
 	}
 	return out
 }
@@ -111,6 +140,8 @@ func rustUseRoot(rest string) []string {
 		}
 		return out
 	}
+	// A leading "::" addresses the crate root: `use ::serde_json::Value;`.
+	rest = strings.TrimPrefix(rest, "::")
 	head := rest
 	if i := strings.Index(head, "::"); i >= 0 {
 		head = head[:i]
