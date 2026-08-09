@@ -226,10 +226,6 @@ func (s *Service) RecordConfirmedSAST(ctx context.Context, verifier string, j ju
 // DETERMINISTICALLY from the typed SASTClaim (no LLM); severity starts Unknown so a human triages it
 // through the normal finding workflow. Audited.
 func (s *Service) RecordConfirmedDAST(ctx context.Context, verifier string, j judgment.Judgment) error {
-	if !j.Publishable() {
-		return fmt.Errorf("%w: dast judgment %s is not publishable", shared.ErrValidation, j.ID)
-	}
-
 	in := finding.DASTInput{JudgmentID: j.ID.String()}
 	var assetID shared.ID
 	switch claim := j.Claim.(type) {
