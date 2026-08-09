@@ -66,7 +66,7 @@ func verifiedCritique(key string) ports.AICritique {
 		Verified:           true,
 		VerifierVerdict:    "refuted",
 		VerifierConfidence: 93,
-		PromptVersion:      "fp-triage-v1",
+		PromptVersion:      "fp-triage-v2",
 	}
 }
 
@@ -135,19 +135,23 @@ func TestApplyAIGatePolicyRejectsForgedVerifiedFlag(t *testing.T) {
 		verifiedCritique("same-model"),
 		verifiedCritique("case-alias"),
 		verifiedCritique("provider-alias"),
+		verifiedCritique("bedrock-alias"),
 		verifiedCritique("low-verifier"),
 		verifiedCritique("wrong-verdict"),
 	}
 	cases[0].VerifierModel = cases[0].ProposerModel
 	cases[1].VerifierModel = "PROPOSER-A"
 	cases[2].VerifierModel = "openai/proposer-a"
-	cases[3].VerifierConfidence = 74
-	cases[4].VerifierVerdict = "sound"
+	cases[3].ProposerModel = "anthropic.claude-opus-5-v1:0"
+	cases[3].VerifierModel = "us.anthropic.claude-opus-5-v1:0"
+	cases[4].VerifierConfidence = 74
+	cases[5].VerifierVerdict = "sound"
 	result := &ScanResult{
 		Findings: []finding.Finding{
 			{DedupKey: "same-model", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"},
 			{DedupKey: "case-alias", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"},
 			{DedupKey: "provider-alias", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"},
+			{DedupKey: "bedrock-alias", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"},
 			{DedupKey: "low-verifier", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"},
 			{DedupKey: "wrong-verdict", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"},
 		},

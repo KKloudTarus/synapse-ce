@@ -36,16 +36,16 @@ type SourceReader = ports.SourceSnippetReader
 // consulted (timeout, transport, or an unparseable/invalid reply); such a critique is treated as
 // inconclusive and never marks a finding.
 //
-// When a DISTINCT verifier model is configured, a proposer "refuted" is only actionable if the verifier
-// independently agrees — the stateless-CLI analogue of the judgment gate's "a distinct verifier's sealed
-// verdict, self-confirm forbidden". VerifyAttempted records that a verifier was required for this
-// critique (proposer refuted at/above the bar); Verifier holds its reply (nil if the verify call failed).
+// When a DISTINCT verifier model is configured, it assesses every candidate without seeing the proposer
+// output. A proposer "refuted" is only actionable if the verifier independently agrees — the stateless-
+// CLI analogue of the judgment gate's "a distinct verifier's sealed verdict, self-confirm forbidden".
+// VerifyAttempted records that a blind verifier was tried; Verifier is nil if that call failed.
 type Critique struct {
 	FindingID       string
 	DedupKey        string
 	Claim           judgment.CritiqueClaim  // the proposer's verdict
 	Verifier        *judgment.CritiqueClaim // the distinct verifier's verdict, when one was run
-	VerifyAttempted bool                    // a distinct verifier was required (and tried) for this critique
+	VerifyAttempted bool                    // a distinct blind verifier was configured and tried
 	Err             error
 }
 
@@ -79,7 +79,7 @@ func (c Critique) VerifiedConsensus(minConfidence int) bool {
 type Coordinator struct {
 	llm           ports.LLM
 	model         string
-	verifier      ports.LLM // optional distinct verifier; a proposer "refuted" is confirmed only if it agrees
+	verifier      ports.LLM // optional distinct blind verifier; a proposer "refuted" is confirmed only if it agrees
 	verifierModel string
 	minConf       int // minimum confidence for a "refuted" to be actionable (default verdict.EvidenceThreshold)
 	radius        int // source context lines each side of the finding line
@@ -106,11 +106,11 @@ func (c *Coordinator) WithMinConfidence(n int) *Coordinator {
 }
 
 // WithVerifier attaches a DISTINCT verifier model. Agreement creates VerifiedConsensus, which the
-// scan policy may authorize only after applying severity/kind/CWE human-review floors. A no-op if llm
-// is nil or the verifier model equals the proposer model (not a distinct verifier).
+// scan policy may authorize only after applying severity/kind/CWE human-review floors. A no-op if the
+// client or either model identity is missing, or the verifier aliases the proposer.
 func (c *Coordinator) WithVerifier(llm ports.LLM, model string) *Coordinator {
 	model = strings.TrimSpace(model)
-	if llm != nil && model != "" && !agent.SameModel(model, c.model) {
+	if llm != nil && model != "" && c.model != "" && !agent.SameModel(model, c.model) {
 		c.verifier = llm
 		c.verifierModel = model
 	}
@@ -185,6 +185,15 @@ func (c *Coordinator) assessOne(ctx context.Context, f finding.Finding, src Sour
 			{Role: "user", Content: userPrompt(f, snippet)},
 		},
 	}
+	// Run the verifier before the proposer result exists. Its request contains only the finding and source
+	// context, so neither invocation order nor prompt content can anchor it to the proposer's conclusion.
+	if c.verifier != nil {
+		res.VerifyAttempted = true
+		if v, verr := c.verify(ctx, f, snippet); verr == nil {
+			res.Verifier = &v
+		}
+	}
+
 	resp, err := c.llm.Chat(ctx, req)
 	if err != nil {
 		res.Err = fmt.Errorf("critique llm: %w", err)
@@ -196,21 +205,12 @@ func (c *Coordinator) assessOne(ctx context.Context, f finding.Finding, src Sour
 		return res
 	}
 	res.Claim = claim
-	// Distinct-verifier consensus: only a proposer "refuted" at/above the bar is worth a second call.
-	// The verifier must independently agree for the refutation to stand (SuspectedFP); a disagreement,
-	// inconclusive reply, or failed call leaves Verifier nil → the finding keeps gating (fail-safe).
-	if c.verifier != nil && claim.Verdict == judgment.CritiqueRefuted && claim.Confidence >= c.minConf {
-		res.VerifyAttempted = true
-		if v, verr := c.verify(ctx, f, snippet, claim); verr == nil {
-			res.Verifier = &v
-		}
-	}
 	return res
 }
 
-// verify runs the distinct verifier model over a proposer's refutation, adversarially framed to keep a
-// real weakness from being dismissed. Returns the verifier's CritiqueClaim, or an error if unreachable.
-func (c *Coordinator) verify(ctx context.Context, f finding.Finding, snippet string, proposer judgment.CritiqueClaim) (judgment.CritiqueClaim, error) {
+// verify runs the distinct verifier over only the finding and source context. Returns its independent
+// CritiqueClaim, or an error if the verifier is unreachable or its reply fails validation.
+func (c *Coordinator) verify(ctx context.Context, f finding.Finding, snippet string) (judgment.CritiqueClaim, error) {
 	if ctx.Err() != nil {
 		return judgment.CritiqueClaim{}, ctx.Err()
 	}
@@ -221,7 +221,7 @@ func (c *Coordinator) verify(ctx context.Context, f finding.Finding, snippet str
 		ResponseSchema: critiqueSchema,
 		Messages: []agent.Message{
 			{Role: "system", Content: verifierSystemPrompt},
-			{Role: "user", Content: verifierUserPrompt(f, snippet, proposer)},
+			{Role: "user", Content: verifierUserPrompt(f, snippet)},
 		},
 	})
 	if err != nil {

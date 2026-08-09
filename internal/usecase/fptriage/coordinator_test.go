@@ -78,8 +78,8 @@ func TestAssessAppliesVerdicts(t *testing.T) {
 	}
 }
 
-// roleLLM answers differently for the proposer vs the verifier pass (the verifier user prompt carries
-// the "first reviewer's verdict" preamble), and can fail the verifier call.
+// roleLLM answers by configured model identity and can fail the verifier call. Routing by model keeps
+// the test independent of prompt text, which is important because the verifier prompt must stay blind.
 type roleLLM struct {
 	proposer  string
 	verifier  string
@@ -87,13 +87,7 @@ type roleLLM struct {
 }
 
 func (f roleLLM) Chat(_ context.Context, req ports.ChatRequest) (ports.ChatResponse, error) {
-	user := ""
-	for _, m := range req.Messages {
-		if m.Role == "user" {
-			user = m.Content
-		}
-	}
-	if strings.Contains(user, "first reviewer's verdict") { // the verifier pass
+	if req.Model == "verifier-model" {
 		if f.verifyErr != nil {
 			return ports.ChatResponse{}, f.verifyErr
 		}
@@ -125,19 +119,73 @@ func TestVerifierConsensus(t *testing.T) {
 	if got := run(roleLLM{proposer: refuted, verifyErr: errors.New("gateway 503")}); got.SuspectedFP(75) || got.Verifier != nil {
 		t.Errorf("a failed verify must keep the finding gating (fail-safe): %+v", got)
 	}
-	// Proposer says sound → no verify attempted, not FP.
-	if got := run(roleLLM{proposer: `{"verdict":"sound","driver":"attacker_controlled","confidence":88}`, verifier: refuted}); got.SuspectedFP(75) || got.VerifyAttempted {
-		t.Errorf("a sound proposer must not trigger verification or FP: %+v", got)
+	// The verifier runs blind for every candidate, but a sound proposer can never produce consensus.
+	if got := run(roleLLM{proposer: `{"verdict":"sound","driver":"attacker_controlled","confidence":88}`, verifier: refuted}); got.SuspectedFP(75) || !got.VerifyAttempted || got.Verifier == nil {
+		t.Errorf("a sound proposer must remain non-FP after an independent verifier pass: %+v", got)
 	}
 }
 
 func TestVerifierMustBeCanonicallyDistinct(t *testing.T) {
 	llm := roleLLM{}
-	for _, verifier := range []string{"PROPOSER-MODEL", "openai/proposer-model", "router/openai/PROPOSER-MODEL"} {
-		c := New(llm, "proposer-model").WithVerifier(llm, verifier)
+	for _, tc := range []struct {
+		proposer string
+		verifier string
+	}{
+		{"proposer-model", "PROPOSER-MODEL"},
+		{"proposer-model", "openai/proposer-model"},
+		{"proposer-model", "router/openai/PROPOSER-MODEL"},
+		{"anthropic.claude-opus-5-v1:0", "us.anthropic.claude-opus-5-v1:0"},
+		{"anthropic/claude-opus-5", "global.anthropic.claude-opus-5-v1:0"},
+		{"", "verifier-model"},
+	} {
+		c := New(llm, tc.proposer).WithVerifier(llm, tc.verifier)
 		if c.VerifierModel() != "" {
-			t.Errorf("verifier %q self-confirmed proposer through an alias", verifier)
+			t.Errorf("verifier %q self-confirmed proposer %q through an alias", tc.verifier, tc.proposer)
 		}
+	}
+}
+
+// anchoringLLM simulates a verifier that rubber-stamps only when the first reviewer's exact output is
+// leaked into its transcript. The safe blind prompt makes it disagree, so restoring the old preamble
+// changes the gate outcome and fails this test.
+type anchoringLLM struct {
+	reqs []ports.ChatRequest
+}
+
+func (a *anchoringLLM) Chat(_ context.Context, req ports.ChatRequest) (ports.ChatResponse, error) {
+	a.reqs = append(a.reqs, req)
+	if req.Model == "proposer-model" {
+		return ports.ChatResponse{Content: `{"verdict":"refuted","driver":"not_reachable","confidence":92}`}, nil
+	}
+	var transcript strings.Builder
+	for _, message := range req.Messages {
+		transcript.WriteString(message.Content)
+		transcript.WriteByte('\n')
+	}
+	leaked := strings.Contains(transcript.String(), "first reviewer's verdict") ||
+		strings.Contains(transcript.String(), "verdict=refuted") ||
+		strings.Contains(transcript.String(), "driver=not_reachable") ||
+		strings.Contains(transcript.String(), "confidence=92")
+	if leaked {
+		return ports.ChatResponse{Content: `{"verdict":"refuted","driver":"not_reachable","confidence":92}`}, nil
+	}
+	return ports.ChatResponse{Content: `{"verdict":"sound","driver":"attacker_controlled","confidence":88}`}, nil
+}
+
+func TestVerifierAssessmentIsBlindAndRunsBeforeComparison(t *testing.T) {
+	llm := &anchoringLLM{}
+	got := New(llm, "proposer-model").WithVerifier(llm, "verifier-model").Assess(
+		context.Background(), []finding.Finding{mkFinding("1", "X (a/b.go:1)")}, nil,
+	)[0]
+
+	if len(llm.reqs) != 2 || llm.reqs[0].Model != "verifier-model" || llm.reqs[1].Model != "proposer-model" {
+		t.Fatalf("blind verifier must run before the proposer result exists, requests=%+v", llm.reqs)
+	}
+	if got.Verifier == nil || got.Verifier.Verdict != judgment.CritiqueSound {
+		t.Fatalf("verifier was anchored by proposer output: %+v", got)
+	}
+	if got.SuspectedFP(75) || got.VerifiedConsensus(75) {
+		t.Fatalf("an independent disagreement must keep the finding gating: %+v", got)
 	}
 }
 

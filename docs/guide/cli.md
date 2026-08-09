@@ -80,8 +80,11 @@ stays in the report, it is only held back from the `--fail-on` gate).
    After the deterministic pass, the model adjudicates the remaining production-scope first-party source
    findings (SAST/misconfig; secret findings are never sent to the LLM) and returns a typed verdict — `refuted` (suspected false positive),
    `sound`, or `uncertain` — with a confidence. The proposer only advises: single-model output can never
-   change the gate. Set `SYNAPSE_VERIFIER_MODEL` to a **different** model to enable consensus. The rollout
-   mode defaults to `SYNAPSE_FP_TRIAGE_MODE=shadow`: Synapse stores `would_gate_exempt` for measurement,
+   change the gate. Set `SYNAPSE_VERIFIER_MODEL` to a **different model family** to enable consensus. The
+   verifier runs first with only the finding and source context; it never sees the proposer verdict.
+   Provider prefixes, dated aliases, and Amazon Bedrock geographic/global inference-profile IDs are
+   canonicalized fail-closed so one model family cannot verify itself under two names. The rollout mode
+   defaults to `SYNAPSE_FP_TRIAGE_MODE=shadow`: Synapse stores `would_gate_exempt` for measurement,
    always forces `gate_exempt=false`, and keeps the finding gating. Set the mode explicitly to `enforce`
    only after the evaluation threshold is approved. In enforced mode, a finding is gate-exempt only when
    both models independently refute it at/above the bar and the deterministic

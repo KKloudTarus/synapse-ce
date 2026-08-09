@@ -141,6 +141,8 @@ func TestAutoVerifyRejectsAliasedOrMissingModelIdentity(t *testing.T) {
 		{"same model", "gpt-4o", "gpt-4o"},
 		{"provider alias", "gpt-4o", "router/openai/GPT-4O"},
 		{"dated alias", "gpt-4o", "openai/gpt-4o-2024-08-06"},
+		{"bedrock geographic profile", "anthropic.claude-opus-5-v1:0", "us.anthropic.claude-opus-5-v1:0"},
+		{"bedrock global profile", "anthropic/claude-opus-5", "global.anthropic.claude-opus-5-v1:0"},
 		{"missing proposer", "", "gpt-4o"},
 		{"missing verifier", "gpt-4o", ""},
 	} {

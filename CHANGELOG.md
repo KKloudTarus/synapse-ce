@@ -47,6 +47,10 @@ capabilities below are already shipped on `main`.
 
 ### Fixed
 
+- **Blind AI verifier independence.** False-positive verification now runs on every candidate before the
+  proposer result is available and receives only the finding plus source context, preventing proposer
+  verdict anchoring. Provider/date aliases and Amazon Bedrock geographic/global inference-profile IDs
+  fail closed as the same model family, and operators are warned when aliasing disables verification.
 - **Fail-closed AI validation.** Reject missing or out-of-range false-positive confidence and verifier
   scores instead of coercing malformed model output into a valid judgment; canonicalize model aliases
   before enforcing proposer/verifier separation; account conservatively for missing, negative, or

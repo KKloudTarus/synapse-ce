@@ -67,6 +67,28 @@ func CanonicalModelID(id string) string {
 	if slash := strings.LastIndexByte(id, '/'); slash >= 0 {
 		id = strings.TrimSpace(id[slash+1:])
 	}
+	// Amazon Bedrock cross-Region inference profiles prepend a geographic scope (for example
+	// "us." or "global.") to the underlying foundation-model ID. Bedrock model IDs then prepend a
+	// provider namespace with a dot, while OpenAI-compatible routers commonly spell that namespace
+	// with a slash (already removed above). Collapse both representations so a profile or provider
+	// spelling cannot make one model look like an independent verifier.
+	if prefix, rest, ok := strings.Cut(id, "."); ok && bedrockScope(prefix) {
+		id = rest
+	}
+	if prefix, rest, ok := strings.Cut(id, "."); ok && bedrockProvider(prefix) {
+		id = rest
+	}
+	// Bedrock's trailing -vN:M identifies a provider deployment revision, not an independent model
+	// family. Separation of duties therefore fails closed across those revisions as it does across
+	// OpenAI dated aliases below.
+	if rev := strings.LastIndex(id, "-v"); rev > 0 && bedrockRevision(id[rev+2:]) {
+		id = id[:rev]
+	}
+	// Bedrock model IDs commonly carry an undelimited YYYYMMDD release date. Treat that snapshot as
+	// the same family as its rolling shorthand; correlated revisions are not independent reviewers.
+	if n := len(id); n > 9 && id[n-9] == '-' && allASCIIDigits(id[n-8:]) {
+		id = id[:n-9]
+	}
 	// OpenAI-style dated aliases (model-YYYY-MM-DD) often point at the same weights as the
 	// corresponding rolling model name. Conservatively collapse that spelling too.
 	if n := len(id); n > 11 && id[n-11] == '-' &&
@@ -76,6 +98,29 @@ func CanonicalModelID(id string) string {
 		id = id[:n-11]
 	}
 	return id
+}
+
+func bedrockScope(s string) bool {
+	switch s {
+	case "us", "eu", "apac", "global":
+		return true
+	default:
+		return false
+	}
+}
+
+func bedrockProvider(s string) bool {
+	switch s {
+	case "ai21", "amazon", "anthropic", "cohere", "deepseek", "luma", "meta", "mistral", "moonshot", "nvidia", "openai", "qwen", "stability":
+		return true
+	default:
+		return false
+	}
+}
+
+func bedrockRevision(s string) bool {
+	major, minor, ok := strings.Cut(s, ":")
+	return ok && allASCIIDigits(major) && allASCIIDigits(minor)
 }
 
 func allASCIIDigits(s string) bool {

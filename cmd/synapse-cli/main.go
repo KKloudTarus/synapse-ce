@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
@@ -1347,12 +1348,12 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage disabled: %v\n", lerr)
 		} else {
 			coord := fptriage.New(llm, cfg.FPTriageModel)
-			if cfg.VerifierModel != "" && cfg.VerifierModel != cfg.FPTriageModel {
+			if strings.TrimSpace(cfg.VerifierModel) != "" && agent.SameModel(cfg.FPTriageModel, cfg.VerifierModel) {
+				fmt.Fprintf(os.Stderr, "synapse-cli: verifier model %q aliases proposer %q as %q; AI triage remains advisory-only\n",
+					cfg.VerifierModel, cfg.FPTriageModel, agent.CanonicalModelID(cfg.FPTriageModel))
+			} else if strings.TrimSpace(cfg.VerifierModel) != "" {
 				if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
 					coord.WithVerifier(vllm, cfg.VerifierModel)
-					if coord.VerifierModel() == "" {
-						fmt.Fprintf(os.Stderr, "synapse-cli: verifier model %q aliases the proposer after canonicalization; AI triage remains advisory-only\n", cfg.VerifierModel)
-					}
 				} else {
 					fmt.Fprintf(os.Stderr, "synapse-cli: verifier model %q unavailable; AI triage remains advisory-only: %v\n", cfg.VerifierModel, verr)
 				}

@@ -37,8 +37,9 @@ type AICritique struct {
 	WouldGateExempt bool `json:"would_gate_exempt,omitempty"`
 	GateExempt      bool `json:"gate_exempt"`
 	ReviewRequired  bool `json:"review_required"`
-	// Verified is true when a DISTINCT verifier model independently confirmed the refutation (two-model
-	// consensus). Single-model triage can set SuspectedFP but can never set Verified or GateExempt.
+	// Verified is true when a DISTINCT canonical model family independently confirmed the refutation
+	// without seeing the proposer result. Single-model triage can set SuspectedFP but can never set
+	// Verified or GateExempt.
 	Verified           bool   `json:"verified"`
 	VerifierVerdict    string `json:"verifier_verdict,omitempty"`
 	VerifierDriver     string `json:"verifier_driver,omitempty"`
