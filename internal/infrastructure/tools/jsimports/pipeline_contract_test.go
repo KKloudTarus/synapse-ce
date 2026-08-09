@@ -70,16 +70,15 @@ require(computed);
 	// Node built-ins must never be mistaken for npm dependencies.
 	assertContains(t, byStatus[jsresolution.StatusBuiltin], "node:fs")
 	assertContains(t, byStatus[jsresolution.StatusBuiltin], "path")
-	// A first-party workspace package must never be classified as a third-party component. At this
-	// phase the resolver reports it as AMBIGUOUS with a reason (workspace linking and a same-named
-	// registry package are indistinguishable without lockfile importer context, which phase R2C adds);
-	// what this test locks is that it is never silently a component.
+	// A first-party workspace package must never be classified as a third-party component. With no SBOM
+	// supplied the resolver cannot rule out a same-named registry package, so it reports AMBIGUOUS with
+	// a reason; what this test locks is that it is never silently a component.
 	assertContains(t, byStatus[jsresolution.StatusAmbiguous], "@workspace/shared")
 	if contains(byStatus[jsresolution.StatusComponent], "@workspace/shared") {
 		t.Error("a local workspace package must never resolve to a third-party component")
 	}
-	// Third-party specifiers stay unresolved at this phase: no SBOM was supplied, and R2C owns
-	// component correlation. What matters is that they are explicit, never silently dropped.
+	// Third-party specifiers stay unresolved here because no SBOM was supplied, so nothing can be
+	// correlated. What matters is that they are explicit, never silently dropped.
 	for _, specifier := range []string{"lodash", "some-types", "commonjs-pkg", "dynamic-pkg"} {
 		if !containsAny(byStatus, specifier) {
 			t.Errorf("specifier %q disappeared from resolution output", specifier)

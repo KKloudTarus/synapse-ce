@@ -11,10 +11,11 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// Resolve implements source-only R2B package identity resolution. The SBOM is
-// intentionally unused in this slice; exact component/PURL correlation belongs
-// to R2C and unresolved third-party package roots remain explicit until then.
-func (r *Resolver) Resolve(ctx context.Context, root string, graph modulegraph.Graph, _ *sbom.SBOM) (jsresolution.Result, error) {
+// Resolve implements source-only package identity resolution. Third-party package roots are correlated
+// to SBOM components by EXACT purl: one resolved version is a deterministic identity, several stay
+// ambiguous with every candidate preserved, and none stays explicitly unresolved. The resolver still
+// classifies identity only — it never decides reachability and never mints a judgment.
+func (r *Resolver) Resolve(ctx context.Context, root string, graph modulegraph.Graph, doc *sbom.SBOM) (jsresolution.Result, error) {
 	if ctx == nil {
 		return jsresolution.Result{}, fmt.Errorf("%w: context is required", shared.ErrValidation)
 	}
@@ -84,6 +85,7 @@ func (r *Resolver) Resolve(ctx context.Context, root string, graph modulegraph.G
 		modulePaths[module.Path] = struct{}{}
 	}
 	workspaceByName := indexWorkspacesByName(inventory.Packages)
+	components := newComponentIndex(doc, r.limits.maxComponents, r.limits.maxCandidates, &coverage)
 
 	result := jsresolution.Result{GraphCoverage: append([]modulegraph.CoverageIssue(nil), normalizedGraph.Coverage...)}
 	for _, edge := range normalizedGraph.Edges {
@@ -119,34 +121,33 @@ func (r *Resolver) Resolve(ctx context.Context, root string, graph modulegraph.G
 			resolution.Status = jsresolution.StatusBuiltin
 			resolution.Package = jsresolution.PackageIdentity{Name: classified.BuiltinName}
 		case jsresolution.SpecifierPackageImport:
-			resolution = r.resolvePackageImport(ctx, resolution, aliases.mappings, aliases.packageScopes, aliases.scopeDiscoveryComplete, workspaceByName, inventory.Packages, &aliasWork, &candidateWork, &coverage)
+			resolution = r.resolvePackageImport(ctx, resolution, aliases.mappings, aliases.packageScopes, aliases.scopeDiscoveryComplete, workspaceByName, inventory.Packages, components, &aliasWork, &candidateWork, &coverage)
 		case jsresolution.SpecifierPackage:
-			if aliasResolution, handled := r.resolveTSPaths(ctx, resolution, aliases.mappings, aliases.configs, aliases.scopeDiscoveryComplete, workspaceByName, inventory.Packages, modulePaths, &aliasWork, &candidateWork, &coverage); handled {
+			if aliasResolution, handled := r.resolveTSPaths(ctx, resolution, aliases.mappings, aliases.configs, aliases.scopeDiscoveryComplete, workspaceByName, inventory.Packages, components, modulePaths, &aliasWork, &candidateWork, &coverage); handled {
 				resolution = aliasResolution
 			} else if self, ok := packageForRepositoryTarget(inventory.Packages, resolution.From); ok && self.Name == classified.PackageName {
-				// A same-name bare import may be a Node package self-reference, whose
-				// legality and subpath identity depend on package.json exports. R2B
-				// does not implement exports maps, so do not let R2C mistake it for
-				// an ordinary third-party package with the same name.
+				// A same-name bare import may be a Node package self-reference, whose legality and
+				// subpath identity depend on package.json exports. Exports maps are not implemented, so
+				// this must not be mistaken for an ordinary third-party package of the same name.
 				resolution.Status = jsresolution.StatusUnresolved
 				resolution.Package = jsresolution.PackageIdentity{Name: classified.PackageName}
-				resolution.Reason = "same-package self-reference requires package.json exports semantics that R2B does not resolve"
+				resolution.Reason = "same-package self-reference requires package.json exports semantics this resolver does not implement"
 				coverage.add(jsresolution.CoverageIssue{
 					Kind: jsresolution.CoverageUnresolvedSpecifier, Path: resolution.From,
 					Detail: fmt.Sprintf("specifier %q may be a package self-reference", resolution.Specifier),
 				})
 			} else {
-				resolution = r.resolvePackageRoot(resolution, classified.PackageName, workspaceByName, &candidateWork, &coverage)
+				resolution = r.resolvePackageRoot(resolution, classified.PackageName, workspaceByName, inventory.Packages, components, &candidateWork, &coverage)
 			}
 		default:
-			if aliasResolution, handled := r.resolveTSPaths(ctx, resolution, aliases.mappings, aliases.configs, aliases.scopeDiscoveryComplete, workspaceByName, inventory.Packages, modulePaths, &aliasWork, &candidateWork, &coverage); handled {
+			if aliasResolution, handled := r.resolveTSPaths(ctx, resolution, aliases.mappings, aliases.configs, aliases.scopeDiscoveryComplete, workspaceByName, inventory.Packages, components, modulePaths, &aliasWork, &candidateWork, &coverage); handled {
 				resolution = aliasResolution
 			} else {
 				resolution.Status = jsresolution.StatusUnsupported
 				resolution.Reason = "unsupported module specifier form"
 				coverage.add(jsresolution.CoverageIssue{
 					Kind: jsresolution.CoverageUnsupportedSpecifier, Path: edge.From,
-					Detail: fmt.Sprintf("specifier %q is outside the supported source-only R2B forms", edge.Specifier),
+					Detail: fmt.Sprintf("specifier %q is outside the supported source-only specifier forms", edge.Specifier),
 				})
 			}
 		}

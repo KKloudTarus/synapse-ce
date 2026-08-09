@@ -112,6 +112,18 @@ type MetadataDeclaration struct {
 }
 
 // PackageMetadata is package.json-derived first-party package metadata.
+// DependencySpec is one declared dependency of a package: the name a source file imports, and the raw
+// specification the manifest declares for it.
+//
+// The spec matters for identity because npm lets a dependency be ALIASED
+// ("lodash": "npm:lodash-es@^4") or fetched from somewhere other than the registry (file:, link:,
+// workspace:, git+ssh:, github:, patch:). In both cases the imported name is NOT the package name, so
+// correlating a specifier to a same-named component would attach the wrong identity.
+type DependencySpec struct {
+	Name string
+	Spec string
+}
+
 type PackageMetadata struct {
 	Name       string
 	Version    string
@@ -119,6 +131,8 @@ type PackageMetadata struct {
 	Private    bool
 	Workspace  bool
 	DeclaredBy []MetadataDeclaration
+	// Dependencies are the package's declared dependencies, sorted by name and deduplicated.
+	Dependencies []DependencySpec
 }
 
 // Inventory is the deterministic offline package/workspace metadata inventory

@@ -104,6 +104,7 @@ type packageFile struct {
 	private        bool
 	patterns       []string
 	packageManager string
+	dependencies   []jsresolution.DependencySpec
 }
 
 type workspaceNegationMode uint8
@@ -376,7 +377,7 @@ func (b *InventoryBuilder) Build(ctx context.Context, root string) (jsresolution
 		}
 		inventory.Packages = append(inventory.Packages, jsresolution.PackageMetadata{
 			Name: pkg.name, Version: strings.TrimSpace(pkg.version), Path: dir, Private: pkg.private,
-			Workspace: isWorkspace, DeclaredBy: decls,
+			Workspace: isWorkspace, DeclaredBy: decls, Dependencies: pkg.dependencies,
 		})
 	}
 
@@ -765,20 +766,33 @@ func splitPathSegments(value string) []string {
 
 func parsePackageJSON(rel string, content []byte) (packageFile, error) {
 	var raw struct {
-		Name           string          `json:"name"`
-		Version        string          `json:"version"`
-		Private        bool            `json:"private"`
-		Workspaces     json.RawMessage `json:"workspaces"`
-		PackageManager string          `json:"packageManager"`
+		Name           string            `json:"name"`
+		Version        string            `json:"version"`
+		Private        bool              `json:"private"`
+		Workspaces     json.RawMessage   `json:"workspaces"`
+		PackageManager string            `json:"packageManager"`
+		Dependencies   map[string]string `json:"dependencies"`
+		DevDeps        map[string]string `json:"devDependencies"`
+		OptionalDeps   map[string]string `json:"optionalDependencies"`
+		PeerDeps       map[string]string `json:"peerDependencies"`
 	}
 	if err := json.Unmarshal(content, &raw); err != nil {
 		return packageFile{}, fmt.Errorf("parse package.json: %w", err)
 	}
 	patterns, workspaceErr := parseJSONWorkspaces(raw.Workspaces)
 	dir := path.Dir(rel)
+	// Dependency SPECS decide package identity, not just presence: npm lets a dependency be aliased
+	// ("lodash": "npm:lodash-es@^4") or fetched from outside the registry, in which case the imported
+	// name is not the package name.
+	var deps []jsresolution.DependencySpec
+	for _, group := range []map[string]string{raw.Dependencies, raw.DevDeps, raw.OptionalDeps, raw.PeerDeps} {
+		for name, spec := range group {
+			deps = append(deps, jsresolution.DependencySpec{Name: name, Spec: spec})
+		}
+	}
 	pkg := packageFile{
 		file: rel, dir: dir, name: raw.Name, version: raw.Version, private: raw.Private,
-		patterns: patterns, packageManager: raw.PackageManager,
+		patterns: patterns, packageManager: raw.PackageManager, dependencies: deps,
 	}
 	if workspaceErr != nil {
 		return pkg, workspaceErr

@@ -86,6 +86,7 @@ func NormalizeInventory(in Inventory) (Inventory, error) {
 			}
 		}
 		pkg.Version = strings.TrimSpace(pkg.Version)
+		pkg.Dependencies = normalizeDependencies(pkg.Dependencies)
 		pkg.DeclaredBy, err = normalizeDeclarations(pkg.DeclaredBy)
 		if err != nil {
 			return Inventory{}, fmt.Errorf("normalize declarations for %q: %w", loc, err)
@@ -171,8 +172,14 @@ func normalizeDeclarations(in []MetadataDeclaration) ([]MetadataDeclaration, err
 }
 
 func packageMetadataEqual(a, b PackageMetadata) bool {
-	if a.Name != b.Name || a.Version != b.Version || a.Path != b.Path || a.Private != b.Private || a.Workspace != b.Workspace || len(a.DeclaredBy) != len(b.DeclaredBy) {
+	if a.Name != b.Name || a.Version != b.Version || a.Path != b.Path || a.Private != b.Private || a.Workspace != b.Workspace ||
+		len(a.DeclaredBy) != len(b.DeclaredBy) || len(a.Dependencies) != len(b.Dependencies) {
 		return false
+	}
+	for i := range a.Dependencies {
+		if a.Dependencies[i] != b.Dependencies[i] {
+			return false
+		}
 	}
 	for i := range a.DeclaredBy {
 		if a.DeclaredBy[i] != b.DeclaredBy[i] {
@@ -193,4 +200,34 @@ func deduplicateCoverage(in []CoverageIssue) []CoverageIssue {
 		}
 	}
 	return out
+}
+
+// normalizeDependencies sorts declared dependencies by name and removes exact duplicates, so inventory
+// output does not depend on manifest key order.
+func normalizeDependencies(in []DependencySpec) []DependencySpec {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]DependencySpec, 0, len(in))
+	for _, dep := range in {
+		name := strings.TrimSpace(dep.Name)
+		if name == "" {
+			continue
+		}
+		out = append(out, DependencySpec{Name: name, Spec: strings.TrimSpace(dep.Spec)})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Spec < out[j].Spec
+	})
+	result := out[:0]
+	for i, dep := range out {
+		if i > 0 && dep == out[i-1] {
+			continue
+		}
+		result = append(result, dep)
+	}
+	return result
 }

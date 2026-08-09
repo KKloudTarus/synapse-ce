@@ -25,7 +25,7 @@ func parseTSConfigPaths(rel string, content []byte, limits aliasLimits) ([]alias
 	var issues []jsresolution.CoverageIssue
 	if rawExtends, ok := doc["extends"]; ok && !bytes.Equal(bytes.TrimSpace(rawExtends), []byte("null")) {
 		config.uncertain = true
-		issues = append(issues, jsresolution.CoverageIssue{Kind: jsresolution.CoverageUnsupportedAlias, Path: rel, Detail: "tsconfig/jsconfig inheritance via extends is not resolved in R2B"})
+		issues = append(issues, jsresolution.CoverageIssue{Kind: jsresolution.CoverageUnsupportedAlias, Path: rel, Detail: "tsconfig/jsconfig inheritance via extends is not resolved"})
 	}
 	selectionPresent := false
 	for _, key := range []string{"files", "include", "exclude"} {
@@ -68,7 +68,7 @@ func parseTSConfigPaths(rel string, content []byte, limits aliasLimits) ([]alias
 	_, hasBaseURL := compiler["baseUrl"]
 	if selectionPresent && (hasPaths || hasBaseURL) {
 		config.uncertain = true
-		issues = append(issues, jsresolution.CoverageIssue{Kind: jsresolution.CoverageUnsupportedAlias, Path: rel, Detail: "tsconfig/jsconfig project files/include/exclude membership is not resolved in R2B"})
+		issues = append(issues, jsresolution.CoverageIssue{Kind: jsresolution.CoverageUnsupportedAlias, Path: rel, Detail: "tsconfig/jsconfig project files/include/exclude membership is not resolved"})
 	}
 	configDir := path.Dir(rel)
 	baseDir := configDir
