@@ -16,6 +16,10 @@ import (
 func TestPostgresEvidenceForkGuard(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()
+	// The repositories run every statement through WithTenant, which refuses an unbound tenant so a
+	// query can never silently escape RLS. Fixtures must therefore state the tenant they act as,
+	// exactly like the HTTP middleware and the worker do.
+	ctx = shared.WithTenant(ctx, "default")
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -28,7 +32,7 @@ func TestPostgresEvidenceForkGuard(t *testing.T) {
 	// engagement id per run so the per-engagement fork-guard starts from an empty chain and
 	// accumulated rows from prior runs are harmless.
 	eng := "eng-" + randHex(t)
-	if _, err := pool.Exec(ctx, `INSERT INTO engagements (id, tenant_id, name) VALUES ($1, '', 'test') ON CONFLICT (id) DO NOTHING`, eng); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO engagements (id, tenant_id, name) VALUES ($1, 'default', 'test') ON CONFLICT (id) DO NOTHING`, eng); err != nil {
 		t.Fatalf("seed engagement: %v", err)
 	}
 	store := NewEvidenceStore(pool)
@@ -56,6 +60,10 @@ func TestPostgresEvidenceForkGuard(t *testing.T) {
 func TestPostgresEvidenceVerifyRoundTrip(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()
+	// The repositories run every statement through WithTenant, which refuses an unbound tenant so a
+	// query can never silently escape RLS. Fixtures must therefore state the tenant they act as,
+	// exactly like the HTTP middleware and the worker do.
+	ctx = shared.WithTenant(ctx, "default")
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -66,7 +74,7 @@ func TestPostgresEvidenceVerifyRoundTrip(t *testing.T) {
 	t.Cleanup(pool.Close)
 	// Append-only (0033): no TRUNCATE; isolate by a fresh engagement id per run.
 	eng := "engRT-" + randHex(t)
-	_, _ = pool.Exec(ctx, `INSERT INTO engagements (id, tenant_id, name) VALUES ($1,'','rt') ON CONFLICT (id) DO NOTHING`, eng)
+	_, _ = pool.Exec(ctx, `INSERT INTO engagements (id, tenant_id, name) VALUES ($1,'default','rt') ON CONFLICT (id) DO NOTHING`, eng)
 	store := NewEvidenceStore(pool)
 
 	now := time.Now() // nanosecond precision – must survive the round-trip via µs truncation

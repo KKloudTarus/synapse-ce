@@ -17,6 +17,10 @@ func TestFindingRepository(t *testing.T) {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
 	ctx := context.Background()
+	// The repositories run every statement through WithTenant, which refuses an unbound tenant so a
+	// query can never silently escape RLS. Fixtures must therefore state the tenant they act as,
+	// exactly like the HTTP middleware and the worker do.
+	ctx = shared.WithTenant(ctx, "default")
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -136,7 +140,7 @@ func TestFindingRepository(t *testing.T) {
 	fidLegacy := shared.ID("fid-" + randHex(t))
 	_, err = pool.Exec(ctx,
 		`INSERT INTO findings (id, tenant_id, engagement_id, title, description, severity, cvss_vector, cwe, status, evidence_score, dedup_key, kev, risk_score, created_at, updated_at, sources, confidence, class, scope, reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key)
-		 VALUES ($1, '', $2, 'legacy', '', 'medium', '', '', 'confirmed', 50, 'sast:legacy', false, 0, $3, $3, '', '', '', '', '', '', 3, 'sast', 'alice', 1, '', '', '')`,
+		 VALUES ($1, 'default', $2, 'legacy', '', 'medium', '', '', 'confirmed', 50, 'sast:legacy', false, 0, $3, $3, '', '', '', '', '', '', 3, 'sast', 'alice', 1, '', '', '')`,
 		fidLegacy, eid, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("insert legacy row: %v", err)

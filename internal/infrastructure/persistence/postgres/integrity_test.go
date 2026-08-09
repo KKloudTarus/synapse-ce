@@ -17,6 +17,10 @@ import (
 func TestAppendOnlyEnforcement(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()
+	// The repositories run every statement through WithTenant, which refuses an unbound tenant so a
+	// query can never silently escape RLS. Fixtures must therefore state the tenant they act as,
+	// exactly like the HTTP middleware and the worker do.
+	ctx = shared.WithTenant(ctx, "default")
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -27,7 +31,7 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	eng := "eng-ao-" + randHex(t)
-	if _, err := pool.Exec(ctx, `INSERT INTO engagements (id, tenant_id, name) VALUES ($1,'','ao') ON CONFLICT (id) DO NOTHING`, eng); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO engagements (id, tenant_id, name) VALUES ($1,'default','ao') ON CONFLICT (id) DO NOTHING`, eng); err != nil {
 		t.Fatalf("seed engagement: %v", err)
 	}
 	ev := evidence.Evidence{ID: shared.ID("ao-" + eng), EngagementID: shared.ID(eng), Kind: "k", Content: []byte("x"), PreviousHash: "", Hash: "h-" + eng, CreatedBy: "op", CreatedAt: time.Unix(1, 0).UTC()}
@@ -104,7 +108,7 @@ func TestAuditForkGuard(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	parent := "parent-" + randHex(t)
-	ins := `INSERT INTO audit_log (tenant_id, actor, action, target, hash, previous_hash) VALUES ('','op','a','t',$1,$2)`
+	ins := `INSERT INTO audit_log (tenant_id, actor, action, target, hash, previous_hash) VALUES ('default','op','a','t',$1,$2)`
 	if _, err := pool.Exec(ctx, ins, "h1-"+parent, parent); err != nil {
 		t.Fatalf("first child of parent: %v", err)
 	}

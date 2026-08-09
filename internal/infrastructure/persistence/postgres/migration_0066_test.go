@@ -61,7 +61,7 @@ func TestMigration0066PreservesLegacyAssessmentGraph(t *testing.T) {
 		{`INSERT INTO writeup_drafts(id,tenant_id,engagement_id,finding_id,state) VALUES($1,'',$2,$3,'proposed')`, []any{prefix + "-draft", engagementID, findingID}},
 		{`INSERT INTO agent_sessions(id,tenant_id,engagement_id,initiated_by,goal) VALUES($1,NULL,$2,'alice','legacy session')`, []any{sessionID, engagementID}},
 		{`INSERT INTO jobs(id,kind,payload,status) VALUES($1,'sca','{}','queued')`, []any{jobID}},
-		{`INSERT INTO audit_log(tenant_id,actor,action,target,hash,previous_hash) VALUES('','alice','legacy.action',$1,$2,'')`, []any{engagementID, auditHash}},
+		{`INSERT INTO audit_log(tenant_id,actor,action,target,hash,previous_hash) VALUES('','alice','legacy.action',$1,$2,$3)`, []any{engagementID, auditHash, prefix + "-audit-prev"}},
 	}
 	for _, statement := range statements {
 		if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {

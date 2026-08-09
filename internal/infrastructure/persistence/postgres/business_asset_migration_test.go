@@ -22,7 +22,10 @@ func TestBusinessAssetMigrationIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	// t.Cleanup, not defer: a deferred Close runs when this function RETURNS, which is before any
+	// t.Cleanup callback -- so the cleanup below was deleting through an already-closed pool and every
+	// statement failed. Registered here, LIFO ordering runs the deletes first and closes afterwards.
+	t.Cleanup(pool.Close)
 	for _, statement := range []string{
 		`INSERT INTO tenants(id,name) VALUES('ba-tenant-a','A'),('ba-tenant-b','B') ON CONFLICT DO NOTHING`,
 		`INSERT INTO fleet_business_services(id,tenant_id,"key",name,owner) VALUES('ba-a','ba-tenant-a','a','Same display name','team'),('ba-a2','ba-tenant-a','a2','Same display name','team'),('ba-b','ba-tenant-b','b','B','team')`,
@@ -36,13 +39,23 @@ func TestBusinessAssetMigrationIsolation(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		bg := context.Background()
-		_, _ = pool.Exec(bg, `DELETE FROM engagements WHERE id='ba-ea'`)
-		_, _ = pool.Exec(bg, `DELETE FROM business_asset_projects WHERE business_asset_id='ba-a'`)
-		_, _ = pool.Exec(bg, `DELETE FROM business_asset_technical_assets WHERE business_asset_id='ba-a'`)
-		_, _ = pool.Exec(bg, `DELETE FROM projects WHERE id IN ('ba-pa','ba-pb')`)
-		_, _ = pool.Exec(bg, `DELETE FROM fleet_assets WHERE id='ba-ta'`)
-		_, _ = pool.Exec(bg, `DELETE FROM fleet_business_services WHERE id IN ('ba-a','ba-a2','ba-b')`)
-		_, _ = pool.Exec(bg, `DELETE FROM tenants WHERE id IN ('ba-tenant-a','ba-tenant-b')`)
+		// Cleanup REPORTS its failures. Discarding them (`_, _ = pool.Exec`) is what made this suite
+		// un-rerunnable: the seeded pair of same-name assets survived, and migration 0066 cannot be
+		// rolled back while any two assets share a display name -- so every later test doing
+		// goose.DownTo past 66 failed with a bare 23505 that pointed nowhere near the cause.
+		for _, statement := range []string{
+			`DELETE FROM engagements WHERE id='ba-ea'`,
+			`DELETE FROM business_asset_projects WHERE business_asset_id='ba-a'`,
+			`DELETE FROM business_asset_technical_assets WHERE business_asset_id='ba-a'`,
+			`DELETE FROM projects WHERE id IN ('ba-pa','ba-pb')`,
+			`DELETE FROM fleet_assets WHERE id='ba-ta'`,
+			`DELETE FROM fleet_business_services WHERE id IN ('ba-a','ba-a2','ba-b')`,
+			`DELETE FROM tenants WHERE id IN ('ba-tenant-a','ba-tenant-b')`,
+		} {
+			if _, err := pool.Exec(bg, statement); err != nil {
+				t.Errorf("cleanup %q: %v (the next run of this suite will fail)", statement, err)
+			}
+		}
 		_, _ = pool.Exec(bg, `DROP OWNED BY ba_runtime`)
 		_, _ = pool.Exec(bg, `DROP ROLE IF EXISTS ba_runtime`)
 	})

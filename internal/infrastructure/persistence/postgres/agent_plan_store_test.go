@@ -16,6 +16,10 @@ import (
 func TestAgentPlanStore_CreateThenCAS(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()
+	// The repositories run every statement through WithTenant, which refuses an unbound tenant so a
+	// query can never silently escape RLS. Fixtures must therefore state the tenant they act as,
+	// exactly like the HTTP middleware and the worker do.
+	ctx = shared.WithTenant(ctx, "default")
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -28,10 +32,10 @@ func TestAgentPlanStore_CreateThenCAS(t *testing.T) {
 	// Seed FKs: an engagement + an agent session (unique ids per run to avoid collisions).
 	eid := "eng-plan-" + shared.ID(time.Now().Format("150405.000000")).String()
 	sid := "sess-plan-" + shared.ID(time.Now().Format("150405.000000")).String()
-	if _, err := pool.Exec(ctx, `INSERT INTO engagements (id, tenant_id, name, status, created_at, updated_at) VALUES ($1,'','plan-test','draft',now(),now())`, eid); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO engagements (id, tenant_id, name, status, created_at, updated_at) VALUES ($1,'default','plan-test','draft',now(),now())`, eid); err != nil {
 		t.Fatalf("seed engagement: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO agent_sessions (id, engagement_id, initiated_by, goal) VALUES ($1,$2,'op','g')`, sid, eid); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO agent_sessions (id, tenant_id, engagement_id, initiated_by, goal) VALUES ($1,'default',$2,'op','g')`, sid, eid); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 

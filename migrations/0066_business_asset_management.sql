@@ -205,4 +205,26 @@ ALTER TABLE fleet_business_services DROP CONSTRAINT fleet_business_services_tena
 ALTER TABLE fleet_business_services DROP COLUMN updated_by, DROP COLUMN created_by, DROP COLUMN version,
   DROP COLUMN metadata, DROP COLUMN lifecycle, DROP COLUMN criticality, DROP COLUMN asset_type,
   DROP COLUMN description, DROP COLUMN "key";
-ALTER TABLE fleet_business_services ADD CONSTRAINT fleet_business_services_tenant_id_name_key UNIQUE (tenant_id, name);
+-- Restoring UNIQUE (tenant_id, name) can be IMPOSSIBLE, and for a reason this migration created: the Up
+-- drops that constraint on purpose so two business assets may share a display name, keying them by
+-- "key" instead. Once an operator has used that permission, the old constraint no longer describes the
+-- data, and a bare ADD CONSTRAINT fails with a 23505 from the index build that names neither the rows
+-- nor the reason -- which is what happens today the moment any two assets share a name.
+--
+-- So refuse with something an operator can act on, and say exactly which names collide. Leaving the
+-- column silently non-unique instead would hand back a schema that is laxer than the one being rolled
+-- back to, which is its own surprise.
+-- +goose StatementBegin
+DO $$
+DECLARE conflicts text;
+BEGIN
+  SELECT string_agg(format('(%s, %s) x%s', tenant_id, name, n), ', ')
+    INTO conflicts
+    FROM (SELECT tenant_id, name, count(*) AS n FROM fleet_business_services
+           GROUP BY tenant_id, name HAVING count(*) > 1) dup;
+  IF conflicts IS NOT NULL THEN
+    RAISE EXCEPTION 'cannot roll back migration 0066: UNIQUE (tenant_id, name) cannot be restored because assets now share a display name, which this migration made legal. Rename or remove the duplicates first: %', conflicts;
+  END IF;
+  ALTER TABLE fleet_business_services ADD CONSTRAINT fleet_business_services_tenant_id_name_key UNIQUE (tenant_id, name);
+END $$;
+-- +goose StatementEnd
