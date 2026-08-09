@@ -305,3 +305,18 @@ func cdxHashes(c sbom.Component) []cdxOutHash {
 	sort.Slice(out, func(i, j int) bool { return out[i].Alg < out[j].Alg })
 	return out
 }
+
+// MarshalCycloneDX renders one SBOM as a deterministic CycloneDX JSON document, without going through
+// an engagement or a store.
+//
+// It exists so the RELEASE pipeline can emit an SBOM for each published artifact using this project's
+// own engine (#412 req 5). That is deliberately the same code path a customer scan uses: a producer we
+// would not trust to describe our own release has no business describing theirs, and a separate
+// release-only SBOM path would let the two drift without anyone noticing.
+func MarshalCycloneDX(doc *sbom.SBOM, target string, created time.Time) ([]byte, error) {
+	out, err := json.MarshalIndent(buildCycloneDX(doc, target, created), "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal cyclonedx: %w", err)
+	}
+	return out, nil
+}

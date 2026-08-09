@@ -87,8 +87,13 @@ func TestFirstRunEnrolsAndPersists(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(r.cfg.stateDir, "agent.key")); err != nil {
 		t.Fatalf("key must be persisted: %v", err)
 	}
-	info, _ := os.Stat(filepath.Join(r.cfg.stateDir, "credential.json"))
-	if info.Mode().Perm() != 0o600 {
+	info, err := os.Stat(filepath.Join(r.cfg.stateDir, "credential.json"))
+	if err != nil {
+		t.Fatalf("credential must be persisted: %v", err)
+	}
+	// Unix-only guarantee: Windows has no permission bits, so the credential is protected by the
+	// state directory's ACL there instead. Asserting 0600 on Windows would assert nothing real.
+	if fleetclient.SecretModeEnforced() && info.Mode().Perm() != 0o600 {
 		t.Fatalf("credential must be 0600, got %v", info.Mode().Perm())
 	}
 	// The order was progressed and reported succeeded with a coverage-honest summary.

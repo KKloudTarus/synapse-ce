@@ -49,7 +49,11 @@ type Agent struct {
 	OSVersion    string
 	AgentVersion string
 	Capabilities []string
-	TokenHash    string
+	// Group is the rollout group an OPERATOR placed this agent in. It is never self-declared: an agent
+	// that could name its own group could place itself in one pinned to an older, vulnerable version,
+	// turning a rollout control into a downgrade primitive. Empty means the default group.
+	Group     string
+	TokenHash string
 	// Fingerprint is the SHA-256 of the agent's issued client certificate (#408). Empty until a
 	// certificate is issued from a CSR; it is the cryptographic identity used by mutual-TLS auth.
 	Fingerprint  string
@@ -59,6 +63,13 @@ type Agent struct {
 	RevokedAt    *time.Time
 	RevokedBy    shared.ID
 	RevokeReason string
+}
+
+// AssignGroup places the agent in a rollout group. Validation lives in the rollout domain, which owns
+// what a group name may be; this only records the operator's decision.
+func (a *Agent) AssignGroup(group string, now time.Time) {
+	a.Group = group
+	a.Audit.UpdatedAt = now
 }
 
 // AttestCertificate records the SHA-256 fingerprint of the client certificate issued to the agent.
