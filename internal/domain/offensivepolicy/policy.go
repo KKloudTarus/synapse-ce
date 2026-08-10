@@ -117,8 +117,11 @@ func (r Radius) Valid() bool { return r == RadiusReadOnly || r == RadiusStateCha
 // confirmed. A state-changing technique without both is not implementable (document §7) and fails the
 // register's validation, which runs in CI rather than at execution time.
 type CleanupSpec struct {
-	Steps        []string `yaml:"steps"`
-	Verification string   `yaml:"verification"`
+	// json tags matter: a CleanupSpec is stored as JSONB in exploitation_steps, and its DB CHECK looks
+	// for a lowercase "steps" key. Without these the marshalled key would be "Steps" and the check
+	// would reject every state-changing step.
+	Steps        []string `yaml:"steps" json:"steps,omitempty"`
+	Verification string   `yaml:"verification" json:"verification,omitempty"`
 }
 
 // IsZero reports whether no cleanup path was declared at all.
