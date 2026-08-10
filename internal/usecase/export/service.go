@@ -4,6 +4,7 @@ package export
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
@@ -22,10 +23,11 @@ type judgmentReader interface {
 
 // Service renders an engagement's findings as SARIF or OpenVEX.
 type Service struct {
-	findings  ports.FindingRepository
-	judgments judgmentReader // optional: confirmed not_reachable judgments refine VEX justification
-	clock     ports.Clock
-	version   string // tool version recorded in the output
+	findings         ports.FindingRepository
+	judgments        judgmentReader // optional: confirmed not_reachable judgments refine VEX justification
+	aiGateExemptions ports.AIGateExemptionReader
+	clock            ports.Clock
+	version          string // tool version recorded in the output
 }
 
 // NewService wires the export use case.
@@ -37,6 +39,12 @@ func NewService(findings ports.FindingRepository, clock ports.Clock, version str
 // by reachability tier. nil ⇒ the default justification.
 func (s *Service) SetJudgments(j judgmentReader) { s.judgments = j }
 
+// SetAIGateExemptions wires the latest-scan policy projection used to annotate retained SARIF results.
+// nil keeps legacy exports unannotated.
+func (s *Service) SetAIGateExemptions(reader ports.AIGateExemptionReader) {
+	s.aiGateExemptions = reader
+}
+
 // SARIF returns the engagement's findings as a SARIF 2.1.0 log. It reads through the
 // publishability gate so an unproven exploitation finding never ships
 // in the exported log.
@@ -45,10 +53,26 @@ func (s *Service) SARIF(ctx context.Context, engagementID shared.ID) (*SARIFLog,
 	if err != nil {
 		return nil, err
 	}
+	exemptions := map[string]ports.AIGateExemption{}
+	if s.aiGateExemptions != nil {
+		items, readErr := s.aiGateExemptions.AIGateExemptions(ctx, engagementID, fs)
+		if readErr != nil && !errors.Is(readErr, shared.ErrNotFound) {
+			return nil, readErr
+		}
+		for _, exemption := range items {
+			if key := strings.TrimSpace(exemption.DedupKey); key != "" {
+				exemptions[key] = exemption
+			}
+		}
+	}
 	// The store-backed export path has findings only (no SBOM), so no resolvers: SCA findings become
 	// repo-level alerts rather than logical-only locations a code-scanning UI would reject, and carry no
-	// inline fix version.
-	return buildSARIF(fs, s.version, SARIFOptions{}), nil
+	// inline fix version. AI gate metadata comes from the same persisted scan result that authorized the
+	// exemption and is revalidated before it reaches this service.
+	return buildSARIF(fs, s.version, SARIFOptions{AIGateExemption: func(item finding.Finding) (ports.AIGateExemption, bool) {
+		exemption, ok := exemptions[strings.TrimSpace(item.DedupKey)]
+		return exemption, ok
+	}}), nil
 }
 
 // OpenVEX returns the engagement's vulnerability findings as an OpenVEX document. It
