@@ -1,6 +1,7 @@
 package sca
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -10,6 +11,13 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+type staticScanResultStore struct{ data []byte }
+
+func (s staticScanResultStore) SaveResult(context.Context, shared.ID, []byte) error { return nil }
+func (s staticScanResultStore) LatestResult(context.Context, shared.ID) ([]byte, error) {
+	return s.data, nil
+}
 
 func TestFPTriageCandidates(t *testing.T) {
 	fs := []finding.Finding{
@@ -290,6 +298,116 @@ func TestAIGateExemptKeysRevalidatesPersistedDecision(t *testing.T) {
 	}
 	if got := result.AIGateExemptKeys(); len(got) != 0 {
 		t.Fatalf("persisted gate flag must be revalidated against the high-risk floor: %v", got)
+	}
+}
+
+// TestAIGateExemptionsNeverProjectAForgedShadowDecision guards the shadow boundary at the EXPORT seam.
+//
+// Shadow mode exists so AI triage can be observed without affecting a gate (P1.1). A shadow decision
+// reaching SARIF as an "external / accepted" suppression would tell a code-scanning UI the finding was
+// accepted while the policy deliberately had no authority to accept it -- the shadow guarantee leaking
+// into an artifact customers and CI read as fact.
+//
+// The critique here is FORGED: Shadow and GateExempt both true, which applyAIGatePolicy never produces
+// (it clears GateExempt before the shadow branch). That is the point -- !c.Shadow in
+// authorizedAIGateExemption is defence against a persisted or hand-built DTO, so only a forged input
+// exercises it. My first attempt at this test used applyAIGatePolicy and passed for the wrong reason:
+// GateExempt was already false, so removing !c.Shadow left it green.
+func TestAIGateExemptionsNeverProjectAForgedShadowDecision(t *testing.T) {
+	forged := verifiedCritique("safe")
+	forged.GateExempt = true
+	forged.Shadow = true
+	forged.PolicyVersion = aiTriagePolicyVersion
+	forged.PolicyReason = aiPolicyVerifiedConsensus
+	findings := []finding.Finding{
+		{DedupKey: "safe", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"},
+	}
+	result := &ScanResult{Findings: findings, AITriage: []ports.AICritique{forged}}
+
+	if got := result.AIGateExemptions(); len(got) != 0 {
+		t.Fatalf("a shadow decision must never be exported as an accepted suppression: %v", got)
+	}
+	if got := result.AIGateExemptKeys(); len(got) != 0 {
+		t.Fatalf("a shadow decision must never authorize a gate: %v", got)
+	}
+
+	// The same decision with Shadow cleared MUST project, or this test would pass for the wrong reason
+	// again -- it has to be the shadow flag doing the refusing, not some other unmet condition.
+	enforced := forged
+	enforced.Shadow = false
+	ok := &ScanResult{Findings: findings, AITriage: []ports.AICritique{enforced}}
+	if got := ok.AIGateExemptions(); len(got) != 1 {
+		t.Fatalf("with Shadow cleared the same decision must project exactly one exemption: %v", got)
+	}
+}
+
+func TestAIGateExemptionsProjectsOnlyPolicyAuthorizedDecision(t *testing.T) {
+	findings := []finding.Finding{
+		{DedupKey: "safe", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"},
+		{DedupKey: "high", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityHigh, CWE: "CWE-327"},
+		{DedupKey: "critical", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityCritical, CWE: "CWE-327"},
+		{DedupKey: "secret", Kind: finding.KindSecret, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"},
+		{DedupKey: "protected-cwe", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-89"},
+		{DedupKey: "ineligible", Kind: finding.KindSCA, Class: finding.ClassThirdParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"},
+	}
+	result := &ScanResult{Findings: findings}
+	for _, item := range findings {
+		result.AITriage = append(result.AITriage, verifiedCritique(item.DedupKey))
+	}
+	applyAIGatePolicy(result, true, aiTriageModeEnforce)
+
+	noLedger := findings[0]
+	noLedger.DedupKey = "no-ledger"
+	withoutLedger := &ScanResult{Findings: []finding.Finding{noLedger}, AITriage: []ports.AICritique{verifiedCritique("no-ledger")}}
+	applyAIGatePolicy(withoutLedger, false, aiTriageModeEnforce)
+	result.Findings = append(result.Findings, noLedger)
+	result.AITriage = append(result.AITriage, withoutLedger.AITriage[0])
+
+	got := result.AIGateExemptions()
+	if len(got) != 1 {
+		t.Fatalf("AI gate exemption projection = %+v, want only safe", got)
+	}
+	exemption, ok := got["safe"]
+	if !ok || exemption.DedupKey != "safe" || exemption.PolicyVersion != aiTriagePolicyVersion || exemption.PolicyReason != aiPolicyVerifiedConsensus {
+		t.Errorf("safe exemption metadata = %+v", exemption)
+	}
+	for _, key := range []string{"high", "critical", "secret", "protected-cwe", "ineligible", "no-ledger"} {
+		if _, exists := got[key]; exists {
+			t.Errorf("unsafe decision %q received export metadata", key)
+		}
+	}
+}
+
+func TestServiceAIGateExemptionsReadsLatestResultDeterministically(t *testing.T) {
+	result := &ScanResult{
+		Findings: []finding.Finding{
+			{DedupKey: "z-safe", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"},
+			{DedupKey: "a-safe", Kind: finding.KindMisconfig, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityLow, CWE: "CWE-16"},
+		},
+		AITriage: []ports.AICritique{verifiedCritique("z-safe"), verifiedCritique("a-safe")},
+	}
+	applyAIGatePolicy(result, true, aiTriageModeEnforce)
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{results: staticScanResultStore{data: data}}
+
+	got, err := svc.AIGateExemptions(context.Background(), "e1", result.Findings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].DedupKey != "a-safe" || got[1].DedupKey != "z-safe" {
+		t.Fatalf("stored exemption order = %+v, want a-safe then z-safe", got)
+	}
+	exportView := append([]finding.Finding(nil), result.Findings...)
+	exportView[0].Severity = shared.SeverityHigh
+	got, err = svc.AIGateExemptions(context.Background(), "e1", exportView)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].DedupKey != "a-safe" {
+		t.Fatalf("severity-escalated export view retained stale exemption: %+v", got)
 	}
 }
 

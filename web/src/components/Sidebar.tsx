@@ -15,7 +15,6 @@ import {
   ShieldQuestion,
   SquarePen,
   Sun,
-  Target,
   Users,
   X,
   type LucideIcon,
@@ -27,7 +26,7 @@ import { cn } from './ui'
 
 const NAV_GROUPS: Array<{
   label: string
-  items: Array<{ icon: LucideIcon; label: string; to: string; prefix?: string; match?: 'new-engagement' | 'engagements'; action?: boolean }>
+  items: Array<{ icon: LucideIcon; label: string; to: string; prefix?: string; action?: boolean }>
 }> = [
   {
     label: 'Command center',
@@ -40,8 +39,7 @@ const NAV_GROUPS: Array<{
   {
     label: 'Assess risk',
     items: [
-      { icon: SquarePen, label: 'New Engagement', to: '/engagements?create=1', match: 'new-engagement', action: true },
-      { icon: Target, label: 'Engagements', to: '/engagements', match: 'engagements' },
+      { icon: SquarePen, label: 'New Engagement', to: '/engagements?create=1', prefix: '/engagements', action: true },
       { icon: ShieldQuestion, label: 'AI review queue', to: '/ai-triage/reviews', prefix: '/ai-triage/reviews' },
       { icon: Library, label: 'Rules', to: '/rules', prefix: '/rules' },
     ],
@@ -91,7 +89,6 @@ function currentTheme(): Theme {
 function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const location = useLocation()
   const [theme, setTheme] = useState<Theme>(currentTheme)
-  const creatingEngagement = location.pathname === '/engagements' && new URLSearchParams(location.search).get('create') === '1'
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -111,14 +108,8 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
   }
 
   function renderItems(items: (typeof NAV_GROUPS)[number]['items']) {
-    return items.map(({ icon: Icon, label, to, prefix, match, action }) => {
-      const active = match === 'new-engagement'
-        ? creatingEngagement
-        : match === 'engagements'
-          ? location.pathname.startsWith('/engagements') && !creatingEngagement
-          : prefix
-            ? location.pathname.startsWith(prefix)
-            : location.pathname === to
+    return items.map(({ icon: Icon, label, to, prefix, action }) => {
+      const active = prefix ? location.pathname.startsWith(prefix) : location.pathname === to
       return (
         <NavLink
           key={to}

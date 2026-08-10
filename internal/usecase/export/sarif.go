@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 const (
@@ -54,11 +55,18 @@ type SARIFText struct {
 }
 
 type SARIFResult struct {
-	RuleID     string          `json:"ruleId"`
-	Level      string          `json:"level"`
-	Message    SARIFText       `json:"message"`
-	Locations  []SARIFLocation `json:"locations,omitempty"`
-	Properties map[string]any  `json:"properties,omitempty"`
+	RuleID       string             `json:"ruleId"`
+	Level        string             `json:"level"`
+	Message      SARIFText          `json:"message"`
+	Locations    []SARIFLocation    `json:"locations,omitempty"`
+	Suppressions []SARIFSuppression `json:"suppressions,omitempty"`
+	Properties   map[string]any     `json:"properties,omitempty"`
+}
+
+type SARIFSuppression struct {
+	Kind          string `json:"kind"`
+	Status        string `json:"status,omitempty"`
+	Justification string `json:"justification,omitempty"`
 }
 
 type SARIFLocation struct {
@@ -87,13 +95,17 @@ type SARIFLogicalLocation struct {
 	Kind string `json:"kind,omitempty"`
 }
 
-// SARIFOptions carries optional per-finding resolvers that enrich SCA results. Both fields are nil-safe.
+// SARIFOptions carries optional per-finding resolvers. Every field is nil-safe.
 type SARIFOptions struct {
 	// Manifest returns the repo-relative manifest/lockfile that declares a dependency finding's
 	// component, so the result gets a physical location a code-scanning UI can annotate. "" when unknown.
 	Manifest func(finding.Finding) string
 	// Fix returns the version that remediates a dependency finding. "" when there is no fix or it is unknown.
 	Fix func(finding.Finding) string
+	// AIGateExemption returns policy metadata only when the finding's exemption has already passed the
+	// server-owned authorization re-check. SARIF renders it as an external accepted suppression while
+	// retaining the result. Advisory or review-required opinions must return false.
+	AIGateExemption func(finding.Finding) (ports.AIGateExemption, bool)
 }
 
 func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *SARIFLog {
@@ -189,6 +201,23 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 			if fix := opts.Fix(f); fix != "" {
 				res.Properties["fixedVersion"] = fix
 				res.Message.Text = f.Title + " (fixed in " + fix + ")"
+			}
+		}
+		if opts.AIGateExemption != nil {
+			findingKey := strings.TrimSpace(f.DedupKey)
+			if exemption, ok := opts.AIGateExemption(f); ok && findingKey != "" &&
+				strings.TrimSpace(exemption.DedupKey) == findingKey &&
+				strings.TrimSpace(exemption.PolicyVersion) != "" && strings.TrimSpace(exemption.PolicyReason) != "" {
+				version := strings.TrimSpace(exemption.PolicyVersion)
+				reason := strings.TrimSpace(exemption.PolicyReason)
+				res.Suppressions = []SARIFSuppression{{
+					Kind:          "external",
+					Status:        "accepted",
+					Justification: "Synapse AI gate exemption: policy=" + version + "; reason=" + reason,
+				}}
+				res.Properties["synapse.aiGateExempt"] = true
+				res.Properties["synapse.aiPolicyVersion"] = version
+				res.Properties["synapse.aiPolicyReason"] = reason
 			}
 		}
 		results = append(results, res)
@@ -306,8 +335,9 @@ func ruleTitle(title string) string {
 // uploader (e.g. GitHub `codeql-action/upload-sarif`) consumes. It is deterministic and templated
 // purely from stored findings: no clock, no LLM (golden rule 5). version is the synapse driver
 // version recorded on the run's tool driver. opts carries optional per-finding resolvers: Manifest gives
-// SCA findings a physical location (a repo-relative manifest path), and Fix adds the remediating version.
-// Both are nil-safe; pass the zero SARIFOptions to enrich nothing.
+// SCA findings a physical location (a repo-relative manifest path), Fix adds the remediating version,
+// and AIGateExemption explains policy-authorized external suppression without removing the result.
+// All are nil-safe; pass the zero SARIFOptions to enrich nothing.
 func MarshalSARIF(findings []finding.Finding, version string, opts SARIFOptions) ([]byte, error) {
 	return json.MarshalIndent(buildSARIF(findings, version, opts), "", "  ")
 }

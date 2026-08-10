@@ -1249,3 +1249,19 @@ export interface FleetCoverageSummary {
   oldestPerCapability: Record<string, string>
   assetsWithoutAgent: number
 }
+
+export interface DashboardTrendPoint {
+  date: string
+  counts: Record<string, number>
+}
+
+export interface DashboardSecurityOperations {
+  rangeDays: number
+  generatedAt: string
+  assetPosture: Record<string, number>
+  assetsByCriticality: Record<string, number>
+  activeFindingsBySeverity: Record<string, number>
+  findingsOverTime: DashboardTrendPoint[]
+  findingsWithoutTimestamp: number
+  externalFindingsIncluded: boolean
+}

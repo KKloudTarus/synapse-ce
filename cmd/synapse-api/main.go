@@ -819,6 +819,7 @@ func main() {
 	}
 	aupService := aupuc.NewService(aupStore, auditLog, clock, cfg.AUPVersion)
 	exportService := exportuc.NewService(findingRepo, clock, buildinfo.App())
+	exportService.SetAIGateExemptions(scaService)
 	findingsService := findingsuc.NewService(findingRepo, commentRepo, retestRepo, auditLog, clock, ids)
 	// Both additions are independent; the tenant resolver is wired first because the review service
 	// takes findingsService as a dependency.

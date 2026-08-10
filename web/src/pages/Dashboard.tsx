@@ -15,8 +15,9 @@ import {
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Card, ErrorState, Spinner, cn } from '../components/ui'
+import { DonutChart, FindingsTrendChart, HorizontalBarChart, type ChartDatum } from '../components/DashboardCharts'
 import { api } from '../lib/api'
-import type { BusinessAsset, Engagement, FleetCoverageSummary } from '../lib/types'
+import type { BusinessAsset, DashboardSecurityOperations, Engagement, FleetCoverageSummary } from '../lib/types'
 import { PostureBadge } from './Assets'
 import { StatusPill } from './Engagements'
 
@@ -26,7 +27,6 @@ type DashboardData = {
   engagements: Engagement[]
 }
 
-const POSTURE_ORDER = ['critical', 'high_risk', 'attention', 'unknown', 'good'] as const
 const ENGAGEMENT_ORDER = ['active', 'draft', 'completed', 'archived'] as const
 const POSTURE_WEIGHT: Record<string, number> = { critical: 5, high_risk: 4, attention: 3, unknown: 2, good: 1 }
 const CRITICALITY_WEIGHT: Record<BusinessAsset['criticality'], number> = { critical: 4, high: 3, medium: 2, low: 1 }
@@ -36,6 +36,9 @@ export function Dashboard() {
   const [error, setError] = useState<string | null>(null)
   const [fleet, setFleet] = useState<FleetCoverageSummary | null>(null)
   const [fleetUnavailable, setFleetUnavailable] = useState(false)
+  const [analytics, setAnalytics] = useState<DashboardSecurityOperations | null>(null)
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null)
+  const [rangeDays, setRangeDays] = useState(30)
 
   useEffect(() => {
     let active = true
@@ -61,6 +64,22 @@ export function Dashboard() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    let active = true
+    setAnalytics(null)
+    setAnalyticsError(null)
+    api.dashboardSecurityOperations(rangeDays)
+      .then((summary) => {
+        if (active) setAnalytics(summary)
+      })
+      .catch((nextError) => {
+        if (active) setAnalyticsError(nextError instanceof Error ? nextError.message : 'Failed to load dashboard analytics')
+      })
+    return () => {
+      active = false
+    }
+  }, [rangeDays])
 
   if (error) return <div className="mx-auto max-w-[1600px]"><ErrorState message={error} /></div>
   if (!data) return <Spinner label="Loading security operations…" />
@@ -116,35 +135,30 @@ export function Dashboard() {
       </section>
 
       <section aria-labelledby="analytics-title">
-        <SectionHeading eyebrow="Telemetry" title="Operations analytics" description="Current distribution across the Asset and assessment lifecycle." id="analytics-title" />
-        <div className="grid gap-4 xl:grid-cols-3">
-          <Card title="Asset posture" actions={<LinkArrow to="/assets" label="View inventory" />} bodyClass="space-y-4">
-            <Distribution rows={POSTURE_ORDER.map((value) => ({ label: labelize(value), value: data.assets.filter((asset) => (asset.posture ?? 'unknown') === value).length, tone: postureTone(value) }))} />
-            {data.assetTotal > data.assets.length && <p className="text-xs text-subtlefg">Posture distribution reflects the first {data.assets.length} loaded Assets.</p>}
-          </Card>
+        <SectionHeading eyebrow="Telemetry" title="Operations analytics" description="Live distribution across Asset posture, finding risk, and security inventory." id="analytics-title" />
+        {analyticsError && <ErrorState message={analyticsError} />}
+        {!analytics && !analyticsError && <Spinner label="Loading operations analytics…" className="min-h-64" />}
+        {analytics && (
+          <div className="grid gap-4 xl:grid-cols-2">
+            <ChartCard title="Asset Security Posture" description="Current posture derived from findings and coverage." action={<LinkArrow to="/assets" label="View inventory" />}>
+              <DonutChart title="Asset Security Posture" centerLabel="Assets" data={postureChart(analytics.assetPosture)} />
+            </ChartCard>
 
-          <Card title="Engagement pipeline" actions={<LinkArrow to="/engagements" label="View queue" />} bodyClass="space-y-4">
-            <Distribution rows={ENGAGEMENT_ORDER.map((value) => ({ label: labelize(value), value: data.engagements.filter((engagement) => engagement.status.toLowerCase() === value).length, tone: engagementTone(value) }))} />
-          </Card>
+            <ChartCard title="Findings Over Time" description="New publishable findings grouped by UTC day and severity." action={<RangeSelector value={rangeDays} onChange={setRangeDays} />}>
+              <FindingsTrendChart points={analytics.findingsOverTime} series={severityChart({}, false)} />
+              {analytics.findingsWithoutTimestamp > 0 && <p className="mt-2 text-xs text-medium">{analytics.findingsWithoutTimestamp} finding{analytics.findingsWithoutTimestamp === 1 ? '' : 's'} excluded from the trend because no creation timestamp is available.</p>}
+            </ChartCard>
 
-          <Card title="Fleet readiness" actions={<LinkArrow to="/fleet" label="View coverage" />} bodyClass="space-y-4">
-            {fleet ? (
-              <>
-                <Distribution rows={fleetRows(fleet)} />
-                <div className="grid grid-cols-2 gap-3 border-t border-border pt-4 text-sm">
-                  <FleetStat label="Assets without agent" value={fleet.assetsWithoutAgent} warn />
-                  <FleetStat label="Connected agents" value={fleet.agentsByState.connected ?? 0} />
-                </div>
-              </>
-            ) : fleetUnavailable ? (
-              <div className="flex min-h-44 flex-col items-center justify-center rounded-lg border border-dashed border-border px-5 text-center">
-                <RadioTower className="size-6 text-subtlefg" aria-hidden="true" />
-                <p className="mt-3 text-sm font-medium">Fleet telemetry unavailable</p>
-                <p className="mt-1 text-xs leading-5 text-mutedfg">Asset and Engagement data remain available. Coverage is not assumed clean.</p>
-              </div>
-            ) : <Spinner label="Loading Fleet telemetry…" className="min-h-44" />}
-          </Card>
-        </div>
+            <ChartCard title="Active Finding Risk Mix" description="Open, triage, and confirmed actionable findings." action={<LinkArrow to="/assets" label="Review Assets" />}>
+              <DonutChart title="Active Finding Risk Mix" centerLabel="Active" data={severityChart(analytics.activeFindingsBySeverity, true)} />
+              {!analytics.externalFindingsIncluded && <p className="mt-2 text-xs text-medium">External finding storage is unavailable; third-party findings are not included.</p>}
+            </ChartCard>
+
+            <ChartCard title="Assets by Criticality" description="Managed Assets grouped by business criticality." action={<LinkArrow to="/assets" label="View inventory" />}>
+              <HorizontalBarChart title="Assets by Criticality" data={criticalityChart(analytics.assetsByCriticality)} />
+            </ChartCard>
+          </div>
+        )}
       </section>
 
       <section aria-labelledby="priority-title">
@@ -226,26 +240,6 @@ function SectionHeading({ eyebrow, title, description, id }: { eyebrow: string; 
   )
 }
 
-function Distribution({ rows }: { rows: Array<{ label: string; value: number; tone: string }> }) {
-  const total = rows.reduce((sum, row) => sum + row.value, 0)
-  return (
-    <div className="space-y-3">
-      {rows.map((row) => (
-        <div key={row.label}>
-          <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
-            <span className="font-medium text-mutedfg">{row.label}</span>
-            <span className="font-mono tabular-nums text-foreground">{row.value}</span>
-          </div>
-          <div className="h-2 overflow-hidden rounded-full bg-muted">
-            <div className={cn('bar-grow h-full min-w-0 rounded-full', row.tone)} style={{ width: `${total ? Math.max(row.value ? 3 : 0, row.value / total * 100) : 0}%` }} />
-          </div>
-        </div>
-      ))}
-      {total === 0 && <p className="text-xs text-subtlefg">No data available.</p>}
-    </div>
-  )
-}
-
 function LinkArrow({ to, label }: { to: string; label: string }) {
   return <Link to={to} className="inline-flex items-center gap-1 text-xs font-semibold text-branddim hover:text-brand"><span className="hidden sm:inline">{label}</span><ArrowRight className="size-3.5" aria-hidden="true" /></Link>
 }
@@ -297,26 +291,56 @@ function CriticalityBadge({ value }: { value: BusinessAsset['criticality'] }) {
   return <span className={cn('inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide', tone)}><CircleDot className="size-3" />{value}</span>
 }
 
-function FleetStat({ label, value, warn = false }: { label: string; value: number; warn?: boolean }) {
-  return <div><div className={cn('text-xl font-bold tabular-nums', warn && value > 0 && 'text-high')}>{value.toLocaleString()}</div><div className="mt-0.5 text-xs text-mutedfg">{label}</div></div>
-}
-
-function fleetRows(summary: FleetCoverageSummary) {
-  const entries = Object.entries(summary.rowsByVerdict)
-  const preferred = ['covered', 'stale', 'not_assessed', 'failed', 'unauthorized', 'unknown']
-  return entries
-    .sort(([left], [right]) => preferred.indexOf(left) - preferred.indexOf(right))
-    .map(([verdict, value]) => ({ label: labelize(verdict), value, tone: verdict === 'covered' ? 'bg-accent' : verdict === 'failed' || verdict === 'unauthorized' ? 'bg-critical' : verdict === 'stale' ? 'bg-high' : 'bg-medium' }))
-}
-
-function postureTone(value: (typeof POSTURE_ORDER)[number]) {
-  return value === 'critical' ? 'bg-critical' : value === 'high_risk' ? 'bg-high' : value === 'attention' ? 'bg-medium' : value === 'good' ? 'bg-accent' : 'bg-subtlefg'
-}
-
-function engagementTone(value: (typeof ENGAGEMENT_ORDER)[number]) {
-  return value === 'active' ? 'bg-accent' : value === 'completed' ? 'bg-brand' : value === 'archived' ? 'bg-subtlefg' : 'bg-info'
-}
-
 function labelize(value: string) {
   return value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function ChartCard({ title, description, action, children }: { title: string; description: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <Card title={<div><span className="block">{title}</span><span aria-hidden="true" className="mt-1 block text-xs font-normal text-subtlefg">{description}</span></div>} actions={action} bodyClass="p-5 sm:p-6">
+      {children}
+    </Card>
+  )
+}
+
+function RangeSelector({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+  return (
+    <div className="flex rounded-lg border border-border bg-bg p-0.5" aria-label="Finding trend range">
+      {[7, 30, 90].map((days) => <button key={days} type="button" onClick={() => onChange(days)} className={cn('rounded-md px-2 py-1 text-[10px] font-semibold transition-colors', value === days ? 'bg-brand text-brandfg' : 'text-mutedfg hover:text-foreground')}>{days}d</button>)}
+    </div>
+  )
+}
+
+function postureChart(counts: Record<string, number>): ChartDatum[] {
+  return [
+    chartItem('critical', 'Critical', counts, 'var(--color-critical)'),
+    chartItem('high_risk', 'High Risk', counts, 'var(--color-high)'),
+    chartItem('attention', 'Attention', counts, 'var(--color-medium)'),
+    chartItem('unknown', 'Unknown', counts, 'var(--color-subtlefg)'),
+    chartItem('good', 'Good', counts, 'var(--color-accent)'),
+  ]
+}
+
+function severityChart(counts: Record<string, number>, includeUnknown: boolean): ChartDatum[] {
+  const rows = [
+    chartItem('critical', 'Critical', counts, 'var(--color-critical)'),
+    chartItem('high', 'High', counts, 'var(--color-high)'),
+    chartItem('medium', 'Medium', counts, 'var(--color-medium)'),
+    chartItem('low', 'Low', counts, 'var(--color-low)'),
+  ]
+  if (includeUnknown) rows.push(chartItem('info', 'Info', counts, 'var(--color-infosev)'), chartItem('unknown', 'Unknown', counts, 'var(--color-subtlefg)'))
+  return rows
+}
+
+function criticalityChart(counts: Record<string, number>): ChartDatum[] {
+  return [
+    chartItem('critical', 'Critical', counts, 'var(--color-critical)'),
+    chartItem('high', 'High', counts, 'var(--color-high)'),
+    chartItem('medium', 'Medium', counts, 'var(--color-medium)'),
+    chartItem('low', 'Low', counts, 'var(--color-low)'),
+  ]
+}
+
+function chartItem(key: string, label: string, counts: Record<string, number>, color: string): ChartDatum {
+  return { key, label, value: counts[key] ?? 0, color }
 }

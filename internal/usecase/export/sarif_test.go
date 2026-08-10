@@ -6,6 +6,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // firstPartyFindings mixes the three first-party kinds (SAST/secret/misconfig) that carry a
@@ -229,6 +230,83 @@ func TestMarshalSARIFValidJSON(t *testing.T) {
 		if p := firstNonNilPhysical(r.Locations); p != nil && p.Region != nil && p.Region.StartLine < 1 {
 			t.Errorf("result %q has invalid startLine %d", r.RuleID, p.Region.StartLine)
 		}
+	}
+}
+
+func TestSARIFAIGateExemptionRetainsAndAnnotatesFinding(t *testing.T) {
+	findings := firstPartyFindings()
+	exemptKey := "misconfig:kubernetes-no-run-as-non-root:deploy/pod.yaml:17"
+	exemption := ports.AIGateExemption{
+		DedupKey: exemptKey, PolicyVersion: "fp-gate-v3", PolicyReason: "verified_consensus",
+	}
+	resolver := func(item finding.Finding) (ports.AIGateExemption, bool) {
+		return exemption, item.DedupKey == exemptKey
+	}
+
+	log := buildSARIF(findings, "v9", SARIFOptions{AIGateExemption: resolver})
+	if len(log.Runs[0].Results) != len(findings) {
+		t.Fatalf("AI gate exemption removed a result: got %d, want %d", len(log.Runs[0].Results), len(findings))
+	}
+	for _, result := range log.Runs[0].Results {
+		if result.RuleID != "kubernetes-no-run-as-non-root" {
+			if len(result.Suppressions) != 0 {
+				t.Errorf("unexempted result %q has suppression: %+v", result.RuleID, result.Suppressions)
+			}
+			if _, exists := result.Properties["synapse.aiGateExempt"]; exists {
+				t.Errorf("unexempted result %q has AI exemption properties: %+v", result.RuleID, result.Properties)
+			}
+			continue
+		}
+		if len(result.Suppressions) != 1 {
+			t.Fatalf("exempted result suppressions = %+v, want one", result.Suppressions)
+		}
+		suppression := result.Suppressions[0]
+		if suppression.Kind != "external" || suppression.Status != "accepted" ||
+			suppression.Justification != "Synapse AI gate exemption: policy=fp-gate-v3; reason=verified_consensus" {
+			t.Errorf("suppression = %+v", suppression)
+		}
+		if result.Properties["synapse.aiGateExempt"] != true ||
+			result.Properties["synapse.aiPolicyVersion"] != "fp-gate-v3" ||
+			result.Properties["synapse.aiPolicyReason"] != "verified_consensus" {
+			t.Errorf("AI exemption properties = %+v", result.Properties)
+		}
+	}
+
+	first, err := MarshalSARIF(findings, "v9", SARIFOptions{AIGateExemption: resolver})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := MarshalSARIF(findings, "v9", SARIFOptions{AIGateExemption: resolver})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) {
+		t.Fatal("AI exemption serialization is not deterministic")
+	}
+}
+
+func TestSARIFAIGateExemptionRejectsIncompleteOrMismatchedMetadata(t *testing.T) {
+	findingItem := firstPartyFindings()[1]
+	tests := []struct {
+		name string
+		meta ports.AIGateExemption
+	}{
+		{name: "mismatched finding", meta: ports.AIGateExemption{DedupKey: "other", PolicyVersion: "fp-gate-v3", PolicyReason: "verified_consensus"}},
+		{name: "missing policy version", meta: ports.AIGateExemption{DedupKey: findingItem.DedupKey, PolicyReason: "verified_consensus"}},
+		{name: "missing policy reason", meta: ports.AIGateExemption{DedupKey: findingItem.DedupKey, PolicyVersion: "fp-gate-v3"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := buildSARIF([]finding.Finding{findingItem}, "v9", SARIFOptions{
+				AIGateExemption: func(finding.Finding) (ports.AIGateExemption, bool) { return test.meta, true },
+			}).Runs[0].Results[0]
+			if len(result.Suppressions) != 0 {
+				t.Errorf("invalid metadata produced suppression: %+v", result.Suppressions)
+			}
+			if _, exists := result.Properties["synapse.aiGateExempt"]; exists {
+				t.Errorf("invalid metadata produced marker properties: %+v", result.Properties)
+			}
+		})
 	}
 }
 

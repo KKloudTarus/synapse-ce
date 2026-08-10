@@ -2,6 +2,7 @@ package export
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 type fixedClock struct{}
@@ -28,6 +30,15 @@ type fakeJudgments struct{ js []judgment.Judgment }
 
 func (f *fakeJudgments) ListByEngagement(context.Context, shared.ID) ([]judgment.Judgment, error) {
 	return f.js, nil
+}
+
+type fakeAIGateExemptions struct {
+	items []ports.AIGateExemption
+	err   error
+}
+
+func (f fakeAIGateExemptions) AIGateExemptions(context.Context, shared.ID, []finding.Finding) ([]ports.AIGateExemption, error) {
+	return f.items, f.err
 }
 
 func mkJudg(subj string, st judgment.State, score int, r judgment.ReachabilityState, tier judgment.ReachabilityTier) judgment.Judgment {
@@ -216,5 +227,56 @@ func TestExportsApplyPublishabilityGate(t *testing.T) {
 		if s.Vulnerability.Name == "CVE-2099-0001" {
 			t.Error("OpenVEX leaked an unproven exploitation finding")
 		}
+	}
+}
+
+func TestStoredSARIFUsesRevalidatedAIGateExemptions(t *testing.T) {
+	repo := memory.NewFindingRepository()
+	ctx := context.Background()
+	item := finding.Finding{
+		ID: "f1", EngagementID: "e1", Title: "Weak hash", Kind: finding.KindSAST,
+		Severity: shared.SeverityMedium, Status: finding.StatusOpen, RuleKey: "weak-hash",
+		SourceLocation: &finding.SourceLocation{File: "app.go", StartLine: 7, EndLine: 7},
+		DedupKey:       "sast:weak-hash:app.go:7",
+	}
+	if err := repo.Upsert(ctx, []finding.Finding{item}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(repo, fixedClock{}, "v1")
+	svc.SetAIGateExemptions(fakeAIGateExemptions{items: []ports.AIGateExemption{{
+		DedupKey: item.DedupKey, PolicyVersion: "fp-gate-v3", PolicyReason: "verified_consensus",
+	}}})
+
+	log, err := svc.SARIF(ctx, "e1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(log.Runs[0].Results) != 1 || len(log.Runs[0].Results[0].Suppressions) != 1 {
+		t.Fatalf("stored SARIF result/exemption = %+v", log.Runs[0].Results)
+	}
+}
+
+func TestStoredSARIFFailsOnUnreadableAIGateMetadataButAllowsMissingLegacyResult(t *testing.T) {
+	repo := memory.NewFindingRepository()
+	ctx := context.Background()
+	if err := repo.Upsert(ctx, []finding.Finding{{
+		ID: "f1", EngagementID: "e1", Title: "Weak hash", Kind: finding.KindSAST,
+		Severity: shared.SeverityMedium, Status: finding.StatusOpen, RuleKey: "weak-hash",
+		SourceLocation: &finding.SourceLocation{File: "app.go", StartLine: 7, EndLine: 7},
+		DedupKey:       "sast:weak-hash:app.go:7",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewService(repo, fixedClock{}, "v1")
+	svc.SetAIGateExemptions(fakeAIGateExemptions{err: shared.ErrNotFound})
+	if _, err := svc.SARIF(ctx, "e1"); err != nil {
+		t.Fatalf("legacy engagement with no scan result must still export: %v", err)
+	}
+
+	readErr := errors.New("scan result unavailable")
+	svc.SetAIGateExemptions(fakeAIGateExemptions{err: readErr})
+	if _, err := svc.SARIF(ctx, "e1"); !errors.Is(err, readErr) {
+		t.Fatalf("SARIF error = %v, want %v", err, readErr)
 	}
 }

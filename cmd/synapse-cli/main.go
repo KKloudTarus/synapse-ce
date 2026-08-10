@@ -1396,6 +1396,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	// Report advisory opinions separately from the smaller policy-authorized gate-exempt set.
 	fpSuspect := res.SuspectedFPKeys()
 	fpGateExempt := res.AIGateExemptKeys()
+	fpGateExemptions := res.AIGateExemptions()
 	fpWouldExempt := res.AIWouldGateExemptKeys()
 	fpReview := res.AIReviewRequiredKeys()
 	if budget := res.AITriageBudget; budget != nil {
@@ -1458,7 +1459,13 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 			}
 		}
 		fixFor := func(f finding.Finding) string { return fixByKey[f.DedupKey] }
-		out, err := exportuc.MarshalSARIF(res.Findings, res.ToolVersions["synapse"], exportuc.SARIFOptions{Manifest: manifestFor, Fix: fixFor})
+		exemptionFor := func(f finding.Finding) (ports.AIGateExemption, bool) {
+			exemption, ok := fpGateExemptions[strings.TrimSpace(f.DedupKey)]
+			return exemption, ok
+		}
+		out, err := exportuc.MarshalSARIF(res.Findings, res.ToolVersions["synapse"], exportuc.SARIFOptions{
+			Manifest: manifestFor, Fix: fixFor, AIGateExemption: exemptionFor,
+		})
 		if err != nil {
 			return fmt.Errorf("encode sarif: %w", err)
 		}
