@@ -7,9 +7,18 @@
 # default, and the reason this list is short: entries are added when a technique is classified, not in
 # advance.
 legal_review:
-  reviewed: false
-  date: ""
-  owner: "Repository maintainer (nghiadaulau) until a named counsel is assigned"
+  # Governance adoption: the accountable owner reviewed this policy and put it in force. A real, dated
+  # review event -- but the maintainer's adoption, NOT external legal counsel.
+  reviewed: true
+  date: "2026-08-10"
+  owner: "nghiadaulau"
+  reviewer: "nghiadaulau (repository maintainer, accountable owner)"
+  # External legal counsel review. Still pending, and production_safe is gated on THIS rather than on
+  # adoption above -- so no technique may be marked production-safe until counsel signs off, regardless
+  # of who adopted the policy.
+  counsel_reviewed: false
+  counsel_date: ""
+  counsel_reviewer: ""
 
 techniques:
   - technique: recon.service_banner

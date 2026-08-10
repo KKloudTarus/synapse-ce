@@ -140,12 +140,25 @@ type TechniquePolicy struct {
 	ProductionSafe bool          `yaml:"production_safe"`
 }
 
-// LegalReview records the document's review status. ProductionSafe is refused for every technique while
-// Reviewed is false, so a register cannot quietly claim production readiness ahead of the review.
+// LegalReview records the policy's review status at TWO distinct levels, because they carry different
+// authority and conflating them would let the weaker one unlock what only the stronger should.
+//
+//   - Reviewed / Date / Owner: governance adoption. The accountable owner has reviewed the policy and
+//     put it in force. This is a real, dated review event — but it is the maintainer's adoption, not an
+//     external legal opinion.
+//   - CounselReviewed / CounselDate / CounselReviewer: external legal counsel review.
+//
+// ProductionSafe is gated on CounselReviewed, NOT on Reviewed. Adopting the governance policy puts it in
+// force; it does not by itself clear any technique to run against a customer's production estate. Only a
+// recorded counsel review lifts that gate, so a maintainer cannot self-authorise production use.
 type LegalReview struct {
-	Reviewed bool   `yaml:"reviewed"`
-	Date     string `yaml:"date"`
-	Owner    string `yaml:"owner"`
+	Reviewed        bool   `yaml:"reviewed"`
+	Date            string `yaml:"date"`
+	Owner           string `yaml:"owner"`
+	Reviewer        string `yaml:"reviewer"`
+	CounselReviewed bool   `yaml:"counsel_reviewed"`
+	CounselDate     string `yaml:"counsel_date"`
+	CounselReviewer string `yaml:"counsel_reviewer"`
 }
 
 // Register is the whole policy: the review status plus every classified technique.
@@ -220,12 +233,20 @@ func (r *Register) Validate() error {
 		if err := t.validateCleanup(name); err != nil {
 			return err
 		}
-		if t.ProductionSafe && !r.LegalReview.Reviewed {
-			return fmt.Errorf("%w: %s is marked production-safe before the legal review is recorded", shared.ErrValidation, name)
+		// Production clearance is gated on EXTERNAL COUNSEL review, not on the maintainer's adoption of
+		// the policy. Adopting the governance artifact does not clear a technique to run against a
+		// customer's production estate, so a maintainer cannot self-authorise it.
+		if t.ProductionSafe && !r.LegalReview.CounselReviewed {
+			return fmt.Errorf("%w: %s is marked production-safe before external legal counsel review is recorded", shared.ErrValidation, name)
 		}
 	}
-	if r.LegalReview.Reviewed && (strings.TrimSpace(r.LegalReview.Date) == "" || strings.TrimSpace(r.LegalReview.Owner) == "") {
-		return fmt.Errorf("%w: a recorded legal review needs both a date and an owner", shared.ErrValidation)
+	if r.LegalReview.Reviewed && (strings.TrimSpace(r.LegalReview.Date) == "" ||
+		strings.TrimSpace(r.LegalReview.Owner) == "" || strings.TrimSpace(r.LegalReview.Reviewer) == "") {
+		return fmt.Errorf("%w: a recorded policy adoption needs a date, an owner and a reviewer", shared.ErrValidation)
+	}
+	if r.LegalReview.CounselReviewed && (strings.TrimSpace(r.LegalReview.CounselDate) == "" ||
+		strings.TrimSpace(r.LegalReview.CounselReviewer) == "") {
+		return fmt.Errorf("%w: a recorded counsel review needs both a date and a named reviewer", shared.ErrValidation)
 	}
 	return nil
 }
