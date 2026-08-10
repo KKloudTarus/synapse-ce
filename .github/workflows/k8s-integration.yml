@@ -33,7 +33,7 @@ jobs:
           cache: true
 
       - name: Create kind cluster
-        uses: helm/kind-action@v1.10.0
+        uses: helm/kind-action@v1.14.0
         with:
           cluster_name: synapse-ci
 
