@@ -317,6 +317,7 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/projects/{key}/analyses", rt.authz(userdom.PermOperate, rt.startProjectAnalysis))
 		mux.HandleFunc("GET /api/v1/projects/{key}/analyses", rt.authz(userdom.PermView, rt.listProjectAnalyses))
 		mux.HandleFunc("GET /api/v1/projects/{key}/analyses/{id}", rt.authz(userdom.PermView, rt.getProjectAnalysis))
+		mux.HandleFunc("POST /api/v1/projects/{key}/analyses/{id}/source", rt.authz(userdom.PermOperate, rt.publishProjectSource))
 		mux.HandleFunc("GET /api/v1/projects/{key}/analyses/{id}/code/files", rt.authz(userdom.PermView, rt.listProjectCodeFiles))
 		mux.HandleFunc("GET /api/v1/projects/{key}/analyses/{id}/code/file", rt.authz(userdom.PermView, rt.getProjectCodeFile))
 		mux.HandleFunc("GET /api/v1/projects/{key}/analyses/{id}/code/diff", rt.authz(userdom.PermView, rt.getProjectCodeDiff))

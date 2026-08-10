@@ -475,7 +475,7 @@ func Load() Config {
 		Offline:                   getbool("SYNAPSE_OFFLINE", false),
 		MaxWorkspaceBytes:         getint64("SYNAPSE_MAX_WORKSPACE_BYTES", 2<<30),
 		ProjectUploadDir:          getenv("SYNAPSE_PROJECT_UPLOAD_DIR", "data/project-uploads"),
-		ProjectSourceArtifactDir:  getenv("SYNAPSE_PROJECT_SOURCE_ARTIFACT_DIR", "data/project-source-artifacts"),
+		ProjectSourceArtifactDir:  projectSourceArtifactDir(),
 		ProjectSourceRetention:    getduration("SYNAPSE_PROJECT_SOURCE_RETENTION", 90*24*time.Hour),
 		ProjectSourceMaxFileBytes: getint64("SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES", 2<<20),
 		ProjectSourceMaxFiles:     getint("SYNAPSE_PROJECT_SOURCE_MAX_FILES", 10_000),

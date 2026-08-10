@@ -22,6 +22,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -41,6 +42,7 @@ type Store struct {
 	maxFileBytes int64
 	maxFiles     int
 	maxBytes     int64
+	retention    time.Duration
 }
 
 func New(root string, maxFileBytes int64, maxFiles int, maxBytes int64) *Store {
@@ -56,6 +58,29 @@ func New(root string, maxFileBytes int64, maxFiles int, maxBytes int64) *Store {
 	return &Store{root: root, maxFileBytes: maxFileBytes, maxFiles: maxFiles, maxBytes: maxBytes}
 }
 
+// SetRetention makes retention a write-path invariant, not merely a startup task.
+// A non-positive duration disables age-based cleanup.
+func (s *Store) SetRetention(retention time.Duration) {
+	if retention > 0 {
+		s.retention = retention
+		return
+	}
+	s.retention = 0
+}
+
+func (s *Store) cleanupBeforeWrite(ctx context.Context) error {
+	if s.retention <= 0 {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.CleanupExpired(ctx, time.Now().Add(-s.retention)); err != nil {
+		return fmt.Errorf("clean expired source artifacts: %w", err)
+	}
+	return nil
+}
+
 var _ ports.ProjectSourceArtifactStore = (*Store)(nil)
 
 func (s *Store) Capture(ctx context.Context, tenantID, projectID shared.ID, analysisID, sourceDir string) (projectanalysis.SourceCapture, error) {
@@ -64,6 +89,15 @@ func (s *Store) Capture(ctx context.Context, tenantID, projectID shared.ID, anal
 	}
 	if err := s.validateAnalysisContext(projectID, analysisID); err != nil || strings.TrimSpace(sourceDir) == "" {
 		return unavailable(projectanalysis.UnavailableCaptureFailed), fmt.Errorf("%w: source capture context is required", shared.ErrValidation)
+	}
+	if err := s.validateSourceIsolation(sourceDir); err != nil {
+		return unavailable(projectanalysis.UnavailableCaptureFailed), err
+	}
+	if err := s.validateWriteRoot(); err != nil {
+		return unavailable(projectanalysis.UnavailableCaptureFailed), err
+	}
+	if err := s.cleanupBeforeWrite(ctx); err != nil {
+		return unavailable(projectanalysis.UnavailableCaptureFailed), err
 	}
 	if err := ctx.Err(); err != nil {
 		return unavailable(projectanalysis.UnavailableCaptureFailed), err
@@ -114,6 +148,9 @@ func (s *Store) Capture(ctx context.Context, tenantID, projectID shared.ID, anal
 		if err != nil || path == "" {
 			return fmt.Errorf("invalid source path: %w", err)
 		}
+		if !sourcepolicy.RetainPath(path) {
+			return nil
+		}
 		if len(manifest.Files) >= s.maxFiles {
 			manifest.Truncated = true
 			return nil
@@ -163,12 +200,25 @@ func (s *Store) Capture(ctx context.Context, tenantID, projectID shared.ID, anal
 	if err := os.WriteFile(filepath.Join(tmp, "manifest.json"), manifestData, 0o600); err != nil {
 		return unavailable(projectanalysis.UnavailableCaptureFailed), fmt.Errorf("write source manifest: %w", err)
 	}
-	if err := os.RemoveAll(captureRoot); err != nil {
-		return unavailable(projectanalysis.UnavailableCaptureFailed), fmt.Errorf("replace source artifact: %w", err)
+	if err := os.Mkdir(captureRoot, 0o700); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return unavailable(projectanalysis.UnavailableAlreadyRetained), shared.ErrConflict
+		}
+		return unavailable(projectanalysis.UnavailableCaptureFailed), fmt.Errorf("claim source artifact: %w", err)
 	}
-	if err := os.Rename(tmp, captureRoot); err != nil {
-		return unavailable(projectanalysis.UnavailableCaptureFailed), fmt.Errorf("publish source artifact: %w", err)
+	published := false
+	defer func() {
+		if !published {
+			_ = os.RemoveAll(captureRoot)
+		}
+	}()
+	if err := os.Rename(filepath.Join(tmp, "blobs"), filepath.Join(captureRoot, "blobs")); err != nil {
+		return unavailable(projectanalysis.UnavailableCaptureFailed), fmt.Errorf("publish source blobs: %w", err)
 	}
+	if err := os.Rename(filepath.Join(tmp, "manifest.json"), filepath.Join(captureRoot, "manifest.json")); err != nil {
+		return unavailable(projectanalysis.UnavailableCaptureFailed), fmt.Errorf("publish source manifest: %w", err)
+	}
+	published = true
 	return projectanalysis.SourceCapture{Capabilities: availableCapabilities(), Manifest: manifest}, nil
 }
 
@@ -181,6 +231,12 @@ func (s *Store) Load(ctx context.Context, tenantID, projectID shared.ID, analysi
 func (s *Store) CaptureBase(ctx context.Context, tenantID, projectID shared.ID, analysisID string, files map[string][]byte) (projectanalysis.SourceManifest, error) {
 	manifest := projectanalysis.SourceManifest{}
 	if err := s.validateAnalysisContext(projectID, analysisID); err != nil {
+		return manifest, err
+	}
+	if err := s.validateWriteRoot(); err != nil {
+		return manifest, err
+	}
+	if err := s.cleanupBeforeWrite(ctx); err != nil {
 		return manifest, err
 	}
 	if len(files) == 0 {
@@ -205,7 +261,14 @@ func (s *Store) CaptureBase(ctx context.Context, tenantID, projectID shared.ID, 
 		if err != nil || canonical == "" || canonical != path {
 			return projectanalysis.SourceManifest{}, fmt.Errorf("%w: base source path is invalid", shared.ErrValidation)
 		}
+		if !sourcepolicy.RetainPath(path) {
+			continue
+		}
 		paths = append(paths, path)
+	}
+	if len(paths) == 0 {
+		manifest.SetArtifactDigest()
+		return manifest, nil
 	}
 	sort.Strings(paths)
 	var total int64
@@ -243,12 +306,25 @@ func (s *Store) CaptureBase(ctx context.Context, tenantID, projectID shared.ID, 
 	if err := os.WriteFile(filepath.Join(tmp, "manifest.json"), data, 0o600); err != nil {
 		return projectanalysis.SourceManifest{}, fmt.Errorf("write base source manifest: %w", err)
 	}
-	if err := os.RemoveAll(root); err != nil {
-		return projectanalysis.SourceManifest{}, fmt.Errorf("replace base source artifact: %w", err)
+	if err := os.Mkdir(root, 0o700); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return projectanalysis.SourceManifest{}, shared.ErrConflict
+		}
+		return projectanalysis.SourceManifest{}, fmt.Errorf("claim base source artifact: %w", err)
 	}
-	if err := os.Rename(tmp, root); err != nil {
-		return projectanalysis.SourceManifest{}, fmt.Errorf("publish base source artifact: %w", err)
+	published := false
+	defer func() {
+		if !published {
+			_ = os.RemoveAll(root)
+		}
+	}()
+	if err := os.Rename(filepath.Join(tmp, "blobs"), filepath.Join(root, "blobs")); err != nil {
+		return projectanalysis.SourceManifest{}, fmt.Errorf("publish base source blobs: %w", err)
 	}
+	if err := os.Rename(filepath.Join(tmp, "manifest.json"), filepath.Join(root, "manifest.json")); err != nil {
+		return projectanalysis.SourceManifest{}, fmt.Errorf("publish base source manifest: %w", err)
+	}
+	published = true
 	return manifest, nil
 }
 
@@ -398,15 +474,16 @@ func (s *Store) cleanupExpiredAt(root string, before time.Time) error {
 					continue
 				}
 				analysisDir := filepath.Join(analysisRoot, analysis.Name())
-				if _, err := os.Stat(filepath.Join(analysisDir, "manifest.json")); os.IsNotExist(err) {
-					continue
-				} else if err != nil {
-					return fmt.Errorf("stat source artifact manifest: %w", err)
-				}
 				info, err := analysis.Info()
 				if err != nil {
 					return err
 				}
+				if _, err := os.Stat(filepath.Join(analysisDir, "manifest.json")); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("stat source artifact manifest: %w", err)
+				}
+				// A process may die after atomically claiming the analysis directory but before
+				// writing manifest.json. Treat an old manifest-less claim as managed stale state
+				// so it cannot block publication forever.
 				if info.ModTime().Before(before) {
 					if err := os.RemoveAll(analysisDir); err != nil {
 						return fmt.Errorf("remove expired source artifacts: %w", err)

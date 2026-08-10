@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -192,7 +193,7 @@ func TestProjectSourceCaptureDefaults(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	cfg := Load()
-	if cfg.ProjectSourceArtifactDir != "data/project-source-artifacts" || cfg.ProjectSourceRetention != 90*24*time.Hour || cfg.ProjectSourceMaxFileBytes != 2<<20 || cfg.ProjectSourceMaxFiles != 10_000 || cfg.ProjectSourceMaxBytes != 500<<20 {
+	if !filepath.IsAbs(cfg.ProjectSourceArtifactDir) || cfg.ProjectSourceRetention != 90*24*time.Hour || cfg.ProjectSourceMaxFileBytes != 2<<20 || cfg.ProjectSourceMaxFiles != 10_000 || cfg.ProjectSourceMaxBytes != 500<<20 {
 		t.Fatalf("source capture defaults = %+v", cfg)
 	}
 }

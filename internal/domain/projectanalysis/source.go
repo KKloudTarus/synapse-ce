@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
@@ -38,6 +39,7 @@ type UnavailableReason string
 const (
 	UnavailableNotRetained       UnavailableReason = "not_retained"
 	UnavailableCaptureFailed     UnavailableReason = "capture_failed"
+	UnavailableAlreadyRetained   UnavailableReason = "already_retained"
 	UnavailableFirstAnalysis     UnavailableReason = "first_analysis"
 	UnavailableNoComparableBase  UnavailableReason = "no_comparable_base"
 	UnavailableUnsupportedTarget UnavailableReason = "unsupported_target"
@@ -48,7 +50,7 @@ const (
 
 func (r UnavailableReason) Valid() bool {
 	switch r {
-	case UnavailableNotRetained, UnavailableCaptureFailed, UnavailableFirstAnalysis,
+	case UnavailableNotRetained, UnavailableCaptureFailed, UnavailableAlreadyRetained, UnavailableFirstAnalysis,
 		UnavailableNoComparableBase, UnavailableUnsupportedTarget, UnavailableLimitExceeded,
 		UnavailableBinary, UnavailableNonUTF8:
 		return true
@@ -251,11 +253,28 @@ func (f SourceFile) Validate() error {
 	return nil
 }
 
+// SourceWriter is the authenticated provenance of a sanctioned source contribution.
+// It lives inside manifest.json so the manifest digest seals who published it, with which
+// client version, and when the server accepted the contribution.
+type SourceWriter struct {
+	Actor       string    `json:"actor"`
+	ToolVersion string    `json:"tool_version"`
+	PublishedAt time.Time `json:"published_at"`
+}
+
+func (w SourceWriter) Validate() error {
+	if strings.TrimSpace(w.Actor) == "" || strings.TrimSpace(w.ToolVersion) == "" || w.PublishedAt.IsZero() {
+		return fmt.Errorf("source writer provenance is invalid")
+	}
+	return nil
+}
+
 // SourceManifest is the analysis-owned source capture inventory. It is immutable after
 // publication and reconciled against measure.Snapshot.Nodes before persistence.
 type SourceManifest struct {
 	Files     []SourceFile `json:"files"`
 	Truncated bool         `json:"truncated,omitempty"`
+	Writer    *SourceWriter `json:"writer,omitempty"`
 	Digest    string       `json:"digest,omitempty"`
 }
 

@@ -228,6 +228,15 @@ func cloneProjectAnalysis(in projectanalysis.Analysis) projectanalysis.Analysis 
 	out.Gate.Results = slices.Clone(in.Gate.Results)
 	out.InternalIssues = slices.Clone(in.InternalIssues)
 	out.SourceManifest.Files = slices.Clone(in.SourceManifest.Files)
+	if in.SourceManifest.Writer != nil {
+		writer := *in.SourceManifest.Writer
+		out.SourceManifest.Writer = &writer
+	}
+	out.Comparison.BaseManifest.Files = slices.Clone(in.Comparison.BaseManifest.Files)
+	if in.Comparison.BaseManifest.Writer != nil {
+		writer := *in.Comparison.BaseManifest.Writer
+		out.Comparison.BaseManifest.Writer = &writer
+	}
 	out.FileChanges = slices.Clone(in.FileChanges)
 	out.Annotations = slices.Clone(in.Annotations)
 	for i := range out.Annotations {

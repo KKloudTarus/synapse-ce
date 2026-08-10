@@ -2799,7 +2799,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// workspace cleanup. Capture failure is explicit metadata, never a scan failure.
 	if opts.ProjectAnalysis {
 		s.captureProjectSource(ctx, engagementID, opts.ProjectAnalysisID, ws.Dir, result)
-		s.captureProjectComparison(ctx, engagementID, opts.ProjectAnalysisID, ws.Dir, ws.Commit, result)
+		if result.SourceCapture != nil && result.SourceCapture.Capabilities.Source.Available {
+			s.captureProjectComparison(ctx, engagementID, opts.ProjectAnalysisID, ws.Dir, ws.Commit, result)
+		}
 	}
 	// Record the image's manifest digest so the fleet cluster agent can correlate a running digest
 	// with this scan (#446). This is the pipeline that populates result.Image (image scans).

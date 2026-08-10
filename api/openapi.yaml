@@ -333,6 +333,69 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalServerError"}
 
+  /api/v1/projects/{key}/analyses/{id}/source:
+    parameters:
+    - $ref: '#/components/parameters/ProjectKey'
+    - $ref: '#/components/parameters/AnalysisId'
+    post:
+      tags: [projects]
+      summary: Publish an immutable source snapshot for one server-owned Project analysis
+      operationId: publishProjectAnalysisSource
+      description: >
+        Authenticated CI contribution path for Code Quality source. The server derives tenant
+        and actor from the bearer token, re-resolves the analysis under that tenant/project,
+        applies configured source-capture policy and limits, and creates the snapshot once.
+      parameters:
+      - name: X-Synapse-Tool-Version
+        in: header
+        required: true
+        schema: {type: string, minLength: 1}
+      requestBody:
+        required: true
+        content:
+          application/x-tar:
+            schema: {type: string, format: binary}
+      responses:
+        "201":
+          description: Source snapshot published and attached to the immutable analysis
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [files, writer, digest]
+                properties:
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      required: [path, bytes, lines, generated, available]
+                      properties:
+                        path: {type: string, minLength: 1}
+                        digest: {type: string}
+                        bytes: {type: integer, format: int64, minimum: 0}
+                        lines: {type: integer, minimum: 0}
+                        generated: {type: boolean}
+                        available: {type: boolean}
+                        reason: {type: string}
+                  truncated: {type: boolean}
+                  writer:
+                    type: object
+                    required: [actor, tool_version, published_at]
+                    properties:
+                      actor: {type: string, minLength: 1}
+                      tool_version: {type: string, minLength: 1}
+                      published_at: {type: string, format: date-time}
+                  digest: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Analysis already has source or source artifact state conflicts}
+        "413": {description: Source archive exceeds the transport upload limit}
+        "415": {description: Content-Type is not application/x-tar}
+        "500": {$ref: "#/components/responses/InternalServerError"}
+        "503": {description: Source artifact storage is temporarily unavailable}
+
   /api/v1/projects/{key}/analyses/{id}/code/files:
     parameters:
     - $ref: '#/components/parameters/ProjectKey'
