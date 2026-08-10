@@ -45,6 +45,27 @@ Synapse validates scope data but cannot verify legal authorization. The operator
 for holding written permission to test any target. Use it only against systems you are
 explicitly authorized to test.
 
+## Offensive actions
+
+Anything Synapse executes **against a target** is additionally governed by the offensive governance
+policy in [`docs/redteam/offensive-policy.md`](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/redteam/offensive-policy.md).
+It is not published on this site because it is a repository artifact that CI verifies against the
+machine-readable register the code enforces — the two must change together, so the reviewed text lives
+next to the register rather than in the docs build.
+
+What it settles, and what the three controls above do not:
+
+- The categories Synapse **will not** execute at all: denial of service, destructive actions,
+  exfiltration beyond a bounded proof sample, unauthorised persistence, out-of-scope lateral movement
+  and third-party impact.
+- Per-technique risk classification, and which class needs automatic, single or **dual** human approval.
+- The rules-of-engagement fields an engagement must carry first. A missing field is a refusal.
+- The kill switch: `POST /api/v1/redteam/halt` cancels all in-flight offensive work, audited with the
+  operator and reason. Its stated bound covers the control plane; a technique already running on a host
+  stops within one further agent poll interval.
+
+**A technique with no register entry is refused.** The register is an allowlist.
+
 ## Reporting a vulnerability
 
 Please do not open a public issue for a security vulnerability. Use GitHub's private

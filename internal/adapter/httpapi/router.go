@@ -69,6 +69,7 @@ type Router struct {
 	sarif             sarifIngester         // optional; nil ⇒ the third-party SARIF import route is not registered
 	importedFindings  sarifReader           // optional read side for imported findings
 	fleetRolloutAdmin fleetRolloutService   // optional; nil ⇒ the operator rollout routes are not served
+	offensiveHalt     offensiveKillSwitch   // optional; nil ⇒ the red-team halt route is not served
 	fleet             *fleetRouter          // optional; nil ⇒ agent transport plane is not served
 	fleetAdmin        fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
 	qualityGates      qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
@@ -340,6 +341,12 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/agents/rollout/promote", rt.authz(userdom.PermAdminister, rt.promoteFleetRollout))
 		mux.HandleFunc("POST /api/v1/agents/rollout/pause", rt.authz(userdom.PermAdminister, rt.pauseFleetRollout))
 		mux.HandleFunc("POST /api/v1/agents/rollout/resume", rt.authz(userdom.PermAdminister, rt.resumeFleetRollout))
+	}
+	if rt.offensiveHalt != nil {
+		// The kill switch (#418, document 8). PermAdminister, not PermOperate: halting the whole fleet's
+		// offensive work is an administrative act, and the same person who can run offensive work should
+		// not be the only one who can stop it.
+		mux.HandleFunc("POST /api/v1/redteam/halt", rt.authz(userdom.PermAdminister, rt.haltOffensiveWork))
 	}
 	mux.HandleFunc("GET /api/v1/engagements", rt.authz(userdom.PermView, rt.listEngagements))
 	mux.HandleFunc("GET /api/v1/engagements/{id}", rt.authz(userdom.PermView, rt.getEngagement))

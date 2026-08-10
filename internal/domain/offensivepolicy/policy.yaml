@@ -1,0 +1,113 @@
+# Machine-readable half of docs/redteam/offensive-policy.md (issue #418).
+#
+# The DOCUMENT is the source of truth. This file mirrors its §10 technique register, and
+# policy_gen_test.go fails the build when the two diverge in either direction. Never edit one alone.
+#
+# A technique absent from this register is REFUSED by the enforcement path. That is the fail-closed
+# default, and the reason this list is short: entries are added when a technique is classified, not in
+# advance.
+legal_review:
+  reviewed: false
+  date: ""
+  owner: "Repository maintainer (nghiadaulau) until a named counsel is assigned"
+
+techniques:
+  - technique: recon.service_banner
+    taxonomy_ref: T1595.002
+    disruption: none
+    reversibility: reversible
+    risk_class: low
+    approval: automatic
+    blast_radius: read_only
+    cleanup:
+      steps: []
+      verification: ""
+    production_safe: false
+
+  - technique: recon.tls_inspect
+    taxonomy_ref: T1596
+    disruption: none
+    reversibility: reversible
+    risk_class: low
+    approval: automatic
+    blast_radius: read_only
+    cleanup:
+      steps: []
+      verification: ""
+    production_safe: false
+
+  - technique: exploit.default_credentials
+    taxonomy_ref: T1078.001
+    disruption: low
+    reversibility: reversible
+    risk_class: medium
+    approval: single
+    blast_radius: read_only
+    cleanup:
+      steps: []
+      verification: ""
+    production_safe: false
+
+  - technique: exploit.known_cve_readonly
+    taxonomy_ref: T1190
+    disruption: low
+    reversibility: reversible
+    risk_class: medium
+    approval: single
+    blast_radius: read_only
+    cleanup:
+      steps: []
+      verification: ""
+    production_safe: false
+
+  - technique: exploit.web_shell_upload
+    taxonomy_ref: T1505.003
+    disruption: low
+    reversibility: irreversible
+    risk_class: high
+    approval: dual
+    blast_radius: state_changing
+    cleanup:
+      steps:
+        - delete uploaded artifact
+      verification: verify absence
+    production_safe: false
+
+  # The three prohibited entries below are listed ON PURPOSE. Omitting them would make them merely
+  # unknown, and the enforcement path would refuse them as "no register entry" -- indistinguishable from
+  # a technique nobody has classified yet. Naming them records that they were considered and excluded.
+  - technique: persist.scheduled_task
+    taxonomy_ref: T1053
+    disruption: low
+    reversibility: irreversible
+    risk_class: prohibited
+    approval: ""
+    blast_radius: state_changing
+    cleanup:
+      steps: []
+      verification: ""
+    production_safe: false
+
+  - technique: impact.service_stop
+    taxonomy_ref: T1489
+    disruption: high
+    reversibility: irreversible
+    risk_class: prohibited
+    approval: ""
+    blast_radius: state_changing
+    cleanup:
+      steps: []
+      verification: ""
+    production_safe: false
+
+  - technique: exfil.bulk_data
+    taxonomy_ref: T1041
+    disruption: none
+    reversibility: reversible
+    risk_class: prohibited
+    approval: ""
+    blast_radius: read_only
+    cleanup:
+      steps: []
+      verification: ""
+    production_safe: false
