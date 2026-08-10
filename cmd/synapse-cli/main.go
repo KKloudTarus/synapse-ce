@@ -95,6 +95,11 @@ func main() {
 		}
 	case "scan":
 		runScan()
+	case "publish-source":
+		if err := runPublishSource(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
+			os.Exit(1)
+		}
 	// validate-sarif is named for what it does: it reports what the server would accept or refuse and
 	// writes nothing. `import-sarif` is kept as an alias so an existing invocation still works, but it
 	// prints the same "persisted: false" contract rather than implying an ingest happened.
@@ -985,6 +990,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  skip the live OSV.dev source; detect with Grype's offline DB only (air-gapped / fast)")
 	fmt.Fprintln(os.Stderr, "      --include-test  also fail the gate on findings in test/fixture/example paths (default: reported but exempt)")
+	fmt.Fprintln(os.Stderr, "  synapse-cli publish-source [path] --server URL --project KEY --analysis ID  # stream server-inventoried source; token from SYNAPSE_API_TOKEN")
 	fmt.Fprintln(os.Stderr, "  synapse-cli inventory <path>             # per-language code-size inventory (files, code/comment/blank lines, functions) – no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli metrics <path> [--fail-on-complexity N] [--top N]  # per-function cyclomatic+cognitive complexity (needs the synapse-ast sidecar)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli duplication <path> [--min-tokens N] [--fail-on-duplication PCT] [--top N]  # copy-paste detection (blocks, lines, density) – no DB")

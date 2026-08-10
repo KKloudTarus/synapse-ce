@@ -143,7 +143,7 @@ func TestReadCodeFileComposesImmutableLineState(t *testing.T) {
 	svc, analyses, p := newCodeService(t, artifacts)
 	saveCodeAnalysis(t, analyses, p, projectanalysis.Analysis{
 		Capabilities:   projectanalysis.SourceCapabilities{Source: projectanalysis.Capability{Available: true}},
-		SourceManifest: projectanalysis.SourceManifest{Files: []projectanalysis.SourceFile{{Path: "main.go", Digest: "digest", Lines: 3, Available: true}}},
+		SourceManifest: projectanalysis.SourceManifest{Files: []projectanalysis.SourceFile{{Path: "main.go", Digest: "digest", Bytes: int64(len(artifacts.data)), Lines: 3, Available: true}}},
 		FileChanges:    []projectanalysis.FileChange{{Status: projectanalysis.FileStatusModified, OldPath: "main.go", NewPath: "main.go", Added: []projectanalysis.LineRange{{Start: 2, End: 2}}}},
 		Coverage:       &measure.CoverageReport{Lines: measure.LineCoverage{"main.go": {1: true, 2: false}}},
 		Duplication:    measure.DuplicationReport{Blocks: []measure.DuplicationBlock{{Occurrences: []measure.CodeRange{{File: "main.go", StartLine: 3, EndLine: 3}}}}},
@@ -164,7 +164,7 @@ func TestReadCodeFileUsesBaseArtifactForDeletedFile(t *testing.T) {
 	svc, analyses, p := newCodeService(t, artifacts)
 	saveCodeAnalysis(t, analyses, p, projectanalysis.Analysis{
 		Capabilities: projectanalysis.SourceCapabilities{Source: projectanalysis.Capability{Available: true}},
-		Comparison:   projectanalysis.Comparison{Available: true, BaseCommit: "base", MergeBase: "base", BaseManifest: projectanalysis.SourceManifest{Files: []projectanalysis.SourceFile{{Path: "deleted.go", Digest: "base-digest", Lines: 1, Available: true}}}},
+		Comparison:   projectanalysis.Comparison{Available: true, BaseCommit: "base", MergeBase: "base", BaseManifest: projectanalysis.SourceManifest{Files: []projectanalysis.SourceFile{{Path: "deleted.go", Digest: "base-digest", Bytes: int64(len(artifacts.baseData)), Lines: 1, Available: true}}}},
 		FileChanges:  []projectanalysis.FileChange{{Status: projectanalysis.FileStatusDeleted, OldPath: "deleted.go"}},
 		Snapshot:     measure.Snapshot{Nodes: []measure.Node{{Path: "", Kind: measure.NodeProject}}},
 	})

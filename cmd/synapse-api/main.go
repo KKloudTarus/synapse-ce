@@ -998,6 +998,7 @@ func main() {
 	projectService.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)
 	scaService.SetLogger(log)
 	sourceArtifacts := sourceartifact.New(cfg.ProjectSourceArtifactDir, cfg.ProjectSourceMaxFileBytes, cfg.ProjectSourceMaxFiles, cfg.ProjectSourceMaxBytes)
+	sourceArtifacts.SetRetention(cfg.ProjectSourceRetention)
 	projectService.SetSourceArtifactStore(sourceArtifacts)
 	scaService.SetProjectSourceArtifactStore(sourceArtifacts)
 	scaService.SetProjectComparisonSource(&gitdiff.ComparisonSource{})

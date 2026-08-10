@@ -178,6 +178,10 @@ func (s *Service) ReadCodeFile(ctx context.Context, tenantID shared.ID, key, ana
 	if err != nil {
 		return CodeFileView{}, analysis.Capabilities, err
 	}
+	expectedSource, found := persistedSourceFileForRead(analysis, canonical, baseSide)
+	if !found || source != expectedSource {
+		return CodeFileView{}, analysis.Capabilities, projectanalysis.ErrSourceIntegrity
+	}
 	lines := splitCodeLines(string(data))
 	if fromLine < 1 {
 		fromLine = 1
