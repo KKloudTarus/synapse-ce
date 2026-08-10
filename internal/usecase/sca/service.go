@@ -682,6 +682,36 @@ func (r *ScanResult) AIGateExemptKeys() map[string]bool {
 	return r.aiGateExemptKeys(r.Findings)
 }
 
+// AIGateExemptions returns export-safe metadata only for decisions that still pass the complete
+// server-owned authorization check. Consumers must use this projection instead of trusting persisted
+// GateExempt flags directly; severity/profile changes and forged or stale decisions fail closed here.
+func (r *ScanResult) AIGateExemptions() map[string]ports.AIGateExemption {
+	return r.aiGateExemptions(r.Findings)
+}
+
+func (r *ScanResult) aiGateExemptions(items []finding.Finding) map[string]ports.AIGateExemption {
+	findings := make(map[string]finding.Finding, len(items))
+	for _, item := range items {
+		if key := strings.TrimSpace(item.DedupKey); key != "" {
+			findings[key] = item
+		}
+	}
+	out := map[string]ports.AIGateExemption{}
+	for _, critique := range r.AITriage {
+		key := strings.TrimSpace(critique.DedupKey)
+		item, found := findings[key]
+		if !authorizedAIGateExemption(critique, item, found) {
+			continue
+		}
+		out[key] = ports.AIGateExemption{
+			DedupKey:      key,
+			PolicyVersion: critique.PolicyVersion,
+			PolicyReason:  critique.PolicyReason,
+		}
+	}
+	return out
+}
+
 // aiGateExemptKeys revalidates decisions against the exact finding view a gate will consume. Project
 // quality profiles may overlay severity, so using r.Findings here could exempt a finding the tenant
 // deliberately escalated to High/Critical.
@@ -696,15 +726,19 @@ func (r *ScanResult) aiGateExemptKeys(items []finding.Finding) map[string]bool {
 	for _, c := range r.AITriage {
 		key := strings.TrimSpace(c.DedupKey)
 		item, found := findings[key]
-		if !c.Shadow && c.GateExempt &&
-			c.PolicyVersion == aiTriagePolicyVersion &&
-			c.PolicyReason == aiPolicyVerifiedConsensus &&
-			hasVerifiedConsensus(c) &&
-			found && humanReviewFloor(item) == "" && isFPTriageEligible(item) {
+		if authorizedAIGateExemption(c, item, found) {
 			out[key] = true
 		}
 	}
 	return out
+}
+
+func authorizedAIGateExemption(c ports.AICritique, item finding.Finding, found bool) bool {
+	return !c.Shadow && c.GateExempt &&
+		c.PolicyVersion == aiTriagePolicyVersion &&
+		c.PolicyReason == aiPolicyVerifiedConsensus &&
+		hasVerifiedConsensus(c) &&
+		found && humanReviewFloor(item) == "" && isFPTriageEligible(item)
 }
 
 // AIWouldGateExemptKeys returns shadow observations that passed every enforced-policy check except the
@@ -3009,6 +3043,26 @@ func (s *Service) LatestResult(ctx context.Context, engagementID shared.ID) ([]b
 		return nil, fmt.Errorf("scan result: %w", shared.ErrNotFound)
 	}
 	return s.results.LatestResult(ctx, engagementID)
+}
+
+// AIGateExemptions reads the latest durable scan and returns a stable projection revalidated against
+// the exact findings being exported. Older scans with no AI triage naturally return an empty slice.
+func (s *Service) AIGateExemptions(ctx context.Context, engagementID shared.ID, findings []finding.Finding) ([]ports.AIGateExemption, error) {
+	data, err := s.LatestResult(ctx, engagementID)
+	if err != nil {
+		return nil, err
+	}
+	var result ScanResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("decode latest scan result: %w", err)
+	}
+	byKey := result.aiGateExemptions(findings)
+	out := make([]ports.AIGateExemption, 0, len(byKey))
+	for _, exemption := range byKey {
+		out = append(out, exemption)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].DedupKey < out[j].DedupKey })
+	return out, nil
 }
 
 func kindOrLocal(kind string) string {

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 // SourceSnippetReader returns a small source excerpt around file:line (1-based, radius lines each side)
@@ -44,6 +45,21 @@ type AICritique struct {
 	VerifierVerdict    string `json:"verifier_verdict,omitempty"`
 	VerifierDriver     string `json:"verifier_driver,omitempty"`
 	VerifierConfidence int    `json:"verifier_confidence,omitempty"`
+}
+
+// AIGateExemption is the minimal, policy-owned projection an output adapter may use to explain why
+// a retained finding did not affect the CI gate. It deliberately excludes model prose and scores:
+// exports describe the deterministic policy decision, not an untrusted model response.
+type AIGateExemption struct {
+	DedupKey      string
+	PolicyVersion string
+	PolicyReason  string
+}
+
+// AIGateExemptionReader returns only exemptions revalidated against the exact finding view being
+// exported. An exporter must not infer gate authority directly from the advisory AICritique fields.
+type AIGateExemptionReader interface {
+	AIGateExemptions(ctx context.Context, engagementID shared.ID, findings []finding.Finding) ([]AIGateExemption, error)
 }
 
 // FPTriager runs an LLM false-positive critique over candidate findings from a workspace and returns a

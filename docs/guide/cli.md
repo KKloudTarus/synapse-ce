@@ -42,7 +42,7 @@ synapse-cli scan <path|image-ref> [flags]
 | `--ignore-unfixed` | Ignore vulnerabilities that have no fix available. |
 | `--detection-priority comprehensive\|precise` | `comprehensive` (default) reports every match. `precise` moves single-source, non-KEV findings into a needs-verify queue that does not trip `--fail-on`. |
 | `--json` | Print the full scan result as JSON to stdout, for machine consumption in CI. |
-| `--sarif` | Print a SARIF 2.1.0 report to stdout, ready to upload to GitHub code scanning. Covers every finding kind; SAST, secret and misconfig findings carry a file and line so the platform annotates the exact source line. `--fail-on` still sets the exit code. Cannot be combined with `--json`. |
+| `--sarif` | Print a SARIF 2.1.0 report to stdout, ready to upload to GitHub code scanning. Covers every finding kind; SAST, secret and misconfig findings carry a file and line so the platform annotates the exact source line. Findings exempted from the CI gate by verified AI consensus remain present and carry an external suppression with the policy version and reason. `--fail-on` still sets the exit code. Cannot be combined with `--json`. |
 
 ### Examples
 
