@@ -170,6 +170,39 @@ func TestFPTriageModeDefaultsToShadow(t *testing.T) {
 	}
 }
 
+func TestFPTriageBudgetDefaultsAndBounds(t *testing.T) {
+	t.Setenv("SYNAPSE_FP_TRIAGE_MAX_FINDINGS", "")
+	t.Setenv("SYNAPSE_FP_TRIAGE_CONCURRENCY", "")
+	cfg := Load()
+	if cfg.FPTriageMaxFindings != defaultFPTriageMaxFindings || cfg.FPTriageConcurrency != defaultFPTriageConcurrency {
+		t.Fatalf("default FP triage budget = (%d,%d), want (%d,%d)", cfg.FPTriageMaxFindings, cfg.FPTriageConcurrency, defaultFPTriageMaxFindings, defaultFPTriageConcurrency)
+	}
+
+	t.Setenv("SYNAPSE_FP_TRIAGE_MAX_FINDINGS", "25")
+	t.Setenv("SYNAPSE_FP_TRIAGE_CONCURRENCY", "3")
+	cfg = Load()
+	if cfg.FPTriageMaxFindings != 25 || cfg.FPTriageConcurrency != 3 {
+		t.Fatalf("configured FP triage budget = (%d,%d), want (25,3)", cfg.FPTriageMaxFindings, cfg.FPTriageConcurrency)
+	}
+
+	for _, tc := range []struct {
+		maxFindings string
+		concurrency string
+	}{
+		{"0", "0"},
+		{"-1", "-1"},
+		{"1001", "33"},
+		{"not-a-number", "not-a-number"},
+	} {
+		t.Setenv("SYNAPSE_FP_TRIAGE_MAX_FINDINGS", tc.maxFindings)
+		t.Setenv("SYNAPSE_FP_TRIAGE_CONCURRENCY", tc.concurrency)
+		cfg = Load()
+		if cfg.FPTriageMaxFindings != defaultFPTriageMaxFindings || cfg.FPTriageConcurrency != defaultFPTriageConcurrency {
+			t.Errorf("invalid FP triage budget (%q,%q) = (%d,%d), want safe defaults", tc.maxFindings, tc.concurrency, cfg.FPTriageMaxFindings, cfg.FPTriageConcurrency)
+		}
+	}
+}
+
 // TestLoadSBOMProducer confirms the SBOM producer defaults to syft and honors the env override.
 func TestLoadSBOMProducer(t *testing.T) {
 	t.Setenv("SYNAPSE_SBOM_PRODUCER", "")

@@ -76,6 +76,7 @@ type Service struct {
 	includeTestSecrets               bool                                  // report secrets in test/fixture/docs paths (default false: suppress)
 	misconfig                        ports.MisconfigScanner                // optional deterministic IaC/config misconfig scan over the live workspace
 	fpTriager                        ports.FPTriager                       // optional LLM false-positive critique of production-scope source findings
+	fpTriageMaxFindings              int                                   // hard per-scan candidate cap; untriaged findings remain gating
 	fpTriageMode                     aiTriageMode                          // shadow by default; enforce must be selected explicitly
 	aiReviews                        ports.AITriageReviewRecorder          // optional durable human-review queue sink
 	osPkgCataloger                   ports.OSPackageCataloger              // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
@@ -232,6 +233,20 @@ func (s *Service) SetIncludeTestSecrets(v bool) { s.includeTestSecrets = v }
 // no triage. Implementations are trusted in-process components; policy revalidation contains buggy DTOs,
 // not malicious code that already holds process authority.
 func (s *Service) SetFPTriage(t ports.FPTriager) { s.fpTriager = t }
+
+const (
+	defaultFPTriageMaxFindings = 100
+	maxFPTriageMaxFindings     = 1000
+)
+
+// SetFPTriageMaxFindings sets the hard per-scan LLM candidate cap. Invalid values restore the finite
+// default; zero never means unbounded. Findings beyond the cap remain reported and gating.
+func (s *Service) SetFPTriageMaxFindings(maxFindings int) {
+	if maxFindings < 1 || maxFindings > maxFPTriageMaxFindings {
+		maxFindings = defaultFPTriageMaxFindings
+	}
+	s.fpTriageMaxFindings = maxFindings
+}
 
 // SetFPTriageMode selects shadow observation or enforced gate authorization. Unknown and empty values
 // fail closed to shadow. This setting never changes the human-review floors.
@@ -555,6 +570,7 @@ func NewService(
 		engagements: engagements, findings: findings, scans: scans, results: results, jobs: jobs, runs: runs, evidence: ev, ids: ids, prov: prov, clock: clock, audit: audit,
 		minSeverity: minSeverity, timeout: timeout, projectAnalysisCompletionTimeout: completionTimeout(timeout), acquirer: a,
 		detector: d, sbomGen: s, sources: sources, riskEnricher: r, licScan: l, licEnricher: le,
+		fpTriageMaxFindings: defaultFPTriageMaxFindings,
 	}
 	// Build the shared execution guard from the service's own scope/clock/audit
 	// deps, so every scan is gated + audited through the one chokepoint recon will
@@ -656,6 +672,10 @@ type ScanResult struct {
 	// distinct-model consensus plus clearance of the high-risk human-review floor. Findings are never
 	// deleted. The complete array is sealed into the scan evidence link.
 	AITriage []ports.AICritique `json:"ai_triage,omitempty"`
+	// AITriageBudget makes the bounded AI coverage explicit. AttemptedFindings were submitted to the
+	// triager even when a provider error produced no critique; SkippedFindings never enter an LLM and
+	// remain gating. nil means AI triage did not run for any eligible finding.
+	AITriageBudget *AITriageBudget `json:"ai_triage_budget,omitempty"`
 	// SourceCapture is analysis-owned source availability metadata. Content is held by
 	// ProjectSourceArtifactStore, never embedded in this scan result.
 	SourceCapture *projectanalysis.SourceCapture `json:"source_capture,omitempty"`
@@ -2581,21 +2601,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// injected triager critiques production-scope first-party findings. The server-owned policy then
 	// separates advisory suspected-FP opinions from verified, low-risk gate exemptions. Single-model,
 	// high/critical, secret, and dangerous-CWE refutations stay gating for human review.
-	if s.fpTriager != nil {
-		if cands := fpTriageCandidates(result.Findings); len(cands) > 0 {
-			tstep := trace.start(stageFindings, "ai-fp-triage", "fp-triager", "AI false-positive triage", map[string]int{"candidates": len(cands)})
-			result.AITriage = s.fpTriager.Triage(ctx, cands, ws.Dir)
-			applyAIGatePolicy(result, s.evidence != nil, s.fpTriageMode)
-			trace.succeed(tstep, "AI false-positive triage", map[string]int{
-				"candidates":      len(cands),
-				"critiqued":       len(result.AITriage),
-				"suspected_fp":    len(result.SuspectedFPKeys()),
-				"gate_exempt":     len(result.AIGateExemptKeys()),
-				"would_exempt":    len(result.AIWouldGateExemptKeys()),
-				"review_required": len(result.AIReviewRequiredKeys()),
-			})
-		}
-	}
+	s.runFPTriage(ctx, result, ws.Dir, trace)
 	result.MinSeverity = s.minSeverity
 	result.VulnsBelowThreshold = countBelowThreshold(vulns, s.minSeverity)
 	result.UnfixedSuppressed = countUnfixedSuppressed(vulns, s.minSeverity, s.ignoreUnfixed)
@@ -3320,6 +3326,7 @@ type scanEvidencePayload struct {
 	AITriagePolicy   string                  `json:"ai_triage_policy,omitempty"`
 	AITriage         []ports.AICritique      `json:"ai_triage,omitempty"`
 	AITriageFindings []scanEvidenceAIFinding `json:"ai_triage_findings,omitempty"`
+	AITriageBudget   *AITriageBudget         `json:"ai_triage_budget,omitempty"`
 	Manifest         ports.ScanManifest      `json:"manifest"`
 	SealedAt         string                  `json:"sealed_at"`
 	Actor            string                  `json:"actor"`
@@ -3413,6 +3420,7 @@ func scanEvidenceContent(actor string, now time.Time, result *ScanResult) ([]byt
 		AITriagePolicy:   policyVersion,
 		AITriage:         aiTriage,
 		AITriageFindings: aiFindings,
+		AITriageBudget:   result.AITriageBudget,
 		Manifest:         result.Manifest,
 		SealedAt:         now.UTC().Format(time.RFC3339),
 		Actor:            actor,

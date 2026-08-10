@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+const (
+	defaultFPTriageMaxFindings = 100
+	maxFPTriageMaxFindings     = 1000
+	defaultFPTriageConcurrency = 6
+	maxFPTriageConcurrency     = 32
+)
+
 // Config holds runtime configuration.
 type Config struct {
 	HTTPAddr     string
@@ -164,7 +171,9 @@ type Config struct {
 	FPTriageModel   string
 	// FPTriageMode is shadow|enforce. Shadow is the fail-closed default: decisions are persisted for
 	// evaluation but can never set gate_exempt. Enforce requires a deliberate operator choice.
-	FPTriageMode string
+	FPTriageMode        string
+	FPTriageMaxFindings int
+	FPTriageConcurrency int
 
 	// Agent orchestration policy. ApprovalMode: manual|filter|auto (manual is
 	// the safe default – a human approves every action). The rest bound a run.
@@ -589,6 +598,8 @@ func Load() Config {
 		FPTriageEnabled:              getbool("SYNAPSE_FP_TRIAGE_ENABLED", false),
 		FPTriageModel:                getenv("SYNAPSE_FP_TRIAGE_MODEL", getenv("SYNAPSE_LLM_MODEL", "")),
 		FPTriageMode:                 normalizeFPTriageMode(getenv("SYNAPSE_FP_TRIAGE_MODE", "shadow")),
+		FPTriageMaxFindings:          boundedPositive(getint("SYNAPSE_FP_TRIAGE_MAX_FINDINGS", defaultFPTriageMaxFindings), defaultFPTriageMaxFindings, maxFPTriageMaxFindings),
+		FPTriageConcurrency:          boundedPositive(getint("SYNAPSE_FP_TRIAGE_CONCURRENCY", defaultFPTriageConcurrency), defaultFPTriageConcurrency, maxFPTriageConcurrency),
 
 		AgentApprovalMode:    getenv("SYNAPSE_AGENT_APPROVAL_MODE", "manual"),
 		AgentApprovalTimeout: getduration("SYNAPSE_AGENT_APPROVAL_TIMEOUT", 30*time.Minute),
@@ -656,6 +667,13 @@ func normalizeFPTriageMode(s string) string {
 		return "enforce"
 	}
 	return "shadow"
+}
+
+func boundedPositive(value, fallback, max int) int {
+	if value < 1 || value > max {
+		return fallback
+	}
+	return value
 }
 
 // IsProduction reports whether this is a production-grade deployment, in which the

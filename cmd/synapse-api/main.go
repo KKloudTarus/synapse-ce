@@ -761,10 +761,11 @@ func main() {
 	// distinct verifier is required before the deterministic high-risk floor may grant a gate exemption.
 	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" {
 		scaService.SetFPTriageMode(cfg.FPTriageMode)
+		scaService.SetFPTriageMaxFindings(cfg.FPTriageMaxFindings)
 		if tllm, terr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); terr != nil {
 			log.Warn("AI false-positive triage DISABLED (LLM unavailable)", "err", terr)
 		} else {
-			coord := fptriage.New(tllm, cfg.FPTriageModel)
+			coord := fptriage.New(tllm, cfg.FPTriageModel).WithConcurrency(cfg.FPTriageConcurrency)
 			mode := "advisory-only (distinct verifier required for gate exemption)"
 			if strings.TrimSpace(cfg.VerifierModel) != "" && agent.SameModel(cfg.FPTriageModel, cfg.VerifierModel) {
 				log.Warn("AI FP-triage verifier aliases the proposer; triage remains advisory-only",
@@ -783,7 +784,8 @@ func main() {
 			scaService.SetFPTriage(fptriage.NewTriager(coord, func(root string) ports.SourceSnippetReader {
 				return sourcesnippet.Reader{Root: root}
 			}))
-			log.Info("AI false-positive triage ENABLED ("+mode+")", "model", cfg.FPTriageModel, "triage_mode", cfg.FPTriageMode)
+			log.Info("AI false-positive triage ENABLED ("+mode+")", "model", cfg.FPTriageModel,
+				"triage_mode", cfg.FPTriageMode, "max_findings", cfg.FPTriageMaxFindings, "concurrency", cfg.FPTriageConcurrency)
 		}
 	}
 	if cfg.SuppressionEnabled {

@@ -97,6 +97,13 @@ stays in the report, it is only held back from the `--fail-on` gate).
    currently has no evidence vault, so AI triage there is advisory-only and never exempts the gate. Model,
    verifier, or evidence availability failure leaves the gate unchanged.
 
+   Per scan, Synapse attempts at most `SYNAPSE_FP_TRIAGE_MAX_FINDINGS=100` eligible findings with
+   `SYNAPSE_FP_TRIAGE_CONCURRENCY=6` simultaneous assessments by default. A distinct verifier can make
+   at most two provider calls per attempted finding. If the cap is reached, selection is deterministic,
+   every skipped finding remains reported and gating, and `ai_triage_budget` plus the CLI warning expose
+   eligible, attempted, and skipped counts. Accepted ranges are `1..1000` findings and `1..32` concurrent
+   assessments; zero, negative, malformed, and over-limit values restore the safe finite defaults.
+
 ```bash
 export SYNAPSE_LLM_BASE_URL=http://localhost:8081/v1
 export SYNAPSE_LLM_API_KEY=…

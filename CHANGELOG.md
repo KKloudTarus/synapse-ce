@@ -12,6 +12,11 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **Bounded AI false-positive triage.** Enforces a finite per-scan finding budget and configurable
+  concurrency for LLM critique, prioritizes capped work deterministically, stops scheduling queued calls
+  on cancellation, and seals/exposes eligible, attempted, and skipped counts while every untriaged
+  finding remains reported and gating.
+
 - **Asset-centric security management.** Promotes the shipped `fleet_business_services` rows in place to stable-keyed Business Assets above Engagements, with tenant/RLS-safe Project and technical-asset memberships, Engagement assignment, Findings/Coverage/Posture/History roll-ups, and UI built from the existing application components. Third-party findings retain provenance and no-promotion authority, while reachability retains proof tier and first-class `unknown`.
 
 - **Immutable Project Code workspace.** Capture bounded analysis-time source and Git comparison artifacts so historical source, unified/split diffs, and finding locations remain inspectable without reconstructing mutable workspaces; large source and diff views use bounded windows or virtualization.

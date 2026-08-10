@@ -304,6 +304,7 @@ func TestScanEvidenceContentSealsAIDecisions(t *testing.T) {
 			{DedupKey: "z", FindingID: "fz", ProposerModel: "p", PolicyVersion: aiTriagePolicyVersion, PolicyReason: aiPolicyVerifierRequired, ReviewRequired: true},
 			{DedupKey: "a", FindingID: "fa", ProposerModel: "p", VerifierModel: "v", PolicyVersion: aiTriagePolicyVersion, PolicyReason: aiPolicyVerifiedConsensus, Verified: true, GateExempt: true},
 		},
+		AITriageBudget: &AITriageBudget{MaxFindings: 10, EligibleFindings: 2, AttemptedFindings: 2},
 	}
 	content, err := scanEvidenceContent("tester", time.Date(2026, 8, 3, 1, 2, 3, 0, time.UTC), result)
 	if err != nil {
@@ -315,6 +316,9 @@ func TestScanEvidenceContentSealsAIDecisions(t *testing.T) {
 	}
 	if payload.AITriagePolicy != aiTriagePolicyVersion || len(payload.AITriage) != 2 {
 		t.Fatalf("AI policy/decisions missing from sealed payload: %+v", payload)
+	}
+	if payload.AITriageBudget == nil || payload.AITriageBudget.MaxFindings != 10 || payload.AITriageBudget.AttemptedFindings != 2 {
+		t.Fatalf("AI request budget missing from sealed payload: %+v", payload.AITriageBudget)
 	}
 	if payload.Findings[0] != "a" || payload.AITriage[0].DedupKey != "a" {
 		t.Errorf("evidence payload must sort findings and AI decisions canonically: %+v", payload)
