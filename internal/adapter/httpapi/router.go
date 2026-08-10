@@ -265,6 +265,9 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/assets/edges", rt.authz(userdom.PermView, rt.listAssetEdges))
 	}
 	if rt.businessAssets != nil {
+		if rt.eng != nil && rt.findings != nil {
+			mux.HandleFunc("GET /api/v1/dashboard/security-operations", rt.authz(userdom.PermView, rt.dashboardSecurityOperations))
+		}
 		mux.HandleFunc("POST /api/v1/appsec/assets", rt.authz(userdom.PermOperate, rt.createBusinessAsset))
 		mux.HandleFunc("GET /api/v1/appsec/assets", rt.authz(userdom.PermView, rt.listBusinessAssets))
 		mux.HandleFunc("GET /api/v1/appsec/assets/{assetID}", rt.authz(userdom.PermView, rt.getBusinessAsset))

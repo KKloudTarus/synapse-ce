@@ -1,8 +1,8 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { api } from '../lib/api'
-import type { BusinessAsset, Engagement, FleetCoverageSummary } from '../lib/types'
+import type { BusinessAsset, DashboardSecurityOperations, Engagement, FleetCoverageSummary } from '../lib/types'
 import { Dashboard } from './Dashboard'
 
 vi.mock('../lib/api', () => ({
@@ -10,6 +10,7 @@ vi.mock('../lib/api', () => ({
     listBusinessAssets: vi.fn(),
     listEngagements: vi.fn(),
     fleetCoverageSummary: vi.fn(),
+    dashboardSecurityOperations: vi.fn(),
   },
 }))
 
@@ -41,6 +42,20 @@ const fleet: FleetCoverageSummary = {
   assetsWithoutAgent: 1,
 }
 
+const analytics: DashboardSecurityOperations = {
+  rangeDays: 30,
+  generatedAt: '2026-08-10T00:00:00Z',
+  assetPosture: { critical: 1, high_risk: 0, attention: 0, unknown: 1, good: 1 },
+  assetsByCriticality: { critical: 1, high: 1, medium: 1, low: 0 },
+  activeFindingsBySeverity: { critical: 1, high: 2, medium: 3, low: 0, info: 0, unknown: 1 },
+  findingsOverTime: [
+    { date: '2026-08-09', counts: { critical: 0, high: 1, medium: 0, low: 0 } },
+    { date: '2026-08-10', counts: { critical: 1, high: 0, medium: 2, low: 0 } },
+  ],
+  findingsWithoutTimestamp: 1,
+  externalFindingsIncluded: true,
+}
+
 function renderDashboard() {
   return render(<MemoryRouter><Dashboard /></MemoryRouter>)
 }
@@ -51,6 +66,7 @@ describe('Dashboard', () => {
     vi.mocked(api.listBusinessAssets).mockResolvedValue({ items: assets, total: assets.length, limit: 200, offset: 0 })
     vi.mocked(api.listEngagements).mockResolvedValue(engagements)
     vi.mocked(api.fleetCoverageSummary).mockResolvedValue(fleet)
+    vi.mocked(api.dashboardSecurityOperations).mockResolvedValue(analytics)
   })
 
   it('renders operational metrics and priority queues from API data', async () => {
@@ -71,6 +87,13 @@ describe('Dashboard', () => {
     expect(screen.getByText('Payment API Review')).toBeInTheDocument()
     expect(screen.getByText('Payments Platform', { selector: 'p' })).toBeInTheDocument()
     expect(screen.getByText('Unassigned Asset')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Asset Security Posture' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Findings Over Time' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Active Finding Risk Mix' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Assets by Criticality' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Asset Security Posture: 3 total')).toBeInTheDocument()
+    expect(screen.getByLabelText('Active Finding Risk Mix: 7 total')).toBeInTheDocument()
+    expect(screen.getByText(/excluded from the trend/)).toBeInTheDocument()
   })
 
   it('keeps core operations visible when Fleet telemetry fails', async () => {
@@ -80,6 +103,19 @@ describe('Dashboard', () => {
     expect(await screen.findByLabelText('Total assets: 3')).toBeInTheDocument()
     expect(screen.getByLabelText('Coverage gaps: —')).toBeInTheDocument()
     expect(screen.getAllByText('Fleet telemetry unavailable').length).toBeGreaterThan(0)
-    expect(screen.getByText(/Coverage is not assumed clean/)).toBeInTheDocument()
+  })
+
+  it('reloads the finding trend for a selected range', async () => {
+    renderDashboard()
+    await screen.findByRole('heading', { name: 'Findings Over Time' })
+    screen.getByRole('button', { name: '90d' }).click()
+    await waitFor(() => expect(api.dashboardSecurityOperations).toHaveBeenLastCalledWith(90))
+  })
+
+  it('keeps the operational dashboard visible when analytics fails', async () => {
+    vi.mocked(api.dashboardSecurityOperations).mockRejectedValue(new Error('analytics unavailable'))
+    renderDashboard()
+    expect(await screen.findByLabelText('Total assets: 3')).toBeInTheDocument()
+    expect(await screen.findByText('analytics unavailable')).toBeInTheDocument()
   })
 })

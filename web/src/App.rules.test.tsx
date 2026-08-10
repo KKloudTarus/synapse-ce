@@ -12,6 +12,7 @@ vi.mock('./lib/api', () => ({
     listEngagements: vi.fn(),
     listBusinessAssets: vi.fn(),
     fleetCoverageSummary: vi.fn(),
+    dashboardSecurityOperations: vi.fn(),
     listProjects: vi.fn(),
     getProject: vi.fn(),
     getAuditLogs: vi.fn(),
@@ -35,6 +36,7 @@ describe('App Routing - Rules', () => {
     vi.mocked(api.listEngagements).mockResolvedValue([])
     vi.mocked(api.listBusinessAssets).mockResolvedValue({ items: [], total: 0, limit: 200, offset: 0 })
     vi.mocked(api.fleetCoverageSummary).mockResolvedValue({ agentsByState: {}, rowsByVerdict: {}, oldestPerCapability: {}, assetsWithoutAgent: 0 })
+    vi.mocked(api.dashboardSecurityOperations).mockResolvedValue({ rangeDays: 30, generatedAt: '', assetPosture: {}, assetsByCriticality: {}, activeFindingsBySeverity: {}, findingsOverTime: [], findingsWithoutTimestamp: 0, externalFindingsIncluded: true })
     vi.mocked(api.listProjects).mockResolvedValue([])
     vi.mocked(api.getRule).mockResolvedValue({
       key: 'go:sql',
