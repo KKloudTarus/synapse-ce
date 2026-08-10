@@ -77,6 +77,7 @@ import type {
   FleetAgentDetail,
   FleetCoverageRow,
   FleetCoverageSummary,
+  DashboardSecurityOperations,
   BusinessAsset,
   BusinessAssetInput,
   BusinessAssetPage,
@@ -1869,6 +1870,20 @@ export const api = {
       rowsByVerdict: res?.rows_by_verdict ?? {},
       oldestPerCapability: res?.oldest_per_capability ?? {},
       assetsWithoutAgent: res?.assets_without_agent ?? 0,
+    }
+  },
+
+  dashboardSecurityOperations: async (rangeDays = 30): Promise<DashboardSecurityOperations> => {
+    const res = await req(`/dashboard/security-operations?range=${rangeDays}d`)
+    return {
+      rangeDays: res?.range_days ?? rangeDays,
+      generatedAt: res?.generated_at ?? '',
+      assetPosture: res?.asset_posture ?? {},
+      assetsByCriticality: res?.assets_by_criticality ?? {},
+      activeFindingsBySeverity: res?.active_findings_by_severity ?? {},
+      findingsOverTime: (res?.findings_over_time ?? []).map((point: any) => ({ date: point?.date ?? '', counts: point?.counts ?? {} })),
+      findingsWithoutTimestamp: res?.findings_without_timestamp ?? 0,
+      externalFindingsIncluded: res?.external_findings_included ?? false,
     }
   },
 

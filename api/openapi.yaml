@@ -36,6 +36,8 @@ tags:
   description: Built-in code-quality and security rule catalog
 - name: assets
   description: Business-level Asset Management and security posture
+- name: dashboard
+  description: Tenant-scoped security operations summaries
 
 paths:
   /healthz:
@@ -959,6 +961,26 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/dashboard/security-operations:
+    get:
+      tags: [dashboard]
+      operationId: getDashboardSecurityOperations
+      summary: Get tenant-scoped Asset and Finding analytics for the Dashboard
+      parameters:
+      - name: range
+        in: query
+        schema: {type: string, enum: [7d, 30d, 90d], default: 30d}
+      responses:
+        '200':
+          description: Security operations summary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardSecurityOperations'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
   /api/v1/appsec/assets:
     get:
       tags: [assets]
@@ -1276,6 +1298,56 @@ components:
         decision: {type: string, enum: [accept, reject]}
         rationale: {type: string, minLength: 3, maxLength: 4000}
         version: {type: integer, minimum: 1}
+
+    DashboardPostureCounts:
+      type: object
+      required: [critical, high_risk, attention, unknown, good]
+      properties:
+        critical: {type: integer, minimum: 0}
+        high_risk: {type: integer, minimum: 0}
+        attention: {type: integer, minimum: 0}
+        unknown: {type: integer, minimum: 0}
+        good: {type: integer, minimum: 0}
+    DashboardCriticalityCounts:
+      type: object
+      required: [critical, high, medium, low]
+      properties:
+        critical: {type: integer, minimum: 0}
+        high: {type: integer, minimum: 0}
+        medium: {type: integer, minimum: 0}
+        low: {type: integer, minimum: 0}
+    DashboardSeverityCounts:
+      type: object
+      required: [critical, high, medium, low, info, unknown]
+      properties:
+        critical: {type: integer, minimum: 0}
+        high: {type: integer, minimum: 0}
+        medium: {type: integer, minimum: 0}
+        low: {type: integer, minimum: 0}
+        info: {type: integer, minimum: 0}
+        unknown: {type: integer, minimum: 0}
+    DashboardTrendPoint:
+      type: object
+      required: [date, counts]
+      properties:
+        date: {type: string, format: date}
+        counts: {$ref: '#/components/schemas/DashboardSeverityCounts'}
+    DashboardSecurityOperations:
+      type: object
+      required: [range_days, generated_at, asset_posture, assets_by_criticality, active_findings_by_severity, findings_over_time, findings_without_timestamp, external_findings_included]
+      properties:
+        range_days: {type: integer, enum: [7, 30, 90]}
+        generated_at: {type: string, format: date-time}
+        asset_posture: {$ref: '#/components/schemas/DashboardPostureCounts'}
+        assets_by_criticality: {$ref: '#/components/schemas/DashboardCriticalityCounts'}
+        active_findings_by_severity: {$ref: '#/components/schemas/DashboardSeverityCounts'}
+        findings_over_time:
+          type: array
+          minItems: 7
+          maxItems: 90
+          items: {$ref: '#/components/schemas/DashboardTrendPoint'}
+        findings_without_timestamp: {type: integer, minimum: 0}
+        external_findings_included: {type: boolean}
 
     BusinessAsset:
       type: object
