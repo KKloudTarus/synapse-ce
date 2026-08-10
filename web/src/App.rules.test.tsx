@@ -149,7 +149,7 @@ describe('App Routing - Rules', () => {
     expect(document.documentElement.dataset.theme).toBe('light')
   })
 
-  it('places New Engagement before the Engagement list', () => {
+  it('shows only New Engagement for the Engagement workspace', () => {
     render(
       <MemoryRouter initialEntries={['/assets']}>
         <Sidebar />
@@ -157,9 +157,8 @@ describe('App Routing - Rules', () => {
     )
 
     const newEngagement = screen.getByRole('link', { name: 'New Engagement' })
-    const engagements = screen.getByRole('link', { name: 'Engagements' })
     expect(newEngagement.getAttribute('href')).toBe('/engagements?create=1')
-    expect(newEngagement.compareDocumentPosition(engagements) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'Engagements' })).not.toBeInTheDocument()
   })
 
   it('opens mobile navigation and navigates to Rules', async () => {
