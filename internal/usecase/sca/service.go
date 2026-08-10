@@ -1900,7 +1900,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	applyDetectionPriority(result, opts.DetectionPriority)
 	s.attachCompliance(result)
 	result.ReproDigest = ReproDigest(result)
-	evidenceRef, err := s.sealEvidence(ctx, actor, engagementID, now, result)
+	evidenceRef, err := s.sealEvidenceFailClosed(ctx, actor, engagementID, now, result)
 	if err != nil {
 		return nil, err
 	}
@@ -2741,7 +2741,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 
 	// Seal this scan into the engagement's append-only hash-chained evidence ledger
 	// before writing any run, scan, finding, or result state.
-	evidenceRef, err := s.sealEvidence(ctx, actor, engagementID, now, result)
+	evidenceRef, err := s.sealEvidenceFailClosed(ctx, actor, engagementID, now, result)
 	if err != nil {
 		return nil, err
 	}
