@@ -12,6 +12,11 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **Bounded AI false-positive triage.** Enforces a finite per-scan finding budget and configurable
+  concurrency for LLM critique, prioritizes capped work deterministically, stops scheduling queued calls
+  on cancellation, and seals/exposes eligible, attempted, and skipped counts while every untriaged
+  finding remains reported and gating.
+
 - **Visible AI gate exemptions in SARIF.** Retained findings exempted by the verified AI false-positive policy now carry a standards-based external suppression plus deterministic policy version/reason metadata in both CLI and stored engagement SARIF exports; advisory, review-required, stale, and high-risk decisions remain unmarked.
 - **Asset-centric security management.** Promotes the shipped `fleet_business_services` rows in place to stable-keyed Business Assets above Engagements, with tenant/RLS-safe Project and technical-asset memberships, Engagement assignment, Findings/Coverage/Posture/History roll-ups, and UI built from the existing application components. Third-party findings retain provenance and no-promotion authority, while reachability retains proof tier and first-class `unknown`.
 

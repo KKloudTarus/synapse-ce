@@ -50,7 +50,9 @@ func run(ctx context.Context, datasetPath, outputPath string) error {
 	if err != nil {
 		return fmt.Errorf("create verifier: %w", err)
 	}
-	coord := fptriage.New(proposer, cfg.FPTriageModel).WithVerifier(verifier, cfg.VerifierModel)
+	coord := fptriage.New(proposer, cfg.FPTriageModel).
+		WithConcurrency(cfg.FPTriageConcurrency).
+		WithVerifier(verifier, cfg.VerifierModel)
 	if coord.VerifierModel() == "" {
 		return fmt.Errorf("verifier %q is not distinct from proposer %q after canonicalization", cfg.VerifierModel, cfg.FPTriageModel)
 	}

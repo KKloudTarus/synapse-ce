@@ -3,8 +3,11 @@ package fptriage
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
@@ -17,6 +20,133 @@ import (
 type fakeLLM struct {
 	byTitleSubstr map[string]string // substring of the user prompt -> raw JSON content
 	err           error
+}
+
+type boundedLLM struct {
+	mu      sync.Mutex
+	active  int
+	maxSeen int
+	calls   int
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *boundedLLM) Chat(ctx context.Context, _ ports.ChatRequest) (ports.ChatResponse, error) {
+	b.mu.Lock()
+	b.active++
+	b.calls++
+	if b.active > b.maxSeen {
+		b.maxSeen = b.active
+	}
+	b.mu.Unlock()
+	b.started <- struct{}{}
+
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+		b.mu.Lock()
+		b.active--
+		b.mu.Unlock()
+		return ports.ChatResponse{}, ctx.Err()
+	}
+
+	b.mu.Lock()
+	b.active--
+	b.mu.Unlock()
+	return ports.ChatResponse{Content: `{"verdict":"sound","driver":"attacker_controlled","confidence":80}`, FinishReason: "stop"}, nil
+}
+
+func (b *boundedLLM) snapshot() (calls, maxSeen int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls, b.maxSeen
+}
+
+func TestAssessBoundsConcurrencyAndVerifierCalls(t *testing.T) {
+	llm := &boundedLLM{started: make(chan struct{}, 8), release: make(chan struct{})}
+	candidates := make([]finding.Finding, 4)
+	for i := range candidates {
+		candidates[i] = mkFinding(strconv.Itoa(i), "finding")
+	}
+	done := make(chan []Critique, 1)
+	go func() {
+		done <- New(llm, "proposer-model").WithVerifier(llm, "verifier-model").WithConcurrency(2).Assess(context.Background(), candidates, nil)
+	}()
+
+	for range 2 {
+		select {
+		case <-llm.started:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for the initial bounded calls")
+		}
+	}
+	select {
+	case <-llm.started:
+		t.Fatal("a third provider call started while the concurrency budget was full")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(llm.release)
+
+	select {
+	case got := <-done:
+		if len(got) != len(candidates) {
+			t.Fatalf("critiques = %d, want %d", len(got), len(candidates))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("assessment did not finish")
+	}
+	calls, maxSeen := llm.snapshot()
+	if calls != 2*len(candidates) {
+		t.Fatalf("provider calls = %d, want at most two per attempted finding (%d)", calls, 2*len(candidates))
+	}
+	if maxSeen > 2 {
+		t.Fatalf("peak provider concurrency = %d, want <= 2", maxSeen)
+	}
+}
+
+func TestAssessCancellationDoesNotScheduleQueuedCandidates(t *testing.T) {
+	llm := &boundedLLM{started: make(chan struct{}, 10), release: make(chan struct{})}
+	candidates := make([]finding.Finding, 10)
+	for i := range candidates {
+		candidates[i] = mkFinding(strconv.Itoa(i), "finding")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan []Critique, 1)
+	go func() {
+		done <- New(llm, "proposer-model").WithConcurrency(1).Assess(ctx, candidates, nil)
+	}()
+	select {
+	case <-llm.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the first provider call")
+	}
+	cancel()
+
+	var got []Critique
+	select {
+	case got = <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled assessment did not finish")
+	}
+	calls, _ := llm.snapshot()
+	if calls != 1 {
+		t.Fatalf("provider calls after cancellation = %d, want only the active call", calls)
+	}
+	for i := 1; i < len(got); i++ {
+		if !errors.Is(got[i].Err, context.Canceled) {
+			t.Errorf("queued critique %d error = %v, want context.Canceled", i, got[i].Err)
+		}
+	}
+}
+
+func TestWithConcurrencyRejectsUnboundedValues(t *testing.T) {
+	c := New(fakeLLM{}, "model")
+	for _, value := range []int{0, -1, maxConcurrency + 1} {
+		c.WithConcurrency(value)
+		if got := c.Concurrency(); got != defaultConcurrency {
+			t.Errorf("WithConcurrency(%d) = %d, want finite default %d", value, got, defaultConcurrency)
+		}
+	}
 }
 
 func (f fakeLLM) Chat(_ context.Context, req ports.ChatRequest) (ports.ChatResponse, error) {

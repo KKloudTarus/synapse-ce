@@ -86,6 +86,11 @@ type Coordinator struct {
 	concurrency   int
 }
 
+const (
+	defaultConcurrency = 6
+	maxConcurrency     = 32
+)
+
 // New builds a Coordinator. model is the proposer model id; llm must be non-nil.
 func New(llm ports.LLM, model string) *Coordinator {
 	return &Coordinator{
@@ -93,7 +98,7 @@ func New(llm ports.LLM, model string) *Coordinator {
 		model:       strings.TrimSpace(model),
 		minConf:     verdict.EvidenceThreshold, // 75 — align with the gated-judgment bar
 		radius:      8,
-		concurrency: 6,
+		concurrency: defaultConcurrency,
 	}
 }
 
@@ -103,6 +108,22 @@ func (c *Coordinator) WithMinConfidence(n int) *Coordinator {
 		c.minConf = n
 	}
 	return c
+}
+
+// WithConcurrency bounds simultaneous proposer/verifier pairs. Invalid values keep the finite default.
+func (c *Coordinator) WithConcurrency(n int) *Coordinator {
+	if c != nil && n > 0 && n <= maxConcurrency {
+		c.concurrency = n
+	}
+	return c
+}
+
+// Concurrency returns the active per-coordinator call-pair limit.
+func (c *Coordinator) Concurrency() int {
+	if c == nil || c.concurrency < 1 {
+		return defaultConcurrency
+	}
+	return c.concurrency
 }
 
 // WithVerifier attaches a DISTINCT verifier model. Agreement creates VerifiedConsensus, which the
@@ -135,11 +156,19 @@ func (c *Coordinator) Assess(ctx context.Context, candidates []finding.Finding, 
 	if c == nil || c.llm == nil || len(candidates) == 0 {
 		return out
 	}
-	sem := make(chan struct{}, c.concurrency)
+	sem := make(chan struct{}, c.Concurrency())
 	var wg sync.WaitGroup
 	for i := range candidates {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			for j := i; j < len(candidates); j++ {
+				out[j] = Critique{FindingID: string(candidates[j].ID), DedupKey: candidates[j].DedupKey, Err: ctx.Err()}
+			}
+			wg.Wait()
+			return out
+		}
 		wg.Add(1)
-		sem <- struct{}{}
 		go func(i int) {
 			defer wg.Done()
 			defer func() { <-sem }()

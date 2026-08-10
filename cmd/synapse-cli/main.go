@@ -1344,10 +1344,11 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	// and dangerous CWEs always keep gating. Findings are never deleted. Skipped for image targets.
 	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" && !image {
 		sca.SetFPTriageMode(cfg.FPTriageMode)
+		sca.SetFPTriageMaxFindings(cfg.FPTriageMaxFindings)
 		if llm, lerr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); lerr != nil {
 			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage disabled: %v\n", lerr)
 		} else {
-			coord := fptriage.New(llm, cfg.FPTriageModel)
+			coord := fptriage.New(llm, cfg.FPTriageModel).WithConcurrency(cfg.FPTriageConcurrency)
 			if strings.TrimSpace(cfg.VerifierModel) != "" && agent.SameModel(cfg.FPTriageModel, cfg.VerifierModel) {
 				fmt.Fprintf(os.Stderr, "synapse-cli: verifier model %q aliases proposer %q as %q; AI triage remains advisory-only\n",
 					cfg.VerifierModel, cfg.FPTriageModel, agent.CanonicalModelID(cfg.FPTriageModel))
@@ -1398,7 +1399,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	fpGateExemptions := res.AIGateExemptions()
 	fpWouldExempt := res.AIWouldGateExemptKeys()
 	fpReview := res.AIReviewRequiredKeys()
-	if len(res.AITriage) > 0 {
+	if budget := res.AITriageBudget; budget != nil {
 		mode := "advisory-only"
 		for _, critique := range res.AITriage {
 			if critique.VerifierModel != "" {
@@ -1406,8 +1407,8 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 				break
 			}
 		}
-		fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage (%s, %s, rollout=%s): critiqued %d, suspected %d, would-exempt %d, gate-exempt %d, human-review %d\n",
-			cfg.FPTriageModel, mode, cfg.FPTriageMode, len(res.AITriage), len(fpSuspect), len(fpWouldExempt), len(fpGateExempt), len(fpReview))
+		fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage (%s, %s, rollout=%s): eligible %d, attempted %d, skipped-budget %d, completed %d, suspected %d, would-exempt %d, gate-exempt %d, human-review %d\n",
+			cfg.FPTriageModel, mode, cfg.FPTriageMode, budget.EligibleFindings, budget.AttemptedFindings, budget.SkippedFindings, len(res.AITriage), len(fpSuspect), len(fpWouldExempt), len(fpGateExempt), len(fpReview))
 	}
 
 	switch {
