@@ -130,6 +130,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/jsreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/llmverifier"
+	offensivepolicyuc "github.com/KKloudTarus/synapse-ce/internal/usecase/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
@@ -1237,6 +1238,18 @@ func main() {
 		}
 		// Revoking an agent cancels its in-flight work orders (#408).
 		agentSvc.SetWorkOrders(workOrderStore)
+
+		// Offensive kill switch (#418, offensive policy document 8): one operator action halts every
+		// in-flight offensive work order. Wired only where a work order store exists, because a halt
+		// endpoint that accepts a request and stops nothing is the worst possible failure for this
+		// control -- an unwired route 404s instead, which an operator can see.
+		if killSwitch, kerr := offensivepolicyuc.NewKillSwitch(workOrderStore, auditLog, nil, func() time.Time { return clock.Now().UTC() }); kerr != nil {
+			log.Error("offensive kill switch init failed", "err", kerr)
+			os.Exit(1)
+		} else {
+			router.SetOffensiveKillSwitch(killSwitch)
+			log.Info("offensive kill switch ENABLED", "route", "POST /api/v1/redteam/halt", "bound", offensivepolicyuc.HaltBound.String())
+		}
 		// Optional certificate identity (#408): when a control-plane CA is configured, enrolment
 		// with a CSR issues a client certificate. Fail closed on a misconfigured CA.
 		if cfg.FleetCACertPEM != "" && cfg.FleetCAKeyPEM != "" {

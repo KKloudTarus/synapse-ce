@@ -1191,6 +1191,29 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
 
+  /api/v1/redteam/halt:
+    post:
+      tags: [redteam]
+      operationId: haltOffensiveWork
+      summary: Kill switch — halt all in-flight offensive work for the tenant
+      description: >-
+        One operator action (PermAdminister) that cancels every in-flight offensive work order. The
+        response reports the MEASURED duration against the stated bound rather than asserting
+        compliance, and reports partial failure as failure. The bound covers the CONTROL PLANE only:
+        a technique already running on a host stops within one further agent poll interval, which is
+        why estate_stop_note is part of the response. See docs/redteam/offensive-policy.md section 8.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OffensiveHaltRequest'}
+      responses:
+        '200': {description: Every in-flight offensive work order was cancelled, content: {application/json: {schema: {$ref: '#/components/schemas/OffensiveHaltResult'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {description: The halt did not fully succeed; the partial result names the orders still in flight, content: {application/json: {schema: {$ref: '#/components/schemas/OffensiveHaltResult'}}}}
+
   /api/v1/ai-triage/reviews/{rid}/claim:
     parameters: [{$ref: '#/components/parameters/AITriageReviewId'}]
     post:
@@ -1347,6 +1370,31 @@ components:
         updated_at: {type: string, format: date-time}
         decided_at: {type: [string, 'null'], format: date-time}
         version: {type: integer, minimum: 1}
+    OffensiveHaltRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          description: Why the halt was pulled. Required — a halt nobody can explain afterwards defeats the chain of custody.
+    OffensiveHaltResult:
+      type: object
+      properties:
+        requested_at: {type: string, format: date-time}
+        completed_at: {type: string, format: date-time}
+        duration_ms: {type: integer, description: Measured halt duration at the control plane}
+        stated_bound_ms: {type: integer, description: The bound the duration was measured against}
+        within_bound: {type: boolean}
+        halted: {type: boolean, description: True only when every in-flight offensive order was cancelled}
+        cancelled: {type: array, items: {type: string}}
+        failed:
+          type: object
+          additionalProperties: {type: string}
+          description: Work orders that could not be cancelled, with the reason. Present means the halt was partial.
+        audit_recorded: {type: boolean, description: False when the halt succeeded but could not be audited}
+        estate_stop_note:
+          type: string
+          description: What the bound does NOT cover — a technique already running on a host stops within one further agent poll interval.
     AITriageReviewClaimRequest:
       type: object
       required: [version]

@@ -264,7 +264,11 @@ func (s *Service) validApprovers(policy offensivepolicy.TechniquePolicy, techniq
 			shared.ErrForbidden, technique, need, len(approvers))
 	}
 	sort.Strings(approvers)
-	return approvers[:need], nil
+	// Return EVERY valid approver, not the first `need` of them. Truncating would both discard evidence
+	// (a third signature is worth recording) and make this line depend on the guard above for memory
+	// safety — a later edit to that guard would turn a policy bug into a panic in the authorization path,
+	// and a panic there is worse than a refusal.
+	return approvers, nil
 }
 
 // refuse audits the refusal and returns the error. A refusal that is not recorded cannot be explained
