@@ -143,6 +143,13 @@ A technique absent from this table is **refused**. That is the fail-closed defau
 | `persist.scheduled_task` | T1053 | low | irreversible | prohibited | — | state_changing | — | no |
 | `impact.service_stop` | T1489 | high | irreversible | prohibited | — | state_changing | — | no |
 | `exfil.bulk_data` | T1041 | none | reversible | prohibited | — | read_only | — | no |
+| `emu.process_discovery` | T1057 | none | reversible | low | automatic | read_only | — | no |
+| `emu.system_network_config_discovery` | T1016 | none | reversible | low | automatic | read_only | — | no |
+| `emu.dns_beacon_benign` | T1071.004 | none | reversible | low | automatic | read_only | — | no |
+| `emu.credential_file_read` | T1552.001 | none | reversible | low | automatic | read_only | — | no |
+| `emu.service_restart_probe` | T1569.002 | high | reversible | high | dual | state_changing | restart the service to its prior running state; confirm the service is running and healthy | no |
+
+The `emu.*` entries are the governance facet of the adversary-emulation techniques (#421); each also appears in the emulation catalogue with its taxonomy and the detection it should produce. Emulation runs through this same allowlist, so an emulation technique absent here is refused like any other. The four benign discovery techniques are read-only and automatic; `emu.service_restart_probe` is lab-only — disruptive and therefore high-risk with dual approval, reversible via its cleanup, and never production-safe.
 
 The three prohibited entries are listed **on purpose**. Omitting them would make them merely unknown, and the enforcement path would refuse them with "no register entry" — indistinguishable from a technique nobody has classified yet. Naming them records that they were considered and excluded, which is what a governance artifact is for.
 

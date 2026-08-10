@@ -120,3 +120,69 @@ techniques:
       steps: []
       verification: ""
     production_safe: false
+
+  # Adversary-emulation techniques (#421). Each also appears in the emulation catalogue with its
+  # taxonomy and expected detection; the register entry is the GOVERNANCE facet (risk/approval/radius).
+  # Emulation runs through this same allowlist, so an emulation technique absent here is refused.
+  - technique: emu.process_discovery
+    taxonomy_ref: T1057
+    disruption: none
+    reversibility: reversible
+    risk_class: low
+    approval: automatic
+    blast_radius: read_only
+    cleanup:
+      steps: []
+      verification: ""
+    production_safe: false
+
+  - technique: emu.system_network_config_discovery
+    taxonomy_ref: T1016
+    disruption: none
+    reversibility: reversible
+    risk_class: low
+    approval: automatic
+    blast_radius: read_only
+    cleanup:
+      steps: []
+      verification: ""
+    production_safe: false
+
+  - technique: emu.dns_beacon_benign
+    taxonomy_ref: T1071.004
+    disruption: none
+    reversibility: reversible
+    risk_class: low
+    approval: automatic
+    blast_radius: read_only
+    cleanup:
+      steps: []
+      verification: ""
+    production_safe: false
+
+  - technique: emu.credential_file_read
+    taxonomy_ref: T1552.001
+    disruption: none
+    reversibility: reversible
+    risk_class: low
+    approval: automatic
+    blast_radius: read_only
+    cleanup:
+      steps: []
+      verification: ""
+    production_safe: false
+
+  # Lab-only: a service restart is disruptive (high) and reversible; not a prohibited category, but
+  # gated at dual approval and never production-safe. Emulation additionally requires a lab opt-in.
+  - technique: emu.service_restart_probe
+    taxonomy_ref: T1569.002
+    disruption: high
+    reversibility: reversible
+    risk_class: high
+    approval: dual
+    blast_radius: state_changing
+    cleanup:
+      steps:
+        - restart the service to its prior running state
+      verification: confirm the service is running and healthy
+    production_safe: false
