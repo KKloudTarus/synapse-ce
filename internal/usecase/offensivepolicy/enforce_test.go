@@ -345,8 +345,14 @@ func TestApprovalAppearsInTheEvidenceChain(t *testing.T) {
 	if !sealed.AuthorizedAt.Equal(testNow) {
 		t.Errorf("sealed timestamp = %v, want %v", sealed.AuthorizedAt, testNow)
 	}
-	if sealed.PolicyReviewed {
-		t.Error("the sealed record claims a recorded legal review; the shipped policy has none")
+	// The shipped policy is adopted by the maintainer but has no counsel review, and the seal must
+	// record that pair honestly: an auditor reading the evidence must be able to tell that no external
+	// counsel stood behind the action.
+	if !sealed.PolicyAdopted {
+		t.Error("the sealed record does not reflect that the policy is adopted")
+	}
+	if sealed.PolicyCounselReviewed {
+		t.Error("the sealed record claims a counsel review; the shipped policy has none")
 	}
 	if decision.EvidenceID == "" {
 		t.Error("the decision does not carry the evidence id it was sealed under")

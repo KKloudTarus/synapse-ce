@@ -8,12 +8,14 @@ The differentiator this platform claims is not proof of exploitation — Horizon
 
 | Field | Value |
 |---|---|
-| Legal review status | **Not reviewed** |
-| Legal review date | — |
-| Review owner | Repository maintainer (`nghiadaulau`) until a named counsel is assigned |
+| Policy adoption (governance) | **Reviewed and adopted 2026-08-10** by `nghiadaulau` (repository maintainer, accountable owner) |
+| External legal counsel review | **Pending** — no counsel assigned; production clearance is gated on this |
+| Review owner | `nghiadaulau` |
 | Enforcement | `internal/domain/offensivepolicy` (register) + `internal/usecase/offensivepolicy` (enforcement, kill switch) |
 
-**Not reviewed is a real state, not a placeholder.** No technique in this register is marked production-safe while the review status is *Not reviewed*; `ProductionSafe` is refused for every entry until a named reviewer records a date here. That refusal is enforced by test, not by convention — see `TestRegisterRefusesProductionSafeBeforeLegalReview`.
+**These are two levels of authority and they are not interchangeable.** Adoption means the accountable owner has reviewed this policy and put it in force — a real, dated review event, recorded rather than asserted. It is *not* an external legal opinion.
+
+**Production clearance is gated on counsel review, not on adoption.** No technique in this register is marked production-safe while the external legal counsel review is *Pending*; `ProductionSafe` is refused for every entry until counsel records a date, and a maintainer adopting the policy cannot lift that gate. The refusal is enforced by test, not by convention — see `TestRegisterRefusesProductionSafeBeforeCounselReview`. This is deliberate: the owner can put the governance rules in force, but only counsel can clear a technique to run against a customer's production estate.
 
 ## 1. Scope and authority
 

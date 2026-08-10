@@ -119,9 +119,11 @@ func TestRegisterRejectsApprovableProhibitedTechnique(t *testing.T) {
 	}
 }
 
-// TestRegisterRefusesProductionSafeBeforeLegalReview is referenced by name in the policy document's
-// Status section: "Not reviewed is a real state, not a placeholder."
-func TestRegisterRefusesProductionSafeBeforeLegalReview(t *testing.T) {
+// TestRegisterRefusesProductionSafeBeforeCounselReview is referenced by name in the policy document's
+// Status section. Production clearance is gated on EXTERNAL COUNSEL review, and the shipped register
+// records only maintainer adoption (counsel_reviewed: false) — so marking any technique production-safe
+// must still fail, proving that a maintainer adopting the policy does not lift the production gate.
+func TestRegisterRefusesProductionSafeBeforeCounselReview(t *testing.T) {
 	err := mutate(t, `    blast_radius: read_only
     cleanup:
       steps: []
@@ -131,8 +133,52 @@ func TestRegisterRefusesProductionSafeBeforeLegalReview(t *testing.T) {
       steps: []
       verification: ""
     production_safe: true`)
-	if !errors.Is(err, shared.ErrValidation) || !strings.Contains(err.Error(), "production-safe before the legal review") {
-		t.Fatalf("production-safe before a recorded legal review must fail validation, got %v", err)
+	if !errors.Is(err, shared.ErrValidation) || !strings.Contains(err.Error(), "before external legal counsel review") {
+		t.Fatalf("production-safe before a recorded counsel review must fail validation, got %v", err)
+	}
+}
+
+// TestAdoptionAloneDoesNotClearProductionSafe is the important negative: the shipped register IS adopted
+// (reviewed: true), and that must NOT be enough. If a future edit ever re-gated production_safe on
+// adoption instead of counsel, this fails.
+func TestAdoptionAloneDoesNotClearProductionSafe(t *testing.T) {
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reg.LegalReview.Reviewed {
+		t.Fatal("fixture expects the shipped policy to be adopted")
+	}
+	if reg.LegalReview.CounselReviewed {
+		t.Fatal("fixture expects counsel review to still be pending")
+	}
+	// Marking a technique production-safe under adoption-but-not-counsel must be refused.
+	if err := mutate(t, "    production_safe: false", "    production_safe: true"); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("adoption alone must not clear production-safe, got %v", err)
+	}
+}
+
+// TestRecordedAdoptionNeedsDateOwnerAndReviewer: a recorded adoption that omits any of the three is not
+// a review, it is a claim.
+func TestRecordedAdoptionNeedsDateOwnerAndReviewer(t *testing.T) {
+	if err := mutate(t, `  date: "2026-08-10"`, `  date: ""`); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("adoption without a date must fail, got %v", err)
+	}
+	if err := mutate(t, `  reviewer: "nghiadaulau (repository maintainer, accountable owner)"`, `  reviewer: ""`); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("adoption without a reviewer must fail, got %v", err)
+	}
+}
+
+// TestRecordedCounselReviewNeedsDateAndReviewer: if counsel review is ever recorded, it must carry who
+// and when, or it unlocks production clearance on an anonymous, undated claim.
+func TestRecordedCounselReviewNeedsDateAndReviewer(t *testing.T) {
+	err := mutate(t, `  counsel_reviewed: false
+  counsel_date: ""
+  counsel_reviewer: ""`, `  counsel_reviewed: true
+  counsel_date: ""
+  counsel_reviewer: ""`)
+	if !errors.Is(err, shared.ErrValidation) || !strings.Contains(err.Error(), "counsel review needs") {
+		t.Fatalf("a recorded counsel review without a date and reviewer must fail, got %v", err)
 	}
 }
 

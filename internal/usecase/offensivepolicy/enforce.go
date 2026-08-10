@@ -115,17 +115,20 @@ type Decision struct {
 // sealedAuthorization is the evidence payload. It carries exactly what document 4 requires: the
 // approving humans, the technique, the target, the window and the timestamp.
 type sealedAuthorization struct {
-	Technique      string    `json:"technique"`
-	Target         string    `json:"target"`
-	RiskClass      string    `json:"risk_class"`
-	Approval       string    `json:"approval_mode"`
-	BlastRadius    string    `json:"blast_radius"`
-	Approvers      []string  `json:"approvers"`
-	WindowStart    time.Time `json:"window_start"`
-	WindowEnd      time.Time `json:"window_end"`
-	AuthorizedAt   time.Time `json:"authorized_at"`
-	Actor          string    `json:"actor"`
-	PolicyReviewed bool      `json:"policy_legal_review_recorded"`
+	Technique    string    `json:"technique"`
+	Target       string    `json:"target"`
+	RiskClass    string    `json:"risk_class"`
+	Approval     string    `json:"approval_mode"`
+	BlastRadius  string    `json:"blast_radius"`
+	Approvers    []string  `json:"approvers"`
+	WindowStart  time.Time `json:"window_start"`
+	WindowEnd    time.Time `json:"window_end"`
+	AuthorizedAt time.Time `json:"authorized_at"`
+	Actor        string    `json:"actor"`
+	// Both review levels are sealed, because an auditor of the action needs to know not just that a
+	// policy governed it but which authority stood behind that policy at the time.
+	PolicyAdopted         bool `json:"policy_adopted"`
+	PolicyCounselReviewed bool `json:"policy_counsel_reviewed"`
 }
 
 // EvidenceSealer is the narrow consumer-side interface this package needs: seal a payload and tell me
@@ -210,7 +213,7 @@ func (s *Service) Authorize(ctx context.Context, req Request) (Decision, error) 
 		Approval: string(policy.Approval), BlastRadius: string(policy.BlastRadius),
 		Approvers: approvers, WindowStart: req.RoE.WindowStart.UTC(), WindowEnd: req.RoE.WindowEnd.UTC(),
 		AuthorizedAt: now.UTC(), Actor: req.Actor,
-		PolicyReviewed: s.register.LegalReview.Reviewed,
+		PolicyAdopted: s.register.LegalReview.Reviewed, PolicyCounselReviewed: s.register.LegalReview.CounselReviewed,
 	})
 	if err != nil {
 		return Decision{}, fmt.Errorf("marshal offensive authorization: %w", err)

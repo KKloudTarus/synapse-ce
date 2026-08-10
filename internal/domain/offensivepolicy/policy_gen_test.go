@@ -99,9 +99,16 @@ func TestLegalReviewStatusMatchesDocument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load embedded register: %v", err)
 	}
-	docReviewed := !strings.Contains(raw, "| Legal review status | **Not reviewed** |")
-	if docReviewed != reg.LegalReview.Reviewed {
-		t.Fatalf("legal review status: register reviewed=%v, document reviewed=%v", reg.LegalReview.Reviewed, docReviewed)
+	// Both levels must agree with the document, in both directions. The register unlocks production
+	// clearance on counsel review, so a register that claimed counsel had reviewed while the document
+	// said "Pending" would open a gate the document says is shut.
+	docAdopted := strings.Contains(raw, "| Policy adoption (governance) | **Reviewed and adopted")
+	if docAdopted != reg.LegalReview.Reviewed {
+		t.Fatalf("adoption status: register reviewed=%v, document adopted=%v", reg.LegalReview.Reviewed, docAdopted)
+	}
+	docCounselPending := strings.Contains(raw, "| External legal counsel review | **Pending**")
+	if docCounselPending == reg.LegalReview.CounselReviewed {
+		t.Fatalf("counsel status: register counsel_reviewed=%v, document says pending=%v", reg.LegalReview.CounselReviewed, docCounselPending)
 	}
 }
 
