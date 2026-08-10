@@ -96,6 +96,16 @@ describe('Dashboard', () => {
     expect(screen.getByText(/excluded from the trend/)).toBeInTheDocument()
   })
 
+  // The completeness disclosures are the point of these charts: a trend that quietly omits rows, or a
+  // risk mix that quietly omits third-party findings, reads as the whole picture. The undated-findings
+  // notice is covered above; this covers the other one, and the fail-closed default behind it.
+  it('says so when third-party findings are not included', async () => {
+    vi.mocked(api.dashboardSecurityOperations).mockResolvedValue({ ...analytics, externalFindingsIncluded: false })
+    renderDashboard()
+
+    expect(await screen.findByText(/third-party findings are not included/)).toBeInTheDocument()
+  })
+
   it('keeps core operations visible when Fleet telemetry fails', async () => {
     vi.mocked(api.fleetCoverageSummary).mockRejectedValue(new Error('fleet disabled'))
     renderDashboard()
