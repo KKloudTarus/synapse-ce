@@ -301,6 +301,46 @@ func TestAIGateExemptKeysRevalidatesPersistedDecision(t *testing.T) {
 	}
 }
 
+// TestAIGateExemptionsNeverProjectAForgedShadowDecision guards the shadow boundary at the EXPORT seam.
+//
+// Shadow mode exists so AI triage can be observed without affecting a gate (P1.1). A shadow decision
+// reaching SARIF as an "external / accepted" suppression would tell a code-scanning UI the finding was
+// accepted while the policy deliberately had no authority to accept it -- the shadow guarantee leaking
+// into an artifact customers and CI read as fact.
+//
+// The critique here is FORGED: Shadow and GateExempt both true, which applyAIGatePolicy never produces
+// (it clears GateExempt before the shadow branch). That is the point -- !c.Shadow in
+// authorizedAIGateExemption is defence against a persisted or hand-built DTO, so only a forged input
+// exercises it. My first attempt at this test used applyAIGatePolicy and passed for the wrong reason:
+// GateExempt was already false, so removing !c.Shadow left it green.
+func TestAIGateExemptionsNeverProjectAForgedShadowDecision(t *testing.T) {
+	forged := verifiedCritique("safe")
+	forged.GateExempt = true
+	forged.Shadow = true
+	forged.PolicyVersion = aiTriagePolicyVersion
+	forged.PolicyReason = aiPolicyVerifiedConsensus
+	findings := []finding.Finding{
+		{DedupKey: "safe", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"},
+	}
+	result := &ScanResult{Findings: findings, AITriage: []ports.AICritique{forged}}
+
+	if got := result.AIGateExemptions(); len(got) != 0 {
+		t.Fatalf("a shadow decision must never be exported as an accepted suppression: %v", got)
+	}
+	if got := result.AIGateExemptKeys(); len(got) != 0 {
+		t.Fatalf("a shadow decision must never authorize a gate: %v", got)
+	}
+
+	// The same decision with Shadow cleared MUST project, or this test would pass for the wrong reason
+	// again -- it has to be the shadow flag doing the refusing, not some other unmet condition.
+	enforced := forged
+	enforced.Shadow = false
+	ok := &ScanResult{Findings: findings, AITriage: []ports.AICritique{enforced}}
+	if got := ok.AIGateExemptions(); len(got) != 1 {
+		t.Fatalf("with Shadow cleared the same decision must project exactly one exemption: %v", got)
+	}
+}
+
 func TestAIGateExemptionsProjectsOnlyPolicyAuthorizedDecision(t *testing.T) {
 	findings := []finding.Finding{
 		{DedupKey: "safe", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"},
