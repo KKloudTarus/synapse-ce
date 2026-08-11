@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestMigration0074PersistsVerifierIndependenceIdentity(t *testing.T) {
+func TestMigration0078PersistsVerifierIndependenceIdentity(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")

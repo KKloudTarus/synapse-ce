@@ -1,5 +1,5 @@
 -- +goose Up
--- P1.3 (migration 0074): retain the provider/model-family identity used by the deterministic
+-- P1.3 (migration 0078): retain the provider/model-family identity used by the deterministic
 -- separation-of-duties policy in the durable P1.2 human-review queue.
 ALTER TABLE ai_triage_reviews
     ADD COLUMN proposer_provider TEXT NOT NULL DEFAULT '',
