@@ -15,6 +15,16 @@ type SourceSnippetReader interface {
 	Snippet(ctx context.Context, file string, line, radius int) (string, error)
 }
 
+// SourceSnippetContextReader atomically returns the exact snippet supplied to AI triage together with
+// the SHA-256 of the complete source file it came from. Cache-enabled triagers require this stronger
+// optional interface for located findings: hashing the whole file prevents a change just outside the
+// displayed window from reusing a stale model decision, while reading both values from one snapshot
+// avoids a time-of-check/time-of-use mismatch in the cache key.
+type SourceSnippetContextReader interface {
+	SourceSnippetReader
+	SnippetContext(ctx context.Context, file string, line, radius int) (snippet, sourceSHA256 string, err error)
+}
+
 // AIIndependencePolicy identifies the deterministic separation-of-duties rule applied to an
 // AI-triage proposer/verifier pair. Model-family is the backwards-compatible minimum; provider
 // additionally requires two explicitly identified, different providers. Unknown values are never
@@ -79,6 +89,44 @@ type AIGateExemption struct {
 // exported. An exporter must not infer gate authority directly from the advisory AICritique fields.
 type AIGateExemptionReader interface {
 	AIGateExemptions(ctx context.Context, engagementID shared.ID, findings []finding.Finding) ([]AIGateExemption, error)
+}
+
+// FPTriageCacheKey names every input that can make a cached model decision incompatible with the
+// current scan. ScopeID is the engagement/project analysis boundary; paired with TenantID it prevents
+// reuse across tenants or unrelated projects even when their source and finding fingerprints match.
+type FPTriageCacheKey struct {
+	TenantID           shared.ID `json:"tenant_id"`
+	ScopeID            shared.ID `json:"scope_id"`
+	FindingFingerprint string    `json:"finding_fingerprint"`
+	SourceSHA256       string    `json:"source_sha256"`
+	ContextSHA256      string    `json:"context_sha256"`
+	ProposerProvider   string    `json:"proposer_provider"`
+	ProposerModel      string    `json:"proposer_model"`
+	VerifierProvider   string    `json:"verifier_provider,omitempty"`
+	VerifierModel      string    `json:"verifier_model,omitempty"`
+	PromptVersion      string    `json:"prompt_version"`
+	PolicyVersion      string    `json:"policy_version"`
+}
+
+// FPTriageCachedDecision contains only the typed proposer/verifier claims. Scan-local finding IDs,
+// deterministic gate authorization, and evidence references are deliberately not cached: every hit is
+// rebound to the current finding, re-authorized by the current server policy, and sealed into the new
+// scan evidence link.
+type FPTriageCachedDecision struct {
+	Verdict            string `json:"verdict"`
+	Driver             string `json:"driver"`
+	Confidence         int    `json:"confidence"`
+	VerifierPresent    bool   `json:"verifier_present,omitempty"`
+	VerifierVerdict    string `json:"verifier_verdict,omitempty"`
+	VerifierDriver     string `json:"verifier_driver,omitempty"`
+	VerifierConfidence int    `json:"verifier_confidence,omitempty"`
+}
+
+// FPTriageCache is an optional best-effort cache of typed model claims. Any error is treated as a miss;
+// a cache can reduce cost, but it can never be required for a scan or grant gate authority itself.
+type FPTriageCache interface {
+	Load(ctx context.Context, key FPTriageCacheKey) (FPTriageCachedDecision, bool, error)
+	Store(ctx context.Context, key FPTriageCacheKey, decision FPTriageCachedDecision) error
 }
 
 // FPTriager runs an LLM false-positive critique over candidate findings from a workspace and returns a

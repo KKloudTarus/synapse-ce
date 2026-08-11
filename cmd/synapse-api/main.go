@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/fptriagecache"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastchecks"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastengine"
@@ -789,9 +791,17 @@ func main() {
 					log.Warn("AI FP-triage verifier unavailable; triage remains advisory-only", "err", verr)
 				}
 			}
-			scaService.SetFPTriage(fptriage.NewTriager(coord, func(root string) ports.SourceSnippetReader {
+			triager := fptriage.NewTriager(coord, func(root string) ports.SourceSnippetReader {
 				return sourcesnippet.Reader{Root: root}
-			}))
+			})
+			if cfg.ScanCacheEnabled {
+				if dir := cfg.ResolveScanCacheDir(); dir != "" {
+					cacheDir := filepath.Join(dir, "ai-triage")
+					triager.WithCache(fptriagecache.New(cacheDir), scauc.EvaluationPolicyVersion())
+					log.Info("AI false-positive triage cache ENABLED", "dir", cacheDir)
+				}
+			}
+			scaService.SetFPTriage(triager)
 			log.Info("AI false-positive triage ENABLED ("+mode+")", "model", cfg.FPTriageModel,
 				"triage_mode", cfg.FPTriageMode, "max_findings", cfg.FPTriageMaxFindings, "concurrency", cfg.FPTriageConcurrency)
 		}

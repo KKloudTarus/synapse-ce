@@ -5,6 +5,8 @@ package sourcesnippet
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -22,14 +24,37 @@ const maxSnippetFileBytes = 8 << 20 // 8 MiB
 type Reader struct{ Root string }
 
 var _ ports.SourceSnippetReader = Reader{}
+var _ ports.SourceSnippetContextReader = Reader{}
 
 // Snippet returns the [line-radius, line+radius] window of the file (1-based), each line prefixed with its
 // number. Symlinks are resolved and the read is contained inside Root (defense-in-depth: the path is our
 // own finding's, but a link inside the tree must not point outside), the read is size-capped, and ctx is
 // honored.
 func (r Reader) Snippet(ctx context.Context, file string, line, radius int) (string, error) {
-	if err := ctx.Err(); err != nil {
+	data, err := r.read(ctx, file, maxSnippetFileBytes)
+	if err != nil {
 		return "", err
+	}
+	return renderSnippet(data, line, radius), nil
+}
+
+// SnippetContext reads one bounded source snapshot and derives both outputs from those exact bytes.
+// This makes a cache key cover the complete source file without racing a second read of mutable input.
+func (r Reader) SnippetContext(ctx context.Context, file string, line, radius int) (string, string, error) {
+	data, err := r.read(ctx, file, maxSnippetFileBytes+1)
+	if err != nil {
+		return "", "", err
+	}
+	if len(data) > maxSnippetFileBytes {
+		return "", "", fmt.Errorf("snippet source exceeds %d bytes", maxSnippetFileBytes)
+	}
+	sum := sha256.Sum256(data)
+	return renderSnippet(data, line, radius), hex.EncodeToString(sum[:]), nil
+}
+
+func (r Reader) read(ctx context.Context, file string, limit int64) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	p := filepath.Join(r.Root, filepath.FromSlash(file))
 	root, err := filepath.EvalSymlinks(r.Root)
@@ -38,21 +63,25 @@ func (r Reader) Snippet(ctx context.Context, file string, line, radius int) (str
 	}
 	rp, err := filepath.EvalSymlinks(p)
 	if err != nil {
-		return "", err // missing/broken file → the coordinator critiques on metadata only
+		return nil, err // missing/broken file → the coordinator critiques on metadata only
 	}
 	rel, err := filepath.Rel(root, rp)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return "", fmt.Errorf("snippet path escapes scan root")
+		return nil, fmt.Errorf("snippet path escapes scan root")
 	}
 	f, err := os.Open(rp)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, maxSnippetFileBytes))
+	data, err := io.ReadAll(io.LimitReader(f, limit))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	return data, nil
+}
+
+func renderSnippet(data []byte, line, radius int) string {
 	lines := strings.Split(string(data), "\n")
 	lo := line - radius
 	if lo < 1 {
@@ -66,5 +95,5 @@ func (r Reader) Snippet(ctx context.Context, file string, line, radius int) (str
 	for i := lo; i <= hi; i++ {
 		fmt.Fprintf(&b, "%d: %s\n", i, lines[i-1])
 	}
-	return b.String(), nil
+	return b.String()
 }

@@ -12,6 +12,12 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **Safe AI-triage caching.** Tenant-bound API scans reuse typed proposer/verifier claims only when
+  tenant, project/engagement scope, finding fingerprint, complete-source hash, prompt context, models,
+  prompt version, and policy version all match. Cache hits are rebound to the current finding,
+  re-authorized by deterministic server policy, and sealed into fresh scan evidence; provider failures
+  and incomplete verifier claims are never cached.
+
 - **Bounded AI false-positive triage.** Enforces a finite per-scan finding budget and configurable
   concurrency for LLM critique, prioritizes capped work deterministically, stops scheduling queued calls
   on cancellation, and seals/exposes eligible, attempted, and skipped counts while every untriaged

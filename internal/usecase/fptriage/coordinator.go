@@ -89,6 +89,18 @@ type Coordinator struct {
 	concurrency        int
 }
 
+// preparedFinding is one immutable model input. sourceSHA256 covers the complete file when the reader
+// implements ports.SourceSnippetContextReader; cacheable is false when that stronger snapshot could not
+// be obtained, so a partial snippet hash can never masquerade as full source identity.
+type preparedFinding struct {
+	finding      finding.Finding
+	snippet      string
+	sourceSHA256 string
+	cacheable    bool
+	reader       SourceReader
+	ready        bool
+}
+
 const (
 	defaultConcurrency = 6
 	maxConcurrency     = 32
@@ -182,6 +194,55 @@ func (c *Coordinator) MinConfidence() int { return c.minConf }
 // of the returned slice matches candidates. Best-effort: a per-finding failure is captured as
 // Critique.Err, never returned as a batch error.
 func (c *Coordinator) Assess(ctx context.Context, candidates []finding.Finding, src SourceReader) []Critique {
+	if c == nil || c.llm == nil || len(candidates) == 0 {
+		return make([]Critique, len(candidates))
+	}
+	prepared := make([]preparedFinding, len(candidates))
+	for i := range candidates {
+		// Source reads stay inside the bounded assessment goroutines on the uncached path. Cache-enabled
+		// triage prepares a stable snapshot before lookup and marks it ready.
+		prepared[i] = preparedFinding{finding: candidates[i], reader: src}
+	}
+	return c.assessPrepared(ctx, prepared)
+}
+
+func (c *Coordinator) prepare(ctx context.Context, f finding.Finding, src SourceReader) preparedFinding {
+	p := preparedFinding{finding: f, ready: true}
+	file, line, located := locationOf(f)
+	if !located {
+		// No source was supplied to the model, so a stable empty-source sentinel fully describes this
+		// dimension of its input. Finding metadata is independently covered by the context hash.
+		p.sourceSHA256 = sha256Hex(nil)
+		p.cacheable = true
+		return p
+	}
+	if src == nil {
+		return p
+	}
+	if snapshot, ok := src.(ports.SourceSnippetContextReader); ok {
+		snippet, sourceHash, err := snapshot.SnippetContext(ctx, file, line, c.radius)
+		if err == nil && validSHA256(sourceHash) {
+			p.snippet = snippet
+			p.sourceSHA256 = sourceHash
+			p.cacheable = true
+			return p
+		}
+		// A full-file snapshot may be unavailable (for example, an intentionally capped giant file).
+		// Preserve the previous best-effort triage behavior by using the ordinary snippet, uncached.
+		if snippet, snippetErr := src.Snippet(ctx, file, line, c.radius); snippetErr == nil {
+			p.snippet = snippet
+		}
+		return p
+	}
+	// Legacy/custom readers remain supported for uncached triage. Their snippet cannot safely key a
+	// cache because it does not prove that the rest of the source file is unchanged.
+	if snippet, err := src.Snippet(ctx, file, line, c.radius); err == nil {
+		p.snippet = snippet
+	}
+	return p
+}
+
+func (c *Coordinator) assessPrepared(ctx context.Context, candidates []preparedFinding) []Critique {
 	out := make([]Critique, len(candidates))
 	if c == nil || c.llm == nil || len(candidates) == 0 {
 		return out
@@ -193,7 +254,7 @@ func (c *Coordinator) Assess(ctx context.Context, candidates []finding.Finding, 
 		case sem <- struct{}{}:
 		case <-ctx.Done():
 			for j := i; j < len(candidates); j++ {
-				out[j] = Critique{FindingID: string(candidates[j].ID), DedupKey: candidates[j].DedupKey, Err: ctx.Err()}
+				out[j] = Critique{FindingID: string(candidates[j].finding.ID), DedupKey: candidates[j].finding.DedupKey, Err: ctx.Err()}
 			}
 			wg.Wait()
 			return out
@@ -207,32 +268,28 @@ func (c *Coordinator) Assess(ctx context.Context, candidates []finding.Finding, 
 			defer func() {
 				if r := recover(); r != nil {
 					out[i] = Critique{
-						FindingID: string(candidates[i].ID),
-						DedupKey:  candidates[i].DedupKey,
+						FindingID: string(candidates[i].finding.ID),
+						DedupKey:  candidates[i].finding.DedupKey,
 						Err:       fmt.Errorf("critique panicked: %v", r),
 					}
 				}
 			}()
-			out[i] = c.assessOne(ctx, candidates[i], src)
+			candidate := candidates[i]
+			if !candidate.ready {
+				candidate = c.prepare(ctx, candidate.finding, candidate.reader)
+			}
+			out[i] = c.assessOne(ctx, candidate.finding, candidate.snippet)
 		}(i)
 	}
 	wg.Wait()
 	return out
 }
 
-func (c *Coordinator) assessOne(ctx context.Context, f finding.Finding, src SourceReader) Critique {
+func (c *Coordinator) assessOne(ctx context.Context, f finding.Finding, snippet string) Critique {
 	res := Critique{FindingID: string(f.ID), DedupKey: f.DedupKey}
 	if ctx.Err() != nil {
 		res.Err = ctx.Err()
 		return res
-	}
-	snippet := ""
-	if src != nil {
-		if file, line, ok := locationOf(f); ok {
-			if s, err := src.Snippet(ctx, file, line, c.radius); err == nil {
-				snippet = s
-			}
-		}
 	}
 	req := ports.ChatRequest{
 		Model:          c.model,

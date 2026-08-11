@@ -289,13 +289,12 @@ type Config struct {
 	// pinned vuln DB) is older than this many days – so a scan on stale advisory data can't silently
 	// under-report (Trivy uses a stale DB silently). 0 disables the check.
 	DBMaxAgeDays int
-	// ScanCacheEnabled turns on the content+version-addressed generated-SBOM cache; off by default. A hit on
-	// an unchanged tree skips the cataloging step; a producer version bump invalidates the entry.
+	// ScanCacheEnabled turns on the content-addressed generated-SBOM and AI-triage caches. An SBOM hit
+	// skips cataloging; an AI hit reuses only typed claims and still reapplies policy + seals new evidence.
 	ScanCacheEnabled bool
-	// ScanCacheDir is where cached SBOMs live when ScanCacheEnabled. Empty ⇒ a "synapse-sbom" subdir of the
-	// OS user cache dir. It MUST be operator-owned and not writable by untrusted users: an attacker who can
-	// write there and compute a scan's content+producer key could pre-seed a lossy SBOM (a silent
-	// false-negative). The default per-user cache dir satisfies this.
+	// ScanCacheDir is where cached scan artifacts live when ScanCacheEnabled. Empty preserves the existing
+	// "synapse-sbom" per-user default; AI claims use its own owner-only subdirectory. It MUST be
+	// operator-owned and not writable by untrusted users: cache poisoning could create a false negative.
 	ScanCacheDir string
 	// ImageRootFSEnabled materializes a container image's assembled root filesystem from the pulled OCI
 	// layout (applying layers + whiteouts), so the owned parsers can read on-disk OS-package DBs and
@@ -745,8 +744,8 @@ func getbool(key string, def bool) bool {
 	return def
 }
 
-// ResolveScanCacheDir returns the SBOM cache directory, defaulting to a "synapse-sbom" subdir of the OS
-// user cache dir when SYNAPSE_SCAN_CACHE_DIR is unset. Empty only when no cache dir can be determined.
+// ResolveScanCacheDir returns the shared scan-cache root, defaulting to the backward-compatible
+// "synapse-sbom" subdir of the OS user cache dir. Empty only when no cache dir can be determined.
 func (c Config) ResolveScanCacheDir() string {
 	if c.ScanCacheDir != "" {
 		return c.ScanCacheDir
