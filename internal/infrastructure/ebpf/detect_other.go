@@ -12,7 +12,11 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+// The off-Linux stub satisfies the same port as the Linux sensor, so composition compiles everywhere.
+var _ ports.DetectionSensor = (*Sensor)(nil)
 
 // ErrSensorUnavailable means the detection sensor cannot run here (Linux only).
 var ErrSensorUnavailable = errors.New("ebpf detection sensor unavailable: Linux only")

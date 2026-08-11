@@ -57,14 +57,16 @@ type fleetAPI interface {
 }
 
 type config struct {
-	baseURL    string
-	enrolToken string
-	stateDir   string
-	root       string
-	name       string
-	poll       time.Duration
-	maxOrders  int
-	once       bool
+	baseURL       string
+	enrolToken    string
+	stateDir      string
+	root          string
+	name          string
+	poll          time.Duration
+	maxOrders     int
+	once          bool
+	detectClasses string  // SYNAPSE_DETECT_CLASSES; empty = detection engine off
+	detectCeiling float64 // SYNAPSE_DETECT_CPU_CEIL_PCT; 0 = no load shedding
 }
 
 func main() {
@@ -116,6 +118,8 @@ func parseConfig() config {
 	flag.DurationVar(&cfg.poll, "poll", 60*time.Second, "poll interval between claim cycles")
 	flag.IntVar(&cfg.maxOrders, "max-orders", 8, "max work orders to claim per cycle")
 	flag.BoolVar(&cfg.once, "once", false, "run a single cycle then exit")
+	flag.StringVar(&cfg.detectClasses, "detect-classes", os.Getenv("SYNAPSE_DETECT_CLASSES"), "comma-separated eBPF detection classes to run (process,network,file,privilege); empty = detection engine off (#422, Linux+root only)")
+	flag.Float64Var(&cfg.detectCeiling, "detect-ceiling", parseCeiling(os.Getenv("SYNAPSE_DETECT_CPU_CEIL_PCT")), "CPU ceiling percent for the detection engine; over it, classes are shed in a defined order (0 = no shedding)")
 	flag.Parse()
 	if cfg.enrolToken == "" {
 		// An absent token file is NOT fatal: it is the normal state after enrolment, once the
@@ -142,6 +146,9 @@ func (r *runner) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Agent-side detection engine (#422): a continuous background observer, separate from the
+	// per-work-order inventory cycle below. Best-effort — it never blocks or fails the inventory loop.
+	r.startDetection(ctx)
 	for {
 		if err := r.cycle(ctx, cred); err != nil {
 			if errors.Is(err, context.Canceled) {
