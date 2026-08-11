@@ -1351,16 +1351,18 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" && !image {
 		sca.SetFPTriageMode(cfg.FPTriageMode)
 		sca.SetFPTriageMaxFindings(cfg.FPTriageMaxFindings)
+		sca.SetFPTriageIndependence(cfg.FPTriageIndependence)
 		if llm, lerr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); lerr != nil {
 			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage disabled: %v\n", lerr)
 		} else {
-			coord := fptriage.New(llm, cfg.FPTriageModel).WithConcurrency(cfg.FPTriageConcurrency)
-			if strings.TrimSpace(cfg.VerifierModel) != "" && agent.SameModel(cfg.FPTriageModel, cfg.VerifierModel) {
-				fmt.Fprintf(os.Stderr, "synapse-cli: verifier model %q aliases proposer %q as %q; AI triage remains advisory-only\n",
-					cfg.VerifierModel, cfg.FPTriageModel, agent.CanonicalModelID(cfg.FPTriageModel))
-			} else if strings.TrimSpace(cfg.VerifierModel) != "" {
-				if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
-					coord.WithVerifier(vllm, cfg.VerifierModel)
+			coord := fptriage.NewWithIdentity(llm, cfg.FPTriageProvider, cfg.FPTriageModel).
+				WithConcurrency(cfg.FPTriageConcurrency)
+			if strings.TrimSpace(cfg.VerifierModel) != "" {
+				if !agent.IndependentLLMs(cfg.FPTriageProvider, cfg.FPTriageModel, cfg.VerifierProvider, cfg.VerifierModel, cfg.FPTriageIndependence) {
+					fmt.Fprintf(os.Stderr, "synapse-cli: verifier %q/%q does not satisfy %q independence from proposer %q/%q; AI triage remains advisory-only\n",
+						cfg.VerifierProvider, cfg.VerifierModel, cfg.FPTriageIndependence, cfg.FPTriageProvider, cfg.FPTriageModel)
+				} else if vllm, verr := openai.New(cfg.VerifierBaseURL, cfg.VerifierAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
+					coord.WithIndependentVerifier(vllm, cfg.VerifierProvider, cfg.VerifierModel, ports.AIIndependencePolicy(cfg.FPTriageIndependence))
 				} else {
 					fmt.Fprintf(os.Stderr, "synapse-cli: verifier model %q unavailable; AI triage remains advisory-only: %v\n", cfg.VerifierModel, verr)
 				}

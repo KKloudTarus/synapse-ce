@@ -327,7 +327,12 @@ export interface AITriage {
   confidence: number
   suspectedFP: boolean
   proposerModel: string
+  proposerProvider: string
+  proposerModelFamily: string
   verifierModel: string
+  verifierProvider: string
+  verifierModelFamily: string
+  independencePolicy: 'model_family' | 'provider' | ''
   promptVersion: string
   policyVersion: string
   policyReason: string
@@ -360,7 +365,12 @@ export interface AITriageReview {
   confidence: number
   suspectedFP: boolean
   proposerModel: string
+  proposerProvider: string
+  proposerModelFamily: string
   verifierModel: string
+  verifierProvider: string
+  verifierModelFamily: string
+  independencePolicy: 'model_family' | 'provider' | ''
   promptVersion: string
   verified: boolean
   verifierVerdict: string

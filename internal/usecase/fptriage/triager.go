@@ -3,6 +3,7 @@ package fptriage
 import (
 	"context"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -47,16 +48,21 @@ func (t *Triager) Triage(ctx context.Context, candidates []finding.Finding, work
 			continue
 		}
 		critique := ports.AICritique{
-			FindingID:     c.FindingID,
-			DedupKey:      c.DedupKey,
-			Verdict:       string(c.Claim.Verdict),
-			Driver:        c.Claim.Driver,
-			Confidence:    c.Claim.Confidence,
-			SuspectedFP:   c.SuspectedFP(t.minConf),
-			Verified:      c.VerifiedConsensus(t.minConf),
-			ProposerModel: t.coord.ProposerModel(),
-			VerifierModel: t.coord.VerifierModel(),
-			PromptVersion: promptVersion,
+			FindingID:           c.FindingID,
+			DedupKey:            c.DedupKey,
+			Verdict:             string(c.Claim.Verdict),
+			Driver:              c.Claim.Driver,
+			Confidence:          c.Claim.Confidence,
+			SuspectedFP:         c.SuspectedFP(t.minConf),
+			Verified:            c.VerifiedConsensus(t.minConf),
+			ProposerModel:       t.coord.ProposerModel(),
+			ProposerProvider:    t.coord.ProposerProvider(),
+			ProposerModelFamily: agent.CanonicalModelID(t.coord.ProposerModel()),
+			VerifierModel:       t.coord.VerifierModel(),
+			VerifierProvider:    t.coord.VerifierProvider(),
+			VerifierModelFamily: agent.CanonicalModelID(t.coord.VerifierModel()),
+			IndependencePolicy:  t.coord.IndependencePolicy(),
+			PromptVersion:       promptVersion,
 		}
 		if c.Verifier != nil {
 			critique.VerifierVerdict = string(c.Verifier.Verdict)

@@ -41,41 +41,46 @@ func (d Decision) Valid() bool { return d == DecisionAccept || d == DecisionReje
 // Review is a durable snapshot of the finding, model verdicts, policy decision,
 // and evidence link that a human reviewed. Findings remain visible independently.
 type Review struct {
-	ID                 shared.ID       `json:"id"`
-	TenantID           shared.ID       `json:"tenant_id"`
-	EngagementID       shared.ID       `json:"engagement_id"`
-	ProjectID          shared.ID       `json:"project_id,omitempty"`
-	FindingID          shared.ID       `json:"finding_id"`
-	DedupKey           string          `json:"dedup_key"`
-	Title              string          `json:"title"`
-	Severity           shared.Severity `json:"severity"`
-	CWE                string          `json:"cwe,omitempty"`
-	Owner              string          `json:"owner,omitempty"`
-	State              State           `json:"state"`
-	Verdict            string          `json:"verdict"`
-	Driver             string          `json:"driver"`
-	Confidence         int             `json:"confidence"`
-	SuspectedFP        bool            `json:"suspected_fp"`
-	ProposerModel      string          `json:"proposer_model"`
-	VerifierModel      string          `json:"verifier_model,omitempty"`
-	PromptVersion      string          `json:"prompt_version"`
-	Verified           bool            `json:"verified"`
-	VerifierVerdict    string          `json:"verifier_verdict,omitempty"`
-	VerifierDriver     string          `json:"verifier_driver,omitempty"`
-	VerifierConfidence int             `json:"verifier_confidence,omitempty"`
-	PolicyVersion      string          `json:"policy_version"`
-	PolicyReason       string          `json:"policy_reason"`
-	Shadow             bool            `json:"shadow"`
-	WouldGateExempt    bool            `json:"would_gate_exempt"`
-	GateExempt         bool            `json:"gate_exempt"`
-	ReviewRequired     bool            `json:"review_required"`
-	EvidenceRef        shared.ID       `json:"evidence_ref"`
-	DecidedBy          string          `json:"decided_by,omitempty"`
-	DecisionRationale  string          `json:"decision_rationale,omitempty"`
-	CreatedAt          time.Time       `json:"created_at"`
-	UpdatedAt          time.Time       `json:"updated_at"`
-	DecidedAt          *time.Time      `json:"decided_at,omitempty"`
-	Version            int             `json:"version"`
+	ID                  shared.ID       `json:"id"`
+	TenantID            shared.ID       `json:"tenant_id"`
+	EngagementID        shared.ID       `json:"engagement_id"`
+	ProjectID           shared.ID       `json:"project_id,omitempty"`
+	FindingID           shared.ID       `json:"finding_id"`
+	DedupKey            string          `json:"dedup_key"`
+	Title               string          `json:"title"`
+	Severity            shared.Severity `json:"severity"`
+	CWE                 string          `json:"cwe,omitempty"`
+	Owner               string          `json:"owner,omitempty"`
+	State               State           `json:"state"`
+	Verdict             string          `json:"verdict"`
+	Driver              string          `json:"driver"`
+	Confidence          int             `json:"confidence"`
+	SuspectedFP         bool            `json:"suspected_fp"`
+	ProposerModel       string          `json:"proposer_model"`
+	ProposerProvider    string          `json:"proposer_provider"`
+	ProposerModelFamily string          `json:"proposer_model_family"`
+	VerifierModel       string          `json:"verifier_model,omitempty"`
+	VerifierProvider    string          `json:"verifier_provider,omitempty"`
+	VerifierModelFamily string          `json:"verifier_model_family,omitempty"`
+	IndependencePolicy  string          `json:"independence_policy"`
+	PromptVersion       string          `json:"prompt_version"`
+	Verified            bool            `json:"verified"`
+	VerifierVerdict     string          `json:"verifier_verdict,omitempty"`
+	VerifierDriver      string          `json:"verifier_driver,omitempty"`
+	VerifierConfidence  int             `json:"verifier_confidence,omitempty"`
+	PolicyVersion       string          `json:"policy_version"`
+	PolicyReason        string          `json:"policy_reason"`
+	Shadow              bool            `json:"shadow"`
+	WouldGateExempt     bool            `json:"would_gate_exempt"`
+	GateExempt          bool            `json:"gate_exempt"`
+	ReviewRequired      bool            `json:"review_required"`
+	EvidenceRef         shared.ID       `json:"evidence_ref"`
+	DecidedBy           string          `json:"decided_by,omitempty"`
+	DecisionRationale   string          `json:"decision_rationale,omitempty"`
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at"`
+	DecidedAt           *time.Time      `json:"decided_at,omitempty"`
+	Version             int             `json:"version"`
 }
 
 // Input contains the immutable snapshot captured when a policy-held critique is queued.
@@ -83,7 +88,9 @@ type Input struct {
 	ID, TenantID, EngagementID, ProjectID, FindingID, EvidenceRef shared.ID
 	DedupKey, Title, CWE                                          string
 	Severity                                                      shared.Severity
-	Verdict, Driver, ProposerModel, VerifierModel, PromptVersion  string
+	Verdict, Driver, ProposerModel, ProposerProvider              string
+	ProposerModelFamily, VerifierModel, VerifierProvider          string
+	VerifierModelFamily, IndependencePolicy, PromptVersion        string
 	Confidence                                                    int
 	SuspectedFP, Verified                                         bool
 	VerifierVerdict, VerifierDriver                               string
@@ -100,7 +107,10 @@ func NewPending(in Input, now time.Time) (Review, error) {
 		Severity: in.Severity, CWE: strings.TrimSpace(in.CWE),
 		State: StatePending, Verdict: in.Verdict, Driver: in.Driver, Confidence: in.Confidence,
 		SuspectedFP: in.SuspectedFP, ProposerModel: strings.TrimSpace(in.ProposerModel),
-		VerifierModel: strings.TrimSpace(in.VerifierModel), PromptVersion: strings.TrimSpace(in.PromptVersion), Verified: in.Verified,
+		ProposerProvider: strings.TrimSpace(in.ProposerProvider), ProposerModelFamily: strings.TrimSpace(in.ProposerModelFamily),
+		VerifierModel: strings.TrimSpace(in.VerifierModel), VerifierProvider: strings.TrimSpace(in.VerifierProvider),
+		VerifierModelFamily: strings.TrimSpace(in.VerifierModelFamily), IndependencePolicy: strings.TrimSpace(in.IndependencePolicy),
+		PromptVersion: strings.TrimSpace(in.PromptVersion), Verified: in.Verified,
 		VerifierVerdict: in.VerifierVerdict, VerifierDriver: in.VerifierDriver,
 		VerifierConfidence: in.VerifierConfidence, PolicyVersion: strings.TrimSpace(in.PolicyVersion),
 		PolicyReason: strings.TrimSpace(in.PolicyReason), Shadow: in.Shadow, WouldGateExempt: in.WouldGateExempt, GateExempt: in.GateExempt,
@@ -118,6 +128,18 @@ func NewPending(in Input, now time.Time) (Review, error) {
 	}
 	if r.ProposerModel == "" || r.PromptVersion == "" || r.PolicyVersion == "" || r.PolicyReason == "" || now.IsZero() {
 		return Review{}, fmt.Errorf("%w: AI-triage review requires model, prompt, policy, reason, and timestamp", shared.ErrValidation)
+	}
+	if r.PolicyVersion == "fp-gate-v4" && (r.ProposerProvider == "" || r.ProposerModelFamily == "" || r.IndependencePolicy == "") {
+		return Review{}, fmt.Errorf("%w: fp-gate-v4 review requires provider/model-family identity and independence policy", shared.ErrValidation)
+	}
+	if r.PolicyVersion == "fp-gate-v4" {
+		if r.VerifierModel == "" {
+			if r.VerifierProvider != "" || r.VerifierModelFamily != "" {
+				return Review{}, fmt.Errorf("%w: verifier metadata requires a verifier model", shared.ErrValidation)
+			}
+		} else if r.VerifierProvider == "" || r.VerifierModelFamily == "" {
+			return Review{}, fmt.Errorf("%w: verifier model requires provider and family metadata", shared.ErrValidation)
+		}
 	}
 	if r.Confidence < 0 || r.Confidence > 100 || r.VerifierConfidence < 0 || r.VerifierConfidence > 100 || (r.WouldGateExempt && !r.Shadow) {
 		return Review{}, fmt.Errorf("%w: invalid AI-triage confidence or rollout metadata", shared.ErrValidation)

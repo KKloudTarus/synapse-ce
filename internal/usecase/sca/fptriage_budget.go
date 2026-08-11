@@ -60,7 +60,7 @@ func (s *Service) runFPTriage(ctx context.Context, result *ScanResult, workspace
 		tstep = trace.start(stageFindings, "ai-fp-triage", "fp-triager", "AI false-positive triage", counts)
 	}
 	result.AITriage = s.fpTriager.Triage(ctx, attempted, workspaceDir)
-	applyAIGatePolicy(result, s.evidence != nil, s.fpTriageMode)
+	applyAIGatePolicyWithIndependence(result, s.evidence != nil, s.fpTriageMode, s.fpTriageIndependence)
 	if trace != nil {
 		trace.succeed(tstep, "AI false-positive triage", map[string]int{
 			"candidates":      len(candidates),

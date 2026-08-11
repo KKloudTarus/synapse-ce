@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // TestFPTriageModeConfigReachesService covers the composition wire that both binaries use: the
@@ -29,5 +30,24 @@ func TestFPTriageModeConfigReachesService(t *testing.T) {
 				t.Fatalf("config mode %q reached service as %q, want %q", cfg.FPTriageMode, service.fpTriageMode, tt.want)
 			}
 		})
+	}
+}
+
+func TestFPTriageIndependenceConfigReachesService(t *testing.T) {
+	for _, tc := range []struct {
+		env  string
+		want ports.AIIndependencePolicy
+	}{
+		{"", ports.AIIndependenceModelFamily},
+		{" PROVIDER ", ports.AIIndependenceProvider},
+		{"typo", ""},
+	} {
+		t.Setenv("SYNAPSE_FP_TRIAGE_INDEPENDENCE", tc.env)
+		cfg := config.Load()
+		service := &Service{}
+		service.SetFPTriageIndependence(cfg.FPTriageIndependence)
+		if service.fpTriageIndependence != tc.want {
+			t.Fatalf("config independence %q reached service as %q, want %q", cfg.FPTriageIndependence, service.fpTriageIndependence, tc.want)
+		}
 	}
 }

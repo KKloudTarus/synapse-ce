@@ -13,10 +13,11 @@ vi.mock('../lib/api', () => ({
 const review: AITriageReview = {
   id: 'r1', tenantId: 'default', engagementId: 'e1', projectId: 'p1', findingId: 'f1', dedupKey: 'sast:key',
   title: 'SQL injection', severity: 'high', cwe: 'CWE-89', owner: 'reviewer', state: 'pending', verdict: 'refuted',
-  driver: 'sanitizer', confidence: 91, suspectedFP: true, proposerModel: 'model-a', verifierModel: 'model-b',
-  promptVersion: 'fp-triage-v1', shadow: false, wouldGateExempt: false,
+  driver: 'sanitizer', confidence: 91, suspectedFP: true, proposerModel: 'model-a', proposerProvider: 'openai', proposerModelFamily: 'model-a',
+  verifierModel: 'model-b', verifierProvider: 'anthropic', verifierModelFamily: 'model-b', independencePolicy: 'provider',
+  promptVersion: 'fp-triage-v2', shadow: false, wouldGateExempt: false,
   verified: true, verifierVerdict: 'refuted', verifierDriver: 'sanitizer', verifierConfidence: 90,
-  policyVersion: 'fp-gate-v3', policyReason: 'severity_requires_human', gateExempt: false, reviewRequired: true,
+  policyVersion: 'fp-gate-v4', policyReason: 'severity_requires_human', gateExempt: false, reviewRequired: true,
   evidenceRef: 'ev1', decidedBy: '', decisionRationale: '', createdAt: '2026-08-09T00:00:00Z',
   updatedAt: '2026-08-09T00:00:00Z', decidedAt: null, version: 1,
 }
@@ -37,8 +38,9 @@ describe('AITriageReviews', () => {
     renderPage()
     expect(await screen.findByText('SQL injection')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /SQL injection/i }))
-    expect(screen.getByText(/model-a · refuted · 91%/)).toBeInTheDocument()
-    expect(screen.getByText('fp-gate-v3')).toBeInTheDocument()
+    expect(screen.getByText(/openai \/ model-a · refuted · 91%/)).toBeInTheDocument()
+    expect(screen.getByText('fp-gate-v4')).toBeInTheDocument()
+    expect(screen.getByText('provider')).toBeInTheDocument()
     expect(screen.getByText('ev1')).toBeInTheDocument()
     expect(screen.getAllByText('Suspected FP').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Verified').length).toBeGreaterThan(0)

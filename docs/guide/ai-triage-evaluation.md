@@ -26,8 +26,14 @@ Configure the same OpenAI-compatible endpoint used by Synapse and two distinct m
 ```bash
 export SYNAPSE_LLM_BASE_URL=http://localhost:20128/v1
 export SYNAPSE_LLM_API_KEY=...
+export SYNAPSE_LLM_PROVIDER=openai
 export SYNAPSE_FP_TRIAGE_MODEL=<proposer-model>
+export SYNAPSE_FP_TRIAGE_PROVIDER=openai
+export SYNAPSE_VERIFIER_BASE_URL=https://verifier.example/v1
+export SYNAPSE_VERIFIER_API_KEY=...
+export SYNAPSE_VERIFIER_PROVIDER=anthropic
 export SYNAPSE_VERIFIER_MODEL=<verifier-model>
+export SYNAPSE_FP_TRIAGE_INDEPENDENCE=provider
 
 make ai-triage-eval
 ```
@@ -40,15 +46,17 @@ go run ./cmd/synapse-fptriage-eval \
   --output ai-triage-eval.json
 ```
 
-The verifier must remain distinct after model-family canonicalization. It runs before the proposer result
-exists and receives only the finding plus source context, so the proposer verdict cannot anchor its
-assessment. Both calls use temperature zero. A provider failure, invalid response, missing verifier, or
-incomplete consensus remains covered as a non-exemption; no error path grants gate authority.
+The verifier must remain distinct after model-family canonicalization. `model_family` policy permits the
+same transport/provider with a different family; `provider` policy additionally requires complete and
+different explicit provider identities. It runs before the proposer result exists and receives only the
+finding plus source context, so the proposer verdict cannot anchor its assessment. Both calls use
+temperature zero. A provider failure, invalid response, missing identity, missing verifier, or incomplete
+consensus remains covered as a non-exemption; no error path grants gate authority.
 
 ## Report contract
 
-The JSON report identifies the dataset, proposer model, verifier model, prompt version, and policy
-version. It records every case beside its human label and emits:
+The `synapse-ai-triage-evaluation-v2` JSON report identifies the dataset, proposer/verifier providers and model families, independence
+policy, prompt version, and gate-policy version. It records every case beside its human label and emits:
 
 - precision and recall of verified false-positive consensus;
 - false-negative escape rate (human true positives the deterministic policy would exempt);

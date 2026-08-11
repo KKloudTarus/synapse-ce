@@ -28,7 +28,9 @@ func (s *AITriageReviewStore) UpsertPending(_ context.Context, review aitriagere
 		if current.TenantID == review.TenantID && current.EngagementID == review.EngagementID &&
 			current.DedupKey == review.DedupKey && current.PolicyVersion == review.PolicyVersion &&
 			current.PromptVersion == review.PromptVersion && current.ProposerModel == review.ProposerModel &&
-			current.VerifierModel == review.VerifierModel {
+			current.ProposerProvider == review.ProposerProvider && current.ProposerModelFamily == review.ProposerModelFamily &&
+			current.VerifierModel == review.VerifierModel && current.VerifierProvider == review.VerifierProvider &&
+			current.VerifierModelFamily == review.VerifierModelFamily && current.IndependencePolicy == review.IndependencePolicy {
 			if current.State == aitriagereview.StatePending {
 				review.ID, review.CreatedAt, review.Owner = current.ID, current.CreatedAt, current.Owner
 				review.Version = current.Version + 1
