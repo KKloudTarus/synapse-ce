@@ -29,6 +29,27 @@ type haltableStore interface {
 	Transition(ctx context.Context, tenantID, id shared.ID, to workorder.State, reason string, expected workorder.State, now time.Time) error
 }
 
+// ChainHaltSummary reports the outcome of halting the in-memory exploitation chains a process is
+// running. It is kept separate from the work-order fields so an operator can see which layer of the kill
+// switch stopped what: queued/claimed work orders, or chains executing in memory.
+type ChainHaltSummary struct {
+	Halted []shared.ID
+	Failed map[shared.ID]string
+}
+
+// clean reports whether every running chain was halted (or there were none).
+func (c ChainHaltSummary) clean() bool { return len(c.Failed) == 0 }
+
+// ChainHalter halts every exploitation chain running IN THE CURRENT PROCESS for a tenant. It is the
+// second layer of the kill switch: work orders cover queued and claimed offensive work, this covers a
+// chain already executing in memory, which is not a work order and would otherwise be unreachable.
+//
+// It is optional. A deployment that never drives chains in-process wires nil, and the kill switch then
+// covers work orders alone — honestly, because the response says so.
+type ChainHalter interface {
+	HaltChains(ctx context.Context, tenantID shared.ID, actor, reason string) (ChainHaltSummary, error)
+}
+
 // HaltResult is what the operator gets back. It reports partial failure honestly: a halt that cancelled
 // nine of ten orders is not a clean halt, and saying so is the difference between an operator escalating
 // and an operator believing the estate is safe.
@@ -40,13 +61,22 @@ type HaltResult struct {
 	Cancelled   []shared.ID
 	Failed      map[shared.ID]string
 	AuditFailed bool
+	// Chains reports the in-memory exploitation chains this halt stopped. Its zero value means the chain
+	// layer was not wired (no ChainHalter) — distinct from "wired and found nothing running".
+	Chains ChainHaltSummary
+	// ChainHaltError is set when the chain layer could not be driven at all (not a per-chain failure,
+	// which lands in Chains.Failed). It is a failure to halt and must not read like success.
+	ChainHaltError string
 	// EstateStopNote states, in the response, what the bound does not cover. An operator reading only
 	// this field must not conclude the estate has stopped.
 	EstateStopNote string
 }
 
-// Halted reports whether every in-flight offensive order was cancelled.
-func (r HaltResult) Halted() bool { return len(r.Failed) == 0 }
+// Halted reports whether every in-flight offensive order AND every running chain was cancelled. A halt
+// that stopped every work order but left a chain running is not a clean halt.
+func (r HaltResult) Halted() bool {
+	return len(r.Failed) == 0 && r.Chains.clean() && r.ChainHaltError == ""
+}
 
 // KillSwitch halts all in-flight offensive work for a tenant.
 type KillSwitch struct {
@@ -54,6 +84,17 @@ type KillSwitch struct {
 	audit       ports.AuditLogger
 	isOffensive func(*workorder.WorkOrder) bool
 	now         func() time.Time
+	chains      ChainHalter
+}
+
+// SetChainHalter wires the in-process chain registry so a halt also stops exploitation chains executing
+// in memory, not only work orders. Optional: left unset, the kill switch covers work orders alone and
+// the result's Chains field stays zero to say so. Wired at the composition root, where the registry the
+// chain machines register into is constructed.
+func (k *KillSwitch) SetChainHalter(ch ChainHalter) {
+	if k != nil {
+		k.chains = ch
+	}
 }
 
 // NewKillSwitch builds the kill switch. isOffensive decides which work orders this switch governs; when
@@ -101,10 +142,28 @@ func (k *KillSwitch) Halt(ctx context.Context, tenantID shared.ID, actor, reason
 			HaltBound),
 	}
 
+	// Halt the in-memory exploitation chains FIRST, and unconditionally. This layer does not depend on
+	// the work-order store, and a chain executing techniques in memory is the most dangerous thing the
+	// kill switch must reach. Gating it behind the work-order enumeration would mean a degraded store —
+	// exactly when an operator pulls the switch — leaves a running chain untouched while the result still
+	// read as if chains were never in play. Done inside the measured window, because stopping a running
+	// chain is part of the halt the operator asked for, not a follow-up.
+	if k.chains != nil {
+		summary, cerr := k.chains.HaltChains(ctx, tenantID, actor, reason)
+		result.Chains = summary
+		if cerr != nil {
+			result.ChainHaltError = cerr.Error()
+		}
+	}
+
 	orders, err := k.orders.ListByTenant(ctx, tenantID)
 	if err != nil {
 		// The halt could not even enumerate what to stop. That is a failure to halt, and it must not
-		// return a result that reads like success.
+		// return a result that reads like success. The chain layer above already ran, so its outcome is
+		// carried in the result and the audit rather than being lost to this early return.
+		result.CompletedAt = k.now().UTC()
+		result.Duration = result.CompletedAt.Sub(result.RequestedAt)
+		result.WithinBound = result.Duration <= HaltBound
 		k.recordAudit(ctx, actor, reason, tenantID, &result, "enumeration_failed")
 		return result, fmt.Errorf("%w: halt could not enumerate work orders: %v", shared.ErrSaturated, err)
 	}
@@ -142,7 +201,12 @@ func (k *KillSwitch) Halt(ctx context.Context, tenantID shared.ID, actor, reason
 	// the result says the audit failed rather than claiming a clean halt.
 	k.recordAudit(ctx, actor, reason, tenantID, &result, "")
 	if !result.Halted() {
-		return result, fmt.Errorf("%w: halt failed for %d work order(s)", shared.ErrSaturated, len(result.Failed))
+		if result.ChainHaltError != "" {
+			return result, fmt.Errorf("%w: halt failed for %d work order(s) and could not drive chain halt: %s",
+				shared.ErrSaturated, len(result.Failed), result.ChainHaltError)
+		}
+		return result, fmt.Errorf("%w: halt failed for %d work order(s) and %d chain(s)",
+			shared.ErrSaturated, len(result.Failed), len(result.Chains.Failed))
 	}
 	return result, nil
 }
@@ -173,9 +237,14 @@ func (k *KillSwitch) recordAudit(ctx context.Context, actor, reason string, tena
 		"reason":          reason,
 		"cancelled":       fmt.Sprint(len(result.Cancelled)),
 		"failed":          fmt.Sprint(len(result.Failed)),
+		"chains_halted":   fmt.Sprint(len(result.Chains.Halted)),
+		"chains_failed":   fmt.Sprint(len(result.Chains.Failed)),
 		"duration_ms":     fmt.Sprint(result.Duration.Milliseconds()),
 		"within_bound":    fmt.Sprint(result.WithinBound),
 		"stated_bound_ms": fmt.Sprint(HaltBound.Milliseconds()),
+	}
+	if result.ChainHaltError != "" {
+		meta["chain_halt_error"] = result.ChainHaltError
 	}
 	if note != "" {
 		meta["note"] = note

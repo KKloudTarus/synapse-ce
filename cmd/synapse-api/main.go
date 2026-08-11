@@ -1247,8 +1247,14 @@ func main() {
 			log.Error("offensive kill switch init failed", "err", kerr)
 			os.Exit(1)
 		} else {
+			// Second layer of the kill switch (#418 follow-up on #420): an in-process registry of running
+			// exploitation chains, so a halt reaches a chain executing in memory and not only a work order.
+			// A chain driver registers its Machine here (via RunTracked); the registry is process-scoped,
+			// which for this single-process deployment is the whole control plane.
+			chainRegistry := exploitationuc.NewChainRegistry()
+			killSwitch.SetChainHalter(chainRegistry)
 			router.SetOffensiveKillSwitch(killSwitch)
-			log.Info("offensive kill switch ENABLED", "route", "POST /api/v1/redteam/halt", "bound", offensivepolicyuc.HaltBound.String())
+			log.Info("offensive kill switch ENABLED", "route", "POST /api/v1/redteam/halt", "bound", offensivepolicyuc.HaltBound.String(), "chain_registry", true)
 		}
 		// Optional certificate identity (#408): when a control-plane CA is configured, enrolment
 		// with a CSR issues a client certificate. Fail closed on a misconfigured CA.

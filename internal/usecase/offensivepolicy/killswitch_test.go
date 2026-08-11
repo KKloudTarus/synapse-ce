@@ -317,3 +317,137 @@ func TestHaltDefaultsToTreatingEveryOrderAsOffensive(t *testing.T) {
 		t.Fatalf("with no classifier every in-flight order must be halted, cancelled %v", result.Cancelled)
 	}
 }
+
+// fakeChainHalter stands in for the exploitation chain registry, so the kill switch can be tested for
+// the second halt layer without importing the exploitation usecase.
+type fakeChainHalter struct {
+	summary   ChainHaltSummary
+	err       error
+	called    bool
+	gotTenant shared.ID
+	gotActor  string
+	gotReason string
+}
+
+func (f *fakeChainHalter) HaltChains(_ context.Context, tenantID shared.ID, actor, reason string) (ChainHaltSummary, error) {
+	f.called = true
+	f.gotTenant, f.gotActor, f.gotReason = tenantID, actor, reason
+	return f.summary, f.err
+}
+
+// TestHaltAlsoStopsRunningChains: with a chain halter wired, one operator halt stops both the in-flight
+// work orders and the chains executing in memory, forwarding the same tenant/operator/reason, and the
+// chain outcome is reported and audited alongside the work-order outcome.
+func TestHaltAlsoStopsRunningChains(t *testing.T) {
+	orders := newFakeOrders(workorder.StateRunning)
+	audit := &fakeAudit{}
+	ks, err := NewKillSwitch(orders, audit, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := &fakeChainHalter{summary: ChainHaltSummary{Halted: []shared.ID{"chain-1", "chain-2"}, Failed: map[shared.ID]string{}}}
+	ks.SetChainHalter(ch)
+
+	result, err := ks.Halt(context.Background(), "t1", "operator@example.test", "stop everything")
+	if err != nil {
+		t.Fatalf("halt: %v", err)
+	}
+	if !result.Halted() {
+		t.Error("a halt that stopped every work order and every chain must read as halted")
+	}
+	if got := orders.state("wo-00"); got != workorder.StateCancelled {
+		t.Errorf("work order not cancelled: %s", got)
+	}
+	if len(result.Chains.Halted) != 2 {
+		t.Errorf("the chain layer's result must be reported, got %v", result.Chains.Halted)
+	}
+	// The same operator action, forwarded verbatim to the chain layer.
+	if !ch.called || ch.gotTenant != "t1" || ch.gotActor != "operator@example.test" || ch.gotReason != "stop everything" {
+		t.Errorf("chain halter not called with the operator's identity/reason: %+v", ch)
+	}
+	last := audit.last()
+	if last.Metadata["chains_halted"] != "2" || last.Metadata["chains_failed"] != "0" {
+		t.Errorf("the audit must record the chain halt counts: %+v", last.Metadata)
+	}
+}
+
+// TestHaltReportsChainFailureAsNotHalted: a chain the kill switch could not stop makes the whole halt a
+// partial failure, even when every work order was cancelled. An operator must not read it as clean.
+func TestHaltReportsChainFailureAsNotHalted(t *testing.T) {
+	orders := newFakeOrders(workorder.StateRunning)
+	ks, _ := NewKillSwitch(orders, &fakeAudit{}, nil, nil)
+	ks.SetChainHalter(&fakeChainHalter{summary: ChainHaltSummary{Failed: map[shared.ID]string{"chain-9": "host unreachable"}}})
+
+	result, err := ks.Halt(context.Background(), "t1", "operator@example.test", "stop")
+	if err == nil {
+		t.Fatal("a halt that left a chain running must return an error")
+	}
+	if result.Halted() {
+		t.Error("Halted() must be false while a chain failed to stop, even though the work order cancelled")
+	}
+	if got := orders.state("wo-00"); got != workorder.StateCancelled {
+		t.Errorf("the work order should still have been cancelled: %s", got)
+	}
+}
+
+// TestHaltStillStopsChainsWhenWorkOrderEnumerationFails: the in-memory chain layer does not depend on
+// the work-order store, so a store outage — exactly when an operator hits the kill switch — must not
+// leave a chain executing techniques in memory. The overall halt still fails, but the chains are stopped
+// and their outcome is reported and audited rather than lost to the early return.
+func TestHaltStillStopsChainsWhenWorkOrderEnumerationFails(t *testing.T) {
+	orders := newFakeOrders(workorder.StateRunning)
+	orders.listErr = errors.New("database unreachable")
+	audit := &fakeAudit{}
+	ks, _ := NewKillSwitch(orders, audit, nil, nil)
+	ch := &fakeChainHalter{summary: ChainHaltSummary{Halted: []shared.ID{"chain-1"}, Failed: map[shared.ID]string{}}}
+	ks.SetChainHalter(ch)
+
+	result, err := ks.Halt(context.Background(), "t1", "operator@example.test", "stop")
+	if err == nil {
+		t.Fatal("a halt that cannot enumerate work orders must still fail overall")
+	}
+	if !ch.called {
+		t.Fatal("the chain layer was skipped when the work-order store failed — a running chain would be left executing")
+	}
+	if len(result.Chains.Halted) != 1 {
+		t.Errorf("the chain halt outcome must be reported even on enumeration failure, got %v", result.Chains.Halted)
+	}
+	if got := audit.last().Metadata["chains_halted"]; got != "1" {
+		t.Errorf("the audit must record the chain halt count on the enumeration-failure path, got %q", got)
+	}
+}
+
+// TestHaltReportsChainHalterError: if the chain layer cannot be driven at all, that is a failure to halt
+// and must surface, not be swallowed.
+func TestHaltReportsChainHalterError(t *testing.T) {
+	orders := newFakeOrders(workorder.StateRunning)
+	ks, _ := NewKillSwitch(orders, &fakeAudit{}, nil, nil)
+	ks.SetChainHalter(&fakeChainHalter{err: errors.New("registry unavailable")})
+
+	result, err := ks.Halt(context.Background(), "t1", "operator@example.test", "stop")
+	if err == nil {
+		t.Fatal("a chain layer that could not be driven must make the halt fail")
+	}
+	if result.ChainHaltError == "" || result.Halted() {
+		t.Errorf("the chain-halt error must be reported and the halt not read as clean: %+v", result)
+	}
+}
+
+// TestHaltWithoutChainHalterCoversWorkOrdersOnly: unwired, the kill switch halts work orders and the
+// result's chain fields stay zero — honestly saying the chain layer did not run, not that it found
+// nothing.
+func TestHaltWithoutChainHalterCoversWorkOrdersOnly(t *testing.T) {
+	orders := newFakeOrders(workorder.StateRunning)
+	ks, _ := NewKillSwitch(orders, &fakeAudit{}, nil, nil)
+
+	result, err := ks.Halt(context.Background(), "t1", "operator@example.test", "stop")
+	if err != nil {
+		t.Fatalf("halt: %v", err)
+	}
+	if !result.Halted() {
+		t.Error("a work-order-only halt with no chains must still read as halted")
+	}
+	if len(result.Chains.Halted) != 0 || len(result.Chains.Failed) != 0 || result.ChainHaltError != "" {
+		t.Errorf("with no chain halter wired the chain fields must be zero: %+v", result.Chains)
+	}
+}
