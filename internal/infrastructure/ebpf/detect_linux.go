@@ -31,7 +31,12 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+// The sensor is consumed by the agent-side engine through ports.DetectionSensor, never as a concrete
+// type — the dependency points inward (usecase ← infrastructure).
+var _ ports.DetectionSensor = (*Sensor)(nil)
 
 // Rebuild the embedded objects after editing the .bpf.c sources (on a Linux host with clang +
 // libbpf-devel; netconn also needs a vmlinux.h from `bpftool btf dump file /sys/kernel/btf/vmlinux
