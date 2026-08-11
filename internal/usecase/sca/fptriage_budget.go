@@ -12,12 +12,16 @@ import (
 
 // AITriageBudget records bounded per-scan AI coverage. The cap is on findings, so a configured
 // distinct verifier can make at most two LLM calls per attempted finding. Unattempted findings retain
-// their normal gate effect.
+// their normal gate effect. EvidenceSealFailures and EvidenceRevokedExemptions are in-memory failure
+// accounting for the revocation boundary; the scan fails before ScanResult persistence, so the
+// operator-visible metric is emitted separately as a stable structured event by sealEvidenceFailClosed.
 type AITriageBudget struct {
-	MaxFindings       int `json:"max_findings"`
-	EligibleFindings  int `json:"eligible_findings"`
-	AttemptedFindings int `json:"attempted_findings"`
-	SkippedFindings   int `json:"skipped_findings"`
+	MaxFindings               int `json:"max_findings"`
+	EligibleFindings          int `json:"eligible_findings"`
+	AttemptedFindings         int `json:"attempted_findings"`
+	SkippedFindings           int `json:"skipped_findings"`
+	EvidenceSealFailures      int `json:"evidence_seal_failures,omitempty"`
+	EvidenceRevokedExemptions int `json:"evidence_revoked_exemptions,omitempty"`
 }
 
 func (s *Service) runFPTriage(ctx context.Context, result *ScanResult, workspaceDir string, trace *scanDebugTrace) {
