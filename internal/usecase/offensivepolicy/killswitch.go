@@ -50,6 +50,13 @@ type ChainHalter interface {
 	HaltChains(ctx context.Context, tenantID shared.ID, actor, reason string) (ChainHaltSummary, error)
 }
 
+// ResponseHalter halts pending/in-flight DEFENSIVE response actions for a tenant (#425): the kill switch
+// stops response actions exactly as it stops offensive work — a defensive action that changes a
+// production system must be as haltable as an offensive one. Optional; nil means no response layer.
+type ResponseHalter interface {
+	HaltResponses(ctx context.Context, tenantID shared.ID, actor, reason string) (int, error)
+}
+
 // HaltResult is what the operator gets back. It reports partial failure honestly: a halt that cancelled
 // nine of ten orders is not a clean halt, and saying so is the difference between an operator escalating
 // and an operator believing the estate is safe.
@@ -67,6 +74,10 @@ type HaltResult struct {
 	// ChainHaltError is set when the chain layer could not be driven at all (not a per-chain failure,
 	// which lands in Chains.Failed). It is a failure to halt and must not read like success.
 	ChainHaltError string
+	// ResponsesHalted counts the pending/in-flight defensive response actions this halt cancelled;
+	// ResponseHaltError is set when that layer could not be driven at all.
+	ResponsesHalted   int
+	ResponseHaltError string
 	// EstateStopNote states, in the response, what the bound does not cover. An operator reading only
 	// this field must not conclude the estate has stopped.
 	EstateStopNote string
@@ -75,7 +86,7 @@ type HaltResult struct {
 // Halted reports whether every in-flight offensive order AND every running chain was cancelled. A halt
 // that stopped every work order but left a chain running is not a clean halt.
 func (r HaltResult) Halted() bool {
-	return len(r.Failed) == 0 && r.Chains.clean() && r.ChainHaltError == ""
+	return len(r.Failed) == 0 && r.Chains.clean() && r.ChainHaltError == "" && r.ResponseHaltError == ""
 }
 
 // KillSwitch halts all in-flight offensive work for a tenant.
@@ -85,6 +96,7 @@ type KillSwitch struct {
 	isOffensive func(*workorder.WorkOrder) bool
 	now         func() time.Time
 	chains      ChainHalter
+	responses   ResponseHalter
 }
 
 // SetChainHalter wires the in-process chain registry so a halt also stops exploitation chains executing
@@ -94,6 +106,14 @@ type KillSwitch struct {
 func (k *KillSwitch) SetChainHalter(ch ChainHalter) {
 	if k != nil {
 		k.chains = ch
+	}
+}
+
+// SetResponseHalter wires the defensive-response layer so a halt also cancels pending/in-flight response
+// actions. Optional: left unset, the kill switch covers offensive work + chains alone.
+func (k *KillSwitch) SetResponseHalter(rh ResponseHalter) {
+	if k != nil {
+		k.responses = rh
 	}
 }
 
@@ -155,6 +175,14 @@ func (k *KillSwitch) Halt(ctx context.Context, tenantID shared.ID, actor, reason
 			result.ChainHaltError = cerr.Error()
 		}
 	}
+	// And the defensive-response layer: pending/in-flight response actions are halted like offensive work.
+	if k.responses != nil {
+		n, rerr := k.responses.HaltResponses(ctx, tenantID, actor, reason)
+		result.ResponsesHalted = n
+		if rerr != nil {
+			result.ResponseHaltError = rerr.Error()
+		}
+	}
 
 	orders, err := k.orders.ListByTenant(ctx, tenantID)
 	if err != nil {
@@ -205,6 +233,10 @@ func (k *KillSwitch) Halt(ctx context.Context, tenantID shared.ID, actor, reason
 			return result, fmt.Errorf("%w: halt failed for %d work order(s) and could not drive chain halt: %s",
 				shared.ErrSaturated, len(result.Failed), result.ChainHaltError)
 		}
+		if result.ResponseHaltError != "" {
+			return result, fmt.Errorf("%w: halt failed for %d work order(s) and could not drive response halt: %s",
+				shared.ErrSaturated, len(result.Failed), result.ResponseHaltError)
+		}
 		return result, fmt.Errorf("%w: halt failed for %d work order(s) and %d chain(s)",
 			shared.ErrSaturated, len(result.Failed), len(result.Chains.Failed))
 	}
@@ -233,18 +265,22 @@ func (k *KillSwitch) retryOnce(ctx context.Context, tenantID, id shared.ID, reas
 
 func (k *KillSwitch) recordAudit(ctx context.Context, actor, reason string, tenantID shared.ID, result *HaltResult, note string) {
 	meta := map[string]string{
-		"tenant":          tenantID.String(),
-		"reason":          reason,
-		"cancelled":       fmt.Sprint(len(result.Cancelled)),
-		"failed":          fmt.Sprint(len(result.Failed)),
-		"chains_halted":   fmt.Sprint(len(result.Chains.Halted)),
-		"chains_failed":   fmt.Sprint(len(result.Chains.Failed)),
-		"duration_ms":     fmt.Sprint(result.Duration.Milliseconds()),
-		"within_bound":    fmt.Sprint(result.WithinBound),
-		"stated_bound_ms": fmt.Sprint(HaltBound.Milliseconds()),
+		"tenant":           tenantID.String(),
+		"reason":           reason,
+		"cancelled":        fmt.Sprint(len(result.Cancelled)),
+		"failed":           fmt.Sprint(len(result.Failed)),
+		"chains_halted":    fmt.Sprint(len(result.Chains.Halted)),
+		"chains_failed":    fmt.Sprint(len(result.Chains.Failed)),
+		"responses_halted": fmt.Sprint(result.ResponsesHalted),
+		"duration_ms":      fmt.Sprint(result.Duration.Milliseconds()),
+		"within_bound":     fmt.Sprint(result.WithinBound),
+		"stated_bound_ms":  fmt.Sprint(HaltBound.Milliseconds()),
 	}
 	if result.ChainHaltError != "" {
 		meta["chain_halt_error"] = result.ChainHaltError
+	}
+	if result.ResponseHaltError != "" {
+		meta["response_halt_error"] = result.ResponseHaltError
 	}
 	if note != "" {
 		meta["note"] = note

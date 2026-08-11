@@ -34,6 +34,7 @@ type AdmittedAction struct {
 	action       agent.ProposedAction
 	decidedBy    string
 	authorizedAt time.Time
+	evidenceID   shared.ID
 }
 
 // Action is the underlying proposed action (target/argv/tool) cleared to run.
@@ -44,6 +45,10 @@ func (a AdmittedAction) DecidedBy() string { return a.decidedBy }
 
 // AuthorizedAt is the time the execution guard authorized it.
 func (a AdmittedAction) AuthorizedAt() time.Time { return a.authorizedAt }
+
+// EvidenceID is the id of the hash-chained evidence link that sealed this admission (the approval as
+// evidence). A caller can persist it to trace a downstream record back to the sealed approval.
+func (a AdmittedAction) EvidenceID() shared.ID { return a.evidenceID }
 
 // Gate admits actions through the engagement guard + the HITL approval, sealing the
 // admission into the evidence chain.
@@ -106,10 +111,11 @@ func (g *Gate) Admit(ctx context.Context, p agent.ProposedAction, actor string) 
 			ActionID: p.ID.String(), SessionID: p.SessionID.String(), Tool: p.Tool, Action: p.Action,
 			Target: p.Target.Value, Argv: p.Argv, Risk: string(p.Risk), DecidedBy: dec.DecidedBy,
 		})
-		if _, err := g.evidence.Seal(ctx, p.EngagementID, "agent_admission", payload, actor); err != nil {
+		sealed, err := g.evidence.Seal(ctx, p.EngagementID, "agent_admission", payload, actor)
+		if err != nil {
 			return AdmittedAction{}, fmt.Errorf("seal admission: %w", err)
 		}
-		return AdmittedAction{action: p, decidedBy: dec.DecidedBy, authorizedAt: at}, nil
+		return AdmittedAction{action: p, decidedBy: dec.DecidedBy, authorizedAt: at, evidenceID: sealed.ID}, nil
 	case agent.ApprovalPending:
 		return AdmittedAction{}, ErrPendingApproval
 	default: // denied | timeout

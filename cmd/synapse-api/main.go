@@ -122,6 +122,7 @@ import (
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
 	clusterinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/clusterinventory"
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
+	detectledger "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectledger"
 	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetrolloutuc"
@@ -211,6 +212,7 @@ func main() {
 	var aiTriageReviewStore ports.AITriageReviewStore
 	var importedSBOMStore ports.ImportedSBOMStore
 	var importedFindingStore ports.ImportedFindingStore // third-party (SARIF) findings under governance
+	var detectionRecordStore ports.DetectionRecordStore // #423 detection ledger projection
 	var scanJobStore ports.ScanJobStore
 	var scanRunStore ports.ScanRunStore
 	var projectAnalysisStore ports.ProjectAnalysisStore
@@ -313,6 +315,7 @@ func main() {
 		aiTriageReviewStore = postgres.NewAITriageReviewRepository(pool)
 		importedSBOMStore = postgres.NewImportedSBOMStore(pool)
 		importedFindingStore = postgres.NewImportedFindingRepository(pool)
+		detectionRecordStore = postgres.NewDetectionRecordRepository(pool)
 		scanJobStore = postgres.NewScanJobStore(pool)
 		scanRunStore = postgres.NewScanRunStore(pool)
 		projectAnalysisStore = postgres.NewProjectAnalysisStore(pool)
@@ -377,6 +380,7 @@ func main() {
 		aiTriageReviewStore = memory.NewAITriageReviewStore()
 		importedSBOMStore = memory.NewImportedSBOMStore()
 		importedFindingStore = memory.NewImportedFindingStore()
+		detectionRecordStore = memory.NewDetectionRecordStore()
 		scanJobStore = memory.NewScanJobStore()
 		scanRunStore = memory.NewScanRunStore()
 		projectAnalysisStore = memory.NewProjectAnalysisStore()
@@ -1211,6 +1215,16 @@ func main() {
 		}
 		router.SetSARIFIngest(sarifSvc)
 		router.SetImportedFindings(importedFindingStore)
+		// #423 detection ledger read routes. The write/ingest path (Service.Ingest → seal into the
+		// evidence chain) plugs the same detectionRecordStore into detectledger.NewService once the
+		// agent→control-plane batch transport + agent signing-key resolver land; the read surface is live
+		// now so a detection is queryable and tenant-scoped through the same chokepoint.
+		if detectionReader, drerr := detectledger.NewReader(detectionRecordStore); drerr != nil {
+			log.Error("detection ledger reader init failed", "err", drerr)
+			os.Exit(1)
+		} else {
+			router.SetDetectionReader(detectionReader)
+		}
 		// The ingest writes an append-only audit entry asserting that N external results entered an
 		// engagement. Without Postgres those rows live only in this process, so the banner says so
 		// rather than letting the audit trail imply a durability the deployment does not have.
