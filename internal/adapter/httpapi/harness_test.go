@@ -11,6 +11,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetcoverage"
@@ -112,6 +113,26 @@ func (harnessRollout) Resume(context.Context, shared.ID, string, shared.ID) (*fl
 type harnessImportedFindings struct{}
 
 func (harnessImportedFindings) ListByEngagement(context.Context, shared.ID, shared.ID) ([]importedfinding.ImportedFinding, error) {
+	return nil, nil
+}
+
+// harnessDetections is the #423 detection-ledger read side: it returns one tenant-A detection carrying a
+// marker asset, so the harness proves a cross-tenant read (blocked by withEngTenant → 404) never reaches
+// it, while a same-tenant read does.
+type harnessDetections struct{}
+
+func (harnessDetections) ListDetections(_ context.Context, engagementID shared.ID) ([]detection.Record, error) {
+	r, _ := detection.Lookup("det.process_enumeration")
+	ev := detection.Event{Class: detection.ClassProcess, At: time.Unix(1, 0), Host: "host-A",
+		Process: &detection.ProcessEvent{PID: 1, Comm: "ps", Path: "/usr/bin/ps"}}
+	d, _ := detection.NewDetection(r, "host-A", "agent:A", []detection.Event{ev}, time.Unix(500, 0))
+	return []detection.Record{{
+		ID: "det-A", TenantID: "tenantA", EngagementID: engagementID, AssetID: "asset-A", AgentID: "agent:A",
+		Detection: d, EvidenceID: "ev-A", BatchSeq: 1, RecordedAt: time.Unix(1000, 0),
+	}}, nil
+}
+
+func (harnessDetections) Incidents(_ context.Context, _ shared.ID) ([]detection.Incident, error) {
 	return nil, nil
 }
 
@@ -264,6 +285,7 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetAttackPaths(attackSvc)              // real #419 service proves cross-tenant derived data isolation
 	rt.SetSARIFIngest(harnessSARIF{})         // register the #415 import route so the harness guards its operate/tenant gates
 	rt.SetImportedFindings(harnessImportedFindings{})
+	rt.SetDetectionReader(harnessDetections{}) // register the #423 detection-ledger read route
 	rt.SetFleetRolloutAdmin(harnessRollout{})
 	rt.EnableAgent(nil, nil, nil, nil, nil, 1, 8)
 	mux := rt.routes()
@@ -390,6 +412,9 @@ func TestHostileHarness(t *testing.T) {
 		{"readonly may read imported findings (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/imported-findings", http.StatusOK},
 		{"cross-tenant imported-finding read → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/imported-findings", http.StatusNotFound},
 		{"principal-less imported-finding read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/imported-findings", http.StatusForbidden},
+		{"readonly may read detections (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/detections", http.StatusOK},
+		{"cross-tenant detection read → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/detections", http.StatusNotFound},
+		{"principal-less detection read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/detections", http.StatusForbidden},
 		// Fleet coverage (#413, PermView): machine roles denied; readonly may read; cross-tenant agent
 		// detail is 404 (never an existence-revealing 403). The cross-tenant LIST emptiness (a 200 that
 		// leaks nothing) is asserted on the body just below the table.
@@ -413,6 +438,15 @@ func TestHostileHarness(t *testing.T) {
 	if code, body := send("readonly", "tenantA", http.MethodGet, "/api/v1/attack-paths", true); code != http.StatusOK || !strings.Contains(body, "tenant-A-secret-marker") {
 		t.Fatalf("tenantA must see its own attack path marker (code=%d body=%s)", code, body)
 	}
+	// #423 detection ledger: tenantA sees its own detection (asset-A marker); a cross-tenant read of the
+	// engagement-scoped route returns NOTHING (404 via withEngTenant), so tenantA's marker can never leak.
+	if code, body := send("readonly", "tenantA", http.MethodGet, "/api/v1/engagements/engA/detections", true); code != http.StatusOK || !strings.Contains(body, "asset-A") {
+		t.Fatalf("tenantA must see its own detections (code=%d body=%s)", code, body)
+	}
+	if code, body := send("consultant", "tenantB", http.MethodGet, "/api/v1/engagements/engA/detections", true); code != http.StatusNotFound || strings.Contains(body, "asset-A") {
+		t.Errorf("cross-tenant detection read must be 404 with no tenantA data (code=%d body=%s)", code, body)
+	}
+
 	if code, body := send("readonly", "tenantB", http.MethodGet, "/api/v1/attack-paths", true); code != http.StatusOK || strings.Contains(body, "tenant-A-secret-marker") {
 		t.Errorf("tenantB attack paths leaked tenantA data (code=%d body=%s)", code, body)
 	}

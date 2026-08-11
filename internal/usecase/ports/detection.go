@@ -2,8 +2,10 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 // DetectionSensor is the agent-side event source the detection engine consumes: a set of per-class eBPF
@@ -32,4 +34,24 @@ type DetectionSensor interface {
 // "somewhere to emit a detection", not on how it is stored or transported.
 type DetectionSink interface {
 	Emit(ctx context.Context, d detection.Detection) error
+}
+
+// DetectionRecordStore persists the control-plane detection ledger projection (#423): the queryable rows
+// over the sealed evidence-chain links. Tenant scoping is enforced in the implementation via the tenant
+// chokepoint, not by the caller. The projection is retention-bounded; the underlying chain links are
+// permanent, so expiry removes rows here, never chain history.
+type DetectionRecordStore interface {
+	// AppendDetection stores one projection row. It is tenant-scoped and idempotent on the record id.
+	AppendDetection(ctx context.Context, r detection.Record) error
+	// HasDetection reports whether a record with this id already exists (tenant-scoped), so ingest can
+	// skip an already-sealed detection on a retry rather than sealing it into the chain twice.
+	HasDetection(ctx context.Context, id shared.ID) (bool, error)
+	// ListDetections returns the (non-expired) records for an engagement, oldest first, tenant-scoped.
+	ListDetections(ctx context.Context, engagementID shared.ID) ([]detection.Record, error)
+	// LastBatchSequence returns the highest batch sequence recorded for an agent (0 = none yet), so a gap
+	// in the sequence can be detected. Tenant-scoped.
+	LastBatchSequence(ctx context.Context, agentID shared.ID) (uint64, error)
+	// ExpireDetections removes the records for an engagement whose ExpiresAt has elapsed at cutoff, and
+	// returns their ids so the removal can be audited. It never touches records with no expiry set.
+	ExpireDetections(ctx context.Context, engagementID shared.ID, cutoff time.Time) ([]shared.ID, error)
 }
