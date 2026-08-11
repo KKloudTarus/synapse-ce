@@ -37,6 +37,9 @@ type haltResponse struct {
 	Halted         bool              `json:"halted"`
 	Cancelled      []string          `json:"cancelled"`
 	Failed         map[string]string `json:"failed,omitempty"`
+	ChainsHalted   []string          `json:"chains_halted,omitempty"`
+	ChainsFailed   map[string]string `json:"chains_failed,omitempty"`
+	ChainHaltError string            `json:"chain_halt_error,omitempty"`
 	AuditRecorded  bool              `json:"audit_recorded"`
 	EstateStopNote string            `json:"estate_stop_note"`
 }
@@ -58,7 +61,9 @@ func (rt *Router) haltOffensiveWork(w http.ResponseWriter, r *http.Request) {
 		DurationMS: result.Duration.Milliseconds(), StatedBoundMS: offensiveuc.HaltBound.Milliseconds(),
 		WithinBound: result.WithinBound, Halted: err == nil && result.Halted(),
 		Cancelled: idStrings(result.Cancelled), Failed: failureStrings(result.Failed),
-		AuditRecorded: !result.AuditFailed, EstateStopNote: result.EstateStopNote,
+		ChainsHalted: idStrings(result.Chains.Halted), ChainsFailed: failureStrings(result.Chains.Failed),
+		ChainHaltError: result.ChainHaltError,
+		AuditRecorded:  !result.AuditFailed, EstateStopNote: result.EstateStopNote,
 	}
 	switch {
 	case err == nil:
