@@ -71,6 +71,7 @@ type Router struct {
 	fleetRolloutAdmin fleetRolloutService   // optional; nil ⇒ the operator rollout routes are not served
 	offensiveHalt     offensiveKillSwitch   // optional; nil ⇒ the red-team halt route is not served
 	detections        detectionReader       // optional read side for the detection ledger (#423)
+	purpleCoverage    purpleCoverageReader  // optional read side for purple-team coverage (#426)
 	fleet             *fleetRouter          // optional; nil ⇒ agent transport plane is not served
 	fleetAdmin        fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
 	qualityGates      qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
@@ -368,6 +369,7 @@ func (rt *Router) routes() *http.ServeMux {
 		// itself, rather than the governance claim being made by a method nothing calls.
 		mux.HandleFunc("GET /api/v1/engagements/{id}/imported-findings", rt.authz(userdom.PermView, rt.withEngTenant(rt.listImportedFindings)))
 		mux.HandleFunc("GET /api/v1/engagements/{id}/detections", rt.authz(userdom.PermView, rt.withEngTenant(rt.listDetections)))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/purple-coverage", rt.authz(userdom.PermView, rt.withEngTenant(rt.listPurpleCoverage)))
 	}
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan", rt.authz(userdom.PermView, rt.withEngTenant(rt.latestScan)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan-status", rt.authz(userdom.PermView, rt.withEngTenant(rt.scanStatus)))
