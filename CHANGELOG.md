@@ -18,6 +18,8 @@ capabilities below are already shipped on `main`.
   finding remains reported and gating.
 
 - **Visible AI gate exemptions in SARIF.** Retained findings exempted by the verified AI false-positive policy now carry a standards-based external suppression plus deterministic policy version/reason metadata in both CLI and stored engagement SARIF exports; advisory, review-required, stale, and high-risk decisions remain unmarked.
+
+- **Provider-independent blind AI-triage verifier.** The false-positive verifier can use a separate endpoint and credential, records explicit provider plus canonical model-family metadata, and supports fail-closed `model_family` or stronger `provider` separation-of-duties policy. Missing or mismatched identity metadata keeps findings gating.
 - **Asset-centric security management.** Promotes the shipped `fleet_business_services` rows in place to stable-keyed Business Assets above Engagements, with tenant/RLS-safe Project and technical-asset memberships, Engagement assignment, Findings/Coverage/Posture/History roll-ups, and UI built from the existing application components. Third-party findings retain provenance and no-promotion authority, while reachability retains proof tier and first-class `unknown`.
 
 - **Immutable Project Code workspace.** Capture bounded analysis-time source and Git comparison artifacts so historical source, unified/split diffs, and finding locations remain inspectable without reconstructing mutable workspaces; large source and diff views use bounded windows or virtualization.

@@ -81,9 +81,15 @@ stays in the report, it is only held back from the `--fail-on` gate).
    findings (SAST/misconfig; secret findings are never sent to the LLM) and returns a typed verdict — `refuted` (suspected false positive),
    `sound`, or `uncertain` — with a confidence. The proposer only advises: single-model output can never
    change the gate. Set `SYNAPSE_VERIFIER_MODEL` to a **different model family** to enable consensus. The
-   verifier runs first with only the finding and source context; it never sees the proposer verdict.
+   verifier may use its own `SYNAPSE_VERIFIER_BASE_URL`, `SYNAPSE_VERIFIER_API_KEY`, and explicit
+   `SYNAPSE_VERIFIER_PROVIDER`; the proposer provider is `SYNAPSE_FP_TRIAGE_PROVIDER` (defaulting to
+   `SYNAPSE_LLM_PROVIDER`). The verifier runs first
+   with only the finding and source context; it never sees the proposer verdict.
    Provider prefixes, dated aliases, and Amazon Bedrock geographic/global inference-profile IDs are
-   canonicalized fail-closed so one model family cannot verify itself under two names. The rollout mode
+   canonicalized fail-closed so one model family cannot verify itself under two names. Set
+   `SYNAPSE_FP_TRIAGE_INDEPENDENCE=provider` to require both a different provider and a different model
+   family; missing/unknown identity metadata leaves triage advisory-only. Provider/model-family/policy
+   metadata is retained in the scan evidence. The rollout mode
    defaults to `SYNAPSE_FP_TRIAGE_MODE=shadow`: Synapse stores `would_gate_exempt` for measurement,
    always forces `gate_exempt=false`, and keeps the finding gating. Set the mode explicitly to `enforce`
    only after the evaluation threshold is approved. In enforced mode, a finding is gate-exempt only when

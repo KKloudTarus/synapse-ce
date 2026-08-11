@@ -77,13 +77,16 @@ func (c Critique) VerifiedConsensus(minConfidence int) bool {
 
 // Coordinator critiques findings through an LLM proposer, and (when configured) a DISTINCT verifier.
 type Coordinator struct {
-	llm           ports.LLM
-	model         string
-	verifier      ports.LLM // optional distinct blind verifier; a proposer "refuted" is confirmed only if it agrees
-	verifierModel string
-	minConf       int // minimum confidence for a "refuted" to be actionable (default verdict.EvidenceThreshold)
-	radius        int // source context lines each side of the finding line
-	concurrency   int
+	llm                ports.LLM
+	model              string
+	proposerProvider   string
+	verifier           ports.LLM // optional distinct blind verifier; a proposer "refuted" is confirmed only if it agrees
+	verifierModel      string
+	verifierProvider   string
+	independencePolicy ports.AIIndependencePolicy
+	minConf            int // minimum confidence for a "refuted" to be actionable (default verdict.EvidenceThreshold)
+	radius             int // source context lines each side of the finding line
+	concurrency        int
 }
 
 const (
@@ -91,14 +94,24 @@ const (
 	maxConcurrency     = 32
 )
 
-// New builds a Coordinator. model is the proposer model id; llm must be non-nil.
+const defaultProviderID = "openai-compatible"
+
+// New builds a Coordinator using the backwards-compatible generic OpenAI-compatible provider
+// identity. Composition roots with explicit provider metadata should use NewWithIdentity.
 func New(llm ports.LLM, model string) *Coordinator {
+	return NewWithIdentity(llm, defaultProviderID, model)
+}
+
+// NewWithIdentity builds a Coordinator with explicit proposer provider/model audit identity.
+func NewWithIdentity(llm ports.LLM, provider, model string) *Coordinator {
 	return &Coordinator{
-		llm:         llm,
-		model:       strings.TrimSpace(model),
-		minConf:     verdict.EvidenceThreshold, // 75 — align with the gated-judgment bar
-		radius:      8,
-		concurrency: defaultConcurrency,
+		llm:                llm,
+		model:              strings.TrimSpace(model),
+		proposerProvider:   agent.CanonicalProviderID(provider),
+		independencePolicy: ports.AIIndependenceModelFamily,
+		minConf:            verdict.EvidenceThreshold, // 75 — align with the gated-judgment bar
+		radius:             8,
+		concurrency:        defaultConcurrency,
 	}
 }
 
@@ -130,16 +143,33 @@ func (c *Coordinator) Concurrency() int {
 // scan policy may authorize only after applying severity/kind/CWE human-review floors. A no-op if the
 // client or either model identity is missing, or the verifier aliases the proposer.
 func (c *Coordinator) WithVerifier(llm ports.LLM, model string) *Coordinator {
+	return c.WithIndependentVerifier(llm, c.proposerProvider, model, ports.AIIndependenceModelFamily)
+}
+
+// WithIndependentVerifier attaches a verifier only when the complete provider/model identity satisfies
+// the requested separation-of-duties policy. Provider policy is stronger: it requires both a different
+// provider and a different canonical model family. Missing/unknown metadata is a no-op (advisory-only).
+func (c *Coordinator) WithIndependentVerifier(llm ports.LLM, provider, model string, policy ports.AIIndependencePolicy) *Coordinator {
 	model = strings.TrimSpace(model)
-	if llm != nil && model != "" && c.model != "" && !agent.SameModel(model, c.model) {
+	provider = agent.CanonicalProviderID(provider)
+	if llm != nil && agent.IndependentLLMs(c.proposerProvider, c.model, provider, model, string(policy)) {
 		c.verifier = llm
 		c.verifierModel = model
+		c.verifierProvider = provider
+		c.independencePolicy = policy
 	}
 	return c
 }
 
 // VerifierModel returns the distinct verifier model in effect, or "" when single-model.
 func (c *Coordinator) VerifierModel() string { return c.verifierModel }
+
+// ProposerProvider and VerifierProvider return canonical provider audit identities.
+func (c *Coordinator) ProposerProvider() string { return c.proposerProvider }
+func (c *Coordinator) VerifierProvider() string { return c.verifierProvider }
+
+// IndependencePolicy returns the rule that admitted the configured verifier.
+func (c *Coordinator) IndependencePolicy() ports.AIIndependencePolicy { return c.independencePolicy }
 
 // ProposerModel returns the configured proposer model ID for audit metadata.
 func (c *Coordinator) ProposerModel() string { return c.model }

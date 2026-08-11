@@ -34,6 +34,33 @@ func TestNewPendingRequiresPolicyHeldSealedCritique(t *testing.T) {
 	}
 }
 
+func TestNewPendingV4RequiresCompleteIndependenceMetadata(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	valid := validInput()
+	valid.PolicyVersion = "fp-gate-v4"
+	valid.ProposerProvider, valid.ProposerModelFamily = "openai", "model-a"
+	valid.VerifierProvider, valid.VerifierModelFamily = "anthropic", "model-b"
+	valid.IndependencePolicy = "provider"
+	if _, err := NewPending(valid, now); err != nil {
+		t.Fatalf("complete v4 identity rejected: %v", err)
+	}
+	for name, mutate := range map[string]func(*Input){
+		"missing proposer provider": func(in *Input) { in.ProposerProvider = "" },
+		"missing proposer family":   func(in *Input) { in.ProposerModelFamily = "" },
+		"missing verifier provider": func(in *Input) { in.VerifierProvider = "" },
+		"missing verifier family":   func(in *Input) { in.VerifierModelFamily = "" },
+		"missing policy":            func(in *Input) { in.IndependencePolicy = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := valid
+			mutate(&in)
+			if _, err := NewPending(in, now); !errors.Is(err, shared.ErrValidation) {
+				t.Fatalf("want validation error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestDecisionRequiresHumanRationaleAndKeepsClosedLifecycle(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	r, err := NewPending(validInput(), now)

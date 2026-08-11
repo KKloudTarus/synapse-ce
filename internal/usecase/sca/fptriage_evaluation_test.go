@@ -15,8 +15,9 @@ func (fixtureEvaluationTriager) Triage(_ context.Context, candidates []finding.F
 	out := make([]ports.AICritique, 0, len(candidates))
 	for _, candidate := range candidates {
 		c := ports.AICritique{
-			DedupKey: candidate.DedupKey, ProposerModel: "fixture-proposer",
-			VerifierModel: "fixture-verifier", PromptVersion: "fixture-prompt-v1",
+			DedupKey: candidate.DedupKey, ProposerModel: "fixture-proposer", ProposerProvider: "fixture-provider",
+			ProposerModelFamily: "fixture-proposer", VerifierModel: "fixture-verifier", VerifierProvider: "fixture-provider",
+			VerifierModelFamily: "fixture-verifier", IndependencePolicy: ports.AIIndependenceModelFamily, PromptVersion: "fixture-prompt-v1",
 		}
 		switch candidate.DedupKey {
 		case "ai-eval:fp-go-constant-input", "ai-eval:fp-js-static-regexp", "ai-eval:tp-java-predictable-session":
@@ -56,8 +57,10 @@ func loadGoldenEvaluationDataset(t *testing.T) AIEvaluationDataset {
 func TestEvaluateFPTriageGoldenDataset(t *testing.T) {
 	dataset := loadGoldenEvaluationDataset(t)
 	run := AIEvaluationRun{
-		ProposerModel: "fixture-proposer", VerifierModel: "fixture-verifier",
-		PromptVersion: "fixture-prompt-v1", PolicyVersion: aiTriagePolicyVersion,
+		ProposerProvider: "fixture-provider", ProposerModel: "fixture-proposer",
+		VerifierProvider: "fixture-provider", VerifierModel: "fixture-verifier",
+		IndependencePolicy: ports.AIIndependenceModelFamily,
+		PromptVersion:      "fixture-prompt-v1", PolicyVersion: aiTriagePolicyVersion,
 	}
 	report, err := EvaluateFPTriage(context.Background(), dataset, run, fixtureEvaluationTriager{})
 	if err != nil {

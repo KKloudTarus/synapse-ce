@@ -160,7 +160,10 @@ type Config struct {
 	LLMBaseURL string
 	LLMAPIKey  string
 	LLMModel   string
-	LLMTimeout time.Duration
+	// LLMProvider is an explicit audit identity, not a value inferred from the URL. A gateway may
+	// route several providers and distinct URLs may still address the same provider.
+	LLMProvider string
+	LLMTimeout  time.Duration
 
 	// FPTriageEnabled turns on opt-in LLM false-positive analysis. A proposer may mark a finding
 	// suspected-FP, but it remains advisory unless a distinct verifier agrees and the deterministic
@@ -169,11 +172,17 @@ type Config struct {
 	// FPTriageModel is the model to critique with (defaults to LLMModel).
 	FPTriageEnabled bool
 	FPTriageModel   string
+	// FPTriageProvider defaults to LLMProvider but may identify a provider routed specifically for
+	// the triage proposer model.
+	FPTriageProvider string
 	// FPTriageMode is shadow|enforce. Shadow is the fail-closed default: decisions are persisted for
 	// evaluation but can never set gate_exempt. Enforce requires a deliberate operator choice.
 	FPTriageMode        string
 	FPTriageMaxFindings int
 	FPTriageConcurrency int
+	// FPTriageIndependence is model_family (default) or provider. Provider mode additionally
+	// requires a different explicit provider identity; invalid values disable verifier authority.
+	FPTriageIndependence string
 
 	// Agent orchestration policy. ApprovalMode: manual|filter|auto (manual is
 	// the safe default – a human approves every action). The rest bound a run.
@@ -415,8 +424,12 @@ type Config struct {
 	// finding's write-up prose as a proposal; a human edits/signs off out of band. Off by default; opt-in.
 	// Requires AgentEnabled (the tool is advertised only on the agent catalog).
 	WriteupDraftsEnabled bool
-	// VerifierModel is the model for the adversarial finding verifier (defaults to LLMModel).
-	VerifierModel string
+	// The verifier may use an independent endpoint, credential, provider, and model. Endpoint/key
+	// default to the proposer transport for backwards compatibility; the key is never logged.
+	VerifierBaseURL  string
+	VerifierAPIKey   string
+	VerifierProvider string
+	VerifierModel    string
 
 	// MeasureCursorSecret is the HMAC-SHA256 key used to sign pagination cursors for
 	// the Measures API. Must be at least 32 bytes (hex or raw). Never logged.
@@ -594,12 +607,15 @@ func Load() Config {
 		LLMBaseURL:                   getenv("SYNAPSE_LLM_BASE_URL", "http://localhost:20128/v1"),
 		LLMAPIKey:                    getenv("SYNAPSE_LLM_API_KEY", ""),
 		LLMModel:                     getenv("SYNAPSE_LLM_MODEL", ""),
+		LLMProvider:                  normalizeProvider(getenv("SYNAPSE_LLM_PROVIDER", "openai-compatible")),
 		LLMTimeout:                   getduration("SYNAPSE_LLM_TIMEOUT", 60*time.Second),
 		FPTriageEnabled:              getbool("SYNAPSE_FP_TRIAGE_ENABLED", false),
 		FPTriageModel:                getenv("SYNAPSE_FP_TRIAGE_MODEL", getenv("SYNAPSE_LLM_MODEL", "")),
+		FPTriageProvider:             normalizeProvider(getenv("SYNAPSE_FP_TRIAGE_PROVIDER", getenv("SYNAPSE_LLM_PROVIDER", "openai-compatible"))),
 		FPTriageMode:                 normalizeFPTriageMode(getenv("SYNAPSE_FP_TRIAGE_MODE", "shadow")),
 		FPTriageMaxFindings:          boundedPositive(getint("SYNAPSE_FP_TRIAGE_MAX_FINDINGS", defaultFPTriageMaxFindings), defaultFPTriageMaxFindings, maxFPTriageMaxFindings),
 		FPTriageConcurrency:          boundedPositive(getint("SYNAPSE_FP_TRIAGE_CONCURRENCY", defaultFPTriageConcurrency), defaultFPTriageConcurrency, maxFPTriageConcurrency),
+		FPTriageIndependence:         normalizeFPTriageIndependence(getenv("SYNAPSE_FP_TRIAGE_INDEPENDENCE", "model_family")),
 
 		AgentApprovalMode:    getenv("SYNAPSE_AGENT_APPROVAL_MODE", "manual"),
 		AgentApprovalTimeout: getduration("SYNAPSE_AGENT_APPROVAL_TIMEOUT", 30*time.Minute),
@@ -617,7 +633,11 @@ func Load() Config {
 		AgentMaxParallel:      getint("SYNAPSE_AGENT_MAX_PARALLEL", 1), // serial by default; operators raise it to parallelize
 		AgentReconConcurrency: getint("SYNAPSE_AGENT_RECON_CONCURRENCY", 3),
 		ApprovalSweepInterval: getduration("SYNAPSE_APPROVAL_SWEEP_INTERVAL", time.Minute),
-		VerifierModel:         getenv("SYNAPSE_VERIFIER_MODEL", getenv("SYNAPSE_LLM_MODEL", "")),
+		VerifierBaseURL:       getenv("SYNAPSE_VERIFIER_BASE_URL", getenv("SYNAPSE_LLM_BASE_URL", "http://localhost:20128/v1")),
+		VerifierAPIKey:        getenv("SYNAPSE_VERIFIER_API_KEY", getenv("SYNAPSE_LLM_API_KEY", "")),
+		VerifierProvider: normalizeProvider(getenv("SYNAPSE_VERIFIER_PROVIDER",
+			getenv("SYNAPSE_FP_TRIAGE_PROVIDER", getenv("SYNAPSE_LLM_PROVIDER", "openai-compatible")))),
+		VerifierModel: getenv("SYNAPSE_VERIFIER_MODEL", getenv("SYNAPSE_LLM_MODEL", "")),
 
 		MeasureCursorSecret: getenv("SYNAPSE_MEASURE_CURSOR_SECRET", ""),
 
@@ -674,6 +694,19 @@ func boundedPositive(value, fallback, max int) int {
 		return fallback
 	}
 	return value
+}
+
+func normalizeProvider(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+func normalizeFPTriageIndependence(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "model_family":
+		return "model_family"
+	case "provider":
+		return "provider"
+	default:
+		return "disabled"
+	}
 }
 
 // IsProduction reports whether this is a production-grade deployment, in which the

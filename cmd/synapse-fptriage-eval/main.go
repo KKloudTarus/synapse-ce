@@ -46,21 +46,25 @@ func run(ctx context.Context, datasetPath, outputPath string) error {
 	if err != nil {
 		return fmt.Errorf("create proposer: %w", err)
 	}
-	verifier, err := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout)
+	verifier, err := openai.New(cfg.VerifierBaseURL, cfg.VerifierAPIKey, cfg.VerifierModel, cfg.LLMTimeout)
 	if err != nil {
 		return fmt.Errorf("create verifier: %w", err)
 	}
-	coord := fptriage.New(proposer, cfg.FPTriageModel).
+	independence := ports.AIIndependencePolicy(cfg.FPTriageIndependence)
+	coord := fptriage.NewWithIdentity(proposer, cfg.FPTriageProvider, cfg.FPTriageModel).
 		WithConcurrency(cfg.FPTriageConcurrency).
-		WithVerifier(verifier, cfg.VerifierModel)
+		WithIndependentVerifier(verifier, cfg.VerifierProvider, cfg.VerifierModel, independence)
 	if coord.VerifierModel() == "" {
-		return fmt.Errorf("verifier %q is not distinct from proposer %q after canonicalization", cfg.VerifierModel, cfg.FPTriageModel)
+		return fmt.Errorf("verifier %q/%q does not satisfy %q independence from proposer %q/%q",
+			cfg.VerifierProvider, cfg.VerifierModel, cfg.FPTriageIndependence, cfg.FPTriageProvider, cfg.FPTriageModel)
 	}
 	reader := sca.NewAIEvaluationSourceReader(dataset)
 	triager := fptriage.NewTriager(coord, func(string) ports.SourceSnippetReader { return reader })
 	report, err := sca.EvaluateFPTriage(ctx, dataset, sca.AIEvaluationRun{
-		ProposerModel: coord.ProposerModel(), VerifierModel: coord.VerifierModel(),
-		PromptVersion: fptriage.EvaluationPromptVersion(), PolicyVersion: sca.EvaluationPolicyVersion(),
+		ProposerProvider: coord.ProposerProvider(), ProposerModel: coord.ProposerModel(),
+		VerifierProvider: coord.VerifierProvider(), VerifierModel: coord.VerifierModel(),
+		IndependencePolicy: coord.IndependencePolicy(), PromptVersion: fptriage.EvaluationPromptVersion(),
+		PolicyVersion: sca.EvaluationPolicyVersion(),
 	}, triager)
 	if err != nil {
 		return err

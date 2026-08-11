@@ -82,10 +82,16 @@ Most of these ship ON by default (safe, best-effort). See [Features](features.md
 | `SYNAPSE_MISCONFIG_ENABLED` | `true` | Misconfiguration and IaC scanning of Dockerfiles and Kubernetes manifests. |
 | `SYNAPSE_FP_TRIAGE_ENABLED` | `false` | Enable advisory LLM false-positive analysis over production-scope SAST/misconfig findings. Secrets never enter the LLM. A proposer alone or a scan without an evidence ledger never changes a gate. |
 | `SYNAPSE_FP_TRIAGE_MODEL` | `SYNAPSE_LLM_MODEL` | Proposer model for false-positive analysis. |
+| `SYNAPSE_FP_TRIAGE_PROVIDER` | `SYNAPSE_LLM_PROVIDER` | Explicit provider identity for the triage proposer model. |
 | `SYNAPSE_FP_TRIAGE_MODE` | `shadow` | `shadow` records `would_gate_exempt` but always keeps the finding gating. `enforce` permits the verified-consensus policy to set `gate_exempt`. Empty or unknown values fail closed to shadow. |
 | `SYNAPSE_FP_TRIAGE_MAX_FINDINGS` | `100` | Hard per-scan cap on eligible findings sent to AI triage (range `1..1000`). When capped, deterministic policy-impact/severity/risk ordering selects work; skipped findings remain reported and gating, and counts are exposed in `ai_triage_budget`. Invalid values restore the finite default. |
 | `SYNAPSE_FP_TRIAGE_CONCURRENCY` | `6` | Maximum simultaneous AI finding assessments (range `1..32`). A distinct verifier makes at most two provider calls per attempted finding. Invalid values restore the finite default. |
-| `SYNAPSE_VERIFIER_MODEL` | `SYNAPSE_LLM_MODEL` | Must name a different canonical model family for AI gate exemptions. The false-positive verifier is blind to the proposer result. Provider/date aliases and Amazon Bedrock inference-profile IDs fail closed as the same family. Two-model consensus is still subject to high/critical, secret, and dangerous-CWE human-review floors. |
+| `SYNAPSE_LLM_PROVIDER` | `openai-compatible` | Explicit proposer-provider audit identity. It is not inferred from the URL because gateways may route multiple providers. |
+| `SYNAPSE_VERIFIER_BASE_URL` | `SYNAPSE_LLM_BASE_URL` | Independent OpenAI-compatible endpoint for the verifier. |
+| `SYNAPSE_VERIFIER_API_KEY` | `SYNAPSE_LLM_API_KEY` | Independent verifier credential; never logged. |
+| `SYNAPSE_VERIFIER_PROVIDER` | `SYNAPSE_FP_TRIAGE_PROVIDER` | Explicit verifier-provider audit identity. It defaults to the proposer identity so provider independence remains advisory-only until an operator deliberately selects a different verifier provider. |
+| `SYNAPSE_VERIFIER_MODEL` | `SYNAPSE_LLM_MODEL` | Must name a different canonical model family for AI gate exemptions. The verifier is blind to the proposer result. Provider/date aliases and Amazon Bedrock inference-profile IDs fail closed as the same family. Two-model consensus remains subject to high/critical, secret, and dangerous-CWE human-review floors. |
+| `SYNAPSE_FP_TRIAGE_INDEPENDENCE` | `model_family` | `model_family` requires different canonical model families. `provider` additionally requires different non-empty provider identities. Empty defaults to model-family compatibility; unknown values fail closed to advisory-only. |
 | `SYNAPSE_DETECTION_PRIORITY` | `comprehensive` | `comprehensive` reports every match. `precise` quarantines single-source, non-KEV findings into a needs-verify queue that is still reported and sealed but exempt from the `--fail-on` gate. |
 | `SYNAPSE_OFFLINE` | `false` | Skip the live advisory source and detect with the offline database only. |
 | `SYNAPSE_IGNORE_UNFIXED` | `false` | Drop vulnerabilities that have no fixed version. |
@@ -144,6 +150,7 @@ reports whether traversal was truncated; lowering a bound never produces a resul
 | `SYNAPSE_AGENT_ENABLED` | `false` | Turn on the agent orchestrator. |
 | `SYNAPSE_LLM_BASE_URL` | (none) | OpenAI-compatible Chat Completions endpoint. |
 | `SYNAPSE_LLM_API_KEY` | (none) | Provider key. Never logged. |
+| `SYNAPSE_LLM_PROVIDER` | `openai-compatible` | Explicit provider identity retained for audit and separation-of-duties checks. |
 | `SYNAPSE_LLM_MODEL` | (none) | Required when the agent is enabled. |
 | `SYNAPSE_LLM_TIMEOUT` | `60s` | Per-request timeout. |
 | `SYNAPSE_AGENT_APPROVAL_MODE` | `manual` | Human-in-the-loop approval: manual, filter, or auto. |

@@ -763,20 +763,23 @@ func main() {
 	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" {
 		scaService.SetFPTriageMode(cfg.FPTriageMode)
 		scaService.SetFPTriageMaxFindings(cfg.FPTriageMaxFindings)
+		scaService.SetFPTriageIndependence(cfg.FPTriageIndependence)
 		if tllm, terr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); terr != nil {
 			log.Warn("AI false-positive triage DISABLED (LLM unavailable)", "err", terr)
 		} else {
-			coord := fptriage.New(tllm, cfg.FPTriageModel).WithConcurrency(cfg.FPTriageConcurrency)
+			coord := fptriage.NewWithIdentity(tllm, cfg.FPTriageProvider, cfg.FPTriageModel).
+				WithConcurrency(cfg.FPTriageConcurrency)
 			mode := "advisory-only (distinct verifier required for gate exemption)"
-			if strings.TrimSpace(cfg.VerifierModel) != "" && agent.SameModel(cfg.FPTriageModel, cfg.VerifierModel) {
-				log.Warn("AI FP-triage verifier aliases the proposer; triage remains advisory-only",
-					"proposer_model", cfg.FPTriageModel, "verifier_model", cfg.VerifierModel,
-					"canonical_model", agent.CanonicalModelID(cfg.FPTriageModel))
-			} else if strings.TrimSpace(cfg.VerifierModel) != "" {
-				if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
-					coord.WithVerifier(vllm, cfg.VerifierModel)
+			if strings.TrimSpace(cfg.VerifierModel) != "" {
+				if !agent.IndependentLLMs(cfg.FPTriageProvider, cfg.FPTriageModel, cfg.VerifierProvider, cfg.VerifierModel, cfg.FPTriageIndependence) {
+					log.Warn("AI FP-triage verifier independence cannot be established; triage remains advisory-only",
+						"proposer_provider", cfg.FPTriageProvider, "proposer_model", cfg.FPTriageModel,
+						"verifier_provider", cfg.VerifierProvider, "verifier_model", cfg.VerifierModel,
+						"independence_policy", cfg.FPTriageIndependence)
+				} else if vllm, verr := openai.New(cfg.VerifierBaseURL, cfg.VerifierAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
+					coord.WithIndependentVerifier(vllm, cfg.VerifierProvider, cfg.VerifierModel, ports.AIIndependencePolicy(cfg.FPTriageIndependence))
 					if coord.VerifierModel() != "" {
-						mode = "verified by " + coord.VerifierModel()
+						mode = "verified by " + coord.VerifierProvider() + "/" + coord.VerifierModel()
 					}
 				} else {
 					log.Warn("AI FP-triage verifier unavailable; triage remains advisory-only", "err", verr)
@@ -1070,7 +1073,7 @@ func main() {
 				"proposer_canonical", agent.CanonicalModelID(cfg.LLMModel),
 				"verifier_canonical", agent.CanonicalModelID(cfg.VerifierModel))
 		} else if llmverifier.ConfiguredModelsDistinct(cfg.LLMModel, cfg.VerifierModel) {
-			if vllm, verr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr != nil {
+			if vllm, verr := openai.New(cfg.VerifierBaseURL, cfg.VerifierAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr != nil {
 				log.Warn("automated LLM judgment-verifier DISABLED (LLM unavailable)", "err", verr)
 			} else {
 				router.SetAutoVerifier(llmverifier.New(vllm, cfg.LLMModel, cfg.VerifierModel, judgmentSvc, judgmentStore))

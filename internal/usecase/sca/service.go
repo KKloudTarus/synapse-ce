@@ -79,6 +79,7 @@ type Service struct {
 	fpTriageMaxFindings              int                                   // hard per-scan candidate cap; untriaged findings remain gating
 	fpTriageMode                     aiTriageMode                          // shadow by default; enforce must be selected explicitly
 	aiReviews                        ports.AITriageReviewRecorder          // optional durable human-review queue sink
+	fpTriageIndependence             ports.AIIndependencePolicy            // deterministic verifier separation-of-duties requirement
 	osPkgCataloger                   ports.OSPackageCataloger              // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
 	instCataloger                    ports.InstalledPackageCataloger       // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
 	artifactCataloger                ports.ArtifactCataloger               // optional owned standalone-artifact cataloging (.msi product identity) from the workspace dir
@@ -261,6 +262,12 @@ func (s *Service) SetFPTriageMode(mode string) {
 // SetAITriageReviewRecorder materializes policy-held critiques after their scan
 // evidence has been sealed. nil keeps CLI/standalone scans free of workflow state.
 func (s *Service) SetAITriageReviewRecorder(r ports.AITriageReviewRecorder) { s.aiReviews = r }
+
+// SetFPTriageIndependence selects the deterministic verifier identity requirement. Unknown values
+// disable verifier authority rather than silently falling back to a weaker policy.
+func (s *Service) SetFPTriageIndependence(policy string) {
+	s.fpTriageIndependence = normalizeAIIndependencePolicy(ports.AIIndependencePolicy(policy))
+}
 
 // SetOSPackageCataloger configures optional owned OS-package cataloging (dpkg/apk) from a materialized image
 // rootfs (Workspace.RootFS). nil ⇒ no owned OS cataloging. It only runs when a rootfs was materialized.
@@ -570,7 +577,8 @@ func NewService(
 		engagements: engagements, findings: findings, scans: scans, results: results, jobs: jobs, runs: runs, evidence: ev, ids: ids, prov: prov, clock: clock, audit: audit,
 		minSeverity: minSeverity, timeout: timeout, projectAnalysisCompletionTimeout: completionTimeout(timeout), acquirer: a,
 		detector: d, sbomGen: s, sources: sources, riskEnricher: r, licScan: l, licEnricher: le,
-		fpTriageMaxFindings: defaultFPTriageMaxFindings,
+		fpTriageMaxFindings:  defaultFPTriageMaxFindings,
+		fpTriageIndependence: ports.AIIndependenceModelFamily,
 	}
 	// Build the shared execution guard from the service's own scope/clock/audit
 	// deps, so every scan is gated + audited through the one chokepoint recon will
@@ -3424,7 +3432,16 @@ func scanEvidenceContent(actor string, now time.Time, result *ScanResult) ([]byt
 		if aiTriage[i].FindingID != aiTriage[j].FindingID {
 			return aiTriage[i].FindingID < aiTriage[j].FindingID
 		}
-		return aiTriage[i].ProposerModel < aiTriage[j].ProposerModel
+		if aiTriage[i].ProposerProvider != aiTriage[j].ProposerProvider {
+			return aiTriage[i].ProposerProvider < aiTriage[j].ProposerProvider
+		}
+		if aiTriage[i].ProposerModel != aiTriage[j].ProposerModel {
+			return aiTriage[i].ProposerModel < aiTriage[j].ProposerModel
+		}
+		if aiTriage[i].VerifierProvider != aiTriage[j].VerifierProvider {
+			return aiTriage[i].VerifierProvider < aiTriage[j].VerifierProvider
+		}
+		return aiTriage[i].VerifierModel < aiTriage[j].VerifierModel
 	})
 	triagedKeys := make(map[string]struct{}, len(aiTriage))
 	for _, critique := range aiTriage {
