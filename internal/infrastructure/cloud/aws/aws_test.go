@@ -73,6 +73,22 @@ func TestProviderRequestAuthorizationRunsForEverySDKAttempt(t *testing.T) {
 	}
 }
 
+func TestEnumerateReconstructsCanonicalScopeKey(t *testing.T) {
+	server, _ := awsEmulator(t, false, false)
+	connector := newTestConnector(t, server.URL, "TOP-SECRET-ACCESS-KEY")
+	scope := testScope()
+	scope.ScopeKey = ""
+	scope.Authorize = func(_ context.Context, operation ports.CloudOperation) error {
+		if operation.ScopeKey != "aws:organizations/o-example" {
+			t.Fatalf("scope key = %q", operation.ScopeKey)
+		}
+		return nil
+	}
+	if _, _, err := connector.Enumerate(context.Background(), scope); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEnumerateReportsPermissionAndUnreachableAccounts(t *testing.T) {
 	for _, test := range []struct {
 		name, want        string

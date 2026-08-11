@@ -144,7 +144,7 @@ func (c *Connector) Enumerate(ctx context.Context, scope ports.CloudScope) (clou
 		if err := c.wait(ctx); err != nil {
 			return inventory, gaps, err
 		}
-		if err := ports.AuthorizeCloudOperation(ctx, scope, "resource-graph", "resources"); err != nil {
+		if err := ports.AuthorizeCloudOperation(ctx, scope, "resource-graph", "POST management.azure.com/providers/Microsoft.ResourceGraph/resources"); err != nil {
 			return inventory, gaps, err
 		}
 		response, err := client.Resources(ctx, resourcesRequest(root, managementGroup, c.pageSize, skipToken), nil)

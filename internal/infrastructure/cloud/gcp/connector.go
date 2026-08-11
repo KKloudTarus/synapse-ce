@@ -176,8 +176,11 @@ func (c *Connector) newClients(ctx context.Context, credential []byte, scope por
 		client.Transport = limitedTransport{base: client.Transport, wait: c.wait, authorize: c.authorize(scope)}
 		opts = append(opts, option.WithHTTPClient(&client))
 	} else {
+		authorize := c.authorize(scope)
+		authClient := &http.Client{Transport: limitedTransport{base: http.DefaultTransport, wait: c.wait, authorize: authorize}}
 		creds, err := credentials.NewCredentialsFromJSON(credentials.ServiceAccount, credential, &credentials.DetectOptions{
 			Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"},
+			Client: authClient,
 		})
 		if err != nil {
 			return clients{}, fmt.Errorf("parse GCP service-account credential: %w", err)
@@ -186,7 +189,7 @@ func (c *Connector) newClients(ctx context.Context, credential []byte, scope por
 		if err != nil {
 			return clients{}, fmt.Errorf("create GCP authenticated transport: %w", err)
 		}
-		opts = append(opts, option.WithHTTPClient(&http.Client{Transport: limitedTransport{base: transport, wait: c.wait, authorize: c.authorize(scope)}}))
+		opts = append(opts, option.WithHTTPClient(&http.Client{Transport: limitedTransport{base: transport, wait: c.wait, authorize: authorize}}))
 	}
 	clear(credential)
 	resources, err := cloudresourcemanager.NewService(ctx, opts...)
@@ -783,7 +786,11 @@ func (t limitedTransport) RoundTrip(request *http.Request) (*http.Response, erro
 		case strings.Contains(request.URL.Path, "folders") || strings.Contains(request.URL.Path, "projects"):
 			category = "projects"
 		}
-		if err := t.authorize(request.Context(), category, request.Method+" "+request.URL.Path); err != nil {
+		target := request.URL.Path
+		if request.URL.Host != "" {
+			target = request.URL.Host + target
+		}
+		if err := t.authorize(request.Context(), category, request.Method+" "+target); err != nil {
 			return nil, err
 		}
 	}

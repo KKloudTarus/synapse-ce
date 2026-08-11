@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -67,7 +68,7 @@ func (e *Executor) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (
 	if err != nil {
 		return cloudposture.Inventory{}, nil, fmt.Errorf("create CSPM credential pipe: %w", err)
 	}
-	defer credentialR.Close()
+	defer func() { _ = credentialR.Close() }()
 	go func() {
 		_, _ = credentialW.Write(secret)
 		_ = credentialW.Close()
@@ -76,13 +77,13 @@ func (e *Executor) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (
 	if err != nil {
 		return cloudposture.Inventory{}, nil, fmt.Errorf("create CSPM authorization request pipe: %w", err)
 	}
-	defer requestR.Close()
+	defer func() { _ = requestR.Close() }()
 	decisionR, decisionW, err := os.Pipe()
 	if err != nil {
 		_ = requestW.Close()
 		return cloudposture.Inventory{}, nil, fmt.Errorf("create CSPM authorization decision pipe: %w", err)
 	}
-	defer decisionR.Close()
+	defer func() { _ = decisionR.Close() }()
 	var authErr error
 	var authOnce sync.Once
 	authDone := make(chan struct{})
@@ -99,17 +100,24 @@ func (e *Executor) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (
 				return
 			}
 			if operation.Provider != scope.Provider || operation.ScopeKey != scope.ScopeKey {
-				authOnce.Do(func() { authErr = fmt.Errorf("CSPM authorization scope mismatch") })
+				authOnce.Do(func() { authErr = fmt.Errorf("%w: CSPM authorization scope mismatch", shared.ErrForbidden) })
 				_ = encoder.Encode(struct {
 					Allowed bool `json:"allowed"`
 				}{})
 				return
 			}
-			allowed := scope.Authorize(ctx, operation) == nil
+			authorizationErr := scope.Authorize(ctx, operation)
+			allowed := authorizationErr == nil
+			if authorizationErr != nil {
+				authOnce.Do(func() { authErr = fmt.Errorf("authorize CSPM operation: %w", authorizationErr) })
+			}
 			if err := encoder.Encode(struct {
 				Allowed bool `json:"allowed"`
 			}{allowed}); err != nil {
 				authOnce.Do(func() { authErr = fmt.Errorf("write CSPM authorization decision: %w", err) })
+				return
+			}
+			if !allowed {
 				return
 			}
 		}
@@ -130,12 +138,15 @@ func (e *Executor) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (
 	if authErr != nil {
 		return cloudposture.Inventory{}, nil, authErr
 	}
-	if runErr != nil || result.ExitCode != 0 || result.TimedOut || result.Truncated {
-		return cloudposture.Inventory{}, nil, fmt.Errorf("sandboxed CSPM helper failed")
+	if runErr != nil {
+		return cloudposture.Inventory{}, nil, fmt.Errorf("sandboxed CSPM helper failed: %w", runErr)
+	}
+	if result.ExitCode != 0 || result.TimedOut || result.Truncated {
+		return cloudposture.Inventory{}, nil, fmt.Errorf("sandboxed CSPM helper failed: exit_code=%d timed_out=%t truncated=%t", result.ExitCode, result.TimedOut, result.Truncated)
 	}
 	result.Stdout = redact.Bytes(result.Stdout, [][]byte{secret})
 	if strings.Contains(string(result.Stdout), redact.Placeholder) {
-		return cloudposture.Inventory{}, nil, fmt.Errorf("sandboxed CSPM output contained credential material")
+		return cloudposture.Inventory{}, nil, errors.New("sandboxed CSPM output contained credential material")
 	}
 	var output struct {
 		Inventory cloudposture.Inventory       `json:"inventory"`

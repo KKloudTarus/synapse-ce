@@ -88,6 +88,10 @@ func (c *Connector) Evaluate(_ context.Context, inventory cloudposture.Inventory
 func (c *Connector) Enumerate(ctx context.Context, scope ports.CloudScope) (cloudposture.Inventory, []cloudposture.CoverageIssue, error) {
 	_, scopeKey, err := cloudposture.NormalizeRoot(scope.Provider, scope.Root)
 	inventory := cloudposture.Inventory{Provider: cloudposture.ProviderAWS, ScopeKey: scopeKey, Complete: true}
+	if err != nil {
+		return inventory, nil, err
+	}
+	scope.ScopeKey = scopeKey
 	if scope.Provider != cloudposture.ProviderAWS || scope.EngagementID.IsZero() || strings.TrimSpace(scope.Root) == "" || strings.TrimSpace(scope.CredentialRef) == "" {
 		return inventory, nil, fmt.Errorf("%w: invalid AWS cloud scope", shared.ErrValidation)
 	}

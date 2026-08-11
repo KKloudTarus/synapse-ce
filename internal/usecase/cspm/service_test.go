@@ -32,6 +32,15 @@ func (c connectorStub) Evaluate(_ context.Context, inv cloudposture.Inventory) (
 
 type executorStub struct{ connector ports.CloudConnector }
 
+type operationExecutorStub struct{ operation ports.CloudOperation }
+
+func (s operationExecutorStub) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (cloudposture.Inventory, []cloudposture.CoverageIssue, error) {
+	if err := scope.Authorize(ctx, s.operation); err != nil {
+		return cloudposture.Inventory{}, nil, err
+	}
+	return cloudposture.Inventory{Provider: scope.Provider, ScopeKey: scope.ScopeKey, Complete: true}, nil, nil
+}
+
 func (s executorStub) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (cloudposture.Inventory, []cloudposture.CoverageIssue, error) {
 	return s.connector.Enumerate(ctx, scope)
 }
@@ -242,5 +251,33 @@ func TestDurableSubmitAndRunJob(t *testing.T) {
 	payload := string(job.Payload)
 	if strings.Contains(payload, "secret") || !strings.Contains(payload, "credential_ref") {
 		t.Fatalf("unsafe CSPM job payload: %s", payload)
+	}
+}
+
+func TestRunDeniesCloudOperationOutsideReadOnlyAllowlist(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1, 0)
+	audit := &auditStub{}
+	assetStore := memory.NewAssetStore()
+	assets, _ := assetuc.NewService(assetStore, audit, clockStub{now}, &idsStub{})
+	engagements := memory.NewEngagementRepository()
+	eng, _ := engagement.New("eng", "tenant", "cloud", "client", now)
+	eng.Status = engagement.StatusActive
+	eng.Scope = engagement.Scope{InScope: []engagement.Target{{Kind: engagement.TargetCloudAccount, Value: "organization/o-1"}}}
+	_ = engagements.Create(ctx, eng)
+	svc, _ := cspm.NewService(map[cloudposture.Provider]ports.CloudConnector{cloudposture.ProviderAWS: connectorStub{}}, assets, memory.NewFindingRepository(), engagements, audit, clockStub{now})
+	svc.SetSandboxExecutor(operationExecutorStub{operation: ports.CloudOperation{Provider: cloudposture.ProviderAWS, ScopeKey: "aws:organizations/o-1", Category: "storage", Name: "DeleteBucket"}})
+	_, err := svc.Run(ctx, cspm.RunInput{TenantID: "tenant", EngagementID: "eng", Actor: "operator", Scopes: []ports.CloudScope{{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "organization/o-1", CredentialRef: "aws"}}})
+	if !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("error = %v", err)
+	}
+	var denied bool
+	for _, entry := range audit.entries {
+		if entry.Action == "cspm.operation.denied" && entry.Metadata["reason"] == "operation_not_allowlisted" {
+			denied = true
+		}
+	}
+	if !denied {
+		t.Fatalf("audit = %#v", audit.entries)
 	}
 }

@@ -26,6 +26,12 @@ const (
 	JobKind    = "cspm"
 )
 
+var readOnlyAWSOperations = map[string]struct{}{
+	"DescribeInstances": {}, "DescribeOrganization": {}, "DescribeSecurityGroups": {},
+	"GetBucketEncryption": {}, "GetBucketPolicyStatus": {}, "ListAccounts": {},
+	"ListBuckets": {}, "ListUsers": {}, "AssumeRole": {},
+}
+
 type RunInput struct {
 	TenantID     shared.ID
 	EngagementID shared.ID
@@ -327,9 +333,75 @@ func (s *Service) prevalidate(ctx context.Context, in *RunInput) (*engagement.En
 	return authorized, nil
 }
 
+func azureTokenEndpointIsReadOnly(target string) bool {
+	const host = "login.microsoftonline.com/"
+	if !strings.HasPrefix(target, host) {
+		return false
+	}
+	path := strings.TrimPrefix(target, host)
+	tenant, endpoint, ok := strings.Cut(path, "/")
+	return ok && tenant != "" && !strings.ContainsAny(tenant, "/?#") && (endpoint == "oauth2/token" || endpoint == "oauth2/v2.0/token")
+}
+
+func gcpOperationIsReadOnly(method, target string) bool {
+	if method == "POST" && target == "oauth2.googleapis.com/token" {
+		return true
+	}
+	host, path, ok := strings.Cut(target, "/")
+	if !ok {
+		return false
+	}
+	switch host {
+	case "cloudresourcemanager.googleapis.com":
+		return method == "GET" && (path == "v1/projects" || strings.HasPrefix(path, "v3/folders")) || method == "POST" && strings.HasPrefix(path, "v1/projects/") && strings.HasSuffix(path, ":getIamPolicy")
+	case "compute.googleapis.com":
+		return method == "GET" && gcpComputePathIsReadOnly(path)
+	case "storage.googleapis.com":
+		return method == "GET" && (path == "storage/v1/b" || strings.HasPrefix(path, "storage/v1/b/"))
+	case "iam.googleapis.com":
+		return method == "GET" && strings.HasPrefix(path, "v1/projects/") && strings.Contains(path, "/serviceAccounts")
+	default:
+		return false
+	}
+}
+
+func gcpComputePathIsReadOnly(path string) bool {
+	if !strings.HasPrefix(path, "compute/v1/projects/") {
+		return false
+	}
+	for _, suffix := range []string{"/aggregated/instances", "/global/routes", "/global/firewalls", "/global/networks"} {
+		if strings.HasSuffix(path, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func cloudOperationIsReadOnly(operation ports.CloudOperation) bool {
+	method, target, hasTarget := strings.Cut(operation.Name, " ")
+	switch operation.Provider {
+	case cloudposture.ProviderAWS:
+		_, allowed := readOnlyAWSOperations[method]
+		return allowed && !hasTarget
+	case cloudposture.ProviderAzure:
+		return method == "POST" && hasTarget && (target == "management.azure.com/providers/Microsoft.ResourceGraph/resources" || azureTokenEndpointIsReadOnly(target))
+	case cloudposture.ProviderGCP:
+		return hasTarget && gcpOperationIsReadOnly(method, target)
+	default:
+		return false
+	}
+}
+
 func (s *Service) authorizeOperation(ctx context.Context, in RunInput, scope ports.CloudScope, operation ports.CloudOperation) error {
 	if operation.Provider != scope.Provider || operation.ScopeKey != scope.ScopeKey {
 		return fmt.Errorf("%w: cloud operation scope mismatch", shared.ErrForbidden)
+	}
+	if !cloudOperationIsReadOnly(operation) {
+		now := s.clock.Now()
+		finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = s.audit.Record(finalCtx, ports.AuditEntry{Actor: in.Actor, Action: "cspm.operation.denied", Target: scope.ApprovedTarget, Metadata: map[string]string{"provider": string(operation.Provider), "operation": operation.Name, "reason": "operation_not_allowlisted"}, At: now})
+		return fmt.Errorf("%w: cloud operation is not allowlisted as read-only", shared.ErrForbidden)
 	}
 	eng, err := s.engagements.GetByIDInTenant(ctx, in.TenantID, in.EngagementID)
 	now := s.clock.Now()
@@ -395,9 +467,6 @@ func (s *Service) Run(ctx context.Context, in RunInput) (result RunResult, runEr
 	for _, scope := range in.Scopes {
 		scope.Authorize = func(operationCtx context.Context, operation ports.CloudOperation) error {
 			return s.authorizeOperation(operationCtx, in, scope, operation)
-		}
-		if err := ports.AuthorizeCloudOperation(runCtx, scope, "inventory", "enumerate"); err != nil {
-			return result, err
 		}
 		connector := s.connectors[scope.Provider]
 		var inventory cloudposture.Inventory

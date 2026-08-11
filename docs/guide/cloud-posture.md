@@ -29,7 +29,7 @@ Use workload identity federation where possible. Assign `Reader` and Azure Resou
 
 ### Google Cloud
 
-Use Workload Identity Federation or service-account impersonation where possible. Grant project/folder/organization browser access, Compute Viewer, Storage bucket metadata/IAM/ACL reads, and IAM service-account reads. Folder traversal, bucket PAP/IAM/ACL posture, and static route/firewall reachability are bounded; inaccessible descendants or ambiguous policy facts are coverage gaps.
+Use Workload Identity Federation or service-account impersonation where possible. Grant project/folder/organization browser access, Compute Viewer, Storage bucket metadata/IAM/ACL reads, and IAM service-account reads. Allow `oauth2.googleapis.com` for OAuth token refresh in addition to the selected Google Cloud control-plane hosts. Token refresh remains inside the sandbox's default-deny egress boundary and is routed through the same parent-side per-operation authorization callback as provider API requests. Folder traversal, bucket PAP/IAM/ACL posture, and static route/firewall reachability are bounded; inaccessible descendants or ambiguous policy facts are coverage gaps.
 
 ## API lifecycle
 

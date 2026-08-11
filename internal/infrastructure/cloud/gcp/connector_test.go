@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -247,6 +248,33 @@ func TestEnumerateFailsClosedWithoutAuthorizer(t *testing.T) {
 		t.Fatalf("err = %v, want forbidden", err)
 	}
 }
+
+func TestLimitedTransportAuthorizesHostAndPath(t *testing.T) {
+	var operation string
+	transport := limitedTransport{
+		base: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("{}")), Header: make(http.Header), Request: request}, nil
+		}),
+		wait: func(context.Context) error { return nil },
+		authorize: func(_ context.Context, _, name string) error {
+			operation = name
+			return nil
+		},
+	}
+	request, _ := http.NewRequest(http.MethodPost, "https://oauth2.googleapis.com/token", nil)
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if operation != "POST oauth2.googleapis.com/token" {
+		t.Fatalf("operation = %q", operation)
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
 func writeJSON(t *testing.T, w http.ResponseWriter, value any) {
 	t.Helper()
