@@ -93,8 +93,8 @@ Most of these ship ON by default (safe, best-effort). See [Features](features.md
 | `SYNAPSE_SUPPRESSION_ENABLED` | `true` | Honor a `.synapseignore` file. Acceptance exempts only the `--fail-on` gate; the finding is still reported, persisted, and evidence-sealed. |
 | `SYNAPSE_VEX_ENABLED` | `true` | Consume an in-repo OpenVEX document (`.synapse.vex.json`) at scan time, on the same retain-and-mark surface as suppression. |
 | `SYNAPSE_COMPLIANCE_ENABLED` | `true` | Compliance benchmark. Re-projects findings onto a control specification and reports per-control PASS or FAIL. |
-| `SYNAPSE_SCAN_CACHE_ENABLED` | `true` | SBOM scan cache, addressed by content plus producer version. The cache directory must be operator-owned, since a shared-writable cache would allow poisoning. |
-| `SYNAPSE_SCAN_CACHE_DIR` | (per-user) | Cache location. Empty uses a per-user cache directory. |
+| `SYNAPSE_SCAN_CACHE_ENABLED` | `true` | Enables content-addressed scan caches. SBOM entries key on content plus producer version. Tenant-bound API AI-triage entries key on tenant, project/engagement scope, finding fingerprint, complete-source hash, prompt-context hash, proposer/verifier models, prompt version, and policy version. Cached AI claims are always rebound to the current finding, re-authorized by server policy, and linked to newly sealed scan evidence; missing tenant identity and provider failures are not cached. The directory must be operator-owned, since a shared-writable cache would allow poisoning. |
+| `SYNAPSE_SCAN_CACHE_DIR` | (per-user) | Cache location. Empty uses a per-user cache directory; AI-triage entries live in its owner-only `ai-triage` subdirectory and contain typed claims, never source text or credentials. |
 | `SYNAPSE_IMAGE_ROOTFS_ENABLED` | `true` | Materialize a container image root filesystem so the owned OS-package catalogers (dpkg, apk, and the rpm sqlite database) and installed-binary catalogers (Go build info, Python dist-info) can run. Best-effort. |
 
 ## Project Code artifact retention and historical comparisons
