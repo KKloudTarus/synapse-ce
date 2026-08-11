@@ -170,8 +170,9 @@ func trustedRoot(root string) bool {
 func validKey(key ports.FPTriageCacheKey) bool {
 	return !key.TenantID.IsZero() && !key.ScopeID.IsZero() && strings.TrimSpace(key.FindingFingerprint) != "" &&
 		validSHA256(key.SourceSHA256) && validSHA256(key.ContextSHA256) &&
-		strings.TrimSpace(key.ProposerModel) != "" && strings.TrimSpace(key.PromptVersion) != "" &&
-		strings.TrimSpace(key.PolicyVersion) != ""
+		strings.TrimSpace(key.ProposerProvider) != "" && strings.TrimSpace(key.ProposerModel) != "" &&
+		(strings.TrimSpace(key.VerifierModel) == "") == (strings.TrimSpace(key.VerifierProvider) == "") &&
+		strings.TrimSpace(key.PromptVersion) != "" && strings.TrimSpace(key.PolicyVersion) != ""
 }
 
 func validDecision(key ports.FPTriageCacheKey, decision ports.FPTriageCachedDecision) bool {

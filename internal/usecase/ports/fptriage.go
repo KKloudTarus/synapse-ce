@@ -25,6 +25,17 @@ type SourceSnippetContextReader interface {
 	SnippetContext(ctx context.Context, file string, line, radius int) (snippet, sourceSHA256 string, err error)
 }
 
+// AIIndependencePolicy identifies the deterministic separation-of-duties rule applied to an
+// AI-triage proposer/verifier pair. Model-family is the backwards-compatible minimum; provider
+// additionally requires two explicitly identified, different providers. Unknown values are never
+// authoritative and therefore keep the finding gating.
+type AIIndependencePolicy string
+
+const (
+	AIIndependenceModelFamily AIIndependencePolicy = "model_family"
+	AIIndependenceProvider    AIIndependencePolicy = "provider"
+)
+
 // AICritique is one finding's LLM false-positive verdict (propose-only, advisory). Verdict and Driver use
 // the closed judgment.CritiqueClaim vocabulary (no free prose). SuspectedFP records the model's opinion;
 // it NEVER grants a gate exemption by itself. GateExempt is a separate, server-owned policy decision that
@@ -39,9 +50,17 @@ type AICritique struct {
 	SuspectedFP   bool   `json:"suspected_fp"`
 	ProposerModel string `json:"proposer_model"`
 	VerifierModel string `json:"verifier_model,omitempty"`
-	PromptVersion string `json:"prompt_version"`
-	PolicyVersion string `json:"policy_version,omitempty"`
-	PolicyReason  string `json:"policy_reason,omitempty"`
+	// Provider and canonical model-family metadata make the separation-of-duties decision
+	// replayable. The server re-derives both family values from the raw model IDs before granting
+	// authority; these fields are audit metadata, not trusted shortcuts.
+	ProposerProvider    string               `json:"proposer_provider"`
+	ProposerModelFamily string               `json:"proposer_model_family"`
+	VerifierProvider    string               `json:"verifier_provider,omitempty"`
+	VerifierModelFamily string               `json:"verifier_model_family,omitempty"`
+	IndependencePolicy  AIIndependencePolicy `json:"independence_policy"`
+	PromptVersion       string               `json:"prompt_version"`
+	PolicyVersion       string               `json:"policy_version,omitempty"`
+	PolicyReason        string               `json:"policy_reason,omitempty"`
 	// Shadow is server-owned rollout metadata. When true, WouldGateExempt records the decision the
 	// enforced policy would have made, but GateExempt must remain false and the finding keeps gating.
 	Shadow          bool `json:"shadow,omitempty"`
@@ -81,7 +100,9 @@ type FPTriageCacheKey struct {
 	FindingFingerprint string    `json:"finding_fingerprint"`
 	SourceSHA256       string    `json:"source_sha256"`
 	ContextSHA256      string    `json:"context_sha256"`
+	ProposerProvider   string    `json:"proposer_provider"`
 	ProposerModel      string    `json:"proposer_model"`
+	VerifierProvider   string    `json:"verifier_provider,omitempty"`
 	VerifierModel      string    `json:"verifier_model,omitempty"`
 	PromptVersion      string    `json:"prompt_version"`
 	PolicyVersion      string    `json:"policy_version"`

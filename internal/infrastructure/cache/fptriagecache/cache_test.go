@@ -17,7 +17,8 @@ func cacheTestKey() ports.FPTriageCacheKey {
 	return ports.FPTriageCacheKey{
 		TenantID: "tenant-a", ScopeID: "project-a", FindingFingerprint: "sast:rule:src/app.go:10",
 		SourceSHA256: strings.Repeat("a", 64), ContextSHA256: strings.Repeat("b", 64),
-		ProposerModel: "provider/model-a", VerifierModel: "provider/model-b",
+		ProposerProvider: "provider-a", ProposerModel: "provider/model-a",
+		VerifierProvider: "provider-b", VerifierModel: "provider/model-b",
 		PromptVersion: "prompt-v1", PolicyVersion: "policy-v1",
 	}
 }
@@ -56,7 +57,9 @@ func TestEveryKeyedInputInvalidates(t *testing.T) {
 		"finding fingerprint": func(k *ports.FPTriageCacheKey) { k.FindingFingerprint += ":changed" },
 		"source":              func(k *ports.FPTriageCacheKey) { k.SourceSHA256 = strings.Repeat("c", 64) },
 		"context":             func(k *ports.FPTriageCacheKey) { k.ContextSHA256 = strings.Repeat("d", 64) },
+		"proposer provider":   func(k *ports.FPTriageCacheKey) { k.ProposerProvider = "provider-c" },
 		"proposer model":      func(k *ports.FPTriageCacheKey) { k.ProposerModel = "provider/model-c" },
+		"verifier provider":   func(k *ports.FPTriageCacheKey) { k.VerifierProvider = "provider-c" },
 		"verifier model":      func(k *ports.FPTriageCacheKey) { k.VerifierModel = "provider/model-c" },
 		"prompt version":      func(k *ports.FPTriageCacheKey) { k.PromptVersion = "prompt-v2" },
 		"policy version":      func(k *ports.FPTriageCacheKey) { k.PolicyVersion = "policy-v2" },

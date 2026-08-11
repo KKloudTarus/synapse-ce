@@ -2,7 +2,9 @@ package fptriage
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -275,6 +277,33 @@ func TestVerifierMustBeCanonicallyDistinct(t *testing.T) {
 	}
 }
 
+func TestVerifierProviderPolicyFailsClosed(t *testing.T) {
+	llm := roleLLM{}
+	for _, tc := range []struct {
+		name, proposerProvider, verifierProvider, verifierModel string
+		policy                                                  ports.AIIndependencePolicy
+		wantAttached                                            bool
+	}{
+		{"different provider and family", "openai", "anthropic", "claude-sonnet-4", ports.AIIndependenceProvider, true},
+		{"same provider", "openai", "OPENAI", "gpt-4.1", ports.AIIndependenceProvider, false},
+		{"missing provider", "openai", "", "claude-sonnet-4", ports.AIIndependenceProvider, false},
+		{"same family across providers", "bedrock", "anthropic", "anthropic/claude-opus-5", ports.AIIndependenceProvider, false},
+		{"unknown policy", "openai", "anthropic", "claude-sonnet-4", "typo", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			proposerModel := "gpt-4o"
+			if tc.name == "same family across providers" {
+				proposerModel = "us.anthropic.claude-opus-5-v1:0"
+			}
+			c := NewWithIdentity(llm, tc.proposerProvider, proposerModel).
+				WithIndependentVerifier(llm, tc.verifierProvider, tc.verifierModel, tc.policy)
+			if got := c.VerifierModel() != ""; got != tc.wantAttached {
+				t.Fatalf("verifier attached = %v, want %v", got, tc.wantAttached)
+			}
+		})
+	}
+}
+
 // anchoringLLM simulates a verifier that rubber-stamps only when the first reviewer's exact output is
 // leaked into its transcript. The safe blind prompt makes it disagree, so restoring the old preamble
 // changes the gate outcome and fails this test.
@@ -316,6 +345,18 @@ func TestVerifierAssessmentIsBlindAndRunsBeforeComparison(t *testing.T) {
 	}
 	if got.SuspectedFP(75) || got.VerifiedConsensus(75) {
 		t.Fatalf("an independent disagreement must keep the finding gating: %+v", got)
+	}
+}
+
+// TestVerifierPromptContractIsPinned addresses the review follow-up that ordering alone prevents the
+// proposer's dynamic result from leaking, but would not catch a future static anchoring sentence such as
+// "findings like this are usually false positives". Any verifier-system-prompt change now requires an
+// explicit security-review update to this fingerprint instead of silently changing the neutral contract.
+func TestVerifierPromptContractIsPinned(t *testing.T) {
+	const approvedSHA256 = "aba2cc4a917ac633bc8fd5d5c9facb2d3ad90f0100b537116e3a82cd114f1778"
+	got := fmt.Sprintf("%x", sha256.Sum256([]byte(verifierSystemPrompt)))
+	if got != approvedSHA256 {
+		t.Fatalf("verifier system prompt changed: sha256=%s; review it for static anchoring before updating the approved fingerprint", got)
 	}
 }
 

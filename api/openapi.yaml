@@ -1333,7 +1333,7 @@ components:
 
     AITriageReview:
       type: object
-      required: [id, tenant_id, engagement_id, finding_id, dedup_key, title, severity, state, verdict, driver, confidence, suspected_fp, proposer_model, prompt_version, verified, policy_version, policy_reason, shadow, would_gate_exempt, gate_exempt, review_required, evidence_ref, created_at, updated_at, version]
+      required: [id, tenant_id, engagement_id, finding_id, dedup_key, title, severity, state, verdict, driver, confidence, suspected_fp, proposer_model, proposer_provider, proposer_model_family, independence_policy, prompt_version, verified, policy_version, policy_reason, shadow, would_gate_exempt, gate_exempt, review_required, evidence_ref, created_at, updated_at, version]
       properties:
         id: {type: string}
         tenant_id: {type: string}
@@ -1351,7 +1351,12 @@ components:
         confidence: {type: integer, minimum: 0, maximum: 100}
         suspected_fp: {type: boolean}
         proposer_model: {type: string}
+        proposer_provider: {type: string}
+        proposer_model_family: {type: string}
         verifier_model: {type: string}
+        verifier_provider: {type: string}
+        verifier_model_family: {type: string}
+        independence_policy: {type: string, enum: ['', model_family, provider]}
         prompt_version: {type: string}
         verified: {type: boolean}
         verifier_verdict: {type: string}

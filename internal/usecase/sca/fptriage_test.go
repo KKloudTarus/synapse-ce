@@ -65,16 +65,21 @@ func TestSuspectedFPKeys(t *testing.T) {
 
 func verifiedCritique(key string) ports.AICritique {
 	return ports.AICritique{
-		DedupKey:           key,
-		Verdict:            "refuted",
-		Confidence:         95,
-		SuspectedFP:        true,
-		ProposerModel:      "proposer-a",
-		VerifierModel:      "verifier-b",
-		Verified:           true,
-		VerifierVerdict:    "refuted",
-		VerifierConfidence: 93,
-		PromptVersion:      "fp-triage-v2",
+		DedupKey:            key,
+		Verdict:             "refuted",
+		Confidence:          95,
+		SuspectedFP:         true,
+		ProposerModel:       "proposer-a",
+		ProposerProvider:    "openai-compatible",
+		ProposerModelFamily: "proposer-a",
+		VerifierModel:       "verifier-b",
+		VerifierProvider:    "openai-compatible",
+		VerifierModelFamily: "verifier-b",
+		IndependencePolicy:  ports.AIIndependenceModelFamily,
+		Verified:            true,
+		VerifierVerdict:     "refuted",
+		VerifierConfidence:  93,
+		PromptVersion:       "fp-triage-v2",
 	}
 }
 
@@ -82,6 +87,8 @@ func TestApplyAIGatePolicy(t *testing.T) {
 	single := verifiedCritique("single")
 	single.Verified = false
 	single.VerifierModel = ""
+	single.VerifierProvider = ""
+	single.VerifierModelFamily = ""
 	single.VerifierVerdict = ""
 	single.VerifierConfidence = 0
 
@@ -168,6 +175,48 @@ func TestApplyAIGatePolicyRejectsForgedVerifiedFlag(t *testing.T) {
 	applyAIGatePolicy(result, true, aiTriageModeEnforce)
 	if got := result.AIGateExemptKeys(); len(got) != 0 {
 		t.Fatalf("forged/incomplete consensus must never receive gate authority: %v", got)
+	}
+}
+
+func TestApplyAIGatePolicyEnforcesProviderIndependence(t *testing.T) {
+	item := finding.Finding{DedupKey: "safe", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"}
+	for _, tc := range []struct {
+		name, proposerProvider, verifierProvider string
+		wantExempt                               bool
+	}{
+		{"different providers", "openai", "anthropic", true},
+		{"same provider", "openai", "OPENAI", false},
+		{"missing provider", "openai", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			critique := verifiedCritique("safe")
+			critique.ProposerProvider = tc.proposerProvider
+			critique.VerifierProvider = tc.verifierProvider
+			result := &ScanResult{Findings: []finding.Finding{item}, AITriage: []ports.AICritique{critique}}
+			applyAIGatePolicyWithIndependence(result, true, aiTriageModeEnforce, ports.AIIndependenceProvider)
+			got := result.AITriage[0]
+			if got.GateExempt != tc.wantExempt {
+				t.Fatalf("gate_exempt = %v, want %v: %+v", got.GateExempt, tc.wantExempt, got)
+			}
+			if !tc.wantExempt && (!got.ReviewRequired || got.PolicyReason != aiPolicyIndependenceRequired) {
+				t.Fatalf("failed independence must stay in human review: %+v", got)
+			}
+		})
+	}
+}
+
+func TestHasVerifiedConsensusRejectsForgedIdentityMetadata(t *testing.T) {
+	for _, mutate := range []func(*ports.AICritique){
+		func(c *ports.AICritique) { c.ProposerModelFamily = "different-family" },
+		func(c *ports.AICritique) { c.VerifierModelFamily = "different-family" },
+		func(c *ports.AICritique) { c.ProposerProvider = " OpenAI-Compatible " },
+		func(c *ports.AICritique) { c.IndependencePolicy = "unknown" },
+	} {
+		critique := verifiedCritique("safe")
+		mutate(&critique)
+		if hasVerifiedConsensus(critique) {
+			t.Fatalf("forged/malformed independence metadata produced consensus: %+v", critique)
+		}
 	}
 }
 

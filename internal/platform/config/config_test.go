@@ -204,6 +204,47 @@ func TestFPTriageBudgetDefaultsAndBounds(t *testing.T) {
 	}
 }
 
+func TestFPTriageVerifierIdentityConfig(t *testing.T) {
+	for _, key := range []string{
+		"SYNAPSE_LLM_BASE_URL", "SYNAPSE_LLM_API_KEY", "SYNAPSE_LLM_PROVIDER", "SYNAPSE_FP_TRIAGE_PROVIDER",
+		"SYNAPSE_VERIFIER_BASE_URL", "SYNAPSE_VERIFIER_API_KEY", "SYNAPSE_VERIFIER_PROVIDER",
+		"SYNAPSE_FP_TRIAGE_INDEPENDENCE",
+	} {
+		t.Setenv(key, "")
+	}
+	cfg := Load()
+	if cfg.VerifierBaseURL != cfg.LLMBaseURL || cfg.VerifierAPIKey != cfg.LLMAPIKey ||
+		cfg.VerifierProvider != cfg.LLMProvider || cfg.FPTriageProvider != cfg.LLMProvider || cfg.LLMProvider != "openai-compatible" {
+		t.Fatal("verifier transport defaults must follow proposer without losing provider metadata")
+	}
+	if cfg.FPTriageIndependence != "model_family" {
+		t.Fatalf("default independence = %q, want model_family", cfg.FPTriageIndependence)
+	}
+
+	t.Setenv("SYNAPSE_LLM_BASE_URL", "https://proposer.example/v1")
+	t.Setenv("SYNAPSE_LLM_API_KEY", "proposer-secret")
+	t.Setenv("SYNAPSE_LLM_PROVIDER", " OpenAI ")
+	t.Setenv("SYNAPSE_FP_TRIAGE_PROVIDER", " Azure-OpenAI ")
+	t.Setenv("SYNAPSE_VERIFIER_PROVIDER", "")
+	if got := Load().VerifierProvider; got != "azure-openai" {
+		t.Fatalf("implicit verifier provider = %q, want fail-closed proposer provider", got)
+	}
+	t.Setenv("SYNAPSE_VERIFIER_BASE_URL", "https://verifier.example/v1")
+	t.Setenv("SYNAPSE_VERIFIER_API_KEY", "verifier-secret")
+	t.Setenv("SYNAPSE_VERIFIER_PROVIDER", " Anthropic ")
+	t.Setenv("SYNAPSE_FP_TRIAGE_INDEPENDENCE", " PROVIDER ")
+	cfg = Load()
+	if cfg.VerifierBaseURL != "https://verifier.example/v1" || cfg.VerifierAPIKey != "verifier-secret" ||
+		cfg.LLMProvider != "openai" || cfg.FPTriageProvider != "azure-openai" || cfg.VerifierProvider != "anthropic" || cfg.FPTriageIndependence != "provider" {
+		t.Fatal("independent verifier configuration was not preserved")
+	}
+
+	t.Setenv("SYNAPSE_FP_TRIAGE_INDEPENDENCE", "different-ish")
+	if got := Load().FPTriageIndependence; got != "disabled" {
+		t.Fatalf("unknown independence policy = %q, want fail-closed disabled", got)
+	}
+}
+
 // TestLoadSBOMProducer confirms the SBOM producer defaults to syft and honors the env override.
 func TestLoadSBOMProducer(t *testing.T) {
 	t.Setenv("SYNAPSE_SBOM_PRODUCER", "")

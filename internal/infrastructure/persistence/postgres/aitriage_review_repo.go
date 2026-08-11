@@ -15,7 +15,8 @@ import (
 )
 
 const aiTriageReviewCols = `id, tenant_id, engagement_id, project_id, finding_id, dedup_key, title, severity, cwe, owner,
- state, verdict, driver, confidence, suspected_fp, proposer_model, verifier_model, prompt_version, verified,
+ state, verdict, driver, confidence, suspected_fp, proposer_model, proposer_provider, proposer_model_family,
+ verifier_model, verifier_provider, verifier_model_family, independence_policy, prompt_version, verified,
  verifier_verdict, verifier_driver, verifier_confidence, policy_version, policy_reason, shadow, would_gate_exempt, gate_exempt,
  review_required, evidence_ref, decided_by, decision_rationale, decided_at, version, created_at, updated_at`
 
@@ -30,16 +31,21 @@ func (r *AITriageReviewRepository) UpsertPending(ctx context.Context, review ait
 	return WithTenant(ctx, r.pool, tenant, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO ai_triage_reviews (
  id, tenant_id, engagement_id, project_id, finding_id, dedup_key, title, severity, cwe, owner,
- state, verdict, driver, confidence, suspected_fp, proposer_model, verifier_model, prompt_version, verified,
+ state, verdict, driver, confidence, suspected_fp, proposer_model, proposer_provider, proposer_model_family,
+ verifier_model, verifier_provider, verifier_model_family, independence_policy, prompt_version, verified,
  verifier_verdict, verifier_driver, verifier_confidence, policy_version, policy_reason, shadow, would_gate_exempt, gate_exempt,
  review_required, evidence_ref, decided_by, decision_rationale, decided_at, version, created_at, updated_at)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)
- ON CONFLICT (tenant_id, engagement_id, dedup_key, policy_version, prompt_version, proposer_model, verifier_model) DO UPDATE SET
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40)
+ ON CONFLICT (tenant_id, engagement_id, dedup_key, policy_version, prompt_version, proposer_provider, proposer_model,
+              proposer_model_family, verifier_provider, verifier_model, verifier_model_family, independence_policy) DO UPDATE SET
    project_id=EXCLUDED.project_id, finding_id=EXCLUDED.finding_id, title=EXCLUDED.title,
    severity=EXCLUDED.severity, cwe=EXCLUDED.cwe,
    verdict=EXCLUDED.verdict, driver=EXCLUDED.driver, confidence=EXCLUDED.confidence,
    suspected_fp=EXCLUDED.suspected_fp, proposer_model=EXCLUDED.proposer_model,
-   verifier_model=EXCLUDED.verifier_model, prompt_version=EXCLUDED.prompt_version, verified=EXCLUDED.verified,
+   proposer_provider=EXCLUDED.proposer_provider, proposer_model_family=EXCLUDED.proposer_model_family,
+   verifier_model=EXCLUDED.verifier_model, verifier_provider=EXCLUDED.verifier_provider,
+   verifier_model_family=EXCLUDED.verifier_model_family, independence_policy=EXCLUDED.independence_policy,
+   prompt_version=EXCLUDED.prompt_version, verified=EXCLUDED.verified,
    verifier_verdict=EXCLUDED.verifier_verdict, verifier_driver=EXCLUDED.verifier_driver,
    verifier_confidence=EXCLUDED.verifier_confidence, policy_reason=EXCLUDED.policy_reason,
    shadow=EXCLUDED.shadow, would_gate_exempt=EXCLUDED.would_gate_exempt,
@@ -49,7 +55,8 @@ func (r *AITriageReviewRepository) UpsertPending(ctx context.Context, review ait
 			review.ID.String(), tenant, review.EngagementID.String(), review.ProjectID.String(), review.FindingID.String(),
 			review.DedupKey, review.Title, string(review.Severity), review.CWE, review.Owner, string(review.State),
 			review.Verdict, review.Driver, review.Confidence, review.SuspectedFP, review.ProposerModel,
-			review.VerifierModel, review.PromptVersion, review.Verified, review.VerifierVerdict, review.VerifierDriver,
+			review.ProposerProvider, review.ProposerModelFamily, review.VerifierModel, review.VerifierProvider,
+			review.VerifierModelFamily, review.IndependencePolicy, review.PromptVersion, review.Verified, review.VerifierVerdict, review.VerifierDriver,
 			review.VerifierConfidence, review.PolicyVersion, review.PolicyReason, review.Shadow, review.WouldGateExempt,
 			review.GateExempt, review.ReviewRequired, review.EvidenceRef.String(), review.DecidedBy, review.DecisionRationale,
 			review.DecidedAt, review.Version, review.CreatedAt, review.UpdatedAt)
@@ -142,7 +149,8 @@ func scanAITriageReview(row rowScanner) (aitriagereview.Review, error) {
 	var id, tenant, eng, project, findingID, severity, state, evidenceRef string
 	var decidedAt *time.Time
 	if err := row.Scan(&id, &tenant, &eng, &project, &findingID, &r.DedupKey, &r.Title, &severity, &r.CWE, &r.Owner,
-		&state, &r.Verdict, &r.Driver, &r.Confidence, &r.SuspectedFP, &r.ProposerModel, &r.VerifierModel,
+		&state, &r.Verdict, &r.Driver, &r.Confidence, &r.SuspectedFP, &r.ProposerModel, &r.ProposerProvider, &r.ProposerModelFamily,
+		&r.VerifierModel, &r.VerifierProvider, &r.VerifierModelFamily, &r.IndependencePolicy,
 		&r.PromptVersion, &r.Verified, &r.VerifierVerdict, &r.VerifierDriver, &r.VerifierConfidence, &r.PolicyVersion,
 		&r.PolicyReason, &r.Shadow, &r.WouldGateExempt, &r.GateExempt, &r.ReviewRequired, &evidenceRef, &r.DecidedBy,
 		&r.DecisionRationale, &decidedAt, &r.Version, &r.CreatedAt, &r.UpdatedAt); err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -106,16 +107,21 @@ func (t *Triager) mapCritiques(crits []Critique) []ports.AICritique {
 			continue
 		}
 		critique := ports.AICritique{
-			FindingID:     c.FindingID,
-			DedupKey:      c.DedupKey,
-			Verdict:       string(c.Claim.Verdict),
-			Driver:        c.Claim.Driver,
-			Confidence:    c.Claim.Confidence,
-			SuspectedFP:   c.SuspectedFP(t.minConf),
-			Verified:      c.VerifiedConsensus(t.minConf),
-			ProposerModel: t.coord.ProposerModel(),
-			VerifierModel: t.coord.VerifierModel(),
-			PromptVersion: promptVersion,
+			FindingID:           c.FindingID,
+			DedupKey:            c.DedupKey,
+			Verdict:             string(c.Claim.Verdict),
+			Driver:              c.Claim.Driver,
+			Confidence:          c.Claim.Confidence,
+			SuspectedFP:         c.SuspectedFP(t.minConf),
+			Verified:            c.VerifiedConsensus(t.minConf),
+			ProposerModel:       t.coord.ProposerModel(),
+			ProposerProvider:    t.coord.ProposerProvider(),
+			ProposerModelFamily: agent.CanonicalModelID(t.coord.ProposerModel()),
+			VerifierModel:       t.coord.VerifierModel(),
+			VerifierProvider:    t.coord.VerifierProvider(),
+			VerifierModelFamily: agent.CanonicalModelID(t.coord.VerifierModel()),
+			IndependencePolicy:  t.coord.IndependencePolicy(),
+			PromptVersion:       promptVersion,
 		}
 		if c.Verifier != nil {
 			critique.VerifierVerdict = string(c.Verifier.Verdict)
@@ -143,13 +149,16 @@ func (t *Triager) cacheKey(ctx context.Context, prepared preparedFinding) (ports
 		FindingFingerprint: finding.Identity(prepared.finding),
 		SourceSHA256:       prepared.sourceSHA256,
 		ContextSHA256:      sha256Hex([]byte(userPrompt(prepared.finding, prepared.snippet))),
+		ProposerProvider:   strings.TrimSpace(t.coord.ProposerProvider()),
 		ProposerModel:      strings.TrimSpace(t.coord.ProposerModel()),
+		VerifierProvider:   strings.TrimSpace(t.coord.VerifierProvider()),
 		VerifierModel:      strings.TrimSpace(t.coord.VerifierModel()),
 		PromptVersion:      promptVersion,
 		PolicyVersion:      t.policy,
 	}
 	if key.TenantID.IsZero() || key.ScopeID.IsZero() || strings.TrimSpace(key.FindingFingerprint) == "" ||
-		!validSHA256(key.SourceSHA256) || !validSHA256(key.ContextSHA256) || key.ProposerModel == "" {
+		!validSHA256(key.SourceSHA256) || !validSHA256(key.ContextSHA256) || key.ProposerProvider == "" ||
+		key.ProposerModel == "" || (key.VerifierModel == "") != (key.VerifierProvider == "") {
 		return ports.FPTriageCacheKey{}, false
 	}
 	return key, true

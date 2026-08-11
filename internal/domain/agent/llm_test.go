@@ -50,3 +50,28 @@ func TestCanonicalModelIDScopeDriftFailsClosed(t *testing.T) {
 		}
 	}
 }
+
+func TestIndependentLLMsFailsClosed(t *testing.T) {
+	tests := []struct {
+		name                                    string
+		proposerProvider, proposerModel         string
+		verifierProvider, verifierModel, policy string
+		want                                    bool
+	}{
+		{"family policy permits one provider with distinct families", "openai", "gpt-4o", "openai", "gpt-4.1", "model_family", true},
+		{"provider policy requires both dimensions", "openai", "gpt-4o", "anthropic", "claude-sonnet-4", "provider", true},
+		{"provider policy rejects same provider", "openai", "gpt-4o", "OPENAI", "gpt-4.1", "provider", false},
+		{"provider policy still rejects aliased family", "bedrock", "us.anthropic.claude-opus-5-v1:0", "anthropic", "claude-opus-5", "provider", false},
+		{"missing proposer provider", "", "gpt-4o", "anthropic", "claude-sonnet-4", "model_family", false},
+		{"missing verifier provider", "openai", "gpt-4o", "", "claude-sonnet-4", "model_family", false},
+		{"missing model", "openai", "", "anthropic", "claude-sonnet-4", "provider", false},
+		{"unknown policy", "openai", "gpt-4o", "anthropic", "claude-sonnet-4", "typo", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IndependentLLMs(tc.proposerProvider, tc.proposerModel, tc.verifierProvider, tc.verifierModel, tc.policy); got != tc.want {
+				t.Fatalf("IndependentLLMs() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

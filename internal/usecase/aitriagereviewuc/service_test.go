@@ -112,7 +112,11 @@ func TestRecordAndDecideReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	item := finding.Finding{ID: "f1", EngagementID: "e1", DedupKey: "sast:key", Title: "SQL injection", Severity: shared.SeverityHigh, Kind: finding.KindSAST, Status: finding.StatusOpen}
-	critique := ports.AICritique{FindingID: "f1", DedupKey: "sast:key", Verdict: "refuted", Driver: "sanitizer", Confidence: 90, SuspectedFP: true, ProposerModel: "model-a", PromptVersion: "fp-triage-v1", PolicyVersion: "fp-gate-v3", PolicyReason: "severity_requires_human", ReviewRequired: true}
+	critique := ports.AICritique{FindingID: "f1", DedupKey: "sast:key", Verdict: "refuted", Driver: "sanitizer", Confidence: 90, SuspectedFP: true,
+		ProposerModel: "model-a", ProposerProvider: "openai", ProposerModelFamily: "model-a",
+		VerifierModel: "model-b", VerifierProvider: "anthropic", VerifierModelFamily: "model-b",
+		IndependencePolicy: ports.AIIndependenceProvider, PromptVersion: "fp-triage-v2", PolicyVersion: "fp-gate-v4",
+		PolicyReason: "severity_requires_human", ReviewRequired: true}
 	if err := svc.RecordScan(ctx, "e1", "ev1", []finding.Finding{item}, []ports.AICritique{critique}); err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +142,20 @@ func TestRecordAndDecideReview(t *testing.T) {
 	if updated.State != aitriagereview.StateRejected || decisions.accepted || decisions.calls != 1 {
 		t.Fatalf("decision not applied: %+v fake=%+v", updated, decisions)
 	}
-	if len(audit.entries) != 2 || audit.entries[1].Metadata["evidence_ref"] != "ev2" || audit.entries[1].Metadata["prompt_version"] != "fp-triage-v1" {
+	if len(audit.entries) != 2 || audit.entries[1].Metadata["evidence_ref"] != "ev2" || audit.entries[1].Metadata["prompt_version"] != "fp-triage-v2" ||
+		audit.entries[1].Metadata["proposer_provider"] != "openai" || audit.entries[1].Metadata["verifier_provider"] != "anthropic" ||
+		audit.entries[1].Metadata["independence_policy"] != "provider" {
 		t.Fatalf("decision audit missing evidence: %+v", audit.entries)
+	}
+
+	// A provider/policy change is a new recommendation identity. A terminal review of the old pair
+	// must not swallow it, even when finding, prompt, raw models, and gate-policy version are unchanged.
+	critique.VerifierProvider = "bedrock"
+	if err := svc.RecordScan(ctx, "e1", "ev3", []finding.Finding{item}, []ports.AICritique{critique}); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := svc.List(ctx, "", ports.AITriageReviewFilter{State: aitriagereview.StatePending})
+	if err != nil || len(pending) != 1 || pending[0].VerifierProvider != "bedrock" {
+		t.Fatalf("new provider identity must create a fresh pending review: pending=%+v err=%v", pending, err)
 	}
 }

@@ -14,7 +14,7 @@ import (
 
 // aiTriagePolicyVersion is sealed with every scan that carries AI triage. Bump it whenever the
 // authorization contract changes so an audit can replay which policy could affect a CI gate.
-const aiTriagePolicyVersion = "fp-gate-v3"
+const aiTriagePolicyVersion = "fp-gate-v4"
 
 // EvaluationPolicyVersion returns the immutable policy identity for evaluation report metadata without
 // exporting the authorization constant as part of the package API.
@@ -30,16 +30,17 @@ const (
 )
 
 const (
-	aiPolicyNotSuspected      = "not_suspected_false_positive"
-	aiPolicyVerifierRequired  = "distinct_verifier_required"
-	aiPolicyFindingMissing    = "finding_not_found"
-	aiPolicyFindingIneligible = "finding_not_eligible"
-	aiPolicySeverityFloor     = "severity_requires_human"
-	aiPolicySecretFloor       = "secret_requires_human"
-	aiPolicyDangerousCWEFloor = "cwe_requires_human"
-	aiPolicyEvidenceRequired  = "evidence_ledger_required"
-	aiPolicyShadowMode        = "shadow_mode"
-	aiPolicyVerifiedConsensus = "verified_consensus"
+	aiPolicyNotSuspected         = "not_suspected_false_positive"
+	aiPolicyVerifierRequired     = "distinct_verifier_required"
+	aiPolicyIndependenceRequired = "verifier_independence_required"
+	aiPolicyFindingMissing       = "finding_not_found"
+	aiPolicyFindingIneligible    = "finding_not_eligible"
+	aiPolicySeverityFloor        = "severity_requires_human"
+	aiPolicySecretFloor          = "secret_requires_human"
+	aiPolicyDangerousCWEFloor    = "cwe_requires_human"
+	aiPolicyEvidenceRequired     = "evidence_ledger_required"
+	aiPolicyShadowMode           = "shadow_mode"
+	aiPolicyVerifiedConsensus    = "verified_consensus"
 )
 
 // humanReviewCWEs are weakness classes where a false negative can directly expose an execution,
@@ -72,9 +73,14 @@ var humanReviewCWEs = map[string]struct{}{
 // policy point used by both CLI and API scans. The triager may propose SuspectedFP, but only a complete
 // distinct-model consensus that clears the human-review floor receives GateExempt.
 func applyAIGatePolicy(result *ScanResult, evidenceAvailable bool, mode aiTriageMode) {
+	applyAIGatePolicyWithIndependence(result, evidenceAvailable, mode, ports.AIIndependenceModelFamily)
+}
+
+func applyAIGatePolicyWithIndependence(result *ScanResult, evidenceAvailable bool, mode aiTriageMode, independence ports.AIIndependencePolicy) {
 	if result == nil || len(result.AITriage) == 0 {
 		return
 	}
+	independence = normalizeAIIndependencePolicy(independence)
 	findings := make(map[string]finding.Finding, len(result.Findings))
 	for _, item := range result.Findings {
 		if key := strings.TrimSpace(item.DedupKey); key != "" {
@@ -84,6 +90,7 @@ func applyAIGatePolicy(result *ScanResult, evidenceAvailable bool, mode aiTriage
 	for i := range result.AITriage {
 		critique := &result.AITriage[i]
 		critique.PolicyVersion = aiTriagePolicyVersion
+		critique.IndependencePolicy = independence
 		critique.Shadow = mode != aiTriageModeEnforce
 		critique.WouldGateExempt = false
 		critique.GateExempt = false
@@ -91,6 +98,21 @@ func applyAIGatePolicy(result *ScanResult, evidenceAvailable bool, mode aiTriage
 
 		if !critique.SuspectedFP {
 			critique.PolicyReason = aiPolicyNotSuspected
+			continue
+		}
+		if independence == "" {
+			critique.PolicyReason = aiPolicyIndependenceRequired
+			critique.ReviewRequired = true
+			continue
+		}
+		if strings.TrimSpace(critique.VerifierModel) == "" {
+			critique.PolicyReason = aiPolicyVerifierRequired
+			critique.ReviewRequired = true
+			continue
+		}
+		if !hasIndependentVerifierIdentity(*critique) {
+			critique.PolicyReason = aiPolicyIndependenceRequired
+			critique.ReviewRequired = true
 			continue
 		}
 		if !hasVerifiedConsensus(*critique) {
@@ -133,13 +155,32 @@ func applyAIGatePolicy(result *ScanResult, evidenceAvailable bool, mode aiTriage
 // hasVerifiedConsensus validates the full DTO rather than trusting its Verified boolean. This keeps a
 // buggy or alternate FPTriager implementation from granting itself gate authority by setting one field.
 func hasVerifiedConsensus(c ports.AICritique) bool {
-	proposer := agent.CanonicalModelID(c.ProposerModel)
-	verifierModel := agent.CanonicalModelID(c.VerifierModel)
-	return c.Verified &&
-		proposer != "" && verifierModel != "" && proposer != verifierModel &&
+	return c.Verified && hasIndependentVerifierIdentity(c) &&
 		c.Verdict == string(judgment.CritiqueRefuted) && c.Confidence >= verdict.EvidenceThreshold &&
 		c.VerifierVerdict == string(judgment.CritiqueRefuted) &&
 		c.VerifierConfidence >= verdict.EvidenceThreshold
+}
+
+func hasIndependentVerifierIdentity(c ports.AICritique) bool {
+	proposerFamily := agent.CanonicalModelID(c.ProposerModel)
+	verifierFamily := agent.CanonicalModelID(c.VerifierModel)
+	proposerProvider := agent.CanonicalProviderID(c.ProposerProvider)
+	verifierProvider := agent.CanonicalProviderID(c.VerifierProvider)
+	return proposerFamily != "" && verifierFamily != "" &&
+		c.ProposerModelFamily == proposerFamily && c.VerifierModelFamily == verifierFamily &&
+		c.ProposerProvider == proposerProvider && c.VerifierProvider == verifierProvider &&
+		agent.IndependentLLMs(proposerProvider, c.ProposerModel, verifierProvider, c.VerifierModel, string(c.IndependencePolicy))
+}
+
+func normalizeAIIndependencePolicy(policy ports.AIIndependencePolicy) ports.AIIndependencePolicy {
+	switch ports.AIIndependencePolicy(strings.ToLower(strings.TrimSpace(string(policy)))) {
+	case ports.AIIndependenceModelFamily:
+		return ports.AIIndependenceModelFamily
+	case ports.AIIndependenceProvider:
+		return ports.AIIndependenceProvider
+	default:
+		return ""
+	}
 }
 
 func humanReviewFloor(item finding.Finding) string {

@@ -99,7 +99,8 @@ func TestTriagerMapsToPortsDTO(t *testing.T) {
 	if byKey["dk-1"].Verified {
 		t.Error("single-model refutation must not be marked verified")
 	}
-	if c := byKey["dk-1"]; c.GateExempt || c.ProposerModel != "m" || c.VerifierModel != "" || c.PromptVersion != promptVersion {
+	if c := byKey["dk-1"]; c.GateExempt || c.ProposerModel != "m" || c.ProposerProvider != defaultProviderID ||
+		c.ProposerModelFamily != "m" || c.VerifierModel != "" || c.IndependencePolicy != ports.AIIndependenceModelFamily || c.PromptVersion != promptVersion {
 		t.Errorf("single-model DTO must be advisory with audit metadata, got %+v", c)
 	}
 }
@@ -171,6 +172,17 @@ func TestTriagerCacheHitsAndInvalidatesBySafeContext(t *testing.T) {
 		WithCache(cache, "policy-v2").Triage(ctx, []finding.Finding{f}, "/workspace")
 	if proposer.callCount() != 6 || verifier.callCount() != 6 {
 		t.Fatal("a policy-version change must invalidate both model claims")
+	}
+
+	providerScoped := NewWithIdentity(proposer, "provider-a", "provider/model-a").
+		WithIndependentVerifier(verifier, "provider-b", "provider/model-b", ports.AIIndependenceProvider)
+	got := NewTriager(providerScoped, func(string) ports.SourceSnippetReader { return reader }).
+		WithCache(cache, "policy-v1").Triage(ctx, []finding.Finding{f}, "/workspace")
+	if proposer.callCount() != 7 || verifier.callCount() != 7 {
+		t.Fatal("different provider identities must invalidate both model claims")
+	}
+	if len(got) != 1 || got[0].ProposerProvider != "provider-a" || got[0].VerifierProvider != "provider-b" {
+		t.Fatalf("provider-scoped critique metadata = %+v", got)
 	}
 }
 

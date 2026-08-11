@@ -57,10 +57,13 @@ type AIEvaluationCase struct {
 
 // AIEvaluationRun identifies the exact model/prompt/policy combination being evaluated.
 type AIEvaluationRun struct {
-	ProposerModel string `json:"proposer_model"`
-	VerifierModel string `json:"verifier_model"`
-	PromptVersion string `json:"prompt_version"`
-	PolicyVersion string `json:"policy_version"`
+	ProposerProvider   string                     `json:"proposer_provider"`
+	ProposerModel      string                     `json:"proposer_model"`
+	VerifierProvider   string                     `json:"verifier_provider"`
+	VerifierModel      string                     `json:"verifier_model"`
+	IndependencePolicy ports.AIIndependencePolicy `json:"independence_policy"`
+	PromptVersion      string                     `json:"prompt_version"`
+	PolicyVersion      string                     `json:"policy_version"`
 }
 
 // AIEvaluationResult keeps the human label beside both model consensus and deterministic shadow-policy
@@ -199,12 +202,13 @@ func EvaluateFPTriage(ctx context.Context, dataset AIEvaluationDataset, run AIEv
 	if triager == nil {
 		return AIEvaluationReport{}, fmt.Errorf("AI evaluation triager is required")
 	}
-	if strings.TrimSpace(run.ProposerModel) == "" || strings.TrimSpace(run.VerifierModel) == "" ||
+	if strings.TrimSpace(run.ProposerProvider) == "" || strings.TrimSpace(run.VerifierProvider) == "" ||
+		strings.TrimSpace(run.ProposerModel) == "" || strings.TrimSpace(run.VerifierModel) == "" ||
 		strings.TrimSpace(run.PromptVersion) == "" || strings.TrimSpace(run.PolicyVersion) == "" {
-		return AIEvaluationReport{}, fmt.Errorf("AI evaluation run requires proposer, verifier, prompt, and policy versions")
+		return AIEvaluationReport{}, fmt.Errorf("AI evaluation run requires proposer/verifier provider and model identities, prompt, and policy versions")
 	}
-	if agent.SameModel(run.ProposerModel, run.VerifierModel) {
-		return AIEvaluationReport{}, fmt.Errorf("AI evaluation verifier must be distinct from the proposer")
+	if !agent.IndependentLLMs(run.ProposerProvider, run.ProposerModel, run.VerifierProvider, run.VerifierModel, string(run.IndependencePolicy)) {
+		return AIEvaluationReport{}, fmt.Errorf("AI evaluation verifier does not satisfy %q independence", run.IndependencePolicy)
 	}
 	if run.PolicyVersion != EvaluationPolicyVersion() {
 		return AIEvaluationReport{}, fmt.Errorf("AI evaluation policy version %q is not current %q", run.PolicyVersion, EvaluationPolicyVersion())
@@ -223,7 +227,7 @@ func EvaluateFPTriage(ctx context.Context, dataset AIEvaluationDataset, run AIEv
 	}
 
 	result := &ScanResult{Findings: findings, AITriage: triager.Triage(ctx, findings, "")}
-	applyAIGatePolicy(result, true, aiTriageModeShadow)
+	applyAIGatePolicyWithIndependence(result, true, aiTriageModeShadow, run.IndependencePolicy)
 	critiqueByKey := make(map[string]ports.AICritique, len(result.AITriage))
 	for _, critique := range result.AITriage {
 		key := strings.TrimSpace(critique.DedupKey)
@@ -234,14 +238,17 @@ func EvaluateFPTriage(ctx context.Context, dataset AIEvaluationDataset, run AIEv
 			return AIEvaluationReport{}, fmt.Errorf("AI evaluation returned critique without a dedup key")
 		}
 		if !agent.SameModel(critique.ProposerModel, run.ProposerModel) ||
-			!agent.SameModel(critique.VerifierModel, run.VerifierModel) || critique.PromptVersion != run.PromptVersion {
+			!agent.SameModel(critique.VerifierModel, run.VerifierModel) ||
+			critique.ProposerProvider != agent.CanonicalProviderID(run.ProposerProvider) ||
+			critique.VerifierProvider != agent.CanonicalProviderID(run.VerifierProvider) ||
+			critique.IndependencePolicy != run.IndependencePolicy || critique.PromptVersion != run.PromptVersion {
 			return AIEvaluationReport{}, fmt.Errorf("AI evaluation critique metadata for %q does not match the run", key)
 		}
 		critiqueByKey[key] = critique
 	}
 
 	report := AIEvaluationReport{
-		SchemaVersion: "synapse-ai-triage-evaluation-v1", DatasetVersion: dataset.Version,
+		SchemaVersion: "synapse-ai-triage-evaluation-v2", DatasetVersion: dataset.Version,
 		DatasetSHA256: evaluationDatasetDigest(dataset),
 		Provenance:    dataset.Provenance, Reviewer: dataset.Reviewer, Run: run,
 		Breakdowns: map[string]map[string]AIEvaluationMetrics{},

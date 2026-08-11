@@ -127,10 +127,11 @@ function ReviewPanel({ review, project, canReview, reviewerId, onClosed, onDecid
       <button type="button" onClick={onClosed} aria-label="Close review details" className="rounded-md p-1 text-mutedfg hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"><X className="size-4" /></button></div>
     <AITriageBadges triage={review} />
     <dl className="mt-5 grid grid-cols-2 gap-3 text-xs">
-      <Meta label="Proposer" value={`${review.proposerModel} · ${review.verdict} · ${review.confidence}%`} />
-      <Meta label="Verifier" value={review.verifierModel ? `${review.verifierModel} · ${review.verifierVerdict || '—'} · ${review.verifierConfidence}%` : 'Not attached'} />
+      <Meta label="Proposer" value={`${review.proposerProvider || 'unknown provider'} / ${review.proposerModelFamily || review.proposerModel} · ${review.verdict} · ${review.confidence}%`} />
+      <Meta label="Verifier" value={review.verifierModel ? `${review.verifierProvider || 'unknown provider'} / ${review.verifierModelFamily || review.verifierModel} · ${review.verifierVerdict || '—'} · ${review.verifierConfidence}%` : 'Not attached'} />
       <Meta label="Prompt" value={review.promptVersion} />
       <Meta label="Policy" value={review.policyVersion} />
+      <Meta label="Independence" value={review.independencePolicy.replaceAll('_', ' ')} />
       <Meta label="Policy reason" value={review.policyReason.replaceAll('_', ' ')} />
       <Meta label="Rollout mode" value={review.shadow ? (review.wouldGateExempt ? 'Shadow · would exempt' : 'Shadow · held') : 'Enforce · held'} />
       <Meta label="Evidence" value={review.evidenceRef} mono />

@@ -153,3 +153,32 @@ func SameModel(a, b string) bool {
 	a, b = CanonicalModelID(a), CanonicalModelID(b)
 	return a != "" && b != "" && a == b
 }
+
+// CanonicalProviderID normalizes an operator-supplied provider identity for audit and
+// separation-of-duties comparisons. Provider identity is deliberately explicit rather than inferred
+// from a gateway URL: one OpenAI-compatible router may front several providers, while two URLs may be
+// aliases for the same provider.
+func CanonicalProviderID(id string) string {
+	return strings.ToLower(strings.TrimSpace(id))
+}
+
+// IndependentLLMs validates the configured proposer/verifier identities against a deterministic
+// policy. Every mode requires complete provider and model-family metadata and distinct model families.
+// Provider mode additionally requires distinct provider identities. Unknown policies fail closed.
+func IndependentLLMs(proposerProvider, proposerModel, verifierProvider, verifierModel string, policy string) bool {
+	proposerProvider = CanonicalProviderID(proposerProvider)
+	verifierProvider = CanonicalProviderID(verifierProvider)
+	proposerFamily := CanonicalModelID(proposerModel)
+	verifierFamily := CanonicalModelID(verifierModel)
+	if proposerProvider == "" || verifierProvider == "" || proposerFamily == "" || verifierFamily == "" || proposerFamily == verifierFamily {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case "model_family":
+		return true
+	case "provider":
+		return proposerProvider != verifierProvider
+	default:
+		return false
+	}
+}
