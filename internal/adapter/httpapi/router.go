@@ -18,6 +18,7 @@ import (
 	audituc "github.com/KKloudTarus/synapse-ce/internal/usecase/audit"
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
 	credentialsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/credentials"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/cspm"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
@@ -63,6 +64,7 @@ type Router struct {
 	aiTriageReviews   aiTriageReviewService // optional; nil ⇒ AI-triage review queue routes are not registered
 	projects          projectService        // optional; nil ⇒ project routes are not registered
 	assets            assetService          // optional; nil ⇒ fleet asset routes are not registered
+	cspm              *cspm.Service         // optional; nil ⇒ CSPM routes are not registered
 	businessAssets    businessAssetService  // optional; nil ⇒ business-level Asset routes are not registered
 	attackPaths       attackPathService     // optional; nil ⇒ attack-path routes are not registered
 	coverage          coverageService       // optional; nil ⇒ fleet coverage/agent-view routes are not registered
@@ -447,6 +449,10 @@ func (rt *Router) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/v1/sca/scans", rt.authz(userdom.PermOperate, rt.runSCAScan))
 	mux.HandleFunc("GET /api/v1/recon/tools", rt.authz(userdom.PermView, rt.listReconTools))
 	mux.HandleFunc("POST /api/v1/engagements/{id}/recon/runs", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.startReconRun)))
+	if rt.cspm != nil {
+		mux.HandleFunc("POST /api/v1/engagements/{id}/cspm/runs", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.runCSPM)))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/cspm/runs/{rid}", rt.authz(userdom.PermView, rt.withEngTenant(rt.getCSPMRun)))
+	}
 	mux.HandleFunc("GET /api/v1/engagements/{id}/recon/runs", rt.authz(userdom.PermView, rt.withEngTenant(rt.listReconRuns)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/recon/runs/{rid}", rt.authz(userdom.PermView, rt.withEngTenant(rt.getReconRun)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/recon/runs/{rid}/logs", rt.authz(userdom.PermView, rt.withEngTenant(rt.streamReconLogs)))

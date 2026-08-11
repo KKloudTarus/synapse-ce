@@ -12,7 +12,7 @@ import (
 // malformed register is REFUSED at load rather than accepted and enforced.
 func mutate(t *testing.T, old, new string) error {
 	t.Helper()
-	raw := string(embeddedPolicy)
+	raw := strings.ReplaceAll(string(embeddedPolicy), "\r\n", "\n")
 	if !strings.Contains(raw, old) {
 		t.Fatalf("fixture anchor not found in policy.yaml: %q", old)
 	}

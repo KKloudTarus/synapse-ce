@@ -71,7 +71,12 @@ func (r *AssetRepository) GetAssetByKey(ctx context.Context, tenantID shared.ID,
 func (r *AssetRepository) ListAssets(ctx context.Context, tenantID shared.ID) ([]*asset.Asset, error) {
 	var out []*asset.Asset
 	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
-		rows, e := tx.Query(ctx, `SELECT `+assetCols+` FROM fleet_assets WHERE tenant_id = $1 ORDER BY kind, "key"`, tenantID.String())
+		rows, e := tx.Query(ctx, `SELECT `+assetCols+` FROM fleet_assets a
+			WHERE a.tenant_id = $1 AND (
+				a.attributes->>'scope_key' IS NULL OR
+				EXISTS (SELECT 1 FROM cspm_observations o
+					WHERE o.tenant_id=a.tenant_id AND o.observation_kind='asset' AND o.object_id=a.id AND o.active)
+			) ORDER BY a.kind, a."key"`, tenantID.String())
 		if e != nil {
 			return e
 		}
@@ -109,8 +114,13 @@ func (r *AssetRepository) ListEdges(ctx context.Context, tenantID shared.ID) ([]
 	var out []*asset.Edge
 	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
 		rows, e := tx.Query(ctx, `
-			SELECT tenant_id, from_asset, to_asset, kind, provenance, confidence FROM fleet_asset_edges
-			WHERE tenant_id = $1 ORDER BY from_asset, to_asset, kind, provenance`, tenantID.String())
+			SELECT e.tenant_id, e.from_asset, e.to_asset, e.kind, e.provenance, e.confidence FROM fleet_asset_edges e
+			WHERE e.tenant_id = $1 AND (
+				e.provenance NOT LIKE 'cspm:%' OR
+				EXISTS (SELECT 1 FROM cspm_observations o
+					WHERE o.tenant_id=e.tenant_id AND o.producer=e.provenance AND o.observation_kind='edge'
+					AND o.object_id=e.from_asset || '|' || e.to_asset || '|' || e.kind AND o.active)
+			) ORDER BY e.from_asset, e.to_asset, e.kind, e.provenance`, tenantID.String())
 		if e != nil {
 			return e
 		}

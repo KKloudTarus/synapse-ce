@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -21,6 +22,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/httpapi"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -109,6 +111,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	credentialsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/credentials"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/crosscheckjudge"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/cspm"
 	dastrunneruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
 	dastsessionuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastsession"
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
@@ -175,6 +178,14 @@ func requireJudgmentsOrSkip(log *slog.Logger, hasJudgment bool, envKey, name str
 
 func main() {
 	cfg := config.Load()
+	if cfg.CSPMEnabled && !cfg.FleetAssetsEnabled {
+		fmt.Fprintln(os.Stderr, "SYNAPSE_CSPM_ENABLED requires SYNAPSE_FLEET_ASSETS_ENABLED=true")
+		os.Exit(1)
+	}
+	if cfg.CSPMEnabled && len(cfg.CSPMProviders) == 0 {
+		fmt.Fprintln(os.Stderr, "SYNAPSE_CSPM_ENABLED requires SYNAPSE_CSPM_PROVIDERS")
+		os.Exit(1)
+	}
 	log := logging.New(cfg.LogLevel)
 	log.Info("starting synapse-api", "env", cfg.Environment, "single_tenant", cfg.SingleTenant)
 
@@ -220,6 +231,8 @@ func main() {
 	var qualityProfileStore ports.QualityProfileStore
 	var qualityGateMutator ports.QualityGateMutator
 	var reconRunStore ports.ReconRunStore
+	var cloudRunStore ports.CloudRunStore
+	var cloudObservationStore ports.CloudObservationStore
 	var evidenceStore ports.EvidenceStore
 	var advisoryStore ports.AdvisoryStore         // owned normalized-advisory store (global reference data, not tenant-scoped)
 	var threatModelStore ports.ThreatModelStore   // per-engagement architecture threat model (tenant-scoped)
@@ -322,6 +335,8 @@ func main() {
 		qualityGateStore = postgres.NewQualityGateStore(pool)
 		qualityProfileStore = postgres.NewQualityProfileStore(pool)
 		reconRunStore = postgres.NewReconRunStore(pool)
+		cloudRunStore = postgres.NewCloudRunStore(pool)
+		cloudObservationStore = postgres.NewCloudObservationStore(pool)
 		evidenceStore = postgres.NewEvidenceStore(pool)
 		advisoryStore = postgres.NewAdvisoryRepository(pool)
 		threatModelStore = postgres.NewThreatModelRepository(pool)
@@ -387,6 +402,8 @@ func main() {
 		qualityGateStore = memory.NewQualityGateStore()
 		qualityProfileStore = memory.NewQualityProfileStore()
 		reconRunStore = memory.NewReconRunRepository()
+		cloudRunStore = memory.NewCloudRunStore()
+		cloudObservationStore = memory.NewCloudObservationStore()
 		evidenceStore = memory.NewEvidenceStore()
 		advisoryStore = memory.NewAdvisoryStore()
 		threatModelStore = memory.NewThreatModelStore()
@@ -1147,6 +1164,14 @@ func main() {
 		router.SetWriteupDrafts(writeupDraftSvc)                  // human sign-off HTTP routes (list/edit/accept/reject; PermReview + SoD + withEngTenant)
 		log.Info("writeup draft proposals ENABLED (agent proposes prose; a distinct human signs off)")
 	}
+	if cfg.CSPMEnabled && !cfg.FleetAssetsEnabled {
+		log.Error("SYNAPSE_CSPM_ENABLED requires SYNAPSE_FLEET_ASSETS_ENABLED")
+		os.Exit(1)
+	}
+	if cfg.CSPMEnabled && cfg.DBDSN == "" {
+		log.Error("SYNAPSE_CSPM_ENABLED requires PostgreSQL durable execution")
+		os.Exit(1)
+	}
 	var assetSvc *assetuc.Service
 	if cfg.FleetAssetsEnabled {
 		svc, derr := assetuc.NewService(assetStore, auditLog, clock, ids)
@@ -1182,6 +1207,53 @@ func main() {
 		router.SetAttackPaths(attackPathSvc)
 		log.Info("fleet asset model ENABLED (multi-tenant, Postgres RLS-enforced)")
 		log.Info("attack-path query ENABLED (tenant-scoped, bounded, evidence-carrying)")
+
+		if cfg.CSPMEnabled {
+			connectors := make(map[cloudposture.Provider]ports.CloudConnector, len(cfg.CSPMProviders))
+			for _, name := range cfg.CSPMProviders {
+				provider := cloudposture.Provider(strings.ToLower(strings.TrimSpace(name)))
+				if !provider.Valid() {
+					log.Error("unknown CSPM provider", "provider", provider)
+					os.Exit(1)
+				}
+				connectors[provider] = cspm.Evaluator{}
+			}
+			cspmSvc, cerr := cspm.NewService(connectors, assetSvc, findingRepo, repo, auditLog, clock)
+			if cerr == nil {
+				if reconQueue == nil {
+					cerr = fmt.Errorf("CSPM requires Postgres durable queue")
+				} else {
+					cerr = cspmSvc.SetDurableExecution(cloudRunStore, reconQueue, ids)
+				}
+			}
+			if cerr == nil {
+				attributor, aerr := attackpathuc.NewRecorder(assetStore, attackPathStore, repo)
+				if aerr != nil {
+					cerr = aerr
+				} else {
+					cspmSvc.SetAttributor(attributor)
+					expectationSource, eerr := cspm.NewExpectationSource(repo, projectAnalysisStore, sourceArtifacts)
+					if eerr != nil {
+						cerr = eerr
+					} else {
+						cspmSvc.SetExpectationSource(expectationSource)
+						evidenceSealer, serr := cspm.NewEvidenceSealer(evidenceService)
+						if serr != nil {
+							cerr = serr
+						} else {
+							cspmSvc.SetEvidenceSealer(evidenceSealer)
+							cspmSvc.SetObservationStore(cloudObservationStore)
+						}
+					}
+				}
+			}
+			if cerr != nil {
+				log.Error("CSPM service init failed", "err", cerr)
+				os.Exit(1)
+			}
+			router.SetCSPM(cspmSvc)
+			log.Info("CSPM ENABLED (read-only live cloud posture)", "providers", cfg.CSPMProviders, "rate", cfg.CSPMRate)
+		}
 
 		// Fleet coverage + agent-health views (#413): a read projection over agents, work orders and
 		// the asset model. Needs the fleet transport (agent + work-order stores); enabled when both the

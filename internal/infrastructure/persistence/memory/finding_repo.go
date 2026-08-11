@@ -14,9 +14,10 @@ import (
 // FindingRepository is an in-memory finding store (dev/tests), deduped per
 // engagement by dedup key. Replaced by Postgres when a DB is configured.
 type FindingRepository struct {
-	mu          sync.RWMutex
-	data        map[shared.ID]map[string]finding.Finding // engagementID -> dedupKey -> finding
-	projections map[shared.ID]map[shared.ID]ports.FindingProjectionMode
+	mu                sync.RWMutex
+	data              map[shared.ID]map[string]finding.Finding // engagementID -> dedupKey -> finding
+	projections       map[shared.ID]map[shared.ID]ports.FindingProjectionMode
+	cloudObservations *CloudObservationStore
 }
 
 // NewFindingRepository returns an empty in-memory finding repository.
@@ -30,6 +31,12 @@ func NewFindingRepository() *FindingRepository {
 var _ ports.FindingRepository = (*FindingRepository)(nil)
 
 // ClaimFindingProjection atomically selects the CapSAST projection mode for a judgment.
+func (r *FindingRepository) SetCloudObservationStore(store *CloudObservationStore) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cloudObservations = store
+}
+
 func (r *FindingRepository) ClaimFindingProjection(_ context.Context, _ shared.ID, engagementID, judgmentID shared.ID, mode ports.FindingProjectionMode) error {
 	if mode != ports.FindingProjectionSAST && mode != ports.FindingProjectionDAST {
 		return fmt.Errorf("%w: unknown finding projection mode %q", shared.ErrValidation, mode)
@@ -139,12 +146,21 @@ func (r *FindingRepository) SetEvidenceScore(_ context.Context, engagementID, fi
 }
 
 // ListByEngagement returns the engagement's findings, highest risk first (KEV -> EPSS x CVSS).
-func (r *FindingRepository) ListByEngagement(_ context.Context, engagementID shared.ID) ([]finding.Finding, error) {
+func (r *FindingRepository) ListByEngagement(ctx context.Context, engagementID shared.ID) ([]finding.Finding, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	byKey := r.data[engagementID]
-	out := make([]finding.Finding, 0, len(byKey))
+	observationStore := r.cloudObservations
+	candidates := make([]finding.Finding, 0, len(byKey))
 	for _, f := range byKey {
+		candidates = append(candidates, f)
+	}
+	r.mu.RUnlock()
+	tenantID, _ := shared.TenantFrom(ctx)
+	out := make([]finding.Finding, 0, len(candidates))
+	for _, f := range candidates {
+		if f.Kind == finding.KindCloudPosture && (observationStore == nil || tenantID.IsZero() || !observationStore.FindingActive(tenantID, engagementID, f.ID)) {
+			continue
+		}
 		out = append(out, f)
 	}
 	sort.Slice(out, func(i, j int) bool {

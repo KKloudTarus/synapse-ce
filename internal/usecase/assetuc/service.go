@@ -91,6 +91,16 @@ type EdgeInput struct {
 	Confidence asset.EdgeConfidence
 }
 
+// UpsertCloudAsset adapts the CSPM port to the asset service.
+func (s *Service) UpsertCloudAsset(ctx context.Context, actor string, in ports.CloudAssetInput) (*asset.Asset, error) {
+	return s.UpsertAsset(ctx, actor, UpsertAssetInput{TenantID: in.TenantID, Kind: in.Kind, Key: in.Key, Name: in.Name, Attributes: in.Attributes})
+}
+
+// UpsertCloudEdge adapts the CSPM port to the asset service.
+func (s *Service) UpsertCloudEdge(ctx context.Context, actor string, in ports.CloudEdgeInput) error {
+	return s.UpsertEdge(ctx, actor, EdgeInput{TenantID: in.TenantID, From: in.From, To: in.To, Kind: in.Kind, Provenance: in.Provenance, Confidence: in.Confidence})
+}
+
 // UpsertEdge validates and persists an edge. It is idempotent by natural key
 // (tenant, from, to, kind, provenance).
 func (s *Service) UpsertEdge(ctx context.Context, actor string, in EdgeInput) error {

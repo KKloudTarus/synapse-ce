@@ -209,7 +209,7 @@ func NormalizeTarget(t Target, scopeEntry bool) (Target, error) {
 			return Target{}, err
 		}
 		out.Value = identity.URL
-	case TargetRepo, TargetImage:
+	case TargetRepo, TargetImage, TargetCloudAccount:
 		out.Value = v
 	default:
 		return Target{}, validationError("unknown scope target kind %q", t.Kind)

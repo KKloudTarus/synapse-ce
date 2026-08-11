@@ -76,6 +76,27 @@ func TestLoadAttackPathBounds(t *testing.T) {
 	}
 }
 
+func TestLoadCSPMDefaultsAndBounds(t *testing.T) {
+	for _, key := range []string{"SYNAPSE_CSPM_ENABLED", "SYNAPSE_CSPM_PROVIDERS", "SYNAPSE_CSPM_RATE"} {
+		t.Setenv(key, "")
+	}
+	cfg := Load()
+	if cfg.CSPMEnabled || len(cfg.CSPMProviders) != 0 || cfg.CSPMRate != 0 {
+		t.Fatalf("CSPM defaults = (%v,%v,%d)", cfg.CSPMEnabled, cfg.CSPMProviders, cfg.CSPMRate)
+	}
+	t.Setenv("SYNAPSE_CSPM_ENABLED", "true")
+	t.Setenv("SYNAPSE_CSPM_PROVIDERS", "aws,azure,gcp")
+	t.Setenv("SYNAPSE_CSPM_RATE", "25")
+	cfg = Load()
+	if !cfg.CSPMEnabled || len(cfg.CSPMProviders) != 3 || cfg.CSPMRate != 25 {
+		t.Fatalf("CSPM override = (%v,%v,%d)", cfg.CSPMEnabled, cfg.CSPMProviders, cfg.CSPMRate)
+	}
+	t.Setenv("SYNAPSE_CSPM_RATE", "101")
+	if got := Load().CSPMRate; got != 0 {
+		t.Fatalf("invalid CSPM rate = %d, want provider default", got)
+	}
+}
+
 // TestLoadReachability confirms the Tier-2 reachability proof is ON by default (effective-by-default
 // policy), that it can be opted out, and the govulncheck binary defaults sensibly.
 func TestLoadReachability(t *testing.T) {
