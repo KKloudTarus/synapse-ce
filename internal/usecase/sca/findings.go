@@ -190,8 +190,9 @@ func buildFindings(engagementID shared.ID, res *ScanResult, now time.Time, minSe
 		if sr.Severity != shared.SeverityUnknown && shared.SeverityRank(sr.Severity) < min {
 			continue
 		}
-		// Dedup on rule+file+line so a re-scan updates in place (1:1).
-		dedup := "sast:" + sr.RuleID + ":" + sr.File + ":" + strconv.Itoa(sr.Line)
+		// Dedup on rule+file+line so a re-scan updates in place (1:1). The same helper keys
+		// deterministic AI-triage evidence, preventing context/finding identity drift.
+		dedup := sastFindingDedupKey(sr)
 		scope := sbom.ClassifyScope(sr.File, "")
 		confidence := sr.Confidence
 		if confidence == "" {

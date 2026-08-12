@@ -34,30 +34,45 @@ func TestNewPendingRequiresPolicyHeldSealedCritique(t *testing.T) {
 	}
 }
 
-func TestNewPendingV4RequiresCompleteIndependenceMetadata(t *testing.T) {
+func TestNewPendingCurrentAndFuturePoliciesRequireCompleteIndependenceMetadata(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
-	valid := validInput()
-	valid.PolicyVersion = "fp-gate-v4"
-	valid.ProposerProvider, valid.ProposerModelFamily = "openai", "model-a"
-	valid.VerifierProvider, valid.VerifierModelFamily = "anthropic", "model-b"
-	valid.IndependencePolicy = "provider"
-	if _, err := NewPending(valid, now); err != nil {
-		t.Fatalf("complete v4 identity rejected: %v", err)
-	}
-	for name, mutate := range map[string]func(*Input){
-		"missing proposer provider": func(in *Input) { in.ProposerProvider = "" },
-		"missing proposer family":   func(in *Input) { in.ProposerModelFamily = "" },
-		"missing verifier provider": func(in *Input) { in.VerifierProvider = "" },
-		"missing verifier family":   func(in *Input) { in.VerifierModelFamily = "" },
-		"missing policy":            func(in *Input) { in.IndependencePolicy = "" },
-	} {
-		t.Run(name, func(t *testing.T) {
-			in := valid
-			mutate(&in)
-			if _, err := NewPending(in, now); !errors.Is(err, shared.ErrValidation) {
-				t.Fatalf("want validation error, got %v", err)
+	for _, version := range []string{"fp-gate-v4", "fp-gate-v5", "fp-gate-v6", "fp-gate-future"} {
+		t.Run(version, func(t *testing.T) {
+			valid := validInput()
+			valid.PolicyVersion = version
+			valid.ProposerProvider, valid.ProposerModelFamily = "openai", "model-a"
+			valid.VerifierProvider, valid.VerifierModelFamily = "anthropic", "model-b"
+			valid.IndependencePolicy = "provider"
+			if _, err := NewPending(valid, now); err != nil {
+				t.Fatalf("complete %s identity rejected: %v", version, err)
+			}
+			for name, mutate := range map[string]func(*Input){
+				"missing proposer provider": func(in *Input) { in.ProposerProvider = "" },
+				"missing proposer family":   func(in *Input) { in.ProposerModelFamily = "" },
+				"missing verifier provider": func(in *Input) { in.VerifierProvider = "" },
+				"missing verifier family":   func(in *Input) { in.VerifierModelFamily = "" },
+				"missing policy":            func(in *Input) { in.IndependencePolicy = "" },
+			} {
+				t.Run(name, func(t *testing.T) {
+					in := valid
+					mutate(&in)
+					if _, err := NewPending(in, now); !errors.Is(err, shared.ErrValidation) {
+						t.Fatalf("want validation error, got %v", err)
+					}
+				})
 			}
 		})
+	}
+}
+
+func TestNewPendingExplicitLegacyPolicyRemainsCompatible(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	for _, version := range []string{"fp-gate-v1", "fp-gate-v2", "fp-gate-v3"} {
+		in := validInput()
+		in.PolicyVersion = version
+		if _, err := NewPending(in, now); err != nil {
+			t.Fatalf("legacy %s review rejected: %v", version, err)
+		}
 	}
 }
 
@@ -128,13 +143,10 @@ func TestDecideRefusesEveryMachinePrincipalFamily(t *testing.T) {
 		"machine:worker", "bot:triage", "service:scanner",
 		"SYSTEM:DAST-ENGINE", "  system:dast-engine  ",
 	} {
-		// Claimed by the machine actor too, so the owner check cannot be what refuses it -- the point is
-		// that a machine principal is rejected on its own merits.
 		if _, err := base.Decide(DecisionAccept, actor, "reviewed evidence", 1, now.Add(time.Second)); !errors.Is(err, shared.ErrValidation) {
 			t.Errorf("machine actor %q must be rejected as a machine, got %v", actor, err)
 		}
 	}
-	// A human owner must still be able to decide, or the check would refuse everyone.
 	claimed, err := base.Claim("alice", 1, now.Add(time.Second))
 	if err != nil {
 		t.Fatal(err)

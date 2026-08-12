@@ -227,3 +227,40 @@ func TestTriagerWithoutTenantContextNeverCaches(t *testing.T) {
 		t.Fatalf("missing tenant identity must disable cache, calls=%d", proposer.callCount())
 	}
 }
+
+func TestEvidenceAwareCacheHitRevalidatesCitationsAgainstCurrentContext(t *testing.T) {
+	proposer := &countingTriageLLM{content: `{"verdict":"refuted","driver":"input_sanitized","confidence":91,"evidence_tokens":["ev:sanitizer"]}`}
+	cache := &testTriageCache{}
+	reader := &cacheSourceReader{snippet: "1: safe(query)\n", hash: strings.Repeat("a", 64)}
+	triager := NewTriager(New(proposer, "provider/model-a"), func(string) ports.SourceSnippetReader { return reader }).WithCache(cache, "policy-v1")
+	ctx := shared.WithTenant(context.Background(), "tenant-a")
+	f := mkFinding("1", "SQL query (app.go:1)")
+	f.EngagementID = "project-a"
+	evidence := map[string][]ports.AITriageEvidenceToken{f.DedupKey: {
+		{ID: "ev:cwe", Kind: "cwe", Value: "CWE-89"},
+		{ID: "ev:sanitizer", Kind: "sanitizer", Value: "sanitized before sink"},
+	}}
+
+	first := triager.TriageWithEvidence(ctx, []finding.Finding{f}, "/workspace", evidence)
+	if len(first) != 1 || proposer.callCount() != 1 {
+		t.Fatalf("first evidence-aware critique=%+v calls=%d", first, proposer.callCount())
+	}
+
+	cache.mu.Lock()
+	if len(cache.data) != 1 {
+		cache.mu.Unlock()
+		t.Fatalf("cache entries=%d, want 1", len(cache.data))
+	}
+	for key, decision := range cache.data {
+		// Keep the exact cache key/current dictionary but corrupt the claim's citation so it no
+		// longer supports input_sanitized. The use case must fail closed to a live miss.
+		decision.EvidenceTokens = []string{"ev:cwe"}
+		cache.data[key] = decision
+	}
+	cache.mu.Unlock()
+
+	second := triager.TriageWithEvidence(ctx, []finding.Finding{f}, "/workspace", evidence)
+	if len(second) != 1 || proposer.callCount() != 2 {
+		t.Fatalf("stale citation was reused instead of re-triaged: second=%+v calls=%d", second, proposer.callCount())
+	}
+}

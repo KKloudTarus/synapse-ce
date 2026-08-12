@@ -21,22 +21,46 @@ func (fixtureEvaluationTriager) Triage(_ context.Context, candidates []finding.F
 		}
 		switch candidate.DedupKey {
 		case "ai-eval:fp-go-constant-input", "ai-eval:fp-js-static-regexp", "ai-eval:tp-java-predictable-session":
-			c.Verdict, c.Confidence, c.SuspectedFP = "refuted", 95, true
-			c.Verified, c.VerifierVerdict, c.VerifierConfidence = true, "refuted", 92
+			c.Verdict, c.Driver, c.Confidence, c.SuspectedFP = "refuted", "constant_or_literal", 95, true
+			c.Verified, c.VerifierVerdict, c.VerifierDriver, c.VerifierConfidence = true, "refuted", "constant_or_literal", 92
 		case "ai-eval:tp-python-path-traversal":
-			c.Verdict, c.Confidence = "refuted", 94
-			c.VerifierVerdict, c.VerifierConfidence = "sound", 91
+			c.Verdict, c.Driver, c.Confidence = "refuted", "constant_or_literal", 94
+			c.VerifierVerdict, c.VerifierDriver, c.VerifierConfidence = "sound", "attacker_controlled", 91
 		case "ai-eval:uncertain-k8s-network-policy":
-			c.Verdict, c.Confidence = "refuted", 90
-			c.VerifierVerdict, c.VerifierConfidence = "uncertain", 82
+			c.Verdict, c.Driver, c.Confidence = "refuted", "constant_or_literal", 90
+			c.VerifierVerdict, c.VerifierDriver, c.VerifierConfidence = "uncertain", "insufficient_context", 82
 		case "ai-eval:uncertain-ruby-dispatch":
-			c.Verdict, c.Confidence = "uncertain", 70
+			c.Verdict, c.Driver, c.Confidence = "uncertain", "insufficient_context", 70
 		default:
-			c.Verdict, c.Confidence = "sound", 96
+			c.Verdict, c.Driver, c.Confidence = "sound", "attacker_controlled", 96
 		}
 		// A buggy injected triager may forge this field; shadow policy must clear it.
 		c.GateExempt = true
 		out = append(out, c)
+	}
+	return out
+}
+
+func (fixtureEvaluationTriager) TriageWithEvidence(_ context.Context, candidates []finding.Finding, _ string, evidence map[string][]ports.AITriageEvidenceToken) []ports.AICritique {
+	out := fixtureEvaluationTriager{}.Triage(context.Background(), candidates, "")
+	for i := range out {
+		c := &out[i]
+		c.PromptVersion = "fp-triage-v3"
+		c.ContextEvidence = append([]ports.AITriageEvidenceToken(nil), evidence[c.DedupKey]...)
+		proposerCitation := "ev:finding_identity"
+		verifierCitation := "ev:finding_identity"
+		if c.Verdict == "refuted" {
+			c.ContextEvidence = append(c.ContextEvidence, ports.AITriageEvidenceToken{ID: "ev:source", Kind: "source", Value: "synthetic evaluator deterministic cue: server-side constant literal"})
+			proposerCitation = "ev:source"
+		}
+		if c.VerifierVerdict == "refuted" {
+			if proposerCitation != "ev:source" {
+				c.ContextEvidence = append(c.ContextEvidence, ports.AITriageEvidenceToken{ID: "ev:source", Kind: "source", Value: "synthetic evaluator deterministic cue: server-side constant literal"})
+			}
+			verifierCitation = "ev:source"
+		}
+		c.EvidenceTokens = []string{proposerCitation}
+		c.VerifierEvidenceTokens = []string{verifierCitation}
 	}
 	return out
 }
@@ -60,7 +84,7 @@ func TestEvaluateFPTriageGoldenDataset(t *testing.T) {
 		ProposerProvider: "fixture-provider", ProposerModel: "fixture-proposer",
 		VerifierProvider: "fixture-provider", VerifierModel: "fixture-verifier",
 		IndependencePolicy: ports.AIIndependenceModelFamily,
-		PromptVersion:      "fixture-prompt-v1", PolicyVersion: aiTriagePolicyVersion,
+		PromptVersion:      "fp-triage-v3", PolicyVersion: aiTriagePolicyVersion,
 	}
 	report, err := EvaluateFPTriage(context.Background(), dataset, run, fixtureEvaluationTriager{})
 	if err != nil {

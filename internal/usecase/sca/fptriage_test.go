@@ -67,6 +67,7 @@ func verifiedCritique(key string) ports.AICritique {
 	return ports.AICritique{
 		DedupKey:            key,
 		Verdict:             "refuted",
+		Driver:              "constant_or_literal",
 		Confidence:          95,
 		SuspectedFP:         true,
 		ProposerModel:       "proposer-a",
@@ -78,8 +79,15 @@ func verifiedCritique(key string) ports.AICritique {
 		IndependencePolicy:  ports.AIIndependenceModelFamily,
 		Verified:            true,
 		VerifierVerdict:     "refuted",
+		VerifierDriver:      "constant_or_literal",
 		VerifierConfidence:  93,
-		PromptVersion:       "fp-triage-v2",
+		PromptVersion:       "fp-triage-v3",
+		ContextEvidence: []ports.AITriageEvidenceToken{
+			{ID: "ev:finding_identity", Kind: "finding_identity", Value: key},
+			{ID: "ev:source", Kind: "source", Value: "server-side constant literal"},
+		},
+		EvidenceTokens:         []string{"ev:source"},
+		VerifierEvidenceTokens: []string{"ev:source"},
 	}
 }
 
@@ -142,6 +150,37 @@ func TestApplyAIGatePolicy(t *testing.T) {
 	}
 	if c := byKey["sound"]; c.GateExempt || c.ReviewRequired || c.PolicyReason != aiPolicyNotSuspected {
 		t.Errorf("non-refuted critique should be informational only: %+v", c)
+	}
+}
+
+func TestApplyAIGatePolicyRequiresDeterministicEvidenceReceipt(t *testing.T) {
+	item := finding.Finding{DedupKey: "safe", Kind: finding.KindSAST, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, Severity: shared.SeverityMedium, CWE: "CWE-327"}
+	for name, mutate := range map[string]func(*ports.AICritique){
+		"legacy prompt":              func(c *ports.AICritique) { c.PromptVersion = "fp-triage-v2" },
+		"missing context":            func(c *ports.AICritique) { c.ContextEvidence = nil },
+		"foreign finding identity":   func(c *ports.AICritique) { c.ContextEvidence[0].Value = "other-finding" },
+		"missing proposer citation":  func(c *ports.AICritique) { c.EvidenceTokens = nil },
+		"unknown proposer citation":  func(c *ports.AICritique) { c.EvidenceTokens = []string{"ev:unknown"} },
+		"missing verifier citation":  func(c *ports.AICritique) { c.VerifierEvidenceTokens = nil },
+		"unknown verifier citation":  func(c *ports.AICritique) { c.VerifierEvidenceTokens = []string{"ev:unknown"} },
+		"unsupported proposer proof": func(c *ports.AICritique) { c.EvidenceTokens = []string{"ev:finding_identity"} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			critique := verifiedCritique("safe")
+			mutate(&critique)
+			result := &ScanResult{Findings: []finding.Finding{item}, AITriage: []ports.AICritique{critique}}
+			applyAIGatePolicy(result, true, aiTriageModeEnforce)
+			got := result.AITriage[0]
+			if got.GateExempt || !got.ReviewRequired || got.PolicyReason != aiPolicyDeterministicEvidenceRequired {
+				t.Fatalf("invalid evidence receipt gained authority: %+v", got)
+			}
+		})
+	}
+}
+
+func TestAITriagePolicyVersionBumpedForEvidenceAuthorization(t *testing.T) {
+	if aiTriagePolicyVersion != "fp-gate-v5" || EvaluationPolicyVersion() != "fp-gate-v5" {
+		t.Fatalf("evidence authorization contract must use fp-gate-v5, got %q/%q", aiTriagePolicyVersion, EvaluationPolicyVersion())
 	}
 }
 

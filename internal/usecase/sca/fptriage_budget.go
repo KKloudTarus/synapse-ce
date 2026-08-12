@@ -25,7 +25,7 @@ type AITriageBudget struct {
 	EvidenceRevokedExemptions int `json:"evidence_revoked_exemptions,omitempty"`
 }
 
-func (s *Service) runFPTriage(ctx context.Context, result *ScanResult, workspaceDir string, trace *scanDebugTrace) {
+func (s *Service) runFPTriage(ctx context.Context, result *ScanResult, workspaceDir string, trace *scanDebugTrace, sastRaws []ports.SASTRawFinding) {
 	if s == nil || s.fpTriager == nil || result == nil {
 		return
 	}
@@ -60,20 +60,23 @@ func (s *Service) runFPTriage(ctx context.Context, result *ScanResult, workspace
 	if trace != nil {
 		tstep = trace.start(stageFindings, "ai-fp-triage", "fp-triager", "AI false-positive triage", counts)
 	}
-	if observed, ok := s.fpTriager.(ports.ObservableFPTriager); ok {
-		observation := observed.TriageObserved(ctx, attempted, workspaceDir)
-		result.AITriage = observation.Critiques
-		result.AITriageTelemetry = &observation.Telemetry
-		if observation.Telemetry.BudgetSkippedFindings > 0 {
-			result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf(
-				"AI false-positive triage token/cost budget skipped %d attempted findings; they remain gating",
-				observation.Telemetry.BudgetSkippedFindings,
-			))
-		}
-	} else {
+	evidence := aiTriageEvidenceForCandidates(attempted, sastRaws)
+	switch triager := s.fpTriager.(type) {
+	case ports.EvidenceAwareObservableFPTriager:
+		observation := triager.TriageObservedWithEvidence(ctx, attempted, workspaceDir, evidence)
+		result.AITriage, result.AITriageTelemetry = observation.Critiques, &observation.Telemetry
+	case ports.EvidenceAwareFPTriager:
+		result.AITriage = triager.TriageWithEvidence(ctx, attempted, workspaceDir, evidence)
+	case ports.ObservableFPTriager:
+		observation := triager.TriageObserved(ctx, attempted, workspaceDir)
+		result.AITriage, result.AITriageTelemetry = observation.Critiques, &observation.Telemetry
+	default:
 		result.AITriage = s.fpTriager.Triage(ctx, attempted, workspaceDir)
 	}
-	applyAIGatePolicyWithIndependence(result, s.evidence != nil, s.fpTriageMode, s.fpTriageIndependence)
+	if result.AITriageTelemetry != nil && result.AITriageTelemetry.BudgetSkippedFindings > 0 {
+		result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf("AI false-positive triage token/cost budget skipped %d attempted findings; they remain gating", result.AITriageTelemetry.BudgetSkippedFindings))
+	}
+	applyAIGatePolicyWithServerEvidence(result, s.evidence != nil, s.fpTriageMode, s.fpTriageIndependence, evidence)
 	if result.AITriageTelemetry != nil {
 		result.AITriageTelemetry.GateExemptions = len(result.AIGateExemptKeys())
 		s.emitAITriageTelemetry(ctx, result)

@@ -256,6 +256,37 @@ func callMetric(role, provider, model, findingID, dedupKey string, started time.
 	}
 }
 
+func callMetricForPrompt(role, provider, model, findingID, dedupKey, version string, started time.Time, resp ports.ChatResponse, outcome string, price requestPrice) ports.FPTriageCallMetric {
+	m := callMetric(role, provider, model, findingID, dedupKey, started, resp, outcome, price)
+	m.PromptVersion = version
+	return m
+}
+
+func (c *Coordinator) observeEvidenceCall(ctx context.Context, llm ports.LLM, breaker *circuitBreaker, req ports.ChatRequest, role, provider, findingID, dedupKey string, price requestPrice, observer *runObserver, evidence []ports.AITriageEvidenceToken) (judgment.CritiqueClaim, []string, error) {
+	started := time.Now()
+	if !breaker.allow() {
+		observer.record(callMetricForPrompt(role, provider, req.Model, findingID, dedupKey, evidencePromptVersion, started, ports.ChatResponse{}, "circuit_open", price))
+		return judgment.CritiqueClaim{}, nil, errTriageCircuitOpen
+	}
+	resp, err := llm.Chat(ctx, req)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			breaker.failure()
+		}
+		observer.record(callMetricForPrompt(role, provider, req.Model, findingID, dedupKey, evidencePromptVersion, started, resp, classifyCallError(ctx, err), price))
+		return judgment.CritiqueClaim{}, nil, err
+	}
+	claim, citations, err := parseCritiqueWithEvidence(resp.Content, evidence)
+	if err != nil {
+		breaker.failure()
+		observer.record(callMetricForPrompt(role, provider, req.Model, findingID, dedupKey, evidencePromptVersion, started, resp, "parse_failure", price))
+		return judgment.CritiqueClaim{}, nil, err
+	}
+	breaker.success()
+	observer.record(callMetricForPrompt(role, provider, req.Model, findingID, dedupKey, evidencePromptVersion, started, resp, "success", price))
+	return claim, citations, nil
+}
+
 func (c *Coordinator) proposerPrice() requestPrice {
 	return requestPrice{c.operations.ProposerInputMicroUSDPerMillion, c.operations.ProposerOutputMicroUSDPerMillion}
 }

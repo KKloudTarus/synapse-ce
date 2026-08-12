@@ -28,6 +28,8 @@ type Triager struct {
 
 var _ ports.FPTriager = (*Triager)(nil)
 var _ ports.ObservableFPTriager = (*Triager)(nil)
+var _ ports.EvidenceAwareFPTriager = (*Triager)(nil)
+var _ ports.EvidenceAwareObservableFPTriager = (*Triager)(nil)
 
 // NewTriager wraps a Coordinator. readerFor returns the source reader rooted at a scan's workspace dir
 // (nil-safe: a nil factory means the coordinator critiques on metadata only).
@@ -56,8 +58,20 @@ func (t *Triager) Triage(ctx context.Context, candidates []finding.Finding, work
 	return t.TriageObserved(ctx, candidates, workspaceDir).Critiques
 }
 
+func (t *Triager) TriageWithEvidence(ctx context.Context, candidates []finding.Finding, workspaceDir string, evidence map[string][]ports.AITriageEvidenceToken) []ports.AICritique {
+	return t.TriageObservedWithEvidence(ctx, candidates, workspaceDir, evidence).Critiques
+}
+
 // TriageObserved performs the same fail-safe triage while returning source-free operational metrics.
 func (t *Triager) TriageObserved(ctx context.Context, candidates []finding.Finding, workspaceDir string) ports.FPTriageObservedResult {
+	return t.triageObserved(ctx, candidates, workspaceDir, nil, false)
+}
+
+func (t *Triager) TriageObservedWithEvidence(ctx context.Context, candidates []finding.Finding, workspaceDir string, evidence map[string][]ports.AITriageEvidenceToken) ports.FPTriageObservedResult {
+	return t.triageObserved(ctx, candidates, workspaceDir, evidence, true)
+}
+
+func (t *Triager) triageObserved(ctx context.Context, candidates []finding.Finding, workspaceDir string, evidence map[string][]ports.AITriageEvidenceToken, evidenceRequired bool) ports.FPTriageObservedResult {
 	if t == nil || t.coord == nil || len(candidates) == 0 {
 		return ports.FPTriageObservedResult{}
 	}
@@ -65,15 +79,18 @@ func (t *Triager) TriageObserved(ctx context.Context, candidates []finding.Findi
 	if t.readerFor != nil {
 		reader = t.readerFor(workspaceDir)
 	}
-	if t.cache == nil {
-		critiques, telemetry := t.coord.assessPreparedObserved(ctx, prepareCandidates(candidates, reader))
-		return ports.FPTriageObservedResult{Critiques: t.mapCritiques(critiques), Telemetry: telemetry}
-	}
 	prepared := make([]preparedFinding, len(candidates))
 	for i := range candidates {
-		prepared[i] = t.coord.prepare(ctx, candidates[i], reader)
+		if evidenceRequired {
+			prepared[i] = t.coord.prepareWithEvidence(ctx, candidates[i], reader, evidence[candidates[i].DedupKey], true)
+		} else {
+			prepared[i] = t.coord.prepare(ctx, candidates[i], reader)
+		}
 	}
-
+	if t.cache == nil {
+		critiques, telemetry := t.coord.assessPreparedObserved(ctx, prepared)
+		return ports.FPTriageObservedResult{Critiques: t.mapCritiques(critiques), Telemetry: telemetry}
+	}
 	crits := make([]Critique, len(candidates))
 	misses := make([]preparedFinding, 0, len(candidates))
 	missIndexes := make([]int, 0, len(candidates))
@@ -81,11 +98,15 @@ func (t *Triager) TriageObserved(ctx context.Context, candidates []finding.Findi
 	cacheable := make([]bool, len(candidates))
 	cacheHits := 0
 	for i := range prepared {
+		if prepared[i].evidenceErr != nil {
+			crits[i] = Critique{FindingID: candidates[i].ID.String(), DedupKey: candidates[i].DedupKey, ContextEvidence: append([]ports.AITriageEvidenceToken(nil), prepared[i].evidence...), PromptVersion: promptVersionFor(prepared[i]), Err: prepared[i].evidenceErr}
+			continue
+		}
 		key, ok := t.cacheKey(ctx, prepared[i])
 		keys[i], cacheable[i] = key, ok
 		if ok {
 			if cached, hit, err := t.cache.Load(ctx, key); err == nil && hit {
-				if critique, valid := critiqueFromCache(prepared[i].finding, key, cached); valid {
+				if critique, valid := critiqueFromCache(prepared[i], key, cached); valid {
 					crits[i] = critique
 					cacheHits++
 					continue
@@ -108,7 +129,6 @@ func (t *Triager) TriageObserved(ctx context.Context, candidates []finding.Findi
 			_ = t.cache.Store(ctx, keys[idx], decisionForCache(critique))
 		}
 	}
-
 	telemetry.CacheHits = cacheHits
 	telemetry.Comparisons = 0
 	telemetry.Disagreements = 0
@@ -137,31 +157,30 @@ func (t *Triager) mapCritiques(crits []Critique) []ports.AICritique {
 		if c.Err != nil {
 			continue
 		}
+		version := c.PromptVersion
+		if version == "" {
+			version = promptVersion
+		}
 		critique := ports.AICritique{
-			FindingID:           c.FindingID,
-			DedupKey:            c.DedupKey,
-			Verdict:             string(c.Claim.Verdict),
-			Driver:              c.Claim.Driver,
-			Confidence:          c.Claim.Confidence,
-			SuspectedFP:         c.SuspectedFP(t.minConf),
-			Verified:            c.VerifiedConsensus(t.minConf),
-			ProposerModel:       t.coord.ProposerModel(),
-			ProposerProvider:    t.coord.ProposerProvider(),
-			ProposerModelFamily: agent.CanonicalModelID(t.coord.ProposerModel()),
-			VerifierModel:       t.coord.VerifierModel(),
-			VerifierProvider:    t.coord.VerifierProvider(),
-			VerifierModelFamily: agent.CanonicalModelID(t.coord.VerifierModel()),
-			IndependencePolicy:  t.coord.IndependencePolicy(),
-			PromptVersion:       promptVersion,
+			FindingID: c.FindingID, DedupKey: c.DedupKey, Verdict: string(c.Claim.Verdict), Driver: c.Claim.Driver,
+			Confidence: c.Claim.Confidence, SuspectedFP: c.SuspectedFP(t.minConf), Verified: c.VerifiedConsensus(t.minConf),
+			ProposerModel: t.coord.ProposerModel(), ProposerProvider: t.coord.ProposerProvider(), ProposerModelFamily: agent.CanonicalModelID(t.coord.ProposerModel()),
+			VerifierModel: t.coord.VerifierModel(), VerifierProvider: t.coord.VerifierProvider(), VerifierModelFamily: agent.CanonicalModelID(t.coord.VerifierModel()), IndependencePolicy: t.coord.IndependencePolicy(),
+			PromptVersion: version, ContextEvidence: append([]ports.AITriageEvidenceToken(nil), c.ContextEvidence...), EvidenceTokens: append([]string(nil), c.EvidenceTokens...), VerifierEvidenceTokens: append([]string(nil), c.VerifierEvidenceTokens...),
 		}
 		if c.Verifier != nil {
-			critique.VerifierVerdict = string(c.Verifier.Verdict)
-			critique.VerifierDriver = c.Verifier.Driver
-			critique.VerifierConfidence = c.Verifier.Confidence
+			critique.VerifierVerdict, critique.VerifierDriver, critique.VerifierConfidence = string(c.Verifier.Verdict), c.Verifier.Driver, c.Verifier.Confidence
 		}
 		out = append(out, critique)
 	}
 	return out
+}
+
+func preparedPrompt(p preparedFinding) (string, string) {
+	if p.evidenceRequired {
+		return userPromptWithEvidence(p.finding, p.snippet, p.evidence), evidencePromptVersion
+	}
+	return userPrompt(p.finding, p.snippet), promptVersion
 }
 
 func (t *Triager) cacheKey(ctx context.Context, prepared preparedFinding) (ports.FPTriageCacheKey, bool) {
@@ -174,17 +193,18 @@ func (t *Triager) cacheKey(ctx context.Context, prepared preparedFinding) (ports
 		// did not bind it still receives live triage, but cannot read or populate the cache.
 		return ports.FPTriageCacheKey{}, false
 	}
+	prompt, version := preparedPrompt(prepared)
 	key := ports.FPTriageCacheKey{
 		TenantID:           tenantID,
 		ScopeID:            prepared.finding.EngagementID,
 		FindingFingerprint: finding.Identity(prepared.finding),
 		SourceSHA256:       prepared.sourceSHA256,
-		ContextSHA256:      sha256Hex([]byte(userPrompt(prepared.finding, prepared.snippet))),
+		ContextSHA256:      sha256Hex([]byte(prompt)),
 		ProposerProvider:   strings.TrimSpace(t.coord.ProposerProvider()),
 		ProposerModel:      strings.TrimSpace(t.coord.ProposerModel()),
 		VerifierProvider:   strings.TrimSpace(t.coord.VerifierProvider()),
 		VerifierModel:      strings.TrimSpace(t.coord.VerifierModel()),
-		PromptVersion:      promptVersion,
+		PromptVersion:      version,
 		PolicyVersion:      t.policy,
 	}
 	if key.TenantID.IsZero() || key.ScopeID.IsZero() || strings.TrimSpace(key.FindingFingerprint) == "" ||
@@ -196,32 +216,45 @@ func (t *Triager) cacheKey(ctx context.Context, prepared preparedFinding) (ports
 }
 
 func decisionForCache(c Critique) ports.FPTriageCachedDecision {
-	decision := ports.FPTriageCachedDecision{
-		Verdict: string(c.Claim.Verdict), Driver: c.Claim.Driver, Confidence: c.Claim.Confidence,
-	}
+	d := ports.FPTriageCachedDecision{Verdict: string(c.Claim.Verdict), Driver: c.Claim.Driver, Confidence: c.Claim.Confidence, EvidenceTokens: append([]string(nil), c.EvidenceTokens...)}
 	if c.Verifier != nil {
-		decision.VerifierPresent = true
-		decision.VerifierVerdict = string(c.Verifier.Verdict)
-		decision.VerifierDriver = c.Verifier.Driver
-		decision.VerifierConfidence = c.Verifier.Confidence
+		d.VerifierPresent, d.VerifierVerdict, d.VerifierDriver, d.VerifierConfidence = true, string(c.Verifier.Verdict), c.Verifier.Driver, c.Verifier.Confidence
+		d.VerifierEvidenceTokens = append([]string(nil), c.VerifierEvidenceTokens...)
 	}
-	return decision
+	return d
 }
 
-func critiqueFromCache(f finding.Finding, key ports.FPTriageCacheKey, d ports.FPTriageCachedDecision) (Critique, bool) {
+func critiqueFromCache(prepared preparedFinding, key ports.FPTriageCacheKey, d ports.FPTriageCachedDecision) (Critique, bool) {
 	claim := judgment.CritiqueClaim{Verdict: judgment.CritiqueVerdict(d.Verdict), Driver: d.Driver, Confidence: d.Confidence}
 	if claim.Validate() != nil || (key.VerifierModel == "") != !d.VerifierPresent {
 		return Critique{}, false
 	}
-	critique := Critique{FindingID: f.ID.String(), DedupKey: f.DedupKey, Claim: claim, VerifyAttempted: key.VerifierModel != ""}
+	c := Critique{FindingID: prepared.finding.ID.String(), DedupKey: prepared.finding.DedupKey, Claim: claim, VerifyAttempted: key.VerifierModel != "", ContextEvidence: append([]ports.AITriageEvidenceToken(nil), prepared.evidence...), PromptVersion: key.PromptVersion}
+	if prepared.evidenceRequired {
+		if key.PromptVersion != evidencePromptVersion {
+			return Critique{}, false
+		}
+		citations, err := validateEvidenceCitations(d.EvidenceTokens, prepared.evidence)
+		if err != nil || citationSupportsClaim(claim, citations, prepared.evidence) != nil {
+			return Critique{}, false
+		}
+		c.EvidenceTokens = citations
+	}
 	if d.VerifierPresent {
 		verifier := judgment.CritiqueClaim{Verdict: judgment.CritiqueVerdict(d.VerifierVerdict), Driver: d.VerifierDriver, Confidence: d.VerifierConfidence}
 		if verifier.Validate() != nil {
 			return Critique{}, false
 		}
-		critique.Verifier = &verifier
+		if prepared.evidenceRequired {
+			citations, err := validateEvidenceCitations(d.VerifierEvidenceTokens, prepared.evidence)
+			if err != nil || citationSupportsClaim(verifier, citations, prepared.evidence) != nil {
+				return Critique{}, false
+			}
+			c.VerifierEvidenceTokens = citations
+		}
+		c.Verifier = &verifier
 	}
-	return critique, true
+	return c, true
 }
 
 func sha256Hex(data []byte) string {

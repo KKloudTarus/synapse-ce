@@ -1,5 +1,5 @@
 // Package fptriagecache provides a bounded, filesystem-backed cache for typed AI false-positive
-// triage claims. Entries contain no source text, credentials, gate authority, or evidence references.
+// triage claims. Entries contain no source text, credentials, gate authority, token values, or evidence-ledger references.
 // The use case rebinds every hit to the current finding, reapplies deterministic policy, and seals it
 // into the current scan's evidence link.
 package fptriagecache
@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -29,6 +30,8 @@ const (
 	maxCacheFiles  = 4096
 	staleTempAfter = time.Hour
 )
+
+var cachedEvidenceTokenRE = regexp.MustCompile(`^ev:[a-z][a-z0-9_]{0,47}$`)
 
 // Cache stores one immutable JSON envelope per content-addressed key. The root must be operator-owned;
 // New creates only the AI-triage subdirectory, with owner-only permissions, on the first write.
@@ -176,6 +179,9 @@ func validKey(key ports.FPTriageCacheKey) bool {
 }
 
 func validDecision(key ports.FPTriageCacheKey, decision ports.FPTriageCachedDecision) bool {
+	if !validCachedEvidenceTokens(decision.EvidenceTokens) || !validCachedEvidenceTokens(decision.VerifierEvidenceTokens) {
+		return false
+	}
 	claim := judgment.CritiqueClaim{
 		Verdict: judgment.CritiqueVerdict(decision.Verdict), Driver: decision.Driver, Confidence: decision.Confidence,
 	}
@@ -183,13 +189,30 @@ func validDecision(key ports.FPTriageCacheKey, decision ports.FPTriageCachedDeci
 		return false
 	}
 	if !decision.VerifierPresent {
-		return decision.VerifierVerdict == "" && decision.VerifierDriver == "" && decision.VerifierConfidence == 0
+		return decision.VerifierVerdict == "" && decision.VerifierDriver == "" && decision.VerifierConfidence == 0 && len(decision.VerifierEvidenceTokens) == 0
 	}
 	verifier := judgment.CritiqueClaim{
 		Verdict: judgment.CritiqueVerdict(decision.VerifierVerdict),
 		Driver:  decision.VerifierDriver, Confidence: decision.VerifierConfidence,
 	}
 	return verifier.Validate() == nil
+}
+
+func validCachedEvidenceTokens(tokens []string) bool {
+	if len(tokens) > 8 {
+		return false
+	}
+	seen := map[string]struct{}{}
+	for _, token := range tokens {
+		if token != strings.TrimSpace(token) || !cachedEvidenceTokenRE.MatchString(token) {
+			return false
+		}
+		if _, ok := seen[token]; ok {
+			return false
+		}
+		seen[token] = struct{}{}
+	}
+	return true
 }
 
 func validSHA256(value string) bool {

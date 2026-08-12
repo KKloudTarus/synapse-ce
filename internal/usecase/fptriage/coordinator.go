@@ -41,12 +41,16 @@ type SourceReader = ports.SourceSnippetReader
 // CLI analogue of the judgment gate's "a distinct verifier's sealed verdict, self-confirm forbidden".
 // VerifyAttempted records that a blind verifier was tried; Verifier is nil if that call failed.
 type Critique struct {
-	FindingID       string
-	DedupKey        string
-	Claim           judgment.CritiqueClaim  // the proposer's verdict
-	Verifier        *judgment.CritiqueClaim // the distinct verifier's verdict, when one was run
-	VerifyAttempted bool                    // a distinct blind verifier was configured and tried
-	Err             error
+	FindingID              string
+	DedupKey               string
+	Claim                  judgment.CritiqueClaim
+	Verifier               *judgment.CritiqueClaim
+	VerifyAttempted        bool
+	ContextEvidence        []ports.AITriageEvidenceToken
+	EvidenceTokens         []string
+	VerifierEvidenceTokens []string
+	PromptVersion          string
+	Err                    error
 }
 
 // SuspectedFP reports the AI's advisory false-positive opinion. When a distinct verifier was attempted,
@@ -96,12 +100,15 @@ type Coordinator struct {
 // implements ports.SourceSnippetContextReader; cacheable is false when that stronger snapshot could not
 // be obtained, so a partial snippet hash can never masquerade as full source identity.
 type preparedFinding struct {
-	finding      finding.Finding
-	snippet      string
-	sourceSHA256 string
-	cacheable    bool
-	reader       SourceReader
-	ready        bool
+	finding          finding.Finding
+	snippet          string
+	sourceSHA256     string
+	cacheable        bool
+	reader           SourceReader
+	ready            bool
+	evidence         []ports.AITriageEvidenceToken
+	evidenceRequired bool
+	evidenceErr      error
 }
 
 const (
@@ -224,8 +231,26 @@ func (c *Coordinator) Assess(ctx context.Context, candidates []finding.Finding, 
 	return c.assessPrepared(ctx, prepared)
 }
 
+// AssessWithEvidence uses the same operational budget/circuit path as Assess, but requires a valid
+// deterministic dictionary for every candidate before reserving tokens or contacting either model.
+func (c *Coordinator) AssessWithEvidence(ctx context.Context, candidates []finding.Finding, src SourceReader, evidence map[string][]ports.AITriageEvidenceToken) []Critique {
+	if c == nil || c.llm == nil || len(candidates) == 0 {
+		return make([]Critique, len(candidates))
+	}
+	prepared := make([]preparedFinding, len(candidates))
+	for i := range candidates {
+		prepared[i] = preparedFinding{finding: candidates[i], reader: src, evidence: evidence[candidates[i].DedupKey], evidenceRequired: true}
+	}
+	return c.assessPrepared(ctx, prepared)
+}
+
 func (c *Coordinator) prepare(ctx context.Context, f finding.Finding, src SourceReader) preparedFinding {
-	p := preparedFinding{finding: f, ready: true}
+	return c.prepareWithEvidence(ctx, f, src, nil, false)
+}
+
+func (c *Coordinator) prepareWithEvidence(ctx context.Context, f finding.Finding, src SourceReader, evidence []ports.AITriageEvidenceToken, required bool) preparedFinding {
+	normalized, evidenceErr := normalizeEvidence(evidence, required)
+	p := preparedFinding{finding: f, ready: true, evidence: normalized, evidenceRequired: required, evidenceErr: evidenceErr}
 	file, line, located := locationOf(f)
 	if !located {
 		// No source was supplied to the model, so a stable empty-source sentinel fully describes this
@@ -240,13 +265,11 @@ func (c *Coordinator) prepare(ctx context.Context, f finding.Finding, src Source
 	if snapshot, ok := src.(ports.SourceSnippetContextReader); ok {
 		snippet, sourceHash, err := snapshot.SnippetContext(ctx, file, line, c.radius)
 		if err == nil && validSHA256(sourceHash) {
-			p.snippet = snippet
-			p.sourceSHA256 = sourceHash
-			p.cacheable = true
+			p.snippet, p.sourceSHA256, p.cacheable = snippet, sourceHash, true
 			return p
 		}
 		// A full-file snapshot may be unavailable (for example, an intentionally capped giant file).
-		// Preserve the previous best-effort triage behavior by using the ordinary snippet, uncached.
+		// Preserve best-effort live triage by using the ordinary snippet, uncached.
 		if snippet, snippetErr := src.Snippet(ctx, file, line, c.radius); snippetErr == nil {
 			p.snippet = snippet
 		}
@@ -281,19 +304,28 @@ func (c *Coordinator) assessPreparedObserved(ctx context.Context, candidates []p
 	skipped := 0
 	for i, candidate := range candidates {
 		if !candidate.ready {
-			candidate = c.prepare(ctx, candidate.finding, candidate.reader)
+			candidate = c.prepareWithEvidence(ctx, candidate.finding, candidate.reader, candidate.evidence, candidate.evidenceRequired)
 		}
-		proposer := c.proposerRequest(candidate.finding, candidate.snippet)
+		work[i].candidate = candidate
+		if candidate.evidenceErr != nil {
+			version := promptVersion
+			if candidate.evidenceRequired {
+				version = evidencePromptVersion
+			}
+			out[i] = Critique{FindingID: candidate.finding.ID.String(), DedupKey: candidate.finding.DedupKey, ContextEvidence: append([]ports.AITriageEvidenceToken(nil), candidate.evidence...), PromptVersion: version, Err: candidate.evidenceErr}
+			continue
+		}
+		proposer := c.proposerRequest(candidate)
 		requests := []pricedRequest{{request: proposer, price: c.proposerPrice()}}
 		var verifier ports.ChatRequest
 		if c.verifier != nil {
-			verifier = c.verifierRequest(candidate.finding, candidate.snippet)
+			verifier = c.verifierRequest(candidate)
 			requests = append(requests, pricedRequest{request: verifier, price: c.verifierPrice()})
 		}
 		admitted := budget.reservePair(requests...)
 		work[i] = assessment{candidate: candidate, proposer: proposer, verifier: verifier, admitted: admitted}
 		if !admitted {
-			out[i] = Critique{FindingID: candidate.finding.ID.String(), DedupKey: candidate.finding.DedupKey, Err: errTriageBudgetExhausted}
+			out[i] = Critique{FindingID: candidate.finding.ID.String(), DedupKey: candidate.finding.DedupKey, ContextEvidence: append([]ports.AITriageEvidenceToken(nil), candidate.evidence...), PromptVersion: promptVersionFor(candidate), Err: errTriageBudgetExhausted}
 			skipped++
 		}
 	}
@@ -310,7 +342,7 @@ func (c *Coordinator) assessPreparedObserved(ctx context.Context, candidates []p
 		case <-ctx.Done():
 			for j := i; j < len(work); j++ {
 				if work[j].admitted {
-					out[j] = Critique{FindingID: work[j].candidate.finding.ID.String(), DedupKey: work[j].candidate.finding.DedupKey, Err: ctx.Err()}
+					out[j] = Critique{FindingID: work[j].candidate.finding.ID.String(), DedupKey: work[j].candidate.finding.DedupKey, ContextEvidence: append([]ports.AITriageEvidenceToken(nil), work[j].candidate.evidence...), PromptVersion: promptVersionFor(work[j].candidate), Err: ctx.Err()}
 				}
 			}
 			wg.Wait()
@@ -324,14 +356,10 @@ func (c *Coordinator) assessPreparedObserved(ctx context.Context, candidates []p
 			// finding's Err (it then gates normally), never taking down the scan pipeline.
 			defer func() {
 				if r := recover(); r != nil {
-					out[i] = Critique{
-						FindingID: work[i].candidate.finding.ID.String(),
-						DedupKey:  work[i].candidate.finding.DedupKey,
-						Err:       fmt.Errorf("critique panicked: %v", r),
-					}
+					out[i] = Critique{FindingID: work[i].candidate.finding.ID.String(), DedupKey: work[i].candidate.finding.DedupKey, ContextEvidence: append([]ports.AITriageEvidenceToken(nil), work[i].candidate.evidence...), PromptVersion: promptVersionFor(work[i].candidate), Err: fmt.Errorf("critique panicked: %v", r)}
 				}
 			}()
-			out[i] = c.assessOneObserved(ctx, work[i].candidate.finding, work[i].proposer, work[i].verifier, observer)
+			out[i] = c.assessOneObserved(ctx, work[i].candidate, work[i].proposer, work[i].verifier, observer)
 		}(i)
 	}
 	wg.Wait()
@@ -355,34 +383,33 @@ func (c *Coordinator) assessOne(ctx context.Context, f finding.Finding, snippet 
 	return out[0]
 }
 
-func (c *Coordinator) proposerRequest(f finding.Finding, snippet string) ports.ChatRequest {
-	return ports.ChatRequest{
-		Model:          c.model,
-		Temperature:    ports.Temp(0),
-		MaxTokens:      512,
-		ResponseSchema: critiqueSchema,
-		Messages: []agent.Message{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userPrompt(f, snippet)},
-		},
+func promptVersionFor(p preparedFinding) string {
+	if p.evidenceRequired {
+		return evidencePromptVersion
 	}
+	return promptVersion
 }
 
-func (c *Coordinator) verifierRequest(f finding.Finding, snippet string) ports.ChatRequest {
-	return ports.ChatRequest{
-		Model:          c.verifierModel,
-		Temperature:    ports.Temp(0),
-		MaxTokens:      512,
-		ResponseSchema: critiqueSchema,
-		Messages: []agent.Message{
-			{Role: "system", Content: verifierSystemPrompt},
-			{Role: "user", Content: verifierUserPrompt(f, snippet)},
-		},
+func (c *Coordinator) proposerRequest(p preparedFinding) ports.ChatRequest {
+	if p.evidenceRequired {
+		return ports.ChatRequest{Model: c.model, Temperature: ports.Temp(0), MaxTokens: 512, ResponseSchema: evidenceCritiqueSchema,
+			Messages: []agent.Message{{Role: "system", Content: evidenceSystemPrompt}, {Role: "user", Content: userPromptWithEvidence(p.finding, p.snippet, p.evidence)}}}
 	}
+	return ports.ChatRequest{Model: c.model, Temperature: ports.Temp(0), MaxTokens: 512, ResponseSchema: critiqueSchema,
+		Messages: []agent.Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: userPrompt(p.finding, p.snippet)}}}
 }
 
-func (c *Coordinator) assessOneObserved(ctx context.Context, f finding.Finding, proposerReq, verifierReq ports.ChatRequest, observer *runObserver) Critique {
-	res := Critique{FindingID: string(f.ID), DedupKey: f.DedupKey}
+func (c *Coordinator) verifierRequest(p preparedFinding) ports.ChatRequest {
+	if p.evidenceRequired {
+		return ports.ChatRequest{Model: c.verifierModel, Temperature: ports.Temp(0), MaxTokens: 512, ResponseSchema: evidenceCritiqueSchema,
+			Messages: []agent.Message{{Role: "system", Content: evidenceVerifierSystemPrompt}, {Role: "user", Content: verifierUserPromptWithEvidence(p.finding, p.snippet, p.evidence)}}}
+	}
+	return ports.ChatRequest{Model: c.verifierModel, Temperature: ports.Temp(0), MaxTokens: 512, ResponseSchema: critiqueSchema,
+		Messages: []agent.Message{{Role: "system", Content: verifierSystemPrompt}, {Role: "user", Content: verifierUserPrompt(p.finding, p.snippet)}}}
+}
+
+func (c *Coordinator) assessOneObserved(ctx context.Context, p preparedFinding, proposerReq, verifierReq ports.ChatRequest, observer *runObserver) Critique {
+	res := Critique{FindingID: p.finding.ID.String(), DedupKey: p.finding.DedupKey, ContextEvidence: append([]ports.AITriageEvidenceToken(nil), p.evidence...), PromptVersion: promptVersionFor(p)}
 	if ctx.Err() != nil {
 		res.Err = ctx.Err()
 		return res
@@ -391,12 +418,24 @@ func (c *Coordinator) assessOneObserved(ctx context.Context, f finding.Finding, 
 	// context, so neither invocation order nor prompt content can anchor it to the proposer's conclusion.
 	if c.verifier != nil {
 		res.VerifyAttempted = true
-		if v, verr := c.observeCall(ctx, c.verifier, c.verifierCircuit, verifierReq, "verifier", c.verifierProvider, f.ID.String(), f.DedupKey, c.verifierPrice(), observer); verr == nil {
+		if p.evidenceRequired {
+			if v, cites, verr := c.observeEvidenceCall(ctx, c.verifier, c.verifierCircuit, verifierReq, "verifier", c.verifierProvider, p.finding.ID.String(), p.finding.DedupKey, c.verifierPrice(), observer, p.evidence); verr == nil {
+				res.Verifier, res.VerifierEvidenceTokens = &v, cites
+			}
+		} else if v, verr := c.observeCall(ctx, c.verifier, c.verifierCircuit, verifierReq, "verifier", c.verifierProvider, p.finding.ID.String(), p.finding.DedupKey, c.verifierPrice(), observer); verr == nil {
 			res.Verifier = &v
 		}
 	}
-
-	claim, err := c.observeCall(ctx, c.llm, c.proposerCircuit, proposerReq, "proposer", c.proposerProvider, f.ID.String(), f.DedupKey, c.proposerPrice(), observer)
+	if p.evidenceRequired {
+		claim, cites, err := c.observeEvidenceCall(ctx, c.llm, c.proposerCircuit, proposerReq, "proposer", c.proposerProvider, p.finding.ID.String(), p.finding.DedupKey, c.proposerPrice(), observer, p.evidence)
+		if err != nil {
+			res.Err = fmt.Errorf("critique llm: %w", err)
+			return res
+		}
+		res.Claim, res.EvidenceTokens = claim, cites
+		return res
+	}
+	claim, err := c.observeCall(ctx, c.llm, c.proposerCircuit, proposerReq, "proposer", c.proposerProvider, p.finding.ID.String(), p.finding.DedupKey, c.proposerPrice(), observer)
 	if err != nil {
 		res.Err = fmt.Errorf("critique llm: %w", err)
 		return res
