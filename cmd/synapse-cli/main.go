@@ -1352,11 +1352,21 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		sca.SetFPTriageMode(cfg.FPTriageMode)
 		sca.SetFPTriageMaxFindings(cfg.FPTriageMaxFindings)
 		sca.SetFPTriageIndependence(cfg.FPTriageIndependence)
+		sca.SetFPTriageAlertPolicy(cfg.FPTriageAlertMinSamples, cfg.FPTriageDisagreeBaseBPS,
+			cfg.FPTriageExemptBaseBPS, cfg.FPTriageParseFailBaseBPS, cfg.FPTriageAlertDeltaBPS)
 		if llm, lerr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); lerr != nil {
 			fmt.Fprintf(os.Stderr, "synapse-cli: AI false-positive triage disabled: %v\n", lerr)
 		} else {
 			coord := fptriage.NewWithIdentity(llm, cfg.FPTriageProvider, cfg.FPTriageModel).
-				WithConcurrency(cfg.FPTriageConcurrency)
+				WithConcurrency(cfg.FPTriageConcurrency).
+				WithOperationalPolicy(ports.FPTriageOperationalPolicy{
+					MaxTokens: cfg.FPTriageMaxTokens, MaxCostMicroUSD: cfg.FPTriageMaxCostMicroUSD,
+					ProposerInputMicroUSDPerMillion:  cfg.FPTriageProposerInputRate,
+					ProposerOutputMicroUSDPerMillion: cfg.FPTriageProposerOutputRate,
+					VerifierInputMicroUSDPerMillion:  cfg.FPTriageVerifierInputRate,
+					VerifierOutputMicroUSDPerMillion: cfg.FPTriageVerifierOutputRate,
+					CircuitFailureThreshold:          cfg.FPTriageCircuitFailures, CircuitCooldown: cfg.FPTriageCircuitCooldown,
+				})
 			if strings.TrimSpace(cfg.VerifierModel) != "" {
 				if !agent.IndependentLLMs(cfg.FPTriageProvider, cfg.FPTriageModel, cfg.VerifierProvider, cfg.VerifierModel, cfg.FPTriageIndependence) {
 					fmt.Fprintf(os.Stderr, "synapse-cli: verifier %q/%q does not satisfy %q independence from proposer %q/%q; AI triage remains advisory-only\n",

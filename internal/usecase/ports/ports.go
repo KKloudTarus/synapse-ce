@@ -307,6 +307,13 @@ type EngagementRepository interface {
 	Delete(ctx context.Context, id shared.ID) error
 }
 
+// ProjectEngagementLister is an optional read extension for tenant-wide operational dashboards.
+// Project analysis contexts are intentionally hidden from EngagementRepository.List, so callers that
+// need project metrics must opt into this tenant-scoped projection instead of weakening List semantics.
+type ProjectEngagementLister interface {
+	ListProjectEngagements(ctx context.Context, tenantID shared.ID) ([]*engagement.Engagement, error)
+}
+
 // JudgmentStore is the broad read/create repository for AI judgments. The
 // score/state MOVER is deliberately NOT here – it lives on the analysis use case's narrow Store
 // interface + the concrete repo, so a read-only consumer (e.g. the agent tool catalog) cannot move

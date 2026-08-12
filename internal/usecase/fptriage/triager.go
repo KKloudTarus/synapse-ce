@@ -27,6 +27,7 @@ type Triager struct {
 }
 
 var _ ports.FPTriager = (*Triager)(nil)
+var _ ports.ObservableFPTriager = (*Triager)(nil)
 
 // NewTriager wraps a Coordinator. readerFor returns the source reader rooted at a scan's workspace dir
 // (nil-safe: a nil factory means the coordinator critiques on metadata only).
@@ -52,15 +53,21 @@ func (t *Triager) WithCache(cache ports.FPTriageCache, policyVersion string) *Tr
 // Triage critiques each candidate and returns the advisory verdicts. A best-effort failure (Err set) is
 // dropped so that finding gates normally. Never mutates a finding.
 func (t *Triager) Triage(ctx context.Context, candidates []finding.Finding, workspaceDir string) []ports.AICritique {
+	return t.TriageObserved(ctx, candidates, workspaceDir).Critiques
+}
+
+// TriageObserved performs the same fail-safe triage while returning source-free operational metrics.
+func (t *Triager) TriageObserved(ctx context.Context, candidates []finding.Finding, workspaceDir string) ports.FPTriageObservedResult {
 	if t == nil || t.coord == nil || len(candidates) == 0 {
-		return nil
+		return ports.FPTriageObservedResult{}
 	}
 	var reader ports.SourceSnippetReader
 	if t.readerFor != nil {
 		reader = t.readerFor(workspaceDir)
 	}
 	if t.cache == nil {
-		return t.mapCritiques(t.coord.Assess(ctx, candidates, reader))
+		critiques, telemetry := t.coord.assessPreparedObserved(ctx, prepareCandidates(candidates, reader))
+		return ports.FPTriageObservedResult{Critiques: t.mapCritiques(critiques), Telemetry: telemetry}
 	}
 	prepared := make([]preparedFinding, len(candidates))
 	for i := range candidates {
@@ -72,6 +79,7 @@ func (t *Triager) Triage(ctx context.Context, candidates []finding.Finding, work
 	missIndexes := make([]int, 0, len(candidates))
 	keys := make([]ports.FPTriageCacheKey, len(candidates))
 	cacheable := make([]bool, len(candidates))
+	cacheHits := 0
 	for i := range prepared {
 		key, ok := t.cacheKey(ctx, prepared[i])
 		keys[i], cacheable[i] = key, ok
@@ -79,6 +87,7 @@ func (t *Triager) Triage(ctx context.Context, candidates []finding.Finding, work
 			if cached, hit, err := t.cache.Load(ctx, key); err == nil && hit {
 				if critique, valid := critiqueFromCache(prepared[i].finding, key, cached); valid {
 					crits[i] = critique
+					cacheHits++
 					continue
 				}
 			}
@@ -86,7 +95,10 @@ func (t *Triager) Triage(ctx context.Context, candidates []finding.Finding, work
 		misses = append(misses, prepared[i])
 		missIndexes = append(missIndexes, i)
 	}
-	assessed := t.coord.assessPrepared(ctx, misses)
+	assessed, telemetry := t.coord.assessPreparedObserved(ctx, misses)
+	if len(misses) == 0 {
+		telemetry = newRunObserver(newRunBudget(t.coord.operations)).snapshot()
+	}
 	for i, critique := range assessed {
 		idx := missIndexes[i]
 		crits[idx] = critique
@@ -97,7 +109,26 @@ func (t *Triager) Triage(ctx context.Context, candidates []finding.Finding, work
 		}
 	}
 
-	return t.mapCritiques(crits)
+	telemetry.CacheHits = cacheHits
+	telemetry.Comparisons = 0
+	telemetry.Disagreements = 0
+	for _, critique := range crits {
+		if critique.Verifier != nil {
+			telemetry.Comparisons++
+			if disagreement(critique) {
+				telemetry.Disagreements++
+			}
+		}
+	}
+	return ports.FPTriageObservedResult{Critiques: t.mapCritiques(crits), Telemetry: telemetry}
+}
+
+func prepareCandidates(candidates []finding.Finding, reader ports.SourceSnippetReader) []preparedFinding {
+	prepared := make([]preparedFinding, len(candidates))
+	for i := range candidates {
+		prepared[i] = preparedFinding{finding: candidates[i], reader: reader}
+	}
+	return prepared
 }
 
 func (t *Triager) mapCritiques(crits []Critique) []ports.AICritique {

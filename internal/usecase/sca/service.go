@@ -80,6 +80,7 @@ type Service struct {
 	fpTriageMode                     aiTriageMode                          // shadow by default; enforce must be selected explicitly
 	aiReviews                        ports.AITriageReviewRecorder          // optional durable human-review queue sink
 	fpTriageIndependence             ports.AIIndependencePolicy            // deterministic verifier separation-of-duties requirement
+	fpTriageAlerts                   aiTriageAlertPolicy                   // scan-local safety metric baselines
 	osPkgCataloger                   ports.OSPackageCataloger              // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
 	instCataloger                    ports.InstalledPackageCataloger       // optional owned installed-package cataloging (Go binaries, Python dist-info) from an image rootfs
 	artifactCataloger                ports.ArtifactCataloger               // optional owned standalone-artifact cataloging (.msi product identity) from the workspace dir
@@ -579,6 +580,7 @@ func NewService(
 		detector: d, sbomGen: s, sources: sources, riskEnricher: r, licScan: l, licEnricher: le,
 		fpTriageMaxFindings:  defaultFPTriageMaxFindings,
 		fpTriageIndependence: ports.AIIndependenceModelFamily,
+		fpTriageAlerts:       defaultAITriageAlertPolicy(),
 	}
 	// Build the shared execution guard from the service's own scope/clock/audit
 	// deps, so every scan is gated + audited through the one chokepoint recon will
@@ -684,6 +686,10 @@ type ScanResult struct {
 	// triager even when a provider error produced no critique; SkippedFindings never enter an LLM and
 	// remain gating. nil means AI triage did not run for any eligible finding.
 	AITriageBudget *AITriageBudget `json:"ai_triage_budget,omitempty"`
+	// AITriageTelemetry contains source-free request, latency, provider outcome, token, cost, consensus,
+	// and exemption observations for this scan. It is sealed with the policy decision.
+	AITriageTelemetry *ports.FPTriageTelemetry `json:"ai_triage_telemetry,omitempty"`
+	AITriageAlerts    []AITriageAlert          `json:"ai_triage_alerts,omitempty"`
 	// SourceCapture is analysis-owned source availability metadata. Content is held by
 	// ProjectSourceArtifactStore, never embedded in this scan result.
 	SourceCapture *projectanalysis.SourceCapture `json:"source_capture,omitempty"`
@@ -2939,6 +2945,11 @@ func mergeCachedAnnotations(current *ScanResult, previous ScanResult, preservePr
 	current.SuppressedFindings = mergeSuppressedFindings(current.SuppressedFindings, previous.SuppressedFindings, keys)
 	current.NeedsVerification = mergeNeedsVerification(current.NeedsVerification, previous.NeedsVerification, keys)
 	current.AITriage = mergeAITriage(current.AITriage, previous.AITriage, keys)
+	if current.AITriageTelemetry == nil {
+		current.AITriageTelemetry = previous.AITriageTelemetry
+		current.AITriageAlerts = append([]AITriageAlert(nil), previous.AITriageAlerts...)
+		current.AITriageBudget = previous.AITriageBudget
+	}
 	if preservePrevious {
 		current.SourceWarnings = mergeStrings(current.SourceWarnings, previous.SourceWarnings)
 		current.ExpiredSuppressions = mergeStrings(current.ExpiredSuppressions, previous.ExpiredSuppressions)
@@ -3384,16 +3395,18 @@ func isPinnedVersion(v string) bool {
 var credInErr = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@`)
 
 type scanEvidencePayload struct {
-	SBOMSHA256       string                  `json:"sbom_sha256"`
-	Findings         []string                `json:"findings"`
-	Suppressed       []string                `json:"suppressed,omitempty"`
-	AITriagePolicy   string                  `json:"ai_triage_policy,omitempty"`
-	AITriage         []ports.AICritique      `json:"ai_triage,omitempty"`
-	AITriageFindings []scanEvidenceAIFinding `json:"ai_triage_findings,omitempty"`
-	AITriageBudget   *AITriageBudget         `json:"ai_triage_budget,omitempty"`
-	Manifest         ports.ScanManifest      `json:"manifest"`
-	SealedAt         string                  `json:"sealed_at"`
-	Actor            string                  `json:"actor"`
+	SBOMSHA256        string                   `json:"sbom_sha256"`
+	Findings          []string                 `json:"findings"`
+	Suppressed        []string                 `json:"suppressed,omitempty"`
+	AITriagePolicy    string                   `json:"ai_triage_policy,omitempty"`
+	AITriage          []ports.AICritique       `json:"ai_triage,omitempty"`
+	AITriageFindings  []scanEvidenceAIFinding  `json:"ai_triage_findings,omitempty"`
+	AITriageBudget    *AITriageBudget          `json:"ai_triage_budget,omitempty"`
+	AITriageTelemetry *ports.FPTriageTelemetry `json:"ai_triage_telemetry,omitempty"`
+	AITriageAlerts    []AITriageAlert          `json:"ai_triage_alerts,omitempty"`
+	Manifest          ports.ScanManifest       `json:"manifest"`
+	SealedAt          string                   `json:"sealed_at"`
+	Actor             string                   `json:"actor"`
 }
 
 // scanEvidenceAIFinding seals every input the gate policy reads. Sealing a dedup key alone would not
@@ -3487,16 +3500,18 @@ func scanEvidenceContent(actor string, now time.Time, result *ScanResult) ([]byt
 		policyVersion = aiTriagePolicyVersion
 	}
 	return json.Marshal(scanEvidencePayload{
-		SBOMSHA256:       result.Manifest.SBOMSHA256,
-		Findings:         keys,
-		Suppressed:       suppressed,
-		AITriagePolicy:   policyVersion,
-		AITriage:         aiTriage,
-		AITriageFindings: aiFindings,
-		AITriageBudget:   result.AITriageBudget,
-		Manifest:         result.Manifest,
-		SealedAt:         now.UTC().Format(time.RFC3339),
-		Actor:            actor,
+		SBOMSHA256:        result.Manifest.SBOMSHA256,
+		Findings:          keys,
+		Suppressed:        suppressed,
+		AITriagePolicy:    policyVersion,
+		AITriage:          aiTriage,
+		AITriageFindings:  aiFindings,
+		AITriageBudget:    result.AITriageBudget,
+		AITriageTelemetry: result.AITriageTelemetry,
+		AITriageAlerts:    result.AITriageAlerts,
+		Manifest:          result.Manifest,
+		SealedAt:          now.UTC().Format(time.RFC3339),
+		Actor:             actor,
 	})
 }
 

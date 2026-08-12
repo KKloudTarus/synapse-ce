@@ -10,10 +10,14 @@ import (
 )
 
 const (
-	defaultFPTriageMaxFindings = 100
-	maxFPTriageMaxFindings     = 1000
-	defaultFPTriageConcurrency = 6
-	maxFPTriageConcurrency     = 32
+	defaultFPTriageMaxFindings     = 100
+	maxFPTriageMaxFindings         = 1000
+	defaultFPTriageConcurrency     = 6
+	maxFPTriageConcurrency         = 32
+	defaultFPTriageMaxTokens       = int64(1_000_000)
+	maxFPTriageMaxTokens           = int64(100_000_000)
+	defaultFPTriageCircuitFailures = 5
+	maxFPTriageCircuitFailures     = 100
 )
 
 // Config holds runtime configuration.
@@ -177,9 +181,22 @@ type Config struct {
 	FPTriageProvider string
 	// FPTriageMode is shadow|enforce. Shadow is the fail-closed default: decisions are persisted for
 	// evaluation but can never set gate_exempt. Enforce requires a deliberate operator choice.
-	FPTriageMode        string
-	FPTriageMaxFindings int
-	FPTriageConcurrency int
+	FPTriageMode               string
+	FPTriageMaxFindings        int
+	FPTriageConcurrency        int
+	FPTriageMaxTokens          int64
+	FPTriageMaxCostMicroUSD    int64
+	FPTriageProposerInputRate  int64
+	FPTriageProposerOutputRate int64
+	FPTriageVerifierInputRate  int64
+	FPTriageVerifierOutputRate int64
+	FPTriageCircuitFailures    int
+	FPTriageCircuitCooldown    time.Duration
+	FPTriageAlertMinSamples    int
+	FPTriageDisagreeBaseBPS    int
+	FPTriageExemptBaseBPS      int
+	FPTriageParseFailBaseBPS   int
+	FPTriageAlertDeltaBPS      int
 	// FPTriageIndependence is model_family (default) or provider. Provider mode additionally
 	// requires a different explicit provider identity; invalid values disable verifier authority.
 	FPTriageIndependence string
@@ -626,6 +643,19 @@ func Load() Config {
 		FPTriageMode:                 normalizeFPTriageMode(getenv("SYNAPSE_FP_TRIAGE_MODE", "shadow")),
 		FPTriageMaxFindings:          boundedPositive(getint("SYNAPSE_FP_TRIAGE_MAX_FINDINGS", defaultFPTriageMaxFindings), defaultFPTriageMaxFindings, maxFPTriageMaxFindings),
 		FPTriageConcurrency:          boundedPositive(getint("SYNAPSE_FP_TRIAGE_CONCURRENCY", defaultFPTriageConcurrency), defaultFPTriageConcurrency, maxFPTriageConcurrency),
+		FPTriageMaxTokens:            boundedPositive64(getint64("SYNAPSE_FP_TRIAGE_MAX_TOKENS", defaultFPTriageMaxTokens), defaultFPTriageMaxTokens, maxFPTriageMaxTokens),
+		FPTriageMaxCostMicroUSD:      boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_MAX_COST_MICRO_USD", 0), 1_000_000_000_000),
+		FPTriageProposerInputRate:    boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_PROPOSER_INPUT_MICRO_USD_PER_MILLION", 0), 1_000_000_000_000),
+		FPTriageProposerOutputRate:   boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_PROPOSER_OUTPUT_MICRO_USD_PER_MILLION", 0), 1_000_000_000_000),
+		FPTriageVerifierInputRate:    boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_VERIFIER_INPUT_MICRO_USD_PER_MILLION", 0), 1_000_000_000_000),
+		FPTriageVerifierOutputRate:   boundedNonNegative64(getint64("SYNAPSE_FP_TRIAGE_VERIFIER_OUTPUT_MICRO_USD_PER_MILLION", 0), 1_000_000_000_000),
+		FPTriageCircuitFailures:      boundedPositive(getint("SYNAPSE_FP_TRIAGE_CIRCUIT_FAILURES", defaultFPTriageCircuitFailures), defaultFPTriageCircuitFailures, maxFPTriageCircuitFailures),
+		FPTriageCircuitCooldown:      boundedPositiveDuration(getduration("SYNAPSE_FP_TRIAGE_CIRCUIT_COOLDOWN", time.Minute), time.Minute, 24*time.Hour),
+		FPTriageAlertMinSamples:      boundedPositive(getint("SYNAPSE_FP_TRIAGE_ALERT_MIN_SAMPLES", 10), 10, 10000),
+		FPTriageDisagreeBaseBPS:      boundedNonNegative(getint("SYNAPSE_FP_TRIAGE_DISAGREEMENT_BASELINE_BPS", 1500), 10000),
+		FPTriageExemptBaseBPS:        boundedNonNegative(getint("SYNAPSE_FP_TRIAGE_EXEMPTION_BASELINE_BPS", 1000), 10000),
+		FPTriageParseFailBaseBPS:     boundedNonNegative(getint("SYNAPSE_FP_TRIAGE_PARSE_FAILURE_BASELINE_BPS", 200), 10000),
+		FPTriageAlertDeltaBPS:        boundedNonNegative(getint("SYNAPSE_FP_TRIAGE_ALERT_DEVIATION_BPS", 1000), 10000),
 		FPTriageIndependence:         normalizeFPTriageIndependence(getenv("SYNAPSE_FP_TRIAGE_INDEPENDENCE", "model_family")),
 
 		AgentApprovalMode:    getenv("SYNAPSE_AGENT_APPROVAL_MODE", "manual"),
@@ -702,6 +732,27 @@ func normalizeFPTriageMode(s string) string {
 
 func boundedPositive(value, fallback, max int) int {
 	if value < 1 || value > max {
+		return fallback
+	}
+	return value
+}
+
+func boundedPositive64(value, fallback, max int64) int64 {
+	if value <= 0 || value > max {
+		return fallback
+	}
+	return value
+}
+
+func boundedNonNegative64(value, max int64) int64 {
+	if value < 0 || value > max {
+		return 0
+	}
+	return value
+}
+
+func boundedPositiveDuration(value, fallback, max time.Duration) time.Duration {
+	if value <= 0 || value > max {
 		return fallback
 	}
 	return value

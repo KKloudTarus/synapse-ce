@@ -109,6 +109,13 @@ stays in the report, it is only held back from the `--fail-on` gate).
    every skipped finding remains reported and gating, and `ai_triage_budget` plus the CLI warning expose
    eligible, attempted, and skipped counts. Accepted ranges are `1..1000` findings and `1..32` concurrent
    assessments; zero, negative, malformed, and over-limit values restore the safe finite defaults.
+   A second reservation guard defaults to `SYNAPSE_FP_TRIAGE_MAX_TOKENS=1000000`. Optional micro-USD
+   pricing and `SYNAPSE_FP_TRIAGE_MAX_COST_MICRO_USD` add a strict cost ceiling. Reservations happen
+   before either model is contacted, so a finding that does not fit receives no partial verifier call
+   and remains gating. Repeated provider or invalid-output failures open a bounded circuit and keep the
+   remaining findings advisory-only until its cooldown probe succeeds. API deployments expose the
+   resulting request, latency, timeout, parse, token/cost, disagreement, exemption and alert views at
+   `/api/v1/ai-triage/observability`.
 
 ```bash
 export SYNAPSE_LLM_BASE_URL=http://localhost:8081/v1

@@ -398,6 +398,41 @@ export interface AITriageReviewFilter {
   state?: AITriageReviewState
 }
 
+export interface AITriageMetricRow {
+  value: string
+  requestCount: number
+  averageLatencyMillis: number
+  timeoutCount: number
+  parseFailureCount: number
+  providerFailureCount: number
+  circuitOpenCount: number
+  totalTokens: number
+  estimatedCostMicroUSD: number
+  comparisons: number
+  disagreements: number
+  gateExemptions: number
+  findings: number
+}
+
+export interface AITriageAlert {
+  metric: string
+  observedBasisPoints: number
+  baselineBasisPoints: number
+  deviationBasisPoints: number
+  sampleSize: number
+  message: string
+}
+
+export interface AITriageObservability {
+  generatedAt: string
+  totals: AITriageMetricRow
+  byModel: AITriageMetricRow[]
+  byPromptVersion: AITriageMetricRow[]
+  byCWE: AITriageMetricRow[]
+  byProject: AITriageMetricRow[]
+  alerts: Array<{ projectId: string; projectName: string; alert: AITriageAlert }>
+}
+
 export type ScanMode = 'full' | 'vulnerabilities' | 'licenses'
 
 export interface ImportedSBOMMetadata {

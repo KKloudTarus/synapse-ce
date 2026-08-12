@@ -5,6 +5,7 @@ import { MobileSidebar, Sidebar } from './components/Sidebar'
 import { Topbar } from './components/Topbar'
 import { Audit } from './pages/Audit'
 import { AITriageReviews } from './pages/AITriageReviews'
+import { AITriageObservability } from './pages/AITriageObservability'
 import { Connect } from './pages/Connect'
 import { EngagementDetail } from './pages/EngagementDetail'
 import { Engagements } from './pages/Engagements'
@@ -76,6 +77,7 @@ function Gate() {
         <Route path="rules/:key" element={<RuleDetail />} />
         <Route path="audit" element={<Audit />} />
         <Route path="ai-triage/reviews" element={<AITriageReviews />} />
+        <Route path="ai-triage/observability" element={<AITriageObservability />} />
         <Route path="team" element={<Team />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>
