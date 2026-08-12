@@ -10,12 +10,27 @@ import (
 
 type combinedTriageProbe struct {
 	legacy, observed, evidence, combined int
-	seen map[string][]ports.AITriageEvidenceToken
+	seen                                 map[string][]ports.AITriageEvidenceToken
 }
-func (p *combinedTriageProbe) Triage(context.Context, []finding.Finding, string) []ports.AICritique { p.legacy++; return nil }
-func (p *combinedTriageProbe) TriageObserved(context.Context, []finding.Finding, string) ports.FPTriageObservedResult { p.observed++; return ports.FPTriageObservedResult{} }
-func (p *combinedTriageProbe) TriageWithEvidence(_ context.Context, _ []finding.Finding, _ string, e map[string][]ports.AITriageEvidenceToken) []ports.AICritique { p.evidence++; p.seen=e; return nil }
-func (p *combinedTriageProbe) TriageObservedWithEvidence(_ context.Context, _ []finding.Finding, _ string, e map[string][]ports.AITriageEvidenceToken) ports.FPTriageObservedResult { p.combined++; p.seen=e; return ports.FPTriageObservedResult{Telemetry: ports.FPTriageTelemetry{RequestCount: 7}} }
+
+func (p *combinedTriageProbe) Triage(context.Context, []finding.Finding, string) []ports.AICritique {
+	p.legacy++
+	return nil
+}
+func (p *combinedTriageProbe) TriageObserved(context.Context, []finding.Finding, string) ports.FPTriageObservedResult {
+	p.observed++
+	return ports.FPTriageObservedResult{}
+}
+func (p *combinedTriageProbe) TriageWithEvidence(_ context.Context, _ []finding.Finding, _ string, e map[string][]ports.AITriageEvidenceToken) []ports.AICritique {
+	p.evidence++
+	p.seen = e
+	return nil
+}
+func (p *combinedTriageProbe) TriageObservedWithEvidence(_ context.Context, _ []finding.Finding, _ string, e map[string][]ports.AITriageEvidenceToken) ports.FPTriageObservedResult {
+	p.combined++
+	p.seen = e
+	return ports.FPTriageObservedResult{Telemetry: ports.FPTriageTelemetry{RequestCount: 7}}
+}
 
 func TestRunFPTriagePrefersEvidenceAwareObservableSeam(t *testing.T) {
 	probe := &combinedTriageProbe{}
