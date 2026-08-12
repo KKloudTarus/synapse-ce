@@ -88,7 +88,7 @@
     <div class="section-head">
       <span class="section-tag">What is Synapse</span>
       <h2>Run the security lifecycle behind one governed control plane</h2>
-      <p>Synapse turns a fragmented, manual security process into a controlled, auditable workflow: software composition analysis, recon, evidence capture, findings, and reporting. Scanning, matching, license classification, and reporting are pure, reproducible Go with nothing else in the path. Where automated analysis is offered it stays strictly bounded: a proposal is only ever proposed, a typed Go state machine validates and executes, and a human approves anything intrusive.</p>
+      <p>Synapse turns a fragmented, manual security process into one controlled, auditable workflow across both point-in-time analysis (SCA, SAST, code quality, IaC) and runtime analysis (a distributed agent fleet, eBPF detections, response actions), over container and VM estates — with a single asset model, one authorization model, one hash-chained evidence chain, and one prioritized queue. Scanning, matching, license classification, scoring, and reporting are pure, reproducible Go with nothing else in the path. Where automated analysis is offered it stays strictly bounded: a proposal is only ever proposed, a typed Go state machine validates and executes, and a human approves anything intrusive.</p>
     </div>
     <div class="pills">
       <span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg> Deterministic-first</span>
@@ -114,6 +114,10 @@
       <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 5-6"/></svg></div><h3>Risk-based priority</h3><p>Findings are ordered by exploitability (known-exploited catalog, then exploit-prediction score, then CVSS), never by raw CVSS alone.</p></div>
       <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg></div><h3>License compliance</h3><p>Declared-license resolution, SPDX expression parsing (AND, OR, WITH), a curated category and risk model, and coordinate recovery for shaded or metadata-less JARs.</p></div>
       <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M5 8v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8M12 13v3"/></svg></div><h3>Reachability</h3><p>A deterministic call-graph engine decides whether a vulnerable symbol is actually reachable from application code, so a finding on unused code can be de-prioritized.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 16 4-4-4-4M6 8l-4 4 4 4M14.5 4l-5 16"/></svg></div><h3>First-party SAST</h3><p>Owned source-code rules across many languages plus a taint engine over the sandboxed call graph, and third-party results via SARIF ingest into the same governed path.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg></div><h3>Offensive testing</h3><p>Recon, an attack-path graph, chained exploitation with per-step proof, adversary emulation, and authenticated DAST — all governed by a written offensive policy and a kill switch.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div><h3>Runtime defense</h3><p>A distributed agent fleet with eBPF detections sealed as hash-chained evidence, a telemetry tier, governed response actions, and purple-team coverage measured from emulation vs what actually fired.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.5 19a4.5 4.5 0 0 0 0-9h-1.8A7 7 0 1 0 4 15.9"/></svg></div><h3>Cloud posture (CSPM)</h3><p>Read-only AWS, Azure and GCP connectors behind a sandboxed helper with vault-ref credentials and per-operation server-side authorization, plus IaC-vs-live drift findings.</p></div>
       <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></div><h3>Tamper-evident evidence</h3><p>Every artifact is hash-chained. A broken chain blocks the report. Audit and evidence logs are append-only and can be anchored with an RFC-3161 timestamp.</p></div>
       <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="m8 9 3 3-3 3M13 15h3"/></svg></div><h3>Hardened execution</h3><p>Heavy tools are shelled out via argv arrays, never a shell string, inside a Linux sandbox with egress scoping. Scope and the authorization window are enforced before any tool runs.</p></div>
       <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div><h3>RBAC and tenancy</h3><p>Per-action role-based access control and tenant isolation flow through a single authorization chokepoint. Secrets stay server-side in a credential vault.</p></div>
@@ -422,22 +426,36 @@ docker compose -f deploy/docker-compose.full.yml up --build
   <div class="container">
     <div class="section-head">
       <span class="section-tag">The team</span>
-      <h2>Built by the founding contributors</h2>
-      <p>Synapse started as a small team effort. The engineers who shaped the platform and the designer behind its brand identity.</p>
+      <h2>Built by the founding team and contributors</h2>
+      <p>The founders and lead maintainer who steer Synapse, the engineers and designer who shaped the platform and its brand, and the AI-engineer contributors extending it.</p>
     </div>
     <div class="contrib-grid">
       <div class="contrib">
         <div class="av" data-initials="ND"><img src="https://github.com/nghiadaulau.png?size=160" alt="nghiadaulau" loading="lazy" onerror="this.style.display='none'"></div>
         <div class="name">nghiadaulau</div>
-        <div class="role">Engineer</div>
+        <div class="role">Founder</div>
         <a class="gh" href="https://github.com/nghiadaulau" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2A10 10 0 0 0 8.8 21.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .8.1-.6.3-1.1.6-1.4-2.2-.2-4.6-1.1-4.6-4.9 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.8-2.4 4.7-4.6 4.9.3.3.6.9.6 1.8v2.7c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg>nghiadaulau</a>
-        <div><span class="tag tag-eng">Engineering</span></div>
+        <div><span class="tag tag-lead">Founding</span></div>
       </div>
       <div class="contrib">
         <div class="av" data-initials="NT"><img src="https://github.com/nnatuan03.png?size=160" alt="nnatuan03" loading="lazy" onerror="this.style.display='none'"></div>
         <div class="name">nnatuan03</div>
-        <div class="role">Engineer</div>
+        <div class="role">Co-founder</div>
         <a class="gh" href="https://github.com/nnatuan03" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2A10 10 0 0 0 8.8 21.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .8.1-.6.3-1.1.6-1.4-2.2-.2-4.6-1.1-4.6-4.9 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.8-2.4 4.7-4.6 4.9.3.3.6.9.6 1.8v2.7c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg>nnatuan03</a>
+        <div><span class="tag tag-lead">Founding</span></div>
+      </div>
+      <div class="contrib">
+        <div class="av" data-initials="PV"><img src="https://github.com/pho-veteran.png?size=160" alt="pho-veteran" loading="lazy" onerror="this.style.display='none'"></div>
+        <div class="name">pho-veteran</div>
+        <div class="role">Lead maintainer</div>
+        <a class="gh" href="https://github.com/pho-veteran" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2A10 10 0 0 0 8.8 21.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .8.1-.6.3-1.1.6-1.4-2.2-.2-4.6-1.1-4.6-4.9 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.8-2.4 4.7-4.6 4.9.3.3.6.9.6 1.8v2.7c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg>pho-veteran</a>
+        <div><span class="tag tag-lead">Maintainer</span></div>
+      </div>
+      <div class="contrib">
+        <div class="av" data-initials="VS"><img src="https://github.com/VietSory.png?size=160" alt="VietSory" loading="lazy" onerror="this.style.display='none'"></div>
+        <div class="name">VietSory</div>
+        <div class="role">Engineer</div>
+        <a class="gh" href="https://github.com/VietSory" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2A10 10 0 0 0 8.8 21.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .8.1-.6.3-1.1.6-1.4-2.2-.2-4.6-1.1-4.6-4.9 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.8-2.4 4.7-4.6 4.9.3.3.6.9.6 1.8v2.7c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg>VietSory</a>
         <div><span class="tag tag-eng">Engineering</span></div>
       </div>
       <div class="contrib">
@@ -453,6 +471,27 @@ docker compose -f deploy/docker-compose.full.yml up --build
         <div class="role">Brand identity designer</div>
         <a class="gh" href="https://github.com/tuu-ngo" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2A10 10 0 0 0 8.8 21.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .8.1-.6.3-1.1.6-1.4-2.2-.2-4.6-1.1-4.6-4.9 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.8-2.4 4.7-4.6 4.9.3.3.6.9.6 1.8v2.7c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg>tuu-ngo</a>
         <div><span class="tag tag-design">Design</span></div>
+      </div>
+      <div class="contrib">
+        <div class="av" data-initials="H1"><img src="https://github.com/H1eu232.png?size=160" alt="H1eu232" loading="lazy" onerror="this.style.display='none'"></div>
+        <div class="name">H1eu232</div>
+        <div class="role">AI engineer</div>
+        <a class="gh" href="https://github.com/H1eu232" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2A10 10 0 0 0 8.8 21.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .8.1-.6.3-1.1.6-1.4-2.2-.2-4.6-1.1-4.6-4.9 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.8-2.4 4.7-4.6 4.9.3.3.6.9.6 1.8v2.7c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg>H1eu232</a>
+        <div><span class="tag tag-ai">AI engineer</span></div>
+      </div>
+      <div class="contrib">
+        <div class="av" data-initials="XH"><img src="https://github.com/XUanhoa04.png?size=160" alt="XUanhoa04" loading="lazy" onerror="this.style.display='none'"></div>
+        <div class="name">XUanhoa04</div>
+        <div class="role">AI engineer</div>
+        <a class="gh" href="https://github.com/XUanhoa04" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2A10 10 0 0 0 8.8 21.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .8.1-.6.3-1.1.6-1.4-2.2-.2-4.6-1.1-4.6-4.9 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.8-2.4 4.7-4.6 4.9.3.3.6.9.6 1.8v2.7c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg>XUanhoa04</a>
+        <div><span class="tag tag-ai">AI engineer</span></div>
+      </div>
+      <div class="contrib">
+        <div class="av" data-initials="TA"><img src="https://github.com/thx2an.png?size=160" alt="thx2an" loading="lazy" onerror="this.style.display='none'"></div>
+        <div class="name">thx2an</div>
+        <div class="role">AI engineer</div>
+        <a class="gh" href="https://github.com/thx2an" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2A10 10 0 0 0 8.8 21.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .8.1-.6.3-1.1.6-1.4-2.2-.2-4.6-1.1-4.6-4.9 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.8-2.4 4.7-4.6 4.9.3.3.6.9.6 1.8v2.7c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg>thx2an</a>
+        <div><span class="tag tag-ai">AI engineer</span></div>
       </div>
     </div>
   </div>
