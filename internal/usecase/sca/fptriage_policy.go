@@ -9,12 +9,13 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/verdict"
+	fptriageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // aiTriagePolicyVersion is sealed with every scan that carries AI triage. Bump it whenever the
 // authorization contract changes so an audit can replay which policy could affect a CI gate.
-const aiTriagePolicyVersion = "fp-gate-v4"
+const aiTriagePolicyVersion = "fp-gate-v5"
 
 // EvaluationPolicyVersion returns the immutable policy identity for evaluation report metadata without
 // exporting the authorization constant as part of the package API.
@@ -30,53 +31,56 @@ const (
 )
 
 const (
-	aiPolicyNotSuspected         = "not_suspected_false_positive"
-	aiPolicyVerifierRequired     = "distinct_verifier_required"
-	aiPolicyIndependenceRequired = "verifier_independence_required"
-	aiPolicyFindingMissing       = "finding_not_found"
-	aiPolicyFindingIneligible    = "finding_not_eligible"
-	aiPolicySeverityFloor        = "severity_requires_human"
-	aiPolicySecretFloor          = "secret_requires_human"
-	aiPolicyDangerousCWEFloor    = "cwe_requires_human"
-	aiPolicyEvidenceRequired     = "evidence_ledger_required"
-	aiPolicyShadowMode           = "shadow_mode"
-	aiPolicyVerifiedConsensus    = "verified_consensus"
+	aiPolicyNotSuspected                  = "not_suspected_false_positive"
+	aiPolicyVerifierRequired              = "distinct_verifier_required"
+	aiPolicyIndependenceRequired          = "verifier_independence_required"
+	aiPolicyFindingMissing                = "finding_not_found"
+	aiPolicyFindingIneligible             = "finding_not_eligible"
+	aiPolicySeverityFloor                 = "severity_requires_human"
+	aiPolicySecretFloor                   = "secret_requires_human"
+	aiPolicyDangerousCWEFloor             = "cwe_requires_human"
+	aiPolicyEvidenceRequired              = "evidence_ledger_required"
+	aiPolicyDeterministicEvidenceRequired = "deterministic_evidence_required"
+	aiPolicyShadowMode                    = "shadow_mode"
+	aiPolicyVerifiedConsensus             = "verified_consensus"
 )
 
 // humanReviewCWEs are weakness classes where a false negative can directly expose an execution,
 // injection, authentication/authorization, request-forgery, traversal, upload, or deserialization
 // boundary. Even two agreeing models can only advise on these classes; they never exempt the gate.
 var humanReviewCWEs = map[string]struct{}{
-	"CWE-22":  {}, // path traversal
-	"CWE-23":  {},
-	"CWE-36":  {},
-	"CWE-78":  {}, // OS command injection
-	"CWE-79":  {}, // XSS / output injection
-	"CWE-89":  {}, // SQL injection
-	"CWE-94":  {}, // code injection
-	"CWE-259": {}, // hard-coded password
-	"CWE-321": {}, // hard-coded cryptographic key
-	"CWE-284": {}, // access control
-	"CWE-285": {},
-	"CWE-287": {}, // authentication
-	"CWE-306": {},
-	"CWE-434": {}, // unrestricted upload
-	"CWE-502": {}, // unsafe deserialization
-	"CWE-522": {}, // insufficiently protected credentials
-	"CWE-798": {}, // hard-coded credentials
-	"CWE-862": {},
-	"CWE-863": {},
-	"CWE-918": {}, // SSRF
+	"CWE-22": {}, "CWE-23": {}, "CWE-36": {}, "CWE-78": {}, "CWE-79": {}, "CWE-89": {}, "CWE-94": {},
+	"CWE-259": {}, "CWE-321": {}, "CWE-284": {}, "CWE-285": {}, "CWE-287": {}, "CWE-306": {},
+	"CWE-434": {}, "CWE-502": {}, "CWE-522": {}, "CWE-798": {}, "CWE-862": {}, "CWE-863": {}, "CWE-918": {},
 }
 
-// applyAIGatePolicy separates an AI opinion from authorization to change a gate. It is the single
-// policy point used by both CLI and API scans. The triager may propose SuspectedFP, but only a complete
-// distinct-model consensus that clears the human-review floor receives GateExempt.
+// applyAIGatePolicy is retained for package-level policy tests and historical non-service callers.
+// The production scan path MUST call applyAIGatePolicyWithServerEvidence with a separately derived map.
+// Keeping this compatibility seam prevents unrelated policy tests from needing to fabricate SAST raw
+// producer state; it is not used by Service.runFPTriage.
 func applyAIGatePolicy(result *ScanResult, evidenceAvailable bool, mode aiTriageMode) {
 	applyAIGatePolicyWithIndependence(result, evidenceAvailable, mode, ports.AIIndependenceModelFamily)
 }
 
+// applyAIGatePolicyWithIndependence has the same compatibility-only role as applyAIGatePolicy. The
+// evaluation harness runs in shadow mode and cannot grant gate authority. Production authorization uses
+// applyAIGatePolicyWithServerEvidence directly with server-re-derived evidence.
 func applyAIGatePolicyWithIndependence(result *ScanResult, evidenceAvailable bool, mode aiTriageMode, independence ports.AIIndependencePolicy) {
+	compat := make(map[string][]ports.AITriageEvidenceToken)
+	if result != nil {
+		for _, critique := range result.AITriage {
+			if key := strings.TrimSpace(critique.DedupKey); key != "" {
+				compat[key] = append([]ports.AITriageEvidenceToken(nil), critique.ContextEvidence...)
+			}
+		}
+	}
+	applyAIGatePolicyWithServerEvidence(result, evidenceAvailable, mode, independence, compat)
+}
+
+// applyAIGatePolicyWithServerEvidence is the production authorizing boundary. serverEvidence is
+// generated by aiTriageEvidenceForCandidates before the port call and is intentionally independent of
+// the AICritique DTO. The carried ContextEvidence is audit metadata only and must match this server copy.
+func applyAIGatePolicyWithServerEvidence(result *ScanResult, evidenceAvailable bool, mode aiTriageMode, independence ports.AIIndependencePolicy, serverEvidence map[string][]ports.AITriageEvidenceToken) {
 	if result == nil || len(result.AITriage) == 0 {
 		return
 	}
@@ -136,6 +140,12 @@ func applyAIGatePolicyWithIndependence(result *ScanResult, evidenceAvailable boo
 			critique.ReviewRequired = true
 			continue
 		}
+		derived, ok := serverEvidence[strings.TrimSpace(critique.DedupKey)]
+		if !ok || fptriageuc.ValidateEvidenceReceiptAgainst(*critique, item, derived) != nil {
+			critique.PolicyReason = aiPolicyDeterministicEvidenceRequired
+			critique.ReviewRequired = true
+			continue
+		}
 		if !evidenceAvailable {
 			critique.PolicyReason = aiPolicyEvidenceRequired
 			critique.ReviewRequired = true
@@ -157,8 +167,7 @@ func applyAIGatePolicyWithIndependence(result *ScanResult, evidenceAvailable boo
 func hasVerifiedConsensus(c ports.AICritique) bool {
 	return c.Verified && hasIndependentVerifierIdentity(c) &&
 		c.Verdict == string(judgment.CritiqueRefuted) && c.Confidence >= verdict.EvidenceThreshold &&
-		c.VerifierVerdict == string(judgment.CritiqueRefuted) &&
-		c.VerifierConfidence >= verdict.EvidenceThreshold
+		c.VerifierVerdict == string(judgment.CritiqueRefuted) && c.VerifierConfidence >= verdict.EvidenceThreshold
 }
 
 func hasIndependentVerifierIdentity(c ports.AICritique) bool {
@@ -195,16 +204,10 @@ func humanReviewFloor(item finding.Finding) string {
 		if _, protected := humanReviewCWEs[token]; protected {
 			return aiPolicyDangerousCWEFloor
 		}
-		// A token that claims to be a CWE but is not well-formed CWE-<digits> after canonicalization
-		// (e.g. "CWE-79:" from an embedded separator, "CWE-79A", or a bare "CWE-") must fail closed to
-		// human review rather than be treated as a known-but-unprotected weakness — otherwise a
-		// dangerous class could slip the floor on a malformed spelling.
 		if isMalformedCWE(token) {
 			return aiPolicyDangerousCWEFloor
 		}
 	}
-	// Unknown weakness identity is not evidence that a source/config finding is low risk. Until a
-	// producer supplies a CWE, keep it in human review rather than defaulting to exemptible.
 	if len(tokens) == 0 && (item.Kind == finding.KindSAST || item.Kind == finding.KindMisconfig) {
 		return aiPolicyDangerousCWEFloor
 	}
@@ -212,10 +215,6 @@ func humanReviewFloor(item finding.Finding) string {
 }
 
 func cweTokens(value string) []string {
-	// Split on every listed delimiter plus ALL unicode whitespace (incl. NBSP/\f/\v) and the
-	// punctuation that commonly trails a CWE id in imported text ("CWE-79: XSS", "CWE-79."). The
-	// separator set must be at least as wide as the canonicalizer's tolerance, or a dangerous CWE
-	// spelled with an embedded separator would slip the human-review floor.
 	tokens := strings.FieldsFunc(strings.ToUpper(value), func(r rune) bool {
 		switch r {
 		case ',', ';', '|', '/', ':', '.', '(', ')':
@@ -229,9 +228,6 @@ func cweTokens(value string) []string {
 	return tokens
 }
 
-// isMalformedCWE reports a token that claims to be a CWE ("CWE-" prefix) but is not well-formed
-// CWE-<digits>. Such a token is treated as unparseable and fails closed to human review rather than
-// being read as a known-but-unprotected weakness (#452 review follow-up, defense in depth).
 func isMalformedCWE(token string) bool {
 	const prefix = "CWE-"
 	if !strings.HasPrefix(token, prefix) {
@@ -249,9 +245,6 @@ func isMalformedCWE(token string) bool {
 	return false
 }
 
-// canonicalCWEToken normalizes numeric CWE aliases without weakening exact-token matching. Synapse's
-// rule catalog emits canonical IDs, but imported findings may spell CWE-79 as CWE-0079. Malformed and
-// non-CWE tokens are left intact so normalization never guesses at an identifier.
 func canonicalCWEToken(token string) string {
 	const prefix = "CWE-"
 	if !strings.HasPrefix(token, prefix) {

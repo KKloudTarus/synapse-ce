@@ -12,6 +12,8 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **Evidence-cited AI false-positive triage.** Supplies bounded deterministic source/sink, data-flow, sanitizer, call-path, route/framework, and reachability metadata to the AI triage proposer/verifier before model calls. Model claims must cite current server-generated evidence-token IDs; unknown, missing, driver-incompatible, or finding-mismatched receipts fail closed. Gate authorization now uses `fp-gate-v5` and requires that closed receipt in addition to the existing severity/CWE/evidence safety floors.
+
 - **Safe AI-triage caching.** Tenant-bound API scans reuse typed proposer/verifier claims only when
   tenant, project/engagement scope, finding fingerprint, complete-source hash, prompt context, models,
   prompt version, and policy version all match. Cache hits are rebound to the current finding,

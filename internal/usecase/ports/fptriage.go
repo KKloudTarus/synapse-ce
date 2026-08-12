@@ -37,6 +37,44 @@ const (
 	AIIndependenceProvider    AIIndependencePolicy = "provider"
 )
 
+// AITriageEvidenceKind is the closed deterministic evidence vocabulary shared by producers,
+// cache validation, model receipts, and the server authorization boundary.
+type AITriageEvidenceKind string
+
+const (
+	AITriageEvidenceKindFindingIdentity    AITriageEvidenceKind = "finding_identity"
+	AITriageEvidenceKindRule               AITriageEvidenceKind = "rule"
+	AITriageEvidenceKindCWE                AITriageEvidenceKind = "cwe"
+	AITriageEvidenceKindScope              AITriageEvidenceKind = "scope"
+	AITriageEvidenceKindSourceLocation     AITriageEvidenceKind = "source_location"
+	AITriageEvidenceKindReachability       AITriageEvidenceKind = "reachability"
+	AITriageEvidenceKindSource             AITriageEvidenceKind = "source"
+	AITriageEvidenceKindSourceEvidence     AITriageEvidenceKind = "source_evidence"
+	AITriageEvidenceKindSink               AITriageEvidenceKind = "sink"
+	AITriageEvidenceKindSinkEvidence       AITriageEvidenceKind = "sink_evidence"
+	AITriageEvidenceKindDataFlow           AITriageEvidenceKind = "data_flow"
+	AITriageEvidenceKindDataFlowEvidence   AITriageEvidenceKind = "data_flow_evidence"
+	AITriageEvidenceKindDataFlowConfidence AITriageEvidenceKind = "data_flow_confidence"
+	AITriageEvidenceKindCallGraph          AITriageEvidenceKind = "call_graph"
+	AITriageEvidenceKindTaintPath          AITriageEvidenceKind = "taint_path"
+	AITriageEvidenceKindSanitizer          AITriageEvidenceKind = "sanitizer"
+	AITriageEvidenceKindFramework          AITriageEvidenceKind = "framework"
+	AITriageEvidenceKindAuthScope          AITriageEvidenceKind = "auth_scope"
+	AITriageEvidenceKindControlEvidence    AITriageEvidenceKind = "control_evidence"
+	AITriageEvidenceKindCounterEvidence    AITriageEvidenceKind = "counter_evidence"
+	AITriageEvidenceKindValidation         AITriageEvidenceKind = "validation"
+
+	MaxAITriageEvidenceValueRunes = 512
+)
+
+// AITriageEvidenceToken is one bounded deterministic fact supplied to AI triage. ID is the only value
+// a model may cite; values are replayable server metadata, never authority by themselves.
+type AITriageEvidenceToken struct {
+	ID    string               `json:"id"`
+	Kind  AITriageEvidenceKind `json:"kind"`
+	Value string               `json:"value"`
+}
+
 // AICritique is one finding's LLM false-positive verdict (propose-only, advisory). Verdict and Driver use
 // the closed judgment.CritiqueClaim vocabulary (no free prose). SuspectedFP records the model's opinion;
 // it NEVER grants a gate exemption by itself. GateExempt is a separate, server-owned policy decision that
@@ -60,8 +98,13 @@ type AICritique struct {
 	VerifierModelFamily string               `json:"verifier_model_family,omitempty"`
 	IndependencePolicy  AIIndependencePolicy `json:"independence_policy"`
 	PromptVersion       string               `json:"prompt_version"`
-	PolicyVersion       string               `json:"policy_version,omitempty"`
-	PolicyReason        string               `json:"policy_reason,omitempty"`
+	// ContextEvidence is audit metadata for the exact deterministic dictionary the models received.
+	// Citation slices contain IDs only; server policy re-derives and compares the dictionary before authority.
+	ContextEvidence        []AITriageEvidenceToken `json:"context_evidence,omitempty"`
+	EvidenceTokens         []string                `json:"evidence_tokens,omitempty"`
+	VerifierEvidenceTokens []string                `json:"verifier_evidence_tokens,omitempty"`
+	PolicyVersion          string                  `json:"policy_version,omitempty"`
+	PolicyReason           string                  `json:"policy_reason,omitempty"`
 	// Shadow is server-owned rollout metadata. When true, WouldGateExempt records the decision the
 	// enforced policy would have made, but GateExempt must remain false and the finding keeps gating.
 	Shadow          bool `json:"shadow,omitempty"`
@@ -114,13 +157,15 @@ type FPTriageCacheKey struct {
 // rebound to the current finding, re-authorized by the current server policy, and sealed into the new
 // scan evidence link.
 type FPTriageCachedDecision struct {
-	Verdict            string `json:"verdict"`
-	Driver             string `json:"driver"`
-	Confidence         int    `json:"confidence"`
-	VerifierPresent    bool   `json:"verifier_present,omitempty"`
-	VerifierVerdict    string `json:"verifier_verdict,omitempty"`
-	VerifierDriver     string `json:"verifier_driver,omitempty"`
-	VerifierConfidence int    `json:"verifier_confidence,omitempty"`
+	Verdict                string   `json:"verdict"`
+	Driver                 string   `json:"driver"`
+	Confidence             int      `json:"confidence"`
+	EvidenceTokens         []string `json:"evidence_tokens,omitempty"`
+	VerifierPresent        bool     `json:"verifier_present,omitempty"`
+	VerifierVerdict        string   `json:"verifier_verdict,omitempty"`
+	VerifierDriver         string   `json:"verifier_driver,omitempty"`
+	VerifierConfidence     int      `json:"verifier_confidence,omitempty"`
+	VerifierEvidenceTokens []string `json:"verifier_evidence_tokens,omitempty"`
 }
 
 // FPTriageCache is an optional best-effort cache of typed model claims. Any error is treated as a miss;
@@ -141,6 +186,12 @@ type FPTriageCache interface {
 // nil = no triage.
 type FPTriager interface {
 	Triage(ctx context.Context, candidates []finding.Finding, workspaceDir string) []AICritique
+}
+
+// EvidenceAwareFPTriager is the stronger optional seam for deterministic, citation-bound context.
+type EvidenceAwareFPTriager interface {
+	FPTriager
+	TriageWithEvidence(ctx context.Context, candidates []finding.Finding, workspaceDir string, evidence map[string][]AITriageEvidenceToken) []AICritique
 }
 
 // FPTriageOperationalPolicy bounds one triage run and configures the shared provider circuit breaker.
@@ -206,4 +257,12 @@ type FPTriageObservedResult struct {
 
 type ObservableFPTriager interface {
 	TriageObserved(ctx context.Context, candidates []finding.Finding, workspaceDir string) FPTriageObservedResult
+}
+
+// EvidenceAwareObservableFPTriager preserves both deterministic evidence receipts and the operational
+// budget/circuit/telemetry contract. The scan pipeline prefers this seam when an implementation supports both.
+type EvidenceAwareObservableFPTriager interface {
+	EvidenceAwareFPTriager
+	ObservableFPTriager
+	TriageObservedWithEvidence(ctx context.Context, candidates []finding.Finding, workspaceDir string, evidence map[string][]AITriageEvidenceToken) FPTriageObservedResult
 }

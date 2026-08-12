@@ -55,7 +55,7 @@ func TestRunFPTriageHardCapsAndSurfacesSkippedFindings(t *testing.T) {
 	}}
 	trace := newScanDebugTrace(nil)
 
-	service.runFPTriage(context.Background(), result, "workspace", trace)
+	service.runFPTriage(context.Background(), result, "workspace", trace, nil)
 
 	if len(result.Findings) != 4 {
 		t.Fatalf("budget must retain every finding, got %d", len(result.Findings))

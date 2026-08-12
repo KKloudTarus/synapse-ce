@@ -2645,22 +2645,6 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			applyVEX(result, doc)
 		}
 	}
-	// AI false-positive triage (opt-in, best-effort, PROPOSE-ONLY). After the deterministic pass, the
-	// injected triager critiques production-scope first-party findings. The server-owned policy then
-	// separates advisory suspected-FP opinions from verified, low-risk gate exemptions. Single-model,
-	// high/critical, secret, and dangerous-CWE refutations stay gating for human review.
-	s.runFPTriage(ctx, result, ws.Dir, trace)
-	result.MinSeverity = s.minSeverity
-	result.VulnsBelowThreshold = countBelowThreshold(vulns, s.minSeverity)
-	result.UnfixedSuppressed = countUnfixedSuppressed(vulns, s.minSeverity, s.ignoreUnfixed)
-	result.FindingQuality = computeFindingQuality(result)
-	trace.succeed(step, "Findings derived", map[string]int{"vulnerabilities": len(vulns), "licenses": len(lics), "findings": len(result.Findings)})
-	result.DebugEvents = trace.snapshot()
-	if result.SBOM != nil {
-		result.Coverage = sbom.CoverageByEcosystem(*result.SBOM) // per-ecosystem coverage breakdown
-		result.SBOMQuality = sbom.Quality(*result.SBOM)          // NTIA + semantic describe-quality of the SBOM
-	}
-
 	// Deterministic Tier-2 reachability proof, best-effort + opt-in: prove which findings' affected
 	// symbols are actually CALLED in the live workspace and mint Tier-2 judgments that supersede weaker
 	// (LLM Tier-1.5) reachability claims. A no-coverage/un-buildable target (e.g. non-Go, or no module
@@ -2723,6 +2707,22 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// enhancement; the scan is never failed). Runs while ws.Dir still exists.
 	if opts.scansVulnerabilities() && s.taint != nil {
 		_, _ = s.taint.Scan(ctx, engagementID, ws.Dir)
+	}
+
+	// AI false-positive triage (opt-in, best-effort, PROPOSE-ONLY). After the deterministic pass, the
+	// injected triager critiques production-scope first-party findings. The server-owned policy then
+	// separates advisory suspected-FP opinions from verified, low-risk gate exemptions. Single-model,
+	// high/critical, secret, and dangerous-CWE refutations stay gating for human review.
+	s.runFPTriage(ctx, result, ws.Dir, trace, sastRaws)
+	result.MinSeverity = s.minSeverity
+	result.VulnsBelowThreshold = countBelowThreshold(vulns, s.minSeverity)
+	result.UnfixedSuppressed = countUnfixedSuppressed(vulns, s.minSeverity, s.ignoreUnfixed)
+	result.FindingQuality = computeFindingQuality(result)
+	trace.succeed(step, "Findings derived", map[string]int{"vulnerabilities": len(vulns), "licenses": len(lics), "findings": len(result.Findings)})
+	result.DebugEvents = trace.snapshot()
+	if result.SBOM != nil {
+		result.Coverage = sbom.CoverageByEcosystem(*result.SBOM) // per-ecosystem coverage breakdown
+		result.SBOMQuality = sbom.Quality(*result.SBOM)          // NTIA + semantic describe-quality of the SBOM
 	}
 
 	// Cross-check disagreement judgments, best-effort + opt-in: where the RUN detection sources

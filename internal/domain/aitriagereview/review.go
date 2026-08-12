@@ -129,10 +129,10 @@ func NewPending(in Input, now time.Time) (Review, error) {
 	if r.ProposerModel == "" || r.PromptVersion == "" || r.PolicyVersion == "" || r.PolicyReason == "" || now.IsZero() {
 		return Review{}, fmt.Errorf("%w: AI-triage review requires model, prompt, policy, reason, and timestamp", shared.ErrValidation)
 	}
-	if r.PolicyVersion == "fp-gate-v4" && (r.ProposerProvider == "" || r.ProposerModelFamily == "" || r.IndependencePolicy == "") {
-		return Review{}, fmt.Errorf("%w: fp-gate-v4 review requires provider/model-family identity and independence policy", shared.ErrValidation)
+	if requiresIndependentModelMetadata(r.PolicyVersion) && (r.ProposerProvider == "" || r.ProposerModelFamily == "" || r.IndependencePolicy == "") {
+		return Review{}, fmt.Errorf("%w: independence-aware AI policy requires provider/model-family identity and independence policy", shared.ErrValidation)
 	}
-	if r.PolicyVersion == "fp-gate-v4" {
+	if requiresIndependentModelMetadata(r.PolicyVersion) {
 		if r.VerifierModel == "" {
 			if r.VerifierProvider != "" || r.VerifierModelFamily != "" {
 				return Review{}, fmt.Errorf("%w: verifier metadata requires a verifier model", shared.ErrValidation)
@@ -145,6 +145,17 @@ func NewPending(in Input, now time.Time) (Review, error) {
 		return Review{}, fmt.Errorf("%w: invalid AI-triage confidence or rollout metadata", shared.ErrValidation)
 	}
 	return r, nil
+}
+
+// Only explicitly historical policies are exempt. Unknown/future policy versions therefore inherit the
+// strongest separation-of-duties metadata requirement instead of failing open when a new version lands.
+func requiresIndependentModelMetadata(policyVersion string) bool {
+	switch strings.TrimSpace(policyVersion) {
+	case "fp-gate-v1", "fp-gate-v2", "fp-gate-v3":
+		return false
+	default:
+		return true
+	}
 }
 
 // Decide transitions a pending review and enforces rationale, optimistic concurrency,

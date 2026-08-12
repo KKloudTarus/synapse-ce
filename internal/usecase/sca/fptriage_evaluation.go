@@ -222,11 +222,27 @@ func EvaluateFPTriage(ctx context.Context, dataset AIEvaluationDataset, run AIEv
 		findings = append(findings, finding.Finding{
 			Title: title, Description: c.Description, Severity: c.Severity, CWE: c.CWE,
 			Kind: c.Kind, Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction, DedupKey: key,
+			SourceLocation: &finding.SourceLocation{File: c.File, StartLine: c.Line, EndLine: c.Line},
 		})
 		caseByKey[key] = c
 	}
 
-	result := &ScanResult{Findings: findings, AITriage: triager.Triage(ctx, findings, "")}
+	evidence := aiTriageEvidenceForCandidates(findings, nil)
+	for _, item := range findings {
+		c := caseByKey[item.DedupKey]
+		if framework := strings.TrimSpace(c.Framework); framework != "" {
+			evidence[item.DedupKey] = append(evidence[item.DedupKey], ports.AITriageEvidenceToken{
+				ID: "ev:framework", Kind: ports.AITriageEvidenceKindFramework, Value: framework,
+			})
+		}
+	}
+	var critiques []ports.AICritique
+	if contextual, ok := triager.(ports.EvidenceAwareFPTriager); ok {
+		critiques = contextual.TriageWithEvidence(ctx, findings, "", evidence)
+	} else {
+		critiques = triager.Triage(ctx, findings, "")
+	}
+	result := &ScanResult{Findings: findings, AITriage: critiques}
 	applyAIGatePolicyWithIndependence(result, true, aiTriageModeShadow, run.IndependencePolicy)
 	critiqueByKey := make(map[string]ports.AICritique, len(result.AITriage))
 	for _, critique := range result.AITriage {
