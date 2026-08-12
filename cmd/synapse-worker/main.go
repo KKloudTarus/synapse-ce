@@ -12,13 +12,17 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cloudsandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
 	egressinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/egress"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
@@ -27,6 +31,7 @@ import (
 	recontools "github.com/KKloudTarus/synapse-ce/internal/infrastructure/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/binregistry"
@@ -37,6 +42,9 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/assetuc"
+	attackpathuc "github.com/KKloudTarus/synapse-ce/internal/usecase/attackpath"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/cspm"
 	egresspolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/egress"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
@@ -100,6 +108,7 @@ func main() {
 	evidenceStore := postgres.NewEvidenceStore(pool)
 	auditLog := postgres.NewAuditLog(pool)
 	queue := postgres.NewJobQueue(pool, ids)
+	cloudRunStore := postgres.NewCloudRunStore(pool)
 
 	// Credential vault – same master key as the API so secrets resolve.
 	credVault := vault.NewPostgresVault(pool, mustVaultCipher(cfg, log))
@@ -170,7 +179,26 @@ func main() {
 		os.Exit(1)
 	}
 	sb.SetVault(credVault)
-	sb.SetBinaryRegistry(binregistry.New(cfg.ToolHashes, true)) // F5: refuse a replaced tool binary (TOFU)
+	toolRegistry := binregistry.New(cfg.ToolHashes, true)
+	if cfg.CSPMEnabled {
+		if !filepath.IsAbs(cfg.CSPMHelperBin) {
+			log.Error("SYNAPSE_CSPM_HELPER_BIN must be an absolute path when CSPM is enabled")
+			os.Exit(1)
+		}
+		resolvedHelper, err := filepath.EvalSymlinks(cfg.CSPMHelperBin)
+		if err != nil {
+			log.Error("resolve CSPM helper path", "err", err)
+			os.Exit(1)
+		}
+		cfg.CSPMHelperBin = resolvedHelper
+		if _, ok := cfg.ToolHashes[resolvedHelper]; !ok {
+			if _, ok = cfg.ToolHashes[filepath.Base(resolvedHelper)]; !ok {
+				log.Error("CSPM helper requires an authoritative SHA-256 pin in SYNAPSE_TOOL_HASHES")
+				os.Exit(1)
+			}
+		}
+	}
+	sb.SetBinaryRegistry(toolRegistry)
 	egressLive := false
 	if app, aerr := egressinfra.NewApplier(); aerr == nil {
 		probeCtx, pcancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -204,6 +232,71 @@ func main() {
 
 	handlers := map[string]worker.Handler{
 		reconuc.JobKind: reconJobHandler{svc: reconService}, // Handle + OnDeadLetter (finalize the run)
+	}
+	if cfg.CSPMEnabled {
+		connectors := make(map[cloudposture.Provider]ports.CloudConnector, len(cfg.CSPMProviders))
+		for _, name := range cfg.CSPMProviders {
+			provider := cloudposture.Provider(strings.ToLower(strings.TrimSpace(name)))
+			if !provider.Valid() {
+				log.Error("unknown CSPM provider", "provider", provider)
+				os.Exit(1)
+			}
+			connectors[provider] = cspm.Evaluator{}
+		}
+		assetRepo := postgres.NewAssetRepository(pool)
+		assetSvc, cerr := assetuc.NewService(assetRepo, auditLog, clock, ids)
+		if cerr != nil {
+			log.Error("CSPM asset service init failed", "err", cerr)
+			os.Exit(1)
+		}
+		findingRepo := postgres.NewFindingRepository(pool)
+		cloudSvc, cerr := cspm.NewService(connectors, assetSvc, findingRepo, repo, auditLog, clock)
+		if cerr != nil {
+			log.Error("CSPM service init failed", "err", cerr)
+			os.Exit(1)
+		}
+		if cerr = cloudSvc.SetDurableExecution(cloudRunStore, queue, ids); cerr != nil {
+			log.Error("CSPM durable execution init failed", "err", cerr)
+			os.Exit(1)
+		}
+		evidenceSealer, cerr := cspm.NewEvidenceSealer(evidenceService)
+		if cerr != nil {
+			log.Error("CSPM evidence init failed", "err", cerr)
+			os.Exit(1)
+		}
+		cloudSvc.SetEvidenceSealer(evidenceSealer)
+		cloudSvc.SetObservationStore(postgres.NewCloudObservationStore(pool))
+		cloudSvc.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
+		egressHosts := map[cloudposture.Provider][]string{}
+		for _, entry := range cfg.CSPMEgressHosts {
+			providerName, host, ok := strings.Cut(entry, "=")
+			provider := cloudposture.Provider(strings.TrimSpace(providerName))
+			if !ok || !provider.Valid() || strings.TrimSpace(host) == "" {
+				log.Error("invalid SYNAPSE_CSPM_EGRESS_HOSTS entry", "entry", entry)
+				os.Exit(1)
+			}
+			egressHosts[provider] = append(egressHosts[provider], strings.TrimSpace(host))
+		}
+		executor, xerr := cloudsandbox.New(sb, credVault, cfg.CSPMHelperBin, cfg.CSPMRate, cfg.ReconTimeout, cfg.ReconMaxOutput, egressHosts)
+		if xerr != nil || !egressLive {
+			log.Error("CSPM requires sandboxed helper with kernel egress enforcement", "err", xerr)
+			os.Exit(1)
+		}
+		cloudSvc.SetSandboxExecutor(executor)
+		attributor, cerr := attackpathuc.NewRecorder(assetRepo, postgres.NewAttackPathStore(pool), repo)
+		if cerr != nil {
+			log.Error("CSPM attribution init failed", "err", cerr)
+			os.Exit(1)
+		}
+		cloudSvc.SetAttributor(attributor)
+		expectations, cerr := cspm.NewExpectationSource(repo, postgres.NewProjectAnalysisStore(pool), sourceartifact.New(cfg.ProjectSourceArtifactDir, cfg.ProjectSourceMaxFileBytes, cfg.ProjectSourceMaxFiles, cfg.ProjectSourceMaxBytes))
+		if cerr != nil {
+			log.Error("CSPM expectation source init failed", "err", cerr)
+			os.Exit(1)
+		}
+		cloudSvc.SetExpectationSource(expectations)
+		handlers[cspm.JobKind] = cspmJobHandler{svc: cloudSvc}
+		log.Info("CSPM worker handler ENABLED", "providers", cfg.CSPMProviders)
 	}
 	visibility := cfg.ReconTimeout + time.Minute
 
@@ -419,6 +512,17 @@ func (h reconJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, 
 // agentJobHandler binds the orchestrator to the worker's Handler + DeadLetterer interfaces:
 // running an agent job is RunJob; dead-lettering one finalizes the backing session, so the
 // reconciler stops re-driving it (closes the dead-letter → re-drive livelock).
+// cspmJobHandler binds durable CSPM execution and dead-letter finalization.
+type cspmJobHandler struct{ svc *cspm.Service }
+
+func (h cspmJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	return h.svc.RunJob(ctx, job.Payload)
+}
+
+func (h cspmJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause error) error {
+	return h.svc.FailStrandedJob(ctx, job.Payload, cause)
+}
+
 type agentJobHandler struct{ orch *orchestrator.Orchestrator }
 
 func (h agentJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {

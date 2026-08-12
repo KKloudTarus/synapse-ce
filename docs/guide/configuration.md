@@ -80,6 +80,11 @@ Most of these ship ON by default (safe, best-effort). See [Features](features.md
 | --- | --- | --- |
 | `SYNAPSE_SECRET_SCAN_ENABLED` | `true` | Secret scanning over the workspace (regex plus entropy). Matches are redacted; the raw secret never reaches logs, evidence, or the report. |
 | `SYNAPSE_MISCONFIG_ENABLED` | `true` | Misconfiguration and IaC scanning of Dockerfiles and Kubernetes manifests. |
+| `SYNAPSE_CSPM_ENABLED` | `false` | Enable durable read-only cloud posture runs. Requires PostgreSQL, fleet assets, `synapse-worker`, sandbox, and kernel egress enforcement. |
+| `SYNAPSE_CSPM_PROVIDERS` | empty | Comma-separated provider allowlist: `aws`, `azure`, `gcp`. |
+| `SYNAPSE_CSPM_RATE` | `0` | Requests per second, `1..100`; `0` selects provider defaults. |
+| `SYNAPSE_CSPM_HELPER_BIN` | `synapse-cspm` | CSPM requires this to be an absolute path and authoritatively pinned in `SYNAPSE_TOOL_HASHES`; the helper executes inside bubblewrap. |
+| `SYNAPSE_CSPM_EGRESS_HOSTS` | empty | Comma-separated `provider=hostname` HTTPS allowlist. Empty fails CSPM startup closed. |
 | `SYNAPSE_FP_TRIAGE_ENABLED` | `false` | Enable advisory LLM false-positive analysis over production-scope SAST/misconfig findings. Secrets never enter the LLM. A proposer alone or a scan without an evidence ledger never changes a gate. |
 | `SYNAPSE_FP_TRIAGE_MODEL` | `SYNAPSE_LLM_MODEL` | Proposer model for false-positive analysis. |
 | `SYNAPSE_FP_TRIAGE_PROVIDER` | `SYNAPSE_LLM_PROVIDER` | Explicit provider identity for the triage proposer model. |

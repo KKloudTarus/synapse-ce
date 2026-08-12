@@ -11,7 +11,7 @@ import (
 // InferTargetKind classifies a raw target string into a scope TargetKind. It is the canonical
 // classifier for turning an operator- or agent-supplied string into a typed Target: a scheme
 // separator means URL, a parseable prefix means CIDR, a parseable address means IP, and
-// anything else is treated as a domain. Repo/image kinds are never inferred from a bare
+// anything else is treated as a domain. Repo/image/cloud-account kinds are never inferred from a bare
 // string (they are explicit). The recon use-case carries an equivalent private classifier
 // (frozen P2); new callers – notably the agent tool catalog – use this canonical one.
 func InferTargetKind(v string) TargetKind {

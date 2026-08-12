@@ -19,12 +19,13 @@ type Scope struct {
 type TargetKind string
 
 const (
-	TargetDomain TargetKind = "domain"
-	TargetIP     TargetKind = "ip"
-	TargetCIDR   TargetKind = "cidr"
-	TargetURL    TargetKind = "url"
-	TargetRepo   TargetKind = "repo"
-	TargetImage  TargetKind = "image"
+	TargetDomain       TargetKind = "domain"
+	TargetIP           TargetKind = "ip"
+	TargetCIDR         TargetKind = "cidr"
+	TargetURL          TargetKind = "url"
+	TargetRepo         TargetKind = "repo"
+	TargetImage        TargetKind = "image"
+	TargetCloudAccount TargetKind = "cloud_account"
 )
 
 // Target is a single in-scope or out-of-scope asset.
@@ -155,6 +156,10 @@ func matchScopeTarget(scopeT, req Target) bool {
 		return true
 	}
 	if (scopeT.Kind == TargetRepo || scopeT.Kind == TargetImage) &&
+		strings.EqualFold(strings.TrimSpace(scopeT.Value), strings.TrimSpace(req.Value)) {
+		return true
+	}
+	if scopeT.Kind == TargetCloudAccount && req.Kind == TargetCloudAccount &&
 		strings.EqualFold(strings.TrimSpace(scopeT.Value), strings.TrimSpace(req.Value)) {
 		return true
 	}

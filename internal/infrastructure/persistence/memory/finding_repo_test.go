@@ -120,3 +120,39 @@ func TestFindingRepositoryRuleKey(t *testing.T) {
 		t.Errorf("SetEvidenceScore must preserve RuleKey, got %q (err: %v)", fUpd.RuleKey, err)
 	}
 }
+
+func TestCloudFindingVisibilityFollowsActiveObservation(t *testing.T) {
+	ctx := shared.WithTenant(context.Background(), "tenant")
+	repo := NewFindingRepository()
+	observations := NewCloudObservationStore()
+	repo.SetCloudObservationStore(observations)
+	cloudFinding := finding.Finding{
+		ID: "cloud-1", EngagementID: "eng", Title: "public bucket", Severity: shared.SeverityHigh,
+		Status: finding.StatusOpen, Kind: finding.KindCloudPosture, RuleKey: "cloud-storage-public",
+		DedupKey: "cspm:aws:scope:cloud-storage-public:bucket:public", ProposedBy: "cspm", EvidenceScore: finding.EvidenceThreshold,
+	}
+	if err := repo.Upsert(ctx, []finding.Finding{cloudFinding}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := repo.ListByEngagement(ctx, "eng"); len(got) != 0 {
+		t.Fatalf("unobserved cloud finding visible: %#v", got)
+	}
+	if err := observations.ReconcileCloudObservations(ctx, "tenant", "eng", "cspm:scope", "evidence", nil, []shared.ID{"cloud-1"}, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := repo.ListByEngagement(ctx, "eng"); len(got) != 1 {
+		t.Fatalf("active cloud finding hidden: %#v", got)
+	}
+	if got, _ := repo.ListPublishableByEngagement(ctx, "eng"); len(got) != 1 {
+		t.Fatalf("active publishable cloud finding hidden: %#v", got)
+	}
+	if err := observations.ReconcileCloudObservations(ctx, "tenant", "eng", "cspm:scope", "evidence-2", nil, nil, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := repo.ListByEngagement(ctx, "eng"); len(got) != 0 {
+		t.Fatalf("inactive cloud finding visible: %#v", got)
+	}
+	if got, _ := repo.ListPublishableByEngagement(ctx, "eng"); len(got) != 0 {
+		t.Fatalf("inactive cloud finding publishable: %#v", got)
+	}
+}

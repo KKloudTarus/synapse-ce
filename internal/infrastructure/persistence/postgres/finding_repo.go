@@ -170,7 +170,12 @@ func (r *FindingRepository) ListByEngagement(ctx context.Context, engagementID s
 	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
 			`SELECT `+findingCols+`
-		 FROM findings WHERE engagement_id=$1
+		 FROM findings f WHERE f.engagement_id=$1
+			 AND (f.kind <> 'cloud_posture' OR EXISTS (
+			   SELECT 1 FROM cspm_observations o
+			   WHERE o.tenant_id=f.tenant_id AND o.engagement_id=f.engagement_id
+			     AND o.observation_kind='finding' AND o.object_id=f.id AND o.active
+			 ))
 		 ORDER BY priority ASC, kev DESC, risk_score DESC,
 		          CASE severity
 		            WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3

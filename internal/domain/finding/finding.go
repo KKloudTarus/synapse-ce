@@ -55,20 +55,21 @@ const (
 	KindRecon        Kind = "recon"
 	KindExploitation Kind = "exploitation"
 	KindManual       Kind = "manual"
-	KindSAST         Kind = "sast"        // first-party source-code issue (SAST)
-	KindSecret       Kind = "secret"      // a hardcoded secret found in source (deterministic; ungated)
-	KindMisconfig    Kind = "misconfig"   // an insecure IaC/config setting (deterministic; ungated)
-	KindDAST         Kind = "dast"        // runtime-confirmed app issue: a safe probe verified exploitability of a gated hypothesis
-	KindThreat       Kind = "threat"      // threat-model item
-	KindHypothesis   Kind = "hypothesis"  // AI-proposed attack-chain hypothesis linking findings (gated until human-verified)
-	KindQuality      Kind = "quality"     // maintainability / code-smell issue (deterministic; ungated)
-	KindReliability  Kind = "reliability" // likely bug (deterministic; ungated)
+	KindSAST         Kind = "sast"          // first-party source-code issue (SAST)
+	KindSecret       Kind = "secret"        // a hardcoded secret found in source (deterministic; ungated)
+	KindMisconfig    Kind = "misconfig"     // an insecure IaC/config setting (deterministic; ungated)
+	KindCloudPosture Kind = "cloud_posture" // a deterministic live cloud posture or IaC/live drift finding
+	KindDAST         Kind = "dast"          // runtime-confirmed app issue: a safe probe verified exploitability of a gated hypothesis
+	KindThreat       Kind = "threat"        // threat-model item
+	KindHypothesis   Kind = "hypothesis"    // AI-proposed attack-chain hypothesis linking findings (gated until human-verified)
+	KindQuality      Kind = "quality"       // maintainability / code-smell issue (deterministic; ungated)
+	KindReliability  Kind = "reliability"   // likely bug (deterministic; ungated)
 )
 
 // Valid reports whether k is a known finding kind.
 func (k Kind) Valid() bool {
 	switch k {
-	case KindSCA, KindRecon, KindExploitation, KindManual, KindSAST, KindSecret, KindMisconfig, KindDAST, KindThreat, KindHypothesis, KindQuality, KindReliability:
+	case KindSCA, KindRecon, KindExploitation, KindManual, KindSAST, KindSecret, KindMisconfig, KindCloudPosture, KindDAST, KindThreat, KindHypothesis, KindQuality, KindReliability:
 		return true
 	}
 	return false
@@ -77,7 +78,7 @@ func (k Kind) Valid() bool {
 // IsRuleBased reports whether k is a kind that requires a catalog rule key.
 func (k Kind) IsRuleBased() bool {
 	switch k {
-	case KindSAST, KindSecret, KindMisconfig, KindQuality, KindReliability:
+	case KindSAST, KindSecret, KindMisconfig, KindCloudPosture, KindQuality, KindReliability:
 		return true
 	}
 	return false

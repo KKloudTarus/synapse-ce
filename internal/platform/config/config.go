@@ -215,6 +215,13 @@ type Config struct {
 	// services) and its HTTP routes; off by default. When on with Postgres, startup refuses to
 	// serve unless the DB role can enforce Row Level Security (not SUPERUSER/BYPASSRLS).
 	FleetAssetsEnabled bool
+	// CSPM enables read-only live cloud posture connectors. Providers is an allowlist;
+	// Rate is requests per second, with zero selecting provider defaults.
+	CSPMEnabled     bool
+	CSPMProviders   []string
+	CSPMRate        int
+	CSPMEgressHosts []string
+	CSPMHelperBin   string
 	// Attack-path traversal is bounded by length, retained paths per target, and wall clock.
 	AttackPathMaxLen    int
 	AttackPathMaxPaths  int
@@ -561,6 +568,11 @@ func Load() Config {
 		SBOMCrossCheckEnabled:        getbool("SYNAPSE_SBOM_CROSSCHECK_ENABLED", true),
 		WriteupDraftsEnabled:         getbool("SYNAPSE_WRITEUP_DRAFTS_ENABLED", false), // needs agent → opt-in
 		FleetAssetsEnabled:           getbool("SYNAPSE_FLEET_ASSETS_ENABLED", false),
+		CSPMEnabled:                  getbool("SYNAPSE_CSPM_ENABLED", false),
+		CSPMProviders:                splitList(getenv("SYNAPSE_CSPM_PROVIDERS", "")),
+		CSPMRate:                     boundedNonNegative(getint("SYNAPSE_CSPM_RATE", 0), 100),
+		CSPMEgressHosts:              splitList(getenv("SYNAPSE_CSPM_EGRESS_HOSTS", "")),
+		CSPMHelperBin:                getenv("SYNAPSE_CSPM_HELPER_BIN", "synapse-cspm"),
 		AttackPathMaxLen:             getint("SYNAPSE_ATTACKPATH_MAX_LEN", 12),
 		AttackPathMaxPaths:           getint("SYNAPSE_ATTACKPATH_MAX_PATHS", 100),
 		AttackPathWallClock:          getduration("SYNAPSE_ATTACKPATH_WALLCLOCK", 2*time.Second),
@@ -706,6 +718,13 @@ func normalizeFPTriageIndependence(s string) string {
 	default:
 		return "disabled"
 	}
+}
+
+func boundedNonNegative(value, max int) int {
+	if value < 0 || value > max {
+		return 0
+	}
+	return value
 }
 
 // IsProduction reports whether this is a production-grade deployment, in which the

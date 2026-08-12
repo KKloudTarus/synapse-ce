@@ -286,7 +286,7 @@ func TestAttackPathOpenAPIContract(t *testing.T) {
 	}
 
 	assertEnum("AttackPathAsset", "Kind", []string{"host", "workload", "image", "cloud_account", "storage", "exposure", "identity", "namespace", "cluster", "repository"})
-	assertEnum("Finding", "Kind", []string{"sca", "recon", "exploitation", "manual", "sast", "secret", "misconfig", "dast", "threat", "hypothesis", "quality", "reliability"})
+	assertEnum("Finding", "Kind", []string{"sca", "recon", "exploitation", "manual", "sast", "secret", "misconfig", "cloud_posture", "dast", "threat", "hypothesis", "quality", "reliability"})
 	assertEnum("AttackPathFindingInput", "reachability", []string{"", "reachable", "not_reachable", "unknown"})
 	assertEnum("AttackPathFindingInput", "tier", []string{"", "tier-0", "tier-1", "tier-1.5", "tier-2"})
 
