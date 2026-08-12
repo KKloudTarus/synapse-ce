@@ -54,6 +54,9 @@ nav:
   - Features: features.md
   - Configuration: configuration.md
   - CLI: cli.md
+  - Cloud posture (CSPM): cloud-posture.md
+  - Code quality rules: code-quality-rules.md
+  - Fleet agent packaging: fleet-agent-packaging.md
   - AI triage evaluation: ai-triage-evaluation.md
   - Architecture: architecture.md
   - Deployment: deployment.md

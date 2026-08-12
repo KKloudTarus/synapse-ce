@@ -251,6 +251,8 @@ td .def { color: var(--fg-faint); font-family: var(--mono); font-size: .8rem; }
 .contrib .tag { display: inline-block; margin-top: 12px; font-size: .72rem; font-weight: 600; padding: 3px 10px; border-radius: 999px; letter-spacing: .03em; }
 .tag-eng { background: color-mix(in srgb, var(--brand) 15%, transparent); color: var(--brand-3); border: 1px solid color-mix(in srgb, var(--brand) 30%, transparent); }
 .tag-design { background: color-mix(in srgb, var(--brand-2) 15%, transparent); color: var(--brand-2); border: 1px solid color-mix(in srgb, var(--brand-2) 30%, transparent); }
+.tag-lead { background: color-mix(in srgb, var(--brand-3) 16%, transparent); color: var(--brand-3); border: 1px solid color-mix(in srgb, var(--brand-3) 32%, transparent); }
+.tag-ai { background: color-mix(in srgb, var(--brand) 12%, transparent); color: var(--brand); border: 1px solid color-mix(in srgb, var(--brand) 26%, transparent); }
 
 /* ---------- footer ---------- */
 .footer { border-top: 1px solid var(--border); padding: 48px 0 40px; background: var(--bg-2); }
