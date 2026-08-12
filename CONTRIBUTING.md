@@ -3,6 +3,16 @@
 Thanks for your interest in improving Synapse! This document explains how to get set up and
 what we expect from contributions.
 
+## Maintainers & review
+
+Synapse is stewarded by its founding team. Pull requests are reviewed strictly against the
+architecture rules and safety invariants below; expect a maintainer to ask for changes until
+they hold.
+
+- **Founder:** [@nghiadaulau](https://github.com/nghiadaulau) · **Co-founder:** [@nnatuan03](https://github.com/nnatuan03)
+- **Lead maintainer:** [@pho-veteran](https://github.com/pho-veteran) — primary reviewer/merger
+- Engineers, designer, and AI-engineer contributors are credited in the [README](README.md#team--contributors).
+
 ## Getting started
 
 1. Fork the repository and create a feature branch off `main`.
@@ -47,8 +57,24 @@ Synapse is a security tool. Changes must preserve these:
 4. **Reports are templated from stored data** – deterministic, reproducible.
 5. **Evidence and audit logs are append-only** and hash-chained; a broken chain blocks the
    report.
+6. **Tenant-scoped tables carry `tenant_id` + Postgres RLS** (`synapse_enable_tenant_rls`) and are
+   reached through a `WithTenant` transaction; global reference data (e.g. `advisories`) is the
+   deliberate exception. Cross-tenant access must be rejected by the hostile harness.
 
 If a change would weaken any of these, please open an issue to discuss first.
+
+## Database migrations
+
+Migrations are numbered SQL files in `migrations/`, embedded and **auto-applied at startup via
+goose**. Two rules avoid the duplicate-version startup crash goose raises on collisions:
+
+- **Append a new numbered file — never edit or renumber a shipped migration.** Take the next
+  free number after the current maximum on `main` at PR time; if two PRs race for the same number,
+  the later one rebases and renumbers. goose keys on the leading integer, so a duplicate is a
+  hard startup panic, not a git merge conflict (the filenames differ), and a clean merge will not
+  catch it.
+- **Add a Postgres integration test** (`migration_00NN_test.go`) that calls `postgres.Migrate`,
+  so a broken or duplicate version is caught locally.
 
 ## Coding conventions
 
@@ -68,7 +94,9 @@ If a change would weaken any of these, please open an issue to discuss first.
 ## Pull requests
 
 - Keep PRs focused; describe the change and its rationale.
-- Include tests for new behavior.
+- Include tests for new behavior. Security- or execution-sensitive changes should also pass the
+  hostile harness (`TestHostileHarness` in `internal/adapter/httpapi/harness_test.go`); persistence
+  changes should include real-Postgres integration tests run with `SYNAPSE_TEST_DB_DSN` set.
 - Ensure `make build vet test typecheck` and `cd web && pnpm build` pass.
 - Use clear, conventional commit messages (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`).
 - For a user-visible change, add an entry under the `Unreleased` section of [`CHANGELOG.md`](CHANGELOG.md).

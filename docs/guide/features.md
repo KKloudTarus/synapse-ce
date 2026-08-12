@@ -61,6 +61,54 @@ runs owned catalogers over it, so a shipped artifact is inventoried even without
 Every parser treats the image as untrusted input: reads are bounded, cancellable, and hardened
 against a hostile filesystem or a crafted package database.
 
+## First-party SAST and code quality
+
+Synapse ships its own source-code analysis, not just dependency scanning. First-party SAST rules
+run across many languages and feed a taint engine over the sandboxed `go/ssa` and tree-sitter call
+graphs; confirmed results emit `Kind=sast` findings. A SonarQube-style code-quality surface adds
+quality rules, quality gates and quality profiles, and hotspots. Third-party results enter the same
+governance path through **SARIF ingest**, so findings from other scanners are de-duplicated,
+prioritized, and reported alongside first-party ones.
+
+## Offensive testing (red team)
+
+Offensive capabilities are governed by a written offensive policy and a kill switch, and run only
+inside the hardened sandbox with server-side scope and authorization:
+
+- **Recon** enumerates a target's surface within the authorized scope.
+- An **attack-path graph** correlates the asset inventory into reachable exposure chains.
+- **Chained exploitation** advances step by step, each step producing its own proof; nothing
+  promotes without a distinct verifier's sealed verdict.
+- **Adversary emulation** runs benign technique variants that declare the detection each technique
+  should produce — the offensive half of the purple-team ledger.
+
+## Runtime defense (blue team)
+
+A distributed **agent fleet** extends Synapse from point-in-time analysis to runtime, over both host
+and Kubernetes estates:
+
+- **Agents** collect host inventory and Kubernetes workload/exposure/identity inventory, with
+  certificate enrolment, signed packaging and updates, per-asset coverage and freshness, and fenced
+  leadership so scheduled work runs once.
+- An **eBPF detection engine** observes process, file, network, and privilege events and evaluates a
+  first-party detection catalog. A detection is **evidence, not an alert**: it is attributable,
+  sealed into the same hash-chained evidence chain, and joined to the same asset and finding the
+  static pillars reason about.
+- A **columnar telemetry tier** retains raw events with a retention/cost model for retro-hunting.
+- **Governed response actions** (isolate host, quarantine file, stop process) run under the *same*
+  admission model as exploitation: server-side authorization, a human-approved sealed evidence
+  record, argv-only execution, a mandatory reversal, and a declared blast radius.
+- **Purple-team coverage** measures which techniques would actually be detected by joining
+  emulation-expected detections with what actually fired, and reports the gap as a first-class number.
+
+## Cloud posture (CSPM)
+
+Read-only posture connectors for **AWS, Azure, and GCP** run behind a sandboxed helper. Credentials
+are resolved by vault reference and passed to the helper out-of-band over an inherited file
+descriptor (never in argv, env, or logs), every cloud operation is authorized server-side against
+the engagement scope before it runs, and the connectors issue describe/list/get calls only. Findings
+include IaC-declared-vs-live-state drift.
+
 ## Governance: suppression, VEX, and compliance
 
 These share one rule that fits a chain-of-custody tool: acceptance is retain-and-mark, never

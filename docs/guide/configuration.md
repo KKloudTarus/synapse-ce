@@ -143,6 +143,42 @@ reports whether traversal was truncated; lowering a bound never produces a resul
 | `SYNAPSE_ATTACKPATH_MAX_PATHS` | `100` | Maximum retained paths per requested target or finding. Must be positive. |
 | `SYNAPSE_ATTACKPATH_WALLCLOCK` | `2s` | Wall-clock traversal budget. Must be positive. |
 
+## Reachability tiers (opt-in per language)
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_REACHABILITY_ENABLED` | `true` | Go Tier-2 call-graph reachability proof (best-effort). |
+| `SYNAPSE_JVM_REACHABILITY_ENABLED` | `true` | JVM (Java/Kotlin) reachability. |
+| `SYNAPSE_PYREACH_ENABLED` | `false` | Python Tier-1 import-reachability (a dead dependency becomes an OpenVEX `not_affected`). |
+| `SYNAPSE_JSREACH_ENABLED` | `false` | JS/TS Tier-1 import-level reachability. |
+| `SYNAPSE_JSREACH_TIER2_ENABLED` | `false` | JS/TS Tier-2 symbol-level reachability. |
+
+## Fleet, leader election, and DAST
+
+All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on Linux hosts / Kubernetes. Enable leader election when running more than one API/worker so scheduled work fires once.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_FLEET_ENABLED` | `false` | Fleet transport + agent-admin routes. |
+| `SYNAPSE_FLEET_ASSETS_ENABLED` | `false` | Fleet asset model + attack paths. |
+| `SYNAPSE_FLEET_HOST_INGEST_ENABLED` | `false` | Accept host-inventory from `synapse-agent`. |
+| `SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED` | `false` | Accept Kubernetes inventory from `synapse-cluster-agent`. |
+| `SYNAPSE_FLEET_STALE_AFTER` | `10m` | An agent older than this reads as stale (`<=0` disables the staleness view). |
+| `SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET` | `24h` | Coverage freshness SLO. |
+| `SYNAPSE_FLEET_MIN_AGENT_VERSION` | empty | Reject agents below this version (empty = no floor). |
+| `SYNAPSE_FLEET_CA_CERT` / `_CA_KEY` / `_CERT_TTL` | empty | Enrolment PKI for agent client certificates (never logged). |
+| `SYNAPSE_FLEET_SIGNER_KEY` | empty | Signing key for agent packages/updates (never logged). |
+| `SYNAPSE_LEADER_ENABLED` | `false` | Fence scheduled dispatch to one node via a Postgres lease. |
+| `SYNAPSE_LEADER_RESOURCE` | `scheduler` | Lease name. |
+| `SYNAPSE_LEADER_TERM` | `15s` | Lease term. |
+| `SYNAPSE_LEADER_RENEW` | `5s` | Renew interval. |
+| `SYNAPSE_DAST_RATE_PER_SEC` | `5` | DAST crawler request rate. |
+| `SYNAPSE_DAST_CONCURRENCY` | `4` | DAST crawler concurrency. |
+| `SYNAPSE_DAST_MAX_DEPTH` | `8` | Maximum crawl depth. |
+| `SYNAPSE_DAST_MAX_PAGES` | `2000` | Maximum pages crawled. |
+| `SYNAPSE_DAST_MAX_WALL_CLOCK` | `30m` | Maximum crawl wall-clock. |
+| `SYNAPSE_DAST_HELPER_BIN` | `synapse-dast-helper` | Sandboxed DAST helper binary. |
+
 ## Recon and execution sandbox (sandbox required in production)
 
 | Variable | Default | Description |
