@@ -787,11 +787,21 @@ func main() {
 		scaService.SetFPTriageMode(cfg.FPTriageMode)
 		scaService.SetFPTriageMaxFindings(cfg.FPTriageMaxFindings)
 		scaService.SetFPTriageIndependence(cfg.FPTriageIndependence)
+		scaService.SetFPTriageAlertPolicy(cfg.FPTriageAlertMinSamples, cfg.FPTriageDisagreeBaseBPS,
+			cfg.FPTriageExemptBaseBPS, cfg.FPTriageParseFailBaseBPS, cfg.FPTriageAlertDeltaBPS)
 		if tllm, terr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); terr != nil {
 			log.Warn("AI false-positive triage DISABLED (LLM unavailable)", "err", terr)
 		} else {
 			coord := fptriage.NewWithIdentity(tllm, cfg.FPTriageProvider, cfg.FPTriageModel).
-				WithConcurrency(cfg.FPTriageConcurrency)
+				WithConcurrency(cfg.FPTriageConcurrency).
+				WithOperationalPolicy(ports.FPTriageOperationalPolicy{
+					MaxTokens: cfg.FPTriageMaxTokens, MaxCostMicroUSD: cfg.FPTriageMaxCostMicroUSD,
+					ProposerInputMicroUSDPerMillion:  cfg.FPTriageProposerInputRate,
+					ProposerOutputMicroUSDPerMillion: cfg.FPTriageProposerOutputRate,
+					VerifierInputMicroUSDPerMillion:  cfg.FPTriageVerifierInputRate,
+					VerifierOutputMicroUSDPerMillion: cfg.FPTriageVerifierOutputRate,
+					CircuitFailureThreshold:          cfg.FPTriageCircuitFailures, CircuitCooldown: cfg.FPTriageCircuitCooldown,
+				})
 			mode := "advisory-only (distinct verifier required for gate exemption)"
 			if strings.TrimSpace(cfg.VerifierModel) != "" {
 				if !agent.IndependentLLMs(cfg.FPTriageProvider, cfg.FPTriageModel, cfg.VerifierProvider, cfg.VerifierModel, cfg.FPTriageIndependence) {
@@ -820,7 +830,8 @@ func main() {
 			}
 			scaService.SetFPTriage(triager)
 			log.Info("AI false-positive triage ENABLED ("+mode+")", "model", cfg.FPTriageModel,
-				"triage_mode", cfg.FPTriageMode, "max_findings", cfg.FPTriageMaxFindings, "concurrency", cfg.FPTriageConcurrency)
+				"triage_mode", cfg.FPTriageMode, "max_findings", cfg.FPTriageMaxFindings, "max_tokens", cfg.FPTriageMaxTokens,
+				"max_cost_micro_usd", cfg.FPTriageMaxCostMicroUSD, "concurrency", cfg.FPTriageConcurrency)
 		}
 	}
 	if cfg.SuppressionEnabled {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // AITriageBudget records bounded per-scan AI coverage. The cap is on findings, so a configured
@@ -59,8 +60,24 @@ func (s *Service) runFPTriage(ctx context.Context, result *ScanResult, workspace
 	if trace != nil {
 		tstep = trace.start(stageFindings, "ai-fp-triage", "fp-triager", "AI false-positive triage", counts)
 	}
-	result.AITriage = s.fpTriager.Triage(ctx, attempted, workspaceDir)
+	if observed, ok := s.fpTriager.(ports.ObservableFPTriager); ok {
+		observation := observed.TriageObserved(ctx, attempted, workspaceDir)
+		result.AITriage = observation.Critiques
+		result.AITriageTelemetry = &observation.Telemetry
+		if observation.Telemetry.BudgetSkippedFindings > 0 {
+			result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf(
+				"AI false-positive triage token/cost budget skipped %d attempted findings; they remain gating",
+				observation.Telemetry.BudgetSkippedFindings,
+			))
+		}
+	} else {
+		result.AITriage = s.fpTriager.Triage(ctx, attempted, workspaceDir)
+	}
 	applyAIGatePolicyWithIndependence(result, s.evidence != nil, s.fpTriageMode, s.fpTriageIndependence)
+	if result.AITriageTelemetry != nil {
+		result.AITriageTelemetry.GateExemptions = len(result.AIGateExemptKeys())
+		s.emitAITriageTelemetry(ctx, result)
+	}
 	if trace != nil {
 		trace.succeed(tstep, "AI false-positive triage", map[string]int{
 			"candidates":      len(candidates),

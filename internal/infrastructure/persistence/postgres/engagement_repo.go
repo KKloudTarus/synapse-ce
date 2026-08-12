@@ -216,6 +216,40 @@ func (r *EngagementRepository) List(ctx context.Context, tenantID shared.ID) (ou
 	return out, err
 }
 
+// ListProjectEngagements returns the tenant's hidden Project analysis contexts for operational
+// aggregation. Normal engagement lists remain unchanged and continue to hide these rows.
+func (r *EngagementRepository) ListProjectEngagements(ctx context.Context, tenantID shared.ID) (out []*engagement.Engagement, err error) {
+	tenantID = shared.TenantOrDefault(tenantID)
+	err = WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+engagementCols+` FROM engagements WHERE tenant_id=$1 AND project_id IS NOT NULL ORDER BY created_at DESC`, tenantID.String())
+		if err != nil {
+			return fmt.Errorf("list project engagements: %w", err)
+		}
+		for rows.Next() {
+			e, err := scanEngagement(rows)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("scan project engagement: %w", err)
+			}
+			out = append(out, e)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("list project engagements: %w", err)
+		}
+		rows.Close()
+		for _, e := range out {
+			scope, err := loadScope(ctx, tx, e.ID)
+			if err != nil {
+				return err
+			}
+			e.Scope = scope
+		}
+		return nil
+	})
+	return out, err
+}
+
 func (r *EngagementRepository) get(ctx context.Context, tx pgx.Tx, predicate string, args ...any) (*engagement.Engagement, error) {
 	e, err := scanEngagement(tx.QueryRow(ctx, `SELECT `+engagementCols+` FROM engagements WHERE `+predicate, args...))
 	if errors.Is(err, pgx.ErrNoRows) {

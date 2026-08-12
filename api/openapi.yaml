@@ -1242,6 +1242,16 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
 
+  /api/v1/ai-triage/observability:
+    get:
+      tags: [ai-triage]
+      operationId: getAITriageObservability
+      summary: Aggregate tenant-scoped AI triage safety and cost metrics
+      responses:
+        '200': {description: Latest per-project AI triage metrics and baseline alerts, content: {application/json: {schema: {$ref: '#/components/schemas/AITriageDashboard'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
   /api/v1/redteam/halt:
     post:
       tags: [redteam]
@@ -1451,6 +1461,52 @@ components:
         updated_at: {type: string, format: date-time}
         decided_at: {type: [string, 'null'], format: date-time}
         version: {type: integer, minimum: 1}
+
+    AITriageMetricRow:
+      type: object
+      required: [value, request_count, average_latency_ms, timeout_count, parse_failure_count, provider_failure_count, circuit_open_count, total_tokens, estimated_cost_micro_usd, comparisons, disagreements, gate_exemptions, findings]
+      properties:
+        value: {type: string}
+        request_count: {type: integer, minimum: 0}
+        average_latency_ms: {type: integer, minimum: 0}
+        timeout_count: {type: integer, minimum: 0}
+        parse_failure_count: {type: integer, minimum: 0}
+        provider_failure_count: {type: integer, minimum: 0}
+        circuit_open_count: {type: integer, minimum: 0}
+        total_tokens: {type: integer, minimum: 0}
+        estimated_cost_micro_usd: {type: integer, minimum: 0}
+        comparisons: {type: integer, minimum: 0}
+        disagreements: {type: integer, minimum: 0}
+        gate_exemptions: {type: integer, minimum: 0}
+        findings: {type: integer, minimum: 0}
+    AITriageAlert:
+      type: object
+      required: [metric, observed_basis_points, baseline_basis_points, deviation_basis_points, sample_size, message]
+      properties:
+        metric: {type: string, enum: [disagreement_rate, exemption_rate, parse_failure_rate]}
+        observed_basis_points: {type: integer, minimum: 0, maximum: 10000}
+        baseline_basis_points: {type: integer, minimum: 0, maximum: 10000}
+        deviation_basis_points: {type: integer, minimum: 0, maximum: 10000}
+        sample_size: {type: integer, minimum: 0}
+        message: {type: string}
+    AITriageDashboardAlert:
+      type: object
+      required: [project_id, project_name, alert]
+      properties:
+        project_id: {type: string}
+        project_name: {type: string}
+        alert: {$ref: '#/components/schemas/AITriageAlert'}
+    AITriageDashboard:
+      type: object
+      required: [generated_at, totals, by_model, by_prompt_version, by_cwe, by_project, alerts]
+      properties:
+        generated_at: {type: string, format: date-time}
+        totals: {$ref: '#/components/schemas/AITriageMetricRow'}
+        by_model: {type: array, items: {$ref: '#/components/schemas/AITriageMetricRow'}}
+        by_prompt_version: {type: array, items: {$ref: '#/components/schemas/AITriageMetricRow'}}
+        by_cwe: {type: array, items: {$ref: '#/components/schemas/AITriageMetricRow'}}
+        by_project: {type: array, items: {$ref: '#/components/schemas/AITriageMetricRow'}}
+        alerts: {type: array, items: {$ref: '#/components/schemas/AITriageDashboardAlert'}}
     OffensiveHaltRequest:
       type: object
       required: [reason]

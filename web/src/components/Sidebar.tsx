@@ -5,6 +5,7 @@ import {
   ChevronRight,
   FileText,
   Gauge,
+  Activity,
   LayoutDashboard,
   Library,
   Moon,
@@ -41,6 +42,7 @@ const NAV_GROUPS: Array<{
     items: [
       { icon: SquarePen, label: 'New Engagement', to: '/engagements?create=1', prefix: '/engagements', action: true },
       { icon: ShieldQuestion, label: 'AI review queue', to: '/ai-triage/reviews', prefix: '/ai-triage/reviews' },
+      { icon: Activity, label: 'AI observability', to: '/ai-triage/observability', prefix: '/ai-triage/observability' },
       { icon: Library, label: 'Rules', to: '/rules', prefix: '/rules' },
     ],
   },

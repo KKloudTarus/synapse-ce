@@ -225,6 +225,24 @@ func TestFPTriageBudgetDefaultsAndBounds(t *testing.T) {
 	}
 }
 
+func TestFPTriageOperationalBudgetAndCircuitConfig(t *testing.T) {
+	for _, key := range []string{"SYNAPSE_FP_TRIAGE_MAX_TOKENS", "SYNAPSE_FP_TRIAGE_MAX_COST_MICRO_USD", "SYNAPSE_FP_TRIAGE_CIRCUIT_FAILURES", "SYNAPSE_FP_TRIAGE_CIRCUIT_COOLDOWN"} {
+		t.Setenv(key, "")
+	}
+	cfg := Load()
+	if cfg.FPTriageMaxTokens != defaultFPTriageMaxTokens || cfg.FPTriageMaxCostMicroUSD != 0 || cfg.FPTriageCircuitFailures != defaultFPTriageCircuitFailures || cfg.FPTriageCircuitCooldown != time.Minute {
+		t.Fatalf("operational defaults = tokens:%d cost:%d failures:%d cooldown:%s", cfg.FPTriageMaxTokens, cfg.FPTriageMaxCostMicroUSD, cfg.FPTriageCircuitFailures, cfg.FPTriageCircuitCooldown)
+	}
+	t.Setenv("SYNAPSE_FP_TRIAGE_MAX_TOKENS", "25000")
+	t.Setenv("SYNAPSE_FP_TRIAGE_MAX_COST_MICRO_USD", "4000")
+	t.Setenv("SYNAPSE_FP_TRIAGE_CIRCUIT_FAILURES", "3")
+	t.Setenv("SYNAPSE_FP_TRIAGE_CIRCUIT_COOLDOWN", "30s")
+	cfg = Load()
+	if cfg.FPTriageMaxTokens != 25000 || cfg.FPTriageMaxCostMicroUSD != 4000 || cfg.FPTriageCircuitFailures != 3 || cfg.FPTriageCircuitCooldown != 30*time.Second {
+		t.Fatalf("operational config = tokens:%d cost:%d failures:%d cooldown:%s", cfg.FPTriageMaxTokens, cfg.FPTriageMaxCostMicroUSD, cfg.FPTriageCircuitFailures, cfg.FPTriageCircuitCooldown)
+	}
+}
+
 func TestFPTriageVerifierIdentityConfig(t *testing.T) {
 	for _, key := range []string{
 		"SYNAPSE_LLM_BASE_URL", "SYNAPSE_LLM_API_KEY", "SYNAPSE_LLM_PROVIDER", "SYNAPSE_FP_TRIAGE_PROVIDER",

@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -140,4 +141,69 @@ type FPTriageCache interface {
 // nil = no triage.
 type FPTriager interface {
 	Triage(ctx context.Context, candidates []finding.Finding, workspaceDir string) []AICritique
+}
+
+// FPTriageOperationalPolicy bounds one triage run and configures the shared provider circuit breaker.
+// Token reservations use a conservative upper bound before either model is contacted. Cost values are
+// integer micro-USD to keep policy arithmetic deterministic and free of floating-point rounding.
+type FPTriageOperationalPolicy struct {
+	MaxTokens                        int64
+	MaxCostMicroUSD                  int64
+	ProposerInputMicroUSDPerMillion  int64
+	ProposerOutputMicroUSDPerMillion int64
+	VerifierInputMicroUSDPerMillion  int64
+	VerifierOutputMicroUSDPerMillion int64
+	CircuitFailureThreshold          int
+	CircuitCooldown                  time.Duration
+}
+
+// FPTriageCallMetric is safe operational metadata for one provider request. It deliberately excludes
+// prompt text, source context, provider error bodies, and credentials.
+type FPTriageCallMetric struct {
+	FindingID             string `json:"finding_id"`
+	DedupKey              string `json:"dedup_key"`
+	Role                  string `json:"role"`
+	Provider              string `json:"provider"`
+	Model                 string `json:"model"`
+	PromptVersion         string `json:"prompt_version"`
+	Outcome               string `json:"outcome"`
+	LatencyMillis         int64  `json:"latency_ms"`
+	PromptTokens          int    `json:"prompt_tokens,omitempty"`
+	CompletionTokens      int    `json:"completion_tokens,omitempty"`
+	TotalTokens           int    `json:"total_tokens,omitempty"`
+	EstimatedCostMicroUSD int64  `json:"estimated_cost_micro_usd,omitempty"`
+}
+
+// FPTriageTelemetry is one scan's bounded, evidence-sealed operational summary. Reserved values are
+// authoritative for enforcing the budget; usage values are provider-reported observations.
+type FPTriageTelemetry struct {
+	Calls                 []FPTriageCallMetric `json:"calls,omitempty"`
+	RequestCount          int                  `json:"request_count"`
+	SuccessCount          int                  `json:"success_count"`
+	TimeoutCount          int                  `json:"timeout_count"`
+	ParseFailureCount     int                  `json:"parse_failure_count"`
+	ProviderFailureCount  int                  `json:"provider_failure_count"`
+	CircuitOpenCount      int                  `json:"circuit_open_count"`
+	CacheHits             int                  `json:"cache_hits"`
+	BudgetSkippedFindings int                  `json:"budget_skipped_findings"`
+	MaxTokens             int64                `json:"max_tokens"`
+	ReservedTokens        int64                `json:"reserved_tokens"`
+	UsedTokens            int64                `json:"used_tokens"`
+	MaxCostMicroUSD       int64                `json:"max_cost_micro_usd"`
+	ReservedCostMicroUSD  int64                `json:"reserved_cost_micro_usd"`
+	EstimatedCostMicroUSD int64                `json:"estimated_cost_micro_usd"`
+	Comparisons           int                  `json:"comparisons"`
+	Disagreements         int                  `json:"disagreements"`
+	GateExemptions        int                  `json:"gate_exemptions"`
+}
+
+// FPTriageObservedResult is supported as an optional extension so existing custom FPTriager
+// implementations remain source-compatible and continue to fail safe without telemetry.
+type FPTriageObservedResult struct {
+	Critiques []AICritique
+	Telemetry FPTriageTelemetry
+}
+
+type ObservableFPTriager interface {
+	TriageObserved(ctx context.Context, candidates []finding.Finding, workspaceDir string) FPTriageObservedResult
 }

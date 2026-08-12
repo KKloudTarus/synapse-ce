@@ -91,6 +91,14 @@ Most of these ship ON by default (safe, best-effort). See [Features](features.md
 | `SYNAPSE_FP_TRIAGE_MODE` | `shadow` | `shadow` records `would_gate_exempt` but always keeps the finding gating. `enforce` permits the verified-consensus policy to set `gate_exempt`. Empty or unknown values fail closed to shadow. |
 | `SYNAPSE_FP_TRIAGE_MAX_FINDINGS` | `100` | Hard per-scan cap on eligible findings sent to AI triage (range `1..1000`). When capped, deterministic policy-impact/severity/risk ordering selects work; skipped findings remain reported and gating, and counts are exposed in `ai_triage_budget`. Invalid values restore the finite default. |
 | `SYNAPSE_FP_TRIAGE_CONCURRENCY` | `6` | Maximum simultaneous AI finding assessments (range `1..32`). A distinct verifier makes at most two provider calls per attempted finding. Invalid values restore the finite default. |
+| `SYNAPSE_FP_TRIAGE_MAX_TOKENS` | `1000000` | Conservative per-scan token reservation ceiling. Both proposer/verifier requests are reserved before a finding is scheduled; work that does not fit remains gating. |
+| `SYNAPSE_FP_TRIAGE_MAX_COST_MICRO_USD` | `0` | Optional per-scan cost ceiling in integer micro-USD (`0` disables cost enforcement). When enabled, all active role prices must be configured or triage fails closed without provider calls. |
+| `SYNAPSE_FP_TRIAGE_{PROPOSER,VERIFIER}_{INPUT,OUTPUT}_MICRO_USD_PER_MILLION` | `0` | Provider price in micro-USD per million tokens for deterministic cost reservation and observed-cost metrics. |
+| `SYNAPSE_FP_TRIAGE_CIRCUIT_FAILURES` | `5` | Consecutive provider/parse failures before that role's circuit opens (range `1..100`). An open circuit is advisory-only and cannot exempt findings. |
+| `SYNAPSE_FP_TRIAGE_CIRCUIT_COOLDOWN` | `1m` | Open-circuit cooldown before one half-open probe (maximum `24h`). |
+| `SYNAPSE_FP_TRIAGE_ALERT_MIN_SAMPLES` | `10` | Minimum per-scan samples before a safety-rate baseline alert is emitted. |
+| `SYNAPSE_FP_TRIAGE_{DISAGREEMENT,EXEMPTION,PARSE_FAILURE}_BASELINE_BPS` | `1500`, `1000`, `200` | Expected safety rates in basis points (`10000` = 100%). |
+| `SYNAPSE_FP_TRIAGE_ALERT_DEVIATION_BPS` | `1000` | Absolute deviation from a configured baseline that emits a persisted warning and structured alert metric. |
 | `SYNAPSE_LLM_PROVIDER` | `openai-compatible` | Explicit proposer-provider audit identity. It is not inferred from the URL because gateways may route multiple providers. |
 | `SYNAPSE_VERIFIER_BASE_URL` | `SYNAPSE_LLM_BASE_URL` | Independent OpenAI-compatible endpoint for the verifier. |
 | `SYNAPSE_VERIFIER_API_KEY` | `SYNAPSE_LLM_API_KEY` | Independent verifier credential; never logged. |

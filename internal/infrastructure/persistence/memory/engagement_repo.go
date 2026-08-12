@@ -121,3 +121,16 @@ func (r *EngagementRepository) List(_ context.Context, tenantID shared.ID) ([]*e
 	}
 	return out, nil
 }
+
+func (r *EngagementRepository) ListProjectEngagements(_ context.Context, tenantID shared.ID) ([]*engagement.Engagement, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	tenantID = shared.TenantOrDefault(tenantID)
+	out := make([]*engagement.Engagement, 0)
+	for _, e := range r.data {
+		if !e.ProjectID.IsZero() && e.TenantID == tenantID {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}

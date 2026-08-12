@@ -3,6 +3,8 @@ import type {
   AITriage,
   AITriageReview,
   AITriageReviewFilter,
+  AITriageObservability,
+  AITriageMetricRow,
   AgentReadiness,
   AgentPlan,
   AgentMessage,
@@ -768,6 +770,35 @@ function mapAITriageReview(r: any): AITriageReview {
   }
 }
 
+function mapAITriageMetricRow(r: any): AITriageMetricRow {
+  return {
+    value: r?.value ?? '', requestCount: r?.request_count ?? 0, averageLatencyMillis: r?.average_latency_ms ?? 0,
+    timeoutCount: r?.timeout_count ?? 0, parseFailureCount: r?.parse_failure_count ?? 0,
+    providerFailureCount: r?.provider_failure_count ?? 0, circuitOpenCount: r?.circuit_open_count ?? 0,
+    totalTokens: r?.total_tokens ?? 0, estimatedCostMicroUSD: r?.estimated_cost_micro_usd ?? 0,
+    comparisons: r?.comparisons ?? 0, disagreements: r?.disagreements ?? 0,
+    gateExemptions: r?.gate_exemptions ?? 0, findings: r?.findings ?? 0,
+  }
+}
+
+function mapAITriageObservability(r: any): AITriageObservability {
+  return {
+    generatedAt: r?.generated_at ?? '', totals: mapAITriageMetricRow(r?.totals),
+    byModel: (r?.by_model ?? []).map(mapAITriageMetricRow),
+    byPromptVersion: (r?.by_prompt_version ?? []).map(mapAITriageMetricRow),
+    byCWE: (r?.by_cwe ?? []).map(mapAITriageMetricRow),
+    byProject: (r?.by_project ?? []).map(mapAITriageMetricRow),
+    alerts: (r?.alerts ?? []).map((item: any) => ({
+      projectId: item?.project_id ?? '', projectName: item?.project_name ?? '',
+      alert: {
+        metric: item?.alert?.metric ?? '', observedBasisPoints: item?.alert?.observed_basis_points ?? 0,
+        baselineBasisPoints: item?.alert?.baseline_basis_points ?? 0, deviationBasisPoints: item?.alert?.deviation_basis_points ?? 0,
+        sampleSize: item?.alert?.sample_size ?? 0, message: item?.alert?.message ?? '',
+      },
+    })),
+  }
+}
+
 function mapImportedSBOMMetadata(r: any): ImportedSBOMMetadata {
   return {
     id: r.id ?? '',
@@ -1427,6 +1458,9 @@ export const api = {
     const r = await req(`/ai-triage/reviews${suffix}`)
     return (r?.reviews ?? []).map(mapAITriageReview)
   },
+
+  aiTriageObservability: async (): Promise<AITriageObservability> =>
+    mapAITriageObservability(await req('/ai-triage/observability')),
 
   decideAITriageReview: async (reviewId: string, decision: 'accept' | 'reject', rationale: string, version: number): Promise<AITriageReview> =>
     mapAITriageReview(await req(`/ai-triage/reviews/${encodeURIComponent(reviewId)}/decision`, {

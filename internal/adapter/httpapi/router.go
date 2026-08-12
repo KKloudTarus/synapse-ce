@@ -258,6 +258,9 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/ai-triage/reviews/{rid}/claim", rt.authz(userdom.PermReview, rt.claimAITriageReview))
 		mux.HandleFunc("POST /api/v1/ai-triage/reviews/{rid}/decision", rt.authz(userdom.PermReview, rt.decideAITriageReview))
 	}
+	if rt.sca != nil {
+		mux.HandleFunc("GET /api/v1/ai-triage/observability", rt.authz(userdom.PermView, rt.getAITriageObservability))
+	}
 	if rt.fleetAdmin != nil {
 		mux.HandleFunc("POST /api/v1/agents/enrolment-tokens", rt.authz(userdom.PermAdminister, rt.mintEnrolToken))
 		mux.HandleFunc("GET /api/v1/agents", rt.authz(userdom.PermView, rt.listFleetAgents))

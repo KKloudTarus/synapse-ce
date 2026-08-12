@@ -87,6 +87,9 @@ type Coordinator struct {
 	minConf            int // minimum confidence for a "refuted" to be actionable (default verdict.EvidenceThreshold)
 	radius             int // source context lines each side of the finding line
 	concurrency        int
+	operations         ports.FPTriageOperationalPolicy
+	proposerCircuit    *circuitBreaker
+	verifierCircuit    *circuitBreaker
 }
 
 // preparedFinding is one immutable model input. sourceSHA256 covers the complete file when the reader
@@ -116,7 +119,7 @@ func New(llm ports.LLM, model string) *Coordinator {
 
 // NewWithIdentity builds a Coordinator with explicit proposer provider/model audit identity.
 func NewWithIdentity(llm ports.LLM, provider, model string) *Coordinator {
-	return &Coordinator{
+	c := &Coordinator{
 		llm:                llm,
 		model:              strings.TrimSpace(model),
 		proposerProvider:   agent.CanonicalProviderID(provider),
@@ -125,6 +128,21 @@ func NewWithIdentity(llm ports.LLM, provider, model string) *Coordinator {
 		radius:             8,
 		concurrency:        defaultConcurrency,
 	}
+	c.WithOperationalPolicy(ports.FPTriageOperationalPolicy{})
+	return c
+}
+
+// WithOperationalPolicy configures per-run resource ceilings and provider circuit breaking. Invalid
+// values are replaced with finite fail-safe defaults; a zero cost ceiling leaves cost enforcement off.
+func (c *Coordinator) WithOperationalPolicy(policy ports.FPTriageOperationalPolicy) *Coordinator {
+	if c == nil {
+		return c
+	}
+	policy = normalizeOperationalPolicy(policy)
+	c.operations = policy
+	c.proposerCircuit = newCircuitBreaker(policy.CircuitFailureThreshold, policy.CircuitCooldown)
+	c.verifierCircuit = newCircuitBreaker(policy.CircuitFailureThreshold, policy.CircuitCooldown)
+	return c
 }
 
 // WithMinConfidence overrides the confidence bar a "refuted" verdict must clear (clamped to 1..100).
@@ -243,21 +261,60 @@ func (c *Coordinator) prepare(ctx context.Context, f finding.Finding, src Source
 }
 
 func (c *Coordinator) assessPrepared(ctx context.Context, candidates []preparedFinding) []Critique {
+	out, _ := c.assessPreparedObserved(ctx, candidates)
+	return out
+}
+
+func (c *Coordinator) assessPreparedObserved(ctx context.Context, candidates []preparedFinding) ([]Critique, ports.FPTriageTelemetry) {
 	out := make([]Critique, len(candidates))
 	if c == nil || c.llm == nil || len(candidates) == 0 {
-		return out
+		return out, ports.FPTriageTelemetry{}
 	}
+	budget := newRunBudget(c.operations)
+	type assessment struct {
+		candidate preparedFinding
+		proposer  ports.ChatRequest
+		verifier  ports.ChatRequest
+		admitted  bool
+	}
+	work := make([]assessment, len(candidates))
+	skipped := 0
+	for i, candidate := range candidates {
+		if !candidate.ready {
+			candidate = c.prepare(ctx, candidate.finding, candidate.reader)
+		}
+		proposer := c.proposerRequest(candidate.finding, candidate.snippet)
+		requests := []pricedRequest{{request: proposer, price: c.proposerPrice()}}
+		var verifier ports.ChatRequest
+		if c.verifier != nil {
+			verifier = c.verifierRequest(candidate.finding, candidate.snippet)
+			requests = append(requests, pricedRequest{request: verifier, price: c.verifierPrice()})
+		}
+		admitted := budget.reservePair(requests...)
+		work[i] = assessment{candidate: candidate, proposer: proposer, verifier: verifier, admitted: admitted}
+		if !admitted {
+			out[i] = Critique{FindingID: candidate.finding.ID.String(), DedupKey: candidate.finding.DedupKey, Err: errTriageBudgetExhausted}
+			skipped++
+		}
+	}
+	observer := newRunObserver(budget)
+	observer.telemetry.BudgetSkippedFindings = skipped
 	sem := make(chan struct{}, c.Concurrency())
 	var wg sync.WaitGroup
-	for i := range candidates {
+	for i := range work {
+		if !work[i].admitted {
+			continue
+		}
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
-			for j := i; j < len(candidates); j++ {
-				out[j] = Critique{FindingID: string(candidates[j].finding.ID), DedupKey: candidates[j].finding.DedupKey, Err: ctx.Err()}
+			for j := i; j < len(work); j++ {
+				if work[j].admitted {
+					out[j] = Critique{FindingID: work[j].candidate.finding.ID.String(), DedupKey: work[j].candidate.finding.DedupKey, Err: ctx.Err()}
+				}
 			}
 			wg.Wait()
-			return out
+			return out, observer.snapshot()
 		}
 		wg.Add(1)
 		go func(i int) {
@@ -268,56 +325,80 @@ func (c *Coordinator) assessPrepared(ctx context.Context, candidates []preparedF
 			defer func() {
 				if r := recover(); r != nil {
 					out[i] = Critique{
-						FindingID: string(candidates[i].finding.ID),
-						DedupKey:  candidates[i].finding.DedupKey,
+						FindingID: work[i].candidate.finding.ID.String(),
+						DedupKey:  work[i].candidate.finding.DedupKey,
 						Err:       fmt.Errorf("critique panicked: %v", r),
 					}
 				}
 			}()
-			candidate := candidates[i]
-			if !candidate.ready {
-				candidate = c.prepare(ctx, candidate.finding, candidate.reader)
-			}
-			out[i] = c.assessOne(ctx, candidate.finding, candidate.snippet)
+			out[i] = c.assessOneObserved(ctx, work[i].candidate.finding, work[i].proposer, work[i].verifier, observer)
 		}(i)
 	}
 	wg.Wait()
-	return out
+	telemetry := observer.snapshot()
+	for _, critique := range out {
+		if critique.Verifier != nil {
+			telemetry.Comparisons++
+			if disagreement(critique) {
+				telemetry.Disagreements++
+			}
+		}
+	}
+	return out, telemetry
 }
 
 func (c *Coordinator) assessOne(ctx context.Context, f finding.Finding, snippet string) Critique {
-	res := Critique{FindingID: string(f.ID), DedupKey: f.DedupKey}
-	if ctx.Err() != nil {
-		res.Err = ctx.Err()
-		return res
+	out, _ := c.assessPreparedObserved(ctx, []preparedFinding{{finding: f, snippet: snippet, ready: true}})
+	if len(out) == 0 {
+		return Critique{FindingID: f.ID.String(), DedupKey: f.DedupKey, Err: context.Canceled}
 	}
-	req := ports.ChatRequest{
+	return out[0]
+}
+
+func (c *Coordinator) proposerRequest(f finding.Finding, snippet string) ports.ChatRequest {
+	return ports.ChatRequest{
 		Model:          c.model,
-		Temperature:    ports.Temp(0), // greedy: the same finding must critique the same way twice
-		MaxTokens:      512,           // headroom if the model emits a short rationale field before the JSON object
+		Temperature:    ports.Temp(0),
+		MaxTokens:      512,
 		ResponseSchema: critiqueSchema,
 		Messages: []agent.Message{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt(f, snippet)},
 		},
 	}
+}
+
+func (c *Coordinator) verifierRequest(f finding.Finding, snippet string) ports.ChatRequest {
+	return ports.ChatRequest{
+		Model:          c.verifierModel,
+		Temperature:    ports.Temp(0),
+		MaxTokens:      512,
+		ResponseSchema: critiqueSchema,
+		Messages: []agent.Message{
+			{Role: "system", Content: verifierSystemPrompt},
+			{Role: "user", Content: verifierUserPrompt(f, snippet)},
+		},
+	}
+}
+
+func (c *Coordinator) assessOneObserved(ctx context.Context, f finding.Finding, proposerReq, verifierReq ports.ChatRequest, observer *runObserver) Critique {
+	res := Critique{FindingID: string(f.ID), DedupKey: f.DedupKey}
+	if ctx.Err() != nil {
+		res.Err = ctx.Err()
+		return res
+	}
 	// Run the verifier before the proposer result exists. Its request contains only the finding and source
 	// context, so neither invocation order nor prompt content can anchor it to the proposer's conclusion.
 	if c.verifier != nil {
 		res.VerifyAttempted = true
-		if v, verr := c.verify(ctx, f, snippet); verr == nil {
+		if v, verr := c.observeCall(ctx, c.verifier, c.verifierCircuit, verifierReq, "verifier", c.verifierProvider, f.ID.String(), f.DedupKey, c.verifierPrice(), observer); verr == nil {
 			res.Verifier = &v
 		}
 	}
 
-	resp, err := c.llm.Chat(ctx, req)
+	claim, err := c.observeCall(ctx, c.llm, c.proposerCircuit, proposerReq, "proposer", c.proposerProvider, f.ID.String(), f.DedupKey, c.proposerPrice(), observer)
 	if err != nil {
 		res.Err = fmt.Errorf("critique llm: %w", err)
-		return res
-	}
-	claim, err := parseCritique(resp.Content)
-	if err != nil {
-		res.Err = err
 		return res
 	}
 	res.Claim = claim
