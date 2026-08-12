@@ -5,11 +5,13 @@
 
 ### Verify Everything. Trust Nothing.
 
-**A governed control plane for software composition analysis, recon, evidence, and reporting.**
+**A governed control plane for the whole security-assessment lifecycle — supply chain, code,
+cloud, offensive, and runtime defense.**
 
-Turn a fragmented, manual security process into a controlled, auditable workflow, with
-server-side scope enforcement, hardened tool execution, tamper-evident evidence, and
-deterministic reports.
+Turn a fragmented, manual security process into one controlled, auditable workflow: SCA, SAST,
+secret and IaC scanning, reachability, recon and governed exploitation, cloud posture, and a
+distributed blue-team agent fleet — all behind server-side scope enforcement, hardened tool
+execution, tamper-evident evidence, and deterministic reports.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-6d5bff)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8)](go.mod)
@@ -37,47 +39,84 @@ deterministic reports.
 
 - ✅ **Deterministic first.** Scanning, matching, and reporting are pure, reproducible Go. No model sits in the report path.
 - ✅ **Evidence you can trust.** Every artifact is hash-chained into a tamper-evident custody record. A broken chain blocks the report.
-- ✅ **One tool, four scanners.** SCA, first-party SAST, secret scanning, and IaC misconfig behind a single gate.
+- ✅ **One platform, every angle.** Supply chain, code, cloud, offensive, and runtime defense behind a single gate.
 - ✅ **Reachability aware.** A deterministic call graph decides whether a vulnerable symbol is actually reachable from your code.
-- ✅ **Detection independent.** Owns its SBOM parsers and advisory matching, and ingests OSV, GHSA, and CSAF.
+- ✅ **Detection independent.** Owns its SBOM parsers and advisory matching, and ingests OSV, GHSA, CSAF and OVAL.
+- ✅ **A detection is evidence, not an alert.** Runtime detections are attributable, hash-chained, and joined to the same asset, finding, and attack path the static pillars reason about.
 - ✅ **CI ready.** `synapse-cli` is a single static binary that gates a build and emits SARIF for code scanning.
 - ✅ **Safe by construction.** argv-only execution in a Linux sandbox, server-side scope and authorization before any tool runs, secrets never leave the server.
 
 ## What is Synapse
 
-Synapse runs the security-assessment lifecycle behind one governed control plane: software
-composition analysis, recon, evidence capture, findings, and reporting.
+Synapse runs the whole security-assessment lifecycle behind one governed control plane, across
+both point-in-time analysis (SCA, SAST, code quality, IaC) and runtime analysis (a distributed
+agent fleet, eBPF detections, response actions), over container and VM estates, with a single
+asset model, one authorization model, one hash-chained evidence chain, and one prioritized queue.
 
-It is deterministic-first. Scanning, matching, license classification, and reporting are
-pure, reproducible Go with nothing else in the path. Where automated analysis is offered it
-stays strictly bounded: a proposal is only ever proposed, a typed Go state machine validates
-and executes, scope and authorization are checked in the execution layer, secrets never leave
-the server, every artifact is hash-chained into a tamper-evident custody record, and a human
-approves anything intrusive.
+It is deterministic-first. Scanning, matching, license classification, scoring, and reporting are
+pure, reproducible Go with nothing else in the path. Where automated analysis is offered it stays
+strictly bounded: a proposal is only ever proposed, a typed Go state machine validates and
+executes, scope and authorization are checked in the execution layer, secrets never leave the
+server, every artifact is hash-chained into a tamper-evident custody record, and a human approves
+anything intrusive.
 
 ## Features
 
+**Software supply chain**
 - **SBOM generation** across many ecosystems (npm, PyPI, Maven, Gradle, Go, Cargo, RubyGems,
-  Composer, NuGet, Hex, Dart and more), with owned per-ecosystem lockfile parsers.
-- **Vulnerability detection** from a live advisory API and an offline database,
-  cross-correlated and de-duplicated, plus an owned advisory store that ingests OSV, GHSA and
-  CSAF feeds for detection independence.
-- **Risk-based prioritization**: findings are ordered by exploitability (known-exploited
-  catalog, then exploit-prediction score, then CVSS), never by raw CVSS alone.
-- **License compliance**: declared-license resolution, SPDX expression parsing, a curated
-  category and risk model, and coordinate recovery for shaded or metadata-less JARs.
-- **Reachability**: a deterministic call-graph engine decides whether a vulnerable symbol is
-  actually reachable from application code.
-- **Tamper-evident evidence**: every artifact is hash-chained. A broken chain blocks the
-  report. Audit and evidence logs are append-only.
-- **Hardened execution**: tools are shelled out via argv arrays inside a Linux sandbox with
-  egress scoping. Scope and the authorization window are enforced before any tool runs.
-- **RBAC and tenant isolation** through a single authorization chokepoint.
+  Composer, NuGet, Hex, Dart, pnpm, Poetry, yarn and more) with owned per-ecosystem lockfile parsers.
+- **Vulnerability detection** from a live advisory API and an offline database, cross-correlated
+  and de-duplicated, plus an owned advisory store that ingests OSV, GHSA, CSAF and OVAL for
+  detection independence.
+- **Risk-based prioritization** ordered by exploitability (CISA KEV, then EPSS, then CVSS), never
+  by raw CVSS alone.
+- **License compliance**: declared-license resolution, SPDX expression parsing, a curated category
+  and risk model, and coordinate recovery for shaded or metadata-less JARs.
+- **Reachability**: a deterministic call-graph engine (Go, plus JVM and JS/TS tiers) decides
+  whether a vulnerable symbol is actually reachable from application code.
+
+**Code & configuration**
+- **First-party SAST** with source-code rules across many languages, plus a taint engine over the
+  sandboxed call graph.
+- **Secret scanning** and **IaC misconfiguration** (Terraform, CloudFormation, ARM, Kubernetes,
+  Helm, Dockerfile, Compose).
+- **Code quality** rules, quality gates and profiles, and third-party **SARIF ingest** into the
+  same governance path.
+
+**Offensive**
+- **Recon** in a hardened sandbox, an **attack-path graph** over the asset inventory, **chained
+  exploitation with per-step proof**, and **adversary emulation** with expected-detection output —
+  all gated by a written offensive policy and a kill switch.
+- **DAST**: authenticated crawling and a first-party check corpus with sessions from the credential vault.
+
+**Runtime defense (blue team)**
+- A distributed **agent fleet** (host and Kubernetes cluster inventory, coverage/freshness,
+  signed packaging and updates) with certificate enrolment and fenced leadership.
+- An **eBPF detection engine**, **detections sealed as hash-chained evidence**, a **columnar
+  telemetry tier** with retention, **governed response actions** (same admission + evidence as
+  exploitation), and **purple-team coverage** measured from emulation-expected vs actually-fired.
+
+**Cloud posture (CSPM)**
+- Read-only **AWS, Azure and GCP** posture connectors behind a sandboxed helper, with vault-ref
+  credentials over an inherited FD, per-operation server-side authorization, and IaC-vs-live drift findings.
+
+**Governance & evidence**
+- **Tamper-evident evidence**: every artifact is hash-chained (RFC-3161 anchored); a broken chain
+  blocks the report. Audit and evidence logs are append-only.
+- **Hardened execution**: tools run via argv arrays inside a Linux sandbox with egress scoping;
+  scope and the authorization window are enforced before any tool runs.
+- **RBAC, tenant isolation (Postgres RLS), and separation of duties** through a single authorization chokepoint.
+- **The Judgment primitive**: every AI/analysis claim is propose → verify → confirm; gated
+  capabilities promote only on a distinct verifier's sealed verdict.
+
+**AI analysis (optional, bounded)**
+- **AI false-positive triage** grounded in deterministic evidence citations, with provider-independent
+  proposer/verifier separation of duties, budgets, circuit breakers, and observability.
+- The agent proposes; a distinct verifier or a human confirms. **No model ever sits in the report path.**
+
+**Standards & reports**
 - **Standards native**: CycloneDX and SPDX with PURL, SARIF, OpenVEX and CSAF, plus KEV and EPSS.
-- **Deterministic reports** templated from stored data, with a curated CWE to OWASP, PCI and
-  ISO compliance mapping.
-- **Bounded AI analysis** (optional): the agent proposes, a distinct verifier or a human
-  confirms. No model ever sits in the report path.
+- **Deterministic reports** templated from stored data, with a curated CWE → OWASP, PCI and ISO compliance mapping.
 
 See the full walkthrough with screenshots on the [documentation site](https://synapse.kkloudtarus.net/#screens).
 
@@ -95,9 +134,13 @@ The lasting difference is what sits around the finding:
 | SCA, license, IaC misconfig, secret scanning | Yes | Yes |
 | First-party SAST (source-code rules) | Yes | Usually no |
 | Reachability via a call graph | Yes | Rarely |
+| Offensive: attack paths, chained exploitation, emulation, DAST | Yes | No |
+| Runtime blue team: agent fleet, eBPF detections, response actions | Yes | No |
+| Detections sealed as hash-chained evidence, joined to the same asset | Yes | No |
+| Cloud posture (AWS/Azure/GCP), IaC-vs-live drift | Yes | Varies |
 | Hash-chained, tamper-evident evidence | Yes | No |
 | Server-side scope and authorization before a tool runs | Yes | No |
-| RBAC, tenant isolation, separation of duties | Yes | No |
+| RBAC, tenant isolation (RLS), separation of duties | Yes | No |
 | Deterministic, model-free report path | Yes | Varies |
 
 ## Quickstart
@@ -177,9 +220,15 @@ The exit code is 0 when no finding meets the threshold, non-zero otherwise.
 | Binary | Role |
 | --- | --- |
 | `synapse-api` | HTTP API server, the primary service |
-| `synapse-cli` | Run an SCA scan from the command line, CI-friendly |
-| `synapse-worker` | Durable job runner for recon and background jobs, lease-based |
-| `synapse-callgraph` | Sandboxed call-graph builder for reachability analysis |
+| `synapse-cli` | Run an SCA/SAST scan from the command line, CI-friendly (SARIF, `--fail-on`) |
+| `synapse-worker` | Durable job runner for recon and background jobs, lease-based, leader-gated |
+| `synapse-callgraph` | Sandboxed `go/ssa` call-graph builder for reachability and taint |
+| `synapse-ast` | Sandboxed tree-sitter AST helper for source-code analysis |
+| `synapse-cspm` | Sandboxed cloud-posture helper (AWS/Azure/GCP), read-only, FD-passed credentials |
+| `synapse-dast-helper` | Sandboxed DAST crawler/check helper |
+| `synapse-agent` | Fleet agent: host inventory and eBPF runtime detections |
+| `synapse-cluster-agent` | Fleet agent: Kubernetes workload/exposure/identity inventory |
+| `synapse-fptriage-eval` | Offline evaluation harness for AI false-positive triage |
 | `synapse-mcp` | Read-only, propose-only integration server, never executes |
 
 ## Architecture
@@ -208,30 +257,33 @@ See [`CHANGELOG.md`](CHANGELOG.md) for what has changed.
 
 Synapse is under active development. Near-term directions:
 
+- **Continuous vulnerability intelligence and risk management** ([epic #514](https://github.com/KKloudTarus/synapse-ce/issues/514)): keep the advisory corpus current, detect newly affected components without re-scanning, and recalculate risk when intelligence changes.
+- **Correlation**: one unified risk story per asset, and cross-pillar promotion rules through the judgment gate.
 - Broader ecosystem coverage: more owned lockfile parsers (Conda, R, Julia, Conan).
-- More first-party SAST rules, and additional languages.
-- More IaC checks across Terraform, Kubernetes, and CloudFormation.
+- More first-party SAST rules and reachability for more language ecosystems.
 - Richer SARIF output, including remediation in code-scanning alerts.
-- More curated, model-free compliance profiles.
-- Reachability for more language ecosystems.
-- More CI recipes and integration examples.
+- More curated, model-free compliance profiles, and more CI recipes and integration examples.
 
 Have a request? Open an issue or start a discussion. Issues tagged
 [`good first issue`](https://github.com/KKloudTarus/synapse-ce/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
 and [`help wanted`](https://github.com/KKloudTarus/synapse-ce/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
 are a good place to start.
 
-## Contributors
+## Team & contributors
 
-Synapse was built by its founding team.
+Synapse is built by its founding team and contributors.
 
-| | Contributor | Role |
+| | Member | Role |
 | --- | --- | --- |
-| <img src="https://github.com/nghiadaulau.png?size=80" width="46" height="46" alt="nghiadaulau"> | [**nghiadaulau**](https://github.com/nghiadaulau) | Engineer |
-| <img src="https://github.com/nnatuan03.png?size=80" width="46" height="46" alt="nnatuan03"> | [**nnatuan03**](https://github.com/nnatuan03) | Engineer |
-| <img src="https://github.com/lethanhsang188.png?size=80" width="46" height="46" alt="lethanhsang188"> | [**lethanhsang188**](https://github.com/lethanhsang188) | Engineer |
+| <img src="https://github.com/nghiadaulau.png?size=80" width="46" height="46" alt="nghiadaulau"> | [**nghiadaulau**](https://github.com/nghiadaulau) | Founder |
+| <img src="https://github.com/nnatuan03.png?size=80" width="46" height="46" alt="nnatuan03"> | [**nnatuan03**](https://github.com/nnatuan03) | Co-founder |
+| <img src="https://github.com/pho-veteran.png?size=80" width="46" height="46" alt="pho-veteran"> | [**pho-veteran**](https://github.com/pho-veteran) | Lead maintainer |
 | <img src="https://github.com/VietSory.png?size=80" width="46" height="46" alt="VietSory"> | [**VietSory**](https://github.com/VietSory) | Engineer |
+| <img src="https://github.com/lethanhsang188.png?size=80" width="46" height="46" alt="lethanhsang188"> | [**lethanhsang188**](https://github.com/lethanhsang188) | Engineer |
 | <img src="https://github.com/tuu-ngo.png?size=80" width="46" height="46" alt="tuu-ngo"> | [**tuu-ngo**](https://github.com/tuu-ngo) | Brand identity designer |
+| <img src="https://github.com/H1eu232.png?size=80" width="46" height="46" alt="H1eu232"> | [**H1eu232**](https://github.com/H1eu232) | AI engineer (contributor) |
+| <img src="https://github.com/XUanhoa04.png?size=80" width="46" height="46" alt="XUanhoa04"> | [**XUanhoa04**](https://github.com/XUanhoa04) | AI engineer (contributor) |
+| <img src="https://github.com/thx2an.png?size=80" width="46" height="46" alt="thx2an"> | [**thx2an**](https://github.com/thx2an) | AI engineer (contributor) |
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), the
 [Code of Conduct](CODE_OF_CONDUCT.md), and report vulnerabilities per the
