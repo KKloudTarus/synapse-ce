@@ -37,19 +37,28 @@ type AITriageDashboardAlert struct {
 }
 
 type AITriageDashboard struct {
-	GeneratedAt time.Time                `json:"generated_at"`
-	Totals      AITriageMetricRow        `json:"totals"`
-	ByModel     []AITriageMetricRow      `json:"by_model"`
-	ByPrompt    []AITriageMetricRow      `json:"by_prompt_version"`
-	ByCWE       []AITriageMetricRow      `json:"by_cwe"`
-	ByProject   []AITriageMetricRow      `json:"by_project"`
-	Alerts      []AITriageDashboardAlert `json:"alerts"`
+	GeneratedAt  time.Time                    `json:"generated_at"`
+	Totals       AITriageMetricRow            `json:"totals"`
+	ByModel      []AITriageMetricRow          `json:"by_model"`
+	ByPrompt     []AITriageMetricRow          `json:"by_prompt_version"`
+	ByCWE        []AITriageMetricRow          `json:"by_cwe"`
+	ByProject    []AITriageMetricRow          `json:"by_project"`
+	Distribution AITriageDistributionSnapshot `json:"distribution"`
+	Alerts       []AITriageDashboardAlert     `json:"alerts"`
 }
 
 // AITriageObservability aggregates the latest evidence-sealed result for each tenant-visible project.
 // It never returns source, prompts, provider errors, or credentials.
 func (s *Service) AITriageObservability(ctx context.Context, tenantID shared.ID) (AITriageDashboard, error) {
-	dashboard := AITriageDashboard{GeneratedAt: time.Now().UTC()}
+	dashboard := AITriageDashboard{
+		GeneratedAt: time.Now().UTC(),
+		Distribution: AITriageDistributionSnapshot{
+			SchemaVersion: aiTriageDistributionSchemaVersion,
+			Language:      map[string]int{},
+			CWE:           map[string]int{},
+			Project:       map[string]int{},
+		},
+	}
 	if s == nil || s.engagements == nil || s.results == nil {
 		return dashboard, fmt.Errorf("AI triage observability: %w", shared.ErrValidation)
 	}
@@ -68,6 +77,10 @@ func (s *Service) AITriageObservability(ctx context.Context, tenantID shared.ID)
 	byPrompt := map[string]*AITriageMetricRow{}
 	byCWE := map[string]*AITriageMetricRow{}
 	byProject := map[string]*AITriageMetricRow{}
+	languageWeights := map[string]float64{}
+	cweWeights := map[string]float64{}
+	projectWeights := map[string]float64{}
+	distributionSamples := 0
 	for _, engagement := range engagements {
 		if engagement == nil {
 			continue
@@ -83,9 +96,6 @@ func (s *Service) AITriageObservability(ctx context.Context, tenantID shared.ID)
 		if err := json.Unmarshal(data, &result); err != nil {
 			return dashboard, fmt.Errorf("decode AI triage observability result: %w", err)
 		}
-		if result.AITriageTelemetry == nil {
-			continue
-		}
 		projectID := engagement.ProjectID
 		if projectID.IsZero() {
 			projectID = engagement.ID
@@ -99,7 +109,11 @@ func (s *Service) AITriageObservability(ctx context.Context, tenantID shared.ID)
 			}
 			findingsByKey[strings.TrimSpace(item.DedupKey)] = cwe
 		}
-		for _, call := range result.AITriageTelemetry.Calls {
+		var calls []ports.FPTriageCallMetric
+		if result.AITriageTelemetry != nil {
+			calls = result.AITriageTelemetry.Calls
+		}
+		for _, call := range calls {
 			model := strings.TrimSpace(call.Provider + "/" + call.Model + " (" + call.Role + ")")
 			prompt := strings.TrimSpace(call.PromptVersion)
 			if prompt == "" {
@@ -120,6 +134,8 @@ func (s *Service) AITriageObservability(ctx context.Context, tenantID shared.ID)
 			if cwe == "" {
 				cwe = "unclassified"
 			}
+			cweWeights[canonicalDistributionCWE(cwe)]++
+			projectWeights[projectID.String()]++
 			model := strings.TrimSpace(critique.ProposerProvider + "/" + critique.ProposerModel + " (proposer)")
 			prompt := strings.TrimSpace(critique.PromptVersion)
 			if prompt == "" {
@@ -139,6 +155,8 @@ func (s *Service) AITriageObservability(ctx context.Context, tenantID shared.ID)
 				}
 			}
 		}
+		distributionSamples += len(result.AITriage)
+		addLanguageDistributionWeights(languageWeights, result.Languages, len(result.AITriage))
 		for _, alert := range result.AITriageAlerts {
 			dashboard.Alerts = append(dashboard.Alerts, AITriageDashboardAlert{ProjectID: projectID.String(), ProjectName: engagement.Name, Alert: alert})
 		}
@@ -149,6 +167,7 @@ func (s *Service) AITriageObservability(ctx context.Context, tenantID shared.ID)
 	dashboard.ByPrompt = sortedMetricRows(byPrompt)
 	dashboard.ByCWE = sortedMetricRows(byCWE)
 	dashboard.ByProject = sortedMetricRows(byProject)
+	dashboard.Distribution = newAITriageDistributionSnapshot(distributionSamples, languageWeights, cweWeights, projectWeights)
 	sort.SliceStable(dashboard.Alerts, func(i, j int) bool {
 		if dashboard.Alerts[i].ProjectID != dashboard.Alerts[j].ProjectID {
 			return dashboard.Alerts[i].ProjectID < dashboard.Alerts[j].ProjectID

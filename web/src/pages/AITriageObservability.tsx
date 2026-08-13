@@ -39,6 +39,14 @@ function Dashboard({ data }: { data: Observability }) {
       <Metric icon={Coins} label="Estimated cost" value={formatCost(data.totals.estimatedCostMicroUSD)} hint={`${data.totals.totalTokens.toLocaleString()} tokens`} />
     </div>
     {data.alerts.length > 0 && <Card title="Safety alerts"><ul className="divide-y divide-border">{data.alerts.map((item, index) => <li className="px-6 py-4" key={`${item.projectId}-${item.alert.metric}-${index}`}><div className="flex gap-3"><AlertTriangle className="mt-0.5 size-4 shrink-0 text-high" /><div><div className="text-sm font-medium">{item.projectName || item.projectId}</div><p className="mt-1 text-sm text-mutedfg">{item.alert.message}</p></div></div></li>)}</ul></Card>}
+    <Card title="Drift input distribution" bodyClass="p-0">
+      <div className="border-b border-border px-6 py-3 text-xs text-mutedfg">Normalized from {data.distribution.sampleSize.toLocaleString()} AI-triaged findings; export this snapshot for deterministic drift checks.</div>
+      <div className="grid divide-y divide-border lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+        <DistributionList title="Language" values={data.distribution.languageBasisPoints} />
+        <DistributionList title="CWE" values={data.distribution.cweBasisPoints} />
+        <DistributionList title="Project" values={data.distribution.projectBasisPoints} />
+      </div>
+    </Card>
     <MetricTable title="By model" rows={data.byModel} />
     <div className="grid gap-5 xl:grid-cols-2"><MetricTable title="By prompt version" rows={data.byPromptVersion} /><MetricTable title="By CWE" rows={data.byCWE} /></div>
     <MetricTable title="By project" rows={data.byProject} />
@@ -51,6 +59,11 @@ function Metric({ icon: Icon, label, value, hint }: { icon: typeof Activity; lab
 
 function MetricTable({ title, rows }: { title: string; rows: AITriageMetricRow[] }) {
   return <Card title={title} bodyClass="p-0"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-elevated/40 text-xs uppercase tracking-wide text-mutedfg"><tr><th className="px-5 py-3">Dimension</th><th className="px-3 py-3 text-right">Requests</th><th className="px-3 py-3 text-right">Latency</th><th className="px-3 py-3 text-right">Failures</th><th className="px-3 py-3 text-right">Tokens</th><th className="px-3 py-3 text-right">Cost</th><th className="px-5 py-3 text-right">Exemptions</th></tr></thead><tbody className="divide-y divide-border">{rows.map((row) => <tr key={row.value}><td className="max-w-xs truncate px-5 py-3 font-medium" title={row.value}>{row.value}</td><td className="px-3 py-3 text-right tabular-nums">{row.requestCount}</td><td className="px-3 py-3 text-right tabular-nums">{row.averageLatencyMillis} ms</td><td className="px-3 py-3 text-right tabular-nums">{row.timeoutCount + row.parseFailureCount + row.providerFailureCount + row.circuitOpenCount}</td><td className="px-3 py-3 text-right tabular-nums">{row.totalTokens.toLocaleString()}</td><td className="px-3 py-3 text-right tabular-nums">{formatCost(row.estimatedCostMicroUSD)}</td><td className="px-5 py-3 text-right tabular-nums">{row.gateExemptions}</td></tr>)}</tbody></table></div></Card>
+}
+
+function DistributionList({ title, values }: { title: string; values: Record<string, number> }) {
+  const rows = Object.entries(values).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 8)
+  return <section className="p-5"><h3 className="text-xs font-semibold uppercase tracking-wide text-mutedfg">{title}</h3><ul className="mt-3 space-y-2">{rows.map(([value, basisPoints]) => <li className="flex items-center justify-between gap-3 text-sm" key={value}><span className="truncate font-medium" title={value}>{value}</span><span className="tabular-nums text-mutedfg">{(basisPoints / 100).toFixed(2)}%</span></li>)}</ul></section>
 }
 
 function rate(numerator: number, denominator: number) { return denominator > 0 ? `${(numerator * 100 / denominator).toFixed(1)}%` : '—' }

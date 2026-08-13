@@ -788,6 +788,13 @@ function mapAITriageObservability(r: any): AITriageObservability {
     byPromptVersion: (r?.by_prompt_version ?? []).map(mapAITriageMetricRow),
     byCWE: (r?.by_cwe ?? []).map(mapAITriageMetricRow),
     byProject: (r?.by_project ?? []).map(mapAITriageMetricRow),
+    distribution: {
+      schemaVersion: r?.distribution?.schema_version ?? 'synapse-ai-triage-distribution-v1',
+      sampleSize: r?.distribution?.sample_size ?? 0,
+      languageBasisPoints: r?.distribution?.language_basis_points ?? {},
+      cweBasisPoints: r?.distribution?.cwe_basis_points ?? {},
+      projectBasisPoints: r?.distribution?.project_basis_points ?? {},
+    },
     alerts: (r?.alerts ?? []).map((item: any) => ({
       projectId: item?.project_id ?? '', projectName: item?.project_name ?? '',
       alert: {
