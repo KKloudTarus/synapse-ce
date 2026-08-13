@@ -14,6 +14,11 @@ capabilities below are already shipped on `main`.
 
 - **AI-triage candidate promotion gate.** Strictly revalidates deterministic shadow reports, compares a candidate model/prompt with a baseline on the exact same reviewed dataset and policy, blocks new true-positive escapes plus overall or segment regressions, and emits stable CI evidence that still requires explicit human promotion approval.
 
+- **AI-triage input drift evidence.** The tenant observability API and UI now expose deterministic,
+  source-free language/CWE/project distributions. A new offline CLI compares them with a versioned,
+  human-approved baseline using total-variation distance, writes stable CI evidence, and alerts on
+  excessive drift or insufficient samples without gaining model-promotion or quality-gate authority.
+
 - **Evidence-cited AI false-positive triage.** Supplies bounded deterministic source/sink, data-flow, sanitizer, call-path, route/framework, and reachability metadata to the AI triage proposer/verifier before model calls. Model claims must cite current server-generated evidence-token IDs; unknown, missing, driver-incompatible, or finding-mismatched receipts fail closed. Gate authorization now uses `fp-gate-v5` and requires that closed receipt in addition to the existing severity/CWE/evidence safety floors.
 
 - **Safe AI-triage caching.** Tenant-bound API scans reuse typed proposer/verifier claims only when

@@ -51,7 +51,8 @@ func run(baselinePath, candidatePath, outputPath string, policy sca.AIEvaluation
 	if baselinePath == "" || candidatePath == "" {
 		return fmt.Errorf("--baseline and --candidate are required")
 	}
-	if err := validateOutputPath(outputPath, baselinePath, candidatePath); err != nil {
+	resolvedOutputPath, err := validateOutputPath(outputPath, baselinePath, candidatePath)
+	if err != nil {
 		return err
 	}
 	baselineData, err := os.ReadFile(baselinePath)
@@ -74,7 +75,7 @@ func run(baselinePath, candidatePath, outputPath string, policy sca.AIEvaluation
 	if err != nil {
 		return err
 	}
-	if err := writeComparison(outputPath, comparison); err != nil {
+	if err := writeComparison(resolvedOutputPath, comparison); err != nil {
 		return err
 	}
 	if comparison.Status == "blocked" && failOnBlocked {
@@ -83,37 +84,42 @@ func run(baselinePath, candidatePath, outputPath string, policy sca.AIEvaluation
 	return nil
 }
 
-func validateOutputPath(outputPath string, inputPaths ...string) error {
+func validateOutputPath(outputPath string, inputPaths ...string) (string, error) {
 	if outputPath == "-" {
-		return nil
+		return outputPath, nil
 	}
 	outputAbs, err := filepath.Abs(outputPath)
 	if err != nil {
-		return fmt.Errorf("resolve comparison output path: %w", err)
+		return "", fmt.Errorf("resolve comparison output path: %w", err)
 	}
-	if info, statErr := os.Lstat(outputAbs); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("comparison output must not be a symlink")
+	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(outputAbs))
+	if err != nil {
+		return "", fmt.Errorf("resolve comparison output parent: %w", err)
 	}
-	outputInfo, outputStatErr := os.Stat(outputAbs)
+	resolvedOutput := filepath.Join(resolvedParent, filepath.Base(outputAbs))
+	if _, statErr := os.Lstat(resolvedOutput); statErr == nil {
+		return "", fmt.Errorf("comparison output already exists; choose a fresh path")
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return "", fmt.Errorf("inspect comparison output: %w", statErr)
+	}
 	for _, inputPath := range inputPaths {
 		inputAbs, err := filepath.Abs(inputPath)
 		if err != nil {
-			return fmt.Errorf("resolve evaluation input path: %w", err)
+			return "", fmt.Errorf("resolve evaluation input path: %w", err)
 		}
-		sameName := outputAbs == inputAbs
+		resolvedInput, err := filepath.EvalSymlinks(inputAbs)
+		if err != nil {
+			return "", fmt.Errorf("resolve evaluation input path: %w", err)
+		}
+		sameName := outputAbs == inputAbs || resolvedOutput == resolvedInput
 		if runtime.GOOS == "windows" {
-			sameName = strings.EqualFold(outputAbs, inputAbs)
+			sameName = strings.EqualFold(outputAbs, inputAbs) || strings.EqualFold(resolvedOutput, resolvedInput)
 		}
 		if sameName {
-			return fmt.Errorf("comparison output must not overwrite an evaluation input")
-		}
-		if outputStatErr == nil {
-			if inputInfo, statErr := os.Stat(inputAbs); statErr == nil && os.SameFile(outputInfo, inputInfo) {
-				return fmt.Errorf("comparison output must not alias an evaluation input")
-			}
+			return "", fmt.Errorf("comparison output must not overwrite an evaluation input")
 		}
 	}
-	return nil
+	return resolvedOutput, nil
 }
 
 func writeComparison(outputPath string, comparison sca.AIEvaluationComparison) error {
@@ -124,7 +130,7 @@ func writeComparison(outputPath string, comparison sca.AIEvaluationComparison) e
 	if outputPath == "-" {
 		out = os.Stdout
 	} else {
-		out, err = os.Create(outputPath)
+		out, err = os.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			return fmt.Errorf("create comparison report: %w", err)
 		}

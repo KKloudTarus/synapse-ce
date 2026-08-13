@@ -110,6 +110,71 @@ func TestRunNeverOverwritesInputEvidence(t *testing.T) {
 	}
 }
 
+func TestRunCreatesOutputThroughResolvedParent(t *testing.T) {
+	baseline := comparisonFixtureReport(t, "prompt-v1", false)
+	candidate := comparisonFixtureReport(t, "prompt-v2", false)
+	baselinePath := writeFixtureReport(t, "baseline.json", baseline)
+	candidatePath := writeFixtureReport(t, "candidate.json", candidate)
+	directory := t.TempDir()
+	realParent := filepath.Join(directory, "reports")
+	if err := os.Mkdir(realParent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linkedParent := filepath.Join(directory, "reports-link")
+	if err := os.Symlink(realParent, linkedParent); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	outputPath := filepath.Join(linkedParent, "comparison.json")
+	if err := run(baselinePath, candidatePath, outputPath, sca.DefaultAIEvaluationPromotionPolicy(), true); err != nil {
+		t.Fatalf("run through resolved parent: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(realParent, "comparison.json")); err != nil {
+		t.Fatalf("resolved output was not created: %v", err)
+	}
+}
+
+func TestWriteComparisonIsCreateOnly(t *testing.T) {
+	outputPath := filepath.Join(t.TempDir(), "comparison.json")
+	const sentinel = "existing approved evidence"
+	if err := os.WriteFile(outputPath, []byte(sentinel), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeComparison(outputPath, sca.AIEvaluationComparison{}); err == nil {
+		t.Fatal("writeComparison replaced an existing artifact")
+	}
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != sentinel {
+		t.Fatalf("existing artifact changed to %q", data)
+	}
+}
+
+func TestRunRejectsFinalSymlinkOutput(t *testing.T) {
+	baseline := comparisonFixtureReport(t, "prompt-v1", false)
+	candidate := comparisonFixtureReport(t, "prompt-v2", false)
+	baselinePath := writeFixtureReport(t, "baseline.json", baseline)
+	candidatePath := writeFixtureReport(t, "candidate.json", candidate)
+	directory := t.TempDir()
+	targetPath := filepath.Join(directory, "target.json")
+	const sentinel = "do not replace"
+	if err := os.WriteFile(targetPath, []byte(sentinel), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outputPath := filepath.Join(directory, "comparison.json")
+	if err := os.Symlink(targetPath, outputPath); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := run(baselinePath, candidatePath, outputPath, sca.DefaultAIEvaluationPromotionPolicy(), true); err == nil {
+		t.Fatal("run accepted a final-component symlink")
+	}
+	data, err := os.ReadFile(targetPath)
+	if err != nil || string(data) != sentinel {
+		t.Fatalf("symlink target changed to %q, err=%v", data, err)
+	}
+}
+
 func comparisonFixtureReport(t *testing.T, prompt string, escapeTP bool) sca.AIEvaluationReport {
 	t.Helper()
 	dataset := sca.AIEvaluationDataset{

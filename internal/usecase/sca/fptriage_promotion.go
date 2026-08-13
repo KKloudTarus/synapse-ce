@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"math/big"
 	"reflect"
 	"sort"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 )
 
 const aiEvaluationComparisonSchema = "synapse-ai-triage-comparison-v1"
@@ -190,12 +190,28 @@ func (r AIEvaluationReport) Validate() error {
 			return fmt.Errorf("AI evaluation report case %q is not shadow-only", caseID)
 		}
 		if !result.Covered {
-			if result.ConsensusFalsePositive || result.WouldGateExempt || strings.TrimSpace(result.Critique.DedupKey) != "" {
+			if result.ConsensusFalsePositive || result.WouldGateExempt || strings.TrimSpace(result.Critique.DedupKey) != "" ||
+				result.Critique.Verdict != "" || result.Critique.Driver != "" || result.Critique.Confidence != 0 ||
+				result.Critique.VerifierVerdict != "" || result.Critique.VerifierDriver != "" || result.Critique.VerifierConfidence != 0 {
 				return fmt.Errorf("AI evaluation report uncovered case %q contains a model decision", caseID)
 			}
 			continue
 		}
 		critique := result.Critique
+		if err := (judgment.CritiqueClaim{
+			Verdict: judgment.CritiqueVerdict(critique.Verdict), Driver: critique.Driver, Confidence: critique.Confidence,
+		}).Validate(); err != nil {
+			return fmt.Errorf("AI evaluation report case %q has an invalid proposer critique: %w", caseID, err)
+		}
+		// A fully missing verifier is valid shadow evidence and is measured as lost verifier
+		// coverage. Any partial or populated verifier response must pass the same domain seam.
+		if critique.VerifierVerdict != "" || critique.VerifierDriver != "" || critique.VerifierConfidence != 0 {
+			if err := (judgment.CritiqueClaim{
+				Verdict: judgment.CritiqueVerdict(critique.VerifierVerdict), Driver: critique.VerifierDriver, Confidence: critique.VerifierConfidence,
+			}).Validate(); err != nil {
+				return fmt.Errorf("AI evaluation report case %q has an invalid verifier critique: %w", caseID, err)
+			}
+		}
 		if critique.DedupKey != "ai-eval:"+caseID || !critique.Shadow ||
 			!agent.SameModel(critique.ProposerModel, r.Run.ProposerModel) ||
 			!agent.SameModel(critique.VerifierModel, r.Run.VerifierModel) ||
@@ -324,13 +340,13 @@ func CompareAIEvaluationReports(baseline, candidate AIEvaluationReport, policy A
 }
 
 func appendOverallPromotionFailures(failures []AIEvaluationPromotionFailure, metrics AIEvaluationMetricComparison, policy AIEvaluationPromotionPolicy) []AIEvaluationPromotionFailure {
-	candidatePrecision := ratioToBasisPoints(metrics.Candidate.Precision)
+	candidatePrecision := floorRateBasisPoints(metrics.Candidate.CorrectFalsePositives, metrics.Candidate.ConsensusFalsePositives)
 	if belowBasisPointMinimum(metrics.Candidate.CorrectFalsePositives, metrics.Candidate.ConsensusFalsePositives, policy.MinimumPrecisionBasisPoints) {
-		failures = append(failures, AIEvaluationPromotionFailure{Rule: "minimum_precision", Scope: "overall", BaselineBasisPoints: ratioToBasisPoints(metrics.Baseline.Precision), CandidateBasisPoints: candidatePrecision, LimitBasisPoints: policy.MinimumPrecisionBasisPoints})
+		failures = append(failures, AIEvaluationPromotionFailure{Rule: "minimum_precision", Scope: "overall", BaselineBasisPoints: floorRateBasisPoints(metrics.Baseline.CorrectFalsePositives, metrics.Baseline.ConsensusFalsePositives), CandidateBasisPoints: candidatePrecision, LimitBasisPoints: policy.MinimumPrecisionBasisPoints})
 	}
-	candidateEscape := ratioToBasisPoints(metrics.Candidate.FalseNegativeEscapeRate)
+	candidateEscape := ceilRateBasisPoints(metrics.Candidate.TruePositiveEscapes, metrics.Candidate.HumanTruePositives)
 	if aboveBasisPointMaximum(metrics.Candidate.TruePositiveEscapes, metrics.Candidate.HumanTruePositives, policy.MaximumFalseNegativeEscapeRateBasisPoints) {
-		failures = append(failures, AIEvaluationPromotionFailure{Rule: "maximum_false_negative_escape_rate", Scope: "overall", BaselineBasisPoints: ratioToBasisPoints(metrics.Baseline.FalseNegativeEscapeRate), CandidateBasisPoints: candidateEscape, LimitBasisPoints: policy.MaximumFalseNegativeEscapeRateBasisPoints})
+		failures = append(failures, AIEvaluationPromotionFailure{Rule: "maximum_false_negative_escape_rate", Scope: "overall", BaselineBasisPoints: ceilRateBasisPoints(metrics.Baseline.TruePositiveEscapes, metrics.Baseline.HumanTruePositives), CandidateBasisPoints: candidateEscape, LimitBasisPoints: policy.MaximumFalseNegativeEscapeRateBasisPoints})
 	}
 	return appendRegressionFailures(failures, "overall", "", metrics, policy)
 }
@@ -343,11 +359,11 @@ func appendRegressionFailures(failures []AIEvaluationPromotionFailure, scope, se
 		limit     int
 		regressed bool
 	}{
-		{"precision_regression", ratioToBasisPoints(metrics.Baseline.Precision), ratioToBasisPoints(metrics.Candidate.Precision), policy.MaximumPrecisionDropBasisPoints, basisPointDropExceeds(metrics.Baseline.CorrectFalsePositives, metrics.Baseline.ConsensusFalsePositives, metrics.Candidate.CorrectFalsePositives, metrics.Candidate.ConsensusFalsePositives, policy.MaximumPrecisionDropBasisPoints)},
-		{"recall_regression", ratioToBasisPoints(metrics.Baseline.Recall), ratioToBasisPoints(metrics.Candidate.Recall), policy.MaximumRecallDropBasisPoints, basisPointDropExceeds(metrics.Baseline.CorrectFalsePositives, metrics.Baseline.HumanFalsePositives, metrics.Candidate.CorrectFalsePositives, metrics.Candidate.HumanFalsePositives, policy.MaximumRecallDropBasisPoints)},
-		{"coverage_regression", ratioToBasisPoints(metrics.Baseline.Coverage), ratioToBasisPoints(metrics.Candidate.Coverage), policy.MaximumCoverageDropBasisPoints, basisPointDropExceeds(metrics.Baseline.Covered, metrics.Baseline.Total, metrics.Candidate.Covered, metrics.Candidate.Total, policy.MaximumCoverageDropBasisPoints)},
-		{"verifier_coverage_regression", verifierCoverageBasisPoints(metrics.Baseline), verifierCoverageBasisPoints(metrics.Candidate), policy.MaximumVerifierCoverageDropBasisPoints, basisPointDropExceeds(metrics.Baseline.VerifierComparisons, metrics.Baseline.Total, metrics.Candidate.VerifierComparisons, metrics.Candidate.Total, policy.MaximumVerifierCoverageDropBasisPoints)},
-		{"disagreement_regression", ratioToBasisPoints(metrics.Baseline.DisagreementRate), ratioToBasisPoints(metrics.Candidate.DisagreementRate), policy.MaximumDisagreementIncreaseBasisPoints, basisPointIncreaseExceeds(metrics.Baseline.VerifierDisagreements, metrics.Baseline.VerifierComparisons, metrics.Candidate.VerifierDisagreements, metrics.Candidate.VerifierComparisons, policy.MaximumDisagreementIncreaseBasisPoints)},
+		{"precision_regression", ceilRateBasisPoints(metrics.Baseline.CorrectFalsePositives, metrics.Baseline.ConsensusFalsePositives), floorRateBasisPoints(metrics.Candidate.CorrectFalsePositives, metrics.Candidate.ConsensusFalsePositives), policy.MaximumPrecisionDropBasisPoints, basisPointDropExceeds(metrics.Baseline.CorrectFalsePositives, metrics.Baseline.ConsensusFalsePositives, metrics.Candidate.CorrectFalsePositives, metrics.Candidate.ConsensusFalsePositives, policy.MaximumPrecisionDropBasisPoints)},
+		{"recall_regression", ceilRateBasisPoints(metrics.Baseline.CorrectFalsePositives, metrics.Baseline.HumanFalsePositives), floorRateBasisPoints(metrics.Candidate.CorrectFalsePositives, metrics.Candidate.HumanFalsePositives), policy.MaximumRecallDropBasisPoints, basisPointDropExceeds(metrics.Baseline.CorrectFalsePositives, metrics.Baseline.HumanFalsePositives, metrics.Candidate.CorrectFalsePositives, metrics.Candidate.HumanFalsePositives, policy.MaximumRecallDropBasisPoints)},
+		{"coverage_regression", ceilRateBasisPoints(metrics.Baseline.Covered, metrics.Baseline.Total), floorRateBasisPoints(metrics.Candidate.Covered, metrics.Candidate.Total), policy.MaximumCoverageDropBasisPoints, basisPointDropExceeds(metrics.Baseline.Covered, metrics.Baseline.Total, metrics.Candidate.Covered, metrics.Candidate.Total, policy.MaximumCoverageDropBasisPoints)},
+		{"verifier_coverage_regression", ceilRateBasisPoints(metrics.Baseline.VerifierComparisons, metrics.Baseline.Total), floorRateBasisPoints(metrics.Candidate.VerifierComparisons, metrics.Candidate.Total), policy.MaximumVerifierCoverageDropBasisPoints, basisPointDropExceeds(metrics.Baseline.VerifierComparisons, metrics.Baseline.Total, metrics.Candidate.VerifierComparisons, metrics.Candidate.Total, policy.MaximumVerifierCoverageDropBasisPoints)},
+		{"disagreement_regression", floorRateBasisPoints(metrics.Baseline.VerifierDisagreements, metrics.Baseline.VerifierComparisons), ceilRateBasisPoints(metrics.Candidate.VerifierDisagreements, metrics.Candidate.VerifierComparisons), policy.MaximumDisagreementIncreaseBasisPoints, basisPointIncreaseExceeds(metrics.Baseline.VerifierDisagreements, metrics.Baseline.VerifierComparisons, metrics.Candidate.VerifierDisagreements, metrics.Candidate.VerifierComparisons, policy.MaximumDisagreementIncreaseBasisPoints)},
 	}
 	for _, test := range tests {
 		if test.regressed {
@@ -360,12 +376,12 @@ func appendRegressionFailures(failures []AIEvaluationPromotionFailure, scope, se
 func metricComparison(baseline, candidate AIEvaluationMetrics) AIEvaluationMetricComparison {
 	return AIEvaluationMetricComparison{
 		Baseline: baseline, Candidate: candidate,
-		PrecisionDeltaBasisPoints:           ratioToBasisPoints(candidate.Precision) - ratioToBasisPoints(baseline.Precision),
-		RecallDeltaBasisPoints:              ratioToBasisPoints(candidate.Recall) - ratioToBasisPoints(baseline.Recall),
-		FalseNegativeEscapeDeltaBasisPoints: ratioToBasisPoints(candidate.FalseNegativeEscapeRate) - ratioToBasisPoints(baseline.FalseNegativeEscapeRate),
-		DisagreementDeltaBasisPoints:        ratioToBasisPoints(candidate.DisagreementRate) - ratioToBasisPoints(baseline.DisagreementRate),
-		CoverageDeltaBasisPoints:            ratioToBasisPoints(candidate.Coverage) - ratioToBasisPoints(baseline.Coverage),
-		VerifierCoverageDeltaBasisPoints:    verifierCoverageBasisPoints(candidate) - verifierCoverageBasisPoints(baseline),
+		PrecisionDeltaBasisPoints:           floorRateDeltaBasisPoints(baseline.CorrectFalsePositives, baseline.ConsensusFalsePositives, candidate.CorrectFalsePositives, candidate.ConsensusFalsePositives),
+		RecallDeltaBasisPoints:              floorRateDeltaBasisPoints(baseline.CorrectFalsePositives, baseline.HumanFalsePositives, candidate.CorrectFalsePositives, candidate.HumanFalsePositives),
+		FalseNegativeEscapeDeltaBasisPoints: ceilRateDeltaBasisPoints(baseline.TruePositiveEscapes, baseline.HumanTruePositives, candidate.TruePositiveEscapes, candidate.HumanTruePositives),
+		DisagreementDeltaBasisPoints:        ceilRateDeltaBasisPoints(baseline.VerifierDisagreements, baseline.VerifierComparisons, candidate.VerifierDisagreements, candidate.VerifierComparisons),
+		CoverageDeltaBasisPoints:            floorRateDeltaBasisPoints(baseline.Covered, baseline.Total, candidate.Covered, candidate.Total),
+		VerifierCoverageDeltaBasisPoints:    floorRateDeltaBasisPoints(baseline.VerifierComparisons, baseline.Total, candidate.VerifierComparisons, candidate.Total),
 	}
 }
 
@@ -400,14 +416,6 @@ func baselineResult(results []AIEvaluationResult, caseID string) AIEvaluationRes
 	return AIEvaluationResult{}
 }
 
-func ratioToBasisPoints(rate float64) int {
-	return int(math.Round(rate * 10_000))
-}
-
-func verifierCoverageBasisPoints(metrics AIEvaluationMetrics) int {
-	return ratioToBasisPoints(verifierCoverage(metrics))
-}
-
 func verifierCoverage(metrics AIEvaluationMetrics) float64 {
 	return ratio(metrics.VerifierComparisons, metrics.Total)
 }
@@ -434,6 +442,42 @@ func basisPointIncreaseExceeds(baselineNumerator, baselineDenominator, candidate
 
 func scaledRate(numerator, denominator int) *big.Rat {
 	return new(big.Rat).Mul(exactRate(numerator, denominator), big.NewRat(10_000, 1))
+}
+
+func floorRateBasisPoints(numerator, denominator int) int {
+	return floorRat(scaledRate(numerator, denominator))
+}
+
+func ceilRateBasisPoints(numerator, denominator int) int {
+	return ceilRat(scaledRate(numerator, denominator))
+}
+
+func floorRateDeltaBasisPoints(baselineNumerator, baselineDenominator, candidateNumerator, candidateDenominator int) int {
+	delta := new(big.Rat).Sub(exactRate(candidateNumerator, candidateDenominator), exactRate(baselineNumerator, baselineDenominator))
+	return floorRat(delta.Mul(delta, big.NewRat(10_000, 1)))
+}
+
+func ceilRateDeltaBasisPoints(baselineNumerator, baselineDenominator, candidateNumerator, candidateDenominator int) int {
+	delta := new(big.Rat).Sub(exactRate(candidateNumerator, candidateDenominator), exactRate(baselineNumerator, baselineDenominator))
+	return ceilRat(delta.Mul(delta, big.NewRat(10_000, 1)))
+}
+
+func floorRat(value *big.Rat) int {
+	quotient, remainder := new(big.Int), new(big.Int)
+	quotient.QuoRem(value.Num(), value.Denom(), remainder)
+	if value.Sign() < 0 && remainder.Sign() != 0 {
+		quotient.Sub(quotient, big.NewInt(1))
+	}
+	return int(quotient.Int64())
+}
+
+func ceilRat(value *big.Rat) int {
+	quotient, remainder := new(big.Int), new(big.Int)
+	quotient.QuoRem(value.Num(), value.Denom(), remainder)
+	if value.Sign() > 0 && remainder.Sign() != 0 {
+		quotient.Add(quotient, big.NewInt(1))
+	}
+	return int(quotient.Int64())
 }
 
 func exactRate(numerator, denominator int) *big.Rat {
@@ -470,6 +514,7 @@ func sortedKeys[V any](values map[string]V) []string {
 func evaluationComparisonID(comparison AIEvaluationComparison) string {
 	copyComparison := comparison
 	copyComparison.ComparisonID = ""
+	// AIEvaluationComparison contains only JSON-supported concrete fields, so marshal cannot fail.
 	b, _ := json.Marshal(copyComparison)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])

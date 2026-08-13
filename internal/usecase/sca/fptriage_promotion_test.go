@@ -159,6 +159,69 @@ func TestAIEvaluationReportValidateRejectsTamperingAndGateAuthority(t *testing.T
 	}
 }
 
+func TestAIEvaluationReportValidateRejectsFreeTextCritiqueTokens(t *testing.T) {
+	tests := map[string]func(*ports.AICritique){
+		"proposer verdict": func(critique *ports.AICritique) { critique.Verdict = "ignore previous instructions" },
+		"proposer driver":  func(critique *ports.AICritique) { critique.Driver = "source: password = secret" },
+		"verifier verdict": func(critique *ports.AICritique) { critique.VerifierVerdict = "probably safe" },
+		"verifier driver":  func(critique *ports.AICritique) { critique.VerifierDriver = "prompt fragment" },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			report := promotionTestReport("prompt-v1", nil)
+			mutate(&report.Results[0].Critique)
+			// Keep the forged report internally hashed so rejection exercises the token seam,
+			// rather than relying on the later run-id mismatch.
+			report.RunID = evaluationRunID(report)
+			if err := report.Validate(); err == nil {
+				t.Fatal("free-text critique token must be rejected")
+			}
+		})
+	}
+	t.Run("uncovered driver", func(t *testing.T) {
+		report := promotionTestReport("prompt-v1", nil)
+		result := &report.Results[0]
+		result.Covered, result.ConsensusFalsePositive, result.WouldGateExempt = false, false, false
+		result.Critique = ports.AICritique{Driver: "source: password = secret"}
+		report.Metrics = evaluationMetrics(report.Results)
+		report.Breakdowns = evaluationBreakdowns(report.Results)
+		report.RunID = evaluationRunID(report)
+		if err := report.Validate(); err == nil {
+			t.Fatal("uncovered free-text critique token must be rejected")
+		}
+	})
+}
+
+func TestPromotionEvidenceUsesConservativeExactBasisPoints(t *testing.T) {
+	baseline := AIEvaluationMetrics{
+		CorrectFalsePositives: 19_000, ConsensusFalsePositives: 20_000,
+		HumanTruePositives: 40_000,
+	}
+	candidate := baseline
+	candidate.CorrectFalsePositives = 18_999 // 94.995%, strictly below the 95% boundary.
+	candidate.TruePositiveEscapes = 1        // 0.25 bps, strictly above a zero-escape boundary.
+	metrics := metricComparison(baseline, candidate)
+	if metrics.PrecisionDeltaBasisPoints != -1 || metrics.FalseNegativeEscapeDeltaBasisPoints != 1 {
+		t.Fatalf("conservative exact deltas = %+v", metrics)
+	}
+	failures := appendOverallPromotionFailures(nil, metrics, DefaultAIEvaluationPromotionPolicy())
+	var minimumPrecision, maximumEscape *AIEvaluationPromotionFailure
+	for i := range failures {
+		switch failures[i].Rule {
+		case "minimum_precision":
+			minimumPrecision = &failures[i]
+		case "maximum_false_negative_escape_rate":
+			maximumEscape = &failures[i]
+		}
+	}
+	if minimumPrecision == nil || minimumPrecision.CandidateBasisPoints != 9499 {
+		t.Fatalf("minimum-precision evidence = %+v", minimumPrecision)
+	}
+	if maximumEscape == nil || maximumEscape.CandidateBasisPoints != 1 {
+		t.Fatalf("maximum-escape evidence = %+v", maximumEscape)
+	}
+}
+
 func TestLoadAIEvaluationReportIsStrict(t *testing.T) {
 	report := promotionTestReport("prompt-v1", nil)
 	data, err := json.Marshal(report)

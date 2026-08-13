@@ -115,7 +115,19 @@ stays in the report, it is only held back from the `--fail-on` gate).
    and remains gating. Repeated provider or invalid-output failures open a bounded circuit and keep the
    remaining findings advisory-only until its cooldown probe succeeds. API deployments expose the
    resulting request, latency, timeout, parse, token/cost, disagreement, exemption and alert views at
-   `/api/v1/ai-triage/observability`.
+   `/api/v1/ai-triage/observability`. The same response carries normalized language/CWE/project
+   distributions for offline drift checks:
+
+```bash
+go run ./cmd/synapse-fptriage-drift \
+  --baseline ai-triage-drift-baseline.json \
+  --observed ai-triage-observability.json \
+  --output ai-triage-drift-report.json
+```
+
+The baseline owns its human approval, minimum sample size, and maximum total-variation distance. The
+command writes deterministic evidence before returning a non-zero drift alert; it never changes runtime
+gate behavior. See [AI triage evaluation](ai-triage-evaluation.md#detect-production-distribution-drift).
 
 ```bash
 export SYNAPSE_LLM_BASE_URL=http://localhost:8081/v1
