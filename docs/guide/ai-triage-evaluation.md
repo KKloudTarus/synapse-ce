@@ -5,11 +5,12 @@ an operator enables gate automation. Evaluation uses the same proposer, verifier
 threshold, human-review floors, and deterministic policy as a scan. The only policy difference is forced
 shadow mode: `would_gate_exempt` is measured, while `gate_exempt` must remain `false`.
 
-The repository includes two offline AI-triage data/evaluation commands:
+The repository includes three offline AI-triage data/evaluation commands:
 
 | Binary | Role |
 | --- | --- |
 | `synapse-fptriage-eval` | Run the versioned AI false-positive evaluation harness |
+| `synapse-fptriage-compare` | Compare a candidate shadow report with an approved baseline before promotion review |
 | `synapse-fptriage-curate` | Curate human review outcomes into privacy- and label-reviewed evaluation data |
 
 ## Golden dataset
@@ -194,3 +195,47 @@ cannot produce `gate_exempt`.
 
 The report is evidence for PM/Security threshold approval; it does not approve a model automatically.
 Keep `SYNAPSE_FP_TRIAGE_MODE=shadow` until the threshold and dataset are approved for canary rollout.
+
+## Compare a promotion candidate with the baseline
+
+Run the baseline and candidate through `synapse-fptriage-eval` separately, using the exact same reviewed
+dataset and deterministic gate policy. Change only the provider/model identities or prompt version being
+evaluated. Then create the comparison artifact:
+
+```bash
+go run ./cmd/synapse-fptriage-compare \
+  --baseline ai-triage-baseline.json \
+  --candidate ai-triage-candidate.json \
+  --output ai-triage-comparison.json
+```
+
+The comparator strictly decodes both reports and recomputes their metrics, breakdowns, shadow invariant,
+model/provider identity, and canonical `run_id`. It rejects reports from different dataset content,
+provenance, reviewer, gate-policy version, or independence policy. Re-spelled aliases of the same
+provider/model configuration are not treated as a new candidate.
+
+The default policy requires at least 95% candidate precision, zero false-negative escape rate, and no
+precision, recall, coverage, or verifier-disagreement regression overall or within any language, kind,
+CWE, severity, or framework segment. Verifier-comparison coverage may not drop, preventing a candidate
+from appearing healthier merely because its verifier stopped returning decisions. Thresholds are integer
+basis points and can be supplied explicitly for an approved program policy:
+
+```bash
+go run ./cmd/synapse-fptriage-compare \
+  --baseline ai-triage-baseline.json \
+  --candidate ai-triage-candidate.json \
+  --minimum-precision-bps 9500 \
+  --maximum-fn-escape-bps 0 \
+  --maximum-precision-drop-bps 0 \
+  --maximum-recall-drop-bps 0 \
+  --maximum-coverage-drop-bps 0 \
+  --maximum-verifier-coverage-drop-bps 0 \
+  --maximum-disagreement-increase-bps 0 \
+  --output ai-triage-comparison.json
+```
+
+A blocked comparison is written before the command exits non-zero, so CI retains the exact failure
+rules and case-level behavior changes. Use `--fail-on-blocked=false` only when collecting exploratory
+shadow evidence. The output path may not overwrite/alias either input or resolve through a symlink. A
+clean comparison has status `review_required`, never `promoted`: PM/Security approval, versioned rollout
+configuration, canary monitoring, and rollback remain explicit human-controlled steps.

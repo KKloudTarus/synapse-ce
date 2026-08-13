@@ -22,6 +22,9 @@ import (
 type AIEvaluationLabel string
 
 const (
+	aiEvaluationDatasetSchema = "synapse-ai-triage-dataset-v1"
+	aiEvaluationReportSchema  = "synapse-ai-triage-evaluation-v2"
+
 	AIEvaluationTruePositive  AIEvaluationLabel = "true_positive"
 	AIEvaluationFalsePositive AIEvaluationLabel = "false_positive"
 	AIEvaluationUncertain     AIEvaluationLabel = "uncertain"
@@ -121,7 +124,7 @@ type AIEvaluationReport struct {
 
 // Validate rejects incomplete or ambiguously labelled datasets before any model call is made.
 func (d AIEvaluationDataset) Validate() error {
-	if d.SchemaVersion != "synapse-ai-triage-dataset-v1" || strings.TrimSpace(d.Version) == "" ||
+	if d.SchemaVersion != aiEvaluationDatasetSchema || strings.TrimSpace(d.Version) == "" ||
 		strings.TrimSpace(d.Provenance) == "" || strings.TrimSpace(d.Reviewer) == "" {
 		return fmt.Errorf("AI evaluation dataset requires the v1 schema, version, provenance, and reviewer")
 	}
@@ -264,7 +267,7 @@ func EvaluateFPTriage(ctx context.Context, dataset AIEvaluationDataset, run AIEv
 	}
 
 	report := AIEvaluationReport{
-		SchemaVersion: "synapse-ai-triage-evaluation-v2", DatasetVersion: dataset.Version,
+		SchemaVersion: aiEvaluationReportSchema, DatasetVersion: dataset.Version,
 		DatasetSHA256: evaluationDatasetDigest(dataset),
 		Provenance:    dataset.Provenance, Reviewer: dataset.Reviewer, Run: run,
 		Breakdowns: map[string]map[string]AIEvaluationMetrics{},
@@ -368,6 +371,7 @@ func evaluationRunID(report AIEvaluationReport) string {
 	copyReport := report
 	copyReport.RunID = ""
 	// Keep results canonical even if a future caller constructs a report manually.
+	copyReport.Results = append([]AIEvaluationResult(nil), report.Results...)
 	sort.SliceStable(copyReport.Results, func(i, j int) bool { return copyReport.Results[i].CaseID < copyReport.Results[j].CaseID })
 	b, _ := json.Marshal(copyReport)
 	sum := sha256.Sum256(b)

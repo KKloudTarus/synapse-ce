@@ -93,6 +93,9 @@ func TestEvaluateFPTriageGoldenDataset(t *testing.T) {
 	if report.RunID == "" || report.DatasetSHA256 == "" || report.DatasetVersion != dataset.Version || report.Run != run {
 		t.Fatalf("versioned run metadata missing: %+v", report)
 	}
+	if err := report.Validate(); err != nil {
+		t.Fatalf("generated report must pass promotion-boundary validation: %v", err)
+	}
 	m := report.Metrics
 	if m.Total != 8 || m.Covered != 8 || m.HumanFalsePositives != 2 || m.HumanTruePositives != 4 ||
 		m.ConsensusFalsePositives != 3 || m.CorrectFalsePositives != 2 || m.TruePositiveEscapes != 1 ||

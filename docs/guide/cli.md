@@ -136,6 +136,19 @@ SYNAPSE_FP_TRIAGE_MODEL=<proposer> SYNAPSE_VERIFIER_MODEL=<verifier> \
 The evaluator always invokes the server policy in shadow mode. A report containing `gate_exempt=true` is
 rejected, so an evaluation run can never authorize a production quality gate.
 
+Before reviewing a new model or prompt for promotion, compare its shadow report with the approved
+baseline on the same dataset and policy:
+
+```bash
+go run ./cmd/synapse-fptriage-compare \
+  --baseline ai-triage-baseline.json \
+  --candidate ai-triage-candidate.json \
+  --output ai-triage-comparison.json
+```
+
+The command exits non-zero on a quality regression but writes the deterministic comparison evidence
+first. A passing result is still `review_required`; it never changes runtime AI configuration.
+
 The AI critique reads the target's own source into the prompt, so an **untrusted PR** can still try prompt
 injection through comments or strings. Distinct consensus and the human-review floor bound the risk, and
 the finding always remains in SARIF/JSON, but treat AI triage as advisory for untrusted contributor code.
