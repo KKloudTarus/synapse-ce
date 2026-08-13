@@ -158,7 +158,7 @@ The lasting difference is what sits around the finding:
 
 Grab a prebuilt binary from the [Releases page](https://github.com/KKloudTarus/synapse-ce/releases)
 (linux, macOS and Windows; amd64 and arm64) and verify it against `checksums.txt`. Each archive bundles
-all five commands.
+the packaged commands.
 
 ```bash
 # Example: linux/amd64
@@ -229,6 +229,7 @@ The exit code is 0 when no finding meets the threshold, non-zero otherwise.
 | `synapse-agent` | Fleet agent: host inventory and eBPF runtime detections |
 | `synapse-cluster-agent` | Fleet agent: Kubernetes workload/exposure/identity inventory |
 | `synapse-fptriage-eval` | Offline evaluation harness for AI false-positive triage |
+| `synapse-fptriage-curate` | Offline privacy- and label-reviewed feedback curation for AI false-positive evaluation |
 | `synapse-mcp` | Read-only, propose-only integration server, never executes |
 
 ## Architecture
