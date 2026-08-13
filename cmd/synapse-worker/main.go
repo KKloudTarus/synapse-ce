@@ -21,6 +21,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cloudsandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
@@ -33,6 +34,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/vulnerabilityprovider"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/binregistry"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
@@ -53,6 +55,13 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitycorrelation"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityevaluation"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitymonitor"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityprojection"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityreconciliation"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityrollout"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityruntime"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/worker"
 	writeupdraftuc "github.com/KKloudTarus/synapse-ce/internal/usecase/writeupdraftuc"
 )
@@ -108,6 +117,15 @@ func main() {
 	evidenceStore := postgres.NewEvidenceStore(pool)
 	auditLog := postgres.NewAuditLog(pool)
 	queue := postgres.NewJobQueue(pool, ids)
+	vulnerabilitySources := postgres.NewVulnerabilitySourceStore(pool)
+	vulnerabilityRuns := postgres.NewSyncRunStore(pool, ids)
+	vulnerabilityMaterializer := postgres.NewAdvisoryMaterializer(pool)
+	vulnerabilityInventory := postgres.NewComponentInventoryStore(pool)
+	vulnerabilityOccurrences := postgres.NewVulnerabilityOccurrenceStore(pool)
+	vulnerabilityAssessments := postgres.NewVulnerabilityRiskAssessmentStore(pool)
+	vulnerabilityActions := postgres.NewVulnerabilityActionStore(pool)
+	vulnerabilityReconcileRuns := postgres.NewVulnerabilityReconcileRunStore(pool, ids)
+	vulnerabilityTransactions := postgres.NewTenantTransactionRunner(pool)
 	cloudRunStore := postgres.NewCloudRunStore(pool)
 
 	// Credential vault – same master key as the API so secrets resolve.
@@ -233,6 +251,76 @@ func main() {
 	handlers := map[string]worker.Handler{
 		reconuc.JobKind: reconJobHandler{svc: reconService}, // Handle + OnDeadLetter (finalize the run)
 	}
+	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
+	vulnerabilityRollout := vulnerabilityrollout.New(vulnerabilityrollout.Config{
+		ProviderSync: cfg.VulnerabilityProviderSyncEnabled, OccurrenceWrites: cfg.VulnerabilityOccurrenceWritesEnabled,
+		FindingProjection: cfg.VulnerabilityFindingProjectionEnabled, Actions: cfg.VulnerabilityActionsEnabled,
+		Notifications: cfg.VulnerabilityNotificationsEnabled, DryRun: cfg.VulnerabilityDryRunEnabled,
+		TenantAllowlist: cfg.VulnerabilityTenantAllowlist,
+	})
+	if err := vulnerabilityprovider.RegisterAll(vulnerabilityRegistry, vulnerabilityprovider.Dependencies{
+		LookupCanonical: vulnerabilityMaterializer.GetCanonical,
+		CurrentRecords:  vulnerabilityMaterializer.CurrentSourceRecordIDs,
+		ResolveSecret: func(ctx context.Context, reference string) ([]byte, error) {
+			return credVault.Resolve(ctx, shared.DefaultTenant, reference)
+		},
+	}); err != nil {
+		log.Error("vulnerability provider registry init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityMonitor, err := vulnerabilitymonitor.NewService(vulnerabilitySources, vulnerabilityRuns, vulnerabilityMaterializer, vulnerabilityRegistry, clock)
+	if err != nil {
+		log.Error("vulnerability monitor init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityMonitor.SetRollout(vulnerabilityRollout)
+	vulnerabilityProjection, err := vulnerabilityprojection.NewService(postgres.NewFindingRepository(pool))
+	if err != nil {
+		log.Error("vulnerability finding projection init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityEvaluator, err := vulnerabilityevaluation.NewService(vulnerabilityMaterializer, vulnerabilityAssessments, vulnerabilityProjection, clock)
+	if err != nil {
+		log.Error("vulnerability evaluation init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityEvaluator.SetActionStore(vulnerabilityActions)
+	vulnerabilityEvaluator.SetRollout(vulnerabilityRollout)
+	vulnerabilityAdvisoryCorrelation, err := vulnerabilitycorrelation.NewService(vulnerabilityInventory, vulnerabilityMaterializer, vulnerabilityOccurrences)
+	if err != nil {
+		log.Error("vulnerability advisory correlation init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityAdvisoryCorrelation.SetEvaluator(vulnerabilityEvaluator, clock)
+	vulnerabilityAdvisoryCorrelation.SetRollout(vulnerabilityRollout)
+	vulnerabilityAdvisoryCorrelation.SetTransactionRunner(vulnerabilityTransactions)
+	vulnerabilityEvaluationCheckpoints, ok := any(vulnerabilityMaterializer).(ports.AdvisoryEvaluationCheckpointStore)
+	if !ok {
+		log.Error("advisory materializer does not support evaluation checkpoints")
+		os.Exit(1)
+	}
+	vulnerabilityReconciliation, err := vulnerabilityreconciliation.NewService(vulnerabilityReconcileRuns, repo, vulnerabilityMaterializer, vulnerabilityMaterializer, vulnerabilityOccurrences, vulnerabilityAdvisoryCorrelation, vulnerabilityEvaluationCheckpoints, 0)
+	if err != nil {
+		log.Error("vulnerability reconciliation init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityReconciliation.SetRollout(vulnerabilityRollout)
+	vulnerabilitySBOMCorrelation, err := vulnerabilitycorrelation.NewSBOMReconciler(vulnerabilityInventory, vulnerabilityMaterializer, vulnerabilityMaterializer, vulnerabilityOccurrences)
+	if err != nil {
+		log.Error("vulnerability SBOM correlation init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilitySBOMCorrelation.SetEvaluator(vulnerabilityEvaluator, clock)
+	vulnerabilitySBOMCorrelation.SetRollout(vulnerabilityRollout)
+	vulnerabilitySBOMCorrelation.SetTransactionRunner(vulnerabilityTransactions)
+	vulnerabilityRuntime, err := vulnerabilityruntime.NewCoordinator(repo, repo, vulnerabilityAdvisoryCorrelation, vulnerabilitySBOMCorrelation, vulnerabilityEvaluationCheckpoints, clock)
+	if err != nil {
+		log.Error("vulnerability runtime init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityMonitor.SetReconciler(vulnerabilityRuntime)
+	handlers[vulnerabilitymonitor.JobKind] = vulnerabilitySyncJobHandler{svc: vulnerabilityMonitor}
+	handlers[vulnerabilityreconcile.JobKind] = vulnerabilityReconcileJobHandler{svc: vulnerabilityReconciliation}
 	if cfg.CSPMEnabled {
 		connectors := make(map[cloudposture.Provider]ports.CloudConnector, len(cfg.CSPMProviders))
 		for _, name := range cfg.CSPMProviders {
@@ -514,6 +602,30 @@ func (h reconJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, 
 // reconciler stops re-driving it (closes the dead-letter → re-drive livelock).
 // cspmJobHandler binds durable CSPM execution and dead-letter finalization.
 type cspmJobHandler struct{ svc *cspm.Service }
+
+type vulnerabilitySyncJobHandler struct{ svc *vulnerabilitymonitor.Service }
+
+type vulnerabilityReconcileJobHandler struct {
+	svc *vulnerabilityreconciliation.Service
+}
+
+func (h vulnerabilityReconcileJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	_, err := h.svc.ExecuteJob(ctx, job.ID)
+	return err
+}
+
+func (h vulnerabilityReconcileJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause error) error {
+	return h.svc.FailJob(ctx, job.ID, cause)
+}
+
+func (h vulnerabilitySyncJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	_, err := h.svc.ExecuteJob(ctx, job.ID)
+	return err
+}
+
+func (h vulnerabilitySyncJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause error) error {
+	return h.svc.FailJob(ctx, job.ID, cause)
+}
 
 func (h cspmJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
 	return h.svc.RunJob(ctx, job.Payload)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
@@ -69,6 +70,17 @@ func TestRemoteFeedFetchesAndParses(t *testing.T) {
 	}
 	if skipped != 2 { // bad.json + noid.json
 		t.Fatalf("want skipped=2, got %d", skipped)
+	}
+}
+
+func TestRemoteFeedSkipsZipBombEntry(t *testing.T) {
+	z := zipAllOf(t, map[string]string{"bomb.json": `{"id":"CVE-2026-9999","summary":"` + strings.Repeat("a", maxAdvisoryBytes) + `"}`})
+	reader, err := zip.NewReader(bytes.NewReader(z), int64(len(z)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readZipEntry(reader.File[0]); ok {
+		t.Fatal("oversized decompressed zip entry was accepted")
 	}
 }
 

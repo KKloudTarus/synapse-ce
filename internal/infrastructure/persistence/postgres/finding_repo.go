@@ -17,7 +17,9 @@ import (
 // findingCols is the SELECT/RETURNING projection scanned by scanFinding.
 const findingCols = `id, engagement_id, title, description, severity, cvss_vector, cwe, status, evidence_score, ` +
 	`COALESCE(dedup_key, ''), kev, risk_score, created_at, updated_at, sources, confidence, class, scope, ` +
-	`reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key`
+	`reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key, ` +
+	`COALESCE(advisory_id, ''), COALESCE(occurrence_id, ''), COALESCE(component_fingerprint, ''), ` +
+	`COALESCE(fixed_version, ''), COALESCE(detection_state, ''), COALESCE(risk_assessment_id, ''), evaluated_at`
 
 // FindingRepository persists findings to PostgreSQL, deduped per engagement.
 type FindingRepository struct{ pool *pgxpool.Pool }
@@ -60,9 +62,8 @@ func (r *FindingRepository) ClaimFindingProjection(ctx context.Context, tenantID
 var _ ports.FindingRepository = (*FindingRepository)(nil)
 
 // Upsert inserts or updates findings, deduped on (engagement_id, dedup_key). On
-// conflict it updates the data fields but preserves id, status (triage), assignee,
-// and created_at – and bumps version (a re-scan IS a concurrent change) – so human
-// triage state is never clobbered.
+// conflict it updates machine-owned data, preserves id, status (triage), assignee,
+// and created_at, and bumps version only when machine-owned data changes.
 func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Finding) error {
 	if err := validateFindingBatch(findings); err != nil {
 		return err
@@ -77,21 +78,47 @@ func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Findi
 	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
 		for _, f := range findings {
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO findings (id, tenant_id, engagement_id, title, description, severity, cvss_vector, cwe, status, evidence_score, dedup_key, kev, risk_score, created_at, updated_at, sources, confidence, class, scope, reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+				`INSERT INTO findings (id, tenant_id, engagement_id, title, description, severity, cvss_vector, cwe, status, evidence_score, dedup_key, kev, risk_score, created_at, updated_at, sources, confidence, class, scope, reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key, advisory_id, occurrence_id, component_fingerprint, fixed_version, detection_state, risk_assessment_id, evaluated_at)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)
 			 ON CONFLICT (engagement_id, dedup_key) WHERE dedup_key IS NOT NULL
 			 DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description,
-			               severity = EXCLUDED.severity, cvss_vector = EXCLUDED.cvss_vector, kev = EXCLUDED.kev, risk_score = EXCLUDED.risk_score,
-			               sources = EXCLUDED.sources, confidence = EXCLUDED.confidence, class = EXCLUDED.class,
-			               scope = EXCLUDED.scope, reachability = EXCLUDED.reachability, impact = EXCLUDED.impact,
-			               kind = EXCLUDED.kind, class_reachability = EXCLUDED.class_reachability,
-			               rule_key = EXCLUDED.rule_key, updated_at = EXCLUDED.updated_at,
-			               version = findings.version + 1`,
+				               severity = EXCLUDED.severity, cvss_vector = EXCLUDED.cvss_vector, kev = EXCLUDED.kev, risk_score = EXCLUDED.risk_score,
+				               sources = EXCLUDED.sources, confidence = EXCLUDED.confidence, class = EXCLUDED.class,
+				               scope = EXCLUDED.scope, reachability = EXCLUDED.reachability, impact = EXCLUDED.impact,
+				               kind = EXCLUDED.kind, class_reachability = EXCLUDED.class_reachability,
+				               rule_key = EXCLUDED.rule_key, advisory_id = EXCLUDED.advisory_id, occurrence_id = EXCLUDED.occurrence_id,
+				               component_fingerprint = EXCLUDED.component_fingerprint, fixed_version = EXCLUDED.fixed_version,
+				               detection_state = EXCLUDED.detection_state, risk_assessment_id = EXCLUDED.risk_assessment_id,
+			               evaluated_at = EXCLUDED.evaluated_at, version = findings.version + 1, updated_at = EXCLUDED.updated_at
+			 WHERE findings.title IS DISTINCT FROM EXCLUDED.title
+			    OR findings.description IS DISTINCT FROM EXCLUDED.description
+			    OR findings.severity IS DISTINCT FROM EXCLUDED.severity
+			    OR findings.cvss_vector IS DISTINCT FROM EXCLUDED.cvss_vector
+			    OR findings.kev IS DISTINCT FROM EXCLUDED.kev
+			    OR findings.risk_score IS DISTINCT FROM EXCLUDED.risk_score
+			    OR findings.sources IS DISTINCT FROM EXCLUDED.sources
+			    OR findings.confidence IS DISTINCT FROM EXCLUDED.confidence
+				    OR findings.class IS DISTINCT FROM EXCLUDED.class
+				    OR findings.scope IS DISTINCT FROM EXCLUDED.scope
+				    OR findings.reachability IS DISTINCT FROM EXCLUDED.reachability
+				    OR findings.impact IS DISTINCT FROM EXCLUDED.impact
+				    OR findings.kind IS DISTINCT FROM EXCLUDED.kind
+			    OR findings.class_reachability IS DISTINCT FROM EXCLUDED.class_reachability
+				OR findings.rule_key IS DISTINCT FROM EXCLUDED.rule_key
+				OR findings.advisory_id IS DISTINCT FROM EXCLUDED.advisory_id
+				OR findings.occurrence_id IS DISTINCT FROM EXCLUDED.occurrence_id
+				OR findings.component_fingerprint IS DISTINCT FROM EXCLUDED.component_fingerprint
+				OR findings.fixed_version IS DISTINCT FROM EXCLUDED.fixed_version
+				    OR findings.detection_state IS DISTINCT FROM EXCLUDED.detection_state
+				    OR findings.risk_assessment_id IS DISTINCT FROM EXCLUDED.risk_assessment_id
+				    OR findings.evaluated_at IS DISTINCT FROM EXCLUDED.evaluated_at`,
 				f.ID.String(), tenantID.String(), f.EngagementID.String(), f.Title, f.Description, string(f.Severity),
 				f.CVSSVector, f.CWE, string(f.Status), f.EvidenceScore, f.DedupKey,
 				f.KEV, f.RiskScore, f.Audit.CreatedAt, f.Audit.UpdatedAt, strings.Join(f.Sources, ","), f.Confidence, classOrDefault(f.Class),
 				scopeOrDefault(f.Scope), reachOrDefault(f.Reachability), f.Impact, priorityOrDefault(f.Priority), kindOrDefault(string(f.Kind)),
-				f.Assignee, versionOrDefault(f.Version), f.ProposedBy, f.ClassReachability, f.RuleKey); err != nil {
+				f.Assignee, versionOrDefault(f.Version), f.ProposedBy, f.ClassReachability, f.RuleKey,
+				f.AdvisoryID, nullableFindingID(f.OccurrenceID), f.ComponentFingerprint, f.FixedVersion, f.DetectionState,
+				nullableFindingID(f.RiskAssessmentID), f.EvaluatedAt); err != nil {
 				return fmt.Errorf("upsert finding: %w", err)
 			}
 		}
@@ -236,13 +263,15 @@ func (r *FindingRepository) GetByEngagementAndID(ctx context.Context, engagement
 // scanFinding scans a findingCols row (pgx.Row or pgx.Rows) into a Finding.
 func scanFinding(row rowScanner) (finding.Finding, error) {
 	var (
-		f                                          finding.Finding
-		id, eid, sev, status, dedup, sources, kind string
+		f                                                                                              finding.Finding
+		id, eid, sev, status, dedup, sources, kind                                                     string
+		advisoryID, occurrenceID, componentFingerprint, fixedVersion, detectionState, riskAssessmentID string
 	)
 	if err := row.Scan(&id, &eid, &f.Title, &f.Description, &sev, &f.CVSSVector, &f.CWE,
 		&status, &f.EvidenceScore, &dedup, &f.KEV, &f.RiskScore, &f.Audit.CreatedAt, &f.Audit.UpdatedAt,
 		&sources, &f.Confidence, &f.Class, &f.Scope, &f.Reachability, &f.Impact, &f.Priority, &kind,
-		&f.Assignee, &f.Version, &f.ProposedBy, &f.ClassReachability, &f.RuleKey); err != nil {
+		&f.Assignee, &f.Version, &f.ProposedBy, &f.ClassReachability, &f.RuleKey,
+		&advisoryID, &occurrenceID, &componentFingerprint, &fixedVersion, &detectionState, &riskAssessmentID, &f.EvaluatedAt); err != nil {
 		return finding.Finding{}, err
 	}
 	f.ID = shared.ID(id)
@@ -252,7 +281,20 @@ func scanFinding(row rowScanner) (finding.Finding, error) {
 	f.Kind = finding.Kind(kindOrDefault(kind))
 	f.DedupKey = dedup
 	f.Sources = splitSources(sources)
+	f.AdvisoryID = advisoryID
+	f.OccurrenceID = shared.ID(occurrenceID)
+	f.ComponentFingerprint = componentFingerprint
+	f.FixedVersion = fixedVersion
+	f.DetectionState = detectionState
+	f.RiskAssessmentID = shared.ID(riskAssessmentID)
 	return f, nil
+}
+
+func nullableFindingID(value shared.ID) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.String()
 }
 
 // kindOrDefault defaults a legacy/empty kind to sca (older rows predate Kind).

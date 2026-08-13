@@ -29,6 +29,7 @@ import { FleetAgents } from './pages/FleetAgents'
 import { Assets } from './pages/Assets'
 import { AssetComponents, AssetCoverageView, AssetDetail, AssetEngagements, AssetFindings, AssetHistory, AssetOverview } from './pages/AssetDetail'
 import { Dashboard } from './pages/Dashboard'
+import { VulnerabilityIntelligence } from './pages/VulnerabilityIntelligence'
 
 export default function App() {
   return (
@@ -78,6 +79,7 @@ function Gate() {
         <Route path="audit" element={<Audit />} />
         <Route path="ai-triage/reviews" element={<AITriageReviews />} />
         <Route path="ai-triage/observability" element={<AITriageObservability />} />
+        <Route path="vulnerability-intelligence" element={<VulnerabilityIntelligence />} />
         <Route path="team" element={<Team />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>

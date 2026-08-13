@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -28,6 +29,7 @@ func NewEngagementRepository(pool *pgxpool.Pool) *EngagementRepository {
 
 var _ ports.EngagementRepository = (*EngagementRepository)(nil)
 var _ ports.PromotionReconciliationScopeReader = (*EngagementRepository)(nil)
+var _ ports.VulnerabilityReconciliationTenantStore = (*EngagementRepository)(nil)
 
 // Create inserts the engagement and its scope targets in one transaction.
 func (r *EngagementRepository) Create(ctx context.Context, e *engagement.Engagement) error {
@@ -293,6 +295,60 @@ func (r *EngagementRepository) ListProjectEngagements(ctx context.Context, tenan
 		return nil
 	})
 	return out, err
+}
+
+func (r *EngagementRepository) ListTenantIDs(ctx context.Context) ([]shared.ID, error) {
+	rows, err := r.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list vulnerability reconciliation tenants: %w", err)
+	}
+	defer rows.Close()
+	out := make([]shared.ID, 0)
+	for rows.Next() {
+		var tenantID shared.ID
+		if err := rows.Scan(&tenantID); err != nil {
+			return nil, fmt.Errorf("scan vulnerability reconciliation tenant: %w", err)
+		}
+		out = append(out, tenantID)
+	}
+	return out, rows.Err()
+}
+
+func (r *EngagementRepository) ListReconciliationEngagements(ctx context.Context, tenantID, after shared.ID, snapshotAt time.Time, limit int) (ports.ReconciliationEngagementPage, error) {
+	if snapshotAt.IsZero() {
+		return ports.ReconciliationEngagementPage{}, fmt.Errorf("%w: reconciliation snapshot time is required", shared.ErrValidation)
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	tenantID = shared.TenantOrDefault(tenantID)
+	page := ports.ReconciliationEngagementPage{}
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id FROM engagements WHERE tenant_id=$1 AND id>$2 AND created_at<=$3 ORDER BY id COLLATE "C" LIMIT $4`, tenantID.String(), after.String(), snapshotAt, limit+1)
+		if err != nil {
+			return fmt.Errorf("list reconciliation engagements: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id shared.ID
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("scan reconciliation engagement: %w", err)
+			}
+			page.IDs = append(page.IDs, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return ports.ReconciliationEngagementPage{}, err
+	}
+	if len(page.IDs) > limit {
+		page.IDs = page.IDs[:limit]
+		page.Next = page.IDs[len(page.IDs)-1]
+	}
+	return page, nil
 }
 
 func (r *EngagementRepository) get(ctx context.Context, tx pgx.Tx, predicate string, args ...any) (*engagement.Engagement, error) {

@@ -24,6 +24,7 @@ func NewJobQueue(pool *pgxpool.Pool, ids ports.IDGenerator) *JobQueue {
 }
 
 var _ ports.JobQueue = (*JobQueue)(nil)
+var _ ports.JobStatusReader = (*JobQueue)(nil)
 
 func (q *JobQueue) Enqueue(ctx context.Context, kind string, payload []byte) (string, error) {
 	if kind == "" {
@@ -139,4 +140,32 @@ func (q *JobQueue) Depth(ctx context.Context, kinds ...string) (count int, err e
 		return tx.QueryRow(ctx, query, args...).Scan(&count)
 	})
 	return count, err
+}
+
+func (q *JobQueue) Stats(ctx context.Context, kinds ...string) (stats ports.JobStats, err error) {
+	err = WithContextTenant(ctx, q.pool, func(tx pgx.Tx) error {
+		query := `SELECT count(*) FILTER (WHERE status='queued'), count(*) FILTER (WHERE status='claimed'), count(*) FILTER (WHERE status='failed'), count(*) FILTER (WHERE status='done'), min(available_at) FILTER (WHERE status IN ('queued','claimed')) FROM jobs`
+		var args []any
+		if len(kinds) > 0 {
+			query += ` WHERE kind=ANY($1)`
+			args = append(args, kinds)
+		}
+		return tx.QueryRow(ctx, query, args...).Scan(&stats.Queued, &stats.Claimed, &stats.Failed, &stats.Done, &stats.OldestActiveAt)
+	})
+	return stats, err
+}
+
+func (q *JobQueue) JobStatus(ctx context.Context, id string) (status ports.JobStatus, err error) {
+	err = WithContextTenant(ctx, q.pool, func(tx pgx.Tx) error {
+		var jobState string
+		if err := tx.QueryRow(ctx, `SELECT attempts,status FROM jobs WHERE id=$1`, id).Scan(&status.Attempts, &jobState); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
+			}
+			return err
+		}
+		status.DeadLettered = jobState == "failed"
+		return nil
+	})
+	return status, err
 }

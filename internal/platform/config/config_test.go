@@ -76,6 +76,77 @@ func TestLoadAttackPathBounds(t *testing.T) {
 	}
 }
 
+func TestLoadVulnerabilitySchedulerDefaultsAndOverrides(t *testing.T) {
+	keys := []string{
+		"SYNAPSE_VULNERABILITY_SCHEDULER_ENABLED",
+		"SYNAPSE_VULNERABILITY_SCHEDULER_POLL",
+		"SYNAPSE_VULNERABILITY_SCHEDULER_STALE_AFTER",
+		"SYNAPSE_VULNERABILITY_SCHEDULER_JITTER_PERCENT",
+		"SYNAPSE_VULNERABILITY_SCHEDULER_DISPATCH_LIMIT",
+		"SYNAPSE_VULNERABILITY_SCHEDULER_MAX_QUEUE_DEPTH",
+		"SYNAPSE_VULNERABILITY_SCHEDULER_RECOVERY_LIMIT",
+	}
+	for _, key := range keys {
+		t.Setenv(key, "")
+	}
+	cfg := Load()
+	if cfg.VulnerabilitySchedulerEnabled ||
+		cfg.VulnerabilitySchedulerPollInterval != time.Minute ||
+		cfg.VulnerabilitySchedulerStaleAfter != 30*time.Minute ||
+		cfg.VulnerabilitySchedulerJitter != 10 ||
+		cfg.VulnerabilitySchedulerDispatch != 10 ||
+		cfg.VulnerabilitySchedulerQueueDepth != 100 ||
+		cfg.VulnerabilitySchedulerRecovery != 10 {
+		t.Fatalf("vulnerability scheduler defaults = %+v", cfg)
+	}
+
+	t.Setenv("SYNAPSE_VULNERABILITY_SCHEDULER_ENABLED", "true")
+	t.Setenv("SYNAPSE_VULNERABILITY_SCHEDULER_POLL", "15s")
+	t.Setenv("SYNAPSE_VULNERABILITY_SCHEDULER_STALE_AFTER", "45m")
+	t.Setenv("SYNAPSE_VULNERABILITY_SCHEDULER_JITTER_PERCENT", "20")
+	t.Setenv("SYNAPSE_VULNERABILITY_SCHEDULER_DISPATCH_LIMIT", "25")
+	t.Setenv("SYNAPSE_VULNERABILITY_SCHEDULER_MAX_QUEUE_DEPTH", "250")
+	t.Setenv("SYNAPSE_VULNERABILITY_SCHEDULER_RECOVERY_LIMIT", "30")
+	cfg = Load()
+	if !cfg.VulnerabilitySchedulerEnabled ||
+		cfg.VulnerabilitySchedulerPollInterval != 15*time.Second ||
+		cfg.VulnerabilitySchedulerStaleAfter != 45*time.Minute ||
+		cfg.VulnerabilitySchedulerJitter != 20 ||
+		cfg.VulnerabilitySchedulerDispatch != 25 ||
+		cfg.VulnerabilitySchedulerQueueDepth != 250 ||
+		cfg.VulnerabilitySchedulerRecovery != 30 {
+		t.Fatalf("vulnerability scheduler overrides = %+v", cfg)
+	}
+}
+
+func TestLoadVulnerabilityRolloutDefaultsFailClosed(t *testing.T) {
+	keys := []string{
+		"SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED", "SYNAPSE_VULNERABILITY_OCCURRENCE_WRITES_ENABLED",
+		"SYNAPSE_VULNERABILITY_FINDING_PROJECTION_ENABLED", "SYNAPSE_VULNERABILITY_ACTIONS_ENABLED",
+		"SYNAPSE_VULNERABILITY_NOTIFICATIONS_ENABLED", "SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED",
+		"SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST",
+	}
+	for _, key := range keys {
+		t.Setenv(key, "")
+	}
+	cfg := Load()
+	if cfg.VulnerabilityProviderSyncEnabled || cfg.VulnerabilityOccurrenceWritesEnabled || cfg.VulnerabilityFindingProjectionEnabled || cfg.VulnerabilityActionsEnabled || cfg.VulnerabilityNotificationsEnabled || !cfg.VulnerabilityDryRunEnabled || len(cfg.VulnerabilityTenantAllowlist) != 0 {
+		t.Fatalf("unsafe vulnerability rollout defaults: %+v", cfg)
+	}
+
+	t.Setenv("SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED", "true")
+	t.Setenv("SYNAPSE_VULNERABILITY_OCCURRENCE_WRITES_ENABLED", "true")
+	t.Setenv("SYNAPSE_VULNERABILITY_FINDING_PROJECTION_ENABLED", "true")
+	t.Setenv("SYNAPSE_VULNERABILITY_ACTIONS_ENABLED", "true")
+	t.Setenv("SYNAPSE_VULNERABILITY_NOTIFICATIONS_ENABLED", "true")
+	t.Setenv("SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED", "false")
+	t.Setenv("SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST", "tenant-a, tenant-b")
+	cfg = Load()
+	if !cfg.VulnerabilityProviderSyncEnabled || !cfg.VulnerabilityOccurrenceWritesEnabled || !cfg.VulnerabilityFindingProjectionEnabled || !cfg.VulnerabilityActionsEnabled || !cfg.VulnerabilityNotificationsEnabled || cfg.VulnerabilityDryRunEnabled || len(cfg.VulnerabilityTenantAllowlist) != 2 {
+		t.Fatalf("vulnerability rollout overrides: %+v", cfg)
+	}
+}
+
 func TestLoadCSPMDefaultsAndBounds(t *testing.T) {
 	for _, key := range []string{"SYNAPSE_CSPM_ENABLED", "SYNAPSE_CSPM_PROVIDERS", "SYNAPSE_CSPM_RATE"} {
 		t.Setenv(key, "")

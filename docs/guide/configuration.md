@@ -172,6 +172,20 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_LEADER_RESOURCE` | `scheduler` | Lease name. |
 | `SYNAPSE_LEADER_TERM` | `15s` | Lease term. |
 | `SYNAPSE_LEADER_RENEW` | `5s` | Renew interval. |
+| `SYNAPSE_VULNERABILITY_SCHEDULER_ENABLED` | `false` | Dispatch due vulnerability-source syncs and recover stale runs. PostgreSQL deployments must also enable leader election. |
+| `SYNAPSE_VULNERABILITY_SCHEDULER_POLL` | `1m` | Scheduler polling interval. |
+| `SYNAPSE_VULNERABILITY_SCHEDULER_STALE_AFTER` | `30m` | Age after which a queued/running sync is eligible for checkpoint-based recovery. |
+| `SYNAPSE_VULNERABILITY_SCHEDULER_JITTER_PERCENT` | `10` | Stable per-source cadence jitter, from 0 through 100 percent. |
+| `SYNAPSE_VULNERABILITY_SCHEDULER_DISPATCH_LIMIT` | `10` | Maximum new source runs dispatched per scheduler tick. |
+| `SYNAPSE_VULNERABILITY_SCHEDULER_MAX_QUEUE_DEPTH` | `100` | Stop dispatching when the vulnerability-sync queue reaches this depth. |
+| `SYNAPSE_VULNERABILITY_SCHEDULER_RECOVERY_LIMIT` | `10` | Maximum stale runs recovered per scheduler tick. |
+| `SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED` | `false` | Permit provider sync execution. This global gate also blocks already queued runs after rollback. |
+| `SYNAPSE_VULNERABILITY_OCCURRENCE_WRITES_ENABLED` | `false` | Permit tenant-scoped occurrence mutations for allowlisted tenants. |
+| `SYNAPSE_VULNERABILITY_FINDING_PROJECTION_ENABLED` | `false` | Permit machine-owned finding projection updates for allowlisted tenants. |
+| `SYNAPSE_VULNERABILITY_ACTIONS_ENABLED` | `false` | Permit risk-change action creation for allowlisted tenants. |
+| `SYNAPSE_VULNERABILITY_NOTIFICATIONS_ENABLED` | `false` | Permit notification-outbox writes for allowlisted tenants. |
+| `SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED` | `true` | Persist reconciliation diffs and counts without occurrence, finding, action, or notification mutations. |
+| `SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST` | empty | Comma-separated tenant IDs allowed to use tenant-scoped gates and dry-run; `*` enables every tenant. Empty fails closed. |
 | `SYNAPSE_DAST_RATE_PER_SEC` | `5` | DAST crawler request rate. |
 | `SYNAPSE_DAST_CONCURRENCY` | `4` | DAST crawler concurrency. |
 | `SYNAPSE_DAST_MAX_DEPTH` | `8` | Maximum crawl depth. |

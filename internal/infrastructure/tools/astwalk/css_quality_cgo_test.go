@@ -566,7 +566,7 @@ func TestCSSDescriptorNamesAreNotOrdinaryProperties(t *testing.T) {
 	assertExactCSSRules(t, "a { size-adjust: 100%; }", "css:unknown-property")          //nolint:misspell
 	assertExactCSSRules(t, "a { syntax: '<length>'; }", "css:unknown-property")         //nolint:misspell
 	assertExactCSSRules(t, "a { inherits: false; }", "css:unknown-property")            //nolint:misspell
-	assertExactCSSRules(t, "a { initial-value: 10px; }", "css:unknown-property")         //nolint:misspell
+	assertExactCSSRules(t, "a { initial-value: 10px; }", "css:unknown-property")        //nolint:misspell
 }
 
 func TestCSSDescriptorContexts(t *testing.T) {

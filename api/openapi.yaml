@@ -38,6 +38,8 @@ tags:
   description: Business-level Asset Management and security posture
 - name: dashboard
   description: Tenant-scoped security operations summaries
+- name: vulnerability-intelligence
+  description: Tenant-scoped vulnerability feeds, exposure correlation, risk transitions, and durable operations
 
 paths:
   /healthz:
@@ -1313,6 +1315,284 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {description: Version, state, or ownership conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
 
+  /api/v1/vulnerability/overview:
+    get:
+      tags: [vulnerability-intelligence]
+      summary: Get vulnerability intelligence operational overview
+      description: Requires view permission. Counts active exposure from occurrences whose current state is `detected`; historical or no-longer-detected occurrences are excluded.
+      responses:
+        '200': {description: Tenant overview, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityOverview'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/vulnerability/advisories:
+    get:
+      tags: [vulnerability-intelligence]
+      summary: List canonical vulnerability advisories
+      description: Requires view permission. `active_affected_count` counts current tenant occurrences in `detected` state only. Aggregate tenant filters are applied before the returned cursor page. Pagination is ordered by canonical advisory ID and continued with `after`.
+      parameters:
+      - {name: after, in: query, schema: {type: string}, description: Last advisory ID from the previous page}
+      - {name: search, in: query, schema: {type: string}}
+      - {name: status, in: query, schema: {type: array, items: {type: string, enum: [active, rejected, withdrawn]}}, explode: true}
+      - {name: kev, in: query, schema: {type: boolean}}
+      - {name: min_cvss, in: query, schema: {type: number, minimum: 0, maximum: 10}}
+      - {name: max_cvss, in: query, schema: {type: number, minimum: 0, maximum: 10}}
+      - {name: source, in: query, schema: {type: string}}
+      - {name: risk_priority, in: query, schema: {type: array, items: {type: integer, minimum: 1, maximum: 5}}, explode: true}
+      - {name: risk_trend, in: query, schema: {type: array, items: {type: string, enum: [none, new, increased, decreased, unchanged]}}, explode: true}
+      - {name: affected_asset, in: query, schema: {type: string}, description: Case-insensitive asset, engagement, component, package, fingerprint, or CPE search}
+      - {name: detection_state, in: query, schema: {type: array, items: {type: string, enum: [detected, no_longer_detected, withdrawn]}}, explode: true}
+      - {name: action_state, in: query, schema: {type: array, items: {type: string, enum: [open, acknowledged, resolved, none]}}, explode: true}
+      - {$ref: '#/components/parameters/VulnerabilityLimit'}
+      responses:
+        '200': {description: Advisory page, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityAdvisoryPage'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/vulnerability/advisories/{id}:
+    parameters: [{$ref: '#/components/parameters/VulnerabilityAdvisoryId'}]
+    get:
+      tags: [vulnerability-intelligence]
+      summary: Get the current canonical advisory
+      responses:
+        '200': {description: Current advisory, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityAdvisoryItem'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/vulnerability/advisories/{id}/revisions:
+    parameters: [{$ref: '#/components/parameters/VulnerabilityAdvisoryId'}]
+    get:
+      tags: [vulnerability-intelligence]
+      summary: List immutable advisory revision history
+      parameters:
+      - {name: before_revision, in: query, schema: {type: integer, minimum: 1}, description: Continue with revisions lower than this value}
+      - {$ref: '#/components/parameters/VulnerabilityLimit'}
+      responses:
+        '200': {description: Revision page, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityAdvisoryRevisionPage'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/vulnerability/advisories/{id}/revisions/{revision}:
+    parameters:
+    - {$ref: '#/components/parameters/VulnerabilityAdvisoryId'}
+    - {name: revision, in: path, required: true, schema: {type: integer, minimum: 1}}
+    get:
+      tags: [vulnerability-intelligence]
+      summary: Get one immutable advisory revision
+      responses:
+        '200': {description: Advisory revision, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityAdvisoryRevisionItem'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/vulnerability/occurrences:
+    get:
+      tags: [vulnerability-intelligence]
+      summary: List tenant vulnerability occurrences
+      description: Requires view permission. Both cursor fields are required together. Results are ordered by `UpdatedAt` and `ID` descending.
+      parameters:
+      - {name: engagement_id, in: query, schema: {type: string}}
+      - {name: advisory_id, in: query, schema: {type: string}}
+      - {name: state, in: query, schema: {type: array, items: {type: string, enum: [detected, no_longer_detected, withdrawn]}}, explode: true}
+      - {$ref: '#/components/parameters/VulnerabilityCursorTime'}
+      - {$ref: '#/components/parameters/VulnerabilityCursorId'}
+      - {$ref: '#/components/parameters/VulnerabilityLimit'}
+      responses:
+        '200': {description: Occurrence page, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityOccurrencePage'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/vulnerability/occurrences/{id}/assessments:
+    parameters: [{$ref: '#/components/parameters/VulnerabilityOccurrenceId'}]
+    get:
+      tags: [vulnerability-intelligence]
+      summary: List immutable risk assessments for an occurrence
+      parameters:
+      - {$ref: '#/components/parameters/VulnerabilityCursorTime'}
+      - {$ref: '#/components/parameters/VulnerabilityCursorId'}
+      - {$ref: '#/components/parameters/VulnerabilityLimit'}
+      responses:
+        '200': {description: Assessment page, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityAssessmentPage'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/vulnerability/occurrences/{id}/transitions:
+    parameters: [{$ref: '#/components/parameters/VulnerabilityOccurrenceId'}]
+    get:
+      tags: [vulnerability-intelligence]
+      summary: List immutable risk transitions for an occurrence
+      parameters:
+      - {$ref: '#/components/parameters/VulnerabilityCursorTime'}
+      - {$ref: '#/components/parameters/VulnerabilityCursorId'}
+      - {$ref: '#/components/parameters/VulnerabilityLimit'}
+      responses:
+        '200': {description: Transition page, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityTransitionPage'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/vulnerability/sources:
+    get:
+      tags: [vulnerability-intelligence]
+      summary: List configured vulnerability sources and health
+      description: Requires view permission. Credential material is never returned; only `credential_configured` is exposed.
+      parameters:
+      - {name: include_archived, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200': {description: Source views, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/VulnerabilitySource'}}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/vulnerability/sync-runs:
+    get:
+      tags: [vulnerability-intelligence]
+      summary: List durable provider synchronization runs
+      description: Requires view permission. Active states are `queued` and `running`; all other states are terminal. The ordinary view omits source snapshots, credential references, and raw provider payloads.
+      parameters:
+      - {name: source_id, in: query, schema: {type: string}}
+      - {name: state, in: query, schema: {type: array, items: {$ref: '#/components/schemas/VulnerabilitySyncState'}}, explode: true}
+      - {name: mode, in: query, schema: {type: array, items: {type: string, enum: [incremental, full]}}, explode: true}
+      - {name: trigger, in: query, schema: {type: string}}
+      - {name: from, in: query, schema: {type: string, format: date}, description: Inclusive UTC creation date}
+      - {name: to, in: query, schema: {type: string, format: date}, description: Inclusive UTC creation date}
+      - {$ref: '#/components/parameters/VulnerabilityCursorTime'}
+      - {$ref: '#/components/parameters/VulnerabilityCursorId'}
+      - {$ref: '#/components/parameters/VulnerabilityLimit'}
+      responses:
+        '200': {description: Safe sync-run page, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilitySyncRunPage'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/vulnerability/sync-runs/{id}:
+    parameters: [{$ref: '#/components/parameters/VulnerabilityRunId'}]
+    get:
+      tags: [vulnerability-intelligence]
+      summary: Get a safe durable synchronization run view
+      description: Source snapshots, credential references, and raw provider payloads are not returned.
+      responses:
+        '200': {description: Safe sync run, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilitySyncRun'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/vulnerability/actions:
+    get:
+      tags: [vulnerability-intelligence]
+      summary: List tenant vulnerability risk actions
+      parameters:
+      - {name: status, in: query, schema: {type: array, items: {type: string, enum: [open, acknowledged, resolved]}}, explode: true}
+      - {name: before_created_at, in: query, schema: {type: string, format: date-time}, description: Must be supplied together with `before_id`}
+      - {name: before_id, in: query, schema: {type: string}, description: Must be supplied together with `before_created_at`}
+      - {$ref: '#/components/parameters/VulnerabilityLimit'}
+      responses:
+        '200': {description: Action page, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityActionPage'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/vulnerability/sources/{id}/sync:
+    parameters: [{$ref: '#/components/parameters/VulnerabilitySourceId'}]
+    post:
+      tags: [vulnerability-intelligence]
+      summary: Enqueue a durable source synchronization
+      description: Requires operate permission. Reuse one idempotency key for retries of the same operator action.
+      requestBody: {content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilitySyncRequest'}}}}
+      responses:
+        '202': {description: Durable synchronization accepted, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilitySyncAccepted'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/vulnerability/sources/test:
+    post:
+      tags: [vulnerability-intelligence]
+      summary: Test an unsaved vulnerability source draft
+      description: Requires administer permission. The draft is normalized and tested with the code-owned adapter but is never persisted. When `existing_source_id` is supplied and `credential_ref` is omitted, the stored credential reference is resolved without returning it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source]
+              properties:
+                source: {type: object, additionalProperties: true}
+                existing_source_id: {type: string}
+      responses:
+        '200': {description: Draft connectivity succeeded}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/vulnerability/advisories/{id}/reconcile:
+    parameters: [{$ref: '#/components/parameters/VulnerabilityAdvisoryId'}]
+    post:
+      tags: [vulnerability-intelligence]
+      summary: Enqueue tenant correlation for one advisory
+      description: Requires operate permission. The HTTP request only creates durable work and returns `202`.
+      requestBody: {content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityReconcileRequest'}}}}
+      responses:
+        '202': {description: Durable reconciliation accepted, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityReconcileAccepted'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/vulnerability/reconcile/tenant:
+    post:
+      tags: [vulnerability-intelligence]
+      summary: Enqueue a tenant-wide full reconciliation
+      description: Requires operate permission. Rollback or disabling this operation stops new mutation only and never deletes historical occurrences, assessments, transitions, actions, or runs.
+      requestBody: {content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityReconcileRequest'}}}}
+      responses:
+        '202': {description: Durable reconciliation accepted, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityReconcileAccepted'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/vulnerability/reconcile-runs/{id}:
+    parameters: [{$ref: '#/components/parameters/VulnerabilityRunId'}]
+    get:
+      tags: [vulnerability-intelligence]
+      summary: Get a durable reconciliation run
+      description: Active states are `queued` and `running`; `succeeded` and `failed` are terminal.
+      responses:
+        '200': {description: Reconciliation run, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityReconcileRun'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/vulnerability/reconcile-runs/{id}/diffs:
+    parameters: [{$ref: '#/components/parameters/VulnerabilityRunId'}]
+    get:
+      tags: [vulnerability-intelligence]
+      summary: List durable dry-run reconciliation differences
+      description: >-
+        Requires view permission. Cursor fields are required as one complete set and results are ordered by mismatch class,
+        engagement, advisory, and component fingerprint. Dry-run count fields map to persisted classes:
+        added=`missing_occurrence`, updated=`changed_occurrence`, unchanged=`in_sync`, retired=`stale_occurrence`,
+        unmatchable=`unmatchable_input`; processed is their total.
+      parameters:
+      - {name: class, in: query, schema: {$ref: '#/components/schemas/VulnerabilityReconcileDiffClass'}}
+      - {$ref: '#/components/parameters/VulnerabilityLimit'}
+      - {name: after_class, in: query, schema: {$ref: '#/components/schemas/VulnerabilityReconcileDiffClass'}, description: Must be supplied with all other `after_*` fields}
+      - {name: after_engagement_id, in: query, schema: {type: string}, description: Must be supplied with all other `after_*` fields}
+      - {name: after_advisory_id, in: query, schema: {type: string}, description: Must be supplied with all other `after_*` fields}
+      - {name: after_component_fingerprint, in: query, schema: {type: string}, description: Must be supplied with all other `after_*` fields}
+      responses:
+        '200': {description: Reconciliation difference page, content: {application/json: {schema: {$ref: '#/components/schemas/VulnerabilityReconcileDiffPage'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1358,6 +1638,40 @@ components:
         enum:
         - overall
         - new-code
+    VulnerabilityAdvisoryId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    VulnerabilityOccurrenceId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    VulnerabilityRunId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    VulnerabilitySourceId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    VulnerabilityLimit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 500, default: 100}
+    VulnerabilityCursorTime:
+      name: before_time
+      in: query
+      schema: {type: string, format: date-time}
+      description: RFC 3339 timestamp; must be supplied together with `before_id`
+    VulnerabilityCursorId:
+      name: before_id
+      in: query
+      schema: {type: string}
+      description: Stable tie-breaker; must be supplied together with `before_time`
 
   responses:
     BadRequest:
@@ -1387,6 +1701,339 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
 
   schemas:
+    VulnerabilityCursor:
+      type: object
+      required: [before_time, before_id]
+      properties:
+        before_time: {type: string, format: date-time}
+        before_id: {type: string}
+
+    VulnerabilityOverview:
+      type: object
+      required: [enabled_sources, stale_or_failed_sources, changed_advisories_24_hours, open_high_critical_exposure, pending_risk_actions, queue_depth, dead_letters]
+      properties:
+        enabled_sources: {type: integer, minimum: 0}
+        stale_or_failed_sources: {type: integer, minimum: 0}
+        last_successful_sync: {type: string, format: date-time}
+        changed_advisories_24_hours: {type: integer, minimum: 0}
+        oldest_unevaluated_revision: {$ref: '#/components/schemas/VulnerabilityEvaluationLag'}
+        open_high_critical_exposure: {type: integer, minimum: 0, description: Current detected occurrences whose latest risk severity is high or critical}
+        pending_risk_actions: {type: integer, minimum: 0}
+        queue_depth: {type: integer, minimum: 0}
+        dead_letters: {type: integer, minimum: 0}
+
+    VulnerabilityEvaluationLag:
+      type: object
+      required: [advisory_id, current_revision, evaluated_revision, changed_at]
+      properties:
+        advisory_id: {type: string}
+        current_revision: {type: integer, minimum: 1}
+        evaluated_revision: {type: integer, minimum: 0}
+        changed_at: {type: string, format: date-time}
+
+    VulnerabilityCanonicalAdvisory:
+      type: object
+      description: Canonical advisory projection. Nested fields retain legacy Go field names.
+      additionalProperties: true
+      properties:
+        Advisory: {type: object, additionalProperties: true}
+        Status: {type: string, enum: [active, rejected, withdrawn]}
+        PublishedAt: {type: string, format: date-time}
+        ModifiedAt: {type: string, format: date-time}
+        KEV: {type: [boolean, 'null']}
+        EPSS: {type: [number, 'null'], minimum: 0, maximum: 1}
+        EPSSPercentile: {type: [number, 'null'], minimum: 0, maximum: 1}
+        PublicExploit: {type: [boolean, 'null']}
+        ActiveExploitation: {type: [boolean, 'null']}
+        Sources: {type: array, items: {type: string}}
+
+    VulnerabilityAdvisoryItem:
+      type: object
+      required: [canonical, revision, active_affected_count, affected_asset_count, affected_component_count, risk_priority, previous_risk_priority, risk_trend, risk_score, risk_score_change]
+      properties:
+        canonical: {$ref: '#/components/schemas/VulnerabilityCanonicalAdvisory'}
+        revision: {type: integer, minimum: 1}
+        changed_fields: {type: array, items: {type: string, enum: [identity, aliases, summary, cvss, dates, affected, status, exploitability, sources]}}
+        changed_at: {type: string, format: date-time}
+        active_affected_count: {type: integer, minimum: 0, description: Current tenant occurrences in detected state}
+        affected_asset_count: {type: integer, minimum: 0}
+        affected_component_count: {type: integer, minimum: 0}
+        risk_priority: {type: integer, minimum: 0, maximum: 5, description: Zero when no current assessment exists}
+        previous_risk_priority: {type: integer, minimum: 0, maximum: 5, description: Zero when no previous assessment exists}
+        risk_trend: {type: string, enum: [none, new, increased, decreased, unchanged]}
+        risk_score: {type: number, minimum: 0}
+        risk_score_change: {type: number}
+        detection_states: {type: array, items: {type: string, enum: [detected, no_longer_detected, withdrawn]}}
+        action_states: {type: array, items: {type: string, enum: [open, acknowledged, resolved]}}
+        last_evaluation: {type: string, format: date-time}
+
+    VulnerabilityAdvisoryPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/VulnerabilityAdvisoryItem'}}
+        next: {type: string}
+
+    VulnerabilityAdvisoryRevisionItem:
+      type: object
+      required: [canonical, revision]
+      properties:
+        canonical: {$ref: '#/components/schemas/VulnerabilityCanonicalAdvisory'}
+        revision: {type: integer, minimum: 1}
+        changed_fields: {type: array, items: {type: string}}
+        sync_run_ids: {type: array, items: {type: string}, description: Tenant-visible synchronization runs that created this canonical revision}
+        changed_at: {type: string, format: date-time}
+
+    VulnerabilityAdvisoryRevisionPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/VulnerabilityAdvisoryRevisionItem'}}
+        next: {type: integer, minimum: 1}
+
+    VulnerabilityOccurrence:
+      type: object
+      description: Legacy domain serialization; property names are PascalCase.
+      additionalProperties: true
+      properties:
+        TenantID: {type: string}
+        ID: {type: string}
+        EngagementID: {type: string}
+        AdvisoryID: {type: string}
+        AdvisoryRevision: {type: integer, minimum: 1}
+        State: {type: string, enum: [detected, no_longer_detected, withdrawn]}
+        UpdatedAt: {type: string, format: date-time}
+
+    VulnerabilityOccurrencePage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/VulnerabilityOccurrence'}}
+        next: {$ref: '#/components/schemas/VulnerabilityCursor'}
+
+    VulnerabilityAssessmentPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {type: object, additionalProperties: true, description: Immutable legacy PascalCase risk assessment}}
+        next: {$ref: '#/components/schemas/VulnerabilityCursor'}
+
+    VulnerabilityTransitionPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {type: object, additionalProperties: true, description: Immutable legacy PascalCase risk transition}}
+        next: {$ref: '#/components/schemas/VulnerabilityCursor'}
+
+    VulnerabilitySource:
+      type: object
+      required: [id, key, name, adapter_type, endpoint, enabled, archived, cadence_seconds, stale_after_seconds, sync_mode, credential_configured, version, created_at, updated_at, health]
+      properties:
+        id: {type: string}
+        key: {type: string}
+        name: {type: string}
+        adapter_type: {type: string, enum: [osv, csaf, oval, nvd, cisa_kev, first_epss, public_exploit]}
+        endpoint: {type: string, format: uri, pattern: '^https://'}
+        enabled: {type: boolean}
+        archived: {type: boolean}
+        cadence_seconds: {type: integer, minimum: 1}
+        stale_after_seconds: {type: integer, minimum: 1}
+        sync_mode: {type: string, enum: [incremental, full]}
+        adapter_config: {type: object, additionalProperties: true}
+        credential_configured: {type: boolean}
+        version: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        health: {type: object, additionalProperties: true}
+
+    VulnerabilitySyncState:
+      type: string
+      enum: [queued, running, succeeded, partial, failed, superseded]
+      description: "`queued` and `running` are active; all other values are terminal."
+
+    VulnerabilitySyncCounts:
+      type: object
+      required: [processed, inserted, updated, unchanged, skipped, quarantined]
+      properties:
+        processed: {type: integer, minimum: 0}
+        inserted: {type: integer, minimum: 0}
+        updated: {type: integer, minimum: 0}
+        unchanged: {type: integer, minimum: 0}
+        skipped: {type: integer, minimum: 0}
+        quarantined: {type: integer, minimum: 0}
+
+    VulnerabilitySyncRun:
+      type: object
+      required: [id, source_id, adapter_type, mode, trigger, actor, attempts, dead_lettered, counts, state, created_at, updated_at]
+      description: Safe ordinary view. It intentionally excludes source_snapshot, credential references, and raw provider payloads.
+      properties:
+        id: {type: string}
+        source_id: {type: string}
+        adapter_type: {type: string}
+        mode: {type: string, enum: [incremental, full]}
+        trigger: {type: string}
+        actor: {type: string, maxLength: 256}
+        client_idempotency_key: {type: string, maxLength: 256}
+        durable_job_id: {type: string}
+        attempts: {type: integer, minimum: 0}
+        dead_lettered: {type: boolean}
+        affected_revisions:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [advisory_id, revision, changed_at]
+            properties:
+              advisory_id: {type: string}
+              revision: {type: integer, minimum: 1}
+              changed_at: {type: string, format: date-time}
+        affected_revisions_truncated: {type: boolean}
+        checkpoint: {type: object, additionalProperties: true}
+        counts: {$ref: '#/components/schemas/VulnerabilitySyncCounts'}
+        error_samples: {type: array, maxItems: 32, items: {type: string}}
+        state: {$ref: '#/components/schemas/VulnerabilitySyncState'}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    VulnerabilitySyncRunPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/VulnerabilitySyncRun'}}
+        next: {$ref: '#/components/schemas/VulnerabilityCursor'}
+
+    VulnerabilityAction:
+      type: object
+      required: [id, engagement_id, occurrence_id, finding_id, transition_id, type, status, title, reason_codes, created_at, updated_at]
+      properties:
+        id: {type: string}
+        engagement_id: {type: string}
+        occurrence_id: {type: string}
+        finding_id: {type: string}
+        transition_id: {type: string}
+        type: {type: string, enum: [new_exposure, escalation, withdrawal, reexposure, retest_required, risk_review]}
+        status: {type: string, enum: [open, acknowledged, resolved]}
+        title: {type: string}
+        reason_codes: {type: array, items: {type: string}}
+        acknowledged_by: {type: string}
+        acknowledged_at: {type: string, format: date-time}
+        resolved_by: {type: string}
+        resolved_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    VulnerabilityActionPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/VulnerabilityAction'}}
+        next:
+          type: object
+          required: [before_created_at, before_id]
+          properties:
+            before_created_at: {type: string, format: date-time}
+            before_id: {type: string}
+
+    VulnerabilitySyncRequest:
+      type: object
+      properties:
+        mode: {type: string, enum: [incremental, full], default: incremental}
+        client_idempotency_key: {type: string, maxLength: 256}
+
+    VulnerabilitySyncAccepted:
+      type: object
+      required: [run_id, source_id, mode, state, created]
+      properties:
+        run_id: {type: string}
+        source_id: {type: string}
+        mode: {type: string, enum: [incremental, full]}
+        state: {$ref: '#/components/schemas/VulnerabilitySyncState'}
+        created: {type: boolean}
+
+    VulnerabilityReconcileRequest:
+      type: object
+      properties:
+        client_idempotency_key: {type: string, maxLength: 256}
+
+    VulnerabilityReconcileAccepted:
+      type: object
+      required: [run_id, job_id, scope, state, created]
+      properties:
+        run_id: {type: string}
+        job_id: {type: string}
+        scope: {type: string, enum: [tenant, advisory]}
+        advisory_id: {type: string}
+        state: {type: string, enum: [queued, running, succeeded, failed]}
+        created: {type: boolean}
+
+    VulnerabilityReconcileRun:
+      type: object
+      additionalProperties: true
+      required: [tenant_id, id, scope, dry_run, durable_job_id, checkpoint, counts, state, snapshot_at, created_at, updated_at]
+      properties:
+        tenant_id: {type: string}
+        id: {type: string}
+        scope: {type: string, enum: [tenant, advisory]}
+        advisory_id: {type: string}
+        dry_run: {type: boolean, description: Pinned when the run is enqueued and unchanged across retries or rollout configuration changes}
+        durable_job_id: {type: string}
+        checkpoint: {type: object, additionalProperties: true}
+        counts:
+          $ref: '#/components/schemas/VulnerabilityReconcileCounts'
+        state: {type: string, enum: [queued, running, succeeded, failed]}
+        snapshot_at: {type: string, format: date-time}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    VulnerabilityReconcileCounts:
+      type: object
+      required: [processed, added, updated, unchanged, unmatchable, retired]
+      description: For dry-run runs, counts are derived from persisted difference rows and remain idempotent across retries.
+      properties:
+        processed: {type: integer, minimum: 0, description: Total difference rows across all mismatch classes}
+        added: {type: integer, minimum: 0, description: "missing_occurrence rows"}
+        updated: {type: integer, minimum: 0, description: "changed_occurrence rows"}
+        unchanged: {type: integer, minimum: 0, description: "in_sync rows"}
+        unmatchable: {type: integer, minimum: 0, description: "unmatchable_input rows"}
+        retired: {type: integer, minimum: 0, description: "stale_occurrence rows"}
+
+    VulnerabilityReconcileDiffClass:
+      type: string
+      enum: [missing_occurrence, changed_occurrence, in_sync, stale_occurrence, unmatchable_input]
+
+    VulnerabilityReconcileDiff:
+      type: object
+      required: [tenant_id, run_id, engagement_id, advisory_id, component_fingerprint, class, details, created_at]
+      properties:
+        tenant_id: {type: string}
+        run_id: {type: string}
+        engagement_id: {type: string}
+        advisory_id: {type: string}
+        component_fingerprint: {type: string}
+        class: {$ref: '#/components/schemas/VulnerabilityReconcileDiffClass'}
+        details: {type: object, additionalProperties: true}
+        created_at: {type: string, format: date-time}
+
+    VulnerabilityReconcileDiffCursor:
+      type: object
+      required: [class, engagement_id, advisory_id, component_fingerprint]
+      properties:
+        class: {$ref: '#/components/schemas/VulnerabilityReconcileDiffClass'}
+        engagement_id: {type: string}
+        advisory_id: {type: string}
+        component_fingerprint: {type: string}
+
+    VulnerabilityReconcileDiffPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/VulnerabilityReconcileDiff'}}
+        next: {$ref: '#/components/schemas/VulnerabilityReconcileDiffCursor'}
+
     CSPMRun:
       type: object
       required: [id, engagement_id, actor, status, complete, assets, findings, started_at]

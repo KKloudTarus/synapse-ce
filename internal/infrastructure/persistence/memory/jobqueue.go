@@ -42,6 +42,7 @@ func NewJobQueue(ids ports.IDGenerator, now func() time.Time) *JobQueue {
 }
 
 var _ ports.JobQueue = (*JobQueue)(nil)
+var _ ports.JobStatusReader = (*JobQueue)(nil)
 
 func (q *JobQueue) Enqueue(ctx context.Context, kind string, payload []byte) (string, error) {
 	if kind == "" {
@@ -146,6 +147,48 @@ func (q *JobQueue) Depth(_ context.Context, kinds ...string) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+func (q *JobQueue) Stats(_ context.Context, kinds ...string) (ports.JobStats, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var stats ports.JobStats
+	for _, job := range q.jobs {
+		if job == nil || !kindWanted(job.kind, kinds) {
+			continue
+		}
+		switch job.status {
+		case "queued":
+			stats.Queued++
+		case "claimed":
+			stats.Claimed++
+		case "failed":
+			stats.Failed++
+		case "done":
+			stats.Done++
+		}
+		if job.status == "queued" || job.status == "claimed" {
+			at := job.availableAt.UTC()
+			if stats.OldestActiveAt == nil || at.Before(*stats.OldestActiveAt) {
+				stats.OldestActiveAt = &at
+			}
+		}
+	}
+	return stats, nil
+}
+
+func (q *JobQueue) JobStatus(ctx context.Context, id string) (ports.JobStatus, error) {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return ports.JobStatus{}, fmt.Errorf("%w: tenant context is required for job status", shared.ErrValidation)
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	job := q.jobs[id]
+	if job == nil || job.tenantID != shared.TenantOrDefault(tenantID) {
+		return ports.JobStatus{}, fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
+	}
+	return ports.JobStatus{Attempts: job.attempts, DeadLettered: job.status == "failed"}, nil
 }
 
 func (q *JobQueue) Fail(_ context.Context, id string, retryIn time.Duration) error {

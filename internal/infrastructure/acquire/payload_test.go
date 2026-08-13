@@ -25,7 +25,7 @@ func cpioHeader(name string, mode, size int) []byte {
 		h += fmt.Sprintf("%08x", f)
 	}
 	b := append([]byte(h), []byte(name)...)
-	b = append(b, 0) // NUL-terminate the name
+	b = append(b, 0)    // NUL-terminate the name
 	for len(b)%4 != 0 { // pad name so the data starts on a 4-byte boundary
 		b = append(b, 0)
 	}

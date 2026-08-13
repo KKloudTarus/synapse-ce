@@ -33,53 +33,72 @@ import (
 	transferuc "github.com/KKloudTarus/synapse-ce/internal/usecase/transfer"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 	vexuc "github.com/KKloudTarus/synapse-ce/internal/usecase/vex"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityactionuc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitymonitor"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityreconciliation"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitysourceuc"
 )
 
 // Router wires HTTP routes to use case services.
 type Router struct {
-	log               *slog.Logger
-	auth              *Authenticator
-	eng               *enguc.Service
-	sca               *scauc.Service
-	aup               *aupuc.Service
-	findings          *findingsuc.Service
-	export            *exportuc.Service
-	report            *reportuc.Service
-	evidence          *evidenceuc.Service
-	recon             *reconuc.Service
-	logs              ports.LogStream
-	transfer          *transferuc.Service
-	audit             *audituc.Service
-	vex               *vexuc.Service
-	users             *usersuc.Service
-	credentials       *credentialsuc.Service
-	dastVerifier      runtimeVerifierService
-	dastWorkflow      dastWorkflowService
-	agent             *agentDeps            // optional; nil ⇒ agent routes are not registered
-	exploitation      findingVerifier       // optional; nil ⇒ the verify route is not registered
-	judgments         judgmentService       // optional; nil ⇒ judgment routes are not registered
-	autoVerifier      autoVerifierService   // optional; nil ⇒ the LLM auto-verify route is not registered
-	threatModels      threatModelService    // optional; nil ⇒ threat-model routes are not registered
-	drafts            writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
-	aiTriageReviews   aiTriageReviewService // optional; nil ⇒ AI-triage review queue routes are not registered
-	projects          projectService        // optional; nil ⇒ project routes are not registered
-	assets            assetService          // optional; nil ⇒ fleet asset routes are not registered
-	cspm              *cspm.Service         // optional; nil ⇒ CSPM routes are not registered
-	businessAssets    businessAssetService  // optional; nil ⇒ business-level Asset routes are not registered
-	attackPaths       attackPathService     // optional; nil ⇒ attack-path routes are not registered
-	coverage          coverageService       // optional; nil ⇒ fleet coverage/agent-view routes are not registered
-	sarif             sarifIngester         // optional; nil ⇒ the third-party SARIF import route is not registered
-	importedFindings  sarifReader           // optional read side for imported findings
-	fleetRolloutAdmin fleetRolloutService   // optional; nil ⇒ the operator rollout routes are not served
-	offensiveHalt     offensiveKillSwitch   // optional; nil ⇒ the red-team halt route is not served
-	detections        detectionReader       // optional read side for the detection ledger (#423)
-	purpleCoverage    purpleCoverageReader  // optional read side for purple-team coverage (#426)
-	fleet             *fleetRouter          // optional; nil ⇒ agent transport plane is not served
-	fleetAdmin        fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
-	qualityGates      qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
-	qualityProfiles   qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
-	rules             rulesService          // optional; nil ⇒ rule catalog routes are not registered
-	dastScan          dastScanService
+	log                         *slog.Logger
+	auth                        *Authenticator
+	eng                         *enguc.Service
+	sca                         *scauc.Service
+	aup                         *aupuc.Service
+	findings                    *findingsuc.Service
+	export                      *exportuc.Service
+	report                      *reportuc.Service
+	evidence                    *evidenceuc.Service
+	recon                       *reconuc.Service
+	logs                        ports.LogStream
+	transfer                    *transferuc.Service
+	audit                       *audituc.Service
+	vex                         *vexuc.Service
+	users                       *usersuc.Service
+	credentials                 *credentialsuc.Service
+	dastVerifier                runtimeVerifierService
+	dastWorkflow                dastWorkflowService
+	agent                       *agentDeps            // optional; nil ⇒ agent routes are not registered
+	exploitation                findingVerifier       // optional; nil ⇒ the verify route is not registered
+	judgments                   judgmentService       // optional; nil ⇒ judgment routes are not registered
+	autoVerifier                autoVerifierService   // optional; nil ⇒ the LLM auto-verify route is not registered
+	threatModels                threatModelService    // optional; nil ⇒ threat-model routes are not registered
+	drafts                      writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
+	aiTriageReviews             aiTriageReviewService // optional; nil ⇒ AI-triage review queue routes are not registered
+	projects                    projectService        // optional; nil ⇒ project routes are not registered
+	assets                      assetService          // optional; nil ⇒ fleet asset routes are not registered
+	cspm                        *cspm.Service         // optional; nil ⇒ CSPM routes are not registered
+	businessAssets              businessAssetService  // optional; nil ⇒ business-level Asset routes are not registered
+	attackPaths                 attackPathService     // optional; nil ⇒ attack-path routes are not registered
+	coverage                    coverageService       // optional; nil ⇒ fleet coverage/agent-view routes are not registered
+	sarif                       sarifIngester         // optional; nil ⇒ the third-party SARIF import route is not registered
+	importedFindings            sarifReader           // optional read side for imported findings
+	fleetRolloutAdmin           fleetRolloutService   // optional; nil ⇒ the operator rollout routes are not served
+	offensiveHalt               offensiveKillSwitch   // optional; nil ⇒ the red-team halt route is not served
+	detections                  detectionReader       // optional read side for the detection ledger (#423)
+	purpleCoverage              purpleCoverageReader  // optional read side for purple-team coverage (#426)
+	fleet                       *fleetRouter          // optional; nil ⇒ agent transport plane is not served
+	fleetAdmin                  fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
+	qualityGates                qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
+	qualityProfiles             qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
+	rules                       rulesService          // optional; nil ⇒ rule catalog routes are not registered
+	dastScan                    dastScanService
+	vulnerabilitySources        *vulnerabilitysourceuc.Service
+	vulnerabilityMonitor        *vulnerabilitymonitor.Service
+	vulnerabilityReconcile      *vulnerabilityreconciliation.Service
+	vulnerabilityAudit          ports.AuditLogger
+	vulnerabilityAdvisories     ports.AdvisoryMaterializer
+	vulnerabilityAdvisoryRead   ports.VulnerabilityAdvisoryReadStore
+	vulnerabilityCheckpoints    ports.AdvisoryEvaluationCheckpointStore
+	vulnerabilityOccurrences    ports.VulnerabilityOccurrenceStore
+	vulnerabilityOccurrenceRead ports.VulnerabilityOccurrenceReadStore
+	vulnerabilityAssessments    ports.VulnerabilityRiskAssessmentStore
+	vulnerabilityRiskRead       ports.VulnerabilityRiskReadStore
+	vulnerabilityTransitionRead ports.VulnerabilityTransitionReadStore
+	vulnerabilitySyncRunRead    ports.VulnerabilitySyncRunReadStore
+	vulnerabilityQueue          ports.JobQueue
+	vulnerabilityActions        *vulnerabilityactionuc.Service
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -176,6 +195,35 @@ func (rt *Router) SetQualityGates(s qualityGateService) { rt.qualityGates = s }
 
 // SetRules wires the rule catalog endpoints. nil ⇒ not registered.
 func (rt *Router) SetRules(s rulesService) { rt.rules = s }
+
+// SetVulnerabilityIntelligence wires source management and durable sync routes.
+func (rt *Router) SetVulnerabilityIntelligence(sources *vulnerabilitysourceuc.Service, monitor *vulnerabilitymonitor.Service) {
+	rt.vulnerabilitySources = sources
+	rt.vulnerabilityMonitor = monitor
+}
+
+func (rt *Router) SetVulnerabilityReconciliation(service *vulnerabilityreconciliation.Service) {
+	rt.vulnerabilityReconcile = service
+}
+
+func (rt *Router) SetVulnerabilityAudit(audit ports.AuditLogger) { rt.vulnerabilityAudit = audit }
+
+func (rt *Router) SetVulnerabilityReadModel(advisories ports.AdvisoryMaterializer, advisoryRead ports.VulnerabilityAdvisoryReadStore, checkpoints ports.AdvisoryEvaluationCheckpointStore, occurrences ports.VulnerabilityOccurrenceStore, occurrenceRead ports.VulnerabilityOccurrenceReadStore, assessments ports.VulnerabilityRiskAssessmentStore, riskRead ports.VulnerabilityRiskReadStore, transitionRead ports.VulnerabilityTransitionReadStore, syncRunRead ports.VulnerabilitySyncRunReadStore, queue ports.JobQueue) {
+	rt.vulnerabilityAdvisories = advisories
+	rt.vulnerabilityAdvisoryRead = advisoryRead
+	rt.vulnerabilityCheckpoints = checkpoints
+	rt.vulnerabilityOccurrences = occurrences
+	rt.vulnerabilityOccurrenceRead = occurrenceRead
+	rt.vulnerabilityAssessments = assessments
+	rt.vulnerabilityRiskRead = riskRead
+	rt.vulnerabilityTransitionRead = transitionRead
+	rt.vulnerabilitySyncRunRead = syncRunRead
+	rt.vulnerabilityQueue = queue
+}
+
+func (rt *Router) SetVulnerabilityActions(actions *vulnerabilityactionuc.Service) {
+	rt.vulnerabilityActions = actions
+}
 
 // NewRouter builds the HTTP router.
 func NewRouter(log *slog.Logger, auth *Authenticator, eng *enguc.Service, sca *scauc.Service, aup *aupuc.Service, findings *findingsuc.Service, export *exportuc.Service, report *reportuc.Service, evidence *evidenceuc.Service, recon *reconuc.Service, logs ports.LogStream, transfer *transferuc.Service, audit *audituc.Service, vex *vexuc.Service, users *usersuc.Service, credentials *credentialsuc.Service) *Router {
@@ -449,6 +497,55 @@ func (rt *Router) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/me", rt.currentUser)
 	mux.HandleFunc("GET /api/v1/users", rt.authz(userdom.PermAdminister, rt.listUsers))
 	mux.HandleFunc("POST /api/v1/users", rt.authz(userdom.PermAdminister, rt.createUser))
+	if rt.vulnerabilitySources != nil && rt.vulnerabilityMonitor != nil {
+		mux.HandleFunc("GET /api/v1/vulnerability/sources/types", rt.authz(userdom.PermView, rt.listVulnerabilityAdapterTypes))
+		mux.HandleFunc("GET /api/v1/vulnerability/sources", rt.authz(userdom.PermView, rt.listVulnerabilitySources))
+		mux.HandleFunc("POST /api/v1/vulnerability/sources", rt.authz(userdom.PermAdminister, rt.createVulnerabilitySource))
+		mux.HandleFunc("PUT /api/v1/vulnerability/sources/{id}", rt.authz(userdom.PermAdminister, rt.updateVulnerabilitySource))
+		mux.HandleFunc("PATCH /api/v1/vulnerability/sources/{id}", rt.authz(userdom.PermAdminister, rt.updateVulnerabilitySource))
+		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/enable", rt.authz(userdom.PermAdminister, rt.setVulnerabilitySourceEnabled))
+		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/disable", rt.authz(userdom.PermAdminister, rt.setVulnerabilitySourceEnabled))
+		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/archive", rt.authz(userdom.PermAdminister, rt.archiveVulnerabilitySource))
+		mux.HandleFunc("POST /api/v1/vulnerability/sources/test", rt.authz(userdom.PermAdminister, rt.testVulnerabilitySourceDraft))
+		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/test", rt.authz(userdom.PermAdminister, rt.testVulnerabilitySource))
+		mux.HandleFunc("POST /api/v1/vulnerability/sources/{id}/sync", rt.authz(userdom.PermOperate, rt.startVulnerabilitySync))
+		mux.HandleFunc("POST /api/v1/vulnerability/sync-all", rt.authz(userdom.PermOperate, rt.startAllVulnerabilitySync))
+		mux.HandleFunc("GET /api/v1/vulnerability/sync-runs/{id}", rt.authz(userdom.PermView, rt.getVulnerabilitySyncRun))
+	}
+	if rt.vulnerabilityAdvisories != nil {
+		mux.HandleFunc("GET /api/v1/vulnerability/advisories", rt.authz(userdom.PermView, rt.listVulnerabilityAdvisories))
+		mux.HandleFunc("GET /api/v1/vulnerability/advisories/{id}", rt.authz(userdom.PermView, rt.getVulnerabilityAdvisory))
+		mux.HandleFunc("GET /api/v1/vulnerability/advisories/{id}/revisions", rt.authz(userdom.PermView, rt.listVulnerabilityAdvisoryRevisions))
+		mux.HandleFunc("GET /api/v1/vulnerability/advisories/{id}/revisions/{revision}", rt.authz(userdom.PermView, rt.getVulnerabilityAdvisoryRevision))
+	}
+	if rt.vulnerabilityAdvisoryRead != nil && rt.vulnerabilityOccurrenceRead != nil && rt.vulnerabilityRiskRead != nil && rt.vulnerabilityTransitionRead != nil && rt.vulnerabilitySyncRunRead != nil {
+		mux.HandleFunc("GET /api/v1/vulnerability/occurrences", rt.authz(userdom.PermView, rt.listAllVulnerabilityOccurrences))
+		mux.HandleFunc("GET /api/v1/vulnerability/occurrences/{id}/assessments", rt.authz(userdom.PermView, rt.listVulnerabilityAssessments))
+		mux.HandleFunc("GET /api/v1/vulnerability/occurrences/{id}/transitions", rt.authz(userdom.PermView, rt.listVulnerabilityTransitions))
+		mux.HandleFunc("GET /api/v1/vulnerability/sync-runs", rt.authz(userdom.PermView, rt.listVulnerabilitySyncRuns))
+		mux.HandleFunc("GET /api/v1/vulnerability/overview", rt.authz(userdom.PermView, rt.getVulnerabilityOverview))
+	}
+	if rt.vulnerabilityReconcile != nil {
+		mux.HandleFunc("POST /api/v1/vulnerability/advisories/{id}/reconcile", rt.authz(userdom.PermOperate, rt.startAdvisoryVulnerabilityReconciliation))
+		mux.HandleFunc("POST /api/v1/vulnerability/reconcile/tenant", rt.authz(userdom.PermOperate, rt.startTenantVulnerabilityReconciliation))
+		mux.HandleFunc("POST /api/v1/vulnerability/reconcile/full", rt.authz(userdom.PermOperate, rt.startFullVulnerabilityReconciliation))
+		mux.HandleFunc("GET /api/v1/vulnerability/reconcile-runs/{id}", rt.authz(userdom.PermView, rt.getVulnerabilityReconciliationRun))
+		mux.HandleFunc("GET /api/v1/vulnerability/reconcile-runs/{id}/diffs", rt.authz(userdom.PermView, rt.listVulnerabilityReconciliationDiffs))
+	}
+	if rt.vulnerabilityOccurrences != nil {
+		mux.HandleFunc("GET /api/v1/engagements/{id}/vulnerability/occurrences", rt.authz(userdom.PermView, rt.withEngTenant(rt.listVulnerabilityOccurrences)))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/vulnerability/occurrences/{oid}/events", rt.authz(userdom.PermView, rt.withEngTenant(rt.listVulnerabilityOccurrenceEvents)))
+	}
+	if rt.vulnerabilityOccurrences != nil && rt.vulnerabilityAssessments != nil {
+		mux.HandleFunc("GET /api/v1/engagements/{id}/vulnerability/occurrences/{oid}/risk", rt.authz(userdom.PermView, rt.withEngTenant(rt.getVulnerabilityOccurrenceRisk)))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/vulnerability/occurrences/{oid}/risk/history", rt.authz(userdom.PermView, rt.withEngTenant(rt.listVulnerabilityOccurrenceRiskHistory)))
+	}
+	if rt.vulnerabilityActions != nil {
+		mux.HandleFunc("GET /api/v1/vulnerability/actions", rt.authz(userdom.PermView, rt.listAllVulnerabilityActions))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/vulnerability/actions", rt.authz(userdom.PermView, rt.withEngTenant(rt.listVulnerabilityActions)))
+		mux.HandleFunc("POST /api/v1/engagements/{id}/vulnerability/actions/{aid}/acknowledge", rt.authz(userdom.PermReview, rt.withEngTenant(rt.acknowledgeVulnerabilityAction)))
+		mux.HandleFunc("POST /api/v1/engagements/{id}/vulnerability/actions/{aid}/resolve", rt.authz(userdom.PermReview, rt.withEngTenant(rt.resolveVulnerabilityAction)))
+	}
 	mux.HandleFunc("POST /api/v1/sca/scans", rt.authz(userdom.PermOperate, rt.runSCAScan))
 	mux.HandleFunc("GET /api/v1/recon/tools", rt.authz(userdom.PermView, rt.listReconTools))
 	mux.HandleFunc("POST /api/v1/engagements/{id}/recon/runs", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.startReconRun)))

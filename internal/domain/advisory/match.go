@@ -30,6 +30,19 @@ func Affected(ecosystem, version string, ranges []Range, versions []string) bool
 	return AffectedVersionList(version, versions) || affectedRanges(ecosystem, version, ranges)
 }
 
+// RangesEvaluable reports whether every range has a sound comparator for the
+// ecosystem and the supplied version is valid for that comparator. Explicit
+// versions remain independently matchable when ranges are not evaluable.
+func RangesEvaluable(ecosystem, version string, ranges []Range) bool {
+	for _, current := range ranges {
+		sc, ok := schemeFor(ecosystem, current.Type)
+		if !ok || !sc.valid(version) {
+			return false
+		}
+	}
+	return true
+}
+
 // AffectedVersionList reports whether version is in an OSV `affected[].versions` explicit enumeration. This
 // is an EXACT, ecosystem-agnostic match (zero false positives/negatives) – the most authoritative signal
 // an advisory carries, complementing the range match. A leading 'v' is normalized on both sides so a

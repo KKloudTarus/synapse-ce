@@ -272,10 +272,10 @@ func (w SourceWriter) Validate() error {
 // SourceManifest is the analysis-owned source capture inventory. It is immutable after
 // publication and reconciled against measure.Snapshot.Nodes before persistence.
 type SourceManifest struct {
-	Files     []SourceFile `json:"files"`
-	Truncated bool         `json:"truncated,omitempty"`
+	Files     []SourceFile  `json:"files"`
+	Truncated bool          `json:"truncated,omitempty"`
 	Writer    *SourceWriter `json:"writer,omitempty"`
-	Digest    string       `json:"digest,omitempty"`
+	Digest    string        `json:"digest,omitempty"`
 }
 
 // ArtifactDigest returns a stable identity for the manifest's immutable inventory.

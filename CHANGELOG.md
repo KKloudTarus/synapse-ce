@@ -23,6 +23,14 @@ capabilities below are already shipped on `main`.
   human-approved baseline using total-variation distance, writes stable CI evidence, and alerts on
   excessive drift or insufficient samples without gaining model-promotion or quality-gate authority.
 
+- **Continuous vulnerability intelligence and risk management.** Adds operator-managed provider
+  sources, durable synchronization and recovery, deterministic canonical advisory revisions,
+  tenant-safe inventory correlation, append-only risk assessments, finding/action projections,
+  guarded reconciliation and rollout controls, authenticated read/write APIs, OpenAPI coverage,
+  and a responsive investigation UI with source, run, occurrence, assessment, and revision
+  provenance. Provider input remains bounded and untrusted, raw payloads stay out of ordinary
+  responses, and tenant-scoped writes fail closed behind PostgreSQL RLS.
+
 - **Evidence-cited AI false-positive triage.** Supplies bounded deterministic source/sink, data-flow, sanitizer, call-path, route/framework, and reachability metadata to the AI triage proposer/verifier before model calls. Model claims must cite current server-generated evidence-token IDs; unknown, missing, driver-incompatible, or finding-mismatched receipts fail closed. Gate authorization now uses `fp-gate-v5` and requires that closed receipt in addition to the existing severity/CWE/evidence safety floors.
 
 - **Safe AI-triage caching.** Tenant-bound API scans reuse typed proposer/verifier claims only when

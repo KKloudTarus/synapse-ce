@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -55,6 +57,24 @@ func (r *AdvisoryRepository) Upsert(ctx context.Context, a advisory.Advisory) er
 	if _, err := tx.Exec(ctx, `DELETE FROM advisory_affects WHERE advisory_id = $1`, a.ID); err != nil {
 		return fmt.Errorf("clear advisory affects: %w", err)
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM advisory_cpe_affects WHERE advisory_id = $1`, a.ID); err != nil {
+		return fmt.Errorf("clear advisory CPE affects: %w", err)
+	}
+	seenCPEs := map[string]bool{}
+	for _, current := range a.CPEs {
+		parsed, err := sbom.ParseCPE23(current.Criteria)
+		if err != nil || parsed.Part == "*" || parsed.Part == "-" || parsed.Vendor == "*" || parsed.Vendor == "-" || parsed.Product == "*" || parsed.Product == "-" {
+			continue
+		}
+		key := parsed.Part + "\x00" + parsed.Vendor + "\x00" + parsed.Product
+		if seenCPEs[key] {
+			continue
+		}
+		seenCPEs[key] = true
+		if _, err := tx.Exec(ctx, `INSERT INTO advisory_cpe_affects(advisory_id,cpe_part,cpe_vendor,cpe_product) VALUES($1,$2,$3,$4)`, a.ID, parsed.Part, parsed.Vendor, parsed.Product); err != nil {
+			return fmt.Errorf("insert advisory CPE affect: %w", err)
+		}
+	}
 	seen := map[string]bool{}
 	for _, ap := range a.Affected {
 		if ap.Ecosystem == "" || ap.Package == "" {
@@ -101,6 +121,27 @@ func (r *AdvisoryRepository) ByPackage(ctx context.Context, ecosystem, name stri
 			return nil, fmt.Errorf("decode advisory: %w", err)
 		}
 		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (r *AdvisoryRepository) ByCPE(ctx context.Context, part, vendor, product string) ([]advisory.Advisory, error) {
+	rows, err := r.pool.Query(ctx, `SELECT a.data FROM advisories a JOIN advisory_cpe_affects aff ON aff.advisory_id=a.id WHERE aff.cpe_part=$1 AND aff.cpe_vendor=$2 AND aff.cpe_product=$3 ORDER BY a.id COLLATE "C" ASC`, strings.ToLower(strings.TrimSpace(part)), strings.ToLower(strings.TrimSpace(vendor)), strings.ToLower(strings.TrimSpace(product)))
+	if err != nil {
+		return nil, fmt.Errorf("query advisories by CPE: %w", err)
+	}
+	defer rows.Close()
+	out := make([]advisory.Advisory, 0)
+	for rows.Next() {
+		var blob []byte
+		if err := rows.Scan(&blob); err != nil {
+			return nil, fmt.Errorf("scan advisory CPE: %w", err)
+		}
+		var item advisory.Advisory
+		if err := json.Unmarshal(blob, &item); err != nil {
+			return nil, fmt.Errorf("decode advisory CPE: %w", err)
+		}
+		out = append(out, item)
 	}
 	return out, rows.Err()
 }

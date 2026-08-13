@@ -4,7 +4,10 @@ package memory
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"sync"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -25,6 +28,8 @@ func NewEngagementRepository() *EngagementRepository {
 // Compile-time assertion that we satisfy the port.
 var _ ports.EngagementRepository = (*EngagementRepository)(nil)
 var _ ports.PromotionReconciliationScopeReader = (*EngagementRepository)(nil)
+var _ ports.VulnerabilityReconciliationTenantStore = (*EngagementRepository)(nil)
+var _ ports.VulnerabilityReconciliationEngagementStore = (*EngagementRepository)(nil)
 
 func (r *EngagementRepository) Create(_ context.Context, e *engagement.Engagement) error {
 	r.mu.Lock()
@@ -155,4 +160,50 @@ func (r *EngagementRepository) ListProjectEngagements(_ context.Context, tenantI
 		}
 	}
 	return out, nil
+}
+
+func (r *EngagementRepository) ListTenantIDs(_ context.Context) ([]shared.ID, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	seen := map[shared.ID]struct{}{}
+	for _, item := range r.data {
+		seen[shared.TenantOrDefault(item.TenantID)] = struct{}{}
+	}
+	out := make([]shared.ID, 0, len(seen))
+	for tenantID := range seen {
+		out = append(out, tenantID)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out, nil
+}
+
+func (r *EngagementRepository) ListReconciliationEngagements(_ context.Context, tenantID, after shared.ID, snapshotAt time.Time, limit int) (ports.ReconciliationEngagementPage, error) {
+	if snapshotAt.IsZero() {
+		return ports.ReconciliationEngagementPage{}, fmt.Errorf("%w: reconciliation snapshot time is required", shared.ErrValidation)
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	tenantID = shared.TenantOrDefault(tenantID)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ids := make([]shared.ID, 0)
+	for _, item := range r.data {
+		createdAt := item.Audit.CreatedAt
+		if item.TenantID == tenantID && item.ID > after && (createdAt.IsZero() || !createdAt.After(snapshotAt)) {
+			ids = append(ids, item.ID)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	page := ports.ReconciliationEngagementPage{}
+	if len(ids) > limit {
+		page.IDs = append([]shared.ID(nil), ids[:limit]...)
+		page.Next = page.IDs[len(page.IDs)-1]
+		return page, nil
+	}
+	page.IDs = ids
+	return page, nil
 }

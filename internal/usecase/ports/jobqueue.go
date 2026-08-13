@@ -18,6 +18,23 @@ type QueuedJob struct {
 	Attempts int
 }
 
+type JobStats struct {
+	Queued         int        `json:"queued"`
+	Claimed        int        `json:"claimed"`
+	Failed         int        `json:"failed"`
+	Done           int        `json:"done"`
+	OldestActiveAt *time.Time `json:"oldest_active_at,omitempty"`
+}
+
+type JobStatus struct {
+	Attempts     int
+	DeadLettered bool
+}
+
+type JobStatusReader interface {
+	JobStatus(ctx context.Context, id string) (JobStatus, error)
+}
+
 // JobQueue is a durable, at-least-once work queue with a visibility timeout.
 // It replaces the in-process jobs.Pool (which loses queued work on restart and
 // cannot reach a separate worker process). Claim hands a job to exactly one worker for
@@ -49,6 +66,7 @@ type JobQueue interface {
 	// admission signal for durable backpressure. When kinds are given only those kinds are
 	// counted (empty = any). 'done' and 'failed' (dead-lettered) are terminal and excluded.
 	Depth(ctx context.Context, kinds ...string) (int, error)
+	Stats(ctx context.Context, kinds ...string) (JobStats, error)
 }
 
 // RunLocker guards a SINGLE ACTIVE execution per run across processes (F9). The durable
