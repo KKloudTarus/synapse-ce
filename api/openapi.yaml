@@ -1246,9 +1246,9 @@ paths:
     get:
       tags: [ai-triage]
       operationId: getAITriageObservability
-      summary: Aggregate tenant-scoped AI triage safety and cost metrics
+      summary: Aggregate tenant-scoped AI triage safety, cost, and input-distribution metrics
       responses:
-        '200': {description: Latest per-project AI triage metrics and baseline alerts, content: {application/json: {schema: {$ref: '#/components/schemas/AITriageDashboard'}}}}
+        '200': {description: Latest per-project AI triage metrics, baseline alerts, and drift-ready distribution snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/AITriageDashboard'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
 
@@ -1496,9 +1496,25 @@ components:
         project_id: {type: string}
         project_name: {type: string}
         alert: {$ref: '#/components/schemas/AITriageAlert'}
+    AITriageDistributionSnapshot:
+      type: object
+      description: Source-free distribution snapshot; every populated dimension sums to 10000 basis points.
+      required: [schema_version, sample_size, language_basis_points, cwe_basis_points, project_basis_points]
+      properties:
+        schema_version: {type: string, const: synapse-ai-triage-distribution-v1}
+        sample_size: {type: integer, minimum: 0}
+        language_basis_points:
+          type: object
+          additionalProperties: {type: integer, minimum: 1, maximum: 10000}
+        cwe_basis_points:
+          type: object
+          additionalProperties: {type: integer, minimum: 1, maximum: 10000}
+        project_basis_points:
+          type: object
+          additionalProperties: {type: integer, minimum: 1, maximum: 10000}
     AITriageDashboard:
       type: object
-      required: [generated_at, totals, by_model, by_prompt_version, by_cwe, by_project, alerts]
+      required: [generated_at, totals, by_model, by_prompt_version, by_cwe, by_project, distribution, alerts]
       properties:
         generated_at: {type: string, format: date-time}
         totals: {$ref: '#/components/schemas/AITriageMetricRow'}
@@ -1506,6 +1522,7 @@ components:
         by_prompt_version: {type: array, items: {$ref: '#/components/schemas/AITriageMetricRow'}}
         by_cwe: {type: array, items: {$ref: '#/components/schemas/AITriageMetricRow'}}
         by_project: {type: array, items: {$ref: '#/components/schemas/AITriageMetricRow'}}
+        distribution: {$ref: '#/components/schemas/AITriageDistributionSnapshot'}
         alerts: {type: array, items: {$ref: '#/components/schemas/AITriageDashboardAlert'}}
     OffensiveHaltRequest:
       type: object

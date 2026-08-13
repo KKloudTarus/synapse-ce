@@ -5,12 +5,13 @@ an operator enables gate automation. Evaluation uses the same proposer, verifier
 threshold, human-review floors, and deterministic policy as a scan. The only policy difference is forced
 shadow mode: `would_gate_exempt` is measured, while `gate_exempt` must remain `false`.
 
-The repository includes two offline AI-triage data/evaluation commands:
+The repository includes three offline AI-triage data/evaluation commands:
 
 | Binary | Role |
 | --- | --- |
 | `synapse-fptriage-eval` | Run the versioned AI false-positive evaluation harness |
 | `synapse-fptriage-curate` | Curate human review outcomes into privacy- and label-reviewed evaluation data |
+| `synapse-fptriage-drift` | Compare production input distribution with a human-approved baseline |
 
 ## Golden dataset
 
@@ -194,3 +195,59 @@ cannot produce `gate_exempt`.
 
 The report is evidence for PM/Security threshold approval; it does not approve a model automatically.
 Keep `SYNAPSE_FP_TRIAGE_MODE=shadow` until the threshold and dataset are approved for canary rollout.
+
+## Detect production distribution drift
+
+The tenant-scoped observability response includes a source-free `distribution` snapshot. It counts the
+latest stored scan for each visible project and normalizes language, CWE, and project shares to exactly
+10,000 basis points. Language byte percentages are weighted by the number of AI-triaged findings in that
+scan; missing language and CWE metadata are explicit as `unknown` and `unclassified` rather than silently
+dropped.
+
+Save a current response without committing it to the repository:
+
+```bash
+curl -H "Authorization: Bearer $SYNAPSE_TOKEN" \
+  "$SYNAPSE_API_URL/api/v1/ai-triage/observability" \
+  > ai-triage-observability.json
+```
+
+Create a reviewed baseline by copying a trusted snapshot into this versioned envelope. The approver must
+be a human identity; reserved machine principals fail validation.
+
+```json
+{
+  "schema_version": "synapse-ai-triage-drift-baseline-v1",
+  "version": "production-2026-08",
+  "provenance": "security/review-42",
+  "approved_by": "security@example.com",
+  "minimum_samples": 50,
+  "maximum_total_variation_basis_points": 1000,
+  "distribution": {
+    "schema_version": "synapse-ai-triage-distribution-v1",
+    "sample_size": 100,
+    "language_basis_points": {"go": 6000, "typescript": 4000},
+    "cwe_basis_points": {"CWE-79": 10000},
+    "project_basis_points": {"project-a": 10000}
+  }
+}
+```
+
+Run the deterministic comparison in CI:
+
+```bash
+go run ./cmd/synapse-fptriage-drift \
+  --baseline ai-triage-drift-baseline.json \
+  --observed ai-triage-observability.json \
+  --output ai-triage-drift-report.json
+```
+
+For each dimension, drift is total-variation distance: half the sum of absolute basis-point changes over
+the union of baseline and observed categories. This catches a newly dominant language, CWE, or project as
+well as shifts among existing categories. The default CLI behavior writes the complete deterministic
+report and then exits non-zero for `drift_detected` or `insufficient_samples`; use
+`--fail-on-alert=false` for report-only monitoring. The approved threshold is read only from the baseline,
+not from a CLI override. A drift report requests review but has no authority to promote a model, change a
+prompt, suppress a finding, or alter a quality gate. `approved_by` is process provenance, not a
+cryptographic identity; create and run approved baselines only in a workflow that authenticates and
+audits the responsible reviewer.

@@ -21,6 +21,11 @@ const dashboard: Observability = {
   byPromptVersion: [{ ...row, value: 'fp-triage-v2' }],
   byCWE: [{ ...row, value: 'CWE-89' }],
   byProject: [{ ...row, value: 'p1 · Checkout' }],
+  distribution: {
+    schemaVersion: 'synapse-ai-triage-distribution-v1', sampleSize: 4,
+    languageBasisPoints: { go: 7500, typescript: 2500 },
+    cweBasisPoints: { 'CWE-89': 10000 }, projectBasisPoints: { p1: 10000 },
+  },
   alerts: [{ projectId: 'p1', projectName: 'Checkout', alert: { metric: 'parse_failure_rate', observedBasisPoints: 2500, baselineBasisPoints: 200, deviationBasisPoints: 2300, sampleSize: 4, message: 'Parse failures exceeded baseline' } }],
 }
 
@@ -33,8 +38,10 @@ describe('AITriageObservability', () => {
     expect(screen.getByText('50.0%')).toBeInTheDocument()
     expect(screen.getByText('provider/model (proposer)')).toBeInTheDocument()
     expect(screen.getByText('fp-triage-v2')).toBeInTheDocument()
-    expect(screen.getByText('CWE-89')).toBeInTheDocument()
+    expect(screen.getAllByText('CWE-89')).toHaveLength(2)
     expect(screen.getByText('p1 · Checkout')).toBeInTheDocument()
     expect(screen.getByText('Parse failures exceeded baseline')).toBeInTheDocument()
+    expect(screen.getByText('Drift input distribution')).toBeInTheDocument()
+    expect(screen.getByText('75.00%')).toBeInTheDocument()
   })
 })

@@ -36,8 +36,9 @@ func (r dashboardEngagementRepo) List(context.Context, shared.ID) ([]*engdom.Eng
 func TestAITriageObservabilityGroupsLatestTenantResult(t *testing.T) {
 	engagement := &engdom.Engagement{ID: "e1", TenantID: shared.TenantOrDefault(""), Name: "checkout"}
 	result := ScanResult{
-		Findings: []finding.Finding{{DedupKey: "k1", CWE: "CWE-89"}},
-		AITriage: []ports.AICritique{{DedupKey: "k1", ProposerProvider: "provider", ProposerModel: "model", PromptVersion: "v1", GateExempt: true}},
+		Languages: []ports.DetectedLanguage{{Name: "Go", Percent: 75}, {Name: "TypeScript", Percent: 25}},
+		Findings:  []finding.Finding{{DedupKey: "k1", CWE: "CWE-89"}},
+		AITriage:  []ports.AICritique{{DedupKey: "k1", ProposerProvider: "provider", ProposerModel: "model", PromptVersion: "v1", GateExempt: true}},
 		AITriageTelemetry: &ports.FPTriageTelemetry{Calls: []ports.FPTriageCallMetric{{
 			DedupKey: "k1", Role: "proposer", Provider: "provider", Model: "model", PromptVersion: "v1", Outcome: "success",
 			LatencyMillis: 25, TotalTokens: 120, EstimatedCostMicroUSD: 50,
@@ -64,5 +65,51 @@ func TestAITriageObservabilityGroupsLatestTenantResult(t *testing.T) {
 	}
 	if len(dashboard.Alerts) != 1 || dashboard.Alerts[0].ProjectID != "e1" {
 		t.Fatalf("alerts = %+v", dashboard.Alerts)
+	}
+	if dashboard.Distribution.SchemaVersion != aiTriageDistributionSchemaVersion || dashboard.Distribution.SampleSize != 1 ||
+		dashboard.Distribution.Language["go"] != 7500 || dashboard.Distribution.Language["typescript"] != 2500 ||
+		dashboard.Distribution.CWE["CWE-89"] != 10_000 || dashboard.Distribution.Project["e1"] != 10_000 {
+		t.Fatalf("distribution = %+v", dashboard.Distribution)
+	}
+}
+
+func TestAITriageDistributionNormalizesDeterministically(t *testing.T) {
+	got := normalizeDistributionWeights(map[string]float64{"c": 1, "a": 1, "b": 1})
+	if got["a"] != 3334 || got["b"] != 3333 || got["c"] != 3333 {
+		t.Fatalf("normalized tie = %+v", got)
+	}
+	languages := map[string]float64{}
+	addLanguageDistributionWeights(languages, nil, 3)
+	if got := normalizeDistributionWeights(languages); got["unknown"] != 10_000 {
+		t.Fatalf("missing languages = %+v", got)
+	}
+	weighted := map[string]float64{}
+	addLanguageDistributionWeights(weighted, []ports.DetectedLanguage{{Name: "Go", Percent: 100}}, 3)
+	addLanguageDistributionWeights(weighted, []ports.DetectedLanguage{{Name: "TypeScript", Percent: 100}}, 1)
+	if got := normalizeDistributionWeights(weighted); got["go"] != 7500 || got["typescript"] != 2500 {
+		t.Fatalf("sample-weighted languages = %+v", got)
+	}
+}
+
+func TestAITriageObservabilityIncludesDistributionWithoutLegacyTelemetry(t *testing.T) {
+	engagement := &engdom.Engagement{ID: "e-without-telemetry", TenantID: shared.TenantOrDefault("")}
+	data, err := json.Marshal(ScanResult{
+		Findings: []finding.Finding{{DedupKey: "k1"}},
+		AITriage: []ports.AICritique{{DedupKey: "k1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{
+		engagements: dashboardEngagementRepo{fakeEngRepo: &fakeEngRepo{}, items: []*engdom.Engagement{engagement}},
+		results:     staticScanResultStore{data: data},
+	}
+	dashboard, err := service.AITriageObservability(context.Background(), shared.TenantOrDefault(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dashboard.Distribution.SampleSize != 1 || dashboard.Distribution.Language["unknown"] != 10_000 ||
+		dashboard.Distribution.CWE["unclassified"] != 10_000 || dashboard.Distribution.Project["e-without-telemetry"] != 10_000 {
+		t.Fatalf("distribution = %+v", dashboard.Distribution)
 	}
 }

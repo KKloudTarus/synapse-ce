@@ -423,6 +423,14 @@ export interface AITriageAlert {
   message: string
 }
 
+export interface AITriageDistributionSnapshot {
+  schemaVersion: string
+  sampleSize: number
+  languageBasisPoints: Record<string, number>
+  cweBasisPoints: Record<string, number>
+  projectBasisPoints: Record<string, number>
+}
+
 export interface AITriageObservability {
   generatedAt: string
   totals: AITriageMetricRow
@@ -430,6 +438,7 @@ export interface AITriageObservability {
   byPromptVersion: AITriageMetricRow[]
   byCWE: AITriageMetricRow[]
   byProject: AITriageMetricRow[]
+  distribution: AITriageDistributionSnapshot
   alerts: Array<{ projectId: string; projectName: string; alert: AITriageAlert }>
 }
 
