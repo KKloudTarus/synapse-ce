@@ -1,4 +1,4 @@
-.PHONY: help install tools dev build run test harness vet lint format typecheck tidy ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift \
+.PHONY: help install tools dev build run test harness vet lint format typecheck tidy ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify \
         docker-build docker-up docker-down clean web-dev web-build smoke
 
 GO ?= go
@@ -67,6 +67,11 @@ ai-triage-release: ## Append a PM/Security-approved AI-triage promotion to a new
 
 ai-triage-drift: ## Compare AI triage input distribution with a human-approved baseline
 	$(GO) run ./cmd/synapse-fptriage-drift --baseline $(AI_DRIFT_BASELINE) --observed $(AI_DRIFT_OBSERVED) --output $(AI_DRIFT_OUTPUT)
+
+ai-triage-verify: ## Reproducibly verify AI-triage eval + shadow gate offline (no models, no prod data)
+	$(GO) build ./cmd/synapse-fptriage-eval ./cmd/synapse-fptriage-compare ./cmd/synapse-fptriage-drift ./cmd/synapse-fptriage-release ./cmd/synapse-fptriage-curate
+	$(GO) test -count=1 ./internal/usecase/sca/ -run 'AIEvaluation|FPTriage|AITriage|GoldenDataset|GatePolicy'
+	$(GO) test -count=1 ./internal/usecase/fptriage/...
 
 docker-build: ## Build the API container image
 	docker build -t $(IMAGE) -f deploy/Dockerfile .
