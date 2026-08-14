@@ -193,6 +193,18 @@ func TestAIEvaluationReleaseEnforcesPromotionPolicyFloor(t *testing.T) {
 		t.Fatal("self-declared policy below the release safety floor was accepted")
 	}
 
+	weakRobustness := DefaultAIEvaluationPromotionPolicy()
+	weakRobustness.MinimumCounterfactualCoverageBasisPoints = 0
+	comparison, err = CompareAIEvaluationReports(baseline, candidate, weakRobustness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence = AIEvaluationPromotionEvidence{BaselineReport: baseline, CandidateReport: candidate, Comparison: comparison}
+	manifest = releaseTestManifest("release-weak-robustness", AIEvaluationReleasePromote, comparison.ComparisonID, "")
+	if _, err := AIEvaluationReleaseReviewDigest(AIEvaluationReleaseLedger{}, &evidence, manifest); err == nil {
+		t.Fatal("release accepted a policy without complete counterfactual coverage")
+	}
+
 	validEvidence := releaseTestEvidence(t)
 	validManifest := releaseTestManifest("release-valid", AIEvaluationReleasePromote, validEvidence.Comparison.ComparisonID, "")
 	validManifest.Approvals = releaseTestApprovals(t, AIEvaluationReleaseLedger{}, &validEvidence, validManifest)

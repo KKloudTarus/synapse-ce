@@ -111,7 +111,8 @@ anything intrusive.
 
 **AI analysis (optional, bounded)**
 - **AI false-positive triage** grounded in deterministic evidence citations, with provider-independent
-  proposer/verifier separation of duties, budgets, circuit breakers, and observability.
+  proposer/verifier separation of duties, budgets, circuit breakers, observability, and a fail-closed
+  adversarial counterfactual gate for model/prompt promotion.
 - The agent proposes; a distinct verifier or a human confirms. **No model ever sits in the report path.**
 
 **Standards & reports**

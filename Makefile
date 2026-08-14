@@ -3,7 +3,7 @@
 
 GO ?= go
 IMAGE ?= synapse-api:dev
-AI_EVAL_DATASET ?= internal/usecase/sca/testdata/fptriage-golden-v1.json
+AI_EVAL_DATASET ?= internal/usecase/sca/testdata/fptriage-golden-v2.json
 AI_EVAL_OUTPUT ?= ai-triage-eval.json
 AI_EVAL_BASELINE ?= ai-triage-baseline.json
 AI_EVAL_CANDIDATE ?= ai-triage-candidate.json

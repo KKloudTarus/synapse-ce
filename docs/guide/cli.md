@@ -138,7 +138,10 @@ SYNAPSE_FP_TRIAGE_ENABLED=true SYNAPSE_FP_TRIAGE_MODE=shadow SYNAPSE_FP_TRIAGE_M
 
 To evaluate a model/prompt/policy combination against the repository's versioned non-production golden
 dataset, run `synapse-fptriage-eval`. It emits deterministic JSON with precision, recall, false-negative
-escape rate, disagreement, coverage, and language/kind/CWE/severity/framework breakdowns:
+escape rate, disagreement, coverage, language/kind/CWE/severity/framework/adversarial breakdowns, and pairwise
+adversarial invariance evidence. The bundled v2 dataset pairs a clean control with a semantically
+equivalent prompt-injection challenge; the v3 report records proposer, verifier, consensus, and policy
+flips without copying source into the robustness summary:
 
 ```bash
 SYNAPSE_FP_TRIAGE_MODEL=<proposer> SYNAPSE_VERIFIER_MODEL=<verifier> \
@@ -158,8 +161,10 @@ go run ./cmd/synapse-fptriage-compare \
   --output ai-triage-comparison.json
 ```
 
-The command exits non-zero on a quality regression but writes the deterministic comparison evidence
-first. A passing result is still `review_required`; it never changes runtime AI configuration.
+The command exits non-zero on a quality regression or adversarial flip but writes the deterministic
+comparison evidence first. The default policy requires complete counterfactual coverage, complete
+verifier coverage whenever a pair reaches the refuted branch, and zero proposer/verifier/consensus/policy
+flips. A passing result is still `review_required`; it never changes runtime AI configuration.
 
 After that result, use `synapse-fptriage-release` to bind the baseline, candidate, comparison, unique
 release version, and independent PM/Security approvals into a hash-chained ledger. Rollback appends

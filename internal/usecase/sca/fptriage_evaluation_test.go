@@ -67,7 +67,7 @@ func (fixtureEvaluationTriager) TriageWithEvidence(_ context.Context, candidates
 
 func loadGoldenEvaluationDataset(t *testing.T) AIEvaluationDataset {
 	t.Helper()
-	b, err := os.ReadFile("testdata/fptriage-golden-v1.json")
+	b, err := os.ReadFile("testdata/fptriage-golden-v2.json")
 	if err != nil {
 		t.Fatalf("read golden dataset: %v", err)
 	}
@@ -97,16 +97,25 @@ func TestEvaluateFPTriageGoldenDataset(t *testing.T) {
 		t.Fatalf("generated report must pass promotion-boundary validation: %v", err)
 	}
 	m := report.Metrics
-	if m.Total != 12 || m.Covered != 12 || m.HumanFalsePositives != 2 || m.HumanTruePositives != 8 ||
+	if m.Total != 13 || m.Covered != 13 || m.HumanFalsePositives != 2 || m.HumanTruePositives != 9 ||
 		m.ConsensusFalsePositives != 3 || m.CorrectFalsePositives != 2 || m.TruePositiveEscapes != 1 ||
 		m.VerifierComparisons != 5 || m.VerifierDisagreements != 2 {
 		t.Fatalf("unexpected aggregate counters: %+v", m)
 	}
-	if m.Precision != 2.0/3.0 || m.Recall != 1 || m.FalseNegativeEscapeRate != 1.0/8.0 ||
+	if m.Precision != 2.0/3.0 || m.Recall != 1 || m.FalseNegativeEscapeRate != 1.0/9.0 ||
 		m.DisagreementRate != 0.4 || m.Coverage != 1 {
 		t.Fatalf("unexpected aggregate rates: %+v", m)
 	}
-	for _, dimension := range []string{"language", "kind", "cwe", "severity", "framework"} {
+	robustness := report.Robustness
+	if robustness.Metrics.TotalPairs != 1 || robustness.Metrics.CoveredPairs != 1 ||
+		robustness.Metrics.VerifierRequiredPairs != 0 || robustness.Metrics.VerifierComparedPairs != 0 ||
+		robustness.Metrics.ProposerVerdictFlips != 0 ||
+		robustness.Metrics.VerifierVerdictFlips != 0 || robustness.Metrics.ConsensusFlips != 0 ||
+		robustness.Metrics.PolicyFlips != 0 || robustness.Metrics.Coverage != 1 ||
+		robustness.Metrics.VerifierCoverage != 1 || len(robustness.Pairs) != 1 {
+		t.Fatalf("unexpected counterfactual robustness evidence: %+v", robustness)
+	}
+	for _, dimension := range []string{"language", "kind", "cwe", "severity", "framework", "adversarial"} {
 		if len(report.Breakdowns[dimension]) == 0 {
 			t.Errorf("missing %s breakdown", dimension)
 		}
@@ -131,6 +140,32 @@ func TestAIEvaluationDatasetRequiresReviewMetadata(t *testing.T) {
 	dataset.Reviewer = ""
 	if err := dataset.Validate(); err == nil {
 		t.Fatal("dataset without a reviewer must be rejected")
+	}
+}
+
+func TestAIEvaluationDatasetRequiresSemanticCounterfactualPairs(t *testing.T) {
+	tests := map[string]func(*AIEvaluationDataset){
+		"missing challenge": func(dataset *AIEvaluationDataset) {
+			dataset.Cases = append(dataset.Cases[:4], dataset.Cases[5:]...)
+		},
+		"changed semantics": func(dataset *AIEvaluationDataset) {
+			dataset.Cases[4].CWE = "CWE-79"
+		},
+		"role without group": func(dataset *AIEvaluationDataset) {
+			dataset.Cases[4].CounterfactualGroup = ""
+		},
+		"adversarial control": func(dataset *AIEvaluationDataset) {
+			dataset.Cases[3].Adversarial = true
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			dataset := loadGoldenEvaluationDataset(t)
+			mutate(&dataset)
+			if err := dataset.Validate(); err == nil {
+				t.Fatal("invalid counterfactual corpus must be rejected")
+			}
+		})
 	}
 }
 

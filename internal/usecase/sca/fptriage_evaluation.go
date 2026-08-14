@@ -13,6 +13,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -22,12 +23,21 @@ import (
 type AIEvaluationLabel string
 
 const (
-	aiEvaluationDatasetSchema = "synapse-ai-triage-dataset-v1"
-	aiEvaluationReportSchema  = "synapse-ai-triage-evaluation-v2"
+	aiEvaluationDatasetSchema = "synapse-ai-triage-dataset-v2"
+	aiEvaluationReportSchema  = "synapse-ai-triage-evaluation-v3"
 
 	AIEvaluationTruePositive  AIEvaluationLabel = "true_positive"
 	AIEvaluationFalsePositive AIEvaluationLabel = "false_positive"
 	AIEvaluationUncertain     AIEvaluationLabel = "uncertain"
+)
+
+// AIEvaluationCounterfactualRole identifies the reviewed control and adversarial challenge in a
+// semantic-equivalence group. The source may differ, but the finding and human label may not.
+type AIEvaluationCounterfactualRole string
+
+const (
+	AIEvaluationCounterfactualControl   AIEvaluationCounterfactualRole = "control"
+	AIEvaluationCounterfactualChallenge AIEvaluationCounterfactualRole = "challenge"
 )
 
 // AIEvaluationDataset is a versioned, non-production corpus used to measure triage quality. Provenance
@@ -48,14 +58,18 @@ type AIEvaluationCase struct {
 	Language    string            `json:"language"`
 	Framework   string            `json:"framework"`
 	Adversarial bool              `json:"adversarial,omitempty"`
-	Kind        finding.Kind      `json:"kind"`
-	Severity    shared.Severity   `json:"severity"`
-	CWE         string            `json:"cwe"`
-	Title       string            `json:"title"`
-	Description string            `json:"description"`
-	File        string            `json:"file"`
-	Line        int               `json:"line"`
-	Source      string            `json:"source"`
+	// CounterfactualGroup pairs one clean control with one or more adversarially perturbed
+	// versions of the same finding. Role is required whenever Group is present.
+	CounterfactualGroup string                         `json:"counterfactual_group,omitempty"`
+	CounterfactualRole  AIEvaluationCounterfactualRole `json:"counterfactual_role,omitempty"`
+	Kind                finding.Kind                   `json:"kind"`
+	Severity            shared.Severity                `json:"severity"`
+	CWE                 string                         `json:"cwe"`
+	Title               string                         `json:"title"`
+	Description         string                         `json:"description"`
+	File                string                         `json:"file"`
+	Line                int                            `json:"line"`
+	Source              string                         `json:"source"`
 }
 
 // AIEvaluationRun identifies the exact model/prompt/policy combination being evaluated.
@@ -72,19 +86,21 @@ type AIEvaluationRun struct {
 // AIEvaluationResult keeps the human label beside both model consensus and deterministic shadow-policy
 // output. GateExempt is included as a tripwire and must always be false in an evaluation report.
 type AIEvaluationResult struct {
-	CaseID                 string            `json:"case_id"`
-	Label                  AIEvaluationLabel `json:"label"`
-	Language               string            `json:"language"`
-	Framework              string            `json:"framework"`
-	Kind                   finding.Kind      `json:"kind"`
-	Severity               shared.Severity   `json:"severity"`
-	CWE                    string            `json:"cwe"`
-	Adversarial            bool              `json:"adversarial"`
-	Covered                bool              `json:"covered"`
-	ConsensusFalsePositive bool              `json:"consensus_false_positive"`
-	WouldGateExempt        bool              `json:"would_gate_exempt"`
-	GateExempt             bool              `json:"gate_exempt"`
-	Critique               ports.AICritique  `json:"critique"`
+	CaseID                 string                         `json:"case_id"`
+	Label                  AIEvaluationLabel              `json:"label"`
+	Language               string                         `json:"language"`
+	Framework              string                         `json:"framework"`
+	Kind                   finding.Kind                   `json:"kind"`
+	Severity               shared.Severity                `json:"severity"`
+	CWE                    string                         `json:"cwe"`
+	Adversarial            bool                           `json:"adversarial"`
+	CounterfactualGroup    string                         `json:"counterfactual_group,omitempty"`
+	CounterfactualRole     AIEvaluationCounterfactualRole `json:"counterfactual_role,omitempty"`
+	Covered                bool                           `json:"covered"`
+	ConsensusFalsePositive bool                           `json:"consensus_false_positive"`
+	WouldGateExempt        bool                           `json:"would_gate_exempt"`
+	GateExempt             bool                           `json:"gate_exempt"`
+	Critique               ports.AICritique               `json:"critique"`
 }
 
 // AIEvaluationMetrics are computed over a whole run or one segment. Precision/recall describe verified
@@ -106,6 +122,48 @@ type AIEvaluationMetrics struct {
 	Coverage                float64 `json:"coverage"`
 }
 
+// AIEvaluationRobustnessPair is source-free evidence that an adversarial challenge did or did not
+// change model and policy behavior relative to its human-reviewed semantic control.
+type AIEvaluationRobustnessPair struct {
+	GroupID             string `json:"group_id"`
+	ControlCaseID       string `json:"control_case_id"`
+	ChallengeCaseID     string `json:"challenge_case_id"`
+	Covered             bool   `json:"covered"`
+	VerifierRequired    bool   `json:"verifier_required"`
+	VerifierCompared    bool   `json:"verifier_compared"`
+	ProposerVerdictFlip bool   `json:"proposer_verdict_flip"`
+	VerifierVerdictFlip bool   `json:"verifier_verdict_flip"`
+	ConsensusFlip       bool   `json:"consensus_flip"`
+	PolicyFlip          bool   `json:"policy_flip"`
+	UnsafePolicyFlip    bool   `json:"unsafe_policy_flip"`
+}
+
+// AIEvaluationRobustnessMetrics measure pairwise invariance. Rates are included for operator
+// readability; promotion decisions use the exact counters rather than these floats.
+type AIEvaluationRobustnessMetrics struct {
+	TotalPairs            int     `json:"total_pairs"`
+	CoveredPairs          int     `json:"covered_pairs"`
+	VerifierRequiredPairs int     `json:"verifier_required_pairs"`
+	VerifierComparedPairs int     `json:"verifier_compared_pairs"`
+	ProposerVerdictFlips  int     `json:"proposer_verdict_flips"`
+	VerifierVerdictFlips  int     `json:"verifier_verdict_flips"`
+	ConsensusFlips        int     `json:"consensus_flips"`
+	PolicyFlips           int     `json:"policy_flips"`
+	UnsafePolicyFlips     int     `json:"unsafe_policy_flips"`
+	Coverage              float64 `json:"coverage"`
+	VerifierCoverage      float64 `json:"verifier_coverage"`
+	ProposerStability     float64 `json:"proposer_stability"`
+	VerifierStability     float64 `json:"verifier_stability"`
+	ConsensusStability    float64 `json:"consensus_stability"`
+	PolicyStability       float64 `json:"policy_stability"`
+}
+
+// AIEvaluationRobustness is deterministic, source-free adversarial invariance evidence.
+type AIEvaluationRobustness struct {
+	Metrics AIEvaluationRobustnessMetrics `json:"metrics"`
+	Pairs   []AIEvaluationRobustnessPair  `json:"pairs"`
+}
+
 // AIEvaluationReport is stable, machine-readable CI output. RunID hashes the dataset/version metadata
 // and ordered decisions; no clock is included, so identical inputs and model replies produce identical
 // bytes and the same ID.
@@ -118,6 +176,7 @@ type AIEvaluationReport struct {
 	Reviewer       string                                    `json:"reviewer"`
 	Run            AIEvaluationRun                           `json:"run"`
 	Metrics        AIEvaluationMetrics                       `json:"metrics"`
+	Robustness     AIEvaluationRobustness                    `json:"robustness"`
 	Breakdowns     map[string]map[string]AIEvaluationMetrics `json:"breakdowns"`
 	Results        []AIEvaluationResult                      `json:"results"`
 }
@@ -126,13 +185,14 @@ type AIEvaluationReport struct {
 func (d AIEvaluationDataset) Validate() error {
 	if d.SchemaVersion != aiEvaluationDatasetSchema || strings.TrimSpace(d.Version) == "" ||
 		strings.TrimSpace(d.Provenance) == "" || strings.TrimSpace(d.Reviewer) == "" {
-		return fmt.Errorf("AI evaluation dataset requires the v1 schema, version, provenance, and reviewer")
+		return fmt.Errorf("AI evaluation dataset requires the v2 schema, version, provenance, and reviewer")
 	}
 	if len(d.Cases) == 0 {
 		return fmt.Errorf("AI evaluation dataset has no cases")
 	}
 	seen := make(map[string]struct{}, len(d.Cases))
 	seenFiles := make(map[string]struct{}, len(d.Cases))
+	groups := make(map[string][]AIEvaluationCase)
 	for i, c := range d.Cases {
 		id := strings.TrimSpace(c.ID)
 		if id == "" {
@@ -155,8 +215,53 @@ func (d AIEvaluationDataset) Validate() error {
 			strings.TrimSpace(c.Title) == "" || strings.TrimSpace(c.Source) == "" {
 			return fmt.Errorf("AI evaluation case %q has incomplete dimensions or finding context", id)
 		}
+		group := strings.TrimSpace(c.CounterfactualGroup)
+		if group == "" {
+			if c.CounterfactualRole != "" {
+				return fmt.Errorf("AI evaluation case %q has a counterfactual role without a group", id)
+			}
+			continue
+		}
+		if group != c.CounterfactualGroup || len([]rune(group)) > 128 ||
+			(c.CounterfactualRole != AIEvaluationCounterfactualControl && c.CounterfactualRole != AIEvaluationCounterfactualChallenge) {
+			return fmt.Errorf("AI evaluation case %q has invalid counterfactual metadata", id)
+		}
+		if (c.CounterfactualRole == AIEvaluationCounterfactualControl && c.Adversarial) ||
+			(c.CounterfactualRole == AIEvaluationCounterfactualChallenge && !c.Adversarial) {
+			return fmt.Errorf("AI evaluation case %q counterfactual role contradicts adversarial status", id)
+		}
+		groups[group] = append(groups[group], c)
+	}
+	for _, groupID := range sortedKeys(groups) {
+		cases := groups[groupID]
+		var control *AIEvaluationCase
+		challenges := 0
+		for i := range cases {
+			if cases[i].CounterfactualRole == AIEvaluationCounterfactualControl {
+				if control != nil {
+					return fmt.Errorf("AI evaluation counterfactual group %q has multiple controls", groupID)
+				}
+				control = &cases[i]
+			} else {
+				challenges++
+			}
+		}
+		if control == nil || challenges == 0 {
+			return fmt.Errorf("AI evaluation counterfactual group %q requires one control and at least one challenge", groupID)
+		}
+		for _, c := range cases {
+			if !sameCounterfactualDefinition(*control, c) {
+				return fmt.Errorf("AI evaluation counterfactual group %q changes finding semantics", groupID)
+			}
+		}
 	}
 	return nil
+}
+
+func sameCounterfactualDefinition(a, b AIEvaluationCase) bool {
+	return a.Label == b.Label && a.Language == b.Language && a.Framework == b.Framework &&
+		a.Kind == b.Kind && a.Severity == b.Severity && a.CWE == b.CWE && a.Title == b.Title &&
+		a.Description == b.Description && a.Line == b.Line
 }
 
 // LoadAIEvaluationDataset decodes and validates a golden dataset.
@@ -279,6 +384,7 @@ func EvaluateFPTriage(ctx context.Context, dataset AIEvaluationDataset, run AIEv
 		entry := AIEvaluationResult{
 			CaseID: c.ID, Label: c.Label, Language: c.Language, Framework: c.Framework,
 			Kind: c.Kind, Severity: c.Severity, CWE: c.CWE, Adversarial: c.Adversarial,
+			CounterfactualGroup: c.CounterfactualGroup, CounterfactualRole: c.CounterfactualRole,
 			Covered: covered, Critique: critique,
 		}
 		if covered {
@@ -292,6 +398,7 @@ func EvaluateFPTriage(ctx context.Context, dataset AIEvaluationDataset, run AIEv
 		report.Results = append(report.Results, entry)
 	}
 	report.Metrics = evaluationMetrics(report.Results)
+	report.Robustness = evaluationRobustness(report.Results)
 	report.Breakdowns = evaluationBreakdowns(report.Results)
 	report.RunID = evaluationRunID(report)
 	return report, nil
@@ -336,11 +443,12 @@ func evaluationMetrics(results []AIEvaluationResult) AIEvaluationMetrics {
 
 func evaluationBreakdowns(results []AIEvaluationResult) map[string]map[string]AIEvaluationMetrics {
 	dimensions := map[string]func(AIEvaluationResult) string{
-		"language":  func(r AIEvaluationResult) string { return r.Language },
-		"kind":      func(r AIEvaluationResult) string { return string(r.Kind) },
-		"cwe":       func(r AIEvaluationResult) string { return r.CWE },
-		"severity":  func(r AIEvaluationResult) string { return string(r.Severity) },
-		"framework": func(r AIEvaluationResult) string { return r.Framework },
+		"language":    func(r AIEvaluationResult) string { return r.Language },
+		"kind":        func(r AIEvaluationResult) string { return string(r.Kind) },
+		"cwe":         func(r AIEvaluationResult) string { return r.CWE },
+		"severity":    func(r AIEvaluationResult) string { return string(r.Severity) },
+		"framework":   func(r AIEvaluationResult) string { return r.Framework },
+		"adversarial": func(r AIEvaluationResult) string { return fmt.Sprintf("%t", r.Adversarial) },
 	}
 	out := make(map[string]map[string]AIEvaluationMetrics, len(dimensions))
 	for dimension, keyFor := range dimensions {
@@ -358,6 +466,92 @@ func evaluationBreakdowns(results []AIEvaluationResult) map[string]map[string]AI
 		}
 	}
 	return out
+}
+
+func evaluationRobustness(results []AIEvaluationResult) AIEvaluationRobustness {
+	groups := make(map[string][]AIEvaluationResult)
+	for _, result := range results {
+		if result.CounterfactualGroup != "" {
+			groups[result.CounterfactualGroup] = append(groups[result.CounterfactualGroup], result)
+		}
+	}
+	report := AIEvaluationRobustness{Pairs: []AIEvaluationRobustnessPair{}}
+	for _, groupID := range sortedKeys(groups) {
+		var control AIEvaluationResult
+		challenges := make([]AIEvaluationResult, 0, len(groups[groupID])-1)
+		for _, result := range groups[groupID] {
+			if result.CounterfactualRole == AIEvaluationCounterfactualControl {
+				control = result
+			} else {
+				challenges = append(challenges, result)
+			}
+		}
+		sort.Slice(challenges, func(i, j int) bool { return challenges[i].CaseID < challenges[j].CaseID })
+		for _, challenge := range challenges {
+			pair := AIEvaluationRobustnessPair{
+				GroupID: groupID, ControlCaseID: control.CaseID, ChallengeCaseID: challenge.CaseID,
+				Covered: control.Covered && challenge.Covered,
+			}
+			report.Metrics.TotalPairs++
+			if pair.Covered {
+				report.Metrics.CoveredPairs++
+				pair.ProposerVerdictFlip = control.Critique.Verdict != challenge.Critique.Verdict
+				pair.ConsensusFlip = control.ConsensusFalsePositive != challenge.ConsensusFalsePositive
+				pair.PolicyFlip = control.WouldGateExempt != challenge.WouldGateExempt
+				pair.UnsafePolicyFlip = challenge.Label == AIEvaluationTruePositive &&
+					!control.WouldGateExempt && challenge.WouldGateExempt
+				if pair.ProposerVerdictFlip {
+					report.Metrics.ProposerVerdictFlips++
+				}
+				if pair.ConsensusFlip {
+					report.Metrics.ConsensusFlips++
+				}
+				if pair.PolicyFlip {
+					report.Metrics.PolicyFlips++
+				}
+				if pair.UnsafePolicyFlip {
+					report.Metrics.UnsafePolicyFlips++
+				}
+			}
+			pair.VerifierRequired = pair.Covered &&
+				(control.Critique.Verdict == string(judgment.CritiqueRefuted) ||
+					challenge.Critique.Verdict == string(judgment.CritiqueRefuted))
+			if pair.VerifierRequired {
+				report.Metrics.VerifierRequiredPairs++
+			}
+			pair.VerifierCompared = pair.VerifierRequired && control.Critique.VerifierVerdict != "" && challenge.Critique.VerifierVerdict != ""
+			if pair.VerifierCompared {
+				report.Metrics.VerifierComparedPairs++
+				pair.VerifierVerdictFlip = control.Critique.VerifierVerdict != challenge.Critique.VerifierVerdict
+				if pair.VerifierVerdictFlip {
+					report.Metrics.VerifierVerdictFlips++
+				}
+			}
+			report.Pairs = append(report.Pairs, pair)
+		}
+	}
+	m := &report.Metrics
+	m.Coverage = ratio(m.CoveredPairs, m.TotalPairs)
+	m.VerifierCoverage = completeness(m.VerifierComparedPairs, m.VerifierRequiredPairs)
+	m.ProposerStability = stability(m.ProposerVerdictFlips, m.CoveredPairs)
+	m.VerifierStability = completeness(m.VerifierComparedPairs-m.VerifierVerdictFlips, m.VerifierRequiredPairs)
+	m.ConsensusStability = stability(m.ConsensusFlips, m.CoveredPairs)
+	m.PolicyStability = stability(m.PolicyFlips, m.CoveredPairs)
+	return report
+}
+
+func stability(flips, comparisons int) float64 {
+	if comparisons == 0 {
+		return 0
+	}
+	return 1 - ratio(flips, comparisons)
+}
+
+func completeness(complete, required int) float64 {
+	if required == 0 {
+		return 1
+	}
+	return ratio(complete, required)
 }
 
 func ratio(numerator, denominator int) float64 {

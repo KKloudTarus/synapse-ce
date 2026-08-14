@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	datasetPath := flag.String("dataset", "internal/usecase/sca/testdata/fptriage-golden-v1.json", "versioned golden dataset JSON")
+	datasetPath := flag.String("dataset", "internal/usecase/sca/testdata/fptriage-golden-v2.json", "versioned golden dataset JSON")
 	outputPath := flag.String("output", "-", "report path, or - for stdout")
 	flag.Parse()
 

@@ -273,7 +273,7 @@ func CurateAIEvaluationFeedback(reviews []aitriagereview.Review, manifest AIEval
 	}
 	manifestHash := sha256.Sum256(manifestBytes)
 	dataset := AIEvaluationDataset{
-		SchemaVersion: "synapse-ai-triage-dataset-v1",
+		SchemaVersion: aiEvaluationDatasetSchema,
 		Version:       strings.TrimSpace(manifest.DatasetVersion),
 		Provenance:    "reviewer-feedback-curation; curated_feedback_sha256=" + hex.EncodeToString(manifestHash[:]),
 		Reviewer:      strings.TrimSpace(manifest.Curator),
