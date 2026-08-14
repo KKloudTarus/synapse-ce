@@ -164,14 +164,26 @@ func writeReleaseJSON(w io.Writer, value any) error {
 }
 
 func sameReleasePath(a, b string) bool {
-	aa, errA := filepath.Abs(a)
-	bb, errB := filepath.Abs(b)
-	if errA == nil && errB == nil {
-		a, b = aa, bb
-	}
-	a, b = filepath.Clean(a), filepath.Clean(b)
+	a, b = canonicalReleasePath(a), canonicalReleasePath(b)
 	if runtime.GOOS == "windows" {
 		return strings.EqualFold(a, b)
 	}
 	return a == b
+}
+
+func canonicalReleasePath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	abs = filepath.Clean(abs)
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return filepath.Clean(resolved)
+	}
+	// The output normally does not exist yet. Resolve its parent so a symlinked directory
+	// cannot alias an input artifact and bypass the explicit overwrite guard.
+	if parent, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
+		return filepath.Join(parent, filepath.Base(abs))
+	}
+	return abs
 }

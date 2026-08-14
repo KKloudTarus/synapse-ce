@@ -230,6 +230,7 @@ The exit code is 0 when no finding meets the threshold, non-zero otherwise.
 | `synapse-cluster-agent` | Fleet agent: Kubernetes workload/exposure/identity inventory |
 | `synapse-fptriage-eval` | Offline evaluation harness for AI false-positive triage |
 | `synapse-fptriage-compare` | Deterministic candidate-vs-baseline gate for AI model/prompt promotion review |
+| `synapse-fptriage-release` | Versioned PM/Security-approved promotion and rollback ledger for AI triage |
 | `synapse-fptriage-curate` | Offline privacy- and label-reviewed feedback curation for AI false-positive evaluation |
 | `synapse-fptriage-drift` | Offline language/CWE/project distribution drift evidence for AI triage |
 | `synapse-mcp` | Read-only, propose-only integration server, never executes |

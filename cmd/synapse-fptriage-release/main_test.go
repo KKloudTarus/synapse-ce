@@ -105,6 +105,25 @@ func TestRunDoesNotOverwriteReleaseEvidence(t *testing.T) {
 	}
 }
 
+func TestSameReleasePathResolvesSymlinkAliases(t *testing.T) {
+	dir := t.TempDir()
+	realDir := filepath.Join(dir, "evidence")
+	if err := os.Mkdir(realDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	input := filepath.Join(realDir, "ledger.json")
+	if err := os.WriteFile(input, []byte("approved evidence"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(dir, "evidence-alias")
+	if err := os.Symlink(realDir, alias); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+	if !sameReleasePath(filepath.Join(alias, "ledger.json"), input) {
+		t.Fatal("symlink alias was not recognized as the same release path")
+	}
+}
+
 func releaseFixtureReport(t *testing.T, prompt string) sca.AIEvaluationReport {
 	t.Helper()
 	dataset := sca.AIEvaluationDataset{SchemaVersion: "synapse-ai-triage-dataset-v1", Version: "fixture-v1",

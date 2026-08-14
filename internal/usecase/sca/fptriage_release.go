@@ -63,6 +63,7 @@ type AIEvaluationReleaseDecision struct {
 	RollbackTo            string                        `json:"rollback_to,omitempty"`
 	BaselineEvaluationRun *AIEvaluationRun              `json:"baseline_evaluation_run,omitempty"`
 	BaselineEvaluationID  string                        `json:"baseline_evaluation_run_id,omitempty"`
+	PromotionPolicy       *AIEvaluationPromotionPolicy  `json:"promotion_policy,omitempty"`
 	PreviousActiveRunID   string                        `json:"previous_active_run_id"`
 	ActiveRun             AIEvaluationRun               `json:"active_run"`
 	ActiveRunID           string                        `json:"active_run_id"`
@@ -88,6 +89,9 @@ type AIEvaluationPromotionEvidence struct {
 }
 
 func (e AIEvaluationPromotionEvidence) Validate() error {
+	if err := validateReleasePromotionPolicy(e.Comparison.Policy); err != nil {
+		return err
+	}
 	if err := e.Comparison.Validate(); err != nil {
 		return err
 	}
@@ -193,8 +197,9 @@ func AIEvaluationReleaseReviewDigest(ledger AIEvaluationReleaseLedger, evidence 
 		if manifest.RollbackTo != "" {
 			return "", fmt.Errorf("AI evaluation promotion must not set rollback_to")
 		}
-		if len(ledger.Decisions) != 0 && !sameEvaluationConfiguration(currentReleaseRun(ledger), comparison.BaselineRun) {
-			return "", fmt.Errorf("AI evaluation promotion baseline does not match the active approved configuration")
+		if len(ledger.Decisions) != 0 && (comparison.BaselineRunID != currentReleaseRunID(ledger) ||
+			!reflect.DeepEqual(currentReleaseRun(ledger), comparison.BaselineRun)) {
+			return "", fmt.Errorf("AI evaluation promotion baseline does not match the exact active approved run")
 		}
 		targetRun, targetRunID = comparison.CandidateRun, comparison.CandidateRunID
 	} else {
@@ -226,7 +231,10 @@ func AIEvaluationReleaseReviewDigest(ledger AIEvaluationReleaseLedger, evidence 
 		TargetRunID  string          `json:"target_run_id"`
 	}{aiEvaluationReleaseApprovalSchema, ledger.HeadDecisionID, manifest.Version, manifest.Action,
 		manifest.Provenance, manifest.ComparisonID, manifest.RollbackTo, targetRun, targetRunID}
-	b, _ := json.Marshal(payload)
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal AI evaluation release approval digest: %w", err)
+	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:]), nil
 }
@@ -238,7 +246,7 @@ func ApplyAIEvaluationRelease(ledger AIEvaluationReleaseLedger, evidence *AIEval
 	if err != nil {
 		return AIEvaluationReleaseLedger{}, err
 	}
-	if err := validateReleaseApprovals(manifest.Approvals, digest, releaseModelIdentities(ledger, evidence)); err != nil {
+	if err := validateReleaseApprovals(manifest.Approvals, digest, releaseModelIdentities(ledger, evidence, manifest)); err != nil {
 		return AIEvaluationReleaseLedger{}, err
 	}
 	for _, decision := range ledger.Decisions {
@@ -271,6 +279,8 @@ func ApplyAIEvaluationRelease(ledger AIEvaluationReleaseLedger, evidence *AIEval
 	if manifest.Action == AIEvaluationReleasePromote {
 		baseline := comparison.BaselineRun
 		decision.BaselineEvaluationRun, decision.BaselineEvaluationID = &baseline, comparison.BaselineRunID
+		policy := comparison.Policy
+		decision.PromotionPolicy = &policy
 		decision.ActiveRun, decision.ActiveRunID = comparison.CandidateRun, comparison.CandidateRunID
 	} else {
 		decision.ActiveRun, decision.ActiveRunID, err = rollbackReleaseTarget(ledger, manifest.RollbackTo)
@@ -281,7 +291,10 @@ func ApplyAIEvaluationRelease(ledger AIEvaluationReleaseLedger, evidence *AIEval
 	if sameEvaluationConfiguration(previousRun, decision.ActiveRun) {
 		return AIEvaluationReleaseLedger{}, fmt.Errorf("AI evaluation release decision would not change the active configuration")
 	}
-	decision.DecisionID = releaseDecisionID(decision)
+	decision.DecisionID, err = releaseDecisionID(decision)
+	if err != nil {
+		return AIEvaluationReleaseLedger{}, err
+	}
 	ledger.Decisions = append(ledger.Decisions, decision)
 	ledger.HeadDecisionID = decision.DecisionID
 	if err := ledger.Validate(); err != nil {
@@ -301,10 +314,14 @@ func (l AIEvaluationReleaseLedger) Validate() error {
 	versions := map[string]struct{}{}
 	previousDecisionID, activeRun, activeRunID := "", l.InitialRun, l.InitialRunID
 	for i, decision := range l.Decisions {
+		expectedDecisionID, err := releaseDecisionID(decision)
+		if err != nil {
+			return fmt.Errorf("AI evaluation release decision %d identity: %w", i+1, err)
+		}
 		if decision.Sequence != i+1 || decision.PreviousDecisionID != previousDecisionID ||
 			decision.PreviousActiveRunID != activeRunID || decision.Status != "approved" ||
 			!releaseVersionPattern.MatchString(decision.Version) || strings.TrimSpace(decision.Provenance) == "" ||
-			decision.DecisionID != releaseDecisionID(decision) || !validEvaluationSHA256(decision.ActiveRunID) {
+			decision.DecisionID != expectedDecisionID || !validEvaluationSHA256(decision.ActiveRunID) {
 			return fmt.Errorf("AI evaluation release decision %d has invalid version, chain, status, or identity", i+1)
 		}
 		key := strings.ToLower(decision.Version)
@@ -321,20 +338,23 @@ func (l AIEvaluationReleaseLedger) Validate() error {
 		if decision.Action == AIEvaluationReleasePromote {
 			if !validEvaluationSHA256(decision.ComparisonID) || decision.RollbackTo != "" ||
 				!validEvaluationSHA256(decision.BaselineEvaluationID) || decision.BaselineEvaluationRun == nil ||
-				!validEvaluationSHA256(decision.ActiveRunID) ||
+				!validEvaluationSHA256(decision.ActiveRunID) || decision.PromotionPolicy == nil ||
 				!sameEvaluationConfiguration(activeRun, *decision.BaselineEvaluationRun) {
 				return fmt.Errorf("AI evaluation promotion decision %d has invalid comparison or baseline", i+1)
 			}
 			if err := validateReleaseRun(*decision.BaselineEvaluationRun); err != nil {
 				return fmt.Errorf("AI evaluation promotion decision %d baseline: %w", i+1, err)
 			}
-			if i == 0 && (decision.BaselineEvaluationID != activeRunID ||
-				!reflect.DeepEqual(*decision.BaselineEvaluationRun, activeRun)) {
-				return fmt.Errorf("AI evaluation first promotion does not bind the ledger's initial baseline")
+			if err := validateReleasePromotionPolicy(*decision.PromotionPolicy); err != nil {
+				return fmt.Errorf("AI evaluation promotion decision %d policy: %w", i+1, err)
+			}
+			if decision.BaselineEvaluationID != activeRunID ||
+				!reflect.DeepEqual(*decision.BaselineEvaluationRun, activeRun) {
+				return fmt.Errorf("AI evaluation promotion decision %d does not bind the exact previous active run", i+1)
 			}
 		} else if decision.Action == AIEvaluationReleaseRollback {
 			if decision.ComparisonID != "" || strings.TrimSpace(decision.RollbackTo) == "" ||
-				decision.BaselineEvaluationID != "" || decision.BaselineEvaluationRun != nil {
+				decision.BaselineEvaluationID != "" || decision.BaselineEvaluationRun != nil || decision.PromotionPolicy != nil {
 				return fmt.Errorf("AI evaluation rollback decision %d has invalid target metadata", i+1)
 			}
 			targetRun, targetRunID, err := rollbackReleaseTarget(AIEvaluationReleaseLedger{
@@ -347,7 +367,11 @@ func (l AIEvaluationReleaseLedger) Validate() error {
 		} else {
 			return fmt.Errorf("AI evaluation release decision %d has invalid action", i+1)
 		}
-		if decision.ApprovalDigest != releaseDecisionApprovalDigest(decision) {
+		expectedApprovalDigest, err := releaseDecisionApprovalDigest(decision)
+		if err != nil {
+			return fmt.Errorf("AI evaluation release decision %d approval digest: %w", i+1, err)
+		}
+		if decision.ApprovalDigest != expectedApprovalDigest {
 			return fmt.Errorf("AI evaluation release decision %d approval digest is invalid", i+1)
 		}
 		models := []string{activeRun.ProposerModel, activeRun.VerifierModel, decision.ActiveRun.ProposerModel, decision.ActiveRun.VerifierModel}
@@ -377,6 +401,25 @@ func validateReleaseManifestHeader(manifest AIEvaluationReleaseManifest) error {
 		}
 	} else if manifest.ComparisonID != "" || strings.TrimSpace(manifest.RollbackTo) == "" {
 		return fmt.Errorf("AI evaluation rollback requires rollback_to and no comparison_id")
+	}
+	return nil
+}
+
+// validateReleasePromotionPolicy pins release authority to a conservative policy floor. Comparison
+// tooling may evaluate exploratory thresholds, but a release cannot weaken the built-in defaults.
+func validateReleasePromotionPolicy(policy AIEvaluationPromotionPolicy) error {
+	if err := policy.Validate(); err != nil {
+		return err
+	}
+	floor := DefaultAIEvaluationPromotionPolicy()
+	if policy.MinimumPrecisionBasisPoints < floor.MinimumPrecisionBasisPoints ||
+		policy.MaximumFalseNegativeEscapeRateBasisPoints > floor.MaximumFalseNegativeEscapeRateBasisPoints ||
+		policy.MaximumPrecisionDropBasisPoints > floor.MaximumPrecisionDropBasisPoints ||
+		policy.MaximumRecallDropBasisPoints > floor.MaximumRecallDropBasisPoints ||
+		policy.MaximumCoverageDropBasisPoints > floor.MaximumCoverageDropBasisPoints ||
+		policy.MaximumVerifierCoverageDropBasisPoints > floor.MaximumVerifierCoverageDropBasisPoints ||
+		policy.MaximumDisagreementIncreaseBasisPoints > floor.MaximumDisagreementIncreaseBasisPoints {
+		return fmt.Errorf("AI evaluation release promotion policy is weaker than the built-in safety floor")
 	}
 	return nil
 }
@@ -452,7 +495,7 @@ func rollbackReleaseTarget(ledger AIEvaluationReleaseLedger, target string) (AIE
 	return AIEvaluationRun{}, "", fmt.Errorf("AI evaluation rollback target %q is not in the approved release ledger", target)
 }
 
-func releaseModelIdentities(ledger AIEvaluationReleaseLedger, evidence *AIEvaluationPromotionEvidence) []string {
+func releaseModelIdentities(ledger AIEvaluationReleaseLedger, evidence *AIEvaluationPromotionEvidence, manifest AIEvaluationReleaseManifest) []string {
 	models := []string{}
 	if ledger.SchemaVersion != "" {
 		run := currentReleaseRun(ledger)
@@ -463,10 +506,15 @@ func releaseModelIdentities(ledger AIEvaluationReleaseLedger, evidence *AIEvalua
 		models = append(models, comparison.BaselineRun.ProposerModel, comparison.BaselineRun.VerifierModel,
 			comparison.CandidateRun.ProposerModel, comparison.CandidateRun.VerifierModel)
 	}
+	if manifest.Action == AIEvaluationReleaseRollback && ledger.SchemaVersion != "" {
+		if target, _, err := rollbackReleaseTarget(ledger, manifest.RollbackTo); err == nil {
+			models = append(models, target.ProposerModel, target.VerifierModel)
+		}
+	}
 	return models
 }
 
-func releaseDecisionApprovalDigest(decision AIEvaluationReleaseDecision) string {
+func releaseDecisionApprovalDigest(decision AIEvaluationReleaseDecision) (string, error) {
 	payload := struct {
 		Schema       string          `json:"schema"`
 		LedgerHead   string          `json:"ledger_head"`
@@ -479,17 +527,23 @@ func releaseDecisionApprovalDigest(decision AIEvaluationReleaseDecision) string 
 		TargetRunID  string          `json:"target_run_id"`
 	}{aiEvaluationReleaseApprovalSchema, decision.PreviousDecisionID, decision.Version, decision.Action,
 		decision.Provenance, decision.ComparisonID, decision.RollbackTo, decision.ActiveRun, decision.ActiveRunID}
-	b, _ := json.Marshal(payload)
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal AI evaluation release approval digest: %w", err)
+	}
 	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
+	return hex.EncodeToString(sum[:]), nil
 }
 
-func releaseDecisionID(decision AIEvaluationReleaseDecision) string {
+func releaseDecisionID(decision AIEvaluationReleaseDecision) (string, error) {
 	copyDecision := decision
 	copyDecision.DecisionID = ""
-	b, _ := json.Marshal(copyDecision)
+	b, err := json.Marshal(copyDecision)
+	if err != nil {
+		return "", fmt.Errorf("marshal AI evaluation release decision identity: %w", err)
+	}
 	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func decodeReleaseJSON(data []byte, dst any) error {

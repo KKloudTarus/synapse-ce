@@ -131,6 +131,122 @@ func TestAIEvaluationReleaseApprovalCannotReplayAfterLedgerHeadChanges(t *testin
 	}
 }
 
+func TestAIEvaluationReleaseRejectsFreshBaselineForSameActiveConfiguration(t *testing.T) {
+	firstEvidence := releaseTestEvidenceFor(t, "prompt-v1", "prompt-v2")
+	first := releaseTestManifest("release-one", AIEvaluationReleasePromote, firstEvidence.Comparison.ComparisonID, "")
+	first.Approvals = releaseTestApprovals(t, AIEvaluationReleaseLedger{}, &firstEvidence, first)
+	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &firstEvidence, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// This is the same prompt/model configuration as the active run, but it is a freshly
+	// evaluated artifact with different canonical evidence. It must not replace the exact
+	// active run as the next promotion's baseline.
+	freshBaseline := promotionTestReport("prompt-v2", func(results []AIEvaluationResult) {
+		results[0].Critique.Confidence--
+	})
+	if freshBaseline.RunID == currentReleaseRunID(ledger) {
+		t.Fatal("test setup did not create a distinct baseline run")
+	}
+	candidate := promotionTestReport("prompt-v3", nil)
+	comparison, err := CompareAIEvaluationReports(freshBaseline, candidate, DefaultAIEvaluationPromotionPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := AIEvaluationPromotionEvidence{BaselineReport: freshBaseline, CandidateReport: candidate, Comparison: comparison}
+	manifest := releaseTestManifest("release-two", AIEvaluationReleasePromote, comparison.ComparisonID, "")
+	if _, err := AIEvaluationReleaseReviewDigest(ledger, &evidence, manifest); err == nil {
+		t.Fatal("fresh same-configuration baseline replaced the exact active approved run")
+	}
+
+	validEvidence := releaseTestEvidenceFor(t, "prompt-v2", "prompt-v3")
+	validManifest := releaseTestManifest("release-two-valid", AIEvaluationReleasePromote, validEvidence.Comparison.ComparisonID, "")
+	validManifest.Approvals = releaseTestApprovals(t, ledger, &validEvidence, validManifest)
+	validLedger, err := ApplyAIEvaluationRelease(ledger, &validEvidence, validManifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validLedger.Decisions[1].BaselineEvaluationID = freshBaseline.RunID
+	validLedger.Decisions[1].DecisionID, err = releaseDecisionID(validLedger.Decisions[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	validLedger.HeadDecisionID = validLedger.Decisions[1].DecisionID
+	if err := validLedger.Validate(); err == nil {
+		t.Fatal("ledger validation accepted a rehashed promotion with a substituted baseline run id")
+	}
+}
+
+func TestAIEvaluationReleaseEnforcesPromotionPolicyFloor(t *testing.T) {
+	baseline := promotionTestReport("prompt-v1", nil)
+	candidate := promotionTestReport("prompt-v2", nil)
+	weak := DefaultAIEvaluationPromotionPolicy()
+	weak.MinimumPrecisionBasisPoints = 0
+	comparison, err := CompareAIEvaluationReports(baseline, candidate, weak)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := AIEvaluationPromotionEvidence{BaselineReport: baseline, CandidateReport: candidate, Comparison: comparison}
+	manifest := releaseTestManifest("release-weak", AIEvaluationReleasePromote, comparison.ComparisonID, "")
+	if _, err := AIEvaluationReleaseReviewDigest(AIEvaluationReleaseLedger{}, &evidence, manifest); err == nil {
+		t.Fatal("self-declared policy below the release safety floor was accepted")
+	}
+
+	validEvidence := releaseTestEvidence(t)
+	validManifest := releaseTestManifest("release-valid", AIEvaluationReleasePromote, validEvidence.Comparison.ComparisonID, "")
+	validManifest.Approvals = releaseTestApprovals(t, AIEvaluationReleaseLedger{}, &validEvidence, validManifest)
+	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &validEvidence, validManifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger.Decisions[0].PromotionPolicy.MinimumPrecisionBasisPoints = 0
+	ledger.Decisions[0].DecisionID, err = releaseDecisionID(ledger.Decisions[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger.HeadDecisionID = ledger.Decisions[0].DecisionID
+	if err := ledger.Validate(); err == nil {
+		t.Fatal("ledger validation accepted a rehashed policy below the release safety floor")
+	}
+
+	strict := DefaultAIEvaluationPromotionPolicy()
+	strict.MinimumPrecisionBasisPoints = 9600
+	comparison, err = CompareAIEvaluationReports(baseline, candidate, strict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence = AIEvaluationPromotionEvidence{BaselineReport: baseline, CandidateReport: candidate, Comparison: comparison}
+	manifest = releaseTestManifest("release-strict", AIEvaluationReleasePromote, comparison.ComparisonID, "")
+	if _, err := AIEvaluationReleaseReviewDigest(AIEvaluationReleaseLedger{}, &evidence, manifest); err != nil {
+		t.Fatalf("stricter release policy was rejected: %v", err)
+	}
+}
+
+func TestAIEvaluationRollbackSeparationOfDutiesIncludesTargetModels(t *testing.T) {
+	target := candidateRun("prompt-v1")
+	target.ProposerModel = "rollback-target-model"
+	current := candidateRun("prompt-v2")
+	ledger := AIEvaluationReleaseLedger{
+		SchemaVersion: aiEvaluationReleaseLedgerSchema,
+		InitialRun:    target,
+		InitialRunID:  strings.Repeat("a", 64),
+		Decisions: []AIEvaluationReleaseDecision{{
+			ActiveRun: current, ActiveRunID: strings.Repeat("b", 64),
+		}},
+	}
+	manifest := releaseTestManifest("rollback-target", AIEvaluationReleaseRollback, "", "initial")
+	digest := strings.Repeat("c", 64)
+	now := time.Date(2026, 8, 14, 8, 0, 0, 0, time.UTC)
+	approvals := []AIEvaluationReleaseApproval{
+		{Role: "pm", Reviewer: target.ProposerModel, Approved: true, Rationale: "Product approval", ReviewedAt: now, ReviewedSHA256: digest},
+		{Role: "security", Reviewer: "security@example.com", Approved: true, Rationale: "Security approval", ReviewedAt: now.Add(time.Minute), ReviewedSHA256: digest},
+	}
+	if err := validateReleaseApprovals(approvals, digest, releaseModelIdentities(ledger, nil, manifest)); err == nil {
+		t.Fatal("rollback target model was accepted as a human approver")
+	}
+}
+
 func TestAIEvaluationReleaseRecomputesComparisonFromReports(t *testing.T) {
 	evidence := releaseTestEvidence(t)
 	evidence.BaselineReport.Run.PromptVersion = "tampered"
