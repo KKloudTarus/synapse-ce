@@ -11,7 +11,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/migrations"
 )
 
-func TestMigration0082BackfillsAndIsolatesScanInventory(t *testing.T) {
+func TestMigration0089BackfillsAndIsolatesScanInventory(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -20,6 +20,11 @@ func TestMigration0082BackfillsAndIsolatesScanInventory(t *testing.T) {
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := Migrate(context.Background(), dsn); err != nil {
+			t.Errorf("restore migrations: %v", err)
+		}
+	})
 	db, err := goose.OpenDBWithDriver("pgx", dsn)
 	if err != nil {
 		t.Fatalf("goose open: %v", err)
@@ -29,11 +34,11 @@ func TestMigration0082BackfillsAndIsolatesScanInventory(t *testing.T) {
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatalf("dialect: %v", err)
 	}
-	if err := goose.Down(db, "."); err != nil {
-		t.Fatalf("down 0082: %v", err)
+	if err := goose.DownTo(db, ".", 88); err != nil {
+		t.Fatalf("down to 0088: %v", err)
 	}
 
-	prefix := "m82-" + randHex(t)
+	prefix := "m89-" + randHex(t)
 	tenantA, tenantB := prefix+"-a", prefix+"-b"
 	engagementA, engagementB := prefix+"-ea", prefix+"-eb"
 	sbomA, sbomB := prefix+"-sa", prefix+"-sb"
@@ -50,11 +55,11 @@ func TestMigration0082BackfillsAndIsolatesScanInventory(t *testing.T) {
 	}
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
-			t.Fatalf("seed pre-0082 data: %v", err)
+			t.Fatalf("seed pre-0089 data: %v", err)
 		}
 	}
-	if err := goose.Up(db, "."); err != nil {
-		t.Fatalf("up 0082: %v", err)
+	if err := goose.UpTo(db, ".", 89); err != nil {
+		t.Fatalf("up 0089: %v", err)
 	}
 
 	for _, probe := range []struct {
@@ -75,7 +80,7 @@ func TestMigration0082BackfillsAndIsolatesScanInventory(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer pool.Close()
-	const role = "sbom_rls_probe_0082"
+	const role = "sbom_rls_probe_0089"
 	_, _ = pool.Exec(ctx, `DROP OWNED BY `+role)
 	_, _ = pool.Exec(ctx, `DROP ROLE IF EXISTS `+role)
 	if _, err := pool.Exec(ctx, `CREATE ROLE `+role+` NOSUPERUSER NOBYPASSRLS`); err != nil {

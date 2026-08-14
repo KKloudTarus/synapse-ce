@@ -164,6 +164,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityactionuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitycorrelation"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityevaluation"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityinteluc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitymonitor"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityprojection"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityreconciliation"
@@ -1133,12 +1134,16 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
-	vulnerabilityRollout := vulnerabilityrollout.New(vulnerabilityrollout.Config{
+	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
 		ProviderSync: cfg.VulnerabilityProviderSyncEnabled, OccurrenceWrites: cfg.VulnerabilityOccurrenceWritesEnabled,
 		FindingProjection: cfg.VulnerabilityFindingProjectionEnabled, Actions: cfg.VulnerabilityActionsEnabled,
 		Notifications: cfg.VulnerabilityNotificationsEnabled, DryRun: cfg.VulnerabilityDryRunEnabled,
 		TenantAllowlist: cfg.VulnerabilityTenantAllowlist,
 	})
+	if err != nil {
+		log.Error("vulnerability rollout init failed", "err", err)
+		os.Exit(1)
+	}
 	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
 	if err := vulnerabilityprovider.RegisterAll(vulnerabilityRegistry, vulnerabilityprovider.Dependencies{
 		LookupCanonical: vulnerabilityMaterializer.GetCanonical,
@@ -1231,6 +1236,11 @@ func main() {
 		log.Error("vulnerability sync run store does not support read queries")
 		os.Exit(1)
 	}
+	vulnerabilityRead, err := vulnerabilityinteluc.NewService(vulnerabilityMaterializer, vulnerabilityAdvisoryRead, vulnerabilityEvaluationCheckpoints, vulnerabilityOccurrences, vulnerabilityOccurrenceRead, vulnerabilityAssessments, vulnerabilityRiskRead, vulnerabilityTransitionRead, vulnerabilitySyncRunRead, vulnerabilityQueue)
+	if err != nil {
+		log.Error("vulnerability read model init failed", "err", err)
+		os.Exit(1)
+	}
 	vulnerabilityReconciliation, err := vulnerabilityreconciliation.NewService(vulnerabilityReconcileRuns, vulnerabilityReconciliationEngagements, vulnerabilityAdvisoryCorpus, vulnerabilityMaterializer, vulnerabilityOccurrenceReconciliation, vulnerabilityAdvisoryCorrelation, vulnerabilityEvaluationCheckpoints, 0)
 	if err != nil {
 		log.Error("vulnerability reconciliation init failed", "err", err)
@@ -1255,7 +1265,7 @@ func main() {
 	router.SetVulnerabilityIntelligence(vulnerabilitySourceService, vulnerabilityMonitor)
 	router.SetVulnerabilityReconciliation(vulnerabilityReconciliation)
 	router.SetVulnerabilityAudit(auditLog)
-	router.SetVulnerabilityReadModel(vulnerabilityMaterializer, vulnerabilityAdvisoryRead, vulnerabilityEvaluationCheckpoints, vulnerabilityOccurrences, vulnerabilityOccurrenceRead, vulnerabilityAssessments, vulnerabilityRiskRead, vulnerabilityTransitionRead, vulnerabilitySyncRunRead, vulnerabilityQueue)
+	router.SetVulnerabilityReadModel(vulnerabilityRead)
 	router.SetVulnerabilityActions(vulnerabilityActionService)
 	if cfg.DBDSN == "" {
 		vulnerabilityWorker = worker.New(vulnerabilityQueue, map[string]worker.Handler{

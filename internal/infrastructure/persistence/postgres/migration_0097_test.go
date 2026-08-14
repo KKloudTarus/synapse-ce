@@ -6,13 +6,16 @@ import (
 	"os"
 	"testing"
 
+	"github.com/pressly/goose/v3"
+
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	"github.com/KKloudTarus/synapse-ce/migrations"
 )
 
-func TestMigration0090ReconciliationRunAtomicityCASAndIsolation(t *testing.T) {
+func TestMigration0097ReconciliationRunAtomicityCASAndIsolation(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -20,6 +23,26 @@ func TestMigration0090ReconciliationRunAtomicityCASAndIsolation(t *testing.T) {
 	ctx := context.Background()
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := Migrate(context.Background(), dsn); err != nil {
+			t.Errorf("restore migrations: %v", err)
+		}
+	})
+	db, err := goose.OpenDBWithDriver("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.DownTo(db, ".", 96); err != nil {
+		t.Fatalf("down to 0096: %v", err)
+	}
+	if err := goose.UpTo(db, ".", 97); err != nil {
+		t.Fatalf("up 0097: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
 	if err != nil {
@@ -32,7 +55,7 @@ func TestMigration0090ReconciliationRunAtomicityCASAndIsolation(t *testing.T) {
 		t.Fatalf("vulnerability_reconciliation_runs FORCE RLS=%v err=%v", forced, err)
 	}
 
-	prefix := "m90-" + randHex(t)
+	prefix := "m97-" + randHex(t)
 	tenantA, tenantB := shared.ID(prefix+"-a"), shared.ID(prefix+"-b")
 	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id,name) VALUES($1,$1),($2,$2)`, tenantA.String(), tenantB.String()); err != nil {
 		t.Fatal(err)

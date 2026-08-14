@@ -11,7 +11,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/migrations"
 )
 
-func TestMigration0086BackfillsComponentIdentityHash(t *testing.T) {
+func TestMigration0093BackfillsComponentIdentityHash(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -20,6 +20,11 @@ func TestMigration0086BackfillsComponentIdentityHash(t *testing.T) {
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := Migrate(context.Background(), dsn); err != nil {
+			t.Errorf("restore migrations: %v", err)
+		}
+	})
 	db, err := goose.OpenDBWithDriver("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -29,11 +34,11 @@ func TestMigration0086BackfillsComponentIdentityHash(t *testing.T) {
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.DownTo(db, ".", 85); err != nil {
-		t.Fatalf("down to 0085: %v", err)
+	if err := goose.DownTo(db, ".", 92); err != nil {
+		t.Fatalf("down to 0092: %v", err)
 	}
 
-	prefix := "m86-" + randHex(t)
+	prefix := "m93-" + randHex(t)
 	tenantID, engagementID, sbomID, componentID := prefix+"-tenant", prefix+"-engagement", prefix+"-sbom", prefix+"-component"
 	purl := "pkg:golang/example.com/pkg@v1.2.3"
 	if _, err := db.ExecContext(ctx, `INSERT INTO tenants(id,name) VALUES($1,$1)`, tenantID); err != nil {
@@ -48,8 +53,8 @@ func TestMigration0086BackfillsComponentIdentityHash(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO components(id,tenant_id,sbom_id,name,version,purl) VALUES($1,$2,$3,'pkg','v1.2.3',$4)`, componentID, tenantID, sbomID, purl); err != nil {
 		t.Fatalf("seed component: %v", err)
 	}
-	if err := goose.UpTo(db, ".", 86); err != nil {
-		t.Fatalf("up 0086: %v", err)
+	if err := goose.UpTo(db, ".", 93); err != nil {
+		t.Fatalf("up 0093: %v", err)
 	}
 
 	expected := sbom.ComponentFingerprint(sbom.ComponentIdentity{Ecosystem: "Go", Package: "example.com/pkg", Version: "v1.2.3"}, purl)

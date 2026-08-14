@@ -6,11 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pressly/goose/v3"
+
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/migrations"
 )
 
-func TestMigration0089CPEPersistenceAndLookup(t *testing.T) {
+func TestMigration0096CPEPersistenceAndLookup(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -18,6 +21,26 @@ func TestMigration0089CPEPersistenceAndLookup(t *testing.T) {
 	ctx := context.Background()
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := Migrate(context.Background(), dsn); err != nil {
+			t.Errorf("restore migrations: %v", err)
+		}
+	})
+	db, err := goose.OpenDBWithDriver("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.DownTo(db, ".", 95); err != nil {
+		t.Fatalf("down to 0095: %v", err)
+	}
+	if err := goose.UpTo(db, ".", 96); err != nil {
+		t.Fatalf("up 0096: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
 	if err != nil {
@@ -32,7 +55,7 @@ func TestMigration0089CPEPersistenceAndLookup(t *testing.T) {
 		}
 	}
 
-	prefix := "m89-" + randHex(t)
+	prefix := "m96-" + randHex(t)
 	tenantID := shared.ID(prefix + "-tenant")
 	engagementID := shared.ID(prefix + "-engagement")
 	sbomID := shared.ID(prefix + "-sbom")
@@ -51,7 +74,7 @@ func TestMigration0089CPEPersistenceAndLookup(t *testing.T) {
 		{`INSERT INTO advisory_cpe_affects(advisory_id,cpe_part,cpe_vendor,cpe_product) VALUES($1,'a','acme','widget')`, []any{advisoryID}},
 	} {
 		if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
-			t.Fatalf("seed 0089 fixture: %v", err)
+			t.Fatalf("seed 0096 fixture: %v", err)
 		}
 	}
 	t.Cleanup(func() {

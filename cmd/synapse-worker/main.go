@@ -252,12 +252,16 @@ func main() {
 		reconuc.JobKind: reconJobHandler{svc: reconService}, // Handle + OnDeadLetter (finalize the run)
 	}
 	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
-	vulnerabilityRollout := vulnerabilityrollout.New(vulnerabilityrollout.Config{
+	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
 		ProviderSync: cfg.VulnerabilityProviderSyncEnabled, OccurrenceWrites: cfg.VulnerabilityOccurrenceWritesEnabled,
 		FindingProjection: cfg.VulnerabilityFindingProjectionEnabled, Actions: cfg.VulnerabilityActionsEnabled,
 		Notifications: cfg.VulnerabilityNotificationsEnabled, DryRun: cfg.VulnerabilityDryRunEnabled,
 		TenantAllowlist: cfg.VulnerabilityTenantAllowlist,
 	})
+	if err != nil {
+		log.Error("vulnerability rollout init failed", "err", err)
+		os.Exit(1)
+	}
 	if err := vulnerabilityprovider.RegisterAll(vulnerabilityRegistry, vulnerabilityprovider.Dependencies{
 		LookupCanonical: vulnerabilityMaterializer.GetCanonical,
 		CurrentRecords:  vulnerabilityMaterializer.CurrentSourceRecordIDs,

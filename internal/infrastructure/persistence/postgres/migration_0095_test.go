@@ -9,13 +9,15 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/pressly/goose/v3"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityaction"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityoccurrence"
+	"github.com/KKloudTarus/synapse-ce/migrations"
 )
 
-func TestMigration0088ActionOutboxIsolationAndIdempotency(t *testing.T) {
+func TestMigration0095ActionOutboxIsolationAndIdempotency(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -23,6 +25,26 @@ func TestMigration0088ActionOutboxIsolationAndIdempotency(t *testing.T) {
 	ctx := context.Background()
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := Migrate(context.Background(), dsn); err != nil {
+			t.Errorf("restore migrations: %v", err)
+		}
+	})
+	db, err := goose.OpenDBWithDriver("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.DownTo(db, ".", 94); err != nil {
+		t.Fatalf("down to 0094: %v", err)
+	}
+	if err := goose.UpTo(db, ".", 95); err != nil {
+		t.Fatalf("up 0095: %v", err)
 	}
 	pool, err := Connect(ctx, dsn)
 	if err != nil {
@@ -40,7 +62,7 @@ func TestMigration0088ActionOutboxIsolationAndIdempotency(t *testing.T) {
 		}
 	}
 
-	prefix := "m88-" + randHex(t)
+	prefix := "m95-" + randHex(t)
 	tenantA, tenantB := prefix+"-ta", prefix+"-tb"
 	engagementA, engagementB := prefix+"-ea", prefix+"-eb"
 	sbomA, sbomB := prefix+"-sa", prefix+"-sb"
@@ -66,11 +88,11 @@ func TestMigration0088ActionOutboxIsolationAndIdempotency(t *testing.T) {
 	}
 	for _, statement := range statements {
 		if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
-			t.Fatalf("seed 0088 fixture: %v", err)
+			t.Fatalf("seed 0095 fixture: %v", err)
 		}
 	}
 
-	role := "m88_runtime_" + randHex(t)
+	role := "m95_runtime_" + randHex(t)
 	for _, statement := range []string{
 		`CREATE ROLE ` + role + ` NOSUPERUSER NOBYPASSRLS`,
 		`GRANT USAGE ON SCHEMA public TO ` + role,

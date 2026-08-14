@@ -38,7 +38,7 @@ func (s *ComponentInventoryStore) ListCurrentComponents(ctx context.Context, que
 	err = WithTenant(ctx, s.pool, tenantID.String(), func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			WITH latest_sbom AS (
-				SELECT id, created_at
+				SELECT id, engagement_id, created_at
 				FROM sboms
 				WHERE tenant_id=$1 AND engagement_id=$2
 				ORDER BY created_at DESC, id DESC

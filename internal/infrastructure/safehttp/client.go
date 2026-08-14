@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var carrierGradeNAT = netip.MustParsePrefix("100.64.0.0/10")
+
 func New(timeout time.Duration, allowPrivate bool) *http.Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
@@ -32,6 +34,7 @@ func New(timeout time.Duration, allowPrivate bool) *http.Client {
 				dialer := net.Dialer{Timeout: 30 * time.Second}
 				var lastErr error
 				for _, address := range addresses {
+					address = address.Unmap()
 					if blocked(address, allowPrivate) {
 						lastErr = fmt.Errorf("source endpoint resolves to a disallowed address")
 						continue
@@ -53,7 +56,8 @@ func New(timeout time.Duration, allowPrivate bool) *http.Client {
 }
 
 func blocked(address netip.Addr, allowPrivate bool) bool {
-	if !address.IsValid() || address.IsUnspecified() || address.IsLoopback() || address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() || address.IsMulticast() {
+	address = address.Unmap()
+	if !address.IsValid() || address.IsUnspecified() || address.IsLoopback() || address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() || address.IsMulticast() || carrierGradeNAT.Contains(address) {
 		return true
 	}
 	return !allowPrivate && address.IsPrivate()

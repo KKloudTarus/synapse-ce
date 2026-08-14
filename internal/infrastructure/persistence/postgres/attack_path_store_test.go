@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pressly/goose/v3"
 
@@ -104,7 +105,7 @@ func TestAttackPathStoreReplaceBindingsSerializesProducer(t *testing.T) {
 	tenant, engagementID := shared.ID("attack-"+id), shared.ID("eng-"+id)
 	assets := []shared.ID{"asset-a-" + shared.ID(id), "asset-b-" + shared.ID(id), "asset-c-" + shared.ID(id), "asset-d-" + shared.ID(id)}
 	findings := []shared.ID{"finding-a-" + shared.ID(id), "finding-b-" + shared.ID(id), "finding-c-" + shared.ID(id), "finding-d-" + shared.ID(id)}
-	seedAttackPathTargets(t, pool, tenant, engagementID, assets, findings, id)
+	seedAttackPathTargets(t, pool, tenant, engagementID, assets, findings, id, false)
 
 	blocker, err := pool.Acquire(ctx)
 	if err != nil {
@@ -195,6 +196,11 @@ func TestMigration0069DownDeduplicatesProducers(t *testing.T) {
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := Migrate(context.Background(), dsn); err != nil {
+			t.Errorf("restore migrations: %v", err)
+		}
+	})
 	db, err := goose.OpenDBWithDriver("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -215,7 +221,7 @@ func TestMigration0069DownDeduplicatesProducers(t *testing.T) {
 	id := randHex(t)
 	tenant, engagementID := shared.ID("rollback-"+id), shared.ID("eng-"+id)
 	assetID, findingID := shared.ID("asset-"+id), shared.ID("finding-"+id)
-	seedAttackPathTargets(t, pool, tenant, engagementID, []shared.ID{assetID}, []shared.ID{findingID}, id)
+	seedAttackPathTargets(t, pool, tenant, engagementID, []shared.ID{assetID}, []shared.ID{findingID}, id, true)
 	for _, producer := range []string{"zeta", "alpha"} {
 		if _, err := pool.Exec(ctx, `INSERT INTO attack_path_edges (tenant_id, engagement_id, from_kind, from_id, to_kind, to_id, kind, producer, provenance, confidence) VALUES ($1,$2,'asset',$3,'finding',$4,'affected_by',$5,'same',$6)`, tenant.String(), engagementID.String(), assetID.String(), findingID.String(), producer, string(asset.EdgeObserved)); err != nil {
 			t.Fatal(err)
@@ -236,7 +242,7 @@ func TestMigration0069DownDeduplicatesProducers(t *testing.T) {
 	}
 }
 
-func seedAttackPathTargets(t *testing.T, pool *pgxpool.Pool, tenant, engagementID shared.ID, assets, findings []shared.ID, suffix string) {
+func seedAttackPathTargets(t *testing.T, pool *pgxpool.Pool, tenant, engagementID shared.ID, assets, findings []shared.ID, suffix string, legacyFindingSchema bool) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(), `INSERT INTO tenants (id, name) VALUES ($1, $1)`, tenant.String()); err != nil {
 		t.Fatal(err)
@@ -255,6 +261,15 @@ func seedAttackPathTargets(t *testing.T, pool *pgxpool.Pool, tenant, engagementI
 		a, _ := asset.New(assets[i], tenant, asset.KindImage, fmt.Sprintf("sha256:%s-%d", suffix, i), "image", nil, now)
 		if err := NewAssetRepository(pool).UpsertAsset(ctx, a); err != nil {
 			t.Fatal(err)
+		}
+		if legacyFindingSchema {
+			if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, `INSERT INTO findings (id, tenant_id, engagement_id, title, severity, status, dedup_key, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, findings[i].String(), tenant.String(), engagementID.String(), "finding", string(shared.SeverityHigh), string(finding.StatusOpen), fmt.Sprintf("vuln:%s:%d", suffix, i), now, now)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			continue
 		}
 		f := finding.Finding{ID: findings[i], EngagementID: engagementID, Title: "finding", Severity: shared.SeverityHigh, Status: finding.StatusOpen, DedupKey: fmt.Sprintf("vuln:%s:%d", suffix, i), Audit: shared.Audit{CreatedAt: now, UpdatedAt: now}}
 		if err := NewFindingRepository(pool).Upsert(ctx, []finding.Finding{f}); err != nil {

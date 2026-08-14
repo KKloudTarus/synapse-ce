@@ -1574,10 +1574,10 @@ func TestPromotionStoreStaleCASAfterReupsert(t *testing.T) {
 		t.Fatalf("version after escalation = %d, want 2", got1.Version)
 	}
 
-	// Re-upsert the finding (simulates a re-scan). Version bumps to 3,
-	// promoted priority (2) is preserved.
+	// Re-upsert with a machine-owned change (simulates a re-scan). Version bumps to 3,
+	// while the promoted priority (2) is preserved.
 	fRescan := finding.Finding{
-		ID: "f1", EngagementID: "eng-1", Title: "test finding",
+		ID: "f1", EngagementID: "eng-1", Title: "test finding", Description: "updated by re-scan",
 		Severity: shared.SeverityHigh, Status: finding.StatusConfirmed,
 		Kind: finding.KindSCA, Priority: 2,
 		DedupKey: "test:f1",
