@@ -161,6 +161,30 @@ go run ./cmd/synapse-fptriage-compare \
 The command exits non-zero on a quality regression but writes the deterministic comparison evidence
 first. A passing result is still `review_required`; it never changes runtime AI configuration.
 
+After that result, use `synapse-fptriage-release` to bind the baseline, candidate, comparison, unique
+release version, and independent PM/Security approvals into a hash-chained ledger. Rollback appends
+another approved decision targeting `initial` or a previous decision. The command writes a new ledger
+file for every event and never changes live AI-triage or gate configuration. See
+[AI triage evaluation](ai-triage-evaluation.md#approve-a-promotion-or-rollback).
+
+```bash
+# First print the exact digest PM and Security must approve.
+go run ./cmd/synapse-fptriage-release \
+  --manifest ai-triage-release.json \
+  --comparison ai-triage-comparison.json \
+  --baseline ai-triage-baseline.json \
+  --candidate ai-triage-candidate.json \
+  --print-review-digest
+
+# After both approvals are added to the manifest, create a new ledger artifact.
+go run ./cmd/synapse-fptriage-release \
+  --manifest ai-triage-release-approved.json \
+  --comparison ai-triage-comparison.json \
+  --baseline ai-triage-baseline.json \
+  --candidate ai-triage-candidate.json \
+  --output ai-triage-release-ledger.json
+```
+
 The AI critique reads the target's own source into the prompt, so an **untrusted PR** can still try prompt
 injection through comments or strings. Distinct consensus and the human-review floor bound the risk, and
 the finding always remains in SARIF/JSON, but treat AI triage as advisory for untrusted contributor code.
