@@ -70,6 +70,13 @@ func (r *findRepoFake) SetAssignee(_ context.Context, eng, id shared.ID, a strin
 	r.byID[id] = f
 	return f, nil
 }
+func (r *findRepoFake) GetByEngagementAndID(_ context.Context, eng, id shared.ID) (finding.Finding, error) {
+	f, ok := r.byID[id]
+	if !ok || f.EngagementID != eng {
+		return finding.Finding{}, fmt.Errorf("finding %s: %w", id, shared.ErrNotFound)
+	}
+	return f, nil
+}
 
 type commentRepoFake struct{ added []finding.Comment }
 

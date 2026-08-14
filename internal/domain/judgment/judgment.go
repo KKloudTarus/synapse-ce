@@ -28,25 +28,26 @@ const (
 	CapRiskNarrative    Capability = "risk_narrative"    // NOT gated (explains, doesn't prove)
 	CapThreat           Capability = "threat"            // gated (STRIDE threat over the model, human-ratified)
 	CapCorrelation      Capability = "correlation"       // NOT gated (a cross-check disagreement; human-acknowledged, never auto-resolved)
+	CapPromotion        Capability = "promotion"         // gated (cross-pillar priority change, distinct-verifier only)
 	CapVexJustification Capability = "vex_justification" // gated (AI-proposed OpenVEX not_affected justification, human-ratified)
 )
 
 // Valid reports whether c is a known capability.
 func (c Capability) Valid() bool {
 	switch c {
-	case CapReachability, CapSAST, CapDAST, CapCritique, CapRiskNarrative, CapThreat, CapCorrelation, CapVexJustification:
+	case CapReachability, CapSAST, CapDAST, CapCritique, CapRiskNarrative, CapThreat, CapCorrelation, CapPromotion, CapVexJustification:
 		return true
 	}
 	return false
 }
 
 // Gated reports whether a verdict gates this capability's publishability (R2). Adversarially-
-// refutable capabilities (reachability/sast/critique/threat/vex_justification) are gated: publishable only with a sealed
+// refutable capabilities (reachability/sast/critique/threat/promotion/vex_justification) are gated: publishable only with a sealed
 // verdict >= EvidenceThreshold. Descriptive ones (risk_narrative; correlation – a deterministic
 // cross-check disagreement) have no "refuted at 75" semantics; they are human-accepted, not score-gated.
 func (c Capability) Gated() bool {
 	switch c {
-	case CapReachability, CapSAST, CapDAST, CapCritique, CapThreat, CapVexJustification:
+	case CapReachability, CapSAST, CapDAST, CapCritique, CapThreat, CapPromotion, CapVexJustification:
 		return true
 	}
 	return false
@@ -102,9 +103,14 @@ type Judgment struct {
 	Claim         Claim
 	State         State
 	EvidenceScore int
-	ProposedBy    string
-	Version       int
-	Audit         shared.Audit
+	ProposedBy    string `json:"proposed_by"`
+	// VerifiedBy and VerdictRationale are sealed-verdict provenance. They are set
+	// only by ApplyVerdict for a distinct verifier; proposed and accepted
+	// judgments leave both empty.
+	VerifiedBy       string `json:"verified_by"`
+	VerdictRationale string `json:"verdict_rationale"`
+	Version          int
+	Audit            shared.Audit
 }
 
 // New builds a PROPOSED judgment at EvidenceScore 0 (the proposer can never set a score). It
@@ -161,6 +167,8 @@ func (j Judgment) ApplyVerdict(v verdict.Verdict, now time.Time) (Judgment, erro
 		return Judgment{}, fmt.Errorf("%w: the verifier (%s) may not be the proposer", shared.ErrValidation, v.Verifier)
 	}
 	j.EvidenceScore = v.Score
+	j.VerifiedBy = strings.TrimSpace(v.Verifier)
+	j.VerdictRationale = strings.TrimSpace(v.Rationale)
 	if verdict.MeetsBar(v.Score) {
 		j.State = StateConfirmed
 	} else {

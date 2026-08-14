@@ -41,9 +41,6 @@ func (r *EvidenceStore) Append(ctx context.Context, items []evidence.Evidence) e
 				`INSERT INTO evidence (id, tenant_id, finding_id, engagement_id, kind, sha256, previous_hash, storage_ref, content, created_by, created_at)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
 				e.ID.String(), tenantID.String(), findingID, e.EngagementID.String(), e.Kind, e.Hash, e.PreviousHash, e.StorageRef, e.Content, e.CreatedBy, e.CreatedAt); err != nil {
-				// Fork guard: the unique(engagement, previous_hash) index rejects a
-				// second child for the same parent – surface as ErrConflict so the caller
-				// re-reads the advanced head + re-chains (keeps the chain strictly linear).
 				var pgErr *pgconn.PgError
 				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 					return fmt.Errorf("evidence chain: parent already linked: %w", shared.ErrConflict)
@@ -98,4 +95,26 @@ func (r *EvidenceStore) Head(ctx context.Context, engagementID shared.ID) (strin
 		return "", fmt.Errorf("head evidence: %w", err)
 	}
 	return head, nil
+}
+
+// LookupSealedForFinding returns the most recent sealed evidence link of the
+// given kind for the specified finding, or (zero, false, nil) if none exists.
+func (r *EvidenceStore) LookupSealedForFinding(ctx context.Context, engagementID, findingID shared.ID, kind string) (evidence.Evidence, bool, error) {
+	var out evidence.Evidence
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx,
+			`SELECT id, engagement_id, finding_id, kind, storage_ref, sha256, previous_hash, created_by, created_at
+			 FROM evidence
+			 WHERE engagement_id=$1 AND finding_id=$2 AND kind=$3
+			 ORDER BY seq DESC LIMIT 1`,
+			engagementID.String(), findingID.String(), kind,
+		).Scan(&out.ID, &out.EngagementID, &out.FindingID, &out.Kind, &out.StorageRef, &out.Hash, &out.PreviousHash, &out.CreatedBy, &out.CreatedAt)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return evidence.Evidence{}, false, nil
+	}
+	if err != nil {
+		return evidence.Evidence{}, false, fmt.Errorf("lookup sealed evidence: %w", err)
+	}
+	return out, true, nil
 }

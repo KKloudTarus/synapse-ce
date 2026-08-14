@@ -113,6 +113,128 @@ func (s *Service) Seal(ctx context.Context, engagementID shared.ID, kind string,
 	return s.sealRef(ctx, engagementID, kind, content, "", createdBy)
 }
 
+// SealForFinding appends one sealed link bound to the chain head with a
+// FindingID link. Used by the promotion service to seal finding-linked
+// promotion application evidence.
+func (s *Service) SealForFinding(ctx context.Context, engagementID, findingID shared.ID, kind string, content []byte, createdBy string) (evdom.Evidence, error) {
+	return s.sealRefForFinding(ctx, engagementID, findingID, kind, content, "", createdBy)
+}
+
+// LookupSealedForFinding returns the most recent sealed evidence link of the
+// given kind for the specified finding, or (zero, false, nil) if none exists.
+// Delegates to the underlying store.
+// LookupSealedByID returns a sealed evidence link by stable ID.
+func (s *Service) LookupSealedByID(ctx context.Context, engagementID, evidenceID shared.ID) (evdom.Evidence, bool, error) {
+	items, err := s.store.ListByEngagement(ctx, engagementID)
+	if err != nil {
+		return evdom.Evidence{}, false, fmt.Errorf("list evidence: %w", err)
+	}
+	for _, item := range items {
+		if item.ID == evidenceID {
+			return item, true, nil
+		}
+	}
+	return evdom.Evidence{}, false, nil
+}
+
+// appendReserved appends a deterministic reserved evidence ID exactly once.
+// A retry compares the existing complete payload before accepting it; a
+// conflicting reuse fails closed without adding another chain link.
+func (s *Service) appendReserved(ctx context.Context, link evdom.Evidence) (evdom.Evidence, error) {
+	if existing, found, err := s.LookupSealedByID(ctx, link.EngagementID, link.ID); err != nil {
+		return evdom.Evidence{}, err
+	} else if found {
+		if existing.FindingID == link.FindingID && existing.Kind == link.Kind && string(existing.Content) == string(link.Content) && existing.StorageRef == link.StorageRef && existing.CreatedBy == link.CreatedBy {
+			return existing, nil
+		}
+		return evdom.Evidence{}, fmt.Errorf("evidence id %s conflicts: %w", link.ID, shared.ErrConflict)
+	}
+	if err := s.store.Append(ctx, []evdom.Evidence{link}); err != nil {
+		if errors.Is(err, shared.ErrConflict) {
+			if existing, found, lookupErr := s.LookupSealedByID(ctx, link.EngagementID, link.ID); lookupErr == nil && found {
+				if existing.FindingID == link.FindingID && existing.Kind == link.Kind && string(existing.Content) == string(link.Content) && existing.StorageRef == link.StorageRef && existing.CreatedBy == link.CreatedBy {
+					return existing, nil
+				}
+				return evdom.Evidence{}, fmt.Errorf("evidence id %s conflicts: %w", link.ID, shared.ErrConflict)
+			}
+		}
+		return evdom.Evidence{}, fmt.Errorf("append evidence: %w", err)
+	}
+	s.anchorSealedHead(ctx, link.EngagementID, link.Hash)
+	return link, nil
+}
+
+// SealForFindingWithID appends a finding-linked evidence link with its caller-
+// reserved stable ID. It is used only by crash-recoverable application flows.
+func (s *Service) SealForFindingWithID(ctx context.Context, evidenceID, engagementID, findingID shared.ID, kind string, content []byte, storageRef, createdBy string) (evdom.Evidence, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return evdom.Evidence{}, err
+		}
+		if existing, found, err := s.LookupSealedByID(ctx, engagementID, evidenceID); err != nil {
+			return evdom.Evidence{}, err
+		} else if found {
+			if existing.FindingID == findingID && existing.Kind == kind && string(existing.Content) == string(content) && existing.StorageRef == storageRef && existing.CreatedBy == createdBy {
+				return existing, nil
+			}
+			return evdom.Evidence{}, fmt.Errorf("evidence id %s conflicts: %w", evidenceID, shared.ErrConflict)
+		}
+		prev, err := s.store.Head(ctx, engagementID)
+		if err != nil {
+			return evdom.Evidence{}, fmt.Errorf("evidence head: %w", err)
+		}
+		link := evdom.Evidence{ID: evidenceID, EngagementID: engagementID, FindingID: findingID, Kind: kind, Content: content, StorageRef: storageRef, PreviousHash: prev, CreatedBy: createdBy, CreatedAt: s.clock.Now()}.Seal()
+		ev, err := s.appendReserved(ctx, link)
+		if err == nil {
+			return ev, nil
+		}
+		if !errors.Is(err, shared.ErrConflict) {
+			return evdom.Evidence{}, err
+		}
+		select {
+		case <-ctx.Done():
+			return evdom.Evidence{}, ctx.Err()
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+func (s *Service) sealRefForFinding(ctx context.Context, engagementID, findingID shared.ID, kind string, content []byte, storageRef, createdBy string) (evdom.Evidence, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return evdom.Evidence{}, err
+		}
+		prev, err := s.store.Head(ctx, engagementID)
+		if err != nil {
+			return evdom.Evidence{}, fmt.Errorf("evidence head: %w", err)
+		}
+		link := evdom.Evidence{
+			ID:           s.ids.NewID(),
+			EngagementID: engagementID,
+			FindingID:    findingID,
+			Kind:         kind,
+			Content:      content,
+			StorageRef:   storageRef,
+			PreviousHash: prev,
+			CreatedBy:    createdBy,
+			CreatedAt:    s.clock.Now(),
+		}.Seal()
+		err = s.store.Append(ctx, []evdom.Evidence{link})
+		if err == nil {
+			s.anchorSealedHead(ctx, engagementID, link.Hash)
+			return link, nil
+		}
+		if !errors.Is(err, shared.ErrConflict) {
+			return evdom.Evidence{}, fmt.Errorf("append evidence: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return evdom.Evidence{}, ctx.Err()
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
 func (s *Service) sealRef(ctx context.Context, engagementID shared.ID, kind string, content []byte, storageRef, createdBy string) (evdom.Evidence, error) {
 	// Concurrency-safe append: two writers (e.g. the API + the worker) sealing to
 	// the same engagement chain can both read the same head and FORK it. The store enforces

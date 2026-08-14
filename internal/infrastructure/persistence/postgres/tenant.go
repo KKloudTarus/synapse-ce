@@ -75,10 +75,12 @@ func WithContextTenant(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) 
 // so that path can enforce it at startup, while single-tenant deployments that connect as a
 // superuser and use no RLS-protected table are not forced to change their role.
 func CheckRLSRuntimeRole(ctx context.Context, pool *pgxpool.Pool) error {
-	var super, bypass bool
-	err := pool.QueryRow(ctx,
-		`SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
-	).Scan(&super, &bypass)
+	var super, bypass, databaseCreate, schemaCreate, ownsRLSTable bool
+	err := pool.QueryRow(ctx, `SELECT r.rolsuper, r.rolbypassrls,
+		has_database_privilege(current_user, current_database(), 'CREATE'),
+		has_schema_privilege(current_user, 'public', 'CREATE'),
+		EXISTS (SELECT 1 FROM pg_class c WHERE c.relkind IN ('r','p') AND c.relrowsecurity AND c.relowner = r.oid)
+		FROM pg_roles r WHERE r.rolname = current_user`).Scan(&super, &bypass, &databaseCreate, &schemaCreate, &ownsRLSTable)
 	if err != nil {
 		return fmt.Errorf("rls: inspect runtime role: %w", err)
 	}
@@ -87,6 +89,10 @@ func CheckRLSRuntimeRole(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("rls: runtime DB role %w: role is SUPERUSER, which bypasses row level security", errRLSRoleBypasses)
 	case bypass:
 		return fmt.Errorf("rls: runtime DB role %w: role has BYPASSRLS, which bypasses row level security", errRLSRoleBypasses)
+	case ownsRLSTable:
+		return fmt.Errorf("rls: runtime DB role %w: role owns an RLS table", errRLSRoleBypasses)
+	case schemaCreate || databaseCreate:
+		return fmt.Errorf("rls: runtime DB role %w: role has schema or database DDL authority", errRLSRoleBypasses)
 	default:
 		return nil
 	}

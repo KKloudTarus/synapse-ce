@@ -29,7 +29,8 @@ func (sealer) Seal(context.Context, shared.ID, string, []byte, string) (evidence
 
 type auditor struct{}
 
-func (auditor) Record(context.Context, ports.AuditEntry) error { return nil }
+func (auditor) Record(context.Context, ports.AuditEntry) error     { return nil }
+func (auditor) RecordOnce(context.Context, ports.AuditEntry) error { return nil }
 
 type clock struct{}
 

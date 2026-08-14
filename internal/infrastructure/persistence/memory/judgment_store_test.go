@@ -33,15 +33,29 @@ func TestJudgmentStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if upd.EvidenceScore != 80 || upd.State != judgment.StateConfirmed || upd.Version != 2 {
+	if upd.EvidenceScore != 80 || upd.State != judgment.StateConfirmed || upd.Version != 2 || upd.VerifiedBy != "" || upd.VerdictRationale != "" {
 		t.Fatalf("SetScoreState: %+v", upd)
 	}
+	provenance, err := st.SetVerdictState(ctx, "e1", "j1", 91, judgment.StateConfirmed, "human:verifier", "reproduced", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provenance.VerifiedBy != "human:verifier" || provenance.VerdictRationale != "reproduced" || provenance.EvidenceScore != 91 || provenance.Version != 3 {
+		t.Fatalf("SetVerdictState lost provenance: %#v", provenance)
+	}
+	accepted, err := st.SetScoreState(ctx, "e1", "j1", 91, judgment.StateConfirmed, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.VerifiedBy != "human:verifier" || accepted.VerdictRationale != "reproduced" || accepted.Version != 4 {
+		t.Fatalf("SetScoreState cleared sealed provenance: %#v", accepted)
+	}
 	// stale expectedVersion → conflict (lost-update guard)
-	if _, err := st.SetScoreState(ctx, "e1", "j1", 90, judgment.StateRefuted, 1); !errors.Is(err, shared.ErrConflict) {
+	if _, err := st.SetScoreState(ctx, "e1", "j1", 90, judgment.StateRefuted, 3); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("stale version: want ErrConflict, got %v", err)
 	}
 	// unknown id → not found
-	if _, err := st.SetScoreState(ctx, "e1", "nope", 1, judgment.StateConfirmed, 2); !errors.Is(err, shared.ErrNotFound) {
+	if _, err := st.SetScoreState(ctx, "e1", "nope", 1, judgment.StateConfirmed, 4); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("unknown id: want ErrNotFound, got %v", err)
 	}
 
@@ -55,7 +69,7 @@ func TestJudgmentStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	again, _ := st.ListByEngagement(ctx, "e1")
-	if again[0].EvidenceScore != 80 || again[0].State != judgment.StateConfirmed || again[0].Version != 2 {
+	if again[0].EvidenceScore != 91 || again[0].State != judgment.StateConfirmed || again[0].Version != 4 || again[0].VerifiedBy != "human:verifier" || again[0].VerdictRationale != "reproduced" {
 		t.Fatalf("re-Save clobbered an existing row: %+v", again[0])
 	}
 }

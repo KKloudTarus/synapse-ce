@@ -66,14 +66,40 @@ func TestMigration0081MakesIndependenceConstraintFailClosed(t *testing.T) {
 	}
 
 	assertUp(constraint())
-	// Exercise exactly this migration so the regression stays isolated from any
-	// neighboring migrations that may land while this branch is under review.
+	// Migration 0085 intentionally refuses a rollback after a tenant v2 audit
+	// entry exists. Isolate this historical migration test from prior live-DSN
+	// test data before rolling through 0085 to reach 0081.
+	cleanupConn, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("migration cleanup connection: %v", err)
+	}
+	if _, err := cleanupConn.ExecContext(context.Background(), "SET session_replication_role = replica"); err != nil {
+		cleanupConn.Close()
+		t.Fatalf("disable audit append-only trigger: %v", err)
+	}
+	if _, err := cleanupConn.ExecContext(context.Background(), "DELETE FROM audit_log WHERE hash_version = 2"); err != nil {
+		_, _ = cleanupConn.ExecContext(context.Background(), "SET session_replication_role = origin")
+		cleanupConn.Close()
+		t.Fatalf("clear v2 audit rows: %v", err)
+	}
+	if _, err := cleanupConn.ExecContext(context.Background(), "SET session_replication_role = origin"); err != nil {
+		cleanupConn.Close()
+		t.Fatalf("restore audit append-only trigger: %v", err)
+	}
+	cleanupConn.Close()
+
+	// DownTo(80) makes 0081 the current migration, so the following Down
+	// applies exactly 0081 rather than only the latest migration. Reapply all
+	// migrations afterwards to restore this shared test database to version 88.
+	if err := goose.DownTo(db, ".", 80); err != nil {
+		t.Fatalf("down to 0080: %v", err)
+	}
 	if err := goose.Down(db, "."); err != nil {
 		t.Fatalf("down 0081: %v", err)
 	}
 	assertDown(constraint())
 	if err := goose.Up(db, "."); err != nil {
-		t.Fatalf("up 0081: %v", err)
+		t.Fatalf("restore to 0088: %v", err)
 	}
 	assertUp(constraint())
 

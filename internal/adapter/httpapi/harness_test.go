@@ -25,14 +25,18 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/threatmodel"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeupdraft"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	attackpathuc "github.com/KKloudTarus/synapse-ce/internal/usecase/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
+	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetrolloutuc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
+	promotionuc "github.com/KKloudTarus/synapse-ce/internal/usecase/promotion"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
@@ -41,7 +45,32 @@ import (
 // fakeJudgments is a no-op judgmentService for the harness – every judgment assertion below is a
 // DENY (403/404) rejected by authz/withEngTenant before any method runs, except the readonly LIST
 // allow which returns an empty set.
+func mustPromotionStore(t *testing.T, findings *memory.FindingRepository, engagements ports.EngagementOwnershipReader) ports.PendingPromotionAuditStore {
+	t.Helper()
+	store, err := memory.NewPromotionStore(findings, engagements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
 type fakeJudgments struct{}
+
+type harnessAudit struct{ entries []ports.AuditEntry }
+
+func (a *harnessAudit) Record(ctx context.Context, e ports.AuditEntry) error {
+	return a.RecordOnce(ctx, e)
+}
+
+func (a *harnessAudit) RecordOnce(_ context.Context, e ports.AuditEntry) error {
+	for _, existing := range a.entries {
+		if e.Metadata["idempotency_key"] != "" && existing.Metadata["idempotency_key"] == e.Metadata["idempotency_key"] {
+			return nil
+		}
+	}
+	a.entries = append(a.entries, e)
+	return nil
+}
 
 func (fakeJudgments) List(context.Context, shared.ID) ([]judgment.Judgment, error) { return nil, nil }
 func (fakeJudgments) Verify(context.Context, string, shared.ID, shared.ID, int, string, int) (judgment.Judgment, error) {
@@ -225,6 +254,18 @@ func (fakeRules) Get(context.Context, rule.Key) (rule.Rule, error)        { retu
 // assertions are the denials.
 func TestHostileHarness(t *testing.T) {
 	engRepo := memory.NewEngagementRepository()
+	promotionFindings := memory.NewFindingRepository()
+	promotionJudgments := memory.NewJudgmentStore()
+	promotionEvents := mustPromotionStore(t, promotionFindings, engRepo)
+	audit := &harnessAudit{}
+	promotionEvidence, err := evidenceuc.NewService(memory.NewEvidenceStore(), nil, audit, fixedClock{t: time.Unix(1, 0)}, engIDs{})
+	if err != nil {
+		t.Fatalf("promotion evidence service: %v", err)
+	}
+	promotionAnalysis, err := analysisuc.NewService(promotionJudgments, promotionEvidence, audit, fixedClock{t: time.Unix(1, 0)}, engIDs{})
+	if err != nil {
+		t.Fatalf("promotion analysis service: %v", err)
+	}
 	if err := engRepo.Create(context.Background(), &engdom.Engagement{
 		ID: "engA", TenantID: "tenantA", Name: "A", Client: "A", Status: engdom.StatusActive,
 	}); err != nil {
@@ -234,6 +275,26 @@ func TestHostileHarness(t *testing.T) {
 		ID: "engB", TenantID: "tenantB", Name: "B", Client: "B", Status: engdom.StatusActive,
 	}); err != nil {
 		t.Fatalf("seed engagement B: %v", err)
+	}
+	promotionCtx := shared.WithTenant(context.Background(), "tenantA")
+	promotionFinding := finding.Finding{
+		ID: "promotion-finding-A", EngagementID: "engA", Title: "promotion marker", Kind: finding.KindSCA,
+		Priority: 3, Version: 1, DedupKey: "promotion-finding-A", Audit: shared.Audit{CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)},
+	}
+	if err := promotionFindings.Upsert(promotionCtx, []finding.Finding{promotionFinding}); err != nil {
+		t.Fatalf("seed promotion finding: %v", err)
+	}
+	promotionRecorder, err := promotionuc.NewConfirmedRecorder(promotionEvidence, promotionEvents, promotionFindings, engRepo, audit, fixedClock{t: time.Unix(1, 0)})
+	if err != nil {
+		t.Fatalf("promotion recorder: %v", err)
+	}
+	promotionAnalysis.SetPromotionRecorder(promotionRecorder)
+	if _, err := promotionAnalysis.Propose(promotionCtx, "system:promotion", "engA", judgment.CapPromotion, judgment.SubjectFinding, promotionFinding.ID, judgment.PromotionClaim{
+		FindingID: promotionFinding.ID, Rule: judgment.RuleRuntimeReachableExposed, Proposed: judgment.PromotionEscalate,
+		Inputs:      []judgment.PromotionInput{{Kind: judgment.PromotionInputReachability, ID: "reachability-A"}},
+		Fingerprint: strings.Repeat("a", 64), FindingVersion: 1, BeforePriority: 3, AfterPriority: 2,
+	}); err != nil {
+		t.Fatalf("seed promotion claim: %v", err)
 	}
 	attackAssets := memory.NewAssetStore()
 	attackBindings := memory.NewAttackPathStore()
@@ -292,7 +353,7 @@ func TestHostileHarness(t *testing.T) {
 	// PermReview approval-decide (needs a non-nil agent – nil deps are fine because every assertion
 	// below on these routes is a DENY that authz/withEngTenant reject before any handler runs).
 	rt.SetExploitation(&fakeVerifier{})
-	rt.SetJudgments(&fakeJudgments{}) // register the judgment sign-off routes so the harness guards their SoD gates
+	rt.SetJudgments(promotionAnalysis) // real judgment/promotion lifecycle for hostile verification coverage
 	rt.SetRuntimeVerifier(&fakeRuntimeVerifier{})
 	rt.SetDASTWorkflow(&fakeDASTWorkflow{})
 	rt.SetThreatModel(&fakeThreatModel{})     // register the threat-model ingest/read routes so the harness guards their gates
@@ -317,6 +378,50 @@ func TestHostileHarness(t *testing.T) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		return rec.Code, rec.Body.String()
+	}
+
+	verifyPromotion := func(role, tenant string) (int, string) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/engagements/engA/judgments/eng-1/verify", strings.NewReader(`{"score":75,"rationale":"hostile verification","version":1}`))
+		req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "p", Role: role, TenantID: tenant}))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.String()
+	}
+	assertPromotionUnchanged := func() {
+		current, err := promotionFindings.GetByEngagementAndID(promotionCtx, "engA", promotionFinding.ID)
+		if err != nil {
+			t.Fatalf("load promotion finding: %v", err)
+		}
+		if current.Priority != promotionFinding.Priority || current.Version != promotionFinding.Version {
+			t.Fatalf("hostile verification mutated promotion finding: priority/version=%d/%d, want %d/%d", current.Priority, current.Version, promotionFinding.Priority, promotionFinding.Version)
+		}
+		events, err := promotionEvents.ListByFinding(promotionCtx, "engA", promotionFinding.ID)
+		if err != nil {
+			t.Fatalf("list tenantA promotion events: %v", err)
+		}
+		if len(events) != 0 {
+			t.Fatalf("hostile verification created %d tenantA promotion events", len(events))
+		}
+	}
+	for _, role := range []string{"agent", "mcp"} {
+		if code, body := verifyPromotion(role, "tenantA"); code != http.StatusForbidden {
+			t.Errorf("machine role %q promotion verification = %d, body=%s, want 403", role, code, body)
+		}
+		assertPromotionUnchanged()
+	}
+	if code, body := verifyPromotion("reviewer", "tenantB"); code != http.StatusNotFound {
+		t.Errorf("tenantB reviewer promotion verification = %d, body=%s, want 404", code, body)
+	}
+	assertPromotionUnchanged()
+	if code, body := send("reviewer", "tenantB", http.MethodGet, "/api/v1/engagements/engA/judgments", true); code != http.StatusNotFound || strings.Contains(body, promotionFinding.ID.String()) {
+		t.Errorf("tenantB observed tenantA promotion lifecycle: code=%d body=%s", code, body)
+	}
+	tenantBEvents, err := promotionEvents.ListByFinding(shared.WithTenant(context.Background(), "tenantB"), "engA", promotionFinding.ID)
+	if err != nil {
+		t.Fatalf("list tenantB promotion events: %v", err)
+	}
+	if len(tenantBEvents) != 0 {
+		t.Fatalf("tenantB observed %d tenantA promotion events", len(tenantBEvents))
 	}
 
 	cases := []struct {

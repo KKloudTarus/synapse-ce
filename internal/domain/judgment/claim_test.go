@@ -1,6 +1,7 @@
 package judgment
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -19,6 +20,7 @@ func TestClaimRoundTrip(t *testing.T) {
 		ThreatClaim{Category: InfoDisclosure, Asset: "pii"},
 		ThreatClaim{Category: Spoofing}, // asset optional
 		CorrelationClaim{Reporters: []string{"osv"}, Missing: []string{"advisory-store"}},
+		PromotionClaim{FindingID: "finding-1", Rule: RuleUncertainCorroboration, Inputs: []PromotionInput{{Kind: PromotionInputReachability, ID: "judgment-1"}}, Proposed: PromotionFlagForReview, Uncertainty: []string{"unknown_reachability"}, Fingerprint: strings.Repeat("a", 64), FindingVersion: 1, BeforePriority: 3, AfterPriority: 3},
 		VexJustificationClaim{Justification: vex.VulnerableCodeNotInExecutePath},
 	}
 	for _, c := range claims {
@@ -189,10 +191,10 @@ func TestCorrelationClaimValidate(t *testing.T) {
 		t.Errorf("a real disagreement should pass: %v", err)
 	}
 	if err := (CorrelationClaim{Reporters: []string{"osv"}}).Validate(); !errors.Is(err, shared.ErrValidation) {
-		t.Error("no missing source → not a disagreement → must be rejected")
+		t.Error("no missing source -> not a disagreement -> must be rejected")
 	}
 	if err := (CorrelationClaim{Missing: []string{"owned"}}).Validate(); !errors.Is(err, shared.ErrValidation) {
-		t.Error("no reporters → must be rejected")
+		t.Error("no reporters -> must be rejected")
 	}
 	if err := (CorrelationClaim{Reporters: []string{""}, Missing: []string{"owned"}}).Validate(); !errors.Is(err, shared.ErrValidation) {
 		t.Error("an empty source name must be rejected")
@@ -210,7 +212,7 @@ func TestReachabilitySupersedes(t *testing.T) {
 	if !rc(Tier1_5).Supersedes(rc(Tier0)) {
 		t.Error("Tier-1.5 must supersede Tier-0")
 	}
-	// same tier does NOT supersede (no churn) – even if the new verdict disagrees
+	// same tier does NOT supersede (no churn) - even if the new verdict disagrees
 	notReach := ReachabilityClaim{Reachable: NotReachable, Tier: Tier2, Confidence: 90}
 	if notReach.Supersedes(rc(Tier2)) {
 		t.Error("same tier must not supersede (stored verdict stands)")
@@ -236,7 +238,7 @@ func TestMarshalNilClaim(t *testing.T) {
 }
 
 func TestReachabilityTierRank(t *testing.T) {
-	// Strength ordering must be strictly increasing – supersession compares ranks.
+	// Strength ordering must be strictly increasing - supersession compares ranks.
 	if !(Tier0.Rank() < Tier1.Rank() && Tier1.Rank() < Tier1_5.Rank() && Tier1_5.Rank() < Tier2.Rank()) {
 		t.Fatalf("tier ranks must be strictly increasing: %d %d %d %d", Tier0.Rank(), Tier1.Rank(), Tier1_5.Rank(), Tier2.Rank())
 	}
@@ -277,5 +279,238 @@ func TestReachabilityClaimPathBounded(t *testing.T) {
 	// a normal path passes
 	if err := (ReachabilityClaim{Reachable: Reachable, Tier: Tier1, Path: []string{"root", "lodash"}, Confidence: 50}).Validate(); err != nil {
 		t.Fatalf("normal path should pass: %v", err)
+	}
+}
+
+// --- Promotion claim tests ---
+
+func TestPromotionClaimStrictRoundTrip(t *testing.T) {
+	orig := PromotionClaim{
+		FindingID:      "finding-abc",
+		Rule:           RuleRuntimeReachableExposed,
+		Inputs:         []PromotionInput{{Kind: PromotionInputAttackPath, ID: "ap1"}, {Kind: PromotionInputReachability, ID: "j1"}},
+		Proposed:       PromotionEscalate,
+		Fingerprint:    strings.Repeat("b", 64),
+		FindingVersion: 2,
+		BeforePriority: 3,
+		AfterPriority:  2,
+	}
+	data, err := MarshalClaim(orig)
+	if err != nil {
+		t.Fatalf("MarshalClaim: %v", err)
+	}
+	got, err := UnmarshalClaim(data)
+	if err != nil {
+		t.Fatalf("UnmarshalClaim: %v", err)
+	}
+	pc, ok := got.(PromotionClaim)
+	if !ok {
+		t.Fatalf("type = %T, want PromotionClaim", got)
+	}
+	if pc.FindingID != orig.FindingID {
+		t.Errorf("FindingID = %s, want %s", pc.FindingID, orig.FindingID)
+	}
+	if pc.Rule != orig.Rule {
+		t.Errorf("Rule = %s, want %s", pc.Rule, orig.Rule)
+	}
+	if pc.Proposed != orig.Proposed {
+		t.Errorf("Proposed = %s, want %s", pc.Proposed, orig.Proposed)
+	}
+	if pc.BeforePriority != orig.BeforePriority || pc.AfterPriority != orig.AfterPriority {
+		t.Errorf("priority: before=%d,after=%d want %d,%d", pc.BeforePriority, pc.AfterPriority, orig.BeforePriority, orig.AfterPriority)
+	}
+	if pc.Fingerprint != orig.Fingerprint {
+		t.Errorf("Fingerprint mismatch")
+	}
+}
+
+func TestPromotionClaimMalformed(t *testing.T) {
+	fp := strings.Repeat("a", 64)
+	cases := []struct {
+		name string
+		data string
+	}{
+		{"zero finding id", `{"capability":"promotion","claim":{"finding_id":"","rule":"` + RuleUncertainCorroboration + `","inputs":[{"kind":"reachability_judgment","id":"j1"}],"proposed":"flag_for_review","fingerprint":"` + fp + `","finding_version":1,"before_priority":3,"after_priority":3}}`},
+		{"bad rule prefix", `{"capability":"promotion","claim":{"finding_id":"f1","rule":"bad.rule","inputs":[{"kind":"reachability_judgment","id":"j1"}],"proposed":"flag_for_review","fingerprint":"` + fp + `","finding_version":1,"before_priority":3,"after_priority":3}}`},
+		{"unknown rule (fail closed)", `{"capability":"promotion","claim":{"finding_id":"f1","rule":RuleUncertainCorroboration,"inputs":[{"kind":"reachability_judgment","id":"j1"}],"proposed":"flag_for_review","fingerprint":"` + fp + `","finding_version":1,"before_priority":3,"after_priority":3}}`},
+		{"bad fingerprint", `{"capability":"promotion","claim":{"finding_id":"f1","rule":"` + RuleUncertainCorroboration + `","inputs":[{"kind":"reachability_judgment","id":"j1"}],"proposed":"flag_for_review","fingerprint":"not_hex","finding_version":1,"before_priority":3,"after_priority":3}}`},
+		{"no inputs", `{"capability":"promotion","claim":{"finding_id":"f1","rule":"` + RuleUncertainCorroboration + `","inputs":[],"proposed":"flag_for_review","fingerprint":"` + fp + `","finding_version":1,"before_priority":3,"after_priority":3}}`},
+		{"rule-effect mismatch: escalate rule with review", `{"capability":"promotion","claim":{"finding_id":"f1","rule":"` + RuleRuntimeReachableExposed + `","inputs":[{"kind":"reachability_judgment","id":"j1"}],"proposed":"flag_for_review","fingerprint":"` + fp + `","finding_version":1,"before_priority":3,"after_priority":3}}`},
+		{"rule-effect mismatch: review rule with escalate", `{"capability":"promotion","claim":{"finding_id":"f1","rule":"` + RuleUncertainCorroboration + `","inputs":[{"kind":"reachability_judgment","id":"j1"}],"proposed":"escalate","uncertainty":["inferred_edge"],"fingerprint":"` + fp + `","finding_version":1,"before_priority":3,"after_priority":2}}`},
+		{"escalation wrong delta", `{"capability":"promotion","claim":{"finding_id":"f1","rule":"` + RuleRuntimeReachableExposed + `","inputs":[{"kind":"reachability_judgment","id":"j1"}],"proposed":"escalate","fingerprint":"` + fp + `","finding_version":1,"before_priority":3,"after_priority":1}}`},
+		{"review changes priority", `{"capability":"promotion","claim":{"finding_id":"f1","rule":"` + RuleUncertainCorroboration + `","inputs":[{"kind":"reachability_judgment","id":"j1"}],"proposed":"flag_for_review","fingerprint":"` + fp + `","finding_version":1,"before_priority":3,"after_priority":2}}`},
+		{"smuggled field", `{"capability":"promotion","claim":{"finding_id":"f1","rule":"` + RuleUncertainCorroboration + `","inputs":[{"kind":"reachability_judgment","id":"j1"}],"proposed":"flag_for_review","fingerprint":"` + fp + `","finding_version":1,"before_priority":3,"after_priority":3,"notes":"PROSE LEAK"}}`},
+		{"hostile: multi-level de-escalation with deterministic_unreachable rule", `{"capability":"promotion","claim":{"finding_id":"f1","rule":"` + RuleDeterministicUnreachable + `","inputs":[{"kind":"reachability_judgment","id":"j1"}],"proposed":"de_escalate","fingerprint":"` + fp + `","finding_version":1,"before_priority":2,"after_priority":5}}`},
+		{"hostile: multi-level de-escalation without prior_promotion input", `{"capability":"promotion","claim":{"finding_id":"f1","rule":"` + RuleCorroboratingSignalLoss + `","inputs":[{"kind":"reachability_judgment","id":"j1"}],"proposed":"de_escalate","fingerprint":"` + fp + `","finding_version":1,"before_priority":2,"after_priority":5}}`},
+		{"hostile: de-escalation no movement", `{"capability":"promotion","claim":{"finding_id":"f1","rule":"` + RuleDeterministicUnreachable + `","inputs":[{"kind":"reachability_judgment","id":"j1"}],"proposed":"de_escalate","fingerprint":"` + fp + `","finding_version":1,"before_priority":3,"after_priority":3}}`},
+		{"hostile: de-escalation toward P1", `{"capability":"promotion","claim":{"finding_id":"f1","rule":"` + RuleDeterministicUnreachable + `","inputs":[{"kind":"reachability_judgment","id":"j1"}],"proposed":"de_escalate","fingerprint":"` + fp + `","finding_version":1,"before_priority":3,"after_priority":2}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := UnmarshalClaim([]byte(tc.data)); err == nil {
+				t.Fatal("want error (fail-closed), got nil")
+			} else if !errors.Is(err, shared.ErrValidation) {
+				t.Fatalf("want ErrValidation, got %v", err)
+			}
+		})
+	}
+}
+
+func TestPromotionClaimBoundaries(t *testing.T) {
+	fp := strings.Repeat("a", 64)
+	claim := func(rule string, p PromotionChange, before, after int, inputs ...PromotionInput) PromotionClaim {
+		if len(inputs) == 0 {
+			inputs = []PromotionInput{{Kind: PromotionInputReachability, ID: "j1"}}
+		}
+		return PromotionClaim{
+			FindingID: "f1", Rule: rule,
+			Inputs: inputs, Proposed: p, Fingerprint: fp,
+			FindingVersion: 1, BeforePriority: before, AfterPriority: after,
+		}
+	}
+
+	// Escalation: exactly one level toward P1.
+	esc := RuleRuntimeReachableExposed
+	if err := claim(esc, PromotionEscalate, 3, 2).Validate(); err != nil {
+		t.Errorf("escalate 3->2 should pass: %v", err)
+	}
+	if err := claim(esc, PromotionEscalate, 3, 1).Validate(); err == nil {
+		t.Error("escalate 3->1 (two levels) must fail")
+	}
+	if err := claim(esc, PromotionEscalate, 1, 0).Validate(); err == nil {
+		t.Error("escalate 1->0 must fail (out of range)")
+	}
+
+	// De-escalation: ordinary (deterministic_unreachable) must be exactly one level.
+	dea := RuleDeterministicUnreachable
+	if err := claim(dea, PromotionDeescalate, 3, 4).Validate(); err != nil {
+		t.Errorf("de-escalate 3->4 should pass: %v", err)
+	}
+	if err := claim(dea, PromotionDeescalate, 2, 5).Validate(); err == nil {
+		t.Error("ordinary de-escalate 2->5 (multi-level) must fail for deterministic_unreachable")
+	}
+	if err := claim(dea, PromotionDeescalate, 3, 3).Validate(); err == nil {
+		t.Error("de-escalate 3->3 (no movement) must fail")
+	}
+	if err := claim(dea, PromotionDeescalate, 3, 2).Validate(); err == nil {
+		t.Error("de-escalate toward P1 must fail")
+	}
+	if err := claim(dea, PromotionDeescalate, 3, 6).Validate(); err == nil {
+		t.Error("de-escalate past P5 must fail")
+	}
+
+	// De-escalation: multi-level reversal (corroborating_signal_loss) with prior_promotion input.
+	csl := RuleCorroboratingSignalLoss
+	priorInputs := []PromotionInput{
+		{Kind: PromotionInputPrior, ID: "evt-1"},
+		{Kind: PromotionInputReachability, ID: "j1"},
+	}
+	if err := claim(csl, PromotionDeescalate, 2, 5, priorInputs...).Validate(); err != nil {
+		t.Errorf("signal-loss reversal 2->5 with prior input should pass: %v", err)
+	}
+	if err := claim(csl, PromotionDeescalate, 2, 5).Validate(); err == nil {
+		t.Error("signal-loss reversal without prior_promotion input must fail")
+	}
+
+	// Review: same priority only.
+	rev := RuleUncertainCorroboration
+	if err := claim(rev, PromotionFlagForReview, 3, 3).Validate(); err != nil {
+		t.Errorf("review 3->3 should pass: %v", err)
+	}
+	if err := claim(rev, PromotionFlagForReview, 3, 4).Validate(); err == nil {
+		t.Error("review 3->4 must fail")
+	}
+}
+
+func TestPromotionClaimInputSorting(t *testing.T) {
+	fp := strings.Repeat("c", 64)
+	sorted := PromotionClaim{
+		FindingID: "f1", Rule: RuleUncertainCorroboration,
+		Inputs: []PromotionInput{
+			{Kind: PromotionInputAttackPath, ID: "ap-1"},
+			{Kind: PromotionInputDetection, ID: "det-1"},
+			{Kind: PromotionInputReachability, ID: "j1"},
+		},
+		Proposed: PromotionFlagForReview, Fingerprint: fp,
+		FindingVersion: 1, BeforePriority: 3, AfterPriority: 3,
+	}
+	if err := sorted.Validate(); err != nil {
+		t.Errorf("sorted inputs should pass: %v", err)
+	}
+	unsorted := PromotionClaim{
+		FindingID: "f1", Rule: RuleUncertainCorroboration,
+		Inputs: []PromotionInput{
+			{Kind: PromotionInputDetection, ID: "det-1"},
+			{Kind: PromotionInputAttackPath, ID: "ap-1"},
+		},
+		Proposed: PromotionFlagForReview, Fingerprint: fp,
+		FindingVersion: 1, BeforePriority: 3, AfterPriority: 3,
+	}
+	if err := unsorted.Validate(); err == nil {
+		t.Error("unsorted inputs must be rejected")
+	}
+	dup := PromotionClaim{
+		FindingID: "f1", Rule: RuleUncertainCorroboration,
+		Inputs: []PromotionInput{
+			{Kind: PromotionInputReachability, ID: "j1"},
+			{Kind: PromotionInputReachability, ID: "j1"},
+		},
+		Proposed: PromotionFlagForReview, Fingerprint: fp,
+		FindingVersion: 1, BeforePriority: 3, AfterPriority: 3,
+	}
+	if err := dup.Validate(); err == nil {
+		t.Error("duplicate inputs must be rejected")
+	}
+}
+
+func TestPromotionClaimUncertaintyTokens(t *testing.T) {
+	fp := strings.Repeat("d", 64)
+	base := PromotionClaim{
+		FindingID: "f1", Rule: RuleUncertainCorroboration,
+		Inputs:      []PromotionInput{{Kind: PromotionInputReachability, ID: "j1"}},
+		Fingerprint: fp, FindingVersion: 1, BeforePriority: 3, AfterPriority: 3,
+	}
+	sorted := base
+	sorted.Proposed = PromotionFlagForReview
+	sorted.Uncertainty = []string{"inferred_edge", "unknown_reachability"}
+	if err := sorted.Validate(); err != nil {
+		t.Errorf("sorted uncertainty + review should pass: %v", err)
+	}
+	unsorted := base
+	unsorted.Proposed = PromotionFlagForReview
+	unsorted.Uncertainty = []string{"unknown_reachability", "inferred_edge"}
+	if err := unsorted.Validate(); err == nil {
+		t.Error("unsorted uncertainty must be rejected")
+	}
+	escWithUncertainty := base
+	escWithUncertainty.Proposed = PromotionEscalate
+	escWithUncertainty.AfterPriority = 2
+	escWithUncertainty.Uncertainty = []string{"inferred_edge"}
+	if err := escWithUncertainty.Validate(); err == nil {
+		t.Error("uncertain escalation must be rejected")
+	}
+}
+
+func TestPromotionClaimJsonEnvelope(t *testing.T) {
+	pc := PromotionClaim{
+		FindingID: "f1", Rule: RuleUncertainCorroboration,
+		Inputs:   []PromotionInput{{Kind: PromotionInputReachability, ID: "j1"}},
+		Proposed: PromotionFlagForReview, Fingerprint: strings.Repeat("e", 64),
+		FindingVersion: 1, BeforePriority: 3, AfterPriority: 3,
+	}
+	data, err := MarshalClaim(pc)
+	if err != nil {
+		t.Fatalf("MarshalClaim: %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal raw: %v", err)
+	}
+	var cap string
+	if err := json.Unmarshal(raw["capability"], &cap); err != nil {
+		t.Fatalf("unmarshal capability: %v", err)
+	}
+	if cap != "promotion" {
+		t.Errorf("capability = %q, want %q", cap, "promotion")
 	}
 }

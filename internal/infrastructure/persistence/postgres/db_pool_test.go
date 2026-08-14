@@ -76,3 +76,44 @@ func TestDSNForMigrate_KeywordForm(t *testing.T) {
 		t.Fatalf("keyword-form non-pool fields must be preserved, got %q", got)
 	}
 }
+
+func TestValidateMigrationRoleSeparation(t *testing.T) {
+	tests := []struct {
+		name         string
+		migrationDSN string
+		runtimeDSN   string
+		wantErr      bool
+	}{
+		{
+			name:         "identical DSNs",
+			migrationDSN: "postgres://synapse_app:secret@localhost/synapse?sslmode=disable",
+			runtimeDSN:   "postgres://synapse_app:secret@localhost/synapse?sslmode=disable",
+			wantErr:      true,
+		},
+		{
+			name:         "same role with different credentials and options",
+			migrationDSN: "postgres://synapse_app:owner-secret@localhost/synapse?sslmode=require&application_name=migrate",
+			runtimeDSN:   "postgres://synapse_app:runtime-secret@localhost/synapse?application_name=api&sslmode=disable",
+			wantErr:      true,
+		},
+		{
+			name:         "distinct roles",
+			migrationDSN: "postgres://synapse_owner:owner-secret@localhost/synapse?sslmode=disable",
+			runtimeDSN:   "postgres://synapse_app:runtime-secret@localhost/synapse?sslmode=disable",
+		},
+		{
+			name:         "malformed migration DSN",
+			migrationDSN: "::not a dsn::",
+			runtimeDSN:   "postgres://synapse_app:runtime-secret@localhost/synapse?sslmode=disable",
+			wantErr:      true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateMigrationRoleSeparation(tt.migrationDSN, tt.runtimeDSN)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateMigrationRoleSeparation() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}

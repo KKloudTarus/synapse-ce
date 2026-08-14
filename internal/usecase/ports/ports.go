@@ -25,6 +25,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/promotion"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualityprofile"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
@@ -307,11 +308,14 @@ type EngagementRepository interface {
 	Delete(ctx context.Context, id shared.ID) error
 }
 
-// ProjectEngagementLister is an optional read extension for tenant-wide operational dashboards.
-// Project analysis contexts are intentionally hidden from EngagementRepository.List, so callers that
-// need project metrics must opt into this tenant-scoped projection instead of weakening List semantics.
-type ProjectEngagementLister interface {
-	ListProjectEngagements(ctx context.Context, tenantID shared.ID) ([]*engagement.Engagement, error)
+// EngagementOwnershipReader is a narrow interface for verifying that an
+// engagement belongs to a given tenant. Used by the in-memory PromotionStore
+// to enforce tenant-ownership before mutation (the postgres adapter handles
+// this via RLS). EngagementRepository satisfies this interface.
+type EngagementOwnershipReader interface {
+	// GetByIDInTenant loads an engagement by id scoped to tenantID.
+	// Returns ErrNotFound if the engagement does not exist in that tenant.
+	GetByIDInTenant(ctx context.Context, tenantID, id shared.ID) (*engagement.Engagement, error)
 }
 
 // JudgmentStore is the broad read/create repository for AI judgments. The
@@ -319,6 +323,45 @@ type ProjectEngagementLister interface {
 // interface + the concrete repo, so a read-only consumer (e.g. the agent tool catalog) cannot move
 // a judgment's score. Reads are engagement-scoped (tenant-isolated via the
 // engagement gate).
+// ProjectEngagementLister is an optional read extension for tenant-wide operational dashboards.
+type ProjectEngagementLister interface {
+	ListProjectEngagements(ctx context.Context, tenantID shared.ID) ([]*engagement.Engagement, error)
+}
+
+// GovernanceReconciler repairs durable governance side effects for one engagement.
+type GovernanceReconciler interface {
+	Reconcile(ctx context.Context, engagementID shared.ID) error
+}
+
+// JudgmentAuditKind identifies the immutable lifecycle transition whose audit record
+// is awaiting durable delivery.
+type JudgmentAuditKind string
+
+const (
+	JudgmentProposalAudit JudgmentAuditKind = "proposal"
+	JudgmentVerdictAudit  JudgmentAuditKind = "verdict"
+)
+
+// PendingJudgmentAudit is an immutable audit payload committed with its judgment
+// mutation. Version identifies a verdict transition; proposals use the inserted
+// judgment version.
+type PendingJudgmentAudit struct {
+	Kind         JudgmentAuditKind
+	JudgmentID   shared.ID
+	Version      int
+	EngagementID shared.ID
+	Entry        AuditEntry
+}
+
+// JudgmentAuditStore keeps judgment persistence and governance-audit outbox state
+// atomic. It is intentionally separate from the broad JudgmentStore read/create port.
+type JudgmentAuditStore interface {
+	SaveWithProposalAudit(ctx context.Context, j judgment.Judgment, entry AuditEntry) error
+	SetVerdictStateWithAudit(ctx context.Context, engagementID, id shared.ID, score int, state judgment.State, verifiedBy, rationale string, expectedVersion int, entry AuditEntry) (judgment.Judgment, error)
+	ListPendingJudgmentAudits(ctx context.Context, engagementID shared.ID) ([]PendingJudgmentAudit, error)
+	AcknowledgeJudgmentAudit(ctx context.Context, kind JudgmentAuditKind, judgmentID shared.ID, version int) error
+}
+
 type JudgmentStore interface {
 	// Save persists a proposed judgment (idempotent by id; never moves an existing row's score).
 	Save(ctx context.Context, j judgment.Judgment) error
@@ -367,6 +410,9 @@ type EngagementTenantResolver interface {
 type FindingRepository interface {
 	Upsert(ctx context.Context, findings []finding.Finding) error
 	ListByEngagement(ctx context.Context, engagementID shared.ID) ([]finding.Finding, error)
+	// GetByEngagementAndID loads a single finding by engagement and finding ID.
+	// Returns shared.ErrNotFound if no such finding exists in the engagement.
+	GetByEngagementAndID(ctx context.Context, engagementID, findingID shared.ID) (finding.Finding, error)
 	// ListPublishableByEngagement returns ONLY the findings that may appear in a
 	// customer-facing deliverable – the evidence gate applied via
 	// finding.Publishable/CanPromote. Every client-facing reader (report PDF/HTML/DOCX,
@@ -397,6 +443,108 @@ type CommentRepository interface {
 type RetestRepository interface {
 	Add(ctx context.Context, r finding.Retest) error
 	ListByEngagementFinding(ctx context.Context, engagementID, findingID shared.ID) ([]finding.Retest, error)
+}
+
+// PromotionCommand bundles every input the store needs to atomically construct,
+// validate, and persist a PromotionEvent plus the matching finding mutation.
+// The store derives AfterFindingVersion from FindingVersion and Effect, and
+// constructs the event from the remaining fields. Tenant is always derived
+// from context (shared.WithTenant / shared.TenantFrom), never from the
+// command, so an untrusted caller cannot forge cross-tenant writes.
+//
+// Idempotency: a command whose JudgmentID matches an existing event returns
+// the existing event (exact replay). A command whose Fingerprint matches but
+// whose JudgmentID differs is a semantic conflict (shared.ErrConflict).
+type PromotionCommand struct {
+	// CAS (compare-and-swap) fields: the store verifies the finding's current
+	// priority and version match before applying any mutation. A mismatch
+	// returns shared.ErrConflict (lost-update guard).
+	ExpectedPriority int
+	ExpectedVersion  int
+
+	// Event construction fields – these become immutable event metadata.
+	EventID        shared.ID
+	JudgmentID     shared.ID
+	FindingVersion int // the finding version BEFORE this promotion (≥1)
+	Rule           string
+	Effect         judgment.PromotionChange
+	BeforePriority int
+	AfterPriority  int
+	Inputs         []judgment.PromotionInput
+	Fingerprint    string
+
+	// Verdict metadata from the sealed judgment (if available).
+	VerdictScore     int
+	VerdictRationale string
+	EvidenceID       shared.ID
+	Verifier         string
+
+	// Uncertainty carries the sorted distinct tokens from the claim that
+	// describe why this promotion was flagged for review. Empty for
+	// deterministic effects. Preserved so that event construction can
+	// round-trip through PromotionClaim.Validate without losing semantics.
+	Uncertainty []string
+
+	// AppliedBy is the actor (human or service identity) that requests this
+	// promotion. Empty means system/unknown.
+	AppliedBy string
+}
+
+// PromotionStore persists promotion lifecycle events (the immutable record of
+// applied finding-priority changes). Apply is the single mutation surface:
+//   - Constructs and validates a PromotionEvent from the command, then
+//     atomically persists the finding mutation + event in one transaction.
+//   - Idempotent by (tenant, judgmentID): re-applying the same judgment
+//     returns the existing event without side effects. A matching fingerprint
+//     with a different judgmentID is a semantic conflict.
+//   - Validates that the finding's current priority matches
+//     command.ExpectedPriority and its version matches command.ExpectedVersion
+//     (CAS) before any mutation.
+//   - For escalate/de_escalate, bumps the finding's version and moves its
+//     priority atomically.
+//   - For flag_for_review, records the event without mutating the finding
+//     (no version bump, no priority change).
+//
+// Returns shared.ErrConflict on a CAS or idempotency mismatch,
+// shared.ErrNotFound if the finding or engagement does not exist.
+type PromotionEvaluator interface {
+	Evaluate(ctx context.Context, engagementID shared.ID) (int, error)
+}
+
+// PromotionReconciler restores promotion lifecycle work after a process failure.
+// It is intentionally separate from PromotionEvaluator: evaluators propose only.
+type PromotionReconciler interface {
+	Reconcile(ctx context.Context, engagementID shared.ID) error
+}
+
+type PromotionReconciliationScopeReader interface {
+	ListPromotionReconciliationScopes(ctx context.Context) ([]PromotionReconciliationScope, error)
+}
+
+type PromotionReconciliationScope struct {
+	TenantID     shared.ID
+	EngagementID shared.ID
+}
+
+type PromotionStore interface {
+	Apply(ctx context.Context, engagementID, findingID shared.ID, cmd PromotionCommand) (finding.Finding, error)
+	ListByFinding(ctx context.Context, engagementID, findingID shared.ID) ([]promotion.PromotionEvent, error)
+	LatestByFinding(ctx context.Context, engagementID, findingID shared.ID) (promotion.PromotionEvent, bool, error)
+	FindByJudgment(ctx context.Context, engagementID, findingID, judgmentID shared.ID) (promotion.PromotionEvent, bool, error)
+}
+
+// PromotionAuditTracker is the recovery-only audit-status authority. Proposal
+// evaluation and read paths do not receive it.
+type PromotionAuditTracker interface {
+	ListPendingAudits(ctx context.Context, engagementID shared.ID) ([]promotion.PromotionEvent, error)
+	MarkAuditComplete(ctx context.Context, eventID shared.ID) error
+}
+
+// PendingPromotionAuditStore combines lifecycle storage with audit-status
+// tracking for the confirmed recorder, which needs both capabilities.
+type PendingPromotionAuditStore interface {
+	PromotionStore
+	PromotionAuditTracker
 }
 
 // Provenance is the static tool/library version context captured at startup for
@@ -652,6 +800,14 @@ type AuditEntry struct {
 // tamper-evident; callers leave those fields zero.
 type AuditLogger interface {
 	Record(ctx context.Context, e AuditEntry) error
+}
+
+// IdempotentAuditLogger records an entry at most once when Metadata contains a
+// deterministic idempotency_key. Durable audit implementations use the key to
+// recover from a committed write whose acknowledgement was lost.
+type IdempotentAuditLogger interface {
+	AuditLogger
+	RecordOnce(ctx context.Context, e AuditEntry) error
 }
 
 // AuditReader reads the append-only audit log for the audit-trail UI. List
@@ -1186,6 +1342,11 @@ type ConfirmedSASTRecorder interface {
 // and it is never agent-reachable (the agent proposes; a distinct verifier confirms).
 type ConfirmedDASTRecorder interface {
 	RecordConfirmedDAST(ctx context.Context, verifier string, j judgment.Judgment) error
+}
+
+// ConfirmedPromotionRecorder applies a promotion only after the existing judgment gate seals a distinct verdict.
+type ConfirmedPromotionRecorder interface {
+	RecordConfirmed(ctx context.Context, j judgment.Judgment) error
 }
 
 // FindingWriteupApplier applies an accepted, human-signed-off write-up draft to its finding: it sets

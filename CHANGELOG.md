@@ -14,6 +14,8 @@ capabilities below are already shipped on `main`.
 
 - **AI-triage candidate promotion gate.** Strictly revalidates deterministic shadow reports, compares a candidate model/prompt with a baseline on the exact same reviewed dataset and policy, blocks new true-positive escapes plus overall or segment regressions, and emits stable CI evidence that still requires explicit human promotion approval.
 
+- **Judgment-gated cross-pillar promotion.** Correlates deterministic reachability, confident internet-facing attack paths, and active same-path runtime detections into tenant-scoped priority proposals. Distinct sealed verification applies one-level changes, uncertain inputs remain review-only, and signal loss restores the exact prior priority through an append-only, auditable lifecycle.
+
 - **AI-triage input drift evidence.** The tenant observability API and UI now expose deterministic,
   source-free language/CWE/project distributions. A new offline CLI compares them with a versioned,
   human-approved baseline using total-variation distance, writes stable CI evidence, and alerts on
