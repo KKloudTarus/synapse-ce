@@ -280,3 +280,43 @@ func (s stubRollout) DecideFor(_ context.Context, _ shared.ID, _, group, _ strin
 	}
 	return fleetrollout.Decision{Reason: fleetrollout.ReasonCanaryOnly}
 }
+
+// TestFleetDecommission exercises the agent-self clean-uninstall report (#412, AC 11): an authenticated
+// agent decommissions itself, and its credential then stops authenticating (403 decommissioned) on any
+// further transport call.
+func TestFleetDecommission(t *testing.T) {
+	h, agentSvc, _ := setupFleet(t)
+	ctx := context.Background()
+
+	enrolTok, err := agentSvc.MintEnrolToken(ctx, "op", "default", time.Hour)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	w := fleetCall(h, http.MethodPost, "/api/v1/fleet/enrol", enrolTok, map[string]any{"name": "agent-x", "platform": "linux"}, true)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("enrol should be 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	var enrolResp struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &enrolResp); err != nil {
+		t.Fatalf("enrol resp: %v", err)
+	}
+	agentTok := enrolResp.Token
+
+	// Decommission requires auth.
+	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/decommission", "", nil, true); w.Code != http.StatusUnauthorized {
+		t.Fatalf("decommission without auth should be 401, got %d", w.Code)
+	}
+	// A healthy agent decommissions itself.
+	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/decommission", agentTok, nil, true); w.Code != http.StatusOK {
+		t.Fatalf("decommission should be 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	// Its credential no longer authenticates anywhere on the transport.
+	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/heartbeat", agentTok, map[string]string{"agent_version": "0.2.0"}, true); w.Code != http.StatusForbidden {
+		t.Fatalf("decommissioned agent heartbeat should be 403, got %d (%s)", w.Code, w.Body.String())
+	}
+	if w := fleetCall(h, http.MethodPost, "/api/v1/fleet/decommission", agentTok, nil, true); w.Code != http.StatusForbidden {
+		t.Fatalf("re-decommission after decommission should be 403, got %d", w.Code)
+	}
+}

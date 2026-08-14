@@ -23,6 +23,9 @@ import (
 var (
 	ErrUnauthenticated = errors.New("fleetagent: unauthenticated")
 	ErrRevoked         = errors.New("fleetagent: agent revoked")
+	// ErrDecommissioned means the agent cleanly uninstalled and reported itself decommissioned (#412);
+	// its credential no longer authenticates. Mapped to 403 at the adapter edge, like ErrRevoked.
+	ErrDecommissioned = errors.New("fleetagent: agent decommissioned")
 )
 
 // Service is the fleet agent identity use case.
@@ -176,6 +179,9 @@ func (s *Service) AuthenticateCertificate(ctx context.Context, tenantID, agentID
 	if agent.Revoked() {
 		return nil, ErrRevoked
 	}
+	if agent.Decommissioned() {
+		return nil, ErrDecommissioned
+	}
 	return agent, nil
 }
 
@@ -198,6 +204,9 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*fleetagent.A
 	}
 	if agent.Revoked() {
 		return nil, ErrRevoked
+	}
+	if agent.Decommissioned() {
+		return nil, ErrDecommissioned
 	}
 	return agent, nil
 }
@@ -239,6 +248,37 @@ func (s *Service) Revoke(ctx context.Context, actor string, tenantID, id shared.
 		At:       now,
 	}); err != nil {
 		return fmt.Errorf("revoke agent: audit: %w", err)
+	}
+	return nil
+}
+
+// Decommission marks an agent cleanly removed on the agent's own authenticated report during uninstall
+// (#412), cancels its in-flight work orders, and audits it. It is self-reported: the actor is the
+// agent's own id. A revoked agent is unaffected (an operator revocation is the stronger terminal
+// state). The control plane then shows the identity as decommissioned rather than letting it decay into
+// stale. Tenant scope comes from the authenticated agent, never from the request body.
+func (s *Service) Decommission(ctx context.Context, agent *fleetagent.Agent) error {
+	if agent == nil {
+		return fmt.Errorf("%w: decommission needs an authenticated agent", shared.ErrValidation)
+	}
+	now := s.clock.Now()
+	if err := s.store.Decommission(ctx, agent.TenantID, agent.ID, now); err != nil {
+		return fmt.Errorf("decommission agent: %w", err)
+	}
+	cancelled := 0
+	if s.workOrders != nil {
+		// Best-effort, mirroring Revoke: a decommissioned agent must stop, but a failure to cancel its
+		// orders must not leave it un-decommissioned. Orders also expire on their own NotAfter.
+		if n, cerr := s.workOrders.CancelForAgent(ctx, agent.TenantID, agent.ID, "agent decommissioned", now); cerr == nil {
+			cancelled = n
+		}
+	}
+	if err := s.audit.Record(ctx, ports.AuditEntry{
+		Actor: agent.ID.String(), Action: "agent.decommissioned", Target: agent.ID.String(),
+		Metadata: map[string]string{"tenant_id": agent.TenantID.String(), "cancelled_orders": fmt.Sprintf("%d", cancelled)},
+		At:       now,
+	}); err != nil {
+		return fmt.Errorf("decommission agent: audit: %w", err)
 	}
 	return nil
 }

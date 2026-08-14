@@ -31,13 +31,21 @@ func CertFingerprint(der []byte) string {
 type State string
 
 const (
-	StateActive  State = "active"
-	StateStale   State = "stale" // last seen longer ago than the freshness threshold (computed by fleet coverage)
+	StateActive State = "active"
+	StateStale  State = "stale" // last seen longer ago than the freshness threshold (computed by fleet coverage)
+	// StateRevoked is an OPERATOR decision: the credential is killed with attribution.
 	StateRevoked State = "revoked"
+	// StateDecommissioned is a terminal state the AGENT reports when it is cleanly uninstalled (#412).
+	// It is distinct from Revoked (an operator killed it) and from Stale (it silently stopped reporting):
+	// the control plane shows an orderly removal rather than leaving the identity to rot into Stale. A
+	// decommissioned agent can no longer authenticate.
+	StateDecommissioned State = "decommissioned"
 )
 
 // Valid reports whether s is a known state.
-func (s State) Valid() bool { return s == StateActive || s == StateStale || s == StateRevoked }
+func (s State) Valid() bool {
+	return s == StateActive || s == StateStale || s == StateRevoked || s == StateDecommissioned
+}
 
 // Agent is an enrolled fleet agent. TokenHash is the hash of the bearer credential presented on
 // every call; the plaintext is shown once at enrolment and never stored.
@@ -63,6 +71,9 @@ type Agent struct {
 	RevokedAt    *time.Time
 	RevokedBy    shared.ID
 	RevokeReason string
+	// DecommissionedAt is when the agent self-reported a clean uninstall (#412). Nil unless the agent
+	// is in StateDecommissioned. There is no "by": decommission is self-reported, not operator-attributed.
+	DecommissionedAt *time.Time
 }
 
 // AssignGroup places the agent in a rollout group. Validation lives in the rollout domain, which owns
@@ -116,8 +127,29 @@ func NewAgent(id, tenantID shared.ID, name, platform, osVersion, agentVersion st
 	}, nil
 }
 
+// Decommission marks the agent cleanly removed (self-reported on uninstall, #412). It is a no-op on an
+// already-revoked agent — an operator revocation is a stronger, attributed terminal state and must not
+// be overwritten by a self-report. Idempotent: decommissioning an already-decommissioned agent only
+// refreshes the audit timestamp.
+func (a *Agent) Decommission(now time.Time) {
+	if a.State == StateRevoked {
+		return
+	}
+	a.State = StateDecommissioned
+	t := now
+	a.DecommissionedAt = &t
+	a.Audit.UpdatedAt = now
+}
+
 // Revoked reports whether the agent may no longer act.
 func (a *Agent) Revoked() bool { return a.State == StateRevoked }
+
+// Decommissioned reports whether the agent was cleanly removed.
+func (a *Agent) Decommissioned() bool { return a.State == StateDecommissioned }
+
+// Removed reports whether the agent's credential may no longer authenticate for any reason — an
+// operator revocation or a self-reported decommission. Auth and coverage both fail closed on it.
+func (a *Agent) Removed() bool { return a.Revoked() || a.Decommissioned() }
 
 // EnrolToken is a single-use, tenant-scoped, expiring token an operator issues so an agent can
 // enrol once. Only its hash is stored.

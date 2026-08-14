@@ -70,3 +70,50 @@ func TestEnrolToken(t *testing.T) {
 		t.Fatalf("used token should not be usable")
 	}
 }
+
+func TestDecommission(t *testing.T) {
+	mk := func() *Agent {
+		a, err := NewAgent("a1", "t1", "agent", "linux", "5.15", "0.1.0", nil, "hash", tNow)
+		if err != nil {
+			t.Fatalf("new agent: %v", err)
+		}
+		return a
+	}
+
+	// A clean decommission moves an active agent to the terminal decommissioned state, self-reported
+	// (no operator attribution), and marks it removed.
+	a := mk()
+	later := tNow.Add(time.Hour)
+	a.Decommission(later)
+	if a.State != StateDecommissioned || !a.Decommissioned() || !a.Removed() {
+		t.Fatalf("decommission did not set terminal state: %+v", a)
+	}
+	if a.DecommissionedAt == nil || !a.DecommissionedAt.Equal(later) || a.RevokedBy != "" {
+		t.Fatalf("decommission attribution wrong: at=%v by=%q", a.DecommissionedAt, a.RevokedBy)
+	}
+	if a.Revoked() {
+		t.Fatalf("a decommissioned agent is not revoked")
+	}
+
+	// Re-decommissioning an already-decommissioned agent is idempotent: it refreshes the timestamp and
+	// stays decommissioned (never toggles back).
+	evenLater := later.Add(time.Hour)
+	a.Decommission(evenLater)
+	if a.State != StateDecommissioned || a.DecommissionedAt == nil || !a.DecommissionedAt.Equal(evenLater) {
+		t.Fatalf("re-decommission should refresh the timestamp and stay decommissioned: %+v", a)
+	}
+
+	// Decommission must NOT overwrite an operator revocation (the stronger terminal state).
+	r := mk()
+	r.Revoke("op", "compromised", tNow)
+	r.Decommission(later)
+	if r.State != StateRevoked || r.Decommissioned() {
+		t.Fatalf("decommission overwrote a revocation: %s", r.State)
+	}
+	if !r.Removed() {
+		t.Fatalf("a revoked agent is removed")
+	}
+	if !StateDecommissioned.Valid() {
+		t.Fatalf("decommissioned must be a valid state")
+	}
+}

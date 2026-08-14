@@ -94,6 +94,35 @@ func TestFleetAgentRepository(t *testing.T) {
 	if !got.Revoked() {
 		t.Fatalf("agent should be revoked")
 	}
+
+	// Decommission (#412): a second, healthy agent cleanly decommissions and round-trips the terminal
+	// state + timestamp; decommissioning the already-revoked ag1 is a silent no-op that does not
+	// downgrade the revocation.
+	ag2, err := fleetagent.NewAgent("ag2", "ft", "agent-2", "linux", "5.15", "0.1.0", []string{"scan.host"}, "tokhash2", now)
+	if err != nil {
+		t.Fatalf("new agent 2: %v", err)
+	}
+	if err := repo.CreateAgent(ctx, ag2); err != nil {
+		t.Fatalf("create agent 2: %v", err)
+	}
+	if err := repo.Decommission(ctx, "ft", "ag2", now.Add(3*time.Minute)); err != nil {
+		t.Fatalf("decommission ag2: %v", err)
+	}
+	got, _ = repo.GetAgent(ctx, "ft", "ag2")
+	if !got.Decommissioned() || got.DecommissionedAt == nil {
+		t.Fatalf("ag2 should be decommissioned with a timestamp: %+v", got)
+	}
+	if err := repo.Decommission(ctx, "ft", "ag1", now.Add(4*time.Minute)); err != nil {
+		t.Fatalf("decommission of a revoked agent must be a silent no-op, got %v", err)
+	}
+	got, _ = repo.GetAgent(ctx, "ft", "ag1")
+	if !got.Revoked() || got.Decommissioned() {
+		t.Fatalf("revoked ag1 must stay revoked after a decommission no-op: %s", got.State)
+	}
+	if err := repo.Decommission(ctx, "ft", "missing", now); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("decommission of a missing agent must be ErrNotFound, got %v", err)
+	}
+
 	if _, err := repo.GetAgent(ctx, "ft", "missing"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing agent, got %v", err)
 	}

@@ -95,19 +95,28 @@ func TestIsFresh(t *testing.T) {
 
 func TestAgentStateFrom(t *testing.T) {
 	now := time.Unix(1_000_000, 0).UTC()
-	if got := AgentStateFrom(now, now, time.Hour, true); got != AgentRevoked {
+	if got := AgentStateFrom(now, now, time.Hour, true, false); got != AgentRevoked {
 		t.Errorf("revoked must dominate, got %q", got)
 	}
-	if got := AgentStateFrom(time.Time{}, now, time.Hour, false); got != AgentStale {
+	if got := AgentStateFrom(now, now, time.Hour, false, true); got != AgentDecommissioned {
+		t.Errorf("decommissioned must be surfaced distinctly, got %q", got)
+	}
+	if got := AgentStateFrom(now, now, time.Hour, true, true); got != AgentRevoked {
+		t.Errorf("revoked must take precedence over decommissioned, got %q", got)
+	}
+	if AgentDecommissioned.Live() || !AgentDecommissioned.Valid() {
+		t.Errorf("decommissioned must be valid and non-live")
+	}
+	if got := AgentStateFrom(time.Time{}, now, time.Hour, false, false); got != AgentStale {
 		t.Errorf("never-seen must be stale, got %q", got)
 	}
-	if got := AgentStateFrom(now.Add(-30*time.Minute), now, time.Hour, false); got != AgentHealthy {
+	if got := AgentStateFrom(now.Add(-30*time.Minute), now, time.Hour, false, false); got != AgentHealthy {
 		t.Errorf("recent must be healthy, got %q", got)
 	}
-	if got := AgentStateFrom(now.Add(-2*time.Hour), now, time.Hour, false); got != AgentStale {
+	if got := AgentStateFrom(now.Add(-2*time.Hour), now, time.Hour, false, false); got != AgentStale {
 		t.Errorf("beyond threshold must be stale, got %q", got)
 	}
-	if got := AgentStateFrom(now.Add(-1000*time.Hour), now, 0, false); got != AgentHealthy {
+	if got := AgentStateFrom(now.Add(-1000*time.Hour), now, 0, false, false); got != AgentHealthy {
 		t.Errorf("disabled threshold must not force stale, got %q", got)
 	}
 	if AgentHealthy.Live() != true || AgentStale.Live() || AgentRevoked.Live() {

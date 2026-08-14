@@ -26,7 +26,7 @@ func NewFleetAgentRepository(pool *pgxpool.Pool) *FleetAgentRepository {
 
 var _ ports.FleetAgentStore = (*FleetAgentRepository)(nil)
 
-const fleetAgentCols = `id, tenant_id, name, platform, os_version, agent_version, capabilities, token_hash, state, created_at, updated_at, last_seen_at, fingerprint, revoked_at, revoked_by, revoke_reason`
+const fleetAgentCols = `id, tenant_id, name, platform, os_version, agent_version, capabilities, token_hash, state, created_at, updated_at, last_seen_at, fingerprint, revoked_at, revoked_by, revoke_reason, decommissioned_at`
 
 func (r *FleetAgentRepository) CreateEnrolToken(ctx context.Context, t *fleetagent.EnrolToken) error {
 	return WithTenant(ctx, r.pool, t.TenantID.String(), func(tx pgx.Tx) error {
@@ -69,10 +69,10 @@ func (r *FleetAgentRepository) CreateAgent(ctx context.Context, a *fleetagent.Ag
 	return WithTenant(ctx, r.pool, a.TenantID.String(), func(tx pgx.Tx) error {
 		_, e := tx.Exec(ctx, `
 			INSERT INTO fleet_agents (`+fleetAgentCols+`)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
 			a.ID.String(), a.TenantID.String(), a.Name, a.Platform, a.OSVersion, a.AgentVersion,
 			caps, a.TokenHash, string(a.State), a.Audit.CreatedAt, a.Audit.UpdatedAt, a.LastSeenAt,
-			a.Fingerprint, a.RevokedAt, a.RevokedBy.String(), a.RevokeReason)
+			a.Fingerprint, a.RevokedAt, a.RevokedBy.String(), a.RevokeReason, a.DecommissionedAt)
 		return e
 	})
 }
@@ -154,6 +154,28 @@ func (r *FleetAgentRepository) Revoke(ctx context.Context, tenantID, id, by shar
 	})
 }
 
+// Decommission marks the agent decommissioned on its own report (#412). It is an idempotent no-op on a
+// REVOKED agent: an operator revocation is the stronger terminal state and a self-report must not
+// overwrite it (the CASE leaves a revoked row untouched but still matches it, so only a truly missing
+// agent yields ErrNotFound — matching the memory store's contract).
+func (r *FleetAgentRepository) Decommission(ctx context.Context, tenantID, id shared.ID, now time.Time) error {
+	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		tag, e := tx.Exec(ctx, `UPDATE fleet_agents
+			SET state = CASE WHEN state='revoked' THEN state ELSE 'decommissioned' END,
+			    decommissioned_at = CASE WHEN state='revoked' THEN decommissioned_at ELSE $3 END,
+			    updated_at = CASE WHEN state='revoked' THEN updated_at ELSE $3 END
+			WHERE tenant_id=$1 AND id=$2`,
+			tenantID.String(), id.String(), now)
+		if e != nil {
+			return e
+		}
+		if tag.RowsAffected() == 0 {
+			return shared.ErrNotFound
+		}
+		return nil
+	})
+}
+
 func (r *FleetAgentRepository) ListAgents(ctx context.Context, tenantID shared.ID) ([]*fleetagent.Agent, error) {
 	var out []*fleetagent.Agent
 	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
@@ -181,13 +203,13 @@ func scanAgent(row rowScanner) (*fleetagent.Agent, error) {
 	var (
 		id, tid, name, platform, osv, ver, hash, state string
 		fingerprint, revokedBy, revokeReason           string
-		revokedAt                                      *time.Time
+		revokedAt, decommissionedAt                    *time.Time
 		caps                                           []byte
 		a                                              fleetagent.Agent
 	)
 	if err := row.Scan(&id, &tid, &name, &platform, &osv, &ver, &caps, &hash, &state,
 		&a.Audit.CreatedAt, &a.Audit.UpdatedAt, &a.LastSeenAt,
-		&fingerprint, &revokedAt, &revokedBy, &revokeReason); err != nil {
+		&fingerprint, &revokedAt, &revokedBy, &revokeReason, &decommissionedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, shared.ErrNotFound
 		}
@@ -205,6 +227,7 @@ func scanAgent(row rowScanner) (*fleetagent.Agent, error) {
 	a.RevokedAt = revokedAt
 	a.RevokedBy = shared.ID(revokedBy)
 	a.RevokeReason = revokeReason
+	a.DecommissionedAt = decommissionedAt
 	if len(caps) > 0 {
 		if err := json.Unmarshal(caps, &a.Capabilities); err != nil {
 			return nil, err

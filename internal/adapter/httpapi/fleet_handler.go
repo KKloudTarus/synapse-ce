@@ -45,6 +45,8 @@ type fleetAgentService interface {
 	Authenticate(ctx context.Context, token string) (*fleetagent.Agent, error)
 	AuthenticateCertificate(ctx context.Context, tenantID, agentID shared.ID, fingerprint string) (*fleetagent.Agent, error)
 	Heartbeat(ctx context.Context, agent *fleetagent.Agent, in fleetagentuc.HeartbeatInput) error
+	// Decommission records the agent's own clean-uninstall report (#412).
+	Decommission(ctx context.Context, agent *fleetagent.Agent) error
 }
 
 // fleetWorkService is the narrow view of the work order lifecycle the transport needs.
@@ -269,6 +271,7 @@ func (f *fleetRouter) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/fleet/enrol", f.entry(f.enrol))
 	mux.HandleFunc("POST /api/v1/fleet/heartbeat", f.entry(f.authed(f.heartbeat)))
+	mux.HandleFunc("POST /api/v1/fleet/decommission", f.entry(f.authed(f.decommission)))
 	mux.HandleFunc("POST /api/v1/fleet/work/claim", f.entry(f.authed(f.claim)))
 	mux.HandleFunc("POST /api/v1/fleet/work/{id}/progress", f.entry(f.authed(f.progress)))
 	mux.HandleFunc("POST /api/v1/fleet/work/{id}/result", f.entry(f.authed(f.result)))
@@ -335,6 +338,8 @@ func (f *fleetRouter) authed(next http.HandlerFunc) http.HandlerFunc {
 			switch {
 			case errors.Is(err, fleetagentuc.ErrRevoked):
 				writeJSON(w, http.StatusForbidden, errorBody{Error: "revoked"})
+			case errors.Is(err, fleetagentuc.ErrDecommissioned):
+				writeJSON(w, http.StatusForbidden, errorBody{Error: "decommissioned"})
 			case errors.Is(err, fleetagentuc.ErrUnauthenticated):
 				writeJSON(w, http.StatusUnauthorized, errorBody{Error: "unauthenticated"})
 			default:
@@ -422,6 +427,19 @@ func (f *fleetRouter) heartbeat(w http.ResponseWriter, r *http.Request) {
 	// service wired, no update is ever offered: the absence of a decider is not permission.
 	out["update"] = f.updateOffer(r.Context(), agent, req.AgentVersion)
 	writeJSON(w, http.StatusOK, out)
+}
+
+// decommission records the agent's own clean-uninstall report (#412, AC 11). It is agent-authenticated
+// (the caller is the agent, resolved by authed), tenant-scoped to that agent's identity, and takes no
+// body — the identity is the credential, never a request field. The control plane then shows the agent
+// as decommissioned rather than letting it decay into stale, and the credential stops authenticating.
+func (f *fleetRouter) decommission(w http.ResponseWriter, r *http.Request) {
+	agent, _ := agentFrom(r.Context())
+	if err := f.agents.Decommission(r.Context(), agent); err != nil {
+		writeError(w, f.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "decommissioned"})
 }
 
 // updateOffer computes the heartbeat's update block for ONE agent.
