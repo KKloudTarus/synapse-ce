@@ -38,7 +38,7 @@ func TestAdvisoryMaterializerPostgresReplayAndConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 
 	sourceID := shared.ID("src-mat-" + randHex(t))
 	tenantID := shared.ID("tenant-mat-" + randHex(t))

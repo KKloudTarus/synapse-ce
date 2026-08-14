@@ -34,7 +34,7 @@ func setupJobQueue(t *testing.T) (*JobQueue, context.Context) {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, "TRUNCATE vulnerability_reconciliation_runs, jobs"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE jobs CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return NewJobQueue(pool, idgen.RandomID{}), shared.WithTenant(ctx, shared.DefaultTenant)

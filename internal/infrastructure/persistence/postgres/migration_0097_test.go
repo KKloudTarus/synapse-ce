@@ -44,6 +44,9 @@ func TestMigration0097ReconciliationRunAtomicityCASAndIsolation(t *testing.T) {
 	if err := goose.UpTo(db, ".", 97); err != nil {
 		t.Fatalf("up 0097: %v", err)
 	}
+	if err := goose.UpTo(db, ".", 99); err != nil {
+		t.Fatalf("up to current reconciliation store schema: %v", err)
+	}
 	pool, err := Connect(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
