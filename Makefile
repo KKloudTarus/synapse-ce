@@ -1,4 +1,4 @@
-.PHONY: help install tools dev build run test harness vet lint format typecheck tidy ai-triage-eval ai-triage-compare ai-triage-drift \
+.PHONY: help install tools dev build run test harness vet lint format typecheck tidy ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift \
         docker-build docker-up docker-down clean web-dev web-build smoke
 
 GO ?= go
@@ -8,6 +8,9 @@ AI_EVAL_OUTPUT ?= ai-triage-eval.json
 AI_EVAL_BASELINE ?= ai-triage-baseline.json
 AI_EVAL_CANDIDATE ?= ai-triage-candidate.json
 AI_EVAL_COMPARISON ?= ai-triage-comparison.json
+AI_RELEASE_MANIFEST ?= ai-triage-release-manifest.json
+AI_RELEASE_LEDGER ?=
+AI_RELEASE_OUTPUT ?= ai-triage-release-ledger.json
 AI_DRIFT_BASELINE ?= ai-triage-drift-baseline.json
 AI_DRIFT_OBSERVED ?= ai-triage-observability.json
 AI_DRIFT_OUTPUT ?= ai-triage-drift-report.json
@@ -58,6 +61,9 @@ ai-triage-eval: ## Evaluate FP triage against the versioned golden dataset (requ
 
 ai-triage-compare: ## Compare candidate and baseline AI-triage shadow reports for promotion review
 	$(GO) run ./cmd/synapse-fptriage-compare --baseline $(AI_EVAL_BASELINE) --candidate $(AI_EVAL_CANDIDATE) --output $(AI_EVAL_COMPARISON)
+
+ai-triage-release: ## Append a PM/Security-approved AI-triage promotion to a new release ledger
+	$(GO) run ./cmd/synapse-fptriage-release --manifest $(AI_RELEASE_MANIFEST) $(if $(AI_RELEASE_LEDGER),--ledger $(AI_RELEASE_LEDGER),) --comparison $(AI_EVAL_COMPARISON) --baseline $(AI_EVAL_BASELINE) --candidate $(AI_EVAL_CANDIDATE) --output $(AI_RELEASE_OUTPUT)
 
 ai-triage-drift: ## Compare AI triage input distribution with a human-approved baseline
 	$(GO) run ./cmd/synapse-fptriage-drift --baseline $(AI_DRIFT_BASELINE) --observed $(AI_DRIFT_OBSERVED) --output $(AI_DRIFT_OUTPUT)

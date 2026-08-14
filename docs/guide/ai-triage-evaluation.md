@@ -5,12 +5,13 @@ an operator enables gate automation. Evaluation uses the same proposer, verifier
 threshold, human-review floors, and deterministic policy as a scan. The only policy difference is forced
 shadow mode: `would_gate_exempt` is measured, while `gate_exempt` must remain `false`.
 
-The repository includes three offline AI-triage data/evaluation commands:
+The repository includes five offline AI-triage data/evaluation commands:
 
 | Binary | Role |
 | --- | --- |
 | `synapse-fptriage-eval` | Run the versioned AI false-positive evaluation harness |
 | `synapse-fptriage-compare` | Compare a candidate shadow report with an approved baseline before promotion review |
+| `synapse-fptriage-release` | Record independently approved, versioned promotions and rollbacks |
 | `synapse-fptriage-curate` | Curate human review outcomes into privacy- and label-reviewed evaluation data |
 | `synapse-fptriage-drift` | Compare production input distribution with a human-approved baseline |
 
@@ -242,6 +243,65 @@ evidence and still inspect `status`. The output is create-only: choose a fresh p
 parent is resolved before creation, and the final component cannot overwrite an existing file, symlink,
 or either input. A clean comparison has status `review_required`, never `promoted`: PM/Security approval,
 versioned rollout configuration, canary monitoring, and rollback remain explicit human-controlled steps.
+
+## Approve a promotion or rollback
+
+`synapse-fptriage-release` closes the governance step after a clean comparison. It recomputes the
+comparison from both shadow reports at the release boundary, then appends an immutable decision to a
+hash-chained release ledger. The command never edits runtime configuration, selects a model, changes a
+prompt or threshold, or grants a finding gate exemption.
+
+Start with a manifest that binds the exact comparison but leaves `approvals` empty:
+
+```json
+{
+  "schema_version": "synapse-ai-triage-release-manifest-v1",
+  "version": "ai-triage-2026-08-canary",
+  "action": "promote",
+  "provenance": "change/security-42",
+  "comparison_id": "<comparison_id>",
+  "approvals": []
+}
+```
+
+Print the digest over that manifest, the three evaluation artifacts, and the current ledger head:
+
+```bash
+go run ./cmd/synapse-fptriage-release \
+  --manifest ai-triage-release-manifest.json \
+  --comparison ai-triage-comparison.json \
+  --baseline ai-triage-baseline.json \
+  --candidate ai-triage-candidate.json \
+  --print-review-digest
+```
+
+One PM and one Security reviewer must independently add approvals in canonical order. They must be
+distinct human identities; model names and reserved machine principals are rejected. Each approval
+contains `role`, `reviewer`, `approved: true`, a rationale, a UTC `reviewed_at`, and the exact
+`reviewed_sha256` printed above. After approval, create the first ledger:
+
+```bash
+go run ./cmd/synapse-fptriage-release \
+  --manifest ai-triage-release-approved.json \
+  --comparison ai-triage-comparison.json \
+  --baseline ai-triage-baseline.json \
+  --candidate ai-triage-candidate.json \
+  --output ai-triage-release-ledger-v1.json
+```
+
+Every later decision reads the previous ledger and writes a new file; output is create-only and cannot
+overwrite any input artifact. Versions are unique, decision IDs form a hash chain, and the approval
+digest includes the previous head so a decision cannot be replayed after another release lands.
+
+Rollback uses the same two-person process. Set `action` to `rollback`, omit `comparison_id`, and set
+`rollback_to` to `initial` or an earlier `decision_id`. Run first with `--ledger <current-ledger>` and
+`--print-review-digest`, add both approvals, then run again with a fresh `--output`. Rollback can only
+select a configuration already present in the validated ledger and is rejected if that configuration
+is already active. Comparison/evaluation inputs are forbidden on rollback.
+
+The approved ledger is governance evidence, not deployment authority. Apply its active run identity
+through the normal reviewed deployment configuration, start in shadow/canary mode, retain all reports
+and comparison inputs, and use the distribution-drift workflow below for monitoring.
 
 ## Detect production distribution drift
 

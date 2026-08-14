@@ -12,6 +12,8 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **Versioned AI-triage release governance.** Recomputes passing candidate comparisons at the approval boundary and records promotions or rollbacks in a create-only, hash-chained ledger. Every decision requires distinct PM and Security approvals bound to the current ledger head; no release artifact mutates runtime model, prompt, threshold, or gate configuration automatically.
+
 - **AI-triage candidate promotion gate.** Strictly revalidates deterministic shadow reports, compares a candidate model/prompt with a baseline on the exact same reviewed dataset and policy, blocks new true-positive escapes plus overall or segment regressions, and emits stable CI evidence that still requires explicit human promotion approval.
 
 - **Judgment-gated cross-pillar promotion.** Correlates deterministic reachability, confident internet-facing attack paths, and active same-path runtime detections into tenant-scoped priority proposals. Distinct sealed verification applies one-level changes, uncertain inputs remain review-only, and signal loss restores the exact prior priority through an append-only, auditable lifecycle.
