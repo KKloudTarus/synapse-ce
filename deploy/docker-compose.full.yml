@@ -14,25 +14,47 @@
 # recon + the API-server Maven/Gradle resolvers require a Linux host with bubblewrap (+ CAP_NET_ADMIN for
 # egress scoping) and a privileged/user-ns container; that's a separate hardened deployment.
 #
-# Credentials below are LOCAL-DEV defaults, overridable via the shell / an .env file next to this compose
-# (DB_USER, DB_PASSWORD, BLOB_USER, BLOB_PASSWORD, SYNAPSE_API_TOKEN, …). Change them for anything but dev.
+# Credentials below use local-dev defaults where safe. Set DB_ADMIN_PASSWORD and DB_APP_PASSWORD
+# via the shell or an .env file next to this compose; the admin owns migrations and the API
+# connects as a non-superuser app role.
 
 services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: "${DB_USER:-synapse}"
-      POSTGRES_PASSWORD: "${DB_PASSWORD:-synapse}"
+      POSTGRES_USER: "${DB_ADMIN_USER:-synapse_admin}"
+      POSTGRES_PASSWORD: "${DB_ADMIN_PASSWORD:?DB_ADMIN_PASSWORD must be set (for example, in .env)}"
       POSTGRES_DB: "${DB_NAME:-synapse}"
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-synapse}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_ADMIN_USER:-synapse_admin}"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  postgres-init:
+    image: postgres:17-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: "${DB_ADMIN_PASSWORD:?DB_ADMIN_PASSWORD must be set (for example, in .env)}"
+      DB_APP_PASSWORD: "${DB_APP_PASSWORD:?DB_APP_PASSWORD must be set (for example, in .env)}"
+    entrypoint:
+      - sh
+      - -ec
+      - |
+        psql -h postgres -U "${DB_ADMIN_USER:-synapse_admin}" -d "${DB_NAME:-synapse}" -v ON_ERROR_STOP=1 \
+          -v app_role="${DB_APP_USER:-synapse_app}" <<'SQL'
+        \getenv app_password DB_APP_PASSWORD
+        SELECT format('CREATE ROLE %I LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD %L', :'app_role', :'app_password')
+        WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app_role')
+        \gexec
+        ALTER ROLE :"app_role" NOSUPERUSER NOBYPASSRLS;
+        SQL
 
   minio:
     image: minio/minio:latest
@@ -76,8 +98,8 @@ services:
     depends_on:
       project-source-artifacts-init:
         condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
     build:
@@ -104,9 +126,10 @@ services:
       SYNAPSE_SINGLE_TENANT: "true"
 
       # --- persistence + evidence blob store ---
-      # DSN scheme is a var so no literal "scheme://user:pass@" is committed (secret-scan clean). pgx
-      # accepts the assembled URL; override any part via the shell / an .env file.
-      SYNAPSE_DB_DSN: "${DB_SCHEME:-postgres}://${DB_USER:-synapse}:${DB_PASSWORD:-synapse}@${DB_HOST:-postgres}:5432/${DB_NAME:-synapse}?sslmode=disable"
+      # Supply complete DSNs so passwords containing URL-reserved characters remain valid.
+      # The API uses the runtime role; migrations use the distinct DDL-owner role.
+      SYNAPSE_DB_DSN: "${SYNAPSE_DB_DSN:?SYNAPSE_DB_DSN must be set (for example, in .env)}"
+      SYNAPSE_DB_MIGRATION_DSN: "${SYNAPSE_DB_MIGRATION_DSN:?SYNAPSE_DB_MIGRATION_DSN must be set (for example, in .env)}"
       SYNAPSE_BLOB_ENDPOINT: "minio:9000"
       SYNAPSE_BLOB_ACCESS_KEY: "${BLOB_USER:-synapse}"
       SYNAPSE_BLOB_SECRET_KEY: "${BLOB_PASSWORD:-synapse-secret}"

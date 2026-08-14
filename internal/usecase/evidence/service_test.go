@@ -12,8 +12,6 @@ import (
 
 	evdom "github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
-	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -41,6 +39,69 @@ func (s *memStore) Head(_ context.Context, id shared.ID) (string, error) {
 		return "", nil
 	}
 	return c[len(c)-1].Hash, nil
+}
+
+func (s *memStore) LookupSealedForFinding(_ context.Context, engagementID, findingID shared.ID, kind string) (evdom.Evidence, bool, error) {
+	chain := s.items[engagementID]
+	for i := len(chain) - 1; i >= 0; i-- {
+		e := chain[i]
+		if e.FindingID == findingID && e.Kind == kind {
+			return e, true, nil
+		}
+	}
+	return evdom.Evidence{}, false, nil
+}
+
+type concurrentEvidenceStore struct {
+	mu      sync.Mutex
+	items   map[shared.ID][]evdom.Evidence
+	tenants map[shared.ID]shared.ID
+}
+
+func newConcurrentEvidenceStore() *concurrentEvidenceStore {
+	return &concurrentEvidenceStore{items: map[shared.ID][]evdom.Evidence{}, tenants: map[shared.ID]shared.ID{}}
+}
+func (s *concurrentEvidenceStore) Append(ctx context.Context, items []evdom.Evidence) error {
+	tenant, _ := shared.TenantFrom(ctx)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range items {
+		if existing, ok := s.tenants[e.EngagementID]; ok && existing != tenant {
+			return shared.ErrNotFound
+		}
+		if list := s.items[e.EngagementID]; len(list) > 0 && e.PreviousHash != list[len(list)-1].Hash {
+			return shared.ErrConflict
+		}
+		s.tenants[e.EngagementID] = tenant
+		s.items[e.EngagementID] = append(s.items[e.EngagementID], e)
+	}
+	return nil
+}
+func (s *concurrentEvidenceStore) ListByEngagement(ctx context.Context, id shared.ID) ([]evdom.Evidence, error) {
+	tenant, _ := shared.TenantFrom(ctx)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.tenants[id]; ok && existing != tenant {
+		return nil, shared.ErrNotFound
+	}
+	return append([]evdom.Evidence(nil), s.items[id]...), nil
+}
+func (s *concurrentEvidenceStore) Head(ctx context.Context, id shared.ID) (string, error) {
+	items, err := s.ListByEngagement(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if len(items) == 0 {
+		return "", nil
+	}
+	return items[len(items)-1].Hash, nil
+}
+
+type randomTestIDs struct{ n int64 }
+
+func (g *randomTestIDs) NewID() shared.ID {
+	g.n++
+	return shared.ID("test-" + strconv.FormatInt(g.n, 10))
 }
 
 type memBlobs struct{ m map[string][]byte }
@@ -386,8 +447,8 @@ func TestVerifyNoAnchorWithoutTimestamper(t *testing.T) {
 // chain concurrently must never fork it – the store's one-child-per-parent guard +
 // re-chain-on-conflict keeps the chain strictly linear and intact.
 func TestSealConcurrentStaysLinear(t *testing.T) {
-	store := memory.NewEvidenceStore()
-	svc, err := NewService(store, nil, &capAudit{}, fixedClock{t: time.Unix(0, 0).UTC()}, idgen.RandomID{})
+	store := newConcurrentEvidenceStore()
+	svc, err := NewService(store, nil, &capAudit{}, fixedClock{t: time.Unix(0, 0).UTC()}, &randomTestIDs{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,5 +480,122 @@ func TestSealConcurrentStaysLinear(t *testing.T) {
 		if chain[j].PreviousHash != chain[j-1].Hash {
 			t.Fatalf("chain FORKED at link %d: previous_hash=%s, want %s", j, chain[j].PreviousHash, chain[j-1].Hash)
 		}
+	}
+}
+
+func TestSealRejectsCrossTenantAppendWithoutChangingChain(t *testing.T) {
+	store := newConcurrentEvidenceStore()
+	svc, err := NewService(store, nil, &capAudit{}, fixedClock{t: time.Unix(0, 0).UTC()}, &randomTestIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := shared.WithTenant(context.Background(), "tenant-owner")
+	other := shared.WithTenant(context.Background(), "tenant-other")
+	if _, err := svc.Seal(owner, "eng-tenant", "scan", []byte("owner"), "operator"); err != nil {
+		t.Fatalf("owner seal: %v", err)
+	}
+	before, err := store.ListByEngagement(owner, "eng-tenant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := store.Head(owner, "eng-tenant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Seal(other, "eng-tenant", "scan", []byte("other"), "operator"); err == nil {
+		t.Fatal("cross-tenant append unexpectedly succeeded")
+	}
+	after, err := store.ListByEngagement(owner, "eng-tenant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterHead, err := store.Head(owner, "eng-tenant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) || afterHead != head {
+		t.Fatalf("cross-tenant append changed chain: before=%d/%s after=%d/%s", len(before), head, len(after), afterHead)
+	}
+}
+
+func TestSealForFindingWithIDReplaysExactlyAndRejectsConflicts(t *testing.T) {
+	store := newConcurrentEvidenceStore()
+	svc, err := NewService(store, nil, &capAudit{}, fixedClock{t: time.Unix(0, 0).UTC()}, &randomTestIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := shared.WithTenant(context.Background(), "tenant-evidence")
+	const n = 64
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = svc.SealForFindingWithID(ctx, "reserved-evidence", "eng-evidence", "finding-evidence", "promotion_application", []byte("sealed"), "", "system:promotion")
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("exact replay %d: %v", i, err)
+		}
+	}
+	items, err := store.ListByEngagement(ctx, "eng-evidence")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("reserved replay links=%d err=%v, want one", len(items), err)
+	}
+	if _, err := svc.SealForFindingWithID(ctx, "reserved-evidence", "eng-evidence", "finding-evidence", "promotion_application", []byte("altered"), "", "system:promotion"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("altered payload = %v, want conflict", err)
+	}
+	if _, err := svc.SealForFindingWithID(ctx, "reserved-evidence", "eng-evidence", "other-finding", "promotion_application", []byte("sealed"), "", "system:promotion"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("altered finding = %v, want conflict", err)
+	}
+	if _, err := svc.SealForFindingWithID(shared.WithTenant(context.Background(), "other-tenant"), "reserved-evidence", "eng-evidence", "finding-evidence", "promotion_application", []byte("sealed"), "", "system:promotion"); err == nil {
+		t.Fatal("cross-tenant replay unexpectedly succeeded")
+	}
+}
+
+func TestSealForFindingWithIDHighContentionStaysLinear(t *testing.T) {
+	store := newConcurrentEvidenceStore()
+	svc, err := NewService(store, nil, &capAudit{}, fixedClock{t: time.Unix(0, 0).UTC()}, &randomTestIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(shared.WithTenant(context.Background(), "tenant-evidence"), 10*time.Second)
+	defer cancel()
+	const writers = 64
+	var wg sync.WaitGroup
+	errs := make([]error, writers)
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			id := shared.ID("reserved-" + strconv.Itoa(i))
+			_, errs[i] = svc.SealForFindingWithID(ctx, id, "eng-evidence", "finding-evidence", "promotion_application", []byte(strconv.Itoa(i)), "", "system:promotion")
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("writer %d: %v", i, err)
+		}
+	}
+	items, err := store.ListByEngagement(ctx, "eng-evidence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != writers {
+		t.Fatalf("links = %d, want %d", len(items), writers)
+	}
+	ids := make(map[shared.ID]struct{}, len(items))
+	for _, item := range items {
+		if _, exists := ids[item.ID]; exists {
+			t.Fatalf("duplicate evidence ID %s", item.ID)
+		}
+		ids[item.ID] = struct{}{}
+	}
+	if err := evdom.VerifyChain(items); err != nil {
+		t.Fatalf("chain invalid: %v", err)
 	}
 }

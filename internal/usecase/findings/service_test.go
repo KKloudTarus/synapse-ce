@@ -59,6 +59,9 @@ func (f *fakeRepo) SetAssignee(_ context.Context, _, _ shared.ID, a string, ver 
 	f.called, f.assignee, f.gotVer = true, a, ver
 	return f.ret, f.err
 }
+func (f *fakeRepo) GetByEngagementAndID(_ context.Context, _, _ shared.ID) (finding.Finding, error) {
+	return f.ret, f.err
+}
 
 type fakeComments struct {
 	added []finding.Comment

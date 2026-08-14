@@ -13,6 +13,8 @@ import (
 func mutate(t *testing.T, old, new string) error {
 	t.Helper()
 	raw := strings.ReplaceAll(string(embeddedPolicy), "\r\n", "\n")
+	old = strings.ReplaceAll(old, "\r\n", "\n")
+	new = strings.ReplaceAll(new, "\r\n", "\n")
 	if !strings.Contains(raw, old) {
 		t.Fatalf("fixture anchor not found in policy.yaml: %q", old)
 	}

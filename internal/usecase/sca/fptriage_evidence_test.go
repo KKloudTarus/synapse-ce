@@ -73,6 +73,17 @@ func (s *aiEvidenceScriptStore) ListByEngagement(_ context.Context, engagementID
 	return out, nil
 }
 
+func (s *aiEvidenceScriptStore) LookupSealedForFinding(_ context.Context, engagementID, findingID shared.ID, kind string) (evdom.Evidence, bool, error) {
+	chain := s.items[engagementID]
+	for i := len(chain) - 1; i >= 0; i-- {
+		e := chain[i]
+		if e.FindingID == findingID && e.Kind == kind {
+			return e, true, nil
+		}
+	}
+	return evdom.Evidence{}, false, nil
+}
+
 type aiEvidenceTestClock struct{ now time.Time }
 
 func (c aiEvidenceTestClock) Now() time.Time { return c.now }

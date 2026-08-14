@@ -27,6 +27,7 @@ func NewEngagementRepository(pool *pgxpool.Pool) *EngagementRepository {
 }
 
 var _ ports.EngagementRepository = (*EngagementRepository)(nil)
+var _ ports.PromotionReconciliationScopeReader = (*EngagementRepository)(nil)
 
 // Create inserts the engagement and its scope targets in one transaction.
 func (r *EngagementRepository) Create(ctx context.Context, e *engagement.Engagement) error {
@@ -180,6 +181,50 @@ func (r *EngagementRepository) GetByProjectID(ctx context.Context, tenantID, pro
 		return err
 	})
 	return out, err
+}
+
+// ListPromotionReconciliationScopes returns every non-project tenant and engagement
+// pair for process-local recovery. Each engagement query remains RLS-scoped.
+func (r *EngagementRepository) ListPromotionReconciliationScopes(ctx context.Context) ([]ports.PromotionReconciliationScope, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	tenants, err := r.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list promotion reconciliation tenants: %w", err)
+	}
+	defer tenants.Close()
+	var out []ports.PromotionReconciliationScope
+	for tenants.Next() {
+		var tenantID shared.ID
+		if err := tenants.Scan(&tenantID); err != nil {
+			return nil, fmt.Errorf("scan promotion reconciliation tenant: %w", err)
+		}
+		if err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx, `SELECT id FROM engagements WHERE project_id IS NULL ORDER BY id`)
+			if err != nil {
+				return fmt.Errorf("list promotion reconciliation engagements: %w", err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var engagementID shared.ID
+				if err := rows.Scan(&engagementID); err != nil {
+					return fmt.Errorf("scan promotion reconciliation engagement: %w", err)
+				}
+				out = append(out, ports.PromotionReconciliationScope{TenantID: tenantID, EngagementID: engagementID})
+			}
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("list promotion reconciliation engagements: %w", err)
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+	if err := tenants.Err(); err != nil {
+		return nil, fmt.Errorf("list promotion reconciliation tenants: %w", err)
+	}
+	return out, nil
 }
 
 // List returns the tenant's engagements, each with its scope loaded (consistent

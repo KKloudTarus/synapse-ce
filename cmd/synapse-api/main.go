@@ -140,6 +140,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
+	promotionuc "github.com/KKloudTarus/synapse-ce/internal/usecase/promotion"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/pyreach"
 	qualitygatesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/qualitygates"
 	qualityprofilesuc "github.com/KKloudTarus/synapse-ce/internal/usecase/qualityprofiles"
@@ -176,6 +177,22 @@ func requireJudgmentsOrSkip(log *slog.Logger, hasJudgment bool, envKey, name str
 	}
 	log.Warn(name + " auto-skipped: SYNAPSE_JUDGMENTS_ENABLED is off (it mints judgments)")
 	return false
+}
+
+func migrationDSNForStartup(cfg config.Config) (string, error) {
+	migrationDSN := cfg.DBMigrationDSN
+	if migrationDSN == "" {
+		if cfg.IsProduction() {
+			return "", fmt.Errorf("SYNAPSE_DB_MIGRATION_DSN is required with SYNAPSE_DB_DSN outside development")
+		}
+		return cfg.DBDSN, nil
+	}
+	if cfg.IsProduction() {
+		if err := postgres.ValidateMigrationRoleSeparation(migrationDSN, cfg.DBDSN); err != nil {
+			return "", fmt.Errorf("validate migration and runtime database roles: %w", err)
+		}
+	}
+	return migrationDSN, nil
 }
 
 func main() {
@@ -226,6 +243,7 @@ func main() {
 	var importedSBOMStore ports.ImportedSBOMStore
 	var importedFindingStore ports.ImportedFindingStore // third-party (SARIF) findings under governance
 	var detectionRecordStore ports.DetectionRecordStore // #423 detection ledger projection
+	var promotionStore ports.PendingPromotionAuditStore
 	var scanJobStore ports.ScanJobStore
 	var scanRunStore ports.ScanRunStore
 	var projectAnalysisStore ports.ProjectAnalysisStore
@@ -240,7 +258,7 @@ func main() {
 	var threatModelStore ports.ThreatModelStore   // per-engagement architecture threat model (tenant-scoped)
 	var writeupDraftStore ports.WriteupDraftStore // AI-proposed, human-gated finding write-up drafts
 	var aupStore ports.AUPStore
-	var auditLog ports.AuditLogger
+	var auditLog ports.IdempotentAuditLogger
 	var timestampStore ports.TimestampStore
 	var credVault ports.CredentialVault
 	var reconQueue ports.JobQueue                 // durable queue for recon-via-worker (Postgres only)
@@ -290,9 +308,20 @@ func main() {
 		// until multi-replica horizontal scaling lands (P5).
 		startup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		if err := postgres.Migrate(startup, cfg.DBDSN); err != nil {
+		migrationDSN, err := migrationDSNForStartup(cfg)
+		if err != nil {
+			log.Error("database migration configuration invalid", "err", err)
+			os.Exit(1)
+		}
+		if err := postgres.Migrate(startup, migrationDSN); err != nil {
 			log.Error("db migrate failed", "err", err)
 			os.Exit(1)
+		}
+		if migrationDSN != cfg.DBDSN {
+			if err := postgres.GrantRuntimePrivileges(startup, migrationDSN, cfg.DBDSN); err != nil {
+				log.Error("db runtime role grant failed", "err", err)
+				os.Exit(1)
+			}
 		}
 		pool, err := postgres.ConnectPool(startup, cfg.DBDSN, postgres.PoolConfig{
 			MaxConns: int32(cfg.DBMaxConns), MinConns: int32(cfg.DBMinConns),
@@ -331,6 +360,11 @@ func main() {
 		importedSBOMStore = postgres.NewImportedSBOMStore(pool)
 		importedFindingStore = postgres.NewImportedFindingRepository(pool)
 		detectionRecordStore = postgres.NewDetectionRecordRepository(pool)
+		promotionStore, err = postgres.NewPromotionStore(pool)
+		if err != nil {
+			log.Error("postgres promotion store init failed", "err", err)
+			os.Exit(1)
+		}
 		scanJobStore = postgres.NewScanJobStore(pool)
 		scanRunStore = postgres.NewScanRunStore(pool)
 		projectAnalysisStore = postgres.NewProjectAnalysisStore(pool)
@@ -398,6 +432,22 @@ func main() {
 		importedSBOMStore = memory.NewImportedSBOMStore()
 		importedFindingStore = memory.NewImportedFindingStore()
 		detectionRecordStore = memory.NewDetectionRecordStore()
+		memoryFindings, ok := findingRepo.(*memory.FindingRepository)
+		if !ok {
+			log.Error("memory finding repository type mismatch")
+			os.Exit(1)
+		}
+		memoryEngagements, ok := repo.(*memory.EngagementRepository)
+		if !ok {
+			log.Error("memory engagement repository type mismatch")
+			os.Exit(1)
+		}
+		var promotionErr error
+		promotionStore, promotionErr = memory.NewPromotionStore(memoryFindings, memoryEngagements)
+		if promotionErr != nil {
+			log.Error("memory promotion store init failed", "err", promotionErr)
+			os.Exit(1)
+		}
 		scanJobStore = memory.NewScanJobStore()
 		scanRunStore = memory.NewScanRunStore()
 		projectAnalysisStore = memory.NewProjectAnalysisStore()
@@ -1093,8 +1143,10 @@ func main() {
 	} else {
 		router.SetThreatModel(tmSvc)
 	}
-	var judgmentSvc *analysisuc.Service // shared by the HTTP verify/accept routes + the agent propose tool
-	if cfg.JudgmentsEnabled {           // AI judgment lifecycle (verify/accept/list); off by default
+	var judgmentSvc *analysisuc.Service                   // shared by the HTTP verify/accept routes + the agent propose tool
+	var promotionEval *promotionuc.Evaluator              // optional source-signal reevaluator; proposes only
+	var promotionRunner *promotionuc.ReconciliationRunner // server-only promotion recovery
+	if cfg.JudgmentsEnabled {                             // AI judgment lifecycle (verify/accept/list); off by default
 		svc, aerr := analysisuc.NewService(judgmentStore, evidenceService, auditLog, clock, ids)
 		if aerr != nil {
 			log.Error("analysis (judgment) service init failed", "err", aerr)
@@ -1104,6 +1156,48 @@ func main() {
 		judgmentSvc.SetThreatRecorder(findingsService) // a ratified threat auto-emits a Kind=threat finding
 		judgmentSvc.SetSASTRecorder(findingsService)   // a confirmed CapSAST (taint) judgment auto-emits a Kind=sast finding
 		judgmentSvc.SetDASTRecorder(findingsService)   // a RUNTIME-confirmed CapSAST judgment auto-emits a Kind=dast finding (via VerifyRuntime)
+		promotionRecorder, perr := promotionuc.NewConfirmedRecorder(evidenceService, promotionStore, findingRepo, repo, auditLog, clock)
+		if perr != nil {
+			log.Error("promotion recorder init failed", "err", perr)
+			os.Exit(1)
+		}
+		judgmentSvc.SetPromotionRecorder(promotionRecorder)
+		promotionReconciler, perr := promotionuc.NewReconciler(judgmentStore, promotionStore, promotionRecorder, auditLog, clock)
+		if perr != nil {
+			log.Error("promotion reconciler init failed", "err", perr)
+			os.Exit(1)
+		}
+		proposalAudit, ok := auditLog.(ports.IdempotentAuditLogger)
+		if !ok {
+			log.Error("promotion evaluator requires an idempotent audit logger")
+			os.Exit(1)
+		}
+		promotionEval, perr = promotionuc.NewEvaluator(judgmentSvc, findingRepo, judgmentStore, attackPathStore, assetStore, detectionRecordStore, repo, promotionStore, clock, proposalAudit)
+		if perr != nil {
+			log.Error("promotion evaluator init failed", "err", perr)
+			os.Exit(1)
+		}
+		promotionScopes, ok := repo.(ports.PromotionReconciliationScopeReader)
+		if !ok {
+			log.Error("promotion reconciliation scope reader is not configured")
+			os.Exit(1)
+		}
+		promotionRunner, perr = promotionuc.NewReconciliationRunner(promotionScopes, promotionEval, promotionReconciler, log)
+		if perr != nil {
+			log.Error("promotion reconciliation runner init failed", "err", perr)
+			os.Exit(1)
+		}
+		judgmentAuditStore, ok := judgmentStore.(ports.JudgmentAuditStore)
+		if !ok {
+			log.Error("judgment audit outbox is not configured")
+			os.Exit(1)
+		}
+		governanceReconciler, gerr := analysisuc.NewGovernanceReconciler(judgmentAuditStore, auditLog)
+		if gerr != nil {
+			log.Error("judgment governance reconciler init failed", "err", gerr)
+			os.Exit(1)
+		}
+		promotionRunner.SetGovernanceReconciler(governanceReconciler)
 		router.SetJudgments(judgmentSvc)
 		// Automated LLM judgment-verifier: when SYNAPSE_VERIFIER_MODEL names a model DIFFERENT from the
 		// agent's model, a distinct verifier independently scores each proposed gated judgment and seals a
@@ -1623,6 +1717,18 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if promotionRunner != nil {
+		startupTimeout := cfg.PromotionReconcileInterval
+		if startupTimeout <= 0 {
+			startupTimeout = time.Minute
+		}
+		startupCtx, cancelPromotionStartup := context.WithTimeout(ctx, startupTimeout)
+		if err := promotionRunner.RunOnce(startupCtx); err != nil && startupCtx.Err() == nil {
+			log.Warn("promotion reconciliation startup run failed", "err", err)
+		}
+		cancelPromotionStartup()
+		go promotionRunner.RunPeriodic(ctx, cfg.PromotionReconcileInterval)
+	}
 	go approvalSvc.RunSweeper(ctx, cfg.ApprovalSweepInterval) // fail-closed HITL approval timeouts for agent + DAST
 
 	// AI agent orchestration. Off unless SYNAPSE_AGENT_ENABLED.

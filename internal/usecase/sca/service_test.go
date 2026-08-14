@@ -1442,6 +1442,15 @@ func (f *fakeEvidence) Head(_ context.Context, _ shared.ID) (string, error) {
 	}
 	return f.items[len(f.items)-1].Hash, nil
 }
+func (f *fakeEvidence) LookupSealedForFinding(_ context.Context, engagementID, findingID shared.ID, kind string) (evidence.Evidence, bool, error) {
+	for i := len(f.items) - 1; i >= 0; i-- {
+		e := f.items[i]
+		if e.EngagementID == engagementID && e.FindingID == findingID && e.Kind == kind {
+			return e, true, nil
+		}
+	}
+	return evidence.Evidence{}, false, nil
+}
 
 type truncatedSecretScanner struct{}
 

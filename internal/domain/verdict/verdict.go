@@ -16,6 +16,9 @@ import (
 // promoted/published. Shared by finding + judgment; do not fork it.
 const EvidenceThreshold = 75
 
+// MaxRationaleBytes bounds sealed verdict rationale payloads and promotion-event provenance.
+const MaxRationaleBytes = 4096
+
 // DeterministicProofScore is the fixed evidence score for a judgment confirmed by a DETERMINISTIC tool
 // proof (a call-graph reachability result), as opposed to a human verdict or an LLM claim.
 // It is well above EvidenceThreshold because a reproducible static call-path is strong evidence, but NOT
@@ -44,6 +47,9 @@ func (v Verdict) Validate() error {
 	}
 	if strings.TrimSpace(v.Rationale) == "" {
 		return fmt.Errorf("%w: verdict requires a rationale", shared.ErrValidation)
+	}
+	if len(v.Rationale) > MaxRationaleBytes {
+		return fmt.Errorf("%w: verdict rationale exceeds %d bytes", shared.ErrValidation, MaxRationaleBytes)
 	}
 	return nil
 }

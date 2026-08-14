@@ -31,8 +31,8 @@ const (
 // (SetScoreState) lives here (and on the concrete repo) – NOT on a broad ports interface – so a
 // read-only consumer (the agent tool catalog) cannot move a score. Concrete repos satisfy it.
 type Store interface {
-	Save(ctx context.Context, j judgment.Judgment) error
-	ListByEngagement(ctx context.Context, engagementID shared.ID) ([]judgment.Judgment, error)
+	ports.JudgmentStore
+	ports.JudgmentAuditStore
 	SetScoreState(ctx context.Context, engagementID, id shared.ID, score int, state judgment.State, expectedVersion int) (judgment.Judgment, error)
 }
 
@@ -45,7 +45,7 @@ type evidenceSealer interface {
 type Service struct {
 	store    Store
 	evidence evidenceSealer
-	audit    ports.AuditLogger
+	audit    ports.IdempotentAuditLogger
 	clock    ports.Clock
 	ids      ports.IDGenerator
 	// threatRecorder (optional) promotes a CONFIRMED threat judgment to a Kind=threat finding,
@@ -57,12 +57,13 @@ type Service struct {
 	// dastRecorder (optional) promotes a CONFIRMED CapSAST judgment to a Kind=dast finding when the
 	// confirming verdict came from a RUNTIME probe (via VerifyRuntime) rather than a static/LLM verdict,
 	// best-effort. Injected from the composition root – never reachable by the agent.
-	dastRecorder ports.ConfirmedDASTRecorder
+	dastRecorder      ports.ConfirmedDASTRecorder
+	promotionRecorder ports.ConfirmedPromotionRecorder
 }
 
 // NewService validates dependencies (all required; the sealer is mandatory because a verdict that
 // cannot be sealed must never move a score).
-func NewService(store Store, ev evidenceSealer, audit ports.AuditLogger, clock ports.Clock, ids ports.IDGenerator) (*Service, error) {
+func NewService(store Store, ev evidenceSealer, audit ports.IdempotentAuditLogger, clock ports.Clock, ids ports.IDGenerator) (*Service, error) {
 	if store == nil || ev == nil || audit == nil || clock == nil || ids == nil {
 		return nil, fmt.Errorf("%w: analysis service is missing a dependency", shared.ErrValidation)
 	}
@@ -120,15 +121,16 @@ func (s *Service) Propose(ctx context.Context, proposer string, engagementID sha
 	if _, err := s.evidence.Seal(ctx, engagementID, ProposedEvidenceKind, payload, j.ProposedBy); err != nil {
 		return judgment.Judgment{}, fmt.Errorf("seal judgment proposal: %w", err)
 	}
-	if err := s.store.Save(ctx, j); err != nil {
-		return judgment.Judgment{}, fmt.Errorf("persist judgment: %w", err)
-	}
-	if err := s.audit.Record(ctx, ports.AuditEntry{
+	entry := ports.AuditEntry{
 		Actor: proposer, Action: "judgment.proposed", Target: j.ID.String(),
-		Metadata: map[string]string{"engagement": engagementID.String(), "capability": string(j.Capability), "subject": string(j.SubjectKind) + ":" + j.SubjectID.String()},
+		Metadata: map[string]string{"idempotency_key": "judgment.proposed:" + j.ID.String(), "engagement": engagementID.String(), "capability": string(j.Capability), "subject": string(j.SubjectKind) + ":" + j.SubjectID.String()},
 		At:       s.clock.Now(),
-	}); err != nil {
-		return judgment.Judgment{}, fmt.Errorf("audit judgment proposal: %w", err)
+	}
+	if err := s.store.SaveWithProposalAudit(ctx, j, entry); err != nil {
+		return judgment.Judgment{}, fmt.Errorf("persist judgment proposal: %w", err)
+	}
+	if err := s.deliverAudit(ctx, ports.PendingJudgmentAudit{Kind: ports.JudgmentProposalAudit, JudgmentID: j.ID, Version: j.Version, EngagementID: engagementID, Entry: entry}); err != nil {
+		return judgment.Judgment{}, err
 	}
 	return j, nil
 }
@@ -159,9 +161,18 @@ func (s *Service) verify(ctx context.Context, verifier string, engagementID, jud
 	if err != nil {
 		return judgment.Judgment{}, err
 	}
-	if cur.Publishable() && (cur.Capability == judgment.CapThreat || cur.Capability == judgment.CapSAST || cur.Capability == judgment.CapDAST) {
+	if cur.Publishable() && (cur.Capability == judgment.CapThreat || cur.Capability == judgment.CapSAST || cur.Capability == judgment.CapDAST || cur.Capability == judgment.CapPromotion) {
 		if cur.Version != expectedVersion {
 			return judgment.Judgment{}, shared.ErrConflict
+		}
+		if cur.Capability == judgment.CapPromotion {
+			if err := s.deliverPendingForJudgment(ctx, engagementID, judgmentID); err != nil {
+				return judgment.Judgment{}, err
+			}
+			if err := s.recordPromotion(ctx, cur); err != nil {
+				return judgment.Judgment{}, err
+			}
+			return cur, nil
 		}
 		s.emitFinding(ctx, verifier, cur, runtimeProof)
 		return cur, nil
@@ -179,19 +190,26 @@ func (s *Service) verify(ctx context.Context, verifier string, engagementID, jud
 	if _, err := s.evidence.Seal(ctx, engagementID, VerdictEvidenceKind, payload, verifier); err != nil {
 		return judgment.Judgment{}, fmt.Errorf("seal judgment verdict: %w", err)
 	}
-	saved, err := s.store.SetScoreState(ctx, engagementID, judgmentID, updated.EvidenceScore, updated.State, expectedVersion)
+	entry := ports.AuditEntry{
+		Actor: verifier, Action: "judgment.verdict", Target: judgmentID.String(),
+		Metadata: map[string]string{"idempotency_key": "judgment.verdict:" + judgmentID.String() + ":" + strconv.Itoa(expectedVersion+1), "engagement": engagementID.String(), "score": strconv.Itoa(v.Score), "state": string(updated.State), "publishable": strconv.FormatBool(updated.Publishable())},
+		At:       s.clock.Now(),
+	}
+	saved, err := s.store.SetVerdictStateWithAudit(ctx, engagementID, judgmentID, updated.EvidenceScore, updated.State, updated.VerifiedBy, updated.VerdictRationale, expectedVersion, entry)
 	if err != nil {
 		return judgment.Judgment{}, fmt.Errorf("apply judgment verdict: %w", err)
 	}
-	if err := s.audit.Record(ctx, ports.AuditEntry{
-		Actor: verifier, Action: "judgment.verdict", Target: judgmentID.String(),
-		Metadata: map[string]string{"engagement": engagementID.String(), "score": strconv.Itoa(v.Score), "state": string(saved.State), "publishable": strconv.FormatBool(saved.Publishable())},
-		At:       s.clock.Now(),
-	}); err != nil {
-		return judgment.Judgment{}, fmt.Errorf("audit judgment verdict: %w", err)
+	if err := s.deliverAudit(ctx, ports.PendingJudgmentAudit{Kind: ports.JudgmentVerdictAudit, JudgmentID: judgmentID, Version: saved.Version, EngagementID: engagementID, Entry: entry}); err != nil {
+		return judgment.Judgment{}, err
 	}
 	if saved.Publishable() {
-		s.emitFinding(ctx, verifier, saved, runtimeProof)
+		if saved.Capability == judgment.CapPromotion {
+			if err := s.recordPromotion(ctx, saved); err != nil {
+				return judgment.Judgment{}, err
+			}
+		} else {
+			s.emitFinding(ctx, verifier, saved, runtimeProof)
+		}
 	}
 	return saved, nil
 }
@@ -229,6 +247,39 @@ func (s *Service) recordProjectionFailure(ctx context.Context, verifier, kind st
 	})
 }
 
+func (s *Service) deliverAudit(ctx context.Context, pending ports.PendingJudgmentAudit) error {
+	if err := s.audit.RecordOnce(ctx, pending.Entry); err != nil {
+		return fmt.Errorf("deliver judgment %s audit: %w", pending.Kind, err)
+	}
+	if err := s.store.AcknowledgeJudgmentAudit(ctx, pending.Kind, pending.JudgmentID, pending.Version); err != nil {
+		return fmt.Errorf("acknowledge judgment %s audit: %w", pending.Kind, err)
+	}
+	return nil
+}
+
+func (s *Service) deliverPendingForJudgment(ctx context.Context, engagementID, judgmentID shared.ID) error {
+	pending, err := s.store.ListPendingJudgmentAudits(ctx, engagementID)
+	if err != nil {
+		return fmt.Errorf("list pending judgment audits: %w", err)
+	}
+	for _, item := range pending {
+		if item.JudgmentID == judgmentID && item.Kind == ports.JudgmentVerdictAudit {
+			return s.deliverAudit(ctx, item)
+		}
+	}
+	return nil
+}
+
+func (s *Service) recordPromotion(ctx context.Context, j judgment.Judgment) error {
+	if s.promotionRecorder == nil {
+		return fmt.Errorf("%w: promotion recorder is not configured", shared.ErrValidation)
+	}
+	if err := s.promotionRecorder.RecordConfirmed(ctx, j); err != nil {
+		return fmt.Errorf("record confirmed promotion: %w", err)
+	}
+	return nil
+}
+
 // SetThreatRecorder wires the optional confirmed-threat → finding promoter. nil ⇒ no finding is
 // emitted on confirm. Composition-root only.
 func (s *Service) SetThreatRecorder(r ports.ConfirmedThreatRecorder) { s.threatRecorder = r }
@@ -241,6 +292,8 @@ func (s *Service) SetSASTRecorder(r ports.ConfirmedSASTRecorder) { s.sastRecorde
 // the VerifyRuntime path. nil ⇒ a runtime confirmation still confirms the judgment but emits no DAST
 // finding. Composition-root only.
 func (s *Service) SetDASTRecorder(r ports.ConfirmedDASTRecorder) { s.dastRecorder = r }
+
+func (s *Service) SetPromotionRecorder(r ports.ConfirmedPromotionRecorder) { s.promotionRecorder = r }
 
 // Accept confirms an UNGATED judgment by human acceptance (no score; there is nothing to refute at
 // 75). It seals the acceptance FIRST, then transitions state under optimistic concurrency. The
@@ -295,4 +348,39 @@ func (s *Service) load(ctx context.Context, engagementID, id shared.ID) (judgmen
 		}
 	}
 	return judgment.Judgment{}, fmt.Errorf("judgment %s: %w", id, shared.ErrNotFound)
+}
+
+// GovernanceReconciler retries immutable judgment audit outboxes. It has no
+// transition authority; it can only deliver already-committed payloads.
+type GovernanceReconciler struct {
+	store ports.JudgmentAuditStore
+	audit ports.IdempotentAuditLogger
+}
+
+func NewGovernanceReconciler(store ports.JudgmentAuditStore, audit ports.IdempotentAuditLogger) (*GovernanceReconciler, error) {
+	if store == nil || audit == nil {
+		return nil, fmt.Errorf("%w: judgment governance reconciler is missing a dependency", shared.ErrValidation)
+	}
+	return &GovernanceReconciler{store: store, audit: audit}, nil
+}
+
+var _ ports.GovernanceReconciler = (*GovernanceReconciler)(nil)
+
+func (r *GovernanceReconciler) Reconcile(ctx context.Context, engagementID shared.ID) error {
+	pending, err := r.store.ListPendingJudgmentAudits(ctx, engagementID)
+	if err != nil {
+		return fmt.Errorf("list pending judgment audits: %w", err)
+	}
+	for _, item := range pending {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := r.audit.RecordOnce(ctx, item.Entry); err != nil {
+			return fmt.Errorf("deliver judgment %s audit: %w", item.Kind, err)
+		}
+		if err := r.store.AcknowledgeJudgmentAudit(ctx, item.Kind, item.JudgmentID, item.Version); err != nil {
+			return fmt.Errorf("acknowledge judgment %s audit: %w", item.Kind, err)
+		}
+	}
+	return nil
 }

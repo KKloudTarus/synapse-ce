@@ -15,7 +15,10 @@ import (
 
 // --- in-package fakes (no infra import from a use-case test) ---
 
-type fakeStore struct{ saved []judgment.Judgment }
+type fakeStore struct {
+	saved   []judgment.Judgment
+	pending []ports.PendingJudgmentAudit
+}
 
 func (f *fakeStore) Save(_ context.Context, j judgment.Judgment) error {
 	for i := range f.saved {
@@ -36,6 +39,15 @@ func (f *fakeStore) ListByEngagement(_ context.Context, eng shared.ID) ([]judgme
 	}
 	return out, nil
 }
+func (f *fakeStore) ListBySubject(_ context.Context, eng, subject shared.ID) ([]judgment.Judgment, error) {
+	var out []judgment.Judgment
+	for _, j := range f.saved {
+		if j.EngagementID == eng && j.SubjectID == subject {
+			out = append(out, j)
+		}
+	}
+	return out, nil
+}
 func (f *fakeStore) SetScoreState(_ context.Context, _, id shared.ID, score int, state judgment.State, expectedVersion int) (judgment.Judgment, error) {
 	for i := range f.saved {
 		if f.saved[i].ID == id {
@@ -49,6 +61,56 @@ func (f *fakeStore) SetScoreState(_ context.Context, _, id shared.ID, score int,
 		}
 	}
 	return judgment.Judgment{}, shared.ErrNotFound
+}
+func (f *fakeStore) SetVerdictState(_ context.Context, _, id shared.ID, score int, state judgment.State, verifiedBy, verdictRationale string, expectedVersion int) (judgment.Judgment, error) {
+	for i := range f.saved {
+		if f.saved[i].ID == id {
+			if f.saved[i].Version != expectedVersion {
+				return judgment.Judgment{}, shared.ErrConflict
+			}
+			f.saved[i].EvidenceScore = score
+			f.saved[i].State = state
+			f.saved[i].VerifiedBy = verifiedBy
+			f.saved[i].VerdictRationale = verdictRationale
+			f.saved[i].Version++
+			return f.saved[i], nil
+		}
+	}
+	return judgment.Judgment{}, shared.ErrNotFound
+}
+
+func (f *fakeStore) SaveWithProposalAudit(_ context.Context, j judgment.Judgment, entry ports.AuditEntry) error {
+	if err := f.Save(context.Background(), j); err != nil {
+		return err
+	}
+	f.pending = append(f.pending, ports.PendingJudgmentAudit{Kind: ports.JudgmentProposalAudit, JudgmentID: j.ID, Version: j.Version, EngagementID: j.EngagementID, Entry: entry})
+	return nil
+}
+func (f *fakeStore) SetVerdictStateWithAudit(_ context.Context, eng, id shared.ID, score int, state judgment.State, by, rationale string, expectedVersion int, entry ports.AuditEntry) (judgment.Judgment, error) {
+	j, err := f.SetVerdictState(context.Background(), eng, id, score, state, by, rationale, expectedVersion)
+	if err != nil {
+		return judgment.Judgment{}, err
+	}
+	f.pending = append(f.pending, ports.PendingJudgmentAudit{Kind: ports.JudgmentVerdictAudit, JudgmentID: id, Version: j.Version, EngagementID: eng, Entry: entry})
+	return j, nil
+}
+func (f *fakeStore) ListPendingJudgmentAudits(_ context.Context, eng shared.ID) ([]ports.PendingJudgmentAudit, error) {
+	var out []ports.PendingJudgmentAudit
+	for _, p := range f.pending {
+		if p.EngagementID == eng {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+func (f *fakeStore) AcknowledgeJudgmentAudit(_ context.Context, kind ports.JudgmentAuditKind, id shared.ID, version int) error {
+	for i, p := range f.pending {
+		if p.Kind == kind && p.JudgmentID == id && p.Version == version {
+			f.pending = append(f.pending[:i], f.pending[i+1:]...)
+			return nil
+		}
+	}
+	return nil
 }
 
 type fakeSealer struct {
@@ -64,10 +126,44 @@ func (f *fakeSealer) Seal(_ context.Context, _ shared.ID, kind string, _ []byte,
 	return evidence.Evidence{}, nil
 }
 
-type fakeAudit struct{ actions []string }
+type fakeAudit struct {
+	actions []string
+	fail    bool
+	once    int
+}
 
 func (f *fakeAudit) Record(_ context.Context, e ports.AuditEntry) error {
 	f.actions = append(f.actions, e.Action)
+	return nil
+}
+func (f *fakeAudit) RecordOnce(ctx context.Context, e ports.AuditEntry) error {
+	f.once++
+	if f.fail {
+		return errors.New("audit unavailable")
+	}
+	return f.Record(ctx, e)
+}
+
+type fakePromotionRecorder struct {
+	attempts int
+	calls    []judgment.Judgment
+	err      error
+	check    func(j judgment.Judgment) error
+}
+
+func (f *fakePromotionRecorder) RecordConfirmed(_ context.Context, j judgment.Judgment) error {
+	f.attempts++
+	if f.check != nil {
+		if err := f.check(j); err != nil {
+			return err
+		}
+	}
+	if f.err != nil {
+		err := f.err
+		f.err = nil
+		return err
+	}
+	f.calls = append(f.calls, j)
 	return nil
 }
 
@@ -93,6 +189,23 @@ func reach() judgment.Claim {
 }
 func narr() judgment.Claim {
 	return judgment.RiskNarrativeClaim{Drivers: []string{"kev"}, Priority: 1}
+}
+
+func promo() judgment.Claim {
+	return judgment.PromotionClaim{
+		FindingID: "f1",
+		Rule:      judgment.RuleRuntimeReachableExposed,
+		Inputs: []judgment.PromotionInput{
+			{Kind: judgment.PromotionInputAttackPath, ID: "path1"},
+			{Kind: judgment.PromotionInputDetection, ID: "det1"},
+			{Kind: judgment.PromotionInputReachability, ID: "reach1"},
+		},
+		Proposed:       judgment.PromotionEscalate,
+		Fingerprint:    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		FindingVersion: 1,
+		BeforePriority: 3,
+		AfterPriority:  2,
+	}
 }
 
 func TestProposeRecordsAtScoreZero(t *testing.T) {
@@ -131,6 +244,9 @@ func TestVerifyConfirmsSealFirst(t *testing.T) {
 	}
 	if got.State != judgment.StateConfirmed || got.EvidenceScore != 80 || !got.Publishable() {
 		t.Fatalf("want confirmed/80/publishable, got %s/%d/%v", got.State, got.EvidenceScore, got.Publishable())
+	}
+	if got.VerifiedBy != "human:bob" || got.VerdictRationale != "holds" || store.saved[0].VerifiedBy != "human:bob" || store.saved[0].VerdictRationale != "holds" {
+		t.Fatalf("sealed verdict provenance was not persisted: got=%#v stored=%#v", got, store.saved[0])
 	}
 	// seal order: proposed BEFORE verdict
 	if len(sealer.kinds) != 2 || sealer.kinds[0] != ProposedEvidenceKind || sealer.kinds[1] != VerdictEvidenceKind {
@@ -174,6 +290,21 @@ func TestVerifyRejectsSelfConfirmAndUngated(t *testing.T) {
 	}
 }
 
+func TestAcceptUngatedDoesNotSetVerdictProvenance(t *testing.T) {
+	svc, store, _, _ := newSvc()
+	jn, err := svc.Propose(context.Background(), "agent:s1", "e1", judgment.CapRiskNarrative, judgment.SubjectFinding, "f1", narr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.Accept(context.Background(), "human:bob", "e1", jn.ID, jn.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.VerifiedBy != "" || got.VerdictRationale != "" || store.saved[0].VerifiedBy != "" || store.saved[0].VerdictRationale != "" {
+		t.Fatalf("accept fabricated verdict provenance: got=%#v stored=%#v", got, store.saved[0])
+	}
+}
+
 func TestAcceptUngated(t *testing.T) {
 	svc, _, _, audit := newSvc()
 	jn, _ := svc.Propose(context.Background(), "agent:s1", "e1", judgment.CapRiskNarrative, judgment.SubjectFinding, "f1", narr())
@@ -200,5 +331,124 @@ func TestVerifyConflict(t *testing.T) {
 	// wrong expectedVersion → conflict (seal still happens; orphan acceptable by design)
 	if _, err := svc.Verify(context.Background(), "human:bob", "e1", j.ID, 80, "holds", j.Version+1); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("want ErrConflict, got %v", err)
+	}
+}
+
+func TestVerifyPromotionRecordsAfterSealedVerdict(t *testing.T) {
+	svc, store, sealer, audit := newSvc()
+	rec := &fakePromotionRecorder{check: func(j judgment.Judgment) error {
+		if j.State != judgment.StateConfirmed || !j.Publishable() || j.VerifiedBy != "human:bob" || j.VerdictRationale != "holds" {
+			return fmt.Errorf("recorder saw unsealed judgment: %#v", j)
+		}
+		if store.saved[0].State != judgment.StateConfirmed || store.saved[0].VerifiedBy != "human:bob" || store.saved[0].VerdictRationale != "holds" {
+			return fmt.Errorf("recorder ran before verdict persistence: %#v", store.saved[0])
+		}
+		if len(sealer.kinds) != 2 || sealer.kinds[0] != ProposedEvidenceKind || sealer.kinds[1] != VerdictEvidenceKind {
+			return fmt.Errorf("recorder ran before verdict seal: %v", sealer.kinds)
+		}
+		if audit.actions[len(audit.actions)-1] != "judgment.verdict" {
+			return fmt.Errorf("recorder ran before verdict audit: %v", audit.actions)
+		}
+		return nil
+	}}
+	svc.SetPromotionRecorder(rec)
+	j, err := svc.Propose(context.Background(), "agent:s1", "e1", judgment.CapPromotion, judgment.SubjectFinding, "f1", promo())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.Verify(context.Background(), "human:bob", "e1", j.ID, 75, "holds", j.Version)
+	if err != nil {
+		t.Fatalf("Verify promotion: %v", err)
+	}
+	if got.Capability != judgment.CapPromotion || got.State != judgment.StateConfirmed {
+		t.Fatalf("promotion verdict not confirmed: %#v", got)
+	}
+	if rec.attempts != 1 || len(rec.calls) != 1 {
+		t.Fatalf("promotion recorder calls = attempts %d stored %d", rec.attempts, len(rec.calls))
+	}
+}
+
+func TestVerifyPromotionReturnsRecorderErrorAndRetriesConfirmed(t *testing.T) {
+	svc, store, _, _ := newSvc()
+	rec := &fakePromotionRecorder{err: errors.New("apply promotion down")}
+	svc.SetPromotionRecorder(rec)
+	j, err := svc.Propose(context.Background(), "agent:s1", "e1", judgment.CapPromotion, judgment.SubjectFinding, "f1", promo())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Verify(context.Background(), "human:bob", "e1", j.ID, 75, "holds", j.Version); err == nil {
+		t.Fatal("promotion recorder failure must be returned")
+	}
+	if store.saved[0].State != judgment.StateConfirmed || store.saved[0].Version != 2 {
+		t.Fatalf("judgment not persisted for retry: %#v", store.saved[0])
+	}
+	got, err := svc.Verify(context.Background(), "human:bob", "e1", j.ID, 75, "holds", store.saved[0].Version)
+	if err != nil {
+		t.Fatalf("retry confirmed promotion: %v", err)
+	}
+	if got.Version != store.saved[0].Version || rec.attempts != 2 || len(rec.calls) != 1 {
+		t.Fatalf("retry state wrong: got version %d store version %d attempts %d calls %d", got.Version, store.saved[0].Version, rec.attempts, len(rec.calls))
+	}
+}
+
+func TestVerifyPromotionRejectsMissingRecorder(t *testing.T) {
+	svc, store, _, _ := newSvc()
+	j, err := svc.Propose(context.Background(), "agent:s1", "e1", judgment.CapPromotion, judgment.SubjectFinding, "f1", promo())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Verify(context.Background(), "human:bob", "e1", j.ID, 75, "holds", j.Version); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("missing promotion recorder: want ErrValidation, got %v", err)
+	}
+	if store.saved[0].State != judgment.StateConfirmed {
+		t.Fatalf("verdict should remain retryable after projection config error: %#v", store.saved[0])
+	}
+}
+
+func TestGovernanceReconcilerDeliversPendingAuditOnce(t *testing.T) {
+	store, sealer, audit := &fakeStore{}, &fakeSealer{}, &fakeAudit{fail: true}
+	svc, err := NewService(store, sealer, audit, fakeClock{}, &fakeIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Propose(context.Background(), "agent:s1", "e1", judgment.CapReachability, judgment.SubjectFinding, "f1", reach()); err == nil {
+		t.Fatal("proposal must surface failed durable audit delivery")
+	}
+	if len(store.pending) != 1 {
+		t.Fatalf("pending audits = %d, want 1", len(store.pending))
+	}
+	audit.fail = false
+	reconciler, err := NewGovernanceReconciler(store, audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reconciler.Reconcile(context.Background(), "e1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.pending) != 0 || audit.once != 2 {
+		t.Fatalf("reconciliation pending=%d attempts=%d", len(store.pending), audit.once)
+	}
+}
+
+func TestPromotionWaitsForDurableVerdictAudit(t *testing.T) {
+	svc, store, _, audit := newSvc()
+	audit.fail = true
+	recorder := &fakePromotionRecorder{}
+	svc.SetPromotionRecorder(recorder)
+	j, err := svc.Propose(context.Background(), "agent:s1", "e1", judgment.CapPromotion, judgment.SubjectFinding, "f1", promo())
+	if err == nil {
+		t.Fatal("proposal audit must fail")
+	}
+	audit.fail = false
+	if err := svc.deliverPendingForJudgment(context.Background(), "e1", j.ID); err != nil {
+		t.Fatal(err)
+	}
+	j = store.saved[0]
+	audit.fail = true
+	if _, err := svc.Verify(context.Background(), "human:bob", "e1", j.ID, 75, "holds", j.Version); err == nil {
+		t.Fatal("verdict audit must fail")
+	}
+	if recorder.attempts != 0 {
+		t.Fatalf("promotion applied before durable verdict audit: %d", recorder.attempts)
 	}
 }

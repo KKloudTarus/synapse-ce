@@ -77,8 +77,9 @@ func (r *FindingRepository) Upsert(_ context.Context, findings []finding.Finding
 			f.Status = existing.Status // preserve triage
 			f.Assignee = existing.Assignee
 			f.Audit.CreatedAt = existing.Audit.CreatedAt
-			f.Version = existing.Version             // version is a triage token; re-scans preserve it
+			f.Version = existing.Version + 1         // re-scan is a concurrent change; bump version (mirrors postgres)
 			f.EvidenceScore = existing.EvidenceScore // moves only via SetEvidenceScore; a re-upsert never changes it – mirrors the postgres ON CONFLICT set
+			f.Priority = existing.Priority           // preserve promoted priority; PromotionStore.Apply is the only path that moves it
 		} else if f.Version <= 0 {
 			f.Version = 1
 		}
@@ -125,6 +126,18 @@ func (r *FindingRepository) SetAssignee(_ context.Context, engagementID, finding
 	return finding.Finding{}, fmt.Errorf("finding %s: %w", findingID, shared.ErrNotFound)
 }
 
+// GetByEngagementAndID loads a single finding by engagement and finding ID.
+func (r *FindingRepository) GetByEngagementAndID(_ context.Context, engagementID, findingID shared.ID) (finding.Finding, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, f := range r.data[engagementID] {
+		if f.ID == findingID {
+			return f, nil
+		}
+	}
+	return finding.Finding{}, fmt.Errorf("finding %s in engagement %s: %w", findingID, engagementID, shared.ErrNotFound)
+}
+
 // SetEvidenceScore sets a finding's evidence score with the same optimistic-concurrency
 // guard as UpdateStatus (the adversarial-verdict path). Returns
 // shared.ErrConflict on a version mismatch, shared.ErrNotFound if absent.
@@ -137,6 +150,28 @@ func (r *FindingRepository) SetEvidenceScore(_ context.Context, engagementID, fi
 				return finding.Finding{}, fmt.Errorf("finding %s changed since you loaded it: %w", findingID, shared.ErrConflict)
 			}
 			f.EvidenceScore = score
+			f.Version++
+			r.data[engagementID][key] = f
+			return f, nil
+		}
+	}
+	return finding.Finding{}, fmt.Errorf("finding %s: %w", findingID, shared.ErrNotFound)
+}
+
+// setPriorityInternal sets a finding's priority and increments its version. It
+// is package-private: only PromotionStore.Apply calls it after its own lock
+// acquisition and priority/version verification. The caller MUST hold
+// PromotionStore.mu; this method acquires FindingRepository.mu (lock ordering:
+// PromotionStore.mu before FindingRepository.mu).
+func (r *FindingRepository) setPriorityInternal(engagementID, findingID shared.ID, priority, expectedVersion int) (finding.Finding, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key, f := range r.data[engagementID] {
+		if f.ID == findingID {
+			if f.Version != expectedVersion {
+				return finding.Finding{}, fmt.Errorf("finding %s changed since you loaded it: %w", findingID, shared.ErrConflict)
+			}
+			f.Priority = priority
 			f.Version++
 			r.data[engagementID][key] = f
 			return f, nil

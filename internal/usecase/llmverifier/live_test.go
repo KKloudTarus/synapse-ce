@@ -24,7 +24,8 @@ func (noopSealer) Seal(_ context.Context, _ shared.ID, kind string, _ []byte, _ 
 
 type noopAudit struct{}
 
-func (noopAudit) Record(_ context.Context, _ ports.AuditEntry) error { return nil }
+func (noopAudit) Record(_ context.Context, _ ports.AuditEntry) error     { return nil }
+func (noopAudit) RecordOnce(_ context.Context, _ ports.AuditEntry) error { return nil }
 
 type sysClock struct{}
 

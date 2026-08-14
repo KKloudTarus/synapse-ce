@@ -18,7 +18,7 @@ func TestJudgmentRepository(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -58,8 +58,8 @@ func TestJudgmentRepository(t *testing.T) {
 	if err != nil || len(list) != 1 || list[0].ID != jid {
 		t.Fatalf("ListByEngagement: %+v err=%v", list, err)
 	}
-	if list[0].State != judgment.StateProposed || list[0].EvidenceScore != 0 {
-		t.Fatalf("want proposed/0, got %s/%d", list[0].State, list[0].EvidenceScore)
+	if list[0].State != judgment.StateProposed || list[0].EvidenceScore != 0 || list[0].VerifiedBy != "" || list[0].VerdictRationale != "" {
+		t.Fatalf("want proposed/0/empty provenance, got %#v", list[0])
 	}
 	if rc, ok := list[0].Claim.(judgment.ReachabilityClaim); !ok || rc.Tier != "tier-1.5" {
 		t.Fatalf("claim did not round-trip typed: %#v", list[0].Claim)
@@ -68,20 +68,34 @@ func TestJudgmentRepository(t *testing.T) {
 		t.Fatalf("ListBySubject: %+v", bySub)
 	}
 
-	// score/state move under optimistic concurrency
+	// Score/state updates for acceptance must not invent or clear verdict provenance.
 	upd, err := repo.SetScoreState(ctx, eid, jid, 80, judgment.StateConfirmed, 1)
 	if err != nil {
 		t.Fatalf("SetScoreState: %v", err)
 	}
-	if upd.EvidenceScore != 80 || upd.State != judgment.StateConfirmed || upd.Version != 2 {
+	if upd.EvidenceScore != 80 || upd.State != judgment.StateConfirmed || upd.Version != 2 || upd.VerifiedBy != "" || upd.VerdictRationale != "" {
 		t.Fatalf("SetScoreState result: %+v", upd)
 	}
+
+	// A verdict transition round-trips its sealed provenance through storage.
+	verdictState, err := repo.SetVerdictState(ctx, eid, jid, 90, judgment.StateConfirmed, "human:verifier", "reproduced", 2)
+	if err != nil {
+		t.Fatalf("SetVerdictState: %v", err)
+	}
+	if verdictState.EvidenceScore != 90 || verdictState.Version != 3 || verdictState.VerifiedBy != "human:verifier" || verdictState.VerdictRationale != "reproduced" {
+		t.Fatalf("SetVerdictState result: %+v", verdictState)
+	}
+	list, err = repo.ListByEngagement(ctx, eid)
+	if err != nil || len(list) != 1 || list[0].VerifiedBy != "human:verifier" || list[0].VerdictRationale != "reproduced" {
+		t.Fatalf("verdict provenance did not round-trip: %+v err=%v", list, err)
+	}
+
 	// stale version → conflict (lost-update guard)
-	if _, err := repo.SetScoreState(ctx, eid, jid, 90, judgment.StateRefuted, 1); !errors.Is(err, shared.ErrConflict) {
+	if _, err := repo.SetScoreState(ctx, eid, jid, 90, judgment.StateRefuted, 2); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("stale version: want ErrConflict, got %v", err)
 	}
 	// unknown id → not found
-	if _, err := repo.SetScoreState(ctx, eid, shared.ID("nope"), 1, judgment.StateConfirmed, 1); !errors.Is(err, shared.ErrNotFound) {
+	if _, err := repo.SetScoreState(ctx, eid, shared.ID("nope"), 1, judgment.StateConfirmed, 3); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("unknown id: want ErrNotFound, got %v", err)
 	}
 
@@ -89,7 +103,7 @@ func TestJudgmentRepository(t *testing.T) {
 	// must be rejected on read, never hydrated. (Last assertion – it poisons ListByEngagement.)
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO judgments (id, tenant_id, engagement_id, capability, subject_kind, subject_id, claim, state, version, created_at, updated_at)
-		 VALUES ($1,'',$2,'reachability','finding','f1','{"capability":"reachability","claim":{"reachable":"unknown","tier":"tier-0","confidence":0}}','GARBAGE',1,now(),now())`,
+		 VALUES ($1,'default',$2,'reachability','finding','f1','{"capability":"reachability","claim":{"reachable":"unknown","tier":"tier-0","confidence":0}}','GARBAGE',1,now(),now())`,
 		"jbad-"+randHex(t), eid.String()); err != nil {
 		t.Fatalf("insert corrupted row: %v", err)
 	}

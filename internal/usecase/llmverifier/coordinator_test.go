@@ -82,6 +82,19 @@ func TestAutoVerifyConfirmsAndRefutes(t *testing.T) {
 	}
 }
 
+func TestAutoVerifySkipsPromotion(t *testing.T) {
+	ver := &fakeVerifier{}
+	c := New(fakeLLM{content: `{"score":99,"rationale":"promotion looks good"}`}, "cx/proposer", "cx/verifier", ver,
+		fakeLister{js: []judgment.Judgment{{ID: "p1", Capability: judgment.CapPromotion, State: judgment.StateProposed, ProposedBy: "agent:x"}}})
+	res, err := c.AutoVerify(context.Background(), "eng", "human:tester")
+	if err != nil {
+		t.Fatalf("AutoVerify: %v", err)
+	}
+	if res != (Result{}) || len(ver.calls) != 0 {
+		t.Fatalf("promotion must not be LLM verified: result=%+v calls=%+v", res, ver.calls)
+	}
+}
+
 func TestAutoVerifyLowScoreRefutes(t *testing.T) {
 	c := New(fakeLLM{content: `{"score":40,"rationale":"finding looks real"}`}, "cx/proposer", "cx/verifier", &fakeVerifier{},
 		fakeLister{js: []judgment.Judgment{critique("1", "agent:x", judgment.StateProposed)}})

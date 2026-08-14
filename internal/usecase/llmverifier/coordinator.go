@@ -100,7 +100,7 @@ func (c *Coordinator) AutoVerify(ctx context.Context, engagementID shared.ID, tr
 		if ctx.Err() != nil {
 			break
 		}
-		if j.State != judgment.StateProposed || !j.Capability.Gated() {
+		if j.State != judgment.StateProposed || !j.Capability.Gated() || j.Capability == judgment.CapPromotion {
 			continue
 		}
 		// Never confirm a claim this verifier proposed (the analysis gate enforces this too; skipping

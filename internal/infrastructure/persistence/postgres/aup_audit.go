@@ -58,8 +58,9 @@ type AuditLog struct{ pool *pgxpool.Pool }
 func NewAuditLog(pool *pgxpool.Pool) *AuditLog { return &AuditLog{pool: pool} }
 
 var (
-	_ ports.AuditLogger = (*AuditLog)(nil)
-	_ ports.AuditReader = (*AuditLog)(nil)
+	_ ports.AuditLogger           = (*AuditLog)(nil)
+	_ ports.AuditReader           = (*AuditLog)(nil)
+	_ ports.IdempotentAuditLogger = (*AuditLog)(nil)
 )
 
 // auditChainLock is a fixed key for the transaction-scoped advisory lock that
@@ -95,35 +96,86 @@ func scanEntries(rows pgx.Rows) ([]ports.AuditEntry, error) {
 	return out, rows.Err()
 }
 
-// List returns the most recent audit entries (newest first), capped at limit.
-func (l *AuditLog) List(ctx context.Context, limit int) ([]ports.AuditEntry, error) {
+// List returns the calling tenant's most recent audit entries (newest first), capped at limit.
+func (l *AuditLog) List(ctx context.Context, limit int) (out []ports.AuditEntry, err error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 200
 	}
-	rows, err := l.pool.Query(ctx,
-		`SELECT actor, action, target, metadata, created_at, hash, previous_hash
-		   FROM audit_log ORDER BY id DESC LIMIT $1`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("list audit: %w", err)
-	}
-	return scanEntries(rows)
+	err = WithContextTenant(ctx, l.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx,
+			`SELECT actor, action, target, metadata, created_at, hash, previous_hash
+			   FROM audit_log ORDER BY id DESC LIMIT $1`, limit)
+		if err != nil {
+			return fmt.Errorf("list audit: %w", err)
+		}
+		out, err = scanEntries(rows)
+		return err
+	})
+	return out, err
 }
 
-// Verify re-derives the hash chain over the entire log (oldest-first, id order) and
-// reports whether it is intact. It is an explicit integrity check, so
-// it reads every row rather than a capped window.
+// Verify examines only the calling tenant's rows. The historical audit chain is
+// global, so omitted links make a tenant-only result unavailable rather than falsely
+// claiming a complete integrity check. Server maintenance code may use VerifyGlobal.
 func (l *AuditLog) Verify(ctx context.Context) (audit.Report, error) {
-	rows, err := l.pool.Query(ctx,
+	entries, err := l.tenantEntries(ctx)
+	if err != nil {
+		return audit.Report{}, err
+	}
+	report := audit.Verify(toRecords(entries))
+	firstHashedPrevious := ""
+	for _, entry := range entries {
+		if entry.Hash != "" {
+			firstHashedPrevious = entry.PreviousHash
+			break
+		}
+	}
+	if firstHashedPrevious != "" || !report.Intact {
+		return audit.Report{
+			Unchained: report.Unchained,
+			Error:     "tenant-scoped audit verification is unavailable for the global hash chain; use server-only VerifyGlobal",
+		}, nil
+	}
+	return report, nil
+}
+
+// VerifyGlobal re-derives the complete, globally linked audit chain. It deliberately
+// bypasses tenant visibility and must only be called by server-side maintenance code,
+// never by a tenant HTTP endpoint.
+func (l *AuditLog) VerifyGlobal(ctx context.Context) (audit.Report, error) {
+	tx, err := l.pool.Begin(ctx)
+	if err != nil {
+		return audit.Report{}, fmt.Errorf("global audit verify: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.audit_global_read', 'on', true)"); err != nil {
+		return audit.Report{}, fmt.Errorf("global audit verify: enable read: %w", err)
+	}
+	rows, err := tx.Query(ctx,
 		`SELECT actor, action, target, metadata, created_at, hash, previous_hash
 		   FROM audit_log ORDER BY id ASC`)
 	if err != nil {
-		return audit.Report{}, fmt.Errorf("verify audit: %w", err)
+		return audit.Report{}, fmt.Errorf("global audit verify: query: %w", err)
 	}
 	entries, err := scanEntries(rows)
 	if err != nil {
 		return audit.Report{}, err
 	}
 	return audit.Verify(toRecords(entries)), nil
+}
+
+func (l *AuditLog) tenantEntries(ctx context.Context) (out []ports.AuditEntry, err error) {
+	err = WithContextTenant(ctx, l.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx,
+			`SELECT actor, action, target, metadata, created_at, hash, previous_hash
+			   FROM audit_log ORDER BY id ASC`)
+		if err != nil {
+			return fmt.Errorf("verify audit: %w", err)
+		}
+		out, err = scanEntries(rows)
+		return err
+	})
+	return out, err
 }
 
 // Record appends an immutable audit entry (INSERT only – never update or delete), chaining it
@@ -133,6 +185,27 @@ func (l *AuditLog) Verify(ctx context.Context) (audit.Report, error) {
 // concurrent append yields a 23505 unique violation – Record then re-reads the advanced head
 // and re-chains (bounded), parity with the evidence store, rather than surfacing an opaque
 // error. On the normal locked path the conflict is unreachable and the loop runs once.
+// RecordOnce implements ports.IdempotentAuditLogger. Entries with a deterministic
+// metadata idempotency_key are recovered without adding a second chain link.
+func (l *AuditLog) RecordOnce(ctx context.Context, e ports.AuditEntry) error {
+	if e.Metadata["idempotency_key"] == "" {
+		return l.Record(ctx, e)
+	}
+	const maxAttempts = 8
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		err := l.recordOnce(ctx, e)
+		if err == nil {
+			return nil
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			continue
+		}
+		return err
+	}
+	return fmt.Errorf("append idempotent audit entry: %w after %d attempts", shared.ErrConflict, maxAttempts)
+}
+
 func (l *AuditLog) Record(ctx context.Context, e ports.AuditEntry) error {
 	const maxAttempts = 8
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -152,12 +225,26 @@ func (l *AuditLog) Record(ctx context.Context, e ports.AuditEntry) error {
 // recordOnce performs one locked read-head → chain → insert attempt. A 23505 unique violation
 // propagates (wrapped) so Record can retry.
 func (l *AuditLog) recordOnce(ctx context.Context, e ports.AuditEntry) error {
+	tenantID, tenantBound := shared.TenantFrom(ctx)
 	tx, err := l.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("audit tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := appendAudit(ctx, tx, e); err != nil {
+	if tenantBound {
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", tenantID.String()); err != nil {
+			return fmt.Errorf("audit tx: set tenant: %w", err)
+		}
+	}
+	var rlsEnforced bool
+	if err := tx.QueryRow(ctx, "SELECT row_security_active('audit_log'::regclass)").Scan(&rlsEnforced); err != nil {
+		return fmt.Errorf("audit tx: inspect RLS: %w", err)
+	}
+	if tenantBound && rlsEnforced {
+		if err := appendTenantAudit(ctx, tx, tenantID.String(), e); err != nil {
+			return err
+		}
+	} else if err := appendAudit(ctx, tx, e); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -185,13 +272,47 @@ func appendAudit(ctx context.Context, tx pgx.Tx, e ports.AuditEntry) error {
 		prevHash = *prev
 	}
 	hash := audit.ComputeHash(prevHash, e.Actor, e.Action, e.Target, e.Metadata, e.At)
-	// tenant_id '' = default tenant, matching the other writers. Audit reads are gated to the
-	// review capability since the log is global; populating this row's tenant_id from the
-	// authenticated context + per-tenant audit scoping is a remaining row-level follow-up.
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, created_at, hash, previous_hash)
 		 VALUES ('', $1, $2, $3, $4, $5, $6, $7)`,
 		e.Actor, e.Action, e.Target, string(meta), e.At, hash, prevHash); err != nil {
+		return fmt.Errorf("insert audit: %w", err)
+	}
+	return nil
+}
+
+func appendTenantAudit(ctx context.Context, tx pgx.Tx, tenantID string, e ports.AuditEntry) error {
+	meta, err := json.Marshal(e.Metadata)
+	if err != nil {
+		return fmt.Errorf("marshal audit metadata: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(auditChainLock)); err != nil {
+		return fmt.Errorf("audit lock: %w", err)
+	}
+	if key := e.Metadata["idempotency_key"]; key != "" {
+		var exists bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM audit_log WHERE tenant_id = $1 AND action = $2 AND idempotency_key = $3)`, tenantID, e.Action, key).Scan(&exists); err != nil {
+			return fmt.Errorf("check idempotent audit record: %w", err)
+		}
+		if exists {
+			return nil
+		}
+	}
+	var prev *string
+	if err := tx.QueryRow(ctx,
+		`SELECT hash FROM audit_log WHERE tenant_id = $1 AND hash_version = 2 AND hash IS NOT NULL ORDER BY id DESC LIMIT 1`, tenantID).Scan(&prev); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("audit head: %w", err)
+	}
+	prevHash := ""
+	if prev != nil {
+		prevHash = *prev
+	}
+	hash := audit.ComputeHash(prevHash, e.Actor, e.Action, e.Target, e.Metadata, e.At)
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, idempotency_key, hash_version, created_at, hash, previous_hash)
+		 VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), 2, $7, $8, $9)`,
+		tenantID, e.Actor, e.Action, e.Target, string(meta), e.Metadata["idempotency_key"], e.At, hash, prevHash); err != nil {
 		return fmt.Errorf("insert audit: %w", err) // 23505 propagates for Record's retry
 	}
 	return nil

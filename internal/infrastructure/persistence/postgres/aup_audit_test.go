@@ -3,13 +3,40 @@ package postgres
 import (
 	"context"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/KKloudTarus/synapse-ce/internal/domain/aup"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
 )
+
+type aupTestClock struct{ now time.Time }
+
+func (c aupTestClock) Now() time.Time { return c.now }
+
+func runtimeAUPPool(ctx context.Context, adminPool *pgxpool.Pool, dsn, role string) (*pgxpool.Pool, error) {
+	for _, statement := range []string{
+		"CREATE ROLE " + role + " LOGIN PASSWORD 'test-password' NOSUPERUSER NOBYPASSRLS",
+		"GRANT USAGE ON SCHEMA public TO " + role,
+		"GRANT SELECT, INSERT ON audit_log TO " + role,
+		"GRANT USAGE, SELECT ON SEQUENCE audit_log_id_seq TO " + role,
+	} {
+		if _, err := adminPool.Exec(ctx, statement); err != nil {
+			return nil, err
+		}
+	}
+	runtimeConfig, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	runtimeConfig.ConnConfig.User = role
+	runtimeConfig.ConnConfig.Password = "test-password"
+	runtimeConfig.MaxConns = 1
+	return pgxpool.NewWithConfig(ctx, runtimeConfig)
+}
 
 func TestAUPStoreAndAuditLog(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
@@ -24,7 +51,7 @@ func TestAUPStoreAndAuditLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 
 	// --- AUP acceptance ---
 	ver := "test-" + randHex(t)
@@ -52,25 +79,41 @@ func TestAUPStoreAndAuditLog(t *testing.T) {
 		t.Errorf("want 1 acceptance row (idempotent), got %d", n)
 	}
 
-	// --- append-only audit ---
-	// audit_log is DB-enforced append-only (migration 0033: UPDATE/DELETE/TRUNCATE raise), so
-	// there is no cleanup – the test uses a unique action per run (randHex) and filters reads by
-	// it, so accumulated rows from prior runs are harmless.
-	action := "test.action-" + randHex(t)
-	log := NewAuditLog(pool)
+	// --- AUP acceptance audit under a NOSUPERUSER, NOBYPASSRLS runtime role ---
+	role := "aup_runtime_" + randHex(t)
+	runtimePool, err := runtimeAUPPool(ctx, pool, dsn, role)
+	if err != nil {
+		t.Fatalf("runtime role setup: %v", err)
+	}
+	defer runtimePool.Close()
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DROP ROLE "+role) })
 
-	if err := log.Record(ctx, ports.AuditEntry{
-		Actor: "operator", Action: action, Target: "engagement-1",
-		Metadata: map[string]string{"kind": "local"}, At: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("Record: %v", err)
+	tenantID := shared.ID("tenant-aup-" + randHex(t))
+	tenantCtx := shared.WithTenant(ctx, tenantID)
+	version := "aup-" + randHex(t)
+	svc := aupuc.NewService(NewAUPStore(pool), NewAuditLog(runtimePool), aupTestClock{now: time.Now().UTC()}, version)
+	if err := svc.Accept(tenantCtx, "operator", version); err != nil {
+		t.Fatalf("runtime role AUP acceptance: %v", err)
 	}
-	var actor, target, meta string
-	if err := pool.QueryRow(ctx,
-		"SELECT actor, target, metadata::text FROM audit_log WHERE action=$1", action).Scan(&actor, &target, &meta); err != nil {
-		t.Fatalf("read audit: %v", err)
+	var storedTenant string
+	var hashVersion int
+	if err := pool.QueryRow(ctx, "SELECT tenant_id, hash_version FROM audit_log WHERE action='aup.accept' AND target=$1", "aup:"+version).Scan(&storedTenant, &hashVersion); err != nil {
+		t.Fatalf("read tenant-bound AUP audit row: %v", err)
 	}
-	if actor != "operator" || target != "engagement-1" || !strings.Contains(meta, "local") {
-		t.Errorf("audit entry = actor=%s target=%s meta=%s", actor, target, meta)
+	if storedTenant != tenantID.String() || hashVersion != 2 {
+		t.Fatalf("audit row tenant/version = %q/%d, want %q/2", storedTenant, hashVersion, tenantID)
 	}
+	// Migration rollback tests share this database. Remove this test's v2 chain
+	// row after exercising the runtime path because migration 0085 correctly
+	// refuses to roll back while any v2 history exists.
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "SET session_replication_role = replica"); err != nil {
+			t.Errorf("disable audit append-only trigger: %v", err)
+			return
+		}
+		defer func() { _, _ = pool.Exec(context.Background(), "SET session_replication_role = origin") }()
+		if _, err := pool.Exec(context.Background(), "DELETE FROM audit_log WHERE action='aup.accept' AND target=$1", "aup:"+version); err != nil {
+			t.Errorf("remove test audit row: %v", err)
+		}
+	})
 }

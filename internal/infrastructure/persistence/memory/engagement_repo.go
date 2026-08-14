@@ -24,6 +24,7 @@ func NewEngagementRepository() *EngagementRepository {
 
 // Compile-time assertion that we satisfy the port.
 var _ ports.EngagementRepository = (*EngagementRepository)(nil)
+var _ ports.PromotionReconciliationScopeReader = (*EngagementRepository)(nil)
 
 func (r *EngagementRepository) Create(_ context.Context, e *engagement.Engagement) error {
 	r.mu.Lock()
@@ -107,6 +108,27 @@ func (r *EngagementRepository) Delete(_ context.Context, id shared.ID) error {
 	defer r.mu.Unlock()
 	delete(r.data, id)
 	return nil
+}
+
+// ListPromotionReconciliationScopes returns every non-project engagement for
+// process-local recovery. It is only wired by the API composition root.
+func (r *EngagementRepository) ListPromotionReconciliationScopes(ctx context.Context) ([]ports.PromotionReconciliationScope, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]ports.PromotionReconciliationScope, 0, len(r.data))
+	for _, e := range r.data {
+		if !e.ProjectID.IsZero() {
+			continue
+		}
+		out = append(out, ports.PromotionReconciliationScope{
+			TenantID:     shared.TenantOrDefault(e.TenantID),
+			EngagementID: e.ID,
+		})
+	}
+	return out, nil
 }
 
 func (r *EngagementRepository) List(_ context.Context, tenantID shared.ID) ([]*engagement.Engagement, error) {

@@ -352,3 +352,11 @@ func TestLoadDASTCeilingsFailClosed(t *testing.T) {
 		t.Fatalf("DAST ceilings did not fail closed: %+v", config)
 	}
 }
+
+func TestLoadDatabaseMigrationDSN(t *testing.T) {
+	t.Setenv("SYNAPSE_DB_DSN", "postgres://app@example/app")
+	t.Setenv("SYNAPSE_DB_MIGRATION_DSN", "postgres://owner@example/app")
+	if got := Load().DBMigrationDSN; got != "postgres://owner@example/app" {
+		t.Fatalf("migration DSN = %q", got)
+	}
+}

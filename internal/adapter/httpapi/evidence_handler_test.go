@@ -39,6 +39,17 @@ func (s *evStoreFake) Head(_ context.Context, id shared.ID) (string, error) {
 	return c[len(c)-1].Hash, nil
 }
 
+func (s *evStoreFake) LookupSealedForFinding(_ context.Context, engagementID, findingID shared.ID, kind string) (evdom.Evidence, bool, error) {
+	chain := s.items[engagementID]
+	for i := len(chain) - 1; i >= 0; i-- {
+		e := chain[i]
+		if e.FindingID == findingID && e.Kind == kind {
+			return e, true, nil
+		}
+	}
+	return evdom.Evidence{}, false, nil
+}
+
 type blobFake struct{ m map[string][]byte }
 
 func newBlobFake() *blobFake                                        { return &blobFake{m: map[string][]byte{}} }

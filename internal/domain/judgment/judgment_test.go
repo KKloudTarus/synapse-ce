@@ -1,7 +1,9 @@
 package judgment
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +62,28 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestVerdictProvenanceJSON(t *testing.T) {
+	j, err := New("j1", "e1", CapReachability, SubjectFinding, "f1", reach(), "agent:s1", t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, err = j.ApplyVerdict(verdict.Verdict{Verifier: "human:bob", Score: 80, Rationale: "holds"}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["verified_by"] != "human:bob" || got["verdict_rationale"] != "holds" {
+		t.Fatalf("sealed provenance JSON: %s", data)
+	}
+}
+
 func TestApplyVerdict(t *testing.T) {
 	base, _ := New("j1", "e1", CapReachability, SubjectFinding, "f1", reach(), "agent:s1", t0)
 
@@ -70,6 +94,9 @@ func TestApplyVerdict(t *testing.T) {
 	if got.State != StateConfirmed || got.EvidenceScore != 80 || !got.Publishable() {
 		t.Fatalf("want confirmed/80/publishable, got %s/%d/%v", got.State, got.EvidenceScore, got.Publishable())
 	}
+	if got.VerifiedBy != "human:bob" || got.VerdictRationale != "holds" {
+		t.Fatalf("verdict provenance lost: %#v", got)
+	}
 
 	got, err = base.ApplyVerdict(verdict.Verdict{Verifier: "human:bob", Score: 40, Rationale: "weak"}, t0)
 	if err != nil {
@@ -77,6 +104,9 @@ func TestApplyVerdict(t *testing.T) {
 	}
 	if got.State != StateRefuted || got.Publishable() {
 		t.Fatalf("want refuted/not-publishable, got %s/%v", got.State, got.Publishable())
+	}
+	if got.VerifiedBy != "human:bob" || got.VerdictRationale != "weak" {
+		t.Fatalf("refuted verdict provenance lost: %#v", got)
 	}
 
 	if _, err := base.ApplyVerdict(verdict.Verdict{Verifier: "agent:s1", Score: 90, Rationale: "x"}, t0); !errors.Is(err, shared.ErrValidation) {
@@ -100,6 +130,9 @@ func TestAccept(t *testing.T) {
 	}
 	if got.State != StateConfirmed || !got.Publishable() {
 		t.Fatalf("want confirmed/publishable, got %s/%v", got.State, got.Publishable())
+	}
+	if got.VerifiedBy != "" || got.VerdictRationale != "" {
+		t.Fatalf("accept fabricated verdict provenance: %#v", got)
 	}
 
 	if _, err := ung.Accept("agent:s1", t0); !errors.Is(err, shared.ErrValidation) {
@@ -157,6 +190,7 @@ func TestCapabilityContractExhaustive(t *testing.T) {
 		{CapRiskNarrative, RiskNarrativeClaim{Drivers: []string{"kev"}, Priority: 3}, false},
 		{CapThreat, ThreatClaim{Category: Tampering}, true},
 		{CapCorrelation, CorrelationClaim{Reporters: []string{"osv"}, Missing: []string{"owned"}}, false},
+		{CapPromotion, PromotionClaim{FindingID: "finding", Rule: "promotion.review.uncertain_corroboration", Inputs: []PromotionInput{{Kind: PromotionInputReachability, ID: "judgment"}}, Proposed: PromotionFlagForReview, Uncertainty: []string{"unknown_reachability"}, Fingerprint: strings.Repeat("a", 64), FindingVersion: 1, BeforePriority: 3, AfterPriority: 3}, true},
 		{CapVexJustification, VexJustificationClaim{Justification: vex.VulnerableCodeNotPresent}, true},
 	}
 	for _, tc := range all {

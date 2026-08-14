@@ -66,21 +66,21 @@ func actorsFor(tier judgment.ReachabilityTier, language Language) (proposer, ver
 		// named the wrong one would make a module-graph proof indistinguishable from an interprocedural
 		// one in the report and in the audit trail.
 		if language == LanguageJavaScript {
-			return "system:jssymbol-scan", "system:jssymbol-engine", "tier-2 javascript affected-export proof"
+			return judgment.ProofActorJSSymbolScan, judgment.ProofActorJSSymbolEngine, "tier-2 javascript affected-export proof"
 		}
-		return "system:callgraph-scan", "system:callgraph-engine", "tier-2 call-graph proof"
+		return judgment.ProofActorCallgraphScan, judgment.ProofActorCallgraphEngine, "tier-2 call-graph proof"
 	}
 	switch language {
 	case LanguageJavaScript:
-		return "system:jsimport-scan", "system:jsimport-engine", "tier-1 javascript import-reachability proof"
+		return judgment.ProofActorJSImportScan, judgment.ProofActorJSImportEngine, "tier-1 javascript import-reachability proof"
 	case LanguageRust:
-		return "system:rustimport-scan", "system:rustimport-engine", "tier-1 rust import-reachability proof"
+		return judgment.ProofActorRustImportScan, judgment.ProofActorRustImportEngine, "tier-1 rust import-reachability proof"
 	case LanguagePHP:
-		return "system:phpimport-scan", "system:phpimport-engine", "tier-1 php import-reachability proof"
+		return judgment.ProofActorPHPImportScan, judgment.ProofActorPHPImportEngine, "tier-1 php import-reachability proof"
 	case LanguageRuby:
-		return "system:rubyimport-scan", "system:rubyimport-engine", "tier-1 ruby import-reachability proof"
+		return judgment.ProofActorRubyImportScan, judgment.ProofActorRubyImportEngine, "tier-1 ruby import-reachability proof"
 	default:
-		return "system:pyimport-scan", "system:pyimport-engine", "tier-1 import-reachability proof"
+		return judgment.ProofActorPyImportScan, judgment.ProofActorPyImportEngine, "tier-1 import-reachability proof"
 	}
 }
 

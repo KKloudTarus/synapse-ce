@@ -2,6 +2,7 @@ package verdict
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -20,6 +21,8 @@ func TestVerdictValidate(t *testing.T) {
 		{"score negative", Verdict{Verifier: "reviewer", Score: -1, Rationale: "x"}, false},
 		{"score over 100", Verdict{Verifier: "reviewer", Score: 101, Rationale: "x"}, false},
 		{"no rationale", Verdict{Verifier: "reviewer", Score: 80, Rationale: " "}, false},
+		{"rationale at byte limit", Verdict{Verifier: "reviewer", Score: 80, Rationale: strings.Repeat("a", MaxRationaleBytes)}, true},
+		{"rationale over byte limit", Verdict{Verifier: "reviewer", Score: 80, Rationale: strings.Repeat("a", MaxRationaleBytes+1)}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

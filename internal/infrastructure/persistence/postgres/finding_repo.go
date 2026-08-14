@@ -83,9 +83,10 @@ func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Findi
 			 DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description,
 			               severity = EXCLUDED.severity, cvss_vector = EXCLUDED.cvss_vector, kev = EXCLUDED.kev, risk_score = EXCLUDED.risk_score,
 			               sources = EXCLUDED.sources, confidence = EXCLUDED.confidence, class = EXCLUDED.class,
-			               scope = EXCLUDED.scope, reachability = EXCLUDED.reachability, impact = EXCLUDED.impact, priority = EXCLUDED.priority,
+			               scope = EXCLUDED.scope, reachability = EXCLUDED.reachability, impact = EXCLUDED.impact,
 			               kind = EXCLUDED.kind, class_reachability = EXCLUDED.class_reachability,
-			               rule_key = EXCLUDED.rule_key, updated_at = EXCLUDED.updated_at`,
+			               rule_key = EXCLUDED.rule_key, updated_at = EXCLUDED.updated_at,
+			               version = findings.version + 1`,
 				f.ID.String(), tenantID.String(), f.EngagementID.String(), f.Title, f.Description, string(f.Severity),
 				f.CVSSVector, f.CWE, string(f.Status), f.EvidenceScore, f.DedupKey,
 				f.KEV, f.RiskScore, f.Audit.CreatedAt, f.Audit.UpdatedAt, strings.Join(f.Sources, ","), f.Confidence, classOrDefault(f.Class),
@@ -208,6 +209,28 @@ func (r *FindingRepository) ListPublishableByEngagement(ctx context.Context, eng
 		return nil, err
 	}
 	return finding.Publishable(all), nil
+}
+
+// GetByEngagementAndID loads a single finding by engagement and finding ID.
+// Returns shared.ErrNotFound if no such finding exists in the engagement.
+func (r *FindingRepository) GetByEngagementAndID(ctx context.Context, engagementID, findingID shared.ID) (finding.Finding, error) {
+	var f finding.Finding
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx,
+			`SELECT `+findingCols+` FROM findings WHERE engagement_id=$1 AND id=$2`,
+			engagementID.String(), findingID.String(),
+		)
+		var scanErr error
+		f, scanErr = scanFinding(row)
+		return scanErr
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return finding.Finding{}, fmt.Errorf("finding %s in engagement %s: %w", findingID, engagementID, shared.ErrNotFound)
+	}
+	if err != nil {
+		return finding.Finding{}, fmt.Errorf("get finding: %w", err)
+	}
+	return f, nil
 }
 
 // scanFinding scans a findingCols row (pgx.Row or pgx.Rows) into a Finding.

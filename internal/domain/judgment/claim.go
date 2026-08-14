@@ -18,6 +18,8 @@ import (
 // no LLM prose reaches a deliverable).
 var driverRE = regexp.MustCompile(`^[a-z][a-z0-9_]*((<=|>=|==|!=|<|>)[0-9]+(\.[0-9]+)?)?$`)
 var fingerprintRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$|^[a-z][a-z0-9_]{0,15}_[a-f0-9]{64}$`)
+var promotionRuleKeyRE = regexp.MustCompile(`^promotion\.[a-z][a-z0-9_.]*$`)
+var promotionFingerprintRE = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 // These fields can be proposed by an LLM before a verifier reviews the claim. Keep their wire
 // representation bounded and token-shaped at the domain seam so model prose/control characters
@@ -26,6 +28,68 @@ var (
 	cweRE      = regexp.MustCompile(`^CWE-[0-9]{1,9}$`)
 	sastRuleRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
 )
+
+// Stable promotion rule identifiers. These constants are the canonical source of truth; the
+// promotion catalog in internal/domain/promotion reuses them to avoid duplicated string
+// vocabularies across domain packages.
+const (
+	RuleRuntimeReachableExposed  = "promotion.escalate.runtime_reachable_exposed"
+	RuleDeterministicUnreachable = "promotion.deescalate.deterministic_unreachable"
+	RuleUncertainCorroboration   = "promotion.review.uncertain_corroboration"
+	RuleCorroboratingSignalLoss  = "promotion.deescalate.corroborating_signal_loss"
+)
+
+// ExpectedEffect returns the PromotionChange that the given rule is allowed to produce.
+// Unknown rules are rejected so claims cannot introduce new promotion behavior.
+func ExpectedEffect(rule string) (PromotionChange, bool) {
+	switch rule {
+	case RuleRuntimeReachableExposed:
+		return PromotionEscalate, true
+	case RuleDeterministicUnreachable, RuleCorroboratingSignalLoss:
+		return PromotionDeescalate, true
+	case RuleUncertainCorroboration:
+		return PromotionFlagForReview, true
+	default:
+		return "", false
+	}
+}
+
+// Reserved deterministic reachability proof identities. These are domain provenance
+// vocabulary; use cases may mint claims with them but cannot define new proof engines.
+const (
+	ProofActorCallgraphScan    = "system:callgraph-scan"
+	ProofActorCallgraphEngine  = "system:callgraph-engine"
+	ProofActorJSSymbolScan     = "system:jssymbol-scan"
+	ProofActorJSSymbolEngine   = "system:jssymbol-engine"
+	ProofActorJSImportScan     = "system:jsimport-scan"
+	ProofActorJSImportEngine   = "system:jsimport-engine"
+	ProofActorPyImportScan     = "system:pyimport-scan"
+	ProofActorPyImportEngine   = "system:pyimport-engine"
+	ProofActorRustImportScan   = "system:rustimport-scan"
+	ProofActorRustImportEngine = "system:rustimport-engine"
+	ProofActorPHPImportScan    = "system:phpimport-scan"
+	ProofActorPHPImportEngine  = "system:phpimport-engine"
+	ProofActorRubyImportScan   = "system:rubyimport-scan"
+	ProofActorRubyImportEngine = "system:rubyimport-engine"
+)
+
+// IsDeterministicReachabilityProof reports whether the distinct reserved identities
+// prove the supplied reachability tier. Unknown identities fail closed.
+func IsDeterministicReachabilityProof(tier ReachabilityTier, proposer, verifier string) bool {
+	switch tier {
+	case Tier2:
+		return (proposer == ProofActorCallgraphScan && verifier == ProofActorCallgraphEngine) ||
+			(proposer == ProofActorJSSymbolScan && verifier == ProofActorJSSymbolEngine)
+	case Tier1:
+		return (proposer == ProofActorJSImportScan && verifier == ProofActorJSImportEngine) ||
+			(proposer == ProofActorPyImportScan && verifier == ProofActorPyImportEngine) ||
+			(proposer == ProofActorRustImportScan && verifier == ProofActorRustImportEngine) ||
+			(proposer == ProofActorPHPImportScan && verifier == ProofActorPHPImportEngine) ||
+			(proposer == ProofActorRubyImportScan && verifier == ProofActorRubyImportEngine)
+	default:
+		return false
+	}
+}
 
 // maxClaimPathElems / maxClaimPathElemLen bound a reachability claim's call/dependency path so a
 // hostile or runaway proposer (agent or HTTP) cannot seal an unbounded path into the evidence ledger
@@ -358,13 +422,149 @@ func (c CorrelationClaim) Validate() error {
 	return nil
 }
 
+// PromotionChange is the closed set of finding-priority effects a cross-pillar rule may propose.
+type PromotionChange string
+
+const (
+	PromotionEscalate      PromotionChange = "escalate"
+	PromotionDeescalate    PromotionChange = "de_escalate"
+	PromotionFlagForReview PromotionChange = "flag_for_review"
+)
+
+func (c PromotionChange) Valid() bool {
+	return c == PromotionEscalate || c == PromotionDeescalate || c == PromotionFlagForReview
+}
+
+// PromotionInputKind identifies a typed record that supports or contradicts a promotion.
+type PromotionInputKind string
+
+const (
+	PromotionInputReachability PromotionInputKind = "reachability_judgment"
+	PromotionInputAttackPath   PromotionInputKind = "attack_path"
+	PromotionInputDetection    PromotionInputKind = "detection"
+	PromotionInputPrior        PromotionInputKind = "prior_promotion"
+)
+
+func (k PromotionInputKind) Valid() bool {
+	return k == PromotionInputReachability || k == PromotionInputAttackPath || k == PromotionInputDetection || k == PromotionInputPrior
+}
+
+// PromotionInput links a promotion to the exact record and, where available, its sealed evidence.
+type PromotionInput struct {
+	Kind       PromotionInputKind `json:"kind"`
+	ID         shared.ID          `json:"id"`
+	EvidenceID shared.ID          `json:"evidence_id,omitempty"`
+}
+
+// PromotionClaim proposes a deterministic priority change. It is inert until a distinct verifier's
+// sealed verdict clears the evidence bar. Uncertain inputs may only produce a review flag.
+type PromotionClaim struct {
+	FindingID      shared.ID        `json:"finding_id"`
+	Rule           string           `json:"rule"`
+	Inputs         []PromotionInput `json:"inputs"`
+	Proposed       PromotionChange  `json:"proposed"`
+	Uncertainty    []string         `json:"uncertainty,omitempty"`
+	Fingerprint    string           `json:"fingerprint"`
+	FindingVersion int              `json:"finding_version"`
+	BeforePriority int              `json:"before_priority"`
+	AfterPriority  int              `json:"after_priority"`
+}
+
+func (PromotionClaim) Capability() Capability { return CapPromotion }
+
+func (c PromotionClaim) Validate() error {
+	if c.FindingID.IsZero() {
+		return fmt.Errorf("%w: promotion finding id is required", shared.ErrValidation)
+	}
+	if len(c.Rule) > 128 || !promotionRuleKeyRE.MatchString(c.Rule) {
+		return fmt.Errorf("%w: promotion rule must be a stable promotion.* token", shared.ErrValidation)
+	}
+	expectEffect, ok := ExpectedEffect(c.Rule)
+	if !ok {
+		return fmt.Errorf("%w: unknown promotion rule %q", shared.ErrValidation, c.Rule)
+	}
+	if c.Proposed != expectEffect {
+		return fmt.Errorf("%w: promotion rule %q produces %s, got %s", shared.ErrValidation, c.Rule, expectEffect, c.Proposed)
+	}
+	if !promotionFingerprintRE.MatchString(c.Fingerprint) {
+		return fmt.Errorf("%w: promotion fingerprint must be a lowercase SHA-256 digest", shared.ErrValidation)
+	}
+	if !c.Proposed.Valid() {
+		return fmt.Errorf("%w: promotion change must be escalate|de_escalate|flag_for_review", shared.ErrValidation)
+	}
+	if c.FindingVersion < 1 || c.BeforePriority < 1 || c.BeforePriority > 5 || c.AfterPriority < 1 || c.AfterPriority > 5 {
+		return fmt.Errorf("%w: promotion requires a positive finding version and priorities in 1..5", shared.ErrValidation)
+	}
+	if len(c.Inputs) == 0 || len(c.Inputs) > 32 {
+		return fmt.Errorf("%w: promotion requires 1..32 inputs", shared.ErrValidation)
+	}
+	for i, in := range c.Inputs {
+		if !in.Kind.Valid() || in.ID.IsZero() {
+			return fmt.Errorf("%w: promotion input %d has invalid kind or id", shared.ErrValidation, i)
+		}
+		if i > 0 {
+			prev := c.Inputs[i-1]
+			if prev.Kind > in.Kind || prev.Kind == in.Kind && (prev.ID > in.ID || prev.ID == in.ID && prev.EvidenceID >= in.EvidenceID) {
+				return fmt.Errorf("%w: promotion inputs must be sorted and distinct", shared.ErrValidation)
+			}
+		}
+	}
+	if len(c.Uncertainty) > 8 {
+		return fmt.Errorf("%w: promotion has too many uncertainty tokens", shared.ErrValidation)
+	}
+	for i, token := range c.Uncertainty {
+		if len(token) > 64 || !driverRE.MatchString(token) || i > 0 && c.Uncertainty[i-1] >= token {
+			return fmt.Errorf("%w: promotion uncertainty must be sorted distinct tokens", shared.ErrValidation)
+		}
+	}
+	if len(c.Uncertainty) > 0 && c.Proposed != PromotionFlagForReview {
+		return fmt.Errorf("%w: uncertain promotion can only flag for review", shared.ErrValidation)
+	}
+	switch c.Proposed {
+	case PromotionEscalate:
+		// Escalation is always exactly one level toward P1.
+		if c.AfterPriority != c.BeforePriority-1 {
+			return fmt.Errorf("%w: escalation must move priority one level toward P1", shared.ErrValidation)
+		}
+	case PromotionDeescalate:
+		if c.AfterPriority <= c.BeforePriority || c.AfterPriority > 5 {
+			return fmt.Errorf("%w: de-escalation must move priority toward P5", shared.ErrValidation)
+		}
+		if c.Rule == RuleCorroboratingSignalLoss {
+			// Multi-level reversal: requires at least one prior_promotion input
+			// and must restore a strictly higher prior priority.
+			hasPrior := false
+			for _, in := range c.Inputs {
+				if in.Kind == PromotionInputPrior {
+					hasPrior = true
+					break
+				}
+			}
+			if !hasPrior {
+				return fmt.Errorf("%w: corroborating_signal_loss requires at least one prior_promotion input", shared.ErrValidation)
+			}
+			if c.AfterPriority <= c.BeforePriority {
+				return fmt.Errorf("%w: corroborating_signal_loss must restore a higher priority", shared.ErrValidation)
+			}
+		} else {
+			// Ordinary de-escalation: exactly one level.
+			if c.AfterPriority != c.BeforePriority+1 {
+				return fmt.Errorf("%w: ordinary de-escalation must move exactly one level toward P5", shared.ErrValidation)
+			}
+		}
+	case PromotionFlagForReview:
+		if c.AfterPriority != c.BeforePriority {
+			return fmt.Errorf("%w: review flag cannot change priority", shared.ErrValidation)
+		}
+	}
+	return nil
+}
+
 // VexJustificationClaim is a proposed OpenVEX justification for why a finding is NOT_AFFECTED – the
 // AI's STRUCTURED choice from the CLOSED OpenVEX justification set, never free prose. The finding it
 // applies to is the Judgment's SUBJECT (SubjectFinding), not part of the claim. Gated: a distinct human
 // verifier ratifies it before the export trusts it (it asserts "not affected" in a published deliverable);
-// the agent only proposes it at score 0. It COMPLEMENTS the deterministic reachability-tier justification
-// (which wins where a confirmed not_reachable proof exists); this carries the OTHER not_affected
-// reasons (component_not_present / cannot_be_controlled / inline_mitigations / code_not_present).
+// the agent only proposes it at score 0. It COMPLEMENTS the deterministic reachability-tier justification.
 type VexJustificationClaim struct {
 	Justification vex.OpenVexJustification `json:"justification"`
 }
@@ -462,6 +662,12 @@ func UnmarshalClaim(data []byte) (Claim, error) {
 			return nil, err
 		}
 		c = cc
+	case CapPromotion:
+		var pc PromotionClaim
+		if err := strictDecode(env.Claim, &pc); err != nil {
+			return nil, err
+		}
+		c = pc
 	case CapVexJustification:
 		var vc VexJustificationClaim
 		if err := strictDecode(env.Claim, &vc); err != nil {

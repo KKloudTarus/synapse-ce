@@ -167,3 +167,61 @@ func Migrate(ctx context.Context, dsn string) error {
 	}
 	return nil
 }
+
+// ValidateMigrationRoleSeparation ensures migrations cannot run as the runtime role.
+func ValidateMigrationRoleSeparation(migrationDSN, runtimeDSN string) error {
+	migrationConfig, err := pgxpool.ParseConfig(migrationDSN)
+	if err != nil {
+		return fmt.Errorf("parse migration dsn: %w", err)
+	}
+	if migrationConfig.ConnConfig.User == "" {
+		return fmt.Errorf("migration dsn has no user")
+	}
+	runtimeConfig, err := pgxpool.ParseConfig(runtimeDSN)
+	if err != nil {
+		return fmt.Errorf("parse runtime dsn: %w", err)
+	}
+	if runtimeConfig.ConnConfig.User == "" {
+		return fmt.Errorf("runtime dsn has no user")
+	}
+	if migrationConfig.ConnConfig.User == runtimeConfig.ConnConfig.User {
+		return fmt.Errorf("migration and runtime DSNs must use distinct database users")
+	}
+	return nil
+}
+
+func quoteIdentifier(identifier string) string {
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+}
+
+// GrantRuntimePrivileges grants the runtime role the DML privileges required by the
+// application after migrations have completed under the separate owner credential.
+func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string) error {
+	runtimeConfig, err := pgxpool.ParseConfig(runtimeDSN)
+	if err != nil {
+		return fmt.Errorf("parse runtime dsn: %w", err)
+	}
+	role := runtimeConfig.ConnConfig.User
+	if role == "" {
+		return fmt.Errorf("runtime dsn has no user")
+	}
+	adminDB, err := sql.Open("pgx", dsnForMigrate(adminDSN))
+	if err != nil {
+		return fmt.Errorf("open admin dsn: %w", err)
+	}
+	defer func() { _ = adminDB.Close() }()
+
+	quotedRole := `"` + strings.ReplaceAll(role, `"`, `""`) + `"`
+	for _, statement := range []string{
+		"REVOKE CREATE ON SCHEMA public FROM " + quotedRole,
+		"REVOKE CREATE ON DATABASE " + quoteIdentifier(runtimeConfig.ConnConfig.Database) + " FROM " + quotedRole,
+		"GRANT USAGE ON SCHEMA public TO " + quotedRole,
+		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO " + quotedRole,
+		"GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO " + quotedRole,
+	} {
+		if _, err := adminDB.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("grant runtime privileges: %w", err)
+		}
+	}
+	return nil
+}

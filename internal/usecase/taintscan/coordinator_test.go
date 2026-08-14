@@ -59,6 +59,9 @@ func (f *fakeAudit) Record(_ context.Context, e ports.AuditEntry) error {
 	f.entries = append(f.entries, e)
 	return nil
 }
+func (f *fakeAudit) RecordOnce(ctx context.Context, e ports.AuditEntry) error {
+	return f.Record(ctx, e)
+}
 
 type fixedClock struct{}
 
