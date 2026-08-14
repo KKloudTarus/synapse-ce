@@ -150,6 +150,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachproof"
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	reportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/report"
+	riskstoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/riskstoryuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
@@ -1597,6 +1598,17 @@ func main() {
 			os.Exit(1)
 		} else {
 			router.SetDetectionReader(detectionReader)
+		}
+		// #427 unified per-asset risk story. A read-model assembler that correlates the records ALREADY
+		// produced by the pillars above (assets/edges, findings, attack-path bindings, reachability
+		// judgments, and the detection ledger) into one deterministic, tenant-scoped story per asset. It
+		// creates no data and persists no table; staleness uses the same freshness target as fleet
+		// coverage (#413). No LLM is in this path (asserted by an arch test).
+		if riskStorySvc, rserr := riskstoryuc.NewService(assetStore, findingRepo, attackPathStore, judgmentStore, detectionRecordStore, cfg.FleetCoverageFreshnessTarget, clock.Now); rserr != nil {
+			log.Error("risk story assembler init failed", "err", rserr)
+			os.Exit(1)
+		} else {
+			router.SetRiskStoryReader(riskStorySvc)
 		}
 		// The ingest writes an append-only audit entry asserting that N external results entered an
 		// engagement. Without Postgres those rows live only in this process, so the banner says so

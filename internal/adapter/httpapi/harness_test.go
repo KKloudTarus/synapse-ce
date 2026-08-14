@@ -544,6 +544,13 @@ func TestHostileHarness(t *testing.T) {
 		{"readonly may read purple coverage", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/purple-coverage", http.StatusOK},
 		{"cross-tenant purple coverage → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/purple-coverage", http.StatusNotFound},
 		{"principal-less purple coverage read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/purple-coverage", http.StatusForbidden},
+		// #427 unified per-asset risk story (PermView): readonly may read; a cross-tenant read is 404 at
+		// the withEngTenant chokepoint before any correlation runs; a principal-less read is denied. Both
+		// the list route and the single-asset route are gated, so the story never crosses a tenant.
+		{"readonly may read risk stories", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/risk-stories", http.StatusOK},
+		{"cross-tenant risk story list → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/risk-stories", http.StatusNotFound},
+		{"principal-less risk story read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/risk-stories", http.StatusForbidden},
+		{"cross-tenant single risk story → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/risk-stories/asset-A", http.StatusNotFound},
 		// Fleet coverage (#413, PermView): machine roles denied; readonly may read; cross-tenant agent
 		// detail is 404 (never an existence-revealing 403). The cross-tenant LIST emptiness (a 200 that
 		// leaks nothing) is asserted on the body just below the table.
