@@ -39,12 +39,12 @@ func TestCatalogParity(t *testing.T) {
 
 	expectedDetection := map[string]domainrule.Detection{
 		"Azure Resource Manager": domainrule.DetectionAST,
-		"CloudFormation":           domainrule.DetectionAST,
-		"Docker Compose": domainrule.DetectionPattern,
-		"Dockerfile":     domainrule.DetectionPattern,
-		"GitHub Actions": domainrule.DetectionPattern,
-		"Kubernetes":     domainrule.DetectionAST,
-		"Terraform":      domainrule.DetectionPattern,
+		"CloudFormation":         domainrule.DetectionAST,
+		"Docker Compose":         domainrule.DetectionPattern,
+		"Dockerfile":             domainrule.DetectionPattern,
+		"GitHub Actions":         domainrule.DetectionPattern,
+		"Kubernetes":             domainrule.DetectionAST,
+		"Terraform":              domainrule.DetectionPattern,
 	}
 
 	if len(explicitInventory) == 0 {
@@ -58,12 +58,12 @@ func TestCatalogParity(t *testing.T) {
 
 	misconfigLanguages := map[string]bool{
 		"Azure Resource Manager": true,
-		"CloudFormation":           true,
-		"Docker Compose": true,
-		"Dockerfile":     true,
-		"GitHub Actions": true,
-		"Kubernetes":     true,
-		"Terraform":      true,
+		"CloudFormation":         true,
+		"Docker Compose":         true,
+		"Dockerfile":             true,
+		"GitHub Actions":         true,
+		"Kubernetes":             true,
+		"Terraform":              true,
 	}
 
 	for _, catalogRule := range rules {

@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	projectSourcePublishMediaType   = "application/x-tar"
+	projectSourcePublishMediaType  = "application/x-tar"
 	projectSourceToolVersionHeader = "X-Synapse-Tool-Version"
 	// The retained source default is 500 MiB. Keep an independent transport ceiling above that
 	// budget so tar headers/padding fit, while ignored-path streams still cannot be unbounded.

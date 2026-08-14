@@ -128,7 +128,7 @@ func (h Hotspot) Transition(
 	}
 
 	from := h.Status
-	
+
 	// Create the mutated clone
 	updated := h
 	updated.Status = to

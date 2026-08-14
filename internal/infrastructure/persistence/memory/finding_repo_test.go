@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +46,46 @@ func TestFindingRepositoryUpsertDedup(t *testing.T) {
 	// other engagements isolated
 	if l, _ := r.ListByEngagement(ctx, "other"); len(l) != 0 {
 		t.Errorf("other engagement should have no findings, got %d", len(l))
+	}
+}
+
+func TestFindingRepositoryUpsertVersionOnlyChangesForMachineProjection(t *testing.T) {
+	repo := NewFindingRepository()
+	ctx := context.Background()
+	initial := finding.Finding{
+		ID: "f-version", EngagementID: "e-version", Title: "old", Severity: shared.SeverityMedium,
+		Status: finding.StatusConfirmed, DedupKey: "vuln:version", Version: 1,
+	}
+	if err := repo.Upsert(ctx, []finding.Finding{initial}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Upsert(ctx, []finding.Finding{initial}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := repo.ListByEngagement(ctx, initial.EngagementID)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list after replay: len=%d err=%v", len(list), err)
+	}
+	if list[0].Version != 1 {
+		t.Fatalf("identical replay bumped version to %d", list[0].Version)
+	}
+
+	changed := initial
+	changed.Title = "new"
+	if err := repo.Upsert(ctx, []finding.Finding{changed}); err != nil {
+		t.Fatal(err)
+	}
+	list, err = repo.ListByEngagement(ctx, initial.EngagementID)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list after change: len=%d err=%v", len(list), err)
+	}
+	if list[0].Version != 2 || list[0].Title != "new" || list[0].Status != finding.StatusConfirmed {
+		t.Fatalf("machine change/version/triage mismatch: %+v", list[0])
+	}
+	if _, err := repo.UpdateStatus(ctx, initial.EngagementID, initial.ID, finding.StatusFalsePos, 1); err == nil {
+		t.Fatal("stale analyst update succeeded after automated change")
+	} else if !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("stale analyst update error=%v, want conflict", err)
 	}
 }
 

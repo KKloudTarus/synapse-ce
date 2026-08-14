@@ -14,6 +14,8 @@ Authorization is cooperative at the HTTPS operation boundary: before each provid
 
 The boundary has independent controls: the helper binary is authoritatively pinned, cloud credentials are read-only, provider egress hosts are explicitly allowlisted, sandboxing and kernel egress enforcement fail closed, and normalized output is redacted before publication.
 
+Vulnerability-provider `allow_private_network` configuration is a separate, administrator-reviewed SSRF exception for approved internal mirrors. It permits private destination addresses only; loopback, link-local, cloud metadata, unspecified, multicast, carrier-grade NAT (`100.64.0.0/10`), and IPv4-mapped representations of those blocked address classes remain denied.
+
 Google OAuth token refresh is routed through the parent-side authorization callback and remains limited to the exact `oauth2.googleapis.com/token` operation inside the sandbox's explicitly configured egress boundary. Azure token acquisition passes through the authorization-aware transport and is allowlisted only for the tenant OAuth token endpoint.
 
 ## Consequences

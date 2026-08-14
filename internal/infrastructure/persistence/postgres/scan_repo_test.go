@@ -19,7 +19,7 @@ func TestScanRepository(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
-	ctx := context.Background()
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -67,11 +67,14 @@ func TestScanRepository(t *testing.T) {
 	if skipped != 1 {
 		t.Errorf("expected 1 skipped (orphan) vuln, got %d", skipped)
 	}
+	if _, err := NewScanRepository(pool).SaveScan(context.Background(), eid, doc, nil, snap); err == nil {
+		t.Fatal("SaveScan without tenant context succeeded")
+	}
 
 	var nSbom, nComp, nVuln int
-	pool.QueryRow(ctx, "SELECT count(*) FROM sboms WHERE engagement_id=$1", eid.String()).Scan(&nSbom)
-	pool.QueryRow(ctx, "SELECT count(*) FROM components c JOIN sboms s ON c.sbom_id=s.id WHERE s.engagement_id=$1", eid.String()).Scan(&nComp)
-	pool.QueryRow(ctx, "SELECT count(*) FROM vulnerabilities v JOIN components c ON v.component_id=c.id JOIN sboms s ON c.sbom_id=s.id WHERE s.engagement_id=$1", eid.String()).Scan(&nVuln)
+	pool.QueryRow(ctx, "SELECT count(*) FROM sboms WHERE engagement_id=$1 AND tenant_id='default'", eid.String()).Scan(&nSbom)
+	pool.QueryRow(ctx, "SELECT count(*) FROM components c JOIN sboms s ON c.sbom_id=s.id WHERE s.engagement_id=$1 AND c.tenant_id=s.tenant_id", eid.String()).Scan(&nComp)
+	pool.QueryRow(ctx, "SELECT count(*) FROM vulnerabilities v JOIN components c ON v.component_id=c.id JOIN sboms s ON c.sbom_id=s.id WHERE s.engagement_id=$1 AND v.tenant_id=c.tenant_id", eid.String()).Scan(&nVuln)
 	if nSbom != 1 || nComp != 2 || nVuln != 1 {
 		t.Errorf("persisted sbom=%d comp=%d vuln=%d, want 1/2/1 (orphan vuln skipped)", nSbom, nComp, nVuln)
 	}

@@ -57,12 +57,12 @@ func TestCatalogArtifactsEmptyDir(t *testing.T) {
 
 func TestSlug(t *testing.T) {
 	cases := map[string]string{
-		"GitHub, Inc.":  "github-inc",
-		"Acme Corp":     "acme-corp",
-		"7-Zip":         "7-zip",
-		"  Spaces  ":    "spaces",
-		"a/b\\c:d":      "a-b-c-d",
-		"node.js":       "node.js",
+		"GitHub, Inc.": "github-inc",
+		"Acme Corp":    "acme-corp",
+		"7-Zip":        "7-zip",
+		"  Spaces  ":   "spaces",
+		"a/b\\c:d":     "a-b-c-d",
+		"node.js":      "node.js",
 	}
 	for in, want := range cases {
 		if got := slug(in); got != want {

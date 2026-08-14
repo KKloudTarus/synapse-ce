@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
@@ -180,6 +181,16 @@ type Finding struct {
 	// vulnerability and the multi-source confidence. Empty for non-SCA findings.
 	Sources    []string
 	Confidence string
+
+	// Continuous vulnerability-intelligence provenance. Empty for legacy and
+	// non-SCA findings; these fields are machine-owned projection metadata.
+	AdvisoryID           string
+	OccurrenceID         shared.ID
+	ComponentFingerprint string
+	FixedVersion         string
+	DetectionState       string
+	RiskAssessmentID     shared.ID
+	EvaluatedAt          *time.Time
 
 	// Class separates actionable third-party findings from historical
 	// advisories matched against the project's own unversioned modules.

@@ -1319,3 +1319,252 @@ export interface DashboardSecurityOperations {
   findingsWithoutTimestamp: number
   externalFindingsIncluded: boolean
 }
+
+// ---- Vulnerability intelligence (#514) ----
+
+export type VulnerabilityAdvisoryStatus = 'active' | 'rejected' | 'withdrawn'
+export type VulnerabilityRiskTrend = 'none' | 'new' | 'increased' | 'decreased' | 'unchanged'
+export type VulnerabilitySourceAdapter = 'osv' | 'csaf' | 'oval' | 'nvd' | 'cisa_kev' | 'first_epss' | 'public_exploit'
+export type VulnerabilitySyncMode = 'incremental' | 'full'
+export type VulnerabilitySyncState = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'superseded'
+
+export interface VulnerabilityEvaluationLag {
+  advisoryId: string
+  currentRevision: number
+  evaluatedRevision: number
+  changedAt: string
+}
+
+export interface VulnerabilityIntelligenceOverview {
+  enabledSources: number
+  staleOrFailedSources: number
+  lastSuccessfulSync: string | null
+  changedAdvisories24Hours: number
+  oldestUnevaluatedRevision: VulnerabilityEvaluationLag | null
+  openHighCriticalExposure: number
+  pendingRiskActions: number
+  queueDepth: number
+  deadLetters: number
+}
+
+export interface VulnerabilityAdvisory {
+  id: string
+  aliases: string[]
+  summary: string
+  cvssVector: string
+  cvssScore: number
+  status: VulnerabilityAdvisoryStatus
+  kev: boolean | null
+  epss: number | null
+  publicExploit: boolean | null
+  activeExploitation: boolean | null
+  sources: string[]
+  revision: number
+  changedFields: string[]
+  syncRunIds: string[]
+  changedAt: string
+  activeAffectedCount: number
+  affectedAssetCount: number
+  affectedComponentCount: number
+  riskPriority: number
+  previousRiskPriority: number
+  riskTrend: VulnerabilityRiskTrend
+  riskScore: number
+  riskScoreChange: number
+  detectionStates: string[]
+  actionStates: string[]
+  lastEvaluation: string | null
+}
+
+export interface VulnerabilityAdvisoryPage {
+  items: VulnerabilityAdvisory[]
+  next: string
+}
+
+export interface VulnerabilityAdvisoryRevisionPage {
+  items: VulnerabilityAdvisory[]
+  next: number
+}
+
+export interface VulnerabilityOccurrence {
+  id: string
+  engagementId: string
+  advisoryId: string
+  advisoryRevision: number
+  componentId: string
+  componentFingerprint: string
+  ecosystem: string
+  packageName: string
+  componentVersion: string
+  componentCpe: string
+  fixedVersion: string
+  matchMethod: string
+  confidence: string
+  scope: string
+  reachability: string
+  state: string
+  firstDetectedAt: string
+  lastDetectedAt: string
+  lastEvaluatedAt: string
+  updatedAt: string
+}
+
+export interface VulnerabilityAssessment {
+  id: string
+  occurrenceId: string
+  advisoryRevision: number
+  severity: string
+  cvssScore: number
+  kev: boolean
+  epss: number
+  scope: string
+  reachability: string
+  impact: string
+  fixedVersion: string
+  occurrenceState: string
+  riskScore: number
+  priority: number
+  reasonCodes: string[]
+  assessedAt: string
+}
+
+export interface VulnerabilityTransition {
+  id: string
+  occurrenceId: string
+  type: string
+  beforeOccurrenceState: string
+  afterOccurrenceState: string
+  reasonCodes: string[]
+  createdAt: string
+}
+
+export interface VulnerabilityAction {
+  id: string
+  engagementId: string
+  occurrenceId: string
+  findingId: string
+  type: string
+  status: string
+  title: string
+  reasonCodes: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface VulnerabilitySourceAdapterInfo {
+  type: VulnerabilitySourceAdapter
+  implemented: boolean
+  supportsTest: boolean
+  supportsCredentials: boolean
+}
+
+export interface VulnerabilitySyncCounts {
+  processed: number
+  inserted: number
+  updated: number
+  unchanged: number
+  skipped: number
+  quarantined: number
+}
+
+export interface VulnerabilityAffectedRevision {
+  advisoryId: string
+  revision: number
+  changedAt: string
+}
+
+export interface VulnerabilitySyncRun {
+  id: string
+  sourceId: string
+  adapterType: string
+  mode: VulnerabilitySyncMode
+  trigger: string
+  actor: string
+  durableJobId: string
+  attempts: number
+  deadLettered: boolean
+  affectedRevisions: VulnerabilityAffectedRevision[]
+  affectedRevisionsTruncated: boolean
+  checkpoint: Record<string, unknown>
+  counts: VulnerabilitySyncCounts
+  errorSamples: string[]
+  state: VulnerabilitySyncState
+  startedAt: string | null
+  finishedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface VulnerabilityCursor {
+  beforeTime: string
+  beforeId: string
+}
+
+export interface VulnerabilitySyncRunPage {
+  items: VulnerabilitySyncRun[]
+  next: VulnerabilityCursor | null
+}
+
+export interface VulnerabilitySourceHealth {
+  state: string
+  stale: boolean
+  latestRun: VulnerabilitySyncRun | null
+  lastSuccessfulAt: string | null
+  freshUntil: string | null
+}
+
+export interface VulnerabilitySource {
+  id: string
+  key: string
+  name: string
+  adapterType: VulnerabilitySourceAdapter
+  endpoint: string
+  enabled: boolean
+  archived: boolean
+  cadenceSeconds: number
+  staleAfterSeconds: number
+  syncMode: VulnerabilitySyncMode
+  adapterConfig: Record<string, unknown>
+  credentialConfigured: boolean
+  version: number
+  createdAt: string
+  updatedAt: string
+  health: VulnerabilitySourceHealth
+}
+
+export interface VulnerabilitySourceInput {
+  key: string
+  name: string
+  adapterType: VulnerabilitySourceAdapter
+  endpoint: string
+  enabled: boolean
+  cadenceSeconds: number
+  staleAfterSeconds: number
+  syncMode: VulnerabilitySyncMode
+  adapterConfig: Record<string, unknown>
+  credentialRef?: string | null
+  expectedVersion?: number
+}
+
+export interface VulnerabilitySyncAccepted {
+  runId: string
+  sourceId: string
+  mode: VulnerabilitySyncMode
+  state: VulnerabilitySyncState
+  created: boolean
+}
+
+export interface VulnerabilitySyncBatchAccepted {
+  runs: VulnerabilitySyncAccepted[]
+  failed: Array<{ sourceId: string; error: string }>
+  requested: number
+}
+
+export interface VulnerabilityReconcileAccepted {
+  runId: string
+  jobId: string
+  scope: 'tenant' | 'advisory'
+  advisoryId: string
+  state: 'queued' | 'running' | 'succeeded' | 'failed'
+  created: boolean
+}

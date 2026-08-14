@@ -80,6 +80,7 @@ type Component struct {
 	Name     string
 	Version  string
 	PURL     string // package URL (purl spec)
+	CPE      string `json:",omitempty"` // authoritative CPE 2.3 identifier from the SBOM producer
 	Licenses []License
 
 	// Supplier is the entity that supplies the component (a Maven groupId, an npm scope, a GitHub org, a

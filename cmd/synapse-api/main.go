@@ -28,6 +28,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/fptriagecache"
@@ -92,6 +93,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/syft"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/taintcallgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/vexfile"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/vulnerabilityprovider"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/binregistry"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo"
@@ -159,6 +161,17 @@ import (
 	transferuc "github.com/KKloudTarus/synapse-ce/internal/usecase/transfer"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 	vexuc "github.com/KKloudTarus/synapse-ce/internal/usecase/vex"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityactionuc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitycorrelation"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityevaluation"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityinteluc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitymonitor"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityprojection"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityreconciliation"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityrollout"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityruntime"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityscheduler"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitysourceuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/worker"
 	writeupdraftuc "github.com/KKloudTarus/synapse-ce/internal/usecase/writeupdraftuc"
 )
@@ -261,7 +274,19 @@ func main() {
 	var auditLog ports.IdempotentAuditLogger
 	var timestampStore ports.TimestampStore
 	var credVault ports.CredentialVault
-	var reconQueue ports.JobQueue                 // durable queue for recon-via-worker (Postgres only)
+	var reconQueue ports.JobQueue         // durable queue for recon-via-worker (Postgres only)
+	var vulnerabilityQueue ports.JobQueue // continuous vulnerability sync queue
+	var vulnerabilitySourceStore ports.VulnerabilitySourceStore
+	var vulnerabilityRunStore ports.SyncRunStore
+	var vulnerabilityMaterializer ports.AdvisoryMaterializer
+	var vulnerabilityAdvisoryStore ports.AdvisoryStore
+	var vulnerabilityInventory ports.ComponentInventoryStore
+	var vulnerabilityOccurrences ports.VulnerabilityOccurrenceStore
+	var vulnerabilityAssessments ports.VulnerabilityRiskAssessmentStore
+	var vulnerabilityActions ports.VulnerabilityActionStore
+	var vulnerabilityReconcileRuns ports.VulnerabilityReconcileRunStore
+	var vulnerabilityTransactions ports.TenantTransactionRunner
+	var vulnerabilityWorker *worker.Worker
 	var reconRunLock ports.RunLocker              // recon run lease (Postgres only); row-lease, no pinned conn
 	var agentRunLock ports.RunLocker              // agent SESSION lock (advisory; cannot expire mid-LLM-loop)
 	var agentSessionStore ports.AgentSessionStore // agent sessions + transcript
@@ -355,6 +380,7 @@ func main() {
 		retestRepo = postgres.NewRetestRepository(pool)
 		userRepo = postgres.NewUserRepository(pool)
 		scanRepo = postgres.NewScanRepository(pool)
+		vulnerabilityInventory = postgres.NewComponentInventoryStore(pool)
 		scanResultStore = postgres.NewScanResultStore(pool)
 		aiTriageReviewStore = postgres.NewAITriageReviewRepository(pool)
 		importedSBOMStore = postgres.NewImportedSBOMStore(pool)
@@ -402,6 +428,16 @@ func main() {
 		timestampStore = postgres.NewTimestampStore(pool)
 		credVault = vault.NewPostgresVault(pool, vaultCipher)
 		reconQueue = postgres.NewJobQueue(pool, ids)
+		vulnerabilityQueue = reconQueue
+		vulnerabilitySourceStore = postgres.NewVulnerabilitySourceStore(pool)
+		vulnerabilityRunStore = postgres.NewSyncRunStore(pool, ids)
+		vulnerabilityMaterializer = postgres.NewAdvisoryMaterializer(pool)
+		vulnerabilityAdvisoryStore = vulnerabilityMaterializer.(ports.AdvisoryStore)
+		vulnerabilityOccurrences = postgres.NewVulnerabilityOccurrenceStore(pool)
+		vulnerabilityAssessments = postgres.NewVulnerabilityRiskAssessmentStore(pool)
+		vulnerabilityActions = postgres.NewVulnerabilityActionStore(pool)
+		vulnerabilityReconcileRuns = postgres.NewVulnerabilityReconcileRunStore(pool, ids)
+		vulnerabilityTransactions = postgres.NewTenantTransactionRunner(pool)
 		// Shared by recon AND the in-process SCA worker, so the base lease TTL must cover the
 		// longer of the two timeouts (the renewer extends it while live, but the base must not
 		// be shorter than a max-length scan). row-lease: no pinned conn.
@@ -426,7 +462,9 @@ func main() {
 		commentRepo = memory.NewCommentRepository()
 		retestRepo = memory.NewRetestRepository()
 		userRepo = memory.NewUserRepository()
-		scanRepo = memory.NewScanRepository()
+		memoryInventory := memory.NewComponentInventoryStore()
+		scanRepo = memory.NewScanRepository(memoryInventory)
+		vulnerabilityInventory = memoryInventory
 		scanResultStore = memory.NewScanResultStore()
 		aiTriageReviewStore = memory.NewAITriageReviewStore()
 		importedSBOMStore = memory.NewImportedSBOMStore()
@@ -466,6 +504,15 @@ func main() {
 		qualityGateMutator = memory.NewQualityGateMutator(qualityGateStore.(*memory.QualityGateStore), projectRepo.(*memory.ProjectRepository), auditLog)
 		timestampStore = memory.NewTimestampStore()
 		credVault = vault.NewMemoryVault(vaultCipher, nil)
+		vulnerabilityQueue = memory.NewJobQueue(ids, clock.Now)
+		vulnerabilitySourceStore = memory.NewVulnerabilitySourceStore()
+		vulnerabilityRunStore = memory.NewSyncRunStore(ids, clock.Now, vulnerabilityQueue)
+		vulnerabilityMaterializer = memory.NewAdvisoryMaterializer()
+		vulnerabilityAdvisoryStore = vulnerabilityMaterializer.(ports.AdvisoryStore)
+		vulnerabilityOccurrences = memory.NewVulnerabilityOccurrenceStore()
+		vulnerabilityAssessments = memory.NewVulnerabilityRiskAssessmentStore()
+		vulnerabilityActions = memory.NewVulnerabilityActionStore()
+		vulnerabilityReconcileRuns = memory.NewVulnerabilityReconcileRunStore(ids, clock, vulnerabilityQueue)
 		agentSessionStore = memory.NewAgentSessionStore()
 		approvalStore = memory.NewApprovalStore()
 		planStore = memory.NewPlanStore()
@@ -1087,6 +1134,145 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
+	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
+		ProviderSync: cfg.VulnerabilityProviderSyncEnabled, OccurrenceWrites: cfg.VulnerabilityOccurrenceWritesEnabled,
+		FindingProjection: cfg.VulnerabilityFindingProjectionEnabled, Actions: cfg.VulnerabilityActionsEnabled,
+		Notifications: cfg.VulnerabilityNotificationsEnabled, DryRun: cfg.VulnerabilityDryRunEnabled,
+		TenantAllowlist: cfg.VulnerabilityTenantAllowlist,
+	})
+	if err != nil {
+		log.Error("vulnerability rollout init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
+	if err := vulnerabilityprovider.RegisterAll(vulnerabilityRegistry, vulnerabilityprovider.Dependencies{
+		LookupCanonical: vulnerabilityMaterializer.GetCanonical,
+		CurrentRecords:  vulnerabilityMaterializer.CurrentSourceRecordIDs,
+		ResolveSecret: func(ctx context.Context, reference string) ([]byte, error) {
+			return credVault.Resolve(ctx, shared.DefaultTenant, reference)
+		},
+	}); err != nil {
+		log.Error("vulnerability provider registry init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityMonitor, err := vulnerabilitymonitor.NewService(vulnerabilitySourceStore, vulnerabilityRunStore, vulnerabilityMaterializer, vulnerabilityRegistry, clock)
+	if err != nil {
+		log.Error("vulnerability monitor init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityMonitor.SetRollout(vulnerabilityRollout)
+	vulnerabilitySourceService, err := vulnerabilitysourceuc.NewService(vulnerabilitySourceStore, vulnerabilityRegistry, auditLog, clock, ids)
+	if err != nil {
+		log.Error("vulnerability source service init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityProjection, err := vulnerabilityprojection.NewService(findingRepo)
+	if err != nil {
+		log.Error("vulnerability finding projection init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityEvaluator, err := vulnerabilityevaluation.NewService(vulnerabilityMaterializer, vulnerabilityAssessments, vulnerabilityProjection, clock)
+	if err != nil {
+		log.Error("vulnerability evaluation init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityEvaluator.SetActionStore(vulnerabilityActions)
+	vulnerabilityEvaluator.SetRollout(vulnerabilityRollout)
+	vulnerabilityActionService, err := vulnerabilityactionuc.NewService(vulnerabilityActions, auditLog, clock)
+	if err != nil {
+		log.Error("vulnerability action service init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityAdvisoryCorrelation, err := vulnerabilitycorrelation.NewService(vulnerabilityInventory, vulnerabilityMaterializer, vulnerabilityOccurrences)
+	if err != nil {
+		log.Error("vulnerability advisory correlation init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityAdvisoryCorrelation.SetEvaluator(vulnerabilityEvaluator, clock)
+	vulnerabilityAdvisoryCorrelation.SetTransactionRunner(vulnerabilityTransactions)
+	vulnerabilityAdvisoryCorrelation.SetRollout(vulnerabilityRollout)
+	vulnerabilityReconciliationEngagements, ok := repo.(ports.VulnerabilityReconciliationEngagementStore)
+	if !ok {
+		log.Error("engagement repository does not support vulnerability reconciliation traversal")
+		os.Exit(1)
+	}
+	vulnerabilityAdvisoryCorpus, ok := vulnerabilityMaterializer.(ports.AdvisoryCorpusStore)
+	if !ok {
+		log.Error("advisory materializer does not support vulnerability reconciliation traversal")
+		os.Exit(1)
+	}
+	vulnerabilityOccurrenceReconciliation, ok := vulnerabilityOccurrences.(ports.VulnerabilityOccurrenceReconciliationStore)
+	if !ok {
+		log.Error("vulnerability occurrence store does not support reconciliation retirement")
+		os.Exit(1)
+	}
+	vulnerabilityEvaluationCheckpoints, ok := vulnerabilityMaterializer.(ports.AdvisoryEvaluationCheckpointStore)
+	if !ok {
+		log.Error("advisory materializer does not support evaluation checkpoints")
+		os.Exit(1)
+	}
+	vulnerabilityAdvisoryRead, ok := vulnerabilityMaterializer.(ports.VulnerabilityAdvisoryReadStore)
+	if !ok {
+		log.Error("advisory materializer does not support vulnerability read queries")
+		os.Exit(1)
+	}
+	vulnerabilityOccurrenceRead, ok := vulnerabilityOccurrences.(ports.VulnerabilityOccurrenceReadStore)
+	if !ok {
+		log.Error("vulnerability occurrence store does not support read queries")
+		os.Exit(1)
+	}
+	vulnerabilityRiskRead, ok := vulnerabilityAssessments.(ports.VulnerabilityRiskReadStore)
+	if !ok {
+		log.Error("vulnerability assessment store does not support read queries")
+		os.Exit(1)
+	}
+	vulnerabilityTransitionRead, ok := vulnerabilityActions.(ports.VulnerabilityTransitionReadStore)
+	if !ok {
+		log.Error("vulnerability action store does not support transition reads")
+		os.Exit(1)
+	}
+	vulnerabilitySyncRunRead, ok := vulnerabilityRunStore.(ports.VulnerabilitySyncRunReadStore)
+	if !ok {
+		log.Error("vulnerability sync run store does not support read queries")
+		os.Exit(1)
+	}
+	vulnerabilityRead, err := vulnerabilityinteluc.NewService(vulnerabilityMaterializer, vulnerabilityAdvisoryRead, vulnerabilityEvaluationCheckpoints, vulnerabilityOccurrences, vulnerabilityOccurrenceRead, vulnerabilityAssessments, vulnerabilityRiskRead, vulnerabilityTransitionRead, vulnerabilitySyncRunRead, vulnerabilityQueue)
+	if err != nil {
+		log.Error("vulnerability read model init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityReconciliation, err := vulnerabilityreconciliation.NewService(vulnerabilityReconcileRuns, vulnerabilityReconciliationEngagements, vulnerabilityAdvisoryCorpus, vulnerabilityMaterializer, vulnerabilityOccurrenceReconciliation, vulnerabilityAdvisoryCorrelation, vulnerabilityEvaluationCheckpoints, 0)
+	if err != nil {
+		log.Error("vulnerability reconciliation init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityReconciliation.SetRollout(vulnerabilityRollout)
+	vulnerabilitySBOMCorrelation, err := vulnerabilitycorrelation.NewSBOMReconciler(vulnerabilityInventory, vulnerabilityAdvisoryStore, vulnerabilityMaterializer, vulnerabilityOccurrences)
+	if err != nil {
+		log.Error("vulnerability SBOM correlation init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilitySBOMCorrelation.SetEvaluator(vulnerabilityEvaluator, clock)
+	vulnerabilitySBOMCorrelation.SetTransactionRunner(vulnerabilityTransactions)
+	vulnerabilitySBOMCorrelation.SetRollout(vulnerabilityRollout)
+	vulnerabilityRuntime, err := vulnerabilityruntime.NewCoordinator(repo.(ports.VulnerabilityReconciliationTenantStore), repo, vulnerabilityAdvisoryCorrelation, vulnerabilitySBOMCorrelation, vulnerabilityEvaluationCheckpoints, clock)
+	if err != nil {
+		log.Error("vulnerability runtime init failed", "err", err)
+		os.Exit(1)
+	}
+	vulnerabilityMonitor.SetReconciler(vulnerabilityRuntime)
+	scaService.SetVulnerabilityReconciler(vulnerabilityRuntime)
+	router.SetVulnerabilityIntelligence(vulnerabilitySourceService, vulnerabilityMonitor)
+	router.SetVulnerabilityReconciliation(vulnerabilityReconciliation)
+	router.SetVulnerabilityAudit(auditLog)
+	router.SetVulnerabilityReadModel(vulnerabilityRead)
+	router.SetVulnerabilityActions(vulnerabilityActionService)
+	if cfg.DBDSN == "" {
+		vulnerabilityWorker = worker.New(vulnerabilityQueue, map[string]worker.Handler{
+			vulnerabilitymonitor.JobKind:   vulnerabilitySyncJobHandler{svc: vulnerabilityMonitor},
+			vulnerabilityreconcile.JobKind: vulnerabilityReconcileJobHandler{svc: vulnerabilityReconciliation},
+		}, worker.Config{Visibility: 2 * time.Minute, Poll: 100 * time.Millisecond, MaxAttempts: 3}, log)
+	}
 	router.SetAITriageReviews(aiTriageReviewService)
 	projectService.SetScanner(scaService)
 	scaService.SetProjectAnalysisRecorder(projectService)
@@ -1837,12 +2023,11 @@ func main() {
 			}
 		}()
 	}
+	if vulnerabilityWorker != nil {
+		go func() { _ = vulnerabilityWorker.Run(ctx) }()
+	}
 
-	// Leader election (#406): run the fenced-lease elector so a future scheduler can gate periodic
-	// dispatch on IsLeader when running more than one instance. Postgres only. The elector resigns
-	// on shutdown so a follower takes over without waiting for the term. NOTE: this ships the
-	// election mechanism; removing the single-instance lock and gating dispatch on IsLeader (true
-	// horizontal scale) is the tracked follow-on.
+	var vulnerabilityLeadership vulnerabilityscheduler.Leadership = vulnerabilityscheduler.AlwaysLeader{}
 	if cfg.LeaderElectionEnabled && leaderStore == nil {
 		log.Warn("leader election enabled but ignored: it requires Postgres (a single in-memory process is trivially the leader)")
 	}
@@ -1852,8 +2037,45 @@ func main() {
 			log.Error("leader election enabled but misconfigured (require 0 < renew < term/2)", "err", eerr)
 			os.Exit(1)
 		}
+		vulnerabilityLeadership = elector
 		go elector.Run(ctx)
 		log.Info("leader election ENABLED", "resource", cfg.LeaderResource, "term", cfg.LeaderTerm, "renew", cfg.LeaderRenew)
+	}
+	if cfg.VulnerabilitySchedulerEnabled && leaderStore != nil && !cfg.LeaderElectionEnabled {
+		log.Error("vulnerability scheduler requires SYNAPSE_LEADER_ENABLED with Postgres")
+		os.Exit(1)
+	}
+	if cfg.VulnerabilitySchedulerEnabled {
+		scheduler, serr := vulnerabilityscheduler.New(
+			vulnerabilitySourceStore,
+			vulnerabilityRunStore,
+			repo.(ports.VulnerabilityReconciliationTenantStore),
+			vulnerabilityQueue,
+			vulnerabilityMonitor,
+			clock,
+			vulnerabilityLeadership,
+			vulnerabilityscheduler.Config{
+				PollInterval:  cfg.VulnerabilitySchedulerPollInterval,
+				StaleAfter:    cfg.VulnerabilitySchedulerStaleAfter,
+				JitterPercent: cfg.VulnerabilitySchedulerJitter,
+				DispatchLimit: cfg.VulnerabilitySchedulerDispatch,
+				MaxQueueDepth: cfg.VulnerabilitySchedulerQueueDepth,
+				RecoveryLimit: cfg.VulnerabilitySchedulerRecovery,
+			},
+		)
+		if serr != nil {
+			log.Error("vulnerability scheduler init failed", "err", serr)
+			os.Exit(1)
+		}
+		scheduler.SetLogger(log)
+		go scheduler.Run(ctx)
+		log.Info("vulnerability scheduler ENABLED",
+			"poll", cfg.VulnerabilitySchedulerPollInterval,
+			"stale_after", cfg.VulnerabilitySchedulerStaleAfter,
+			"dispatch_limit", cfg.VulnerabilitySchedulerDispatch,
+			"max_queue_depth", cfg.VulnerabilitySchedulerQueueDepth,
+			"recovery_limit", cfg.VulnerabilitySchedulerRecovery,
+		)
 	}
 
 	if err := httpserver.Run(ctx, cfg.HTTPAddr, router.Handler(), log); err != nil {
@@ -1867,6 +2089,30 @@ func main() {
 // terminal failed state (parity with recon + agent), so a stranded scan is operator-visible
 // rather than stuck non-terminal with no result.
 type scaJobHandler struct{ svc *scauc.Service }
+
+type vulnerabilitySyncJobHandler struct{ svc *vulnerabilitymonitor.Service }
+
+type vulnerabilityReconcileJobHandler struct {
+	svc *vulnerabilityreconciliation.Service
+}
+
+func (h vulnerabilityReconcileJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	_, err := h.svc.ExecuteJob(ctx, job.ID)
+	return err
+}
+
+func (h vulnerabilityReconcileJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause error) error {
+	return h.svc.FailJob(ctx, job.ID, cause)
+}
+
+func (h vulnerabilitySyncJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	_, err := h.svc.ExecuteJob(ctx, job.ID)
+	return err
+}
+
+func (h vulnerabilitySyncJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause error) error {
+	return h.svc.FailJob(ctx, job.ID, cause)
+}
 
 func (h scaJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
 	return h.svc.RunScanJob(ctx, job.Payload)

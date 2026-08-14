@@ -34,6 +34,13 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/threatmodel"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityaction"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityintel"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityoccurrence"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityrisk"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilitysource"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilitysync"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeupdraft"
 )
@@ -41,6 +48,13 @@ import (
 // Clock abstracts wall-clock time for testability.
 type Clock interface {
 	Now() time.Time
+}
+
+// TenantTransactionRunner makes a tenant-scoped use-case mutation atomic across
+// multiple repositories. Implementations bind one transaction to the returned
+// context; repositories must reuse it instead of opening nested transactions.
+type TenantTransactionRunner interface {
+	Run(ctx context.Context, tenantID shared.ID, fn func(context.Context) error) error
 }
 
 // IDGenerator issues new domain identifiers.
@@ -598,6 +612,151 @@ type ScanRepository interface {
 	// SaveScan persists the snapshot and returns the count of vulns that could not
 	// be linked to an SBOM component (skipped, never orphaned).
 	SaveScan(ctx context.Context, engagementID shared.ID, doc *sbom.SBOM, vulns []vulnerability.Vulnerability, snap ScanSnapshot) (int, error)
+}
+
+// ComponentInventoryStore returns only components from the latest persisted SBOM
+// for an engagement. Implementations must preserve deterministic keyset ordering
+// and tenant isolation; unsupported identities are intentionally excluded by the
+// query contract rather than guessed into a match.
+type ComponentInventoryStore interface {
+	ListCurrentComponents(ctx context.Context, query sbom.ComponentQuery) (sbom.ComponentPage, error)
+}
+
+type SBOMVulnerabilityReconciler interface {
+	ReconcileSBOM(ctx context.Context, engagementID shared.ID, doc *sbom.SBOM) error
+}
+
+type AdvisoryRevisionReconciler interface {
+	ReconcileAdvisoryRevision(ctx context.Context, result advisory.MaterializationResult) error
+}
+
+type VulnerabilityReconciliationTenantStore interface {
+	ListTenantIDs(ctx context.Context) ([]shared.ID, error)
+}
+
+type ReconciliationEngagementPage struct {
+	IDs  []shared.ID
+	Next shared.ID
+}
+
+type VulnerabilityReconciliationEngagementStore interface {
+	ListReconciliationEngagements(ctx context.Context, tenantID, after shared.ID, snapshotAt time.Time, limit int) (ReconciliationEngagementPage, error)
+}
+
+type AdvisoryRevisionRef struct {
+	ID        string
+	Revision  int64
+	CreatedAt time.Time
+}
+
+type AdvisoryRevisionPage struct {
+	Items []AdvisoryRevisionRef
+	Next  string
+}
+
+type AdvisoryCorpusStore interface {
+	AdvisoryRevisionAt(ctx context.Context, advisoryID string, snapshotAt time.Time) (AdvisoryRevisionRef, error)
+	ListAdvisoryRevisions(ctx context.Context, after string, snapshotAt time.Time, limit int) (AdvisoryRevisionPage, error)
+}
+
+type VulnerabilityReconcileStart struct {
+	Scope                vulnerabilityreconcile.Scope
+	AdvisoryID           string
+	DryRun               bool
+	ClientIdempotencyKey string
+	JobPayload           []byte
+	Checkpoint           []byte
+}
+
+type VulnerabilityReconcileDiffStore interface {
+	RecordReconciliationDiff(ctx context.Context, diff vulnerabilityreconcile.Diff) (created bool, err error)
+	HasReconciliationMatch(ctx context.Context, tenantID, runID, engagementID shared.ID, advisoryID, componentFingerprint string) (bool, error)
+	SummarizeReconciliationDiffs(ctx context.Context, tenantID, runID shared.ID) (vulnerabilityreconcile.Counts, error)
+	ListReconciliationDiffs(ctx context.Context, query vulnerabilityreconcile.DiffQuery) (vulnerabilityreconcile.DiffPage, error)
+}
+
+type VulnerabilityReconcileRunStore interface {
+	Start(ctx context.Context, request VulnerabilityReconcileStart) (vulnerabilityreconcile.Run, bool, error)
+	Get(ctx context.Context, id shared.ID) (vulnerabilityreconcile.Run, error)
+	GetByDurableJobID(ctx context.Context, jobID string) (vulnerabilityreconcile.Run, error)
+	MarkRunning(ctx context.Context, id shared.ID) error
+	Advance(ctx context.Context, id shared.ID, expectedCheckpoint, nextCheckpoint []byte, counts vulnerabilityreconcile.Counts, errors []string) (vulnerabilityreconcile.Run, error)
+	Finish(ctx context.Context, id shared.ID, state vulnerabilityreconcile.State, counts vulnerabilityreconcile.Counts, errors []string) (vulnerabilityreconcile.Run, error)
+}
+
+// VulnerabilityOccurrenceStore persists the current and historical exposure of a
+// canonical advisory against one component fingerprint.
+type VulnerabilityOccurrenceStore interface {
+	Upsert(ctx context.Context, occurrence vulnerabilityoccurrence.Occurrence) (vulnerabilityoccurrence.UpsertResult, error)
+	Get(ctx context.Context, tenantID, engagementID shared.ID, advisoryID, componentFingerprint string) (vulnerabilityoccurrence.Occurrence, error)
+	ListByEngagement(ctx context.Context, tenantID, engagementID shared.ID, states []vulnerabilityoccurrence.State) ([]vulnerabilityoccurrence.Occurrence, error)
+	ListEvents(ctx context.Context, tenantID, occurrenceID shared.ID) ([]vulnerabilityoccurrence.Event, error)
+}
+
+type VulnerabilityOccurrenceReconciliationPage struct {
+	Items []vulnerabilityoccurrence.Occurrence
+	Next  shared.ID
+}
+
+type VulnerabilityOccurrenceReconciliationStore interface {
+	ListUnreconciled(ctx context.Context, tenantID, runID shared.ID, advisoryID string, after shared.ID, snapshotAt time.Time, limit int) (VulnerabilityOccurrenceReconciliationPage, error)
+}
+
+type VulnerabilityAdvisoryReadStore interface {
+	ListVulnerabilityAdvisories(ctx context.Context, tenantID shared.ID, query vulnerabilityintel.AdvisoryQuery) (vulnerabilityintel.AdvisoryPage, error)
+	ListVulnerabilityAdvisoryRevisions(ctx context.Context, query vulnerabilityintel.AdvisoryRevisionQuery) (vulnerabilityintel.AdvisoryRevisionPage, error)
+	ListVulnerabilitySyncRunRevisions(ctx context.Context, runIDs []shared.ID, limitPerRun int) (map[shared.ID]vulnerabilityintel.AdvisoryRevisionLinkPage, error)
+	CountVulnerabilityAdvisoriesChangedSince(ctx context.Context, since time.Time) (int64, error)
+}
+
+type VulnerabilityOccurrenceReadStore interface {
+	ListVulnerabilityOccurrences(ctx context.Context, query vulnerabilityintel.OccurrenceQuery) (vulnerabilityintel.OccurrencePage, error)
+	CountActiveVulnerabilityOccurrences(ctx context.Context, tenantID shared.ID, advisoryID string) (int64, error)
+	SummarizeVulnerabilityOccurrences(ctx context.Context, tenantID shared.ID, advisoryIDs []string, affectedAsset string, states []vulnerabilityoccurrence.State) (map[string]vulnerabilityintel.AdvisoryOccurrenceSummary, error)
+}
+
+type VulnerabilityRiskReadStore interface {
+	ListVulnerabilityAssessments(ctx context.Context, query vulnerabilityintel.AssessmentQuery) (vulnerabilityintel.AssessmentPage, error)
+	CountOpenHighCriticalVulnerabilityExposure(ctx context.Context, tenantID shared.ID) (int64, error)
+	SummarizeVulnerabilityRisk(ctx context.Context, tenantID shared.ID, advisoryIDs []string) (map[string]vulnerabilityintel.AdvisoryRiskSummary, error)
+}
+
+type VulnerabilityTransitionReadStore interface {
+	ListVulnerabilityTransitions(ctx context.Context, query vulnerabilityintel.TransitionQuery) (vulnerabilityintel.TransitionPage, error)
+	CountPendingVulnerabilityActions(ctx context.Context, tenantID shared.ID) (int64, error)
+	SummarizeVulnerabilityActions(ctx context.Context, tenantID shared.ID, advisoryIDs []string) (map[string]vulnerabilityintel.AdvisoryActionSummary, error)
+}
+
+type VulnerabilitySyncRunReadStore interface {
+	GetVulnerabilitySyncRun(ctx context.Context, tenantID, id shared.ID) (vulnerabilityintel.SyncRunItem, error)
+	ListVulnerabilitySyncRuns(ctx context.Context, query vulnerabilityintel.SyncRunQuery) (vulnerabilityintel.SyncRunPage, error)
+	LatestSuccessfulVulnerabilitySync(ctx context.Context, tenantID shared.ID) (*time.Time, error)
+}
+
+type AdvisoryEvaluationCheckpointStore interface {
+	MarkAdvisoryEvaluated(ctx context.Context, tenantID shared.ID, advisoryID string, revision int64, evaluatedAt time.Time) error
+	OldestUnevaluatedAdvisory(ctx context.Context, tenantID shared.ID) (*vulnerabilityintel.EvaluationLag, error)
+}
+
+// VulnerabilityRiskAssessmentStore keeps immutable risk evaluations and a
+// tenant-scoped current pointer. Replaying the same model/input hash is a no-op.
+type VulnerabilityRiskAssessmentStore interface {
+	Upsert(ctx context.Context, assessment vulnerabilityrisk.Assessment) (vulnerabilityrisk.Result, error)
+	Current(ctx context.Context, tenantID, occurrenceID shared.ID) (vulnerabilityrisk.Assessment, error)
+	History(ctx context.Context, tenantID, occurrenceID shared.ID) ([]vulnerabilityrisk.Assessment, error)
+}
+
+// VulnerabilityActionStore persists deterministic risk transitions, operator
+// actions, and their notification outbox in one tenant-scoped transaction.
+type VulnerabilityActionStore interface {
+	RecordChange(ctx context.Context, change vulnerabilityaction.Change) (created bool, err error)
+	GetAction(ctx context.Context, tenantID, actionID shared.ID) (vulnerabilityaction.Action, error)
+	ListActions(ctx context.Context, query vulnerabilityaction.ActionQuery) (vulnerabilityaction.ActionPage, error)
+	AcknowledgeAction(ctx context.Context, tenantID, actionID shared.ID, actor string, at time.Time) (vulnerabilityaction.Action, error)
+	ResolveAction(ctx context.Context, tenantID, actionID shared.ID, actor string, at time.Time) (vulnerabilityaction.Action, error)
+	ClaimOutbox(ctx context.Context, tenantID shared.ID, now, lockedUntil time.Time, limit int) ([]vulnerabilityaction.OutboxEvent, error)
+	CompleteOutbox(ctx context.Context, tenantID, eventID shared.ID, at time.Time) error
+	RetryOutbox(ctx context.Context, tenantID, eventID shared.ID, at, availableAt time.Time, lastError string, terminal bool) error
 }
 
 // ScanStatus is the lifecycle of an asynchronous SCA scan.
@@ -1298,6 +1457,10 @@ type AdvisoryStore interface {
 	ByPackage(ctx context.Context, ecosystem, name string) ([]advisory.Advisory, error)
 }
 
+type CPEAdvisoryStore interface {
+	ByCPE(ctx context.Context, part, vendor, product string) ([]advisory.Advisory, error)
+}
+
 // CorrelationRecorder turns a cross-check DISAGREEMENT report into Judgments for human review.
 // The SCA pipeline computes the report (vulnerability.CrossCheck over its multi-source
 // RawFindings) and hands it here; the recorder proposes one UNGATED CapCorrelation judgment per NEW
@@ -1375,6 +1538,60 @@ type ThreatModelStore interface {
 // AdvisoryStore KEY CONTRACT.
 type AdvisoryWriter interface {
 	Upsert(ctx context.Context, a advisory.Advisory) error
+}
+
+// AdvisoryMaterializer atomically records provider observations, rebuilds the
+// canonical advisory projection, and appends a revision only when its content
+// hash changes. Implementations keep this global reference data out of tenant RLS.
+type AdvisoryMaterializer interface {
+	Materialize(ctx context.Context, records []advisory.ObservationRecord) (advisory.MaterializationResult, error)
+	CurrentSourceRecordIDs(ctx context.Context, sourceID string, yield func(string) error) error
+	GetCanonical(ctx context.Context, advisoryID string) (advisory.Canonical, error)
+	GetCanonicalAtRevision(ctx context.Context, advisoryID string, revision int64) (advisory.Canonical, error)
+	CurrentRevision(ctx context.Context, advisoryID string) (int64, error)
+}
+
+// SyncRunStart describes one durable provider synchronization request. Runs are
+// global control-plane history; the durable job created with the run is tenant-scoped.
+type SyncRunStart struct {
+	SourceID             shared.ID
+	AdapterType          string
+	Mode                 vulnerabilitysync.Mode
+	Trigger              string
+	Actor                string
+	ClientIdempotencyKey string
+	SourceSnapshot       []byte
+	Checkpoint           []byte
+	JobKind              string
+	JobPayload           []byte
+}
+
+// SyncRunStore owns the sync-run lifecycle and its checkpoint CAS. Start is
+// idempotent by active (source, mode) or client key and atomically creates the
+// queued durable job in transactional adapters.
+type SyncRunStore interface {
+	Start(ctx context.Context, request SyncRunStart) (run vulnerabilitysync.Run, created bool, err error)
+	RecoverStale(ctx context.Context, staleRunID shared.ID, staleBefore time.Time, request SyncRunStart) (run vulnerabilitysync.Run, created bool, err error)
+	Get(ctx context.Context, id shared.ID) (vulnerabilitysync.Run, error)
+	GetByDurableJobID(ctx context.Context, jobID string) (vulnerabilitysync.Run, error)
+	LatestForSource(ctx context.Context, sourceID shared.ID, states []vulnerabilitysync.State) (vulnerabilitysync.Run, error)
+	MarkRunning(ctx context.Context, id shared.ID) error
+	Advance(ctx context.Context, id shared.ID, expectedCheckpoint, nextCheckpoint []byte, counts vulnerabilitysync.Counts, errors []string) (vulnerabilitysync.Run, error)
+	Finish(ctx context.Context, id shared.ID, state vulnerabilitysync.State, counts vulnerabilitysync.Counts, errors []string) (vulnerabilitysync.Run, error)
+	Supersede(ctx context.Context, id shared.ID) error
+	ListStale(ctx context.Context, olderThan time.Time, limit int) ([]vulnerabilitysync.Run, error)
+}
+
+// VulnerabilitySourceStore persists global, code-owned provider source instances.
+// CredentialRef is a secret-manager reference; implementations must never return
+// or persist plaintext credentials.
+type VulnerabilitySourceStore interface {
+	Create(ctx context.Context, source vulnerabilitysource.Source) error
+	List(ctx context.Context, includeArchived bool) ([]vulnerabilitysource.Source, error)
+	Get(ctx context.Context, id shared.ID) (vulnerabilitysource.Source, error)
+	Update(ctx context.Context, source vulnerabilitysource.Source, expectedVersion int) error
+	SetEnabled(ctx context.Context, id shared.ID, enabled bool, expectedVersion int) (vulnerabilitysource.Source, error)
+	Archive(ctx context.Context, id shared.ID, expectedVersion int) error
 }
 
 // AdvisoryFeed streams normalized advisories from a bulk source – a local OSV dump directory today, a remote

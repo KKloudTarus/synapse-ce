@@ -11,6 +11,16 @@ type Advisory struct {
 	CVSSVector string            // primary CVSS vector when known
 	CVSSScore  float64           // computed base score
 	Affected   []AffectedPackage // the packages this advisory affects
+	CPEs       []CPEMatch        // NVD/CSAF product applicability retained for CPE correlation
+}
+
+type CPEMatch struct {
+	Criteria              string
+	Vulnerable            bool
+	VersionStartIncluding string
+	VersionStartExcluding string
+	VersionEndIncluding   string
+	VersionEndExcluding   string
 }
 
 // AffectedPackage is one advisory→package binding: which ecosystem+package, and the affected version

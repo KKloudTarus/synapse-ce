@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -74,10 +75,15 @@ func (r *FindingRepository) Upsert(_ context.Context, findings []finding.Finding
 			key = f.ID.String()
 		}
 		if existing, ok := byKey[key]; ok {
+			machineChanged := findingMachineProjectionChanged(existing, f)
+			f.ID = existing.ID
 			f.Status = existing.Status // preserve triage
 			f.Assignee = existing.Assignee
 			f.Audit.CreatedAt = existing.Audit.CreatedAt
-			f.Version = existing.Version + 1         // re-scan is a concurrent change; bump version (mirrors postgres)
+			f.Version = existing.Version
+			if machineChanged {
+				f.Version++
+			}
 			f.EvidenceScore = existing.EvidenceScore // moves only via SetEvidenceScore; a re-upsert never changes it – mirrors the postgres ON CONFLICT set
 			f.Priority = existing.Priority           // preserve promoted priority; PromotionStore.Apply is the only path that moves it
 		} else if f.Version <= 0 {
@@ -86,6 +92,50 @@ func (r *FindingRepository) Upsert(_ context.Context, findings []finding.Finding
 		byKey[key] = f
 	}
 	return nil
+}
+
+func findingMachineProjectionChanged(existing, incoming finding.Finding) bool {
+	return existing.Title != incoming.Title ||
+		existing.Description != incoming.Description ||
+		existing.Severity != incoming.Severity ||
+		existing.CVSSVector != incoming.CVSSVector ||
+		existing.KEV != incoming.KEV ||
+		existing.RiskScore != incoming.RiskScore ||
+		!sameStrings(existing.Sources, incoming.Sources) ||
+		existing.Confidence != incoming.Confidence ||
+		existing.Class != incoming.Class ||
+		existing.Scope != incoming.Scope ||
+		existing.Reachability != incoming.Reachability ||
+		existing.Impact != incoming.Impact ||
+		existing.Kind != incoming.Kind ||
+		existing.ClassReachability != incoming.ClassReachability ||
+		existing.RuleKey != incoming.RuleKey ||
+		existing.AdvisoryID != incoming.AdvisoryID ||
+		existing.OccurrenceID != incoming.OccurrenceID ||
+		existing.ComponentFingerprint != incoming.ComponentFingerprint ||
+		existing.FixedVersion != incoming.FixedVersion ||
+		existing.DetectionState != incoming.DetectionState ||
+		existing.RiskAssessmentID != incoming.RiskAssessmentID ||
+		!sameFindingTime(existing.EvaluatedAt, incoming.EvaluatedAt)
+}
+
+func sameFindingTime(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
+}
+
+func sameStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 // UpdateStatus sets a finding's triage status with optimistic concurrency

@@ -120,7 +120,7 @@ func TestPublishSourceFromAnalysisPropagatesServerRefusal(t *testing.T) {
 	analysis := projectanalysis.Analysis{
 		ID: "analysis", ProjectKey: "project",
 		SourceRevision: projectanalysis.SourceRevision{Kind: projectanalysis.ScanKindLocal, Head: "workspace"},
-		Snapshot: measure.Snapshot{Nodes: []measure.Node{{Path: "main.go", Kind: measure.NodeFile}}},
+		Snapshot:       measure.Snapshot{Nodes: []measure.Node{{Path: "main.go", Kind: measure.NodeFile}}},
 	}
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o600); err != nil {

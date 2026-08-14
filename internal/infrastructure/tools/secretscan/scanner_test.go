@@ -17,7 +17,7 @@ import (
 var (
 	awsID     = "AKIA" + "Z2K7QMN4TJ5VWXY9"          // matches AKIA + 16
 	ghToken   = "ghp_" + strings.Repeat("aB3dE6", 7) // ghp_ + 42 chars (>= 36)
-	highEnt   = highEntropyFixture()                   // 32 hex chars – derived from hash at runtime, never a literal
+	highEnt   = highEntropyFixture()                 // 32 hex chars – derived from hash at runtime, never a literal
 	privBlock = "-----BEGIN RSA " + "PRIVATE KEY-----\nMIIByz==\n-----END RSA PRIVATE KEY-----"
 )
 

@@ -31,6 +31,9 @@ func CompareSemver(a, b string) int {
 	return comparePrerelease(ap, bp)
 }
 
+// ValidSemver reports whether a version can be ordered by CompareSemver.
+func ValidSemver(value string) bool { return validCore(value) }
+
 // splitSemver returns the [major, minor, patch] core (missing parts = "0") and the pre-release string
 // (after '-', before any '+'). Build metadata is dropped.
 func splitSemver(v string) ([3]string, string) {

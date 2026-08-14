@@ -9,7 +9,32 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+type tenantTransactionKey struct{}
+
+type tenantTransaction struct {
+	tenantID string
+	tx       pgx.Tx
+}
+
+type TenantTransactionRunner struct{ pool *pgxpool.Pool }
+
+func NewTenantTransactionRunner(pool *pgxpool.Pool) *TenantTransactionRunner {
+	return &TenantTransactionRunner{pool: pool}
+}
+
+var _ ports.TenantTransactionRunner = (*TenantTransactionRunner)(nil)
+
+func (runner *TenantTransactionRunner) Run(ctx context.Context, tenantID shared.ID, fn func(context.Context) error) error {
+	if tenantID.IsZero() || fn == nil {
+		return fmt.Errorf("%w: tenant transaction identity is required", shared.ErrValidation)
+	}
+	return WithTenant(ctx, runner.pool, tenantID.String(), func(tx pgx.Tx) error {
+		return fn(context.WithValue(ctx, tenantTransactionKey{}, tenantTransaction{tenantID: tenantID.String(), tx: tx}))
+	})
+}
 
 // WithTenant runs fn inside a transaction whose `app.current_tenant` session variable is set to
 // tenantID for the life of that transaction only. Stores of Row-Level-Security-protected tables
@@ -25,6 +50,12 @@ import (
 // and mapping the empty string to NULL means a connection reused outside WithTenant still denies
 // rather than exposing default-tenant rows.
 func WithTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) (err error) {
+	if bound, ok := ctx.Value(tenantTransactionKey{}).(tenantTransaction); ok {
+		if bound.tenantID != tenantID {
+			return fmt.Errorf("%w: nested tenant transaction mismatch", shared.ErrValidation)
+		}
+		return fn(bound.tx)
+	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("rls: begin tx: %w", err)

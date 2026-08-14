@@ -54,6 +54,9 @@ func componentIdentity(c Component) string {
 // and order-preserving.
 func mergeComponents(dst, src Component) Component {
 	dst.Licenses = unionLicenses(dst.Licenses, src.Licenses)
+	if dst.CPE == "" {
+		dst.CPE = src.CPE
+	}
 	if dst.Location == "" {
 		dst.Location = src.Location
 	}

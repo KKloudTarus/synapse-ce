@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -55,6 +56,31 @@ type RemoteFeed struct {
 	client     *http.Client
 }
 
+// Test performs one bounded metadata request and never downloads or parses a
+// feed. Redirects remain disabled so an endpoint cannot bounce the check to a
+// different host.
+func (f *RemoteFeed) Test(ctx context.Context) error {
+	if len(f.ecosystems) == 0 {
+		return fmt.Errorf("%w: remote feed has no ecosystems", shared.ErrValidation)
+	}
+	if !ecosystemRE.MatchString(f.ecosystems[0]) {
+		return fmt.Errorf("%w: unsafe ecosystem name", shared.ErrValidation)
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodHead, f.baseURL+"/"+f.ecosystems[0]+"/all.zip", nil)
+	if err != nil {
+		return fmt.Errorf("build remote feed test: %w", err)
+	}
+	response, err := f.client.Do(request)
+	if err != nil {
+		return fmt.Errorf("remote feed test request: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("remote feed test returned HTTP %d", response.StatusCode)
+	}
+	return nil
+}
+
 // NewRemoteFeed returns a feed over the OSV bulk bucket. baseURL defaults to the public bucket; ecosystems
 // defaults to the covered set; client defaults to a 10-minute, no-redirect client (the zips are large).
 func NewRemoteFeed(baseURL string, ecosystems []string, client *http.Client) *RemoteFeed {
@@ -68,11 +94,46 @@ func NewRemoteFeed(baseURL string, ecosystems []string, client *http.Client) *Re
 		client = &http.Client{
 			Timeout:       10 * time.Minute, // a per-ecosystem all.zip is large
 			CheckRedirect: noRedirect,
+			Transport:     safeTransport(),
 		}
 	} else if client.CheckRedirect == nil {
 		client.CheckRedirect = noRedirect // defense-in-depth: a stock injected client must not follow redirects either
 	}
 	return &RemoteFeed{baseURL: strings.TrimRight(baseURL, "/"), ecosystems: ecosystems, client: client}
+}
+
+func safeTransport() http.RoundTripper {
+	return &http.Transport{
+		Proxy: nil,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(address)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+			if err != nil {
+				return nil, err
+			}
+			dialer := net.Dialer{Timeout: 30 * time.Second}
+			var lastErr error
+			for _, ip := range ips {
+				if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+					lastErr = fmt.Errorf("%w: source endpoint resolves to a loopback/link-local address", shared.ErrValidation)
+					continue
+				}
+				conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+				if dialErr == nil {
+					return conn, nil
+				}
+				lastErr = dialErr
+			}
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, fmt.Errorf("source endpoint has no usable address")
+		},
+		ForceAttemptHTTP2: true,
+	}
 }
 
 var _ ports.AdvisoryFeed = (*RemoteFeed)(nil)

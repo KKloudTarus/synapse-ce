@@ -121,6 +121,7 @@ type cdxComponent struct {
 	Name       string             `json:"name"`
 	Version    string             `json:"version"`
 	PURL       string             `json:"purl"`
+	CPE        string             `json:"cpe"`
 	Scope      string             `json:"scope"` // required | optional | excluded (npm dev -> excluded)
 	Supplier   cdxSupplier        `json:"supplier"`
 	Licenses   []cdxLicenseChoice `json:"licenses"`
@@ -275,7 +276,7 @@ func parseCycloneDX(data []byte) ([]sbom.Component, []sbom.Dependency, string, e
 		}
 		supplier, supplierSrc := sbom.SupplierWithSource(c.Supplier.Name, c.PURL)
 		comp := sbom.Component{
-			Name: c.Name, Version: c.Version, PURL: c.PURL,
+			Name: c.Name, Version: c.Version, PURL: c.PURL, CPE: c.CPE,
 			Location:       loc,
 			Scope:          sbom.ClassifyScope(loc, c.Scope),
 			Supplier:       supplier,

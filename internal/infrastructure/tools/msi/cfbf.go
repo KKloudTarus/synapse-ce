@@ -13,8 +13,8 @@ import (
 
 // Bounds (defense-in-depth against a hostile/corrupt compound file).
 const (
-	maxSectors    = 1 << 22 // 4M sectors (≥16 GiB at 4 KiB) — a sane ceiling for a scanned artifact
-	maxDirEntries = 1 << 20 // directory-entry cap
+	maxSectors    = 1 << 22  // 4M sectors (≥16 GiB at 4 KiB) — a sane ceiling for a scanned artifact
+	maxDirEntries = 1 << 20  // directory-entry cap
 	maxStreamSize = 64 << 20 // per-stream read cap (a real MSI table stream is far smaller)
 )
 
@@ -31,10 +31,10 @@ var cfbfSignature = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
 
 // dirEntry is one compound-file directory entry (a storage, stream, or the root).
 type dirEntry struct {
-	name       string // decoded UTF-16 name (MSI-mangled for MSI tables; decoded separately)
-	objType    byte
-	startSect  uint32
-	size       uint64
+	name      string // decoded UTF-16 name (MSI-mangled for MSI tables; decoded separately)
+	objType   byte
+	startSect uint32
+	size      uint64
 }
 
 // cfbf is a parsed compound file with random access to its streams by directory index.

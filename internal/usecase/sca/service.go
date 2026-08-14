@@ -44,6 +44,7 @@ type Service struct {
 	attributor                       ports.FindingAttributor
 	findings                         ports.FindingRepository
 	scans                            ports.ScanRepository
+	vulnerabilityReconciler          ports.SBOMVulnerabilityReconciler
 	results                          ports.ScanResultStore
 	scannedImages                    ports.ScannedImageStore
 	importedSBOM                     ports.ImportedSBOMStore
@@ -421,6 +422,10 @@ func (s *Service) SetJSSymbolReachability(r jsSBOMReachabilityRecorder) { s.jsSy
 // correlation judgments. Best-effort + opt-in: a recorder error is ignored (the scan never fails). A setter
 // keeps NewService call sites unchanged.
 func (s *Service) SetCorrelation(r ports.CorrelationRecorder) { s.correlation = r }
+
+func (s *Service) SetVulnerabilityReconciler(reconciler ports.SBOMVulnerabilityReconciler) {
+	s.vulnerabilityReconciler = reconciler
+}
 
 // SetTaint configures the optional deterministic taint-analysis CapSAST proposer. nil ⇒ no taint
 // judgments. Best-effort + opt-in: a no-coverage/un-buildable target is ignored (the scan never fails). A
@@ -1940,6 +1945,9 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		if err := s.findings.Upsert(ctx, result.Findings); err != nil {
 			return nil, fmt.Errorf("persist findings: %w", err)
 		}
+		if err := s.reconcileVulnerabilities(ctx, engagementID, doc); err != nil {
+			return nil, err
+		}
 		if err := s.attributeFindings(ctx, engagementID, strings.TrimSpace(doc.TargetRef), result); err != nil {
 			s.logger().Warn("attribute SCA findings failed (best-effort)", "err", err)
 		}
@@ -2799,6 +2807,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		if err := s.findings.Upsert(ctx, result.Findings); err != nil {
 			return nil, fmt.Errorf("persist findings: %w", err)
 		}
+		if err := s.reconcileVulnerabilities(ctx, engagementID, doc); err != nil {
+			return nil, err
+		}
 		if err := s.attributeFindings(ctx, engagementID, normalizedSourceTarget(req), result); err != nil {
 			s.logger().Warn("attribute SCA findings failed (best-effort)", "err", err)
 		}
@@ -2827,6 +2838,16 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// with this scan (#446). This is the pipeline that populates result.Image (image scans).
 	s.recordScannedImage(ctx, engagementID, result)
 	return result, nil
+}
+
+func (s *Service) reconcileVulnerabilities(ctx context.Context, engagementID shared.ID, doc *sbom.SBOM) error {
+	if s.vulnerabilityReconciler == nil || doc == nil {
+		return nil
+	}
+	if err := s.vulnerabilityReconciler.ReconcileSBOM(ctx, engagementID, doc); err != nil {
+		return fmt.Errorf("reconcile persisted SBOM vulnerabilities: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) captureProjectComparison(ctx context.Context, engagementID shared.ID, analysisID, sourceDir, head string, result *ScanResult) {

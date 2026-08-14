@@ -193,9 +193,9 @@ func TestXMLMaintainability_OversizedElement(t *testing.T) {
 	// Span == 200 → no finding.
 	// Build: <root> [line 1], 174 blank lines, 20 children (6 distinct names), </root> [line 200]
 	sb := strings.Builder{}
-	sb.WriteString("<root>\n") // line 1
+	sb.WriteString("<root>\n")                // line 1
 	sb.WriteString(strings.Repeat("\n", 178)) // lines 2–179 (178 blanks)
-	for i := 0; i < 20; i++ { // lines 180–199 (20 children)
+	for i := 0; i < 20; i++ {                 // lines 180–199 (20 children)
 		sb.WriteString("<c" + string(rune('A'+(i%6))) + "/>\n")
 	}
 	// </root> is at line 200 → span = 200 - 1 + 1 = 200 (threshold is >200, so no finding)
@@ -204,9 +204,9 @@ func TestXMLMaintainability_OversizedElement(t *testing.T) {
 
 	// Span == 201 → finding.
 	sb.Reset()
-	sb.WriteString("<root>\n") // line 1
+	sb.WriteString("<root>\n")                // line 1
 	sb.WriteString(strings.Repeat("\n", 179)) // lines 2–180 (179 blanks)
-	for i := 0; i < 20; i++ { // lines 181–200 (20 children)
+	for i := 0; i < 20; i++ {                 // lines 181–200 (20 children)
 		sb.WriteString("<c" + string(rune('A'+(i%6))) + "/>\n")
 	}
 	// </root> is at line 201 → span = 201 - 1 + 1 = 201 (>200 threshold, finding expected)

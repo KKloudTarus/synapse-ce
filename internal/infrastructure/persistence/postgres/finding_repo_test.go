@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -83,6 +84,24 @@ func TestFindingRepository(t *testing.T) {
 	}
 	if list[0].ID != f.ID {
 		t.Errorf("original finding id should be preserved on conflict, got %s want %s", list[0].ID, f.ID)
+	}
+	if list[0].Version != 2 {
+		t.Fatalf("material automated update should bump version to 2, got %d", list[0].Version)
+	}
+	if err := repo.Upsert(ctx, []finding.Finding{f2}); err != nil {
+		t.Fatalf("identical replay: %v", err)
+	}
+	replayed, err := repo.ListByEngagement(ctx, eid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replayed[0].Version != 2 {
+		t.Fatalf("identical replay bumped version to %d", replayed[0].Version)
+	}
+	if _, err := repo.UpdateStatus(ctx, eid, f.ID, finding.StatusFalsePos, 1); err == nil {
+		t.Fatal("stale analyst update succeeded after automated change")
+	} else if !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("stale analyst update error=%v, want conflict", err)
 	}
 
 	// risk ordering: a KEV finding (lower severity, higher risk) must rank first,
