@@ -118,6 +118,17 @@ func (s *FleetAgentStore) Revoke(_ context.Context, tenantID, id, by shared.ID, 
 	return nil
 }
 
+func (s *FleetAgentStore) Decommission(_ context.Context, tenantID, id shared.ID, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.agents[agentKey(tenantID, id)]
+	if !ok {
+		return shared.ErrNotFound
+	}
+	a.Decommission(now) // no-op on a revoked agent (the domain enforces it)
+	return nil
+}
+
 func (s *FleetAgentStore) ListAgents(_ context.Context, tenantID shared.ID) ([]*fleetagent.Agent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

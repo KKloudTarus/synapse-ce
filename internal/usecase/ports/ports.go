@@ -155,6 +155,9 @@ type FleetAgentStore interface {
 	SetFingerprint(ctx context.Context, tenantID, id shared.ID, fingerprint string, now time.Time) error
 	// Revoke marks the agent revoked with operator attribution and a reason.
 	Revoke(ctx context.Context, tenantID, id, by shared.ID, reason string, now time.Time) error
+	// Decommission marks the agent cleanly decommissioned on its own report (#412). It must NOT
+	// overwrite an operator revocation (the stronger terminal state).
+	Decommission(ctx context.Context, tenantID, id shared.ID, now time.Time) error
 	ListAgents(ctx context.Context, tenantID shared.ID) ([]*fleetagent.Agent, error)
 }
 

@@ -109,6 +109,51 @@ func TestAuthenticateRevoked(t *testing.T) {
 	}
 }
 
+func TestDecommissionStopsAuthAndCancelsOrders(t *testing.T) {
+	svc := newSvc(t)
+	canceller := &fakeCanceller{}
+	svc.SetWorkOrders(canceller)
+	ctx := context.Background()
+	enrolTok, _ := svc.MintEnrolToken(ctx, "op", "t1", time.Hour)
+	agent, agentTok, _, err := svc.Enrol(ctx, enrolTok, EnrolInput{Name: "a"})
+	if err != nil {
+		t.Fatalf("enrol: %v", err)
+	}
+	if err := svc.Decommission(ctx, agent); err != nil {
+		t.Fatalf("decommission: %v", err)
+	}
+	// A decommissioned agent's credential no longer authenticates.
+	if _, err := svc.Authenticate(ctx, agentTok); !errors.Is(err, ErrDecommissioned) {
+		t.Fatalf("decommissioned agent must return ErrDecommissioned, got %v", err)
+	}
+	// In-flight orders are cancelled, mirroring revoke.
+	if canceller.cancelled != 1 {
+		t.Fatalf("decommission must cancel the agent's in-flight orders, calls=%d", canceller.cancelled)
+	}
+}
+
+func TestDecommissionDoesNotOverrideRevocation(t *testing.T) {
+	svc := newSvc(t)
+	ctx := context.Background()
+	enrolTok, _ := svc.MintEnrolToken(ctx, "op", "t1", time.Hour)
+	agent, agentTok, _, err := svc.Enrol(ctx, enrolTok, EnrolInput{Name: "a"})
+	if err != nil {
+		t.Fatalf("enrol: %v", err)
+	}
+	if err := svc.Revoke(ctx, "op", "t1", agent.ID, "compromised"); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	// A self-reported decommission is an idempotent no-op on a revoked agent (revocation wins); it
+	// returns no error but must not downgrade the terminal state.
+	if err := svc.Decommission(ctx, agent); err != nil {
+		t.Fatalf("decommission on a revoked agent should be a silent no-op, got %v", err)
+	}
+	// It stays revoked (the stronger terminal state), not decommissioned.
+	if _, err := svc.Authenticate(ctx, agentTok); !errors.Is(err, ErrRevoked) {
+		t.Fatalf("agent must remain revoked, got %v", err)
+	}
+}
+
 func TestExpiredEnrolTokenRejected(t *testing.T) {
 	svc := newSvc(t)
 	ctx := context.Background()

@@ -103,7 +103,7 @@ func (s *Service) Agents(ctx context.Context, tenantID shared.ID, stateFilter fl
 	for _, a := range agents {
 		row := AgentRow{
 			ID: a.ID.String(), Name: a.Name, Platform: a.Platform, Version: a.AgentVersion,
-			Health:       fleetcoverage.AgentStateFrom(a.LastSeenAt, now, s.staleAfter, a.RevokedAt != nil),
+			Health:       fleetcoverage.AgentStateFrom(a.LastSeenAt, now, s.staleAfter, a.Revoked(), a.Decommissioned()),
 			LastSeen:     a.LastSeenAt,
 			Capabilities: append([]string(nil), a.Capabilities...),
 			CurrentWork:  liveByAgent[a.ID],
@@ -187,7 +187,7 @@ func (s *Service) Coverage(ctx context.Context, tenantID shared.ID) ([]CoverageR
 	liveCapabilities := map[string]bool{} // a capability advertised by at least one HEALTHY agent
 	anyLiveAgent := false                 // is there any live agent at all (for assets with no work orders)?
 	for _, a := range agents {
-		if fleetcoverage.AgentStateFrom(a.LastSeenAt, now, s.staleAfter, a.RevokedAt != nil).Live() {
+		if fleetcoverage.AgentStateFrom(a.LastSeenAt, now, s.staleAfter, a.Revoked(), a.Decommissioned()).Live() {
 			anyLiveAgent = true
 			for _, c := range a.Capabilities {
 				liveCapabilities[c] = true
