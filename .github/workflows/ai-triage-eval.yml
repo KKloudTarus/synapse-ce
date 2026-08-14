@@ -1,0 +1,46 @@
+name: AI Triage Evaluation
+
+# Issue #388: prove AI-triage quality reproducibly, in CI, without production data and without model
+# secrets. This gate runs the deterministic evaluation over the versioned, human-reviewed golden
+# dataset (a stub proposer/verifier, no live models) and asserts the shadow-mode invariant that the
+# evaluation can never grant a gate exemption. A real-model evaluation that produces a promotion report
+# is a separate, secrets-gated, human-approved step (see `make ai-triage-eval`), never this job.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "internal/usecase/sca/**"
+      - "internal/usecase/fptriage/**"
+      - "cmd/synapse-fptriage-*/**"
+      - ".github/workflows/ai-triage-eval.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "internal/usecase/sca/**"
+      - "internal/usecase/fptriage/**"
+      - "cmd/synapse-fptriage-*/**"
+      - ".github/workflows/ai-triage-eval.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    name: Golden-dataset evaluation (shadow, offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Deliberately runs with no SYNAPSE_FP_TRIAGE_MODEL / SYNAPSE_VERIFIER_MODEL / API keys in the
+      # environment, proving the reproducible evaluation path needs neither live models nor production
+      # data. The evaluation is deterministic (temperature 0 is enforced in the verifier path, #384).
+      - name: Reproducible AI-triage evaluation + shadow-gate verification
+        run: make ai-triage-verify

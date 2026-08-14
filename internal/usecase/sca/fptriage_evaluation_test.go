@@ -97,12 +97,12 @@ func TestEvaluateFPTriageGoldenDataset(t *testing.T) {
 		t.Fatalf("generated report must pass promotion-boundary validation: %v", err)
 	}
 	m := report.Metrics
-	if m.Total != 8 || m.Covered != 8 || m.HumanFalsePositives != 2 || m.HumanTruePositives != 4 ||
+	if m.Total != 12 || m.Covered != 12 || m.HumanFalsePositives != 2 || m.HumanTruePositives != 8 ||
 		m.ConsensusFalsePositives != 3 || m.CorrectFalsePositives != 2 || m.TruePositiveEscapes != 1 ||
 		m.VerifierComparisons != 5 || m.VerifierDisagreements != 2 {
 		t.Fatalf("unexpected aggregate counters: %+v", m)
 	}
-	if m.Precision != 2.0/3.0 || m.Recall != 1 || m.FalseNegativeEscapeRate != 0.25 ||
+	if m.Precision != 2.0/3.0 || m.Recall != 1 || m.FalseNegativeEscapeRate != 1.0/8.0 ||
 		m.DisagreementRate != 0.4 || m.Coverage != 1 {
 		t.Fatalf("unexpected aggregate rates: %+v", m)
 	}
