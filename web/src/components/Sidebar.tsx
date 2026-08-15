@@ -15,7 +15,7 @@ import {
   Settings,
   ShieldQuestion,
   ShieldAlert,
-  SquarePen,
+  Target,
   Sun,
   Users,
   X,
@@ -41,7 +41,7 @@ const NAV_GROUPS: Array<{
   {
     label: 'Assess risk',
     items: [
-      { icon: SquarePen, label: 'New Engagement', to: '/engagements?create=1', prefix: '/engagements', action: true },
+      { icon: Target, label: 'Engagements', to: '/engagements', prefix: '/engagements' },
       { icon: ShieldQuestion, label: 'AI review queue', to: '/ai-triage/reviews', prefix: '/ai-triage/reviews' },
       { icon: Activity, label: 'AI observability', to: '/ai-triage/observability', prefix: '/ai-triage/observability' },
       { icon: ShieldAlert, label: 'Vulnerability intelligence', to: '/vulnerability-intelligence', prefix: '/vulnerability-intelligence' },

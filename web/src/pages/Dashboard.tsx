@@ -119,7 +119,7 @@ export function Dashboard() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <QuickLink to="/engagements?create=1" label="New Engagement" icon={Target} />
+            <QuickLink to="/engagements/new" label="New Engagement" icon={Target} />
             <QuickLink to="/assets" label="Asset inventory" icon={Boxes} />
             <QuickLink to="/code-quality" label="Code security" icon={Gauge} />
           </div>

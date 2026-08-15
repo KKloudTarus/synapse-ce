@@ -8,7 +8,7 @@ import { AITriageReviews } from './pages/AITriageReviews'
 import { AITriageObservability } from './pages/AITriageObservability'
 import { Connect } from './pages/Connect'
 import { EngagementDetail } from './pages/EngagementDetail'
-import { Engagements } from './pages/Engagements'
+import { Engagements, NewEngagement } from './pages/Engagements'
 import { Team } from './pages/Team'
 import Rules from './pages/Rules'
 import RuleDetail from './pages/RuleDetail'
@@ -48,6 +48,7 @@ function Gate() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="engagements" element={<Engagements />} />
+        <Route path="engagements/new" element={<NewEngagement />} />
         <Route path="engagements/:id" element={<EngagementDetail />} />
         <Route path="assets" element={<Assets />} />
         <Route path="assets/:key" element={<AssetDetail />}>
