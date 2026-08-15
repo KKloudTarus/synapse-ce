@@ -1,7 +1,9 @@
 -- +goose Up
 -- Risk-based remediation SLA governance (#80) and continuous-intelligence reassessment (#540).
--- Policies and assessments are append-only. Current pointers are separate so an audit can reproduce
--- every historical deadline. Human lifecycle state is isolated from machine-owned assessment refreshes.
+-- Policies are append-only. Assessment/event rows are immutable for the lifetime of their finding
+-- aggregate and cascade with an intentional finding/engagement/project teardown. Current pointers are
+-- separate so an audit can reproduce every retained deadline. Human lifecycle state is isolated from
+-- machine-owned assessment refreshes.
 
 CREATE TABLE sla_policies (
     tenant_id      TEXT NOT NULL REFERENCES tenants(id),
@@ -50,7 +52,7 @@ CREATE TABLE sla_assessments (
     FOREIGN KEY (tenant_id, source_risk_assessment_id)
         REFERENCES vulnerability_risk_assessments(tenant_id, id),
     FOREIGN KEY (tenant_id, engagement_id, finding_id, previous_assessment_id)
-        REFERENCES sla_assessments(tenant_id, engagement_id, finding_id, id),
+        REFERENCES sla_assessments(tenant_id, engagement_id, finding_id, id) ON DELETE CASCADE,
     CHECK (deadline_anchor_at <= assessed_at),
     CHECK (mitigate_by >= deadline_anchor_at),
     CHECK (remediate_by >= mitigate_by)
@@ -91,7 +93,7 @@ CREATE TABLE sla_lifecycles (
     FOREIGN KEY (tenant_id, engagement_id, finding_id)
         REFERENCES findings(tenant_id, engagement_id, id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, engagement_id, finding_id, assessment_id)
-        REFERENCES sla_assessments(tenant_id, engagement_id, finding_id, id),
+        REFERENCES sla_assessments(tenant_id, engagement_id, finding_id, id) ON DELETE CASCADE,
     CHECK (
         (status = 'accepted_risk' AND btrim(reason) <> '' AND btrim(compensating_control) <> ''
             AND btrim(accepted_by) <> '' AND accepted_at IS NOT NULL
@@ -126,13 +128,15 @@ CREATE TABLE sla_lifecycle_events (
     FOREIGN KEY (tenant_id, engagement_id, finding_id)
         REFERENCES sla_lifecycles(tenant_id, engagement_id, finding_id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, engagement_id, finding_id, assessment_id)
-        REFERENCES sla_assessments(tenant_id, engagement_id, finding_id, id)
+        REFERENCES sla_assessments(tenant_id, engagement_id, finding_id, id) ON DELETE CASCADE
 );
 CREATE INDEX idx_sla_lifecycle_events_history
     ON sla_lifecycle_events(tenant_id, engagement_id, finding_id, occurred_at, id);
 
--- The application never mutates these audit artifacts, but RLS alone still permits mutation by an
--- authorized tenant writer. Enforce the append-only contract at the database boundary as well.
+-- Policies outlive every governed finding and are fully append-only. Assessments and lifecycle
+-- events are update-immutable while their finding aggregate exists, but DELETE remains available
+-- for the repository's intentional finding/engagement/project ON DELETE CASCADE teardown. Combining
+-- an unconditional child DELETE trigger with those parent FKs would make production teardown fail.
 CREATE TRIGGER sla_policies_append_only
     BEFORE UPDATE OR DELETE ON sla_policies
     FOR EACH ROW EXECUTE FUNCTION synapse_forbid_mutation();
@@ -141,14 +145,14 @@ CREATE TRIGGER sla_policies_no_truncate
     FOR EACH STATEMENT EXECUTE FUNCTION synapse_forbid_mutation();
 
 CREATE TRIGGER sla_assessments_append_only
-    BEFORE UPDATE OR DELETE ON sla_assessments
+    BEFORE UPDATE ON sla_assessments
     FOR EACH ROW EXECUTE FUNCTION synapse_forbid_mutation();
 CREATE TRIGGER sla_assessments_no_truncate
     BEFORE TRUNCATE ON sla_assessments
     FOR EACH STATEMENT EXECUTE FUNCTION synapse_forbid_mutation();
 
 CREATE TRIGGER sla_lifecycle_events_append_only
-    BEFORE UPDATE OR DELETE ON sla_lifecycle_events
+    BEFORE UPDATE ON sla_lifecycle_events
     FOR EACH ROW EXECUTE FUNCTION synapse_forbid_mutation();
 CREATE TRIGGER sla_lifecycle_events_no_truncate
     BEFORE TRUNCATE ON sla_lifecycle_events

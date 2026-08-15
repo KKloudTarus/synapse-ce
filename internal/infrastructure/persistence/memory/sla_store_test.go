@@ -154,6 +154,25 @@ func TestSLAStoreMaterialRefreshLinksHistoryAndPreservesHumanState(t *testing.T)
 	}
 }
 
+func TestSLAStoreMissingCurrentPredecessorReturnsNotFound(t *testing.T) {
+	store := NewSLAStore()
+	ctx := slaContext("tenant-a")
+	first := slaAssessmentFor(t, "tenant-a", "eng-1", "finding-1", 0.1, slaStoreEpoch)
+	if _, err := store.UpsertAssessment(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate an impossible corrupt adapter state: the current pointer survived but its immutable
+	// artifact did not. PostgreSQL reports ErrNotFound for the same condition, so memory must match.
+	store.mu.Lock()
+	delete(store.assessments, slaAssessmentKey("tenant-a", first.ID))
+	store.mu.Unlock()
+
+	refresh := slaAssessmentFor(t, "tenant-a", "eng-1", "finding-1", 0.9, slaStoreEpoch.Add(time.Hour))
+	if _, err := store.UpsertAssessment(ctx, refresh); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("missing current predecessor error=%v, want not found", err)
+	}
+}
+
 func TestSLAStoreTransitionIsAtomicAndOptimistic(t *testing.T) {
 	store := NewSLAStore()
 	ctx := slaContext("tenant-a")

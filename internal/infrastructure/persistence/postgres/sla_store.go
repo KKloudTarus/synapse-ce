@@ -301,10 +301,7 @@ func (s *SLAStore) SaveTransition(ctx context.Context, next sla.Lifecycle, event
 			event.EngagementID.String(), event.FindingID.String(), event.AssessmentID.String(), string(event.From),
 			string(event.To), event.Reason, event.CompensatingControl, event.AcceptanceExpiresAt, event.Actor,
 			event.BeforeVersion, event.AfterVersion, event.At); err != nil {
-			if postgresUniqueViolation(err) {
-				return fmt.Errorf("insert sla lifecycle event: %v: %w", err, shared.ErrConflict)
-			}
-			return fmt.Errorf("insert sla lifecycle event: %w", err)
+			return wrapPostgresSLAWriteError("insert sla lifecycle event", err)
 		}
 		return nil
 	})
@@ -513,4 +510,11 @@ func slaFindingAdvisoryLockKey(tenantID, engagementID, findingID shared.ID) int6
 func postgresUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+func wrapPostgresSLAWriteError(operation string, err error) error {
+	if postgresUniqueViolation(err) {
+		return fmt.Errorf("%s: %w: %w", operation, err, shared.ErrConflict)
+	}
+	return fmt.Errorf("%s: %w", operation, err)
 }

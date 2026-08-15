@@ -162,9 +162,12 @@ old and newly calculated deadlines, so a rescan, de-escalation, or late emergenc
 silently reset or extend the remediation clock. CVSS/EPSS movement within the same effective scoring
 band is retained as upstream risk provenance but does not create a duplicate SLA assessment.
 
-Policies, assessments, and lifecycle events are protected by PostgreSQL append-only triggers in
-addition to application conventions and RLS. In-place UPDATE, DELETE, and TRUNCATE operations are
-rejected; mutable active/current pointers and lifecycle state remain separate.
+Policies reject in-place `UPDATE`, `DELETE`, and `TRUNCATE` through PostgreSQL triggers. Assessments
+and lifecycle events reject `UPDATE` and `TRUNCATE`, while their `DELETE` follows the repository's
+intentional finding/engagement/project cascade contract. This keeps retained history immutable
+without blocking project deletion or partially-materialized-import rollback. The assessment
+self-reference also cascades explicitly, so multi-hop chains tear down as one aggregate. Mutable
+active/current pointers and lifecycle state remain separate.
 
 ## Rollout guidance
 

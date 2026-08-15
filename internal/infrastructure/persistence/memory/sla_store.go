@@ -117,7 +117,10 @@ func (s *SLAStore) UpsertAssessment(ctx context.Context, assessment sla.Assessme
 		return sla.AssessmentUpsertResult{Assessment: cloneSLAAssessment(existing)}, nil
 	}
 	if previousID, ok := s.current[key]; ok {
-		previous := s.assessments[slaAssessmentKey(tenantID, previousID)]
+		previous, exists := s.assessments[slaAssessmentKey(tenantID, previousID)]
+		if !exists {
+			return sla.AssessmentUpsertResult{}, fmt.Errorf("load current sla assessment: %w", shared.ErrNotFound)
+		}
 		assessment, err = sla.ContinueAssessment(assessment, previous)
 		if err != nil {
 			return sla.AssessmentUpsertResult{}, err

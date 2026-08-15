@@ -10,9 +10,28 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sla"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 )
+
+type slaDeleteClock struct{ now time.Time }
+
+func (clock slaDeleteClock) Now() time.Time { return clock.now }
+
+type slaDeleteIDs struct{}
+
+func (slaDeleteIDs) NewID() shared.ID { return "unused-sla-delete-id" }
+
+type slaDeleteAudit struct{ entries []ports.AuditEntry }
+
+func (audit *slaDeleteAudit) Record(_ context.Context, entry ports.AuditEntry) error {
+	audit.entries = append(audit.entries, entry)
+	return nil
+}
 
 // TestPostgresSLAStore exercises the real migration, JSON codecs, nullable provenance, RLS-scoped
 // adapter calls, immutable history, and the no-human-clobber refresh invariant. It deliberately uses
@@ -33,39 +52,52 @@ func TestPostgresSLAStore(t *testing.T) {
 	defer pool.Close()
 	prefix := "sla-" + randHex(t)
 	tenantID := shared.ID(prefix + "-tenant")
+	projectID := shared.ID(prefix + "-project")
+	projectKey := prefix + "-project"
 	engagementID := shared.ID(prefix + "-engagement")
 	findingID := shared.ID(prefix + "-finding")
+	now := time.Date(2026, 8, 15, 13, 0, 0, 0, time.UTC)
+	ctx := shared.WithTenant(base, tenantID)
 	if _, err := pool.Exec(base, `INSERT INTO tenants(id,name) VALUES($1,$1)`, tenantID.String()); err != nil {
 		t.Fatalf("seed tenant: %v", err)
 	}
-	if _, err := pool.Exec(base, `INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,$1)`, engagementID.String(), tenantID.String()); err != nil {
+	projectItem, err := project.New(projectID, tenantID, "SLA delete integration", projectKey,
+		project.SourceBinding{Kind: project.SourceLocal, Value: "."}, nil, "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectRepo := NewProjectRepository(pool)
+	if err := projectRepo.Create(ctx, projectItem); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	engagementItem, err := engagement.New(engagementID, tenantID, "SLA integration engagement", "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engagementItem.ProjectID = projectID
+	engagementRepo := NewEngagementRepository(pool)
+	if err := engagementRepo.Create(ctx, engagementItem); err != nil {
 		t.Fatalf("seed engagement: %v", err)
 	}
 	if _, err := pool.Exec(base, `INSERT INTO findings(id,tenant_id,engagement_id,title,dedup_key) VALUES($1,$2,$3,'SLA integration finding',$1)`, findingID.String(), tenantID.String(), engagementID.String()); err != nil {
 		t.Fatalf("seed finding: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(base, `ALTER TABLE sla_lifecycle_events DISABLE TRIGGER sla_lifecycle_events_append_only`)
-		_, _ = pool.Exec(base, `ALTER TABLE sla_assessments DISABLE TRIGGER sla_assessments_append_only`)
 		_, _ = pool.Exec(base, `ALTER TABLE sla_policies DISABLE TRIGGER sla_policies_append_only`)
 		_, _ = pool.Exec(base, `DELETE FROM sla_lifecycle_events WHERE tenant_id=$1`, tenantID.String())
 		_, _ = pool.Exec(base, `DELETE FROM sla_lifecycles WHERE tenant_id=$1`, tenantID.String())
 		_, _ = pool.Exec(base, `DELETE FROM sla_current_assessments WHERE tenant_id=$1`, tenantID.String())
-		_, _ = pool.Exec(base, `UPDATE sla_assessments SET previous_assessment_id=NULL WHERE tenant_id=$1`, tenantID.String())
 		_, _ = pool.Exec(base, `DELETE FROM sla_assessments WHERE tenant_id=$1`, tenantID.String())
 		_, _ = pool.Exec(base, `DELETE FROM sla_active_policies WHERE tenant_id=$1`, tenantID.String())
 		_, _ = pool.Exec(base, `DELETE FROM sla_policies WHERE tenant_id=$1`, tenantID.String())
 		_, _ = pool.Exec(base, `DELETE FROM findings WHERE tenant_id=$1`, tenantID.String())
 		_, _ = pool.Exec(base, `DELETE FROM engagements WHERE tenant_id=$1`, tenantID.String())
+		_, _ = pool.Exec(base, `DELETE FROM projects WHERE tenant_id=$1`, tenantID.String())
 		_, _ = pool.Exec(base, `DELETE FROM tenants WHERE id=$1`, tenantID.String())
 		_, _ = pool.Exec(base, `ALTER TABLE sla_policies ENABLE TRIGGER sla_policies_append_only`)
-		_, _ = pool.Exec(base, `ALTER TABLE sla_assessments ENABLE TRIGGER sla_assessments_append_only`)
-		_, _ = pool.Exec(base, `ALTER TABLE sla_lifecycle_events ENABLE TRIGGER sla_lifecycle_events_append_only`)
 	})
 
-	ctx := shared.WithTenant(base, tenantID)
 	store := NewSLAStore(pool)
-	now := time.Date(2026, 8, 15, 13, 0, 0, 0, time.UTC)
 	policy, err := sla.NewPolicy(tenantID, sla.DefaultConfig(), "integration-admin", now)
 	if err != nil {
 		t.Fatal(err)
@@ -138,6 +170,17 @@ func TestPostgresSLAStore(t *testing.T) {
 	if err != nil || len(events) != 1 || events[0].ID != event.ID {
 		t.Fatalf("events=%+v err=%v", events, err)
 	}
+	third, err := sla.Evaluate(sla.AssessmentInput{
+		TenantID: tenantID, EngagementID: engagementID, FindingID: findingID,
+		Risk: sla.Inputs{Severity: shared.SeverityMedium, CVSSScore: 5.5, EPSS: 0.04, PublicPoC: true, Feasibility: sla.FeasibilityChangeWindow},
+	}, policy.Config, now.Add(3*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err = store.UpsertAssessment(ctx, third)
+	if err != nil || !stored.Created || stored.Assessment.PreviousAssessmentID != refreshed.ID {
+		t.Fatalf("third assessment did not extend the multi-hop chain: %+v err=%v", stored, err)
+	}
 
 	if err := store.SaveTransition(ctx, next, event); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("stale transition should conflict, got %v", err)
@@ -149,7 +192,7 @@ func TestPostgresSLAStore(t *testing.T) {
 	}{
 		{name: "policy update", query: `UPDATE sla_policies SET created_by='tampered' WHERE tenant_id=$1`, args: []any{tenantID.String()}},
 		{name: "assessment update", query: `UPDATE sla_assessments SET score=0 WHERE tenant_id=$1`, args: []any{tenantID.String()}},
-		{name: "event delete", query: `DELETE FROM sla_lifecycle_events WHERE tenant_id=$1`, args: []any{tenantID.String()}},
+		{name: "event update", query: `UPDATE sla_lifecycle_events SET actor='tampered' WHERE tenant_id=$1`, args: []any{tenantID.String()}},
 	}
 	for _, mutation := range immutableMutations {
 		if _, err := pool.Exec(base, mutation.query, mutation.args...); err == nil || !strings.Contains(err.Error(), "append-only") {
@@ -159,6 +202,35 @@ func TestPostgresSLAStore(t *testing.T) {
 	otherCtx := shared.WithTenant(base, "other-tenant")
 	if _, err := store.Current(otherCtx, tenantID, engagementID, findingID); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("cross-tenant read should fail closed, got %v", err)
+	}
+
+	// projectuc.Delete first calls EngagementRepository.Delete, which cascades findings and their
+	// multi-hop SLA history, then removes the project. This is the production teardown path that the
+	// update-immutability triggers must not block.
+	audit := &slaDeleteAudit{}
+	projectService := projectuc.NewService(projectRepo, engagementRepo, slaDeleteClock{now: now}, slaDeleteIDs{}, audit, true)
+	if err := projectService.Delete(ctx, "integration-admin", tenantID, projectKey); err != nil {
+		t.Fatalf("delete SLA-assessed project: %v", err)
+	}
+	for _, check := range []struct {
+		name  string
+		query string
+	}{
+		{name: "assessments", query: `SELECT count(*) FROM sla_assessments WHERE tenant_id=$1`},
+		{name: "current assessments", query: `SELECT count(*) FROM sla_current_assessments WHERE tenant_id=$1`},
+		{name: "lifecycles", query: `SELECT count(*) FROM sla_lifecycles WHERE tenant_id=$1`},
+		{name: "lifecycle events", query: `SELECT count(*) FROM sla_lifecycle_events WHERE tenant_id=$1`},
+		{name: "findings", query: `SELECT count(*) FROM findings WHERE tenant_id=$1`},
+		{name: "engagements", query: `SELECT count(*) FROM engagements WHERE tenant_id=$1`},
+		{name: "projects", query: `SELECT count(*) FROM projects WHERE tenant_id=$1`},
+	} {
+		var count int
+		if err := pool.QueryRow(base, check.query, tenantID.String()).Scan(&count); err != nil || count != 0 {
+			t.Errorf("%s remaining after project teardown=%d err=%v", check.name, count, err)
+		}
+	}
+	if len(audit.entries) != 1 || audit.entries[0].Action != "project.delete" {
+		t.Fatalf("project teardown audit=%+v", audit.entries)
 	}
 }
 
@@ -174,8 +246,14 @@ func TestSLAFindingAdvisoryLockKeyIsStableAndScoped(t *testing.T) {
 }
 
 func TestPostgresUniqueViolationClassification(t *testing.T) {
-	if !postgresUniqueViolation(&pgconn.PgError{Code: "23505"}) {
+	pgErr := &pgconn.PgError{Code: "23505", ConstraintName: "sla_lifecycle_events_pkey"}
+	if !postgresUniqueViolation(pgErr) {
 		t.Fatal("unique_violation must be classified as a conflict")
+	}
+	wrapped := wrapPostgresSLAWriteError("insert sla lifecycle event", pgErr)
+	var recovered *pgconn.PgError
+	if !errors.Is(wrapped, shared.ErrConflict) || !errors.As(wrapped, &recovered) || recovered != pgErr {
+		t.Fatalf("wrapped unique violation lost conflict or PostgreSQL cause: %v", wrapped)
 	}
 	if postgresUniqueViolation(&pgconn.PgError{Code: "23503"}) || postgresUniqueViolation(errors.New("23505")) {
 		t.Fatal("non-unique PostgreSQL and untyped errors must not be classified as unique violations")
