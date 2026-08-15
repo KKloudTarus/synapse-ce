@@ -59,7 +59,7 @@ func TestAssessmentIdentityChangesOnlyForMaterialInputOrPolicy(t *testing.T) {
 	}{
 		{name: "finding", input: func() AssessmentInput { in := validAssessmentInput(); in.FindingID = "finding-2"; return in }(), cfg: DefaultConfig()},
 		{name: "tenant", input: func() AssessmentInput { in := validAssessmentInput(); in.TenantID = "tenant-b"; return in }(), cfg: DefaultConfig()},
-		{name: "risk", input: func() AssessmentInput { in := validAssessmentInput(); in.Risk.EPSS = 0.2; return in }(), cfg: DefaultConfig()},
+		{name: "risk", input: func() AssessmentInput { in := validAssessmentInput(); in.Risk.KEV = false; return in }(), cfg: DefaultConfig()},
 		{name: "policy", input: validAssessmentInput(), cfg: func() Config { cfg := DefaultConfig(); cfg.Version = "sla-v2"; return cfg }()},
 	}
 	for _, tc := range cases {
@@ -92,6 +92,96 @@ func TestAssessmentIdentityIgnoresProvenanceOnlyRefresh(t *testing.T) {
 	}
 	if right.SourceRiskAssessmentID != "risk-2" {
 		t.Fatalf("candidate did not retain new source provenance: %+v", right)
+	}
+}
+
+func TestAssessmentIdentityIgnoresNonMaterialRiskDrift(t *testing.T) {
+	base := validAssessmentInput()
+	base.Risk.KEV = false
+	base.Risk.ActiveExploitation = false
+	base.Risk.CVSSScore = 9.1
+	base.Risk.EPSS = 0.61
+
+	cases := map[string]func(*AssessmentInput){
+		"cvss inside critical band": func(in *AssessmentInput) { in.Risk.CVSSScore = 9.9 },
+		"epss inside high band":     func(in *AssessmentInput) { in.Risk.EPSS = 0.99 },
+		"severity hidden by cvss":   func(in *AssessmentInput) { in.Risk.Severity = shared.SeverityLow },
+	}
+	first, err := Evaluate(base, DefaultConfig(), assessmentEpoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, edit := range cases {
+		t.Run(name, func(t *testing.T) {
+			changed := base
+			edit(&changed)
+			got, err := Evaluate(changed, DefaultConfig(), assessmentEpoch.Add(time.Hour))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.ID != first.ID || got.InputHash != first.InputHash {
+				t.Fatalf("non-material drift minted assessment: first=%s got=%s", first.ID, got.ID)
+			}
+		})
+	}
+
+	crossed := base
+	crossed.Risk.EPSS = 0.49
+	changed, err := Evaluate(crossed, DefaultConfig(), assessmentEpoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.ID == first.ID {
+		t.Fatal("crossing an EPSS scoring band must create a new material assessment")
+	}
+}
+
+func TestContinueAssessmentPreservesOriginalClockAndNeverExtendsDeadline(t *testing.T) {
+	cfg := DefaultConfig()
+	input := validAssessmentInput()
+	input.Risk = Inputs{Severity: shared.SeverityHigh, CVSSScore: 8.1, EPSS: 0.2, Feasibility: FeasibilityPatchAvailable}
+	first, err := Evaluate(input, cfg, assessmentEpoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Result.Tier != TierHigh {
+		t.Fatalf("test setup tier=%s, want high", first.Result.Tier)
+	}
+
+	input.Risk.ActiveExploitation = true
+	candidate, err := Evaluate(input, cfg, assessmentEpoch.Add(25*24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	continued, err := ContinueAssessment(candidate, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if continued.PreviousAssessmentID != first.ID || !continued.DeadlineAnchorAt.Equal(first.AssessedAt) {
+		t.Fatalf("assessment chain/anchor not retained: %+v", continued)
+	}
+	wantEmergencyDue := first.AssessedAt.Add(cfg.DueRanges.Emergency.RemediateWithin)
+	if !continued.Result.RemediateBy.Equal(wantEmergencyDue) {
+		t.Fatalf("late emergency deadline=%s, want original anchor + emergency range=%s", continued.Result.RemediateBy, wantEmergencyDue)
+	}
+	if !continued.Result.RemediateBy.Before(continued.Result.ComputedAt) {
+		t.Fatal("late escalation should remain observably overdue instead of resetting its clock")
+	}
+	if err := continued.Validate(); err != nil {
+		t.Fatalf("overdue continued assessment rejected: %v", err)
+	}
+
+	input.Risk = Inputs{Severity: shared.SeverityLow, CVSSScore: 2.0, Feasibility: FeasibilityPatchAvailable}
+	deescalated, err := Evaluate(input, cfg, assessmentEpoch.Add(26*24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deescalated, err = ContinueAssessment(deescalated, continued)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deescalated.Result.RemediateBy.Equal(continued.Result.RemediateBy) {
+		t.Fatalf("de-escalation extended committed deadline: previous=%s got=%s", continued.Result.RemediateBy, deescalated.Result.RemediateBy)
 	}
 }
 
@@ -136,6 +226,7 @@ func TestAssessmentValidateDetectsTampering(t *testing.T) {
 		{name: "input hash", edit: func(a *Assessment) { a.InputHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }},
 		{name: "config hash", edit: func(a *Assessment) { a.ConfigHash = "short" }},
 		{name: "computed at", edit: func(a *Assessment) { a.Result.ComputedAt = time.Time{} }},
+		{name: "deadline anchor", edit: func(a *Assessment) { a.DeadlineAnchorAt = time.Time{} }},
 		{name: "mitigate before computed", edit: func(a *Assessment) { a.Result.MitigateBy = a.Result.ComputedAt.Add(-time.Second) }},
 		{name: "remediate before mitigate", edit: func(a *Assessment) { a.Result.RemediateBy = a.Result.MitigateBy.Add(-time.Second) }},
 	}

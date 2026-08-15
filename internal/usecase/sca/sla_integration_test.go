@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,15 @@ func (clock slaPipelineClock) Now() time.Time { return clock.at }
 type slaPipelineIDs struct{}
 
 func (slaPipelineIDs) NewID() shared.ID { return "sla-event" }
+
+type selectiveSLAAssessor struct{ fail shared.ID }
+
+func (assessor selectiveSLAAssessor) AssessFinding(_ context.Context, tenantID shared.ID, item finding.Finding) (sla.View, error) {
+	if item.ID == assessor.fail {
+		return sla.View{}, errors.New("governance unavailable")
+	}
+	return sla.View{Assessment: sla.Assessment{TenantID: tenantID, FindingID: item.ID}}, nil
+}
 
 func TestAssessFindingSLAsUsesPersistedFindingOrderAndTenant(t *testing.T) {
 	now := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
@@ -78,5 +88,20 @@ func TestAssessFindingSLAsFailsClosedWithoutTenantContext(t *testing.T) {
 	result := &ScanResult{Findings: []finding.Finding{{ID: "finding-1", EngagementID: "eng-1"}}}
 	if err := service.assessFindingSLAs(context.Background(), result); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("missing tenant error=%v, want validation", err)
+	}
+}
+
+func TestAssessFindingSLAsRetainsPartialEnrichment(t *testing.T) {
+	service := &Service{slaAssessor: selectiveSLAAssessor{fail: "finding-2"}}
+	result := &ScanResult{Findings: []finding.Finding{
+		{ID: "finding-1"}, {ID: "finding-2"}, {ID: "finding-3"},
+	}}
+	err := service.assessFindingSLAs(shared.WithTenant(context.Background(), "tenant-a"), result)
+	if err == nil || !strings.Contains(err.Error(), "finding-2") {
+		t.Fatalf("aggregate enrichment error=%v, want failed finding identity", err)
+	}
+	if len(result.SLAs) != 2 || result.SLAs[0].Assessment.FindingID != "finding-1" ||
+		result.SLAs[1].Assessment.FindingID != "finding-3" {
+		t.Fatalf("successful SLA enrichments were not retained in order: %+v", result.SLAs)
 	}
 }

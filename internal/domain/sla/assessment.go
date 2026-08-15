@@ -38,6 +38,7 @@ type Assessment struct {
 	InputHash              string    `json:"input_hash"`
 	ConfigHash             string    `json:"config_hash"`
 	PreviousAssessmentID   shared.ID `json:"previous_assessment_id,omitempty"`
+	DeadlineAnchorAt       time.Time `json:"deadline_anchor_at"`
 	AssessedAt             time.Time `json:"assessed_at"`
 	CreatedAt              time.Time `json:"created_at"`
 }
@@ -131,8 +132,53 @@ func Evaluate(input AssessmentInput, cfg Config, now time.Time) (Assessment, err
 		EngagementID: input.EngagementID, FindingID: input.FindingID,
 		SourceRiskAssessmentID: input.SourceRiskAssessmentID, Inputs: input.Risk,
 		Result: Compute(input.Risk, cfg, now), InputHash: inputHash, ConfigHash: configHash,
-		AssessedAt: now, CreatedAt: now,
+		DeadlineAnchorAt: now, AssessedAt: now, CreatedAt: now,
 	}, nil
+}
+
+// ContinueAssessment binds a new immutable assessment to the current chain without resetting its
+// clock. The new tier's due windows are rebased to the first assessment, and an already-promised
+// deadline is never moved later. Stores call this while holding their per-finding serialization lock,
+// so the anchor and deadline caps always come from the actual current predecessor.
+func ContinueAssessment(candidate, previous Assessment) (Assessment, error) {
+	if err := candidate.Validate(); err != nil {
+		return Assessment{}, err
+	}
+	if err := previous.Validate(); err != nil {
+		return Assessment{}, fmt.Errorf("validate previous sla assessment: %w", err)
+	}
+	if candidate.TenantID != previous.TenantID || candidate.EngagementID != previous.EngagementID ||
+		candidate.FindingID != previous.FindingID {
+		return Assessment{}, fmt.Errorf("%w: sla assessment predecessor belongs to another finding", shared.ErrValidation)
+	}
+	if !candidate.PreviousAssessmentID.IsZero() && candidate.PreviousAssessmentID != previous.ID {
+		return Assessment{}, fmt.Errorf("%w: sla assessment chain advanced", shared.ErrConflict)
+	}
+	if candidate.AssessedAt.Before(previous.AssessedAt) {
+		return Assessment{}, fmt.Errorf("%w: sla assessment cannot precede its current predecessor", shared.ErrConflict)
+	}
+
+	mitigateWindow := candidate.Result.MitigateBy.Sub(candidate.DeadlineAnchorAt)
+	remediateWindow := candidate.Result.RemediateBy.Sub(candidate.DeadlineAnchorAt)
+	candidate.PreviousAssessmentID = previous.ID
+	candidate.DeadlineAnchorAt = previous.DeadlineAnchorAt
+	candidate.Result.MitigateBy = earlierDeadline(
+		candidate.DeadlineAnchorAt.Add(mitigateWindow), previous.Result.MitigateBy,
+	)
+	candidate.Result.RemediateBy = earlierDeadline(
+		candidate.DeadlineAnchorAt.Add(remediateWindow), previous.Result.RemediateBy,
+	)
+	if err := candidate.Validate(); err != nil {
+		return Assessment{}, fmt.Errorf("validate continued sla assessment: %w", err)
+	}
+	return candidate, nil
+}
+
+func earlierDeadline(left, right time.Time) time.Time {
+	if left.Before(right) {
+		return left
+	}
+	return right
 }
 
 // AssessmentID is stable for a material input and policy version. Tenant and finding identity are
@@ -147,15 +193,20 @@ func AssessmentID(tenantID, findingID shared.ID, configVersion, inputHash string
 // Validate recomputes every binding used at the persistence and promotion boundaries.
 func (a Assessment) Validate() error {
 	if a.TenantID.IsZero() || a.ID.IsZero() || a.EngagementID.IsZero() || a.FindingID.IsZero() ||
-		a.AssessedAt.IsZero() || a.CreatedAt.IsZero() || len(a.InputHash) != 64 || len(a.ConfigHash) != 64 {
+		a.DeadlineAnchorAt.IsZero() || a.AssessedAt.IsZero() || a.CreatedAt.IsZero() ||
+		len(a.InputHash) != 64 || len(a.ConfigHash) != 64 {
 		return fmt.Errorf("%w: sla assessment identity or provenance is incomplete", shared.ErrValidation)
 	}
 	if err := a.Inputs.Validate(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(a.Result.ConfigVersion) == "" || a.Result.ComputedAt.IsZero() ||
-		a.Result.MitigateBy.Before(a.Result.ComputedAt) || a.Result.RemediateBy.Before(a.Result.MitigateBy) {
+		!a.Result.ComputedAt.Equal(a.AssessedAt) || a.DeadlineAnchorAt.After(a.AssessedAt) ||
+		a.Result.MitigateBy.Before(a.DeadlineAnchorAt) || a.Result.RemediateBy.Before(a.Result.MitigateBy) {
 		return fmt.Errorf("%w: sla assessment result is invalid", shared.ErrValidation)
+	}
+	if a.PreviousAssessmentID.IsZero() && !a.DeadlineAnchorAt.Equal(a.AssessedAt) {
+		return fmt.Errorf("%w: first sla assessment must start its own deadline clock", shared.ErrValidation)
 	}
 	inputHash, err := assessmentInputHash(AssessmentInput{
 		TenantID: a.TenantID, EngagementID: a.EngagementID, FindingID: a.FindingID,
@@ -171,14 +222,38 @@ func (a Assessment) Validate() error {
 }
 
 func assessmentInputHash(input AssessmentInput) (string, error) {
+	// Hash only facts that can change the decision. Raw CVSS/EPSS movement inside one scoring band,
+	// an EPSS change hidden by KEV, and PublicPoC while active exploitation is already true are useful
+	// provenance but not new SLA decisions and therefore must not mint a fresh deadline artifact.
+	exploitabilityBand := "none"
+	switch {
+	case input.Risk.KEV:
+		exploitabilityBand = "kev"
+	case input.Risk.EPSS >= epssHighBand:
+		exploitabilityBand = "high"
+	case input.Risk.EPSS >= epssMediumBand:
+		exploitabilityBand = "medium"
+	case input.Risk.EPSS >= epssLowBand:
+		exploitabilityBand = "low"
+	}
 	payload := struct {
-		TenantID     string `json:"tenant_id"`
-		EngagementID string `json:"engagement_id"`
-		FindingID    string `json:"finding_id"`
-		Risk         Inputs `json:"risk"`
+		TenantID           string          `json:"tenant_id"`
+		EngagementID       string          `json:"engagement_id"`
+		FindingID          string          `json:"finding_id"`
+		SeverityBand       shared.Severity `json:"severity_band"`
+		ExploitabilityBand string          `json:"exploitability_band"`
+		KEV                bool            `json:"kev"`
+		PublicPoC          bool            `json:"public_poc"`
+		ActiveExploitation bool            `json:"active_exploitation"`
+		Criticality        Criticality     `json:"criticality"`
+		Exposure           Exposure        `json:"exposure"`
+		Feasibility        Feasibility     `json:"feasibility"`
 	}{
 		TenantID: input.TenantID.String(), EngagementID: input.EngagementID.String(), FindingID: input.FindingID.String(),
-		Risk: input.Risk,
+		SeverityBand: input.Risk.severityBand(), ExploitabilityBand: exploitabilityBand, KEV: input.Risk.KEV,
+		PublicPoC:          input.Risk.PublicPoC && !input.Risk.ActiveExploitation,
+		ActiveExploitation: input.Risk.ActiveExploitation, Criticality: input.Risk.Criticality,
+		Exposure: input.Risk.Exposure, Feasibility: input.Risk.Feasibility,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {

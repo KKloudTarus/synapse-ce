@@ -11,8 +11,7 @@ CREATE TABLE sla_policies (
     created_by     TEXT NOT NULL CHECK (btrim(created_by) <> ''),
     created_at     TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (tenant_id, config_version),
-    UNIQUE (tenant_id, config_version, sha256),
-    UNIQUE (tenant_id, sha256)
+    UNIQUE (tenant_id, config_version, sha256)
 );
 
 CREATE TABLE sla_active_policies (
@@ -38,6 +37,7 @@ CREATE TABLE sla_assessments (
     mitigate_by               TIMESTAMPTZ NOT NULL,
     remediate_by              TIMESTAMPTZ NOT NULL,
     previous_assessment_id    TEXT,
+    deadline_anchor_at        TIMESTAMPTZ NOT NULL,
     assessed_at               TIMESTAMPTZ NOT NULL,
     created_at                TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (tenant_id, id),
@@ -51,7 +51,8 @@ CREATE TABLE sla_assessments (
         REFERENCES vulnerability_risk_assessments(tenant_id, id),
     FOREIGN KEY (tenant_id, engagement_id, finding_id, previous_assessment_id)
         REFERENCES sla_assessments(tenant_id, engagement_id, finding_id, id),
-    CHECK (mitigate_by >= assessed_at),
+    CHECK (deadline_anchor_at <= assessed_at),
+    CHECK (mitigate_by >= deadline_anchor_at),
     CHECK (remediate_by >= mitigate_by)
 );
 CREATE INDEX idx_sla_assessments_history
@@ -129,6 +130,29 @@ CREATE TABLE sla_lifecycle_events (
 );
 CREATE INDEX idx_sla_lifecycle_events_history
     ON sla_lifecycle_events(tenant_id, engagement_id, finding_id, occurred_at, id);
+
+-- The application never mutates these audit artifacts, but RLS alone still permits mutation by an
+-- authorized tenant writer. Enforce the append-only contract at the database boundary as well.
+CREATE TRIGGER sla_policies_append_only
+    BEFORE UPDATE OR DELETE ON sla_policies
+    FOR EACH ROW EXECUTE FUNCTION synapse_forbid_mutation();
+CREATE TRIGGER sla_policies_no_truncate
+    BEFORE TRUNCATE ON sla_policies
+    FOR EACH STATEMENT EXECUTE FUNCTION synapse_forbid_mutation();
+
+CREATE TRIGGER sla_assessments_append_only
+    BEFORE UPDATE OR DELETE ON sla_assessments
+    FOR EACH ROW EXECUTE FUNCTION synapse_forbid_mutation();
+CREATE TRIGGER sla_assessments_no_truncate
+    BEFORE TRUNCATE ON sla_assessments
+    FOR EACH STATEMENT EXECUTE FUNCTION synapse_forbid_mutation();
+
+CREATE TRIGGER sla_lifecycle_events_append_only
+    BEFORE UPDATE OR DELETE ON sla_lifecycle_events
+    FOR EACH ROW EXECUTE FUNCTION synapse_forbid_mutation();
+CREATE TRIGGER sla_lifecycle_events_no_truncate
+    BEFORE TRUNCATE ON sla_lifecycle_events
+    FOR EACH STATEMENT EXECUTE FUNCTION synapse_forbid_mutation();
 
 CALL synapse_enable_tenant_rls('sla_policies');
 CALL synapse_enable_tenant_rls('sla_active_policies');

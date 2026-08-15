@@ -143,6 +143,7 @@ export interface SLAAssessment {
   inputHash: string
   configHash: string
   previousAssessmentId: string
+  deadlineAnchorAt: string
   assessedAt: string
   createdAt: string
 }

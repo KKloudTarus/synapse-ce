@@ -169,7 +169,10 @@ func TestActivatePolicyIsHumanOnlyAndAffectsFutureAssessment(t *testing.T) {
 		second.Assessment.PreviousAssessmentID != first.Assessment.ID {
 		t.Fatalf("new policy did not version assessment: %+v", second.Assessment)
 	}
-	if got := second.Assessment.Result.RemediateBy.Sub(second.Assessment.AssessedAt); got != 10*24*time.Hour {
+	if !second.Assessment.DeadlineAnchorAt.Equal(first.Assessment.DeadlineAnchorAt) {
+		t.Fatalf("new policy reset deadline anchor: first=%s second=%s", first.Assessment.DeadlineAnchorAt, second.Assessment.DeadlineAnchorAt)
+	}
+	if got := second.Assessment.Result.RemediateBy.Sub(second.Assessment.DeadlineAnchorAt); got != 10*24*time.Hour {
 		t.Fatalf("new due policy not applied: %v", got)
 	}
 	if _, created, err := service.ActivatePolicy(ctx, "tenant-a", cfg, "security-admin@example.com"); err != nil || created {

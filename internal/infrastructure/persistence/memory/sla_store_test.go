@@ -134,6 +134,10 @@ func TestSLAStoreMaterialRefreshLinksHistoryAndPreservesHumanState(t *testing.T)
 	if err != nil || !upserted.Created || upserted.Assessment.PreviousAssessmentID != first.ID {
 		t.Fatalf("refresh=%+v err=%v", upserted, err)
 	}
+	if !upserted.Assessment.DeadlineAnchorAt.Equal(first.DeadlineAnchorAt) ||
+		upserted.Assessment.Result.RemediateBy.After(first.Result.RemediateBy) {
+		t.Fatalf("refresh reset or extended SLA clock: first=%+v refresh=%+v", first, upserted.Assessment)
+	}
 	current, err = store.Current(ctx, "tenant-a", "eng-1", "finding-1")
 	if err != nil {
 		t.Fatal(err)

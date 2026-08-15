@@ -2,11 +2,14 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -130,8 +133,8 @@ func (s *SLAStore) UpsertAssessment(ctx context.Context, assessment sla.Assessme
 		// Serialize every candidate for one finding, including its first assessment. A row lock
 		// cannot protect the absent-pointer case, so use a transaction advisory lock on the stable
 		// tenant/engagement/finding identity.
-		lockKey := tenantID.String() + "\x00" + assessment.EngagementID.String() + "\x00" + assessment.FindingID.String()
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, lockKey); err != nil {
+		lockKey := slaFindingAdvisoryLockKey(tenantID, assessment.EngagementID, assessment.FindingID)
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, lockKey); err != nil {
 			return fmt.Errorf("lock sla finding: %w", err)
 		}
 		var existing sla.Assessment
@@ -151,8 +154,19 @@ func (s *SLAStore) UpsertAssessment(ctx context.Context, assessment sla.Assessme
 			assessment.PreviousAssessmentID = ""
 		} else if err != nil {
 			return fmt.Errorf("load current sla assessment pointer: %w", err)
-		} else if assessment.PreviousAssessmentID.IsZero() {
-			assessment.PreviousAssessmentID = shared.ID(previousID)
+		} else {
+			var previous sla.Assessment
+			found, err := loadSLAAssessment(ctx, tx, tenantID, shared.ID(previousID), &previous)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return fmt.Errorf("load current sla assessment: %w", shared.ErrNotFound)
+			}
+			assessment, err = sla.ContinueAssessment(assessment, previous)
+			if err != nil {
+				return err
+			}
 		}
 		if err := insertSLAAssessment(ctx, tx, assessment); err != nil {
 			return err
@@ -287,6 +301,9 @@ func (s *SLAStore) SaveTransition(ctx context.Context, next sla.Lifecycle, event
 			event.EngagementID.String(), event.FindingID.String(), event.AssessmentID.String(), string(event.From),
 			string(event.To), event.Reason, event.CompensatingControl, event.AcceptanceExpiresAt, event.Actor,
 			event.BeforeVersion, event.AfterVersion, event.At); err != nil {
+			if postgresUniqueViolation(err) {
+				return fmt.Errorf("insert sla lifecycle event: %v: %w", err, shared.ErrConflict)
+			}
 			return fmt.Errorf("insert sla lifecycle event: %w", err)
 		}
 		return nil
@@ -323,7 +340,7 @@ func (s *SLAStore) LifecycleEvents(ctx context.Context, tenantID, engagementID, 
 }
 
 const slaAssessmentColumns = `tenant_id,id,engagement_id,finding_id,source_risk_assessment_id,inputs,result,
-	input_hash,config_hash,previous_assessment_id,assessed_at,created_at`
+	input_hash,config_hash,previous_assessment_id,deadline_anchor_at,assessed_at,created_at`
 
 const slaLifecycleColumns = `lifecycle.tenant_id,lifecycle.engagement_id,lifecycle.finding_id,lifecycle.assessment_id,
 	lifecycle.status,lifecycle.version,lifecycle.reason,lifecycle.compensating_control,lifecycle.accepted_by,
@@ -338,7 +355,8 @@ const currentSLAQuery = `SELECT ` + slaAssessmentPrefixedColumns + `,` + slaLife
 
 const slaAssessmentPrefixedColumns = `assessment.tenant_id,assessment.id,assessment.engagement_id,
 	assessment.finding_id,assessment.source_risk_assessment_id,assessment.inputs,assessment.result,
-	assessment.input_hash,assessment.config_hash,assessment.previous_assessment_id,assessment.assessed_at,assessment.created_at`
+	assessment.input_hash,assessment.config_hash,assessment.previous_assessment_id,assessment.deadline_anchor_at,
+	assessment.assessed_at,assessment.created_at`
 
 func slaPostgresTenant(ctx context.Context, requested shared.ID) (shared.ID, error) {
 	bound, ok := shared.TenantFrom(ctx)
@@ -380,7 +398,7 @@ func scanSLAAssessment(row interface{ Scan(...any) error }, item *sla.Assessment
 	var sourceID, previousID pgtype.Text
 	if err := row.Scan(&item.TenantID, &item.ID, &item.EngagementID, &item.FindingID,
 		&sourceID, &inputJSON, &resultJSON, &item.InputHash, &item.ConfigHash,
-		&previousID, &item.AssessedAt, &item.CreatedAt); err != nil {
+		&previousID, &item.DeadlineAnchorAt, &item.AssessedAt, &item.CreatedAt); err != nil {
 		return err
 	}
 	item.SourceRiskAssessmentID, item.PreviousAssessmentID = "", ""
@@ -420,7 +438,8 @@ func scanSLACurrent(row interface{ Scan(...any) error }, item *sla.Current) erro
 	if err := row.Scan(&item.Assessment.TenantID, &item.Assessment.ID, &item.Assessment.EngagementID,
 		&item.Assessment.FindingID, &sourceID, &inputJSON, &resultJSON,
 		&item.Assessment.InputHash, &item.Assessment.ConfigHash, &previousID,
-		&item.Assessment.AssessedAt, &item.Assessment.CreatedAt, &item.Lifecycle.TenantID,
+		&item.Assessment.DeadlineAnchorAt, &item.Assessment.AssessedAt, &item.Assessment.CreatedAt,
+		&item.Lifecycle.TenantID,
 		&item.Lifecycle.EngagementID, &item.Lifecycle.FindingID, &item.Lifecycle.AssessmentID,
 		&item.Lifecycle.Status, &item.Lifecycle.Version, &item.Lifecycle.Reason,
 		&item.Lifecycle.CompensatingControl, &item.Lifecycle.AcceptedBy, &item.Lifecycle.AcceptedAt,
@@ -457,11 +476,13 @@ func insertSLAAssessment(ctx context.Context, tx pgx.Tx, item sla.Assessment) er
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO sla_assessments
 		(tenant_id,id,engagement_id,finding_id,source_risk_assessment_id,inputs,result,input_hash,
-		config_hash,config_version,tier,score,mitigate_by,remediate_by,previous_assessment_id,assessed_at,created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`, item.TenantID.String(),
+		config_hash,config_version,tier,score,mitigate_by,remediate_by,previous_assessment_id,
+		deadline_anchor_at,assessed_at,created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`, item.TenantID.String(),
 		item.ID.String(), item.EngagementID.String(), item.FindingID.String(), nullableSLAID(item.SourceRiskAssessmentID),
 		inputs, result, item.InputHash, item.ConfigHash, item.Result.ConfigVersion, string(item.Result.Tier), item.Result.Score,
-		item.Result.MitigateBy, item.Result.RemediateBy, nullableSLAID(item.PreviousAssessmentID), item.AssessedAt, item.CreatedAt)
+		item.Result.MitigateBy, item.Result.RemediateBy, nullableSLAID(item.PreviousAssessmentID), item.DeadlineAnchorAt,
+		item.AssessedAt, item.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("insert sla assessment: %w", err)
 	}
@@ -482,4 +503,14 @@ func nullableSLAID(value shared.ID) any {
 		return nil
 	}
 	return value.String()
+}
+
+func slaFindingAdvisoryLockKey(tenantID, engagementID, findingID shared.ID) int64 {
+	digest := sha256.Sum256([]byte(tenantID.String() + "\x00" + engagementID.String() + "\x00" + findingID.String()))
+	return int64(binary.BigEndian.Uint64(digest[:8]))
+}
+
+func postgresUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }

@@ -156,6 +156,16 @@ Assessment writes serialize on the stable tenant/engagement/finding identity. Th
 first-write case where no row exists to lock and ensures concurrent material updates produce a
 single ordered history rather than sibling assessments with the same predecessor.
 
+The first assessment also fixes `deadline_anchor_at` for the complete finding chain. Later risk or
+policy assessments rebase their tier windows to that original anchor and retain the earlier of the
+old and newly calculated deadlines, so a rescan, de-escalation, or late emergency escalation cannot
+silently reset or extend the remediation clock. CVSS/EPSS movement within the same effective scoring
+band is retained as upstream risk provenance but does not create a duplicate SLA assessment.
+
+Policies, assessments, and lifecycle events are protected by PostgreSQL append-only triggers in
+addition to application conventions and RLS. In-place UPDATE, DELETE, and TRUNCATE operations are
+rejected; mutable active/current pointers and lifecycle state remain separate.
+
 ## Rollout guidance
 
 1. Apply migrations with the DDL owner and run the API with a non-superuser, non-`BYPASSRLS`

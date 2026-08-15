@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sla"
@@ -42,6 +45,9 @@ func TestPostgresSLAStore(t *testing.T) {
 		t.Fatalf("seed finding: %v", err)
 	}
 	t.Cleanup(func() {
+		_, _ = pool.Exec(base, `ALTER TABLE sla_lifecycle_events DISABLE TRIGGER sla_lifecycle_events_append_only`)
+		_, _ = pool.Exec(base, `ALTER TABLE sla_assessments DISABLE TRIGGER sla_assessments_append_only`)
+		_, _ = pool.Exec(base, `ALTER TABLE sla_policies DISABLE TRIGGER sla_policies_append_only`)
 		_, _ = pool.Exec(base, `DELETE FROM sla_lifecycle_events WHERE tenant_id=$1`, tenantID.String())
 		_, _ = pool.Exec(base, `DELETE FROM sla_lifecycles WHERE tenant_id=$1`, tenantID.String())
 		_, _ = pool.Exec(base, `DELETE FROM sla_current_assessments WHERE tenant_id=$1`, tenantID.String())
@@ -52,6 +58,9 @@ func TestPostgresSLAStore(t *testing.T) {
 		_, _ = pool.Exec(base, `DELETE FROM findings WHERE tenant_id=$1`, tenantID.String())
 		_, _ = pool.Exec(base, `DELETE FROM engagements WHERE tenant_id=$1`, tenantID.String())
 		_, _ = pool.Exec(base, `DELETE FROM tenants WHERE id=$1`, tenantID.String())
+		_, _ = pool.Exec(base, `ALTER TABLE sla_policies ENABLE TRIGGER sla_policies_append_only`)
+		_, _ = pool.Exec(base, `ALTER TABLE sla_assessments ENABLE TRIGGER sla_assessments_append_only`)
+		_, _ = pool.Exec(base, `ALTER TABLE sla_lifecycle_events ENABLE TRIGGER sla_lifecycle_events_append_only`)
 	})
 
 	ctx := shared.WithTenant(base, tenantID)
@@ -108,6 +117,10 @@ func TestPostgresSLAStore(t *testing.T) {
 	if err != nil || !stored.Created || stored.Assessment.PreviousAssessmentID != first.ID {
 		t.Fatalf("refreshed assessment=%+v err=%v", stored, err)
 	}
+	if !stored.Assessment.DeadlineAnchorAt.Equal(first.AssessedAt) ||
+		stored.Assessment.Result.RemediateBy.After(first.Result.RemediateBy) {
+		t.Fatalf("refreshed assessment reset or extended SLA clock: first=%+v refreshed=%+v", first, stored.Assessment)
+	}
 	current, err = store.Current(ctx, tenantID, engagementID, findingID)
 	if err != nil {
 		t.Fatal(err)
@@ -129,8 +142,42 @@ func TestPostgresSLAStore(t *testing.T) {
 	if err := store.SaveTransition(ctx, next, event); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("stale transition should conflict, got %v", err)
 	}
+	immutableMutations := []struct {
+		name  string
+		query string
+		args  []any
+	}{
+		{name: "policy update", query: `UPDATE sla_policies SET created_by='tampered' WHERE tenant_id=$1`, args: []any{tenantID.String()}},
+		{name: "assessment update", query: `UPDATE sla_assessments SET score=0 WHERE tenant_id=$1`, args: []any{tenantID.String()}},
+		{name: "event delete", query: `DELETE FROM sla_lifecycle_events WHERE tenant_id=$1`, args: []any{tenantID.String()}},
+	}
+	for _, mutation := range immutableMutations {
+		if _, err := pool.Exec(base, mutation.query, mutation.args...); err == nil || !strings.Contains(err.Error(), "append-only") {
+			t.Errorf("%s must be rejected by append-only trigger, got %v", mutation.name, err)
+		}
+	}
 	otherCtx := shared.WithTenant(base, "other-tenant")
 	if _, err := store.Current(otherCtx, tenantID, engagementID, findingID); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("cross-tenant read should fail closed, got %v", err)
+	}
+}
+
+func TestSLAFindingAdvisoryLockKeyIsStableAndScoped(t *testing.T) {
+	first := slaFindingAdvisoryLockKey("tenant-a", "eng-1", "finding-1")
+	if first != slaFindingAdvisoryLockKey("tenant-a", "eng-1", "finding-1") {
+		t.Fatal("same SLA finding identity produced an unstable advisory lock key")
+	}
+	if first == slaFindingAdvisoryLockKey("tenant-a", "eng-1", "finding-2") ||
+		first == slaFindingAdvisoryLockKey("tenant-b", "eng-1", "finding-1") {
+		t.Fatal("distinct SLA finding identities produced the same test lock key")
+	}
+}
+
+func TestPostgresUniqueViolationClassification(t *testing.T) {
+	if !postgresUniqueViolation(&pgconn.PgError{Code: "23505"}) {
+		t.Fatal("unique_violation must be classified as a conflict")
+	}
+	if postgresUniqueViolation(&pgconn.PgError{Code: "23503"}) || postgresUniqueViolation(errors.New("23505")) {
+		t.Fatal("non-unique PostgreSQL and untyped errors must not be classified as unique violations")
 	}
 }

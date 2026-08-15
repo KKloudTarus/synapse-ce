@@ -66,6 +66,10 @@ func TestSLAOpenAPIContract(t *testing.T) {
 	}
 
 	schemas := doc["components"].(map[string]any)["schemas"].(map[string]any)
+	assessment := schemas["SLAAssessment"].(map[string]any)
+	if !stringSet(assessment["required"].([]any))["deadline_anchor_at"] {
+		t.Error("SLAAssessment.deadline_anchor_at must be required")
+	}
 	request := schemas["SLATransitionRequest"].(map[string]any)
 	required := stringSet(request["required"].([]any))
 	for _, field := range []string{"to", "reason", "version"} {

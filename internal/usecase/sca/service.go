@@ -1955,7 +1955,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 			return nil, fmt.Errorf("persist findings: %w", err)
 		}
 		if err := s.assessFindingSLAs(ctx, result); err != nil {
-			return nil, err
+			s.logger().Warn("assess SCA finding SLAs failed (best-effort)", "err", err)
 		}
 		if err := s.reconcileVulnerabilities(ctx, engagementID, doc); err != nil {
 			return nil, err
@@ -1977,9 +1977,11 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	return result, nil
 }
 
-// assessFindingSLAs runs after finding persistence (the PostgreSQL SLA schema has a composite
-// finding foreign key) and before continuous-intelligence reconciliation. The latter may immediately
-// replace a basic finding-only assessment with a richer one carrying PoC/exploitation provenance.
+// assessFindingSLAs is an opt-in enrichment after finding persistence (the PostgreSQL SLA schema has
+// a composite finding foreign key). It retains every successful view and reports all failures to the
+// caller for logging; an unavailable governance dependency must never turn a committed scan into a
+// client-visible failure. Continuous-intelligence reconciliation may immediately replace a basic
+// finding-only assessment with a richer one carrying PoC/exploitation provenance.
 func (s *Service) assessFindingSLAs(ctx context.Context, result *ScanResult) error {
 	if s.slaAssessor == nil || result == nil {
 		return nil
@@ -1989,15 +1991,17 @@ func (s *Service) assessFindingSLAs(ctx context.Context, result *ScanResult) err
 		return fmt.Errorf("%w: tenant context is required for sla assessment", shared.ErrValidation)
 	}
 	views := make([]sla.View, 0, len(result.Findings))
+	var assessmentErrors []error
 	for _, item := range result.Findings {
 		view, err := s.slaAssessor.AssessFinding(ctx, shared.TenantOrDefault(tenantID), item)
 		if err != nil {
-			return fmt.Errorf("assess finding %s sla: %w", item.ID, err)
+			assessmentErrors = append(assessmentErrors, fmt.Errorf("assess finding %s sla: %w", item.ID, err))
+			continue
 		}
 		views = append(views, view)
 	}
 	result.SLAs = views
-	return nil
+	return errors.Join(assessmentErrors...)
 }
 
 // normalizedSourceTarget is the same canonical request identity authorized for a
@@ -2843,7 +2847,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			return nil, fmt.Errorf("persist findings: %w", err)
 		}
 		if err := s.assessFindingSLAs(ctx, result); err != nil {
-			return nil, err
+			s.logger().Warn("assess SCA finding SLAs failed (best-effort)", "err", err)
 		}
 		if err := s.reconcileVulnerabilities(ctx, engagementID, doc); err != nil {
 			return nil, err

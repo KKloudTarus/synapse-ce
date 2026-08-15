@@ -1966,7 +1966,7 @@ components:
 
     SLAAssessment:
       type: object
-      required: [tenant_id, id, engagement_id, finding_id, inputs, result, input_hash, config_hash, assessed_at, created_at]
+      required: [tenant_id, id, engagement_id, finding_id, inputs, result, input_hash, config_hash, deadline_anchor_at, assessed_at, created_at]
       properties:
         tenant_id: {type: string}
         id: {type: string}
@@ -1978,6 +1978,7 @@ components:
         input_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
         config_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
         previous_assessment_id: {type: string}
+        deadline_anchor_at: {type: string, format: date-time}
         assessed_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
 

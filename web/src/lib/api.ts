@@ -331,6 +331,7 @@ function mapSLAView(r: any): SLAView {
       inputHash: assessment.input_hash ?? '',
       configHash: assessment.config_hash ?? '',
       previousAssessmentId: assessment.previous_assessment_id ?? '',
+      deadlineAnchorAt: assessment.deadline_anchor_at ?? '',
       assessedAt: assessment.assessed_at ?? '',
       createdAt: assessment.created_at ?? '',
     },
