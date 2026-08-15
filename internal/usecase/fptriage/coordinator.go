@@ -375,14 +375,6 @@ func (c *Coordinator) assessPreparedObserved(ctx context.Context, candidates []p
 	return out, telemetry
 }
 
-func (c *Coordinator) assessOne(ctx context.Context, f finding.Finding, snippet string) Critique {
-	out, _ := c.assessPreparedObserved(ctx, []preparedFinding{{finding: f, snippet: snippet, ready: true}})
-	if len(out) == 0 {
-		return Critique{FindingID: f.ID.String(), DedupKey: f.DedupKey, Err: context.Canceled}
-	}
-	return out[0]
-}
-
 func promptVersionFor(p preparedFinding) string {
 	if p.evidenceRequired {
 		return evidencePromptVersion
@@ -442,28 +434,6 @@ func (c *Coordinator) assessOneObserved(ctx context.Context, p preparedFinding, 
 	}
 	res.Claim = claim
 	return res
-}
-
-// verify runs the distinct verifier over only the finding and source context. Returns its independent
-// CritiqueClaim, or an error if the verifier is unreachable or its reply fails validation.
-func (c *Coordinator) verify(ctx context.Context, f finding.Finding, snippet string) (judgment.CritiqueClaim, error) {
-	if ctx.Err() != nil {
-		return judgment.CritiqueClaim{}, ctx.Err()
-	}
-	resp, err := c.verifier.Chat(ctx, ports.ChatRequest{
-		Model:          c.verifierModel,
-		Temperature:    ports.Temp(0), // greedy: consensus is only meaningful if the verifier is reproducible
-		MaxTokens:      512,
-		ResponseSchema: critiqueSchema,
-		Messages: []agent.Message{
-			{Role: "system", Content: verifierSystemPrompt},
-			{Role: "user", Content: verifierUserPrompt(f, snippet)},
-		},
-	})
-	if err != nil {
-		return judgment.CritiqueClaim{}, fmt.Errorf("verify llm: %w", err)
-	}
-	return parseCritique(resp.Content)
 }
 
 // parseCritique decodes the model's reply into a CritiqueClaim and validates it against the domain's

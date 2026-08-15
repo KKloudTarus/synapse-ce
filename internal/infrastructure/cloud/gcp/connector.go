@@ -551,18 +551,22 @@ func (c *Connector) buckets(ctx context.Context, service *storage.Service, proje
 			} else {
 				policy, policyErr := service.Buckets.GetIamPolicy(bucket.Name).Context(ctx).OptionsRequestedPolicyVersion(3).Do()
 				if policyErr != nil {
+					// A public ACL entity already establishes the posture definitively; only
+					// downgrade to unknown (and drop policyKnown) when the ACL was inconclusive.
 					if public != cloudposture.StateEnabled {
 						public = cloudposture.StateUnknown
+						policyKnown = false
 					}
-					policyKnown = false
 					*gaps = append(*gaps, coverage(bucket.Name, "storage", errorCode(policyErr), "bucket IAM policy unavailable"))
 				} else if policyHasPublicMember(policy) {
 					public, policyKnown = cloudposture.StateEnabled, true
 				} else if policyHasConditionalBinding(policy) {
+					// A public ACL entity already establishes the posture definitively; a
+					// conditional binding only leaves it unknown when the ACL was inconclusive.
 					if public != cloudposture.StateEnabled {
 						public = cloudposture.StateUnknown
+						policyKnown = false
 					}
-					policyKnown = false
 					*gaps = append(*gaps, coverage(bucket.Name, "storage", "conditional_policy", "conditional bucket policy cannot be resolved safely"))
 				} else {
 					policyKnown = true

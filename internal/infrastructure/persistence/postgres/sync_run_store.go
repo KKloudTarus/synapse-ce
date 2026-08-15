@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -626,11 +625,6 @@ func trimSyncErrors(samples []string) []string {
 		out = vulnerabilitysync.AddErrorSample(out, sample)
 	}
 	return out
-}
-
-func isUniqueConstraint(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 func WithGlobalRead(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) error {

@@ -301,10 +301,7 @@ func TestEngineRunLoopProcessesThenStops(t *testing.T) {
 	sensor.events <- procEvent("ps", "-ef")
 	// Give the loop a moment, then close the stream to end Run.
 	deadline := time.After(2 * time.Second)
-	for {
-		if len(sink.detections()) > 0 {
-			break
-		}
+	for len(sink.detections()) == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("Run did not process the event")

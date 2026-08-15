@@ -129,14 +129,6 @@ func ComponentFingerprint(identity ComponentIdentity, purl string) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func urlDecode(value string) string {
-	decoded, err := url.PathUnescape(value)
-	if err != nil {
-		return value
-	}
-	return decoded
-}
-
 func distroEcosystem(typ, purl string) string {
 	qualifiers := ""
 	if i := strings.IndexByte(purl, '?'); i >= 0 {

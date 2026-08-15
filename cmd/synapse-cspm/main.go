@@ -63,7 +63,7 @@ func main() {
 	if credentialFile == nil {
 		fail("credential descriptor unavailable")
 	}
-	defer credentialFile.Close()
+	defer func() { _ = credentialFile.Close() }()
 	secret, err := io.ReadAll(io.LimitReader(credentialFile, 1<<20))
 	if err != nil || len(secret) == 0 {
 		fail("credential unavailable")

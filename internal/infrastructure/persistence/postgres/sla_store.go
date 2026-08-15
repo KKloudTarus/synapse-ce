@@ -417,18 +417,6 @@ func scanSLAAssessment(row interface{ Scan(...any) error }, item *sla.Assessment
 	return nil
 }
 
-func scanSLALifecycle(row interface{ Scan(...any) error }, item *sla.Lifecycle) error {
-	if err := row.Scan(&item.TenantID, &item.EngagementID, &item.FindingID, &item.AssessmentID,
-		&item.Status, &item.Version, &item.Reason, &item.CompensatingControl, &item.AcceptedBy,
-		&item.AcceptedAt, &item.AcceptanceExpiresAt, &item.UpdatedBy, &item.UpdatedAt); err != nil {
-		return err
-	}
-	if err := item.Validate(); err != nil {
-		return fmt.Errorf("validate stored sla lifecycle: %w", err)
-	}
-	return nil
-}
-
 func scanSLACurrent(row interface{ Scan(...any) error }, item *sla.Current) error {
 	var inputJSON, resultJSON []byte
 	var sourceID, previousID pgtype.Text

@@ -18,9 +18,7 @@ type ComponentInventoryStore struct {
 
 func NewComponentInventoryStore(records ...sbom.ComponentRecord) *ComponentInventoryStore {
 	store := &ComponentInventoryStore{}
-	for _, record := range records {
-		store.items = append(store.items, record)
-	}
+	store.items = append(store.items, records...)
 	return store
 }
 
