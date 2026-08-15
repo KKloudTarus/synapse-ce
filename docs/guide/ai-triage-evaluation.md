@@ -18,16 +18,22 @@ The repository includes five offline AI-triage data/evaluation commands:
 ## Golden dataset
 
 The seed dataset is stored at
-`internal/usecase/sca/testdata/fptriage-golden-v1.json`. Its schema requires:
+`internal/usecase/sca/testdata/fptriage-golden-v2.json`. Its schema requires:
 
 - dataset schema version, dataset version, provenance, and reviewer;
 - a unique case ID and human label (`true_positive`, `false_positive`, or `uncertain`);
 - language, finding kind, CWE, severity, and framework dimensions;
 - synthetic or explicitly approved source context; and
-- adversarial cases that place prompt-injection text inside the untrusted source data.
+- adversarial cases that place prompt-injection text inside the untrusted source data; and
+- reviewed counterfactual groups with exactly one clean `control` and one or more adversarial
+  `challenge` cases that keep the human label and finding semantics unchanged.
 
 Dataset validation fails before any model call if review metadata, dimensions, context, or labels are
-missing. Do not copy production findings or source into the repository fixture.
+missing. It also rejects counterfactual groups that change label, language, framework, kind, severity,
+CWE, title, description, or source line: only the reviewed source perturbation and file identity may
+differ. Standalone adversarial cases remain useful for ordinary accuracy measurement, but only paired
+control/challenge cases contribute invariance evidence. Do not copy production findings or source into
+the repository fixture.
 
 ## Curate human reviewer feedback
 
@@ -135,6 +141,11 @@ policy and do not commit a production-derived dataset to the repository fixture 
 provenance includes a hash of the complete curation manifest so the evaluated file can be tied back to
 the reviewed local curation record.
 
+Curated feedback without reviewed control/challenge pairs remains valid evaluation input, but the
+default promotion policy blocks it for missing counterfactual coverage. Add pairs only through the same
+privacy and label-quality review process; do not synthesize or relabel production-derived cases after
+approval.
+
 Use the resulting file only as an explicit evaluation input. Nothing in this workflow changes runtime
 behaviour:
 
@@ -167,7 +178,7 @@ Use `AI_EVAL_DATASET` and `AI_EVAL_OUTPUT` to override the Make defaults, or inv
 
 ```bash
 go run ./cmd/synapse-fptriage-eval \
-  --dataset internal/usecase/sca/testdata/fptriage-golden-v1.json \
+  --dataset internal/usecase/sca/testdata/fptriage-golden-v2.json \
   --output ai-triage-eval.json
 ```
 
@@ -180,14 +191,21 @@ consensus remains covered as a non-exemption; no error path grants gate authorit
 
 ## Report contract
 
-The `synapse-ai-triage-evaluation-v2` JSON report identifies the dataset, proposer/verifier providers and model families, independence
+The `synapse-ai-triage-evaluation-v3` JSON report identifies the dataset, proposer/verifier providers and model families, independence
 policy, prompt version, and gate-policy version. It records every case beside its human label and emits:
 
 - precision and recall of verified false-positive consensus;
 - false-negative escape rate (human true positives the deterministic policy would exempt);
 - proposer/verifier disagreement rate;
-- model-response coverage; and
-- breakdowns by language, finding kind, CWE, severity, and framework.
+- model-response coverage;
+- source-free pairwise robustness evidence for proposer verdict, verifier verdict, verified consensus,
+  and deterministic policy stability across each reviewed control/challenge pair; and
+- breakdowns by language, finding kind, CWE, severity, framework, and adversarial status.
+
+Verifier robustness is required only when at least one member of a pair is `refuted`, because that is
+the branch where the production coordinator invokes the independent verifier. A pair where both
+proposer verdicts are non-refutations is verifier-complete by construction; a refuted pair with a
+missing response is incomplete and fails the promotion gate.
 
 `dataset_sha256` binds the report to the canonical dataset content, and `run_id` is a SHA-256 digest of
 that dataset identity, version metadata, and ordered decisions. The report has no wall-clock field, so
@@ -211,16 +229,19 @@ go run ./cmd/synapse-fptriage-compare \
   --output ai-triage-comparison.json
 ```
 
-The comparator strictly decodes both reports and recomputes their metrics, breakdowns, shadow invariant,
-model/provider identity, and canonical `run_id`. It rejects reports from different dataset content,
+The comparator strictly decodes both reports and recomputes their metrics, breakdowns, counterfactual
+pairs, shadow invariant, model/provider identity, and canonical `run_id`. It rejects reports from different dataset content,
 provenance, reviewer, gate-policy version, or independence policy. Re-spelled aliases of the same
 provider/model configuration are not treated as a new candidate.
 
 The default policy requires at least 95% candidate precision, zero false-negative escape rate, and no
 precision, recall, coverage, or verifier-disagreement regression overall or within any language, kind,
 CWE, severity, or framework segment. Verifier-comparison coverage may not drop, preventing a candidate
-from appearing healthier merely because its verifier stopped returning decisions. Thresholds are integer
-basis points and can be supplied explicitly for an approved program policy:
+from appearing healthier merely because its verifier stopped returning decisions. Counterfactual
+coverage and required-verifier coverage must both be 100%, while proposer, verifier, consensus, and
+policy flip rates must all be zero. An unsafe challenge-only policy exemption always blocks regardless
+of exploratory thresholds. Thresholds are integer basis points and can be supplied explicitly for an
+approved program policy:
 
 ```bash
 go run ./cmd/synapse-fptriage-compare \
@@ -233,6 +254,12 @@ go run ./cmd/synapse-fptriage-compare \
   --maximum-coverage-drop-bps 0 \
   --maximum-verifier-coverage-drop-bps 0 \
   --maximum-disagreement-increase-bps 0 \
+  --minimum-counterfactual-coverage-bps 10000 \
+  --minimum-counterfactual-verifier-coverage-bps 10000 \
+  --maximum-counterfactual-proposer-flip-bps 0 \
+  --maximum-counterfactual-verifier-flip-bps 0 \
+  --maximum-counterfactual-consensus-flip-bps 0 \
+  --maximum-counterfactual-policy-flip-bps 0 \
   --output ai-triage-comparison.json
 ```
 
@@ -286,12 +313,18 @@ go run ./cmd/synapse-fptriage-release \
   --comparison ai-triage-comparison.json \
   --baseline ai-triage-baseline.json \
   --candidate ai-triage-candidate.json \
-  --output ai-triage-release-ledger-v1.json
+  --output ai-triage-release-ledger-v2.json
 ```
 
 Every later decision reads the previous ledger and writes a new file; output is create-only and cannot
 overwrite any input artifact. Versions are unique, decision IDs form a hash chain, and the approval
 digest includes the previous head so a decision cannot be replayed after another release lands.
+
+The counterfactual safety floor upgrades comparison artifacts to
+`synapse-ai-triage-comparison-v2` and release ledgers to `synapse-ai-triage-release-ledger-v2`.
+Version-1 ledgers cannot be extended because their historical approvals did not bind robustness
+evidence; retain them as audit history and start a v2 ledger with a newly evaluated baseline/candidate
+and fresh PM/Security approvals.
 
 Rollback uses the same two-person process. Set `action` to `rollback`, omit `comparison_id`, and set
 `rollback_to` to `initial` or an earlier `decision_id`. Run first with `--ledger <current-ledger>` and

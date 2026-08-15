@@ -19,8 +19,8 @@ var errPromotionBlocked = errors.New("candidate is blocked from promotion review
 
 func main() {
 	defaults := sca.DefaultAIEvaluationPromotionPolicy()
-	baselinePath := flag.String("baseline", "", "baseline synapse-ai-triage-evaluation-v2 report")
-	candidatePath := flag.String("candidate", "", "candidate synapse-ai-triage-evaluation-v2 report")
+	baselinePath := flag.String("baseline", "", "baseline synapse-ai-triage-evaluation-v3 report")
+	candidatePath := flag.String("candidate", "", "candidate synapse-ai-triage-evaluation-v3 report")
 	outputPath := flag.String("output", "-", "comparison report path, or - for stdout")
 	failOnBlocked := flag.Bool("fail-on-blocked", true, "exit non-zero after writing a blocked comparison")
 	minimumPrecision := flag.Int("minimum-precision-bps", defaults.MinimumPrecisionBasisPoints, "minimum candidate precision in basis points")
@@ -30,16 +30,28 @@ func main() {
 	maximumCoverageDrop := flag.Int("maximum-coverage-drop-bps", defaults.MaximumCoverageDropBasisPoints, "maximum coverage drop versus baseline in basis points")
 	maximumVerifierCoverageDrop := flag.Int("maximum-verifier-coverage-drop-bps", defaults.MaximumVerifierCoverageDropBasisPoints, "maximum verifier-comparison coverage drop versus baseline in basis points")
 	maximumDisagreementIncrease := flag.Int("maximum-disagreement-increase-bps", defaults.MaximumDisagreementIncreaseBasisPoints, "maximum disagreement-rate increase versus baseline in basis points")
+	minimumCounterfactualCoverage := flag.Int("minimum-counterfactual-coverage-bps", defaults.MinimumCounterfactualCoverageBasisPoints, "minimum covered adversarial counterfactual pairs in basis points")
+	minimumCounterfactualVerifierCoverage := flag.Int("minimum-counterfactual-verifier-coverage-bps", defaults.MinimumCounterfactualVerifierCoverageBasisPoints, "minimum independently verified adversarial counterfactual pairs in basis points")
+	maximumCounterfactualProposerFlips := flag.Int("maximum-counterfactual-proposer-flip-bps", defaults.MaximumCounterfactualProposerFlipRateBasisPoints, "maximum proposer verdict flip rate across counterfactual pairs in basis points")
+	maximumCounterfactualVerifierFlips := flag.Int("maximum-counterfactual-verifier-flip-bps", defaults.MaximumCounterfactualVerifierFlipRateBasisPoints, "maximum verifier verdict flip rate across counterfactual pairs in basis points")
+	maximumCounterfactualConsensusFlips := flag.Int("maximum-counterfactual-consensus-flip-bps", defaults.MaximumCounterfactualConsensusFlipRateBasisPoints, "maximum consensus flip rate across counterfactual pairs in basis points")
+	maximumCounterfactualPolicyFlips := flag.Int("maximum-counterfactual-policy-flip-bps", defaults.MaximumCounterfactualPolicyFlipRateBasisPoints, "maximum deterministic policy flip rate across counterfactual pairs in basis points")
 	flag.Parse()
 
 	policy := sca.AIEvaluationPromotionPolicy{
-		MinimumPrecisionBasisPoints:               *minimumPrecision,
-		MaximumFalseNegativeEscapeRateBasisPoints: *maximumEscape,
-		MaximumPrecisionDropBasisPoints:           *maximumPrecisionDrop,
-		MaximumRecallDropBasisPoints:              *maximumRecallDrop,
-		MaximumCoverageDropBasisPoints:            *maximumCoverageDrop,
-		MaximumVerifierCoverageDropBasisPoints:    *maximumVerifierCoverageDrop,
-		MaximumDisagreementIncreaseBasisPoints:    *maximumDisagreementIncrease,
+		MinimumPrecisionBasisPoints:                       *minimumPrecision,
+		MaximumFalseNegativeEscapeRateBasisPoints:         *maximumEscape,
+		MaximumPrecisionDropBasisPoints:                   *maximumPrecisionDrop,
+		MaximumRecallDropBasisPoints:                      *maximumRecallDrop,
+		MaximumCoverageDropBasisPoints:                    *maximumCoverageDrop,
+		MaximumVerifierCoverageDropBasisPoints:            *maximumVerifierCoverageDrop,
+		MaximumDisagreementIncreaseBasisPoints:            *maximumDisagreementIncrease,
+		MinimumCounterfactualCoverageBasisPoints:          *minimumCounterfactualCoverage,
+		MinimumCounterfactualVerifierCoverageBasisPoints:  *minimumCounterfactualVerifierCoverage,
+		MaximumCounterfactualProposerFlipRateBasisPoints:  *maximumCounterfactualProposerFlips,
+		MaximumCounterfactualVerifierFlipRateBasisPoints:  *maximumCounterfactualVerifierFlips,
+		MaximumCounterfactualConsensusFlipRateBasisPoints: *maximumCounterfactualConsensusFlips,
+		MaximumCounterfactualPolicyFlipRateBasisPoints:    *maximumCounterfactualPolicyFlips,
 	}
 	if err := run(*baselinePath, *candidatePath, *outputPath, policy, *failOnBlocked); err != nil {
 		fmt.Fprintf(os.Stderr, "synapse-fptriage-compare: %v\n", err)

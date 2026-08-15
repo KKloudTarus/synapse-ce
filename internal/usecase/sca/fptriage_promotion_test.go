@@ -77,6 +77,91 @@ func TestCompareAIEvaluationReportsBlocksNewTruePositiveEscapeAndSegmentRegressi
 	}
 }
 
+func TestCompareAIEvaluationReportsBlocksAdversarialCounterfactualFlips(t *testing.T) {
+	baseline := promotionTestReport("prompt-v1", nil)
+	candidate := promotionTestReport("prompt-v2", func(results []AIEvaluationResult) {
+		for i := range results {
+			if results[i].CaseID == "tp-go-path-injected" {
+				results[i].Critique = promotionTestCritique(candidateRun("prompt-v2"), results[i].CaseID, true, true)
+				results[i].ConsensusFalsePositive = true
+				results[i].WouldGateExempt = true
+			}
+		}
+	})
+
+	comparison, err := CompareAIEvaluationReports(baseline, candidate, DefaultAIEvaluationPromotionPolicy())
+	if err != nil {
+		t.Fatalf("CompareAIEvaluationReports: %v", err)
+	}
+	if comparison.Status != "blocked" || comparison.Robustness.Candidate.UnsafePolicyFlips != 1 {
+		t.Fatalf("unsafe counterfactual candidate must be blocked: %+v", comparison.Robustness)
+	}
+	for _, rule := range []string{
+		"maximum_counterfactual_proposer_flip_rate",
+		"maximum_counterfactual_verifier_flip_rate",
+		"maximum_counterfactual_consensus_flip_rate",
+		"maximum_counterfactual_policy_flip_rate",
+		"counterfactual_unsafe_policy_flip",
+	} {
+		if !hasPromotionFailure(comparison.Failures, rule, "robustness", "", "") {
+			t.Errorf("missing robustness failure %q in %+v", rule, comparison.Failures)
+		}
+	}
+}
+
+func TestCompareAIEvaluationReportsBlocksIncompleteCounterfactualCoverage(t *testing.T) {
+	baseline := promotionTestReport("prompt-v1", nil)
+	candidate := promotionTestReport("prompt-v2", func(results []AIEvaluationResult) {
+		for i := range results {
+			if results[i].CaseID == "tp-go-path-injected" {
+				results[i].Covered = false
+				results[i].ConsensusFalsePositive = false
+				results[i].WouldGateExempt = false
+				results[i].Critique = ports.AICritique{}
+			}
+		}
+	})
+
+	comparison, err := CompareAIEvaluationReports(baseline, candidate, DefaultAIEvaluationPromotionPolicy())
+	if err != nil {
+		t.Fatalf("CompareAIEvaluationReports: %v", err)
+	}
+	if !hasPromotionFailure(comparison.Failures, "minimum_counterfactual_coverage", "robustness", "", "") {
+		t.Errorf("missing robustness coverage failure in %+v", comparison.Failures)
+	}
+}
+
+func TestCompareAIEvaluationReportsRequiresVerifierForRefutedCounterfactuals(t *testing.T) {
+	baseline := promotionTestReport("prompt-v1", nil)
+	candidate := promotionTestReport("prompt-v2", func(results []AIEvaluationResult) {
+		for i := range results {
+			if results[i].CounterfactualGroup != "go-path-comment-injection" {
+				continue
+			}
+			results[i].Critique = promotionTestCritique(candidateRun("prompt-v2"), results[i].CaseID, true, false)
+			results[i].ConsensusFalsePositive = true
+			results[i].WouldGateExempt = false
+			if results[i].CounterfactualRole == AIEvaluationCounterfactualChallenge {
+				results[i].Critique.Verified = false
+				results[i].Critique.VerifierVerdict = ""
+				results[i].Critique.VerifierDriver = ""
+				results[i].Critique.VerifierConfidence = 0
+				results[i].ConsensusFalsePositive = false
+			}
+		}
+	})
+
+	comparison, err := CompareAIEvaluationReports(baseline, candidate, DefaultAIEvaluationPromotionPolicy())
+	if err != nil {
+		t.Fatalf("CompareAIEvaluationReports: %v", err)
+	}
+	if comparison.Robustness.Candidate.VerifierRequiredPairs != 1 ||
+		comparison.Robustness.Candidate.VerifierComparedPairs != 0 ||
+		!hasPromotionFailure(comparison.Failures, "minimum_counterfactual_verifier_coverage", "robustness", "", "") {
+		t.Fatalf("missing verifier must block refuted counterfactual pair: %+v", comparison)
+	}
+}
+
 func TestCompareAIEvaluationReportsRejectsApplesToOrangesInputs(t *testing.T) {
 	baseline := promotionTestReport("prompt-v1", nil)
 	tests := map[string]func(*AIEvaluationReport){
@@ -144,6 +229,7 @@ func TestAIEvaluationReportValidateRejectsTamperingAndGateAuthority(t *testing.T
 	tests := map[string]func(*AIEvaluationReport){
 		"metrics":        func(report *AIEvaluationReport) { report.Metrics.Precision = 0 },
 		"breakdowns":     func(report *AIEvaluationReport) { delete(report.Breakdowns, "cwe") },
+		"robustness":     func(report *AIEvaluationReport) { report.Robustness.Metrics.PolicyFlips++ },
 		"run id":         func(report *AIEvaluationReport) { report.RunID = strings.Repeat("0", 64) },
 		"gate authority": func(report *AIEvaluationReport) { report.Results[0].GateExempt = true },
 		"model metadata": func(report *AIEvaluationReport) { report.Results[0].Critique.ProposerModel = "other" },
@@ -190,6 +276,36 @@ func TestAIEvaluationReportValidateRejectsFreeTextCritiqueTokens(t *testing.T) {
 			t.Fatal("uncovered free-text critique token must be rejected")
 		}
 	})
+}
+
+func TestAIEvaluationReportValidateRejectsForgedCounterfactualBindings(t *testing.T) {
+	tests := map[string]func(*AIEvaluationResult){
+		"changed dimensions": func(result *AIEvaluationResult) { result.CWE = "CWE-79" },
+		"second control": func(result *AIEvaluationResult) {
+			result.CounterfactualRole = AIEvaluationCounterfactualControl
+			result.Adversarial = false
+		},
+		"non-adversarial challenge": func(result *AIEvaluationResult) { result.Adversarial = false },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			report := promotionTestReport("prompt-v1", nil)
+			for i := range report.Results {
+				if report.Results[i].CaseID == "tp-go-path-injected" {
+					mutate(&report.Results[i])
+				}
+			}
+			// Recompute every derived field and hash so rejection exercises the reviewed
+			// counterfactual binding rather than an incidental digest mismatch.
+			report.Metrics = evaluationMetrics(report.Results)
+			report.Breakdowns = evaluationBreakdowns(report.Results)
+			report.Robustness = evaluationRobustness(report.Results)
+			report.RunID = evaluationRunID(report)
+			if err := report.Validate(); err == nil {
+				t.Fatal("forged counterfactual binding must be rejected")
+			}
+		})
+	}
 }
 
 func TestPromotionEvidenceUsesConservativeExactBasisPoints(t *testing.T) {
@@ -242,10 +358,19 @@ func TestLoadAIEvaluationReportIsStrict(t *testing.T) {
 }
 
 func TestAIEvaluationPromotionPolicyRejectsInvalidBasisPoints(t *testing.T) {
-	policy := DefaultAIEvaluationPromotionPolicy()
-	policy.MaximumRecallDropBasisPoints = 10_001
-	if err := policy.Validate(); err == nil {
-		t.Fatal("out-of-range promotion threshold must be rejected")
+	for name, mutate := range map[string]func(*AIEvaluationPromotionPolicy){
+		"quality regression": func(policy *AIEvaluationPromotionPolicy) { policy.MaximumRecallDropBasisPoints = 10_001 },
+		"robustness flip": func(policy *AIEvaluationPromotionPolicy) {
+			policy.MaximumCounterfactualConsensusFlipRateBasisPoints = 10_001
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			policy := DefaultAIEvaluationPromotionPolicy()
+			mutate(&policy)
+			if err := policy.Validate(); err == nil {
+				t.Fatal("out-of-range promotion threshold must be rejected")
+			}
+		})
 	}
 }
 
@@ -285,13 +410,15 @@ func TestEvaluationRunIDDoesNotReorderCallerResults(t *testing.T) {
 func promotionTestReport(prompt string, mutate func([]AIEvaluationResult)) AIEvaluationReport {
 	run := candidateRun(prompt)
 	definitions := []struct {
-		id, label, language, cwe string
-		falsePositive            bool
+		id, label, language, cwe, group string
+		role                            AIEvaluationCounterfactualRole
+		adversarial, falsePositive      bool
 	}{
-		{"fp-go-constant", "false_positive", "go", "CWE-89", true},
-		{"fp-python-sanitized", "false_positive", "python", "CWE-79", true},
-		{"tp-go-path", "true_positive", "go", "CWE-22", false},
-		{"tp-python-template", "true_positive", "python", "CWE-78", false},
+		{id: "fp-go-constant", label: "false_positive", language: "go", cwe: "CWE-89", falsePositive: true},
+		{id: "fp-python-sanitized", label: "false_positive", language: "python", cwe: "CWE-79", falsePositive: true},
+		{id: "tp-go-path", label: "true_positive", language: "go", cwe: "CWE-22", group: "go-path-comment-injection", role: AIEvaluationCounterfactualControl},
+		{id: "tp-go-path-injected", label: "true_positive", language: "go", cwe: "CWE-22", group: "go-path-comment-injection", role: AIEvaluationCounterfactualChallenge, adversarial: true},
+		{id: "tp-python-template", label: "true_positive", language: "python", cwe: "CWE-78"},
 	}
 	results := make([]AIEvaluationResult, 0, len(definitions))
 	for _, definition := range definitions {
@@ -299,7 +426,9 @@ func promotionTestReport(prompt string, mutate func([]AIEvaluationResult)) AIEva
 		results = append(results, AIEvaluationResult{
 			CaseID: definition.id, Label: AIEvaluationLabel(definition.label), Language: definition.language,
 			Framework: "standard-library", Kind: finding.KindSAST, Severity: shared.SeverityMedium,
-			CWE: definition.cwe, Covered: true, ConsensusFalsePositive: definition.falsePositive,
+			CWE: definition.cwe, Adversarial: definition.adversarial,
+			CounterfactualGroup: definition.group, CounterfactualRole: definition.role,
+			Covered: true, ConsensusFalsePositive: definition.falsePositive,
 			WouldGateExempt: definition.falsePositive, Critique: critique,
 		})
 	}
@@ -312,6 +441,7 @@ func promotionTestReport(prompt string, mutate func([]AIEvaluationResult)) AIEva
 		Run: run, Results: results,
 	}
 	report.Metrics = evaluationMetrics(report.Results)
+	report.Robustness = evaluationRobustness(report.Results)
 	report.Breakdowns = evaluationBreakdowns(report.Results)
 	report.RunID = evaluationRunID(report)
 	return report

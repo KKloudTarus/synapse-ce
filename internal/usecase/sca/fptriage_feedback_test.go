@@ -70,7 +70,7 @@ func TestCurateAIEvaluationFeedbackProducesApprovedDatasetWithOpaqueProvenance(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dataset.SchemaVersion != "synapse-ai-triage-dataset-v1" || dataset.Version != "feedback-2026-08-12" || dataset.Reviewer != "dataset-curator" {
+	if dataset.SchemaVersion != "synapse-ai-triage-dataset-v2" || dataset.Version != "feedback-2026-08-12" || dataset.Reviewer != "dataset-curator" {
 		t.Fatalf("unexpected dataset metadata: %+v", dataset)
 	}
 	if !strings.HasPrefix(dataset.Provenance, "reviewer-feedback-curation; curated_feedback_sha256=") {

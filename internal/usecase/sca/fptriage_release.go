@@ -18,7 +18,7 @@ import (
 
 const (
 	AIEvaluationReleaseManifestSchema = "synapse-ai-triage-release-manifest-v1"
-	aiEvaluationReleaseLedgerSchema   = "synapse-ai-triage-release-ledger-v1"
+	aiEvaluationReleaseLedgerSchema   = "synapse-ai-triage-release-ledger-v2"
 	aiEvaluationReleaseApprovalSchema = "synapse-ai-triage-release-approval-v1"
 	AIEvaluationReleasePromote        = "promote"
 	AIEvaluationReleaseRollback       = "rollback"
@@ -125,6 +125,9 @@ func (c AIEvaluationComparison) Validate() error {
 	}
 	if c.Status != "review_required" || !c.ApprovalRequired || len(c.Failures) != 0 {
 		return fmt.Errorf("AI evaluation comparison is not eligible for human promotion approval")
+	}
+	if err := c.Policy.Validate(); err != nil {
+		return fmt.Errorf("AI evaluation comparison policy: %w", err)
 	}
 	if strings.TrimSpace(c.DatasetVersion) == "" || !validEvaluationSHA256(c.DatasetSHA256) ||
 		strings.TrimSpace(c.Provenance) == "" || strings.TrimSpace(c.Reviewer) == "" ||
@@ -418,7 +421,13 @@ func validateReleasePromotionPolicy(policy AIEvaluationPromotionPolicy) error {
 		policy.MaximumRecallDropBasisPoints > floor.MaximumRecallDropBasisPoints ||
 		policy.MaximumCoverageDropBasisPoints > floor.MaximumCoverageDropBasisPoints ||
 		policy.MaximumVerifierCoverageDropBasisPoints > floor.MaximumVerifierCoverageDropBasisPoints ||
-		policy.MaximumDisagreementIncreaseBasisPoints > floor.MaximumDisagreementIncreaseBasisPoints {
+		policy.MaximumDisagreementIncreaseBasisPoints > floor.MaximumDisagreementIncreaseBasisPoints ||
+		policy.MinimumCounterfactualCoverageBasisPoints < floor.MinimumCounterfactualCoverageBasisPoints ||
+		policy.MinimumCounterfactualVerifierCoverageBasisPoints < floor.MinimumCounterfactualVerifierCoverageBasisPoints ||
+		policy.MaximumCounterfactualProposerFlipRateBasisPoints > floor.MaximumCounterfactualProposerFlipRateBasisPoints ||
+		policy.MaximumCounterfactualVerifierFlipRateBasisPoints > floor.MaximumCounterfactualVerifierFlipRateBasisPoints ||
+		policy.MaximumCounterfactualConsensusFlipRateBasisPoints > floor.MaximumCounterfactualConsensusFlipRateBasisPoints ||
+		policy.MaximumCounterfactualPolicyFlipRateBasisPoints > floor.MaximumCounterfactualPolicyFlipRateBasisPoints {
 		return fmt.Errorf("AI evaluation release promotion policy is weaker than the built-in safety floor")
 	}
 	return nil

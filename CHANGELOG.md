@@ -12,6 +12,11 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **Adversarial invariance gate for AI-triage promotion.** Golden datasets can bind a clean control to
+  semantically equivalent prompt-injection challenges. Evaluation reports emit source-free pair evidence,
+  and the comparison/release boundary requires complete coverage plus zero proposer, verifier, consensus,
+  or deterministic-policy flips before a model or prompt can reach human promotion review.
+
 - **Versioned AI-triage release governance.** Recomputes passing candidate comparisons at the approval boundary and records promotions or rollbacks in a create-only, hash-chained ledger. Every decision requires distinct PM and Security approvals bound to the current ledger head; no release artifact mutates runtime model, prompt, threshold, or gate configuration automatically.
 
 - **AI-triage candidate promotion gate.** Strictly revalidates deterministic shadow reports, compares a candidate model/prompt with a baseline on the exact same reviewed dataset and policy, blocks new true-positive escapes plus overall or segment regressions, and emits stable CI evidence that still requires explicit human promotion approval.

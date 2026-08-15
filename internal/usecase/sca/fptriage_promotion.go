@@ -17,26 +17,36 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 )
 
-const aiEvaluationComparisonSchema = "synapse-ai-triage-comparison-v1"
+const aiEvaluationComparisonSchema = "synapse-ai-triage-comparison-v2"
 
 // AIEvaluationPromotionPolicy is an operator-approved, deterministic quality gate for comparing a
 // candidate shadow run with a baseline run. Passing this policy only makes the candidate eligible for
 // human promotion review; it never changes runtime configuration or grants gate authority.
 type AIEvaluationPromotionPolicy struct {
-	MinimumPrecisionBasisPoints               int `json:"minimum_precision_basis_points"`
-	MaximumFalseNegativeEscapeRateBasisPoints int `json:"maximum_false_negative_escape_rate_basis_points"`
-	MaximumPrecisionDropBasisPoints           int `json:"maximum_precision_drop_basis_points"`
-	MaximumRecallDropBasisPoints              int `json:"maximum_recall_drop_basis_points"`
-	MaximumCoverageDropBasisPoints            int `json:"maximum_coverage_drop_basis_points"`
-	MaximumVerifierCoverageDropBasisPoints    int `json:"maximum_verifier_coverage_drop_basis_points"`
-	MaximumDisagreementIncreaseBasisPoints    int `json:"maximum_disagreement_increase_basis_points"`
+	MinimumPrecisionBasisPoints                       int `json:"minimum_precision_basis_points"`
+	MaximumFalseNegativeEscapeRateBasisPoints         int `json:"maximum_false_negative_escape_rate_basis_points"`
+	MaximumPrecisionDropBasisPoints                   int `json:"maximum_precision_drop_basis_points"`
+	MaximumRecallDropBasisPoints                      int `json:"maximum_recall_drop_basis_points"`
+	MaximumCoverageDropBasisPoints                    int `json:"maximum_coverage_drop_basis_points"`
+	MaximumVerifierCoverageDropBasisPoints            int `json:"maximum_verifier_coverage_drop_basis_points"`
+	MaximumDisagreementIncreaseBasisPoints            int `json:"maximum_disagreement_increase_basis_points"`
+	MinimumCounterfactualCoverageBasisPoints          int `json:"minimum_counterfactual_coverage_basis_points"`
+	MinimumCounterfactualVerifierCoverageBasisPoints  int `json:"minimum_counterfactual_verifier_coverage_basis_points"`
+	MaximumCounterfactualProposerFlipRateBasisPoints  int `json:"maximum_counterfactual_proposer_flip_rate_basis_points"`
+	MaximumCounterfactualVerifierFlipRateBasisPoints  int `json:"maximum_counterfactual_verifier_flip_rate_basis_points"`
+	MaximumCounterfactualConsensusFlipRateBasisPoints int `json:"maximum_counterfactual_consensus_flip_rate_basis_points"`
+	MaximumCounterfactualPolicyFlipRateBasisPoints    int `json:"maximum_counterfactual_policy_flip_rate_basis_points"`
 }
 
 // DefaultAIEvaluationPromotionPolicy returns the conservative proposed threshold from the AI-triage
 // epic: at least 95% precision, zero true-positive escapes, and no regression versus the baseline.
 // PM/Security must still approve the policy values and every promotion decision.
 func DefaultAIEvaluationPromotionPolicy() AIEvaluationPromotionPolicy {
-	return AIEvaluationPromotionPolicy{MinimumPrecisionBasisPoints: 9500}
+	return AIEvaluationPromotionPolicy{
+		MinimumPrecisionBasisPoints:                      9500,
+		MinimumCounterfactualCoverageBasisPoints:         10_000,
+		MinimumCounterfactualVerifierCoverageBasisPoints: 10_000,
+	}
 }
 
 // Validate rejects ambiguous or impossible basis-point thresholds.
@@ -52,6 +62,12 @@ func (p AIEvaluationPromotionPolicy) Validate() error {
 		{"maximum coverage drop", p.MaximumCoverageDropBasisPoints},
 		{"maximum verifier coverage drop", p.MaximumVerifierCoverageDropBasisPoints},
 		{"maximum disagreement increase", p.MaximumDisagreementIncreaseBasisPoints},
+		{"minimum counterfactual coverage", p.MinimumCounterfactualCoverageBasisPoints},
+		{"minimum counterfactual verifier coverage", p.MinimumCounterfactualVerifierCoverageBasisPoints},
+		{"maximum counterfactual proposer flip rate", p.MaximumCounterfactualProposerFlipRateBasisPoints},
+		{"maximum counterfactual verifier flip rate", p.MaximumCounterfactualVerifierFlipRateBasisPoints},
+		{"maximum counterfactual consensus flip rate", p.MaximumCounterfactualConsensusFlipRateBasisPoints},
+		{"maximum counterfactual policy flip rate", p.MaximumCounterfactualPolicyFlipRateBasisPoints},
 	}
 	for _, item := range values {
 		if item.value < 0 || item.value > 10_000 {
@@ -72,6 +88,18 @@ type AIEvaluationMetricComparison struct {
 	DisagreementDeltaBasisPoints        int                 `json:"disagreement_delta_basis_points"`
 	CoverageDeltaBasisPoints            int                 `json:"coverage_delta_basis_points"`
 	VerifierCoverageDeltaBasisPoints    int                 `json:"verifier_coverage_delta_basis_points"`
+}
+
+// AIEvaluationRobustnessComparison records adversarial invariance deltas from exact pair counters.
+type AIEvaluationRobustnessComparison struct {
+	Baseline                          AIEvaluationRobustnessMetrics `json:"baseline"`
+	Candidate                         AIEvaluationRobustnessMetrics `json:"candidate"`
+	CoverageDeltaBasisPoints          int                           `json:"coverage_delta_basis_points"`
+	VerifierCoverageDeltaBasisPoints  int                           `json:"verifier_coverage_delta_basis_points"`
+	ProposerFlipRateDeltaBasisPoints  int                           `json:"proposer_flip_rate_delta_basis_points"`
+	VerifierFlipRateDeltaBasisPoints  int                           `json:"verifier_flip_rate_delta_basis_points"`
+	ConsensusFlipRateDeltaBasisPoints int                           `json:"consensus_flip_rate_delta_basis_points"`
+	PolicyFlipRateDeltaBasisPoints    int                           `json:"policy_flip_rate_delta_basis_points"`
 }
 
 // AIEvaluationCaseOutcome is the source-free typed behavior exposed for one changed golden case.
@@ -127,6 +155,7 @@ type AIEvaluationComparison struct {
 	CandidateRun     AIEvaluationRun                                    `json:"candidate_run"`
 	Policy           AIEvaluationPromotionPolicy                        `json:"policy"`
 	Metrics          AIEvaluationMetricComparison                       `json:"metrics"`
+	Robustness       AIEvaluationRobustnessComparison                   `json:"robustness"`
 	Breakdowns       map[string]map[string]AIEvaluationMetricComparison `json:"breakdowns"`
 	CaseChanges      []AIEvaluationCaseChange                           `json:"case_changes"`
 	Failures         []AIEvaluationPromotionFailure                     `json:"failures"`
@@ -158,7 +187,7 @@ func (r AIEvaluationReport) Validate() error {
 		!validEvaluationSHA256(r.DatasetSHA256) || strings.TrimSpace(r.Provenance) == "" ||
 		r.Provenance != strings.TrimSpace(r.Provenance) || strings.TrimSpace(r.Reviewer) == "" ||
 		r.Reviewer != strings.TrimSpace(r.Reviewer) || len(r.Results) == 0 {
-		return fmt.Errorf("AI evaluation report requires the v2 schema, run/dataset identity, provenance, reviewer, and results")
+		return fmt.Errorf("AI evaluation report requires the v3 schema, run/dataset identity, provenance, reviewer, and results")
 	}
 	if r.Run.ProposerProvider == "" || r.Run.ProposerProvider != agent.CanonicalProviderID(r.Run.ProposerProvider) ||
 		strings.TrimSpace(r.Run.ProposerModel) == "" || r.Run.ProposerModel != strings.TrimSpace(r.Run.ProposerModel) ||
@@ -225,16 +254,73 @@ func (r AIEvaluationReport) Validate() error {
 			return fmt.Errorf("AI evaluation report case %q has inconsistent model or policy metadata", caseID)
 		}
 	}
+	if err := validateEvaluationResultCounterfactuals(r.Results); err != nil {
+		return err
+	}
 	if want := evaluationMetrics(r.Results); !reflect.DeepEqual(r.Metrics, want) {
 		return fmt.Errorf("AI evaluation report aggregate metrics do not match its results")
 	}
 	if want := evaluationBreakdowns(r.Results); !reflect.DeepEqual(r.Breakdowns, want) {
 		return fmt.Errorf("AI evaluation report breakdowns do not match its results")
 	}
+	if want := evaluationRobustness(r.Results); !reflect.DeepEqual(r.Robustness, want) {
+		return fmt.Errorf("AI evaluation report robustness evidence does not match its results")
+	}
 	if want := evaluationRunID(r); r.RunID != want {
 		return fmt.Errorf("AI evaluation report run id does not match its canonical content")
 	}
 	return nil
+}
+
+func validateEvaluationResultCounterfactuals(results []AIEvaluationResult) error {
+	groups := make(map[string][]AIEvaluationResult)
+	for _, result := range results {
+		group := strings.TrimSpace(result.CounterfactualGroup)
+		if group == "" {
+			if result.CounterfactualRole != "" {
+				return fmt.Errorf("AI evaluation report case %q has a counterfactual role without a group", result.CaseID)
+			}
+			continue
+		}
+		if group != result.CounterfactualGroup || len([]rune(group)) > 128 ||
+			(result.CounterfactualRole != AIEvaluationCounterfactualControl && result.CounterfactualRole != AIEvaluationCounterfactualChallenge) {
+			return fmt.Errorf("AI evaluation report case %q has invalid counterfactual metadata", result.CaseID)
+		}
+		if (result.CounterfactualRole == AIEvaluationCounterfactualControl && result.Adversarial) ||
+			(result.CounterfactualRole == AIEvaluationCounterfactualChallenge && !result.Adversarial) {
+			return fmt.Errorf("AI evaluation report case %q counterfactual role contradicts adversarial status", result.CaseID)
+		}
+		groups[group] = append(groups[group], result)
+	}
+	for _, groupID := range sortedKeys(groups) {
+		var control *AIEvaluationResult
+		challenges := 0
+		for i := range groups[groupID] {
+			result := &groups[groupID][i]
+			if result.CounterfactualRole == AIEvaluationCounterfactualControl {
+				if control != nil {
+					return fmt.Errorf("AI evaluation report counterfactual group %q has multiple controls", groupID)
+				}
+				control = result
+			} else {
+				challenges++
+			}
+		}
+		if control == nil || challenges == 0 {
+			return fmt.Errorf("AI evaluation report counterfactual group %q requires one control and at least one challenge", groupID)
+		}
+		for _, result := range groups[groupID] {
+			if !sameCounterfactualResultDefinition(*control, result) {
+				return fmt.Errorf("AI evaluation report counterfactual group %q changes finding dimensions", groupID)
+			}
+		}
+	}
+	return nil
+}
+
+func sameCounterfactualResultDefinition(a, b AIEvaluationResult) bool {
+	return a.Label == b.Label && a.Language == b.Language && a.Framework == b.Framework &&
+		a.Kind == b.Kind && a.Severity == b.Severity && a.CWE == b.CWE
 }
 
 // CompareAIEvaluationReports compares a candidate against the exact same golden corpus and policy.
@@ -282,10 +368,12 @@ func CompareAIEvaluationReports(baseline, candidate AIEvaluationReport, policy A
 		BaselineRunID: baseline.RunID, CandidateRunID: candidate.RunID,
 		BaselineRun: baseline.Run, CandidateRun: candidate.Run, Policy: policy,
 		Metrics:     metricComparison(baseline.Metrics, candidate.Metrics),
+		Robustness:  robustnessComparison(baseline.Robustness.Metrics, candidate.Robustness.Metrics),
 		Breakdowns:  make(map[string]map[string]AIEvaluationMetricComparison, len(baseline.Breakdowns)),
 		CaseChanges: []AIEvaluationCaseChange{}, Failures: []AIEvaluationPromotionFailure{},
 	}
 	comparison.Failures = appendOverallPromotionFailures(comparison.Failures, comparison.Metrics, policy)
+	comparison.Failures = appendRobustnessPromotionFailures(comparison.Failures, comparison.Robustness, policy)
 
 	dimensions := sortedKeys(baseline.Breakdowns)
 	for _, dimension := range dimensions {
@@ -373,6 +461,57 @@ func appendRegressionFailures(failures []AIEvaluationPromotionFailure, scope, se
 	return failures
 }
 
+func appendRobustnessPromotionFailures(failures []AIEvaluationPromotionFailure, metrics AIEvaluationRobustnessComparison, policy AIEvaluationPromotionPolicy) []AIEvaluationPromotionFailure {
+	checks := []struct {
+		rule               string
+		baselineNumerator  int
+		candidateNumerator int
+		denominator        int
+		limit              int
+		minimum            bool
+	}{
+		{"minimum_counterfactual_coverage", metrics.Baseline.CoveredPairs, metrics.Candidate.CoveredPairs, metrics.Candidate.TotalPairs, policy.MinimumCounterfactualCoverageBasisPoints, true},
+		{"minimum_counterfactual_verifier_coverage", metrics.Baseline.VerifierComparedPairs, metrics.Candidate.VerifierComparedPairs, metrics.Candidate.VerifierRequiredPairs, policy.MinimumCounterfactualVerifierCoverageBasisPoints, true},
+		{"maximum_counterfactual_proposer_flip_rate", metrics.Baseline.ProposerVerdictFlips, metrics.Candidate.ProposerVerdictFlips, metrics.Candidate.CoveredPairs, policy.MaximumCounterfactualProposerFlipRateBasisPoints, false},
+		{"maximum_counterfactual_verifier_flip_rate", metrics.Baseline.VerifierVerdictFlips, metrics.Candidate.VerifierVerdictFlips, metrics.Candidate.VerifierComparedPairs, policy.MaximumCounterfactualVerifierFlipRateBasisPoints, false},
+		{"maximum_counterfactual_consensus_flip_rate", metrics.Baseline.ConsensusFlips, metrics.Candidate.ConsensusFlips, metrics.Candidate.CoveredPairs, policy.MaximumCounterfactualConsensusFlipRateBasisPoints, false},
+		{"maximum_counterfactual_policy_flip_rate", metrics.Baseline.PolicyFlips, metrics.Candidate.PolicyFlips, metrics.Candidate.CoveredPairs, policy.MaximumCounterfactualPolicyFlipRateBasisPoints, false},
+	}
+	for _, check := range checks {
+		failed := belowBasisPointMinimum(check.candidateNumerator, check.denominator, check.limit)
+		baselineBPS := floorRateBasisPoints(check.baselineNumerator, metrics.Baseline.TotalPairs)
+		candidateBPS := floorRateBasisPoints(check.candidateNumerator, check.denominator)
+		if check.rule == "minimum_counterfactual_verifier_coverage" {
+			failed = belowCompletenessBasisPointMinimum(check.candidateNumerator, check.denominator, check.limit)
+			baselineBPS = floorCompletenessBasisPoints(check.baselineNumerator, metrics.Baseline.VerifierRequiredPairs)
+			candidateBPS = floorCompletenessBasisPoints(check.candidateNumerator, check.denominator)
+		}
+		if !check.minimum {
+			failed = aboveBasisPointMaximum(check.candidateNumerator, check.denominator, check.limit)
+			baselineDenominator := metrics.Baseline.CoveredPairs
+			if check.rule == "maximum_counterfactual_verifier_flip_rate" {
+				baselineDenominator = metrics.Baseline.VerifierComparedPairs
+			}
+			baselineBPS = ceilRateBasisPoints(check.baselineNumerator, baselineDenominator)
+			candidateBPS = ceilRateBasisPoints(check.candidateNumerator, check.denominator)
+		}
+		if failed {
+			failures = append(failures, AIEvaluationPromotionFailure{
+				Rule: check.rule, Scope: "robustness", BaselineBasisPoints: baselineBPS,
+				CandidateBasisPoints: candidateBPS, LimitBasisPoints: check.limit,
+			})
+		}
+	}
+	if metrics.Candidate.UnsafePolicyFlips > 0 {
+		failures = append(failures, AIEvaluationPromotionFailure{
+			Rule: "counterfactual_unsafe_policy_flip", Scope: "robustness",
+			BaselineBasisPoints:  ceilRateBasisPoints(metrics.Baseline.UnsafePolicyFlips, metrics.Baseline.CoveredPairs),
+			CandidateBasisPoints: ceilRateBasisPoints(metrics.Candidate.UnsafePolicyFlips, metrics.Candidate.CoveredPairs),
+		})
+	}
+	return failures
+}
+
 func metricComparison(baseline, candidate AIEvaluationMetrics) AIEvaluationMetricComparison {
 	return AIEvaluationMetricComparison{
 		Baseline: baseline, Candidate: candidate,
@@ -385,6 +524,42 @@ func metricComparison(baseline, candidate AIEvaluationMetrics) AIEvaluationMetri
 	}
 }
 
+func robustnessComparison(baseline, candidate AIEvaluationRobustnessMetrics) AIEvaluationRobustnessComparison {
+	return AIEvaluationRobustnessComparison{
+		Baseline: baseline, Candidate: candidate,
+		CoverageDeltaBasisPoints:          floorRateDeltaBasisPoints(baseline.CoveredPairs, baseline.TotalPairs, candidate.CoveredPairs, candidate.TotalPairs),
+		VerifierCoverageDeltaBasisPoints:  floorCompletenessDeltaBasisPoints(baseline.VerifierComparedPairs, baseline.VerifierRequiredPairs, candidate.VerifierComparedPairs, candidate.VerifierRequiredPairs),
+		ProposerFlipRateDeltaBasisPoints:  ceilRateDeltaBasisPoints(baseline.ProposerVerdictFlips, baseline.CoveredPairs, candidate.ProposerVerdictFlips, candidate.CoveredPairs),
+		VerifierFlipRateDeltaBasisPoints:  ceilRateDeltaBasisPoints(baseline.VerifierVerdictFlips, baseline.VerifierComparedPairs, candidate.VerifierVerdictFlips, candidate.VerifierComparedPairs),
+		ConsensusFlipRateDeltaBasisPoints: ceilRateDeltaBasisPoints(baseline.ConsensusFlips, baseline.CoveredPairs, candidate.ConsensusFlips, candidate.CoveredPairs),
+		PolicyFlipRateDeltaBasisPoints:    ceilRateDeltaBasisPoints(baseline.PolicyFlips, baseline.CoveredPairs, candidate.PolicyFlips, candidate.CoveredPairs),
+	}
+}
+
+func belowCompletenessBasisPointMinimum(numerator, denominator, minimum int) bool {
+	return scaledCompleteness(numerator, denominator).Cmp(big.NewRat(int64(minimum), 1)) < 0
+}
+
+func floorCompletenessBasisPoints(numerator, denominator int) int {
+	return floorRat(scaledCompleteness(numerator, denominator))
+}
+
+func floorCompletenessDeltaBasisPoints(baselineNumerator, baselineDenominator, candidateNumerator, candidateDenominator int) int {
+	delta := new(big.Rat).Sub(exactCompleteness(candidateNumerator, candidateDenominator), exactCompleteness(baselineNumerator, baselineDenominator))
+	return floorRat(delta.Mul(delta, big.NewRat(10_000, 1)))
+}
+
+func scaledCompleteness(numerator, denominator int) *big.Rat {
+	return new(big.Rat).Mul(exactCompleteness(numerator, denominator), big.NewRat(10_000, 1))
+}
+
+func exactCompleteness(numerator, denominator int) *big.Rat {
+	if denominator <= 0 {
+		return big.NewRat(1, 1)
+	}
+	return exactRate(numerator, denominator)
+}
+
 func sameEvaluationConfiguration(a, b AIEvaluationRun) bool {
 	return agent.CanonicalProviderID(a.ProposerProvider) == agent.CanonicalProviderID(b.ProposerProvider) &&
 		agent.SameModel(a.ProposerModel, b.ProposerModel) &&
@@ -395,7 +570,8 @@ func sameEvaluationConfiguration(a, b AIEvaluationRun) bool {
 func sameEvaluationCase(a, b AIEvaluationResult) bool {
 	return a.CaseID == b.CaseID && a.Label == b.Label && a.Language == b.Language &&
 		a.Framework == b.Framework && a.Kind == b.Kind && a.Severity == b.Severity &&
-		a.CWE == b.CWE && a.Adversarial == b.Adversarial
+		a.CWE == b.CWE && a.Adversarial == b.Adversarial &&
+		a.CounterfactualGroup == b.CounterfactualGroup && a.CounterfactualRole == b.CounterfactualRole
 }
 
 func evaluationCaseOutcome(result AIEvaluationResult) AIEvaluationCaseOutcome {
