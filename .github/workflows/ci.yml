@@ -74,7 +74,7 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test -count=1 ./...
+        run: bash scripts/ci/go-test.sh
 
       - name: Test Postgres suite again on the same database
         run: go test -count=1 ./internal/infrastructure/persistence/postgres
@@ -101,7 +101,8 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ./...
+        shell: bash
+        run: bash scripts/ci/go-test.sh
 
   frontend:
     name: Frontend (web)
