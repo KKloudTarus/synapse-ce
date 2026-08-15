@@ -94,7 +94,7 @@ func TestSLAStoreAssessmentReplayPreservesOriginalDeadlines(t *testing.T) {
 		t.Fatalf("first upsert=%+v err=%v", stored, err)
 	}
 	replay := slaAssessmentFor(t, "tenant-a", "eng-1", "finding-1", 0.4, slaStoreEpoch.Add(48*time.Hour))
-	if replay.ID != first.ID || replay.Result.RemediateBy == first.Result.RemediateBy {
+	if replay.ID != first.ID || replay.Result.RemediateBy.Equal(first.Result.RemediateBy) {
 		t.Fatal("test setup does not represent same material input at a later clock")
 	}
 	stored, err = store.UpsertAssessment(ctx, replay)

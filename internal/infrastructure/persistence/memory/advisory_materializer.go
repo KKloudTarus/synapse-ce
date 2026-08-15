@@ -44,6 +44,10 @@ type AdvisoryMaterializer struct {
 	aliases      map[string]string
 	revisions    map[string][]advisoryRevision
 	evaluated    map[shared.ID]map[string]evaluationCheckpoint
+	// now stamps each revision's createdAt. It defaults to the wall clock; tests inject a controlled
+	// clock so revision-pinning is deterministic regardless of the host clock resolution (Windows'
+	// ~15ms tick otherwise lets two closely-spaced Materialize calls share a createdAt).
+	now func() time.Time
 }
 
 func NewAdvisoryMaterializer() *AdvisoryMaterializer {
@@ -54,7 +58,18 @@ func NewAdvisoryMaterializer() *AdvisoryMaterializer {
 		aliases:      map[string]string{},
 		revisions:    map[string][]advisoryRevision{},
 		evaluated:    map[shared.ID]map[string]evaluationCheckpoint{},
+		now:          func() time.Time { return time.Now().UTC() },
 	}
+}
+
+// WithClock overrides the revision-createdAt clock (tests only). A nil clock is ignored.
+func (m *AdvisoryMaterializer) WithClock(now func() time.Time) *AdvisoryMaterializer {
+	if now != nil {
+		m.mu.Lock()
+		m.now = now
+		m.mu.Unlock()
+	}
+	return m
 }
 
 var _ ports.AdvisoryMaterializer = (*AdvisoryMaterializer)(nil)
@@ -175,7 +190,7 @@ func (m *AdvisoryMaterializer) materializeLocked(tenantID shared.ID, records []a
 	for _, id := range append([]string{canonical.Advisory.ID}, canonical.Advisory.Aliases...) {
 		m.aliases[id] = canonical.Advisory.ID
 	}
-	m.revisions[canonical.Advisory.ID] = append(m.revisions[canonical.Advisory.ID], advisoryRevision{canonical: canonical, hash: hash, fields: append([]advisory.ChangedField(nil), result.ChangedFields...), syncRuns: observationSyncRuns(tenantID, normalized), createdAt: time.Now().UTC()})
+	m.revisions[canonical.Advisory.ID] = append(m.revisions[canonical.Advisory.ID], advisoryRevision{canonical: canonical, hash: hash, fields: append([]advisory.ChangedField(nil), result.ChangedFields...), syncRuns: observationSyncRuns(tenantID, normalized), createdAt: m.now()})
 	result.Revision = int64(len(m.revisions[canonical.Advisory.ID]))
 	result.CreatedRevision = true
 	return result, nil
@@ -210,6 +225,7 @@ func (m *AdvisoryMaterializer) clone() *AdvisoryMaterializer {
 			clone.evaluated[tenantID][advisoryID] = checkpoint
 		}
 	}
+	clone.now = m.now
 	return clone
 }
 

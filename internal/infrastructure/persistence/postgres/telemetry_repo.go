@@ -250,10 +250,3 @@ func splitTelemetryKey(k string) (shared.ID, detection.Class) {
 	}
 	return shared.ID(k), ""
 }
-
-func nullableTime(t time.Time) interface{} {
-	if t.IsZero() {
-		return nil
-	}
-	return t.UTC()
-}

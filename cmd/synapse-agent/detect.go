@@ -101,7 +101,9 @@ func parseCeiling(s string) float64 {
 	}
 	v, err := strconv.ParseFloat(s, 64)
 	if err != nil || v < 0 {
-		log.Printf("detection: ignoring invalid SYNAPSE_DETECT_CPU_CEIL_PCT %q", s)
+		// The raw value is operator-controlled (an environment variable), so it is deliberately kept
+		// out of the log line to prevent log injection.
+		log.Print("detection: ignoring invalid SYNAPSE_DETECT_CPU_CEIL_PCT (want a non-negative number)")
 		return 0
 	}
 	return v

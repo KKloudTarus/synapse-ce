@@ -74,7 +74,7 @@ func (f *RemoteFeed) Test(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("remote feed test request: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return fmt.Errorf("remote feed test returned HTTP %d", response.StatusCode)
 	}

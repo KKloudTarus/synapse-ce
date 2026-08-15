@@ -39,7 +39,7 @@ func TestAssessmentEvaluateIsDeterministicAndBound(t *testing.T) {
 	if first.ID != second.ID || first.InputHash != second.InputHash || first.ConfigHash != second.ConfigHash {
 		t.Fatalf("materially identical input changed identity: first=%+v second=%+v", first, second)
 	}
-	if first.AssessedAt == second.AssessedAt || first.Result.RemediateBy == second.Result.RemediateBy {
+	if first.AssessedAt.Equal(second.AssessedAt) || first.Result.RemediateBy.Equal(second.Result.RemediateBy) {
 		t.Fatal("candidate clocks should reflect the attempted assessment; the store preserves the original on replay")
 	}
 	if first.TenantID != "tenant-a" || first.EngagementID != "eng-1" || first.FindingID != "finding-1" || first.SourceRiskAssessmentID != "risk-1" {

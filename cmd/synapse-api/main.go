@@ -1375,12 +1375,7 @@ func main() {
 			log.Error("promotion reconciler init failed", "err", perr)
 			os.Exit(1)
 		}
-		proposalAudit, ok := auditLog.(ports.IdempotentAuditLogger)
-		if !ok {
-			log.Error("promotion evaluator requires an idempotent audit logger")
-			os.Exit(1)
-		}
-		promotionEval, perr = promotionuc.NewEvaluator(judgmentSvc, findingRepo, judgmentStore, attackPathStore, assetStore, detectionRecordStore, repo, promotionStore, clock, proposalAudit)
+		promotionEval, perr = promotionuc.NewEvaluator(judgmentSvc, findingRepo, judgmentStore, attackPathStore, assetStore, detectionRecordStore, repo, promotionStore, clock, auditLog)
 		if perr != nil {
 			log.Error("promotion evaluator init failed", "err", perr)
 			os.Exit(1)

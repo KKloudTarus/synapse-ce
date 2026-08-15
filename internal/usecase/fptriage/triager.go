@@ -143,14 +143,6 @@ func (t *Triager) triageObserved(ctx context.Context, candidates []finding.Findi
 	return ports.FPTriageObservedResult{Critiques: t.mapCritiques(crits), Telemetry: telemetry}
 }
 
-func prepareCandidates(candidates []finding.Finding, reader ports.SourceSnippetReader) []preparedFinding {
-	prepared := make([]preparedFinding, len(candidates))
-	for i := range candidates {
-		prepared[i] = preparedFinding{finding: candidates[i], reader: reader}
-	}
-	return prepared
-}
-
 func (t *Triager) mapCritiques(crits []Critique) []ports.AICritique {
 	out := make([]ports.AICritique, 0, len(crits))
 	for _, c := range crits {

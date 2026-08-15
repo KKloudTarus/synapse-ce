@@ -592,10 +592,6 @@ func baselineResult(results []AIEvaluationResult, caseID string) AIEvaluationRes
 	return AIEvaluationResult{}
 }
 
-func verifierCoverage(metrics AIEvaluationMetrics) float64 {
-	return ratio(metrics.VerifierComparisons, metrics.Total)
-}
-
 func belowBasisPointMinimum(numerator, denominator, minimum int) bool {
 	return scaledRate(numerator, denominator).Cmp(big.NewRat(int64(minimum), 1)) < 0
 }
