@@ -173,7 +173,7 @@ jobs:
         run: ./scripts/release/verify-artifacts-signed.sh ./artifacts
 
       - name: Provenance attestation
-        uses: actions/attest-build-provenance@92c22c5d770a3f8010cf6c11c8c2b3e4d7bc4d8d # v3.0.0
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
         with:
           subject-path: "./artifacts/*"
 
