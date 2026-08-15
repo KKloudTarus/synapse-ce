@@ -4,13 +4,20 @@ name: Release Scan Gate
 # scanner binary is missing, errors, or reports a finding above the floor, the job fails. No step in
 # the release path may swallow a non-zero exit (asserted by the lint step below).
 #
-# STATUS: authored to the #412 spec. GitHub Actions is currently disabled for this repository, so this
-# workflow does not run yet; it is the gate that activates when Actions is enabled. Its logic is
-# deliberately fail-closed so a dormant/misconfigured scanner can never masquerade as "0 findings".
+# Its logic is deliberately fail-closed so a dormant/misconfigured scanner can never masquerade as
+# "0 findings". It runs on a published release; workflow_dispatch(tag) also lets it be run on demand for
+# an existing tag (e.g. a release published by goreleaser's GITHUB_TOKEN, which does not itself emit the
+# release:published event that would otherwise trigger this gate).
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to scan (e.g. v0.1.0)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -47,17 +54,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          test -n "${tag}"
           mkdir -p ./release-artifacts
-          gh release download "${{ github.event.release.tag_name }}" --dir ./release-artifacts
+          gh release download "${tag}" --dir ./release-artifacts
 
       - name: Scan every artifact and the image, fail on findings at/above the floor
         # Each invocation must propagate its exit; `set -e` + no swallowing. --fail-on high makes the
-        # scanner exit non-zero on a High/Critical finding, which fails the job.
+        # scanner exit non-zero on a High/Critical finding, which fails the job. SYNAPSE_SBOM_PRODUCER=
+        # ownsbom uses the first-party SBOM engine so no external syft binary is required on the runner.
+        env:
+          SYNAPSE_SBOM_PRODUCER: ownsbom
         run: |
           set -euo pipefail
           shopt -s nullglob
           scanned=0
           for art in ./release-artifacts/*; do
+            case "${art}" in
+            *.sig | *.asc | *.sha256 | *checksums.txt | *SHA256SUMS) continue ;;
+            esac
             echo "scanning ${art}"
             ./dist/synapse-cli scan --fail-on high "${art}"
             scanned=$((scanned + 1))

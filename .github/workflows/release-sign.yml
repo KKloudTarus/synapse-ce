@@ -141,15 +141,20 @@ jobs:
 
       # Requirement 5: the SBOM is produced by this project's OWN engine, which makes every release a
       # dogfooding run. A scanner that cannot describe our own artifact has no business describing a
-      # customer's.
+      # customer's. SYNAPSE_SBOM_PRODUCER=ownsbom selects the first-party engine so no external syft
+      # binary is required on the runner (using syft here would contradict "our OWN engine" anyway).
       - name: Build the scanner and emit an SBOM per artifact
+        env:
+          SYNAPSE_SBOM_PRODUCER: ownsbom
         run: |
           set -euo pipefail
           go build -o ./dist/synapse-cli ./cmd/synapse-cli
           test -x ./dist/synapse-cli
           for art in ./artifacts/*; do
             case "${art}" in
-            *.sig | *.asc | *.sha256 | *.sbom.json | *.intoto.jsonl) continue ;;
+            # Skip signatures, checksums, and already-emitted derived files — an SBOM of a checksum
+            # manifest is meaningless and only package artifacts describe a bill of materials.
+            *.sig | *.asc | *.sha256 | *.sbom.json | *.intoto.jsonl | *checksums.txt | *SHA256SUMS) continue ;;
             esac
             # `scan <path> --sbom` renders CycloneDX to stdout through the SAME renderer the engagement
             # export uses, so a release SBOM cannot drift from the one customers get.
