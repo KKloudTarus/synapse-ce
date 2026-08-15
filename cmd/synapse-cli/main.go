@@ -1170,7 +1170,9 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		}
 		target = abs
 	}
-	ctx := context.Background()
+	// The gated Scan + its persistence require a tenant in context (RLS / WithTenant). This CLI is the
+	// single-tenant dogfood path, so bind the default tenant, same as the other CLI commands.
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 	cfg := config.Load()
 	if priority == "" { // the --detection-priority flag falls back to the configured default
 		priority = cfg.DetectionPriority
@@ -1395,7 +1397,7 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	}
 
 	// Ephemeral engagement covering the target so the real (gated) Scan path runs.
-	eng, err := engagement.New(ids.NewID(), "", "synapse-cli dogfood", "", clock.Now())
+	eng, err := engagement.New(ids.NewID(), shared.DefaultTenant, "synapse-cli dogfood", "", clock.Now())
 	if err != nil {
 		return fmt.Errorf("build ephemeral engagement: %w", err)
 	}
