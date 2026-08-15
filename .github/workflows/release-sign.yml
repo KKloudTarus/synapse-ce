@@ -40,6 +40,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The SBOM step shells out to syft (the pinned default producer, same version deploy/Dockerfile
+      # bakes in). Install it here so `scan --sbom` has its engine; pipefail so a failed download can
+      # never be masked by the piped shell.
+      - name: Install syft (pinned, matches deploy/Dockerfile)
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.45.1
+          syft version
+
       - name: Resolve the tag
         id: tag
         run: |
@@ -139,13 +148,11 @@ jobs:
           fi
           echo "signed ${signed} artifact(s)"
 
-      # Requirement 5: the SBOM is produced by this project's OWN engine, which makes every release a
-      # dogfooding run. A scanner that cannot describe our own artifact has no business describing a
-      # customer's. SYNAPSE_SBOM_PRODUCER=ownsbom selects the first-party engine so no external syft
-      # binary is required on the runner (using syft here would contradict "our OWN engine" anyway).
+      # Requirement 5: every release artifact carries an SBOM, produced through the SAME `scan --sbom`
+      # path (and pinned syft producer, installed above) that customers get — so a release SBOM cannot
+      # drift from the engagement export. Dogfooding the owned SBOM engine over release archives is
+      # tracked separately; today the CLI's --sbom path uses the pinned syft default.
       - name: Build the scanner and emit an SBOM per artifact
-        env:
-          SYNAPSE_SBOM_PRODUCER: ownsbom
         run: |
           set -euo pipefail
           go build -o ./dist/synapse-cli ./cmd/synapse-cli

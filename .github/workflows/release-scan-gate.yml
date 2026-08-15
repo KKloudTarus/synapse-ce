@@ -43,6 +43,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The SCA scan shells out to syft (SBOM) and grype (vuln match) — the pinned versions
+      # deploy/Dockerfile bakes in. Install them so the scan has its engines; pipefail so a failed
+      # download can never be masked by the piped shell.
+      - name: Install syft + grype (pinned, matches deploy/Dockerfile)
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.45.1
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin v0.115.0
+          syft version && grype version
+
       - name: Build the scanner (fail if it cannot be built)
         run: go build -o ./dist/synapse-cli ./cmd/synapse-cli
 
@@ -61,11 +71,9 @@ jobs:
           gh release download "${tag}" --dir ./release-artifacts
 
       - name: Scan every artifact and the image, fail on findings at/above the floor
-        # Each invocation must propagate its exit; `set -e` + no swallowing. --fail-on high makes the
-        # scanner exit non-zero on a High/Critical finding, which fails the job. SYNAPSE_SBOM_PRODUCER=
-        # ownsbom uses the first-party SBOM engine so no external syft binary is required on the runner.
-        env:
-          SYNAPSE_SBOM_PRODUCER: ownsbom
+        # Each invocation must propagate its exit; `set -e` + no swallowing. The CLI takes the path
+        # FIRST, then flags: `scan <path> --fail-on high`. --fail-on high makes the scanner exit
+        # non-zero on a High/Critical finding, which fails the job.
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -75,7 +83,7 @@ jobs:
             *.sig | *.asc | *.sha256 | *checksums.txt | *SHA256SUMS) continue ;;
             esac
             echo "scanning ${art}"
-            ./dist/synapse-cli scan --fail-on high "${art}"
+            ./dist/synapse-cli scan "${art}" --fail-on high
             scanned=$((scanned + 1))
           done
           # Fail closed: a release with no scannable artifact must NOT pass vacuously.
