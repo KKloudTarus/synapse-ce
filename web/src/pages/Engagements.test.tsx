@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../lib/api'
-import { Engagements } from './Engagements'
+import { Engagements, NewEngagement } from './Engagements'
 
 vi.mock('../lib/api', () => ({
   api: {
@@ -38,10 +38,19 @@ describe('Engagements', () => {
     })
   })
 
-  it('opens creation and preselects the Asset from query parameters', async () => {
-    render(<MemoryRouter initialEntries={['/engagements?create=1&assetId=a1']}><Engagements /></MemoryRouter>)
+  it('keeps the Engagements page focused on the assessment queue', async () => {
+    render(<MemoryRouter initialEntries={['/engagements']}><Engagements /></MemoryRouter>)
+
+    expect(screen.getByRole('heading', { name: 'Engagements' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Engagement details' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'New Engagement' })).toHaveAttribute('href', '/engagements/new')
+  })
+
+  it('renders creation separately and preselects the Asset from query parameters', async () => {
+    render(<MemoryRouter initialEntries={['/engagements/new?assetId=a1']}><NewEngagement /></MemoryRouter>)
 
     expect(screen.getByRole('heading', { name: 'New Engagement' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Engagement details' })).toBeInTheDocument()
     expect((await screen.findAllByText('Mobile Banking (mobile)')).length).toBeGreaterThan(0)
     await waitFor(() => expect(api.listBusinessAssets).toHaveBeenCalledWith('limit=200'))
   })

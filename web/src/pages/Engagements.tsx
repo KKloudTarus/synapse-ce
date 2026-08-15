@@ -1,6 +1,6 @@
-import { Activity, Boxes, Briefcase, CheckCircle2, Plus, Target, Trash2, Upload, X } from 'lucide-react'
+import { Activity, Boxes, Briefcase, CheckCircle2, Plus, Target, Trash2, Upload } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button, Card, cn, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../components/ui'
 import { kindLabel } from '../lib/format'
 import { api } from '../lib/api'
@@ -9,12 +9,10 @@ import type { BusinessAsset, Engagement, ScopeTarget } from '../lib/types'
 const KINDS = ['repo', 'domain', 'host', 'url', 'image', 'cidr']
 
 export function Engagements() {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const requestedAssetId = searchParams.get('assetId') ?? ''
+  const [searchParams] = useSearchParams()
   const [list, setList] = useState<Engagement[] | null>(null)
   const [assetNames, setAssetNames] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
-  const [creating, setCreating] = useState(() => searchParams.get('create') === '1')
   const [importing, setImporting] = useState(false)
   const [importErr, setImportErr] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -33,11 +31,6 @@ export function Engagements() {
   }
 
   useEffect(load, [])
-
-  function closeCreate() {
-    setCreating(false)
-    if (searchParams.has('create') || searchParams.has('assetId')) setSearchParams({}, { replace: true })
-  }
 
   async function onImportFile(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -60,6 +53,11 @@ export function Engagements() {
   const completedCount = engagements.filter((engagement) => engagement.status.toLowerCase() === 'completed').length
   const unassignedCount = engagements.filter((engagement) => !engagement.businessAssetId).length
 
+  if (searchParams.get('create') === '1') {
+    const assetId = searchParams.get('assetId')
+    return <Navigate replace to={assetId ? `/engagements/new?${new URLSearchParams({ assetId }).toString()}` : '/engagements/new'} />
+  }
+
   return (
     <div className="mx-auto max-w-[1480px] animate-fade-in">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
@@ -75,25 +73,13 @@ export function Engagements() {
           <Button variant="secondary" loading={importing} onClick={() => fileRef.current?.click()}>
             <Upload className="size-4" />Import bundle
           </Button>
-          <Button variant="brand" onClick={() => creating ? closeCreate() : setCreating(true)}>
-            {creating ? <><X className="size-4" />Cancel</> : <><Plus className="size-4" />New Engagement</>}
-          </Button>
+          <Link to="/engagements/new" className="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold text-brandfg transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg">
+            <Plus className="size-4" />New Engagement
+          </Link>
         </div>
       </header>
 
       {importErr && <div className="mb-6"><ErrorState message={importErr} /></div>}
-
-      {creating && (
-        <div className="mb-6">
-          <CreateForm
-            initialAssetId={requestedAssetId}
-            onCreated={() => {
-              closeCreate()
-              load()
-            }}
-          />
-        </div>
-      )}
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <EngagementStat icon={Target} label="Total" value={list ? engagements.length : '—'} />
@@ -104,12 +90,12 @@ export function Engagements() {
 
       {error && <ErrorState message={error} />}
       {!list && !error && <Spinner label="Loading engagements…" />}
-      {list && list.length === 0 && !creating && (
+      {list && list.length === 0 && (
         <EmptyState
           icon={Target}
           title="No engagements yet"
           hint="Create one to define an authorized testing scope and connect the assessment to an Asset."
-          action={<Button variant="brand" onClick={() => setCreating(true)}><Plus className="size-4" />New Engagement</Button>}
+          action={<Link to="/engagements/new" className="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold text-brandfg transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"><Plus className="size-4" />New Engagement</Link>}
         />
       )}
       {list && list.length > 0 && (
@@ -119,6 +105,27 @@ export function Engagements() {
           ))}
         </Card>
       )}
+    </div>
+  )
+}
+
+export function NewEngagement() {
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const initialAssetId = searchParams.get('assetId') ?? ''
+
+  return (
+    <div className="mx-auto max-w-[1480px] animate-fade-in">
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-branddim">Assessment operations</p>
+          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">New Engagement</h1>
+          <p className="mt-2 max-w-3xl text-sm text-mutedfg sm:text-base">Define an authorized assessment scope and connect it to a business Asset.</p>
+        </div>
+        <Link to="/engagements" className="inline-flex items-center justify-center rounded-lg border border-border bg-elevated px-3.5 py-2 text-sm font-semibold text-foreground transition hover:border-borderstrong hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg">Cancel</Link>
+      </header>
+
+      <CreateForm initialAssetId={initialAssetId} onCreated={() => navigate('/engagements')} />
     </div>
   )
 }
@@ -252,7 +259,7 @@ function CreateForm({ initialAssetId, onCreated }: { initialAssetId?: string; on
   }
 
   return (
-    <Card title="New Engagement" className="animate-fade-in border-brand/25">
+    <Card title="Engagement details" className="border-brand/25">
       <form onSubmit={submit} className="space-y-5">
         <div>
           <div className="mb-3 flex items-center gap-2 text-sm font-semibold"><span className="flex size-6 items-center justify-center rounded-full bg-brand text-xs text-brandfg">1</span>Assessment context</div>

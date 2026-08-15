@@ -156,7 +156,7 @@ export function AssetDetail() {
 }
 
 function newEngagementPath(assetId: string) {
-  return `/engagements?${new URLSearchParams({ create: '1', assetId }).toString()}`
+  return `/engagements/new?${new URLSearchParams({ assetId }).toString()}`
 }
 
 function ProfileItem({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
