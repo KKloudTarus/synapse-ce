@@ -194,7 +194,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # SHA256SUMS.sig is already matched by ./artifacts/*.sig; listing it again uploaded the same
+          # asset twice in one invocation, and --clobber only replaces PRE-existing assets (not a
+          # same-command duplicate), so the second upload 422'd "already exists". Let the *.sig glob
+          # cover it; only SHA256SUMS (no extension) needs an explicit entry.
           gh release upload "${{ steps.tag.outputs.tag }}" \
-            ./artifacts/*.sig ./artifacts/*.sbom.json ./artifacts/SHA256SUMS ./artifacts/SHA256SUMS.sig \
+            ./artifacts/*.sig ./artifacts/*.sbom.json ./artifacts/SHA256SUMS \
             --clobber
           echo "release ${{ steps.tag.outputs.tag }} is signed and attested"
