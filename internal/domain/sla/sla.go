@@ -108,15 +108,47 @@ const (
 // context (common before an asset model is wired) yields a defensible, reproducible result rather than
 // an error.
 type Inputs struct {
-	Severity           shared.Severity
-	CVSSScore          float64 // 0..10 base score; when 0 the Severity label is used instead
-	KEV                bool    // CISA Known-Exploited
-	EPSS               float64 // 0..1 exploit-prediction probability
-	PublicPoC          bool
-	ActiveExploitation bool
-	Criticality        Criticality
-	Exposure           Exposure
-	Feasibility        Feasibility
+	Severity           shared.Severity `json:"severity"`
+	CVSSScore          float64         `json:"cvss_score"` // 0..10 base score; when 0 the Severity label is used instead
+	KEV                bool            `json:"kev"`        // CISA Known-Exploited
+	EPSS               float64         `json:"epss"`       // 0..1 exploit-prediction probability
+	PublicPoC          bool            `json:"public_poc"`
+	ActiveExploitation bool            `json:"active_exploitation"`
+	Criticality        Criticality     `json:"criticality,omitempty"`
+	Exposure           Exposure        `json:"exposure,omitempty"`
+	Feasibility        Feasibility     `json:"feasibility,omitempty"`
+}
+
+// Validate rejects inputs that would make a persisted SLA assessment ambiguous or impossible to
+// reproduce. Unknown asset context remains valid and neutral, but numeric risk signals must remain in
+// their documented ranges and every closed vocabulary must be recognized.
+func (in Inputs) Validate() error {
+	if in.Severity != "" && !in.Severity.Valid() {
+		return fmt.Errorf("%w: sla severity %q is invalid", shared.ErrValidation, in.Severity)
+	}
+	if in.CVSSScore < 0 || in.CVSSScore > 10 {
+		return fmt.Errorf("%w: sla cvss score must be between 0 and 10", shared.ErrValidation)
+	}
+	if in.EPSS < 0 || in.EPSS > 1 {
+		return fmt.Errorf("%w: sla epss must be between 0 and 1", shared.ErrValidation)
+	}
+	if !validExposure(in.Exposure) || !validCriticality(in.Criticality) || !validFeasibility(in.Feasibility) {
+		return fmt.Errorf("%w: sla context contains an unknown closed-vocabulary value", shared.ErrValidation)
+	}
+	return nil
+}
+
+func validExposure(v Exposure) bool {
+	return v == ExposureUnknown || v == ExposureInternal || v == ExposureExternal
+}
+
+func validCriticality(v Criticality) bool {
+	return v == CriticalityUnknown || v == CriticalityLow || v == CriticalityMedium || v == CriticalityHigh
+}
+
+func validFeasibility(v Feasibility) bool {
+	return v == FeasibilityUnknown || v == FeasibilityPatchAvailable || v == FeasibilityChangeWindow ||
+		v == FeasibilityCompensatingControl || v == FeasibilityNoPatch
 }
 
 // Breakdown is the explainable decomposition of the score: each factor's contribution, plus the names

@@ -96,6 +96,107 @@ export interface Finding {
   complianceControls: ComplianceControl[] // curated regulatory/standard controls the CWE maps to
 }
 
+export type SLATier = 'emergency' | 'critical' | 'high' | 'medium' | 'low' | 'exception'
+export type SLARemediationStatus = 'open' | 'mitigating' | 'remediated' | 'accepted_risk'
+
+export interface SLAInputs {
+  severity: Severity
+  cvssScore: number
+  kev: boolean
+  epss: number
+  publicPoC: boolean
+  activeExploitation: boolean
+  criticality: '' | 'low' | 'medium' | 'high'
+  exposure: '' | 'internal' | 'external'
+  feasibility: '' | 'patch_available' | 'change_window' | 'compensating_control' | 'no_patch'
+}
+
+export interface SLABreakdown {
+  severity: number
+  exploitability: number
+  threatIntel: number
+  exposure: number
+  criticality: number
+  feasibility: number
+  overrides: string[]
+}
+
+export interface SLAResult {
+  tier: SLATier
+  score: number
+  breakdown: SLABreakdown
+  mitigateBy: string
+  remediateBy: string
+  reason: string
+  computedAt: string
+  configVersion: string
+}
+
+export interface SLAAssessment {
+  tenantId: string
+  id: string
+  engagementId: string
+  findingId: string
+  sourceRiskAssessmentId: string
+  inputs: SLAInputs
+  result: SLAResult
+  inputHash: string
+  configHash: string
+  previousAssessmentId: string
+  deadlineAnchorAt: string
+  assessedAt: string
+  createdAt: string
+}
+
+export interface SLALifecycle {
+  tenantId: string
+  engagementId: string
+  findingId: string
+  assessmentId: string
+  status: SLARemediationStatus
+  version: number
+  reason: string
+  compensatingControl: string
+  acceptedBy: string
+  acceptedAt: string | null
+  acceptanceExpiresAt: string | null
+  updatedBy: string
+  updatedAt: string
+}
+
+export interface SLAView {
+  assessment: SLAAssessment
+  lifecycle: SLALifecycle
+  effectiveState: SLARemediationStatus
+  overdue: boolean
+  acceptanceExpired: boolean
+}
+
+export interface SLAEvent {
+  tenantId: string
+  id: string
+  engagementId: string
+  findingId: string
+  assessmentId: string
+  from: SLARemediationStatus
+  to: SLARemediationStatus
+  reason: string
+  compensatingControl: string
+  acceptanceExpiresAt: string | null
+  actor: string
+  beforeVersion: number
+  afterVersion: number
+  at: string
+}
+
+export interface SLATransitionInput {
+  to: SLARemediationStatus
+  reason: string
+  compensatingControl?: string
+  acceptanceExpiresAt?: string
+  version: number
+}
+
 // ComplianceControl is one curated control a finding's CWE maps to: the framework, the
 // control/category id, and its title – e.g. { OWASP-2021, A03:2021, Injection }. Deterministic
 // reference data from the server's curated table (a lookup, not a model output).
@@ -308,6 +409,7 @@ export interface ScanResult {
   vulnerabilities: Vulnerability[]
   licenses: LicenseFinding[]
   findings: Finding[]
+  slas?: SLAView[]
   aiTriage?: AITriage[]
   toolVersions: Record<string, string>
   vulnDBSnapshot: string

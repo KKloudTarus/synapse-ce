@@ -1,11 +1,13 @@
 package aitriagereview
 
+import "github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+
 // IsMachineActor reports whether actor uses one of Synapse's reserved non-human
 // principal prefixes. Curation and other in-process consumers should use this
 // shared predicate instead of duplicating the denylist maintained by the review
 // domain.
 func IsMachineActor(actor string) bool {
-	return machineActor(actor)
+	return shared.IsMachineActor(actor)
 }
 
 // IsMachineOrModelActor reports whether actor is either a reserved machine

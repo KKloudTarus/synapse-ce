@@ -12,6 +12,13 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **Risk-based remediation SLA governance.** Adds opt-in, tenant/RLS-safe and versioned SLA policy,
+  immutable deterministic assessment history, mitigate/remediate deadlines in scan/API/UI output,
+  human-only open/mitigating/remediated/accepted-risk transitions with hard acceptance expiry, and
+  continuous vulnerability-intelligence reassessment that preserves human state. Replays cannot move
+  an original deadline, machine principals cannot accept risk, and remediated findings cannot be
+  silently reopened; re-exposure remains explicit review work.
+
 - **Adversarial invariance gate for AI-triage promotion.** Golden datasets can bind a clean control to
   semantically equivalent prompt-injection challenges. Evaluation reports emit source-free pair evidence,
   and the comparison/release boundary requires complete coverage plus zero proposer, verifier, consensus,

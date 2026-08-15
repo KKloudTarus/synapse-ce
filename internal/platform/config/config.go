@@ -312,6 +312,9 @@ type Config struct {
 	VulnerabilityNotificationsEnabled     bool
 	VulnerabilityDryRunEnabled            bool
 	VulnerabilityTenantAllowlist          []string
+	// SLAEnabled turns on durable risk-based remediation deadlines, versioned tenant policy, and
+	// human lifecycle APIs. Default false until an operator explicitly opts into the new schema/path.
+	SLAEnabled bool
 	// SASTEnabled turns on the deterministic pattern-SAST analyzer in the scan pipeline; off by default.
 	SASTEnabled bool
 	// SecretScanEnabled turns on the deterministic secret scanner in the scan pipeline; off by default.
@@ -647,6 +650,7 @@ func Load() Config {
 		VulnerabilityNotificationsEnabled:     getbool("SYNAPSE_VULNERABILITY_NOTIFICATIONS_ENABLED", false),
 		VulnerabilityDryRunEnabled:            getbool("SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED", true),
 		VulnerabilityTenantAllowlist:          splitList(getenv("SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST", "")),
+		SLAEnabled:                            getbool("SYNAPSE_SLA_ENABLED", false),
 		GovulncheckBin:                        getenv("SYNAPSE_GOVULNCHECK_BIN", "govulncheck"),
 		GoModGraphEnabled:                     getbool("SYNAPSE_GOMODGRAPH_ENABLED", true),
 		GoBin:                                 getenv("SYNAPSE_GO_BIN", "go"),

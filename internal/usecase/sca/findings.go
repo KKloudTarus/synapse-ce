@@ -147,6 +147,7 @@ func buildFindings(engagementID shared.ID, res *ScanResult, now time.Time, minSe
 			CVSSVector:        v.CVSSVector,
 			KEV:               v.KEV,
 			RiskScore:         v.RiskScore(),
+			FixedVersion:      v.FixedVersion,
 			Sources:           v.Sources,
 			Confidence:        v.Confidence,
 			Class:             class,

@@ -40,6 +40,8 @@ tags:
   description: Tenant-scoped security operations summaries
 - name: vulnerability-intelligence
   description: Tenant-scoped vulnerability feeds, exposure correlation, risk transitions, and durable operations
+- name: remediation-sla
+  description: Risk-based remediation deadlines, immutable assessments, policy versions, and human-owned lifecycle governance
 
 paths:
   /healthz:
@@ -1593,6 +1595,142 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
 
+  /api/v1/sla/policies:
+    get:
+      tags: [remediation-sla]
+      operationId: listSLAPolicies
+      summary: List immutable SLA policy versions and the active version
+      description: Requires view permission. The built-in policy is installed on first use when no tenant policy exists.
+      responses:
+        '200':
+          description: Active policy and append-only tenant policy history
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SLAPolicyList'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [remediation-sla]
+      operationId: activateSLAPolicy
+      summary: Validate, append, and activate an SLA policy version
+      description: Requires administer permission and a human principal. Existing assessments are never rewritten.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [config]
+              properties:
+                config: {$ref: '#/components/schemas/SLAConfig'}
+      responses:
+        '200': {description: Existing identical policy selected, content: {application/json: {schema: {$ref: '#/components/schemas/SLAPolicyActivation'}}}}
+        '201': {description: New immutable policy created and selected, content: {application/json: {schema: {$ref: '#/components/schemas/SLAPolicyActivation'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/engagements/{id}/slas:
+    parameters: [{$ref: '#/components/parameters/EngagementId'}]
+    get:
+      tags: [remediation-sla, findings]
+      operationId: listEngagementSLAs
+      summary: List current remediation SLA views for an engagement
+      description: Time-sensitive overdue and acceptance-expiry fields are calculated at read time.
+      responses:
+        '200':
+          description: Current SLA views
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slas]
+                properties:
+                  slas: {type: array, items: {$ref: '#/components/schemas/SLAView'}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/engagements/{id}/slas/{fid}:
+    parameters:
+    - $ref: '#/components/parameters/EngagementId'
+    - $ref: '#/components/parameters/FindingId'
+    get:
+      tags: [remediation-sla, findings]
+      operationId: getFindingSLA
+      summary: Get the current SLA assessment and remediation lifecycle for a finding
+      responses:
+        '200': {description: Current SLA view, content: {application/json: {schema: {$ref: '#/components/schemas/SLAView'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/engagements/{id}/slas/{fid}/assessments:
+    parameters:
+    - $ref: '#/components/parameters/EngagementId'
+    - $ref: '#/components/parameters/FindingId'
+    get:
+      tags: [remediation-sla, findings]
+      operationId: listSLAAssessmentHistory
+      summary: List immutable SLA assessments for a finding
+      responses:
+        '200':
+          description: Oldest-to-newest assessment history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assessments]
+                properties:
+                  assessments: {type: array, items: {$ref: '#/components/schemas/SLAAssessment'}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/engagements/{id}/slas/{fid}/events:
+    parameters:
+    - $ref: '#/components/parameters/EngagementId'
+    - $ref: '#/components/parameters/FindingId'
+    get:
+      tags: [remediation-sla, findings]
+      operationId: listSLALifecycleEvents
+      summary: List append-only human remediation lifecycle events
+      responses:
+        '200':
+          description: Oldest-to-newest lifecycle audit history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events: {type: array, items: {$ref: '#/components/schemas/SLALifecycleEvent'}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/engagements/{id}/slas/{fid}/transition:
+    parameters:
+    - $ref: '#/components/parameters/EngagementId'
+    - $ref: '#/components/parameters/FindingId'
+    post:
+      tags: [remediation-sla, findings]
+      operationId: transitionFindingSLA
+      summary: Apply an optimistic-concurrency protected human remediation decision
+      description: Machine principals are rejected. Accepted risk requires a reason, compensating control, and future expiry; remediated is terminal.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SLATransitionRequest'}
+      responses:
+        '200': {description: Updated current SLA view, content: {application/json: {schema: {$ref: '#/components/schemas/SLAView'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Lifecycle version changed since it was loaded, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1605,6 +1743,11 @@ components:
       in: path
       required: true
       schema: {type: string}
+    FindingId:
+      name: fid
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
     BusinessAssetId:
       name: assetID
       in: path
@@ -1701,6 +1844,201 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
 
   schemas:
+    SLATier:
+      type: string
+      enum: [emergency, critical, high, medium, low, exception]
+
+    SLARemediationStatus:
+      type: string
+      enum: [open, mitigating, remediated, accepted_risk]
+
+    SLAWeights:
+      type: object
+      required: [severity, exploitability, threat_intel, exposure, criticality, feasibility_relief]
+      properties:
+        severity: {type: number, minimum: 0}
+        exploitability: {type: number, minimum: 0}
+        threat_intel: {type: number, minimum: 0}
+        exposure: {type: number, minimum: 0}
+        criticality: {type: number, minimum: 0}
+        feasibility_relief: {type: number, minimum: 0}
+
+    SLAThresholds:
+      type: object
+      description: Inclusive lower score bounds; values must be strictly descending from emergency to medium.
+      required: [emergency, critical, high, medium]
+      properties:
+        emergency: {type: number, minimum: 0, maximum: 100}
+        critical: {type: number, minimum: 0, maximum: 100}
+        high: {type: number, minimum: 0, maximum: 100}
+        medium: {type: number, exclusiveMinimum: 0, maximum: 100}
+
+    SLADueRange:
+      type: object
+      description: Go duration values encoded as integer nanoseconds; mitigate_within must not exceed remediate_within.
+      required: [mitigate_within, remediate_within]
+      properties:
+        mitigate_within: {type: integer, format: int64, minimum: 0, example: 86400000000000}
+        remediate_within: {type: integer, format: int64, minimum: 0, example: 604800000000000}
+
+    SLADueRanges:
+      type: object
+      required: [emergency, critical, high, medium, low, exception]
+      properties:
+        emergency: {$ref: '#/components/schemas/SLADueRange'}
+        critical: {$ref: '#/components/schemas/SLADueRange'}
+        high: {$ref: '#/components/schemas/SLADueRange'}
+        medium: {$ref: '#/components/schemas/SLADueRange'}
+        low: {$ref: '#/components/schemas/SLADueRange'}
+        exception: {$ref: '#/components/schemas/SLADueRange'}
+
+    SLAConfig:
+      type: object
+      required: [weights, thresholds, due_ranges, version]
+      properties:
+        weights: {$ref: '#/components/schemas/SLAWeights'}
+        thresholds: {$ref: '#/components/schemas/SLAThresholds'}
+        due_ranges: {$ref: '#/components/schemas/SLADueRanges'}
+        version: {type: string, minLength: 1, example: sla-v2}
+
+    SLAPolicy:
+      type: object
+      required: [tenant_id, config, sha256, created_by, created_at]
+      properties:
+        tenant_id: {type: string}
+        config: {$ref: '#/components/schemas/SLAConfig'}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+
+    SLAPolicyList:
+      type: object
+      required: [active, policies]
+      properties:
+        active: {$ref: '#/components/schemas/SLAPolicy'}
+        policies: {type: array, items: {$ref: '#/components/schemas/SLAPolicy'}}
+
+    SLAPolicyActivation:
+      type: object
+      required: [policy, created]
+      properties:
+        policy: {$ref: '#/components/schemas/SLAPolicy'}
+        created: {type: boolean}
+
+    SLAInputs:
+      type: object
+      required: [severity, cvss_score, kev, epss, public_poc, active_exploitation]
+      properties:
+        severity: {type: string, enum: ['', info, low, medium, high, critical]}
+        cvss_score: {type: number, minimum: 0, maximum: 10}
+        kev: {type: boolean}
+        epss: {type: number, minimum: 0, maximum: 1}
+        public_poc: {type: boolean}
+        active_exploitation: {type: boolean}
+        criticality: {type: string, enum: ['', low, medium, high]}
+        exposure: {type: string, enum: ['', internal, external]}
+        feasibility: {type: string, enum: ['', patch_available, change_window, compensating_control, no_patch]}
+
+    SLABreakdown:
+      type: object
+      required: [severity, exploitability, threat_intel, exposure, criticality, feasibility]
+      properties:
+        severity: {type: number}
+        exploitability: {type: number}
+        threat_intel: {type: number}
+        exposure: {type: number}
+        criticality: {type: number}
+        feasibility: {type: number}
+        overrides: {type: array, items: {type: string}}
+
+    SLAResult:
+      type: object
+      required: [tier, score, breakdown, mitigate_by, remediate_by, reason, computed_at, config_version]
+      properties:
+        tier: {$ref: '#/components/schemas/SLATier'}
+        score: {type: number, minimum: 0, maximum: 100}
+        breakdown: {$ref: '#/components/schemas/SLABreakdown'}
+        mitigate_by: {type: string, format: date-time}
+        remediate_by: {type: string, format: date-time}
+        reason: {type: string}
+        computed_at: {type: string, format: date-time}
+        config_version: {type: string}
+
+    SLAAssessment:
+      type: object
+      required: [tenant_id, id, engagement_id, finding_id, inputs, result, input_hash, config_hash, deadline_anchor_at, assessed_at, created_at]
+      properties:
+        tenant_id: {type: string}
+        id: {type: string}
+        engagement_id: {type: string}
+        finding_id: {type: string}
+        source_risk_assessment_id: {type: string}
+        inputs: {$ref: '#/components/schemas/SLAInputs'}
+        result: {$ref: '#/components/schemas/SLAResult'}
+        input_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        config_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        previous_assessment_id: {type: string}
+        deadline_anchor_at: {type: string, format: date-time}
+        assessed_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+
+    SLALifecycle:
+      type: object
+      required: [tenant_id, engagement_id, finding_id, assessment_id, status, version, updated_by, updated_at]
+      properties:
+        tenant_id: {type: string}
+        engagement_id: {type: string}
+        finding_id: {type: string}
+        assessment_id: {type: string}
+        status: {$ref: '#/components/schemas/SLARemediationStatus'}
+        version: {type: integer, minimum: 1}
+        reason: {type: string}
+        compensating_control: {type: string}
+        accepted_by: {type: string}
+        accepted_at: {type: string, format: date-time}
+        acceptance_expires_at: {type: string, format: date-time}
+        updated_by: {type: string}
+        updated_at: {type: string, format: date-time}
+
+    SLAView:
+      type: object
+      required: [assessment, lifecycle, effective_state, overdue, acceptance_expired]
+      properties:
+        assessment: {$ref: '#/components/schemas/SLAAssessment'}
+        lifecycle: {$ref: '#/components/schemas/SLALifecycle'}
+        effective_state: {$ref: '#/components/schemas/SLARemediationStatus'}
+        overdue: {type: boolean}
+        acceptance_expired: {type: boolean}
+
+    SLALifecycleEvent:
+      type: object
+      required: [tenant_id, id, engagement_id, finding_id, assessment_id, from, to, reason, actor, before_version, after_version, at]
+      properties:
+        tenant_id: {type: string}
+        id: {type: string}
+        engagement_id: {type: string}
+        finding_id: {type: string}
+        assessment_id: {type: string}
+        from: {$ref: '#/components/schemas/SLARemediationStatus'}
+        to: {$ref: '#/components/schemas/SLARemediationStatus'}
+        reason: {type: string}
+        compensating_control: {type: string}
+        acceptance_expires_at: {type: string, format: date-time}
+        actor: {type: string}
+        before_version: {type: integer, minimum: 1}
+        after_version: {type: integer, minimum: 2}
+        at: {type: string, format: date-time}
+
+    SLATransitionRequest:
+      type: object
+      required: [to, reason, version]
+      properties:
+        to: {$ref: '#/components/schemas/SLARemediationStatus'}
+        reason: {type: string, minLength: 1}
+        compensating_control: {type: string}
+        acceptance_expires_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+
     VulnerabilityCursor:
       type: object
       required: [before_time, before_id]
