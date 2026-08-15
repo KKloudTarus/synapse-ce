@@ -30,6 +30,7 @@ import (
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	reportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/report"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
 	transferuc "github.com/KKloudTarus/synapse-ce/internal/usecase/transfer"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 	vexuc "github.com/KKloudTarus/synapse-ce/internal/usecase/vex"
@@ -92,6 +93,7 @@ type Router struct {
 	vulnerabilityAudit     ports.AuditLogger
 	vulnerabilityRead      *vulnerabilityinteluc.Service
 	vulnerabilityActions   *vulnerabilityactionuc.Service
+	sla                    *slauc.Service
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -209,6 +211,9 @@ func (rt *Router) SetVulnerabilityActions(actions *vulnerabilityactionuc.Service
 	rt.vulnerabilityActions = actions
 }
 
+// SetSLA wires the opt-in risk-based remediation governance API.
+func (rt *Router) SetSLA(service *slauc.Service) { rt.sla = service }
+
 // NewRouter builds the HTTP router.
 func NewRouter(log *slog.Logger, auth *Authenticator, eng *enguc.Service, sca *scauc.Service, aup *aupuc.Service, findings *findingsuc.Service, export *exportuc.Service, report *reportuc.Service, evidence *evidenceuc.Service, recon *reconuc.Service, logs ports.LogStream, transfer *transferuc.Service, audit *audituc.Service, vex *vexuc.Service, users *usersuc.Service, credentials *credentialsuc.Service) *Router {
 	return &Router{log: log, auth: auth, eng: eng, sca: sca, aup: aup, findings: findings, export: export, report: report, evidence: evidence, recon: recon, logs: logs, transfer: transfer, audit: audit, vex: vex, users: users, credentials: credentials}
@@ -289,6 +294,15 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/ai-triage/reviews", rt.authz(userdom.PermView, rt.listAITriageReviews))
 		mux.HandleFunc("POST /api/v1/ai-triage/reviews/{rid}/claim", rt.authz(userdom.PermReview, rt.claimAITriageReview))
 		mux.HandleFunc("POST /api/v1/ai-triage/reviews/{rid}/decision", rt.authz(userdom.PermReview, rt.decideAITriageReview))
+	}
+	if rt.sla != nil {
+		mux.HandleFunc("GET /api/v1/sla/policies", rt.authz(userdom.PermView, rt.listSLAPolicies))
+		mux.HandleFunc("POST /api/v1/sla/policies", rt.authz(userdom.PermAdminister, rt.activateSLAPolicy))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/slas", rt.authz(userdom.PermView, rt.withEngTenant(rt.listEngagementSLAs)))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/slas/{fid}", rt.authz(userdom.PermView, rt.withEngTenant(rt.getFindingSLA)))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/slas/{fid}/assessments", rt.authz(userdom.PermView, rt.withEngTenant(rt.listSLAAssessments)))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/slas/{fid}/events", rt.authz(userdom.PermView, rt.withEngTenant(rt.listSLAEvents)))
+		mux.HandleFunc("POST /api/v1/engagements/{id}/slas/{fid}/transition", rt.authz(userdom.PermReview, rt.withEngTenant(rt.transitionFindingSLA)))
 	}
 	if rt.sca != nil {
 		mux.HandleFunc("GET /api/v1/ai-triage/observability", rt.authz(userdom.PermView, rt.getAITriageObservability))

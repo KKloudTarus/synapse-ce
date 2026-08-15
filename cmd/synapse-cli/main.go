@@ -81,6 +81,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
 )
 
 func main() {
@@ -590,7 +591,10 @@ func runRating(args []string) error {
 			return fmt.Errorf("unknown or incomplete option %q", args[i])
 		}
 	}
-	ctx := context.Background()
+	// The standalone CLI is the single-tenant deployment boundary. Bind the same canonical tenant
+	// the API's in-memory mode uses so optional tenant-aware services (including SLA governance) do
+	// not need a weaker persistence contract just for dogfood scans.
+	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
 
 	inv, err := codeinventory.New().Inventory(ctx, dir)
 	if err != nil {
@@ -1197,6 +1201,13 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		detectionSources,
 		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil)),
 	)
+	if cfg.SLAEnabled {
+		slaService, slaErr := slauc.NewService(memory.NewSLAStore(), clock, ids)
+		if slaErr != nil {
+			return fmt.Errorf("configure remediation SLA: %w", slaErr)
+		}
+		sca.SetSLAAssessor(slaService)
+	}
 	sca.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)
 	sca.SetProjectComparisonSource(&gitdiff.ComparisonSource{})
 	sca.SetGateDecoder(qualityprofile.LoadGateBytes)
@@ -1623,6 +1634,20 @@ func printReport(target string, res *scauc.ScanResult) {
 		fmt.Printf("  reachability (JVM, coarse): %d referenced, %d unreferenced by app code\n", reach, unref)
 	}
 	fmt.Printf("  findings (promoted): %d\n", len(res.Findings))
+	if len(res.SLAs) > 0 {
+		overdue := 0
+		for _, item := range res.SLAs {
+			if item.Overdue {
+				overdue++
+			}
+			fmt.Printf("    SLA %-9s %-13s mitigate %s · remediate %s · %s\n",
+				item.Assessment.Result.Tier, item.EffectiveState,
+				item.Assessment.Result.MitigateBy.Format("2006-01-02"),
+				item.Assessment.Result.RemediateBy.Format("2006-01-02"), item.Assessment.FindingID)
+		}
+		fmt.Printf("  remediation SLA: %d assessed, %d overdue (policy %s)\n",
+			len(res.SLAs), overdue, res.SLAs[0].Assessment.Result.ConfigVersion)
+	}
 	if res.VulnsBelowThreshold > 0 {
 		fmt.Printf("  ! %d detected vulnerabilities are BELOW the '%s' severity floor and were NOT promoted "+
 			"(set SYNAPSE_FINDING_MIN_SEVERITY=info to promote every detected vuln)\n", res.VulnsBelowThreshold, res.MinSeverity)

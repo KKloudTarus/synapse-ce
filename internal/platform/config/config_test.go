@@ -147,6 +147,21 @@ func TestLoadVulnerabilityRolloutDefaultsFailClosed(t *testing.T) {
 	}
 }
 
+func TestLoadSLAGovernanceIsExplicitOptIn(t *testing.T) {
+	t.Setenv("SYNAPSE_SLA_ENABLED", "")
+	if Load().SLAEnabled {
+		t.Fatal("SLA governance must remain disabled by default")
+	}
+	t.Setenv("SYNAPSE_SLA_ENABLED", "true")
+	if !Load().SLAEnabled {
+		t.Fatal("SYNAPSE_SLA_ENABLED=true did not enable SLA governance")
+	}
+	t.Setenv("SYNAPSE_SLA_ENABLED", "invalid")
+	if Load().SLAEnabled {
+		t.Fatal("invalid SLA feature flag must fail closed")
+	}
+}
+
 func TestLoadCSPMDefaultsAndBounds(t *testing.T) {
 	for _, key := range []string{"SYNAPSE_CSPM_ENABLED", "SYNAPSE_CSPM_PROVIDERS", "SYNAPSE_CSPM_RATE"} {
 		t.Setenv(key, "")

@@ -58,6 +58,7 @@ nav:
   - Code quality rules: code-quality-rules.md
   - Fleet agent packaging: fleet-agent-packaging.md
   - AI triage evaluation: ai-triage-evaluation.md
+  - Remediation SLA governance: sla-governance.md
   - Architecture: architecture.md
   - Deployment: deployment.md
   - Security model: security.md

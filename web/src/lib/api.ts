@@ -31,6 +31,10 @@ import type {
   Judgment,
   ScanJob,
   ScanResult,
+  SLAAssessment,
+  SLAEvent,
+  SLATransitionInput,
+  SLAView,
   Severity,
   AuditEntry,
   AuditReport,
@@ -279,6 +283,107 @@ function mapFinding(r: any): Finding {
       id: c.ID ?? '',
       title: c.Title ?? '',
     })),
+  }
+}
+
+function mapSLAView(r: any): SLAView {
+  const assessment = r?.assessment ?? {}
+  const result = assessment.result ?? {}
+  const inputs = assessment.inputs ?? {}
+  const breakdown = result.breakdown ?? {}
+  const lifecycle = r?.lifecycle ?? {}
+  return {
+    assessment: {
+      tenantId: assessment.tenant_id ?? '',
+      id: assessment.id ?? '',
+      engagementId: assessment.engagement_id ?? '',
+      findingId: assessment.finding_id ?? '',
+      sourceRiskAssessmentId: assessment.source_risk_assessment_id ?? '',
+      inputs: {
+        severity: inputs.severity ?? 'unknown',
+        cvssScore: inputs.cvss_score ?? 0,
+        kev: inputs.kev ?? false,
+        epss: inputs.epss ?? 0,
+        publicPoC: inputs.public_poc ?? false,
+        activeExploitation: inputs.active_exploitation ?? false,
+        criticality: inputs.criticality ?? '',
+        exposure: inputs.exposure ?? '',
+        feasibility: inputs.feasibility ?? '',
+      },
+      result: {
+        tier: result.tier ?? 'low',
+        score: result.score ?? 0,
+        breakdown: {
+          severity: breakdown.severity ?? 0,
+          exploitability: breakdown.exploitability ?? 0,
+          threatIntel: breakdown.threat_intel ?? 0,
+          exposure: breakdown.exposure ?? 0,
+          criticality: breakdown.criticality ?? 0,
+          feasibility: breakdown.feasibility ?? 0,
+          overrides: breakdown.overrides ?? [],
+        },
+        mitigateBy: result.mitigate_by ?? '',
+        remediateBy: result.remediate_by ?? '',
+        reason: result.reason ?? '',
+        computedAt: result.computed_at ?? '',
+        configVersion: result.config_version ?? '',
+      },
+      inputHash: assessment.input_hash ?? '',
+      configHash: assessment.config_hash ?? '',
+      previousAssessmentId: assessment.previous_assessment_id ?? '',
+      assessedAt: assessment.assessed_at ?? '',
+      createdAt: assessment.created_at ?? '',
+    },
+    lifecycle: {
+      tenantId: lifecycle.tenant_id ?? '',
+      engagementId: lifecycle.engagement_id ?? '',
+      findingId: lifecycle.finding_id ?? '',
+      assessmentId: lifecycle.assessment_id ?? '',
+      status: lifecycle.status ?? 'open',
+      version: lifecycle.version ?? 1,
+      reason: lifecycle.reason ?? '',
+      compensatingControl: lifecycle.compensating_control ?? '',
+      acceptedBy: lifecycle.accepted_by ?? '',
+      acceptedAt: lifecycle.accepted_at ?? null,
+      acceptanceExpiresAt: lifecycle.acceptance_expires_at ?? null,
+      updatedBy: lifecycle.updated_by ?? '',
+      updatedAt: lifecycle.updated_at ?? '',
+    },
+    effectiveState: r?.effective_state ?? lifecycle.status ?? 'open',
+    overdue: r?.overdue ?? false,
+    acceptanceExpired: r?.acceptance_expired ?? false,
+  }
+}
+
+function mapSLAAssessment(r: any): SLAAssessment {
+  return mapSLAView({ assessment: r, lifecycle: {
+    tenant_id: r?.tenant_id,
+    engagement_id: r?.engagement_id,
+    finding_id: r?.finding_id,
+    assessment_id: r?.id,
+    status: 'open',
+    version: 1,
+    updated_by: 'history',
+    updated_at: r?.assessed_at,
+  } }).assessment
+}
+
+function mapSLAEvent(r: any): SLAEvent {
+  return {
+    tenantId: r?.tenant_id ?? '',
+    id: r?.id ?? '',
+    engagementId: r?.engagement_id ?? '',
+    findingId: r?.finding_id ?? '',
+    assessmentId: r?.assessment_id ?? '',
+    from: r?.from ?? 'open',
+    to: r?.to ?? 'open',
+    reason: r?.reason ?? '',
+    compensatingControl: r?.compensating_control ?? '',
+    acceptanceExpiresAt: r?.acceptance_expires_at ?? null,
+    actor: r?.actor ?? '',
+    beforeVersion: r?.before_version ?? 0,
+    afterVersion: r?.after_version ?? 0,
+    at: r?.at ?? '',
   }
 }
 
@@ -695,7 +800,8 @@ function mapScanResult(r: any): ScanResult {
       verdict: l.verdict ?? 'warn',
       components: l.components ?? [],
     })),
-    findings: (r.findings ?? []).map(mapFinding),
+	findings: (r.findings ?? []).map(mapFinding),
+	slas: (r.slas ?? []).map(mapSLAView),
     aiTriage: (r.ai_triage ?? []).map(mapAITriage),
     toolVersions: r.tool_versions ?? {},
     vulnDBSnapshot: r.vuln_db_snapshot ?? '',
@@ -1686,6 +1792,36 @@ export const api = {
 
   findings: async (engagementId: string): Promise<Finding[]> =>
     ((await req(`/engagements/${encodeURIComponent(engagementId)}/findings`)) ?? []).map(mapFinding),
+
+  slas: async (engagementId: string): Promise<SLAView[]> => {
+    const response = await req(`/engagements/${encodeURIComponent(engagementId)}/slas`)
+    return (response?.slas ?? []).map(mapSLAView)
+  },
+
+  findingSLA: async (engagementId: string, findingId: string): Promise<SLAView> =>
+    mapSLAView(await req(`/engagements/${encodeURIComponent(engagementId)}/slas/${encodeURIComponent(findingId)}`)),
+
+  transitionSLA: async (engagementId: string, findingId: string, input: SLATransitionInput): Promise<SLAView> =>
+    mapSLAView(await req(`/engagements/${encodeURIComponent(engagementId)}/slas/${encodeURIComponent(findingId)}/transition`, {
+      method: 'POST',
+      body: JSON.stringify({
+        to: input.to,
+        reason: input.reason,
+        compensating_control: input.compensatingControl ?? '',
+        acceptance_expires_at: input.acceptanceExpiresAt || null,
+        version: input.version,
+      }),
+    })),
+
+  slaAssessments: async (engagementId: string, findingId: string): Promise<SLAAssessment[]> => {
+    const response = await req(`/engagements/${encodeURIComponent(engagementId)}/slas/${encodeURIComponent(findingId)}/assessments`)
+    return (response?.assessments ?? []).map(mapSLAAssessment)
+  },
+
+  slaEvents: async (engagementId: string, findingId: string): Promise<SLAEvent[]> => {
+    const response = await req(`/engagements/${encodeURIComponent(engagementId)}/slas/${encodeURIComponent(findingId)}/events`)
+    return (response?.events ?? []).map(mapSLAEvent)
+  },
 
   updateFindingStatus: async (
     engagementId: string,

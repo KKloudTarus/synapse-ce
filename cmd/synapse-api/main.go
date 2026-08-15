@@ -156,6 +156,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sbomcrosscheckjudge"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/srcreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/taintscan"
 	threatmodeluc "github.com/KKloudTarus/synapse-ce/internal/usecase/threatmodeluc"
@@ -287,6 +288,7 @@ func main() {
 	var vulnerabilityActions ports.VulnerabilityActionStore
 	var vulnerabilityReconcileRuns ports.VulnerabilityReconcileRunStore
 	var vulnerabilityTransactions ports.TenantTransactionRunner
+	var slaStore ports.SLAStore
 	var vulnerabilityWorker *worker.Worker
 	var reconRunLock ports.RunLocker              // recon run lease (Postgres only); row-lease, no pinned conn
 	var agentRunLock ports.RunLocker              // agent SESSION lock (advisory; cannot expire mid-LLM-loop)
@@ -439,6 +441,7 @@ func main() {
 		vulnerabilityActions = postgres.NewVulnerabilityActionStore(pool)
 		vulnerabilityReconcileRuns = postgres.NewVulnerabilityReconcileRunStore(pool, ids)
 		vulnerabilityTransactions = postgres.NewTenantTransactionRunner(pool)
+		slaStore = postgres.NewSLAStore(pool)
 		// Shared by recon AND the in-process SCA worker, so the base lease TTL must cover the
 		// longer of the two timeouts (the renewer extends it while live, but the base must not
 		// be shorter than a max-length scan). row-lease: no pinned conn.
@@ -514,6 +517,7 @@ func main() {
 		vulnerabilityAssessments = memory.NewVulnerabilityRiskAssessmentStore()
 		vulnerabilityActions = memory.NewVulnerabilityActionStore()
 		vulnerabilityReconcileRuns = memory.NewVulnerabilityReconcileRunStore(ids, clock, vulnerabilityQueue)
+		slaStore = memory.NewSLAStore()
 		agentSessionStore = memory.NewAgentSessionStore()
 		approvalStore = memory.NewApprovalStore()
 		planStore = memory.NewPlanStore()
@@ -744,6 +748,17 @@ func main() {
 		enry.New(), sbomGen,
 		detectionSources,
 		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil)))
+	var slaService *slauc.Service
+	if cfg.SLAEnabled {
+		var slaErr error
+		slaService, slaErr = slauc.NewService(slaStore, clock, ids)
+		if slaErr != nil {
+			log.Error("sla governance service init failed", "err", slaErr)
+			os.Exit(1)
+		}
+		scaService.SetSLAAssessor(slaService)
+		log.Info("risk-based remediation SLA governance ENABLED")
+	}
 	scaService.SetImportedSBOMStore(importedSBOMStore)
 	// Record scanned image digests so the fleet cluster agent can correlate running images (#446).
 	scaService.SetScannedImageRecorder(scannedImageStore)
@@ -1135,6 +1150,9 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
+	if slaService != nil {
+		router.SetSLA(slaService)
+	}
 	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
 		ProviderSync: cfg.VulnerabilityProviderSyncEnabled, OccurrenceWrites: cfg.VulnerabilityOccurrenceWritesEnabled,
 		FindingProjection: cfg.VulnerabilityFindingProjectionEnabled, Actions: cfg.VulnerabilityActionsEnabled,
@@ -1179,6 +1197,9 @@ func main() {
 	}
 	vulnerabilityEvaluator.SetActionStore(vulnerabilityActions)
 	vulnerabilityEvaluator.SetRollout(vulnerabilityRollout)
+	if slaService != nil {
+		vulnerabilityEvaluator.SetSLAAssessor(slaService)
+	}
 	vulnerabilityActionService, err := vulnerabilityactionuc.NewService(vulnerabilityActions, auditLog, clock)
 	if err != nil {
 		log.Error("vulnerability action service init failed", "err", err)

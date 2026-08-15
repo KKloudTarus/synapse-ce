@@ -186,6 +186,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_VULNERABILITY_NOTIFICATIONS_ENABLED` | `false` | Permit notification-outbox writes for allowlisted tenants. |
 | `SYNAPSE_VULNERABILITY_DRY_RUN_ENABLED` | `true` | Persist reconciliation diffs and counts without occurrence, finding, action, or notification mutations. |
 | `SYNAPSE_VULNERABILITY_TENANT_ALLOWLIST` | empty | Comma-separated tenant IDs allowed to use tenant-scoped gates and dry-run; `*` enables every tenant. Empty fails closed. |
+| `SYNAPSE_SLA_ENABLED` | `false` | Enable versioned risk-based remediation deadlines, immutable assessment history, human-only lifecycle transitions, and continuous-intelligence reassessment. See [Remediation SLA governance](sla-governance.md). |
 | `SYNAPSE_DAST_RATE_PER_SEC` | `5` | DAST crawler request rate. |
 | `SYNAPSE_DAST_CONCURRENCY` | `4` | DAST crawler concurrency. |
 | `SYNAPSE_DAST_MAX_DEPTH` | `8` | Maximum crawl depth. |

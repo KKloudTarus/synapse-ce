@@ -60,6 +60,7 @@ import { AITriageBadges } from '../components/AITriageBadges'
 import { AgentTab } from './AgentTab'
 import { ThreatModelTab } from './ThreatModelTab'
 import { CodeQualityTab } from './CodeQualityTab'
+import { SLATab } from './SLATab'
 import { api, ApiError, downloadBundle, downloadExport, downloadReport, downloadReportDoc, streamReconLogs, type ReportType } from '../lib/api'
 import {
   downloadStyledExcel,
@@ -99,7 +100,7 @@ import { StatusPill } from './Engagements'
 // Lazy-loaded so React Flow stays out of the initial bundle (only the Graph tab needs it).
 const DependencyGraphTab = lazy(() => import('./DependencyGraph').then((m) => ({ default: m.DependencyGraphTab })))
 
-type Tab = 'overview' | 'findings' | 'components' | 'vulns' | 'licenses' | 'graph' | 'quality' | 'threats' | 'recon' | 'agent' | 'reviews' | 'evidence' | 'settings'
+type Tab = 'overview' | 'findings' | 'sla' | 'components' | 'vulns' | 'licenses' | 'graph' | 'quality' | 'threats' | 'recon' | 'agent' | 'reviews' | 'evidence' | 'settings'
 
 function findingAnchor(id: string) {
   return `finding-${id}`
@@ -270,6 +271,7 @@ export function EngagementDetail() {
             onReload={reloadFindings}
           />
         )}
+        {tab === 'sla' && <SLATab engagementId={id} findings={findings} />}
         {tab === 'components' && <ComponentsTab scan={scan} />}
         {tab === 'vulns' && <VulnsTab scan={scan} />}
         {tab === 'graph' && (
@@ -1165,6 +1167,7 @@ function fmtDebugDuration(ms: number) {
 const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard; countKey?: keyof TabCounts }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'findings', label: 'Findings', icon: ShieldAlert, countKey: 'findings' },
+  { id: 'sla', label: 'Remediation SLA', icon: CalendarClock },
   { id: 'components', label: 'Packages', icon: Boxes, countKey: 'components' },
   { id: 'vulns', label: 'Vulnerabilities', icon: Bug, countKey: 'vulns' },
   { id: 'licenses', label: 'Licenses', icon: Scale, countKey: 'licenses' },

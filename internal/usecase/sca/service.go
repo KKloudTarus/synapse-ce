@@ -30,6 +30,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sla"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
@@ -119,6 +120,7 @@ type Service struct {
 	comparisonSource ports.ProjectComparisonSource
 	log              *slog.Logger
 	gateDecoder      ports.GateDecoder
+	slaAssessor      ports.FindingSLAAssessor // optional; nil while SYNAPSE_SLA_ENABLED=false
 }
 
 // SetSeverityEnricher configures optional severity backfill (NVD CVSS) for vulnerabilities the
@@ -188,6 +190,10 @@ func (s *Service) logger() *slog.Logger {
 }
 
 func (s *Service) SetGateDecoder(decoder ports.GateDecoder) { s.gateDecoder = decoder }
+
+// SetSLAAssessor enables durable remediation SLA assessment at the finding persistence boundary.
+// When unset, scan behavior and output remain unchanged.
+func (s *Service) SetSLAAssessor(assessor ports.FindingSLAAssessor) { s.slaAssessor = assessor }
 
 // SetIgnoreUnfixed controls whether vulnerabilities with no available fix are promoted to
 // findings. true = suppress them (Trivy's --ignore-unfixed); they stay in the vuln inventory.
@@ -626,6 +632,9 @@ type ScanResult struct {
 	Licenses          []ports.LicenseFinding        `json:"licenses"`
 	ComponentLicenses []ComponentLicenseAudit       `json:"component_licenses"`
 	Findings          []finding.Finding             `json:"findings"`
+	// SLAs is populated only when SLA governance is enabled. Each entry joins immutable scoring
+	// provenance with the separately human-owned remediation lifecycle.
+	SLAs []sla.View `json:"slas,omitempty"`
 	// MinSeverity + VulnsBelowThreshold make the severity floor VISIBLE: every detected vuln is
 	// kept in Vulnerabilities, but only those at/above MinSeverity become promoted Findings.
 	// VulnsBelowThreshold counts the detected-but-not-promoted vulns so a raised floor can never
@@ -1945,6 +1954,9 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		if err := s.findings.Upsert(ctx, result.Findings); err != nil {
 			return nil, fmt.Errorf("persist findings: %w", err)
 		}
+		if err := s.assessFindingSLAs(ctx, result); err != nil {
+			return nil, err
+		}
 		if err := s.reconcileVulnerabilities(ctx, engagementID, doc); err != nil {
 			return nil, err
 		}
@@ -1963,6 +1975,29 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		}
 	}
 	return result, nil
+}
+
+// assessFindingSLAs runs after finding persistence (the PostgreSQL SLA schema has a composite
+// finding foreign key) and before continuous-intelligence reconciliation. The latter may immediately
+// replace a basic finding-only assessment with a richer one carrying PoC/exploitation provenance.
+func (s *Service) assessFindingSLAs(ctx context.Context, result *ScanResult) error {
+	if s.slaAssessor == nil || result == nil {
+		return nil
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return fmt.Errorf("%w: tenant context is required for sla assessment", shared.ErrValidation)
+	}
+	views := make([]sla.View, 0, len(result.Findings))
+	for _, item := range result.Findings {
+		view, err := s.slaAssessor.AssessFinding(ctx, shared.TenantOrDefault(tenantID), item)
+		if err != nil {
+			return fmt.Errorf("assess finding %s sla: %w", item.ID, err)
+		}
+		views = append(views, view)
+	}
+	result.SLAs = views
+	return nil
 }
 
 // normalizedSourceTarget is the same canonical request identity authorized for a
@@ -2806,6 +2841,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if s.findings != nil {
 		if err := s.findings.Upsert(ctx, result.Findings); err != nil {
 			return nil, fmt.Errorf("persist findings: %w", err)
+		}
+		if err := s.assessFindingSLAs(ctx, result); err != nil {
+			return nil, err
 		}
 		if err := s.reconcileVulnerabilities(ctx, engagementID, doc); err != nil {
 			return nil, err
