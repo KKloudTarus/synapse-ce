@@ -1,73 +1,76 @@
 import {
+  Activity,
   Boxes,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  FileText,
   Gauge,
-  Activity,
   LayoutDashboard,
   Library,
   Moon,
-  Radar,
+  Plus,
   ScrollText,
   Server,
-  Settings,
-  ShieldQuestion,
   ShieldAlert,
-  Target,
+  ShieldQuestion,
   Sun,
+  Target,
   Users,
   X,
   type LucideIcon,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { Link, NavLink } from 'react-router-dom'
 import logo from '../assets/logo.png'
 import { cn } from './ui'
 
+type NavItem = {
+  icon: LucideIcon
+  label: string
+  to: string
+  end?: boolean
+}
+
+const DASHBOARD: NavItem = { icon: LayoutDashboard, label: 'Dashboard', to: '/dashboard', end: true }
+
 const NAV_GROUPS: Array<{
   label: string
-  items: Array<{ icon: LucideIcon; label: string; to: string; prefix?: string; action?: boolean }>
+  items: NavItem[]
 }> = [
   {
-    label: 'Command center',
-    items: [{ icon: LayoutDashboard, label: 'Dashboard', to: '/dashboard' }],
-  },
-  {
-    label: 'Scope & inventory',
-    items: [{ icon: Boxes, label: 'Assets', to: '/assets', prefix: '/assets' }],
-  },
-  {
-    label: 'Assess risk',
+    label: 'Security operations',
     items: [
-      { icon: Target, label: 'Engagements', to: '/engagements', prefix: '/engagements' },
-      { icon: ShieldQuestion, label: 'AI review queue', to: '/ai-triage/reviews', prefix: '/ai-triage/reviews' },
-      { icon: Activity, label: 'AI observability', to: '/ai-triage/observability', prefix: '/ai-triage/observability' },
-      { icon: ShieldAlert, label: 'Vulnerability intelligence', to: '/vulnerability-intelligence', prefix: '/vulnerability-intelligence' },
-      { icon: Library, label: 'Rules', to: '/rules', prefix: '/rules' },
+      { icon: Target, label: 'Engagements', to: '/engagements' },
+      { icon: ShieldQuestion, label: 'Review queue', to: '/ai-triage/reviews' },
+    ],
+  },
+  {
+    label: 'Exposure management',
+    items: [
+      { icon: Boxes, label: 'Assets', to: '/assets' },
+      { icon: ShieldAlert, label: 'Vulnerability intelligence', to: '/vulnerability-intelligence' },
     ],
   },
   {
     label: 'Security engineering',
     items: [
-      { icon: Gauge, label: 'Code Quality', to: '/code-quality', prefix: '/code-quality' },
-      { icon: Server, label: 'Fleet', to: '/fleet', prefix: '/fleet' },
+      { icon: Gauge, label: 'Code Quality', to: '/code-quality' },
+      { icon: Library, label: 'Rules', to: '/rules' },
     ],
   },
   {
-    label: 'Govern & evidence',
+    label: 'Runtime security',
+    items: [
+      { icon: Server, label: 'Fleet', to: '/fleet' },
+      { icon: Activity, label: 'Automation observability', to: '/ai-triage/observability' },
+    ],
+  },
+  {
+    label: 'Governance',
     items: [
       { icon: ScrollText, label: 'Audit log', to: '/audit' },
       { icon: Users, label: 'Team', to: '/team' },
     ],
   },
-]
-
-const SOON: { icon: LucideIcon; label: string }[] = [
-  { icon: Radar, label: 'Recon' },
-  { icon: FileText, label: 'Reports' },
-  { icon: Settings, label: 'Settings' },
 ]
 
 type Theme = 'light' | 'dark'
@@ -91,7 +94,6 @@ function currentTheme(): Theme {
 }
 
 function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
-  const location = useLocation()
   const [theme, setTheme] = useState<Theme>(currentTheme)
 
   useEffect(() => {
@@ -111,32 +113,32 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
     setTheme(next)
   }
 
-  function renderItems(items: (typeof NAV_GROUPS)[number]['items']) {
-    return items.map(({ icon: Icon, label, to, prefix, action }) => {
-      const active = prefix ? location.pathname.startsWith(prefix) : location.pathname === to
-      return (
-        <NavLink
-          key={to}
-          to={to}
-          title={collapsed ? label : undefined}
-          aria-label={collapsed ? label : undefined}
-          onClick={onNavigate}
-          className={cn(
-            'relative flex min-h-10 items-center rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70',
-            collapsed ? 'justify-center px-2' : 'gap-3 px-3',
-            active
-              ? 'bg-navactive font-semibold text-white'
-              : action
-                ? 'border border-brand/30 bg-brand/10 font-semibold text-navfg hover:bg-brand/20'
-                : 'text-navmuted hover:bg-navhover hover:text-navfg',
-          )}
-        >
-          <Icon className={cn('size-[18px] shrink-0', action && !active && 'text-branddim')} aria-hidden="true" />
-          <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
-          {active && <span className="absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-brand" />}
-        </NavLink>
-      )
-    })
+  function renderItems(items: NavItem[]) {
+    return items.map(({ icon: Icon, label, to, end }) => (
+      <NavLink
+        key={to}
+        to={to}
+        end={end}
+        title={collapsed ? label : undefined}
+        aria-label={collapsed ? label : undefined}
+        onClick={onNavigate}
+        className={({ isActive }) => cn(
+          'relative flex min-h-10 items-center rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70',
+          collapsed ? 'justify-center px-2' : 'gap-3 px-3',
+          isActive
+            ? 'bg-navactive font-semibold text-white'
+            : 'text-navmuted hover:bg-navhover hover:text-navfg',
+        )}
+      >
+        {({ isActive }) => (
+          <>
+            <Icon className="size-[18px] shrink-0" aria-hidden="true" />
+            <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
+            {isActive && <span className="absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-brand" />}
+          </>
+        )}
+      </NavLink>
+    ))
   }
 
   return (
@@ -149,39 +151,32 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Primary navigation">
-        {NAV_GROUPS.map((group, index) => collapsed ? (
-          <div key={group.label} className={cn('space-y-1', index > 0 && 'mt-3')}>{renderItems(group.items)}</div>
-        ) : (
-          <details key={group.label} open className={cn('group', index > 0 && 'mt-4')}>
-            <summary className="mb-1.5 flex cursor-pointer list-none items-center justify-between rounded-md px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-navsubtle transition-colors hover:text-navmuted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70 [&::-webkit-details-marker]:hidden">
-              {group.label}
-              <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
-            </summary>
-            <div className="space-y-1">{renderItems(group.items)}</div>
-          </details>
-        ))}
+      <div className="border-b border-navborder p-3">
+        <Link
+          to="/engagements/new"
+          title={collapsed ? 'New Engagement' : undefined}
+          aria-label={collapsed ? 'New Engagement' : undefined}
+          onClick={onNavigate}
+          className={cn(
+            'btn-primary flex min-h-10 items-center justify-center rounded-lg text-sm font-semibold text-brandfg transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70 focus-visible:ring-offset-2 focus-visible:ring-offset-nav',
+            collapsed ? 'px-2' : 'gap-2 px-3',
+          )}
+        >
+          <Plus className="size-[18px] shrink-0" aria-hidden="true" />
+          <span className={collapsed ? 'sr-only' : undefined}>New Engagement</span>
+        </Link>
+      </div>
 
-        <div className="mt-5">
-          <div className={cn('mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-navsubtle', collapsed && 'sr-only')}>
-            Coming soon
-          </div>
-          <div className="space-y-1">
-            {SOON.map(({ icon: Icon, label }) => (
-              <span
-                key={label}
-                title={collapsed ? `${label} · Coming soon` : 'Coming soon'}
-                className={cn(
-                  'flex min-h-10 cursor-not-allowed items-center rounded-lg text-sm text-navsubtle/60',
-                  collapsed ? 'justify-center px-2' : 'gap-3 px-3',
-                )}
-              >
-                <Icon className="size-[18px] shrink-0" aria-hidden="true" />
-                <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
-              </span>
-            ))}
-          </div>
-        </div>
+      <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Primary navigation">
+        <div className="space-y-1">{renderItems([DASHBOARD])}</div>
+        {NAV_GROUPS.map((group) => (
+          <section key={group.label} aria-label={group.label} className="mt-4">
+            <h2 className={cn('mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-navsubtle', collapsed && 'sr-only')}>
+              {group.label}
+            </h2>
+            <div className="space-y-1">{renderItems(group.items)}</div>
+          </section>
+        ))}
       </nav>
 
       <div className="border-t border-navborder p-3">

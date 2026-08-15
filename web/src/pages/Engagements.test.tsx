@@ -1,6 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { Sidebar } from '../components/Sidebar'
 import { api } from '../lib/api'
 import { Engagements, NewEngagement } from './Engagements'
 
@@ -53,5 +54,22 @@ describe('Engagements', () => {
     expect(screen.getByRole('heading', { name: 'Engagement details' })).toBeInTheDocument()
     expect((await screen.findAllByText('Mobile Banking (mobile)')).length).toBeGreaterThan(0)
     await waitFor(() => expect(api.listBusinessAssets).toHaveBeenCalledWith('limit=200'))
+  })
+
+  it('navigates to the dedicated creation route from the sidebar', async () => {
+    render(
+      <MemoryRouter initialEntries={['/engagements']}>
+        <Sidebar />
+        <Routes>
+          <Route path="/engagements" element={<Engagements />} />
+          <Route path="/engagements/new" element={<NewEngagement />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('No engagements yet')
+    const newEngagementLinks = screen.getAllByRole('link', { name: 'New Engagement' })
+    fireEvent.click(newEngagementLinks[0])
+    expect(await screen.findByRole('heading', { name: 'New Engagement' })).toBeInTheDocument()
   })
 })
