@@ -109,6 +109,44 @@ func TestSandboxReadOnlyExtraBinds(t *testing.T) {
 	}
 }
 
+// TestSandboxBindsToolBinaryOutsideCuratedRoot pins the bind for owned helpers installed outside
+// the curated read-only root. The root deliberately omits /opt so host secrets stay ENOENT, which
+// also made the DOCUMENTED /opt/synapse/bin/synapse-cspm layout unrunnable: every CSPM run died
+// with "bwrap: execvp /opt/synapse/synapse-cspm: No such file or directory", retried three times
+// and dead-lettered. Only the verified FILE is bound - never its directory.
+func TestSandboxBindsToolBinaryOutsideCuratedRoot(t *testing.T) {
+	r := fakeRunner("")
+	argv := r.command(ports.ToolSpec{Name: "/opt/synapse/bin/synapse-cspm"}, "", "", 3, false)
+	joined := strings.Join(argv, " ")
+	if !strings.Contains(joined, "--ro-bind-try /opt/synapse/bin/synapse-cspm /opt/synapse/bin/synapse-cspm") {
+		t.Errorf("helper binary was not bound into the sandbox: %s", joined)
+	}
+	if strings.Contains(joined, "--ro-bind-try /opt/synapse/bin /opt/synapse/bin") || strings.Contains(joined, "--ro-bind-try /opt /opt") {
+		t.Errorf("bound the helper's DIRECTORY, widening the curated root: %s", joined)
+	}
+}
+
+// TestSandboxDoesNotRebindCuratedRootTools keeps the bind narrow: tools already inside the curated
+// root need no extra bind, and a lookalike path must not be treated as being inside it.
+func TestSandboxDoesNotRebindCuratedRootTools(t *testing.T) {
+	r := fakeRunner("")
+	joined := strings.Join(r.command(ports.ToolSpec{Name: "/usr/bin/syft"}, "", "", 3, false), " ")
+	if strings.Contains(joined, "--ro-bind-try /usr/bin/syft /usr/bin/syft") {
+		t.Errorf("re-bound a tool already inside the curated root: %s", joined)
+	}
+	for _, name := range []string{"/libexec/synapse/helper", "/lib-evil/helper"} {
+		joined = strings.Join(r.command(ports.ToolSpec{Name: name}, "", "", 3, false), " ")
+		if !strings.Contains(joined, "--ro-bind-try "+name+" "+name) {
+			t.Errorf("%s was treated as inside the curated root: %s", name, joined)
+		}
+	}
+	// A relative name still resolves through PATH inside the sandbox; binding it would be wrong.
+	joined = strings.Join(r.command(ports.ToolSpec{Name: "grype"}, "", "", 3, false), " ")
+	if strings.Contains(joined, "--ro-bind-try grype") {
+		t.Errorf("bound a relative tool name: %s", joined)
+	}
+}
+
 // ---- secret substitution + worker-env exclusion (argv-construction level) ----
 
 func TestChildEnvResolvesSecretsCleanly(t *testing.T) {

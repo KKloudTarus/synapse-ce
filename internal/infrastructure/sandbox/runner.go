@@ -25,6 +25,7 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -80,6 +81,23 @@ var curatedEtc = []string{
 	"/etc/passwd", "/etc/group", // account NAMES only (no shadow)
 	"/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d", "/etc/alternatives",
 	"/etc/localtime", "/etc/mime.types", "/etc/gitconfig", "/etc/xdg",
+}
+
+// curatedRoot lists the OS trees bwrapArgs already binds read-only. A tool inside one of them
+// needs no extra bind; anything else must be bound explicitly.
+var curatedRoot = []string{"/usr", "/bin", "/sbin", "/lib", "/lib64"}
+
+// underCuratedRoot reports whether an absolute path already lives inside the curated read-only
+// root. Matching is segment-aligned so "/libexec/evil" is not mistaken for "/lib".
+func underCuratedRoot(p string) bool {
+	// path, not path/filepath: these are Linux container paths regardless of the host GOOS.
+	clean := path.Clean(p)
+	for _, root := range curatedRoot {
+		if clean == root || strings.HasPrefix(clean, root+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // SetBinaryRegistry enables tool-binary integrity verification (F5): before each run the
@@ -422,6 +440,17 @@ func (r *Runner) bwrapArgs(spec ports.ToolSpec, sharedNet bool, hostsFile string
 	} else {
 		// Isolated mode: fresh netns too – default-deny egress by construction (E9 default).
 		args = append(args, "--unshare-all")
+	}
+	// Bind the tool binary ITSELF when it lives outside the curated root. Run() resolves and
+	// integrity-verifies an absolute path, but the curated root deliberately omits /opt, /srv and
+	// friends so host secrets stay ENOENT - which also made every owned helper installed there
+	// (the documented /opt/synapse/bin/synapse-cspm layout) die with
+	// "bwrap: execvp ...: No such file or directory". Bind the single verified FILE read-only,
+	// never its directory, so nothing else in that tree becomes visible.
+	// These are LINUX container paths, so the check is POSIX by construction: filepath.IsAbs is
+	// false for "/opt/..." on Windows, where this argv builder is still unit-tested.
+	if bin := strings.TrimSpace(spec.Name); strings.HasPrefix(bin, "/") && !underCuratedRoot(bin) {
+		args = append(args, "--ro-bind-try", bin, bin)
 	}
 	for _, p := range spec.ReadOnlyPaths {
 		if strings.TrimSpace(p) != "" {
