@@ -1428,7 +1428,7 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 		if _, err := s.jobQueue.Enqueue(ctx, ScanJobKind, payload); err != nil {
 			fin := s.clock.Now()
 			job.Status, job.Stage, job.Error, job.FinishedAt = ports.ScanFailed, "enqueue", truncateErr(err), &fin
-			_ = s.jobs.Save(context.Background(), job)
+			_ = s.jobs.Save(context.WithoutCancel(ctx), job)
 			return ports.ScanJob{}, fmt.Errorf("enqueue scan job: %w", err)
 		}
 		return job, nil
@@ -1752,7 +1752,11 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 
 	fin := s.clock.Now()
 	if err == nil && opts.ProjectAnalysis && s.projectAnalysisRecorder != nil {
-		completionCtx, cancel := context.WithTimeout(context.Background(), s.projectAnalysisCompletionTimeout)
+		// Detach from the request's cancellation but KEEP the tenant that runScanJob's ctx
+		// carries: the recorder reads the engagement through a tenant-scoped (RLS) repository,
+		// and a bare context.Background() would drop the tenant and fail the whole scan at
+		// the persistence boundary.
+		completionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.projectAnalysisCompletionTimeout)
 		err = s.projectAnalysisRecorder.RecordProjectAnalysis(completionCtx, engagementID, job.ID, fin, result)
 		cancel()
 	}
@@ -1764,7 +1768,7 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 		job.Status, job.Stage = ports.ScanSucceeded, "done"
 	}
 	if s.jobs != nil {
-		_ = s.jobs.Save(context.Background(), job) // fresh ctx: the timeout ctx may be done
+		_ = s.jobs.Save(context.WithoutCancel(ctx), job) // detached but tenant-preserving: the timeout ctx may be done
 	}
 }
 
