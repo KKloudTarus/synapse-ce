@@ -51,6 +51,13 @@ const diagnosticCap = 512
 // inventory (a GCP client_email and project_id, an Azure subscription_id, an AWS account id). Value
 // length cannot separate the two - a GCP client_email is long and public, an Azure client_secret may
 // be short and secret - so any length threshold both over- and under-matches.
+//
+// This is a name heuristic and it errs toward scrubbing: "key" also matches AWS access_key_id, which
+// is a semi-public identifier. That is deliberate - the current AWS connector enumerates IAM users,
+// not access keys, so nothing legitimately emits one. If a future connector enumerates access keys it
+// must rename the credential field or narrow this list, or a successful run will be rejected the way
+// an unfiltered GCP client_email once was. A provider that names a secret generically (a bare
+// "values" array) would likewise not be matched here; add a marker when one appears.
 var secretFieldMarkers = []string{"secret", "password", "passwd", "passphrase", "token", "private", "credential", "key"}
 
 // isSecretFieldName reports whether a JSON field name marks its value as secret material.
@@ -65,13 +72,15 @@ func isSecretFieldName(name string) bool {
 }
 
 // walkCredential calls visit for every string value in a credential document, with the field name it
-// was reached through (empty for array elements and the root). The document is treated as opaque
-// provider-shaped JSON on purpose: this executor is the shared sandbox path for every provider and
-// must not import a concrete connector's credential type.
-func walkCredential(secret []byte, visit func(name, value string)) bool {
+// was reached through (empty at the root). A non-JSON credential is opaque and yields no callbacks;
+// callers always seed their set with the whole blob, so an unparseable credential echoed wholesale is
+// still covered. The document is treated as opaque provider-shaped JSON on purpose: this executor is
+// the shared sandbox path for every provider and must not import a concrete connector's credential
+// type.
+func walkCredential(secret []byte, visit func(name, value string)) {
 	var document any
 	if err := json.Unmarshal(secret, &document); err != nil {
-		return false // opaque (non-JSON) credential: nothing to decompose
+		return
 	}
 	var walk func(name string, node any)
 	walk = func(name string, node any) {
@@ -82,14 +91,13 @@ func walkCredential(secret []byte, visit func(name, value string)) bool {
 			}
 		case []any:
 			for _, value := range typed {
-				walk(name, value) // array elements inherit the field they hang off
+				walk(name, value) // elements inherit the field the array hangs off
 			}
 		case string:
 			visit(name, typed)
 		}
 	}
 	walk("", document)
-	return true
 }
 
 // diagnosticSecrets is the scrub set for the DIAGNOSTIC sink: the whole document plus every string

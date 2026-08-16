@@ -242,17 +242,17 @@ func TestResolveToolPathKeepsHostPathOutOfSandboxAuthority(t *testing.T) {
 
 	// Verified: a bare name resolves, so the verified path is the bound and executed path.
 	if got := resolveToolPath(bare, true); !filepath.IsAbs(got) {
-		t.Errorf("resolveToolPath(%q, verify) = %q, want an absolute path", bare, got)
+		t.Errorf("resolveToolPath(%q, hostPATHIsAuthority) = %q, want an absolute path", bare, got)
 	}
 	// Unverified: host PATH is not an authority for what gets bound; leave it to bwrap.
 	if got := resolveToolPath(bare, false); got != bare {
-		t.Errorf("resolveToolPath(%q, no-verify) = %q, want the bare name so bwrap resolves it inside the sandbox", bare, got)
+		t.Errorf("resolveToolPath(%q, !hostPATHIsAuthority) = %q, want the bare name so bwrap resolves it inside the sandbox", bare, got)
 	}
 	// An absolute operator-configured path is returned as given, verified or not.
 	const absolute = "/opt/synapse/bin/synapse-cspm"
-	for _, verify := range []bool{true, false} {
-		if got := resolveToolPath(absolute, verify); got != absolute {
-			t.Errorf("resolveToolPath(%q, %v) = %q, want it unchanged", absolute, verify, got)
+	for _, hostPATHIsAuthority := range []bool{true, false} {
+		if got := resolveToolPath(absolute, hostPATHIsAuthority); got != absolute {
+			t.Errorf("resolveToolPath(%q, %v) = %q, want it unchanged", absolute, hostPATHIsAuthority, got)
 		}
 	}
 	// An unresolvable name is returned unchanged so bwrap surfaces the not-found itself.

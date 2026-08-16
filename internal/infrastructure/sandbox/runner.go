@@ -87,23 +87,27 @@ var curatedEtc = []string{
 // needs no extra bind; anything else must be bound explicitly.
 var curatedRoot = []string{"/usr", "/bin", "/sbin", "/lib", "/lib64"}
 
-// resolveToolPath resolves a tool name to its absolute on-disk path, returning the name unchanged
-// when it cannot be resolved (bwrap then surfaces the not-found).
+// resolveToolPath settles the path bwrap will bind and exec. It returns the name unchanged whenever
+// it must not or cannot be resolved, in which case bwrap resolves it inside the sandbox and surfaces
+// any not-found itself.
 //
-// An ALREADY-ABSOLUTE name is returned as given and needs no PATH lookup: it is operator authority
-// (the documented /opt/synapse/bin/synapse-cspm layout), which is what makes it bindable below.
+// An ALREADY-ABSOLUTE name is returned as given and needs no lookup: it is operator authority (the
+// documented /opt/synapse/bin/synapse-cspm layout), which is what makes it bindable.
 //
-// A bare name is resolved through the host PATH only when the caller will integrity-verify the
-// result (verify=true). Host PATH is not an authority for what may be bound into the sandbox: with
-// verification off, resolving it would let an inherited PATH entry such as /tmp/attacker/tool be
-// resolved on the host and then explicitly bound in, where previously bwrap resolved the bare name
-// against the sandbox's own curated PATH and a binary outside the curated root failed closed.
-func resolveToolPath(name string, verify bool) string {
+// A bare name is resolved through the host PATH only when hostPATHIsAuthority is set, which callers
+// tie to integrity verification being enabled. Host PATH is otherwise NOT an authority for what may
+// be bound into the sandbox: resolving it unconditionally would let an inherited entry such as
+// /tmp/attacker/tool be resolved on the host and then explicitly bound in, where bwrap would instead
+// resolve the bare name against the sandbox's own curated PATH and a binary outside the curated root
+// would fail closed.
+func resolveToolPath(name string, hostPATHIsAuthority bool) string {
+	// A Linux container path is absolute even when this argv builder runs on a Windows host, where
+	// filepath.IsAbs("/opt/...") is false.
 	if strings.HasPrefix(name, "/") || filepath.IsAbs(name) {
 		return name
 	}
-	if !verify {
-		return name // unverified bare name: leave it for bwrap to resolve inside the sandbox
+	if !hostPATHIsAuthority {
+		return name
 	}
 	if resolved, err := exec.LookPath(name); err == nil {
 		return resolved
@@ -208,9 +212,10 @@ func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult
 	defer func() { _ = seccompF.Close() }()
 	// Settle the exec path BEFORE verification, so the path that is verified is the path that is
 	// bound and executed (closing the verify-path != exec-path gap). An absolute name is kept as
-	// given - that is the operator-configured helper the bind below exists for. A bare name is only
-	// resolved through the host PATH when it will also be verified; see resolveToolPath.
-	spec.Name = resolveToolPath(spec.Name, r.binreg != nil)
+	// given - that is the operator-configured helper the bind below exists for. The host PATH counts
+	// as an authority for a bare name only when that name will also be integrity-verified.
+	hostPATHIsAuthority := r.binreg != nil
+	spec.Name = resolveToolPath(spec.Name, hostPATHIsAuthority)
 	// F5: verify the tool binary's integrity before it runs. The resolved on-disk binary
 	// must match its pin (operator hash and/or trust-on-first-use); a replaced binary is
 	// refused. Defends the "compromised tool binary" threat the audit named.
