@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -142,24 +143,30 @@ func TestEveryAgentRouteReachesTheAgentPlane(t *testing.T) {
 // wildcardRE matches a net/http mux wildcard segment such as "{id}".
 var wildcardRE = regexp.MustCompile(`\{[^}]*\}`)
 
-// TestFleetAgentPlaneRoutesAllHaveHandlers guards the other direction: handler() skips a declared
-// pattern it has no handler for, which would otherwise be a silent 404 on a mounted agent path.
-func TestFleetAgentPlaneRoutesAllHaveHandlers(t *testing.T) {
-	agentSvc, err := fleetagentuc.NewService(memory.NewFleetAgentStore(), ftAudit{}, ftClock{}, &ftIDs{})
-	if err != nil {
-		t.Fatalf("agent svc: %v", err)
-	}
-	rt := &Router{log: discardLog()}
-	rt.SetFleet(agentSvc, nil, time.Now, "")
-	mux, ok := rt.fleet.handler().(*http.ServeMux)
-	if !ok {
-		t.Fatal("agent plane handler is not a *http.ServeMux")
-	}
+// TestFleetAgentPlaneRoutesAreWellFormed guards the declaration itself. The handler now lives on the
+// route, so a missing handler is a compile-time impossibility rather than a silent 404 - but an
+// explicit nil would panic at mux registration, and a pattern must carry a method and sit under a
+// mount that actually covers it.
+func TestFleetAgentPlaneRoutesAreWellFormed(t *testing.T) {
+	mounts := fleetAgentPlaneMounts()
 	for _, route := range fleetAgentPlaneRoutes() {
-		method, pattern, _ := strings.Cut(route.pattern, " ")
-		path := wildcardRE.ReplaceAllString(pattern, "wo1")
-		if _, matched := mux.Handler(httptest.NewRequest(method, path, http.NoBody)); matched == "" {
-			t.Errorf("declared route %q registered no handler; it would 404 on a mounted path", route.pattern)
+		if route.handler == nil {
+			t.Errorf("route %q declares a nil handler; mux registration would panic", route.pattern)
+			continue
+		}
+		method, pattern, ok := strings.Cut(route.pattern, " ")
+		if !ok || method == "" || !strings.HasPrefix(pattern, "/api/v1/fleet/") {
+			t.Errorf("route %q is malformed; want \"METHOD /api/v1/fleet/...\"", route.pattern)
+			continue
+		}
+		if !slices.Contains(mounts, route.mount) {
+			t.Errorf("route %q declares mount %q, which fleetAgentPlaneMounts() does not expose", route.pattern, route.mount)
+		}
+		// The mount must actually cover the pattern, or Router.Handler() sends it to the human chain.
+		covered := pattern == route.mount ||
+			(strings.HasSuffix(route.mount, "/") && strings.HasPrefix(pattern, route.mount))
+		if !covered {
+			t.Errorf("route %q is not covered by its own mount %q", route.pattern, route.mount)
 		}
 	}
 }

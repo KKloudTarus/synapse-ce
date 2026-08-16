@@ -273,20 +273,32 @@ func agentFrom(ctx context.Context) (*fleetagent.Agent, bool) {
 type fleetAgentPlaneRoute struct {
 	pattern string // the mux pattern, including the method
 	mount   string // the top-level prefix Router.Handler() mounts this plane under
+	// handler produces the route's handler from the router. Carrying it here rather than in a
+	// side table makes the pattern/mount/handler relation TOTAL by construction: a new route cannot
+	// be declared without a handler, so there is no missing-case branch to fail open or 404.
+	handler func(*fleetRouter) http.HandlerFunc
 }
 
 // fleetAgentPlaneRoutes is the single source of truth consumed by BOTH fleetRouter.handler() (which
 // registers the patterns) and Router.Handler() (which mounts the distinct prefixes).
 func fleetAgentPlaneRoutes() []fleetAgentPlaneRoute {
 	return []fleetAgentPlaneRoute{
-		{"POST /api/v1/fleet/enrol", "/api/v1/fleet/enrol"},
-		{"POST /api/v1/fleet/heartbeat", "/api/v1/fleet/heartbeat"},
-		{"POST /api/v1/fleet/decommission", "/api/v1/fleet/decommission"},
-		{"POST /api/v1/fleet/work/claim", "/api/v1/fleet/work/"},
-		{"POST /api/v1/fleet/work/{id}/progress", "/api/v1/fleet/work/"},
-		{"POST /api/v1/fleet/work/{id}/result", "/api/v1/fleet/work/"},
-		{"POST /api/v1/fleet/inventory/cluster", "/api/v1/fleet/inventory/"},
-		{"POST /api/v1/fleet/inventory/host", "/api/v1/fleet/inventory/"},
+		{"POST /api/v1/fleet/enrol", "/api/v1/fleet/enrol",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.enrol) }},
+		{"POST /api/v1/fleet/heartbeat", "/api/v1/fleet/heartbeat",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.heartbeat)) }},
+		{"POST /api/v1/fleet/decommission", "/api/v1/fleet/decommission",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.decommission)) }},
+		{"POST /api/v1/fleet/work/claim", "/api/v1/fleet/work/",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.claim)) }},
+		{"POST /api/v1/fleet/work/{id}/progress", "/api/v1/fleet/work/",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.progress)) }},
+		{"POST /api/v1/fleet/work/{id}/result", "/api/v1/fleet/work/",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.result)) }},
+		{"POST /api/v1/fleet/inventory/cluster", "/api/v1/fleet/inventory/",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.clusterInventory)) }},
+		{"POST /api/v1/fleet/inventory/host", "/api/v1/fleet/inventory/",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.hostInventory)) }},
 	}
 }
 
@@ -307,25 +319,9 @@ func fleetAgentPlaneMounts() []string {
 // handler builds the agent-plane mux. Every route checks the protocol version; every route except
 // enrol requires a valid agent bearer credential (agent-auth, NOT the human RBAC plane).
 func (f *fleetRouter) handler() http.Handler {
-	handlers := map[string]http.HandlerFunc{
-		"POST /api/v1/fleet/enrol":              f.entry(f.enrol),
-		"POST /api/v1/fleet/heartbeat":          f.entry(f.authed(f.heartbeat)),
-		"POST /api/v1/fleet/decommission":       f.entry(f.authed(f.decommission)),
-		"POST /api/v1/fleet/work/claim":         f.entry(f.authed(f.claim)),
-		"POST /api/v1/fleet/work/{id}/progress": f.entry(f.authed(f.progress)),
-		"POST /api/v1/fleet/work/{id}/result":   f.entry(f.authed(f.result)),
-		"POST /api/v1/fleet/inventory/cluster":  f.entry(f.authed(f.clusterInventory)),
-		"POST /api/v1/fleet/inventory/host":     f.entry(f.authed(f.hostInventory)),
-	}
 	mux := http.NewServeMux()
 	for _, route := range fleetAgentPlaneRoutes() {
-		handler, ok := handlers[route.pattern]
-		if !ok {
-			// A declared route with no handler is a programming error caught by
-			// TestFleetAgentPlaneRoutesAllHaveHandlers, never a silent 404 in production.
-			continue
-		}
-		mux.HandleFunc(route.pattern, handler)
+		mux.HandleFunc(route.pattern, route.handler(f))
 	}
 	return mux
 }

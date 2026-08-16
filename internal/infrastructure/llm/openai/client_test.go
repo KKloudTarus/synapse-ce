@@ -97,10 +97,6 @@ func TestChatTerminalOnBadRequest(t *testing.T) {
 	}
 }
 
-// TestChatSendsExplicitTemperatureZero pins the wire contract deterministic callers depend on: an
-// explicit temperature 0 (greedy decoding) must reach the provider. Dropping it silently falls back to
-// the provider default (~1.0), which is the difference between a reproducible verdict and a sampled one
-// — the FP-triage proposer/verifier and the judgment verifier all ask for 0.
 // TestChatRequestsNonStreamingResponse pins that the adapter always sends stream:false.
 // This client decodes ONE non-streaming JSON body, but several OpenAI-compatible gateways
 // default to text/event-stream when the field is absent. Omitting it made every LLM call fail
@@ -119,6 +115,10 @@ func TestChatRequestsNonStreamingResponse(t *testing.T) {
 	}
 }
 
+// TestChatSendsExplicitTemperatureZero pins the wire contract deterministic callers depend on: an
+// explicit temperature 0 (greedy decoding) must reach the provider. Dropping it silently falls back to
+// the provider default (~1.0), which is the difference between a reproducible verdict and a sampled one
+// — the FP-triage proposer/verifier and the judgment verifier all ask for 0.
 func TestChatSendsExplicitTemperatureZero(t *testing.T) {
 	body := captureChatBody(t, ports.ChatRequest{
 		Temperature: ports.Temp(0),
