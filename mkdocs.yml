@@ -1,9 +1,9 @@
 # MkDocs Material configuration for the Synapse documentation site.
 # The marketing landing page (docs/index.html) is kept at the site root; this
 # renders the guide under /docs/. Both are assembled and deployed by
-# .github/workflows/docs.yml. Build locally with:  mkdocs serve
+# .github/workflows/docs.yml. Build locally with: mkdocs serve
 site_name: Synapse
-site_description: A governed control plane for software composition analysis, recon, evidence, and reporting.
+site_description: A governed control plane for supply-chain, code, cloud, offensive, and runtime security assessments.
 site_url: https://synapse.kkloudtarus.net/docs/
 repo_url: https://github.com/KKloudTarus/synapse-ce
 repo_name: KKloudTarus/synapse-ce
@@ -48,20 +48,36 @@ theme:
 
 nav:
   - Home: README.md
-  - Introduction: introduction.md
-  - Installation: installation.md
-  - Quickstart: quickstart.md
-  - Features: features.md
-  - Configuration: configuration.md
-  - CLI: cli.md
-  - Cloud posture (CSPM): cloud-posture.md
-  - Code quality rules: code-quality-rules.md
-  - Fleet agent packaging: fleet-agent-packaging.md
-  - AI triage evaluation: ai-triage-evaluation.md
-  - Remediation SLA governance: sla-governance.md
-  - Architecture: architecture.md
-  - Deployment: deployment.md
-  - Security model: security.md
+  - Get started:
+      - Introduction: introduction.md
+      - Installation: installation.md
+      - Quickstart: quickstart.md
+      - Features: features.md
+  - Assessment workflows:
+      - Project code quality: project-code-quality.md
+      - Governed assessments: governed-assessment-workflows.md
+      - Vulnerability intelligence: vulnerability-intelligence.md
+      - Cloud posture (CSPM): cloud-posture.md
+      - Fleet and runtime defense: fleet-blue-team.md
+      - AI triage review: ai-triage-review.md
+      - Remediation SLA governance: sla-governance.md
+  - Operate:
+      - Configuration: configuration.md
+      - Deployment: deployment.md
+      - Fleet agent packaging: fleet-agent-packaging.md
+      - AI triage evaluation: ai-triage-evaluation.md
+  - Integrate:
+      - CLI: cli.md
+      - MCP integration: mcp-integration.md
+      - Code quality rule authoring: code-quality-rules.md
+  - Architecture and security:
+      - Architecture: architecture.md
+      - Security model: security.md
+      - Repository decisions and policies:
+          - Telemetry store ADR: repository/telemetry-store-adr.md
+          - CSPM helper ADR: repository/cspm-helper-adr.md
+          - Promotion rules: repository/promotion-rules.md
+          - Offensive policy: repository/offensive-policy.md
 
 markdown_extensions:
   - abbr

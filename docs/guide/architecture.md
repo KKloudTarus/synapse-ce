@@ -33,13 +33,51 @@ their Project instead of duplicating or forking that engine.
 
 ## Binaries
 
+`cmd/` holds 15 composition roots. They fall into four groups.
+
+**Services**
+
 | Binary | Role |
 | --- | --- |
-| `synapse-api` | HTTP API server, the primary service. |
-| `synapse-cli` | Run an SCA scan from the command line, CI-friendly. |
-| `synapse-worker` | Durable job runner for recon and background jobs, lease-based. |
-| `synapse-callgraph` | Sandboxed call-graph builder for reachability analysis. It keeps the heavy analysis library out of the server. |
-| `synapse-mcp` | Read-only, propose-only integration server. It never executes. |
+| `synapse-api` | HTTP API server, the primary service and largest composition root. |
+| `synapse-worker` | Durable, lease-based job runner for recon, scheduled provider work, and background jobs. Leader-gated. |
+| `synapse-mcp` | Read and propose-only MCP integration. It has no executor and no gate, so it never executes. |
+
+**Command line**
+
+| Binary | Role |
+| --- | --- |
+| `synapse-cli` | CI-oriented scanner and code-quality gate using the same pipeline as the server. |
+
+**Sandboxed helpers**
+
+Each isolates a capability-sensitive or untrusted-input workload out of the server process.
+
+| Binary | Role |
+| --- | --- |
+| `synapse-callgraph` | `go/ssa` call-graph builder for reachability and taint. |
+| `synapse-ast` | tree-sitter AST parsing of untrusted source. Exit code 3 means the backend is unavailable in a CGO-free build. |
+| `synapse-cspm` | Cloud posture collection for AWS, Azure, and GCP. Read-only, with credentials passed by inherited file descriptor. |
+| `synapse-dast-helper` | Governed DAST crawling and checks under kernel-enforced egress confinement. |
+
+**Fleet agents**
+
+| Binary | Role |
+| --- | --- |
+| `synapse-agent` | Host inventory and, on Linux, eBPF runtime detections. |
+| `synapse-cluster-agent` | Kubernetes workload, exposure, and identity inventory. |
+
+**AI-triage evaluation tools**
+
+Offline governance utilities. None participates in a live scan.
+
+| Binary | Role |
+| --- | --- |
+| `synapse-fptriage-eval` | Offline evaluation harness against golden datasets. |
+| `synapse-fptriage-compare` | Deterministic candidate-versus-baseline promotion gate. |
+| `synapse-fptriage-release` | Versioned promotion and rollback ledger. |
+| `synapse-fptriage-curate` | Privacy- and label-reviewed reviewer-feedback curation. |
+| `synapse-fptriage-drift` | Input distribution drift detection. |
 
 ## Tool integration
 

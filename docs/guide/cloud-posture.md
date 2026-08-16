@@ -1,6 +1,6 @@
 # Cloud posture connectors
 
-Synapse can enumerate live AWS, Azure, and Google Cloud state through read-only connectors. CSPM is disabled by default.
+Synapse can enumerate live AWS, Azure, and Google Cloud state through read-only connectors. CSPM is disabled by default. CSPM results live inside an engagement rather than at a standalone dashboard route. A truthful loaded-state screenshot therefore requires a sandboxed Linux deployment, `synapse-worker`, a pinned helper, and authorized synthetic cloud inventory; the development Compose stack cannot produce one, and no credential-bearing provider view should be captured for documentation.
 
 ```env
 SYNAPSE_CSPM_ENABLED=true
