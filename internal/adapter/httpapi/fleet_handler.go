@@ -353,6 +353,12 @@ func (f *fleetRouter) authed(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		ctx := context.WithValue(r.Context(), agentKeyCtx, agent)
+		// Bind the AUTHENTICATED agent's tenant onto the context (never a request field). Downstream
+		// writes - notably the hash-chained audit log - read the tenant from the context to satisfy
+		// tenant RLS, and this plane has no human principal to carry it. Without this, heartbeat,
+		// claim, result, and inventory writes fail the audit insert with
+		// "new row violates row-level security policy for table audit_log".
+		ctx = shared.WithTenant(ctx, agent.TenantID)
 		next(w, r.WithContext(ctx))
 	}
 }

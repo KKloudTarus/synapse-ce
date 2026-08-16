@@ -101,6 +101,11 @@ func (s *Service) Enrol(ctx context.Context, enrolToken string, in EnrolInput) (
 	}
 	now := s.clock.Now()
 	tenantID := shared.ID(tenantStr)
+	// Bind the token's tenant onto the context. Downstream writes (notably the audit chain) read
+	// the tenant from the context to satisfy tenant RLS, and this agent plane has no human
+	// principal to carry it: without this, every enrolment fails the audit insert with
+	// "new row violates row-level security policy for table audit_log".
+	ctx = shared.WithTenant(ctx, tenantID)
 	agentID := s.ids.NewID()
 	token, hash, err := agenttoken.Mint(agenttoken.KindAgent, tenantID.String(), agentID.String())
 	if err != nil {
