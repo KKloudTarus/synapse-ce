@@ -40,6 +40,32 @@ func New(runner ports.ToolRunner, vault ports.CredentialVault, binary string, ra
 	return &Executor{runner: runner, vault: vault, binary: binary, rate: rate, timeout: timeout, maxOutput: maxOutput, egressHost: egressHosts}, nil
 }
 
+// diagnosticCap bounds how much helper stderr reaches an error message. The helper writes one
+// short reason line; anything longer is a malfunction and must not become an unbounded log write.
+const diagnosticCap = 512
+
+// diagnostic renders the helper's stderr as a bounded, credential-free error suffix. Without it a
+// failing helper surfaces only "exit_code=1", which says nothing about WHY posture enumeration
+// failed and makes an operator-fixable misconfiguration (bad role ARN, denied API, blocked egress)
+// indistinguishable from a crash. The credential is redacted first and, if any placeholder survives,
+// the text is dropped entirely rather than risking secret material in a log or API error.
+func diagnostic(stderr, secret []byte) string {
+	redacted := redact.Bytes(stderr, [][]byte{secret})
+	if strings.Contains(string(redacted), redact.Placeholder) {
+		return " reason=<redacted>"
+	}
+	reason := strings.TrimSpace(string(redacted))
+	if reason == "" {
+		return ""
+	}
+	if len(reason) > diagnosticCap {
+		reason = reason[:diagnosticCap] + "…"
+	}
+	// Collapse to a single line: these reasons land in structured logs and JSON error bodies.
+	reason = strings.Join(strings.Fields(reason), " ")
+	return " reason=" + reason
+}
+
 func (e *Executor) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (cloudposture.Inventory, []cloudposture.CoverageIssue, error) {
 	if scope.Authorize == nil {
 		return cloudposture.Inventory{}, nil, fmt.Errorf("%w: cloud operation authorizer is required", shared.ErrForbidden)
@@ -142,7 +168,7 @@ func (e *Executor) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (
 		return cloudposture.Inventory{}, nil, fmt.Errorf("sandboxed CSPM helper failed: %w", runErr)
 	}
 	if result.ExitCode != 0 || result.TimedOut || result.Truncated {
-		return cloudposture.Inventory{}, nil, fmt.Errorf("sandboxed CSPM helper failed: exit_code=%d timed_out=%t truncated=%t", result.ExitCode, result.TimedOut, result.Truncated)
+		return cloudposture.Inventory{}, nil, fmt.Errorf("sandboxed CSPM helper failed: exit_code=%d timed_out=%t truncated=%t%s", result.ExitCode, result.TimedOut, result.Truncated, diagnostic(result.Stderr, secret))
 	}
 	result.Stdout = redact.Bytes(result.Stdout, [][]byte{secret})
 	if strings.Contains(string(result.Stdout), redact.Placeholder) {

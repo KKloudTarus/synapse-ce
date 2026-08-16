@@ -126,3 +126,76 @@ func (nilVault) Resolve(context.Context, shared.ID, string) ([]byte, error)     
 func (nilVault) Put(context.Context, shared.ID, string, []byte) error            { return nil }
 func (nilVault) List(context.Context, shared.ID) ([]ports.CredentialMeta, error) { return nil, nil }
 func (nilVault) Delete(context.Context, shared.ID, string) error                 { return nil }
+
+// secretVault hands out real credential material so the redaction path is exercised for real
+// rather than against nilVault's empty secret.
+type secretVault struct{ secret []byte }
+
+func (v secretVault) Resolve(context.Context, shared.ID, string) ([]byte, error) {
+	return append([]byte(nil), v.secret...), nil
+}
+func (secretVault) Put(context.Context, shared.ID, string, []byte) error            { return nil }
+func (secretVault) List(context.Context, shared.ID) ([]ports.CredentialMeta, error) { return nil, nil }
+func (secretVault) Delete(context.Context, shared.ID, string) error                 { return nil }
+
+// TestExecutorSurfacesHelperStderr pins the helper's failure REASON onto the error. The executor
+// used to report only "exit_code=1", so an operator-fixable misconfiguration (unassumable role,
+// denied API, blocked egress) was indistinguishable from a crash: the durable run dead-lettered
+// after three attempts with no recorded cause anywhere in the worker log or the run row.
+func TestExecutorSurfacesHelperStderr(t *testing.T) {
+	runner := &runnerStub{result: ports.ToolResult{ExitCode: 1, Stderr: []byte("enumerate accounts: AccessDenied\n")}}
+	executor, err := New(runner, nilVault{}, "synapse-cspm", 5, time.Minute, 1<<20, map[cloudposture.Provider][]string{cloudposture.ProviderAWS: {"organizations.us-east-1.amazonaws.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
+	if err == nil {
+		t.Fatal("expected a helper failure")
+	}
+	if !strings.Contains(err.Error(), "exit_code=1") {
+		t.Errorf("error = %v, want the exit code preserved", err)
+	}
+	if !strings.Contains(err.Error(), "reason=enumerate accounts: AccessDenied") {
+		t.Errorf("error = %v, want the helper's stderr reason", err)
+	}
+}
+
+// TestExecutorNeverLeaksCredentialsThroughStderr is the other half of the contract: stderr is
+// attacker-influenced, untrusted output on a credentialed path, so a helper that echoes its own
+// credential must not turn an error message into a secret sink.
+func TestExecutorNeverLeaksCredentialsThroughStderr(t *testing.T) {
+	const secret = "AKIAEXAMPLECANARY"
+	runner := &runnerStub{result: ports.ToolResult{ExitCode: 1, Stderr: []byte("failed for key " + secret)}}
+	executor, err := New(runner, secretVault{secret: []byte(secret)}, "synapse-cspm", 5, time.Minute, 1<<20, map[cloudposture.Provider][]string{cloudposture.ProviderAWS: {"organizations.us-east-1.amazonaws.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
+	if err == nil {
+		t.Fatal("expected a helper failure")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatal("credential material leaked into the error message")
+	}
+	if !strings.Contains(err.Error(), "reason=<redacted>") {
+		t.Errorf("error = %v, want the reason dropped once a placeholder survives", err)
+	}
+}
+
+// TestDiagnosticBoundsAndNormalizesReason keeps the suffix log-safe: empty stderr adds nothing, and
+// a malfunctioning helper cannot emit an unbounded multi-line blob into a structured log field.
+func TestDiagnosticBoundsAndNormalizesReason(t *testing.T) {
+	if got := diagnostic(nil, nil); got != "" {
+		t.Errorf("diagnostic(nil) = %q, want empty", got)
+	}
+	if got := diagnostic([]byte("  \n\t "), nil); got != "" {
+		t.Errorf("diagnostic(whitespace) = %q, want empty", got)
+	}
+	if got := diagnostic([]byte("first line\nsecond line"), nil); got != " reason=first line second line" {
+		t.Errorf("diagnostic(multiline) = %q, want a single line", got)
+	}
+	long := diagnostic([]byte(strings.Repeat("x", diagnosticCap*3)), nil)
+	if len(long) > diagnosticCap+len(" reason=")+len("…") {
+		t.Errorf("diagnostic(long) length = %d, want bounded by diagnosticCap", len(long))
+	}
+}
