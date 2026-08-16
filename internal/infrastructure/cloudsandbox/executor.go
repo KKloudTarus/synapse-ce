@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -44,13 +45,58 @@ func New(runner ports.ToolRunner, vault ports.CredentialVault, binary string, ra
 // short reason line; anything longer is a malfunction and must not become an unbounded log write.
 const diagnosticCap = 512
 
+// minScrubbableSecretLen is the shortest credential-field value scrubbed on its own. Provider
+// credential documents also carry SHORT structural values (a region, a provider name, "true"), and
+// scrubbing those would match ordinary prose in any diagnostic and drop every reason - silently
+// reverting the observability this file exists to provide. Real credential material is far longer:
+// an AWS access key id is 20 characters, a secret access key 40, session tokens and GCP/Azure keys
+// longer still.
+const minScrubbableSecretLen = 16
+
+// credentialSecrets decomposes resolved credential material into every value that must be scrubbed
+// INDEPENDENTLY. A provider credential is a JSON document holding several distinct secret-bearing
+// fields (an AWS document carries access_key_id, secret_access_key and session_token), and provider
+// SDK errors routinely echo exactly ONE of them in isolation - for example "The AWS Access Key Id
+// you provided does not exist in our records: AKIA...". Scrubbing only the whole document never
+// matches that substring, so the field would survive redaction, pass the placeholder check, and
+// reach a structured log or a JSON API error body.
+//
+// The document is treated as opaque provider-shaped JSON on purpose: this executor is
+// provider-agnostic and must not import a concrete connector's credential type.
+func credentialSecrets(secret []byte) [][]byte {
+	secrets := [][]byte{secret}
+	var document any
+	if err := json.Unmarshal(secret, &document); err != nil {
+		return secrets // opaque (non-JSON) credential: the whole blob is the only known value
+	}
+	var walk func(node any)
+	walk = func(node any) {
+		switch typed := node.(type) {
+		case map[string]any:
+			for _, value := range typed {
+				walk(value)
+			}
+		case []any:
+			for _, value := range typed {
+				walk(value)
+			}
+		case string:
+			if len(typed) >= minScrubbableSecretLen {
+				secrets = append(secrets, []byte(typed))
+			}
+		}
+	}
+	walk(document)
+	return secrets
+}
+
 // diagnostic renders the helper's stderr as a bounded, credential-free error suffix. Without it a
 // failing helper surfaces only "exit_code=1", which says nothing about WHY posture enumeration
 // failed and makes an operator-fixable misconfiguration (bad role ARN, denied API, blocked egress)
-// indistinguishable from a crash. The credential is redacted first and, if any placeholder survives,
-// the text is dropped entirely rather than risking secret material in a log or API error.
-func diagnostic(stderr, secret []byte) string {
-	redacted := redact.Bytes(stderr, [][]byte{secret})
+// indistinguishable from a crash. Every credential value is redacted first and, if any placeholder
+// survives, the text is dropped entirely rather than risking secret material in a log or API error.
+func diagnostic(stderr []byte, secrets [][]byte) string {
+	redacted := redact.Bytes(stderr, secrets)
 	if strings.Contains(string(redacted), redact.Placeholder) {
 		return " reason=<redacted>"
 	}
@@ -58,8 +104,14 @@ func diagnostic(stderr, secret []byte) string {
 	if reason == "" {
 		return ""
 	}
+	// Truncate on a RUNE boundary: a byte-offset cut can split a multi-byte rune and emit invalid
+	// UTF-8 into a structured log and a JSON error body, which strings.Fields below cannot repair.
 	if len(reason) > diagnosticCap {
-		reason = reason[:diagnosticCap] + "…"
+		cut := diagnosticCap
+		for cut > 0 && !utf8.ValidString(reason[:cut]) {
+			cut--
+		}
+		reason = reason[:cut] + "…"
 	}
 	// Collapse to a single line: these reasons land in structured logs and JSON error bodies.
 	reason = strings.Join(strings.Fields(reason), " ")
@@ -167,10 +219,13 @@ func (e *Executor) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (
 	if runErr != nil {
 		return cloudposture.Inventory{}, nil, fmt.Errorf("sandboxed CSPM helper failed: %w", runErr)
 	}
+	// Scrub each credential FIELD independently, not just the whole document: a provider SDK error
+	// echoes one field in isolation, which never matches the blob.
+	secrets := credentialSecrets(secret)
 	if result.ExitCode != 0 || result.TimedOut || result.Truncated {
-		return cloudposture.Inventory{}, nil, fmt.Errorf("sandboxed CSPM helper failed: exit_code=%d timed_out=%t truncated=%t%s", result.ExitCode, result.TimedOut, result.Truncated, diagnostic(result.Stderr, secret))
+		return cloudposture.Inventory{}, nil, fmt.Errorf("sandboxed CSPM helper failed: exit_code=%d timed_out=%t truncated=%t%s", result.ExitCode, result.TimedOut, result.Truncated, diagnostic(result.Stderr, secrets))
 	}
-	result.Stdout = redact.Bytes(result.Stdout, [][]byte{secret})
+	result.Stdout = redact.Bytes(result.Stdout, secrets)
 	if strings.Contains(string(result.Stdout), redact.Placeholder) {
 		return cloudposture.Inventory{}, nil, errors.New("sandboxed CSPM output contained credential material")
 	}

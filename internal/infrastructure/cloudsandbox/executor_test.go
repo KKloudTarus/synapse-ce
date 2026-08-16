@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -197,5 +198,97 @@ func TestDiagnosticBoundsAndNormalizesReason(t *testing.T) {
 	long := diagnostic([]byte(strings.Repeat("x", diagnosticCap*3)), nil)
 	if len(long) > diagnosticCap+len(" reason=")+len("…") {
 		t.Errorf("diagnostic(long) length = %d, want bounded by diagnosticCap", len(long))
+	}
+}
+
+// TestExecutorRedactsIndividualCredentialFields is the review finding this file previously missed.
+// A provider credential is a JSON document with several secret-bearing fields, and provider SDK
+// errors echo exactly ONE of them in isolation ("The AWS Access Key Id you provided does not exist
+// in our records: AKIA..."). Scrubbing only the whole document never matches that substring, so the
+// field survived redaction, passed the placeholder check, and reached the returned error - which by
+// diagnostic's own contract lands in structured logs and JSON API error bodies.
+func TestExecutorRedactsIndividualCredentialFields(t *testing.T) {
+	const (
+		accessKeyID = "AKIAIOSFODNN7EXAMPLE"
+		secretKey   = "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY123"
+		sessionTok  = "FwoGZXIvYXdzEBYaDEXAMPLESESSIONTOKENVALUE"
+	)
+	document := `{"access_key_id":"` + accessKeyID + `","secret_access_key":"` + secretKey +
+		`","session_token":"` + sessionTok + `","role_arn_template":"arn:aws:iam::{account_id}:role/Reader"}`
+
+	for _, tc := range []struct {
+		name   string
+		stderr string
+		leaked string
+	}{
+		{"access key id alone", "The AWS Access Key Id you provided does not exist in our records: " + accessKeyID, accessKeyID},
+		{"secret access key alone", "signature mismatch for key " + secretKey, secretKey},
+		{"session token alone", "expired session token " + sessionTok, sessionTok},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &runnerStub{result: ports.ToolResult{ExitCode: 1, Stderr: []byte(tc.stderr)}}
+			executor, err := New(runner, secretVault{secret: []byte(document)}, "synapse-cspm", 5, time.Minute, 1<<20, map[cloudposture.Provider][]string{cloudposture.ProviderAWS: {"organizations.us-east-1.amazonaws.com"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
+			if err == nil {
+				t.Fatal("expected a helper failure")
+			}
+			if strings.Contains(err.Error(), tc.leaked) {
+				t.Fatalf("credential field leaked into the error message: %v", err)
+			}
+			if !strings.Contains(err.Error(), "reason=<redacted>") {
+				t.Errorf("error = %v, want the reason dropped once a credential field is detected", err)
+			}
+		})
+	}
+}
+
+// TestCredentialSecretsDecomposesTheDocument pins the decomposition contract: every long field is
+// scrubbable on its own, the whole blob stays in the set, short structural values are excluded (they
+// would match ordinary prose and drop every diagnostic), and a non-JSON credential is still covered.
+func TestCredentialSecretsDecomposesTheDocument(t *testing.T) {
+	document := []byte(`{"access_key_id":"AKIAIOSFODNN7EXAMPLE","region":"us-east-1","enabled":true,"nested":{"token":"FwoGZXIvYXdzEBYaDEXAMPLESESSIONTOKEN"}}`)
+	got := credentialSecrets(document)
+	has := func(want string) bool {
+		for _, secret := range got {
+			if string(secret) == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(string(document)) {
+		t.Error("the whole credential document must remain in the scrub set")
+	}
+	if !has("AKIAIOSFODNN7EXAMPLE") {
+		t.Error("a top-level credential field was not decomposed")
+	}
+	if !has("FwoGZXIvYXdzEBYaDEXAMPLESESSIONTOKEN") {
+		t.Error("a nested credential field was not decomposed")
+	}
+	if has("us-east-1") {
+		t.Error("a short structural value was scrubbed; that matches ordinary prose and drops every diagnostic")
+	}
+	if opaque := credentialSecrets([]byte("not-json-credential-material")); len(opaque) != 1 {
+		t.Errorf("opaque credential produced %d secrets, want just the blob", len(opaque))
+	}
+}
+
+// TestDiagnosticTruncatesOnARuneBoundary keeps the suffix valid UTF-8. A byte-offset cut can split a
+// multi-byte rune and emit invalid UTF-8 into a structured log and a JSON error body, and the
+// strings.Fields pass afterwards does not repair it.
+func TestDiagnosticTruncatesOnARuneBoundary(t *testing.T) {
+	// "é" is two bytes, so a diagnosticCap-byte cut lands mid-rune for some repetition counts.
+	for _, filler := range []string{"é", "字", "🔒"} {
+		reason := strings.Repeat(filler, diagnosticCap)
+		got := diagnostic([]byte(reason), nil)
+		if !utf8.ValidString(got) {
+			t.Errorf("diagnostic(%q...) produced invalid UTF-8", filler)
+		}
+		if len(got) > diagnosticCap+len(" reason=")+len("…") {
+			t.Errorf("diagnostic(%q...) length = %d, want bounded", filler, len(got))
+		}
 	}
 }
