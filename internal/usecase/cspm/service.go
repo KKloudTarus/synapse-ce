@@ -522,20 +522,13 @@ func (s *Service) Run(ctx context.Context, in RunInput) (result RunResult, runEr
 		if err := s.findings.Upsert(runCtx, standard); err != nil {
 			return result, err
 		}
-		if s.attributor != nil {
-			for resourceID, cloudAsset := range assets {
-				producer := shared.ID("cspm:" + scopeDigest(scope.ScopeKey) + ":" + scopeDigest(resourceID))
-				var targets []attackpath.FindingTarget
-				for index, match := range matches {
-					if match.ResourceID == resourceID {
-						targets = append(targets, attackpath.FindingTarget{ID: standard[index].ID, Kind: attackpath.TargetCanonical})
-					}
-				}
-				if err := s.attributor.RecordTargets(runCtx, in.EngagementID, cloudAsset.ID, producer, evidenceIDOrProducer(evidenceID, producer), asset.EdgeObserved, targets); err != nil {
-					return result, err
-				}
-			}
-		}
+		// Reconcile observations BEFORE attribution. A cloud asset carries a scope_key, and the
+		// asset repository deliberately hides such an asset until an ACTIVE cspm_observations row
+		// vouches for it (no default-to-clean inventory). Attribution validates its asset through
+		// that same tenant-scoped listing, so attributing first made every run with at least one
+		// asset fail with "asset <id>: not found" - after real provider enumeration had already
+		// succeeded - then retry twice and dead-letter. Reconciliation depends only on findings and
+		// edges that are already persisted above, so it is safe to run first.
 		if s.observations != nil {
 			assetIDs := make([]shared.ID, 0, len(assets))
 			for _, cloudAsset := range assets {
@@ -555,6 +548,20 @@ func (s *Service) Run(ctx context.Context, in RunInput) (result RunResult, runEr
 			}
 			if err := s.observations.ReconcileCloudObservations(runCtx, in.TenantID, in.EngagementID, producerID(scope.ScopeKey).String(), evidenceID, assetIDs, findingIDs, edgeIDs, inventory.Complete && len(allTargetGaps) == 0); err != nil {
 				return result, err
+			}
+		}
+		if s.attributor != nil {
+			for resourceID, cloudAsset := range assets {
+				producer := shared.ID("cspm:" + scopeDigest(scope.ScopeKey) + ":" + scopeDigest(resourceID))
+				var targets []attackpath.FindingTarget
+				for index, match := range matches {
+					if match.ResourceID == resourceID {
+						targets = append(targets, attackpath.FindingTarget{ID: standard[index].ID, Kind: attackpath.TargetCanonical})
+					}
+				}
+				if err := s.attributor.RecordTargets(runCtx, in.EngagementID, cloudAsset.ID, producer, evidenceIDOrProducer(evidenceID, producer), asset.EdgeObserved, targets); err != nil {
+					return result, err
+				}
 			}
 		}
 		result.Findings += len(standard)
