@@ -139,6 +139,13 @@ type AIEvaluationCaseChange struct {
 
 // AIEvaluationPromotionFailure is a stable machine-readable reason a candidate cannot proceed to
 // human promotion review. Scope is "overall", "case", or a report breakdown dimension.
+//
+// A failure carries exactly one of two numeric triples, so a consumer never has to read a value in
+// a unit it did not expect. Rate rules populate the basis-point fields, which always hold a rate in
+// 0..10000. Precondition rules constrain the size of a population rather than a rate, and populate
+// the count fields instead while leaving the basis-point fields zero. LimitCount is non-zero on
+// every emitted count rule, because a precondition with a zero minimum cannot fail, so its presence
+// identifies the shape without the consumer needing a list of rule names.
 type AIEvaluationPromotionFailure struct {
 	Rule                 string `json:"rule"`
 	Scope                string `json:"scope"`
@@ -147,6 +154,9 @@ type AIEvaluationPromotionFailure struct {
 	BaselineBasisPoints  int    `json:"baseline_basis_points"`
 	CandidateBasisPoints int    `json:"candidate_basis_points"`
 	LimitBasisPoints     int    `json:"limit_basis_points"`
+	BaselineCount        int    `json:"baseline_count,omitempty"`
+	CandidateCount       int    `json:"candidate_count,omitempty"`
+	LimitCount           int    `json:"limit_count,omitempty"`
 }
 
 // AIEvaluationComparison is deterministic CI evidence for a candidate-vs-baseline decision. A clean
@@ -527,13 +537,14 @@ func appendRobustnessPromotionFailures(failures []AIEvaluationPromotionFailure, 
 	}
 	// A precondition on the population the flip criteria are computed over, not a rate. Without it a
 	// corpus whose adversarial challenges all sit above a human-review floor reports zero flips for
-	// every candidate, and the criteria above pass without having tested anything.
+	// every candidate, and the criteria above pass without having tested anything. Its evidence is
+	// pair counts, so it reports them in the count fields and leaves the basis-point fields zero.
 	if metrics.Candidate.GateReachablePairs < policy.MinimumGateReachableCounterfactualPairs {
 		failures = append(failures, AIEvaluationPromotionFailure{
 			Rule: "minimum_gate_reachable_counterfactual_pairs", Scope: "robustness",
-			BaselineBasisPoints:  metrics.Baseline.GateReachablePairs,
-			CandidateBasisPoints: metrics.Candidate.GateReachablePairs,
-			LimitBasisPoints:     policy.MinimumGateReachableCounterfactualPairs,
+			BaselineCount:  metrics.Baseline.GateReachablePairs,
+			CandidateCount: metrics.Candidate.GateReachablePairs,
+			LimitCount:     policy.MinimumGateReachableCounterfactualPairs,
 		})
 	}
 	return failures

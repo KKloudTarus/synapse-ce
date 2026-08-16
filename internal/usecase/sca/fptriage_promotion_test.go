@@ -188,8 +188,17 @@ func TestCompareAIEvaluationReportsBlocksVacuousCounterfactualPopulation(t *test
 	if comparison.Status != "blocked" {
 		t.Fatalf("a corpus that cannot exercise the gate must not reach promotion review: %q", comparison.Status)
 	}
-	if !hasPromotionFailure(comparison.Failures, "minimum_gate_reachable_counterfactual_pairs", "robustness", "", "") {
+	precondition := findPromotionFailure(comparison.Failures, "minimum_gate_reachable_counterfactual_pairs", "robustness", "", "")
+	if precondition == nil {
 		t.Fatalf("missing gate-reachability failure in %+v", comparison.Failures)
+	}
+	// The evidence is a pair count, so it must arrive in the count fields. Reported as basis points
+	// a limit of 1 pair would read as 0.01%.
+	if precondition.LimitCount != 1 || precondition.CandidateCount != 0 || precondition.BaselineCount != 0 {
+		t.Fatalf("gate-reachability evidence must be pair counts: %+v", precondition)
+	}
+	if precondition.LimitBasisPoints != 0 || precondition.CandidateBasisPoints != 0 || precondition.BaselineBasisPoints != 0 {
+		t.Fatalf("a count precondition must not occupy the basis-point fields: %+v", precondition)
 	}
 	// The flip-rate criteria are all satisfied here, which is exactly why the precondition is needed.
 	for _, rule := range []string{
@@ -390,6 +399,62 @@ func TestPromotionEvidenceUsesConservativeExactBasisPoints(t *testing.T) {
 	}
 }
 
+// TestPromotionFailureEvidenceStaysInItsDeclaredUnit pins the reporting contract of
+// AIEvaluationPromotionFailure: the basis-point fields always carry a rate, and a precondition that
+// constrains a population reports counts in fields of its own. A consumer reading
+// "candidate_basis_points": 2 must never be looking at two pairs.
+func TestPromotionFailureEvidenceStaysInItsDeclaredUnit(t *testing.T) {
+	// One robustness comparison that trips both shapes: coverage and policy-flip rates, and the
+	// gate-reachability precondition.
+	robustness := AIEvaluationRobustnessComparison{
+		Baseline:  AIEvaluationRobustnessMetrics{TotalPairs: 2, CoveredPairs: 2, GateReachablePairs: 2},
+		Candidate: AIEvaluationRobustnessMetrics{TotalPairs: 2, CoveredPairs: 1, PolicyFlips: 1},
+	}
+	failures := appendRobustnessPromotionFailures(nil, robustness, DefaultAIEvaluationPromotionPolicy())
+	overall := metricComparison(
+		AIEvaluationMetrics{CorrectFalsePositives: 19_000, ConsensusFalsePositives: 20_000, HumanTruePositives: 40_000, ExemptibleTruePositives: 40_000},
+		AIEvaluationMetrics{CorrectFalsePositives: 18_999, ConsensusFalsePositives: 20_000, HumanTruePositives: 40_000, ExemptibleTruePositives: 40_000, TruePositiveEscapes: 1},
+	)
+	failures = appendOverallPromotionFailures(failures, overall, DefaultAIEvaluationPromotionPolicy())
+
+	var rateRules, countRules int
+	for _, failure := range failures {
+		if failure.LimitCount != 0 {
+			countRules++
+			if failure.BaselineBasisPoints != 0 || failure.CandidateBasisPoints != 0 || failure.LimitBasisPoints != 0 {
+				t.Fatalf("count rule %q also occupies the basis-point fields: %+v", failure.Rule, failure)
+			}
+			continue
+		}
+		rateRules++
+		if failure.BaselineCount != 0 || failure.CandidateCount != 0 {
+			t.Fatalf("rate rule %q reports counts: %+v", failure.Rule, failure)
+		}
+		for _, bps := range []int{failure.BaselineBasisPoints, failure.CandidateBasisPoints, failure.LimitBasisPoints} {
+			if bps < 0 || bps > 10_000 {
+				t.Fatalf("rate rule %q reports %d outside basis-point space: %+v", failure.Rule, bps, failure)
+			}
+		}
+		// omitempty is what keeps a rate failure's wire shape unchanged by the count fields.
+		var encoded map[string]any
+		raw, err := json.Marshal(failure)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(raw, &encoded); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"baseline_count", "candidate_count", "limit_count"} {
+			if _, ok := encoded[key]; ok {
+				t.Fatalf("rate rule %q emits %s on the wire: %s", failure.Rule, key, raw)
+			}
+		}
+	}
+	if rateRules == 0 || countRules != 1 {
+		t.Fatalf("both failure shapes must be exercised: %d rate, %d count in %+v", rateRules, countRules, failures)
+	}
+}
+
 func TestLoadAIEvaluationReportIsStrict(t *testing.T) {
 	report := promotionTestReport("prompt-v1", nil)
 	data, err := json.Marshal(report)
@@ -530,10 +595,15 @@ func promotionTestCritique(run AIEvaluationRun, caseID string, falsePositive, wo
 }
 
 func hasPromotionFailure(failures []AIEvaluationPromotionFailure, rule, scope, segment, caseID string) bool {
-	for _, failure := range failures {
+	return findPromotionFailure(failures, rule, scope, segment, caseID) != nil
+}
+
+func findPromotionFailure(failures []AIEvaluationPromotionFailure, rule, scope, segment, caseID string) *AIEvaluationPromotionFailure {
+	for i := range failures {
+		failure := &failures[i]
 		if failure.Rule == rule && failure.Scope == scope && failure.Segment == segment && failure.CaseID == caseID {
-			return true
+			return failure
 		}
 	}
-	return false
+	return nil
 }

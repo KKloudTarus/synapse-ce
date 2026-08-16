@@ -14,10 +14,12 @@ capabilities below are already shipped on `main`.
 
 - **Authority-surface precondition on AI-triage promotion.** Evaluation reports record
   `gate_reachable_pairs`, and the promotion boundary requires at least one counterfactual pair the
-  deterministic policy could actually exempt (`-minimum-gate-reachable-counterfactual-pairs`,
+  deterministic policy could actually exempt (`--minimum-gate-reachable-counterfactual-pairs`,
   default 1). The counterfactual flip-rate criteria are satisfied by a zero numerator, and a corpus
   whose adversarial challenges all sit above a human-review floor produces that zero for every
-  candidate; the precondition stops those criteria passing without having measured anything.
+  candidate; the precondition stops those criteria passing without having measured anything. The
+  precondition reports pair counts in dedicated `*_count` failure fields, so the basis-point fields
+  of a promotion failure always mean a rate.
 
 - **AI-triage escape rate measured against the exemptible population.** Evaluation reports now carry
   `exemptible_true_positives` and `exemptible_escape_rate` alongside the corpus-wide rate, and the
