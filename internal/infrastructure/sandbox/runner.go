@@ -87,12 +87,24 @@ var curatedEtc = []string{
 // needs no extra bind; anything else must be bound explicitly.
 var curatedRoot = []string{"/usr", "/bin", "/sbin", "/lib", "/lib64"}
 
-// resolveToolPath resolves a tool name to its absolute on-disk path via PATH, returning the name
-// unchanged when it cannot be resolved (bwrap then surfaces the not-found). This runs on EVERY path,
-// not only when integrity verification is enabled: bwrapArgs binds the binary only when it is
-// absolute, so a bare name left unresolved emits no bind and any helper outside the curated root
-// dies with "bwrap: execvp ...: No such file or directory".
-func resolveToolPath(name string) string {
+// resolveToolPath resolves a tool name to its absolute on-disk path, returning the name unchanged
+// when it cannot be resolved (bwrap then surfaces the not-found).
+//
+// An ALREADY-ABSOLUTE name is returned as given and needs no PATH lookup: it is operator authority
+// (the documented /opt/synapse/bin/synapse-cspm layout), which is what makes it bindable below.
+//
+// A bare name is resolved through the host PATH only when the caller will integrity-verify the
+// result (verify=true). Host PATH is not an authority for what may be bound into the sandbox: with
+// verification off, resolving it would let an inherited PATH entry such as /tmp/attacker/tool be
+// resolved on the host and then explicitly bound in, where previously bwrap resolved the bare name
+// against the sandbox's own curated PATH and a binary outside the curated root failed closed.
+func resolveToolPath(name string, verify bool) string {
+	if strings.HasPrefix(name, "/") || filepath.IsAbs(name) {
+		return name
+	}
+	if !verify {
+		return name // unverified bare name: leave it for bwrap to resolve inside the sandbox
+	}
 	if resolved, err := exec.LookPath(name); err == nil {
 		return resolved
 	}
@@ -194,13 +206,11 @@ func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult
 		return ports.ToolResult{}, fmt.Errorf("%w: build seccomp filter: %v", shared.ErrValidation, serr)
 	}
 	defer func() { _ = seccompF.Close() }()
-	// Resolve the tool to an absolute on-disk path FIRST, independently of integrity verification.
-	// bwrapArgs binds the binary only when it is absolute and outside the curated root, so leaving a
-	// bare name unresolved in the legacy PATH-trust mode (binreg == nil) emits no bind and returns
-	// the original "bwrap: execvp ...: No such file or directory" for any helper installed outside
-	// /usr, /bin, /sbin or /lib. Resolving here also means bwrap never re-resolves spec.Name via
-	// PATH to a possibly-different binary (closing the verify-path != exec-path gap below).
-	spec.Name = resolveToolPath(spec.Name)
+	// Settle the exec path BEFORE verification, so the path that is verified is the path that is
+	// bound and executed (closing the verify-path != exec-path gap). An absolute name is kept as
+	// given - that is the operator-configured helper the bind below exists for. A bare name is only
+	// resolved through the host PATH when it will also be verified; see resolveToolPath.
+	spec.Name = resolveToolPath(spec.Name, r.binreg != nil)
 	// F5: verify the tool binary's integrity before it runs. The resolved on-disk binary
 	// must match its pin (operator hash and/or trust-on-first-use); a replaced binary is
 	// refused. Defends the "compromised tool binary" threat the audit named.
@@ -453,14 +463,13 @@ func (r *Runner) bwrapArgs(spec ports.ToolSpec, sharedNet bool, hostsFile string
 		// Isolated mode: fresh netns too – default-deny egress by construction (E9 default).
 		args = append(args, "--unshare-all")
 	}
-	// Bind the tool binary ITSELF when it lives outside the curated root. Run() resolves and
-	// integrity-verifies an absolute path, but the curated root deliberately omits /opt, /srv and
-	// friends so host secrets stay ENOENT - which also made every owned helper installed there
-	// (the documented /opt/synapse/bin/synapse-cspm layout) die with
-	// "bwrap: execvp ...: No such file or directory". Bind the single verified FILE read-only,
-	// never its directory, so nothing else in that tree becomes visible.
-	// These are LINUX container paths, so the check is POSIX by construction: filepath.IsAbs is
-	// false for "/opt/..." on Windows, where this argv builder is still unit-tested.
+	// Bind the tool binary ITSELF when it lives outside the curated root. The curated root
+	// deliberately omits /opt, /srv and friends so host secrets stay ENOENT, which also made every
+	// owned helper installed there (the documented /opt/synapse/bin/synapse-cspm layout) die with
+	// "bwrap: execvp ...: No such file or directory". Bind the single resolved FILE read-only, never
+	// its directory, so nothing else in that tree becomes visible. Only an absolute path is bound,
+	// and resolveToolPath keeps the host PATH from making a bare name absolute unless it is also
+	// integrity-verified - so what gets bound is operator authority, not an inherited PATH entry.
 	if bin := strings.TrimSpace(spec.Name); strings.HasPrefix(bin, "/") && !underCuratedRoot(bin) {
 		args = append(args, "--ro-bind-try", bin, bin)
 	}

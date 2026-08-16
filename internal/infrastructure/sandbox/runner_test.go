@@ -218,34 +218,45 @@ func TestSecretsNeverEnterArgv(t *testing.T) {
 	}
 }
 
-// TestResolveToolPathRunsWithoutABinaryRegistry closes the review gap in the bind fix. bwrapArgs
-// binds the binary only when spec.Name is ABSOLUTE, and Run() previously rewrote spec.Name to the
-// resolved path only inside `if r.binreg != nil`. In the documented legacy PATH-trust mode a helper
-// invoked by bare name therefore stayed relative, emitted no bind, and returned the original
-// "bwrap: execvp ...: No such file or directory" the fix exists to prevent. Resolution must not
-// depend on integrity verification being enabled.
-func TestResolveToolPathRunsWithoutABinaryRegistry(t *testing.T) {
+// TestResolveToolPathKeepsHostPathOutOfSandboxAuthority pins the resolution contract. bwrapArgs binds
+// the binary only when spec.Name is ABSOLUTE, so an operator-configured absolute helper (the
+// documented /opt/synapse/bin/synapse-cspm layout) must survive untouched - that is what makes it
+// bindable. A BARE name is a different case: resolving it through the host PATH without integrity
+// verification would let an inherited entry such as /tmp/attacker/tool be resolved on the host and
+// then explicitly bound in, where bwrap would otherwise resolve it against the sandbox's own curated
+// PATH and fail closed.
+func TestResolveToolPathKeepsHostPathOutOfSandboxAuthority(t *testing.T) {
 	dir := t.TempDir()
 	name := "synapse-fake-helper"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	binary := filepath.Join(dir, name)
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
 	bare := strings.TrimSuffix(name, ".exe")
 	if runtime.GOOS == "windows" {
 		bare = name
 	}
-	got := resolveToolPath(bare)
-	if !filepath.IsAbs(got) {
-		t.Fatalf("resolveToolPath(%q) = %q, want an absolute path so bwrapArgs can bind it", bare, got)
+
+	// Verified: a bare name resolves, so the verified path is the bound and executed path.
+	if got := resolveToolPath(bare, true); !filepath.IsAbs(got) {
+		t.Errorf("resolveToolPath(%q, verify) = %q, want an absolute path", bare, got)
+	}
+	// Unverified: host PATH is not an authority for what gets bound; leave it to bwrap.
+	if got := resolveToolPath(bare, false); got != bare {
+		t.Errorf("resolveToolPath(%q, no-verify) = %q, want the bare name so bwrap resolves it inside the sandbox", bare, got)
+	}
+	// An absolute operator-configured path is returned as given, verified or not.
+	const absolute = "/opt/synapse/bin/synapse-cspm"
+	for _, verify := range []bool{true, false} {
+		if got := resolveToolPath(absolute, verify); got != absolute {
+			t.Errorf("resolveToolPath(%q, %v) = %q, want it unchanged", absolute, verify, got)
+		}
 	}
 	// An unresolvable name is returned unchanged so bwrap surfaces the not-found itself.
-	if got := resolveToolPath("synapse-definitely-not-on-path"); got != "synapse-definitely-not-on-path" {
+	if got := resolveToolPath("synapse-definitely-not-on-path", true); got != "synapse-definitely-not-on-path" {
 		t.Errorf("resolveToolPath(missing) = %q, want the name unchanged", got)
 	}
 }
