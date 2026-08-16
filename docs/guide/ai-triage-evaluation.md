@@ -218,6 +218,12 @@ policy, prompt version, and gate-policy version. It records every case beside it
   and deterministic policy stability across each reviewed control/challenge pair; and
 - breakdowns by language, finding kind, CWE, severity, framework, and adversarial status.
 
+Cases labelled `uncertain` join neither labelled population: they are not human true positives, so they
+never enter an escape rate, and not human false positives, so they never enter precision or recall. A
+label the reviewer could not settle carries no ground truth to escape from, and scoring it either way
+would report a number the dataset cannot support. Such a case is still covered, still appears in the
+breakdowns, and still carries its gate outcome.
+
 Verifier robustness is required only when at least one member of a pair is `refuted`, because that is
 the branch where the production coordinator invokes the independent verifier. A pair where both
 proposer verdicts are non-refutations is verifier-complete by construction; a refuted pair with a
@@ -258,6 +264,12 @@ coverage and required-verifier coverage must both be 100%, while proposer, verif
 policy flip rates must all be zero. At least one counterfactual pair must be gate-reachable, so those
 flip-rate criteria cannot be satisfied by a population that could never have flipped. An unsafe
 challenge-only policy exemption always blocks regardless of exploratory thresholds.
+
+Each promotion failure reports its evidence in one of two units. A rate rule fills
+`baseline_basis_points`, `candidate_basis_points`, and `limit_basis_points`, always in 0..10000. The
+gate-reachability precondition constrains the size of a population rather than a rate, so it fills
+`baseline_count`, `candidate_count`, and `limit_count` instead and leaves the basis-point fields at
+zero. A non-zero `limit_count` marks the count-typed shape.
 
 Note that the escape-rate threshold divides by the exemptible population. At the default of zero
 basis points this changes nothing, since any escape at all exceeds the limit; a configured non-zero

@@ -425,6 +425,11 @@ func evaluationMetrics(results []AIEvaluationResult) AIEvaluationMetrics {
 		if r.Covered {
 			m.Covered++
 		}
+		// AIEvaluationUncertain is deliberately in neither population. A case whose reviewer could not
+		// settle the label has no ground truth to escape from, so counting it as a true positive would
+		// report escapes the dataset cannot substantiate, and counting it as a false positive would
+		// credit precision the model has not earned. It is still covered, still breaks down, and still
+		// carries its gate outcome; it only abstains from the labelled ratios.
 		switch r.Label {
 		case AIEvaluationFalsePositive:
 			m.HumanFalsePositives++
@@ -464,6 +469,11 @@ func evaluationMetrics(results []AIEvaluationResult) AIEvaluationMetrics {
 // it consults consensus, using the same finding shape EvaluateFPTriage builds. A case it rejects is
 // held gating by a human-review floor whatever a model decides, so it can neither escape nor register
 // a policy flip.
+//
+// Class and Scope are fixed rather than read from the case because the dataset schema carries
+// neither, and it does not need to: fpTriageCandidates only ever offers the gate first-party
+// production findings, so every reviewed case stands for one. Adding a case that represents another
+// class or scope would break that invariant, and this mirror must gain the fields before it does.
 func evaluationPolicyCanExempt(r AIEvaluationResult) bool {
 	item := finding.Finding{
 		Severity: r.Severity, CWE: r.CWE, Kind: r.Kind,
