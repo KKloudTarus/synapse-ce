@@ -129,7 +129,10 @@ func userPromptWithEvidence(f finding.Finding, snippet string, evidence []ports.
 		b.Write(data)
 		b.WriteByte('\n')
 	}
-	b.WriteString("Return JSON with verdict, driver, confidence, and evidence_tokens containing only IDs listed above.\n")
+	// State the uniqueness requirement in the prompt. The response schema cannot carry it (strict
+	// structured outputs reject "uniqueItems"), so validateEvidenceCitations rejects duplicates at
+	// runtime; asking for it here keeps that from becoming an avoidable rejected call.
+	b.WriteString("Return JSON with verdict, driver, confidence, and evidence_tokens containing only IDs listed above. Cite each ID at most once.\n")
 	return b.String()
 }
 

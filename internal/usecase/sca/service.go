@@ -1768,7 +1768,9 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 		job.Status, job.Stage = ports.ScanSucceeded, "done"
 	}
 	if s.jobs != nil {
-		_ = s.jobs.Save(context.WithoutCancel(ctx), job) // detached but tenant-preserving: the timeout ctx may be done
+		// Detached from ctx so the record still lands when the completion timeout above has fired.
+		// (ScanJobStore.Save is not tenant-scoped; the tenant matters at the recorder call, not here.)
+		_ = s.jobs.Save(context.WithoutCancel(ctx), job)
 	}
 }
 
