@@ -151,16 +151,33 @@ describe('App Routing - Rules', () => {
     expect(document.documentElement.dataset.theme).toBe('light')
   })
 
-  it('links to the Engagements queue from the primary navigation', () => {
+  it('separates the create action from the active Engagements destination', () => {
     render(
-      <MemoryRouter initialEntries={['/assets']}>
+      <MemoryRouter initialEntries={['/engagements/new']}>
         <Sidebar />
       </MemoryRouter>
     )
 
-    const engagements = screen.getByRole('link', { name: 'Engagements' })
-    expect(engagements.getAttribute('href')).toBe('/engagements')
-    expect(screen.queryByRole('link', { name: 'New Engagement' })).not.toBeInTheDocument()
+    const newEngagement = screen.getByRole('link', { name: 'New Engagement' })
+    expect(newEngagement.getAttribute('href')).toBe('/engagements/new')
+    expect(newEngagement).not.toHaveAttribute('aria-current')
+    expect(screen.getByRole('link', { name: 'Engagements' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('groups shipped capabilities by operator workflow without placeholder navigation', () => {
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <Sidebar />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByRole('heading', { name: 'Security operations' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Exposure management' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Security engineering' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Runtime security' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Governance' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Review queue' })).toHaveAttribute('href', '/ai-triage/reviews')
+    expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
   })
 
   it('opens mobile navigation and navigates to Rules', async () => {
