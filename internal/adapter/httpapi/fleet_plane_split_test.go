@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,29 +104,62 @@ func TestFleetAgentPlaneStaysOffTheHumanChain(t *testing.T) {
 	}
 }
 
-// TestFleetAgentPlanePrefixesCoverEveryAgentRoute keeps the mount list honest: a new agent-plane
-// route that no prefix covers would silently fall through to the human chain and be rejected as an
-// unauthenticated operator request.
-func TestFleetAgentPlanePrefixesCoverEveryAgentRoute(t *testing.T) {
-	for _, path := range []string{
-		"/api/v1/fleet/enrol",
-		"/api/v1/fleet/heartbeat",
-		"/api/v1/fleet/decommission",
-		"/api/v1/fleet/work/claim",
-		"/api/v1/fleet/work/wo1/progress",
-		"/api/v1/fleet/work/wo1/result",
-		"/api/v1/fleet/inventory/cluster",
-		"/api/v1/fleet/inventory/host",
-	} {
-		covered := false
-		for _, prefix := range fleetAgentPlanePrefixes {
-			if path == prefix || (len(prefix) > 0 && prefix[len(prefix)-1] == '/' && len(path) >= len(prefix) && path[:len(prefix)] == prefix) {
-				covered = true
-				break
-			}
+// TestEveryAgentRouteReachesTheAgentPlane keeps the mount list honest for routes that do not exist
+// yet. It iterates fleetAgentPlaneRoutes - the SAME declaration fleetRouter.handler() registers -
+// rather than a hand-copied path list, and drives each route through the real Handler(). A new agent
+// route therefore fails this test automatically: without a matching mount it falls through to the
+// human chain and answers 401 instead of reaching the agent plane.
+//
+// The 400 expectation is the agent plane's own protocol-version check, which every agent route runs
+// before auth. Reaching it proves the request was served by the agent mux, not the human chain.
+func TestEveryAgentRouteReachesTheAgentPlane(t *testing.T) {
+	handler := routerWithFleetPlanes(t)
+	for _, route := range fleetAgentPlaneRoutes() {
+		method, pattern, ok := strings.Cut(route.pattern, " ")
+		if !ok {
+			t.Fatalf("route %q has no method", route.pattern)
 		}
-		if !covered {
-			t.Errorf("agent route %s is not covered by fleetAgentPlanePrefixes", path)
+		// Substitute a concrete value for each wildcard so the request matches the pattern.
+		path := wildcardRE.ReplaceAllString(pattern, "wo1")
+		t.Run(path, func(t *testing.T) {
+			request := httptest.NewRequest(method, path, http.NoBody)
+			// Deliberately no X-Synapse-Fleet-Proto header and no credential.
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code == http.StatusUnauthorized {
+				t.Fatalf("%s was served by the HUMAN chain (401); it needs a mount in fleetAgentPlaneRoutes", path)
+			}
+			if recorder.Code == http.StatusNotFound {
+				t.Fatalf("%s answered 404; the agent plane is mounted but does not serve it", path)
+			}
+			if recorder.Code != http.StatusBadRequest {
+				t.Errorf("%s status = %d, want 400 from the agent-plane protocol-version check", path, recorder.Code)
+			}
+		})
+	}
+}
+
+// wildcardRE matches a net/http mux wildcard segment such as "{id}".
+var wildcardRE = regexp.MustCompile(`\{[^}]*\}`)
+
+// TestFleetAgentPlaneRoutesAllHaveHandlers guards the other direction: handler() skips a declared
+// pattern it has no handler for, which would otherwise be a silent 404 on a mounted agent path.
+func TestFleetAgentPlaneRoutesAllHaveHandlers(t *testing.T) {
+	agentSvc, err := fleetagentuc.NewService(memory.NewFleetAgentStore(), ftAudit{}, ftClock{}, &ftIDs{})
+	if err != nil {
+		t.Fatalf("agent svc: %v", err)
+	}
+	rt := &Router{log: discardLog()}
+	rt.SetFleet(agentSvc, nil, time.Now, "")
+	mux, ok := rt.fleet.handler().(*http.ServeMux)
+	if !ok {
+		t.Fatal("agent plane handler is not a *http.ServeMux")
+	}
+	for _, route := range fleetAgentPlaneRoutes() {
+		method, pattern, _ := strings.Cut(route.pattern, " ")
+		path := wildcardRE.ReplaceAllString(pattern, "wo1")
+		if _, matched := mux.Handler(httptest.NewRequest(method, path, http.NoBody)); matched == "" {
+			t.Errorf("declared route %q registered no handler; it would 404 on a mounted path", route.pattern)
 		}
 	}
 }

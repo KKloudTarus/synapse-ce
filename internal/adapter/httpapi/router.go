@@ -600,28 +600,17 @@ func (rt *Router) Handler() http.Handler {
 	// bearer-token authenticator or the AUP gate. Mount it on the EXACT agent-plane subtrees rather
 	// than the whole /api/v1/fleet/ prefix. A prefix mount also swallows the OPERATOR routes that
 	// live under /api/v1/fleet (coverage + agent health), which the agent mux does not serve, so
-	// every one of them answered 404 instead of reaching the human chain. Listing the subtrees keeps
-	// the two planes disjoint: agent paths never see human auth, and human paths never see the
-	// agent plane. normalizePath wraps the whole top mux once, so both planes are normalized
-	// without double-wrapping.
+	// every one of them answered 404 instead of reaching the human chain. The mounts are derived
+	// from fleetAgentPlaneRoutes, the same declaration fleetRouter.handler() registers, so the two
+	// planes cannot drift apart. normalizePath wraps the whole top mux once, so both planes are
+	// normalized without double-wrapping.
 	top := http.NewServeMux()
-	for _, prefix := range fleetAgentPlanePrefixes {
-		top.Handle(prefix, rt.fleet.handler())
+	agentPlane := rt.fleet.handler()
+	for _, mount := range fleetAgentPlaneMounts() {
+		top.Handle(mount, agentPlane)
 	}
 	top.Handle("/", human)
 	return normalizePath(top)
-}
-
-// fleetAgentPlanePrefixes are the exact /api/v1/fleet subtrees served by the untrusted agent-auth
-// plane. Anything else under /api/v1/fleet is an operator route on the human RBAC plane. Keep this
-// list in sync with fleetRouter.handler(); TestFleetOperatorRoutesAreNotShadowedByAgentPlane guards
-// the split.
-var fleetAgentPlanePrefixes = []string{
-	"/api/v1/fleet/enrol",
-	"/api/v1/fleet/heartbeat",
-	"/api/v1/fleet/decommission",
-	"/api/v1/fleet/work/",
-	"/api/v1/fleet/inventory/",
 }
 
 // normalizePath rejects non-canonical request paths (e.g. `/a//b`, `/a/../b`,
