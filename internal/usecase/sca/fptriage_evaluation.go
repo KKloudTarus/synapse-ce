@@ -24,7 +24,7 @@ type AIEvaluationLabel string
 
 const (
 	aiEvaluationDatasetSchema = "synapse-ai-triage-dataset-v2"
-	aiEvaluationReportSchema  = "synapse-ai-triage-evaluation-v3"
+	aiEvaluationReportSchema  = "synapse-ai-triage-evaluation-v4"
 
 	AIEvaluationTruePositive  AIEvaluationLabel = "true_positive"
 	AIEvaluationFalsePositive AIEvaluationLabel = "false_positive"
@@ -105,11 +105,19 @@ type AIEvaluationResult struct {
 
 // AIEvaluationMetrics are computed over a whole run or one segment. Precision/recall describe verified
 // false-positive consensus; escape rate describes real bugs the deterministic policy would exempt.
+//
+// Two escape rates are reported because they answer different questions. FalseNegativeEscapeRate is
+// the corpus-wide rate: escapes over every human true positive, including the ones a human-review
+// floor makes ineligible for exemption. It is stable to read across datasets but it dilutes — adding
+// a High-severity true positive lowers it while changing nothing about the gate. ExemptibleEscapeRate
+// divides by ExemptibleTruePositives, the true positives the deterministic policy could actually have
+// exempted, and is the rate a safety threshold should be set against.
 type AIEvaluationMetrics struct {
 	Total                   int     `json:"total"`
 	Covered                 int     `json:"covered"`
 	HumanFalsePositives     int     `json:"human_false_positives"`
 	HumanTruePositives      int     `json:"human_true_positives"`
+	ExemptibleTruePositives int     `json:"exemptible_true_positives"`
 	ConsensusFalsePositives int     `json:"consensus_false_positives"`
 	CorrectFalsePositives   int     `json:"correct_false_positives"`
 	TruePositiveEscapes     int     `json:"true_positive_escapes"`
@@ -118,6 +126,7 @@ type AIEvaluationMetrics struct {
 	Precision               float64 `json:"precision"`
 	Recall                  float64 `json:"recall"`
 	FalseNegativeEscapeRate float64 `json:"false_negative_escape_rate"`
+	ExemptibleEscapeRate    float64 `json:"exemptible_escape_rate"`
 	DisagreementRate        float64 `json:"disagreement_rate"`
 	Coverage                float64 `json:"coverage"`
 }
@@ -416,6 +425,9 @@ func evaluationMetrics(results []AIEvaluationResult) AIEvaluationMetrics {
 			m.HumanFalsePositives++
 		case AIEvaluationTruePositive:
 			m.HumanTruePositives++
+			if evaluationPolicyExemptible(r) {
+				m.ExemptibleTruePositives++
+			}
 		}
 		if r.ConsensusFalsePositive {
 			m.ConsensusFalsePositives++
@@ -436,9 +448,30 @@ func evaluationMetrics(results []AIEvaluationResult) AIEvaluationMetrics {
 	m.Precision = ratio(m.CorrectFalsePositives, m.ConsensusFalsePositives)
 	m.Recall = ratio(m.CorrectFalsePositives, m.HumanFalsePositives)
 	m.FalseNegativeEscapeRate = ratio(m.TruePositiveEscapes, m.HumanTruePositives)
+	m.ExemptibleEscapeRate = ratio(m.TruePositiveEscapes, m.ExemptibleTruePositives)
 	m.DisagreementRate = ratio(m.VerifierDisagreements, m.VerifierComparisons)
 	m.Coverage = ratio(m.Covered, m.Total)
 	return m
+}
+
+// evaluationPolicyExemptible reports whether the deterministic policy could ever have exempted this
+// case, independent of what any model said about it. It mirrors the checks applyAIGatePolicy makes
+// before it consults consensus, using the same finding shape EvaluateFPTriage builds, so a true
+// positive held back by a human-review floor is never counted as something the gate could release.
+//
+// A recorded exemption always counts, even when the floor says it should not have been possible.
+// Otherwise a report carrying an escape the floor disagrees with would divide by a smaller
+// denominator than its own numerator, and an escape must never be able to shrink the rate that
+// exists to catch it.
+func evaluationPolicyExemptible(r AIEvaluationResult) bool {
+	if r.WouldGateExempt || r.GateExempt {
+		return true
+	}
+	item := finding.Finding{
+		Severity: r.Severity, CWE: r.CWE, Kind: r.Kind,
+		Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction,
+	}
+	return humanReviewFloor(item) == "" && isFPTriageEligible(item)
 }
 
 func evaluationBreakdowns(results []AIEvaluationResult) map[string]map[string]AIEvaluationMetrics {

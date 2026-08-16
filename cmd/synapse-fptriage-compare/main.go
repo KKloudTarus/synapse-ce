@@ -19,8 +19,8 @@ var errPromotionBlocked = errors.New("candidate is blocked from promotion review
 
 func main() {
 	defaults := sca.DefaultAIEvaluationPromotionPolicy()
-	baselinePath := flag.String("baseline", "", "baseline synapse-ai-triage-evaluation-v3 report")
-	candidatePath := flag.String("candidate", "", "candidate synapse-ai-triage-evaluation-v3 report")
+	baselinePath := flag.String("baseline", "", "baseline synapse-ai-triage-evaluation-v4 report")
+	candidatePath := flag.String("candidate", "", "candidate synapse-ai-triage-evaluation-v4 report")
 	outputPath := flag.String("output", "-", "comparison report path, or - for stdout")
 	failOnBlocked := flag.Bool("fail-on-blocked", true, "exit non-zero after writing a blocked comparison")
 	minimumPrecision := flag.Int("minimum-precision-bps", defaults.MinimumPrecisionBasisPoints, "minimum candidate precision in basis points")

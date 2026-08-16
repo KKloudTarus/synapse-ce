@@ -432,9 +432,14 @@ func appendOverallPromotionFailures(failures []AIEvaluationPromotionFailure, met
 	if belowBasisPointMinimum(metrics.Candidate.CorrectFalsePositives, metrics.Candidate.ConsensusFalsePositives, policy.MinimumPrecisionBasisPoints) {
 		failures = append(failures, AIEvaluationPromotionFailure{Rule: "minimum_precision", Scope: "overall", BaselineBasisPoints: floorRateBasisPoints(metrics.Baseline.CorrectFalsePositives, metrics.Baseline.ConsensusFalsePositives), CandidateBasisPoints: candidatePrecision, LimitBasisPoints: policy.MinimumPrecisionBasisPoints})
 	}
-	candidateEscape := ceilRateBasisPoints(metrics.Candidate.TruePositiveEscapes, metrics.Candidate.HumanTruePositives)
-	if aboveBasisPointMaximum(metrics.Candidate.TruePositiveEscapes, metrics.Candidate.HumanTruePositives, policy.MaximumFalseNegativeEscapeRateBasisPoints) {
-		failures = append(failures, AIEvaluationPromotionFailure{Rule: "maximum_false_negative_escape_rate", Scope: "overall", BaselineBasisPoints: ceilRateBasisPoints(metrics.Baseline.TruePositiveEscapes, metrics.Baseline.HumanTruePositives), CandidateBasisPoints: candidateEscape, LimitBasisPoints: policy.MaximumFalseNegativeEscapeRateBasisPoints})
+	// Measured over the true positives the deterministic policy could actually exempt. Dividing by
+	// every human true positive dilutes the rate: a corpus that adds High-severity findings, which a
+	// human-review floor holds back regardless, would report a safer number without the gate changing.
+	// At the default zero-basis-point limit both denominators behave identically, since any escape at
+	// all exceeds the threshold; the denominator only decides how much tolerance a non-zero limit buys.
+	candidateEscape := ceilRateBasisPoints(metrics.Candidate.TruePositiveEscapes, metrics.Candidate.ExemptibleTruePositives)
+	if aboveBasisPointMaximum(metrics.Candidate.TruePositiveEscapes, metrics.Candidate.ExemptibleTruePositives, policy.MaximumFalseNegativeEscapeRateBasisPoints) {
+		failures = append(failures, AIEvaluationPromotionFailure{Rule: "maximum_false_negative_escape_rate", Scope: "overall", BaselineBasisPoints: ceilRateBasisPoints(metrics.Baseline.TruePositiveEscapes, metrics.Baseline.ExemptibleTruePositives), CandidateBasisPoints: candidateEscape, LimitBasisPoints: policy.MaximumFalseNegativeEscapeRateBasisPoints})
 	}
 	return appendRegressionFailures(failures, "overall", "", metrics, policy)
 }
@@ -517,7 +522,7 @@ func metricComparison(baseline, candidate AIEvaluationMetrics) AIEvaluationMetri
 		Baseline: baseline, Candidate: candidate,
 		PrecisionDeltaBasisPoints:           floorRateDeltaBasisPoints(baseline.CorrectFalsePositives, baseline.ConsensusFalsePositives, candidate.CorrectFalsePositives, candidate.ConsensusFalsePositives),
 		RecallDeltaBasisPoints:              floorRateDeltaBasisPoints(baseline.CorrectFalsePositives, baseline.HumanFalsePositives, candidate.CorrectFalsePositives, candidate.HumanFalsePositives),
-		FalseNegativeEscapeDeltaBasisPoints: ceilRateDeltaBasisPoints(baseline.TruePositiveEscapes, baseline.HumanTruePositives, candidate.TruePositiveEscapes, candidate.HumanTruePositives),
+		FalseNegativeEscapeDeltaBasisPoints: ceilRateDeltaBasisPoints(baseline.TruePositiveEscapes, baseline.ExemptibleTruePositives, candidate.TruePositiveEscapes, candidate.ExemptibleTruePositives),
 		DisagreementDeltaBasisPoints:        ceilRateDeltaBasisPoints(baseline.VerifierDisagreements, baseline.VerifierComparisons, candidate.VerifierDisagreements, candidate.VerifierComparisons),
 		CoverageDeltaBasisPoints:            floorRateDeltaBasisPoints(baseline.Covered, baseline.Total, candidate.Covered, candidate.Total),
 		VerifierCoverageDeltaBasisPoints:    floorRateDeltaBasisPoints(baseline.VerifierComparisons, baseline.Total, candidate.VerifierComparisons, candidate.Total),

@@ -311,7 +311,9 @@ func TestAIEvaluationReportValidateRejectsForgedCounterfactualBindings(t *testin
 func TestPromotionEvidenceUsesConservativeExactBasisPoints(t *testing.T) {
 	baseline := AIEvaluationMetrics{
 		CorrectFalsePositives: 19_000, ConsensusFalsePositives: 20_000,
-		HumanTruePositives: 40_000,
+		// The escape rate divides by the true positives the policy could exempt, not by every
+		// human true positive, so the eligible population is what this boundary case measures.
+		HumanTruePositives: 40_000, ExemptibleTruePositives: 40_000,
 	}
 	candidate := baseline
 	candidate.CorrectFalsePositives = 18_999 // 94.995%, strictly below the 95% boundary.

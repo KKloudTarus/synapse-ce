@@ -7,6 +7,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -145,8 +146,14 @@ func TestEvaluateFPTriageGoldenDataset(t *testing.T) {
 		m.VerifierComparisons != 6 || m.VerifierDisagreements != 2 {
 		t.Fatalf("unexpected aggregate counters: %+v", m)
 	}
+	// Three of the ten true positives are medium severity outside the protected-CWE list, so they are
+	// the only ones the deterministic policy could exempt. The single escape reads as 1/10 across the
+	// corpus and 1/3 against the population that can actually escape.
+	if m.ExemptibleTruePositives != 3 {
+		t.Fatalf("unexpected exemptible population: %+v", m)
+	}
 	if m.Precision != 0.75 || m.Recall != 1 || m.FalseNegativeEscapeRate != 0.1 ||
-		m.DisagreementRate != 1.0/3.0 || m.Coverage != 1 {
+		m.ExemptibleEscapeRate != 1.0/3.0 || m.DisagreementRate != 1.0/3.0 || m.Coverage != 1 {
 		t.Fatalf("unexpected aggregate rates: %+v", m)
 	}
 	robustness := report.Robustness
@@ -306,6 +313,51 @@ func TestCounterfactualRobustnessDetectsInjectionCapitulation(t *testing.T) {
 		if result.GateExempt || result.Critique.GateExempt || !result.Critique.Shadow {
 			t.Fatalf("shadow evaluation leaked gate authority: %+v", result)
 		}
+	}
+}
+
+// TestExemptibleEscapeRateIgnoresFindingsThePolicyCannotExempt pins the property that motivated the
+// second rate: a corpus must not be able to look safer by adding true positives the deterministic
+// policy was never allowed to release.
+func TestExemptibleEscapeRateIgnoresFindingsThePolicyCannotExempt(t *testing.T) {
+	exemptibleTP := func(id string, escaped bool) AIEvaluationResult {
+		return AIEvaluationResult{
+			CaseID: id, Label: AIEvaluationTruePositive, Kind: finding.KindSAST,
+			Severity: shared.SeverityMedium, CWE: "CWE-330", Covered: true, WouldGateExempt: escaped,
+		}
+	}
+	// High severity: humanReviewFloor holds it back whatever the models say.
+	blockedTP := func(id string) AIEvaluationResult {
+		return AIEvaluationResult{
+			CaseID: id, Label: AIEvaluationTruePositive, Kind: finding.KindSAST,
+			Severity: shared.SeverityHigh, CWE: "CWE-89", Covered: true,
+		}
+	}
+
+	before := evaluationMetrics([]AIEvaluationResult{
+		exemptibleTP("escaped", true),
+		exemptibleTP("held", false),
+	})
+	if before.ExemptibleTruePositives != 2 || before.TruePositiveEscapes != 1 ||
+		before.ExemptibleEscapeRate != 0.5 || before.FalseNegativeEscapeRate != 0.5 {
+		t.Fatalf("baseline metrics = %+v", before)
+	}
+
+	after := evaluationMetrics([]AIEvaluationResult{
+		exemptibleTP("escaped", true),
+		exemptibleTP("held", false),
+		blockedTP("floor-1"), blockedTP("floor-2"), blockedTP("floor-3"),
+	})
+	if after.ExemptibleTruePositives != 2 || after.TruePositiveEscapes != 1 {
+		t.Fatalf("floor-blocked true positives must not enter the exemptible population: %+v", after)
+	}
+	if after.ExemptibleEscapeRate != before.ExemptibleEscapeRate {
+		t.Fatalf("exemptible escape rate moved from %v to %v without the gate changing",
+			before.ExemptibleEscapeRate, after.ExemptibleEscapeRate)
+	}
+	if after.FalseNegativeEscapeRate >= before.FalseNegativeEscapeRate {
+		t.Fatalf("corpus-wide rate is expected to dilute, so this test is no longer measuring the difference: %v -> %v",
+			before.FalseNegativeEscapeRate, after.FalseNegativeEscapeRate)
 	}
 }
 

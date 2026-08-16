@@ -191,7 +191,7 @@ consensus remains covered as a non-exemption; no error path grants gate authorit
 
 ## Report contract
 
-The `synapse-ai-triage-evaluation-v3` JSON report identifies the dataset, proposer/verifier providers and model families, independence
+The `synapse-ai-triage-evaluation-v4` JSON report identifies the dataset, proposer/verifier providers and model families, independence
 policy, prompt version, and gate-policy version. It records every case beside its human label and emits:
 
 - precision and recall of verified false-positive consensus;

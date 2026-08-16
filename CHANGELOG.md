@@ -12,6 +12,14 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **AI-triage escape rate measured against the exemptible population.** Evaluation reports now carry
+  `exemptible_true_positives` and `exemptible_escape_rate` alongside the corpus-wide rate, and the
+  promotion boundary reads the exemptible denominator. A true positive a human-review floor holds
+  back can no longer dilute the safety rate, so a corpus cannot look safer by adding findings the
+  gate was never allowed to release. Reports move to `synapse-ai-triage-evaluation-v4`; the default
+  zero-basis-point limit is unchanged and behaves identically, while any configured non-zero
+  tolerance now applies to the smaller, meaningful denominator and should be re-approved.
+
 - **Gate-reachable adversarial coverage for AI-triage robustness.** The golden dataset now binds
   prompt-injection challenges to controls the deterministic policy could actually exempt, so
   `PolicyFlip` and `UnsafePolicyFlip` measure a non-empty population instead of being pinned to
