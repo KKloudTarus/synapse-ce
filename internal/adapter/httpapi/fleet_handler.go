@@ -265,18 +265,64 @@ func agentFrom(ctx context.Context) (*fleetagent.Agent, bool) {
 	return a, ok
 }
 
+// fleetAgentPlaneRoute is one route on the untrusted agent-auth plane: the pattern its mux serves
+// and the top-level prefix the Router mounts it under. The two live together so a new agent route
+// cannot be registered without also declaring how it is mounted - the failure mode being that the
+// route falls through to the human RBAC chain and is rejected as an unauthenticated operator
+// request. Anything under /api/v1/fleet NOT listed here is an operator route on the human plane.
+type fleetAgentPlaneRoute struct {
+	pattern string // the mux pattern, including the method
+	mount   string // the top-level prefix Router.Handler() mounts this plane under
+	// handler produces the route's handler from the router. Carrying it here rather than in a
+	// side table makes the pattern/mount/handler relation TOTAL by construction: a new route cannot
+	// be declared without a handler, so there is no missing-case branch to fail open or 404.
+	handler func(*fleetRouter) http.HandlerFunc
+}
+
+// fleetAgentPlaneRoutes is the single source of truth consumed by BOTH fleetRouter.handler() (which
+// registers the patterns) and Router.Handler() (which mounts the distinct prefixes).
+func fleetAgentPlaneRoutes() []fleetAgentPlaneRoute {
+	return []fleetAgentPlaneRoute{
+		{"POST /api/v1/fleet/enrol", "/api/v1/fleet/enrol",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.enrol) }},
+		{"POST /api/v1/fleet/heartbeat", "/api/v1/fleet/heartbeat",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.heartbeat)) }},
+		{"POST /api/v1/fleet/decommission", "/api/v1/fleet/decommission",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.decommission)) }},
+		{"POST /api/v1/fleet/work/claim", "/api/v1/fleet/work/",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.claim)) }},
+		{"POST /api/v1/fleet/work/{id}/progress", "/api/v1/fleet/work/",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.progress)) }},
+		{"POST /api/v1/fleet/work/{id}/result", "/api/v1/fleet/work/",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.result)) }},
+		{"POST /api/v1/fleet/inventory/cluster", "/api/v1/fleet/inventory/",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.clusterInventory)) }},
+		{"POST /api/v1/fleet/inventory/host", "/api/v1/fleet/inventory/",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.hostInventory)) }},
+	}
+}
+
+// fleetAgentPlaneMounts returns the deduplicated top-level prefixes for the agent plane, preserving
+// declaration order.
+func fleetAgentPlaneMounts() []string {
+	seen := make(map[string]bool)
+	var mounts []string
+	for _, route := range fleetAgentPlaneRoutes() {
+		if !seen[route.mount] {
+			seen[route.mount] = true
+			mounts = append(mounts, route.mount)
+		}
+	}
+	return mounts
+}
+
 // handler builds the agent-plane mux. Every route checks the protocol version; every route except
 // enrol requires a valid agent bearer credential (agent-auth, NOT the human RBAC plane).
 func (f *fleetRouter) handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/v1/fleet/enrol", f.entry(f.enrol))
-	mux.HandleFunc("POST /api/v1/fleet/heartbeat", f.entry(f.authed(f.heartbeat)))
-	mux.HandleFunc("POST /api/v1/fleet/decommission", f.entry(f.authed(f.decommission)))
-	mux.HandleFunc("POST /api/v1/fleet/work/claim", f.entry(f.authed(f.claim)))
-	mux.HandleFunc("POST /api/v1/fleet/work/{id}/progress", f.entry(f.authed(f.progress)))
-	mux.HandleFunc("POST /api/v1/fleet/work/{id}/result", f.entry(f.authed(f.result)))
-	mux.HandleFunc("POST /api/v1/fleet/inventory/cluster", f.entry(f.authed(f.clusterInventory)))
-	mux.HandleFunc("POST /api/v1/fleet/inventory/host", f.entry(f.authed(f.hostInventory)))
+	for _, route := range fleetAgentPlaneRoutes() {
+		mux.HandleFunc(route.pattern, route.handler(f))
+	}
 	return mux
 }
 
@@ -353,6 +399,12 @@ func (f *fleetRouter) authed(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		ctx := context.WithValue(r.Context(), agentKeyCtx, agent)
+		// Bind the AUTHENTICATED agent's tenant onto the context (never a request field). Downstream
+		// writes - notably the hash-chained audit log - read the tenant from the context to satisfy
+		// tenant RLS, and this plane has no human principal to carry it. Without this, heartbeat,
+		// claim, result, and inventory writes fail the audit insert with
+		// "new row violates row-level security policy for table audit_log".
+		ctx = shared.WithTenant(ctx, agent.TenantID)
 		next(w, r.WithContext(ctx))
 	}
 }

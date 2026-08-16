@@ -27,6 +27,21 @@ type fakeAudit struct{ n int }
 
 func (a *fakeAudit) Record(context.Context, ports.AuditEntry) error { a.n++; return nil }
 
+// tenantCapturingAudit records the tenant bound on the context of each audit write. The Postgres
+// audit repository reads the tenant from the context to satisfy tenant RLS, so an unbound context
+// is a write that fails in production but passes against a context-blind fake.
+type tenantCapturingAudit struct {
+	tenants []shared.ID
+	bound   []bool
+}
+
+func (a *tenantCapturingAudit) Record(ctx context.Context, _ ports.AuditEntry) error {
+	tenant, ok := shared.TenantFrom(ctx)
+	a.tenants = append(a.tenants, tenant)
+	a.bound = append(a.bound, ok)
+	return nil
+}
+
 func newSvc(t *testing.T) *Service {
 	t.Helper()
 	svc, err := NewService(memory.NewFleetAgentStore(), &fakeAudit{}, fakeClock{t: time.Unix(1000, 0).UTC()}, &fakeIDs{})
@@ -34,6 +49,43 @@ func newSvc(t *testing.T) *Service {
 		t.Fatalf("new service: %v", err)
 	}
 	return svc
+}
+
+// TestEnrolBindsTenantOnAuditContext pins the tenant onto the context that Enrol's audit writes
+// see. The agent plane has no human principal, so the tenant must come from the enrolment token;
+// the Postgres audit repository reads it from the context to satisfy tenant RLS. Without the
+// binding, every real enrolment fails with "new row violates row-level security policy for table
+// audit_log" and the agent can never join the fleet.
+func TestEnrolBindsTenantOnAuditContext(t *testing.T) {
+	audit := &tenantCapturingAudit{}
+	svc, err := NewService(memory.NewFleetAgentStore(), audit, fakeClock{t: time.Unix(1000, 0).UTC()}, &fakeIDs{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	// An unbound background context is exactly what the fleet HTTP plane hands in.
+	ctx := context.Background()
+	enrolTok, err := svc.MintEnrolToken(shared.WithTenant(ctx, "t1"), "op", "t1", time.Hour)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	before := len(audit.tenants)
+	if _, _, _, err := svc.Enrol(ctx, enrolTok, EnrolInput{Name: "agent-1", Platform: "linux"}); err != nil {
+		t.Fatalf("enrol: %v", err)
+	}
+	enrolWrites := audit.tenants[before:]
+	enrolBound := audit.bound[before:]
+	if len(enrolWrites) == 0 {
+		t.Fatal("enrol recorded no audit entry")
+	}
+	for i, bound := range enrolBound {
+		if !bound {
+			t.Errorf("enrol audit write %d has no tenant on its context; the RLS insert would be rejected", i)
+			continue
+		}
+		if enrolWrites[i] != "t1" {
+			t.Errorf("enrol audit write %d tenant = %q, want %q (from the enrolment token)", i, enrolWrites[i], "t1")
+		}
+	}
 }
 
 func TestEnrolAndAuthenticate(t *testing.T) {

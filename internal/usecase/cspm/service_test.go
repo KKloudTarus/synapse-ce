@@ -3,6 +3,7 @@ package cspm_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -279,5 +280,100 @@ func TestRunDeniesCloudOperationOutsideReadOnlyAllowlist(t *testing.T) {
 	}
 	if !denied {
 		t.Fatalf("audit = %#v", audit.entries)
+	}
+}
+
+// gatedAttributor models the REAL attribution boundary. A cloud asset carries a scope_key, and the
+// asset repository hides such an asset until an ACTIVE cspm_observations row vouches for it, so
+// ValidateAsset only ever sees assets that reconciliation has already published. attributorStub
+// accepts every asset unconditionally, which is precisely why unit tests missed this.
+type gatedAttributor struct {
+	published  map[shared.ID]bool
+	attributed map[shared.ID][]shared.ID
+}
+
+func (a *gatedAttributor) ValidateAsset(_ context.Context, _ shared.ID, assetID shared.ID) error {
+	if !a.published[assetID] {
+		return fmt.Errorf("asset %s: %w", assetID, shared.ErrNotFound)
+	}
+	return nil
+}
+
+func (a *gatedAttributor) InheritedAssetID(context.Context, shared.ID, []shared.ID) (shared.ID, error) {
+	return "", nil
+}
+
+func (a *gatedAttributor) Record(ctx context.Context, engagementID shared.ID, assetID, producer, provenance shared.ID, confidence asset.EdgeConfidence, findingIDs []shared.ID) error {
+	targets := make([]attackpath.FindingTarget, 0, len(findingIDs))
+	for _, id := range findingIDs {
+		targets = append(targets, attackpath.FindingTarget{ID: id, Kind: attackpath.TargetCanonical})
+	}
+	return a.RecordTargets(ctx, engagementID, assetID, producer, provenance, confidence, targets)
+}
+
+func (a *gatedAttributor) RecordTargets(ctx context.Context, engagementID shared.ID, assetID, _, _ shared.ID, _ asset.EdgeConfidence, targets []attackpath.FindingTarget) error {
+	if err := a.ValidateAsset(ctx, engagementID, assetID); err != nil {
+		return err
+	}
+	for _, target := range targets {
+		a.attributed[assetID] = append(a.attributed[assetID], target.ID)
+	}
+	return nil
+}
+
+// publishingObservationStore is the other half: reconciliation is what makes a cloud asset visible.
+type publishingObservationStore struct{ attributor *gatedAttributor }
+
+func (s publishingObservationStore) ReconcileCloudObservations(_ context.Context, _, _ shared.ID, _ string, _ shared.ID, assetIDs, _ []shared.ID, _ []string, _ bool) error {
+	for _, id := range assetIDs {
+		s.attributor.published[id] = true
+	}
+	return nil
+}
+
+// TestRunReconcilesObservationsBeforeAttributing pins the ordering between reconciliation and
+// attribution. Attributing FIRST validated each asset against a listing that still hid it, so every
+// CSPM run carrying at least one asset failed with "asset <id>: not found" - after real provider
+// enumeration had already succeeded - then retried twice and dead-lettered with zero assets and
+// zero findings recorded.
+func TestRunReconcilesObservationsBeforeAttributing(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1, 0)
+	audit := &auditStub{}
+	store := memory.NewAssetStore()
+	assets, err := assetuc.NewService(store, audit, clockStub{now}, &idsStub{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engagements := memory.NewEngagementRepository()
+	eng, _ := engagement.New("eng", "tenant", "cloud", "client", now)
+	eng.Status = engagement.StatusActive
+	eng.Scope = engagement.Scope{InScope: []engagement.Target{{Kind: engagement.TargetCloudAccount, Value: "organization/o-1"}}}
+	if err := engagements.Create(ctx, eng); err != nil {
+		t.Fatal(err)
+	}
+	inv := cloudposture.Inventory{Provider: cloudposture.ProviderAWS, Complete: true, Resources: []cloudposture.Resource{
+		{Provider: cloudposture.ProviderAWS, ID: "account", Name: "prod", Kind: asset.KindCloudAccount},
+		{Provider: cloudposture.ProviderAWS, AccountID: "account", ID: "bucket", Name: "logs", Kind: asset.KindStorage, Public: cloudposture.StateEnabled, Encrypted: cloudposture.StateDisabled},
+	}}
+	connector := connectorStub{inventory: inv}
+	svc, err := cspm.NewService(map[cloudposture.Provider]ports.CloudConnector{cloudposture.ProviderAWS: connector}, assets, memory.NewFindingRepository(), engagements, audit, clockStub{now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attributor := &gatedAttributor{published: map[shared.ID]bool{}, attributed: map[shared.ID][]shared.ID{}}
+	svc.SetAttributor(attributor)
+	svc.SetObservationStore(publishingObservationStore{attributor: attributor})
+	svc.SetEvidenceSealer(evidenceStub{})
+	svc.SetSandboxExecutor(executorStub{connector: connector})
+	result, err := svc.Run(ctx, cspm.RunInput{TenantID: "tenant", EngagementID: "eng", Actor: "operator", Scopes: []ports.CloudScope{{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "organization/o-1", CredentialRef: "aws-prod"}}})
+	if err != nil {
+		t.Fatalf("run failed: %v (attribution ran before reconciliation published the assets)", err)
+	}
+	if result.Assets != 2 {
+		t.Fatalf("assets = %d, want 2", result.Assets)
+	}
+	if len(attributor.attributed) == 0 {
+		t.Fatal("no findings were attributed to any asset")
 	}
 }

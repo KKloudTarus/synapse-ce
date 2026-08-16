@@ -1124,12 +1124,15 @@ type contextRecorder struct {
 	waitForDeadline bool
 	result          *ScanResult
 	err             error
+	tenant          shared.ID
+	tenantOK        bool
 }
 
 func (r *contextRecorder) RecordProjectAnalysis(ctx context.Context, _ shared.ID, _ string, _ time.Time, result *ScanResult) error {
 	r.called = true
 	r.live = ctx.Err() == nil
 	r.deadline, _ = ctx.Deadline()
+	r.tenant, r.tenantOK = shared.TenantFrom(ctx)
 	r.result = result
 	if r.waitForDeadline {
 		<-ctx.Done()
@@ -1212,6 +1215,37 @@ func TestProjectRecorderUsesFreshCompletionContext(t *testing.T) {
 	}
 	if !recorder.called || !recorder.live {
 		t.Fatalf("recorder called=%v live=%v, want live completion context", recorder.called, recorder.live)
+	}
+	if final.Status != ports.ScanSucceeded {
+		t.Fatalf("status=%q err=%q, want succeeded", final.Status, final.Error)
+	}
+}
+
+// TestProjectRecorderCompletionContextKeepsTenant pins the tenant onto the project-analysis
+// completion context. The recorder reads the engagement through a tenant-scoped (RLS)
+// repository, so deriving the completion context from a bare context.Background() drops the
+// tenant and fails every Project analysis at the persistence boundary with
+// "tenant context is required" — after the whole pipeline has already succeeded.
+func TestProjectRecorderCompletionContextKeepsTenant(t *testing.T) {
+	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
+	jobs := newFakeJobStore()
+	svc := newAsyncSvc(repo, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
+	recorder := &contextRecorder{}
+	svc.SetProjectAnalysisRecorder(recorder)
+	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, StartedAt: time.Unix(0, 0).UTC()}
+	svc.runScanJob(shared.WithTenant(context.Background(), shared.DefaultTenant), "operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, ProjectAnalysis: true}, job)
+	if !recorder.called {
+		t.Fatal("recorder was not called")
+	}
+	if !recorder.tenantOK {
+		t.Fatal("completion context carries no tenant; a tenant-scoped repository read would fail")
+	}
+	if recorder.tenant != shared.DefaultTenant {
+		t.Fatalf("completion context tenant = %q, want %q", recorder.tenant, shared.DefaultTenant)
+	}
+	final, err := jobs.LatestForEngagement(context.Background(), "e1")
+	if err != nil {
+		t.Fatal(err)
 	}
 	if final.Status != ports.ScanSucceeded {
 		t.Fatalf("status=%q err=%q, want succeeded", final.Status, final.Error)

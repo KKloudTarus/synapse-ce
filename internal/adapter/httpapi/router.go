@@ -597,11 +597,18 @@ func (rt *Router) Handler() http.Handler {
 		return normalizePath(human)
 	}
 	// The untrusted agent transport is a SEPARATE auth plane: it must not pass through the human
-	// bearer-token authenticator or the AUP gate. Mount it at the top level so /api/v1/fleet is
-	// served by the agent-auth handler and everything else by the human chain. normalizePath wraps
-	// the whole top mux once, so both planes are normalized without double-wrapping.
+	// bearer-token authenticator or the AUP gate. Mount it on the EXACT agent-plane subtrees rather
+	// than the whole /api/v1/fleet/ prefix. A prefix mount also swallows the OPERATOR routes that
+	// live under /api/v1/fleet (coverage + agent health), which the agent mux does not serve, so
+	// every one of them answered 404 instead of reaching the human chain. The mounts are derived
+	// from fleetAgentPlaneRoutes, the same declaration fleetRouter.handler() registers, so the two
+	// planes cannot drift apart. normalizePath wraps the whole top mux once, so both planes are
+	// normalized without double-wrapping.
 	top := http.NewServeMux()
-	top.Handle("/api/v1/fleet/", rt.fleet.handler())
+	agentPlane := rt.fleet.handler()
+	for _, mount := range fleetAgentPlaneMounts() {
+		top.Handle(mount, agentPlane)
+	}
 	top.Handle("/", human)
 	return normalizePath(top)
 }

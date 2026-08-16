@@ -25,6 +25,7 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -80,6 +81,51 @@ var curatedEtc = []string{
 	"/etc/passwd", "/etc/group", // account NAMES only (no shadow)
 	"/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d", "/etc/alternatives",
 	"/etc/localtime", "/etc/mime.types", "/etc/gitconfig", "/etc/xdg",
+}
+
+// curatedRoot lists the OS trees bwrapArgs already binds read-only. A tool inside one of them
+// needs no extra bind; anything else must be bound explicitly.
+var curatedRoot = []string{"/usr", "/bin", "/sbin", "/lib", "/lib64"}
+
+// resolveToolPath settles the path bwrap will bind and exec. It returns the name unchanged whenever
+// it must not or cannot be resolved, in which case bwrap resolves it inside the sandbox and surfaces
+// any not-found itself.
+//
+// An ALREADY-ABSOLUTE name is returned as given and needs no lookup: it is operator authority (the
+// documented /opt/synapse/bin/synapse-cspm layout), which is what makes it bindable.
+//
+// A bare name is resolved through the host PATH only when hostPATHIsAuthority is set, which callers
+// tie to integrity verification being enabled. Host PATH is otherwise NOT an authority for what may
+// be bound into the sandbox: resolving it unconditionally would let an inherited entry such as
+// /tmp/attacker/tool be resolved on the host and then explicitly bound in, where bwrap would instead
+// resolve the bare name against the sandbox's own curated PATH and a binary outside the curated root
+// would fail closed.
+func resolveToolPath(name string, hostPATHIsAuthority bool) string {
+	// A Linux container path is absolute even when this argv builder runs on a Windows host, where
+	// filepath.IsAbs("/opt/...") is false.
+	if strings.HasPrefix(name, "/") || filepath.IsAbs(name) {
+		return name
+	}
+	if !hostPATHIsAuthority {
+		return name
+	}
+	if resolved, err := exec.LookPath(name); err == nil {
+		return resolved
+	}
+	return name
+}
+
+// underCuratedRoot reports whether an absolute path already lives inside the curated read-only
+// root. Matching is segment-aligned so "/libexec/evil" is not mistaken for "/lib".
+func underCuratedRoot(p string) bool {
+	// path, not path/filepath: these are Linux container paths regardless of the host GOOS.
+	clean := path.Clean(p)
+	for _, root := range curatedRoot {
+		if clean == root || strings.HasPrefix(clean, root+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // SetBinaryRegistry enables tool-binary integrity verification (F5): before each run the
@@ -164,20 +210,19 @@ func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult
 		return ports.ToolResult{}, fmt.Errorf("%w: build seccomp filter: %v", shared.ErrValidation, serr)
 	}
 	defer func() { _ = seccompF.Close() }()
+	// Settle the exec path BEFORE verification, so the path that is verified is the path that is
+	// bound and executed (closing the verify-path != exec-path gap). An absolute name is kept as
+	// given - that is the operator-configured helper the bind below exists for. The host PATH counts
+	// as an authority for a bare name only when that name will also be integrity-verified.
+	hostPATHIsAuthority := r.binreg != nil
+	spec.Name = resolveToolPath(spec.Name, hostPATHIsAuthority)
 	// F5: verify the tool binary's integrity before it runs. The resolved on-disk binary
 	// must match its pin (operator hash and/or trust-on-first-use); a replaced binary is
 	// refused. Defends the "compromised tool binary" threat the audit named.
 	if r.binreg != nil {
-		binPath, lerr := exec.LookPath(spec.Name)
-		if lerr != nil {
-			binPath = spec.Name // not on PATH; let bwrap surface the not-found, but still try to verify
-		}
-		if verr := r.binreg.Verify(binPath); verr != nil {
+		if verr := r.binreg.Verify(spec.Name); verr != nil {
 			return ports.ToolResult{}, fmt.Errorf("%w: %v", shared.ErrValidation, verr)
 		}
-		// Exec the EXACT path we verified (absolute) – so bwrap does not re-resolve spec.Name
-		// via PATH to a possibly-different binary (closes the verify-path != exec-path gap).
-		spec.Name = binPath
 	}
 	// F3: a per-run cgroup v2 with hard memory.max + pids.max so a memory/fork bomb is
 	// contained on EVERY path (egress and isolated), independent of systemd-run. The tool
@@ -422,6 +467,16 @@ func (r *Runner) bwrapArgs(spec ports.ToolSpec, sharedNet bool, hostsFile string
 	} else {
 		// Isolated mode: fresh netns too – default-deny egress by construction (E9 default).
 		args = append(args, "--unshare-all")
+	}
+	// Bind the tool binary ITSELF when it lives outside the curated root. The curated root
+	// deliberately omits /opt, /srv and friends so host secrets stay ENOENT, which also made every
+	// owned helper installed there (the documented /opt/synapse/bin/synapse-cspm layout) die with
+	// "bwrap: execvp ...: No such file or directory". Bind the single resolved FILE read-only, never
+	// its directory, so nothing else in that tree becomes visible. Only an absolute path is bound,
+	// and resolveToolPath keeps the host PATH from making a bare name absolute unless it is also
+	// integrity-verified - so what gets bound is operator authority, not an inherited PATH entry.
+	if bin := strings.TrimSpace(spec.Name); strings.HasPrefix(bin, "/") && !underCuratedRoot(bin) {
+		args = append(args, "--ro-bind-try", bin, bin)
 	}
 	for _, p := range spec.ReadOnlyPaths {
 		if strings.TrimSpace(p) != "" {

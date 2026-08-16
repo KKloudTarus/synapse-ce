@@ -3,6 +3,9 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -109,6 +112,44 @@ func TestSandboxReadOnlyExtraBinds(t *testing.T) {
 	}
 }
 
+// TestSandboxBindsToolBinaryOutsideCuratedRoot pins the bind for owned helpers installed outside
+// the curated read-only root. The root deliberately omits /opt so host secrets stay ENOENT, which
+// also made the DOCUMENTED /opt/synapse/bin/synapse-cspm layout unrunnable: every CSPM run died
+// with "bwrap: execvp /opt/synapse/synapse-cspm: No such file or directory", retried three times
+// and dead-lettered. Only the verified FILE is bound - never its directory.
+func TestSandboxBindsToolBinaryOutsideCuratedRoot(t *testing.T) {
+	r := fakeRunner("")
+	argv := r.command(ports.ToolSpec{Name: "/opt/synapse/bin/synapse-cspm"}, "", "", 3, false)
+	joined := strings.Join(argv, " ")
+	if !strings.Contains(joined, "--ro-bind-try /opt/synapse/bin/synapse-cspm /opt/synapse/bin/synapse-cspm") {
+		t.Errorf("helper binary was not bound into the sandbox: %s", joined)
+	}
+	if strings.Contains(joined, "--ro-bind-try /opt/synapse/bin /opt/synapse/bin") || strings.Contains(joined, "--ro-bind-try /opt /opt") {
+		t.Errorf("bound the helper's DIRECTORY, widening the curated root: %s", joined)
+	}
+}
+
+// TestSandboxDoesNotRebindCuratedRootTools keeps the bind narrow: tools already inside the curated
+// root need no extra bind, and a lookalike path must not be treated as being inside it.
+func TestSandboxDoesNotRebindCuratedRootTools(t *testing.T) {
+	r := fakeRunner("")
+	joined := strings.Join(r.command(ports.ToolSpec{Name: "/usr/bin/syft"}, "", "", 3, false), " ")
+	if strings.Contains(joined, "--ro-bind-try /usr/bin/syft /usr/bin/syft") {
+		t.Errorf("re-bound a tool already inside the curated root: %s", joined)
+	}
+	for _, name := range []string{"/libexec/synapse/helper", "/lib-evil/helper"} {
+		joined = strings.Join(r.command(ports.ToolSpec{Name: name}, "", "", 3, false), " ")
+		if !strings.Contains(joined, "--ro-bind-try "+name+" "+name) {
+			t.Errorf("%s was treated as inside the curated root: %s", name, joined)
+		}
+	}
+	// A relative name still resolves through PATH inside the sandbox; binding it would be wrong.
+	joined = strings.Join(r.command(ports.ToolSpec{Name: "grype"}, "", "", 3, false), " ")
+	if strings.Contains(joined, "--ro-bind-try grype") {
+		t.Errorf("bound a relative tool name: %s", joined)
+	}
+}
+
 // ---- secret substitution + worker-env exclusion (argv-construction level) ----
 
 func TestChildEnvResolvesSecretsCleanly(t *testing.T) {
@@ -174,5 +215,61 @@ func TestSecretsNeverEnterArgv(t *testing.T) {
 	argv := r.command(ports.ToolSpec{Name: "tool", EngagementID: "eng1", Env: []string{"TOK={{secret:TOK}}"}}, "", "", 3, false)
 	if strings.Contains(strings.Join(argv, " "), "PLAINTEXT_SECRET") {
 		t.Fatal("a resolved secret must NEVER appear in the argv")
+	}
+}
+
+// TestResolveToolPathKeepsHostPathOutOfSandboxAuthority pins the resolution contract. bwrapArgs binds
+// the binary only when spec.Name is ABSOLUTE, so an operator-configured absolute helper (the
+// documented /opt/synapse/bin/synapse-cspm layout) must survive untouched - that is what makes it
+// bindable. A BARE name is a different case: resolving it through the host PATH without integrity
+// verification would let an inherited entry such as /tmp/attacker/tool be resolved on the host and
+// then explicitly bound in, where bwrap would otherwise resolve it against the sandbox's own curated
+// PATH and fail closed.
+func TestResolveToolPathKeepsHostPathOutOfSandboxAuthority(t *testing.T) {
+	dir := t.TempDir()
+	name := "synapse-fake-helper"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	bare := strings.TrimSuffix(name, ".exe")
+	if runtime.GOOS == "windows" {
+		bare = name
+	}
+
+	// Verified: a bare name resolves, so the verified path is the bound and executed path.
+	if got := resolveToolPath(bare, true); !filepath.IsAbs(got) {
+		t.Errorf("resolveToolPath(%q, hostPATHIsAuthority) = %q, want an absolute path", bare, got)
+	}
+	// Unverified: host PATH is not an authority for what gets bound; leave it to bwrap.
+	if got := resolveToolPath(bare, false); got != bare {
+		t.Errorf("resolveToolPath(%q, !hostPATHIsAuthority) = %q, want the bare name so bwrap resolves it inside the sandbox", bare, got)
+	}
+	// An absolute operator-configured path is returned as given, verified or not.
+	const absolute = "/opt/synapse/bin/synapse-cspm"
+	for _, hostPATHIsAuthority := range []bool{true, false} {
+		if got := resolveToolPath(absolute, hostPATHIsAuthority); got != absolute {
+			t.Errorf("resolveToolPath(%q, %v) = %q, want it unchanged", absolute, hostPATHIsAuthority, got)
+		}
+	}
+	// An unresolvable name is returned unchanged so bwrap surfaces the not-found itself.
+	if got := resolveToolPath("synapse-definitely-not-on-path", true); got != "synapse-definitely-not-on-path" {
+		t.Errorf("resolveToolPath(missing) = %q, want the name unchanged", got)
+	}
+}
+
+// TestSandboxBindsResolvedBinaryOnTheLegacyPath is the argv-level half: a runner with NO binary
+// registry (legacy PATH trust) must still emit the bind for a resolved out-of-root helper.
+func TestSandboxBindsResolvedBinaryOnTheLegacyPath(t *testing.T) {
+	r := fakeRunner("")
+	if r.binreg != nil {
+		t.Fatal("this test must exercise the legacy PATH-trust path (binreg == nil)")
+	}
+	joined := strings.Join(r.command(ports.ToolSpec{Name: "/opt/synapse/bin/synapse-cspm"}, "", "", 3, false), " ")
+	if !strings.Contains(joined, "--ro-bind-try /opt/synapse/bin/synapse-cspm /opt/synapse/bin/synapse-cspm") {
+		t.Errorf("no bind emitted without a binary registry: %s", joined)
 	}
 }
