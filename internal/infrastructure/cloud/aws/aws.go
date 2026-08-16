@@ -315,9 +315,15 @@ func (c *Connector) buckets(ctx context.Context, client *s3.Client, account acco
 					resource.Public = cloudposture.StateDisabled
 				case statusErr != nil:
 					*gaps = append(*gaps, *coverageGap(account.id, "storage", statusErr))
-				case status.PolicyStatus != nil && awssdk.ToBool(status.PolicyStatus.IsPublic):
+				case status.PolicyStatus == nil:
+					// A 200 carrying no policy-status field is NOT evidence of absence, so the state
+					// stays unknown. Collapsing it into the negative below would manufacture an
+					// evidence-backed claim out of a missing field - the same category error this
+					// function fixes in the other direction.
+				case awssdk.ToBool(status.PolicyStatus.IsPublic):
 					resource.Public = cloudposture.StateEnabled
 				default:
+					// PolicyStatus present and IsPublic false: an observed negative.
 					resource.Public = cloudposture.StateDisabled
 				}
 			}
@@ -336,7 +342,9 @@ func (c *Connector) buckets(ctx context.Context, client *s3.Client, account acco
 				case encryption.ServerSideEncryptionConfiguration != nil:
 					resource.Encrypted = cloudposture.StateEnabled
 				default:
-					resource.Encrypted = cloudposture.StateDisabled
+					// A 200 carrying no encryption configuration field is NOT evidence of absence:
+					// only the named error code above is. Leave the state unknown rather than
+					// manufacturing an unencrypted-bucket claim from a missing field.
 				}
 			}
 			inventory.Resources = append(inventory.Resources, resource)

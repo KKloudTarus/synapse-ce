@@ -442,3 +442,55 @@ func TestIsAbsentConfigOnlyMatchesTheNamedCode(t *testing.T) {
 		t.Error("a transport error was treated as an observed negative")
 	}
 }
+
+// TestSuccessfulCallWithNilConfigStaysUnknown is the review finding this file previously missed. Only
+// the named ABSENCE ERROR CODES are evidence of absence. A 200 response carrying a nil config field
+// is not: recording it as a definitive negative manufactures an evidence-backed posture claim out of
+// a missing field, which is the same category error as treating a real absence as a failure.
+func TestSuccessfulCallWithNilConfigStaysUnknown(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		action := r.Header.Get("X-Amz-Target")
+		switch {
+		case strings.HasSuffix(action, "DescribeOrganization"):
+			w.Header().Set("Content-Type", "application/x-amz-json-1.1")
+			fmt.Fprint(w, `{"Organization":{"Id":"o-example","Arn":"arn:aws:organizations::111111111111:organization/o-example","FeatureSet":"ALL","MasterAccountId":"111111111111"}}`)
+		case strings.HasSuffix(action, "ListAccounts"):
+			w.Header().Set("Content-Type", "application/x-amz-json-1.1")
+			fmt.Fprint(w, `{"Accounts":[{"Id":"111111111111","Arn":"arn:aws:organizations::111111111111:account/o-example/a","Name":"first"}]}`)
+		case strings.Contains(r.URL.RawQuery, "policyStatus"), strings.Contains(r.URL.RawQuery, "encryption"):
+			// 200 OK carrying no configuration field at all - a successful call that establishes
+			// nothing. This is NOT one of the named absence error codes.
+			w.WriteHeader(http.StatusOK)
+		default:
+			body, _ := io.ReadAll(r.Body)
+			if bytes.Contains(body, []byte("AssumeRole")) {
+				fmt.Fprint(w, `<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials><AccessKeyId>temporary</AccessKeyId><SecretAccessKey>temporary-secret</SecretAccessKey><SessionToken>temporary-token</SessionToken><Expiration>2100-01-01T00:00:00Z</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>`)
+				return
+			}
+			fmt.Fprint(w, `<ListAllMyBucketsResult><Buckets><Bucket><Name>plain</Name></Bucket></Buckets></ListAllMyBucketsResult>`)
+		}
+	}))
+	defer server.Close()
+
+	connector := newTestConnector(t, server.URL, "TOP-SECRET-ACCESS-KEY")
+	inventory, _, err := connector.Enumerate(context.Background(), testScope())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bucket *cloudposture.Resource
+	for i := range inventory.Resources {
+		if inventory.Resources[i].Kind == asset.KindStorage {
+			bucket = &inventory.Resources[i]
+			break
+		}
+	}
+	if bucket == nil {
+		t.Fatal("bucket was not enumerated")
+	}
+	if bucket.Encrypted != cloudposture.StateUnknown {
+		t.Errorf("Encrypted = %q, want %q (a nil config field on a 200 is not evidence of absence)", bucket.Encrypted, cloudposture.StateUnknown)
+	}
+	if bucket.Public != cloudposture.StateUnknown {
+		t.Errorf("Public = %q, want %q (a nil policy-status field on a 200 is not evidence of absence)", bucket.Public, cloudposture.StateUnknown)
+	}
+}
