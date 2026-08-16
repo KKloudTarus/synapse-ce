@@ -93,6 +93,11 @@ var critiqueSchema = json.RawMessage(`{
   }
 }`)
 
+// evidenceCritiqueSchema constrains the evidence-backed critique. It deliberately omits
+// "uniqueItems": OpenAI structured outputs reject that keyword in strict mode ("'uniqueItems' is
+// not permitted"), which failed EVERY evidence-backed triage call with a 400 the telemetry then
+// recorded as a provider error. Duplicate citations are rejected in code instead, by
+// validateEvidenceCitations.
 var evidenceCritiqueSchema = json.RawMessage(`{
   "name": "evidence_critique",
   "strict": true,
@@ -104,7 +109,7 @@ var evidenceCritiqueSchema = json.RawMessage(`{
       "verdict": { "type": "string", "enum": ["refuted", "sound", "uncertain"] },
       "driver": { "type": "string", "enum": ["test_or_example_code","not_attacker_controlled","input_sanitized","constant_or_literal","framework_autoescape","not_reachable","intended_behavior","false_pattern_match","mitigated_elsewhere","confirmed_exploitable","attacker_controlled","insufficient_context"] },
       "confidence": { "type": "integer", "minimum": 0, "maximum": 100 },
-      "evidence_tokens": { "type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": { "type": "string", "pattern": "^ev:[a-z][a-z0-9_]{0,47}$" } }
+      "evidence_tokens": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^ev:[a-z][a-z0-9_]{0,47}$" } }
     }
   }
 }`)
