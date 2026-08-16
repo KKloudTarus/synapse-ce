@@ -3,6 +3,9 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -212,5 +215,50 @@ func TestSecretsNeverEnterArgv(t *testing.T) {
 	argv := r.command(ports.ToolSpec{Name: "tool", EngagementID: "eng1", Env: []string{"TOK={{secret:TOK}}"}}, "", "", 3, false)
 	if strings.Contains(strings.Join(argv, " "), "PLAINTEXT_SECRET") {
 		t.Fatal("a resolved secret must NEVER appear in the argv")
+	}
+}
+
+// TestResolveToolPathRunsWithoutABinaryRegistry closes the review gap in the bind fix. bwrapArgs
+// binds the binary only when spec.Name is ABSOLUTE, and Run() previously rewrote spec.Name to the
+// resolved path only inside `if r.binreg != nil`. In the documented legacy PATH-trust mode a helper
+// invoked by bare name therefore stayed relative, emitted no bind, and returned the original
+// "bwrap: execvp ...: No such file or directory" the fix exists to prevent. Resolution must not
+// depend on integrity verification being enabled.
+func TestResolveToolPathRunsWithoutABinaryRegistry(t *testing.T) {
+	dir := t.TempDir()
+	name := "synapse-fake-helper"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	binary := filepath.Join(dir, name)
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	bare := strings.TrimSuffix(name, ".exe")
+	if runtime.GOOS == "windows" {
+		bare = name
+	}
+	got := resolveToolPath(bare)
+	if !filepath.IsAbs(got) {
+		t.Fatalf("resolveToolPath(%q) = %q, want an absolute path so bwrapArgs can bind it", bare, got)
+	}
+	// An unresolvable name is returned unchanged so bwrap surfaces the not-found itself.
+	if got := resolveToolPath("synapse-definitely-not-on-path"); got != "synapse-definitely-not-on-path" {
+		t.Errorf("resolveToolPath(missing) = %q, want the name unchanged", got)
+	}
+}
+
+// TestSandboxBindsResolvedBinaryOnTheLegacyPath is the argv-level half: a runner with NO binary
+// registry (legacy PATH trust) must still emit the bind for a resolved out-of-root helper.
+func TestSandboxBindsResolvedBinaryOnTheLegacyPath(t *testing.T) {
+	r := fakeRunner("")
+	if r.binreg != nil {
+		t.Fatal("this test must exercise the legacy PATH-trust path (binreg == nil)")
+	}
+	joined := strings.Join(r.command(ports.ToolSpec{Name: "/opt/synapse/bin/synapse-cspm"}, "", "", 3, false), " ")
+	if !strings.Contains(joined, "--ro-bind-try /opt/synapse/bin/synapse-cspm /opt/synapse/bin/synapse-cspm") {
+		t.Errorf("no bind emitted without a binary registry: %s", joined)
 	}
 }

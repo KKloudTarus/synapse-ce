@@ -87,6 +87,18 @@ var curatedEtc = []string{
 // needs no extra bind; anything else must be bound explicitly.
 var curatedRoot = []string{"/usr", "/bin", "/sbin", "/lib", "/lib64"}
 
+// resolveToolPath resolves a tool name to its absolute on-disk path via PATH, returning the name
+// unchanged when it cannot be resolved (bwrap then surfaces the not-found). This runs on EVERY path,
+// not only when integrity verification is enabled: bwrapArgs binds the binary only when it is
+// absolute, so a bare name left unresolved emits no bind and any helper outside the curated root
+// dies with "bwrap: execvp ...: No such file or directory".
+func resolveToolPath(name string) string {
+	if resolved, err := exec.LookPath(name); err == nil {
+		return resolved
+	}
+	return name
+}
+
 // underCuratedRoot reports whether an absolute path already lives inside the curated read-only
 // root. Matching is segment-aligned so "/libexec/evil" is not mistaken for "/lib".
 func underCuratedRoot(p string) bool {
@@ -182,20 +194,20 @@ func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult
 		return ports.ToolResult{}, fmt.Errorf("%w: build seccomp filter: %v", shared.ErrValidation, serr)
 	}
 	defer func() { _ = seccompF.Close() }()
+	// Resolve the tool to an absolute on-disk path FIRST, independently of integrity verification.
+	// bwrapArgs binds the binary only when it is absolute and outside the curated root, so leaving a
+	// bare name unresolved in the legacy PATH-trust mode (binreg == nil) emits no bind and returns
+	// the original "bwrap: execvp ...: No such file or directory" for any helper installed outside
+	// /usr, /bin, /sbin or /lib. Resolving here also means bwrap never re-resolves spec.Name via
+	// PATH to a possibly-different binary (closing the verify-path != exec-path gap below).
+	spec.Name = resolveToolPath(spec.Name)
 	// F5: verify the tool binary's integrity before it runs. The resolved on-disk binary
 	// must match its pin (operator hash and/or trust-on-first-use); a replaced binary is
 	// refused. Defends the "compromised tool binary" threat the audit named.
 	if r.binreg != nil {
-		binPath, lerr := exec.LookPath(spec.Name)
-		if lerr != nil {
-			binPath = spec.Name // not on PATH; let bwrap surface the not-found, but still try to verify
-		}
-		if verr := r.binreg.Verify(binPath); verr != nil {
+		if verr := r.binreg.Verify(spec.Name); verr != nil {
 			return ports.ToolResult{}, fmt.Errorf("%w: %v", shared.ErrValidation, verr)
 		}
-		// Exec the EXACT path we verified (absolute) – so bwrap does not re-resolve spec.Name
-		// via PATH to a possibly-different binary (closes the verify-path != exec-path gap).
-		spec.Name = binPath
 	}
 	// F3: a per-run cgroup v2 with hard memory.max + pids.max so a memory/fork bomb is
 	// contained on EVERY path (egress and isolated), independent of systemd-run. The tool
