@@ -12,6 +12,13 @@ capabilities below are already shipped on `main`.
 
 ### Added
 
+- **Gate-reachable adversarial coverage for AI-triage robustness.** The golden dataset now binds
+  prompt-injection challenges to controls the deterministic policy could actually exempt, so
+  `PolicyFlip` and `UnsafePolicyFlip` measure a non-empty population instead of being pinned to
+  `false` by the human-review floor. A regression test proves the metrics are falsifiable — a triager
+  that obeys an injection registers an unsafe flip, an honest one does not — and a coverage test
+  fails if a future dataset edit leaves no adversarial case able to reach the gate.
+
 - **Risk-based remediation SLA governance.** Adds opt-in, tenant/RLS-safe and versioned SLA policy,
   immutable deterministic assessment history, mitigate/remediate deadlines in scan/API/UI output,
   human-only open/mitigating/remediated/accepted-risk transitions with hard acceptance expiry, and
