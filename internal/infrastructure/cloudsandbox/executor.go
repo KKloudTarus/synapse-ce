@@ -45,48 +45,89 @@ func New(runner ports.ToolRunner, vault ports.CredentialVault, binary string, ra
 // short reason line; anything longer is a malfunction and must not become an unbounded log write.
 const diagnosticCap = 512
 
-// minScrubbableSecretLen is the shortest credential-field value scrubbed on its own. Provider
-// credential documents also carry SHORT structural values (a region, a provider name, "true"), and
-// scrubbing those would match ordinary prose in any diagnostic and drop every reason - silently
-// reverting the observability this file exists to provide. Real credential material is far longer:
-// an AWS access key id is 20 characters, a secret access key 40, session tokens and GCP/Azure keys
-// longer still.
-const minScrubbableSecretLen = 16
+// secretFieldMarkers name a credential field whose VALUE is secret material rather than a public
+// identifier. Matching is on the field name, not the value: a credential document mixes secrets
+// (private_key, client_secret, session_token) with identifiers that legitimately appear in enumerated
+// inventory (a GCP client_email and project_id, an Azure subscription_id, an AWS account id). Value
+// length cannot separate the two - a GCP client_email is long and public, an Azure client_secret may
+// be short and secret - so any length threshold both over- and under-matches.
+var secretFieldMarkers = []string{"secret", "password", "passwd", "passphrase", "token", "private", "credential", "key"}
 
-// credentialSecrets decomposes resolved credential material into every value that must be scrubbed
-// INDEPENDENTLY. A provider credential is a JSON document holding several distinct secret-bearing
-// fields (an AWS document carries access_key_id, secret_access_key and session_token), and provider
-// SDK errors routinely echo exactly ONE of them in isolation - for example "The AWS Access Key Id
-// you provided does not exist in our records: AKIA...". Scrubbing only the whole document never
-// matches that substring, so the field would survive redaction, pass the placeholder check, and
-// reach a structured log or a JSON API error body.
-//
-// The document is treated as opaque provider-shaped JSON on purpose: this executor is
-// provider-agnostic and must not import a concrete connector's credential type.
-func credentialSecrets(secret []byte) [][]byte {
-	secrets := [][]byte{secret}
+// isSecretFieldName reports whether a JSON field name marks its value as secret material.
+func isSecretFieldName(name string) bool {
+	lowered := strings.ToLower(name)
+	for _, marker := range secretFieldMarkers {
+		if strings.Contains(lowered, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// walkCredential calls visit for every string value in a credential document, with the field name it
+// was reached through (empty for array elements and the root). The document is treated as opaque
+// provider-shaped JSON on purpose: this executor is the shared sandbox path for every provider and
+// must not import a concrete connector's credential type.
+func walkCredential(secret []byte, visit func(name, value string)) bool {
 	var document any
 	if err := json.Unmarshal(secret, &document); err != nil {
-		return secrets // opaque (non-JSON) credential: the whole blob is the only known value
+		return false // opaque (non-JSON) credential: nothing to decompose
 	}
-	var walk func(node any)
-	walk = func(node any) {
+	var walk func(name string, node any)
+	walk = func(name string, node any) {
 		switch typed := node.(type) {
 		case map[string]any:
-			for _, value := range typed {
-				walk(value)
+			for field, value := range typed {
+				walk(field, value)
 			}
 		case []any:
 			for _, value := range typed {
-				walk(value)
+				walk(name, value) // array elements inherit the field they hang off
 			}
 		case string:
-			if len(typed) >= minScrubbableSecretLen {
-				secrets = append(secrets, []byte(typed))
-			}
+			visit(name, typed)
 		}
 	}
-	walk(document)
+	walk("", document)
+	return true
+}
+
+// diagnosticSecrets is the scrub set for the DIAGNOSTIC sink: the whole document plus every string
+// value in it, whatever its name or length. Provider SDK errors echo exactly one field in isolation
+// ("The AWS Access Key Id you provided does not exist in our records: AKIA..."), which never matches
+// the whole document, so the field would otherwise survive redaction and reach a structured log or a
+// JSON API error body.
+//
+// This set is deliberately maximal. The only cost of a false match here is that diagnostic() drops
+// the reason text; the cost of a miss is credential disclosure. Every field is therefore in scope
+// regardless of length - an Azure client_secret is only validated non-empty, so a short secret must
+// not slip through a length threshold.
+func diagnosticSecrets(secret []byte) [][]byte {
+	secrets := [][]byte{secret}
+	walkCredential(secret, func(_, value string) {
+		if value != "" {
+			secrets = append(secrets, []byte(value))
+		}
+	})
+	return secrets
+}
+
+// outputSecrets is the scrub set for the helper's STDOUT: the whole document plus only the values
+// whose field name marks them as secret material.
+//
+// Stdout is load-bearing data, not a diagnostic - a placeholder hit REJECTS the whole enumeration -
+// so this set must not contain public identifiers the helper legitimately emits. A GCP credential's
+// client_email appears verbatim in enumerated IAM bindings and its project_id in every resource ID,
+// so scrubbing every field here would fail every GCP run with "output contained credential material"
+// after the helper had already succeeded. Real secret fields are still scrubbed at any length, and
+// the whole-document match still catches a wholesale echo of an unparseable credential.
+func outputSecrets(secret []byte) [][]byte {
+	secrets := [][]byte{secret}
+	walkCredential(secret, func(name, value string) {
+		if value != "" && isSecretFieldName(name) {
+			secrets = append(secrets, []byte(value))
+		}
+	})
 	return secrets
 }
 
@@ -104,8 +145,11 @@ func diagnostic(stderr []byte, secrets [][]byte) string {
 	if reason == "" {
 		return ""
 	}
-	// Truncate on a RUNE boundary: a byte-offset cut can split a multi-byte rune and emit invalid
-	// UTF-8 into a structured log and a JSON error body, which strings.Fields below cannot repair.
+	// Coerce to valid UTF-8 unconditionally, not only when truncating: a helper can emit a latin-1
+	// provider message or a partial write that is invalid UTF-8 well under the cap, and this string
+	// lands in a structured log and a JSON error body. ToValidUTF8 also makes the truncation below
+	// safe to do on a byte offset walked back to a rune boundary.
+	reason = strings.ToValidUTF8(reason, "�")
 	if len(reason) > diagnosticCap {
 		cut := diagnosticCap
 		for cut > 0 && !utf8.ValidString(reason[:cut]) {
@@ -219,13 +263,13 @@ func (e *Executor) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (
 	if runErr != nil {
 		return cloudposture.Inventory{}, nil, fmt.Errorf("sandboxed CSPM helper failed: %w", runErr)
 	}
-	// Scrub each credential FIELD independently, not just the whole document: a provider SDK error
-	// echoes one field in isolation, which never matches the blob.
-	secrets := credentialSecrets(secret)
+	// The two sinks get DIFFERENT scrub sets because they tolerate a false match differently: a
+	// diagnostic can be dropped, but stdout is the enumeration result and a placeholder hit rejects
+	// the whole run. See diagnosticSecrets and outputSecrets.
 	if result.ExitCode != 0 || result.TimedOut || result.Truncated {
-		return cloudposture.Inventory{}, nil, fmt.Errorf("sandboxed CSPM helper failed: exit_code=%d timed_out=%t truncated=%t%s", result.ExitCode, result.TimedOut, result.Truncated, diagnostic(result.Stderr, secrets))
+		return cloudposture.Inventory{}, nil, fmt.Errorf("sandboxed CSPM helper failed: exit_code=%d timed_out=%t truncated=%t%s", result.ExitCode, result.TimedOut, result.Truncated, diagnostic(result.Stderr, diagnosticSecrets(secret)))
 	}
-	result.Stdout = redact.Bytes(result.Stdout, secrets)
+	result.Stdout = redact.Bytes(result.Stdout, outputSecrets(secret))
 	if strings.Contains(string(result.Stdout), redact.Placeholder) {
 		return cloudposture.Inventory{}, nil, errors.New("sandboxed CSPM output contained credential material")
 	}

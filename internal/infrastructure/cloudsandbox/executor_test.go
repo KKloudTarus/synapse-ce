@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -20,6 +21,9 @@ type runnerStub struct {
 	result    ports.ToolResult
 	err       error
 	operation ports.CloudOperation
+	// passthroughStdout returns result.Stdout verbatim instead of the canned inventory, so a test can
+	// drive the executor's own stdout scrub over chosen helper output.
+	passthroughStdout bool
 }
 
 func (r *runnerStub) Run(_ context.Context, spec ports.ToolSpec) (ports.ToolResult, error) {
@@ -46,6 +50,9 @@ func (r *runnerStub) Run(_ context.Context, spec ports.ToolSpec) (ports.ToolResu
 		return ports.ToolResult{}, r.err
 	}
 	if r.result.ExitCode != 0 || r.result.TimedOut || r.result.Truncated {
+		return r.result, nil
+	}
+	if r.passthroughStdout {
 		return r.result, nil
 	}
 	return ports.ToolResult{Stdout: out}, nil
@@ -245,34 +252,99 @@ func TestExecutorRedactsIndividualCredentialFields(t *testing.T) {
 	}
 }
 
-// TestCredentialSecretsDecomposesTheDocument pins the decomposition contract: every long field is
-// scrubbable on its own, the whole blob stays in the set, short structural values are excluded (they
-// would match ordinary prose and drop every diagnostic), and a non-JSON credential is still covered.
-func TestCredentialSecretsDecomposesTheDocument(t *testing.T) {
-	document := []byte(`{"access_key_id":"AKIAIOSFODNN7EXAMPLE","region":"us-east-1","enabled":true,"nested":{"token":"FwoGZXIvYXdzEBYaDEXAMPLESESSIONTOKEN"}}`)
-	got := credentialSecrets(document)
-	has := func(want string) bool {
-		for _, secret := range got {
-			if string(secret) == want {
-				return true
-			}
+// has reports whether the scrub set contains an exact value.
+func hasSecret(secrets [][]byte, want string) bool {
+	for _, secret := range secrets {
+		if string(secret) == want {
+			return true
 		}
-		return false
 	}
-	if !has(string(document)) {
-		t.Error("the whole credential document must remain in the scrub set")
+	return false
+}
+
+// gcpCredential mirrors a real GCP service-account key: PUBLIC identifiers (client_email, project_id)
+// sitting next to actual secret material (private_key).
+const gcpCredential = `{"type":"service_account","project_id":"synapse-e2e-project","private_key":"-----BEGIN PRIVATE KEY-----MIIEvQIBADANBg-----END PRIVATE KEY-----","client_email":"synapse-cspm@synapse-e2e-project.iam.gserviceaccount.com","client_id":"114857320991827364550"}`
+
+// TestDiagnosticSecretsCoversEveryFieldAtAnyLength pins the DIAGNOSTIC set as maximal. A provider SDK
+// error echoes one field in isolation, which never matches the whole document, and the only cost of a
+// false match here is that the reason text is dropped. Length must not gate membership: an Azure
+// client_secret is validated non-empty only, so a SHORT secret has to be covered too.
+func TestDiagnosticSecretsCoversEveryFieldAtAnyLength(t *testing.T) {
+	document := []byte(`{"tenant_id":"t","client_id":"c","client_secret":"sh0rt","subscription_id":"sub-1234"}`)
+	got := diagnosticSecrets(document)
+	if !hasSecret(got, string(document)) {
+		t.Error("the whole credential document must stay in the scrub set")
 	}
-	if !has("AKIAIOSFODNN7EXAMPLE") {
-		t.Error("a top-level credential field was not decomposed")
+	for _, value := range []string{"sh0rt", "sub-1234", "t", "c"} {
+		if !hasSecret(got, value) {
+			t.Errorf("field value %q is not scrubbed in a diagnostic; a short secret must not slip a length threshold", value)
+		}
 	}
-	if !has("FwoGZXIvYXdzEBYaDEXAMPLESESSIONTOKEN") {
-		t.Error("a nested credential field was not decomposed")
+	// Nested and array-wrapped values are reached too.
+	nested := diagnosticSecrets([]byte(`{"outer":{"session_token":"nested-token"},"list":["listed-token"]}`))
+	if !hasSecret(nested, "nested-token") || !hasSecret(nested, "listed-token") {
+		t.Errorf("nested/array credential values were not decomposed: %q", nested)
 	}
-	if has("us-east-1") {
-		t.Error("a short structural value was scrubbed; that matches ordinary prose and drops every diagnostic")
-	}
-	if opaque := credentialSecrets([]byte("not-json-credential-material")); len(opaque) != 1 {
+	if opaque := diagnosticSecrets([]byte("not-json-credential-material")); len(opaque) != 1 {
 		t.Errorf("opaque credential produced %d secrets, want just the blob", len(opaque))
+	}
+}
+
+// TestOutputSecretsExcludesPublicIdentifiers pins the STDOUT set as narrow, and is the regression
+// guard for the review finding that a maximal set breaks every GCP run. Stdout is the enumeration
+// result, not a diagnostic: a placeholder hit REJECTS the run. A GCP client_email appears verbatim in
+// enumerated IAM bindings and project_id in every resource ID, so scrubbing them would fail a
+// successful enumeration with "output contained credential material".
+func TestOutputSecretsExcludesPublicIdentifiers(t *testing.T) {
+	got := outputSecrets([]byte(gcpCredential))
+	if !hasSecret(got, string(gcpCredential)) {
+		t.Error("the whole credential document must stay in the scrub set")
+	}
+	if !hasSecret(got, "-----BEGIN PRIVATE KEY-----MIIEvQIBADANBg-----END PRIVATE KEY-----") {
+		t.Error("private_key is real secret material and must be scrubbed from stdout")
+	}
+	for _, public := range []string{
+		"synapse-cspm@synapse-e2e-project.iam.gserviceaccount.com", // appears in enumerated IAM bindings
+		"synapse-e2e-project", // appears in every resource ID
+		"service_account",
+	} {
+		if hasSecret(got, public) {
+			t.Errorf("public identifier %q is scrubbed from stdout; that rejects a successful enumeration", public)
+		}
+	}
+}
+
+// TestOutputScrubKeepsLegitimateInventory drives the full executor: a helper that emits its own
+// client_email and project_id in normal inventory - exactly what the GCP connector does - must still
+// have its output accepted.
+func TestOutputScrubKeepsLegitimateInventory(t *testing.T) {
+	inventory, err := json.Marshal(struct {
+		Inventory cloudposture.Inventory       `json:"inventory"`
+		Coverage  []cloudposture.CoverageIssue `json:"coverage"`
+	}{Inventory: cloudposture.Inventory{
+		Provider: cloudposture.ProviderAWS, ScopeKey: "aws:organizations/o-test", Complete: true,
+		Resources: []cloudposture.Resource{{
+			Provider: cloudposture.ProviderAWS,
+			ID:       "projects/synapse-e2e-project/iam/roles~owner/serviceAccount:synapse-cspm@synapse-e2e-project.iam.gserviceaccount.com",
+			Name:     "synapse-cspm@synapse-e2e-project.iam.gserviceaccount.com",
+			Kind:     asset.KindIdentity,
+		}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &runnerStub{result: ports.ToolResult{Stdout: inventory}, passthroughStdout: true}
+	executor, err := New(runner, secretVault{secret: []byte(gcpCredential)}, "synapse-cspm", 5, time.Minute, 1<<20, map[cloudposture.Provider][]string{cloudposture.ProviderAWS: {"organizations.us-east-1.amazonaws.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "gcp-prod", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
+	if err != nil {
+		t.Fatalf("legitimate inventory was rejected: %v", err)
+	}
+	if len(got.Resources) != 1 || got.Resources[0].Name == "" {
+		t.Fatalf("inventory = %#v, want the enumerated identity preserved", got.Resources)
 	}
 }
 
