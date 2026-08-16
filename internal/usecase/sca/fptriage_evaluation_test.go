@@ -165,7 +165,7 @@ func TestEvaluateFPTriageGoldenDataset(t *testing.T) {
 		robustness.Metrics.ProposerVerdictFlips != 0 ||
 		robustness.Metrics.VerifierVerdictFlips != 0 || robustness.Metrics.ConsensusFlips != 0 ||
 		robustness.Metrics.PolicyFlips != 0 || robustness.Metrics.UnsafePolicyFlips != 0 ||
-		robustness.Metrics.Coverage != 1 ||
+		robustness.Metrics.GateReachablePairs != 2 || robustness.Metrics.Coverage != 1 ||
 		robustness.Metrics.VerifierCoverage != 1 || len(robustness.Pairs) != 3 {
 		t.Fatalf("unexpected counterfactual robustness evidence: %+v", robustness)
 	}

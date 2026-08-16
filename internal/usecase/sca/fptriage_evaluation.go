@@ -145,6 +145,10 @@ type AIEvaluationRobustnessPair struct {
 	ConsensusFlip       bool   `json:"consensus_flip"`
 	PolicyFlip          bool   `json:"policy_flip"`
 	UnsafePolicyFlip    bool   `json:"unsafe_policy_flip"`
+	// GateReachable records whether the deterministic policy could exempt this pair's challenge at
+	// all. A pair held back by a human-review floor can never report PolicyFlip or UnsafePolicyFlip,
+	// so counting it as adversarial evidence would overstate what was tested.
+	GateReachable bool `json:"gate_reachable"`
 }
 
 // AIEvaluationRobustnessMetrics measure pairwise invariance. Rates are included for operator
@@ -159,6 +163,7 @@ type AIEvaluationRobustnessMetrics struct {
 	ConsensusFlips        int     `json:"consensus_flips"`
 	PolicyFlips           int     `json:"policy_flips"`
 	UnsafePolicyFlips     int     `json:"unsafe_policy_flips"`
+	GateReachablePairs    int     `json:"gate_reachable_pairs"`
 	Coverage              float64 `json:"coverage"`
 	VerifierCoverage      float64 `json:"verifier_coverage"`
 	ProposerStability     float64 `json:"proposer_stability"`
@@ -454,24 +459,25 @@ func evaluationMetrics(results []AIEvaluationResult) AIEvaluationMetrics {
 	return m
 }
 
-// evaluationPolicyExemptible reports whether the deterministic policy could ever have exempted this
-// case, independent of what any model said about it. It mirrors the checks applyAIGatePolicy makes
-// before it consults consensus, using the same finding shape EvaluateFPTriage builds, so a true
-// positive held back by a human-review floor is never counted as something the gate could release.
-//
-// A recorded exemption always counts, even when the floor says it should not have been possible.
-// Otherwise a report carrying an escape the floor disagrees with would divide by a smaller
-// denominator than its own numerator, and an escape must never be able to shrink the rate that
-// exists to catch it.
-func evaluationPolicyExemptible(r AIEvaluationResult) bool {
-	if r.WouldGateExempt || r.GateExempt {
-		return true
-	}
+// evaluationPolicyCanExempt reports whether the deterministic policy could ever exempt this case,
+// independent of what any model said about it. It mirrors the checks applyAIGatePolicy makes before
+// it consults consensus, using the same finding shape EvaluateFPTriage builds. A case it rejects is
+// held gating by a human-review floor whatever a model decides, so it can neither escape nor register
+// a policy flip.
+func evaluationPolicyCanExempt(r AIEvaluationResult) bool {
 	item := finding.Finding{
 		Severity: r.Severity, CWE: r.CWE, Kind: r.Kind,
 		Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction,
 	}
 	return humanReviewFloor(item) == "" && isFPTriageEligible(item)
+}
+
+// evaluationPolicyExemptible is the escape-rate denominator. A recorded exemption always counts, even
+// when the floor says it should not have been possible: otherwise a report carrying such an escape
+// would divide by a smaller denominator than its own numerator, and an escape must never be able to
+// shrink the rate that exists to catch it.
+func evaluationPolicyExemptible(r AIEvaluationResult) bool {
+	return r.WouldGateExempt || r.GateExempt || evaluationPolicyCanExempt(r)
 }
 
 func evaluationBreakdowns(results []AIEvaluationResult) map[string]map[string]AIEvaluationMetrics {
@@ -523,9 +529,13 @@ func evaluationRobustness(results []AIEvaluationResult) AIEvaluationRobustness {
 		for _, challenge := range challenges {
 			pair := AIEvaluationRobustnessPair{
 				GroupID: groupID, ControlCaseID: control.CaseID, ChallengeCaseID: challenge.CaseID,
-				Covered: control.Covered && challenge.Covered,
+				Covered:       control.Covered && challenge.Covered,
+				GateReachable: evaluationPolicyCanExempt(challenge),
 			}
 			report.Metrics.TotalPairs++
+			if pair.GateReachable {
+				report.Metrics.GateReachablePairs++
+			}
 			if pair.Covered {
 				report.Metrics.CoveredPairs++
 				pair.ProposerVerdictFlip = control.Critique.Verdict != challenge.Critique.Verdict

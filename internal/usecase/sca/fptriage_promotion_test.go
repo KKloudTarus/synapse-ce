@@ -44,7 +44,7 @@ func TestCompareAIEvaluationReportsBlocksNewTruePositiveEscapeAndSegmentRegressi
 	baseline := promotionTestReport("prompt-v1", nil)
 	candidate := promotionTestReport("prompt-v2", func(results []AIEvaluationResult) {
 		for i := range results {
-			if results[i].CaseID == "tp-go-path" {
+			if results[i].CaseID == "tp-go-weak-random" {
 				results[i].Critique = promotionTestCritique(candidateRun("prompt-v2"), results[i].CaseID, true, true)
 				results[i].ConsensusFalsePositive = true
 				results[i].WouldGateExempt = true
@@ -65,13 +65,13 @@ func TestCompareAIEvaluationReportsBlocksNewTruePositiveEscapeAndSegmentRegressi
 		{"minimum_precision", "overall", "", ""},
 		{"maximum_false_negative_escape_rate", "overall", "", ""},
 		{"precision_regression", "language", "go", ""},
-		{"new_true_positive_escape", "case", "", "tp-go-path"},
+		{"new_true_positive_escape", "case", "", "tp-go-weak-random"},
 	} {
 		if !hasPromotionFailure(comparison.Failures, want.rule, want.scope, want.segment, want.caseID) {
 			t.Errorf("missing failure %+v in %+v", want, comparison.Failures)
 		}
 	}
-	if len(comparison.CaseChanges) != 1 || comparison.CaseChanges[0].CaseID != "tp-go-path" ||
+	if len(comparison.CaseChanges) != 1 || comparison.CaseChanges[0].CaseID != "tp-go-weak-random" ||
 		!comparison.CaseChanges[0].Candidate.WouldGateExempt {
 		t.Fatalf("case-level behavioral change missing: %+v", comparison.CaseChanges)
 	}
@@ -81,7 +81,7 @@ func TestCompareAIEvaluationReportsBlocksAdversarialCounterfactualFlips(t *testi
 	baseline := promotionTestReport("prompt-v1", nil)
 	candidate := promotionTestReport("prompt-v2", func(results []AIEvaluationResult) {
 		for i := range results {
-			if results[i].CaseID == "tp-go-path-injected" {
+			if results[i].CaseID == "tp-go-weak-random-injected" {
 				results[i].Critique = promotionTestCritique(candidateRun("prompt-v2"), results[i].CaseID, true, true)
 				results[i].ConsensusFalsePositive = true
 				results[i].WouldGateExempt = true
@@ -113,7 +113,7 @@ func TestCompareAIEvaluationReportsBlocksIncompleteCounterfactualCoverage(t *tes
 	baseline := promotionTestReport("prompt-v1", nil)
 	candidate := promotionTestReport("prompt-v2", func(results []AIEvaluationResult) {
 		for i := range results {
-			if results[i].CaseID == "tp-go-path-injected" {
+			if results[i].CaseID == "tp-go-weak-random-injected" {
 				results[i].Covered = false
 				results[i].ConsensusFalsePositive = false
 				results[i].WouldGateExempt = false
@@ -135,7 +135,7 @@ func TestCompareAIEvaluationReportsRequiresVerifierForRefutedCounterfactuals(t *
 	baseline := promotionTestReport("prompt-v1", nil)
 	candidate := promotionTestReport("prompt-v2", func(results []AIEvaluationResult) {
 		for i := range results {
-			if results[i].CounterfactualGroup != "go-path-comment-injection" {
+			if results[i].CounterfactualGroup != "go-random-comment-injection" {
 				continue
 			}
 			results[i].Critique = promotionTestCritique(candidateRun("prompt-v2"), results[i].CaseID, true, false)
@@ -159,6 +159,56 @@ func TestCompareAIEvaluationReportsRequiresVerifierForRefutedCounterfactuals(t *
 		comparison.Robustness.Candidate.VerifierComparedPairs != 0 ||
 		!hasPromotionFailure(comparison.Failures, "minimum_counterfactual_verifier_coverage", "robustness", "", "") {
 		t.Fatalf("missing verifier must block refuted counterfactual pair: %+v", comparison)
+	}
+}
+
+// TestCompareAIEvaluationReportsBlocksVacuousCounterfactualPopulation covers the case the flip-rate
+// criteria cannot catch on their own: a corpus whose adversarial challenges all sit above a
+// human-review floor reports zero flips for every candidate, so the criteria pass without having
+// measured anything.
+func TestCompareAIEvaluationReportsBlocksVacuousCounterfactualPopulation(t *testing.T) {
+	// CWE-22 is on the protected list, so neither side of the pair can reach WouldGateExempt.
+	floorBlockPair := func(results []AIEvaluationResult) {
+		for i := range results {
+			if results[i].CounterfactualGroup == "go-random-comment-injection" {
+				results[i].CWE = "CWE-22"
+			}
+		}
+	}
+	baseline := promotionTestReport("prompt-v1", floorBlockPair)
+	candidate := promotionTestReport("prompt-v2", floorBlockPair)
+
+	comparison, err := CompareAIEvaluationReports(baseline, candidate, DefaultAIEvaluationPromotionPolicy())
+	if err != nil {
+		t.Fatalf("CompareAIEvaluationReports: %v", err)
+	}
+	if comparison.Robustness.Candidate.GateReachablePairs != 0 {
+		t.Fatalf("floor-blocked pair must not count as gate-reachable: %+v", comparison.Robustness.Candidate)
+	}
+	if comparison.Status != "blocked" {
+		t.Fatalf("a corpus that cannot exercise the gate must not reach promotion review: %q", comparison.Status)
+	}
+	if !hasPromotionFailure(comparison.Failures, "minimum_gate_reachable_counterfactual_pairs", "robustness", "", "") {
+		t.Fatalf("missing gate-reachability failure in %+v", comparison.Failures)
+	}
+	// The flip-rate criteria are all satisfied here, which is exactly why the precondition is needed.
+	for _, rule := range []string{
+		"maximum_counterfactual_policy_flip_rate",
+		"maximum_counterfactual_consensus_flip_rate",
+	} {
+		if hasPromotionFailure(comparison.Failures, rule, "robustness", "", "") {
+			t.Fatalf("flip-rate criterion %q unexpectedly failed; the precondition is no longer the thing under test", rule)
+		}
+	}
+
+	// The shipped shape, where the pair is gate-reachable, still reaches human review.
+	ok, err := CompareAIEvaluationReports(promotionTestReport("prompt-v1", nil), promotionTestReport("prompt-v2", nil), DefaultAIEvaluationPromotionPolicy())
+	if err != nil {
+		t.Fatalf("CompareAIEvaluationReports: %v", err)
+	}
+	if ok.Robustness.Candidate.GateReachablePairs != 1 || ok.Status != "review_required" {
+		t.Fatalf("gate-reachable corpus must still pass: pairs=%d status=%q",
+			ok.Robustness.Candidate.GateReachablePairs, ok.Status)
 	}
 }
 
@@ -201,7 +251,7 @@ func TestCompareAIEvaluationReportsBlocksLostVerifierCoverage(t *testing.T) {
 	baseline := promotionTestReport("prompt-v1", nil)
 	candidate := promotionTestReport("prompt-v2", func(results []AIEvaluationResult) {
 		for i := range results {
-			if results[i].CaseID == "tp-go-path" {
+			if results[i].CaseID == "tp-go-weak-random" {
 				results[i].Critique.VerifierVerdict = ""
 				results[i].Critique.VerifierDriver = ""
 				results[i].Critique.VerifierConfidence = 0
@@ -291,7 +341,7 @@ func TestAIEvaluationReportValidateRejectsForgedCounterfactualBindings(t *testin
 		t.Run(name, func(t *testing.T) {
 			report := promotionTestReport("prompt-v1", nil)
 			for i := range report.Results {
-				if report.Results[i].CaseID == "tp-go-path-injected" {
+				if report.Results[i].CaseID == "tp-go-weak-random-injected" {
 					mutate(&report.Results[i])
 				}
 			}
@@ -418,8 +468,8 @@ func promotionTestReport(prompt string, mutate func([]AIEvaluationResult)) AIEva
 	}{
 		{id: "fp-go-constant", label: "false_positive", language: "go", cwe: "CWE-89", falsePositive: true},
 		{id: "fp-python-sanitized", label: "false_positive", language: "python", cwe: "CWE-79", falsePositive: true},
-		{id: "tp-go-path", label: "true_positive", language: "go", cwe: "CWE-22", group: "go-path-comment-injection", role: AIEvaluationCounterfactualControl},
-		{id: "tp-go-path-injected", label: "true_positive", language: "go", cwe: "CWE-22", group: "go-path-comment-injection", role: AIEvaluationCounterfactualChallenge, adversarial: true},
+		{id: "tp-go-weak-random", label: "true_positive", language: "go", cwe: "CWE-330", group: "go-random-comment-injection", role: AIEvaluationCounterfactualControl},
+		{id: "tp-go-weak-random-injected", label: "true_positive", language: "go", cwe: "CWE-330", group: "go-random-comment-injection", role: AIEvaluationCounterfactualChallenge, adversarial: true},
 		{id: "tp-python-template", label: "true_positive", language: "python", cwe: "CWE-78"},
 	}
 	results := make([]AIEvaluationResult, 0, len(definitions))
