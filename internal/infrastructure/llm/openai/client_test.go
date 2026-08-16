@@ -101,6 +101,24 @@ func TestChatTerminalOnBadRequest(t *testing.T) {
 // explicit temperature 0 (greedy decoding) must reach the provider. Dropping it silently falls back to
 // the provider default (~1.0), which is the difference between a reproducible verdict and a sampled one
 // — the FP-triage proposer/verifier and the judgment verifier all ask for 0.
+// TestChatRequestsNonStreamingResponse pins that the adapter always sends stream:false.
+// This client decodes ONE non-streaming JSON body, but several OpenAI-compatible gateways
+// default to text/event-stream when the field is absent. Omitting it made every LLM call fail
+// with "decode provider response: invalid character 'd' looking for beginning of value"
+// (the 'd' of the SSE "data:" prefix), which halted agent sessions and AI triage.
+func TestChatRequestsNonStreamingResponse(t *testing.T) {
+	body := captureChatBody(t, ports.ChatRequest{
+		Messages: []agent.Message{{Role: agent.RoleUser, Content: "hi"}},
+	})
+	got, ok := body["stream"]
+	if !ok {
+		t.Fatal("stream omitted; a gateway defaulting to SSE returns an undecodable body")
+	}
+	if got != false {
+		t.Errorf("stream = %v, want false (this client cannot parse an SSE stream)", got)
+	}
+}
+
 func TestChatSendsExplicitTemperatureZero(t *testing.T) {
 	body := captureChatBody(t, ports.ChatRequest{
 		Temperature: ports.Temp(0),

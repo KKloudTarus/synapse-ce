@@ -77,8 +77,12 @@ func (c *Client) BaseURL() string { return c.base }
 // --- wire types (OpenAI Chat Completions shape) ---
 
 type wireReq struct {
-	Model               string       `json:"model"`
-	Messages            []wireMsg    `json:"messages"`
+	Model    string    `json:"model"`
+	Messages []wireMsg `json:"messages"`
+	// Stream is always false and always sent: this client decodes a single non-streaming
+	// JSON body. Some OpenAI-compatible gateways default to text/event-stream when the field
+	// is absent, which makes the response undecodable here, so the intent must be explicit.
+	Stream              bool         `json:"stream"`
 	Tools               []wireTool   `json:"tools,omitempty"`
 	ToolChoice          string       `json:"tool_choice,omitempty"`
 	ResponseFormat      *wireRespFmt `json:"response_format,omitempty"`
