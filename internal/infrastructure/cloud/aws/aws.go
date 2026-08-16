@@ -35,6 +35,9 @@ const (
 	defaultMaxAccounts  = 100
 	defaultMaxResources = 1000
 	defaultRate         = 5
+	// maxListAccountsPageSize is the largest MaxResults AWS Organizations accepts for
+	// ListAccounts. Anything higher is rejected with InvalidInputException rather than clamped.
+	maxListAccountsPageSize = 20
 )
 
 var _ ports.CloudConnector = (*Connector)(nil)
@@ -200,7 +203,12 @@ type account struct {
 }
 
 func (c *Connector) accounts(ctx context.Context, client *organizations.Client, root string) ([]account, *cloudposture.CoverageIssue) {
-	pager := organizations.NewListAccountsPaginator(client, &organizations.ListAccountsInput{MaxResults: awssdk.Int32(int32(c.opts.MaxAccounts))})
+	// MaxAccounts is OUR total bound, not a page size. Organizations rejects a ListAccounts
+	// MaxResults above maxListAccountsPageSize with InvalidInputException, so sending the total
+	// bound (default 100) failed account enumeration outright and surfaced as a
+	// "provider_error" coverage gap on every real organization. Page within the API limit and
+	// keep enforcing the total bound while collecting.
+	pager := organizations.NewListAccountsPaginator(client, &organizations.ListAccountsInput{MaxResults: awssdk.Int32(int32(min(c.opts.MaxAccounts, maxListAccountsPageSize)))})
 	var accounts []account
 	for pager.HasMorePages() {
 		page, err := pager.NextPage(ctx)
@@ -298,20 +306,37 @@ func (c *Connector) buckets(ctx context.Context, client *s3.Client, account acco
 				*gaps = append(*gaps, *coverageGap(account.id, "storage", err))
 			} else {
 				status, statusErr := client.GetBucketPolicyStatus(ctx, &s3.GetBucketPolicyStatusInput{Bucket: awssdk.String(name)})
-				if statusErr != nil {
+				switch {
+				case statusErr != nil && isAbsentConfig(statusErr, "NoSuchBucketPolicy"):
+					// No bucket policy is a DEFINITIVE answer, not a failure to observe: the bucket
+					// is not public by policy. Treating it as a coverage gap both invented a
+					// provider_error and left Public unknown, so an evidence-backed negative was
+					// downgraded to "we could not tell".
+					resource.Public = cloudposture.StateDisabled
+				case statusErr != nil:
 					*gaps = append(*gaps, *coverageGap(account.id, "storage", statusErr))
-				} else if status.PolicyStatus != nil && awssdk.ToBool(status.PolicyStatus.IsPublic) {
+				case status.PolicyStatus != nil && awssdk.ToBool(status.PolicyStatus.IsPublic):
 					resource.Public = cloudposture.StateEnabled
+				default:
+					resource.Public = cloudposture.StateDisabled
 				}
 			}
 			if err := limiter.wait(ctx); err != nil {
 				*gaps = append(*gaps, *coverageGap(account.id, "storage", err))
 			} else {
 				encryption, encryptionErr := client.GetBucketEncryption(ctx, &s3.GetBucketEncryptionInput{Bucket: awssdk.String(name)})
-				if encryptionErr != nil {
+				switch {
+				case encryptionErr != nil && isAbsentConfig(encryptionErr, "ServerSideEncryptionConfigurationNotFoundError"):
+					// Same contract: "no encryption configuration" is an OBSERVED negative. It
+					// must land as Disabled so the posture rules can raise an unencrypted-bucket
+					// finding; a coverage gap here silently suppressed that finding.
+					resource.Encrypted = cloudposture.StateDisabled
+				case encryptionErr != nil:
 					*gaps = append(*gaps, *coverageGap(account.id, "storage", encryptionErr))
-				} else if encryption.ServerSideEncryptionConfiguration != nil {
+				case encryption.ServerSideEncryptionConfiguration != nil:
 					resource.Encrypted = cloudposture.StateEnabled
+				default:
+					resource.Encrypted = cloudposture.StateDisabled
 				}
 			}
 			inventory.Resources = append(inventory.Resources, resource)
@@ -410,6 +435,16 @@ func appendUnsupportedCoverage(inventory *cloudposture.Inventory, gaps *[]cloudp
 		*gaps = append(*gaps, cloudposture.CoverageIssue{Provider: cloudposture.ProviderAWS, Scope: scope, Category: category, Code: "unsupported", Detail: "connector does not yet establish this posture category"})
 	}
 	inventory.Complete = false
+}
+
+// isAbsentConfig reports whether err is the provider's way of saying "this configuration does not
+// exist" rather than "the request failed". Those codes are DEFINITIVE observations - no bucket
+// policy, no encryption configuration - so they must set a negative state instead of raising a
+// coverage gap: recording them as failures both invented a provider_error and suppressed the
+// posture finding the absent configuration should produce.
+func isAbsentConfig(err error, code string) bool {
+	var apiErr smithy.APIError
+	return errors.As(err, &apiErr) && apiErr.ErrorCode() == code
 }
 
 func coverageGap(scope, category string, err error) *cloudposture.CoverageIssue {
