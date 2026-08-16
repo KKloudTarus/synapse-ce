@@ -170,7 +170,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
       <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Primary navigation">
         <div className="space-y-1">{renderItems([DASHBOARD])}</div>
         {NAV_GROUPS.map((group) => (
-          <section key={group.label} aria-label={group.label} className="mt-4">
+          <section key={group.label} className="mt-4">
             <h2 className={cn('mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-navsubtle', collapsed && 'sr-only')}>
               {group.label}
             </h2>
