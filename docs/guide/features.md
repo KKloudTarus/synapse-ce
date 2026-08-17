@@ -4,10 +4,11 @@
 
 ## Software composition analysis
 
-**SBOM generation.** Synapse produces a software bill of materials across many ecosystems:
-npm, PyPI, Maven, Gradle, Go, Cargo, RubyGems, Composer, NuGet, Hex, Dart and more. It has
-owned per-ecosystem lockfile parsers and a pluggable producer, so detection is not tied to a
-single vendor. It can also ingest a client-supplied CycloneDX SBOM as the scan inventory.
+**SBOM generation.** Synapse produces a software bill of materials with owned per-ecosystem lockfile
+parsers and a pluggable producer, so detection is not tied to a single vendor. Current coverage: Go,
+npm, Yarn, pnpm, PyPI, Poetry, Pipfile, uv, Cargo, Maven, Gradle, RubyGems, Composer, NuGet, Swift,
+Dart, Hex/Elixir, Conda, R (renv), Julia, and Conan. It can also ingest a client-supplied CycloneDX
+SBOM as the scan inventory.
 
 **Multi-source detection.** Components are matched against a live advisory API and an offline
 database. Results are cross-correlated and de-duplicated, and each finding records the scanner
@@ -156,7 +157,8 @@ credential vault with placeholder substitution.
 
 Reports are templated from stored data and are deterministic. Compliance mapping from CWE to
 OWASP, PCI, and ISO controls comes from a curated, source-cited table, with no model in the
-path. Synapse speaks CycloneDX and SPDX with PURL, SARIF, OpenVEX and CSAF, and KEV plus EPSS.
+path. Synapse exports CycloneDX and SPDX with PURL, SARIF, and OpenVEX, ingests CSAF and OVAL advisory
+feeds, and uses KEV plus EPSS for prioritization. CSAF is an ingest format only; there is no CSAF export.
 The SBOM both imports and exports: CycloneDX 1.6 and SPDX 2.3 and 3.0 are available from the
 engagement, from the API export routes, and from the export button in the dashboard.
 

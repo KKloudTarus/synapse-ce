@@ -41,8 +41,13 @@ synapse-cli scan <path|image-ref> [flags]
 | `--offline` | Skip the live advisory source and detect with the offline database only. |
 | `--ignore-unfixed` | Ignore vulnerabilities that have no fix available. |
 | `--detection-priority comprehensive\|precise` | `comprehensive` (default) reports every match. `precise` moves single-source, non-KEV findings into a needs-verify queue that does not trip `--fail-on`. |
+| `--include-test` | Also gate on findings in test, fixture, and example paths. They are reported but gate-exempt by default. |
 | `--json` | Print the full scan result as JSON to stdout, for machine consumption in CI. |
-| `--sarif` | Print a SARIF 2.1.0 report to stdout, ready to upload to GitHub code scanning. Covers every finding kind; SAST, secret and misconfig findings carry a file and line so the platform annotates the exact source line. Findings exempted from the CI gate by verified AI consensus remain present and carry an external suppression with the policy version and reason. `--fail-on` still sets the exit code. Cannot be combined with `--json`. |
+| `--sarif` | Print a SARIF 2.1.0 report to stdout, ready to upload to GitHub code scanning. Covers every finding kind; SAST, secret and misconfig findings carry a file and line so the platform annotates the exact source line. Findings exempted from the CI gate by verified AI consensus remain present and carry an external suppression with the policy version and reason. `--fail-on` still sets the exit code. |
+| `--sbom` | Print the generated CycloneDX SBOM to stdout instead of a findings report. |
+
+`--json`, `--sarif`, and `--sbom` each take over stdout completely, so they are mutually exclusive.
+Passing more than one exits `2` rather than silently honoring the last flag.
 
 ### Examples
 
@@ -57,8 +62,8 @@ synapse-cli scan . --mode licenses
 synapse-cli scan alpine:3.19 --image --offline
 ```
 
-The exit code is 0 when no finding meets the `--fail-on` threshold, and non-zero otherwise.
-Wire it straight into a pipeline step.
+The exit code is 0 when no finding meets the `--fail-on` threshold. See
+[Exit codes](#exit-codes) for the full contract, which distinguishes a gate result from a usage error.
 
 ### Project analysis parity
 
@@ -194,22 +199,34 @@ The AI critique reads the target's own source into the prompt, so an **untrusted
 injection through comments or strings. Distinct consensus and the human-review floor bound the risk, and
 the finding always remains in SARIF/JSON, but treat AI triage as advisory for untrusted contributor code.
 
+## Exit codes
+
+The exit code is a CI contract. A pipeline that branches on it can distinguish a real finding from a
+misconfigured invocation:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | The command succeeded and no gate threshold was crossed. |
+| `1` | A runtime failure, or a gate result: a finding at or above `--fail-on`, a failed quality gate, coverage below its threshold, or a rating below `--fail-below`. |
+| `2` | Invalid usage: an unknown or incomplete flag, a missing required argument, or an invalid enum value such as `--fail-on none`. Nothing was analyzed. |
+
+Treat `2` as "fix the pipeline definition" and `1` as "inspect the findings". Retrying an exit `2`
+unchanged will always fail again.
+
 ## Container image (Docker)
 
-Every release publishes a multi-arch `synapse-cli` image to GHCR that bundles syft and grype, so you can
-scan with nothing installed but Docker:
+The current release workflow does **not** publish a container image. Build one locally when a
+containerized CLI is needed:
 
 ```bash
-# scan the current directory (mounted read-only), fail on high-or-critical
-docker run --rm -v "$PWD:/scan:ro" ghcr.io/kkloudtarus/synapse-cli scan /scan --fail-on high
-
-# pin a version instead of latest
-docker run --rm -v "$PWD:/scan:ro" ghcr.io/kkloudtarus/synapse-cli:v0.1.0 scan /scan
+docker build -t synapse:full --target full -f deploy/Dockerfile .
+docker run --rm -v "$PWD:/scan:ro" synapse:full synapse-cli scan /scan --fail-on high
 ```
 
-The image targets the pure-Go scan path (SBOM, OSV/Grype vulnerabilities, licenses, SAST, secrets, IaC
-misconfig). Sandboxed execution and JVM-from-source resolution need a Linux host with bubblewrap and a
-JDK/Maven/Gradle, so run those on a host install or the batteries-included compose image.
+The `full` target bundles pinned Syft and Grype and covers the pure-Go scan path: SBOM, OSV/Grype
+vulnerabilities, licenses, SAST, secrets, and IaC misconfiguration. Sandboxed execution and
+JVM-from-source resolution need a Linux host with bubblewrap and a JDK/Maven/Gradle, so run those on a
+host install or the full Compose stack.
 
 ## Advisory sync (optional owned store)
 
@@ -244,7 +261,7 @@ whole scan step is three lines:
 ```yaml
 - uses: KKloudTarus/synapse-ce@v1
   with:
-    fail-on: high        # critical | high | medium | low | info | none (default: high)
+    fail-on: high        # critical | high | medium | low | info (default: high)
     path: .              # what to scan (default: .)
     version: latest      # a released tag like v0.1.0, or latest (default)
 ```
@@ -378,8 +395,17 @@ synapse-cli gate . --new-code-only --base origin/main
 synapse-cli gate . --new-code-only --base origin/main --coverage coverage.info
 ```
 
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--new-code-only` | off | Score only lines changed against `--base` instead of the whole tree. |
+| `--base <ref>` | `origin/main` | Git reference the new-code diff is computed against. |
+| `--gate <file>` | `<path>/.synapse-gate.yaml` | Gate definition to apply. |
+| `--rules <file>` | `<path>/.synapse-rules.yaml` | Rule enable/disable and severity overrides. |
+| `--coverage <file>` | none | Coverage report (lcov, Cobertura, or JaCoCo, auto-detected) so gate conditions can require a coverage floor. |
+| `--format text\|markdown` | `text` | Output format. `markdown` prints a ready-to-post PR summary. |
+
 A `.synapse-gate.yaml` overrides the built-in gate, and a `.synapse-rules.yaml` enables/disables rules
-or overrides severities:
+or overrides severities. Use `--gate` and `--rules` to point at files outside the scanned tree:
 
 ```yaml
 # .synapse-gate.yaml
@@ -397,6 +423,75 @@ Inspect coverage on its own:
 ```bash
 synapse-cli coverage coverage.info --fail-below 80
 ```
+
+### Code-health commands
+
+These commands run the same analyzers the gate composes, but each reports one dimension on its own. None
+of them needs a database or a server; all are safe in CI. Complexity and structural analysis use the
+`synapse-ast` sidecar, and degrade to Go-only counts when it is unavailable rather than failing.
+
+```
+synapse-cli inventory <path>
+synapse-cli metrics <path> [--fail-on-complexity N] [--top N]
+synapse-cli duplication <path> [--min-tokens N] [--fail-on-duplication PCT] [--top N]
+synapse-cli quality <path> [--fail-on SEV] [--min-complexity N] [--include-test-smells] [--sarif]
+synapse-cli rating <path> [--json] [--fail-below GRADE]
+```
+
+| Command | Reports | Gate flag |
+| --- | --- | --- |
+| `inventory` | Languages, files, and lines of code | none |
+| `metrics` | Per-function cyclomatic and cognitive complexity | `--fail-on-complexity N` exits `1` when any function exceeds `N` |
+| `duplication` | Duplicated blocks, lines, and density | `--fail-on-duplication PCT` exits `1` when density exceeds `PCT` |
+| `quality` | Maintainability and reliability findings, plus duplication and complexity bridges | `--fail-on SEV` accepts `critical\|high\|medium\|low\|info` |
+| `rating` | A–E security, reliability, and maintainability grades with technical debt | `--fail-below GRADE` exits `1` when any grade falls below it |
+
+`--top N` limits how many entries are printed. `quality --sarif` writes a SARIF report, and
+`quality --include-test-smells` adds test-code smells that are otherwise suppressed.
+
+```bash
+# gate a build on complexity and duplication without a server
+synapse-cli metrics . --fail-on-complexity 15
+synapse-cli duplication . --fail-on-duplication 3
+
+# publish code-quality findings to GitHub code scanning
+synapse-cli quality . --sarif > quality.sarif
+```
+
+## Validate a third-party SARIF report
+
+```
+synapse-cli validate-sarif <engagement-id> <report.sarif>|- [--actor <id>] [--fail-on-refusal]
+```
+
+`validate-sarif` runs a third-party report through the same use case as the server ingest endpoint and
+reports what would be accepted or refused. It **writes nothing**: the JSON output carries
+`"persisted": false`, and no audit entry is recorded. To actually ingest a report, post it to
+`/api/v1/engagements/{id}/sarif`, where the ingesting actor comes from the authenticated principal.
+
+`import-sarif` remains an alias for the same command and the same non-persisting contract. Pass `-` to
+read the report from stdin. `--actor` is a local label only. Exit `1` covers both a report whose results
+were all refused and, with `--fail-on-refusal`, any partial refusal, so a pipeline can insist every
+result be attributable.
+
+## Publish analysis source
+
+```
+synapse-cli publish-source [dir] --server <url> --project <key> --analysis <id>
+```
+
+Uploads the source files a completed server-side analysis listed as retainable, so the dashboard can show
+annotated code. It requires `SYNAPSE_API_TOKEN`, and `--server` defaults to `SYNAPSE_API_URL`. Only files
+in the analysis inventory are sent; the server returns a digest-verified source manifest.
+
+## Build an offline CVSS database
+
+```
+synapse-cli build-cvss-db <out.jsonl[.gz]> <nvd-*.json[.gz]...>
+```
+
+Converts NVD JSON feeds into a compact local database. Point `SYNAPSE_NVD_CVSS_DB` at the output to
+backfill CVSS scores with no network access and no API rate limit, which suits air-gapped CI.
 
 ### PR decoration
 

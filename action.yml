@@ -15,7 +15,7 @@ inputs:
     required: false
     default: "false"
   fail-on:
-    description: "Minimum severity that fails the build: critical | high | medium | low | info | none."
+    description: "Minimum severity that fails the build: critical | high | medium | low | info."
     required: false
     default: "high"
   sarif:

@@ -10,6 +10,8 @@ deterministic SLA scorer and adds the operational pieces needed to use its outpu
 - append-only transition evidence; and
 - reassessment when continuous vulnerability intelligence changes.
 
+The Remediation SLA view is an engagement tab populated by assessed findings, not a standalone dashboard. A representative screenshot requires `SYNAPSE_SLA_ENABLED=true` plus a synthetic engagement and finding history. The default development Compose stack leaves it disabled, so this guide does not substitute an empty or unrelated screen for a loaded SLA example.
+
 It is off by default:
 
 ```bash

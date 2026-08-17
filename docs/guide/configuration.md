@@ -3,9 +3,9 @@
 [Documentation home](README.md) · Previous: [Features](features.md) · Next: [CLI](cli.md)
 
 Synapse reads its configuration from the process environment. It does not auto-load a file.
-Load your settings first, for example `set -a; source .env; set +a`, or pass them with
-`docker run --env-file`, Compose `env_file`, or your process manager. A fully documented
-template lives in [`.env.example`](https://github.com/KKloudTarus/synapse-ce/blob/main/.env.example).
+Pass settings with `docker run --env-file`, Compose `env_file`, a strict dotenv loader, or your
+process manager. Do not shell-source an untrusted dotenv file: shell syntax in that file would execute.
+A fully documented template lives in [`.env.example`](https://github.com/KKloudTarus/synapse-ce/blob/main/.env.example).
 
 Conventions: an empty value means unset, so the built-in default applies. Booleans accept
 `1/0/true/false`. Durations use Go syntax such as `30s`, `10m`, `1h`. Sizes are byte counts.
@@ -14,7 +14,7 @@ Conventions: an empty value means unset, so the built-in default applies. Boolea
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_API_TOKEN` | (none) | Bootstrap-admin bearer token. The API exits if empty. There is no anonymous access. Generate with `openssl rand -hex 32`. |
+| `SYNAPSE_API_TOKEN` | (none) | Bootstrap-admin bearer token. The API exits if empty. Operational routes require it; `GET /healthz` is intentionally public. Generate with `openssl rand -hex 32`. |
 
 ## Core and server
 
@@ -66,7 +66,7 @@ Conventions: an empty value means unset, so the built-in default applies. Boolea
 | `SYNAPSE_GRYPE_BIN` | `grype` | Grype executable. Missing means detection degrades to the live source only. |
 | `SYNAPSE_GRYPE_DB_DIR` | (online) | Pin Grype's vulnerability database to a pre-synced directory for offline, reproducible scans. |
 | `SYNAPSE_SCAN_TIMEOUT` | `10m` | Per-scan timeout. 0 disables. |
-| `SYNAPSE_FINDING_MIN_SEVERITY` | `high` | Lowest severity promoted to a finding: critical, high, medium, low, info. |
+| `SYNAPSE_FINDING_MIN_SEVERITY` | `info` | Lowest severity promoted to a finding: critical, high, medium, low, info. The default promotes everything; set `high` to tighten the floor and drop medium/low/info. |
 | `SYNAPSE_MAX_WORKSPACE_BYTES` | `2147483648` | Maximum prepared workspace size. A bigger target or archive is rejected. |
 | `SYNAPSE_OWNED_ADVISORY` | `true` | Match the SBOM against the owned advisory store, alongside the live and offline sources. Populate it first with `synapse-cli sync-advisories`. |
 | `SYNAPSE_JARHASH_ONLINE_ENABLED` | `false` | Recover the coordinate of a shaded or metadata-less JAR by its SHA-1. |
@@ -93,11 +93,16 @@ Most of these ship ON by default (safe, best-effort). See [Features](features.md
 | `SYNAPSE_FP_TRIAGE_CONCURRENCY` | `6` | Maximum simultaneous AI finding assessments (range `1..32`). A distinct verifier makes at most two provider calls per attempted finding. Invalid values restore the finite default. |
 | `SYNAPSE_FP_TRIAGE_MAX_TOKENS` | `1000000` | Conservative per-scan token reservation ceiling. Both proposer/verifier requests are reserved before a finding is scheduled; work that does not fit remains gating. |
 | `SYNAPSE_FP_TRIAGE_MAX_COST_MICRO_USD` | `0` | Optional per-scan cost ceiling in integer micro-USD (`0` disables cost enforcement). When enabled, all active role prices must be configured or triage fails closed without provider calls. |
-| `SYNAPSE_FP_TRIAGE_{PROPOSER,VERIFIER}_{INPUT,OUTPUT}_MICRO_USD_PER_MILLION` | `0` | Provider price in micro-USD per million tokens for deterministic cost reservation and observed-cost metrics. |
+| `SYNAPSE_FP_TRIAGE_PROPOSER_INPUT_MICRO_USD_PER_MILLION` | `0` | Proposer input price in micro-USD per million tokens, for deterministic cost reservation and observed-cost metrics. |
+| `SYNAPSE_FP_TRIAGE_PROPOSER_OUTPUT_MICRO_USD_PER_MILLION` | `0` | Proposer output price in micro-USD per million tokens. |
+| `SYNAPSE_FP_TRIAGE_VERIFIER_INPUT_MICRO_USD_PER_MILLION` | `0` | Verifier input price in micro-USD per million tokens. |
+| `SYNAPSE_FP_TRIAGE_VERIFIER_OUTPUT_MICRO_USD_PER_MILLION` | `0` | Verifier output price in micro-USD per million tokens. |
 | `SYNAPSE_FP_TRIAGE_CIRCUIT_FAILURES` | `5` | Consecutive provider/parse failures before that role's circuit opens (range `1..100`). An open circuit is advisory-only and cannot exempt findings. |
 | `SYNAPSE_FP_TRIAGE_CIRCUIT_COOLDOWN` | `1m` | Open-circuit cooldown before one half-open probe (maximum `24h`). |
 | `SYNAPSE_FP_TRIAGE_ALERT_MIN_SAMPLES` | `10` | Minimum per-scan samples before a safety-rate baseline alert is emitted. |
-| `SYNAPSE_FP_TRIAGE_{DISAGREEMENT,EXEMPTION,PARSE_FAILURE}_BASELINE_BPS` | `1500`, `1000`, `200` | Expected safety rates in basis points (`10000` = 100%). |
+| `SYNAPSE_FP_TRIAGE_DISAGREEMENT_BASELINE_BPS` | `1500` | Expected proposer/verifier disagreement rate in basis points (`10000` = 100%). |
+| `SYNAPSE_FP_TRIAGE_EXEMPTION_BASELINE_BPS` | `1000` | Expected gate-exemption rate in basis points. |
+| `SYNAPSE_FP_TRIAGE_PARSE_FAILURE_BASELINE_BPS` | `200` | Expected model parse-failure rate in basis points. |
 | `SYNAPSE_FP_TRIAGE_ALERT_DEVIATION_BPS` | `1000` | Absolute deviation from a configured baseline that emits a persisted warning and structured alert metric. |
 | `SYNAPSE_LLM_PROVIDER` | `openai-compatible` | Explicit proposer-provider audit identity. It is not inferred from the URL because gateways may route multiple providers. |
 | `SYNAPSE_VERIFIER_BASE_URL` | `SYNAPSE_LLM_BASE_URL` | Independent OpenAI-compatible endpoint for the verifier. |
@@ -241,9 +246,108 @@ All are best-effort and no-op without inputs. Set a flag to `false` to opt out.
 | `SYNAPSE_GOMODGRAPH_ENABLED` | `true` | Transitive Go dependency edges via `go mod graph`. |
 | `SYNAPSE_WRITEUP_DRAFTS_ENABLED` | `false` | Agent write-up draft tool. A distinct human signs off. |
 
+## Additional operator settings
+
+The settings below are intentionally grouped by owning process. They are real operator controls even
+when they are used only by a CLI, helper, or optional subsystem.
+
+### Database, project storage, and maintenance
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_DB_MIGRATION_DSN` | `SYNAPSE_DB_DSN` | Optional owner-level PostgreSQL DSN used only for embedded migrations. Use it to keep the runtime DSN least-privileged. |
+| `SYNAPSE_PROJECT_UPLOAD_DIR` | `data/project-uploads` | Server-owned directory for uploaded project source bundles. |
+| `SYNAPSE_PROJECT_ANALYSIS_COMPLETION_TIMEOUT` | `1m` | Maximum wait for project-analysis completion; non-positive values reset to one minute. |
+| `SYNAPSE_APPROVAL_SWEEP_INTERVAL` | `1m` | Sweep interval for expired pending approvals. |
+| `SYNAPSE_PROMOTION_RECONCILE_INTERVAL` | `1m` | Interval for deterministic promotion-rule reevaluation. |
+
+### Advisory, NVD, and resolver access
+
+Network-backed manifest resolution is disabled by default. When enabled, set the associated host
+allowlist; an empty or overly broad allowlist must not become an implicit network policy.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_NVD_API_URL` | public NVD API | NVD API endpoint override for an approved mirror. |
+| `SYNAPSE_NVD_API_KEY` | empty | NVD API key. Keep it in the process environment or secret manager; never put it in source. |
+| `SYNAPSE_NVD_BUDGET` | `20s` | Per-request NVD enrichment budget. |
+| `SYNAPSE_NVD_CVSS_DB` | empty | CLI path to an offline CVSS database built with `build-cvss-db`. |
+| `SYNAPSE_MAVEN_RESOLVE_ENABLED` | `false` | Resolve Maven metadata from allowlisted repositories. |
+| `SYNAPSE_MAVEN_REPO_HOSTS` | empty | Comma-separated Maven host allowlist. |
+| `SYNAPSE_MAVEN_LOCAL_REPO` | platform default | Local Maven repository override. |
+| `SYNAPSE_GRADLE_RESOLVE_ENABLED` | `false` | Resolve Gradle metadata. Requires an isolated Gradle home and approved hosts. |
+| `SYNAPSE_GRADLE_HOME` | empty | Isolated Gradle user-home directory. |
+| `SYNAPSE_GRADLE_HTTP_TIMEOUT_MS` | implementation default | Gradle HTTP timeout in milliseconds. |
+| `SYNAPSE_NPM_RESOLVE_ENABLED` | `false` | Resolve npm manifests from allowlisted registries. |
+| `SYNAPSE_NPM_REGISTRY_HOSTS` | empty | Comma-separated npm registry host allowlist. |
+| `SYNAPSE_MANIFEST_RESOLVE_ENABLED` | `false` | Enable remaining external manifest resolvers. |
+| `SYNAPSE_MANIFEST_REGISTRY_HOSTS` | empty | Comma-separated host allowlist for those resolvers. |
+| `SYNAPSE_JARHASH_BASE_URL` | empty | Approved jar-hash service or mirror URL. |
+| `SYNAPSE_JARHASH_DB_PATH` | empty | Offline jar-hash database path. |
+
+Tool binary overrides use `SYNAPSE_AST_BIN`, `SYNAPSE_GOVULNCHECK_BIN`, `SYNAPSE_GO_BIN`,
+`SYNAPSE_MVN_BIN`, `SYNAPSE_GRADLE_BIN`, `SYNAPSE_NPM_BIN`, `SYNAPSE_COMPOSER_BIN`,
+`SYNAPSE_BUNDLE_BIN`, `SYNAPSE_POETRY_BIN`, and `SYNAPSE_TAINT_CALLGRAPH_BIN`. Defaults are the
+corresponding command names on `PATH`; production sandbox deployments should use absolute, pinned paths.
+
+### Recon and DAST limits
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_RECON_MAX_OUTPUT` | `8388608` | Maximum captured output per recon run, in bytes. |
+| `SYNAPSE_RECON_QUEUE` | `64` | Recon work queue depth. |
+| `SYNAPSE_DAST_MAX_REAUTH` | `2` | Maximum governed reauthorization cycles for a DAST session. |
+| `SYNAPSE_DAST_MAX_REQUESTS` | `20000` | Hard request ceiling for a DAST session. |
+| `SYNAPSE_DAST_SECRET_<NAME>` | unset | Helper-only projection of a named vault placeholder. The parent constructs and scrubs these values; operators should store the source secret in the vault instead of setting this prefix manually. |
+
+`SYNAPSE_DAST_AUTH_REQUEST_FD`, `SYNAPSE_DAST_AUTH_DECISION_FD`,
+`SYNAPSE_CSPM_CREDENTIAL_FD`, `SYNAPSE_CSPM_AUTH_REQUEST_FD`, and
+`SYNAPSE_CSPM_AUTH_DECISION_FD` are inherited-pipe descriptors managed by the parent process. They are
+not operator settings and must not be injected manually.
+
+### Fleet control plane
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_FLEET_CA_KEY` | empty | Private key for the fleet client-certificate CA. Required with the fleet CA certificate; treat as a production secret. |
+| `SYNAPSE_FLEET_CERT_TTL` | `24h` | Lifetime of issued fleet client certificates. |
+| `SYNAPSE_FLEET_CLIENT_CERT_HEADER` | empty | Trusted reverse-proxy header carrying the verified client certificate. Enable only behind a proxy that strips all client-supplied copies and sets the header after mTLS verification. |
+| `SYNAPSE_UPDATE_PUBLIC_KEY` | built-in release key | Hex Ed25519 public-key override for fleet self-update verification. Use only for a controlled private release channel. |
+| `SYNAPSE_AGENT_CONCURRENCY` | `8` | Total server-side agent work concurrency. |
+| `SYNAPSE_AGENT_QUEUE_DEPTH` | `256` | Pending agent-work queue depth. |
+| `SYNAPSE_AGENT_MAX_PARALLEL` | `1` | Maximum parallel actions per agent; serial by default. |
+| `SYNAPSE_AGENT_RECON_CONCURRENCY` | `3` | Recon work admitted within the agent budget. |
+
+### Host and Kubernetes agents
+
+The following variables are read by `synapse-agent` and `synapse-cluster-agent`, not by the API:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_FLEET_URL` | empty | Fleet API base URL. HTTPS is required except for loopback development. |
+| `SYNAPSE_FLEET_ENROL_TOKEN` | empty | One-time enrollment token. Environment use is supported, but a token file is preferred; the equivalent command-line flag is visible in process listings and shell history. |
+| `SYNAPSE_FLEET_ENROL_TOKEN_FILE` | empty | Preferred file containing the one-time token. Remove it after successful enrollment. |
+| `SYNAPSE_AGENT_STATE_DIR` | platform default | Credential and offline-buffer directory; `/var/lib/synapse-cluster-agent` for the cluster agent. Protect it from other users. |
+| `SYNAPSE_AGENT_ROOT` | `/` | Host filesystem root inventoried by the VM agent. |
+| `SYNAPSE_AGENT_NAME` | hostname | Human-readable agent display name. |
+| `SYNAPSE_DETECT_CLASSES` | empty | Comma-separated eBPF classes: `process`, `network`, `file`, `privilege`. Empty disables the engine; Linux root/capabilities are required. |
+| `SYNAPSE_DETECT_CPU_CEIL_PCT` | `0` | CPU ceiling for deterministic class shedding; zero disables shedding. |
+| `SYNAPSE_CLUSTER` | empty (required) | Stable cluster identity attached to every Kubernetes asset. |
+| `SYNAPSE_CLUSTER_NAMESPACES` | empty | Comma-separated namespace scope; empty means all authorized namespaces. |
+| `SYNAPSE_CLUSTER_RESYNC` | `5m` | Interval between Kubernetes inventory collections. |
+
+### CLI integration
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_API_URL` | empty | Server base URL used by `synapse-cli publish-source`; overridden by `--server`. |
+| `SYNAPSE_REACH_RUST` | `false` | Enable conservative Rust manifest/import reachability. |
+| `SYNAPSE_REACH_RUBY` | `false` | Enable conservative Ruby manifest/import reachability. |
+| `SYNAPSE_REACH_PHP` | `false` | Enable conservative PHP manifest/import reachability. |
+
 ## MCP server (synapse-mcp)
 
-Read and propose only. It never executes. Both variables are required to start it.
+Read and propose only. It never executes. The token and engagement ID are required to start it.
 
 | Variable | Default | Description |
 | --- | --- | --- |

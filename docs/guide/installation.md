@@ -7,21 +7,31 @@
 | Component | Notes |
 | --- | --- |
 | Go 1.26 | Pinned in `go.mod`. Builds cgo-free, so the container image is distroless. |
-| Node and pnpm | For the web dashboard. Use pnpm, not npm or yarn. |
+| Node 20 and pnpm 9 | For the web dashboard. Use pnpm, not npm or yarn. |
 | Syft | Required for any scan. Generates the SBOM. |
 | Grype | Optional. Adds the offline vulnerability database. Missing means detection degrades to the live source only. |
-| PostgreSQL | Optional. For durable persistence. A blank DSN runs an in-memory dev store. |
+| PostgreSQL | Optional for development, required for durable persistence, the fleet, scheduled provider work, and the owned advisory store. |
 | S3 or MinIO | Optional. For evidence artifacts. |
 | Docker | Optional. The easiest way to run the full stack on any OS. |
-| Linux host | Required only for the hardened sandbox, live recon, and egress scoping (bubblewrap, seccomp, cgroups, network namespaces). |
+| Linux host | Required for the hardened sandbox, live recon, and egress scoping (bubblewrap, seccomp, cgroups, network namespaces). |
+| Linux with eBPF | Required only for host-agent runtime detections. Needs root or equivalent capabilities. |
+| Kubernetes access | Required only for `synapse-cluster-agent`. Runs in-cluster or with a kubeconfig. |
 
 ## Platform support
 
-The API, SCA, findings, and reports run on macOS, Linux, and Windows for development. The
-execution sandbox, live recon, and egress scoping use Linux kernel features that have no
-Windows or macOS equivalent. On those platforms the features stay disabled and fail closed
-rather than running unsandboxed. The simplest way to get full parity on any OS is to run the
-container, which is Linux inside.
+The API, SCA, project code quality, findings, and reports run on macOS, Linux, and Windows for
+development. Several capabilities depend on Linux kernel features with no Windows or macOS equivalent:
+
+| Capability | Requirement | Behavior elsewhere |
+| --- | --- | --- |
+| Execution sandbox | Linux with bubblewrap, seccomp, cgroups | Fails closed when requested; never runs unsandboxed |
+| Live recon | Linux sandbox | Stays disabled |
+| Egress scoping | Linux network namespaces | A run needing enforced egress is refused, not downgraded |
+| Governed DAST probes | Linux, kernel-enforced egress allowlist | Probe refused |
+| Host runtime detections | Linux with eBPF, root or capabilities | Detection engine stays off |
+
+Requested-but-unavailable protection is always an error rather than a silent downgrade. The simplest way
+to get full parity on any OS is the container, which is Linux inside.
 
 ## Install the external tools
 

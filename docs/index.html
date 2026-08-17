@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Synapse · Verify Everything. Trust Nothing.</title>
-<meta name="description" content="Synapse is a governed control plane for software composition analysis, recon, evidence, and reporting. Deterministic-first, scope-gated, tamper-evident.">
+<meta name="description" content="Synapse is a governed control plane for supply-chain, code, cloud, offensive, and runtime security assessments. Deterministic-first, scope-gated, tamper-evident.">
 <meta property="og:title" content="Synapse · Verify Everything. Trust Nothing.">
-<meta property="og:description" content="A governed control plane for software composition analysis, recon, evidence, and reporting.">
+<meta property="og:description" content="A governed control plane for supply-chain, code, cloud, offensive, and runtime security assessments.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://synapse.kkloudtarus.net/">
 <meta property="og:image" content="https://synapse.kkloudtarus.net/assets/shots/dashboard.webp">
@@ -121,7 +121,7 @@
       <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></div><h3>Tamper-evident evidence</h3><p>Every artifact is hash-chained. A broken chain blocks the report. Audit and evidence logs are append-only and can be anchored with an RFC-3161 timestamp.</p></div>
       <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="m8 9 3 3-3 3M13 15h3"/></svg></div><h3>Hardened execution</h3><p>Heavy tools are shelled out via argv arrays, never a shell string, inside a Linux sandbox with egress scoping. Scope and the authorization window are enforced before any tool runs.</p></div>
       <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div><h3>RBAC and tenancy</h3><p>Per-action role-based access control and tenant isolation flow through a single authorization chokepoint. Secrets stay server-side in a credential vault.</p></div>
-      <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v12H5.2L4 17.5Z"/><path d="M8 8h8M8 12h5"/></svg></div><h3>Standards native</h3><p>CycloneDX and SPDX with PURL, SARIF, OpenVEX and CSAF, plus KEV and EPSS. Import a client SBOM as the scan inventory, export the results in the format they expect.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v12H5.2L4 17.5Z"/><path d="M8 8h8M8 12h5"/></svg></div><h3>Standards native</h3><p>Exports CycloneDX and SPDX with PURL, SARIF and OpenVEX; ingests CSAF and OVAL advisory feeds; prioritizes with KEV and EPSS. Import a client SBOM as the scan inventory, export the results in the format they expect.</p></div>
       <div class="card"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/><circle cx="12" cy="12" r="9"/></svg></div><h3>Bounded AI analysis</h3><p>An optional analysis layer proposes reachability, critique, threat and write-up drafts. Every claim goes through propose, verify, confirm, gated by a distinct verifier or a human. No model ever sits in the report path.</p></div>
     </div>
   </div>
@@ -307,7 +307,7 @@ docker compose -f deploy/docker-compose.full.yml up --build
       <tr><th>Variable</th><th>Default</th><th>What it does</th></tr>
       <tr><td><code>SYNAPSE_SBOM_PRODUCER</code></td><td><span class="def">syft</span></td><td>syft (pinned binary, full coverage, dep-graph edges) or ownsbom (detection-independent owned parsers, components only).</td></tr>
       <tr><td><code>SYNAPSE_GRYPE_DB_DIR</code></td><td><span class="def">(online)</span></td><td>Pin Grype's vuln database to a pre-synced directory for offline, reproducible scans.</td></tr>
-      <tr><td><code>SYNAPSE_FINDING_MIN_SEVERITY</code></td><td><span class="def">high</span></td><td>Lowest severity promoted to a finding: critical, high, medium, low, info.</td></tr>
+      <tr><td><code>SYNAPSE_FINDING_MIN_SEVERITY</code></td><td><span class="def">info</span></td><td>Lowest severity promoted to a finding: critical, high, medium, low, info. Default promotes everything; set high to tighten the floor.</td></tr>
       <tr><td><code>SYNAPSE_SCAN_TIMEOUT</code></td><td><span class="def">10m</span></td><td>Per-scan timeout. 0 disables.</td></tr>
       <tr><td><code>SYNAPSE_OWNED_ADVISORY</code></td><td><span class="def">false</span></td><td>Match the SBOM against the owned advisory store, alongside the live and offline sources. Populate it first with <code>synapse-cli sync-advisories</code>.</td></tr>
       <tr><td><code>SYNAPSE_JARHASH_ONLINE_ENABLED</code></td><td><span class="def">false</span></td><td>Recover the coordinate of a shaded or metadata-less JAR by its SHA-1, so its vulnerabilities are attributed.</td></tr>

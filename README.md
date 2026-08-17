@@ -116,7 +116,7 @@ anything intrusive.
 - The agent proposes; a distinct verifier or a human confirms. **No model ever sits in the report path.**
 
 **Standards & reports**
-- **Standards native**: CycloneDX and SPDX with PURL, SARIF, OpenVEX and CSAF, plus KEV and EPSS.
+- **Standards native**: CycloneDX and SPDX with PURL, SARIF and OpenVEX exports; CSAF advisory ingestion; KEV and EPSS prioritization.
 - **Deterministic reports** templated from stored data, with a curated CWE → OWASP, PCI and ISO compliance mapping.
 
 See the full walkthrough with screenshots on the [documentation site](https://synapse.kkloudtarus.net/#screens).
@@ -158,7 +158,7 @@ The lasting difference is what sits around the finding:
 ### Install a released build
 
 Grab a prebuilt binary from the [Releases page](https://github.com/KKloudTarus/synapse-ce/releases)
-(linux, macOS and Windows; amd64 and arm64) and verify it against `checksums.txt`. Each archive bundles
+(Linux and macOS on amd64/arm64, and Windows on amd64) and verify it against `checksums.txt`. Each archive bundles
 the packaged commands.
 
 ```bash
@@ -171,9 +171,8 @@ tar -xzf synapse.tar.gz synapse-cli
 
 Or scan with zero install using the container image (bundles `synapse-cli` plus syft and grype):
 
-```bash
-docker run --rm -v "$PWD:/scan:ro" ghcr.io/kkloudtarus/synapse-cli scan /scan --fail-on high
-```
+Container images are not published by the current release workflow. Use a release archive or build
+`deploy/Dockerfile` locally when a containerized CLI is required.
 
 Gate a repository in CI with the reusable action (see [`docs/guide/cli.md`](docs/guide/cli.md#github-action)):
 
@@ -197,7 +196,7 @@ make install                       # Go modules + web deps
 make tools                         # syft + grype into ./bin
 export PATH="$PWD/bin:$PATH"
 
-export SYNAPSE_API_TOKEN="$(openssl rand -hex 32)"   # required, no anonymous access
+export SYNAPSE_API_TOKEN="$(openssl rand -hex 32)"   # required for operational API routes; /healthz is public
 make dev                           # API on :8080, dashboard on :5173
 ```
 
@@ -260,14 +259,14 @@ See [`CHANGELOG.md`](CHANGELOG.md) for what has changed.
 
 ## Roadmap
 
-Synapse is under active development. Near-term directions:
+Synapse is under active development. The current roadmap extends the shipped platform rather than
+introducing new pillars:
 
-- **Continuous vulnerability intelligence and risk management** ([epic #514](https://github.com/KKloudTarus/synapse-ce/issues/514)): keep the advisory corpus current, detect newly affected components without re-scanning, and recalculate risk when intelligence changes.
-- **Correlation**: one unified risk story per asset, and cross-pillar promotion rules through the judgment gate.
-- Broader ecosystem coverage: more owned lockfile parsers (Conda, R, Julia, Conan).
-- More first-party SAST rules and reachability for more language ecosystems.
-- Richer SARIF output, including remediation in code-scanning alerts.
-- More curated, model-free compliance profiles, and more CI recipes and integration examples.
+- Broader deterministic rule and ecosystem coverage beyond the current Go, JavaScript/TypeScript,
+  Python, Java/JVM, .NET, Rust, Ruby, PHP, Swift, Dart, Elixir, Conda, R, Julia, and Conan coverage.
+- Deeper language-aware reachability and taint analysis, with conservative handling for dynamic code.
+- More model-free compliance profiles and ready-to-run CI, fleet, and deployment recipes.
+- Continued hardening of sandbox, supply-chain, evidence, and agent-update boundaries.
 
 Have a request? Open an issue or start a discussion. Issues tagged
 [`good first issue`](https://github.com/KKloudTarus/synapse-ce/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)

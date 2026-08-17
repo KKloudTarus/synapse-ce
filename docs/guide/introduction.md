@@ -4,10 +4,10 @@
 
 ## What is Synapse
 
-Synapse runs the security-assessment lifecycle behind one governed control plane: software
-composition analysis, recon, evidence capture, findings, and reporting. It is built for
-consultancies and security teams that need results they can put in front of a client, with a
-clear chain of custody.
+Synapse runs the security-assessment lifecycle behind one governed control plane: supply-chain
+analysis, project code quality, cloud posture, governed offensive testing, runtime defense, evidence
+capture, findings, and reporting. It is built for consultancies and security teams that need results
+they can put in front of a client, with a clear chain of custody.
 
 The design goal is simple to state. Be fast, but be provable.
 
@@ -65,7 +65,18 @@ theoretical critical.
 
 ## Standards
 
-Synapse speaks the formats a client expects: CycloneDX and SPDX with PURL, SARIF for findings,
-OpenVEX and CSAF for exploitability statements, and KEV plus EPSS for prioritization.
+Synapse speaks the formats a client expects. Ingest and export are deliberately listed separately,
+because they are not the same capability:
+
+| Format | Ingest | Export |
+| --- | --- | --- |
+| CycloneDX | Yes, as a scan inventory | Yes |
+| SPDX | — | Yes |
+| SARIF | Yes, third-party reports | Yes |
+| OpenVEX | Yes, in-repo `.synapse.vex.json` | Yes |
+| CSAF | Yes, advisory feeds | No |
+| OSV, GHSA, OVAL | Yes, advisory feeds | No |
+
+KEV and EPSS drive prioritization rather than exchange.
 
 Next: [Installation](installation.md)
