@@ -57,7 +57,7 @@ func TestRunUsesIndependentVerifierTransportAndIdentity(t *testing.T) {
 	if err := json.Unmarshal(b, &report); err != nil {
 		t.Fatalf("decode report: %v", err)
 	}
-	if report.SchemaVersion != "synapse-ai-triage-evaluation-v3" || report.Robustness.Metrics.TotalPairs == 0 ||
+	if report.SchemaVersion != "synapse-ai-triage-evaluation-v4" || report.Robustness.Metrics.TotalPairs == 0 ||
 		report.Run.ProposerProvider != "openai" || report.Run.VerifierProvider != "anthropic" ||
 		report.Run.IndependencePolicy != "provider" {
 		t.Fatalf("independence metadata missing from report: %+v", report.Run)

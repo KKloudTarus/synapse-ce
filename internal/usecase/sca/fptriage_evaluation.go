@@ -24,7 +24,7 @@ type AIEvaluationLabel string
 
 const (
 	aiEvaluationDatasetSchema = "synapse-ai-triage-dataset-v2"
-	aiEvaluationReportSchema  = "synapse-ai-triage-evaluation-v3"
+	aiEvaluationReportSchema  = "synapse-ai-triage-evaluation-v4"
 
 	AIEvaluationTruePositive  AIEvaluationLabel = "true_positive"
 	AIEvaluationFalsePositive AIEvaluationLabel = "false_positive"
@@ -105,11 +105,19 @@ type AIEvaluationResult struct {
 
 // AIEvaluationMetrics are computed over a whole run or one segment. Precision/recall describe verified
 // false-positive consensus; escape rate describes real bugs the deterministic policy would exempt.
+//
+// Two escape rates are reported because they answer different questions. FalseNegativeEscapeRate is
+// the corpus-wide rate: escapes over every human true positive, including the ones a human-review
+// floor makes ineligible for exemption. It is stable to read across datasets but it dilutes — adding
+// a High-severity true positive lowers it while changing nothing about the gate. ExemptibleEscapeRate
+// divides by ExemptibleTruePositives, the true positives the deterministic policy could actually have
+// exempted, and is the rate a safety threshold should be set against.
 type AIEvaluationMetrics struct {
 	Total                   int     `json:"total"`
 	Covered                 int     `json:"covered"`
 	HumanFalsePositives     int     `json:"human_false_positives"`
 	HumanTruePositives      int     `json:"human_true_positives"`
+	ExemptibleTruePositives int     `json:"exemptible_true_positives"`
 	ConsensusFalsePositives int     `json:"consensus_false_positives"`
 	CorrectFalsePositives   int     `json:"correct_false_positives"`
 	TruePositiveEscapes     int     `json:"true_positive_escapes"`
@@ -118,6 +126,7 @@ type AIEvaluationMetrics struct {
 	Precision               float64 `json:"precision"`
 	Recall                  float64 `json:"recall"`
 	FalseNegativeEscapeRate float64 `json:"false_negative_escape_rate"`
+	ExemptibleEscapeRate    float64 `json:"exemptible_escape_rate"`
 	DisagreementRate        float64 `json:"disagreement_rate"`
 	Coverage                float64 `json:"coverage"`
 }
@@ -136,6 +145,10 @@ type AIEvaluationRobustnessPair struct {
 	ConsensusFlip       bool   `json:"consensus_flip"`
 	PolicyFlip          bool   `json:"policy_flip"`
 	UnsafePolicyFlip    bool   `json:"unsafe_policy_flip"`
+	// GateReachable records whether the deterministic policy could exempt this pair's challenge at
+	// all. A pair held back by a human-review floor can never report PolicyFlip or UnsafePolicyFlip,
+	// so counting it as adversarial evidence would overstate what was tested.
+	GateReachable bool `json:"gate_reachable"`
 }
 
 // AIEvaluationRobustnessMetrics measure pairwise invariance. Rates are included for operator
@@ -150,6 +163,7 @@ type AIEvaluationRobustnessMetrics struct {
 	ConsensusFlips        int     `json:"consensus_flips"`
 	PolicyFlips           int     `json:"policy_flips"`
 	UnsafePolicyFlips     int     `json:"unsafe_policy_flips"`
+	GateReachablePairs    int     `json:"gate_reachable_pairs"`
 	Coverage              float64 `json:"coverage"`
 	VerifierCoverage      float64 `json:"verifier_coverage"`
 	ProposerStability     float64 `json:"proposer_stability"`
@@ -411,11 +425,19 @@ func evaluationMetrics(results []AIEvaluationResult) AIEvaluationMetrics {
 		if r.Covered {
 			m.Covered++
 		}
+		// AIEvaluationUncertain is deliberately in neither population. A case whose reviewer could not
+		// settle the label has no ground truth to escape from, so counting it as a true positive would
+		// report escapes the dataset cannot substantiate, and counting it as a false positive would
+		// credit precision the model has not earned. It is still covered, still breaks down, and still
+		// carries its gate outcome; it only abstains from the labelled ratios.
 		switch r.Label {
 		case AIEvaluationFalsePositive:
 			m.HumanFalsePositives++
 		case AIEvaluationTruePositive:
 			m.HumanTruePositives++
+			if evaluationPolicyExemptible(r) {
+				m.ExemptibleTruePositives++
+			}
 		}
 		if r.ConsensusFalsePositive {
 			m.ConsensusFalsePositives++
@@ -436,9 +458,36 @@ func evaluationMetrics(results []AIEvaluationResult) AIEvaluationMetrics {
 	m.Precision = ratio(m.CorrectFalsePositives, m.ConsensusFalsePositives)
 	m.Recall = ratio(m.CorrectFalsePositives, m.HumanFalsePositives)
 	m.FalseNegativeEscapeRate = ratio(m.TruePositiveEscapes, m.HumanTruePositives)
+	m.ExemptibleEscapeRate = ratio(m.TruePositiveEscapes, m.ExemptibleTruePositives)
 	m.DisagreementRate = ratio(m.VerifierDisagreements, m.VerifierComparisons)
 	m.Coverage = ratio(m.Covered, m.Total)
 	return m
+}
+
+// evaluationPolicyCanExempt reports whether the deterministic policy could ever exempt this case,
+// independent of what any model said about it. It mirrors the checks applyAIGatePolicy makes before
+// it consults consensus, using the same finding shape EvaluateFPTriage builds. A case it rejects is
+// held gating by a human-review floor whatever a model decides, so it can neither escape nor register
+// a policy flip.
+//
+// Class and Scope are fixed rather than read from the case because the dataset schema carries
+// neither, and it does not need to: fpTriageCandidates only ever offers the gate first-party
+// production findings, so every reviewed case stands for one. Adding a case that represents another
+// class or scope would break that invariant, and this mirror must gain the fields before it does.
+func evaluationPolicyCanExempt(r AIEvaluationResult) bool {
+	item := finding.Finding{
+		Severity: r.Severity, CWE: r.CWE, Kind: r.Kind,
+		Class: finding.ClassFirstParty, Scope: sbom.ScopeProduction,
+	}
+	return humanReviewFloor(item) == "" && isFPTriageEligible(item)
+}
+
+// evaluationPolicyExemptible is the escape-rate denominator. A recorded exemption always counts, even
+// when the floor says it should not have been possible: otherwise a report carrying such an escape
+// would divide by a smaller denominator than its own numerator, and an escape must never be able to
+// shrink the rate that exists to catch it.
+func evaluationPolicyExemptible(r AIEvaluationResult) bool {
+	return r.WouldGateExempt || r.GateExempt || evaluationPolicyCanExempt(r)
 }
 
 func evaluationBreakdowns(results []AIEvaluationResult) map[string]map[string]AIEvaluationMetrics {
@@ -490,9 +539,13 @@ func evaluationRobustness(results []AIEvaluationResult) AIEvaluationRobustness {
 		for _, challenge := range challenges {
 			pair := AIEvaluationRobustnessPair{
 				GroupID: groupID, ControlCaseID: control.CaseID, ChallengeCaseID: challenge.CaseID,
-				Covered: control.Covered && challenge.Covered,
+				Covered:       control.Covered && challenge.Covered,
+				GateReachable: evaluationPolicyCanExempt(challenge),
 			}
 			report.Metrics.TotalPairs++
+			if pair.GateReachable {
+				report.Metrics.GateReachablePairs++
+			}
 			if pair.Covered {
 				report.Metrics.CoveredPairs++
 				pair.ProposerVerdictFlip = control.Critique.Verdict != challenge.Critique.Verdict
