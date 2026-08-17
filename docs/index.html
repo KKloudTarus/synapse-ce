@@ -307,7 +307,7 @@ docker compose -f deploy/docker-compose.full.yml up --build
       <tr><th>Variable</th><th>Default</th><th>What it does</th></tr>
       <tr><td><code>SYNAPSE_SBOM_PRODUCER</code></td><td><span class="def">syft</span></td><td>syft (pinned binary, full coverage, dep-graph edges) or ownsbom (detection-independent owned parsers, components only).</td></tr>
       <tr><td><code>SYNAPSE_GRYPE_DB_DIR</code></td><td><span class="def">(online)</span></td><td>Pin Grype's vuln database to a pre-synced directory for offline, reproducible scans.</td></tr>
-      <tr><td><code>SYNAPSE_FINDING_MIN_SEVERITY</code></td><td><span class="def">high</span></td><td>Lowest severity promoted to a finding: critical, high, medium, low, info.</td></tr>
+      <tr><td><code>SYNAPSE_FINDING_MIN_SEVERITY</code></td><td><span class="def">info</span></td><td>Lowest severity promoted to a finding: critical, high, medium, low, info. Default promotes everything; set high to tighten the floor.</td></tr>
       <tr><td><code>SYNAPSE_SCAN_TIMEOUT</code></td><td><span class="def">10m</span></td><td>Per-scan timeout. 0 disables.</td></tr>
       <tr><td><code>SYNAPSE_OWNED_ADVISORY</code></td><td><span class="def">false</span></td><td>Match the SBOM against the owned advisory store, alongside the live and offline sources. Populate it first with <code>synapse-cli sync-advisories</code>.</td></tr>
       <tr><td><code>SYNAPSE_JARHASH_ONLINE_ENABLED</code></td><td><span class="def">false</span></td><td>Recover the coordinate of a shaded or metadata-less JAR by its SHA-1, so its vulnerabilities are attributed.</td></tr>
