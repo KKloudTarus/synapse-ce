@@ -19,8 +19,8 @@ var errPromotionBlocked = errors.New("candidate is blocked from promotion review
 
 func main() {
 	defaults := sca.DefaultAIEvaluationPromotionPolicy()
-	baselinePath := flag.String("baseline", "", "baseline synapse-ai-triage-evaluation-v3 report")
-	candidatePath := flag.String("candidate", "", "candidate synapse-ai-triage-evaluation-v3 report")
+	baselinePath := flag.String("baseline", "", "baseline synapse-ai-triage-evaluation-v4 report")
+	candidatePath := flag.String("candidate", "", "candidate synapse-ai-triage-evaluation-v4 report")
 	outputPath := flag.String("output", "-", "comparison report path, or - for stdout")
 	failOnBlocked := flag.Bool("fail-on-blocked", true, "exit non-zero after writing a blocked comparison")
 	minimumPrecision := flag.Int("minimum-precision-bps", defaults.MinimumPrecisionBasisPoints, "minimum candidate precision in basis points")
@@ -36,6 +36,7 @@ func main() {
 	maximumCounterfactualVerifierFlips := flag.Int("maximum-counterfactual-verifier-flip-bps", defaults.MaximumCounterfactualVerifierFlipRateBasisPoints, "maximum verifier verdict flip rate across counterfactual pairs in basis points")
 	maximumCounterfactualConsensusFlips := flag.Int("maximum-counterfactual-consensus-flip-bps", defaults.MaximumCounterfactualConsensusFlipRateBasisPoints, "maximum consensus flip rate across counterfactual pairs in basis points")
 	maximumCounterfactualPolicyFlips := flag.Int("maximum-counterfactual-policy-flip-bps", defaults.MaximumCounterfactualPolicyFlipRateBasisPoints, "maximum deterministic policy flip rate across counterfactual pairs in basis points")
+	minimumGateReachablePairs := flag.Int("minimum-gate-reachable-counterfactual-pairs", defaults.MinimumGateReachableCounterfactualPairs, "minimum counterfactual pairs the deterministic policy could exempt; a count, not basis points")
 	flag.Parse()
 
 	policy := sca.AIEvaluationPromotionPolicy{
@@ -52,6 +53,7 @@ func main() {
 		MaximumCounterfactualVerifierFlipRateBasisPoints:  *maximumCounterfactualVerifierFlips,
 		MaximumCounterfactualConsensusFlipRateBasisPoints: *maximumCounterfactualConsensusFlips,
 		MaximumCounterfactualPolicyFlipRateBasisPoints:    *maximumCounterfactualPolicyFlips,
+		MinimumGateReachableCounterfactualPairs:           *minimumGateReachablePairs,
 	}
 	if err := run(*baselinePath, *candidatePath, *outputPath, policy, *failOnBlocked); err != nil {
 		fmt.Fprintf(os.Stderr, "synapse-fptriage-compare: %v\n", err)

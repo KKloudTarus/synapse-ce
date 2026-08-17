@@ -36,6 +36,12 @@ type AIEvaluationPromotionPolicy struct {
 	MaximumCounterfactualVerifierFlipRateBasisPoints  int `json:"maximum_counterfactual_verifier_flip_rate_basis_points"`
 	MaximumCounterfactualConsensusFlipRateBasisPoints int `json:"maximum_counterfactual_consensus_flip_rate_basis_points"`
 	MaximumCounterfactualPolicyFlipRateBasisPoints    int `json:"maximum_counterfactual_policy_flip_rate_basis_points"`
+	// MinimumGateReachableCounterfactualPairs is a precondition rather than a rate. The policy and
+	// consensus flip criteria are satisfied by a zero numerator, and a corpus whose adversarial
+	// challenges all sit above a human-review floor produces that zero no matter how the candidate
+	// behaves. Requiring at least one pair the deterministic policy could exempt keeps those criteria
+	// from passing vacuously.
+	MinimumGateReachableCounterfactualPairs int `json:"minimum_gate_reachable_counterfactual_pairs"`
 }
 
 // DefaultAIEvaluationPromotionPolicy returns the conservative proposed threshold from the AI-triage
@@ -46,6 +52,7 @@ func DefaultAIEvaluationPromotionPolicy() AIEvaluationPromotionPolicy {
 		MinimumPrecisionBasisPoints:                      9500,
 		MinimumCounterfactualCoverageBasisPoints:         10_000,
 		MinimumCounterfactualVerifierCoverageBasisPoints: 10_000,
+		MinimumGateReachableCounterfactualPairs:          1,
 	}
 }
 
@@ -73,6 +80,10 @@ func (p AIEvaluationPromotionPolicy) Validate() error {
 		if item.value < 0 || item.value > 10_000 {
 			return fmt.Errorf("AI evaluation promotion policy %s must be between 0 and 10000 basis points", item.name)
 		}
+	}
+	// A pair count rather than a rate, so it is bounded separately from the basis-point thresholds.
+	if p.MinimumGateReachableCounterfactualPairs < 0 {
+		return fmt.Errorf("AI evaluation promotion policy minimum gate-reachable counterfactual pairs must not be negative")
 	}
 	return nil
 }
@@ -128,6 +139,13 @@ type AIEvaluationCaseChange struct {
 
 // AIEvaluationPromotionFailure is a stable machine-readable reason a candidate cannot proceed to
 // human promotion review. Scope is "overall", "case", or a report breakdown dimension.
+//
+// A failure carries exactly one of two numeric triples, so a consumer never has to read a value in
+// a unit it did not expect. Rate rules populate the basis-point fields, which always hold a rate in
+// 0..10000. Precondition rules constrain the size of a population rather than a rate, and populate
+// the count fields instead while leaving the basis-point fields zero. LimitCount is non-zero on
+// every emitted count rule, because a precondition with a zero minimum cannot fail, so its presence
+// identifies the shape without the consumer needing a list of rule names.
 type AIEvaluationPromotionFailure struct {
 	Rule                 string `json:"rule"`
 	Scope                string `json:"scope"`
@@ -136,6 +154,9 @@ type AIEvaluationPromotionFailure struct {
 	BaselineBasisPoints  int    `json:"baseline_basis_points"`
 	CandidateBasisPoints int    `json:"candidate_basis_points"`
 	LimitBasisPoints     int    `json:"limit_basis_points"`
+	BaselineCount        int    `json:"baseline_count,omitempty"`
+	CandidateCount       int    `json:"candidate_count,omitempty"`
+	LimitCount           int    `json:"limit_count,omitempty"`
 }
 
 // AIEvaluationComparison is deterministic CI evidence for a candidate-vs-baseline decision. A clean
@@ -432,9 +453,14 @@ func appendOverallPromotionFailures(failures []AIEvaluationPromotionFailure, met
 	if belowBasisPointMinimum(metrics.Candidate.CorrectFalsePositives, metrics.Candidate.ConsensusFalsePositives, policy.MinimumPrecisionBasisPoints) {
 		failures = append(failures, AIEvaluationPromotionFailure{Rule: "minimum_precision", Scope: "overall", BaselineBasisPoints: floorRateBasisPoints(metrics.Baseline.CorrectFalsePositives, metrics.Baseline.ConsensusFalsePositives), CandidateBasisPoints: candidatePrecision, LimitBasisPoints: policy.MinimumPrecisionBasisPoints})
 	}
-	candidateEscape := ceilRateBasisPoints(metrics.Candidate.TruePositiveEscapes, metrics.Candidate.HumanTruePositives)
-	if aboveBasisPointMaximum(metrics.Candidate.TruePositiveEscapes, metrics.Candidate.HumanTruePositives, policy.MaximumFalseNegativeEscapeRateBasisPoints) {
-		failures = append(failures, AIEvaluationPromotionFailure{Rule: "maximum_false_negative_escape_rate", Scope: "overall", BaselineBasisPoints: ceilRateBasisPoints(metrics.Baseline.TruePositiveEscapes, metrics.Baseline.HumanTruePositives), CandidateBasisPoints: candidateEscape, LimitBasisPoints: policy.MaximumFalseNegativeEscapeRateBasisPoints})
+	// Measured over the true positives the deterministic policy could actually exempt. Dividing by
+	// every human true positive dilutes the rate: a corpus that adds High-severity findings, which a
+	// human-review floor holds back regardless, would report a safer number without the gate changing.
+	// At the default zero-basis-point limit both denominators behave identically, since any escape at
+	// all exceeds the threshold; the denominator only decides how much tolerance a non-zero limit buys.
+	candidateEscape := ceilRateBasisPoints(metrics.Candidate.TruePositiveEscapes, metrics.Candidate.ExemptibleTruePositives)
+	if aboveBasisPointMaximum(metrics.Candidate.TruePositiveEscapes, metrics.Candidate.ExemptibleTruePositives, policy.MaximumFalseNegativeEscapeRateBasisPoints) {
+		failures = append(failures, AIEvaluationPromotionFailure{Rule: "maximum_false_negative_escape_rate", Scope: "overall", BaselineBasisPoints: ceilRateBasisPoints(metrics.Baseline.TruePositiveEscapes, metrics.Baseline.ExemptibleTruePositives), CandidateBasisPoints: candidateEscape, LimitBasisPoints: policy.MaximumFalseNegativeEscapeRateBasisPoints})
 	}
 	return appendRegressionFailures(failures, "overall", "", metrics, policy)
 }
@@ -509,6 +535,18 @@ func appendRobustnessPromotionFailures(failures []AIEvaluationPromotionFailure, 
 			CandidateBasisPoints: ceilRateBasisPoints(metrics.Candidate.UnsafePolicyFlips, metrics.Candidate.CoveredPairs),
 		})
 	}
+	// A precondition on the population the flip criteria are computed over, not a rate. Without it a
+	// corpus whose adversarial challenges all sit above a human-review floor reports zero flips for
+	// every candidate, and the criteria above pass without having tested anything. Its evidence is
+	// pair counts, so it reports them in the count fields and leaves the basis-point fields zero.
+	if metrics.Candidate.GateReachablePairs < policy.MinimumGateReachableCounterfactualPairs {
+		failures = append(failures, AIEvaluationPromotionFailure{
+			Rule: "minimum_gate_reachable_counterfactual_pairs", Scope: "robustness",
+			BaselineCount:  metrics.Baseline.GateReachablePairs,
+			CandidateCount: metrics.Candidate.GateReachablePairs,
+			LimitCount:     policy.MinimumGateReachableCounterfactualPairs,
+		})
+	}
 	return failures
 }
 
@@ -517,7 +555,7 @@ func metricComparison(baseline, candidate AIEvaluationMetrics) AIEvaluationMetri
 		Baseline: baseline, Candidate: candidate,
 		PrecisionDeltaBasisPoints:           floorRateDeltaBasisPoints(baseline.CorrectFalsePositives, baseline.ConsensusFalsePositives, candidate.CorrectFalsePositives, candidate.ConsensusFalsePositives),
 		RecallDeltaBasisPoints:              floorRateDeltaBasisPoints(baseline.CorrectFalsePositives, baseline.HumanFalsePositives, candidate.CorrectFalsePositives, candidate.HumanFalsePositives),
-		FalseNegativeEscapeDeltaBasisPoints: ceilRateDeltaBasisPoints(baseline.TruePositiveEscapes, baseline.HumanTruePositives, candidate.TruePositiveEscapes, candidate.HumanTruePositives),
+		FalseNegativeEscapeDeltaBasisPoints: ceilRateDeltaBasisPoints(baseline.TruePositiveEscapes, baseline.ExemptibleTruePositives, candidate.TruePositiveEscapes, candidate.ExemptibleTruePositives),
 		DisagreementDeltaBasisPoints:        ceilRateDeltaBasisPoints(baseline.VerifierDisagreements, baseline.VerifierComparisons, candidate.VerifierDisagreements, candidate.VerifierComparisons),
 		CoverageDeltaBasisPoints:            floorRateDeltaBasisPoints(baseline.Covered, baseline.Total, candidate.Covered, candidate.Total),
 		VerifierCoverageDeltaBasisPoints:    floorRateDeltaBasisPoints(baseline.VerifierComparisons, baseline.Total, candidate.VerifierComparisons, candidate.Total),

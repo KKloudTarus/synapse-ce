@@ -7,6 +7,32 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Added
+
+- **Authority-surface precondition on AI-triage promotion.** Evaluation reports record
+  `gate_reachable_pairs`, and the promotion boundary requires at least one counterfactual pair the
+  deterministic policy could actually exempt (`--minimum-gate-reachable-counterfactual-pairs`,
+  default 1). The counterfactual flip-rate criteria are satisfied by a zero numerator, and a corpus
+  whose adversarial challenges all sit above a human-review floor produces that zero for every
+  candidate; the precondition stops those criteria passing without having measured anything. The
+  precondition reports pair counts in dedicated `*_count` failure fields, so the basis-point fields
+  of a promotion failure always mean a rate.
+
+- **AI-triage escape rate measured against the exemptible population.** Evaluation reports now carry
+  `exemptible_true_positives` and `exemptible_escape_rate` alongside the corpus-wide rate, and the
+  promotion boundary reads the exemptible denominator. A true positive a human-review floor holds
+  back can no longer dilute the safety rate, so a corpus cannot look safer by adding findings the
+  gate was never allowed to release. Reports move to `synapse-ai-triage-evaluation-v4`; the default
+  zero-basis-point limit is unchanged and behaves identically, while any configured non-zero
+  tolerance now applies to the smaller, meaningful denominator and should be re-approved.
+
+- **Gate-reachable adversarial coverage for AI-triage robustness.** The golden dataset now binds
+  prompt-injection challenges to controls the deterministic policy could actually exempt, so
+  `PolicyFlip` and `UnsafePolicyFlip` measure a non-empty population instead of being pinned to
+  `false` by the human-review floor. A regression test proves the metrics are falsifiable — a triager
+  that obeys an injection registers an unsafe flip, an honest one does not — and a coverage test
+  fails if a future dataset edit leaves no adversarial case able to reach the gate.
+
 ### Changed
 
 - **Workflow-oriented sidebar navigation.** Reorganizes shipped dashboard capabilities around security operations, exposure management, engineering, runtime, and governance; separates engagement creation from the active navigation state; and removes unavailable placeholder destinations.
