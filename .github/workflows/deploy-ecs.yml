@@ -81,7 +81,6 @@ jobs:
             --target api \
             --platform linux/amd64 \
             --tag "${IMAGE_URI}" \
-            --tag "${ECR_REGISTRY}/${ECR_REPO_API}:latest" \
             --cache-from type=gha \
             --cache-to type=gha,mode=max \
             --push \
