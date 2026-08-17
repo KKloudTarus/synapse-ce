@@ -6,16 +6,7 @@ name: Build & Deploy
 on:
   push:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      deploy:
-        description: "Deploy sau khi build (false = chỉ build+push, không deploy)"
-        required: false
-        default: "true"
-        type: choice
-        options:
-          - "true"
-          - "false"
+  workflow_dispatch: {}
 
 permissions:
   id-token: write # OIDC auth với AWS
@@ -24,9 +15,9 @@ permissions:
 env:
   AWS_REGION: ap-southeast-1
   ECR_REPO_API: synapse-api
-  ECS_CLUSTER: synapse-cluster
+  ECS_CLUSTER: synapse-cluster-prod
   ECS_SERVICE_API: synapse-api
-  S3_WEB_BUCKET: synapse-web-frontend
+  S3_WEB_BUCKET: synapse-web-945125812908
   CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
 
 jobs:
@@ -155,9 +146,7 @@ jobs:
     name: "API: Deploy ECS"
     runs-on: ubuntu-latest
     needs: [build-api, scan]
-    if: |
-      github.ref == 'refs/heads/main' &&
-      (github.event_name != 'workflow_dispatch' || inputs.deploy == 'true')
+    if: github.ref == 'refs/heads/main'
     environment:
       name: production
     steps:
@@ -198,9 +187,7 @@ jobs:
     name: "Web: Deploy S3 + CloudFront"
     runs-on: ubuntu-latest
     needs: build-web
-    if: |
-      github.ref == 'refs/heads/main' &&
-      (github.event_name != 'workflow_dispatch' || inputs.deploy == 'true')
+    if: github.ref == 'refs/heads/main'
     environment:
       name: production
     steps:
