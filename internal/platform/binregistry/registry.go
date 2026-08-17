@@ -41,12 +41,20 @@ func New(expected map[string]string, tofu bool) *Registry {
 }
 
 // Verify hashes the binary at path (symlinks resolved), checks it against its pin, and returns
-// the resolved path. Callers must execute the returned path rather than resolving the input again.
-// Returns ErrIntegrity on a mismatch; records a TOFU pin on first sight when enabled.
+// the resolved path. The returned path is always absolute, so callers can bind and execute it
+// verbatim rather than resolving the input again. Returns ErrIntegrity on a mismatch; records a
+// TOFU pin on first sight when enabled.
 func (r *Registry) Verify(path string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return "", fmt.Errorf("%w: cannot resolve %q: %v", ErrIntegrity, path, err)
+	}
+	// EvalSymlinks preserves relative-ness: a bare name that host PATH resolution left unresolved
+	// would resolve against the process CWD and come back relative, and the sandbox binds/execs only
+	// absolute paths - so bwrap would re-resolve the bare name against its own PATH and run a file
+	// this never hashed. Refuse a non-absolute result so the verify==exec invariant is total.
+	if !filepath.IsAbs(resolved) {
+		return "", fmt.Errorf("%w: resolved path %q is not absolute", ErrIntegrity, resolved)
 	}
 	sum, err := hashFile(resolved)
 	if err != nil {
