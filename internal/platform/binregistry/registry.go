@@ -40,33 +40,43 @@ func New(expected map[string]string, tofu bool) *Registry {
 	return &Registry{expected: cp, seen: map[string]string{}, tofu: tofu}
 }
 
-// Verify hashes the binary at path (symlinks resolved) and checks it against its pin.
+// Verify hashes the binary at path (symlinks resolved), checks it against its pin, and returns
+// the resolved path. Callers must execute the returned path rather than resolving the input again.
 // Returns ErrIntegrity on a mismatch; records a TOFU pin on first sight when enabled.
-func (r *Registry) Verify(path string) error {
+func (r *Registry) Verify(path string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return fmt.Errorf("%w: cannot resolve %q: %v", ErrIntegrity, path, err)
+		return "", fmt.Errorf("%w: cannot resolve %q: %v", ErrIntegrity, path, err)
 	}
 	sum, err := hashFile(resolved)
 	if err != nil {
-		return fmt.Errorf("%w: cannot hash %q: %v", ErrIntegrity, resolved, err)
+		return "", fmt.Errorf("%w: cannot hash %q: %v", ErrIntegrity, resolved, err)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Authoritative pin keyed by resolved path or by basename (so config can pin "naabu").
 	if want, ok := r.expected[resolved]; ok {
-		return matchOrErr(resolved, want, sum)
+		if err := matchOrErr(resolved, want, sum); err != nil {
+			return "", err
+		}
+		return resolved, nil
 	}
 	if want, ok := r.expected[filepath.Base(resolved)]; ok {
-		return matchOrErr(resolved, want, sum)
+		if err := matchOrErr(resolved, want, sum); err != nil {
+			return "", err
+		}
+		return resolved, nil
 	}
 	if r.tofu {
 		if first, ok := r.seen[resolved]; ok {
-			return matchOrErr(resolved, first, sum)
+			if err := matchOrErr(resolved, first, sum); err != nil {
+				return "", err
+			}
+			return resolved, nil
 		}
 		r.seen[resolved] = sum // pin on first use
 	}
-	return nil
+	return resolved, nil
 }
 
 func matchOrErr(path, want, got string) error {

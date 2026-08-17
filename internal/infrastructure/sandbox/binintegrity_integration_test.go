@@ -54,3 +54,36 @@ func TestBinaryIntegrityRefusesTamper(t *testing.T) {
 	}
 	t.Logf("F5 OK: replaced binary refused before exec (%v)", err)
 }
+
+// TestBinaryIntegrityExecutesResolvedSymlinkTarget proves the path returned by the registry is the
+// one passed to bubblewrap and exec. Re-resolving the input symlink downstream would reopen the
+// target-swap window that verification is intended to close.
+func TestBinaryIntegrityExecutesResolvedSymlinkTarget(t *testing.T) {
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bwrap not installed")
+	}
+	sb, err := sandbox.NewRunner(20*time.Second, 8<<20, 1<<30, 256)
+	if err != nil {
+		t.Skipf("sandbox unavailable: %v", err)
+	}
+	sb.SetBinaryRegistry(binregistry.New(nil, true))
+
+	dir := t.TempDir()
+	link := filepath.Join(dir, "verified-sh")
+	if err := os.Symlink("/bin/sh", link); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+	resolved, err := filepath.EvalSymlinks(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := sb.Run(context.Background(), ports.ToolSpec{
+		Name: link, Args: []string{"-c", `printf %s "$0"`}, Workdir: dir,
+	})
+	if err != nil {
+		t.Fatalf("run symlinked tool: %v", err)
+	}
+	if got := string(result.Stdout); got != resolved {
+		t.Fatalf("executed argv[0] = %q, want verified resolved path %q", got, resolved)
+	}
+}
