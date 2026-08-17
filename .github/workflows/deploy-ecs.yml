@@ -16,7 +16,7 @@ env:
   AWS_REGION: ap-southeast-1
   ECR_REPO_API: synapse-api
   ECS_CLUSTER: synapse-cluster-prod
-  ECS_SERVICE_API: synapse-api
+  ECS_SERVICE_API: synapse-api-prod
   S3_WEB_BUCKET: synapse-web-945125812908
   CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
 
@@ -179,7 +179,7 @@ jobs:
       - name: Download current task definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition synapse-api \
+            --task-definition synapse-api-prod \
             --query taskDefinition \
             > task-definition.json
 
