@@ -29,6 +29,78 @@ func TestIsProductionFailsClosed(t *testing.T) {
 	}
 }
 
+func TestValidateSandboxPosture(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{name: "production sandbox disabled", cfg: Config{Environment: "production"}, want: true},
+		{name: "unknown environment sandbox disabled", cfg: Config{Environment: "typo-env"}, want: true},
+		{name: "production sandbox enabled", cfg: Config{Environment: "production", SandboxEnabled: true}},
+		{name: "development sandbox disabled", cfg: Config{Environment: "development"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Config(tt.cfg).ValidateSandboxPosture() != nil; got != tt.want {
+				t.Fatalf("ValidateSandboxPosture() error = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateMigrationPosture(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{name: "production auto-migrate enabled", cfg: Config{Environment: "production", DBAutoMigrate: true}, want: true},
+		{name: "unknown environment auto-migrate enabled", cfg: Config{Environment: "typo-env", DBAutoMigrate: true}, want: true},
+		{name: "production auto-migrate disabled", cfg: Config{Environment: "production"}},
+		{name: "development auto-migrate enabled", cfg: Config{Environment: "development", DBAutoMigrate: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.ValidateMigrationPosture() != nil; got != tt.want {
+				t.Fatalf("ValidateMigrationPosture() error = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMigrationDSN(t *testing.T) {
+	cfg := Config{DBDSN: "runtime"}
+	if got := cfg.MigrationDSN(); got != "runtime" {
+		t.Fatalf("MigrationDSN() = %q, want runtime", got)
+	}
+	cfg.DBMigrationDSN = "owner"
+	if got := cfg.MigrationDSN(); got != "owner" {
+		t.Fatalf("MigrationDSN() = %q, want owner", got)
+	}
+}
+
+func TestLoadDBAutoMigrate(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "default", want: true},
+		{name: "enabled", value: "true", want: true},
+		{name: "disabled", value: "false"},
+		{name: "invalid uses default", value: "not-a-bool", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SYNAPSE_DB_AUTO_MIGRATE", tt.value)
+			if got := Load().DBAutoMigrate; got != tt.want {
+				t.Fatalf("DBAutoMigrate = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestLoadNormalizesEnvironment confirms Load canonicalizes the env so logs + any reader
 // see one form.
 func TestLoadNormalizesEnvironment(t *testing.T) {

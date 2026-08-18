@@ -98,7 +98,8 @@ its own claim. No model ever sits in the report path.
 ## Persistence and migrations
 
 Persistence is PostgreSQL when a DSN is set, and an in-memory store otherwise. Migrations are
-numbered SQL files, embedded in the binary, and applied automatically at startup. There is no
-separate migrate step. A shipped migration is never edited. A new numbered file is appended.
+numbered SQL files embedded in the binary. Development services apply them automatically; production
+uses the dedicated `synapse-migrate` command with the owner credential before API, worker, and MCP
+start with their runtime credential. A shipped migration is never edited. A new numbered file is appended.
 
 Next: [Deployment](deployment.md)

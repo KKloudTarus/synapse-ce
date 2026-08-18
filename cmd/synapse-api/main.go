@@ -220,22 +220,6 @@ func metricsAddrIsLoopback(addr string) bool {
 	return ip.IsLoopback()
 }
 
-func migrationDSNForStartup(cfg config.Config) (string, error) {
-	migrationDSN := cfg.DBMigrationDSN
-	if migrationDSN == "" {
-		if cfg.IsProduction() {
-			return "", fmt.Errorf("SYNAPSE_DB_MIGRATION_DSN is required with SYNAPSE_DB_DSN outside development")
-		}
-		return cfg.DBDSN, nil
-	}
-	if cfg.IsProduction() {
-		if err := postgres.ValidateMigrationRoleSeparation(migrationDSN, cfg.DBDSN); err != nil {
-			return "", fmt.Errorf("validate migration and runtime database roles: %w", err)
-		}
-	}
-	return migrationDSN, nil
-}
-
 func main() {
 	cfg := config.Load()
 	if cfg.CSPMEnabled && !cfg.FleetAssetsEnabled {
@@ -248,6 +232,14 @@ func main() {
 	}
 	log := logging.New(cfg.LogLevel)
 	log.Info("starting synapse-api", "env", cfg.Environment, "single_tenant", cfg.SingleTenant)
+	if err := cfg.ValidateSandboxPosture(); err != nil {
+		log.Error("sandbox posture invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateMigrationPosture(); err != nil {
+		log.Error("database migration posture invalid", "err", err)
+		os.Exit(1)
+	}
 
 	// Fail closed: no anonymous access. The token is never logged.
 	if cfg.APIToken == "" {
@@ -358,25 +350,25 @@ func main() {
 	}()
 
 	if cfg.DBDSN != "" {
-		// Bounded so a migration that blocks can't hang boot forever. NOTE: no
-		// advisory lock yet – run a single instance (or a one-shot migrate job)
-		// until multi-replica horizontal scaling lands (P5).
+		// Bounded so a contended migration lock cannot hang boot forever.
 		startup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		migrationDSN, err := migrationDSNForStartup(cfg)
-		if err != nil {
-			log.Error("database migration configuration invalid", "err", err)
-			os.Exit(1)
-		}
-		if err := postgres.Migrate(startup, migrationDSN); err != nil {
-			log.Error("db migrate failed", "err", err)
-			os.Exit(1)
-		}
-		if migrationDSN != cfg.DBDSN {
-			if err := postgres.GrantRuntimePrivileges(startup, migrationDSN, cfg.DBDSN); err != nil {
-				log.Error("db runtime role grant failed", "err", err)
+		if cfg.DBAutoMigrate {
+			migrationDSN := cfg.MigrationDSN()
+			migrationStarted := time.Now()
+			if err := postgres.MigrateLocked(startup, migrationDSN); err != nil {
+				log.Error("db migrate failed", "err", err)
 				os.Exit(1)
 			}
+			log.Info("db migrations complete", "duration", time.Since(migrationStarted))
+			if migrationDSN != cfg.DBDSN {
+				if err := postgres.GrantRuntimePrivileges(startup, migrationDSN, cfg.DBDSN); err != nil {
+					log.Error("db runtime role grant failed", "err", err)
+					os.Exit(1)
+				}
+			}
+		} else {
+			log.Info("db auto-migration disabled; readiness requires current migrations")
 		}
 		pool, err := postgres.ConnectPool(startup, cfg.DBDSN, postgres.PoolConfig{
 			MaxConns: int32(cfg.DBMaxConns), MinConns: int32(cfg.DBMinConns),
@@ -738,10 +730,6 @@ func main() {
 		} else {
 			log.Info("acquisition (git/image) runs sandboxed (host-net; kernel egress scoping unavailable here)")
 		}
-	} else if cfg.IsProduction() {
-		// Production must not ship with zero containment (re-audit: the flag defaults off).
-		log.Error("SYNAPSE_SANDBOX_ENABLED is required in production (tool execution + acquisition containment); set it and install bubblewrap")
-		os.Exit(1)
 	} else {
 		log.Warn("SANDBOX DISABLED (SYNAPSE_SANDBOX_ENABLED is off) – syft/grype/git/crane run UNSANDBOXED with NO seccomp/rootfs/egress/cgroup containment; dev only, never production")
 	}

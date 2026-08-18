@@ -5,6 +5,30 @@ import (
 	"testing"
 )
 
+func TestCompareMigrationStates(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected []int64
+		actual   []migrationState
+		wantErr  bool
+	}{
+		{name: "all embedded migrations applied", expected: []int64{1, 2}, actual: []migrationState{{version: 1, applied: true}, {version: 2, applied: true}}},
+		{name: "missing embedded migration", expected: []int64{1, 2}, actual: []migrationState{{version: 1, applied: true}}, wantErr: true},
+		{name: "latest state down", expected: []int64{1, 2}, actual: []migrationState{{version: 1, applied: true}, {version: 2, applied: false}}, wantErr: true},
+		{name: "unexpected applied migration", expected: []int64{1}, actual: []migrationState{{version: 1, applied: true}, {version: 2, applied: true}}, wantErr: true},
+		{name: "unexpected down migration", expected: []int64{1}, actual: []migrationState{{version: 1, applied: true}, {version: 2, applied: false}}, wantErr: true},
+		{name: "duplicate latest state", expected: []int64{1}, actual: []migrationState{{version: 1, applied: true}, {version: 1, applied: true}}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := compareMigrationStates(tt.expected, tt.actual)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("compareMigrationStates() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestPostgresReadinessChecks(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()

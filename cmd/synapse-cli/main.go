@@ -1089,7 +1089,7 @@ func runScan() {
 
 // syncAdvisories ingests a local OSV advisory dump into the owned advisory store. It requires a
 // Postgres DSN: the owned store is durable reference data, so ingesting into an ephemeral in-memory store
-// would do nothing. Migrations are applied first (the advisories tables may not exist yet), then a DirFeed
+// would do nothing. The database must already be migrated by synapse-migrate, then a DirFeed
 // over the dump directory streams every parseable advisory into the store via the narrow AdvisoryWriter.
 func syncAdvisories(args []string) error {
 	if len(args) < 1 {
@@ -1128,14 +1128,14 @@ func syncAdvisories(args []string) error {
 		src = args[0]
 	}
 	ctx := context.Background()
-	if err := postgres.Migrate(ctx, cfg.DBDSN); err != nil {
-		return fmt.Errorf("apply migrations: %w", err)
-	}
 	pool, err := postgres.Connect(ctx, cfg.DBDSN)
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
 	defer pool.Close()
+	if err := postgres.CheckMigrationsReady(ctx, pool); err != nil {
+		return fmt.Errorf("database migrations are not current; run synapse-migrate: %w", err)
+	}
 	ingest, err := advisoryingest.NewService(feed, postgres.NewAdvisoryRepository(pool))
 	if err != nil {
 		return err

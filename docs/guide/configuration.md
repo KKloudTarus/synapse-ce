@@ -67,7 +67,9 @@ The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADD
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_DB_DSN` | (in-memory) | PostgreSQL connection URL. Empty runs an in-memory dev store, so nothing is durable. |
+| `SYNAPSE_DB_DSN` | (in-memory) | Runtime PostgreSQL connection URL. Empty runs an in-memory dev store, so nothing is durable. |
+| `SYNAPSE_DB_MIGRATION_DSN` | `SYNAPSE_DB_DSN` in development | Optional owner-level PostgreSQL DSN used only by `synapse-migrate`, separating migration authority from the least-privileged runtime DSN. In production it must use a database user distinct from the runtime DSN. |
+| `SYNAPSE_DB_AUTO_MIGRATE` | `true` in development | Long-running services apply embedded migrations only in development. Production requires `false`; run `synapse-migrate` first. API exposes stale-schema status through `/readyz`; worker and MCP refuse startup until the schema is current. |
 | `SYNAPSE_DB_MAX_CONNS` | `32` | pgx pool maximum connections. |
 | `SYNAPSE_DB_MIN_CONNS` | `0` | pgx pool minimum connections. |
 | `SYNAPSE_DB_MAX_CONN_LIFETIME` | `1h` | Connection lifetime. |
@@ -237,7 +239,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_SANDBOX_ENABLED` | `false` | Run tool execution and acquisition in the bubblewrap sandbox. If set but bubblewrap is missing, startup fails closed. |
+| `SYNAPSE_SANDBOX_ENABLED` | `false` | Run tool execution and acquisition in the bubblewrap sandbox. Production requires `true`; if bubblewrap is missing, startup fails closed. |
 | `SYNAPSE_SANDBOX_MEM_MAX` | `536870912` | Per-run memory limit in bytes. |
 | `SYNAPSE_SANDBOX_PIDS_MAX` | `256` | Per-run pid limit. |
 | `SYNAPSE_TOOL_HASHES` | (TOFU) | Authoritative sha256 pins. The sandbox refuses a binary whose hash does not match. |
