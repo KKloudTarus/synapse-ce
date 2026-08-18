@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -14,6 +15,7 @@ const defaultReadinessTimeout = 2 * time.Second
 type ReadinessCheck func(context.Context) error
 
 type readinessConfig struct {
+	mu      sync.RWMutex
 	checks  map[string]ReadinessCheck
 	timeout time.Duration
 }
@@ -25,7 +27,10 @@ type readinessResponse struct {
 
 // SetReadinessChecks replaces the dependency checks used by GET /readyz. It copies the map so
 // startup wiring cannot mutate the live probe configuration after the server begins serving.
+// Protected by write-lock against concurrent probe execution (race safety).
 func (rt *Router) SetReadinessChecks(checks map[string]ReadinessCheck) {
+	rt.readiness.mu.Lock()
+	defer rt.readiness.mu.Unlock()
 	rt.readiness.checks = make(map[string]ReadinessCheck, len(checks))
 	for name, check := range checks {
 		if name = strings.TrimSpace(name); name != "" && check != nil {
@@ -35,7 +40,14 @@ func (rt *Router) SetReadinessChecks(checks map[string]ReadinessCheck) {
 }
 
 func (rt *Router) ready(w http.ResponseWriter, r *http.Request) {
-	checks := rt.readiness.checks
+	rt.readiness.mu.RLock()
+	checks := make(map[string]ReadinessCheck, len(rt.readiness.checks))
+	for k, v := range rt.readiness.checks {
+		checks[k] = v
+	}
+	timeout := rt.readiness.timeout
+	rt.readiness.mu.RUnlock()
+
 	states := make(map[string]string, len(checks))
 	w.Header().Set("Cache-Control", "no-store")
 	if len(checks) == 0 {
@@ -43,7 +55,6 @@ func (rt *Router) ready(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	timeout := rt.readiness.timeout
 	if timeout <= 0 {
 		timeout = defaultReadinessTimeout
 	}
