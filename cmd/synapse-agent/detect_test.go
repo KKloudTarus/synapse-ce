@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
 )
 
 func TestParseDetectClasses(t *testing.T) {
@@ -45,5 +47,35 @@ func TestFormatCoverageShowsGapsWithReason(t *testing.T) {
 	}
 	if !strings.Contains(s, "file=failed(load failed)") {
 		t.Errorf("gap must show its reason: %q", s)
+	}
+}
+
+// TestDetectionIdentityUsesCanonicalAgentID proves the D1 fix (#606): the detection engine's identity
+// is the server-issued canonical AgentID from the enrolled credential, NOT the mutable display name.
+func TestDetectionIdentityUsesCanonicalAgentID(t *testing.T) {
+	cred := fleetclient.Credential{AgentID: "agt_01HCANONICAL", Token: "secret"}
+	host, agent, ok := detectionIdentity(cred)
+	if !ok {
+		t.Fatalf("expected ok for a credential with an agent id")
+	}
+	if agent != shared.ID("agt_01HCANONICAL") {
+		t.Errorf("agent identity = %q, want the canonical AgentID", agent)
+	}
+	if host != shared.ID("agt_01HCANONICAL") {
+		t.Errorf("host identity = %q, want the canonical AgentID", host)
+	}
+	// The identity must not be derived from the old display-name form.
+	if strings.HasPrefix(string(agent), "agent:") {
+		t.Errorf("agent identity %q still uses the display-name form", agent)
+	}
+}
+
+// TestDetectionIdentityFailsClosedWithoutAgentID proves detection does not start under an empty or
+// whitespace-only identity — no fallback to a display name.
+func TestDetectionIdentityFailsClosedWithoutAgentID(t *testing.T) {
+	for _, id := range []string{"", "   ", "\t"} {
+		if _, _, ok := detectionIdentity(fleetclient.Credential{AgentID: id}); ok {
+			t.Errorf("expected fail-closed (ok=false) for AgentID %q", id)
+		}
 	}
 }
