@@ -14,6 +14,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetryschema"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -62,6 +63,12 @@ func (s *Service) Ingest(ctx context.Context, batch ports.TelemetryBatch) (Inges
 	}
 	if batch.SampleRate < 1 {
 		return IngestReport{}, fmt.Errorf("%w: telemetry sample rate must be >= 1 (1 = full fidelity)", shared.ErrValidation)
+	}
+	// The wire schema version is declared per batch and validated against the range THIS reader supports
+	// (telemetryschema), independent of the agent version. An unset or out-of-range version is rejected
+	// fail-closed rather than parsed under a guessed shape.
+	if err := telemetryschema.Validate(batch.SchemaVersion); err != nil {
+		return IngestReport{}, err
 	}
 	// The write tenant is the AUTHENTICATED tenant on the context, never a self-declared field on the
 	// wire batch: an agent must not be able to write into another tenant's partition by claiming a
