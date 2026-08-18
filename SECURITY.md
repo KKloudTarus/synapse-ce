@@ -46,7 +46,7 @@ operator is responsible for holding written permission.
 Hardening highlights operators should preserve:
 
 - Always set `SYNAPSE_API_TOKEN`; operational API routes require authentication. The intentionally
-  public `GET /healthz` endpoint exposes only service health.
+  public `GET /healthz` and `GET /readyz` endpoints expose only liveness and named dependency pass/fail state.
 - Run the execution sandbox and live recon on a Linux host; they **fail closed** without
   the required kernel features rather than running unsandboxed.
 - Keep secrets in the credential vault; never place them in logs or source.

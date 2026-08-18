@@ -1,7 +1,8 @@
 # Full Synapse stack: API server + Postgres + MinIO (+ bucket init), all env wired.
 #
 #   docker compose -f deploy/docker-compose.full.yml up -d --build
-#   curl localhost:8080/healthz
+#   curl localhost:8080/healthz   # liveness
+#   curl localhost:8080/readyz    # dependency readiness
 #   # authenticated call:
 #   curl -H "Authorization: Bearer $SYNAPSE_API_TOKEN" localhost:8080/api/...
 #
@@ -113,7 +114,7 @@ services:
       - project-source-artifacts:/home/synapse/project-source-artifacts
       # - ../:/scan:ro            # uncomment to `synapse-cli scan /scan` this repo
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS localhost:8080/healthz || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS localhost:8080/readyz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12

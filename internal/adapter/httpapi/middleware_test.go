@@ -33,7 +33,7 @@ func TestNormalizePathRejectsNonCanonical(t *testing.T) {
 		}
 	}
 
-	good := []string{"/healthz", "/api/v1/engagements", "/api/v1/aup", "/api/v1/aup/accept", "/"}
+	good := []string{"/healthz", "/readyz", "/api/v1/engagements", "/api/v1/aup", "/api/v1/aup/accept", "/"}
 	for _, p := range good {
 		called = false
 		rec := httptest.NewRecorder()

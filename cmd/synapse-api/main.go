@@ -296,6 +296,7 @@ func main() {
 	var approvalStore ports.ApprovalStore         // durable HITL approval queue
 	var planStore ports.PlanStore                 // agent execution-plan DAG
 	var decisionStore ports.DecisionStore         // structured decision log
+	readinessChecks := map[string]httpapi.ReadinessCheck{}
 
 	// Credential vault cipher: a configured master key gives durable
 	// encryption; an empty key yields an ephemeral one (dev only – stored secrets won't
@@ -360,6 +361,12 @@ func main() {
 			os.Exit(1)
 		}
 		defer pool.Close()
+		readinessChecks["database"] = func(ctx context.Context) error {
+			return postgres.CheckDatabaseReady(ctx, pool)
+		}
+		readinessChecks["migrations"] = func(ctx context.Context) error {
+			return postgres.CheckMigrationsReady(ctx, pool)
+		}
 		// Single-instance guard: until horizontal scaling the repos
 		// ignore tenant_id and there is no leader election, so two writers would race. A
 		// session advisory lock makes the assumption explicit + enforced – a second
@@ -603,6 +610,7 @@ func main() {
 			os.Exit(1)
 		}
 		blobStore = bs
+		readinessChecks["object_store"] = bs.CheckReady
 		log.Info("blob store: minio/s3", "bucket", cfg.BlobBucket)
 	} else {
 		blobStore = blob.NewMemory()
@@ -1150,6 +1158,7 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
+	router.SetReadinessChecks(readinessChecks)
 	if slaService != nil {
 		router.SetSLA(slaService)
 	}

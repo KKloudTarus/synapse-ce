@@ -94,6 +94,7 @@ type Router struct {
 	vulnerabilityRead      *vulnerabilityinteluc.Service
 	vulnerabilityActions   *vulnerabilityactionuc.Service
 	sla                    *slauc.Service
+	readiness              readinessConfig
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -266,8 +267,9 @@ func (rt *Router) routes() *http.ServeMux {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "synapse-api"})
 	})
+	mux.HandleFunc("GET /readyz", rt.ready)
 	// Identity/consent routes carry NO role gate (a brand-new principal must reach them): /aup,
-	// /aup/accept, /me, and public /healthz. EVERY other route below is registered through
+	// /aup/accept, /me, and public probes. EVERY other route below is registered through
 	// authz(perm, …) – the single RBAC chokepoint, so no handler decides its own role
 	// check. Engagement child routes compose authz OUTSIDE withEngTenant: the role 403 is decided
 	// first and cheaply (without revealing whether a cross-tenant engagement exists); a role-allowed
@@ -584,10 +586,11 @@ func (rt *Router) routes() *http.ServeMux {
 // raw-vs-cleaned path mismatch).
 func (rt *Router) Handler() http.Handler {
 	// Public: no auth and no AUP gate.
-	public := map[string]bool{"/healthz": true}
+	public := map[string]bool{"/healthz": true, "/readyz": true}
 	// Authenticated but exempt from the AUP gate (so the operator can read + accept).
 	aupExempt := map[string]bool{
 		"/healthz":           true,
+		"/readyz":            true,
 		"/api/v1/aup":        true,
 		"/api/v1/aup/accept": true,
 		"/api/v1/me":         true,

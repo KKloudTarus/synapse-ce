@@ -14,7 +14,7 @@ Conventions: an empty value means unset, so the built-in default applies. Boolea
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_API_TOKEN` | (none) | Bootstrap-admin bearer token. The API exits if empty. Operational routes require it; `GET /healthz` is intentionally public. Generate with `openssl rand -hex 32`. |
+| `SYNAPSE_API_TOKEN` | (none) | Bootstrap-admin bearer token. The API exits if empty. Operational routes require it; liveness `GET /healthz` and readiness `GET /readyz` are intentionally public. Generate with `openssl rand -hex 32`. |
 
 ## Core and server
 
