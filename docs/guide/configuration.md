@@ -46,6 +46,7 @@ Metric names and label cardinality:
 | `synapse_job_queue_queued` | gauge | none | Aggregate queued durable jobs, across every tenant. Present only when the configured job queue supports aggregate stats (Postgres and in-memory both do). |
 | `synapse_job_queue_in_flight` | gauge | none | Aggregate claimed/in-flight durable jobs, across every tenant. |
 | `synapse_job_queue_oldest_active_age_seconds` | gauge | none | Age of the oldest still-queued-or-claimed job (`ports.JobStats.OldestActiveAt`), `0` when the queue is empty. |
+| `synapse_job_queue_scrape_errors_total` | counter | none | Failed attempts to read aggregate durable job queue stats for a scrape. The three `synapse_job_queue_*` gauges above are omitted from that scrape (never a stale or bogus value) when this increments. |
 | `synapse_sca_scan_duration_seconds` | histogram | `outcome` | Completed synchronous or asynchronous SCA execution duration. For an async scan, measured from worker execution start, not from `StartScan`/enqueue time. Queue failures, dead letters, stale sweeps, and blocked gates do not record a duration. |
 | `synapse_sca_scan_outcomes_total` | counter | `outcome` | Terminal SCA outcomes: `success`, `failed`, or `blocked`. Queue failures, dead letters, and stale sweeps count as `failed` without a duration. `blocked` is recorded only for an execution-gate denial reached after a genuine scan attempt — never for a pre-gate validation failure. |
 
@@ -60,7 +61,7 @@ scrape_configs:
       - targets: ["127.0.0.1:9090"]
 ```
 
-The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface.
+The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. Startup logs a WARN if `SYNAPSE_METRICS_ENABLED` is set and `SYNAPSE_METRICS_ADDR` does not resolve to a loopback address.
 
 ## Persistence
 

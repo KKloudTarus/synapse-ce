@@ -178,10 +178,15 @@ func TestRunScanJobIdempotentSkipDoesNotDoubleObserve(t *testing.T) {
 	}
 }
 
-// TestRunScanJobReturnsTerminalSaveFailureWithoutObservation covers durable queue
-// retry behavior: the public worker entry point returns a final ScanJob save failure
-// and does not record a terminal outcome whose persistence was unsuccessful.
-func TestRunScanJobReturnsTerminalSaveFailureWithoutObservation(t *testing.T) {
+// TestRunScanJobDoesNotRedeliverOnTerminalSaveFailure covers a double-seal hazard: if
+// the terminal ScanJob Save fails, the scan already executed but the job is left
+// stranded at Status=Running (not terminal). Returning that Save error would make the
+// durable queue redeliver the job; runScanJob's idempotency guard only skips a
+// redelivery when the latest job is already terminal, so redelivery here would re-run
+// the pipeline and seal a DUPLICATE "scan" evidence link plus a phantom ScanRun row.
+// RunScanJob must therefore return nil (no redelivery) and must not observe any
+// terminal outcome — SweepStaleScans alone finalizes the stranded job and counts it.
+func TestRunScanJobDoesNotRedeliverOnTerminalSaveFailure(t *testing.T) {
 	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
 	terminalSaveErr := errors.New("terminal scan job save unavailable")
 	jobs := newFakeJobStore()
@@ -202,8 +207,8 @@ func TestRunScanJobReturnsTerminalSaveFailureWithoutObservation(t *testing.T) {
 	}
 
 	err = svc.RunScanJob(shared.WithTenant(context.Background(), shared.DefaultTenant), payload)
-	if !errors.Is(err, terminalSaveErr) {
-		t.Fatalf("RunScanJob error = %v, want terminal save error %v", err, terminalSaveErr)
+	if err != nil {
+		t.Fatalf("RunScanJob error = %v, want nil so the durable queue does not redeliver", err)
 	}
 	if calls := observer.snapshot(); len(calls) != 0 {
 		t.Fatalf("terminal save failure must not observe an outcome or duration, got %+v", calls)
@@ -213,7 +218,7 @@ func TestRunScanJobReturnsTerminalSaveFailureWithoutObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if stored.Status != ports.ScanRunning || stored.FinishedAt != nil {
-		t.Fatalf("terminal save failure must leave no terminal job state, got %+v", stored)
+		t.Fatalf("terminal save failure must leave the job stranded (running, not terminal) for SweepStaleScans, got %+v", stored)
 	}
 }
 

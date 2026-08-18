@@ -1349,7 +1349,7 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 	} else if ok {
 		now, err := s.gateImportedSBOMAndAudit(ctx, actor, engagementID, imported, opts)
 		if err != nil {
-			s.observeGateOutcome(started, err)
+			s.observeGateOutcome(err)
 			return nil, err
 		}
 		result, err := s.runImportedSBOMPipeline(ctx, actor, engagementID, now, imported, doc, opts, func(string, int, []ports.ScanDebugEvent) {})
@@ -1358,7 +1358,7 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 	}
 	now, err := s.gateAndAudit(ctx, actor, engagementID, req, opts)
 	if err != nil {
-		s.observeGateOutcome(started, err)
+		s.observeGateOutcome(err)
 		return nil, err
 	}
 	result, err := s.runPipeline(ctx, actor, engagementID, now, req, opts, func(string, int, []ports.ScanDebugEvent) {})
@@ -1383,7 +1383,6 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 		return ports.ScanJob{}, err
 	}
 	req = normalizeLocalTarget(req)
-	started := s.clock.Now()
 	var imported importedsbom.Record
 	var importedDoc *sbom.SBOM
 	var useImported bool
@@ -1397,7 +1396,7 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 		now, err = s.gateAndAudit(ctx, actor, engagementID, req, opts)
 	}
 	if err != nil {
-		s.observeGateOutcome(started, err)
+		s.observeGateOutcome(err)
 		return ports.ScanJob{}, err
 	}
 	target := req.Value
@@ -1498,7 +1497,7 @@ func (s *Service) observeOutcome(outcome string) {
 // (shared.ErrForbidden) reached AFTER a genuine scan attempt (past option
 // normalization and SBOM-import loading). A validation failure (malformed
 // options, unconfigured guard) is not a scan attempt and is never observed here.
-func (s *Service) observeGateOutcome(started time.Time, err error) {
+func (s *Service) observeGateOutcome(err error) {
 	if errors.Is(err, shared.ErrForbidden) {
 		s.observeOutcome("blocked")
 	}
@@ -1835,7 +1834,16 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 		// Detached from ctx so the record still lands when the completion timeout above has fired.
 		// (ScanJobStore.Save is not tenant-scoped; the tenant matters at the recorder call, not here.)
 		if saveErr := s.jobs.Save(context.WithoutCancel(ctx), job); saveErr != nil {
-			return saveErr
+			// Do NOT return saveErr here: the durable queue treats a non-nil error as
+			// redeliverable, but the scan already executed. The job is left stranded at
+			// Status=Running (not terminal), so runScanJob's idempotency guard above would
+			// NOT skip a redelivery – it would re-run the pipeline and seal a DUPLICATE "scan"
+			// evidence link plus a phantom ScanRun row, violating the append-only evidence
+			// chain. SweepStaleScans is the single component that finalizes a stranded running
+			// job, so it alone counts the eventual "failed" outcome; observing here too would
+			// double-count. Log and swallow instead.
+			s.logger().Error("terminal scan job save failed; job left stranded for SweepStaleScans to finalize", "job_id", job.ID, "err", saveErr)
+			return nil
 		}
 	}
 	s.observeSyncTerminal(execStarted, err)

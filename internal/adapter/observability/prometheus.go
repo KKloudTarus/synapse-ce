@@ -63,12 +63,14 @@ type queueCollector struct {
 	queued          *prometheus.Desc
 	inFlight        *prometheus.Desc
 	oldestActiveAge *prometheus.Desc
+	scrapeErrors    prometheus.Counter
 }
 
 func (c *queueCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.queued
 	ch <- c.inFlight
 	ch <- c.oldestActiveAge
+	ch <- c.scrapeErrors.Desc()
 }
 
 func (c *queueCollector) Collect(ch chan<- prometheus.Metric) {
@@ -76,6 +78,11 @@ func (c *queueCollector) Collect(ch chan<- prometheus.Metric) {
 	defer cancel()
 	stats, err := c.reader.AggregateJobQueueStats(ctx)
 	if err != nil {
+		// Do not emit bogus/stale gauge values for queued/in_flight/oldest_active_age; the
+		// scrape-error counter makes the failure itself observable instead of the gauges
+		// silently vanishing from the scrape exactly when queue health matters.
+		c.scrapeErrors.Inc()
+		ch <- c.scrapeErrors
 		return
 	}
 	age := 0.0
@@ -88,6 +95,7 @@ func (c *queueCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.queued, prometheus.GaugeValue, float64(stats.Queued))
 	ch <- prometheus.MustNewConstMetric(c.inFlight, prometheus.GaugeValue, float64(stats.Claimed))
 	ch <- prometheus.MustNewConstMetric(c.oldestActiveAge, prometheus.GaugeValue, age)
+	ch <- c.scrapeErrors
 }
 
 func newQueueCollector(reader ports.AggregateJobQueueStatsReader, now func() time.Time) *queueCollector {
@@ -97,6 +105,10 @@ func newQueueCollector(reader ports.AggregateJobQueueStatsReader, now func() tim
 		queued:          prometheus.NewDesc("synapse_job_queue_queued", "Aggregate queued durable jobs.", nil, nil),
 		inFlight:        prometheus.NewDesc("synapse_job_queue_in_flight", "Aggregate claimed durable jobs.", nil, nil),
 		oldestActiveAge: prometheus.NewDesc("synapse_job_queue_oldest_active_age_seconds", "Age of the oldest queued or claimed durable job.", nil, nil),
+		scrapeErrors: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "synapse", Subsystem: "job_queue", Name: "scrape_errors_total",
+			Help: "Failed attempts to read aggregate durable job queue stats for this scrape.",
+		}),
 	}
 }
 

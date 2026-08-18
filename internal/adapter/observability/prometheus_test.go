@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -103,5 +104,27 @@ func TestCollectorsQueueGaugesAbsentWithoutReader(t *testing.T) {
 	c.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if strings.Contains(rec.Body.String(), "synapse_job_queue_") {
 		t.Error("no queue gauge should be registered without an AggregateJobQueueStatsReader")
+	}
+}
+
+// TestCollectorsQueueScrapeErrorSurfacesFailure covers that a failed
+// AggregateJobQueueStats read does not silently drop the queue gauges: the three
+// gauges must be absent from that scrape (no bogus/stale values), and the failure
+// itself must be observable via the scrape-error counter.
+func TestCollectorsQueueScrapeErrorSurfacesFailure(t *testing.T) {
+	reader := &fakeQueueReader{err: errors.New("queue stats unavailable")}
+	c := New(reader)
+
+	rec := httptest.NewRecorder()
+	c.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := rec.Body.String()
+
+	for _, absent := range []string{"synapse_job_queue_queued", "synapse_job_queue_in_flight", "synapse_job_queue_oldest_active_age_seconds"} {
+		if strings.Contains(body, absent) {
+			t.Errorf("gauge %q must be absent on a failed scrape, got: %s", absent, body)
+		}
+	}
+	if !strings.Contains(body, "synapse_job_queue_scrape_errors_total 1") {
+		t.Errorf("scrape-error counter missing/incorrect: %s", body)
 	}
 }

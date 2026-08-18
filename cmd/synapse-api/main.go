@@ -13,6 +13,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -194,6 +195,29 @@ func requireJudgmentsOrSkip(log *slog.Logger, hasJudgment bool, envKey, name str
 	}
 	log.Warn(name + " auto-skipped: SYNAPSE_JUDGMENTS_ENABLED is off (it mints judgments)")
 	return false
+}
+
+// metricsAddrIsLoopback reports whether addr binds only to a loopback interface. The
+// metrics listener is intentionally unauthenticated, so a non-loopback bind exposes
+// aggregate operational metrics to anything that can reach it; callers use this to
+// decide whether to warn. It fails loud (returns false, i.e. "warn") on anything it
+// cannot confidently classify as loopback-only.
+func metricsAddrIsLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "" {
+		return false // empty host binds all interfaces
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
 }
 
 func migrationDSNForStartup(cfg config.Config) (string, error) {
@@ -1177,6 +1201,9 @@ func main() {
 		metrics = observability.New(queueReader)
 		httpObserver = metrics
 		scaService.SetObserver(metrics)
+		if !metricsAddrIsLoopback(cfg.MetricsAddr) {
+			log.Warn("metrics listener is bound to a non-loopback address; it is unauthenticated and exposes aggregate operational metrics to anything that can reach it", "addr", cfg.MetricsAddr)
+		}
 	}
 	router.SetObservability(cfg.AccessLogEnabled, httpObserver)
 	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
