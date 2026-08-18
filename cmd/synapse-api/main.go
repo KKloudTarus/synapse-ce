@@ -1609,6 +1609,12 @@ func main() {
 		// evidence chain) plugs the same detectionRecordStore into detectledger.NewService once the
 		// agent→control-plane batch transport + agent signing-key resolver land; the read surface is live
 		// now so a detection is queryable and tenant-scoped through the same chokepoint.
+		// A0.5 (#610) PREREQUISITE — before wiring detectledger.NewService here, the EvidenceChain passed
+		// to it MUST implement SealOnce as a truly key-idempotent seal, keyed on (engagement, detection id)
+		// and atomic with the chain append (e.g. an ON CONFLICT (engagement_id, idempotency_key) DO NOTHING
+		// insert that returns the existing link). A keyless Seal, or a non-atomic check-then-append, reopens
+		// D3 (a seal-then-crash retry appends a duplicate permanent link). evidence.Service.SealOnce is the
+		// A4 deliverable that provides this; do not bridge NewService onto plain Seal.
 		if detectionReader, drerr := detectledger.NewReader(detectionRecordStore); drerr != nil {
 			log.Error("detection ledger reader init failed", "err", drerr)
 			os.Exit(1)

@@ -23,7 +23,9 @@ func (c fixedClock) Now() time.Time { return c.t }
 type fakeDetections struct{ records []detection.Record }
 
 func (f *fakeDetections) AppendDetection(context.Context, detection.Record) error { return nil }
-func (f *fakeDetections) HasDetection(context.Context, shared.ID) (bool, error)   { return false, nil }
+func (f *fakeDetections) HasDetection(context.Context, shared.ID, shared.ID) (bool, error) {
+	return false, nil
+}
 func (f *fakeDetections) ListDetections(context.Context, shared.ID) ([]detection.Record, error) {
 	return f.records, nil
 }

@@ -26,8 +26,9 @@ func NewDetectionRecordRepository(pool *pgxpool.Pool) *DetectionRecordRepository
 	return &DetectionRecordRepository{pool: pool}
 }
 
-// AppendDetection stores one projection row, idempotent on (tenant_id, id): a row is immutable once
-// written (provenance), so a re-delivery of the same detection does not overwrite it.
+// AppendDetection stores one projection row, idempotent on (tenant_id, engagement_id, id): a row is
+// immutable once written (provenance), so a re-delivery of the same detection in the same engagement does
+// not overwrite it, while the same id in a DIFFERENT engagement is a distinct row (not dropped).
 func (r *DetectionRecordRepository) AppendDetection(ctx context.Context, rec detection.Record) error {
 	if err := rec.Validate(); err != nil {
 		return err
@@ -47,7 +48,7 @@ func (r *DetectionRecordRepository) AppendDetection(ctx context.Context, rec det
 			  (tenant_id, id, engagement_id, asset_id, agent_id, rule_id, rule_version, class, severity,
 			   host_id, observed_at, evidence_id, batch_seq, detection, recorded_at, expires_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-			ON CONFLICT (tenant_id, id) DO NOTHING`,
+			ON CONFLICT (tenant_id, engagement_id, id) DO NOTHING`,
 			rec.TenantID.String(), rec.ID.String(), rec.EngagementID.String(), rec.AssetID.String(),
 			rec.AgentID.String(), rec.Detection.RuleID, rec.Detection.RuleVersion, string(rec.Detection.Class),
 			string(rec.Detection.Severity), rec.Detection.HostID.String(), rec.Detection.Observed.UTC(),
@@ -109,11 +110,11 @@ func (r *DetectionRecordRepository) ListDetections(ctx context.Context, engageme
 	return out, err
 }
 
-// HasDetection reports whether a record with this id already exists in the ctx tenant.
-func (r *DetectionRecordRepository) HasDetection(ctx context.Context, id shared.ID) (bool, error) {
+// HasDetection reports whether a record with this id already exists in the given engagement (ctx tenant).
+func (r *DetectionRecordRepository) HasDetection(ctx context.Context, engagementID, id shared.ID) (bool, error) {
 	var exists bool
 	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM detections WHERE id = $1)`, id.String()).Scan(&exists)
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM detections WHERE engagement_id = $1 AND id = $2)`, engagementID.String(), id.String()).Scan(&exists)
 	})
 	return exists, err
 }
