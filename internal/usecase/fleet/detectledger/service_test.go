@@ -22,25 +22,50 @@ type sealCall struct {
 	engagement shared.ID
 	kind       string
 	createdBy  string
+	key        string
 }
 
 type fakeChain struct {
 	mu      sync.Mutex
-	seals   []sealCall
+	seals   []sealCall           // one entry per link ACTUALLY appended; an idempotent replay adds none
+	byKey   map[string]shared.ID // (engagement, idempotency key) -> the id of the link sealed for it
 	n       int
 	broken  bool
 	sealErr error
 }
 
-func (c *fakeChain) Seal(_ context.Context, eng shared.ID, kind string, _ []byte, by string) (shared.ID, error) {
+// sealKey namespaces the idempotency key by engagement, mirroring the real chain: the key is unique only
+// WITHIN an engagement, so the same detection id in two engagements seals two distinct links.
+func sealKey(eng shared.ID, key string) string { return string(eng) + "\x00" + key }
+
+// SealOnce models the real chain's idempotency contract: a repeated (engagement, key) returns the existing
+// link and appends NOTHING new, so a test can prove a detection is sealed into the chain at most once.
+func (c *fakeChain) SealOnce(_ context.Context, eng shared.ID, kind, key string, _ []byte, by string) (shared.ID, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.sealErr != nil {
 		return "", c.sealErr
 	}
-	c.seals = append(c.seals, sealCall{eng, kind, by})
+	if c.byKey == nil {
+		c.byKey = map[string]shared.ID{}
+	}
+	k := sealKey(eng, key)
+	if id, ok := c.byKey[k]; ok {
+		return id, nil // idempotent: same (engagement, key) -> same link, nothing appended
+	}
 	c.n++
-	return shared.ID("ev-" + itoa(c.n)), nil
+	id := shared.ID("ev-" + itoa(c.n))
+	c.byKey[k] = id
+	c.seals = append(c.seals, sealCall{eng, kind, by, key})
+	return id, nil
+}
+
+// idFor returns the link id sealed for (engagement, key), read under the same lock that guards byKey, so a
+// test can inspect it without racing a concurrent SealOnce.
+func (c *fakeChain) idFor(eng shared.ID, key string) shared.ID {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.byKey[sealKey(eng, key)]
 }
 func (c *fakeChain) Verify(_ context.Context, _ shared.ID) error {
 	if c.broken {
@@ -127,6 +152,25 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(b)
+}
+
+// failingRecords wraps a real record store and fails the next N AppendDetection calls, to simulate a
+// projection-write failure AFTER the seal has succeeded — the exact D3 crash window.
+type failingRecords struct {
+	ports.DetectionRecordStore
+	mu         sync.Mutex
+	failAppend int
+}
+
+func (f *failingRecords) AppendDetection(ctx context.Context, r detection.Record) error {
+	f.mu.Lock()
+	if f.failAppend > 0 {
+		f.failAppend--
+		f.mu.Unlock()
+		return errors.New("projection store unavailable")
+	}
+	f.mu.Unlock()
+	return f.DetectionRecordStore.AppendDetection(ctx, r)
 }
 
 // ---- harness ----------------------------------------------------------------------------------------
@@ -416,5 +460,102 @@ func TestExpireIsAuditedAndRequiresActorReason(t *testing.T) {
 	}
 	if e := h.audit.last["detection.expired"]; e.Actor != "operator" || e.Metadata["reason"] != "retention" {
 		t.Errorf("expiry audit must carry actor + reason, got %+v", e)
+	}
+}
+
+// TestIngestNeverDoubleSealsAfterProjectionFailure proves the D3 fix (#610): sealing a detection into
+// the permanent chain and writing its projection row are two stores with no shared transaction. If the
+// projection write fails AFTER a successful seal, a retry finds no row (HasDetection is false) and, with
+// a naive Seal, would append a SECOND chain link for the same detection. Because SealOnce is keyed on the
+// detection id, the retry returns the first link instead — the detection is sealed exactly once.
+func TestIngestNeverDoubleSealsAfterProjectionFailure(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	chain := &fakeChain{}
+	audit := &fakeAudit{}
+	records := &failingRecords{DetectionRecordStore: memory.NewDetectionRecordStore(), failAppend: 1}
+	keys := &fakeKeys{pub: pub, known: map[shared.ID]bool{"agent:1": true}}
+	svc, err := NewService(records, chain, keys, audit, fixedClock{t: time.Unix(1000, 0)}, &seqIDs{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
+	b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: "eng-1", Sequence: 1, Detections: refsFor(t, items)}
+	b.Signature = fleetagent.SignBatch(priv, b)
+
+	// First ingest: the seal succeeds, then the injected projection-write failure surfaces.
+	if _, err := svc.Ingest(tctx(), b, items); err == nil {
+		t.Fatal("expected the injected projection-write failure to surface")
+	}
+	if got := len(chain.kinds()); got != 1 {
+		t.Fatalf("the detection must have been sealed exactly once before the crash, got %d", got)
+	}
+	if recs, _ := records.ListDetections(tctx(), "eng-1"); len(recs) != 0 {
+		t.Fatalf("the projection write failed, so no row should exist yet, got %d", len(recs))
+	}
+
+	// Retry the SAME batch. The row is still missing (HasDetection is false), so a naive Seal would run
+	// again — SealOnce must return the first link instead.
+	res, err := svc.Ingest(tctx(), b, items)
+	if err != nil {
+		t.Fatalf("the retry must complete the projection, got %v", err)
+	}
+	if got := len(chain.kinds()); got != 1 {
+		t.Fatalf("D3: a detection must never be sealed into the chain twice, got %d links", got)
+	}
+	if len(res.SealedRecords) != 1 {
+		t.Fatalf("the retry must complete the previously-unwritten projection row, got %+v", res)
+	}
+	recs, _ := records.ListDetections(tctx(), "eng-1")
+	sealed := chain.idFor("eng-1", "d1")
+	if len(recs) != 1 || recs[0].EvidenceID != sealed {
+		t.Fatalf("the row must bind to the single sealed link %q, got %+v", sealed, recs)
+	}
+}
+
+// TestIngestSealsSameDetectionIDInDistinctEngagements proves the seal namespace is per-engagement: the
+// same detection id delivered under two different engagements is two distinct detections and must each be
+// sealed — the engagement-scoped HasDetection skip must NOT suppress the second (the D3 cross-engagement
+// loss/suppression vector). Both links are sealed and both projection rows are written.
+func TestIngestSealsSameDetectionIDInDistinctEngagements(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	chain := &fakeChain{}
+	audit := &fakeAudit{}
+	records := memory.NewDetectionRecordStore()
+	keys := &fakeKeys{pub: pub, known: map[shared.ID]bool{"agent:1": true}}
+	svc, err := NewService(records, chain, keys, audit, fixedClock{t: time.Unix(1000, 0)}, &seqIDs{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
+	for _, eng := range []shared.ID{"eng-1", "eng-2"} {
+		b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: eng, Sequence: 1, Detections: refsFor(t, items)}
+		b.Signature = fleetagent.SignBatch(priv, b)
+		res, err := svc.Ingest(tctx(), b, items)
+		if err != nil {
+			t.Fatalf("ingest into %s: %v", eng, err)
+		}
+		if len(res.SealedRecords) != 1 || len(res.Skipped) != 0 {
+			t.Fatalf("%s: the detection must be sealed, not skipped, got %+v", eng, res)
+		}
+	}
+	if got := len(chain.kinds()); got != 2 {
+		t.Fatalf("the same id in two engagements must seal two distinct links, got %d", got)
+	}
+	l1, l2 := chain.idFor("eng-1", "d1"), chain.idFor("eng-2", "d1")
+	if l1 == "" || l2 == "" || l1 == l2 {
+		t.Fatalf("each engagement must get its own link, got %q and %q", l1, l2)
+	}
+	// The projection must hold BOTH rows — one per engagement — each bound to its own sealed link. A
+	// projection keyed on (tenant, id) alone would drop one of these silently; the (tenant, engagement,
+	// id) key keeps them distinct. Assert per engagement so this test actually verifies the claim.
+	r1, _ := records.ListDetections(tctx(), "eng-1")
+	if len(r1) != 1 || r1[0].ID != "d1" || r1[0].EvidenceID != l1 {
+		t.Fatalf("eng-1 must retain its own row bound to link %q, got %+v", l1, r1)
+	}
+	r2, _ := records.ListDetections(tctx(), "eng-2")
+	if len(r2) != 1 || r2[0].ID != "d1" || r2[0].EvidenceID != l2 {
+		t.Fatalf("eng-2 must retain its own row bound to link %q, got %+v", l2, r2)
 	}
 }

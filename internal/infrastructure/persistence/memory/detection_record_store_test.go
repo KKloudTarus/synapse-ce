@@ -49,6 +49,36 @@ func TestDetectionStoreTenantIsolation(t *testing.T) {
 	}
 }
 
+func TestDetectionStoreEngagementScopedKey(t *testing.T) {
+	s := NewDetectionRecordStore()
+	// The SAME detection id under two engagements of one tenant: two distinct rows, not an overwrite
+	// (matches the Postgres (tenant_id, engagement_id, id) key). drRecord binds EvidenceID to "ev-"+id, so
+	// both would collide on id alone.
+	a := drRecord(t, "dupe", "t1", "e1", "agent:1", 1, time.Time{})
+	a.EvidenceID = "ev-a"
+	b := drRecord(t, "dupe", "t1", "e2", "agent:1", 1, time.Time{})
+	b.EvidenceID = "ev-b"
+	if err := s.AppendDetection(ctxT("t1"), a); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendDetection(ctxT("t1"), b); err != nil {
+		t.Fatal(err)
+	}
+	// A re-delivery in e1 is idempotent (first-writer-wins, like ON CONFLICT DO NOTHING): the immutable
+	// row is kept, a swapped-evidence replay does NOT overwrite it.
+	replay := a
+	replay.EvidenceID = "ev-tampered"
+	if err := s.AppendDetection(ctxT("t1"), replay); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.ListDetections(ctxT("t1"), "e1"); len(got) != 1 || got[0].EvidenceID != "ev-a" {
+		t.Fatalf("e1 must keep its own immutable row bound to ev-a, got %+v", got)
+	}
+	if got, _ := s.ListDetections(ctxT("t1"), "e2"); len(got) != 1 || got[0].EvidenceID != "ev-b" {
+		t.Fatalf("e2 must retain its distinct row bound to ev-b, got %+v", got)
+	}
+}
+
 func TestDetectionStoreLastBatchSequence(t *testing.T) {
 	s := NewDetectionRecordStore()
 	_ = s.AppendDetection(ctxT("t1"), drRecord(t, "r1", "t1", "e1", "agent:1", 2, time.Time{}))
@@ -91,14 +121,19 @@ func TestDetectionStoreExpire(t *testing.T) {
 func TestDetectionStoreHasDetection(t *testing.T) {
 	s := NewDetectionRecordStore()
 	_ = s.AppendDetection(ctxT("t1"), drRecord(t, "r1", "t1", "e1", "agent:1", 1, time.Time{}))
-	if ok, _ := s.HasDetection(ctxT("t1"), "r1"); !ok {
+	if ok, _ := s.HasDetection(ctxT("t1"), "e1", "r1"); !ok {
 		t.Error("t1 must see its own record via HasDetection")
 	}
-	if ok, _ := s.HasDetection(ctxT("t1"), "missing"); ok {
+	if ok, _ := s.HasDetection(ctxT("t1"), "e1", "missing"); ok {
 		t.Error("HasDetection must be false for an unknown id")
 	}
+	// Engagement-scoped: the same id in a DIFFERENT engagement is a distinct detection, not a match —
+	// so a tenant-wide skip cannot silently drop it (the D3 cross-engagement loss vector).
+	if ok, _ := s.HasDetection(ctxT("t1"), "e2", "r1"); ok {
+		t.Error("HasDetection must be engagement-scoped")
+	}
 	// Cross-tenant: t2 must not observe t1's record.
-	if ok, _ := s.HasDetection(ctxT("t2"), "r1"); ok {
+	if ok, _ := s.HasDetection(ctxT("t2"), "e1", "r1"); ok {
 		t.Error("HasDetection must be tenant-scoped")
 	}
 }

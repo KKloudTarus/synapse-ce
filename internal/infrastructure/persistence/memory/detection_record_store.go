@@ -11,13 +11,19 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
+// recKey identifies a projection row by (engagement, detection id) — the SAME namespace the per-engagement
+// seal uses. Keying on this (not the id alone) is what lets the same detection id in two engagements be two
+// distinct rows instead of one silently overwriting the other, mirroring the Postgres PRIMARY KEY
+// (tenant_id, engagement_id, id).
+type recKey struct{ eng, id shared.ID }
+
 // DetectionRecordStore is the in-memory detection-ledger projection used inline/in dev. Records are
 // bucketed per tenant, so a read under one tenant can never observe another's — the same isolation the
-// Postgres store gets from RLS. It keeps deep copies so a caller mutating a returned record cannot
-// corrupt stored state.
+// Postgres store gets from RLS. Within a tenant, a row is keyed by (engagement, id) to match the Postgres
+// uniqueness key. It keeps deep copies so a caller mutating a returned record cannot corrupt stored state.
 type DetectionRecordStore struct {
 	mu       sync.Mutex
-	byTenant map[shared.ID]map[shared.ID]detection.Record // tenant -> record id -> record
+	byTenant map[shared.ID]map[recKey]detection.Record // tenant -> (engagement, record id) -> record
 	now      func() time.Time
 }
 
@@ -25,13 +31,13 @@ var _ ports.DetectionRecordStore = (*DetectionRecordStore)(nil)
 
 // NewDetectionRecordStore constructs the store.
 func NewDetectionRecordStore() *DetectionRecordStore {
-	return &DetectionRecordStore{byTenant: map[shared.ID]map[shared.ID]detection.Record{}, now: func() time.Time { return time.Now().UTC() }}
+	return &DetectionRecordStore{byTenant: map[shared.ID]map[recKey]detection.Record{}, now: func() time.Time { return time.Now().UTC() }}
 }
 
 // SetClock overrides the store's clock (tests only), so expiry-on-read is deterministic.
 func (s *DetectionRecordStore) SetClock(now func() time.Time) { s.now = now }
 
-// AppendDetection stores one record, idempotent on its id, under the ctx tenant.
+// AppendDetection stores one record, idempotent on (engagement, id), bucketed by the record's TenantID.
 func (s *DetectionRecordStore) AppendDetection(ctx context.Context, r detection.Record) error {
 	if err := r.Validate(); err != nil {
 		return err
@@ -40,9 +46,16 @@ func (s *DetectionRecordStore) AppendDetection(ctx context.Context, r detection.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.byTenant[tenant] == nil {
-		s.byTenant[tenant] = map[shared.ID]detection.Record{}
+		s.byTenant[tenant] = map[recKey]detection.Record{}
 	}
-	s.byTenant[tenant][r.ID] = cloneRecord(r)
+	// Idempotent on (engagement, id), matching the Postgres ON CONFLICT (tenant_id, engagement_id, id):
+	// a re-delivery of the same detection in the same engagement is a no-op, while the same id in a
+	// DIFFERENT engagement is a distinct row and must not overwrite the first.
+	k := recKey{eng: r.EngagementID, id: r.ID}
+	if _, exists := s.byTenant[tenant][k]; exists {
+		return nil
+	}
+	s.byTenant[tenant][k] = cloneRecord(r)
 	return nil
 }
 
@@ -69,13 +82,13 @@ func (s *DetectionRecordStore) ListDetections(ctx context.Context, engagementID 
 	return out, nil
 }
 
-// HasDetection reports whether a record with this id already exists under the ctx tenant, so ingest can
+// HasDetection reports whether a record with this id already exists in the given engagement under the ctx tenant, so ingest can
 // skip an already-sealed detection on a retry (idempotent resume) rather than sealing it twice.
-func (s *DetectionRecordStore) HasDetection(ctx context.Context, id shared.ID) (bool, error) {
+func (s *DetectionRecordStore) HasDetection(ctx context.Context, engagementID, id shared.ID) (bool, error) {
 	tenant := shared.TenantOrDefault(tenantFromCtx(ctx))
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.byTenant[tenant][id]
+	_, ok := s.byTenant[tenant][recKey{eng: engagementID, id: id}]
 	return ok, nil
 }
 
@@ -100,10 +113,10 @@ func (s *DetectionRecordStore) ExpireDetections(ctx context.Context, engagementI
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var expired []shared.ID
-	for id, r := range s.byTenant[tenant] {
+	for k, r := range s.byTenant[tenant] {
 		if r.EngagementID == engagementID && r.Expired(cutoff) {
-			expired = append(expired, id)
-			delete(s.byTenant[tenant], id)
+			expired = append(expired, r.ID)
+			delete(s.byTenant[tenant], k)
 		}
 	}
 	sort.Slice(expired, func(i, j int) bool { return expired[i] < expired[j] })

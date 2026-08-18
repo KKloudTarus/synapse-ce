@@ -31,9 +31,16 @@ const evidenceKindDetection = "detection"
 // composition root (like offensivepolicy's EvidenceSealer), so this package never depends on the
 // concrete vault or the domain Evidence shape.
 type EvidenceChain interface {
-	// Seal appends content under the given kind, bound to the engagement's chain head, and returns the
-	// new link's id.
-	Seal(ctx context.Context, engagementID shared.ID, kind string, content []byte, createdBy string) (shared.ID, error)
+	// SealOnce appends content under the given kind, bound to the engagement's chain head, and returns
+	// the new link's id. It is IDEMPOTENT on idempotencyKey (the detection id): if a link was already
+	// sealed for (engagementID, idempotencyKey) it returns that existing link's id and appends NOTHING.
+	//
+	// This is what closes D3 (#610): sealing a detection into the permanent chain and writing its
+	// projection row are two stores with no shared transaction, so a projection write that fails AFTER a
+	// successful seal would, on retry, seal a SECOND chain link for the same detection. Keying the seal on
+	// the detection id makes the retry return the first link instead — a detection can never be sealed
+	// into the chain twice.
+	SealOnce(ctx context.Context, engagementID shared.ID, kind string, idempotencyKey string, content []byte, createdBy string) (shared.ID, error)
 	// Verify checks the engagement's chain and returns a non-nil error (wrapping evidence.ErrChainBroken)
 	// when it is broken, so a dependent report can be blocked.
 	//
@@ -162,15 +169,19 @@ func (s *Service) Ingest(ctx context.Context, batch fleetagent.AgentBatch, items
 		if got := fleetagent.DetectionContentHash(payload, it.AssetID); got != refByID[it.ID].ContentSHA256 {
 			return result, fmt.Errorf("%w: detection %s content does not match its signed digest", shared.ErrValidation, it.ID)
 		}
-		// Idempotent resume: skip a detection already sealed (e.g. a retry after a partial batch), so it is
-		// never sealed into the chain twice.
-		if exists, err := s.records.HasDetection(ctx, it.ID); err != nil {
+		// Fast-path idempotent resume: skip a detection whose projection row already exists FOR THIS
+		// engagement (a retry after a fully-completed item). The skip is engagement-scoped to match the
+		// per-engagement seal below — a tenant-wide skip would silently drop the same id in another
+		// engagement. The AUTHORITATIVE no-double-seal guarantee is SealOnce, keyed on (engagement,
+		// detection id) — so a retry after a seal-then-append crash (no projection row, so HasDetection
+		// is false here) still cannot seal a second chain link.
+		if exists, err := s.records.HasDetection(ctx, batch.EngagementID, it.ID); err != nil {
 			return result, fmt.Errorf("check detection %s: %w", it.ID, err)
 		} else if exists {
 			result.Skipped = append(result.Skipped, it.ID)
 			continue
 		}
-		evID, err := s.chain.Seal(ctx, batch.EngagementID, evidenceKindDetection, payload, batch.AgentID.String())
+		evID, err := s.chain.SealOnce(ctx, batch.EngagementID, evidenceKindDetection, it.ID.String(), payload, batch.AgentID.String())
 		if err != nil {
 			return result, fmt.Errorf("seal detection %s: %w", it.ID, err)
 		}
