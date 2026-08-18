@@ -2,12 +2,14 @@ package telemetry
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetryschema"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -58,7 +60,7 @@ func tctx() context.Context { return shared.WithTenant(context.Background(), "t1
 
 func batch(seq uint64, sampleRate int, evs ...detection.Event) ports.TelemetryBatch {
 	return ports.TelemetryBatch{TenantID: "t1", HostID: "host-1", AssetID: "asset-1", AgentID: "agent:1",
-		Class: detection.ClassProcess, Sequence: seq, SampleRate: sampleRate, Events: evs}
+		SchemaVersion: telemetryschema.Current, Class: detection.ClassProcess, Sequence: seq, SampleRate: sampleRate, Events: evs}
 }
 
 func TestIngestBudgetOverflowReportsGap(t *testing.T) {
@@ -126,7 +128,7 @@ func TestRetentionTiersAndAuditedExpiry(t *testing.T) {
 	warmEvs := []detection.Event{procEventAt("a", now.Add(-90*time.Minute)), procEventAt("b", now.Add(-90*time.Minute))}
 	oldEv := procEventAt("old", now.Add(-3*time.Hour))
 	_, _ = svc.Ingest(tctx(), batch(1, 1, hotEv))
-	_, _ = svc.Ingest(tctx(), ports.TelemetryBatch{TenantID: "t1", HostID: "host-1", AssetID: "asset-1", AgentID: "agent:1", Class: detection.ClassProcess, Sequence: 2, SampleRate: 1, Events: warmEvs})
+	_, _ = svc.Ingest(tctx(), ports.TelemetryBatch{TenantID: "t1", HostID: "host-1", AssetID: "asset-1", AgentID: "agent:1", SchemaVersion: telemetryschema.Current, Class: detection.ClassProcess, Sequence: 2, SampleRate: 1, Events: warmEvs})
 	_, _ = svc.Ingest(tctx(), batch(3, 1, oldEv))
 
 	rep, err := svc.Sweep(tctx())
@@ -208,7 +210,7 @@ func TestRetroHuntLatencyOnSeededVolume(t *testing.T) {
 			}
 			evs[j] = procEventAt(comm, base.Add(time.Duration(i)*time.Second))
 		}
-		if _, err := svc.Ingest(tctx(), ports.TelemetryBatch{TenantID: "t1", HostID: "host-1", AssetID: "asset-1", AgentID: "agent:1", Class: detection.ClassProcess, Sequence: uint64(i + 1), SampleRate: 1, Events: evs}); err != nil {
+		if _, err := svc.Ingest(tctx(), ports.TelemetryBatch{TenantID: "t1", HostID: "host-1", AssetID: "asset-1", AgentID: "agent:1", SchemaVersion: telemetryschema.Current, Class: detection.ClassProcess, Sequence: uint64(i + 1), SampleRate: 1, Events: evs}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -224,5 +226,27 @@ func TestRetroHuntLatencyOnSeededVolume(t *testing.T) {
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("retro-hunt latency %s exceeds the 5s bound on %d events (memory tier)", elapsed, batches*per)
+	}
+}
+
+func TestIngestValidatesSchemaVersion(t *testing.T) {
+	svc, _, _ := newSvc(t, 100, 7*24*time.Hour, 30*24*time.Hour)
+	ev := procEventAt("ps", time.Unix(1_000_000, 0))
+
+	// Accepted: the schema version this build emits. Acceptance keys on the batch's declared schema
+	// version, never on any agent-binary version (there is no agent-version field on the batch) — proving
+	// the schema/agent decoupling structurally.
+	if _, err := svc.Ingest(tctx(), batch(1, 1, ev)); err != nil {
+		t.Fatalf("Current schema version (%d) must be accepted: %v", telemetryschema.Current, err)
+	}
+
+	// Rejected fail-closed with ErrValidation: an unset (0) version and a version newer than this reader
+	// supports — never parsed under a guessed shape.
+	for _, v := range []int{0, telemetryschema.MaxSupported + 1} {
+		b := batch(2, 1, ev)
+		b.SchemaVersion = v
+		if _, err := svc.Ingest(tctx(), b); !errors.Is(err, shared.ErrValidation) {
+			t.Errorf("schema version %d must be rejected with ErrValidation, got %v", v, err)
+		}
 	}
 }

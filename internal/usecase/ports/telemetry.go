@@ -39,8 +39,12 @@ type TelemetryBatch struct {
 	HostID   shared.ID
 	AssetID  shared.ID
 	AgentID  shared.ID
-	Class    detection.Class
-	Sequence uint64
+	// SchemaVersion is the wire-format version of the events in this batch (see domain/telemetryschema).
+	// It is versioned INDEPENDENTLY of the agent binary version; ingest validates it and rejects an unset
+	// or out-of-range version rather than parsing under a guessed shape.
+	SchemaVersion int
+	Class         detection.Class
+	Sequence      uint64
 	// SampleRate records how the batch was sampled: 1 = full fidelity; N>1 = one event kept per N observed
 	// (recorded WITH the data so a hunt knows it is looking at a sample, never a complete window).
 	SampleRate int
