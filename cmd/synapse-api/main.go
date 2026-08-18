@@ -13,6 +13,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/httpapi"
+	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
@@ -1162,6 +1164,21 @@ func main() {
 	if slaService != nil {
 		router.SetSLA(slaService)
 	}
+	// Metrics stay off by default and, when enabled, are exposed only on the separate
+	// loopback-by-default listener (never bearer-protected, never instrumented itself).
+	var metrics *observability.Collectors
+	var httpObserver httpapi.HTTPObserver // kept as a nil INTERFACE unless metrics is built
+	if cfg.MetricsEnabled {
+		queueReader, ok := vulnerabilityQueue.(ports.AggregateJobQueueStatsReader)
+		if !ok {
+			log.Error("metrics enabled but the configured job queue does not support aggregate stats")
+			os.Exit(1)
+		}
+		metrics = observability.New(queueReader)
+		httpObserver = metrics
+		scaService.SetObserver(metrics)
+	}
+	router.SetObservability(cfg.AccessLogEnabled, httpObserver)
 	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
 		ProviderSync: cfg.VulnerabilityProviderSyncEnabled, OccurrenceWrites: cfg.VulnerabilityOccurrenceWritesEnabled,
 		FindingProjection: cfg.VulnerabilityFindingProjectionEnabled, Actions: cfg.VulnerabilityActionsEnabled,
@@ -2128,7 +2145,11 @@ func main() {
 		)
 	}
 
-	if err := httpserver.Run(ctx, cfg.HTTPAddr, router.Handler(), log); err != nil {
+	var metricsHandler http.Handler
+	if metrics != nil {
+		metricsHandler = metrics.Handler()
+	}
+	if err := httpserver.RunPair(ctx, cfg.HTTPAddr, router.Handler(), cfg.MetricsAddr, metricsHandler, log); err != nil {
 		log.Error("server error", "err", err)
 		os.Exit(1)
 	}

@@ -87,6 +87,9 @@ func (a *Authenticator) Middleware(publicPaths map[string]bool, next http.Handle
 		principal.TenantID = shared.TenantOrDefault(shared.ID(principal.TenantID)).String()
 		ctx := context.WithValue(r.Context(), principalKey, principal)
 		ctx = shared.WithTenant(ctx, shared.ID(principal.TenantID))
+		if observation := requestObservationFrom(ctx); observation != nil {
+			observation.setPrincipal(principal.ID)
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

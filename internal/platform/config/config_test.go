@@ -446,3 +446,36 @@ func TestLoadDatabaseMigrationDSN(t *testing.T) {
 		t.Fatalf("migration DSN = %q", got)
 	}
 }
+
+// TestLoadObservabilityDefaults pins the opt-in-metrics / on-by-default-access-log
+// posture: metrics stay off and loopback-bound until explicitly enabled, while
+// access logging is on by default so a fresh deployment gets request correlation
+// without operator action.
+func TestLoadObservabilityDefaults(t *testing.T) {
+	config := Load()
+	if config.MetricsEnabled {
+		t.Error("SYNAPSE_METRICS_ENABLED must default to false (opt-in)")
+	}
+	if config.MetricsAddr != "127.0.0.1:9090" {
+		t.Errorf("MetricsAddr default = %q, want 127.0.0.1:9090 (loopback-only)", config.MetricsAddr)
+	}
+	if !config.AccessLogEnabled {
+		t.Error("SYNAPSE_ACCESS_LOG_ENABLED must default to true")
+	}
+}
+
+func TestLoadObservabilityFromEnv(t *testing.T) {
+	t.Setenv("SYNAPSE_METRICS_ENABLED", "true")
+	t.Setenv("SYNAPSE_METRICS_ADDR", "0.0.0.0:9999")
+	t.Setenv("SYNAPSE_ACCESS_LOG_ENABLED", "false")
+	config := Load()
+	if !config.MetricsEnabled {
+		t.Error("SYNAPSE_METRICS_ENABLED=true must enable metrics")
+	}
+	if config.MetricsAddr != "0.0.0.0:9999" {
+		t.Errorf("MetricsAddr = %q, want 0.0.0.0:9999", config.MetricsAddr)
+	}
+	if config.AccessLogEnabled {
+		t.Error("SYNAPSE_ACCESS_LOG_ENABLED=false must disable access logging")
+	}
+}

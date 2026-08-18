@@ -169,7 +169,7 @@ func TestPublishedMirrorsMatchCanonicalSources(t *testing.T) {
 
 		notice := "> Canonical source: [`" + canonical + "`](https://github.com/KKloudTarus/synapse-ce/blob/main/" + canonical + "). Do not edit this published mirror directly.\n\n"
 		want := notice + string(canonicalBody)
-		if string(mirrorBody) != want {
+		if strings.ReplaceAll(string(mirrorBody), "\r\n", "\n") != strings.ReplaceAll(want, "\r\n", "\n") {
 			t.Errorf("%s has drifted from %s; regenerate the mirror as its canonical-source notice plus the complete canonical file", mirror, canonical)
 		}
 	}

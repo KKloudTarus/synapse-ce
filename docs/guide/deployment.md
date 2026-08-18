@@ -109,6 +109,22 @@ Recommended hardening:
 
 `GET /healthz` and `GET /readyz` are unauthenticated by design. Every other API route requires the bearer token.
 
+## Metrics and access logging
+
+`SYNAPSE_METRICS_ENABLED` (default `false`) exposes Prometheus metrics — HTTP RED
+(rate/errors/duration), aggregate durable-job queue depth, and SCA scan outcomes — on a
+SEPARATE listener bound by `SYNAPSE_METRICS_ADDR` (default `127.0.0.1:9090`). That
+listener is intentionally uninstrumented and never bearer-protected: keep it loopback-only
+or on a private scrape network, and never put it behind the same public path as the API.
+See [Configuration](configuration.md#observability) for metric names and the label/privacy
+policy.
+
+`SYNAPSE_ACCESS_LOG_ENABLED` (default `true`) emits one structured `http access` log event
+per request with only bounded, non-sensitive fields (method, matched route, status,
+latency, request id, and — once authenticated — the resolved principal id). It never logs
+raw paths, query strings, headers, bodies, tenant ids, remote addresses, user agents, or
+secrets.
+
 ## Liveness and readiness probes
 
 `GET /healthz` is a constant liveness probe: `200` means the process and HTTP listener are alive. It

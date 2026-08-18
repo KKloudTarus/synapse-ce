@@ -405,6 +405,9 @@ func (f *fleetRouter) authed(next http.HandlerFunc) http.HandlerFunc {
 		// claim, result, and inventory writes fail the audit insert with
 		// "new row violates row-level security policy for table audit_log".
 		ctx = shared.WithTenant(ctx, agent.TenantID)
+		if observation := requestObservationFrom(ctx); observation != nil {
+			observation.setPrincipal(agent.ID.String())
+		}
 		next(w, r.WithContext(ctx))
 	}
 }
