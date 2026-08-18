@@ -155,6 +155,10 @@ func (g SequenceGap) HasGap() bool { return g.Missing > 0 || g.Replay }
 // DetectSequenceGap compares an incoming batch sequence against the last sequence recorded for that
 // agent (0 = none yet). The expected next sequence is lastSeen+1; anything higher leaves a gap, anything
 // not higher is a replay/out-of-order.
+//
+// This is the single-counter predecessor of the delivery contract (#609): it cannot tell a legitimate
+// reboot reset-to-1 apart from a replay. It is superseded by ClassifyDelivery (delivery.go), which is
+// incarnation-aware; A3 adopts ClassifyDelivery once the wire envelope carries a StreamPosition.
 func DetectSequenceGap(lastSeen, incoming uint64) SequenceGap {
 	if incoming <= lastSeen {
 		return SequenceGap{Replay: true}
