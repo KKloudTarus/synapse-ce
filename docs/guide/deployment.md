@@ -107,14 +107,29 @@ Recommended hardening:
 - Terminate TLS at your load balancer or reverse proxy in front of the API.
 - Back up the database and the evidence object store together; a report depends on both.
 
-`GET /healthz` is unauthenticated by design. Every other API route requires the bearer token.
+`GET /healthz` and `GET /readyz` are unauthenticated by design. Every other API route requires the bearer token.
 
-## Health check
+## Liveness and readiness probes
 
-The API exposes an unauthenticated `GET /healthz` for liveness and readiness probes.
+`GET /healthz` is a constant liveness probe: `200` means the process and HTTP listener are alive. It
+does not inspect dependencies. `GET /readyz` runs the configured PostgreSQL, migration, and evidence
+object-store checks concurrently with a short timeout. It returns `200` only when every check passes,
+or `503` with per-check pass/fail states; dependency errors and credentials are never exposed.
+
+In in-memory development mode no external checks are configured, so readiness follows process health.
+The full Compose stack uses `/readyz` for its service health condition. Kubernetes should keep the two
+signals separate:
 
 ```bash
 curl -s http://localhost:8080/healthz
+curl -s http://localhost:8080/readyz
+```
+
+```yaml
+livenessProbe:
+  httpGet: {path: /healthz, port: 8080}
+readinessProbe:
+  httpGet: {path: /readyz, port: 8080}
 ```
 
 Next: [Security model](security.md)

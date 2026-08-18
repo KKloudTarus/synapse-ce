@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver for goose
 	"github.com/pressly/goose/v3"
@@ -164,6 +165,63 @@ func Migrate(ctx context.Context, dsn string) error {
 	}
 	if err := goose.UpContext(ctx, db, "."); err != nil {
 		return fmt.Errorf("migrate up: %w", err)
+	}
+	return nil
+}
+
+// CheckDatabaseReady verifies the runtime pool can execute a trivial query.
+func CheckDatabaseReady(ctx context.Context, pool *pgxpool.Pool) error {
+	return checkDatabaseReady(ctx, pool)
+}
+
+type readinessQueryer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func checkDatabaseReady(ctx context.Context, queryer readinessQueryer) error {
+	var one int
+	if err := queryer.QueryRow(ctx, "SELECT 1").Scan(&one); err != nil {
+		return fmt.Errorf("database readiness: %w", err)
+	}
+	if one != 1 {
+		return fmt.Errorf("database readiness returned %d", one)
+	}
+	return nil
+}
+
+// CheckMigrationsReady verifies the latest state of every embedded migration is applied. Goose
+// retains down records, so the query considers only the newest row for each migration version.
+func CheckMigrationsReady(ctx context.Context, pool *pgxpool.Pool) error {
+	return checkMigrationsReady(ctx, pool)
+}
+
+func checkMigrationsReady(ctx context.Context, queryer readinessQueryer) error {
+	entries, err := migrations.FS.ReadDir(".")
+	if err != nil {
+		return fmt.Errorf("read embedded migrations: %w", err)
+	}
+	expected := 0
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") {
+			expected++
+		}
+	}
+
+	var applied int
+	err = queryer.QueryRow(ctx, `
+		SELECT count(*)
+		FROM (
+			SELECT DISTINCT ON (version_id) version_id, is_applied
+			FROM goose_db_version
+			WHERE version_id > 0
+			ORDER BY version_id, id DESC
+		) AS latest
+		WHERE is_applied`).Scan(&applied)
+	if err != nil {
+		return fmt.Errorf("migration readiness: %w", err)
+	}
+	if applied != expected {
+		return fmt.Errorf("migration readiness: %d of %d embedded migrations applied", applied, expected)
 	}
 	return nil
 }

@@ -38,8 +38,8 @@ make dev                                             # API on :8080, dashboard o
 ```
 
 `SYNAPSE_API_TOKEN` is the only required development setting. The server refuses to start without it.
-Operational API routes require it; `GET /healthz` is intentionally public so probes work without a
-credential.
+Operational API routes require it; liveness `GET /healthz` and dependency readiness `GET /readyz` are
+intentionally public so probes work without a credential.
 
 A blank `SYNAPSE_DB_DSN` runs the development persistence: in-memory stores plus a few local files such as
 `data/audit.jsonl`. It is not durable and not suitable for real work, but it is not purely ephemeral
