@@ -17,10 +17,11 @@ import (
 // expiry), sampling recorded with the data, and sequence-gap visibility. It is reached only through
 // ports.TelemetryStore.
 type TelemetryStore struct {
-	mu   sync.Mutex
-	rows map[shared.ID][]telemetryRow // tenant -> rows
-	hot  time.Duration
-	warm time.Duration
+	mu     sync.Mutex
+	rows   map[shared.ID][]telemetryRow        // tenant -> rows
+	losses map[shared.ID][]ports.TelemetryLoss // tenant -> first-class loss records (A0.6)
+	hot    time.Duration
+	warm   time.Duration
 }
 
 type telemetryRow struct {
@@ -37,7 +38,28 @@ var _ ports.TelemetryStore = (*TelemetryStore)(nil)
 
 // NewTelemetryStore constructs the store with the hot/warm tier boundaries (the config in ADR 0001).
 func NewTelemetryStore(hot, warm time.Duration) *TelemetryStore {
-	return &TelemetryStore{rows: map[shared.ID][]telemetryRow{}, hot: hot, warm: warm}
+	return &TelemetryStore{rows: map[shared.ID][]telemetryRow{}, losses: map[shared.ID][]ports.TelemetryLoss{}, hot: hot, warm: warm}
+}
+
+// RecordLoss persists a Truncated/Dropped loss record for the ctx tenant, idempotent on
+// (host, class, seq, disposition) so a re-ingest of the same over-budget batch records one loss.
+func (s *TelemetryStore) RecordLoss(ctx context.Context, loss ports.TelemetryLoss) error {
+	if err := loss.Validate(); err != nil {
+		return err
+	}
+	tenant, err := requireTelemetryTenant(ctx)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, l := range s.losses[tenant] {
+		if l.HostID == loss.HostID && l.Class == loss.Class && l.Sequence == loss.Sequence && l.Disposition == loss.Disposition {
+			return nil // idempotent
+		}
+	}
+	s.losses[tenant] = append(s.losses[tenant], loss)
+	return nil
 }
 
 // Ingest appends the batch's events, idempotent on (host, class, seq, event index). The bucket is the
@@ -112,7 +134,15 @@ func (s *TelemetryStore) Query(ctx context.Context, q ports.HuntQuery) (ports.Hu
 		seqsByHostClass[k][r.seq] = struct{}{}
 	}
 	res.SequenceGaps = detectSeqGaps(seqsByHostClass)
-	res.Complete = !res.Sampled && len(res.SequenceGaps) == 0
+	// First-class losses intersecting the window (by host/asset/class/time, like the events). Any loss
+	// makes the window incomplete — including on an asset pivot, since losses carry an AssetID.
+	for _, l := range s.losses[tenant] {
+		if matchesLossQuery(l, q) {
+			res.Losses = append(res.Losses, l)
+		}
+	}
+	sort.Slice(res.Losses, func(i, j int) bool { return res.Losses[i].FromAt.Before(res.Losses[j].FromAt) })
+	res.Complete = !res.Sampled && len(res.SequenceGaps) == 0 && len(res.Losses) == 0
 	res.RowsScanned = len(res.Events) // rows matched/returned, consistent with the Postgres twin
 	sort.Slice(res.Events, func(i, j int) bool { return res.Events[i].At.Before(res.Events[j].At) })
 	if q.Limit > 0 && len(res.Events) > q.Limit {
@@ -184,6 +214,30 @@ func matchesQuery(r telemetryRow, q ports.HuntQuery) bool {
 		return false
 	}
 	if !q.Until.IsZero() && r.event.At.After(q.Until) {
+		return false
+	}
+	return true
+}
+
+// matchesLossQuery windows a loss record by the hunt's host/asset/class/time — the SAME dimensions the
+// events matcher uses, so an asset-pivot hunt surfaces losses (a truncated/dropped window is never
+// presented as complete on an asset pivot). Losses carry an AssetID for exactly this reason.
+func matchesLossQuery(l ports.TelemetryLoss, q ports.HuntQuery) bool {
+	if q.HostID != "" && l.HostID != q.HostID {
+		return false
+	}
+	if q.AssetID != "" && l.AssetID != q.AssetID {
+		return false
+	}
+	if q.Class != "" && l.Class != q.Class {
+		return false
+	}
+	// Overlap, not point containment: the loss surfaces if its dropped-event span [FromAt, ToAt] intersects
+	// the hunt window — so a window starting INSIDE the span still sees the loss.
+	if !q.Since.IsZero() && l.ToAt.Before(q.Since) {
+		return false
+	}
+	if !q.Until.IsZero() && l.FromAt.After(q.Until) {
 		return false
 	}
 	return true
