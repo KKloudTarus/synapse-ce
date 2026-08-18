@@ -41,6 +41,7 @@ type AgentBatch struct {
 	AgentID      shared.ID
 	EngagementID shared.ID
 	Sequence     uint64
+	KeyID        string // the AgentSigningKey this batch is signed with; resolved + verified server-side
 	Signature    string // base64 ed25519 over BatchMessage
 	Detections   []DetectionRef
 }
@@ -68,6 +69,9 @@ func (b AgentBatch) Validate() error {
 	if b.Sequence == 0 {
 		return fmt.Errorf("%w: batch sequence must be >= 1 (0 is reserved for 'no batch yet')", shared.ErrValidation)
 	}
+	if b.KeyID == "" {
+		return fmt.Errorf("%w: batch has no signing key id", shared.ErrValidation)
+	}
 	if len(b.Detections) == 0 {
 		return fmt.Errorf("%w: batch carries no detections", shared.ErrValidation)
 	}
@@ -92,9 +96,9 @@ func (b AgentBatch) IDs() []shared.ID {
 }
 
 // BatchMessage is the canonical byte string a batch signature covers: the context tag, agent,
-// engagement, sequence, and the SORTED (id, content-digest) refs — so membership is order-independent
-// but complete, and each detection's content is bound. It is a sha256 digest of those fields, separated
-// so field boundaries cannot collide.
+// engagement, sequence, signing-key id, and the SORTED (id, content-digest) refs — so membership is
+// order-independent but complete, each detection's content is bound, and the named signing key cannot be
+// swapped. It is a sha256 digest of those fields, separated so field boundaries cannot collide.
 func BatchMessage(b AgentBatch) []byte {
 	refs := append([]DetectionRef(nil), b.Detections...)
 	sort.Slice(refs, func(i, j int) bool { return refs[i].ID < refs[j].ID })
@@ -104,6 +108,7 @@ func BatchMessage(b AgentBatch) []byte {
 	write(b.AgentID.String())
 	write(b.EngagementID.String())
 	write(strconv.FormatUint(b.Sequence, 10))
+	write(b.KeyID) // bind the signing-key id into the signature: the envelope KeyID cannot be swapped
 	for _, ref := range refs {
 		write(ref.ID.String())
 		write(ref.ContentSHA256)

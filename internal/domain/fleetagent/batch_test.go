@@ -9,7 +9,7 @@ import (
 )
 
 func sampleBatch() AgentBatch {
-	return AgentBatch{AgentID: "agent:1", EngagementID: "eng-1", Sequence: 3,
+	return AgentBatch{AgentID: "agent:1", EngagementID: "eng-1", Sequence: 3, KeyID: "kid-1",
 		Detections: []DetectionRef{
 			{ID: "d3", ContentSHA256: "h3"}, {ID: "d1", ContentSHA256: "h1"}, {ID: "d2", ContentSHA256: "h2"},
 		}}
@@ -37,6 +37,7 @@ func TestVerifyBatchRejectsTamper(t *testing.T) {
 		"bump sequence":   func(x *AgentBatch) { x.Sequence = 4 },
 		"swap engagement": func(x *AgentBatch) { x.EngagementID = "eng-2" },
 		"swap agent":      func(x *AgentBatch) { x.AgentID = "agent:2" },
+		"swap key id":     func(x *AgentBatch) { x.KeyID = "kid-2" },
 	}
 	for name, tamper := range tampers {
 		t.Run(name, func(t *testing.T) {
@@ -78,10 +79,11 @@ func TestBatchValidate(t *testing.T) {
 	cases := map[string]AgentBatch{
 		"no agent":      {EngagementID: "e", Sequence: 1, Detections: ref},
 		"no engagement": {AgentID: "a", Sequence: 1, Detections: ref},
-		"zero sequence": {AgentID: "a", EngagementID: "e", Sequence: 0, Detections: ref},
-		"no detections": {AgentID: "a", EngagementID: "e", Sequence: 1},
-		"empty id":      {AgentID: "a", EngagementID: "e", Sequence: 1, Detections: []DetectionRef{{ContentSHA256: "h"}}},
-		"empty content": {AgentID: "a", EngagementID: "e", Sequence: 1, Detections: []DetectionRef{{ID: "d"}}},
+		"zero sequence": {AgentID: "a", EngagementID: "e", Sequence: 0, KeyID: "k", Detections: ref},
+		"no key id":     {AgentID: "a", EngagementID: "e", Sequence: 1, Detections: ref},
+		"no detections": {AgentID: "a", EngagementID: "e", Sequence: 1, KeyID: "k"},
+		"empty id":      {AgentID: "a", EngagementID: "e", Sequence: 1, KeyID: "k", Detections: []DetectionRef{{ContentSHA256: "h"}}},
+		"empty content": {AgentID: "a", EngagementID: "e", Sequence: 1, KeyID: "k", Detections: []DetectionRef{{ID: "d"}}},
 	}
 	for name, b := range cases {
 		t.Run(name, func(t *testing.T) {

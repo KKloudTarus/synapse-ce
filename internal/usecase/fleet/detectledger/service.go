@@ -10,7 +10,6 @@ package detectledger
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -52,10 +51,12 @@ type EvidenceChain interface {
 	Verify(ctx context.Context, engagementID shared.ID) error
 }
 
-// AgentKeyResolver returns the enrolment public key for an agent (#408), used to verify a batch's
-// signature. An agent with no known key cannot have its batches admitted — fail closed.
+// AgentKeyResolver resolves the content-signing key an incoming batch names (#607, A0.2). The batch
+// carries a KeyID; the resolver returns the AgentSigningKey bound to (agentID, keyID), and Ingest gates
+// on purpose + validity window + revocation + agent binding via VerifyBatchWithKey before trusting the
+// signature. An unknown key resolves to an error and the batch is refused — fail closed.
 type AgentKeyResolver interface {
-	AgentPublicKey(ctx context.Context, agentID shared.ID) (ed25519.PublicKey, error)
+	ResolveSigningKey(ctx context.Context, agentID shared.ID, keyID string) (fleetagent.AgentSigningKey, error)
 }
 
 // IngestItem is one detection in a batch together with the asset it was observed on (#423 requirement 5:
@@ -114,15 +115,22 @@ func (s *Service) Ingest(ctx context.Context, batch fleetagent.AgentBatch, items
 		return IngestResult{}, fmt.Errorf("%w: detection ingest requires a tenant in context", shared.ErrValidation)
 	}
 
-	// Signature: fail closed. An agent with no known key, or a batch that does not verify, is refused
-	// before any detection is sealed.
-	pub, err := s.keys.AgentPublicKey(ctx, batch.AgentID)
+	// Signature: fail closed under the keyed lifecycle (#607). Resolve the signing key the batch names by
+	// KeyID; an unknown key admits nothing. VerifyBatchWithKey then refuses — before any detection is
+	// sealed — a key of the wrong purpose, a key bound to another agent, an envelope naming a different
+	// key, a pending/expired/revoked key, or a bad signature.
+	key, err := s.keys.ResolveSigningKey(ctx, batch.AgentID, batch.KeyID)
 	if err != nil {
-		return IngestResult{}, fmt.Errorf("%w: no key for agent %s: %v", shared.ErrForbidden, batch.AgentID, err)
-	}
-	if err := fleetagent.VerifyBatch(pub, batch); err != nil {
 		s.recordAudit(ctx, "detection.batch_rejected", batch.AgentID.String(), map[string]string{
-			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence), "reason": "bad_signature",
+			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
+			"key_id": batch.KeyID, "reason": "unknown_key",
+		})
+		return IngestResult{}, fmt.Errorf("%w: no signing key %s for agent %s: %v", shared.ErrForbidden, batch.KeyID, batch.AgentID, err)
+	}
+	if err := fleetagent.VerifyBatchWithKey(key, fleetagent.PurposeDetectionBatch, s.clock.Now().UTC(), batch); err != nil {
+		s.recordAudit(ctx, "detection.batch_rejected", batch.AgentID.String(), map[string]string{
+			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
+			"key_id": batch.KeyID, "reason": "unverified",
 		})
 		return IngestResult{}, err
 	}

@@ -1615,6 +1615,13 @@ func main() {
 		// insert that returns the existing link). A keyless Seal, or a non-atomic check-then-append, reopens
 		// D3 (a seal-then-crash retry appends a duplicate permanent link). evidence.Service.SealOnce is the
 		// A4 deliverable that provides this; do not bridge NewService onto plain Seal.
+		// A0.2 (#607) — the detectledger.AgentKeyResolver that NewService needs is satisfied by the agent
+		// signing-key registry (ports.AgentSigningKeyStore → postgres.NewAgentSigningKeyRepository /
+		// memory.NewAgentSigningKeyStore): its Resolve(agentID, keyID) returns the AgentSigningKey the batch
+		// names, and VerifyBatchWithKey gates purpose+window+revocation fail-closed. The store is the durable
+		// backing; still deferred to A4 is the agent-plane registration endpoint (an agent posts its ed25519
+		// signing public key + a ProveKeyPossession proof, bound to its canonical AgentID) plus the operator
+		// rotate/revoke routes — none can be wired until the agent→control-plane transport exists.
 		if detectionReader, drerr := detectledger.NewReader(detectionRecordStore); drerr != nil {
 			log.Error("detection ledger reader init failed", "err", drerr)
 			os.Exit(1)
