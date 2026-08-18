@@ -22,10 +22,18 @@ const (
 
 // Config holds runtime configuration.
 type Config struct {
-	HTTPAddr     string
-	Environment  string
-	LogLevel     string
-	SingleTenant bool
+	HTTPAddr string
+	// MetricsEnabled turns on the Prometheus /metrics endpoint on a SEPARATE,
+	// uninstrumented, non-bearer-protected listener. Off by default.
+	MetricsEnabled bool
+	// MetricsAddr is the loopback-by-default listen address for the metrics endpoint.
+	MetricsAddr string
+	// AccessLogEnabled turns on the single structured access-log event per HTTP
+	// request (method, matched route, status, latency, request id). On by default.
+	AccessLogEnabled bool
+	Environment      string
+	LogLevel         string
+	SingleTenant     bool
 
 	// APIToken protects all API + UI routes; required (no anonymous access).
 	APIToken string
@@ -516,6 +524,9 @@ func Load() Config {
 	}
 	return Config{
 		HTTPAddr:                         getenv("SYNAPSE_HTTP_ADDR", ":8080"),
+		MetricsEnabled:                   getbool("SYNAPSE_METRICS_ENABLED", false),
+		MetricsAddr:                      getenv("SYNAPSE_METRICS_ADDR", "127.0.0.1:9090"),
+		AccessLogEnabled:                 getbool("SYNAPSE_ACCESS_LOG_ENABLED", true),
 		Environment:                      normalizeEnv(getenv("SYNAPSE_ENV", "development")),
 		LogLevel:                         getenv("SYNAPSE_LOG_LEVEL", "info"),
 		SingleTenant:                     getbool("SYNAPSE_SINGLE_TENANT", true),

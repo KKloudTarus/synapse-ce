@@ -25,6 +25,7 @@ func NewJobQueue(pool *pgxpool.Pool, ids ports.IDGenerator) *JobQueue {
 
 var _ ports.JobQueue = (*JobQueue)(nil)
 var _ ports.JobStatusReader = (*JobQueue)(nil)
+var _ ports.AggregateJobQueueStatsReader = (*JobQueue)(nil)
 
 func (q *JobQueue) Enqueue(ctx context.Context, kind string, payload []byte) (string, error) {
 	if kind == "" {
@@ -168,4 +169,46 @@ func (q *JobQueue) JobStatus(ctx context.Context, id string) (status ports.JobSt
 		return nil
 	})
 	return status, err
+}
+
+// AggregateJobQueueStats aggregates each tenant's RLS-scoped queue statistics for the
+// operator metrics collector. The tenant enumeration mirrors Claim so the forced-RLS
+// per-tenant transaction remains the only way any job row is read; no tenant label is
+// ever attached to the aggregated totals.
+func (q *JobQueue) AggregateJobQueueStats(ctx context.Context, kinds ...string) (ports.JobStats, error) {
+	rows, err := q.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
+	if err != nil {
+		return ports.JobStats{}, fmt.Errorf("list queue tenants: %w", err)
+	}
+	var tenantIDs []shared.ID
+	for rows.Next() {
+		var tenantID shared.ID
+		if err := rows.Scan(&tenantID); err != nil {
+			rows.Close()
+			return ports.JobStats{}, fmt.Errorf("scan queue tenant: %w", err)
+		}
+		tenantIDs = append(tenantIDs, tenantID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return ports.JobStats{}, fmt.Errorf("list queue tenants: %w", err)
+	}
+	rows.Close()
+
+	var total ports.JobStats
+	for _, tenantID := range tenantIDs {
+		stats, err := q.Stats(shared.WithTenant(ctx, tenantID), kinds...)
+		if err != nil {
+			return ports.JobStats{}, fmt.Errorf("queue stats for tenant: %w", err)
+		}
+		total.Queued += stats.Queued
+		total.Claimed += stats.Claimed
+		total.Failed += stats.Failed
+		total.Done += stats.Done
+		if stats.OldestActiveAt != nil && (total.OldestActiveAt == nil || stats.OldestActiveAt.Before(*total.OldestActiveAt)) {
+			at := *stats.OldestActiveAt
+			total.OldestActiveAt = &at
+		}
+	}
+	return total, nil
 }

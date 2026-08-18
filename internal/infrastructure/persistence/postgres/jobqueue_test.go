@@ -109,3 +109,30 @@ func TestPostgresJobQueueClaimByKind(t *testing.T) {
 		t.Fatalf("a recon worker must claim the recon job, got %+v", j3)
 	}
 }
+
+// TestPostgresJobQueueAggregateJobQueueStatsAcrossTenants covers the operator metrics
+// seam: AggregateJobQueueStats must sum every tenant's RLS-scoped Stats (mirroring
+// Claim's per-tenant transaction loop), never a privileged cross-tenant query, and must
+// never require or expose a tenant label on the result. Gated on SYNAPSE_TEST_DB_DSN.
+func TestPostgresJobQueueAggregateJobQueueStatsAcrossTenants(t *testing.T) {
+	q, ctx := setupJobQueue(t)
+	tenantA := shared.DefaultTenant
+	_, _ = q.Enqueue(ctx, "sca", []byte("a"))
+
+	otherTenant := shared.ID("other-tenant")
+	if _, err := q.pool.Exec(ctx, `INSERT INTO tenants (id) VALUES ($1) ON CONFLICT DO NOTHING`, otherTenant.String()); err != nil {
+		t.Fatalf("seed second tenant: %v", err)
+	}
+	ctxB := shared.WithTenant(context.Background(), otherTenant)
+	if _, err := q.Enqueue(ctxB, "sca", []byte("b")); err != nil {
+		t.Fatalf("enqueue tenant b: %v", err)
+	}
+
+	stats, err := q.AggregateJobQueueStats(context.Background(), "sca")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Queued != 2 {
+		t.Fatalf("aggregate queued = %d, want 2 (across tenant %s and %s)", stats.Queued, tenantA, otherTenant)
+	}
+}

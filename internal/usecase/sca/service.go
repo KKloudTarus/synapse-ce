@@ -53,8 +53,9 @@ type Service struct {
 	runs                             ports.ScanRunStore
 	evidence                         *evidenceuc.Service
 	ids                              ports.IDGenerator
-	jobQueue                         ports.JobQueue  // optional; when set, StartScan defers to the durable queue
-	runLock                          ports.RunLocker // optional; guards single active execution per scan job
+	jobQueue                         ports.JobQueue    // optional; when set, StartScan defers to the durable queue
+	runLock                          ports.RunLocker   // optional; guards single active execution per scan job
+	observer                         ports.SCAObserver // optional; observes terminal scan outcomes for metrics
 	prov                             ports.Provenance
 	clock                            ports.Clock
 	audit                            ports.AuditLogger
@@ -1342,20 +1343,27 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 		ctx, cancel = context.WithTimeout(ctx, s.timeout)
 		defer cancel()
 	}
+	started := s.clock.Now()
 	if imported, doc, ok, err := s.loadImportedSBOM(ctx, engagementID, opts); err != nil {
 		return nil, err
 	} else if ok {
 		now, err := s.gateImportedSBOMAndAudit(ctx, actor, engagementID, imported, opts)
 		if err != nil {
+			s.observeGateOutcome(err)
 			return nil, err
 		}
-		return s.runImportedSBOMPipeline(ctx, actor, engagementID, now, imported, doc, opts, func(string, int, []ports.ScanDebugEvent) {})
+		result, err := s.runImportedSBOMPipeline(ctx, actor, engagementID, now, imported, doc, opts, func(string, int, []ports.ScanDebugEvent) {})
+		s.observeSyncTerminal(started, err)
+		return result, err
 	}
 	now, err := s.gateAndAudit(ctx, actor, engagementID, req, opts)
 	if err != nil {
+		s.observeGateOutcome(err)
 		return nil, err
 	}
-	return s.runPipeline(ctx, actor, engagementID, now, req, opts, func(string, int, []ports.ScanDebugEvent) {})
+	result, err := s.runPipeline(ctx, actor, engagementID, now, req, opts, func(string, int, []ports.ScanDebugEvent) {})
+	s.observeSyncTerminal(started, err)
+	return result, err
 }
 
 // StartScan gates + audits the scan, then runs the pipeline ASYNCHRONOUSLY
@@ -1388,6 +1396,7 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 		now, err = s.gateAndAudit(ctx, actor, engagementID, req, opts)
 	}
 	if err != nil {
+		s.observeGateOutcome(err)
 		return ports.ScanJob{}, err
 	}
 	target := req.Value
@@ -1429,6 +1438,9 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 			fin := s.clock.Now()
 			job.Status, job.Stage, job.Error, job.FinishedAt = ports.ScanFailed, "enqueue", truncateErr(err), &fin
 			_ = s.jobs.Save(context.WithoutCancel(ctx), job)
+			// Terminal: the job never reaches execution, so it dead-ends here rather than
+			// double-counting when a worker later (never) runs it.
+			s.observeOutcome("failed")
 			return ports.ScanJob{}, fmt.Errorf("enqueue scan job: %w", err)
 		}
 		return job, nil
@@ -1463,6 +1475,44 @@ func (s *Service) SetQueue(q ports.JobQueue) { s.jobQueue = q }
 // at-least-once queue redelivery.
 func (s *Service) SetRunLock(l ports.RunLocker) { s.runLock = l }
 
+// SetObserver installs an optional terminal SCA execution observer (duration +
+// success/failed/blocked outcome). Nil disables observation.
+func (s *Service) SetObserver(observer ports.SCAObserver) { s.observer = observer }
+
+// observeTerminal records one terminal SCA execution outcome with its duration when
+// an observer is configured; a no-op otherwise.
+func (s *Service) observeTerminal(started time.Time, outcome string) {
+	if s.observer != nil {
+		s.observer.ObserveSCAScan(s.clock.Now().Sub(started), outcome)
+	}
+}
+
+func (s *Service) observeOutcome(outcome string) {
+	if s.observer != nil {
+		s.observer.ObserveSCAOutcome(outcome)
+	}
+}
+
+// observeGateOutcome records "blocked" only for an execution-gate denial
+// (shared.ErrForbidden) reached AFTER a genuine scan attempt (past option
+// normalization and SBOM-import loading). A validation failure (malformed
+// options, unconfigured guard) is not a scan attempt and is never observed here.
+func (s *Service) observeGateOutcome(err error) {
+	if errors.Is(err, shared.ErrForbidden) {
+		s.observeOutcome("blocked")
+	}
+}
+
+// observeSyncTerminal records the synchronous pipeline's terminal outcome
+// (success/failed) after the execution gate has already passed.
+func (s *Service) observeSyncTerminal(started time.Time, err error) {
+	if err != nil {
+		s.observeTerminal(started, "failed")
+		return
+	}
+	s.observeTerminal(started, "success")
+}
+
 // RunScanJob runs an SCA scan claimed from the durable queue (the worker handler calls
 // this). A malformed payload is a hard error (dead-letters); pipeline failures are
 // recorded on the ScanJob (not a job error), so the job completes.
@@ -1492,8 +1542,7 @@ func (s *Service) RunScanJob(ctx context.Context, payload []byte) error {
 	if err != nil {
 		return err
 	}
-	s.runScanJob(ctx, p.Actor, shared.ID(p.EngagementID), p.Now, p.Req, opts, p.Job)
-	return nil
+	return s.runScanJob(ctx, p.Actor, shared.ID(p.EngagementID), p.Now, p.Req, opts, p.Job)
 }
 
 // FailStrandedScanJob marks the scan job behind a DEAD-LETTERED sca job failed if it has not
@@ -1542,7 +1591,14 @@ func (s *Service) FailStrandedScanJob(ctx context.Context, payload []byte, cause
 	fin := s.clock.Now()
 	job.FinishedAt, job.Progress = &fin, 100
 	job.Status, job.Stage, job.Error = ports.ScanFailed, "dead-letter", truncateErr(cause)
-	return s.jobs.Save(ctx, job)
+	if err := s.jobs.Save(ctx, job); err != nil {
+		return err
+	}
+	// This is the ONE place dead-letter finalization observes a terminal outcome; the
+	// terminal guard above (already-terminal jobs return early) keeps it from double-
+	// counting a scan runScanJob already finished.
+	s.observeOutcome("failed")
+	return nil
 }
 
 // SweepStaleScans reclaims scan jobs a crashed worker left `running` past staleFor WITHOUT a
@@ -1573,8 +1629,12 @@ func (s *Service) SweepStaleScans(ctx context.Context, staleFor time.Duration) (
 		fin := s.clock.Now()
 		job.FinishedAt, job.Progress = &fin, 100
 		job.Status, job.Stage, job.Error = ports.ScanFailed, "swept", "scan stranded running past staleFor with no live owner – reclaimed by sweeper"
-		_ = s.jobs.Save(ctx, job)
+		if err := s.jobs.Save(ctx, job); err != nil {
+			release()
+			return n, fmt.Errorf("save swept scan job %s: %w", job.ID, err)
+		}
 		release()
+		s.observeOutcome("failed")
 		n++
 	}
 	return n, nil
@@ -1709,7 +1769,7 @@ func looksLikePath(v string) bool {
 
 // runScanJob runs the pipeline on a detached background context (the request that
 // started the scan has returned), advancing + finishing the job.
-func (s *Service) runScanJob(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, job ports.ScanJob) {
+func (s *Service) runScanJob(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, job ports.ScanJob) error {
 	// Idempotency (audit): the durable queue is at-least-once, so a redelivery can
 	// re-invoke a scan a prior delivery already finished. Re-running is read-only (findings
 	// dedup by advisory+component+version) but would seal a DUPLICATE "scan" evidence link
@@ -1719,12 +1779,15 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 	if s.jobs != nil {
 		if latest, err := s.jobs.LatestForEngagement(ctx, engagementID); err == nil &&
 			latest.ID == job.ID && (latest.Status == ports.ScanSucceeded || latest.Status == ports.ScanFailed) {
-			return
+			return nil
 		}
 	}
 	if opts.ProjectAnalysis {
 		opts.ProjectAnalysisID = job.ID
 	}
+	// Async duration is measured from EXECUTION (this claim/delivery), not from the
+	// original enqueue time (job.StartedAt) – the queue wait is not scan work.
+	execStarted := s.clock.Now()
 	if s.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, s.timeout)
@@ -1770,8 +1833,21 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 	if s.jobs != nil {
 		// Detached from ctx so the record still lands when the completion timeout above has fired.
 		// (ScanJobStore.Save is not tenant-scoped; the tenant matters at the recorder call, not here.)
-		_ = s.jobs.Save(context.WithoutCancel(ctx), job)
+		if saveErr := s.jobs.Save(context.WithoutCancel(ctx), job); saveErr != nil {
+			// Do NOT return saveErr here: the durable queue treats a non-nil error as
+			// redeliverable, but the scan already executed. The job is left stranded at
+			// Status=Running (not terminal), so runScanJob's idempotency guard above would
+			// NOT skip a redelivery – it would re-run the pipeline and seal a DUPLICATE "scan"
+			// evidence link plus a phantom ScanRun row, violating the append-only evidence
+			// chain. SweepStaleScans is the single component that finalizes a stranded running
+			// job, so it alone counts the eventual "failed" outcome; observing here too would
+			// double-count. Log and swallow instead.
+			s.logger().Error("terminal scan job save failed; job left stranded for SweepStaleScans to finalize", "job_id", job.ID, "err", saveErr)
+			return nil
+		}
 	}
+	s.observeSyncTerminal(execStarted, err)
+	return nil
 }
 
 // runPipeline is the read-only tool chain (acquire -> detect -> SBOM -> vulns ->
