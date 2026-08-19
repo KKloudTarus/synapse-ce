@@ -69,7 +69,7 @@ The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADD
 | --- | --- | --- |
 | `SYNAPSE_DB_DSN` | (in-memory) | Runtime PostgreSQL connection URL. Empty runs an in-memory dev store, so nothing is durable. |
 | `SYNAPSE_DB_MIGRATION_DSN` | `SYNAPSE_DB_DSN` in development | Optional owner-level PostgreSQL DSN used only by `synapse-migrate`, separating migration authority from the least-privileged runtime DSN. In production it must use a database user distinct from the runtime DSN. |
-| `SYNAPSE_DB_AUTO_MIGRATE` | `true` in development | Long-running services apply embedded migrations only in development. Production requires `false`; run `synapse-migrate` first. API exposes stale-schema status through `/readyz`; worker and MCP refuse startup until the schema is current. |
+| `SYNAPSE_DB_AUTO_MIGRATE` | `true` in development | Long-running services apply embedded migrations only in development. Production requires `false`; run `synapse-migrate` first. Use backward-compatible, phased, migrate-first changes: the API accepts only an applied forward migration strictly above its embedded maximum and exposes a stale or divergent schema through `/readyz`; worker and MCP refuse startup until the schema is current because they have no readiness endpoint. |
 | `SYNAPSE_DB_MAX_CONNS` | `32` | pgx pool maximum connections. |
 | `SYNAPSE_DB_MIN_CONNS` | `0` | pgx pool minimum connections. |
 | `SYNAPSE_DB_MAX_CONN_LIFETIME` | `1h` | Connection lifetime. |

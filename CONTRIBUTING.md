@@ -73,6 +73,10 @@ goose**. Two rules avoid the duplicate-version startup crash goose raises on col
   the later one rebases and renumbers. goose keys on the leading integer, so a duplicate is a
   hard startup panic, not a git merge conflict (the filenames differ), and a clean merge will not
   catch it.
+- **Use backward-compatible, phased schema changes.** Production rollouts migrate first, then
+  deploy application binaries. During that overlap an older API may serve only a database whose
+  additional migration versions are applied and strictly newer than its embedded maximum; it must
+  not depend on columns or constraints removed by the migration.
 - **Add a Postgres integration test** (`migration_00NN_test.go`) that calls `postgres.Migrate`,
   so a broken or duplicate version is caught locally.
 

@@ -102,4 +102,11 @@ numbered SQL files embedded in the binary. Development services apply them autom
 uses the dedicated `synapse-migrate` command with the owner credential before API, worker, and MCP
 start with their runtime credential. A shipped migration is never edited. A new numbered file is appended.
 
+Production rollouts are migrate-first and migrations must be backward-compatible and phased: apply the
+schema expansion before deploying binaries that use it, and defer destructive changes until every older
+binary is gone. The API remains live but reports stale schema through `/readyz`; workers and the MCP
+server refuse startup on stale schema because they have no readiness endpoint to withdraw. Readiness
+accepts only an applied database migration newer than the binary's embedded maximum, which permits
+that migrate-first overlap while rejecting a missing, down, or divergent required migration.
+
 Next: [Deployment](deployment.md)

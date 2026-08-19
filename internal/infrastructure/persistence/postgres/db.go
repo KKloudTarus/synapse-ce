@@ -8,8 +8,9 @@ import (
 	"database/sql"
 	"fmt"
 	"hash/fnv"
-	"math"
+	"io/fs"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -273,22 +274,57 @@ type migrationState struct {
 }
 
 func embeddedMigrationVersions() ([]int64, error) {
-	goose.SetBaseFS(migrations.FS)
-	embedded, err := goose.CollectMigrations(".", 0, math.MaxInt64)
+	return migrationVersions(migrations.FS)
+}
+
+func migrationVersions(source fs.FS) ([]int64, error) {
+	entries, err := fs.ReadDir(source, ".")
 	if err != nil {
-		return nil, fmt.Errorf("collect embedded migrations: %w", err)
+		return nil, fmt.Errorf("read embedded migrations: %w", err)
 	}
-	versions := make([]int64, 0, len(embedded))
-	for _, migration := range embedded {
-		versions = append(versions, migration.Version)
+
+	versions := make([]int64, 0, len(entries))
+	seen := make(map[int64]string, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		prefix, _, ok := strings.Cut(entry.Name(), "_")
+		if !ok {
+			return nil, fmt.Errorf("embedded migration %q has an invalid filename", entry.Name())
+		}
+		version, err := goose.NumericComponent(entry.Name())
+		if err != nil || version <= 0 {
+			return nil, fmt.Errorf("embedded migration %q has invalid version %q", entry.Name(), prefix)
+		}
+		if previous, duplicate := seen[version]; duplicate {
+			return nil, fmt.Errorf("embedded migrations %q and %q use duplicate version %d", previous, entry.Name(), version)
+		}
+		seen[version] = entry.Name()
+		versions = append(versions, version)
 	}
+	if len(versions) == 0 {
+		return nil, fmt.Errorf("no embedded SQL migrations found")
+	}
+	sort.Slice(versions, func(i, j int) bool { return versions[i] < versions[j] })
 	return versions, nil
 }
 
 func compareMigrationStates(expected []int64, actual []migrationState) error {
+	if len(expected) == 0 {
+		return fmt.Errorf("migration readiness: no embedded migrations expected")
+	}
+
 	want := make(map[int64]struct{}, len(expected))
+	latestExpected := expected[0]
 	for _, version := range expected {
+		if _, duplicate := want[version]; duplicate {
+			return fmt.Errorf("migration readiness: duplicate embedded migration %d", version)
+		}
 		want[version] = struct{}{}
+		if version > latestExpected {
+			latestExpected = version
+		}
 	}
 	got := make(map[int64]bool, len(actual))
 	for _, state := range actual {
@@ -306,9 +342,15 @@ func compareMigrationStates(expected []int64, actual []migrationState) error {
 			return fmt.Errorf("migration readiness: embedded migration %d is not applied", version)
 		}
 	}
-	for version := range got {
-		if _, ok := want[version]; !ok {
-			return fmt.Errorf("migration readiness: database contains unexpected migration %d", version)
+	for version, applied := range got {
+		if _, ok := want[version]; ok {
+			continue
+		}
+		if version <= latestExpected {
+			return fmt.Errorf("migration readiness: database contains divergent migration %d", version)
+		}
+		if !applied {
+			return fmt.Errorf("migration readiness: newer migration %d is not applied", version)
 		}
 	}
 	return nil
