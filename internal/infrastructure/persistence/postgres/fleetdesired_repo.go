@@ -73,9 +73,19 @@ func (r *FleetDesiredRepository) Put(ctx context.Context, state *fleetdesired.St
 			}
 			if err != nil {
 				var pgErr *pgconn.PgError
-				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-					return fmt.Errorf("%w: desired policy id %s already exists in tenant %s",
-						shared.ErrConflict, state.PolicyID, state.TenantID)
+				if errors.As(err, &pgErr) {
+					switch pgErr.Code {
+					case "23505":
+						return fmt.Errorf("%w: desired policy id %s already exists in tenant %s",
+							shared.ErrConflict, state.PolicyID, state.TenantID)
+					case "23503":
+						// Admission verifies the canonical subject before Put. A foreign-key failure here
+						// therefore means that the tenant/asset precondition disappeared before the write
+						// committed (or a lower-level caller supplied a stale subject). Surface that as an
+						// optimistic conflict rather than leaking a PostgreSQL implementation error.
+						return fmt.Errorf("%w: desired-state subject %s/%s no longer exists",
+							shared.ErrConflict, state.TenantID, state.AssetID)
+					}
 				}
 			}
 			return err
