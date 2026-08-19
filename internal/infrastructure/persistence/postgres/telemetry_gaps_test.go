@@ -13,7 +13,7 @@ func TestTelemetryGapsCalculation(t *testing.T) {
 	input := map[telemetryKey][]uint64{
 		{host: "host-1", class: detection.ClassProcess}: {1, 2, 5, 8, 8, 2}, // duplicates & out of order: 1, 2, 5, 8 -> gaps: 2..5 (missing 2), 5..8 (missing 2)
 		{host: "host-2", class: detection.ClassNetwork}: {10, 11, 12},       // contiguous -> no gaps
-		{host: "host-3", class: detection.ClassFile}:    {1, 4},              // gap: 1..4 (missing 2)
+		{host: "host-3", class: detection.ClassFile}:    {1, 4},             // gap: 1..4 (missing 2)
 	}
 
 	gaps := telemetryGaps(input)

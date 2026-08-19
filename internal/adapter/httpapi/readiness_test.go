@@ -160,4 +160,3 @@ func TestReadinessSetChecksConcurrentRace(t *testing.T) {
 	close(stop)
 	wg.Wait()
 }
-
