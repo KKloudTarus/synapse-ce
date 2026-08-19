@@ -486,6 +486,10 @@ func (s *Service) record(ctx context.Context, state *desireddom.State, actor sha
 			metadata[k] = v
 		}
 	}
+	// Audit persistence is tenant-context driven under RLS. Bind the durable policy tenant here rather
+	// than trusting caller context so a missing or mismatched context cannot drop or misattribute the
+	// audit entry after the desired-state mutation has already committed.
+	ctx = shared.WithTenant(ctx, state.TenantID)
 	_ = s.audit.Record(ctx, ports.AuditEntry{
 		Actor: actor.String(), Action: action, Target: state.AssetID.String(), Metadata: metadata, At: at,
 	})
