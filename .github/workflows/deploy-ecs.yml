@@ -78,7 +78,7 @@ jobs:
 
           docker buildx build \
             --file deploy/Dockerfile \
-            --target api \
+            --target full \
             --platform linux/amd64 \
             --tag "${IMAGE_URI}" \
             --cache-from type=gha \
