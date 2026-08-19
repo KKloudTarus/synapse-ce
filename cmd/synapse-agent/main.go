@@ -148,7 +148,9 @@ func (r *runner) run(ctx context.Context) error {
 	}
 	// Agent-side detection engine (#422): a continuous background observer, separate from the
 	// per-work-order inventory cycle below. Best-effort — it never blocks or fails the inventory loop.
-	r.startDetection(ctx)
+	// It is given the enrolled credential so its events carry the canonical AgentID, not the display
+	// name (D1 fix, #606).
+	r.startDetection(ctx, cred)
 	for {
 		if err := r.cycle(ctx, cred); err != nil {
 			if errors.Is(err, context.Canceled) {

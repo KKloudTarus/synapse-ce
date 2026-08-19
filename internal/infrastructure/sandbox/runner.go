@@ -210,19 +210,21 @@ func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult
 		return ports.ToolResult{}, fmt.Errorf("%w: build seccomp filter: %v", shared.ErrValidation, serr)
 	}
 	defer func() { _ = seccompF.Close() }()
-	// Settle the exec path BEFORE verification, so the path that is verified is the path that is
-	// bound and executed (closing the verify-path != exec-path gap). An absolute name is kept as
-	// given - that is the operator-configured helper the bind below exists for. The host PATH counts
-	// as an authority for a bare name only when that name will also be integrity-verified.
+	// Settle PATH lookup before verification. An absolute name is kept as given; the registry below
+	// then resolves any symlinks and returns the exact path it hashed. The host PATH counts as an
+	// authority for a bare name only when that name will also be integrity-verified.
 	hostPATHIsAuthority := r.binreg != nil
 	spec.Name = resolveToolPath(spec.Name, hostPATHIsAuthority)
-	// F5: verify the tool binary's integrity before it runs. The resolved on-disk binary
-	// must match its pin (operator hash and/or trust-on-first-use); a replaced binary is
-	// refused. Defends the "compromised tool binary" threat the audit named.
+	// F5: verify the tool binary's integrity before it runs, then bind and execute the returned
+	// symlink-resolved path. This prevents a symlink swap from selecting a different target after
+	// verification. It does not eliminate the residual window in which that target's contents could
+	// be replaced between hashing and exec; fully closing that requires an fd-based execution path.
 	if r.binreg != nil {
-		if verr := r.binreg.Verify(spec.Name); verr != nil {
+		verifiedPath, verr := r.binreg.Verify(spec.Name)
+		if verr != nil {
 			return ports.ToolResult{}, fmt.Errorf("%w: %v", shared.ErrValidation, verr)
 		}
+		spec.Name = verifiedPath
 	}
 	// F3: a per-run cgroup v2 with hard memory.max + pids.max so a memory/fork bomb is
 	// contained on EVERY path (egress and isolated), independent of systemd-run. The tool
@@ -474,7 +476,8 @@ func (r *Runner) bwrapArgs(spec ports.ToolSpec, sharedNet bool, hostsFile string
 	// "bwrap: execvp ...: No such file or directory". Bind the single resolved FILE read-only, never
 	// its directory, so nothing else in that tree becomes visible. Only an absolute path is bound,
 	// and resolveToolPath keeps the host PATH from making a bare name absolute unless it is also
-	// integrity-verified - so what gets bound is operator authority, not an inherited PATH entry.
+	// integrity-verified. When the registry is enabled, spec.Name is also the symlink-resolved path
+	// it hashed, so a later symlink retarget cannot change this bind or the exec path.
 	if bin := strings.TrimSpace(spec.Name); strings.HasPrefix(bin, "/") && !underCuratedRoot(bin) {
 		args = append(args, "--ro-bind-try", bin, bin)
 	}

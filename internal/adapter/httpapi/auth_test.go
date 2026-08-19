@@ -45,7 +45,7 @@ func TestAuthenticatorMiddleware(t *testing.T) {
 		}
 		return Principal{}, false
 	})
-	public := map[string]bool{"/healthz": true}
+	public := map[string]bool{"/healthz": true, "/readyz": true}
 
 	var nextCalled bool
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -62,6 +62,7 @@ func TestAuthenticatorMiddleware(t *testing.T) {
 		wantNext bool
 	}{
 		{"public needs no token", "/healthz", "", http.StatusOK, true},
+		{"readiness needs no token", "/readyz", "", http.StatusOK, true},
 		{"protected missing token", "/api/v1/engagements", "", http.StatusUnauthorized, false},
 		{"protected wrong token", "/api/v1/engagements", "Bearer nope", http.StatusUnauthorized, false},
 		{"protected wrong scheme", "/api/v1/engagements", "Basic secret", http.StatusUnauthorized, false},

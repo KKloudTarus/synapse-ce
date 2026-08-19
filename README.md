@@ -196,7 +196,7 @@ make install                       # Go modules + web deps
 make tools                         # syft + grype into ./bin
 export PATH="$PWD/bin:$PATH"
 
-export SYNAPSE_API_TOKEN="$(openssl rand -hex 32)"   # required for operational API routes; /healthz is public
+export SYNAPSE_API_TOKEN="$(openssl rand -hex 32)"   # required for operational API routes; /healthz and /readyz are public
 make dev                           # API on :8080, dashboard on :5173
 ```
 

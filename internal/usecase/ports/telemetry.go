@@ -2,10 +2,12 @@ package ports
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 )
 
 // TelemetryStore is the DEDICATED persistence port for the columnar telemetry tier (#424, ADR 0001). It
@@ -31,6 +33,62 @@ type TelemetryStore interface {
 	// LastSequence returns the highest batch sequence stored for a (host, class), 0 if none — so the
 	// telemetry usecase can detect a sequence gap and surface a lossy window.
 	LastSequence(ctx context.Context, hostID shared.ID, class detection.Class) (uint64, error)
+	// RecordLoss persists a first-class loss record (a Truncated or Dropped batch), so a hunt over the
+	// window learns the window is incomplete from stored data — not from a best-effort audit line, and
+	// never by a truncation masquerading as an elevated sample rate (D2). Idempotent on
+	// (host, class, sequence, disposition): a re-ingest of the same over-budget batch records one loss.
+	RecordLoss(ctx context.Context, loss TelemetryLoss) error
+}
+
+// TelemetryLoss is a first-class, persisted record that a batch was cut (Truncated) or observed-then-lost
+// (Dropped) at the store-rate stage. Agent-side SAMPLING is not a TelemetryLoss — it rides SampleRate on
+// the stored rows (surfaced as HuntResult.Sampled); this type captures the losses D2 used to hide.
+type TelemetryLoss struct {
+	HostID        shared.ID
+	AssetID       shared.ID // the asset the batch was observed on, so an asset-pivot hunt windows the loss
+	Class         detection.Class
+	Sequence      uint64
+	Disposition   telemetry.LossDisposition // Truncated or Dropped
+	ObservedCount int
+	KeptCount     int
+	DroppedCount  int
+	Reason        string
+	// FromAt..ToAt is the observed-time SPAN of the dropped events (not ingest wall-clock), so a
+	// time-bounded hunt that overlaps ANY part of the dropped span surfaces the loss — a point anchor
+	// would miss a hunt whose window starts inside the span. Windowing is by overlap: ToAt >= Since AND
+	// FromAt <= Until.
+	FromAt time.Time
+	ToAt   time.Time
+}
+
+// Validate checks a loss record is well-formed and honest: a real (host, class, sequence), a lossy
+// disposition that actually reports a drop, counts that add up, and a reason.
+func (l TelemetryLoss) Validate() error {
+	if l.HostID == "" {
+		return fmt.Errorf("%w: telemetry loss has no host", shared.ErrValidation)
+	}
+	if l.AssetID == "" {
+		return fmt.Errorf("%w: telemetry loss has no asset", shared.ErrValidation)
+	}
+	if !l.Class.Valid() {
+		return fmt.Errorf("%w: telemetry loss has an unknown class %q", shared.ErrValidation, l.Class)
+	}
+	if l.Sequence == 0 {
+		return fmt.Errorf("%w: telemetry loss sequence must be >= 1", shared.ErrValidation)
+	}
+	if l.Disposition != telemetry.Truncated && l.Disposition != telemetry.Dropped {
+		return fmt.Errorf("%w: telemetry loss disposition must be truncated or dropped, got %q", shared.ErrValidation, l.Disposition)
+	}
+	if err := telemetry.ValidateLossCounts(l.Disposition, l.ObservedCount, l.KeptCount, l.DroppedCount); err != nil {
+		return err
+	}
+	if l.Reason == "" {
+		return fmt.Errorf("%w: telemetry loss must carry a reason", shared.ErrValidation)
+	}
+	if l.FromAt.IsZero() || l.ToAt.IsZero() || l.ToAt.Before(l.FromAt) {
+		return fmt.Errorf("%w: telemetry loss must carry a valid observed-time span (from <= to)", shared.ErrValidation)
+	}
+	return nil
 }
 
 // TelemetryBatch is one sequenced, sampled batch of raw events from an agent for a single event class.
@@ -39,8 +97,12 @@ type TelemetryBatch struct {
 	HostID   shared.ID
 	AssetID  shared.ID
 	AgentID  shared.ID
-	Class    detection.Class
-	Sequence uint64
+	// SchemaVersion is the wire-format version of the events in this batch (see domain/telemetryschema).
+	// It is versioned INDEPENDENTLY of the agent binary version; ingest validates it and rejects an unset
+	// or out-of-range version rather than parsing under a guessed shape.
+	SchemaVersion int
+	Class         detection.Class
+	Sequence      uint64
 	// SampleRate records how the batch was sampled: 1 = full fidelity; N>1 = one event kept per N observed
 	// (recorded WITH the data so a hunt knows it is looking at a sample, never a complete window).
 	SampleRate int
@@ -80,6 +142,9 @@ type HuntResult struct {
 	MaxSampleRate int // the worst (largest) sample rate in the window; 1 = fully sampled
 	Complete      bool
 	SequenceGaps  []TelemetrySequenceGap
+	// Losses are the first-class Truncated/Dropped records intersecting the window (A0.6). A window with
+	// any loss is never Complete, so a truncated/dropped batch can never be presented as the whole truth.
+	Losses []TelemetryLoss
 }
 
 // TelemetrySequenceGap is a missing run of batch sequences for a (host, class), making a window lossy.

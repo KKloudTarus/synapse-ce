@@ -169,3 +169,26 @@ func TestJobQueueClaimByKind(t *testing.T) {
 		t.Fatalf("a recon worker must claim the recon job, got %+v", j3)
 	}
 }
+
+// TestJobQueueAggregateJobQueueStatsAggregatesAllTenants covers the metrics seam: unlike
+// Stats (tenant-scoped by JobStatus's own tenant check), AggregateJobQueueStats must sum
+// every job across every tenant, since the in-memory adapter has no per-tenant isolation
+// boundary to preserve for a single-process operator collector.
+func TestJobQueueAggregateJobQueueStatsAggregatesAllTenants(t *testing.T) {
+	clk := &movableClock{t: time.Unix(1000, 0).UTC()}
+	q := NewJobQueue(&seqIDs{}, clk.now)
+	ctxA := shared.WithTenant(context.Background(), "tenant-a")
+	ctxB := shared.WithTenant(context.Background(), "tenant-b")
+
+	_, _ = q.Enqueue(ctxA, "sca", nil)
+	_, _ = q.Enqueue(ctxB, "sca", nil)
+	_, _ = q.Claim(ctxA, time.Minute, "sca")
+
+	stats, err := q.AggregateJobQueueStats(context.Background(), "sca")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Queued != 1 || stats.Claimed != 1 {
+		t.Fatalf("aggregate stats = %+v, want 1 queued + 1 claimed across both tenants", stats)
+	}
+}

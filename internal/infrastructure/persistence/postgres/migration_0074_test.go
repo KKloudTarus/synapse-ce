@@ -91,9 +91,14 @@ func TestMigration0074Detections(t *testing.T) {
 	if got, _ := repo.ListDetections(tctx, shared.ID(engA)); len(got) != 1 {
 		t.Fatalf("append must be idempotent on id, got %d rows", len(got))
 	}
-	// HasDetection is tenant-scoped and true for a stored id.
-	if ok, err := repo.HasDetection(tctx, rec.ID); err != nil || !ok {
+	// HasDetection is engagement-scoped (tenant-scoped by ctx) and true for a stored id.
+	if ok, err := repo.HasDetection(tctx, rec.EngagementID, rec.ID); err != nil || !ok {
 		t.Fatalf("HasDetection must be true for a stored record (ok=%v err=%v)", ok, err)
+	}
+	// The same id under a DIFFERENT engagement must NOT match — a tenant-wide skip would silently drop
+	// a distinct detection that happens to share the id (the D3 cross-engagement loss vector).
+	if ok, err := repo.HasDetection(tctx, shared.ID("eng-other"), rec.ID); err != nil || ok {
+		t.Fatalf("HasDetection must be engagement-scoped (ok=%v err=%v)", ok, err)
 	}
 	// A second, CRITICAL detection of the same rule+asset — so the incident rollup can be checked to
 	// report the highest severity by RANK, not the alphabetical max of the label.
@@ -171,5 +176,89 @@ func TestMigration0074Detections(t *testing.T) {
 	}
 	if got, _ := repo.ListDetections(tctx, shared.ID(engA)); len(got) != 2 {
 		t.Fatalf("the two no-expiry records must remain after expiry, got %d", len(got))
+	}
+}
+
+// TestDetectionRecordEngagementScopedKey proves the (tenant_id, engagement_id, id) uniqueness key
+// (migration 0104): the SAME detection id delivered under two engagements of one tenant is TWO distinct
+// rows, each bound to its own evidence link. Under the original (tenant_id, id) key the second engagement's
+// row was silently dropped by ON CONFLICT DO NOTHING — the D3 cross-engagement loss vector.
+func TestDetectionRecordEngagementScopedKey(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	if err := Migrate(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	id := randHex(t)
+	tenant := shared.ID("detk-" + id)
+	engA, engB := "detk-engA-"+id, "detk-engB-"+id
+	evA, evB := "detk-evA-"+id, "detk-evB-"+id
+	for _, stmt := range []struct {
+		q    string
+		args []any
+	}{
+		{`INSERT INTO tenants(id,name) VALUES($1,$1)`, []any{tenant.String()}},
+		{`INSERT INTO engagements(id,tenant_id,name) VALUES($1,$3,'detk-a'),($2,$3,'detk-b')`, []any{engA, engB, tenant.String()}},
+		{`INSERT INTO evidence(id,tenant_id,engagement_id,kind,sha256,previous_hash,storage_ref,content,created_by)
+		   VALUES($1,$3,$5,'detection','deadbeef','','', $7,'agent:1'),($2,$4,$6,'detection','feedface','','', $7,'agent:1')`,
+			[]any{evA, evB, tenant.String(), tenant.String(), engA, engB, []byte("{}")}},
+	} {
+		if _, err := pool.Exec(ctx, stmt.q, stmt.args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		for _, q := range []string{
+			`DELETE FROM detections WHERE tenant_id = $1`,
+			`DELETE FROM evidence WHERE tenant_id = $1`,
+			`DELETE FROM engagements WHERE tenant_id = $1`,
+			`DELETE FROM tenants WHERE id = $1`,
+		} {
+			_, _ = pool.Exec(bg, q, tenant.String())
+		}
+	})
+
+	repo := NewDetectionRecordRepository(pool)
+	tctx := shared.WithTenant(ctx, tenant)
+	base := detection.Record{
+		ID: shared.ID("dupe-" + id), TenantID: tenant, AssetID: "asset-x", AgentID: "agent:1",
+		Detection: mig74Detection(t), BatchSeq: 1, RecordedAt: time.Unix(1000, 0).UTC(),
+	}
+	recA := base
+	recA.EngagementID, recA.EvidenceID = shared.ID(engA), shared.ID(evA)
+	recB := base
+	recB.EngagementID, recB.EvidenceID = shared.ID(engB), shared.ID(evB)
+	if err := repo.AppendDetection(tctx, recA); err != nil {
+		t.Fatalf("append engA: %v", err)
+	}
+	if err := repo.AppendDetection(tctx, recB); err != nil {
+		t.Fatalf("append engB (same id): %v", err)
+	}
+	// Idempotent within each engagement: a re-delivery is a no-op, not a duplicate.
+	if err := repo.AppendDetection(tctx, recA); err != nil {
+		t.Fatalf("re-append engA: %v", err)
+	}
+
+	if got, _ := repo.ListDetections(tctx, shared.ID(engA)); len(got) != 1 || got[0].EvidenceID != shared.ID(evA) {
+		t.Fatalf("engA must retain its own row bound to %q, got %+v", evA, got)
+	}
+	if got, _ := repo.ListDetections(tctx, shared.ID(engB)); len(got) != 1 || got[0].EvidenceID != shared.ID(evB) {
+		t.Fatalf("engB must retain its own row bound to %q, got %+v", evB, got)
+	}
+	if okA, _ := repo.HasDetection(tctx, shared.ID(engA), base.ID); !okA {
+		t.Error("HasDetection(engA) must be true")
+	}
+	if okB, _ := repo.HasDetection(tctx, shared.ID(engB), base.ID); !okB {
+		t.Error("HasDetection(engB) must be true")
 	}
 }

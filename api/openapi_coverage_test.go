@@ -75,9 +75,9 @@ func TestOpenAPIHasNoDeadOperations(t *testing.T) {
 	sort.Strings(described)
 
 	for _, op := range described {
-		// /healthz lives outside /api/v1 and is registered separately; it is verified by the
+		// Health probes live outside /api/v1 and are registered separately; they are verified by the
 		// public-endpoint assertions in openapi_test.go rather than here.
-		if strings.HasSuffix(op, " /healthz") {
+		if strings.HasSuffix(op, " /healthz") || strings.HasSuffix(op, " /readyz") {
 			continue
 		}
 		if !registered[op] {

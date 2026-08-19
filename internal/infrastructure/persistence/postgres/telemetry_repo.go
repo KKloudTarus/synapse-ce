@@ -13,6 +13,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -72,6 +73,30 @@ func (r *TelemetryRepository) LastSequence(ctx context.Context, hostID shared.ID
 	return uint64(last), nil
 }
 
+// RecordLoss persists a Truncated/Dropped loss record for the ctx tenant, idempotent on
+// (host, class, seq, disposition) via the primary key, so a re-ingest records one loss.
+func (r *TelemetryRepository) RecordLoss(ctx context.Context, loss ports.TelemetryLoss) error {
+	if err := loss.Validate(); err != nil {
+		return err
+	}
+	if _, ok := shared.TenantFrom(ctx); !ok {
+		return fmt.Errorf("%w: telemetry loss requires a tenant in context", shared.ErrValidation)
+	}
+	return WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		tenant, _ := shared.TenantFrom(ctx)
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO telemetry_losses
+			  (tenant_id, host_id, asset_id, class, seq, disposition, observed_count, kept_count, dropped_count, reason, from_at, to_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+			ON CONFLICT (tenant_id, host_id, class, seq, disposition) DO NOTHING`,
+			tenant.String(), loss.HostID.String(), loss.AssetID.String(), string(loss.Class), int64(loss.Sequence), string(loss.Disposition),
+			loss.ObservedCount, loss.KeptCount, loss.DroppedCount, loss.Reason, loss.FromAt.UTC(), loss.ToAt.UTC()); err != nil {
+			return fmt.Errorf("insert telemetry loss: %w", err)
+		}
+		return nil
+	})
+}
+
 // defaultHuntCap bounds how many event rows a single hunt loads into memory when the caller sets no
 // Limit — a store defined by its volume must never let one query pull the whole window into RAM. The
 // completeness metadata (sampled / sequence gaps) is still computed over the FULL window (cheap
@@ -110,7 +135,7 @@ func (r *TelemetryRepository) Query(ctx context.Context, q ports.HuntQuery) (por
 	}
 
 	res := ports.HuntResult{MaxSampleRate: 1}
-	seqsByHostClass := map[string][]uint64{}
+	seqsByHostClass := map[telemetryKey][]uint64{}
 	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		// 1. The (bounded) event rows.
 		rows, err := tx.Query(ctx, `SELECT event FROM telemetry_events WHERE `+where+` ORDER BY observed_at ASC LIMIT `+fmt.Sprint(rowCap), args...)
@@ -147,16 +172,64 @@ func (r *TelemetryRepository) Query(ctx context.Context, q ports.HuntQuery) (por
 			if err := seqRows.Scan(&host, &class, &seq); err != nil {
 				return err
 			}
-			seqsByHostClass[host+"\x00"+class] = append(seqsByHostClass[host+"\x00"+class], uint64(seq))
+			k := telemetryKey{host: shared.ID(host), class: detection.Class(class)}
+			seqsByHostClass[k] = append(seqsByHostClass[k], uint64(seq))
 		}
-		return seqRows.Err()
+		if err := seqRows.Err(); err != nil {
+			return err
+		}
+		// 3. First-class losses intersecting the window, windowed by the SAME host/asset/class/time
+		// dimensions as the events — so an asset-pivot hunt surfaces losses and a truncated/dropped window
+		// is never presented as complete on an asset pivot (losses carry an asset_id for this).
+		lossConds := []string{"TRUE"}
+		lossArgs := []any{}
+		laddc := func(cond string, val any) {
+			lossArgs = append(lossArgs, val)
+			lossConds = append(lossConds, fmt.Sprintf(cond, len(lossArgs)))
+		}
+		if q.HostID != "" {
+			laddc("host_id = $%d", q.HostID.String())
+		}
+		if q.AssetID != "" {
+			laddc("asset_id = $%d", q.AssetID.String())
+		}
+		if q.Class != "" {
+			laddc("class = $%d", string(q.Class))
+		}
+		// Overlap, not point containment: to_at >= since AND from_at <= until.
+		if !q.Since.IsZero() {
+			laddc("to_at >= $%d", q.Since.UTC())
+		}
+		if !q.Until.IsZero() {
+			laddc("from_at <= $%d", q.Until.UTC())
+		}
+		lossRows, err := tx.Query(ctx, `
+			SELECT host_id, asset_id, class, seq, disposition, observed_count, kept_count, dropped_count, reason, from_at, to_at
+			FROM telemetry_losses WHERE `+strings.Join(lossConds, " AND ")+` ORDER BY from_at ASC`, lossArgs...)
+		if err != nil {
+			return err
+		}
+		defer lossRows.Close()
+		for lossRows.Next() {
+			var (
+				l                        ports.TelemetryLoss
+				host, asset, class, disp string
+				seq                      int64
+			)
+			if err := lossRows.Scan(&host, &asset, &class, &seq, &disp, &l.ObservedCount, &l.KeptCount, &l.DroppedCount, &l.Reason, &l.FromAt, &l.ToAt); err != nil {
+				return err
+			}
+			l.HostID, l.AssetID, l.Class, l.Sequence, l.Disposition = shared.ID(host), shared.ID(asset), detection.Class(class), uint64(seq), telemetry.LossDisposition(disp)
+			res.Losses = append(res.Losses, l)
+		}
+		return lossRows.Err()
 	})
 	if err != nil {
 		return ports.HuntResult{}, fmt.Errorf("telemetry query: %w", err)
 	}
 	res.Sampled = res.MaxSampleRate > 1
 	res.SequenceGaps = telemetryGaps(seqsByHostClass)
-	res.Complete = !res.Sampled && len(res.SequenceGaps) == 0
+	res.Complete = !res.Sampled && len(res.SequenceGaps) == 0 && len(res.Losses) == 0
 	res.RowsScanned = len(res.Events)
 	return res, nil
 }
@@ -211,15 +284,20 @@ func (r *TelemetryRepository) Footprint(ctx context.Context) (ports.TelemetryFoo
 	return fp, nil
 }
 
-func telemetryGaps(seqsByHostClass map[string][]uint64) []ports.TelemetrySequenceGap {
+// telemetryKey uniquely identifies a (host, class) stream for grouping sequences in hunt queries.
+type telemetryKey struct {
+	host  shared.ID
+	class detection.Class
+}
+
+func telemetryGaps(seqsByHostClass map[telemetryKey][]uint64) []ports.TelemetrySequenceGap {
 	var gaps []ports.TelemetrySequenceGap
 	for k, seqs := range seqsByHostClass {
 		uniq := dedupSorted(seqs)
-		host, class := splitTelemetryKey(k)
 		for i := 1; i < len(uniq); i++ {
 			if uniq[i] > uniq[i-1]+1 {
 				gaps = append(gaps, ports.TelemetrySequenceGap{
-					HostID: host, Class: class, Missing: uniq[i] - uniq[i-1] - 1, LastSeen: uniq[i-1], Incoming: uniq[i],
+					HostID: k.host, Class: k.class, Missing: uniq[i] - uniq[i-1] - 1, LastSeen: uniq[i-1], Incoming: uniq[i],
 				})
 			}
 		}
@@ -240,13 +318,4 @@ func dedupSorted(in []uint64) []uint64 {
 		}
 	}
 	return out
-}
-
-func splitTelemetryKey(k string) (shared.ID, detection.Class) {
-	for i := 0; i < len(k); i++ {
-		if k[i] == 0 {
-			return shared.ID(k[:i]), detection.Class(k[i+1:])
-		}
-	}
-	return shared.ID(k), ""
 }

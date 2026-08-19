@@ -43,6 +43,7 @@ func NewJobQueue(ids ports.IDGenerator, now func() time.Time) *JobQueue {
 
 var _ ports.JobQueue = (*JobQueue)(nil)
 var _ ports.JobStatusReader = (*JobQueue)(nil)
+var _ ports.AggregateJobQueueStatsReader = (*JobQueue)(nil)
 
 func (q *JobQueue) Enqueue(ctx context.Context, kind string, payload []byte) (string, error) {
 	if kind == "" {
@@ -202,4 +203,10 @@ func (q *JobQueue) Fail(_ context.Context, id string, retryIn time.Duration) err
 	j.claimedUntil = time.Time{}
 	j.availableAt = q.now().Add(retryIn)
 	return nil
+}
+
+// AggregateJobQueueStats aggregates every in-memory job without tenant scoping. It is
+// intended solely for the operator metrics collector and never returns tenant labels.
+func (q *JobQueue) AggregateJobQueueStats(ctx context.Context, kinds ...string) (ports.JobStats, error) {
+	return q.Stats(ctx, kinds...)
 }

@@ -41,11 +41,16 @@ type DetectionSink interface {
 // chokepoint, not by the caller. The projection is retention-bounded; the underlying chain links are
 // permanent, so expiry removes rows here, never chain history.
 type DetectionRecordStore interface {
-	// AppendDetection stores one projection row. It is tenant-scoped and idempotent on the record id.
+	// AppendDetection stores one projection row. It is tenant-scoped and idempotent on (engagement, id):
+	// a re-delivery in the same engagement is a no-op, while the same id in a different engagement is a
+	// distinct row (never overwritten), matching the per-engagement seal namespace.
 	AppendDetection(ctx context.Context, r detection.Record) error
-	// HasDetection reports whether a record with this id already exists (tenant-scoped), so ingest can
-	// skip an already-sealed detection on a retry rather than sealing it into the chain twice.
-	HasDetection(ctx context.Context, id shared.ID) (bool, error)
+	// HasDetection reports whether a record with this id already exists in the given engagement
+	// (tenant-scoped by ctx), so ingest can skip an already-sealed detection on a retry rather than
+	// sealing it into the chain twice. It is scoped to the engagement to MATCH the per-engagement seal:
+	// the same detection id in a DIFFERENT engagement is a distinct detection and must not be skipped
+	// (a tenant-wide skip would silently drop it — a cross-engagement loss/suppression vector).
+	HasDetection(ctx context.Context, engagementID, id shared.ID) (bool, error)
 	// ListDetections returns the (non-expired) records for an engagement, oldest first, tenant-scoped.
 	ListDetections(ctx context.Context, engagementID shared.ID) ([]detection.Record, error)
 	// LastBatchSequence returns the highest batch sequence recorded for an agent (0 = none yet), so a gap

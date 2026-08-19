@@ -107,14 +107,45 @@ Recommended hardening:
 - Terminate TLS at your load balancer or reverse proxy in front of the API.
 - Back up the database and the evidence object store together; a report depends on both.
 
-`GET /healthz` is unauthenticated by design. Every other API route requires the bearer token.
+`GET /healthz` and `GET /readyz` are unauthenticated by design. Every other API route requires the bearer token.
 
-## Health check
+## Metrics and access logging
 
-The API exposes an unauthenticated `GET /healthz` for liveness and readiness probes.
+`SYNAPSE_METRICS_ENABLED` (default `false`) exposes Prometheus metrics — HTTP RED
+(rate/errors/duration), aggregate durable-job queue depth, and SCA scan outcomes — on a
+SEPARATE listener bound by `SYNAPSE_METRICS_ADDR` (default `127.0.0.1:9090`). That
+listener is intentionally uninstrumented and never bearer-protected: keep it loopback-only
+or on a private scrape network, and never put it behind the same public path as the API.
+See [Configuration](configuration.md#observability) for metric names and the label/privacy
+policy.
+
+`SYNAPSE_ACCESS_LOG_ENABLED` (default `true`) emits one structured `http access` log event
+per request with only bounded, non-sensitive fields (method, matched route, status,
+latency, request id, and — once authenticated — the resolved principal id). It never logs
+raw paths, query strings, headers, bodies, tenant ids, remote addresses, user agents, or
+secrets.
+
+## Liveness and readiness probes
+
+`GET /healthz` is a constant liveness probe: `200` means the process and HTTP listener are alive. It
+does not inspect dependencies. `GET /readyz` runs the configured PostgreSQL, migration, and evidence
+object-store checks concurrently with a short timeout. It returns `200` only when every check passes,
+or `503` with per-check pass/fail states; dependency errors and credentials are never exposed.
+
+In in-memory development mode no external checks are configured, so readiness follows process health.
+The full Compose stack uses `/readyz` for its service health condition. Kubernetes should keep the two
+signals separate:
 
 ```bash
 curl -s http://localhost:8080/healthz
+curl -s http://localhost:8080/readyz
+```
+
+```yaml
+livenessProbe:
+  httpGet: {path: /healthz, port: 8080}
+readinessProbe:
+  httpGet: {path: /readyz, port: 8080}
 ```
 
 Next: [Security model](security.md)

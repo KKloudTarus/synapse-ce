@@ -44,6 +44,8 @@ import (
 // Router wires HTTP routes to use case services.
 type Router struct {
 	log                    *slog.Logger
+	accessLogEnabled       bool
+	httpObserver           HTTPObserver
 	auth                   *Authenticator
 	eng                    *enguc.Service
 	sca                    *scauc.Service
@@ -94,6 +96,7 @@ type Router struct {
 	vulnerabilityRead      *vulnerabilityinteluc.Service
 	vulnerabilityActions   *vulnerabilityactionuc.Service
 	sla                    *slauc.Service
+	readiness              readinessConfig
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -214,6 +217,13 @@ func (rt *Router) SetVulnerabilityActions(actions *vulnerabilityactionuc.Service
 // SetSLA wires the opt-in risk-based remediation governance API.
 func (rt *Router) SetSLA(service *slauc.Service) { rt.sla = service }
 
+// SetObservability installs the optional bounded HTTP observer and access-log policy.
+// A nil observer disables metrics feed but access logging (if enabled) still runs.
+func (rt *Router) SetObservability(accessLogEnabled bool, observer HTTPObserver) {
+	rt.accessLogEnabled = accessLogEnabled
+	rt.httpObserver = observer
+}
+
 // NewRouter builds the HTTP router.
 func NewRouter(log *slog.Logger, auth *Authenticator, eng *enguc.Service, sca *scauc.Service, aup *aupuc.Service, findings *findingsuc.Service, export *exportuc.Service, report *reportuc.Service, evidence *evidenceuc.Service, recon *reconuc.Service, logs ports.LogStream, transfer *transferuc.Service, audit *audituc.Service, vex *vexuc.Service, users *usersuc.Service, credentials *credentialsuc.Service) *Router {
 	return &Router{log: log, auth: auth, eng: eng, sca: sca, aup: aup, findings: findings, export: export, report: report, evidence: evidence, recon: recon, logs: logs, transfer: transfer, audit: audit, vex: vex, users: users, credentials: credentials}
@@ -266,8 +276,9 @@ func (rt *Router) routes() *http.ServeMux {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "synapse-api"})
 	})
+	mux.HandleFunc("GET /readyz", rt.ready)
 	// Identity/consent routes carry NO role gate (a brand-new principal must reach them): /aup,
-	// /aup/accept, /me, and public /healthz. EVERY other route below is registered through
+	// /aup/accept, /me, and public probes. EVERY other route below is registered through
 	// authz(perm, …) – the single RBAC chokepoint, so no handler decides its own role
 	// check. Engagement child routes compose authz OUTSIDE withEngTenant: the role 403 is decided
 	// first and cheaply (without revealing whether a cross-tenant engagement exists); a role-allowed
@@ -584,33 +595,46 @@ func (rt *Router) routes() *http.ServeMux {
 // raw-vs-cleaned path mismatch).
 func (rt *Router) Handler() http.Handler {
 	// Public: no auth and no AUP gate.
-	public := map[string]bool{"/healthz": true}
+	public := map[string]bool{"/healthz": true, "/readyz": true}
 	// Authenticated but exempt from the AUP gate (so the operator can read + accept).
 	aupExempt := map[string]bool{
 		"/healthz":           true,
+		"/readyz":            true,
 		"/api/v1/aup":        true,
 		"/api/v1/aup/accept": true,
 		"/api/v1/me":         true,
 	}
-	human := rt.auth.Middleware(public, rt.requireAUP(aupExempt, rt.routes()))
+	routes := rt.routes()
+	human := rt.auth.Middleware(public, rt.requireAUP(aupExempt, routes))
+	// Attach a method-aware route pattern before auth/AUP can reject a known human
+	// route. ServeMux returns an empty pattern for unknown paths and method mismatches.
+	human = annotateRoutePattern(routes, human)
+	var complete http.Handler
 	if rt.fleet == nil {
-		return normalizePath(human)
+		complete = normalizePath(human)
+	} else {
+		// The untrusted agent transport is a separate auth plane. Mount its exact
+		// subtrees so operator routes under /api/v1/fleet remain on the human chain.
+		top := http.NewServeMux()
+		agentPlane := rt.fleet.handler()
+		for _, mount := range fleetAgentPlaneMounts() {
+			top.Handle(mount, agentPlane)
+		}
+		top.Handle("/", human)
+		complete = normalizePath(top)
 	}
-	// The untrusted agent transport is a SEPARATE auth plane: it must not pass through the human
-	// bearer-token authenticator or the AUP gate. Mount it on the EXACT agent-plane subtrees rather
-	// than the whole /api/v1/fleet/ prefix. A prefix mount also swallows the OPERATOR routes that
-	// live under /api/v1/fleet (coverage + agent health), which the agent mux does not serve, so
-	// every one of them answered 404 instead of reaching the human chain. The mounts are derived
-	// from fleetAgentPlaneRoutes, the same declaration fleetRouter.handler() registers, so the two
-	// planes cannot drift apart. normalizePath wraps the whole top mux once, so both planes are
-	// normalized without double-wrapping.
-	top := http.NewServeMux()
-	agentPlane := rt.fleet.handler()
-	for _, mount := range fleetAgentPlaneMounts() {
-		top.Handle(mount, agentPlane)
-	}
-	top.Handle("/", human)
-	return normalizePath(top)
+	// Instrument wraps the entire normalized human+fleet handler exactly once.
+	return Instrument(complete, rt.log, rt.accessLogEnabled, rt.httpObserver)
+}
+
+func annotateRoutePattern(mux *http.ServeMux, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, pattern := mux.Handler(r)
+		if pattern != "" && pattern != "/" {
+			r.Pattern = pattern
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // normalizePath rejects non-canonical request paths (e.g. `/a//b`, `/a/../b`,

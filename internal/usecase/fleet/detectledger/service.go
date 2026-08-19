@@ -10,7 +10,6 @@ package detectledger
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -31,9 +30,16 @@ const evidenceKindDetection = "detection"
 // composition root (like offensivepolicy's EvidenceSealer), so this package never depends on the
 // concrete vault or the domain Evidence shape.
 type EvidenceChain interface {
-	// Seal appends content under the given kind, bound to the engagement's chain head, and returns the
-	// new link's id.
-	Seal(ctx context.Context, engagementID shared.ID, kind string, content []byte, createdBy string) (shared.ID, error)
+	// SealOnce appends content under the given kind, bound to the engagement's chain head, and returns
+	// the new link's id. It is IDEMPOTENT on idempotencyKey (the detection id): if a link was already
+	// sealed for (engagementID, idempotencyKey) it returns that existing link's id and appends NOTHING.
+	//
+	// This is what closes D3 (#610): sealing a detection into the permanent chain and writing its
+	// projection row are two stores with no shared transaction, so a projection write that fails AFTER a
+	// successful seal would, on retry, seal a SECOND chain link for the same detection. Keying the seal on
+	// the detection id makes the retry return the first link instead — a detection can never be sealed
+	// into the chain twice.
+	SealOnce(ctx context.Context, engagementID shared.ID, kind string, idempotencyKey string, content []byte, createdBy string) (shared.ID, error)
 	// Verify checks the engagement's chain and returns a non-nil error (wrapping evidence.ErrChainBroken)
 	// when it is broken, so a dependent report can be blocked.
 	//
@@ -45,10 +51,12 @@ type EvidenceChain interface {
 	Verify(ctx context.Context, engagementID shared.ID) error
 }
 
-// AgentKeyResolver returns the enrolment public key for an agent (#408), used to verify a batch's
-// signature. An agent with no known key cannot have its batches admitted — fail closed.
+// AgentKeyResolver resolves the content-signing key an incoming batch names (#607, A0.2). The batch
+// carries a KeyID; the resolver returns the AgentSigningKey bound to (agentID, keyID), and Ingest gates
+// on purpose + validity window + revocation + agent binding via VerifyBatchWithKey before trusting the
+// signature. An unknown key resolves to an error and the batch is refused — fail closed.
 type AgentKeyResolver interface {
-	AgentPublicKey(ctx context.Context, agentID shared.ID) (ed25519.PublicKey, error)
+	ResolveSigningKey(ctx context.Context, agentID shared.ID, keyID string) (fleetagent.AgentSigningKey, error)
 }
 
 // IngestItem is one detection in a batch together with the asset it was observed on (#423 requirement 5:
@@ -107,15 +115,22 @@ func (s *Service) Ingest(ctx context.Context, batch fleetagent.AgentBatch, items
 		return IngestResult{}, fmt.Errorf("%w: detection ingest requires a tenant in context", shared.ErrValidation)
 	}
 
-	// Signature: fail closed. An agent with no known key, or a batch that does not verify, is refused
-	// before any detection is sealed.
-	pub, err := s.keys.AgentPublicKey(ctx, batch.AgentID)
+	// Signature: fail closed under the keyed lifecycle (#607). Resolve the signing key the batch names by
+	// KeyID; an unknown key admits nothing. VerifyBatchWithKey then refuses — before any detection is
+	// sealed — a key of the wrong purpose, a key bound to another agent, an envelope naming a different
+	// key, a pending/expired/revoked key, or a bad signature.
+	key, err := s.keys.ResolveSigningKey(ctx, batch.AgentID, batch.KeyID)
 	if err != nil {
-		return IngestResult{}, fmt.Errorf("%w: no key for agent %s: %v", shared.ErrForbidden, batch.AgentID, err)
-	}
-	if err := fleetagent.VerifyBatch(pub, batch); err != nil {
 		s.recordAudit(ctx, "detection.batch_rejected", batch.AgentID.String(), map[string]string{
-			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence), "reason": "bad_signature",
+			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
+			"key_id": batch.KeyID, "reason": "unknown_key",
+		})
+		return IngestResult{}, fmt.Errorf("%w: no signing key %s for agent %s: %v", shared.ErrForbidden, batch.KeyID, batch.AgentID, err)
+	}
+	if err := fleetagent.VerifyBatchWithKey(key, fleetagent.PurposeDetectionBatch, s.clock.Now().UTC(), batch); err != nil {
+		s.recordAudit(ctx, "detection.batch_rejected", batch.AgentID.String(), map[string]string{
+			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
+			"key_id": batch.KeyID, "reason": "unverified",
 		})
 		return IngestResult{}, err
 	}
@@ -162,15 +177,19 @@ func (s *Service) Ingest(ctx context.Context, batch fleetagent.AgentBatch, items
 		if got := fleetagent.DetectionContentHash(payload, it.AssetID); got != refByID[it.ID].ContentSHA256 {
 			return result, fmt.Errorf("%w: detection %s content does not match its signed digest", shared.ErrValidation, it.ID)
 		}
-		// Idempotent resume: skip a detection already sealed (e.g. a retry after a partial batch), so it is
-		// never sealed into the chain twice.
-		if exists, err := s.records.HasDetection(ctx, it.ID); err != nil {
+		// Fast-path idempotent resume: skip a detection whose projection row already exists FOR THIS
+		// engagement (a retry after a fully-completed item). The skip is engagement-scoped to match the
+		// per-engagement seal below — a tenant-wide skip would silently drop the same id in another
+		// engagement. The AUTHORITATIVE no-double-seal guarantee is SealOnce, keyed on (engagement,
+		// detection id) — so a retry after a seal-then-append crash (no projection row, so HasDetection
+		// is false here) still cannot seal a second chain link.
+		if exists, err := s.records.HasDetection(ctx, batch.EngagementID, it.ID); err != nil {
 			return result, fmt.Errorf("check detection %s: %w", it.ID, err)
 		} else if exists {
 			result.Skipped = append(result.Skipped, it.ID)
 			continue
 		}
-		evID, err := s.chain.Seal(ctx, batch.EngagementID, evidenceKindDetection, payload, batch.AgentID.String())
+		evID, err := s.chain.SealOnce(ctx, batch.EngagementID, evidenceKindDetection, it.ID.String(), payload, batch.AgentID.String())
 		if err != nil {
 			return result, fmt.Errorf("seal detection %s: %w", it.ID, err)
 		}

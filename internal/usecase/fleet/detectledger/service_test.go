@@ -22,25 +22,50 @@ type sealCall struct {
 	engagement shared.ID
 	kind       string
 	createdBy  string
+	key        string
 }
 
 type fakeChain struct {
 	mu      sync.Mutex
-	seals   []sealCall
+	seals   []sealCall           // one entry per link ACTUALLY appended; an idempotent replay adds none
+	byKey   map[string]shared.ID // (engagement, idempotency key) -> the id of the link sealed for it
 	n       int
 	broken  bool
 	sealErr error
 }
 
-func (c *fakeChain) Seal(_ context.Context, eng shared.ID, kind string, _ []byte, by string) (shared.ID, error) {
+// sealKey namespaces the idempotency key by engagement, mirroring the real chain: the key is unique only
+// WITHIN an engagement, so the same detection id in two engagements seals two distinct links.
+func sealKey(eng shared.ID, key string) string { return string(eng) + "\x00" + key }
+
+// SealOnce models the real chain's idempotency contract: a repeated (engagement, key) returns the existing
+// link and appends NOTHING new, so a test can prove a detection is sealed into the chain at most once.
+func (c *fakeChain) SealOnce(_ context.Context, eng shared.ID, kind, key string, _ []byte, by string) (shared.ID, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.sealErr != nil {
 		return "", c.sealErr
 	}
-	c.seals = append(c.seals, sealCall{eng, kind, by})
+	if c.byKey == nil {
+		c.byKey = map[string]shared.ID{}
+	}
+	k := sealKey(eng, key)
+	if id, ok := c.byKey[k]; ok {
+		return id, nil // idempotent: same (engagement, key) -> same link, nothing appended
+	}
 	c.n++
-	return shared.ID("ev-" + itoa(c.n)), nil
+	id := shared.ID("ev-" + itoa(c.n))
+	c.byKey[k] = id
+	c.seals = append(c.seals, sealCall{eng, kind, by, key})
+	return id, nil
+}
+
+// idFor returns the link id sealed for (engagement, key), read under the same lock that guards byKey, so a
+// test can inspect it without racing a concurrent SealOnce.
+func (c *fakeChain) idFor(eng shared.ID, key string) shared.ID {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.byKey[sealKey(eng, key)]
 }
 func (c *fakeChain) Verify(_ context.Context, _ shared.ID) error {
 	if c.broken {
@@ -59,15 +84,17 @@ func (c *fakeChain) kinds() []string {
 }
 
 type fakeKeys struct {
-	pub   ed25519.PublicKey
-	known map[shared.ID]bool
+	byAgent map[shared.ID]fleetagent.AgentSigningKey
 }
 
-func (k *fakeKeys) AgentPublicKey(_ context.Context, id shared.ID) (ed25519.PublicKey, error) {
-	if k.known[id] {
-		return k.pub, nil
+// ResolveSigningKey returns the key bound to (agentID, keyID), fail-closed: an unknown agent or a KeyID
+// that does not match the agent's registered key resolves to an error, so the batch is refused.
+func (k *fakeKeys) ResolveSigningKey(_ context.Context, agentID shared.ID, keyID string) (fleetagent.AgentSigningKey, error) {
+	key, ok := k.byAgent[agentID]
+	if !ok || key.KeyID != keyID {
+		return fleetagent.AgentSigningKey{}, errors.New("unknown signing key")
 	}
-	return nil, errors.New("unknown agent")
+	return key, nil
 }
 
 type fakeAudit struct {
@@ -129,6 +156,25 @@ func itoa(n int) string {
 	return string(b)
 }
 
+// failingRecords wraps a real record store and fails the next N AppendDetection calls, to simulate a
+// projection-write failure AFTER the seal has succeeded — the exact D3 crash window.
+type failingRecords struct {
+	ports.DetectionRecordStore
+	mu         sync.Mutex
+	failAppend int
+}
+
+func (f *failingRecords) AppendDetection(ctx context.Context, r detection.Record) error {
+	f.mu.Lock()
+	if f.failAppend > 0 {
+		f.failAppend--
+		f.mu.Unlock()
+		return errors.New("projection store unavailable")
+	}
+	f.mu.Unlock()
+	return f.DetectionRecordStore.AppendDetection(ctx, r)
+}
+
 // ---- harness ----------------------------------------------------------------------------------------
 
 type harness struct {
@@ -137,6 +183,18 @@ type harness struct {
 	audit *fakeAudit
 	store *memory.DetectionRecordStore
 	priv  ed25519.PrivateKey
+	key   fleetagent.AgentSigningKey
+}
+
+// mkSigningKey mints a detection-batch signing key bound to agent whose validity window comfortably
+// contains the harness clock (Unix 1000), so a well-formed batch verifies under the keyed lifecycle.
+func mkSigningKey(t *testing.T, agent shared.ID, pub ed25519.PublicKey) fleetagent.AgentSigningKey {
+	t.Helper()
+	key, err := fleetagent.NewSigningKey(agent, fleetagent.PurposeDetectionBatch, pub, time.Unix(1, 0), time.Unix(1<<31, 0))
+	if err != nil {
+		t.Fatalf("NewSigningKey: %v", err)
+	}
+	return key
 }
 
 func newHarness(t *testing.T, retention time.Duration) *harness {
@@ -145,12 +203,13 @@ func newHarness(t *testing.T, retention time.Duration) *harness {
 	chain := &fakeChain{}
 	audit := &fakeAudit{}
 	store := memory.NewDetectionRecordStore()
-	keys := &fakeKeys{pub: pub, known: map[shared.ID]bool{"agent:1": true}}
+	key := mkSigningKey(t, "agent:1", pub)
+	keys := &fakeKeys{byAgent: map[shared.ID]fleetagent.AgentSigningKey{"agent:1": key}}
 	svc, err := NewService(store, chain, keys, audit, fixedClock{t: time.Unix(1000, 0)}, &seqIDs{}, retention)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &harness{svc: svc, chain: chain, audit: audit, store: store, priv: priv}
+	return &harness{svc: svc, chain: chain, audit: audit, store: store, priv: priv, key: key}
 }
 
 func mkDetection(t *testing.T, comm string) detection.Detection {
@@ -183,7 +242,7 @@ func refsFor(t *testing.T, items []IngestItem) []fleetagent.DetectionRef {
 
 func (h *harness) signedBatch(t *testing.T, seq uint64, items []IngestItem) fleetagent.AgentBatch {
 	t.Helper()
-	b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: "eng-1", Sequence: seq, Detections: refsFor(t, items)}
+	b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: "eng-1", Sequence: seq, KeyID: h.key.KeyID, Detections: refsFor(t, items)}
 	b.Signature = fleetagent.SignBatch(h.priv, b)
 	return b
 }
@@ -261,7 +320,7 @@ func TestIngestRefusesContentTamper(t *testing.T) {
 func TestIngestRefusesUnknownAgent(t *testing.T) {
 	h := newHarness(t, 0)
 	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
-	b := fleetagent.AgentBatch{AgentID: "agent:unknown", EngagementID: "eng-1", Sequence: 1, Detections: refsFor(t, items)}
+	b := fleetagent.AgentBatch{AgentID: "agent:unknown", EngagementID: "eng-1", Sequence: 1, KeyID: h.key.KeyID, Detections: refsFor(t, items)}
 	b.Signature = fleetagent.SignBatch(h.priv, b)
 	if _, err := h.svc.Ingest(tctx(), b, items); !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("an agent with no known key must be refused (fail closed), got %v", err)
@@ -324,7 +383,7 @@ func TestIngestRequiresMembershipMatchAndTenant(t *testing.T) {
 	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
 	// Membership mismatch: batch names d1+d2 but only d1 supplied.
 	extra := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}, {ID: "d2", Detection: mkDetection(t, "top"), AssetID: "asset-1"}}
-	b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: "eng-1", Sequence: 1, Detections: refsFor(t, extra)}
+	b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: "eng-1", Sequence: 1, KeyID: h.key.KeyID, Detections: refsFor(t, extra)}
 	b.Signature = fleetagent.SignBatch(h.priv, b)
 	if _, err := h.svc.Ingest(tctx(), b, items); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("membership mismatch must be a validation error, got %v", err)
@@ -416,5 +475,150 @@ func TestExpireIsAuditedAndRequiresActorReason(t *testing.T) {
 	}
 	if e := h.audit.last["detection.expired"]; e.Actor != "operator" || e.Metadata["reason"] != "retention" {
 		t.Errorf("expiry audit must carry actor + reason, got %+v", e)
+	}
+}
+
+// TestIngestNeverDoubleSealsAfterProjectionFailure proves the D3 fix (#610): sealing a detection into
+// the permanent chain and writing its projection row are two stores with no shared transaction. If the
+// projection write fails AFTER a successful seal, a retry finds no row (HasDetection is false) and, with
+// a naive Seal, would append a SECOND chain link for the same detection. Because SealOnce is keyed on the
+// detection id, the retry returns the first link instead — the detection is sealed exactly once.
+func TestIngestNeverDoubleSealsAfterProjectionFailure(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	chain := &fakeChain{}
+	audit := &fakeAudit{}
+	records := &failingRecords{DetectionRecordStore: memory.NewDetectionRecordStore(), failAppend: 1}
+	key := mkSigningKey(t, "agent:1", pub)
+	keys := &fakeKeys{byAgent: map[shared.ID]fleetagent.AgentSigningKey{"agent:1": key}}
+	svc, err := NewService(records, chain, keys, audit, fixedClock{t: time.Unix(1000, 0)}, &seqIDs{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
+	b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: "eng-1", Sequence: 1, KeyID: key.KeyID, Detections: refsFor(t, items)}
+	b.Signature = fleetagent.SignBatch(priv, b)
+
+	// First ingest: the seal succeeds, then the injected projection-write failure surfaces.
+	if _, err := svc.Ingest(tctx(), b, items); err == nil {
+		t.Fatal("expected the injected projection-write failure to surface")
+	}
+	if got := len(chain.kinds()); got != 1 {
+		t.Fatalf("the detection must have been sealed exactly once before the crash, got %d", got)
+	}
+	if recs, _ := records.ListDetections(tctx(), "eng-1"); len(recs) != 0 {
+		t.Fatalf("the projection write failed, so no row should exist yet, got %d", len(recs))
+	}
+
+	// Retry the SAME batch. The row is still missing (HasDetection is false), so a naive Seal would run
+	// again — SealOnce must return the first link instead.
+	res, err := svc.Ingest(tctx(), b, items)
+	if err != nil {
+		t.Fatalf("the retry must complete the projection, got %v", err)
+	}
+	if got := len(chain.kinds()); got != 1 {
+		t.Fatalf("D3: a detection must never be sealed into the chain twice, got %d links", got)
+	}
+	if len(res.SealedRecords) != 1 {
+		t.Fatalf("the retry must complete the previously-unwritten projection row, got %+v", res)
+	}
+	recs, _ := records.ListDetections(tctx(), "eng-1")
+	sealed := chain.idFor("eng-1", "d1")
+	if len(recs) != 1 || recs[0].EvidenceID != sealed {
+		t.Fatalf("the row must bind to the single sealed link %q, got %+v", sealed, recs)
+	}
+}
+
+// TestIngestSealsSameDetectionIDInDistinctEngagements proves the seal namespace is per-engagement: the
+// same detection id delivered under two different engagements is two distinct detections and must each be
+// sealed — the engagement-scoped HasDetection skip must NOT suppress the second (the D3 cross-engagement
+// loss/suppression vector). Both links are sealed and both projection rows are written.
+func TestIngestSealsSameDetectionIDInDistinctEngagements(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	chain := &fakeChain{}
+	audit := &fakeAudit{}
+	records := memory.NewDetectionRecordStore()
+	key := mkSigningKey(t, "agent:1", pub)
+	keys := &fakeKeys{byAgent: map[shared.ID]fleetagent.AgentSigningKey{"agent:1": key}}
+	svc, err := NewService(records, chain, keys, audit, fixedClock{t: time.Unix(1000, 0)}, &seqIDs{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
+	for _, eng := range []shared.ID{"eng-1", "eng-2"} {
+		b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: eng, Sequence: 1, KeyID: key.KeyID, Detections: refsFor(t, items)}
+		b.Signature = fleetagent.SignBatch(priv, b)
+		res, err := svc.Ingest(tctx(), b, items)
+		if err != nil {
+			t.Fatalf("ingest into %s: %v", eng, err)
+		}
+		if len(res.SealedRecords) != 1 || len(res.Skipped) != 0 {
+			t.Fatalf("%s: the detection must be sealed, not skipped, got %+v", eng, res)
+		}
+	}
+	if got := len(chain.kinds()); got != 2 {
+		t.Fatalf("the same id in two engagements must seal two distinct links, got %d", got)
+	}
+	l1, l2 := chain.idFor("eng-1", "d1"), chain.idFor("eng-2", "d1")
+	if l1 == "" || l2 == "" || l1 == l2 {
+		t.Fatalf("each engagement must get its own link, got %q and %q", l1, l2)
+	}
+	// The projection must hold BOTH rows — one per engagement — each bound to its own sealed link. A
+	// projection keyed on (tenant, id) alone would drop one of these silently; the (tenant, engagement,
+	// id) key keeps them distinct. Assert per engagement so this test actually verifies the claim.
+	r1, _ := records.ListDetections(tctx(), "eng-1")
+	if len(r1) != 1 || r1[0].ID != "d1" || r1[0].EvidenceID != l1 {
+		t.Fatalf("eng-1 must retain its own row bound to link %q, got %+v", l1, r1)
+	}
+	r2, _ := records.ListDetections(tctx(), "eng-2")
+	if len(r2) != 1 || r2[0].ID != "d1" || r2[0].EvidenceID != l2 {
+		t.Fatalf("eng-2 must retain its own row bound to link %q, got %+v", l2, r2)
+	}
+}
+
+// TestIngestRefusesUnknownKeyID: the agent is known but the batch names a KeyID the resolver cannot
+// resolve — fail closed (ErrForbidden), nothing sealed, and the rejection is audited.
+func TestIngestRefusesUnknownKeyID(t *testing.T) {
+	h := newHarness(t, 0)
+	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
+	b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: "eng-1", Sequence: 1, KeyID: "kid-does-not-exist", Detections: refsFor(t, items)}
+	b.Signature = fleetagent.SignBatch(h.priv, b)
+	if _, err := h.svc.Ingest(tctx(), b, items); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("an unresolvable KeyID must be refused (fail closed), got %v", err)
+	}
+	if len(h.chain.kinds()) != 0 {
+		t.Fatal("nothing may be sealed when the key does not resolve")
+	}
+	if !h.audit.has("detection.batch_rejected") {
+		t.Error("an unknown-key rejection must be audited")
+	}
+}
+
+// TestIngestRefusesRevokedKey: the batch is validly signed by a key that resolves, but the key is revoked
+// at ingest time — VerifyBatchWithKey fails closed, so the batch is refused and nothing is sealed.
+func TestIngestRefusesRevokedKey(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	chain := &fakeChain{}
+	audit := &fakeAudit{}
+	store := memory.NewDetectionRecordStore()
+	key := mkSigningKey(t, "agent:1", pub)
+	key.RevokedAt = time.Unix(500, 0) // revoked before the harness clock (Unix 1000)
+	keys := &fakeKeys{byAgent: map[shared.ID]fleetagent.AgentSigningKey{"agent:1": key}}
+	svc, err := NewService(store, chain, keys, audit, fixedClock{t: time.Unix(1000, 0)}, &seqIDs{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
+	b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: "eng-1", Sequence: 1, KeyID: key.KeyID, Detections: refsFor(t, items)}
+	b.Signature = fleetagent.SignBatch(priv, b)
+	if _, err := svc.Ingest(tctx(), b, items); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("a revoked key must fail closed, got %v", err)
+	}
+	if len(chain.kinds()) != 0 {
+		t.Fatal("nothing may be sealed under a revoked key")
+	}
+	if !audit.has("detection.batch_rejected") {
+		t.Error("a revoked-key rejection must be audited")
 	}
 }

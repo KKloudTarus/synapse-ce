@@ -88,3 +88,16 @@ func (m *MinIO) Get(ctx context.Context, key string) ([]byte, error) {
 	}
 	return data, nil
 }
+
+// CheckReady verifies that the configured evidence bucket remains reachable. It performs no object
+// reads or writes and is safe to call from the unauthenticated readiness endpoint.
+func (m *MinIO) CheckReady(ctx context.Context) error {
+	exists, err := m.client.BucketExists(ctx, m.bucket)
+	if err != nil {
+		return fmt.Errorf("minio bucket readiness: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("minio bucket readiness: bucket is missing")
+	}
+	return nil
+}

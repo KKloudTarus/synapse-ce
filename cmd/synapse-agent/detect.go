@@ -15,14 +15,33 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/detectsink"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
 	detectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detect"
 )
+
+// detectionIdentity derives the canonical (host, agent) identity the detection engine tags its events
+// and detections with, from the ENROLLED credential — never from the mutable display name (cfg.name).
+//
+// This is the D1 fix (#606): the server issues a canonical AgentID at enrolment and resolves the asset
+// binding from it, so renaming an agent must not forge a new data-plane identity, two hosts sharing a
+// display name must not collide, and signing-key lookup by enrolled AgentID must not miss. The agent
+// runs one detection sensor for its own host, so that single canonical AgentID is the identity for both
+// the host and agent tags here; the control plane remains authoritative and binds the asset on ingest.
+// Returns ok=false when the credential carries no AgentID, so detection fails closed rather than
+// starting under an empty or attacker-influenced identity.
+func detectionIdentity(cred fleetclient.Credential) (host, agent shared.ID, ok bool) {
+	id := shared.ID(strings.TrimSpace(cred.AgentID))
+	if id == "" {
+		return "", "", false
+	}
+	return id, id, true
+}
 
 // startDetection launches the agent-side detection engine (#422) in the background when configured. It
 // is strictly best-effort and isolated from the inventory loop: on a host where the eBPF sensor cannot
 // run (non-Linux, no root, missing kernel features) it logs the reason and returns, leaving the agent's
 // normal work untouched. Detection is OFF unless -detect-classes / SYNAPSE_DETECT_CLASSES is set.
-func (r *runner) startDetection(ctx context.Context) {
+func (r *runner) startDetection(ctx context.Context, cred fleetclient.Credential) {
 	classes, err := parseDetectClasses(r.cfg.detectClasses)
 	if err != nil {
 		log.Printf("detection: %v; detection engine disabled", err)
@@ -32,8 +51,11 @@ func (r *runner) startDetection(ctx context.Context) {
 		return // off by default
 	}
 
-	host := shared.ID(r.cfg.name)
-	agent := shared.ID("agent:" + r.cfg.name)
+	host, agent, ok := detectionIdentity(cred)
+	if !ok {
+		log.Print("detection: enrolled credential has no canonical agent id; detection engine disabled")
+		return
+	}
 	sinkPath := filepath.Join(r.cfg.stateDir, "detections.jsonl")
 	sink, err := detectsink.New(sinkPath)
 	if err != nil {

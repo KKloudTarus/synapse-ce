@@ -35,6 +35,20 @@ type JobStatusReader interface {
 	JobStatus(ctx context.Context, id string) (JobStatus, error)
 }
 
+// AggregateJobQueueStatsReader reads queue totals across all tenants for
+// operator-only telemetry. Implementations retain tenant isolation internally
+// (mirroring Claim's per-tenant RLS scoping) and never expose tenant labels.
+type AggregateJobQueueStatsReader interface {
+	AggregateJobQueueStats(ctx context.Context, kinds ...string) (JobStats, error)
+}
+
+// SCAObserver receives terminal SCA outcomes. Durations are recorded only for
+// completed synchronous or asynchronous scan execution, not queue/gate failures.
+type SCAObserver interface {
+	ObserveSCAOutcome(outcome string)
+	ObserveSCAScan(duration time.Duration, outcome string)
+}
+
 // JobQueue is a durable, at-least-once work queue with a visibility timeout.
 // It replaces the in-process jobs.Pool (which loses queued work on restart and
 // cannot reach a separate worker process). Claim hands a job to exactly one worker for

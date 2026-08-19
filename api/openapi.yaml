@@ -7,7 +7,7 @@ info:
     Authorized security testing only: every scan is gated by an engagement's
     scope and authorization window, enforced server-side.
 
-    Auth: all endpoints except `/healthz` require a bearer token
+    Auth: all endpoints except `/healthz` and `/readyz` require a bearer token
     (`Authorization: Bearer <SYNAPSE_API_TOKEN>`). After authentication, every
     endpoint except the AUP endpoints also requires that the current Acceptable
     Use Policy has been accepted, else `403`.
@@ -59,6 +59,24 @@ paths:
                 properties:
                   status: {type: string, example: ok}
                   service: {type: string, example: synapse-api}
+
+  /readyz:
+    get:
+      tags: [health]
+      summary: Dependency readiness probe
+      description: Checks PostgreSQL, embedded migration state, and the object store when configured.
+      security: []
+      responses:
+        "200":
+          description: Every configured dependency is ready
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Readiness"}
+        "503":
+          description: One or more configured dependencies failed or timed out
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Readiness"}
 
   /api/v1/aup:
     get:
@@ -1844,6 +1862,19 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
 
   schemas:
+    Readiness:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [ok, failed]
+
     SLATier:
       type: string
       enum: [emergency, critical, high, medium, low, exception]

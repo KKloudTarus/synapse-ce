@@ -149,7 +149,7 @@ type fakeDetectionStore struct {
 }
 
 func (s *fakeDetectionStore) AppendDetection(_ context.Context, _ detection.Record) error { return nil }
-func (s *fakeDetectionStore) HasDetection(_ context.Context, _ shared.ID) (bool, error) {
+func (s *fakeDetectionStore) HasDetection(_ context.Context, _, _ shared.ID) (bool, error) {
 	return false, nil
 }
 func (s *fakeDetectionStore) ListDetections(_ context.Context, _ shared.ID) ([]detection.Record, error) {

@@ -19,6 +19,22 @@ type errorBody struct {
 	Error string `json:"error"`
 }
 
+func requestLogger(w http.ResponseWriter, fallback *slog.Logger) *slog.Logger {
+	for w != nil {
+		if carrier, ok := w.(requestLoggerResponseWriter); ok {
+			if log := carrier.requestLogger(); log != nil {
+				return log
+			}
+		}
+		unwrapper, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			break
+		}
+		w = unwrapper.Unwrap()
+	}
+	return fallback
+}
+
 // writeError maps domain sentinel errors to HTTP status codes.
 func writeError(w http.ResponseWriter, log *slog.Logger, err error) {
 	switch {
@@ -38,7 +54,7 @@ func writeError(w http.ResponseWriter, log *slog.Logger, err error) {
 		}
 		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: err.Error()})
 	default:
-		log.Error("request failed", "err", err)
+		requestLogger(w, log).Error("request failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, errorBody{Error: "internal error"})
 	}
 }

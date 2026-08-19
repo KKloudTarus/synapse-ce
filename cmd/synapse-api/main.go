@@ -13,6 +13,8 @@ import (
 	"crypto/rand"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -21,6 +23,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/httpapi"
+	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
@@ -194,6 +197,29 @@ func requireJudgmentsOrSkip(log *slog.Logger, hasJudgment bool, envKey, name str
 	return false
 }
 
+// metricsAddrIsLoopback reports whether addr binds only to a loopback interface. The
+// metrics listener is intentionally unauthenticated, so a non-loopback bind exposes
+// aggregate operational metrics to anything that can reach it; callers use this to
+// decide whether to warn. It fails loud (returns false, i.e. "warn") on anything it
+// cannot confidently classify as loopback-only.
+func metricsAddrIsLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "" {
+		return false // empty host binds all interfaces
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
+}
+
 func migrationDSNForStartup(cfg config.Config) (string, error) {
 	migrationDSN := cfg.DBMigrationDSN
 	if migrationDSN == "" {
@@ -296,6 +322,7 @@ func main() {
 	var approvalStore ports.ApprovalStore         // durable HITL approval queue
 	var planStore ports.PlanStore                 // agent execution-plan DAG
 	var decisionStore ports.DecisionStore         // structured decision log
+	readinessChecks := map[string]httpapi.ReadinessCheck{}
 
 	// Credential vault cipher: a configured master key gives durable
 	// encryption; an empty key yields an ephemeral one (dev only – stored secrets won't
@@ -360,6 +387,12 @@ func main() {
 			os.Exit(1)
 		}
 		defer pool.Close()
+		readinessChecks["database"] = func(ctx context.Context) error {
+			return postgres.CheckDatabaseReady(ctx, pool)
+		}
+		readinessChecks["migrations"] = func(ctx context.Context) error {
+			return postgres.CheckMigrationsReady(ctx, pool)
+		}
 		// Single-instance guard: until horizontal scaling the repos
 		// ignore tenant_id and there is no leader election, so two writers would race. A
 		// session advisory lock makes the assumption explicit + enforced – a second
@@ -603,6 +636,7 @@ func main() {
 			os.Exit(1)
 		}
 		blobStore = bs
+		readinessChecks["object_store"] = bs.CheckReady
 		log.Info("blob store: minio/s3", "bucket", cfg.BlobBucket)
 	} else {
 		blobStore = blob.NewMemory()
@@ -1150,9 +1184,28 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
+	router.SetReadinessChecks(readinessChecks)
 	if slaService != nil {
 		router.SetSLA(slaService)
 	}
+	// Metrics stay off by default and, when enabled, are exposed only on the separate
+	// loopback-by-default listener (never bearer-protected, never instrumented itself).
+	var metrics *observability.Collectors
+	var httpObserver httpapi.HTTPObserver // kept as a nil INTERFACE unless metrics is built
+	if cfg.MetricsEnabled {
+		queueReader, ok := vulnerabilityQueue.(ports.AggregateJobQueueStatsReader)
+		if !ok {
+			log.Error("metrics enabled but the configured job queue does not support aggregate stats")
+			os.Exit(1)
+		}
+		metrics = observability.New(queueReader)
+		httpObserver = metrics
+		scaService.SetObserver(metrics)
+		if !metricsAddrIsLoopback(cfg.MetricsAddr) {
+			log.Warn("metrics listener is bound to a non-loopback address; it is unauthenticated and exposes aggregate operational metrics to anything that can reach it", "addr", cfg.MetricsAddr)
+		}
+	}
+	router.SetObservability(cfg.AccessLogEnabled, httpObserver)
 	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
 		ProviderSync: cfg.VulnerabilityProviderSyncEnabled, OccurrenceWrites: cfg.VulnerabilityOccurrenceWritesEnabled,
 		FindingProjection: cfg.VulnerabilityFindingProjectionEnabled, Actions: cfg.VulnerabilityActionsEnabled,
@@ -1609,6 +1662,19 @@ func main() {
 		// evidence chain) plugs the same detectionRecordStore into detectledger.NewService once the
 		// agent→control-plane batch transport + agent signing-key resolver land; the read surface is live
 		// now so a detection is queryable and tenant-scoped through the same chokepoint.
+		// A0.5 (#610) PREREQUISITE — before wiring detectledger.NewService here, the EvidenceChain passed
+		// to it MUST implement SealOnce as a truly key-idempotent seal, keyed on (engagement, detection id)
+		// and atomic with the chain append (e.g. an ON CONFLICT (engagement_id, idempotency_key) DO NOTHING
+		// insert that returns the existing link). A keyless Seal, or a non-atomic check-then-append, reopens
+		// D3 (a seal-then-crash retry appends a duplicate permanent link). evidence.Service.SealOnce is the
+		// A4 deliverable that provides this; do not bridge NewService onto plain Seal.
+		// A0.2 (#607) — the detectledger.AgentKeyResolver that NewService needs is satisfied by the agent
+		// signing-key registry (ports.AgentSigningKeyStore → postgres.NewAgentSigningKeyRepository /
+		// memory.NewAgentSigningKeyStore): its Resolve(agentID, keyID) returns the AgentSigningKey the batch
+		// names, and VerifyBatchWithKey gates purpose+window+revocation fail-closed. The store is the durable
+		// backing; still deferred to A4 is the agent-plane registration endpoint (an agent posts its ed25519
+		// signing public key + a ProveKeyPossession proof, bound to its canonical AgentID) plus the operator
+		// rotate/revoke routes — none can be wired until the agent→control-plane transport exists.
 		if detectionReader, drerr := detectledger.NewReader(detectionRecordStore); drerr != nil {
 			log.Error("detection ledger reader init failed", "err", drerr)
 			os.Exit(1)
@@ -2106,7 +2172,11 @@ func main() {
 		)
 	}
 
-	if err := httpserver.Run(ctx, cfg.HTTPAddr, router.Handler(), log); err != nil {
+	var metricsHandler http.Handler
+	if metrics != nil {
+		metricsHandler = metrics.Handler()
+	}
+	if err := httpserver.RunPair(ctx, cfg.HTTPAddr, router.Handler(), cfg.MetricsAddr, metricsHandler, log); err != nil {
 		log.Error("server error", "err", err)
 		os.Exit(1)
 	}
