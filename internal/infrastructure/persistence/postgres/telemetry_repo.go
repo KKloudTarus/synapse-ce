@@ -135,7 +135,7 @@ func (r *TelemetryRepository) Query(ctx context.Context, q ports.HuntQuery) (por
 	}
 
 	res := ports.HuntResult{MaxSampleRate: 1}
-	seqsByHostClass := map[string][]uint64{}
+	seqsByHostClass := map[telemetryKey][]uint64{}
 	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		// 1. The (bounded) event rows.
 		rows, err := tx.Query(ctx, `SELECT event FROM telemetry_events WHERE `+where+` ORDER BY observed_at ASC LIMIT `+fmt.Sprint(rowCap), args...)
@@ -172,7 +172,8 @@ func (r *TelemetryRepository) Query(ctx context.Context, q ports.HuntQuery) (por
 			if err := seqRows.Scan(&host, &class, &seq); err != nil {
 				return err
 			}
-			seqsByHostClass[host+"\x00"+class] = append(seqsByHostClass[host+"\x00"+class], uint64(seq))
+			k := telemetryKey{host: shared.ID(host), class: detection.Class(class)}
+			seqsByHostClass[k] = append(seqsByHostClass[k], uint64(seq))
 		}
 		if err := seqRows.Err(); err != nil {
 			return err
@@ -283,15 +284,20 @@ func (r *TelemetryRepository) Footprint(ctx context.Context) (ports.TelemetryFoo
 	return fp, nil
 }
 
-func telemetryGaps(seqsByHostClass map[string][]uint64) []ports.TelemetrySequenceGap {
+// telemetryKey uniquely identifies a (host, class) stream for grouping sequences in hunt queries.
+type telemetryKey struct {
+	host  shared.ID
+	class detection.Class
+}
+
+func telemetryGaps(seqsByHostClass map[telemetryKey][]uint64) []ports.TelemetrySequenceGap {
 	var gaps []ports.TelemetrySequenceGap
 	for k, seqs := range seqsByHostClass {
 		uniq := dedupSorted(seqs)
-		host, class := splitTelemetryKey(k)
 		for i := 1; i < len(uniq); i++ {
 			if uniq[i] > uniq[i-1]+1 {
 				gaps = append(gaps, ports.TelemetrySequenceGap{
-					HostID: host, Class: class, Missing: uniq[i] - uniq[i-1] - 1, LastSeen: uniq[i-1], Incoming: uniq[i],
+					HostID: k.host, Class: k.class, Missing: uniq[i] - uniq[i-1] - 1, LastSeen: uniq[i-1], Incoming: uniq[i],
 				})
 			}
 		}
@@ -312,13 +318,4 @@ func dedupSorted(in []uint64) []uint64 {
 		}
 	}
 	return out
-}
-
-func splitTelemetryKey(k string) (shared.ID, detection.Class) {
-	for i := 0; i < len(k); i++ {
-		if k[i] == 0 {
-			return shared.ID(k[:i]), detection.Class(k[i+1:])
-		}
-	}
-	return shared.ID(k), ""
 }

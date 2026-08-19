@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -115,4 +116,47 @@ func TestHealthzRemainsConstantLivenessProbe(t *testing.T) {
 	if recorder.Code != http.StatusOK || called || recorder.Body.String() != "{\"service\":\"synapse-api\",\"status\":\"ok\"}\n" {
 		t.Fatalf("liveness changed: code=%d called=%v body=%q", recorder.Code, called, recorder.Body.String())
 	}
+}
+
+func TestReadinessSetChecksConcurrentRace(t *testing.T) {
+	rt := &Router{}
+	rt.readiness.timeout = 50 * time.Millisecond
+	rt.SetReadinessChecks(map[string]ReadinessCheck{
+		"database": func(context.Context) error { return nil },
+	})
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	// Goroutine 1: concurrently query the readiness probe.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				recorder := httptest.NewRecorder()
+				rt.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+			}
+		}
+	}()
+
+	// Goroutine 2: concurrently update readiness checks (e.g., dynamic dependency lifecycle).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 20; i++ {
+			rt.SetReadinessChecks(map[string]ReadinessCheck{
+				"database": func(context.Context) error { return nil },
+				"cache":    func(context.Context) error { return nil },
+			})
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	time.Sleep(120 * time.Millisecond)
+	close(stop)
+	wg.Wait()
 }
