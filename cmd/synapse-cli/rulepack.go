@@ -94,14 +94,15 @@ func runRulePackGate(args []string) error {
 	fs := flag.NewFlagSet("rulepack gate", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	artifactPath := fs.String("artifact", "", "signed RulePack artifact JSON")
-	keyPath := fs.String("public-key", "", "trusted Ed25519 public key, base64 text")
-	evidencePath := fs.String("evidence", "", "deterministic RulePack gate evidence JSON")
+	keyPath := fs.String("public-key", "", "trusted RulePack Ed25519 public key, base64 text")
+	evidencePath := fs.String("evidence", "", "attested RulePack gate-evidence JSON")
+	evidenceKeyPath := fs.String("evidence-public-key", "", "trusted gate-evidence collector Ed25519 public key, base64 text")
 	phase := fs.String("phase", "promotion", "release phase: pre-canary|canary|promotion")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() != 0 || strings.TrimSpace(*artifactPath) == "" || strings.TrimSpace(*keyPath) == "" || strings.TrimSpace(*evidencePath) == "" {
-		return fmt.Errorf("usage: synapse-cli rulepack gate --artifact FILE --public-key FILE --evidence FILE [--phase pre-canary|canary|promotion]")
+	if fs.NArg() != 0 || strings.TrimSpace(*artifactPath) == "" || strings.TrimSpace(*keyPath) == "" || strings.TrimSpace(*evidencePath) == "" || strings.TrimSpace(*evidenceKeyPath) == "" {
+		return fmt.Errorf("usage: synapse-cli rulepack gate --artifact FILE --public-key FILE --evidence FILE --evidence-public-key FILE [--phase pre-canary|canary|promotion]")
 	}
 	if *phase != "pre-canary" && *phase != "canary" && *phase != "promotion" {
 		return fmt.Errorf("--phase must be pre-canary, canary, or promotion")
@@ -110,9 +111,17 @@ func runRulePackGate(args []string) error {
 	if err != nil {
 		return err
 	}
-	var input rulepackuc.GateInput
-	if err := decodeRulePackJSONFile(*evidencePath, maxRulePackCLIBytes, &input); err != nil {
-		return fmt.Errorf("load rulepack gate evidence: %w", err)
+	var signedEvidence rulepackuc.SignedGateEvidence
+	if err := decodeRulePackJSONFile(*evidencePath, maxRulePackCLIBytes, &signedEvidence); err != nil {
+		return fmt.Errorf("load attested rulepack gate evidence: %w", err)
+	}
+	evidencePub, err := loadEd25519PublicKey(*evidenceKeyPath, "rulepack gate-evidence")
+	if err != nil {
+		return err
+	}
+	input, err := rulepackuc.VerifyGateEvidence(signedEvidence, artifact.Pack, evidencePub)
+	if err != nil {
+		return fmt.Errorf("verify rulepack gate evidence: %w", err)
 	}
 	report, err := rulepackuc.Evaluate(artifact.Pack, input)
 	if err != nil {
@@ -152,13 +161,17 @@ func loadVerifiedRulePack(artifactPath, keyPath string) (rulepackdomain.SignedAr
 }
 
 func loadRulePackPublicKey(path string) (ed25519.PublicKey, error) {
+	return loadEd25519PublicKey(path, "rulepack")
+}
+
+func loadEd25519PublicKey(path, purpose string) (ed25519.PublicKey, error) {
 	data, err := readRulePackBounded(path, maxRulePackKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("load trusted rulepack public key: %w", err)
+		return nil, fmt.Errorf("load trusted %s public key: %w", purpose, err)
 	}
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data)))
 	if err != nil || len(raw) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("trusted rulepack public key must be base64-encoded %d-byte Ed25519 public key", ed25519.PublicKeySize)
+		return nil, fmt.Errorf("trusted %s public key must be base64-encoded %d-byte Ed25519 public key", purpose, ed25519.PublicKeySize)
 	}
 	return ed25519.PublicKey(append([]byte(nil), raw...)), nil
 }
