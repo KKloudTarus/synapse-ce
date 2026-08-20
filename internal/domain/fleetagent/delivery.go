@@ -6,7 +6,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 )
 
 // Delivery contract (#609, A0.4). The agent ships security signals to the control plane under an explicit,
@@ -54,6 +56,19 @@ func (p DeliveryPriority) String() string {
 	default:
 		return "P?"
 	}
+}
+
+// TelemetryPriority assigns canonical raw telemetry to the A2 priority ladder. Privilege transitions and
+// sensitive-file observations are never-shed P2; high-volume process/network observations are evictable
+// P3. P0 and P1 are reserved for coverage/verification and confirmed detections respectively.
+func TelemetryPriority(class detection.Class) (DeliveryPriority, error) {
+	if !class.Valid() {
+		return PriorityP3, fmt.Errorf("%w: unknown telemetry class %q", shared.ErrValidation, class)
+	}
+	if telemetry.MustNotShed(class) {
+		return PriorityP2, nil
+	}
+	return PriorityP3, nil
 }
 
 // SessionID identifies one agent run/enrolment session; BootID identifies one host boot. Both are opaque
