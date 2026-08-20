@@ -16,9 +16,11 @@ func Replay(p RulePack) ([]ReplayResult, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	fixtures := append([]Fixture(nil), p.PositiveFixtures...)
-	fixtures = append(fixtures, p.NegativeFixtures...)
-	sort.Slice(fixtures, func(i, j int) bool { return fixtures[i].ID < fixtures[j].ID })
+	positive := append([]Fixture(nil), p.PositiveFixtures...)
+	negative := append([]Fixture(nil), p.NegativeFixtures...)
+	sort.Slice(positive, func(i, j int) bool { return positive[i].ID < positive[j].ID })
+	sort.Slice(negative, func(i, j int) bool { return negative[i].ID < negative[j].ID })
+	fixtures := append(positive, negative...)
 	out := make([]ReplayResult, 0, len(fixtures))
 	for _, f := range fixtures {
 		actual := make([]string, 0)
