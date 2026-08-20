@@ -414,27 +414,32 @@ func emulationFailures(p rulepackdomain.RulePack, coverage []purplecoverage.Cove
 		verdicts[key] = item.Verdict
 	}
 	covered := int64(0)
-	var failures []Failure
+	missing := make([]string, 0)
 	for key, mapping := range claimed {
 		verdict, ok := verdicts[key]
 		if ok && verdict == purplecoverage.VerdictCovered {
 			covered++
 			continue
 		}
-		detail := fmt.Sprintf("rule %s / %s has no covered purple evidence", mapping.RuleID, mapping.TechniqueID)
+		detail := fmt.Sprintf("%s/%s:missing", mapping.RuleID, mapping.TechniqueID)
 		if ok {
-			detail = fmt.Sprintf("rule %s / %s purple verdict is %s", mapping.RuleID, mapping.TechniqueID, verdict)
+			detail = fmt.Sprintf("%s/%s:%s", mapping.RuleID, mapping.TechniqueID, verdict)
 		}
-		failures = append(failures, Failure{Code: "attack_mapping_not_covered", Detail: detail})
+		missing = append(missing, detail)
 	}
+	sort.Strings(missing)
 	coverageBPS, err := ratioBPS(covered, int64(len(claimed)))
 	if err != nil {
 		return 0, nil, err
 	}
+	var failures []Failure
 	if coverageBPS < minimumBPS {
-		failures = append(failures, Failure{Code: "attack_coverage_below_minimum", Detail: fmt.Sprintf("ATT&CK coverage %d bps is below required %d bps", coverageBPS, minimumBPS)})
+		detail := fmt.Sprintf("ATT&CK coverage %d bps is below required %d bps", coverageBPS, minimumBPS)
+		if len(missing) != 0 {
+			detail += fmt.Sprintf(" (uncovered: %v)", missing)
+		}
+		failures = append(failures, Failure{Code: "attack_coverage_below_minimum", Detail: detail})
 	}
-	sortFailures(failures)
 	return coverageBPS, failures, nil
 }
 
