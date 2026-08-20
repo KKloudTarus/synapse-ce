@@ -188,6 +188,15 @@ const AUDIT_LOG = Array.from({ length: 20 }, (_, i) => ({
 // ============================================================================
 
 export const handlers = [
+  // --- Auth: AUP check (bypass token requirement for local dev) ---
+  http.get('/api/v1/aup', () => {
+    return HttpResponse.json({ version: '1.0', accepted: true, accepted_at: NOW })
+  }),
+
+  http.post('/api/v1/aup/accept', () => {
+    return HttpResponse.json({ ok: true })
+  }),
+
   // --- AI Triage Reviews (Review Queue) ---
   http.get('/api/v1/ai-triage/reviews', () => {
     return HttpResponse.json(REVIEWS)
