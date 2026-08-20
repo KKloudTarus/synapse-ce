@@ -22,7 +22,7 @@ const (
 
 func runRulePack(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: synapse-cli rulepack verify|replay|gate ...")
+		return fmt.Errorf("usage: synapse-cli rulepack verify|replay|gate")
 	}
 	switch args[0] {
 	case "verify":
