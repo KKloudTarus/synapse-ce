@@ -17,6 +17,7 @@ AI_DRIFT_OUTPUT ?= ai-triage-drift-report.json
 RULEPACK_ARTIFACT ?= rulepack.signed.json
 RULEPACK_PUBLIC_KEY ?= rulepack-release.pub
 RULEPACK_EVIDENCE ?= rulepack-gate-evidence.json
+RULEPACK_EVIDENCE_PUBLIC_KEY ?= rulepack-evidence.pub
 RULEPACK_PHASE ?= promotion
 
 help: ## Show this help
@@ -83,8 +84,8 @@ rulepack-verify: ## Verify a signed RulePack against the externally pinned relea
 rulepack-replay: ## Verify and replay a RulePack's positive/negative deterministic fixtures
 	$(GO) run ./cmd/synapse-cli rulepack replay --artifact $(RULEPACK_ARTIFACT) --public-key $(RULEPACK_PUBLIC_KEY)
 
-rulepack-gate: ## Evaluate RulePack release evidence for pre-canary, canary, or promotion
-	$(GO) run ./cmd/synapse-cli rulepack gate --artifact $(RULEPACK_ARTIFACT) --public-key $(RULEPACK_PUBLIC_KEY) --evidence $(RULEPACK_EVIDENCE) --phase $(RULEPACK_PHASE)
+rulepack-gate: ## Evaluate attested RulePack release evidence for pre-canary, canary, or promotion
+	$(GO) run ./cmd/synapse-cli rulepack gate --artifact $(RULEPACK_ARTIFACT) --public-key $(RULEPACK_PUBLIC_KEY) --evidence $(RULEPACK_EVIDENCE) --evidence-public-key $(RULEPACK_EVIDENCE_PUBLIC_KEY) --phase $(RULEPACK_PHASE)
 
 docker-build: ## Build the API container image
 	docker build -t $(IMAGE) -f deploy/Dockerfile .
@@ -98,11 +99,11 @@ docker-down: ## Stop dev dependencies
 clean: ## Remove build artifacts
 	rm -rf bin web/dist
 
-web-dev: ## Run the Vite dev server (proxies /api to :8080)
+web-dev: ## Run the frontend dev server
 	cd web && pnpm dev
 
-web-build: ## Build the web app
+web-build: ## Build the frontend
 	cd web && pnpm build
 
-smoke: build ## Build then probe /healthz
-	./bin/synapse-api & sleep 1; curl -s localhost:8080/healthz; kill %1
+smoke: build ## Run API smoke test
+	./bin/synapse-api & sleep 1; curl -f http://localhost:8080/healthz; kill %1
