@@ -10,11 +10,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/purplecoverage"
 	rulepackdomain "github.com/KKloudTarus/synapse-ce/internal/domain/rulepack"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 const (
@@ -44,15 +46,30 @@ type GateEvidenceRequest struct {
 	Production   *QualitySample                    `json:"production,omitempty"`
 }
 
+// RetroQueryProvenance records the exact bounded telemetry selector used to produce one rule's retro
+// evidence. The gate attestation binds these selectors alongside the aggregate result so a later release
+// review can identify and reproduce the exact host/class/time window that was evaluated.
+type RetroQueryProvenance struct {
+	RuleID  string          `json:"rule_id"`
+	HostID  shared.ID       `json:"host_id"`
+	AssetID shared.ID       `json:"asset_id,omitempty"`
+	Class   detection.Class `json:"class"`
+	Since   time.Time       `json:"since"`
+	Until   time.Time       `json:"until"`
+	Limit   int             `json:"limit"`
+}
+
 // SignedGateEvidence is the immutable release-evidence envelope consumed by synapse-cli rulepack gate.
-// Its attestation covers the exact RulePack identity and canonical GateInput; verification pins the
-// evidence producer key externally, independently of the RulePack content-signing key.
+// Its attestation covers the exact RulePack identity, the bounded retro-hunt selectors, and canonical
+// GateInput; verification pins the evidence producer key externally, independently of the RulePack
+// content-signing key.
 type SignedGateEvidence struct {
-	PackID      string               `json:"pack_id"`
-	PackVersion int                  `json:"pack_version"`
-	PackDigest  string               `json:"pack_digest"`
-	Input       GateInput            `json:"input"`
-	Attestation evidence.Attestation `json:"attestation"`
+	PackID       string                 `json:"pack_id"`
+	PackVersion  int                    `json:"pack_version"`
+	PackDigest   string                 `json:"pack_digest"`
+	RetroQueries []RetroQueryProvenance `json:"retro_queries"`
+	Input        GateInput              `json:"input"`
+	Attestation  evidence.Attestation   `json:"attestation"`
 }
 
 // EvidenceCollector obtains the release evidence whose provenance matters from the existing authoritative
@@ -82,6 +99,10 @@ func (c *EvidenceCollector) Collect(ctx context.Context, p rulepackdomain.RulePa
 	if err != nil {
 		return SignedGateEvidence{}, err
 	}
+	retroQueries := retroQueryProvenance(req.RetroCases)
+	if err := validateRetroQueryProvenance(p, retro, retroQueries); err != nil {
+		return SignedGateEvidence{}, fmt.Errorf("validate retro-hunt provenance: %w", err)
+	}
 	purple, err := CollectPurpleEvidence(ctx, c.purple, req.Purple)
 	if err != nil {
 		return SignedGateEvidence{}, err
@@ -101,7 +122,7 @@ func (c *EvidenceCollector) Collect(ctx context.Context, p rulepackdomain.RulePa
 	if _, err := Evaluate(p, input); err != nil {
 		return SignedGateEvidence{}, fmt.Errorf("validate rulepack gate evidence: %w", err)
 	}
-	head, err := gateEvidenceHead(p.ID, p.Version, p.Digest, input)
+	head, err := gateEvidenceHead(p.ID, p.Version, p.Digest, input, retroQueries)
 	if err != nil {
 		return SignedGateEvidence{}, err
 	}
@@ -117,7 +138,8 @@ func (c *EvidenceCollector) Collect(ctx context.Context, p rulepackdomain.RulePa
 	}
 	return SignedGateEvidence{
 		PackID: p.ID, PackVersion: p.Version, PackDigest: p.Digest,
-		Input: cloneGateInput(input), Attestation: att,
+		RetroQueries: canonicalRetroQueryProvenance(retroQueries),
+		Input:        cloneGateInput(input), Attestation: att,
 	}, nil
 }
 
@@ -137,7 +159,11 @@ func VerifyGateEvidence(s SignedGateEvidence, p rulepackdomain.RulePack, trusted
 	if s.Attestation.Context != GateEvidenceAttestationContext {
 		return GateInput{}, fmt.Errorf("rulepack gate evidence has unexpected attestation context %q", s.Attestation.Context)
 	}
-	head, err := gateEvidenceHead(s.PackID, s.PackVersion, s.PackDigest, s.Input)
+	input := cloneGateInput(s.Input)
+	if err := validateRetroQueryProvenance(p, input.Retro, s.RetroQueries); err != nil {
+		return GateInput{}, fmt.Errorf("rulepack gate evidence has invalid retro-hunt provenance: %w", err)
+	}
+	head, err := gateEvidenceHead(s.PackID, s.PackVersion, s.PackDigest, input, s.RetroQueries)
 	if err != nil {
 		return GateInput{}, err
 	}
@@ -151,26 +177,87 @@ func VerifyGateEvidence(s SignedGateEvidence, p rulepackdomain.RulePack, trusted
 	if err != nil || len(embedded) != ed25519.PublicKeySize || !bytes.Equal(embedded, trustedPub) {
 		return GateInput{}, fmt.Errorf("rulepack gate evidence signer is not the externally trusted key")
 	}
-	input := cloneGateInput(s.Input)
 	if _, err := Evaluate(p, input); err != nil {
 		return GateInput{}, fmt.Errorf("validate attested rulepack gate evidence: %w", err)
 	}
 	return input, nil
 }
 
-func gateEvidenceHead(packID string, packVersion int, packDigest string, input GateInput) (string, error) {
+func gateEvidenceHead(packID string, packVersion int, packDigest string, input GateInput, retroQuerySets ...[]RetroQueryProvenance) (string, error) {
+	var retroQueries []RetroQueryProvenance
+	if len(retroQuerySets) != 0 {
+		retroQueries = canonicalRetroQueryProvenance(retroQuerySets[0])
+	}
 	payload := struct {
-		PackID      string    `json:"pack_id"`
-		PackVersion int       `json:"pack_version"`
-		PackDigest  string    `json:"pack_digest"`
-		Input       GateInput `json:"input"`
-	}{packID, packVersion, packDigest, canonicalGateInput(input)}
+		PackID       string                 `json:"pack_id"`
+		PackVersion  int                    `json:"pack_version"`
+		PackDigest   string                 `json:"pack_digest"`
+		RetroQueries []RetroQueryProvenance `json:"retro_queries,omitempty"`
+		Input        GateInput              `json:"input"`
+	}{packID, packVersion, packDigest, retroQueries, canonicalGateInput(input)}
 	b, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("canonicalize rulepack gate evidence: %w", err)
 	}
 	sum := sha256.Sum256(b)
 	return gateEvidenceDigestPrefix + hex.EncodeToString(sum[:]), nil
+}
+
+func retroQueryProvenance(cases []RetroCase) []RetroQueryProvenance {
+	out := make([]RetroQueryProvenance, 0, len(cases))
+	for _, candidate := range cases {
+		q := candidate.Query
+		out = append(out, RetroQueryProvenance{
+			RuleID: candidate.RuleID, HostID: q.HostID, AssetID: q.AssetID, Class: q.Class,
+			Since: q.Since.UTC(), Until: q.Until.UTC(), Limit: q.Limit,
+		})
+	}
+	return canonicalRetroQueryProvenance(out)
+}
+
+func canonicalRetroQueryProvenance(in []RetroQueryProvenance) []RetroQueryProvenance {
+	out := append([]RetroQueryProvenance(nil), in...)
+	for i := range out {
+		out[i].Since = out[i].Since.UTC()
+		out[i].Until = out[i].Until.UTC()
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].RuleID < out[j].RuleID })
+	return out
+}
+
+func validateRetroQueryProvenance(p rulepackdomain.RulePack, retro []RetroEvidence, queries []RetroQueryProvenance) error {
+	if len(queries) != len(p.Rules) {
+		return fmt.Errorf("expected exactly one retro query per rule (%d rules, %d queries)", len(p.Rules), len(queries))
+	}
+	rules := make(map[string]detection.Class, len(p.Rules))
+	for _, rule := range p.Rules {
+		rules[rule.ID] = rule.Class
+	}
+	retroRules := make(map[string]struct{}, len(retro))
+	for _, item := range retro {
+		retroRules[item.RuleID] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(queries))
+	for _, q := range queries {
+		class, ok := rules[q.RuleID]
+		if !ok {
+			return fmt.Errorf("retro query names unknown rule %q", q.RuleID)
+		}
+		if _, duplicate := seen[q.RuleID]; duplicate {
+			return fmt.Errorf("retro query for rule %q is duplicated", q.RuleID)
+		}
+		seen[q.RuleID] = struct{}{}
+		if q.HostID == "" || !q.Class.Valid() || q.Class != class || q.Since.IsZero() || q.Until.IsZero() || q.Until.Before(q.Since) {
+			return fmt.Errorf("retro query for rule %s needs a host, matching class, and bounded time window", q.RuleID)
+		}
+		if q.Limit < 1 || q.Limit > maxRetroHuntEvents {
+			return fmt.Errorf("retro query for rule %s needs an event limit between 1 and %d", q.RuleID, maxRetroHuntEvents)
+		}
+		if _, ok := retroRules[q.RuleID]; !ok {
+			return fmt.Errorf("retro query for rule %s has no corresponding result", q.RuleID)
+		}
+	}
+	return nil
 }
 
 func canonicalGateInput(in GateInput) GateInput {
