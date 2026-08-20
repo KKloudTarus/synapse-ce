@@ -1,4 +1,4 @@
-import { http, HttpResponse, passthrough } from 'msw'
+import { http, HttpResponse } from 'msw'
 
 // ============================================================================
 // MOCK DATA — Rich data for full UI coverage
@@ -303,10 +303,20 @@ export const handlers = [
     })
   }),
 
-  // Let all other requests pass through to the real API
-  http.get('/api/v1/*', () => passthrough()),
-  http.post('/api/v1/*', () => passthrough()),
-  http.patch('/api/v1/*', () => passthrough()),
-  http.delete('/api/v1/*', () => passthrough()),
-  http.put('/api/v1/*', () => passthrough()),
+  // Fallback: return empty JSON for any unhandled API call (prevents 502 from missing backend)
+  http.get('/api/v1/*', () => {
+    return HttpResponse.json([])
+  }),
+  http.post('/api/v1/*', () => {
+    return HttpResponse.json({ ok: true })
+  }),
+  http.patch('/api/v1/*', () => {
+    return HttpResponse.json({ ok: true })
+  }),
+  http.delete('/api/v1/*', () => {
+    return HttpResponse.json({ ok: true })
+  }),
+  http.put('/api/v1/*', () => {
+    return HttpResponse.json({ ok: true })
+  }),
 ]
