@@ -113,3 +113,25 @@ func TestLoadVerifiedRulePackPinsExternalPublicKey(t *testing.T) {
 		t.Fatal("artifact must not trust a different externally pinned key")
 	}
 }
+
+func TestRulePackGatePhaseRequiresLifecycleState(t *testing.T) {
+	tests := []struct {
+		phase string
+		state rulepackdomain.DeploymentState
+		want  bool
+	}{
+		{phase: "pre-canary", state: rulepackdomain.DeploymentCandidate, want: true},
+		{phase: "pre-canary", state: rulepackdomain.DeploymentCanary, want: false},
+		{phase: "canary", state: rulepackdomain.DeploymentCanary, want: true},
+		{phase: "canary", state: rulepackdomain.DeploymentCandidate, want: false},
+		{phase: "promotion", state: rulepackdomain.DeploymentCanary, want: true},
+		{phase: "promotion", state: rulepackdomain.DeploymentCandidate, want: false},
+		{phase: "promotion", state: rulepackdomain.DeploymentPromoted, want: false},
+		{phase: "unknown", state: rulepackdomain.DeploymentCanary, want: false},
+	}
+	for _, tt := range tests {
+		if got := rulePackGatePhaseAcceptsState(tt.phase, tt.state); got != tt.want {
+			t.Errorf("phase %q state %q accepted=%t, want %t", tt.phase, tt.state, got, tt.want)
+		}
+	}
+}
