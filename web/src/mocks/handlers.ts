@@ -243,7 +243,7 @@ export const handlers = [
   })),
 
   // --- AI Triage Reviews ---
-  http.get('/api/v1/ai-triage/reviews', () => HttpResponse.json(REVIEWS)),
+  http.get('/api/v1/ai-triage/reviews', () => HttpResponse.json({ reviews: REVIEWS })),
   http.get('/api/v1/ai-triage/reviews/:id', ({ params }) => {
     const r = REVIEWS.find(rv => rv.id === params.id) ?? REVIEWS[0]
     return HttpResponse.json(r)
@@ -251,6 +251,9 @@ export const handlers = [
 
   // --- AI Triage Observability ---
   http.get('/api/v1/ai-triage/observability', () => HttpResponse.json(OBSERVABILITY)),
+
+  // --- Current User ---
+  http.get('/api/v1/me', () => HttpResponse.json({ id: 'user-001', username: 'admin', display_name: 'Admin User', email: 'admin@synapse.local', role: 'owner' })),
 
   // --- Assets ---
   http.get('/api/v1/assets', () => HttpResponse.json(BUSINESS_ASSETS.map(a => ({ ...a, type: 'host', tags: ['production'], finding_count: 12, last_scanned: HOUR_AGO })))),
