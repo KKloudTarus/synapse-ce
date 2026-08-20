@@ -1,14 +1,14 @@
 # RulePack release lifecycle
 
-A RulePack is the signed, versioned unit of runtime detection content. It binds the rules themselves to the compatibility and release evidence needed to decide whether that exact content may move from candidate to canary and then to production.
+A RulePack is the signed, versioned unit of runtime detection content. It binds the rules themselves to the compatibility and release metadata needed to decide whether that exact content may move from candidate to canary and then to production.
 
-This lifecycle is deliberately separate from agent update distribution. RulePack signing and release decisions live here; secure distribution and wire-side anti-downgrade enforcement are the responsibility of the fleet update path.
+This lifecycle is deliberately separate from agent update distribution. RulePack signing and release decisions live here; secure distribution and wire-side anti-downgrade enforcement are the responsibility of the fleet update path in #631.
 
 ## What a RulePack binds
 
 A RulePack includes:
 
-- a stable pack ID, monotonically increasing pack version, and canonical SHA-256 digest;
+- a stable pack ID, explicit pack version, and canonical SHA-256 digest;
 - typed `detection.Rule` definitions;
 - the minimum agent version and accepted telemetry schema versions;
 - required sensor versions and matcher fields;
@@ -19,22 +19,26 @@ A RulePack includes:
 
 Construction is fail-closed. Required fields must cover every field used by a rule matcher, ATT&CK mappings must point at rules in the pack, fixture expectations must name rules in the pack, positive fixtures must collectively exercise every rule, and each rule must have an explicit cost budget. Set-like inputs are canonicalized for the digest so declaration order does not create a different identity.
 
+Deployment compatibility is checked against both the RulePack metadata and the telemetry reader in the running control-plane build. A deployment cannot claim a schema version that the current `telemetryschema` reader would reject. Forward admission also requires `previous_version` to equal the signed `rollback_version`, so canary/promotion cannot start with a broken rollback escape hatch.
+
 ## Trust model
 
 RulePack signatures use Ed25519 over a domain-separated canonical RulePack encoding. The canonical digest is SHA-256 over that same normalized content; verification recomputes and validates the digest before verifying the signature. The signed artifact contains the key ID and signature, but it does **not** carry a public key that can declare itself trusted.
 
-CI or an operator must supply the trusted Ed25519 public key separately. The CLI verifies that the supplied key has the expected fingerprint and that it verifies the exact canonical RulePack content. Mutating the pack after signing therefore fails digest validation and/or signature verification.
+CI or an operator must supply the trusted RulePack Ed25519 public key separately. The CLI verifies that the supplied key has the expected fingerprint and that it verifies the exact canonical RulePack content. Mutating the pack after signing therefore fails digest validation and/or signature verification.
 
-The public-key file used by the CLI is standard-base64 text for the raw 32-byte Ed25519 public key.
+Release evidence has a separate trust boundary. Retro-hunt and purple rows are collected through `rulepack.EvidenceCollector`, which calls the existing telemetry `Hunt` and `purplecoverage.Service` seams and signs the resulting canonical evidence envelope under the domain-separated context `synapse-rulepack-gate-evidence:v1`. The gate CLI requires a separately supplied trusted evidence-producer public key. An evidence envelope cannot authorize its own embedded key, and raw `GateInput` JSON is not accepted by the CLI.
+
+The public-key files used by the CLI are standard-base64 text for raw 32-byte Ed25519 public keys.
 
 ## CLI
 
-All commands verify the signature against the externally pinned key before doing any other RulePack work.
+All commands verify the RulePack signature against the externally pinned content key before doing any RulePack work.
 
 ```sh
 synapse-cli rulepack verify \
   --artifact rulepack.signed.json \
-  --public-key release-ed25519.pub
+  --public-key rulepack-release.pub
 ```
 
 `verify` prints a small JSON identity record and exits non-zero if the pack, digest, key fingerprint, or signature is invalid.
@@ -42,7 +46,7 @@ synapse-cli rulepack verify \
 ```sh
 synapse-cli rulepack replay \
   --artifact rulepack.signed.json \
-  --public-key release-ed25519.pub
+  --public-key rulepack-release.pub
 ```
 
 `replay` evaluates the pack's deterministic positive and negative fixtures. Positive fixtures collectively cover every rule and each fixture must fire exactly its declared rule IDs; negative fixtures must fire none. The JSON result is emitted even when a fixture fails so CI retains the evidence, and the command exits non-zero on any mismatch.
@@ -50,14 +54,25 @@ synapse-cli rulepack replay \
 ```sh
 synapse-cli rulepack gate \
   --artifact rulepack.signed.json \
-  --public-key release-ed25519.pub \
+  --public-key rulepack-release.pub \
   --evidence rulepack-gate-evidence.json \
+  --evidence-public-key rulepack-evidence.pub \
   --phase promotion
 ```
 
-`gate` accepts `pre-canary`, `canary`, or `promotion` as the phase. It always emits the complete deterministic gate report and exits non-zero when the requested phase is not eligible.
+`gate` accepts `pre-canary`, `canary`, or `promotion` as the phase. The evidence file must be a `SignedGateEvidence` envelope produced by a trusted `EvidenceCollector`; the CLI recomputes its canonical evidence head, verifies the domain-separated attestation against the externally pinned evidence key, and then evaluates the embedded gate input. It always emits the deterministic gate report after successful provenance verification and exits non-zero when the requested phase is not eligible.
 
 The JSON decoder is strict: unknown fields, trailing JSON, malformed keys, and oversized inputs are rejected rather than ignored.
+
+## Producing release evidence
+
+`EvidenceCollector` is the trusted producer boundary for release evidence. A composition root or CI runner wires it with:
+
+- the existing fleet telemetry service through the narrow `TelemetryHunter`/`Hunt` seam;
+- the existing purple-coverage service through the narrow `PurpleReader`/`Trend` seam;
+- the existing Ed25519 signer adapter configured with `GateEvidenceAttestationContext`.
+
+The collection request carries deployment/policy/cost/quality measurements plus retro and purple selectors. It does **not** accept caller-supplied retro results or purple coverage rows. The collector obtains those two evidence classes from the authoritative services, validates the complete gate-input shape, and attests the exact pack identity plus canonical input. The private evidence-signing key remains outside the domain/usecase layers.
 
 ## Gate order
 
@@ -73,7 +88,9 @@ The release report evaluates the gates in this fixed order:
 8. canary metrics;
 9. production metrics.
 
-Passing through the false-positive budget yields `pre_canary_passed`. Passing the canary stage yields `canary_passed`. Only a report with every stage green has `passed=true` and may be used for promotion.
+Passing through the false-positive budget yields `pre_canary_passed`. Passing the canary stage yields `canary_passed`. Only a report with every required stage green has `passed=true` and may be used for promotion.
+
+ATT&CK coverage is measured in basis points against every mapping claimed by the RulePack. Individual uncovered mappings remain visible in failure diagnostics, while the stage pass/fail decision follows the operator-owned `minimum_attack_coverage_bps` policy. A 90% policy therefore accepts 90% measured coverage; a 100% policy requires every mapping covered.
 
 A failed release report never blocks rollback. Rollback still requires the RulePack's signed rollback metadata to identify the prior version correctly.
 
@@ -85,9 +102,11 @@ Rates use integer basis points instead of floating point so CI decisions are rep
 - reviewed-detection count and analyst disposition rate;
 - suppression rate;
 - detections per host-day (milli-detections);
-- required-field availability;
+- required-field capability availability across the declared evaluated field set;
 - per-rule latency and CPU observations;
 - measured ATT&CK coverage.
+
+`required_field_availability_bps` currently means the fraction of the RulePack's required field kinds declared available by the evaluated sample/deployment, not per-event uptime. Per-event telemetry defects remain represented by the telemetry `DataQuality`/coverage model and can feed a richer availability aggregate when that measurement is added.
 
 Canary and production stages re-enforce the precision/false-positive floors in addition to their host-day, detection-density, field-availability, suppression, and analyst-disposition requirements. A candidate cannot pass evaluation with good offline labels and then silently regress in production.
 
@@ -101,6 +120,6 @@ Each RulePack rule needs exactly one bounded retro case. A release window must c
 
 ## Purple/emulation evidence
 
-Purple evidence is loaded through the existing `purplecoverage.Service` trend seam and bound to one explicit tenant/engagement/run/asset scope. A `covered` row is accepted only when its measured `Actual` detections contain the expected RulePack detection; a self-asserted verdict is not sufficient. Claimed ATT&CK mappings count as covered only when that measured evidence is internally consistent, and evidence for an unclaimed detection/taxonomy pair is rejected. Missing mappings remain gaps; they are never inferred as covered.
+Purple evidence is loaded through the existing `purplecoverage.Service` trend seam and bound to one explicit tenant/engagement/run/asset scope. A `covered` row is accepted only when its measured `Actual` detections contain the expected RulePack detection; a self-asserted verdict is not sufficient. Evidence for an unclaimed detection/taxonomy pair is rejected, and missing claimed mappings reduce measured ATT&CK coverage rather than being inferred as covered.
 
-Release tooling should persist the emitted gate report beside the signed RulePack and the underlying metric/evidence inputs so a later review can reproduce why that exact digest was admitted, promoted, or rolled back.
+Release tooling should persist the signed gate-evidence envelope and emitted gate report beside the signed RulePack so a later review can reproduce why that exact digest was admitted, promoted, or rolled back.
