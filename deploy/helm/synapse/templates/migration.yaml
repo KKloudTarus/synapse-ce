@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "synapse.fullname" . }}-migrate
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "synapse.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      hostUsers: {{ .Values.sandbox.hostUsers }}
+      restartPolicy: Never
+      serviceAccountName: {{ include "synapse.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "synapse.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "synapse.image" .Values.image | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/opt/synapse/synapse-migrate"]
+          securityContext:
+            {{- include "synapse.containerSecurityContext" . | nindent 12 }}
+          env:
+            {{- include "synapse.runtimeEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migration.resources | nindent 12 }}
+          volumeMounts:
+            - {name: database-ca, mountPath: /etc/synapse/database-ca, readOnly: true}
+      volumes:
+        - name: database-ca
+          secret:
+            secretName: {{ required "externalDatabase.caBundle.secretName is required" .Values.externalDatabase.caBundle.secretName }}
+            items:
+              - key: {{ required "externalDatabase.caBundle.key is required" .Values.externalDatabase.caBundle.key }}
+                path: ca.crt

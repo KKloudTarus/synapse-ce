@@ -2,6 +2,8 @@ package blob
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"testing"
 
@@ -31,5 +33,32 @@ func TestMemoryRoundTrip(t *testing.T) {
 	again, _ := s.Get(ctx, "k1")
 	if string(again) != string(data) {
 		t.Errorf("store mutated via returned slice: %q", again)
+	}
+}
+
+func TestMemoryStatAndVerifyHashStoredBytes(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemory()
+	good := []byte("original artifact")
+	sum := sha256.Sum256(good)
+	key := hex.EncodeToString(sum[:])
+	if err := store.Put(ctx, key, good); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Simulate storage corruption beneath an otherwise valid content-address key.
+	store.mu.Lock()
+	store.m[key] = []byte("corrupted artifact")
+	store.mu.Unlock()
+
+	metadata, err := store.Stat(ctx, key)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if metadata.SHA256 == key {
+		t.Fatal("stat must derive checksum from corrupted stored bytes, not trust key")
+	}
+	if err := store.Verify(ctx, key, key); err == nil {
+		t.Fatal("verification must reject bytes corrupted under a valid content-address key")
 	}
 }

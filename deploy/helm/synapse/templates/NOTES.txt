@@ -1,0 +1,7 @@
+Synapse requires pre-existing split Secrets; this chart deliberately never creates Secret data.
+
+The migration hook runs before install and upgrade. API and worker are configured with
+SYNAPSE_DB_AUTO_MIGRATE=false and wait for the migration schema state.
+
+Production image references are digest-only. Before deployment, validate that every worker
+node supports unprivileged user namespaces for bubblewrap. The chart is not yet proven on EKS.

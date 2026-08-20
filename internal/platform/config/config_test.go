@@ -551,3 +551,30 @@ func TestLoadObservabilityFromEnv(t *testing.T) {
 		t.Error("SYNAPSE_ACCESS_LOG_ENABLED=false must disable access logging")
 	}
 }
+
+func TestValidateOIDCPosture(t *testing.T) {
+	valid := Config{OIDCEnabled: true, OIDCIssuer: "https://issuer.example", OIDCClientID: "client", OIDCClientSecret: "secret", OIDCRedirectURL: "https://synapse.example/api/auth/oidc/callback", OIDCFrontendURL: "https://synapse.example/", OIDCTenantID: "tenant", OIDCGroupRoleMapping: []string{"admins=admin"}, OIDCTransactionTTL: time.Minute, OIDCSessionTTL: time.Hour}
+	if err := valid.ValidateOIDCPosture(); err != nil {
+		t.Fatalf("valid OIDC posture: %v", err)
+	}
+	valid.OIDCClientSecret = ""
+	if err := valid.ValidateOIDCPosture(); err == nil {
+		t.Fatal("missing OIDC client secret must fail")
+	}
+	valid.OIDCClientSecret = "secret"
+	valid.OIDCFrontendURL = "https://synapse.example/?next=https://attacker.example"
+	if err := valid.ValidateOIDCPosture(); err == nil {
+		t.Fatal("request-like OIDC frontend URL must fail")
+	}
+}
+
+func TestProductionOIDCRequiresPostgres(t *testing.T) {
+	cfg := Config{Environment: "production", OIDCEnabled: true, DBAutoMigrate: false}
+	if err := cfg.ValidateMigrationPosture(); err == nil {
+		t.Fatal("production OIDC without database must fail")
+	}
+	cfg.DBDSN = "postgres://synapse"
+	if err := cfg.ValidateMigrationPosture(); err != nil {
+		t.Fatalf("production OIDC with database: %v", err)
+	}
+}

@@ -21,6 +21,20 @@ func fakeRunner(systemdRun string) *Runner {
 	return &Runner{bwrap: "/usr/bin/bwrap", systemdRun: systemdRun, memMax: 256 << 20, pidsMax: 128}
 }
 
+func TestProbeBubblewrapRejectsMissingExecutable(t *testing.T) {
+	if !seccompSupported {
+		t.Skip("seccomp probe is Linux-only")
+	}
+	filter, err := seccompFile()
+	if err != nil {
+		t.Fatalf("build seccomp filter: %v", err)
+	}
+	defer func() { _ = filter.Close() }()
+	if err := probeBubblewrap(filepath.Join(t.TempDir(), "missing-bwrap"), filter); err == nil {
+		t.Fatal("probeBubblewrap must reject an unusable executable")
+	}
+}
+
 func TestSandboxArgvConfinesTheRun(t *testing.T) {
 	r := fakeRunner("")
 	argv := r.command(ports.ToolSpec{Name: "subfinder", Args: []string{"-d", "example.com"}, Workdir: "/run/work"}, "", "", 3, false)

@@ -44,6 +44,44 @@ func (r *UserRepository) Upsert(ctx context.Context, u *user.User) error {
 	return nil
 }
 
+// Bootstrap atomically seeds or refreshes the bootstrap administrator. The audit row
+// is appended in the same transaction only when the user is first inserted, so
+// concurrent API startups cannot create duplicate bootstrap audit events.
+func (r *UserRepository) Bootstrap(ctx context.Context, u *user.User, auditEntry ports.AuditEntry) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("bootstrap user: begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var inserted bool
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO users (`+userCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		 ON CONFLICT (id) DO NOTHING
+		 RETURNING true`,
+		u.ID.String(), u.Name, string(u.Role), u.APIKeyHash, u.Disabled, u.Audit.CreatedAt, u.Audit.UpdatedAt, u.TenantID).Scan(&inserted); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("bootstrap user: insert: %w", err)
+	}
+	if !inserted {
+		if _, err := tx.Exec(ctx,
+			`UPDATE users SET name=$2, role=$3, api_key_hash=$4, disabled=$5, updated_at=$6, tenant_id=$7 WHERE id=$1`,
+			u.ID.String(), u.Name, string(u.Role), u.APIKeyHash, u.Disabled, u.Audit.UpdatedAt, u.TenantID); err != nil {
+			return fmt.Errorf("bootstrap user: refresh: %w", err)
+		}
+	} else {
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", shared.DefaultTenant.String()); err != nil {
+			return fmt.Errorf("bootstrap user: set audit tenant: %w", err)
+		}
+		if err := appendTenantAudit(ctx, tx, shared.DefaultTenant.String(), auditEntry); err != nil {
+			return fmt.Errorf("bootstrap user: audit: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("bootstrap user: commit: %w", err)
+	}
+	return nil
+}
+
 func (r *UserRepository) GetByID(ctx context.Context, id shared.ID) (*user.User, error) {
 	u, err := scanUser(r.pool.QueryRow(ctx, `SELECT `+userCols+` FROM users WHERE id=$1`, id.String()))
 	if errors.Is(err, pgx.ErrNoRows) {

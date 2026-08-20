@@ -78,6 +78,42 @@ docker build -t synapse:full --target full -f deploy/Dockerfile .
 The build is cgo-free, so the distroless image works with a pure-Go SQLite driver and no
 system libraries.
 
+## Production Helm and EKS topology
+
+The production reference topology is a Helm release on Amazon EKS; the Compose profile remains for local
+development. Run at least two ready `synapse-api` replicas behind a TLS-terminating ingress and operate
+`synapse-worker` as a separate scalable tier. PostgreSQL and S3-compatible evidence storage are private,
+externally operated dependencies rather than Helm-managed StatefulSets.
+
+Set `SYNAPSE_DB_AUTO_MIGRATE=false`. A single Helm pre-install/pre-upgrade migration Job must use the
+owner migration identity, complete successfully before API or worker rollout, and cause the release to
+fail when it does not. Execution-capable Pods require approved Linux nodes with bubblewrap and the kernel
+features required by the sandbox; `SYNAPSE_SANDBOX_ENABLED=true` remains fail-closed. See
+[ADR 0005](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/adr/0005-production-helm-eks-topology.md).
+
+Back up PostgreSQL and the evidence object store as a quiesced pair, and restore them as a pair in an
+isolated drill. Schema migration is forward-only: recover an abandoned release by restoring a validated
+pre-upgrade copy and deploying the known-good release, never with down migrations. See
+[ADR 0007](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/adr/0007-paired-backup-and-forward-only-upgrades.md) and
+[Operations drill evidence](operations-drill-evidence.md).
+
+## Kubernetes with Helm
+
+The production chart is at [`deploy/helm/synapse`](https://github.com/KKloudTarus/synapse-ce/blob/main/deploy/helm/synapse/README.md). It runs at least two API replicas, one lease-locked worker, a web deployment, and a pre-install/pre-upgrade migration hook. It uses external PostgreSQL and S3-compatible storage only; it never creates Secret data. Supply the separate runtime database, migration database, object-store, API-token, and cryptographic Secret references through your secret-management controller.
+
+The chart requires digest-qualified API and web images, an existing TLS Secret, `SYNAPSE_SANDBOX_ENABLED=true`, and `SYNAPSE_DB_AUTO_MIGRATE=false`. The production image is non-root and bundles bubblewrap plus Synapse's helpers and tools; the target Linux amd64 runtime must permit unprivileged user namespaces. It does not request privileged mode or `SYS_ADMIN`. The chart starts default-deny and allows only explicit ingress and egress paths; configure FQDN-aware CNI or egress-gateway allowlists for managed PostgreSQL, object storage, and authorized recon targets.
+
+Run static validation before installation:
+
+```bash
+helm lint --strict deploy/helm/synapse -f deploy/helm/synapse/tests/production-values.yaml
+helm template synapse deploy/helm/synapse -f deploy/helm/synapse/tests/production-values.yaml --kube-version 1.29.0
+(cd deploy/helm/synapse && sh testdata/render_test.sh)
+```
+
+Real EKS deployment proof remains pending. Before relying on this chart in EKS, validate that the selected node AMI and runtime allow bubblewrap's unprivileged-user-namespace path, then execute a sandboxed worker job in that cluster.
+
+
 ## Production checklist
 
 Required, by variable name. Any `SYNAPSE_ENV` value other than `development`, `dev`, `local`, `test`, or

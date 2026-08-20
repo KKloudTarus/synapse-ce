@@ -19,6 +19,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver for goose
 	"github.com/pressly/goose/v3"
 
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"github.com/KKloudTarus/synapse-ce/migrations"
 )
 
@@ -88,6 +89,41 @@ func ConnectPool(ctx context.Context, dsn string, pc PoolConfig) (*pgxpool.Pool,
 // Connect opens a pgx pool with default sizing (back-compat wrapper).
 func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	return ConnectPool(ctx, dsn, PoolConfig{})
+}
+
+// PoolStatsSource exposes aggregate pool saturation through a driver-free port so the
+// metrics adapter never depends on pgx.
+type PoolStatsSource struct{ pool *pgxpool.Pool }
+
+var _ ports.PoolStatsReader = (*PoolStatsSource)(nil)
+
+// NewPoolStatsSource returns nil for a nil pool so a composition root can pass the result
+// straight to an optional collector without constructing a typed-nil interface.
+func NewPoolStatsSource(pool *pgxpool.Pool) *PoolStatsSource {
+	if pool == nil {
+		return nil
+	}
+	return &PoolStatsSource{pool: pool}
+}
+
+// PoolStats snapshots the pool's aggregate counters; it carries no connection identity.
+func (s *PoolStatsSource) PoolStats() ports.PoolStats {
+	stats := s.pool.Stat()
+	return ports.PoolStats{
+		AcquiredConns:        stats.AcquiredConns(),
+		ConstructingConns:    stats.ConstructingConns(),
+		IdleConns:            stats.IdleConns(),
+		MaxConns:             stats.MaxConns(),
+		TotalConns:           stats.TotalConns(),
+		AcquireCount:         stats.AcquireCount(),
+		CanceledAcquireCount: stats.CanceledAcquireCount(),
+		EmptyAcquireCount:    stats.EmptyAcquireCount(),
+		NewConnsCount:        stats.NewConnsCount(),
+		MaxIdleDestroyCount:  stats.MaxIdleDestroyCount(),
+		MaxLifetimeDestroy:   stats.MaxLifetimeDestroyCount(),
+		AcquireDuration:      stats.AcquireDuration(),
+		EmptyAcquireWaitTime: stats.EmptyAcquireWaitTime(),
+	}
 }
 
 // singletonLockKey derives a stable advisory-lock key PER ROLE. Scoping by

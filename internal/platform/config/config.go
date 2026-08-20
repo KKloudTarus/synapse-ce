@@ -3,6 +3,7 @@ package config
 
 import (
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -38,6 +39,17 @@ type Config struct {
 
 	// APIToken protects all API + UI routes; required (no anonymous access).
 	APIToken string
+	// OIDCEnabled enables the browser-based OIDC authorization-code BFF flow.
+	OIDCEnabled          bool
+	OIDCIssuer           string
+	OIDCClientID         string
+	OIDCClientSecret     string
+	OIDCRedirectURL      string
+	OIDCFrontendURL      string
+	OIDCTenantID         string
+	OIDCGroupRoleMapping []string
+	OIDCTransactionTTL   time.Duration
+	OIDCSessionTTL       time.Duration
 	// AUPVersion is the current Acceptable-Use Policy version.
 	AUPVersion string
 	// AUPFile is where first-run AUP acceptance is recorded (file-backed until Postgres).
@@ -535,6 +547,16 @@ func Load() Config {
 		LogLevel:                         getenv("SYNAPSE_LOG_LEVEL", "info"),
 		SingleTenant:                     getbool("SYNAPSE_SINGLE_TENANT", true),
 		APIToken:                         getenv("SYNAPSE_API_TOKEN", ""),
+		OIDCEnabled:                      getbool("SYNAPSE_OIDC_ENABLED", false),
+		OIDCIssuer:                       getenv("SYNAPSE_OIDC_ISSUER", ""),
+		OIDCClientID:                     getenv("SYNAPSE_OIDC_CLIENT_ID", ""),
+		OIDCClientSecret:                 getenv("SYNAPSE_OIDC_CLIENT_SECRET", ""),
+		OIDCRedirectURL:                  getenv("SYNAPSE_OIDC_REDIRECT_URL", ""),
+		OIDCFrontendURL:                  getenv("SYNAPSE_OIDC_FRONTEND_URL", ""),
+		OIDCTenantID:                     getenv("SYNAPSE_OIDC_TENANT_ID", ""),
+		OIDCGroupRoleMapping:             splitList(getenv("SYNAPSE_OIDC_GROUP_ROLE_MAPPING", "")),
+		OIDCTransactionTTL:               getduration("SYNAPSE_OIDC_TRANSACTION_TTL", 10*time.Minute),
+		OIDCSessionTTL:                   getduration("SYNAPSE_OIDC_SESSION_TTL", 8*time.Hour),
 		AUPVersion:                       getenv("SYNAPSE_AUP_VERSION", "1.0"),
 		AUPFile:                          getenv("SYNAPSE_AUP_FILE", "data/aup-accepted.json"),
 		AuditFile:                        getenv("SYNAPSE_AUDIT_FILE", "data/audit.jsonl"),
@@ -872,7 +894,29 @@ func (c Config) ValidateMigrationPosture() error {
 	if c.IsProduction() && c.DBAutoMigrate {
 		return errors.New("SYNAPSE_DB_AUTO_MIGRATE=false is required in production; run synapse-migrate before starting services")
 	}
+	if c.IsProduction() && c.OIDCEnabled && c.DBDSN == "" {
+		return errors.New("SYNAPSE_DB_DSN is required when OIDC is enabled in production")
+	}
 	return nil
+}
+
+// ValidateOIDCPosture fails closed when the browser OIDC BFF cannot bind identity/session state to a fixed tenant.
+func (c Config) ValidateOIDCPosture() error {
+	if !c.OIDCEnabled {
+		return nil
+	}
+	if strings.TrimSpace(c.OIDCIssuer) == "" || strings.TrimSpace(c.OIDCClientID) == "" || strings.TrimSpace(c.OIDCClientSecret) == "" || strings.TrimSpace(c.OIDCRedirectURL) == "" || strings.TrimSpace(c.OIDCTenantID) == "" || len(c.OIDCGroupRoleMapping) == 0 || c.OIDCTransactionTTL <= 0 || c.OIDCSessionTTL <= 0 {
+		return errors.New("OIDC requires issuer, client id, client secret, redirect URL, fixed tenant, group-role mapping, and positive lifetimes")
+	}
+	if !validOIDCFrontendURL(c.OIDCFrontendURL) {
+		return errors.New("OIDC requires an absolute HTTPS SYNAPSE_OIDC_FRONTEND_URL without query or fragment")
+	}
+	return nil
+}
+
+func validOIDCFrontendURL(value string) bool {
+	u, err := url.Parse(strings.TrimSpace(value))
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
 }
 
 // MigrationDSN returns the DDL credential when configured, falling back to the runtime

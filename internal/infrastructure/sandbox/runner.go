@@ -163,10 +163,16 @@ func NewRunner(timeout time.Duration, maxOut int, memMax int64, pidsMax int) (*R
 	if !seccompSupported {
 		return nil, fmt.Errorf("%w: seccomp filtering is required but unsupported on this platform", ErrUnavailable)
 	}
-	if f, serr := seccompFile(); serr != nil {
-		return nil, fmt.Errorf("%w: seccomp self-check failed: %v", ErrUnavailable, serr)
-	} else {
-		_ = f.Close()
+	filter, err := seccompFile()
+	if err != nil {
+		return nil, fmt.Errorf("%w: seccomp self-check failed: %v", ErrUnavailable, err)
+	}
+	defer func() { _ = filter.Close() }()
+	// Finding bwrap on PATH is insufficient in a container: the runtime seccomp profile or
+	// kernel policy can still deny namespace/mount setup. Exercise the same namespace and
+	// seccomp primitives used for real runs so production startup fails before accepting work.
+	if err := probeBubblewrap(bwrap, filter); err != nil {
+		return nil, fmt.Errorf("%w: bubblewrap isolation self-check failed: %v", ErrUnavailable, err)
 	}
 	slots := make(chan int, netnsSlotCount)
 	for i := 0; i < netnsSlotCount; i++ {
@@ -183,6 +189,38 @@ func NewRunner(timeout time.Duration, maxOut int, memMax int64, pidsMax int) (*R
 		r.systemdRun = sd
 	}
 	return r, nil
+}
+
+// probeBubblewrap verifies that this process can create the namespace, mount, and seccomp
+// boundary required by the runner. It executes only /bin/true in a read-only view of the host;
+// no user-controlled argv, environment, or filesystem content enters this startup check.
+func probeBubblewrap(bwrap string, filter *os.File) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bwrap,
+		"--unshare-all",
+		"--die-with-parent",
+		"--new-session",
+		"--ro-bind", "/", "/",
+		"--seccomp", "3",
+		"--", "/bin/true",
+	)
+	cmd.ExtraFiles = []*os.File{filter}
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("probe timed out: %w", ctx.Err())
+	}
+	message := strings.TrimSpace(string(output))
+	if len(message) > 512 {
+		message = message[:512]
+	}
+	if message == "" {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, message)
 }
 
 // CgroupLimitsEnforced reports whether cgroup resource limits are actually applied

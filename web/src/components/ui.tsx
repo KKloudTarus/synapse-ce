@@ -39,7 +39,7 @@ export function Button({ variant = 'primary', loading, className, children, disa
       disabled={loading || disabled}
       {...rest}
     >
-      {loading && <Loader2 className="size-4 animate-spin" />}
+      {loading && <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />}
       {children}
     </button>
   )
@@ -287,7 +287,8 @@ export function EmptyState({
 
 export function ErrorState({ message }: { message: string }) {
   return (
-    <div className="rounded-lg border border-high/30 bg-high/10 px-4 py-3 text-sm text-high">
+    // role="alert" so assistive technology announces asynchronous failures that appear after load.
+    <div role="alert" className="rounded-lg border border-high/30 bg-high/10 px-4 py-3 text-sm text-high">
       {message}
     </div>
   )
