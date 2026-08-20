@@ -52,6 +52,28 @@ func TestForwardTransitionRequiresUsableRollbackTarget(t *testing.T) {
 	}
 }
 
+func TestRulePackVersionAfterV1RequiresUsableRollbackTarget(t *testing.T) {
+	spec := testSpec()
+	spec.RollbackVersion = 0
+	if _, err := New(spec); err == nil {
+		t.Fatal("rulepack version >1 must name an actual prior rollback version")
+	}
+
+	spec = testSpec()
+	spec.Version = 1
+	spec.RollbackVersion = 0
+	if _, err := New(spec); err != nil {
+		t.Fatalf("initial rulepack version may use rollback version 0: %v", err)
+	}
+
+	spec = testSpec()
+	spec.Version = 1
+	spec.RollbackVersion = 1
+	if _, err := New(spec); err == nil {
+		t.Fatal("initial rulepack version must not claim a non-existent rollback target")
+	}
+}
+
 func TestCompatibilityRejectsSchemaUnsupportedByCurrentReader(t *testing.T) {
 	p := seal(t)
 	d := RulePackDeployment{
