@@ -66,6 +66,7 @@ nav:
       - Deployment: deployment.md
       - Fleet agent packaging: fleet-agent-packaging.md
       - AI triage evaluation: ai-triage-evaluation.md
+      - Detection RulePack lifecycle: rulepack.md
   - Integrate:
       - CLI: cli.md
       - MCP integration: mcp-integration.md

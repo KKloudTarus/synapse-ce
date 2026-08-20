@@ -16,6 +16,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   exports bounded-cardinality depth, oldest-age, eviction, corruption, and fsync metrics. P0–P2 apply
   backpressure instead of silently shedding; A3 will consume the exposed peek/ACK and retry contract.
 
+- **Signed RulePack detection-content lifecycle and deterministic release gates.** Runtime detection
+  content can now bind rules, compatibility requirements, ATT&CK mappings, positive/negative replay
+  fixtures, per-rule cost budgets, rollout cohorts, and rollback metadata into a canonical signed
+  RulePack. The `synapse-cli rulepack verify|replay|gate` release surface pins an external Ed25519 trust
+  key and gates candidate, canary, and production promotion on deterministic replay, compatibility,
+  retro-hunt completeness, purple/emulation coverage, false-positive quality, required-field
+  availability, suppression/disposition rates, detection density, latency, and CPU evidence.
+
 - **Authority-surface precondition on AI-triage promotion.** Evaluation reports record
   `gate_reachable_pairs`, and the promotion boundary requires at least one counterfactual pair the
   deterministic policy could actually exempt (`--minimum-gate-reachable-counterfactual-pairs`,

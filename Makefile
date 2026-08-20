@@ -1,5 +1,5 @@
 .PHONY: help install tools dev build run test harness vet lint format typecheck tidy ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify \
-        docker-build docker-up docker-down clean web-dev web-build smoke
+        rulepack-verify rulepack-replay rulepack-gate docker-build docker-up docker-down clean web-dev web-build smoke
 
 GO ?= go
 IMAGE ?= synapse-api:dev
@@ -14,6 +14,10 @@ AI_RELEASE_OUTPUT ?= ai-triage-release-ledger.json
 AI_DRIFT_BASELINE ?= ai-triage-drift-baseline.json
 AI_DRIFT_OBSERVED ?= ai-triage-observability.json
 AI_DRIFT_OUTPUT ?= ai-triage-drift-report.json
+RULEPACK_ARTIFACT ?= rulepack.signed.json
+RULEPACK_PUBLIC_KEY ?= rulepack-release.pub
+RULEPACK_EVIDENCE ?= rulepack-gate-evidence.json
+RULEPACK_PHASE ?= promotion
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -72,6 +76,15 @@ ai-triage-verify: ## Reproducibly verify AI-triage eval + shadow gate offline (n
 	$(GO) build ./cmd/synapse-fptriage-eval ./cmd/synapse-fptriage-compare ./cmd/synapse-fptriage-drift ./cmd/synapse-fptriage-release ./cmd/synapse-fptriage-curate
 	$(GO) test -count=1 ./internal/usecase/sca/ -run 'AIEvaluation|FPTriage|AITriage|GoldenDataset|GatePolicy'
 	$(GO) test -count=1 ./internal/usecase/fptriage/...
+
+rulepack-verify: ## Verify a signed RulePack against the externally pinned release key
+	$(GO) run ./cmd/synapse-cli rulepack verify --artifact $(RULEPACK_ARTIFACT) --public-key $(RULEPACK_PUBLIC_KEY)
+
+rulepack-replay: ## Verify and replay a RulePack's positive/negative deterministic fixtures
+	$(GO) run ./cmd/synapse-cli rulepack replay --artifact $(RULEPACK_ARTIFACT) --public-key $(RULEPACK_PUBLIC_KEY)
+
+rulepack-gate: ## Evaluate RulePack release evidence for pre-canary, canary, or promotion
+	$(GO) run ./cmd/synapse-cli rulepack gate --artifact $(RULEPACK_ARTIFACT) --public-key $(RULEPACK_PUBLIC_KEY) --evidence $(RULEPACK_EVIDENCE) --phase $(RULEPACK_PHASE)
 
 docker-build: ## Build the API container image
 	docker build -t $(IMAGE) -f deploy/Dockerfile .
