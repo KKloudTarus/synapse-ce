@@ -264,10 +264,39 @@ export const handlers = [
   http.get('/api/v1/appsec/assets', () => HttpResponse.json({ items: BUSINESS_ASSETS, total: 3, limit: 50, offset: 0 })),
 
   // --- Vulnerability Intelligence ---
-  http.get('/api/v1/vulnerability/advisories', () => HttpResponse.json({ items: VULN_INTEL.advisories, next: null })),
-  http.get('/api/v1/vulnerability/sources', () => HttpResponse.json(VULN_INTEL.sources)),
+  http.get('/api/v1/vulnerability/overview', () => HttpResponse.json({
+    enabled_sources: 4, stale_or_failed_sources: 1, last_successful_sync: HOUR_AGO,
+    changed_advisories_24_hours: 12, oldest_unevaluated_revision: null,
+    open_high_critical_exposure: 7, pending_risk_actions: 3, queue_depth: 0, dead_letters: 0,
+  })),
+  http.get('/api/v1/vulnerability/advisories', () => HttpResponse.json({ items: VULN_INTEL.advisories, next: '' })),
+  http.get('/api/v1/vulnerability/sources', () => HttpResponse.json([
+    { id: 'src-001', type: 'osv', name: 'OSV (GitHub)', enabled: true, archived: false, last_sync_at: HOUR_AGO, last_sync_state: 'succeeded', advisory_count: 245, config: {} },
+    { id: 'src-002', type: 'nvd', name: 'NVD (NIST)', enabled: true, archived: false, last_sync_at: DAY_AGO, last_sync_state: 'succeeded', advisory_count: 1820, config: {} },
+    { id: 'src-003', type: 'cisa_kev', name: 'CISA KEV', enabled: true, archived: false, last_sync_at: HOUR_AGO, last_sync_state: 'succeeded', advisory_count: 1145, config: {} },
+    { id: 'src-004', type: 'first_epss', name: 'FIRST EPSS', enabled: true, archived: false, last_sync_at: new Date(Date.now() - 4 * 86400_000).toISOString(), last_sync_state: 'stale', advisory_count: 0, config: {} },
+  ])),
+  http.get('/api/v1/vulnerability/sources/types', () => HttpResponse.json([
+    { type: 'osv', implemented: true, supports_test: true, supports_credentials: false },
+    { type: 'nvd', implemented: true, supports_test: true, supports_credentials: true },
+    { type: 'cisa_kev', implemented: true, supports_test: true, supports_credentials: false },
+    { type: 'first_epss', implemented: true, supports_test: false, supports_credentials: false },
+    { type: 'csaf', implemented: true, supports_test: true, supports_credentials: true },
+    { type: 'public_exploit', implemented: true, supports_test: false, supports_credentials: false },
+  ])),
+  http.get('/api/v1/vulnerability/sync-runs', () => HttpResponse.json({ items: [
+    { id: 'run-001', source_id: 'src-001', adapter_type: 'osv', mode: 'incremental', trigger: 'scheduled', actor: 'system', durable_job_id: '', attempts: 1, dead_lettered: false, affected_revisions: [{ advisory_id: 'GHSA-abcd-1001', revision: 3, changed_at: HOUR_AGO }], affected_revisions_truncated: false, checkpoint: {}, counts: { processed: 45, inserted: 3, updated: 8, unchanged: 34, skipped: 0, quarantined: 0 }, state: 'succeeded', error: '', started_at: HOUR_AGO, finished_at: HOUR_AGO, created_at: HOUR_AGO },
+    { id: 'run-002', source_id: 'src-002', adapter_type: 'nvd', mode: 'incremental', trigger: 'scheduled', actor: 'system', durable_job_id: '', attempts: 1, dead_lettered: false, affected_revisions: [], affected_revisions_truncated: false, checkpoint: {}, counts: { processed: 120, inserted: 5, updated: 15, unchanged: 100, skipped: 0, quarantined: 0 }, state: 'succeeded', error: '', started_at: DAY_AGO, finished_at: DAY_AGO, created_at: DAY_AGO },
+    { id: 'run-003', source_id: 'src-003', adapter_type: 'cisa_kev', mode: 'full', trigger: 'manual', actor: 'admin', durable_job_id: '', attempts: 1, dead_lettered: false, affected_revisions: [{ advisory_id: 'CVE-2026-1234', revision: 1, changed_at: HOUR_AGO }], affected_revisions_truncated: false, checkpoint: {}, counts: { processed: 1145, inserted: 2, updated: 0, unchanged: 1143, skipped: 0, quarantined: 0 }, state: 'succeeded', error: '', started_at: HOUR_AGO, finished_at: HOUR_AGO, created_at: HOUR_AGO },
+  ], next: '' })),
 
   // --- Fleet ---
+  http.get('/api/v1/fleet/coverage/summary', () => HttpResponse.json({
+    agents_by_state: { healthy: 4, stale: 1, revoked: 0 },
+    rows_by_verdict: { covered: 4, stale: 1, partial: 1, agent_missing: 1 },
+    oldest_per_capability: { 'scan.host': new Date(Date.now() - 3 * 86400_000).toISOString(), 'detect.runtime': DAY_AGO, 'scan.container': HOUR_AGO },
+    assets_without_agent: 1,
+  })),
   http.get('/api/v1/fleet/agents', () => HttpResponse.json(FLEET_AGENTS)),
   http.get('/api/v1/fleet/agents/:id', ({ params }) => {
     const agent = FLEET_AGENTS.find(a => a.id === params.id) ?? FLEET_AGENTS[0]
