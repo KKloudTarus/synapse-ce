@@ -1,0 +1,52 @@
+name: Diagnose 630 Linux failure
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${{ github.run_id }}
+      POSTGRES_DB: synapse
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ${{ github.run_id }}
+          POSTGRES_DB: synapse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d synapse"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/630-rulepack-lifecycle
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Configure Postgres integration database
+        run: echo "SYNAPSE_TEST_DB_DSN=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?sslmode=disable" >> "$GITHUB_ENV"
+      - name: Run Postgres package verbosely
+        run: go test -count=1 -v ./internal/infrastructure/persistence/postgres
+      - name: Remove diagnostic workflow
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/diag-630-linux.yml
+          git commit -m "ci: remove #630 diagnostic workflow"
+          git push origin HEAD:feat/630-rulepack-lifecycle
