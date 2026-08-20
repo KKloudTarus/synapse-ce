@@ -99,11 +99,11 @@ docker-down: ## Stop dev dependencies
 clean: ## Remove build artifacts
 	rm -rf bin web/dist
 
-web-dev: ## Run the frontend dev server
+web-dev: ## Run the Vite dev server (proxies /api to :8080)
 	cd web && pnpm dev
 
-web-build: ## Build the frontend
+web-build: ## Build the web app
 	cd web && pnpm build
 
-smoke: build ## Run API smoke test
-	./bin/synapse-api & sleep 1; curl -f http://localhost:8080/healthz; kill %1
+smoke: build ## Build then probe /healthz
+	./bin/synapse-api & sleep 1; curl -s localhost:8080/healthz; kill %1
