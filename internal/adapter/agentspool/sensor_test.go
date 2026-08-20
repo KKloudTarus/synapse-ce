@@ -200,6 +200,48 @@ func TestDurableSensorFailureDegradesCoverage(t *testing.T) {
 	_ = wrapper.Close()
 }
 
+func TestDurableSensorFailureDoesNotMaskFailedCoverage(t *testing.T) {
+	source := newFakeSensor()
+	source.coverage = []detection.ClassCoverage{{
+		Class: detection.ClassProcess, HostID: "asset-1", AgentID: "agent-1",
+		State: detection.StateFailed, Reason: "probe attach failed", Since: adapterNow,
+	}}
+	durable := &captureSpool{errors: []error{errors.New("disk I/O failed")}}
+	wrapper := mustSensor(t, source, durable)
+	wrapper.now = func() time.Time { return adapterNow }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := wrapper.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	source.events <- processEvent()
+	select {
+	case <-wrapper.Events():
+	case <-time.After(time.Second):
+		t.Fatal("detection path should continue after recorded telemetry failure")
+	}
+	coverage := wrapper.Coverage()
+	if len(coverage) != 1 || coverage[0].State != detection.StateFailed || coverage[0].Reason != "probe attach failed" {
+		t.Fatalf("failed source coverage was masked: %#v", coverage)
+	}
+	cancel()
+	_ = wrapper.Close()
+}
+
+func TestSaturationRetryDelayIsJitteredWithinBounds(t *testing.T) {
+	seen := make(map[time.Duration]struct{})
+	for range 100 {
+		delay := saturationRetryDelay()
+		if delay < minSaturationRetryDelay || delay > maxSaturationRetryDelay {
+			t.Fatalf("retry delay %s outside [%s, %s]", delay, minSaturationRetryDelay, maxSaturationRetryDelay)
+		}
+		seen[delay] = struct{}{}
+	}
+	if len(seen) == 1 {
+		t.Fatal("retry delay remained fixed")
+	}
+}
+
 func TestDurableSensorRejectsBadDependenciesAndDoubleStart(t *testing.T) {
 	identity := testIdentity()
 	if _, err := NewDurableSensor(nil, &captureSpool{}, identity); err == nil {
@@ -263,14 +305,18 @@ func privilegeEvent() detection.Event {
 }
 
 type fakeSensor struct {
-	events chan detection.Event
-	once   sync.Once
+	events   chan detection.Event
+	coverage []detection.ClassCoverage
+	once     sync.Once
 }
 
 func newFakeSensor() *fakeSensor                     { return &fakeSensor{events: make(chan detection.Event)} }
 func (f *fakeSensor) Start(context.Context) error    { return nil }
 func (f *fakeSensor) Events() <-chan detection.Event { return f.events }
 func (f *fakeSensor) Coverage() []detection.ClassCoverage {
+	if f.coverage != nil {
+		return append([]detection.ClassCoverage(nil), f.coverage...)
+	}
 	return []detection.ClassCoverage{{Class: detection.ClassProcess, HostID: "asset-1", AgentID: "agent-1", State: detection.StateActive, Since: adapterNow}}
 }
 func (f *fakeSensor) Dropped() map[detection.Class]uint64 { return nil }

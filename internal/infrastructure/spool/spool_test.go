@@ -361,3 +361,64 @@ func TestRollbackAppendRestoresOffsetForNextWrite(t *testing.T) {
 		t.Fatalf("repaired contents = %q", data)
 	}
 }
+
+func TestSyncFailurePoisonsSpoolUntilRecovery(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Sync[fleetagent.PriorityP3] = SyncAlways
+	s := mustOpen(t, cfg)
+	originalSync := s.syncFile
+	s.syncFile = func(*os.File) error { return errors.New("injected sync failure") }
+
+	if _, err := s.Enqueue(context.Background(), testItem(fleetagent.PriorityP3, "ambiguous", 32)); !errors.Is(err, ErrFailed) {
+		t.Fatalf("enqueue after sync failure = %v, want ErrFailed", err)
+	}
+	if _, err := s.Peek(context.Background(), ports.PeekSpoolRequest{}); !errors.Is(err, ErrFailed) {
+		t.Fatalf("peek after sync failure = %v, want ErrFailed", err)
+	}
+	if _, err := s.Enqueue(context.Background(), testItem(fleetagent.PriorityP3, "must-not-reuse", 32)); !errors.Is(err, ErrFailed) {
+		t.Fatalf("enqueue after sync failure = %v, want ErrFailed", err)
+	}
+
+	// Close still owns cleanup after fail-stop. A successful final flush makes
+	// the ambiguous frame recoverable without ever reusing its coordinate.
+	s.syncFile = originalSync
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := mustOpen(t, cfg)
+	defer reopened.Close()
+	requireIDs(t, mustPeek(t, reopened), "ambiguous")
+	next := mustEnqueue(t, reopened, testItem(fleetagent.PriorityP3, "next", 32))
+	if next.Sequence != 2 {
+		t.Fatalf("sequence after recovery = %d, want 2", next.Sequence)
+	}
+}
+
+func TestStateCommitFailurePoisonsSpoolUntilRecovery(t *testing.T) {
+	cfg := testConfig(t)
+	s := mustOpen(t, cfg)
+	originalPersist := s.persistState
+	s.persistState = func(string, *diskState) error { return errors.New("injected state failure") }
+
+	if _, err := s.Enqueue(context.Background(), testItem(fleetagent.PriorityP2, "ambiguous", 32)); !errors.Is(err, ErrFailed) {
+		t.Fatalf("enqueue after state commit failure = %v, want ErrFailed", err)
+	}
+	if _, err := s.Stats(context.Background()); !errors.Is(err, ErrFailed) {
+		t.Fatalf("stats after state failure = %v, want ErrFailed", err)
+	}
+	if _, err := s.Enqueue(context.Background(), testItem(fleetagent.PriorityP2, "must-not-reuse", 32)); !errors.Is(err, ErrFailed) {
+		t.Fatalf("enqueue after state failure = %v, want ErrFailed", err)
+	}
+
+	s.persistState = originalPersist
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := mustOpen(t, cfg)
+	defer reopened.Close()
+	requireIDs(t, mustPeek(t, reopened), "ambiguous")
+	next := mustEnqueue(t, reopened, testItem(fleetagent.PriorityP2, "next", 32))
+	if next.Sequence != 2 {
+		t.Fatalf("sequence after recovery = %d, want 2", next.Sequence)
+	}
+}

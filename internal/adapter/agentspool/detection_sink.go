@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
@@ -48,12 +47,8 @@ func (s *DetectionSink) Emit(ctx context.Context, value detection.Detection) err
 		if _, err = s.spool.Enqueue(ctx, item); !errors.Is(err, ports.ErrTelemetrySpoolSaturated) {
 			return err
 		}
-		timer := time.NewTimer(250 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
+		if err := waitForSpoolCapacity(ctx); err != nil {
+			return err
 		}
 	}
 }

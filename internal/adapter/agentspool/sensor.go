@@ -175,13 +175,9 @@ func (s *DurableSensor) persist(ctx context.Context, event detection.Event) bool
 		// A non-sheddable class applies real backpressure. The spool has already
 		// persisted a quota-backpressure gap; retry until A3 ACKs free space or
 		// shutdown cancels the observation.
-		timer := time.NewTimer(250 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		if err := waitForSpoolCapacity(ctx); err != nil {
 			s.recordFailure(event.Class)
 			return false
-		case <-timer.C:
 		}
 	}
 }
@@ -242,7 +238,7 @@ func (s *DurableSensor) Coverage() []detection.ClassCoverage {
 	}
 	s.mu.Unlock()
 	for index := range coverage {
-		if failures[coverage[index].Class] == 0 {
+		if failures[coverage[index].Class] == 0 || coverage[index].State != detection.StateActive {
 			continue
 		}
 		coverage[index].State = detection.StateDegraded

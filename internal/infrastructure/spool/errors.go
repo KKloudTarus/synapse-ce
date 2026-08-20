@@ -13,6 +13,9 @@ var (
 	ErrSaturated = ports.ErrTelemetrySpoolSaturated
 	// ErrClosed means the spool no longer accepts or serves operations.
 	ErrClosed = errors.New("telemetry spool closed")
+	// ErrFailed means a durability operation had an ambiguous outcome. The
+	// spool fails stop until it is closed and recovered from disk.
+	ErrFailed = errors.New("telemetry spool durability failure")
 	// ErrLocked means another process already owns the spool directory.
 	ErrLocked = errors.New("telemetry spool already open")
 	// ErrACKAhead means an ACK claims a sequence which this spool has never assigned.

@@ -75,12 +75,8 @@ func enqueueHealth(ctx context.Context, durable ports.TelemetrySpool, kind ports
 		if _, err = durable.Enqueue(ctx, item); !errors.Is(err, ports.ErrTelemetrySpoolSaturated) {
 			return err
 		}
-		timer := time.NewTimer(250 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
+		if err := waitForSpoolCapacity(ctx); err != nil {
+			return err
 		}
 	}
 }

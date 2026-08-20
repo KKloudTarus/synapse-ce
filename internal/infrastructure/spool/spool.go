@@ -48,6 +48,10 @@ type Spool struct {
 	gapFile *os.File
 	state   diskState
 	closed  bool
+	failed  error
+
+	syncFile     func(*os.File) error
+	persistState func(string, *diskState) error
 
 	records  [4][]*recordRef
 	segments []*segment
@@ -83,7 +87,11 @@ func Open(input Config) (*Spool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("lock spool directory: %w", err)
 	}
-	s := &Spool{cfg: cfg, lock: lock}
+	s := &Spool{
+		cfg: cfg, lock: lock,
+		syncFile:     func(file *os.File) error { return file.Sync() },
+		persistState: persistState,
+	}
 	fail := func(openErr error) (*Spool, error) {
 		if s.gapFile != nil {
 			_ = s.gapFile.Close()
@@ -443,7 +451,17 @@ func (s *Spool) ensureOpenLocked() error {
 	if s.closed {
 		return ErrClosed
 	}
+	if s.failed != nil {
+		return errors.Join(ErrFailed, s.failed)
+	}
 	return nil
+}
+
+func (s *Spool) failLocked(err error) error {
+	if s.failed == nil {
+		s.failed = err
+	}
+	return errors.Join(ErrFailed, err)
 }
 
 func (s *Spool) writerLocked(priority fleetagent.DeliveryPriority, epoch, sequence uint64, frameBytes int64) (*segment, error) {
@@ -484,8 +502,8 @@ func (s *Spool) syncSegmentLocked(seg *segment) error {
 		return nil
 	}
 	started := s.cfg.Now()
-	if err := seg.file.Sync(); err != nil {
-		return fmt.Errorf("sync %s WAL segment: %w", seg.priority, err)
+	if err := s.syncFile(seg.file); err != nil {
+		return s.failLocked(fmt.Errorf("sync %s WAL segment: %w", seg.priority, err))
 	}
 	s.observeSyncLocked(started)
 	return nil
@@ -501,8 +519,8 @@ func (s *Spool) observeSyncLocked(started time.Time) {
 
 func (s *Spool) persistStateLocked() error {
 	started := s.cfg.Now()
-	if err := persistState(s.cfg.Dir, &s.state); err != nil {
-		return err
+	if err := s.persistState(s.cfg.Dir, &s.state); err != nil {
+		return s.failLocked(err)
 	}
 	s.observeSyncLocked(started)
 	return nil

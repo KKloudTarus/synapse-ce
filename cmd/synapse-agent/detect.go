@@ -82,29 +82,38 @@ func (r *runner) startDetection(ctx context.Context, cred fleetclient.Credential
 		_ = durable.Close()
 		return
 	}
-	if err := r.startSpoolMetrics(ctx, durable); err != nil {
+	runCtx, cancelRun := context.WithCancel(ctx)
+	if err := r.startSpoolMetrics(runCtx, durable); err != nil {
 		log.Printf("detection: agent metrics listener unavailable: %v", err)
 	}
 
 	log.Printf("detection engine starting: classes=%s ceiling=%.0f%% durable_spool=%s", r.cfg.detectClasses, r.cfg.detectCeiling, r.telemetrySpoolDir())
 	// One-shot coverage report shortly after start, so the operator can see which classes actually came
 	// up on this host and which are gaps — never silently assume a class is observing.
+	coverageDone := make(chan struct{})
 	go func() {
+		defer close(coverageDone)
+		timer := time.NewTimer(3 * time.Second)
+		defer timer.Stop()
 		select {
-		case <-ctx.Done():
-		case <-time.After(3 * time.Second):
+		case <-runCtx.Done():
+		case <-timer.C:
 			coverage := eng.Coverage()
 			log.Printf("detection coverage: %s", formatCoverage(coverage))
-			if err := agentspool.RecordCoverage(ctx, durable, coverage, time.Now().UTC()); err != nil {
+			if err := agentspool.RecordCoverage(runCtx, durable, coverage, time.Now().UTC()); err != nil && !errors.Is(err, context.Canceled) {
 				log.Printf("detection: persist coverage/sensor state: %v", err)
 			}
 		}
 	}()
 	go func() {
-		err := eng.Run(ctx)
+		err := eng.Run(runCtx)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("detection engine stopped: %v", err)
 		}
+		cancelRun()
+		// A timer that fired concurrently may still be persisting coverage. Wait
+		// for it before closing the shared spool so no operation races Close.
+		<-coverageDone
 		if closeErr := durable.Close(); closeErr != nil {
 			log.Printf("detection: close durable spool: %v", closeErr)
 		}
