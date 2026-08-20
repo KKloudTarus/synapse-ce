@@ -130,6 +130,9 @@ func runRulePackGate(args []string) error {
 	if err := writeRulePackJSON(report); err != nil {
 		return err
 	}
+	if !rulePackGatePhaseAcceptsState(*phase, input.Deployment.State) {
+		return fmt.Errorf("rulepack %s gate requires deployment state %q, got %q", *phase, rulePackGateRequiredState(*phase), input.Deployment.State)
+	}
 	var passed bool
 	switch *phase {
 	case "pre-canary":
@@ -143,6 +146,22 @@ func runRulePackGate(args []string) error {
 		return fmt.Errorf("rulepack %s gate failed", *phase)
 	}
 	return nil
+}
+
+func rulePackGateRequiredState(phase string) rulepackdomain.DeploymentState {
+	switch phase {
+	case "pre-canary":
+		return rulepackdomain.DeploymentCandidate
+	case "canary", "promotion":
+		return rulepackdomain.DeploymentCanary
+	default:
+		return ""
+	}
+}
+
+func rulePackGatePhaseAcceptsState(phase string, state rulepackdomain.DeploymentState) bool {
+	required := rulePackGateRequiredState(phase)
+	return required != "" && state == required
 }
 
 func loadVerifiedRulePack(artifactPath, keyPath string) (rulepackdomain.SignedArtifact, ed25519.PublicKey, error) {
