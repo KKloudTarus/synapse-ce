@@ -42,7 +42,9 @@ func (s *setInvariantStore) Delete(_ context.Context, _ shared.ID, _ shared.ID, 
 	s.getErr = shared.ErrNotFound
 	return nil
 }
-func (*setInvariantStore) List(context.Context, shared.ID) ([]*desireddom.State, error) { return nil, nil }
+func (*setInvariantStore) List(context.Context, shared.ID) ([]*desireddom.State, error) {
+	return nil, nil
+}
 
 type setInvariantAssetReader struct {
 	asset *asset.Asset

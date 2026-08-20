@@ -57,6 +57,13 @@ func NewService(store ports.FleetDesiredStore, assets AssetReader, bindings Bind
 	if store == nil || assets == nil || bindings == nil || agents == nil || audit == nil || clock == nil || ids == nil {
 		return nil, fmt.Errorf("%w: fleet desired-state service needs store, asset reader, binding reader, agent reader, audit log, clock and id generator", shared.ErrValidation)
 	}
+	// Fail closed on the coverage window: fleetcoverage.AgentStateFrom treats a non-positive staleAfter as
+	// "never stale", which would report a long-idle agent as Healthy/covered — the exact fail-open a
+	// coverage-honesty tool must refuse. Require a positive window at construction rather than trust the
+	// composition root to pass one.
+	if staleAfter <= 0 {
+		return nil, fmt.Errorf("%w: fleet desired-state service needs a positive stale-after window, got %s", shared.ErrValidation, staleAfter)
+	}
 	return &Service{store: store, assets: assets, bindings: bindings, agents: agents, audit: audit, clock: clock, ids: ids, staleAfter: staleAfter}, nil
 }
 
@@ -197,9 +204,9 @@ func (s *Service) Get(ctx context.Context, tenantID, assetID shared.ID) (*desire
 }
 
 type ReconciliationRow struct {
-	AssetID       string                    `json:"asset_id"`
-	PolicyID      string                    `json:"policy_id"`
-	PolicyVersion int64                     `json:"policy_version"`
+	AssetID       string `json:"asset_id"`
+	PolicyID      string `json:"policy_id"`
+	PolicyVersion int64  `json:"policy_version"`
 	// AgentID is the deterministic witness that satisfied the capability, or the best available
 	// representative when the capability is uncovered. Asset coverage does not imply reverse-unique
 	// AssetID -> AgentID binding.

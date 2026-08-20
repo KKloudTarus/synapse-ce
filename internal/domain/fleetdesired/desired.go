@@ -38,6 +38,8 @@ type State struct {
 	Audit        shared.Audit
 }
 
+// GapReason names why a desired capability is not covered by a healthy bound agent. It is a closed set
+// so a consumer can reason over every uncovered case rather than an open-ended string.
 type GapReason string
 
 const (
@@ -48,6 +50,7 @@ const (
 	GapCapabilityMissing   GapReason = "capability_missing"
 )
 
+// Valid reports whether r is a known gap reason.
 func (r GapReason) Valid() bool {
 	switch r {
 	case GapAgentMissing, GapAgentStale, GapAgentRevoked, GapAgentDecommissioned, GapCapabilityMissing:
@@ -57,6 +60,8 @@ func (r GapReason) Valid() bool {
 	}
 }
 
+// SupportedAssetKind reports whether desired capabilities may target an asset of this kind. Only the
+// canonical host and cluster kinds carry a fleet agent that can satisfy a desired capability.
 func SupportedAssetKind(kind asset.Kind) bool {
 	return kind == asset.KindHost || kind == asset.KindCluster
 }
