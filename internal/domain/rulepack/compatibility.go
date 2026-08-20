@@ -7,6 +7,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetversion"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetryschema"
 )
 
 // Compatible validates that deployment can execute this exact RulePack without missing a required
@@ -15,8 +16,14 @@ func Compatible(p RulePack, d RulePackDeployment) error {
 	if err := validateDeploymentIdentity(p, d); err != nil {
 		return err
 	}
+	if d.PreviousVersion != p.RollbackVersion {
+		return fmt.Errorf("%w: deployment previous version %d does not match rulepack rollback version %d", shared.ErrValidation, d.PreviousVersion, p.RollbackVersion)
+	}
 	if !fleetversion.MeetsFloor(d.AgentVersion, p.MinAgentVersion) {
 		return fmt.Errorf("%w: agent version %q is below rulepack floor %q", shared.ErrValidation, d.AgentVersion, p.MinAgentVersion)
+	}
+	if err := telemetryschema.Validate(d.SchemaVersion); err != nil {
+		return fmt.Errorf("%w: deployment telemetry schema is unsupported by this control-plane reader", err)
 	}
 	if !containsInt(p.RequiredSchemaVersions, d.SchemaVersion) {
 		return fmt.Errorf("%w: telemetry schema version %d is not supported by rulepack", shared.ErrValidation, d.SchemaVersion)
