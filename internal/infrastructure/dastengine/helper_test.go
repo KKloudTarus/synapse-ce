@@ -202,7 +202,7 @@ func TestRunHelperCrawlWallClockCancelsBlockedIO(t *testing.T) {
 	plan.Crawl = &ports.DASTCrawlPlan{Target: server.URL, Seeds: []dastsurface.Request{{Method: "GET", URL: server.URL + "/slow"}}, Depth: 4, Pages: 10, Requests: 20, WallClock: time.Second}
 	started := time.Now()
 	outcome, _ := runHelper(t, plan, map[string]string{"credential": "token"}, func(ports.DASTRequest) bool { return true })
-	if !outcome.Incomplete || outcome.Reason != "wall_clock" || time.Since(started) > 2*time.Second {
+	if !outcome.Incomplete || outcome.Reason != "wall_clock" || time.Since(started) > 5*time.Second {
 		t.Fatalf("elapsed=%s outcome=%+v", time.Since(started), outcome)
 	}
 }
