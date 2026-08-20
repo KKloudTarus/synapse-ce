@@ -10,6 +10,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/purplecoverage"
+	rulepackdomain "github.com/KKloudTarus/synapse-ce/internal/domain/rulepack"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -45,7 +46,7 @@ func TestEvidenceCollectorAttestsAuthoritativeRetroAndPurpleEvidence(t *testing.
 		t.Fatal(err)
 	}
 	req := GateEvidenceRequest{
-		Deployment: gateDeployment(p, DeploymentCandidateForTest()),
+		Deployment: gateDeployment(p, rulepackdomain.DeploymentCandidate),
 		Policy: gatePolicy(),
 		Costs: []RuleCostObservation{{RuleID: "det.test", LatencyMicros: 50, CPUMicrosPerHostDay: 500}},
 		RetroCases: []RetroCase{{RuleID: "det.test", Query: ports.HuntQuery{HostID: "h1", Class: detection.ClassProcess, Since: now.Add(-time.Minute), Until: now.Add(time.Minute), Limit: 100}}},
@@ -66,12 +67,6 @@ func TestEvidenceCollectorAttestsAuthoritativeRetroAndPurpleEvidence(t *testing.
 	if len(input.Retro) != 1 || len(input.Purple) != 1 {
 		t.Fatalf("verified evidence = %+v", input)
 	}
-}
-
-// DeploymentCandidateForTest keeps this test independent of literal state spelling while reusing the
-// same deployment helper as the gate tests in this package.
-func DeploymentCandidateForTest() string {
-	return "candidate"
 }
 
 func TestVerifyGateEvidenceRejectsTamperAndWrongTrustedKey(t *testing.T) {
