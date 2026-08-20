@@ -28,6 +28,14 @@ func (s testGateEvidenceSigner) Sign(_ context.Context, head string) (evidence.A
 	}, nil
 }
 
+func gateRetroQueryProvenance() []RetroQueryProvenance {
+	now := time.Unix(10, 0).UTC()
+	return []RetroQueryProvenance{{
+		RuleID: "det.test", HostID: "h1", Class: detection.ClassProcess,
+		Since: now.Add(-time.Minute), Until: now.Add(time.Minute), Limit: 100,
+	}}
+}
+
 func TestEvidenceCollectorAttestsAuthoritativeRetroAndPurpleEvidence(t *testing.T) {
 	p := gatePack(t)
 	now := time.Unix(10, 0).UTC()
@@ -60,6 +68,9 @@ func TestEvidenceCollectorAttestsAuthoritativeRetroAndPurpleEvidence(t *testing.
 	if len(signed.Input.Retro) != 1 || signed.Input.Retro[0].MatchedEvents != 1 || len(signed.Input.Purple) != 1 {
 		t.Fatalf("collected evidence = %+v", signed.Input)
 	}
+	if len(signed.RetroQueries) != 1 || signed.RetroQueries[0].RuleID != "det.test" || signed.RetroQueries[0].HostID != "h1" || signed.RetroQueries[0].Limit != 100 {
+		t.Fatalf("retro query provenance = %+v", signed.RetroQueries)
+	}
 	input, err := VerifyGateEvidence(signed, p, pub)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +87,8 @@ func TestVerifyGateEvidenceRejectsTamperAndWrongTrustedKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	input := goodGateInput(p)
-	head, err := gateEvidenceHead(p.ID, p.Version, p.Digest, input)
+	queries := gateRetroQueryProvenance()
+	head, err := gateEvidenceHead(p.ID, p.Version, p.Digest, input, queries)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +97,7 @@ func TestVerifyGateEvidenceRejectsTamperAndWrongTrustedKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signed := SignedGateEvidence{PackID: p.ID, PackVersion: p.Version, PackDigest: p.Digest, Input: input, Attestation: att}
+	signed := SignedGateEvidence{PackID: p.ID, PackVersion: p.Version, PackDigest: p.Digest, RetroQueries: queries, Input: input, Attestation: att}
 	if _, err := VerifyGateEvidence(signed, p, pub); err != nil {
 		t.Fatalf("valid signed evidence: %v", err)
 	}
@@ -96,6 +108,20 @@ func TestVerifyGateEvidenceRejectsTamperAndWrongTrustedKey(t *testing.T) {
 	if _, err := VerifyGateEvidence(tampered, p, pub); err == nil {
 		t.Fatal("tampered release evidence must fail attestation verification")
 	}
+
+	tamperedQuery := signed
+	tamperedQuery.RetroQueries = append([]RetroQueryProvenance(nil), signed.RetroQueries...)
+	tamperedQuery.RetroQueries[0].Limit++
+	if _, err := VerifyGateEvidence(tamperedQuery, p, pub); err == nil {
+		t.Fatal("tampered retro query provenance must fail attestation verification")
+	}
+
+	missingQuery := signed
+	missingQuery.RetroQueries = nil
+	if _, err := VerifyGateEvidence(missingQuery, p, pub); err == nil {
+		t.Fatal("retro aggregate without its bounded query provenance must fail")
+	}
+
 	wrongPub, _, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -113,15 +139,35 @@ func TestGateEvidenceHeadCanonicalizesSetLikeOrdering(t *testing.T) {
 	b.Evaluation.AvailableFields[0], b.Evaluation.AvailableFields[1] = b.Evaluation.AvailableFields[1], b.Evaluation.AvailableFields[0]
 	b.Purple[0].Actual = []string{"zzz", "det.test"}
 	a.Purple[0].Actual = []string{"det.test", "zzz"}
-	ha, err := gateEvidenceHead(p.ID, p.Version, p.Digest, a)
+	queries := gateRetroQueryProvenance()
+	ha, err := gateEvidenceHead(p.ID, p.Version, p.Digest, a, queries)
 	if err != nil {
 		t.Fatal(err)
 	}
-	hb, err := gateEvidenceHead(p.ID, p.Version, p.Digest, b)
+	hb, err := gateEvidenceHead(p.ID, p.Version, p.Digest, b, queries)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ha != hb {
 		t.Fatalf("set-like ordering changed gate evidence identity: %s != %s", ha, hb)
+	}
+}
+
+func TestGateEvidenceHeadBindsRetroQueryWindow(t *testing.T) {
+	p := gatePack(t)
+	input := goodGateInput(p)
+	a := gateRetroQueryProvenance()
+	b := append([]RetroQueryProvenance(nil), a...)
+	b[0].Since = b[0].Since.Add(time.Second)
+	ha, err := gateEvidenceHead(p.ID, p.Version, p.Digest, input, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hb, err := gateEvidenceHead(p.ID, p.Version, p.Digest, input, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ha == hb {
+		t.Fatal("changing the retro-hunt window must change the attested evidence head")
 	}
 }
