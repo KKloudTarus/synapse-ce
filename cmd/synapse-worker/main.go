@@ -70,6 +70,14 @@ func main() {
 	cfg := config.Load()
 	log := logging.New(cfg.LogLevel)
 	log.Info("starting synapse-worker", "env", cfg.Environment)
+	if err := cfg.ValidateSandboxPosture(); err != nil {
+		log.Error("sandbox posture invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateMigrationPosture(); err != nil {
+		log.Error("database migration posture invalid", "err", err)
+		os.Exit(1)
+	}
 
 	// The worker shares the API's Postgres (the queue + the recon/evidence repos), so a DSN
 	// is required – an in-memory queue is not shared across processes.
@@ -82,9 +90,15 @@ func main() {
 
 	startup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := postgres.Migrate(startup, cfg.DBDSN); err != nil {
-		log.Error("db migrate failed", "err", err)
-		os.Exit(1)
+	if cfg.DBAutoMigrate {
+		migrationStarted := time.Now()
+		if err := postgres.MigrateLocked(startup, cfg.MigrationDSN()); err != nil {
+			log.Error("db migrate failed", "err", err)
+			os.Exit(1)
+		}
+		log.Info("db migrations complete", "duration", time.Since(migrationStarted))
+	} else {
+		log.Info("db auto-migration disabled; readiness requires current migrations")
 	}
 	pool, err := postgres.ConnectPool(startup, cfg.DBDSN, postgres.PoolConfig{
 		MaxConns: int32(cfg.DBMaxConns), MinConns: int32(cfg.DBMinConns),
@@ -95,6 +109,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+	if !cfg.DBAutoMigrate {
+		if err := postgres.CheckMigrationsReady(startup, pool); err != nil {
+			log.Error("database migrations are not current", "err", err)
+			os.Exit(1)
+		}
+	}
 	if err := postgres.CheckRLSRuntimeRole(startup, pool); err != nil {
 		log.Error("the worker DB role cannot enforce row level security – refusing to serve", "err", err)
 		os.Exit(1)

@@ -42,6 +42,10 @@ func main() {
 		log.Error("synapse-mcp requires SYNAPSE_MCP_ENGAGEMENT_ID (the engagement it is scoped to)")
 		os.Exit(1)
 	}
+	if err := cfg.ValidateMigrationPosture(); err != nil {
+		log.Error("database migration posture invalid", "err", err)
+		os.Exit(1)
+	}
 
 	clock := idgen.SystemClock{}
 	ids := idgen.RandomID{}
@@ -54,9 +58,15 @@ func main() {
 	if cfg.DBDSN != "" {
 		startup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		if err := postgres.Migrate(startup, cfg.DBDSN); err != nil {
-			log.Error("db migrate failed", "err", err)
-			os.Exit(1)
+		if cfg.DBAutoMigrate {
+			migrationStarted := time.Now()
+			if err := postgres.MigrateLocked(startup, cfg.MigrationDSN()); err != nil {
+				log.Error("db migrate failed", "err", err)
+				os.Exit(1)
+			}
+			log.Info("db migrations complete", "duration", time.Since(migrationStarted))
+		} else {
+			log.Info("db auto-migration disabled; readiness requires current migrations")
 		}
 		pool, err := postgres.Connect(startup, cfg.DBDSN)
 		if err != nil {
@@ -64,6 +74,12 @@ func main() {
 			os.Exit(1)
 		}
 		defer pool.Close()
+		if !cfg.DBAutoMigrate {
+			if err := postgres.CheckMigrationsReady(startup, pool); err != nil {
+				log.Error("database migrations are not current", "err", err)
+				os.Exit(1)
+			}
+		}
 		lockConn, ok, lerr := postgres.AcquireSingletonLock(startup, pool, "mcp")
 		if lerr != nil {
 			log.Error("mcp single-instance lock check failed", "err", lerr)

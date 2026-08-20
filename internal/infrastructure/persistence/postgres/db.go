@@ -8,7 +8,9 @@ import (
 	"database/sql"
 	"fmt"
 	"hash/fnv"
+	"io/fs"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -98,6 +100,12 @@ func singletonLockKey(role string) int64 {
 	return int64(h.Sum64())
 }
 
+func migrationLockKey() int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte("synapse:migration"))
+	return int64(h.Sum64())
+}
+
 // AcquireSingletonLock takes a session-level advisory lock (keyed by role) on a DEDICATED
 // connection the caller holds for the whole process lifetime – releasing it drops the
 // lock. A second instance OF THE SAME ROLE gets ok=false so it can fail fast (the repos
@@ -158,7 +166,36 @@ func Migrate(ctx context.Context, dsn string) error {
 		return fmt.Errorf("migrate open: %w", err)
 	}
 	defer func() { _ = db.Close() }()
+	return migrate(ctx, db)
+}
 
+// MigrateLocked applies the embedded migration set while holding a database-wide advisory lock.
+// The lock and goose share the pool's sole connection, so the session lock is held for the
+// complete migration run. Acquisition blocks until the caller's context expires.
+func MigrateLocked(ctx context.Context, dsn string) error {
+	db, err := sql.Open("pgx", dsnForMigrate(dsn))
+	if err != nil {
+		return fmt.Errorf("migrate open: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	if _, err := db.ExecContext(ctx, "SELECT pg_advisory_lock($1)", migrationLockKey()); err != nil {
+		return fmt.Errorf("acquire migration advisory lock: %w", err)
+	}
+	defer func() {
+		// A network failure during cleanup must not turn a bounded migration startup
+		// into an unbounded shutdown hang. Closing the sole connection also releases
+		// the session lock if this best-effort unlock cannot complete.
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = db.ExecContext(releaseCtx, "SELECT pg_advisory_unlock($1)", migrationLockKey())
+	}()
+	return migrate(ctx, db)
+}
+
+func migrate(ctx context.Context, db *sql.DB) error {
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		return fmt.Errorf("migrate dialect: %w", err)
@@ -195,33 +232,126 @@ func CheckMigrationsReady(ctx context.Context, pool *pgxpool.Pool) error {
 	return checkMigrationsReady(ctx, pool)
 }
 
-func checkMigrationsReady(ctx context.Context, queryer readinessQueryer) error {
-	entries, err := migrations.FS.ReadDir(".")
-	if err != nil {
-		return fmt.Errorf("read embedded migrations: %w", err)
-	}
-	expected := 0
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") {
-			expected++
-		}
-	}
+type migrationReadinessQueryer interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
 
-	var applied int
-	err = queryer.QueryRow(ctx, `
-		SELECT count(*)
+func checkMigrationsReady(ctx context.Context, queryer migrationReadinessQueryer) error {
+	expected, err := embeddedMigrationVersions()
+	if err != nil {
+		return err
+	}
+	rows, err := queryer.Query(ctx, `SELECT version_id, is_applied
 		FROM (
 			SELECT DISTINCT ON (version_id) version_id, is_applied
 			FROM goose_db_version
 			WHERE version_id > 0
 			ORDER BY version_id, id DESC
 		) AS latest
-		WHERE is_applied`).Scan(&applied)
+		ORDER BY version_id`)
 	if err != nil {
-		return fmt.Errorf("migration readiness: %w", err)
+		return fmt.Errorf("migration readiness query: %w", err)
 	}
-	if applied != expected {
-		return fmt.Errorf("migration readiness: %d of %d embedded migrations applied", applied, expected)
+	defer rows.Close()
+
+	actual := make([]migrationState, 0, len(expected))
+	for rows.Next() {
+		var state migrationState
+		if err := rows.Scan(&state.version, &state.applied); err != nil {
+			return fmt.Errorf("migration readiness scan: %w", err)
+		}
+		actual = append(actual, state)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("migration readiness rows: %w", err)
+	}
+	return compareMigrationStates(expected, actual)
+}
+
+type migrationState struct {
+	version int64
+	applied bool
+}
+
+func embeddedMigrationVersions() ([]int64, error) {
+	return migrationVersions(migrations.FS)
+}
+
+func migrationVersions(source fs.FS) ([]int64, error) {
+	entries, err := fs.ReadDir(source, ".")
+	if err != nil {
+		return nil, fmt.Errorf("read embedded migrations: %w", err)
+	}
+
+	versions := make([]int64, 0, len(entries))
+	seen := make(map[int64]string, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		prefix, _, ok := strings.Cut(entry.Name(), "_")
+		if !ok {
+			return nil, fmt.Errorf("embedded migration %q has an invalid filename", entry.Name())
+		}
+		version, err := goose.NumericComponent(entry.Name())
+		if err != nil || version <= 0 {
+			return nil, fmt.Errorf("embedded migration %q has invalid version %q", entry.Name(), prefix)
+		}
+		if previous, duplicate := seen[version]; duplicate {
+			return nil, fmt.Errorf("embedded migrations %q and %q use duplicate version %d", previous, entry.Name(), version)
+		}
+		seen[version] = entry.Name()
+		versions = append(versions, version)
+	}
+	if len(versions) == 0 {
+		return nil, fmt.Errorf("no embedded SQL migrations found")
+	}
+	sort.Slice(versions, func(i, j int) bool { return versions[i] < versions[j] })
+	return versions, nil
+}
+
+func compareMigrationStates(expected []int64, actual []migrationState) error {
+	if len(expected) == 0 {
+		return fmt.Errorf("migration readiness: no embedded migrations expected")
+	}
+
+	want := make(map[int64]struct{}, len(expected))
+	latestExpected := expected[0]
+	for _, version := range expected {
+		if _, duplicate := want[version]; duplicate {
+			return fmt.Errorf("migration readiness: duplicate embedded migration %d", version)
+		}
+		want[version] = struct{}{}
+		if version > latestExpected {
+			latestExpected = version
+		}
+	}
+	got := make(map[int64]bool, len(actual))
+	for _, state := range actual {
+		if _, duplicate := got[state.version]; duplicate {
+			return fmt.Errorf("migration readiness: duplicate latest state for version %d", state.version)
+		}
+		got[state.version] = state.applied
+	}
+	for _, version := range expected {
+		applied, ok := got[version]
+		if !ok {
+			return fmt.Errorf("migration readiness: embedded migration %d is missing", version)
+		}
+		if !applied {
+			return fmt.Errorf("migration readiness: embedded migration %d is not applied", version)
+		}
+	}
+	for version, applied := range got {
+		if _, ok := want[version]; ok {
+			continue
+		}
+		if version <= latestExpected {
+			return fmt.Errorf("migration readiness: database contains divergent migration %d", version)
+		}
+		if !applied {
+			return fmt.Errorf("migration readiness: newer migration %d is not applied", version)
+		}
 	}
 	return nil
 }

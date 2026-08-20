@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -48,6 +49,9 @@ type Config struct {
 	// DBMigrationDSN, when set, is used only for schema migrations and runtime-role grants.
 	// It must be a DDL owner credential; DBDSN remains the least-privilege application credential.
 	DBMigrationDSN string
+	// DBAutoMigrate controls embedded migrations for long-running services. A dedicated
+	// synapse-migrate job may own migrations while services rely on readiness instead.
+	DBAutoMigrate bool
 	// SyftBin is the Syft executable used for SBOM generation (shell-out).
 	SyftBin string
 	// SBOMProducer selects the SBOM-generation producer: "syft" (default – the pinned
@@ -536,6 +540,7 @@ func Load() Config {
 		AuditFile:                        getenv("SYNAPSE_AUDIT_FILE", "data/audit.jsonl"),
 		DBDSN:                            getenv("SYNAPSE_DB_DSN", ""),
 		DBMigrationDSN:                   getenv("SYNAPSE_DB_MIGRATION_DSN", ""),
+		DBAutoMigrate:                    getbool("SYNAPSE_DB_AUTO_MIGRATE", true),
 		SyftBin:                          getenv("SYNAPSE_SYFT_BIN", "syft"),
 		SBOMProducer:                     getenv("SYNAPSE_SBOM_PRODUCER", "syft"),
 		GrypeBin:                         getenv("SYNAPSE_GRYPE_BIN", "grype"),
@@ -851,6 +856,32 @@ func (c Config) IsProduction() bool {
 	default: // production, prod, staging, or any unrecognized/misspelled value → fail closed
 		return true
 	}
+}
+
+// ValidateSandboxPosture rejects a production configuration that would execute tools without containment.
+func (c Config) ValidateSandboxPosture() error {
+	if c.IsProduction() && !c.SandboxEnabled {
+		return errors.New("SYNAPSE_SANDBOX_ENABLED is required in production")
+	}
+	return nil
+}
+
+// ValidateMigrationPosture keeps DDL credentials out of long-running production services.
+// Production migrations are owned by the dedicated synapse-migrate command.
+func (c Config) ValidateMigrationPosture() error {
+	if c.IsProduction() && c.DBAutoMigrate {
+		return errors.New("SYNAPSE_DB_AUTO_MIGRATE=false is required in production; run synapse-migrate before starting services")
+	}
+	return nil
+}
+
+// MigrationDSN returns the DDL credential when configured, falling back to the runtime
+// credential only for development convenience.
+func (c Config) MigrationDSN() string {
+	if c.DBMigrationDSN != "" {
+		return c.DBMigrationDSN
+	}
+	return c.DBDSN
 }
 
 func getenv(key, def string) string {

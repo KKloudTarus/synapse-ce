@@ -109,6 +109,20 @@ Recommended hardening:
 
 `GET /healthz` and `GET /readyz` are unauthenticated by design. Every other API route requires the bearer token.
 
+## Migration rollout
+
+In production, set `SYNAPSE_DB_AUTO_MIGRATE=false` and run `synapse-migrate` with the owner
+credential before deploying API, worker, or MCP binaries. Design migrations as backward-compatible,
+phased changes: expand first, deploy consumers second, then remove obsolete schema only after all
+older consumers are gone. This migrate-first sequence permits an older API to remain serving a
+forward schema only when every additional database migration is applied and has a version strictly
+above that binary's embedded maximum. Missing, down, or divergent required migrations remain
+unready.
+
+The distinction is intentional: an API with a stale schema stays running but reports `503` from
+`/readyz`, allowing the orchestrator to remove it from traffic. `synapse-worker` and `synapse-mcp`
+have no equivalent HTTP readiness endpoint, so they refuse startup until migrations are ready.
+
 ## Metrics and access logging
 
 `SYNAPSE_METRICS_ENABLED` (default `false`) exposes Prometheus metrics — HTTP RED
