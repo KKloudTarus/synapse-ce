@@ -85,7 +85,8 @@ GET  /api/v1/fleet/agents/{id}
 ```
 
 Configure a host agent with `SYNAPSE_AGENT_ROOT` (filesystem root to inventory), `SYNAPSE_AGENT_NAME`, and
-`SYNAPSE_AGENT_STATE_DIR`. Protect the state directory: it holds the agent credential and offline buffer.
+`SYNAPSE_AGENT_STATE_DIR`. Protect the state directory: it holds the agent credential and offline buffer,
+including the telemetry WAL under `telemetry-spool/`.
 
 The cluster agent requires `SYNAPSE_CLUSTER` as a stable identity keyed into every asset, and accepts
 `SYNAPSE_CLUSTER_NAMESPACES` to narrow scope and `SYNAPSE_CLUSTER_RESYNC` (default `5m`) to set the
@@ -105,6 +106,40 @@ per engagement:
 ```
 GET /api/v1/engagements/{id}/detections
 ```
+
+### Durable telemetry spool
+
+Before the detection engine evaluates an eBPF event, the agent normalizes it to the canonical telemetry
+envelope and appends it to a checksummed priority WAL. Confirmed detections enter the same spool at P1.
+The four lanes drain in P0 → P3 order:
+
+| Priority | Signals | Disk-pressure behavior |
+| --- | --- | --- |
+| P0 | response verification, coverage, sensor state | never shed; producer backpressure plus a durable gap record |
+| P1 | confirmed detections | never shed; producer backpressure plus a durable gap record |
+| P2 | privilege changes and critical-file telemetry | never shed; producer backpressure plus a durable gap record |
+| P3 | background process and network telemetry | oldest P3 segment evicted first, only after its exact sequence gap is fsynced |
+
+`SYNAPSE_TELEMETRY_SPOOL_BYTES` sets the WAL-segment quota (default 512 MiB). The small state and gap
+journals are outside that quota so a full data allocation cannot prevent the agent recording why data
+was not retained. A restart reads both state generations, validates CRC32C frames, removes ACKed bytes,
+repairs corrupt/torn segments, and continues the current `(priority, epoch, sequence)` coordinate. A
+kernel reboot changes the Linux boot UUID, advances the epoch, and safely restarts sequence at one.
+
+The WAL is the A2 durability boundary; wire batching and server ACK exchange belong to A3. Until that
+transport is enabled, P3 rotates within the configured quota while never-shed lanes can eventually
+backpressure. Operators should therefore size the quota for the expected disconnected interval.
+
+Set `SYNAPSE_AGENT_METRICS_ADDR=127.0.0.1:9465` to expose `/metrics`. This listener is deliberately off
+by default and has no authentication. Exported series have bounded labels (priority only):
+
+- `synapse_agent_spool_records` and `synapse_agent_spool_record_bytes`
+- `synapse_agent_spool_oldest_unacked_age_seconds`
+- `synapse_agent_spool_next_sequence` and `synapse_agent_spool_highest_acked_sequence`
+- `synapse_agent_spool_gap_records` and `synapse_agent_spool_gap_bytes`
+- `synapse_agent_spool_evicted_records_total`
+- `synapse_agent_spool_corruption_events_total`
+- `synapse_agent_spool_fsync_total` and `synapse_agent_spool_fsync_duration_seconds_total`
 
 ## Coverage
 
@@ -158,14 +193,15 @@ For packaging, service integration, and uninstall contracts, see
 
 ## Telemetry
 
-Raw telemetry is deliberately isolated behind its own persistence port (`ports.TelemetryStore`) so the
-finding, judgment, and evidence paths never wait on a high-volume store. The architectural boundary is in
-place, and an architecture test asserts the columnar store never leaks into a domain package.
+Raw telemetry is deliberately isolated behind persistence ports so the finding, judgment, and evidence
+paths never wait on a high-volume store. `ports.TelemetrySpool` is the agent-side WAL boundary;
+`ports.TelemetryStore` is the control-plane columnar boundary. Architecture tests keep both concrete
+stores out of domain packages.
 
 The retention, sampling, and ingest-budget behavior described in the
 [telemetry store ADR](repository/telemetry-store-adr.md) is the accepted design, but the operator
-configuration for it is **not wired yet**: there are currently no telemetry environment variables to set.
-Detections themselves are persisted and hash-chained today and do not depend on this tier.
+configuration for the control-plane tier is **not wired yet**. Agent-side durability and its quota are
+wired as described above; A3 still owns transmission from that WAL to the existing columnar ingest.
 
 ## Purple coverage
 

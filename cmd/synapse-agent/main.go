@@ -22,6 +22,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -67,6 +68,8 @@ type config struct {
 	once          bool
 	detectClasses string  // SYNAPSE_DETECT_CLASSES; empty = detection engine off
 	detectCeiling float64 // SYNAPSE_DETECT_CPU_CEIL_PCT; 0 = no load shedding
+	spoolBytes    int64   // durable telemetry WAL quota
+	metricsAddr   string  // optional private agent metrics listener
 }
 
 func main() {
@@ -120,6 +123,8 @@ func parseConfig() config {
 	flag.BoolVar(&cfg.once, "once", false, "run a single cycle then exit")
 	flag.StringVar(&cfg.detectClasses, "detect-classes", os.Getenv("SYNAPSE_DETECT_CLASSES"), "comma-separated eBPF detection classes to run (process,network,file,privilege); empty = detection engine off (#422, Linux+root only)")
 	flag.Float64Var(&cfg.detectCeiling, "detect-ceiling", parseCeiling(os.Getenv("SYNAPSE_DETECT_CPU_CEIL_PCT")), "CPU ceiling percent for the detection engine; over it, classes are shed in a defined order (0 = no shedding)")
+	flag.Int64Var(&cfg.spoolBytes, "telemetry-spool-bytes", parsePositiveBytes(os.Getenv("SYNAPSE_TELEMETRY_SPOOL_BYTES"), 512<<20), "maximum bytes retained by the priority telemetry WAL")
+	flag.StringVar(&cfg.metricsAddr, "agent-metrics-addr", os.Getenv("SYNAPSE_AGENT_METRICS_ADDR"), "optional address for private agent Prometheus metrics (for example 127.0.0.1:9465)")
 	flag.Parse()
 	if cfg.enrolToken == "" {
 		// An absent token file is NOT fatal: it is the normal state after enrolment, once the
@@ -297,6 +302,18 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func parsePositiveBytes(value string, def int64) int64 {
+	if value == "" {
+		return def
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
+		log.Printf("ignoring invalid telemetry spool byte count (want a positive integer)")
+		return def
+	}
+	return parsed
 }
 
 func defaultStateDir() string {

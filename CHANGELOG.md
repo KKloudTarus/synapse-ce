@@ -9,6 +9,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Crash-recoverable priority telemetry spool for the host agent.** Normalized eBPF events and
+  confirmed detections now enter checksummed, per-priority WAL segments before downstream use. The
+  spool resumes sequence incarnations after restart, commits exact-epoch ACKs, evicts only P3 under
+  quota pressure, persists queryable gap evidence before any loss, repairs torn/corrupt frames, and
+  exports bounded-cardinality depth, oldest-age, eviction, corruption, and fsync metrics. P0–P2 apply
+  backpressure instead of silently shedding; A3 will consume the exposed peek/ACK and retry contract.
+
 - **Authority-surface precondition on AI-triage promotion.** Evaluation reports record
   `gate_reachable_pairs`, and the promotion boundary requires at least one counterfactual pair the
   deterministic policy could actually exempt (`--minimum-gate-reachable-counterfactual-pairs`,
