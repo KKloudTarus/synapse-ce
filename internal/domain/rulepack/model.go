@@ -161,8 +161,12 @@ func (p RulePack) validateContent() error {
 	if len(p.Rules) == 0 || len(p.Rules) > MaxRules {
 		return fmt.Errorf("%w: rulepack %s must carry 1..%d rules", shared.ErrValidation, p.ID, MaxRules)
 	}
-	if p.RollbackVersion < 0 || p.RollbackVersion >= p.Version {
-		return fmt.Errorf("%w: rulepack %s rollback version must be >= 0 and older than version %d", shared.ErrValidation, p.ID, p.Version)
+	if p.Version == 1 {
+		if p.RollbackVersion != 0 {
+			return fmt.Errorf("%w: rulepack %s version 1 must use rollback version 0", shared.ErrValidation, p.ID)
+		}
+	} else if p.RollbackVersion < 1 || p.RollbackVersion >= p.Version {
+		return fmt.Errorf("%w: rulepack %s rollback version must be between 1 and %d", shared.ErrValidation, p.ID, p.Version-1)
 	}
 	if p.MinAgentVersion != "" {
 		if strings.TrimSpace(p.MinAgentVersion) != p.MinAgentVersion {
