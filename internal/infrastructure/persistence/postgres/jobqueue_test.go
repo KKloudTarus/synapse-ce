@@ -193,7 +193,8 @@ func TestPostgresJobQueueClaimByKind(t *testing.T) {
 func TestPostgresJobQueueAggregateJobQueueStatsAcrossTenants(t *testing.T) {
 	q, ctx := setupJobQueue(t)
 	tenantA := shared.DefaultTenant
-	_, _ = q.Enqueue(ctx, "sca", []byte("a"))
+	const aggregateKind = "aggregate-jobqueue-stats-test"
+	_, _ = q.Enqueue(ctx, aggregateKind, []byte("a"))
 
 	otherTenant := shared.ID("other-tenant")
 	// The tenants schema requires name, so keep this fixture schema-valid instead of relying on an implicit default.
@@ -201,12 +202,12 @@ func TestPostgresJobQueueAggregateJobQueueStatsAcrossTenants(t *testing.T) {
 		t.Fatalf("seed second tenant: %v", err)
 	}
 	ctxB := shared.WithTenant(context.Background(), otherTenant)
-	if _, err := q.Enqueue(ctxB, "sca", []byte("b")); err != nil {
+	if _, err := q.Enqueue(ctxB, aggregateKind, []byte("b")); err != nil {
 		t.Fatalf("enqueue tenant b: %v", err)
 	}
 
 	reader := jobQueueRLSReader(t, context.Background(), q.pool)
-	stats, err := reader.AggregateJobQueueStats(context.Background(), "sca")
+	stats, err := reader.AggregateJobQueueStats(context.Background(), aggregateKind)
 	if err != nil {
 		t.Fatal(err)
 	}
