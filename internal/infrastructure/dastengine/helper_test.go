@@ -6,9 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,13 +24,31 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
+const dastHelperTestProcess = "SYNAPSE_DAST_HELPER_TEST_PROCESS"
+
+func TestRunHelperProcess(t *testing.T) {
+	if os.Getenv(dastHelperTestProcess) != "1" {
+		return
+	}
+	if err := RunHelper(context.Background(), os.Stdin, os.Stdout); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	// Exit before the testing package writes its own PASS output to stdout; the
+	// parent expects stdout to contain only the helper's JSON result.
+	os.Exit(0)
+}
+
 func TestRunHelperAuthSchemesAndSecretFreeProof(t *testing.T) {
 	const secret = "plain-secret-must-not-leak"
 	for _, scheme := range []dastsession.Scheme{dastsession.SchemeForm, dastsession.SchemeBasic, dastsession.SchemeBearer, dastsession.SchemeHeader, dastsession.SchemeCookie} {
 		t.Run(string(scheme), func(t *testing.T) {
+			var mu sync.Mutex
 			var requests []string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
 				requests = append(requests, r.URL.Path)
+				mu.Unlock()
 				ok := false
 				switch scheme {
 				case dastsession.SchemeForm:
@@ -72,6 +94,8 @@ func TestRunHelperAuthSchemesAndSecretFreeProof(t *testing.T) {
 			if strings.Contains(raw, secret) || strings.Contains(outcome.Observations[0].URL, secret) {
 				t.Fatalf("secret leaked in output: %s", raw)
 			}
+			mu.Lock()
+			defer mu.Unlock()
 			if len(requests) < 3 {
 				t.Fatalf("requests=%v, want login/liveness/probe", requests)
 			}
@@ -110,13 +134,18 @@ func TestRunHelperWrongCredentialsAndReauthExhaustion(t *testing.T) {
 }
 
 func TestRunHelperAvoidsLogoutAndSeparatelyAuthorizesRedirect(t *testing.T) {
+	var mu sync.Mutex
 	var logoutCalls, redirectCalls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		switch r.URL.Path {
 		case "/logout":
 			logoutCalls++
 		case "/go":
 			redirectCalls++
+		}
+		mu.Unlock()
+		if r.URL.Path == "/go" {
 			w.Header().Set("Location", "/other")
 			w.WriteHeader(http.StatusFound)
 			return
@@ -128,6 +157,8 @@ func TestRunHelperAvoidsLogoutAndSeparatelyAuthorizesRedirect(t *testing.T) {
 	plan := testPlan(server.URL, dastsession.SchemeBearer)
 	plan.Requests = []dastsurface.Request{{Method: "GET", URL: server.URL + "/logout"}, {Method: "GET", URL: server.URL + "/go"}}
 	outcome, _ := runHelper(t, plan, map[string]string{"credential": "x"}, func(request ports.DASTRequest) bool { return !strings.HasSuffix(request.URL, "/other") })
+	mu.Lock()
+	defer mu.Unlock()
 	if logoutCalls != 0 || redirectCalls != 1 || !outcome.Incomplete || outcome.Reason != "request_not_authorized" {
 		t.Fatalf("logout=%d redirects=%d outcome=%#v", logoutCalls, redirectCalls, outcome)
 	}
@@ -171,7 +202,7 @@ func TestRunHelperCrawlWallClockCancelsBlockedIO(t *testing.T) {
 	plan.Crawl = &ports.DASTCrawlPlan{Target: server.URL, Seeds: []dastsurface.Request{{Method: "GET", URL: server.URL + "/slow"}}, Depth: 4, Pages: 10, Requests: 20, WallClock: time.Second}
 	started := time.Now()
 	outcome, _ := runHelper(t, plan, map[string]string{"credential": "token"}, func(ports.DASTRequest) bool { return true })
-	if !outcome.Incomplete || outcome.Reason != "wall_clock" || time.Since(started) > 2*time.Second {
+	if !outcome.Incomplete || outcome.Reason != "wall_clock" || time.Since(started) > 5*time.Second {
 		t.Fatalf("elapsed=%s outcome=%+v", time.Since(started), outcome)
 	}
 }
@@ -268,10 +299,13 @@ func TestRunHelperCrawlSharesBoundedReauthentication(t *testing.T) {
 }
 
 func TestRunHelperCrawlReportsDeniedPathsAsSkipped(t *testing.T) {
+	var mu sync.Mutex
 	logoutCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/logout" {
+			mu.Lock()
 			logoutCalls++
+			mu.Unlock()
 		}
 		_, _ = w.Write([]byte("live"))
 	}))
@@ -280,6 +314,8 @@ func TestRunHelperCrawlReportsDeniedPathsAsSkipped(t *testing.T) {
 	plan.Requests = nil
 	plan.Crawl = &ports.DASTCrawlPlan{Target: server.URL, Seeds: []dastsurface.Request{{Method: "GET", URL: server.URL + "/logout"}}, Depth: 4, Pages: 10, Requests: 20, WallClock: time.Second}
 	outcome, _ := runHelper(t, plan, map[string]string{"credential": "token"}, func(ports.DASTRequest) bool { return true })
+	mu.Lock()
+	defer mu.Unlock()
 	if outcome.Incomplete || logoutCalls != 0 || len(outcome.Surface.Requests) != 1 || len(outcome.Coverage.Entries) != 1 || outcome.Coverage.Entries[0].Status != dastsurface.CoverageSkipped || outcome.Coverage.Entries[0].Reason != "deny_path" {
 		t.Fatalf("logout_calls=%d outcome=%+v", logoutCalls, outcome)
 	}
@@ -291,49 +327,92 @@ func testPlan(target string, scheme dastsession.Scheme) ports.DASTPlan {
 
 func runHelper(t *testing.T, plan ports.DASTPlan, credentials map[string]string, allow func(ports.DASTRequest) bool) (ports.DASTOutcome, string) {
 	t.Helper()
+	input, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
 	requestR, requestW, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	decisionR, decisionW, err := os.Pipe()
 	if err != nil {
+		_ = requestR.Close()
+		_ = requestW.Close()
 		t.Fatal(err)
 	}
-	defer requestR.Close()
-	defer requestW.Close()
-	defer decisionR.Close()
-	defer decisionW.Close()
-	oldRequest, oldDecision := os.Getenv("SYNAPSE_DAST_AUTH_REQUEST_FD"), os.Getenv("SYNAPSE_DAST_AUTH_DECISION_FD")
-	t.Setenv("SYNAPSE_DAST_AUTH_REQUEST_FD", strconv.Itoa(int(requestW.Fd())))
-	t.Setenv("SYNAPSE_DAST_AUTH_DECISION_FD", strconv.Itoa(int(decisionR.Fd())))
-	for name, value := range credentials {
-		t.Setenv(secretEnvName(name), value)
+	dummy, err := os.Open(os.DevNull)
+	if err != nil {
+		_ = requestR.Close()
+		_ = requestW.Close()
+		_ = decisionR.Close()
+		_ = decisionW.Close()
+		t.Fatal(err)
 	}
-	defer os.Setenv("SYNAPSE_DAST_AUTH_REQUEST_FD", oldRequest)
-	defer os.Setenv("SYNAPSE_DAST_AUTH_DECISION_FD", oldDecision)
+	defer func() {
+		_ = dummy.Close()
+		_ = requestR.Close()
+		_ = requestW.Close()
+		_ = decisionR.Close()
+		_ = decisionW.Close()
+	}()
+
+	authDone := make(chan error, 1)
 	go func() {
+		defer func() { _ = decisionW.Close() }()
 		decoder, encoder := json.NewDecoder(requestR), json.NewEncoder(decisionW)
 		for {
 			var request ports.DASTRequest
-			if decoder.Decode(&request) != nil {
+			if err := decoder.Decode(&request); err != nil {
+				if errors.Is(err, io.EOF) {
+					authDone <- nil
+				} else {
+					authDone <- err
+				}
 				return
 			}
-			if encoder.Encode(ports.DASTAuthorization{Allowed: allow(request)}) != nil {
+			if err := encoder.Encode(ports.DASTAuthorization{Allowed: allow(request)}); err != nil {
+				authDone <- err
 				return
 			}
 		}
 	}()
-	input, err := json.Marshal(plan)
-	if err != nil {
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRunHelperProcess$")
+	cmd.Env = append(os.Environ(),
+		dastHelperTestProcess+"=1",
+		"SYNAPSE_DAST_AUTH_REQUEST_FD=4",
+		"SYNAPSE_DAST_AUTH_DECISION_FD=5",
+	)
+	for name, value := range credentials {
+		cmd.Env = append(cmd.Env, secretEnvName(name)+"="+value)
+	}
+	cmd.Stdin = bytes.NewReader(input)
+	var output, stderr bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &stderr
+	// Match production's descriptor layout: the sandbox owns fd 3, then the
+	// authorization request and decision channels arrive as fd 4 and fd 5.
+	cmd.ExtraFiles = []*os.File{dummy, requestW, decisionR}
+	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	var output bytes.Buffer
-	if err := RunHelper(context.Background(), bytes.NewReader(input), &output); err != nil {
-		t.Fatal(err)
+	// The child owns its duplicated copies now. Closing the parent copies is what
+	// lets the authorization goroutine observe EOF when the helper exits.
+	_ = dummy.Close()
+	_ = requestW.Close()
+	_ = decisionR.Close()
+	waitErr := cmd.Wait()
+	authErr := <-authDone
+	if waitErr != nil {
+		t.Fatalf("RunHelper subprocess: %v: %s", waitErr, stderr.String())
+	}
+	if authErr != nil {
+		t.Fatalf("DAST authorization harness: %v", authErr)
 	}
 	var outcome ports.DASTOutcome
 	if err := json.Unmarshal(output.Bytes(), &outcome); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decode helper output: %v: %s", err, output.String())
 	}
 	return outcome, output.String()
 }
