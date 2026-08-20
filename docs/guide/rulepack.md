@@ -19,7 +19,7 @@ A RulePack includes:
 
 Construction is fail-closed. Required fields must cover every field used by a rule matcher, ATT&CK mappings must point at rules in the pack, fixture expectations must name rules in the pack, positive fixtures must collectively exercise every rule, and each rule must have an explicit cost budget. Set-like inputs are canonicalized for the digest so declaration order does not create a different identity.
 
-Deployment compatibility is checked against both the RulePack metadata and the telemetry reader in the running control-plane build. A deployment cannot claim a schema version that the current `telemetryschema` reader would reject. Forward admission also requires `previous_version` to equal the signed `rollback_version`, so canary/promotion cannot start with a broken rollback escape hatch.
+Version 1 uses rollback version `0` because no prior RulePack exists. Every later RulePack version must name an actual older version (`1..version-1`) as its rollback target. Deployment compatibility is checked against both the RulePack metadata and the telemetry reader in the running control-plane build. A deployment cannot claim a schema version that the current `telemetryschema` reader would reject. Forward admission also requires `previous_version` to equal the signed `rollback_version`, so canary/promotion cannot start with a broken rollback escape hatch.
 
 ## Trust model
 
@@ -27,7 +27,7 @@ RulePack signatures use Ed25519 over a domain-separated canonical RulePack encod
 
 CI or an operator must supply the trusted RulePack Ed25519 public key separately. The CLI verifies that the supplied key has the expected fingerprint and that it verifies the exact canonical RulePack content. Mutating the pack after signing therefore fails digest validation and/or signature verification.
 
-Release evidence has a separate trust boundary. Retro-hunt and purple rows are collected through `rulepack.EvidenceCollector`, which calls the existing telemetry `Hunt` and `purplecoverage.Service` seams and signs the resulting canonical evidence envelope under the domain-separated context `synapse-rulepack-gate-evidence:v1`. The gate CLI requires a separately supplied trusted evidence-producer public key. An evidence envelope cannot authorize its own embedded key, and raw `GateInput` JSON is not accepted by the CLI.
+Release evidence has a separate trust boundary. Retro-hunt and purple rows are collected through `rulepack.EvidenceCollector`, which calls the existing telemetry `Hunt` and `purplecoverage.Service` seams and signs the resulting canonical evidence envelope under the domain-separated context `synapse-rulepack-gate-evidence:v1`. The envelope binds the exact RulePack identity, canonical gate input, and the bounded host/class/time-window/limit selectors used for every retro hunt. The gate CLI requires a separately supplied trusted evidence-producer public key. An evidence envelope cannot authorize its own embedded key, and raw `GateInput` JSON is not accepted by the CLI.
 
 The public-key files used by the CLI are standard-base64 text for raw 32-byte Ed25519 public keys.
 
@@ -60,7 +60,7 @@ synapse-cli rulepack gate \
   --phase promotion
 ```
 
-`gate` accepts `pre-canary`, `canary`, or `promotion` as the phase. The evidence file must be a `SignedGateEvidence` envelope produced by a trusted `EvidenceCollector`; the CLI recomputes its canonical evidence head, verifies the domain-separated attestation against the externally pinned evidence key, and then evaluates the embedded gate input. It always emits the deterministic gate report after successful provenance verification and exits non-zero when the requested phase is not eligible.
+`gate` accepts `pre-canary`, `canary`, or `promotion` as the phase. The evidence file must be a `SignedGateEvidence` envelope produced by a trusted `EvidenceCollector`; the CLI recomputes its canonical evidence head, verifies the domain-separated attestation against the externally pinned evidence key, and then evaluates the embedded gate input. Phase checks are also bound to lifecycle state: `pre-canary` requires a candidate deployment, while `canary` and `promotion` require the deployment to already be in canary. This prevents a fully populated metrics object from bypassing the candidate → canary → promoted state machine. The command always emits the deterministic gate report after successful provenance verification and exits non-zero when the requested phase is not eligible.
 
 The JSON decoder is strict: unknown fields, trailing JSON, malformed keys, and oversized inputs are rejected rather than ignored.
 
@@ -72,7 +72,7 @@ The JSON decoder is strict: unknown fields, trailing JSON, malformed keys, and o
 - the existing purple-coverage service through the narrow `PurpleReader`/`Trend` seam;
 - the existing Ed25519 signer adapter configured with `GateEvidenceAttestationContext`.
 
-The collection request carries deployment/policy/cost/quality measurements plus retro and purple selectors. It does **not** accept caller-supplied retro results or purple coverage rows. The collector obtains those two evidence classes from the authoritative services, validates the complete gate-input shape, and attests the exact pack identity plus canonical input. The private evidence-signing key remains outside the domain/usecase layers.
+The collection request carries deployment/policy/cost/quality measurements plus retro and purple selectors. It does **not** accept caller-supplied retro results or purple coverage rows. The collector obtains those two evidence classes from the authoritative services, validates the complete gate-input shape, and attests the exact pack identity, canonical input, and canonical retro-hunt selectors. The private evidence-signing key remains outside the domain/usecase layers.
 
 ## Gate order
 
@@ -117,6 +117,8 @@ The existing telemetry service exposes both `Hunt` and `RetroRunRule`. RulePack 
 That distinction matters: `RetroRunRule` uses the currently shipped detection catalogue, so using it directly to approve candidate content could test the old rule rather than the rule being promoted.
 
 Each RulePack rule needs exactly one bounded retro case. A release window must contain context, must produce at least one candidate-rule match, and must be complete, unsampled, and free of recorded sequence gaps or losses. Each case also supplies an explicit event limit from 1 through 50,000; if the hunt returns exactly that many rows, the collector refuses the evidence because the telemetry port cannot prove there were no additional rows beyond the limit. Narrow the time window or use a larger still-bounded limit and collect again.
+
+The signed evidence envelope retains the exact host, optional asset, event class, UTC time bounds, and row limit for every retro case. Those selectors are covered by the gate attestation, so changing the window after collection invalidates verification instead of leaving the same aggregate counts apparently authoritative.
 
 ## Purple/emulation evidence
 
