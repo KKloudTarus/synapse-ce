@@ -11,15 +11,15 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-func (s *Spool) ensureCapacityLocked(required int64, incoming fleetagent.DeliveryPriority, eventID shared.ID) error {
-	if required > s.cfg.MaxBytes {
-		return s.saturatedLocked(required, incoming, eventID)
+func (s *Spool) ensureCapacityLocked(required int64, incoming fleetagent.DeliveryPriority) error {
+	if required > s.cfg.SegmentBytes || required > s.walMaxBytesLocked() {
+		return fmt.Errorf("%w: encoded WAL frame is %d bytes, maximum permanent capacity is %d",
+			shared.ErrValidation, required, min(s.cfg.SegmentBytes, s.walMaxBytesLocked()))
 	}
 	if _, err := s.removeEmptySegmentsLocked(); err != nil {
 		return err
 	}
-	if s.totalBytes+required <= s.cfg.MaxBytes {
-		s.lastRejected[incoming] = ""
+	if s.totalBytes+required <= s.walMaxBytesLocked() {
 		return nil
 	}
 	segments := append([]*segment(nil), s.segments...)
@@ -41,27 +41,28 @@ func (s *Spool) ensureCapacityLocked(required int64, incoming fleetagent.Deliver
 		if err := s.deleteSegmentLocked(seg); err != nil {
 			return err
 		}
-		if s.totalBytes+required <= s.cfg.MaxBytes {
-			s.lastRejected[incoming] = ""
+		if s.totalBytes+required <= s.walMaxBytesLocked() {
 			return nil
 		}
 	}
-	return s.saturatedLocked(required, incoming, eventID)
+	return s.saturatedLocked(required, incoming)
 }
 
-func (s *Spool) saturatedLocked(required int64, incoming fleetagent.DeliveryPriority, eventID shared.ID) error {
-	reason := ports.SpoolGapQuotaBackpressure
+func (s *Spool) saturatedLocked(required int64, incoming fleetagent.DeliveryPriority) error {
+	// P0..P2 apply backpressure and retain the item at the producer, so no loss
+	// gap exists yet. P3 is explicitly shed by its adapter and needs one durable,
+	// coalesced record for the ongoing saturation interval.
 	if incoming == fleetagent.PriorityP3 {
-		reason = ports.SpoolGapQuotaEviction
-	}
-	if s.lastRejected[incoming] != eventID {
-		if err := s.appendUnknownGapLocked(incoming, s.state.CurrentEpoch, reason); err != nil {
+		if err := s.recordP3LossLocked(ports.SpoolGapQuotaEviction); err != nil {
 			return fmt.Errorf("record quota saturation evidence: %w", err)
 		}
-		s.lastRejected[incoming] = eventID
 	}
-	return &SaturatedError{UsedBytes: s.totalBytes, MaxBytes: s.cfg.MaxBytes, RequiredBytes: required}
+	return &SaturatedError{UsedBytes: s.usedBytesLocked(), MaxBytes: s.cfg.MaxBytes, RequiredBytes: required}
 }
+
+func (s *Spool) walMaxBytesLocked() int64 { return s.cfg.MaxBytes - s.cfg.MaxGapBytes }
+
+func (s *Spool) usedBytesLocked() int64 { return s.totalBytes + s.gapBytes }
 
 func (s *Spool) recordEvictionGapsLocked(refs []*recordRef) error {
 	if len(refs) == 0 {

@@ -10,15 +10,25 @@ import (
 // Windows FileMode does not model ACLs, so Unix-bit verification is not claimed
 // there; the package/service-owned state-directory ACL is authoritative.
 func securePath(path string, mode os.FileMode) error {
+	before, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if before.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refuse symlink spool path %s", path)
+	}
 	if err := os.Chmod(path, mode); err != nil {
 		return err
 	}
 	if runtime.GOOS == "windows" {
 		return nil
 	}
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refuse symlink spool path %s", path)
 	}
 	if info.Mode().Perm() != mode.Perm() {
 		return fmt.Errorf("%s mode is %o, want %o", path, info.Mode().Perm(), mode.Perm())

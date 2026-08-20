@@ -16,6 +16,10 @@ var (
 	// ErrFailed means a durability operation had an ambiguous outcome. The
 	// spool fails stop until it is closed and recovered from disk.
 	ErrFailed = errors.New("telemetry spool durability failure")
+	// ErrGapJournalFull means loss evidence cannot be retained within its
+	// reserved share of the spool quota. The spool fails stop rather than erase
+	// evidence or grow beyond its configured disk bound.
+	ErrGapJournalFull = errors.New("telemetry spool gap journal full")
 	// ErrLocked means another process already owns the spool directory.
 	ErrLocked = errors.New("telemetry spool already open")
 	// ErrACKAhead means an ACK claims a sequence which this spool has never assigned.

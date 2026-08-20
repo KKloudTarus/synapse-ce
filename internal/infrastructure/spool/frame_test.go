@@ -5,9 +5,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -99,6 +101,15 @@ func TestDecodeFrameRejectsTruncationAndFormatBombs(t *testing.T) {
 	binary.LittleEndian.PutUint32(bad[44:48], binary.LittleEndian.Uint32(bad[8:12])+1)
 	if _, _, err := decodeFrame(bad); err == nil {
 		t.Fatal("metadata larger than body accepted")
+	}
+}
+
+func TestEncodeFrameRejectsMetadataOutsideReservedOverhead(t *testing.T) {
+	item := testItem(fleetagent.PriorityP3, "bounded-meta", 32)
+	item.ContentType = strings.Repeat("x", int(maxFrameMetadataBytes))
+	position := fleetagent.StreamPosition{Priority: fleetagent.PriorityP3, Epoch: 1, Sequence: 1, Session: "s", Boot: "b"}
+	if _, err := encodeFrame(item, position, testNow); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("oversized metadata error = %v, want validation error", err)
 	}
 }
 

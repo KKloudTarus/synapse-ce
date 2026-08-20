@@ -58,11 +58,13 @@ type Spool struct {
 	writers  [4]*segment
 	gaps     []ports.SpoolGap
 
-	totalBytes   int64
-	gapBytes     int64
-	batchBytes   [4]int64
-	lastSync     [4]time.Time
-	lastRejected [4]shared.ID
+	totalBytes  int64
+	gapBytes    int64
+	batchBytes  [4]int64
+	lastSync    [4]time.Time
+	gapDirty    bool
+	gapPending  uint64
+	lastGapSync time.Time
 
 	evictedRecords   uint64
 	corruptionEvents uint64
@@ -103,6 +105,14 @@ func Open(input Config) (*Spool, error) {
 	s.gapFile, s.gaps, s.gapBytes, err = openGapJournal(cfg.Dir)
 	if err != nil {
 		return fail(err)
+	}
+	s.lastGapSync = cfg.Now().UTC()
+	if s.gapBytes > s.gapJournalLimitLocked() {
+		s.gaps = compactGaps(s.gaps)
+		s.gapDirty = true
+		if err := s.flushGapJournalLocked(); err != nil {
+			return fail(err)
+		}
 	}
 	state, found, stateErr := loadState(cfg.Dir)
 	if stateErr != nil {
@@ -180,10 +190,10 @@ func (s *Spool) Enqueue(ctx context.Context, item ports.SpoolItem) (fleetagent.S
 	if err != nil {
 		return fleetagent.StreamPosition{}, err
 	}
-	if int64(len(frame)) > s.cfg.MaxRecordBytes+frameHeaderSize+(256<<10) {
-		return fleetagent.StreamPosition{}, fmt.Errorf("%w: encoded frame metadata exceeds safety budget", shared.ErrValidation)
+	if int64(len(frame)) > s.cfg.MaxRecordBytes+FrameOverheadBudget {
+		return fleetagent.StreamPosition{}, fmt.Errorf("%w: encoded WAL frame exceeds record plus metadata budget", shared.ErrValidation)
 	}
-	if err := s.ensureCapacityLocked(int64(len(frame)), priority, item.EventID); err != nil {
+	if err := s.ensureCapacityLocked(int64(len(frame)), priority); err != nil {
 		return fleetagent.StreamPosition{}, err
 	}
 	seg, err := s.writerLocked(priority, position.Epoch, position.Sequence, int64(len(frame)))
@@ -197,18 +207,24 @@ func (s *Spool) Enqueue(ctx context.Context, item ports.SpoolItem) (fleetagent.S
 			writeErr = io.ErrShortWrite
 		}
 		rollbackErr := rollbackAppend(seg.file, offset)
-		gapReason := ports.SpoolGapQuotaBackpressure
-		if priority == fleetagent.PriorityP3 {
-			gapReason = ports.SpoolGapQuotaEviction
-		}
-		gapErr := s.appendUnknownGapLocked(priority, position.Epoch, gapReason)
 		appendErr := fmt.Errorf("append %s WAL frame: %w", priority, writeErr)
 		if errors.Is(writeErr, syscall.ENOSPC) {
-			appendErr = errors.Join(&SaturatedError{
-				UsedBytes: s.totalBytes, MaxBytes: s.cfg.MaxBytes, RequiredBytes: int64(len(frame)),
+			if rollbackErr != nil {
+				return fleetagent.StreamPosition{}, s.failLocked(errors.Join(appendErr, rollbackErr))
+			}
+			if priority == fleetagent.PriorityP3 {
+				if gapErr := s.recordP3LossLocked(ports.SpoolGapIOFailure); gapErr != nil {
+					return fleetagent.StreamPosition{}, errors.Join(appendErr, gapErr)
+				}
+			}
+			return fleetagent.StreamPosition{}, errors.Join(&SaturatedError{
+				UsedBytes: s.usedBytesLocked(), MaxBytes: s.cfg.MaxBytes, RequiredBytes: int64(len(frame)),
 			}, appendErr)
 		}
-		return fleetagent.StreamPosition{}, errors.Join(appendErr, rollbackErr, gapErr)
+		if rollbackErr != nil {
+			return fleetagent.StreamPosition{}, s.failLocked(errors.Join(appendErr, rollbackErr))
+		}
+		return fleetagent.StreamPosition{}, appendErr
 	}
 	seg.size += int64(len(frame))
 	seg.live++
@@ -365,7 +381,7 @@ func (s *Spool) flushLocked() error {
 			s.lastSync[priority] = s.cfg.Now().UTC()
 		}
 	}
-	return nil
+	return s.flushGapJournalLocked()
 }
 
 func (s *Spool) Gaps(ctx context.Context) ([]ports.SpoolGap, error) {
@@ -390,7 +406,7 @@ func (s *Spool) Stats(ctx context.Context) (ports.SpoolStats, error) {
 		return ports.SpoolStats{}, err
 	}
 	stats := ports.SpoolStats{
-		TotalBytes: s.totalBytes, GapRecords: int64(len(s.gaps)), GapBytes: s.gapBytes,
+		TotalBytes: s.usedBytesLocked(), GapRecords: int64(len(s.gaps)), GapBytes: s.gapBytes,
 		EvictedRecords: s.evictedRecords, CorruptionEvents: s.corruptionEvents,
 		FsyncCount: s.fsyncCount, FsyncTotal: s.fsyncTotal,
 		Priorities: make([]ports.SpoolPriorityStats, 0, 4),

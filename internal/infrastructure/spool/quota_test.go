@@ -7,14 +7,16 @@ import (
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 func quotaConfig(t *testing.T) Config {
 	cfg := testConfig(t)
-	cfg.MaxBytes = 1100
-	cfg.SegmentBytes = 600
-	cfg.MaxRecordBytes = 300
+	cfg.MaxBytes = 6 << 10
+	cfg.MaxGapBytes = 4 << 10
+	cfg.SegmentBytes = 1200
+	cfg.MaxRecordBytes = 600
 	cfg.Sync[fleetagent.PriorityP3] = SyncAlways
 	return cfg
 }
@@ -22,10 +24,10 @@ func quotaConfig(t *testing.T) Config {
 func TestQuotaEvictsP3BeforeNeverShedLanes(t *testing.T) {
 	cfg := quotaConfig(t)
 	s := mustOpen(t, cfg)
-	p3a := mustEnqueue(t, s, testItem(fleetagent.PriorityP3, "background-a", 220))
-	p3b := mustEnqueue(t, s, testItem(fleetagent.PriorityP3, "background-b", 220))
-	mustEnqueue(t, s, testItem(fleetagent.PriorityP2, "critical-a", 220))
-	mustEnqueue(t, s, testItem(fleetagent.PriorityP2, "critical-b", 220))
+	p3a := mustEnqueue(t, s, testItem(fleetagent.PriorityP3, "background-a", 500))
+	p3b := mustEnqueue(t, s, testItem(fleetagent.PriorityP3, "background-b", 500))
+	mustEnqueue(t, s, testItem(fleetagent.PriorityP2, "critical-a", 500))
+	mustEnqueue(t, s, testItem(fleetagent.PriorityP2, "critical-b", 500))
 
 	records := mustPeek(t, s)
 	ids := map[string]bool{}
@@ -40,10 +42,10 @@ func TestQuotaEvictsP3BeforeNeverShedLanes(t *testing.T) {
 	}
 	gaps, _ := s.Gaps(context.Background())
 	if !ids["background-a"] {
-		assertKnownGap(t, gaps, ports.SpoolGapQuotaEviction, p3a.Epoch, p3a.Sequence, p3a.Sequence)
+		assertGapCovers(t, gaps, ports.SpoolGapQuotaEviction, p3a.Epoch, p3a.Sequence)
 	}
 	if !ids["background-b"] {
-		assertKnownGap(t, gaps, ports.SpoolGapQuotaEviction, p3b.Epoch, p3b.Sequence, p3b.Sequence)
+		assertGapCovers(t, gaps, ports.SpoolGapQuotaEviction, p3b.Epoch, p3b.Sequence)
 	}
 	stats, _ := s.Stats(context.Background())
 	if stats.TotalBytes > cfg.MaxBytes || stats.EvictedRecords == 0 {
@@ -51,7 +53,7 @@ func TestQuotaEvictsP3BeforeNeverShedLanes(t *testing.T) {
 	}
 }
 
-func TestNeverShedSaturationBackpressuresAndPersistsGap(t *testing.T) {
+func TestNeverShedSaturationBackpressuresWithoutClaimingLoss(t *testing.T) {
 	cfg := quotaConfig(t)
 	s := mustOpen(t, cfg)
 	for n := 0; ; n++ {
@@ -72,18 +74,14 @@ func TestNeverShedSaturationBackpressuresAndPersistsGap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := false
 	for _, gap := range gaps {
 		if gap.Priority == fleetagent.PriorityP2 && gap.Reason == ports.SpoolGapQuotaBackpressure && !gap.KnownSequence {
-			found = true
+			t.Fatalf("backpressured item was falsely reported lost: %#v", gap)
 		}
-	}
-	if !found {
-		t.Fatalf("no durable P2 backpressure gap: %#v", gaps)
 	}
 }
 
-func TestRepeatedBackpressureForSameEventDoesNotFloodGapJournal(t *testing.T) {
+func TestRepeatedBackpressureDoesNotCreateLossGaps(t *testing.T) {
 	cfg := quotaConfig(t)
 	s := mustOpen(t, cfg)
 	for n := 0; ; n++ {
@@ -103,14 +101,78 @@ func TestRepeatedBackpressureForSameEventDoesNotFloodGapJournal(t *testing.T) {
 		}
 	}
 	after := len(mustGaps(t, s))
-	if after != before+1 {
-		t.Fatalf("same-event retry added %d gaps, want 1", after-before)
+	if after != before {
+		t.Fatalf("retryable backpressure added %d false loss gaps", after-before)
+	}
+}
+
+func TestFrameLargerThanPermanentCapacityIsNotRetryable(t *testing.T) {
+	s := mustOpen(t, quotaConfig(t))
+	s.mu.Lock()
+	err := s.ensureCapacityLocked(s.walMaxBytesLocked()+1, fleetagent.PriorityP2)
+	s.mu.Unlock()
+	if !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("oversized frame error = %v, want validation error", err)
+	}
+	if errors.Is(err, ErrSaturated) {
+		t.Fatalf("oversized frame was classified as retryable saturation: %v", err)
+	}
+}
+
+func TestDistinctP3SaturationCoalescesWithinGapBudget(t *testing.T) {
+	cfg := quotaConfig(t)
+	s := mustOpen(t, cfg)
+	for n := 0; ; n++ {
+		_, err := s.Enqueue(context.Background(), testItem(fleetagent.PriorityP2, fmt.Sprintf("fill-%d", n), 500))
+		if errors.Is(err, ErrSaturated) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := s.Stats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const dropped = 1000
+	for n := 0; n < dropped; n++ {
+		_, err := s.Enqueue(context.Background(), testItem(fleetagent.PriorityP3, fmt.Sprintf("raw-drop-%d", n), 600))
+		if !errors.Is(err, ErrSaturated) {
+			t.Fatalf("drop %d error = %v", n, err)
+		}
+	}
+	gaps := mustGaps(t, s)
+	if len(gaps) != 1 || gaps[0].Priority != fleetagent.PriorityP3 || gaps[0].KnownSequence || gaps[0].Count != dropped {
+		t.Fatalf("coalesced gaps = %#v", gaps)
+	}
+	stats, err := s.Stats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.TotalBytes > cfg.MaxBytes || stats.GapBytes > cfg.MaxGapBytes/2 {
+		t.Fatalf("bounded stats = %#v, quota=%d gap_budget=%d", stats, cfg.MaxBytes, cfg.MaxGapBytes)
+	}
+	if delta := stats.FsyncCount - before.FsyncCount; delta > 5 {
+		t.Fatalf("P3 saturation caused %d fsyncs for %d drops", delta, dropped)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recovered.Close()
+	recoveredGaps := mustGaps(t, recovered)
+	if len(recoveredGaps) != 1 || recoveredGaps[0].Count != dropped {
+		t.Fatalf("recovered coalesced gaps = %#v", recoveredGaps)
 	}
 }
 
 func TestP3SaturationNeverDeletesHigherPriority(t *testing.T) {
 	cfg := quotaConfig(t)
-	cfg.MaxBytes = 1500
+	cfg.MaxBytes = 8 << 10
 	s := mustOpen(t, cfg)
 	mustEnqueue(t, s, testItem(fleetagent.PriorityP0, "health", 220))
 	mustEnqueue(t, s, testItem(fleetagent.PriorityP1, "detection", 220))
@@ -176,7 +238,7 @@ func TestEvictionEvidenceSurvivesRestart(t *testing.T) {
 // every successful enqueue is still readable or is covered by durable gap evidence.
 func TestPropertyNoAcceptedRecordSilentlyDisappears(t *testing.T) {
 	cfg := quotaConfig(t)
-	cfg.MaxBytes = 5000
+	cfg.MaxBytes = 7 << 10
 	s, err := Open(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -237,4 +299,14 @@ func mustGaps(t *testing.T, s *Spool) []ports.SpoolGap {
 		t.Fatal(err)
 	}
 	return gaps
+}
+
+func assertGapCovers(t *testing.T, gaps []ports.SpoolGap, reason ports.SpoolGapReason, epoch, sequence uint64) {
+	t.Helper()
+	for _, gap := range gaps {
+		if gap.Reason == reason && gap.KnownSequence && gap.Epoch == epoch && gap.FromSequence <= sequence && gap.ToSequence >= sequence {
+			return
+		}
+	}
+	t.Fatalf("missing %s gap covering %d:%d in %#v", reason, epoch, sequence, gaps)
 }

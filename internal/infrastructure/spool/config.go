@@ -10,12 +10,19 @@ import (
 
 const (
 	defaultMaxBytes       = int64(512 << 20)
+	defaultMaxGapBytes    = int64(8 << 20)
 	defaultSegmentBytes   = int64(8 << 20)
 	defaultMaxRecordBytes = int64(4 << 20)
 	defaultPeekRecords    = 256
 	defaultPeekBytes      = int64(2 << 20)
 	defaultBatchInterval  = time.Second
 	defaultBatchBytes     = int64(256 << 10)
+	// FrameOverheadBudget bounds the header plus encoded record metadata. It is
+	// exported so composition roots that shrink a spool can also shrink the
+	// payload limit without creating a record that can never fit.
+	FrameOverheadBudget   = int64(512)
+	maxFrameMetadataBytes = FrameOverheadBudget - frameHeaderSize
+	minimumGapReserve     = 8 * FrameOverheadBudget
 )
 
 // SyncPolicy controls when an accepted record is forced to stable storage.
@@ -31,10 +38,16 @@ const (
 
 // Config is the bounded resource and durability policy for one spool.
 type Config struct {
-	Dir            string
-	Session        fleetagent.SessionID
-	Boot           fleetagent.BootID
-	MaxBytes       int64
+	// Dir must be service-owned and non-world-writable. Open tightens it to
+	// 0700 and refuses symlink paths before reading spool contents.
+	Dir      string
+	Session  fleetagent.SessionID
+	Boot     fleetagent.BootID
+	MaxBytes int64
+	// MaxGapBytes is reserved inside MaxBytes for durable loss evidence and its
+	// atomic compaction scratch file. Zero selects a size-derived default; WAL
+	// records cannot consume this reserve.
+	MaxGapBytes    int64
 	SegmentBytes   int64
 	MaxRecordBytes int64
 	PeekRecords    int
@@ -81,6 +94,11 @@ func normalizeConfig(in Config) (Config, error) {
 	if in.MaxBytes != 0 {
 		cfg.MaxBytes = in.MaxBytes
 	}
+	if in.MaxGapBytes != 0 {
+		cfg.MaxGapBytes = in.MaxGapBytes
+	} else {
+		cfg.MaxGapBytes = RecommendedGapBytes(cfg.MaxBytes)
+	}
 	if in.SegmentBytes != 0 {
 		cfg.SegmentBytes = in.SegmentBytes
 	}
@@ -115,14 +133,21 @@ func normalizeConfig(in Config) (Config, error) {
 	if cfg.Session == "" || cfg.Boot == "" {
 		return Config{}, fmt.Errorf("%w: spool session and boot ids are required", shared.ErrValidation)
 	}
-	if cfg.MaxBytes <= 0 || cfg.SegmentBytes <= 0 || cfg.MaxRecordBytes <= 0 {
+	if cfg.MaxBytes <= 0 || cfg.MaxGapBytes <= 0 || cfg.SegmentBytes <= 0 || cfg.MaxRecordBytes <= 0 {
 		return Config{}, fmt.Errorf("%w: spool byte limits must be positive", shared.ErrValidation)
 	}
-	if cfg.SegmentBytes > cfg.MaxBytes {
-		return Config{}, fmt.Errorf("%w: segment limit cannot exceed spool quota", shared.ErrValidation)
+	if cfg.MaxGapBytes >= cfg.MaxBytes {
+		return Config{}, fmt.Errorf("%w: gap journal budget must be smaller than spool quota", shared.ErrValidation)
 	}
-	if cfg.MaxRecordBytes > cfg.SegmentBytes {
-		return Config{}, fmt.Errorf("%w: record limit cannot exceed segment limit", shared.ErrValidation)
+	if cfg.MaxGapBytes < minimumGapReserve {
+		return Config{}, fmt.Errorf("%w: gap journal budget is too small for bounded atomic compaction", shared.ErrValidation)
+	}
+	walBytes := cfg.MaxBytes - cfg.MaxGapBytes
+	if cfg.SegmentBytes > walBytes {
+		return Config{}, fmt.Errorf("%w: segment limit cannot exceed WAL quota after gap reserve", shared.ErrValidation)
+	}
+	if cfg.MaxRecordBytes > cfg.SegmentBytes-FrameOverheadBudget {
+		return Config{}, fmt.Errorf("%w: record limit plus frame overhead cannot exceed segment limit", shared.ErrValidation)
 	}
 	if cfg.PeekRecords < 1 || cfg.PeekBytes < 1 {
 		return Config{}, fmt.Errorf("%w: peek limits must be positive", shared.ErrValidation)
@@ -140,4 +165,17 @@ func normalizeConfig(in Config) (Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+// RecommendedGapBytes returns the bounded loss-evidence reserve used when
+// MaxGapBytes is zero. The reserve includes room for an atomic rewrite copy.
+func RecommendedGapBytes(maxBytes int64) int64 {
+	budget := maxBytes / 64
+	if budget > defaultMaxGapBytes {
+		budget = defaultMaxGapBytes
+	}
+	if budget < minimumGapReserve {
+		budget = minimumGapReserve
+	}
+	return budget
 }

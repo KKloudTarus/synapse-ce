@@ -96,6 +96,9 @@ func encodeFrame(item ports.SpoolItem, position fleetagent.StreamPosition, enque
 	if err != nil {
 		return nil, fmt.Errorf("encode WAL metadata: %w", err)
 	}
+	if len(meta) > int(maxFrameMetadataBytes) {
+		return nil, fmt.Errorf("%w: encoded WAL metadata is %d bytes, maximum is %d", shared.ErrValidation, len(meta), maxFrameMetadataBytes)
+	}
 	bodySize := len(meta) + len(item.Payload)
 	if bodySize > int(^uint32(0)) {
 		return nil, errors.New("encode WAL frame: body exceeds format limit")

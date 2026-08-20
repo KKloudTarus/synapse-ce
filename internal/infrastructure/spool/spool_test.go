@@ -149,7 +149,7 @@ func TestSessionChangeAdvancesEpoch(t *testing.T) {
 
 func TestACKSurvivesRestartAndReclaimsSegment(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.SegmentBytes = 512
+	cfg.SegmentBytes = 1024
 	cfg.MaxRecordBytes = 256
 	s, err := Open(cfg)
 	if err != nil {
@@ -300,6 +300,24 @@ func TestSpoolFilesAreOwnerOnly(t *testing.T) {
 		if info.Mode().Perm()&0o077 != 0 {
 			t.Errorf("%s permissions = %o, expose group/world bits", filepath.Base(entry.Name()), info.Mode().Perm())
 		}
+	}
+}
+
+func TestSecurePathRejectsSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires elevated privileges on some Windows hosts")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "p3-e00000000000000000001-s00000000000000000001.wal")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := securePath(link, 0o600); err == nil {
+		t.Fatal("symlink spool path accepted")
 	}
 }
 

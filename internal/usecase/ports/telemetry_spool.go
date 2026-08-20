@@ -169,6 +169,7 @@ const (
 	SpoolGapQuotaBackpressure SpoolGapReason = "quota_backpressure"
 	SpoolGapCorruptFrame      SpoolGapReason = "corrupt_frame"
 	SpoolGapTornWrite         SpoolGapReason = "torn_write"
+	SpoolGapIOFailure         SpoolGapReason = "io_failure"
 	SpoolGapUnsyncedTail      SpoolGapReason = "unsynced_tail"
 	SpoolGapStateRecovery     SpoolGapReason = "state_recovery"
 )
@@ -177,7 +178,7 @@ const (
 func (r SpoolGapReason) Valid() bool {
 	switch r {
 	case SpoolGapQuotaEviction, SpoolGapQuotaBackpressure, SpoolGapCorruptFrame, SpoolGapTornWrite,
-		SpoolGapUnsyncedTail, SpoolGapStateRecovery:
+		SpoolGapIOFailure, SpoolGapUnsyncedTail, SpoolGapStateRecovery:
 		return true
 	default:
 		return false
@@ -245,8 +246,10 @@ type SpoolPriorityStats struct {
 
 // SpoolStats is both an operator query and the source for the agent Prometheus collector.
 type SpoolStats struct {
-	Priorities       []SpoolPriorityStats
-	TotalRecords     int64
+	Priorities   []SpoolPriorityStats
+	TotalRecords int64
+	// TotalBytes includes WAL records and GapBytes; GapBytes is exposed
+	// separately as the loss-evidence subset of the bounded spool quota.
 	TotalBytes       int64
 	GapRecords       int64
 	GapBytes         int64

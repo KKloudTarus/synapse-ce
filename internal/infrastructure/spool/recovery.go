@@ -118,11 +118,24 @@ func (s *Spool) recoverSegmentsLocked() (uint64, error) {
 }
 
 func (s *Spool) scanSegmentLocked(path string, expectedPriority fleetagent.DeliveryPriority, expectedEpoch uint64) ([]recoveredFrame, bool, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, false, fmt.Errorf("stat WAL segment: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, false, fmt.Errorf("refuse symlink WAL segment %s", filepath.Base(path))
+	}
+	// Older versions allowed metadata headroom outside SegmentBytes. Keep that
+	// bounded compatibility window, but inspect the file size before ReadFile so
+	// a hostile sparse/large segment cannot force an unbounded allocation.
+	maxSegmentRead := s.cfg.SegmentBytes + (256 << 10) + frameHeaderSize
+	if info.Size() > maxSegmentRead {
+		return nil, false, fmt.Errorf("WAL segment exceeds recovery bound: size=%d bound=%d", info.Size(), maxSegmentRead)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, false, fmt.Errorf("read WAL segment: %w", err)
 	}
-	maxSegmentRead := s.cfg.SegmentBytes + s.cfg.MaxRecordBytes + (512 << 10)
 	if int64(len(data)) > maxSegmentRead {
 		return nil, false, fmt.Errorf("WAL segment exceeds recovery bound: size=%d bound=%d", len(data), maxSegmentRead)
 	}
@@ -145,7 +158,7 @@ func (s *Spool) scanSegmentLocked(path string, expectedPriority fleetagent.Deliv
 		headerTrusted := header.Magic == frameMagic && header.Version == frameVersion &&
 			header.HeaderSize == frameHeaderSize && header.Epoch == expectedEpoch &&
 			fleetagent.DeliveryPriority(header.Priority) == expectedPriority && header.Sequence > 0
-		if err := validateHeader(header); err != nil || !headerTrusted || int64(header.BodySize) > s.cfg.MaxRecordBytes+(256<<10) {
+		if err := validateHeader(header); err != nil || !headerTrusted || int64(header.BodySize) > s.cfg.MaxRecordBytes+maxFrameMetadataBytes {
 			if headerTrusted {
 				if gapErr := s.appendKnownGapLocked(expectedPriority, expectedEpoch, header.Sequence, header.Sequence, ports.SpoolGapCorruptFrame); gapErr != nil {
 					return nil, damaged, gapErr

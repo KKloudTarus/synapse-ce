@@ -10,7 +10,14 @@ import (
 )
 
 func TestDefaultConfigUsesNeverShedDurability(t *testing.T) {
-	cfg := DefaultConfig()
+	input := DefaultConfig()
+	input.Dir = t.TempDir()
+	input.Session = "s"
+	input.Boot = "b"
+	cfg, err := normalizeConfig(input)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for priority := fleetagent.PriorityP0; priority <= fleetagent.PriorityP2; priority++ {
 		if cfg.Sync[priority] != SyncAlways {
 			t.Errorf("%s sync = %q, want always", priority, cfg.Sync[priority])
@@ -19,8 +26,8 @@ func TestDefaultConfigUsesNeverShedDurability(t *testing.T) {
 	if cfg.Sync[fleetagent.PriorityP3] != SyncBatch {
 		t.Errorf("P3 sync = %q, want batch", cfg.Sync[fleetagent.PriorityP3])
 	}
-	if cfg.MaxRecordBytes > cfg.SegmentBytes || cfg.SegmentBytes > cfg.MaxBytes {
-		t.Fatalf("invalid default size hierarchy: record=%d segment=%d quota=%d", cfg.MaxRecordBytes, cfg.SegmentBytes, cfg.MaxBytes)
+	if cfg.MaxGapBytes <= 0 || cfg.MaxRecordBytes+FrameOverheadBudget > cfg.SegmentBytes || cfg.SegmentBytes > cfg.MaxBytes-cfg.MaxGapBytes {
+		t.Fatalf("invalid default size hierarchy: record=%d segment=%d gaps=%d quota=%d", cfg.MaxRecordBytes, cfg.SegmentBytes, cfg.MaxGapBytes, cfg.MaxBytes)
 	}
 }
 
@@ -34,8 +41,10 @@ func TestNormalizeConfigRejectsUnsafePolicies(t *testing.T) {
 		{"missing session", func(c *Config) { c.Session = "" }},
 		{"missing boot", func(c *Config) { c.Boot = "" }},
 		{"negative quota", func(c *Config) { c.MaxBytes = -1 }},
+		{"gap budget over quota", func(c *Config) { c.MaxGapBytes = c.MaxBytes }},
+		{"gap budget too small", func(c *Config) { c.MaxGapBytes = minimumGapReserve - 1 }},
 		{"segment over quota", func(c *Config) { c.SegmentBytes = c.MaxBytes + 1 }},
-		{"record over segment", func(c *Config) { c.MaxRecordBytes = c.SegmentBytes + 1 }},
+		{"record plus overhead over segment", func(c *Config) { c.MaxRecordBytes = c.SegmentBytes - FrameOverheadBudget + 1 }},
 		{"negative peek count", func(c *Config) { c.PeekRecords = -1 }},
 		{"negative peek bytes", func(c *Config) { c.PeekBytes = -1 }},
 		{"negative batch interval", func(c *Config) { c.BatchInterval = -time.Second }},

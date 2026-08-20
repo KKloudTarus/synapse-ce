@@ -52,11 +52,15 @@ func (r *runner) openTelemetrySpool(ctx context.Context, cred fleetclient.Creden
 	if cfg.MaxBytes < 1<<20 {
 		return nil, agentspool.SensorIdentity{}, fmt.Errorf("telemetry spool quota must be at least 1048576 bytes, got %d", cfg.MaxBytes)
 	}
-	if cfg.SegmentBytes > cfg.MaxBytes {
-		cfg.SegmentBytes = cfg.MaxBytes
+	// Reserve the same bounded share normalizeConfig will assign to loss
+	// evidence, so WAL sizing cannot consume the gap journal's capacity.
+	cfg.MaxGapBytes = spool.RecommendedGapBytes(cfg.MaxBytes)
+	walBytes := cfg.MaxBytes - cfg.MaxGapBytes
+	if cfg.SegmentBytes > walBytes {
+		cfg.SegmentBytes = walBytes
 	}
-	if cfg.MaxRecordBytes > cfg.SegmentBytes {
-		cfg.MaxRecordBytes = cfg.SegmentBytes
+	if cfg.MaxRecordBytes > cfg.SegmentBytes-spool.FrameOverheadBudget {
+		cfg.MaxRecordBytes = cfg.SegmentBytes - spool.FrameOverheadBudget
 	}
 	durable, err := spool.Open(cfg)
 	if err != nil {
