@@ -75,6 +75,12 @@ func (t AuthorizationTransaction) Usable(now time.Time) bool {
 	return t.ConsumedAt == nil && t.ExpiresAt.After(now)
 }
 
+// MaxSessionAge is the absolute lifetime of a browser session, independent of the sliding per-poll
+// TTL. Rotation refreshes the sliding expiry but never extends OriginAt, so an actively-polled (or
+// stolen-then-kept-alive) session cannot outlive this cap — past it the operator must re-authenticate
+// through the OIDC provider.
+const MaxSessionAge = 12 * time.Hour
+
 // Session is an opaque browser session. Only token hashes are persisted; no provider credentials
 // or raw session/CSRF tokens are retained.
 type Session struct {
@@ -84,10 +90,13 @@ type Session struct {
 	TokenHash     string
 	CSRFTokenHash string
 	Metadata      map[string]string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	ExpiresAt     time.Time
-	RevokedAt     *time.Time
+	// OriginAt is the immutable time the session lineage began at login. It is carried unchanged across
+	// every rotation so the absolute-age cap (MaxSessionAge) is measured from first authentication.
+	OriginAt  time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	ExpiresAt time.Time
+	RevokedAt *time.Time
 }
 
 // NewSession constructs an opaque session record with bounded, non-secret metadata.
@@ -105,12 +114,23 @@ func NewSession(id, tenantID, userID shared.ID, tokenHash, csrfTokenHash string,
 	if err != nil {
 		return Session{}, err
 	}
-	return Session{ID: id, TenantID: tenantID, UserID: userID, TokenHash: tokenHash, CSRFTokenHash: csrfTokenHash, Metadata: metadata, CreatedAt: now.UTC(), UpdatedAt: now.UTC(), ExpiresAt: expiresAt.UTC()}, nil
+	return Session{ID: id, TenantID: tenantID, UserID: userID, TokenHash: tokenHash, CSRFTokenHash: csrfTokenHash, Metadata: metadata, OriginAt: now.UTC(), CreatedAt: now.UTC(), UpdatedAt: now.UTC(), ExpiresAt: expiresAt.UTC()}, nil
 }
 
 // Active reports whether a session remains unrevoked and unexpired.
 func (s Session) Active(now time.Time) bool {
 	return s.RevokedAt == nil && s.ExpiresAt.After(now)
+}
+
+// BeyondMaxAge reports whether the session has passed its absolute lifetime cap measured from
+// OriginAt. A session that has must not be rotated — the browser is forced back through OIDC. A zero
+// OriginAt is treated as beyond the cap (fail closed): a session lineage with no recorded origin
+// cannot prove it is within the absolute window.
+func (s Session) BeyondMaxAge(now time.Time) bool {
+	if s.OriginAt.IsZero() {
+		return true
+	}
+	return !now.Before(s.OriginAt.Add(MaxSessionAge))
 }
 
 // Revoke records the terminal revocation timestamp. It is intentionally idempotent on the entity;

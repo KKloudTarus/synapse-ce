@@ -4,10 +4,13 @@ import (
 	"context"
 
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // SecretProtector adapts the authenticated vault cipher for short-lived PKCE verifier storage.
 type SecretProtector struct{ cipher *vault.Cipher }
+
+var _ ports.IdentitySecretProtector = (*SecretProtector)(nil)
 
 func NewSecretProtector(cipher *vault.Cipher) *SecretProtector {
 	return &SecretProtector{cipher: cipher}

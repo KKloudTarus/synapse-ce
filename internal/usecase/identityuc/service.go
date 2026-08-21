@@ -153,10 +153,18 @@ func (s *Service) RotateSession(ctx context.Context, previous identity.Session, 
 		return CreatedSession{}, err
 	}
 	now := s.clock.Now().UTC()
+	// Enforce the absolute lifetime cap: a rotation refreshes the sliding TTL but must never extend the
+	// lineage past MaxSessionAge measured from the original login. Past it, the browser is forced back
+	// through OIDC. A zero OriginAt fails closed (BeyondMaxAge).
+	if previous.BeyondMaxAge(now) {
+		return CreatedSession{}, fmt.Errorf("%w: session exceeded its maximum lifetime; re-authentication required", shared.ErrForbidden)
+	}
 	replacement, err := identity.NewSession(s.ids.NewID(), previous.TenantID, previous.UserID, stateHash(token), stateHash(csrfToken), metadata, now.Add(ttl), now)
 	if err != nil {
 		return CreatedSession{}, err
 	}
+	// Carry the immutable origin so the cap is measured from first authentication, not this rotation.
+	replacement.OriginAt = previous.OriginAt
 	if err := s.store.RotateSession(ctx, previous.ID, replacement, now); err != nil {
 		return CreatedSession{}, fmt.Errorf("rotate opaque session: %w", err)
 	}

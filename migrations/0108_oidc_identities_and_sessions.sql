@@ -40,12 +40,16 @@ CREATE TABLE oidc_sessions (
     token_hash      TEXT NOT NULL UNIQUE CHECK (btrim(token_hash) <> ''),
     csrf_token_hash TEXT NOT NULL CHECK (btrim(csrf_token_hash) <> ''),
     metadata        JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(metadata) = 'object' AND octet_length(metadata::text) <= 8192),
+    -- origin_at is the immutable start of the session lineage (login); it is carried unchanged across
+    -- rotations so the absolute-age cap is measured from first authentication, never reset by a poll.
+    origin_at       TIMESTAMPTZ NOT NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at      TIMESTAMPTZ NOT NULL,
     revoked_at      TIMESTAMPTZ,
     CHECK (expires_at > created_at),
     CHECK (updated_at >= created_at),
+    CHECK (origin_at <= created_at),
     FOREIGN KEY (tenant_id, user_id) REFERENCES users(tenant_id, id) ON DELETE RESTRICT
 );
 CREATE INDEX idx_oidc_sessions_tenant_user ON oidc_sessions(tenant_id, user_id);

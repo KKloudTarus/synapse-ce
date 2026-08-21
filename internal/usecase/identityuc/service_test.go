@@ -113,3 +113,34 @@ func TestCreateSessionPersistsOnlyTokenHashes(t *testing.T) {
 		t.Fatalf("authenticate fresh session: %v", err)
 	}
 }
+
+// TestRotateSessionEnforcesAbsoluteMaxAge locks in the absolute-lifetime cap (review LOW-1): a rotation
+// refreshes the sliding TTL and carries the immutable origin forward, but a session lineage past
+// identity.MaxSessionAge is refused so the browser is forced back through OIDC.
+func TestRotateSessionEnforcesAbsoluteMaxAge(t *testing.T) {
+	now := time.Unix(1_000_000, 0).UTC()
+	store, ids := &identityTestStore{}, &identityTestIDs{}
+	svc, _ := NewService(store, identityTestProtector{}, identityTestClock{now}, ids)
+
+	// Within the cap: rotation succeeds and the replacement inherits the original origin (not reset).
+	fresh, err := identity.NewSession("s1", "tenant", "user", stateHash("tok"), stateHash("csrf"), nil, now.Add(time.Hour), now.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := svc.RotateSession(context.Background(), fresh, nil, time.Hour)
+	if err != nil {
+		t.Fatalf("within-cap rotation must succeed: %v", err)
+	}
+	if !rotated.Session.OriginAt.Equal(fresh.OriginAt) {
+		t.Fatalf("rotation must carry the immutable origin: got %s want %s", rotated.Session.OriginAt, fresh.OriginAt)
+	}
+
+	// Past the cap: refused with ErrForbidden even though the sliding expiry is still in the future.
+	old, err := identity.NewSession("s2", "tenant", "user", stateHash("tok2"), stateHash("csrf2"), nil, now.Add(time.Hour), now.Add(-(identity.MaxSessionAge + time.Minute)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RotateSession(context.Background(), old, nil, time.Hour); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("past-cap rotation must be forbidden, got %v", err)
+	}
+}

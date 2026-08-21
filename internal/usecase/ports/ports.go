@@ -882,11 +882,6 @@ type EvidenceStore interface {
 	Head(ctx context.Context, engagementID shared.ID) (string, error)
 }
 
-// BlobStore stores and retrieves binary artifacts content-addressed by their
-// lowercase-hex SHA-256, so identical content dedups and tampering is detectable
-// against the evidence chain (the same hash is sealed into the chain). Used by the
-// evidence vault for screenshots, raw tool output, request/response captures, etc.
-// . Put is idempotent for the same key+content.
 // RestoreEvidenceChain is one independently verifiable evidence chain from a restored database.
 // ID is the engagement identifier; Items are ordered from genesis to head.
 type RestoreEvidenceChain struct {
@@ -945,6 +940,11 @@ type RestoreExpectedState struct {
 	MigrationVersions []int64                        `json:"migration_versions"`
 }
 
+// BlobStore stores and retrieves binary artifacts content-addressed by their
+// lowercase-hex SHA-256, so identical content dedups and tampering is detectable
+// against the evidence chain (the same hash is sealed into the chain). Used by the
+// evidence vault for screenshots, raw tool output, request/response captures, etc.
+// Put is idempotent for the same key+content.
 type BlobStore interface {
 	Put(ctx context.Context, sha256hex string, data []byte) error
 	Get(ctx context.Context, sha256hex string) ([]byte, error)

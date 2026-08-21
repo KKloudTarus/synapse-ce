@@ -112,8 +112,8 @@ func (s *IdentityStore) CreateSession(ctx context.Context, session identity.Sess
 	}
 	return WithTenant(ctx, s.pool, session.TenantID.String(), func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO oidc_sessions
-			(id, tenant_id, user_id, token_hash, csrf_token_hash, metadata, created_at, updated_at, expires_at, revoked_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, session.ID.String(), session.TenantID.String(), session.UserID.String(), session.TokenHash, session.CSRFTokenHash, metadata, session.CreatedAt, session.UpdatedAt, session.ExpiresAt, session.RevokedAt)
+			(id, tenant_id, user_id, token_hash, csrf_token_hash, metadata, created_at, updated_at, expires_at, revoked_at, origin_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, session.ID.String(), session.TenantID.String(), session.UserID.String(), session.TokenHash, session.CSRFTokenHash, metadata, session.CreatedAt, session.UpdatedAt, session.ExpiresAt, session.RevokedAt, session.OriginAt)
 		if err == nil {
 			return nil
 		}
@@ -138,8 +138,8 @@ func (s *IdentityStore) RotateSession(ctx context.Context, previousSessionID sha
 	}
 	return WithTenant(ctx, s.pool, replacement.TenantID.String(), func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO oidc_sessions
-			(id, tenant_id, user_id, token_hash, csrf_token_hash, metadata, created_at, updated_at, expires_at, revoked_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, replacement.ID.String(), replacement.TenantID.String(), replacement.UserID.String(), replacement.TokenHash, replacement.CSRFTokenHash, metadata, replacement.CreatedAt, replacement.UpdatedAt, replacement.ExpiresAt, replacement.RevokedAt); err != nil {
+			(id, tenant_id, user_id, token_hash, csrf_token_hash, metadata, created_at, updated_at, expires_at, revoked_at, origin_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, replacement.ID.String(), replacement.TenantID.String(), replacement.UserID.String(), replacement.TokenHash, replacement.CSRFTokenHash, metadata, replacement.CreatedAt, replacement.UpdatedAt, replacement.ExpiresAt, replacement.RevokedAt, replacement.OriginAt); err != nil {
 			return fmt.Errorf("create replacement OIDC session: %w", err)
 		}
 		tag, err := tx.Exec(ctx, `UPDATE oidc_sessions SET revoked_at=$4, updated_at=$4
@@ -156,7 +156,7 @@ func (s *IdentityStore) RotateSession(ctx context.Context, previousSessionID sha
 
 func (s *IdentityStore) GetSessionByTokenHash(ctx context.Context, tokenHash string) (session identity.Session, err error) {
 	err = WithContextTenant(ctx, s.pool, func(tx pgx.Tx) error {
-		session, err = scanSession(tx.QueryRow(ctx, `SELECT id, tenant_id, user_id, token_hash, csrf_token_hash, metadata, created_at, updated_at, expires_at, revoked_at
+		session, err = scanSession(tx.QueryRow(ctx, `SELECT id, tenant_id, user_id, token_hash, csrf_token_hash, metadata, created_at, updated_at, expires_at, revoked_at, origin_at
 			FROM oidc_sessions WHERE token_hash=$1`, tokenHash))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return shared.ErrNotFound
@@ -214,7 +214,7 @@ func scanSession(row rowScanner) (identity.Session, error) {
 	var session identity.Session
 	var id, tenantID, userID string
 	var metadata []byte
-	if err := row.Scan(&id, &tenantID, &userID, &session.TokenHash, &session.CSRFTokenHash, &metadata, &session.CreatedAt, &session.UpdatedAt, &session.ExpiresAt, &session.RevokedAt); err != nil {
+	if err := row.Scan(&id, &tenantID, &userID, &session.TokenHash, &session.CSRFTokenHash, &metadata, &session.CreatedAt, &session.UpdatedAt, &session.ExpiresAt, &session.RevokedAt, &session.OriginAt); err != nil {
 		return identity.Session{}, err
 	}
 	if err := json.Unmarshal(metadata, &session.Metadata); err != nil {
