@@ -1,0 +1,22 @@
+image:
+  repository: registry.example.invalid/synapse
+  digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+web:
+  image:
+    repository: registry.example.invalid/synapse-web
+    digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+objectStore:
+  endpoint: s3.example.internal:443
+  bucket: synapse-evidence
+  useSSL: true
+ingress:
+  host: synapse.test.example
+  tls:
+    secretName: synapse-test-tls
+networkPolicy:
+  ingressControllerNamespace: ingress-nginx
+  allowInternetEgress: false
+  runtimeEgress:
+    database: ["10.64.16.0/20"]
+    objectStore: ["10.64.32.0/20"]
+    oidc: ["10.64.48.0/20"]

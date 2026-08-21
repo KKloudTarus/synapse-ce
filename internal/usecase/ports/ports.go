@@ -882,11 +882,69 @@ type EvidenceStore interface {
 	Head(ctx context.Context, engagementID shared.ID) (string, error)
 }
 
+// RestoreEvidenceChain is one independently verifiable evidence chain from a restored database.
+// ID is the engagement identifier; Items are ordered from genesis to head.
+type RestoreEvidenceChain struct {
+	ID    shared.ID
+	Items []evidence.Evidence
+}
+
+// RestoreEvidenceReader enumerates every restored evidence chain for offline recovery
+// verification. Implementations must not mutate custody data.
+type RestoreEvidenceReader interface {
+	ListEvidenceChains(ctx context.Context) ([]RestoreEvidenceChain, error)
+}
+
+// ObjectMetadata is the content-address identity reported without reading object bytes.
+type ObjectMetadata struct {
+	SHA256 string
+}
+
+// RestoreBlobReader obtains metadata for a referenced evidence object without reading
+// its contents. The returned SHA256 must be the object's persisted checksum metadata.
+type RestoreBlobReader interface {
+	Stat(ctx context.Context, sha256hex string) (ObjectMetadata, error)
+}
+
+// MigrationMetadata is the latest recorded state of one database migration.
+type MigrationMetadata struct {
+	Version int64 `json:"version"`
+	Applied bool  `json:"applied"`
+}
+
+// RestoreMigrationReader reads migration state from a restored database without
+// applying or altering migrations.
+type RestoreMigrationReader interface {
+	MigrationMetadata(ctx context.Context) ([]MigrationMetadata, error)
+}
+
+// RestoreAuditReader verifies the full, global audit chain from a restored database.
+// This maintenance-only boundary must not be exposed to tenant-scoped transports.
+type RestoreAuditReader interface {
+	VerifyGlobal(ctx context.Context) (audit.Report, error)
+}
+
+// RestoreExpectedEvidenceChain is the independently captured state expected for one
+// engagement after a restore. Head may be empty only when Count is zero.
+type RestoreExpectedEvidenceChain struct {
+	EngagementID shared.ID `json:"engagement_id"`
+	Head         string    `json:"head"`
+	Count        int       `json:"count"`
+}
+
+// RestoreExpectedState is an optional, independently captured restore target. Its
+// presence permits a completeness check in addition to local chain verification.
+type RestoreExpectedState struct {
+	AuditHead         string                         `json:"audit_head"`
+	EvidenceChains    []RestoreExpectedEvidenceChain `json:"evidence_chains"`
+	MigrationVersions []int64                        `json:"migration_versions"`
+}
+
 // BlobStore stores and retrieves binary artifacts content-addressed by their
 // lowercase-hex SHA-256, so identical content dedups and tampering is detectable
 // against the evidence chain (the same hash is sealed into the chain). Used by the
 // evidence vault for screenshots, raw tool output, request/response captures, etc.
-// . Put is idempotent for the same key+content.
+// Put is idempotent for the same key+content.
 type BlobStore interface {
 	Put(ctx context.Context, sha256hex string, data []byte) error
 	Get(ctx context.Context, sha256hex string) ([]byte, error)
@@ -941,6 +999,30 @@ type TimestampStore interface {
 type AUPStore interface {
 	Accepted(ctx context.Context, version string) (bool, error)
 	Save(ctx context.Context, a aup.Acceptance) error
+}
+
+// PoolStats is a bounded, driver-free snapshot of a database connection pool. It
+// carries no connection, tenant, or credential identity.
+type PoolStats struct {
+	AcquiredConns        int32
+	ConstructingConns    int32
+	IdleConns            int32
+	MaxConns             int32
+	TotalConns           int32
+	AcquireCount         int64
+	CanceledAcquireCount int64
+	EmptyAcquireCount    int64
+	NewConnsCount        int64
+	MaxIdleDestroyCount  int64
+	MaxLifetimeDestroy   int64
+	AcquireDuration      time.Duration
+	EmptyAcquireWaitTime time.Duration
+}
+
+// PoolStatsReader reports aggregate connection-pool saturation for metrics. It keeps the
+// concrete database driver out of the adapter layer.
+type PoolStatsReader interface {
+	PoolStats() PoolStats
 }
 
 // AuditEntry is one append-only audit record.

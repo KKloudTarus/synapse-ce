@@ -164,6 +164,38 @@ func (l *AuditLog) VerifyGlobal(ctx context.Context) (audit.Report, error) {
 	return audit.Verify(toRecords(entries)), nil
 }
 
+// MigrationMetadata returns each migration's latest recorded state in version order.
+// It makes no schema changes and is intended for offline restore verification.
+func (l *AuditLog) MigrationMetadata(ctx context.Context) ([]ports.MigrationMetadata, error) {
+	rows, err := l.pool.Query(ctx, `SELECT version_id, is_applied
+		FROM (
+			SELECT DISTINCT ON (version_id) version_id, is_applied
+			FROM goose_db_version
+			WHERE version_id > 0
+			ORDER BY version_id, id DESC
+		) AS latest
+		ORDER BY version_id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("read migration metadata: %w", err)
+	}
+	defer rows.Close()
+	out := []ports.MigrationMetadata{}
+	for rows.Next() {
+		var state ports.MigrationMetadata
+		if err := rows.Scan(&state.Version, &state.Applied); err != nil {
+			return nil, fmt.Errorf("scan migration metadata: %w", err)
+		}
+		out = append(out, state)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read migration metadata rows: %w", err)
+	}
+	return out, nil
+}
+
+var _ ports.RestoreAuditReader = (*AuditLog)(nil)
+var _ ports.RestoreMigrationReader = (*AuditLog)(nil)
+
 func (l *AuditLog) tenantEntries(ctx context.Context) (out []ports.AuditEntry, err error) {
 	err = WithContextTenant(ctx, l.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,

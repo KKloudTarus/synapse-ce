@@ -57,9 +57,18 @@ type Resolver func(ctx context.Context, token string) (Principal, bool)
 
 // Authenticator validates the bearer token on each request via the Resolver and
 // stamps the resolved principal into the request context for attribution.
+// SessionResolver validates an opaque browser session. CSRF is passed only for cookie authentication.
+type SessionResolver interface {
+	Authenticate(ctx context.Context, token, csrfToken string, unsafe bool) (Principal, error)
+}
+
 type Authenticator struct {
 	resolve Resolver
+	session SessionResolver
 }
+
+// SetSessionResolver enables the OIDC BFF cookie session fallback while retaining bearer authentication.
+func (a *Authenticator) SetSessionResolver(resolve SessionResolver) { a.session = resolve }
 
 // NewAuthenticator builds an authenticator from a token resolver.
 func NewAuthenticator(resolve Resolver) *Authenticator {
@@ -74,15 +83,28 @@ func (a *Authenticator) Middleware(publicPaths map[string]bool, next http.Handle
 			next.ServeHTTP(w, r)
 			return
 		}
-		token, ok := bearerToken(r)
-		if !ok {
-			unauthorized(w)
-			return
-		}
-		principal, ok := a.resolve(r.Context(), token)
-		if !ok {
-			unauthorized(w)
-			return
+		var principal Principal
+		if token, ok := bearerToken(r); ok {
+			// Bearer credentials retain their existing API semantics, including no CSRF requirement.
+			var authenticated bool
+			principal, authenticated = a.resolve(r.Context(), token)
+			if !authenticated {
+				unauthorized(w)
+				return
+			}
+		} else {
+			cookie, err := r.Cookie(sessionCookieName)
+			if err != nil || cookie.Value == "" || a.session == nil {
+				unauthorized(w)
+				return
+			}
+			unsafe := r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions
+			var sessionErr error
+			principal, sessionErr = a.session.Authenticate(r.Context(), cookie.Value, r.Header.Get("X-CSRF-Token"), unsafe)
+			if sessionErr != nil {
+				unauthorized(w)
+				return
+			}
 		}
 		principal.TenantID = shared.TenantOrDefault(shared.ID(principal.TenantID)).String()
 		ctx := context.WithValue(r.Context(), principalKey, principal)

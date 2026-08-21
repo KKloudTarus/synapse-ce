@@ -22,6 +22,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/httpapi"
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
@@ -43,6 +45,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetca"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
+	oidcadapter "github.com/KKloudTarus/synapse-ce/internal/infrastructure/oidc"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/file"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
@@ -138,6 +141,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetrolloutuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
+	identitybff "github.com/KKloudTarus/synapse-ce/internal/usecase/identitybff"
+	identityuc "github.com/KKloudTarus/synapse-ce/internal/usecase/identityuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/jsreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/llmverifier"
@@ -240,6 +245,10 @@ func main() {
 		log.Error("database migration posture invalid", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateOIDCPosture(); err != nil {
+		log.Error("OIDC posture invalid", "err", err)
+		os.Exit(1)
+	}
 
 	// Fail closed: no anonymous access. The token is never logged.
 	if cfg.APIToken == "" {
@@ -252,6 +261,7 @@ func main() {
 	acquirer := acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled).WithComparisonDepth(cfg.ProjectGitComparisonDepth)
 
 	// Persistence: PostgreSQL when configured, else file + in-memory (dev).
+	var databasePool *pgxpool.Pool
 	var repo ports.EngagementRepository
 	var projectRepo ports.ProjectRepository
 	var assetStore ports.AssetRepository
@@ -269,6 +279,7 @@ func main() {
 	var commentRepo ports.CommentRepository
 	var retestRepo ports.RetestRepository
 	var userRepo ports.UserRepository
+	var identityStore ports.IdentityStore
 	var auditReader ports.AuditReader
 	var scanRepo ports.ScanRepository
 	var scanResultStore ports.ScanResultStore
@@ -379,27 +390,13 @@ func main() {
 			os.Exit(1)
 		}
 		defer pool.Close()
+		databasePool = pool
 		readinessChecks["database"] = func(ctx context.Context) error {
 			return postgres.CheckDatabaseReady(ctx, pool)
 		}
 		readinessChecks["migrations"] = func(ctx context.Context) error {
 			return postgres.CheckMigrationsReady(ctx, pool)
 		}
-		// Single-instance guard: until horizontal scaling the repos
-		// ignore tenant_id and there is no leader election, so two writers would race. A
-		// session advisory lock makes the assumption explicit + enforced – a second
-		// instance fails fast instead of silently corrupting state.
-		lockConn, ok, lerr := postgres.AcquireSingletonLock(startup, pool, "api")
-		if lerr != nil {
-			log.Error("single-instance lock check failed", "err", lerr)
-			os.Exit(1)
-		}
-		if !ok {
-			log.Error("another synapse-api instance holds the single-instance lock – this build runs ONE instance (stop the other first); horizontal scaling is P5")
-			os.Exit(1)
-		}
-		defer lockConn.Release()
-		log.Info("acquired single-instance advisory lock")
 		repo = postgres.NewEngagementRepository(pool)
 		projectRepo = postgres.NewProjectRepository(pool)
 		findingRepo = postgres.NewFindingRepository(pool)
@@ -407,6 +404,11 @@ func main() {
 		commentRepo = postgres.NewCommentRepository(pool)
 		retestRepo = postgres.NewRetestRepository(pool)
 		userRepo = postgres.NewUserRepository(pool)
+		identityStore, err = postgres.NewIdentityStore(pool)
+		if err != nil {
+			log.Error("postgres OIDC identity store init failed", "err", err)
+			os.Exit(1)
+		}
 		scanRepo = postgres.NewScanRepository(pool)
 		vulnerabilityInventory = postgres.NewComponentInventoryStore(pool)
 		scanResultStore = postgres.NewScanResultStore(pool)
@@ -491,6 +493,12 @@ func main() {
 		commentRepo = memory.NewCommentRepository()
 		retestRepo = memory.NewRetestRepository()
 		userRepo = memory.NewUserRepository()
+		var identityStoreErr error
+		identityStore, identityStoreErr = memory.NewIdentityStore(userRepo)
+		if identityStoreErr != nil {
+			log.Error("memory OIDC identity store init failed", "err", identityStoreErr)
+			os.Exit(1)
+		}
 		memoryInventory := memory.NewComponentInventoryStore()
 		scanRepo = memory.NewScanRepository(memoryInventory)
 		vulnerabilityInventory = memoryInventory
@@ -1172,6 +1180,52 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
+	if cfg.OIDCEnabled {
+		provider, oidcErr := oidcadapter.New(context.Background(), oidcadapter.Config{
+			Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCClientSecret,
+			RedirectURL: cfg.OIDCRedirectURL, GroupRoleMapping: cfg.OIDCGroupRoleMapping,
+		})
+		if oidcErr != nil {
+			log.Error("OIDC provider initialization failed", "err", oidcErr)
+			os.Exit(1)
+		}
+		identityService, oidcErr := identityuc.NewService(identityStore, oidcadapter.NewSecretProtector(vaultCipher), clock, ids)
+		if oidcErr != nil {
+			log.Error("OIDC identity service initialization failed", "err", oidcErr)
+			os.Exit(1)
+		}
+		oidcService, oidcErr := identitybff.NewService(provider, identityService, identityStore, userRepo, clock, ids, identitybff.Config{
+			TenantID: shared.ID(cfg.OIDCTenantID), TransactionTTL: cfg.OIDCTransactionTTL, SessionTTL: cfg.OIDCSessionTTL,
+		})
+		if oidcErr != nil {
+			log.Error("OIDC BFF initialization failed", "err", oidcErr)
+			os.Exit(1)
+		}
+		httpOIDCService, oidcErr := httpapi.NewOIDCService(
+			func(ctx context.Context) (httpapi.OIDCAuthorization, error) {
+				result, err := oidcService.Begin(ctx)
+				return httpapi.OIDCAuthorization{URL: result.URL, Nonce: result.Nonce}, err
+			},
+			func(ctx context.Context, state, code, nonce string) (httpapi.OIDCSession, error) {
+				result, err := oidcService.Complete(ctx, state, code, nonce)
+				return httpapi.OIDCSession{Token: result.Token, CSRFToken: result.CSRFToken, Principal: httpapi.OIDCPrincipal{ID: result.Principal.ID, Name: result.Principal.Name, Role: result.Principal.Role, TenantID: result.Principal.TenantID}}, err
+			},
+			func(ctx context.Context, token string) (httpapi.OIDCSession, error) {
+				result, err := oidcService.Discover(ctx, token)
+				return httpapi.OIDCSession{Token: result.Token, CSRFToken: result.CSRFToken, Principal: httpapi.OIDCPrincipal{ID: result.Principal.ID, Name: result.Principal.Name, Role: result.Principal.Role, TenantID: result.Principal.TenantID}}, err
+			},
+			func(ctx context.Context, token, csrf string, unsafe bool) (httpapi.OIDCPrincipal, error) {
+				result, err := oidcService.Authenticate(ctx, token, csrf, unsafe)
+				return httpapi.OIDCPrincipal{ID: result.ID, Name: result.Name, Role: result.Role, TenantID: result.TenantID}, err
+			},
+			oidcService.Logout,
+		)
+		if oidcErr != nil {
+			log.Error("OIDC HTTP service initialization failed", "err", oidcErr)
+			os.Exit(1)
+		}
+		router.SetOIDC(httpOIDCService, cfg.OIDCFrontendURL)
+	}
 	router.SetReadinessChecks(readinessChecks)
 	if slaService != nil {
 		router.SetSLA(slaService)
@@ -1186,7 +1240,7 @@ func main() {
 			log.Error("metrics enabled but the configured job queue does not support aggregate stats")
 			os.Exit(1)
 		}
-		metrics = observability.New(queueReader)
+		metrics = observability.New(queueReader, postgres.NewPoolStatsSource(databasePool))
 		httpObserver = metrics
 		scaService.SetObserver(metrics)
 		if !metricsAddrIsLoopback(cfg.MetricsAddr) {

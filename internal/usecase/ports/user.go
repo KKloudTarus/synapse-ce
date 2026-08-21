@@ -17,4 +17,7 @@ type UserRepository interface {
 	// Upsert inserts or updates by id (used to keep the bootstrap admin's key in sync
 	// with SYNAPSE_API_TOKEN across restarts).
 	Upsert(ctx context.Context, u *user.User) error
+	// Bootstrap atomically seeds or refreshes the bootstrap user. Durable implementations
+	// record auditEntry only when the user is first created.
+	Bootstrap(ctx context.Context, u *user.User, auditEntry AuditEntry) error
 }

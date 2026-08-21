@@ -54,9 +54,25 @@ func TestPostgresEvidenceForkGuard(t *testing.T) {
 	}
 }
 
-// TestPostgresEvidenceVerifyRoundTrip covers the re-audit hash change: a chain sealed with
-// created_by/created_at bound into the hash must still VerifyChain after a Postgres
-// round-trip (the hash truncates the timestamp to µs to match timestamptz precision).
+// TestRestoreRoleEligible documents the recovery identity contract: a normal
+// application role may not enumerate all tenant chains under RLS.
+func TestRestoreRoleEligible(t *testing.T) {
+	for _, test := range []struct {
+		name                   string
+		bypassRLS, owner, want bool
+	}{
+		{name: "bypass RLS role", bypassRLS: true, want: true},
+		{name: "database owner", owner: true, want: true},
+		{name: "normal application role", want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := restoreRoleEligible(test.bypassRLS, test.owner); got != test.want {
+				t.Fatalf("restoreRoleEligible(%v, %v) = %v, want %v", test.bypassRLS, test.owner, got, test.want)
+			}
+		})
+	}
+}
+
 func TestPostgresEvidenceVerifyRoundTrip(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()

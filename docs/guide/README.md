@@ -35,10 +35,12 @@ architectural boundaries that keep execution auditable.
 | --- | --- |
 | [Configuration](configuration.md) | Environment variables, defaults, dependencies, and production requirements |
 | [Deployment](deployment.md) | Containers, services, agents, Linux-only capabilities, and production checks |
+| [Backup, restore, and upgrade recovery](backup-restore-upgrade.md) | Quiesced paired backups, restore verification, active-write characterization, and safe upgrades |
 | [CLI](cli.md) | Scanning, code-quality gates, advisory maintenance, imports, and exit contracts |
 | [MCP integration](mcp-integration.md) | Read/propose-only tool access scoped to one engagement |
 | [Fleet agent packaging](fleet-agent-packaging.md) | Package, identity, rollout, upgrade, and uninstall contracts |
 | [AI triage evaluation](ai-triage-evaluation.md) | Offline datasets, comparison gates, promotion, rollback, and drift detection |
+| [Operations drill evidence](operations-drill-evidence.md) | Versioned, redacted evidence for backup, restore, and rollback-on-copy drills |
 | [Code quality rule authoring](code-quality-rules.md) | Clean-room rule packs, schemas, references, and golden coverage |
 
 ## Architecture and policy

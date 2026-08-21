@@ -15,6 +15,13 @@ Conventions: an empty value means unset, so the built-in default applies. Boolea
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_API_TOKEN` | (none) | Bootstrap-admin bearer token. The API exits if empty. Operational routes require it; liveness `GET /healthz` and readiness `GET /readyz` are intentionally public. Generate with `openssl rand -hex 32`. |
+| `SYNAPSE_OIDC_ENABLED` | `false` | Enable the browser OIDC BFF. Requires the fixed HTTPS issuer, client credentials, callback URL, fixed frontend URL, fixed tenant, and allowlisted group-to-role mapping below. |
+| `SYNAPSE_OIDC_ISSUER` | (none) | Absolute HTTPS issuer used for pinned discovery and ID-token validation. |
+| `SYNAPSE_OIDC_CLIENT_ID`, `SYNAPSE_OIDC_CLIENT_SECRET`, `SYNAPSE_OIDC_REDIRECT_URL` | (none) | OAuth client settings. The callback must be the exact registered `https://<api-host>/api/auth/oidc/callback` URL. Never log the secret. |
+| `SYNAPSE_OIDC_FRONTEND_URL` | (none) | Fixed absolute HTTPS dashboard URL for a successful callback redirect. Query strings, fragments, and credentials are rejected; request parameters never control this destination. |
+| `SYNAPSE_OIDC_TENANT_ID` | (none) | The one fixed Synapse tenant accepted by this BFF instance. |
+| `SYNAPSE_OIDC_GROUP_ROLE_MAPPING` | (none) | Comma-separated exact `provider-group=role` entries. Roles may only be `admin`, `consultant`, `reviewer`, or `readonly`; unmapped, duplicate, and multi-role group claims are rejected. |
+| `SYNAPSE_OIDC_TRANSACTION_TTL`, `SYNAPSE_OIDC_SESSION_TTL` | `10m`, `8h` | Maximum authorization-transaction and opaque browser-session lifetimes. |
 
 ## Core and server
 
@@ -84,6 +91,18 @@ The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADD
 | `SYNAPSE_BLOB_SECRET_KEY` | `synapse-secret` | Secret key. |
 | `SYNAPSE_BLOB_BUCKET` | `synapse-evidence` | Bucket for evidence artifacts. |
 | `SYNAPSE_BLOB_USE_SSL` | `false` | Set true for https endpoints. |
+
+## Restore verification (synapse-verify-restore)
+
+`synapse-verify-restore` is a read-only recovery tool. It reuses `SYNAPSE_DB_DSN` and the evidence
+blob-store settings above, and requires a database identity permitted to read every tenant's
+evidence chain; a least-privilege runtime role fails closed rather than reporting an empty restore
+as intact.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_RESTORE_VERIFY_TIMEOUT` | `2m` | Maximum duration for one restore-verification run before it fails. |
+| `SYNAPSE_RESTORE_VERIFY_EXPECTED_STATE` | (none) | Path to an independently captured expected-state manifest (audit head, per-engagement evidence heads and counts, expected applied migration versions). Equivalent to `--expected-state`. Without it a run reports `completeness: incomplete_no_expected_state`, because an emptied database cannot be distinguished from an intact one. |
 
 ## Custody, signing, and anchoring (required in production)
 

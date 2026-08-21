@@ -47,6 +47,8 @@ type Router struct {
 	accessLogEnabled       bool
 	httpObserver           HTTPObserver
 	auth                   *Authenticator
+	oidc                   OIDCService
+	oidcFrontendURL        string
 	eng                    *enguc.Service
 	sca                    *scauc.Service
 	aup                    *aupuc.Service
@@ -277,6 +279,12 @@ func (rt *Router) routes() *http.ServeMux {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "synapse-api"})
 	})
 	mux.HandleFunc("GET /readyz", rt.ready)
+	if rt.oidc != nil {
+		mux.HandleFunc("GET /api/auth/oidc/login", rt.oidcLogin)
+		mux.HandleFunc("GET /api/auth/oidc/callback", rt.oidcCallback)
+		mux.HandleFunc("GET /api/auth/session", rt.oidcSession)
+		mux.HandleFunc("POST /api/auth/logout", rt.oidcLogout)
+	}
 	// Identity/consent routes carry NO role gate (a brand-new principal must reach them): /aup,
 	// /aup/accept, /me, and public probes. EVERY other route below is registered through
 	// authz(perm, …) – the single RBAC chokepoint, so no handler decides its own role
@@ -593,17 +601,34 @@ func (rt *Router) routes() *http.ServeMux {
 // authz(perm, …) – not a path-set. Normalizing first ensures the public/AUP-exempt path-sets
 // (matched on the request path) see exactly the path the ServeMux will route on (closes the
 // raw-vs-cleaned path mismatch).
-func (rt *Router) Handler() http.Handler {
-	// Public: no auth and no AUP gate.
-	public := map[string]bool{"/healthz": true, "/readyz": true}
-	// Authenticated but exempt from the AUP gate (so the operator can read + accept).
-	aupExempt := map[string]bool{
-		"/healthz":           true,
-		"/readyz":            true,
+// publicPaths carry no authentication and no AUP gate.
+func publicPaths() map[string]bool {
+	return map[string]bool{
+		"/healthz": true, "/readyz": true,
+		"/api/auth/oidc/login": true, "/api/auth/oidc/callback": true, "/api/auth/session": true,
+	}
+}
+
+// aupExemptPaths are reachable without an accepted acceptable-use policy, so the operator can
+// read and accept it. Every entry in publicPaths must also appear here: skipping authentication
+// still leaves the AUP gate in the chain, and an unauthenticated visitor has no principal that
+// could ever have accepted the policy, so omitting a public path makes it permanently 403.
+func aupExemptPaths() map[string]bool {
+	exempt := map[string]bool{
 		"/api/v1/aup":        true,
 		"/api/v1/aup/accept": true,
 		"/api/v1/me":         true,
+		"/api/auth/logout":   true,
 	}
+	for path := range publicPaths() {
+		exempt[path] = true
+	}
+	return exempt
+}
+
+func (rt *Router) Handler() http.Handler {
+	public := publicPaths()
+	aupExempt := aupExemptPaths()
 	routes := rt.routes()
 	human := rt.auth.Middleware(public, rt.requireAUP(aupExempt, routes))
 	// Attach a method-aware route pattern before auth/AUP can reject a known human

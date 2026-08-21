@@ -39,6 +39,15 @@ admin, consultant, reviewer, and read-only. Separation of duties means a machine
 never verify or accept its own claim. Tenant isolation is enforced at the service layer, so a
 caller cannot read another tenant's engagement even if a route wrapper is bypassed.
 
+## Browser OIDC access
+
+Browser OIDC uses a backend-for-frontend model. The server accepts an identity only for an exact approved
+issuer and subject pair, assigns it to the deployment's fixed tenant, and maps it only to the existing
+allowlisted roles: `admin`, `consultant`, `reviewer`, and `read-only`. It stores the authenticated browser
+state in an opaque, replica-safe server-side session and requires a session-bound CSRF token for every
+state-changing request. Existing bearer-token machine authentication is unchanged. See
+[ADR 0006](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/adr/0006-oidc-bff-trust-model.md).
+
 ## Authorization is your responsibility
 
 Synapse validates scope data but cannot verify legal authorization. The operator is responsible
