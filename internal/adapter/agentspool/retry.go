@@ -13,6 +13,7 @@ const (
 
 func saturationRetryDelay() time.Duration {
 	window := maxSaturationRetryDelay - minSaturationRetryDelay
+	//nolint:gosec // Retry jitter is intentionally non-cryptographic.
 	return minSaturationRetryDelay + time.Duration(rand.Int64N(int64(window)+1))
 }
 

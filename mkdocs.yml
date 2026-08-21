@@ -69,6 +69,7 @@ nav:
       - Fleet agent packaging: fleet-agent-packaging.md
       - AI triage evaluation: ai-triage-evaluation.md
       - Operations drill evidence: operations-drill-evidence.md
+      - Detection RulePack lifecycle: rulepack.md
   - Integrate:
       - CLI: cli.md
       - MCP integration: mcp-integration.md

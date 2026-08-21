@@ -92,7 +92,7 @@ func readStateFile(path string) (diskState, error) {
 	if err != nil {
 		return diskState{}, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	limited := io.LimitReader(f, 1<<20)
 	decoder := json.NewDecoder(limited)
 	decoder.DisallowUnknownFields()
