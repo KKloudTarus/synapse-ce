@@ -9,6 +9,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Deterministic release evidence and verification.** Release signing now binds the complete asset
+  set to its repository, tag, and exact source revision in a signed, provenance-attested manifest.
+  The local verifier rejects identity drift, tampered/missing/unlisted assets, non-canonical input,
+  unsafe paths, and symlinks; the operator guide separates checksum integrity, publisher signatures,
+  and GitHub workflow provenance.
+
 - **Crash-recoverable priority telemetry spool for the host agent.** Normalized eBPF events and
   confirmed detections now enter checksummed, per-priority WAL segments before downstream use. The
   spool resumes sequence incarnations after restart, commits exact-epoch ACKs, evicts only P3 under

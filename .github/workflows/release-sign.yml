@@ -2,7 +2,8 @@ name: Release Sign and Attest
 
 # #412 requirements 4 and 5: every published artifact is signed, a release cannot be published with an
 # unsigned artifact, and each artifact carries a checksum, an SBOM produced by this project's own
-# engine (the dogfooding gate) and a provenance attestation.
+# engine (the dogfooding gate), a deterministic signed evidence manifest, and a provenance
+# attestation.
 #
 # The gate that REFUSES an unsigned artifact already existed
 # (scripts/release/verify-artifacts-signed.sh, proven by release-gate-negative.yml). This workflow is
@@ -33,6 +34,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Build the release tooling from the release revision. A manual run must be dispatched
+          # from this exact tag as well; Resolve the tag below proves the event identity agrees.
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -55,7 +61,19 @@ jobs:
           set -euo pipefail
           tag="${{ github.event.release.tag_name || inputs.tag }}"
           test -n "${tag}"
+          source_revision="$(git rev-parse HEAD)"
+          tag_revision="$(git rev-list -n 1 "${tag}^{commit}")"
+          test "${source_revision}" = "${tag_revision}" || {
+            echo "checked-out source ${source_revision} does not match ${tag} (${tag_revision})"
+            exit 1
+          }
+          test "${GITHUB_SHA}" = "${source_revision}" || {
+            echo "the workflow identity ${GITHUB_SHA} does not match release source ${source_revision}"
+            echo "manual signing runs must be dispatched from the release tag, not a moving branch"
+            exit 1
+          }
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "source_revision=${source_revision}" >> "$GITHUB_OUTPUT"
 
       # Fail closed BEFORE touching a release: a missing signing key must stop the job, never let it
       # continue and publish unsigned. This is the same failure shape as the missing scanner.
@@ -108,6 +126,13 @@ jobs:
           set -euo pipefail
           mkdir -p ./artifacts
           gh release download "${{ steps.tag.outputs.tag }}" --dir ./artifacts
+          # A retry downloads evidence produced by the previous attempt. Rebuild owned derived
+          # files from the primary goreleaser assets so no stale signature/SBOM can enter the new
+          # evidence manifest or make SHA256SUMS self-referential.
+          find ./artifacts -maxdepth 1 -type f \( \
+            -name '*.sig' -o -name '*.sbom.json' -o -name 'SHA256SUMS' -o \
+            -name 'release-evidence.json' \
+          \) -delete
           ls -l ./artifacts
 
       # Requirement 4, Windows half: there is no Authenticode certificate, and a self-signed one would
@@ -156,7 +181,9 @@ jobs:
         run: |
           set -euo pipefail
           go build -o ./dist/synapse-cli ./cmd/synapse-cli
+          go build -o ./dist/synapse-release-evidence ./cmd/synapse-release-evidence
           test -x ./dist/synapse-cli
+          test -x ./dist/synapse-release-evidence
           for art in ./artifacts/*; do
             case "${art}" in
             # Skip signatures, checksums, and already-emitted derived files — an SBOM of a checksum
@@ -174,10 +201,31 @@ jobs:
         run: |
           set -euo pipefail
           cd ./artifacts
-          sha256sum ./* > SHA256SUMS
+          mapfile -d '' files < <(find . -maxdepth 1 -type f \
+            ! -name 'SHA256SUMS' ! -name 'SHA256SUMS.sig' -print0 | sort -z)
+          test "${#files[@]}" -gt 0 || { echo "no release assets to checksum"; exit 1; }
+          sha256sum -- "${files[@]}" > SHA256SUMS
           gpg --batch --yes --pinentry-mode loopback --passphrase "${{ secrets.SYNAPSE_GPG_PASSPHRASE }}" \
             --local-user "${{ secrets.SYNAPSE_GPG_KEY_ID }}" --detach-sign --output SHA256SUMS.sig SHA256SUMS
           gpg --batch --verify SHA256SUMS.sig SHA256SUMS
+
+      - name: Bind the complete asset set to this release revision
+        run: |
+          set -euo pipefail
+          ./dist/synapse-release-evidence generate \
+            --dir ./artifacts \
+            --repository "${GITHUB_REPOSITORY}" \
+            --revision "${{ steps.tag.outputs.source_revision }}" \
+            --release "${{ steps.tag.outputs.tag }}"
+          gpg --batch --yes --pinentry-mode loopback --passphrase "${{ secrets.SYNAPSE_GPG_PASSPHRASE }}" \
+            --local-user "${{ secrets.SYNAPSE_GPG_KEY_ID }}" --detach-sign \
+            --output ./artifacts/release-evidence.json.sig ./artifacts/release-evidence.json
+          gpg --batch --verify ./artifacts/release-evidence.json.sig ./artifacts/release-evidence.json
+          ./dist/synapse-release-evidence verify \
+            --dir ./artifacts \
+            --repository "${GITHUB_REPOSITORY}" \
+            --revision "${{ steps.tag.outputs.source_revision }}" \
+            --release "${{ steps.tag.outputs.tag }}"
 
       # The gate that the negative workflow proves fails on an unsigned artifact. Running it here is the
       # point: the release cannot be published unless it passes.
@@ -189,7 +237,7 @@ jobs:
         with:
           subject-path: "./artifacts/*"
 
-      - name: Upload the signatures, SBOMs and checksums to the release
+      - name: Upload the signatures, SBOMs, checksums and evidence manifest to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -200,5 +248,6 @@ jobs:
           # cover it; only SHA256SUMS (no extension) needs an explicit entry.
           gh release upload "${{ steps.tag.outputs.tag }}" \
             ./artifacts/*.sig ./artifacts/*.sbom.json ./artifacts/SHA256SUMS \
+            ./artifacts/release-evidence.json \
             --clobber
           echo "release ${{ steps.tag.outputs.tag }} is signed and attested"
