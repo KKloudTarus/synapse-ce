@@ -3,8 +3,9 @@ import { ServerCog } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import type { FleetAgentDetail, FleetAgentHealth, FleetAgentRow } from '../lib/types'
 import { Button, Card, cn, EmptyState, ErrorState, Pill, Spinner } from '../components/ui'
-import { VirtualTable, type Column } from '../components/VirtualTable'
+import { VirtualTable, type Column } from '../components/synapse/VirtualTable'
 import { FleetStateBadge, formatFleetTime } from './fleetShared'
+import { useFetch } from '../hooks'
 
 type StateFilter = 'all' | FleetAgentHealth
 const FILTERS: { value: StateFilter; label: string }[] = [
@@ -89,19 +90,11 @@ function AgentDetailCard({ id, onClose }: { id: string; onClose: () => void }) {
 
 export function FleetAgents() {
   const [filter, setFilter] = useState<StateFilter>('all')
-  const [rows, setRows] = useState<FleetAgentRow[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { data: rows, loading, error, refetch } = useFetch(
+    () => api.listFleetAgents(filter === 'all' ? undefined : filter),
+    { deps: [filter] },
+  )
   const [selected, setSelected] = useState<string | null>(null)
-
-  function load() {
-    setError(null)
-    setRows(null)
-    api
-      .listFleetAgents(filter === 'all' ? undefined : filter)
-      .then(setRows)
-      .catch((e) => setError(e instanceof ApiError ? e.message : 'Failed to load fleet agents'))
-  }
-  useEffect(load, [filter])
 
   const columns: Column<FleetAgentRow>[] = [
     {
@@ -172,12 +165,12 @@ export function FleetAgents() {
       {error && (
         <div className="space-y-3">
           <ErrorState message={error} />
-          <Button variant="secondary" onClick={load}>
+          <Button variant="secondary" onClick={refetch}>
             Retry
           </Button>
         </div>
       )}
-      {!rows && !error && <Spinner label="Loading fleet agents…" />}
+      {loading && <Spinner label="Loading fleet agents…" />}
       {rows && rows.length === 0 && !error && (
         <EmptyState
           icon={ServerCog}

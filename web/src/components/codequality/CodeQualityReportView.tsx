@@ -3,7 +3,7 @@ import { Braces, Copy, FileCode2, Gauge, ShieldCheck, Wrench } from 'lucide-reac
 import { formatOverviewPercentage } from '../../lib/projectOverviewPresentation'
 import type { CodeQualityReport, Finding, Grade, LanguageInventory } from '../../lib/types'
 import { Card, Pill, SevBadge, cn } from '../ui'
-import { VirtualTable, type Column } from '../VirtualTable'
+import { VirtualTable, type Column } from '../synapse/VirtualTable'
 import { gradeTone } from './qualityPresentation'
 
 function GradeCard({ label, grade, detail, icon: Icon }: { label: string; grade: Grade; detail: string; icon: typeof Gauge }) {

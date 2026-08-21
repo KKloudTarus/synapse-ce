@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Download, ShieldAlert } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import type { FleetCoverageRow, FleetCoverageSummary, FleetVerdict } from '../lib/types'
 import { Button, Card, EmptyState, ErrorState, Spinner } from '../components/ui'
-import { VirtualTable, type Column } from '../components/VirtualTable'
+import { VirtualTable, type Column } from '../components/synapse/VirtualTable'
 import { FLEET_VERDICT_ORDER, FleetVerdictBadge, formatFleetTime, verdictLabel } from './fleetShared'
+import { useParallelFetch } from '../hooks'
 
 const COLUMNS: Column<FleetCoverageRow>[] = [
   {
@@ -111,24 +112,16 @@ function SummaryCard({ summary }: { summary: FleetCoverageSummary }) {
 }
 
 export function FleetCoverage() {
-  const [rows, setRows] = useState<FleetCoverageRow[] | null>(null)
-  const [summary, setSummary] = useState<FleetCoverageSummary | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
 
-  function load() {
-    setError(null)
-    setRows(null)
-    setSummary(null)
-    Promise.all([api.listFleetCoverage(), api.fleetCoverageSummary()])
-      .then(([r, s]) => {
-        setRows(r)
-        setSummary(s)
-      })
-      .catch((e) => setError(e instanceof ApiError ? e.message : 'Failed to load fleet coverage'))
-  }
-  useEffect(load, [])
+  const { data, error, refetch } = useParallelFetch(
+    () => Promise.all([api.listFleetCoverage(), api.fleetCoverageSummary()] as const),
+    { deps: [] },
+  )
+
+  const rows: FleetCoverageRow[] | null = data?.[0] ?? null
+  const summary: FleetCoverageSummary | null = data?.[1] ?? null
 
   async function onExport() {
     setExportError(null)
@@ -146,7 +139,7 @@ export function FleetCoverage() {
     return (
       <div className="space-y-3">
         <ErrorState message={error} />
-        <Button variant="secondary" onClick={load}>
+        <Button variant="secondary" onClick={refetch}>
           Retry
         </Button>
       </div>

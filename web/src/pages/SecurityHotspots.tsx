@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useProjectRouteContext } from './CodeQualityProject'
 import { api, ApiError } from '../lib/api'
+import { useFetch } from '../hooks'
 import { formatOverviewPercentage } from '../lib/projectOverviewPresentation'
 import type { HotspotListFilter, HotspotPage } from '../lib/types'
 import { HotspotList } from '../components/hotspots/HotspotList'
@@ -26,30 +27,25 @@ export function SecurityHotspotsPage() {
   }), [status, rule, severity, search])
 
   const [page, setPage] = useState<HotspotPage | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [refreshCount, setRefreshCount] = useState(0)
 
   const selectedId = params.get('id')
 
+  const { data: initialPage, error: fetchError } = useFetch(
+    () => api.listProjectHotspots(projectKey, lens, filter),
+    { deps: [projectKey, lens, filter, refreshCount] },
+  )
+
   useEffect(() => {
-    let active = true
-    setLoading(true)
-    setError(null)
-    api.listProjectHotspots(projectKey, lens, filter)
-      .then((res) => {
-        if (!active) return
-        setPage(res)
-      })
-      .catch((err) => {
-        if (!active) return
-        setError(err instanceof ApiError ? err.message : 'An error occurred')
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-    return () => { active = false }
-  }, [projectKey, lens, filter, refreshCount])
+    if (initialPage) setPage(initialPage)
+  }, [initialPage])
+
+  useEffect(() => {
+    if (fetchError) setError(fetchError)
+    else setError(null)
+  }, [fetchError])
 
   const loadMore = () => {
     if (!page?.next || loading) return

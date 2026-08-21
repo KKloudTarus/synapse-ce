@@ -1,29 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Activity, AlertTriangle, Coins, Gauge, RefreshCw } from 'lucide-react'
 import { Button, Card, EmptyState, ErrorState, Spinner } from '../components/ui'
-import { api, ApiError } from '../lib/api'
+import { api } from '../lib/api'
 import type { AITriageMetricRow, AITriageObservability as Observability } from '../lib/types'
+import { useFetch } from '../hooks'
 
 export function AITriageObservability() {
-  const [data, setData] = useState<Observability | null>(null)
-  const [error, setError] = useState('')
-  const [refresh, setRefresh] = useState(0)
-
-  useEffect(() => {
-    let active = true
-    setData(null); setError('')
-    api.aiTriageObservability()
-      .then((value) => { if (active) setData(value) })
-      .catch((e) => { if (active) setError(e instanceof ApiError ? e.message : 'Failed to load AI triage observability') })
-    return () => { active = false }
-  }, [refresh])
+  const [revision, setRevision] = useState(0)
+  const { data, loading, error } = useFetch<Observability>(
+    () => api.aiTriageObservability(),
+    { deps: [revision] },
+  )
 
   return <div className="space-y-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h1 className="text-3xl font-bold tracking-tight">AI triage observability</h1><p className="mt-1 text-sm text-mutedfg">Evidence-sealed safety, reliability, token and cost signals from each project's latest scan.</p></div>
-      <Button variant="secondary" onClick={() => setRefresh((value) => value + 1)}><RefreshCw className="size-4" />Refresh</Button>
+      <Button variant="secondary" onClick={() => setRevision((v) => v + 1)}><RefreshCw className="size-4" />Refresh</Button>
     </div>
-    {error ? <ErrorState message={error} /> : data === null ? <Spinner label="Loading AI triage metrics…" /> : <Dashboard data={data} />}
+    {error ? <ErrorState message={error} /> : loading || data === null ? <Spinner label="Loading AI triage metrics…" /> : <Dashboard data={data} />}
   </div>
 }
 

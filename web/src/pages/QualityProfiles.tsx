@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Copy, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import type { QualityProfile, RuleSummary } from '../lib/types'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../components/ui'
+import { useFetch } from '../hooks'
 
 const SEVERITIES = ['critical', 'high', 'medium', 'low'] // matches RuleSeverity
 const RULE_RENDER_CAP = 100
@@ -10,19 +11,13 @@ const RULE_RENDER_CAP = 100
 // QualityProfiles is the management page for named, per-language rule sets: browse the built-in default
 // per language, copy it into a custom profile, toggle rules + severities, assign it to a project.
 export function QualityProfiles() {
-  const [profiles, setProfiles] = useState<QualityProfile[] | null>(null)
-  const [err, setErr] = useState<string | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
 
-  useEffect(() => {
-    let live = true
-    setErr(null)
-    api.listQualityProfiles()
-      .then((list) => { if (live) setProfiles(list) })
-      .catch((e) => { if (live) setErr(e instanceof ApiError ? e.message : 'Failed to load profiles') })
-    return () => { live = false }
-  }, [refresh])
+  const { data: profiles, error: err } = useFetch<QualityProfile[]>(
+    () => api.listQualityProfiles(),
+    { deps: [refresh] },
+  )
 
   const byLanguage = useMemo(() => {
     const map = new Map<string, QualityProfile[]>()
@@ -80,22 +75,15 @@ export function QualityProfiles() {
 }
 
 function ProfileDetail({ profile, onChanged }: { profile: QualityProfile; onChanged: () => void }) {
-  const [rules, setRules] = useState<RuleSummary[] | null>(null)
-  const [rulesErr, setRulesErr] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [copyOpen, setCopyOpen] = useState(false)
   const [ruleQuery, setRuleQuery] = useState('')
 
-  useEffect(() => {
-    let live = true
-    setRules(null)
-    setRulesErr(null)
-    api.listRules({ languages: [profile.language] })
-      .then((list) => { if (live) setRules(list) })
-      .catch((e) => { if (live) setRulesErr(e instanceof ApiError ? e.message : 'Failed to load rules') })
-    return () => { live = false }
-  }, [profile.language])
+  const { data: rules, error: rulesErr } = useFetch<RuleSummary[]>(
+    () => api.listRules({ languages: [profile.language] }),
+    { deps: [profile.language] },
+  )
 
   const filtered = useMemo(() => {
     const q = ruleQuery.trim().toLowerCase()

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { Sidebar } from '../components/Sidebar'
+import { Sidebar } from '../components/layout/Sidebar'
 import { api } from '../lib/api'
 import { Engagements, NewEngagement } from './Engagements'
 

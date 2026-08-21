@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Bug, ShieldAlert, Wrench, X } from 'lucide-react'
 import { useProjectRouteContext } from './CodeQualityProject'
 import { api, ApiError } from '../lib/api'
+import { useFetch } from '../hooks'
 import {
   canTransitionIssue,
   ISSUE_STATUSES,
@@ -46,20 +47,22 @@ export function ProjectIssuesPage() {
   )
 
   const [page, setPage] = useState<IssuePage | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
 
+  const { data: initialPage, loading: initialLoading, error: fetchError } = useFetch(
+    () => api.listProjectIssues(projectKey, filter),
+    { deps: [projectKey, filter, refresh] },
+  )
+
   useEffect(() => {
-    let active = true
-    setLoading(true)
-    setError(null)
-    api.listProjectIssues(projectKey, filter)
-      .then((res) => { if (active) setPage(res) })
-      .catch((err) => { if (active) setError(err instanceof ApiError ? err.message : 'Failed to load issues') })
-      .finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [projectKey, filter, refresh])
+    if (initialPage) setPage(initialPage)
+  }, [initialPage])
+
+  useEffect(() => {
+    if (fetchError) setError(fetchError)
+  }, [fetchError])
 
   function patch(key: string, value: string | null) {
     const next = new URLSearchParams(params)
@@ -100,7 +103,7 @@ export function ProjectIssuesPage() {
 
       <div className="flex gap-4">
         <div className="min-w-0 flex-1 rounded-xl border border-border bg-card">
-          {loading && !page ? (
+          {initialLoading && !page ? (
             <div className="flex h-40 items-center justify-center"><Spinner /></div>
           ) : error ? (
             <div className="space-y-3 p-5"><ErrorState message={error} /><Button variant="secondary" onClick={() => setRefresh((c) => c + 1)}>Retry</Button></div>

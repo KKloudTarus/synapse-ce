@@ -11,10 +11,11 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner, cn } from '../components/ui'
 import { api } from '../lib/api'
+import { useFetch } from '../hooks'
 import type {
   BusinessAsset,
   BusinessAssetCriticality,
@@ -48,8 +49,6 @@ const LIFECYCLES = [
 
 export function Assets() {
   const [page, setPage] = useState(0)
-  const [result, setResult] = useState<BusinessAssetPage | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [revision, setRevision] = useState(0)
   const [query, setQuery] = useState('')
@@ -57,23 +56,17 @@ export function Assets() {
   const [criticality, setCriticality] = useState('')
   const [lifecycle, setLifecycle] = useState('')
 
-  useEffect(() => {
-    let active = true
-    const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) })
-    if (query.trim()) params.set('q', query.trim())
-    if (type) params.set('type', type)
-    if (criticality) params.set('criticality', criticality)
-    if (lifecycle) params.set('lifecycle', lifecycle)
-    setResult(null)
-    setError(null)
-    api
-      .listBusinessAssets(params.toString())
-      .then((next) => active && setResult(next))
-      .catch((nextError) => active && setError(nextError instanceof Error ? nextError.message : 'Failed to load assets'))
-    return () => {
-      active = false
-    }
-  }, [criticality, lifecycle, page, query, revision, type])
+  const { data: result, error } = useFetch<BusinessAssetPage>(
+    (_signal) => {
+      const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) })
+      if (query.trim()) params.set('q', query.trim())
+      if (type) params.set('type', type)
+      if (criticality) params.set('criticality', criticality)
+      if (lifecycle) params.set('lifecycle', lifecycle)
+      return api.listBusinessAssets(params.toString())
+    },
+    { deps: [criticality, lifecycle, page, query, revision, type] },
+  )
 
   const hasFilters = Boolean(query.trim() || type || criticality || lifecycle)
   const pageCount = result ? Math.max(1, Math.ceil(result.total / PAGE_SIZE)) : 1

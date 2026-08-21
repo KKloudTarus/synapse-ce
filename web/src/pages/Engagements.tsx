@@ -4,33 +4,33 @@ import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button, Card, cn, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../components/ui'
 import { kindLabel } from '../lib/format'
 import { api } from '../lib/api'
+import { useFetch } from '../hooks'
 import type { BusinessAsset, Engagement, ScopeTarget } from '../lib/types'
 
 const KINDS = ['repo', 'domain', 'host', 'url', 'image', 'cidr']
 
 export function Engagements() {
   const [searchParams] = useSearchParams()
-  const [list, setList] = useState<Engagement[] | null>(null)
-  const [assetNames, setAssetNames] = useState<Record<string, string>>({})
-  const [error, setError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   const [importErr, setImportErr] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
 
-  function load() {
-    setError(null)
-    api
-      .listEngagements()
-      .then(setList)
-      .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Failed to load engagements'))
-    api
-      .listBusinessAssets('limit=200')
-      .then((page) => setAssetNames(Object.fromEntries(page.items.map((asset) => [asset.id, asset.name]))))
-      .catch(() => setAssetNames({}))
-  }
+  const { data, error } = useFetch<{ list: Engagement[]; assetNames: Record<string, string> }>(
+    async () => {
+      const engagements = await api.listEngagements()
+      let assetNames: Record<string, string> = {}
+      try {
+        const page = await api.listBusinessAssets('limit=200')
+        assetNames = Object.fromEntries(page.items.map((asset) => [asset.id, asset.name]))
+      } catch { /* ignore asset name failures */ }
+      return { list: engagements, assetNames }
+    },
+    { deps: [] },
+  )
 
-  useEffect(load, [])
+  const list = data?.list ?? null
+  const assetNames = data?.assetNames ?? {}
 
   async function onImportFile(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]

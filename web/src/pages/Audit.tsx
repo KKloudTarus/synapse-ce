@@ -3,18 +3,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import type { AuditEntry, AuditReport } from '../lib/types'
 import { Button, Card, cn, EmptyState, ErrorState, Spinner } from '../components/ui'
-import { VirtualTable, type Column } from '../components/VirtualTable'
+import { VirtualTable, type Column } from '../components/synapse/VirtualTable'
+import { useAuditLog } from '../hooks'
 
 export function Audit() {
-  const [entries, setEntries] = useState<AuditEntry[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    api
-      .recentAudit(500)
-      .then(setEntries)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load the audit log'))
-  }, [])
+  const { data: entries, loading, error } = useAuditLog(500)
 
   const columns: Column<AuditEntry>[] = [
     { header: 'Time', className: 'w-44 shrink-0 font-mono text-xs tabular-nums text-mutedfg', cell: (e) => fmtTime(e.at) },
@@ -40,7 +33,7 @@ export function Audit() {
       </header>
 
       {error && <ErrorState message={error} />}
-      {!entries && !error && <Spinner label="Loading audit log…" />}
+      {loading && <Spinner label="Loading audit log…" />}
       {entries && entries.length === 0 && (
         <EmptyState icon={ScrollText} title="No audit entries yet" hint="Actions appear here as they happen." />
       )}

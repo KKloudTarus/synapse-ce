@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { ArrowRight, Box, Database, ShieldAlert, Tag, UserRound, Waypoints } from 'lucide-react'
 import { api } from '../lib/api'
 import type { ThreatComponent, ThreatModel } from '../lib/types'
 import { Card, EmptyState, ErrorState, Spinner } from '../components/ui'
+import { useFetch } from '../hooks'
 
 // kindIcon maps a DFD element kind to a lucide glyph.
 function kindIcon(kind: string) {
@@ -47,17 +48,10 @@ function classificationTone(c: string): string {
 // components, its data flows with the boundary CROSSINGS (the attack surface STRIDE reasons over)
 // highlighted, and its assets by classification. Read-only; the model is ingested via the API/agent.
 export function ThreatModelTab({ engagementId }: { engagementId: string }) {
-  const [model, setModel] = useState<ThreatModel | null | undefined>(undefined) // undefined = loading, null = none
-  const [err, setErr] = useState<string | null>(null)
-
-  useEffect(() => {
-    setModel(undefined)
-    setErr(null)
-    api
-      .threatModel(engagementId)
-      .then(setModel)
-      .catch((e) => setErr(e instanceof Error ? e.message : 'Failed to load the threat model'))
-  }, [engagementId])
+  const { data: model, loading, error: err } = useFetch<ThreatModel | null>(
+    () => api.threatModel(engagementId),
+    { deps: [engagementId] },
+  )
 
   const byId = useMemo(() => {
     const m = new Map<string, ThreatComponent>()
@@ -88,7 +82,7 @@ export function ThreatModelTab({ engagementId }: { engagementId: string }) {
   }, [model, byId])
 
   if (err) return <ErrorState message={err} />
-  if (model === undefined) return <Spinner label="Loading threat model…" />
+  if (loading) return <Spinner label="Loading threat model…" />
   if (model === null) {
     return (
       <EmptyState

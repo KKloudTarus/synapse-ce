@@ -1,5 +1,5 @@
 import { CalendarClock, GitCommit, GitBranch, Gauge, ShieldAlert } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { CodeLensToggle } from '../components/codequality/projectOverview/CodeLensToggle'
 import { OverviewIssueSummary } from '../components/codequality/projectOverview/OverviewIssueSummary'
@@ -7,6 +7,7 @@ import { OverviewMetricGrid } from '../components/codequality/projectOverview/Ov
 import { ProjectOverviewSkeleton } from '../components/codequality/projectOverview/ProjectOverviewSkeleton'
 import { QualityGateBanner } from '../components/codequality/projectOverview/QualityGateBanner'
 import { Button, Card, EmptyState, ErrorState, Pill } from '../components/ui'
+import { useFetch } from '../hooks'
 import { api } from '../lib/api'
 import type { ProjectOverview } from '../lib/projectOverview'
 import {
@@ -17,16 +18,9 @@ import {
 } from '../lib/projectOverviewPresentation'
 import { useProjectRouteContext } from './CodeQualityProject'
 
-type LoadState =
-  | { status: 'loading' }
-  | { status: 'loaded'; overview: ProjectOverview }
-  | { status: 'error'; message: string }
-
 export function ProjectOverviewPage() {
   const { projectKey, isRunning, analysisRevision, startAnalysis } = useProjectRouteContext()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [state, setState] = useState<LoadState>({ status: 'loading' })
-  const requestToken = useRef<symbol | null>(null)
   const lens = parseCodeLens(searchParams.get('lens'))
 
   useEffect(() => {
@@ -44,39 +38,27 @@ export function ProjectOverviewPage() {
     setSearchParams(next)
   }
 
-  function load() {
-    const token = Symbol()
-    requestToken.current = token
-    setState({ status: 'loading' })
-    api.projectOverview(projectKey)
-      .then((overview) => {
-        if (requestToken.current === token) setState({ status: 'loaded', overview })
-      })
-      .catch((e) => {
-        if (requestToken.current !== token) return
-        const message = e instanceof Error && e.message === 'Invalid project overview response'
-          ? 'Project Overview data is unavailable.'
-          : e instanceof Error ? e.message : 'Failed to load Project Overview'
-        setState({ status: 'error', message })
-      })
-  }
+  const { data: overview, loading, error, refetch: load } = useFetch<ProjectOverview>(
+    () => api.projectOverview(projectKey).catch((e) => {
+      const message = e instanceof Error && e.message === 'Invalid project overview response'
+        ? 'Project Overview data is unavailable.'
+        : e instanceof Error ? e.message : 'Failed to load Project Overview'
+      throw new Error(message)
+    }),
+    { deps: [projectKey, analysisRevision] },
+  )
 
-  useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectKey, analysisRevision])
-
-  if (state.status === 'loading') return <ProjectOverviewSkeleton />
-  if (state.status === 'error') {
+  if (loading) return <ProjectOverviewSkeleton />
+  if (error) {
     return (
       <div className="space-y-3">
-        <ErrorState message={state.message} />
+        <ErrorState message={error} />
         <Button variant="secondary" onClick={load}>Retry Overview</Button>
       </div>
     )
   }
 
-  const { overview } = state
+  if (!overview) return <ProjectOverviewSkeleton />
   if (overview.state === 'not_analyzed') {
     return (
       <Card title="Project Overview">

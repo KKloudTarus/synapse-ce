@@ -1,35 +1,46 @@
-import { useState } from 'react'
-import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { Menu01 } from '@untitledui/icons'
+import { lazy, Suspense, useState } from 'react'
+import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthContext'
-import { MobileSidebar, Sidebar } from './components/Sidebar'
-import { Topbar } from './components/Topbar'
-import { Audit } from './pages/Audit'
-import { AITriageReviews } from './pages/AITriageReviews'
-import { AITriageObservability } from './pages/AITriageObservability'
+import { ErrorBoundary } from './components/layout/ErrorBoundary'
+import { LoadingFallback } from './components/layout/LoadingFallback'
+import { MobileSidebar, Sidebar } from './components/layout/Sidebar'
 import { Connect } from './pages/Connect'
-import { EngagementDetail } from './pages/EngagementDetail'
-import { Engagements, NewEngagement } from './pages/Engagements'
-import { Team } from './pages/Team'
-import Rules from './pages/Rules'
-import RuleDetail from './pages/RuleDetail'
-import { CodeQualityProject } from './pages/CodeQualityProject'
-import { CodeQualityProjects } from './pages/CodeQualityProjects'
-import { ProjectActivityPage } from './pages/ProjectActivityPage'
-import { ProjectAnalysisPage } from './pages/ProjectAnalysisPage'
-import { ProjectOverviewPage } from './pages/ProjectOverviewPage'
-import { SecurityHotspotsPage } from './pages/SecurityHotspots'
-import { ProjectIssuesPage } from './pages/ProjectIssues'
-import { ProjectMeasuresPage } from './pages/ProjectMeasuresPage'
-import { ProjectCodePage } from './pages/ProjectCodePage'
-import { QualityGates } from './pages/QualityGates'
-import { QualityProfiles } from './pages/QualityProfiles'
-import { FleetLayout } from './pages/FleetLayout'
-import { FleetCoverage } from './pages/FleetCoverage'
-import { FleetAgents } from './pages/FleetAgents'
-import { Assets } from './pages/Assets'
-import { AssetComponents, AssetCoverageView, AssetDetail, AssetEngagements, AssetFindings, AssetHistory, AssetOverview } from './pages/AssetDetail'
-import { Dashboard } from './pages/Dashboard'
-import { VulnerabilityIntelligence } from './pages/VulnerabilityIntelligence'
+
+// --- Lazy-loaded page components ---
+const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })))
+const Engagements = lazy(() => import('./pages/Engagements').then(m => ({ default: m.Engagements })))
+const NewEngagement = lazy(() => import('./pages/Engagements').then(m => ({ default: m.NewEngagement })))
+const EngagementDetail = lazy(() => import('./pages/EngagementDetail').then(m => ({ default: m.EngagementDetail })))
+const Assets = lazy(() => import('./pages/Assets').then(m => ({ default: m.Assets })))
+const AssetDetail = lazy(() => import('./pages/AssetDetail').then(m => ({ default: m.AssetDetail })))
+const AssetOverview = lazy(() => import('./pages/AssetDetail').then(m => ({ default: m.AssetOverview })))
+const AssetComponents = lazy(() => import('./pages/AssetDetail').then(m => ({ default: m.AssetComponents })))
+const AssetEngagements = lazy(() => import('./pages/AssetDetail').then(m => ({ default: m.AssetEngagements })))
+const AssetFindings = lazy(() => import('./pages/AssetDetail').then(m => ({ default: m.AssetFindings })))
+const AssetCoverageView = lazy(() => import('./pages/AssetDetail').then(m => ({ default: m.AssetCoverageView })))
+const AssetHistory = lazy(() => import('./pages/AssetDetail').then(m => ({ default: m.AssetHistory })))
+const CodeQualityProjects = lazy(() => import('./pages/CodeQualityProjects').then(m => ({ default: m.CodeQualityProjects })))
+const CodeQualityProject = lazy(() => import('./pages/CodeQualityProject').then(m => ({ default: m.CodeQualityProject })))
+const QualityGates = lazy(() => import('./pages/QualityGates').then(m => ({ default: m.QualityGates })))
+const QualityProfiles = lazy(() => import('./pages/QualityProfiles').then(m => ({ default: m.QualityProfiles })))
+const FleetLayout = lazy(() => import('./pages/FleetLayout').then(m => ({ default: m.FleetLayout })))
+const FleetCoverage = lazy(() => import('./pages/FleetCoverage').then(m => ({ default: m.FleetCoverage })))
+const FleetAgents = lazy(() => import('./pages/FleetAgents').then(m => ({ default: m.FleetAgents })))
+const Rules = lazy(() => import('./pages/Rules'))
+const RuleDetail = lazy(() => import('./pages/RuleDetail'))
+const Audit = lazy(() => import('./pages/Audit').then(m => ({ default: m.Audit })))
+const AITriageReviews = lazy(() => import('./pages/AITriageReviews').then(m => ({ default: m.AITriageReviews })))
+const AITriageObservability = lazy(() => import('./pages/AITriageObservability').then(m => ({ default: m.AITriageObservability })))
+const VulnerabilityIntelligence = lazy(() => import('./pages/VulnerabilityIntelligence').then(m => ({ default: m.VulnerabilityIntelligence })))
+const Team = lazy(() => import('./pages/Team').then(m => ({ default: m.Team })))
+const ProjectOverviewPage = lazy(() => import('./pages/ProjectOverviewPage').then(m => ({ default: m.ProjectOverviewPage })))
+const ProjectAnalysisPage = lazy(() => import('./pages/ProjectAnalysisPage').then(m => ({ default: m.ProjectAnalysisPage })))
+const ProjectActivityPage = lazy(() => import('./pages/ProjectActivityPage').then(m => ({ default: m.ProjectActivityPage })))
+const SecurityHotspotsPage = lazy(() => import('./pages/SecurityHotspots').then(m => ({ default: m.SecurityHotspotsPage })))
+const ProjectIssuesPage = lazy(() => import('./pages/ProjectIssues').then(m => ({ default: m.ProjectIssuesPage })))
+const ProjectMeasuresPage = lazy(() => import('./pages/ProjectMeasuresPage').then(m => ({ default: m.ProjectMeasuresPage })))
+const ProjectCodePage = lazy(() => import('./pages/ProjectCodePage').then(m => ({ default: m.ProjectCodePage })))
 
 export default function App() {
   return (
@@ -90,14 +101,29 @@ function Gate() {
 
 function Shell() {
   const [menuOpen, setMenuOpen] = useState(false)
+  const location = useLocation()
   return (
-    <div className="flex h-screen overflow-hidden bg-bg">
+    <div className="h-screen overflow-hidden bg-primary md:grid md:grid-cols-[auto_1fr]">
       <Sidebar />
       <MobileSidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar onMenu={() => setMenuOpen(true)} />
-        <main className="flex-1 overflow-auto p-4 sm:p-6 xl:p-8">
-          <Outlet />
+      <div className="flex min-h-0 min-w-0 flex-col bg-primary md:pt-4">
+        {/* Mobile hamburger only */}
+        <div className="flex h-14 shrink-0 items-center px-4 md:hidden">
+          <button
+            type="button"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open menu"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-primary_hover hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+          >
+            <Menu01 className="size-5" />
+          </button>
+        </div>
+        <main className="flex-1 overflow-auto bg-secondary-subtle p-4 sm:p-6 xl:p-8 md:rounded-tl-[40px] md:border-t md:border-l md:border-secondary md:shadow-md">
+          <ErrorBoundary key={location.pathname}>
+            <Suspense fallback={<LoadingFallback />}>
+              <Outlet />
+            </Suspense>
+          </ErrorBoundary>
         </main>
       </div>
     </div>

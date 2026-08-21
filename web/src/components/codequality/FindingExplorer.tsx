@@ -7,7 +7,7 @@ import {
   type RatedFindingDimension,
 } from '../../lib/ratedFindingDimensions'
 import type { AITriage, Finding } from '../../lib/types'
-import { AITriageBadges } from '../AITriageBadges'
+import { AITriageBadges } from '../synapse/AITriageBadges'
 import { Card, EmptyState, Input, Pill, Select, SevBadge } from '../ui'
 
 const pageSize = 50

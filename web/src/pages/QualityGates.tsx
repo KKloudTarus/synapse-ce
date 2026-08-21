@@ -1,6 +1,7 @@
 import { Pencil, Plus, ShieldCheck, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
+import { useFetch } from '../hooks'
 import type { QualityGate, QualityGateCondition } from '../lib/types'
 import { metricLabel } from '../components/codequality/qualityPresentation'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../components/ui'
@@ -10,9 +11,14 @@ const operators: QualityGateCondition['op'][] = ['<=', '>=', '==', '<', '>']
 const blankCondition = (): QualityGateCondition => ({ metric: 'new_high', op: '<=', threshold: 0 })
 
 export function QualityGates() {
-  const [gates, setGates] = useState<QualityGate[] | null>(null); const [error, setError] = useState<string | null>(null); const [editing, setEditing] = useState<QualityGate | 'new' | null>(null)
-  function load() { setError(null); api.listQualityGates().then(setGates).catch((e) => setError(e instanceof Error ? e.message : 'Failed to load quality gates')) }
-  useEffect(load, [])
+  const [gates, setGates] = useState<QualityGate[] | null>(null); const [error, setError] = useState<string | null>(null); const [editing, setEditing] = useState<QualityGate | 'new' | null>(null); const [refresh, setRefresh] = useState(0)
+  const { data: fetchedGates, error: fetchError } = useFetch(
+    () => api.listQualityGates(),
+    { deps: [refresh] },
+  )
+  useEffect(() => { if (fetchedGates) setGates(fetchedGates) }, [fetchedGates])
+  useEffect(() => { if (fetchError) setError(fetchError) }, [fetchError])
+  function load() { setRefresh((c) => c + 1) }
   async function remove(gate: QualityGate) { if (!window.confirm(`Delete “${gate.name}”? Assigned gates cannot be deleted.`)) return; setError(null); try { await api.deleteQualityGate(gate.key); if (editing !== 'new' && editing?.key === gate.key) setEditing(null); load() } catch (e) { setError(e instanceof Error ? e.message : 'Failed to delete quality gate') } }
   return <div className="mx-auto max-w-7xl animate-fade-in">
     <header className="bg-hero mb-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border p-6"><div><div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-branddim"><ShieldCheck className="size-4" aria-hidden="true" />Policy</div><h1 className="text-3xl font-bold tracking-tight">Quality Gates</h1><p className="mt-1.5 max-w-2xl text-sm text-mutedfg">Define measurable release policy once, assign it to Projects, and preserve condition-level evidence in every analysis.</p></div><Button variant="brand" onClick={() => setEditing(editing === 'new' ? null : 'new')}>{editing === 'new' ? <><X className="size-4" aria-hidden="true" /> Cancel</> : <><Plus className="size-4" aria-hidden="true" /> New gate</>}</Button></header>

@@ -4,6 +4,7 @@ import { FileCode2 } from 'lucide-react'
 import { ProjectCodeWorkspace } from '../components/codequality/ProjectCodeWorkspace'
 import { Button, EmptyState, ErrorState, Spinner } from '../components/ui'
 import { api, ApiError } from '../lib/api'
+import { useFetch } from '../hooks'
 import { normalizeProjectCodeSearch, PROJECT_CODE_SOURCE_WINDOW } from '../lib/projectCodeNavigation'
 import type { ProjectCodeDiffResponse, ProjectCodeFileIndex, ProjectCodeFileView, ProjectCodeFinding, ProjectCodeView } from '../lib/types'
 import { ProjectRouteEmpty, useProjectRouteContext } from './CodeQualityProject'
@@ -19,12 +20,10 @@ export function ProjectCodePage() {
   const [index, setIndex] = useState<ProjectCodeFileIndex | null>(null)
   const [source, setSource] = useState<ProjectCodeFileView | null>(null)
   const [diff, setDiff] = useState<ProjectCodeDiffResponse | null>(null)
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sourceError, setSourceError] = useState<string | null>(null)
   const [diffError, setDiffError] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
-  const indexAbort = useRef<AbortController | null>(null)
   const contentAbort = useRef<AbortController | null>(null)
   const selectedFile = index?.files.find((file) => file.path === selection.path) ?? null
   const diffAvailable = selection.view === 'unified' ? index?.capabilities.unifiedDiff : index?.capabilities.splitDiff
@@ -34,35 +33,33 @@ export function ProjectCodePage() {
     if (selection.changed) setParams(selection.params, { replace: true })
   }, [selection.changed, selection.params, setParams])
 
+  const { data: latestAnalysisPage } = useFetch(
+    () => api.projectAnalyses(projectKey),
+    { enabled: !selection.analysisId, deps: [analysisRevision, projectKey] },
+  )
+
   useEffect(() => {
     if (selection.analysisId) {
       setLatestAnalysisId(null)
       return
     }
-    let live = true
-    setLatestAnalysisId(null)
-    api.projectAnalyses(projectKey)
-      .then((page) => {
-        if (live && !selection.analysisId) setLatestAnalysisId(page.items[0]?.id ?? null)
-      })
-      .catch((err) => live && setError(message(err)))
-    return () => { live = false }
-  }, [analysisRevision, projectKey, selection.analysisId])
+    if (latestAnalysisPage) {
+      setLatestAnalysisId(latestAnalysisPage.items[0]?.id ?? null)
+    }
+  }, [selection.analysisId, latestAnalysisPage])
+
+  const { data: fetchedIndex, loading, error: indexError } = useFetch(
+    (signal) => api.listProjectCodeFiles(projectKey, analysisId!, signal),
+    { enabled: !!analysisId, deps: [analysisId, projectKey, refresh] },
+  )
 
   useEffect(() => {
-    if (!analysisId) return
-    indexAbort.current?.abort()
-    const abort = new AbortController()
-    indexAbort.current = abort
-    setLoading(true)
-    setError(null)
-    setIndex(null)
-    api.listProjectCodeFiles(projectKey, analysisId, abort.signal)
-      .then((next) => { if (!abort.signal.aborted) setIndex(next) })
-      .catch((err) => { if (!abort.signal.aborted) setError(message(err)) })
-      .finally(() => { if (!abort.signal.aborted) setLoading(false) })
-    return () => abort.abort()
-  }, [analysisId, projectKey, refresh])
+    if (fetchedIndex) setIndex(fetchedIndex)
+  }, [fetchedIndex])
+
+  useEffect(() => {
+    if (indexError) setError(indexError)
+  }, [indexError])
 
   useEffect(() => {
     if (!index || selection.path || !index.files.length) return

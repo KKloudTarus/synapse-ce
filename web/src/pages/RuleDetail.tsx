@@ -1,53 +1,28 @@
 import { ArrowLeft, AlertCircle, RefreshCw, SearchX } from 'lucide-react'
-import { useEffect, useState, useCallback } from 'react'
 import { Link, useParams, useLocation } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 import type { RuleDetail } from '../lib/types'
 import { EmptyState, Spinner } from '../components/ui'
 import { RuleMetadata } from '../components/rules/RuleMetadata'
 import { RuleExamples } from '../components/rules/RuleExamples'
+import { useFetch } from '../hooks'
 
 export default function RuleDetailPage() {
   const { key } = useParams<{ key: string }>()
   const location = useLocation()
   const from = location.state?.from || ''
 
-  const [rule, setRule] = useState<RuleDetail | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<{ status: number, message: string } | null>(null)
+  const { data: rule, loading, error: fetchError, refetch } = useFetch<RuleDetail>(
+    () => api.getRule(key!).catch((err) => {
+      if (err instanceof ApiError) {
+        throw new Error(`[${err.status}] ${err.message}`)
+      }
+      throw new Error('[500] An error occurred')
+    }),
+    { deps: [key], enabled: !!key },
+  )
 
-  const loadRule = useCallback(() => {
-    if (!key) return
-    let active = true
-    setLoading(true)
-    setError(null)
-
-    api.getRule(key)
-      .then((res) => {
-        if (!active) return
-        setRule(res)
-      })
-      .catch((err) => {
-        if (!active) return
-        if (err instanceof ApiError) {
-          setError({ status: err.status, message: err.message })
-        } else {
-          setError({ status: 500, message: 'An error occurred' })
-        }
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [key])
-
-  useEffect(() => {
-    const cleanup = loadRule()
-    return cleanup
-  }, [loadRule])
+  const error = fetchError ? parseRuleError(fetchError) : null
 
   if (error) {
     if (error.status === 404) {
@@ -74,7 +49,7 @@ export default function RuleDetailPage() {
                 </Link>
                 <button
                   type="button"
-                  onClick={() => loadRule()}
+                  onClick={() => refetch()}
                   className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brandfg hover:bg-brand/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface inline-flex items-center gap-2"
                 >
                   <RefreshCw className="size-4" />
@@ -101,7 +76,7 @@ export default function RuleDetailPage() {
           <h2 className="text-lg font-semibold">Failed to load rule details</h2>
           <p className="mt-2 text-sm">{error.message}</p>
           <button
-            onClick={() => loadRule()}
+            onClick={() => refetch()}
             className="mt-6 inline-flex items-center gap-2 rounded-lg bg-red-500/10 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-500/20 dark:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
           >
             <RefreshCw className="size-4" />
@@ -179,4 +154,10 @@ export default function RuleDetailPage() {
       </div>
     </div>
   )
+}
+
+function parseRuleError(msg: string): { status: number; message: string } {
+  const match = msg.match(/^\[(\d+)\]\s*(.*)$/)
+  if (match) return { status: Number(match[1]), message: match[2] }
+  return { status: 500, message: msg }
 }

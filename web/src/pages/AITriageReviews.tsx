@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Check, ExternalLink, ShieldQuestion, X } from 'lucide-react'
-import { AITriageBadges } from '../components/AITriageBadges'
+import { AITriageBadges } from '../components/synapse/AITriageBadges'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, SevBadge, Spinner } from '../components/ui'
+import { useFetch } from '../hooks'
 import { api, ApiError } from '../lib/api'
 import type { AITriageReview, AITriageReviewFilter, AITriageReviewState, CurrentUser, Project, Severity } from '../lib/types'
 
@@ -11,10 +12,6 @@ const states: AITriageReviewState[] = ['pending', 'accepted', 'rejected']
 
 export function AITriageReviews() {
   const [params, setParams] = useSearchParams()
-  const [reviews, setReviews] = useState<AITriageReview[] | null>(null)
-  const [projects, setProjects] = useState<Project[]>([])
-  const [me, setMe] = useState<CurrentUser | null>(null)
-  const [error, setError] = useState('')
   const [refresh, setRefresh] = useState(0)
   const [selected, setSelected] = useState<AITriageReview | null>(null)
 
@@ -25,19 +22,20 @@ export function AITriageReviews() {
     state: (params.get('state') as AITriageReviewState) || 'pending',
   }), [params])
 
+  const { data, error } = useFetch<{ reviews: AITriageReview[]; projects: Project[]; me: CurrentUser | null }>(
+    () => Promise.all([api.aiTriageReviews(filter), api.listProjects().catch(() => [] as Project[]), api.me().catch(() => null)])
+      .then(([reviews, projects, me]) => ({ reviews, projects, me })),
+    { deps: [JSON.stringify(filter), refresh] },
+  )
+
+  const reviews = data?.reviews ?? null
+  const projects = data?.projects ?? []
+  const me = data?.me ?? null
+  const errorMessage = error ?? ''
+
   useEffect(() => {
-    let active = true
-    setReviews(null)
-    setError('')
-    Promise.all([api.aiTriageReviews(filter), api.listProjects().catch(() => []), api.me().catch(() => null)])
-      .then(([items, projectList, currentUser]) => {
-        if (!active) return
-        setReviews(items); setProjects(projectList); setMe(currentUser)
-        setSelected((current) => current ? items.find((item) => item.id === current.id) ?? null : null)
-      })
-      .catch((e) => { if (active) setError(e instanceof ApiError ? e.message : 'Failed to load AI-triage reviews') })
-    return () => { active = false }
-  }, [filter, refresh])
+    if (reviews) setSelected((current) => current ? reviews.find((item) => item.id === current.id) ?? null : null)
+  }, [reviews])
 
   function patch(key: string, value: string) {
     const next = new URLSearchParams(params)
@@ -66,7 +64,7 @@ export function AITriageReviews() {
           options={states.map((v) => ({ value: v, label: v[0].toUpperCase() + v.slice(1) }))} />
       </div>
 
-      {error ? <div className="space-y-3"><ErrorState message={error} /><Button variant="secondary" onClick={() => setRefresh((v) => v + 1)}>Retry</Button></div>
+      {errorMessage ? <div className="space-y-3"><ErrorState message={errorMessage} /><Button variant="secondary" onClick={() => setRefresh((v) => v + 1)}>Retry</Button></div>
         : reviews === null ? <Spinner label="Loading AI-triage reviews…" />
           : reviews.length === 0 ? <EmptyState icon={ShieldQuestion} title="No reviews match these filters" hint="Review-required findings appear here after an AI-triaged scan is sealed." />
             : <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_25rem]">

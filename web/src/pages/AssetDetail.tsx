@@ -15,9 +15,10 @@ import {
   UserRound,
   type LucideIcon,
 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useOutletContext, useParams } from 'react-router-dom'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, SevBadge, Spinner, cn } from '../components/ui'
+import { useFetch } from '../hooks'
 import { api, ApiError } from '../lib/api'
 import type {
   AssetCoverage,
@@ -53,12 +54,10 @@ export function useAssetContext() {
 
 export function AssetDetail() {
   const { key = '' } = useParams()
-  const [data, setData] = useState<Context | null | undefined>(undefined)
-  const [error, setError] = useState<string | null>(null)
+  const [notFound, setNotFound] = useState(false)
 
-  const load = useCallback(() => {
-    setError(null)
-    Promise.all([
+  const { data: fetchedData, error, refetch } = useFetch<Omit<Context, 'reload'>>(
+    () => Promise.all([
       api.getBusinessAsset(key),
       api.businessAssetProjects(key),
       api.businessAssetTechnicalAssets(key),
@@ -67,21 +66,26 @@ export function AssetDetail() {
       api.businessAssetCoverage(key),
       api.businessAssetPosture(key),
       api.businessAssetHistory(key),
-    ])
-      .then(([asset, projects, technical, engagements, findings, coverage, posture, history]) => {
-        setData({ asset, projects, technical, engagements, findings, coverage, posture, history, reload: load })
-      })
-      .catch((nextError) => {
-        if (nextError instanceof ApiError && nextError.status === 404) setData(null)
-        else setError(nextError instanceof Error ? nextError.message : 'Failed to load Asset')
-      })
-  }, [key])
+    ]).then(([asset, projects, technical, engagements, findings, coverage, posture, history]) => {
+      setNotFound(false)
+      return { asset, projects, technical, engagements, findings, coverage, posture, history }
+    }).catch((nextError) => {
+      if (nextError instanceof ApiError && nextError.status === 404) {
+        setNotFound(true)
+        return null as never
+      }
+      throw nextError
+    }),
+    { deps: [key] },
+  )
 
-  useEffect(load, [load])
+  const context: Context | null = fetchedData ? { ...fetchedData, reload: refetch } : null
 
-  if (error) return <div className="mx-auto max-w-6xl"><ErrorState message={error} /></div>
-  if (data === undefined) return <Spinner label="Loading Asset…" />
-  if (!data) return <EmptyState icon={Boxes} title="Asset not found" hint="It may not exist or belongs to another tenant." />
+  if (error && !notFound) return <div className="mx-auto max-w-6xl"><ErrorState message={error} /></div>
+  if (notFound) return <EmptyState icon={Boxes} title="Asset not found" hint="It may not exist or belongs to another tenant." />
+  if (!context) return <Spinner label="Loading Asset…" />
+
+  const data = context
 
   const retired = data.asset.lifecycle === 'retired'
   const componentCount = data.projects.length + data.technical.length

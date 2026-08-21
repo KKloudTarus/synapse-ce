@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useOutletContext, useParams } from 'react-router-dom'
 import { Button, EmptyState, ErrorState, InfoNote, Pill, Spinner, cn } from '../components/ui'
 import { api } from '../lib/api'
+import { useFetch } from '../hooks'
 import type { Project, QualityGate, ScanJob } from '../lib/types'
 
 export interface ProjectRouteContext {
@@ -31,7 +32,6 @@ export function CodeQualityProject() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [operationError, setOperationError] = useState<string | null>(startError ?? null)
   const [coverageFile, setCoverageFile] = useState<File | null>(null)
-  const [gates, setGates] = useState<QualityGate[]>([])
   const [analysisRevision, setAnalysisRevision] = useState(0)
   const poll = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollGeneration = useRef<symbol | null>(null)
@@ -113,13 +113,11 @@ export function CodeQualityProject() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, startError])
 
-  useEffect(() => {
-    let live = true
-    api.listQualityGates().then((next) => live && setGates(next)).catch(() => live && setGates([]))
-    return () => {
-      live = false
-    }
-  }, [])
+  const { data: fetchedGates } = useFetch(
+    () => api.listQualityGates().catch(() => [] as QualityGate[]),
+    { deps: [] },
+  )
+  const gates = fetchedGates ?? []
 
   if (project && project.key !== key) return <Spinner label="Loading project…" />
 

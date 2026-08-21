@@ -4,23 +4,19 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import type { Grade, Project, ProjectSourceKind } from '../lib/types'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner, cn } from '../components/ui'
+import { useFetch } from '../hooks'
 
 const allowLocalSource = import.meta.env.DEV
 type Health = 'all' | 'failing' | 'passing' | 'analyzing' | 'failed' | 'unanalyzed'
 
 export function CodeQualityProjects() {
-  const [projects, setProjects] = useState<Project[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { data: projects, error, refetch } = useFetch<Project[]>(
+    () => api.listProjects(),
+    { deps: [] },
+  )
   const [creating, setCreating] = useState(false)
   const [query, setQuery] = useState('')
   const [health, setHealth] = useState<Health>('all')
-
-  function load() {
-    setError(null)
-    setProjects(null)
-    api.listProjects().then(setProjects).catch((e) => setError(e instanceof Error ? e.message : 'Failed to load projects'))
-  }
-  useEffect(load, [])
 
   const counts = useMemo(() => {
     const next = { failing: 0, passing: 0, analyzing: 0, failed: 0, unanalyzed: 0 }
@@ -46,8 +42,8 @@ export function CodeQualityProjects() {
         <div className="flex gap-2"><Link to="/code-quality/profiles"><Button variant="secondary">Quality profiles</Button></Link><Link to="/code-quality/gates"><Button variant="secondary">Quality gates</Button></Link><Button variant="brand" onClick={() => setCreating((value) => !value)}>{creating ? <><X className="size-4" aria-hidden="true" /> Cancel</> : <><Plus className="size-4" aria-hidden="true" /> New project</>}</Button></div>
       </header>
 
-      {creating && <div className="mb-6"><CreateProjectForm /></div>}
-      {error && <div className="space-y-3"><ErrorState message={error} /><Button variant="secondary" onClick={load}>Retry</Button></div>}
+      {creating && <div className="mb-6"><CreateProjectForm onCreated={refetch} /></div>}
+      {error && <div className="space-y-3"><ErrorState message={error} /><Button variant="secondary" onClick={refetch}>Retry</Button></div>}
       {!projects && !error && <Spinner label="Loading projects…" />}
       {projects && projects.length === 0 && !creating && <EmptyState icon={FolderGit2} title="No code quality projects yet" hint={`Create a project from Git${allowLocalSource ? ', a server-local path,' : ''} or an uploaded archive. Its first analysis starts automatically.`} action={<Button variant="brand" onClick={() => setCreating(true)}><Plus className="size-4" aria-hidden="true" /> New project</Button>} />}
       {projects && projects.length > 0 && <>
@@ -110,7 +106,7 @@ function formatDate(value: string) { return new Date(value).toLocaleString(undef
 
 function slugify(value: string): string { return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') }
 
-function CreateProjectForm() {
+function CreateProjectForm({ onCreated: _onCreated }: { onCreated?: () => void }) {
   const [name, setName] = useState(''); const [key, setKey] = useState(''); const [keyEdited, setKeyEdited] = useState(false)
   const [kind, setKind] = useState<ProjectSourceKind>('git'); const [value, setValue] = useState(''); const [ref, setRef] = useState('')
   const [archive, setArchive] = useState<File | null>(null); const [gateId, setGateId] = useState(''); const [gates, setGates] = useState<{ key: string; name: string }[]>([])

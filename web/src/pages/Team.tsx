@@ -1,25 +1,12 @@
 import { Copy, KeyRound, ShieldCheck, UserPlus, Users } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { api, ApiError } from '../lib/api'
-import type { User, UserRole } from '../lib/types'
+import { useState } from 'react'
+import { api } from '../lib/api'
+import type { UserRole } from '../lib/types'
 import { Button, Card, cn, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../components/ui'
+import { useUserList } from '../hooks'
 
 export function Team() {
-  const [users, setUsers] = useState<User[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [forbidden, setForbidden] = useState(false)
-
-  function load() {
-    setError(null)
-    api
-      .listUsers()
-      .then(setUsers)
-      .catch((e) => {
-        if (e instanceof ApiError && e.status === 403) setForbidden(true)
-        else setError(e instanceof Error ? e.message : 'Failed to load the team')
-      })
-  }
-  useEffect(load, [])
+  const { data: users, loading, error, forbidden, refetch } = useUserList()
 
   return (
     <div className="mx-auto max-w-4xl animate-fade-in">
@@ -38,10 +25,10 @@ export function Team() {
       ) : (
         <>
           <div className="mb-6">
-            <CreateUserForm onCreated={load} />
+            <CreateUserForm onCreated={refetch} />
           </div>
           {error && <ErrorState message={error} />}
-          {!users && !error && <Spinner label="Loading team…" />}
+          {loading && <Spinner label="Loading team…" />}
           {users && users.length > 0 && (
             <Card title="Members" bodyClass="p-0">
               <div className="divide-y divide-border">

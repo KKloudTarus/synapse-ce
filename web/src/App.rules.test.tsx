@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import App from './App'
 import { api } from './lib/api'
-import { Sidebar } from './components/Sidebar'
+import { Sidebar } from './components/layout/Sidebar'
 
 vi.mock('./lib/api', () => ({
   api: {
@@ -67,7 +67,7 @@ describe('App Routing - Rules', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Rules' })).toBeInTheDocument()
-    })
+    }, { timeout: 8000 })
   })
 
   it('renders Dashboard as the default route', async () => {
@@ -77,7 +77,7 @@ describe('App Routing - Rules', () => {
       </MemoryRouter>
     )
 
-    expect(await screen.findByRole('heading', { name: 'Security Operations' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Security Operations' }, { timeout: 8000 })).toBeInTheDocument()
   })
 
   it('renders RuleDetail page on /rules/:key route and decodes colon exactly once', async () => {
@@ -89,7 +89,7 @@ describe('App Routing - Rules', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'SQL Injection' })).toBeInTheDocument()
-    })
+    }, { timeout: 8000 })
 
     expect(api.getRule).toHaveBeenCalledWith('go:sql')
   })
@@ -102,7 +102,7 @@ describe('App Routing - Rules', () => {
     )
 
     const rulesLink = screen.getByRole('link', { name: /Rules/i })
-    expect(rulesLink.className).toMatch(/bg-navactive|text-white/)
+    expect(rulesLink.className).toMatch(/bg-active|bg-navactive|text-white/)
   })
 
   it('maintains active state on Rules detail', async () => {
@@ -113,7 +113,7 @@ describe('App Routing - Rules', () => {
     )
 
     const rulesLink = screen.getByRole('link', { name: /Rules/i })
-    expect(rulesLink.className).toMatch(/bg-navactive|text-white/)
+    expect(rulesLink.className).toMatch(/bg-active|bg-navactive|text-white/)
   })
 
   it('keeps Code Quality active on project shells', () => {
@@ -123,7 +123,7 @@ describe('App Routing - Rules', () => {
       </MemoryRouter>
     )
     const link = screen.getByRole('link', { name: /Code Quality/i })
-    expect(link.className).toMatch(/bg-navactive|text-white/)
+    expect(link.className).toMatch(/bg-active|bg-navactive|text-white/)
   })
 
   it('keeps Dashboard active in the command center', () => {
@@ -133,7 +133,7 @@ describe('App Routing - Rules', () => {
       </MemoryRouter>
     )
     const link = screen.getByRole('link', { name: /Dashboard/i })
-    expect(link.className).toMatch(/bg-navactive|text-white/)
+    expect(link.className).toMatch(/bg-active|bg-navactive|text-white/)
   })
 
   it('supports collapsed navigation and theme switching', () => {

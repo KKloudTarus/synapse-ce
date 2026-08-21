@@ -1,5 +1,5 @@
 import { AlertTriangle, ArrowLeft, CalendarClock, ShieldAlert } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { CodeQualityReportView } from '../components/codequality/CodeQualityReportView'
 import { FindingExplorer } from '../components/codequality/FindingExplorer'
@@ -8,6 +8,7 @@ import { ProjectCoverageDetail } from '../components/codequality/ProjectCoverage
 import { GateEvidence, GradeBadge } from '../components/codequality/qualityPresentation'
 import { Button, Card, EmptyState, ErrorState, Pill } from '../components/ui'
 import { api } from '../lib/api'
+import { useFetch } from '../hooks'
 import {
   normalizeProjectAnalysisSearch,
   projectAnalysisLandmarks,
@@ -20,57 +21,21 @@ import type { RatedFindingDimension } from '../lib/ratedFindingDimensions'
 import type { LatestProjectAnalysis } from '../lib/types'
 import { ProjectRouteEmpty, useProjectRouteContext } from './CodeQualityProject'
 
-type LoadState =
-  | { status: 'loading'; projectKey: string; analysisRevision: number }
-  | { status: 'loaded'; projectKey: string; analysisRevision: number; latest: LatestProjectAnalysis | null }
-  | { status: 'error'; projectKey: string; analysisRevision: number; message: string }
-
 export function ProjectAnalysisPage() {
   const { projectKey, isRunning, analysisRevision } = useProjectRouteContext()
   const [searchParams, setSearchParams] = useSearchParams()
   const navigation = normalizeProjectAnalysisSearch(searchParams)
   const normalizedSearch = navigation.params.toString()
-  const [state, setState] = useState<LoadState>({ status: 'loading', projectKey, analysisRevision })
-  const latestRequest = useRef<symbol | null>(null)
 
-  function load(requestedProjectKey = projectKey, requestedRevision = analysisRevision) {
-    const token = Symbol()
-    latestRequest.current = token
-    setState({ status: 'loading', projectKey: requestedProjectKey, analysisRevision: requestedRevision })
-    api.latestProjectAnalysis(requestedProjectKey)
-      .then((latest) => {
-        if (latestRequest.current === token) {
-          setState({ status: 'loaded', projectKey: requestedProjectKey, analysisRevision: requestedRevision, latest })
-        }
-      })
-      .catch((e) => {
-        if (latestRequest.current === token) {
-          setState({
-            status: 'error',
-            projectKey: requestedProjectKey,
-            analysisRevision: requestedRevision,
-            message: e instanceof Error ? e.message : 'Failed to load analysis result',
-          })
-        }
-      })
-    return token
-  }
-
-  useEffect(() => {
-    const token = load(projectKey, analysisRevision)
-    return () => {
-      if (latestRequest.current === token) latestRequest.current = null
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectKey, analysisRevision])
+  const { data: latest, loading, error, refetch } = useFetch(
+    () => api.latestProjectAnalysis(projectKey),
+    { deps: [projectKey, analysisRevision] },
+  )
 
   useEffect(() => {
     if (navigation.changed) setSearchParams(new URLSearchParams(normalizedSearch), { replace: true })
   }, [navigation.changed, normalizedSearch, setSearchParams])
 
-  const currentState = state.projectKey === projectKey && state.analysisRevision === analysisRevision
-    ? state
-    : { status: 'loading' as const, projectKey, analysisRevision }
   const backToOverview = projectOverviewPath(projectKey, navigation.lens)
   const backLink = (
     <Link to={backToOverview} className="inline-flex w-fit items-center gap-1.5 rounded-md text-sm text-branddim hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
@@ -78,22 +43,22 @@ export function ProjectAnalysisPage() {
     </Link>
   )
 
-  if (currentState.status === 'loading') return <div className="space-y-3">{backLink}<Card title="Analysis details"><EmptyState icon={ShieldAlert} title="Loading analysis details" hint="Fetching the full latest analysis report." /></Card></div>
-  if (currentState.status === 'error') {
+  if (loading) return <div className="space-y-3">{backLink}<Card title="Analysis details"><EmptyState icon={ShieldAlert} title="Loading analysis details" hint="Fetching the full latest analysis report." /></Card></div>
+  if (error) {
     return (
       <div className="space-y-3">
         {backLink}
-        <ErrorState message={currentState.message} />
-        <Button variant="secondary" onClick={() => load()}>Retry analysis details</Button>
+        <ErrorState message={error} />
+        <Button variant="secondary" onClick={() => refetch()}>Retry analysis details</Button>
       </div>
     )
   }
-  if (!currentState.latest) return <div className="space-y-3">{backLink}<Card title="Analysis details"><ProjectRouteEmpty running={isRunning} /></Card></div>
+  if (!latest) return <div className="space-y-3">{backLink}<Card title="Analysis details"><ProjectRouteEmpty running={isRunning} /></Card></div>
   return (
     <div className="space-y-3">
       {backLink}
       <LatestAnalysisView
-        latest={currentState.latest}
+        latest={latest}
         running={isRunning}
         projectKey={projectKey}
         analysisRevision={analysisRevision}

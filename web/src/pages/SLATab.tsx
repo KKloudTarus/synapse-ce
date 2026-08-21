@@ -1,8 +1,9 @@
 import { AlertTriangle, CalendarClock, CheckCircle2, Clock3, RefreshCw, ShieldCheck } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { api, ApiError } from '../lib/api'
 import type { Finding, SLARemediationStatus, SLAView } from '../lib/types'
 import { Button, Card, cn, EmptyState, ErrorState, Spinner } from '../components/ui'
+import { useFetch } from '../hooks'
 
 const STATUS_LABEL: Record<SLARemediationStatus, string> = {
   open: 'Open',
@@ -21,28 +22,26 @@ const TIER_STYLE: Record<string, string> = {
 }
 
 export function SLATab({ engagementId, findings }: { engagementId: string; findings: Finding[] | null }) {
-  const [items, setItems] = useState<SLAView[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [disabled, setDisabled] = useState(false)
   const [selected, setSelected] = useState<SLAView | null>(null)
+  const [localItems, setLocalItems] = useState<SLAView[] | null>(null)
 
-  const load = useCallback(async () => {
-    setError(null)
-    try {
-      setItems(await api.slas(engagementId))
-      setDisabled(false)
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        setDisabled(true)
-        setItems([])
-      } else {
-        setError(err instanceof Error ? err.message : 'Failed to load remediation SLAs')
-        setItems([])
+  const { data: fetchedItems, error, refetch } = useFetch<SLAView[]>(
+    async () => {
+      try {
+        return await api.slas(engagementId)
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          setDisabled(true)
+          return []
+        }
+        throw err
       }
-    }
-  }, [engagementId])
+    },
+    { deps: [engagementId] },
+  )
 
-  useEffect(() => { void load() }, [load])
+  const items = localItems ?? fetchedItems
 
   const findingByID = useMemo(() => new Map((findings ?? []).map((item) => [item.id, item])), [findings])
   const stats = useMemo(() => {
@@ -75,7 +74,7 @@ export function SLATab({ engagementId, findings }: { engagementId: string; findi
 
       <Card
         title="Risk-based remediation deadlines"
-        actions={<Button variant="secondary" onClick={() => void load()} className="px-3 py-1.5"><RefreshCw className="size-3.5" /> Refresh</Button>}
+        actions={<Button variant="secondary" onClick={() => void refetch()} className="px-3 py-1.5"><RefreshCw className="size-3.5" /> Refresh</Button>}
         bodyClass="p-0"
       >
         <div className="overflow-x-auto">
@@ -133,7 +132,7 @@ export function SLATab({ engagementId, findings }: { engagementId: string; findi
           findingTitle={findingByID.get(selected.assessment.findingId)?.title ?? selected.assessment.findingId}
           onClose={() => setSelected(null)}
           onSaved={(updated) => {
-            setItems((current) => (current ?? []).map((item) => item.assessment.findingId === updated.assessment.findingId ? updated : item))
+            setLocalItems((current) => ((current ?? fetchedItems) ?? []).map((item) => item.assessment.findingId === updated.assessment.findingId ? updated : item))
             setSelected(null)
           }}
         />
