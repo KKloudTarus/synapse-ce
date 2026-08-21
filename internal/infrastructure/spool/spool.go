@@ -547,7 +547,7 @@ func readRecordRef(ref *recordRef) (ports.SpoolRecord, error) {
 	if err != nil {
 		return ports.SpoolRecord{}, fmt.Errorf("open WAL record: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	frame := make([]byte, ref.length)
 	if _, err := f.ReadAt(frame, ref.offset); err != nil {
 		return ports.SpoolRecord{}, fmt.Errorf("read WAL record: %w", err)

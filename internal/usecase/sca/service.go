@@ -1449,7 +1449,9 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 	if !ok {
 		return ports.ScanJob{}, fmt.Errorf("%w: tenant context is required for scan job", shared.ErrValidation)
 	}
-	go s.runScanJob(shared.WithTenant(context.Background(), tenantID), actor, engagementID, now, req, opts, job)
+	go func() {
+		_ = s.runScanJob(shared.WithTenant(context.Background(), tenantID), actor, engagementID, now, req, opts, job)
+	}()
 	return job, nil
 }
 

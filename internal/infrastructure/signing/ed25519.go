@@ -18,6 +18,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	rulepackuc "github.com/KKloudTarus/synapse-ce/internal/usecase/rulepack"
 )
 
 // Ed25519Signer signs chain heads with a fixed ed25519 key under a domain-separation
@@ -31,6 +32,10 @@ type Ed25519Signer struct {
 }
 
 var _ ports.ChainSigner = (*Ed25519Signer)(nil)
+
+// Ed25519Signer also signs RulePack gate-evidence heads (X1, #630). A build-time assertion (not a
+// test-only one) so a GateEvidenceSigner signature drift breaks the build, per the adapter convention.
+var _ rulepackuc.GateEvidenceSigner = (*Ed25519Signer)(nil)
 
 // WithContext returns a sibling signer that shares this key but signs under a
 // different domain-separation context (e.g. evidence vs audit heads). The private key

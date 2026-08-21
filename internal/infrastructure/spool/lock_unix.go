@@ -36,6 +36,7 @@ func syncDirectory(path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	return f.Sync()
+	syncErr := f.Sync()
+	closeErr := f.Close()
+	return errors.Join(syncErr, closeErr)
 }
