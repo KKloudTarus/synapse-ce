@@ -36,14 +36,14 @@ type GateEvidenceSigner interface {
 // be collected from authoritative telemetry and purple-coverage services. Callers cannot inject raw
 // RetroEvidence or purplecoverage.Coverage into this boundary.
 type GateEvidenceRequest struct {
-	Deployment   rulepackdomain.RulePackDeployment `json:"deployment"`
-	Policy       GatePolicy                        `json:"policy"`
-	Costs        []RuleCostObservation             `json:"costs"`
-	RetroCases   []RetroCase                       `json:"retro_cases"`
-	Purple       PurpleRequest                     `json:"purple_request"`
-	Evaluation   QualitySample                     `json:"evaluation"`
-	Canary       *QualitySample                    `json:"canary,omitempty"`
-	Production   *QualitySample                    `json:"production,omitempty"`
+	Deployment rulepackdomain.RulePackDeployment `json:"deployment"`
+	Policy     GatePolicy                        `json:"policy"`
+	Costs      []RuleCostObservation             `json:"costs"`
+	RetroCases []RetroCase                       `json:"retro_cases"`
+	Purple     PurpleRequest                     `json:"purple_request"`
+	Evaluation QualitySample                     `json:"evaluation"`
+	Canary     *QualitySample                    `json:"canary,omitempty"`
+	Production *QualitySample                    `json:"production,omitempty"`
 }
 
 // RetroQueryProvenance records the exact bounded telemetry selector used to produce one rule's retro

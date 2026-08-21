@@ -16,7 +16,7 @@ func TestCollectRetroEvidenceRejectsAmbiguousLimitHit(t *testing.T) {
 	hunter := &fakeHunter{result: ports.HuntResult{Events: []detection.Event{event, event}, Complete: true}}
 	_, err := CollectRetroEvidence(context.Background(), p, hunter, []RetroCase{{
 		RuleID: "det.test",
-		Query: ports.HuntQuery{HostID: "h1", Class: detection.ClassProcess, Since: now.Add(-time.Minute), Until: now.Add(time.Minute), Limit: 2},
+		Query:  ports.HuntQuery{HostID: "h1", Class: detection.ClassProcess, Since: now.Add(-time.Minute), Until: now.Add(time.Minute), Limit: 2},
 	}})
 	if err == nil {
 		t.Fatal("retro evidence that hits the row limit must fail closed")
@@ -30,7 +30,7 @@ func TestCollectRetroEvidenceRequiresExplicitBoundedLimit(t *testing.T) {
 	for _, limit := range []int{0, maxRetroHuntEvents + 1} {
 		_, err := CollectRetroEvidence(context.Background(), p, hunter, []RetroCase{{
 			RuleID: "det.test",
-			Query: ports.HuntQuery{HostID: "h1", Class: detection.ClassProcess, Since: now.Add(-time.Minute), Until: now.Add(time.Minute), Limit: limit},
+			Query:  ports.HuntQuery{HostID: "h1", Class: detection.ClassProcess, Since: now.Add(-time.Minute), Until: now.Add(time.Minute), Limit: limit},
 		}})
 		if err == nil {
 			t.Fatalf("retro limit %d must be rejected", limit)

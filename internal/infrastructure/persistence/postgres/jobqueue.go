@@ -50,10 +50,7 @@ func (q *JobQueue) Enqueue(ctx context.Context, kind string, payload []byte) (st
 }
 
 func (q *JobQueue) Claim(ctx context.Context, visibility time.Duration, kinds ...string) (*ports.QueuedJob, error) {
-	// Migration 0066 intentionally retains the legacy empty tenant row for backward
-	// compatibility, but RLS defines the empty tenant as DENY. Queue-owned rows are
-	// normalized to non-empty tenant IDs, so never iterate the legacy sentinel here.
-	rows, err := q.pool.Query(ctx, `SELECT id FROM tenants WHERE id <> '' ORDER BY id`)
+	rows, err := q.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list queue tenants: %w", err)
 	}
@@ -179,10 +176,7 @@ func (q *JobQueue) JobStatus(ctx context.Context, id string) (status ports.JobSt
 // per-tenant transaction remains the only way any job row is read; no tenant label is
 // ever attached to the aggregated totals.
 func (q *JobQueue) AggregateJobQueueStats(ctx context.Context, kinds ...string) (ports.JobStats, error) {
-	// Do not enumerate the retained legacy empty tenant. Passing it through
-	// shared.WithTenant would normalize it to DefaultTenant and count that partition
-	// twice (once for '' and once for 'default'). RLS itself treats '' as DENY.
-	rows, err := q.pool.Query(ctx, `SELECT id FROM tenants WHERE id <> '' ORDER BY id`)
+	rows, err := q.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
 	if err != nil {
 		return ports.JobStats{}, fmt.Errorf("list queue tenants: %w", err)
 	}

@@ -20,10 +20,10 @@ func (s testGateEvidenceSigner) Sign(_ context.Context, head string) (evidence.A
 	pub := s.priv.Public().(ed25519.PublicKey)
 	return evidence.Attestation{
 		Algorithm: "ed25519",
-		KeyID: evidence.KeyFingerprint(pub),
+		KeyID:     evidence.KeyFingerprint(pub),
 		PublicKey: base64.StdEncoding.EncodeToString(pub),
-		Context: GateEvidenceAttestationContext,
-		Head: head,
+		Context:   GateEvidenceAttestationContext,
+		Head:      head,
 		Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(s.priv, evidence.AttestationMessage(GateEvidenceAttestationContext, head))),
 	}, nil
 }
@@ -55,10 +55,10 @@ func TestEvidenceCollectorAttestsAuthoritativeRetroAndPurpleEvidence(t *testing.
 	}
 	req := GateEvidenceRequest{
 		Deployment: gateDeployment(p, rulepackdomain.DeploymentCandidate),
-		Policy: gatePolicy(),
-		Costs: []RuleCostObservation{{RuleID: "det.test", LatencyMicros: 50, CPUMicrosPerHostDay: 500}},
+		Policy:     gatePolicy(),
+		Costs:      []RuleCostObservation{{RuleID: "det.test", LatencyMicros: 50, CPUMicrosPerHostDay: 500}},
 		RetroCases: []RetroCase{{RuleID: "det.test", Query: ports.HuntQuery{HostID: "h1", Class: detection.ClassProcess, Since: now.Add(-time.Minute), Until: now.Add(time.Minute), Limit: 100}}},
-		Purple: PurpleRequest{EngagementID: "e1", RunID: "run1"},
+		Purple:     PurpleRequest{EngagementID: "e1", RunID: "run1"},
 		Evaluation: goodSample(),
 	}
 	signed, err := collector.Collect(context.Background(), p, req)
