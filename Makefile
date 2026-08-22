@@ -1,4 +1,4 @@
-.PHONY: help install tools dev build run test harness vet lint format typecheck tidy ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify \
+.PHONY: help install tools dev build run test harness vet lint format typecheck tidy ebpf-generate ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify \
         rulepack-verify rulepack-replay rulepack-gate docker-build docker-up docker-down clean web-dev web-build smoke
 
 GO ?= go
@@ -60,6 +60,9 @@ typecheck: ## Static checks: go vet + web tsc --noEmit
 
 tidy: ## Tidy go.mod / go.sum
 	$(GO) mod tidy
+
+ebpf-generate: ## Rebuild committed Linux amd64/arm64 eBPF objects (clang + llvm-strip required)
+	scripts/ebpf/build.sh
 
 ai-triage-eval: ## Evaluate FP triage against the versioned golden dataset (requires two model IDs)
 	$(GO) run ./cmd/synapse-fptriage-eval --dataset $(AI_EVAL_DATASET) --output $(AI_EVAL_OUTPUT)

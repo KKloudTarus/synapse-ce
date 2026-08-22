@@ -71,6 +71,43 @@ func TestSensorLoadsAndDisablesEachClassIndependently(t *testing.T) {
 	}
 }
 
+// TestNetworkSensorCapturesNativeKprobeArguments is the architecture proof beyond a successful
+// verifier load. The network program reads function arguments from target-specific pt_regs offsets;
+// an object compiled for the wrong architecture can attach yet decode an unrelated pointer. A local
+// UDP write is deterministic, needs no external network, and must emerge with its exact protocol and
+// destination port on every supported native runner.
+func TestNetworkSensorCapturesNativeKprobeArguments(t *testing.T) {
+	requireSensor(t)
+	s := NewSensor("host-native", "agent:native", []detection.Class{detection.ClassNetwork})
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("start network sensor: %v", err)
+	}
+	defer s.Close()
+
+	conn, err := net.Dial("udp4", "127.0.0.1:53")
+	if err != nil {
+		t.Fatalf("create local UDP fixture: %v", err)
+	}
+	if _, err := conn.Write([]byte{0}); err != nil {
+		_ = conn.Close()
+		t.Fatalf("send local UDP fixture: %v", err)
+	}
+	_ = conn.Close()
+
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case event := <-s.Events():
+			if event.Network != nil && event.Network.Proto == "udp" && event.Network.RemotePort == 53 {
+				return
+			}
+		case <-timer.C:
+			t.Fatal("network sensor attached but did not decode native kprobe arguments for udp/53")
+		}
+	}
+}
+
 // TestSensorLifecycleGuards: Start is once-only and Close is idempotent, so a re-Start (which would
 // duplicate coverage) or a Start-after-Close (which would panic on send-to-closed) is refused, and a
 // double Close does not panic.

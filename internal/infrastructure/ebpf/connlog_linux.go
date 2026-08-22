@@ -9,7 +9,6 @@ package ebpf
 
 import (
 	"bytes"
-	_ "embed"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -27,12 +26,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// Rebuild the embedded object after editing connlog.bpf.c (run on a Linux host with
-// clang + libbpf-devel; the result is committed so no toolchain is needed at build time):
-//
-//go:generate sh -c "clang -target bpf -D__TARGET_ARCH_x86 -O2 -g -Wall -c c/connlog.bpf.c -o c/connlog.bpf.o"
-//go:embed c/connlog.bpf.o
-var connlogObj []byte
+// Rebuild the committed amd64 and arm64 objects after editing connlog.bpf.c with
+// make ebpf-generate on Linux. Production binaries embed only their architecture's object.
 
 const cgroupRoot = "/sys/fs/cgroup"
 
@@ -99,6 +94,9 @@ func (m *Monitor) Attach(cgroupPath string) (*Session, error) {
 
 // attach loads the program and links connect4/connect6 to cgroupPath, then drains.
 func (m *Monitor) attach(cgPath string, cgDir *os.File, owns bool) (*Session, error) {
+	if embeddedObjectArch == "" {
+		return nil, fmt.Errorf("%w: no architecture-matched object", ErrUnavailable)
+	}
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return nil, fmt.Errorf("%w: memlock: %v", ErrUnavailable, err)
 	}
