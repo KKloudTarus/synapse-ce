@@ -137,6 +137,7 @@ import (
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
 	detectledger "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectledger"
 	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
+	telemetryingest "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/telemetryingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetrolloutuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
@@ -269,8 +270,10 @@ func main() {
 	var scannedImageStore ports.ScannedImageStore
 	var workOrderStore ports.WorkOrderStore
 	var fleetAgentStore ports.FleetAgentStore
-	var fleetRolloutStore ports.FleetRolloutStore // operator update-rollout plans (#412 req 9)
-	var leaderStore ports.LeaderStore             // postgres only; nil in memory mode (single process)
+	var agentSigningKeyStore ports.AgentSigningKeyStore       // A0.2 signing-key registry (A3 resolve+verify)
+	var telemetryTransportStore ports.TelemetryTransportStore // A3 telemetry transport sequencing state
+	var fleetRolloutStore ports.FleetRolloutStore             // operator update-rollout plans (#412 req 9)
+	var leaderStore ports.LeaderStore                         // postgres only; nil in memory mode (single process)
 	var findingRepo ports.FindingRepository
 	var judgmentStore interface {
 		analysisuc.Store
@@ -438,6 +441,8 @@ func main() {
 		scannedImageStore = postgres.NewScannedImageStore(pool)
 		workOrderStore = postgres.NewWorkOrderRepository(pool)
 		fleetAgentStore = postgres.NewFleetAgentRepository(pool)
+		agentSigningKeyStore = postgres.NewAgentSigningKeyRepository(pool)
+		telemetryTransportStore = postgres.NewTelemetryTransportRepository(pool)
 		fleetRolloutStore = postgres.NewFleetRolloutRepository(pool)
 		leaderStore = postgres.NewLeaderStore(pool)
 		// SECURITY (#431 req 6, #432, #409): the fleet_* tables are RLS-protected, but RLS is a
@@ -487,6 +492,8 @@ func main() {
 		scannedImageStore = memory.NewScannedImageStore()
 		workOrderStore = memory.NewWorkOrderStore()
 		fleetAgentStore = memory.NewFleetAgentStore()
+		agentSigningKeyStore = memory.NewAgentSigningKeyStore()
+		telemetryTransportStore = memory.NewTelemetryTransportStore()
 		fleetRolloutStore = memory.NewFleetRolloutStore()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
@@ -1848,6 +1855,24 @@ func main() {
 			}
 			router.SetFleetHostInventory(hiSvc)
 			log.Info("fleet host inventory ingest ENABLED (VM agents persist host inventories into the asset model)")
+		}
+
+		// Agent→control-plane telemetry batch ingest (A3, #624): an enrolled agent ships a signed
+		// TelemetryBatchManifest which the control plane verifies (identity + signing key + schema,
+		// fail-closed), sequences idempotently per incarnation, derives gaps from the ACK snapshot, and acks.
+		// Gated by its own flag; the signing-key resolver is the A0.2 registry, durable when Postgres is set.
+		if cfg.FleetTelemetryIngestEnabled {
+			telemetrySvc, terr := telemetryingest.NewService(telemetryTransportStore, agentSigningKeyStore, auditLog, clock)
+			if terr != nil {
+				log.Error("fleet telemetry ingest init failed", "err", terr)
+				os.Exit(1)
+			}
+			router.SetFleetTelemetry(telemetrySvc)
+			if cfg.DBDSN != "" {
+				log.Info("fleet telemetry ingest ENABLED (durable; server-side identity/key/schema verification, idempotent, acked)")
+			} else {
+				log.Warn("fleet telemetry ingest ENABLED but NOT DURABLE - transport state lives in memory and is lost on restart; configure SYNAPSE_DB_DSN")
+			}
 		}
 	}
 	// deterministic Tier-2 reachability proof in the scan pipeline (opt-in). It mints reachability

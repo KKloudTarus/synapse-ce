@@ -284,6 +284,11 @@ type Config struct {
 	// its collected host inventory (facts + packages + coverage) to be persisted as a Kind=host asset.
 	// Off by default; requires FleetEnabled + FleetAssetsEnabled.
 	FleetHostIngestEnabled bool
+	// FleetTelemetryIngestEnabled turns on the agent→control-plane telemetry batch ingest endpoint
+	// (A3, #624): an enrolled agent ships a signed TelemetryBatchManifest which the control plane verifies
+	// (identity + signing key + schema, fail-closed), sequences idempotently, and acks. Off by default;
+	// requires FleetEnabled.
+	FleetTelemetryIngestEnabled bool
 	// FleetAgentStaleAfter is how long since an agent's last heartbeat before it is reported stale in
 	// the coverage/agent-health views (#413, SYNAPSE_FLEET_STALE_AFTER). <=0 disables the staleness
 	// check. Default 10m, per the issue spec.
@@ -662,6 +667,7 @@ func Load() Config {
 		FleetEnabled:                          getbool("SYNAPSE_FLEET_ENABLED", false),
 		FleetClusterIngestEnabled:             getbool("SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED", false),
 		FleetHostIngestEnabled:                getbool("SYNAPSE_FLEET_HOST_INGEST_ENABLED", false),
+		FleetTelemetryIngestEnabled:           getbool("SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED", false),
 		FleetMinAgentVersion:                  strings.TrimSpace(os.Getenv("SYNAPSE_FLEET_MIN_AGENT_VERSION")),
 		FleetAgentStaleAfter:                  getduration("SYNAPSE_FLEET_STALE_AFTER", 10*time.Minute),
 		FleetCoverageFreshnessTarget:          getduration("SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET", 24*time.Hour),
