@@ -390,6 +390,8 @@ The following variables are read by `synapse-agent` and `synapse-cluster-agent`,
 | `SYNAPSE_AGENT_NAME` | hostname | Human-readable agent display name. |
 | `SYNAPSE_DETECT_CLASSES` | empty | Comma-separated eBPF classes: `process`, `network`, `file`, `privilege`. Empty disables the engine; Linux root/capabilities are required. |
 | `SYNAPSE_DETECT_CPU_CEIL_PCT` | `0` | CPU ceiling for deterministic class shedding; zero disables shedding. |
+| `SYNAPSE_DETECTION_ENGAGEMENT_ID` | empty | Engagement receiving signed detection batches. Empty keeps confirmed detections durably local and does not start the remote detection shipper. |
+| `SYNAPSE_DETECTION_SHIP_INTERVAL` | `1s` | Poll interval while the independent P1 detection delivery lane is empty. Network/429/5xx retry uses separate capped exponential backoff. |
 | `SYNAPSE_TELEMETRY_SPOOL_BYTES` | `536870912` | Maximum bytes of checksummed telemetry WAL segments (minimum 1 MiB). P3 is evicted first with durable gap evidence; P0–P2 backpressure instead of shedding. |
 | `SYNAPSE_AGENT_METRICS_ADDR` | empty | Optional private Prometheus listener for agent spool metrics. It has no authentication; bind to loopback or a protected scrape network. |
 | `SYNAPSE_CLUSTER` | empty (required) | Stable cluster identity attached to every Kubernetes asset. |

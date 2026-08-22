@@ -129,6 +129,10 @@ func (r SpoolRecord) Validate() error {
 type PeekSpoolRequest struct {
 	MaxRecords int
 	MaxBytes   int64
+	// OnlyPriority restricts the read to one delivery lane. A nil value preserves the normal P0→P3
+	// drain order. Dedicated transports use this to ensure a busy coverage or telemetry lane cannot
+	// consume the read budget and starve the independent detection queue.
+	OnlyPriority *fleetagent.DeliveryPriority
 }
 
 // SpoolACK is the highest contiguous record sequence the control plane durably accepted for one priority

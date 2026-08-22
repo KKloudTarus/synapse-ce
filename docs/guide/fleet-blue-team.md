@@ -97,6 +97,7 @@ collection interval.
 ```bash
 SYNAPSE_DETECT_CLASSES=process,network,file,privilege
 SYNAPSE_DETECT_CPU_CEIL_PCT=25
+SYNAPSE_DETECTION_ENGAGEMENT_ID=engagement-id
 ```
 
 An empty class list disables the engine. When CPU exceeds the ceiling, classes are shed in a defined order
@@ -106,6 +107,20 @@ per engagement:
 ```
 GET /api/v1/engagements/{id}/detections
 ```
+
+When `SYNAPSE_DETECTION_ENGAGEMENT_ID` is set, the agent generates a purpose-bound Ed25519 key,
+persists the private half as `detection-transport.json` under the protected state directory, proves
+possession to `POST /api/v1/fleet/keys`, and drains P1 independently to
+`POST /api/v1/fleet/detections`. Enable both `SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED=true` and
+`SYNAPSE_FLEET_DETECTION_INGEST_ENABLED=true` on the control plane. The server derives the agent
+identity from its credential, resolves the named key, verifies every content digest and signature,
+then seals each detection exactly once.
+
+A pending batch coordinate is written before the network request. If the agent restarts or loses the
+HTTP response, it retries the same sequence and membership; the control plane idempotently skips what
+was already sealed. The local WAL is ACKed only after a complete 2xx response. Keys rotate before
+expiry, and one `403` causes one new key registration plus a retry of the same pending sequence. A
+second rejection stops delivery instead of generating keys indefinitely.
 
 ### Durable telemetry spool
 
@@ -126,9 +141,10 @@ was not retained. A restart reads both state generations, validates CRC32C frame
 repairs corrupt/torn segments, and continues the current `(priority, epoch, sequence)` coordinate. A
 kernel reboot changes the Linux boot UUID, advances the epoch, and safely restarts sequence at one.
 
-The WAL is the A2 durability boundary; wire batching and server ACK exchange belong to A3. Until that
-transport is enabled, P3 rotates within the configured quota while never-shed lanes can eventually
-backpressure. Operators should therefore size the quota for the expected disconnected interval.
+The WAL is the A2 durability boundary. Confirmed P1 detections have their own signed shipper when an
+engagement is configured; the remaining raw-telemetry drain belongs to A3. Until that transport is
+enabled, P3 rotates within the configured quota while P0/P2 can eventually backpressure. Operators
+should therefore size the quota for the expected disconnected interval.
 
 Set `SYNAPSE_AGENT_METRICS_ADDR=127.0.0.1:9465` to expose `/metrics`. This listener is deliberately off
 by default and has no authentication. Exported series have bounded labels (priority only):

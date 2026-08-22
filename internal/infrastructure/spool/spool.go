@@ -281,9 +281,16 @@ func (s *Spool) Peek(ctx context.Context, req ports.PeekSpoolRequest) ([]ports.S
 	if maxRecords < 0 || maxBytes < 0 {
 		return nil, fmt.Errorf("%w: negative peek limit", shared.ErrValidation)
 	}
+	firstPriority, lastPriority := fleetagent.PriorityP0, fleetagent.PriorityP3
+	if req.OnlyPriority != nil {
+		if !req.OnlyPriority.Valid() {
+			return nil, fmt.Errorf("%w: invalid peek priority %d", shared.ErrValidation, int(*req.OnlyPriority))
+		}
+		firstPriority, lastPriority = *req.OnlyPriority, *req.OnlyPriority
+	}
 	result := make([]ports.SpoolRecord, 0, min(maxRecords, 64))
 	var bytesRead int64
-	for priority := fleetagent.PriorityP0; priority <= fleetagent.PriorityP3; priority++ {
+	for priority := firstPriority; priority <= lastPriority; priority++ {
 		for _, ref := range s.records[priority] {
 			if len(result) >= maxRecords {
 				return result, nil

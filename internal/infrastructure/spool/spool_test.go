@@ -33,6 +33,24 @@ func TestSpoolPriorityDrainAndLaneOrdering(t *testing.T) {
 	}
 }
 
+func TestPeekCanIsolateDetectionPriority(t *testing.T) {
+	s := mustOpen(t, testConfig(t))
+	mustEnqueue(t, s, testItem(fleetagent.PriorityP0, "coverage", 32))
+	mustEnqueue(t, s, testItem(fleetagent.PriorityP1, "detection-1", 32))
+	mustEnqueue(t, s, testItem(fleetagent.PriorityP1, "detection-2", 32))
+	mustEnqueue(t, s, testItem(fleetagent.PriorityP3, "telemetry", 32))
+	priority := fleetagent.PriorityP1
+	records, err := s.Peek(context.Background(), ports.PeekSpoolRequest{MaxRecords: 8, MaxBytes: 1024, OnlyPriority: &priority})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireIDs(t, records, "detection-1", "detection-2")
+	invalid := fleetagent.DeliveryPriority(99)
+	if _, err := s.Peek(context.Background(), ports.PeekSpoolRequest{OnlyPriority: &invalid}); err == nil {
+		t.Fatal("invalid isolated priority accepted")
+	}
+}
+
 func TestPeekBoundsAndAlwaysMakesProgress(t *testing.T) {
 	s := mustOpen(t, testConfig(t))
 	mustEnqueue(t, s, testItem(fleetagent.PriorityP3, "large", 4096))
