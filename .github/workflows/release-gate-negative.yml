@@ -111,12 +111,31 @@ jobs:
           if [ "${code}" -eq 0 ]; then echo "GATE IS PERMISSIVE: zero artifacts passed vacuously"; exit 1; fi
           echo "empty artifact set correctly failed with exit ${code}"
 
+      - name: An unsigned release evidence manifest must fail
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/evidence
+          echo "artifact" > /tmp/evidence/one.deb
+          : > /tmp/evidence/one.deb.sig
+          echo '{"schema_version":"synapse-release-evidence-v1"}' > /tmp/evidence/release-evidence.json
+          set +e
+          ./scripts/release/verify-artifacts-signed.sh /tmp/evidence
+          code=$?
+          set -e
+          if [ "${code}" -eq 0 ]; then
+            echo "GATE IS PERMISSIVE: an unsigned release evidence manifest passed"
+            exit 1
+          fi
+          echo "unsigned release evidence correctly failed with exit ${code}"
+
       - name: A fully signed artifact set passes
         run: |
           set -euo pipefail
           mkdir -p /tmp/signed
           echo "a" > /tmp/signed/one.deb && : > /tmp/signed/one.deb.sig
           echo "b" > /tmp/signed/two.rpm && : > /tmp/signed/two.rpm.sig
+          echo '{}' > /tmp/signed/release-evidence.json
+          : > /tmp/signed/release-evidence.json.sig
           ./scripts/release/verify-artifacts-signed.sh /tmp/signed
 
   update-manifest-must-bind-version:

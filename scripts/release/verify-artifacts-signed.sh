@@ -28,6 +28,10 @@ fi
 # Extensions that are release ARTIFACTS and must carry a signature.
 is_artifact() {
     case "$1" in
+    # Other JSON files are derived metadata, but the evidence manifest is the root that binds the
+    # complete release set. Letting it bypass the detached-signature gate would reduce the whole
+    # release to unauthenticated checksums.
+    release-evidence.json) return 0 ;;
     *.sig | *.asc | *.pem | *.sha256 | *.txt | *.json | *.sbom | *.intoto.jsonl) return 1 ;;
     *) return 0 ;;
     esac
