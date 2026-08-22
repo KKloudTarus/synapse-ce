@@ -9,6 +9,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Native amd64 and arm64 eBPF sensor artifacts with capability-based CO-RE probing.** The agent now
+  embeds only architecture-matched objects, detects kernel BTF and required network types without
+  kernel-version gating, reports unsupported capability as an explicit coverage gap, and validates
+  both architectures in a native load/attach workflow. A repository-owned minimal CO-RE header and
+  reproducible build target replace the uncommitted, build-host-specific vmlinux.h dependency.
+
 - **Deterministic release evidence and verification.** Release signing now binds the complete asset
   set to its repository, tag, and exact source revision in a signed, provenance-attested manifest.
   The local verifier rejects identity drift, tampered/missing/unlisted assets, non-canonical input,

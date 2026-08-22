@@ -5,9 +5,10 @@
 // udp:53. So this program hooks the kernel functions where the protocol is implicit in the hook itself —
 // udp_sendmsg (udp) and tcp_connect (tcp) — and reads the destination from struct sock via CO-RE.
 //
-// CO-RE (with a build-time vmlinux.h) is used HERE ONLY; the other sensors stay CO-RE-free. Observe-only:
-// a kprobe cannot change the syscall's outcome, it only records.
-#include "vmlinux.h"
+// CO-RE is used HERE ONLY; the other sensors stay CO-RE-free. The repository-owned minimal type
+// header makes both architecture artifacts reproducible without a host-generated vmlinux.h.
+// Observe-only: a kprobe cannot change the syscall's outcome, it only records.
+#include "core_types.bpf.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
@@ -50,7 +51,7 @@ static __always_inline void emit(__u8 proto, __u32 daddr, __u16 dport)
 
 // int udp_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 SEC("kprobe/udp_sendmsg")
-int BPF_KPROBE(detect_udp_sendmsg, struct sock *sk, struct msghdr *msg)
+int BPF_KPROBE(detect_udp_sendmsg, struct sock___synapse *sk, struct msghdr___synapse *msg)
 {
 	// Connected UDP: the destination is on the socket.
 	__u16 dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
@@ -58,7 +59,8 @@ int BPF_KPROBE(detect_udp_sendmsg, struct sock *sk, struct msghdr *msg)
 	if (dport == 0) {
 		// Unconnected UDP (the common DNS case): the destination is in msg->msg_name, which the syscall
 		// layer has already copied into kernel memory as a sockaddr_in.
-		struct sockaddr_in *sin = (struct sockaddr_in *)BPF_CORE_READ(msg, msg_name);
+		struct sockaddr_in___synapse *sin =
+			(struct sockaddr_in___synapse *)BPF_CORE_READ(msg, msg_name);
 		if (sin) {
 			dport = bpf_ntohs(BPF_CORE_READ(sin, sin_port));
 			daddr = BPF_CORE_READ(sin, sin_addr.s_addr);
@@ -70,7 +72,7 @@ int BPF_KPROBE(detect_udp_sendmsg, struct sock *sk, struct msghdr *msg)
 
 // void tcp_connect(struct sock *sk) — the destination is set on the socket by this point.
 SEC("kprobe/tcp_connect")
-int BPF_KPROBE(detect_tcp_connect, struct sock *sk)
+int BPF_KPROBE(detect_tcp_connect, struct sock___synapse *sk)
 {
 	__u16 dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
 	__u32 daddr = BPF_CORE_READ(sk, __sk_common.skc_daddr);

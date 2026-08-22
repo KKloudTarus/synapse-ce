@@ -67,6 +67,7 @@ nav:
       - Capacity and service objectives: capacity-slos.md
       - Backup, restore, and upgrade: backup-restore-upgrade.md
       - Fleet agent packaging: fleet-agent-packaging.md
+      - eBPF portability: ebpf-portability.md
       - Release provenance: release-provenance.md
       - AI triage evaluation: ai-triage-evaluation.md
       - Operations drill evidence: operations-drill-evidence.md

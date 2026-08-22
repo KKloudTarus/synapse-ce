@@ -14,17 +14,18 @@ package ebpf
 import (
 	"bytes"
 	"context"
-	_ "embed"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"net/netip"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
@@ -38,26 +39,8 @@ import (
 // type — the dependency points inward (usecase ← infrastructure).
 var _ ports.DetectionSensor = (*Sensor)(nil)
 
-// Rebuild the embedded objects after editing the .bpf.c sources (on a Linux host with clang +
-// libbpf-devel; netconn also needs a vmlinux.h from `bpftool btf dump file /sys/kernel/btf/vmlinux
-// format c`). The results are committed so no toolchain is needed at build time:
-//
-//go:generate sh -c "clang -target bpf -D__TARGET_ARCH_x86 -O2 -g -Wall -c c/exec.bpf.c   -o c/exec.bpf.o"
-//go:generate sh -c "clang -target bpf -D__TARGET_ARCH_x86 -O2 -g -Wall -c c/file.bpf.c   -o c/file.bpf.o"
-//go:generate sh -c "clang -target bpf -D__TARGET_ARCH_x86 -O2 -g -Wall -c c/priv.bpf.c   -o c/priv.bpf.o"
-//go:generate sh -c "clang -target bpf -D__TARGET_ARCH_x86 -O2 -g -Wall -I c -c c/netconn.bpf.c -o c/netconn.bpf.o"
-
-//go:embed c/exec.bpf.o
-var execObj []byte
-
-//go:embed c/file.bpf.o
-var fileObj []byte
-
-//go:embed c/priv.bpf.o
-var privObj []byte
-
-//go:embed c/netconn.bpf.o
-var netObj []byte
+// Rebuild the committed amd64 and arm64 artifacts after editing .bpf.c sources with
+// make ebpf-generate on Linux. Production binaries embed only their architecture's objects.
 
 // ErrSensorUnavailable means the detection sensor cannot run here at all (no privilege, no eBPF). It is
 // distinct from a single class failing to load — that is a coverage gap, not a total failure.
@@ -67,11 +50,12 @@ var ErrSensorUnavailable = errors.New("ebpf detection sensor unavailable")
 // map name, and the (program name, attach) pairs. A class may attach more than one program (privilege
 // hooks both setuid and setresuid; network hooks udp_sendmsg and tcp_connect).
 type classProgram struct {
-	class   detection.Class
-	obj     []byte
-	mapName string
-	attach  []progAttach
-	decode  func(host shared.ID, raw []byte, now time.Time) (detection.Event, bool)
+	class        detection.Class
+	obj          []byte
+	requiresCORE bool
+	mapName      string
+	attach       []progAttach
+	decode       func(host shared.ID, raw []byte, now time.Time) (detection.Event, bool)
 }
 
 type attachKind int
@@ -109,7 +93,7 @@ func classPrograms() []classProgram {
 			decode: decodePriv,
 		},
 		{
-			class: detection.ClassNetwork, obj: netObj, mapName: "net_events",
+			class: detection.ClassNetwork, obj: netObj, requiresCORE: true, mapName: "net_events",
 			attach: []progAttach{
 				{prog: "detect_udp_sendmsg", kind: attachKprobe, name: "udp_sendmsg"},
 				{prog: "detect_tcp_connect", kind: attachKprobe, name: "tcp_connect"},
@@ -177,6 +161,15 @@ func (s *Sensor) Start(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("%w: %v", ErrSensorUnavailable, err)
 	}
+	if embeddedObjectArch == "" {
+		for _, cp := range classPrograms() {
+			if s.requested[cp.class] {
+				s.recordGap(cp.class, detection.StateFailed, "no architecture-matched eBPF objects for linux/"+runtime.GOARCH)
+			}
+		}
+		s.markDisabledClasses()
+		return fmt.Errorf("%w: unsupported architecture linux/%s", ErrSensorUnavailable, runtime.GOARCH)
+	}
 	if err := rlimit.RemoveMemlock(); err != nil {
 		// Nothing can load. Report every requested class as a failed gap and surface the total failure.
 		for _, cp := range classPrograms() {
@@ -186,11 +179,28 @@ func (s *Sensor) Start(ctx context.Context) error {
 		return fmt.Errorf("%w: %v", ErrSensorUnavailable, err)
 	}
 
+	var coreCache *btf.Cache
+	var coreCapabilities HostCapabilities
+	if s.requested[detection.ClassNetwork] {
+		coreCache = btf.NewCache()
+		coreCapabilities = probeHostCapabilities(runtime.GOARCH, embeddedObjectArch, func() (kernelTypeLookup, error) {
+			spec, err := coreCache.Kernel()
+			if err != nil {
+				return nil, err
+			}
+			return spec.AnyTypeByName, nil
+		})
+	}
+
 	for _, cp := range classPrograms() {
 		if !s.requested[cp.class] {
 			continue // reported as StateDisabled below
 		}
-		lc, err := s.loadClass(cp)
+		if cp.requiresCORE && !coreCapabilities.CORE {
+			s.recordGap(cp.class, detection.StateDegraded, coreCapabilities.Reason)
+			continue
+		}
+		lc, err := s.loadClass(cp, coreCache)
 		if err != nil {
 			s.recordGap(cp.class, gapStateFor(err), err.Error())
 			continue
@@ -237,12 +247,12 @@ func gapStateFor(err error) detection.ClassState {
 	return detection.StateFailed
 }
 
-func (s *Sensor) loadClass(cp classProgram) (*loadedClass, error) {
+func (s *Sensor) loadClass(cp classProgram, cache *btf.Cache) (*loadedClass, error) {
 	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(cp.obj))
 	if err != nil {
 		return nil, fmt.Errorf("load spec: %w", err)
 	}
-	coll, err := ebpf.NewCollection(spec)
+	coll, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{Cache: cache})
 	if err != nil {
 		return nil, fmt.Errorf("load programs: %w", err)
 	}
