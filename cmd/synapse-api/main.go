@@ -137,6 +137,7 @@ import (
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
 	detectledger "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectledger"
 	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
+	keyregistry "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/keyregistry"
 	telemetryingest "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/telemetryingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetrolloutuc"
@@ -1707,23 +1708,11 @@ func main() {
 		}
 		router.SetSARIFIngest(sarifSvc)
 		router.SetImportedFindings(importedFindingStore)
-		// #423 detection ledger read routes. The write/ingest path (Service.Ingest → seal into the
-		// evidence chain) plugs the same detectionRecordStore into detectledger.NewService once the
-		// agent→control-plane batch transport + agent signing-key resolver land; the read surface is live
-		// now so a detection is queryable and tenant-scoped through the same chokepoint.
-		// A0.5 (#610) PREREQUISITE — before wiring detectledger.NewService here, the EvidenceChain passed
-		// to it MUST implement SealOnce as a truly key-idempotent seal, keyed on (engagement, detection id)
-		// and atomic with the chain append (e.g. an ON CONFLICT (engagement_id, idempotency_key) DO NOTHING
-		// insert that returns the existing link). A keyless Seal, or a non-atomic check-then-append, reopens
-		// D3 (a seal-then-crash retry appends a duplicate permanent link). evidence.Service.SealOnce is the
-		// A4 deliverable that provides this; do not bridge NewService onto plain Seal.
-		// A0.2 (#607) — the detectledger.AgentKeyResolver that NewService needs is satisfied by the agent
-		// signing-key registry (ports.AgentSigningKeyStore → postgres.NewAgentSigningKeyRepository /
-		// memory.NewAgentSigningKeyStore): its Resolve(agentID, keyID) returns the AgentSigningKey the batch
-		// names, and VerifyBatchWithKey gates purpose+window+revocation fail-closed. The store is the durable
-		// backing; still deferred to A4 is the agent-plane registration endpoint (an agent posts its ed25519
-		// signing public key + a ProveKeyPossession proof, bound to its canonical AgentID) plus the operator
-		// rotate/revoke routes — none can be wired until the agent→control-plane transport exists.
+		// #423 detection ledger READ routes. The read surface needs only the record store, so it is wired
+		// here (inside the asset-model gate) independently of the agent transport plane. The WRITE/ingest
+		// path (detectledger.NewService → SealOnce into the evidence chain) is wired under FleetEnabled below
+		// (A4 #625), because it needs the agent-plane transport, the A0.2 signing-key resolver, and the
+		// evidenceService SealOnce bridge — see the FleetDetectionIngestEnabled block.
 		if detectionReader, drerr := detectledger.NewReader(detectionRecordStore); drerr != nil {
 			log.Error("detection ledger reader init failed", "err", drerr)
 			os.Exit(1)
@@ -1872,6 +1861,57 @@ func main() {
 				log.Info("fleet telemetry ingest ENABLED (durable; server-side identity/key/schema verification, idempotent, acked)")
 			} else {
 				log.Warn("fleet telemetry ingest ENABLED but NOT DURABLE - transport state lives in memory and is lost on restart; configure SYNAPSE_DB_DSN")
+			}
+		}
+		// Agent signing-key registration + operator key management (A4, #625, A0.2): an agent registers its
+		// Ed25519 signing key with a proof-of-possession bound to its authenticated id; operators list and
+		// revoke. This is what makes the batch signing-key resolver used by telemetry/detection ingest fillable
+		// over the wire. Same durable store (agentSigningKeyStore) either plane resolves against.
+		if cfg.FleetKeyRegistrationEnabled {
+			keyRegSvc, kerr := keyregistry.NewService(agentSigningKeyStore, auditLog, clock)
+			if kerr != nil {
+				log.Error("fleet key registration init failed", "err", kerr)
+				os.Exit(1)
+			}
+			router.SetFleetKeyRegistration(keyRegSvc)
+			router.SetFleetKeyAdmin(keyRegSvc)
+			log.Info("fleet signing-key registration ENABLED (proof-of-possession required; operator list/revoke)")
+		}
+		// Agent→control-plane detection batch ingest (A4, #625): an enrolled agent ships a signed AgentBatch;
+		// the ledger verifies identity (A0.1: batch agent MUST be the authenticated agent) + the named signing
+		// key + each detection's content digest (fail-closed), then seals each detection ONCE into the shared
+		// evidence chain and persists the projection. The EvidenceChain is bridged onto evidenceService:
+		// SealOnce is idempotent on (engagement, detection id) via a deterministic reserved id over the
+		// crash-recoverable reserved-append path (closes D3 for detections — a seal-then-crash retry returns
+		// the first link, never a second); VerifyChainError translates evidence.Verify's Intact=false into an
+		// ErrChainBroken-wrapping error. Gated by its own flag; requires the A0.2 key registry above.
+		if cfg.FleetDetectionIngestEnabled {
+			sealOnce := func(ctx context.Context, engagementID shared.ID, kind, idempotencyKey string, content []byte, createdBy string) (shared.ID, error) {
+				ev, serr := evidenceService.SealOnce(ctx, engagementID, kind, idempotencyKey, content, createdBy)
+				if serr != nil {
+					return "", serr
+				}
+				return ev.ID, nil
+			}
+			verifyChain := func(ctx context.Context, engagementID shared.ID) error {
+				return evidenceService.VerifyChainError(ctx, engagementID)
+			}
+			chainBridge, cberr := detectledger.NewEvidenceChainBridge(sealOnce, verifyChain)
+			if cberr != nil {
+				log.Error("fleet detection ingest chain bridge init failed", "err", cberr)
+				os.Exit(1)
+			}
+			// retention 0 = keep the projection forever; the evidence chain is always permanent regardless.
+			detectSvc, derr := detectledger.NewService(detectionRecordStore, chainBridge, agentSigningKeyStore, auditLog, clock, ids, 0)
+			if derr != nil {
+				log.Error("fleet detection ingest init failed", "err", derr)
+				os.Exit(1)
+			}
+			router.SetFleetDetectionIngest(detectSvc)
+			if cfg.DBDSN != "" {
+				log.Info("fleet detection ingest ENABLED (durable; server-side identity/key/content verification, sealed once into the evidence chain)")
+			} else {
+				log.Warn("fleet detection ingest ENABLED but NOT DURABLE - detection ledger + evidence chain live in memory and are lost on restart; configure SYNAPSE_DB_DSN")
 			}
 		}
 	}

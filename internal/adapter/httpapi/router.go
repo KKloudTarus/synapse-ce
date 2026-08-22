@@ -87,6 +87,7 @@ type Router struct {
 	purpleCoverage         purpleCoverageReader  // optional read side for purple-team coverage (#426)
 	fleet                  *fleetRouter          // optional; nil ⇒ agent transport plane is not served
 	fleetAdmin             fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
+	fleetKeys              fleetKeyAdmin         // optional; nil ⇒ operator signing-key routes not registered (A4 #625)
 	qualityGates           qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
 	qualityProfiles        qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
 	rules                  rulesService          // optional; nil ⇒ rule catalog routes are not registered
@@ -330,6 +331,10 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/agents/enrolment-tokens", rt.authz(userdom.PermAdminister, rt.mintEnrolToken))
 		mux.HandleFunc("GET /api/v1/agents", rt.authz(userdom.PermView, rt.listFleetAgents))
 		mux.HandleFunc("POST /api/v1/agents/{id}/revoke", rt.authz(userdom.PermAdminister, rt.revokeFleetAgent))
+	}
+	if rt.fleetKeys != nil {
+		mux.HandleFunc("GET /api/v1/agents/{id}/keys", rt.authz(userdom.PermView, rt.listAgentKeys))
+		mux.HandleFunc("POST /api/v1/agents/{id}/keys/{keyID}/revoke", rt.authz(userdom.PermAdminister, rt.revokeAgentKey))
 	}
 	if rt.assets != nil {
 		mux.HandleFunc("POST /api/v1/assets", rt.authz(userdom.PermOperate, rt.createAsset))

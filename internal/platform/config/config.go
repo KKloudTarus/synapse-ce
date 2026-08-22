@@ -289,6 +289,15 @@ type Config struct {
 	// (identity + signing key + schema, fail-closed), sequences idempotently, and acks. Off by default;
 	// requires FleetEnabled.
 	FleetTelemetryIngestEnabled bool
+	// FleetDetectionIngestEnabled turns on the agent→control-plane detection batch ingest endpoint (A4,
+	// #625): an enrolled agent ships a signed AgentBatch which the control plane verifies (identity +
+	// signing key + per-detection content digest, fail-closed) and seals once into the evidence chain.
+	// Off by default; requires FleetEnabled.
+	FleetDetectionIngestEnabled bool
+	// FleetKeyRegistrationEnabled turns on the agent-plane signing-key registration endpoint plus the
+	// operator key management routes (A4, #625, A0.2): an agent registers its Ed25519 signing key with a
+	// proof-of-possession. Off by default; requires FleetEnabled.
+	FleetKeyRegistrationEnabled bool
 	// FleetAgentStaleAfter is how long since an agent's last heartbeat before it is reported stale in
 	// the coverage/agent-health views (#413, SYNAPSE_FLEET_STALE_AFTER). <=0 disables the staleness
 	// check. Default 10m, per the issue spec.
@@ -668,6 +677,8 @@ func Load() Config {
 		FleetClusterIngestEnabled:             getbool("SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED", false),
 		FleetHostIngestEnabled:                getbool("SYNAPSE_FLEET_HOST_INGEST_ENABLED", false),
 		FleetTelemetryIngestEnabled:           getbool("SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED", false),
+		FleetDetectionIngestEnabled:           getbool("SYNAPSE_FLEET_DETECTION_INGEST_ENABLED", false),
+		FleetKeyRegistrationEnabled:           getbool("SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED", false),
 		FleetMinAgentVersion:                  strings.TrimSpace(os.Getenv("SYNAPSE_FLEET_MIN_AGENT_VERSION")),
 		FleetAgentStaleAfter:                  getduration("SYNAPSE_FLEET_STALE_AFTER", 10*time.Minute),
 		FleetCoverageFreshnessTarget:          getduration("SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET", 24*time.Hour),

@@ -8,6 +8,7 @@ package evidence
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -167,6 +168,52 @@ func (s *Service) appendReserved(ctx context.Context, link evdom.Evidence) (evdo
 // SealForFindingWithID appends a finding-linked evidence link with its caller-
 // reserved stable ID. It is used only by crash-recoverable application flows.
 func (s *Service) SealForFindingWithID(ctx context.Context, evidenceID, engagementID, findingID shared.ID, kind string, content []byte, storageRef, createdBy string) (evdom.Evidence, error) {
+	return s.sealReserved(ctx, evidenceID, engagementID, findingID, kind, content, storageRef, createdBy)
+}
+
+// sealOnceContext domain-separates the deterministic reserved id an idempotency-keyed seal derives, so
+// the same (engagement, kind, key) never collides with a caller-chosen reserved id or another kind.
+const sealOnceContext = "synapse-evidence-seal-once:v1"
+
+// SealOnce appends one sealed link IDEMPOTENTLY on (engagementID, kind, idempotencyKey): it derives a
+// deterministic reserved evidence id from those three and seals exactly once, so a retry after a crash
+// between the seal and a caller's projection write returns the FIRST link and appends nothing (this is
+// how the detection ledger closes D3 — a detection can never be sealed into the chain twice). It reuses
+// the same crash-recoverable reserved-append path as SealForFindingWithID; there is no findingID.
+func (s *Service) SealOnce(ctx context.Context, engagementID shared.ID, kind, idempotencyKey string, content []byte, createdBy string) (evdom.Evidence, error) {
+	if engagementID.IsZero() {
+		return evdom.Evidence{}, fmt.Errorf("%w: seal-once needs an engagement", shared.ErrValidation)
+	}
+	if kind == "" || idempotencyKey == "" {
+		return evdom.Evidence{}, fmt.Errorf("%w: seal-once needs a kind and an idempotency key", shared.ErrValidation)
+	}
+	return s.sealReserved(ctx, sealOnceID(engagementID, kind, idempotencyKey), engagementID, "", kind, content, "", createdBy)
+}
+
+// sealOnceID is the deterministic reserved evidence id for a SealOnce, over a domain-separated digest of
+// (engagement, kind, idempotency key) so the same logical seal always targets the same reserved row. Each
+// component is LENGTH-PREFIXED (not just separator-delimited): idempotencyKey is a wire-supplied detection
+// id, so a crafted value containing the separator byte must not be able to alias another (engagement, kind,
+// key) tuple's reserved id.
+func sealOnceID(engagementID shared.ID, kind, idempotencyKey string) shared.ID {
+	h := sha256.New()
+	var lenbuf [8]byte
+	write := func(str string) {
+		binary.BigEndian.PutUint64(lenbuf[:], uint64(len(str)))
+		h.Write(lenbuf[:])
+		h.Write([]byte(str))
+	}
+	write(sealOnceContext)
+	write(engagementID.String())
+	write(kind)
+	write(idempotencyKey)
+	return shared.ID(hex.EncodeToString(h.Sum(nil)))
+}
+
+// sealReserved appends a caller-reserved stable evidence id exactly once, re-chaining on a concurrent
+// head advance and returning the existing link (payload-checked) on a reserved-id conflict — the shared
+// crash-recoverable path behind SealForFindingWithID and SealOnce.
+func (s *Service) sealReserved(ctx context.Context, evidenceID, engagementID, findingID shared.ID, kind string, content []byte, storageRef, createdBy string) (evdom.Evidence, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return evdom.Evidence{}, err
@@ -363,6 +410,23 @@ func (s *Service) Verify(ctx context.Context, engagementID shared.ID) (Report, e
 	// out-of-band so report bytes are unchanged. Best-effort + bounded.
 	s.anchorHead(ctx, ChainEvidence, engagementID, &rep)
 	return rep, nil
+}
+
+// VerifyChainError is the error-shaped view of Verify for callers that only need a go/no-go: it runs the
+// same verify-on-read path and returns a non-nil error WRAPPING evdom.ErrChainBroken when the chain is
+// not intact (a tampered chain or a detected tail-truncation), nil when intact. Verify itself signals a
+// broken chain via Report.Intact=false with a NIL error (the error is reserved for I/O), so a bridge that
+// forwarded Verify's raw error would report a tampered chain as healthy; this method closes that trap for
+// the detection-ledger EvidenceChain bridge (and any other go/no-go caller).
+func (s *Service) VerifyChainError(ctx context.Context, engagementID shared.ID) error {
+	rep, err := s.Verify(ctx, engagementID)
+	if err != nil {
+		return err
+	}
+	if !rep.Intact {
+		return fmt.Errorf("%w: %s", evdom.ErrChainBroken, rep.Error)
+	}
+	return nil
 }
 
 // ChainEvidence/ChainAudit name the two custody chains in the out-of-band token store.

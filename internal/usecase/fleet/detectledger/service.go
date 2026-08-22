@@ -102,9 +102,21 @@ func NewService(records ports.DetectionRecordStore, chain EvidenceChain, keys Ag
 // Ingest admits one signed, sequenced agent batch: it verifies the signature, detects a sequence gap
 // (reported as a potential loss, never silently accepted), seals each detection into the evidence chain
 // as kind="detection", and persists the projection rows bound to their chain links and asset.
-func (s *Service) Ingest(ctx context.Context, batch fleetagent.AgentBatch, items []IngestItem) (IngestResult, error) {
+//
+// authAgentID is the canonical id of the AUTHENTICATED agent (from the agent-plane credential, never a
+// wire field). A0.1 server-authoritative identity: a batch whose manifest claims any other agent is
+// refused BEFORE key resolution or sealing, so a valid agent cannot ship a batch attributed to another —
+// the sealed detection always carries the authenticated agent id, never a self-declared one.
+func (s *Service) Ingest(ctx context.Context, authAgentID shared.ID, batch fleetagent.AgentBatch, items []IngestItem) (IngestResult, error) {
 	if err := batch.Validate(); err != nil {
 		return IngestResult{}, err
+	}
+	if authAgentID.IsZero() || batch.AgentID != authAgentID {
+		s.recordAudit(ctx, "detection.batch_rejected", authAgentID.String(), map[string]string{
+			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
+			"manifest_agent_id": batch.AgentID.String(), "reason": "identity_mismatch",
+		})
+		return IngestResult{}, fmt.Errorf("%w: batch agent %q is not the authenticated agent %q", shared.ErrForbidden, batch.AgentID, authAgentID)
 	}
 	refByID, err := membership(batch, items)
 	if err != nil {

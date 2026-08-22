@@ -251,13 +251,33 @@ func tctx() context.Context { return shared.WithTenant(context.Background(), "t1
 
 // ---- tests ------------------------------------------------------------------------------------------
 
+func TestIngestRejectsIdentityMismatch(t *testing.T) {
+	h := newHarness(t, 0)
+	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
+	batch := h.signedBatch(t, 1, items) // batch.AgentID == "agent:1"
+	// A0.1 server-authoritative identity: a batch signed by a valid agent but ingested under a DIFFERENT
+	// authenticated credential is refused BEFORE key resolution or sealing — no chain link, no projection.
+	if _, err := h.svc.Ingest(tctx(), "agent:2", batch, items); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("identity mismatch must be forbidden, got %v", err)
+	}
+	if got := len(h.chain.seals); got != 0 {
+		t.Fatalf("an identity-mismatched batch must seal nothing, got %d", got)
+	}
+	if recs, _ := h.store.ListDetections(tctx(), "eng-1"); len(recs) != 0 {
+		t.Fatalf("an identity-mismatched batch must persist nothing, got %d rows", len(recs))
+	}
+	if !h.audit.has("detection.batch_rejected") {
+		t.Error("an identity-mismatched batch must be audited as rejected")
+	}
+}
+
 func TestIngestSealsEachDetectionAsChainedEvidence(t *testing.T) {
 	h := newHarness(t, 0)
 	items := []IngestItem{
 		{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"},
 		{ID: "d2", Detection: mkDetection(t, "top"), AssetID: "asset-1"},
 	}
-	res, err := h.svc.Ingest(tctx(), h.signedBatch(t, 1, items), items)
+	res, err := h.svc.Ingest(tctx(), "agent:1", h.signedBatch(t, 1, items), items)
 	if err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
@@ -290,7 +310,7 @@ func TestIngestRefusesBadSignature(t *testing.T) {
 	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
 	b := h.signedBatch(t, 1, items)
 	b.Sequence = 99 // tamper a signed field AFTER signing → the signature no longer matches
-	if _, err := h.svc.Ingest(tctx(), b, items); !errors.Is(err, fleetagent.ErrBadBatchSignature) {
+	if _, err := h.svc.Ingest(tctx(), b.AgentID, b, items); !errors.Is(err, fleetagent.ErrBadBatchSignature) {
 		t.Fatalf("a tampered batch must be refused, got %v", err)
 	}
 	if len(h.chain.kinds()) != 0 {
@@ -309,7 +329,7 @@ func TestIngestRefusesContentTamper(t *testing.T) {
 	b := h.signedBatch(t, 1, signedItems) // signs a digest over the "ps" detection
 	// Deliver the same id with a DIFFERENT body.
 	swapped := []IngestItem{{ID: "d1", Detection: mkDetection(t, "top"), AssetID: "asset-1"}}
-	if _, err := h.svc.Ingest(tctx(), b, swapped); !errors.Is(err, shared.ErrValidation) {
+	if _, err := h.svc.Ingest(tctx(), b.AgentID, b, swapped); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("a content swap must be refused, got %v", err)
 	}
 	if len(h.chain.kinds()) != 0 {
@@ -322,7 +342,7 @@ func TestIngestRefusesUnknownAgent(t *testing.T) {
 	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
 	b := fleetagent.AgentBatch{AgentID: "agent:unknown", EngagementID: "eng-1", Sequence: 1, KeyID: h.key.KeyID, Detections: refsFor(t, items)}
 	b.Signature = fleetagent.SignBatch(h.priv, b)
-	if _, err := h.svc.Ingest(tctx(), b, items); !errors.Is(err, shared.ErrForbidden) {
+	if _, err := h.svc.Ingest(tctx(), b.AgentID, b, items); !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("an agent with no known key must be refused (fail closed), got %v", err)
 	}
 }
@@ -331,12 +351,12 @@ func TestIngestReportsForwardGapButProceeds(t *testing.T) {
 	h := newHarness(t, 0)
 	// First batch seq 1.
 	i1 := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
-	if _, err := h.svc.Ingest(tctx(), h.signedBatch(t, 1, i1), i1); err != nil {
+	if _, err := h.svc.Ingest(tctx(), "agent:1", h.signedBatch(t, 1, i1), i1); err != nil {
 		t.Fatal(err)
 	}
 	// Next batch jumps to seq 4 → sequences 2,3 are a gap.
 	i2 := []IngestItem{{ID: "d4", Detection: mkDetection(t, "top"), AssetID: "asset-1"}}
-	res, err := h.svc.Ingest(tctx(), h.signedBatch(t, 4, i2), i2)
+	res, err := h.svc.Ingest(tctx(), "agent:1", h.signedBatch(t, 4, i2), i2)
 	if err != nil {
 		t.Fatalf("a forward gap must still seal the arriving batch: %v", err)
 	}
@@ -358,12 +378,12 @@ func TestIngestIsIdempotentOnReplay(t *testing.T) {
 	h := newHarness(t, 0)
 	i1 := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
 	b := h.signedBatch(t, 2, i1)
-	if _, err := h.svc.Ingest(tctx(), b, i1); err != nil {
+	if _, err := h.svc.Ingest(tctx(), b.AgentID, b, i1); err != nil {
 		t.Fatal(err)
 	}
 	sealedBefore := len(h.chain.kinds())
 	// Re-ingest the exact same batch: idempotent — no new seal, d1 skipped, replay reported.
-	res, err := h.svc.Ingest(tctx(), b, i1)
+	res, err := h.svc.Ingest(tctx(), b.AgentID, b, i1)
 	if err != nil {
 		t.Fatalf("an idempotent replay must not error, got %v", err)
 	}
@@ -385,12 +405,12 @@ func TestIngestRequiresMembershipMatchAndTenant(t *testing.T) {
 	extra := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}, {ID: "d2", Detection: mkDetection(t, "top"), AssetID: "asset-1"}}
 	b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: "eng-1", Sequence: 1, KeyID: h.key.KeyID, Detections: refsFor(t, extra)}
 	b.Signature = fleetagent.SignBatch(h.priv, b)
-	if _, err := h.svc.Ingest(tctx(), b, items); !errors.Is(err, shared.ErrValidation) {
+	if _, err := h.svc.Ingest(tctx(), b.AgentID, b, items); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("membership mismatch must be a validation error, got %v", err)
 	}
 	// Missing tenant in context.
 	good := h.signedBatch(t, 1, items)
-	if _, err := h.svc.Ingest(context.Background(), good, items); !errors.Is(err, shared.ErrValidation) {
+	if _, err := h.svc.Ingest(context.Background(), good.AgentID, good, items); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("a missing tenant must be refused, got %v", err)
 	}
 }
@@ -401,13 +421,13 @@ func TestIngestFailsWhenGapAuditFails(t *testing.T) {
 	h := newHarness(t, 0)
 	// Seed seq 1 so a jump to seq 5 is a forward gap.
 	i1 := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
-	if _, err := h.svc.Ingest(tctx(), h.signedBatch(t, 1, i1), i1); err != nil {
+	if _, err := h.svc.Ingest(tctx(), "agent:1", h.signedBatch(t, 1, i1), i1); err != nil {
 		t.Fatal(err)
 	}
 	h.audit.failAction = "detection.batch_gap" // the gap coverage event cannot be written
 	i2 := []IngestItem{{ID: "d5", Detection: mkDetection(t, "top"), AssetID: "asset-1"}}
 	sealedBefore := len(h.chain.kinds())
-	if _, err := h.svc.Ingest(tctx(), h.signedBatch(t, 5, i2), i2); err == nil {
+	if _, err := h.svc.Ingest(tctx(), "agent:1", h.signedBatch(t, 5, i2), i2); err == nil {
 		t.Fatal("an unrecordable gap must fail the ingest, not silently proceed")
 	}
 	if len(h.chain.kinds()) != sealedBefore {
@@ -432,7 +452,7 @@ func TestIncidentsRollupFromLedger(t *testing.T) {
 		{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"},
 		{ID: "d2", Detection: mkDetection(t, "ps"), AssetID: "asset-1"},
 	}
-	if _, err := h.svc.Ingest(tctx(), h.signedBatch(t, 1, items), items); err != nil {
+	if _, err := h.svc.Ingest(tctx(), "agent:1", h.signedBatch(t, 1, items), items); err != nil {
 		t.Fatal(err)
 	}
 	inc, err := h.svc.Incidents(tctx(), "eng-1")
@@ -447,7 +467,7 @@ func TestIncidentsRollupFromLedger(t *testing.T) {
 func TestExpireIsAuditedAndRequiresActorReason(t *testing.T) {
 	h := newHarness(t, time.Hour) // records expire 1h after RecordedAt (clock = t=1000s)
 	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
-	if _, err := h.svc.Ingest(tctx(), h.signedBatch(t, 1, items), items); err != nil {
+	if _, err := h.svc.Ingest(tctx(), "agent:1", h.signedBatch(t, 1, items), items); err != nil {
 		t.Fatal(err)
 	}
 	// Actor/reason required.
@@ -500,7 +520,7 @@ func TestIngestNeverDoubleSealsAfterProjectionFailure(t *testing.T) {
 	b.Signature = fleetagent.SignBatch(priv, b)
 
 	// First ingest: the seal succeeds, then the injected projection-write failure surfaces.
-	if _, err := svc.Ingest(tctx(), b, items); err == nil {
+	if _, err := svc.Ingest(tctx(), b.AgentID, b, items); err == nil {
 		t.Fatal("expected the injected projection-write failure to surface")
 	}
 	if got := len(chain.kinds()); got != 1 {
@@ -512,7 +532,7 @@ func TestIngestNeverDoubleSealsAfterProjectionFailure(t *testing.T) {
 
 	// Retry the SAME batch. The row is still missing (HasDetection is false), so a naive Seal would run
 	// again — SealOnce must return the first link instead.
-	res, err := svc.Ingest(tctx(), b, items)
+	res, err := svc.Ingest(tctx(), b.AgentID, b, items)
 	if err != nil {
 		t.Fatalf("the retry must complete the projection, got %v", err)
 	}
@@ -549,7 +569,7 @@ func TestIngestSealsSameDetectionIDInDistinctEngagements(t *testing.T) {
 	for _, eng := range []shared.ID{"eng-1", "eng-2"} {
 		b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: eng, Sequence: 1, KeyID: key.KeyID, Detections: refsFor(t, items)}
 		b.Signature = fleetagent.SignBatch(priv, b)
-		res, err := svc.Ingest(tctx(), b, items)
+		res, err := svc.Ingest(tctx(), b.AgentID, b, items)
 		if err != nil {
 			t.Fatalf("ingest into %s: %v", eng, err)
 		}
@@ -584,7 +604,7 @@ func TestIngestRefusesUnknownKeyID(t *testing.T) {
 	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
 	b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: "eng-1", Sequence: 1, KeyID: "kid-does-not-exist", Detections: refsFor(t, items)}
 	b.Signature = fleetagent.SignBatch(h.priv, b)
-	if _, err := h.svc.Ingest(tctx(), b, items); !errors.Is(err, shared.ErrForbidden) {
+	if _, err := h.svc.Ingest(tctx(), b.AgentID, b, items); !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("an unresolvable KeyID must be refused (fail closed), got %v", err)
 	}
 	if len(h.chain.kinds()) != 0 {
@@ -612,7 +632,7 @@ func TestIngestRefusesRevokedKey(t *testing.T) {
 	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
 	b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: "eng-1", Sequence: 1, KeyID: key.KeyID, Detections: refsFor(t, items)}
 	b.Signature = fleetagent.SignBatch(priv, b)
-	if _, err := svc.Ingest(tctx(), b, items); !errors.Is(err, shared.ErrForbidden) {
+	if _, err := svc.Ingest(tctx(), b.AgentID, b, items); !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("a revoked key must fail closed, got %v", err)
 	}
 	if len(chain.kinds()) != 0 {
