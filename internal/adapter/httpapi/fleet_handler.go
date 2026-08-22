@@ -79,6 +79,7 @@ type fleetRouter struct {
 	work             fleetWorkService
 	clusterInv       fleetClusterInventory // optional; nil ⇒ cluster inventory ingest is not served
 	hostInv          fleetHostInventory    // optional; nil ⇒ host inventory ingest is not served
+	telemetry        fleetTelemetryIngest  // optional; nil ⇒ telemetry ingest is not served (A3 #624)
 	minAgentVersion  string                // #412 version skew: agents below this are refused work; "" = no floor
 	cpVersion        string                // control-plane version advertised to agents (min_control_plane check)
 	rollout          fleetRolloutDecider   // optional; nil ⇒ no update is ever offered (#412 req 9)
@@ -170,6 +171,14 @@ func (rt *Router) SetFleetClusterInventory(s fleetClusterInventory) {
 func (rt *Router) SetFleetHostInventory(s fleetHostInventory) {
 	if rt.fleet != nil {
 		rt.fleet.hostInv = s
+	}
+}
+
+// SetFleetTelemetry wires the agent-plane telemetry batch ingest (A3 #624). When nil (or unset),
+// POST /api/v1/fleet/telemetry returns 404. It must be called after SetFleet.
+func (rt *Router) SetFleetTelemetry(s fleetTelemetryIngest) {
+	if rt.fleet != nil {
+		rt.fleet.telemetry = s
 	}
 }
 
@@ -299,6 +308,8 @@ func fleetAgentPlaneRoutes() []fleetAgentPlaneRoute {
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.clusterInventory)) }},
 		{"POST /api/v1/fleet/inventory/host", "/api/v1/fleet/inventory/",
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.hostInventory)) }},
+		{"POST /api/v1/fleet/telemetry", "/api/v1/fleet/telemetry",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestTelemetry)) }},
 	}
 }
 
