@@ -13,7 +13,7 @@ func TestAIEvaluationReleasePromotionAndRollbackAreVersionedAndChained(t *testin
 	manifest := releaseTestManifest("release-2026-08-canary", AIEvaluationReleasePromote, comparison.ComparisonID, "")
 	manifest.Approvals = releaseTestApprovals(t, AIEvaluationReleaseLedger{}, &evidence, manifest)
 
-	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &evidence, manifest)
+	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &evidence, manifest, releaseTestApprovers())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestAIEvaluationReleasePromotionAndRollbackAreVersionedAndChained(t *testin
 
 	rollback := releaseTestManifest("release-2026-08-rollback", AIEvaluationReleaseRollback, "", "initial")
 	rollback.Approvals = releaseTestApprovals(t, ledger, nil, rollback)
-	ledger, err = ApplyAIEvaluationRelease(ledger, nil, rollback)
+	ledger, err = ApplyAIEvaluationRelease(ledger, nil, rollback, releaseTestApprovers())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,10 +57,77 @@ func TestAIEvaluationReleaseRejectsMachineDuplicateAndReplayedApprovals(t *testi
 			changed := manifest
 			changed.Approvals = append([]AIEvaluationReleaseApproval(nil), manifest.Approvals...)
 			mutate(&changed)
-			if _, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &evidence, changed); err == nil {
+			if _, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &evidence, changed, releaseTestApprovers()); err == nil {
 				t.Fatal("unsafe release approval was accepted")
 			}
 		})
+	}
+}
+
+func TestAIEvaluationReleaseRequiresAllowlistedHumanApprovers(t *testing.T) {
+	evidence := releaseTestEvidence(t)
+	comparison := evidence.Comparison
+	manifest := releaseTestManifest("release-canary", AIEvaluationReleasePromote, comparison.ComparisonID, "")
+	manifest.Approvals = releaseTestApprovals(t, AIEvaluationReleaseLedger{}, &evidence, manifest)
+
+	rejected := map[string][]string{
+		"no allowlist":            nil,
+		"empty allowlist":         {},
+		"security absent":         {"pm@example.com"},
+		"case differs":            {"PM@example.com", "security@example.com"},
+		"entry is not trimmed":    {" pm@example.com", "security@example.com"},
+		"machine principal entry": {"system:release", "security@example.com"},
+	}
+	for name, approvers := range rejected {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &evidence, manifest, approvers); err == nil {
+				t.Fatal("release recorded an approver the operator never admitted")
+			}
+		})
+	}
+
+	// The denylist keeps its say: an allowlist entry cannot launder a model identity into an approval.
+	launder := manifest
+	launder.Approvals = append([]AIEvaluationReleaseApproval(nil), manifest.Approvals...)
+	launder.Approvals[0].Reviewer = comparison.CandidateRun.ProposerModel
+	if _, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &evidence, launder,
+		[]string{comparison.CandidateRun.ProposerModel, "security@example.com"}); err == nil {
+		t.Fatal("allowlisting a model identity admitted it as a human approver")
+	}
+
+	if _, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &evidence, manifest, releaseTestApprovers()); err != nil {
+		t.Fatalf("allowlisted approvers were rejected: %v", err)
+	}
+}
+
+// A decision keeps the approvers it was admitted with. An approver who later leaves the allowlist -- or
+// a ledger read somewhere the allowlist is not available at all -- must not invalidate signed history,
+// otherwise the append-only evidence chain would stop loading on a staffing change.
+func TestAIEvaluationReleaseLedgerValidatesWithoutTheApproverAllowlist(t *testing.T) {
+	evidence := releaseTestEvidence(t)
+	manifest := releaseTestManifest("release-canary", AIEvaluationReleasePromote, evidence.Comparison.ComparisonID, "")
+	manifest.Approvals = releaseTestApprovals(t, AIEvaluationReleaseLedger{}, &evidence, manifest)
+	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &evidence, manifest, releaseTestApprovers())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Validate(); err != nil {
+		t.Fatalf("signed history failed to validate without an allowlist: %v", err)
+	}
+	b, err := json.Marshal(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadAIEvaluationReleaseLedger(b)
+	if err != nil || loaded.HeadDecisionID != ledger.HeadDecisionID {
+		t.Fatalf("stored ledger no longer loads: %+v err=%v", loaded, err)
+	}
+
+	// The next decision still has to clear the allowlist in force now.
+	rollback := releaseTestManifest("release-rollback", AIEvaluationReleaseRollback, "", "initial")
+	rollback.Approvals = releaseTestApprovals(t, ledger, nil, rollback)
+	if _, err := ApplyAIEvaluationRelease(ledger, nil, rollback, []string{"pm@example.com"}); err == nil {
+		t.Fatal("a later decision skipped the current allowlist")
 	}
 }
 
@@ -80,7 +147,7 @@ func TestAIEvaluationReleaseRejectsBlockedComparisonAndTamperedLedger(t *testing
 
 	manifest = releaseTestManifest("release-canary", AIEvaluationReleasePromote, comparison.ComparisonID, "")
 	manifest.Approvals = releaseTestApprovals(t, AIEvaluationReleaseLedger{}, &evidence, manifest)
-	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &evidence, manifest)
+	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &evidence, manifest, releaseTestApprovers())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +162,7 @@ func TestAIEvaluationReleaseRejectsUnknownAndCurrentRollbackTargets(t *testing.T
 	comparison := evidence.Comparison
 	manifest := releaseTestManifest("release-canary", AIEvaluationReleasePromote, comparison.ComparisonID, "")
 	manifest.Approvals = releaseTestApprovals(t, AIEvaluationReleaseLedger{}, &evidence, manifest)
-	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &evidence, manifest)
+	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &evidence, manifest, releaseTestApprovers())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +178,7 @@ func TestAIEvaluationReleaseApprovalCannotReplayAfterLedgerHeadChanges(t *testin
 	firstEvidence := releaseTestEvidenceFor(t, "prompt-v1", "prompt-v2")
 	first := releaseTestManifest("release-one", AIEvaluationReleasePromote, firstEvidence.Comparison.ComparisonID, "")
 	first.Approvals = releaseTestApprovals(t, AIEvaluationReleaseLedger{}, &firstEvidence, first)
-	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &firstEvidence, first)
+	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &firstEvidence, first, releaseTestApprovers())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,11 +189,11 @@ func TestAIEvaluationReleaseApprovalCannotReplayAfterLedgerHeadChanges(t *testin
 	secondEvidence := releaseTestEvidenceFor(t, "prompt-v2", "prompt-v3")
 	second := releaseTestManifest("release-two", AIEvaluationReleasePromote, secondEvidence.Comparison.ComparisonID, "")
 	second.Approvals = releaseTestApprovals(t, ledger, &secondEvidence, second)
-	ledger, err = ApplyAIEvaluationRelease(ledger, &secondEvidence, second)
+	ledger, err = ApplyAIEvaluationRelease(ledger, &secondEvidence, second, releaseTestApprovers())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ApplyAIEvaluationRelease(ledger, nil, rollback); err == nil {
+	if _, err := ApplyAIEvaluationRelease(ledger, nil, rollback, releaseTestApprovers()); err == nil {
 		t.Fatal("approval from an older ledger head was replayed")
 	}
 }
@@ -135,7 +202,7 @@ func TestAIEvaluationReleaseRejectsFreshBaselineForSameActiveConfiguration(t *te
 	firstEvidence := releaseTestEvidenceFor(t, "prompt-v1", "prompt-v2")
 	first := releaseTestManifest("release-one", AIEvaluationReleasePromote, firstEvidence.Comparison.ComparisonID, "")
 	first.Approvals = releaseTestApprovals(t, AIEvaluationReleaseLedger{}, &firstEvidence, first)
-	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &firstEvidence, first)
+	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &firstEvidence, first, releaseTestApprovers())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +230,7 @@ func TestAIEvaluationReleaseRejectsFreshBaselineForSameActiveConfiguration(t *te
 	validEvidence := releaseTestEvidenceFor(t, "prompt-v2", "prompt-v3")
 	validManifest := releaseTestManifest("release-two-valid", AIEvaluationReleasePromote, validEvidence.Comparison.ComparisonID, "")
 	validManifest.Approvals = releaseTestApprovals(t, ledger, &validEvidence, validManifest)
-	validLedger, err := ApplyAIEvaluationRelease(ledger, &validEvidence, validManifest)
+	validLedger, err := ApplyAIEvaluationRelease(ledger, &validEvidence, validManifest, releaseTestApprovers())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +275,7 @@ func TestAIEvaluationReleaseEnforcesPromotionPolicyFloor(t *testing.T) {
 	validEvidence := releaseTestEvidence(t)
 	validManifest := releaseTestManifest("release-valid", AIEvaluationReleasePromote, validEvidence.Comparison.ComparisonID, "")
 	validManifest.Approvals = releaseTestApprovals(t, AIEvaluationReleaseLedger{}, &validEvidence, validManifest)
-	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &validEvidence, validManifest)
+	ledger, err := ApplyAIEvaluationRelease(AIEvaluationReleaseLedger{}, &validEvidence, validManifest, releaseTestApprovers())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,6 +352,10 @@ func releaseTestEvidenceFor(t *testing.T, baselinePrompt, candidatePrompt string
 func releaseTestManifest(version, action, comparisonID, rollbackTo string) AIEvaluationReleaseManifest {
 	return AIEvaluationReleaseManifest{SchemaVersion: AIEvaluationReleaseManifestSchema, Version: version,
 		Action: action, Provenance: "security/change-42", ComparisonID: comparisonID, RollbackTo: rollbackTo}
+}
+
+func releaseTestApprovers() []string {
+	return []string{"pm@example.com", "security@example.com"}
 }
 
 func releaseTestApprovals(t *testing.T, ledger AIEvaluationReleaseLedger, evidence *AIEvaluationPromotionEvidence, manifest AIEvaluationReleaseManifest) []AIEvaluationReleaseApproval {

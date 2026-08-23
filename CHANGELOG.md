@@ -45,6 +45,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   precondition reports pair counts in dedicated `*_count` failure fields, so the basis-point fields
   of a promotion failure always mean a rate.
 
+- **Operator-owned human approver allowlist on AI-triage releases.** Recording a promotion or rollback
+  now requires `--human-approvers`, a private operator-owned allowlist an approver identity must appear
+  in. The release manifest names its own PM and Security approvers, so previously the only test of their
+  humanness was a reserved machine-prefix denylist, which by construction cannot recognise an identity
+  scheme it has never seen; the allowlist admits identities from outside the artifact being validated.
+  It is enforced when a decision is admitted, not when stored history is re-validated, so an approver
+  leaving the allowlist never invalidates a ledger they already signed.
+
 - **AI-triage escape rate measured against the exemptible population.** Evaluation reports now carry
   `exemptible_true_positives` and `exemptible_escape_rate` alongside the corpus-wide rate, and the
   promotion boundary reads the exemptible denominator. A true positive a human-review floor holds

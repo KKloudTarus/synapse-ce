@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,19 +53,20 @@ func TestRunCreatesPromotionAndRollbackLedger(t *testing.T) {
 	baselinePath := writeReleaseFixture(t, dir, "baseline.json", baseline)
 	candidatePath := writeReleaseFixture(t, dir, "candidate.json", candidate)
 	comparisonPath := writeReleaseFixture(t, dir, "comparison.json", comparison)
+	approversPath := writeReleaseApprovers(t, dir, "approvers.txt", 0o600)
 
 	promotion := sca.AIEvaluationReleaseManifest{SchemaVersion: sca.AIEvaluationReleaseManifestSchema,
 		Version: "release-canary", Action: sca.AIEvaluationReleasePromote, Provenance: "security/change-42", ComparisonID: comparison.ComparisonID}
 	promotionPath := writeReleaseFixture(t, dir, "promotion.json", promotion)
 	var digestOutput bytes.Buffer
-	if err := run(promotionPath, "", comparisonPath, baselinePath, candidatePath, "", true, &digestOutput); err != nil {
+	if err := run(promotionPath, "", comparisonPath, baselinePath, candidatePath, "", "", true, &digestOutput); err != nil {
 		t.Fatalf("print promotion digest: %v", err)
 	}
 	digest := releaseDigest(t, digestOutput.Bytes())
 	promotion.Approvals = releaseApprovals(digest)
 	promotionPath = writeReleaseFixture(t, dir, "promotion-approved.json", promotion)
 	ledgerPath := filepath.Join(dir, "ledger-v1.json")
-	if err := run(promotionPath, "", comparisonPath, baselinePath, candidatePath, ledgerPath, false, &bytes.Buffer{}); err != nil {
+	if err := run(promotionPath, "", comparisonPath, baselinePath, candidatePath, ledgerPath, approversPath, false, &bytes.Buffer{}); err != nil {
 		t.Fatalf("promote: %v", err)
 	}
 	ledger := loadReleaseLedger(t, ledgerPath)
@@ -76,18 +78,54 @@ func TestRunCreatesPromotionAndRollbackLedger(t *testing.T) {
 		Version: "release-rollback", Action: sca.AIEvaluationReleaseRollback, Provenance: "incident/42", RollbackTo: "initial"}
 	rollbackPath := writeReleaseFixture(t, dir, "rollback.json", rollback)
 	digestOutput.Reset()
-	if err := run(rollbackPath, ledgerPath, "", "", "", "", true, &digestOutput); err != nil {
+	if err := run(rollbackPath, ledgerPath, "", "", "", "", "", true, &digestOutput); err != nil {
 		t.Fatalf("print rollback digest: %v", err)
 	}
 	rollback.Approvals = releaseApprovals(releaseDigest(t, digestOutput.Bytes()))
 	rollbackPath = writeReleaseFixture(t, dir, "rollback-approved.json", rollback)
 	rolledBackPath := filepath.Join(dir, "ledger-v2.json")
-	if err := run(rollbackPath, ledgerPath, "", "", "", rolledBackPath, false, &bytes.Buffer{}); err != nil {
+	if err := run(rollbackPath, ledgerPath, "", "", "", rolledBackPath, approversPath, false, &bytes.Buffer{}); err != nil {
 		t.Fatalf("rollback: %v", err)
 	}
 	rolledBack := loadReleaseLedger(t, rolledBackPath)
 	if len(rolledBack.Decisions) != 2 || rolledBack.Decisions[1].ActiveRun.PromptVersion != "prompt-v1" {
 		t.Fatalf("rollback ledger = %+v", rolledBack)
+	}
+}
+
+func TestRunRequiresAPrivateHumanApproverAllowlistToRecordADecision(t *testing.T) {
+	dir := t.TempDir()
+	baseline := releaseFixtureReport(t, "prompt-v1")
+	candidate := releaseFixtureReport(t, "prompt-v2")
+	comparison, err := sca.CompareAIEvaluationReports(baseline, candidate, sca.DefaultAIEvaluationPromotionPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	baselinePath := writeReleaseFixture(t, dir, "baseline.json", baseline)
+	candidatePath := writeReleaseFixture(t, dir, "candidate.json", candidate)
+	comparisonPath := writeReleaseFixture(t, dir, "comparison.json", comparison)
+	promotion := sca.AIEvaluationReleaseManifest{SchemaVersion: sca.AIEvaluationReleaseManifestSchema,
+		Version: "release-canary", Action: sca.AIEvaluationReleasePromote, Provenance: "security/change-42", ComparisonID: comparison.ComparisonID}
+	var digestOutput bytes.Buffer
+	if err := run(writeReleaseFixture(t, dir, "promotion.json", promotion), "", comparisonPath, baselinePath, candidatePath, "", "", true, &digestOutput); err != nil {
+		t.Fatalf("print promotion digest: %v", err)
+	}
+	promotion.Approvals = releaseApprovals(releaseDigest(t, digestOutput.Bytes()))
+	promotionPath := writeReleaseFixture(t, dir, "promotion-approved.json", promotion)
+
+	// A world-readable allowlist is one a second party can edit, which would let them admit whoever they
+	// choose; an absent one leaves the manifest asserting its own approvers are human.
+	shared := writeReleaseApprovers(t, dir, "shared-approvers.txt", 0o644)
+	for name, approvers := range map[string]string{"absent": "", "group readable": shared} {
+		t.Run(name, func(t *testing.T) {
+			ledgerPath := filepath.Join(dir, "ledger-"+strings.ReplaceAll(name, " ", "-")+".json")
+			if err := run(promotionPath, "", comparisonPath, baselinePath, candidatePath, ledgerPath, approvers, false, &bytes.Buffer{}); err == nil {
+				t.Fatal("release decision was recorded without a private human approver allowlist")
+			}
+			if _, err := os.Lstat(ledgerPath); !os.IsNotExist(err) {
+				t.Fatalf("rejected release still wrote a ledger: %v", err)
+			}
+		})
 	}
 }
 
@@ -149,6 +187,18 @@ func writeReleaseFixture(t *testing.T, dir, name string, value any) string {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func writeReleaseApprovers(t *testing.T, dir, name string, perm os.FileMode) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("# operator-owned allowlist\npm@example.com\nsecurity@example.com\n"), perm); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, perm); err != nil {
 		t.Fatal(err)
 	}
 	return path

@@ -22,16 +22,17 @@ func main() {
 	baselinePath := flag.String("baseline", "", "baseline synapse-ai-triage-evaluation-v4 report (promotion only)")
 	candidatePath := flag.String("candidate", "", "candidate synapse-ai-triage-evaluation-v4 report (promotion only)")
 	outputPath := flag.String("output", "", "new path for the append-only release ledger")
+	humanApproversPath := flag.String("human-approvers", "", "private operator-owned allowlist file, one human approver identity per line")
 	printDigest := flag.Bool("print-review-digest", false, "print the digest PM/Security must approve without writing a ledger")
 	flag.Parse()
 
-	if err := run(*manifestPath, *ledgerPath, *comparisonPath, *baselinePath, *candidatePath, *outputPath, *printDigest, os.Stdout); err != nil {
+	if err := run(*manifestPath, *ledgerPath, *comparisonPath, *baselinePath, *candidatePath, *outputPath, *humanApproversPath, *printDigest, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "synapse-fptriage-release: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(manifestPath, ledgerPath, comparisonPath, baselinePath, candidatePath, outputPath string, printDigest bool, stdout io.Writer) error {
+func run(manifestPath, ledgerPath, comparisonPath, baselinePath, candidatePath, outputPath, humanApproversPath string, printDigest bool, stdout io.Writer) error {
 	manifestPath, ledgerPath, comparisonPath = strings.TrimSpace(manifestPath), strings.TrimSpace(ledgerPath), strings.TrimSpace(comparisonPath)
 	baselinePath, candidatePath, outputPath = strings.TrimSpace(baselinePath), strings.TrimSpace(candidatePath), strings.TrimSpace(outputPath)
 	if manifestPath == "" {
@@ -87,16 +88,66 @@ func run(manifestPath, ledgerPath, comparisonPath, baselinePath, candidatePath, 
 	if outputPath == "" || outputPath == "-" {
 		return fmt.Errorf("--output must be a new ledger file path")
 	}
-	for _, input := range []string{manifestPath, ledgerPath, comparisonPath, baselinePath, candidatePath} {
+	for _, input := range []string{manifestPath, ledgerPath, comparisonPath, baselinePath, candidatePath, strings.TrimSpace(humanApproversPath)} {
 		if input != "" && sameReleasePath(outputPath, input) {
 			return fmt.Errorf("--output must not overwrite an input artifact")
 		}
 	}
-	updated, err := sca.ApplyAIEvaluationRelease(ledger, evidence, manifest)
+	approvers, err := loadHumanApprovers(humanApproversPath)
+	if err != nil {
+		return err
+	}
+	updated, err := sca.ApplyAIEvaluationRelease(ledger, evidence, manifest, approvers)
 	if err != nil {
 		return err
 	}
 	return writeReleaseLedger(outputPath, updated)
+}
+
+// loadHumanApprovers reads the operator-owned allowlist. It is required only on the path that writes a
+// decision: --print-review-digest runs before PM and Security have approved anything, so demanding the
+// allowlist there would gate printing a digest on a file that has nothing yet to check.
+func loadHumanApprovers(path string) ([]string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, fmt.Errorf("--human-approvers is required to record a release decision")
+	}
+	if err := requirePrivateFile(path); err != nil {
+		return nil, fmt.Errorf("human approver allowlist: %w", err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read human approver allowlist: %w", err)
+	}
+	var approvers []string
+	for _, line := range strings.Split(string(b), "\n") {
+		if identity := strings.TrimSpace(line); identity != "" && !strings.HasPrefix(identity, "#") {
+			approvers = append(approvers, identity)
+		}
+	}
+	if len(approvers) == 0 {
+		return nil, fmt.Errorf("human approver allowlist is empty")
+	}
+	return approvers, nil
+}
+
+// requirePrivateFile refuses an allowlist any other account can read or replace, mirroring the same
+// guard in synapse-fptriage-blind: an allowlist a second party can edit admits whoever they choose.
+func requirePrivateFile(path string) error {
+	if runtime.GOOS == "windows" {
+		return fmt.Errorf("private input files are not supported on Windows: current-user-only ACL verification is unavailable in this command")
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("stat private input: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return fmt.Errorf("private input must be a regular file, not a symlink or special file")
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("private input must not grant group or other access")
+	}
+	return nil
 }
 
 func loadPromotionEvidence(comparisonPath, baselinePath, candidatePath string) (sca.AIEvaluationPromotionEvidence, error) {
