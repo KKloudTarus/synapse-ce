@@ -144,24 +144,21 @@ func (s *EndpointState) applyProcess(env telemetry.TelemetryEnvelope) []Timeline
 
 	s.ensureParentStub(obs)
 
-	kind := TimelineProcessStart
-	if obs.Kind == "exec" {
-		kind = TimelineProcessExec
+	return s.appendTimeline(env)
+}
+
+// appendTimeline appends the envelope's timeline transition (built by the shared timelineEntryFor) and
+// returns it, or nil if there is none or it was a duplicate.
+func (s *EndpointState) appendTimeline(env telemetry.TelemetryEnvelope) []TimelineEntry {
+	entry, ok := timelineEntryFor(s.tenantID, env)
+	if !ok {
+		return nil
 	}
-	entry, appended := s.timeline.append(TimelineEntry{
-		OccurredAt: env.OccurredAt,
-		TenantID:   s.tenantID,
-		AssetID:    s.assetID,
-		EntityKind: EntityProcess,
-		EntityID:   obs.EntityID,
-		Kind:       kind,
-		EventID:    env.EventID,
-		Summary:    processObsSummary(obs),
-	})
+	stored, appended := s.timeline.append(entry)
 	if !appended {
 		return nil
 	}
-	return []TimelineEntry{entry}
+	return []TimelineEntry{stored}
 }
 
 // ensureParentStub records a referenced-but-unobserved parent as an explicit ProcessUnknown entity, so a
@@ -223,20 +220,7 @@ func (s *EndpointState) applyNetwork(env telemetry.TelemetryEnvelope) []Timeline
 	// reorder-invariant log of observations. Deduplication of the flow itself lives on the connection
 	// entity above, not on the timeline — a per-flow entry would have to take the timestamp of whichever
 	// connect was folded first, which would not be reorder-invariant.
-	entry, appended := s.timeline.append(TimelineEntry{
-		OccurredAt: env.OccurredAt,
-		TenantID:   s.tenantID,
-		AssetID:    s.assetID,
-		EntityKind: EntityNetwork,
-		EntityID:   id,
-		Kind:       TimelineNetworkConnect,
-		EventID:    env.EventID,
-		Summary:    connectionObsSummary(obs),
-	})
-	if !appended {
-		return nil
-	}
-	return []TimelineEntry{entry}
+	return s.appendTimeline(env)
 }
 
 // Process returns a copy of one process entity by id.
@@ -298,6 +282,60 @@ func (s *EndpointState) Ancestors(id shared.ID) []ProcessEntity {
 		cur = parent
 	}
 	return out
+}
+
+// timelineEntryFor returns the single timeline transition an envelope produces, and whether it produces
+// one (a container-only event produces none). It is PURE — it depends only on the envelope, not on any
+// accumulated state — so the timeline is a stateless per-envelope projection: the same envelope always
+// yields the same entry, and both the live fold (Observe) and the persistence path (TimelineEntriesFor)
+// build entries through this one function, so they can never drift. The envelope must already be validated.
+func timelineEntryFor(tenantID shared.ID, env telemetry.TelemetryEnvelope) (TimelineEntry, bool) {
+	e := TimelineEntry{OccurredAt: env.OccurredAt, TenantID: tenantID, AssetID: env.AssetID, EventID: env.EventID}
+	switch env.EventClass {
+	case detection.ClassProcess:
+		obs := env.Event.Process
+		e.EntityKind, e.EntityID, e.Summary = EntityProcess, obs.EntityID, processObsSummary(obs)
+		e.Kind = TimelineProcessStart
+		if obs.Kind == "exec" {
+			e.Kind = TimelineProcessExec
+		}
+		return e, true
+	case detection.ClassNetwork:
+		obs := env.Event.Network
+		e.EntityKind = EntityNetwork
+		e.EntityID = ConnectionID(env.AssetID, obs.ProcessEntityID, obs.Proto, obs.Direction, obs.LocalAddr, obs.LocalPort, obs.RemoteAddr, obs.RemotePort)
+		e.Kind, e.Summary = TimelineNetworkConnect, connectionObsSummary(obs)
+		return e, true
+	case detection.ClassFile:
+		obs := env.Event.File
+		e.EntityKind, e.EntityID = EntityFile, obs.TargetID()
+		e.Kind, e.Summary = fileTimelineKind(obs.Op), fileObsSummary(obs)
+		return e, true
+	case detection.ClassPrivilege:
+		obs := env.Event.Privilege
+		e.EntityKind, e.EntityID = EntityIdentity, obs.ProcessEntityID
+		e.Kind, e.Summary = TimelinePrivilegeChange, privilegeSummary(obs)
+		return e, true
+	}
+	return TimelineEntry{}, false
+}
+
+// TimelineEntriesFor is the stateless State-Timeline projection of one telemetry envelope, for the
+// persistence path (a store appends what this returns, deduplicating by EventID). It validates the
+// envelope first (fail-closed) and stamps entries with the given tenant and the envelope's asset. It
+// returns no entries for a class that has no transition (container-only). Because it shares
+// timelineEntryFor with the live fold, a persisted timeline is identical to the in-memory one.
+func TimelineEntriesFor(tenantID shared.ID, env telemetry.TelemetryEnvelope) ([]TimelineEntry, error) {
+	if tenantID.IsZero() {
+		return nil, fmt.Errorf("%w: timeline projection requires a tenant id", shared.ErrValidation)
+	}
+	if err := env.Validate(); err != nil {
+		return nil, fmt.Errorf("endpoint: reject malformed telemetry envelope: %w", err)
+	}
+	if entry, ok := timelineEntryFor(tenantID, env); ok {
+		return []TimelineEntry{entry}, nil
+	}
+	return nil, nil
 }
 
 // laterEvent reports whether the event (occ, eventID) is strictly later than a reference event by event
