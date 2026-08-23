@@ -3,6 +3,7 @@ package endpoint
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -13,16 +14,20 @@ import (
 const maxAncestorWalk = 256
 
 // EndpointState is the projected endpoint-visibility state for ONE (tenant, asset): its process entities
-// (B1), network connections (B2), and the State Timeline (B7) of their transitions. It is built by
-// folding telemetry envelopes with Observe and is a pure, deterministic aggregate — no I/O, no clock.
-// The zero value is not usable; construct it with NewEndpointState.
+// (B1), network connections (B2), file targets (B3), privilege transitions (B4), container instances (B5),
+// and the State Timeline (B7) of their transitions. It is built by folding telemetry envelopes with
+// Observe and is a pure, deterministic aggregate — no I/O, no clock. The zero value is not usable;
+// construct it with NewEndpointState.
 type EndpointState struct {
-	tenantID  shared.ID
-	assetID   shared.ID
-	processes map[shared.ID]*ProcessEntity
-	conns     map[shared.ID]*NetworkConnection
-	timeline  *StateTimeline
-	processed map[shared.ID]struct{}
+	tenantID   shared.ID
+	assetID    shared.ID
+	processes  map[shared.ID]*ProcessEntity
+	conns      map[shared.ID]*NetworkConnection
+	files      map[shared.ID]*FileTarget
+	containers map[shared.ID]*ContainerInstance
+	privileges []PrivilegeTransition
+	timeline   *StateTimeline
+	processed  map[shared.ID]struct{}
 }
 
 // NewEndpointState creates the projection for one asset. Both ids are required — endpoint visibility is
@@ -35,12 +40,14 @@ func NewEndpointState(tenantID, assetID shared.ID) (*EndpointState, error) {
 		return nil, fmt.Errorf("%w: endpoint state requires an asset id", shared.ErrValidation)
 	}
 	return &EndpointState{
-		tenantID:  tenantID,
-		assetID:   assetID,
-		processes: make(map[shared.ID]*ProcessEntity),
-		conns:     make(map[shared.ID]*NetworkConnection),
-		timeline:  newStateTimeline(),
-		processed: make(map[shared.ID]struct{}),
+		tenantID:   tenantID,
+		assetID:    assetID,
+		processes:  make(map[shared.ID]*ProcessEntity),
+		conns:      make(map[shared.ID]*NetworkConnection),
+		files:      make(map[shared.ID]*FileTarget),
+		containers: make(map[shared.ID]*ContainerInstance),
+		timeline:   newStateTimeline(),
+		processed:  make(map[shared.ID]struct{}),
 	}, nil
 }
 
@@ -53,8 +60,8 @@ func NewEndpointState(tenantID, assetID shared.ID) (*EndpointState, error) {
 //   - fail-closed — the envelope is fully validated (telemetry.Validate) and a wrong-asset envelope is
 //     rejected, never silently folded.
 //
-// Only process (B1) and network (B2) classes are projected here; file/privilege envelopes are accepted
-// (already validated) and marked processed but produce no state yet (B3/B4).
+// All four telemetry classes are projected: process (B1), network (B2), file (B3), privilege (B4); and
+// every event, whatever its class, feeds the runtime container inventory (B5) from its ResourceContext.
 func (s *EndpointState) Observe(env telemetry.TelemetryEnvelope) ([]TimelineEntry, error) {
 	if err := env.Validate(); err != nil {
 		return nil, fmt.Errorf("endpoint: reject malformed telemetry envelope: %w", err)
@@ -72,10 +79,15 @@ func (s *EndpointState) Observe(env telemetry.TelemetryEnvelope) ([]TimelineEntr
 		entries = s.applyProcess(env)
 	case detection.ClassNetwork:
 		entries = s.applyNetwork(env)
-	default:
-		// File/privilege and any future class are valid telemetry but not projected in B1/B2; accept and
-		// mark processed so a later B3/B4 fold in a fresh state can own them.
+	case detection.ClassFile:
+		entries = s.applyFile(env)
+	case detection.ClassPrivilege:
+		entries = s.applyPrivilege(env)
 	}
+	// Runtime container inventory (B5) is cross-cutting: any event observed from inside a container
+	// inventories it, regardless of the event's class. Inventory only — container presence is not a
+	// timeline transition (start/stop events are a sensor tail A1 does not carry yet).
+	s.observeContainer(env)
 	s.processed[env.EventID] = struct{}{}
 	return entries, nil
 }
@@ -100,16 +112,17 @@ func (s *EndpointState) applyProcess(env telemetry.TelemetryEnvelope) []Timeline
 	}
 
 	// Descriptor fields are resolved by EVENT time: an observation only overwrites them when it is the
-	// latest one seen for this entity (its OccurredAt is not before the current last-seen). This makes the
-	// projection invariant to the order envelopes are folded in — an out-of-order older envelope never
-	// clobbers newer descriptors. An exec replaces the image.
-	descriptorIsLatest := !existed || !env.OccurredAt.Before(pe.LastSeenAt)
+	// latest one seen for this entity, with EventID breaking an exact-timestamp tie. This makes the
+	// projection invariant to the order envelopes are folded in — an out-of-order (or same-instant, lower
+	// EventID) envelope never clobbers newer descriptors. An exec replaces the image.
+	descriptorIsLatest := !existed || laterEvent(env.OccurredAt, env.EventID, pe.LastSeenAt, pe.descEventID)
 	if descriptorIsLatest {
 		pe.PID = obs.PID
 		pe.PPID = obs.PPID
 		pe.ParentEntityID = obs.ParentEntityID
 		pe.UID = obs.UID
 		pe.Resource = env.ResourceContext
+		pe.descEventID = env.EventID
 		if obs.Comm != "" {
 			pe.Comm = obs.Comm
 		}
@@ -285,6 +298,19 @@ func (s *EndpointState) Ancestors(id shared.ID) []ProcessEntity {
 		cur = parent
 	}
 	return out
+}
+
+// laterEvent reports whether the event (occ, eventID) is strictly later than a reference event by event
+// time, with EventID as the deterministic tiebreak for an identical timestamp. It is the single rule the
+// folds use to resolve "latest wins" descriptor fields so the outcome never depends on fold order.
+func laterEvent(occ time.Time, eventID shared.ID, refOcc time.Time, refEventID shared.ID) bool {
+	if occ.After(refOcc) {
+		return true
+	}
+	if occ.Equal(refOcc) {
+		return eventID > refEventID
+	}
+	return false
 }
 
 // processObsSummary / connectionObsSummary build a timeline entry's human summary from the OBSERVATION,

@@ -49,21 +49,18 @@ func TestTimelineDedupesByEventID(t *testing.T) {
 	}
 }
 
-func TestTimelineEqualTimestampsKeepInsertionOrder(t *testing.T) {
+func TestTimelineEqualTimestampsTiebreakByEventIDNotInsertionOrder(t *testing.T) {
 	tl := newStateTimeline()
-	// Three entries at the SAME instant: the deterministic tiebreak is insertion order (Seq).
-	tl.append(entry("first", base))
-	tl.append(entry("second", base))
-	tl.append(entry("third", base))
+	// Three entries at the SAME instant, appended out of EventID order. The tiebreak is EventID, NOT
+	// insertion order — so the result is reorder-invariant even when timestamps collide.
+	tl.append(entry("c", base))
+	tl.append(entry("a", base))
+	tl.append(entry("b", base))
 	got := tl.Entries()
-	want := []string{"first", "second", "third"}
+	want := []string{"a", "b", "c"}
 	for i, w := range want {
 		if string(got[i].EventID) != w {
-			t.Fatalf("equal-timestamp tiebreak broke determinism at %d: got %s want %s", i, got[i].EventID, w)
+			t.Fatalf("equal-timestamp tiebreak not by EventID at %d: got %s want %s", i, got[i].EventID, w)
 		}
-	}
-	// Seq must be assigned in insertion order.
-	if got[0].Seq != 0 || got[1].Seq != 1 || got[2].Seq != 2 {
-		t.Fatalf("seq assignment wrong: %d %d %d", got[0].Seq, got[1].Seq, got[2].Seq)
 	}
 }

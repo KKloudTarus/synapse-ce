@@ -22,10 +22,11 @@ import (
 type EntityKind string
 
 const (
-	EntityProcess  EntityKind = "process"
-	EntityNetwork  EntityKind = "network"
-	EntityFile     EntityKind = "file"
-	EntityIdentity EntityKind = "identity"
+	EntityProcess   EntityKind = "process"
+	EntityNetwork   EntityKind = "network"
+	EntityFile      EntityKind = "file"
+	EntityIdentity  EntityKind = "identity"
+	EntityContainer EntityKind = "container"
 )
 
 // TimelineEntryKind is the specific state transition an entry records.
@@ -35,18 +36,23 @@ const (
 	// Process lifecycle (B1). A fork creates a child; an exec replaces the image of an existing entity.
 	TimelineProcessStart TimelineEntryKind = "process_start"
 	TimelineProcessExec  TimelineEntryKind = "process_exec"
-	// Network (B2): the first time a flow is seen. Re-observing the same flow widens its last-seen time
-	// but is not a new transition, so it does not add a second entry.
+	// Network (B2): one entry per connect event; the connection entity deduplicates the flow.
 	TimelineNetworkConnect TimelineEntryKind = "network_connect"
+	// File (B3): one entry per file access event, tagged with the observed op.
+	TimelineFileOpen   TimelineEntryKind = "file_open"
+	TimelineFileWrite  TimelineEntryKind = "file_write"
+	TimelineFileRename TimelineEntryKind = "file_rename"
+	// Identity/privilege (B4): a privilege or capability transition on a process. Never-sampled upstream
+	// (A0.6), so every one surfaces here.
+	TimelinePrivilegeChange TimelineEntryKind = "privilege_change"
 )
 
 // TimelineEntry is one endpoint state transition, ordered by EVENT time (when it happened on the host),
 // never by ingest order. It stays explainable after the raw telemetry that produced it expires because it
-// carries its own summary and the identities it links.
+// carries its own summary and the identities it links. Every field is content-derived, so a given set of
+// envelopes yields byte-identical entries regardless of fold order — the property Phase C evidence sealing
+// depends on.
 type TimelineEntry struct {
-	// Seq is the assignment order within one StateTimeline. It is the deterministic tiebreak when two
-	// transitions share an OccurredAt; it is not a host-wide sequence.
-	Seq        uint64
 	OccurredAt time.Time
 	TenantID   shared.ID
 	AssetID    shared.ID
@@ -54,7 +60,7 @@ type TimelineEntry struct {
 	EntityID   shared.ID
 	Kind       TimelineEntryKind
 	// EventID is the source envelope's event id; it is the dedupe key so a replayed envelope never adds
-	// a duplicate transition.
+	// a duplicate transition, and the tiebreak that orders transitions sharing an OccurredAt.
 	EventID shared.ID
 	Summary string
 }
@@ -65,7 +71,6 @@ type TimelineEntry struct {
 type StateTimeline struct {
 	entries []TimelineEntry
 	seen    map[shared.ID]struct{}
-	nextSeq uint64
 }
 
 func newStateTimeline() *StateTimeline {
@@ -73,14 +78,11 @@ func newStateTimeline() *StateTimeline {
 }
 
 // append records a transition unless its EventID is already on the timeline. It returns the stored entry
-// (with its assigned Seq) and whether it was newly appended; a duplicate EventID returns (zero, false)
-// and changes nothing.
+// and whether it was newly appended; a duplicate EventID returns (zero, false) and changes nothing.
 func (t *StateTimeline) append(e TimelineEntry) (TimelineEntry, bool) {
 	if _, dup := t.seen[e.EventID]; dup {
 		return TimelineEntry{}, false
 	}
-	e.Seq = t.nextSeq
-	t.nextSeq++
 	t.seen[e.EventID] = struct{}{}
 	t.entries = append(t.entries, e)
 	return e, true
@@ -92,16 +94,18 @@ func (t *StateTimeline) has(eventID shared.ID) bool {
 	return ok
 }
 
-// Entries returns a copy of the timeline ordered by event time, with insertion order (Seq) as the
-// deterministic tiebreak for equal timestamps. Callers may mutate the returned slice freely.
+// Entries returns a copy of the timeline ordered by event time, with EventID as the tiebreak for equal
+// timestamps. EventID (not insertion order) is the tiebreak so the order is fully reorder-invariant: two
+// transitions at the same instant sort the same way no matter which order they were folded in — the
+// property Phase C evidence sealing depends on. Callers may mutate the returned slice freely.
 func (t *StateTimeline) Entries() []TimelineEntry {
 	out := make([]TimelineEntry, len(t.entries))
 	copy(out, t.entries)
-	sort.SliceStable(out, func(i, j int) bool {
+	sort.Slice(out, func(i, j int) bool {
 		if !out[i].OccurredAt.Equal(out[j].OccurredAt) {
 			return out[i].OccurredAt.Before(out[j].OccurredAt)
 		}
-		return out[i].Seq < out[j].Seq
+		return out[i].EventID < out[j].EventID
 	})
 	return out
 }

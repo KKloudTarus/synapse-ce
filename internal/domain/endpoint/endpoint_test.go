@@ -120,27 +120,6 @@ func TestObserveIsIdempotentByEventID(t *testing.T) {
 	}
 }
 
-func TestObserveIgnoresUnprojectedClasses(t *testing.T) {
-	s := mustState(t)
-	env := telemetry.TelemetryEnvelope{
-		SchemaVersion: telemetry.SchemaVersion,
-		EventID:       "f1", EventType: "file.open", EventClass: detection.ClassFile,
-		AgentID: testAgent, AssetID: testAsset, BootID: testBoot, OccurredAt: base, ObservedAt: base,
-		Event: telemetry.TelemetryEvent{Class: detection.ClassFile, File: &telemetry.FileObservation{Op: "open", Path: "/etc/passwd"}},
-	}
-	entries, err := s.Observe(env)
-	if err != nil {
-		t.Fatalf("file class must be accepted (not projected), got %v", err)
-	}
-	if len(entries) != 0 || s.timeline.Len() != 0 {
-		t.Fatalf("file class must produce no state in B1/B2")
-	}
-	// It is still marked processed, so a re-apply is a clean no-op.
-	if _, done := s.processed["f1"]; !done {
-		t.Fatal("unprojected event should still be marked processed")
-	}
-}
-
 // --- B1 process ---
 
 func TestForkThenExecTransitionsOneEntity(t *testing.T) {
@@ -339,16 +318,9 @@ func TestFoldIsReorderInvariant(t *testing.T) {
 	if !reflect.DeepEqual(fwd.Connections(), rev.Connections()) {
 		t.Fatalf("connections differ by fold order:\nfwd=%+v\nrev=%+v", fwd.Connections(), rev.Connections())
 	}
-	strip := func(es []TimelineEntry) []TimelineEntry {
-		out := make([]TimelineEntry, len(es))
-		for i, e := range es {
-			e.Seq = 0 // Seq is an internal insertion-order tiebreak, not part of the observable projection.
-			out[i] = e
-		}
-		return out
-	}
-	if !reflect.DeepEqual(strip(fwd.Timeline()), strip(rev.Timeline())) {
-		t.Fatalf("timeline differs by fold order:\nfwd=%+v\nrev=%+v", strip(fwd.Timeline()), strip(rev.Timeline()))
+	// The timeline is byte-identical (no insertion-order field remains); EventID is the tiebreak.
+	if !reflect.DeepEqual(fwd.Timeline(), rev.Timeline()) {
+		t.Fatalf("timeline differs by fold order:\nfwd=%+v\nrev=%+v", fwd.Timeline(), rev.Timeline())
 	}
 
 	// Sanity: descriptor is the exec image (latest event-time), started-at is the earliest event, and the
