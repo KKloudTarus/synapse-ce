@@ -1,3 +1,4 @@
+{{- if .Values.worker.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,8 +8,8 @@ metadata:
     app.kubernetes.io/component: worker
 spec:
   replicas: {{ .Values.worker.replicaCount }}
-  # A singleton worker holds a PostgreSQL process lock. With one replica, zero surge and one
-  # unavailable stops the old pod before starting its replacement, without an overlap window.
+  # Fenced claim leases, per-run execution locks, and leader-gated maintenance make replicas safe.
+  # maxSurge zero bounds replacement overlap while the old worker drains its current claim.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -32,11 +33,11 @@ spec:
       topologySpreadConstraints:
         {{- include "synapse.topologySpreadConstraints" (list . "worker") | nindent 8 }}
       nodeSelector:
-        {{- toYaml .Values.nodeSelector | nindent 8 }}
+        {{- toYaml .Values.worker.nodeSelector | nindent 8 }}
       tolerations:
-        {{- toYaml .Values.tolerations | nindent 8 }}
+        {{- toYaml .Values.worker.tolerations | nindent 8 }}
       affinity:
-        {{- toYaml .Values.affinity | nindent 8 }}
+        {{- toYaml .Values.worker.affinity | nindent 8 }}
       containers:
         - name: worker
           image: {{ include "synapse.image" .Values.image | quote }}
@@ -53,11 +54,11 @@ spec:
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           startupProbe:
-            # argv only: no shell is used anywhere in the execution path. bwrap --version
-            # confirms the sandbox helper is present and executable before work is claimed.
-            exec: {command: ["/usr/bin/bwrap", "--version"]}
+            # Executes the production sandbox runner before this worker can claim work.
+            exec: {command: ["/opt/synapse/synapse-sandbox-check", "-mode=startup"]}
             periodSeconds: 10
-            failureThreshold: 18
+            failureThreshold: 6
+            timeoutSeconds: 15
           volumeMounts:
             - {name: synapse-data, mountPath: /var/lib/synapse}
             - {name: tmp, mountPath: /tmp}
@@ -73,3 +74,4 @@ spec:
             items:
               - key: {{ required "externalDatabase.caBundle.key is required" .Values.externalDatabase.caBundle.key }}
                 path: ca.crt
+{{- end }}

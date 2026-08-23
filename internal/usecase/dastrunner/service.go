@@ -141,12 +141,14 @@ func (s *Service) Execute(ctx context.Context, admitted safety.AdmittedAction, p
 	}
 
 	spec := ports.ToolSpec{
-		Name:           s.curlBin,
-		Args:           curlArgs(method, probe.URL, u, pinnedIP, s.timeout),
-		Timeout:        s.timeout,
-		MaxOutputBytes: s.maxOut,
-		EngagementID:   action.EngagementID,
-		EgressPolicy:   egressPolicyForPinnedIP(pinnedIP, u),
+		Name:                s.curlBin,
+		Args:                curlArgs(method, probe.URL, u, pinnedIP, s.timeout),
+		Timeout:             s.timeout,
+		MaxOutputBytes:      s.maxOut,
+		EngagementID:        action.EngagementID,
+		EgressPolicy:        egressPolicyForPinnedIP(pinnedIP, u),
+		EgressExecutionKind: "dast-verifier",
+		EgressExecutionID:   probe.JudgmentID.String(),
 	}
 	res, runErr := s.runner.Run(ctx, spec)
 	status, body := splitCurlStatus(res.Stdout)

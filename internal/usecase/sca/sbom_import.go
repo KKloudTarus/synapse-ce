@@ -73,7 +73,7 @@ func (s *Service) ImportSBOMFile(ctx context.Context, actor string, tenantID, en
 		Manifest: ports.ScanManifest{SBOMSHA256: hashHex(data)},
 	}
 
-	if _, err := s.sealEvidence(ctx, actor, engagementID, now, res); err != nil {
+	if _, err := s.sealEvidence(ctx, actor, engagementID, now, res, ""); err != nil {
 		return nil, err
 	}
 

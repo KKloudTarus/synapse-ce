@@ -64,7 +64,7 @@ func TestExecutorUsesSecretPlaceholderAndDefaultDenyEgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", Authorize: func(_ context.Context, operation ports.CloudOperation) error {
+	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", EgressExecutionKind: "cspm", EgressExecutionID: "run-1", Authorize: func(_ context.Context, operation ports.CloudOperation) error {
 		if operation.Provider != cloudposture.ProviderAWS || operation.ScopeKey != "aws:organizations/o-test" || operation.Name != "ListAccounts" {
 			t.Fatalf("operation = %#v", operation)
 		}
@@ -76,8 +76,36 @@ func TestExecutorUsesSecretPlaceholderAndDefaultDenyEgress(t *testing.T) {
 	if runner.spec.EgressPolicy == nil || len(runner.spec.EgressPolicy.AllowDomainRules) != 1 || runner.spec.HostNetwork {
 		t.Fatalf("egress policy = %#v", runner.spec.EgressPolicy)
 	}
+	if runner.spec.EgressExecutionKind != "cspm" || runner.spec.EgressExecutionID != "run-1" {
+		t.Fatalf("execution identity = %q/%q", runner.spec.EgressExecutionKind, runner.spec.EgressExecutionID)
+	}
 	if len(runner.spec.Env) != 3 || runner.spec.Env[0] != "SYNAPSE_CSPM_CREDENTIAL_FD=4" || runner.spec.Env[1] != "SYNAPSE_CSPM_AUTH_REQUEST_FD=5" || runner.spec.Env[2] != "SYNAPSE_CSPM_AUTH_DECISION_FD=6" || len(runner.spec.ExtraFiles) != 3 {
 		t.Fatalf("env=%#v files=%d", runner.spec.Env, len(runner.spec.ExtraFiles))
+	}
+}
+
+func TestExecutorRejectsMissingExecutionIdentityBeforeSecretResolution(t *testing.T) {
+	runner := &runnerStub{}
+	resolved := false
+	executor, err := New(runner, secretVault{
+		secret:  []byte("must-not-resolve"),
+		resolve: func() { resolved = true },
+	}, "synapse-cspm", 5, time.Minute, 1<<20, map[cloudposture.Provider][]string{cloudposture.ProviderAWS: {"organizations.us-east-1.amazonaws.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{
+		EngagementID: "eng", Provider: cloudposture.ProviderAWS, ScopeKey: "aws:organizations/o-test",
+		CredentialRef: "aws-prod", Authorize: func(context.Context, ports.CloudOperation) error { return nil },
+	})
+	if !errors.Is(err, shared.ErrValidation) || !strings.Contains(err.Error(), "authoritative signed execution grants") {
+		t.Fatalf("EnumerateCloud() error = %v, want signed-grant validation", err)
+	}
+	if resolved {
+		t.Fatal("credential vault was resolved before execution identity validation")
+	}
+	if runner.spec.Name != "" {
+		t.Fatalf("runner reached with spec %#v", runner.spec)
 	}
 }
 
@@ -87,7 +115,7 @@ func TestExecutorPreservesRunnerFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
+	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", EgressExecutionKind: "cspm", EgressExecutionID: "run-1", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
 	if !errors.Is(err, runErr) {
 		t.Fatalf("error = %v", err)
 	}
@@ -98,7 +126,7 @@ func TestExecutorReportsHelperExitState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
+	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", EgressExecutionKind: "cspm", EgressExecutionID: "run-1", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
 	if err == nil || !strings.Contains(err.Error(), "exit_code=3 timed_out=true truncated=false") {
 		t.Fatalf("error = %v", err)
 	}
@@ -109,7 +137,7 @@ func TestExecutorPreservesAuthorizationDenial(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", Authorize: func(context.Context, ports.CloudOperation) error { return shared.ErrForbidden }})
+	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", EgressExecutionKind: "cspm", EgressExecutionID: "run-1", Authorize: func(context.Context, ports.CloudOperation) error { return shared.ErrForbidden }})
 	if !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("error = %v", err)
 	}
@@ -122,7 +150,7 @@ func TestExecutorClassifiesAuthorizationScopeMismatchAsForbidden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
+	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", EgressExecutionKind: "cspm", EgressExecutionID: "run-1", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
 	if !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("error = %v", err)
 	}
@@ -137,9 +165,15 @@ func (nilVault) Delete(context.Context, shared.ID, string) error                
 
 // secretVault hands out real credential material so the redaction path is exercised for real
 // rather than against nilVault's empty secret.
-type secretVault struct{ secret []byte }
+type secretVault struct {
+	secret  []byte
+	resolve func()
+}
 
 func (v secretVault) Resolve(context.Context, shared.ID, string) ([]byte, error) {
+	if v.resolve != nil {
+		v.resolve()
+	}
 	return append([]byte(nil), v.secret...), nil
 }
 func (secretVault) Put(context.Context, shared.ID, string, []byte) error            { return nil }
@@ -156,7 +190,7 @@ func TestExecutorSurfacesHelperStderr(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
+	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", EgressExecutionKind: "cspm", EgressExecutionID: "run-1", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
 	if err == nil {
 		t.Fatal("expected a helper failure")
 	}
@@ -178,7 +212,7 @@ func TestExecutorNeverLeaksCredentialsThroughStderr(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
+	_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", EgressExecutionKind: "cspm", EgressExecutionID: "run-1", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
 	if err == nil {
 		t.Fatal("expected a helper failure")
 	}
@@ -238,7 +272,7 @@ func TestExecutorRedactsIndividualCredentialFields(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
+			_, _, err = executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "aws-prod", EgressExecutionKind: "cspm", EgressExecutionID: "run-1", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
 			if err == nil {
 				t.Fatal("expected a helper failure")
 			}
@@ -339,7 +373,7 @@ func TestOutputScrubKeepsLegitimateInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, _, err := executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "gcp-prod", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
+	got, _, err := executor.EnumerateCloud(context.Background(), ports.CloudScope{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "o-test", ScopeKey: "aws:organizations/o-test", CredentialRef: "gcp-prod", EgressExecutionKind: "cspm", EgressExecutionID: "run-1", Authorize: func(context.Context, ports.CloudOperation) error { return nil }})
 	if err != nil {
 		t.Fatalf("legitimate inventory was rejected: %v", err)
 	}

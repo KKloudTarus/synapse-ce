@@ -6,22 +6,22 @@
 //
 // It is argv-only: every step is an `ip`/`iptables` argv invocation, no
 // shell. The host validated the recipe (allowed dest reachable, denied dropped, coexists
-// with Docker's FORWARD DROP). Privileged operations need CAP_NET_ADMIN (the worker runs
-// with it in prod; CmdPrefix lets a dev/test driver prepend "sudo").
+// with Docker's FORWARD DROP). Privileged operations run only in the root-owned broker in
+// production; CmdPrefix remains a development/test hook for direct integration tests.
 //
 // Scope/limits of THIS layer: it enforces IP/CIDR (+ optional ports) allow/deny on
-// RESOLVED addresses, never on a hostname string. Policy domains (AllowDomains) need
-// run-start DNS resolution + a pinning proxy and are not yet wired here.
+// pre-resolved addresses, never on a hostname string. The unprivileged runner resolves
+// exact domains once and binds the same answers into the child through /etc/hosts.
 package egress
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/netip"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -35,18 +35,22 @@ import (
 // Linux). Callers fail closed for egress-required runs rather than running unfiltered.
 var ErrUnavailable = errors.New("egress enforcement unavailable: ip/iptables not found")
 
+const networkNamespaceDir = "/run/netns"
+
 // Applier creates + tears down egress-filtered network namespaces.
 type Applier struct {
-	ip        string   // resolved `ip` path
-	iptables  string   // resolved `iptables` path
-	ip6tables string   // resolved `ip6tables` path ("" if absent) – IPv6 default-drop fail-closed
-	sysctl    string   // resolved `sysctl` path ("" if absent) – IPv6 disable fail-closed
-	cmdPrefix []string // prepended to every privileged command (e.g. {"sudo"}); empty when already privileged
+	ip          string   // resolved `ip` path
+	iptables    string   // resolved `iptables` path
+	ip6tables   string   // resolved `ip6tables` path ("" if absent) – IPv6 default-drop fail-closed
+	sysctl      string   // resolved `sysctl` path ("" if absent) – IPv6 disable fail-closed
+	cmdPrefix   []string // prepended to every privileged command (e.g. {"sudo"}); empty when already privileged
+	netnsDir    string   // standard ip-netns directory in production; injectable in tests
+	commandHook func(context.Context, []string) error
 }
 
 // NewApplier resolves the `ip` + `iptables` binaries (Linux only). cmdPrefix is prepended
-// to each command – pass {"sudo"} from an unprivileged dev/test driver, nil in prod where
-// the worker holds CAP_NET_ADMIN.
+// to each command for development/test drivers. Production constructs the applier only in
+// the root-owned broker; the worker has no network-administration capabilities.
 func NewApplier(cmdPrefix ...string) (*Applier, error) {
 	ipBin, err := exec.LookPath("ip")
 	if err != nil {
@@ -58,7 +62,7 @@ func NewApplier(cmdPrefix ...string) (*Applier, error) {
 	}
 	sysctlBin, _ := exec.LookPath("sysctl") // IPv6 fail-closed (disable_ipv6)
 	ip6Bin, _ := exec.LookPath("ip6tables") // IPv6 fail-closed (default-DROP); one of the two must work
-	return &Applier{ip: ipBin, iptables: ipt, ip6tables: ip6Bin, sysctl: sysctlBin, cmdPrefix: cmdPrefix}, nil
+	return &Applier{ip: ipBin, iptables: ipt, ip6tables: ip6Bin, sysctl: sysctlBin, cmdPrefix: cmdPrefix, netnsDir: networkNamespaceDir}, nil
 }
 
 // Probe verifies egress enforcement actually works here – i.e. the process has enough
@@ -73,12 +77,60 @@ func (a *Applier) Probe(ctx context.Context) error {
 	return ns.Teardown(ctx)
 }
 
-// ExecPrefix returns the argv prefix that enters netns `name` to run a command:
-// `[<cmdPrefix>] ip netns exec <name>`. Entering an existing netns needs CAP_SYS_ADMIN,
-// so the same privilege prefix (sudo / caps) as Setup applies. The SandboxRunner prepends
-// this to the bwrap invocation for an egress-enforced run.
-func (a *Applier) ExecPrefix(name string) []string {
-	return append(append([]string{}, a.cmdPrefix...), a.ip, "netns", "exec", name)
+// RecoverStale removes broker-owned namespace state left behind by a prior broker
+// process. It is called before the broker accepts requests, while no live runs can
+// be active. Only the broker's tightly bounded syn0..syn63 names are eligible.
+func (a *Applier) RecoverStale(ctx context.Context) error {
+	dir := a.netnsDir
+	if dir == "" {
+		dir = networkNamespaceDir
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("list stale egress namespaces: %w", err)
+	}
+	var firstErr error
+	for _, entry := range entries {
+		name := entry.Name()
+		idx, ok := managedNamespaceIndex(name)
+		if !ok {
+			continue
+		}
+		hostVeth := "vh-" + name
+		_, _, subnet := linkAddrs(idx)
+		checksAndDeletes := [][2][]string{
+			{{a.iptables, "-C", "FORWARD", "-d", subnet, "-j", "ACCEPT"}, {a.iptables, "-D", "FORWARD", "-d", subnet, "-j", "ACCEPT"}},
+			{{a.iptables, "-C", "FORWARD", "-s", subnet, "-j", "ACCEPT"}, {a.iptables, "-D", "FORWARD", "-s", subnet, "-j", "ACCEPT"}},
+			{{a.iptables, "-t", "nat", "-C", "POSTROUTING", "-s", subnet, "-j", "MASQUERADE"}, {a.iptables, "-t", "nat", "-D", "POSTROUTING", "-s", subnet, "-j", "MASQUERADE"}},
+			{{a.ip, "link", "show", "dev", hostVeth}, {a.ip, "link", "del", hostVeth}},
+		}
+		for _, pair := range checksAndDeletes {
+			if err := a.run(ctx, pair[0]); err != nil {
+				continue
+			}
+			if err := a.run(ctx, pair[1]); err != nil && firstErr == nil {
+				firstErr = fmt.Errorf("clean stale egress namespace %q: %w", name, err)
+			}
+		}
+		if err := removePinnedNetworkNamespace(filepath.Join(dir, name)); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("remove stale egress namespace %q: %w", name, err)
+		}
+	}
+	return firstErr
+}
+
+func managedNamespaceIndex(name string) (int, bool) {
+	if name == "synprobe" {
+		return 63, true
+	}
+	if !strings.HasPrefix(name, "syn") {
+		return 0, false
+	}
+	idx, err := strconv.Atoi(strings.TrimPrefix(name, "syn"))
+	return idx, err == nil && idx >= 0 && idx < 64
 }
 
 // Netns is a live egress-filtered namespace. Run a tool inside it with
@@ -100,6 +152,14 @@ type Netns struct {
 	cleanup      [][]string // reverse-order teardown steps (argv, or {rmSentinel, path})
 }
 
+func (n *Netns) NamespaceName() string { return n.Name }
+
+func (n *Netns) HostsPath() string { return n.HostsFile }
+
+func (n *Netns) Rules() []ports.EgressRule {
+	return append([]ports.EgressRule(nil), n.AllowedRules...)
+}
+
 // rmSentinel marks a cleanup entry as "remove this file" rather than an argv command.
 const rmSentinel = "__synapse_rm__"
 
@@ -116,6 +176,58 @@ func linkAddrs(idx int) (host, peer, subnet string) {
 
 // Setup builds the filtered netns from p. idx disambiguates concurrent runs' subnets.
 func (a *Applier) Setup(ctx context.Context, name string, idx int, p ports.EgressPolicy) (*Netns, error) {
+	return a.setup(ctx, name, idx, p, []string{a.ip, "netns", "add", name})
+}
+
+// SetupForPID configures the network namespace already created by a paused,
+// non-root Bubblewrap child. The broker attaches that namespace under the fixed
+// run name, applies the same default-deny recipe, then lets the worker release
+// Bubblewrap's block fd. No privileged executable is handed back to the worker.
+func (a *Applier) SetupForPID(ctx context.Context, name string, idx int, p ports.EgressPolicy, pid int) (*Netns, error) {
+	if pid <= 1 {
+		return nil, fmt.Errorf("%w: invalid sandbox pid %d", shared.ErrValidation, pid)
+	}
+	return a.setup(ctx, name, idx, p, []string{a.ip, "netns", "attach", name, strconv.Itoa(pid)})
+}
+
+// SetupForNamespaceFD configures a network namespace pinned by an open descriptor.
+// The broker opens this descriptor only after authenticating the paused Bubblewrap
+// process, avoiding namespace selection through a reusable numeric PID.
+func (a *Applier) SetupForNamespaceFD(ctx context.Context, name string, idx int, p ports.EgressPolicy, namespaceFD int) (ns *Netns, err error) {
+	if namespaceFD < 0 {
+		return nil, fmt.Errorf("%w: invalid sandbox network namespace descriptor", shared.ErrValidation)
+	}
+	if len("vh-"+name) > 15 || len("vp-"+name) > 15 {
+		return nil, fmt.Errorf("%w: netns name %q too long for a veth name (max ~12)", shared.ErrValidation, name)
+	}
+	dir := a.netnsDir
+	if dir == "" {
+		dir = networkNamespaceDir
+	}
+	pinned, err := pinNetworkNamespaceAt(dir, name, namespaceFD)
+	if err != nil {
+		return nil, fmt.Errorf("pin network namespace %q: %w", name, err)
+	}
+	defer func() {
+		if err != nil {
+			_ = removePinnedNetworkNamespace(pinned)
+		}
+	}()
+	ns, err = a.setup(ctx, name, idx, p, nil)
+	if err != nil {
+		return nil, err
+	}
+	return ns, nil
+}
+
+func (a *Applier) setup(ctx context.Context, name string, idx int, p ports.EgressPolicy, attach []string) (*Netns, error) {
+	// Domain authority must be resolved and pinned before any privileged namespace
+	// operation. The applier accepts only canonical IP/CIDR rules; otherwise a
+	// compromised caller could turn the root-owned boundary into a DNS authority.
+	if len(p.AllowDomains) != 0 || len(p.DenyDomains) != 0 || len(p.AllowDomainRules) != 0 || len(p.DenyDomainRules) != 0 {
+		return nil, errors.New("egress setup requires pre-resolved domain rules")
+	}
+
 	hostAddr, peerAddr, subnet := linkAddrs(idx)
 	hostVeth, peerVeth := "vh-"+name, "vp-"+name
 	if len(hostVeth) > 15 || len(peerVeth) > 15 {
@@ -127,8 +239,21 @@ func (a *Applier) Setup(ctx context.Context, name string, idx int, p ports.Egres
 	steps := []struct {
 		args     []string
 		teardown []string
+	}{}
+	if attach != nil {
+		steps = append(steps, struct {
+			args     []string
+			teardown []string
+		}{attach, []string{a.ip, "netns", "del", name}})
+	} else {
+		// SetupForNamespaceFD already pinned the namespace at the standard ip-netns path.
+		// Register cleanup before any subsequent operation can fail.
+		ns.cleanup = append(ns.cleanup, []string{a.ip, "netns", "del", name})
+	}
+	steps = append(steps, []struct {
+		args     []string
+		teardown []string
 	}{
-		{[]string{a.ip, "netns", "add", name}, []string{a.ip, "netns", "del", name}},
 		{[]string{a.ip, "link", "add", hostVeth, "type", "veth", "peer", "name", peerVeth}, []string{a.ip, "link", "del", hostVeth}},
 		{[]string{a.ip, "link", "set", peerVeth, "netns", name}, nil},
 		{[]string{a.ip, "addr", "add", hostAddr, "dev", hostVeth}, nil},
@@ -143,7 +268,7 @@ func (a *Applier) Setup(ctx context.Context, name string, idx int, p ports.Egres
 		{[]string{a.iptables, "-I", "FORWARD", "-d", subnet, "-j", "ACCEPT"}, []string{a.iptables, "-D", "FORWARD", "-d", subnet, "-j", "ACCEPT"}},
 		// Always allow loopback egress inside the netns.
 		{[]string{a.ip, "netns", "exec", name, a.iptables, "-A", "OUTPUT", "-o", "lo", "-j", "ACCEPT"}, nil},
-	}
+	}...)
 	for _, s := range steps {
 		if err := a.run(ctx, s.args); err != nil {
 			_ = ns.Teardown(context.Background()) // best-effort unwind
@@ -178,22 +303,10 @@ func (a *Applier) Setup(ctx context.Context, name string, idx int, p ports.Egres
 		return nil, fmt.Errorf("egress: cannot lock down IPv6 in the netns (need sysctl or ip6tables) – refusing to run with unfiltered v6")
 	}
 
-	// resolve in-scope domains on the host (where DNS works) and PIN them – their
-	// IPs become allow rules + a pinned /etc/hosts the tool reads, while NO DNS egress is
-	// opened. So the tool reaches an in-scope domain (via the pinned host entry → an
-	// allowed IP) but cannot resolve anything else and has no DNS channel to exfiltrate
-	// through (the market lesson). Wildcards can't be pre-resolved (a documented gap;
-	// dynamic subdomain pinning is a follow-up).
 	denyRules := filterRules(p.Rules, false)
 	allowRules := filterRules(p.Rules, true)
 	hosts := pinnedHosts(p.PinnedHosts)
-	resolvedHosts, allowDomainRules := a.resolvePins(ctx, domainRules(p.AllowDomains, p.AllowDomainRules))
-	hosts += resolvedHosts
-	allowRules = append(allowRules, allowDomainRules...)
 	ns.AllowedRules = allowRules // expose the resolved allow-set for the connection-observer verdict
-	if _, deny := a.resolvePins(ctx, domainRules(p.DenyDomains, p.DenyDomainRules)); len(deny) > 0 {
-		denyRules = append(denyRules, deny...)
-	}
 
 	// Deny first (out-of-scope wins), then allow, then default DROP.
 	for _, r := range denyRules {
@@ -230,43 +343,9 @@ func (a *Applier) Setup(ctx context.Context, name string, idx int, p ports.Egres
 // domainRules combines backwards-compatible hostname-wide rules with structured
 // hostname-and-port rules. The structured form keeps URL authorization's effective
 // port through host-side resolution and into the kernel rule set.
-func domainRules(domains []string, structured []ports.DomainRule) []ports.DomainRule {
-	out := make([]ports.DomainRule, 0, len(domains)+len(structured))
-	for _, host := range domains {
-		out = append(out, ports.DomainRule{Host: host})
-	}
-	return append(out, structured...)
-}
-
 // resolvePins resolves each non-wildcard domain on the host and returns pinned
 // /etc/hosts lines + the matching allow-by-IP rules. A domain that fails to resolve is
 // skipped (fail-closed: it simply stays unreachable). Wildcards can't be pre-resolved.
-func (a *Applier) resolvePins(ctx context.Context, domains []ports.DomainRule) (hosts string, rules []ports.EgressRule) {
-	var b strings.Builder
-	seen := map[string]bool{}
-	for _, domain := range domains {
-		host := strings.TrimSpace(domain.Host)
-		if host == "" || strings.Contains(host, "*") {
-			continue
-		}
-		addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-		if err != nil {
-			continue
-		}
-		for _, ip := range addrs {
-			ip = ip.Unmap()
-			rules = append(rules, ports.EgressRule{Allow: true, Net: netip.PrefixFrom(ip, ip.BitLen()), Ports: domain.Ports})
-			line := ip.String() + " " + host
-			if !seen[line] {
-				b.WriteString(line)
-				b.WriteByte('\n')
-				seen[line] = true
-			}
-		}
-	}
-	return b.String(), rules
-}
-
 // writeHostsFile writes a pinned hosts file (with the usual localhost entries) to a temp
 // path, world-readable so the sandboxed tool (any uid) can read it.
 func writeHostsFile(pinned string) (string, error) {
@@ -361,6 +440,9 @@ func (n *Netns) Teardown(ctx context.Context) error {
 }
 
 func (a *Applier) run(ctx context.Context, args []string) error {
+	if a.commandHook != nil {
+		return a.commandHook(ctx, append([]string(nil), args...))
+	}
 	full := append(append([]string{}, a.cmdPrefix...), args...)
 	cmd := exec.CommandContext(ctx, full[0], full[1:]...)
 	if out, err := cmd.CombinedOutput(); err != nil {

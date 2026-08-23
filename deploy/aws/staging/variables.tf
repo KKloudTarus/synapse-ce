@@ -208,3 +208,158 @@ variable "cognito_logout_urls" {
     error_message = "cognito_logout_urls must contain one or more HTTPS URLs."
   }
 }
+
+variable "worker_parent_image" {
+  description = "Exact x86_64 AL2023 parent image identifier for EC2 Image Builder: an AMI ID or a version-pinned Image Builder ARN."
+  type        = string
+
+  validation {
+    condition = can(regex("^ami-[0-9a-f]{8,17}$", var.worker_parent_image)) || can(regex(
+      "^arn:[a-z0-9-]+:imagebuilder:us-east-1:(aws|[0-9]{12}):image/[A-Za-z0-9._/-]+/[0-9]+\\.[0-9]+\\.[0-9]+$",
+      var.worker_parent_image,
+    ))
+    error_message = "worker_parent_image must be an exact AMI ID or a version-pinned us-east-1 Image Builder image ARN."
+  }
+}
+
+variable "worker_release_version" {
+  description = "Three-part numeric version used for the worker Image Builder component and recipe."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+$", var.worker_release_version))
+    error_message = "worker_release_version must be a numeric major.minor.patch version."
+  }
+}
+
+variable "worker_image_definition_version" {
+  description = "Three-part Image Builder component and recipe version; bump whenever package metadata or build controls change."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+$", var.worker_image_definition_version))
+    error_message = "worker_image_definition_version must be a numeric major.minor.patch version."
+  }
+}
+
+variable "worker_package_s3_key" {
+  description = "S3 object key of the prebuilt worker RPM in the staging evidence bucket."
+  type        = string
+
+  validation {
+    condition     = length(var.worker_package_s3_key) <= 1024 && can(regex("^[A-Za-z0-9][A-Za-z0-9._/-]*$", var.worker_package_s3_key)) && !strcontains(var.worker_package_s3_key, "..")
+    error_message = "worker_package_s3_key must be a canonical non-traversing S3 object key."
+  }
+}
+
+variable "worker_package_sha256" {
+  description = "Lowercase SHA-256 digest of the pinned worker RPM."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{64}$", var.worker_package_sha256))
+    error_message = "worker_package_sha256 must contain exactly 64 lowercase hexadecimal characters."
+  }
+}
+
+variable "worker_trust_anchor_s3_key" {
+  description = "S3 object key of the public private-CA certificate trusted by native workers."
+  type        = string
+
+  validation {
+    condition     = length(var.worker_trust_anchor_s3_key) <= 1024 && can(regex("^[A-Za-z0-9][A-Za-z0-9._/-]*$", var.worker_trust_anchor_s3_key)) && !strcontains(var.worker_trust_anchor_s3_key, "..")
+    error_message = "worker_trust_anchor_s3_key must be a canonical non-traversing S3 object key."
+  }
+}
+
+variable "worker_trust_anchor_sha256" {
+  description = "Lowercase SHA-256 digest of the public private-CA certificate trusted by native workers."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{64}$", var.worker_trust_anchor_sha256))
+    error_message = "worker_trust_anchor_sha256 must contain exactly 64 lowercase hexadecimal characters."
+  }
+}
+
+variable "worker_runtime_secret_arn" {
+  description = "Governed Secrets Manager ARN containing the native worker runtime configuration."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:[a-z0-9-]+:secretsmanager:us-east-1:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$", var.worker_runtime_secret_arn))
+    error_message = "worker_runtime_secret_arn must be a Secrets Manager secret ARN in us-east-1."
+  }
+}
+
+variable "worker_grant_authority_backend_port" {
+  description = "Private API pod port targeted by the TLS-terminating egress-grant NLB."
+  type        = number
+  default     = 8082
+
+  validation {
+    condition     = var.worker_grant_authority_backend_port >= 1024 && var.worker_grant_authority_backend_port <= 65535
+    error_message = "worker_grant_authority_backend_port must be between 1024 and 65535."
+  }
+}
+
+variable "worker_image_builder_instance_type" {
+  description = "EC2 instance type used only while baking and testing the worker AMI."
+  type        = string
+  default     = "m6i.xlarge"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]*[0-9][a-z0-9-]*\\.[a-z0-9]+$", var.worker_image_builder_instance_type))
+    error_message = "worker_image_builder_instance_type must be a valid EC2 instance type."
+  }
+}
+
+variable "worker_instance_type" {
+  description = "EC2 instance type for native execution workers."
+  type        = string
+  default     = "m6i.xlarge"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]*[0-9][a-z0-9-]*\\.[a-z0-9]+$", var.worker_instance_type))
+    error_message = "worker_instance_type must be a valid EC2 instance type."
+  }
+}
+
+variable "worker_root_volume_gib" {
+  description = "Encrypted gp3 root-volume size for native execution workers."
+  type        = number
+  default     = 80
+
+  validation {
+    condition     = var.worker_root_volume_gib >= 40 && var.worker_root_volume_gib <= 1024
+    error_message = "worker_root_volume_gib must be between 40 and 1024 GiB."
+  }
+}
+
+variable "worker_desired_size" {
+  description = "Desired native execution-worker capacity."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.worker_desired_size >= 1 && var.worker_desired_size <= 8
+    error_message = "worker_desired_size must be between 1 and 8."
+  }
+}
+
+variable "worker_min_size" {
+  description = "Minimum native execution-worker capacity."
+  type        = number
+  default     = 1
+}
+
+variable "worker_max_size" {
+  description = "Maximum native execution-worker capacity."
+  type        = number
+  default     = 4
+
+  validation {
+    condition     = var.worker_min_size >= 1 && var.worker_min_size <= var.worker_desired_size && var.worker_desired_size <= var.worker_max_size && var.worker_max_size <= 8
+    error_message = "Require 1 <= worker_min_size <= worker_desired_size <= worker_max_size <= 8."
+  }
+}

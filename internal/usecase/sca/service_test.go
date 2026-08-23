@@ -72,12 +72,60 @@ type fakeAcquirer struct {
 	called  bool
 }
 
+type cancelingAcquirer struct{}
+
+func (cancelingAcquirer) Acquire(ctx context.Context, _ ports.AcquireRequest) (*ports.Workspace, error) {
+	<-ctx.Done()
+	return nil, fmt.Errorf("acquire canceled: %w", ctx.Err())
+}
+
+type cancelAfterAppendEvidenceStore struct {
+	*fakeEvidence
+	cancel context.CancelFunc
+}
+
+func (s *cancelAfterAppendEvidenceStore) Append(ctx context.Context, items []evidence.Evidence) error {
+	if err := s.fakeEvidence.Append(ctx, items); err != nil {
+		return err
+	}
+	s.cancel()
+	return context.Canceled
+}
+
 func (f *fakeAcquirer) Acquire(_ context.Context, _ ports.AcquireRequest) (*ports.Workspace, error) {
 	f.called = true
 	return &ports.Workspace{Dir: f.dir, Cleanup: func() error { f.cleaned++; return nil }}, nil
 }
 
 type fakeDetector struct{ gotPath string }
+
+type staticSASTAnalyzer struct {
+	findings []ports.SASTRawFinding
+}
+
+func (a staticSASTAnalyzer) Name() string { return "static-sast" }
+
+func (a staticSASTAnalyzer) AnalyzeSource(context.Context, string) ([]ports.SASTRawFinding, error) {
+	return append([]ports.SASTRawFinding(nil), a.findings...), nil
+}
+
+type changingTelemetryTriager struct {
+	calls int
+}
+
+func (t *changingTelemetryTriager) Triage(context.Context, []finding.Finding, string) []ports.AICritique {
+	return nil
+}
+
+func (t *changingTelemetryTriager) TriageObserved(_ context.Context, candidates []finding.Finding, _ string) ports.FPTriageObservedResult {
+	t.calls++
+	metric := ports.FPTriageCallMetric{Role: "proposer", Provider: "test", Model: "test", PromptVersion: "v1", Outcome: "success", LatencyMillis: int64(t.calls)}
+	if len(candidates) > 0 {
+		metric.FindingID = string(candidates[0].ID)
+		metric.DedupKey = candidates[0].DedupKey
+	}
+	return ports.FPTriageObservedResult{Telemetry: ports.FPTriageTelemetry{Calls: []ports.FPTriageCallMetric{metric}, RequestCount: 1, SuccessCount: 1}}
+}
 
 func (f *fakeDetector) Detect(_ context.Context, p string) ([]ports.DetectedLanguage, error) {
 	f.gotPath = p
@@ -632,7 +680,7 @@ func TestScanDebugTraceCapturesVulnerabilitySourceFailure(t *testing.T) {
 	var events []ports.ScanDebugEvent
 	_, err := svc.runPipeline(context.Background(), "operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull}, func(_ string, _ int, evs []ports.ScanDebugEvent) {
 		events = evs
-	})
+	}, "")
 	if err == nil {
 		t.Fatal("runPipeline should fail when a vulnerability source fails")
 	}
@@ -1199,6 +1247,113 @@ func TestStartScanAsyncCompletes(t *testing.T) {
 // TestFailStrandedScanJobFinalizes covers the SCA DeadLetterer hook: a dead-lettered scan job
 // drives its backing ScanJob to a terminal failed state (parity with recon + agent), instead of
 // leaving it stuck `running` with no result. Idempotent / no-op once terminal.
+func TestRunScanJobCancellationReturnsRetryableWithoutTerminalState(t *testing.T) {
+	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
+	jobs := newFakeJobStore()
+	svc := newAsyncSvc(repo, fakeClock{t: time.Unix(0, 0).UTC()}, cancelingAcquirer{}, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
+	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, StartedAt: time.Unix(0, 0).UTC()}
+	if err := jobs.CreateRunning(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(scaJobPayload{
+		Actor: "operator", TenantID: strPtr(shared.DefaultTenant.String()), EngagementID: "e1",
+		Now: time.Unix(0, 0).UTC(), Req: ports.AcquireRequest{Kind: "local", Value: "myrepo"}, Options: ScanOptions{Mode: ScanModeFull}, Job: job,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(shared.WithTenant(context.Background(), shared.DefaultTenant))
+	cancel()
+
+	err = svc.RunScanJob(ctx, payload)
+	if !errors.Is(err, ports.ErrRetryable) {
+		t.Fatalf("RunScanJob error = %v, want ErrRetryable", err)
+	}
+	stored, err := jobs.LatestForEngagement(context.Background(), "e1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != ports.ScanRunning || stored.FinishedAt != nil || stored.Error != "" {
+		t.Fatalf("canceled delivery published terminal scan state: %+v", stored)
+	}
+}
+
+func TestRunScanJobAmbiguousEvidenceAppendCancellationIsIdempotentlyRetryable(t *testing.T) {
+	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
+	jobs := newFakeJobStore()
+	ctx, cancel := context.WithCancel(shared.WithTenant(context.Background(), shared.DefaultTenant))
+	store := &cancelAfterAppendEvidenceStore{fakeEvidence: &fakeEvidence{}, cancel: cancel}
+	evidenceService, err := evidenceuc.NewService(store, nil, &fakeAudit{}, fakeClock{t: time.Unix(0, 0).UTC()}, fakeIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(repo, nil, nil, nil, jobs, nil, evidenceService, fakeIDs{}, ports.Provenance{}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAudit{}, shared.SeverityHigh, 0, &fakeAcquirer{dir: t.TempDir()}, &fakeDetector{}, fakeSBOM{}, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil)
+	svc.SetSASTAnalyzer(staticSASTAnalyzer{findings: []ports.SASTRawFinding{{File: "service.go", Line: 7, RuleID: "weak-hash", CWE: "CWE-327", Severity: shared.SeverityHigh, Title: "Weak hash"}}})
+	triager := &changingTelemetryTriager{}
+	svc.SetFPTriage(triager)
+	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, StartedAt: time.Unix(0, 0).UTC()}
+	if err := jobs.CreateRunning(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+
+	err = svc.runScanJob(ctx, "operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull}, job)
+	if !errors.Is(err, ports.ErrRetryable) {
+		t.Fatalf("ambiguous evidence append error = %v, want ErrRetryable", err)
+	}
+	stored, err := jobs.LatestForEngagement(context.Background(), "e1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != ports.ScanRunning || stored.FinishedAt != nil {
+		t.Fatalf("ambiguous evidence append published terminal scan state: %+v", stored)
+	}
+	if len(store.items) != 1 || store.items[0].ID != shared.ID(job.ID) {
+		t.Fatalf("reserved evidence links = %+v, want one link with job ID", store.items)
+	}
+
+	store.cancel = func() {}
+	retryCtx := shared.WithTenant(context.Background(), shared.DefaultTenant)
+	if err := svc.runScanJob(retryCtx, "operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull}, job); err != nil {
+		t.Fatalf("redelivery error = %v", err)
+	}
+	stored, err = jobs.LatestForEngagement(context.Background(), "e1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != ports.ScanSucceeded {
+		t.Fatalf("redelivery status = %+v, want succeeded", stored)
+	}
+	if triager.calls != 2 {
+		t.Fatalf("AI triage calls = %d, want telemetry from both deliveries", triager.calls)
+	}
+	if len(store.items) != 1 {
+		t.Fatalf("redelivery appended duplicate evidence: %+v", store.items)
+	}
+}
+
+func TestRunScanJobTimeoutRemainsTerminal(t *testing.T) {
+	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
+	jobs := newFakeJobStore()
+	svc := newAsyncSvc(repo, fakeClock{t: time.Unix(0, 0).UTC()}, cancelingAcquirer{}, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
+	svc.timeout = 10 * time.Millisecond
+	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, StartedAt: time.Unix(0, 0).UTC()}
+	if err := jobs.CreateRunning(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+
+	err := svc.runScanJob(shared.WithTenant(context.Background(), shared.DefaultTenant), "operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull}, job)
+	if err != nil {
+		t.Fatalf("configured scan timeout returned queue error: %v", err)
+	}
+	stored, err := jobs.LatestForEngagement(context.Background(), "e1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != ports.ScanFailed || !strings.Contains(stored.Error, context.DeadlineExceeded.Error()) {
+		t.Fatalf("configured timeout job = %+v, want terminal deadline failure", stored)
+	}
+}
+
 func TestProjectRecorderUsesFreshCompletionContext(t *testing.T) {
 	repo := &fakeEngRepo{eng: engagementWithScope(t, "myrepo")}
 	jobs := newFakeJobStore()

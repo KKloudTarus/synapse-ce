@@ -38,6 +38,15 @@ var routeRegistrationFiles = []string{
 	"../internal/adapter/httpapi/fleet_handler.go",
 }
 
+// nonAPIRouteRegistrationFiles register routes on their own mux outside /api/v1, so this
+// browser/human-facing spec does not describe them. Each is still held to registering NO /api/v1
+// path by TestNonAPIRegistrationFilesStayOffTheAPISurface, so the exemption cannot become a way to
+// ship an undocumented /api/v1 endpoint.
+var nonAPIRouteRegistrationFiles = []string{
+	// Machine-only egress grant authority on a separate private listener (/internal/v1).
+	"../internal/adapter/httpapi/egress_grant_handler.go",
+}
+
 // TestOpenAPIRouteCoverage fails when a registered operation is neither described in openapi.yaml nor
 // listed as known debt. This is the guard that prevents the coverage gap from growing.
 func TestOpenAPIRouteCoverage(t *testing.T) {
@@ -120,7 +129,7 @@ func TestCoverageDebtHasNoStaleEntries(t *testing.T) {
 // undocumented routes escape the ratchet entirely.
 func TestRouteRegistrationFilesAreKnown(t *testing.T) {
 	known := map[string]bool{}
-	for _, f := range routeRegistrationFiles {
+	for _, f := range append(routeRegistrationFiles, nonAPIRouteRegistrationFiles...) {
 		known[filepath.ToSlash(filepath.Clean(f))] = true
 	}
 
@@ -146,6 +155,22 @@ func TestRouteRegistrationFilesAreKnown(t *testing.T) {
 		if !known[filepath.ToSlash(filepath.Clean(path))] {
 			t.Errorf("%s registers routes but is not in routeRegistrationFiles; add it so its routes "+
 				"are covered by the OpenAPI coverage guard", path)
+		}
+	}
+}
+
+// TestNonAPIRegistrationFilesStayOffTheAPISurface holds every exempted registration file to its
+// reason for exemption: it must not register an /api/v1 path. Without this, adding a file to
+// nonAPIRouteRegistrationFiles would silently exempt real API endpoints from the coverage ratchet.
+func TestNonAPIRegistrationFilesStayOffTheAPISurface(t *testing.T) {
+	for _, file := range nonAPIRouteRegistrationFiles {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		if strings.Contains(string(data), "/api/v1") {
+			t.Errorf("%s is exempted from OpenAPI coverage as a non-/api/v1 listener but mentions "+
+				"/api/v1; describe its routes in the spec and move it to routeRegistrationFiles", file)
 		}
 	}
 }

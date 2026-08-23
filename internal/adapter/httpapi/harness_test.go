@@ -453,6 +453,9 @@ func TestHostileHarness(t *testing.T) {
 		{"readonly may not author finding (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/engagements/engA/findings", http.StatusForbidden},
 		{"readonly may not triage (triage)", "readonly", "tenantA", true, http.MethodPatch, "/api/v1/engagements/engA/findings/f1", http.StatusForbidden},
 		{"readonly may not run scan (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/sca/scans", http.StatusForbidden},
+		// The scan-job read carries its engagement in the RESPONSE, not the path, so withEngTenant
+		// cannot wrap it; the handler re-checks the tenant itself. A machine role is denied outright.
+		{"machine may not read scan job (view)", "agent", "tenantA", true, http.MethodGet, "/api/v1/sca/scans/job-1", http.StatusForbidden},
 		{"readonly may not read audit (review)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/audit", http.StatusForbidden},
 		{"readonly may not manage users (administer)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/users", http.StatusForbidden},
 		// Consultant: operate yes (covered elsewhere), but NOT review or administer.

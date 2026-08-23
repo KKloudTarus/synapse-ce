@@ -1,0 +1,55 @@
+[Unit]
+Description=Synapse scoped-egress namespace broker
+Documentation=https://github.com/KKloudTarus/synapse-ce/blob/main/docs/guide/deployment.md
+After=network-online.target synapse-worker-runtime-env.service
+Wants=network-online.target
+Requires=synapse-worker-runtime-env.service
+Before=synapse-worker.service
+
+[Service]
+Type=simple
+User=root
+Group=synapse-worker
+EnvironmentFile=/etc/synapse-worker/egress-broker.env
+ExecStart=/opt/synapse/synapse-egress-broker -socket=/run/synapse-egress-broker/egress-broker.sock -user=synapse-worker -group=synapse-worker -bwrap=/usr/bin/bwrap -grant-public-key=${SYNAPSE_EGRESS_GRANT_PUBLIC_KEY} -grant-replay-journal=/var/lib/synapse-egress-broker/grant-replays.jsonl
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+UMask=0027
+RuntimeDirectory=synapse-egress-broker netns
+RuntimeDirectoryMode=0750
+StateDirectory=synapse-egress-broker
+StateDirectoryMode=0700
+
+# This is the only host service allowed to administer per-run namespaces and firewall rules.
+# The protocol accepts no command or argv fields and authenticates each worker and Bubblewrap PID.
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_READ_SEARCH CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SYS_PTRACE
+AmbientCapabilities=
+# CAP_SYS_PTRACE and CAP_DAC_READ_SEARCH permit read-only inspection of the worker-owned
+# Bubblewrap executable, command line, namespaces, and inherited synchronization pipe in procfs.
+# CAP_SYS_ADMIN is required only to bind-mount a per-run network-namespace descriptor under
+# /run/netns. The kernel gates many unrelated operations behind these capabilities, so a syscall
+# allowlist bounds them to the procfs inspection and namespace/mount work this service actually
+# performs: @system-service excludes the privileged groups, and only the mount syscalls used by pinning are added back.
+# Anything outside the allowlist is refused with EPERM rather than terminating the broker, so a
+# denied syscall surfaces as a failed grant instead of dropping every in-flight run.
+SystemCallFilter=@system-service mount umount2 setns
+SystemCallFilter=~@clock @cpu-emulation @debug @keyring @kexec @module @obsolete @raw-io @reboot @swap
+SystemCallErrorNumber=EPERM
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+ReadWritePaths=/run/synapse-egress-broker /run/netns /var/lib/synapse-egress-broker
+
+[Install]
+WantedBy=multi-user.target

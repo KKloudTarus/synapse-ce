@@ -212,6 +212,8 @@ func (s *Service) RunJob(ctx context.Context, payload []byte) error {
 	}
 	for index := range job.Scopes {
 		job.Scopes[index].ApprovedTarget = job.ApprovedTargets[index]
+		job.Scopes[index].EgressExecutionKind = "cspm"
+		job.Scopes[index].EgressExecutionID = job.RunID.String()
 	}
 	result, runErr := s.Run(ctx, RunInput{TenantID: job.TenantID, EngagementID: job.EngagementID, Actor: job.Actor, Scopes: job.Scopes})
 	if runErr != nil {

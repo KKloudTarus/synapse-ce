@@ -452,6 +452,7 @@ func (rt *Router) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan-status", rt.authz(userdom.PermView, rt.withEngTenant(rt.scanStatus)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan-runs", rt.authz(userdom.PermView, rt.withEngTenant(rt.scanRuns)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan-runs/compare", rt.authz(userdom.PermView, rt.withEngTenant(rt.compareScanRuns)))
+	mux.HandleFunc("GET /api/v1/sca/scans/{id}", rt.authz(userdom.PermView, rt.scanJob))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/credentials", rt.authz(userdom.PermView, rt.withEngTenant(rt.listCredentials)))
 	mux.HandleFunc("POST /api/v1/engagements/{id}/credentials", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.setCredential)))
 	mux.HandleFunc("DELETE /api/v1/engagements/{id}/credentials/{name}", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.deleteCredential)))

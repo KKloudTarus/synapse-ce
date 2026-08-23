@@ -50,7 +50,11 @@ func (e *AIEvidenceSealError) Unwrap() error {
 // write here: Evidence.Service already owns the bounded chain-head retry, while a generic Append
 // error can be commit-ambiguous. The operator retries the whole scan after the ledger recovers.
 func (s *Service) sealEvidenceFailClosed(ctx context.Context, actor string, engagementID shared.ID, now time.Time, result *ScanResult) (shared.ID, error) {
-	ref, sealErr := s.sealEvidence(ctx, actor, engagementID, now, result)
+	return s.sealEvidenceFailClosedWithID(ctx, actor, engagementID, now, result, "")
+}
+
+func (s *Service) sealEvidenceFailClosedWithID(ctx context.Context, actor string, engagementID shared.ID, now time.Time, result *ScanResult, evidenceID shared.ID) (shared.ID, error) {
+	ref, sealErr := s.sealEvidence(ctx, actor, engagementID, now, result, evidenceID)
 	if sealErr == nil {
 		return ref, nil
 	}

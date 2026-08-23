@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -16,7 +17,17 @@ type QueuedJob struct {
 	Kind     string // e.g. "recon" | "sca"
 	Payload  []byte
 	Attempts int
+	Fence    int64 // monotonically increasing generation assigned by Claim
 }
+
+// ErrStaleLease indicates that the claimed job was reclaimed by another worker.
+var (
+	// ErrStaleLease indicates that the claimed job was reclaimed by another worker.
+	ErrStaleLease = errors.New("job lease is stale: the job was reclaimed by another worker")
+	// ErrRetryable tells the claim loop to release the current delivery without consuming an
+	// attempt. It is used when another worker owns the run-level execution lease.
+	ErrRetryable = errors.New("job execution is temporarily owned by another worker")
+)
 
 type JobStats struct {
 	Queued         int        `json:"queued"`
@@ -61,21 +72,33 @@ type JobQueue interface {
 	Enqueue(ctx context.Context, kind string, payload []byte) (string, error)
 	// Claim atomically leases the next available job for visibility, or returns
 	// (nil, nil) when none is ready. A claimed job whose lease has expired is eligible
-	// again (crash recovery). When kinds are given, only jobs of those kinds are claimed
+	// again (crash recovery). Each claim increments and returns a fence generation; callers
+	// must supply it to Heartbeat, Complete, Fail, and Deadletter. When kinds are given, only
+	// jobs of those kinds are claimed
 	// – so specialized workers (a privileged recon worker, an in-process SCA worker) draw
 	// only the kinds they can handle and never park each other's jobs; empty = any kind.
 	Claim(ctx context.Context, visibility time.Duration, kinds ...string) (*QueuedJob, error)
-	// Heartbeat extends a claimed job's lease while it is still being processed.
-	Heartbeat(ctx context.Context, id string, extend time.Duration) error
-	// Complete marks a job done (it will not be redelivered).
-	Complete(ctx context.Context, id string) error
-	// Fail requeues a job to run again after retryIn (backoff); the caller decides when
-	// Attempts is high enough to stop retrying.
-	Fail(ctx context.Context, id string, retryIn time.Duration) error
-	// Deadletter marks a job permanently FAILED (gave up after MaxAttempts) – a terminal
-	// state distinct from done so an abandoned authorized scan is operator-visible and
-	// queryable, not silently indistinguishable from success.
-	Deadletter(ctx context.Context, id string) error
+	// Heartbeat extends a claimed job's lease only when fence is still its current claim
+	// generation. ErrStaleLease means another worker owns this job now; abandon it silently
+	// and do not publish terminal state or evidence.
+	Heartbeat(ctx context.Context, id string, fence int64, extend time.Duration) error
+	// Complete marks a job done only when fence is still its current claim generation.
+	// ErrStaleLease means another worker owns this job now; abandon it silently and do not
+	// publish terminal state or evidence.
+	Complete(ctx context.Context, id string, fence int64) error
+	// Fail requeues a job only when fence is still its current claim generation. The caller
+	// decides when Attempts is high enough to stop retrying. ErrStaleLease means another
+	// worker owns this job now; abandon it silently and do not publish terminal state or evidence.
+	Fail(ctx context.Context, id string, fence int64, retryIn time.Duration) error
+	// Retry releases a claimed job with backoff without consuming a delivery attempt. It is
+	// reserved for contention outcomes such as a live run-level execution lease.
+	Retry(ctx context.Context, id string, fence int64, retryIn time.Duration) error
+	// Deadletter marks a job permanently FAILED only when fence is still its current claim
+	// generation. This terminal state is distinct from done so an abandoned authorized scan is
+	// operator-visible and queryable, not silently indistinguishable from success. ErrStaleLease
+	// means another worker owns this job now; abandon it silently and do not publish terminal state
+	// or evidence.
+	Deadletter(ctx context.Context, id string, fence int64) error
 	// Depth returns the number of NOT-yet-terminal jobs (queued or claimed/in-flight) – the
 	// admission signal for durable backpressure. When kinds are given only those kinds are
 	// counted (empty = any). 'done' and 'failed' (dead-lettered) are terminal and excluded.

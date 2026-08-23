@@ -78,10 +78,10 @@ func (q *JobQueue) Claim(ctx context.Context, visibility time.Duration, kinds ..
 				args = append(args, kinds)
 			}
 			var job ports.QueuedJob
-			err := tx.QueryRow(ctx, `UPDATE jobs SET status='claimed',attempts=attempts+1,claimed_until=now()+make_interval(secs=>$1),updated_at=now()
+			err := tx.QueryRow(ctx, `UPDATE jobs SET status='claimed',attempts=attempts+1,claim_fence=claim_fence+1,claimed_until=now()+make_interval(secs=>$1),updated_at=now()
 				WHERE id=(SELECT id FROM jobs WHERE status IN ('queued','claimed') AND available_at<=now() AND (status='queued' OR claimed_until<now())`+kindFilter+`
 				ORDER BY available_at,id FOR UPDATE SKIP LOCKED LIMIT 1)
-				RETURNING id,tenant_id,kind,payload,attempts`, args...).Scan(&job.ID, &job.TenantID, &job.Kind, &job.Payload, &job.Attempts)
+				RETURNING id,tenant_id,kind,payload,attempts,claim_fence`, args...).Scan(&job.ID, &job.TenantID, &job.Kind, &job.Payload, &job.Attempts, &job.Fence)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
 			}
@@ -101,32 +101,46 @@ func (q *JobQueue) Claim(ctx context.Context, visibility time.Duration, kinds ..
 	return nil, nil
 }
 
-func (q *JobQueue) Heartbeat(ctx context.Context, id string, extend time.Duration) error {
-	return q.update(ctx, id, `UPDATE jobs SET claimed_until=now()+make_interval(secs=>$2),updated_at=now() WHERE id=$1 AND status='claimed'`, extend.Seconds())
+func (q *JobQueue) Heartbeat(ctx context.Context, id string, fence int64, extend time.Duration) error {
+	return q.update(ctx, id, fence, `UPDATE jobs SET claimed_until=now()+make_interval(secs=>$3),updated_at=now() WHERE id=$1 AND status='claimed' AND claim_fence=$2`, extend.Seconds())
 }
 
-func (q *JobQueue) Complete(ctx context.Context, id string) error {
-	return q.update(ctx, id, `UPDATE jobs SET status='done',claimed_until=NULL,updated_at=now() WHERE id=$1`)
+func (q *JobQueue) Complete(ctx context.Context, id string, fence int64) error {
+	return q.update(ctx, id, fence, `UPDATE jobs SET status='done',claimed_until=NULL,updated_at=now() WHERE id=$1 AND status='claimed' AND claim_fence=$2`)
 }
 
-func (q *JobQueue) Deadletter(ctx context.Context, id string) error {
-	return q.update(ctx, id, `UPDATE jobs SET status='failed',claimed_until=NULL,updated_at=now() WHERE id=$1`)
+func (q *JobQueue) Deadletter(ctx context.Context, id string, fence int64) error {
+	return q.update(ctx, id, fence, `UPDATE jobs SET status='failed',claimed_until=NULL,updated_at=now() WHERE id=$1 AND status='claimed' AND claim_fence=$2`)
 }
 
-func (q *JobQueue) Fail(ctx context.Context, id string, retryIn time.Duration) error {
-	return q.update(ctx, id, `UPDATE jobs SET status='queued',claimed_until=NULL,available_at=now()+make_interval(secs=>$2),updated_at=now() WHERE id=$1`, retryIn.Seconds())
+func (q *JobQueue) Fail(ctx context.Context, id string, fence int64, retryIn time.Duration) error {
+	return q.update(ctx, id, fence, `UPDATE jobs SET status='queued',claimed_until=NULL,available_at=now()+$3::interval,updated_at=now() WHERE id=$1 AND status='claimed' AND claim_fence=$2`, retryIn.String())
 }
 
-func (q *JobQueue) update(ctx context.Context, id, query string, args ...any) error {
+// Retry releases a contention delivery without charging it against the job's attempt budget.
+func (q *JobQueue) Retry(ctx context.Context, id string, fence int64, retryIn time.Duration) error {
+	return q.update(ctx, id, fence, `UPDATE jobs SET status='queued',claimed_until=NULL,available_at=now()+$3::interval,attempts=GREATEST(attempts-1, 0),updated_at=now() WHERE id=$1 AND status='claimed' AND claim_fence=$2`, retryIn.String())
+}
+
+func (q *JobQueue) update(ctx context.Context, id string, fence int64, query string, args ...any) error {
 	return WithContextTenant(ctx, q.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, query, append([]any{id}, args...)...)
+		tag, err := tx.Exec(ctx, query, append([]any{id, fence}, args...)...)
 		if err != nil {
-			return err
+			return fmt.Errorf("update job %s: %w", id, err)
 		}
-		if tag.RowsAffected() == 0 {
+		if tag.RowsAffected() != 0 {
+			return nil
+		}
+
+		var exists bool
+		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM jobs WHERE id=$1)`, id).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("check job %s after fenced update: %w", id, err)
+		}
+		if !exists {
 			return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
 		}
-		return nil
+		return fmt.Errorf("job %s fence %d: %w", id, fence, ports.ErrStaleLease)
 	})
 }
 

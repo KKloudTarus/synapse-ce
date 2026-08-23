@@ -88,8 +88,17 @@ func newClient(cfg Config) (*minio.Client, error) {
 	if cfg.Endpoint == "" || cfg.Bucket == "" {
 		return nil, fmt.Errorf("%w: blob store requires endpoint and bucket", shared.ErrValidation)
 	}
+	if (cfg.AccessKey == "") != (cfg.SecretKey == "") {
+		return nil, fmt.Errorf("%w: blob access and secret keys must be set together", shared.ErrValidation)
+	}
+	creds := credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, "")
+	if cfg.AccessKey == "" {
+		// NewIAM follows the AWS container, web-identity, and EC2 metadata credential
+		// paths, so the same runtime supports EKS IRSA and EC2 instance profiles.
+		creds = credentials.NewIAM("")
+	}
 	client, err := minio.New(cfg.Endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
+		Creds:  creds,
 		Secure: cfg.UseSSL,
 	})
 	if err != nil {

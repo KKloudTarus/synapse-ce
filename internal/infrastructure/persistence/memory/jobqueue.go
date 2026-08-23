@@ -29,6 +29,7 @@ type memJob struct {
 	payload      []byte
 	status       string // queued | claimed | done
 	attempts     int
+	claimFence   int64
 	availableAt  time.Time
 	claimedUntil time.Time
 }
@@ -96,40 +97,52 @@ func (q *JobQueue) Claim(_ context.Context, visibility time.Duration, kinds ...s
 	j := ready[0]
 	j.status = "claimed"
 	j.attempts++
+	j.claimFence++
 	j.claimedUntil = now.Add(visibility)
-	return &ports.QueuedJob{ID: j.id, TenantID: j.tenantID, Kind: j.kind, Payload: j.payload, Attempts: j.attempts}, nil
+	return &ports.QueuedJob{ID: j.id, TenantID: j.tenantID, Kind: j.kind, Payload: j.payload, Attempts: j.attempts, Fence: j.claimFence}, nil
 }
 
-func (q *JobQueue) Heartbeat(_ context.Context, id string, extend time.Duration) error {
+func (q *JobQueue) Heartbeat(_ context.Context, id string, fence int64, extend time.Duration) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	j := q.jobs[id]
-	if j == nil || j.status != "claimed" {
+	if j == nil {
 		return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
+	}
+	if j.status != "claimed" || j.claimFence != fence {
+		return fmt.Errorf("job %s fence %d: %w", id, fence, ports.ErrStaleLease)
 	}
 	j.claimedUntil = q.now().Add(extend)
 	return nil
 }
 
-func (q *JobQueue) Complete(_ context.Context, id string) error {
+func (q *JobQueue) Complete(_ context.Context, id string, fence int64) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	j := q.jobs[id]
 	if j == nil {
 		return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
 	}
+	if j.status != "claimed" || j.claimFence != fence {
+		return fmt.Errorf("job %s fence %d: %w", id, fence, ports.ErrStaleLease)
+	}
 	j.status = "done"
+	j.claimedUntil = time.Time{}
 	return nil
 }
 
-func (q *JobQueue) Deadletter(_ context.Context, id string) error {
+func (q *JobQueue) Deadletter(_ context.Context, id string, fence int64) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	j := q.jobs[id]
 	if j == nil {
 		return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
 	}
+	if j.status != "claimed" || j.claimFence != fence {
+		return fmt.Errorf("job %s fence %d: %w", id, fence, ports.ErrStaleLease)
+	}
 	j.status = "failed" // terminal, distinct from done (gave up after MaxAttempts)
+	j.claimedUntil = time.Time{}
 	return nil
 }
 
@@ -192,16 +205,39 @@ func (q *JobQueue) JobStatus(ctx context.Context, id string) (ports.JobStatus, e
 	return ports.JobStatus{Attempts: job.attempts, DeadLettered: job.status == "failed"}, nil
 }
 
-func (q *JobQueue) Fail(_ context.Context, id string, retryIn time.Duration) error {
+func (q *JobQueue) Fail(_ context.Context, id string, fence int64, retryIn time.Duration) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	j := q.jobs[id]
 	if j == nil {
 		return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
 	}
+	if j.status != "claimed" || j.claimFence != fence {
+		return fmt.Errorf("job %s fence %d: %w", id, fence, ports.ErrStaleLease)
+	}
 	j.status = "queued"
 	j.claimedUntil = time.Time{}
 	j.availableAt = q.now().Add(retryIn)
+	return nil
+}
+
+// Retry releases a contention delivery without charging it against the job's attempt budget.
+func (q *JobQueue) Retry(_ context.Context, id string, fence int64, retryIn time.Duration) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	j := q.jobs[id]
+	if j == nil {
+		return fmt.Errorf("job %s: %w", id, shared.ErrNotFound)
+	}
+	if j.status != "claimed" || j.claimFence != fence {
+		return fmt.Errorf("job %s fence %d: %w", id, fence, ports.ErrStaleLease)
+	}
+	j.status = "queued"
+	j.claimedUntil = time.Time{}
+	j.availableAt = q.now().Add(retryIn)
+	if j.attempts > 0 {
+		j.attempts--
+	}
 	return nil
 }
 

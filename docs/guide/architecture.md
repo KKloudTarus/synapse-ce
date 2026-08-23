@@ -17,11 +17,13 @@ domain  <-  usecase  <-  adapter / infrastructure
 | adapter | `internal/adapter/*` | usecase and domain |
 | infrastructure | `internal/infrastructure/*` | the ports it implements, plus domain |
 | platform | `internal/platform/*` | standard library, domain and ports |
+| composition | `internal/composition/*` | usecase, infrastructure, and platform packages needed for shared composition |
 
 All external I/O (database, tools, LLM, sandbox, storage) goes through ports, which are
 interfaces in `internal/usecase/ports`. The domain stays pure, with no framework, database, or
-tool types in it. `cmd/*` is the composition root: it wires concrete implementations into the
-interfaces in `main`, and holds no business logic.
+tool types in it. `cmd/*` remains the composition root: it wires concrete implementations into the
+interfaces in `main`, and holds no business logic. Shared wiring that is reused by multiple binaries
+lives in `internal/composition/*`, above the platform and infrastructure packages it composes.
 
 ## Projects and engagements
 
