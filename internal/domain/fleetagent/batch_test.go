@@ -84,6 +84,7 @@ func TestBatchValidate(t *testing.T) {
 		"no detections": {AgentID: "a", EngagementID: "e", Sequence: 1, KeyID: "k"},
 		"empty id":      {AgentID: "a", EngagementID: "e", Sequence: 1, KeyID: "k", Detections: []DetectionRef{{ContentSHA256: "h"}}},
 		"empty content": {AgentID: "a", EngagementID: "e", Sequence: 1, KeyID: "k", Detections: []DetectionRef{{ID: "d"}}},
+		"duplicate id":  {AgentID: "a", EngagementID: "e", Sequence: 1, KeyID: "k", Detections: []DetectionRef{{ID: "d", ContentSHA256: "h"}, {ID: "d", ContentSHA256: "h"}}},
 	}
 	for name, b := range cases {
 		t.Run(name, func(t *testing.T) {

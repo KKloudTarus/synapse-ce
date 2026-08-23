@@ -61,11 +61,7 @@ type AgentKeyResolver interface {
 
 // IngestItem is one detection in a batch together with the asset it was observed on (#423 requirement 5:
 // a detection joins the asset model).
-type IngestItem struct {
-	ID        shared.ID
-	Detection detection.Detection
-	AssetID   shared.ID
-}
+type IngestItem = fleetagent.DetectionBatchItem
 
 // IngestResult reports the outcome of ingesting a batch.
 type IngestResult struct {

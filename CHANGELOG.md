@@ -9,6 +9,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Independent signed agent detection delivery.** Confirmed detections now drain from an isolated P1
+  WAL lane into crash-recoverable batches, using an agent-owned Ed25519 key registered with
+  proof-of-possession. Pending sequence/membership survives restart and lost responses, local records
+  are ACKed only after complete server admission, rejected or expiring keys rotate without changing
+  the pending batch sequence, and a live-path test covers WAL → HTTP → key resolution → signature and
+  content verification → exactly-once evidence sealing.
+
 - **Native amd64 and arm64 eBPF sensor artifacts with capability-based CO-RE probing.** The agent now
   embeds only architecture-matched objects, detects kernel BTF and required network types without
   kernel-version gating, reports unsupported capability as an explicit coverage gap, and validates

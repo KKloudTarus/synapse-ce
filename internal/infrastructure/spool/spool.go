@@ -281,9 +281,16 @@ func (s *Spool) Peek(ctx context.Context, req ports.PeekSpoolRequest) ([]ports.S
 	if maxRecords < 0 || maxBytes < 0 {
 		return nil, fmt.Errorf("%w: negative peek limit", shared.ErrValidation)
 	}
+	firstPriority, lastPriority := fleetagent.PriorityP0, fleetagent.PriorityP3
+	if req.OnlyPriority != nil {
+		if !req.OnlyPriority.Valid() {
+			return nil, fmt.Errorf("%w: invalid peek priority %d", shared.ErrValidation, int(*req.OnlyPriority))
+		}
+		firstPriority, lastPriority = *req.OnlyPriority, *req.OnlyPriority
+	}
 	result := make([]ports.SpoolRecord, 0, min(maxRecords, 64))
 	var bytesRead int64
-	for priority := fleetagent.PriorityP0; priority <= fleetagent.PriorityP3; priority++ {
+	for priority := firstPriority; priority <= lastPriority; priority++ {
 		for _, ref := range s.records[priority] {
 			if len(result) >= maxRecords {
 				return result, nil
@@ -427,6 +434,23 @@ func (s *Spool) Stats(ctx context.Context) (ports.SpoolStats, error) {
 		stats.TotalRecords += lane.Records
 		stats.Priorities = append(stats.Priorities, lane)
 	}
+	for key, highest := range s.state.ACK {
+		priority, epoch, err := parseACKKey(key)
+		if err != nil {
+			return ports.SpoolStats{}, fmt.Errorf("read spool ACK history: %w", err)
+		}
+		if highest > 0 {
+			stats.EpochACKs = append(stats.EpochACKs, ports.SpoolEpochACK{
+				Priority: priority, Epoch: epoch, HighestACKed: highest,
+			})
+		}
+	}
+	sort.Slice(stats.EpochACKs, func(i, j int) bool {
+		if stats.EpochACKs[i].Priority != stats.EpochACKs[j].Priority {
+			return stats.EpochACKs[i].Priority < stats.EpochACKs[j].Priority
+		}
+		return stats.EpochACKs[i].Epoch < stats.EpochACKs[j].Epoch
+	})
 	return stats, nil
 }
 

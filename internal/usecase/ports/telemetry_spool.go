@@ -129,6 +129,10 @@ func (r SpoolRecord) Validate() error {
 type PeekSpoolRequest struct {
 	MaxRecords int
 	MaxBytes   int64
+	// OnlyPriority restricts the read to one delivery lane. A nil value preserves the normal P0→P3
+	// drain order. Dedicated transports use this to ensure a busy coverage or telemetry lane cannot
+	// consume the read budget and starve the independent detection queue.
+	OnlyPriority *fleetagent.DeliveryPriority
 }
 
 // SpoolACK is the highest contiguous record sequence the control plane durably accepted for one priority
@@ -244,9 +248,19 @@ type SpoolPriorityStats struct {
 	HighestACKed  uint64
 }
 
+// SpoolEpochACK preserves the highest durable ACK for one priority incarnation. Historical entries
+// let a shipper finish committing local state after a reboot advances CurrentEpoch and reclaimed WAL
+// records from the acknowledged epoch are no longer readable.
+type SpoolEpochACK struct {
+	Priority     fleetagent.DeliveryPriority
+	Epoch        uint64
+	HighestACKed uint64
+}
+
 // SpoolStats is both an operator query and the source for the agent Prometheus collector.
 type SpoolStats struct {
 	Priorities   []SpoolPriorityStats
+	EpochACKs    []SpoolEpochACK
 	TotalRecords int64
 	// TotalBytes includes WAL records and GapBytes; GapBytes is exposed
 	// separately as the loss-evidence subset of the bounded spool quota.

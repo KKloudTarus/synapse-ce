@@ -8,9 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
+	"github.com/KKloudTarus/synapse-ce/internal/platform/fssecurity"
 )
 
 type fakeAPI struct {
@@ -51,6 +53,12 @@ func (f *fakeAPI) SubmitResult(_ context.Context, _, orderID, status, reason str
 func (f *fakeAPI) SendHostInventory(_ context.Context, _ string, _ any) error {
 	f.sent++
 	return f.sendErr
+}
+func (f *fakeAPI) RegisterDetectionKey(context.Context, string, fleetagent.AgentSigningKey, string) error {
+	return nil
+}
+func (f *fakeAPI) SendDetectionBatch(context.Context, string, fleetagent.AgentBatch, []fleetagent.DetectionBatchItem) error {
+	return nil
 }
 
 func newRunner(t *testing.T, api fleetAPI, orders []fleetclient.Order, collect func(context.Context, string) (hostinventory.HostInventory, error)) *runner {
@@ -93,7 +101,7 @@ func TestFirstRunEnrolsAndPersists(t *testing.T) {
 	}
 	// Unix-only guarantee: Windows has no permission bits, so the credential is protected by the
 	// state directory's ACL there instead. Asserting 0600 on Windows would assert nothing real.
-	if fleetclient.SecretModeEnforced() && info.Mode().Perm() != 0o600 {
+	if fssecurity.UnixModeEnforced() && info.Mode().Perm() != 0o600 {
 		t.Fatalf("credential must be 0600, got %v", info.Mode().Perm())
 	}
 	// The order was progressed and reported succeeded with a coverage-honest summary.

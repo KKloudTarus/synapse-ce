@@ -33,6 +33,24 @@ func TestSpoolPriorityDrainAndLaneOrdering(t *testing.T) {
 	}
 }
 
+func TestPeekCanIsolateDetectionPriority(t *testing.T) {
+	s := mustOpen(t, testConfig(t))
+	mustEnqueue(t, s, testItem(fleetagent.PriorityP0, "coverage", 32))
+	mustEnqueue(t, s, testItem(fleetagent.PriorityP1, "detection-1", 32))
+	mustEnqueue(t, s, testItem(fleetagent.PriorityP1, "detection-2", 32))
+	mustEnqueue(t, s, testItem(fleetagent.PriorityP3, "telemetry", 32))
+	priority := fleetagent.PriorityP1
+	records, err := s.Peek(context.Background(), ports.PeekSpoolRequest{MaxRecords: 8, MaxBytes: 1024, OnlyPriority: &priority})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireIDs(t, records, "detection-1", "detection-2")
+	invalid := fleetagent.DeliveryPriority(99)
+	if _, err := s.Peek(context.Background(), ports.PeekSpoolRequest{OnlyPriority: &invalid}); err == nil {
+		t.Fatal("invalid isolated priority accepted")
+	}
+}
+
 func TestPeekBoundsAndAlwaysMakesProgress(t *testing.T) {
 	s := mustOpen(t, testConfig(t))
 	mustEnqueue(t, s, testItem(fleetagent.PriorityP3, "large", 4096))
@@ -178,6 +196,43 @@ func TestACKSurvivesRestartAndReclaimsSegment(t *testing.T) {
 	if stats.Priorities[fleetagent.PriorityP3].HighestACKed != first.Sequence || second.Sequence != first.Sequence+1 {
 		t.Fatalf("ACK/sequence state not restored: %#v", stats.Priorities[fleetagent.PriorityP3])
 	}
+}
+
+func TestStatsRetainsACKForPastEpochAfterBootChange(t *testing.T) {
+	cfg := testConfig(t)
+	s, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivered := mustEnqueue(t, s, testItem(fleetagent.PriorityP1, "delivered", 64))
+	if _, err := s.Ack(context.Background(), ports.SpoolACK{
+		Priority: fleetagent.PriorityP1, Epoch: delivered.Epoch, Through: delivered.Sequence,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg.Boot = "boot-after-ack"
+	reopened, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	stats, err := reopened.Stats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Priorities[fleetagent.PriorityP1].CurrentEpoch <= delivered.Epoch {
+		t.Fatalf("boot did not advance epoch: stats=%#v delivered=%#v", stats.Priorities[fleetagent.PriorityP1], delivered)
+	}
+	for _, ack := range stats.EpochACKs {
+		if ack.Priority == fleetagent.PriorityP1 && ack.Epoch == delivered.Epoch && ack.HighestACKed == delivered.Sequence {
+			return
+		}
+	}
+	t.Fatalf("past-epoch ACK missing after reboot: %#v", stats.EpochACKs)
 }
 
 func TestDirectoryHasExclusiveProcessOwnership(t *testing.T) {

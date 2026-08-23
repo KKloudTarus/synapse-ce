@@ -10,8 +10,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
+
+	"github.com/KKloudTarus/synapse-ce/internal/platform/fssecurity"
 )
 
 // ValidateControlPlaneURL refuses a cleartext control-plane URL so the bearer credential cannot
@@ -107,7 +108,7 @@ func WriteSecret(path string, data []byte, mode os.FileMode) error {
 	if err := os.Chmod(path, mode); err != nil {
 		return err
 	}
-	if !SecretModeEnforced() {
+	if !fssecurity.UnixModeEnforced() {
 		// Windows does not implement Unix permission bits: os.Chmod only toggles the read-only
 		// attribute, so the mode above is NOT the protection it looks like. Verifying it here would
 		// fail on a platform where the guarantee simply does not exist, and asserting it anyway would
@@ -130,12 +131,6 @@ func WriteSecret(path string, data []byte, mode os.FileMode) error {
 	}
 	return nil
 }
-
-// SecretModeEnforced reports whether this platform enforces Unix permission bits on a file.
-//
-// It is false on Windows, where os.Chmod only toggles the read-only attribute. Callers use it to
-// state the guarantee they actually have rather than the one they wrote down.
-func SecretModeEnforced() bool { return runtime.GOOS != "windows" }
 
 // ReadEnrolTokenFile reads a one-time enrolment token from path, treating an ABSENT file as "no token
 // supplied" rather than as an error.
