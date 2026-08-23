@@ -42,6 +42,6 @@ describe('AITriageObservability', () => {
     expect(screen.getByText('p1 · Checkout')).toBeInTheDocument()
     expect(screen.getByText('Parse failures exceeded baseline')).toBeInTheDocument()
     expect(screen.getByText('Drift input distribution')).toBeInTheDocument()
-    expect(screen.getByText('75.00%')).toBeInTheDocument()
+    expect(screen.getByText('75.0%')).toBeInTheDocument()
   })
 })

@@ -79,14 +79,7 @@ export async function logoutSession(): Promise<void> {
 export async function req(path: string, init?: RequestInit): Promise<any> {
   let res: Response
   try {
-    res = await fetch(`/api/v1${path}`, {
-      ...init,
-      headers: {
-        'content-type': 'application/json',
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-        ...(init?.headers ?? {}),
-      },
-    })
+    res = await fetch(`/api/v1${path}`, apiRequestInit(init))
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw error
@@ -110,7 +103,7 @@ export async function req(path: string, init?: RequestInit): Promise<any> {
 
 /** Fetch a SARIF/OpenVEX export with the bearer token and trigger a browser download. */
 export async function blobDownload(path: string, fallbackName: string): Promise<void> {
-  const res = await fetch(path, { headers: token ? { authorization: `Bearer ${token}` } : {} })
+  const res = await fetch(path, apiRequestInit({}, false))
   if (res.status === 401 && onUnauthorized) onUnauthorized()
   if (!res.ok) {
     let msg = `HTTP ${res.status}`
