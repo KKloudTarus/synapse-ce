@@ -10,8 +10,20 @@ import (
 )
 
 func TestPlatformDoesNotImportInfrastructure(t *testing.T) {
+	assertNoInfrastructureImport(t, ".")
+}
+
+// TestUsecaseDoesNotImportInfrastructure enforces the inward dependency rule for the usecase layer:
+// production usecase code depends on domain + usecase/ports only, never a concrete infrastructure
+// package. Test files are exempt (they legitimately wire the in-memory adapter twins).
+func TestUsecaseDoesNotImportInfrastructure(t *testing.T) {
+	assertNoInfrastructureImport(t, filepath.Join("..", "usecase"))
+}
+
+func assertNoInfrastructureImport(t *testing.T, root string) {
+	t.Helper()
 	fset := token.NewFileSet()
-	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

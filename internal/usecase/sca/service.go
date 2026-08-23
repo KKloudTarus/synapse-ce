@@ -3697,9 +3697,11 @@ func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID s
 	if err != nil {
 		return "", fmt.Errorf("marshal scan evidence: %w", err)
 	}
-	// Queued scans reserve a stable evidence ID from the durable job ID. An exact
-	// redelivery can therefore prove a prior commit and reuse the link rather than
-	// appending a duplicate after a commit-ambiguous cancellation.
+	// Queued scans reserve a stable evidence ID from the durable job ID. A redelivery can
+	// therefore prove a prior commit and reuse the link rather than appending a duplicate after a
+	// commit-ambiguous cancellation. This is deliberately first-commit-authoritative (see
+	// SealWithID): a retry whose AI-triage telemetry differs reuses the first sealed link instead
+	// of conflicting, so the finding-linked evidence stays byte-stable to the first commit.
 	var link evidence.Evidence
 	if evidenceID.IsZero() {
 		link, err = s.evidence.Seal(ctx, engagementID, "scan", content, actor)

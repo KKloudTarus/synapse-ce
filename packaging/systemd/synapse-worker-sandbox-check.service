@@ -10,7 +10,7 @@ Before=synapse-worker.service
 Type=oneshot
 User=synapse-worker
 Group=synapse-worker
-ExecStart=/opt/synapse/synapse-sandbox-check -mode=startup -strict
+ExecStart=/opt/synapse/synapse-sandbox-check -mode=full -strict
 RemainAfterExit=true
 Delegate=yes
 NoNewPrivileges=true

@@ -153,7 +153,7 @@ resource "aws_imagebuilder_component" "worker" {
             action = "ExecuteBash"
             inputs = {
               commands = [
-                "systemd-run --wait --collect --unit=synapse-image-sandbox-check --property=User=synapse-worker --property=Group=synapse-worker --property=Delegate=yes --property=NoNewPrivileges=yes --property=CapabilityBoundingSet= --property=PrivateTmp=yes --property=PrivateDevices=yes /opt/synapse/synapse-sandbox-check -mode=startup -strict",
+                "systemd-run --wait --collect --unit=synapse-image-sandbox-check --property=User=synapse-worker --property=Group=synapse-worker --property=Delegate=yes --property=NoNewPrivileges=yes --property=CapabilityBoundingSet= --property=PrivateTmp=yes --property=PrivateDevices=yes /opt/synapse/synapse-sandbox-check -mode=full -strict",
               ]
             }
           },

@@ -54,11 +54,14 @@ spec:
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           startupProbe:
-            # Executes the production sandbox runner before this worker can claim work.
-            exec: {command: ["/opt/synapse/synapse-sandbox-check", "-mode=startup"]}
-            periodSeconds: 10
+            # Runs the FULL production sandbox conformance suite (every strict control, not just the
+            # host/kernel-dependent subset) before this worker can claim work; -strict fails closed
+            # until delegated cgroup limits are actually enforced. The wider timeout gives the
+            # behavioral probes (seccomp/filesystem/memory/pids/timeout/output/redaction) headroom.
+            exec: {command: ["/opt/synapse/synapse-sandbox-check", "-mode=full", "-strict"]}
+            periodSeconds: 15
             failureThreshold: 6
-            timeoutSeconds: 15
+            timeoutSeconds: 30
           volumeMounts:
             - {name: synapse-data, mountPath: /var/lib/synapse}
             - {name: tmp, mountPath: /tmp}

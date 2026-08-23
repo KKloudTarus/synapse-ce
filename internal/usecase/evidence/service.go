@@ -114,9 +114,15 @@ func (s *Service) Seal(ctx context.Context, engagementID shared.ID, kind string,
 	return s.sealRef(ctx, engagementID, kind, content, "", createdBy)
 }
 
-// SealWithID appends a general evidence link with a caller-reserved identity.
-// Exact redeliveries return the existing link, making commit-ambiguous queue
-// retries idempotent without weakening the engagement's linear chain.
+// SealWithID appends a general evidence link with a caller-reserved identity, making
+// commit-ambiguous queue retries idempotent without weakening the engagement's linear chain.
+//
+// Matching is FIRST-COMMIT-AUTHORITATIVE, not byte-exact (exactContent=false): a redelivery under
+// the same reserved id/kind/ref/creator returns the already-sealed link even if its content differs.
+// This is deliberate for queued work whose payload may legitimately vary across a retry (e.g. a scan
+// re-run whose AI-triage telemetry differs) while the sealed, finding-linked evidence must stay
+// byte-stable to the first commit. Callers that need a divergent redelivery to fail closed instead
+// must seal with byte-exact reservation (see appendReserved's exactContent path).
 func (s *Service) SealWithID(ctx context.Context, evidenceID, engagementID shared.ID, kind string, content []byte, createdBy string) (evdom.Evidence, error) {
 	return s.sealRefWithID(ctx, evidenceID, engagementID, "", kind, content, "", createdBy, false)
 }

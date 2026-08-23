@@ -13,7 +13,7 @@ grep -Fq 'Delegate=yes' packaging/systemd/synapse-worker.service
 grep -Fq 'CapabilityBoundingSet=' packaging/systemd/synapse-worker.service
 grep -Fq 'Requires=synapse-worker-runtime-env.service synapse-egress-broker.service synapse-worker-sandbox-check.service' packaging/systemd/synapse-worker.service
 grep -Fq 'User=synapse-worker' packaging/systemd/synapse-worker-sandbox-check.service
-grep -Fq 'ExecStart=/opt/synapse/synapse-sandbox-check -mode=startup -strict' packaging/systemd/synapse-worker-sandbox-check.service
+grep -Fq 'ExecStart=/opt/synapse/synapse-sandbox-check -mode=full -strict' packaging/systemd/synapse-worker-sandbox-check.service
 grep -Fq 'Delegate=yes' packaging/systemd/synapse-worker-sandbox-check.service
 grep -Fq 'CapabilityBoundingSet=' packaging/systemd/synapse-worker-sandbox-check.service
 grep -Fq 'Before=synapse-worker.service' packaging/systemd/synapse-worker-sandbox-check.service

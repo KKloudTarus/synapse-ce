@@ -15,6 +15,12 @@ import (
 
 var ErrGrantReplay = errors.New("egress grant was already used")
 
+// replayCompactMinRecords is the floor below which the append-only journal is never rewritten:
+// compaction is only worthwhile once the file holds many more records than the live (unexpired)
+// set. Above the floor the journal is rewritten when it has grown past twice the live set, which
+// bounds on-disk growth to O(live grants) instead of O(all grants ever issued).
+const replayCompactMinRecords = 1024
+
 type GrantReplayStore interface {
 	Consume(id string, expiresAt, now time.Time) error
 }
@@ -32,6 +38,9 @@ type FileGrantReplayStore struct {
 	path        string
 	expectedUID int
 	entries     map[string]time.Time
+	// diskRecords tracks how many records the on-disk journal holds (live + not-yet-compacted
+	// expired), so Consume can decide when the append-only log has grown enough to compact.
+	diskRecords int
 	syncFile    func(*os.File) error
 	syncDir     func(string) error
 }
@@ -88,6 +97,7 @@ func newFileGrantReplayStore(path string, now time.Time, expectedUID int) (*File
 		if err != nil {
 			return nil, err
 		}
+		store.diskRecords++
 		expiry := time.Unix(record.ExpiresAt, 0)
 		if now.Before(expiry) {
 			store.entries[record.ID] = expiry
@@ -96,8 +106,22 @@ func newFileGrantReplayStore(path string, now time.Time, expectedUID int) (*File
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("read egress grant replay journal: %w", err)
 	}
+	// Drop any temp file orphaned by a compaction that crashed before its atomic rename. Such a
+	// file is owner-private and never read, but removing it keeps the directory bounded too.
+	if matches, err := filepath.Glob(filepath.Join(dir, replayCompactTempGlob)); err == nil {
+		for _, m := range matches {
+			_ = os.Remove(m)
+		}
+	}
 	return store, nil
 }
+
+// replayCompactTempPrefix / replayCompactTempGlob name the transient file a compaction writes
+// before atomically renaming it over the journal.
+const (
+	replayCompactTempPrefix = ".egress-replay-compact-"
+	replayCompactTempGlob   = replayCompactTempPrefix + "*.tmp"
+)
 
 func (s *FileGrantReplayStore) Consume(id string, expiresAt, now time.Time) error {
 	s.mu.Lock()
@@ -173,6 +197,75 @@ func (s *FileGrantReplayStore) Consume(id string, expiresAt, now time.Time) erro
 		}
 	}
 	s.entries[id] = expiresAt
+	s.diskRecords++
+	// The grant is now durably consumed; compaction is pure housekeeping. Rewrite the journal to
+	// drop expired records once it has grown well past the live set. A compaction failure must not
+	// fail this already-committed Consume — leave the journal as-is and retry on a later call.
+	if s.diskRecords >= replayCompactMinRecords && s.diskRecords > 2*len(s.entries) {
+		_ = s.compactLocked(now)
+	}
+	return nil
+}
+
+// compactLocked rewrites the journal keeping only unexpired entries, bounding the growth of the
+// append-only log. It is crash-safe: the live set is written to an owner-private temp file, fsync'd,
+// atomically renamed over the journal, and the directory fsync'd. A crash before the rename leaves
+// the old journal (a superset of the live set) intact; a crash after it leaves the compacted file —
+// either way no consumed-and-still-valid grant can become replayable, because an expired grant can
+// never be consumed (Consume rejects expiry <= now) and load skips expired records. Dropping expired
+// records therefore never enables a replay. Must be called with s.mu held.
+func (s *FileGrantReplayStore) compactLocked(now time.Time) error {
+	dir := filepath.Dir(s.path)
+	if err := validateReplayDirectory(dir, s.expectedUID); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, replayCompactTempPrefix+"*.tmp")
+	if err != nil {
+		return fmt.Errorf("create egress grant replay compaction temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tmp.Close()
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		return fmt.Errorf("set egress grant replay compaction mode: %w", err)
+	}
+	writer := bufio.NewWriter(tmp)
+	live := 0
+	for existingID, expiry := range s.entries {
+		if !now.Before(expiry) {
+			continue
+		}
+		record, err := json.Marshal(replayRecord{ID: existingID, ExpiresAt: expiry.Unix()})
+		if err != nil {
+			return fmt.Errorf("encode egress grant replay record: %w", err)
+		}
+		if _, err := writer.Write(append(record, '\n')); err != nil {
+			return fmt.Errorf("write egress grant replay compaction record: %w", err)
+		}
+		live++
+	}
+	if err := writer.Flush(); err != nil {
+		return fmt.Errorf("flush egress grant replay compaction: %w", err)
+	}
+	if err := s.syncFile(tmp); err != nil {
+		return fmt.Errorf("sync egress grant replay compaction: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close egress grant replay compaction: %w", err)
+	}
+	if err := os.Rename(tmpPath, s.path); err != nil {
+		return fmt.Errorf("commit egress grant replay compaction: %w", err)
+	}
+	committed = true
+	if err := s.syncDir(dir); err != nil {
+		return fmt.Errorf("sync egress grant replay directory: %w", err)
+	}
+	s.diskRecords = live
 	return nil
 }
 

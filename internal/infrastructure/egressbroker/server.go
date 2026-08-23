@@ -114,15 +114,24 @@ func (s *Server) Run(ctx context.Context) error {
 		listener.Close()
 	}()
 
+	// Drain in-flight handlers before returning so a shutdown cannot orphan a privileged
+	// setup/cleanup mid-flight; each handler is already ctx-bounded (30s per request), so the wait
+	// is bounded.
+	var handlers sync.WaitGroup
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			handlers.Wait()
 			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 				return nil
 			}
 			return fmt.Errorf("accept broker connection: %w", err)
 		}
-		go s.handle(ctx, conn)
+		handlers.Add(1)
+		go func() {
+			defer handlers.Done()
+			s.handle(ctx, conn)
+		}()
 	}
 }
 

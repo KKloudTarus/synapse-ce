@@ -129,7 +129,12 @@ func (w *Worker) safeHandle(ctx context.Context, h Handler, job ports.QueuedJob)
 // Completes or Fails it.
 func (w *Worker) process(ctx context.Context, job ports.QueuedJob) {
 	if job.TenantID.IsZero() {
-		w.log.Error("job has no tenant – dead-lettering", "kind", job.Kind, "job", job.ID)
+		// Defensive guard: durable Enqueue requires a tenant and the tenant-scoped claim never
+		// returns a tenant-less row, so this is unreachable in practice. If it ever fired we could
+		// not park the job either — every queue mutation is tenant-scoped (RLS) and there is no
+		// tenant to scope one with – so skip it and log loudly rather than claim a terminal
+		// transition we cannot make.
+		w.log.Error("job has no tenant – skipping (cannot tenant-scope a terminal transition)", "kind", job.Kind, "job", job.ID)
 		return
 	}
 	jobCtx := shared.WithTenant(ctx, job.TenantID)
