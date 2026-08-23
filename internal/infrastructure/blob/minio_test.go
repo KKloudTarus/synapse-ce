@@ -138,3 +138,24 @@ func TestReadOnlyMinIODoesNotExposePut(t *testing.T) {
 		t.Fatal("read-only MinIO must not expose Put")
 	}
 }
+
+func TestNewClientAcceptsInstanceProfileCredentials(t *testing.T) {
+	client, err := newClient(Config{Endpoint: "s3.us-east-1.amazonaws.com", Bucket: "evidence", UseSSL: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client == nil {
+		t.Fatal("instance-profile client is required")
+	}
+}
+
+func TestNewClientRejectsPartialStaticCredentials(t *testing.T) {
+	for _, cfg := range []Config{
+		{Endpoint: "s3.us-east-1.amazonaws.com", Bucket: "evidence", AccessKey: "access"},
+		{Endpoint: "s3.us-east-1.amazonaws.com", Bucket: "evidence", SecretKey: "secret"},
+	} {
+		if _, err := newClient(cfg); err == nil {
+			t.Fatal("partial static credentials must fail closed")
+		}
+	}
+}

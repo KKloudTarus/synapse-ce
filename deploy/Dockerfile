@@ -17,6 +17,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /out/synapse-api ./cmd/synapse-api \
     && CGO_ENABLED=0 go build -trimpath -o /out/synapse-worker ./cmd/synapse-worker \
+    && CGO_ENABLED=0 go build -trimpath -o /out/synapse-sandbox-check ./cmd/synapse-sandbox-check \
     && CGO_ENABLED=0 go build -trimpath -o /out/synapse-migrate ./cmd/synapse-migrate \
     && CGO_ENABLED=0 go build -trimpath -o /out/synapse-dast-helper ./cmd/synapse-dast-helper \
     && CGO_ENABLED=0 go build -trimpath -o /out/synapse-callgraph ./cmd/synapse-callgraph \
@@ -112,6 +113,7 @@ RUN apt-get update \
          /var/lib/synapse/cache
 COPY --from=build /out/synapse-api /opt/synapse/synapse-api
 COPY --from=build /out/synapse-worker /opt/synapse/synapse-worker
+COPY --from=build /out/synapse-sandbox-check /opt/synapse/synapse-sandbox-check
 COPY --from=build /out/synapse-migrate /opt/synapse/synapse-migrate
 COPY --from=build /out/synapse-dast-helper /opt/synapse/synapse-dast-helper
 COPY --from=build /out/synapse-callgraph /opt/synapse/synapse-callgraph

@@ -1,6 +1,13 @@
 package ports
 
-import "net/netip"
+import (
+	"context"
+	"net/netip"
+	"slices"
+	"time"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+)
 
 // EgressRule is one egress decision: allow or deny traffic to Net on Ports (empty Ports
 // = all ports). Rules are matched in order; an EgressPolicy is default-DENY, so only
@@ -33,4 +40,70 @@ type EgressPolicy struct {
 	AllowDomainRules []DomainRule
 	DenyDomainRules  []DomainRule
 	PinnedHosts      map[string][]netip.Addr // prevalidated host-to-address bindings; no second DNS lookup
+}
+
+// EgressNamespace is the lifecycle handle for one configured execution network
+// namespace. Concrete namespace setup and teardown remain infrastructure concerns.
+type EgressNamespace interface {
+	NamespaceName() string
+	HostsPath() string
+	Rules() []EgressRule
+	Teardown(context.Context) error
+}
+
+// EgressEnforcer configures a scope-bound execution network namespace. Sandboxed
+// runners depend on this inward-facing port rather than a concrete broker client.
+type EgressEnforcer interface {
+	Probe(context.Context) error
+	Setup(context.Context, string, int, int, string, string, EgressPolicy) (EgressNamespace, error)
+}
+
+// CanonicalEgressRule is the normalized rule signed by the control plane and
+// passed over the broker protocol.
+type CanonicalEgressRule struct {
+	Allow bool     `json:"allow"`
+	CIDR  string   `json:"cidr"`
+	Ports []uint16 `json:"ports,omitempty"`
+}
+
+// CanonicalEgressRulesEqual compares canonical rules without string conversion so
+// grant signing and broker enforcement share the same exact ordering invariant.
+
+func CanonicalEgressRulesEqual(left, right []CanonicalEgressRule) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i].Allow != right[i].Allow || left[i].CIDR != right[i].CIDR || !slices.Equal(left[i].Ports, right[i].Ports) {
+			return false
+		}
+	}
+	return true
+}
+
+// EgressGrantRequest binds a signed grant to the exact tenant, execution,
+// Bubblewrap process, namespace slot, and canonical policy.
+type EgressGrantRequest struct {
+	TenantID      string
+	ExecutionKind string
+	ExecutionID   string
+	RunID         string
+	Slot          int
+	PID           int
+	Rules         []CanonicalEgressRule
+}
+
+// EgressGrantSigner signs a short-lived process-bound grant.
+type EgressGrantSigner interface {
+	Sign(EgressGrantRequest, time.Time, time.Duration) (string, error)
+}
+
+// EgressPolicyCanonicalizer resolves and normalizes a policy for signing.
+type EgressPolicyCanonicalizer interface {
+	Canonicalize(context.Context, EgressPolicy) ([]CanonicalEgressRule, error)
+}
+
+// EgressPolicyCompiler derives a default-deny policy from authoritative scope.
+type EgressPolicyCompiler interface {
+	Compile(engagement.Scope) EgressPolicy
 }

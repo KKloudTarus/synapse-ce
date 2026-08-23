@@ -1,0 +1,23 @@
+[Unit]
+Description=Render Synapse worker runtime secret environment
+After=network-online.target
+Wants=network-online.target
+Before=synapse-egress-broker.service synapse-worker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/synapse-worker/bootstrap.env
+ExecStart=/usr/libexec/synapse/render-worker-runtime-env
+RemainAfterExit=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/etc/synapse-worker
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

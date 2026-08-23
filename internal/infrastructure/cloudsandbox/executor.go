@@ -185,6 +185,9 @@ func (e *Executor) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (
 	if len(hosts) == 0 {
 		return cloudposture.Inventory{}, nil, fmt.Errorf("%w: no CSPM egress hosts configured for %s", shared.ErrValidation, scope.Provider)
 	}
+	if strings.TrimSpace(scope.EgressExecutionKind) == "" || strings.TrimSpace(scope.EgressExecutionID) == "" {
+		return cloudposture.Inventory{}, nil, fmt.Errorf("%w: CSPM execution requires authoritative signed execution grants", shared.ErrValidation)
+	}
 	policy := &ports.EgressPolicy{}
 	for _, host := range hosts {
 		policy.AllowDomainRules = append(policy.AllowDomainRules, ports.DomainRule{Host: host, Ports: []uint16{443}})
@@ -254,7 +257,9 @@ func (e *Executor) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (
 	}()
 	result, runErr := e.runner.Run(ctx, ports.ToolSpec{
 		Name: e.binary, Stdin: input, Timeout: e.timeout, MaxOutputBytes: e.maxOutput,
-		EngagementID: scope.EngagementID, EgressPolicy: policy, ExtraFiles: []*os.File{credentialR, requestW, decisionR},
+		EngagementID: scope.EngagementID, EgressPolicy: policy,
+		EgressExecutionKind: scope.EgressExecutionKind, EgressExecutionID: scope.EgressExecutionID,
+		ExtraFiles: []*os.File{credentialR, requestW, decisionR},
 		Env: []string{
 			fmt.Sprintf("SYNAPSE_CSPM_CREDENTIAL_FD=%d", credentialFD),
 			"SYNAPSE_CSPM_AUTH_REQUEST_FD=5",

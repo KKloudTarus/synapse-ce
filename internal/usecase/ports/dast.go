@@ -39,16 +39,18 @@ type DASTCrawlPlan struct {
 }
 
 type DASTPlan struct {
-	HelperBin    string                `json:"-"`
-	ConfigDigest string                `json:"-"`
-	Target       string                `json:"target"`
-	Session      dastsession.Config    `json:"session"`
-	Requests     []dastsurface.Request `json:"requests"`
-	Crawl        *DASTCrawlPlan        `json:"crawl,omitempty"`
-	RatePerSec   int                   `json:"rate_per_sec"`
-	Concurrency  int                   `json:"concurrency"`
-	EngagementID shared.ID             `json:"-"`
-	EgressPolicy *EgressPolicy         `json:"-"`
+	HelperBin           string                `json:"-"`
+	ConfigDigest        string                `json:"-"`
+	Target              string                `json:"target"`
+	Session             dastsession.Config    `json:"session"`
+	Requests            []dastsurface.Request `json:"requests"`
+	Crawl               *DASTCrawlPlan        `json:"crawl,omitempty"`
+	RatePerSec          int                   `json:"rate_per_sec"`
+	Concurrency         int                   `json:"concurrency"`
+	EngagementID        shared.ID             `json:"-"`
+	EgressPolicy        *EgressPolicy         `json:"-"`
+	EgressExecutionKind string                `json:"-"`
+	EgressExecutionID   string                `json:"-"`
 }
 
 // DASTObservation is bounded, secret-free proof of one completed request.

@@ -1,0 +1,90 @@
+name: synapse-worker
+arch: ${SYNAPSE_ARCH}
+platform: linux
+version: ${SYNAPSE_VERSION}
+section: admin
+maintainer: KKloudTarus <security@kkloudtarus.example>
+description: Synapse hardened external execution worker.
+license: proprietary
+vendor: KKloudTarus
+
+overrides:
+  rpm:
+    depends:
+      - awscli-2
+      - bubblewrap
+      - ca-certificates
+      - glibc >= ${SYNAPSE_LIBC_FLOOR}
+      - iproute
+      - iptables-nft
+      - libpcap
+      - python3
+      - systemd
+  deb:
+    depends:
+      - awscli
+      - bubblewrap
+      - ca-certificates
+      - libc6 (>= ${SYNAPSE_LIBC_FLOOR})
+      - iproute2
+      - iptables
+      - libpcap0.8
+      - python3
+      - systemd
+
+contents:
+  - src: ./dist/worker/
+    dst: /opt/synapse/
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+  - src: ./packaging/systemd/synapse-worker.service
+    dst: /usr/lib/systemd/system/synapse-worker.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./packaging/systemd/synapse-worker-runtime-env.service
+    dst: /usr/lib/systemd/system/synapse-worker-runtime-env.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./packaging/systemd/synapse-worker-sandbox-check.service
+    dst: /usr/lib/systemd/system/synapse-worker-sandbox-check.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./packaging/systemd/synapse-egress-broker.service
+    dst: /usr/lib/systemd/system/synapse-egress-broker.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ./packaging/scripts/render-worker-runtime-env.sh
+    dst: /usr/libexec/synapse/render-worker-runtime-env
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+  - src: ./packaging/worker.env.example
+    dst: /etc/synapse-worker/worker.env
+    type: config|noreplace
+    file_info:
+      mode: 0640
+      owner: root
+      group: synapse-worker
+  - src: ./packaging/worker-bootstrap.env.example
+    dst: /etc/synapse-worker/bootstrap.env
+    type: config|noreplace
+    file_info:
+      mode: 0600
+      owner: root
+      group: root
+
+scripts:
+  preinstall: ./packaging/scripts/worker-preinstall.sh
+  preremove: ./packaging/scripts/worker-preremove.sh
+  postremove: ./packaging/scripts/worker-postremove.sh

@@ -53,6 +53,9 @@ func (e *Engine) Run(ctx context.Context, plan ports.DASTPlan, secretEnv []strin
 	if strings.TrimSpace(plan.Target) == "" {
 		return ports.DASTOutcome{}, fmt.Errorf("%w: DAST target is required", shared.ErrValidation)
 	}
+	if plan.EgressPolicy == nil || strings.TrimSpace(plan.EgressExecutionKind) == "" || strings.TrimSpace(plan.EgressExecutionID) == "" {
+		return ports.DASTOutcome{}, fmt.Errorf("%w: DAST execution requires authoritative signed execution grants", shared.ErrValidation)
+	}
 	if plan.HelperBin != "" && plan.HelperBin != e.helper {
 		return ports.DASTOutcome{}, fmt.Errorf("%w: approved DAST helper does not match configured helper", shared.ErrValidation)
 	}
@@ -118,10 +121,12 @@ func (e *Engine) Run(ctx context.Context, plan ports.DASTPlan, secretEnv []strin
 		Timeout:        e.timeout,
 		MaxOutputBytes: e.maxOut,
 		// The sandbox places caller files after its seccomp fd: request=4, decision=5.
-		Env:          append([]string{"SYNAPSE_DAST_AUTH_REQUEST_FD=4", "SYNAPSE_DAST_AUTH_DECISION_FD=5"}, secretEnv...),
-		ExtraFiles:   []*os.File{requestW, decisionR},
-		EngagementID: plan.EngagementID,
-		EgressPolicy: plan.EgressPolicy,
+		Env:                 append([]string{"SYNAPSE_DAST_AUTH_REQUEST_FD=4", "SYNAPSE_DAST_AUTH_DECISION_FD=5"}, secretEnv...),
+		ExtraFiles:          []*os.File{requestW, decisionR},
+		EngagementID:        plan.EngagementID,
+		EgressPolicy:        plan.EgressPolicy,
+		EgressExecutionKind: plan.EgressExecutionKind,
+		EgressExecutionID:   plan.EgressExecutionID,
 	})
 	_ = requestW.Close()
 	_ = decisionR.Close()

@@ -32,6 +32,10 @@ type ToolSpec struct {
 	// exec.Cmd.ExtraFiles. The SandboxRunner uses this to hand bwrap the seccomp-filter fd
 	// (`--seccomp 3`); the caller retains ownership and closes them after Run.
 	ExtraFiles []*os.File
+	// Started, when non-nil, is called after the direct child starts and before waiting.
+	// The callback may read status from inherited descriptors before returning. SandboxRunner
+	// uses it only to configure a paused Bubblewrap namespace; plain callers leave it nil.
+	Started func(context.Context) error
 
 	CapAdd      []string // capabilities to re-add after cap-drop ALL (only CAP_NET_RAW, for naabu, is permitted)
 	MemMaxBytes int64    // cgroup memory.max via systemd-run (0 = runner default)
@@ -51,11 +55,14 @@ type ToolSpec struct {
 	// can reach only in-scope destinations. Nil = the run is fully network-isolated
 	// (bubblewrap's fresh netns, no egress) – the E9 default.
 	EgressPolicy *EgressPolicy
-	// HostNetwork runs the tool with the HOST network namespace (sandboxed for fs/seccomp/
-	// caps/cgroup, but NOT egress-scoped) – used only for acquisition (git/image) when
-	// kernel egress scoping is unavailable (F4): it removes the direct-exec surface while
-	// still allowing the network the fetch needs. Ignored when EgressPolicy is set
-	// (egress-scoped wins). Never set for recon (recon fails closed without egress scoping).
+	// EgressExecutionKind and EgressExecutionID bind a privileged broker authorization
+	// to authoritative control-plane state for this one tool execution. Production
+	// broker clients fail closed when either is absent.
+	EgressExecutionKind string
+	EgressExecutionID   string
+	// HostNetwork is retained for compatibility with older callers but the hardened
+	// SandboxRunner rejects it. Networked tools must use EgressPolicy plus an authoritative
+	// execution identity; nil EgressPolicy remains fully network-isolated.
 	HostNetwork bool
 }
 

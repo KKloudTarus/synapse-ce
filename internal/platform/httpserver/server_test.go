@@ -68,6 +68,28 @@ func TestRunPairServesBothListeners(t *testing.T) {
 // listener cannot bind (e.g. address in use), RunPair must cancel the shared context so
 // the API listener is also gracefully joined, rather than leaking a goroutine serving
 // forever with no supervisor.
+func TestRunListenersServesPrivateAuthority(t *testing.T) {
+	apiAddr := freePort(t)
+	authorityAddr := freePort(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- RunListeners(ctx, []Listener{
+			{Name: "http server", Addr: apiAddr, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })},
+			{Name: "egress grant authority", Addr: authorityAddr, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusCreated) })},
+		}, discardLog())
+	}()
+	waitForListener(t, apiAddr)
+	waitForListener(t, authorityAddr)
+	if resp, err := http.Get("http://" + authorityAddr + "/internal/v1/egress-grants"); err != nil || resp.StatusCode != http.StatusCreated {
+		t.Fatalf("authority listener not serving: err=%v resp=%v", err, resp)
+	}
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunListeners returned an error on graceful shutdown: %v", err)
+	}
+}
+
 func TestRunPairMetricsFailureCancelsAPI(t *testing.T) {
 	apiAddr := freePort(t)
 	blocked, err := net.Listen("tcp", "127.0.0.1:0")

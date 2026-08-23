@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // dsn returns the test database DSN, or skips when none is configured (so the suite
@@ -84,11 +86,62 @@ func TestPostgresJobQueueLeaseReclaim(t *testing.T) {
 	if err != nil || second == nil || second.ID != id || second.Attempts != 2 {
 		t.Fatalf("expired lease must be reclaimable as attempt 2: %+v err=%v", second, err)
 	}
-	if err := q.Complete(ctx, id); err != nil {
+	if second.Fence <= first.Fence {
+		t.Fatalf("reclaim fence = %d, want greater than first fence %d", second.Fence, first.Fence)
+	}
+	if err := q.Complete(ctx, id, first.Fence); !errors.Is(err, ports.ErrStaleLease) {
+		t.Fatalf("stale complete = %v, want ErrStaleLease", err)
+	}
+	if err := q.Complete(ctx, id, second.Fence); err != nil {
 		t.Fatal(err)
 	}
 	if j, _ := q.Claim(ctx, time.Second); j != nil {
 		t.Fatalf("completed job must not be claimable, got %+v", j)
+	}
+}
+
+func TestPostgresJobQueueStaleLeaseMutations(t *testing.T) {
+	operations := []struct {
+		name string
+		call func(*JobQueue, context.Context, string, int64) error
+	}{
+		{"complete", func(q *JobQueue, ctx context.Context, id string, fence int64) error {
+			return q.Complete(ctx, id, fence)
+		}},
+		{"fail", func(q *JobQueue, ctx context.Context, id string, fence int64) error { return q.Fail(ctx, id, fence, 0) }},
+		{"retry", func(q *JobQueue, ctx context.Context, id string, fence int64) error {
+			return q.Retry(ctx, id, fence, 0)
+		}},
+		{"deadletter", func(q *JobQueue, ctx context.Context, id string, fence int64) error {
+			return q.Deadletter(ctx, id, fence)
+		}},
+		{"heartbeat", func(q *JobQueue, ctx context.Context, id string, fence int64) error {
+			return q.Heartbeat(ctx, id, fence, time.Minute)
+		}},
+	}
+	for _, tt := range operations {
+		t.Run(tt.name, func(t *testing.T) {
+			q, ctx := setupJobQueue(t)
+			id, err := q.Enqueue(ctx, "recon", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := q.Claim(ctx, time.Second)
+			if err != nil || first == nil {
+				t.Fatalf("first claim = %+v, %v", first, err)
+			}
+			time.Sleep(1500 * time.Millisecond)
+			second, err := q.Claim(ctx, time.Minute)
+			if err != nil || second == nil || second.Fence <= first.Fence {
+				t.Fatalf("reclaim = %+v, %v", second, err)
+			}
+			if err := tt.call(q, ctx, id, first.Fence); !errors.Is(err, ports.ErrStaleLease) {
+				t.Fatalf("stale %s = %v, want ErrStaleLease", tt.name, err)
+			}
+			if err := q.Heartbeat(ctx, id, second.Fence, time.Minute); err != nil {
+				t.Fatalf("current fence heartbeat: %v", err)
+			}
+		})
 	}
 }
 
@@ -114,6 +167,25 @@ func TestPostgresJobQueueClaimByKind(t *testing.T) {
 // seam: AggregateJobQueueStats must sum every tenant's RLS-scoped Stats (mirroring
 // Claim's per-tenant transaction loop), never a privileged cross-tenant query, and must
 // never require or expose a tenant label on the result. Gated on SYNAPSE_TEST_DB_DSN.
+func TestPostgresJobQueueRetryDoesNotBurnAttempt(t *testing.T) {
+	q, ctx := setupJobQueue(t)
+	id, err := q.Enqueue(ctx, "recon", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := q.Claim(ctx, time.Minute)
+	if err != nil || job == nil || job.Attempts != 1 {
+		t.Fatalf("claim = %+v, %v", job, err)
+	}
+	if err := q.Retry(ctx, id, job.Fence, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	status, err := q.JobStatus(ctx, id)
+	if err != nil || status.Attempts != 0 || status.DeadLettered {
+		t.Fatalf("retry status = %+v, %v", status, err)
+	}
+}
+
 func TestPostgresJobQueueAggregateJobQueueStatsAcrossTenants(t *testing.T) {
 	q, ctx := setupJobQueue(t)
 	tenantA := shared.DefaultTenant

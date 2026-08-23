@@ -64,6 +64,9 @@ func (e *authorizingEngine) Run(ctx context.Context, plan ports.DASTPlan, _ []st
 	if len(plan.ConfigDigest) != 64 {
 		return ports.DASTOutcome{}, fmt.Errorf("%w: approved DAST configuration digest is required", shared.ErrValidation)
 	}
+	if plan.EgressPolicy == nil || plan.EgressExecutionKind != "dast-session" || plan.EgressExecutionID == "" {
+		return ports.DASTOutcome{}, fmt.Errorf("%w: authoritative DAST execution identity is required", shared.ErrValidation)
+	}
 	for i, request := range e.requests {
 		if e.before != nil {
 			e.before(i)

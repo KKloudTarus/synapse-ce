@@ -53,3 +53,58 @@ output "cognito_hosted_ui_domain" {
   description = "Hosted-UI domain endpoint."
   value       = "https://${aws_cognito_user_pool_domain.staging.domain}.auth.${var.aws_region}.amazoncognito.com"
 }
+
+output "worker_ami_id" {
+  description = "Digest-pinned and conformance-tested native worker AMI ID."
+  value       = local.worker_ami_id
+}
+
+output "worker_image_arn" {
+  description = "EC2 Image Builder image ARN used by the worker launch template."
+  value       = aws_imagebuilder_image.worker.arn
+}
+
+output "worker_launch_template_id" {
+  description = "Private native worker launch-template identifier."
+  value       = aws_launch_template.worker.id
+}
+
+output "worker_autoscaling_group_name" {
+  description = "Native execution-worker Auto Scaling Group name."
+  value       = aws_autoscaling_group.worker.name
+}
+
+output "worker_instance_profile_arn" {
+  description = "Dedicated native worker instance-profile ARN."
+  value       = aws_iam_instance_profile.worker.arn
+}
+
+output "worker_security_group_id" {
+  description = "Dedicated native worker security-group identifier."
+  value       = aws_security_group.worker.id
+}
+
+output "worker_grant_authority_nlb_security_group_id" {
+  description = "Frontend security group for the private TLS egress-grant NLB; supply this to the Helm Service annotation."
+  value       = aws_security_group.grant_authority_nlb.id
+}
+
+output "worker_grant_authority_nlb_private_ipv4_addresses" {
+  description = "Fixed addresses reserved in dedicated NLB subnets; assign them to the authority NLB and admit them as /32s in NetworkPolicy."
+  value       = local.grant_nlb_private_addresses
+}
+
+output "worker_grant_authority_nlb_subnet_ids" {
+  description = "Dedicated private subnets for the internal egress-grant NLB; supply them to the Helm Service annotation."
+  value       = [for subnet in aws_subnet.grant_nlb : subnet.id]
+}
+
+output "worker_private_subnet_ids" {
+  description = "Dedicated private subnets used only by the native worker Auto Scaling Group."
+  value       = [for subnet in aws_subnet.worker : subnet.id]
+}
+
+output "worker_private_subnet_cidrs" {
+  description = "Dedicated native-worker subnet CIDRs; these are not used as authority admission ranges."
+  value       = local.worker_subnet_cidrs
+}

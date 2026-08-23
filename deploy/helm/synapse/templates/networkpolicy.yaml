@@ -26,6 +26,27 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace | quote }}
       ports: [{protocol: TCP, port: 8080}]
+{{- if .Values.api.grantAuthority.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "synapse.fullname" . }}-egress-grant-authority
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "synapse.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- range .Values.api.grantAuthority.networkPolicySourceCIDRs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports: [{protocol: TCP, port: {{ .Values.api.grantAuthority.port }}}]
+{{- end }}
 {{- if .Values.api.metrics.enabled }}
 ---
 apiVersion: networking.k8s.io/v1
@@ -93,7 +114,7 @@ spec:
         {{- end }}
       ports: [{protocol: TCP, port: 443}]
     {{- end }}
-{{- if .Values.networkPolicy.allowInternetEgress }}
+{{- if and .Values.worker.enabled .Values.networkPolicy.allowInternetEgress }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

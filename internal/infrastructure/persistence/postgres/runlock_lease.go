@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,11 +21,13 @@ import (
 // the pool (the ≤8-default-pool hazard the hostile review flagged). A background renewer
 // extends the lease while the run is live; a crash lets the lease expire so another worker can
 // reclaim it. Used for RECON; the agent SESSION lock stays the advisory RunLock (it must not
-// expire mid-LLM-loop). owner is a per-process id so renew/release are owner-scoped.
+// expire mid-LLM-loop). owner is a process id; each acquisition derives a distinct owner token
+// so concurrent loops cannot renew or release one another's row.
 type LeaseRunLock struct {
-	pool  *pgxpool.Pool
-	owner string
-	lease time.Duration
+	pool     *pgxpool.Pool
+	owner    string
+	lease    time.Duration
+	sequence atomic.Uint64
 }
 
 // NewLeaseRunLock returns a row-lease run locker. lease is the claim TTL (set it comfortably
@@ -54,6 +57,9 @@ func (l *LeaseRunLock) TryLock(ctx context.Context, runID string) (func(), bool,
 // in-flight run), plus a release that stops the renewer, cancels leaseCtx, and deletes the
 // owner's row. A claim held by a live owner returns ok=false (the at-least-once queue retries).
 func (l *LeaseRunLock) TryLockLeased(ctx context.Context, runID string) (context.Context, func(), bool, error) {
+	// A LeaseRunLock can serve concurrent claim loops. Every acquisition gets a fresh owner
+	// token so release/renew from one loop cannot affect another loop's execution lease.
+	owner := fmt.Sprintf("%s:%d", l.owner, l.sequence.Add(1))
 	// Acquire iff there is no row, or the existing claim has expired. Uses DB now() as the single
 	// clock. RETURNING yields a row only when the INSERT or the (expired-claim) UPDATE applied.
 	var got string
@@ -62,9 +68,9 @@ func (l *LeaseRunLock) TryLockLeased(ctx context.Context, runID string) (context
 		 VALUES ($1, $2, now() + $3::interval, now())
 		 ON CONFLICT (run_id) DO UPDATE
 		   SET owner = EXCLUDED.owner, claimed_until = EXCLUDED.claimed_until
-		   WHERE jobs_run_lock.claimed_until < now()
+		 WHERE jobs_run_lock.claimed_until < now()
 		 RETURNING owner`,
-		runID, l.owner, l.lease.String()).Scan(&got)
+		runID, owner, l.lease.String()).Scan(&got)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, false, nil // a live owner holds the lease
 	}
@@ -76,13 +82,15 @@ func (l *LeaseRunLock) TryLockLeased(ctx context.Context, runID string) (context
 	leaseCtx, leaseCancel := context.WithCancel(ctx)
 	rctx, stopRenew := context.WithCancel(context.Background())
 	var once sync.Once
-	go l.renew(rctx, runID, leaseCancel)
+	var released atomic.Bool
+	go l.renew(rctx, runID, owner, leaseCancel, &released)
 	release := func() {
 		once.Do(func() {
+			released.Store(true)
 			stopRenew()
 			leaseCancel()
 			_, _ = l.pool.Exec(context.Background(),
-				`DELETE FROM jobs_run_lock WHERE run_id=$1 AND owner=$2`, runID, l.owner)
+				`DELETE FROM jobs_run_lock WHERE run_id=$1 AND owner=$2`, runID, owner)
 		})
 	}
 	return leaseCtx, release, true, nil
@@ -96,7 +104,7 @@ func (l *LeaseRunLock) TryLockLeased(ctx context.Context, runID string) (context
 // renew failures (the claim can now be stolen), it calls onLost – cancelling the run's lease
 // context so the caller ABORTS – and stops. A silently-lost lease is exactly what would let a
 // second worker double-run an admitted action against a live host.
-func (l *LeaseRunLock) renew(ctx context.Context, runID string, onLost func()) {
+func (l *LeaseRunLock) renew(ctx context.Context, runID, owner string, onLost func(), released *atomic.Bool) {
 	interval := l.lease / 4
 	if interval <= 0 {
 		interval = time.Second
@@ -112,11 +120,15 @@ func (l *LeaseRunLock) renew(ctx context.Context, runID string, onLost func()) {
 			rc, cancel := context.WithTimeout(ctx, interval)
 			tag, err := l.pool.Exec(rc,
 				`UPDATE jobs_run_lock SET claimed_until = now() + $1::interval WHERE run_id=$2 AND owner=$3`,
-				l.lease.String(), runID, l.owner)
+				l.lease.String(), runID, owner)
 			cancel()
 			switch {
 			case err == nil && tag.RowsAffected() == 0:
-				// Our owned, unexpired row is gone → the lease was stolen/expired. Definitive loss.
+				// Our owned, unexpired row is gone → the lease was stolen/expired. A release
+				// from another loop that shared our owner must not be treated as benign.
+				if released.Load() {
+					return
+				}
 				slog.Warn("run lease lost (renew matched no owned row); aborting in-flight run", "run", runID)
 				onLost()
 				return

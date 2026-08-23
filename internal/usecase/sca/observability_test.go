@@ -291,11 +291,18 @@ func (failingEnqueueQueue) Enqueue(context.Context, string, []byte) (string, err
 func (failingEnqueueQueue) Claim(context.Context, time.Duration, ...string) (*ports.QueuedJob, error) {
 	return nil, nil
 }
-func (failingEnqueueQueue) Heartbeat(context.Context, string, time.Duration) error { return nil }
-func (failingEnqueueQueue) Complete(context.Context, string) error                 { return nil }
-func (failingEnqueueQueue) Fail(context.Context, string, time.Duration) error      { return nil }
-func (failingEnqueueQueue) Deadletter(context.Context, string) error               { return nil }
-func (failingEnqueueQueue) Depth(context.Context, ...string) (int, error)          { return 0, nil }
+func (failingEnqueueQueue) Heartbeat(context.Context, string, int64, time.Duration) error {
+	return nil
+}
+func (failingEnqueueQueue) Complete(context.Context, string, int64) error { return nil }
+func (failingEnqueueQueue) Fail(context.Context, string, int64, time.Duration) error {
+	return nil
+}
+func (failingEnqueueQueue) Retry(context.Context, string, int64, time.Duration) error {
+	return nil
+}
+func (failingEnqueueQueue) Deadletter(context.Context, string, int64) error { return nil }
+func (failingEnqueueQueue) Depth(context.Context, ...string) (int, error)   { return 0, nil }
 func (failingEnqueueQueue) Stats(context.Context, ...string) (ports.JobStats, error) {
 	return ports.JobStats{}, nil
 }

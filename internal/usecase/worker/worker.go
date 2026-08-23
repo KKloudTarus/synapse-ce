@@ -8,9 +8,11 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"sync/atomic"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -31,13 +33,10 @@ type HandlerFunc func(ctx context.Context, job ports.QueuedJob) error
 // Handle calls f.
 func (f HandlerFunc) Handle(ctx context.Context, job ports.QueuedJob) error { return f(ctx, job) }
 
-// DeadLetterer is an optional capability a Handler may implement. When the worker is about to
-// dead-letter a job (terminal failure after MaxAttempts), it calls OnDeadLetter FIRST so the
-// handler can drive its backing domain entity (agent session / recon run) to a terminal state.
-// Without it, a reconciler that keys on the ENTITY's status – not the job's – re-enqueues the
-// stranded entity forever (the dead-letter → re-drive livelock), and the job/entity states
-// permanently disagree. Best-effort: an OnDeadLetter error is logged, never blocking the
-// dead-letter itself. cause is the last handler error that exhausted the retries.
+// DeadLetterer is an optional capability a Handler may implement after the fenced queue
+// transition has successfully dead-lettered a terminally failed job. Running it after the
+// fence check prevents a stale worker from finalizing entity state owned by a newer claim.
+// Best-effort: an OnDeadLetter error is logged after the authoritative queue transition.
 type DeadLetterer interface {
 	OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause error) error
 }
@@ -130,7 +129,12 @@ func (w *Worker) safeHandle(ctx context.Context, h Handler, job ports.QueuedJob)
 // Completes or Fails it.
 func (w *Worker) process(ctx context.Context, job ports.QueuedJob) {
 	if job.TenantID.IsZero() {
-		w.log.Error("job has no tenant – dead-lettering", "kind", job.Kind, "job", job.ID)
+		// Defensive guard: durable Enqueue requires a tenant and the tenant-scoped claim never
+		// returns a tenant-less row, so this is unreachable in practice. If it ever fired we could
+		// not park the job either — every queue mutation is tenant-scoped (RLS) and there is no
+		// tenant to scope one with – so skip it and log loudly rather than claim a terminal
+		// transition we cannot make.
+		w.log.Error("job has no tenant – skipping (cannot tenant-scope a terminal transition)", "kind", job.Kind, "job", job.ID)
 		return
 	}
 	jobCtx := shared.WithTenant(ctx, job.TenantID)
@@ -139,63 +143,139 @@ func (w *Worker) process(ctx context.Context, job ports.QueuedJob) {
 		// Unknown kind: there is no handler in this build. Park it (Complete) so it does
 		// not spin forever, and log loudly – a silent drop would hide a misconfiguration.
 		w.log.Error("no handler for job kind – parking job", "kind", job.Kind, "job", job.ID)
-		w.complete(jobCtx, job.ID)
+		w.complete(jobCtx, job.ID, job.Fence)
 		return
 	}
 
-	hbCtx, stopHB := context.WithCancel(jobCtx)
-	go w.heartbeat(hbCtx, job.ID)
+	// The handler runs under a claim-scoped context the heartbeat cancels the moment the lease
+	// is lost. Without this a reclaimed job's handler keeps executing – hitting real hosts and
+	// publishing domain state or evidence – while another worker owns the job at a newer fence.
+	claimCtx, abandonClaim := context.WithCancel(jobCtx)
+	defer abandonClaim()
+	// Lease loss is recorded explicitly: the claim context is also cancelled on the normal path
+	// (handler returned, shutdown), so its error cannot distinguish the two.
+	var leaseLost atomic.Bool
+	hbDone := make(chan struct{})
+	go func() {
+		defer close(hbDone)
+		w.heartbeat(claimCtx, job.ID, job.Fence, func() {
+			leaseLost.Store(true)
+			abandonClaim()
+		})
+	}()
 
-	err := w.safeHandle(jobCtx, h, job)
-	stopHB()
+	err := w.safeHandle(claimCtx, h, job)
+	// Stop heartbeating and join the goroutine before acting on the result, so the lease-loss
+	// signal cannot land after we have decided the job's terminal state.
+	abandonClaim()
+	<-hbDone
 
+	// The lease was lost mid-flight: another worker owns this job at a newer fence. Abandon it
+	// silently without publishing terminal state or evidence.
+	if leaseLost.Load() {
+		w.log.Warn("job claim was lost during execution – abandoning", "kind", job.Kind, "job", job.ID)
+		return
+	}
+	if errors.Is(err, ports.ErrRetryable) {
+		if rerr := w.queue.Retry(context.WithoutCancel(jobCtx), job.ID, job.Fence, w.cfg.Backoff); rerr != nil {
+			if errors.Is(rerr, ports.ErrStaleLease) {
+				w.log.Warn("job was reclaimed by another worker – abandoning", "job", job.ID, "err", rerr)
+			} else {
+				w.log.Error("retryable job release failed", "job", job.ID, "err", rerr)
+			}
+		}
+		return
+	}
 	if err == nil {
-		w.complete(jobCtx, job.ID)
+		w.complete(jobCtx, job.ID, job.Fence)
 		return
 	}
 	if job.Attempts >= w.cfg.MaxAttempts {
 		w.log.Error("job failed permanently – dead-lettering", "kind", job.Kind, "job", job.ID, "attempts", job.Attempts, "err", err)
-		// Drive the backing domain entity terminal BEFORE flipping the job row, so a reconciler
-		// keyed on the entity's status (not the job's) stops re-enqueuing it – closing the
-		// dead-letter → re-drive livelock. Best-effort + logged; never blocks the dead-letter.
+		// Claim the terminal transition through the fence FIRST. A worker whose lease expired
+		// must never drive the backing entity terminal: another worker may already own this job
+		// at a newer fence, and the domain repositories are unconditional upserts that would
+		// clobber its live run. ErrStaleLease here means we lost the job – abandon silently.
+		if derr := w.queue.Deadletter(context.WithoutCancel(jobCtx), job.ID, job.Fence); derr != nil {
+			if errors.Is(derr, ports.ErrStaleLease) {
+				w.log.Warn("job was reclaimed by another worker – abandoning", "job", job.ID, "err", derr)
+			} else {
+				w.log.Error("dead-letter failed", "job", job.ID, "err", derr)
+			}
+			return
+		}
+		// Terminal FAILED state (not done) is now recorded, so an abandoned authorized scan stays
+		// operator-visible + queryable. Drive the backing domain entity terminal too, so a
+		// reconciler keyed on the entity's status stops re-enqueuing it – closing the
+		// dead-letter → re-drive livelock. Best-effort + logged; a crash between the two leaves
+		// the entity to the existing stranded-job reconciler.
 		if dl, ok := h.(DeadLetterer); ok {
 			if derr := dl.OnDeadLetter(context.WithoutCancel(jobCtx), job, err); derr != nil {
 				w.log.Error("dead-letter entity finalize failed", "kind", job.Kind, "job", job.ID, "err", derr)
 			}
 		}
-		// Terminal FAILED state (not done): an abandoned authorized scan stays operator-
-		// visible + queryable, never silently indistinguishable from a success.
-		if derr := w.queue.Deadletter(context.WithoutCancel(jobCtx), job.ID); derr != nil {
-			w.log.Error("dead-letter failed", "job", job.ID, "err", derr)
-		}
 		return
 	}
 	w.log.Warn("job failed – requeueing with backoff", "kind", job.Kind, "job", job.ID, "attempt", job.Attempts, "err", err)
-	if ferr := w.queue.Fail(jobCtx, job.ID, w.cfg.Backoff); ferr != nil {
+	if ferr := w.queue.Fail(jobCtx, job.ID, job.Fence, w.cfg.Backoff); ferr != nil {
+		if errors.Is(ferr, ports.ErrStaleLease) {
+			w.log.Warn("job was reclaimed by another worker – abandoning", "job", job.ID, "err", ferr)
+			return
+		}
 		w.log.Error("requeue failed", "job", job.ID, "err", ferr)
 	}
 }
 
 // heartbeat extends the job's lease on an interval until its context is cancelled (the
-// handler returned). Uses context.Background for the extension call so a cancelled
-// parent (shutdown) still lets the in-flight handler finish under a valid lease.
-func (w *Worker) heartbeat(ctx context.Context, id string) {
+// handler returned). Each extension runs under a bounded timeout derived from the visibility
+// lease so a stalled queue call cannot leak this goroutine or delay lease-loss detection.
+// Losing the lease calls abandon, cancelling the handler: another worker owns the job now, and
+// continued execution would hit real hosts and publish state behind that worker's back.
+func (w *Worker) heartbeat(ctx context.Context, id string, fence int64, abandon context.CancelFunc) {
 	t := time.NewTicker(w.cfg.Heartbeat)
 	defer t.Stop()
+	leaseDeadline := time.Now().Add(w.cfg.Visibility)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := w.queue.Heartbeat(context.WithoutCancel(ctx), id, w.cfg.Visibility); err != nil {
-				w.log.Warn("heartbeat failed", "job", id, "err", err)
+			remaining := time.Until(leaseDeadline)
+			if remaining <= 0 {
+				w.log.Warn("job lease expired after heartbeat failure – abandoning", "job", id)
+				abandon()
+				return
+			}
+			// A heartbeat cannot wait beyond the last lease known to be authoritative. If the
+			// queue is unavailable through that deadline, another worker may reclaim this job.
+			hbCtx, cancel := context.WithTimeout(ctx, remaining)
+			err := w.queue.Heartbeat(hbCtx, id, fence, w.cfg.Visibility)
+			cancel()
+			if err == nil {
+				leaseDeadline = time.Now().Add(w.cfg.Visibility)
+				continue
+			}
+			if errors.Is(err, ports.ErrStaleLease) {
+				w.log.Warn("job was reclaimed by another worker – abandoning", "job", id, "err", err)
+				abandon()
+				return
+			}
+			w.log.Warn("heartbeat failed", "job", id, "err", err)
+			if time.Now().After(leaseDeadline) {
+				w.log.Warn("job lease expired after heartbeat failure – abandoning", "job", id)
+				abandon()
+				return
 			}
 		}
 	}
 }
 
-func (w *Worker) complete(ctx context.Context, id string) {
-	if err := w.queue.Complete(context.WithoutCancel(ctx), id); err != nil {
+func (w *Worker) complete(ctx context.Context, id string, fence int64) {
+	if err := w.queue.Complete(context.WithoutCancel(ctx), id, fence); err != nil {
+		if errors.Is(err, ports.ErrStaleLease) {
+			w.log.Warn("job was reclaimed by another worker – abandoning", "job", id, "err", err)
+			return
+		}
 		w.log.Error("complete failed", "job", id, "err", err)
 	}
 }

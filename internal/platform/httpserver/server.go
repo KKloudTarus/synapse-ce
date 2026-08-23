@@ -16,11 +16,27 @@ func Run(ctx context.Context, addr string, handler http.Handler, log *slog.Logge
 	return RunPair(ctx, addr, handler, "", nil, log)
 }
 
+// Listener describes one HTTP listener in a coordinated server group.
+type Listener struct {
+	Name    string
+	Addr    string
+	Handler http.Handler
+}
+
 // RunPair serves the API and an optional metrics listener under one coordinated
 // lifecycle: either listener's failure cancels the shared context so the other
 // listener is joined via the same graceful shutdown, instead of leaking a goroutine.
 // metricsHandler nil means no metrics listener is started at all.
 func RunPair(ctx context.Context, apiAddr string, apiHandler http.Handler, metricsAddr string, metricsHandler http.Handler, log *slog.Logger) error {
+	listeners := []Listener{{Name: "http server", Addr: apiAddr, Handler: apiHandler}}
+	if metricsHandler != nil {
+		listeners = append(listeners, Listener{Name: "metrics server", Addr: metricsAddr, Handler: metricsHandler})
+	}
+	return RunListeners(ctx, listeners, log)
+}
+
+// RunListeners serves all configured listeners under one coordinated lifecycle.
+func RunListeners(ctx context.Context, listeners []Listener, log *slog.Logger) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -28,9 +44,19 @@ func RunPair(ctx context.Context, apiAddr string, apiHandler http.Handler, metri
 		name string
 		srv  *http.Server
 	}
-	servers := []namedServer{{name: "http server", srv: &http.Server{Addr: apiAddr, Handler: apiHandler, ReadHeaderTimeout: 10 * time.Second}}}
-	if metricsHandler != nil {
-		servers = append(servers, namedServer{name: "metrics server", srv: &http.Server{Addr: metricsAddr, Handler: metricsHandler, ReadHeaderTimeout: 10 * time.Second}})
+	if len(listeners) == 0 {
+		return errors.New("at least one HTTP listener is required")
+	}
+	servers := make([]namedServer, 0, len(listeners))
+	for _, listener := range listeners {
+		if listener.Addr == "" || listener.Handler == nil {
+			return errors.New("HTTP listener requires an address and handler")
+		}
+		name := listener.Name
+		if name == "" {
+			name = "http server"
+		}
+		servers = append(servers, namedServer{name: name, srv: &http.Server{Addr: listener.Addr, Handler: listener.Handler, ReadHeaderTimeout: 10 * time.Second}})
 	}
 
 	errCh := make(chan error, len(servers))

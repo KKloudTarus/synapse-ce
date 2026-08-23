@@ -3,6 +3,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 )
 
 const (
+	defaultWorkerConcurrency       = 1
+	maxWorkerConcurrency           = 64
 	defaultFPTriageMaxFindings     = 100
 	maxFPTriageMaxFindings         = 1000
 	defaultFPTriageConcurrency     = 6
@@ -179,9 +182,27 @@ type Config struct {
 	// not survive restart). Required in production. Never logged.
 	VaultMasterKey string
 	// ReconViaWorker routes recon runs through the durable queue: the API enqueues
-	// and the privileged synapse-worker (with CAP_NET_ADMIN for egress) claims + executes
-	// them. Requires Postgres. Default false = the API runs recon in-process (dev).
+	// and the non-root synapse-worker claims and executes them. Scoped egress is
+	// configured by a separate root-owned broker. Requires Postgres. Default false
+	// = the API runs recon in-process (dev).
 	ReconViaWorker bool
+	// EgressBrokerSocket is the root-owned scoped-egress broker Unix socket. The
+	// non-root worker is only a protocol client and receives no network-admin capabilities.
+	EgressBrokerSocket string
+	// EgressGrantAuthorityAddr is the private control-plane listener used only for
+	// machine-authenticated egress grant issuance. It is separate from human API/AUP auth.
+	EgressGrantAuthorityAddr string
+	// EgressGrantAuthorityURL and EgressGrantAuthorityToken configure the worker's
+	// machine-only grant client. The token must not reuse the human bootstrap API token.
+	EgressGrantAuthorityURL   string
+	EgressGrantAuthorityToken string
+	// EgressGrantIssuerToken authenticates workers to the private issuer listener.
+	// EgressGrantSigningSeed is a dedicated Ed25519 seed and must not reuse evidence signing.
+	EgressGrantIssuerToken string
+	EgressGrantSigningSeed string
+	// ToolExecutionMode is the explicit process execution posture. Empty selects a
+	// role- and environment-safe default in ResolveToolExecution.
+	ToolExecutionMode string
 	// AgentEnabled turns on the AI orchestrator. Default false (fail-safe): no
 	// LLM is contacted and no agent endpoints are active unless explicitly enabled.
 	AgentEnabled bool
@@ -331,6 +352,8 @@ type Config struct {
 	// LeaderTerm is the lease term; LeaderRenew is the renewal interval (must be < Term/2).
 	LeaderTerm  time.Duration
 	LeaderRenew time.Duration
+	// WorkerConcurrency is the number of durable-queue claim loops in one synapse-worker process.
+	WorkerConcurrency int
 	// VulnerabilitySchedulerEnabled dispatches due vulnerability-source syncs and recovers stale
 	// runs. Postgres deployments must also enable fenced leader election to prevent duplicate work.
 	VulnerabilitySchedulerEnabled      bool
@@ -618,23 +641,30 @@ func Load() Config {
 
 		ReconAllowCapabilitySensitive: getbool("SYNAPSE_RECON_ALLOW_CAPABILITY_SENSITIVE", false),
 
-		EvidenceSigningSeed: getenv("SYNAPSE_EVIDENCE_SIGNING_SEED", ""),
-		TSAURL:              getenv("SYNAPSE_TSA_URL", ""),
-		SandboxEnabled:      getbool("SYNAPSE_SANDBOX_ENABLED", false),
-		SandboxMemMax:       int64(getint("SYNAPSE_SANDBOX_MEM_MAX", 512<<20)),
-		SandboxPidsMax:      getint("SYNAPSE_SANDBOX_PIDS_MAX", 256),
-		DASTHelperBin:       getenv("SYNAPSE_DAST_HELPER_BIN", "synapse-dast-helper"),
-		DASTMaxReauth:       maxReauth,
-		DASTRatePerSec:      ratePerSec,
-		DASTConcurrency:     concurrency,
-		DASTMaxDepth:        maxDepth,
-		DASTMaxPages:        maxPages,
-		DASTMaxRequests:     maxRequests,
-		DASTMaxWallClock:    maxWallClock,
-		VaultMasterKey:      getenv("SYNAPSE_VAULT_MASTER_KEY", ""),
-		ReconViaWorker:      getbool("SYNAPSE_RECON_VIA_WORKER", false),
-		ToolHashes:          parsePins(getenv("SYNAPSE_TOOL_HASHES", "")),
-		AgentEnabled:        getbool("SYNAPSE_AGENT_ENABLED", false), // needs LLM creds → stays opt-in
+		EvidenceSigningSeed:       getenv("SYNAPSE_EVIDENCE_SIGNING_SEED", ""),
+		TSAURL:                    getenv("SYNAPSE_TSA_URL", ""),
+		SandboxEnabled:            getbool("SYNAPSE_SANDBOX_ENABLED", false),
+		SandboxMemMax:             int64(getint("SYNAPSE_SANDBOX_MEM_MAX", 512<<20)),
+		SandboxPidsMax:            getint("SYNAPSE_SANDBOX_PIDS_MAX", 256),
+		DASTHelperBin:             getenv("SYNAPSE_DAST_HELPER_BIN", "synapse-dast-helper"),
+		DASTMaxReauth:             maxReauth,
+		DASTRatePerSec:            ratePerSec,
+		DASTConcurrency:           concurrency,
+		DASTMaxDepth:              maxDepth,
+		DASTMaxPages:              maxPages,
+		DASTMaxRequests:           maxRequests,
+		DASTMaxWallClock:          maxWallClock,
+		VaultMasterKey:            getenv("SYNAPSE_VAULT_MASTER_KEY", ""),
+		ReconViaWorker:            getbool("SYNAPSE_RECON_VIA_WORKER", false),
+		EgressBrokerSocket:        getenv("SYNAPSE_EGRESS_BROKER_SOCKET", "/run/synapse-egress-broker/egress-broker.sock"),
+		EgressGrantAuthorityAddr:  getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR", ""),
+		EgressGrantAuthorityURL:   getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_URL", ""),
+		EgressGrantAuthorityToken: getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN", ""),
+		EgressGrantIssuerToken:    getenv("SYNAPSE_EGRESS_GRANT_ISSUER_TOKEN", ""),
+		EgressGrantSigningSeed:    getenv("SYNAPSE_EGRESS_GRANT_SIGNING_SEED", ""),
+		ToolExecutionMode:         getenv("SYNAPSE_TOOL_EXECUTION_MODE", ""),
+		ToolHashes:                parsePins(getenv("SYNAPSE_TOOL_HASHES", "")),
+		AgentEnabled:              getbool("SYNAPSE_AGENT_ENABLED", false), // needs LLM creds → stays opt-in
 		// Analysis capabilities default ON so the tool is fully effective out of the box (the UI and a
 		// bare scan get every deterministic, best-effort feature without hunting env flags). Each is
 		// safe to default on: file/compute-based, no external service, and a no-op when its input is
@@ -691,6 +721,7 @@ func Load() Config {
 		LeaderResource:                        getenv("SYNAPSE_LEADER_RESOURCE", "scheduler"),
 		LeaderTerm:                            getduration("SYNAPSE_LEADER_TERM", 15*time.Second),
 		LeaderRenew:                           getduration("SYNAPSE_LEADER_RENEW", 5*time.Second),
+		WorkerConcurrency:                     getint("SYNAPSE_WORKER_CONCURRENCY", defaultWorkerConcurrency),
 		VulnerabilitySchedulerEnabled:         getbool("SYNAPSE_VULNERABILITY_SCHEDULER_ENABLED", false),
 		VulnerabilitySchedulerPollInterval:    getduration("SYNAPSE_VULNERABILITY_SCHEDULER_POLL", time.Minute),
 		VulnerabilitySchedulerStaleAfter:      getduration("SYNAPSE_VULNERABILITY_SCHEDULER_STALE_AFTER", 30*time.Minute),
@@ -905,6 +936,139 @@ func (c Config) ValidateSandboxPosture() error {
 	return nil
 }
 
+// ToolExecution is the resolved authority over whether a process may execute external
+// tools against untrusted input itself, or must hand that work to the durable queue.
+// It replaces inferring the boundary from a growing family of per-feature "via worker"
+// booleans, which could not express "this process must never exec a tool".
+type ToolExecution string
+
+const (
+	// ToolExecutionDispatchOnly forbids constructing tool runners in this process: work is
+	// validated, authorized, and enqueued for an execution-capable worker to claim.
+	ToolExecutionDispatchOnly ToolExecution = "dispatch-only"
+	// ToolExecutionWorker executes queued work inside the hardened sandbox.
+	ToolExecutionWorker ToolExecution = "worker"
+	// ToolExecutionInProcess runs tools in the serving process. Development and CLI only.
+	ToolExecutionInProcess ToolExecution = "in-process"
+)
+
+// ProcessRole names the composition root resolving its execution posture. The role is a
+// property of the binary, not of the environment, so it is passed in rather than guessed.
+type ProcessRole string
+
+const (
+	ProcessRoleAPI    ProcessRole = "api"
+	ProcessRoleWorker ProcessRole = "worker"
+	ProcessRoleCLI    ProcessRole = "cli"
+)
+
+// ResolveToolExecution decides how role may execute tools, failing closed on any
+// combination that would let a production API run an untrusted tool locally.
+//
+// Production API pods are dispatch-only: they must not build a sandbox runner, and a
+// missing queue is a startup failure rather than a silent fall back to local execution.
+// The worker is always execution-capable, and the CLI always runs in process because it
+// is the operator's own single-process scanner.
+func (c Config) ResolveToolExecution(role ProcessRole) (ToolExecution, error) {
+	requested := ToolExecution(normalizeEnv(c.ToolExecutionMode))
+	switch role {
+	case ProcessRoleWorker:
+		if requested != "" && requested != ToolExecutionWorker {
+			return "", fmt.Errorf("synapse-worker cannot run as %q: it exists to execute queued work", requested)
+		}
+		if c.DBDSN == "" {
+			return "", errors.New("synapse-worker requires SYNAPSE_DB_DSN: queued execution cannot use process-local persistence")
+		}
+		if c.IsProduction() && !c.SandboxEnabled {
+			return "", errors.New("production synapse-worker requires SYNAPSE_SANDBOX_ENABLED=true")
+		}
+		return ToolExecutionWorker, nil
+	case ProcessRoleCLI:
+		if requested != "" && requested != ToolExecutionInProcess {
+			return "", fmt.Errorf("the CLI scanner cannot run as %q: it has no durable queue", requested)
+		}
+		return ToolExecutionInProcess, nil
+	case ProcessRoleAPI:
+	default:
+		return "", fmt.Errorf("unknown process role %q", role)
+	}
+
+	if requested == "" && (c.ReconViaWorker || c.AgentViaWorker) {
+		requested = ToolExecutionDispatchOnly
+	}
+	switch requested {
+	case ToolExecutionWorker:
+		return "", errors.New("SYNAPSE_TOOL_EXECUTION_MODE=worker is not valid for synapse-api; run synapse-worker instead")
+	case ToolExecutionInProcess:
+		if c.IsProduction() {
+			return "", errors.New("SYNAPSE_TOOL_EXECUTION_MODE=in-process is refused in production: the API must not execute untrusted tools; use dispatch-only with synapse-worker")
+		}
+		return ToolExecutionInProcess, nil
+	case ToolExecutionDispatchOnly:
+		if c.DBDSN == "" {
+			return "", errors.New("SYNAPSE_TOOL_EXECUTION_MODE=dispatch-only requires SYNAPSE_DB_DSN: the durable queue is the only path to an execution worker")
+		}
+		return ToolExecutionDispatchOnly, nil
+	case "":
+		if !c.IsProduction() {
+			return ToolExecutionInProcess, nil
+		}
+		if c.DBDSN == "" {
+			return "", errors.New("production synapse-api requires SYNAPSE_DB_DSN: tool execution is dispatched to synapse-worker through the durable queue")
+		}
+		return ToolExecutionDispatchOnly, nil
+	default:
+		return "", fmt.Errorf("unknown SYNAPSE_TOOL_EXECUTION_MODE %q (want dispatch-only, worker, or in-process)", c.ToolExecutionMode)
+	}
+}
+
+// ValidateEgressGrantPosture fails closed unless production APIs and workers use
+// a distinct machine credential and a dedicated signing authority.
+func (c Config) ValidateEgressGrantPosture(role ProcessRole) error {
+	if !c.IsProduction() {
+		return nil
+	}
+	switch role {
+	case ProcessRoleAPI:
+		if strings.TrimSpace(c.EgressGrantAuthorityAddr) == "" || strings.TrimSpace(c.EgressGrantIssuerToken) == "" || strings.TrimSpace(c.EgressGrantSigningSeed) == "" {
+			return errors.New("production synapse-api requires SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR, SYNAPSE_EGRESS_GRANT_ISSUER_TOKEN, and SYNAPSE_EGRESS_GRANT_SIGNING_SEED")
+		}
+		if c.EgressGrantIssuerToken == c.APIToken {
+			return errors.New("SYNAPSE_EGRESS_GRANT_ISSUER_TOKEN must not reuse SYNAPSE_API_TOKEN")
+		}
+		if c.EgressGrantSigningSeed == c.EvidenceSigningSeed {
+			return errors.New("SYNAPSE_EGRESS_GRANT_SIGNING_SEED must not reuse SYNAPSE_EVIDENCE_SIGNING_SEED")
+		}
+	case ProcessRoleWorker:
+		if strings.TrimSpace(c.EgressGrantAuthorityURL) == "" || strings.TrimSpace(c.EgressGrantAuthorityToken) == "" {
+			return errors.New("production synapse-worker requires SYNAPSE_EGRESS_GRANT_AUTHORITY_URL and SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN")
+		}
+		if c.EgressGrantAuthorityToken == c.APIToken {
+			return errors.New("SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN must not reuse SYNAPSE_API_TOKEN")
+		}
+	default:
+		return fmt.Errorf("unknown process role %q for egress grant posture", role)
+	}
+	return nil
+}
+
+// ValidateNetworkExecutionPosture rejects production network execution kinds that do not yet
+// have a trusted control-plane issuer branch. Development may use the local test egress applier.
+func (c Config) ValidateNetworkExecutionPosture(role ProcessRole) error {
+	if !c.IsProduction() {
+		return nil
+	}
+	switch role {
+	case ProcessRoleAPI, ProcessRoleWorker:
+		if c.CSPMEnabled {
+			return errors.New("production CSPM execution requires authoritative signed CSPM grants and is not yet supported")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown process role %q for network execution posture", role)
+	}
+}
+
 // ValidateMigrationPosture keeps DDL credentials out of long-running production services.
 // Production migrations are owned by the dedicated synapse-migrate command.
 func (c Config) ValidateMigrationPosture() error {
@@ -913,6 +1077,15 @@ func (c Config) ValidateMigrationPosture() error {
 	}
 	if c.IsProduction() && c.OIDCEnabled && c.DBDSN == "" {
 		return errors.New("SYNAPSE_DB_DSN is required when OIDC is enabled in production")
+	}
+	return nil
+}
+
+// ValidateWorkerConcurrency bounds in-process queue claim loops so a configuration typo cannot
+// create an unbounded number of privileged executions.
+func (c Config) ValidateWorkerConcurrency() error {
+	if c.WorkerConcurrency < 1 || c.WorkerConcurrency > maxWorkerConcurrency {
+		return fmt.Errorf("SYNAPSE_WORKER_CONCURRENCY must be between 1 and %d (got %d)", maxWorkerConcurrency, c.WorkerConcurrency)
 	}
 	return nil
 }

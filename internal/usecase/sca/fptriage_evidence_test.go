@@ -438,7 +438,7 @@ func TestScanPipelinesUseFailClosedAIEvidenceBoundary(t *testing.T) {
 				return true
 			}
 			switch selector.Sel.Name {
-			case "sealEvidenceFailClosed":
+			case "sealEvidenceFailClosed", "sealEvidenceFailClosedWithID":
 				failClosedCalls++
 			case "sealEvidence":
 				rawSealCalls++
