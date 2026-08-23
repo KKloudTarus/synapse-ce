@@ -19,15 +19,19 @@ const maxAncestorWalk = 256
 // Observe and is a pure, deterministic aggregate — no I/O, no clock. The zero value is not usable;
 // construct it with NewEndpointState.
 type EndpointState struct {
-	tenantID   shared.ID
-	assetID    shared.ID
-	processes  map[shared.ID]*ProcessEntity
-	conns      map[shared.ID]*NetworkConnection
-	files      map[shared.ID]*FileTarget
-	containers map[shared.ID]*ContainerInstance
-	privileges []PrivilegeTransition
-	timeline   *StateTimeline
-	processed  map[shared.ID]struct{}
+	tenantID  shared.ID
+	assetID   shared.ID
+	processes map[shared.ID]*ProcessEntity
+	conns     map[shared.ID]*NetworkConnection
+	// connsByProcess is a derived index used to reconcile an unknown attribution in O(flows for process)
+	// when an out-of-order process observation arrives. Empty process ids are intentionally not indexed:
+	// there is no stable identity by which a later process event could resolve them.
+	connsByProcess map[shared.ID][]*NetworkConnection
+	files          map[shared.ID]*FileTarget
+	containers     map[shared.ID]*ContainerInstance
+	privileges     []PrivilegeTransition
+	timeline       *StateTimeline
+	processed      map[shared.ID]struct{}
 }
 
 // NewEndpointState creates the projection for one asset. Both ids are required — endpoint visibility is
@@ -40,14 +44,15 @@ func NewEndpointState(tenantID, assetID shared.ID) (*EndpointState, error) {
 		return nil, fmt.Errorf("%w: endpoint state requires an asset id", shared.ErrValidation)
 	}
 	return &EndpointState{
-		tenantID:   tenantID,
-		assetID:    assetID,
-		processes:  make(map[shared.ID]*ProcessEntity),
-		conns:      make(map[shared.ID]*NetworkConnection),
-		files:      make(map[shared.ID]*FileTarget),
-		containers: make(map[shared.ID]*ContainerInstance),
-		timeline:   newStateTimeline(),
-		processed:  make(map[shared.ID]struct{}),
+		tenantID:       tenantID,
+		assetID:        assetID,
+		processes:      make(map[shared.ID]*ProcessEntity),
+		conns:          make(map[shared.ID]*NetworkConnection),
+		connsByProcess: make(map[shared.ID][]*NetworkConnection),
+		files:          make(map[shared.ID]*FileTarget),
+		containers:     make(map[shared.ID]*ContainerInstance),
+		timeline:       newStateTimeline(),
+		processed:      make(map[shared.ID]struct{}),
 	}, nil
 }
 
@@ -142,6 +147,11 @@ func (s *EndpointState) applyProcess(env telemetry.TelemetryEnvelope) []Timeline
 		pe.LastSeenAt = env.OccurredAt
 	}
 
+	// A network observation may have arrived before this process observation. Promote every flow that
+	// references this now-directly-observed entity; the transition is monotonic and therefore independent
+	// of fold order.
+	s.markProcessAttributionObserved(obs.EntityID)
+
 	s.ensureParentStub(obs)
 
 	return s.appendTimeline(env)
@@ -189,22 +199,26 @@ func (s *EndpointState) applyNetwork(env telemetry.TelemetryEnvelope) []Timeline
 	conn, existed := s.conns[id]
 	if !existed {
 		conn = &NetworkConnection{
-			ConnectionID:    id,
-			TenantID:        s.tenantID,
-			AssetID:         s.assetID,
-			ProcessEntityID: obs.ProcessEntityID,
-			Proto:           obs.Proto,
-			Direction:       obs.Direction,
-			LocalAddr:       obs.LocalAddr,
-			LocalPort:       obs.LocalPort,
-			RemoteAddr:      obs.RemoteAddr,
-			RemotePort:      obs.RemotePort,
-			Comm:            obs.Comm,
-			FirstSeenAt:     env.OccurredAt,
-			LastSeenAt:      env.OccurredAt,
-			State:           ConnectionObserved,
+			ConnectionID:       id,
+			TenantID:           s.tenantID,
+			AssetID:            s.assetID,
+			ProcessEntityID:    obs.ProcessEntityID,
+			Proto:              obs.Proto,
+			Direction:          obs.Direction,
+			LocalAddr:          obs.LocalAddr,
+			LocalPort:          obs.LocalPort,
+			RemoteAddr:         obs.RemoteAddr,
+			RemotePort:         obs.RemotePort,
+			Comm:               obs.Comm,
+			ProcessAttribution: s.processAttribution(obs.ProcessEntityID),
+			FirstSeenAt:        env.OccurredAt,
+			LastSeenAt:         env.OccurredAt,
+			State:              ConnectionObserved,
 		}
 		s.conns[id] = conn
+		if !obs.ProcessEntityID.IsZero() {
+			s.connsByProcess[obs.ProcessEntityID] = append(s.connsByProcess[obs.ProcessEntityID], conn)
+		}
 	} else {
 		// The connection ENTITY deduplicates the flow: re-observing widens its seen window. Both bounds
 		// take a min/max so the window is order-independent (reorder-invariant).
@@ -221,6 +235,28 @@ func (s *EndpointState) applyNetwork(env telemetry.TelemetryEnvelope) []Timeline
 	// entity above, not on the timeline — a per-flow entry would have to take the timestamp of whichever
 	// connect was folded first, which would not be reorder-invariant.
 	return s.appendTimeline(env)
+}
+
+// processAttribution reports only what this projection can prove. Merely having an entity id, including
+// an id represented by a ProcessUnknown parent stub, is not enough: a direct process observation must
+// have been folded before attribution becomes observed.
+func (s *EndpointState) processAttribution(processEntityID shared.ID) ProcessAttribution {
+	pe, ok := s.processes[processEntityID]
+	if ok && pe.State != ProcessUnknown {
+		return ProcessAttributionObserved
+	}
+	return ProcessAttributionUnknown
+}
+
+// markProcessAttributionObserved reconciles flows that arrived before their process event. Connections
+// with no process id remain explicitly unknown because there is no safe identity to join on.
+func (s *EndpointState) markProcessAttributionObserved(processEntityID shared.ID) {
+	if processEntityID.IsZero() {
+		return
+	}
+	for _, conn := range s.connsByProcess[processEntityID] {
+		conn.ProcessAttribution = ProcessAttributionObserved
+	}
 }
 
 // Process returns a copy of one process entity by id.

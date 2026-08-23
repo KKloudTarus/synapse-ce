@@ -21,6 +21,9 @@ func TestConnectionIDIsStableAndProcessAttributed(t *testing.T) {
 	if c.ProcessEntityID != proc {
 		t.Fatalf("connection must be attributed to its process entity, got %s", c.ProcessEntityID)
 	}
+	if c.ProcessAttribution != ProcessAttributionUnknown {
+		t.Fatalf("unobserved process attribution must be explicit, got %q", c.ProcessAttribution)
+	}
 	want := ConnectionID(testAsset, proc, "tcp", "egress", "10.0.0.1", 4444, "1.2.3.4", 443)
 	if c.ConnectionID != want {
 		t.Fatalf("connection id unstable: got %s want %s", c.ConnectionID, want)
@@ -85,12 +88,65 @@ func TestDistinctFlowsAreDistinctConnections(t *testing.T) {
 }
 
 func TestNetworkConnectionValidate(t *testing.T) {
-	good := NetworkConnection{ConnectionID: shared.ID("nc_x"), AssetID: testAsset, State: ConnectionObserved}
+	good := NetworkConnection{
+		ConnectionID: shared.ID("nc_x"), AssetID: testAsset, State: ConnectionObserved,
+		ProcessAttribution: ProcessAttributionUnknown,
+	}
 	if err := good.Validate(); err != nil {
 		t.Fatalf("valid connection rejected: %v", err)
 	}
-	bad := NetworkConnection{ConnectionID: shared.ID("nc_x"), AssetID: testAsset, State: "bogus"}
-	if bad.Validate() == nil {
-		t.Fatal("unknown state must be rejected")
+	cases := map[string]NetworkConnection{
+		"unknown state":       {ConnectionID: "nc_x", AssetID: testAsset, State: "bogus", ProcessAttribution: ProcessAttributionUnknown},
+		"missing attribution": {ConnectionID: "nc_x", AssetID: testAsset, State: ConnectionObserved},
+		"observed without id": {ConnectionID: "nc_x", AssetID: testAsset, State: ConnectionObserved, ProcessAttribution: ProcessAttributionObserved},
+	}
+	for name, bad := range cases {
+		if bad.Validate() == nil {
+			t.Fatalf("%s must be rejected", name)
+		}
+	}
+}
+
+func TestNetworkAttributionReconcilesAfterProcessObservation(t *testing.T) {
+	s := mustState(t)
+	proc := procEntityID(303, 1)
+	mustObserve(t, s, netEnv("n1", base.Add(time.Second), proc, "tcp", "egress", "10.0.0.1", 6000, "1.2.3.4", 443))
+	if got := s.Connections()[0].ProcessAttribution; got != ProcessAttributionUnknown {
+		t.Fatalf("flow arriving before its process must be unknown, got %q", got)
+	}
+
+	mustObserve(t, s, procEnv("p1", base, proc, "", 303, 1, "exec", "app", "/usr/bin/app"))
+	if got := s.Connections()[0].ProcessAttribution; got != ProcessAttributionObserved {
+		t.Fatalf("direct process observation must reconcile attribution, got %q", got)
+	}
+}
+
+func TestNetworkAttributionRequiresDirectProcessObservation(t *testing.T) {
+	s := mustState(t)
+	parent := procEntityID(304, 1)
+	child := procEntityID(305, 2)
+
+	// Observing the child creates an explicit ProcessUnknown parent stub. A stub proves only that the
+	// lineage referenced the id; it must not upgrade a network attribution.
+	mustObserve(t, s, procEnv("p-child", base, child, parent, 305, 304, "exec", "child", "/child"))
+	mustObserve(t, s, netEnv("n-parent", base.Add(time.Second), parent, "tcp", "egress", "10.0.0.1", 6001, "1.2.3.4", 443))
+	if got := s.Connections()[0].ProcessAttribution; got != ProcessAttributionUnknown {
+		t.Fatalf("parent stub must not count as observed attribution, got %q", got)
+	}
+
+	mustObserve(t, s, procEnv("p-parent", base.Add(2*time.Second), parent, "", 304, 1, "exec", "parent", "/parent"))
+	if got := s.Connections()[0].ProcessAttribution; got != ProcessAttributionObserved {
+		t.Fatalf("directly observing the parent must resolve attribution, got %q", got)
+	}
+}
+
+func TestNetworkAttributionWithoutProcessIDStaysUnknown(t *testing.T) {
+	s := mustState(t)
+	mustObserve(t, s, netEnv("n1", base, "", "udp", "egress", "", 0, "8.8.8.8", 53))
+	mustObserve(t, s, procEnv("p1", base.Add(time.Second), procEntityID(306, 1), "", 306, 1, "exec", "dns", "/usr/bin/dns"))
+
+	c := s.Connections()[0]
+	if !c.ProcessEntityID.IsZero() || c.ProcessAttribution != ProcessAttributionUnknown {
+		t.Fatalf("flow without a join identity must stay unknown, got %+v", c)
 	}
 }

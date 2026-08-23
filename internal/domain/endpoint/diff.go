@@ -92,11 +92,12 @@ func diffProcesses(before, after *EndpointState) []EntityChange {
 }
 
 func diffConnections(before, after *EndpointState) []EntityChange {
-	// A connection's identity (process + proto + direction + 5-tuple) is its whole material state, so a
-	// flow only ever appears or disappears; it never "changes" in place.
+	// A connection's tuple is immutable, but its process attribution can move monotonically from unknown
+	// to observed when an out-of-order process event arrives. That resolution is a material security-state
+	// change; seen-window movement remains intentionally ignored.
 	return diffSet(EntityNetwork, connectionsOf(before), connectionsOf(after),
 		func(c NetworkConnection) shared.ID { return c.ConnectionID },
-		func(a, b NetworkConnection) bool { return true })
+		func(a, b NetworkConnection) bool { return a.ProcessAttribution == b.ProcessAttribution })
 }
 
 func diffFiles(before, after *EndpointState) []EntityChange {

@@ -333,4 +333,7 @@ func TestFoldIsReorderInvariant(t *testing.T) {
 	if !c.FirstSeenAt.Equal(base.Add(time.Second)) || !c.LastSeenAt.Equal(base.Add(3*time.Second)) {
 		t.Fatalf("connection window not min/max: [%s,%s]", c.FirstSeenAt, c.LastSeenAt)
 	}
+	if c.ProcessAttribution != ProcessAttributionObserved {
+		t.Fatalf("process attribution must resolve regardless of fold order, got %q", c.ProcessAttribution)
+	}
 }

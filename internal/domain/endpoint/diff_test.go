@@ -82,6 +82,23 @@ func TestDiffIgnoresSeenWindowMovement(t *testing.T) {
 	}
 }
 
+func TestDiffReportsProcessAttributionResolution(t *testing.T) {
+	before := mustState(t)
+	after := mustState(t)
+	proc := procEntityID(44, 1)
+	flow := netEnv("n1", base, proc, "tcp", "egress", "10.0.0.1", 4000, "1.2.3.4", 443)
+	mustObserve(t, before, flow)
+	mustObserve(t, after, flow)
+	mustObserve(t, after, procEnv("p1", base.Add(time.Second), proc, "", 44, 1, "exec", "app", "/app"))
+
+	connID := ConnectionID(testAsset, proc, "tcp", "egress", "10.0.0.1", 4000, "1.2.3.4", 443)
+	d := Diff(before, after)
+	if len(d.Changes) != 2 || !hasChange(d, EntityNetwork, connID, ChangeChanged) {
+		// The process itself is also added; the connection resolution must be the other material change.
+		t.Fatalf("attribution resolution must be reported as a changed connection: %+v", d.Changes)
+	}
+}
+
 func TestDiffOfIdenticalIsEmptyAndDeterministicallyOrdered(t *testing.T) {
 	build := func() *EndpointState {
 		s := mustState(t)
