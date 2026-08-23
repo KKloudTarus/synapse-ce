@@ -50,6 +50,10 @@ type ProcessEntity struct {
 	// ExitedAt is set only when an exit is observed (reserved tail); nil while running.
 	ExitedAt *time.Time
 	State    ProcessState
+	// descEventID is the EventID of the observation that last set the descriptor fields. It is the
+	// tiebreak that keeps the descriptor resolution reorder-invariant when two observations of this entity
+	// share an OccurredAt; unexported so it is internal bookkeeping, not part of the public projection.
+	descEventID shared.ID
 }
 
 // IsRunning reports whether the process is currently believed to be alive.
