@@ -11,16 +11,15 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/worksign"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/telemetryingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// setupFleetWithTelemetry builds the fleet transport plane with a real telemetry-ingest use case backed
-// by the in-memory transport store, and a signing-key resolver holding one key. It returns the handler,
-// the agent service (to enrol), the private key + keyID to sign manifests, and whether telemetry is wired.
 func setupFleetWithTelemetry(t *testing.T, wireTelemetry bool) (http.Handler, *fleetagentuc.Service, ed25519.PrivateKey, func(agentID shared.ID) string) {
 	t.Helper()
 	agentSvc, err := fleetagentuc.NewService(memory.NewFleetAgentStore(), ftAudit{}, ftClock{}, &ftIDs{})
@@ -39,17 +38,21 @@ func setupFleetWithTelemetry(t *testing.T, wireTelemetry bool) (http.Handler, *f
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The key's AgentID is only known after enrol; keyOf builds a resolver-registered key for that agent.
 	resolver := &lateResolver{}
+	transport := memory.NewTelemetryTransportStore()
 	keyOf := func(agentID shared.ID) string {
 		key, err := fleetagent.NewSigningKey(agentID, fleetagent.PurposeTelemetryBatch, pub, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 		if err != nil {
 			t.Fatal(err)
 		}
 		resolver.key = key
+		ctx := shared.WithTenant(context.Background(), shared.ID("default"))
+		if err := transport.BindTelemetryAsset(ctx, ports.TelemetryAssetBinding{TenantID: "default", AgentID: agentID, AssetID: "asset-1", UpdatedAt: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
 		return key.KeyID
 	}
-	ingest, err := telemetryingest.NewService(memory.NewTelemetryTransportStore(), resolver, ftAudit{}, ftClock{})
+	ingest, err := telemetryingest.NewService(transport, resolver, ftAudit{}, ftClock{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +64,6 @@ func setupFleetWithTelemetry(t *testing.T, wireTelemetry bool) (http.Handler, *f
 	return rt.fleet.handler(), agentSvc, priv, keyOf
 }
 
-// lateResolver holds a key registered after enrol (once the agent id is known).
 type lateResolver struct{ key fleetagent.AgentSigningKey }
 
 func (r *lateResolver) ResolveSigningKey(_ context.Context, agentID shared.ID, keyID string) (fleetagent.AgentSigningKey, error) {
@@ -91,37 +93,48 @@ func enrolAgent(t *testing.T, h http.Handler, agentSvc *fleetagentuc.Service) (t
 	return resp.Token, shared.ID(resp.AgentID)
 }
 
-func signedRequest(agentID shared.ID, keyID string, priv ed25519.PrivateKey) telemetryingest.IngestRequest {
+func signedRequest(t *testing.T, agentID shared.ID, keyID string, priv ed25519.PrivateKey) telemetryingest.IngestRequest {
+	t.Helper()
 	asset := shared.ID("asset-1")
-	payload := []byte("event-bytes")
+	session := fleetagent.CanonicalSessionID(agentID)
+	stream, err := fleetagent.TelemetryDeliveryStreamID(agentID, session, fleetagent.PriorityP1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := time.Unix(1_700_000_000, 0).UTC()
+	ev := telemetry.TelemetryEvent{
+		Class:   detection.ClassProcess,
+		Process: &telemetry.ProcessObservation{Kind: "exec", PID: 101, EntityID: "proc-http-1", Comm: "http-test"},
+	}
+	env := telemetry.TelemetryEnvelope{
+		SchemaVersion: telemetry.SchemaVersion,
+		EventID:       "e1", EventType: ev.EventType(), EventClass: detection.ClassProcess,
+		AgentID: agentID, AgentSessionID: shared.ID(session), AssetID: asset,
+		BootID: "boot-1", StreamID: "sensor-stream-http", SensorID: "sensor-http", SensorVersion: "1",
+		OccurredAt: observed.Add(-time.Millisecond), ObservedAt: observed, Sequence: 1, Event: ev,
+	}
+	payload, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
 	m := fleetagent.TelemetryBatchManifest{
-		ProtocolVersion:  fleetagent.TelemetryProtocolVersion,
-		SchemaVersion:    1,
-		BatchID:          "batch-1",
-		AgentID:          agentID,
-		AssetID:          asset,
-		StreamID:         "stream-1",
-		Position:         fleetagent.StreamPosition{Priority: fleetagent.PriorityP1, Epoch: 1, Sequence: 1, Session: "sess-1", Boot: "boot-1"},
+		ProtocolVersion: fleetagent.TelemetryProtocolVersion, SchemaVersion: telemetry.SchemaVersion,
+		BatchID: "batch-1", AgentID: agentID, HostID: agentID, AssetID: asset, StreamID: stream,
+		Position:         fleetagent.StreamPosition{Priority: fleetagent.PriorityP1, Epoch: 1, Sequence: 1, Session: session, Boot: "boot-1"},
 		PreviousSequence: 0,
-		EventTimeMin:     time.Unix(1_700_000_000, 0).UTC(),
-		EventTimeMax:     time.Unix(1_700_000_001, 0).UTC(),
-		ObservedCount:    1,
-		KeptCount:        1,
-		Events:           []fleetagent.EventRef{{ID: "e1", Digest: fleetagent.TelemetryEventDigest(payload, asset)}},
-		KeyID:            keyID,
+		EventTimeMin:     observed, EventTimeMax: observed,
+		ObservedCount: 1, KeptCount: 1,
+		Events: []fleetagent.EventRef{{ID: "e1", Digest: fleetagent.TelemetryEventDigest(payload, asset)}}, KeyID: keyID,
 	}
 	m.PayloadDigest = fleetagent.TelemetryPayloadDigest(m.Events)
 	m.Signature = fleetagent.SignTelemetryManifest(priv, m)
-	return telemetryingest.IngestRequest{
-		Manifest: m,
-		Events:   []telemetryingest.EventPayload{{EventID: "e1", Class: detection.ClassProcess, Payload: payload, ObservedAt: m.EventTimeMin}},
-	}
+	return telemetryingest.IngestRequest{Manifest: m, Events: []telemetryingest.EventPayload{{EventID: "e1", Class: detection.ClassProcess, Payload: payload, ObservedAt: observed}}}
 }
 
 func TestIngestTelemetryEndpointAccepts(t *testing.T) {
 	h, agentSvc, priv, keyOf := setupFleetWithTelemetry(t, true)
 	token, agentID := enrolAgent(t, h, agentSvc)
-	req := signedRequest(agentID, keyOf(agentID), priv)
+	req := signedRequest(t, agentID, keyOf(agentID), priv)
 	w := fleetCall(h, http.MethodPost, "/api/v1/fleet/telemetry", token, req, true)
 	if w.Code != http.StatusOK {
 		t.Fatalf("ingest should be 200, got %d (%s)", w.Code, w.Body.String())
@@ -138,19 +151,30 @@ func TestIngestTelemetryEndpointAccepts(t *testing.T) {
 func TestIngestTelemetryEndpointIdentityMismatch403(t *testing.T) {
 	h, agentSvc, priv, keyOf := setupFleetWithTelemetry(t, true)
 	token, agentID := enrolAgent(t, h, agentSvc)
-	// A manifest claiming a DIFFERENT agent than the authenticated credential must be forbidden.
 	keyID := keyOf(agentID)
-	req := signedRequest("someone-else", keyID, priv)
+	req := signedRequest(t, "someone-else", keyID, priv)
 	w := fleetCall(h, http.MethodPost, "/api/v1/fleet/telemetry", token, req, true)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("identity mismatch should be 403, got %d (%s)", w.Code, w.Body.String())
 	}
 }
 
-func TestIngestTelemetryEndpointNotEnabled404(t *testing.T) {
-	h, agentSvc, priv, keyOf := setupFleetWithTelemetry(t, false) // telemetry not wired
+func TestIngestTelemetryEndpointHostMismatch403(t *testing.T) {
+	h, agentSvc, priv, keyOf := setupFleetWithTelemetry(t, true)
 	token, agentID := enrolAgent(t, h, agentSvc)
-	req := signedRequest(agentID, keyOf(agentID), priv)
+	req := signedRequest(t, agentID, keyOf(agentID), priv)
+	req.Manifest.HostID = "someone-else"
+	req.Manifest.Signature = fleetagent.SignTelemetryManifest(priv, req.Manifest)
+	w := fleetCall(h, http.MethodPost, "/api/v1/fleet/telemetry", token, req, true)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("host mismatch should be 403, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+func TestIngestTelemetryEndpointNotEnabled404(t *testing.T) {
+	h, agentSvc, priv, keyOf := setupFleetWithTelemetry(t, false)
+	token, agentID := enrolAgent(t, h, agentSvc)
+	req := signedRequest(t, agentID, keyOf(agentID), priv)
 	w := fleetCall(h, http.MethodPost, "/api/v1/fleet/telemetry", token, req, true)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("unwired telemetry should be 404, got %d (%s)", w.Code, w.Body.String())

@@ -32,14 +32,21 @@ import (
 )
 
 const (
-	e2eTenant  = shared.ID("tenant-e2e")
-	e2eAgent   = shared.ID("agent-e2e")
-	e2eAsset   = shared.ID("asset-e2e")
-	e2eEng     = shared.ID("eng-e2e")
-	e2eSession = fleetagent.SessionID("sess-e2e")
-	e2eBoot    = fleetagent.BootID("boot-e2e")
-	e2eStream  = shared.ID("stream-e2e-p1")
+	e2eTenant = shared.ID("tenant-e2e")
+	e2eAgent  = shared.ID("agent-e2e")
+	e2eAsset  = shared.ID("asset-e2e")
+	e2eEng    = shared.ID("eng-e2e")
+	e2eBoot   = fleetagent.BootID("boot-e2e")
 )
+
+var e2eSession = fleetagent.CanonicalSessionID(e2eAgent)
+var e2eStream = func() shared.ID {
+	stream, err := fleetagent.TelemetryDeliveryStreamID(e2eAgent, e2eSession, fleetagent.PriorityP1)
+	if err != nil {
+		panic(err)
+	}
+	return stream
+}()
 
 // captureAudit records audit actions so fail-closed paths can be asserted (every rejection is audited).
 type captureAudit struct {
@@ -115,6 +122,11 @@ func newHarness(t *testing.T, retention time.Duration) *harness {
 
 	keys := memory.NewAgentSigningKeyStore()
 	transport := memory.NewTelemetryTransportStore()
+	if err := transport.BindTelemetryAsset(ctx, ports.TelemetryAssetBinding{
+		TenantID: e2eTenant, AgentID: e2eAgent, AssetID: e2eAsset, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("bind telemetry asset: %v", err)
+	}
 	records := memory.NewDetectionRecordStore()
 
 	evidence, err := evidenceuc.NewService(memory.NewEvidenceStore(), nil, audit, clock, ids)
@@ -174,6 +186,8 @@ func (h *harness) registerKey(purpose fleetagent.SigningPurpose) (ed25519.Privat
 
 // telemetryEnvelope builds a canonical process-telemetry envelope carrying the given argv.
 func (h *harness) telemetryEnvelope(seq uint64, args []string) telemetry.TelemetryEnvelope {
+	pid := 100 + int(seq)
+	startTimeNanos := seq * uint64(time.Millisecond)
 	return telemetry.TelemetryEnvelope{
 		SchemaVersion: telemetry.SchemaVersion, EventID: shared.ID(fmt.Sprintf("te-%d", seq)),
 		EventType: "process.exec", EventClass: detection.ClassProcess,
@@ -182,7 +196,11 @@ func (h *harness) telemetryEnvelope(seq uint64, args []string) telemetry.Telemet
 		OccurredAt: h.now.Add(time.Duration(seq) * time.Millisecond), ObservedAt: h.now.Add(time.Duration(seq) * time.Millisecond),
 		Sequence: seq,
 		Event: telemetry.TelemetryEvent{Class: detection.ClassProcess,
-			Process: &telemetry.ProcessObservation{Kind: "exec", PID: 100 + int(seq), Comm: "app", Path: "/usr/bin/app", Args: args}},
+			Process: &telemetry.ProcessObservation{
+				Kind: "exec", PID: pid, StartTimeNanos: startTimeNanos,
+				EntityID: telemetry.ProcessEntityID(e2eAsset, shared.ID(e2eBoot), pid, startTimeNanos),
+				Comm: "app", Path: "/usr/bin/app", Args: args,
+			}},
 	}
 }
 
@@ -212,7 +230,7 @@ func (h *harness) shipTelemetry(epoch, seq, prev uint64, envelopes ...telemetry.
 	}
 	m := fleetagent.TelemetryBatchManifest{
 		ProtocolVersion: fleetagent.TelemetryProtocolVersion, SchemaVersion: telemetry.SchemaVersion,
-		BatchID: shared.ID(fmt.Sprintf("batch-%d-%d", epoch, seq)), AgentID: e2eAgent, AssetID: e2eAsset, StreamID: e2eStream,
+		BatchID: shared.ID(fmt.Sprintf("batch-%d-%d", epoch, seq)), AgentID: e2eAgent, HostID: e2eAgent, AssetID: e2eAsset, StreamID: e2eStream,
 		Position:         fleetagent.StreamPosition{Priority: fleetagent.PriorityP1, Epoch: epoch, Sequence: seq, Session: e2eSession, Boot: e2eBoot},
 		PreviousSequence: prev, EventTimeMin: minAt, EventTimeMax: maxAt,
 		ObservedCount: len(events), KeptCount: len(events), Events: refs,

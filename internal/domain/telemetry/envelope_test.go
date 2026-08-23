@@ -14,17 +14,18 @@ func baseEnvelope() TelemetryEnvelope {
 	observed := occurred.Add(2 * time.Millisecond)
 	ev := TelemetryEvent{Class: detection.ClassProcess, Process: &ProcessObservation{Kind: "exec", PID: 10, EntityID: "pe_x", Comm: "sh", Path: "/bin/sh"}}
 	return TelemetryEnvelope{
-		SchemaVersion: SchemaVersion,
-		EventID:       "te_x",
-		EventType:     ev.EventType(),
-		EventClass:    detection.ClassProcess,
-		AgentID:       "agent-1",
-		AssetID:       "asset-1",
-		BootID:        "boot-1",
-		StreamID:      "stream-1",
-		OccurredAt:    occurred,
-		ObservedAt:    observed,
-		Event:         ev,
+		SchemaVersion:  SchemaVersion,
+		EventID:        "te_x",
+		EventType:      ev.EventType(),
+		EventClass:     detection.ClassProcess,
+		AgentID:        "agent-1",
+		AgentSessionID: "session-1",
+		AssetID:        "asset-1",
+		BootID:         "boot-1",
+		StreamID:       "stream-1",
+		OccurredAt:     occurred,
+		ObservedAt:     observed,
+		Event:          ev,
 	}
 }
 
@@ -40,6 +41,9 @@ func TestEnvelopeValidate(t *testing.T) {
 		{"no event id", func(e *TelemetryEnvelope) { e.EventID = "" }, true},
 		{"no agent id", func(e *TelemetryEnvelope) { e.AgentID = "" }, true},
 		{"no asset id", func(e *TelemetryEnvelope) { e.AssetID = "" }, true},
+		{"v2 no session", func(e *TelemetryEnvelope) { e.AgentSessionID = "" }, true},
+		{"v2 no boot", func(e *TelemetryEnvelope) { e.BootID = "" }, true},
+		{"v2 no stream", func(e *TelemetryEnvelope) { e.StreamID = "" }, true},
 		{"class disagrees with payload", func(e *TelemetryEnvelope) { e.EventClass = detection.ClassNetwork }, true},
 		{"type disagrees with payload", func(e *TelemetryEnvelope) { e.EventType = "process.fork" }, true},
 		{"no occurred-at", func(e *TelemetryEnvelope) { e.OccurredAt = time.Time{} }, true},
@@ -61,6 +65,17 @@ func TestEnvelopeValidate(t *testing.T) {
 				t.Fatalf("error must wrap shared.ErrValidation, got %v", err)
 			}
 		})
+	}
+}
+
+func TestEnvelopeV1CompatibilityDoesNotRequireV2IncarnationFields(t *testing.T) {
+	e := baseEnvelope()
+	e.SchemaVersion = 1
+	e.AgentSessionID = ""
+	e.BootID = ""
+	e.StreamID = ""
+	if err := e.Validate(); err != nil {
+		t.Fatalf("historical v1 envelope should remain readable without v2 incarnation fields: %v", err)
 	}
 }
 
@@ -113,7 +128,6 @@ func TestDeriveEventIDDeterministic(t *testing.T) {
 	if a[:3] != "te_" {
 		t.Fatalf("event id must be prefixed te_: %q", a)
 	}
-	// Any coordinate change => distinct id.
 	if a == DeriveEventID("asset-1", "boot-1", "stream-1", 8, detection.ClassProcess, 1234) {
 		t.Fatalf("a different sequence must derive a distinct id")
 	}

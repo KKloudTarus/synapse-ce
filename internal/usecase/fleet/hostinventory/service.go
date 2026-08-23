@@ -67,9 +67,12 @@ type SyncResult struct {
 }
 
 // Sync persists the host as a Kind=host asset. It is idempotent: two syncs of an unchanged host reuse
-// the asset id (keyed by the host's stable identity) and produce no churn.
+// the asset id (keyed by the host's stable identity) and produce no churn. reporting_agent_id is stamped
+// from actor, which the HTTP adapter obtains from the authenticated fleet credential; it is never read
+// from Inventory. A3 uses this server-authored attribute to establish the canonical telemetry binding.
 func (s *Service) Sync(ctx context.Context, actor string, in SyncInput) (*SyncResult, error) {
-	if strings.TrimSpace(actor) == "" {
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
 		return nil, fmt.Errorf("%w: host inventory actor is required", shared.ErrValidation)
 	}
 	if in.TenantID.IsZero() {
@@ -88,7 +91,7 @@ func (s *Service) Sync(ctx context.Context, actor string, in SyncInput) (*SyncRe
 		Kind:       asset.KindHost,
 		Key:        key,
 		Name:       displayName(inv.Facts, key),
-		Attributes: attributes(inv, degraded),
+		Attributes: attributes(inv, degraded, actor),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("host inventory: upsert host asset: %w", err)
@@ -134,19 +137,20 @@ func displayName(f dhi.HostFacts, key string) string {
 	return key
 }
 
-func attributes(inv dhi.HostInventory, degraded bool) map[string]string {
+func attributes(inv dhi.HostInventory, degraded bool, reportingAgent string) map[string]string {
 	f := inv.Facts
 	attrs := map[string]string{
-		"os":             f.OS,
-		"os_version":     f.OSVersion,
-		"kernel":         f.Kernel,
-		"arch":           f.Arch,
-		"machine_id":     f.MachineID,
-		"cloud_instance": f.CloudInstance,
-		"packages":       strconv.Itoa(len(inv.Packages)),
-		"complete":       strconv.FormatBool(inv.Complete),
-		"degraded":       strconv.FormatBool(degraded),
-		"coverage_gaps":  strconv.Itoa(len(inv.Coverage)),
+		"os":                 f.OS,
+		"os_version":         f.OSVersion,
+		"kernel":             f.Kernel,
+		"arch":               f.Arch,
+		"machine_id":         f.MachineID,
+		"cloud_instance":     f.CloudInstance,
+		"packages":           strconv.Itoa(len(inv.Packages)),
+		"complete":           strconv.FormatBool(inv.Complete),
+		"degraded":           strconv.FormatBool(degraded),
+		"coverage_gaps":      strconv.Itoa(len(inv.Coverage)),
+		"reporting_agent_id": strings.TrimSpace(reportingAgent),
 	}
 	// Drop empty fact values so the asset attributes stay clean.
 	for k, v := range attrs {

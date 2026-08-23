@@ -16,6 +16,7 @@ func validManifest() TelemetryBatchManifest {
 		SchemaVersion:        1,
 		BatchID:              "batch-1",
 		AgentID:              "agent-1",
+		HostID:               "agent-1",
 		AssetID:              "asset-1",
 		StreamID:             "stream-1",
 		Position:             StreamPosition{Priority: PriorityP1, Epoch: 1, Sequence: 5, Session: "sess-1", Boot: "boot-1"},
@@ -43,9 +44,11 @@ func TestTelemetryManifestValidate(t *testing.T) {
 	}{
 		{"valid", func(*TelemetryBatchManifest) {}, false},
 		{"no protocol", func(m *TelemetryBatchManifest) { m.ProtocolVersion = 0 }, true},
+		{"unsupported protocol", func(m *TelemetryBatchManifest) { m.ProtocolVersion = TelemetryProtocolVersion + 1 }, true},
 		{"no schema", func(m *TelemetryBatchManifest) { m.SchemaVersion = 0 }, true},
 		{"no batch id", func(m *TelemetryBatchManifest) { m.BatchID = "" }, true},
 		{"no agent id", func(m *TelemetryBatchManifest) { m.AgentID = "" }, true},
+		{"no host id", func(m *TelemetryBatchManifest) { m.HostID = "" }, true},
 		{"no asset id", func(m *TelemetryBatchManifest) { m.AssetID = "" }, true},
 		{"no stream id", func(m *TelemetryBatchManifest) { m.StreamID = "" }, true},
 		{"bad position (epoch 0)", func(m *TelemetryBatchManifest) { m.Position.Epoch = 0 }, true},
@@ -96,6 +99,7 @@ func TestTelemetryManifestSignVerifyRoundTrip(t *testing.T) {
 	}
 	// Tamper: any bound field change breaks the signature.
 	for _, mut := range []func(*TelemetryBatchManifest){
+		func(m *TelemetryBatchManifest) { m.HostID = "other-host" },
 		func(m *TelemetryBatchManifest) { m.Position.Sequence = 6 },
 		func(m *TelemetryBatchManifest) { m.PayloadDigest = "other" },
 		func(m *TelemetryBatchManifest) { m.Events[0].Digest = "tampered" },

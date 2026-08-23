@@ -17,15 +17,16 @@ var (
 
 func baseProcess() DecodedEvent {
 	return DecodedEvent{
-		Class:      detection.ClassProcess,
-		AgentID:    "agent-1",
-		AssetID:    "asset-1",
-		BootID:     "boot-1",
-		StreamID:   "stream-1",
-		Sequence:   42,
-		OccurredAt: occurred,
-		ObservedAt: observed,
-		Resource:   telemetry.ResourceContext{Host: "h1"},
+		Class:          detection.ClassProcess,
+		AgentID:        "agent-1",
+		AgentSessionID: "session-1",
+		AssetID:        "asset-1",
+		BootID:         "boot-1",
+		StreamID:       "stream-1",
+		Sequence:       42,
+		OccurredAt:     occurred,
+		ObservedAt:     observed,
+		Resource:       telemetry.ResourceContext{Host: "h1"},
 		Process: &DecodedProcess{
 			Kind: "exec", PID: 1234, PPID: 1000,
 			StartTimeNanos: 5555, ParentStartTimeNanos: 1111,
@@ -73,7 +74,7 @@ func TestNormalizeProcessGolden(t *testing.T) {
 
 func TestNormalizeNetworkGolden(t *testing.T) {
 	d := DecodedEvent{
-		Class: detection.ClassNetwork, AgentID: "a", AssetID: "asset-1", BootID: "boot-1", StreamID: "s", Sequence: 1,
+		Class: detection.ClassNetwork, AgentID: "a", AgentSessionID: "session-1", AssetID: "asset-1", BootID: "boot-1", StreamID: "s", Sequence: 1,
 		OccurredAt: occurred, ObservedAt: observed,
 		Network: &DecodedNetwork{Kind: "connect", Proto: "tcp", Direction: "egress", RemoteAddr: "9.9.9.9", RemotePort: 53, PID: 1234, ProcStartTimeNanos: 5555, Comm: "curl"},
 	}
@@ -95,7 +96,7 @@ func TestNormalizeNetworkGolden(t *testing.T) {
 
 func TestNormalizeFileGolden(t *testing.T) {
 	d := DecodedEvent{
-		Class: detection.ClassFile, AgentID: "a", AssetID: "asset-1", BootID: "boot-1", StreamID: "s", Sequence: 1,
+		Class: detection.ClassFile, AgentID: "a", AgentSessionID: "session-1", AssetID: "asset-1", BootID: "boot-1", StreamID: "s", Sequence: 1,
 		OccurredAt: occurred, ObservedAt: observed,
 		File: &DecodedFile{Op: "write", Path: "/etc/shadow", Device: 66, Inode: 128, PID: 1234, ProcStartTimeNanos: 5555, Comm: "vi"},
 	}
@@ -116,7 +117,7 @@ func TestNormalizeFileGolden(t *testing.T) {
 
 func TestNormalizePrivilegeGolden(t *testing.T) {
 	d := DecodedEvent{
-		Class: detection.ClassPrivilege, AgentID: "a", AssetID: "asset-1", BootID: "boot-1", StreamID: "s", Sequence: 1,
+		Class: detection.ClassPrivilege, AgentID: "a", AgentSessionID: "session-1", AssetID: "asset-1", BootID: "boot-1", StreamID: "s", Sequence: 1,
 		OccurredAt: occurred, ObservedAt: observed,
 		Privilege: &DecodedPrivilege{Kind: "setuid", PID: 1234, ProcStartTimeNanos: 5555, FromUID: 1000, ToUID: 0, Comm: "sudo"},
 	}
@@ -250,7 +251,7 @@ func TestNormalizePIDReuseDistinct(t *testing.T) {
 
 func TestNormalizeLinkProcessOptional(t *testing.T) {
 	d := DecodedEvent{
-		Class: detection.ClassNetwork, AgentID: "a", AssetID: "asset-1", BootID: "boot-1", StreamID: "s", Sequence: 1,
+		Class: detection.ClassNetwork, AgentID: "a", AgentSessionID: "session-1", AssetID: "asset-1", BootID: "boot-1", StreamID: "s", Sequence: 1,
 		OccurredAt: occurred, ObservedAt: observed,
 		Network: &DecodedNetwork{Kind: "connect", Proto: "udp", Direction: "egress", RemoteAddr: "1.1.1.1", RemotePort: 53, PID: 1234, ProcStartTimeNanos: 0},
 	}
