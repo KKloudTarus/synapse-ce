@@ -8,39 +8,40 @@ import { MobileSidebar, Sidebar } from './components/layout/Sidebar'
 import { Connect } from './pages/Connect'
 
 // --- Lazy-loaded page components ---
-const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })))
-const Engagements = lazy(() => import('./pages/Engagements').then(m => ({ default: m.Engagements })))
-const NewEngagement = lazy(() => import('./pages/Engagements').then(m => ({ default: m.NewEngagement })))
+const Dashboard = lazy(() => import('./pages/Dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })))
+const Engagements = lazy(() => import('./pages/Engagements/EngagementsPage').then(m => ({ default: m.EngagementsPage })))
+const NewEngagement = lazy(() => import('./pages/Engagements/NewEngagementPage').then(m => ({ default: m.NewEngagementPage })))
 const EngagementDetail = lazy(() => import('./pages/EngagementDetail').then(m => ({ default: m.EngagementDetail })))
-const Assets = lazy(() => import('./pages/Assets').then(m => ({ default: m.Assets })))
-const AssetDetail = lazy(() => import('./pages/AssetDetail').then(m => ({ default: m.AssetDetail })))
-const AssetOverview = lazy(() => import('./pages/AssetDetail').then(m => ({ default: m.AssetOverview })))
-const AssetComponents = lazy(() => import('./pages/AssetDetail').then(m => ({ default: m.AssetComponents })))
-const AssetEngagements = lazy(() => import('./pages/AssetDetail').then(m => ({ default: m.AssetEngagements })))
-const AssetFindings = lazy(() => import('./pages/AssetDetail').then(m => ({ default: m.AssetFindings })))
-const AssetCoverageView = lazy(() => import('./pages/AssetDetail').then(m => ({ default: m.AssetCoverageView })))
-const AssetHistory = lazy(() => import('./pages/AssetDetail').then(m => ({ default: m.AssetHistory })))
-const CodeQualityProjects = lazy(() => import('./pages/CodeQualityProjects').then(m => ({ default: m.CodeQualityProjects })))
-const CodeQualityProject = lazy(() => import('./pages/CodeQualityProject').then(m => ({ default: m.CodeQualityProject })))
-const QualityGates = lazy(() => import('./pages/QualityGates').then(m => ({ default: m.QualityGates })))
-const QualityProfiles = lazy(() => import('./pages/QualityProfiles').then(m => ({ default: m.QualityProfiles })))
-const FleetLayout = lazy(() => import('./pages/FleetLayout').then(m => ({ default: m.FleetLayout })))
-const FleetCoverage = lazy(() => import('./pages/FleetCoverage').then(m => ({ default: m.FleetCoverage })))
-const FleetAgents = lazy(() => import('./pages/FleetAgents').then(m => ({ default: m.FleetAgents })))
-const Rules = lazy(() => import('./pages/Rules'))
-const RuleDetail = lazy(() => import('./pages/RuleDetail'))
-const Audit = lazy(() => import('./pages/Audit').then(m => ({ default: m.Audit })))
-const AITriageReviews = lazy(() => import('./pages/AITriageReviews').then(m => ({ default: m.AITriageReviews })))
-const AITriageObservability = lazy(() => import('./pages/AITriageObservability').then(m => ({ default: m.AITriageObservability })))
+const Assets = lazy(() => import('./pages/Assets/Assets').then(m => ({ default: m.Assets })))
+const AssetDetail = lazy(() => import('./pages/Assets/AssetDetail').then(m => ({ default: m.AssetDetail })))
+const AssetOverview = lazy(() => import('./pages/Assets/AssetDetail').then(m => ({ default: m.AssetOverview })))
+const AssetComponents = lazy(() => import('./pages/Assets/AssetDetail').then(m => ({ default: m.AssetComponents })))
+const AssetEngagements = lazy(() => import('./pages/Assets/AssetDetail').then(m => ({ default: m.AssetEngagements })))
+const AssetFindings = lazy(() => import('./pages/Assets/AssetDetail').then(m => ({ default: m.AssetFindings })))
+const AssetCoverageView = lazy(() => import('./pages/Assets/AssetDetail').then(m => ({ default: m.AssetCoverageView })))
+const AssetHistory = lazy(() => import('./pages/Assets/AssetDetail').then(m => ({ default: m.AssetHistory })))
+const CodeQualityProjects = lazy(() => import('./pages/CodeQuality/CodeQualityProjects').then(m => ({ default: m.CodeQualityProjects })))
+const CodeQualityProject = lazy(() => import('./pages/CodeQuality/CodeQualityProject').then(m => ({ default: m.CodeQualityProject })))
+const QualityGates = lazy(() => import('./pages/CodeQuality/QualityGates').then(m => ({ default: m.QualityGates })))
+const QualityProfiles = lazy(() => import('./pages/CodeQuality/QualityProfiles').then(m => ({ default: m.QualityProfiles })))
+const FleetCoverage = lazy(() => import('./pages/Fleet/FleetCoverage').then(m => ({ default: m.FleetCoverage })))
+const Rules = lazy(() => import('./pages/Rules/index'))
+const RuleDetail = lazy(() => import('./pages/Rules/RuleDetail'))
+const Audit = lazy(() => import('./pages/Settings/Audit').then(m => ({ default: m.Audit })))
+const Settings = lazy(() => import('./pages/Settings/Settings').then(m => ({ default: m.Settings })))
+const SettingsConfig = lazy(() => import('./pages/Settings/SettingsConfig').then(m => ({ default: m.SettingsConfig })))
+const AITriageReviews = lazy(() => import('./pages/AITriage/AITriageReviews').then(m => ({ default: m.AITriageReviews })))
+const AITriageObservability = lazy(() => import('./pages/AITriage/AITriageObservability').then(m => ({ default: m.AITriageObservability })))
 const VulnerabilityIntelligence = lazy(() => import('./pages/VulnerabilityIntelligence').then(m => ({ default: m.VulnerabilityIntelligence })))
-const Team = lazy(() => import('./pages/Team').then(m => ({ default: m.Team })))
-const ProjectOverviewPage = lazy(() => import('./pages/ProjectOverviewPage').then(m => ({ default: m.ProjectOverviewPage })))
-const ProjectAnalysisPage = lazy(() => import('./pages/ProjectAnalysisPage').then(m => ({ default: m.ProjectAnalysisPage })))
-const ProjectActivityPage = lazy(() => import('./pages/ProjectActivityPage').then(m => ({ default: m.ProjectActivityPage })))
-const SecurityHotspotsPage = lazy(() => import('./pages/SecurityHotspots').then(m => ({ default: m.SecurityHotspotsPage })))
-const ProjectIssuesPage = lazy(() => import('./pages/ProjectIssues').then(m => ({ default: m.ProjectIssuesPage })))
-const ProjectMeasuresPage = lazy(() => import('./pages/ProjectMeasuresPage').then(m => ({ default: m.ProjectMeasuresPage })))
-const ProjectCodePage = lazy(() => import('./pages/ProjectCodePage').then(m => ({ default: m.ProjectCodePage })))
+const VulnerabilityAdvisoryPage = lazy(() => import('./pages/VulnerabilityIntelligence/VulnIntelAdvisories').then(m => ({ default: m.VulnerabilityAdvisoryPage })))
+const Team = lazy(() => import('./pages/Settings/Team').then(m => ({ default: m.Team })))
+const ProjectOverviewPage = lazy(() => import('./pages/CodeQuality/ProjectOverviewPage').then(m => ({ default: m.ProjectOverviewPage })))
+const ProjectAnalysisPage = lazy(() => import('./pages/CodeQuality/ProjectAnalysisPage').then(m => ({ default: m.ProjectAnalysisPage })))
+const ProjectActivityPage = lazy(() => import('./pages/CodeQuality/ProjectActivityPage').then(m => ({ default: m.ProjectActivityPage })))
+const SecurityHotspotsPage = lazy(() => import('./pages/CodeQuality/SecurityHotspots').then(m => ({ default: m.SecurityHotspotsPage })))
+const ProjectIssuesPage = lazy(() => import('./pages/CodeQuality/ProjectIssues').then(m => ({ default: m.ProjectIssuesPage })))
+const ProjectMeasuresPage = lazy(() => import('./pages/CodeQuality/ProjectMeasuresPage').then(m => ({ default: m.ProjectMeasuresPage })))
+const ProjectCodePage = lazy(() => import('./pages/CodeQuality/ProjectCodePage').then(m => ({ default: m.ProjectCodePage })))
 
 export default function App() {
   return (
@@ -61,6 +62,7 @@ function Gate() {
         <Route path="engagements" element={<Engagements />} />
         <Route path="engagements/new" element={<NewEngagement />} />
         <Route path="engagements/:id" element={<EngagementDetail />} />
+        <Route path="engagements/:id/:tabSlug" element={<EngagementDetail />} />
         <Route path="assets" element={<Assets />} />
         <Route path="assets/:key" element={<AssetDetail />}>
           <Route index element={<AssetOverview />} />
@@ -82,17 +84,21 @@ function Gate() {
           <Route path="analysis" element={<ProjectAnalysisPage />} />
           <Route path="activity" element={<ProjectActivityPage />} />
         </Route>
-        <Route path="fleet" element={<FleetLayout />}>
-          <Route index element={<FleetCoverage />} />
-          <Route path="agents" element={<FleetAgents />} />
-        </Route>
+        <Route path="fleet" element={<FleetCoverage />} />
+        <Route path="fleet/agents" element={<Navigate to="/fleet" replace />} />
         <Route path="rules" element={<Rules />} />
         <Route path="rules/:key" element={<RuleDetail />} />
-        <Route path="audit" element={<Audit />} />
+        <Route path="settings" element={<Settings />}>
+          <Route index element={<Audit />} />
+          <Route path="team" element={<Team />} />
+          <Route path="config" element={<SettingsConfig />} />
+        </Route>
+        <Route path="audit" element={<Navigate to="/settings" replace />} />
+        <Route path="team" element={<Navigate to="/settings/team" replace />} />
         <Route path="ai-triage/reviews" element={<AITriageReviews />} />
         <Route path="ai-triage/observability" element={<AITriageObservability />} />
         <Route path="vulnerability-intelligence" element={<VulnerabilityIntelligence />} />
-        <Route path="team" element={<Team />} />
+        <Route path="vulnerability-intelligence/advisories/:advisoryId" element={<VulnerabilityAdvisoryPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>
     </Routes>

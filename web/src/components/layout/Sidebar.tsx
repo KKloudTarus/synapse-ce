@@ -3,84 +3,77 @@ import {
   BarChartSquare02,
   BookClosed,
   CheckDone01,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Cube01,
-  File06,
-  LogOut01,
-  Moon01,
   Plus,
   Server01,
+  Settings01,
   ShieldTick,
   ShieldZap,
-  Sun,
   Target04,
-  Users01,
   XClose,
 } from '@untitledui/icons'
 import { useEffect, useRef, useState, type ComponentType } from 'react'
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import logo from '../../assets/logo.png'
-import { useAuth } from '../../auth/AuthContext'
 import { cn } from '../ui'
 
 type IconComponent = ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>
 
 type NavItem = {
-  icon: IconComponent
+  icon?: IconComponent
   label: string
   to: string
   end?: boolean
+  children?: Array<{ label: string; to: string }>
 }
 
 const DASHBOARD: NavItem = { icon: BarChartSquare02, label: 'Dashboard', to: '/dashboard', end: true }
+const SETTINGS: NavItem = { icon: Settings01, label: 'Settings', to: '/settings' }
 
 const NAV_GROUPS: Array<{
   label: string
   items: NavItem[]
 }> = [
-  {
-    label: 'Security operations',
-    items: [
-      { icon: Target04, label: 'Engagements', to: '/engagements' },
-      { icon: ShieldTick, label: 'Review queue', to: '/ai-triage/reviews' },
-    ],
-  },
-  {
-    label: 'Exposure management',
-    items: [
-      { icon: Cube01, label: 'Assets', to: '/assets' },
-      { icon: ShieldZap, label: 'Vulnerability intelligence', to: '/vulnerability-intelligence' },
-    ],
-  },
-  {
-    label: 'Security engineering',
-    items: [
-      { icon: CheckDone01, label: 'Code Quality', to: '/code-quality' },
-      { icon: BookClosed, label: 'Rules', to: '/rules' },
-    ],
-  },
-  {
-    label: 'Runtime security',
-    items: [
-      { icon: Server01, label: 'Fleet', to: '/fleet' },
-      { icon: Activity, label: 'Automation observability', to: '/ai-triage/observability' },
-    ],
-  },
-  {
-    label: 'Governance',
-    items: [
-      { icon: File06, label: 'Audit log', to: '/audit' },
-      { icon: Users01, label: 'Team', to: '/team' },
-    ],
-  },
-]
-
-type Theme = 'light' | 'dark'
-
-function currentTheme(): Theme {
-  return storageGet('synapse-theme') === 'dark' ? 'dark' : 'light'
-}
+    {
+      label: 'Security operations',
+      items: [
+        { icon: Target04, label: 'Engagements', to: '/engagements' },
+        { icon: ShieldTick, label: 'Review Queue', to: '/ai-triage/reviews' },
+      ],
+    },
+    {
+      label: 'Exposure management',
+      items: [
+        { icon: Cube01, label: 'Assets', to: '/assets' },
+        { icon: ShieldZap, label: 'Vulnerability Intelligence', to: '/vulnerability-intelligence' },
+      ],
+    },
+    {
+      label: 'Security engineering',
+      items: [
+        {
+          icon: CheckDone01,
+          label: 'Code Quality',
+          to: '/code-quality',
+          children: [
+            { label: 'Quality Profiles', to: '/code-quality/profiles' },
+            { label: 'Quality Gates', to: '/code-quality/gates' },
+          ],
+        },
+        { icon: BookClosed, label: 'Rules', to: '/rules' },
+      ],
+    },
+    {
+      label: 'Runtime security',
+      items: [
+        { icon: Server01, label: 'Fleet', to: '/fleet' },
+        { icon: Activity, label: 'Automation Observability', to: '/ai-triage/observability' },
+      ],
+    },
+  ]
 
 function storageGet(key: string) {
   try {
@@ -96,68 +89,125 @@ function storageSet(key: string, value: string) {
   } catch {}
 }
 
-function useOptionalAuth() {
-  try {
-    return useAuth()
-  } catch {
-    return { logout: () => {} }
-  }
-}
-
 function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
-  const [theme, setTheme] = useState<Theme>(currentTheme)
-  const { logout } = useOptionalAuth()
+  const location = useLocation()
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>(() => ({
+    '/code-quality': storageGet('synapse-nav-expanded-/code-quality') !== 'false',
+  }))
 
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    storageSet('synapse-theme', theme)
-  }, [theme])
-
-  useEffect(() => {
-    const synchronize = (event: Event) => setTheme((event as CustomEvent<Theme>).detail)
-    window.addEventListener('synapse-theme-change', synchronize)
-    return () => window.removeEventListener('synapse-theme-change', synchronize)
-  }, [])
-
-  function setThemeValue(next: Theme) {
-    window.dispatchEvent(new CustomEvent<Theme>('synapse-theme-change', { detail: next }))
-    setTheme(next)
+  function toggleExpanded(key: string) {
+    setExpandedItems((prev) => {
+      const next = !prev[key]
+      storageSet(`synapse-nav-expanded-${key}`, String(next))
+      return { ...prev, [key]: next }
+    })
   }
 
   function renderItems(items: NavItem[]) {
-    return items.map(({ icon: Icon, label, to, end }) => (
-      <NavLink
-        key={to}
-        to={to}
-        end={end}
-        title={collapsed ? label : undefined}
-        aria-label={collapsed ? label : undefined}
-        onClick={onNavigate}
-        className={({ isActive }) =>
-          cn(
-            'group relative flex h-10 items-center rounded-lg text-sm font-semibold select-none transition-colors duration-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
-            collapsed ? 'justify-center px-0' : 'gap-3 px-3 py-2',
-            isActive
-              ? 'bg-active text-primary'
-              : 'text-secondary hover:bg-primary_hover hover:text-secondary_hover',
-          )
-        }
-      >
-        {({ isActive }) => (
-          <>
-            <Icon
-              className={cn(
-                'size-5 shrink-0 transition-colors duration-100',
-                isActive ? 'text-fg-brand-primary' : 'text-fg-quaternary group-hover:text-fg-quaternary_hover',
-              )}
-              aria-hidden="true"
-            />
-            <span className={cn('truncate', collapsed ? 'sr-only' : 'inline')}>{label}</span>
-            {isActive && <span className="absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-brand-solid" />}
-          </>
-        )}
-      </NavLink>
-    ))
+    return items.map(({ icon: Icon, label, to, end, children }) => {
+      const hasChildren = Boolean(children && children.length > 0)
+      const isExpanded = Boolean(expandedItems[to])
+      const isSubRouteActive = Boolean(
+        hasChildren &&
+        children?.some((child) => location.pathname === child.to || location.pathname.startsWith(`${child.to}/`)),
+      )
+
+      return (
+        <div key={to} className="space-y-0.5">
+          <NavLink
+            to={to}
+            end={end}
+            title={collapsed ? label : undefined}
+            aria-label={collapsed ? label : undefined}
+            onClick={() => {
+              if (hasChildren && !isExpanded) {
+                toggleExpanded(to)
+              }
+              onNavigate?.()
+            }}
+            className={({ isActive: navActive }) => {
+              const isActive = navActive && !isSubRouteActive
+
+              return cn(
+                'group relative flex h-10 items-center rounded-lg text-sm font-semibold select-none transition-colors duration-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
+                collapsed ? 'justify-center px-0' : 'gap-3 px-3 py-2',
+                isActive
+                  ? 'bg-active text-primary'
+                  : 'text-secondary hover:bg-primary_hover hover:text-secondary_hover',
+              )
+            }}
+          >
+            {({ isActive: navActive }) => {
+              const isActive = navActive && !isSubRouteActive
+
+              return (
+                <>
+                  {Icon && (
+                    <Icon
+                      className={cn(
+                        'size-5 shrink-0 transition-colors duration-100',
+                        isActive ? 'text-fg-brand-primary' : 'text-fg-quaternary group-hover:text-fg-quaternary_hover',
+                      )}
+                      aria-hidden="true"
+                    />
+                  )}
+                  <span className={cn('truncate', collapsed ? 'sr-only' : 'inline')}>{label}</span>
+                  {isActive && <span className="absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-brand-solid" />}
+                  {hasChildren && !collapsed && (
+                    <button
+                      type="button"
+                      aria-label={isExpanded ? `Collapse ${label}` : `Expand ${label}`}
+                      aria-expanded={isExpanded}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        toggleExpanded(to)
+                      }}
+                      className="ml-auto flex size-6 items-center justify-center rounded-md text-fg-quaternary transition-colors duration-100 hover:bg-secondary hover:text-fg-secondary focus-visible:outline-2 focus-visible:outline-brand"
+                    >
+                      <ChevronDown
+                        className={cn(
+                          'size-4 shrink-0 transition-transform duration-200',
+                          isExpanded && '-rotate-180',
+                        )}
+                        aria-hidden="true"
+                      />
+                    </button>
+                  )}
+                </>
+              )
+            }}
+          </NavLink>
+
+          {hasChildren && !collapsed && isExpanded && (
+            <div className="space-y-0.5 pl-7 pr-1">
+              {children?.map((child) => (
+                <NavLink
+                  key={child.to}
+                  to={child.to}
+                  onClick={onNavigate}
+                  className={({ isActive }) =>
+                    cn(
+                      'group relative flex h-8 items-center rounded-lg px-3 text-xs select-none transition-colors duration-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
+                      isActive
+                        ? 'bg-active text-primary font-semibold'
+                        : 'text-secondary font-medium hover:bg-primary_hover hover:text-secondary_hover',
+                    )
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <span className="truncate">{child.label}</span>
+                      {isActive && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-r-full bg-brand-solid" />}
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          )}
+        </div>
+      )
+    })
   }
 
   return (
@@ -211,68 +261,8 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
         ))}
       </nav>
 
-      <div className="shrink-0 space-y-2.5 border-t border-secondary p-3">
-        {/* Status text */}
-        <div
-          className={cn(
-            'flex items-center text-xs font-medium text-quaternary select-none',
-            collapsed ? 'justify-center' : 'gap-2 px-1',
-          )}
-        >
-          <span className="size-2 shrink-0 rounded-full bg-success-solid" />
-          <span className={cn('truncate', collapsed && 'sr-only')}>self-host · single-tenant</span>
-        </div>
-
-        {/* Theme toggle — dual icon style */}
-        <div
-          className={cn(
-            'flex items-center rounded-lg border border-secondary p-0.5 bg-secondary',
-            collapsed ? 'flex-col gap-1' : 'gap-0.5',
-          )}
-        >
-          <button
-            type="button"
-            onClick={() => setThemeValue('light')}
-            className={cn(
-              'flex items-center justify-center rounded-md p-1.5 transition-colors duration-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
-              collapsed ? 'w-full' : 'flex-1',
-              theme === 'light'
-                ? 'bg-primary text-fg-primary shadow-xs'
-                : 'text-fg-quaternary hover:text-fg-secondary',
-            )}
-            aria-label="Light theme"
-          >
-            <Sun className="size-4 shrink-0" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setThemeValue('dark')}
-            className={cn(
-              'flex items-center justify-center rounded-md p-1.5 transition-colors duration-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
-              collapsed ? 'w-full' : 'flex-1',
-              theme === 'dark'
-                ? 'bg-primary text-fg-primary shadow-xs'
-                : 'text-fg-quaternary hover:text-fg-secondary',
-            )}
-            aria-label="Dark theme"
-          >
-            <Moon01 className="size-4 shrink-0" />
-          </button>
-        </div>
-
-        {/* Disconnect button */}
-        <button
-          type="button"
-          onClick={logout}
-          className={cn(
-            'group flex h-10 w-full items-center rounded-lg text-sm font-semibold text-secondary transition-colors duration-100 hover:bg-primary_hover hover:text-error-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
-            collapsed ? 'justify-center px-0' : 'gap-3 px-3 py-2',
-          )}
-          aria-label="Disconnect"
-        >
-          <LogOut01 className="size-5 shrink-0 text-fg-quaternary group-hover:text-fg-error-primary" />
-          <span className={cn('truncate', collapsed && 'sr-only')}>Disconnect</span>
-        </button>
+      <div className="shrink-0 border-t border-secondary p-3">
+        <div className="space-y-0.5">{renderItems([SETTINGS])}</div>
       </div>
     </>
   )

@@ -1,4 +1,4 @@
-import { Search, X } from 'lucide-react'
+import { SearchLg, XClose } from '@untitledui/icons'
 import { FacetFilter } from '../../components/rules/FacetFilter'
 import { formatRuleSeverity, formatRuleType } from '../../lib/ruleFormat'
 import type { RuleFacets, RuleListFilters, RuleType, RuleSeverity } from '../../lib/types'
@@ -39,7 +39,7 @@ export function RuleFilterBar({
     <>
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center">
         <div className="relative max-w-md flex-1">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-mutedfg" />
+          <SearchLg className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-quaternary" />
           <input
             ref={searchInputRef}
             aria-label="Search rules"
@@ -48,7 +48,7 @@ export function RuleFilterBar({
             onChange={(e) => onQueryChange(e.target.value)}
             onKeyDown={onSearchKey}
             placeholder="Search rules..."
-            className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-8 text-sm text-foreground transition-colors placeholder:text-mutedfg focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand shadow-sm"
+            className="w-full rounded-lg border border-secondary bg-primary py-2 pl-9 pr-8 text-sm text-primary transition-colors placeholder:text-placeholder focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand shadow-xs"
             maxLength={256}
           />
           {query && (
@@ -56,9 +56,9 @@ export function RuleFilterBar({
               type="button"
               onClick={onClearQuery}
               aria-label="Clear search"
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-mutedfg transition-colors hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-tertiary transition-colors hover:bg-secondary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             >
-              <X className="size-3.5" />
+              <XClose className="size-3.5" />
             </button>
           )}
         </div>
@@ -100,7 +100,7 @@ export function RuleFilterBar({
             <button
               type="button"
               onClick={onClearAll}
-              className="ml-2 text-sm font-medium text-branddim transition-colors hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded-sm"
+              className="ml-2 text-sm font-semibold text-brand-secondary transition-colors hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-sm"
             >
               Clear all
             </button>
@@ -112,7 +112,7 @@ export function RuleFilterBar({
         <div className="mb-6 flex flex-wrap gap-2">
           {(['languages', 'types', 'severities', 'tags', 'cwe'] as const).map(key => 
             filters[key].map(val => (
-              <div key={`${key}-${val}`} className="flex items-center gap-1 rounded-md bg-brand/10 pl-2.5 pr-1 py-1 text-xs font-medium text-branddim">
+              <div key={`${key}-${val}`} className="flex items-center gap-1 rounded-md bg-brand-primary pl-2.5 pr-1 py-1 text-xs font-semibold text-brand-secondary ring-1 ring-brand/20">
                 {formatFilterChip(key, val)}
                 <button
                   type="button"
@@ -120,7 +120,7 @@ export function RuleFilterBar({
                   onClick={() => onRemoveChip(key, val)}
                   className="rounded-full p-0.5 transition-colors hover:bg-brand/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                 >
-                  <X className="size-3" />
+                  <XClose className="size-3" />
                 </button>
               </div>
             ))

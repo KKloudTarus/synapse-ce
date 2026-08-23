@@ -28,28 +28,26 @@ export const AssessmentActivityTable: FC<AssessmentActivityTableProps> = ({
   }
 
   return (
-    <div className="divide-y divide-secondary">
+    <div className="max-h-[400px] divide-y divide-secondary overflow-y-auto">
       {engagements.map((engagement) => (
         <Link
           key={engagement.id}
           to={`/engagements/${encodeURIComponent(engagement.id)}`}
-          className="group grid gap-3 p-4 transition-colors hover:bg-secondary/50 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5"
+          className="group flex items-start gap-3 px-4 py-3 transition-colors hover:bg-primary_hover"
         >
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="truncate font-semibold text-primary group-hover:text-brand-secondary">
+          <Target01 className="mt-0.5 size-5 shrink-0 text-fg-quaternary group-hover:text-fg-secondary" aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-sm font-medium text-primary group-hover:text-brand-secondary">
                 {engagement.name || 'Untitled Engagement'}
-              </h3>
+              </span>
               <StatusPill status={engagement.status} />
             </div>
-            <p className="mt-1 truncate text-xs text-secondary">
+            <p className="mt-0.5 truncate text-xs text-tertiary">
               {assetNames[engagement.businessAssetId] ||
-                (engagement.businessAssetId ? engagement.businessAssetId : 'Unassigned Asset')}
+                (engagement.businessAssetId ? engagement.businessAssetId : 'Unassigned')}
+              {engagement.inScope && engagement.inScope.length > 0 && ` · ${engagement.inScope.length} in scope`}
             </p>
-          </div>
-          <div className="flex items-center gap-1.5 text-xs text-tertiary">
-            <Target01 className="size-3.5" aria-hidden="true" />
-            <span>{engagement.inScope.length} in scope</span>
           </div>
         </Link>
       ))}

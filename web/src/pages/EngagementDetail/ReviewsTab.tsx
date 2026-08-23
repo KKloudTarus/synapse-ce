@@ -1,5 +1,5 @@
-import { AlertTriangle, CheckCircle2, ShieldCheck, ShieldQuestion } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { AlertTriangle, CheckCircle, ShieldTick, Shield01 } from '@untitledui/icons'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Spinner, cn } from '../../components/ui'
 import { useParallelFetch } from '../../hooks'
 import { ApiError, api } from '../../lib/api'
@@ -76,7 +76,7 @@ export function JudgmentReviewTab({ engagementId }: { engagementId: string }) {
   if (!judgments?.length) {
     return (
       <div className="space-y-3">
-        <EmptyState icon={ShieldCheck} title="No judgments awaiting review" hint="All proposed judgments have been settled." />
+        <EmptyState icon={ShieldTick} title="No judgments awaiting review" hint="All proposed judgments have been settled." />
       </div>
     )
   }
@@ -84,8 +84,8 @@ export function JudgmentReviewTab({ engagementId }: { engagementId: string }) {
   return (
     <div className="space-y-4">
       <div>
-        <h2 ref={reviewHeadingRef} tabIndex={-1} className="text-lg font-semibold text-foreground">Judgments awaiting review</h2>
-        <p className="mt-1 text-sm text-mutedfg">
+        <h2 ref={reviewHeadingRef} tabIndex={-1} className="text-lg font-semibold text-primary">Judgments awaiting review</h2>
+        <p className="mt-1 text-sm text-tertiary">
           Verify evidence-gated claims or accept descriptive claims. The server records every decision in the evidence chain.
         </p>
       </div>
@@ -123,17 +123,17 @@ export function JudgmentReviewTab({ engagementId }: { engagementId: string }) {
               }}
               tabIndex={blockedReason ? undefined : 0}
             >
-              <Card bodyClass="p-4" className={cn(!blockedReason && 'cursor-pointer hover:border-borderstrong')}>
+              <Card bodyClass="p-4" className={cn(!blockedReason && 'cursor-pointer hover:border-primary')}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium capitalize text-foreground">{judgment.capability.replaceAll('_', ' ')}</span>
+                      <span className="font-medium capitalize text-primary">{judgment.capability.replaceAll('_', ' ')}</span>
                       <JudgmentStateBadge state={judgment.state} />
                       <Pill>{gated ? 'evidence-gated' : 'human acceptance'}</Pill>
                     </div>
-                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-mutedfg">
-                      <span>{judgment.subjectKind || 'subject'}: <span className="break-all font-mono text-foreground">{judgment.subjectId}</span></span>
-                      <span>proposed by <span className="font-mono text-foreground">{judgment.proposedBy}</span></span>
+                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-tertiary">
+                      <span>{judgment.subjectKind || 'subject'}: <span className="break-all font-mono text-primary">{judgment.subjectId}</span></span>
+                      <span>proposed by <span className="font-mono text-primary">{judgment.proposedBy}</span></span>
                     </div>
                   </div>
                   <div className="text-right">
@@ -147,25 +147,25 @@ export function JudgmentReviewTab({ engagementId }: { engagementId: string }) {
                       onClick={() => setSelected(judgment)}
                       className="px-3 py-1.5"
                     >
-                      {gated ? <ShieldCheck className="size-4" /> : <CheckCircle2 className="size-4" />}
+                      {gated ? <ShieldTick className="size-4" /> : <CheckCircle className="size-4" />}
                       {gated ? 'Verify' : 'Accept'}
                     </Button>
-                    {blockedReason && <p className="mt-1 max-w-64 text-xs text-subtlefg">{blockedReason}</p>}
+                    {blockedReason && <p className="mt-1 max-w-64 text-xs text-quaternary">{blockedReason}</p>}
                   </div>
                 </div>
-                <div className="mt-4 rounded-lg border border-border bg-bg p-3">
+                <div className="mt-4 rounded-lg border border-secondary bg-primary p-3">
                   <JudgmentClaim judgment={judgment} />
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-mutedfg">
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-tertiary">
                   {evidence ? (
                     <>
-                      <span className="flex items-center gap-1.5 text-accent"><ShieldCheck className="size-3.5" /> Sealed proposal</span>
+                      <span className="flex items-center gap-1.5 text-accent"><ShieldTick className="size-3.5" /> Sealed proposal</span>
                       <span className="font-mono" title={evidence.hash}>sha256 {evidence.hash.slice(0, 12)}</span>
                       <span>by {evidence.createdBy}</span>
                       <span>{evidence.createdAt ? new Date(evidence.createdAt).toLocaleString() : '–'}</span>
                     </>
                   ) : (
-                    <span className="flex items-center gap-1.5 text-medium"><ShieldQuestion className="size-3.5" /> Sealed proposal evidence unavailable</span>
+                    <span className="flex items-center gap-1.5 text-medium"><Shield01 className="size-3.5" /> Sealed proposal evidence unavailable</span>
                   )}
                 </div>
                 {selected?.id === judgment.id && (
@@ -225,10 +225,10 @@ export function JudgmentReviewForm({
   }
 
   return (
-    <div id={`judgment-review-${judgment.id}`} className="mt-4 border-t border-border pt-4">
+    <div id={`judgment-review-${judgment.id}`} className="mt-4 border-t border-secondary pt-4">
       {gated ? (
         <div className="space-y-3">
-          <p className="text-xs text-mutedfg">
+          <p className="text-xs text-tertiary">
             Record an adversarial verdict. Scores ≥ {EVIDENCE_BAR} confirm this claim; lower scores refute it. Either outcome is sealed.
           </p>
           <Field label="Evidence score" hint="0–100">
@@ -246,12 +246,12 @@ export function JudgmentReviewForm({
               onChange={(e) => setRationale(e.target.value)}
               rows={4}
               placeholder="How the claim was reproduced or refuted"
-              className="w-full rounded-lg border border-border bg-elevated px-3 py-2 text-sm text-foreground placeholder:text-subtlefg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
+              className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary placeholder:text-quaternary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
             />
           </Field>
         </div>
       ) : (
-        <p className="text-sm text-mutedfg">
+        <p className="text-sm text-tertiary">
           Accept this descriptive claim as reviewed. The acceptance is sealed into the evidence chain.
         </p>
       )}

@@ -1,12 +1,22 @@
-import { ArrowLeft, Boxes, CalendarClock, FileSignature, ShieldAlert, ShieldCheck, Target } from 'lucide-react'
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { useState, useEffect, lazy, Suspense, type FC } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
-import { Button, cn, EmptyState, Select, Spinner } from '../../components/ui'
+import {
+  ArrowLeft,
+  Package,
+  Calendar,
+  FileCheck01,
+  ShieldZap,
+  ShieldTick,
+  Target04,
+  LayoutGrid01,
+  Sliders04,
+  ChevronRight,
+} from '@untitledui/icons'
+import { Button, cn, EmptyState, Spinner } from '../../components/ui'
 import { useFetch } from '../../hooks'
 import { api, ApiError } from '../../lib/api'
 import { kindLabel } from '../../lib/format'
 import type {
-  BusinessAsset,
   Engagement,
   Finding,
   ImportedSBOMMetadata,
@@ -16,10 +26,10 @@ import type {
 } from '../../lib/types'
 import { StatusPill } from '../Engagements'
 import { AgentTab } from '../AgentTab'
-import { ThreatModelTab } from '../ThreatModelTab'
-import { CodeQualityTab } from '../CodeQualityTab'
-import { SLATab } from '../SLATab'
-import { TabBar, OverviewTab } from './OverviewTab'
+import { ThreatModelTab } from './ThreatModelTab'
+import { CodeQualityTab } from '../CodeQuality/CodeQualityTab'
+import { SLATab } from './SLATab'
+import { OverviewTab } from './OverviewTab'
 import { FindingsTab } from './FindingsTab'
 import { ScanPanel } from './ScanPanel'
 import { ExportButtons } from './ExportButtons'
@@ -30,11 +40,99 @@ import { ReconTab } from './ReconTab'
 import { EvidenceTab } from './EvidenceTab'
 import { SettingsTab } from './SettingsTab'
 import { JudgmentReviewTab } from './ReviewsTab'
+
 // Lazy-loaded so React Flow stays out of the initial bundle (only the Graph tab needs it).
 const DependencyGraphTab = lazy(() => import('../DependencyGraph').then((m) => ({ default: m.DependencyGraphTab })))
 
-export type Tab = 'overview' | 'findings' | 'sla' | 'components' | 'vulns' | 'licenses' | 'graph' | 'quality' | 'threats' | 'recon' | 'agent' | 'reviews' | 'evidence' | 'settings'
+export type Tab =
+  | 'overview'
+  | 'findings'
+  | 'sla'
+  | 'components'
+  | 'vulns'
+  | 'licenses'
+  | 'graph'
+  | 'quality'
+  | 'threats'
+  | 'recon'
+  | 'agent'
+  | 'reviews'
+  | 'evidence'
+  | 'settings'
 
+export interface SubTabDefinition {
+  id: Tab
+  label: string
+  countKey?: 'findings' | 'components' | 'vulns' | 'licenses'
+}
+
+export interface TabGroupDefinition {
+  id: string
+  label: string
+  icon: FC<{ className?: string }>
+  sub?: SubTabDefinition[]
+}
+
+export const TAB_GROUPS: TabGroupDefinition[] = [
+  {
+    id: 'overview',
+    label: 'Overview',
+    icon: LayoutGrid01,
+  },
+  {
+    id: 'findings',
+    label: 'Findings',
+    icon: ShieldZap,
+    sub: [
+      { id: 'findings', label: 'All Findings', countKey: 'findings' },
+      { id: 'sla', label: 'Remediation SLA' },
+    ],
+  },
+  {
+    id: 'supply-chain',
+    label: 'Supply Chain',
+    icon: Package,
+    sub: [
+      { id: 'components', label: 'Packages', countKey: 'components' },
+      { id: 'vulns', label: 'Vulnerabilities', countKey: 'vulns' },
+      { id: 'licenses', label: 'Licenses', countKey: 'licenses' },
+      { id: 'graph', label: 'Dependency Graph' },
+    ],
+  },
+  {
+    id: 'offensive',
+    label: 'Offensive',
+    icon: Target04,
+    sub: [
+      { id: 'recon', label: 'Recon' },
+      { id: 'threats', label: 'Threat Model' },
+      { id: 'agent', label: 'Agent' },
+    ],
+  },
+  {
+    id: 'governance',
+    label: 'Governance',
+    icon: ShieldTick,
+    sub: [
+      { id: 'evidence', label: 'Evidence' },
+      { id: 'reviews', label: 'Awaiting Review' },
+      { id: 'quality', label: 'Code Quality' },
+    ],
+  },
+  {
+    id: 'settings',
+    label: 'Settings',
+    icon: Sliders04,
+  },
+]
+
+function getGroupForTab(tab: Tab): TabGroupDefinition {
+  for (const group of TAB_GROUPS) {
+    if (group.id === tab && !group.sub) return group
+    if (group.sub?.some((s) => s.id === tab)) return group
+  }
+  return TAB_GROUPS[0]
+}
 
 export function EngagementDetail() {
   const { id = '' } = useParams()
@@ -119,7 +217,7 @@ export function EngagementDetail() {
   if (engErr)
     return (
       <EmptyState
-        icon={ShieldAlert}
+        icon={ShieldZap}
         title="Couldn't load this engagement"
         hint={engErr}
         action={
@@ -135,7 +233,7 @@ export function EngagementDetail() {
   if (eng === null) {
     return (
       <EmptyState
-        icon={ShieldAlert}
+        icon={ShieldZap}
         title="Engagement not found"
         hint="It may have been removed."
         action={
@@ -149,14 +247,30 @@ export function EngagementDetail() {
     )
   }
 
+  const counts = {
+    findings: findings?.length ?? 0,
+    components: scan?.components.length ?? 0,
+    vulns: scan ? countVulnerabilityFindings(scan.vulnerabilities, packageLocationMap(scan.components)) : 0,
+    licenses: scan?.licenses.length ?? 0,
+  }
+
+  const activeGroup = getGroupForTab(tab)
+
   return (
-    <div className="mx-auto max-w-6xl animate-fade-in">
-      <Link
-        to="/engagements"
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-mutedfg transition-colors hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" /> Engagements
-      </Link>
+    <div className="mx-auto max-w-[1600px] animate-fade-in">
+      {/* Breadcrumb navigation */}
+      <nav aria-label="Breadcrumb" className="mb-4 flex items-center gap-2 text-xs text-tertiary">
+        <Link
+          to="/engagements"
+          className="inline-flex items-center gap-1 font-medium text-secondary transition-colors hover:text-primary"
+        >
+          <ArrowLeft className="size-3.5" /> Engagements
+        </Link>
+        <ChevronRight className="size-3 text-quaternary" />
+        <span className="truncate font-semibold text-primary" aria-current="page">
+          {eng.name}
+        </span>
+      </nav>
 
       <Header eng={eng} scan={scan} onChanged={refreshAll} />
 
@@ -178,18 +292,100 @@ export function EngagementDetail() {
         }}
       />
 
-      <TabBar
-        tab={tab}
-        setTab={setTab}
-        counts={{
-          findings: findings?.length ?? 0,
-          components: scan?.components.length ?? 0,
-          vulns: scan ? countVulnerabilityFindings(scan.vulnerabilities, packageLocationMap(scan.components)) : 0,
-          licenses: scan?.licenses.length ?? 0,
-        }}
-      />
+      {/* 6 Grouped Tabs */}
+      <div className="space-y-2">
+        {/* Top-Level Tabs */}
+        <div
+          role="tablist"
+          aria-label="Engagement Views"
+          className="flex gap-2 overflow-x-auto border-b border-secondary"
+        >
+          {TAB_GROUPS.map((group) => {
+            const isGroupActive = activeGroup.id === group.id
+            const Icon = group.icon
 
-      <div className="mt-5">
+            // Count for top-level badge if applicable
+            let groupCount: number | undefined
+            if (group.id === 'findings') groupCount = counts.findings
+            else if (group.id === 'supply-chain') groupCount = counts.components + counts.vulns + counts.licenses
+
+            return (
+              <button
+                key={group.id}
+                role="tab"
+                id={`tab-${group.id}`}
+                aria-selected={isGroupActive}
+                aria-controls={`panel-${isGroupActive ? tab : (group.sub ? group.sub[0].id : group.id)}`}
+                onClick={() => {
+                  if (group.sub && group.sub.length > 0) {
+                    // Switch to first sub-tab of group if not already in this group
+                    if (activeGroup.id !== group.id) {
+                      setTab(group.sub[0].id)
+                    }
+                  } else {
+                    setTab(group.id as Tab)
+                  }
+                }}
+                className={cn(
+                  '-mb-px inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-3.5 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40',
+                  isGroupActive
+                    ? 'border-brand text-brand-secondary'
+                    : 'border-transparent text-tertiary hover:border-secondary hover:text-primary',
+                )}
+              >
+                <Icon className={cn('size-4', isGroupActive ? 'text-brand-secondary' : 'text-quaternary')} />
+                <span>{group.label}</span>
+                {groupCount !== undefined && groupCount > 0 && (
+                  <span
+                    className={cn(
+                      'rounded-full px-1.5 py-0.5 text-xs font-bold tabular-nums',
+                      isGroupActive ? 'bg-brand-primary text-brand-secondary' : 'bg-secondary text-tertiary',
+                    )}
+                  >
+                    {groupCount}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Sub-Navigation Pills (if active group has sub-tabs) */}
+        {activeGroup.sub && activeGroup.sub.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1 border-b border-secondary px-1 pb-2 pt-1">
+            {activeGroup.sub.map((sub) => {
+              const isSubActive = tab === sub.id
+              const count = sub.countKey ? counts[sub.countKey] : undefined
+              return (
+                <button
+                  key={sub.id}
+                  onClick={() => setTab(sub.id)}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                    isSubActive
+                      ? 'bg-brand-solid text-white shadow-xs'
+                      : 'text-secondary hover:bg-secondary hover:text-primary',
+                  )}
+                >
+                  <span>{sub.label}</span>
+                  {count !== undefined && count > 0 && (
+                    <span
+                      className={cn(
+                        'rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums',
+                        isSubActive ? 'bg-white/20 text-white' : 'bg-secondary text-tertiary',
+                      )}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${activeGroup.id}`} className="mt-5">
         {tab === 'overview' && (
           <OverviewTab findings={findings} scan={scan} job={job} onSelectSeverity={selectSeverity} onGoTab={setTab} />
         )}
@@ -231,53 +427,54 @@ function Header({ eng, scan, onChanged }: { eng: Engagement; scan: ScanResult | 
     <div className="mb-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-3xl font-bold tracking-tight">{eng.name}</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-primary">{eng.name}</h1>
           <StatusPill status={eng.status} />
           <EvidenceBadge engagementId={eng.id} />
         </div>
         <ExportButtons engagementId={eng.id} scan={scan} onChanged={onChanged} />
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-mutedfg">
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-tertiary">
         {eng.client && <span>{eng.client}</span>}
-        {eng.businessAssetId ? <Link to={`/assets/${encodeURIComponent(eng.businessAssetId)}`} className="flex items-center gap-1.5 text-branddim hover:underline"><Boxes className="size-3.5" />Asset</Link> : <span className="flex items-center gap-1.5"><Boxes className="size-3.5" />Unassigned</span>}
-        <span className="flex items-center gap-1.5">
-          <Target className="size-3.5" /> {eng.inScope.length} in scope
-        </span>
-        {(eng.authorizedFrom || eng.authorizedTo) && (
+        {eng.businessAssetId ? (
+          <Link
+            to={`/assets/${encodeURIComponent(eng.businessAssetId)}`}
+            className="flex items-center gap-1.5 text-brand-secondary hover:underline"
+          >
+            <Package className="size-3.5" /> Asset: {eng.businessAssetId}
+          </Link>
+        ) : (
           <span className="flex items-center gap-1.5">
-            <CalendarClock className="size-3.5" /> {fmtWindow(eng.authorizedFrom, eng.authorizedTo)}
+            <Package className="size-3.5 text-quaternary" /> Unassigned Asset
+          </span>
+        )}
+        <span className="flex items-center gap-1.5">
+          <Target04 className="size-3.5" /> {eng.inScope.length} in scope
+        </span>
+        {eng.inScope.map((t, i) => {
+          const displayValue = t.kind === 'repo' && t.value.includes('/')
+            ? t.value.split('/').slice(-1)[0].replace(/\.git$/, '')
+            : t.value
+          return (
+            <span
+              key={i}
+              className="inline-flex items-center gap-1.5 rounded-md border border-secondary bg-secondary py-0.5 pl-1.5 pr-2 text-xs text-tertiary"
+              title={t.value}
+            >
+              <span className="rounded bg-brand-primary px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-brand-secondary">
+                {kindLabel(t.kind)}
+              </span>
+              <span className="font-mono text-primary">{displayValue}</span>
+            </span>
+          )
+        })}
+        {(eng.authorizedFrom || eng.authorizedTo) && (
+          <span className="flex items-center gap-1.5 font-mono">
+            <Calendar className="size-3.5" /> {fmtWindow(eng.authorizedFrom, eng.authorizedTo)}
           </span>
         )}
       </div>
-      <AssetAssignment engagement={eng} onChanged={onChanged} />
-      {eng.inScope.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {eng.inScope.map((t, i) => (
-            <span
-              key={i}
-              className="inline-flex items-center gap-2 rounded-md border border-border bg-elevated py-1 pl-1.5 pr-2.5 text-xs text-mutedfg"
-            >
-              <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-branddim">
-                {kindLabel(t.kind)}
-              </span>
-              <span className="font-mono text-foreground">{t.value}</span>
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   )
-}
-
-function AssetAssignment({ engagement, onChanged }: { engagement: Engagement; onChanged: () => void }) {
-  const { data: assets } = useFetch(
-    () => api.listBusinessAssets('limit=200').then((r) => r.items).catch(() => [] as BusinessAsset[]),
-    { deps: [] },
-  )
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  async function assign(assetId:string){setSaving(true);setError(null);try{await api.assignEngagementAsset(engagement.id,assetId);onChanged()}catch(e){setError(e instanceof Error?e.message:'Failed to assign Asset')}finally{setSaving(false)}}
-  return <div className="mt-3 flex flex-wrap items-center gap-3"><span className="text-xs font-semibold uppercase tracking-wide text-subtlefg">Asset assignment</span><Select value={engagement.businessAssetId} onValueChange={assign} disabled={saving} size="sm" options={[{value:'',label:'Unassigned'},...(assets ?? []).map(a=>({value:a.id,label:`${a.name} (${a.key})`}))]}/>{error&&<span className="text-xs text-critical">{error}</span>}</div>
 }
 
 // EvidenceBadge shows the tamper-evident evidence-chain status and, when
@@ -299,148 +496,18 @@ function EvidenceBadge({ engagementId }: { engagementId: string }) {
         )}
         title={`${ev.verified} evidence link(s) in the hash chain`}
       >
-        <ShieldCheck className="size-3.5" />
+        <ShieldTick className="size-3.5" />
         {ev.intact ? 'Evidence verified' : 'Evidence tampered'}
       </span>
       {ev.intact && ev.keyId && (
         <span
-          className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 font-mono text-xs text-mutedfg ring-1 ring-inset ring-border"
+          className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-0.5 font-mono text-xs text-tertiary ring-1 ring-inset ring-secondary"
           title={`Chain head signed (ed25519) by key ${ev.keyId} – proves origin, not just integrity`}
         >
-          <FileSignature className="size-3.5" />
+          <FileCheck01 className="size-3.5 text-quaternary" />
           {ev.keyId}
         </span>
       )}
     </span>
   )
 }
-
-// Mirrors the report builder's canonical sections (internal/usecase/report); keys +
-// order must match so the customer deliverable renders predictably.
-
-// Report variants and their default section sets – mirrors reportProfiles in
-// internal/usecase/report. The server stays the source of truth (framing + content);
-// these only pre-select the checkboxes so the modal is WYSIWYG per type. The
-// remediation + exhibits sections self-omit when there's no data, so they are safe to
-// pre-select.
-
-// ReportBuilderModal assembles a deterministic, templated report (no model in the
-// path). PDF is the full sealed report; HTML/DOCX honor the section,
-// status, and title customization below.
-
-// trapTabFocus keeps Tab/Shift+Tab cycling within the modal's focusable elements.
-
-// ---- Scan bar (Part 1) ----
-
-// detectKind infers the target kind from its value (a URL is a git clone).
-
-// ---- Navigation (Part 4) ----
-
-// ---- Overview (Part 2): organized around decisions, top to bottom ----
-
-// FindingQualityStrip: raw vs actionable vs background, before any
-// vuln count – so a flood of example/test findings never reads as headline risk.
-
-// Section 1 – Scan Health.
-
-// Section 2 – What Needs Attention (the most important section; before composition).
-
-// Section 3 – Top Remediation Targets: what to fix first.
-
-// Section 4 – Vulnerability Distribution (clickable → filtered findings).
-
-// Section 5 – Project Composition (informational, lower).
-
-// Section 6 – Provenance (audit info, bottom).
-
-// ---- Findings (Part 4: raw vulnerabilities folded in as expandable detail) ----
-
-// shortPkg turns a component identity (PURL or name@version) into a bare name.
-
-// frameworkShort renders a compact label for a compliance framework id.
-
-// ComplianceChips lists the curated regulatory/standard controls a finding's CWE maps to.
-// Deterministic, server-computed reference data (compliance.ControlsFor) – advisory context only,
-// never a gate. Renders nothing when the CWE maps to no controls (the common case for non-code kinds).
-
-// JudgmentStateBadge shows a judgment's lifecycle state (proposed = unverified AI output, confirmed
-// = human-ratified, refuted = a verifier rejected it) as a text+color chip – never color alone.
-
-// RiskNarrative (ungated) explains a finding's computed priority via closed driver tokens –
-// never free prose (R8); the priority mirrors the Go-computed value.
-
-// Critique (gated) is an adversarial review of a finding – verdict + a closed driver token +
-// confidence. A confirmed "refuted" critique is what drives the suspected-FP flag on the list.
-
-// Reachability (gated) surfaces a reachability verdict: whether the vulnerable symbol is reachable
-// (reachable is the worse, attention-worthy state), the tier (a deterministic Tier-2 call-graph proof
-// supersedes an LLM Tier-1.5), and the call-path proof chain. The state badge marks an unverified proposal.
-
-// ExplainJudgments surfaces the read-side "explain & advise" analysis judgments for a finding:
-// the risk narrative, adversarial critiques, and the reachability verdict (AI-proposed or deterministic).
-// Self-contained, best-effort fetch – it NEVER blocks or errors the finding detail (judgments disabled /
-// load failure / none ⇒ renders nothing). The state badge keeps a "proposed" (unverified) judgment
-// visibly distinct from a human-ratified or deterministically-proven one.
-
-// EVIDENCE_BAR mirrors the domain's finding.EvidenceThreshold (the server is authoritative): an
-// exploitation finding is unproven + unreportable until a DISTINCT verifier raises its score to
-// this bar.
-
-// ---- Packages (formerly SBOM components) ----
-
-// ---- Vulnerabilities (complete advisory list, incl. sub-threshold not promoted to findings) ----
-
-// packageLocationMap groups each package@version to the distinct manifest locations it was
-// declared in, so a vulnerability is counted once per place it actually ships.
-
-// countVulnerabilityFindings is the TRUE finding count the table renders: every advisory
-// (CVE/GHSA/OSV – not just CVE) counted once per affected package@version per manifest
-// location. This matches the rows on screen – not distinct packages, not distinct CVE ids.
-
-// ---- Licenses ----
-
-// LicenseChipStack renders a package's licenses (or their severities) as one chip per
-// entry, stacked vertically and coloured by each license's own severity – so a dual/multi-
-// license package reads as separate choices (OR), aligned across the License/Severity columns.
-
-// ---- shared bits ----
-
-// PriorityBadge renders the unified Synapse risk priority (1 highest.. 5 background).
-
-// ScopeBadge shows where the component lives; background scopes are de-emphasized.
-
-// DetectedBy renders the detection sources – OSV, Grype, or both.
-
-// KindBadge labels a finding's Kind – shown in the list for the non-SCA kinds (sast,
-// exploitation, threat, hypothesis, recon, manual) where the provenance is worth surfacing.
-
-// KindFilter is the finding-Kind segmented filter, mirroring SeverityFilter. Only the Kinds
-// actually present are offered, plus "all".
-
-// ---- Recon: gated live-recon launcher · runs · SSE console ----
-
-// ReconContainmentBadge shows the confinement posture a run executed under:
-// green when sandboxed (egress-restricted / isolated), amber when unsandboxed (dev).
-
-// ReconConsole tails a run's logs over SSE (fetch-based; reconnects with the last
-// event id if the stream drops before the run finishes).
-
-// ---- Settings: scope CRUD · authorization window · lifecycle ----
-
-// LiveReconCard toggles lab-only live recon. Off by default; enabling
-// it is an explicit, audited opt-in shown with a clear safety caveat.
-
-// Known tool classes (gate-action prefixes). Empty selection = no restriction.
-
-// toLocalInput converts an RFC3339 instant to a datetime-local input value
-// (YYYY-MM-DDTHH:mm in the browser's local time); '' for null/invalid.
-
-// ---- Evidence vault: tamper-evident chain timeline + manual capture ----
-
-// fileToBase64 reads a File as base64 (without the data URL prefix) for capture.
-
-// ---- Findings workflow: manual authoring · CVSS builder · Kanban · collab ----
-
-// Common CWEs for the picker datalist (operators can still type any value).
-
-

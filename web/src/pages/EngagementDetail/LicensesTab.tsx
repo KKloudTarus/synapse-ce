@@ -1,5 +1,5 @@
-import { Bug, Scale } from 'lucide-react'
 import { useState } from 'react'
+import { Scale01, SearchLg, ShieldZap } from '@untitledui/icons'
 import { Column, VirtualTable } from '../../components/synapse/VirtualTable'
 import { Card, EmptyState, cn } from '../../components/ui'
 import { CATEGORY_LABEL, sevSoft } from '../../lib/severity'
@@ -191,12 +191,12 @@ export function LicenseCoverageHeader({ scan }: { scan: ScanResult }) {
   return (
     <Card className="mb-4">
       <div className="mb-2 flex items-center justify-between text-sm">
-        <span className="font-medium text-foreground">License coverage</span>
-        <span className="font-mono tabular-nums text-mutedfg">
+        <span className="font-medium text-primary">License coverage</span>
+        <span className="font-mono tabular-nums text-tertiary">
           {c.pct.toFixed(0)}% · {c.detected.toLocaleString()} detected · {c.unknown.toLocaleString()} unknown
         </span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-elevated">
+      <div className="h-2 overflow-hidden rounded-full bg-secondary">
         <div className={cn('h-full rounded-full transition-[width]', tone)} style={{ width: `${Math.max(1, c.pct)}%` }} />
       </div>
     </Card>
@@ -206,9 +206,9 @@ export function LicenseCoverageHeader({ scan }: { scan: ScanResult }) {
 export function LicensesTab({ scan }: { scan: ScanResult | null }) {
   const [search, setSearch] = useState('')
 
-  if (!scan) return <ScanPrompt icon={Scale} what="the license report" />
+  if (!scan) return <ScanPrompt icon={Scale01} what="the license report" />
   if (scan.scanMode === 'vulnerabilities') {
-    return <EmptyState icon={Bug} title="Licenses skipped" hint="This run used vulnerability-only scan mode." />
+    return <EmptyState icon={ShieldZap} title="Licenses skipped" hint="This run used vulnerability-only scan mode." />
   }
   const componentIndex = buildLicenseComponentIndex(scan.components)
   const unknownPackages = scan.components
@@ -221,12 +221,12 @@ export function LicensesTab({ scan }: { scan: ScanResult | null }) {
   const licenseColumns: Column<LicenseDisplayRow>[] = [
     {
       header: 'Packages',
-      className: 'sticky left-0 z-10 w-72 bg-card pr-2 font-mono text-xs text-foreground',
+      className: 'sticky left-0 z-10 w-72 bg-primary pr-2 font-mono text-xs text-primary',
       cell: (row) => <span title={row.version ? `${row.component}@${row.version}` : row.component}>{row.component}</span>,
     },
     {
       header: 'License',
-      className: 'w-72 font-mono text-xs text-foreground',
+      className: 'w-72 font-mono text-xs text-primary',
       // Multi-license packages are a CHOICE (OR) – show one chip per license (coloured by
       // its own severity), not a collapsed "A AND B" string.
       cell: (row) => <LicenseChipStack entries={row.entries} render={(e) => e.license} title={(e) => e.license} />,
@@ -247,14 +247,14 @@ export function LicensesTab({ scan }: { scan: ScanResult | null }) {
         return (
           <div className="min-w-0 space-y-1" title={title}>
             <div className="flex min-w-0 items-center gap-2">
-              <span className="shrink-0 rounded-md bg-elevated px-1.5 py-0.5 font-mono text-[10px] uppercase text-mutedfg ring-1 ring-border/70">
+              <span className="shrink-0 rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[10px] uppercase text-tertiary ring-1 ring-secondary">
                 {row.sourceLabel}
               </span>
-              <span className="truncate font-mono text-[11px] text-subtlefg">{row.sourceFile || 'no source file'}</span>
+              <span className="truncate font-mono text-[11px] text-quaternary">{row.sourceFile || 'no source file'}</span>
             </div>
-            <div className="truncate text-mutedfg">
+            <div className="truncate text-tertiary">
               {row.relationshipLabel}
-              {row.dependencyPath && <span className="text-subtlefg"> · {row.dependencyPath}</span>}
+              {row.dependencyPath && <span className="text-quaternary"> · {row.dependencyPath}</span>}
             </div>
           </div>
         )
@@ -262,7 +262,7 @@ export function LicensesTab({ scan }: { scan: ScanResult | null }) {
     },
     {
       header: 'Category',
-      className: 'w-56 text-sm text-mutedfg',
+      className: 'w-56 text-sm text-tertiary',
       cell: (row) => (
         <div className="flex flex-col gap-1">
           {(row.entries.length ? row.entries : [{ category: 'unknown', severity: 'unknown' as Severity, license: '' }]).map((e, i) => (
@@ -280,51 +280,52 @@ export function LicensesTab({ scan }: { scan: ScanResult | null }) {
       <LicenseCoverageHeader scan={scan} />
       {scan.licenses.length === 0 ? (
         <EmptyState
-          icon={Scale}
+          icon={Scale01}
           title="No licenses classified"
           hint="No license metadata resolved for these packages – see coverage above."
         />
       ) : (
         <Card bodyClass="p-0">
-          <div className="space-y-3 border-b border-border p-4">
+          <div className="space-y-3 border-b border-secondary p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-medium text-foreground">License inventory</div>
-                <div className="text-xs text-mutedfg">All detected package licenses are listed without hiding allowed entries.</div>
+                <div className="text-sm font-medium text-primary">License inventory</div>
+                <div className="text-xs text-tertiary">All detected package licenses are listed without hiding allowed entries.</div>
               </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="relative">
+                <SearchLg className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-quaternary" />
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.currentTarget.value)}
                   placeholder="Search package, license, source, path…"
                   aria-label="Search licenses"
-                  className="h-8 w-72 rounded-md border border-border bg-elevated px-2 text-xs text-foreground placeholder:text-subtlefg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
+                  className="h-8 w-72 rounded-md border border-secondary bg-primary pl-8 pr-3 text-xs text-primary placeholder:text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
                 />
               </div>
             </div>
-            <div className="grid gap-2 text-xs text-mutedfg tabular-nums sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-md bg-elevated/60 px-3 py-2 ring-1 ring-border/60">
-                <div className="font-mono text-base font-semibold text-foreground">{displayRows.length.toLocaleString()}</div>
+            <div className="grid gap-2 text-xs text-tertiary tabular-nums sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
+                <div className="font-mono text-base font-semibold text-primary">{displayRows.length.toLocaleString()}</div>
                 <div>packages listed</div>
               </div>
-              <div className="rounded-md bg-elevated/60 px-3 py-2 ring-1 ring-border/60">
-                <div className="font-mono text-base font-semibold text-foreground">{packagesImpacted.toLocaleString()}</div>
+              <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
+                <div className="font-mono text-base font-semibold text-primary">{packagesImpacted.toLocaleString()}</div>
                 <div>packages impacted</div>
               </div>
-              <div className="rounded-md bg-elevated/60 px-3 py-2 ring-1 ring-border/60">
-                <div className="font-mono text-base font-semibold text-mutedfg">{allDisplayRows.length.toLocaleString()}</div>
+              <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
+                <div className="font-mono text-base font-semibold text-tertiary">{allDisplayRows.length.toLocaleString()}</div>
                 <div>total package rows</div>
               </div>
-              <div className="rounded-md bg-elevated/60 px-3 py-2 ring-1 ring-border/60">
-                <div className="font-mono text-base font-semibold text-subtlefg">{unknownPackages.length.toLocaleString()}</div>
+              <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
+                <div className="font-mono text-base font-semibold text-quaternary">{unknownPackages.length.toLocaleString()}</div>
                 <div>unknown-license packages</div>
               </div>
             </div>
           </div>
           {displayRows.length === 0 ? (
             <div className="p-8 text-center">
-              <div className="text-sm font-medium text-foreground">No licenses match this search.</div>
-              <div className="mx-auto mt-2 max-w-xl text-xs leading-5 text-mutedfg">
+              <div className="text-sm font-medium text-primary">No licenses match this search.</div>
+              <div className="mx-auto mt-2 max-w-xl text-xs leading-5 text-tertiary">
                 Clear the search query to review the full license inventory.
               </div>
             </div>
@@ -334,8 +335,8 @@ export function LicensesTab({ scan }: { scan: ScanResult | null }) {
               totalItems={allDisplayRows.length}
               tableMinWidthClass="min-w-[1120px]"
               rowKey={(row) => row.key}
-              rowClassName="items-start py-2"
-              rowHeight={(row) => Math.max(46, (row.entries.length || 1) * 28 + 16)}
+              rowClassName={(row) => cn('py-3', row.entries.length > 1 ? 'items-start' : 'items-center')}
+              rowHeight={(row) => Math.max(64, (row.entries.length || 1) * 32 + 20)}
               columns={licenseColumns}
             />
           )}

@@ -1,7 +1,9 @@
-import { KeyRound, Loader2, ShieldCheck } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
+import { Key01, Loading01, ShieldTick } from '@untitledui/icons'
 import { useAuth } from '../auth/AuthContext'
-import { Button, Card, ErrorState, Field, Input } from '../components/ui'
+import { Button } from '@/components/base/buttons/button'
+import { Input } from '@/components/base/input/input'
+import { ErrorState } from '../components/ui'
 import logoFull from '../assets/logo-full-dark.png'
 
 export function Connect() {
@@ -12,33 +14,35 @@ export function Connect() {
   if (phase === 'connecting') {
     return (
       <Center>
-        <Loader2 className="size-6 animate-spin text-accent" />
-        <p className="mt-3 text-sm text-mutedfg">Restoring session…</p>
+        <Loading01 className="size-6 animate-spin text-brand" />
+        <p className="mt-3 text-sm text-tertiary">Restoring session…</p>
       </Center>
     )
   }
 
   return (
     <Center>
-      <div className="mb-7 flex flex-col items-center gap-3 text-center">
-        <img src={logoFull} alt="Synapse" className="h-20 w-auto" />
-        <p className="text-xs text-mutedfg">Security &amp; pentest operations</p>
-      </div>
-
       {phase === 'need-aup' && aup ? (
-        <Card title="Acceptable Use Policy" className="w-full max-w-lg animate-fade-in">
-          <p className="whitespace-pre-line text-sm leading-relaxed text-mutedfg">{aup.text}</p>
-          <div className="mt-5 flex items-center justify-between gap-3">
+        <div className="w-full max-w-lg rounded-xl border border-secondary bg-primary p-6 shadow-md animate-fade-in">
+          <div className="mb-6 flex flex-col items-center gap-2 text-center">
+            <img src={logoFull} alt="Synapse" className="h-14 w-auto object-contain" />
+            <p className="text-xs text-secondary">Security &amp; Pentest Operations</p>
+          </div>
+          <h2 className="text-base font-semibold text-primary">Acceptable Use Policy</h2>
+          <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-secondary">{aup.text}</p>
+          <div className="mt-6 flex items-center justify-between gap-3">
             <button
               type="button"
               onClick={logout}
-              className="text-xs text-mutedfg underline-offset-2 hover:text-foreground hover:underline"
+              className="text-xs text-tertiary underline-offset-2 hover:text-primary hover:underline"
             >
               Use a different token
             </button>
             <Button
-              variant="brand"
-              loading={accepting}
+              size="md"
+              color="primary"
+              isLoading={accepting}
+              iconLeading={ShieldTick}
               onClick={async () => {
                 setAccepting(true)
                 try {
@@ -48,13 +52,18 @@ export function Connect() {
                 }
               }}
             >
-              <ShieldCheck className="size-4" /> Accept &amp; continue
+              Accept &amp; continue
             </Button>
           </div>
-          <p className="mt-3 text-center text-[11px] text-subtlefg">Policy version {aup.version}</p>
-        </Card>
+          <p className="mt-4 text-center text-[11px] text-quaternary">Policy version {aup.version}</p>
+        </div>
       ) : (
-        <Card className="w-full max-w-[420px] animate-fade-in">
+        <div className="w-full max-w-sm rounded-xl border border-secondary bg-primary p-6 shadow-md animate-fade-in">
+          <div className="mb-6 flex flex-col items-center gap-2 text-center">
+            <img src={logoFull} alt="Synapse" className="h-14 w-auto object-contain" />
+            <p className="text-xs text-secondary">Security &amp; Pentest Operations</p>
+          </div>
+
           <form
             onSubmit={(e) => {
               e.preventDefault()
@@ -62,31 +71,41 @@ export function Connect() {
             }}
             className="space-y-4"
           >
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <KeyRound className="size-4 text-brand" /> Connect to the API
-            </div>
-            <Field label="API token">
-              <Input
-                type="password"
-                autoFocus
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="paste token…"
-                className="font-mono"
-                aria-label="API token"
-              />
-            </Field>
+            <Input
+              label="API token"
+              type="password"
+              autoFocus
+              value={token}
+              onChange={setToken}
+              placeholder="API Token"
+              icon={Key01}
+              size="md"
+              aria-label="API token"
+              className="w-full"
+            />
+
             {error && <ErrorState message={error} />}
-            <Button variant="brand" type="submit" loading={connecting} className="w-full">
+
+            <Button
+              size="md"
+              color="primary"
+              type="submit"
+              isLoading={connecting}
+              className="w-full mt-3"
+            >
               Connect
             </Button>
+
+            <p className="text-center text-xs text-quaternary">
+              Enter your team or personal API token to authenticate
+            </p>
           </form>
-        </Card>
+        </div>
       )}
     </Center>
   )
 }
 
 function Center({ children }: { children: ReactNode }) {
-  return <div className="bg-auth flex min-h-screen flex-col items-center justify-center px-4">{children}</div>
+  return <div className="flex min-h-screen flex-col items-center justify-center bg-primary px-4 py-12">{children}</div>
 }

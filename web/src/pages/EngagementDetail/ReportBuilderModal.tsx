@@ -1,5 +1,6 @@
-import { Download, SlidersHorizontal, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
+import { Download01, Sliders04, XClose } from '@untitledui/icons'
 import { Button, ErrorState, Field, Input, cn } from '../../components/ui'
 import { ReportType, downloadReport, downloadReportDoc } from '../../lib/api'
 import { trapTabFocus } from './ScanPanel'
@@ -110,29 +111,34 @@ export function ReportBuilderModal({ engagementId, onClose }: { engagementId: st
     }
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button type="button" aria-label="Close" className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <button type="button" aria-label="Close" className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
       <div
         ref={panelRef}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="report-builder-title"
-        className="elev relative z-10 w-full max-w-lg rounded-xl border border-borderstrong bg-card p-5 text-left shadow-xl outline-none"
+        className="relative z-10 w-full max-w-lg rounded-xl border border-secondary bg-primary p-5 text-left shadow-xl outline-none"
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 id="report-builder-title" className="flex items-center gap-2 text-lg font-semibold">
-            <SlidersHorizontal className="size-4 text-brand" /> Build report
+          <h2 id="report-builder-title" className="flex items-center gap-2 text-lg font-semibold text-primary">
+            <Sliders04 className="size-4 text-brand-secondary" /> Build report
           </h2>
-          <button type="button" aria-label="Close" onClick={onClose} className="rounded-md p-1 text-mutedfg hover:bg-raised hover:text-foreground">
-            <X className="size-4" />
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="rounded-md p-1 text-tertiary hover:bg-secondary hover:text-primary"
+          >
+            <XClose className="size-4" />
           </button>
         </div>
 
         <div className="space-y-4">
           <Field label="Format">
-            <div role="radiogroup" aria-label="Report format" className="inline-flex rounded-lg border border-border bg-elevated p-0.5">
+            <div role="radiogroup" aria-label="Report format" className="inline-flex rounded-lg border border-secondary bg-secondary p-0.5">
               {(['pdf', 'html', 'docx'] as const).map((f) => (
                 <button
                   key={f}
@@ -142,7 +148,7 @@ export function ReportBuilderModal({ engagementId, onClose }: { engagementId: st
                   onClick={() => setFormat(f)}
                   className={cn(
                     'rounded-md px-3 py-1.5 text-sm font-medium uppercase transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40',
-                    format === f ? 'bg-brand text-brandfg' : 'text-mutedfg hover:text-foreground',
+                    format === f ? 'bg-brand-solid text-white' : 'text-tertiary hover:text-primary',
                   )}
                 >
                   {f}
@@ -152,7 +158,7 @@ export function ReportBuilderModal({ engagementId, onClose }: { engagementId: st
           </Field>
 
           {!customizable ? (
-            <p className="rounded-lg border border-border bg-elevated px-3.5 py-2.5 text-xs text-mutedfg">
+            <p className="rounded-lg border border-secondary bg-secondary px-3.5 py-2.5 text-xs text-tertiary">
               The PDF is the full canonical report (all sections, all findings), sealed with a SHA-256 for chain of custody.
               Switch to HTML or DOCX to customize sections, finding statuses, and the title.
             </p>
@@ -169,7 +175,7 @@ export function ReportBuilderModal({ engagementId, onClose }: { engagementId: st
                       onClick={() => selectType(rt.key)}
                       className={cn(
                         'rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40',
-                        type === rt.key ? 'border-brand bg-brand/10 text-foreground' : 'border-border text-mutedfg hover:text-foreground',
+                        type === rt.key ? 'border-brand bg-brand-primary text-primary' : 'border-secondary text-tertiary hover:text-primary',
                       )}
                     >
                       {rt.label}
@@ -186,7 +192,7 @@ export function ReportBuilderModal({ engagementId, onClose }: { engagementId: st
                     <CheckRow key={s.key} label={s.label} checked={sections.has(s.key)} onChange={() => toggle(sections, setSections, s.key)} />
                   ))}
                 </div>
-                {noSections && <p className="mt-1.5 text-xs text-critical">Select at least one section.</p>}
+                {noSections && <p className="mt-1.5 text-xs text-error-primary">Select at least one section.</p>}
               </Field>
               <Field label="Include finding statuses" hint="None selected = all statuses">
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
@@ -206,17 +212,18 @@ export function ReportBuilderModal({ engagementId, onClose }: { engagementId: st
             Cancel
           </Button>
           <Button loading={busy} disabled={noSections} onClick={download} className="px-3 py-1.5">
-            <Download className="size-4" /> Download {format.toUpperCase()}
+            <Download01 className="size-4" /> Download {format.toUpperCase()}
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
 export function CheckRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: () => void }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-raised focus-within:bg-raised">
+    <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-secondary focus-within:bg-secondary text-primary">
       <input type="checkbox" checked={checked} onChange={onChange} className="size-4 accent-brand" />
       <span>{label}</span>
     </label>

@@ -1,21 +1,70 @@
-import { AlertTriangle, Plus, Save, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
+import { AlertTriangle, Plus, Save01, Trash01 } from '@untitledui/icons'
 import { Button, Card, ErrorState, Field, Input, Pill, Select, cn } from '../../components/ui'
+import { useFetch } from '../../hooks'
 import { api } from '../../lib/api'
 import { kindLabel } from '../../lib/format'
-import type { Engagement, ScopeTarget } from '../../lib/types'
+import type { BusinessAsset, Engagement, ScopeTarget } from '../../lib/types'
 import { StatusPill } from '../Engagements'
 import { TARGET_KINDS } from './ReconTab'
 
 export function SettingsTab({ eng, onUpdated }: { eng: Engagement; onUpdated: (e: Engagement) => void }) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <LifecycleCard eng={eng} onUpdated={onUpdated} />
+      <AssetAssignmentCard eng={eng} onUpdated={onUpdated} />
       <ScopeEditorCard eng={eng} onUpdated={onUpdated} />
       <WindowEditorCard eng={eng} onUpdated={onUpdated} />
       <RoeEditorCard eng={eng} onUpdated={onUpdated} />
       <LiveReconCard eng={eng} onUpdated={onUpdated} />
     </div>
+  )
+}
+
+export function AssetAssignmentCard({ eng, onUpdated }: { eng: Engagement; onUpdated: (e: Engagement) => void }) {
+  const { data: assets } = useFetch(
+    () => api.listBusinessAssets('limit=200').then((r) => r.items).catch(() => [] as BusinessAsset[]),
+    { deps: [] },
+  )
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  async function assign(assetId: string) {
+    setSaving(true)
+    setError(null)
+    setSaved(false)
+    try {
+      await api.assignEngagementAsset(eng.id, assetId)
+      const updated = await api.getEngagement(eng.id)
+      if (updated) onUpdated(updated)
+      setSaved(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to assign Asset')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card title="Asset assignment">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm text-tertiary">Link to a business asset</span>
+        <Select
+          value={eng.businessAssetId || ''}
+          onValueChange={assign}
+          disabled={saving}
+          size="sm"
+          className="w-72"
+          options={[
+            { value: '', label: 'Unassigned' },
+            ...(assets ?? []).map((a) => ({ value: a.id, label: `${a.name} (${a.key})` })),
+          ]}
+        />
+        {saved && !error && <span className="text-xs text-accent">Updated.</span>}
+        {error && <span className="text-xs text-critical">{error}</span>}
+      </div>
+    </Card>
   )
 }
 
@@ -38,18 +87,18 @@ export function LiveReconCard({ eng, onUpdated }: { eng: Engagement; onUpdated: 
   return (
     <Card title="Live reconnaissance">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="max-w-xl space-y-2 text-sm text-mutedfg">
+        <div className="max-w-xl space-y-2 text-sm text-tertiary">
           <p>
             Live recon shells out to network tools against in-scope targets. Until the hardened sandbox + egress
-            allowlist ship, it is <span className="font-medium text-foreground">lab-only</span>: enable it only for
+            allowlist ship, it is <span className="font-medium text-primary">lab-only</span>: enable it only for
             authorized test environments.
           </p>
           <p className="flex items-center gap-2">
-            <span className="text-mutedfg">Status:</span>
+            <span className="text-tertiary">Status:</span>
             {eng.liveReconEnabled ? (
               <Pill className="bg-accent/10 text-accent ring-1 ring-inset ring-accent/25">Enabled</Pill>
             ) : (
-              <Pill className="bg-elevated text-mutedfg ring-1 ring-inset ring-border">Disabled</Pill>
+              <Pill className="bg-secondary text-tertiary ring-1 ring-inset ring-secondary">Disabled</Pill>
             )}
           </p>
           {err && <span className="text-xs text-critical">{err}</span>}
@@ -67,13 +116,13 @@ export function LiveReconCard({ eng, onUpdated }: { eng: Engagement; onUpdated: 
   )
 }
 
-export const LIFECYCLE_NEXT: Record<string, { status: string; label: string; variant: 'primary' | 'secondary' }[]> = {
+export const LIFECYCLE_NEXT: Record<string, { status: string; label: string; variant: 'secondary-color' | 'secondary' }[]> = {
   draft: [
-    { status: 'active', label: 'Activate', variant: 'primary' },
+    { status: 'active', label: 'Activate', variant: 'secondary-color' },
     { status: 'archived', label: 'Archive', variant: 'secondary' },
   ],
   active: [
-    { status: 'completed', label: 'Complete', variant: 'primary' },
+    { status: 'completed', label: 'Complete', variant: 'secondary-color' },
     { status: 'archived', label: 'Archive', variant: 'secondary' },
   ],
   completed: [{ status: 'archived', label: 'Archive', variant: 'secondary' }],
@@ -100,11 +149,15 @@ export function LifecycleCard({ eng, onUpdated }: { eng: Engagement; onUpdated: 
   return (
     <Card title="Lifecycle">
       <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm text-mutedfg">Status</span>
+        <span className="text-sm text-tertiary">Status</span>
         <StatusPill status={eng.status} />
+        <span className="hidden text-quaternary sm:inline">·</span>
+        <span className="text-xs text-quaternary">
+          {eng.status === 'archived' ? 'Terminal state' : 'Scope and authorization enforced on every run'}
+        </span>
         <div className="ml-auto flex flex-wrap gap-2">
           {next.length === 0 ? (
-            <span className="text-xs text-subtlefg">Terminal – no further transitions.</span>
+            <span className="text-xs text-quaternary">No further transitions.</span>
           ) : (
             next.map((n) => (
               <Button
@@ -120,12 +173,8 @@ export function LifecycleCard({ eng, onUpdated }: { eng: Engagement; onUpdated: 
           )}
         </div>
       </div>
-      <p className="mt-3 text-xs text-subtlefg">
-        Completing or archiving an engagement blocks all tool execution. Scope and the authorization window are enforced
-        on every run too – changes here take effect immediately, server-side.
-      </p>
       {err && (
-        <div className="mt-3">
+        <div className="mt-2">
           <ErrorState message={err} />
         </div>
       )}
@@ -169,18 +218,17 @@ export function ScopeEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdated
     <Card
       title="Scope"
       actions={
-        <Button loading={busy} onClick={save} className="px-3 py-1.5">
-          <Save className="size-4" /> Save scope
+        <Button loading={busy} onClick={save} variant="secondary-color" className="px-3 py-1.5">
+          <Save01 className="size-4" /> Save scope
         </Button>
       }
     >
-      <div className="space-y-5">
+      <div className="space-y-4">
         <TargetList label="In scope" targets={inScope} onChange={setInScope} />
         <TargetList label="Out of scope" targets={outScope} onChange={setOutScope} />
       </div>
-      <p className="mt-4 text-xs text-subtlefg">
-        Host-centric matching: a CIDR contains an IP, <span className="font-mono">*.example.com</span> matches
-        subdomains, URLs match by host. Out-of-scope always wins. The execution gate reads this live – no restart.
+      <p className="mt-3 text-[11px] text-quaternary">
+        Host-centric matching. Out-of-scope always wins. The execution gate reads this live.
       </p>
       {err && (
         <div className="mt-3">
@@ -206,9 +254,9 @@ export function TargetList({
   }
   return (
     <div>
-      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-mutedfg">{label}</div>
+      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-tertiary">{label}</div>
       <div className="space-y-2">
-        {targets.length === 0 && <p className="text-xs text-subtlefg">No targets.</p>}
+        {targets.length === 0 && <p className="text-xs text-quaternary">No targets.</p>}
         {targets.map((t, i) => (
           <div key={i} className="flex items-center gap-2">
             <Select
@@ -229,9 +277,9 @@ export function TargetList({
               type="button"
               onClick={() => onChange(targets.filter((_, j) => j !== i))}
               aria-label={`Remove ${label} target ${i + 1}`}
-              className="rounded-md p-2 text-subtlefg transition-colors hover:bg-elevated hover:text-critical focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+              className="rounded-md p-2 text-quaternary transition-colors hover:bg-secondary hover:text-critical focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
             >
-              <Trash2 className="size-4" />
+              <Trash01 className="size-4" />
             </button>
           </div>
         ))}
@@ -239,7 +287,7 @@ export function TargetList({
       <button
         type="button"
         onClick={() => onChange([...targets, { kind: 'domain', value: '' }])}
-        className="mt-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-branddim transition-colors hover:bg-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+        className="mt-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-brand-secondary transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
       >
         <Plus className="size-3.5" /> Add target
       </button>
@@ -283,8 +331,8 @@ export function WindowEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdate
     <Card
       title="Authorization window"
       actions={
-        <Button loading={busy} onClick={save} className="px-3 py-1.5">
-          <Save className="size-4" /> Save window
+        <Button loading={busy} onClick={save} variant="secondary-color" className="px-3 py-1.5">
+          <Save01 className="size-4" /> Save window
         </Button>
       }
     >
@@ -314,8 +362,8 @@ export function WindowEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdate
           />
         </Field>
       </div>
-      <p className="mt-3 text-xs text-subtlefg">
-        Tools are refused outside this window (±2 min skew), server-side. Leave a bound empty to leave that side open.
+      <p className="mt-3 text-[11px] text-quaternary">
+        Tools are refused outside this window (±2 min skew). Leave a bound empty for open-ended.
       </p>
       {clearsWindow && (
         <div className="mt-3 flex items-start gap-2 rounded-lg border border-medium/40 bg-medium/10 p-3 text-xs text-medium">
@@ -374,14 +422,14 @@ export function RoeEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdated: 
     <Card
       title="Rules of engagement"
       actions={
-        <Button loading={busy} onClick={save} className="px-3 py-1.5">
-          <Save className="size-4" /> Save RoE
+        <Button loading={busy} onClick={save} variant="secondary-color" className="px-3 py-1.5">
+          <Save01 className="size-4" /> Save RoE
         </Button>
       }
     >
-      <div className="space-y-5">
+      <div className="space-y-4">
         <div>
-          <div id="roe-classes-label" className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-mutedfg">
+          <div id="roe-classes-label" className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-tertiary">
             Allowed tool classes
           </div>
           <div role="group" aria-labelledby="roe-classes-label" className="flex flex-wrap gap-2">
@@ -398,8 +446,8 @@ export function RoeEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdated: 
                     'rounded-md px-3 py-1.5 text-sm font-medium capitalize ring-1 ring-inset transition-colors',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40',
                     on
-                      ? 'bg-brand/15 text-branddim ring-brand/30'
-                      : 'bg-elevated text-mutedfg ring-border hover:text-foreground',
+                      ? 'bg-brand-primary text-brand-secondary ring-brand'
+                      : 'bg-secondary text-tertiary ring-secondary hover:text-primary',
                   )}
                 >
                   {c}
@@ -415,16 +463,16 @@ export function RoeEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdated: 
               </span>
             </div>
           ) : (
-            <p className="mt-2 text-xs text-subtlefg">
+            <p className="mt-2 text-xs text-quaternary">
               Only the selected tool classes may run; everything else is denied.
             </p>
           )}
         </div>
 
         <div>
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-mutedfg">Blackout windows</div>
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-tertiary">Blackout windows</div>
           <div className="space-y-2">
-            {blackouts.length === 0 && <p className="text-xs text-subtlefg">No blackout windows.</p>}
+            {blackouts.length === 0 && <p className="text-xs text-quaternary">No blackout windows.</p>}
             {blackouts.map((b, i) => (
               <div key={i} className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_auto_1fr_auto]">
                 <Input
@@ -435,7 +483,7 @@ export function RoeEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdated: 
                   }
                   aria-label={`Blackout ${i + 1} start`}
                 />
-                <span className="hidden text-center text-subtlefg sm:inline">→</span>
+                <span className="hidden text-center text-quaternary sm:inline">→</span>
                 <Input
                   type="datetime-local"
                   value={b.to}
@@ -446,9 +494,9 @@ export function RoeEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdated: 
                   type="button"
                   onClick={() => setBlackouts((cur) => cur.filter((_, j) => j !== i))}
                   aria-label={`Remove blackout ${i + 1}`}
-                  className="justify-self-start rounded-md p-2 text-subtlefg transition-colors hover:bg-elevated hover:text-critical focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 sm:justify-self-auto"
+                  className="justify-self-start rounded-md p-2 text-quaternary transition-colors hover:bg-secondary hover:text-critical focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 sm:justify-self-auto"
                 >
-                  <Trash2 className="size-4" />
+                  <Trash01 className="size-4" />
                 </button>
               </div>
             ))}
@@ -456,15 +504,14 @@ export function RoeEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdated: 
           <button
             type="button"
             onClick={() => setBlackouts((cur) => [...cur, { from: '', to: '' }])}
-            className="mt-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-branddim transition-colors hover:bg-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+            className="mt-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-brand-secondary transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
           >
             <Plus className="size-3.5" /> Add blackout
           </button>
         </div>
       </div>
-      <p className="mt-4 text-xs text-subtlefg">
-        Enforced by the execution gate on every run: a disallowed tool class, or any run inside a blackout, is denied
-        and audited.
+      <p className="mt-3 text-[11px] text-quaternary">
+        Enforced on every run: disallowed tool classes and blackout windows are denied and audited.
       </p>
       {err && (
         <div className="mt-3">

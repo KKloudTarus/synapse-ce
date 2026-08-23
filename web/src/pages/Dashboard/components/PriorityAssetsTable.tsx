@@ -2,8 +2,7 @@ import type { FC } from 'react'
 import { Link } from 'react-router-dom'
 import { CheckCircle } from '@untitledui/icons'
 import type { BusinessAsset } from '../../../lib/types'
-import { PostureBadge } from '../../Assets'
-import { SeverityBadge } from '../../../components/synapse/SeverityBadge'
+import { PostureBadge } from '../../Assets/Assets'
 
 export interface PriorityAssetsTableProps {
   assets: BusinessAsset[]
@@ -31,20 +30,19 @@ export const PriorityAssetsTable: FC<PriorityAssetsTableProps> = ({ assets, hasT
         <Link
           key={asset.id}
           to={`/assets/${encodeURIComponent(asset.id)}`}
-          className="group grid gap-3 p-4 transition-colors hover:bg-secondary/50 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5"
+          className="group flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-primary_hover sm:px-5"
         >
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="truncate font-semibold text-primary group-hover:text-brand-secondary">
-                {asset.name}
-              </h3>
-              <SeverityBadge severity={asset.criticality} size="sm" showIcon={false} />
-            </div>
-            <p className="mt-1 truncate text-xs text-secondary">
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-sm font-medium text-primary group-hover:text-brand-secondary">
+              {asset.name}
+            </h3>
+            <p className="mt-0.5 truncate text-xs text-tertiary">
               {asset.owner || 'Owner not set'} · {labelize(asset.lifecycle)}
             </p>
           </div>
-          <PostureBadge rating={asset.posture ?? 'unknown'} />
+          <div className="shrink-0">
+            <PostureBadge rating={asset.posture ?? 'unknown'} />
+          </div>
         </Link>
       ))}
     </div>

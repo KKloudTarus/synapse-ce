@@ -11,36 +11,35 @@ export const StatCard: FC<StatCardProps> = ({
   className,
 }) => {
   const iconTone = {
-    muted: 'bg-secondary text-fg-tertiary',
-    brand: 'bg-utility-brand-50 text-utility-brand-700 dark:bg-utility-brand-950/50 dark:text-utility-brand-300',
-    critical: 'bg-utility-red-50 text-utility-red-700 dark:bg-utility-red-950/50 dark:text-utility-red-300',
-    high: 'bg-utility-orange-50 text-utility-orange-700 dark:bg-utility-orange-950/50 dark:text-utility-orange-300',
-    medium: 'bg-utility-yellow-50 text-utility-yellow-700 dark:bg-utility-yellow-950/50 dark:text-utility-yellow-300',
-    accent: 'bg-utility-green-50 text-utility-green-700 dark:bg-utility-green-950/50 dark:text-utility-green-300',
+    muted: 'text-fg-tertiary',
+    brand: 'text-utility-brand-600 dark:text-utility-brand-400',
+    critical: 'text-utility-red-600 dark:text-utility-red-400',
+    high: 'text-utility-orange-600 dark:text-utility-orange-400',
+    medium: 'text-utility-yellow-600 dark:text-utility-yellow-400',
+    accent: 'text-utility-green-600 dark:text-utility-green-400',
+    info: 'text-utility-blue-600 dark:text-utility-blue-400',
   }[tone]
 
   return (
     <div
       aria-label={`${label}: ${value}`}
       className={cx(
-        'rounded-xl border border-border bg-card p-4 shadow-xs transition duration-150 hover:border-borderstrong',
+        'rounded-xl border border-secondary bg-primary p-4 shadow-xs transition duration-150 hover:border-primary',
         className,
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-2xl font-bold tabular-nums text-primary sm:text-3xl">
-            {typeof value === 'number' ? value.toLocaleString() : value}
-          </div>
-          <div className="mt-1 text-xs font-semibold text-secondary sm:text-sm">{label}</div>
-        </div>
-        <span className={cx('flex size-9 shrink-0 items-center justify-center rounded-lg', iconTone)}>
-          <Icon className="size-4.5" aria-hidden="true" />
-        </span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-sm font-semibold text-secondary">{label}</span>
+        {Icon && <Icon className={cx('size-5 shrink-0', iconTone)} aria-hidden="true" />}
       </div>
-      <p className="mt-3 truncate text-xs text-tertiary" title={hint}>
-        {hint}
-      </p>
+      <div className="mt-2 text-3xl font-bold tabular-nums text-primary sm:text-4xl">
+        {typeof value === 'number' ? value.toLocaleString() : value}
+      </div>
+      {hint && (
+        <p className="mt-2 truncate text-[11px] text-tertiary" title={hint}>
+          {hint}
+        </p>
+      )}
     </div>
   )
 }

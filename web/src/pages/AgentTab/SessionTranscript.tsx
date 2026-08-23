@@ -1,7 +1,7 @@
-import { ListTree, Loader2, Network, Play, ShieldAlert } from 'lucide-react'
+import { AlertTriangle, Dataflow03, Loading01, Play, Share07 } from '@untitledui/icons'
 import { useEffect, useRef, useState } from 'react'
-import { Button, Card, cn } from '../../components/ui'
 import { Markdown } from '../../components/synapse/Markdown'
+import { Button, Card, cn } from '../../components/ui'
 import { useFetch } from '../../hooks'
 import { api, streamAgentSession } from '../../lib/api'
 import type { AgentMessage } from '../../lib/types'
@@ -101,7 +101,7 @@ export function SessionTranscript({
       title="Transcript"
       actions={
         <span className={cn('flex items-center gap-1.5 text-xs', statusTone(status))}>
-          {!terminal(status) && <Loader2 className="size-3.5 animate-spin" />}
+          {!terminal(status) && <Loading01 className="size-3.5 animate-spin" />}
           {status}
         </span>
       }
@@ -114,7 +114,7 @@ export function SessionTranscript({
         className="max-h-[28rem] space-y-2 overflow-auto"
       >
         {messages.length === 0 ? (
-          <span className="text-sm text-mutedfg">Waiting for the agent…</span>
+          <span className="text-sm text-tertiary">Waiting for the agent…</span>
         ) : (
           messages.map((m, i) => <MessageRow key={i} m={m} />)
         )}
@@ -122,8 +122,8 @@ export function SessionTranscript({
       <PlanGraph engagementId={engagementId} sessionId={sessionId} status={status} />
       <DecisionLog engagementId={engagementId} sessionId={sessionId} status={status} />
       {terminal(status) && (
-        <div className="mt-3 border-t border-border pt-3">
-          <p className="mb-1.5 text-xs text-mutedfg">
+        <div className="mt-3 border-t border-secondary pt-3">
+          <p className="mb-1.5 text-xs text-tertiary">
             This run is {status}. The agent runs one goal per session — start a follow-up run to continue this
             line of work (it opens a fresh session).
           </p>
@@ -139,7 +139,7 @@ export function SessionTranscript({
               }}
               placeholder={`Follow-up goal, e.g. \u201cnow triage the SQLi candidates one by one\u201d`}
               aria-label="Follow-up goal"
-              className="flex-1 rounded-lg border border-border bg-elevated px-3 py-2 text-sm text-foreground placeholder:text-mutedfg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
+              className="flex-1 rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary placeholder:text-quaternary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
             />
             <Button
               loading={followUpBusy}
@@ -148,6 +148,7 @@ export function SessionTranscript({
                 onFollowUp(followUp)
                 setFollowUp('')
               }}
+              color="secondary"
               className="px-3 py-2"
             >
               <Play className="size-4" /> Follow up
@@ -164,7 +165,7 @@ export function SessionTranscript({
 function nodeStatusTone(s: string): string {
   switch (s) {
     case 'done':
-      return 'text-low'
+      return 'text-accent'
     case 'denied':
     case 'failed':
       return 'text-critical'
@@ -174,14 +175,14 @@ function nodeStatusTone(s: string): string {
     case 'awaiting':
       return 'text-high'
     default:
-      return 'text-mutedfg'
+      return 'text-tertiary'
   }
 }
 
 function planStatusTone(s: string): string {
   switch (s) {
     case 'complete':
-      return 'text-low'
+      return 'text-accent'
     case 'failed':
       return 'text-critical'
     default:
@@ -198,27 +199,27 @@ function PlanGraph({ engagementId, sessionId, status }: { engagementId: string; 
   if (!plan || plan.nodes.length === 0) return null
   const keyOf = (id: string) => plan.nodes.findIndex((n) => n.id === id) + 1
   return (
-    <div className="mt-3 border-t border-border pt-3">
-      <h4 className="mb-2 flex items-center gap-1.5 text-xs font-medium text-mutedfg">
-        <Network className="size-3.5" /> Plan ·{' '}
+    <div className="mt-3 border-t border-secondary pt-3">
+      <h4 className="mb-2 flex items-center gap-1.5 text-xs font-medium text-tertiary">
+        <Share07 className="size-3.5" /> Plan ·{' '}
         <span className={cn('font-mono', planStatusTone(plan.status))}>{plan.status}</span>
-        <span className="text-mutedfg">
+        <span className="text-tertiary">
           ({plan.nodes.filter((n) => n.status === 'done').length}/{plan.nodes.length} done)
         </span>
       </h4>
       <ul className="space-y-1.5">
         {plan.nodes.map((n, i) => (
           <li key={n.id} className="flex items-start gap-2 text-xs">
-            <span className="font-mono tabular-nums text-mutedfg">{i + 1}</span>
+            <span className="font-mono tabular-nums text-tertiary">{i + 1}</span>
             <span className="flex-1">
               <span className="font-mono">{n.tool}</span>
-              <span className="text-mutedfg"> · {n.target}</span>
+              <span className="text-tertiary"> · {n.target}</span>
               {n.depends_on && n.depends_on.length > 0 && (
-                <span className="text-mutedfg"> · after {n.depends_on.map(keyOf).join(',')}</span>
+                <span className="text-tertiary"> · after {n.depends_on.map(keyOf).join(',')}</span>
               )}
               <span className={cn('ml-1.5 font-mono', nodeStatusTone(n.status))}>{n.status}</span>
-              {n.risk === 'intrusive' && <ShieldAlert className="ml-1 inline size-3 text-critical" aria-label="intrusive" />}
-              {n.failure && <span className="block text-mutedfg">{n.failure}</span>}
+              {n.risk === 'intrusive' && <AlertTriangle className="ml-1 inline size-3 text-critical" aria-label="intrusive" />}
+              {n.failure && <span className="block text-tertiary">{n.failure}</span>}
             </span>
           </li>
         ))}
@@ -232,13 +233,13 @@ function PlanGraph({ engagementId, sessionId, status }: { engagementId: string; 
 function outcomeTone(outcome?: string): string {
   switch (outcome) {
     case 'executed':
-      return 'text-low'
+      return 'text-accent'
     case 'denied':
       return 'text-critical'
     case 'error':
       return 'text-medium'
     default:
-      return 'text-mutedfg'
+      return 'text-tertiary'
   }
 }
 
@@ -250,26 +251,26 @@ function DecisionLog({ engagementId, sessionId, status }: { engagementId: string
 
   if (!decisions || decisions.length === 0) return null
   return (
-    <div className="mt-3 border-t border-border pt-3">
-      <h4 className="mb-2 flex items-center gap-1.5 text-xs font-medium text-mutedfg">
-        <ListTree className="size-3.5" /> Decision log
+    <div className="mt-3 border-t border-secondary pt-3">
+      <h4 className="mb-2 flex items-center gap-1.5 text-xs font-medium text-tertiary">
+        <Dataflow03 className="size-3.5" /> Decision log
       </h4>
       <ul className="space-y-1.5">
         {decisions.map((d) => (
           <li key={d.seq} className="flex items-start gap-2 text-xs">
-            <span className="font-mono tabular-nums text-mutedfg">{d.seq}</span>
+            <span className="font-mono tabular-nums text-tertiary">{d.seq}</span>
             {d.kind === 'stop' ? (
-              <span className="text-mutedfg">
+              <span className="text-tertiary">
                 stopped: <span className="font-mono">{d.stop_reason}</span>
               </span>
             ) : (
               <span className="flex-1">
                 <span className={cn('font-mono', outcomeTone(d.outcome))}>{d.outcome}</span>{' '}
                 <span className="font-mono">{d.tool}</span>
-                {d.target && <span className="text-mutedfg"> · {d.target}</span>}
-                {d.reason?.why_tool && <span className="block text-mutedfg">{d.reason.why_tool}</span>}
+                {d.target && <span className="text-tertiary"> · {d.target}</span>}
+                {d.reason?.why_tool && <span className="block text-tertiary">{d.reason.why_tool}</span>}
                 {d.refs?.step_hash && (
-                  <span className="block font-mono text-[10px] text-mutedfg">step {d.refs.step_hash.slice(0, 12)}…</span>
+                  <span className="block font-mono text-[10px] text-tertiary">step {d.refs.step_hash.slice(0, 12)}…</span>
                 )}
               </span>
             )}
@@ -286,12 +287,12 @@ function MessageRow({ m }: { m: AgentMessage }) {
   if (m.role === 'system') return null
   const label = m.role === 'tool' ? 'tool result' : m.role
   const tone =
-    m.role === 'assistant' ? 'border-brand/30 bg-brand/5' : m.role === 'tool' ? 'border-border bg-elevated' : 'border-border bg-bg'
+    m.role === 'assistant' ? 'border-brand/30 bg-brand/5' : m.role === 'tool' ? 'border-secondary bg-secondary' : 'border-secondary bg-primary'
   return (
     <div className={cn('rounded-md border p-2', tone)}>
-      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-mutedfg">{label}</div>
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tertiary">{label}</div>
       {m.toolCalls.length > 0 && (
-        <div className="mb-1 font-mono text-xs text-branddim">
+        <div className="mb-1 font-mono text-xs text-brand-secondary">
           → {m.toolCalls.map((c) => c.name).join(', ')}
         </div>
       )}
@@ -301,7 +302,7 @@ function MessageRow({ m }: { m: AgentMessage }) {
         ) : m.role === 'assistant' ? (
           <Markdown className="text-xs">{m.content}</Markdown>
         ) : (
-          <div className="whitespace-pre-wrap break-words text-xs text-foreground">{m.content}</div>
+          <div className="whitespace-pre-wrap break-words text-xs text-primary">{m.content}</div>
         ))}
     </div>
   )
@@ -312,10 +313,10 @@ function ToolResult({ content }: { content: string }) {
   const pretty = parsed !== undefined ? JSON.stringify(parsed, null, 2) : null
   return (
     <details className="text-xs">
-      <summary className="cursor-pointer select-none rounded text-mutedfg marker:text-mutedfg hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40">
+      <summary className="cursor-pointer select-none rounded text-tertiary marker:text-tertiary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40">
         {toolSummary(parsed, content)}
       </summary>
-      <pre className="mt-1 max-h-64 overflow-auto rounded-md border border-border bg-bg p-2 font-mono text-[11px] leading-relaxed text-mutedfg">
+      <pre className="mt-1 max-h-64 overflow-auto rounded-md border border-secondary bg-primary p-2 font-mono text-[11px] leading-relaxed text-tertiary">
         {pretty ?? content}
       </pre>
     </details>

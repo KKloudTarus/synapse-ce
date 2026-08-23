@@ -1,4 +1,4 @@
-import { Boxes, Bug, CheckCircle2, Scale } from 'lucide-react'
+import { CheckCircle, Scale01, SearchLg, ShieldZap } from '@untitledui/icons'
 import { useMemo, useState } from 'react'
 import { Column, VirtualTable } from '../../components/synapse/VirtualTable'
 import { Card, EmptyState, SevBadge, cn } from '../../components/ui'
@@ -264,18 +264,18 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
     () => [
       {
         header: 'Package',
-        className: 'sticky left-0 z-10 w-64 bg-card pr-2 font-mono text-xs text-foreground',
+        className: 'sticky left-0 z-10 w-64 bg-primary pr-2 font-mono text-xs text-primary',
         cell: (row) => (
           <div
             className={cn(
               'rounded-md px-2 py-1',
-              row.isFirstInPackage ? 'bg-elevated/80 ring-1 ring-border/80' : 'select-none text-transparent',
+              row.isFirstInPackage ? 'bg-secondary/80 ring-1 ring-secondary/80' : 'select-none text-transparent',
             )}
             title={row.component}
           >
             <div className="truncate">{row.component}</div>
             {row.isFirstInPackage && (
-              <div className="mt-0.5 font-sans text-[10px] uppercase tracking-wide text-subtlefg">
+              <div className="mt-0.5 font-sans text-[10px] uppercase tracking-wide text-quaternary">
                 {row.packageCveCount.toLocaleString()} advisor{row.packageCveCount === 1 ? 'y' : 'ies'}
               </div>
             )}
@@ -314,7 +314,7 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
         header: 'Fixed Version',
         className: 'w-32 font-mono text-xs',
         cell: (row) =>
-          row.fixedVersion ? <span className="text-accent">{row.fixedVersion}</span> : <span className="text-subtlefg">–</span>,
+          row.fixedVersion ? <span className="text-accent">{row.fixedVersion}</span> : <span className="text-quaternary">–</span>,
       },
       {
         header: 'Source / Path',
@@ -327,14 +327,14 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
           return (
             <div className="min-w-0 space-y-1" title={title}>
               <div className="flex min-w-0 items-center gap-2">
-                <span className="shrink-0 rounded-md bg-elevated px-1.5 py-0.5 font-mono text-[10px] uppercase text-mutedfg ring-1 ring-border/70">
+                <span className="shrink-0 rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[10px] uppercase text-tertiary ring-1 ring-secondary">
                   {row.sourceLabel}
                 </span>
-                <span className="truncate font-mono text-[11px] text-subtlefg">{row.sourceFile || 'no source file'}</span>
+                <span className="truncate font-mono text-[11px] text-quaternary">{row.sourceFile || 'no source file'}</span>
               </div>
-              <div className="truncate text-mutedfg">
+              <div className="truncate text-tertiary">
                 {row.relationshipLabel}
-                {row.dependencyPath && <span className="text-subtlefg"> · {row.dependencyPath}</span>}
+                {row.dependencyPath && <span className="text-quaternary"> · {row.dependencyPath}</span>}
               </div>
             </div>
           )
@@ -344,14 +344,14 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
     [],
   )
 
-  if (!scan) return <ScanPrompt icon={Bug} what="vulnerabilities" />
+  if (!scan) return <ScanPrompt icon={ShieldZap} what="vulnerabilities" />
   if (scan.scanMode === 'licenses') {
-    return <EmptyState icon={Scale} title="Vulnerabilities skipped" hint="This run used license-only scan mode." />
+    return <EmptyState icon={Scale01} title="Vulnerabilities skipped" hint="This run used license-only scan mode." />
   }
   if (scan.vulnerabilities.length === 0) {
     return (
       <EmptyState
-        icon={CheckCircle2}
+        icon={CheckCircle}
         title="No known vulnerabilities"
         hint="OSV reported no advisories for these packages."
       />
@@ -359,38 +359,39 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
   }
   return (
     <Card bodyClass="p-0">
-      <div className="space-y-3 border-b border-border p-4">
+      <div className="space-y-3 border-b border-secondary p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <SeverityFilter value={filter} onChange={setFilter} available={available} />
-          <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="relative">
+            <SearchLg className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-quaternary" />
             <input
               value={search}
               onChange={(event) => setSearch(event.currentTarget.value)}
               placeholder="Search CVE, package, source, path…"
               aria-label="Search vulnerabilities"
-              className="h-8 w-72 rounded-md border border-border bg-elevated px-2 text-xs text-foreground placeholder:text-subtlefg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
+              className="h-8 w-72 rounded-md border border-secondary bg-primary pl-8 pr-3 text-xs text-primary placeholder:text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
             />
           </div>
         </div>
-        <div className="grid gap-2 text-xs text-mutedfg tabular-nums sm:grid-cols-2 xl:grid-cols-3">
-          <div className="rounded-md bg-elevated/60 px-3 py-2 ring-1 ring-border/60">
-            <div className="font-mono text-base font-semibold text-foreground">{shownPackages.toLocaleString()}</div>
+        <div className="grid gap-2 text-xs text-tertiary tabular-nums sm:grid-cols-2 xl:grid-cols-3">
+          <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
+            <div className="font-mono text-base font-semibold text-primary">{shownPackages.toLocaleString()}</div>
             <div>packages shown</div>
           </div>
-          <div className="rounded-md bg-elevated/60 px-3 py-2 ring-1 ring-border/60">
-            <div className="font-mono text-base font-semibold text-foreground">{shownAdvisories.toLocaleString()}</div>
+          <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
+            <div className="font-mono text-base font-semibold text-primary">{shownAdvisories.toLocaleString()}</div>
             <div>advisories shown</div>
           </div>
-          <div className="rounded-md bg-elevated/60 px-3 py-2 ring-1 ring-border/60">
-            <div className="font-mono text-base font-semibold text-mutedfg">{totalAdvisories.toLocaleString()}</div>
+          <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
+            <div className="font-mono text-base font-semibold text-tertiary">{totalAdvisories.toLocaleString()}</div>
             <div>total advisories after filters</div>
           </div>
         </div>
       </div>
       {displayRows.length === 0 ? (
         <div className="p-8 text-center">
-          <div className="text-sm font-medium text-foreground">No vulnerabilities match this filter.</div>
-          <div className="mx-auto mt-2 max-w-xl text-xs leading-5 text-mutedfg">
+          <div className="text-sm font-medium text-primary">No vulnerabilities match this filter.</div>
+          <div className="mx-auto mt-2 max-w-xl text-xs leading-5 text-tertiary">
             Clear the search query or choose another severity to review all scanner advisories.
           </div>
         </div>
@@ -400,7 +401,10 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
           totalItems={allSeverityDisplayRows.length}
           tableMinWidthClass="min-w-[1120px]"
           rowKey={(row) => row.key}
-          rowClassName={(row) => cn('items-start py-2', row.isFirstInPackage && 'border-t-2 border-t-borderstrong bg-elevated/20')}
+          rowHeight={64}
+          rowClassName={(row) =>
+            cn('items-center py-3', row.isFirstInPackage && 'border-t-2 border-t-primary bg-secondary/20')
+          }
           columns={vulnColumns}
         />
       )}
@@ -416,7 +420,7 @@ export function PriorityBadge({ priority }: { priority: number }) {
         ? 'bg-high/15 text-high ring-high/30'
         : priority === 3
           ? 'bg-medium/15 text-medium ring-medium/30'
-          : 'bg-muted text-subtlefg ring-border'
+          : 'bg-secondary text-quaternary ring-secondary'
   return (
     <span className={cn('inline-flex items-center rounded px-1.5 py-0.5 font-mono text-xs font-semibold ring-1 ring-inset', tone)}>
       P{priority}
@@ -438,14 +442,14 @@ export const SCOPE_LABEL: Record<string, string> = {
 export function ScopeBadge({ scope }: { scope: string }) {
   const bg = scope !== 'production' && scope !== 'unknown'
   return (
-    <span className={cn('font-mono text-[11px]', bg ? 'text-subtlefg' : 'text-mutedfg')}>
+    <span className={cn('font-mono text-[11px]', bg ? 'text-quaternary' : 'text-tertiary')}>
       {SCOPE_LABEL[scope] ?? scope}
     </span>
   )
 }
 
 export function DetectedBy({ sources }: { sources: string[] }) {
-  if (!sources || sources.length === 0) return <span className="text-subtlefg">–</span>
+  if (!sources || sources.length === 0) return <span className="text-quaternary">–</span>
   return (
     <div className="flex flex-wrap gap-1">
       {sources.map((s) => (
@@ -453,7 +457,7 @@ export function DetectedBy({ sources }: { sources: string[] }) {
           key={s}
           className={cn(
             'rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset',
-            s === 'grype' ? 'bg-brand/10 text-branddim ring-brand/25' : 'bg-muted text-mutedfg ring-border',
+            s === 'grype' ? 'bg-brand-primary text-brand-secondary ring-brand' : 'bg-secondary text-tertiary ring-secondary',
           )}
         >
           {s}
@@ -471,15 +475,15 @@ export const CONFIDENCE_LABEL: Record<string, string> = {
 }
 
 export function ConfidenceBadge({ confidence }: { confidence: string }) {
-  if (!confidence) return <span className="text-subtlefg">–</span>
+  if (!confidence) return <span className="text-quaternary">–</span>
   const tone =
     confidence === 'very_high'
       ? 'bg-accent/10 text-accent ring-accent/25'
       : confidence === 'high'
-        ? 'bg-brand/10 text-branddim ring-brand/25'
+        ? 'bg-brand-primary text-brand-secondary ring-brand'
         : confidence === 'medium'
-          ? 'bg-muted text-mutedfg ring-border'
-          : 'text-subtlefg ring-border'
+          ? 'bg-secondary text-tertiary ring-secondary'
+          : 'text-quaternary ring-secondary'
   return (
     <span className={cn('inline-flex rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset', tone)}>
       {CONFIDENCE_LABEL[confidence] ?? confidence}
@@ -489,7 +493,7 @@ export function ConfidenceBadge({ confidence }: { confidence: string }) {
 
 export function KindBadge({ kind }: { kind: string }) {
   return (
-    <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-mutedfg">
+    <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-tertiary">
       {findingKindLabel(kind)}
     </span>
   )
@@ -498,20 +502,20 @@ export function KindBadge({ kind }: { kind: string }) {
 export function KindFilter({ value, onChange, kinds }: { value: string; onChange: (v: string) => void; kinds: string[] }) {
   const opts = ['all', ...kinds]
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="inline-flex items-center gap-0.5 rounded-lg bg-secondary p-1">
       {opts.map((o) => (
         <button
           key={o}
           onClick={() => onChange(o)}
           className={cn(
-            'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+            'rounded-md px-3 py-1.5 text-xs font-medium transition-all',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40',
             value === o
-              ? 'bg-brand/15 text-branddim ring-1 ring-inset ring-brand/30'
-              : 'text-mutedfg hover:bg-elevated hover:text-foreground',
+              ? 'bg-primary text-primary shadow-xs'
+              : 'text-tertiary hover:text-primary',
           )}
         >
-          {o === 'all' ? 'all kinds' : findingKindLabel(o)}
+          {o === 'all' ? 'All Kinds' : findingKindLabel(o)}
         </button>
       ))}
     </div>
@@ -529,27 +533,27 @@ export function SeverityFilter({
 }) {
   const opts: (Severity | 'all')[] = ['all', ...SEVERITY_ORDER.filter((s) => available.has(s))]
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="inline-flex items-center gap-0.5 rounded-lg bg-secondary p-1">
       {opts.map((o) => (
         <button
           key={o}
           onClick={() => onChange(o)}
           className={cn(
-            'rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors',
+            'rounded-md px-3 py-1.5 text-xs font-medium capitalize transition-all',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40',
             value === o
-              ? 'bg-brand/15 text-branddim ring-1 ring-inset ring-brand/30'
-              : 'text-mutedfg hover:bg-elevated hover:text-foreground',
+              ? 'bg-primary text-primary shadow-xs'
+              : 'text-tertiary hover:text-primary',
           )}
         >
-          {o}
+          {o === 'all' ? 'All' : o}
         </button>
       ))}
     </div>
   )
 }
 
-export function ScanPrompt({ icon, what }: { icon: typeof Boxes; what: string }) {
+export function ScanPrompt({ icon, what }: { icon: React.ComponentType<{ className?: string }>; what: string }) {
   return <EmptyState icon={icon} title={`Run a scan to populate ${what}`} hint="Use the “Run scan” panel above." />
 }
 

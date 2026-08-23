@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useFetch } from '../../../hooks'
 import { api } from '../../../lib/api'
-import type { BusinessAsset, DashboardSecurityOperations, Engagement, FleetCoverageSummary } from '../../../lib/types'
+import type { BusinessAsset, DashboardSecurityOperations, FleetCoverageSummary } from '../../../lib/types'
 import type { DashboardData, DashboardHookResult } from '../types'
 
 const ENGAGEMENT_ORDER = ['active', 'draft', 'completed', 'archived'] as const
@@ -50,7 +50,6 @@ export function useDashboardData(): DashboardHookResult {
       setRangeDays,
       highRiskAssets: 0,
       activeEngagements: 0,
-      unassignedEngagements: 0,
       coverageGaps: null,
       priorityAssets: [],
       assessmentQueue: [],
@@ -65,7 +64,6 @@ export function useDashboardData(): DashboardHookResult {
   const activeEngagements = data.engagements.filter(
     (engagement) => engagement.status.toLowerCase() === 'active',
   ).length
-  const unassignedEngagements = data.engagements.filter((engagement) => !engagement.businessAssetId).length
   const coverageGaps = fleet
     ? Object.entries(fleet.rowsByVerdict).reduce(
         (total, [verdict, count]) => total + (verdict === 'covered' ? 0 : count),
@@ -84,7 +82,7 @@ export function useDashboardData(): DashboardHookResult {
         left.name.localeCompare(right.name)
       )
     })
-    .slice(0, 6)
+    .slice(0, 4)
 
   const assessmentQueue = [...data.engagements]
     .sort((left, right) => {
@@ -109,7 +107,6 @@ export function useDashboardData(): DashboardHookResult {
     setRangeDays,
     highRiskAssets,
     activeEngagements,
-    unassignedEngagements,
     coverageGaps,
     priorityAssets,
     assessmentQueue,

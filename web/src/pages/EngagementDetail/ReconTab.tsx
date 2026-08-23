@@ -1,5 +1,5 @@
-import { AlertTriangle, Play, Radar, ShieldAlert, ShieldCheck, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { AlertTriangle, Play, Target04, ShieldZap, ShieldTick, XClose } from '@untitledui/icons'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Select, Spinner, cn } from '../../components/ui'
 import { useParallelFetch, usePolling } from '../../hooks'
 import { api, streamReconLogs } from '../../lib/api'
@@ -49,7 +49,7 @@ export function ReconTab({ eng, onGoTab }: { eng: Engagement; onGoTab: (t: Tab) 
         />
       ) : (
         <Card title="Live reconnaissance disabled">
-          <div className="flex flex-wrap items-center gap-3 text-sm text-mutedfg">
+          <div className="flex flex-wrap items-center gap-3 text-sm text-tertiary">
             <AlertTriangle className="size-4 shrink-0 text-info" />
             <span>Live recon is lab-only and turned off for this engagement.</span>
             <Button variant="secondary" onClick={() => onGoTab('settings')} className="px-3 py-1.5">
@@ -105,7 +105,7 @@ export function ReconLauncher({ eng, tools, onLaunched }: { eng: Engagement; too
   if (tools.length === 0) {
     return (
       <Card title="Recon">
-        <p className="text-sm text-mutedfg">No recon tools are registered.</p>
+        <p className="text-sm text-tertiary">No recon tools are registered.</p>
       </Card>
     )
   }
@@ -155,7 +155,7 @@ export function ReconLauncher({ eng, tools, onLaunched }: { eng: Engagement; too
         </div>
       )}
       <div className="mt-4 flex justify-end">
-        <Button loading={busy} disabled={!target} onClick={launch} className="px-3 py-1.5">
+        <Button loading={busy} disabled={!target} onClick={launch} color="secondary" className="px-3 py-1.5">
           <Play className="size-4" /> Launch
         </Button>
       </div>
@@ -165,7 +165,7 @@ export function ReconLauncher({ eng, tools, onLaunched }: { eng: Engagement; too
 
 export function ReconStatusPill({ status }: { status: ReconRun['status'] }) {
   const cls: Record<ReconRun['status'], string> = {
-    queued: 'bg-elevated text-mutedfg ring-border',
+    queued: 'bg-secondary text-tertiary ring-secondary',
     running: 'bg-info/10 text-info ring-info/25',
     succeeded: 'bg-accent/10 text-accent ring-accent/25',
     failed: 'bg-critical/10 text-critical ring-critical/25',
@@ -179,7 +179,7 @@ export function ReconStatusPill({ status }: { status: ReconRun['status'] }) {
 
 export function ReconContainmentBadge({ posture }: { posture: string }) {
   const unsandboxed = posture.startsWith('unsandboxed')
-  const Icon = unsandboxed ? ShieldAlert : ShieldCheck
+  const Icon = unsandboxed ? ShieldZap : ShieldTick
   return (
     <span
       className={cn(
@@ -199,26 +199,26 @@ export function ReconContainmentBadge({ posture }: { posture: string }) {
 
 export function ReconRunsList({ runs, activeId, onSelect }: { runs: ReconRun[]; activeId: string | null; onSelect: (id: string) => void }) {
   if (runs.length === 0) {
-    return <EmptyState icon={Radar} title="No recon runs yet" hint="Launch a tool above to start reconnaissance." />
+    return <EmptyState icon={Target04} title="No recon runs yet" hint="Launch a tool above to start reconnaissance." />
   }
   return (
     <Card title="Runs" bodyClass="p-0">
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-secondary">
         {runs.map((r) => (
           <button
             key={r.id}
             onClick={() => onSelect(r.id)}
             aria-pressed={activeId === r.id}
             className={cn(
-              'flex w-full flex-col gap-1 px-4 py-3 text-left text-sm transition-colors hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40',
-              activeId === r.id && 'bg-raised',
+              'flex w-full flex-col gap-1 px-4 py-3 text-left text-sm transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40',
+              activeId === r.id && 'bg-secondary',
             )}
           >
             <div className="flex w-full items-center gap-3">
               <ReconStatusPill status={r.status} />
-              <span className="font-mono font-medium text-foreground">{r.tool}</span>
-              <span className="truncate font-mono text-mutedfg">{r.target}</span>
-              <span className="ml-auto shrink-0 tabular-nums text-xs text-subtlefg">
+              <span className="font-mono font-medium text-primary">{r.tool}</span>
+              <span className="truncate font-mono text-tertiary">{r.target}</span>
+              <span className="ml-auto shrink-0 tabular-nums text-xs text-quaternary">
                 {r.status === 'succeeded' ? `${r.resultCount} in-scope` : r.status === 'failed' ? 'failed' : r.stage}
               </span>
             </div>
@@ -287,12 +287,12 @@ export function ReconConsole({ engagementId, runId, onClose, onDone }: { engagem
       title="Live log"
       actions={
         <div className="flex items-center gap-3">
-          <span className={cn('flex items-center gap-1.5 text-xs', done ? 'text-mutedfg' : reconnecting ? 'text-medium' : 'text-info')}>
-            <span className={cn('size-1.5 rounded-full', done ? 'bg-mutedfg' : reconnecting ? 'bg-medium' : 'bg-info')} />
+          <span className={cn('flex items-center gap-1.5 text-xs', done ? 'text-tertiary' : reconnecting ? 'text-medium' : 'text-info')}>
+            <span className={cn('size-1.5 rounded-full', done ? 'bg-tertiary' : reconnecting ? 'bg-medium' : 'bg-info')} />
             {done ? 'ended' : reconnecting ? 'reconnecting…' : 'streaming'}
           </span>
-          <button type="button" aria-label="Close log" onClick={onClose} className="rounded-md p-1 text-mutedfg hover:bg-raised hover:text-foreground">
-            <X className="size-4" />
+          <button type="button" aria-label="Close log" onClick={onClose} className="rounded-md p-1 text-tertiary hover:bg-secondary hover:text-primary">
+            <XClose className="size-4" />
           </button>
         </div>
       }
@@ -302,17 +302,17 @@ export function ReconConsole({ engagementId, runId, onClose, onDone }: { engagem
         role="log"
         aria-live="polite"
         aria-relevant="additions"
-        className="max-h-96 overflow-auto rounded-lg border border-border bg-bg p-3 font-mono text-xs leading-relaxed"
+        className="max-h-96 overflow-auto rounded-lg border border-secondary bg-primary p-3 font-mono text-xs leading-relaxed"
       >
         {lines.length === 0 ? (
-          <span className="text-subtlefg">Waiting for output…</span>
+          <span className="text-quaternary">Waiting for output…</span>
         ) : (
           lines.map((l, i) => (
             <div
               key={i}
               className={cn(
                 'whitespace-pre-wrap break-all',
-                l.startsWith('ERROR') ? 'text-critical' : l.startsWith('WARN') ? 'text-medium' : l.includes('[dropped') ? 'text-mutedfg' : 'text-foreground',
+                l.startsWith('ERROR') ? 'text-critical' : l.startsWith('WARN') ? 'text-medium' : l.includes('[dropped') ? 'text-tertiary' : 'text-primary',
               )}
             >
               {l}

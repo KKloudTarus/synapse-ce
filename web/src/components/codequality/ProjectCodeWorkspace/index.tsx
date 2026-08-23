@@ -145,8 +145,24 @@ function WorkspaceHeader({ file, index, view, diff, onView }: { file: ProjectCod
         {file?.oldPath && <p className="mt-1.5 text-xs text-mutedfg">From <span className="font-mono text-foreground">{file.oldPath}</span></p>}
         {file?.status === 'deleted' && <p className="mt-1.5 text-xs text-mutedfg">Showing the retained base-side source.</p>}
       </div>
-      <div className="flex rounded-lg border border-border bg-bg p-1" aria-label="Code view">
-        {(['source', 'unified', 'split'] as const).map((candidate) => <button key={candidate} type="button" disabled={!enabled(candidate)} aria-pressed={view === candidate} onClick={() => onView(candidate)} className={cn('min-h-8 rounded-md px-3 text-xs font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 disabled:cursor-not-allowed disabled:text-subtlefg', view === candidate ? 'bg-brand text-brandfg shadow-sm' : 'text-mutedfg hover:bg-elevated hover:text-foreground')}>{candidate}</button>)}
+      <div className="flex items-center rounded-lg border border-secondary bg-secondary p-1" aria-label="Code view">
+        {(['source', 'unified', 'split'] as const).map((candidate) => (
+          <button
+            key={candidate}
+            type="button"
+            disabled={!enabled(candidate)}
+            aria-pressed={view === candidate}
+            onClick={() => onView(candidate)}
+            className={cn(
+              'rounded-md px-3 py-1.5 text-xs font-semibold capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 disabled:cursor-not-allowed disabled:text-quaternary',
+              view === candidate
+                ? 'bg-primary text-brand-secondary shadow-xs'
+                : 'text-tertiary hover:text-primary',
+            )}
+          >
+            {candidate}
+          </button>
+        ))}
       </div>
     </div>
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/70 px-4 py-2 text-[11px] text-subtlefg">

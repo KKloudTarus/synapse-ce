@@ -3,10 +3,11 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// Dev server proxies API calls to the Go backend on :8080 by default.
+// Dev server proxies API calls to the Go backend only when VITE_API_PROXY_TARGET is set.
+// Without it, MSW (service worker) intercepts /api/* in the browser — no proxy needed.
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const apiTarget = env.VITE_API_PROXY_TARGET ?? 'http://localhost:8080'
+  const apiTarget = env.VITE_API_PROXY_TARGET
 
   return {
     plugins: [react(), tailwindcss()],
@@ -17,10 +18,12 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
-      proxy: {
-        '/api': apiTarget,
-        '/healthz': apiTarget,
-      },
+      ...(apiTarget && {
+        proxy: {
+          '/api': apiTarget,
+          '/healthz': apiTarget,
+        },
+      }),
     },
   }
 })

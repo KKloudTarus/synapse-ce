@@ -13,7 +13,7 @@ export interface StatCardProps {
   hint: string
   trend?: number
   trendDirection?: 'up' | 'down' | 'neutral'
-  tone?: 'muted' | 'brand' | 'critical' | 'high' | 'medium' | 'accent'
+  tone?: 'muted' | 'brand' | 'critical' | 'high' | 'medium' | 'accent' | 'info'
   severity?: 'success' | 'warning' | 'critical'
   icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>
   className?: string
@@ -30,7 +30,6 @@ export interface DashboardHookResult {
   setRangeDays: (days: number) => void
   highRiskAssets: number
   activeEngagements: number
-  unassignedEngagements: number
   coverageGaps: number | null
   priorityAssets: BusinessAsset[]
   assessmentQueue: Engagement[]
