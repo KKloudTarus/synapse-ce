@@ -385,6 +385,11 @@ func (s *TelemetryTransportStore) BindTelemetryAsset(ctx context.Context, bindin
 	if s.bindings[tenant] == nil {
 		s.bindings[tenant] = map[shared.ID]ports.TelemetryAssetBinding{}
 	}
+	for agentID, current := range s.bindings[tenant] {
+		if agentID != binding.AgentID && current.AssetID == binding.AssetID {
+			return fmt.Errorf("%w: telemetry asset %s is already bound to agent %s", shared.ErrConflict, binding.AssetID, agentID)
+		}
+	}
 	if current, ok := s.bindings[tenant][binding.AgentID]; ok && binding.UpdatedAt.Before(current.UpdatedAt) {
 		return fmt.Errorf("%w: stale telemetry asset binding update", shared.ErrConflict)
 	}

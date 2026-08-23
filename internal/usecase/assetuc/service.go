@@ -81,6 +81,13 @@ func (s *Service) UpsertAsset(ctx context.Context, actor string, in UpsertAssetI
 	return a, nil
 }
 
+// GetAssetByKey returns the current asset identified by its tenant-scoped natural key. It is exposed
+// narrowly for use cases that must authorize a mutation against server-authored asset state before
+// calling UpsertAsset; callers must still use UpsertAsset for writes so mutation auditing is preserved.
+func (s *Service) GetAssetByKey(ctx context.Context, tenantID shared.ID, kind asset.Kind, key string) (*asset.Asset, error) {
+	return s.repo.GetAssetByKey(ctx, tenantID, kind, key)
+}
+
 // EdgeInput describes a typed, provenance-carrying relationship between two assets.
 type EdgeInput struct {
 	TenantID   shared.ID

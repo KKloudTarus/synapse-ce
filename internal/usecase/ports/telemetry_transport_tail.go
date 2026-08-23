@@ -18,6 +18,7 @@ type TelemetryAssetBinding struct {
 	UpdatedAt time.Time
 }
 
+// Validate checks that a binding carries complete tenant, authenticated-agent, asset and timestamp identity.
 func (b TelemetryAssetBinding) Validate() error {
 	if b.TenantID.IsZero() || b.AgentID.IsZero() || b.AssetID.IsZero() || b.UpdatedAt.IsZero() {
 		return fmt.Errorf("%w: telemetry asset binding is incomplete", shared.ErrValidation)
@@ -25,6 +26,9 @@ func (b TelemetryAssetBinding) Validate() error {
 	return nil
 }
 
+// TelemetryAssetBindingStore owns the server-authoritative agent→host mapping. BindTelemetryAsset is
+// fail-closed: one asset cannot silently move to a different agent; a cross-agent claim returns
+// shared.ErrConflict and leaves the existing binding intact. ResolveTelemetryAsset is tenant-scoped from ctx.
 type TelemetryAssetBindingStore interface {
 	BindTelemetryAsset(ctx context.Context, binding TelemetryAssetBinding) error
 	ResolveTelemetryAsset(ctx context.Context, agentID shared.ID) (shared.ID, error)
@@ -52,6 +56,8 @@ type TelemetryAgentGap struct {
 	UpdatedAt       time.Time
 }
 
+// Validate checks that the loss identity, lane, optional sequence range, observed-time span and report
+// timestamps are internally consistent.
 func (g TelemetryAgentGap) Validate() error {
 	if g.GapID.IsZero() || g.AgentID.IsZero() || g.AssetID.IsZero() || g.StreamID.IsZero() {
 		return fmt.Errorf("%w: telemetry agent gap is missing identity", shared.ErrValidation)

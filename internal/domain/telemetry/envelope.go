@@ -8,9 +8,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// SchemaVersion is the current canonical raw-telemetry schema version. The reader keeps the
-// previous version in-range so mixed fleets can coexist during rollout. v2 makes the concrete
-// delivery-incarnation identity mandatory; v1 remains readable for historical compatibility.
+// SchemaVersion is the current canonical raw-telemetry schema version. It is stamped on every envelope so
+// the schema can evolve (A0.3, #608) without an agent-version coupling; SchemaMin..SchemaMax is the range
+// a reader accepts. The previous version remains in-range during rollout; v2 makes the concrete delivery
+// incarnation identity mandatory while v1 stays readable for historical compatibility.
 const (
 	SchemaVersion = 2
 	SchemaMin     = 1
@@ -19,22 +20,34 @@ const (
 
 // TelemetryEnvelope is the canonical unit of raw telemetry (A1, fixes D4): a class-typed observation plus
 // the identity, three distinct timestamps, sequencing, coverage/quality honesty, and host/K8s placement
-// that the whole data plane (A2 spool, A3 transport, A5 evidence, B/C detection) is built on.
+// that the whole data plane (A2 spool, A3 transport, A5 evidence, B/C detection) is built on. It is
+// telemetry's own type; it does not reuse detection.Event as the observation schema.
+//
+// The three timestamps are deliberately separate and mean different things:
+//   - OccurredAt  — when the event happened, from the KERNEL source clock (the truth).
+//   - ObservedAt  — when the agent collector decoded it (userspace).
+//   - ReceivedAt  — when the control plane ingested it (stamped at ingest, A3; zero on the agent).
+//
+// The old thin path stamped a single userspace time.Now() for all three, which is D4.
 type TelemetryEnvelope struct {
-	SchemaVersion   int
-	EventID         shared.ID
-	EventType       string
-	EventClass      detection.Class
-	AgentID         shared.ID
-	AgentSessionID  shared.ID
-	AssetID         shared.ID
-	BootID          shared.ID
-	StreamID        shared.ID
-	SensorID        string
-	SensorVersion   string
-	OccurredAt      time.Time
-	ObservedAt      time.Time
-	ReceivedAt      time.Time
+	SchemaVersion int
+	EventID       shared.ID
+	// EventType is the stable dotted type name (e.g. "process.exec"); it must equal Event.EventType().
+	EventType string
+	// EventClass is the top-level class for coarse indexing; it must equal Event.Class.
+	EventClass     detection.Class
+	AgentID        shared.ID
+	AgentSessionID shared.ID
+	AssetID        shared.ID
+	BootID         shared.ID
+	StreamID       shared.ID
+	SensorID       string
+	SensorVersion  string
+	OccurredAt     time.Time
+	ObservedAt     time.Time
+	ReceivedAt     time.Time
+	// Sequence is the per-stream monotonic sequence number (within one incarnation/Epoch — see #594
+	// identity conventions; the incarnation is embedded in StreamID upstream).
 	Sequence        uint64
 	CoverageFlags   CoverageFlags
 	DataQuality     DataQuality
@@ -43,12 +56,15 @@ type TelemetryEnvelope struct {
 	// recorded WITH the data so a reader knows how it was redacted. It is DISTINCT from any sampling-policy
 	// digest. Empty when no redaction policy was applied (pre-A6 path); set by privacy.Scrub.
 	RedactionPolicyDigest string
-	Event                 TelemetryEvent
+	// Event is the typed payload (the "TypedPayload" contract slot).
+	Event TelemetryEvent
 }
 
-// Validate enforces a well-formed envelope. v1 tolerates an absent session/boot/stream for historical
-// compatibility; v2 requires all three so the canonical event is attributable to one concrete agent
-// incarnation rather than only to a long-lived agent id.
+// Validate enforces a well-formed envelope: an accepted schema version, the mandatory identity, a class
+// that matches its payload, and the timestamp ordering invariant. v1 tolerates an absent session/boot/stream
+// for historical compatibility; v2 requires all three so the event is attributable to one concrete agent
+// incarnation. ReceivedAt is optional (zero on the agent, stamped at ingest) but, when present, must not
+// precede ObservedAt.
 func (e TelemetryEnvelope) Validate() error {
 	if e.SchemaVersion < SchemaMin || e.SchemaVersion > SchemaMax {
 		return fmt.Errorf("%w: telemetry envelope schema version %d outside [%d,%d]", shared.ErrValidation, e.SchemaVersion, SchemaMin, SchemaMax)
@@ -97,6 +113,9 @@ func (e TelemetryEnvelope) Validate() error {
 	return nil
 }
 
+// StampReceived sets ReceivedAt at ingest (A3), enforcing the ordering invariant against ObservedAt. It
+// is the ONLY sanctioned way to set the control-plane timestamp, so the ordering can never be violated by
+// a caller assigning the field directly and skipping the check.
 func (e *TelemetryEnvelope) StampReceived(t time.Time) error {
 	if t.IsZero() {
 		return fmt.Errorf("%w: received-at timestamp is zero", shared.ErrValidation)
@@ -108,12 +127,17 @@ func (e *TelemetryEnvelope) StampReceived(t time.Time) error {
 	return nil
 }
 
+// Clone returns a deep copy, so an envelope handed downstream (spool, batch, evidence) cannot be mutated
+// through the original's payload pointers.
 func (e TelemetryEnvelope) Clone() TelemetryEnvelope {
 	c := e
 	c.Event = e.Event.clone()
 	return c
 }
 
+// DeriveEventID computes a deterministic, collision-resistant event id from the per-stream coordinates
+// that uniquely place an event: (AssetID, BootID, StreamID, Sequence, Class, OccurredAt). Determinism
+// makes ingest idempotent (a re-delivered event derives the same id) and makes golden fixtures stable.
 func DeriveEventID(assetID, bootID, streamID shared.ID, sequence uint64, class detection.Class, occurredAtNanos int64) shared.ID {
 	sum := hashFields("telemetry:event-id:v1",
 		assetID.String(), bootID.String(), streamID.String(),

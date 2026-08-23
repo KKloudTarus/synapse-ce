@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -347,5 +346,3 @@ func mergeGap(current *ports.SpoolGap, next ports.SpoolGap) bool {
 	current.FromAt, current.ToAt = currentFrom.UTC(), currentTo.UTC()
 	return true
 }
-
-var _ = time.Time{}

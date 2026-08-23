@@ -199,7 +199,7 @@ func (h *harness) telemetryEnvelope(seq uint64, args []string) telemetry.Telemet
 			Process: &telemetry.ProcessObservation{
 				Kind: "exec", PID: pid, StartTimeNanos: startTimeNanos,
 				EntityID: telemetry.ProcessEntityID(e2eAsset, shared.ID(e2eBoot), pid, startTimeNanos),
-				Comm: "app", Path: "/usr/bin/app", Args: args,
+				Comm:     "app", Path: "/usr/bin/app", Args: args,
 			}},
 	}
 }

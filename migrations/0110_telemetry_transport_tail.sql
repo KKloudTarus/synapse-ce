@@ -13,11 +13,10 @@ CREATE TABLE telemetry_asset_bindings (
     asset_id   TEXT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (tenant_id, agent_id),
+    CONSTRAINT uq_telemetry_asset_bindings_asset UNIQUE (tenant_id, asset_id),
     FOREIGN KEY (tenant_id, agent_id) REFERENCES fleet_agents(tenant_id, id),
     FOREIGN KEY (tenant_id, asset_id) REFERENCES fleet_assets(tenant_id, id)
 );
-CREATE INDEX idx_telemetry_asset_bindings_asset
-    ON telemetry_asset_bindings (tenant_id, asset_id);
 CALL synapse_enable_tenant_rls('telemetry_asset_bindings');
 
 -- +goose StatementBegin
@@ -36,10 +35,20 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    DELETE FROM telemetry_asset_bindings
-      WHERE tenant_id = NEW.tenant_id
-        AND asset_id = NEW.id
-        AND agent_id <> reporting_agent;
+    -- Asset ownership is fail-closed. A host natural key is agent supplied, so a
+    -- second agent that reports the same machine-id/hostname must never displace
+    -- the existing server-authoritative binding. The unique constraint below is
+    -- the race-safe backstop for two concurrent first observations.
+    IF EXISTS (
+        SELECT 1
+          FROM telemetry_asset_bindings
+         WHERE tenant_id = NEW.tenant_id
+           AND asset_id = NEW.id
+           AND agent_id <> reporting_agent
+    ) THEN
+        RAISE EXCEPTION 'telemetry asset % is already bound to another agent', NEW.id
+            USING ERRCODE = '23505', CONSTRAINT = 'uq_telemetry_asset_bindings_asset';
+    END IF;
 
     INSERT INTO telemetry_asset_bindings (tenant_id, agent_id, asset_id, updated_at)
     VALUES (NEW.tenant_id, reporting_agent, NEW.id, NEW.updated_at)

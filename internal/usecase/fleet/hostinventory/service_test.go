@@ -2,6 +2,7 @@ package hostinventory
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -15,12 +16,25 @@ import (
 
 type fakeAssetWriter struct {
 	ids     map[string]shared.ID
+	assets  map[string]*asset.Asset
 	next    int
 	upserts int
 	last    assetuc.UpsertAssetInput
 }
 
-func newFakeWriter() *fakeAssetWriter { return &fakeAssetWriter{ids: map[string]shared.ID{}} }
+func newFakeWriter() *fakeAssetWriter {
+	return &fakeAssetWriter{ids: map[string]shared.ID{}, assets: map[string]*asset.Asset{}}
+}
+
+func (f *fakeAssetWriter) GetAssetByKey(_ context.Context, _ shared.ID, kind asset.Kind, key string) (*asset.Asset, error) {
+	a, ok := f.assets[string(kind)+"|"+key]
+	if !ok {
+		return nil, shared.ErrNotFound
+	}
+	copyAsset := *a
+	copyAsset.Attributes = cloneStringMap(a.Attributes)
+	return &copyAsset, nil
+}
 
 func (f *fakeAssetWriter) UpsertAsset(_ context.Context, _ string, in assetuc.UpsertAssetInput) (*asset.Asset, error) {
 	f.upserts++
@@ -32,16 +46,41 @@ func (f *fakeAssetWriter) UpsertAsset(_ context.Context, _ string, in assetuc.Up
 		id = shared.ID("id-" + itoa(f.next))
 		f.ids[k] = id
 	}
-	return &asset.Asset{ID: id, TenantID: in.TenantID, Kind: in.Kind, Key: in.Key, Name: in.Name}, nil
+	a := &asset.Asset{ID: id, TenantID: in.TenantID, Kind: in.Kind, Key: in.Key, Name: in.Name, Attributes: cloneStringMap(in.Attributes)}
+	f.assets[k] = a
+	copyAsset := *a
+	copyAsset.Attributes = cloneStringMap(a.Attributes)
+	return &copyAsset, nil
 }
 
-type fakeAudit struct{ gaps int }
+func cloneStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+type fakeAudit struct {
+	gaps    int
+	entries []ports.AuditEntry
+}
 
 func (f *fakeAudit) Record(_ context.Context, e ports.AuditEntry) error {
+	f.entries = append(f.entries, e)
 	if e.Action == "host_inventory.coverage_gap" {
 		f.gaps++
 	}
 	return nil
+}
+
+func (f *fakeAudit) entry(action string) (ports.AuditEntry, bool) {
+	for _, e := range f.entries {
+		if e.Action == action {
+			return e, true
+		}
+	}
+	return ports.AuditEntry{}, false
 }
 
 type fixedClock struct{}
@@ -155,6 +194,49 @@ func TestSyncIdempotent(t *testing.T) {
 	}
 	if first.AssetID != second.AssetID {
 		t.Fatalf("re-sync must resolve the same asset id")
+	}
+}
+
+func TestSyncBlocksCrossAgentAssetTakeoverAndAlerts(t *testing.T) {
+	w, a := newFakeWriter(), &fakeAudit{}
+	s := newService(t, w, a)
+	in := SyncInput{TenantID: "tenant-1", Inventory: completeHost()}
+	first, err := s.Sync(context.Background(), "agent-a", in)
+	if err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+
+	_, err = s.Sync(context.Background(), "agent-b", in)
+	if !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("cross-agent takeover error = %v, want conflict", err)
+	}
+	if w.upserts != 1 {
+		t.Fatalf("blocked takeover mutated the asset: upserts=%d want 1", w.upserts)
+	}
+	stored, err := w.GetAssetByKey(context.Background(), "tenant-1", asset.KindHost, "machine-id/abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ID != first.AssetID || stored.Attributes["reporting_agent_id"] != "agent-a" {
+		t.Fatalf("blocked takeover changed owner: id=%s attrs=%v", stored.ID, stored.Attributes)
+	}
+
+	auditEntry, ok := a.entry("host_inventory.asset_binding_takeover_blocked")
+	if !ok {
+		t.Fatal("blocked takeover was not audited")
+	}
+	alertEntry, ok := a.entry("security.alert")
+	if !ok {
+		t.Fatal("blocked takeover did not emit a security alert")
+	}
+	for name, entry := range map[string]ports.AuditEntry{"audit": auditEntry, "alert": alertEntry} {
+		if entry.Metadata["tenant_id"] != "tenant-1" || entry.Metadata["asset_id"] != first.AssetID.String() ||
+			entry.Metadata["old_agent_id"] != "agent-a" || entry.Metadata["new_agent_id"] != "agent-b" {
+			t.Fatalf("%s context = %+v", name, entry.Metadata)
+		}
+	}
+	if alertEntry.Metadata["alert_type"] != "telemetry_asset_binding_takeover" || alertEntry.Metadata["severity"] != "high" {
+		t.Fatalf("security alert classification = %+v", alertEntry.Metadata)
 	}
 }
 
