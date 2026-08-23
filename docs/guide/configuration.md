@@ -15,6 +15,13 @@ Conventions: an empty value means unset, so the built-in default applies. Boolea
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_API_TOKEN` | (none) | Bootstrap-admin bearer token. The API exits if empty. Operational routes require it; liveness `GET /healthz` and readiness `GET /readyz` are intentionally public. Generate with `openssl rand -hex 32`. |
+| `SYNAPSE_OIDC_ENABLED` | `false` | Enable the browser OIDC BFF. Requires the fixed HTTPS issuer, client credentials, callback URL, fixed frontend URL, fixed tenant, and allowlisted group-to-role mapping below. |
+| `SYNAPSE_OIDC_ISSUER` | (none) | Absolute HTTPS issuer used for pinned discovery and ID-token validation. |
+| `SYNAPSE_OIDC_CLIENT_ID`, `SYNAPSE_OIDC_CLIENT_SECRET`, `SYNAPSE_OIDC_REDIRECT_URL` | (none) | OAuth client settings. The callback must be the exact registered `https://<api-host>/api/auth/oidc/callback` URL. Never log the secret. |
+| `SYNAPSE_OIDC_FRONTEND_URL` | (none) | Fixed absolute HTTPS dashboard URL for a successful callback redirect. Query strings, fragments, and credentials are rejected; request parameters never control this destination. |
+| `SYNAPSE_OIDC_TENANT_ID` | (none) | The one fixed Synapse tenant accepted by this BFF instance. |
+| `SYNAPSE_OIDC_GROUP_ROLE_MAPPING` | (none) | Comma-separated exact `provider-group=role` entries. Roles may only be `admin`, `consultant`, `reviewer`, or `readonly`; unmapped, duplicate, and multi-role group claims are rejected. |
+| `SYNAPSE_OIDC_TRANSACTION_TTL`, `SYNAPSE_OIDC_SESSION_TTL` | `10m`, `8h` | Maximum authorization-transaction and opaque browser-session lifetimes. |
 
 ## Core and server
 
@@ -67,7 +74,9 @@ The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADD
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_DB_DSN` | (in-memory) | PostgreSQL connection URL. Empty runs an in-memory dev store, so nothing is durable. |
+| `SYNAPSE_DB_DSN` | (in-memory) | Runtime PostgreSQL connection URL. Empty runs an in-memory dev store, so nothing is durable. |
+| `SYNAPSE_DB_MIGRATION_DSN` | `SYNAPSE_DB_DSN` in development | Optional owner-level PostgreSQL DSN used only by `synapse-migrate`, separating migration authority from the least-privileged runtime DSN. In production it must use a database user distinct from the runtime DSN. |
+| `SYNAPSE_DB_AUTO_MIGRATE` | `true` in development | Long-running services apply embedded migrations only in development. Production requires `false`; run `synapse-migrate` first. Use backward-compatible, phased, migrate-first changes: the API accepts only an applied forward migration strictly above its embedded maximum and exposes a stale or divergent schema through `/readyz`; worker and MCP refuse startup until the schema is current because they have no readiness endpoint. |
 | `SYNAPSE_DB_MAX_CONNS` | `32` | pgx pool maximum connections. |
 | `SYNAPSE_DB_MIN_CONNS` | `0` | pgx pool minimum connections. |
 | `SYNAPSE_DB_MAX_CONN_LIFETIME` | `1h` | Connection lifetime. |
@@ -82,6 +91,18 @@ The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADD
 | `SYNAPSE_BLOB_SECRET_KEY` | `synapse-secret` | Secret key. |
 | `SYNAPSE_BLOB_BUCKET` | `synapse-evidence` | Bucket for evidence artifacts. |
 | `SYNAPSE_BLOB_USE_SSL` | `false` | Set true for https endpoints. |
+
+## Restore verification (synapse-verify-restore)
+
+`synapse-verify-restore` is a read-only recovery tool. It reuses `SYNAPSE_DB_DSN` and the evidence
+blob-store settings above, and requires a database identity permitted to read every tenant's
+evidence chain; a least-privilege runtime role fails closed rather than reporting an empty restore
+as intact.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_RESTORE_VERIFY_TIMEOUT` | `2m` | Maximum duration for one restore-verification run before it fails. |
+| `SYNAPSE_RESTORE_VERIFY_EXPECTED_STATE` | (none) | Path to an independently captured expected-state manifest (audit head, per-engagement evidence heads and counts, expected applied migration versions). Equivalent to `--expected-state`. Without it a run reports `completeness: incomplete_no_expected_state`, because an emptied database cannot be distinguished from an intact one. |
 
 ## Custody, signing, and anchoring (required in production)
 
@@ -202,6 +223,9 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_FLEET_ASSETS_ENABLED` | `false` | Fleet asset model + attack paths. |
 | `SYNAPSE_FLEET_HOST_INGEST_ENABLED` | `false` | Accept host-inventory from `synapse-agent`. |
 | `SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED` | `false` | Accept Kubernetes inventory from `synapse-cluster-agent`. |
+| `SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED` | `false` | Accept signed agent telemetry batches (A3, `POST /api/v1/fleet/telemetry`); verified + idempotently sequenced server-side. |
+| `SYNAPSE_FLEET_DETECTION_INGEST_ENABLED` | `false` | Accept signed agent detection batches (A4, `POST /api/v1/fleet/detections`); sealed once into the evidence chain. |
+| `SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED` | `false` | Serve agent signing-key registration (`POST /api/v1/fleet/keys`) + operator key list/revoke (A4, A0.2). |
 | `SYNAPSE_FLEET_STALE_AFTER` | `10m` | An agent older than this reads as stale (`<=0` disables the staleness view). |
 | `SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET` | `24h` | Coverage freshness SLO. |
 | `SYNAPSE_FLEET_MIN_AGENT_VERSION` | empty | Reject agents below this version (empty = no floor). |
@@ -211,6 +235,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_LEADER_RESOURCE` | `scheduler` | Lease name. |
 | `SYNAPSE_LEADER_TERM` | `15s` | Lease term. |
 | `SYNAPSE_LEADER_RENEW` | `5s` | Renew interval. |
+| `SYNAPSE_WORKER_CONCURRENCY` | `1` | Durable queue claim loops per `synapse-worker` process; must be from 1 through 64. Jobs remain active on every worker, while maintenance sweepers are leader-gated when election is enabled. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_ENABLED` | `false` | Dispatch due vulnerability-source syncs and recover stale runs. PostgreSQL deployments must also enable leader election. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_POLL` | `1m` | Scheduler polling interval. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_STALE_AFTER` | `30m` | Age after which a queued/running sync is eligible for checkpoint-based recovery. |
@@ -237,14 +262,34 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_SANDBOX_ENABLED` | `false` | Run tool execution and acquisition in the bubblewrap sandbox. If set but bubblewrap is missing, startup fails closed. |
+| `SYNAPSE_SANDBOX_ENABLED` | `false` | Run tool execution and acquisition in the bubblewrap sandbox. Production requires `true`; if bubblewrap is missing, startup fails closed. |
 | `SYNAPSE_SANDBOX_MEM_MAX` | `536870912` | Per-run memory limit in bytes. |
 | `SYNAPSE_SANDBOX_PIDS_MAX` | `256` | Per-run pid limit. |
 | `SYNAPSE_TOOL_HASHES` | (TOFU) | Authoritative sha256 pins. The sandbox refuses a binary whose hash does not match. |
 | `SYNAPSE_RECON_TIMEOUT` | `3m` | Per-run recon timeout. |
 | `SYNAPSE_RECON_CONCURRENCY` | `3` | Recon worker pool size. |
 | `SYNAPSE_RECON_ALLOW_CAPABILITY_SENSITIVE` | `false` | Permit tools that need raw sockets. |
+| `SYNAPSE_TOOL_EXECUTION_MODE` | (role default) | Explicit process execution posture: `dispatch-only`, `worker`, or `in-process`. Production `synapse-api` defaults to `dispatch-only` and refuses `in-process`, so untrusted tools run only on `synapse-worker`; `dispatch-only` requires PostgreSQL. Leave unset unless overriding the role default. |
 | `SYNAPSE_RECON_VIA_WORKER` | `false` | Route recon through the durable queue to synapse-worker. Requires PostgreSQL. |
+
+## Signed egress grants (native worker tier)
+
+Scoped network access for an untrusted process is authorized by the control plane, not by the
+worker. The API signs a short-lived grant bound to the exact process and namespace; a root-owned
+broker verifies it and configures that namespace before the sandboxed child is released. The
+signing seed stays in the control plane and the broker holds only the public verification key. See
+[Deployment](deployment.md) and [Security](security.md).
+
+Set the issuer variables on `synapse-api` and the client variables on `synapse-worker`.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR` | (none) | API: listen address for the machine-only grant listener, for example `:8082`. Publish it through a private TLS load balancer reachable only from the worker security group, never through the browser ingress. |
+| `SYNAPSE_EGRESS_GRANT_ISSUER_TOKEN` | (none) | API: bearer credential the worker machine identity presents to the grant listener. Keep it distinct from `SYNAPSE_API_TOKEN` so a worker holds no human API authority. Never logged. |
+| `SYNAPSE_EGRESS_GRANT_SIGNING_SEED` | (none) | API: Ed25519 seed that signs grants. Rotate in two phases so in-flight grants stay verifiable. Never logged. |
+| `SYNAPSE_EGRESS_GRANT_AUTHORITY_URL` | (none) | Worker: private HTTPS URL of the grant listener. |
+| `SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN` | (none) | Worker: machine bearer credential for the grant listener. Never logged. |
+| `SYNAPSE_EGRESS_BROKER_SOCKET` | (none) | Worker: path to the root-owned broker's Unix socket. The protocol carries only a run id and canonical CIDR/port rules; it has no command or argv field. |
 
 ## AI agent orchestration (off by default)
 
@@ -364,8 +409,14 @@ The following variables are read by `synapse-agent` and `synapse-cluster-agent`,
 | `SYNAPSE_AGENT_STATE_DIR` | platform default | Credential and offline-buffer directory; `/var/lib/synapse-cluster-agent` for the cluster agent. Protect it from other users. |
 | `SYNAPSE_AGENT_ROOT` | `/` | Host filesystem root inventoried by the VM agent. |
 | `SYNAPSE_AGENT_NAME` | hostname | Human-readable agent display name. |
+| `SYNAPSE_INVENTORY_SWEEP_ENABLED` | `true` | Ship host inventory continuously on a cadence (A8, #629), not only on a `scan.host` work order. Ingest is idempotent server-side (host upsert-by-natural-key), so a re-sweep of an unchanged host is a no-op. Set `false` to disable. |
+| `SYNAPSE_INVENTORY_SWEEP_INTERVAL` | `1h` | Cadence of the continuous host-inventory sweep. Clamped to a 1-minute floor so a misconfiguration cannot busy-loop the collector over the filesystem. |
 | `SYNAPSE_DETECT_CLASSES` | empty | Comma-separated eBPF classes: `process`, `network`, `file`, `privilege`. Empty disables the engine; Linux root/capabilities are required. |
 | `SYNAPSE_DETECT_CPU_CEIL_PCT` | `0` | CPU ceiling for deterministic class shedding; zero disables shedding. |
+| `SYNAPSE_DETECTION_ENGAGEMENT_ID` | empty | Engagement receiving signed detection batches. Empty keeps confirmed detections durably local and does not start the remote detection shipper. |
+| `SYNAPSE_DETECTION_SHIP_INTERVAL` | `1s` | Poll interval while the independent P1 detection delivery lane is empty. Network/429/5xx retry uses separate capped exponential backoff. |
+| `SYNAPSE_TELEMETRY_SPOOL_BYTES` | `536870912` | Maximum bytes of checksummed telemetry WAL segments (minimum 1 MiB). P3 is evicted first with durable gap evidence; P0–P2 backpressure instead of shedding. |
+| `SYNAPSE_AGENT_METRICS_ADDR` | empty | Optional private Prometheus listener for agent spool metrics. It has no authentication; bind to loopback or a protected scrape network. |
 | `SYNAPSE_CLUSTER` | empty (required) | Stable cluster identity attached to every Kubernetes asset. |
 | `SYNAPSE_CLUSTER_NAMESPACES` | empty | Comma-separated namespace scope; empty means all authorized namespaces. |
 | `SYNAPSE_CLUSTER_RESYNC` | `5m` | Interval between Kubernetes inventory collections. |

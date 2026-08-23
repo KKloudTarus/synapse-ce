@@ -1,0 +1,80 @@
+{{- if .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "synapse.fullname" . }}-worker
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  # Fenced claim leases, per-run execution locks, and leader-gated maintenance make replicas safe.
+  # maxSurge zero bounds replacement overlap while the old worker drains its current claim.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "synapse.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "synapse.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      hostUsers: {{ .Values.sandbox.hostUsers }}
+      serviceAccountName: {{ include "synapse.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "synapse.podSecurityContext" . | nindent 8 }}
+      topologySpreadConstraints:
+        {{- include "synapse.topologySpreadConstraints" (list . "worker") | nindent 8 }}
+      nodeSelector:
+        {{- toYaml .Values.worker.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.worker.tolerations | nindent 8 }}
+      affinity:
+        {{- toYaml .Values.worker.affinity | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ include "synapse.image" .Values.image | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/opt/synapse/synapse-worker"]
+          securityContext:
+            {{- include "synapse.containerSecurityContext" . | nindent 12 }}
+          env:
+            {{- include "synapse.runtimeEnv" . | nindent 12 }}
+            - name: SYNAPSE_LEADER_ENABLED
+              value: "true"
+            - name: SYNAPSE_METRICS_ENABLED
+              value: "false"
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          startupProbe:
+            # Runs the FULL production sandbox conformance suite (every strict control, not just the
+            # host/kernel-dependent subset) before this worker can claim work; -strict fails closed
+            # until delegated cgroup limits are actually enforced. The wider timeout gives the
+            # behavioral probes (seccomp/filesystem/memory/pids/timeout/output/redaction) headroom.
+            exec: {command: ["/opt/synapse/synapse-sandbox-check", "-mode=full", "-strict"]}
+            periodSeconds: 15
+            failureThreshold: 6
+            timeoutSeconds: 30
+          volumeMounts:
+            - {name: synapse-data, mountPath: /var/lib/synapse}
+            - {name: tmp, mountPath: /tmp}
+            - {name: database-ca, mountPath: /etc/synapse/database-ca, readOnly: true}
+      volumes:
+        - name: synapse-data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: database-ca
+          secret:
+            secretName: {{ required "externalDatabase.caBundle.secretName is required" .Values.externalDatabase.caBundle.secretName }}
+            items:
+              - key: {{ required "externalDatabase.caBundle.key is required" .Values.externalDatabase.caBundle.key }}
+                path: ca.crt
+{{- end }}

@@ -22,9 +22,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetversion"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
@@ -54,19 +56,30 @@ type fleetAPI interface {
 	Progress(ctx context.Context, token, orderID string) error
 	SubmitResult(ctx context.Context, token, orderID, status, reason string) error
 	SendHostInventory(ctx context.Context, token string, inv any) error
+	RegisterDetectionKey(ctx context.Context, token string, key fleetagent.AgentSigningKey, proof string) error
+	SendDetectionBatch(ctx context.Context, token string, batch fleetagent.AgentBatch, items []fleetagent.DetectionBatchItem) error
 }
 
 type config struct {
-	baseURL       string
-	enrolToken    string
-	stateDir      string
-	root          string
-	name          string
-	poll          time.Duration
-	maxOrders     int
-	once          bool
-	detectClasses string  // SYNAPSE_DETECT_CLASSES; empty = detection engine off
-	detectCeiling float64 // SYNAPSE_DETECT_CPU_CEIL_PCT; 0 = no load shedding
+	baseURL               string
+	enrolToken            string
+	stateDir              string
+	root                  string
+	name                  string
+	poll                  time.Duration
+	maxOrders             int
+	once                  bool
+	detectClasses         string  // SYNAPSE_DETECT_CLASSES; empty = detection engine off
+	detectCeiling         float64 // SYNAPSE_DETECT_CPU_CEIL_PCT; 0 = no load shedding
+	spoolBytes            int64   // durable telemetry WAL quota
+	metricsAddr           string  // optional private agent metrics listener
+	detectionEngagement   string  // engagement receiving signed detection batches; empty = local-only
+	detectionShipInterval time.Duration
+	// inventorySweep turns the host inventory from on-demand (a scan.host work order) into a continuous
+	// periodic stream (A8, #629). Enabled by default (ingest-on); the interval is clamped to a floor so a
+	// misconfiguration cannot busy-loop the collector over the real filesystem.
+	inventorySweepEnabled  bool
+	inventorySweepInterval time.Duration
 }
 
 func main() {
@@ -120,6 +133,12 @@ func parseConfig() config {
 	flag.BoolVar(&cfg.once, "once", false, "run a single cycle then exit")
 	flag.StringVar(&cfg.detectClasses, "detect-classes", os.Getenv("SYNAPSE_DETECT_CLASSES"), "comma-separated eBPF detection classes to run (process,network,file,privilege); empty = detection engine off (#422, Linux+root only)")
 	flag.Float64Var(&cfg.detectCeiling, "detect-ceiling", parseCeiling(os.Getenv("SYNAPSE_DETECT_CPU_CEIL_PCT")), "CPU ceiling percent for the detection engine; over it, classes are shed in a defined order (0 = no shedding)")
+	flag.Int64Var(&cfg.spoolBytes, "telemetry-spool-bytes", parsePositiveBytes(os.Getenv("SYNAPSE_TELEMETRY_SPOOL_BYTES"), 512<<20), "maximum bytes retained by the priority telemetry WAL")
+	flag.StringVar(&cfg.metricsAddr, "agent-metrics-addr", os.Getenv("SYNAPSE_AGENT_METRICS_ADDR"), "optional address for private agent Prometheus metrics (for example 127.0.0.1:9465)")
+	flag.StringVar(&cfg.detectionEngagement, "detection-engagement", os.Getenv("SYNAPSE_DETECTION_ENGAGEMENT_ID"), "engagement id receiving signed detection batches; empty keeps detections local")
+	flag.DurationVar(&cfg.detectionShipInterval, "detection-ship-interval", parsePositiveDuration(os.Getenv("SYNAPSE_DETECTION_SHIP_INTERVAL"), time.Second), "idle interval for the independent detection delivery loop")
+	flag.BoolVar(&cfg.inventorySweepEnabled, "inventory-sweep", envEnabledDefaultTrue(os.Getenv("SYNAPSE_INVENTORY_SWEEP_ENABLED")), "ship host inventory continuously on a cadence (A8, #629); on by default")
+	flag.DurationVar(&cfg.inventorySweepInterval, "inventory-sweep-interval", parsePositiveDuration(os.Getenv("SYNAPSE_INVENTORY_SWEEP_INTERVAL"), time.Hour), "cadence of the continuous host-inventory sweep (clamped to a floor)")
 	flag.Parse()
 	if cfg.enrolToken == "" {
 		// An absent token file is NOT fatal: it is the normal state after enrolment, once the
@@ -151,6 +170,10 @@ func (r *runner) run(ctx context.Context) error {
 	// It is given the enrolled credential so its events carry the canonical AgentID, not the display
 	// name (D1 fix, #606).
 	r.startDetection(ctx, cred)
+	// Continuous host-inventory sweep (#629, A8): a background stream, separate from the per-work-order
+	// scan.host cycle below, so a control plane always has a fresh inventory to re-evaluate against new
+	// advisories without a manual re-scan. Best-effort — it never blocks or fails the work-order loop.
+	r.startInventorySweep(ctx, cred)
 	for {
 		if err := r.cycle(ctx, cred); err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -297,6 +320,30 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func parsePositiveBytes(value string, def int64) int64 {
+	if value == "" {
+		return def
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
+		log.Printf("ignoring invalid telemetry spool byte count (want a positive integer)")
+		return def
+	}
+	return parsed
+}
+
+func parsePositiveDuration(value string, def time.Duration) time.Duration {
+	if value == "" {
+		return def
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed <= 0 {
+		log.Printf("ignoring invalid detection ship interval (want a positive duration)")
+		return def
+	}
+	return parsed
 }
 
 func defaultStateDir() string {

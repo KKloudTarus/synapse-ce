@@ -1,0 +1,135 @@
+# Namespace-wide default deny. The following policies admit only the required control-plane paths.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "synapse.fullname" . }}-default-deny
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "synapse.fullname" . }}-ingress
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "synapse.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace | quote }}
+      ports: [{protocol: TCP, port: 8080}]
+{{- if .Values.api.grantAuthority.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "synapse.fullname" . }}-egress-grant-authority
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "synapse.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- range .Values.api.grantAuthority.networkPolicySourceCIDRs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports: [{protocol: TCP, port: {{ .Values.api.grantAuthority.port }}}]
+{{- end }}
+{{- if .Values.api.metrics.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "synapse.fullname" . }}-metrics
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "synapse.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.api.metrics.monitoringNamespace | quote }}
+      ports: [{protocol: TCP, port: {{ .Values.api.metrics.port }}}]
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "synapse.fullname" . }}-runtime-egress
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "synapse.selectorLabels" . | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    {{- $db := .Values.networkPolicy.runtimeEgress.database }}
+    {{- $objectStore := .Values.networkPolicy.runtimeEgress.objectStore }}
+    {{- $oidcRanges := .Values.networkPolicy.runtimeEgress.oidc }}
+    {{- if not $db }}
+      {{- fail "networkPolicy.runtimeEgress.database must list the PostgreSQL CIDR(s); an unrestricted egress rule is not accepted in production" }}
+    {{- end }}
+    {{- if not $objectStore }}
+      {{- fail "networkPolicy.runtimeEgress.objectStore must list the object-store CIDR(s); an unrestricted egress rule is not accepted in production" }}
+    {{- end }}
+    # Each destination is an explicit CIDR. There is deliberately no ports-only rule, so a
+    # compromised pod cannot reach an arbitrary host even on an allowed port.
+    - to:
+        {{- range $db }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports: [{protocol: TCP, port: 5432}]
+    - to:
+        {{- range $objectStore }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports: [{protocol: TCP, port: 443}]
+    {{- if $oidcRanges }}
+    - to:
+        {{- range $oidcRanges }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports: [{protocol: TCP, port: 443}]
+    {{- end }}
+{{- if and .Values.worker.enabled .Values.networkPolicy.allowInternetEgress }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "synapse.fullname" . }}-worker-recon-egress
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "synapse.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  policyTypes: [Egress]
+  egress:
+    # Only worker pods may reach authorized external recon/acquisition targets. Application
+    # scope/authorization and the in-process sandbox gate every execution.
+    - ports: [{protocol: TCP, port: 80}, {protocol: TCP, port: 443}]
+{{- end }}

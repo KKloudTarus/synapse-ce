@@ -8,6 +8,47 @@ enforcement is exercised, not bypassed. Nothing is persisted.
 
 Build it with `make build`. The binary lands at `./bin/synapse-cli`.
 
+## RulePack release commands
+
+The `rulepack` command group verifies signed detection-content artifacts, replays their deterministic
+fixtures, and evaluates attested release evidence. The RulePack content-signing key and gate-evidence
+producer key are supplied independently as standard-base64 text containing raw 32-byte Ed25519 public
+keys; neither artifact is allowed to self-authorize an embedded trust key.
+
+```bash
+synapse-cli rulepack verify \
+  --artifact rulepack.signed.json \
+  --public-key rulepack-release.pub
+
+synapse-cli rulepack replay \
+  --artifact rulepack.signed.json \
+  --public-key rulepack-release.pub
+
+synapse-cli rulepack gate \
+  --artifact rulepack.signed.json \
+  --public-key rulepack-release.pub \
+  --evidence rulepack-gate-evidence.json \
+  --evidence-public-key rulepack-evidence.pub \
+  --phase promotion
+```
+
+| Subcommand / flag | Description |
+| --- | --- |
+| `rulepack verify` | Recompute the canonical digest and verify the RulePack signature against `--public-key`. Prints the verified pack identity as JSON. |
+| `rulepack replay` | Verify the artifact, then run positive fixtures before negative fixtures in deterministic order. Prints replay results as JSON and exits non-zero on any mismatch. |
+| `rulepack gate` | Verify both the RulePack and the attested gate-evidence envelope, emit the deterministic gate report, and exit non-zero when the selected lifecycle phase is not eligible. |
+| `--artifact <file>` | Signed RulePack JSON. Required by all three RulePack subcommands. |
+| `--public-key <file>` | Externally trusted RulePack Ed25519 public key. Required by all three subcommands. |
+| `--evidence <file>` | Attested `SignedGateEvidence` JSON. Required by `rulepack gate`. Raw/unattested gate input is rejected. |
+| `--evidence-public-key <file>` | Externally trusted Ed25519 key for the evidence producer. Required by `rulepack gate` and intentionally separate from the RulePack content key. |
+| `--phase pre-canary\|canary\|promotion` | Which lifecycle threshold to enforce. Default: `promotion`. `pre-canary` requires deployment state `candidate`; `canary` and `promotion` require state `canary`. |
+
+Successful verification/replay/gating exits `0`; a signature, provenance, replay, lifecycle-state, or gate
+failure exits non-zero and prints the reason on stderr. `rulepack gate` writes its deterministic report to
+stdout after provenance verification even when the requested gate subsequently fails, so CI can retain the
+failure evidence. See [RulePack release lifecycle](rulepack.md) for the signed artifact schema, retro-hunt
+selector provenance, release-stage ordering, metrics, and rollback semantics.
+
 ## Doctor
 
 ```

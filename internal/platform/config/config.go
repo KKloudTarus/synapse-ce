@@ -2,6 +2,9 @@
 package config
 
 import (
+	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +13,8 @@ import (
 )
 
 const (
+	defaultWorkerConcurrency       = 1
+	maxWorkerConcurrency           = 64
 	defaultFPTriageMaxFindings     = 100
 	maxFPTriageMaxFindings         = 1000
 	defaultFPTriageConcurrency     = 6
@@ -37,6 +42,17 @@ type Config struct {
 
 	// APIToken protects all API + UI routes; required (no anonymous access).
 	APIToken string
+	// OIDCEnabled enables the browser-based OIDC authorization-code BFF flow.
+	OIDCEnabled          bool
+	OIDCIssuer           string
+	OIDCClientID         string
+	OIDCClientSecret     string
+	OIDCRedirectURL      string
+	OIDCFrontendURL      string
+	OIDCTenantID         string
+	OIDCGroupRoleMapping []string
+	OIDCTransactionTTL   time.Duration
+	OIDCSessionTTL       time.Duration
 	// AUPVersion is the current Acceptable-Use Policy version.
 	AUPVersion string
 	// AUPFile is where first-run AUP acceptance is recorded (file-backed until Postgres).
@@ -48,6 +64,9 @@ type Config struct {
 	// DBMigrationDSN, when set, is used only for schema migrations and runtime-role grants.
 	// It must be a DDL owner credential; DBDSN remains the least-privilege application credential.
 	DBMigrationDSN string
+	// DBAutoMigrate controls embedded migrations for long-running services. A dedicated
+	// synapse-migrate job may own migrations while services rely on readiness instead.
+	DBAutoMigrate bool
 	// SyftBin is the Syft executable used for SBOM generation (shell-out).
 	SyftBin string
 	// SBOMProducer selects the SBOM-generation producer: "syft" (default – the pinned
@@ -163,9 +182,27 @@ type Config struct {
 	// not survive restart). Required in production. Never logged.
 	VaultMasterKey string
 	// ReconViaWorker routes recon runs through the durable queue: the API enqueues
-	// and the privileged synapse-worker (with CAP_NET_ADMIN for egress) claims + executes
-	// them. Requires Postgres. Default false = the API runs recon in-process (dev).
+	// and the non-root synapse-worker claims and executes them. Scoped egress is
+	// configured by a separate root-owned broker. Requires Postgres. Default false
+	// = the API runs recon in-process (dev).
 	ReconViaWorker bool
+	// EgressBrokerSocket is the root-owned scoped-egress broker Unix socket. The
+	// non-root worker is only a protocol client and receives no network-admin capabilities.
+	EgressBrokerSocket string
+	// EgressGrantAuthorityAddr is the private control-plane listener used only for
+	// machine-authenticated egress grant issuance. It is separate from human API/AUP auth.
+	EgressGrantAuthorityAddr string
+	// EgressGrantAuthorityURL and EgressGrantAuthorityToken configure the worker's
+	// machine-only grant client. The token must not reuse the human bootstrap API token.
+	EgressGrantAuthorityURL   string
+	EgressGrantAuthorityToken string
+	// EgressGrantIssuerToken authenticates workers to the private issuer listener.
+	// EgressGrantSigningSeed is a dedicated Ed25519 seed and must not reuse evidence signing.
+	EgressGrantIssuerToken string
+	EgressGrantSigningSeed string
+	// ToolExecutionMode is the explicit process execution posture. Empty selects a
+	// role- and environment-safe default in ResolveToolExecution.
+	ToolExecutionMode string
 	// AgentEnabled turns on the AI orchestrator. Default false (fail-safe): no
 	// LLM is contacted and no agent endpoints are active unless explicitly enabled.
 	AgentEnabled bool
@@ -268,6 +305,20 @@ type Config struct {
 	// its collected host inventory (facts + packages + coverage) to be persisted as a Kind=host asset.
 	// Off by default; requires FleetEnabled + FleetAssetsEnabled.
 	FleetHostIngestEnabled bool
+	// FleetTelemetryIngestEnabled turns on the agent→control-plane telemetry batch ingest endpoint
+	// (A3, #624): an enrolled agent ships a signed TelemetryBatchManifest which the control plane verifies
+	// (identity + signing key + schema, fail-closed), sequences idempotently, and acks. Off by default;
+	// requires FleetEnabled.
+	FleetTelemetryIngestEnabled bool
+	// FleetDetectionIngestEnabled turns on the agent→control-plane detection batch ingest endpoint (A4,
+	// #625): an enrolled agent ships a signed AgentBatch which the control plane verifies (identity +
+	// signing key + per-detection content digest, fail-closed) and seals once into the evidence chain.
+	// Off by default; requires FleetEnabled.
+	FleetDetectionIngestEnabled bool
+	// FleetKeyRegistrationEnabled turns on the agent-plane signing-key registration endpoint plus the
+	// operator key management routes (A4, #625, A0.2): an agent registers its Ed25519 signing key with a
+	// proof-of-possession. Off by default; requires FleetEnabled.
+	FleetKeyRegistrationEnabled bool
 	// FleetAgentStaleAfter is how long since an agent's last heartbeat before it is reported stale in
 	// the coverage/agent-health views (#413, SYNAPSE_FLEET_STALE_AFTER). <=0 disables the staleness
 	// check. Default 10m, per the issue spec.
@@ -301,6 +352,8 @@ type Config struct {
 	// LeaderTerm is the lease term; LeaderRenew is the renewal interval (must be < Term/2).
 	LeaderTerm  time.Duration
 	LeaderRenew time.Duration
+	// WorkerConcurrency is the number of durable-queue claim loops in one synapse-worker process.
+	WorkerConcurrency int
 	// VulnerabilitySchedulerEnabled dispatches due vulnerability-source syncs and recovers stale
 	// runs. Postgres deployments must also enable fenced leader election to prevent duplicate work.
 	VulnerabilitySchedulerEnabled      bool
@@ -531,11 +584,22 @@ func Load() Config {
 		LogLevel:                         getenv("SYNAPSE_LOG_LEVEL", "info"),
 		SingleTenant:                     getbool("SYNAPSE_SINGLE_TENANT", true),
 		APIToken:                         getenv("SYNAPSE_API_TOKEN", ""),
+		OIDCEnabled:                      getbool("SYNAPSE_OIDC_ENABLED", false),
+		OIDCIssuer:                       getenv("SYNAPSE_OIDC_ISSUER", ""),
+		OIDCClientID:                     getenv("SYNAPSE_OIDC_CLIENT_ID", ""),
+		OIDCClientSecret:                 getenv("SYNAPSE_OIDC_CLIENT_SECRET", ""),
+		OIDCRedirectURL:                  getenv("SYNAPSE_OIDC_REDIRECT_URL", ""),
+		OIDCFrontendURL:                  getenv("SYNAPSE_OIDC_FRONTEND_URL", ""),
+		OIDCTenantID:                     getenv("SYNAPSE_OIDC_TENANT_ID", ""),
+		OIDCGroupRoleMapping:             splitList(getenv("SYNAPSE_OIDC_GROUP_ROLE_MAPPING", "")),
+		OIDCTransactionTTL:               getduration("SYNAPSE_OIDC_TRANSACTION_TTL", 10*time.Minute),
+		OIDCSessionTTL:                   getduration("SYNAPSE_OIDC_SESSION_TTL", 8*time.Hour),
 		AUPVersion:                       getenv("SYNAPSE_AUP_VERSION", "1.0"),
 		AUPFile:                          getenv("SYNAPSE_AUP_FILE", "data/aup-accepted.json"),
 		AuditFile:                        getenv("SYNAPSE_AUDIT_FILE", "data/audit.jsonl"),
 		DBDSN:                            getenv("SYNAPSE_DB_DSN", ""),
 		DBMigrationDSN:                   getenv("SYNAPSE_DB_MIGRATION_DSN", ""),
+		DBAutoMigrate:                    getbool("SYNAPSE_DB_AUTO_MIGRATE", true),
 		SyftBin:                          getenv("SYNAPSE_SYFT_BIN", "syft"),
 		SBOMProducer:                     getenv("SYNAPSE_SBOM_PRODUCER", "syft"),
 		GrypeBin:                         getenv("SYNAPSE_GRYPE_BIN", "grype"),
@@ -577,23 +641,30 @@ func Load() Config {
 
 		ReconAllowCapabilitySensitive: getbool("SYNAPSE_RECON_ALLOW_CAPABILITY_SENSITIVE", false),
 
-		EvidenceSigningSeed: getenv("SYNAPSE_EVIDENCE_SIGNING_SEED", ""),
-		TSAURL:              getenv("SYNAPSE_TSA_URL", ""),
-		SandboxEnabled:      getbool("SYNAPSE_SANDBOX_ENABLED", false),
-		SandboxMemMax:       int64(getint("SYNAPSE_SANDBOX_MEM_MAX", 512<<20)),
-		SandboxPidsMax:      getint("SYNAPSE_SANDBOX_PIDS_MAX", 256),
-		DASTHelperBin:       getenv("SYNAPSE_DAST_HELPER_BIN", "synapse-dast-helper"),
-		DASTMaxReauth:       maxReauth,
-		DASTRatePerSec:      ratePerSec,
-		DASTConcurrency:     concurrency,
-		DASTMaxDepth:        maxDepth,
-		DASTMaxPages:        maxPages,
-		DASTMaxRequests:     maxRequests,
-		DASTMaxWallClock:    maxWallClock,
-		VaultMasterKey:      getenv("SYNAPSE_VAULT_MASTER_KEY", ""),
-		ReconViaWorker:      getbool("SYNAPSE_RECON_VIA_WORKER", false),
-		ToolHashes:          parsePins(getenv("SYNAPSE_TOOL_HASHES", "")),
-		AgentEnabled:        getbool("SYNAPSE_AGENT_ENABLED", false), // needs LLM creds → stays opt-in
+		EvidenceSigningSeed:       getenv("SYNAPSE_EVIDENCE_SIGNING_SEED", ""),
+		TSAURL:                    getenv("SYNAPSE_TSA_URL", ""),
+		SandboxEnabled:            getbool("SYNAPSE_SANDBOX_ENABLED", false),
+		SandboxMemMax:             int64(getint("SYNAPSE_SANDBOX_MEM_MAX", 512<<20)),
+		SandboxPidsMax:            getint("SYNAPSE_SANDBOX_PIDS_MAX", 256),
+		DASTHelperBin:             getenv("SYNAPSE_DAST_HELPER_BIN", "synapse-dast-helper"),
+		DASTMaxReauth:             maxReauth,
+		DASTRatePerSec:            ratePerSec,
+		DASTConcurrency:           concurrency,
+		DASTMaxDepth:              maxDepth,
+		DASTMaxPages:              maxPages,
+		DASTMaxRequests:           maxRequests,
+		DASTMaxWallClock:          maxWallClock,
+		VaultMasterKey:            getenv("SYNAPSE_VAULT_MASTER_KEY", ""),
+		ReconViaWorker:            getbool("SYNAPSE_RECON_VIA_WORKER", false),
+		EgressBrokerSocket:        getenv("SYNAPSE_EGRESS_BROKER_SOCKET", "/run/synapse-egress-broker/egress-broker.sock"),
+		EgressGrantAuthorityAddr:  getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR", ""),
+		EgressGrantAuthorityURL:   getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_URL", ""),
+		EgressGrantAuthorityToken: getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN", ""),
+		EgressGrantIssuerToken:    getenv("SYNAPSE_EGRESS_GRANT_ISSUER_TOKEN", ""),
+		EgressGrantSigningSeed:    getenv("SYNAPSE_EGRESS_GRANT_SIGNING_SEED", ""),
+		ToolExecutionMode:         getenv("SYNAPSE_TOOL_EXECUTION_MODE", ""),
+		ToolHashes:                parsePins(getenv("SYNAPSE_TOOL_HASHES", "")),
+		AgentEnabled:              getbool("SYNAPSE_AGENT_ENABLED", false), // needs LLM creds → stays opt-in
 		// Analysis capabilities default ON so the tool is fully effective out of the box (the UI and a
 		// bare scan get every deterministic, best-effort feature without hunting env flags). Each is
 		// safe to default on: file/compute-based, no external service, and a no-op when its input is
@@ -635,6 +706,9 @@ func Load() Config {
 		FleetEnabled:                          getbool("SYNAPSE_FLEET_ENABLED", false),
 		FleetClusterIngestEnabled:             getbool("SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED", false),
 		FleetHostIngestEnabled:                getbool("SYNAPSE_FLEET_HOST_INGEST_ENABLED", false),
+		FleetTelemetryIngestEnabled:           getbool("SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED", false),
+		FleetDetectionIngestEnabled:           getbool("SYNAPSE_FLEET_DETECTION_INGEST_ENABLED", false),
+		FleetKeyRegistrationEnabled:           getbool("SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED", false),
 		FleetMinAgentVersion:                  strings.TrimSpace(os.Getenv("SYNAPSE_FLEET_MIN_AGENT_VERSION")),
 		FleetAgentStaleAfter:                  getduration("SYNAPSE_FLEET_STALE_AFTER", 10*time.Minute),
 		FleetCoverageFreshnessTarget:          getduration("SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET", 24*time.Hour),
@@ -647,6 +721,7 @@ func Load() Config {
 		LeaderResource:                        getenv("SYNAPSE_LEADER_RESOURCE", "scheduler"),
 		LeaderTerm:                            getduration("SYNAPSE_LEADER_TERM", 15*time.Second),
 		LeaderRenew:                           getduration("SYNAPSE_LEADER_RENEW", 5*time.Second),
+		WorkerConcurrency:                     getint("SYNAPSE_WORKER_CONCURRENCY", defaultWorkerConcurrency),
 		VulnerabilitySchedulerEnabled:         getbool("SYNAPSE_VULNERABILITY_SCHEDULER_ENABLED", false),
 		VulnerabilitySchedulerPollInterval:    getduration("SYNAPSE_VULNERABILITY_SCHEDULER_POLL", time.Minute),
 		VulnerabilitySchedulerStaleAfter:      getduration("SYNAPSE_VULNERABILITY_SCHEDULER_STALE_AFTER", 30*time.Minute),
@@ -851,6 +926,196 @@ func (c Config) IsProduction() bool {
 	default: // production, prod, staging, or any unrecognized/misspelled value → fail closed
 		return true
 	}
+}
+
+// ValidateSandboxPosture rejects a production configuration that would execute tools without containment.
+func (c Config) ValidateSandboxPosture() error {
+	if c.IsProduction() && !c.SandboxEnabled {
+		return errors.New("SYNAPSE_SANDBOX_ENABLED is required in production")
+	}
+	return nil
+}
+
+// ToolExecution is the resolved authority over whether a process may execute external
+// tools against untrusted input itself, or must hand that work to the durable queue.
+// It replaces inferring the boundary from a growing family of per-feature "via worker"
+// booleans, which could not express "this process must never exec a tool".
+type ToolExecution string
+
+const (
+	// ToolExecutionDispatchOnly forbids constructing tool runners in this process: work is
+	// validated, authorized, and enqueued for an execution-capable worker to claim.
+	ToolExecutionDispatchOnly ToolExecution = "dispatch-only"
+	// ToolExecutionWorker executes queued work inside the hardened sandbox.
+	ToolExecutionWorker ToolExecution = "worker"
+	// ToolExecutionInProcess runs tools in the serving process. Development and CLI only.
+	ToolExecutionInProcess ToolExecution = "in-process"
+)
+
+// ProcessRole names the composition root resolving its execution posture. The role is a
+// property of the binary, not of the environment, so it is passed in rather than guessed.
+type ProcessRole string
+
+const (
+	ProcessRoleAPI    ProcessRole = "api"
+	ProcessRoleWorker ProcessRole = "worker"
+	ProcessRoleCLI    ProcessRole = "cli"
+)
+
+// ResolveToolExecution decides how role may execute tools, failing closed on any
+// combination that would let a production API run an untrusted tool locally.
+//
+// Production API pods are dispatch-only: they must not build a sandbox runner, and a
+// missing queue is a startup failure rather than a silent fall back to local execution.
+// The worker is always execution-capable, and the CLI always runs in process because it
+// is the operator's own single-process scanner.
+func (c Config) ResolveToolExecution(role ProcessRole) (ToolExecution, error) {
+	requested := ToolExecution(normalizeEnv(c.ToolExecutionMode))
+	switch role {
+	case ProcessRoleWorker:
+		if requested != "" && requested != ToolExecutionWorker {
+			return "", fmt.Errorf("synapse-worker cannot run as %q: it exists to execute queued work", requested)
+		}
+		if c.DBDSN == "" {
+			return "", errors.New("synapse-worker requires SYNAPSE_DB_DSN: queued execution cannot use process-local persistence")
+		}
+		if c.IsProduction() && !c.SandboxEnabled {
+			return "", errors.New("production synapse-worker requires SYNAPSE_SANDBOX_ENABLED=true")
+		}
+		return ToolExecutionWorker, nil
+	case ProcessRoleCLI:
+		if requested != "" && requested != ToolExecutionInProcess {
+			return "", fmt.Errorf("the CLI scanner cannot run as %q: it has no durable queue", requested)
+		}
+		return ToolExecutionInProcess, nil
+	case ProcessRoleAPI:
+	default:
+		return "", fmt.Errorf("unknown process role %q", role)
+	}
+
+	if requested == "" && (c.ReconViaWorker || c.AgentViaWorker) {
+		requested = ToolExecutionDispatchOnly
+	}
+	switch requested {
+	case ToolExecutionWorker:
+		return "", errors.New("SYNAPSE_TOOL_EXECUTION_MODE=worker is not valid for synapse-api; run synapse-worker instead")
+	case ToolExecutionInProcess:
+		if c.IsProduction() {
+			return "", errors.New("SYNAPSE_TOOL_EXECUTION_MODE=in-process is refused in production: the API must not execute untrusted tools; use dispatch-only with synapse-worker")
+		}
+		return ToolExecutionInProcess, nil
+	case ToolExecutionDispatchOnly:
+		if c.DBDSN == "" {
+			return "", errors.New("SYNAPSE_TOOL_EXECUTION_MODE=dispatch-only requires SYNAPSE_DB_DSN: the durable queue is the only path to an execution worker")
+		}
+		return ToolExecutionDispatchOnly, nil
+	case "":
+		if !c.IsProduction() {
+			return ToolExecutionInProcess, nil
+		}
+		if c.DBDSN == "" {
+			return "", errors.New("production synapse-api requires SYNAPSE_DB_DSN: tool execution is dispatched to synapse-worker through the durable queue")
+		}
+		return ToolExecutionDispatchOnly, nil
+	default:
+		return "", fmt.Errorf("unknown SYNAPSE_TOOL_EXECUTION_MODE %q (want dispatch-only, worker, or in-process)", c.ToolExecutionMode)
+	}
+}
+
+// ValidateEgressGrantPosture fails closed unless production APIs and workers use
+// a distinct machine credential and a dedicated signing authority.
+func (c Config) ValidateEgressGrantPosture(role ProcessRole) error {
+	if !c.IsProduction() {
+		return nil
+	}
+	switch role {
+	case ProcessRoleAPI:
+		if strings.TrimSpace(c.EgressGrantAuthorityAddr) == "" || strings.TrimSpace(c.EgressGrantIssuerToken) == "" || strings.TrimSpace(c.EgressGrantSigningSeed) == "" {
+			return errors.New("production synapse-api requires SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR, SYNAPSE_EGRESS_GRANT_ISSUER_TOKEN, and SYNAPSE_EGRESS_GRANT_SIGNING_SEED")
+		}
+		if c.EgressGrantIssuerToken == c.APIToken {
+			return errors.New("SYNAPSE_EGRESS_GRANT_ISSUER_TOKEN must not reuse SYNAPSE_API_TOKEN")
+		}
+		if c.EgressGrantSigningSeed == c.EvidenceSigningSeed {
+			return errors.New("SYNAPSE_EGRESS_GRANT_SIGNING_SEED must not reuse SYNAPSE_EVIDENCE_SIGNING_SEED")
+		}
+	case ProcessRoleWorker:
+		if strings.TrimSpace(c.EgressGrantAuthorityURL) == "" || strings.TrimSpace(c.EgressGrantAuthorityToken) == "" {
+			return errors.New("production synapse-worker requires SYNAPSE_EGRESS_GRANT_AUTHORITY_URL and SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN")
+		}
+		if c.EgressGrantAuthorityToken == c.APIToken {
+			return errors.New("SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN must not reuse SYNAPSE_API_TOKEN")
+		}
+	default:
+		return fmt.Errorf("unknown process role %q for egress grant posture", role)
+	}
+	return nil
+}
+
+// ValidateNetworkExecutionPosture rejects production network execution kinds that do not yet
+// have a trusted control-plane issuer branch. Development may use the local test egress applier.
+func (c Config) ValidateNetworkExecutionPosture(role ProcessRole) error {
+	if !c.IsProduction() {
+		return nil
+	}
+	switch role {
+	case ProcessRoleAPI, ProcessRoleWorker:
+		if c.CSPMEnabled {
+			return errors.New("production CSPM execution requires authoritative signed CSPM grants and is not yet supported")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown process role %q for network execution posture", role)
+	}
+}
+
+// ValidateMigrationPosture keeps DDL credentials out of long-running production services.
+// Production migrations are owned by the dedicated synapse-migrate command.
+func (c Config) ValidateMigrationPosture() error {
+	if c.IsProduction() && c.DBAutoMigrate {
+		return errors.New("SYNAPSE_DB_AUTO_MIGRATE=false is required in production; run synapse-migrate before starting services")
+	}
+	if c.IsProduction() && c.OIDCEnabled && c.DBDSN == "" {
+		return errors.New("SYNAPSE_DB_DSN is required when OIDC is enabled in production")
+	}
+	return nil
+}
+
+// ValidateWorkerConcurrency bounds in-process queue claim loops so a configuration typo cannot
+// create an unbounded number of privileged executions.
+func (c Config) ValidateWorkerConcurrency() error {
+	if c.WorkerConcurrency < 1 || c.WorkerConcurrency > maxWorkerConcurrency {
+		return fmt.Errorf("SYNAPSE_WORKER_CONCURRENCY must be between 1 and %d (got %d)", maxWorkerConcurrency, c.WorkerConcurrency)
+	}
+	return nil
+}
+
+// ValidateOIDCPosture fails closed when the browser OIDC BFF cannot bind identity/session state to a fixed tenant.
+func (c Config) ValidateOIDCPosture() error {
+	if !c.OIDCEnabled {
+		return nil
+	}
+	if strings.TrimSpace(c.OIDCIssuer) == "" || strings.TrimSpace(c.OIDCClientID) == "" || strings.TrimSpace(c.OIDCClientSecret) == "" || strings.TrimSpace(c.OIDCRedirectURL) == "" || strings.TrimSpace(c.OIDCTenantID) == "" || len(c.OIDCGroupRoleMapping) == 0 || c.OIDCTransactionTTL <= 0 || c.OIDCSessionTTL <= 0 {
+		return errors.New("OIDC requires issuer, client id, client secret, redirect URL, fixed tenant, group-role mapping, and positive lifetimes")
+	}
+	if !validOIDCFrontendURL(c.OIDCFrontendURL) {
+		return errors.New("OIDC requires an absolute HTTPS SYNAPSE_OIDC_FRONTEND_URL without query or fragment")
+	}
+	return nil
+}
+
+func validOIDCFrontendURL(value string) bool {
+	u, err := url.Parse(strings.TrimSpace(value))
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
+}
+
+// MigrationDSN returns the DDL credential when configured, falling back to the runtime
+// credential only for development convenience.
+func (c Config) MigrationDSN() string {
+	if c.DBMigrationDSN != "" {
+		return c.DBMigrationDSN
+	}
+	return c.DBDSN
 }
 
 func getenv(key, def string) string {

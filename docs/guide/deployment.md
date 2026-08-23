@@ -78,6 +78,98 @@ docker build -t synapse:full --target full -f deploy/Dockerfile .
 The build is cgo-free, so the distroless image works with a pure-Go SQLite driver and no
 system libraries.
 
+## Production EKS control plane and EC2 execution tier
+
+The production reference topology keeps `synapse-api`, web, and the ordered migration Job on Amazon EKS.
+Run at least two ready API replicas behind a TLS-terminating ingress. PostgreSQL and S3-compatible evidence
+storage are private, externally operated dependencies rather than Helm-managed StatefulSets.
+
+Production untrusted-tool execution does **not** run in an EKS Pod. Set the API execution posture to
+`dispatch-only`, disable the chart worker with `worker.enabled=false`, and run native non-root
+`synapse-worker` services in dedicated private EC2 worker subnets. [ADR 0008](../adr/0008-native-ec2-execution-tier.md)
+supersedes only ADR 0005's worker-placement decision; ADR 0005 still governs the control plane and migration
+order.
+
+Set `SYNAPSE_DB_AUTO_MIGRATE=false`. The Helm pre-install/pre-upgrade migration Job uses the owner identity
+and must complete before API rollout. Back up PostgreSQL and the evidence object store as a quiesced pair and
+use forward-only schema migration as specified by [ADR 0007](../adr/0007-paired-backup-and-forward-only-upgrades.md).
+
+## Kubernetes control plane
+
+The chart is at [`deploy/helm/synapse`](https://github.com/KKloudTarus/synapse-ce/blob/main/deploy/helm/synapse/README.md).
+It renders two or more APIs, web, and a migration hook while referring only to pre-existing Secrets. Production
+values must disable the in-cluster worker, use digest-qualified images, set `SYNAPSE_SANDBOX_ENABLED=true` as a
+fail-closed configuration invariant, and expose neither metrics nor the machine grant listener through browser
+Ingress.
+
+The grant authority is a separate machine-only API listener behind a private TLS-terminating NLB. Configure its
+dedicated frontend security group, dedicated NLB subnets and fixed private addresses, ACM certificate, and
+`networkPolicySourceCIDRs`. The frontend security group accepts only the native-worker security group. The pod
+NetworkPolicy accepts only the dedicated NLB-subnet CIDRs on the authority backend port. Put the certificate
+hostname in private Route 53 and never reuse the browser API token for this listener.
+
+Run static validation before installation:
+
+```bash
+helm lint --strict deploy/helm/synapse -f deploy/helm/synapse/tests/production-values.yaml
+helm template synapse deploy/helm/synapse -f deploy/helm/synapse/tests/production-values.yaml --kube-version 1.29.0
+(cd deploy/helm/synapse && sh testdata/render_test.sh)
+```
+
+## Native worker image and rollout
+
+`deploy/aws/staging` defines dedicated private worker subnets, an EC2 Image Builder recipe, encrypted Launch
+Template, SSM-only instance role, and an Auto Scaling Group with rolling replacement and automatic rollback.
+Supply governed values through ignored operator inputs: a pinned AL2023 parent image ARN, versioned RPM object
+key and SHA-256 digest, worker runtime-secret ARN, private authority DNS/certificate inputs, and desired capacity.
+Do not put secret payloads, AWS credentials, machine tokens, or private signing seeds in Terraform inputs or
+state.
+
+The AMI build verifies the RPM and systemd units, then runs `/opt/synapse/synapse-sandbox-check -mode=startup
+-strict` as the `synapse-worker` service identity with delegated cgroup v2 and an empty capability set. Do not
+route claims to an image that fails this check. The worker service has no sudo or capabilities; only the separate
+root broker has the narrowly bounded namespace/firewall capabilities required by its typed protocol.
+
+Before a rollout:
+
+1. Run `bash packaging/tests/static.sh`, Terraform formatting/validation/static checks, and inspect a saved plan.
+2. Build the AMI and record the parent AMI, resulting AMI, kernel, release, worker RPM, helper/tool, seccomp, and
+   grant-public-key digests.
+3. Start one disposable instance, use SSM to inspect `systemctl status` and the strict conformance result, and
+   verify the broker replay journal is root-owned mode `0600` on a root-owned state directory.
+4. Prove worker-to-private-NLB TLS using the certificate hostname, and prove other VPC identities cannot connect.
+5. Prove the authority Pod observes only dedicated NLB-subnet sources and that browser Ingress has no authority
+   route.
+6. Start an ASG instance refresh. Verify a terminated worker loses its queue lease, cannot finalize through its
+   stale fence, its entire tool process tree is gone, the instance is replaced, and the replacement passes strict
+   conformance before claiming work. Let automatic rollback retain the previous Launch Template/AMI if a health
+   check fails.
+
+Use SSM Session Manager and `journalctl -u synapse-worker -u synapse-egress-broker`; do not add SSH ingress or a
+key pair. Broker startup recovers stale namespace state before listening. Failed setup consumes its signed grant,
+and replay after worker or broker restart is refused.
+
+## Secret, key, DNS, and certificate rotation
+
+- Rotate the dedicated worker authority bearer token independently from `SYNAPSE_API_TOKEN`. Update the governed
+  worker runtime secret, roll the ASG, verify all new instances, then retire the old authority token.
+- Rotate the Ed25519 grant key by adding the new public key to the AMI/broker configuration, deploying the new
+  API signing seed, waiting longer than the five-minute maximum grant lifetime, and then removing the old public
+  key in a second worker rollout. The private seed never enters worker secrets or Terraform state.
+- Renew the ACM certificate before expiry while retaining the same private hostname, verify NLB TLS from a worker,
+  and only then remove the old certificate. For a hostname change, publish and verify the private Route 53 alias
+  before updating the worker authority URL.
+- Rotate database, object-store, vault, and evidence credentials according to their own dual-read/dual-write
+  procedures; do not bundle them into the broker environment. The broker receives only its grant public key.
+
+## Supported network execution posture
+
+Recon has an authoritative signed-grant issuer. Production refuses CSPM and networked SCA/acquisition until their
+issuer branches can reload authoritative aggregate state and independently derive exact egress. Production API
+composition omits DAST execution workflows, so authenticated DAST and verifier probes cannot start. Do not bypass
+these refusals with host networking, a local privileged egress applier, a worker-supplied policy, or a broadly
+reachable proxy.
+
 ## Production checklist
 
 Required, by variable name. Any `SYNAPSE_ENV` value other than `development`, `dev`, `local`, `test`, or
@@ -108,6 +200,20 @@ Recommended hardening:
 - Back up the database and the evidence object store together; a report depends on both.
 
 `GET /healthz` and `GET /readyz` are unauthenticated by design. Every other API route requires the bearer token.
+
+## Migration rollout
+
+In production, set `SYNAPSE_DB_AUTO_MIGRATE=false` and run `synapse-migrate` with the owner
+credential before deploying API, worker, or MCP binaries. Design migrations as backward-compatible,
+phased changes: expand first, deploy consumers second, then remove obsolete schema only after all
+older consumers are gone. This migrate-first sequence permits an older API to remain serving a
+forward schema only when every additional database migration is applied and has a version strictly
+above that binary's embedded maximum. Missing, down, or divergent required migrations remain
+unready.
+
+The distinction is intentional: an API with a stale schema stays running but reports `503` from
+`/readyz`, allowing the orchestrator to remove it from traffic. `synapse-worker` and `synapse-mcp`
+have no equivalent HTTP readiness endpoint, so they refuse startup until migrations are ready.
 
 ## Metrics and access logging
 

@@ -173,6 +173,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 			os.Exit(1)
 		}
+	case "rulepack":
+		if err := runRulePack(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "synapse-cli:", err)
+			os.Exit(1)
+		}
 	case "coverage":
 		if len(os.Args) < 3 {
 			usage()
@@ -1003,6 +1008,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  synapse-cli rating <path> [--json] [--fail-below GRADE]  # A-E health grades (security/reliability/maintainability) + technical debt – no DB")
 	fmt.Fprintln(os.Stderr, "  synapse-cli gate <path> [--new-code-only] [--base REF] [--gate FILE] [--rules FILE] [--coverage FILE] [--format text|markdown]  # Clean-as-You-Code quality gate")
 	fmt.Fprintln(os.Stderr, "  synapse-cli coverage <lcov|cobertura|jacoco file> [--fail-below PCT] [--top N]  # parse a coverage report (auto-detected)")
+	fmt.Fprintln(os.Stderr, "  synapse-cli rulepack verify|replay|gate ...  # signed detection RulePack verification, fixture replay, and promotion gates")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories <dir>        # ingest a local OSV dump into the owned advisory store (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote     # fetch + ingest app ecosystems from the OSV bulk bucket (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-distros # fetch + ingest OS-package advisories (Debian/Alpine) from OSV (large; requires SYNAPSE_DB_DSN)")
@@ -1089,7 +1095,7 @@ func runScan() {
 
 // syncAdvisories ingests a local OSV advisory dump into the owned advisory store. It requires a
 // Postgres DSN: the owned store is durable reference data, so ingesting into an ephemeral in-memory store
-// would do nothing. Migrations are applied first (the advisories tables may not exist yet), then a DirFeed
+// would do nothing. The database must already be migrated by synapse-migrate, then a DirFeed
 // over the dump directory streams every parseable advisory into the store via the narrow AdvisoryWriter.
 func syncAdvisories(args []string) error {
 	if len(args) < 1 {
@@ -1128,14 +1134,14 @@ func syncAdvisories(args []string) error {
 		src = args[0]
 	}
 	ctx := context.Background()
-	if err := postgres.Migrate(ctx, cfg.DBDSN); err != nil {
-		return fmt.Errorf("apply migrations: %w", err)
-	}
 	pool, err := postgres.Connect(ctx, cfg.DBDSN)
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
 	defer pool.Close()
+	if err := postgres.CheckMigrationsReady(ctx, pool); err != nil {
+		return fmt.Errorf("database migrations are not current; run synapse-migrate: %w", err)
+	}
 	ingest, err := advisoryingest.NewService(feed, postgres.NewAdvisoryRepository(pool))
 	if err != nil {
 		return err

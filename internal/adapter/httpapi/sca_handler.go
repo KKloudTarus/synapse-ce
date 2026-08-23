@@ -176,6 +176,26 @@ func (rt *Router) scanStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, job)
 }
 
+// scanJob returns one asynchronous scan by job ID. The job is resolved first, then its
+// engagement is checked against the authenticated tenant before any job data is returned.
+func (rt *Router) scanJob(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "scan job id is required"})
+		return
+	}
+	job, err := rt.sca.ScanJob(r.Context(), id)
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	if _, err := rt.eng.Get(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(job.EngagementID)); err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
 // latestScan returns the engagement's most recent full scan result (JSON) so the
 // UI can rehydrate the SBOM / vulnerabilities / graph / languages / provenance on
 // page load, not only in the session that ran the scan.

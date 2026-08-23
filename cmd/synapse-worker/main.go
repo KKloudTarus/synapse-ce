@@ -1,22 +1,25 @@
 // Command synapse-worker is the privileged execution worker: it
 // claims recon jobs the API enqueued to the durable queue and runs them under the SAME
 // gate/audit/evidence invariants as the in-process path, but with the sandbox + kernel
-// egress allowlist (it runs with CAP_NET_ADMIN/SYS_ADMIN, which the API lacks). It is a
+// egress allowlist (through a narrow root-owned broker on hardened execution hosts). It is a
 // composition root only – no business logic. It coexists with the API via a role-scoped
-// single-instance lock, and the evidence chain is multi-writer-safe.
+// concurrent queue claim loops, and the evidence chain is multi-writer-safe.
 package main
 
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
@@ -25,7 +28,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cloudsandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
-	egressinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/egress"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/egressbroker"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
@@ -34,9 +37,14 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/license"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensemeta"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/risk"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/vulnerabilityprovider"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/binregistry"
+	"github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/jobs"
@@ -51,10 +59,12 @@ import (
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 	exploitationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/exploitation"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
+	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitycorrelation"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityevaluation"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitymonitor"
@@ -69,7 +79,32 @@ import (
 func main() {
 	cfg := config.Load()
 	log := logging.New(cfg.LogLevel)
-	log.Info("starting synapse-worker", "env", cfg.Environment)
+	toolExecution, err := cfg.ResolveToolExecution(config.ProcessRoleWorker)
+	if err != nil {
+		log.Error("tool execution posture invalid", "err", err)
+		os.Exit(1)
+	}
+	log.Info("starting synapse-worker", "env", cfg.Environment, "tool_execution", toolExecution)
+	if err := cfg.ValidateSandboxPosture(); err != nil {
+		log.Error("sandbox posture invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateMigrationPosture(); err != nil {
+		log.Error("database migration posture invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateWorkerConcurrency(); err != nil {
+		log.Error("worker concurrency invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateEgressGrantPosture(config.ProcessRoleWorker); err != nil {
+		log.Error("egress grant posture invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateNetworkExecutionPosture(config.ProcessRoleWorker); err != nil {
+		log.Error("network execution posture invalid", "err", err)
+		os.Exit(1)
+	}
 
 	// The worker shares the API's Postgres (the queue + the recon/evidence repos), so a DSN
 	// is required – an in-memory queue is not shared across processes.
@@ -77,14 +112,23 @@ func main() {
 		log.Error("synapse-worker requires SYNAPSE_DB_DSN (the durable queue + repos shared with the API)")
 		os.Exit(1)
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	clock := idgen.SystemClock{}
 	ids := idgen.RandomID{}
 
-	startup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	startup, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	if err := postgres.Migrate(startup, cfg.DBDSN); err != nil {
-		log.Error("db migrate failed", "err", err)
-		os.Exit(1)
+	if cfg.DBAutoMigrate {
+		migrationStarted := time.Now()
+		if err := postgres.MigrateLocked(startup, cfg.MigrationDSN()); err != nil {
+			log.Error("db migrate failed", "err", err)
+			os.Exit(1)
+		}
+		log.Info("db migrations complete", "duration", time.Since(migrationStarted))
+	} else {
+		log.Info("db auto-migration disabled; readiness requires current migrations")
 	}
 	pool, err := postgres.ConnectPool(startup, cfg.DBDSN, postgres.PoolConfig{
 		MaxConns: int32(cfg.DBMaxConns), MinConns: int32(cfg.DBMinConns),
@@ -95,21 +139,18 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+	if !cfg.DBAutoMigrate {
+		if err := postgres.CheckMigrationsReady(startup, pool); err != nil {
+			log.Error("database migrations are not current", "err", err)
+			os.Exit(1)
+		}
+	}
 	if err := postgres.CheckRLSRuntimeRole(startup, pool); err != nil {
 		log.Error("the worker DB role cannot enforce row level security – refusing to serve", "err", err)
 		os.Exit(1)
 	}
-	// Role-scoped single-instance lock: one worker, coexisting with one API.
-	lockConn, ok, lerr := postgres.AcquireSingletonLock(startup, pool, "worker")
-	if lerr != nil {
-		log.Error("worker single-instance lock check failed", "err", lerr)
-		os.Exit(1)
-	}
-	if !ok {
-		log.Error("another synapse-worker holds the single-instance lock – run ONE worker")
-		os.Exit(1)
-	}
-	defer lockConn.Release()
+	// Concurrent workers are safe: queue claim fences reject stale deliveries, each run has a
+	// per-run execution lease, and only deployment-global sweepers run under a leader lease.
 
 	// Repos shared with the API.
 	repo := postgres.NewEngagementRepository(pool)
@@ -126,7 +167,14 @@ func main() {
 	vulnerabilityActions := postgres.NewVulnerabilityActionStore(pool)
 	vulnerabilityReconcileRuns := postgres.NewVulnerabilityReconcileRunStore(pool, ids)
 	vulnerabilityTransactions := postgres.NewTenantTransactionRunner(pool)
+	leaderStore := postgres.NewLeaderStore(pool)
 	cloudRunStore := postgres.NewCloudRunStore(pool)
+	scanRepo := postgres.NewScanRepository(pool)
+	scanResultStore := postgres.NewScanResultStore(pool)
+	scanJobStore := postgres.NewScanJobStore(pool)
+	scanRunStore := postgres.NewScanRunStore(pool)
+	findingRepo := postgres.NewFindingRepository(pool)
+	importedSBOMStore := postgres.NewImportedSBOMStore(pool)
 
 	// Credential vault – same master key as the API so secrets resolve.
 	credVault := vault.NewPostgresVault(pool, mustVaultCipher(cfg, log))
@@ -190,6 +238,30 @@ func main() {
 	}
 	evidenceService.SetTimestamper(tsaClient, postgres.NewTimestampStore(pool))
 
+	prov := ports.Provenance{
+		ToolVersions: map[string]string{
+			"go-enry": buildinfo.Module("github.com/go-enry/go-enry/v2"),
+			"synapse": buildinfo.App(),
+		},
+		VulnDBSource: "osv.dev",
+	}
+	scaExecution, eerr := scacompose.BuildExecution(cfg, log, postgres.NewAdvisoryRepository(pool))
+	if eerr != nil {
+		log.Error(eerr.Error())
+		os.Exit(1)
+	}
+	scaService := scauc.NewService(repo, findingRepo, scanRepo, scanResultStore, scanJobStore, scanRunStore, evidenceService, ids, prov, clock, auditLog, shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, scaExecution.Acquirer,
+		enry.New(), scaExecution.SBOMGen, scaExecution.Sources,
+		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil)))
+	scaService.SetImportedSBOMStore(importedSBOMStore)
+	configureCleanup := scacompose.Configure(scaService, cfg, scaExecution.Sandbox, log)
+	defer configureCleanup()
+	if cfg.ComplianceEnabled {
+		scaService.SetComplianceEnabled(true) // attach the AppSec-baseline benchmark (per-control PASS/FAIL)
+		log.Info("compliance report ENABLED (Synapse AppSec Baseline; deterministic, LLM-free)")
+	}
+	scaService.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ScanTimeout+time.Minute))
+
 	// The sandbox is REQUIRED here – the worker exists to run recon contained.
 	sb, serr := sandbox.NewRunner(cfg.ReconTimeout, cfg.ReconMaxOutput, cfg.SandboxMemMax, cfg.SandboxPidsMax)
 	if serr != nil {
@@ -218,18 +290,35 @@ func main() {
 	}
 	sb.SetBinaryRegistry(toolRegistry)
 	egressLive := false
-	if app, aerr := egressinfra.NewApplier(); aerr == nil {
-		probeCtx, pcancel := context.WithTimeout(context.Background(), 10*time.Second)
-		perr := app.Probe(probeCtx)
-		pcancel()
-		if perr == nil {
-			sb.SetEgress(app)
-			sb.SetConnMonitor(ebpf.NewMonitor()) // per-run eBPF connect-log (best-effort)
-			egressLive = true
-			log.Info("worker: kernel egress enforcement enabled")
-		} else {
-			log.Warn("worker has no usable egress (needs CAP_NET_ADMIN/SYS_ADMIN) – recon will be network-isolated", "err", perr)
+	var grantAuthority egressbroker.GrantAuthority
+	if strings.TrimSpace(cfg.EgressGrantAuthorityURL) != "" || strings.TrimSpace(cfg.EgressGrantAuthorityToken) != "" {
+		grantAuthority, err = egressbroker.NewHTTPGrantAuthority(cfg.EgressGrantAuthorityURL, cfg.EgressGrantAuthorityToken, 10*time.Second)
+		if err != nil {
+			log.Error("egress grant authority configuration invalid", "err", err)
+			os.Exit(1)
 		}
+	}
+	broker, berr := egressbroker.NewClient(cfg.EgressBrokerSocket, 10*time.Second, grantAuthority)
+	if berr != nil {
+		log.Error("egress broker configuration invalid", "err", berr)
+		os.Exit(1)
+	}
+	perr := waitForEgressBroker(ctx, broker)
+	if perr == nil && grantAuthority != nil {
+		sb.SetEgressEnforcer(broker)
+		sb.SetConnMonitor(ebpf.NewMonitor()) // per-run eBPF connect-log (best-effort)
+		egressLive = true
+		log.Info("worker: root-owned kernel egress broker enabled")
+	} else if cfg.IsProduction() {
+		if perr == nil {
+			perr = errors.New("egress grant authority is required")
+		}
+		log.Error("production worker requires a usable scoped-egress broker", "err", perr)
+		os.Exit(1)
+	} else if perr != nil {
+		log.Warn("worker has no usable scoped-egress broker – recon will remain network-isolated", "err", perr)
+	} else {
+		log.Warn("worker has no egress grant authority – recon will remain network-isolated")
 	}
 
 	logBroker := logstream.NewBroker(0)
@@ -243,13 +332,12 @@ func main() {
 	if egressLive {
 		reconService.SetSandboxEnforcement(egresspolicy.Compile)
 	}
-	reconService.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute)) // row-lease: no pinned conn
+	reconService.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
+	var maintenanceTasks []func(context.Context)
 	handlers := map[string]worker.Handler{
-		reconuc.JobKind: reconJobHandler{svc: reconService}, // Handle + OnDeadLetter (finalize the run)
+		reconuc.JobKind:   reconJobHandler{svc: reconService}, // Handle + OnDeadLetter (finalize the run)
+		scauc.ScanJobKind: scaJobHandler{svc: scaService},
 	}
 	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
 	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
@@ -278,6 +366,7 @@ func main() {
 		os.Exit(1)
 	}
 	vulnerabilityMonitor.SetRollout(vulnerabilityRollout)
+	vulnerabilityMonitor.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
 	vulnerabilityProjection, err := vulnerabilityprojection.NewService(postgres.NewFindingRepository(pool))
 	if err != nil {
 		log.Error("vulnerability finding projection init failed", "err", err)
@@ -309,6 +398,7 @@ func main() {
 		os.Exit(1)
 	}
 	vulnerabilityReconciliation.SetRollout(vulnerabilityRollout)
+	vulnerabilityReconciliation.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ReconTimeout+time.Minute))
 	vulnerabilitySBOMCorrelation, err := vulnerabilitycorrelation.NewSBOMReconciler(vulnerabilityInventory, vulnerabilityMaterializer, vulnerabilityMaterializer, vulnerabilityOccurrences)
 	if err != nil {
 		log.Error("vulnerability SBOM correlation init failed", "err", err)
@@ -391,6 +481,9 @@ func main() {
 		log.Info("CSPM worker handler ENABLED", "providers", cfg.CSPMProviders)
 	}
 	visibility := cfg.ReconTimeout + time.Minute
+	if cfg.ScanTimeout+time.Minute > visibility {
+		visibility = cfg.ScanTimeout + time.Minute
+	}
 
 	// durable agent runs. Register the agent handler with a DEDICATED
 	// dispatcher-backed recon service (its own pool, NO SetQueue) – so the agent executor's
@@ -516,42 +609,115 @@ func main() {
 			_, err = queue.Enqueue(tenantCtx, orchestrator.JobKind, p)
 			return err
 		})
-		go reconciler.Run(ctx, 5*time.Minute)
-		go approvalSvc.RunSweeper(ctx, cfg.ApprovalSweepInterval)
+		maintenanceTasks = append(maintenanceTasks,
+			func(ctx context.Context) { reconciler.Run(ctx, 5*time.Minute) },
+			func(ctx context.Context) { approvalSvc.RunSweeper(ctx, cfg.ApprovalSweepInterval) },
+		)
 		if cfg.AgentMaxDuration+time.Minute > visibility {
 			visibility = cfg.AgentMaxDuration + time.Minute
 		}
 		log.Info("AI agent worker handler ENABLED (durable)", "model", cfg.LLMModel)
 	}
 
-	// Stale-run sweeper: reclaim recon runs a crash left `running` with no live owner
-	// – i.e. stranded WITHOUT a dead-letter event (the dead-letter hook covers only jobs that
-	// dead-letter). Lease-as-liveness: an acquirable lease means no live owner. Immediate pass,
-	// then every 5m, until shutdown.
-	go func() {
-		staleFor := cfg.ReconTimeout + 5*time.Minute
-		t := time.NewTicker(5 * time.Minute)
-		defer t.Stop()
-		for {
-			if n, err := reconService.SweepStaleRuns(ctx, staleFor); err != nil && ctx.Err() == nil {
-				log.Warn("recon stale-run sweep failed", "err", err)
-			} else if n > 0 {
-				log.Info("recon stale-run sweeper reclaimed stranded runs", "count", n)
+	// Deployment-global recovery work is leader-gated. Queue claim loops are deliberately
+	// not leader-gated: every worker must claim and execute durable jobs.
+	maintenanceTasks = append(maintenanceTasks,
+		func(ctx context.Context) {
+			staleFor := cfg.ScanTimeout + 5*time.Minute
+			t := time.NewTicker(5 * time.Minute)
+			defer t.Stop()
+			for {
+				if n, err := scaService.SweepStaleScans(ctx, staleFor); err != nil && ctx.Err() == nil {
+					log.Warn("sca stale-scan sweep failed", "err", err)
+				} else if n > 0 {
+					log.Info("sca stale-scan sweeper reclaimed stranded scans", "count", n)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+				}
 			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
+		},
+		func(ctx context.Context) {
+			staleFor := cfg.ReconTimeout + 5*time.Minute
+			t := time.NewTicker(5 * time.Minute)
+			defer t.Stop()
+			for {
+				if n, err := reconService.SweepStaleRuns(ctx, staleFor); err != nil && ctx.Err() == nil {
+					log.Warn("recon stale-run sweep failed", "err", err)
+				} else if n > 0 {
+					log.Info("recon stale-run sweeper reclaimed stranded runs", "count", n)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+				}
 			}
-		}
-	}()
+		},
+	)
 
-	w := worker.New(queue, handlers, worker.Config{Visibility: visibility, MaxAttempts: 3}, log)
-	if err := w.Run(ctx); err != nil && ctx.Err() == nil {
-		log.Error("worker exited with error", "err", err)
-		os.Exit(1)
+	if cfg.LeaderElectionEnabled {
+		resource := cfg.LeaderResource + "-worker-maintenance"
+		elector, eerr := leaderuc.NewElector(leaderStore, auditLog, clock, resource, ids.NewID().String(), cfg.LeaderTerm, cfg.LeaderRenew)
+		if eerr != nil {
+			log.Error("worker leader election configuration invalid", "err", eerr)
+			os.Exit(1)
+		}
+		go elector.Run(ctx)
+		go func() {
+			var maintenanceCancel context.CancelFunc
+			wasLeader := false
+			t := time.NewTicker(time.Second)
+			defer t.Stop()
+			defer func() {
+				if maintenanceCancel != nil {
+					maintenanceCancel()
+				}
+			}()
+			for {
+				leader := elector.IsLeader()
+				if leader && !wasLeader {
+					maintenanceCtx, cancel := context.WithCancel(ctx)
+					maintenanceCancel = cancel
+					for _, task := range maintenanceTasks {
+						go task(maintenanceCtx)
+					}
+				}
+				if !leader && wasLeader && maintenanceCancel != nil {
+					maintenanceCancel()
+					maintenanceCancel = nil
+				}
+				wasLeader = leader
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+				}
+			}
+		}()
+		log.Info("worker maintenance leader election ENABLED", "resource", resource, "term", cfg.LeaderTerm, "renew", cfg.LeaderRenew)
+	} else {
+		// Keep the single-worker behavior explicit: without leader election, maintenance runs here.
+		for _, task := range maintenanceTasks {
+			go task(ctx)
+		}
 	}
-	log.Info("synapse-worker stopped")
+
+	var loops sync.WaitGroup
+	for i := 0; i < cfg.WorkerConcurrency; i++ {
+		loops.Add(1)
+		go func(loop int) {
+			defer loops.Done()
+			w := worker.New(queue, handlers, worker.Config{Visibility: visibility, MaxAttempts: 3}, log.With("loop", loop+1))
+			if err := w.Run(ctx); err != nil && ctx.Err() == nil {
+				log.Error("worker claim loop exited with error", "loop", loop+1, "err", err)
+			}
+		}(i)
+	}
+	loops.Wait()
+	log.Info("synapse-worker stopped", "loops", cfg.WorkerConcurrency)
 }
 
 // mustVaultCipher builds the vault cipher from the master key (ephemeral in dev), exiting
@@ -559,6 +725,16 @@ func main() {
 // production fail-closed guard: without a configured key the worker would seal/resolve under a
 // per-process ephemeral key that diverges from the API's, so every credentialed recon run
 // breaks. Fail closed in production rather than fail open to an ephemeral key.
+type egressReadinessWaiter interface {
+	WaitReady(context.Context, time.Duration) error
+}
+
+func waitForEgressBroker(ctx context.Context, broker egressReadinessWaiter) error {
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return broker.WaitReady(probeCtx, 100*time.Millisecond)
+}
+
 func mustVaultCipher(cfg config.Config, log *slog.Logger) *vault.Cipher {
 	var key []byte
 	if cfg.VaultMasterKey != "" {
@@ -586,6 +762,20 @@ func mustVaultCipher(cfg config.Config, log *slog.Logger) *vault.Cipher {
 		os.Exit(1)
 	}
 	return c
+}
+
+// scaJobHandler binds the SCA service to the worker's Handler + DeadLetterer interfaces:
+// running a scan job is RunScanJob; dead-lettering one finalizes the backing ScanJob to a
+// terminal failed state (parity with recon + agent), so a stranded scan is operator-visible
+// rather than stuck non-terminal with no result.
+type scaJobHandler struct{ svc *scauc.Service }
+
+func (h scaJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	return h.svc.RunScanJob(ctx, job.Payload)
+}
+
+func (h scaJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause error) error {
+	return h.svc.FailStrandedScanJob(ctx, job.Payload, cause)
 }
 
 // reconJobHandler binds the recon service to the worker's Handler + DeadLetterer interfaces:

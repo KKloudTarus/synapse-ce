@@ -1,0 +1,8 @@
+# Create this bucket, the DynamoDB lock table, and its KMS policy in a separately governed
+# state-bootstrap account or stack. Do not use the disposable environment's bucket for state.
+bucket         = "REPLACE-WITH-DEDICATED-TERRAFORM-STATE-BUCKET"
+key            = "synapse/staging/terraform.tfstate"
+region         = "us-east-1"
+dynamodb_table = "REPLACE-WITH-TERRAFORM-LOCK-TABLE"
+encrypt        = true
+# Optional: kms_key_id = "arn:aws:kms:us-east-1:...:key/..."

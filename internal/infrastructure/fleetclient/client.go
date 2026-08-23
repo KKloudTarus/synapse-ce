@@ -7,13 +7,18 @@ package fleetclient
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 const protoHeader = "X-Synapse-Fleet-Proto"
@@ -26,6 +31,52 @@ const maxResponseBytes = 8 << 20
 type Client struct {
 	baseURL string
 	http    *http.Client
+}
+
+// HTTPError preserves the response metadata the durable delivery loop needs to distinguish retryable
+// backpressure/server failures from permanent 4xx failures and a revoked signing key. Body is a bounded,
+// trimmed diagnostic snippet and must never contain the bearer credential (headers are not copied).
+type HTTPError struct {
+	Method     string
+	Path       string
+	StatusCode int
+	RetryAfter string
+	Body       string
+}
+
+// NetworkError distinguishes a request that never received an HTTP response from a permanent local
+// validation/state failure. Durable shippers may retry it with bounded jitter.
+type NetworkError struct {
+	Method string
+	Path   string
+	Err    error
+}
+
+func (e *NetworkError) Error() string {
+	return fmt.Sprintf("fleetclient: %s %s: %v", e.Method, e.Path, e.Err)
+}
+func (e *NetworkError) Unwrap() error { return e.Err }
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("fleetclient: %s %s: status %d: %s", e.Method, e.Path, e.StatusCode, e.Body)
+}
+
+// ResponseStatus lets delivery use cases classify the response without depending on this adapter.
+func (e *HTTPError) ResponseStatus() (int, string) { return e.StatusCode, e.RetryAfter }
+
+// HTTPStatus returns the status metadata carried by an HTTPError.
+func HTTPStatus(err error) (status int, retryAfter string, ok bool) {
+	var target *HTTPError
+	if !errors.As(err, &target) {
+		return 0, "", false
+	}
+	return target.StatusCode, target.RetryAfter, true
+}
+
+// IsNetworkError reports whether the request failed before an HTTP response was available.
+func IsNetworkError(err error) bool {
+	var target *NetworkError
+	return errors.As(err, &target)
 }
 
 // New builds a client for baseURL (e.g. https://control-plane). timeout bounds each request.
@@ -119,6 +170,28 @@ func (c *Client) SendHostInventory(ctx context.Context, token string, inv any) e
 	return c.do(ctx, http.MethodPost, "/api/v1/fleet/inventory/host", token, inv, nil)
 }
 
+// RegisterDetectionKey registers an agent-owned detection signing key with proof-of-possession. The
+// private key never enters this adapter; only the public lifecycle record and its PoP signature cross
+// the wire. Registration is idempotent server-side.
+func (c *Client) RegisterDetectionKey(ctx context.Context, token string, key fleetagent.AgentSigningKey, proof string) error {
+	body := map[string]any{
+		"public_key": base64.StdEncoding.EncodeToString(key.PublicKey),
+		"purpose":    string(key.Purpose), "not_before": key.NotBefore, "not_after": key.NotAfter,
+		"proof": proof,
+	}
+	return c.do(ctx, http.MethodPost, "/api/v1/fleet/keys", token, body, nil)
+}
+
+// SendDetectionBatch posts one signed detection batch. A 2xx response means the complete membership was
+// durably admitted (or idempotently skipped), which is the point at which the caller may ACK its WAL.
+func (c *Client) SendDetectionBatch(ctx context.Context, token string, batch fleetagent.AgentBatch, items []fleetagent.DetectionBatchItem) error {
+	body := struct {
+		Batch fleetagent.AgentBatch           `json:"batch"`
+		Items []fleetagent.DetectionBatchItem `json:"items"`
+	}{Batch: batch, Items: items}
+	return c.do(ctx, http.MethodPost, "/api/v1/fleet/detections", token, body, nil)
+}
+
 func (c *Client) do(ctx context.Context, method, path, token string, body, out any) error {
 	var reader io.Reader
 	if body != nil {
@@ -139,12 +212,13 @@ func (c *Client) do(ctx context.Context, method, path, token string, body, out a
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("fleetclient: %s %s: %w", method, path, err)
+		return &NetworkError{Method: method, Path: path, Err: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("fleetclient: %s %s: status %d: %s", method, path, resp.StatusCode, string(snippet))
+		return &HTTPError{Method: method, Path: path, StatusCode: resp.StatusCode,
+			RetryAfter: resp.Header.Get("Retry-After"), Body: strings.TrimSpace(string(snippet))}
 	}
 	if out != nil {
 		// Cap the decoded body: Timeout bounds time, not size, and the control plane is not fully
@@ -156,3 +230,5 @@ func (c *Client) do(ctx context.Context, method, path, token string, body, out a
 	}
 	return nil
 }
+
+var _ ports.DetectionTransport = (*Client)(nil)

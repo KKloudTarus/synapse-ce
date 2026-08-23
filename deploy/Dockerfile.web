@@ -1,38 +1,31 @@
-# Synapse web – Vite dev server. Used by docker-compose.full.yml as the `web` service.
-#
-# Vite proxies /api and /healthz to the `synapse-api` compose service on :8080,
-# so the SPA on :5173 talks to the same backend the CLI would.
-#
-# Build: docker compose -f deploy/docker-compose.full.yml up -d --build web
+# Synapse web dashboard images.
+# `dev` preserves the Compose hot-reload target. `production` is a non-root static server;
+# Kubernetes ingress routes /api, /healthz, and /readyz directly to synapse-api.
 
-FROM node:22-alpine
+FROM node:22-alpine AS build
 WORKDIR /app
-
-# pnpm via corepack (ships with Node 22).
 RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
-
-# Copy lockfile + manifest first for layer caching.
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
-
-# pnpm 11 reads build-script approval from pnpm-workspace.yaml (`allowBuilds`),
-# not from package.json or .npmrc. The project file approves esbuild's
-# postinstall; without it, pnpm exits with ERR_PNPM_IGNORED_BUILDS.
 RUN pnpm install --frozen-lockfile --config.trustLockfile=true
-
-# The rest of the source – bind-mount in dev for hot reload (see compose).
 COPY web/ .
+RUN pnpm build
 
-# Drop to the image's built-in non-root `node` user (uid 1000) instead of running the dev server as
-# root. Own /app so pnpm/Vite can write their caches (node_modules/.vite) under the unprivileged user.
+FROM node:22-alpine AS dev
+WORKDIR /app
+RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile --config.trustLockfile=true
+COPY web/ .
 RUN chown -R node:node /app
 USER node
-
-# Vite dev server. --host 0.0.0.0 so it's reachable from the host.
-# VITE_API_PROXY_TARGET is the in-network API URL (compose DNS resolves the service name).
-ENV CI=true
-ENV NPM_CONFIG_TRUST_LOCKFILE=true
-ENV VITE_API_PROXY_TARGET=http://synapse-api:8080
+ENV CI=true \
+    NPM_CONFIG_TRUST_LOCKFILE=true \
+    VITE_API_PROXY_TARGET=http://synapse-api:8080
 EXPOSE 5173
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
     CMD wget -qO- http://127.0.0.1:5173/ >/dev/null 2>&1 || exit 1
 CMD ["pnpm", "dev", "--host", "0.0.0.0", "--port", "5173"]
+
+FROM nginxinc/nginx-unprivileged:1.29-alpine AS production
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 8080

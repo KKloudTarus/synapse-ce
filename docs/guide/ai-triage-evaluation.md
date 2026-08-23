@@ -339,7 +339,24 @@ go run ./cmd/synapse-fptriage-release \
 One PM and one Security reviewer must independently add approvals in canonical order. They must be
 distinct human identities; model names and reserved machine principals are rejected. Each approval
 contains `role`, `reviewer`, `approved: true`, a rationale, a UTC `reviewed_at`, and the exact
-`reviewed_sha256` printed above. After approval, create the first ledger:
+`reviewed_sha256` printed above.
+
+Recording a decision also requires `--human-approvers`, an operator-owned allowlist of the identities
+permitted to approve a release — one per line, `#` comments allowed, and the file must not grant group
+or other access. The manifest names its own approvers, so the allowlist is what admits an identity from
+outside the artifact being validated; the machine-prefix denylist only rejects the non-human identity
+families this codebase already mints, and cannot recognise one it has never heard of. Printing the review
+digest does not require the allowlist, because at that point nobody has approved anything yet.
+
+```
+# operator-owned; readable only by the release operator
+pm@example.com
+security@example.com
+```
+
+The allowlist is checked when a decision is admitted, never when an existing ledger is re-validated. An
+approver who later leaves the allowlist does not invalidate the decisions they already signed, and a
+stored ledger still loads where the allowlist is unavailable. After approval, create the first ledger:
 
 ```bash
 go run ./cmd/synapse-fptriage-release \
@@ -347,6 +364,7 @@ go run ./cmd/synapse-fptriage-release \
   --comparison ai-triage-comparison.json \
   --baseline ai-triage-baseline.json \
   --candidate ai-triage-candidate.json \
+  --human-approvers ai-triage-human-approvers.txt \
   --output ai-triage-release-ledger-v2.json
 ```
 

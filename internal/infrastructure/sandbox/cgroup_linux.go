@@ -7,17 +7,17 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
-const cgroupRoot = "/sys/fs/cgroup"
+const (
+	cgroupRoot        = "/sys/fs/cgroup"
+	cgroupManagerName = "synapse-manager"
+)
 
-// runCgroup is a per-run cgroup v2 with hard resource limits (F3). The tool is created
-// inside it via clone-into-cgroup (CgroupFD), so memory.max + pids.max bound a memory or
-// fork bomb on EVERY execution path – egress and isolated alike – without depending on
-// systemd-run. Creating a cgroup needs write access to /sys/fs/cgroup (root / CAP delegated);
-// the egress path always has it, so the privileged runs that touch hostile networks are
-// always limited. When creation isn't permitted, newRunCgroup errors and the caller falls
-// back to the best-effort systemd-run limiter.
+// runCgroup is a per-run cgroup v2 with hard resource limits (F3). The service
+// uses systemd Delegate=yes, moves itself into a manager child, and creates run
+// siblings beneath the assigned unit cgroup. It never writes outside that subtree.
 type runCgroup struct {
 	path string
 	dir  *os.File
@@ -25,9 +25,83 @@ type runCgroup struct {
 
 // newRunCgroup creates the cgroup, writes the limits (checked – a failed limit write is an
 // error, never a silently-unlimited cgroup), and opens its dir fd for clone-into-cgroup.
-func newRunCgroup(seq int64, memMax int64, pidsMax int) (*runCgroup, error) {
-	path := filepath.Join(cgroupRoot, fmt.Sprintf("synapse-run-%d", seq))
-	_ = os.Remove(path) // defensive: clear a stale dir from a crashed prior run
+// prepareDelegatedCgroup prepares the service's systemd-delegated cgroup v2 subtree.
+func prepareDelegatedCgroup() (string, error) {
+	membership, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return "", fmt.Errorf("read cgroup membership: %w", err)
+	}
+	return prepareDelegatedCgroupAt(cgroupRoot, membership, os.Getpid())
+}
+
+func prepareDelegatedCgroupAt(root string, membership []byte, pid int) (string, error) {
+	membershipRoot, err := unifiedCgroupRoot(root, membership)
+	if err != nil {
+		return "", err
+	}
+	unitRoot := membershipRoot
+	if filepath.Base(membershipRoot) == cgroupManagerName {
+		unitRoot = filepath.Dir(membershipRoot)
+	}
+	controllers, err := os.ReadFile(filepath.Join(unitRoot, "cgroup.controllers"))
+	if err != nil {
+		return "", fmt.Errorf("read delegated controllers: %w", err)
+	}
+	available := make(map[string]bool)
+	for _, controller := range strings.Fields(string(controllers)) {
+		available[controller] = true
+	}
+	for _, required := range []string{"memory", "pids"} {
+		if !available[required] {
+			return "", fmt.Errorf("delegated cgroup controller %q is unavailable", required)
+		}
+	}
+
+	manager := filepath.Join(unitRoot, cgroupManagerName)
+	if err := os.Mkdir(manager, 0o755); err != nil && !os.IsExist(err) {
+		return "", fmt.Errorf("create cgroup manager child: %w", err)
+	}
+	if membershipRoot != manager {
+		if err := os.WriteFile(filepath.Join(manager, "cgroup.procs"), []byte(strconv.Itoa(pid)), 0o644); err != nil {
+			return "", fmt.Errorf("move service into cgroup manager child: %w", err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(unitRoot, "cgroup.subtree_control"), []byte("+memory +pids"), 0o644); err != nil {
+		return "", fmt.Errorf("enable delegated cgroup controllers: %w", err)
+	}
+	return unitRoot, nil
+}
+
+func unifiedCgroupRoot(root string, membership []byte) (string, error) {
+	var relative string
+	for _, line := range strings.Split(strings.TrimSpace(string(membership)), "\n") {
+		if strings.HasPrefix(line, "0::") {
+			relative = strings.TrimPrefix(line, "0::")
+			break
+		}
+	}
+	if relative == "" || !strings.HasPrefix(relative, "/") {
+		return "", fmt.Errorf("unified cgroup v2 membership is unavailable")
+	}
+	for _, part := range strings.Split(relative, "/") {
+		if part == ".." {
+			return "", fmt.Errorf("invalid unified cgroup path")
+		}
+	}
+	cleanRoot := filepath.Clean(root)
+	joined := filepath.Join(cleanRoot, filepath.FromSlash(strings.TrimPrefix(relative, "/")))
+	if joined != cleanRoot && !strings.HasPrefix(joined, cleanRoot+string(os.PathSeparator)) {
+		return "", fmt.Errorf("unified cgroup path escapes cgroup root")
+	}
+	return joined, nil
+}
+
+func newRunCgroup(root string, seq int64, memMax int64, pidsMax int) (*runCgroup, error) {
+	if root == "" {
+		return nil, fmt.Errorf("delegated cgroup root is unavailable")
+	}
+	path := filepath.Join(root, fmt.Sprintf("synapse-run-%d-%d", os.Getpid(), seq))
+	_ = os.Remove(path) // defensive: clear a stale empty dir from a failed setup
 	if err := os.Mkdir(path, 0o755); err != nil {
 		return nil, fmt.Errorf("create cgroup: %w", err)
 	}
@@ -43,10 +117,6 @@ func newRunCgroup(seq int64, memMax int64, pidsMax int) (*runCgroup, error) {
 			cg.Close()
 			return nil, err
 		}
-		// No swap escape hatch – a memory bomb must not spill into swap to evade memory.max.
-		// Checked: if the controller is present but the write fails, fail the cgroup (the
-		// caller falls back) rather than silently allowing swap-based evasion. Skipped only
-		// when swap accounting is absent (file missing → write returns an error we tolerate).
 		if _, statErr := os.Stat(filepath.Join(path, "memory.swap.max")); statErr == nil {
 			if err := write("memory.swap.max", "0"); err != nil {
 				cg.Close()

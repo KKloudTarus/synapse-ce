@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synapse.kkloudtarus.net/schemas/operations-drill-evidence-envelope/v1.json",
+  "title": "Operations drill evidence envelope",
+  "description": "Versioned, redacted summary of a paired backup, restore, or rollback-on-copy drill.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "drill_id",
+    "run_id",
+    "runbook",
+    "environment",
+    "execution",
+    "assertions",
+    "result",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "drill_id": {
+      "type": "string",
+      "pattern": "^OPS-DRILL-[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "runbook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identifier", "revision", "sha256"],
+      "properties": {
+        "identifier": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "revision": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "environment": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started_at", "completed_at", "complete"],
+      "properties": {
+        "started_at": { "type": "string", "format": "date-time" },
+        "completed_at": { "type": "string", "format": "date-time" },
+        "complete": { "type": "boolean" }
+      }
+    },
+    "assertions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "required", "status", "summary"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          },
+          "required": { "type": "boolean" },
+          "status": { "enum": ["passed", "failed", "not-run"] },
+          "summary": { "type": "string", "minLength": 1, "maxLength": 4000 }
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "rule"],
+      "properties": {
+        "status": { "enum": ["passed", "failed", "inconclusive"] },
+        "rule": {
+          "enum": [
+            "complete-and-all-required-assertions-passed",
+            "complete-and-a-required-assertion-failed",
+            "execution-incomplete"
+          ]
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "sha256", "bytes", "media_type", "redacted_summary", "sanitization"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          },
+          "sha256": { "$ref": "#/$defs/sha256" },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "media_type": { "type": "string", "minLength": 1, "maxLength": 255 },
+          "redacted_summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+          "sanitization": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "reviewed_by"],
+            "properties": {
+              "status": { "enum": ["redacted", "no-sensitive-content-confirmed"] },
+              "reviewed_by": { "type": "string", "minLength": 1, "maxLength": 256 }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "result": { "properties": { "status": { "const": "passed" } } } } },
+      "then": {
+        "properties": {
+          "execution": { "properties": { "complete": { "const": true } } },
+          "result": { "properties": { "rule": { "const": "complete-and-all-required-assertions-passed" } } },
+          "assertions": {
+            "not": {
+              "contains": {
+                "properties": {
+                  "required": { "const": true },
+                  "status": { "enum": ["failed", "not-run"] }
+                },
+                "required": ["required", "status"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "result": { "properties": { "status": { "const": "failed" } } } } },
+      "then": {
+        "properties": {
+          "execution": { "properties": { "complete": { "const": true } } },
+          "result": { "properties": { "rule": { "const": "complete-and-a-required-assertion-failed" } } },
+          "assertions": {
+            "contains": {
+              "properties": {
+                "required": { "const": true },
+                "status": { "const": "failed" }
+              },
+              "required": ["required", "status"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "result": { "properties": { "status": { "const": "inconclusive" } } } } },
+      "then": {
+        "properties": {
+          "execution": { "properties": { "complete": { "const": false } } },
+          "result": { "properties": { "rule": { "const": "execution-incomplete" } } }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

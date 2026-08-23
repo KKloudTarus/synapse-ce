@@ -17,13 +17,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/httpapi"
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
+	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
@@ -32,17 +34,16 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/fptriagecache"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastchecks"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastengine"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
 	egressinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/egress"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/egressbroker"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetca"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
+	oidcadapter "github.com/KKloudTarus/synapse-ce/internal/infrastructure/oidc"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/file"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
@@ -52,55 +53,30 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourcesnippet"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gomodgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/govulncheck"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/grype"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ignorefile"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarchecksum"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarhash"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarlicense"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jsimports"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jsresolve"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jvmreach"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/license"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensefile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensemeta"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/manifest"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/manifestresolve"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavencoord"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavenresolve"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/misconfig"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/msi"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/npmresolve"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/nvd"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ospkg"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/osv"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownadvisory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownsbom"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/pyimports"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/qualityprofile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/risk"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/secretscan"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/srcimports"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/syft"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/taintcallgraph"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/vexfile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/vulnerabilityprovider"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/binregistry"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
+	"github.com/KKloudTarus/synapse-ce/internal/platform/executionmode"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/httpserver"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/jobs"
@@ -124,6 +100,7 @@ import (
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
 	egresspolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/egress"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/egressgrant"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
@@ -134,10 +111,13 @@ import (
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
 	detectledger "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectledger"
 	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
+	keyregistry "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/keyregistry"
+	telemetryingest "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/telemetryingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetrolloutuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
+	identitybff "github.com/KKloudTarus/synapse-ce/internal/usecase/identitybff"
+	identityuc "github.com/KKloudTarus/synapse-ce/internal/usecase/identityuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/jsreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/llmverifier"
@@ -220,22 +200,6 @@ func metricsAddrIsLoopback(addr string) bool {
 	return ip.IsLoopback()
 }
 
-func migrationDSNForStartup(cfg config.Config) (string, error) {
-	migrationDSN := cfg.DBMigrationDSN
-	if migrationDSN == "" {
-		if cfg.IsProduction() {
-			return "", fmt.Errorf("SYNAPSE_DB_MIGRATION_DSN is required with SYNAPSE_DB_DSN outside development")
-		}
-		return cfg.DBDSN, nil
-	}
-	if cfg.IsProduction() {
-		if err := postgres.ValidateMigrationRoleSeparation(migrationDSN, cfg.DBDSN); err != nil {
-			return "", fmt.Errorf("validate migration and runtime database roles: %w", err)
-		}
-	}
-	return migrationDSN, nil
-}
-
 func main() {
 	cfg := config.Load()
 	if cfg.CSPMEnabled && !cfg.FleetAssetsEnabled {
@@ -247,7 +211,34 @@ func main() {
 		os.Exit(1)
 	}
 	log := logging.New(cfg.LogLevel)
-	log.Info("starting synapse-api", "env", cfg.Environment, "single_tenant", cfg.SingleTenant)
+	toolExecution, err := cfg.ResolveToolExecution(config.ProcessRoleAPI)
+	if err != nil {
+		log.Error("tool execution posture invalid", "err", err)
+		os.Exit(1)
+	}
+	log.Info("starting synapse-api", "env", cfg.Environment, "single_tenant", cfg.SingleTenant, "tool_execution", toolExecution)
+	if toolExecution == config.ToolExecutionInProcess {
+		if err := cfg.ValidateSandboxPosture(); err != nil {
+			log.Error("sandbox posture invalid", "err", err)
+			os.Exit(1)
+		}
+	}
+	if err := cfg.ValidateMigrationPosture(); err != nil {
+		log.Error("database migration posture invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateOIDCPosture(); err != nil {
+		log.Error("OIDC posture invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateEgressGrantPosture(config.ProcessRoleAPI); err != nil {
+		log.Error("egress grant posture invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateNetworkExecutionPosture(config.ProcessRoleAPI); err != nil {
+		log.Error("network execution posture invalid", "err", err)
+		os.Exit(1)
+	}
 
 	// Fail closed: no anonymous access. The token is never logged.
 	if cfg.APIToken == "" {
@@ -257,9 +248,13 @@ func main() {
 
 	clock := idgen.SystemClock{}
 	ids := idgen.RandomID{}
-	acquirer := acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled).WithComparisonDepth(cfg.ProjectGitComparisonDepth)
+	var acquirer ports.Acquirer
+	if toolExecution == config.ToolExecutionDispatchOnly {
+		acquirer = executionmode.DispatchOnly{}
+	}
 
 	// Persistence: PostgreSQL when configured, else file + in-memory (dev).
+	var databasePool *pgxpool.Pool
 	var repo ports.EngagementRepository
 	var projectRepo ports.ProjectRepository
 	var assetStore ports.AssetRepository
@@ -267,8 +262,10 @@ func main() {
 	var scannedImageStore ports.ScannedImageStore
 	var workOrderStore ports.WorkOrderStore
 	var fleetAgentStore ports.FleetAgentStore
-	var fleetRolloutStore ports.FleetRolloutStore // operator update-rollout plans (#412 req 9)
-	var leaderStore ports.LeaderStore             // postgres only; nil in memory mode (single process)
+	var agentSigningKeyStore ports.AgentSigningKeyStore       // A0.2 signing-key registry (A3 resolve+verify)
+	var telemetryTransportStore ports.TelemetryTransportStore // A3 telemetry transport sequencing state
+	var fleetRolloutStore ports.FleetRolloutStore             // operator update-rollout plans (#412 req 9)
+	var leaderStore ports.LeaderStore                         // postgres only; nil in memory mode (single process)
 	var findingRepo ports.FindingRepository
 	var judgmentStore interface {
 		analysisuc.Store
@@ -277,6 +274,7 @@ func main() {
 	var commentRepo ports.CommentRepository
 	var retestRepo ports.RetestRepository
 	var userRepo ports.UserRepository
+	var identityStore ports.IdentityStore
 	var auditReader ports.AuditReader
 	var scanRepo ports.ScanRepository
 	var scanResultStore ports.ScanResultStore
@@ -358,25 +356,25 @@ func main() {
 	}()
 
 	if cfg.DBDSN != "" {
-		// Bounded so a migration that blocks can't hang boot forever. NOTE: no
-		// advisory lock yet – run a single instance (or a one-shot migrate job)
-		// until multi-replica horizontal scaling lands (P5).
+		// Bounded so a contended migration lock cannot hang boot forever.
 		startup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		migrationDSN, err := migrationDSNForStartup(cfg)
-		if err != nil {
-			log.Error("database migration configuration invalid", "err", err)
-			os.Exit(1)
-		}
-		if err := postgres.Migrate(startup, migrationDSN); err != nil {
-			log.Error("db migrate failed", "err", err)
-			os.Exit(1)
-		}
-		if migrationDSN != cfg.DBDSN {
-			if err := postgres.GrantRuntimePrivileges(startup, migrationDSN, cfg.DBDSN); err != nil {
-				log.Error("db runtime role grant failed", "err", err)
+		if cfg.DBAutoMigrate {
+			migrationDSN := cfg.MigrationDSN()
+			migrationStarted := time.Now()
+			if err := postgres.MigrateLocked(startup, migrationDSN); err != nil {
+				log.Error("db migrate failed", "err", err)
 				os.Exit(1)
 			}
+			log.Info("db migrations complete", "duration", time.Since(migrationStarted))
+			if migrationDSN != cfg.DBDSN {
+				if err := postgres.GrantRuntimePrivileges(startup, migrationDSN, cfg.DBDSN); err != nil {
+					log.Error("db runtime role grant failed", "err", err)
+					os.Exit(1)
+				}
+			}
+		} else {
+			log.Info("db auto-migration disabled; readiness requires current migrations")
 		}
 		pool, err := postgres.ConnectPool(startup, cfg.DBDSN, postgres.PoolConfig{
 			MaxConns: int32(cfg.DBMaxConns), MinConns: int32(cfg.DBMinConns),
@@ -387,27 +385,13 @@ func main() {
 			os.Exit(1)
 		}
 		defer pool.Close()
+		databasePool = pool
 		readinessChecks["database"] = func(ctx context.Context) error {
 			return postgres.CheckDatabaseReady(ctx, pool)
 		}
 		readinessChecks["migrations"] = func(ctx context.Context) error {
 			return postgres.CheckMigrationsReady(ctx, pool)
 		}
-		// Single-instance guard: until horizontal scaling the repos
-		// ignore tenant_id and there is no leader election, so two writers would race. A
-		// session advisory lock makes the assumption explicit + enforced – a second
-		// instance fails fast instead of silently corrupting state.
-		lockConn, ok, lerr := postgres.AcquireSingletonLock(startup, pool, "api")
-		if lerr != nil {
-			log.Error("single-instance lock check failed", "err", lerr)
-			os.Exit(1)
-		}
-		if !ok {
-			log.Error("another synapse-api instance holds the single-instance lock – this build runs ONE instance (stop the other first); horizontal scaling is P5")
-			os.Exit(1)
-		}
-		defer lockConn.Release()
-		log.Info("acquired single-instance advisory lock")
 		repo = postgres.NewEngagementRepository(pool)
 		projectRepo = postgres.NewProjectRepository(pool)
 		findingRepo = postgres.NewFindingRepository(pool)
@@ -415,6 +399,11 @@ func main() {
 		commentRepo = postgres.NewCommentRepository(pool)
 		retestRepo = postgres.NewRetestRepository(pool)
 		userRepo = postgres.NewUserRepository(pool)
+		identityStore, err = postgres.NewIdentityStore(pool)
+		if err != nil {
+			log.Error("postgres OIDC identity store init failed", "err", err)
+			os.Exit(1)
+		}
 		scanRepo = postgres.NewScanRepository(pool)
 		vulnerabilityInventory = postgres.NewComponentInventoryStore(pool)
 		scanResultStore = postgres.NewScanResultStore(pool)
@@ -444,6 +433,8 @@ func main() {
 		scannedImageStore = postgres.NewScannedImageStore(pool)
 		workOrderStore = postgres.NewWorkOrderRepository(pool)
 		fleetAgentStore = postgres.NewFleetAgentRepository(pool)
+		agentSigningKeyStore = postgres.NewAgentSigningKeyRepository(pool)
+		telemetryTransportStore = postgres.NewTelemetryTransportRepository(pool)
 		fleetRolloutStore = postgres.NewFleetRolloutRepository(pool)
 		leaderStore = postgres.NewLeaderStore(pool)
 		// SECURITY (#431 req 6, #432, #409): the fleet_* tables are RLS-protected, but RLS is a
@@ -493,12 +484,20 @@ func main() {
 		scannedImageStore = memory.NewScannedImageStore()
 		workOrderStore = memory.NewWorkOrderStore()
 		fleetAgentStore = memory.NewFleetAgentStore()
+		agentSigningKeyStore = memory.NewAgentSigningKeyStore()
+		telemetryTransportStore = memory.NewTelemetryTransportStore()
 		fleetRolloutStore = memory.NewFleetRolloutStore()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
 		commentRepo = memory.NewCommentRepository()
 		retestRepo = memory.NewRetestRepository()
 		userRepo = memory.NewUserRepository()
+		var identityStoreErr error
+		identityStore, identityStoreErr = memory.NewIdentityStore(userRepo)
+		if identityStoreErr != nil {
+			log.Error("memory OIDC identity store init failed", "err", identityStoreErr)
+			os.Exit(1)
+		}
 		memoryInventory := memory.NewComponentInventoryStore()
 		scanRepo = memory.NewScanRepository(memoryInventory)
 		vulnerabilityInventory = memoryInventory
@@ -694,89 +693,26 @@ func main() {
 		log.Info("external RFC-3161 anchoring enabled", "tsa", cfg.TSAURL)
 	}
 	evidenceService.SetTimestamper(tsaClient, timestampStore)
-	// SCA tool sandboxing (closes audit finding D2): syft + grype are offline, so
-	// when the sandbox is enabled they run in an ISOLATED sandbox (read-only FS, no
-	// network, dropped caps) – no egress/vault needed. Build/parse output is unchanged.
-	// Best-effort: if bubblewrap is unavailable, syft/grype degrade to a direct exec.
-	syftGen := syft.New(cfg.SyftBin)
-	grypeSrc := grype.New(cfg.GrypeBin, cfg.GrypeDBDir)
-	var scaSandbox *sandbox.Runner // hoisted: shared by syft/grype/acquisition AND the govulncheck reachability builder
-	if cfg.SandboxEnabled {
-		sb, serr := sandbox.NewRunner(cfg.ScanTimeout, cfg.ReconMaxOutput, cfg.SandboxMemMax, cfg.SandboxPidsMax)
-		if serr != nil {
-			// Fail CLOSED (re-audit fix): the operator explicitly asked for the sandbox
-			// (SYNAPSE_SANDBOX_ENABLED=true); if it cannot be built we must NOT silently
-			// degrade to a direct host exec of syft/grype/git/crane. Refuse to start –
-			// mirrors the worker (which os.Exit's) and the prod-vault-key hardening.
-			log.Error("SYNAPSE_SANDBOX_ENABLED is set but the sandbox is unavailable – refusing to run SCA/acquisition UNSANDBOXED; install bubblewrap or unset the flag", "err", serr)
+	var scaSandbox *sandbox.Runner
+	var syftGen *syft.Generator
+	var sbomGen ports.SBOMGenerator
+	var detectionSources []ports.DetectionSource
+	if toolExecution == config.ToolExecutionDispatchOnly {
+		dispatchOnly := executionmode.DispatchOnly{}
+		sbomGen = dispatchOnly
+		detectionSources = []ports.DetectionSource{dispatchOnly}
+		log.Info("SCA execution adapters omitted from dispatch-only API")
+	} else {
+		execution, eerr := scacompose.BuildExecution(cfg, log, advisoryStore)
+		if eerr != nil {
+			log.Error(eerr.Error())
 			os.Exit(1)
 		}
-		scaSandbox = sb
-		// syft/grype have no EgressPolicy on their spec → isolated netns, even though the
-		// same runner is egress-capable; only the git clone spec carries a policy.
-		scaSandbox.SetBinaryRegistry(binregistry.New(cfg.ToolHashes, true)) // refuse a replaced syft/grype (TOFU)
-		syftGen = syftGen.WithRunner(scaSandbox)
-		grypeSrc = grypeSrc.WithRunner(scaSandbox)
-		log.Info("SCA tools (syft/grype) run sandboxed-isolated")
-		// acquisition (git/image) ALWAYS runs sandboxed – never a direct exec. When
-		// kernel egress is usable here (privileged), scope egress to the repo/registry
-		// host; otherwise the fetch runs host-net but STILL fully sandboxed
-		// (fs/seccomp/caps/cgroup), removing the direct-exec RCE surface.
-		egressScoped := false
-		if app, aerr := egressinfra.NewApplier(); aerr == nil {
-			pctx, pcancel := context.WithTimeout(context.Background(), 10*time.Second)
-			perr := app.Probe(pctx)
-			pcancel()
-			if perr == nil {
-				scaSandbox.SetEgress(app)
-				egressScoped = true
-			}
-		}
-		acquirer = acquirer.WithSandbox(scaSandbox, egressScoped)
-		if egressScoped {
-			log.Info("acquisition (git/image) runs sandboxed + egress-scoped to the repo/registry host")
-		} else {
-			log.Info("acquisition (git/image) runs sandboxed (host-net; kernel egress scoping unavailable here)")
-		}
-	} else if cfg.IsProduction() {
-		// Production must not ship with zero containment (re-audit: the flag defaults off).
-		log.Error("SYNAPSE_SANDBOX_ENABLED is required in production (tool execution + acquisition containment); set it and install bubblewrap")
-		os.Exit(1)
-	} else {
-		log.Warn("SANDBOX DISABLED (SYNAPSE_SANDBOX_ENABLED is off) – syft/grype/git/crane run UNSANDBOXED with NO seccomp/rootfs/egress/cgroup containment; dev only, never production")
-	}
-	// SBOM producer select: default Syft (pinned binary, full coverage + CycloneDX
-	// dep-graph edges) or the detection-independent owned parsers. ownsbom is pure-Go (no exec) so it
-	// needs no sandbox; its SBOM is components-only (no edges) over Tier-1 ecosystems – which OSV and
-	// grype both accept (grype reconstructs a CycloneDX from the components when there is no Raw).
-	var sbomGen ports.SBOMGenerator = syftGen
-	switch cfg.SBOMProducer {
-	case "", "syft":
-		log.Info("SBOM producer = syft (pinned binary; full ecosystem coverage + CycloneDX dep-graph edges)") // default, wired above
-	case "ownsbom":
-		reg, rerr := ownsbom.DefaultRegistry()
-		if rerr != nil {
-			log.Error("build ownsbom SBOM producer", "err", rerr)
-			os.Exit(1)
-		}
-		sbomGen = reg
-		log.Info("SBOM producer = ownsbom (detection-independent owned parsers; no third-party scanner; components-only over Tier-1 ecosystems)")
-	default:
-		log.Error("invalid SYNAPSE_SBOM_PRODUCER (want 'syft' or 'ownsbom')", "value", cfg.SBOMProducer)
-		os.Exit(1)
-	}
-	// Detection sources: Grype (offline DB) always; live OSV unless SYNAPSE_OFFLINE (air-gapped /
-	// fast path – no per-scan network egress). The owned advisory store is opt-in
-	// and offline, so it runs in both modes (detection independence).
-	detectionSources := []ports.DetectionSource{grypeSrc}
-	if !cfg.Offline {
-		detectionSources = append([]ports.DetectionSource{osv.New(cfg.OSVBaseURL, nil)}, detectionSources...)
-	} else {
-		log.Info("SYNAPSE_OFFLINE: live OSV source disabled; detecting with offline sources only", "grype", true, "owned_advisory", cfg.OwnedAdvisoryEnabled)
-	}
-	if cfg.OwnedAdvisoryEnabled {
-		detectionSources = append(detectionSources, ownadvisory.New(advisoryStore))
-		log.Info("owned advisory DetectionSource ENABLED (offline match against the owned store, alongside OSV/Grype) – ensure the store is populated; an empty store yields no findings until the advisory ingester runs")
+		scaSandbox = execution.Sandbox
+		syftGen = execution.SyftGen
+		acquirer = execution.Acquirer
+		sbomGen = execution.SBOMGen
+		detectionSources = execution.Sources
 	}
 	scaService := scauc.NewService(repo, findingRepo, scanRepo, scanResultStore, scanJobStore, scanRunStore, evidenceService, ids, prov, clock, auditLog, shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, acquirer,
 		enry.New(), sbomGen,
@@ -796,219 +732,14 @@ func main() {
 	scaService.SetImportedSBOMStore(importedSBOMStore)
 	// Record scanned image digests so the fleet cluster agent can correlate running images (#446).
 	scaService.SetScannedImageRecorder(scannedImageStore)
-	scaService.SetGateDecoder(qualityprofile.LoadGateBytes)
-	scaService.SetSBOMEnricher(manifest.New())
-	scaService.SetArtifactCataloger(msi.New())           // recover Windows Installer (.msi) product identity into the SBOM
-	scaService.SetMavenCoordResolver(mavencoord.New())   // recover real Maven coords from JAR pom.properties (offline) before license lookup
-	scaService.SetJarChecksumResolver(jarchecksum.New()) // capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
-	// SHA-1 coordinate recovery for shaded/metadata-less JARs: offline trivy-java-db-format
-	// index first (if configured), online Maven Central as the fallback. Best-effort.
-	var jhResolvers []ports.JarHashResolver
-	if cfg.JarHashDBPath != "" {
-		if off, err := jarhash.NewOffline(cfg.JarHashDBPath); err != nil {
-			log.Warn("JAR SHA-1 offline DB not usable – falling back to online only if enabled", "path", cfg.JarHashDBPath, "err", err)
-		} else {
-			defer func() { _ = off.Close() }() // release the read-only DB handle at shutdown
-			jhResolvers = append(jhResolvers, off)
-			log.Info("JAR SHA-1 coordinate recovery: OFFLINE index ENABLED (air-gap; no rate limit)", "path", cfg.JarHashDBPath)
-		}
+	configureCleanup := func() {}
+	if toolExecution != config.ToolExecutionDispatchOnly {
+		configureCleanup = scacompose.Configure(scaService, cfg, scaSandbox, log)
 	}
-	if cfg.JarHashOnlineEnabled {
-		// An egress call to Maven Central; on the sandbox it needs search.maven.org in the egress allow-list.
-		jhResolvers = append(jhResolvers, jarhash.New(cfg.JarHashBaseURL, nil))
-		log.Info("JAR SHA-1 coordinate recovery: ONLINE Maven Central ENABLED (best-effort; fallback after offline)")
-	}
-	if len(jhResolvers) > 0 {
-		scaService.SetJarHashResolver(jarhash.NewChain(jhResolvers...))
-	}
-	// Backfill unknown vuln severities from NVD CVSS (best-effort; set SYNAPSE_NVD_API_KEY for throughput).
-	scaService.SetSeverityEnricher(nvd.New(cfg.NVDAPIURL, cfg.NVDAPIKey, nil).WithBudget(cfg.NVDBudget))
-	scaService.SetIgnoreUnfixed(cfg.IgnoreUnfixed) // SYNAPSE_IGNORE_UNFIXED: suppress no-upstream-fix vulns (distro-noise reducer)
-	// Offline license-text fallback: JAR-embedded licenses (jarlicense) + workspace LICENSE
-	// files for every ecosystem.
-	scaService.SetLicenseFileResolver(licensefile.NewChain(jarlicense.New(), licensefile.New()))
-	// Transitive Go dependency edges via `go mod graph`, opt-in + best-effort. Sandboxed when the
-	// SCA sandbox is on (low-risk: go mod graph only reads go.mod files, never compiles); a non-Go target /
-	// no module cache adds no edges and never fails the scan.
-	if cfg.GoModGraphEnabled {
-		gmg := gomodgraph.New(cfg.GoBin)
-		if scaSandbox != nil {
-			gmg = gmg.WithRunner(scaSandbox)
-		} else {
-			// dev only (prod attaches the sandbox above): the direct path still pins GOPROXY=off +
-			// GOTOOLCHAIN=local, but runs `go` outside the bwrap confinement – make that explicit.
-			log.Warn("go mod graph runs UNSANDBOXED (SCA sandbox off; dev only)")
-		}
-		scaService.SetGraphResolver(gmg)
-		log.Info("Go transitive-edge resolution ENABLED (go mod graph; best-effort, sandboxed when available)")
-	}
-	// Maven full-tree resolution (`mvn dependency:list`): resolves managed versions + the transitive tree
-	// a from-source pom.xml scan can't, so Maven projects stop under-reporting. HIGHER RISK than go mod
-	// graph – it RUNS the Maven toolchain (POM + parent-POM + plugin resolution) over UNTRUSTED project
-	// config and reaches the Maven repo. The SERVER therefore enables it ONLY when the SCA sandbox is
-	// present (egress confined to Maven Central) and FAILS CLOSED otherwise – it never host-execs mvn over
-	// an untrusted target. Direct-exec is left to synapse-cli, the trusted-local dogfood path. Opt-in.
-	if cfg.MavenResolveEnabled {
-		if scaSandbox == nil {
-			log.Warn("SYNAPSE_MAVEN_RESOLVE_ENABLED ignored: it requires the SCA sandbox (mvn would otherwise run untrusted POM config on the host). Enable the sandbox to use it.")
-		} else {
-			scaService.SetMavenResolver(mavenresolve.New(cfg.MvnBin).WithRunner(scaSandbox).
-				WithRepoHosts(cfg.MavenRepoHosts).WithLocalRepo(cfg.MavenLocalRepo))
-			log.Info("Maven transitive-tree resolution ENABLED (mvn dependency:list, sandbox-confined; best-effort)", "extra_repo_hosts", len(cfg.MavenRepoHosts), "persistent_cache", cfg.MavenLocalRepo != "")
-		}
-	}
-	// Gradle full-tree resolution (`gradle dependencies`): same gap as Maven, but evaluating build.gradle
-	// runs arbitrary build logic – so the SERVER enables it ONLY with the SCA sandbox and FAILS CLOSED
-	// otherwise (never host-execs gradle over an untrusted target). A pinned gradle, never./gradlew.
-	if cfg.GradleResolveEnabled {
-		if scaSandbox == nil {
-			log.Warn("SYNAPSE_GRADLE_RESOLVE_ENABLED ignored: it requires the SCA sandbox (gradle would otherwise run untrusted build logic on the host). Enable the sandbox to use it.")
-		} else {
-			scaService.SetGradleResolver(gradleresolve.New(cfg.GradleBin).WithRunner(scaSandbox).
-				WithRepoHosts(cfg.MavenRepoHosts).WithGradleHome(cfg.GradleHome))
-			log.Info("Gradle transitive-tree resolution ENABLED (gradle dependencies, sandbox-confined; best-effort)", "extra_repo_hosts", len(cfg.MavenRepoHosts), "persistent_cache", cfg.GradleHome != "")
-		}
-	}
-	// npm resolution for a lockfile-less package.json (`npm install --package-lock-only --ignore-scripts`):
-	// reaches the registry over an untrusted manifest, so the SERVER enables it ONLY with the SCA sandbox
-	// and FAILS CLOSED otherwise (never host-execs npm over an untrusted target). --ignore-scripts + a
-	// throwaway copy mean no project code runs and the source is never mutated. Opt-in.
-	if cfg.NPMResolveEnabled {
-		if scaSandbox == nil {
-			log.Warn("SYNAPSE_NPM_RESOLVE_ENABLED ignored: it requires the SCA sandbox (npm would otherwise reach the network over an untrusted manifest on the host). Enable the sandbox to use it.")
-		} else {
-			scaService.SetNPMResolver(npmresolve.New(cfg.NPMBin).WithRunner(scaSandbox).WithRegistryHosts(cfg.NPMRegistryHosts))
-			log.Info("npm resolution ENABLED (npm install --package-lock-only, sandbox-confined; best-effort)", "extra_registry_hosts", len(cfg.NPMRegistryHosts))
-		}
-	}
-	// Lockfile-less manifest resolvers (composer.json / Gemfile / pyproject.toml): each runs its ecosystem
-	// tool over an untrusted manifest and reaches the registry, so the SERVER enables them ONLY with the SCA
-	// sandbox and FAILS CLOSED otherwise. Lock-only + no-scripts + a throwaway copy mean no project code runs.
-	if cfg.ManifestResolveEnabled {
-		if scaSandbox == nil {
-			log.Warn("SYNAPSE_MANIFEST_RESOLVE_ENABLED ignored: it requires the SCA sandbox (composer/bundle/poetry would otherwise reach the network over an untrusted manifest on the host). Enable the sandbox to use it.")
-		} else {
-			binOf := map[string]string{"composer": cfg.ComposerBin, "gem": cfg.BundleBin, "poetry": cfg.PoetryBin}
-			for _, eco := range []string{"composer", "gem", "poetry"} {
-				scaService.AddManifestResolver(manifestresolve.New(eco, binOf[eco]).WithRunner(scaSandbox).WithRegistryHosts(cfg.ManifestRegistryHosts))
-			}
-			log.Info("lockfile-less manifest resolution ENABLED (composer/gem/poetry, sandbox-confined; best-effort)", "extra_registry_hosts", len(cfg.ManifestRegistryHosts))
-		}
-	}
-	if cfg.JVMReachabilityEnabled {
-		// Read-only bytecode parsing (no exec, no ToolRunner needed) – tags JVM components reachable/
-		// unreferenced from the app's compiled closure. Best-effort; a not-built target tags nothing.
-		scaService.SetJVMReachability(jvmreach.New())
-		log.Info("coarse JVM class-reachability ENABLED (deprioritizes findings on unreferenced deps)")
-	}
-	if cfg.SASTEnabled {
-		scaService.SetSASTAnalyzer(sast.New()) // deterministic pattern-SAST in the scan pipeline
-		log.Info("pattern-SAST ENABLED (weak crypto / hardcoded secrets / insecure config)")
-	}
-	if cfg.SecretScanEnabled {
-		scaService.SetSecretScanner(secretscan.New()) // deterministic, redacted secret scan in the scan pipeline
-		log.Info("secret scanning ENABLED (hardcoded credentials; matches redacted)")
-	}
-	if cfg.ImageRootFSEnabled {
-		scaService.SetOSPackageCataloger(ospkg.New())         // owned dpkg/apk cataloging from the materialized image rootfs
-		scaService.SetInstalledPackageCataloger(bincat.New()) // owned Go-binary + Python dist-info cataloging from the rootfs
-		log.Info("image-rootfs cataloging ENABLED (dpkg + apk OS packages; Go binaries + Python dist-info)")
-	}
-	if cfg.MisconfigEnabled {
-		// Helm chart rendering shells out `helm template` over an UNTRUSTED chart; like the maven/gradle
-		// resolvers it must be sandbox-confined on the API host (a crafted chart's Sprig getHostByName is an
-		// SSRF vector). Wire it through the SCA sandbox when present; otherwise leave Helm rendering OFF.
-		mc := misconfig.New()
-		helmMode := "Helm rendering OFF (no SCA sandbox; a chart runs untrusted templates on the host)"
-		if scaSandbox != nil {
-			mc = mc.WithHelmRunner(scaSandbox)
-			helmMode = "Helm charts rendered sandboxed (egress-denied)"
-		}
-		scaService.SetMisconfigScanner(mc) // deterministic IaC/config misconfig scan in the scan pipeline
-		log.Info("misconfig scanning ENABLED (Dockerfile + Kubernetes + Terraform); " + helmMode)
-	}
-	// AI false-positive triage in the scan pipeline (opt-in, best-effort, PROPOSE-ONLY). Independent of
-	// the agent: it critiques production-scope source findings. Single-model output is advisory-only; a
-	// distinct verifier is required before the deterministic high-risk floor may grant a gate exemption.
-	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" {
-		scaService.SetFPTriageMode(cfg.FPTriageMode)
-		scaService.SetFPTriageMaxFindings(cfg.FPTriageMaxFindings)
-		scaService.SetFPTriageIndependence(cfg.FPTriageIndependence)
-		scaService.SetFPTriageAlertPolicy(cfg.FPTriageAlertMinSamples, cfg.FPTriageDisagreeBaseBPS,
-			cfg.FPTriageExemptBaseBPS, cfg.FPTriageParseFailBaseBPS, cfg.FPTriageAlertDeltaBPS)
-		if tllm, terr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); terr != nil {
-			log.Warn("AI false-positive triage DISABLED (LLM unavailable)", "err", terr)
-		} else {
-			coord := fptriage.NewWithIdentity(tllm, cfg.FPTriageProvider, cfg.FPTriageModel).
-				WithConcurrency(cfg.FPTriageConcurrency).
-				WithOperationalPolicy(ports.FPTriageOperationalPolicy{
-					MaxTokens: cfg.FPTriageMaxTokens, MaxCostMicroUSD: cfg.FPTriageMaxCostMicroUSD,
-					ProposerInputMicroUSDPerMillion:  cfg.FPTriageProposerInputRate,
-					ProposerOutputMicroUSDPerMillion: cfg.FPTriageProposerOutputRate,
-					VerifierInputMicroUSDPerMillion:  cfg.FPTriageVerifierInputRate,
-					VerifierOutputMicroUSDPerMillion: cfg.FPTriageVerifierOutputRate,
-					CircuitFailureThreshold:          cfg.FPTriageCircuitFailures, CircuitCooldown: cfg.FPTriageCircuitCooldown,
-				})
-			mode := "advisory-only (distinct verifier required for gate exemption)"
-			if strings.TrimSpace(cfg.VerifierModel) != "" {
-				if !agent.IndependentLLMs(cfg.FPTriageProvider, cfg.FPTriageModel, cfg.VerifierProvider, cfg.VerifierModel, cfg.FPTriageIndependence) {
-					log.Warn("AI FP-triage verifier independence cannot be established; triage remains advisory-only",
-						"proposer_provider", cfg.FPTriageProvider, "proposer_model", cfg.FPTriageModel,
-						"verifier_provider", cfg.VerifierProvider, "verifier_model", cfg.VerifierModel,
-						"independence_policy", cfg.FPTriageIndependence)
-				} else if vllm, verr := openai.New(cfg.VerifierBaseURL, cfg.VerifierAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
-					coord.WithIndependentVerifier(vllm, cfg.VerifierProvider, cfg.VerifierModel, ports.AIIndependencePolicy(cfg.FPTriageIndependence))
-					if coord.VerifierModel() != "" {
-						mode = "verified by " + coord.VerifierProvider() + "/" + coord.VerifierModel()
-					}
-				} else {
-					log.Warn("AI FP-triage verifier unavailable; triage remains advisory-only", "err", verr)
-				}
-			}
-			triager := fptriage.NewTriager(coord, func(root string) ports.SourceSnippetReader {
-				return sourcesnippet.Reader{Root: root}
-			})
-			if cfg.ScanCacheEnabled {
-				if dir := cfg.ResolveScanCacheDir(); dir != "" {
-					cacheDir := filepath.Join(dir, "ai-triage")
-					triager.WithCache(fptriagecache.New(cacheDir), scauc.EvaluationPolicyVersion())
-					log.Info("AI false-positive triage cache ENABLED", "dir", cacheDir)
-				}
-			}
-			scaService.SetFPTriage(triager)
-			log.Info("AI false-positive triage ENABLED ("+mode+")", "model", cfg.FPTriageModel,
-				"triage_mode", cfg.FPTriageMode, "max_findings", cfg.FPTriageMaxFindings, "max_tokens", cfg.FPTriageMaxTokens,
-				"max_cost_micro_usd", cfg.FPTriageMaxCostMicroUSD, "concurrency", cfg.FPTriageConcurrency)
-		}
-	}
-	if cfg.SuppressionEnabled {
-		scaService.SetSuppressionLoader(ignorefile.New()) // repo-committed .synapseignore accepted-risk policy
-		log.Info("suppression ENABLED (.synapseignore; suppressed findings retained + surfaced)")
-	}
-	if cfg.VEXEnabled {
-		scaService.SetVEXLoader(vexfile.New()) // in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
-		log.Info("in-scan VEX ENABLED (.synapse.vex.json; not_affected/fixed gate-exempt, still reported + sealed)")
-	}
+	defer configureCleanup()
 	if cfg.ComplianceEnabled {
 		scaService.SetComplianceEnabled(true) // attach the AppSec-baseline benchmark (per-control PASS/FAIL)
 		log.Info("compliance report ENABLED (Synapse AppSec Baseline; deterministic, LLM-free)")
-	}
-	scaService.SetDBMaxAgeDays(cfg.DBMaxAgeDays) // warn on stale reference DBs (KEV/EPSS/vuln-DB); 0 disables
-	// Validate the configured detection priority once at startup: an invalid value would otherwise make
-	// EVERY API scan return 400. Warn + fall back to comprehensive rather than crash a long-running server.
-	detPriority := cfg.DetectionPriority
-	if detPriority != "" {
-		if _, err := scauc.NormalizeScanOptions(scauc.ScanOptions{Mode: scauc.ScanModeFull, DetectionPriority: detPriority}); err != nil {
-			log.Warn("invalid SYNAPSE_DETECTION_PRIORITY; falling back to comprehensive", "value", detPriority, "err", err)
-			detPriority = ""
-		}
-	}
-	scaService.SetDetectionPriority(detPriority) // server default (comprehensive|precise); the API scan path has no per-request priority
-	if cfg.ScanCacheEnabled {
-		if dir := cfg.ResolveScanCacheDir(); dir != "" {
-			scaService.SetSBOMCache(sbomcache.New(dir)) // content+version-addressed generated-SBOM cache
-			log.Info("SBOM cache ENABLED", "dir", dir)
-		}
 	}
 	aupService := aupuc.NewService(aupStore, auditLog, clock, cfg.AUPVersion)
 	exportService := exportuc.NewService(findingRepo, clock, buildinfo.App())
@@ -1065,47 +796,85 @@ func main() {
 		log.Error("recon guard init failed", "err", err)
 		os.Exit(1)
 	}
-	logBroker := logstream.NewBroker(0)
-	reconPool := jobs.NewPool(cfg.ReconConcurrency, cfg.ReconQueueSize)
-	defer reconPool.Shutdown(context.Background())
-	// Select the tool runner: the bubblewrap sandbox when enabled, else the plain
-	// argv ExecRunner. Fail closed if the sandbox is required but unavailable – never
-	// silently run unsandboxed (mirrors the prod-signing-seed hardening).
-	var reconRunner ports.ToolRunner = toolrunner.NewExecRunner(cfg.ReconTimeout, cfg.ReconMaxOutput)
-	egressLive := false // set when the sandbox can kernel-enforce scope egress
-	if cfg.SandboxEnabled {
-		sb, serr := sandbox.NewRunner(cfg.ReconTimeout, cfg.ReconMaxOutput, cfg.SandboxMemMax, cfg.SandboxPidsMax)
+	var egressGrantHandler http.Handler
+	if cfg.EgressGrantAuthorityAddr != "" {
+		seed, serr := signing.DecodeSeed(cfg.EgressGrantSigningSeed)
 		if serr != nil {
-			log.Error("SYNAPSE_SANDBOX_ENABLED but the sandbox is unavailable – install bubblewrap or disable it", "err", serr)
+			log.Error("egress grant signing seed invalid", "err", serr)
 			os.Exit(1)
 		}
-		reconRunner = sb
-		sb.SetVault(credVault)                                      // resolve {{secret:NAME}} into the child env at exec time
-		sb.SetBinaryRegistry(binregistry.New(cfg.ToolHashes, true)) // refuse a replaced recon tool binary (TOFU)
-		// Egress enforcement: enable ONLY when the applier actually works here – it
-		// needs CAP_NET_ADMIN + CAP_SYS_ADMIN, which an unprivileged API lacks. Probe and
-		// degrade to network-isolated (still safe) rather than failing recon at runtime.
-		if app, aerr := egressinfra.NewApplier(); aerr == nil {
-			probeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			perr := app.Probe(probeCtx)
-			cancel()
-			if perr == nil {
-				sb.SetEgress(app)
-				sb.SetConnMonitor(ebpf.NewMonitor()) // per-run eBPF connect-log (best-effort)
-				egressLive = true
-				log.Info("recon sandbox enabled with KERNEL EGRESS enforcement (scope-restricted netns)")
-			} else {
-				log.Warn("sandbox egress not usable here (needs CAP_NET_ADMIN/SYS_ADMIN) – sandboxed recon runs network-ISOLATED; run capability-sensitive/live recon via synapse-worker", "err", perr)
-			}
-		} else {
-			log.Warn("sandbox egress applier unavailable (no ip/iptables) – sandboxed recon runs network-isolated", "err", aerr)
+		brokerSigner, serr := egressbroker.NewGrantSigner(seed)
+		if serr != nil {
+			log.Error("egress grant signer init failed", "err", serr)
+			os.Exit(1)
 		}
-		if !sb.CgroupLimitsEnforced() {
-			log.Warn("sandbox cgroup resource limits NOT enforced (no usable systemd-run --user)")
+		grantSigner, serr := egressbroker.NewEgressGrantSigner(brokerSigner)
+		if serr != nil {
+			log.Error("egress grant signer adapter init failed", "err", serr)
+			os.Exit(1)
+		}
+		grantService, serr := egressgrant.NewService(reconRunStore, repo, reconGuard, clock, recontools.Registry(), egresspolicy.Compiler{}, egressbroker.EgressGrantCanonicalizer{}, grantSigner)
+		if serr != nil {
+			log.Error("egress grant service init failed", "err", serr)
+			os.Exit(1)
+		}
+		egressGrantHandler, serr = httpapi.NewEgressGrantHandler(cfg.EgressGrantIssuerToken, grantService)
+		if serr != nil {
+			log.Error("egress grant HTTP handler init failed", "err", serr)
+			os.Exit(1)
+		}
+	}
+	logBroker := logstream.NewBroker(0)
+	var reconRunner ports.ToolRunner
+	var reconDispatcher reconuc.Dispatcher
+	egressLive := false // set when the sandbox can kernel-enforce scope egress
+	if toolExecution == config.ToolExecutionDispatchOnly {
+		dispatchOnly := executionmode.DispatchOnly{}
+		reconRunner = dispatchOnly
+		reconDispatcher = dispatchOnly
+		log.Info("recon execution adapters omitted from dispatch-only API")
+	} else {
+		reconPool := jobs.NewPool(cfg.ReconConcurrency, cfg.ReconQueueSize)
+		defer reconPool.Shutdown(context.Background())
+		reconDispatcher = reconPool
+		// Select the tool runner: the bubblewrap sandbox when enabled, else the plain
+		// argv ExecRunner. Fail closed if the sandbox is required but unavailable – never
+		// silently run unsandboxed (mirrors the prod-signing-seed hardening).
+		reconRunner = toolrunner.NewExecRunner(cfg.ReconTimeout, cfg.ReconMaxOutput)
+		if cfg.SandboxEnabled {
+			sb, serr := sandbox.NewRunner(cfg.ReconTimeout, cfg.ReconMaxOutput, cfg.SandboxMemMax, cfg.SandboxPidsMax)
+			if serr != nil {
+				log.Error("SYNAPSE_SANDBOX_ENABLED but the sandbox is unavailable – install bubblewrap or disable it", "err", serr)
+				os.Exit(1)
+			}
+			reconRunner = sb
+			sb.SetVault(credVault)                                      // resolve {{secret:NAME}} into the child env at exec time
+			sb.SetBinaryRegistry(binregistry.New(cfg.ToolHashes, true)) // refuse a replaced recon tool binary (TOFU)
+			// Egress enforcement: enable ONLY when the applier actually works here – it
+			// needs CAP_NET_ADMIN + CAP_SYS_ADMIN, which an unprivileged API lacks. Probe and
+			// degrade to network-isolated (still safe) rather than failing recon at runtime.
+			if app, aerr := egressinfra.NewApplier(); aerr == nil {
+				probeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				perr := app.Probe(probeCtx)
+				cancel()
+				if perr == nil {
+					sb.SetEgress(app)
+					sb.SetConnMonitor(ebpf.NewMonitor()) // per-run eBPF connect-log (best-effort)
+					egressLive = true
+					log.Info("recon sandbox enabled with KERNEL EGRESS enforcement (scope-restricted netns)")
+				} else {
+					log.Warn("sandbox egress not usable here (needs CAP_NET_ADMIN/SYS_ADMIN) – sandboxed recon runs network-ISOLATED; run capability-sensitive/live recon via synapse-worker", "err", perr)
+				}
+			} else {
+				log.Warn("sandbox egress applier unavailable (no ip/iptables) – sandboxed recon runs network-isolated", "err", aerr)
+			}
+			if !sb.CgroupLimitsEnforced() {
+				log.Warn("sandbox cgroup resource limits NOT enforced (no usable systemd-run --user)")
+			}
 		}
 	}
 	reconService, err := reconuc.NewService(reconGuard, reconRunner,
-		reconRunStore, evidenceService, repo, logBroker, reconPool, clock, ids, recontools.Registry(),
+		reconRunStore, evidenceService, repo, logBroker, reconDispatcher, clock, ids, recontools.Registry(),
 		cfg.ReconTimeout, cfg.ReconMaxOutput, cfg.ReconAllowCapabilitySensitive)
 	if err != nil {
 		log.Error("recon service init failed", "err", err)
@@ -1118,20 +887,28 @@ func main() {
 		reconService.SetSandboxEnforcement(egresspolicy.Compile)
 	}
 	var scaWorker *worker.Worker
-	if cfg.ReconViaWorker {
-		// defer execution to the durable queue. Recon goes to the privileged
-		// synapse-worker (egress/capability needs CAP_NET_ADMIN). SCA is offline → an
-		// IN-PROCESS worker here runs it (sandboxed, no privilege). Claim-by-kind keeps the
-		// two from grabbing each other's jobs. Needs Postgres.
+	if toolExecution == config.ToolExecutionDispatchOnly {
+		if reconQueue == nil {
+			log.Error("dispatch-only execution requires the PostgreSQL durable queue")
+			os.Exit(1)
+		}
+		reconService.SetQueue(reconQueue)
+		scaService.SetQueue(reconQueue)
+		reconService.SetRunLock(reconRunLock)
+		scaService.SetRunLock(reconRunLock)
+		log.Info("all untrusted tool execution deferred to synapse-worker")
+	} else if cfg.ReconViaWorker {
+		// Backward-compatible development posture: recon is durable while offline SCA
+		// remains in an in-process worker. Explicit dispatch-only never starts this worker.
 		if reconQueue != nil {
 			reconService.SetQueue(reconQueue)
 			scaService.SetQueue(reconQueue)
-			reconService.SetRunLock(reconRunLock) // no duplicate live scan on redelivery
+			reconService.SetRunLock(reconRunLock)
 			scaService.SetRunLock(reconRunLock)
 			scaWorker = worker.New(reconQueue, map[string]worker.Handler{
-				scauc.ScanJobKind: scaJobHandler{svc: scaService}, // Handle + OnDeadLetter (finalize the ScanJob)
+				scauc.ScanJobKind: scaJobHandler{svc: scaService},
 			}, worker.Config{Visibility: cfg.ScanTimeout + time.Minute, MaxAttempts: 3}, log)
-			log.Info("execution deferred to the durable queue: recon → synapse-worker, SCA → in-process worker")
+			log.Info("legacy durable execution enabled: recon via synapse-worker, SCA via in-process worker")
 		} else {
 			log.Warn("SYNAPSE_RECON_VIA_WORKER set but no Postgres queue (set SYNAPSE_DB_DSN) – running in-process")
 		}
@@ -1184,6 +961,52 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
+	if cfg.OIDCEnabled {
+		provider, oidcErr := oidcadapter.New(context.Background(), oidcadapter.Config{
+			Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCClientSecret,
+			RedirectURL: cfg.OIDCRedirectURL, GroupRoleMapping: cfg.OIDCGroupRoleMapping,
+		})
+		if oidcErr != nil {
+			log.Error("OIDC provider initialization failed", "err", oidcErr)
+			os.Exit(1)
+		}
+		identityService, oidcErr := identityuc.NewService(identityStore, oidcadapter.NewSecretProtector(vaultCipher), clock, ids)
+		if oidcErr != nil {
+			log.Error("OIDC identity service initialization failed", "err", oidcErr)
+			os.Exit(1)
+		}
+		oidcService, oidcErr := identitybff.NewService(provider, identityService, identityStore, userRepo, clock, ids, identitybff.Config{
+			TenantID: shared.ID(cfg.OIDCTenantID), TransactionTTL: cfg.OIDCTransactionTTL, SessionTTL: cfg.OIDCSessionTTL,
+		})
+		if oidcErr != nil {
+			log.Error("OIDC BFF initialization failed", "err", oidcErr)
+			os.Exit(1)
+		}
+		httpOIDCService, oidcErr := httpapi.NewOIDCService(
+			func(ctx context.Context) (httpapi.OIDCAuthorization, error) {
+				result, err := oidcService.Begin(ctx)
+				return httpapi.OIDCAuthorization{URL: result.URL, Nonce: result.Nonce}, err
+			},
+			func(ctx context.Context, state, code, nonce string) (httpapi.OIDCSession, error) {
+				result, err := oidcService.Complete(ctx, state, code, nonce)
+				return httpapi.OIDCSession{Token: result.Token, CSRFToken: result.CSRFToken, Principal: httpapi.OIDCPrincipal{ID: result.Principal.ID, Name: result.Principal.Name, Role: result.Principal.Role, TenantID: result.Principal.TenantID}}, err
+			},
+			func(ctx context.Context, token string) (httpapi.OIDCSession, error) {
+				result, err := oidcService.Discover(ctx, token)
+				return httpapi.OIDCSession{Token: result.Token, CSRFToken: result.CSRFToken, Principal: httpapi.OIDCPrincipal{ID: result.Principal.ID, Name: result.Principal.Name, Role: result.Principal.Role, TenantID: result.Principal.TenantID}}, err
+			},
+			func(ctx context.Context, token, csrf string, unsafe bool) (httpapi.OIDCPrincipal, error) {
+				result, err := oidcService.Authenticate(ctx, token, csrf, unsafe)
+				return httpapi.OIDCPrincipal{ID: result.ID, Name: result.Name, Role: result.Role, TenantID: result.TenantID}, err
+			},
+			oidcService.Logout,
+		)
+		if oidcErr != nil {
+			log.Error("OIDC HTTP service initialization failed", "err", oidcErr)
+			os.Exit(1)
+		}
+		router.SetOIDC(httpOIDCService, cfg.OIDCFrontendURL)
+	}
 	router.SetReadinessChecks(readinessChecks)
 	if slaService != nil {
 		router.SetSLA(slaService)
@@ -1198,7 +1021,7 @@ func main() {
 			log.Error("metrics enabled but the configured job queue does not support aggregate stats")
 			os.Exit(1)
 		}
-		metrics = observability.New(queueReader)
+		metrics = observability.New(queueReader, postgres.NewPoolStatsSource(databasePool))
 		httpObserver = metrics
 		scaService.SetObserver(metrics)
 		if !metricsAddrIsLoopback(cfg.MetricsAddr) {
@@ -1513,7 +1336,7 @@ func main() {
 				router.SetDASTScan(dastWorkflowSvc)
 				log.Info("DAST verifier and authenticated scan workflows ENABLED (sandbox egress-enforced)")
 			} else {
-				log.Warn("DAST verifier workflow DISABLED: sandbox kernel egress enforcement is unavailable")
+				log.Warn("DAST execution workflows DISABLED: authoritative signed DAST grants are unavailable in this process posture")
 			}
 		}
 		exportService.SetJudgments(judgmentStore) // OpenVEX justification-by-tier from confirmed not_reachable judgments
@@ -1658,23 +1481,11 @@ func main() {
 		}
 		router.SetSARIFIngest(sarifSvc)
 		router.SetImportedFindings(importedFindingStore)
-		// #423 detection ledger read routes. The write/ingest path (Service.Ingest → seal into the
-		// evidence chain) plugs the same detectionRecordStore into detectledger.NewService once the
-		// agent→control-plane batch transport + agent signing-key resolver land; the read surface is live
-		// now so a detection is queryable and tenant-scoped through the same chokepoint.
-		// A0.5 (#610) PREREQUISITE — before wiring detectledger.NewService here, the EvidenceChain passed
-		// to it MUST implement SealOnce as a truly key-idempotent seal, keyed on (engagement, detection id)
-		// and atomic with the chain append (e.g. an ON CONFLICT (engagement_id, idempotency_key) DO NOTHING
-		// insert that returns the existing link). A keyless Seal, or a non-atomic check-then-append, reopens
-		// D3 (a seal-then-crash retry appends a duplicate permanent link). evidence.Service.SealOnce is the
-		// A4 deliverable that provides this; do not bridge NewService onto plain Seal.
-		// A0.2 (#607) — the detectledger.AgentKeyResolver that NewService needs is satisfied by the agent
-		// signing-key registry (ports.AgentSigningKeyStore → postgres.NewAgentSigningKeyRepository /
-		// memory.NewAgentSigningKeyStore): its Resolve(agentID, keyID) returns the AgentSigningKey the batch
-		// names, and VerifyBatchWithKey gates purpose+window+revocation fail-closed. The store is the durable
-		// backing; still deferred to A4 is the agent-plane registration endpoint (an agent posts its ed25519
-		// signing public key + a ProveKeyPossession proof, bound to its canonical AgentID) plus the operator
-		// rotate/revoke routes — none can be wired until the agent→control-plane transport exists.
+		// #423 detection ledger READ routes. The read surface needs only the record store, so it is wired
+		// here (inside the asset-model gate) independently of the agent transport plane. The WRITE/ingest
+		// path (detectledger.NewService → SealOnce into the evidence chain) is wired under FleetEnabled below
+		// (A4 #625), because it needs the agent-plane transport, the A0.2 signing-key resolver, and the
+		// evidenceService SealOnce bridge — see the FleetDetectionIngestEnabled block.
 		if detectionReader, drerr := detectledger.NewReader(detectionRecordStore); drerr != nil {
 			log.Error("detection ledger reader init failed", "err", drerr)
 			os.Exit(1)
@@ -1806,6 +1617,75 @@ func main() {
 			}
 			router.SetFleetHostInventory(hiSvc)
 			log.Info("fleet host inventory ingest ENABLED (VM agents persist host inventories into the asset model)")
+		}
+
+		// Agent→control-plane telemetry batch ingest (A3, #624): an enrolled agent ships a signed
+		// TelemetryBatchManifest which the control plane verifies (identity + signing key + schema,
+		// fail-closed), sequences idempotently per incarnation, derives gaps from the ACK snapshot, and acks.
+		// Gated by its own flag; the signing-key resolver is the A0.2 registry, durable when Postgres is set.
+		if cfg.FleetTelemetryIngestEnabled {
+			telemetrySvc, terr := telemetryingest.NewService(telemetryTransportStore, agentSigningKeyStore, auditLog, clock)
+			if terr != nil {
+				log.Error("fleet telemetry ingest init failed", "err", terr)
+				os.Exit(1)
+			}
+			router.SetFleetTelemetry(telemetrySvc)
+			if cfg.DBDSN != "" {
+				log.Info("fleet telemetry ingest ENABLED (durable; server-side identity/key/schema verification, idempotent, acked)")
+			} else {
+				log.Warn("fleet telemetry ingest ENABLED but NOT DURABLE - transport state lives in memory and is lost on restart; configure SYNAPSE_DB_DSN")
+			}
+		}
+		// Agent signing-key registration + operator key management (A4, #625, A0.2): an agent registers its
+		// Ed25519 signing key with a proof-of-possession bound to its authenticated id; operators list and
+		// revoke. This is what makes the batch signing-key resolver used by telemetry/detection ingest fillable
+		// over the wire. Same durable store (agentSigningKeyStore) either plane resolves against.
+		if cfg.FleetKeyRegistrationEnabled {
+			keyRegSvc, kerr := keyregistry.NewService(agentSigningKeyStore, auditLog, clock)
+			if kerr != nil {
+				log.Error("fleet key registration init failed", "err", kerr)
+				os.Exit(1)
+			}
+			router.SetFleetKeyRegistration(keyRegSvc)
+			router.SetFleetKeyAdmin(keyRegSvc)
+			log.Info("fleet signing-key registration ENABLED (proof-of-possession required; operator list/revoke)")
+		}
+		// Agent→control-plane detection batch ingest (A4, #625): an enrolled agent ships a signed AgentBatch;
+		// the ledger verifies identity (A0.1: batch agent MUST be the authenticated agent) + the named signing
+		// key + each detection's content digest (fail-closed), then seals each detection ONCE into the shared
+		// evidence chain and persists the projection. The EvidenceChain is bridged onto evidenceService:
+		// SealOnce is idempotent on (engagement, detection id) via a deterministic reserved id over the
+		// crash-recoverable reserved-append path (closes D3 for detections — a seal-then-crash retry returns
+		// the first link, never a second); VerifyChainError translates evidence.Verify's Intact=false into an
+		// ErrChainBroken-wrapping error. Gated by its own flag; requires the A0.2 key registry above.
+		if cfg.FleetDetectionIngestEnabled {
+			sealOnce := func(ctx context.Context, engagementID shared.ID, kind, idempotencyKey string, content []byte, createdBy string) (shared.ID, error) {
+				ev, serr := evidenceService.SealOnce(ctx, engagementID, kind, idempotencyKey, content, createdBy)
+				if serr != nil {
+					return "", serr
+				}
+				return ev.ID, nil
+			}
+			verifyChain := func(ctx context.Context, engagementID shared.ID) error {
+				return evidenceService.VerifyChainError(ctx, engagementID)
+			}
+			chainBridge, cberr := detectledger.NewEvidenceChainBridge(sealOnce, verifyChain)
+			if cberr != nil {
+				log.Error("fleet detection ingest chain bridge init failed", "err", cberr)
+				os.Exit(1)
+			}
+			// retention 0 = keep the projection forever; the evidence chain is always permanent regardless.
+			detectSvc, derr := detectledger.NewService(detectionRecordStore, chainBridge, agentSigningKeyStore, auditLog, clock, ids, 0)
+			if derr != nil {
+				log.Error("fleet detection ingest init failed", "err", derr)
+				os.Exit(1)
+			}
+			router.SetFleetDetectionIngest(detectSvc)
+			if cfg.DBDSN != "" {
+				log.Info("fleet detection ingest ENABLED (durable; server-side identity/key/content verification, sealed once into the evidence chain)")
+			} else {
+				log.Warn("fleet detection ingest ENABLED but NOT DURABLE - detection ledger + evidence chain live in memory and are lost on restart; configure SYNAPSE_DB_DSN")
+			}
 		}
 	}
 	// deterministic Tier-2 reachability proof in the scan pipeline (opt-in). It mints reachability
@@ -2077,9 +1957,9 @@ func main() {
 		// the API enqueues and synapse-worker drives + survives restart. Otherwise the API runs
 		// the agent inline (bounded by AgentConcurrency; NOT durable – a crash strands the run).
 		var agentQueue ports.JobQueue
-		if cfg.AgentViaWorker {
-			if !cfg.ReconViaWorker || reconQueue == nil {
-				log.Error("SYNAPSE_AGENT_VIA_WORKER requires SYNAPSE_RECON_VIA_WORKER + Postgres (the durable queue)")
+		if cfg.AgentViaWorker || toolExecution == config.ToolExecutionDispatchOnly {
+			if reconQueue == nil {
+				log.Error("durable agent execution requires Postgres (the durable queue)")
 				os.Exit(1)
 			}
 			agentQueue = reconQueue
@@ -2176,7 +2056,14 @@ func main() {
 	if metrics != nil {
 		metricsHandler = metrics.Handler()
 	}
-	if err := httpserver.RunPair(ctx, cfg.HTTPAddr, router.Handler(), cfg.MetricsAddr, metricsHandler, log); err != nil {
+	listeners := []httpserver.Listener{{Name: "http server", Addr: cfg.HTTPAddr, Handler: router.Handler()}}
+	if metricsHandler != nil {
+		listeners = append(listeners, httpserver.Listener{Name: "metrics server", Addr: cfg.MetricsAddr, Handler: metricsHandler})
+	}
+	if egressGrantHandler != nil {
+		listeners = append(listeners, httpserver.Listener{Name: "egress grant authority", Addr: cfg.EgressGrantAuthorityAddr, Handler: egressGrantHandler})
+	}
+	if err := httpserver.RunListeners(ctx, listeners, log); err != nil {
 		log.Error("server error", "err", err)
 		os.Exit(1)
 	}

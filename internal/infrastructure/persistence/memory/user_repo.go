@@ -43,6 +43,12 @@ func (r *UserRepository) Upsert(_ context.Context, u *user.User) error {
 	return nil
 }
 
+// Bootstrap preserves the in-memory repository's historical seed behavior. Durable
+// audit-chain guarantees are provided by the PostgreSQL implementation.
+func (r *UserRepository) Bootstrap(ctx context.Context, u *user.User, _ ports.AuditEntry) error {
+	return r.Upsert(ctx, u)
+}
+
 func (r *UserRepository) GetByID(_ context.Context, id shared.ID) (*user.User, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

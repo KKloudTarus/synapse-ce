@@ -5,18 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"path/filepath"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/adapter/agentspool"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/detectsink"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/agentstate"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/spool"
 	detectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detect"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectionship"
 )
 
 // detectionIdentity derives the canonical (host, agent) identity the detection engine tags its events
@@ -56,40 +59,120 @@ func (r *runner) startDetection(ctx context.Context, cred fleetclient.Credential
 		log.Print("detection: enrolled credential has no canonical agent id; detection engine disabled")
 		return
 	}
-	sinkPath := filepath.Join(r.cfg.stateDir, "detections.jsonl")
-	sink, err := detectsink.New(sinkPath)
+	durable, identity, err := r.openTelemetrySpool(ctx, cred)
 	if err != nil {
-		log.Printf("detection: %v; detection engine disabled", err)
+		log.Printf("detection: open durable telemetry spool: %v; detection engine disabled", err)
 		return
 	}
-	sensor := ebpf.NewSensor(host, agent, classes)
+	rawSensor := ebpf.NewSensor(host, agent, classes)
+	sensor, err := agentspool.NewDurableSensor(rawSensor, durable, identity)
+	if err != nil {
+		log.Printf("detection: wire durable telemetry sensor: %v; detection engine disabled", err)
+		_ = durable.Close()
+		return
+	}
+	sink, err := agentspool.NewDetectionSink(durable)
+	if err != nil {
+		log.Printf("detection: wire durable detection sink: %v; detection engine disabled", err)
+		_ = durable.Close()
+		return
+	}
 	eng, err := detectuc.NewEngine(sensor, sink, host, agent, detectuc.Options{
 		Classes:       classes,
 		CPUCeilingPct: r.cfg.detectCeiling,
 	})
 	if err != nil {
 		log.Printf("detection: %v; detection engine disabled", err)
-		_ = sink.Close()
+		_ = durable.Close()
 		return
 	}
+	runCtx, cancelRun := context.WithCancel(ctx)
+	var shipper *detectionship.Service
+	if engagement := shared.ID(strings.TrimSpace(r.cfg.detectionEngagement)); !engagement.IsZero() {
+		shipper, err = detectionship.NewService(durable, r.api, agentstate.NewDetectionStore(r.cfg.stateDir), detectionship.Config{
+			AgentID: agent, EngagementID: engagement, Token: cred.Token,
+			IdleInterval: r.cfg.detectionShipInterval, Retry: detectionRetry(spool.DefaultRetryPolicy()),
+		})
+		if err != nil {
+			log.Printf("detection: wire signed delivery: %v; detection engine disabled", err)
+			cancelRun()
+			_ = durable.Close()
+			return
+		}
+	}
+	if err := r.startSpoolMetrics(runCtx, durable); err != nil {
+		log.Printf("detection: agent metrics listener unavailable: %v", err)
+	}
 
-	log.Printf("detection engine starting: classes=%s ceiling=%.0f%% sink=%s", r.cfg.detectClasses, r.cfg.detectCeiling, sinkPath)
+	log.Printf("detection engine starting: classes=%s ceiling=%.0f%% durable_spool=%s", r.cfg.detectClasses, r.cfg.detectCeiling, r.telemetrySpoolDir())
 	// One-shot coverage report shortly after start, so the operator can see which classes actually came
 	// up on this host and which are gaps — never silently assume a class is observing.
+	coverageDone := make(chan struct{})
 	go func() {
+		defer close(coverageDone)
+		timer := time.NewTimer(3 * time.Second)
+		defer timer.Stop()
 		select {
-		case <-ctx.Done():
-		case <-time.After(3 * time.Second):
-			log.Printf("detection coverage: %s", formatCoverage(eng.Coverage()))
+		case <-runCtx.Done():
+		case <-timer.C:
+			coverage := eng.Coverage()
+			log.Printf("detection coverage: %s", formatCoverage(coverage))
+			if err := agentspool.RecordCoverage(runCtx, durable, coverage, time.Now().UTC()); err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("detection: persist coverage/sensor state: %v", err)
+			}
 		}
 	}()
+	deliveryDone := make(chan struct{})
+	if shipper == nil {
+		close(deliveryDone)
+	} else {
+		go func() {
+			defer close(deliveryDone)
+			if err := shipper.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("detection delivery stopped: %v", err)
+			}
+			cancelRun()
+		}()
+	}
 	go func() {
-		err := eng.Run(ctx)
+		err := eng.Run(runCtx)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("detection engine stopped: %v", err)
 		}
-		_ = sink.Close()
+		cancelRun()
+		// A timer that fired concurrently may still be persisting coverage. Wait
+		// for it before closing the shared spool so no operation races Close.
+		<-coverageDone
+		<-deliveryDone
+		if closeErr := durable.Close(); closeErr != nil {
+			log.Printf("detection: close durable spool: %v", closeErr)
+		}
 	}()
+}
+
+func detectionRetry(policy spool.RetryPolicy) detectionship.RetryDecider {
+	return func(err error, attempt uint) (bool, time.Duration) {
+		if status, retryAfter, ok := fleetclient.HTTPStatus(err); ok {
+			decision, classifyErr := policy.ClassifyHTTP(status, retryAfter, time.Now().UTC(), attempt)
+			if classifyErr != nil {
+				return false, 0
+			}
+			return decision.Retry, decision.Delay
+		}
+		if fleetclient.IsNetworkError(err) {
+			decision, classifyErr := policy.NetworkFailure(attempt)
+			if classifyErr == nil {
+				return decision.Retry, decision.Delay
+			}
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			decision, classifyErr := policy.ClassifyHTTP(http.StatusRequestTimeout, "", time.Now().UTC(), attempt)
+			if classifyErr == nil {
+				return decision.Retry, decision.Delay
+			}
+		}
+		return false, 0
+	}
 }
 
 // parseDetectClasses turns the comma-separated config into validated classes. An unknown class is a

@@ -1,7 +1,7 @@
 // Barrel re-export — preserves all existing import paths from '../lib/api'
 // All consumers use: import { api, ApiError, setToken, ... } from '../lib/api'
 
-export { ApiError, setToken, setUnauthorizedHandler } from './client'
+export { ApiError, setToken, setCSRFToken, setUnauthorizedHandler, discoverSession, logoutSession, type BFFSession } from './client'
 export { type ReportType, type ReportBuildOptions } from './evidence'
 export { type ReconLogEvent, streamReconLogs } from './recon'
 export { type AgentStreamEvent, streamAgentSession } from './agent'

@@ -67,7 +67,15 @@ func (s *Service) EnsureBootstrapAdmin(ctx context.Context, token string) error 
 	if err != nil {
 		return err
 	}
-	if err := s.repo.Upsert(ctx, u); err != nil {
+	if err := s.repo.Bootstrap(ctx, u, ports.AuditEntry{
+		Actor:  BootstrapID,
+		Action: "user.bootstrap_admin_seeded",
+		Target: BootstrapID,
+		Metadata: map[string]string{
+			"idempotency_key": "bootstrap-admin:" + BootstrapID,
+		},
+		At: s.clock.Now(),
+	}); err != nil {
 		return fmt.Errorf("seed bootstrap admin: %w", err)
 	}
 	return nil

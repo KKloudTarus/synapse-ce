@@ -27,7 +27,8 @@ type Collectors struct {
 }
 
 // New constructs the bounded Prometheus collectors used by the API metrics listener.
-func New(queueReader ports.AggregateJobQueueStatsReader) *Collectors {
+// The optional pool reader supplies aggregate pool metrics without connection or tenant labels.
+func New(queueReader ports.AggregateJobQueueStatsReader, pool ports.PoolStatsReader) *Collectors {
 	c := &Collectors{
 		registry:    prometheus.NewRegistry(),
 		queueReader: queueReader,
@@ -53,6 +54,9 @@ func New(queueReader ports.AggregateJobQueueStatsReader) *Collectors {
 	if queueReader != nil {
 		queue := newQueueCollector(queueReader, c.now)
 		c.registry.MustRegister(queue)
+	}
+	if pool != nil {
+		c.registry.MustRegister(newPGXPoolCollector(pool))
 	}
 	return c
 }
@@ -111,6 +115,70 @@ func newQueueCollector(reader ports.AggregateJobQueueStatsReader, now func() tim
 		}),
 	}
 }
+
+type pgxPoolCollector struct {
+	pool             ports.PoolStatsReader
+	connections      *prometheus.Desc
+	acquires         *prometheus.Desc
+	newConnections   *prometheus.Desc
+	destroyed        *prometheus.Desc
+	acquireDuration  *prometheus.Desc
+	emptyAcquireWait *prometheus.Desc
+}
+
+func newPGXPoolCollector(pool ports.PoolStatsReader) *pgxPoolCollector {
+	return &pgxPoolCollector{
+		pool:             pool,
+		connections:      prometheus.NewDesc("synapse_postgres_pool_connections", "PostgreSQL pool connections by fixed state.", []string{"state"}, nil),
+		acquires:         prometheus.NewDesc("synapse_postgres_pool_acquires_total", "PostgreSQL pool acquire attempts by fixed outcome.", []string{"outcome"}, nil),
+		newConnections:   prometheus.NewDesc("synapse_postgres_pool_new_connections_total", "PostgreSQL pool connections created.", nil, nil),
+		destroyed:        prometheus.NewDesc("synapse_postgres_pool_connections_destroyed_total", "PostgreSQL pool connections destroyed by fixed reason.", []string{"reason"}, nil),
+		acquireDuration:  prometheus.NewDesc("synapse_postgres_pool_acquire_duration_seconds", "Cumulative PostgreSQL pool connection acquisition duration.", nil, nil),
+		emptyAcquireWait: prometheus.NewDesc("synapse_postgres_pool_empty_acquire_wait_seconds", "Cumulative wait time when PostgreSQL pool acquisition found no idle connection.", nil, nil),
+	}
+}
+
+func (c *pgxPoolCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.connections
+	ch <- c.acquires
+	ch <- c.newConnections
+	ch <- c.destroyed
+	ch <- c.acquireDuration
+	ch <- c.emptyAcquireWait
+}
+
+func (c *pgxPoolCollector) Collect(ch chan<- prometheus.Metric) {
+	stats := c.pool.PoolStats()
+	for _, metric := range []struct {
+		state string
+		value int32
+	}{
+		{"acquired", stats.AcquiredConns},
+		{"constructing", stats.ConstructingConns},
+		{"idle", stats.IdleConns},
+		{"max", stats.MaxConns},
+		{"total", stats.TotalConns},
+	} {
+		ch <- prometheus.MustNewConstMetric(c.connections, prometheus.GaugeValue, float64(metric.value), metric.state)
+	}
+	for _, metric := range []struct {
+		outcome string
+		value   int64
+	}{
+		{"acquired", stats.AcquireCount},
+		{"canceled", stats.CanceledAcquireCount},
+		{"empty", stats.EmptyAcquireCount},
+	} {
+		ch <- prometheus.MustNewConstMetric(c.acquires, prometheus.CounterValue, float64(metric.value), metric.outcome)
+	}
+	ch <- prometheus.MustNewConstMetric(c.newConnections, prometheus.CounterValue, float64(stats.NewConnsCount))
+	ch <- prometheus.MustNewConstMetric(c.destroyed, prometheus.CounterValue, float64(stats.MaxIdleDestroyCount), "max_idle")
+	ch <- prometheus.MustNewConstMetric(c.destroyed, prometheus.CounterValue, float64(stats.MaxLifetimeDestroy), "max_lifetime")
+	ch <- prometheus.MustNewConstMetric(c.acquireDuration, prometheus.CounterValue, stats.AcquireDuration.Seconds())
+	ch <- prometheus.MustNewConstMetric(c.emptyAcquireWait, prometheus.CounterValue, stats.EmptyAcquireWaitTime.Seconds())
+}
+
+var _ prometheus.Collector = (*pgxPoolCollector)(nil)
 
 // ObserveHTTPRequest records a bounded HTTP request outcome.
 func (c *Collectors) ObserveHTTPRequest(method, route, statusClass string, duration time.Duration) {

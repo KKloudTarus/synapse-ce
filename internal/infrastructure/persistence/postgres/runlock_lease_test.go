@@ -42,3 +42,32 @@ func TestLeaseRunLockMutualExclusion(t *testing.T) {
 	}
 	rel2()
 }
+
+func TestLeaseRunLockSharedInstanceDoesNotReleaseAnotherAcquisition(t *testing.T) {
+	dsn := testDSN(t)
+	ctx := context.Background()
+	if err := Migrate(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	lock := NewLeaseRunLock(pool, "shared-owner", time.Minute)
+	firstRelease, firstOK, err := lock.TryLock(ctx, "runLease-first")
+	if err != nil || !firstOK {
+		t.Fatalf("first lease = ok=%v err=%v", firstOK, err)
+	}
+	secondRelease, secondOK, err := lock.TryLock(ctx, "runLease-second")
+	if err != nil || !secondOK {
+		t.Fatalf("second lease = ok=%v err=%v", secondOK, err)
+	}
+	firstRelease()
+	other := NewLeaseRunLock(pool, "other-owner", time.Minute)
+	if _, ok, err := other.TryLock(ctx, "runLease-second"); err != nil || ok {
+		t.Fatalf("first release affected second acquisition: ok=%v err=%v", ok, err)
+	}
+	secondRelease()
+}

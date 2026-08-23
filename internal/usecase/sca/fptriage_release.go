@@ -244,12 +244,26 @@ func AIEvaluationReleaseReviewDigest(ledger AIEvaluationReleaseLedger, evidence 
 
 // ApplyAIEvaluationRelease appends an approved promotion or rollback. It does not mutate runtime
 // configuration, model clients, prompts, thresholds, findings, or gate state.
-func ApplyAIEvaluationRelease(ledger AIEvaluationReleaseLedger, evidence *AIEvaluationPromotionEvidence, manifest AIEvaluationReleaseManifest) (AIEvaluationReleaseLedger, error) {
+//
+// allowedHumanApprovers is the operator-owned allowlist an approver identity must appear in. The
+// manifest is operator-supplied input that names its own approvers, so on its own "these two are human"
+// is a claim the manifest makes about itself: the machine-prefix denylist can only reject the identity
+// families this codebase already mints, and fails open on any other. The allowlist is what admits an
+// identity from outside the artifact being validated.
+//
+// It is required here, at admission, and deliberately not consulted by Validate. A decision keeps the
+// approvers it was admitted with, so an approver who later leaves the allowlist must not retroactively
+// invalidate the ledger they signed, nor stop that ledger from loading.
+func ApplyAIEvaluationRelease(ledger AIEvaluationReleaseLedger, evidence *AIEvaluationPromotionEvidence, manifest AIEvaluationReleaseManifest, allowedHumanApprovers []string) (AIEvaluationReleaseLedger, error) {
 	digest, err := AIEvaluationReleaseReviewDigest(ledger, evidence, manifest)
 	if err != nil {
 		return AIEvaluationReleaseLedger{}, err
 	}
-	if err := validateReleaseApprovals(manifest.Approvals, digest, releaseModelIdentities(ledger, evidence, manifest)); err != nil {
+	models := releaseModelIdentities(ledger, evidence, manifest)
+	if err := validateReleaseApprovals(manifest.Approvals, digest, models); err != nil {
+		return AIEvaluationReleaseLedger{}, err
+	}
+	if err := validateReleaseApproverAllowlist(manifest.Approvals, allowedHumanApprovers, models); err != nil {
 		return AIEvaluationReleaseLedger{}, err
 	}
 	for _, decision := range ledger.Decisions {
@@ -463,6 +477,38 @@ func validateReleaseApprovals(approvals []AIEvaluationReleaseApproval, digest st
 		return fmt.Errorf("AI evaluation release approvals must be ordered pm then security")
 	}
 	return nil
+}
+
+// validateReleaseApproverAllowlist requires every approver to appear in the operator-owned allowlist.
+// It is the positive counterpart to the machine-prefix denylist in validateReleaseApprovals, which can
+// only name the non-human families this codebase already mints.
+//
+// An empty list is a refusal rather than a skip: a release recorded without an allowlist to check
+// against would carry exactly the self-asserted approval this exists to prevent.
+//
+// The match is exact, not the case-insensitive comparison used for approver distinctness, so an
+// allowlist entry admits one spelling of one identity. Each entry is re-checked against the denylist so
+// the allowlist cannot launder a machine principal, mirroring validateBlindFPTriageReviewer.
+func validateReleaseApproverAllowlist(approvals []AIEvaluationReleaseApproval, allowedHumanApprovers, models []string) error {
+	if len(allowedHumanApprovers) == 0 {
+		return fmt.Errorf("AI evaluation release requires an operator-supplied human approver allowlist")
+	}
+	for _, approval := range approvals {
+		if !releaseApproverIsAllowed(approval.Reviewer, allowedHumanApprovers, models) {
+			return fmt.Errorf("AI evaluation release approver %q is not an allowlisted human", approval.Reviewer)
+		}
+	}
+	return nil
+}
+
+func releaseApproverIsAllowed(reviewer string, allowedHumanApprovers, models []string) bool {
+	for _, allowed := range allowedHumanApprovers {
+		if reviewer == allowed && allowed == strings.TrimSpace(allowed) &&
+			!aitriagereview.IsMachineOrModelActor(allowed, models...) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateReleaseRun(run AIEvaluationRun) error {

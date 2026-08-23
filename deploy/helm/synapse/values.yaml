@@ -1,0 +1,178 @@
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/kkloudtarus/synapse
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  pullPolicy: IfNotPresent
+
+web:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/kkloudtarus/synapse-web
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    pullPolicy: IfNotPresent
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+
+api:
+  replicaCount: 2
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  metrics:
+    # Dedicated, unauthenticated listener. It remains private behind this ClusterIP Service and
+    # the chart's default-deny NetworkPolicy; never expose this port through the public ingress.
+    enabled: true
+    port: 9090
+    monitoringNamespace: monitoring
+  grantAuthority:
+    # Optional machine-only listener exposed through a private TLS-terminating NLB. Production
+    # enables it with a Terraform-created frontend security group and fixed NLB private addresses;
+    # the browser Ingress never references this Service.
+    enabled: false
+    port: 8082
+    servicePort: 443
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: external
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+      service.beta.kubernetes.io/aws-load-balancer-security-groups: ""
+      service.beta.kubernetes.io/aws-load-balancer-manage-backend-security-group-rules: "true"
+      service.beta.kubernetes.io/aws-load-balancer-subnets: ""
+      service.beta.kubernetes.io/aws-load-balancer-private-ipv4-addresses: ""
+      # Production must also provide an ACM certificate ARN and TLS-listener annotations.
+      service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "443"
+      service.beta.kubernetes.io/aws-load-balancer-backend-protocol: tcp
+    # Dedicated private NLB subnet CIDRs. The frontend security group separately restricts
+    # clients to the native worker security group.
+    networkPolicySourceCIDRs: []
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {cpu: "2", memory: 2Gi}
+
+worker:
+  # Disable this Deployment when execution workers run on the hardened external EC2 tier.
+  enabled: true
+  # Fenced claim leases, per-run execution locks, and leader-gated maintenance permit safe worker replicas.
+  replicaCount: 1
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {cpu: "2", memory: 2Gi}
+
+migration:
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+serviceAccount:
+  create: true
+  name: ""
+  # Workload-identity annotations, e.g. eks.amazonaws.com/role-arn for IRSA. No credential
+  # material belongs here, only a role reference.
+  annotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile: {type: RuntimeDefault}
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  # Writable paths are supplied as explicit emptyDir mounts (/tmp, /var/lib/synapse), so the
+  # image itself stays immutable and pinned tool binaries cannot be replaced at runtime.
+  readOnlyRootFilesystem: true
+  capabilities: {drop: ["ALL"]}
+
+# Every secret reference is pre-existing and split by purpose. The chart never creates or
+# renders Secret data. Use external-secrets, CSI, or equivalent to supply these objects.
+existingSecrets:
+  apiToken: {name: synapse-api-token, key: api-token}
+  database:
+    runtime: {name: synapse-db-runtime, key: dsn}
+    migration: {name: synapse-db-migration, key: dsn}
+  objectStore:
+    accessKey: {name: synapse-s3-access, key: access-key}
+    secretKey: {name: synapse-s3-secret, key: secret-key}
+  cryptography:
+    vaultMasterKey: {name: synapse-vault-key, key: key}
+    evidenceSigningSeed: {name: synapse-evidence-signing, key: seed}
+    measureCursorSecret: {name: synapse-cursor-secret, key: secret}
+  egressGrant:
+    issuerToken: {name: synapse-egress-grant-issuer, key: token}
+    signingSeed: {name: synapse-egress-grant-signing, key: seed}
+  # Referenced only when oidc.enabled is true; the value is never rendered by the chart.
+  oidc:
+    clientSecret: {name: synapse-oidc-client, key: client-secret}
+
+externalDatabase:
+  # Runtime and migration DSNs are supplied only by existingSecrets.database. Each DSN must use
+  # sslmode=verify-full and point sslrootcert at the mounted file below.
+  sslMode: verify-full
+  caBundle:
+    secretName: synapse-database-ca
+    key: ca.crt
+
+# Browser OIDC BFF. Disabled by default; bearer API tokens are unaffected either way. The client
+# secret is never rendered here, only referenced from a pre-existing Secret.
+oidc:
+  enabled: false
+  issuer: ""
+  clientID: ""
+  redirectURL: ""
+  frontendURL: ""
+  # The tenant is fixed by the operator and never read from a token claim.
+  tenantID: ""
+  # Allowlist entries map one provider group to one Synapse role, e.g. "administrators=admin".
+  groupRoleMapping: []
+  transactionTTL: 10m
+  sessionTTL: 8h
+
+objectStore:
+  endpoint: s3.example.internal:443
+  bucket: synapse-evidence
+  useSSL: true
+
+sandbox:
+  enabled: true
+  # Set false to place pods in a Kubernetes-managed user namespace. This does not replace the
+  # live bubblewrap startup self-check: the node/runtime must still allow nested namespaces.
+  hostUsers: true
+  # Nodes must permit unprivileged user namespaces for bubblewrap. Do not grant SYS_ADMIN.
+  userNamespacesRequired: true
+
+ingress:
+  enabled: true
+  annotations: {}
+  className: ""
+  host: synapse.example.com
+  tls:
+    secretName: synapse-tls
+
+networkPolicy:
+  ingressControllerNamespace: ingress-nginx
+  # Runtime egress is restricted to these explicit destinations. A CIDR-based NetworkPolicy
+  # cannot express FQDNs, so each dependency must be named as the CIDR it actually resolves to
+  # (for example the RDS subnet range and the S3/OIDC endpoint prefix list ranges).
+  runtimeEgress:
+    database: []
+    objectStore: []
+    oidc: []
+  # Recon and governed acquisition reach authorized external targets from worker pods only.
+  # Leave false unless a cluster-level allowlist (FQDN-aware CNI or egress gateway) is in
+  # place; engagement scope and the sandbox gate execution, not this policy.
+  allowInternetEgress: false
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    # Rewritten by each workload template to its own component labels. Keeping a selector here
+    # would accidentally couple the API, worker, and web scheduling domains.
+    labelSelector: {}

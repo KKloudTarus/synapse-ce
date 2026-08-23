@@ -79,6 +79,9 @@ type fleetRouter struct {
 	work             fleetWorkService
 	clusterInv       fleetClusterInventory // optional; nil ⇒ cluster inventory ingest is not served
 	hostInv          fleetHostInventory    // optional; nil ⇒ host inventory ingest is not served
+	telemetry        fleetTelemetryIngest  // optional; nil ⇒ telemetry ingest is not served (A3 #624)
+	detections       fleetDetectionIngest  // optional; nil ⇒ detection ingest is not served (A4 #625)
+	keyReg           fleetKeyRegistration  // optional; nil ⇒ signing-key registration is not served (A4 #625)
 	minAgentVersion  string                // #412 version skew: agents below this are refused work; "" = no floor
 	cpVersion        string                // control-plane version advertised to agents (min_control_plane check)
 	rollout          fleetRolloutDecider   // optional; nil ⇒ no update is ever offered (#412 req 9)
@@ -172,6 +175,34 @@ func (rt *Router) SetFleetHostInventory(s fleetHostInventory) {
 		rt.fleet.hostInv = s
 	}
 }
+
+// SetFleetTelemetry wires the agent-plane telemetry batch ingest (A3 #624). When nil (or unset),
+// POST /api/v1/fleet/telemetry returns 404. It must be called after SetFleet.
+func (rt *Router) SetFleetTelemetry(s fleetTelemetryIngest) {
+	if rt.fleet != nil {
+		rt.fleet.telemetry = s
+	}
+}
+
+// SetFleetDetectionIngest wires the agent-plane detection batch ingest (A4 #625). When nil (or unset),
+// POST /api/v1/fleet/detections returns 404. It must be called after SetFleet.
+func (rt *Router) SetFleetDetectionIngest(s fleetDetectionIngest) {
+	if rt.fleet != nil {
+		rt.fleet.detections = s
+	}
+}
+
+// SetFleetKeyRegistration wires the agent-plane signing-key registration (A4 #625, A0.2). When nil (or
+// unset), POST /api/v1/fleet/keys returns 404. It must be called after SetFleet.
+func (rt *Router) SetFleetKeyRegistration(s fleetKeyRegistration) {
+	if rt.fleet != nil {
+		rt.fleet.keyReg = s
+	}
+}
+
+// SetFleetKeyAdmin wires the operator (human, RBAC-gated) signing-key management routes (list + revoke).
+// When nil, those routes are not registered.
+func (rt *Router) SetFleetKeyAdmin(s fleetKeyAdmin) { rt.fleetKeys = s }
 
 // SetFleetVersionPolicy wires the version-skew policy (#412): minAgentVersion is the minimum agent
 // version allowed to claim work (empty = no floor), and cpVersion is the control-plane version
@@ -299,6 +330,12 @@ func fleetAgentPlaneRoutes() []fleetAgentPlaneRoute {
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.clusterInventory)) }},
 		{"POST /api/v1/fleet/inventory/host", "/api/v1/fleet/inventory/",
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.hostInventory)) }},
+		{"POST /api/v1/fleet/telemetry", "/api/v1/fleet/telemetry",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestTelemetry)) }},
+		{"POST /api/v1/fleet/detections", "/api/v1/fleet/detections",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestDetections)) }},
+		{"POST /api/v1/fleet/keys", "/api/v1/fleet/keys",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.registerKey)) }},
 	}
 }
 

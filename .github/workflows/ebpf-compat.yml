@@ -1,0 +1,53 @@
+name: eBPF Compatibility
+
+on:
+  pull_request:
+    paths:
+      - "internal/infrastructure/ebpf/**"
+      - "scripts/ebpf/**"
+      - ".github/workflows/ebpf-compat.yml"
+      - "Makefile"
+  push:
+    branches: [main]
+    paths:
+      - "internal/infrastructure/ebpf/**"
+      - "scripts/ebpf/**"
+      - ".github/workflows/ebpf-compat.yml"
+      - "Makefile"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Native load (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install eBPF build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang llvm libbpf-dev
+
+      - name: Rebuild both committed architecture sets
+        run: make ebpf-generate
+
+      - name: Validate artifacts and host capability probe
+        run: go test -count=1 ./internal/infrastructure/ebpf -run 'TestProbe|TestCommitted|TestNetworkObjects|TestNativeBuild' -v
+
+      - name: Load and attach every sensor class on the native kernel
+        run: sudo --preserve-env=PATH go test -count=1 ./internal/infrastructure/ebpf -run '^Test(SensorLoadsAndDisablesEachClassIndependently|NetworkSensorCapturesNativeKprobeArguments)$' -v

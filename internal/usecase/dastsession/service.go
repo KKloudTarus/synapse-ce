@@ -89,6 +89,7 @@ func (s *Service) execute(ctx context.Context, admitted safety.AdmittedAction, h
 		Target: action.Target.Value, Session: config, Requests: requests,
 		RatePerSec: ratePerSec, Concurrency: concurrency,
 		EngagementID: action.EngagementID, EgressPolicy: egressPolicy,
+		EgressExecutionKind: "dast-session", EgressExecutionID: action.SessionID.String(),
 	}, secretEnv, func(ctx context.Context, request ports.DASTRequest) error {
 		target, err := requestTarget(base, request.URL)
 		if err != nil {
@@ -213,6 +214,7 @@ func (s *Service) CrawlWithRate(ctx context.Context, admitted safety.AdmittedAct
 		},
 		RatePerSec: ratePerSec, Concurrency: concurrency,
 		EngagementID: action.EngagementID, EgressPolicy: egressPolicy,
+		EgressExecutionKind: "dast-session", EgressExecutionID: action.SessionID.String(),
 	}, secretEnv, func(ctx context.Context, request ports.DASTRequest) error {
 		target, err := requestTarget(base, request.URL)
 		if err != nil {

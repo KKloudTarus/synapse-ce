@@ -42,6 +42,8 @@ tags:
   description: Tenant-scoped vulnerability feeds, exposure correlation, risk transitions, and durable operations
 - name: remediation-sla
   description: Risk-based remediation deadlines, immutable assessments, policy versions, and human-owned lifecycle governance
+- name: fleet
+  description: Enrolled-agent transport and operator fleet administration
 
 paths:
   /healthz:
@@ -356,6 +358,32 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/sca/scans/{id}:
+    get:
+      tags: [sca]
+      summary: Read one asynchronous scan job by its own id
+      description: >
+        Reads a specific scan job rather than the engagement's latest, so a
+        concurrent scan on the same engagement cannot mask this job's status. The
+        job is resolved first, then its engagement is checked against the caller's
+        tenant; an unknown or cross-tenant job is 404 and reveals nothing.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+        description: Scan job id returned when the scan was accepted
+      responses:
+        "200":
+          description: Scan job status, stage, and progress
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ScanJob"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/attack-paths:
     get:
@@ -1749,6 +1777,141 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {description: Lifecycle version changed since it was loaded, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
 
+  /api/v1/fleet/telemetry:
+    post:
+      tags: [fleet]
+      operationId: ingestFleetTelemetryBatch
+      summary: Verify and ingest a signed canonical telemetry batch
+      description: A3 transport endpoint. Verifies credential identity, key lifecycle, schema, manifest signature, event digests, incarnation-aware sequencing, and returns the highest-contiguous ACK.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [Manifest, Events]
+              properties:
+                Manifest:
+                  type: object
+                  description: fleetagent.TelemetryBatchManifest with a signed StreamPosition and explicit loss counts.
+                  additionalProperties: true
+                Events:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [EventID, Class, Payload, ObservedAt]
+                    properties:
+                      EventID: {type: string}
+                      Class: {type: string, enum: [process, network, file, privilege]}
+                      Payload: {type: string, contentEncoding: base64, description: Canonical telemetry event bytes}
+                      ObservedAt: {type: string, format: date-time}
+      responses:
+        '200':
+          description: Batch classified and highest-contiguous ACK returned
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, duplicate, ack, provenance, gap_open]
+                properties:
+                  accepted: {type: boolean}
+                  duplicate: {type: boolean}
+                  ack: {type: integer, format: uint64, minimum: 0}
+                  provenance: {type: string}
+                  gap_open: {type: boolean}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/fleet/keys:
+    post:
+      tags: [fleet]
+      operationId: registerFleetSigningKey
+      summary: Register an agent content-signing key with proof-of-possession
+      description: The canonical agent identity comes from the bearer credential, never the request body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentSigningKeyRegistration'}
+      responses:
+        '201':
+          description: Key registered or idempotently re-registered
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentSigningKeyRegistrationResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/fleet/detections:
+    post:
+      tags: [fleet]
+      operationId: ingestFleetDetectionBatch
+      summary: Verify and ingest an independently signed agent detection batch
+      description: Verifies authenticated agent identity, key lifecycle, signature, exact membership, and per-detection content digests before exactly-once evidence sealing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentDetectionBatchRequest'}
+      responses:
+        '200':
+          description: The complete batch was admitted or idempotently skipped
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentDetectionBatchResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/agents/{id}/keys:
+    parameters:
+    - $ref: '#/components/parameters/AgentId'
+    get:
+      tags: [fleet]
+      operationId: listAgentSigningKeys
+      summary: List an agent's content-signing keys
+      responses:
+        '200':
+          description: Signing-key lifecycle records
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentSigningKeyList'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/agents/{id}/keys/{keyID}/revoke:
+    parameters:
+    - $ref: '#/components/parameters/AgentId'
+    - $ref: '#/components/parameters/SigningKeyId'
+    post:
+      tags: [fleet]
+      operationId: revokeAgentSigningKey
+      summary: Revoke one agent content-signing key
+      responses:
+        '200':
+          description: Key revoked monotonically
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agent_id, key_id, state]
+                properties:
+                  agent_id: {type: string}
+                  key_id: {type: string}
+                  state: {type: string, const: revoked}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1763,6 +1926,16 @@ components:
       schema: {type: string}
     FindingId:
       name: fid
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    AgentId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    SigningKeyId:
+      name: keyID
       in: path
       required: true
       schema: {type: string, minLength: 1}
@@ -1862,6 +2035,104 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
 
   schemas:
+    AgentSigningKeyRegistration:
+      type: object
+      additionalProperties: false
+      required: [public_key, purpose, not_before, not_after, proof]
+      properties:
+        public_key: {type: string, contentEncoding: base64, description: Raw 32-byte Ed25519 public key}
+        purpose: {type: string, enum: [telemetry-batch, detection-batch, response-result]}
+        not_before: {type: string, format: date-time}
+        not_after: {type: string, format: date-time}
+        proof: {type: string, contentEncoding: base64, description: Ed25519 signature over the purpose-bound key binding message}
+
+    AgentSigningKeyRegistrationResult:
+      type: object
+      required: [key_id, agent_id, purpose, not_before, not_after]
+      properties:
+        key_id: {type: string}
+        agent_id: {type: string}
+        purpose: {type: string, enum: [telemetry-batch, detection-batch, response-result]}
+        not_before: {type: string, format: date-time}
+        not_after: {type: string, format: date-time}
+
+    AgentSigningKeySummary:
+      type: object
+      required: [key_id, purpose, algorithm, not_before, not_after, revoked, replaced_by]
+      properties:
+        key_id: {type: string}
+        purpose: {type: string, enum: [telemetry-batch, detection-batch, response-result]}
+        algorithm: {type: string, const: ed25519}
+        not_before: {type: string, format: date-time}
+        not_after: {type: string, format: date-time}
+        revoked: {type: boolean}
+        replaced_by: {type: string}
+
+    AgentSigningKeyList:
+      type: object
+      required: [agent_id, keys]
+      properties:
+        agent_id: {type: string}
+        keys:
+          type: array
+          items: {$ref: '#/components/schemas/AgentSigningKeySummary'}
+
+    DetectionBatchRef:
+      type: object
+      additionalProperties: false
+      required: [ID, ContentSHA256]
+      properties:
+        ID: {type: string}
+        ContentSHA256: {type: string, pattern: '^[0-9a-f]{64}$'}
+
+    AgentDetectionBatch:
+      type: object
+      additionalProperties: false
+      required: [AgentID, EngagementID, Sequence, KeyID, Signature, Detections]
+      properties:
+        AgentID: {type: string, description: Must equal the authenticated agent identity}
+        EngagementID: {type: string}
+        Sequence: {type: integer, format: uint64, minimum: 1}
+        KeyID: {type: string}
+        Signature: {type: string, contentEncoding: base64}
+        Detections:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/DetectionBatchRef'}
+
+    DetectionBatchItem:
+      type: object
+      additionalProperties: false
+      required: [ID, Detection, AssetID]
+      properties:
+        ID: {type: string}
+        Detection:
+          type: object
+          description: Typed detection.Detection body whose canonical JSON and AssetID must match the signed content digest.
+          additionalProperties: true
+        AssetID: {type: string}
+
+    AgentDetectionBatchRequest:
+      type: object
+      additionalProperties: false
+      required: [batch, items]
+      properties:
+        batch: {$ref: '#/components/schemas/AgentDetectionBatch'}
+        items:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/DetectionBatchItem'}
+
+    AgentDetectionBatchResult:
+      type: object
+      required: [engagement_id, sealed, skipped, missing, replay]
+      properties:
+        engagement_id: {type: string}
+        sealed: {type: integer, minimum: 0}
+        skipped: {type: integer, minimum: 0}
+        missing: {type: integer, format: uint64, minimum: 0}
+        replay: {type: boolean}
+
     Readiness:
       type: object
       required: [status, checks]
@@ -3264,6 +3535,28 @@ components:
           type: string
           enum: [local, git, archive, image]
           default: local
+
+    ScanJob:
+      type: object
+      description: >
+        Progress of one asynchronous scan. Debug events carry only metadata and
+        counts: never raw tool output, environment values, or unredacted commands.
+      properties:
+        id: {type: string}
+        engagement_id: {type: string}
+        target: {type: string}
+        kind: {type: string}
+        status:
+          type: string
+          enum: [running, succeeded, failed]
+        stage: {type: string}
+        progress: {type: integer, minimum: 0, maximum: 100}
+        error: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        debug_events:
+          type: array
+          items: {type: object}
 
     ScanResult:
       type: object

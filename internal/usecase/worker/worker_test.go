@@ -41,6 +41,62 @@ func cfg() Config {
 	return Config{Visibility: time.Second, Poll: 5 * time.Millisecond, Heartbeat: 200 * time.Millisecond, Backoff: 10 * time.Millisecond, MaxAttempts: 3}
 }
 
+type staleCompleteQueue struct {
+	completeCalls   atomic.Int64
+	failCalls       atomic.Int64
+	deadletterCalls atomic.Int64
+}
+
+func (q *staleCompleteQueue) Enqueue(context.Context, string, []byte) (string, error) {
+	return "", nil
+}
+func (q *staleCompleteQueue) Claim(context.Context, time.Duration, ...string) (*ports.QueuedJob, error) {
+	return nil, nil
+}
+func (q *staleCompleteQueue) Heartbeat(context.Context, string, int64, time.Duration) error {
+	return nil
+}
+func (q *staleCompleteQueue) Complete(context.Context, string, int64) error {
+	q.completeCalls.Add(1)
+	return ports.ErrStaleLease
+}
+func (q *staleCompleteQueue) Fail(context.Context, string, int64, time.Duration) error {
+	q.failCalls.Add(1)
+	return nil
+}
+func (q *staleCompleteQueue) Retry(context.Context, string, int64, time.Duration) error {
+	return nil
+}
+func (q *staleCompleteQueue) Deadletter(context.Context, string, int64) error {
+	q.deadletterCalls.Add(1)
+	return nil
+}
+func (q *staleCompleteQueue) Depth(context.Context, ...string) (int, error) { return 0, nil }
+func (q *staleCompleteQueue) Stats(context.Context, ...string) (ports.JobStats, error) {
+	return ports.JobStats{}, nil
+}
+
+func TestWorkerAbandonsStaleCompletion(t *testing.T) {
+	q := &staleCompleteQueue{}
+	w := New(q, map[string]Handler{
+		"recon": HandlerFunc(func(context.Context, ports.QueuedJob) error { return nil }),
+	}, cfg(), nil)
+
+	w.process(context.Background(), ports.QueuedJob{
+		ID:       "job-1",
+		TenantID: "tenant-test",
+		Kind:     "recon",
+		Fence:    7,
+	})
+
+	if q.completeCalls.Load() != 1 {
+		t.Fatalf("Complete calls = %d, want 1", q.completeCalls.Load())
+	}
+	if q.failCalls.Load() != 0 || q.deadletterCalls.Load() != 0 {
+		t.Fatalf("stale completion must abandon without Fail or Deadletter: fail=%d deadletter=%d", q.failCalls.Load(), q.deadletterCalls.Load())
+	}
+}
+
 // TestWorkerRecoversFromHandlerPanic proves a panicking handler (e.g. a crafted image that panics a stdlib
 // parser in the SCA handler) is converted to a job failure and does NOT crash the shared worker. If the panic
 // were not recovered it would unwind out of the Run goroutine and crash this test process.
@@ -107,6 +163,31 @@ func TestWorkerProcessesAndCompletes(t *testing.T) {
 	// Completed → not redelivered.
 	if j, _ := q.Claim(ctx, time.Second); j != nil {
 		t.Errorf("a completed job must not be claimable, got %+v (id %s)", j, id)
+	}
+}
+
+func TestWorkerRetryableResultDoesNotBurnAttempt(t *testing.T) {
+	q := memory.NewJobQueue(&seqIDs{}, nil)
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
+	id, err := q.Enqueue(ctx, "contended", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := q.Claim(ctx, time.Second)
+	if err != nil || job == nil {
+		t.Fatalf("claim = %+v, %v", job, err)
+	}
+	w := New(q, map[string]Handler{
+		"contended": HandlerFunc(func(context.Context, ports.QueuedJob) error { return ports.ErrRetryable }),
+	}, cfg(), nil)
+	w.process(context.Background(), *job)
+
+	status, err := q.JobStatus(ctx, id)
+	if err != nil || status.Attempts != 0 || status.DeadLettered {
+		t.Fatalf("retryable status = %+v, %v; want zero attempts and a live job", status, err)
+	}
+	if next, err := q.Claim(ctx, time.Second); err != nil || next != nil {
+		t.Fatalf("retryable job ignored backoff: claim=%+v err=%v", next, err)
 	}
 }
 
@@ -201,6 +282,195 @@ func TestWorkerCallsDeadLettererOnGiveUp(t *testing.T) {
 	// The job is still dead-lettered (the hook does not block it).
 	if j, _ := q.Claim(ctx, time.Second); j != nil {
 		t.Errorf("job must be dead-lettered after give-up, got %+v", j)
+	}
+}
+
+// staleDeadletterQueue reports that the job was reclaimed at a newer fence when the worker
+// tries to dead-letter it.
+type staleDeadletterQueue struct {
+	staleCompleteQueue
+}
+
+func (q *staleDeadletterQueue) Complete(context.Context, string, int64) error {
+	q.completeCalls.Add(1)
+	return nil
+}
+
+func (q *staleDeadletterQueue) Deadletter(context.Context, string, int64) error {
+	q.deadletterCalls.Add(1)
+	return ports.ErrStaleLease
+}
+
+// TestWorkerSkipsDeadLettererWhenLeaseIsStale proves the fence check gates the entity finalize.
+// The backing domain repositories are unconditional upserts, so a worker whose lease expired must
+// not drive the entity terminal: the job already belongs to another worker at a newer fence and
+// that worker's live run would be clobbered.
+func TestWorkerSkipsDeadLettererWhenLeaseIsStale(t *testing.T) {
+	q := &staleDeadletterQueue{}
+	h := &deadLetterHandler{}
+	w := New(q, map[string]Handler{"agent": h}, cfg(), nil)
+
+	w.process(context.Background(), ports.QueuedJob{
+		ID:       "job-1",
+		TenantID: "tenant-test",
+		Kind:     "agent",
+		Fence:    3,
+		Attempts: cfg().MaxAttempts,
+	})
+
+	if q.deadletterCalls.Load() != 1 {
+		t.Fatalf("Deadletter calls = %d, want 1", q.deadletterCalls.Load())
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.dlCalls != 0 {
+		t.Fatalf("OnDeadLetter must not fire after a stale lease, got %d calls", h.dlCalls)
+	}
+}
+
+// staleHeartbeatQueue reports the lease as lost on the first heartbeat, simulating another
+// worker reclaiming the job after this worker's visibility lease expired.
+type staleHeartbeatQueue struct {
+	staleCompleteQueue
+	heartbeats atomic.Int64
+}
+
+func (q *staleHeartbeatQueue) Heartbeat(context.Context, string, int64, time.Duration) error {
+	q.heartbeats.Add(1)
+	return ports.ErrStaleLease
+}
+
+func (q *staleHeartbeatQueue) Complete(context.Context, string, int64) error {
+	q.completeCalls.Add(1)
+	return nil
+}
+
+// TestWorkerCancelsHandlerWhenLeaseIsLost proves losing the lease mid-flight cancels the
+// handler's context and abandons the job. Recon handlers hit real hosts and seal evidence, so a
+// handler that keeps running after another worker has reclaimed the job at a newer fence would
+// publish state behind that worker's back and could double-complete the work.
+func TestWorkerCancelsHandlerWhenLeaseIsLost(t *testing.T) {
+	q := &staleHeartbeatQueue{}
+	handlerCtxErr := make(chan error, 1)
+	w := New(q, map[string]Handler{
+		"recon": HandlerFunc(func(ctx context.Context, _ ports.QueuedJob) error {
+			// Model a long tool run: block until the lease is lost (ctx cancelled).
+			select {
+			case <-ctx.Done():
+				handlerCtxErr <- ctx.Err()
+				return ctx.Err()
+			case <-time.After(3 * time.Second):
+				handlerCtxErr <- nil
+				return nil
+			}
+		}),
+	}, Config{Visibility: time.Second, Poll: 5 * time.Millisecond, Heartbeat: 10 * time.Millisecond, Backoff: 10 * time.Millisecond, MaxAttempts: 3}, nil)
+
+	w.process(context.Background(), ports.QueuedJob{
+		ID:       "job-1",
+		TenantID: "tenant-test",
+		Kind:     "recon",
+		Fence:    5,
+	})
+
+	select {
+	case err := <-handlerCtxErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("handler context error = %v, want context.Canceled", err)
+		}
+	default:
+		t.Fatal("handler did not observe cancellation")
+	}
+	if q.heartbeats.Load() == 0 {
+		t.Fatal("heartbeat must run so lease loss is detected")
+	}
+	// A reclaimed job must not have its terminal state published by this worker.
+	if q.completeCalls.Load() != 0 || q.failCalls.Load() != 0 || q.deadletterCalls.Load() != 0 {
+		t.Fatalf("lost claim must publish no terminal state: complete=%d fail=%d deadletter=%d",
+			q.completeCalls.Load(), q.failCalls.Load(), q.deadletterCalls.Load())
+	}
+}
+
+type failingHeartbeatQueue struct {
+	staleCompleteQueue
+	heartbeats atomic.Int64
+}
+
+func (q *failingHeartbeatQueue) Heartbeat(context.Context, string, int64, time.Duration) error {
+	q.heartbeats.Add(1)
+	return errors.New("database unavailable")
+}
+
+func TestWorkerCancelsHandlerWhenHeartbeatCannotRenewLease(t *testing.T) {
+	q := &failingHeartbeatQueue{}
+	handlerCtxErr := make(chan error, 1)
+	w := New(q, map[string]Handler{
+		"recon": HandlerFunc(func(ctx context.Context, _ ports.QueuedJob) error {
+			<-ctx.Done()
+			handlerCtxErr <- ctx.Err()
+			return ctx.Err()
+		}),
+	}, Config{Visibility: 40 * time.Millisecond, Poll: 5 * time.Millisecond, Heartbeat: 5 * time.Millisecond, Backoff: 10 * time.Millisecond, MaxAttempts: 3}, nil)
+
+	w.process(context.Background(), ports.QueuedJob{
+		ID:       "job-1",
+		TenantID: "tenant-test",
+		Kind:     "recon",
+		Fence:    5,
+	})
+
+	select {
+	case err := <-handlerCtxErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("handler context error = %v, want context.Canceled", err)
+		}
+	default:
+		t.Fatal("handler did not observe cancellation after lease renewal failed")
+	}
+	if q.heartbeats.Load() == 0 {
+		t.Fatal("heartbeat must run before the known lease expires")
+	}
+	if q.completeCalls.Load() != 0 || q.failCalls.Load() != 0 || q.deadletterCalls.Load() != 0 {
+		t.Fatalf("expired claim must publish no terminal state: complete=%d fail=%d deadletter=%d",
+			q.completeCalls.Load(), q.failCalls.Load(), q.deadletterCalls.Load())
+	}
+}
+
+type blockingHeartbeatQueue struct {
+	staleCompleteQueue
+	started chan struct{}
+}
+
+func (q *blockingHeartbeatQueue) Heartbeat(ctx context.Context, _ string, _ int64, _ time.Duration) error {
+	select {
+	case <-q.started:
+	default:
+		close(q.started)
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestWorkerHeartbeatHonorsParentCancellation(t *testing.T) {
+	q := &blockingHeartbeatQueue{started: make(chan struct{})}
+	w := New(q, nil, Config{Visibility: time.Second, Heartbeat: time.Millisecond}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		w.heartbeat(ctx, "job-1", 1, func() {})
+		close(done)
+	}()
+
+	select {
+	case <-q.started:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat did not start")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("heartbeat did not stop after parent cancellation")
 	}
 }
 

@@ -1,0 +1,45 @@
+image:
+  repository: registry.example.invalid/synapse
+  digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+api:
+  nodeSelector:
+    synapse.example/runtime: control-plane
+  grantAuthority:
+    enabled: true
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: external
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+      service.beta.kubernetes.io/aws-load-balancer-security-groups: sg-0123456789abcdef0
+      service.beta.kubernetes.io/aws-load-balancer-manage-backend-security-group-rules: "true"
+      service.beta.kubernetes.io/aws-load-balancer-subnets: subnet-00000000000000001,subnet-00000000000000002,subnet-00000000000000003
+      service.beta.kubernetes.io/aws-load-balancer-private-ipv4-addresses: 10.64.255.14,10.64.255.30,10.64.255.46
+      service.beta.kubernetes.io/aws-load-balancer-ssl-cert: arn:aws:acm:us-east-1:111122223333:certificate/00000000-0000-0000-0000-000000000000
+      service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "443"
+      service.beta.kubernetes.io/aws-load-balancer-backend-protocol: tcp
+    networkPolicySourceCIDRs: ["10.64.255.0/28", "10.64.255.16/28", "10.64.255.32/28"]
+worker:
+  enabled: false
+  nodeSelector:
+    synapse.example/runtime: execution
+web:
+  image:
+    repository: registry.example.invalid/synapse-web
+    digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+objectStore:
+  endpoint: s3.example.internal:443
+  bucket: synapse-evidence
+  useSSL: true
+ingress:
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  host: synapse.test.example
+  tls:
+    secretName: synapse-test-tls
+networkPolicy:
+  ingressControllerNamespace: ingress-nginx
+  allowInternetEgress: false
+  runtimeEgress:
+    database: ["10.64.16.0/20"]
+    objectStore: ["10.64.32.0/20"]
+    oidc: ["10.64.48.0/20"]

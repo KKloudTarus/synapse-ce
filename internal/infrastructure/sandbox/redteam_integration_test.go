@@ -165,7 +165,13 @@ func TestRedTeamEgress(t *testing.T) {
 	sb.SetEgress(app)
 	// In scope: only 1.1.1.1. Everything else (metadata, 8.8.8.8, v6) must be dropped.
 	policy := ports.EgressPolicy{Rules: []ports.EgressRule{{Allow: true, Net: netip.MustParsePrefix("1.1.1.1/32")}}}
-	res, err := sb.Run(ctx, ports.ToolSpec{Name: bin, Workdir: filepath.Dir(bin), EgressPolicy: &policy})
+	res, err := sb.Run(ctx, ports.ToolSpec{
+		Name:                bin,
+		Workdir:             filepath.Dir(bin),
+		EgressPolicy:        &policy,
+		EgressExecutionKind: "recon",
+		EgressExecutionID:   "integration-red-team",
+	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}

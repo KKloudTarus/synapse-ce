@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -30,6 +31,30 @@ const batchSep = "\x1e"
 type DetectionRef struct {
 	ID            shared.ID
 	ContentSHA256 string
+}
+
+// DetectionBatchItem is one detection body covered by an AgentBatch ref. It lives beside the batch
+// contract so the agent transport and control-plane ingest share the exact same wire shape without an
+// infrastructure package importing a server-side use case. AssetID is explicit because the asset is
+// part of DetectionContentHash and must therefore be verified under the batch signature.
+type DetectionBatchItem struct {
+	ID        shared.ID
+	Detection detection.Detection
+	AssetID   shared.ID
+}
+
+// Validate checks the item before it is signed or admitted by the control plane.
+func (i DetectionBatchItem) Validate() error {
+	if i.ID.IsZero() {
+		return fmt.Errorf("%w: detection batch item has no id", shared.ErrValidation)
+	}
+	if i.AssetID.IsZero() {
+		return fmt.Errorf("%w: detection batch item %s has no asset", shared.ErrValidation, i.ID)
+	}
+	if err := i.Detection.Validate(); err != nil {
+		return fmt.Errorf("detection batch item %s is malformed: %w", i.ID, err)
+	}
+	return nil
 }
 
 // AgentBatch is a sequenced, signed set of detections an agent shipped to the control plane (#423). The
@@ -75,6 +100,7 @@ func (b AgentBatch) Validate() error {
 	if len(b.Detections) == 0 {
 		return fmt.Errorf("%w: batch carries no detections", shared.ErrValidation)
 	}
+	seen := make(map[shared.ID]struct{}, len(b.Detections))
 	for i, ref := range b.Detections {
 		if ref.ID == "" {
 			return fmt.Errorf("%w: batch detection[%d] has no id", shared.ErrValidation, i)
@@ -82,6 +108,10 @@ func (b AgentBatch) Validate() error {
 		if ref.ContentSHA256 == "" {
 			return fmt.Errorf("%w: batch detection[%d] has no content digest", shared.ErrValidation, i)
 		}
+		if _, duplicate := seen[ref.ID]; duplicate {
+			return fmt.Errorf("%w: batch repeats detection id %s", shared.ErrValidation, ref.ID)
+		}
+		seen[ref.ID] = struct{}{}
 	}
 	return nil
 }

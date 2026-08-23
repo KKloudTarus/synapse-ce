@@ -9,11 +9,18 @@ export class ApiError extends Error {
 }
 
 let token = ''
+let csrfToken = ''
 let onUnauthorized: (() => void) | null = null
 
 export function setToken(t: string): void {
   token = t
 }
+
+// The BFF issues this token with the session; it intentionally remains in memory only.
+export function setCSRFToken(t: string): void {
+  csrfToken = t
+}
+
 export function setUnauthorizedHandler(fn: () => void): void {
   onUnauthorized = fn
 }
@@ -24,6 +31,49 @@ export function getToken(): string {
 
 export function getOnUnauthorized(): (() => void) | null {
   return onUnauthorized
+}
+
+export type BFFSession = { authenticated: boolean; csrfToken: string }
+
+function apiRequestInit(init: RequestInit = {}, json = true): RequestInit {
+  const method = (init.method ?? 'GET').toUpperCase()
+  const headers: Record<string, string> = {}
+  if (json && !headers['content-type']) headers['content-type'] = 'application/json'
+  if (token) headers.authorization = `Bearer ${token}`
+  else if (!['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method) && csrfToken) headers['X-CSRF-Token'] = csrfToken
+  return { ...init, credentials: token ? 'omit' : 'same-origin', headers: { ...headers, ...(init.headers as Record<string, string> ?? {}) } }
+}
+
+async function errorMessage(res: Response): Promise<string> {
+  try { const b = await res.json(); return b?.error ?? `HTTP ${res.status}` } catch { return `HTTP ${res.status}` }
+}
+
+export async function discoverSession(): Promise<BFFSession> {
+  let res: Response
+  try {
+    res = await fetch('/api/auth/session', { credentials: 'same-origin' })
+  } catch {
+    throw new ApiError(0, 'Cannot reach the API. Is the server running on :8080?')
+  }
+  if (res.status === 401 || res.status === 403) return { authenticated: false, csrfToken: '' }
+  if (!res.ok) throw new ApiError(res.status, await errorMessage(res))
+  const body = await res.json()
+  if (body?.authenticated !== true) return { authenticated: false, csrfToken: '' }
+  const csrf = body?.csrf_token ?? body?.csrfToken ?? body?.csrf
+  if (typeof csrf !== 'string' || csrf === '') {
+    throw new ApiError(res.status, 'The sign-in session did not include a CSRF token.')
+  }
+  return { authenticated: true, csrfToken: csrf }
+}
+
+export async function logoutSession(): Promise<void> {
+  let res: Response
+  try {
+    res = await fetch('/api/auth/logout', apiRequestInit({ method: 'POST' }))
+  } catch {
+    throw new ApiError(0, 'Cannot reach the API. Is the server running on :8080?')
+  }
+  if (!res.ok) throw new ApiError(res.status, await errorMessage(res))
 }
 
 export async function req(path: string, init?: RequestInit): Promise<any> {

@@ -85,7 +85,8 @@ GET  /api/v1/fleet/agents/{id}
 ```
 
 Configure a host agent with `SYNAPSE_AGENT_ROOT` (filesystem root to inventory), `SYNAPSE_AGENT_NAME`, and
-`SYNAPSE_AGENT_STATE_DIR`. Protect the state directory: it holds the agent credential and offline buffer.
+`SYNAPSE_AGENT_STATE_DIR`. Protect the state directory: it holds the agent credential and offline buffer,
+including the telemetry WAL under `telemetry-spool/`.
 
 The cluster agent requires `SYNAPSE_CLUSTER` as a stable identity keyed into every asset, and accepts
 `SYNAPSE_CLUSTER_NAMESPACES` to narrow scope and `SYNAPSE_CLUSTER_RESYNC` (default `5m`) to set the
@@ -96,6 +97,7 @@ collection interval.
 ```bash
 SYNAPSE_DETECT_CLASSES=process,network,file,privilege
 SYNAPSE_DETECT_CPU_CEIL_PCT=25
+SYNAPSE_DETECTION_ENGAGEMENT_ID=engagement-id
 ```
 
 An empty class list disables the engine. When CPU exceeds the ceiling, classes are shed in a defined order
@@ -105,6 +107,58 @@ per engagement:
 ```
 GET /api/v1/engagements/{id}/detections
 ```
+
+When `SYNAPSE_DETECTION_ENGAGEMENT_ID` is set, the agent generates a purpose-bound Ed25519 key,
+persists the private half as `detection-transport.json` under the protected state directory, proves
+possession to `POST /api/v1/fleet/keys`, and drains P1 independently to
+`POST /api/v1/fleet/detections`. Enable both `SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED=true` and
+`SYNAPSE_FLEET_DETECTION_INGEST_ENABLED=true` on the control plane. The server derives the agent
+identity from its credential, resolves the named key, verifies every content digest and signature,
+then seals each detection exactly once.
+
+A pending batch coordinate, membership, and engagement attribution are written before the network
+request. If the agent restarts or loses the HTTP response, it retries the same sequence and membership;
+the control plane idempotently skips what was already sealed. Changing the configured engagement while
+a batch is pending fails closed instead of re-attributing it. The local WAL is ACKed only after a
+complete 2xx response, and its per-epoch ACK history lets a reboot finish committing a batch whose WAL
+records were already reclaimed. Keys rotate before expiry, and one `403` causes one new key registration
+plus a retry of the same pending sequence. A second rejection stops delivery instead of generating keys
+indefinitely.
+
+### Durable telemetry spool
+
+Before the detection engine evaluates an eBPF event, the agent normalizes it to the canonical telemetry
+envelope and appends it to a checksummed priority WAL. Confirmed detections enter the same spool at P1.
+The four lanes drain in P0 → P3 order:
+
+| Priority | Signals | Disk-pressure behavior |
+| --- | --- | --- |
+| P0 | response verification, coverage, sensor state | never shed; producer backpressure plus a durable gap record |
+| P1 | confirmed detections | never shed; producer backpressure plus a durable gap record |
+| P2 | privilege changes and critical-file telemetry | never shed; producer backpressure plus a durable gap record |
+| P3 | background process and network telemetry | oldest P3 segment evicted first, only after its exact sequence gap is fsynced |
+
+`SYNAPSE_TELEMETRY_SPOOL_BYTES` sets the WAL-segment quota (default 512 MiB). The small state and gap
+journals are outside that quota so a full data allocation cannot prevent the agent recording why data
+was not retained. A restart reads both state generations, validates CRC32C frames, removes ACKed bytes,
+repairs corrupt/torn segments, and continues the current `(priority, epoch, sequence)` coordinate. A
+kernel reboot changes the Linux boot UUID, advances the epoch, and safely restarts sequence at one.
+
+The WAL is the A2 durability boundary. Confirmed P1 detections have their own signed shipper when an
+engagement is configured; the remaining raw-telemetry drain belongs to A3. Until that transport is
+enabled, P3 rotates within the configured quota while P0/P2 can eventually backpressure. Operators
+should therefore size the quota for the expected disconnected interval.
+
+Set `SYNAPSE_AGENT_METRICS_ADDR=127.0.0.1:9465` to expose `/metrics`. This listener is deliberately off
+by default and has no authentication. Exported series have bounded labels (priority only):
+
+- `synapse_agent_spool_records` and `synapse_agent_spool_record_bytes`
+- `synapse_agent_spool_oldest_unacked_age_seconds`
+- `synapse_agent_spool_next_sequence` and `synapse_agent_spool_highest_acked_sequence`
+- `synapse_agent_spool_gap_records` and `synapse_agent_spool_gap_bytes`
+- `synapse_agent_spool_evicted_records_total`
+- `synapse_agent_spool_corruption_events_total`
+- `synapse_agent_spool_fsync_total` and `synapse_agent_spool_fsync_duration_seconds_total`
 
 ## Coverage
 
@@ -158,14 +212,15 @@ For packaging, service integration, and uninstall contracts, see
 
 ## Telemetry
 
-Raw telemetry is deliberately isolated behind its own persistence port (`ports.TelemetryStore`) so the
-finding, judgment, and evidence paths never wait on a high-volume store. The architectural boundary is in
-place, and an architecture test asserts the columnar store never leaks into a domain package.
+Raw telemetry is deliberately isolated behind persistence ports so the finding, judgment, and evidence
+paths never wait on a high-volume store. `ports.TelemetrySpool` is the agent-side WAL boundary;
+`ports.TelemetryStore` is the control-plane columnar boundary. Architecture tests keep both concrete
+stores out of domain packages.
 
 The retention, sampling, and ingest-budget behavior described in the
 [telemetry store ADR](repository/telemetry-store-adr.md) is the accepted design, but the operator
-configuration for it is **not wired yet**: there are currently no telemetry environment variables to set.
-Detections themselves are persisted and hash-chained today and do not depend on this tier.
+configuration for the control-plane tier is **not wired yet**. Agent-side durability and its quota are
+wired as described above; A3 still owns transmission from that WAL to the existing columnar ingest.
 
 ## Purple coverage
 

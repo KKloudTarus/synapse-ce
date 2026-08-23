@@ -10,13 +10,15 @@ import (
 
 // CloudScope identifies one provider root and a vault credential by reference.
 type CloudScope struct {
-	EngagementID   shared.ID                `json:"engagement_id"`
-	Provider       cloudposture.Provider    `json:"provider"`
-	Root           string                   `json:"root"`
-	CredentialRef  string                   `json:"credential_ref"`
-	ScopeKey       string                   `json:"-"`
-	ApprovedTarget string                   `json:"-"`
-	Authorize      CloudOperationAuthorizer `json:"-"`
+	EngagementID        shared.ID                `json:"engagement_id"`
+	Provider            cloudposture.Provider    `json:"provider"`
+	Root                string                   `json:"root"`
+	CredentialRef       string                   `json:"credential_ref"`
+	ScopeKey            string                   `json:"-"`
+	ApprovedTarget      string                   `json:"-"`
+	Authorize           CloudOperationAuthorizer `json:"-"`
+	EgressExecutionKind string                   `json:"-"`
+	EgressExecutionID   string                   `json:"-"`
 }
 
 // CloudConnector observes one cloud provider without mutation.

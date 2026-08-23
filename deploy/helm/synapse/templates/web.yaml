@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "synapse.fullname" . }}-web
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  replicas: {{ .Values.web.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "synapse.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        {{- include "synapse.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: web
+    spec:
+      hostUsers: {{ .Values.sandbox.hostUsers }}
+      serviceAccountName: {{ include "synapse.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "synapse.podSecurityContext" . | nindent 8 }}
+      topologySpreadConstraints:
+        {{- include "synapse.topologySpreadConstraints" (list . "web") | nindent 8 }}
+      containers:
+        - name: web
+          image: {{ include "synapse.image" .Values.web.image | quote }}
+          imagePullPolicy: {{ .Values.web.image.pullPolicy }}
+          securityContext:
+            {{- include "synapse.containerSecurityContext" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+          livenessProbe:
+            httpGet: {path: /, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet: {path: /, port: http}
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+          volumeMounts:
+            # nginx-unprivileged writes PID and temporary client/proxy state under /tmp.
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {}

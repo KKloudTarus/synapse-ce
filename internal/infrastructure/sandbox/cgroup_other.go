@@ -8,7 +8,11 @@ import "errors"
 // runner falls back (the sandbox itself is already unavailable off Linux – no bwrap).
 type runCgroup struct{}
 
-func newRunCgroup(int64, int64, int) (*runCgroup, error) {
+func prepareDelegatedCgroup() (string, error) {
+	return "", errors.New("cgroup v2 unavailable off Linux")
+}
+
+func newRunCgroup(string, int64, int64, int) (*runCgroup, error) {
 	return nil, errors.New("cgroup v2 unavailable off Linux")
 }
 

@@ -8,6 +8,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/KKloudTarus/synapse-ce/internal/platform/fssecurity"
 )
 
 type fakeEnroller struct {
@@ -45,8 +47,8 @@ func TestEnsureEnrolledFirstRunThenReuse(t *testing.T) {
 		t.Fatalf("credential must be persisted: %v", err)
 	}
 	// The 0600 guarantee is a Unix one. On Windows os.Chmod only toggles the read-only attribute, so
-	// asserting the bits there would assert something no platform enforces — see SecretModeEnforced.
-	if SecretModeEnforced() && info.Mode().Perm() != 0o600 {
+	// asserting the bits there would assert something no platform enforces.
+	if fssecurity.UnixModeEnforced() && info.Mode().Perm() != 0o600 {
 		t.Fatalf("credential must be persisted 0600, got %v", info.Mode().Perm())
 	}
 	if _, err := os.Stat(store.keyPath()); err != nil {

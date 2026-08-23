@@ -524,6 +524,8 @@ func (s *Service) execute(ctx context.Context, actor string, runID shared.ID, to
 	if s.sandboxed && s.compileEgress != nil {
 		policy := s.compileEgress(eng.Scope)
 		spec.EgressPolicy = &policy
+		spec.EgressExecutionKind = "recon"
+		spec.EgressExecutionID = run.ID.String()
 	}
 	// record the containment posture on the run (operator-facing) and seal it
 	// into evidence (provable). Metadata only – never changes argv/output.

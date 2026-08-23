@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "synapse.fullname" . }}-api
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "synapse.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    {{- if .Values.api.metrics.enabled }}
+    - name: metrics
+      port: {{ .Values.api.metrics.port }}
+      targetPort: metrics
+    {{- end }}
+{{- if .Values.api.grantAuthority.enabled }}
+{{- if not .Values.api.grantAuthority.networkPolicySourceCIDRs }}
+{{- fail "api.grantAuthority.networkPolicySourceCIDRs must list the dedicated private NLB subnet CIDRs" }}
+{{- end }}
+{{- if ne (index .Values.api.grantAuthority.annotations "service.beta.kubernetes.io/aws-load-balancer-type") "external" }}
+{{- fail "api.grantAuthority requires AWS Load Balancer Controller ownership" }}
+{{- end }}
+{{- if ne (index .Values.api.grantAuthority.annotations "service.beta.kubernetes.io/aws-load-balancer-scheme") "internal" }}
+{{- fail "api.grantAuthority requires an internal AWS load balancer" }}
+{{- end }}
+{{- if not (index .Values.api.grantAuthority.annotations "service.beta.kubernetes.io/aws-load-balancer-security-groups") }}
+{{- fail "api.grantAuthority requires a dedicated frontend security group" }}
+{{- end }}
+{{- if ne (index .Values.api.grantAuthority.annotations "service.beta.kubernetes.io/aws-load-balancer-manage-backend-security-group-rules") "true" }}
+{{- fail "api.grantAuthority requires controller-managed backend security-group rules" }}
+{{- end }}
+{{- if not (index .Values.api.grantAuthority.annotations "service.beta.kubernetes.io/aws-load-balancer-subnets") }}
+{{- fail "api.grantAuthority requires dedicated NLB subnets" }}
+{{- end }}
+{{- if not (index .Values.api.grantAuthority.annotations "service.beta.kubernetes.io/aws-load-balancer-private-ipv4-addresses") }}
+{{- fail "api.grantAuthority requires fixed private NLB addresses" }}
+{{- end }}
+{{- if not (index .Values.api.grantAuthority.annotations "service.beta.kubernetes.io/aws-load-balancer-ssl-cert") }}
+{{- fail "api.grantAuthority requires a private TLS listener backed by an ACM certificate" }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "synapse.fullname" . }}-egress-grant-authority
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+  annotations:
+    {{- toYaml .Values.api.grantAuthority.annotations | nindent 4 }}
+spec:
+  type: LoadBalancer
+  selector:
+    {{- include "synapse.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  ports:
+    - name: https
+      port: {{ .Values.api.grantAuthority.servicePort }}
+      targetPort: grant-authority
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "synapse.fullname" . }}-web
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "synapse.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

@@ -97,9 +97,16 @@ func (s *concurrentEvidenceStore) Head(ctx context.Context, id shared.ID) (strin
 	return items[len(items)-1].Hash, nil
 }
 
-type randomTestIDs struct{ n int64 }
+type randomTestIDs struct {
+	mu sync.Mutex
+	n  int64
+}
 
 func (g *randomTestIDs) NewID() shared.ID {
+	// Guarded: TestSealConcurrentStaysLinear calls Seal (and thus NewID) from multiple goroutines, so an
+	// unsynchronized counter is a data race under -race (pre-existing; a real ports.IDGenerator is safe).
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.n++
 	return shared.ID("test-" + strconv.FormatInt(g.n, 10))
 }
@@ -518,6 +525,29 @@ func TestSealRejectsCrossTenantAppendWithoutChangingChain(t *testing.T) {
 	}
 }
 
+func TestSealWithIDReusesReservedIdentityAndRejectsIdentityConflicts(t *testing.T) {
+	svc, store, _ := newVault(t, nil)
+	ctx := context.Background()
+
+	first, err := svc.SealWithID(ctx, "reserved-scan", "eng-evidence", "scan", []byte("sealed"), "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.SealWithID(ctx, "reserved-scan", "eng-evidence", "scan", []byte("altered telemetry"), "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != second.ID || string(second.Content) != "sealed" || len(store.items["eng-evidence"]) != 1 {
+		t.Fatalf("reserved replay did not reuse committed evidence: first=%+v second=%+v items=%+v", first, second, store.items["eng-evidence"])
+	}
+	if _, err := svc.SealWithID(ctx, "reserved-scan", "eng-evidence", "other-kind", []byte("sealed"), "worker"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("altered kind replay error = %v, want ErrConflict", err)
+	}
+	if _, err := svc.SealWithID(ctx, "reserved-scan", "eng-evidence", "scan", []byte("sealed"), "other-worker"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("altered creator replay error = %v, want ErrConflict", err)
+	}
+}
+
 func TestSealForFindingWithIDReplaysExactlyAndRejectsConflicts(t *testing.T) {
 	store := newConcurrentEvidenceStore()
 	svc, err := NewService(store, nil, &capAudit{}, fixedClock{t: time.Unix(0, 0).UTC()}, &randomTestIDs{})
@@ -597,5 +627,79 @@ func TestSealForFindingWithIDHighContentionStaysLinear(t *testing.T) {
 	}
 	if err := evdom.VerifyChain(items); err != nil {
 		t.Fatalf("chain invalid: %v", err)
+	}
+}
+
+func TestSealOnceIsIdempotentOnKey(t *testing.T) {
+	svc, store, _ := newVault(t, nil)
+	ctx := context.Background()
+	const eng = shared.ID("eng-once")
+
+	first, err := svc.SealOnce(ctx, eng, "detection", "d1", []byte(`{"x":1}`), "agent:1")
+	if err != nil {
+		t.Fatalf("first seal: %v", err)
+	}
+	// Same (engagement, kind, key) with the SAME content returns the SAME link and appends nothing — this
+	// is the D3 closure: a seal-then-crash retry cannot add a second permanent link for one detection.
+	again, err := svc.SealOnce(ctx, eng, "detection", "d1", []byte(`{"x":1}`), "agent:1")
+	if err != nil {
+		t.Fatalf("idempotent re-seal: %v", err)
+	}
+	if again.ID != first.ID {
+		t.Fatalf("re-seal must return the first link id %s, got %s", first.ID, again.ID)
+	}
+	if chain, _ := store.ListByEngagement(ctx, eng); len(chain) != 1 {
+		t.Fatalf("idempotent re-seal must not append a second link, chain has %d", len(chain))
+	}
+
+	// A different key is a distinct link.
+	other, err := svc.SealOnce(ctx, eng, "detection", "d2", []byte(`{"x":2}`), "agent:1")
+	if err != nil {
+		t.Fatalf("second key seal: %v", err)
+	}
+	if other.ID == first.ID {
+		t.Fatalf("a different idempotency key must seal a distinct link")
+	}
+	if chain, _ := store.ListByEngagement(ctx, eng); len(chain) != 2 {
+		t.Fatalf("two distinct keys must be two links, chain has %d", len(chain))
+	}
+
+	// Reusing a key with DIFFERENT content is a conflict, not a silent overwrite (fail closed).
+	if _, err := svc.SealOnce(ctx, eng, "detection", "d1", []byte(`{"x":999}`), "agent:1"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("conflicting content under a used key must be ErrConflict, got %v", err)
+	}
+}
+
+func TestSealOnceValidates(t *testing.T) {
+	svc, _, _ := newVault(t, nil)
+	ctx := context.Background()
+	if _, err := svc.SealOnce(ctx, "", "detection", "k", []byte("x"), "a"); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("empty engagement must be ErrValidation, got %v", err)
+	}
+	if _, err := svc.SealOnce(ctx, "eng", "", "k", []byte("x"), "a"); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("empty kind must be ErrValidation, got %v", err)
+	}
+	if _, err := svc.SealOnce(ctx, "eng", "detection", "", []byte("x"), "a"); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("empty idempotency key must be ErrValidation, got %v", err)
+	}
+}
+
+func TestVerifyChainErrorReflectsIntactness(t *testing.T) {
+	svc, store, _ := newVault(t, nil)
+	ctx := context.Background()
+	const eng = shared.ID("eng-verify")
+	if _, err := svc.SealOnce(ctx, eng, "detection", "d1", []byte("body"), "agent:1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.VerifyChainError(ctx, eng); err != nil {
+		t.Fatalf("an intact chain must verify with nil error, got %v", err)
+	}
+	// Tamper a stored link's attribution: VerifyChainError must surface it as an ErrChainBroken-wrapping
+	// error (Verify itself returns Intact=false with a nil error, which a naive bridge would miss).
+	chain := store.items[eng]
+	chain[0].CreatedBy = "attacker"
+	store.items[eng] = chain
+	if err := svc.VerifyChainError(ctx, eng); !errors.Is(err, evdom.ErrChainBroken) {
+		t.Fatalf("a tampered chain must return an ErrChainBroken-wrapping error, got %v", err)
 	}
 }

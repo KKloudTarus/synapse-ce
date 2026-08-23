@@ -3,6 +3,8 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -18,12 +20,73 @@ import (
 // fakeRunner builds a Runner without LookPath so the argv-construction logic (the
 // security-critical part) is unit-testable on any platform.
 func fakeRunner(systemdRun string) *Runner {
-	return &Runner{bwrap: "/usr/bin/bwrap", systemdRun: systemdRun, memMax: 256 << 20, pidsMax: 128}
+	return &Runner{bwrap: "/usr/bin/bwrap", systemdRun: systemdRun, memMax: 256 << 20, pidsMax: 128, lookupNetIP: func(context.Context, string, string) ([]netip.Addr, error) { return nil, nil }}
+}
+
+func TestErrUnavailableDoesNotMisidentifyTheMissingControl(t *testing.T) {
+	if got := ErrUnavailable.Error(); got != "sandbox unavailable" {
+		t.Fatalf("ErrUnavailable = %q, want generic sentinel", got)
+	}
+	err := fmt.Errorf("%w: cgroup limits are required", ErrUnavailable)
+	if !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "cgroup limits are required") {
+		t.Fatalf("wrapped error must retain sentinel and control detail: %v", err)
+	}
+}
+
+func TestSandboxRejectsUntrustedNetworkPosturesBeforeExecution(t *testing.T) {
+	policy := &ports.EgressPolicy{}
+	tests := []struct {
+		name string
+		spec ports.ToolSpec
+		want string
+	}{
+		{
+			name: "host network",
+			spec: ports.ToolSpec{Name: "tool", HostNetwork: true},
+			want: "host-network sandbox execution is not supported",
+		},
+		{
+			name: "missing execution kind",
+			spec: ports.ToolSpec{Name: "tool", EgressPolicy: policy, EgressExecutionID: "execution-1"},
+			want: "egress policy requires authoritative execution kind and id",
+		},
+		{
+			name: "missing execution id",
+			spec: ports.ToolSpec{Name: "tool", EgressPolicy: policy, EgressExecutionKind: "recon"},
+			want: "egress policy requires authoritative execution kind and id",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := fakeRunner("")
+			// inner remains nil: reaching the execution adapter would panic rather than
+			// returning the required validation error.
+			_, err := r.Run(context.Background(), tt.spec)
+			if !errors.Is(err, shared.ErrValidation) || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Run() error = %v, want validation containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestProbeBubblewrapRejectsMissingExecutable(t *testing.T) {
+	if !seccompSupported {
+		t.Skip("seccomp probe is Linux-only")
+	}
+	filter, err := seccompFile()
+	if err != nil {
+		t.Fatalf("build seccomp filter: %v", err)
+	}
+	defer func() { _ = filter.Close() }()
+	if err := probeBubblewrap(filepath.Join(t.TempDir(), "missing-bwrap"), filter); err == nil {
+		t.Fatal("probeBubblewrap must reject an unusable executable")
+	}
 }
 
 func TestSandboxArgvConfinesTheRun(t *testing.T) {
 	r := fakeRunner("")
-	argv := r.command(ports.ToolSpec{Name: "subfinder", Args: []string{"-d", "example.com"}, Workdir: "/run/work"}, "", "", 3, false)
+	argv := r.command(ports.ToolSpec{Name: "subfinder", Args: []string{"-d", "example.com"}, Workdir: "/run/work"}, "", "", 3, 0, 0, false)
 	joined := strings.Join(argv, " ")
 
 	// bwrap is arg 0, the tool is after the `--` separator, args preserved.
@@ -37,7 +100,7 @@ func TestSandboxArgvConfinesTheRun(t *testing.T) {
 	// The confinement flags must all be present.
 	for _, want := range []string{
 		"--ro-bind-try /usr /usr", "--ro-bind-try /etc/ssl/certs /etc/ssl/certs", // F2: curated OS tree + TLS trust
-		"--ro-bind-try /etc/nsswitch.conf /etc/nsswitch.conf",
+		"--ro-bind-try /etc/nsswitch.conf /etc/nsswitch.conf", "--remount-ro /",
 		"--unshare-all", "--die-with-parent", "--cap-drop ALL",
 		"--tmpfs /tmp", "--bind /run/work /run/work", "--chdir /run/work",
 		"--seccomp 3", // F1: the default-deny syscall filter fd is always passed
@@ -56,7 +119,7 @@ func TestSandboxArgvConfinesTheRun(t *testing.T) {
 func TestSandboxOnlyAllowsCapNetRaw(t *testing.T) {
 	r := fakeRunner("")
 	// naabu asks for CAP_NET_RAW (allowed) + a smuggled CAP_SYS_ADMIN (must be dropped).
-	argv := r.command(ports.ToolSpec{Name: "naabu", CapAdd: []string{"CAP_NET_RAW", "CAP_SYS_ADMIN"}}, "", "", 3, false)
+	argv := r.command(ports.ToolSpec{Name: "naabu", CapAdd: []string{"CAP_NET_RAW", "CAP_SYS_ADMIN"}}, "", "", 3, 0, 0, false)
 	joined := strings.Join(argv, " ")
 	if !strings.Contains(joined, "--cap-add CAP_NET_RAW") {
 		t.Error("CAP_NET_RAW should be re-added for naabu")
@@ -68,7 +131,7 @@ func TestSandboxOnlyAllowsCapNetRaw(t *testing.T) {
 
 func TestSandboxNoCapAddByDefault(t *testing.T) {
 	r := fakeRunner("")
-	argv := r.command(ports.ToolSpec{Name: "httpx"}, "", "", 3, false)
+	argv := r.command(ports.ToolSpec{Name: "httpx"}, "", "", 3, 0, 0, false)
 	if strings.Contains(strings.Join(argv, " "), "--cap-add") {
 		t.Error("a non-capability-sensitive tool must run with no added caps")
 	}
@@ -76,7 +139,7 @@ func TestSandboxNoCapAddByDefault(t *testing.T) {
 
 func TestSandboxWrapsInSystemdRunForLimits(t *testing.T) {
 	r := fakeRunner("/usr/bin/systemd-run")
-	argv := r.command(ports.ToolSpec{Name: "syft", MemMaxBytes: 512 << 20, PidsMax: 64}, "", "", 3, false)
+	argv := r.command(ports.ToolSpec{Name: "syft", MemMaxBytes: 512 << 20, PidsMax: 64}, "", "", 3, 0, 0, false)
 	if argv[0] != "/usr/bin/systemd-run" {
 		t.Fatalf("argv[0] = %q, want systemd-run prefix", argv[0])
 	}
@@ -94,7 +157,7 @@ func TestSandboxDirectCgroupSkipsSystemdRun(t *testing.T) {
 	r := fakeRunner("/usr/bin/systemd-run")
 	// directCgroup=true → the run is already in a limit cgroup; systemd-run must be skipped
 	// to avoid a redundant scope (F3).
-	argv := r.command(ports.ToolSpec{Name: "syft"}, "", "", 3, true)
+	argv := r.command(ports.ToolSpec{Name: "syft"}, "", "", 3, 0, 0, true)
 	if argv[0] == "/usr/bin/systemd-run" {
 		t.Errorf("direct cgroup run must NOT also wrap in systemd-run: %v", argv)
 	}
@@ -105,7 +168,7 @@ func TestSandboxDirectCgroupSkipsSystemdRun(t *testing.T) {
 
 func TestSandboxReadOnlyExtraBinds(t *testing.T) {
 	r := fakeRunner("")
-	argv := r.command(ports.ToolSpec{Name: "grype", ReadOnlyPaths: []string{"/var/grypedb", "/src"}}, "", "", 3, false)
+	argv := r.command(ports.ToolSpec{Name: "grype", ReadOnlyPaths: []string{"/var/grypedb", "/src"}}, "", "", 3, 0, 0, false)
 	joined := strings.Join(argv, " ")
 	if !strings.Contains(joined, "--ro-bind /var/grypedb /var/grypedb") || !strings.Contains(joined, "--ro-bind /src /src") {
 		t.Errorf("read-only extra binds missing: %s", joined)
@@ -119,7 +182,7 @@ func TestSandboxReadOnlyExtraBinds(t *testing.T) {
 // and dead-lettered. Only the verified FILE is bound - never its directory.
 func TestSandboxBindsToolBinaryOutsideCuratedRoot(t *testing.T) {
 	r := fakeRunner("")
-	argv := r.command(ports.ToolSpec{Name: "/opt/synapse/bin/synapse-cspm"}, "", "", 3, false)
+	argv := r.command(ports.ToolSpec{Name: "/opt/synapse/bin/synapse-cspm"}, "", "", 3, 0, 0, false)
 	joined := strings.Join(argv, " ")
 	if !strings.Contains(joined, "--ro-bind-try /opt/synapse/bin/synapse-cspm /opt/synapse/bin/synapse-cspm") {
 		t.Errorf("helper binary was not bound into the sandbox: %s", joined)
@@ -133,18 +196,18 @@ func TestSandboxBindsToolBinaryOutsideCuratedRoot(t *testing.T) {
 // root need no extra bind, and a lookalike path must not be treated as being inside it.
 func TestSandboxDoesNotRebindCuratedRootTools(t *testing.T) {
 	r := fakeRunner("")
-	joined := strings.Join(r.command(ports.ToolSpec{Name: "/usr/bin/syft"}, "", "", 3, false), " ")
+	joined := strings.Join(r.command(ports.ToolSpec{Name: "/usr/bin/syft"}, "", "", 3, 0, 0, false), " ")
 	if strings.Contains(joined, "--ro-bind-try /usr/bin/syft /usr/bin/syft") {
 		t.Errorf("re-bound a tool already inside the curated root: %s", joined)
 	}
 	for _, name := range []string{"/libexec/synapse/helper", "/lib-evil/helper"} {
-		joined = strings.Join(r.command(ports.ToolSpec{Name: name}, "", "", 3, false), " ")
+		joined = strings.Join(r.command(ports.ToolSpec{Name: name}, "", "", 3, 0, 0, false), " ")
 		if !strings.Contains(joined, "--ro-bind-try "+name+" "+name) {
 			t.Errorf("%s was treated as inside the curated root: %s", name, joined)
 		}
 	}
 	// A relative name still resolves through PATH inside the sandbox; binding it would be wrong.
-	joined = strings.Join(r.command(ports.ToolSpec{Name: "grype"}, "", "", 3, false), " ")
+	joined = strings.Join(r.command(ports.ToolSpec{Name: "grype"}, "", "", 3, 0, 0, false), " ")
 	if strings.Contains(joined, "--ro-bind-try grype") {
 		t.Errorf("bound a relative tool name: %s", joined)
 	}
@@ -212,7 +275,7 @@ func TestSecretsNeverEnterArgv(t *testing.T) {
 	_ = mv.Put(context.Background(), "eng1", "TOK", []byte("PLAINTEXT_SECRET"))
 	r := &Runner{bwrap: "/usr/bin/bwrap", vault: mv}
 	// The argv (command) must reference the placeholder name at most, never resolve it.
-	argv := r.command(ports.ToolSpec{Name: "tool", EngagementID: "eng1", Env: []string{"TOK={{secret:TOK}}"}}, "", "", 3, false)
+	argv := r.command(ports.ToolSpec{Name: "tool", EngagementID: "eng1", Env: []string{"TOK={{secret:TOK}}"}}, "", "", 3, 0, 0, false)
 	if strings.Contains(strings.Join(argv, " "), "PLAINTEXT_SECRET") {
 		t.Fatal("a resolved secret must NEVER appear in the argv")
 	}
@@ -261,6 +324,56 @@ func TestResolveToolPathKeepsHostPathOutOfSandboxAuthority(t *testing.T) {
 	}
 }
 
+func TestPrepareEgressHostsFileUsesOnlyPinnedAddresses(t *testing.T) {
+	path, err := prepareEgressHostsFile(ports.EgressPolicy{PinnedHosts: map[string][]netip.Addr{
+		"api.example.com": {netip.MustParseAddr("203.0.113.8"), netip.MustParseAddr("203.0.113.7")},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "203.0.113.7 api.example.com\n203.0.113.8 api.example.com\n") {
+		t.Fatalf("hosts file = %q", got)
+	}
+}
+
+func TestPrepareEgressHostsFileCanonicalizesMixedCasePins(t *testing.T) {
+	path, err := prepareEgressHostsFile(ports.EgressPolicy{PinnedHosts: map[string][]netip.Addr{
+		"API.Example.COM": {netip.MustParseAddr("203.0.113.8")},
+		"api.example.com": {netip.MustParseAddr("203.0.113.7")},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); !strings.Contains(got, "203.0.113.7 api.example.com\n203.0.113.8 api.example.com\n") {
+		t.Fatalf("hosts file = %q", got)
+	}
+}
+
+func TestPrepareEgressHostsFileRejectsUnsafeOrIPv6Pins(t *testing.T) {
+	for name, policy := range map[string]ports.EgressPolicy{
+		"unsafe host": {PinnedHosts: map[string][]netip.Addr{"example.com\ninvalid": {netip.MustParseAddr("203.0.113.7")}}},
+		"ipv6":        {PinnedHosts: map[string][]netip.Addr{"example.com": {netip.MustParseAddr("2001:db8::1")}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if path, err := prepareEgressHostsFile(policy); err == nil {
+				_ = os.Remove(path)
+				t.Fatal("unsafe pinned host policy must fail closed")
+			}
+		})
+	}
+}
+
 // TestSandboxBindsResolvedBinaryOnTheLegacyPath is the argv-level half: a runner with NO binary
 // registry (legacy PATH trust) must still emit the bind for a resolved out-of-root helper.
 func TestSandboxBindsResolvedBinaryOnTheLegacyPath(t *testing.T) {
@@ -268,7 +381,7 @@ func TestSandboxBindsResolvedBinaryOnTheLegacyPath(t *testing.T) {
 	if r.binreg != nil {
 		t.Fatal("this test must exercise the legacy PATH-trust path (binreg == nil)")
 	}
-	joined := strings.Join(r.command(ports.ToolSpec{Name: "/opt/synapse/bin/synapse-cspm"}, "", "", 3, false), " ")
+	joined := strings.Join(r.command(ports.ToolSpec{Name: "/opt/synapse/bin/synapse-cspm"}, "", "", 3, 0, 0, false), " ")
 	if !strings.Contains(joined, "--ro-bind-try /opt/synapse/bin/synapse-cspm /opt/synapse/bin/synapse-cspm") {
 		t.Errorf("no bind emitted without a binary registry: %s", joined)
 	}

@@ -29,6 +29,138 @@ func TestIsProductionFailsClosed(t *testing.T) {
 	}
 }
 
+func TestValidateSandboxPosture(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{name: "production sandbox disabled", cfg: Config{Environment: "production"}, want: true},
+		{name: "unknown environment sandbox disabled", cfg: Config{Environment: "typo-env"}, want: true},
+		{name: "production sandbox enabled", cfg: Config{Environment: "production", SandboxEnabled: true}},
+		{name: "development sandbox disabled", cfg: Config{Environment: "development"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Config(tt.cfg).ValidateSandboxPosture() != nil; got != tt.want {
+				t.Fatalf("ValidateSandboxPosture() error = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveToolExecution(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     Config
+		role    ProcessRole
+		want    ToolExecution
+		wantErr bool
+	}{
+		{name: "production API defaults to dispatch", cfg: Config{Environment: "production", DBDSN: "postgres://runtime"}, role: ProcessRoleAPI, want: ToolExecutionDispatchOnly},
+		{name: "production API requires database", cfg: Config{Environment: "production"}, role: ProcessRoleAPI, wantErr: true},
+		{name: "production API refuses in process", cfg: Config{Environment: "production", ToolExecutionMode: "in-process"}, role: ProcessRoleAPI, wantErr: true},
+		{name: "development API defaults in process", cfg: Config{Environment: "development"}, role: ProcessRoleAPI, want: ToolExecutionInProcess},
+		{name: "explicit dispatch requires database", cfg: Config{Environment: "development", ToolExecutionMode: "dispatch-only"}, role: ProcessRoleAPI, wantErr: true},
+		{name: "explicit dispatch with database", cfg: Config{Environment: "development", DBDSN: "postgres://runtime", ToolExecutionMode: " DISPATCH-ONLY "}, role: ProcessRoleAPI, want: ToolExecutionDispatchOnly},
+		{name: "API refuses worker mode", cfg: Config{ToolExecutionMode: "worker"}, role: ProcessRoleAPI, wantErr: true},
+		{name: "legacy recon flag maps API to dispatch", cfg: Config{Environment: "development", DBDSN: "postgres://runtime", ReconViaWorker: true}, role: ProcessRoleAPI, want: ToolExecutionDispatchOnly},
+		{name: "legacy agent flag maps API to dispatch", cfg: Config{Environment: "development", DBDSN: "postgres://runtime", AgentViaWorker: true}, role: ProcessRoleAPI, want: ToolExecutionDispatchOnly},
+		{name: "worker defaults to worker", cfg: Config{Environment: "development", DBDSN: "postgres://runtime"}, role: ProcessRoleWorker, want: ToolExecutionWorker},
+		{name: "worker requires database", cfg: Config{Environment: "development"}, role: ProcessRoleWorker, wantErr: true},
+		{name: "production worker requires sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime"}, role: ProcessRoleWorker, wantErr: true},
+		{name: "production worker accepts sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", SandboxEnabled: true}, role: ProcessRoleWorker, want: ToolExecutionWorker},
+		{name: "worker refuses other mode", cfg: Config{Environment: "development", DBDSN: "postgres://runtime", ToolExecutionMode: "dispatch-only"}, role: ProcessRoleWorker, wantErr: true},
+		{name: "CLI defaults in process", cfg: Config{}, role: ProcessRoleCLI, want: ToolExecutionInProcess},
+		{name: "CLI refuses other mode", cfg: Config{ToolExecutionMode: "worker"}, role: ProcessRoleCLI, wantErr: true},
+		{name: "unknown mode", cfg: Config{ToolExecutionMode: "surprise"}, role: ProcessRoleAPI, wantErr: true},
+		{name: "unknown role", cfg: Config{}, role: ProcessRole("surprise"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.cfg.ResolveToolExecution(tt.role)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ResolveToolExecution() error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("ResolveToolExecution() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadToolExecutionMode(t *testing.T) {
+	t.Setenv("SYNAPSE_TOOL_EXECUTION_MODE", "dispatch-only")
+	if got := Load().ToolExecutionMode; got != "dispatch-only" {
+		t.Fatalf("Load().ToolExecutionMode = %q, want dispatch-only", got)
+	}
+}
+
+func TestLoadEgressBrokerSocket(t *testing.T) {
+	const defaultPath = "/run/synapse-egress-broker/egress-broker.sock"
+	if got := Load().EgressBrokerSocket; got != defaultPath {
+		t.Fatalf("Load().EgressBrokerSocket = %q, want %q", got, defaultPath)
+	}
+
+	const configuredPath = "/run/test/synapse-egress.sock"
+	t.Setenv("SYNAPSE_EGRESS_BROKER_SOCKET", configuredPath)
+	if got := Load().EgressBrokerSocket; got != configuredPath {
+		t.Fatalf("Load().EgressBrokerSocket = %q, want %q", got, configuredPath)
+	}
+}
+
+func TestValidateMigrationPosture(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{name: "production auto-migrate enabled", cfg: Config{Environment: "production", DBAutoMigrate: true}, want: true},
+		{name: "unknown environment auto-migrate enabled", cfg: Config{Environment: "typo-env", DBAutoMigrate: true}, want: true},
+		{name: "production auto-migrate disabled", cfg: Config{Environment: "production"}},
+		{name: "development auto-migrate enabled", cfg: Config{Environment: "development", DBAutoMigrate: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.ValidateMigrationPosture() != nil; got != tt.want {
+				t.Fatalf("ValidateMigrationPosture() error = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMigrationDSN(t *testing.T) {
+	cfg := Config{DBDSN: "runtime"}
+	if got := cfg.MigrationDSN(); got != "runtime" {
+		t.Fatalf("MigrationDSN() = %q, want runtime", got)
+	}
+	cfg.DBMigrationDSN = "owner"
+	if got := cfg.MigrationDSN(); got != "owner" {
+		t.Fatalf("MigrationDSN() = %q, want owner", got)
+	}
+}
+
+func TestLoadDBAutoMigrate(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "default", want: true},
+		{name: "enabled", value: "true", want: true},
+		{name: "disabled", value: "false"},
+		{name: "invalid uses default", value: "not-a-bool", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SYNAPSE_DB_AUTO_MIGRATE", tt.value)
+			if got := Load().DBAutoMigrate; got != tt.want {
+				t.Fatalf("DBAutoMigrate = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestLoadNormalizesEnvironment confirms Load canonicalizes the env so logs + any reader
 // see one form.
 func TestLoadNormalizesEnvironment(t *testing.T) {
@@ -73,6 +205,91 @@ func TestLoadAttackPathBounds(t *testing.T) {
 	c = Load()
 	if c.AttackPathMaxLen != 7 || c.AttackPathMaxPaths != 25 || c.AttackPathWallClock != 750*time.Millisecond {
 		t.Fatalf("attack-path overrides = (%d, %d, %s), want (7, 25, 750ms)", c.AttackPathMaxLen, c.AttackPathMaxPaths, c.AttackPathWallClock)
+	}
+}
+
+func TestValidateEgressGrantPosture(t *testing.T) {
+	api := Config{
+		Environment:              "production",
+		APIToken:                 "human-token",
+		EvidenceSigningSeed:      "evidence-seed",
+		EgressGrantAuthorityAddr: "127.0.0.1:8082",
+		EgressGrantIssuerToken:   "machine-token",
+		EgressGrantSigningSeed:   "grant-seed",
+	}
+	worker := Config{
+		Environment:               "production",
+		APIToken:                  "human-token",
+		EgressGrantAuthorityURL:   "https://issuer.internal/v1/egress-grants",
+		EgressGrantAuthorityToken: "machine-token",
+	}
+	for _, tt := range []struct {
+		name    string
+		cfg     Config
+		role    ProcessRole
+		wantErr bool
+	}{
+		{name: "api valid", cfg: api, role: ProcessRoleAPI},
+		{name: "api missing listener", cfg: func() Config { c := api; c.EgressGrantAuthorityAddr = ""; return c }(), role: ProcessRoleAPI, wantErr: true},
+		{name: "api reuses human token", cfg: func() Config { c := api; c.EgressGrantIssuerToken = c.APIToken; return c }(), role: ProcessRoleAPI, wantErr: true},
+		{name: "api reuses evidence seed", cfg: func() Config { c := api; c.EgressGrantSigningSeed = c.EvidenceSigningSeed; return c }(), role: ProcessRoleAPI, wantErr: true},
+		{name: "worker valid", cfg: worker, role: ProcessRoleWorker},
+		{name: "worker missing authority URL", cfg: func() Config { c := worker; c.EgressGrantAuthorityURL = ""; return c }(), role: ProcessRoleWorker, wantErr: true},
+		{name: "worker reuses human token", cfg: func() Config { c := worker; c.EgressGrantAuthorityToken = c.APIToken; return c }(), role: ProcessRoleWorker, wantErr: true},
+		{name: "development does not require issuer", cfg: Config{Environment: "development"}, role: ProcessRoleAPI},
+		{name: "unknown production role", cfg: api, role: ProcessRoleCLI, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.ValidateEgressGrantPosture(tt.role)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateEgressGrantPosture() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateNetworkExecutionPosture(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		cfg     Config
+		role    ProcessRole
+		wantErr bool
+	}{
+		{name: "production API offline", cfg: Config{Environment: "production"}, role: ProcessRoleAPI},
+		{name: "production API rejects CSPM", cfg: Config{Environment: "production", CSPMEnabled: true}, role: ProcessRoleAPI, wantErr: true},
+		{name: "production worker rejects CSPM", cfg: Config{Environment: "production", CSPMEnabled: true}, role: ProcessRoleWorker, wantErr: true},
+		{name: "development worker permits local CSPM", cfg: Config{Environment: "development", CSPMEnabled: true}, role: ProcessRoleWorker},
+		{name: "unknown production role", cfg: Config{Environment: "production"}, role: ProcessRoleCLI, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.ValidateNetworkExecutionPosture(tt.role)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateNetworkExecutionPosture() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestWorkerConcurrencyValidation(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		value string
+		valid bool
+	}{
+		{"default", "", true},
+		{"minimum", "1", true},
+		{"maximum", "64", true},
+		{"zero", "0", false},
+		{"negative", "-1", false},
+		{"above maximum", "65", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SYNAPSE_WORKER_CONCURRENCY", tt.value)
+			err := Load().ValidateWorkerConcurrency()
+			if (err == nil) != tt.valid {
+				t.Fatalf("ValidateWorkerConcurrency() error = %v, valid=%v", err, tt.valid)
+			}
+		})
 	}
 }
 
@@ -477,5 +694,32 @@ func TestLoadObservabilityFromEnv(t *testing.T) {
 	}
 	if config.AccessLogEnabled {
 		t.Error("SYNAPSE_ACCESS_LOG_ENABLED=false must disable access logging")
+	}
+}
+
+func TestValidateOIDCPosture(t *testing.T) {
+	valid := Config{OIDCEnabled: true, OIDCIssuer: "https://issuer.example", OIDCClientID: "client", OIDCClientSecret: "secret", OIDCRedirectURL: "https://synapse.example/api/auth/oidc/callback", OIDCFrontendURL: "https://synapse.example/", OIDCTenantID: "tenant", OIDCGroupRoleMapping: []string{"admins=admin"}, OIDCTransactionTTL: time.Minute, OIDCSessionTTL: time.Hour}
+	if err := valid.ValidateOIDCPosture(); err != nil {
+		t.Fatalf("valid OIDC posture: %v", err)
+	}
+	valid.OIDCClientSecret = ""
+	if err := valid.ValidateOIDCPosture(); err == nil {
+		t.Fatal("missing OIDC client secret must fail")
+	}
+	valid.OIDCClientSecret = "secret"
+	valid.OIDCFrontendURL = "https://synapse.example/?next=https://attacker.example"
+	if err := valid.ValidateOIDCPosture(); err == nil {
+		t.Fatal("request-like OIDC frontend URL must fail")
+	}
+}
+
+func TestProductionOIDCRequiresPostgres(t *testing.T) {
+	cfg := Config{Environment: "production", OIDCEnabled: true, DBAutoMigrate: false}
+	if err := cfg.ValidateMigrationPosture(); err == nil {
+		t.Fatal("production OIDC without database must fail")
+	}
+	cfg.DBDSN = "postgres://synapse"
+	if err := cfg.ValidateMigrationPosture(); err != nil {
+		t.Fatalf("production OIDC with database: %v", err)
 	}
 }

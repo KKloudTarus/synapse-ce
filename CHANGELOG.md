@@ -9,6 +9,40 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Independent signed agent detection delivery.** Confirmed detections now drain from an isolated P1
+  WAL lane into crash-recoverable batches, using an agent-owned Ed25519 key registered with
+  proof-of-possession. Pending sequence/membership survives restart and lost responses, local records
+  are ACKed only after complete server admission, rejected or expiring keys rotate without changing
+  the pending batch sequence, and a live-path test covers WAL → HTTP → key resolution → signature and
+  content verification → exactly-once evidence sealing.
+
+- **Native amd64 and arm64 eBPF sensor artifacts with capability-based CO-RE probing.** The agent now
+  embeds only architecture-matched objects, detects kernel BTF and required network types without
+  kernel-version gating, reports unsupported capability as an explicit coverage gap, and validates
+  both architectures in a native load/attach workflow. A repository-owned minimal CO-RE header and
+  reproducible build target replace the uncommitted, build-host-specific vmlinux.h dependency.
+
+- **Deterministic release evidence and verification.** Release signing now binds the complete asset
+  set to its repository, tag, and exact source revision in a signed, provenance-attested manifest.
+  The local verifier rejects identity drift, tampered/missing/unlisted assets, non-canonical input,
+  unsafe paths, and symlinks; the operator guide separates checksum integrity, publisher signatures,
+  and GitHub workflow provenance.
+
+- **Crash-recoverable priority telemetry spool for the host agent.** Normalized eBPF events and
+  confirmed detections now enter checksummed, per-priority WAL segments before downstream use. The
+  spool resumes sequence incarnations after restart, commits exact-epoch ACKs, evicts only P3 under
+  quota pressure, persists queryable gap evidence before any loss, repairs torn/corrupt frames, and
+  exports bounded-cardinality depth, oldest-age, eviction, corruption, and fsync metrics. P0–P2 apply
+  backpressure instead of silently shedding; A3 will consume the exposed peek/ACK and retry contract.
+
+- **Signed RulePack detection-content lifecycle and deterministic release gates.** Runtime detection
+  content can now bind rules, compatibility requirements, ATT&CK mappings, positive/negative replay
+  fixtures, per-rule cost budgets, rollout cohorts, and rollback metadata into a canonical signed
+  RulePack. The `synapse-cli rulepack verify|replay|gate` release surface pins an external Ed25519 trust
+  key and gates candidate, canary, and production promotion on deterministic replay, compatibility,
+  retro-hunt completeness, purple/emulation coverage, false-positive quality, required-field
+  availability, suppression/disposition rates, detection density, latency, and CPU evidence.
+
 - **Authority-surface precondition on AI-triage promotion.** Evaluation reports record
   `gate_reachable_pairs`, and the promotion boundary requires at least one counterfactual pair the
   deterministic policy could actually exempt (`--minimum-gate-reachable-counterfactual-pairs`,
@@ -17,6 +51,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   candidate; the precondition stops those criteria passing without having measured anything. The
   precondition reports pair counts in dedicated `*_count` failure fields, so the basis-point fields
   of a promotion failure always mean a rate.
+
+- **Operator-owned human approver allowlist on AI-triage releases.** Recording a promotion or rollback
+  now requires `--human-approvers`, a private operator-owned allowlist an approver identity must appear
+  in. The release manifest names its own PM and Security approvers, so previously the only test of their
+  humanness was a reserved machine-prefix denylist, which by construction cannot recognise an identity
+  scheme it has never seen; the allowlist admits identities from outside the artifact being validated.
+  It is enforced when a decision is admitted, not when stored history is re-validated, so an approver
+  leaving the allowlist never invalidates a ledger they already signed.
 
 - **AI-triage escape rate measured against the exemptible population.** Evaluation reports now carry
   `exemptible_true_positives` and `exemptible_escape_rate` alongside the corpus-wide rate, and the

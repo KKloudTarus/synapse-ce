@@ -1352,7 +1352,7 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 			s.observeGateOutcome(err)
 			return nil, err
 		}
-		result, err := s.runImportedSBOMPipeline(ctx, actor, engagementID, now, imported, doc, opts, func(string, int, []ports.ScanDebugEvent) {})
+		result, err := s.runImportedSBOMPipeline(ctx, actor, engagementID, now, imported, doc, opts, func(string, int, []ports.ScanDebugEvent) {}, "")
 		s.observeSyncTerminal(started, err)
 		return result, err
 	}
@@ -1361,7 +1361,7 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 		s.observeGateOutcome(err)
 		return nil, err
 	}
-	result, err := s.runPipeline(ctx, actor, engagementID, now, req, opts, func(string, int, []ports.ScanDebugEvent) {})
+	result, err := s.runPipeline(ctx, actor, engagementID, now, req, opts, func(string, int, []ports.ScanDebugEvent) {}, "")
 	s.observeSyncTerminal(started, err)
 	return result, err
 }
@@ -1449,7 +1449,9 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 	if !ok {
 		return ports.ScanJob{}, fmt.Errorf("%w: tenant context is required for scan job", shared.ErrValidation)
 	}
-	go s.runScanJob(shared.WithTenant(context.Background(), tenantID), actor, engagementID, now, req, opts, job)
+	go func() {
+		_ = s.runScanJob(shared.WithTenant(context.Background(), tenantID), actor, engagementID, now, req, opts, job)
+	}()
 	return job, nil
 }
 
@@ -1648,6 +1650,14 @@ func (s *Service) LatestJob(ctx context.Context, engagementID shared.ID) (ports.
 	return s.jobs.LatestForEngagement(ctx, engagementID)
 }
 
+// ScanJob returns one asynchronous scan by its stable job ID.
+func (s *Service) ScanJob(ctx context.Context, jobID string) (ports.ScanJob, error) {
+	if s.jobs == nil {
+		return ports.ScanJob{}, fmt.Errorf("scan job: %w", shared.ErrNotFound)
+	}
+	return s.jobs.GetJob(ctx, jobID)
+}
+
 func (s *Service) LatestJobs(ctx context.Context, engagementIDs []shared.ID) (map[shared.ID]ports.ScanJob, error) {
 	if s.jobs == nil {
 		return map[shared.ID]ports.ScanJob{}, nil
@@ -1769,6 +1779,13 @@ func looksLikePath(v string) bool {
 
 // runScanJob runs the pipeline on a detached background context (the request that
 // started the scan has returned), advancing + finishing the job.
+func retryableScanInterruption(ctx context.Context, err error) error {
+	if err == nil || ctx.Err() == nil || !errors.Is(err, ctx.Err()) {
+		return nil
+	}
+	return fmt.Errorf("scan execution interrupted: %w", ports.ErrRetryable)
+}
+
 func (s *Service) runScanJob(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, job ports.ScanJob) error {
 	// Idempotency (audit): the durable queue is at-least-once, so a redelivery can
 	// re-invoke a scan a prior delivery already finished. Re-running is read-only (findings
@@ -1788,9 +1805,10 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 	// Async duration is measured from EXECUTION (this claim/delivery), not from the
 	// original enqueue time (job.StartedAt) – the queue wait is not scan work.
 	execStarted := s.clock.Now()
+	executionCtx := ctx
 	if s.timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, s.timeout)
+		executionCtx, cancel = context.WithTimeout(ctx, s.timeout)
 		defer cancel()
 	}
 	report := func(stage string, pct int, events []ports.ScanDebugEvent) {
@@ -1798,19 +1816,27 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 			return
 		}
 		job.Stage, job.Progress, job.DebugEvents = stage, pct, events
-		_ = s.jobs.Save(ctx, job)
+		_ = s.jobs.Save(executionCtx, job)
 	}
 
 	var (
 		result *ScanResult
 		err    error
 	)
-	if imported, doc, ok, loadErr := s.loadImportedSBOM(ctx, engagementID, opts); loadErr != nil {
+	if imported, doc, ok, loadErr := s.loadImportedSBOM(executionCtx, engagementID, opts); loadErr != nil {
 		err = loadErr
 	} else if ok {
-		result, err = s.runImportedSBOMPipeline(ctx, actor, engagementID, now, imported, doc, opts, report)
+		result, err = s.runImportedSBOMPipeline(executionCtx, actor, engagementID, now, imported, doc, opts, report, shared.ID(job.ID))
 	} else {
-		result, err = s.runPipeline(ctx, actor, engagementID, now, req, opts, report)
+		result, err = s.runPipeline(executionCtx, actor, engagementID, now, req, opts, report, shared.ID(job.ID))
+	}
+	if retryErr := retryableScanInterruption(ctx, err); retryErr != nil {
+		// The worker lost this delivery (lease loss or process shutdown) before the
+		// pipeline produced a durable terminal result. Leave the backing ScanJob running
+		// and release the queue claim for redelivery; a stale worker must not publish
+		// ScanFailed. Evidence append failures remain terminal unless the vault can prove
+		// the append did not occur.
+		return retryErr
 	}
 
 	fin := s.clock.Now()
@@ -1852,7 +1878,7 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 
 // runPipeline is the read-only tool chain (acquire -> detect -> SBOM -> vulns ->
 // risk -> licenses -> findings -> persist). report() advances the progress bar.
-func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, engagementID shared.ID, now time.Time, record importedsbom.Record, doc *sbom.SBOM, opts ScanOptions, report func(stage string, pct int, events []ports.ScanDebugEvent)) (*ScanResult, error) {
+func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, engagementID shared.ID, now time.Time, record importedsbom.Record, doc *sbom.SBOM, opts ScanOptions, report func(stage string, pct int, events []ports.ScanDebugEvent), evidenceID shared.ID) (*ScanResult, error) {
 	stage, pct := stageSBOM, 35
 	trace := newScanDebugTrace(func(events []ports.ScanDebugEvent) { report(stage, pct, events) })
 	report(stage, pct, trace.snapshot())
@@ -2010,7 +2036,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	applyDetectionPriority(result, opts.DetectionPriority)
 	s.attachCompliance(result)
 	result.ReproDigest = ReproDigest(result)
-	evidenceRef, err := s.sealEvidenceFailClosed(ctx, actor, engagementID, now, result)
+	evidenceRef, err := s.sealEvidenceFailClosedWithID(ctx, actor, engagementID, now, result, evidenceID)
 	if err != nil {
 		return nil, err
 	}
@@ -2187,7 +2213,7 @@ func importedCompleteness(doc *sbom.SBOM) ports.Completeness {
 	return ports.Completeness{ComponentsTotal: len(doc.Components), ComponentsResolved: resolved, Confident: true, Warning: "imported client SBOM used as scan inventory; source-only analyzers skipped"}
 }
 
-func (s *Service) runPipeline(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, report func(stage string, pct int, events []ports.ScanDebugEvent)) (*ScanResult, error) {
+func (s *Service) runPipeline(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, report func(stage string, pct int, events []ports.ScanDebugEvent), evidenceID shared.ID) (*ScanResult, error) {
 	stage, pct := stageAcquire, 5
 	trace := newScanDebugTrace(func(events []ports.ScanDebugEvent) { report(stage, pct, events) })
 	report(stage, pct, trace.snapshot())
@@ -2884,7 +2910,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 
 	// Seal this scan into the engagement's append-only hash-chained evidence ledger
 	// before writing any run, scan, finding, or result state.
-	evidenceRef, err := s.sealEvidenceFailClosed(ctx, actor, engagementID, now, result)
+	evidenceRef, err := s.sealEvidenceFailClosedWithID(ctx, actor, engagementID, now, result, evidenceID)
 	if err != nil {
 		return nil, err
 	}
@@ -3663,7 +3689,7 @@ func scanEvidenceContent(actor string, now time.Time, result *ScanResult) ([]byt
 // sealEvidence appends one tamper-evident link summarizing this scan to the engagement's hash chain.
 // Content covers every gate-affecting AI field as well as the deterministic finding/suppression set.
 // A configured ledger failure prevents result persistence, preserving the fail-closed contract.
-func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID shared.ID, now time.Time, result *ScanResult) (shared.ID, error) {
+func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID shared.ID, now time.Time, result *ScanResult, evidenceID shared.ID) (shared.ID, error) {
 	if s.evidence == nil {
 		return "", nil
 	}
@@ -3671,10 +3697,17 @@ func (s *Service) sealEvidence(ctx context.Context, actor string, engagementID s
 	if err != nil {
 		return "", fmt.Errorf("marshal scan evidence: %w", err)
 	}
-	// Append through the evidence vault – one tamper-evident chain + verify path per
-	// engagement. The vault binds the link to the current head; a transient
-	// Head failure fails the seal rather than forking the chain.
-	link, err := s.evidence.Seal(ctx, engagementID, "scan", content, actor)
+	// Queued scans reserve a stable evidence ID from the durable job ID. A redelivery can
+	// therefore prove a prior commit and reuse the link rather than appending a duplicate after a
+	// commit-ambiguous cancellation. This is deliberately first-commit-authoritative (see
+	// SealWithID): a retry whose AI-triage telemetry differs reuses the first sealed link instead
+	// of conflicting, so the finding-linked evidence stays byte-stable to the first commit.
+	var link evidence.Evidence
+	if evidenceID.IsZero() {
+		link, err = s.evidence.Seal(ctx, engagementID, "scan", content, actor)
+	} else {
+		link, err = s.evidence.SealWithID(ctx, evidenceID, engagementID, "scan", content, actor)
+	}
 	if err != nil {
 		return "", fmt.Errorf("seal scan evidence: %w", err)
 	}

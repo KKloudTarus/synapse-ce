@@ -6,7 +6,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 )
 
 // Delivery contract (#609, A0.4). The agent ships security signals to the control plane under an explicit,
@@ -54,6 +56,19 @@ func (p DeliveryPriority) String() string {
 	default:
 		return "P?"
 	}
+}
+
+// TelemetryPriority assigns canonical raw telemetry to the A2 priority ladder. Privilege transitions and
+// sensitive-file observations are never-shed P2; high-volume process/network observations are evictable
+// P3. P0 and P1 are reserved for coverage/verification and confirmed detections respectively.
+func TelemetryPriority(class detection.Class) (DeliveryPriority, error) {
+	if !class.Valid() {
+		return PriorityP3, fmt.Errorf("%w: unknown telemetry class %q", shared.ErrValidation, class)
+	}
+	if telemetry.MustNotShed(class) {
+		return PriorityP2, nil
+	}
+	return PriorityP3, nil
 }
 
 // SessionID identifies one agent run/enrolment session; BootID identifies one host boot. Both are opaque
@@ -234,6 +249,15 @@ type AckLedger struct {
 // NewAckLedger returns an empty ledger.
 func NewAckLedger() *AckLedger { return &AckLedger{} }
 
+// SeedContiguous rehydrates a ledger's contiguous high-water from durable state (A3 persists the ACK
+// mark rather than replaying every sequence). It sets the base only on a fresh ledger; the caller then
+// Observe()s the persisted pending set on top. Seeding a non-empty ledger is a no-op.
+func (l *AckLedger) SeedContiguous(n uint64) {
+	if l.contiguous == 0 && len(l.pending) == 0 {
+		l.contiguous = n
+	}
+}
+
 // Observe records that sequence seq has been received. It returns true if this is the first time seq is
 // seen — INCLUDING a late arrival that fills an earlier gap below the high-water — and false if seq is a
 // true duplicate (idempotent no-op) or invalid (0). This boolean is the authoritative "new vs already-have"
@@ -269,6 +293,21 @@ func (l *AckLedger) Observe(seq uint64) bool {
 
 // HighestContiguous returns the ACK: the highest sequence with no hole beneath it (0 = nothing yet).
 func (l *AckLedger) HighestContiguous() uint64 { return l.contiguous }
+
+// Pending returns the received sequences strictly above the contiguous mark, ascending. It is the
+// snapshot A3 persists (with HighestContiguous) so the ledger can be rehydrated across stateless ingests
+// without replaying every sequence.
+func (l *AckLedger) Pending() []uint64 {
+	if len(l.pending) == 0 {
+		return nil
+	}
+	out := make([]uint64, 0, len(l.pending))
+	for s := range l.pending {
+		out = append(out, s)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
 
 // Gaps returns the still-missing sequence ranges below the highest sequence received, oldest first. An
 // empty result means everything received so far is contiguous (nothing outstanding). These are the
