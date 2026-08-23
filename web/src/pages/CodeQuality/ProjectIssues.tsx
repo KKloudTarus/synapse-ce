@@ -14,7 +14,7 @@ import {
   type ProjectIssue,
   type RuleType,
 } from '../../lib/types'
-import { Button, EmptyState, ErrorState, Field, Input, Pill, Select, SevBadge, Spinner } from '../../components/ui'
+import { Button, EmptyState, ErrorState, Field, Input, Pill, Select, SevBadge } from '../../components/ui'
 import { projectCodePath } from '../../lib/projectCodeNavigation'
 
 const TYPE_OPTIONS: { value: RuleType; label: string }[] = [

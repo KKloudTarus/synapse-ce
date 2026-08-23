@@ -1,11 +1,11 @@
-import { AlertTriangle, Calendar, ShieldTick } from '@untitledui/icons'
+import { AlertTriangle, Calendar } from '@untitledui/icons'
 import { useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { FindingExplorer } from '../../components/codequality/FindingExplorer'
 import { ProjectAnalysisFocusController } from '../../components/codequality/ProjectAnalysisFocusController'
 import { ProjectCoverageDetail } from '../../components/codequality/ProjectCoverageDetail'
 import { GateEvidence } from '../../components/codequality/qualityPresentation'
-import { Button, Card, EmptyState, ErrorState, Pill } from '../../components/ui'
+import { Button, Card, ErrorState, Pill } from '../../components/ui'
 import { api } from '../../lib/api'
 import { useFetch } from '../../hooks'
 import {

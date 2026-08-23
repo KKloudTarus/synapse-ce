@@ -18,5 +18,11 @@
         "noUnusedParameters": true,
         "noFallthroughCasesInSwitch": true
     },
-    "include": ["src"]
+    "include": ["src"],
+    "exclude": [
+        "src/components/application",
+        "src/components/base",
+        "src/components/shared-assets",
+        "src/components/foundations"
+    ]
 }

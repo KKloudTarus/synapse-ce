@@ -42,7 +42,7 @@ export function AITriageReviews() {
   const reviews = useMemo(() => {
     if (!rawReviews) return null
     return rawReviews.filter((r) => {
-      if (filter.severity && filter.severity !== 'all' && r.severity !== filter.severity) return false
+      if (filter.severity && (filter.severity as string) !== 'all' && r.severity !== filter.severity) return false
       if (filter.cwe && filter.cwe.trim()) {
         const needle = filter.cwe.trim().toLowerCase()
         const matchesCwe = r.cwe?.toLowerCase().includes(needle)
@@ -59,7 +59,7 @@ export function AITriageReviews() {
           (filter.project === 'proj-002' && (r.projectId === 'proj-acme' || r.projectId === 'gin-gonic'))
         if (!matchesProject) return false
       }
-      if (filter.state && filter.state !== 'all' && r.state !== filter.state) return false
+      if (filter.state && (filter.state as string) !== 'all' && r.state !== filter.state) return false
       return true
     })
   }, [rawReviews, filter, projectByID])
@@ -83,7 +83,7 @@ export function AITriageReviews() {
   }
 
   const canReview = me?.role === 'admin' || me?.role === 'owner' || me?.role === 'reviewer'
-  const reviewerId = me?.id || me?.username || 'admin'
+  const reviewerId = me?.id || me?.name || 'admin'
 
   async function claim(review: AITriageReview) {
     setBusy('claim')
@@ -189,7 +189,7 @@ export function AITriageReviews() {
 
             const isOwner = Boolean(
               review.owner &&
-              (review.owner === reviewerId || review.owner === me?.id || review.owner === me?.username || review.owner === me?.name)
+              (review.owner === reviewerId || review.owner === me?.id || review.owner === me?.name || review.owner === me?.name)
             )
 
             return (
