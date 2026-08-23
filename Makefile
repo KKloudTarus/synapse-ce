@@ -1,4 +1,4 @@
-.PHONY: help install tools dev build run test harness vet lint format typecheck tidy ebpf-generate ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify \
+.PHONY: help install tools dev build run test harness dataplane-e2e vet lint format typecheck tidy ebpf-generate ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify \
         rulepack-verify rulepack-replay rulepack-gate docker-build docker-up docker-down clean web-dev web-build smoke
 
 GO ?= go
@@ -44,6 +44,9 @@ test: ## Run Go tests
 
 harness: ## Run the hostile tenant-isolation harness
 	$(GO) test ./internal/adapter/httpapi -run '^TestHostileHarness$$'
+
+dataplane-e2e: ## Run the Phase-A data-plane e2e + failure-matrix + soak harness (A7, #628)
+	$(GO) test -race ./test/e2e/...
 
 vet: ## Run go vet
 	$(GO) vet ./...
