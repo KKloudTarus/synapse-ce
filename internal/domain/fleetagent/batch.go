@@ -52,7 +52,7 @@ func (i DetectionBatchItem) Validate() error {
 		return fmt.Errorf("%w: detection batch item %s has no asset", shared.ErrValidation, i.ID)
 	}
 	if err := i.Detection.Validate(); err != nil {
-		return fmt.Errorf("%w: detection batch item %s is malformed: %v", shared.ErrValidation, i.ID, err)
+		return fmt.Errorf("detection batch item %s is malformed: %w", i.ID, err)
 	}
 	return nil
 }

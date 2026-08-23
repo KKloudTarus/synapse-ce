@@ -198,6 +198,43 @@ func TestACKSurvivesRestartAndReclaimsSegment(t *testing.T) {
 	}
 }
 
+func TestStatsRetainsACKForPastEpochAfterBootChange(t *testing.T) {
+	cfg := testConfig(t)
+	s, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivered := mustEnqueue(t, s, testItem(fleetagent.PriorityP1, "delivered", 64))
+	if _, err := s.Ack(context.Background(), ports.SpoolACK{
+		Priority: fleetagent.PriorityP1, Epoch: delivered.Epoch, Through: delivered.Sequence,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg.Boot = "boot-after-ack"
+	reopened, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	stats, err := reopened.Stats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Priorities[fleetagent.PriorityP1].CurrentEpoch <= delivered.Epoch {
+		t.Fatalf("boot did not advance epoch: stats=%#v delivered=%#v", stats.Priorities[fleetagent.PriorityP1], delivered)
+	}
+	for _, ack := range stats.EpochACKs {
+		if ack.Priority == fleetagent.PriorityP1 && ack.Epoch == delivered.Epoch && ack.HighestACKed == delivered.Sequence {
+			return
+		}
+	}
+	t.Fatalf("past-epoch ACK missing after reboot: %#v", stats.EpochACKs)
+}
+
 func TestDirectoryHasExclusiveProcessOwnership(t *testing.T) {
 	cfg := testConfig(t)
 	first, err := Open(cfg)

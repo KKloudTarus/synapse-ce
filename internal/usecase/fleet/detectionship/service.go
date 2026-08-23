@@ -4,7 +4,6 @@
 package detectionship
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -21,7 +20,6 @@ import (
 )
 
 const (
-	stateVersion        = 1
 	defaultKeyValidity  = 90 * 24 * time.Hour
 	defaultRotateBefore = 7 * 24 * time.Hour
 	defaultBatchRecords = 32
@@ -39,18 +37,6 @@ var (
 	ErrDeliveryState = errors.New("detection delivery state inconsistent")
 )
 
-// Transport is the live agent-plane surface implemented by fleetclient.Client.
-type Transport interface {
-	RegisterDetectionKey(ctx context.Context, token string, key fleetagent.AgentSigningKey, proof string) error
-	SendDetectionBatch(ctx context.Context, token string, batch fleetagent.AgentBatch, items []fleetagent.DetectionBatchItem) error
-}
-
-// StateStore durably persists the private signing material and in-flight batch coordinate.
-type StateStore interface {
-	Load() (State, bool, error)
-	Save(State) error
-}
-
 // ResponseError is implemented by transports that preserve an HTTP status and Retry-After value.
 type ResponseError interface {
 	error
@@ -61,92 +47,8 @@ type ResponseError interface {
 // delay without removing anything from the WAL.
 type RetryDecider func(err error, attempt uint) (retry bool, delay time.Duration)
 
-// LocalSigningKey is the private half of one purpose-bound agent key. It is a persistence DTO, not a
-// wire type: only Key.PublicKey and a proof produced from PrivateKey leave the host.
-type LocalSigningKey struct {
-	Key        fleetagent.AgentSigningKey
-	PrivateKey ed25519.PrivateKey
-}
-
-func (k LocalSigningKey) validate() error {
-	if err := k.Key.Validate(); err != nil {
-		return err
-	}
-	if len(k.PrivateKey) != ed25519.PrivateKeySize {
-		return fmt.Errorf("%w: local detection private key has invalid size", shared.ErrValidation)
-	}
-	canonicalPrivate := ed25519.NewKeyFromSeed(k.PrivateKey.Seed())
-	if !bytes.Equal(canonicalPrivate, k.PrivateKey) {
-		return fmt.Errorf("%w: local detection private key seed/public material is inconsistent", shared.ErrValidation)
-	}
-	derived, ok := k.PrivateKey.Public().(ed25519.PublicKey)
-	if !ok || !bytes.Equal(derived, k.Key.PublicKey) {
-		return fmt.Errorf("%w: local detection private key does not match its public key", shared.ErrValidation)
-	}
-	if k.Key.Purpose != fleetagent.PurposeDetectionBatch {
-		return fmt.Errorf("%w: local key has purpose %q, want detection-batch", shared.ErrValidation, k.Key.Purpose)
-	}
-	return nil
-}
-
-// PendingBatch is written before the network call. A restart rebuilds exactly this membership with the
-// same Sequence; if the response was lost, the server's SealOnce path makes the replay idempotent.
-type PendingBatch struct {
-	Sequence uint64
-	Epoch    uint64
-	Through  uint64
-	EventIDs []shared.ID
-}
-
-func (p PendingBatch) validate() error {
-	if p.Sequence == 0 || p.Epoch == 0 || p.Through == 0 || len(p.EventIDs) == 0 {
-		return fmt.Errorf("%w: pending detection batch has incomplete coordinates", shared.ErrValidation)
-	}
-	for _, id := range p.EventIDs {
-		if id.IsZero() {
-			return fmt.Errorf("%w: pending detection batch has an empty event id", shared.ErrValidation)
-		}
-	}
-	return nil
-}
-
-// State is the complete secret-bearing agent-side detection transport state.
-type State struct {
-	Version         int
-	NextSequence    uint64
-	Key             *LocalSigningKey
-	RegisteredKeyID string
-	Pending         *PendingBatch
-}
-
-func initialState() State { return State{Version: stateVersion, NextSequence: 1} }
-
-// Validate rejects corrupt or tampered local state instead of silently minting a new identity and
-// abandoning an in-flight sequence.
-func (s State) Validate() error {
-	if s.Version != stateVersion || s.NextSequence == 0 {
-		return fmt.Errorf("%w: unsupported or incomplete detection delivery state", shared.ErrValidation)
-	}
-	if s.Key == nil && s.RegisteredKeyID != "" {
-		return fmt.Errorf("%w: registered key id exists without local key material", shared.ErrValidation)
-	}
-	if s.Key != nil {
-		if err := s.Key.validate(); err != nil {
-			return err
-		}
-		if s.RegisteredKeyID != "" && s.RegisteredKeyID != s.Key.Key.KeyID {
-			return fmt.Errorf("%w: registered key id does not match local key", shared.ErrValidation)
-		}
-	}
-	if s.Pending != nil {
-		if err := s.Pending.validate(); err != nil {
-			return err
-		}
-		if s.Pending.Sequence != s.NextSequence {
-			return fmt.Errorf("%w: pending sequence %d disagrees with next sequence %d", shared.ErrValidation, s.Pending.Sequence, s.NextSequence)
-		}
-	}
-	return nil
+func initialState() ports.DetectionDeliveryState {
+	return ports.DetectionDeliveryState{Version: ports.DetectionDeliveryStateVersion, NextSequence: 1}
 }
 
 // Config binds one shipper to an enrolled agent and one engagement.
@@ -206,14 +108,14 @@ func normalizeConfig(cfg Config) (Config, error) {
 // Service drains one durable detection lane.
 type Service struct {
 	spool     ports.TelemetrySpool
-	transport Transport
-	store     StateStore
+	transport ports.DetectionTransport
+	store     ports.DetectionStateStore
 	cfg       Config
-	state     State
+	state     ports.DetectionDeliveryState
 }
 
 // NewService loads and validates durable state before any key registration or network delivery.
-func NewService(spool ports.TelemetrySpool, transport Transport, store StateStore, cfg Config) (*Service, error) {
+func NewService(spool ports.TelemetrySpool, transport ports.DetectionTransport, store ports.DetectionStateStore, cfg Config) (*Service, error) {
 	if spool == nil || transport == nil || store == nil {
 		return nil, fmt.Errorf("%w: detection shipper is missing a dependency", shared.ErrValidation)
 	}
@@ -236,6 +138,10 @@ func NewService(spool ports.TelemetrySpool, transport Transport, store StateStor
 	}
 	if state.Key != nil && state.Key.Key.AgentID != normalized.AgentID {
 		return nil, fmt.Errorf("%w: local signing key belongs to agent %s, not %s", shared.ErrForbidden, state.Key.Key.AgentID, normalized.AgentID)
+	}
+	if state.Pending != nil && state.Pending.EngagementID != normalized.EngagementID {
+		return nil, fmt.Errorf("%w: pending detection batch belongs to engagement %s, not %s",
+			shared.ErrForbidden, state.Pending.EngagementID, normalized.EngagementID)
 	}
 	return &Service{spool: spool, transport: transport, store: store, cfg: normalized, state: state}, nil
 }
@@ -285,6 +191,10 @@ func (s *Service) DeliverOnce(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	if s.state.Pending != nil {
+		if s.state.Pending.EngagementID != s.cfg.EngagementID {
+			return false, fmt.Errorf("%w: pending detection batch belongs to engagement %s, not %s",
+				shared.ErrForbidden, s.state.Pending.EngagementID, s.cfg.EngagementID)
+		}
 		acked, err := s.pendingAlreadyACKed(ctx)
 		if err != nil {
 			return false, err
@@ -305,7 +215,8 @@ func (s *Service) DeliverOnce(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	if s.state.Pending == nil {
-		pending := &PendingBatch{Sequence: s.state.NextSequence, Epoch: records[0].Position.Epoch,
+		pending := &ports.DetectionPendingBatch{EngagementID: s.cfg.EngagementID,
+			Sequence: s.state.NextSequence, Epoch: records[0].Position.Epoch,
 			Through: records[len(records)-1].Position.Sequence, EventIDs: make([]shared.ID, len(records))}
 		for i := range records {
 			pending.EventIDs[i] = records[i].EventID
@@ -316,7 +227,7 @@ func (s *Service) DeliverOnce(ctx context.Context) (bool, error) {
 			return false, fmt.Errorf("persist pending detection batch: %w", err)
 		}
 	}
-	batch := fleetagent.AgentBatch{AgentID: s.cfg.AgentID, EngagementID: s.cfg.EngagementID,
+	batch := fleetagent.AgentBatch{AgentID: s.cfg.AgentID, EngagementID: s.state.Pending.EngagementID,
 		Sequence: s.state.Pending.Sequence, KeyID: s.state.Key.Key.KeyID, Detections: refs}
 	batch.Signature = fleetagent.SignBatch(s.state.Key.PrivateKey, batch)
 	if err := batch.Validate(); err != nil {
@@ -355,7 +266,7 @@ func (s *Service) ensureKey(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		local = &LocalSigningKey{Key: key, PrivateKey: privateKey}
+		local = &ports.DetectionSigningKeyState{Key: key, PrivateKey: privateKey}
 	}
 	proof := fleetagent.ProveKeyPossession(local.PrivateKey, local.Key)
 	if err := s.transport.RegisterDetectionKey(ctx, s.cfg.Token, local.Key, proof); err != nil {
@@ -451,9 +362,9 @@ func (s *Service) pendingAlreadyACKed(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read detection WAL state: %w", err)
 	}
-	for _, lane := range stats.Priorities {
-		if lane.Priority == fleetagent.PriorityP1 && lane.CurrentEpoch == s.state.Pending.Epoch {
-			return lane.HighestACKed >= s.state.Pending.Through, nil
+	for _, ack := range stats.EpochACKs {
+		if ack.Priority == fleetagent.PriorityP1 && ack.Epoch == s.state.Pending.Epoch {
+			return ack.HighestACKed >= s.state.Pending.Through, nil
 		}
 	}
 	return false, nil
@@ -479,7 +390,7 @@ func (s *Service) forgetRejectedKey() error {
 	return nil
 }
 
-func (s *Service) persist(next State) error {
+func (s *Service) persist(next ports.DetectionDeliveryState) error {
 	if err := next.Validate(); err != nil {
 		return err
 	}

@@ -9,16 +9,17 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectionship"
+	"github.com/KKloudTarus/synapse-ce/internal/platform/fssecurity"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 func TestDetectionStoreRoundTripsSecretStateAt0600(t *testing.T) {
 	dir := t.TempDir()
 	store := NewDetectionStore(dir)
 	key := testLocalKey(t)
-	want := detectionship.State{Version: 1, NextSequence: 3, Key: &key, RegisteredKeyID: key.Key.KeyID,
-		Pending: &detectionship.PendingBatch{Sequence: 3, Epoch: 2, Through: 7, EventIDs: []shared.ID{"det-6", "det-7"}}}
+	want := ports.DetectionDeliveryState{Version: 1, NextSequence: 3, Key: &key, RegisteredKeyID: key.Key.KeyID,
+		Pending: &ports.DetectionPendingBatch{EngagementID: "eng-1", Sequence: 3, Epoch: 2, Through: 7,
+			EventIDs: []shared.ID{"det-6", "det-7"}}}
 	if err := store.Save(want); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +42,7 @@ func TestDetectionStoreRoundTripsSecretStateAt0600(t *testing.T) {
 	if err != nil || !ok || got.NextSequence != 4 || got.Pending != nil {
 		t.Fatalf("replacement state = %#v ok=%v err=%v", got, ok, err)
 	}
-	if fleetclient.SecretModeEnforced() {
+	if fssecurity.UnixModeEnforced() {
 		info, err := os.Stat(filepath.Join(dir, detectionStateFile))
 		if err != nil {
 			t.Fatal(err)
@@ -68,12 +69,12 @@ func TestDetectionStoreDistinguishesMissingAndCorruptState(t *testing.T) {
 
 func TestDetectionStoreRefusesInvalidState(t *testing.T) {
 	store := NewDetectionStore(t.TempDir())
-	if err := store.Save(detectionship.State{}); err == nil {
+	if err := store.Save(ports.DetectionDeliveryState{}); err == nil {
 		t.Fatal("invalid zero state persisted")
 	}
 }
 
-func testLocalKey(t *testing.T) detectionship.LocalSigningKey {
+func testLocalKey(t *testing.T) ports.DetectionSigningKeyState {
 	t.Helper()
 	pub, privateKey, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -84,5 +85,5 @@ func testLocalKey(t *testing.T) detectionship.LocalSigningKey {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return detectionship.LocalSigningKey{Key: key, PrivateKey: privateKey}
+	return ports.DetectionSigningKeyState{Key: key, PrivateKey: privateKey}
 }

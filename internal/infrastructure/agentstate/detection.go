@@ -10,8 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectionship"
+	"github.com/KKloudTarus/synapse-ce/internal/platform/fssecurity"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 const detectionStateFile = "detection-transport.json"
@@ -27,27 +27,27 @@ func NewDetectionStore(dir string) *DetectionStore {
 
 // Load returns ok=false only when no state has been created yet. Corrupt or unreadable state fails
 // closed so an in-flight sequence or signing identity is never silently discarded.
-func (s *DetectionStore) Load() (detectionship.State, bool, error) {
+func (s *DetectionStore) Load() (ports.DetectionDeliveryState, bool, error) {
 	body, err := os.ReadFile(s.path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return detectionship.State{}, false, nil
+		return ports.DetectionDeliveryState{}, false, nil
 	}
 	if err != nil {
-		return detectionship.State{}, false, fmt.Errorf("read detection transport state: %w", err)
+		return ports.DetectionDeliveryState{}, false, fmt.Errorf("read detection transport state: %w", err)
 	}
-	var state detectionship.State
+	var state ports.DetectionDeliveryState
 	if err := json.Unmarshal(body, &state); err != nil {
-		return detectionship.State{}, false, fmt.Errorf("decode detection transport state: %w", err)
+		return ports.DetectionDeliveryState{}, false, fmt.Errorf("decode detection transport state: %w", err)
 	}
 	if err := state.Validate(); err != nil {
-		return detectionship.State{}, false, err
+		return ports.DetectionDeliveryState{}, false, err
 	}
 	return state, true, nil
 }
 
 // Save writes the complete state with 0600 permissions. The file contains an Ed25519 private key and
 // must be treated with the same protection as the long-lived fleet credential.
-func (s *DetectionStore) Save(state detectionship.State) error {
+func (s *DetectionStore) Save(state ports.DetectionDeliveryState) error {
 	if err := state.Validate(); err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func writeDetectionState(path string, body []byte) error {
 		_ = os.Remove(tmpName)
 		return err
 	}
-	if fleetclient.SecretModeEnforced() {
+	if fssecurity.UnixModeEnforced() {
 		info, err := os.Stat(path)
 		if err != nil {
 			return err
@@ -121,4 +121,4 @@ func writeDetectionState(path string, body []byte) error {
 	return nil
 }
 
-var _ detectionship.StateStore = (*DetectionStore)(nil)
+var _ ports.DetectionStateStore = (*DetectionStore)(nil)

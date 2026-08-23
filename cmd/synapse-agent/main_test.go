@@ -12,6 +12,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
+	"github.com/KKloudTarus/synapse-ce/internal/platform/fssecurity"
 )
 
 type fakeAPI struct {
@@ -100,7 +101,7 @@ func TestFirstRunEnrolsAndPersists(t *testing.T) {
 	}
 	// Unix-only guarantee: Windows has no permission bits, so the credential is protected by the
 	// state directory's ACL there instead. Asserting 0600 on Windows would assert nothing real.
-	if fleetclient.SecretModeEnforced() && info.Mode().Perm() != 0o600 {
+	if fssecurity.UnixModeEnforced() && info.Mode().Perm() != 0o600 {
 		t.Fatalf("credential must be 0600, got %v", info.Mode().Perm())
 	}
 	// The order was progressed and reported succeeded with a coverage-honest summary.

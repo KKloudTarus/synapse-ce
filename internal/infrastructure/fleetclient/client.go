@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 const protoHeader = "X-Synapse-Fleet-Proto"
@@ -229,3 +230,5 @@ func (c *Client) do(ctx context.Context, method, path, token string, body, out a
 	}
 	return nil
 }
+
+var _ ports.DetectionTransport = (*Client)(nil)

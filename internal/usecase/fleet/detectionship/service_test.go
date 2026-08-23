@@ -20,19 +20,19 @@ var shipNow = time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
 
 type memoryState struct {
 	mu      sync.Mutex
-	state   State
+	state   ports.DetectionDeliveryState
 	ok      bool
 	saves   int
 	saveErr error
 }
 
-func (m *memoryState) Load() (State, bool, error) {
+func (m *memoryState) Load() (ports.DetectionDeliveryState, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return cloneState(m.state), m.ok, nil
 }
 
-func (m *memoryState) Save(state State) error {
+func (m *memoryState) Save(state ports.DetectionDeliveryState) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.saveErr != nil {
@@ -43,19 +43,20 @@ func (m *memoryState) Save(state State) error {
 	return nil
 }
 
-func cloneState(in State) State {
+func cloneState(in ports.DetectionDeliveryState) ports.DetectionDeliveryState {
 	body, _ := json.Marshal(in)
-	var out State
+	var out ports.DetectionDeliveryState
 	_ = json.Unmarshal(body, &out)
 	return out
 }
 
 type memorySpool struct {
-	mu      sync.Mutex
-	records []ports.SpoolRecord
-	acked   uint64
-	epoch   uint64
-	peeks   []ports.PeekSpoolRequest
+	mu           sync.Mutex
+	records      []ports.SpoolRecord
+	acked        uint64
+	epoch        uint64
+	currentEpoch uint64
+	peeks        []ports.PeekSpoolRequest
 }
 
 func (s *memorySpool) Enqueue(context.Context, ports.SpoolItem) (fleetagent.StreamPosition, error) {
@@ -93,8 +94,16 @@ func (*memorySpool) Gaps(context.Context) ([]ports.SpoolGap, error) { return nil
 func (s *memorySpool) Stats(context.Context) (ports.SpoolStats, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return ports.SpoolStats{Priorities: []ports.SpoolPriorityStats{{Priority: fleetagent.PriorityP1,
-		CurrentEpoch: s.epoch, HighestACKed: s.acked}}}, nil
+	currentEpoch := s.currentEpoch
+	if currentEpoch == 0 {
+		currentEpoch = s.epoch
+	}
+	stats := ports.SpoolStats{Priorities: []ports.SpoolPriorityStats{{Priority: fleetagent.PriorityP1,
+		CurrentEpoch: currentEpoch}}}
+	if s.acked > 0 {
+		stats.EpochACKs = []ports.SpoolEpochACK{{Priority: fleetagent.PriorityP1, Epoch: s.epoch, HighestACKed: s.acked}}
+	}
+	return stats, nil
 }
 func (*memorySpool) Close() error { return nil }
 
@@ -192,7 +201,7 @@ func TestLostResponseRestartsWithSameSequenceMembershipAndKey(t *testing.T) {
 	if delivered, err := first.DeliverOnce(context.Background()); err == nil || delivered {
 		t.Fatalf("lost response delivered=%v err=%v", delivered, err)
 	}
-	if state.state.Pending == nil || state.state.Pending.Sequence != 1 || spool.acked != 0 {
+	if state.state.Pending == nil || state.state.Pending.Sequence != 1 || state.state.Pending.EngagementID != "eng-1" || spool.acked != 0 {
 		t.Fatalf("pending state not preserved: %#v ack=%d", state.state, spool.acked)
 	}
 
@@ -262,8 +271,9 @@ func TestRunRotatesRejectedKeyOnceAndRetriesPendingBatch(t *testing.T) {
 
 func TestRecoveredACKCompletesPendingStateWithoutResending(t *testing.T) {
 	key := localKey(t)
-	state := &memoryState{ok: true, state: State{Version: 1, NextSequence: 4, Key: &key,
-		RegisteredKeyID: key.Key.KeyID, Pending: &PendingBatch{Sequence: 4, Epoch: 2, Through: 9, EventIDs: []shared.ID{"det-9"}}}}
+	state := &memoryState{ok: true, state: ports.DetectionDeliveryState{Version: 1, NextSequence: 4, Key: &key,
+		RegisteredKeyID: key.Key.KeyID, Pending: &ports.DetectionPendingBatch{EngagementID: "eng-1",
+			Sequence: 4, Epoch: 2, Through: 9, EventIDs: []shared.ID{"det-9"}}}}
 	spool := &memorySpool{acked: 9, epoch: 2}
 	transport := &captureTransport{}
 	service, err := NewService(spool, transport, state, testConfig())
@@ -278,10 +288,50 @@ func TestRecoveredACKCompletesPendingStateWithoutResending(t *testing.T) {
 	}
 }
 
+func TestRecoveredACKFromPastEpochCompletesPendingStateAfterReboot(t *testing.T) {
+	key := localKey(t)
+	state := &memoryState{ok: true, state: ports.DetectionDeliveryState{Version: 1, NextSequence: 4, Key: &key,
+		RegisteredKeyID: key.Key.KeyID, Pending: &ports.DetectionPendingBatch{EngagementID: "eng-1",
+			Sequence: 4, Epoch: 2, Through: 9, EventIDs: []shared.ID{"det-9"}}}}
+	spool := &memorySpool{acked: 9, epoch: 2, currentEpoch: 3}
+	transport := &captureTransport{}
+	service, err := NewService(spool, transport, state, testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delivered, err := service.DeliverOnce(context.Background()); err != nil || !delivered {
+		t.Fatalf("reboot recovery delivered=%v err=%v", delivered, err)
+	}
+	if len(transport.batches) != 0 || state.state.Pending != nil || state.state.NextSequence != 5 {
+		t.Fatalf("past-epoch ACK was not recovered: sends=%d state=%#v", len(transport.batches), state.state)
+	}
+}
+
+func TestPendingEngagementMismatchFailsClosed(t *testing.T) {
+	key := localKey(t)
+	state := &memoryState{ok: true, state: ports.DetectionDeliveryState{Version: 1, NextSequence: 1, Key: &key,
+		RegisteredKeyID: key.Key.KeyID, Pending: &ports.DetectionPendingBatch{EngagementID: "eng-original",
+			Sequence: 1, Epoch: 1, Through: 1, EventIDs: []shared.ID{"det-1"}}}}
+	if _, err := NewService(&memorySpool{}, &captureTransport{}, state, testConfig()); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("engagement mismatch error = %v", err)
+	}
+	cfg := testConfig()
+	cfg.EngagementID = "eng-original"
+	service, err := NewService(&memorySpool{}, &captureTransport{}, state, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.cfg.EngagementID = "eng-changed" // exercise the per-delivery guard independently of construction
+	if _, err := service.DeliverOnce(context.Background()); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("delivery engagement mismatch error = %v", err)
+	}
+}
+
 func TestPendingMembershipMismatchFailsClosed(t *testing.T) {
 	key := localKey(t)
-	state := &memoryState{ok: true, state: State{Version: 1, NextSequence: 1, Key: &key,
-		RegisteredKeyID: key.Key.KeyID, Pending: &PendingBatch{Sequence: 1, Epoch: 1, Through: 1, EventIDs: []shared.ID{"expected"}}}}
+	state := &memoryState{ok: true, state: ports.DetectionDeliveryState{Version: 1, NextSequence: 1, Key: &key,
+		RegisteredKeyID: key.Key.KeyID, Pending: &ports.DetectionPendingBatch{EngagementID: "eng-1",
+			Sequence: 1, Epoch: 1, Through: 1, EventIDs: []shared.ID{"expected"}}}}
 	spool := &memorySpool{records: []ports.SpoolRecord{spoolDetection(1, "different")}, epoch: 1}
 	service, err := NewService(spool, &captureTransport{}, state, testConfig())
 	if err != nil {
@@ -298,7 +348,7 @@ func TestPendingMembershipMismatchFailsClosed(t *testing.T) {
 func TestNewServiceRejectsCorruptPrivateKeyAndBadConfig(t *testing.T) {
 	bad := localKey(t)
 	bad.PrivateKey[0] ^= 0xff
-	state := &memoryState{ok: true, state: State{Version: 1, NextSequence: 1, Key: &bad}}
+	state := &memoryState{ok: true, state: ports.DetectionDeliveryState{Version: 1, NextSequence: 1, Key: &bad}}
 	if _, err := NewService(&memorySpool{}, &captureTransport{}, state, testConfig()); err == nil {
 		t.Fatal("corrupt private key accepted")
 	}
@@ -326,7 +376,7 @@ func validDetection() detection.Detection {
 		Evidence: []detection.Event{event}, ObservedCount: 1, Observed: shipNow}
 }
 
-func localKey(t *testing.T) LocalSigningKey {
+func localKey(t *testing.T) ports.DetectionSigningKeyState {
 	t.Helper()
 	pub, privateKey, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -336,5 +386,5 @@ func localKey(t *testing.T) LocalSigningKey {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return LocalSigningKey{Key: key, PrivateKey: privateKey}
+	return ports.DetectionSigningKeyState{Key: key, PrivateKey: privateKey}
 }

@@ -116,11 +116,14 @@ possession to `POST /api/v1/fleet/keys`, and drains P1 independently to
 identity from its credential, resolves the named key, verifies every content digest and signature,
 then seals each detection exactly once.
 
-A pending batch coordinate is written before the network request. If the agent restarts or loses the
-HTTP response, it retries the same sequence and membership; the control plane idempotently skips what
-was already sealed. The local WAL is ACKed only after a complete 2xx response. Keys rotate before
-expiry, and one `403` causes one new key registration plus a retry of the same pending sequence. A
-second rejection stops delivery instead of generating keys indefinitely.
+A pending batch coordinate, membership, and engagement attribution are written before the network
+request. If the agent restarts or loses the HTTP response, it retries the same sequence and membership;
+the control plane idempotently skips what was already sealed. Changing the configured engagement while
+a batch is pending fails closed instead of re-attributing it. The local WAL is ACKed only after a
+complete 2xx response, and its per-epoch ACK history lets a reboot finish committing a batch whose WAL
+records were already reclaimed. Keys rotate before expiry, and one `403` causes one new key registration
+plus a retry of the same pending sequence. A second rejection stops delivery instead of generating keys
+indefinitely.
 
 ### Durable telemetry spool
 

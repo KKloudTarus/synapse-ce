@@ -434,6 +434,23 @@ func (s *Spool) Stats(ctx context.Context) (ports.SpoolStats, error) {
 		stats.TotalRecords += lane.Records
 		stats.Priorities = append(stats.Priorities, lane)
 	}
+	for key, highest := range s.state.ACK {
+		priority, epoch, err := parseACKKey(key)
+		if err != nil {
+			return ports.SpoolStats{}, fmt.Errorf("read spool ACK history: %w", err)
+		}
+		if highest > 0 {
+			stats.EpochACKs = append(stats.EpochACKs, ports.SpoolEpochACK{
+				Priority: priority, Epoch: epoch, HighestACKed: highest,
+			})
+		}
+	}
+	sort.Slice(stats.EpochACKs, func(i, j int) bool {
+		if stats.EpochACKs[i].Priority != stats.EpochACKs[j].Priority {
+			return stats.EpochACKs[i].Priority < stats.EpochACKs[j].Priority
+		}
+		return stats.EpochACKs[i].Epoch < stats.EpochACKs[j].Epoch
+	})
 	return stats, nil
 }
 
