@@ -21,6 +21,21 @@ const (
 	ConnectionObserved ConnectionState = "observed"
 )
 
+// ProcessAttribution records whether the process named by a network observation has itself been
+// directly observed. A ProcessEntityID alone is not proof that the endpoint projection received the
+// corresponding process event: sensors can miss it, or network telemetry can arrive first.
+type ProcessAttribution string
+
+const (
+	// ProcessAttributionUnknown means the flow has no ProcessEntityID, or its referenced process has not
+	// been directly observed. The id is preserved when present, but consumers must not treat it as a
+	// verified process entity yet.
+	ProcessAttributionUnknown ProcessAttribution = "unknown"
+	// ProcessAttributionObserved means a validated process observation for ProcessEntityID is present in
+	// the same endpoint projection.
+	ProcessAttributionObserved ProcessAttribution = "observed"
+)
+
 // NetworkConnection is a process-attributed network flow reconstructed from network telemetry (B2). It is
 // keyed by a stable ConnectionID so re-observing the same flow widens its last-seen time instead of
 // creating a duplicate, and it links to the process that opened it by the A1 ProcessEntityID rather than a
@@ -37,9 +52,12 @@ type NetworkConnection struct {
 	RemoteAddr      string
 	RemotePort      int
 	Comm            string
-	FirstSeenAt     time.Time
-	LastSeenAt      time.Time
-	State           ConnectionState
+	// ProcessAttribution makes a missing process observation explicit instead of allowing consumers to
+	// infer that ProcessEntityID necessarily resolves to an observed process.
+	ProcessAttribution ProcessAttribution
+	FirstSeenAt        time.Time
+	LastSeenAt         time.Time
+	State              ConnectionState
 }
 
 // Validate enforces a well-formed network connection.
@@ -52,6 +70,14 @@ func (c NetworkConnection) Validate() error {
 	}
 	if c.State != ConnectionObserved {
 		return fmt.Errorf("%w: network connection has unknown state %q", shared.ErrValidation, c.State)
+	}
+	switch c.ProcessAttribution {
+	case ProcessAttributionUnknown, ProcessAttributionObserved:
+	default:
+		return fmt.Errorf("%w: network connection has unknown process attribution %q", shared.ErrValidation, c.ProcessAttribution)
+	}
+	if c.ProcessAttribution == ProcessAttributionObserved && c.ProcessEntityID.IsZero() {
+		return fmt.Errorf("%w: observed process attribution has no process entity id", shared.ErrValidation)
 	}
 	return nil
 }
