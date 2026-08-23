@@ -4,13 +4,43 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+// TestDetectionSinkRedactsEvidenceSecretsAtSource proves A6 (#627) closes the detection channel: a secret
+// in a detection's evidence argv must not enter the spool (and thus the shipped, permanently-sealed record).
+func TestDetectionSinkRedactsEvidenceSecretsAtSource(t *testing.T) {
+	secret := "topSecret" + "Value123"
+	durable := &captureSpool{}
+	sink, err := NewDetectionSink(durable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	det := validDetection()
+	det.Evidence = []detection.Event{{
+		Class: detection.ClassProcess, At: adapterNow.Add(-time.Millisecond), Host: "asset-1",
+		Process: &detection.ProcessEvent{PID: 10, PPID: 1, Comm: "mysql", Path: "/usr/bin/mysql",
+			Args: []string{"mysql", "--password=" + secret, "app_db"}, UID: 1000},
+	}}
+	if err := sink.Emit(context.Background(), det); err != nil {
+		t.Fatal(err)
+	}
+	item := durable.snapshot()[0]
+	if strings.Contains(string(item.Payload), secret) {
+		t.Fatalf("detection evidence secret entered the spool unredacted: %s", item.Payload)
+	}
+	// Caller's detection is not mutated (engine keeps its raw copy).
+	if !strings.Contains(det.Evidence[0].Process.Args[1], secret) {
+		t.Fatal("Emit must not mutate the caller's detection")
+	}
+}
 
 func TestDetectionSinkPersistsP1AndDeterministicID(t *testing.T) {
 	durable := &captureSpool{}
