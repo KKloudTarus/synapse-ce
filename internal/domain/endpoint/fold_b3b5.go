@@ -44,20 +44,7 @@ func (s *EndpointState) applyFile(env telemetry.TelemetryEnvelope) []TimelineEnt
 		ft.LastSeenAt = env.OccurredAt
 	}
 
-	entry, appended := s.timeline.append(TimelineEntry{
-		OccurredAt: env.OccurredAt,
-		TenantID:   s.tenantID,
-		AssetID:    s.assetID,
-		EntityKind: EntityFile,
-		EntityID:   id,
-		Kind:       fileTimelineKind(obs.Op),
-		EventID:    env.EventID,
-		Summary:    fileObsSummary(obs),
-	})
-	if !appended {
-		return nil
-	}
-	return []TimelineEntry{entry}
+	return s.appendTimeline(env)
 }
 
 // applyPrivilege folds a validated privilege envelope (B4). env is already telemetry-validated by Observe.
@@ -83,20 +70,7 @@ func (s *EndpointState) applyPrivilege(env telemetry.TelemetryEnvelope) []Timeli
 		OccurredAt:      env.OccurredAt,
 	})
 
-	entry, appended := s.timeline.append(TimelineEntry{
-		OccurredAt: env.OccurredAt,
-		TenantID:   s.tenantID,
-		AssetID:    s.assetID,
-		EntityKind: EntityIdentity,
-		EntityID:   obs.ProcessEntityID,
-		Kind:       TimelinePrivilegeChange,
-		EventID:    env.EventID,
-		Summary:    privilegeSummary(obs),
-	})
-	if !appended {
-		return nil
-	}
-	return []TimelineEntry{entry}
+	return s.appendTimeline(env)
 }
 
 // observeContainer inventories the container an event came from (B5), from the envelope's ResourceContext.
