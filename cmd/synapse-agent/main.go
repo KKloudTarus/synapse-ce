@@ -75,6 +75,11 @@ type config struct {
 	metricsAddr           string  // optional private agent metrics listener
 	detectionEngagement   string  // engagement receiving signed detection batches; empty = local-only
 	detectionShipInterval time.Duration
+	// inventorySweep turns the host inventory from on-demand (a scan.host work order) into a continuous
+	// periodic stream (A8, #629). Enabled by default (ingest-on); the interval is clamped to a floor so a
+	// misconfiguration cannot busy-loop the collector over the real filesystem.
+	inventorySweepEnabled  bool
+	inventorySweepInterval time.Duration
 }
 
 func main() {
@@ -132,6 +137,8 @@ func parseConfig() config {
 	flag.StringVar(&cfg.metricsAddr, "agent-metrics-addr", os.Getenv("SYNAPSE_AGENT_METRICS_ADDR"), "optional address for private agent Prometheus metrics (for example 127.0.0.1:9465)")
 	flag.StringVar(&cfg.detectionEngagement, "detection-engagement", os.Getenv("SYNAPSE_DETECTION_ENGAGEMENT_ID"), "engagement id receiving signed detection batches; empty keeps detections local")
 	flag.DurationVar(&cfg.detectionShipInterval, "detection-ship-interval", parsePositiveDuration(os.Getenv("SYNAPSE_DETECTION_SHIP_INTERVAL"), time.Second), "idle interval for the independent detection delivery loop")
+	flag.BoolVar(&cfg.inventorySweepEnabled, "inventory-sweep", envEnabledDefaultTrue(os.Getenv("SYNAPSE_INVENTORY_SWEEP_ENABLED")), "ship host inventory continuously on a cadence (A8, #629); on by default")
+	flag.DurationVar(&cfg.inventorySweepInterval, "inventory-sweep-interval", parsePositiveDuration(os.Getenv("SYNAPSE_INVENTORY_SWEEP_INTERVAL"), time.Hour), "cadence of the continuous host-inventory sweep (clamped to a floor)")
 	flag.Parse()
 	if cfg.enrolToken == "" {
 		// An absent token file is NOT fatal: it is the normal state after enrolment, once the
@@ -163,6 +170,10 @@ func (r *runner) run(ctx context.Context) error {
 	// It is given the enrolled credential so its events carry the canonical AgentID, not the display
 	// name (D1 fix, #606).
 	r.startDetection(ctx, cred)
+	// Continuous host-inventory sweep (#629, A8): a background stream, separate from the per-work-order
+	// scan.host cycle below, so a control plane always has a fresh inventory to re-evaluate against new
+	// advisories without a manual re-scan. Best-effort — it never blocks or fails the work-order loop.
+	r.startInventorySweep(ctx, cred)
 	for {
 		if err := r.cycle(ctx, cred); err != nil {
 			if errors.Is(err, context.Canceled) {

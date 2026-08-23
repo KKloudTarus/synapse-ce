@@ -388,6 +388,8 @@ The following variables are read by `synapse-agent` and `synapse-cluster-agent`,
 | `SYNAPSE_AGENT_STATE_DIR` | platform default | Credential and offline-buffer directory; `/var/lib/synapse-cluster-agent` for the cluster agent. Protect it from other users. |
 | `SYNAPSE_AGENT_ROOT` | `/` | Host filesystem root inventoried by the VM agent. |
 | `SYNAPSE_AGENT_NAME` | hostname | Human-readable agent display name. |
+| `SYNAPSE_INVENTORY_SWEEP_ENABLED` | `true` | Ship host inventory continuously on a cadence (A8, #629), not only on a `scan.host` work order. Ingest is idempotent server-side (host upsert-by-natural-key), so a re-sweep of an unchanged host is a no-op. Set `false` to disable. |
+| `SYNAPSE_INVENTORY_SWEEP_INTERVAL` | `1h` | Cadence of the continuous host-inventory sweep. Clamped to a 1-minute floor so a misconfiguration cannot busy-loop the collector over the filesystem. |
 | `SYNAPSE_DETECT_CLASSES` | empty | Comma-separated eBPF classes: `process`, `network`, `file`, `privilege`. Empty disables the engine; Linux root/capabilities are required. |
 | `SYNAPSE_DETECT_CPU_CEIL_PCT` | `0` | CPU ceiling for deterministic class shedding; zero disables shedding. |
 | `SYNAPSE_DETECTION_ENGAGEMENT_ID` | empty | Engagement receiving signed detection batches. Empty keeps confirmed detections durably local and does not start the remote detection shipper. |
