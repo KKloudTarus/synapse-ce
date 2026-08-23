@@ -16,6 +16,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/normalize"
@@ -52,6 +53,7 @@ type DurableSensor struct {
 	source   ports.DetectionSensor
 	spool    ports.TelemetrySpool
 	identity SensorIdentity
+	policy   privacy.Policy
 	now      func() time.Time
 	runID    string
 
@@ -75,11 +77,27 @@ func NewDurableSensor(source ports.DetectionSensor, durable ports.TelemetrySpool
 		return nil, err
 	}
 	return &DurableSensor{
-		source: source, spool: durable, identity: identity, now: time.Now,
+		source: source, spool: durable, identity: identity, policy: privacy.DefaultPolicy(), now: time.Now,
 		runID:  uuid.NewString(),
 		events: make(chan detection.Event), failures: make(map[detection.Class]uint64),
 		sequence: make(map[detection.Class]uint64),
 	}, nil
+}
+
+// SetRedactionPolicy overrides the source-side redaction policy (A6, #627). A DurableSensor is created with
+// privacy.DefaultPolicy(); an operator/tenant policy is applied here before Start. An invalid policy is
+// rejected so the sensor never ships with a broken (fail-open) redaction config.
+func (s *DurableSensor) SetRedactionPolicy(p privacy.Policy) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.started {
+		return fmt.Errorf("%w: cannot change the redaction policy after the sensor has started", shared.ErrValidation)
+	}
+	s.policy = p
+	return nil
 }
 
 func (s *DurableSensor) Start(ctx context.Context) error {
@@ -138,6 +156,14 @@ func (s *DurableSensor) persist(ctx context.Context, event detection.Event) bool
 		return true // detection can still evaluate; coverage reports raw loss
 	}
 	envelope, err := (normalize.Normalizer{}).Normalize(decoded)
+	if err != nil {
+		s.recordFailure(event.Class)
+		return true
+	}
+	// A6 (#627): redact at the SOURCE — before the WAL/ship — so unredacted secrets/PII never persist on
+	// disk or leave the host. The scrubbed envelope carries its RedactionPolicyDigest + a QualityRedacted
+	// flag so the redaction travels with the data.
+	envelope, _, err = privacy.Scrub(envelope, s.policy)
 	if err != nil {
 		s.recordFailure(event.Class)
 		return true

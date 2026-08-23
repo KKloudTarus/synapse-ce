@@ -51,6 +51,10 @@ type TelemetryEnvelope struct {
 	CoverageFlags   CoverageFlags
 	DataQuality     DataQuality
 	ResourceContext ResourceContext
+	// RedactionPolicyDigest names the source-side privacy policy that scrubbed this event (A6, #627),
+	// recorded WITH the data so a reader knows how it was redacted. It is DISTINCT from any sampling-policy
+	// digest. Empty when no redaction policy was applied (pre-A6 path); set by privacy.Scrub.
+	RedactionPolicyDigest string
 	// Event is the typed payload (the "TypedPayload" contract slot).
 	Event TelemetryEvent
 }

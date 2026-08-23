@@ -30,6 +30,10 @@ const (
 	// QualityKernelTimestampUnavailable — OccurredAt could not be taken from the kernel event and fell
 	// back to the collector's ObservedAt; the two are equal for this event.
 	QualityKernelTimestampUnavailable
+	// QualityRedacted — source-side privacy redaction (A6, #627) changed at least one field of this event
+	// (a secret scrubbed, a value hashed, or a field dropped) before it entered the spool. The reader knows
+	// a redacted value is not the raw observation; the applied policy is named by RedactionPolicyDigest.
+	QualityRedacted
 )
 
 // Has reports whether flag f is set.
@@ -56,6 +60,7 @@ func (q DataQuality) String() string {
 		{QualityMissingStartTime, "missing_start_time"},
 		{QualityMissingParentStartTime, "missing_parent_start_time"},
 		{QualityKernelTimestampUnavailable, "kernel_ts_unavailable"},
+		{QualityRedacted, "redacted"},
 	}
 	var set []string
 	for _, e := range names {

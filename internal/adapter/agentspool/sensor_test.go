@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,51 @@ import (
 )
 
 var adapterNow = time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+
+// TestDurableSensorRedactsSecretsAtSource proves A6 (#627): a secret in argv is scrubbed on the agent
+// BEFORE it enters the spool, so the persisted payload never contains it. The secret is assembled from
+// parts so it does not appear verbatim in source.
+func TestDurableSensorRedactsSecretsAtSource(t *testing.T) {
+	secret := "topSecret" + "Value123"
+	source := newFakeSensor()
+	durable := &captureSpool{}
+	wrapper := mustSensor(t, source, durable)
+	wrapper.now = func() time.Time { return adapterNow }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := wrapper.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	source.events <- detection.Event{
+		Class: detection.ClassProcess, At: adapterNow.Add(-time.Millisecond), Host: "asset-1",
+		Process: &detection.ProcessEvent{PID: 10, PPID: 1, Comm: "mysql", Path: "/usr/bin/mysql",
+			Args: []string{"mysql", "--password=" + secret, "app_db"}, UID: 1000},
+	}
+	select {
+	case <-wrapper.Events():
+	case <-time.After(time.Second):
+		t.Fatal("event not forwarded")
+	}
+	item := durable.snapshot()[0]
+	if strings.Contains(string(item.Payload), secret) {
+		t.Fatalf("secret entered the spool unredacted: %s", item.Payload)
+	}
+	var env telemetry.TelemetryEnvelope
+	if err := json.Unmarshal(item.Payload, &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if !env.DataQuality.Has(telemetry.QualityRedacted) || env.RedactionPolicyDigest == "" {
+		t.Fatalf("redaction was not recorded on the spooled envelope: quality=%s digest=%q", env.DataQuality, env.RedactionPolicyDigest)
+	}
+	// Non-secret argv context is preserved.
+	if env.Event.Process.Args[0] != "mysql" || env.Event.Process.Args[2] != "app_db" {
+		t.Fatalf("forensic argv context lost: %#v", env.Event.Process.Args)
+	}
+	cancel()
+	if err := wrapper.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestDurableSensorNormalizesAndPersistsBeforeForwarding(t *testing.T) {
 	source := newFakeSensor()
