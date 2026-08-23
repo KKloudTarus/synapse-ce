@@ -14,7 +14,6 @@ DELETE /api/v1/engagements/{p}/credentials/{p}
 DELETE /api/v1/quality-gates/{p}
 DELETE /api/v1/quality-profiles/{p}
 GET /api/v1/agents
-GET /api/v1/agents/{p}/keys
 GET /api/v1/agents/rollout
 GET /api/v1/assets
 GET /api/v1/assets/edges
@@ -86,7 +85,6 @@ GET /api/v1/vulnerability/sources/types
 GET /api/v1/writeups
 PATCH /api/v1/engagements/{p}
 PATCH /api/v1/vulnerability/sources/{p}
-POST /api/v1/agents/{p}/keys/{p}/revoke
 POST /api/v1/agents/{p}/revoke
 POST /api/v1/agents/enrolment-tokens
 POST /api/v1/agents/rollout/pause
@@ -120,13 +118,10 @@ POST /api/v1/engagements/{p}/writeup-drafts/{p}/edit
 POST /api/v1/engagements/{p}/writeup-drafts/{p}/reject
 POST /api/v1/engagements/import
 POST /api/v1/fleet/decommission
-POST /api/v1/fleet/detections
 POST /api/v1/fleet/enrol
 POST /api/v1/fleet/heartbeat
 POST /api/v1/fleet/inventory/cluster
 POST /api/v1/fleet/inventory/host
-POST /api/v1/fleet/keys
-POST /api/v1/fleet/telemetry
 POST /api/v1/fleet/work/{p}/progress
 POST /api/v1/fleet/work/{p}/result
 POST /api/v1/fleet/work/claim
