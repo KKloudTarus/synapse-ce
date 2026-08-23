@@ -184,10 +184,27 @@ func (s *Service) Ingest(ctx context.Context, authAgentID shared.ID, batch fleet
 		if err != nil {
 			return result, fmt.Errorf("marshal detection %s: %w", it.ID, err)
 		}
-		// Content binding: the signed ref for this id must match a digest of the bytes we are about to
-		// seal (detection + asset). A body swapped in transit for a known id is refused here.
+		// Content binding: the signed ref for this id must match a digest of the bytes the agent committed
+		// to (detection + asset). A body swapped in transit for a known id is refused here.
 		if got := fleetagent.DetectionContentHash(payload, it.AssetID); got != refByID[it.ID].ContentSHA256 {
 			return result, fmt.Errorf("%w: detection %s content does not match its signed digest", shared.ErrValidation, it.ID)
+		}
+		// A5 (#626): seal a SELF-CONTAINED DetectionEvidenceEnvelope as the permanent chain link — the
+		// detection plus its full attribution (tenant/agent/asset/engagement), the admitting batch identity,
+		// the agent's content commitment, and rule provenance — so the link stays verifiable and explainable
+		// after the expirable projection row is swept. The envelope is deterministic (no ingest clock), so
+		// the SealOnce content comparison still converges on an idempotent retry. Provenance is Complete: the
+		// detection evidence is durably sealed (the raw-telemetry-durability cross-check is a read-layer tail).
+		envelope, err := fleetagent.NewDetectionEvidenceEnvelope(
+			tenantID, batch.EngagementID, batch.AgentID, it.AssetID, it.ID, batch.Sequence,
+			batch.KeyID, refByID[it.ID].ContentSHA256, fleetagent.ProvenanceComplete, it.Detection,
+		)
+		if err != nil {
+			return result, fmt.Errorf("build detection %s evidence envelope: %w", it.ID, err)
+		}
+		content, err := envelope.Canonical()
+		if err != nil {
+			return result, fmt.Errorf("canonicalize detection %s evidence envelope: %w", it.ID, err)
 		}
 		// Fast-path idempotent resume: skip a detection whose projection row already exists FOR THIS
 		// engagement (a retry after a fully-completed item). The skip is engagement-scoped to match the
@@ -201,7 +218,7 @@ func (s *Service) Ingest(ctx context.Context, authAgentID shared.ID, batch fleet
 			result.Skipped = append(result.Skipped, it.ID)
 			continue
 		}
-		evID, err := s.chain.SealOnce(ctx, batch.EngagementID, evidenceKindDetection, it.ID.String(), payload, batch.AgentID.String())
+		evID, err := s.chain.SealOnce(ctx, batch.EngagementID, evidenceKindDetection, it.ID.String(), content, batch.AgentID.String())
 		if err != nil {
 			return result, fmt.Errorf("seal detection %s: %w", it.ID, err)
 		}

@@ -13,6 +13,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -29,6 +30,7 @@ type fakeChain struct {
 	mu      sync.Mutex
 	seals   []sealCall           // one entry per link ACTUALLY appended; an idempotent replay adds none
 	byKey   map[string]shared.ID // (engagement, idempotency key) -> the id of the link sealed for it
+	content map[string][]byte    // (engagement, idempotency key) -> the sealed content bytes
 	n       int
 	broken  bool
 	sealErr error
@@ -40,7 +42,7 @@ func sealKey(eng shared.ID, key string) string { return string(eng) + "\x00" + k
 
 // SealOnce models the real chain's idempotency contract: a repeated (engagement, key) returns the existing
 // link and appends NOTHING new, so a test can prove a detection is sealed into the chain at most once.
-func (c *fakeChain) SealOnce(_ context.Context, eng shared.ID, kind, key string, _ []byte, by string) (shared.ID, error) {
+func (c *fakeChain) SealOnce(_ context.Context, eng shared.ID, kind, key string, content []byte, by string) (shared.ID, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.sealErr != nil {
@@ -49,6 +51,9 @@ func (c *fakeChain) SealOnce(_ context.Context, eng shared.ID, kind, key string,
 	if c.byKey == nil {
 		c.byKey = map[string]shared.ID{}
 	}
+	if c.content == nil {
+		c.content = map[string][]byte{}
+	}
 	k := sealKey(eng, key)
 	if id, ok := c.byKey[k]; ok {
 		return id, nil // idempotent: same (engagement, key) -> same link, nothing appended
@@ -56,8 +61,16 @@ func (c *fakeChain) SealOnce(_ context.Context, eng shared.ID, kind, key string,
 	c.n++
 	id := shared.ID("ev-" + itoa(c.n))
 	c.byKey[k] = id
+	c.content[k] = append([]byte(nil), content...)
 	c.seals = append(c.seals, sealCall{eng, kind, by, key})
 	return id, nil
+}
+
+// contentFor returns the sealed content bytes for (engagement, key), under the same lock.
+func (c *fakeChain) contentFor(eng shared.ID, key string) []byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.content[sealKey(eng, key)]
 }
 
 // idFor returns the link id sealed for (engagement, key), read under the same lock that guards byKey, so a
@@ -268,6 +281,32 @@ func TestIngestRejectsIdentityMismatch(t *testing.T) {
 	}
 	if !h.audit.has("detection.batch_rejected") {
 		t.Error("an identity-mismatched batch must be audited as rejected")
+	}
+}
+
+func TestIngestSealsSelfContainedEvidenceEnvelope(t *testing.T) {
+	h := newHarness(t, 0)
+	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
+	if _, err := h.svc.Ingest(tctx(), "agent:1", h.signedBatch(t, 1, items), items); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	// A5 (#626): the sealed chain content must be a SELF-CONTAINED DetectionEvidenceEnvelope, decodable and
+	// verifiable from the chain link ALONE (no projection read here) — exactly the property needed after the
+	// expirable projection row is swept.
+	content := h.chain.contentFor("eng-1", "d1")
+	if len(content) == 0 {
+		t.Fatal("no sealed content captured")
+	}
+	env, err := fleetagent.DecodeDetectionEvidenceEnvelope(content)
+	if err != nil {
+		t.Fatalf("sealed content must decode as an evidence envelope: %v", err)
+	}
+	if env.TenantID != "t1" || env.EngagementID != "eng-1" || env.AgentID != "agent:1" || env.AssetID != "asset-1" ||
+		env.DetectionID != "d1" || env.BatchSequence != 1 || env.Provenance != fleetagent.ProvenanceComplete {
+		t.Fatalf("envelope attribution wrong: %+v", env)
+	}
+	if err := env.VerifyContent(); err != nil {
+		t.Fatalf("sealed envelope must self-verify against its commitment: %v", err)
 	}
 }
 
@@ -503,6 +542,73 @@ func TestExpireIsAuditedAndRequiresActorReason(t *testing.T) {
 // projection write fails AFTER a successful seal, a retry finds no row (HasDetection is false) and, with
 // a naive Seal, would append a SECOND chain link for the same detection. Because SealOnce is keyed on the
 // detection id, the retry returns the first link instead — the detection is sealed exactly once.
+// TestIngestSealsOnceThroughRealEvidenceServiceAcrossProjectionCrash supersedes the fake-backed D3 test
+// (A5, #626): it runs the seal-then-projection-crash retry through the REAL evidence.Service.SealOnce
+// (memory-backed vault, bridged as the ledger's chain), proving the production seal path itself leaves
+// exactly ONE permanent chain link — and that the link is the self-contained envelope.
+func TestIngestSealsOnceThroughRealEvidenceServiceAcrossProjectionCrash(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	audit := &fakeAudit{}
+	clock := fixedClock{t: time.Unix(1000, 0)}
+	ids := &seqIDs{}
+	evSvc, err := evidenceuc.NewService(memory.NewEvidenceStore(), nil, audit, clock, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := NewEvidenceChainBridge(
+		func(ctx context.Context, eng shared.ID, kind, idem string, content []byte, by string) (shared.ID, error) {
+			ev, serr := evSvc.SealOnce(ctx, eng, kind, idem, content, by)
+			if serr != nil {
+				return "", serr
+			}
+			return ev.ID, nil
+		},
+		func(ctx context.Context, eng shared.ID) error { return evSvc.VerifyChainError(ctx, eng) },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := &failingRecords{DetectionRecordStore: memory.NewDetectionRecordStore(), failAppend: 1}
+	key := mkSigningKey(t, "agent:1", pub)
+	keys := &fakeKeys{byAgent: map[shared.ID]fleetagent.AgentSigningKey{"agent:1": key}}
+	svc, err := NewService(records, bridge, keys, audit, clock, ids, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := []IngestItem{{ID: "d1", Detection: mkDetection(t, "ps"), AssetID: "asset-1"}}
+	b := fleetagent.AgentBatch{AgentID: "agent:1", EngagementID: "eng-1", Sequence: 1, KeyID: key.KeyID, Detections: refsFor(t, items)}
+	b.Signature = fleetagent.SignBatch(priv, b)
+
+	// First ingest: the real seal succeeds, then the injected projection write fails.
+	if _, err := svc.Ingest(tctx(), b.AgentID, b, items); err == nil {
+		t.Fatal("expected the injected projection-write failure to surface")
+	}
+	// Retry the SAME batch through the real service (projection row still missing → HasDetection false).
+	if _, err := svc.Ingest(tctx(), b.AgentID, b, items); err != nil {
+		t.Fatalf("retry must complete: %v", err)
+	}
+	// D3: the real vault holds exactly ONE permanent detection link.
+	links, err := evSvc.List(tctx(), "eng-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(links) != 1 {
+		t.Fatalf("D3: exactly one permanent chain link expected, got %d", len(links))
+	}
+	if links[0].Kind != evidenceKindDetection {
+		t.Fatalf("the link must be kind=detection, got %q", links[0].Kind)
+	}
+	// The permanent link is the self-contained envelope and verifies on its own.
+	env, err := fleetagent.DecodeDetectionEvidenceEnvelope(links[0].Content)
+	if err != nil {
+		t.Fatalf("permanent link must decode as an evidence envelope: %v", err)
+	}
+	if err := env.VerifyContent(); err != nil {
+		t.Fatalf("permanent envelope must self-verify: %v", err)
+	}
+}
+
 func TestIngestNeverDoubleSealsAfterProjectionFailure(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	chain := &fakeChain{}
