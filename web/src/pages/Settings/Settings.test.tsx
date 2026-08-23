@@ -54,14 +54,16 @@ describe('Settings Layout', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByText('self-host · single-tenant')).toBeInTheDocument()
+    expect(screen.getByText('Self-hosted · single-tenant · isolated storage')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Light theme' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Dark theme' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Disconnect' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Dark theme' }))
     expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(document.documentElement.classList.contains('dark-mode')).toBe(true)
     fireEvent.click(screen.getByRole('button', { name: 'Light theme' }))
     expect(document.documentElement.dataset.theme).toBe('light')
+    expect(document.documentElement.classList.contains('dark-mode')).toBe(false)
   })
 })

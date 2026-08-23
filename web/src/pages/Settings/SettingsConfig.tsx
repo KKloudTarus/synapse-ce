@@ -40,7 +40,14 @@ export function SettingsConfig() {
 
   useEffect(() => {
     const resolved = resolveTheme(pref)
+    // System 1: index.css custom vars (:root[data-theme='dark'])
     document.documentElement.dataset.theme = resolved
+    // System 2: UUI tokens (.dark-mode class) + Tailwind dark: variant
+    if (resolved === 'dark') {
+      document.documentElement.classList.add('dark-mode')
+    } else {
+      document.documentElement.classList.remove('dark-mode')
+    }
     try { localStorage.setItem('synapse-theme', pref) } catch {}
   }, [pref])
 
@@ -49,7 +56,13 @@ export function SettingsConfig() {
     if (pref !== 'system') return
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
     const handler = () => {
-      document.documentElement.dataset.theme = mq.matches ? 'dark' : 'light'
+      const resolved = mq.matches ? 'dark' : 'light'
+      document.documentElement.dataset.theme = resolved
+      if (resolved === 'dark') {
+        document.documentElement.classList.add('dark-mode')
+      } else {
+        document.documentElement.classList.remove('dark-mode')
+      }
     }
     mq.addEventListener('change', handler)
     return () => mq.removeEventListener('change', handler)

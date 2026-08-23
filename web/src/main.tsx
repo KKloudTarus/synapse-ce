@@ -5,6 +5,17 @@ import App from './App'
 import './index.css'
 import "./styles/globals.css";
 
+// Apply theme BEFORE first render to prevent flash of wrong theme
+;(function initTheme() {
+  const pref = localStorage.getItem('synapse-theme') || 'light'
+  let resolved = pref
+  if (pref === 'system') {
+    resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  }
+  document.documentElement.dataset.theme = resolved
+  if (resolved === 'dark') document.documentElement.classList.add('dark-mode')
+})()
+
 async function bootstrap() {
   if (import.meta.env.DEV) {
     const { worker } = await import('./mocks/browser')

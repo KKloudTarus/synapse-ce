@@ -221,7 +221,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
         <img
           src={logo}
           alt="Synapse"
-          className="size-8 shrink-0 rounded-lg shadow-sm drop-shadow-xs"
+          className="size-8 shrink-0 rounded-lg shadow-sm drop-shadow-xs dark:ring-1 dark:ring-white/50"
         />
         <div className={cn('min-w-0 truncate', collapsed && 'sr-only')}>
           <div className="text-lg font-bold tracking-tight text-primary">Synapse</div>
