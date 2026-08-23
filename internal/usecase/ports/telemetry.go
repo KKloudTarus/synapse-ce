@@ -18,13 +18,18 @@ import (
 //
 // Telemetry is NOT hash-chained per event (the #405 decision); batches stay sequence-numbered so a hunt
 // can tell a complete sequence from a lossy one.
-type TelemetryStore interface {
-	// Ingest persists one batch of raw events. It is the store write only; boundedness/backpressure and
-	// gap reporting are the telemetry usecase's job. Idempotent on (host, class, sequence, event index).
-	Ingest(ctx context.Context, batch TelemetryBatch) error
+// TelemetryHuntReader is the narrow coverage-honest query seam used by retro-hunt consumers.
+type TelemetryHuntReader interface {
 	// Query runs a retro-hunt. The three acceptance patterns (retro-run a rule over the hot window,
 	// reconstruct context around a detection, pivot an asset to its raw events) are HuntQuery.Kind values.
 	Query(ctx context.Context, q HuntQuery) (HuntResult, error)
+}
+
+type TelemetryStore interface {
+	TelemetryHuntReader
+	// Ingest persists one batch of raw events. It is the store write only; boundedness/backpressure and
+	// gap reporting are the telemetry usecase's job. Idempotent on (host, class, sequence, event index).
+	Ingest(ctx context.Context, batch TelemetryBatch) error
 	// RetentionSweep enforces the tier boundaries as of now: it down-samples the warm window and expires
 	// past-warm data, returning what it did so the caller can audit the expiry. Tenant-scoped.
 	RetentionSweep(ctx context.Context, now time.Time) (SweepReport, error)
