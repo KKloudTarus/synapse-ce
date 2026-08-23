@@ -36,21 +36,21 @@ func TestSyncRunReadMetadataDateAndTenantIsolation(t *testing.T) {
 	if err != nil || claimed == nil || claimed.ID != before.DurableJobID {
 		t.Fatalf("first claim=%+v err=%v", claimed, err)
 	}
-	if err := queue.Complete(ctxA, claimed.ID); err != nil {
+	if err := queue.Complete(ctxA, claimed.ID, claimed.Fence); err != nil {
 		t.Fatal(err)
 	}
 	claimed, err = queue.Claim(ctxA, time.Minute, "vulnerability_sync")
 	if err != nil || claimed == nil || claimed.ID != inRange.DurableJobID {
 		t.Fatalf("second claim=%+v err=%v", claimed, err)
 	}
-	if err := queue.Fail(ctxA, claimed.ID, 0); err != nil {
+	if err := queue.Fail(ctxA, claimed.ID, claimed.Fence, 0); err != nil {
 		t.Fatal(err)
 	}
 	claimed, err = queue.Claim(ctxA, time.Minute, "vulnerability_sync")
 	if err != nil || claimed == nil || claimed.Attempts != 2 {
 		t.Fatalf("retry claim=%+v err=%v", claimed, err)
 	}
-	if err := queue.Deadletter(ctxA, claimed.ID); err != nil {
+	if err := queue.Deadletter(ctxA, claimed.ID, claimed.Fence); err != nil {
 		t.Fatal(err)
 	}
 

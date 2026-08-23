@@ -359,6 +359,32 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
+  /api/v1/sca/scans/{id}:
+    get:
+      tags: [sca]
+      summary: Read one asynchronous scan job by its own id
+      description: >
+        Reads a specific scan job rather than the engagement's latest, so a
+        concurrent scan on the same engagement cannot mask this job's status. The
+        job is resolved first, then its engagement is checked against the caller's
+        tenant; an unknown or cross-tenant job is 404 and reveals nothing.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+        description: Scan job id returned when the scan was accepted
+      responses:
+        "200":
+          description: Scan job status, stage, and progress
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ScanJob"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/attack-paths:
     get:
       tags: [findings]
@@ -3509,6 +3535,28 @@ components:
           type: string
           enum: [local, git, archive, image]
           default: local
+
+    ScanJob:
+      type: object
+      description: >
+        Progress of one asynchronous scan. Debug events carry only metadata and
+        counts: never raw tool output, environment values, or unredacted commands.
+      properties:
+        id: {type: string}
+        engagement_id: {type: string}
+        target: {type: string}
+        kind: {type: string}
+        status:
+          type: string
+          enum: [running, succeeded, failed]
+        stage: {type: string}
+        progress: {type: integer, minimum: 0, maximum: 100}
+        error: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        debug_events:
+          type: array
+          items: {type: object}
 
     ScanResult:
       type: object

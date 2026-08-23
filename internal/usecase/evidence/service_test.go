@@ -525,6 +525,29 @@ func TestSealRejectsCrossTenantAppendWithoutChangingChain(t *testing.T) {
 	}
 }
 
+func TestSealWithIDReusesReservedIdentityAndRejectsIdentityConflicts(t *testing.T) {
+	svc, store, _ := newVault(t, nil)
+	ctx := context.Background()
+
+	first, err := svc.SealWithID(ctx, "reserved-scan", "eng-evidence", "scan", []byte("sealed"), "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.SealWithID(ctx, "reserved-scan", "eng-evidence", "scan", []byte("altered telemetry"), "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != second.ID || string(second.Content) != "sealed" || len(store.items["eng-evidence"]) != 1 {
+		t.Fatalf("reserved replay did not reuse committed evidence: first=%+v second=%+v items=%+v", first, second, store.items["eng-evidence"])
+	}
+	if _, err := svc.SealWithID(ctx, "reserved-scan", "eng-evidence", "other-kind", []byte("sealed"), "worker"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("altered kind replay error = %v, want ErrConflict", err)
+	}
+	if _, err := svc.SealWithID(ctx, "reserved-scan", "eng-evidence", "scan", []byte("sealed"), "other-worker"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("altered creator replay error = %v, want ErrConflict", err)
+	}
+}
+
 func TestSealForFindingWithIDReplaysExactlyAndRejectsConflicts(t *testing.T) {
 	store := newConcurrentEvidenceStore()
 	svc, err := NewService(store, nil, &capAudit{}, fixedClock{t: time.Unix(0, 0).UTC()}, &randomTestIDs{})

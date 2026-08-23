@@ -93,7 +93,17 @@ func (r *ExecRunner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolRe
 	cmd.Stdout = outW
 	cmd.Stderr = errW
 
-	runErr := cmd.Run()
+	runErr := cmd.Start()
+	var startErr error
+	if runErr == nil && spec.Started != nil {
+		startErr = spec.Started(runCtx)
+		if startErr != nil {
+			_ = cmd.Cancel()
+		}
+	}
+	if runErr == nil {
+		runErr = cmd.Wait()
+	}
 	res := ports.ToolResult{
 		Stdout:    outW.buf.Bytes(),
 		Stderr:    errW.buf.Bytes(),
@@ -103,6 +113,9 @@ func (r *ExecRunner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolRe
 	if runCtx.Err() == context.DeadlineExceeded {
 		res.TimedOut = true
 		return res, fmt.Errorf("toolrunner: %q exceeded its %s timeout", spec.Name, timeout)
+	}
+	if startErr != nil {
+		return res, fmt.Errorf("toolrunner: initialize %q after start: %w", spec.Name, startErr)
 	}
 	if runErr != nil {
 		var ee *exec.ExitError

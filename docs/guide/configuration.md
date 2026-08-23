@@ -235,6 +235,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_LEADER_RESOURCE` | `scheduler` | Lease name. |
 | `SYNAPSE_LEADER_TERM` | `15s` | Lease term. |
 | `SYNAPSE_LEADER_RENEW` | `5s` | Renew interval. |
+| `SYNAPSE_WORKER_CONCURRENCY` | `1` | Durable queue claim loops per `synapse-worker` process; must be from 1 through 64. Jobs remain active on every worker, while maintenance sweepers are leader-gated when election is enabled. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_ENABLED` | `false` | Dispatch due vulnerability-source syncs and recover stale runs. PostgreSQL deployments must also enable leader election. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_POLL` | `1m` | Scheduler polling interval. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_STALE_AFTER` | `30m` | Age after which a queued/running sync is eligible for checkpoint-based recovery. |
@@ -268,7 +269,27 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_RECON_TIMEOUT` | `3m` | Per-run recon timeout. |
 | `SYNAPSE_RECON_CONCURRENCY` | `3` | Recon worker pool size. |
 | `SYNAPSE_RECON_ALLOW_CAPABILITY_SENSITIVE` | `false` | Permit tools that need raw sockets. |
+| `SYNAPSE_TOOL_EXECUTION_MODE` | (role default) | Explicit process execution posture: `dispatch-only`, `worker`, or `in-process`. Production `synapse-api` defaults to `dispatch-only` and refuses `in-process`, so untrusted tools run only on `synapse-worker`; `dispatch-only` requires PostgreSQL. Leave unset unless overriding the role default. |
 | `SYNAPSE_RECON_VIA_WORKER` | `false` | Route recon through the durable queue to synapse-worker. Requires PostgreSQL. |
+
+## Signed egress grants (native worker tier)
+
+Scoped network access for an untrusted process is authorized by the control plane, not by the
+worker. The API signs a short-lived grant bound to the exact process and namespace; a root-owned
+broker verifies it and configures that namespace before the sandboxed child is released. The
+signing seed stays in the control plane and the broker holds only the public verification key. See
+[Deployment](deployment.md) and [Security](security.md).
+
+Set the issuer variables on `synapse-api` and the client variables on `synapse-worker`.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR` | (none) | API: listen address for the machine-only grant listener, for example `:8082`. Publish it through a private TLS load balancer reachable only from the worker security group, never through the browser ingress. |
+| `SYNAPSE_EGRESS_GRANT_ISSUER_TOKEN` | (none) | API: bearer credential the worker machine identity presents to the grant listener. Keep it distinct from `SYNAPSE_API_TOKEN` so a worker holds no human API authority. Never logged. |
+| `SYNAPSE_EGRESS_GRANT_SIGNING_SEED` | (none) | API: Ed25519 seed that signs grants. Rotate in two phases so in-flight grants stay verifiable. Never logged. |
+| `SYNAPSE_EGRESS_GRANT_AUTHORITY_URL` | (none) | Worker: private HTTPS URL of the grant listener. |
+| `SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN` | (none) | Worker: machine bearer credential for the grant listener. Never logged. |
+| `SYNAPSE_EGRESS_BROKER_SOCKET` | (none) | Worker: path to the root-owned broker's Unix socket. The protocol carries only a run id and canonical CIDR/port rules; it has no command or argv field. |
 
 ## AI agent orchestration (off by default)
 

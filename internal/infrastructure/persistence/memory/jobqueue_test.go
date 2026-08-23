@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 type seqIDs struct {
@@ -46,7 +47,7 @@ func TestJobQueueClaimLeaseAndComplete(t *testing.T) {
 		t.Fatalf("a leased job must not be re-claimed, got %+v", j2)
 	}
 	// Complete → never returned again.
-	if err := q.Complete(ctx, id); err != nil {
+	if err := q.Complete(ctx, id, j.Fence); err != nil {
 		t.Fatal(err)
 	}
 	if j3, _ := q.Claim(ctx, 30*time.Second); j3 != nil {
@@ -73,6 +74,166 @@ func TestJobQueueExpiredLeaseIsReclaimed(t *testing.T) {
 	if second.Attempts != 2 {
 		t.Errorf("reclaim should be attempt 2, got %d", second.Attempts)
 	}
+	if second.Fence <= first.Fence {
+		t.Errorf("reclaim fence = %d, want greater than first fence %d", second.Fence, first.Fence)
+	}
+}
+
+func TestJobQueueFencesStaleLeaseMutations(t *testing.T) {
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
+	operations := []struct {
+		name string
+		call func(*JobQueue, string, int64) error
+	}{
+		{"complete", func(q *JobQueue, id string, fence int64) error { return q.Complete(ctx, id, fence) }},
+		{"fail", func(q *JobQueue, id string, fence int64) error { return q.Fail(ctx, id, fence, 0) }},
+		{"retry", func(q *JobQueue, id string, fence int64) error { return q.Retry(ctx, id, fence, 0) }},
+		{"deadletter", func(q *JobQueue, id string, fence int64) error { return q.Deadletter(ctx, id, fence) }},
+		{"heartbeat", func(q *JobQueue, id string, fence int64) error { return q.Heartbeat(ctx, id, fence, time.Minute) }},
+	}
+
+	for _, tt := range operations {
+		t.Run(tt.name, func(t *testing.T) {
+			clk := &movableClock{t: time.Unix(1000, 0).UTC()}
+			q := NewJobQueue(&seqIDs{}, clk.now)
+			id, err := q.Enqueue(ctx, "recon", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := q.Claim(ctx, time.Second)
+			if err != nil || first == nil {
+				t.Fatalf("first claim = %+v, %v", first, err)
+			}
+			clk.t = clk.t.Add(2 * time.Second)
+			second, err := q.Claim(ctx, time.Minute)
+			if err != nil || second == nil || second.Fence <= first.Fence {
+				t.Fatalf("reclaim = %+v, %v", second, err)
+			}
+
+			if err := tt.call(q, id, first.Fence); !errors.Is(err, ports.ErrStaleLease) {
+				t.Fatalf("stale %s error = %v, want ErrStaleLease", tt.name, err)
+			}
+			j := q.jobs[id]
+			if j.status != "claimed" || j.claimFence != second.Fence {
+				t.Fatalf("stale %s changed current claim: status=%q fence=%d, want claimed/%d", tt.name, j.status, j.claimFence, second.Fence)
+			}
+			if got, want := j.claimedUntil, clk.t.Add(time.Minute); !got.Equal(want) {
+				t.Fatalf("stale %s changed current lease: got %v, want %v", tt.name, got, want)
+			}
+		})
+	}
+}
+
+func TestJobQueueCurrentFenceMutationsSucceed(t *testing.T) {
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
+	operations := []struct {
+		name       string
+		call       func(*JobQueue, string, int64) error
+		wantStatus string
+	}{
+		{"complete", func(q *JobQueue, id string, fence int64) error { return q.Complete(ctx, id, fence) }, "done"},
+		{"fail", func(q *JobQueue, id string, fence int64) error { return q.Fail(ctx, id, fence, 0) }, "queued"},
+		{"deadletter", func(q *JobQueue, id string, fence int64) error { return q.Deadletter(ctx, id, fence) }, "failed"},
+		{"heartbeat", func(q *JobQueue, id string, fence int64) error { return q.Heartbeat(ctx, id, fence, time.Minute) }, "claimed"},
+	}
+
+	for _, tt := range operations {
+		t.Run(tt.name, func(t *testing.T) {
+			q := NewJobQueue(&seqIDs{}, time.Now)
+			id, err := q.Enqueue(ctx, "recon", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			job, err := q.Claim(ctx, time.Minute)
+			if err != nil || job == nil {
+				t.Fatalf("claim = %+v, %v", job, err)
+			}
+			if err := tt.call(q, id, job.Fence); err != nil {
+				t.Fatalf("current %s: %v", tt.name, err)
+			}
+			if got := q.jobs[id].status; got != tt.wantStatus {
+				t.Fatalf("status after %s = %q, want %q", tt.name, got, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestJobQueueFencedMutationsRejectMissingJobs(t *testing.T) {
+	q := NewJobQueue(&seqIDs{}, time.Now)
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
+	operations := []struct {
+		name string
+		call func() error
+	}{
+		{"complete", func() error { return q.Complete(ctx, "missing", 1) }},
+		{"fail", func() error { return q.Fail(ctx, "missing", 1, 0) }},
+		{"deadletter", func() error { return q.Deadletter(ctx, "missing", 1) }},
+		{"heartbeat", func() error { return q.Heartbeat(ctx, "missing", 1, time.Minute) }},
+	}
+	for _, tt := range operations {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.call(); !errors.Is(err, shared.ErrNotFound) || errors.Is(err, ports.ErrStaleLease) {
+				t.Fatalf("missing %s error = %v, want ErrNotFound only", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestJobQueueReclaimFencesExpiredWorkerCompletion(t *testing.T) {
+	clk := &movableClock{t: time.Unix(1000, 0).UTC()}
+	q := NewJobQueue(&seqIDs{}, clk.now)
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
+	id, err := q.Enqueue(ctx, "sca", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := q.Claim(ctx, time.Second)
+	if err != nil || first == nil {
+		t.Fatalf("first claim = %+v, %v", first, err)
+	}
+	clk.t = clk.t.Add(2 * time.Second)
+	second, err := q.Claim(ctx, time.Minute)
+	if err != nil || second == nil || second.Fence <= first.Fence {
+		t.Fatalf("second claim = %+v, %v", second, err)
+	}
+	if err := q.Complete(ctx, id, first.Fence); !errors.Is(err, ports.ErrStaleLease) {
+		t.Fatalf("stale completion = %v, want ErrStaleLease", err)
+	}
+	if err := q.Complete(ctx, id, second.Fence); err != nil {
+		t.Fatalf("current completion: %v", err)
+	}
+	if j, err := q.Claim(ctx, time.Minute); err != nil || j != nil {
+		t.Fatalf("completed exactly once: job=%+v err=%v", j, err)
+	}
+}
+
+func TestJobQueueRetryBacksOffWithoutBurningAttempt(t *testing.T) {
+	clk := &movableClock{t: time.Unix(1000, 0).UTC()}
+	q := NewJobQueue(&seqIDs{}, clk.now)
+	ctx := shared.WithTenant(context.Background(), "tenant-test")
+	id, err := q.Enqueue(ctx, "recon", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := q.Claim(ctx, time.Minute)
+	if err != nil || job == nil || job.Attempts != 1 {
+		t.Fatalf("claim = %+v, %v", job, err)
+	}
+	if err := q.Retry(ctx, id, job.Fence, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	status, err := q.JobStatus(ctx, id)
+	if err != nil || status.Attempts != 0 {
+		t.Fatalf("retry status = %+v, %v; want zero attempts", status, err)
+	}
+	if next, err := q.Claim(ctx, time.Minute); err != nil || next != nil {
+		t.Fatalf("retry ignored backoff: claim=%+v err=%v", next, err)
+	}
+	clk.t = clk.t.Add(time.Minute)
+	next, err := q.Claim(ctx, time.Minute)
+	if err != nil || next == nil || next.Attempts != 1 {
+		t.Fatalf("reclaimed retry = %+v, %v; want first charged delivery", next, err)
+	}
 }
 
 func TestJobQueueFailBacksOff(t *testing.T) {
@@ -80,9 +241,9 @@ func TestJobQueueFailBacksOff(t *testing.T) {
 	q := NewJobQueue(&seqIDs{}, clk.now)
 	ctx := shared.WithTenant(context.Background(), "tenant-test")
 	id, _ := q.Enqueue(ctx, "recon", nil)
-	_, _ = q.Claim(ctx, 30*time.Second)
 	// Fail with a 60s backoff: not claimable until the backoff elapses.
-	if err := q.Fail(ctx, id, 60*time.Second); err != nil {
+	job, _ := q.Claim(ctx, 30*time.Second)
+	if err := q.Fail(ctx, id, job.Fence, 60*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if j, _ := q.Claim(ctx, 30*time.Second); j != nil {
@@ -97,10 +258,10 @@ func TestJobQueueFailBacksOff(t *testing.T) {
 func TestJobQueueErrorsOnMissing(t *testing.T) {
 	q := NewJobQueue(&seqIDs{}, (&movableClock{t: time.Unix(1, 0)}).now)
 	ctx := shared.WithTenant(context.Background(), "tenant-test")
-	if err := q.Complete(ctx, "nope"); !errors.Is(err, shared.ErrNotFound) {
+	if err := q.Complete(ctx, "nope", 1); !errors.Is(err, shared.ErrNotFound) {
 		t.Errorf("complete missing → ErrNotFound, got %v", err)
 	}
-	if err := q.Heartbeat(ctx, "nope", time.Second); !errors.Is(err, shared.ErrNotFound) {
+	if err := q.Heartbeat(ctx, "nope", 1, time.Second); !errors.Is(err, shared.ErrNotFound) {
 		t.Errorf("heartbeat missing → ErrNotFound, got %v", err)
 	}
 }
@@ -132,13 +293,14 @@ func TestJobQueueDepth(t *testing.T) {
 		t.Fatalf("agent depth = %d, want 2", d)
 	}
 	// A claimed (in-flight) job still counts toward depth.
-	_, _ = q.Claim(ctx, time.Minute, "agent")
+	claimedAgent, _ := q.Claim(ctx, time.Minute, "agent")
 	if d, _ := q.Depth(ctx, "agent"); d != 2 {
 		t.Fatalf("a claimed job must still count, agent depth = %d, want 2", d)
 	}
 	// Terminal jobs drop out: complete one agent job, dead-letter the recon job.
-	_ = q.Complete(ctx, a)
-	_ = q.Deadletter(ctx, b)
+	_ = q.Complete(ctx, a, claimedAgent.Fence)
+	claimedRecon, _ := q.Claim(ctx, time.Minute, "recon")
+	_ = q.Deadletter(ctx, b, claimedRecon.Fence)
 	if d, _ := q.Depth(ctx, "agent"); d != 1 {
 		t.Fatalf("a completed job must drop out, agent depth = %d, want 1", d)
 	}

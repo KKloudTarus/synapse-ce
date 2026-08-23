@@ -52,6 +52,7 @@ var classifiedEnv = map[string]string{
 	"SYNAPSE_K8S_INTEGRATION": "test-only: opts into the kind-based Kubernetes suite",
 	"SYNAPSE_EVAL_OUT":        "tooling-only: output path for the offline AI-triage evaluation harness",
 	"SYNAPSE_EVAL_SBOM":       "tooling-only: SBOM input for the offline evaluation harness",
+	"SYNAPSE_PROBE_SECRET":    "conformance-only: redaction marker injected into the sandbox probe by synapse-sandbox-check",
 
 	// Internal IPC. The parent process creates these inherited file descriptors when it spawns a
 	// sandboxed helper. An operator-supplied value would be meaningless or actively harmful, so they are

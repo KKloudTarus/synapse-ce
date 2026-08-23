@@ -49,10 +49,12 @@ func TestSandboxEgressConnectLog(t *testing.T) {
 	// (out-of-scope → the SYN is kernel-dropped, but the connect() ATTEMPT is still logged).
 	policy := ports.EgressPolicy{Rules: []ports.EgressRule{{Allow: true, Net: netip.MustParsePrefix("1.1.1.1/32")}}}
 	spec := ports.ToolSpec{
-		Name:         "sh",
-		Args:         []string{"-c", "curl -s --connect-timeout 4 -o /dev/null http://1.1.1.1/ ; curl -s --connect-timeout 4 -o /dev/null http://8.8.8.8:53/ ; true"},
-		EgressPolicy: &policy,
-		Timeout:      40 * time.Second,
+		Name:                "sh",
+		Args:                []string{"-c", "curl -s --connect-timeout 4 -o /dev/null http://1.1.1.1/ ; curl -s --connect-timeout 4 -o /dev/null http://8.8.8.8:53/ ; true"},
+		EgressPolicy:        &policy,
+		EgressExecutionKind: "recon",
+		EgressExecutionID:   "integration-connect-log",
+		Timeout:             40 * time.Second,
 	}
 	res, err := sb.Run(ctx, spec)
 	if err != nil {

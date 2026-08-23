@@ -16,6 +16,16 @@ import (
 // TestAcquireGitSandboxedEgress proves E15: `git clone` runs inside the sandbox with
 // egress restricted to the repo host, and still clones a real public repo. Needs git +
 // bubblewrap + CAP_NET_ADMIN (run the binary with sudo on the host).
+type authoritativeTestRunner struct {
+	ports.ToolRunner
+}
+
+func (r authoritativeTestRunner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult, error) {
+	spec.EgressExecutionKind = "recon"
+	spec.EgressExecutionID = "acquisition-integration"
+	return r.ToolRunner.Run(ctx, spec)
+}
+
 func TestAcquireGitSandboxedEgress(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
@@ -40,7 +50,7 @@ func TestAcquireGitSandboxedEgress(t *testing.T) {
 	}
 	sb.SetEgress(app)
 
-	acq := acquire.New().WithSandbox(sb, true)
+	acq := acquire.New().WithSandbox(authoritativeTestRunner{ToolRunner: sb}, true)
 	ws, err := acq.Acquire(ctx, ports.AcquireRequest{Kind: ports.TargetGit, Value: "https://github.com/octocat/Hello-World.git"})
 	if err != nil {
 		t.Fatalf("sandboxed git clone failed: %v", err)

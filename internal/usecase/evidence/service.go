@@ -114,6 +114,19 @@ func (s *Service) Seal(ctx context.Context, engagementID shared.ID, kind string,
 	return s.sealRef(ctx, engagementID, kind, content, "", createdBy)
 }
 
+// SealWithID appends a general evidence link with a caller-reserved identity, making
+// commit-ambiguous queue retries idempotent without weakening the engagement's linear chain.
+//
+// Matching is FIRST-COMMIT-AUTHORITATIVE, not byte-exact (exactContent=false): a redelivery under
+// the same reserved id/kind/ref/creator returns the already-sealed link even if its content differs.
+// This is deliberate for queued work whose payload may legitimately vary across a retry (e.g. a scan
+// re-run whose AI-triage telemetry differs) while the sealed, finding-linked evidence must stay
+// byte-stable to the first commit. Callers that need a divergent redelivery to fail closed instead
+// must seal with byte-exact reservation (see appendReserved's exactContent path).
+func (s *Service) SealWithID(ctx context.Context, evidenceID, engagementID shared.ID, kind string, content []byte, createdBy string) (evdom.Evidence, error) {
+	return s.sealRefWithID(ctx, evidenceID, engagementID, "", kind, content, "", createdBy, false)
+}
+
 // SealForFinding appends one sealed link bound to the chain head with a
 // FindingID link. Used by the promotion service to seal finding-linked
 // promotion application evidence.
@@ -141,11 +154,19 @@ func (s *Service) LookupSealedByID(ctx context.Context, engagementID, evidenceID
 // appendReserved appends a deterministic reserved evidence ID exactly once.
 // A retry compares the existing complete payload before accepting it; a
 // conflicting reuse fails closed without adding another chain link.
-func (s *Service) appendReserved(ctx context.Context, link evdom.Evidence) (evdom.Evidence, error) {
+func reservedEvidenceMatches(existing, requested evdom.Evidence, exactContent bool) bool {
+	return existing.FindingID == requested.FindingID &&
+		existing.Kind == requested.Kind &&
+		(!exactContent || string(existing.Content) == string(requested.Content)) &&
+		existing.StorageRef == requested.StorageRef &&
+		existing.CreatedBy == requested.CreatedBy
+}
+
+func (s *Service) appendReserved(ctx context.Context, link evdom.Evidence, exactContent bool) (evdom.Evidence, error) {
 	if existing, found, err := s.LookupSealedByID(ctx, link.EngagementID, link.ID); err != nil {
 		return evdom.Evidence{}, err
 	} else if found {
-		if existing.FindingID == link.FindingID && existing.Kind == link.Kind && string(existing.Content) == string(link.Content) && existing.StorageRef == link.StorageRef && existing.CreatedBy == link.CreatedBy {
+		if reservedEvidenceMatches(existing, link, exactContent) {
 			return existing, nil
 		}
 		return evdom.Evidence{}, fmt.Errorf("evidence id %s conflicts: %w", link.ID, shared.ErrConflict)
@@ -153,7 +174,7 @@ func (s *Service) appendReserved(ctx context.Context, link evdom.Evidence) (evdo
 	if err := s.store.Append(ctx, []evdom.Evidence{link}); err != nil {
 		if errors.Is(err, shared.ErrConflict) {
 			if existing, found, lookupErr := s.LookupSealedByID(ctx, link.EngagementID, link.ID); lookupErr == nil && found {
-				if existing.FindingID == link.FindingID && existing.Kind == link.Kind && string(existing.Content) == string(link.Content) && existing.StorageRef == link.StorageRef && existing.CreatedBy == link.CreatedBy {
+				if reservedEvidenceMatches(existing, link, exactContent) {
 					return existing, nil
 				}
 				return evdom.Evidence{}, fmt.Errorf("evidence id %s conflicts: %w", link.ID, shared.ErrConflict)
@@ -168,7 +189,7 @@ func (s *Service) appendReserved(ctx context.Context, link evdom.Evidence) (evdo
 // SealForFindingWithID appends a finding-linked evidence link with its caller-
 // reserved stable ID. It is used only by crash-recoverable application flows.
 func (s *Service) SealForFindingWithID(ctx context.Context, evidenceID, engagementID, findingID shared.ID, kind string, content []byte, storageRef, createdBy string) (evdom.Evidence, error) {
-	return s.sealReserved(ctx, evidenceID, engagementID, findingID, kind, content, storageRef, createdBy)
+	return s.sealRefWithID(ctx, evidenceID, engagementID, findingID, kind, content, storageRef, createdBy, true)
 }
 
 // sealOnceContext domain-separates the deterministic reserved id an idempotency-keyed seal derives, so
@@ -177,9 +198,7 @@ const sealOnceContext = "synapse-evidence-seal-once:v1"
 
 // SealOnce appends one sealed link IDEMPOTENTLY on (engagementID, kind, idempotencyKey): it derives a
 // deterministic reserved evidence id from those three and seals exactly once, so a retry after a crash
-// between the seal and a caller's projection write returns the FIRST link and appends nothing (this is
-// how the detection ledger closes D3 — a detection can never be sealed into the chain twice). It reuses
-// the same crash-recoverable reserved-append path as SealForFindingWithID; there is no findingID.
+// between the seal and a caller's projection write returns the FIRST link and appends nothing.
 func (s *Service) SealOnce(ctx context.Context, engagementID shared.ID, kind, idempotencyKey string, content []byte, createdBy string) (evdom.Evidence, error) {
 	if engagementID.IsZero() {
 		return evdom.Evidence{}, fmt.Errorf("%w: seal-once needs an engagement", shared.ErrValidation)
@@ -187,14 +206,9 @@ func (s *Service) SealOnce(ctx context.Context, engagementID shared.ID, kind, id
 	if kind == "" || idempotencyKey == "" {
 		return evdom.Evidence{}, fmt.Errorf("%w: seal-once needs a kind and an idempotency key", shared.ErrValidation)
 	}
-	return s.sealReserved(ctx, sealOnceID(engagementID, kind, idempotencyKey), engagementID, "", kind, content, "", createdBy)
+	return s.sealRefWithID(ctx, sealOnceID(engagementID, kind, idempotencyKey), engagementID, "", kind, content, "", createdBy, true)
 }
 
-// sealOnceID is the deterministic reserved evidence id for a SealOnce, over a domain-separated digest of
-// (engagement, kind, idempotency key) so the same logical seal always targets the same reserved row. Each
-// component is LENGTH-PREFIXED (not just separator-delimited): idempotencyKey is a wire-supplied detection
-// id, so a crafted value containing the separator byte must not be able to alias another (engagement, kind,
-// key) tuple's reserved id.
 func sealOnceID(engagementID shared.ID, kind, idempotencyKey string) shared.ID {
 	h := sha256.New()
 	var lenbuf [8]byte
@@ -210,10 +224,7 @@ func sealOnceID(engagementID shared.ID, kind, idempotencyKey string) shared.ID {
 	return shared.ID(hex.EncodeToString(h.Sum(nil)))
 }
 
-// sealReserved appends a caller-reserved stable evidence id exactly once, re-chaining on a concurrent
-// head advance and returning the existing link (payload-checked) on a reserved-id conflict — the shared
-// crash-recoverable path behind SealForFindingWithID and SealOnce.
-func (s *Service) sealReserved(ctx context.Context, evidenceID, engagementID, findingID shared.ID, kind string, content []byte, storageRef, createdBy string) (evdom.Evidence, error) {
+func (s *Service) sealRefWithID(ctx context.Context, evidenceID, engagementID, findingID shared.ID, kind string, content []byte, storageRef, createdBy string, exactContent bool) (evdom.Evidence, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return evdom.Evidence{}, err
@@ -221,7 +232,8 @@ func (s *Service) sealReserved(ctx context.Context, evidenceID, engagementID, fi
 		if existing, found, err := s.LookupSealedByID(ctx, engagementID, evidenceID); err != nil {
 			return evdom.Evidence{}, err
 		} else if found {
-			if existing.FindingID == findingID && existing.Kind == kind && string(existing.Content) == string(content) && existing.StorageRef == storageRef && existing.CreatedBy == createdBy {
+			requested := evdom.Evidence{FindingID: findingID, Kind: kind, Content: content, StorageRef: storageRef, CreatedBy: createdBy}
+			if reservedEvidenceMatches(existing, requested, exactContent) {
 				return existing, nil
 			}
 			return evdom.Evidence{}, fmt.Errorf("evidence id %s conflicts: %w", evidenceID, shared.ErrConflict)
@@ -231,7 +243,7 @@ func (s *Service) sealReserved(ctx context.Context, evidenceID, engagementID, fi
 			return evdom.Evidence{}, fmt.Errorf("evidence head: %w", err)
 		}
 		link := evdom.Evidence{ID: evidenceID, EngagementID: engagementID, FindingID: findingID, Kind: kind, Content: content, StorageRef: storageRef, PreviousHash: prev, CreatedBy: createdBy, CreatedAt: s.clock.Now()}.Seal()
-		ev, err := s.appendReserved(ctx, link)
+		ev, err := s.appendReserved(ctx, link, exactContent)
 		if err == nil {
 			return ev, nil
 		}

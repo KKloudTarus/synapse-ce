@@ -31,7 +31,10 @@ func (c connectorStub) Evaluate(_ context.Context, inv cloudposture.Inventory) (
 	return cloudposture.Evaluate(inv)
 }
 
-type executorStub struct{ connector ports.CloudConnector }
+type executorStub struct {
+	connector ports.CloudConnector
+	observe   func(ports.CloudScope)
+}
 
 type operationExecutorStub struct{ operation ports.CloudOperation }
 
@@ -43,6 +46,9 @@ func (s operationExecutorStub) EnumerateCloud(ctx context.Context, scope ports.C
 }
 
 func (s executorStub) EnumerateCloud(ctx context.Context, scope ports.CloudScope) (cloudposture.Inventory, []cloudposture.CoverageIssue, error) {
+	if s.observe != nil {
+		s.observe(scope)
+	}
 	return s.connector.Enumerate(ctx, scope)
 }
 
@@ -226,7 +232,11 @@ func TestDurableSubmitAndRunJob(t *testing.T) {
 	inventory := cloudposture.Inventory{Provider: cloudposture.ProviderAWS, Complete: true, Resources: []cloudposture.Resource{{Provider: cloudposture.ProviderAWS, ID: "account", Kind: asset.KindCloudAccount}}}
 	svc, _ := cspm.NewService(map[cloudposture.Provider]ports.CloudConnector{cloudposture.ProviderAWS: connectorStub{inventory: inventory}}, assets, findings, engagements, audit, clockStub{now})
 	svc.SetEvidenceSealer(evidenceStub{})
-	svc.SetSandboxExecutor(executorStub{connector: connectorStub{inventory: inventory}})
+	var observedScope ports.CloudScope
+	svc.SetSandboxExecutor(executorStub{
+		connector: connectorStub{inventory: inventory},
+		observe:   func(scope ports.CloudScope) { observedScope = scope },
+	})
 	runs := memory.NewCloudRunStore()
 	ids := &idsStub{}
 	queue := memory.NewJobQueue(ids, func() time.Time { return now })
@@ -234,7 +244,7 @@ func TestDurableSubmitAndRunJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc.SetRunLock(memory.NewRunLock())
-	run, err := svc.Submit(ctx, cspm.RunInput{TenantID: "tenant", EngagementID: "eng", Actor: "operator", Scopes: []ports.CloudScope{{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "organization/o-1", CredentialRef: "aws"}}})
+	run, err := svc.Submit(ctx, cspm.RunInput{TenantID: "tenant", EngagementID: "eng", Actor: "operator", Scopes: []ports.CloudScope{{EngagementID: "eng", Provider: cloudposture.ProviderAWS, Root: "organization/o-1", CredentialRef: "aws", EgressExecutionKind: "caller-controlled", EgressExecutionID: "caller-controlled"}}})
 	if err != nil || run.Status != cloudposture.RunQueued {
 		t.Fatalf("run=%#v err=%v", run, err)
 	}
@@ -245,12 +255,15 @@ func TestDurableSubmitAndRunJob(t *testing.T) {
 	if err := svc.RunJob(ctx, job.Payload); err != nil {
 		t.Fatal(err)
 	}
+	if observedScope.EgressExecutionKind != "cspm" || observedScope.EgressExecutionID != run.ID.String() {
+		t.Fatalf("execution identity = %q/%q, want cspm/%s", observedScope.EgressExecutionKind, observedScope.EgressExecutionID, run.ID.String())
+	}
 	finished, err := svc.GetRun(ctx, "tenant", run.ID)
 	if err != nil || finished.Status != cloudposture.RunSucceeded || finished.FinishedAt == nil {
 		t.Fatalf("finished=%#v err=%v", finished, err)
 	}
 	payload := string(job.Payload)
-	if strings.Contains(payload, "secret") || !strings.Contains(payload, "credential_ref") {
+	if strings.Contains(payload, "secret") || strings.Contains(payload, "caller-controlled") || !strings.Contains(payload, "credential_ref") {
 		t.Fatalf("unsafe CSPM job payload: %s", payload)
 	}
 }

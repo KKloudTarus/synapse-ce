@@ -35,6 +35,13 @@ func Compile(scope engagement.Scope) ports.EgressPolicy {
 	return p
 }
 
+// Compiler adapts Compile to the inward-facing policy compiler port.
+type Compiler struct{}
+
+func (Compiler) Compile(scope engagement.Scope) ports.EgressPolicy {
+	return Compile(scope)
+}
+
 // addTarget compiles one target into a concrete rule (or a pending-domain entry).
 func addTarget(p *ports.EgressPolicy, allow bool, t engagement.Target) {
 	v := strings.TrimSpace(t.Value)

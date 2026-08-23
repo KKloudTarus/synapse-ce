@@ -36,8 +36,8 @@ var credsRE = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@`)
 
 // Acquirer prepares isolated workspaces for SCA targets.
 type Acquirer struct {
-	sandbox           ports.ToolRunner // when set, git clone + image pull ALWAYS run sandboxed (F4)
-	egressScoped      bool             // when true, scope egress to the repo/registry host; else host-net sandbox
+	sandbox           ports.ToolRunner // when set, git clone + image pull always use the hardened runner
+	egressScoped      bool             // when true, request scoped egress; false requests legacy host-net and is rejected by the hardened runner
 	imageTool         string           // crane (go-containerregistry CLI) binary for daemonless image pulls
 	maxWorkspaceBytes int64            // prepared-workspace size cap; <=0 ⇒ the MaxWorkspaceBytes default
 	materializeRootFS bool             // when true, an image pull also assembles the layers into a walkable rootfs
@@ -104,7 +104,7 @@ func (a *Acquirer) sandboxNet(allowHosts []string) (*ports.EgressPolicy, bool) {
 	if a.egressScoped {
 		return &ports.EgressPolicy{AllowDomains: allowHosts}, false
 	}
-	return nil, true // HostNetwork: sandboxed, host net, no egress scoping
+	return nil, true // compatibility request; the hardened runner rejects host networking before execution
 }
 
 var _ ports.Acquirer = (*Acquirer)(nil)
@@ -333,6 +333,9 @@ func (a *Acquirer) acquireGit(ctx context.Context, url, ref, baseRef, baseCommit
 	}
 	if baseCommit != "" && !gitCommitRE.MatchString(baseCommit) {
 		return nil, fmt.Errorf("%w: invalid git base commit", shared.ErrValidation)
+	}
+	if a.sandbox != nil && !a.egressScoped {
+		return nil, fmt.Errorf("%w: remote git acquisition requires authoritative signed execution grants", shared.ErrValidation)
 	}
 	dir, err := os.MkdirTemp("", "synapse-ws-*")
 	if err != nil {
@@ -583,6 +586,9 @@ func (a *Acquirer) acquireImage(ctx context.Context, ref string) (*ports.Workspa
 	}
 	if err := validateImageRef(ref); err != nil {
 		return nil, err
+	}
+	if a.sandbox != nil && !a.egressScoped {
+		return nil, fmt.Errorf("%w: remote image acquisition requires authoritative signed execution grants", shared.ErrValidation)
 	}
 	dir, err := os.MkdirTemp("", "synapse-ws-*")
 	if err != nil {

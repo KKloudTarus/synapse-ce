@@ -17,7 +17,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -26,6 +25,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/httpapi"
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
+	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
@@ -34,14 +34,12 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/fptriagecache"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastchecks"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/dastengine"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
 	egressinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/egress"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/egressbroker"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetca"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
@@ -55,55 +53,30 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourcesnippet"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/bincat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gomodgraph"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/govulncheck"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gradleresolve"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/grype"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ignorefile"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarchecksum"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarhash"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jarlicense"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jsimports"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jsresolve"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/jvmreach"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/license"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensefile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensemeta"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/manifest"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/manifestresolve"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavencoord"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/mavenresolve"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/misconfig"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/msi"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/npmresolve"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/nvd"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ospkg"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/osv"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownadvisory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ownsbom"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/pyimports"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/qualityprofile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/risk"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/secretscan"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/srcimports"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/syft"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/taintcallgraph"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/vexfile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/vulnerabilityprovider"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/binregistry"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
+	"github.com/KKloudTarus/synapse-ce/internal/platform/executionmode"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/httpserver"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/jobs"
@@ -127,6 +100,7 @@ import (
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
 	egresspolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/egress"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/egressgrant"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
@@ -142,7 +116,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetrolloutuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/fptriage"
 	identitybff "github.com/KKloudTarus/synapse-ce/internal/usecase/identitybff"
 	identityuc "github.com/KKloudTarus/synapse-ce/internal/usecase/identityuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/jsreach"
@@ -238,10 +211,17 @@ func main() {
 		os.Exit(1)
 	}
 	log := logging.New(cfg.LogLevel)
-	log.Info("starting synapse-api", "env", cfg.Environment, "single_tenant", cfg.SingleTenant)
-	if err := cfg.ValidateSandboxPosture(); err != nil {
-		log.Error("sandbox posture invalid", "err", err)
+	toolExecution, err := cfg.ResolveToolExecution(config.ProcessRoleAPI)
+	if err != nil {
+		log.Error("tool execution posture invalid", "err", err)
 		os.Exit(1)
+	}
+	log.Info("starting synapse-api", "env", cfg.Environment, "single_tenant", cfg.SingleTenant, "tool_execution", toolExecution)
+	if toolExecution == config.ToolExecutionInProcess {
+		if err := cfg.ValidateSandboxPosture(); err != nil {
+			log.Error("sandbox posture invalid", "err", err)
+			os.Exit(1)
+		}
 	}
 	if err := cfg.ValidateMigrationPosture(); err != nil {
 		log.Error("database migration posture invalid", "err", err)
@@ -249,6 +229,14 @@ func main() {
 	}
 	if err := cfg.ValidateOIDCPosture(); err != nil {
 		log.Error("OIDC posture invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateEgressGrantPosture(config.ProcessRoleAPI); err != nil {
+		log.Error("egress grant posture invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateNetworkExecutionPosture(config.ProcessRoleAPI); err != nil {
+		log.Error("network execution posture invalid", "err", err)
 		os.Exit(1)
 	}
 
@@ -260,7 +248,10 @@ func main() {
 
 	clock := idgen.SystemClock{}
 	ids := idgen.RandomID{}
-	acquirer := acquire.New().WithMaxWorkspaceBytes(cfg.MaxWorkspaceBytes).WithImageRootFS(cfg.ImageRootFSEnabled).WithComparisonDepth(cfg.ProjectGitComparisonDepth)
+	var acquirer ports.Acquirer
+	if toolExecution == config.ToolExecutionDispatchOnly {
+		acquirer = executionmode.DispatchOnly{}
+	}
 
 	// Persistence: PostgreSQL when configured, else file + in-memory (dev).
 	var databasePool *pgxpool.Pool
@@ -702,85 +693,26 @@ func main() {
 		log.Info("external RFC-3161 anchoring enabled", "tsa", cfg.TSAURL)
 	}
 	evidenceService.SetTimestamper(tsaClient, timestampStore)
-	// SCA tool sandboxing (closes audit finding D2): syft + grype are offline, so
-	// when the sandbox is enabled they run in an ISOLATED sandbox (read-only FS, no
-	// network, dropped caps) – no egress/vault needed. Build/parse output is unchanged.
-	// Best-effort: if bubblewrap is unavailable, syft/grype degrade to a direct exec.
-	syftGen := syft.New(cfg.SyftBin)
-	grypeSrc := grype.New(cfg.GrypeBin, cfg.GrypeDBDir)
-	var scaSandbox *sandbox.Runner // hoisted: shared by syft/grype/acquisition AND the govulncheck reachability builder
-	if cfg.SandboxEnabled {
-		sb, serr := sandbox.NewRunner(cfg.ScanTimeout, cfg.ReconMaxOutput, cfg.SandboxMemMax, cfg.SandboxPidsMax)
-		if serr != nil {
-			// Fail CLOSED (re-audit fix): the operator explicitly asked for the sandbox
-			// (SYNAPSE_SANDBOX_ENABLED=true); if it cannot be built we must NOT silently
-			// degrade to a direct host exec of syft/grype/git/crane. Refuse to start –
-			// mirrors the worker (which os.Exit's) and the prod-vault-key hardening.
-			log.Error("SYNAPSE_SANDBOX_ENABLED is set but the sandbox is unavailable – refusing to run SCA/acquisition UNSANDBOXED; install bubblewrap or unset the flag", "err", serr)
+	var scaSandbox *sandbox.Runner
+	var syftGen *syft.Generator
+	var sbomGen ports.SBOMGenerator
+	var detectionSources []ports.DetectionSource
+	if toolExecution == config.ToolExecutionDispatchOnly {
+		dispatchOnly := executionmode.DispatchOnly{}
+		sbomGen = dispatchOnly
+		detectionSources = []ports.DetectionSource{dispatchOnly}
+		log.Info("SCA execution adapters omitted from dispatch-only API")
+	} else {
+		execution, eerr := scacompose.BuildExecution(cfg, log, advisoryStore)
+		if eerr != nil {
+			log.Error(eerr.Error())
 			os.Exit(1)
 		}
-		scaSandbox = sb
-		// syft/grype have no EgressPolicy on their spec → isolated netns, even though the
-		// same runner is egress-capable; only the git clone spec carries a policy.
-		scaSandbox.SetBinaryRegistry(binregistry.New(cfg.ToolHashes, true)) // refuse a replaced syft/grype (TOFU)
-		syftGen = syftGen.WithRunner(scaSandbox)
-		grypeSrc = grypeSrc.WithRunner(scaSandbox)
-		log.Info("SCA tools (syft/grype) run sandboxed-isolated")
-		// acquisition (git/image) ALWAYS runs sandboxed – never a direct exec. When
-		// kernel egress is usable here (privileged), scope egress to the repo/registry
-		// host; otherwise the fetch runs host-net but STILL fully sandboxed
-		// (fs/seccomp/caps/cgroup), removing the direct-exec RCE surface.
-		egressScoped := false
-		if app, aerr := egressinfra.NewApplier(); aerr == nil {
-			pctx, pcancel := context.WithTimeout(context.Background(), 10*time.Second)
-			perr := app.Probe(pctx)
-			pcancel()
-			if perr == nil {
-				scaSandbox.SetEgress(app)
-				egressScoped = true
-			}
-		}
-		acquirer = acquirer.WithSandbox(scaSandbox, egressScoped)
-		if egressScoped {
-			log.Info("acquisition (git/image) runs sandboxed + egress-scoped to the repo/registry host")
-		} else {
-			log.Info("acquisition (git/image) runs sandboxed (host-net; kernel egress scoping unavailable here)")
-		}
-	} else {
-		log.Warn("SANDBOX DISABLED (SYNAPSE_SANDBOX_ENABLED is off) – syft/grype/git/crane run UNSANDBOXED with NO seccomp/rootfs/egress/cgroup containment; dev only, never production")
-	}
-	// SBOM producer select: default Syft (pinned binary, full coverage + CycloneDX
-	// dep-graph edges) or the detection-independent owned parsers. ownsbom is pure-Go (no exec) so it
-	// needs no sandbox; its SBOM is components-only (no edges) over Tier-1 ecosystems – which OSV and
-	// grype both accept (grype reconstructs a CycloneDX from the components when there is no Raw).
-	var sbomGen ports.SBOMGenerator = syftGen
-	switch cfg.SBOMProducer {
-	case "", "syft":
-		log.Info("SBOM producer = syft (pinned binary; full ecosystem coverage + CycloneDX dep-graph edges)") // default, wired above
-	case "ownsbom":
-		reg, rerr := ownsbom.DefaultRegistry()
-		if rerr != nil {
-			log.Error("build ownsbom SBOM producer", "err", rerr)
-			os.Exit(1)
-		}
-		sbomGen = reg
-		log.Info("SBOM producer = ownsbom (detection-independent owned parsers; no third-party scanner; components-only over Tier-1 ecosystems)")
-	default:
-		log.Error("invalid SYNAPSE_SBOM_PRODUCER (want 'syft' or 'ownsbom')", "value", cfg.SBOMProducer)
-		os.Exit(1)
-	}
-	// Detection sources: Grype (offline DB) always; live OSV unless SYNAPSE_OFFLINE (air-gapped /
-	// fast path – no per-scan network egress). The owned advisory store is opt-in
-	// and offline, so it runs in both modes (detection independence).
-	detectionSources := []ports.DetectionSource{grypeSrc}
-	if !cfg.Offline {
-		detectionSources = append([]ports.DetectionSource{osv.New(cfg.OSVBaseURL, nil)}, detectionSources...)
-	} else {
-		log.Info("SYNAPSE_OFFLINE: live OSV source disabled; detecting with offline sources only", "grype", true, "owned_advisory", cfg.OwnedAdvisoryEnabled)
-	}
-	if cfg.OwnedAdvisoryEnabled {
-		detectionSources = append(detectionSources, ownadvisory.New(advisoryStore))
-		log.Info("owned advisory DetectionSource ENABLED (offline match against the owned store, alongside OSV/Grype) – ensure the store is populated; an empty store yields no findings until the advisory ingester runs")
+		scaSandbox = execution.Sandbox
+		syftGen = execution.SyftGen
+		acquirer = execution.Acquirer
+		sbomGen = execution.SBOMGen
+		detectionSources = execution.Sources
 	}
 	scaService := scauc.NewService(repo, findingRepo, scanRepo, scanResultStore, scanJobStore, scanRunStore, evidenceService, ids, prov, clock, auditLog, shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, acquirer,
 		enry.New(), sbomGen,
@@ -800,219 +732,14 @@ func main() {
 	scaService.SetImportedSBOMStore(importedSBOMStore)
 	// Record scanned image digests so the fleet cluster agent can correlate running images (#446).
 	scaService.SetScannedImageRecorder(scannedImageStore)
-	scaService.SetGateDecoder(qualityprofile.LoadGateBytes)
-	scaService.SetSBOMEnricher(manifest.New())
-	scaService.SetArtifactCataloger(msi.New())           // recover Windows Installer (.msi) product identity into the SBOM
-	scaService.SetMavenCoordResolver(mavencoord.New())   // recover real Maven coords from JAR pom.properties (offline) before license lookup
-	scaService.SetJarChecksumResolver(jarchecksum.New()) // capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
-	// SHA-1 coordinate recovery for shaded/metadata-less JARs: offline trivy-java-db-format
-	// index first (if configured), online Maven Central as the fallback. Best-effort.
-	var jhResolvers []ports.JarHashResolver
-	if cfg.JarHashDBPath != "" {
-		if off, err := jarhash.NewOffline(cfg.JarHashDBPath); err != nil {
-			log.Warn("JAR SHA-1 offline DB not usable – falling back to online only if enabled", "path", cfg.JarHashDBPath, "err", err)
-		} else {
-			defer func() { _ = off.Close() }() // release the read-only DB handle at shutdown
-			jhResolvers = append(jhResolvers, off)
-			log.Info("JAR SHA-1 coordinate recovery: OFFLINE index ENABLED (air-gap; no rate limit)", "path", cfg.JarHashDBPath)
-		}
+	configureCleanup := func() {}
+	if toolExecution != config.ToolExecutionDispatchOnly {
+		configureCleanup = scacompose.Configure(scaService, cfg, scaSandbox, log)
 	}
-	if cfg.JarHashOnlineEnabled {
-		// An egress call to Maven Central; on the sandbox it needs search.maven.org in the egress allow-list.
-		jhResolvers = append(jhResolvers, jarhash.New(cfg.JarHashBaseURL, nil))
-		log.Info("JAR SHA-1 coordinate recovery: ONLINE Maven Central ENABLED (best-effort; fallback after offline)")
-	}
-	if len(jhResolvers) > 0 {
-		scaService.SetJarHashResolver(jarhash.NewChain(jhResolvers...))
-	}
-	// Backfill unknown vuln severities from NVD CVSS (best-effort; set SYNAPSE_NVD_API_KEY for throughput).
-	scaService.SetSeverityEnricher(nvd.New(cfg.NVDAPIURL, cfg.NVDAPIKey, nil).WithBudget(cfg.NVDBudget))
-	scaService.SetIgnoreUnfixed(cfg.IgnoreUnfixed) // SYNAPSE_IGNORE_UNFIXED: suppress no-upstream-fix vulns (distro-noise reducer)
-	// Offline license-text fallback: JAR-embedded licenses (jarlicense) + workspace LICENSE
-	// files for every ecosystem.
-	scaService.SetLicenseFileResolver(licensefile.NewChain(jarlicense.New(), licensefile.New()))
-	// Transitive Go dependency edges via `go mod graph`, opt-in + best-effort. Sandboxed when the
-	// SCA sandbox is on (low-risk: go mod graph only reads go.mod files, never compiles); a non-Go target /
-	// no module cache adds no edges and never fails the scan.
-	if cfg.GoModGraphEnabled {
-		gmg := gomodgraph.New(cfg.GoBin)
-		if scaSandbox != nil {
-			gmg = gmg.WithRunner(scaSandbox)
-		} else {
-			// dev only (prod attaches the sandbox above): the direct path still pins GOPROXY=off +
-			// GOTOOLCHAIN=local, but runs `go` outside the bwrap confinement – make that explicit.
-			log.Warn("go mod graph runs UNSANDBOXED (SCA sandbox off; dev only)")
-		}
-		scaService.SetGraphResolver(gmg)
-		log.Info("Go transitive-edge resolution ENABLED (go mod graph; best-effort, sandboxed when available)")
-	}
-	// Maven full-tree resolution (`mvn dependency:list`): resolves managed versions + the transitive tree
-	// a from-source pom.xml scan can't, so Maven projects stop under-reporting. HIGHER RISK than go mod
-	// graph – it RUNS the Maven toolchain (POM + parent-POM + plugin resolution) over UNTRUSTED project
-	// config and reaches the Maven repo. The SERVER therefore enables it ONLY when the SCA sandbox is
-	// present (egress confined to Maven Central) and FAILS CLOSED otherwise – it never host-execs mvn over
-	// an untrusted target. Direct-exec is left to synapse-cli, the trusted-local dogfood path. Opt-in.
-	if cfg.MavenResolveEnabled {
-		if scaSandbox == nil {
-			log.Warn("SYNAPSE_MAVEN_RESOLVE_ENABLED ignored: it requires the SCA sandbox (mvn would otherwise run untrusted POM config on the host). Enable the sandbox to use it.")
-		} else {
-			scaService.SetMavenResolver(mavenresolve.New(cfg.MvnBin).WithRunner(scaSandbox).
-				WithRepoHosts(cfg.MavenRepoHosts).WithLocalRepo(cfg.MavenLocalRepo))
-			log.Info("Maven transitive-tree resolution ENABLED (mvn dependency:list, sandbox-confined; best-effort)", "extra_repo_hosts", len(cfg.MavenRepoHosts), "persistent_cache", cfg.MavenLocalRepo != "")
-		}
-	}
-	// Gradle full-tree resolution (`gradle dependencies`): same gap as Maven, but evaluating build.gradle
-	// runs arbitrary build logic – so the SERVER enables it ONLY with the SCA sandbox and FAILS CLOSED
-	// otherwise (never host-execs gradle over an untrusted target). A pinned gradle, never./gradlew.
-	if cfg.GradleResolveEnabled {
-		if scaSandbox == nil {
-			log.Warn("SYNAPSE_GRADLE_RESOLVE_ENABLED ignored: it requires the SCA sandbox (gradle would otherwise run untrusted build logic on the host). Enable the sandbox to use it.")
-		} else {
-			scaService.SetGradleResolver(gradleresolve.New(cfg.GradleBin).WithRunner(scaSandbox).
-				WithRepoHosts(cfg.MavenRepoHosts).WithGradleHome(cfg.GradleHome))
-			log.Info("Gradle transitive-tree resolution ENABLED (gradle dependencies, sandbox-confined; best-effort)", "extra_repo_hosts", len(cfg.MavenRepoHosts), "persistent_cache", cfg.GradleHome != "")
-		}
-	}
-	// npm resolution for a lockfile-less package.json (`npm install --package-lock-only --ignore-scripts`):
-	// reaches the registry over an untrusted manifest, so the SERVER enables it ONLY with the SCA sandbox
-	// and FAILS CLOSED otherwise (never host-execs npm over an untrusted target). --ignore-scripts + a
-	// throwaway copy mean no project code runs and the source is never mutated. Opt-in.
-	if cfg.NPMResolveEnabled {
-		if scaSandbox == nil {
-			log.Warn("SYNAPSE_NPM_RESOLVE_ENABLED ignored: it requires the SCA sandbox (npm would otherwise reach the network over an untrusted manifest on the host). Enable the sandbox to use it.")
-		} else {
-			scaService.SetNPMResolver(npmresolve.New(cfg.NPMBin).WithRunner(scaSandbox).WithRegistryHosts(cfg.NPMRegistryHosts))
-			log.Info("npm resolution ENABLED (npm install --package-lock-only, sandbox-confined; best-effort)", "extra_registry_hosts", len(cfg.NPMRegistryHosts))
-		}
-	}
-	// Lockfile-less manifest resolvers (composer.json / Gemfile / pyproject.toml): each runs its ecosystem
-	// tool over an untrusted manifest and reaches the registry, so the SERVER enables them ONLY with the SCA
-	// sandbox and FAILS CLOSED otherwise. Lock-only + no-scripts + a throwaway copy mean no project code runs.
-	if cfg.ManifestResolveEnabled {
-		if scaSandbox == nil {
-			log.Warn("SYNAPSE_MANIFEST_RESOLVE_ENABLED ignored: it requires the SCA sandbox (composer/bundle/poetry would otherwise reach the network over an untrusted manifest on the host). Enable the sandbox to use it.")
-		} else {
-			binOf := map[string]string{"composer": cfg.ComposerBin, "gem": cfg.BundleBin, "poetry": cfg.PoetryBin}
-			for _, eco := range []string{"composer", "gem", "poetry"} {
-				scaService.AddManifestResolver(manifestresolve.New(eco, binOf[eco]).WithRunner(scaSandbox).WithRegistryHosts(cfg.ManifestRegistryHosts))
-			}
-			log.Info("lockfile-less manifest resolution ENABLED (composer/gem/poetry, sandbox-confined; best-effort)", "extra_registry_hosts", len(cfg.ManifestRegistryHosts))
-		}
-	}
-	if cfg.JVMReachabilityEnabled {
-		// Read-only bytecode parsing (no exec, no ToolRunner needed) – tags JVM components reachable/
-		// unreferenced from the app's compiled closure. Best-effort; a not-built target tags nothing.
-		scaService.SetJVMReachability(jvmreach.New())
-		log.Info("coarse JVM class-reachability ENABLED (deprioritizes findings on unreferenced deps)")
-	}
-	if cfg.SASTEnabled {
-		scaService.SetSASTAnalyzer(sast.New()) // deterministic pattern-SAST in the scan pipeline
-		log.Info("pattern-SAST ENABLED (weak crypto / hardcoded secrets / insecure config)")
-	}
-	if cfg.SecretScanEnabled {
-		scaService.SetSecretScanner(secretscan.New()) // deterministic, redacted secret scan in the scan pipeline
-		log.Info("secret scanning ENABLED (hardcoded credentials; matches redacted)")
-	}
-	if cfg.ImageRootFSEnabled {
-		scaService.SetOSPackageCataloger(ospkg.New())         // owned dpkg/apk cataloging from the materialized image rootfs
-		scaService.SetInstalledPackageCataloger(bincat.New()) // owned Go-binary + Python dist-info cataloging from the rootfs
-		log.Info("image-rootfs cataloging ENABLED (dpkg + apk OS packages; Go binaries + Python dist-info)")
-	}
-	if cfg.MisconfigEnabled {
-		// Helm chart rendering shells out `helm template` over an UNTRUSTED chart; like the maven/gradle
-		// resolvers it must be sandbox-confined on the API host (a crafted chart's Sprig getHostByName is an
-		// SSRF vector). Wire it through the SCA sandbox when present; otherwise leave Helm rendering OFF.
-		mc := misconfig.New()
-		helmMode := "Helm rendering OFF (no SCA sandbox; a chart runs untrusted templates on the host)"
-		if scaSandbox != nil {
-			mc = mc.WithHelmRunner(scaSandbox)
-			helmMode = "Helm charts rendered sandboxed (egress-denied)"
-		}
-		scaService.SetMisconfigScanner(mc) // deterministic IaC/config misconfig scan in the scan pipeline
-		log.Info("misconfig scanning ENABLED (Dockerfile + Kubernetes + Terraform); " + helmMode)
-	}
-	// AI false-positive triage in the scan pipeline (opt-in, best-effort, PROPOSE-ONLY). Independent of
-	// the agent: it critiques production-scope source findings. Single-model output is advisory-only; a
-	// distinct verifier is required before the deterministic high-risk floor may grant a gate exemption.
-	if cfg.FPTriageEnabled && strings.TrimSpace(cfg.FPTriageModel) != "" {
-		scaService.SetFPTriageMode(cfg.FPTriageMode)
-		scaService.SetFPTriageMaxFindings(cfg.FPTriageMaxFindings)
-		scaService.SetFPTriageIndependence(cfg.FPTriageIndependence)
-		scaService.SetFPTriageAlertPolicy(cfg.FPTriageAlertMinSamples, cfg.FPTriageDisagreeBaseBPS,
-			cfg.FPTriageExemptBaseBPS, cfg.FPTriageParseFailBaseBPS, cfg.FPTriageAlertDeltaBPS)
-		if tllm, terr := openai.New(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.FPTriageModel, cfg.LLMTimeout); terr != nil {
-			log.Warn("AI false-positive triage DISABLED (LLM unavailable)", "err", terr)
-		} else {
-			coord := fptriage.NewWithIdentity(tllm, cfg.FPTriageProvider, cfg.FPTriageModel).
-				WithConcurrency(cfg.FPTriageConcurrency).
-				WithOperationalPolicy(ports.FPTriageOperationalPolicy{
-					MaxTokens: cfg.FPTriageMaxTokens, MaxCostMicroUSD: cfg.FPTriageMaxCostMicroUSD,
-					ProposerInputMicroUSDPerMillion:  cfg.FPTriageProposerInputRate,
-					ProposerOutputMicroUSDPerMillion: cfg.FPTriageProposerOutputRate,
-					VerifierInputMicroUSDPerMillion:  cfg.FPTriageVerifierInputRate,
-					VerifierOutputMicroUSDPerMillion: cfg.FPTriageVerifierOutputRate,
-					CircuitFailureThreshold:          cfg.FPTriageCircuitFailures, CircuitCooldown: cfg.FPTriageCircuitCooldown,
-				})
-			mode := "advisory-only (distinct verifier required for gate exemption)"
-			if strings.TrimSpace(cfg.VerifierModel) != "" {
-				if !agent.IndependentLLMs(cfg.FPTriageProvider, cfg.FPTriageModel, cfg.VerifierProvider, cfg.VerifierModel, cfg.FPTriageIndependence) {
-					log.Warn("AI FP-triage verifier independence cannot be established; triage remains advisory-only",
-						"proposer_provider", cfg.FPTriageProvider, "proposer_model", cfg.FPTriageModel,
-						"verifier_provider", cfg.VerifierProvider, "verifier_model", cfg.VerifierModel,
-						"independence_policy", cfg.FPTriageIndependence)
-				} else if vllm, verr := openai.New(cfg.VerifierBaseURL, cfg.VerifierAPIKey, cfg.VerifierModel, cfg.LLMTimeout); verr == nil {
-					coord.WithIndependentVerifier(vllm, cfg.VerifierProvider, cfg.VerifierModel, ports.AIIndependencePolicy(cfg.FPTriageIndependence))
-					if coord.VerifierModel() != "" {
-						mode = "verified by " + coord.VerifierProvider() + "/" + coord.VerifierModel()
-					}
-				} else {
-					log.Warn("AI FP-triage verifier unavailable; triage remains advisory-only", "err", verr)
-				}
-			}
-			triager := fptriage.NewTriager(coord, func(root string) ports.SourceSnippetReader {
-				return sourcesnippet.Reader{Root: root}
-			})
-			if cfg.ScanCacheEnabled {
-				if dir := cfg.ResolveScanCacheDir(); dir != "" {
-					cacheDir := filepath.Join(dir, "ai-triage")
-					triager.WithCache(fptriagecache.New(cacheDir), scauc.EvaluationPolicyVersion())
-					log.Info("AI false-positive triage cache ENABLED", "dir", cacheDir)
-				}
-			}
-			scaService.SetFPTriage(triager)
-			log.Info("AI false-positive triage ENABLED ("+mode+")", "model", cfg.FPTriageModel,
-				"triage_mode", cfg.FPTriageMode, "max_findings", cfg.FPTriageMaxFindings, "max_tokens", cfg.FPTriageMaxTokens,
-				"max_cost_micro_usd", cfg.FPTriageMaxCostMicroUSD, "concurrency", cfg.FPTriageConcurrency)
-		}
-	}
-	if cfg.SuppressionEnabled {
-		scaService.SetSuppressionLoader(ignorefile.New()) // repo-committed .synapseignore accepted-risk policy
-		log.Info("suppression ENABLED (.synapseignore; suppressed findings retained + surfaced)")
-	}
-	if cfg.VEXEnabled {
-		scaService.SetVEXLoader(vexfile.New()) // in-repo OpenVEX (.synapse.vex.json) accepted-risk assertions
-		log.Info("in-scan VEX ENABLED (.synapse.vex.json; not_affected/fixed gate-exempt, still reported + sealed)")
-	}
+	defer configureCleanup()
 	if cfg.ComplianceEnabled {
 		scaService.SetComplianceEnabled(true) // attach the AppSec-baseline benchmark (per-control PASS/FAIL)
 		log.Info("compliance report ENABLED (Synapse AppSec Baseline; deterministic, LLM-free)")
-	}
-	scaService.SetDBMaxAgeDays(cfg.DBMaxAgeDays) // warn on stale reference DBs (KEV/EPSS/vuln-DB); 0 disables
-	// Validate the configured detection priority once at startup: an invalid value would otherwise make
-	// EVERY API scan return 400. Warn + fall back to comprehensive rather than crash a long-running server.
-	detPriority := cfg.DetectionPriority
-	if detPriority != "" {
-		if _, err := scauc.NormalizeScanOptions(scauc.ScanOptions{Mode: scauc.ScanModeFull, DetectionPriority: detPriority}); err != nil {
-			log.Warn("invalid SYNAPSE_DETECTION_PRIORITY; falling back to comprehensive", "value", detPriority, "err", err)
-			detPriority = ""
-		}
-	}
-	scaService.SetDetectionPriority(detPriority) // server default (comprehensive|precise); the API scan path has no per-request priority
-	if cfg.ScanCacheEnabled {
-		if dir := cfg.ResolveScanCacheDir(); dir != "" {
-			scaService.SetSBOMCache(sbomcache.New(dir)) // content+version-addressed generated-SBOM cache
-			log.Info("SBOM cache ENABLED", "dir", dir)
-		}
 	}
 	aupService := aupuc.NewService(aupStore, auditLog, clock, cfg.AUPVersion)
 	exportService := exportuc.NewService(findingRepo, clock, buildinfo.App())
@@ -1069,47 +796,85 @@ func main() {
 		log.Error("recon guard init failed", "err", err)
 		os.Exit(1)
 	}
-	logBroker := logstream.NewBroker(0)
-	reconPool := jobs.NewPool(cfg.ReconConcurrency, cfg.ReconQueueSize)
-	defer reconPool.Shutdown(context.Background())
-	// Select the tool runner: the bubblewrap sandbox when enabled, else the plain
-	// argv ExecRunner. Fail closed if the sandbox is required but unavailable – never
-	// silently run unsandboxed (mirrors the prod-signing-seed hardening).
-	var reconRunner ports.ToolRunner = toolrunner.NewExecRunner(cfg.ReconTimeout, cfg.ReconMaxOutput)
-	egressLive := false // set when the sandbox can kernel-enforce scope egress
-	if cfg.SandboxEnabled {
-		sb, serr := sandbox.NewRunner(cfg.ReconTimeout, cfg.ReconMaxOutput, cfg.SandboxMemMax, cfg.SandboxPidsMax)
+	var egressGrantHandler http.Handler
+	if cfg.EgressGrantAuthorityAddr != "" {
+		seed, serr := signing.DecodeSeed(cfg.EgressGrantSigningSeed)
 		if serr != nil {
-			log.Error("SYNAPSE_SANDBOX_ENABLED but the sandbox is unavailable – install bubblewrap or disable it", "err", serr)
+			log.Error("egress grant signing seed invalid", "err", serr)
 			os.Exit(1)
 		}
-		reconRunner = sb
-		sb.SetVault(credVault)                                      // resolve {{secret:NAME}} into the child env at exec time
-		sb.SetBinaryRegistry(binregistry.New(cfg.ToolHashes, true)) // refuse a replaced recon tool binary (TOFU)
-		// Egress enforcement: enable ONLY when the applier actually works here – it
-		// needs CAP_NET_ADMIN + CAP_SYS_ADMIN, which an unprivileged API lacks. Probe and
-		// degrade to network-isolated (still safe) rather than failing recon at runtime.
-		if app, aerr := egressinfra.NewApplier(); aerr == nil {
-			probeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			perr := app.Probe(probeCtx)
-			cancel()
-			if perr == nil {
-				sb.SetEgress(app)
-				sb.SetConnMonitor(ebpf.NewMonitor()) // per-run eBPF connect-log (best-effort)
-				egressLive = true
-				log.Info("recon sandbox enabled with KERNEL EGRESS enforcement (scope-restricted netns)")
-			} else {
-				log.Warn("sandbox egress not usable here (needs CAP_NET_ADMIN/SYS_ADMIN) – sandboxed recon runs network-ISOLATED; run capability-sensitive/live recon via synapse-worker", "err", perr)
-			}
-		} else {
-			log.Warn("sandbox egress applier unavailable (no ip/iptables) – sandboxed recon runs network-isolated", "err", aerr)
+		brokerSigner, serr := egressbroker.NewGrantSigner(seed)
+		if serr != nil {
+			log.Error("egress grant signer init failed", "err", serr)
+			os.Exit(1)
 		}
-		if !sb.CgroupLimitsEnforced() {
-			log.Warn("sandbox cgroup resource limits NOT enforced (no usable systemd-run --user)")
+		grantSigner, serr := egressbroker.NewEgressGrantSigner(brokerSigner)
+		if serr != nil {
+			log.Error("egress grant signer adapter init failed", "err", serr)
+			os.Exit(1)
+		}
+		grantService, serr := egressgrant.NewService(reconRunStore, repo, reconGuard, clock, recontools.Registry(), egresspolicy.Compiler{}, egressbroker.EgressGrantCanonicalizer{}, grantSigner)
+		if serr != nil {
+			log.Error("egress grant service init failed", "err", serr)
+			os.Exit(1)
+		}
+		egressGrantHandler, serr = httpapi.NewEgressGrantHandler(cfg.EgressGrantIssuerToken, grantService)
+		if serr != nil {
+			log.Error("egress grant HTTP handler init failed", "err", serr)
+			os.Exit(1)
+		}
+	}
+	logBroker := logstream.NewBroker(0)
+	var reconRunner ports.ToolRunner
+	var reconDispatcher reconuc.Dispatcher
+	egressLive := false // set when the sandbox can kernel-enforce scope egress
+	if toolExecution == config.ToolExecutionDispatchOnly {
+		dispatchOnly := executionmode.DispatchOnly{}
+		reconRunner = dispatchOnly
+		reconDispatcher = dispatchOnly
+		log.Info("recon execution adapters omitted from dispatch-only API")
+	} else {
+		reconPool := jobs.NewPool(cfg.ReconConcurrency, cfg.ReconQueueSize)
+		defer reconPool.Shutdown(context.Background())
+		reconDispatcher = reconPool
+		// Select the tool runner: the bubblewrap sandbox when enabled, else the plain
+		// argv ExecRunner. Fail closed if the sandbox is required but unavailable – never
+		// silently run unsandboxed (mirrors the prod-signing-seed hardening).
+		reconRunner = toolrunner.NewExecRunner(cfg.ReconTimeout, cfg.ReconMaxOutput)
+		if cfg.SandboxEnabled {
+			sb, serr := sandbox.NewRunner(cfg.ReconTimeout, cfg.ReconMaxOutput, cfg.SandboxMemMax, cfg.SandboxPidsMax)
+			if serr != nil {
+				log.Error("SYNAPSE_SANDBOX_ENABLED but the sandbox is unavailable – install bubblewrap or disable it", "err", serr)
+				os.Exit(1)
+			}
+			reconRunner = sb
+			sb.SetVault(credVault)                                      // resolve {{secret:NAME}} into the child env at exec time
+			sb.SetBinaryRegistry(binregistry.New(cfg.ToolHashes, true)) // refuse a replaced recon tool binary (TOFU)
+			// Egress enforcement: enable ONLY when the applier actually works here – it
+			// needs CAP_NET_ADMIN + CAP_SYS_ADMIN, which an unprivileged API lacks. Probe and
+			// degrade to network-isolated (still safe) rather than failing recon at runtime.
+			if app, aerr := egressinfra.NewApplier(); aerr == nil {
+				probeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				perr := app.Probe(probeCtx)
+				cancel()
+				if perr == nil {
+					sb.SetEgress(app)
+					sb.SetConnMonitor(ebpf.NewMonitor()) // per-run eBPF connect-log (best-effort)
+					egressLive = true
+					log.Info("recon sandbox enabled with KERNEL EGRESS enforcement (scope-restricted netns)")
+				} else {
+					log.Warn("sandbox egress not usable here (needs CAP_NET_ADMIN/SYS_ADMIN) – sandboxed recon runs network-ISOLATED; run capability-sensitive/live recon via synapse-worker", "err", perr)
+				}
+			} else {
+				log.Warn("sandbox egress applier unavailable (no ip/iptables) – sandboxed recon runs network-isolated", "err", aerr)
+			}
+			if !sb.CgroupLimitsEnforced() {
+				log.Warn("sandbox cgroup resource limits NOT enforced (no usable systemd-run --user)")
+			}
 		}
 	}
 	reconService, err := reconuc.NewService(reconGuard, reconRunner,
-		reconRunStore, evidenceService, repo, logBroker, reconPool, clock, ids, recontools.Registry(),
+		reconRunStore, evidenceService, repo, logBroker, reconDispatcher, clock, ids, recontools.Registry(),
 		cfg.ReconTimeout, cfg.ReconMaxOutput, cfg.ReconAllowCapabilitySensitive)
 	if err != nil {
 		log.Error("recon service init failed", "err", err)
@@ -1122,20 +887,28 @@ func main() {
 		reconService.SetSandboxEnforcement(egresspolicy.Compile)
 	}
 	var scaWorker *worker.Worker
-	if cfg.ReconViaWorker {
-		// defer execution to the durable queue. Recon goes to the privileged
-		// synapse-worker (egress/capability needs CAP_NET_ADMIN). SCA is offline → an
-		// IN-PROCESS worker here runs it (sandboxed, no privilege). Claim-by-kind keeps the
-		// two from grabbing each other's jobs. Needs Postgres.
+	if toolExecution == config.ToolExecutionDispatchOnly {
+		if reconQueue == nil {
+			log.Error("dispatch-only execution requires the PostgreSQL durable queue")
+			os.Exit(1)
+		}
+		reconService.SetQueue(reconQueue)
+		scaService.SetQueue(reconQueue)
+		reconService.SetRunLock(reconRunLock)
+		scaService.SetRunLock(reconRunLock)
+		log.Info("all untrusted tool execution deferred to synapse-worker")
+	} else if cfg.ReconViaWorker {
+		// Backward-compatible development posture: recon is durable while offline SCA
+		// remains in an in-process worker. Explicit dispatch-only never starts this worker.
 		if reconQueue != nil {
 			reconService.SetQueue(reconQueue)
 			scaService.SetQueue(reconQueue)
-			reconService.SetRunLock(reconRunLock) // no duplicate live scan on redelivery
+			reconService.SetRunLock(reconRunLock)
 			scaService.SetRunLock(reconRunLock)
 			scaWorker = worker.New(reconQueue, map[string]worker.Handler{
-				scauc.ScanJobKind: scaJobHandler{svc: scaService}, // Handle + OnDeadLetter (finalize the ScanJob)
+				scauc.ScanJobKind: scaJobHandler{svc: scaService},
 			}, worker.Config{Visibility: cfg.ScanTimeout + time.Minute, MaxAttempts: 3}, log)
-			log.Info("execution deferred to the durable queue: recon → synapse-worker, SCA → in-process worker")
+			log.Info("legacy durable execution enabled: recon via synapse-worker, SCA via in-process worker")
 		} else {
 			log.Warn("SYNAPSE_RECON_VIA_WORKER set but no Postgres queue (set SYNAPSE_DB_DSN) – running in-process")
 		}
@@ -1563,7 +1336,7 @@ func main() {
 				router.SetDASTScan(dastWorkflowSvc)
 				log.Info("DAST verifier and authenticated scan workflows ENABLED (sandbox egress-enforced)")
 			} else {
-				log.Warn("DAST verifier workflow DISABLED: sandbox kernel egress enforcement is unavailable")
+				log.Warn("DAST execution workflows DISABLED: authoritative signed DAST grants are unavailable in this process posture")
 			}
 		}
 		exportService.SetJudgments(judgmentStore) // OpenVEX justification-by-tier from confirmed not_reachable judgments
@@ -2184,9 +1957,9 @@ func main() {
 		// the API enqueues and synapse-worker drives + survives restart. Otherwise the API runs
 		// the agent inline (bounded by AgentConcurrency; NOT durable – a crash strands the run).
 		var agentQueue ports.JobQueue
-		if cfg.AgentViaWorker {
-			if !cfg.ReconViaWorker || reconQueue == nil {
-				log.Error("SYNAPSE_AGENT_VIA_WORKER requires SYNAPSE_RECON_VIA_WORKER + Postgres (the durable queue)")
+		if cfg.AgentViaWorker || toolExecution == config.ToolExecutionDispatchOnly {
+			if reconQueue == nil {
+				log.Error("durable agent execution requires Postgres (the durable queue)")
 				os.Exit(1)
 			}
 			agentQueue = reconQueue
@@ -2283,7 +2056,14 @@ func main() {
 	if metrics != nil {
 		metricsHandler = metrics.Handler()
 	}
-	if err := httpserver.RunPair(ctx, cfg.HTTPAddr, router.Handler(), cfg.MetricsAddr, metricsHandler, log); err != nil {
+	listeners := []httpserver.Listener{{Name: "http server", Addr: cfg.HTTPAddr, Handler: router.Handler()}}
+	if metricsHandler != nil {
+		listeners = append(listeners, httpserver.Listener{Name: "metrics server", Addr: cfg.MetricsAddr, Handler: metricsHandler})
+	}
+	if egressGrantHandler != nil {
+		listeners = append(listeners, httpserver.Listener{Name: "egress grant authority", Addr: cfg.EgressGrantAuthorityAddr, Handler: egressGrantHandler})
+	}
+	if err := httpserver.RunListeners(ctx, listeners, log); err != nil {
 		log.Error("server error", "err", err)
 		os.Exit(1)
 	}

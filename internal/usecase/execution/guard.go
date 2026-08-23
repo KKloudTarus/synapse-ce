@@ -33,17 +33,9 @@ func NewGuard(engagements ports.EngagementRepository, clock ports.Clock, audit p
 	return &Guard{engagements: engagements, clock: clock, audit: audit}, nil
 }
 
-// Request describes one tool execution to authorize. Action is the audit verb
-// (e.g. "sca.scan", "recon.subfinder"); Target is the asset that will be acted
-// on and is matched kind-aware against the engagement scope. Metadata is recorded
-// verbatim on the audit entry (e.g. {"kind": "...", "engagement": "..."}).
-type Request struct {
-	Actor        string
-	EngagementID shared.ID
-	Action       string
-	Target       engagement.Target
-	Metadata     map[string]string
-}
+// Request remains as a compatibility alias while the inward-facing execution
+// authorization contract lives in ports.
+type Request = ports.ExecutionRequest
 
 // Authorize enforces the engagement lifecycle status, then the authorization
 // window, then scope, then the rules of engagement (tool class + blackout), audits

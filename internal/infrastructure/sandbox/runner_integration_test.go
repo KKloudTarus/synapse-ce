@@ -204,9 +204,11 @@ func TestSandboxEgressEnforced(t *testing.T) {
 echo caps=$(grep CapEff /proc/self/status | awk '{print $2}')
 `
 	res, err := r.Run(context.Background(), ports.ToolSpec{
-		Name:         "bash",
-		Args:         []string{"-c", probe},
-		EgressPolicy: policy,
+		Name:                "bash",
+		Args:                []string{"-c", probe},
+		EgressPolicy:        policy,
+		EgressExecutionKind: "recon",
+		EgressExecutionID:   "integration-egress-enforced",
 	})
 	if err != nil {
 		t.Fatalf("egress-enforced run: %v (stderr %s)", err, res.Stderr)
@@ -257,7 +259,13 @@ func TestSandboxEgressDomainPinning(t *testing.T) {
 (timeout 6 bash -c 'exec 3<>/dev/tcp/one.one.one.one/443' 2>/dev/null && echo INSCOPE=connected || echo INSCOPE=blocked)
 (timeout 6 bash -c 'exec 3<>/dev/tcp/dns.google/443' 2>/dev/null && echo OUTSCOPE=connected || echo OUTSCOPE=blocked)
 `
-	res, err := r.Run(context.Background(), ports.ToolSpec{Name: "bash", Args: []string{"-c", probe}, EgressPolicy: policy})
+	res, err := r.Run(context.Background(), ports.ToolSpec{
+		Name:                "bash",
+		Args:                []string{"-c", probe},
+		EgressPolicy:        policy,
+		EgressExecutionKind: "recon",
+		EgressExecutionID:   "integration-domain-pinning",
+	})
 	if err != nil {
 		t.Fatalf("run: %v (stderr %s)", err, res.Stderr)
 	}

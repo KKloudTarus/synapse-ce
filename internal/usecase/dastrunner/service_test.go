@@ -144,6 +144,9 @@ func TestExecuteSafeHTTPProbeSealsAndAppliesVerifierResult(t *testing.T) {
 	if runner.spec.EgressPolicy == nil || len(runner.spec.EgressPolicy.Rules) != 1 || runner.spec.EgressPolicy.Rules[0].Net.Addr() != netip.MustParseAddr("203.0.113.10") {
 		t.Fatalf("runner spec should carry pinned-IP egress policy: %+v", runner.spec.EgressPolicy)
 	}
+	if runner.spec.EgressExecutionKind != "dast-verifier" || runner.spec.EgressExecutionID != "j-1" {
+		t.Fatalf("execution identity = %q/%q", runner.spec.EgressExecutionKind, runner.spec.EgressExecutionID)
+	}
 	if len(applier.calls) != 1 {
 		t.Fatalf("want one verifier apply call, got %d", len(applier.calls))
 	}

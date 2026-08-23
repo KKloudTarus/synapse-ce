@@ -1,0 +1,48 @@
+[Unit]
+Description=Synapse governed execution worker
+Documentation=https://github.com/KKloudTarus/synapse-ce/blob/main/docs/guide/deployment.md
+After=network-online.target synapse-worker-runtime-env.service synapse-egress-broker.service synapse-worker-sandbox-check.service
+Wants=network-online.target
+Requires=synapse-worker-runtime-env.service synapse-egress-broker.service synapse-worker-sandbox-check.service
+
+[Service]
+Type=simple
+User=synapse-worker
+Group=synapse-worker
+Environment=HOME=/var/lib/synapse
+Environment=PATH=/opt/synapse:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+EnvironmentFile=/etc/synapse-worker/worker.env
+EnvironmentFile=/etc/synapse-worker/runtime.env
+ExecStart=/opt/synapse/synapse-worker
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=90s
+KillSignal=SIGTERM
+UMask=0027
+Delegate=yes
+
+# The worker and every child remain unprivileged. Bubblewrap uses unprivileged user
+# namespaces; no SYS_ADMIN, NET_ADMIN, ambient capability, or unrestricted sudo is granted.
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+# A blanket RestrictNamespaces or @system-service filter would block Bubblewrap's
+# namespace setup. The exact sandbox runner applies its own default-deny seccomp policy.
+StateDirectory=synapse
+CacheDirectory=synapse
+RuntimeDirectory=synapse
+ReadWritePaths=/var/lib/synapse /var/cache/synapse /run/synapse
+
+[Install]
+WantedBy=multi-user.target

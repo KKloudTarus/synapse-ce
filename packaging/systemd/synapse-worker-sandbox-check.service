@@ -1,0 +1,31 @@
+[Unit]
+Description=Verify Synapse worker production sandbox
+Documentation=https://github.com/KKloudTarus/synapse-ce/blob/main/docs/guide/deployment.md
+After=network-online.target synapse-worker-runtime-env.service synapse-egress-broker.service
+Wants=network-online.target
+Requires=synapse-worker-runtime-env.service synapse-egress-broker.service
+Before=synapse-worker.service
+
+[Service]
+Type=oneshot
+User=synapse-worker
+Group=synapse-worker
+ExecStart=/opt/synapse/synapse-sandbox-check -mode=full -strict
+RemainAfterExit=true
+Delegate=yes
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

@@ -3,13 +3,17 @@ package egress
 import (
 	"context"
 	"net/netip"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	egresspolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/egress"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 func TestPinnedHostsAreDeterministic(t *testing.T) {
@@ -34,6 +38,61 @@ func TestLinkAddrsDistinctPerIndex(t *testing.T) {
 	}
 	if h0 != "10.210.0.1/30" || p0 != "10.210.0.2/30" || s0 != "10.210.0.0/30" {
 		t.Errorf("unexpected idx0 addressing: host=%s peer=%s subnet=%s", h0, p0, s0)
+	}
+}
+
+func TestSetupRejectsUnresolvedDomainAuthorityBeforePrivilegedOperations(t *testing.T) {
+	for name, policy := range map[string]ports.EgressPolicy{
+		"allow domains":      {AllowDomains: []string{"api.example.com"}},
+		"deny domains":       {DenyDomains: []string{"blocked.example.com"}},
+		"allow domain rules": {AllowDomainRules: []ports.DomainRule{{Host: "api.example.com"}}},
+		"deny domain rules":  {DenyDomainRules: []ports.DomainRule{{Host: "blocked.example.com"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a := &Applier{}
+			if _, err := a.setup(context.Background(), "test", 0, policy, nil); err == nil {
+				t.Fatal("unresolved domain authority must fail before privileged setup")
+			}
+		})
+	}
+}
+
+func TestRecoverStaleOnlyRemovesBrokerOwnedNamespaces(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"syn3", "syn63", "synprobe", "other"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var commands []string
+	a := &Applier{
+		ip:       "/usr/sbin/ip",
+		iptables: "/usr/sbin/iptables",
+		netnsDir: dir,
+		commandHook: func(_ context.Context, args []string) error {
+			commands = append(commands, strings.Join(args, " "))
+			return nil
+		},
+	}
+	if err := a.RecoverStale(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"syn3", "syn63", "synprobe"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Fatalf("managed namespace %q was not removed: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "other")); err != nil {
+		t.Fatalf("unmanaged namespace was modified: %v", err)
+	}
+	joined := strings.Join(commands, "\n")
+	for _, want := range []string{"-C FORWARD -d 10.210.0.12/30", "vh-syn3", "-C FORWARD -d 10.210.0.252/30", "vh-syn63", "vh-synprobe"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("recovery commands missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "other") {
+		t.Errorf("recovery touched unmanaged namespace:\n%s", joined)
 	}
 }
 

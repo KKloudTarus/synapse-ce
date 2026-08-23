@@ -41,7 +41,7 @@ func TestAcquireImageSandboxedEgress(t *testing.T) {
 	}
 	sb.SetEgress(app)
 
-	acq := acquire.New().WithSandbox(sb, true)
+	acq := acquire.New().WithSandbox(authoritativeTestRunner{ToolRunner: sb}, true)
 	ws, err := acq.Acquire(ctx, ports.AcquireRequest{Kind: ports.TargetImage, Value: "alpine:latest"})
 	if err != nil {
 		t.Fatalf("sandboxed image pull failed: %v", err)

@@ -6,10 +6,61 @@ data "aws_availability_zones" "selected" {
   state = "available"
 }
 
+data "aws_iam_policy_document" "staging_kms" {
+  statement {
+    sid       = "EnableAccountIAMPermissions"
+    effect    = "Allow"
+    actions   = ["kms:*"]
+    resources = ["*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+  }
+
+  statement {
+    sid    = "AllowAutoScalingEncryptedVolumes"
+    effect = "Allow"
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:GenerateDataKey*",
+      "kms:ReEncrypt*",
+    ]
+    resources = ["*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"]
+    }
+  }
+
+  statement {
+    sid       = "AllowAutoScalingGrantCreation"
+    effect    = "Allow"
+    actions   = ["kms:CreateGrant"]
+    resources = ["*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "kms:GrantIsForAWSResource"
+      values   = ["true"]
+    }
+  }
+}
+
 resource "aws_kms_key" "staging" {
   description             = "Encryption key for ${local.prefix} data services"
   deletion_window_in_days = 7
   enable_key_rotation     = true
+  policy                  = data.aws_iam_policy_document.staging_kms.json
 
   tags = merge(local.tags, { Name = "${local.prefix}-data" })
 }
@@ -60,6 +111,31 @@ resource "aws_subnet" "private" {
   })
 }
 
+resource "aws_subnet" "worker" {
+  for_each = toset(var.availability_zones)
+
+  vpc_id            = aws_vpc.staging.id
+  availability_zone = each.value
+  cidr_block        = local.worker_subnet_cidrs[index(var.availability_zones, each.value)]
+
+  tags = merge(local.tags, local.worker_tags, {
+    Name = "${local.prefix}-worker-${each.value}"
+  })
+}
+
+resource "aws_subnet" "grant_nlb" {
+  for_each = toset(var.availability_zones)
+
+  vpc_id            = aws_vpc.staging.id
+  availability_zone = each.value
+  cidr_block        = local.grant_nlb_subnet_cidrs[index(var.availability_zones, each.value)]
+
+  tags = merge(local.tags, local.worker_tags, {
+    Name                              = "${local.prefix}-grant-nlb-${each.value}"
+    "kubernetes.io/role/internal-elb" = "1"
+  })
+}
+
 resource "aws_eip" "nat" {
   domain = "vpc"
   tags   = merge(local.tags, { Name = "${local.prefix}-nat" })
@@ -103,6 +179,18 @@ resource "aws_route_table" "private" {
 
 resource "aws_route_table_association" "private" {
   for_each       = aws_subnet.private
+  subnet_id      = each.value.id
+  route_table_id = aws_route_table.private.id
+}
+
+resource "aws_route_table_association" "worker" {
+  for_each       = aws_subnet.worker
+  subnet_id      = each.value.id
+  route_table_id = aws_route_table.private.id
+}
+
+resource "aws_route_table_association" "grant_nlb" {
+  for_each       = aws_subnet.grant_nlb
   subnet_id      = each.value.id
   route_table_id = aws_route_table.private.id
 }
@@ -158,7 +246,7 @@ resource "aws_vpc_security_group_ingress_rule" "nodes_self" {
 
 resource "aws_security_group" "database" {
   name        = "${local.prefix}-postgres"
-  description = "Restricts PostgreSQL to EKS nodes only"
+  description = "Restricts PostgreSQL to application and execution tiers"
   vpc_id      = aws_vpc.staging.id
 
   tags = merge(local.tags, { Name = "${local.prefix}-postgres" })
