@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ChevronLeft, ChevronRight, FileCode2, Files, GitCompareArrows, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, FileCode01 as FileCode2, File06 as Files, SwitchHorizontal01 as GitCompareArrows, XClose as X } from '@untitledui/icons'
 import { Button, EmptyState, Pill, SevBadge, Skeleton, cn } from '../../ui'
 import { PROJECT_CODE_SOURCE_WINDOW } from '../../../lib/projectCodeNavigation'
 import type { ProjectCodeDiffHunk, ProjectCodeDiffResponse, ProjectCodeDiffRow, ProjectCodeFile, ProjectCodeFileIndex, ProjectCodeFileView, ProjectCodeFinding, ProjectCodeView } from '../../../lib/types'

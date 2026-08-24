@@ -1,4 +1,4 @@
-import { Search } from 'lucide-react'
+import { SearchLg as Search } from '@untitledui/icons'
 import { useEffect, useMemo, useState } from 'react'
 import {
   findingMatchesRatedDimension,

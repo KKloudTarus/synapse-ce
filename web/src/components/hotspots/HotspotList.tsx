@@ -1,4 +1,4 @@
-import { Search, X, ShieldAlert, CheckCircle2, ShieldCheck, Shield, AlertTriangle } from 'lucide-react'
+import { SearchLg as Search, XClose as X, ShieldZap as ShieldAlert, CheckCircle as CheckCircle2, ShieldTick as ShieldCheck, Shield01 as Shield, AlertTriangle } from '@untitledui/icons'
 import { useState, useEffect } from 'react'
 import type { HotspotListFilter, HotspotPage, HotspotStatus, Severity } from '../../lib/types'
 import { Button, EmptyState, ErrorState, Spinner, cn } from '../ui'

@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from 'react'
-import { Braces, Copy, FileCode2, Gauge, ShieldCheck, Wrench } from 'lucide-react'
+import { Code02 as Braces, Copy01 as Copy, FileCode01 as FileCode2, Speedometer04 as Gauge, ShieldTick as ShieldCheck, Tool01 as Wrench } from '@untitledui/icons'
 import { formatOverviewPercentage } from '../../lib/projectOverviewPresentation'
 import type { CodeQualityReport, Finding, Grade, LanguageInventory } from '../../lib/types'
 import { Card, Pill, SevBadge, cn } from '../ui'

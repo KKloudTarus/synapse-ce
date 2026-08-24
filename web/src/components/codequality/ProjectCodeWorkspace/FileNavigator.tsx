@@ -1,6 +1,6 @@
 import { useRef, type ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { FileCode2, Search } from 'lucide-react'
+import { FileCode01 as FileCode2, SearchLg as Search } from '@untitledui/icons'
 import { EmptyState, Input, Select, cn } from '../../ui'
 import type { ProjectCodeFile, ProjectCodeFileIndex, ProjectCodeFileStatus } from '../../../lib/types'
 

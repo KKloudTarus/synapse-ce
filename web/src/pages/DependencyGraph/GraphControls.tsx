@@ -1,4 +1,4 @@
-import { GitFork, Network, Scale, Search, ShieldAlert } from 'lucide-react'
+import { GitBranch01 as GitFork, Dataflow04 as Network, Scale01 as Scale, SearchLg as Search, ShieldZap as ShieldAlert } from '@untitledui/icons'
 import { useMemo, useState } from 'react'
 import { cn, Input, Select } from '../../components/ui'
 import type { ScanResult } from '../../lib/types'

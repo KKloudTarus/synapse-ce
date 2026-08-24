@@ -1,4 +1,4 @@
-import { ArrowLeft, AlertCircle, RefreshCw, SearchX } from 'lucide-react'
+import { ArrowLeft, AlertCircle, RefreshCw01 as RefreshCw, SearchLg as SearchX } from '@untitledui/icons'
 import { Link, useParams, useLocation } from 'react-router-dom'
 import { api, ApiError } from '../../lib/api'
 import type { RuleDetail } from '../../lib/types'

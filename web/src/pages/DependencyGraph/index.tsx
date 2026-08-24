@@ -1,6 +1,6 @@
 import { Background, Controls, MiniMap, ReactFlow, type Edge, type Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Boxes, Network, Search } from 'lucide-react'
+import { Package as Boxes, Dataflow04 as Network, SearchLg as Search } from '@untitledui/icons'
 import { useMemo, useState } from 'react'
 import { Card, EmptyState } from '../../components/ui'
 import type { ScanResult } from '../../lib/types'

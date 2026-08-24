@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ServerCog } from 'lucide-react'
+import { Server01 as ServerCog } from '@untitledui/icons'
 import { api, ApiError } from '../../lib/api'
 import type { FleetAgentDetail, FleetAgentHealth, FleetAgentRow } from '../../lib/types'
 import { Button, Card, cn, EmptyState, ErrorState, Pill, Spinner } from '../../components/ui'

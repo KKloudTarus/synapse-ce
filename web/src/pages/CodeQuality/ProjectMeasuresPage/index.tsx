@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Folder, ChevronRight } from 'lucide-react'
+import { Folder, ChevronRight } from '@untitledui/icons'
 import { api } from '../../../lib/api'
 import { useFetch } from '../../../hooks'
 import { Button, EmptyState, ErrorState, cn } from '../../../components/ui'

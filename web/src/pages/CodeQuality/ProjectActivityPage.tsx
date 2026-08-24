@@ -1,4 +1,4 @@
-import { Activity } from 'lucide-react'
+import { Activity } from '@untitledui/icons'
 import { useEffect, useRef, useState } from 'react'
 import { ProjectActivityView } from '../../components/codequality/ProjectActivityView'
 import { Button, Card, EmptyState, ErrorState } from '../../components/ui'

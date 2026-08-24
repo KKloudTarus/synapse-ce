@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { X, CalendarClock, ShieldAlert, CheckCircle2, ShieldCheck, Shield, AlertTriangle } from 'lucide-react'
+import { XClose as X, Clock as CalendarClock, ShieldZap as ShieldAlert, CheckCircle as CheckCircle2, ShieldTick as ShieldCheck, Shield01 as Shield, AlertTriangle } from '@untitledui/icons'
 import { api, ApiError } from '../../lib/api'
 import type { Hotspot, HotspotReviewEvent, HotspotStatus } from '../../lib/types'
 import { Button, ErrorState, Pill, Spinner, cn } from '../ui'

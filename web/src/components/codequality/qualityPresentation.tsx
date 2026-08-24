@@ -1,4 +1,4 @@
-import { CheckCircle2, XCircle } from 'lucide-react'
+import { CheckCircle as CheckCircle2, XCircle } from '@untitledui/icons'
 import type { Grade, ProjectGateInfo, ProjectGateResult } from '../../lib/types'
 import { Pill, cn } from '../ui'
 

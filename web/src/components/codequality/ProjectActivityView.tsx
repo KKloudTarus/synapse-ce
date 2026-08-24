@@ -1,4 +1,4 @@
-import { Activity, ArrowDownRight, ArrowRight, ArrowUpRight, ChevronDown, GitCommit } from 'lucide-react'
+import { Activity, ArrowDownRight, ArrowRight, ArrowUpRight, ChevronDown, GitCommit } from '@untitledui/icons'
 import { useState } from 'react'
 import type { ProjectAnalysis } from '../../lib/types'
 import { Button, Card, EmptyState, Pill, Select, cn } from '../ui'
