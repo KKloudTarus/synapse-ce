@@ -1,4 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
+// Forced alias: @untitledui/icons has no calendar-clock glyph, so the scheduled
+// timestamp shows a plain clock.
 import { XClose as X, Clock as CalendarClock, ShieldZap as ShieldAlert, CheckCircle as CheckCircle2, ShieldTick as ShieldCheck, Shield01 as Shield, AlertTriangle } from '@untitledui/icons'
 import { api, ApiError } from '../../lib/api'
 import type { Hotspot, HotspotReviewEvent, HotspotStatus } from '../../lib/types'
@@ -252,7 +254,7 @@ export function HotspotSidePanel({
                 type="submit"
                 disabled={submitting || (transitionStatus === hotspot.status && rationale.trim().length === 0)}
                 className="w-full"
-                variant="brand"
+               
               >
                 {submitting ? <Spinner className="size-4 mr-2" /> : null}
                 Save decision

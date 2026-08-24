@@ -64,6 +64,14 @@ export function useSSE<T>(
   const controllerRef = useRef<AbortController | null>(null)
   const retriesRef = useRef(0)
   const mountedRef = useRef(true)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Callers commonly pass an inline arrow, so keep `subscriber` out of the
+  // callback deps — otherwise the stream tears down and re-opens every render.
+  const subscriberRef = useRef(subscriber)
+  useEffect(() => {
+    subscriberRef.current = subscriber
+  }, [subscriber])
 
   const start = useCallback(() => {
     if (!enabled) return
@@ -73,7 +81,7 @@ export function useSSE<T>(
     setStatus('connecting')
     setError(null)
 
-    subscriber(
+    subscriberRef.current(
       (event) => {
         if (mountedRef.current) {
           setData(event)
@@ -97,14 +105,15 @@ export function useSSE<T>(
         // Reconnect logic
         if (reconnect && retriesRef.current < maxRetries) {
           retriesRef.current++
-          setTimeout(() => {
+          reconnectTimerRef.current = setTimeout(() => {
+            reconnectTimerRef.current = null
             if (mountedRef.current && enabled) {
               start()
             }
           }, reconnectDelay)
         }
       })
-  }, [enabled, subscriber, reconnect, reconnectDelay, maxRetries])
+  }, [enabled, reconnect, reconnectDelay, maxRetries])
 
   useEffect(() => {
     mountedRef.current = true
@@ -115,12 +124,21 @@ export function useSSE<T>(
 
     return () => {
       mountedRef.current = false
+      if (reconnectTimerRef.current !== null) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
       controllerRef.current?.abort()
       controllerRef.current = null
     }
   }, [start, enabled])
 
   const close = useCallback(() => {
+    mountedRef.current = false
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
     controllerRef.current?.abort()
     controllerRef.current = null
     setStatus('closed')

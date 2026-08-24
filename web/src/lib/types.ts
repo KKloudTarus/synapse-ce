@@ -40,6 +40,19 @@ export interface Engagement {
   liveReconEnabled: boolean
   createdAt: string | null
   businessAssetId: string
+  /** List-view enrichment. Absent unless the API includes it; the Engagements
+   *  table and its sort fall back to createdAt / zero when missing. */
+  findingsCount?: EngagementFindingsCount
+  /** List-view enrichment; see findingsCount. */
+  lastScanDate?: string | null
+}
+
+export interface EngagementFindingsCount {
+  total: number
+  critical: number
+  high: number
+  medium: number
+  low: number
 }
 
 export interface CreateEngagementInput {

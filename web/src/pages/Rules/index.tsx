@@ -1,5 +1,5 @@
-import { Fragment, useState } from 'react'
-import { AlertCircle, CheckCircle, ChevronDown, RefreshCw01, SearchLg, XCircle } from '@untitledui/icons'
+import { Fragment, useEffect, useState } from 'react'
+import { AlertCircle, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, RefreshCw01, SearchLg, XCircle } from '@untitledui/icons'
 import { Card, EmptyState, Spinner, cn } from '../../components/ui'
 import { VirtualRuleCards } from '../../components/rules/VirtualRuleCards'
 import { formatRuleSeverity, formatRuleType } from '../../lib/ruleFormat'
@@ -70,8 +70,15 @@ function RuleInlineDetail({ ruleKey }: { ruleKey: string }) {
   )
 }
 
+// The catalog runs to thousands of rules unfiltered, so the desktop table is
+// paginated to keep the rendered row count bounded (docs/04-ui-ux.md). It cannot
+// use VirtualTable: rows expand into a full-width detail row and the layout is
+// table-fixed, neither of which the windowed list supports.
+const DESKTOP_PAGE_SIZE = 50
+
 export default function Rules() {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
   const {
     params,
     filters,
@@ -101,6 +108,15 @@ export default function Rules() {
     }
   }
 
+  const pageCount = Math.max(1, Math.ceil(resultRules.length / DESKTOP_PAGE_SIZE))
+  const safePage = Math.min(page, pageCount)
+  const pageRules = resultRules.slice((safePage - 1) * DESKTOP_PAGE_SIZE, safePage * DESKTOP_PAGE_SIZE)
+
+  useEffect(() => {
+    setPage(1)
+    setExpandedKey(null)
+  }, [resultRules])
+
   return (
     <div className="mx-auto max-w-[1600px] animate-fade-in space-y-6 pb-12">
       <header className="flex flex-wrap items-center justify-between gap-4 pb-1">
@@ -123,7 +139,7 @@ export default function Rules() {
       </header>
 
       {catalogError ? (
-        <div className="mb-6 rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-600 dark:text-red-400">
+        <div className="mb-6 rounded-lg border border-critical/20 bg-critical/5 p-4 text-sm text-critical">
           <div className="flex items-center gap-2 font-medium">
             <AlertCircle className="size-4" />
             Failed to load catalog
@@ -157,7 +173,7 @@ export default function Rules() {
 
           <div className="space-y-4" aria-busy={resultLoading}>
             {resultError && (
-              <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-600 dark:text-red-400">
+              <div className="rounded-lg border border-critical/20 bg-critical/5 p-4 text-sm text-critical">
                 <div className="flex items-center gap-2 font-medium">
                   <AlertCircle className="size-4" />
                   Failed to load filtered results
@@ -213,7 +229,7 @@ export default function Rules() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-secondary">
-                          {resultRules.map((rule) => {
+                          {pageRules.map((rule) => {
                             const isExpanded = expandedKey === rule.key
                             const maxTags = 3
                             const visibleTags = rule.tags.slice(0, maxTags)
@@ -286,6 +302,37 @@ export default function Rules() {
                           })}
                         </tbody>
                       </table>
+                      {pageCount > 1 && (
+                        <div className="flex items-center justify-between border-t border-secondary px-5 py-3">
+                          <span className="text-xs text-tertiary tabular-nums">
+                            Showing {(safePage - 1) * DESKTOP_PAGE_SIZE + 1}–
+                            {Math.min(safePage * DESKTOP_PAGE_SIZE, resultRules.length)} of {resultRules.length}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setPage(safePage - 1)}
+                              disabled={safePage === 1}
+                              aria-label="Previous page"
+                              className="inline-flex size-8 items-center justify-center rounded-md border border-secondary text-secondary transition-colors hover:bg-secondary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <ChevronLeft className="size-4" aria-hidden="true" />
+                            </button>
+                            <span className="text-xs tabular-nums text-tertiary">
+                              Page {safePage} of {pageCount}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setPage(safePage + 1)}
+                              disabled={safePage === pageCount}
+                              aria-label="Next page"
+                              className="inline-flex size-8 items-center justify-center rounded-md border border-secondary text-secondary transition-colors hover:bg-secondary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <ChevronRight className="size-4" aria-hidden="true" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
                   </Card>
                 </div>
 

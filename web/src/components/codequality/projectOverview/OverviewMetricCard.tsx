@@ -1,3 +1,5 @@
+// Forced aliases: @untitledui/icons has no bug glyph, so the reliability metric
+// renders an alert octagon (`Bug` is kept as the local name for readability).
 import { ArrowRight, AlertOctagon as Bug, Copy01 as Copy, Eye, Speedometer04 as Gauge, Shield01 as Shield, Tool01 as Wrench } from '@untitledui/icons'
 import type { FC, SVGProps } from 'react'
 import { Link } from 'react-router-dom'

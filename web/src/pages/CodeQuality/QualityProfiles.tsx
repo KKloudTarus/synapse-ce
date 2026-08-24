@@ -245,7 +245,7 @@ function CopyForm({ profile, onDone, onError }: { profile: QualityProfile; onDon
         </label>
 
         <div className="flex flex-col justify-end">
-          <Button variant="brand" type="submit" loading={saving} className="h-10 whitespace-nowrap px-4">
+          <Button type="submit" loading={saving} className="h-10 whitespace-nowrap px-4">
             <Plus className="size-4" aria-hidden="true" /> Create copy
           </Button>
         </div>
@@ -284,7 +284,7 @@ function AssignInlineForm({ profile, onError, onDone }: { profile: QualityProfil
         aria-label={`Assign ${profile.name} to project`}
         className="h-8 w-44 rounded-md border border-secondary bg-primary px-2.5 text-xs text-primary placeholder:text-quaternary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 sm:w-56"
       />
-      <Button variant="brand" className="h-8 px-3 text-xs" type="submit" loading={saving} disabled={!projectKey.trim() || saving}>
+      <Button className="h-8 px-3 text-xs" type="submit" loading={saving} disabled={!projectKey.trim() || saving}>
         Assign
       </Button>
     </form>

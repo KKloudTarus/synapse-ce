@@ -1,3 +1,5 @@
+// Forced alias: no search-x glyph exists in @untitledui/icons, so the
+// rule-not-found empty state uses a plain magnifier.
 import { ArrowLeft, AlertCircle, RefreshCw01 as RefreshCw, SearchLg as SearchX } from '@untitledui/icons'
 import { Link, useParams, useLocation } from 'react-router-dom'
 import { api, ApiError } from '../../lib/api'
@@ -71,13 +73,13 @@ export default function RuleDetailPage() {
           <ArrowLeft className="size-4" />
           Back to rules
         </Link>
-        <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-6 text-center text-red-600 dark:text-red-400">
+        <div className="rounded-lg border border-critical/20 bg-critical/5 p-6 text-center text-critical">
           <AlertCircle className="mx-auto mb-3 size-6" />
           <h2 className="text-lg font-semibold">Failed to load rule details</h2>
           <p className="mt-2 text-sm">{error.message}</p>
           <button
             onClick={() => refetch()}
-            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-red-500/10 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-500/20 dark:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-critical/10 px-4 py-2 text-sm font-medium text-critical transition-colors hover:bg-critical/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-critical focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
           >
             <RefreshCw className="size-4" />
             Retry

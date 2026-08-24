@@ -24,6 +24,17 @@ function mapEngagement(r: any): Engagement {
     liveReconEnabled: r.LiveReconEnabled ?? false,
     createdAt: r.Audit?.CreatedAt ?? null,
     businessAssetId: r.BusinessAssetID ?? '',
+    // Optional list-view enrichment; stays undefined when the API omits it.
+    findingsCount: r.findings_count
+      ? {
+          total: r.findings_count.total ?? 0,
+          critical: r.findings_count.critical ?? 0,
+          high: r.findings_count.high ?? 0,
+          medium: r.findings_count.medium ?? 0,
+          low: r.findings_count.low ?? 0,
+        }
+      : undefined,
+    lastScanDate: r.last_scan_date ?? undefined,
   }
 }
 

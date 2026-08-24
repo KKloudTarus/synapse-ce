@@ -112,8 +112,13 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
         children?.some((child) => location.pathname === child.to || location.pathname.startsWith(`${child.to}/`)),
       )
 
+      const panelId = hasChildren ? `nav-group-${to.replace(/\W+/g, '-')}` : undefined
+
       return (
         <div key={to} className="space-y-0.5">
+          {/* The link and the expand toggle are siblings: HTML forbids interactive
+              content inside an <a>. The toggle is overlaid on the row's right edge. */}
+          <div className="relative">
           <NavLink
             to={to}
             end={end}
@@ -131,6 +136,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
               return cn(
                 'group relative flex h-10 items-center rounded-lg text-sm font-semibold select-none transition-colors duration-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
                 collapsed ? 'justify-center px-0' : 'gap-3 px-3 py-2',
+                hasChildren && !collapsed && 'pr-10',
                 isActive
                   ? 'bg-active text-primary'
                   : 'text-secondary hover:bg-primary_hover hover:text-secondary_hover',
@@ -153,34 +159,29 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
                   )}
                   <span className={cn('truncate', collapsed ? 'sr-only' : 'inline')}>{label}</span>
                   {isActive && <span className="absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-brand-solid" />}
-                  {hasChildren && !collapsed && (
-                    <button
-                      type="button"
-                      aria-label={isExpanded ? `Collapse ${label}` : `Expand ${label}`}
-                      aria-expanded={isExpanded}
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        toggleExpanded(to)
-                      }}
-                      className="ml-auto flex size-6 items-center justify-center rounded-md text-fg-quaternary transition-colors duration-100 hover:bg-secondary hover:text-fg-secondary focus-visible:outline-2 focus-visible:outline-brand"
-                    >
-                      <ChevronDown
-                        className={cn(
-                          'size-4 shrink-0 transition-transform duration-200',
-                          isExpanded && '-rotate-180',
-                        )}
-                        aria-hidden="true"
-                      />
-                    </button>
-                  )}
                 </>
               )
             }}
           </NavLink>
+          {hasChildren && !collapsed && (
+            <button
+              type="button"
+              aria-label={isExpanded ? `Collapse ${label}` : `Expand ${label}`}
+              aria-expanded={isExpanded}
+              aria-controls={panelId}
+              onClick={() => toggleExpanded(to)}
+              className="absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-fg-quaternary transition-colors duration-100 hover:bg-secondary hover:text-fg-secondary focus-visible:outline-2 focus-visible:outline-brand"
+            >
+              <ChevronDown
+                className={cn('size-4 shrink-0 transition-transform duration-200', isExpanded && '-rotate-180')}
+                aria-hidden="true"
+              />
+            </button>
+          )}
+          </div>
 
           {hasChildren && !collapsed && isExpanded && (
-            <div className="space-y-0.5 pl-7 pr-1">
+            <div id={panelId} className="space-y-0.5 pl-7 pr-1">
               {children?.map((child) => (
                 <NavLink
                   key={child.to}
@@ -301,6 +302,8 @@ export function Sidebar() {
   )
 }
 
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])'
+
 export function MobileSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const panelRef = useRef<HTMLElement>(null)
 
@@ -309,7 +312,32 @@ export function MobileSidebar({ open, onClose }: { open: boolean; onClose: () =>
     const previous = document.activeElement as HTMLElement | null
     panelRef.current?.focus()
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        onClose()
+        return
+      }
+      // `aria-modal` does not trap focus on its own — cycle Tab inside the panel.
+      if (event.key !== 'Tab') return
+      const panel = panelRef.current
+      if (!panel) return
+      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+        (el) => el.offsetParent !== null || el === panel,
+      )
+      if (focusable.length === 0) {
+        event.preventDefault()
+        panel.focus()
+        return
+      }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+      if (event.shiftKey && (active === first || active === panel || !panel.contains(active))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     document.addEventListener('keydown', onKey)
     return () => {
@@ -319,14 +347,20 @@ export function MobileSidebar({ open, onClose }: { open: boolean; onClose: () =>
   }, [open, onClose])
 
   return (
-    <div className={cn('fixed inset-0 z-40 md:hidden', !open && 'pointer-events-none')} aria-hidden={!open}>
+    // `inert` while closed keeps the off-screen nav links out of the tab order,
+    // so no focusable content lives inside the aria-hidden subtree.
+    <div
+      className={cn('fixed inset-0 z-40 md:hidden', !open && 'pointer-events-none')}
+      aria-hidden={!open}
+      inert={!open}
+    >
       <button
         type="button"
         aria-label="Close menu"
         tabIndex={open ? undefined : -1}
         onClick={onClose}
         className={cn(
-          'absolute inset-0 bg-black/50 backdrop-blur-xs transition-opacity duration-200 motion-reduce:transition-none',
+          'absolute inset-0 bg-overlay/50 backdrop-blur-xs transition-opacity duration-200 motion-reduce:transition-none',
           open ? 'opacity-100' : 'opacity-0',
         )}
       />

@@ -240,7 +240,10 @@ export const scanApi = {
 
   scanStatus: async (engagementId: string): Promise<ScanJob | null> => {
     try {
-      return mapScanJob(await req(`/engagements/${encodeURIComponent(engagementId)}/scan-status`))
+      const r = await req(`/engagements/${encodeURIComponent(engagementId)}/scan-status`)
+      // "no active job" can arrive as an empty body as well as a 404.
+      if (!r) return null
+      return mapScanJob(r)
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) return null
       throw e

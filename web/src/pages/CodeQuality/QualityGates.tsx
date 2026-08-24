@@ -235,7 +235,7 @@ function GateEditor({ gate, onSaved }: { gate: QualityGate | null; onSaved: () =
 
         {error && <ErrorState message={error} />}
         <div className="flex justify-end pt-2">
-          <Button variant="brand" type="submit" loading={saving} className="h-9 px-4 text-xs font-semibold">
+          <Button type="submit" loading={saving} className="h-9 px-4 text-xs font-semibold">
             {gate ? 'Save changes' : 'Create gate'}
           </Button>
         </div>

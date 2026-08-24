@@ -27,7 +27,7 @@ export function Connect() {
       </div>
 
       {phase === 'need-aup' && aup ? (
-        <Card title="Acceptable Use Policy" className="w-full max-w-lg animate-fade-in">
+        <Card title="Acceptable Use Policy" className="w-full max-w-lg animate-fade-in motion-reduce:animate-none">
           <p className="whitespace-pre-line text-sm leading-relaxed text-secondary">{aup.text}</p>
           {error && <div className="mt-4"><ErrorState message={error} /></div>}
           <div className="mt-5 flex items-center justify-between gap-3">
@@ -38,11 +38,11 @@ export function Connect() {
                 setSigningOut(true)
                 try { await logout() } finally { setSigningOut(false) }
               }}
-              className="text-xs text-tertiary underline-offset-2 hover:text-primary hover:underline"
+              className="rounded text-xs text-tertiary underline-offset-2 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {signingOut ? 'Signing out…' : 'Sign out'}
             </button>
-            <Button variant="brand" loading={accepting} onClick={async () => {
+            <Button loading={accepting} onClick={async () => {
               setAccepting(true)
               try { await acceptAup() } finally { setAccepting(false) }
             }}>
@@ -52,7 +52,7 @@ export function Connect() {
           <p className="mt-3 text-center text-[11px] text-quaternary">Policy version {aup.version}</p>
         </Card>
       ) : (
-        <Card className="w-full max-w-[420px] animate-fade-in">
+        <Card className="w-full max-w-[420px] animate-fade-in motion-reduce:animate-none">
           <div className="space-y-5">
             <div className="space-y-1 text-center">
               <h1 className="text-base font-semibold text-primary">Sign in to Synapse</h1>
@@ -61,7 +61,7 @@ export function Connect() {
             {error && <ErrorState message={error} />}
             <a
               href="/api/auth/oidc/login"
-              className="inline-flex w-full select-none items-center justify-center gap-2 rounded-lg bg-brand-solid px-3.5 py-2 text-sm font-semibold text-white transition-opacity duration-150 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2"
+              className="inline-flex w-full select-none items-center justify-center gap-2 rounded-lg bg-brand-solid px-3.5 py-2 text-sm font-semibold text-primary_on-brand transition-opacity duration-150 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2"
             >
               <LogIn04 className="size-4" /> Sign in with your organization
             </a>
@@ -84,7 +84,7 @@ export function Connect() {
                 <p id="api-token-hint" className="text-[11px] text-tertiary">
                   {token.trim() ? 'The token is sent only to this server.' : 'Paste a token to enable this development sign-in.'}
                 </p>
-                <Button variant="brand" type="submit" loading={connecting} disabled={!token.trim()} className="w-full">
+                <Button type="submit" loading={connecting} disabled={!token.trim()} className="w-full">
                   <Key01 className="size-4" /> Connect with API token
                 </Button>
               </form>

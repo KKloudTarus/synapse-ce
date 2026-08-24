@@ -75,7 +75,7 @@ export function ProjectOverviewPage() {
           icon={isRunning ? BarChart01 : ShieldTick}
           title={isRunning ? 'Analysis in progress' : 'No completed analysis yet'}
           hint={isRunning ? 'The Overview will appear after the first successful analysis completes.' : 'Run an analysis to see the Quality Gate verdict and code-quality metrics.'}
-          action={!isRunning && <Button variant="brand" onClick={startAnalysis}>Run first analysis</Button>}
+          action={!isRunning && <Button onClick={startAnalysis}>Run first analysis</Button>}
         />
       </Card>
     )

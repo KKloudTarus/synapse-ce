@@ -103,14 +103,27 @@ export function FindingsTab({
 
   // Separate actionable third-party findings from first-party historical advisories
   // – the table shows only actionable findings.
-  const thirdParty = (findings ?? []).filter((f) => f.class !== 'first_party_historical')
-  const historical = (findings ?? []).filter((f) => f.class === 'first_party_historical')
-  const available = new Set(thirdParty.map((f) => f.severity))
+  const thirdParty = useMemo(
+    () => (findings ?? []).filter((f) => f.class !== 'first_party_historical'),
+    [findings],
+  )
+  const historical = useMemo(
+    () => (findings ?? []).filter((f) => f.class === 'first_party_historical'),
+    [findings],
+  )
+  const available = useMemo(() => new Set(thirdParty.map((f) => f.severity)), [thirdParty])
   // The Kinds present – the Kind filter only appears when there's more than one to choose from.
-  const kinds = Array.from(new Set(thirdParty.map((f) => f.kind).filter(Boolean)))
+  const kinds = useMemo(
+    () => Array.from(new Set(thirdParty.map((f) => f.kind).filter(Boolean))),
+    [thirdParty],
+  )
   // findings arrive already risk-ordered (KEV -> EPSS x CVSS) from the API.
-  const rows = thirdParty.filter(
-    (f) => (filter === 'all' || f.severity === filter) && (kindFilter === 'all' || f.kind === kindFilter),
+  const rows = useMemo(
+    () =>
+      thirdParty.filter(
+        (f) => (filter === 'all' || f.severity === filter) && (kindFilter === 'all' || f.kind === kindFilter),
+      ),
+    [thirdParty, filter, kindFilter],
   )
 
   useEffect(() => {
@@ -119,7 +132,8 @@ export function FindingsTab({
     if (idx >= 0) {
       setPage(Math.floor(idx / PAGE_SIZE) + 1)
     }
-    setExpanded((current) => new Set(current).add(focusedFindingId))
+    // Bail out when already expanded so this never feeds a re-render cycle.
+    setExpanded((current) => (current.has(focusedFindingId) ? current : new Set(current).add(focusedFindingId)))
     const frame = requestAnimationFrame(() => {
       document.getElementById(findingAnchor(focusedFindingId))?.scrollIntoView({ block: 'center', behavior: 'smooth' })
     })

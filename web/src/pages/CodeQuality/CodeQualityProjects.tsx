@@ -55,7 +55,7 @@ export function CodeQualityProjects() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Button variant="brand" onClick={() => setCreating((value) => !value)}>
+          <Button onClick={() => setCreating((value) => !value)}>
             {creating ? <><XClose className="size-4" /> Cancel</> : <><Plus className="size-4" /> New project</>}
           </Button>
         </div>
@@ -69,7 +69,7 @@ export function CodeQualityProjects() {
           icon={Folder}
           title="No code quality projects yet"
           hint={`Create a project from Git${allowLocalSource ? ', a server-local path,' : ''} or an uploaded archive. Its first analysis starts automatically.`}
-          action={<Button variant="brand" onClick={() => setCreating(true)}><Plus className="size-4" aria-hidden="true" /> New project</Button>}
+          action={<Button onClick={() => setCreating(true)}><Plus className="size-4" aria-hidden="true" /> New project</Button>}
         />
       )}
       {projects && projects.length > 0 && (
@@ -334,7 +334,7 @@ function CreateProjectForm({ onCreated: _onCreated }: { onCreated?: () => void }
         </Field>
         {error && <ErrorState message={error} />}
         <div className="flex justify-end">
-          <Button variant="brand" type="submit" loading={submitting}>
+          <Button type="submit" loading={submitting}>
             <GitBranch01 className="size-4" aria-hidden="true" /> Create and analyze
           </Button>
         </div>

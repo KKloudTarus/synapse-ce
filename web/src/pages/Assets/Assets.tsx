@@ -9,7 +9,7 @@ import {
   ShieldTick,
   XClose,
 } from '@untitledui/icons'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner, cn } from '../../components/ui'
 import { PaginationCardDefault } from '../../components/application/pagination/pagination'
@@ -51,20 +51,28 @@ export function Assets() {
   const [creating, setCreating] = useState(false)
   const [revision, setRevision] = useState(0)
   const [query, setQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
   const [type, setType] = useState('all')
   const [criticality, setCriticality] = useState('all')
   const [lifecycle, setLifecycle] = useState('all')
 
+  // Only the debounced value feeds the fetch deps, so typing doesn't fire a
+  // request per keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 300)
+    return () => clearTimeout(timer)
+  }, [query])
+
   const { data: result, error } = useFetch<BusinessAssetPage>(
-    (_signal) => {
+    (signal) => {
       const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) })
-      if (query.trim()) params.set('q', query.trim())
+      if (debouncedQuery.trim()) params.set('q', debouncedQuery.trim())
       if (type && type !== 'all') params.set('type', type)
       if (criticality && criticality !== 'all') params.set('criticality', criticality)
       if (lifecycle && lifecycle !== 'all') params.set('lifecycle', lifecycle)
-      return api.listBusinessAssets(params.toString())
+      return api.listBusinessAssets(params.toString(), signal)
     },
-    { deps: [criticality, lifecycle, page, query, revision, type] },
+    { deps: [criticality, lifecycle, page, debouncedQuery, revision, type] },
   )
 
   const hasFilters = Boolean(query.trim() || (type && type !== 'all') || (criticality && criticality !== 'all') || (lifecycle && lifecycle !== 'all'))
@@ -85,7 +93,7 @@ export function Assets() {
           </p>
         </div>
         <Button
-          variant={creating ? 'secondary' : 'brand'}
+          variant={creating ? 'secondary' : 'primary'}
           onClick={() => setCreating((value) => !value)}
           className={creating ? '!border-brand-solid !text-brand-secondary hover:!bg-brand-primary/10' : undefined}
         >
@@ -336,7 +344,7 @@ function CreateAssetForm({ onCreated }: { onCreated: () => void }) {
           <Field label="Description"><Input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Customer-facing mobile banking product" /></Field>
         </div>
         {error && <ErrorState message={error} />}
-        <div className="flex justify-end"><Button variant="brand" type="submit" loading={submitting}>Create Asset</Button></div>
+        <div className="flex justify-end"><Button type="submit" loading={submitting}>Create Asset</Button></div>
       </form>
     </Card>
   )

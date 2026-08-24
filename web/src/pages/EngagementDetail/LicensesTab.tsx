@@ -217,7 +217,11 @@ export function LicensesTab({ scan }: { scan: ScanResult | null }) {
     .sort((a, b) => a.name.localeCompare(b.name))
   const allDisplayRows = buildLicenseDisplayRows(scan.licenses, unknownPackages, componentIndex, scan.dependencies)
   const displayRows = allDisplayRows.filter((row) => licenseDisplayRowMatchesSearch(row, search.trim().toLowerCase()))
-  const packagesImpacted = displayRows.length
+  // "Impacted" means a real license risk (copyleft/proprietary and above), not
+  // simply "listed" — otherwise this card duplicates "packages listed".
+  const packagesImpacted = displayRows.filter((row) =>
+    row.entries.some((entry) => entry.severity === 'critical' || entry.severity === 'high' || entry.severity === 'medium'),
+  ).length
   const licenseColumns: Column<LicenseDisplayRow>[] = [
     {
       header: 'Packages',
@@ -310,7 +314,7 @@ export function LicensesTab({ scan }: { scan: ScanResult | null }) {
               </div>
               <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
                 <div className="font-mono text-base font-semibold text-primary">{packagesImpacted.toLocaleString()}</div>
-                <div>packages impacted</div>
+                <div>packages with license risk</div>
               </div>
               <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
                 <div className="font-mono text-base font-semibold text-tertiary">{allDisplayRows.length.toLocaleString()}</div>

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
+// Forced aliases: @untitledui/icons has no multi-file or compare-arrows glyph, so
+// Browse-files uses a single-file icon and the diff toggle a horizontal switch.
 import { ChevronLeft, ChevronRight, FileCode01 as FileCode2, File06 as Files, SwitchHorizontal01 as GitCompareArrows, XClose as X } from '@untitledui/icons'
 import { Button, EmptyState, Pill, SevBadge, Skeleton, cn } from '../../ui'
 import { PROJECT_CODE_SOURCE_WINDOW } from '../../../lib/projectCodeNavigation'
@@ -99,7 +101,7 @@ export function ProjectCodeWorkspace({
       </div>
 
       {filesOpen && <div className="fixed inset-0 z-40 lg:hidden">
-        <button type="button" aria-label="Close files" onClick={() => setFilesOpen(false)} className="absolute inset-0 bg-black/60" />
+        <button type="button" aria-label="Close files" onClick={() => setFilesOpen(false)} className="absolute inset-0 bg-overlay/60" />
         <aside ref={filesPanel} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Captured files" className="absolute inset-y-0 left-0 flex w-[min(90vw,22rem)] flex-col border-r border-border bg-surface shadow-2xl outline-none">
           <div className="flex h-14 items-center justify-between border-b border-border px-4">
             <h2 className="text-sm font-semibold">Captured files</h2>

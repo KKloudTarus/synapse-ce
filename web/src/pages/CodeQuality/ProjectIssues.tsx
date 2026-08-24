@@ -246,7 +246,7 @@ function IssueDetail({ projectKey, issue, onClose, onTransitioned }: {
                 placeholder="Why is this the right decision?" />
             </Field>
             {err && <p className="text-xs text-critical">{err}</p>}
-            <Button variant="brand" onClick={submit} loading={busy} disabled={busy}>Apply transition</Button>
+            <Button onClick={submit} loading={busy} disabled={busy}>Apply transition</Button>
           </div>
         )}
       </div>

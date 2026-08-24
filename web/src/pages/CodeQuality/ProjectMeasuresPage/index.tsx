@@ -108,7 +108,9 @@ export function ProjectMeasuresPage() {
     setSearchParams(sp)
   }
 
-  if (loading) return <div className="h-20" />
+  // Only blank on the first load.  is also true while refetching after a
+  // path/domain change, and blanking then wiped the breadcrumbs and selector.
+  if (loading && !data) return <div className="h-20" />
   if (error && !data) return <ErrorState message={error} />
   if (!data || data.state === 'not_analyzed') return <ProjectRouteEmpty running={job?.status === 'running'} />
 
@@ -128,7 +130,9 @@ export function ProjectMeasuresPage() {
     return a.name.localeCompare(b.name)
   })
 
-  const columns = getDomainColumns(domain)
+  // Build the column array once: getDomainColumns(domain)(setPath) allocates fresh
+  // cell closures, and it was previously called per row.
+  const cols = getDomainColumns(domain)(setPath)
 
   return (
     <div className="space-y-6">
@@ -191,7 +195,7 @@ export function ProjectMeasuresPage() {
             />
         ) : sortedItems.length > 50 ? (
           <VirtualTable
-            columns={columns(setPath)}
+            columns={cols}
             items={sortedItems}
             rowKey={(item) => item.path}
             totalItems={undefined}
@@ -201,7 +205,7 @@ export function ProjectMeasuresPage() {
             <table className="min-w-full text-left text-sm whitespace-nowrap">
               <thead className="bg-secondary/95 text-[11px] uppercase tracking-[0.14em] text-primary border-b border-secondary sticky top-0">
                 <tr>
-                  {columns(setPath).map((c) => (
+                  {cols.map((c) => (
                     <th key={c.header} scope="col" className={cn("px-4 py-3 font-semibold", c.className)}>{c.header}</th>
                   ))}
                 </tr>
@@ -209,7 +213,7 @@ export function ProjectMeasuresPage() {
               <tbody className="divide-y divide-secondary">
                 {sortedItems.map(item => (
                   <tr key={item.path} className="hover:bg-secondary/50 transition-colors">
-                    {columns(setPath).map((c) => (
+                    {cols.map((c) => (
                       <td key={c.header} className={cn("px-4 py-3 min-w-0 truncate", c.className)}>
                         {c.cell(item)}
                       </td>

@@ -262,7 +262,7 @@ export function CodeQualityProject() {
               <span className="max-w-32 truncate">{coverageFile ? coverageFile.name : 'Coverage'}</span>
               <input aria-label="Coverage report (optional)" className="sr-only" type="file" accept=".info,.lcov,.xml,text/plain,application/xml,text/xml" disabled={isRunning} onChange={(event) => setCoverageFile(event.target.files?.[0] ?? null)} />
             </label>
-            <Button variant="brand" loading={isRunning} disabled={isRunning} onClick={startAnalysis}>
+            <Button loading={isRunning} disabled={isRunning} onClick={startAnalysis}>
               <Play className="size-4" aria-hidden="true" /> Run analysis
             </Button>
           </div>
