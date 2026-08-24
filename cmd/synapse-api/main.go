@@ -111,6 +111,8 @@ import (
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
 	detectledger "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectledger"
 	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
+	incidenttriage "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidenttriage"
+	incidentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
 	keyregistry "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/keyregistry"
 	telemetryingest "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/telemetryingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
@@ -282,6 +284,7 @@ func main() {
 	var importedSBOMStore ports.ImportedSBOMStore
 	var importedFindingStore ports.ImportedFindingStore // third-party (SARIF) findings under governance
 	var detectionRecordStore ports.DetectionRecordStore // #423 detection ledger projection
+	var incidentEventStore ports.IncidentEventStore     // #594 C7 incident append-only event log
 	var promotionStore ports.PendingPromotionAuditStore
 	var scanJobStore ports.ScanJobStore
 	var scanRunStore ports.ScanRunStore
@@ -411,6 +414,7 @@ func main() {
 		importedSBOMStore = postgres.NewImportedSBOMStore(pool)
 		importedFindingStore = postgres.NewImportedFindingRepository(pool)
 		detectionRecordStore = postgres.NewDetectionRecordRepository(pool)
+		incidentEventStore = postgres.NewIncidentEventRepository(pool)
 		promotionStore, err = postgres.NewPromotionStore(pool)
 		if err != nil {
 			log.Error("postgres promotion store init failed", "err", err)
@@ -506,6 +510,7 @@ func main() {
 		importedSBOMStore = memory.NewImportedSBOMStore()
 		importedFindingStore = memory.NewImportedFindingStore()
 		detectionRecordStore = memory.NewDetectionRecordStore()
+		incidentEventStore = memory.NewIncidentEventStore()
 		memoryFindings, ok := findingRepo.(*memory.FindingRepository)
 		if !ok {
 			log.Error("memory finding repository type mismatch")
@@ -1510,6 +1515,31 @@ func main() {
 			log.Info("third-party SARIF ingest ENABLED (durable; provenance mandatory; imported findings cannot self-promote)")
 		} else {
 			log.Warn("third-party SARIF ingest ENABLED but NOT DURABLE - imported findings and their ingest history live in memory and are lost on restart; configure SYNAPSE_DB_DSN for a durable store")
+		}
+	}
+
+	// Phase-C incident read + analyst-triage surface (#594 C7/C5). The event-sourced incident store
+	// (append-only log + projection) is always present (memory or Postgres selected above); the read
+	// service projects it, and the triage service records each analyst mutation as an attributable
+	// event on that log + the tamper-evident audit trail. RBAC + tenant scoping are enforced at the
+	// HTTP edge (router). No agent transport needed — this is an operator surface.
+	{
+		incidentSvc, ierr := incidentuc.NewService(incidentEventStore)
+		if ierr != nil {
+			log.Error("incident read service init failed", "err", ierr)
+			os.Exit(1)
+		}
+		router.SetIncidents(incidentSvc)
+		triageSvc, terr := incidenttriage.NewService(incidentSvc, auditLog, func() time.Time { return clock.Now().UTC() })
+		if terr != nil {
+			log.Error("incident triage service init failed", "err", terr)
+			os.Exit(1)
+		}
+		router.SetIncidentTriage(triageSvc)
+		if cfg.DBDSN != "" {
+			log.Info("incident read + analyst-triage surface ENABLED (durable; append-only event log; tenant-scoped; RBAC-gated)")
+		} else {
+			log.Warn("incident read + analyst-triage surface ENABLED but NOT DURABLE - incidents and their triage history live in memory and are lost on restart; configure SYNAPSE_DB_DSN for a durable store")
 		}
 	}
 

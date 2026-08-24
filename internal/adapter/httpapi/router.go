@@ -78,6 +78,8 @@ type Router struct {
 	businessAssets         businessAssetService  // optional; nil ⇒ business-level Asset routes are not registered
 	attackPaths            attackPathService     // optional; nil ⇒ attack-path routes are not registered
 	coverage               coverageService       // optional; nil ⇒ fleet coverage/agent-view routes are not registered
+	incidents              incidentReader        // optional; nil ⇒ incident read routes are not registered (#594 C7)
+	incidentTriage         incidentTriager       // optional; nil ⇒ incident triage routes are not registered (#594 C5)
 	sarif                  sarifIngester         // optional; nil ⇒ the third-party SARIF import route is not registered
 	importedFindings       sarifReader           // optional read side for imported findings
 	fleetRolloutAdmin      fleetRolloutService   // optional; nil ⇒ the operator rollout routes are not served
@@ -372,6 +374,24 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/fleet/coverage", rt.authz(userdom.PermView, rt.listFleetCoverage))
 		mux.HandleFunc("GET /api/v1/fleet/coverage/summary", rt.authz(userdom.PermView, rt.fleetCoverageSummary))
 		mux.HandleFunc("GET /api/v1/fleet/coverage/export", rt.authz(userdom.PermView, rt.exportFleetCoverage))
+	}
+	if rt.incidents != nil {
+		// Phase-C incident read + analyst-triage surface (#594 C7/C5). Operator plane, tenant-scoped
+		// (fleetTenant + RLS). These live under /api/v1/fleet but are NOT in fleetAgentPlaneMounts,
+		// so Handler() keeps them on the HUMAN RBAC chain, not the untrusted agent plane. Reads =
+		// PermView.
+		mux.HandleFunc("GET /api/v1/fleet/incidents", rt.authz(userdom.PermView, rt.listIncidents))
+		mux.HandleFunc("GET /api/v1/fleet/incidents/{id}", rt.authz(userdom.PermView, rt.getIncident))
+		if rt.incidentTriage != nil {
+			// Analyst-triage mutations. Owner/comment/status = PermTriage (mirrors finding-triage);
+			// disposition is an analyst VERDICT so it takes PermReview. The actor is the authenticated
+			// principal (PrincipalFrom), never a body field, and each mutation lands as an attributable
+			// event on the append-only incident log.
+			mux.HandleFunc("POST /api/v1/fleet/incidents/{id}/owner", rt.authz(userdom.PermTriage, rt.assignIncidentOwner))
+			mux.HandleFunc("POST /api/v1/fleet/incidents/{id}/comments", rt.authz(userdom.PermTriage, rt.commentIncident))
+			mux.HandleFunc("POST /api/v1/fleet/incidents/{id}/status", rt.authz(userdom.PermTriage, rt.changeIncidentStatus))
+			mux.HandleFunc("POST /api/v1/fleet/incidents/{id}/disposition", rt.authz(userdom.PermReview, rt.setIncidentDisposition))
+		}
 	}
 	if rt.projects != nil {
 		mux.HandleFunc("POST /api/v1/projects", rt.authz(userdom.PermOperate, rt.createProject))
