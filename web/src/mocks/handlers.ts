@@ -322,7 +322,12 @@ const TEAM_MEMBERS = [
 // ============================================================================
 
 export const handlers = [
-  // --- Auth ---
+  // --- Auth (BFF) ---
+  // discoverSession() calls GET /api/auth/session and expects an authenticated
+  // session with a CSRF token; without this handler the request falls through to
+  // the Vite SPA fallback (index.html) and JSON.parse throws.
+  http.get('/api/auth/session', () => HttpResponse.json({ authenticated: true, csrf_token: 'mock-csrf-token' })),
+  http.post('/api/auth/logout', () => new HttpResponse(null, { status: 204 })),
   http.get('/api/v1/aup', () => HttpResponse.json({ version: '1.0', accepted: true, accepted_at: NOW })),
   http.post('/api/v1/aup/accept', () => HttpResponse.json({ ok: true })),
 

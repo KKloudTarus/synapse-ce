@@ -23,7 +23,10 @@ import "./styles/globals.css";
 })()
 
 async function bootstrap() {
-  if (import.meta.env.DEV) {
+  // MSW mock mode is dev-only AND mutually exclusive with the real backend:
+  // when VITE_API_PROXY_TARGET is set the dev server proxies /api to the backend,
+  // so the mock worker must stay off or it would intercept those calls first.
+  if (import.meta.env.DEV && !import.meta.env.VITE_API_PROXY_TARGET) {
     const { worker } = await import('./mocks/browser')
     await worker.start({ onUnhandledRequest: 'bypass' })
   }
