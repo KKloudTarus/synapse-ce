@@ -2,10 +2,12 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -54,7 +56,7 @@ func WithTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn fun
 		if bound.tenantID != tenantID {
 			return fmt.Errorf("%w: nested tenant transaction mismatch", shared.ErrValidation)
 		}
-		return fn(bound.tx)
+		return normalizePersistenceError(fn(bound.tx))
 	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -77,13 +79,27 @@ func WithTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn fun
 		return fmt.Errorf("rls: set tenant: %w", err)
 	}
 	if err = fn(tx); err != nil {
-		return err
+		return normalizePersistenceError(err)
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("rls: commit: %w", err)
 	}
 	committed = true
 	return nil
+}
+
+// normalizePersistenceError translates database-enforced application conflicts into the same
+// domain sentinel used by deterministic pre-checks. The telemetry asset-binding constraint is a
+// race backstop, so callers must observe a conflict (HTTP 409 at the edge), not a generic 500.
+func normalizePersistenceError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "uq_telemetry_asset_bindings_asset" {
+		return fmt.Errorf("%w: telemetry asset is already bound to another agent", shared.ErrConflict)
+	}
+	return err
 }
 
 // WithContextTenant runs fn under the immutable tenant previously bound to ctx.
