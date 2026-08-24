@@ -2,11 +2,15 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 func TestTelemetryAssetBindingTriggerRejectsCrossAgentTakeover(t *testing.T) {
@@ -53,10 +57,21 @@ func TestTelemetryAssetBindingTriggerRejectsCrossAgentTakeover(t *testing.T) {
 		t.Fatalf("seed host asset: %v", err)
 	}
 
-	if _, err := pool.Exec(ctx, `UPDATE fleet_assets
+	_, updateErr := pool.Exec(ctx, `UPDATE fleet_assets
 		SET attributes=jsonb_build_object('reporting_agent_id',$3::text), updated_at=$4
-		WHERE tenant_id=$1 AND id=$2`, tenant, assetID, agentB, now.Add(time.Second)); err == nil {
+		WHERE tenant_id=$1 AND id=$2`, tenant, assetID, agentB, now.Add(time.Second))
+	if updateErr == nil {
 		t.Fatal("cross-agent host update unexpectedly displaced telemetry asset binding")
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(updateErr, &pgErr) {
+		t.Fatalf("cross-agent host update error = %T %v, want PgError", updateErr, updateErr)
+	}
+	if pgErr.Code != "23505" || pgErr.ConstraintName != "uq_telemetry_asset_bindings_asset" {
+		t.Fatalf("cross-agent host update SQLSTATE/constraint = %s/%s, want 23505/uq_telemetry_asset_bindings_asset", pgErr.Code, pgErr.ConstraintName)
+	}
+	if err := normalizePersistenceError(updateErr); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("normalized cross-agent host update error = %v, want ErrConflict", err)
 	}
 
 	var boundAgent string
