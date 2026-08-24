@@ -204,14 +204,6 @@ export const EngagementTable: FC<EngagementTableProps> = ({
                         ? 'Try adjusting your search query or filter parameters.'
                         : 'Create one to define an authorized testing scope and connect the assessment to an Asset.'}
                     </p>
-                    {!isFiltered && (
-                      <Link
-                        to="/engagements/new"
-                        className="mt-4 inline-flex items-center justify-center gap-1.5 rounded-lg bg-brand-solid px-3.5 py-2 text-xs font-semibold text-white shadow-xs transition hover:bg-brand-solid_hover"
-                      >
-                        New Engagement
-                      </Link>
-                    )}
                   </div>
                 </td>
               </tr>

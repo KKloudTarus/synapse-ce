@@ -140,7 +140,6 @@ export function Assets() {
               icon={Cube01}
               title={hasFilters ? 'No matching Assets' : 'No Assets yet'}
               hint={hasFilters ? 'Adjust search or filters.' : 'Create a product, application, system, or business service to aggregate security posture.'}
-              action={!hasFilters ? <Button variant="brand" onClick={() => setCreating(true)}><Plus className="size-4" />New Asset</Button> : undefined}
             />
           </div>
         )}
