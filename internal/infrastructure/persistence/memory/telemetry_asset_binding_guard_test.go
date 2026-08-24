@@ -17,18 +17,18 @@ func TestTelemetryAssetBindingRejectsCrossAgentTakeover(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 
 	first := ports.TelemetryAssetBinding{
-		TenantID: tenant,
-		AgentID: "agent-a",
-		AssetID: "asset-1",
+		TenantID:  tenant,
+		AgentID:   "agent-a",
+		AssetID:   "asset-1",
 		UpdatedAt: now,
 	}
 	if err := store.BindTelemetryAsset(ctx, first); err != nil {
 		t.Fatalf("bind initial asset: %v", err)
 	}
 	second := ports.TelemetryAssetBinding{
-		TenantID: tenant,
-		AgentID: "agent-b",
-		AssetID: "asset-1",
+		TenantID:  tenant,
+		AgentID:   "agent-b",
+		AssetID:   "asset-1",
 		UpdatedAt: now.Add(time.Second),
 	}
 	if err := store.BindTelemetryAsset(ctx, second); !errors.Is(err, shared.ErrConflict) {
