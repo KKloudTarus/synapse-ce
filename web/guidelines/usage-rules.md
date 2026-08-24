@@ -1,271 +1,220 @@
 # Usage Rules
 
-> Quy tắc thực tế để compose pages đúng design system. Inferred từ component source code patterns.
+Conventions for composing Synapse pages with the shared design system. Where `tokens.md`
+covers *which* token to use and `components.md` covers *which* component to use, this
+guide covers *how to put them together* into a consistent page.
 
 ---
 
-## Spacing Rules
+## What a page author controls
 
-### Component Internal Padding
+Shared components own their **internal** spacing — the padding inside a button, input,
+tab, badge, or modal. Do not override it. Your job as a page author is the layout
+*around* and *between* components:
 
-| Component | Size SM | Size MD | Size LG |
-|-----------|---------|---------|---------|
-| Button | `py-1.5 px-2.5` (6px/10px) | `py-2.5 px-3.5` (10px/14px) | `py-2.5 px-4` (10px/16px) |
-| Input | `py-2 px-3` (8px/12px) | `py-2 px-3` (8px/12px) | `py-2.5 px-3.5` (10px/14px) |
-| Tabs (button) | `py-2 px-2.5` | `py-2.5 px-2.5` | — |
-| Modal padding | `p-4` (16px mobile) | `p-6` (24px desktop) | — |
-
-### Gap Rules (khoảng cách giữa elements)
-
-| Context | Gap | Ví dụ |
-|---------|-----|-------|
-| Icon ↔ text (nhỏ) | `gap-1` (4px) | Button xs/sm icon + text |
-| Icon ↔ text (lớn) | `gap-1.5` (6px) | Button lg/xl icon + text |
-| Label ↔ input | `gap-1.5` (6px) | Form field label → input |
-| Input ↔ hint | `gap-1.5` (6px) | Input → helper text dưới |
-| Toggle/Checkbox ↔ label | `gap-2` (8px) sm, `gap-3` (12px) md | Inline controls |
-| Form fields | `gap-4` to `gap-6` (16-24px) | Giữa các form groups |
-| Section ↔ section | `gap-6` to `gap-8` (24-32px) | Giữa các content sections |
-| Page sections | `gap-8` to `gap-16` (32-64px) | Major page divisions |
-
-### Padding Patterns
-
-| Element | Padding |
-|---------|---------|
-| Card/Panel | `p-4` (16px) hoặc `p-6` (24px) |
-| Modal body | `p-6` (24px) |
-| Sidebar | `p-4` hoặc `px-3 py-4` |
-| Table cell | `px-6 py-4` (typical) |
-| Page container | `px-4 sm:px-6 lg:px-8` |
-| Dropdown items | `px-2.5 py-2` |
-| Tooltip | `px-3 py-2` (title only), `px-3 py-3` (with description) |
+- **Space between sections** — use section-level gaps (`gap-6`–`gap-8`); reserve larger
+  page-level gaps for major divisions. See the spacing scale in `tokens.md`.
+- **Grid and flex gaps** — set the `gap-*` between cards, stats, and columns.
+- **Container padding** — the responsive page container uses a pattern like
+  `px-4 sm:px-6 lg:px-8`; keep page content within it.
+- **Content width** — constrain wide content to `max-width-container` rather than
+  inventing new max-widths.
+- **Responsive layout** — collapse multi-column grids to single column on small
+  screens; make wide tables and code blocks scroll inside their own container.
+- **Action placement** — where the primary and secondary actions sit in a header,
+  toolbar, or card footer.
 
 ---
 
-## Radius Rules
+## Actions and hierarchy
 
-| Component | Radius | Token |
-|-----------|--------|-------|
-| **Buttons** (tất cả sizes) | `rounded-lg` (8px) | `radius-lg` |
-| **Inputs** | `rounded-lg` (8px) | `radius-lg` |
-| **Cards** | `rounded-xl` (12px) | `radius-xl` |
-| **Modals** (mobile) | `rounded-xl` (12px) | `radius-xl` |
-| **Modals** (desktop) | `rounded-2xl` (16px) | `radius-2xl` |
-| **Badges** (pill type) | `rounded-full` (9999px) | `radius-full` |
-| **Badges** (color/modern) | `rounded-md` (6px) | `radius-md` |
-| **Checkbox** (sm) | `rounded` (4px) | `radius-sm` |
-| **Checkbox** (md) | `rounded-md` (6px) | `radius-md` |
-| **Toggle** | `rounded-full` | `radius-full` |
-| **Avatar** | `rounded-full` | `radius-full` |
-| **Tooltip** | `rounded-lg` (8px) | `radius-lg` |
-| **Tabs** (border type) | `rounded-[10px]` container, items inside | Custom |
-| **Tags** | `rounded-md` to `rounded-full` | Varies |
-| **Dropdown menu** | `rounded-lg` to `rounded-xl` | `radius-lg/xl` |
-| **Shortcut badge** | `rounded` (4px) | `radius-sm` |
+**Use one primary action per action group.** Style the remaining actions in that group
+as secondary or tertiary. An "action group" is any cluster of controls that belong
+together — a page header, a card footer, a modal footer, a toolbar. A page may contain
+several action groups, each with its own single primary action.
 
-**Rule:** Hầu hết interactive elements = `rounded-lg`. Containers/panels = `rounded-xl/2xl`. Pill shapes = `rounded-full`.
+Express emphasis through the `Button` `color` prop, most to least prominent:
+
+`primary` → `secondary` → `tertiary` → `link-color` → `link-gray`
+
+Use the `*-destructive` colours for delete/remove, and always confirm irreversible
+actions in a `Modal`.
 
 ---
 
-## Shadow Rules
+## Colours
 
-| Context | Shadow | Khi nào |
-|---------|--------|---------|
-| **Buttons** (primary/secondary) | `shadow-xs-skeuomorphic` | Mọi filled buttons |
-| **Inputs** | `shadow-xs` | Default state |
-| **Cards** nhỏ | `shadow-sm` | Elevated cards |
-| **Dropdowns/Popovers** | `shadow-md` to `shadow-lg` | Floating menus |
-| **Tooltips** | `shadow-lg` | Tooltip container |
-| **Modals** | `shadow-xl` | Modal panel |
-| **Tabs** (minimal type) | `shadow-xs` + `ring-1` | Selected tab item |
-| **Marketing/Mockups** | `shadow-2xl` to `shadow-3xl` | Hero sections |
-| **Badge** (modern) | `shadow-xs` | Modern badge variant |
-| **No shadow** | — | Tertiary buttons, text links, toggles |
-
-**Rule:** Shadow depth tăng theo z-level: page content < cards < dropdowns < tooltips < modals.
+- **Use semantic colour tokens** for surfaces, text, borders, and icons
+  (`text-primary`, `bg-secondary`, `border-primary`, `fg-tertiary`, …). Pick categorical
+  colours (status, tags, charts) through the components that consume the `utility-*`
+  ramps — the `color` prop on `Badge`, `Tag`, and charts.
+- **Do not write raw colour values** — no hex/rgb, and avoid raw scale utilities like
+  `bg-red-500`, which are not theme-aware.
+- **Reserve brand for meaning** — primary actions, focus, links, active/selected state.
+- **Verify each surface in light and dark.** See the token roles and dark-mode mappings
+  in `tokens.md`.
 
 ---
 
-## Color Rules
+## Dark mode
 
-### Semantic Meaning
-
-| Color | Meaning | Dùng cho |
-|-------|---------|----------|
-| **Brand** (purple) | Primary action, active state | CTAs, links, focus rings, selected items, active tabs |
-| **Error/Red** | Destructive, invalid, failure | Delete buttons, form errors, error alerts, destructive badges |
-| **Warning/Yellow** | Caution, attention needed | Warning alerts, pending states |
-| **Success/Green** | Positive, completed | Success alerts, completed status, valid states |
-| **Neutral/Gray** | Default, secondary | Secondary actions, borders, disabled, placeholder |
-
-### Button Color Hierarchy
-
-```
-Quan trọng nhất → ít quan trọng nhất:
-
-primary (brand solid)  →  secondary (white + border)  →  tertiary (ghost)  →  link-color  →  link-gray
-```
-
-**Rule:** Mỗi page section chỉ nên có **1 primary button**. Các actions khác dùng secondary/tertiary.
-
-### Text Color Hierarchy
-
-```
-text-primary   → Main content, headings
-text-secondary → Descriptions, supporting text
-text-tertiary  → Less important info, timestamps
-text-quaternary → Least important, icons muted
-text-placeholder → Input placeholder only
-```
-
-### Background Layering
-
-```
-bg-primary (white/950) → Main page, cards
-  └── bg-secondary (50/900) → Subtle sections, table alternating
-       └── bg-tertiary (100/800) → Enclosed areas, code blocks
-            └── bg-quaternary (200/700) → Deep nesting (rare)
-```
+Light and dark are driven by token mappings in `theme.css`, not by per-component work:
+the `.dark-mode` layer remaps the semantic role tokens (`text-*`, `bg-*`, `border-*`,
+`fg-*`, `ring-*`, `outline-*`) and the `utility-*` colour ramps. If you style with those
+mapped tokens, surfaces adapt automatically. Because raw colour scales are **not**
+remapped, and no arbitrary shade is guaranteed a good dark counterpart, review every new
+surface in both themes before shipping.
 
 ---
 
-## Typography Rules
+## Accessibility
 
-### Heading Levels
+The base components are built on React Aria and ship real accessibility behaviour. Your
+job is to compose them so that behaviour survives — distinguish what the component
+guarantees from what correct usage requires:
 
-| Level | Font | Khi nào dùng |
-|-------|------|--------------|
-| h1 (Page title) | `text-display-sm font-semibold` (30px) | Page top-level heading |
-| h2 (Section) | `text-xl font-semibold` (20px) | Major sections |
-| h3 (Subsection) | `text-lg font-semibold` (18px) | Cards headers, sub-sections |
-| h4 (Small header) | `text-md font-semibold` (16px) | Small card titles |
+| The component guarantees | You are responsible for |
+|---|---|
+| Keyboard interaction (activation, arrow-key navigation, roving tabindex) | Not replacing components with bare `<div>`s that drop it; giving icon-only controls an accessible label |
+| Associating `label`, `hint`, and error text with a field | Actually passing `label` and hint/error via the component API instead of relying on `placeholder` |
+| Focus containment and `Escape`-to-close in `Modal` / `SlideoutMenu` | Keeping that behaviour enabled — don't disable focus management or intercept `Escape` |
+| Exposing checked/disabled state to assistive tech | Using the `isDisabled` / selection props rather than visually faking those states |
+| Opening tooltips on focus as well as hover | Attaching tooltips to focusable triggers |
 
-### Body Text
-
-| Context | Font |
-|---------|------|
-| Body default | `text-sm text-secondary` (14px) |
-| Body large | `text-md text-secondary` (16px) |
-| Labels (form) | `text-sm font-medium text-secondary` |
-| Hints/Descriptions | `text-sm text-tertiary` |
-| Captions/Footnotes | `text-xs text-tertiary` |
-| Button text | `text-sm font-semibold` (xs-md) / `text-md font-semibold` (lg-xl) |
-| Badge text | `text-xs font-medium` (sm) / `text-sm font-medium` (md-lg) |
-| Tooltip | `text-xs font-semibold text-white` |
-| Tab text | `text-sm font-semibold` (sm) / `text-md font-semibold` (md) |
+After composing a flow, test it with the keyboard alone — tab order, activation, and
+dismissal should all work.
 
 ---
 
-## Component Selection Guide
+## Page layout and the app shell
 
-| Cần gì? | Dùng component nào |
-|---------|-------------------|
-| Main action (CTA) | `Button color="primary"` |
-| Secondary action | `Button color="secondary"` |
-| Destructive action | `Button color="primary-destructive"` |
-| Text link (brand) | `Button color="link-color"` |
-| Text link (neutral) | `Button color="link-gray"` |
-| Input text | `Input` |
-| Input long text | `Textarea` |
-| Input number | `InputNumber` |
-| Input date | `DatePicker` |
-| Input date range | `DateRangePicker` |
-| Input file | `FileUpload` (drag-drop) or `FileUploadTrigger` (button) |
-| Input tags | `InputTags` |
-| Chọn 1 trong N (dropdown) | `Select` |
-| Chọn 1 trong N (inline) | `RadioButtons` |
-| Chọn nhiều (dropdown) | `MultiSelect` |
-| Chọn nhiều (inline) | `Checkbox` (multiple) |
-| Chọn với search | `Combobox` |
-| On/Off toggle | `Toggle` |
-| Agree/confirm | `Checkbox` (single) |
-| Range/slider | `Slider` |
-| Hiện status | `Badge` |
-| Hiện user | `Avatar` |
-| Tooltip info | `Tooltip` |
-| Confirm dangerous action | `Modal` + destructive buttons |
-| Side panel detail | `SlideoutMenu` |
-| Tab navigation | `Tabs` |
-| Table data | `Table` |
-| Loading state | `LoadingIndicator` |
-| Progress | `ProgressIndicators` |
-| Empty state | `EmptyState` |
-| Filter controls | `FilterBar` |
-| Command palette (⌘K) | `CommandMenu` |
-| Dropdown menu | `Dropdown` (pick variant) |
-| Sidebar nav | `Sidebar*` variants |
-| Top nav | `HeaderNavigation` |
-| Page pagination | `Pagination` |
-| Carousel/slider | `Carousel` |
+Synapse has **one canonical app shell**; individual pages do not build their own
+navigation. The shell is defined in `web/src/App.tsx` (the `Shell` component) and
+`web/src/components/layout/Sidebar.tsx`. It composes the persistent `Sidebar` (plus a
+`MobileSidebar`), an error boundary, and a `Suspense` fallback, and renders the active
+route into a `<main>` region via React Router's `<Outlet />`.
 
----
+Because the shell owns navigation, **a page component begins at its own header**, not at
+a sidebar or top nav. A typical list/table page renders, in order:
 
-## Dark Mode Rules
+```tsx
+export function ExamplePage() {
+  return (
+    <div className="space-y-6">
+      {/* 1. Page header: title + primary action for this group */}
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-display-sm font-semibold text-primary">Engagements</h1>
+        <Button color="primary" iconLeading={Plus}>New engagement</Button>
+      </div>
 
-- Semantic tokens **tự động swap** trong `.dark-mode` class
-- KHÔNG hardcode color values — luôn dùng semantic tokens (`text-primary`, `bg-secondary`, etc.)
-- Utility colors invert (50↔950, 100↔900...) → Badges, tags tự adapt
-- `--color-alpha-white` → black trong dark mode (dùng cho inverted surfaces)
-- Test cả light + dark mode khi chọn colors
+      {/* 2. Filters */}
+      <FilterBar.Root>{/* … */}</FilterBar.Root>
 
----
+      {/* 3. Primary content */}
+      <Table>{/* … */}</Table>
 
-## Accessibility Rules
-
-- Mọi interactive elements có `focus-visible:outline-2 outline-offset-2`
-- Focus ring color: `outline-brand` (brand-500) default, `outline-error` (red-500) for error inputs
-- Buttons: dùng React Aria `Button` → handles keyboard, aria-disabled
-- Inputs: connect `label` + `hint` via aria-labelledby/describedby
-- Modals: trap focus, handle Escape key (via React Aria)
-- Disabled: `opacity-50 cursor-not-allowed`, NOT removed from DOM
-- Checkboxes/Toggles: proper checked/unchecked states via React Aria
-- Tooltips: triggered by focus too, not just hover
-
----
-
-## Composition Patterns
-
-### Form Field
-```
-<Input label="Email" hint="We'll never share your email" placeholder="you@example.com" icon={Mail} isRequired />
+      {/* 4. Pagination */}
+      <PaginationLine page={page} total={total} onPageChange={setPage} />
+    </div>
+  );
+}
 ```
 
-### Modal Confirmation
+The route is what places this page inside the shell (see the `<Route>` table in
+`App.tsx`); the page itself only owns the content region.
+
+---
+
+## Common composition patterns
+
+### Form field
+
+```tsx
+<Input label="Email" hint="We'll never share it" placeholder="you@example.com" icon={Mail} isRequired />
 ```
+
+### Confirmation modal
+
+```tsx
 <DialogTrigger>
   <Button color="primary-destructive">Delete</Button>
   <ModalOverlay>
     <Modal>
-      <Dialog>
-        {/* Header + content + footer with cancel + confirm buttons */}
-      </Dialog>
+      <Dialog>{/* header + body + footer: one primary action, rest secondary */}</Dialog>
     </Modal>
   </ModalOverlay>
 </DialogTrigger>
 ```
 
-### Page Layout
-```
-<SidebarSimple>         ← Navigation
-  <HeaderNavigation>    ← Top bar
-    <main>
-      <h1 class="text-display-sm font-semibold text-primary">Title</h1>
-      <FilterBar />     ← Filters
-      <Table />         ← Data
-      <Pagination />    ← Pagination
-    </main>
-  </HeaderNavigation>
-</SidebarSimple>
-```
+### Empty state
 
-### Empty State
-```
+```tsx
 <EmptyState.Root>
   <EmptyState.FeaturedIcon icon={SearchLg} />
   <EmptyState.Header title="No results" description="Try adjusting your filters" />
   <EmptyState.Actions>
     <Button color="secondary">Clear filters</Button>
-    <Button color="primary">New item</Button>
   </EmptyState.Actions>
 </EmptyState.Root>
 ```
+
+### Stat / KPI card
+
+Keep stat cards consistent: the label sits above the value, semibold but lighter than
+the value; the value is the largest, boldest element and uses `tabular-nums`; an optional
+hint sits below.
+
+```tsx
+<div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
+  <div className="flex items-center justify-between">
+    <span className="text-sm font-semibold text-secondary">Open findings</span>
+    <Icon className="text-fg-quaternary" aria-hidden />
+  </div>
+  <div className="text-display-sm font-bold tabular-nums text-primary">142</div>
+  <p className="text-xs text-tertiary">+12 this week</p>
+</div>
+```
+
+### Loading, empty, and error states
+
+Every data view must handle all three. Use `LoadingIndicator` (or a skeleton) while
+loading, `EmptyState` for no-results, and a clear error surface on failure — never leave
+a blank region.
+
+---
+
+## Choosing a component
+
+| You need | Use |
+|---|---|
+| Main / secondary / destructive action | `Button` with the matching `color` |
+| Text link | `Button color="link-color"` (brand) or `"link-gray"` (neutral) |
+| Single-line text, email, password, search | `Input` |
+| Multi-line text | `TextArea` |
+| Number with steppers | `InputNumber` |
+| Date / date range | `DatePicker` / `DateRangePicker` |
+| File upload | `FileUpload` (drop zone) or `FileUploadTrigger` (button) |
+| Tag entry | `InputTags` |
+| One of N (dropdown) | `Select` |
+| One of N (inline) | `RadioGroup` |
+| Many of N (dropdown) | `MultiSelect` |
+| Many of N (inline) | `Checkbox` list |
+| Searchable selection | `ComboBox` |
+| On/off setting | `Toggle` |
+| Single agreement/confirmation | `Checkbox` |
+| Numeric range | `Slider` |
+| Status / category label | `Badge` |
+| User identity | `Avatar` |
+| Contextual help | `Tooltip` |
+| Confirm a dangerous action | `Modal` + destructive button |
+| Detail side panel | `SlideoutMenu` |
+| In-page section switching | `Tabs` |
+| Tabular data | `Table` (or `VirtualTable` for large sets) |
+| Loading state | `LoadingIndicator` |
+| Determinate progress | `ProgressBar` |
+| Empty / no-results state | `EmptyState` |
+| Filter controls | `FilterBar` |
+| Command palette (⌘K) | `CommandMenu` |
+| Contextual menu | `Dropdown` (pick the variant file) |
+| List pagination | `PaginationLine` / `PaginationDot` |
+</content>

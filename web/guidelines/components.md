@@ -1,502 +1,428 @@
-# Component Library
+# Component Catalogue
 
-> Tất cả components import từ `@/components/base/` hoặc `@/components/application/`.
-> UI library: React Aria Components (Adobe). Icons: `@untitledui/icons`.
+Where the shared building blocks live:
+
+- **`@/components/base/`** — shared UI **primitives** (buttons, inputs, selects,
+  checkboxes, badges, avatars, tooltips, and so on). These are React Aria Components
+  under the hood, so they ship keyboard and ARIA behaviour by default.
+- **`@/components/application/`** — reusable **application components** assembled from the
+  primitives (tables, modals, tabs, pagination, date pickers, command menus, navigation
+  shells, and so on).
+
+Two related directories exist but are out of scope for this catalogue:
+`@/components/synapse/` holds Synapse-specific domain components (e.g. severity badges,
+page state placeholders, the virtualized table), and `@/components/foundations/` holds
+icon/logo/illustration primitives. The app shell itself lives in `@/components/layout/`
+(see `usage-rules.md`).
+
+All icons come from `@untitledui/icons`. The `@` import alias resolves to `web/src`.
+
+### How to read the labels
+
+Each entry is tagged so you can tell how it fits Synapse:
+
+- **Preferred** — the component to standardize on for this need.
+- **Variant** — an alternative the library supports; use it when the specific case calls
+  for it.
+- **Building block** — a lower-level or specialized piece you compose manually, or a
+  library shell Synapse does not use as-is.
+
+This catalogue focuses on the public contract: the import, the key props, the supported
+variants, when to use it, and its accessibility behaviour. It deliberately omits internal
+styling (radius/shadow/padding/ring classes) — those belong to the component and are not
+part of its contract.
 
 ---
 
 ## Buttons
 
-### Button
+### Button — *Preferred*
 
-**Import:** `@/components/base/buttons/button`
+```ts
+import { Button } from "@/components/base/buttons/button";
+```
 
-| Prop | Type | Default | Mô tả |
-|------|------|---------|--------|
-| `size` | `"xs" \| "sm" \| "md" \| "lg" \| "xl"` | `"sm"` | Kích thước button |
-| `color` | `"primary" \| "secondary" \| "tertiary" \| "link-color" \| "link-gray" \| "primary-destructive" \| "secondary-destructive" \| "tertiary-destructive" \| "link-destructive"` | `"primary"` | Màu/hierarchy |
-| `iconLeading` | `FC \| ReactNode` | — | Icon trước text |
-| `iconTrailing` | `FC \| ReactNode` | — | Icon sau text |
-| `isDisabled` | `boolean` | — | Disabled state |
-| `isLoading` | `boolean` | — | Loading spinner |
-| `showTextWhileLoading` | `boolean` | — | Giữ text khi loading |
-| `noTextPadding` | `boolean` | — | Bỏ px-0.5 quanh text |
-| `href` | `string` | — | Render as link (anchor) |
+Key props: `size` (`"xs" | "sm" | "md" | "lg" | "xl"`, default `"sm"`), `color`
+(`"primary" | "secondary" | "tertiary" | "link-color" | "link-gray" |
+"primary-destructive" | "secondary-destructive" | "tertiary-destructive" |
+"link-destructive"`, default `"primary"`), `iconLeading`, `iconTrailing`, `isDisabled`,
+`isLoading`, `showTextWhileLoading`, `href` (renders an anchor).
 
-**Design tokens:**
-- Radius: `rounded-lg` (8px) cho mọi sizes
-- Shadow: `shadow-xs-skeuomorphic` (primary, secondary)
-- Font: `text-sm font-semibold` (xs-md), `text-md font-semibold` (lg-xl)
-- Focus: `outline-2 outline-offset-2 outline-brand`
+Use `color` to express hierarchy: `primary` for the main action, `secondary` for
+supporting actions, `tertiary` for low-emphasis (ghost) actions, `link-*` for text
+links, and the `*-destructive` variants for delete/remove actions.
 
-**Khi nào dùng:**
-- `primary` → CTA chính, submit, confirm
-- `secondary` → Action phụ (cancel, back, filter)
-- `tertiary` → Action ít quan trọng (ghost button)
-- `link-color` → Text link dạng brand color
-- `link-gray` → Text link dạng neutral
-- `primary-destructive` → Delete, remove (solid red)
-- `secondary-destructive` → Delete nhẹ hơn (outline red)
+Accessibility: built on React Aria `Button` — full keyboard activation, and disabled
+state exposed via `aria-disabled` (the element stays in the DOM and focusable behaviour
+is handled for you). Pass an accessible label when the button is icon-only.
 
----
+```tsx
+<Button color="primary" iconLeading={Plus} onClick={onCreate}>New engagement</Button>
+```
 
-### ButtonUtility
+### ButtonUtility — *Building block*
 
-**Import:** `@/components/base/buttons/button-utility`
+```ts
+import { ButtonUtility } from "@/components/base/buttons/button-utility";
+```
 
-Nút icon nhỏ (close, settings, menu toggle). Không có text, chỉ icon.
+Small icon-only button (close, settings, menu toggle). Requires an accessible label.
 
----
+### CloseButton — *Building block*
 
-### CloseButton
+```ts
+import { CloseButton } from "@/components/base/buttons/close-button";
+```
 
-**Import:** `@/components/base/buttons/close-button`
+The dismiss (×) control for modals, slideouts, and alerts. Takes a `label`, `size`, and
+`theme`.
 
-Nút X để đóng modals, slideouts, alerts. Sử dụng `CloseX` icon.
+### ButtonGroup — *Variant*
 
----
+```ts
+import { ButtonGroup, ButtonGroupItem } from "@/components/base/button-group/button-group";
+```
 
-### SocialButton
-
-**Import:** `@/components/base/buttons/social-button`
-
-Nút đăng nhập/đăng ký qua social providers (Google, Apple, GitHub...).
+Segmented group of adjoining actions. Compose `ButtonGroupItem` children inside
+`ButtonGroup`.
 
 ---
 
-### ButtonGroup
+## Inputs & forms
 
-**Import:** `@/components/base/button-group/button-group`
+### Input — *Preferred*
 
-Nhóm buttons liền nhau (segmented control style).
+```ts
+import { Input } from "@/components/base/input/input";
+```
 
----
+Key props: `size` (`"sm" | "md" | "lg"`, default `"md"`), `label`, `hint`,
+`placeholder`, `icon` (leading), `tooltip`, `shortcut`, `isInvalid`, `isDisabled`,
+`isRequired`, `type`. The `password` type gets a reveal toggle automatically.
 
-## Inputs
+Accessibility: `label`, `hint`, and error state are wired to the field via React Aria, so
+screen readers announce the label and description. Always pass `label` (or an accessible
+label) rather than a bare `placeholder`.
 
-### Input
+```tsx
+<Input label="Email" hint="We'll never share it" placeholder="you@example.com" icon={Mail} isRequired />
+```
 
-**Import:** `@/components/base/input/input`
+`@/components/base/input/input.tsx` also exports `TextField` and `InputBase` as building
+blocks for custom field layouts.
 
-| Prop | Type | Default | Mô tả |
-|------|------|---------|--------|
-| `size` | `"sm" \| "md" \| "lg"` | `"md"` | Kích thước |
-| `label` | `string` | — | Label phía trên |
-| `hint` | `ReactNode` | — | Helper text dưới input |
-| `placeholder` | `string` | — | Placeholder text |
-| `icon` | `ComponentType` | — | Leading icon |
-| `tooltip` | `string` | — | Help tooltip (trailing ?) |
-| `shortcut` | `string \| boolean` | — | Keyboard shortcut badge |
-| `isInvalid` | `boolean` | — | Error state |
-| `isDisabled` | `boolean` | — | Disabled state |
-| `isRequired` | `boolean` | — | Required indicator |
-| `type` | `string` | `"text"` | Input type (password has toggle) |
+### Specialized inputs — *Variant*
 
-**Design tokens:**
-- Radius: `rounded-lg` (8px)
-- Shadow: `shadow-xs`
-- Ring: `ring-1 ring-primary` → focus: `ring-2 ring-brand`
-- Error: `ring-error_subtle` → focus: `ring-2 ring-error`
-- Sizes: sm = `py-2 px-3 text-sm`, md = `py-2 px-3 text-md`, lg = `py-2.5 px-3.5 text-md`
+Each lives in its own module under `@/components/base/input/`:
 
-**Khi nào dùng:**
-- Text input đơn giản, email, password, search
-- Có label + hint cho form fields
-- Có icon cho search, email icons
-- Shortcut cho global search (⌘K)
+```ts
+import { InputNumber } from "@/components/base/input/input-number";
+import { InputDate } from "@/components/base/input/input-date";
+import { InputFile } from "@/components/base/input/input-file";
+import { InputTags } from "@/components/base/input/input-tags";
+import { PinInput } from "@/components/base/input/pin-input";
+import { InputGroup } from "@/components/base/input/input-group";
+```
 
----
+`InputNumber` (stepper), `InputDate`, `InputFile`, `InputTags`, `PinInput` (OTP), and
+`InputGroup` (input paired with prefix/addon controls).
 
-### InputNumber / InputDate / InputFile / InputTags / InputPayment / PinInput
+### Textarea — *Preferred*
 
-**Import:** `@/components/base/input/input-*`
+```ts
+import { TextArea } from "@/components/base/textarea/textarea";
+```
 
-Các biến thể chuyên biệt: số (có +/- buttons), date, file upload, tags, payment card, OTP pin.
+Key props: `size` (`"sm" | "md"`), `label`, `hint`, `isResizable`. Same labelling
+contract as `Input`.
 
----
+### Select — *Preferred*
 
-### InputGroup
+```ts
+import { Select } from "@/components/base/select/select";
+```
 
-**Import:** `@/components/base/input/input-group`
+Key props: `size` (`"sm" | "md" | "lg"`), `label`, `placeholder`, `isInvalid`. Compose
+`SelectItem` children (`@/components/base/select/select-item`).
 
-Ghép Input + Button cạnh nhau (ví dụ: search + submit).
+Accessibility: React Aria listbox behaviour — arrow-key navigation, type-ahead, and
+`aria-expanded` are handled. Provide a `label`.
 
----
+Related selection components — *Variant*:
 
-### Textarea
+```ts
+import { MultiSelect } from "@/components/base/select/multi-select";
+import { ComboBox } from "@/components/base/select/combobox";
+import { TagSelect } from "@/components/base/select/tag-select";
+import { NativeSelect } from "@/components/base/select/select-native";
+```
 
-**Import:** `@/components/base/textarea/textarea`
+Choose `Select` for one-of-N, `MultiSelect` for many, `ComboBox` for searchable
+selection, `TagSelect` for token/category selection, and `NativeSelect` where a native
+control is preferable (e.g. simple mobile forms).
 
-| Prop | Type | Default | Mô tả |
-|------|------|---------|--------|
-| `size` | `"sm" \| "md"` | `"sm"` | Kích thước |
-| `label` | `string` | — | Label |
-| `hint` | `ReactNode` | — | Helper text |
-| `isResizable` | `boolean` | — | Cho phép resize |
+### Checkbox / RadioGroup / Toggle — *Preferred*
 
-**Design tokens:** Giống Input (rounded-lg, shadow-xs, ring-1 ring-primary).
+```ts
+import { Checkbox } from "@/components/base/checkbox/checkbox";
+import { RadioGroup, RadioButton } from "@/components/base/radio-buttons/radio-buttons";
+import { Toggle } from "@/components/base/toggle/toggle";
+```
 
----
+`Checkbox` (single confirmation or multi-select list; `size`, `label`, `hint`),
+`RadioGroup` wrapping `RadioButton` children (exclusive choice), and `Toggle`
+(`size`, `slim`, `label`, `hint`) for on/off settings. All expose their checked state
+through React Aria.
 
-### Select
+### Slider — *Variant*
 
-**Import:** `@/components/base/select/select`
+```ts
+import { Slider } from "@/components/base/slider/slider";
+```
 
-| Prop | Type | Default | Mô tả |
-|------|------|---------|--------|
-| `size` | `"sm" \| "md" \| "lg"` | `"md"` | Kích thước |
-| `label` | `string` | — | Label |
-| `placeholder` | `string` | — | Placeholder |
-| `isInvalid` | `boolean` | — | Error state |
+Range/numeric slider (`minValue`, `maxValue`, `formatOptions`, `labelPosition`).
 
-**Biến thể khác:** `MultiSelect`, `TagSelect`, `Combobox`, `SelectNative`
+### Form — *Building block*
 
-**Khi nào dùng:**
-- Chọn 1 option → `Select`
-- Chọn nhiều options → `MultiSelect`
-- Chọn với search → `Combobox`
-- Chọn tags/categories → `TagSelect`
-- Native select (mobile) → `SelectNative`
+```ts
+import { Form } from "@/components/base/form/form";
+import { HookForm, FormField } from "@/components/base/form/hook-form";
+```
 
----
-
-### Checkbox
-
-**Import:** `@/components/base/checkbox/checkbox`
-
-| Prop | Type | Default | Mô tả |
-|------|------|---------|--------|
-| `size` | `"sm" \| "md"` | `"sm"` | Kích thước (16px / 20px) |
-| `label` | `ReactNode` | — | Label text |
-| `hint` | `ReactNode` | — | Description |
-
-**Design tokens:**
-- Default: `bg-primary ring-1 ring-primary`
-- Selected: `bg-brand-solid ring-brand-solid`
-- Radius: sm = `rounded` (4px), md = `rounded-md` (6px)
+`Form` is the React Aria form wrapper. `HookForm` + `FormField` integrate the fields with
+React Hook Form for validation-driven forms.
 
 ---
 
-### Toggle
+## Data display
 
-**Import:** `@/components/base/toggle/toggle`
+### Badge — *Preferred*
 
-| Prop | Type | Default | Mô tả |
-|------|------|---------|--------|
-| `size` | `"sm" \| "md"` | `"sm"` | Kích thước |
-| `slim` | `boolean` | — | Slim variant (thinner track) |
-| `label` | `string` | — | Label text |
-| `hint` | `ReactNode` | — | Description |
+```ts
+import { Badge } from "@/components/base/badges/badges";
+```
 
-**Design tokens:**
-- Track: `bg-tertiary` → selected: `bg-brand-solid`
-- Handle: `bg-fg-white shadow-sm`, `rounded-full`
-- Sizes: sm = `h-5 w-9`, md = `h-6 w-11`
+Key props: `size` (`"sm" | "md" | "lg"`), `color` (utility colour such as `"gray"`,
+`"brand"`, `"error"`, `"warning"`, `"success"`, `"blue"`, `"indigo"`, `"purple"`, …),
+`type` (`"pill-color" | "color" | "modern"`), plus optional `dot`, `avatar`, `flag`, and
+`onDismiss`. Choosing colour via the `color` prop keeps the badge theme-aware.
 
-**Khi nào dùng:** On/off settings, preferences, feature flags.
+Use `pill-color` + a status colour for status indicators, `color` for categories/tags,
+and `modern` + gray for counts/labels. `badges.tsx` also exports pre-composed variants
+(`BadgeWithDot`, `BadgeWithIcon`, `BadgeWithButton`, …) as building blocks.
 
----
+### Avatar — *Preferred*
 
-### RadioButtons
+```ts
+import { Avatar } from "@/components/base/avatar/avatar";
+```
 
-**Import:** `@/components/base/radio-buttons/radio-buttons`
+User avatar (image or initials) with optional online/verified indicators. Provide `alt`
+text.
 
-Radio group cho chọn 1 trong nhiều options (exclusive selection).
+### Tags — *Variant*
 
----
+```ts
+import { Tag, TagGroup, TagList } from "@/components/base/tags/tags";
+```
 
-### Slider
+Dismissible tag chips for filters and selected items. Compose `Tag` inside
+`TagGroup` / `TagList`.
 
-**Import:** `@/components/base/slider/slider`
+### Table — *Preferred*
 
-Range slider cho numeric values.
+```ts
+import { Table, TableCard } from "@/components/application/table/table";
+```
 
----
+Data table with sortable columns and selectable rows. For large result sets prefer the
+virtualized `VirtualTable` in `@/components/synapse/VirtualTable`.
 
-## Data Display
+### Charts — *Building block*
 
-### Badge
+```ts
+import { ChartTooltipContent, ChartLegendContent } from "@/components/application/charts/charts-base";
+```
 
-**Import:** `@/components/base/badges/badges`
+`charts-base` is a toolkit of chart pieces (tooltip, legend, active-dot) layered over the
+charting library rather than a single drop-in chart. Synapse's dashboards compose these
+via `@/components/synapse/DashboardCharts` and page-local chart cards.
 
-| Prop | Type | Default | Mô tả |
-|------|------|---------|--------|
-| `size` | `"sm" \| "md" \| "lg"` | `"sm"` | Kích thước |
-| `color` | `"gray" \| "brand" \| "error" \| "warning" \| "success" \| "slate" \| "sky" \| "blue" \| "indigo" \| "purple" \| "pink" \| "orange"` | `"gray"` | Màu |
-| `type` | `"pill-color" \| "color" \| "modern"` | `"pill-color"` | Kiểu badge |
-| `icon` | `IconComponentType` | — | Leading icon |
-| `iconTrailing` | `IconComponentType` | — | Trailing icon |
-| `dot` | `boolean` | — | Status dot |
-| `avatar` | `string` | — | Avatar image |
-| `flag` | `FlagTypes` | — | Country flag |
-| `onDismiss` | `MouseEventHandler` | — | Close button |
+### EmptyState — *Preferred*
 
-**Design tokens:**
-- `pill-color`: `rounded-full ring-1 ring-inset` + utility color bg/text/ring
-- `color`: `rounded-md ring-1 ring-inset` + utility color bg/text/ring
-- `modern`: `rounded-md ring-1 ring-inset shadow-xs` + neutral bg/text/ring
+```ts
+import { EmptyState } from "@/components/application/empty-state/empty-state";
+```
 
-**Khi nào dùng:**
-- Status indicators → `pill-color` + success/error/warning
-- Categories/tags → `color` + brand/indigo/purple
-- Counts/labels → `modern` + gray
+Compound component: `EmptyState.Root` (size), `EmptyState.FeaturedIcon`,
+`EmptyState.Illustration`, `EmptyState.Header` (title + description), and
+`EmptyState.Actions`. Use for empty tables, no-results, and first-run states.
 
----
-
-### Avatar
-
-**Import:** `@/components/base/avatar/avatar`
-
-Hiển thị user avatar (image hoặc initials). Có online indicator, verified tick, company icon.
-
-**Biến thể:** `AvatarProfilePhoto`, `AvatarLabelGroup`
-
----
-
-### Tags
-
-**Import:** `@/components/base/tags/tags`
-
-Tag chips có thể close (x). Dùng cho filters, selected items, categories.
+```tsx
+<EmptyState.Root>
+  <EmptyState.FeaturedIcon icon={SearchLg} />
+  <EmptyState.Header title="No results" description="Try adjusting your filters" />
+  <EmptyState.Actions>
+    <Button color="secondary">Clear filters</Button>
+  </EmptyState.Actions>
+</EmptyState.Root>
+```
 
 ---
 
-### Table
+## Feedback & overlays
 
-**Import:** `@/components/application/table/table`
+### Tooltip — *Preferred*
 
-Data table với sortable columns, selectable rows, pagination.
+```ts
+import { Tooltip, TooltipTrigger } from "@/components/base/tooltip/tooltip";
+```
 
----
+Key props: `title`, `description`, `placement` (default `"top"`), `arrow`, `delay`.
+Accessibility: React Aria opens the tooltip on focus as well as hover, so keyboard users
+reach it too.
 
-### Charts
+### Modal / Dialog — *Preferred*
 
-**Import:** `@/components/application/charts/charts-base`
+```ts
+import { DialogTrigger, ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
+```
 
-Chart container (wraps charting library). Bar, line, area charts.
+`DialogTrigger` wraps the trigger and modal; `ModalOverlay` is the backdrop; `Modal` is
+the container; `Dialog` holds scrollable content. Accessibility: React Aria traps focus
+inside the modal and closes it on `Escape` — keep that behaviour intact (see
+`usage-rules.md`). Use for confirmations, forms, and destructive-action confirms.
 
----
+### SlideoutMenu — *Preferred*
 
-### EmptyState
+```ts
+import { SlideoutMenu } from "@/components/application/slideout-menus/slideout-menu";
+```
 
-**Import:** `@/components/application/empty-state/empty-state`
+Side drawer for detail views and settings panels. Like Modal, it manages focus
+containment and `Escape`.
 
-| Compound | Mô tả |
-|----------|--------|
-| `EmptyState.Root` | Container (size: sm/md/lg) |
-| `EmptyState.FeaturedIcon` | Icon lớn (color: gray/brand/error/success/warning) |
-| `EmptyState.Illustration` | Illustration (type: cloud/files/etc) |
-| `EmptyState.Header` | Title + description |
-| `EmptyState.Actions` | CTA buttons |
+### LoadingIndicator — *Preferred*
 
-**Khi nào dùng:** Trang trống, no results, first-time experience.
+```ts
+import { LoadingIndicator } from "@/components/application/loading-indicator/loading-indicator";
+```
 
----
+Spinner/skeleton for loading states (`type`, `size`, `label`).
 
-## Feedback
+### ProgressBar — *Variant*
 
-### Tooltip
+```ts
+import { ProgressBar } from "@/components/base/progress-indicators/progress-indicators";
+```
 
-**Import:** `@/components/base/tooltip/tooltip`
-
-| Prop | Type | Default | Mô tả |
-|------|------|---------|--------|
-| `title` | `ReactNode` | — | Tooltip title |
-| `description` | `ReactNode` | — | Optional description |
-| `placement` | `Placement` | `"top"` | Vị trí tooltip |
-| `arrow` | `boolean` | `false` | Show arrow |
-| `delay` | `number` | `300` | Delay (ms) |
-
-**Design tokens:**
-- Bg: `bg-primary-solid` (neutral-950)
-- Radius: `rounded-lg`
-- Shadow: `shadow-lg`
-- Text: `text-xs font-semibold text-white`
-
----
-
-### Modal / Dialog
-
-**Import:** `@/components/application/modals/modal`
-
-| Export | Mô tả |
-|--------|--------|
-| `DialogTrigger` | Trigger wrapper |
-| `ModalOverlay` | Backdrop (bg-overlay/70 + backdrop-blur) |
-| `Modal` | Modal container |
-| `Dialog` | Content wrapper (handles scroll) |
-
-**Design tokens:**
-- Overlay: `bg-overlay/70 backdrop-blur-[6px]`
-- Modal: `rounded-xl sm:rounded-2xl bg-primary shadow-xl`
-- Animation: enter `300ms ease-out zoom-in-95`, exit `200ms ease-in zoom-out-95`
-
-**Khi nào dùng:** Confirmations, forms, detail views, destructive action confirms.
-
----
-
-### LoadingIndicator
-
-**Import:** `@/components/application/loading-indicator/loading-indicator`
-
-Spinner/skeleton cho loading states.
-
----
-
-### ProgressIndicators
-
-**Import:** `@/components/base/progress-indicators/progress-indicators`
-
-Progress bars và circles (determinate progress). Variant: linear bar, circular.
+Determinate progress bar (`value`, `min`, `max`, `valueFormatter`, `labelPosition`).
 
 ---
 
 ## Navigation
 
-### Tabs
+### Tabs — *Preferred*
 
-**Import:** `@/components/application/tabs/tabs`
+```ts
+import { Tabs, TabList, Tab, TabPanel } from "@/components/application/tabs/tabs";
+```
 
-| Prop | Type | Default | Mô tả |
-|------|------|---------|--------|
-| `size` | `"sm" \| "md"` | `"sm"` | Kích thước |
-| `type` | Horizontal: `"button-brand" \| "button-gray" \| "button-border" \| "button-minimal" \| "underline"` / Vertical: `+ "line"` | — | Style variant |
-| `orientation` | `"horizontal" \| "vertical"` | `"horizontal"` | Direction |
-| `fullWidth` | `boolean` | — | Full width tabs (underline) |
+Key props on `TabList`: `size` (`"sm" | "md"`), `type` (horizontal:
+`"button-brand" | "button-gray" | "button-border" | "button-minimal" | "underline"`;
+vertical adds `"line"`), `orientation`, `fullWidth`. Compose `Tab` (label/icon/badge)
+inside `TabList`, with matching `TabPanel`s. Accessibility: React Aria provides the
+roving-tabindex and `aria-selected` wiring.
 
-**Khi nào dùng:**
-- `button-brand` → Primary navigation tabs
-- `button-gray` → Secondary/subtle tabs
-- `button-border` → Segmented control (enclosed tabs)
-- `button-minimal` → Minimal tabs with ring border
-- `underline` → Classic tab navigation (horizontal)
-- `line` → Vertical navigation sidebar tabs
+### Pagination — *Preferred*
 
----
+```ts
+import { PaginationLine } from "@/components/application/pagination/pagination-line";
+import { PaginationDot } from "@/components/application/pagination/pagination-dot";
+```
 
-### Sidebar Navigation
+`PaginationLine` for simple prev/next, `PaginationDot` for dot indicators. The numbered
+page variants (`PaginationPageDefault`, `PaginationCardDefault`,
+`PaginationButtonGroup`, …) live in `@/components/application/pagination/pagination` as
+building blocks.
 
-**Import:** `@/components/application/app-navigation/sidebar-navigation/*`
+### CommandMenu — *Variant*
 
-| Variant | Mô tả |
-|---------|--------|
-| `SidebarSlim` | Collapsed icon-only sidebar |
-| `SidebarSimple` | Standard sidebar với nav items |
-| `SidebarDualTier` | Two-level sidebar |
-| `SidebarSectionsSubheadings` | Sections with subheading groups |
-| `SidebarSectionDividers` | Sections separated by dividers |
+```ts
+import { CommandMenu } from "@/components/application/command-menus/command-menu";
+```
 
----
+Command palette (⌘K style) for quick actions and navigation.
 
-### Header Navigation
+### Dropdown — *Preferred*
 
-**Import:** `@/components/application/app-navigation/header-navigation`
+```ts
+import { Dropdown } from "@/components/base/dropdown/dropdown";
+```
 
-Top navigation bar (logo + links + actions).
+Base menu component. The `@/components/base/dropdown/` directory holds specialized,
+pre-composed variants — import the specific file you need, e.g.:
 
----
+```ts
+import { DropdownButtonSimple } from "@/components/base/dropdown/dropdown-button-simple";
+import { DropdownAvatar } from "@/components/base/dropdown/dropdown-avatar";
+```
 
-### Pagination
+Other variants in that directory: `dropdown-button-advanced`, `dropdown-icon-simple`,
+`dropdown-icon-advanced`, `dropdown-search-simple`, `dropdown-search-advanced`,
+`dropdown-context-menu-simple`, `dropdown-context-menu-advanced`,
+`dropdown-account-button`, `dropdown-account-breadcrumb`.
 
-**Import:** `@/components/application/pagination/pagination`
+### App-navigation shells — *Building block*
 
-| Variant | Mô tả |
-|---------|--------|
-| `Pagination` | Full pagination (numbers + prev/next) |
-| `PaginationLine` | Simple prev/next |
-| `PaginationDot` | Dot indicators (carousel-style) |
-
----
-
-### CommandMenu
-
-**Import:** `@/components/application/command-menus/command-menu`
-
-Command palette (Cmd+K style). Variants: actions, users, integrations (flat + stacked).
-
----
-
-## Overlay
-
-### Dropdown
-
-**Import:** `@/components/base/dropdown/dropdown`
-
-| Variant | Mô tả |
-|---------|--------|
-| `Dropdown` | Base dropdown menu |
-| `DropdownButtonSimple` | Button trigger → simple menu |
-| `DropdownButtonAdvanced` | Button trigger → rich menu (icons, descriptions) |
-| `DropdownIconSimple` | Icon-only trigger → simple menu |
-| `DropdownIconAdvanced` | Icon-only trigger → rich menu |
-| `DropdownSearchSimple` | With search filter (simple) |
-| `DropdownSearchAdvanced` | With search filter (rich) |
-| `DropdownContextMenuSimple` | Right-click context menu |
-| `DropdownContextMenuAdvanced` | Rich context menu |
-| `DropdownAvatar` | User avatar trigger → account menu |
-| `DropdownAccountButton` | Account switcher |
-| `DropdownAccountBreadcrumb` | Breadcrumb with dropdown |
-| `DropdownIntegration` | Integration/app selector |
+The library ships navigation shells under
+`@/components/application/app-navigation/` — the `sidebar-navigation/` directory
+(`SidebarSimple`, `SidebarSlim`, `SidebarDualTier`, `SidebarSectionsSubheadings`,
+`SidebarSectionDividers`, each in its own file) and `header-navigation`. **Synapse does
+not use these for its app shell** — it ships its own sidebar and layout in
+`@/components/layout/` (see `usage-rules.md`). Treat them as reference building blocks
+only.
 
 ---
 
-### SlideoutMenu
+## Layout & pickers
 
-**Import:** `@/components/application/slideout-menus/slideout-menu`
+### FilterBar — *Preferred*
 
-Side panel (drawer) cho detail views, settings panels.
+```ts
+import { FilterBar } from "@/components/application/filter-bar/filter-bar";
+```
 
----
+Row of filter controls (search, dropdowns) for list and table views. Exposed as a
+compound object — compose its sub-parts.
 
-### DatePicker / DateRangePicker
+### DatePicker / DateRangePicker — *Preferred*
 
-**Import:** `@/components/application/date-picker/date-picker`
+```ts
+import { DatePicker } from "@/components/application/date-picker/date-picker";
+import { DateRangePicker } from "@/components/application/date-picker/date-range-picker";
+import { Calendar } from "@/components/application/date-picker/calendar";
+import { RangeCalendar } from "@/components/application/date-picker/range-calendar";
+```
 
-| Component | Mô tả |
-|-----------|--------|
-| `DatePicker` | Single date selection |
-| `DateRangePicker` | Date range selection with presets |
-| `Calendar` | Standalone calendar |
-| `RangeCalendar` | Dual-month range calendar |
+`DatePicker` for a single date, `DateRangePicker` for a range (with presets); `Calendar`
+and `RangeCalendar` are the standalone building blocks.
 
----
+### File upload — *Preferred*
 
-## Layout
+```ts
+import { FileUpload, FileUploadDropZone } from "@/components/application/file-upload/file-upload-base";
+import { FileUploadTrigger } from "@/components/base/file-upload-trigger/file-upload-trigger";
+```
 
-### Carousel
+`FileUpload` / `FileUploadDropZone` for a drag-and-drop zone; `FileUploadTrigger` for a
+plain button that opens the file picker (no drop zone).
 
-**Import:** `@/components/application/carousel/carousel-base`
+### Carousel — *Variant*
 
-Horizontal scrolling carousel cho cards, images, testimonials.
+```ts
+import { Carousel } from "@/components/application/carousel/carousel-base";
+```
 
----
-
-### FilterBar
-
-**Import:** `@/components/application/filter-bar/filter-bar`
-
-Filter controls row (dropdowns, search) cho list/table views.
-
----
-
-### FileUpload
-
-**Import:** `@/components/application/file-upload/file-upload-base`
-
-Drag-and-drop file upload zone.
-
----
-
-### Form
-
-**Import:** `@/components/base/form/form` / `hook-form`
-
-Form wrapper. `hook-form` integrates with React Hook Form.
-
----
-
-### FileUploadTrigger
-
-**Import:** `@/components/base/file-upload-trigger/file-upload-trigger`
-
-Simple button/area that triggers file picker (no drag-drop zone).
+Horizontal scrolling carousel, exposed as a compound object (`Carousel.*`).
+</content>
