@@ -65,6 +65,8 @@ GET /api/v1/fleet/agents/{p}
 GET /api/v1/fleet/coverage
 GET /api/v1/fleet/coverage/export
 GET /api/v1/fleet/coverage/summary
+GET /api/v1/fleet/incidents
+GET /api/v1/fleet/incidents/{p}
 GET /api/v1/me
 GET /api/v1/projects
 GET /api/v1/projects/{p}
@@ -120,6 +122,10 @@ POST /api/v1/engagements/import
 POST /api/v1/fleet/decommission
 POST /api/v1/fleet/enrol
 POST /api/v1/fleet/heartbeat
+POST /api/v1/fleet/incidents/{p}/comments
+POST /api/v1/fleet/incidents/{p}/disposition
+POST /api/v1/fleet/incidents/{p}/owner
+POST /api/v1/fleet/incidents/{p}/status
 POST /api/v1/fleet/inventory/cluster
 POST /api/v1/fleet/inventory/host
 POST /api/v1/fleet/work/{p}/progress
