@@ -12,9 +12,12 @@ import (
 )
 
 const (
-	testTenant = shared.ID("tenant-b")
-	testAsset  = shared.ID("asset-b")
-	testBoot   = shared.ID("boot-b")
+	testTenant  = shared.ID("tenant-b")
+	testAsset   = shared.ID("asset-b")
+	testBoot    = shared.ID("boot-b")
+	testAgent   = shared.ID("agent-b")
+	testSession = shared.ID("session-b")
+	testStream  = shared.ID("stream-b")
 )
 
 var base = time.Unix(1_800_000_000, 0).UTC()
@@ -24,19 +27,19 @@ func procEntityID(pid int, startNanos uint64) shared.ID {
 	return telemetry.ProcessEntityID(testAsset, testBoot, pid, startNanos)
 }
 
-const testAgent = shared.ID("agent-b")
-
 func procEnv(eventID string, occ time.Time, entityID, parentID shared.ID, pid, ppid int, kind, comm, path string, args ...string) telemetry.TelemetryEnvelope {
 	return telemetry.TelemetryEnvelope{
-		SchemaVersion: telemetry.SchemaVersion,
-		EventID:       shared.ID(eventID),
-		EventType:     "process." + kind,
-		EventClass:    detection.ClassProcess,
-		AgentID:       testAgent,
-		AssetID:       testAsset,
-		BootID:        testBoot,
-		OccurredAt:    occ,
-		ObservedAt:    occ,
+		SchemaVersion:  telemetry.SchemaVersion,
+		EventID:        shared.ID(eventID),
+		EventType:      "process." + kind,
+		EventClass:     detection.ClassProcess,
+		AgentID:        testAgent,
+		AgentSessionID: testSession,
+		AssetID:        testAsset,
+		BootID:         testBoot,
+		StreamID:       testStream,
+		OccurredAt:     occ,
+		ObservedAt:     occ,
 		Event: telemetry.TelemetryEvent{
 			Class: detection.ClassProcess,
 			Process: &telemetry.ProcessObservation{
@@ -50,15 +53,17 @@ func procEnv(eventID string, occ time.Time, entityID, parentID shared.ID, pid, p
 
 func netEnv(eventID string, occ time.Time, procEntity shared.ID, proto, dir, laddr string, lport int, raddr string, rport int) telemetry.TelemetryEnvelope {
 	return telemetry.TelemetryEnvelope{
-		SchemaVersion: telemetry.SchemaVersion,
-		EventID:       shared.ID(eventID),
-		EventType:     "network.connect",
-		EventClass:    detection.ClassNetwork,
-		AgentID:       testAgent,
-		AssetID:       testAsset,
-		BootID:        testBoot,
-		OccurredAt:    occ,
-		ObservedAt:    occ,
+		SchemaVersion:  telemetry.SchemaVersion,
+		EventID:        shared.ID(eventID),
+		EventType:      "network.connect",
+		EventClass:     detection.ClassNetwork,
+		AgentID:        testAgent,
+		AgentSessionID: testSession,
+		AssetID:        testAsset,
+		BootID:         testBoot,
+		StreamID:       testStream,
+		OccurredAt:     occ,
+		ObservedAt:     occ,
 		Event: telemetry.TelemetryEvent{
 			Class: detection.ClassNetwork,
 			Network: &telemetry.NetworkObservation{
@@ -116,7 +121,7 @@ func TestObserveIsIdempotentByEventID(t *testing.T) {
 		t.Fatalf("timeline must hold exactly one entry after a duplicate, got %d", got)
 	}
 	if got := len(s.Processes()); got != 1 {
-		t.Fatalf("processes must hold exactly one entity, got %d", got)
+		t.Fatalf("processes must hold exactly one entity after a duplicate, got %d", got)
 	}
 }
 
