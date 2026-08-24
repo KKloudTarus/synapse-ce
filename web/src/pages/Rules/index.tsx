@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react'
-import { AlertCircle, ChevronDown, RefreshCw01, SearchLg } from '@untitledui/icons'
+import { AlertCircle, CheckCircle, ChevronDown, RefreshCw01, SearchLg, XCircle } from '@untitledui/icons'
 import { Card, EmptyState, Spinner, cn } from '../../components/ui'
 import { VirtualRuleCards } from '../../components/rules/VirtualRuleCards'
 import { formatRuleSeverity, formatRuleType } from '../../lib/ruleFormat'
@@ -51,7 +51,7 @@ function RuleInlineDetail({ ruleKey }: { ruleKey: string }) {
           {compliant && (
             <div className="flex flex-col overflow-hidden rounded-lg border border-utility-success-200 bg-primary dark:border-utility-success-800">
               <div className="flex items-center gap-1.5 border-b border-utility-success-200 bg-utility-success-50 px-3 py-1.5 text-xs font-semibold text-utility-success-700 dark:border-utility-success-800 dark:bg-utility-success-950/40 dark:text-utility-success-300">
-                ✓ Compliant
+                <CheckCircle className="size-3.5" aria-hidden="true" /> Compliant
               </div>
               <pre className="overflow-x-auto p-3 text-xs font-mono text-primary"><code>{compliant}</code></pre>
             </div>
@@ -59,7 +59,7 @@ function RuleInlineDetail({ ruleKey }: { ruleKey: string }) {
           {noncompliant && (
             <div className="flex flex-col overflow-hidden rounded-lg border border-utility-red-200 bg-primary dark:border-utility-red-800">
               <div className="flex items-center gap-1.5 border-b border-utility-red-200 bg-utility-red-50 px-3 py-1.5 text-xs font-semibold text-utility-red-700 dark:border-utility-red-800 dark:bg-utility-red-950/40 dark:text-utility-red-300">
-                ✗ Non-compliant
+                <XCircle className="size-3.5" aria-hidden="true" /> Non-compliant
               </div>
               <pre className="overflow-x-auto p-3 text-xs font-mono text-primary"><code>{noncompliant}</code></pre>
             </div>

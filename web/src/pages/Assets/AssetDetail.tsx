@@ -6,6 +6,7 @@ import {
   Calendar,
   CheckDone01,
   ClockRewind,
+  Edit01,
   FolderCode,
   Plus,
   Server04,
@@ -267,9 +268,10 @@ export function AssetOverview() {
             <Button
               variant="ghost"
               onClick={() => setShowEditor((v) => !v)}
-              className="text-xs font-semibold text-brand-secondary hover:text-brand-primary"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-secondary hover:text-brand-primary"
             >
-              ✎ {showEditor ? 'Hide editor' : 'Edit'}
+              <Edit01 className="size-3.5" aria-hidden="true" />
+              {showEditor ? 'Hide editor' : 'Edit'}
             </Button>
           }
         >
