@@ -74,7 +74,7 @@ function Dashboard({ data }: { data: Observability }) {
         <p className="text-xs text-tertiary mb-5">
           Normalized from {data.distribution.sampleSize.toLocaleString()} AI-triaged findings.
         </p>
-        <div className="flex flex-col items-start gap-8 sm:flex-row sm:justify-around">
+        <div className="flex flex-col items-start gap-8 sm:flex-row sm:justify-around overflow-hidden">
           <DistributionDonut title="Language" values={data.distribution.languageBasisPoints} />
           <DistributionDonut title="CWE" values={data.distribution.cweBasisPoints} />
           <DistributionDonut title="Project" values={data.distribution.projectBasisPoints} />
@@ -82,7 +82,7 @@ function Dashboard({ data }: { data: Observability }) {
       </Card>
 
       {/* Model + Prompt merged (2-col with CWE on desktop) */}
-      <div className="grid gap-5 xl:grid-cols-2">
+      <div className="grid gap-5 xl:grid-cols-2 [&>*]:min-w-0">
         <ModelAndPromptSection models={data.byModel} prompts={data.byPromptVersion} />
         <CWESection rows={data.byCWE} />
       </div>
@@ -133,7 +133,7 @@ function DistributionDonut({ title, values }: { title: string; values: Record<st
   let offset = 0
 
   return (
-    <div className="flex flex-col items-center gap-4 flex-1 min-w-[160px]">
+    <div className="flex flex-col items-center gap-4 flex-1 min-w-[160px] max-w-[220px]">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-tertiary">{title}</h3>
       <div className="relative">
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
@@ -165,12 +165,12 @@ function DistributionDonut({ title, values }: { title: string; values: Record<st
         </div>
       </div>
       {/* Legend — horizontal wrap below donut */}
-      <div className="flex flex-wrap justify-center gap-x-3 gap-y-1">
+      <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 w-full">
         {rows.map(([label, basisPoints], i) => (
-          <span key={label} className="inline-flex items-center gap-1 text-[11px]">
+          <span key={label} className="inline-flex items-center gap-1 text-[11px] max-w-full">
             <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: colors[i % colors.length] }} />
-            <span className="text-primary">{label}</span>
-            <span className="tabular-nums text-tertiary">{(basisPoints / 100).toFixed(1)}%</span>
+            <span className="text-primary truncate max-w-[80px]" title={label}>{label}</span>
+            <span className="tabular-nums text-tertiary shrink-0">{(basisPoints / 100).toFixed(1)}%</span>
           </span>
         ))}
       </div>
@@ -234,12 +234,12 @@ function CWESection({ rows }: { rows: AITriageMetricRow[] }) {
   const max = rows[0]?.requestCount ?? 1
   return (
     <Card title="By CWE">
-      <div className="space-y-2.5">
+      <div className="space-y-2.5 min-w-0">
         {rows.map((row) => (
-          <div key={row.value}>
-            <div className="flex items-center justify-between text-xs mb-0.5">
-              <span className="font-mono font-medium text-primary">{row.value}</span>
-              <span className="flex items-center gap-3 tabular-nums text-tertiary">
+          <div key={row.value} className="min-w-0">
+            <div className="flex items-center justify-between gap-2 text-xs mb-0.5">
+              <span className="font-mono font-medium text-primary truncate">{row.value}</span>
+              <span className="flex items-center gap-3 tabular-nums text-tertiary shrink-0">
                 <span>{row.requestCount} req</span>
                 {row.gateExemptions > 0 && (
                   <span className="text-utility-orange-600 dark:text-utility-orange-400">
@@ -265,14 +265,14 @@ function ProjectSection({ rows }: { rows: AITriageMetricRow[] }) {
   const totalReq = rows.reduce((a, r) => a + r.requestCount, 0) || 1
   return (
     <Card title="By project">
-      <div className="space-y-3">
+      <div className="space-y-3 min-w-0">
         {rows.map((row) => {
           const failures = row.timeoutCount + row.parseFailureCount + row.providerFailureCount + row.circuitOpenCount
           return (
-            <div key={row.value}>
-              <div className="flex items-center justify-between text-sm mb-1">
-                <span className="font-medium text-primary">{row.value}</span>
-                <span className="flex items-center gap-3 text-xs tabular-nums text-tertiary">
+            <div key={row.value} className="min-w-0">
+              <div className="flex items-center justify-between gap-2 text-sm mb-1">
+                <span className="font-medium text-primary truncate" title={row.value}>{row.value}</span>
+                <span className="flex items-center gap-3 text-xs tabular-nums text-tertiary shrink-0">
                   <span>{row.requestCount} req</span>
                   {failures > 0 && <span className="text-critical">{failures} fail</span>}
                   <span>{row.gateExemptions} exempt</span>
