@@ -9,6 +9,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Coverage-honest incident investigation and analyst triage.** Runtime detections can pivot to a
+  deterministic surrounding endpoint State Timeline with explicit sampled, gapped, lost, expired, and
+  capped-window coverage signals. Tenant-scoped incident APIs now expose projections and immutable event
+  history, while review-gated owner, comment, state, and disposition mutations append attributable events
+  under optimistic concurrency without coupling disposition to risk.
+
 - **Independent signed agent detection delivery.** Confirmed detections now drain from an isolated P1
   WAL lane into crash-recoverable batches, using an agent-owned Ed25519 key registered with
   proof-of-possession. Pending sequence/membership survives restart and lost responses, local records

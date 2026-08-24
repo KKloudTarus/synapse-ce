@@ -131,3 +131,10 @@ func TestListByAsset(t *testing.T) {
 		t.Fatalf("other asset must list nothing, got %d", len(other))
 	}
 }
+
+func TestHistoryNotFound(t *testing.T) {
+	svc, ctx := newSvc(t)
+	if _, err := svc.History(ctx, "missing"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("missing history must be ErrNotFound, got %v", err)
+	}
+}

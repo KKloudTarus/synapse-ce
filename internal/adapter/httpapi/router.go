@@ -10,6 +10,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/aitriagereview"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -72,6 +73,8 @@ type Router struct {
 	threatModels           threatModelService    // optional; nil ⇒ threat-model routes are not registered
 	drafts                 writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
 	aiTriageReviews        aiTriageReviewService // optional; nil ⇒ AI-triage review queue routes are not registered
+	incidents              incidentReadService   // optional; nil ⇒ incident read routes are not registered
+	incidentTriage         incidentTriageService // optional; nil ⇒ incident mutation routes are not registered
 	projects               projectService        // optional; nil ⇒ project routes are not registered
 	assets                 assetService          // optional; nil ⇒ fleet asset routes are not registered
 	cspm                   *cspm.Service         // optional; nil ⇒ CSPM routes are not registered
@@ -139,6 +142,22 @@ type aiTriageReviewService interface {
 	Decide(ctx context.Context, tenantID, id shared.ID, actor string, decision aitriagereview.Decision, rationale string, expectedVersion int) (aitriagereview.Review, error)
 }
 
+// incidentReadService exposes projections and immutable history without generic append access.
+type incidentReadService interface {
+	Get(context.Context, shared.ID) (incident.Incident, error)
+	ListByAsset(context.Context, shared.ID, int) ([]incident.Incident, error)
+	History(context.Context, shared.ID) ([]incident.IncidentEvent, error)
+}
+
+// incidentTriageService is deliberately narrow: HTTP callers can only perform the four human C5
+// mutations. The generic incident event appender remains inaccessible at the transport edge.
+type incidentTriageService interface {
+	AssignOwner(context.Context, string, shared.ID, string) (incident.Incident, error)
+	Comment(context.Context, string, shared.ID, string) (incident.Incident, error)
+	ChangeStatus(context.Context, string, shared.ID, incident.State) (incident.Incident, error)
+	SetDisposition(context.Context, string, shared.ID, incident.Disposition) (incident.Incident, error)
+}
+
 // SetJudgments wires the AI judgment lifecycle endpoints. nil ⇒ routes are not registered.
 func (rt *Router) SetJudgments(s judgmentService) { rt.judgments = s }
 
@@ -181,6 +200,12 @@ func (rt *Router) SetWriteupDrafts(s writeupDraftService) { rt.drafts = s }
 
 // SetAITriageReviews wires the tenant-scoped human review queue.
 func (rt *Router) SetAITriageReviews(s aiTriageReviewService) { rt.aiTriageReviews = s }
+
+// SetIncidents wires the tenant-scoped incident reads and audited human-triage workflow.
+func (rt *Router) SetIncidents(read incidentReadService, triage incidentTriageService) {
+	rt.incidents = read
+	rt.incidentTriage = triage
+}
 
 // qualityGateService is the HTTP slice for tenant-scoped gate management.
 type qualityGateService interface {
@@ -314,6 +339,17 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/ai-triage/reviews", rt.authz(userdom.PermView, rt.listAITriageReviews))
 		mux.HandleFunc("POST /api/v1/ai-triage/reviews/{rid}/claim", rt.authz(userdom.PermReview, rt.claimAITriageReview))
 		mux.HandleFunc("POST /api/v1/ai-triage/reviews/{rid}/decision", rt.authz(userdom.PermReview, rt.decideAITriageReview))
+	}
+	if rt.incidents != nil {
+		mux.HandleFunc("GET /api/v1/incidents", rt.authz(userdom.PermView, rt.listIncidents))
+		mux.HandleFunc("GET /api/v1/incidents/{id}", rt.authz(userdom.PermView, rt.getIncident))
+		mux.HandleFunc("GET /api/v1/incidents/{id}/events", rt.authz(userdom.PermView, rt.incidentHistory))
+	}
+	if rt.incidents != nil && rt.incidentTriage != nil {
+		mux.HandleFunc("PUT /api/v1/incidents/{id}/owner", rt.authz(userdom.PermReview, rt.changeIncidentOwner))
+		mux.HandleFunc("POST /api/v1/incidents/{id}/comments", rt.authz(userdom.PermReview, rt.addIncidentComment))
+		mux.HandleFunc("POST /api/v1/incidents/{id}/state", rt.authz(userdom.PermReview, rt.changeIncidentState))
+		mux.HandleFunc("POST /api/v1/incidents/{id}/disposition", rt.authz(userdom.PermReview, rt.setIncidentDisposition))
 	}
 	if rt.sla != nil {
 		mux.HandleFunc("GET /api/v1/sla/policies", rt.authz(userdom.PermView, rt.listSLAPolicies))

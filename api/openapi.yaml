@@ -44,6 +44,8 @@ tags:
   description: Risk-based remediation deadlines, immutable assessments, policy versions, and human-owned lifecycle governance
 - name: fleet
   description: Enrolled-agent transport and operator fleet administration
+- name: incidents
+  description: Tenant-scoped runtime incidents, immutable event history, and human triage
 
 paths:
   /healthz:
@@ -1912,6 +1914,152 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
 
+  /api/v1/incidents:
+    get:
+      tags: [incidents]
+      operationId: listIncidents
+      summary: List tenant-scoped runtime incidents
+      parameters:
+      - name: asset_id
+        in: query
+        schema: {type: string, minLength: 1}
+        description: Optional exact asset filter
+      - name: limit
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 100, default: 100}
+      responses:
+        '200':
+          description: Stable incident-id-ordered result
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentList'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/incidents/{id}:
+    parameters:
+    - $ref: '#/components/parameters/IncidentId'
+    get:
+      tags: [incidents]
+      operationId: getIncident
+      summary: Get the current event-sourced incident projection
+      responses:
+        '200':
+          description: Current incident projection
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Incident'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/incidents/{id}/events:
+    parameters:
+    - $ref: '#/components/parameters/IncidentId'
+    get:
+      tags: [incidents]
+      operationId: getIncidentEventHistory
+      summary: Get the immutable attributable incident event log
+      responses:
+        '200':
+          description: Events in ascending revision order
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentEventList'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/incidents/{id}/owner:
+    parameters:
+    - $ref: '#/components/parameters/IncidentId'
+    put:
+      tags: [incidents]
+      operationId: changeIncidentOwner
+      summary: Assign an incident owner through an append-only event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IncidentOwnerMutation'}
+      responses:
+        '200': {description: Updated incident projection, content: {application/json: {schema: {$ref: '#/components/schemas/Incident'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Expected revision is stale, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/incidents/{id}/comments:
+    parameters:
+    - $ref: '#/components/parameters/IncidentId'
+    post:
+      tags: [incidents]
+      operationId: addIncidentComment
+      summary: Append an attributable analyst comment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IncidentCommentMutation'}
+      responses:
+        '200': {description: Updated incident projection, content: {application/json: {schema: {$ref: '#/components/schemas/Incident'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Expected revision is stale, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/incidents/{id}/state:
+    parameters:
+    - $ref: '#/components/parameters/IncidentId'
+    post:
+      tags: [incidents]
+      operationId: changeIncidentState
+      summary: Advance the incident through the legal workflow graph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IncidentStateMutation'}
+      responses:
+        '200': {description: Updated incident projection, content: {application/json: {schema: {$ref: '#/components/schemas/Incident'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Expected revision is stale, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/incidents/{id}/disposition:
+    parameters:
+    - $ref: '#/components/parameters/IncidentId'
+    post:
+      tags: [incidents]
+      operationId: setIncidentDisposition
+      summary: Set the analyst verdict without changing workflow state or risk
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IncidentDispositionMutation'}
+      responses:
+        '200': {description: Updated incident projection, content: {application/json: {schema: {$ref: '#/components/schemas/Incident'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Expected revision is stale, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1946,6 +2094,11 @@ components:
       schema: {type: string, minLength: 1}
     AITriageReviewId:
       name: rid
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    IncidentId:
+      name: id
       in: path
       required: true
       schema: {type: string, minLength: 1}
@@ -2145,6 +2298,166 @@ components:
           additionalProperties:
             type: string
             enum: [ok, failed]
+
+    IncidentState:
+      type: string
+      enum: [new, open, triaged, investigating, contained, remediated, resolved, closed, reopened]
+
+    IncidentDisposition:
+      type: string
+      enum: [unknown, true_positive, benign_positive, false_positive, duplicate, test]
+
+    IncidentRiskAssessment:
+      type: object
+      additionalProperties: false
+      required: [assessment_id, incident_revision, scorer_version, policy_version, input_snapshot_hash, risk, confidence, coverage, coverage_vector, context, factor_contributions, reason_codes, created_at]
+      properties:
+        assessment_id: {type: string}
+        incident_revision: {type: integer, minimum: 0}
+        scorer_version: {type: string}
+        policy_version: {type: string}
+        input_snapshot_hash: {type: string}
+        risk: {type: integer, minimum: 0, maximum: 100}
+        confidence: {type: integer, minimum: 0, maximum: 100}
+        coverage: {type: integer, minimum: 0, maximum: 100}
+        coverage_vector:
+          type: object
+          additionalProperties: false
+          required: [process, network, file, privilege, reasons]
+          properties:
+            process: {type: integer, minimum: 0, maximum: 100}
+            network: {type: integer, minimum: 0, maximum: 100}
+            file: {type: integer, minimum: 0, maximum: 100}
+            privilege: {type: integer, minimum: 0, maximum: 100}
+            reasons: {type: array, items: {type: string}}
+        context:
+          type: object
+          additionalProperties: false
+          required: [threat, exposure, behavior]
+          properties:
+            threat: {type: integer, minimum: 0, maximum: 100}
+            exposure: {type: integer, minimum: 0, maximum: 100}
+            behavior: {type: integer, minimum: 0, maximum: 100}
+        factor_contributions:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [factor, points, reason]
+            properties:
+              factor: {type: string}
+              points: {type: integer, minimum: 0, maximum: 100}
+              reason: {type: string}
+        reason_codes: {type: array, items: {type: string}}
+        created_at: {type: string, format: date-time}
+
+    IncidentComment:
+      type: object
+      additionalProperties: false
+      required: [at, actor, text]
+      properties:
+        at: {type: string, format: date-time}
+        actor: {type: string, minLength: 1, maxLength: 256}
+        text: {type: string, minLength: 1, maxLength: 8192}
+
+    IncidentResponseRef:
+      type: object
+      additionalProperties: false
+      required: [action_id, verified]
+      properties:
+        action_id: {type: string}
+        verified: {type: boolean}
+
+    Incident:
+      type: object
+      additionalProperties: false
+      required: [id, asset_id, title, severity, state, disposition, owner_id, detection_ids, comments, responses, revision, created_at, updated_at]
+      properties:
+        id: {type: string, minLength: 1}
+        asset_id: {type: string, minLength: 1}
+        title: {type: string}
+        severity: {type: string, enum: ['', unknown, info, low, medium, high, critical]}
+        state: {$ref: '#/components/schemas/IncidentState'}
+        disposition: {$ref: '#/components/schemas/IncidentDisposition'}
+        owner_id: {type: string, maxLength: 256}
+        detection_ids: {type: array, items: {type: string}}
+        risk: {$ref: '#/components/schemas/IncidentRiskAssessment'}
+        merged_into: {type: string}
+        comments: {type: array, items: {$ref: '#/components/schemas/IncidentComment'}}
+        responses: {type: array, items: {$ref: '#/components/schemas/IncidentResponseRef'}}
+        revision: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    IncidentList:
+      type: object
+      additionalProperties: false
+      required: [incidents]
+      properties:
+        incidents: {type: array, items: {$ref: '#/components/schemas/Incident'}}
+
+    IncidentEvent:
+      type: object
+      additionalProperties: false
+      required: [revision, kind, at, actor]
+      properties:
+        revision: {type: integer, minimum: 1}
+        kind:
+          type: string
+          enum: [created, detection_attached, detection_detached, status_changed, owner_changed, disposition_set, risk_reassessed, analyst_commented, merged, response_requested, response_verified]
+        at: {type: string, format: date-time}
+        actor: {type: string, minLength: 1, maxLength: 256}
+        asset_id: {type: string}
+        title: {type: string}
+        severity: {type: string, enum: [unknown, info, low, medium, high, critical]}
+        detection_id: {type: string}
+        to: {$ref: '#/components/schemas/IncidentState'}
+        owner: {type: string, maxLength: 256}
+        disposition: {$ref: '#/components/schemas/IncidentDisposition'}
+        risk: {$ref: '#/components/schemas/IncidentRiskAssessment'}
+        comment: {type: string, maxLength: 8192}
+        merged_into: {type: string}
+        response_action_id: {type: string}
+        verified: {type: boolean}
+
+    IncidentEventList:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events: {type: array, items: {$ref: '#/components/schemas/IncidentEvent'}}
+
+    IncidentOwnerMutation:
+      type: object
+      additionalProperties: false
+      required: [owner, expected_revision]
+      properties:
+        owner: {type: string, minLength: 1, maxLength: 256}
+        expected_revision: {type: integer, minimum: 1}
+
+    IncidentCommentMutation:
+      type: object
+      additionalProperties: false
+      required: [comment, expected_revision]
+      properties:
+        comment: {type: string, minLength: 1, maxLength: 8192}
+        expected_revision: {type: integer, minimum: 1}
+
+    IncidentStateMutation:
+      type: object
+      additionalProperties: false
+      required: [state, expected_revision]
+      properties:
+        state: {$ref: '#/components/schemas/IncidentState'}
+        expected_revision: {type: integer, minimum: 1}
+
+    IncidentDispositionMutation:
+      type: object
+      additionalProperties: false
+      required: [disposition, expected_revision]
+      properties:
+        disposition: {$ref: '#/components/schemas/IncidentDisposition'}
+        expected_revision: {type: integer, minimum: 1}
 
     SLATier:
       type: string

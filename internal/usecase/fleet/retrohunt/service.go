@@ -27,21 +27,57 @@ type Request struct {
 	Limit    int
 }
 
-// Result is the surrounding-timeline window. Entries are event-time ordered. Truncated reports that the
-// store's limit capped the window, so the caller knows the view may be partial (coverage honesty); a
-// deeper gap/sample overlay from the telemetry coverage store is a documented follow-up.
+// Result is the surrounding-timeline window. Entries are event-time ordered. Coverage combines timeline
+// truncation with raw-telemetry sampling, sequence-gap, and loss metadata for the exact window.
 type Result struct {
 	AssetID   shared.ID
 	From      time.Time
 	To        time.Time
 	Entries   []endpoint.TimelineEntry
 	Truncated bool
+	Coverage  Coverage
+}
+
+// CoverageReason is a stable, machine-readable explanation for an incomplete window.
+type CoverageReason string
+
+const (
+	CoverageSampled              CoverageReason = "telemetry_sampled"
+	CoverageSequenceGap          CoverageReason = "telemetry_sequence_gap"
+	CoverageLoss                 CoverageReason = "telemetry_loss"
+	CoverageTelemetryUnavailable CoverageReason = "telemetry_unavailable"
+	CoverageTimelineTruncated    CoverageReason = "timeline_limit"
+	CoverageTelemetryIncomplete  CoverageReason = "telemetry_incomplete"
+)
+
+// Coverage proves whether the returned timeline can be treated as complete for the requested window.
+// Complete is false whenever raw telemetry was sampled, lost, sequence-gapped, unavailable, or the
+// projected timeline was capped.
+type Coverage struct {
+	Complete          bool
+	Sampled           bool
+	MaxSampleRate     int
+	TimelineTruncated bool
+	TelemetryObserved bool
+	SequenceGaps      []ports.TelemetrySequenceGap
+	Losses            []ports.TelemetryLoss
+	Reasons           []CoverageReason
+}
+
+// TelemetryHuntReader is the read-only telemetry surface used to establish coverage honesty.
+type TelemetryHuntReader interface {
+	Query(context.Context, ports.HuntQuery) (ports.HuntResult, error)
 }
 
 // Service answers retro-hunt queries over the endpoint State Timeline.
 type Service struct {
-	timeline ports.EndpointTimelineStore
+	timeline  ports.EndpointTimelineStore
+	telemetry TelemetryHuntReader
 }
+
+// SetTelemetryReader enables sampling/gap/loss coverage checks over the exact hunt window. Until a
+// reader is configured, hunts remain usable but explicitly report telemetry_unavailable and incomplete.
+func (s *Service) SetTelemetryReader(telemetry TelemetryHuntReader) { s.telemetry = telemetry }
 
 // NewService constructs the retro-hunt service over an endpoint-timeline store.
 func NewService(timeline ports.EndpointTimelineStore) (*Service, error) {
@@ -77,6 +113,9 @@ func (s *Service) Hunt(ctx context.Context, req Request) (Result, error) {
 	if effLimit <= 0 {
 		effLimit = defaultHuntLimit
 	}
+	if effLimit > maxHuntLimit {
+		return Result{}, fmt.Errorf("%w: retro-hunt limit exceeds %d", shared.ErrValidation, maxHuntLimit)
+	}
 	entries, err := s.timeline.QueryTimeline(ctx, ports.EndpointTimelineQuery{
 		AssetID: req.AssetID, From: from, To: to, EntityID: req.EntityID, Limit: effLimit + 1,
 	})
@@ -88,9 +127,72 @@ func (s *Service) Hunt(ctx context.Context, req Request) (Result, error) {
 		entries = entries[:effLimit]
 		truncated = true
 	}
-	return Result{AssetID: req.AssetID, From: from, To: to, Entries: entries, Truncated: truncated}, nil
+	coverage, err := s.coverage(ctx, req.AssetID, from, to, truncated)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{
+		AssetID: req.AssetID, From: from, To: to, Entries: entries,
+		Truncated: truncated, Coverage: coverage,
+	}, nil
+}
+
+func (s *Service) coverage(ctx context.Context, assetID shared.ID, from, to time.Time, timelineTruncated bool) (Coverage, error) {
+	if s.telemetry == nil {
+		coverage := Coverage{MaxSampleRate: 1, TimelineTruncated: timelineTruncated}
+		coverage.Reasons = append(coverage.Reasons, CoverageTelemetryUnavailable)
+		if timelineTruncated {
+			coverage.Reasons = append(coverage.Reasons, CoverageTimelineTruncated)
+		}
+		return coverage, nil
+	}
+	hunt, err := s.telemetry.Query(ctx, ports.HuntQuery{
+		Kind: ports.HuntContext, AssetID: assetID, Since: from, Until: to, Limit: 1,
+	})
+	if err != nil {
+		return Coverage{}, fmt.Errorf("retro-hunt coverage query: %w", err)
+	}
+	return coverageFor(hunt, timelineTruncated), nil
+}
+
+func coverageFor(hunt ports.HuntResult, timelineTruncated bool) Coverage {
+	maxSampleRate := hunt.MaxSampleRate
+	if maxSampleRate < 1 {
+		maxSampleRate = 1
+	}
+	sampled := hunt.Sampled || maxSampleRate > 1
+	coverage := Coverage{
+		Sampled: sampled, MaxSampleRate: maxSampleRate, TimelineTruncated: timelineTruncated,
+		TelemetryObserved: hunt.RowsScanned > 0,
+		SequenceGaps:      append([]ports.TelemetrySequenceGap{}, hunt.SequenceGaps...),
+		Losses:            append([]ports.TelemetryLoss{}, hunt.Losses...),
+	}
+	if sampled {
+		coverage.Reasons = append(coverage.Reasons, CoverageSampled)
+	}
+	if len(coverage.SequenceGaps) > 0 {
+		coverage.Reasons = append(coverage.Reasons, CoverageSequenceGap)
+	}
+	if len(coverage.Losses) > 0 {
+		coverage.Reasons = append(coverage.Reasons, CoverageLoss)
+	}
+	if !coverage.TelemetryObserved {
+		coverage.Reasons = append(coverage.Reasons, CoverageTelemetryUnavailable)
+	}
+	if timelineTruncated {
+		coverage.Reasons = append(coverage.Reasons, CoverageTimelineTruncated)
+	}
+	knownIncomplete := sampled || len(coverage.SequenceGaps) > 0 || len(coverage.Losses) > 0 || !coverage.TelemetryObserved
+	if !hunt.Complete && !knownIncomplete {
+		coverage.Reasons = append(coverage.Reasons, CoverageTelemetryIncomplete)
+	}
+	coverage.Complete = hunt.Complete && len(coverage.Reasons) == 0
+	return coverage
 }
 
 // defaultHuntLimit bounds a retro-hunt window when the caller specifies no (or a non-positive) limit; it
 // is below the timeline store's own cap so a full page is always reportable as Truncated.
 const defaultHuntLimit = 1000
+
+// maxHuntLimit leaves room for the look-ahead row under timeline stores' 10k hard cap.
+const maxHuntLimit = 9999

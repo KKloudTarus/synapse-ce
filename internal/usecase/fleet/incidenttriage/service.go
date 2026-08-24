@@ -9,11 +9,19 @@ package incidenttriage
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+)
+
+const (
+	maxActorRunes   = 256
+	maxOwnerRunes   = 256
+	maxCommentRunes = 8 * 1024
 )
 
 // IncidentAppender is the consumer-side view of the incident store this usecase needs: read the current
@@ -49,23 +57,31 @@ func NewService(incidents IncidentAppender, audit ports.AuditLogger, now func() 
 // server-side principal, never a request-body field) and follows ctx to keep it away from the other string
 // params.
 func (s *Service) AssignOwner(ctx context.Context, actor string, id shared.ID, owner string) (incident.Incident, error) {
+	owner = strings.TrimSpace(owner)
 	if owner == "" {
 		return incident.Incident{}, fmt.Errorf("%w: owner is required", shared.ErrValidation)
 	}
+	if utf8.RuneCountInString(owner) > maxOwnerRunes {
+		return incident.Incident{}, fmt.Errorf("%w: owner exceeds %d characters", shared.ErrValidation, maxOwnerRunes)
+	}
 	return s.apply(ctx, actor, id, "incident.owner_changed",
-		func(at time.Time) incident.IncidentEvent {
-			return incident.IncidentEvent{IncidentID: id, Kind: incident.EventOwnerChanged, At: at, Actor: actor, Owner: owner}
+		func(at time.Time, authenticatedActor string) incident.IncidentEvent {
+			return incident.IncidentEvent{IncidentID: id, Kind: incident.EventOwnerChanged, At: at, Actor: authenticatedActor, Owner: owner}
 		}, map[string]string{"owner": owner})
 }
 
 // Comment records an analyst note.
 func (s *Service) Comment(ctx context.Context, actor string, id shared.ID, text string) (incident.Incident, error) {
+	text = strings.TrimSpace(text)
 	if text == "" {
 		return incident.Incident{}, fmt.Errorf("%w: comment text is required", shared.ErrValidation)
 	}
+	if utf8.RuneCountInString(text) > maxCommentRunes {
+		return incident.Incident{}, fmt.Errorf("%w: comment exceeds %d characters", shared.ErrValidation, maxCommentRunes)
+	}
 	return s.apply(ctx, actor, id, "incident.commented",
-		func(at time.Time) incident.IncidentEvent {
-			return incident.IncidentEvent{IncidentID: id, Kind: incident.EventAnalystCommented, At: at, Actor: actor, Comment: text}
+		func(at time.Time, authenticatedActor string) incident.IncidentEvent {
+			return incident.IncidentEvent{IncidentID: id, Kind: incident.EventAnalystCommented, At: at, Actor: authenticatedActor, Comment: text}
 		}, nil)
 }
 
@@ -75,8 +91,8 @@ func (s *Service) ChangeStatus(ctx context.Context, actor string, id shared.ID, 
 		return incident.Incident{}, fmt.Errorf("%w: unknown target state %q", shared.ErrValidation, to)
 	}
 	return s.apply(ctx, actor, id, "incident.status_changed",
-		func(at time.Time) incident.IncidentEvent {
-			return incident.IncidentEvent{IncidentID: id, Kind: incident.EventStatusChanged, At: at, Actor: actor, To: to}
+		func(at time.Time, authenticatedActor string) incident.IncidentEvent {
+			return incident.IncidentEvent{IncidentID: id, Kind: incident.EventStatusChanged, At: at, Actor: authenticatedActor, To: to}
 		}, map[string]string{"to": string(to)})
 }
 
@@ -86,8 +102,8 @@ func (s *Service) SetDisposition(ctx context.Context, actor string, id shared.ID
 		return incident.Incident{}, fmt.Errorf("%w: unknown disposition %q", shared.ErrValidation, disposition)
 	}
 	return s.apply(ctx, actor, id, "incident.disposition_set",
-		func(at time.Time) incident.IncidentEvent {
-			return incident.IncidentEvent{IncidentID: id, Kind: incident.EventDispositionSet, At: at, Actor: actor, Disposition: disposition}
+		func(at time.Time, authenticatedActor string) incident.IncidentEvent {
+			return incident.IncidentEvent{IncidentID: id, Kind: incident.EventDispositionSet, At: at, Actor: authenticatedActor, Disposition: disposition}
 		}, map[string]string{"disposition": string(disposition)})
 }
 
@@ -104,19 +120,23 @@ func (s *Service) SetDisposition(ctx context.Context, actor string, id shared.ID
 // durable and carries the attribution) — the error signals only that the secondary audit trail has a gap.
 // The caller MUST NOT blindly retry (the stores are not transactional and the append is not idempotent, so
 // a retry would append a DUPLICATE event); treat it as committed-but-unaudited and reconcile/alert.
-func (s *Service) apply(ctx context.Context, actor string, id shared.ID, action string, build func(time.Time) incident.IncidentEvent, meta map[string]string) (incident.Incident, error) {
+func (s *Service) apply(ctx context.Context, actor string, id shared.ID, action string, build func(time.Time, string) incident.IncidentEvent, meta map[string]string) (incident.Incident, error) {
+	actor = strings.TrimSpace(actor)
 	if id.IsZero() {
 		return incident.Incident{}, fmt.Errorf("%w: incident id is required", shared.ErrValidation)
 	}
 	if actor == "" {
 		return incident.Incident{}, fmt.Errorf("%w: triage mutation requires an actor", shared.ErrValidation)
 	}
+	if utf8.RuneCountInString(actor) > maxActorRunes {
+		return incident.Incident{}, fmt.Errorf("%w: triage mutation actor exceeds %d characters", shared.ErrValidation, maxActorRunes)
+	}
 	cur, err := s.incidents.Get(ctx, id)
 	if err != nil {
 		return incident.Incident{}, err
 	}
 	at := s.now().UTC()
-	updated, err := s.incidents.Append(ctx, id, cur.Revision, []incident.IncidentEvent{build(at)})
+	updated, err := s.incidents.Append(ctx, id, cur.Revision, []incident.IncidentEvent{build(at, actor)})
 	if err != nil {
 		return incident.Incident{}, err
 	}

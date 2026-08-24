@@ -10,6 +10,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/endpoint"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 const (
@@ -18,6 +19,17 @@ const (
 )
 
 var base = time.Unix(1_800_000_000, 0).UTC()
+
+type coverageReader struct {
+	result ports.HuntResult
+	err    error
+	query  ports.HuntQuery
+}
+
+func (r *coverageReader) Query(_ context.Context, query ports.HuntQuery) (ports.HuntResult, error) {
+	r.query = query
+	return r.result, r.err
+}
 
 func newSvc(t *testing.T) (*Service, context.Context, *memory.EndpointTimelineStore) {
 	t.Helper()
@@ -90,15 +102,19 @@ func TestHuntTruncation(t *testing.T) {
 	if len(res.Entries) != 2 || !res.Truncated {
 		t.Fatalf("expected truncated 2-entry result, got %d truncated=%v", len(res.Entries), res.Truncated)
 	}
+	if !hasCoverageReason(res.Coverage, CoverageTimelineTruncated) {
+		t.Fatalf("timeline cap missing from coverage: %+v", res.Coverage)
+	}
 }
 
 func TestHuntFailsClosed(t *testing.T) {
 	svc, ctx, _ := newSvc(t)
 	bad := []Request{
-		{Around: base, Before: time.Minute},                            // no asset
-		{AssetID: asset, Before: time.Minute},                          // no trigger time
-		{AssetID: asset, Around: base, Before: -1, After: time.Minute}, // negative look-back
-		{AssetID: asset, Around: base},                                 // zero-width window
+		{Around: base, Before: time.Minute},                                          // no asset
+		{AssetID: asset, Before: time.Minute},                                        // no trigger time
+		{AssetID: asset, Around: base, Before: -1, After: time.Minute},               // negative look-back
+		{AssetID: asset, Around: base},                                               // zero-width window
+		{AssetID: asset, Around: base, Before: time.Minute, Limit: maxHuntLimit + 1}, // unsafe limit
 	}
 	for i, req := range bad {
 		if _, err := svc.Hunt(ctx, req); !errors.Is(err, shared.ErrValidation) {
@@ -108,6 +124,80 @@ func TestHuntFailsClosed(t *testing.T) {
 	if _, err := NewService(nil); !errors.Is(err, shared.ErrValidation) {
 		t.Fatal("nil store must be rejected")
 	}
+}
+
+func TestHuntCoverageIsHonestAboutSamplingGapsAndLoss(t *testing.T) {
+	svc, ctx, store := newSvc(t)
+	seed(t, ctx, store)
+	reader := &coverageReader{result: ports.HuntResult{
+		RowsScanned: 3, Sampled: true, MaxSampleRate: 10, Complete: false,
+		SequenceGaps: []ports.TelemetrySequenceGap{{Missing: 2}},
+		Losses:       []ports.TelemetryLoss{{Reason: "agent batch truncated"}},
+	}}
+	svc.SetTelemetryReader(reader)
+
+	res, err := svc.Hunt(ctx, Request{AssetID: asset, Around: base, Before: time.Minute, After: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Coverage.Complete || !res.Coverage.Sampled || res.Coverage.MaxSampleRate != 10 {
+		t.Fatalf("coverage = %+v", res.Coverage)
+	}
+	for _, reason := range []CoverageReason{CoverageSampled, CoverageSequenceGap, CoverageLoss} {
+		if !hasCoverageReason(res.Coverage, reason) {
+			t.Fatalf("coverage missing %q: %+v", reason, res.Coverage)
+		}
+	}
+	if reader.query.Kind != ports.HuntContext || reader.query.AssetID != asset ||
+		!reader.query.Since.Equal(base.Add(-time.Minute)) || !reader.query.Until.Equal(base.Add(time.Minute)) {
+		t.Fatalf("coverage query does not match timeline window: %+v", reader.query)
+	}
+}
+
+func TestHuntCoverageCanProveCompleteWindow(t *testing.T) {
+	svc, ctx, store := newSvc(t)
+	seed(t, ctx, store)
+	svc.SetTelemetryReader(&coverageReader{result: ports.HuntResult{
+		RowsScanned: 3, MaxSampleRate: 1, Complete: true,
+	}})
+
+	res, err := svc.Hunt(ctx, Request{AssetID: asset, Around: base, Before: time.Minute, After: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Coverage.Complete || len(res.Coverage.Reasons) != 0 {
+		t.Fatalf("complete coverage = %+v", res.Coverage)
+	}
+}
+
+func TestHuntWithoutTelemetryDoesNotClaimCompleteness(t *testing.T) {
+	svc, ctx, store := newSvc(t)
+	seed(t, ctx, store)
+	res, err := svc.Hunt(ctx, Request{AssetID: asset, Around: base, Before: time.Minute, After: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Coverage.Complete || !hasCoverageReason(res.Coverage, CoverageTelemetryUnavailable) {
+		t.Fatalf("missing telemetry must be explicit: %+v", res.Coverage)
+	}
+}
+
+func TestHuntCoverageQueryErrorPropagates(t *testing.T) {
+	svc, ctx, store := newSvc(t)
+	seed(t, ctx, store)
+	svc.SetTelemetryReader(&coverageReader{err: errors.New("telemetry unavailable")})
+	if _, err := svc.Hunt(ctx, Request{AssetID: asset, Around: base, Before: time.Minute, After: time.Minute}); err == nil {
+		t.Fatal("coverage query error must fail closed")
+	}
+}
+
+func hasCoverageReason(coverage Coverage, want CoverageReason) bool {
+	for _, reason := range coverage.Reasons {
+		if reason == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestHuntDefaultLimitReportsTruncation(t *testing.T) {

@@ -111,6 +111,8 @@ import (
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
 	detectledger "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectledger"
 	hostinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/hostinventory"
+	incidenttriage "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidenttriage"
+	incidentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
 	keyregistry "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/keyregistry"
 	telemetryingest "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/telemetryingest"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
@@ -264,6 +266,7 @@ func main() {
 	var fleetAgentStore ports.FleetAgentStore
 	var agentSigningKeyStore ports.AgentSigningKeyStore       // A0.2 signing-key registry (A3 resolve+verify)
 	var telemetryTransportStore ports.TelemetryTransportStore // A3 telemetry transport sequencing state
+	var incidentEventStore ports.IncidentEventStore           // C7 append-only incident event log
 	var fleetRolloutStore ports.FleetRolloutStore             // operator update-rollout plans (#412 req 9)
 	var leaderStore ports.LeaderStore                         // postgres only; nil in memory mode (single process)
 	var findingRepo ports.FindingRepository
@@ -435,6 +438,7 @@ func main() {
 		fleetAgentStore = postgres.NewFleetAgentRepository(pool)
 		agentSigningKeyStore = postgres.NewAgentSigningKeyRepository(pool)
 		telemetryTransportStore = postgres.NewTelemetryTransportRepository(pool)
+		incidentEventStore = postgres.NewIncidentEventRepository(pool)
 		fleetRolloutStore = postgres.NewFleetRolloutRepository(pool)
 		leaderStore = postgres.NewLeaderStore(pool)
 		// SECURITY (#431 req 6, #432, #409): the fleet_* tables are RLS-protected, but RLS is a
@@ -486,6 +490,7 @@ func main() {
 		fleetAgentStore = memory.NewFleetAgentStore()
 		agentSigningKeyStore = memory.NewAgentSigningKeyStore()
 		telemetryTransportStore = memory.NewTelemetryTransportStore()
+		incidentEventStore = memory.NewIncidentEventStore()
 		fleetRolloutStore = memory.NewFleetRolloutStore()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
@@ -961,6 +966,17 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
+	incidentService, err := incidentuc.NewService(incidentEventStore)
+	if err != nil {
+		log.Error("incident service init failed", "err", err)
+		os.Exit(1)
+	}
+	incidentTriageService, err := incidenttriage.NewService(incidentService, auditLog, clock.Now)
+	if err != nil {
+		log.Error("incident triage service init failed", "err", err)
+		os.Exit(1)
+	}
+	router.SetIncidents(incidentService, incidentTriageService)
 	if cfg.OIDCEnabled {
 		provider, oidcErr := oidcadapter.New(context.Background(), oidcadapter.Config{
 			Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCClientSecret,

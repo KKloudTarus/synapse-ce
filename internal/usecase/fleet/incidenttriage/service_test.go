@@ -3,6 +3,7 @@ package incidenttriage
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -147,10 +148,20 @@ func TestTriageFailsClosed(t *testing.T) {
 	svc, _, ctx, _ := setup(t)
 	bad := []func() error{
 		func() error { _, e := svc.AssignOwner(ctx, "alice", incID, ""); return e },
+		func() error { _, e := svc.AssignOwner(ctx, "alice", incID, "   "); return e },
+		func() error {
+			_, e := svc.AssignOwner(ctx, "alice", incID, strings.Repeat("x", maxOwnerRunes+1))
+			return e
+		},
 		func() error { _, e := svc.Comment(ctx, "alice", incID, ""); return e },
+		func() error {
+			_, e := svc.Comment(ctx, "alice", incID, strings.Repeat("x", maxCommentRunes+1))
+			return e
+		},
 		func() error { _, e := svc.ChangeStatus(ctx, "alice", incID, "bogus"); return e },
 		func() error { _, e := svc.SetDisposition(ctx, "alice", incID, "bogus"); return e },
-		func() error { _, e := svc.Comment(ctx, "", incID, "x"); return e },   // no actor
+		func() error { _, e := svc.Comment(ctx, "", incID, "x"); return e }, // no actor
+		func() error { _, e := svc.Comment(ctx, strings.Repeat("x", maxActorRunes+1), incID, "x"); return e },
 		func() error { _, e := svc.Comment(ctx, "alice", "", "x"); return e }, // no incident id
 	}
 	for i, f := range bad {
@@ -164,5 +175,27 @@ func TestTriageFailsClosed(t *testing.T) {
 	}
 	if _, err := NewService(nil, &captureAudit{}, time.Now); !errors.Is(err, shared.ErrValidation) {
 		t.Fatal("nil store must be rejected")
+	}
+}
+
+func TestTriageCanonicalizesAttributionAndText(t *testing.T) {
+	svc, audit, ctx, inc := setup(t)
+	if _, err := svc.AssignOwner(ctx, "  alice  ", incID, "  bob  "); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Comment(ctx, "  alice  ", incID, "  note  "); err != nil {
+		t.Fatal(err)
+	}
+	got, err := inc.Get(ctx, incID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.OwnerID != "bob" || len(got.Comments) != 1 || got.Comments[0].Actor != "alice" || got.Comments[0].Text != "note" {
+		t.Fatalf("canonicalized incident = %+v", got)
+	}
+	for _, entry := range audit.entries {
+		if entry.Actor != "alice" {
+			t.Fatalf("audit actor = %q, want alice", entry.Actor)
+		}
 	}
 }

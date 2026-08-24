@@ -88,6 +88,23 @@ func (s *Service) ListByAsset(ctx context.Context, assetID shared.ID, limit int)
 	return out, nil
 }
 
+// History returns the immutable incident event log in revision order. The event log is the audit trail:
+// every analyst mutation carries its authenticated actor and server-side timestamp and is never updated
+// or deleted.
+func (s *Service) History(ctx context.Context, id shared.ID) ([]incident.IncidentEvent, error) {
+	if id.IsZero() {
+		return nil, fmt.Errorf("%w: incident id is required", shared.ErrValidation)
+	}
+	events, err := s.store.LoadEvents(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(events) == 0 {
+		return nil, fmt.Errorf("%w: incident %s", shared.ErrNotFound, id)
+	}
+	return events, nil
+}
+
 // RecordCorrelation persists correlator output (a flat event stream, grouped by incident) as NEW
 // incidents. It is IDEMPOTENT for batch correlation: an incident id that already exists is skipped (the
 // correlator mints deterministic ids, so re-running over the same window records nothing new). Attaching
