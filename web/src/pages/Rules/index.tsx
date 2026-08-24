@@ -200,17 +200,16 @@ export default function Rules() {
                 {/* Desktop Table */}
                 <div className="hidden md:block">
                   <Card bodyClass="p-0 overflow-hidden">
-                    <div className="overflow-x-auto">
-                      <table role="table" aria-rowcount={resultRules.length + 1} className="min-w-full text-left text-sm whitespace-nowrap">
+                      <table role="table" aria-rowcount={resultRules.length + 1} className="w-full table-fixed text-left text-sm">
                         <thead className="bg-secondary/95 text-[11px] uppercase tracking-[0.14em] text-primary border-b border-secondary sticky top-0">
                           <tr role="row">
-                            <th scope="col" className="px-5 py-3 font-semibold min-w-[20rem]">Rule</th>
-                            <th scope="col" className="px-4 py-3 font-semibold w-28">Language</th>
-                            <th scope="col" className="px-4 py-3 font-semibold w-32">Type</th>
-                            <th scope="col" className="px-4 py-3 font-semibold w-36">Qualities</th>
-                            <th scope="col" className="px-4 py-3 font-semibold w-28">Severity</th>
-                            <th scope="col" className="px-4 py-3 font-semibold w-48">Tags</th>
-                            <th scope="col" className="px-4 py-3 font-semibold w-10 text-right"><span className="sr-only">Expand</span></th>
+                            <th scope="col" className="px-5 py-3 font-semibold w-[40%]">Rule</th>
+                            <th scope="col" className="px-4 py-3 font-semibold w-[12%]">Language</th>
+                            <th scope="col" className="px-4 py-3 font-semibold w-[12%]">Type</th>
+                            <th scope="col" className="px-4 py-3 font-semibold w-[12%]">Qualities</th>
+                            <th scope="col" className="px-4 py-3 font-semibold w-[8%]">Severity</th>
+                            <th scope="col" className="px-4 py-3 font-semibold w-[14%]">Tags</th>
+                            <th scope="col" className="px-4 py-3 font-semibold w-[2%] text-right"><span className="sr-only">Expand</span></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-secondary">
@@ -229,12 +228,12 @@ export default function Rules() {
                                   )}
                                   onClick={() => setExpandedKey(isExpanded ? null : rule.key)}
                                 >
-                                  <td className="px-5 py-3">
-                                    <div className="flex items-center gap-2">
-                                      <span className={cn("font-semibold", isExpanded ? "text-brand-secondary" : "text-primary")}>
+                                  <td className="px-5 py-3 overflow-hidden">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className={cn("font-semibold truncate", isExpanded ? "text-brand-secondary" : "text-primary")}>
                                         {rule.name}
                                       </span>
-                                      <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-tertiary border border-secondary">
+                                      <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-tertiary border border-secondary shrink-0 truncate max-w-[160px]">
                                         {rule.key}
                                       </span>
                                     </div>
@@ -251,10 +250,10 @@ export default function Rules() {
                                   <td className="px-4 py-3 text-tertiary">
                                     {formatRuleSeverity(rule.defaultSeverity)}
                                   </td>
-                                  <td className="px-4 py-3 text-tertiary">
-                                    <div className="flex flex-wrap gap-1">
+                                  <td className="px-4 py-3 text-tertiary overflow-hidden">
+                                    <div className="flex flex-wrap gap-1 max-h-[2.5rem] overflow-hidden">
                                       {visibleTags.map((t) => (
-                                        <span key={t} className="rounded bg-secondary px-1.5 py-0.5 text-[11px] border border-secondary">
+                                        <span key={t} className="rounded bg-secondary px-1.5 py-0.5 text-[11px] border border-secondary truncate max-w-[80px]">
                                           {t}
                                         </span>
                                       ))}
@@ -287,7 +286,6 @@ export default function Rules() {
                           })}
                         </tbody>
                       </table>
-                    </div>
                   </Card>
                 </div>
 
