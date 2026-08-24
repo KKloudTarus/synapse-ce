@@ -57,25 +57,39 @@ export function AssetDetail() {
   const [notFound, setNotFound] = useState(false)
 
   const { data: fetchedData, error, refetch } = useFetch<Omit<Context, 'reload'>>(
-    () => Promise.all([
-      api.getBusinessAsset(key),
-      api.businessAssetProjects(key),
-      api.businessAssetTechnicalAssets(key),
-      api.businessAssetEngagements(key),
-      api.businessAssetFindings(key),
-      api.businessAssetCoverage(key),
-      api.businessAssetPosture(key),
-      api.businessAssetHistory(key),
-    ]).then(([asset, projects, technical, engagements, findings, coverage, posture, history]) => {
-      setNotFound(false)
-      return { asset, projects, technical, engagements, findings, coverage, posture, history }
-    }).catch((nextError) => {
-      if (nextError instanceof ApiError && nextError.status === 404) {
-        setNotFound(true)
-        return null as never
+    async () => {
+      try {
+        // Asset URLs are key-based, but the detail API resolves assets by id. Map the
+        // route param (accepting an id too) to the asset id before fetching its
+        // sub-resources. (Proper fix: have the backend getBusinessAsset resolve
+        // key-or-id — the store already exposes GetBusinessAssetByKey.)
+        const list = await api.listBusinessAssets()
+        const match = list.items.find((a) => a.key === key || a.id === key)
+        if (!match) {
+          setNotFound(true)
+          return null as never
+        }
+        const id = match.id
+        const [asset, projects, technical, engagements, findings, coverage, posture, history] = await Promise.all([
+          api.getBusinessAsset(id),
+          api.businessAssetProjects(id),
+          api.businessAssetTechnicalAssets(id),
+          api.businessAssetEngagements(id),
+          api.businessAssetFindings(id),
+          api.businessAssetCoverage(id),
+          api.businessAssetPosture(id),
+          api.businessAssetHistory(id),
+        ])
+        setNotFound(false)
+        return { asset, projects, technical, engagements, findings, coverage, posture, history }
+      } catch (nextError) {
+        if (nextError instanceof ApiError && nextError.status === 404) {
+          setNotFound(true)
+          return null as never
+        }
+        throw nextError
       }
-      throw nextError
-    }),
+    },
     { deps: [key] },
   )
 
