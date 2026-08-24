@@ -120,14 +120,14 @@ function DistributionDonut({ title, values }: { title: string; values: Record<st
   const radius = (size - strokeWidth) / 2
   const circumference = 2 * Math.PI * radius
 
-  // Color palette (brand shades)
+  // Color palette — a descending brand-shade ramp, all driven from theme tokens.
   const colors = [
-    'var(--color-brand-solid, #7c3aed)',
-    'var(--color-brand-secondary, #a78bfa)',
-    '#c4b5fd',
-    '#ddd6fe',
-    '#ede9fe',
-    '#f5f3ff',
+    'var(--color-brand-600)',
+    'var(--color-brand-500)',
+    'var(--color-brand-400)',
+    'var(--color-brand-300)',
+    'var(--color-brand-200)',
+    'var(--color-brand-100)',
   ]
 
   let offset = 0

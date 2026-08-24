@@ -323,6 +323,11 @@
     --color-border-brand: var(--color-brand-500);
     --color-border-brand_alt: var(--color-brand-600);
 
+    /* Textarea resize-handle background. The stroke color is a literal here
+       (a data: URI cannot embed a CSS var()); it mirrors --color-border-primary
+       (neutral-300 in light mode). Overridden under .dark-mode below. */
+    --resize-handle-bg: url("data:image/svg+xml,%3Csvg width='18' height='18' viewBox='0 0 18 18' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M10 2L2 10' stroke='%23D5D7DA' stroke-linecap='round'/%3E%3Cpath d='M11 7L7 11' stroke='%23D5D7DA' stroke-linecap='round'/%3E%3C/svg%3E");
+
     /* FOREGROUND COLORS */
     --color-fg-secondary: var(--color-neutral-700);
     --color-fg-warning-primary: var(--color-yellow-600);
@@ -682,6 +687,9 @@
         --color-border-brand: var(--color-brand-400);
         --color-border-error: var(--color-red-400);
         --color-border-tertiary: var(--color-neutral-800);
+
+        /* Dark-mode textarea resize handle (mirrors --color-border-primary / neutral-700). */
+        --resize-handle-bg: url("data:image/svg+xml,%3Csvg width='18' height='18' viewBox='0 0 18 18' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M10 2L2 10' stroke='%23373A41' stroke-linecap='round'/%3E%3Cpath d='M11 7L7 11' stroke='%23373A41' stroke-linecap='round'/%3E%3C/svg%3E");
         --color-border-brand_alt: var(--color-neutral-700);
         --color-border-secondary_alt: var(--color-neutral-800);
 
