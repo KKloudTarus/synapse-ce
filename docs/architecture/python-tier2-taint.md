@@ -257,13 +257,13 @@ Exit: a sandboxed sidecar can emit stable, bounded facts without executing Pytho
 
 ### Pass 2 — Pure resolver and call graph
 
-- [ ] Validate all sidecar facts at the trust boundary.
-- [ ] Resolve lexical scopes, imports/aliases, relative imports, local functions, classes, `self`/`cls`,
+- [x] Validate all sidecar facts at the trust boundary.
+- [x] Resolve lexical scopes, imports/aliases, relative imports, local functions, classes, `self`/`cls`,
   constructors, and conservative inheritance.
-- [ ] Model unresolved calls and ambiguity explicitly.
-- [ ] Derive framework entrypoints for Django, Flask, FastAPI, ASGI/WSGI, CLI, and conventional `main`.
-- [ ] Produce the shared callgraph graph plus Python coverage metadata.
-- [ ] Add shortest-path, recursion, ambiguity, shadowing, inheritance, and dynamic-dispatch tests.
+- [x] Model unresolved calls and ambiguity explicitly.
+- [x] Derive framework entrypoints for Django, Flask, FastAPI, ASGI/WSGI, CLI, and conventional `main`.
+- [x] Produce the shared callgraph graph plus Python coverage metadata.
+- [x] Add shortest-path, recursion, ambiguity, shadowing, inheritance, and dynamic-dispatch tests.
 
 Exit: pure Go resolution can prove positive paths and distinguish complete negatives from unknowns.
 
@@ -374,6 +374,7 @@ Append one row at the end of every implementation pass.
 | --- | --- | --- | --- | --- |
 | 0 | `20b77fc` | Focused seam tests pass | `go build ./cmd/...` passes; `go test ./...` has four pre-existing Windows/baseline test failures | Plan created from `bf7dad4`. Failures: private-file ACL in `cmd/synapse-fptriage-release`, owner-controlled replay directory in `internal/infrastructure/egressbroker`, and two telemetry failure-matrix assertions in `test/e2e`. |
 | 1 | `feat:python-semantic-facts` | Domain, provider, CGO-free astwalk/ports tests pass | `go build ./cmd/...` and `CGO_ENABLED=0 go build ./cmd/synapse-ast` pass | CGO golden fixtures were added but cannot execute on this workstation because no C compiler is installed; CI must run them with CGO enabled. Coverage-aware walking reports skipped Python candidates instead of silently permitting a negative proof. |
+| 2 | `feat:python-semantic-resolver` | Python resolver and shared callgraph tests pass | Focused AST/ports tests and `go build ./cmd/...` pass | Resolver emits conservative candidates for ambiguity, keeps positive graphs usable under partial coverage, and requires complete extraction plus resolution before a negative proof. Public Python API symbols are entrypoints by design to keep library scans sound. |
 
 ## Definition of done
 

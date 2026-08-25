@@ -250,6 +250,7 @@ func (d Document) Validate() error {
 	}
 	moduleSet := make(map[string]bool, len(d.Modules))
 	fileSet := make(map[string]bool, len(d.Modules))
+	moduleFiles := make(map[string]string, len(d.Modules))
 	for _, m := range d.Modules {
 		if !validDotted(m.Name) || validatePosition(m.Pos, true) != nil || m.File != m.Pos.File {
 			return fmt.Errorf("%w: invalid python module fact", shared.ErrValidation)
@@ -258,6 +259,7 @@ func (d Document) Validate() error {
 			return fmt.Errorf("%w: duplicate python module or file", shared.ErrValidation)
 		}
 		moduleSet[m.Name], fileSet[m.File] = true, true
+		moduleFiles[m.Name] = m.File
 	}
 	symbolSet := make(map[string]Symbol, len(d.Symbols))
 	for _, s := range d.Symbols {
@@ -265,15 +267,18 @@ func (d Document) Validate() error {
 		if s.Kind == SymbolLambda {
 			validSymbolName = validSyntheticLambdaName(s.Name)
 		}
-		if !s.Kind.Valid() || !validText(s.ID) || !strings.HasPrefix(s.ID, "python:") || !moduleSet[s.Module] ||
+		if !s.Kind.Valid() || s.ID != canonicalPythonSymbolID(s.Module, s.QualifiedName) || !moduleSet[s.Module] ||
 			!validQualified(s.QualifiedName) || !validSymbolName || validatePosition(s.Pos, true) != nil || len(s.Parameters) > maxParameters {
 			return fmt.Errorf("%w: invalid python symbol fact", shared.ErrValidation)
 		}
 		if _, duplicate := symbolSet[s.ID]; duplicate {
 			return fmt.Errorf("%w: duplicate python symbol %q", shared.ErrValidation, s.ID)
 		}
+		if s.Pos.File != moduleFiles[s.Module] {
+			return fmt.Errorf("%w: python symbol position is outside its module", shared.ErrValidation)
+		}
 		for _, p := range s.Parameters {
-			if !validName(p.Name) || !p.Kind.Valid() || validatePosition(p.Pos, true) != nil {
+			if !validName(p.Name) || !p.Kind.Valid() || validatePosition(p.Pos, true) != nil || p.Pos.File != s.Pos.File {
 				return fmt.Errorf("%w: invalid python parameter fact", shared.ErrValidation)
 			}
 		}
@@ -289,23 +294,44 @@ func (d Document) Validate() error {
 		}
 		symbolSet[s.ID] = s
 	}
+	for module := range moduleSet {
+		root, ok := symbolSet[canonicalPythonSymbolID(module, "<module>")]
+		if !ok || root.Kind != SymbolModule {
+			return fmt.Errorf("%w: python module has no canonical module symbol", shared.ErrValidation)
+		}
+	}
 	for _, s := range d.Symbols {
-		if s.ParentID != "" {
-			if _, ok := symbolSet[s.ParentID]; !ok {
-				return fmt.Errorf("%w: python symbol parent does not exist", shared.ErrValidation)
+		if s.Kind == SymbolModule {
+			if s.ParentID != "" || s.QualifiedName != "<module>" {
+				return fmt.Errorf("%w: invalid python module symbol", shared.ErrValidation)
 			}
+			continue
+		}
+		if s.ParentID == "" {
+			return fmt.Errorf("%w: non-module python symbol needs a parent", shared.ErrValidation)
+		}
+		if parent, ok := symbolSet[s.ParentID]; !ok {
+			return fmt.Errorf("%w: python symbol parent does not exist", shared.ErrValidation)
+		} else if parent.Module != s.Module {
+			return fmt.Errorf("%w: python symbol parent crosses modules", shared.ErrValidation)
 		}
 	}
 	validScope := func(scope string) bool { _, ok := symbolSet[scope]; return ok }
+	positionMatchesScope := func(scope string, pos Position) bool {
+		symbol, ok := symbolSet[scope]
+		return ok && symbol.Pos.File == pos.File
+	}
 	for _, item := range d.Imports {
 		if !validScope(item.ScopeID) || item.Level < 0 || item.Level > maxSegments || !validOptionalDotted(item.Module) ||
-			!validOptionalName(item.Name) || !validOptionalName(item.Alias) || validatePosition(item.Pos, true) != nil || item.Wildcard != (item.Name == "*") {
+			!validOptionalName(item.Name) || !validOptionalName(item.Alias) || validatePosition(item.Pos, true) != nil ||
+			!positionMatchesScope(item.ScopeID, item.Pos) || item.Wildcard != (item.Name == "*") {
 			return fmt.Errorf("%w: invalid python import fact", shared.ErrValidation)
 		}
 	}
 	callSet := make(map[string]bool, len(d.Calls))
 	for _, item := range d.Calls {
-		if !validText(item.ID) || callSet[item.ID] || !validScope(item.CallerID) || len(item.Arguments) > maxArguments || validatePosition(item.Pos, true) != nil {
+		if !validText(item.ID) || callSet[item.ID] || !validScope(item.CallerID) || len(item.Arguments) > maxArguments ||
+			validatePosition(item.Pos, true) != nil || !positionMatchesScope(item.CallerID, item.Pos) {
 			return fmt.Errorf("%w: invalid python call fact", shared.ErrValidation)
 		}
 		if err := validateReference(item.Callee); err != nil {
@@ -322,7 +348,8 @@ func (d Document) Validate() error {
 		callSet[item.ID] = true
 	}
 	for _, item := range d.Assignments {
-		if !validScope(item.ScopeID) || len(item.Targets) == 0 || len(item.Targets) > maxArguments || validatePosition(item.Pos, true) != nil {
+		if !validScope(item.ScopeID) || len(item.Targets) == 0 || len(item.Targets) > maxArguments ||
+			validatePosition(item.Pos, true) != nil || !positionMatchesScope(item.ScopeID, item.Pos) {
 			return fmt.Errorf("%w: invalid python assignment fact", shared.ErrValidation)
 		}
 		for _, target := range item.Targets {
@@ -335,7 +362,7 @@ func (d Document) Validate() error {
 		}
 	}
 	for _, item := range d.Returns {
-		if !validScope(item.ScopeID) || validatePosition(item.Pos, true) != nil {
+		if !validScope(item.ScopeID) || validatePosition(item.Pos, true) != nil || !positionMatchesScope(item.ScopeID, item.Pos) {
 			return fmt.Errorf("%w: invalid python return fact", shared.ErrValidation)
 		}
 		if err := validateReference(item.Value); err != nil {
@@ -343,12 +370,13 @@ func (d Document) Validate() error {
 		}
 	}
 	for _, item := range d.Entrypoints {
-		if !validScope(item.SymbolID) || !validText(item.Kind) || validatePosition(item.Pos, true) != nil {
+		if !validScope(item.SymbolID) || !validText(item.Kind) || validatePosition(item.Pos, true) != nil || !positionMatchesScope(item.SymbolID, item.Pos) {
 			return fmt.Errorf("%w: invalid python entrypoint hint", shared.ErrValidation)
 		}
 	}
 	for _, gap := range d.CoverageGaps {
-		if !gap.Kind.Valid() || gap.SymbolID != "" && !validScope(gap.SymbolID) || !validOptionalText(gap.Detail) || validatePosition(gap.Pos, false) != nil {
+		if !gap.Kind.Valid() || gap.SymbolID != "" && !validScope(gap.SymbolID) || !validOptionalText(gap.Detail) || validatePosition(gap.Pos, false) != nil ||
+			gap.SymbolID != "" && gap.Pos.File != "" && !positionMatchesScope(gap.SymbolID, gap.Pos) {
 			return fmt.Errorf("%w: invalid python coverage gap", shared.ErrValidation)
 		}
 	}

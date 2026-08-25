@@ -46,6 +46,9 @@ func TestDocumentValidateRejectsUnsafeOrUnboundedFacts(t *testing.T) {
 		{"absolute path", func(d *Document) { d.Modules[0].File, d.Modules[0].Pos.File = "/secret/app.py", "/secret/app.py" }},
 		{"parent path", func(d *Document) { d.Modules[0].File, d.Modules[0].Pos.File = "../app.py", "../app.py" }},
 		{"unknown parent", func(d *Document) { d.Symbols[1].ParentID = "python:missing:x" }},
+		{"noncanonical symbol id", func(d *Document) { d.Symbols[1].ID = "python:app.api:other" }},
+		{"cross-file symbol", func(d *Document) { d.Symbols[1].Pos.File = "other.py" }},
+		{"missing module symbol", func(d *Document) { d.Symbols = d.Symbols[1:] }},
 		{"opaque source text", func(d *Document) {
 			d.Calls[0].Callee = Reference{Kind: ReferenceUnknown, Segments: []string{"do", "not", "leak"}}
 		}},
