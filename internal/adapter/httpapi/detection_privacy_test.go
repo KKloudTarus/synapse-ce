@@ -145,6 +145,11 @@ func TestListDetectionsReadonlyStripsSensitiveFieldsAndAuditsFirst(t *testing.T)
 	if evidence[0].Process.PID != 101 || evidence[1].Network.RemotePort != 443 || evidence[2].File.Op != "open" || evidence[3].Privilege.Cap != "CAP_SYS_ADMIN" {
 		t.Errorf("restricted projection removed structural evidence unexpectedly: %+v", evidence)
 	}
+	for _, forbidden := range []string{secret, "203.0.113.7", "worker"} {
+		if strings.Contains(rec.Body.String(), forbidden) {
+			t.Fatalf("readonly response leaked direct evidence value %q: %s", forbidden, rec.Body.String())
+		}
+	}
 
 	// Projection is subtract-only and must never mutate the ledger-owned object returned by the reader.
 	if got := reader.records[0].Detection.Evidence[0].Process.Path; got != "/srv/"+secret {
@@ -155,6 +160,15 @@ func TestListDetectionsReadonlyStripsSensitiveFieldsAndAuditsFirst(t *testing.T)
 	}
 	if got := reader.records[0].Detection.Evidence[0].Process.Comm; got != "worker" {
 		t.Fatalf("projection mutated stored command name: %q", got)
+	}
+	if got := reader.records[0].Detection.Evidence[1].Network.RemoteAddr; got != "203.0.113.7" {
+		t.Fatalf("projection mutated stored remote address: %q", got)
+	}
+	if got := reader.records[0].Detection.Evidence[2].File.Path; got != "/tmp/"+secret {
+		t.Fatalf("projection mutated stored file path: %q", got)
+	}
+	if got := reader.records[0].Detection.Evidence[3].Privilege.Comm; got != "worker" {
+		t.Fatalf("projection mutated stored privilege command: %q", got)
 	}
 
 	if len(audit.entries) != 1 {
@@ -175,7 +189,7 @@ func TestListDetectionsReadonlyStripsSensitiveFieldsAndAuditsFirst(t *testing.T)
 
 func TestListDetectionsInvestigativeRolesRetainSourceRedactedEvidence(t *testing.T) {
 	secret := "fixture-" + "visible-after-source-scrub"
-	for _, role := range []string{"consultant", "reviewer", "admin"} {
+	for _, role := range []string{"consultant", "member", "reviewer", "admin"} {
 		t.Run(role, func(t *testing.T) {
 			reader := &detectionQueryReaderStub{records: []detection.Record{sensitiveDetectionRecord(secret)}}
 			audit := &detectionQueryAuditStub{}
@@ -206,6 +220,34 @@ func TestListDetectionsInvestigativeRolesRetainSourceRedactedEvidence(t *testing
 	}
 }
 
+func TestDetectionProjectionFullScopeIsDeepCopy(t *testing.T) {
+	secret := "fixture-deep-copy"
+	source := sensitiveDetectionRecord(secret)
+	projected := projectDetectionRecords([]detection.Record{source}, detectionFieldScopeFull)
+	if len(projected) != 1 || len(projected[0].Detection.Evidence) != 4 {
+		t.Fatalf("unexpected projection shape: %+v", projected)
+	}
+
+	projected[0].Detection.Evidence[0].Process.Path = "/mutated"
+	projected[0].Detection.Evidence[0].Process.Args[1] = "mutated"
+	projected[0].Detection.Evidence[1].Network.RemoteAddr = "198.51.100.99"
+	projected[0].Detection.Evidence[2].File.Path = "/mutated"
+	projected[0].Detection.Evidence[3].Privilege.Comm = "mutated"
+
+	if source.Detection.Evidence[0].Process.Path != "/srv/"+secret || source.Detection.Evidence[0].Process.Args[1] != secret {
+		t.Fatalf("full projection aliases process evidence: %+v", source.Detection.Evidence[0].Process)
+	}
+	if source.Detection.Evidence[1].Network.RemoteAddr != "203.0.113.7" {
+		t.Fatalf("full projection aliases network evidence: %+v", source.Detection.Evidence[1].Network)
+	}
+	if source.Detection.Evidence[2].File.Path != "/tmp/"+secret {
+		t.Fatalf("full projection aliases file evidence: %+v", source.Detection.Evidence[2].File)
+	}
+	if source.Detection.Evidence[3].Privilege.Comm != "worker" {
+		t.Fatalf("full projection aliases privilege evidence: %+v", source.Detection.Evidence[3].Privilege)
+	}
+}
+
 func TestListDetectionsAuditFailureFailsClosedBeforeRead(t *testing.T) {
 	order := []string{}
 	reader := &detectionQueryReaderStub{records: []detection.Record{sensitiveDetectionRecord("fixture-value")}, order: &order}
@@ -224,6 +266,66 @@ func TestListDetectionsAuditFailureFailsClosedBeforeRead(t *testing.T) {
 	}
 	if rec.Header().Get("Retry-After") == "" {
 		t.Fatal("saturated audit failure should carry Retry-After")
+	}
+}
+
+func TestDetectionQueryMissingAuditSinkFailsClosedForEveryView(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{name: "records", url: "/api/v1/engagements/eng-1/detections"},
+		{name: "incidents", url: "/api/v1/engagements/eng-1/detections?view=incidents"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := &detectionQueryReaderStub{
+				records:   []detection.Record{sensitiveDetectionRecord("fixture-value")},
+				incidents: []detection.Incident{{Key: "rule\x00asset", RuleID: "rule", AssetID: "asset-1", Count: 1}},
+			}
+			rt := &Router{log: discardLog(), detections: reader}
+
+			rec := runDetectionQuery(t, rt, "consultant", tc.url)
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("missing audit sink: want 503, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if reader.listCalls != 0 || reader.incidentCalls != 0 {
+				t.Fatalf("missing audit sink must stop before every data read: records=%d incidents=%d", reader.listCalls, reader.incidentCalls)
+			}
+			if rec.Header().Get("Retry-After") == "" {
+				t.Fatal("missing audit sink should carry Retry-After")
+			}
+		})
+	}
+}
+
+func TestDetectionQueryDeniedRolesNeverReachAuditOrReader(t *testing.T) {
+	for _, role := range []string{"mcp", "agent", "unknown"} {
+		t.Run(role, func(t *testing.T) {
+			reader := &detectionQueryReaderStub{records: []detection.Record{sensitiveDetectionRecord("fixture-value")}}
+			audit := &detectionQueryAuditStub{}
+			rt := &Router{log: discardLog(), detections: reader, vulnerabilityAudit: audit}
+
+			rec := runDetectionQuery(t, rt, role, "/api/v1/engagements/eng-1/detections")
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("role %q: want 403, got %d: %s", role, rec.Code, rec.Body.String())
+			}
+			if reader.listCalls != 0 || reader.incidentCalls != 0 || len(audit.entries) != 0 {
+				t.Fatalf("denied role reached governed query path: records=%d incidents=%d audits=%d", reader.listCalls, reader.incidentCalls, len(audit.entries))
+			}
+		})
+	}
+}
+
+func TestDetectionQueryWithoutReaderIsStillAudited(t *testing.T) {
+	audit := &detectionQueryAuditStub{}
+	rt := &Router{log: discardLog(), vulnerabilityAudit: audit}
+
+	rec := runDetectionQuery(t, rt, "readonly", "/api/v1/engagements/eng-1/detections")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("empty governed query: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(audit.entries) != 1 || audit.entries[0].Metadata["view"] != "records" || audit.entries[0].Metadata["field_scope"] != "restricted" {
+		t.Fatalf("empty query must still be audited: %+v", audit.entries)
 	}
 }
 
