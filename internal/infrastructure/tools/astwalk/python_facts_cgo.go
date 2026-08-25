@@ -74,7 +74,10 @@ func PythonFactsFor(ctx context.Context, root string) (pythonprogram.Document, e
 			ID: moduleID, Module: module, QualifiedName: "<module>", Name: pythonModuleLeaf(module), Kind: pythonprogram.SymbolModule, Pos: modulePos,
 		})
 		doc.Entrypoints = append(doc.Entrypoints, pythonprogram.EntrypointHint{SymbolID: moduleID, Kind: "module_import", Pos: modulePos})
-		extractor := pythonFactExtractor{doc: &doc, module: module, file: rel, source: content}
+		extractor := pythonFactExtractor{
+			doc: &doc, module: module, file: rel, source: content,
+			values: map[string]bool{}, flows: map[string]bool{},
+		}
 		if rootNode.HasError() {
 			extractor.gap(pythonprogram.GapParseRecovery, moduleID, "parser_recovery", rootNode)
 		}
@@ -118,6 +121,8 @@ type pythonFactExtractor struct {
 	file      string
 	source    []byte
 	budgetHit bool
+	values    map[string]bool
+	flows     map[string]bool
 }
 
 func (e *pythonFactExtractor) walk(node *sitter.Node, scope pythonScope) {
@@ -206,7 +211,7 @@ func (e *pythonFactExtractor) walkFunction(node *sitter.Node, parent pythonScope
 	}
 	symbol := pythonprogram.Symbol{
 		ID: id, Module: e.module, QualifiedName: qualified, Name: name, ParentID: parent.id, Kind: kind,
-		Pos: e.position(node), Parameters: e.parameters(node.ChildByFieldName("parameters")), Decorators: filterKnownReferences(decorators), Async: pythonNodeHasToken(node, "async"),
+		Pos: e.position(node), Parameters: e.parameters(node.ChildByFieldName("parameters"), id), Decorators: filterKnownReferences(decorators), Async: pythonNodeHasToken(node, "async"),
 	}
 	e.doc.Symbols = append(e.doc.Symbols, symbol)
 	e.entrypointHints(symbol)
@@ -257,7 +262,7 @@ func (e *pythonFactExtractor) walkLambda(node *sitter.Node, parent pythonScope) 
 	id := pythonSymbolID(e.module, qualified)
 	e.doc.Symbols = append(e.doc.Symbols, pythonprogram.Symbol{
 		ID: id, Module: e.module, QualifiedName: qualified, Name: name, ParentID: parent.id,
-		Kind: pythonprogram.SymbolLambda, Pos: pos, Parameters: e.parameters(node.ChildByFieldName("parameters")),
+		Kind: pythonprogram.SymbolLambda, Pos: pos, Parameters: e.parameters(node.ChildByFieldName("parameters"), id),
 	})
 	if body := node.ChildByFieldName("body"); body != nil {
 		e.walk(body, pythonScope{id: id, qualified: qualified, kind: pythonprogram.SymbolLambda})
@@ -282,7 +287,11 @@ func (e *pythonFactExtractor) callFact(node *sitter.Node, scope pythonScope) {
 	calleeNode := node.ChildByFieldName("function")
 	callee := e.reference(calleeNode)
 	call := pythonprogram.Call{
-		ID: pythonFactID(e.file, node), CallerID: scope.id, Callee: callee, Pos: e.position(node), Await: node.Parent() != nil && node.Parent().Type() == "await",
+		ID: pythonFactID(e.file, node), CallerID: scope.id, Callee: callee, ResultID: e.valueFor(node, scope),
+		Pos: e.position(node), Await: node.Parent() != nil && node.Parent().Type() == "await",
+	}
+	if calleeNode != nil && calleeNode.Type() == "attribute" {
+		call.ReceiverValueID = e.valueFor(calleeNode.ChildByFieldName("object"), scope)
 	}
 	if callee.Kind == pythonprogram.ReferenceUnknown {
 		e.gap(pythonprogram.GapUnresolvedCall, scope.id, "call_target", node)
@@ -300,22 +309,24 @@ func (e *pythonFactExtractor) callFact(node *sitter.Node, scope pythonScope) {
 		for i := 0; i < int(args.NamedChildCount()); i++ {
 			argNode := args.NamedChild(i)
 			arg := pythonprogram.Argument{}
+			valueNode := argNode
 			switch argNode.Type() {
 			case "keyword_argument":
 				if name := argNode.ChildByFieldName("name"); name != nil {
 					arg.Keyword = name.Content(e.source)
 				}
-				arg.Value = e.reference(argNode.ChildByFieldName("value"))
+				valueNode = argNode.ChildByFieldName("value")
 			case "list_splat":
 				arg.Star = true
-				arg.Value = e.reference(firstNamedChild(argNode))
+				valueNode = firstNamedChild(argNode)
 			case "dictionary_splat":
 				arg.Keyword = "**"
-				arg.Value = e.reference(firstNamedChild(argNode))
-			default:
-				arg.Value = e.reference(argNode)
+				valueNode = firstNamedChild(argNode)
 			}
-			if arg.Value.Kind == pythonprogram.ReferenceUnknown {
+			arg.Value = e.reference(valueNode)
+			arg.ValueID = e.valueFor(valueNode, scope)
+			arg.Pos = e.position(valueNode)
+			if arg.Value.Kind == pythonprogram.ReferenceUnknown && arg.ValueID == "" {
 				e.gap(pythonprogram.GapUnresolvedValue, scope.id, "call_argument", argNode)
 			}
 			call.Arguments = append(call.Arguments, arg)
@@ -338,10 +349,20 @@ func (e *pythonFactExtractor) assignmentFact(node *sitter.Node, scope pythonScop
 		return
 	}
 	value := e.reference(right)
-	if value.Kind == pythonprogram.ReferenceUnknown {
+	valueID := e.valueFor(right, scope)
+	if value.Kind == pythonprogram.ReferenceUnknown && valueID == "" {
 		e.gap(pythonprogram.GapUnresolvedValue, scope.id, "assignment_value", node)
 	}
-	e.doc.Assignments = append(e.doc.Assignments, pythonprogram.Assignment{ScopeID: scope.id, Targets: targets, Value: value, Pos: e.position(node)})
+	targetIDs := e.bindingValues(left, scope)
+	for _, targetID := range targetIDs {
+		e.addValueFlow(valueID, targetID, pythonprogram.FlowAssignment, node)
+		if node.Type() == "augmented_assignment" {
+			e.addValueFlow(e.valueFor(left, scope), targetID, pythonprogram.FlowAssignment, node)
+		}
+	}
+	e.doc.Assignments = append(e.doc.Assignments, pythonprogram.Assignment{
+		ScopeID: scope.id, Targets: targets, TargetIDs: targetIDs, Value: value, ValueID: valueID, Pos: e.position(node),
+	})
 }
 
 func (e *pythonFactExtractor) returnFact(node *sitter.Node, scope pythonScope) {
@@ -349,10 +370,96 @@ func (e *pythonFactExtractor) returnFact(node *sitter.Node, scope pythonScope) {
 	if node.NamedChildCount() > 0 {
 		value = e.reference(node.NamedChild(0))
 	}
-	if value.Kind == pythonprogram.ReferenceUnknown {
+	valueNode := firstNamedChild(node)
+	valueID := e.valueFor(valueNode, scope)
+	if value.Kind == pythonprogram.ReferenceUnknown && valueID == "" {
 		e.gap(pythonprogram.GapUnresolvedValue, scope.id, "return_value", node)
 	}
-	e.doc.Returns = append(e.doc.Returns, pythonprogram.Return{ScopeID: scope.id, Value: value, Pos: e.position(node)})
+	slotID := scope.id + "#return"
+	e.addValue(pythonprogram.Value{
+		ID: slotID, ScopeID: scope.id, Kind: pythonprogram.ValueReturn,
+		Ref: pythonprogram.Reference{Kind: pythonprogram.ReferenceUnknown}, Pos: e.position(node),
+	})
+	e.addValueFlow(valueID, slotID, pythonprogram.FlowReturn, node)
+	e.doc.Returns = append(e.doc.Returns, pythonprogram.Return{ScopeID: scope.id, Value: value, ValueID: valueID, SlotID: slotID, Pos: e.position(node)})
+}
+
+func (e *pythonFactExtractor) valueFor(node *sitter.Node, scope pythonScope) string {
+	if node == nil {
+		return ""
+	}
+	id := pythonValueID(e.file, node, "value")
+	if e.values[id] {
+		return id
+	}
+	ref := e.reference(node)
+	kind := pythonprogram.ValueExpression
+	switch {
+	case node.Type() == "call":
+		kind = pythonprogram.ValueCallResult
+	case node.Type() == "identifier" || node.Type() == "attribute":
+		kind = pythonprogram.ValueReference
+	case ref.Kind == pythonprogram.ReferenceLiteral && node.NamedChildCount() == 0:
+		kind = pythonprogram.ValueLiteral
+	default:
+		ref = pythonprogram.Reference{Kind: pythonprogram.ReferenceExpression}
+	}
+	e.addValue(pythonprogram.Value{ID: id, ScopeID: scope.id, Kind: kind, Ref: ref, Pos: e.position(node)})
+
+	switch node.Type() {
+	case "call":
+		// Argument-to-result propagation is function-model/interprocedural behavior, not a syntax flow.
+		return id
+	case "attribute":
+		from := e.valueFor(node.ChildByFieldName("object"), scope)
+		e.addValueFlow(from, id, pythonprogram.FlowAttribute, node)
+		return id
+	case "identifier":
+		return id
+	}
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		child := node.NamedChild(i)
+		e.addValueFlow(e.valueFor(child, scope), id, pythonprogram.FlowExpression, node)
+	}
+	return id
+}
+
+func (e *pythonFactExtractor) bindingValues(node *sitter.Node, scope pythonScope) []string {
+	if node == nil {
+		return nil
+	}
+	ref := e.reference(node)
+	if ref.Kind == pythonprogram.ReferenceName || ref.Kind == pythonprogram.ReferenceAttribute {
+		id := pythonValueID(e.file, node, "binding")
+		name := ref.Segments[len(ref.Segments)-1]
+		e.addValue(pythonprogram.Value{ID: id, ScopeID: scope.id, Kind: pythonprogram.ValueBinding, Name: name, Ref: ref, Pos: e.position(node)})
+		return []string{id}
+	}
+	var out []string
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		out = append(out, e.bindingValues(node.NamedChild(i), scope)...)
+	}
+	return out
+}
+
+func (e *pythonFactExtractor) addValue(value pythonprogram.Value) {
+	if value.ID == "" || e.values[value.ID] {
+		return
+	}
+	e.values[value.ID] = true
+	e.doc.Values = append(e.doc.Values, value)
+}
+
+func (e *pythonFactExtractor) addValueFlow(from, to string, kind pythonprogram.ValueFlowKind, node *sitter.Node) {
+	if from == "" || to == "" || from == to {
+		return
+	}
+	key := from + "\x00" + to + "\x00" + string(kind)
+	if e.flows[key] {
+		return
+	}
+	e.flows[key] = true
+	e.doc.Flows = append(e.doc.Flows, pythonprogram.ValueFlow{FromID: from, ToID: to, Kind: kind, Pos: e.position(node)})
 }
 
 func (e *pythonFactExtractor) reference(node *sitter.Node) pythonprogram.Reference {
@@ -404,7 +511,7 @@ func (e *pythonFactExtractor) targets(node *sitter.Node) []pythonprogram.Referen
 	return out
 }
 
-func (e *pythonFactExtractor) parameters(node *sitter.Node) []pythonprogram.Parameter {
+func (e *pythonFactExtractor) parameters(node *sitter.Node, scopeID string) []pythonprogram.Parameter {
 	if node == nil {
 		return nil
 	}
@@ -430,7 +537,13 @@ func (e *pythonFactExtractor) parameters(node *sitter.Node) []pythonprogram.Para
 		if name == "" {
 			continue
 		}
-		out = append(out, pythonprogram.Parameter{Name: name, Kind: kind, Pos: e.position(child)})
+		valueID := scopeID + "#param:" + strconv.Itoa(len(out)) + ":" + name
+		pos := e.position(child)
+		e.addValue(pythonprogram.Value{
+			ID: valueID, ScopeID: scopeID, Kind: pythonprogram.ValueParameter, Name: name,
+			Ref: pythonprogram.Reference{Kind: pythonprogram.ReferenceName, Segments: []string{name}}, Pos: pos,
+		})
+		out = append(out, pythonprogram.Parameter{Name: name, Kind: kind, ValueID: valueID, Pos: pos})
 	}
 	return out
 }
@@ -473,7 +586,8 @@ func (e *pythonFactExtractor) position(node *sitter.Node) pythonprogram.Position
 }
 
 func (e *pythonFactExtractor) factCount() int {
-	return len(e.doc.Symbols) + len(e.doc.Imports) + len(e.doc.Calls) + len(e.doc.Assignments) + len(e.doc.Returns) + len(e.doc.CoverageGaps)
+	return len(e.doc.Symbols) + len(e.doc.Imports) + len(e.doc.Calls) + len(e.doc.Assignments) + len(e.doc.Returns) +
+		len(e.doc.Values) + len(e.doc.Flows) + len(e.doc.CoverageGaps)
 }
 
 func pythonModuleName(rel string) (string, bool) {
@@ -529,6 +643,12 @@ func joinPythonQualified(parent, name string) string {
 func pythonFactID(file string, node *sitter.Node) string {
 	point := node.StartPoint()
 	return file + ":" + strconv.Itoa(int(point.Row)+1) + ":" + strconv.Itoa(int(point.Column))
+}
+
+func pythonValueID(file string, node *sitter.Node, role string) string {
+	start, end := node.StartPoint(), node.EndPoint()
+	return file + ":" + strconv.Itoa(int(start.Row)+1) + ":" + strconv.Itoa(int(start.Column)) + ":" +
+		strconv.Itoa(int(end.Row)+1) + ":" + strconv.Itoa(int(end.Column)) + ":" + role
 }
 
 func firstNamedChild(node *sitter.Node) *sitter.Node {

@@ -64,16 +64,17 @@ func (k ParameterKind) Valid() bool {
 type ReferenceKind string
 
 const (
-	ReferenceName      ReferenceKind = "name"
-	ReferenceAttribute ReferenceKind = "attribute"
-	ReferenceCall      ReferenceKind = "call"
-	ReferenceLiteral   ReferenceKind = "literal"
-	ReferenceUnknown   ReferenceKind = "unknown"
+	ReferenceName       ReferenceKind = "name"
+	ReferenceAttribute  ReferenceKind = "attribute"
+	ReferenceCall       ReferenceKind = "call"
+	ReferenceExpression ReferenceKind = "expression"
+	ReferenceLiteral    ReferenceKind = "literal"
+	ReferenceUnknown    ReferenceKind = "unknown"
 )
 
 func (k ReferenceKind) Valid() bool {
 	switch k {
-	case ReferenceName, ReferenceAttribute, ReferenceCall, ReferenceLiteral, ReferenceUnknown:
+	case ReferenceName, ReferenceAttribute, ReferenceCall, ReferenceExpression, ReferenceLiteral, ReferenceUnknown:
 		return true
 	}
 	return false
@@ -123,9 +124,10 @@ type Reference struct {
 
 // Parameter is one callable parameter in declaration order.
 type Parameter struct {
-	Name string        `json:"name"`
-	Kind ParameterKind `json:"kind"`
-	Pos  Position      `json:"position"`
+	Name    string        `json:"name"`
+	Kind    ParameterKind `json:"kind"`
+	ValueID string        `json:"value_id,omitempty"`
+	Pos     Position      `json:"position"`
 }
 
 // Module associates a canonical module candidate with its source file.
@@ -168,32 +170,93 @@ type Argument struct {
 	Keyword string    `json:"keyword,omitempty"`
 	Star    bool      `json:"star,omitempty"`
 	Value   Reference `json:"value"`
+	ValueID string    `json:"value_id,omitempty"`
+	Pos     Position  `json:"position,omitempty"`
 }
 
 // Call is one syntactic call expression owned by CallerID. Callee is a name/attribute reference when
 // statically expressible, otherwise ReferenceUnknown and a matching coverage gap is required.
 type Call struct {
-	ID        string     `json:"id"`
-	CallerID  string     `json:"caller_id"`
-	Callee    Reference  `json:"callee"`
-	Arguments []Argument `json:"arguments,omitempty"`
-	Pos       Position   `json:"position"`
-	Await     bool       `json:"await,omitempty"`
+	ID              string     `json:"id"`
+	CallerID        string     `json:"caller_id"`
+	Callee          Reference  `json:"callee"`
+	Arguments       []Argument `json:"arguments,omitempty"`
+	ResultID        string     `json:"result_id,omitempty"`
+	ReceiverValueID string     `json:"receiver_value_id,omitempty"`
+	Pos             Position   `json:"position"`
+	Await           bool       `json:"await,omitempty"`
 }
 
 // Assignment captures a binding/value relationship without retaining expression text.
 type Assignment struct {
-	ScopeID string      `json:"scope_id"`
-	Targets []Reference `json:"targets"`
-	Value   Reference   `json:"value"`
-	Pos     Position    `json:"position"`
+	ScopeID   string      `json:"scope_id"`
+	Targets   []Reference `json:"targets"`
+	TargetIDs []string    `json:"target_ids,omitempty"`
+	Value     Reference   `json:"value"`
+	ValueID   string      `json:"value_id,omitempty"`
+	Pos       Position    `json:"position"`
 }
 
 // Return captures a function return expression summary.
 type Return struct {
 	ScopeID string    `json:"scope_id"`
 	Value   Reference `json:"value"`
+	ValueID string    `json:"value_id,omitempty"`
+	SlotID  string    `json:"slot_id,omitempty"`
 	Pos     Position  `json:"position"`
+}
+
+// ValueKind identifies a source-level value slot used by the interprocedural taint engine.
+type ValueKind string
+
+const (
+	ValueParameter  ValueKind = "parameter"
+	ValueBinding    ValueKind = "binding"
+	ValueReference  ValueKind = "reference"
+	ValueCallResult ValueKind = "call_result"
+	ValueExpression ValueKind = "expression"
+	ValueLiteral    ValueKind = "literal"
+	ValueReturn     ValueKind = "return"
+)
+
+func (k ValueKind) Valid() bool {
+	switch k {
+	case ValueParameter, ValueBinding, ValueReference, ValueCallResult, ValueExpression, ValueLiteral, ValueReturn:
+		return true
+	}
+	return false
+}
+
+// Value is one stable value slot. Ref carries only a bounded semantic shape; source text is never kept.
+type Value struct {
+	ID      string    `json:"id"`
+	ScopeID string    `json:"scope_id"`
+	Kind    ValueKind `json:"kind"`
+	Name    string    `json:"name,omitempty"`
+	Ref     Reference `json:"reference"`
+	Pos     Position  `json:"position"`
+}
+
+// ValueFlowKind is a closed intra-procedural propagation operation emitted by the sidecar.
+type ValueFlowKind string
+
+const (
+	FlowExpression ValueFlowKind = "expression"
+	FlowAttribute  ValueFlowKind = "attribute"
+	FlowAssignment ValueFlowKind = "assignment"
+	FlowReturn     ValueFlowKind = "return"
+)
+
+func (k ValueFlowKind) Valid() bool {
+	return k == FlowExpression || k == FlowAttribute || k == FlowAssignment || k == FlowReturn
+}
+
+// ValueFlow says a value can propagate from one slot to another inside the same Python function.
+type ValueFlow struct {
+	FromID string        `json:"from_id"`
+	ToID   string        `json:"to_id"`
+	Kind   ValueFlowKind `json:"kind"`
+	Pos    Position      `json:"position"`
 }
 
 // EntrypointHint is a syntactic framework/application entrypoint cue. Resolution decides whether it is
@@ -222,6 +285,8 @@ type Document struct {
 	Calls         []Call           `json:"calls"`
 	Assignments   []Assignment     `json:"assignments"`
 	Returns       []Return         `json:"returns"`
+	Values        []Value          `json:"values"`
+	Flows         []ValueFlow      `json:"flows"`
 	Entrypoints   []EntrypointHint `json:"entrypoint_hints"`
 	CoverageGaps  []CoverageGap    `json:"coverage_gaps"`
 	FilesSeen     int              `json:"files_seen"`
@@ -245,7 +310,7 @@ func (d Document) Validate() error {
 	}
 	if len(d.Modules) > maxFiles || len(d.Symbols) > maxSymbols || len(d.Imports) > maxFacts ||
 		len(d.Calls) > maxFacts || len(d.Assignments) > maxFacts || len(d.Returns) > maxFacts ||
-		len(d.Entrypoints) > maxFacts || len(d.CoverageGaps) > maxFacts {
+		len(d.Values) > maxFacts || len(d.Flows) > maxFacts || len(d.Entrypoints) > maxFacts || len(d.CoverageGaps) > maxFacts {
 		return fmt.Errorf("%w: python facts document exceeds bounds", shared.ErrValidation)
 	}
 	moduleSet := make(map[string]bool, len(d.Modules))
@@ -321,6 +386,42 @@ func (d Document) Validate() error {
 		symbol, ok := symbolSet[scope]
 		return ok && symbol.Pos.File == pos.File
 	}
+	valueSet := make(map[string]Value, len(d.Values))
+	for _, value := range d.Values {
+		if !validText(value.ID) || !validScope(value.ScopeID) || !value.Kind.Valid() ||
+			validatePosition(value.Pos, true) != nil || !positionMatchesScope(value.ScopeID, value.Pos) {
+			return fmt.Errorf("%w: invalid python value fact", shared.ErrValidation)
+		}
+		if value.Name != "" && !validName(value.Name) {
+			return fmt.Errorf("%w: invalid python value name", shared.ErrValidation)
+		}
+		if err := validateReference(value.Ref); err != nil {
+			return err
+		}
+		if _, duplicate := valueSet[value.ID]; duplicate {
+			return fmt.Errorf("%w: duplicate python value fact", shared.ErrValidation)
+		}
+		valueSet[value.ID] = value
+	}
+	for _, flow := range d.Flows {
+		from, fromOK := valueSet[flow.FromID]
+		to, toOK := valueSet[flow.ToID]
+		if !fromOK || !toOK || from.ScopeID != to.ScopeID || !flow.Kind.Valid() ||
+			validatePosition(flow.Pos, true) != nil || !positionMatchesScope(from.ScopeID, flow.Pos) {
+			return fmt.Errorf("%w: invalid python intra-procedural value flow", shared.ErrValidation)
+		}
+	}
+	for _, symbol := range d.Symbols {
+		for _, parameter := range symbol.Parameters {
+			if parameter.ValueID == "" {
+				continue
+			}
+			value, ok := valueSet[parameter.ValueID]
+			if !ok || value.ScopeID != symbol.ID || value.Kind != ValueParameter || value.Name != parameter.Name {
+				return fmt.Errorf("%w: python parameter references an invalid value", shared.ErrValidation)
+			}
+		}
+	}
 	for _, item := range d.Imports {
 		if !validScope(item.ScopeID) || item.Level < 0 || item.Level > maxSegments || !validOptionalDotted(item.Module) ||
 			!validOptionalName(item.Name) || !validOptionalName(item.Alias) || validatePosition(item.Pos, true) != nil ||
@@ -344,6 +445,22 @@ func (d Document) Validate() error {
 			if err := validateReference(arg.Value); err != nil {
 				return err
 			}
+			if arg.ValueID != "" {
+				if value, ok := valueSet[arg.ValueID]; !ok || value.ScopeID != item.CallerID ||
+					validatePosition(arg.Pos, true) != nil || !positionMatchesScope(item.CallerID, arg.Pos) {
+					return fmt.Errorf("%w: python call argument references an invalid value", shared.ErrValidation)
+				}
+			}
+		}
+		if item.ResultID != "" {
+			if value, ok := valueSet[item.ResultID]; !ok || value.ScopeID != item.CallerID || value.Kind != ValueCallResult {
+				return fmt.Errorf("%w: python call references an invalid result value", shared.ErrValidation)
+			}
+		}
+		if item.ReceiverValueID != "" {
+			if value, ok := valueSet[item.ReceiverValueID]; !ok || value.ScopeID != item.CallerID {
+				return fmt.Errorf("%w: python call references an invalid receiver value", shared.ErrValidation)
+			}
 		}
 		callSet[item.ID] = true
 	}
@@ -360,6 +477,16 @@ func (d Document) Validate() error {
 		if err := validateReference(item.Value); err != nil {
 			return err
 		}
+		if item.ValueID != "" {
+			if value, ok := valueSet[item.ValueID]; !ok || value.ScopeID != item.ScopeID {
+				return fmt.Errorf("%w: python assignment references an invalid source value", shared.ErrValidation)
+			}
+		}
+		for _, id := range item.TargetIDs {
+			if value, ok := valueSet[id]; !ok || value.ScopeID != item.ScopeID || value.Kind != ValueBinding {
+				return fmt.Errorf("%w: python assignment references an invalid target value", shared.ErrValidation)
+			}
+		}
 	}
 	for _, item := range d.Returns {
 		if !validScope(item.ScopeID) || validatePosition(item.Pos, true) != nil || !positionMatchesScope(item.ScopeID, item.Pos) {
@@ -367,6 +494,16 @@ func (d Document) Validate() error {
 		}
 		if err := validateReference(item.Value); err != nil {
 			return err
+		}
+		if item.ValueID != "" {
+			if value, ok := valueSet[item.ValueID]; !ok || value.ScopeID != item.ScopeID {
+				return fmt.Errorf("%w: python return references an invalid value", shared.ErrValidation)
+			}
+		}
+		if item.SlotID != "" {
+			if value, ok := valueSet[item.SlotID]; !ok || value.ScopeID != item.ScopeID || value.Kind != ValueReturn {
+				return fmt.Errorf("%w: python return references an invalid slot", shared.ErrValidation)
+			}
 		}
 	}
 	for _, item := range d.Entrypoints {
@@ -390,7 +527,7 @@ func validateReference(ref Reference) error {
 	if (ref.Kind == ReferenceName || ref.Kind == ReferenceAttribute || ref.Kind == ReferenceCall) && len(ref.Segments) == 0 {
 		return fmt.Errorf("%w: named python reference needs segments", shared.ErrValidation)
 	}
-	if (ref.Kind == ReferenceLiteral || ref.Kind == ReferenceUnknown) && len(ref.Segments) != 0 {
+	if (ref.Kind == ReferenceLiteral || ref.Kind == ReferenceExpression || ref.Kind == ReferenceUnknown) && len(ref.Segments) != 0 {
 		return fmt.Errorf("%w: opaque python reference cannot carry text", shared.ErrValidation)
 	}
 	for _, segment := range ref.Segments {
@@ -504,6 +641,12 @@ func (d *Document) SortCanonical() {
 	})
 	sort.Slice(d.Returns, func(i, j int) bool {
 		return factKey(d.Returns[i].Pos, d.Returns[i].ScopeID, "") < factKey(d.Returns[j].Pos, d.Returns[j].ScopeID, "")
+	})
+	sort.Slice(d.Values, func(i, j int) bool { return d.Values[i].ID < d.Values[j].ID })
+	sort.Slice(d.Flows, func(i, j int) bool {
+		left := d.Flows[i].FromID + "\x00" + d.Flows[i].ToID + "\x00" + string(d.Flows[i].Kind)
+		right := d.Flows[j].FromID + "\x00" + d.Flows[j].ToID + "\x00" + string(d.Flows[j].Kind)
+		return left < right
 	})
 	sort.Slice(d.Entrypoints, func(i, j int) bool {
 		return d.Entrypoints[i].SymbolID+"\x00"+d.Entrypoints[i].Kind < d.Entrypoints[j].SymbolID+"\x00"+d.Entrypoints[j].Kind

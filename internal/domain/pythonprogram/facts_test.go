@@ -74,3 +74,29 @@ func TestSortCanonical(t *testing.T) {
 		t.Fatalf("canonical order not applied: modules=%+v calls=%+v", doc.Modules, doc.Calls)
 	}
 }
+
+func TestDocumentValidateValueFactsAndLinks(t *testing.T) {
+	doc := validDocument()
+	functionID := doc.Symbols[1].ID
+	doc.Symbols[1].Parameters[0].ValueID = "parameter:request"
+	doc.Values = []Value{
+		{ID: "parameter:request", ScopeID: functionID, Kind: ValueParameter, Name: "request", Ref: Reference{Kind: ReferenceName, Segments: []string{"request"}}, Pos: Position{File: "app/api.py", Line: 3}},
+		{ID: "call:result", ScopeID: functionID, Kind: ValueCallResult, Ref: Reference{Kind: ReferenceCall, Segments: []string{"db", "execute"}}, Pos: Position{File: "app/api.py", Line: 4, Column: 11}},
+	}
+	doc.Flows = []ValueFlow{{FromID: "parameter:request", ToID: "call:result", Kind: FlowExpression, Pos: Position{File: "app/api.py", Line: 4}}}
+	doc.Calls[0].ResultID = "call:result"
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("valid value facts: %v", err)
+	}
+
+	bad := doc
+	bad.Flows = []ValueFlow{{FromID: "missing", ToID: "call:result", Kind: FlowExpression, Pos: Position{File: "app/api.py", Line: 4}}}
+	if err := bad.Validate(); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("missing flow endpoint error = %v", err)
+	}
+	bad = doc
+	bad.Calls[0].ResultID = "parameter:request"
+	if err := bad.Validate(); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("wrong result kind error = %v", err)
+	}
+}

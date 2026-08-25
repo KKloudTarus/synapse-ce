@@ -282,13 +282,13 @@ Exit: Python findings with affected symbols receive honest Tier-2 judgments.
 
 ### Pass 4 — Interprocedural value-flow engine
 
-- [ ] Build value slots and intra-function flows from facts.
-- [ ] Bind positional/keyword arguments and return values across resolved calls.
-- [ ] Add bounded function summaries, recursion/fixpoint handling, and deterministic convergence.
-- [ ] Add typed source, sink, propagator, and sanitizer roles.
-- [ ] Preserve the existing coarse Go taint behavior and tests.
-- [ ] Add witness paths carrying relative file:line evidence.
-- [ ] Add tests for sibling calls, sanitizer class separation, return propagation, keyword arguments,
+- [x] Build value slots and intra-function flows from facts.
+- [x] Bind positional/keyword arguments, method receivers, and return values across resolved calls.
+- [x] Use a bounded whole-program value graph with cycle-safe traversal and deterministic convergence.
+- [x] Add typed source, sink, propagator, and sanitizer roles.
+- [x] Preserve the existing coarse Go taint behavior and tests.
+- [x] Add witness paths carrying relative file:line evidence.
+- [x] Add tests for sibling calls, sanitizer class separation, return propagation, keyword arguments,
   methods, recursion, and unsupported shapes.
 
 Exit: value flow—not mere call adjacency—drives Python taint candidates.
@@ -377,6 +377,7 @@ Append one row at the end of every implementation pass.
 | 1 | `feat:python-semantic-facts` | Domain, provider, CGO-free astwalk/ports tests pass | `go build ./cmd/...` and `CGO_ENABLED=0 go build ./cmd/synapse-ast` pass | CGO golden fixtures were added but cannot execute on this workstation because no C compiler is installed; CI must run them with CGO enabled. Coverage-aware walking reports skipped Python candidates instead of silently permitting a negative proof. |
 | 2 | `feat:python-semantic-resolver` | Python resolver and shared callgraph tests pass | Focused AST/ports tests and `go build ./cmd/...` pass | Resolver emits conservative candidates for ambiguity, keeps positive graphs usable under partial coverage, and requires complete extraction plus resolution before a negative proof. Public Python API symbols are entrypoints by design to keep library scans sound. |
 | 3 | `feat:python-tier2-reachability` | Python Tier-2 analyzer/recorder, reachproof, SCA subject, judgment provenance, config and OpenVEX tests pass | Focused cross-package tests and `go build ./cmd/...` pass | Exact PyPI PURL + advisory symbol subjects prevent package/symbol confusion. Partial coverage admits bounded positive witnesses only; incomplete negatives are removed before the coordinator so Tier-1 stands. API composition is opt-in via `SYNAPSE_PYREACH_TIER2_ENABLED`. |
+| 4 | `feat:python-value-flow-taint` | Python facts/value-flow, typed catalog, interprocedural binding and resolver regression tests pass | Focused cross-package tests and `go build ./cmd/...` pass | The Python graph tracks value slots rather than treating call adjacency as data flow. Traversal is cycle-safe and bounded; sinks and sanitizers are class-specific. CGO extractor golden tests remain CI-only on this workstation because no C compiler is installed. |
 
 ## Definition of done
 

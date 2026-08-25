@@ -52,6 +52,11 @@ func TestPythonFactsForExtractsSemanticFactsDeterministically(t *testing.T) {
 		create.Parameters[2].Kind != pythonprogram.ParameterKeywordOnly || create.Parameters[3].Kind != pythonprogram.ParameterKwArgs {
 		t.Fatalf("create_user parameters = %+v", create.Parameters)
 	}
+	for _, parameter := range create.Parameters {
+		if parameter.ValueID == "" {
+			t.Errorf("parameter %q has no value slot", parameter.Name)
+		}
+	}
 	if !hasPythonEntrypoint(first, create.ID, "framework_route") {
 		t.Errorf("missing framework route hint for %s", create.ID)
 	}
@@ -69,6 +74,19 @@ func TestPythonFactsForExtractsSemanticFactsDeterministically(t *testing.T) {
 	}
 	if len(first.Assignments) < 2 || len(first.Returns) != 3 {
 		t.Errorf("assignments=%d returns=%d", len(first.Assignments), len(first.Returns))
+	}
+	if len(first.Values) == 0 || len(first.Flows) == 0 {
+		t.Errorf("value extraction missing: values=%d flows=%d", len(first.Values), len(first.Flows))
+	}
+	for _, call := range first.Calls {
+		if call.ResultID == "" {
+			t.Errorf("call %q has no result value", call.ID)
+		}
+		for _, argument := range call.Arguments {
+			if argument.ValueID == "" {
+				t.Errorf("call %q has an argument without a value slot", call.ID)
+			}
+		}
 	}
 }
 
