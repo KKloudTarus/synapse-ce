@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -23,7 +24,7 @@ func runProbe(args []string, out io.Writer) (bool, int) {
 	}
 	switch probe {
 	case "ok":
-		fmt.Fprintln(out, "PASS")
+		_, _ = fmt.Fprintln(out, "PASS")
 		return true, 0
 	case "capabilities":
 		return true, probeCapabilities(out)
@@ -35,7 +36,7 @@ func runProbe(args []string, out io.Writer) (bool, int) {
 		return true, probeSeccomp(out)
 	case "sleep":
 		time.Sleep(30 * time.Second)
-		fmt.Fprintln(out, "PASS")
+		_, _ = fmt.Fprintln(out, "PASS")
 		return true, 0
 	case "pids":
 		return true, probePids(out)
@@ -49,13 +50,13 @@ func runProbe(args []string, out io.Writer) (bool, int) {
 		if n <= 0 {
 			n = 8192
 		}
-		fmt.Fprint(out, strings.Repeat("x", n))
+		_, _ = fmt.Fprint(out, strings.Repeat("x", n))
 		return true, 0
 	case "redaction":
-		fmt.Fprint(out, os.Getenv("SYNAPSE_PROBE_SECRET"))
+		_, _ = fmt.Fprint(out, os.Getenv("SYNAPSE_PROBE_SECRET"))
 		return true, 0
 	default:
-		fmt.Fprintln(out, "unknown probe")
+		_, _ = fmt.Fprintln(out, "unknown probe")
 		return true, 2
 	}
 }
@@ -176,6 +177,7 @@ func probeMemory(out io.Writer) int {
 		}
 		blocks = append(blocks, block)
 	}
+	runtime.KeepAlive(blocks)
 	fmt.Fprintln(out, "FAIL")
 	return 1
 }
