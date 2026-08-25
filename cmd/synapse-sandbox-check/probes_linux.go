@@ -78,53 +78,53 @@ func probeArguments(args []string) (string, map[string]string) {
 func probeCapabilities(out io.Writer) int {
 	file, err := os.Open("/proc/self/status")
 	if err != nil {
-		fmt.Fprintln(out, "FAIL")
+		_, _ = fmt.Fprintln(out, "FAIL")
 		return 1
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	for scanner := bufio.NewScanner(file); scanner.Scan(); {
 		if strings.HasPrefix(scanner.Text(), "CapEff:") {
 			if strings.TrimSpace(strings.TrimPrefix(scanner.Text(), "CapEff:")) == "0000000000000000" {
-				fmt.Fprintln(out, "PASS")
+				_, _ = fmt.Fprintln(out, "PASS")
 				return 0
 			}
 			break
 		}
 	}
-	fmt.Fprintln(out, "FAIL")
+	_, _ = fmt.Fprintln(out, "FAIL")
 	return 1
 }
 
 func probeNetwork(out io.Writer) int {
 	conn, err := net.DialTimeout("tcp", "1.1.1.1:443", 750*time.Millisecond)
 	if err == nil {
-		conn.Close()
-		fmt.Fprintln(out, "FAIL")
+		_ = conn.Close()
+		_, _ = fmt.Fprintln(out, "FAIL")
 		return 1
 	}
-	fmt.Fprintln(out, "PASS")
+	_, _ = fmt.Fprintln(out, "PASS")
 	return 0
 }
 
 func probeFilesystem(out io.Writer, workdir, hidden string) int {
 	if workdir == "" || hidden == "" {
-		fmt.Fprintln(out, "FAIL")
+		_, _ = fmt.Fprintln(out, "FAIL")
 		return 1
 	}
 	if err := os.WriteFile(filepath.Join(workdir, "sandbox-check-write"), []byte("ok"), 0o600); err != nil {
-		fmt.Fprintln(out, "FAIL")
+		_, _ = fmt.Fprintln(out, "FAIL")
 		return 1
 	}
 	if err := os.WriteFile("/etc/synapse-sandbox-check", []byte("must fail"), 0o600); err == nil {
 		_ = os.Remove("/etc/synapse-sandbox-check")
-		fmt.Fprintln(out, "FAIL")
+		_, _ = fmt.Fprintln(out, "FAIL")
 		return 1
 	}
 	if _, err := os.Stat(filepath.Dir(hidden)); err == nil || !errors.Is(err, os.ErrNotExist) {
-		fmt.Fprintln(out, "FAIL")
+		_, _ = fmt.Fprintln(out, "FAIL")
 		return 1
 	}
-	fmt.Fprintln(out, "PASS")
+	_, _ = fmt.Fprintln(out, "PASS")
 	return 0
 }
 
@@ -132,17 +132,17 @@ func probeSeccomp(out io.Writer) int {
 	// ptrace (x86_64 syscall 101) is intentionally absent from seccompAllow and must return EPERM.
 	_, _, errno := syscallPtrace()
 	if errno == 1 {
-		fmt.Fprintln(out, "PASS")
+		_, _ = fmt.Fprintln(out, "PASS")
 		return 0
 	}
-	fmt.Fprintln(out, "FAIL")
+	_, _ = fmt.Fprintln(out, "FAIL")
 	return 1
 }
 
 func probePids(out io.Writer) int {
 	self, err := os.Executable()
 	if err != nil {
-		fmt.Fprintln(out, "FAIL")
+		_, _ = fmt.Fprintln(out, "FAIL")
 		return 1
 	}
 	var children []*exec.Cmd
@@ -159,12 +159,12 @@ func probePids(out io.Writer) int {
 	for range 256 {
 		child := exec.Command(self, "-probe=hold")
 		if err := child.Start(); err != nil {
-			fmt.Fprintln(out, "PIDS_BLOCKED")
+			_, _ = fmt.Fprintln(out, "PIDS_BLOCKED")
 			return 0
 		}
 		children = append(children, child)
 	}
-	fmt.Fprintln(out, "FAIL")
+	_, _ = fmt.Fprintln(out, "FAIL")
 	return 1
 }
 
@@ -178,6 +178,6 @@ func probeMemory(out io.Writer) int {
 		blocks = append(blocks, block)
 	}
 	runtime.KeepAlive(blocks)
-	fmt.Fprintln(out, "FAIL")
+	_, _ = fmt.Fprintln(out, "FAIL")
 	return 1
 }
