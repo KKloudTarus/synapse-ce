@@ -603,7 +603,7 @@ func TestHostileHarness(t *testing.T) {
 	// appear in tenantB's coverage or agent list (the #413 no-cross-tenant-aggregate requirement).
 	for _, path := range []string{"/api/v1/fleet/coverage", "/api/v1/fleet/agents", "/api/v1/fleet/coverage/export"} {
 		if code, body := send("readonly", "tenantA", http.MethodGet, path, true); code != http.StatusOK || !strings.Contains(body, "asset-A") && !strings.Contains(body, "ag1") {
-			// sanity: tenantA genuinely sees its own data at %s (code=%d body=%s)
+			// sanity: tenantA genuinely sees its own data, so the emptiness below is meaningful.
 			t.Fatalf("tenantA must see its own fleet data at %s (code=%d body=%s)", path, code, body)
 		}
 		if code, body := send("readonly", "tenantB", http.MethodGet, path, true); code != http.StatusOK {
