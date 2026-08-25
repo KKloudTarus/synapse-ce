@@ -12,10 +12,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func pinNetworkNamespace(name string, namespaceFD int) (string, error) {
-	return pinNetworkNamespaceAt(networkNamespaceDir, name, namespaceFD)
-}
-
 func pinNetworkNamespaceAt(dir, name string, namespaceFD int) (string, error) {
 	if namespaceFD < 0 {
 		return "", errors.New("invalid network namespace descriptor")
