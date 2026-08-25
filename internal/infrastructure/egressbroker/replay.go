@@ -82,7 +82,9 @@ func newFileGrantReplayStore(path string, now time.Time, expectedUID int) (*File
 	if err != nil {
 		return nil, fmt.Errorf("open egress grant replay journal: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 	openedInfo, err := file.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("stat egress grant replay journal: %w", err)
