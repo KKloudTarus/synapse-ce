@@ -53,6 +53,13 @@ func Scrub(env telemetry.TelemetryEnvelope, policy Policy) (telemetry.TelemetryE
 	}
 
 	if p := out.Event.Process; p != nil {
+		// Capture the ORIGINAL executable identity before policy transforms Path/Comm. Ambiguous short
+		// options such as MySQL -pPASSWORD must be interpreted using the process that actually emitted them,
+		// even when argv omits argv[0] or a tenant policy later hashes/drops the executable path.
+		commandIdentity := p.Path
+		if commandIdentity == "" {
+			commandIdentity = p.Comm
+		}
 		if v, cut := boundLen(apply(CategoryProcessPath, p.Path), policy.MaxPathLen); true {
 			p.Path = v
 			if cut {
@@ -67,8 +74,9 @@ func Scrub(env telemetry.TelemetryEnvelope, policy Policy) (telemetry.TelemetryE
 			markArgvTruncated()
 		}
 		// Slice-aware argv redaction: per-element secret scan PLUS cross-element (a lone credential flag
-		// redacts the following value element — the space-separated `--password secret` form).
-		scrubbedArgs, red, drop := policy.RedactArgv(p.Args)
+		// redacts the following value element). Source-aware command identity also closes the MySQL/MariaDB
+		// glued -pPASSWORD form without globally treating every -p prefix as a credential.
+		scrubbedArgs, red, drop := policy.redactArgvForCommand(p.Args, commandIdentity)
 		rep.Redacted += red
 		rep.Dropped += drop
 		for i := range scrubbedArgs {

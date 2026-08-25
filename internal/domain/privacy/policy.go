@@ -125,13 +125,22 @@ func (p Policy) Validate() error {
 // RedactArgv redacts a whole argv slice as a unit (positions preserved). Each element is classified as a
 // process arg (disposition + per-element secret scan), AND — the reason this is slice-aware — when an
 // element is a lone credential flag its FOLLOWING element (the space-separated value) is redacted
-// wholesale, which no per-element scan can do. It also handles command-scoped MySQL/MariaDB -pPASSWORD
-// without globally treating ambiguous -p prefixes as credentials. Returns the scrubbed argv and how many
-// elements were redacted/hashed vs dropped.
+// wholesale. It also handles command-scoped MySQL/MariaDB -pPASSWORD when argv[0] identifies that client.
+// Source scrubbers additionally pass the authoritative Process.Path/Comm so this does not rely on argv[0].
 func (p Policy) RedactArgv(args []string) (out []string, redacted, dropped int) {
+	return p.redactArgvForCommand(args, "")
+}
+
+// redactArgvForCommand is the source-aware form of RedactArgv. command is the original process executable
+// path/name from the observation and wins over argv shape for ambiguous short-option interpretation. argv[0]
+// remains a fallback for callers that only have argv.
+func (p Policy) redactArgvForCommand(args []string, command string) (out []string, redacted, dropped int) {
 	out = make([]string, len(args))
 	redactValue := false
-	mysqlPasswordClient := len(args) > 0 && isMySQLPasswordClient(args[0])
+	mysqlPasswordClient := isMySQLPasswordClient(command)
+	if !mysqlPasswordClient && len(args) > 0 {
+		mysqlPasswordClient = isMySQLPasswordClient(args[0])
+	}
 	for i, a := range args {
 		v, disp := p.Classify(CategoryProcessArg, a)
 		if p.RedactSecrets && mysqlPasswordClient {

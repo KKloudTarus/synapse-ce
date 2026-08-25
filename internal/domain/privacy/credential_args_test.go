@@ -80,7 +80,9 @@ func TestResidualCredentialFormsNeverReachTelemetryOrDetection(t *testing.T) {
 	glued := "glued" + "Leak93"
 	spaceLeft := "left" + "Leak"
 	spaceRight := "right" + "Leak"
-	args := []string{"mysqldump", "-p" + glued, "DB_PASSWORD=" + spaceLeft + " " + spaceRight, "app_db"}
+	// Deliberately omit the executable from Args. The canonical process record carries authoritative Path
+	// and Comm separately, and A6 must still interpret MySQL's ambiguous -p suffix as password material.
+	args := []string{"-p" + glued, "DB_PASSWORD=" + spaceLeft + " " + spaceRight, "app_db"}
 
 	env, _, err := Scrub(mkEnvelope(args, "/usr/bin/mysqldump"), DefaultPolicy())
 	if err != nil {
