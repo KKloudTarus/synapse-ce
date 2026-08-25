@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../lib/api'
 import { QualityGates } from './QualityGates'
@@ -23,5 +23,12 @@ describe('QualityGates', () => {
   })
 
   it('validates a create form before calling the API', async () => { render(<QualityGates />); fireEvent.click(await screen.findByRole('button', { name: /New gate/i })); fireEvent.click(screen.getByRole('button', { name: 'Create gate' })); expect(screen.getByText('Name and key are required.')).toBeInTheDocument(); expect(api.createQualityGate).not.toHaveBeenCalled() })
-  it('confirms custom deletion', async () => { vi.mocked(api.deleteQualityGate).mockResolvedValue(); render(<QualityGates />); fireEvent.click(await screen.findByRole('button', { name: /Delete/i })); expect(window.confirm).toHaveBeenCalled(); await waitFor(() => expect(api.deleteQualityGate).toHaveBeenCalledWith('release')) })
+  it('confirms custom deletion', async () => {
+    vi.mocked(api.deleteQualityGate).mockResolvedValue()
+    render(<QualityGates />)
+    fireEvent.click(await screen.findByRole('button', { name: /Delete/i }))
+    expect(screen.getByText('Delete “Release”?')).toBeInTheDocument()
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(api.deleteQualityGate).toHaveBeenCalledWith('release'))
+  })
 })
