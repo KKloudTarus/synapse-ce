@@ -364,6 +364,7 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetAttackPaths(attackSvc)              // real #419 service proves cross-tenant derived data isolation
 	rt.SetSARIFIngest(harnessSARIF{})         // register the #415 import route so the harness guards its operate/tenant gates
 	rt.SetImportedFindings(harnessImportedFindings{})
+	rt.SetVulnerabilityAudit(audit)
 	rt.SetDetectionReader(harnessDetections{})  // register the #423 detection-ledger read route
 	rt.SetPurpleCoverageReader(harnessPurple{}) // register the #426 purple-coverage read route
 	rt.SetFleetRolloutAdmin(harnessRollout{})
@@ -597,7 +598,6 @@ func TestHostileHarness(t *testing.T) {
 	if code, body := send("readonly", "tenantB", http.MethodGet, "/api/v1/attack-paths", true); code != http.StatusOK || strings.Contains(body, "tenant-A-secret-marker") {
 		t.Errorf("tenantB attack paths leaked tenantA data (code=%d body=%s)", code, body)
 	}
-
 	// Cross-tenant fleet reads must return NOTHING, not merely a 200. tenantA's asset id must never
 	// appear in tenantB's coverage or agent list (the #413 no-cross-tenant-aggregate requirement).
 	for _, path := range []string{"/api/v1/fleet/coverage", "/api/v1/fleet/agents", "/api/v1/fleet/coverage/export"} {
