@@ -225,6 +225,41 @@ func TestObservationAndKeyValidation(t *testing.T) {
 	}
 }
 
+func TestNewBaselineFromNearCapAndVarianceCheck(t *testing.T) {
+	// A near-cap but VALID row: every observation = MaxFeatureValue (variance 0). obs*sumSq and sum^2 both
+	// reach ~1e24 and overflow int64 — the big.Int integrity check must NOT wrongly reject it.
+	valid := make([]FeatureSummary, NumFeatures)
+	for f := 0; f < NumFeatures; f++ {
+		valid[f] = FeatureSummary{
+			Feature: Feature(f),
+			Count:   MaxObservations,
+			Sum:     MaxObservations * MaxFeatureValue,
+			SumSq:   MaxObservations * MaxFeatureValue * MaxFeatureValue,
+			Min:     MaxFeatureValue,
+			Max:     MaxFeatureValue,
+		}
+	}
+	if _, err := NewBaselineFrom(key(), StateActive, valid); err != nil {
+		t.Fatalf("a valid near-cap baseline must rehydrate (no int64 overflow in the variance check): %v", err)
+	}
+	// A genuinely negative-variance row (obs*sumSq < sum^2) must be rejected.
+	bad := make([]FeatureSummary, NumFeatures)
+	for f := 0; f < NumFeatures; f++ {
+		bad[f] = FeatureSummary{Feature: Feature(f), Count: 10, Sum: 100, SumSq: 500, Min: 0, Max: 10}
+	}
+	if _, err := NewBaselineFrom(key(), StateActive, bad); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("a negative-variance row must be rejected, got %v", err)
+	}
+	// An inverted min/max must be rejected.
+	inv := make([]FeatureSummary, NumFeatures)
+	for f := 0; f < NumFeatures; f++ {
+		inv[f] = FeatureSummary{Feature: Feature(f), Count: 1, Sum: 2, SumSq: 4, Min: 5, Max: 2}
+	}
+	if _, err := NewBaselineFrom(key(), StateActive, inv); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("inverted min/max must be rejected, got %v", err)
+	}
+}
+
 func TestLearnEligibilityFailClosed(t *testing.T) {
 	if ok, why := okWin().Eligible(); !ok {
 		t.Fatalf("clean window must be eligible, got %q", why)

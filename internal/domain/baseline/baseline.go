@@ -68,6 +68,59 @@ func NewBaseline(key Key) (*Baseline, error) {
 	return &Baseline{key: key, state: StateLearning}, nil
 }
 
+// NewBaselineFrom rehydrates a baseline from a persisted key + state + per-feature summaries, so a store
+// can reload one without re-folding raw observations. summaries must be exactly NumFeatures entries in
+// feature order. It validates integrity fail-closed: a consistent shared observation count within
+// [0, MaxObservations], non-negative bounded sums, and non-negative variance (obs*sumSq >= sum^2) — a
+// crafted/corrupt row that violates these is rejected rather than loaded into the scorer.
+func NewBaselineFrom(key Key, state State, summaries []FeatureSummary) (*Baseline, error) {
+	if err := key.Validate(); err != nil {
+		return nil, err
+	}
+	if !state.Valid() {
+		return nil, fmt.Errorf("%w: unknown baseline state %q", shared.ErrValidation, state)
+	}
+	if len(summaries) != numFeatures {
+		return nil, fmt.Errorf("%w: baseline needs %d feature summaries, got %d", shared.ErrValidation, numFeatures, len(summaries))
+	}
+	b := &Baseline{key: key, state: state}
+	obs := summaries[0].Count
+	if obs < 0 || obs > MaxObservations {
+		return nil, fmt.Errorf("%w: baseline observation count %d out of range [0,%d]", shared.ErrValidation, obs, MaxObservations)
+	}
+	b.obs = obs
+	for f := 0; f < numFeatures; f++ {
+		s := summaries[f]
+		if s.Feature != Feature(f) {
+			return nil, fmt.Errorf("%w: summary %d is for feature %q, expected %q", shared.ErrValidation, f, s.Feature.Name(), Feature(f).Name())
+		}
+		if s.Count != obs {
+			return nil, fmt.Errorf("%w: feature %s count %d disagrees with observation count %d", shared.ErrValidation, Feature(f).Name(), s.Count, obs)
+		}
+		if s.Sum < 0 || s.SumSq < 0 || s.Min < 0 || s.Max < 0 {
+			return nil, fmt.Errorf("%w: feature %s has a negative accumulator", shared.ErrValidation, Feature(f).Name())
+		}
+		if s.Max > MaxFeatureValue || s.Min > s.Max {
+			return nil, fmt.Errorf("%w: feature %s has an out-of-range or inverted min/max", shared.ErrValidation, Feature(f).Name())
+		}
+		if s.Sum > obs*MaxFeatureValue || s.SumSq > obs*MaxFeatureValue*MaxFeatureValue {
+			return nil, fmt.Errorf("%w: feature %s accumulator exceeds the bound for %d observations", shared.ErrValidation, Feature(f).Name(), obs)
+		}
+		// Non-negative variance: obs*sumSq >= sum^2. Checked in math/big because both products can exceed
+		// int64 near the accumulator cap (obs*sumSq up to ~1e24) — the same overflow discipline as the
+		// scorer's featureBand, so the integrity gate cannot be defeated by wraparound.
+		lhs := new(big.Int).Mul(big.NewInt(obs), big.NewInt(s.SumSq))
+		if lhs.Cmp(new(big.Int).Mul(big.NewInt(s.Sum), big.NewInt(s.Sum))) < 0 {
+			return nil, fmt.Errorf("%w: feature %s has negative variance (obs*sumSq < sum^2)", shared.ErrValidation, Feature(f).Name())
+		}
+		b.sum[f] = s.Sum
+		b.sumSq[f] = s.SumSq
+		b.min[f] = s.Min
+		b.max[f] = s.Max
+	}
+	return b, nil
+}
+
 // Key returns the baseline's identity.
 func (b *Baseline) Key() Key { return b.key }
 
