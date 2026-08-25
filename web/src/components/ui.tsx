@@ -289,9 +289,24 @@ export function EmptyState({
   )
 }
 
-export function ErrorState({ message }: { message: string }) {
+export function ErrorState({
+  message,
+  id,
+  tabIndex,
+  className,
+}: {
+  message: string
+  id?: string
+  tabIndex?: number
+  className?: string
+}) {
   return (
-    <div className="rounded-lg border border-high/30 bg-high/10 px-4 py-3 text-sm text-high">
+    <div
+      id={id}
+      tabIndex={tabIndex}
+      role="alert"
+      className={cn('rounded-lg border border-high/30 bg-high/10 px-4 py-3 text-sm text-high outline-none', className)}
+    >
       {message}
     </div>
   )

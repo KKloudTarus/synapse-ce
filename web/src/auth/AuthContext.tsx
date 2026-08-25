@@ -20,6 +20,7 @@ interface AuthState {
   aup: AupStatus | null
   error: string | null
   connecting: boolean
+  oidcAvailable: boolean
   connect: (token: string) => Promise<void>
   acceptAup: () => Promise<void>
   logout: () => Promise<void>
@@ -38,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [aup, setAup] = useState<AupStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
+  const [oidcAvailable, setOidcAvailable] = useState(true)
   const [authMethod, setAuthMethod] = useState<'session' | 'token' | null>(null)
 
   const clearAuthentication = useCallback(() => {
@@ -142,13 +144,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await restoreSavedToken()
       } catch (e) {
         if (ignore) return
+        const isBffNotFound = e instanceof ApiError && e.status === 404
+        if (isBffNotFound) {
+          setOidcAvailable(false)
+        }
         // Session discovery failing (offline, or a server without the BFF) says nothing about
         // the saved bearer token, so try it before discarding the credential.
         const discoveryError = e instanceof Error ? `Could not check your sign-in session: ${e.message}` : 'Could not check your sign-in session.'
         try {
-          if (!(await restoreSavedToken())) setError(discoveryError)
+          const restored = await restoreSavedToken()
+          if (!restored && !isBffNotFound) {
+            setError(discoveryError)
+          }
         } catch {
-          if (!ignore) setError(discoveryError)
+          if (!ignore && !isBffNotFound) setError(discoveryError)
         }
       }
     }
@@ -183,8 +192,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearAuthentication, refreshAup])
 
   const value = useMemo(
-    () => ({ phase, aup, error, connecting, connect, acceptAup, logout }),
-    [phase, aup, error, connecting, connect, acceptAup, logout],
+    () => ({ phase, aup, error, connecting, oidcAvailable, connect, acceptAup, logout }),
+    [phase, aup, error, connecting, oidcAvailable, connect, acceptAup, logout],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

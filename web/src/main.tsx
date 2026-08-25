@@ -17,7 +17,11 @@ import "./styles/globals.css";
 })()
 
 async function bootstrap() {
-  if (import.meta.env.DEV) {
+  // MSW runs only in DEV and only when not explicitly disabled. Set
+  // VITE_ENABLE_MSW=false (e.g. in the docker dev stack) to hit the real API
+  // through the Vite proxy instead of the in-browser mock handlers.
+  const mswEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_MSW !== 'false'
+  if (mswEnabled) {
     const { worker } = await import('./mocks/browser')
     await worker.start({ onUnhandledRequest: 'bypass' })
   }

@@ -298,9 +298,11 @@ describe('Rules Page', () => {
       expect(mobileList).toHaveAttribute('aria-rowcount', '1000')
     })
 
-    // Desktop: all rows rendered (plain table, no virtualization)
+    // Desktop: paginated rows rendered (1 thead row + 25 data rows on page 1)
     const rows = screen.getAllByRole('row')
-    expect(rows.length).toBeGreaterThan(100)
+    expect(rows.length).toBe(26)
+    expect(screen.getByLabelText('Rules per page')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeInTheDocument()
 
     // Mobile: DOM should not have one card for every item (virtualized)
     const cards = screen.getAllByRole('heading', { name: /Virtual Rule/ })

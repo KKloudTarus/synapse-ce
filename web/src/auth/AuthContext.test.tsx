@@ -114,4 +114,33 @@ describe('BFF authentication', () => {
     expect(logoutSession).not.toHaveBeenCalled()
     expect(sessionStorage.getItem('synapse.token')).toBeNull()
   })
+
+  it('swallows 404 session discovery error when BFF is unconfigured and does not show error banner', async () => {
+    vi.mocked(discoverSession).mockRejectedValue(new ApiError(404, 'not found'))
+    renderConnect()
+
+    expect(await screen.findByRole('tab', { name: /Organization/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /API Token/i })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByText(/Could not check your sign-in session/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('toggles password visibility with the show/hide token button', async () => {
+    renderConnect()
+
+    const tokenTab = await screen.findByRole('tab', { name: /API Token/i })
+    fireEvent.click(tokenTab)
+
+    const input = await screen.findByLabelText('API token')
+    expect(input).toHaveAttribute('type', 'password')
+
+    const toggleButton = screen.getByRole('button', { name: 'Show token' })
+    fireEvent.click(toggleButton)
+
+    expect(input).toHaveAttribute('type', 'text')
+    expect(screen.getByRole('button', { name: 'Hide token' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide token' }))
+    expect(input).toHaveAttribute('type', 'password')
+  })
 })

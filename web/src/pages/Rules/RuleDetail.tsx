@@ -126,7 +126,7 @@ export default function RuleDetailPage() {
 
       <div className="space-y-8">
         <section>
-          <h2 className="mb-3 text-lg font-semibold text-foreground">Description</h2>
+          <h2 className="mb-3 text-lg font-bold text-foreground">Description</h2>
           <div className="prose prose-sm prose-zinc dark:prose-invert max-w-none text-mutedfg">
             {rule.description}
           </div>
@@ -134,7 +134,7 @@ export default function RuleDetailPage() {
 
         {rule.rationale && (
           <section>
-            <h2 className="mb-3 text-lg font-semibold text-foreground">Rationale</h2>
+            <h2 className="mb-3 text-lg font-bold text-foreground">Rationale</h2>
             <div className="prose prose-sm prose-zinc dark:prose-invert max-w-none text-mutedfg">
               {rule.rationale}
             </div>

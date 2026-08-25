@@ -188,6 +188,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.web
+      target: dev
     depends_on:
       synapse-api:
         condition: service_healthy
@@ -196,6 +197,8 @@ services:
     environment:
       # In-network API URL – the Vite dev server proxies /api + /healthz to this.
       VITE_API_PROXY_TARGET: "http://synapse-api:8080"
+      # Hit the real API through the proxy instead of the in-browser MSW mocks.
+      VITE_ENABLE_MSW: "false"
     volumes:
       # Hot reload: mount the source in, leave node_modules from the image intact.
       - ../web:/app
