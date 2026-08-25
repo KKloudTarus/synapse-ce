@@ -193,6 +193,13 @@ export turns into a `vulnerable_code_not_in_execute_path` justification. It is h
 (`importlib`/`__import__`), a non-Python target, or an unresolvable import name yields no verdict
 rather than a false "not reachable" that could suppress a real vulnerability.
 
+When `SYNAPSE_PYREACH_TIER2_ENABLED=true`, a CGO-enabled `synapse-ast` sidecar parses Python without
+importing or executing it, resolves imports, lexical call targets, constructors, receiver methods and
+conservative inheritance, then queries advisory-provided affected symbols. A reached symbol produces a
+bounded Tier-2 call path even when unrelated coverage is incomplete. A Tier-2 negative is emitted only
+when extraction, resolution and symbol placement are complete; otherwise the Tier-1 judgment remains.
+The Tier-2 flag is ignored unless `SYNAPSE_PYREACH_ENABLED=true`.
+
 ### Runtime confirmation (DAST)
 
 A gated SAST hypothesis can be confirmed at runtime by a **safe HTTP probe**. When a distinct

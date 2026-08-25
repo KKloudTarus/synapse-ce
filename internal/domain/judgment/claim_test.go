@@ -38,6 +38,16 @@ func TestClaimRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPythonSemanticActorsAreRecognizedOnlyAtTier2(t *testing.T) {
+	if !IsDeterministicReachabilityProof(Tier2, ProofActorPySemanticScan, ProofActorPySemanticEngine) {
+		t.Fatal("Python semantic actors must be accepted as a deterministic Tier-2 pair")
+	}
+	if IsDeterministicReachabilityProof(Tier1, ProofActorPySemanticScan, ProofActorPySemanticEngine) ||
+		IsDeterministicReachabilityProof(Tier2, ProofActorPySemanticScan, ProofActorPyImportEngine) {
+		t.Fatal("Python semantic actors must fail closed for the wrong tier or a mixed pair")
+	}
+}
+
 func TestDASTClaimStrictDecode(t *testing.T) {
 	valid := []byte(`{"capability":"dast","claim":{"cwe":"CWE-79","location":"/search","rule":"reflected-xss","source":"first_party","fingerprint":"search_reflection","proof_evidence_id":"proof-1"}}`)
 	claim, err := UnmarshalClaim(valid)

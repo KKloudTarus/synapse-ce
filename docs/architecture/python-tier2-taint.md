@@ -269,13 +269,14 @@ Exit: pure Go resolution can prove positive paths and distinguish complete negat
 
 ### Pass 3 — Tier-2 reachability integration
 
-- [ ] Normalize Python affected symbols without guessing when advisory symbol data is absent.
-- [ ] Add a Tier-2 analyzer alongside existing Tier-1 pyreach.
-- [ ] Reuse reachproof supersession so Tier-2 replaces Tier-1 append-only.
-- [ ] On complete negative coverage, mint Tier-2 `not_reachable`; on gaps, keep Tier-1.
-- [ ] Seal bounded call-path and entrypoint evidence.
-- [ ] Wire configuration and API/CLI/worker composition roots.
-- [ ] Add SCA-to-judgment-to-OpenVEX end-to-end tests.
+- [x] Normalize Python affected symbols without guessing when advisory symbol data is absent.
+- [x] Add a Tier-2 analyzer alongside existing Tier-1 pyreach.
+- [x] Reuse reachproof supersession so Tier-2 replaces Tier-1 append-only.
+- [x] On complete negative coverage, mint Tier-2 `not_reachable`; on gaps, keep Tier-1.
+- [x] Seal bounded call-path and entrypoint evidence.
+- [x] Wire configuration and the judgment-owning server scan composition root. The standalone CLI has no
+  judgment lifecycle, so it keeps sidecar-backed code analysis but does not mint reachability claims.
+- [x] Add SCA-to-judgment-to-OpenVEX end-to-end tests.
 
 Exit: Python findings with affected symbols receive honest Tier-2 judgments.
 
@@ -375,6 +376,7 @@ Append one row at the end of every implementation pass.
 | 0 | `20b77fc` | Focused seam tests pass | `go build ./cmd/...` passes; `go test ./...` has four pre-existing Windows/baseline test failures | Plan created from `bf7dad4`. Failures: private-file ACL in `cmd/synapse-fptriage-release`, owner-controlled replay directory in `internal/infrastructure/egressbroker`, and two telemetry failure-matrix assertions in `test/e2e`. |
 | 1 | `feat:python-semantic-facts` | Domain, provider, CGO-free astwalk/ports tests pass | `go build ./cmd/...` and `CGO_ENABLED=0 go build ./cmd/synapse-ast` pass | CGO golden fixtures were added but cannot execute on this workstation because no C compiler is installed; CI must run them with CGO enabled. Coverage-aware walking reports skipped Python candidates instead of silently permitting a negative proof. |
 | 2 | `feat:python-semantic-resolver` | Python resolver and shared callgraph tests pass | Focused AST/ports tests and `go build ./cmd/...` pass | Resolver emits conservative candidates for ambiguity, keeps positive graphs usable under partial coverage, and requires complete extraction plus resolution before a negative proof. Public Python API symbols are entrypoints by design to keep library scans sound. |
+| 3 | `feat:python-tier2-reachability` | Python Tier-2 analyzer/recorder, reachproof, SCA subject, judgment provenance, config and OpenVEX tests pass | Focused cross-package tests and `go build ./cmd/...` pass | Exact PyPI PURL + advisory symbol subjects prevent package/symbol confusion. Partial coverage admits bounded positive witnesses only; incomplete negatives are removed before the coordinator so Tier-1 stands. API composition is opt-in via `SYNAPSE_PYREACH_TIER2_ENABLED`. |
 
 ## Definition of done
 

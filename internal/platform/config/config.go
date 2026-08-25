@@ -431,6 +431,11 @@ type Config struct {
 	// dynamic-import / no-coverage target leaves the prior tier standing, never a false "not reachable").
 	// Also requires the judgment lifecycle (SYNAPSE_JUDGMENTS_ENABLED).
 	PyReachabilityEnabled bool
+	// PySemanticReachabilityEnabled turns on the Tier-2 Python affected-symbol call graph. It requires
+	// Tier-1 Python reachability so any semantic refusal has a weaker judgment to leave standing.
+	// ASTBin is the sandboxable synapse-ast sidecar; empty enables bundled/PATH discovery.
+	PySemanticReachabilityEnabled bool
+	ASTBin                        string
 
 	// JSReachabilityEnabled turns on deterministic Tier-1 JavaScript/TypeScript import-reachability: a
 	// declared npm dependency that first-party source never imports becomes not_reachable, which the
@@ -686,6 +691,8 @@ func Load() Config {
 		OwnedAdvisoryEnabled:                  getbool("SYNAPSE_OWNED_ADVISORY", true),
 		ReachabilityEnabled:                   getbool("SYNAPSE_REACHABILITY_ENABLED", true),
 		PyReachabilityEnabled:                 getbool("SYNAPSE_PYREACH_ENABLED", false),
+		PySemanticReachabilityEnabled:         getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
+		ASTBin:                                os.Getenv("SYNAPSE_AST_BIN"),
 		JSReachabilityEnabled:                 getbool("SYNAPSE_JSREACH_ENABLED", false),
 		JSSymbolReachabilityEnabled:           getbool("SYNAPSE_JSREACH_TIER2_ENABLED", false),
 		RustReachabilityEnabled:               getbool("SYNAPSE_REACH_RUST", false),

@@ -94,6 +94,7 @@ type Service struct {
 	detectionPriority                string                                // server default detection priority (comprehensive|precise); empty = comprehensive
 	reachability                     ports.ReachabilityRecorder            // optional deterministic Tier-2 reachability proof (Go call-graph)
 	pyReachability                   ports.ReachabilityRecorder            // optional deterministic Tier-1 Python import-reachability proof
+	pySymbolReachability             ports.ReachabilityRecorder            // optional deterministic Tier-2 Python semantic call-graph proof
 	jsReachability                   jsSBOMReachabilityRecorder            // optional deterministic Tier-1 JavaScript import-reachability proof
 	jsSymbolReachability             jsSBOMReachabilityRecorder            // optional deterministic Tier-2 JavaScript affected-export proof
 	srcReachability                  map[string]ports.ReachabilityRecorder // optional Tier-1 provers keyed by package-URL type
@@ -380,6 +381,10 @@ func (s *Service) SetReachability(r ports.ReachabilityRecorder) { s.reachability
 // SetReachability (a no-coverage / dynamic-import target leaves the prior tier standing, never a false
 // "not reachable"). Kept distinct from the Go call-graph prover: it is a WEAKER (Tier-1, import-level) proof.
 func (s *Service) SetPyReachability(r ports.ReachabilityRecorder) { s.pyReachability = r }
+
+// SetPySymbolReachability configures the optional Python Tier-2 affected-symbol call-graph proof. It is
+// run after Tier-1 so an incomplete semantic analysis leaves the package-level judgment standing.
+func (s *Service) SetPySymbolReachability(r ports.ReachabilityRecorder) { s.pySymbolReachability = r }
 
 // jsSBOMReachabilityRecorder is the narrow slice of a JavaScript reachability recorder this service
 // needs. BOTH tiers satisfy it — the name is deliberately tier-neutral, because Go interfaces are
@@ -2819,6 +2824,14 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if opts.scansVulnerabilities() && s.pyReachability != nil {
 		if subs := pyReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
 			_, _ = s.pyReachability.Record(ctx, engagementID, ws.Dir, subs)
+		}
+	}
+
+	// Python Tier-2 runs after Tier-1. Partial semantic coverage may still prove a positive path, but an
+	// incomplete negative is filtered by the recorder and therefore leaves the Tier-1 judgment standing.
+	if opts.scansVulnerabilities() && s.pySymbolReachability != nil {
+		if subs := pySymbolReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
+			_, _ = s.pySymbolReachability.Record(ctx, engagementID, ws.Dir, subs)
 		}
 	}
 

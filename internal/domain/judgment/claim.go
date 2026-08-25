@@ -61,6 +61,8 @@ const (
 	ProofActorCallgraphEngine  = "system:callgraph-engine"
 	ProofActorJSSymbolScan     = "system:jssymbol-scan"
 	ProofActorJSSymbolEngine   = "system:jssymbol-engine"
+	ProofActorPySemanticScan   = "system:pysemantic-scan"
+	ProofActorPySemanticEngine = "system:pysemantic-engine"
 	ProofActorJSImportScan     = "system:jsimport-scan"
 	ProofActorJSImportEngine   = "system:jsimport-engine"
 	ProofActorPyImportScan     = "system:pyimport-scan"
@@ -79,7 +81,8 @@ func IsDeterministicReachabilityProof(tier ReachabilityTier, proposer, verifier 
 	switch tier {
 	case Tier2:
 		return (proposer == ProofActorCallgraphScan && verifier == ProofActorCallgraphEngine) ||
-			(proposer == ProofActorJSSymbolScan && verifier == ProofActorJSSymbolEngine)
+			(proposer == ProofActorJSSymbolScan && verifier == ProofActorJSSymbolEngine) ||
+			(proposer == ProofActorPySemanticScan && verifier == ProofActorPySemanticEngine)
 	case Tier1:
 		return (proposer == ProofActorJSImportScan && verifier == ProofActorJSImportEngine) ||
 			(proposer == ProofActorPyImportScan && verifier == ProofActorPyImportEngine) ||

@@ -210,6 +210,8 @@ reports whether traversal was truncated; lowering a bound never produces a resul
 | `SYNAPSE_REACHABILITY_ENABLED` | `true` | Go Tier-2 call-graph reachability proof (best-effort). |
 | `SYNAPSE_JVM_REACHABILITY_ENABLED` | `true` | JVM (Java/Kotlin) reachability. |
 | `SYNAPSE_PYREACH_ENABLED` | `false` | Python Tier-1 import-reachability (a dead dependency becomes an OpenVEX `not_affected`). |
+| `SYNAPSE_PYREACH_TIER2_ENABLED` | `false` | Python Tier-2 affected-symbol semantic reachability. Requires Tier-1, judgments, and a CGO-enabled `synapse-ast`. |
+| `SYNAPSE_AST_BIN` | bundled / `PATH` | Optional path to the `synapse-ast` sidecar used by Python Tier-2 and code-quality analysis. |
 | `SYNAPSE_JSREACH_ENABLED` | `false` | JS/TS Tier-1 import-level reachability. |
 | `SYNAPSE_JSREACH_TIER2_ENABLED` | `false` | JS/TS Tier-2 symbol-level reachability. |
 
@@ -319,6 +321,7 @@ All are best-effort and no-op without inputs. Set a flag to `false` to opt out.
 | `SYNAPSE_SAST_ENABLED` | `true` | Pattern SAST in the scan pipeline. |
 | `SYNAPSE_REACHABILITY_ENABLED` | `true` | Call-graph reachability proof (Go, Tier-2). Needs judgments. |
 | `SYNAPSE_PYREACH_ENABLED` | `false` | Python import-reachability (Tier-1 dead-dependency → OpenVEX). Needs judgments. |
+| `SYNAPSE_PYREACH_TIER2_ENABLED` | `false` | Python semantic call-graph reachability (Tier-2). Requires Python Tier-1 and `synapse-ast`. |
 | `SYNAPSE_TAINT_ENABLED` | `false` | Taint proposals. Needs judgments and the sandbox. |
 | `SYNAPSE_CROSSCHECK_ENABLED` | `true` | Detection-source disagreement judgments. |
 | `SYNAPSE_SBOM_CROSSCHECK_ENABLED` | `true` | Dual-producer SBOM cross-check. |

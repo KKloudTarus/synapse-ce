@@ -461,6 +461,7 @@ func TestAnalysisDefaultsOn(t *testing.T) {
 func TestExternalSetupDefaultsOff(t *testing.T) {
 	for _, k := range []string{
 		"SYNAPSE_SANDBOX_ENABLED", "SYNAPSE_AGENT_ENABLED", "SYNAPSE_TAINT_ENABLED",
+		"SYNAPSE_PYREACH_TIER2_ENABLED",
 		"SYNAPSE_MAVEN_RESOLVE_ENABLED", "SYNAPSE_GRADLE_RESOLVE_ENABLED", "SYNAPSE_JARHASH_ONLINE_ENABLED",
 		"SYNAPSE_WRITEUP_DRAFTS_ENABLED", "SYNAPSE_OFFLINE", "SYNAPSE_IGNORE_UNFIXED",
 	} {
@@ -469,6 +470,7 @@ func TestExternalSetupDefaultsOff(t *testing.T) {
 	c := Load()
 	off := map[string]bool{
 		"Sandbox": c.SandboxEnabled, "Agent": c.AgentEnabled, "Taint": c.TaintEnabled,
+		"PythonTier2":  c.PySemanticReachabilityEnabled,
 		"MavenResolve": c.MavenResolveEnabled, "GradleResolve": c.GradleResolveEnabled,
 		"JarHashOnline": c.JarHashOnlineEnabled, "WriteupDrafts": c.WriteupDraftsEnabled,
 		"Offline": c.Offline, "IgnoreUnfixed": c.IgnoreUnfixed,
@@ -477,6 +479,15 @@ func TestExternalSetupDefaultsOff(t *testing.T) {
 		if v {
 			t.Errorf("%s must default OFF (needs external setup / opt-in)", name)
 		}
+	}
+}
+
+func TestLoadPythonSemanticReachability(t *testing.T) {
+	t.Setenv("SYNAPSE_PYREACH_TIER2_ENABLED", "true")
+	t.Setenv("SYNAPSE_AST_BIN", "custom-synapse-ast")
+	config := Load()
+	if !config.PySemanticReachabilityEnabled || config.ASTBin != "custom-synapse-ast" {
+		t.Fatalf("python tier-2 config = enabled:%v bin:%q", config.PySemanticReachabilityEnabled, config.ASTBin)
 	}
 }
 
