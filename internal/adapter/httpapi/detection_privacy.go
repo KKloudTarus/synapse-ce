@@ -67,6 +67,7 @@ func projectDetectionEvent(event detection.Event, scope detectionFieldScope) det
 		if scope == detectionFieldScopeRestricted {
 			process.Path = ""
 			process.Args = nil
+			process.Comm = ""
 		}
 		out.Process = &process
 	}
@@ -74,6 +75,7 @@ func projectDetectionEvent(event detection.Event, scope detectionFieldScope) det
 		network := *event.Network
 		if scope == detectionFieldScopeRestricted {
 			network.RemoteAddr = ""
+			network.Comm = ""
 		}
 		out.Network = &network
 	}
@@ -81,11 +83,15 @@ func projectDetectionEvent(event detection.Event, scope detectionFieldScope) det
 		file := *event.File
 		if scope == detectionFieldScopeRestricted {
 			file.Path = ""
+			file.Comm = ""
 		}
 		out.File = &file
 	}
 	if event.Privilege != nil {
 		privilege := *event.Privilege
+		if scope == detectionFieldScopeRestricted {
+			privilege.Comm = ""
+		}
 		out.Privilege = &privilege
 	}
 	return out
