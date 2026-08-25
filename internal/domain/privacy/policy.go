@@ -125,16 +125,24 @@ func (p Policy) Validate() error {
 // RedactArgv redacts a whole argv slice as a unit (positions preserved). Each element is classified as a
 // process arg (disposition + per-element secret scan), AND — the reason this is slice-aware — when an
 // element is a lone credential flag its FOLLOWING element (the space-separated value) is redacted
-// wholesale, which no per-element scan can do. Returns the scrubbed argv and how many elements were
-// redacted/hashed vs dropped.
+// wholesale, which no per-element scan can do. It also handles command-scoped MySQL/MariaDB -pPASSWORD
+// without globally treating ambiguous -p prefixes as credentials. Returns the scrubbed argv and how many
+// elements were redacted/hashed vs dropped.
 func (p Policy) RedactArgv(args []string) (out []string, redacted, dropped int) {
 	out = make([]string, len(args))
 	redactValue := false
+	mysqlPasswordClient := len(args) > 0 && isMySQLPasswordClient(args[0])
 	for i, a := range args {
 		v, disp := p.Classify(CategoryProcessArg, a)
-		if redactValue && disp == DispositionAllow {
+		if p.RedactSecrets && mysqlPasswordClient {
+			if scrubbed, changed := scrubMySQLGluedPassword(a); changed {
+				v, disp = scrubbed, DispositionRedact
+			}
+		}
+		if redactValue && disp == DispositionAllow && v != RedactionPlaceholder {
 			// This element is the value of a preceding credential flag; force it redacted even though it
-			// carries no secret pattern of its own (it IS the secret).
+			// carries no secret pattern of its own (it IS the secret). Already-redacted values remain a
+			// no-op so replaying an envelope does not falsely report another redaction.
 			v, disp = RedactionPlaceholder, DispositionRedact
 		}
 		redactValue = disp != DispositionDrop && IsCredentialFlag(a)
@@ -161,6 +169,11 @@ func (p Policy) Classify(cat FieldCategory, value string) (string, FieldDisposit
 		return RedactionPlaceholder, DispositionRedact
 	default: // allow
 		if p.RedactSecrets {
+			if cat == CategoryProcessArg {
+				if scrubbed, changed := scrubWholeCredentialArg(value); changed {
+					return scrubbed, DispositionRedact
+				}
+			}
 			if scrubbed, changed := scrubSecrets(value); changed {
 				return scrubbed, DispositionRedact
 			}
