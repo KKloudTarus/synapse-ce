@@ -2,8 +2,10 @@ package ast
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -97,6 +99,52 @@ func TestAnalyzeTimedOutRunner(t *testing.T) {
 	p := New("synapse-ast").WithRunner(fakeRunner{result: ports.ToolResult{TimedOut: true}, err: want})
 	if _, err := p.Analyze(context.Background(), t.TempDir()); err != want {
 		t.Fatalf("timed-out analysis error = %v, want %v", err, want)
+	}
+}
+
+func TestPythonFactsValidatesSidecarDocument(t *testing.T) {
+	document := pythonprogram.Document{
+		SchemaVersion: pythonprogram.SchemaVersion,
+		FilesSeen:     1,
+		FilesParsed:   1,
+		Modules: []pythonprogram.Module{{
+			Name: "app", File: "app.py", Pos: pythonprogram.Position{File: "app.py", Line: 1},
+		}},
+		Symbols: []pythonprogram.Symbol{{
+			ID: "python:app:<module>", Module: "app", QualifiedName: "<module>", Name: "app",
+			Kind: pythonprogram.SymbolModule, Pos: pythonprogram.Position{File: "app.py", Line: 1},
+		}},
+	}
+	wire, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := New("synapse-ast").WithRunner(fakeRunner{stdout: wire})
+	got, available, err := p.PythonFacts(context.Background(), t.TempDir())
+	if err != nil || !available {
+		t.Fatalf("PythonFacts: available=%v err=%v", available, err)
+	}
+	if got.SchemaVersion != pythonprogram.SchemaVersion || !got.Complete() {
+		t.Fatalf("PythonFacts document = %+v", got)
+	}
+}
+
+func TestPythonFactsRejectsUntrustedWireData(t *testing.T) {
+	for _, wire := range [][]byte{
+		[]byte("not json"),
+		[]byte(`{"schema_version":1,"files_seen":1,"files_parsed":1,"modules":[{"name":"app","file":"../app.py","pos":{"file":"../app.py","line":1}}]}`),
+	} {
+		p := New("synapse-ast").WithRunner(fakeRunner{stdout: wire})
+		if _, available, err := p.PythonFacts(context.Background(), t.TempDir()); err == nil || available {
+			t.Fatalf("untrusted wire must fail closed: available=%v err=%v", available, err)
+		}
+	}
+}
+
+func TestPythonFactsUnavailableWhenBinaryMissing(t *testing.T) {
+	document, available, err := New("/nonexistent/synapse-ast-does-not-exist").PythonFacts(context.Background(), t.TempDir())
+	if err != nil || available || document.SchemaVersion != 0 {
+		t.Fatalf("missing sidecar: document=%+v available=%v err=%v", document, available, err)
 	}
 }
 

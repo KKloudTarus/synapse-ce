@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -99,7 +100,31 @@ var (
 	_ ports.CodeMetricsProvider = (*Provider)(nil)
 	_ ports.BugDetector         = (*Provider)(nil)
 	_ ports.CodeAnalyzer        = (*Provider)(nil)
+	_ ports.PythonFactsProvider = (*Provider)(nil)
 )
+
+// PythonFacts runs `synapse-ast python-facts <root>`. The wire document is validated here because the
+// sidecar is outside the application trust boundary and parses attacker-controlled repositories.
+func (p *Provider) PythonFacts(ctx context.Context, root string) (pythonprogram.Document, bool, error) {
+	if strings.TrimSpace(root) == "" {
+		return pythonprogram.Document{}, false, nil
+	}
+	out, exit, err := p.run(ctx, "python-facts", root)
+	if exit == exitUnavailable {
+		return pythonprogram.Document{}, false, nil
+	}
+	if err != nil {
+		return pythonprogram.Document{}, false, err
+	}
+	var document pythonprogram.Document
+	if err := json.Unmarshal(out, &document); err != nil {
+		return pythonprogram.Document{}, false, fmt.Errorf("parse synapse-ast python facts: %w", err)
+	}
+	if err := document.Validate(); err != nil {
+		return pythonprogram.Document{}, false, fmt.Errorf("validate synapse-ast python facts: %w", err)
+	}
+	return document, true, nil
+}
 
 // FunctionCounts runs `synapse-ast functions <root>` and returns per-language function counts. A sidecar
 // built without the tree-sitter backend exits exitUnavailable, which maps to (nil, false, nil) so the

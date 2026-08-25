@@ -245,13 +245,13 @@ Exit: the branch is reproducible and no existing behavior is unintentionally red
 
 ### Pass 1 — Semantic-facts wire and extraction
 
-- [ ] Add the schema-versioned document and closed coverage-gap codes.
-- [ ] Add `python-facts` to `synapse-ast` and its CGO-free unavailable behavior.
-- [ ] Extract deterministic modules, classes, functions, methods, imports, aliases, calls, assignments,
+- [x] Add the schema-versioned document and closed coverage-gap codes.
+- [x] Add `python-facts` to `synapse-ast` and its CGO-free unavailable behavior.
+- [x] Extract deterministic modules, classes, functions, methods, imports, aliases, calls, assignments,
   parameters, returns, attributes, decorators, and locations.
-- [ ] Detect dynamic constructs and parser errors as gaps.
-- [ ] Add hostile bounds, sorting, golden fixtures, malformed-source tests, and determinism tests.
-- [ ] Add the narrow provider port and CGO-free adapter.
+- [x] Detect dynamic constructs and parser errors as gaps.
+- [x] Add hostile bounds, sorting, golden fixtures, malformed-source tests, and determinism tests.
+- [x] Add the narrow provider port and CGO-free adapter.
 
 Exit: a sandboxed sidecar can emit stable, bounded facts without executing Python.
 
@@ -372,7 +372,8 @@ Append one row at the end of every implementation pass.
 
 | Pass | Commit | Focused tests | Full gates | Notes |
 | --- | --- | --- | --- | --- |
-| 0 | pending | Focused seam tests pass | `go build ./cmd/...` passes; `go test ./...` has three pre-existing Windows/baseline failures | Plan created from `bf7dad4`. Failures: private-file ACL in `cmd/synapse-fptriage-release`, owner-controlled replay directory in `internal/infrastructure/egressbroker`, and two telemetry failure-matrix assertions in `test/e2e`. |
+| 0 | `20b77fc` | Focused seam tests pass | `go build ./cmd/...` passes; `go test ./...` has four pre-existing Windows/baseline test failures | Plan created from `bf7dad4`. Failures: private-file ACL in `cmd/synapse-fptriage-release`, owner-controlled replay directory in `internal/infrastructure/egressbroker`, and two telemetry failure-matrix assertions in `test/e2e`. |
+| 1 | `feat:python-semantic-facts` | Domain, provider, CGO-free astwalk/ports tests pass | `go build ./cmd/...` and `CGO_ENABLED=0 go build ./cmd/synapse-ast` pass | CGO golden fixtures were added but cannot execute on this workstation because no C compiler is installed; CI must run them with CGO enabled. Coverage-aware walking reports skipped Python candidates instead of silently permitting a negative proof. |
 
 ## Definition of done
 
