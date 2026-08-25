@@ -26,6 +26,10 @@ const (
 	numFeatures = iota
 )
 
+// NumFeatures is the number of behavioral features in an Observation vector — the exact length a caller
+// (e.g. a persistence layer rehydrating via NewBaselineFrom) must provide.
+const NumFeatures = numFeatures
+
 // featureNames gives each feature a stable name for reasons/validation messages, indexed by Feature.
 var featureNames = [numFeatures]string{
 	"process_spawn_rate",
