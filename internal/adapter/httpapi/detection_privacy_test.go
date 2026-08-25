@@ -72,7 +72,7 @@ func sensitiveDetectionRecord(secret string) detection.Record {
 			Severity:      shared.SeverityHigh,
 			HostID:        "host-1",
 			AgentID:       "agent-1",
-			ObservedCount: 3,
+			ObservedCount: 4,
 			Observed:      at,
 			Evidence: []detection.Event{
 				{Class: detection.ClassProcess, At: at, Host: "host-1", Process: &detection.ProcessEvent{
@@ -83,6 +83,9 @@ func sensitiveDetectionRecord(secret string) detection.Record {
 				}},
 				{Class: detection.ClassFile, At: at, Host: "host-1", File: &detection.FileEvent{
 					Path: "/tmp/" + secret, Op: "open", PID: 101, Comm: "worker",
+				}},
+				{Class: detection.ClassPrivilege, At: at, Host: "host-1", Privilege: &detection.PrivilegeEvent{
+					PID: 101, Comm: "worker", FromUID: 1000, ToUID: 0, Cap: "CAP_SYS_ADMIN", Kind: "setuid",
 				}},
 			},
 		},
@@ -127,16 +130,19 @@ func TestListDetectionsReadonlyStripsSensitiveFieldsAndAuditsFirst(t *testing.T)
 		t.Fatalf("unexpected restricted response: scope=%q records=%d", response.FieldScope, len(response.Detections))
 	}
 	evidence := response.Detections[0].Detection.Evidence
-	if evidence[0].Process.Path != "" || evidence[0].Process.Args != nil {
+	if evidence[0].Process.Path != "" || evidence[0].Process.Args != nil || evidence[0].Process.Comm != "" {
 		t.Errorf("readonly process evidence leaked direct values: %+v", evidence[0].Process)
 	}
-	if evidence[1].Network.RemoteAddr != "" {
-		t.Errorf("readonly network evidence leaked remote address %q", evidence[1].Network.RemoteAddr)
+	if evidence[1].Network.RemoteAddr != "" || evidence[1].Network.Comm != "" {
+		t.Errorf("readonly network evidence leaked direct values: %+v", evidence[1].Network)
 	}
-	if evidence[2].File.Path != "" {
-		t.Errorf("readonly file evidence leaked path %q", evidence[2].File.Path)
+	if evidence[2].File.Path != "" || evidence[2].File.Comm != "" {
+		t.Errorf("readonly file evidence leaked direct values: %+v", evidence[2].File)
 	}
-	if evidence[0].Process.PID != 101 || evidence[0].Process.Comm != "worker" || evidence[1].Network.RemotePort != 443 {
+	if evidence[3].Privilege.Comm != "" {
+		t.Errorf("readonly privilege evidence leaked command name: %+v", evidence[3].Privilege)
+	}
+	if evidence[0].Process.PID != 101 || evidence[1].Network.RemotePort != 443 || evidence[2].File.Op != "open" || evidence[3].Privilege.Cap != "CAP_SYS_ADMIN" {
 		t.Errorf("restricted projection removed structural evidence unexpectedly: %+v", evidence)
 	}
 
@@ -146,6 +152,9 @@ func TestListDetectionsReadonlyStripsSensitiveFieldsAndAuditsFirst(t *testing.T)
 	}
 	if got := reader.records[0].Detection.Evidence[0].Process.Args[1]; got != secret {
 		t.Fatalf("projection mutated stored argv: %q", got)
+	}
+	if got := reader.records[0].Detection.Evidence[0].Process.Comm; got != "worker" {
+		t.Fatalf("projection mutated stored command name: %q", got)
 	}
 
 	if len(audit.entries) != 1 {
@@ -159,7 +168,7 @@ func TestListDetectionsReadonlyStripsSensitiveFieldsAndAuditsFirst(t *testing.T)
 	if err != nil {
 		t.Fatalf("marshal audit entry: %v", err)
 	}
-	if strings.Contains(string(encodedAudit), secret) || strings.Contains(string(encodedAudit), "203.0.113.7") {
+	if strings.Contains(string(encodedAudit), secret) || strings.Contains(string(encodedAudit), "203.0.113.7") || strings.Contains(string(encodedAudit), "worker") {
 		t.Fatalf("query audit must contain metadata only, not sensitive evidence: %s", encodedAudit)
 	}
 }
@@ -187,7 +196,7 @@ func TestListDetectionsInvestigativeRolesRetainSourceRedactedEvidence(t *testing
 				t.Fatalf("want full field scope, got %q", response.FieldScope)
 			}
 			process := response.Detections[0].Detection.Evidence[0].Process
-			if process.Path != "/srv/"+secret || len(process.Args) != 2 || process.Args[1] != secret {
+			if process.Path != "/srv/"+secret || len(process.Args) != 2 || process.Args[1] != secret || process.Comm != "worker" {
 				t.Fatalf("full scope unexpectedly removed already-source-scrubbed evidence: %+v", process)
 			}
 			if len(audit.entries) != 1 || audit.entries[0].Metadata["field_scope"] != "full" {
