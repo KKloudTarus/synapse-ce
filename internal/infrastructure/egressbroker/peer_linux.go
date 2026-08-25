@@ -46,7 +46,7 @@ func peerIdentityFromConn(conn net.Conn) (peerIdentity, error) {
 		return peerIdentity{}, fmt.Errorf("read Unix peer credentials: %w", sockErr)
 	}
 	if cred == nil || cred.Pid <= 1 {
-		return peerIdentity{}, errors.New("Unix peer credentials contain an invalid pid")
+		return peerIdentity{}, errors.New("unix peer credentials contain an invalid pid")
 	}
 	return peerIdentity{pid: int(cred.Pid), uid: int(cred.Uid), gid: int(cred.Gid)}, nil
 }
