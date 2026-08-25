@@ -101,7 +101,7 @@ func Run(mode string, strict bool, readyWait time.Duration) (Report, error) {
 	if err != nil {
 		return Report{}, fmt.Errorf("create startup sandbox workdir: %w", err)
 	}
-	defer os.RemoveAll(startupWorkdir)
+	defer func() { _ = os.RemoveAll(startupWorkdir) }()
 
 	r := Report{Mode: mode, Strict: strict, CgroupLimitsEnforced: runner.CgroupLimitsEnforced()}
 	r.Checks = append(r.Checks, runCheck(runner, trueSpec(startupWorkdir)))
@@ -172,12 +172,12 @@ func fullChecks(runner *sandbox.Runner, self string) []CheckResult {
 	if err != nil {
 		return []CheckResult{FailResult("filesystem", "filesystem", "create temporary workdir: "+redact.String(err.Error(), nil))}
 	}
-	defer os.RemoveAll(work)
+	defer func() { _ = os.RemoveAll(work) }()
 	hiddenDir, err := os.MkdirTemp("", "synapse-sandbox-hidden-")
 	if err != nil {
 		return []CheckResult{FailResult("filesystem", "filesystem", "create temporary hidden path: "+redact.String(err.Error(), nil))}
 	}
-	defer os.RemoveAll(hiddenDir)
+	defer func() { _ = os.RemoveAll(hiddenDir) }()
 	hiddenPath := filepath.Join(hiddenDir, "host-only")
 	if err := os.WriteFile(hiddenPath, []byte("conformance host-only"), 0o600); err != nil {
 		return []CheckResult{FailResult("filesystem", "filesystem", "prepare unreadable host path: "+redact.String(err.Error(), nil))}
@@ -257,13 +257,13 @@ func outputSpec(self string) checkSpec {
 }
 
 func redactionSpec(self string) checkSpec {
-	const secret = "synapse-conformance-redaction-marker"
+	const redactionMarker = "synapse-conformance-redaction-marker"
 	spec := BaseSpec(self)
 	spec.Args = []string{"-probe=redaction"}
 	spec.Env = []string{"SYNAPSE_PROBE_SECRET={{secret:REDACTION_MARKER}}"}
 	return checkSpec{name: "secret-redaction", category: "output", spec: spec, evaluate: func(res ports.ToolResult, err error) CheckResult {
 		output := append(append([]byte(nil), res.Stdout...), res.Stderr...)
-		if err != nil || res.ExitCode != 0 || bytes.Contains(output, []byte(secret)) || !bytes.Contains(output, []byte(redact.Placeholder)) {
+		if err != nil || res.ExitCode != 0 || bytes.Contains(output, []byte(redactionMarker)) || !bytes.Contains(output, []byte(redact.Placeholder)) {
 			return FailResult("secret-redaction", "output", resultDetail(err, res))
 		}
 		return PassResult("secret-redaction", "output", "resolved secret was redacted from captured output")
@@ -286,7 +286,7 @@ func integrityCheck(runner *sandbox.Runner, self string) CheckResult {
 	if err != nil {
 		return FailResult("binary-integrity", "integrity", "create temporary tool: "+redact.String(err.Error(), nil))
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	copyPath := filepath.Join(dir, "probe")
 	contents, err := os.ReadFile(self)
 	if err != nil {
@@ -354,7 +354,7 @@ func WriteReport(path string, r Report, stdout, stderr io.Writer) error {
 	if path == "" {
 		return writeSummary(stdout, r)
 	}
-	var out io.Writer = stdout
+	out := stdout
 	var file *os.File
 	if path != "-" {
 		var err error
@@ -362,7 +362,7 @@ func WriteReport(path string, r Report, stdout, stderr io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("create JSON report: %w", err)
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		out = file
 	}
 	if err := json.NewEncoder(out).Encode(r); err != nil {
