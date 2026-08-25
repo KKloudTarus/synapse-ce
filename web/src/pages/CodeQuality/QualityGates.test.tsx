@@ -31,4 +31,22 @@ describe('QualityGates', () => {
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(api.deleteQualityGate).toHaveBeenCalledWith('release'))
   })
+
+  it('filters quality gates by search query and type', async () => {
+    render(<QualityGates />)
+    expect(await screen.findByText('Synapse way')).toBeInTheDocument()
+    expect(screen.getByText('Release')).toBeInTheDocument()
+
+    const searchInput = screen.getByPlaceholderText(/Search gates by name/i)
+    fireEvent.change(searchInput, { target: { value: 'Release' } })
+    expect(screen.queryByText('Synapse way')).not.toBeInTheDocument()
+    expect(screen.getByText('Release')).toBeInTheDocument()
+
+    fireEvent.change(searchInput, { target: { value: '' } })
+    expect(screen.getByText('Synapse way')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Built-in/i }))
+    expect(screen.getByText('Synapse way')).toBeInTheDocument()
+    expect(screen.queryByText('Release')).not.toBeInTheDocument()
+  })
 })

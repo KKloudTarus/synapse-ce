@@ -4,12 +4,13 @@ import {
   FileCode01,
   Percent01,
   Plus,
+  SearchLg,
   ShieldTick,
   ShieldZap,
   Trash01,
   XClose,
 } from '@untitledui/icons'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../../lib/api'
 import { useFetch } from '../../hooks'
@@ -39,6 +40,8 @@ const operators: QualityGateCondition['op'][] = ['<=', '>=', '==', '<', '>']
 const blankCondition = (metric = 'new_high'): QualityGateCondition => ({ metric, op: '<=', threshold: 0 })
 
 type MetricCategory = 'security' | 'rating' | 'coverage' | 'duplication'
+type TypeFilter = 'all' | 'builtin' | 'custom'
+type SortOption = 'name-asc' | 'name-desc' | 'conditions-desc' | 'conditions-asc'
 
 function getMetricCategory(metric: string): MetricCategory {
   if (['new_critical', 'new_high', 'new_medium', 'new_secret', 'new_vulnerability', 'total_critical'].includes(metric)) {
@@ -98,6 +101,11 @@ export function QualityGates() {
   const [deletingGate, setDeletingGate] = useState<QualityGate | null>(null)
   const [refresh, setRefresh] = useState(0)
 
+  // Search, Filter & Sort states
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
+  const [sortBy, setSortBy] = useState<SortOption>('name-asc')
+
   const { data: fetchedGates, error: fetchError } = useFetch(
     () => api.listQualityGates(),
     { deps: [refresh] },
@@ -107,6 +115,35 @@ export function QualityGates() {
   useEffect(() => { if (fetchError) setError(fetchError) }, [fetchError])
 
   function load() { setRefresh((c) => c + 1) }
+
+  const builtInCount = useMemo(() => gates?.filter((g) => g.builtIn).length ?? 0, [gates])
+  const customCount = useMemo(() => gates?.filter((g) => !g.builtIn).length ?? 0, [gates])
+
+  const filteredGates = useMemo(() => {
+    if (!gates) return []
+    return gates
+      .filter((gate) => {
+        if (typeFilter === 'builtin' && !gate.builtIn) return false
+        if (typeFilter === 'custom' && gate.builtIn) return false
+        if (search.trim()) {
+          const q = search.trim().toLowerCase()
+          const nameMatch = gate.name.toLowerCase().includes(q)
+          const keyMatch = gate.key.toLowerCase().includes(q)
+          const metricMatch = gate.conditions.some(
+            (c) => c.metric.toLowerCase().includes(q) || metricLabel(c.metric).toLowerCase().includes(q)
+          )
+          return nameMatch || keyMatch || metricMatch
+        }
+        return true
+      })
+      .sort((a, b) => {
+        if (sortBy === 'name-asc') return a.name.localeCompare(b.name)
+        if (sortBy === 'name-desc') return b.name.localeCompare(a.name)
+        if (sortBy === 'conditions-desc') return b.conditions.length - a.conditions.length
+        if (sortBy === 'conditions-asc') return a.conditions.length - b.conditions.length
+        return 0
+      })
+  }, [gates, search, typeFilter, sortBy])
 
   return (
     <div className="mx-auto max-w-[1600px] animate-fade-in space-y-6 pb-12">
@@ -150,126 +187,239 @@ export function QualityGates() {
       {error && <div className="mb-6"><ErrorState message={error} /><Button className="mt-3" variant="secondary" onClick={load}>Retry</Button></div>}
       {!gates && !error && <Spinner label="Loading quality gates…" />}
       {gates?.length === 0 && <EmptyState icon={ShieldTick} title="No quality gates" hint="Create a custom gate or use the built-in default." />}
+
       {gates && gates.length > 0 && (
-        <div className="grid gap-5 lg:grid-cols-2">
-          {gates.map((gate) => {
-            const hasMoreConditions = gate.conditions.length > 6
-            const displayedConditions = gate.conditions.slice(0, 6)
+        <>
+          {/* Search, Filter & Sort Toolbar */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-1 flex-wrap items-center gap-3">
+              {/* Search Bar */}
+              <div className="relative min-w-[240px] max-w-sm flex-1">
+                <SearchLg className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-tertiary" aria-hidden="true" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search gates by name, key or metric…"
+                  className="h-9 pl-9 pr-8 text-xs font-medium"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    aria-label="Clear search"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-tertiary transition hover:text-primary"
+                  >
+                    <XClose className="size-3.5" />
+                  </button>
+                )}
+              </div>
 
-            return (
-              <Card
-                key={gate.key}
-                title={
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={cn(
-                        'flex size-9 shrink-0 items-center justify-center rounded-xl border shadow-sm transition-all',
-                        gate.builtIn
-                          ? 'border-brand/30 bg-brand-primary/10 text-brand-secondary ring-1 ring-brand/10'
-                          : 'border-utility-blue-200 bg-utility-blue-50 text-utility-blue-700 ring-1 ring-utility-blue-100 dark:border-utility-blue-800 dark:bg-utility-blue-950/40 dark:text-utility-blue-300'
-                      )}
-                    >
-                      <ShieldTick className="size-4.5" aria-hidden="true" />
-                    </div>
-                    <div className="min-w-0">
-                      <span className="font-bold text-primary block leading-tight truncate">{gate.name}</span>
-                      <span className="font-mono text-xs text-tertiary italic">{gate.key}</span>
-                    </div>
-                  </div>
-                }
-                actions={
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        'inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold shadow-xs',
-                        gate.builtIn
-                          ? 'border-brand/30 bg-brand-primary/15 text-brand-secondary'
-                          : 'border-utility-blue-200 bg-utility-blue-50 text-utility-blue-700 dark:border-utility-blue-800 dark:bg-utility-blue-950/40 dark:text-utility-blue-300'
-                      )}
-                    >
-                      {gate.builtIn ? 'Built-in' : 'Custom'}
-                    </span>
-                    <span className="inline-flex items-center rounded-md border border-secondary bg-secondary px-2 py-0.5 text-xs font-medium text-tertiary shadow-xs tabular-nums">
-                      {gate.conditions.length} conditions
-                    </span>
-                  </div>
-                }
-                className={cn(gate.builtIn ? 'border-brand/30 shadow-xs' : 'border-secondary shadow-xs')}
-              >
-                {/* Compact 2-column Semantic Chips Grid (Max 6 shown directly on card) */}
-                <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {displayedConditions.map((condition, index) => {
-                    const cat = getMetricCategory(condition.metric)
-                    const style = getMetricCategoryStyle(cat)
-                    const Icon = style.icon
+              {/* Segmented Filter Pills */}
+              <div className="flex items-center rounded-lg border border-secondary bg-secondary/30 p-0.5 shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => setTypeFilter('all')}
+                  className={cn(
+                    'rounded-md px-2.5 py-1 text-xs font-semibold transition-all',
+                    typeFilter === 'all'
+                      ? 'bg-primary text-primary shadow-xs border border-secondary/60'
+                      : 'text-tertiary hover:text-primary'
+                  )}
+                >
+                  All <span className="ml-1 text-[11px] font-mono text-quaternary tabular-nums">({gates.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTypeFilter('builtin')}
+                  className={cn(
+                    'rounded-md px-2.5 py-1 text-xs font-semibold transition-all',
+                    typeFilter === 'builtin'
+                      ? 'bg-primary text-brand-secondary shadow-xs border border-secondary/60'
+                      : 'text-tertiary hover:text-primary'
+                  )}
+                >
+                  Built-in <span className="ml-1 text-[11px] font-mono text-quaternary tabular-nums">({builtInCount})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTypeFilter('custom')}
+                  className={cn(
+                    'rounded-md px-2.5 py-1 text-xs font-semibold transition-all',
+                    typeFilter === 'custom'
+                      ? 'bg-primary text-utility-blue-700 dark:text-utility-blue-300 shadow-xs border border-secondary/60'
+                      : 'text-tertiary hover:text-primary'
+                  )}
+                >
+                  Custom <span className="ml-1 text-[11px] font-mono text-quaternary tabular-nums">({customCount})</span>
+                </button>
+              </div>
+            </div>
 
-                    return (
-                      <li
-                        key={`${condition.metric}-${index}`}
-                        className={cn(
-                          'flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2 shadow-xs transition-colors',
-                          style.cardBg
-                        )}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className={cn('flex size-5 shrink-0 items-center justify-center rounded', style.iconBg)}>
-                            <Icon className="size-3" aria-hidden="true" />
-                          </div>
-                          <span className="text-xs font-semibold text-primary truncate" title={metricLabel(condition.metric)}>
-                            {metricLabel(condition.metric)}
-                          </span>
+            {/* Sorting Select */}
+            <div className="w-48 shrink-0">
+              <Select
+                value={sortBy}
+                onValueChange={(value) => setSortBy(value as SortOption)}
+                options={[
+                  { value: 'name-asc', label: 'Name (A to Z)' },
+                  { value: 'name-desc', label: 'Name (Z to A)' },
+                  { value: 'conditions-desc', label: 'Most conditions' },
+                  { value: 'conditions-asc', label: 'Fewest conditions' },
+                ]}
+                size="sm"
+                className="w-full bg-primary text-xs font-medium"
+                ariaLabel="Sort quality gates"
+              />
+            </div>
+          </div>
+
+          {/* Cards Grid or Empty Search State */}
+          {filteredGates.length === 0 ? (
+            <EmptyState
+              icon={SearchLg}
+              title="No matching quality gates"
+              hint={
+                search
+                  ? `No quality gates found matching "${search}". Try adjusting your search query or filters.`
+                  : 'No quality gates match the selected filter.'
+              }
+              action={
+                search || typeFilter !== 'all' ? (
+                  <Button
+                    variant="secondary"
+                    className="mt-3 text-xs font-medium"
+                    onClick={() => {
+                      setSearch('')
+                      setTypeFilter('all')
+                    }}
+                  >
+                    Reset filters
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <div className="grid gap-5 lg:grid-cols-2">
+              {filteredGates.map((gate) => {
+                const hasMoreConditions = gate.conditions.length > 6
+                const displayedConditions = gate.conditions.slice(0, 6)
+
+                return (
+                  <Card
+                    key={gate.key}
+                    title={
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={cn(
+                            'flex size-9 shrink-0 items-center justify-center rounded-xl border shadow-sm transition-all',
+                            gate.builtIn
+                              ? 'border-brand/30 bg-brand-primary/10 text-brand-secondary ring-1 ring-brand/10'
+                              : 'border-utility-blue-200 bg-utility-blue-50 text-utility-blue-700 ring-1 ring-utility-blue-100 dark:border-utility-blue-800 dark:bg-utility-blue-950/40 dark:text-utility-blue-300'
+                          )}
+                        >
+                          <ShieldTick className="size-4.5" aria-hidden="true" />
                         </div>
-                        <span className="shrink-0 rounded border border-secondary bg-primary px-1.5 py-0.5 font-mono text-[11px] font-bold text-primary shadow-xs tabular-nums">
-                          {condition.op} {condition.threshold}
+                        <div className="min-w-0">
+                          <span className="font-bold text-primary block leading-tight truncate">{gate.name}</span>
+                          <span className="font-mono text-xs text-tertiary italic">{gate.key}</span>
+                        </div>
+                      </div>
+                    }
+                    actions={
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            'inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold shadow-xs',
+                            gate.builtIn
+                              ? 'border-brand/30 bg-brand-primary/15 text-brand-secondary'
+                              : 'border-utility-blue-200 bg-utility-blue-50 text-utility-blue-700 dark:border-utility-blue-800 dark:bg-utility-blue-950/40 dark:text-utility-blue-300'
+                          )}
+                        >
+                          {gate.builtIn ? 'Built-in' : 'Custom'}
                         </span>
-                      </li>
-                    )
-                  })}
-                </ul>
+                        <span className="inline-flex items-center rounded-md border border-secondary bg-secondary px-2 py-0.5 text-xs font-medium text-tertiary shadow-xs tabular-nums">
+                          {gate.conditions.length} conditions
+                        </span>
+                      </div>
+                    }
+                    className={cn(gate.builtIn ? 'border-brand/30 shadow-xs' : 'border-secondary shadow-xs')}
+                  >
+                    {/* Compact 2-column Semantic Chips Grid (Max 6 shown directly on card) */}
+                    <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {displayedConditions.map((condition, index) => {
+                        const cat = getMetricCategory(condition.metric)
+                        const style = getMetricCategoryStyle(cat)
+                        const Icon = style.icon
 
-                {/* Show More link opening ModalForm directly */}
-                {hasMoreConditions && (
-                  <div className="mt-2.5">
-                    <button
-                      type="button"
-                      onClick={() => setEditing(gate)}
-                      className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-secondary bg-secondary/40 py-1.5 text-xs font-medium text-secondary transition hover:border-brand-solid hover:bg-brand-primary/10 hover:text-brand-primary"
-                    >
-                      <span className="font-semibold">+ {gate.conditions.length - 6} more conditions</span>
-                      <span className="text-[11px] font-normal text-tertiary">
-                        ({gate.builtIn ? 'Click to view all' : 'Click to view & edit'})
-                      </span>
-                    </button>
-                  </div>
-                )}
+                        return (
+                          <li
+                            key={`${condition.metric}-${index}`}
+                            className={cn(
+                              'flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2 shadow-xs transition-colors',
+                              style.cardBg
+                            )}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className={cn('flex size-5 shrink-0 items-center justify-center rounded', style.iconBg)}>
+                                <Icon className="size-3" aria-hidden="true" />
+                              </div>
+                              <span className="text-xs font-semibold text-primary truncate" title={metricLabel(condition.metric)}>
+                                {metricLabel(condition.metric)}
+                              </span>
+                            </div>
+                            <span className="shrink-0 rounded border border-secondary bg-primary px-1.5 py-0.5 font-mono text-[11px] font-bold text-primary shadow-xs tabular-nums">
+                              {condition.op} {condition.threshold}
+                            </span>
+                          </li>
+                        )
+                      })}
+                    </ul>
 
-                {gate.builtIn ? (
-                  <div className="mt-3 flex items-center justify-between border-t border-secondary/60 pt-2.5">
-                    <p className="text-xs text-tertiary">Built-in policy maintained by Synapse</p>
-                    <span className="text-[11px] font-medium text-brand-secondary">Active Baseline</span>
-                  </div>
-                ) : (
-                  <div className="mt-3 flex items-center justify-end gap-2 border-t border-secondary/60 pt-2.5">
-                    <Button
-                      variant="secondary"
-                      className="h-8 !border-brand-solid !text-brand-secondary hover:!border-brand-solid hover:!bg-brand-primary/10 hover:!text-brand-primary text-xs"
-                      onClick={() => setEditing(gate)}
-                    >
-                      <Edit01 className="size-3.5" aria-hidden="true" /> Edit
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="h-8 !border-utility-red-400 !text-utility-red-600 hover:!border-utility-red-600 hover:!bg-utility-red-50 hover:!text-utility-red-700 dark:border-utility-red-800 dark:text-utility-red-400 dark:hover:!bg-utility-red-950/40 dark:hover:!text-utility-red-300 text-xs"
-                      onClick={() => setDeletingGate(gate)}
-                    >
-                      <Trash01 className="size-3.5" aria-hidden="true" /> Delete
-                    </Button>
-                  </div>
-                )}
-              </Card>
-            )
-          })}
-        </div>
+                    {/* Show More link opening ModalForm directly */}
+                    {hasMoreConditions && (
+                      <div className="mt-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setEditing(gate)}
+                          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-secondary bg-secondary/40 py-1.5 text-xs font-medium text-secondary transition hover:border-brand-solid hover:bg-brand-primary/10 hover:text-brand-primary"
+                        >
+                          <span className="font-semibold">+ {gate.conditions.length - 6} more conditions</span>
+                          <span className="text-[11px] font-normal text-tertiary">
+                            ({gate.builtIn ? 'Click to view all' : 'Click to view & edit'})
+                          </span>
+                        </button>
+                      </div>
+                    )}
+
+                    {gate.builtIn ? (
+                      <div className="mt-3 flex items-center justify-between border-t border-secondary/60 pt-2.5">
+                        <p className="text-xs text-tertiary">Built-in policy maintained by Synapse</p>
+                        <span className="text-[11px] font-medium text-brand-secondary">Active Baseline</span>
+                      </div>
+                    ) : (
+                      <div className="mt-3 flex items-center justify-end gap-2 border-t border-secondary/60 pt-2.5">
+                        <Button
+                          variant="secondary"
+                          className="h-8 !border-brand-solid !text-brand-secondary hover:!border-brand-solid hover:!bg-brand-primary/10 hover:!text-brand-primary text-xs"
+                          onClick={() => setEditing(gate)}
+                        >
+                          <Edit01 className="size-3.5" aria-hidden="true" /> Edit
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          className="h-8 !border-utility-red-400 !text-utility-red-600 hover:!border-utility-red-600 hover:!bg-utility-red-50 hover:!text-utility-red-700 dark:border-utility-red-800 dark:text-utility-red-400 dark:hover:!bg-utility-red-950/40 dark:hover:!text-utility-red-300 text-xs"
+                          onClick={() => setDeletingGate(gate)}
+                        >
+                          <Trash01 className="size-3.5" aria-hidden="true" /> Delete
+                        </Button>
+                      </div>
+                    )}
+                  </Card>
+                )
+              })}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
