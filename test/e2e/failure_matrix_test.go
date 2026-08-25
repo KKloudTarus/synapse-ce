@@ -85,6 +85,11 @@ func (f *flakyTransport) IngestBatchEvents(ctx context.Context, batch ports.Tele
 func TestFailure_NetworkOutageRetryIsIdempotent(t *testing.T) {
 	h := newHarness(t, 0)
 	mem := memory.NewTelemetryTransportStore()
+	if err := mem.BindTelemetryAsset(h.ctx, ports.TelemetryAssetBinding{
+		TenantID: e2eTenant, AgentID: e2eAgent, AssetID: e2eAsset, UpdatedAt: h.now,
+	}); err != nil {
+		t.Fatalf("bind telemetry asset: %v", err)
+	}
 	flaky := &flakyTransport{TelemetryTransportStore: mem, failNext: 1}
 	svc, err := telemetryingest.NewService(flaky, h.keys, h.audit, h.clock)
 	if err != nil {
@@ -234,7 +239,7 @@ func TestFailure_ClockSkewRejected(t *testing.T) {
 	m.EventTimeMin = m.EventTimeMax.Add(time.Hour)
 	m.Signature = fleetagent.SignTelemetryManifest(h.telPriv, m)
 	if _, err := h.telemetry.Ingest(h.ctx, e2eAgent, telemetryingest.IngestRequest{Manifest: m, Events: events}); !errors.Is(err, shared.ErrValidation) {
-		t.Fatalf("an inverted event-time window (clock skew) must be rejected, got %v", err)
+		t.Fatalf("an inverted event-time window (clock skew) must be rejected as invalid, got %v", err)
 	}
 	if n, _ := h.transport.CountBatchEvents(h.ctx, e2eAgent, e2eStream, 1, 1); n != 0 {
 		t.Fatalf("a time-corrupt batch must store nothing, got %d", n)
