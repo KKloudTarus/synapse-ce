@@ -54,7 +54,7 @@ func (h *harness) buildSignedTelemetry(epoch, seq, prev uint64, envelopes ...tel
 	}
 	m := fleetagent.TelemetryBatchManifest{
 		ProtocolVersion: fleetagent.TelemetryProtocolVersion, SchemaVersion: telemetry.SchemaVersion,
-		BatchID: shared.ID("batch-fm"), AgentID: e2eAgent, AssetID: e2eAsset, StreamID: e2eStream,
+		BatchID: shared.ID("batch-fm"), AgentID: e2eAgent, HostID: e2eAgent, AssetID: e2eAsset, StreamID: e2eStream,
 		Position:         fleetagent.StreamPosition{Priority: fleetagent.PriorityP1, Epoch: epoch, Sequence: seq, Session: e2eSession, Boot: e2eBoot},
 		PreviousSequence: prev, EventTimeMin: minAt, EventTimeMax: maxAt,
 		ObservedCount: len(events), KeptCount: len(events), Events: refs,
