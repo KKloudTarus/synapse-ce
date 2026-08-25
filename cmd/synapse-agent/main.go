@@ -26,7 +26,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetversion"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
@@ -56,28 +55,30 @@ type fleetAPI interface {
 	Progress(ctx context.Context, token, orderID string) error
 	SubmitResult(ctx context.Context, token, orderID, status, reason string) error
 	SendHostInventory(ctx context.Context, token string, inv any) error
-	RegisterDetectionKey(ctx context.Context, token string, key fleetagent.AgentSigningKey, proof string) error
-	SendDetectionBatch(ctx context.Context, token string, batch fleetagent.AgentBatch, items []fleetagent.DetectionBatchItem) error
+}
+
+// hostInventoryResolvedAPI is optional so the long-standing run-loop test doubles
+// remain source-compatible. The production fleet client implements it and returns
+// the canonical asset identity reconciled by the authenticated control plane.
+type hostInventoryResolvedAPI interface {
+	SendHostInventoryResolved(ctx context.Context, token string, inv any) (fleetclient.HostInventoryResponse, error)
 }
 
 type config struct {
-	baseURL               string
-	enrolToken            string
-	stateDir              string
-	root                  string
-	name                  string
-	poll                  time.Duration
-	maxOrders             int
-	once                  bool
-	detectClasses         string  // SYNAPSE_DETECT_CLASSES; empty = detection engine off
-	detectCeiling         float64 // SYNAPSE_DETECT_CPU_CEIL_PCT; 0 = no load shedding
-	spoolBytes            int64   // durable telemetry WAL quota
-	metricsAddr           string  // optional private agent metrics listener
-	detectionEngagement   string  // engagement receiving signed detection batches; empty = local-only
-	detectionShipInterval time.Duration
-	// inventorySweep turns the host inventory from on-demand (a scan.host work order) into a continuous
-	// periodic stream (A8, #629). Enabled by default (ingest-on); the interval is clamped to a floor so a
-	// misconfiguration cannot busy-loop the collector over the real filesystem.
+	baseURL       string
+	enrolToken    string
+	stateDir      string
+	root          string
+	name          string
+	poll          time.Duration
+	maxOrders     int
+	once          bool
+	detectClasses string  // SYNAPSE_DETECT_CLASSES; empty = detection engine off
+	detectCeiling float64 // SYNAPSE_DETECT_CPU_CEIL_PCT; 0 = no load shedding
+	spoolBytes    int64   // durable telemetry WAL quota
+	metricsAddr   string  // optional private agent metrics listener
+	// inventorySweep turns host inventory from on-demand scan.host work into a continuous
+	// periodic stream (A8, #629). It is default-on and cadence-clamped to avoid busy loops.
 	inventorySweepEnabled  bool
 	inventorySweepInterval time.Duration
 }
@@ -135,8 +136,6 @@ func parseConfig() config {
 	flag.Float64Var(&cfg.detectCeiling, "detect-ceiling", parseCeiling(os.Getenv("SYNAPSE_DETECT_CPU_CEIL_PCT")), "CPU ceiling percent for the detection engine; over it, classes are shed in a defined order (0 = no shedding)")
 	flag.Int64Var(&cfg.spoolBytes, "telemetry-spool-bytes", parsePositiveBytes(os.Getenv("SYNAPSE_TELEMETRY_SPOOL_BYTES"), 512<<20), "maximum bytes retained by the priority telemetry WAL")
 	flag.StringVar(&cfg.metricsAddr, "agent-metrics-addr", os.Getenv("SYNAPSE_AGENT_METRICS_ADDR"), "optional address for private agent Prometheus metrics (for example 127.0.0.1:9465)")
-	flag.StringVar(&cfg.detectionEngagement, "detection-engagement", os.Getenv("SYNAPSE_DETECTION_ENGAGEMENT_ID"), "engagement id receiving signed detection batches; empty keeps detections local")
-	flag.DurationVar(&cfg.detectionShipInterval, "detection-ship-interval", parsePositiveDuration(os.Getenv("SYNAPSE_DETECTION_SHIP_INTERVAL"), time.Second), "idle interval for the independent detection delivery loop")
 	flag.BoolVar(&cfg.inventorySweepEnabled, "inventory-sweep", envEnabledDefaultTrue(os.Getenv("SYNAPSE_INVENTORY_SWEEP_ENABLED")), "ship host inventory continuously on a cadence (A8, #629); on by default")
 	flag.DurationVar(&cfg.inventorySweepInterval, "inventory-sweep-interval", parsePositiveDuration(os.Getenv("SYNAPSE_INVENTORY_SWEEP_INTERVAL"), time.Hour), "cadence of the continuous host-inventory sweep (clamped to a floor)")
 	flag.Parse()
@@ -165,21 +164,33 @@ func (r *runner) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Agent-side detection engine (#422): a continuous background observer, separate from the
-	// per-work-order inventory cycle below. Best-effort — it never blocks or fails the inventory loop.
-	// It is given the enrolled credential so its events carry the canonical AgentID, not the display
-	// name (D1 fix, #606).
-	r.startDetection(ctx, cred)
-	// Continuous host-inventory sweep (#629, A8): a background stream, separate from the per-work-order
-	// scan.host cycle below, so a control plane always has a fresh inventory to re-evaluate against new
-	// advisories without a manual re-scan. Best-effort — it never blocks or fails the work-order loop.
+	// A8 continuous host-inventory sweep is best-effort and independent from the
+	// scan.host work-order loop. A3 still gates telemetry observation/signing on
+	// the canonical server-provided AssetID below.
 	r.startInventorySweep(ctx, cred)
+	// A0.1 requires the canonical server-provided asset binding before telemetry
+	// observation/signing starts. A persisted binding from an earlier host sync can
+	// start immediately; a first enrolment waits until its first successful host sync.
+	detectionStarted := false
+	if cred.AssetID != "" {
+		r.startDetection(ctx, cred)
+		detectionStarted = true
+	}
 	for {
 		if err := r.cycle(ctx, cred); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return err
 			}
 			log.Printf("cycle error (will retry): %v", err)
+		}
+		// handle may have learned and durably persisted the canonical AssetID. Reload
+		// after every cycle so the transport starts exactly once with the server binding.
+		if current, ok := r.store.Load(); ok && current.AgentID == cred.AgentID {
+			cred = current
+		}
+		if !detectionStarted && cred.AssetID != "" {
+			r.startDetection(ctx, cred)
+			detectionStarted = true
 		}
 		if r.cfg.once {
 			return nil
@@ -259,10 +270,26 @@ func (r *runner) handle(ctx context.Context, cred fleetclient.Credential, o flee
 		_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "buffer inventory: "+err.Error())
 		return
 	}
-	// Report the inventory to the control plane, which persists the host into the asset model (#446).
-	// The control plane records the coverage/degraded flags on the asset. If reporting fails the data
-	// did not land, so the order is not a clean success — fail it (the local buffer preserves the data).
-	if err := r.api.SendHostInventory(ctx, cred.Token, inv); err != nil {
+	// Production uses the resolved response path: the authenticated control plane
+	// returns the canonical host AssetID and the agent persists that exact value.
+	// Legacy fakes can keep the old void method without weakening production.
+	if resolved, ok := r.api.(hostInventoryResolvedAPI); ok {
+		resp, reportErr := resolved.SendHostInventoryResolved(ctx, cred.Token, inv)
+		if reportErr != nil {
+			log.Printf("order %s: report inventory: %v", o.ID, reportErr)
+			_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "report inventory: "+reportErr.Error())
+			return
+		}
+		if resp.AssetID == "" {
+			_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "report inventory: control plane returned no canonical asset id")
+			return
+		}
+		if _, err := r.store.PersistAssetBinding(cred, resp.AssetID); err != nil {
+			log.Printf("order %s: persist canonical asset binding: %v", o.ID, err)
+			_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "persist canonical asset binding: "+err.Error())
+			return
+		}
+	} else if err := r.api.SendHostInventory(ctx, cred.Token, inv); err != nil {
 		log.Printf("order %s: report inventory: %v", o.ID, err)
 		_ = r.api.SubmitResult(ctx, cred.Token, o.ID, "failed", "report inventory: "+err.Error())
 		return
@@ -329,18 +356,6 @@ func parsePositiveBytes(value string, def int64) int64 {
 	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || parsed <= 0 {
 		log.Printf("ignoring invalid telemetry spool byte count (want a positive integer)")
-		return def
-	}
-	return parsed
-}
-
-func parsePositiveDuration(value string, def time.Duration) time.Duration {
-	if value == "" {
-		return def
-	}
-	parsed, err := time.ParseDuration(value)
-	if err != nil || parsed <= 0 {
-		log.Printf("ignoring invalid detection ship interval (want a positive duration)")
 		return def
 	}
 	return parsed

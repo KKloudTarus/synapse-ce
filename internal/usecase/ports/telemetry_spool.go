@@ -12,13 +12,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 )
 
-// ErrTelemetrySpoolSaturated is the transport-neutral backpressure signal a
-// producer may match without importing a concrete filesystem implementation.
 var ErrTelemetrySpoolSaturated = errors.New("telemetry spool saturated")
 
-// SpoolRecordKind identifies the durable lane payload without coupling the WAL to a future wire format.
-// Telemetry is produced by A1's canonical normalizer; the other kinds reserve the priority lanes A2 owns
-// so detection, coverage, sensor-health, and response verification never need a second competing spool.
 type SpoolRecordKind string
 
 const (
@@ -29,7 +24,6 @@ const (
 	SpoolRecordResponseVerification SpoolRecordKind = "response_verification"
 )
 
-// Valid reports whether k is one of the version-one spool record kinds.
 func (k SpoolRecordKind) Valid() bool {
 	switch k {
 	case SpoolRecordTelemetry, SpoolRecordDetection, SpoolRecordCoverage,
@@ -40,9 +34,6 @@ func (k SpoolRecordKind) Valid() bool {
 	}
 }
 
-// SpoolItem is an immutable security signal submitted to the durable agent WAL. Payload is the canonical
-// uncompressed representation owned by the producer. A2 preserves these exact bytes; A3 may batch and
-// compress them for transport without changing the durable commitment input.
 type SpoolItem struct {
 	Kind          SpoolRecordKind
 	Priority      fleetagent.DeliveryPriority
@@ -55,8 +46,6 @@ type SpoolItem struct {
 	SchemaVersion int
 }
 
-// Validate enforces bounded-at-the-port semantics that do not depend on a concrete disk implementation.
-// Concrete size limits are Config-owned because operators choose the record and quota budgets.
 func (i SpoolItem) Validate() error {
 	if !i.Kind.Valid() {
 		return fmt.Errorf("%w: unknown spool record kind %q", shared.ErrValidation, i.Kind)
@@ -86,8 +75,6 @@ func (i SpoolItem) Validate() error {
 		return fmt.Errorf("%w: telemetry class %s must-not-shed=%t, got %t", shared.ErrValidation,
 			i.EventClass, telemetry.MustNotShed(i.EventClass), i.MustNotShed)
 	}
-	// The priority contract makes P0..P2 non-sheddable. P3 is the only eviction lane; allowing a caller
-	// to mark a higher-priority item sheddable would turn a producer bug into silent security-data loss.
 	if i.Priority != fleetagent.PriorityP3 && !i.MustNotShed {
 		return fmt.Errorf("%w: %s spool item must be marked must-not-shed", shared.ErrValidation, i.Priority)
 	}
@@ -97,8 +84,6 @@ func (i SpoolItem) Validate() error {
 	return nil
 }
 
-// SpoolRecord is one recovered, ordered WAL entry. The position is assigned durably by the spool; the
-// payload is copied on both ingress and egress so callers cannot mutate queued data through shared memory.
 type SpoolRecord struct {
 	Kind          SpoolRecordKind
 	Position      fleetagent.StreamPosition
@@ -112,7 +97,6 @@ type SpoolRecord struct {
 	SchemaVersion int
 }
 
-// Validate checks both the delivery coordinate and the record metadata recovered from disk.
 func (r SpoolRecord) Validate() error {
 	if err := r.Position.Validate(); err != nil {
 		return err
@@ -124,8 +108,6 @@ func (r SpoolRecord) Validate() error {
 	}.Validate()
 }
 
-// PeekSpoolRequest bounds one priority-ordered read. Zero MaxRecords/MaxBytes asks the implementation to
-// use its safe defaults; a single record may exceed MaxBytes so callers can always make forward progress.
 type PeekSpoolRequest struct {
 	MaxRecords int
 	MaxBytes   int64
@@ -135,15 +117,12 @@ type PeekSpoolRequest struct {
 	OnlyPriority *fleetagent.DeliveryPriority
 }
 
-// SpoolACK is the highest contiguous record sequence the control plane durably accepted for one priority
-// incarnation. Epoch is mandatory: an ACK from before a reboot must never delete a new incarnation's data.
 type SpoolACK struct {
 	Priority fleetagent.DeliveryPriority
 	Epoch    uint64
 	Through  uint64
 }
 
-// Validate rejects ambiguous or malformed ACK coordinates.
 func (a SpoolACK) Validate() error {
 	if !a.Priority.Valid() {
 		return fmt.Errorf("%w: unknown ACK priority %d", shared.ErrValidation, int(a.Priority))
@@ -154,22 +133,16 @@ func (a SpoolACK) Validate() error {
 	return nil
 }
 
-// SpoolACKResult reports the local effect of an idempotent ACK.
 type SpoolACKResult struct {
 	RemovedRecords int
 	ReclaimedBytes int64
 	HighestACKed   uint64
 }
 
-// SpoolGapReason is why a sequence or physical WAL interval cannot be delivered. These labels are stable
-// telemetry for A3/A6; Detail is deliberately not part of the contract because filesystem errors may
-// contain sensitive host paths.
 type SpoolGapReason string
 
 const (
-	SpoolGapQuotaEviction SpoolGapReason = "quota_eviction"
-	// SpoolGapQuotaBackpressure records that a non-sheddable producer reached
-	// the disk ceiling and was forced to stop/retry instead of silently dropping.
+	SpoolGapQuotaEviction     SpoolGapReason = "quota_eviction"
 	SpoolGapQuotaBackpressure SpoolGapReason = "quota_backpressure"
 	SpoolGapCorruptFrame      SpoolGapReason = "corrupt_frame"
 	SpoolGapTornWrite         SpoolGapReason = "torn_write"
@@ -178,7 +151,6 @@ const (
 	SpoolGapStateRecovery     SpoolGapReason = "state_recovery"
 )
 
-// Valid reports whether r is a defined durable gap reason.
 func (r SpoolGapReason) Valid() bool {
 	switch r {
 	case SpoolGapQuotaEviction, SpoolGapQuotaBackpressure, SpoolGapCorruptFrame, SpoolGapTornWrite,
@@ -189,9 +161,11 @@ func (r SpoolGapReason) Valid() bool {
 	}
 }
 
-// SpoolGap is the agent-side, durable loss object. KnownSequence=false is reserved for damage so early in
-// a frame that even its coordinate could not be trusted; it remains queryable and makes coverage
-// incomplete without fabricating a sequence. A3 maps these records to the server's persisted gap model.
+// SpoolGap is the durable local loss object A3 must transport. FromAt/ToAt were
+// added after the original journal format; legacy records with both fields zero use
+// OccurredAt as a point span so old journals remain readable. New writers always set
+// the full span and coalescing extends ToAt, preventing a long loss interval from
+// collapsing to one timestamp in retro-hunt coverage.
 type SpoolGap struct {
 	ID            shared.ID
 	Priority      fleetagent.DeliveryPriority
@@ -202,9 +176,20 @@ type SpoolGap struct {
 	Reason        SpoolGapReason
 	Count         uint64
 	OccurredAt    time.Time
+	FromAt        time.Time `json:",omitempty"`
+	ToAt          time.Time `json:",omitempty"`
 }
 
-// Validate checks an honest gap: exact ranges when known, explicit unknown coordinates otherwise.
+// TimeBounds returns the normalized observed/loss interval. Legacy gaps that predate
+// FromAt/ToAt fall back to OccurredAt for backward-compatible journal recovery.
+func (g SpoolGap) TimeBounds() (time.Time, time.Time) {
+	if g.FromAt.IsZero() && g.ToAt.IsZero() {
+		at := g.OccurredAt.UTC()
+		return at, at
+	}
+	return g.FromAt.UTC(), g.ToAt.UTC()
+}
+
 func (g SpoolGap) Validate() error {
 	if g.ID.IsZero() {
 		return fmt.Errorf("%w: spool gap has no id", shared.ErrValidation)
@@ -220,6 +205,13 @@ func (g SpoolGap) Validate() error {
 	}
 	if g.OccurredAt.IsZero() {
 		return fmt.Errorf("%w: spool gap has no timestamp", shared.ErrValidation)
+	}
+	if (g.FromAt.IsZero()) != (g.ToAt.IsZero()) {
+		return fmt.Errorf("%w: spool gap time bounds must be both set or both unset", shared.ErrValidation)
+	}
+	fromAt, toAt := g.TimeBounds()
+	if fromAt.IsZero() || toAt.IsZero() || toAt.Before(fromAt) {
+		return fmt.Errorf("%w: spool gap has invalid time bounds", shared.ErrValidation)
 	}
 	if g.Count == 0 {
 		return fmt.Errorf("%w: spool gap count must be positive", shared.ErrValidation)
@@ -237,7 +229,21 @@ func (g SpoolGap) Validate() error {
 	return nil
 }
 
-// SpoolPriorityStats is a stable snapshot for one delivery lane.
+// SameSnapshot compares the exact reportable state of one durable gap. It deliberately
+// ignores time.Time's internal monotonic/location representation and compares instants.
+// AckGap uses this to avoid deleting a gap that grew while its older snapshot was in flight.
+func (g SpoolGap) SameSnapshot(other SpoolGap) bool {
+	if g.ID != other.ID || g.Priority != other.Priority || g.Epoch != other.Epoch ||
+		g.FromSequence != other.FromSequence || g.ToSequence != other.ToSequence ||
+		g.KnownSequence != other.KnownSequence || g.Reason != other.Reason || g.Count != other.Count ||
+		!g.OccurredAt.Equal(other.OccurredAt) {
+		return false
+	}
+	gf, gt := g.TimeBounds()
+	of, ot := other.TimeBounds()
+	return gf.Equal(of) && gt.Equal(ot)
+}
+
 type SpoolPriorityStats struct {
 	Priority      fleetagent.DeliveryPriority
 	Records       int64
@@ -257,13 +263,10 @@ type SpoolEpochACK struct {
 	HighestACKed uint64
 }
 
-// SpoolStats is both an operator query and the source for the agent Prometheus collector.
 type SpoolStats struct {
-	Priorities   []SpoolPriorityStats
-	EpochACKs    []SpoolEpochACK
-	TotalRecords int64
-	// TotalBytes includes WAL records and GapBytes; GapBytes is exposed
-	// separately as the loss-evidence subset of the bounded spool quota.
+	Priorities       []SpoolPriorityStats
+	EpochACKs        []SpoolEpochACK
+	TotalRecords     int64
 	TotalBytes       int64
 	GapRecords       int64
 	GapBytes         int64
@@ -273,15 +276,17 @@ type SpoolStats struct {
 	FsyncTotal       time.Duration
 }
 
-// TelemetrySpool is the durable agent-side handoff between observation and transport. Implementations
-// must be safe for concurrent producers, preserve priority order, and make every accepted item either
-// readable until ACKed or represented by a durable SpoolGap.
 type TelemetrySpool interface {
 	Enqueue(ctx context.Context, item SpoolItem) (fleetagent.StreamPosition, error)
 	Peek(ctx context.Context, req PeekSpoolRequest) ([]SpoolRecord, error)
 	Ack(ctx context.Context, ack SpoolACK) (SpoolACKResult, error)
 	Flush(ctx context.Context) error
 	Gaps(ctx context.Context) ([]SpoolGap, error)
+	// AckGap removes a local gap only if the current durable object still exactly
+	// matches the snapshot that the server acknowledged. false,nil means the gap
+	// changed (usually coalesced more loss) while the report was in flight and must
+	// be sent again; an already-absent gap is an idempotent true,nil.
+	AckGap(ctx context.Context, reported SpoolGap) (bool, error)
 	Stats(ctx context.Context) (SpoolStats, error)
 	Close() error
 }

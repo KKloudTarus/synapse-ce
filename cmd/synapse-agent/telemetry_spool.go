@@ -32,13 +32,29 @@ func (r *runner) telemetrySpoolDir() string {
 	return filepath.Join(r.cfg.stateDir, "telemetry-spool")
 }
 
+// telemetrySpoolExists distinguishes a genuinely empty/off agent from one that
+// has durable A2 state left by a previous run. Transport must resume that backlog
+// even when detection is now disabled by configuration.
+func (r *runner) telemetrySpoolExists() bool {
+	info, err := os.Stat(r.telemetrySpoolDir())
+	return err == nil && info.IsDir()
+}
+
 func (r *runner) openTelemetrySpool(ctx context.Context, cred fleetclient.Credential) (*spool.Spool, agentspool.SensorIdentity, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, agentspool.SensorIdentity{}, err
 	}
 	agentID := shared.ID(strings.TrimSpace(cred.AgentID))
+	assetID := shared.ID(strings.TrimSpace(cred.AssetID))
 	if agentID.IsZero() {
 		return nil, agentspool.SensorIdentity{}, errors.New("enrolled credential has no canonical agent id")
+	}
+	if assetID.IsZero() {
+		return nil, agentspool.SensorIdentity{}, errors.New("control plane has not established the canonical telemetry asset binding")
+	}
+	session := fleetagent.CanonicalSessionID(agentID)
+	if session == "" {
+		return nil, agentspool.SensorIdentity{}, errors.New("cannot derive canonical agent session")
 	}
 	bootID, err := currentBootID()
 	if err != nil {
@@ -46,7 +62,7 @@ func (r *runner) openTelemetrySpool(ctx context.Context, cred fleetclient.Creden
 	}
 	cfg := spool.DefaultConfig()
 	cfg.Dir = r.telemetrySpoolDir()
-	cfg.Session = fleetagent.SessionID(agentID)
+	cfg.Session = session
 	cfg.Boot = fleetagent.BootID(bootID)
 	cfg.MaxBytes = r.cfg.spoolBytes
 	if cfg.MaxBytes < 1<<20 {
@@ -67,7 +83,7 @@ func (r *runner) openTelemetrySpool(ctx context.Context, cred fleetclient.Creden
 		return nil, agentspool.SensorIdentity{}, err
 	}
 	identity := agentspool.SensorIdentity{
-		AgentID: agentID, AssetID: agentID, AgentSession: agentID,
+		AgentID: agentID, AssetID: assetID, AgentSession: shared.ID(session),
 		BootID: bootID, SensorID: agentSensorID, SensorVersion: agentSensorVersion,
 	}
 	return durable, identity, nil
@@ -91,30 +107,40 @@ func currentBootID() (shared.ID, error) {
 	return id, nil
 }
 
-func (r *runner) startSpoolMetrics(ctx context.Context, durable *spool.Spool) error {
+// startSpoolMetrics returns a completion signal so the WAL owner can wait for
+// the HTTP collector to stop before closing the spool it scrapes.
+func (r *runner) startSpoolMetrics(ctx context.Context, durable *spool.Spool) (<-chan struct{}, error) {
 	address := strings.TrimSpace(r.cfg.metricsAddr)
 	if address == "" {
-		return nil
+		return closedTelemetryWorker(), nil
 	}
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	registry := prometheus.NewPedanticRegistry()
 	registry.MustRegister(spool.NewCollector(durable))
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	done := make(chan struct{})
 	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = server.Shutdown(shutdownCtx)
-	}()
-	go func() {
-		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("metrics listener stopped: %v", err)
+		defer close(done)
+		serveErr := make(chan error, 1)
+		go func() { serveErr <- server.Serve(listener) }()
+		select {
+		case err := <-serveErr:
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("metrics listener stopped: %v", err)
+			}
+		case <-ctx.Done():
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = server.Shutdown(shutdownCtx)
+			cancel()
+			if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("metrics listener stopped: %v", err)
+			}
 		}
 	}()
-	return nil
+	return done, nil
 }

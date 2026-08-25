@@ -72,7 +72,7 @@ func readGapJournal(f *os.File) ([]ports.SpoolGap, int64, error) {
 			return gaps, offset, nil
 		}
 		if errors.Is(err, io.ErrUnexpectedEOF) {
-			return gaps, offset, nil // a crash before Sync: safe to truncate
+			return gaps, offset, nil
 		}
 		if err != nil {
 			return nil, offset, fmt.Errorf("read gap journal header: %w", err)
@@ -107,7 +107,15 @@ func readGapJournal(f *os.File) ([]ports.SpoolGap, int64, error) {
 	}
 }
 
+func normalizeGapTimes(gap *ports.SpoolGap) {
+	if gap.FromAt.IsZero() && gap.ToAt.IsZero() && !gap.OccurredAt.IsZero() {
+		at := gap.OccurredAt.UTC()
+		gap.FromAt, gap.ToAt = at, at
+	}
+}
+
 func (s *Spool) appendGapLocked(gap ports.SpoolGap) error {
+	normalizeGapTimes(&gap)
 	if err := gap.Validate(); err != nil {
 		return err
 	}
@@ -161,9 +169,15 @@ func (s *Spool) recordP3LossLocked(reason ports.SpoolGapReason) error {
 			return s.failLocked(errors.New("P3 coalesced gap count overflow"))
 		}
 		gap.Count++
+		now := s.cfg.Now().UTC()
+		fromAt, _ := gap.TimeBounds()
+		gap.FromAt = fromAt
+		gap.ToAt = now
+		if gap.ToAt.Before(gap.FromAt) {
+			gap.ToAt = gap.FromAt
+		}
 		s.gapDirty = true
 		s.gapPending++
-		now := s.cfg.Now().UTC()
 		if s.gapPending >= gapCoalesceBatch || (!s.lastGapSync.IsZero() && now.Sub(s.lastGapSync) >= s.cfg.BatchInterval) {
 			return s.flushGapJournalLocked()
 		}
@@ -198,6 +212,7 @@ func (s *Spool) flushGapJournalLocked() error {
 	started := s.cfg.Now()
 	var snapshot bytes.Buffer
 	for _, gap := range s.gaps {
+		normalizeGapTimes(&gap)
 		frame, err := encodeGapFrame(gap)
 		if err != nil {
 			return err
@@ -281,6 +296,7 @@ func writeExclusiveSyncedFile(path string, data []byte, mode os.FileMode) error 
 func compactGaps(in []ports.SpoolGap) []ports.SpoolGap {
 	out := make([]ports.SpoolGap, 0, len(in))
 	for _, gap := range in {
+		normalizeGapTimes(&gap)
 		merged := false
 		for index := len(out) - 1; index >= 0; index-- {
 			if mergeGap(&out[index], gap) {
@@ -299,25 +315,34 @@ func mergeGap(current *ports.SpoolGap, next ports.SpoolGap) bool {
 	if current.Priority != next.Priority || current.Epoch != next.Epoch || current.Reason != next.Reason || current.KnownSequence != next.KnownSequence {
 		return false
 	}
+	currentFrom, currentTo := current.TimeBounds()
+	nextFrom, nextTo := next.TimeBounds()
 	if !current.KnownSequence {
 		if ^uint64(0)-current.Count < next.Count {
 			return false
 		}
 		current.Count += next.Count
-		return true
+	} else {
+		if next.FromSequence > current.ToSequence && (current.ToSequence == ^uint64(0) || next.FromSequence != current.ToSequence+1) {
+			return false
+		}
+		if current.FromSequence > next.ToSequence && (next.ToSequence == ^uint64(0) || current.FromSequence != next.ToSequence+1) {
+			return false
+		}
+		if next.FromSequence < current.FromSequence {
+			current.FromSequence = next.FromSequence
+		}
+		if next.ToSequence > current.ToSequence {
+			current.ToSequence = next.ToSequence
+		}
+		current.Count = current.ToSequence - current.FromSequence + 1
 	}
-	if next.FromSequence > current.ToSequence && (current.ToSequence == ^uint64(0) || next.FromSequence != current.ToSequence+1) {
-		return false
+	if nextFrom.Before(currentFrom) {
+		currentFrom = nextFrom
 	}
-	if current.FromSequence > next.ToSequence && (next.ToSequence == ^uint64(0) || current.FromSequence != next.ToSequence+1) {
-		return false
+	if nextTo.After(currentTo) {
+		currentTo = nextTo
 	}
-	if next.FromSequence < current.FromSequence {
-		current.FromSequence = next.FromSequence
-	}
-	if next.ToSequence > current.ToSequence {
-		current.ToSequence = next.ToSequence
-	}
-	current.Count = current.ToSequence - current.FromSequence + 1
+	current.FromAt, current.ToAt = currentFrom.UTC(), currentTo.UTC()
 	return true
 }

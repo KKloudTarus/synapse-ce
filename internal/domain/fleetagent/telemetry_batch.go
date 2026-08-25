@@ -43,13 +43,16 @@ type EventRef struct {
 // TelemetryBatchManifest is a sequenced, signed manifest for one shipped telemetry batch (A3, #624). It
 // binds the batch to a stream position (incarnation-aware, so a reboot reset-to-1 is not a replay — the
 // A0.4 delivery contract), carries the three DISTINCT loss counts (Sampled ≠ Truncated ≠ Dropped, per
-// D2/A0.6), and commits to the batch payload. This is the TRANSPORT-integrity + ACK commitment only;
-// the permanent evidence commitment (retention/proof/Merkle) is A5's, not computed here.
+// D2/A0.6), and commits to the batch payload. AgentID/HostID/AssetID/AgentSessionID are carried so the
+// control plane can compare every claimed identity coordinate with its authenticated/server-side binding.
+// This is the TRANSPORT-integrity + ACK commitment only; the permanent evidence commitment
+// (retention/proof/Merkle) is A5's, not computed here.
 type TelemetryBatchManifest struct {
 	ProtocolVersion int
 	SchemaVersion   int
 	BatchID         shared.ID
 	AgentID         shared.ID
+	HostID          shared.ID
 	AssetID         shared.ID
 	StreamID        shared.ID
 	// Position carries Priority, Epoch, Sequence, Session (== the AgentSessionID) and Boot — the
@@ -81,14 +84,14 @@ func (m TelemetryBatchManifest) AgentSessionID() SessionID { return m.Position.S
 // identity, an inconsistent kept-vs-event count, or a bad loss arithmetic — is refused before any
 // signature check or ingest.
 func (m TelemetryBatchManifest) Validate() error {
-	if m.ProtocolVersion < 1 {
-		return fmt.Errorf("%w: telemetry manifest protocol version must be >= 1", shared.ErrValidation)
+	if m.ProtocolVersion != TelemetryProtocolVersion {
+		return fmt.Errorf("%w: unsupported telemetry manifest protocol version %d (want %d)", shared.ErrValidation, m.ProtocolVersion, TelemetryProtocolVersion)
 	}
 	if m.SchemaVersion < 1 {
 		return fmt.Errorf("%w: telemetry manifest schema version must be >= 1", shared.ErrValidation)
 	}
-	if m.BatchID.IsZero() || m.AgentID.IsZero() || m.AssetID.IsZero() || m.StreamID.IsZero() {
-		return fmt.Errorf("%w: telemetry manifest needs batch, agent, asset and stream ids", shared.ErrValidation)
+	if m.BatchID.IsZero() || m.AgentID.IsZero() || m.HostID.IsZero() || m.AssetID.IsZero() || m.StreamID.IsZero() {
+		return fmt.Errorf("%w: telemetry manifest needs batch, agent, host, asset and stream ids", shared.ErrValidation)
 	}
 	if err := m.Position.Validate(); err != nil {
 		return fmt.Errorf("telemetry manifest position: %w", err)
@@ -185,6 +188,7 @@ func TelemetryManifestMessage(m TelemetryBatchManifest) []byte {
 	writeI(m.SchemaVersion)
 	write(m.BatchID.String())
 	write(m.AgentID.String())
+	write(m.HostID.String())
 	write(m.AssetID.String())
 	write(m.StreamID.String())
 	writeU(uint64(m.Position.Priority))

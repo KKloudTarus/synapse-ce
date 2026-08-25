@@ -47,11 +47,13 @@ func isLoopbackHost(host string) bool {
 }
 
 // Credential is a persisted agent identity. Token is a secret: the file is written 0600 and its
-// contents are never logged.
+// contents are never logged. AssetID is the last canonical binding returned by the control plane's
+// host-inventory reconciliation; the agent never derives it from its name or AgentID.
 type Credential struct {
 	AgentID        string `json:"agent_id"`
 	Token          string `json:"token"`
 	CertificatePEM string `json:"certificate_pem,omitempty"`
+	AssetID        string `json:"asset_id,omitempty"`
 }
 
 // CredentialStore persists an agent credential + private key under a state directory. It is shared by
@@ -95,6 +97,21 @@ func (s *CredentialStore) Persist(cred Credential, keyPEM []byte) error {
 		return fmt.Errorf("write credential: %w", err)
 	}
 	return nil
+}
+
+// PersistAssetBinding updates only the server-reconciled canonical asset while retaining
+// all credential material. A missing identity/asset fails closed rather than persisting an
+// unusable telemetry attribution.
+func (s *CredentialStore) PersistAssetBinding(cred Credential, assetID string) (Credential, error) {
+	assetID = strings.TrimSpace(assetID)
+	if strings.TrimSpace(cred.AgentID) == "" || cred.Token == "" || assetID == "" {
+		return Credential{}, errors.New("fleetclient: canonical asset binding is incomplete")
+	}
+	cred.AssetID = assetID
+	if err := s.Persist(cred, nil); err != nil {
+		return Credential{}, err
+	}
+	return cred, nil
 }
 
 // WriteSecret writes secret material and enforces the mode even if the file pre-existed with looser
@@ -185,7 +202,7 @@ func EnsureEnrolled(ctx context.Context, e Enroller, store *CredentialStore, enr
 	if err != nil {
 		return Credential{}, fmt.Errorf("fleetclient: enrol: %w", err)
 	}
-	cred := Credential(resp)
+	cred := Credential{AgentID: resp.AgentID, Token: resp.Token, CertificatePEM: resp.CertificatePEM}
 	if err := store.Persist(cred, keyPEM); err != nil {
 		return Credential{}, err
 	}

@@ -11,42 +11,61 @@ import (
 )
 
 // TelemetryTransportStore persists the AGENT→CONTROL-PLANE transport sequencing state (A3, #624), kept
-// deliberately separate from the columnar TelemetryStore: it holds per-stream delivery bookkeeping
-// (the highest-contiguous ACK snapshot) keyed by the incarnation-aware (AgentID, StreamID, Epoch), which
-// the columnar (host, class, sequence) store does not model. It is the durable home for the A0.4 AckLedger.
-// Transport gaps are NOT stored: ListGaps derives them from the same snapshot, so the ACK is the single
-// source of truth and a filled gap can never linger as a phantom. Every method is keyed by the AUTHENTICATED
-// agent id (never an agent-chosen wire field) and tenant-scoped from the ctx.
+// deliberately separate from the columnar TelemetryStore. It owns delivery identity, immutable
+// per-sequence commitments, highest-contiguous ACK state, explicit coverage gaps, first-class agent-origin
+// spool-loss reports, and the server-authoritative host-asset binding. Every operation is tenant-scoped
+// from ctx; ingest keys it by the AUTHENTICATED agent identity, never by an agent-chosen wire field.
 type TelemetryTransportStore interface {
+	TelemetryDeliveryGapReader
+	TelemetryAgentGapStore
+	TelemetryAssetBindingStore
 	// StreamState returns the persisted delivery state for (agentID, streamID, epoch): the highest-contiguous
-	// acknowledged sequence, the received-but-not-yet-contiguous sequences, and the optimistic-concurrency
-	// version. A stream/epoch never seen returns a zero state (Contiguous=0, Version=0), not an error.
+	// acknowledged sequence, received-but-not-yet-contiguous sequences, and optimistic-concurrency version.
+	// A stream/epoch never seen returns a zero state (Contiguous=0, Version=0), not an error.
 	StreamState(ctx context.Context, agentID, streamID shared.ID, epoch uint64) (TelemetryStreamState, error)
-	// SaveStreamState persists the recomputed delivery state under optimistic concurrency: it writes only if
-	// the stored version still equals state.Version (else it returns shared.ErrConflict and the caller retries),
-	// so two concurrent batches for one (agent, stream, epoch) cannot lose-update the ACK. It is the sole
-	// writer of ACK state; the usecase computes it from an AckLedger and writes it back under the ctx tenant.
+	// SaveStreamState persists the recomputed delivery state under optimistic concurrency, so concurrent
+	// batches for one stream cannot lose-update the ACK. The use case computes the state from AckLedger.
 	SaveStreamState(ctx context.Context, state TelemetryStreamState) error
-	// MaxEpoch returns the highest epoch this (agent, stream) has state for (0 if none), so ingest can reject
-	// a stale incarnation — a batch addressing an epoch below one the stream has already advanced past.
+	// MaxEpoch returns the highest epoch seen for (agent, stream), or zero when none exists, so ingest can
+	// reject a stale incarnation after the stream has advanced.
 	MaxEpoch(ctx context.Context, agentID, streamID shared.ID) (uint64, error)
-	// ListGaps returns the open transport gaps for (agent, stream), DERIVED from the persisted ACK snapshots
-	// (contiguous + pending → AckLedger.Gaps()) across all epochs, so a hunt/coverage query learns the window
-	// is lossy from the same source of truth the ACK uses — a filled gap disappears automatically.
+	// ListGaps returns the currently open inferred transport gaps for (agent, stream). Persisted gap history
+	// is reconciled against ACK state so a filled range no longer appears open.
 	ListGaps(ctx context.Context, agentID, streamID shared.ID) ([]TelemetryGap, error)
-	// IngestBatchEvents durably persists the shipped raw telemetry events of one accepted batch, keyed by the
-	// incarnation-aware (agentID, streamID, epoch, sequence, eventID). Idempotent: a re-delivered batch stores
-	// each event at most once. Returns how many events were newly stored. The bytes are stored opaque +
-	// content-addressed by digest; interpretation/columnar-hunt is a later concern.
+	// CommitBatch durably commits one immutable batch coordinate before ACK state advances. Reusing a
+	// coordinate with different batch identity/content conflicts; an identical retry is idempotent.
+	CommitBatch(ctx context.Context, batch TelemetryEventBatch) error
+	// IngestBatchEvents persists verified raw telemetry bytes idempotently by incarnation-aware delivery
+	// coordinate plus event id, returning the number of newly stored events.
 	IngestBatchEvents(ctx context.Context, batch TelemetryEventBatch) (int, error)
-	// CountBatchEvents returns how many events are stored for (agentID, streamID, epoch, sequence) — for tests
-	// and idempotency assertions.
+	// CountBatchEvents reports the number of events durably stored for one batch coordinate; used for
+	// idempotency assertions and recovery checks.
 	CountBatchEvents(ctx context.Context, agentID, streamID shared.ID, epoch, sequence uint64) (int, error)
 }
 
+// TelemetryDeliveryGapReader is the narrow coverage-honesty view consumed by retro-hunt. The filter is
+// tenant-scoped from ctx and windows gaps by observed-time OVERLAP, not by detection wall-clock. It
+// includes both open delivery holes and durable agent-origin loss records.
+type TelemetryDeliveryGapReader interface {
+	QueryDeliveryGaps(ctx context.Context, q TelemetryGapQuery) ([]TelemetryGap, error)
+}
+
+// TelemetryGapQuery filters transport coverage gaps. Empty agent/asset and nil priority are wildcards;
+// Since/Until use overlap semantics against the source-observed gap span.
+type TelemetryGapQuery struct {
+	AgentID  shared.ID
+	AssetID  shared.ID
+	Priority *fleetagent.DeliveryPriority
+	Since    time.Time
+	Until    time.Time
+}
+
 // TelemetryEventBatch is one accepted batch's raw events to persist durably, already verified against the
-// signed manifest (identity, key, schema, per-event digest) by the ingest usecase.
+// signed manifest (authenticated identity, key, schema, per-event digest, and immutable batch commitment)
+// by the ingest use case.
 type TelemetryEventBatch struct {
+	BatchID       shared.ID
+	PayloadDigest string
 	AgentID       shared.ID
 	StreamID      shared.ID
 	AssetID       shared.ID
@@ -57,7 +76,7 @@ type TelemetryEventBatch struct {
 }
 
 // StoredTelemetryEvent is one raw telemetry event persisted by the transport store: its stable id, class,
-// content digest (matched against the manifest), opaque shipped bytes, and source time.
+// content digest (matched against the signed manifest), opaque shipped bytes, and source-observed time.
 type StoredTelemetryEvent struct {
 	EventID    shared.ID
 	Class      detection.Class
@@ -66,8 +85,11 @@ type StoredTelemetryEvent struct {
 	ObservedAt time.Time
 }
 
-// Validate checks the event batch is well-formed and internally consistent.
+// Validate checks that the immutable batch commitment and every stored event are well formed.
 func (b TelemetryEventBatch) Validate() error {
+	if b.BatchID.IsZero() || b.PayloadDigest == "" {
+		return fmt.Errorf("%w: telemetry event batch needs batch id and payload digest", shared.ErrValidation)
+	}
 	if b.AgentID.IsZero() || b.StreamID.IsZero() || b.AssetID.IsZero() {
 		return fmt.Errorf("%w: telemetry event batch needs agent, stream and asset ids", shared.ErrValidation)
 	}
@@ -76,6 +98,9 @@ func (b TelemetryEventBatch) Validate() error {
 	}
 	if b.SchemaVersion < 1 {
 		return fmt.Errorf("%w: telemetry event batch schema version must be >= 1", shared.ErrValidation)
+	}
+	if len(b.Events) == 0 {
+		return fmt.Errorf("%w: telemetry event batch needs at least one event", shared.ErrValidation)
 	}
 	for i, e := range b.Events {
 		if e.EventID.IsZero() {
@@ -90,30 +115,29 @@ func (b TelemetryEventBatch) Validate() error {
 		if len(e.Payload) == 0 {
 			return fmt.Errorf("%w: telemetry event[%d] has no payload", shared.ErrValidation, i)
 		}
+		if e.ObservedAt.IsZero() {
+			return fmt.Errorf("%w: telemetry event[%d] has no observed-at", shared.ErrValidation, i)
+		}
 	}
 	return nil
 }
 
-// TelemetryStreamState is the durable AckLedger snapshot for one (AgentID, StreamID, Epoch): the highest
-// sequence with no hole beneath it (the ACK returned to the agent so it can delete acked batches), plus the
-// received sequences ABOVE the contiguous mark that are waiting for their gap to fill. Rehydrating an
-// AckLedger from this state and Observe-ing a new sequence recomputes both fields deterministically. Version
-// is the optimistic-concurrency token: read it with the state, write it back unchanged; SaveStreamState
-// accepts the write only if the store still holds that version.
+// TelemetryStreamState is the durable AckLedger snapshot for one (AgentID, StreamID, Epoch): Contiguous
+// is the highest sequence with no hole beneath it, Pending are received sequences above that mark waiting
+// for predecessors, and Version is the optimistic-concurrency token used by SaveStreamState.
 type TelemetryStreamState struct {
 	AgentID    shared.ID
 	StreamID   shared.ID
 	Epoch      uint64
 	Contiguous uint64
 	// Pending are received sequences strictly above Contiguous whose predecessors have not all arrived;
-	// bounded by the ingest forward-gap cap. Empty when the stream is fully contiguous.
+	// the ingest forward-gap cap bounds this set.
 	Pending   []uint64
 	Version   uint64
 	UpdatedAt time.Time
 }
 
-// Validate checks the state is well-formed: a real agent/stream/epoch and no pending sequence at or below the
-// contiguous mark (which would be a contradiction — a contiguous sequence is not pending).
+// Validate checks that the stream identity is real and that no pending sequence contradicts Contiguous.
 func (s TelemetryStreamState) Validate() error {
 	if s.AgentID.IsZero() {
 		return fmt.Errorf("%w: telemetry stream state has no agent id", shared.ErrValidation)
@@ -132,23 +156,25 @@ func (s TelemetryStreamState) Validate() error {
 	return nil
 }
 
-// TelemetryGap is a DERIVED transport gap: a run of batch sequences that has not arrived for a stream
-// incarnation, computed on read from the ACK snapshot so a hunt over the window learns it is lossy from the
-// same source of truth the ACK uses. It is never persisted, so a gap that fills simply stops being returned.
+// TelemetryGap is a coverage window surfaced to retro-hunt. Inferred delivery holes carry the missing
+// transport-batch FromSequence..ToSequence coordinates; unknown-coordinate agent-origin loss keeps those
+// fields zero. FromAt..ToAt is source-observed time, not control-plane receipt time.
 type TelemetryGap struct {
 	AgentID      shared.ID
+	AssetID      shared.ID
 	StreamID     shared.ID
+	Priority     fleetagent.DeliveryPriority
 	Epoch        uint64
-	FromSequence uint64 // first missing sequence (inclusive)
-	ToSequence   uint64 // last missing sequence (inclusive)
+	FromSequence uint64
+	ToSequence   uint64
+	FromAt       time.Time
+	ToAt         time.Time
+	DetectedAt   time.Time
 }
 
-// LoadAckLedger rehydrates an AckLedger from the persisted state so the usecase can Observe a new
-// sequence and recompute (Contiguous, Pending) with the exact A0.4 semantics.
+// LoadAckLedger rehydrates the persisted snapshot without observing every sequence below Contiguous.
 func (s TelemetryStreamState) LoadAckLedger() *fleetagent.AckLedger {
 	ledger := fleetagent.NewAckLedger()
-	// Seeding: observe every contiguous sequence [1..Contiguous] would be O(n); instead the AckLedger
-	// exposes a seed constructor. We reconstruct by observing the pending set on top of a contiguous base.
 	ledger.SeedContiguous(s.Contiguous)
 	for _, seq := range s.Pending {
 		ledger.Observe(seq)
@@ -156,8 +182,7 @@ func (s TelemetryStreamState) LoadAckLedger() *fleetagent.AckLedger {
 	return ledger
 }
 
-// GapsFrom derives the open transport gaps for a stream incarnation from its ACK snapshot, so both the
-// store impls and callers compute gaps identically from the single source of truth.
+// GapsFrom derives the open missing transport-batch ranges from the ACK snapshot.
 func (s TelemetryStreamState) GapsFrom() []TelemetryGap {
 	ledger := s.LoadAckLedger()
 	var gaps []TelemetryGap

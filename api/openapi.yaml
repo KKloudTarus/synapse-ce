@@ -7,10 +7,12 @@ info:
     Authorized security testing only: every scan is gated by an engagement's
     scope and authorization window, enforced server-side.
 
-    Auth: all endpoints except `/healthz` and `/readyz` require a bearer token
-    (`Authorization: Bearer <SYNAPSE_API_TOKEN>`). After authentication, every
-    endpoint except the AUP endpoints also requires that the current Acceptable
-    Use Policy has been accepted, else `403`.
+    Auth: human/control-plane endpoints except `/healthz` and `/readyz` require
+    the operator bearer token (`Authorization: Bearer <SYNAPSE_API_TOKEN>`).
+    Agent-plane `/api/v1/fleet/*` endpoints use the enrolled agent bearer credential
+    (or the configured trusted mTLS-proxy certificate path) and pin protocol version 1.
+    After operator authentication, every endpoint except the AUP endpoints also
+    requires that the current Acceptable Use Policy has been accepted, else `403`.
 
     Note: legacy response objects may use PascalCase where they are serialized
     directly from domain structs. Endpoints with explicit response schemas,
@@ -43,7 +45,7 @@ tags:
 - name: remediation-sla
   description: Risk-based remediation deadlines, immutable assessments, policy versions, and human-owned lifecycle governance
 - name: fleet
-  description: Enrolled-agent transport and operator fleet administration
+  description: Agent-plane fleet telemetry transport
 
 paths:
   /healthz:
@@ -1777,99 +1779,6 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {description: Lifecycle version changed since it was loaded, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
 
-  /api/v1/fleet/telemetry:
-    post:
-      tags: [fleet]
-      operationId: ingestFleetTelemetryBatch
-      summary: Verify and ingest a signed canonical telemetry batch
-      description: A3 transport endpoint. Verifies credential identity, key lifecycle, schema, manifest signature, event digests, incarnation-aware sequencing, and returns the highest-contiguous ACK.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [Manifest, Events]
-              properties:
-                Manifest:
-                  type: object
-                  description: fleetagent.TelemetryBatchManifest with a signed StreamPosition and explicit loss counts.
-                  additionalProperties: true
-                Events:
-                  type: array
-                  items:
-                    type: object
-                    additionalProperties: false
-                    required: [EventID, Class, Payload, ObservedAt]
-                    properties:
-                      EventID: {type: string}
-                      Class: {type: string, enum: [process, network, file, privilege]}
-                      Payload: {type: string, contentEncoding: base64, description: Canonical telemetry event bytes}
-                      ObservedAt: {type: string, format: date-time}
-      responses:
-        '200':
-          description: Batch classified and highest-contiguous ACK returned
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [accepted, duplicate, ack, provenance, gap_open]
-                properties:
-                  accepted: {type: boolean}
-                  duplicate: {type: boolean}
-                  ack: {type: integer, format: uint64, minimum: 0}
-                  provenance: {type: string}
-                  gap_open: {type: boolean}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '403': {$ref: '#/components/responses/Forbidden'}
-        '404': {$ref: '#/components/responses/NotFound'}
-
-  /api/v1/fleet/keys:
-    post:
-      tags: [fleet]
-      operationId: registerFleetSigningKey
-      summary: Register an agent content-signing key with proof-of-possession
-      description: The canonical agent identity comes from the bearer credential, never the request body.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/AgentSigningKeyRegistration'}
-      responses:
-        '201':
-          description: Key registered or idempotently re-registered
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/AgentSigningKeyRegistrationResult'}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '403': {$ref: '#/components/responses/Forbidden'}
-        '404': {$ref: '#/components/responses/NotFound'}
-
-  /api/v1/fleet/detections:
-    post:
-      tags: [fleet]
-      operationId: ingestFleetDetectionBatch
-      summary: Verify and ingest an independently signed agent detection batch
-      description: Verifies authenticated agent identity, key lifecycle, signature, exact membership, and per-detection content digests before exactly-once evidence sealing.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/AgentDetectionBatchRequest'}
-      responses:
-        '200':
-          description: The complete batch was admitted or idempotently skipped
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/AgentDetectionBatchResult'}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '403': {$ref: '#/components/responses/Forbidden'}
-        '404': {$ref: '#/components/responses/NotFound'}
-
   /api/v1/agents/{id}/keys:
     parameters:
     - $ref: '#/components/parameters/AgentId'
@@ -1912,13 +1821,222 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
 
+  /api/v1/fleet/keys:
+    post:
+      tags: [fleet]
+      operationId: registerFleetSigningKey
+      summary: Register an agent content-signing key with proof-of-possession
+      description: The canonical agent identity comes from the bearer credential, never the request body.
+      security:
+      - fleetAgentAuth: []
+      parameters:
+      - $ref: '#/components/parameters/FleetProtocolVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentSigningKeyRegistration'}
+      responses:
+        '201':
+          description: Key registered or idempotently re-registered
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentSigningKeyRegistrationResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/fleet/detections:
+    post:
+      tags: [fleet]
+      operationId: ingestFleetDetectionBatch
+      summary: Verify and ingest an independently signed agent detection batch
+      description: Verifies authenticated agent identity, key lifecycle, signature, exact membership, and per-detection content digests before exactly-once evidence sealing.
+      security:
+      - fleetAgentAuth: []
+      parameters:
+      - $ref: '#/components/parameters/FleetProtocolVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentDetectionBatchRequest'}
+      responses:
+        '200':
+          description: The complete batch was admitted or idempotently skipped
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentDetectionBatchResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/fleet/telemetry:
+    post:
+      tags: [fleet]
+      operationId: ingestFleetTelemetry
+      summary: Ingest one signed raw telemetry batch or one signed durable agent gap
+      description: >
+        Agent-plane endpoint for A3 telemetry transport. The authenticated tenant and agent
+        identity are authoritative; AgentID, HostID, enrollment Session, server-derived delivery
+        StreamID, and AssetID carried on the wire are validated against server state and cannot
+        redirect a delivery lane. Telemetry batch manifests and gap reports are purpose-bound
+        Ed25519 signed and fail closed on unknown keys, unsupported protocol/schema versions,
+        digest mismatches, stale incarnations, or invalid identity bindings. Batch delivery is
+        at-least-once and idempotent. The returned ACK is the highest contiguous transport-batch
+        sequence durably ingested. Agent-origin gap coordinates are local WAL-record coordinates:
+        they are persisted for audit and completeness reporting but never advance the transport-batch
+        ACK. Content-Encoding gzip is accepted for either media type. Request decoding is strict;
+        unknown JSON fields fail. A missing Content-Type remains backward-compatible with legacy
+        batch clients and is interpreted as application/json; an explicit unsupported media type fails 415.
+      security:
+      - fleetAgentAuth: []
+      parameters:
+      - $ref: '#/components/parameters/FleetProtocolVersion'
+      - name: Content-Encoding
+        in: header
+        required: false
+        description: Optional wire compression. Omit for raw JSON.
+        schema: {type: string, enum: [gzip]}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [Manifest, Events]
+              properties:
+                Manifest:
+                  type: object
+                  additionalProperties: false
+                  required: [ProtocolVersion, SchemaVersion, BatchID, AgentID, HostID, AssetID, StreamID, Position, EventTimeMin, EventTimeMax, ObservedCount, KeptCount, SampledOutCount, TruncatedCount, DroppedCount, SamplingPolicyDigest, Events, PayloadDigest, KeyID, Signature]
+                  properties:
+                    ProtocolVersion: {type: integer, const: 1}
+                    SchemaVersion: {type: integer, minimum: 1, maximum: 2}
+                    BatchID: {type: string, minLength: 1}
+                    AgentID: {type: string, minLength: 1}
+                    HostID: {type: string, minLength: 1}
+                    AssetID: {type: string, minLength: 1}
+                    StreamID: {type: string, minLength: 1, description: Server-derived delivery stream identity; agent choice is rejected}
+                    Position:
+                      type: object
+                      additionalProperties: false
+                      required: [Priority, Epoch, Sequence, Session, Boot]
+                      properties:
+                        Priority: {type: integer, minimum: 0, maximum: 3, description: P0..P3 encoded as 0..3}
+                        Epoch: {type: integer, format: uint64, minimum: 1}
+                        Sequence: {type: integer, format: uint64, minimum: 1, description: Transport-batch sequence within the priority/epoch lane}
+                        Session: {type: string, minLength: 1}
+                        Boot: {type: string, minLength: 1}
+                    PreviousSequence: {type: integer, format: uint64, minimum: 0}
+                    EventTimeMin: {type: string, format: date-time}
+                    EventTimeMax: {type: string, format: date-time}
+                    ObservedCount: {type: integer, minimum: 0}
+                    KeptCount: {type: integer, minimum: 0}
+                    SampledOutCount: {type: integer, minimum: 0}
+                    TruncatedCount: {type: integer, minimum: 0}
+                    DroppedCount: {type: integer, minimum: 0}
+                    SamplingPolicyDigest: {type: string, minLength: 1}
+                    Events:
+                      type: array
+                      items:
+                        type: object
+                        additionalProperties: false
+                        required: [ID, Digest]
+                        properties:
+                          ID: {type: string, minLength: 1}
+                          Digest: {type: string, minLength: 1}
+                    PayloadDigest: {type: string, minLength: 1}
+                    KeyID: {type: string, minLength: 1}
+                    Signature: {type: string, description: "Base64 Ed25519 signature produced by encoding/json for []byte"}
+                Events:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [EventID, Class, Payload, ObservedAt]
+                    properties:
+                      EventID: {type: string, minLength: 1}
+                      Class: {type: string, minLength: 1}
+                      Payload: {type: string, format: byte, description: Base64-encoded event bytes}
+                      ObservedAt: {type: string, format: date-time}
+          application/vnd.synapse.telemetry-gap+json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ProtocolVersion, GapID, AgentID, HostID, AgentSessionID, AssetID, StreamID, Priority, Epoch, KnownSequence, FromSequence, ToSequence, Count, Reason, FromAt, ToAt, KeyID, Signature]
+              properties:
+                ProtocolVersion: {type: integer, const: 1}
+                GapID: {type: string, minLength: 1}
+                AgentID: {type: string, minLength: 1}
+                HostID: {type: string, minLength: 1}
+                AgentSessionID: {type: string, minLength: 1}
+                AssetID: {type: string, minLength: 1}
+                StreamID: {type: string, minLength: 1, description: Server-derived delivery stream identity}
+                Priority: {type: integer, minimum: 0, maximum: 3}
+                Epoch: {type: integer, format: uint64, minimum: 1}
+                KnownSequence: {type: boolean, description: True when the durable loss report has an exact local WAL-record range; this never advances the transport-batch ACK}
+                FromSequence: {type: integer, format: uint64, minimum: 0, description: First lost local WAL-record sequence when KnownSequence is true}
+                ToSequence: {type: integer, format: uint64, minimum: 0, description: Last lost local WAL-record sequence when KnownSequence is true}
+                Count: {type: integer, format: uint64, minimum: 1}
+                Reason: {type: string, enum: [quota_eviction, quota_backpressure, corrupt_frame, torn_write, io_failure, unsynced_tail, state_recovery]}
+                FromAt: {type: string, format: date-time}
+                ToAt: {type: string, format: date-time}
+                KeyID: {type: string, minLength: 1}
+                Signature: {type: string, description: "Base64 Ed25519 signature produced by encoding/json for []byte"}
+      responses:
+        '200':
+          description: Batch persisted/idempotently observed, or signed gap durably acknowledged
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [accepted, duplicate, ack, provenance, gap_open]
+                  properties:
+                    accepted: {type: boolean}
+                    duplicate: {type: boolean}
+                    ack: {type: integer, format: uint64, minimum: 0, description: Highest contiguous durably ingested transport-batch sequence}
+                    provenance: {type: string}
+                    gap_open: {type: boolean}
+                - type: object
+                  additionalProperties: false
+                  required: [acknowledged, gap_id]
+                  properties:
+                    acknowledged: {type: boolean, const: true}
+                    gap_id: {type: string, minLength: 1}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {description: Fleet agent authentication failed, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Replay/incarnation, immutable gap identity, or stream-state conflict, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Encoded or decoded telemetry body exceeds the bounded transport limit, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '415': {description: Unsupported content encoding or explicit media type, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '429': {description: Backpressure; the agent preserves WAL state and retries according to Retry-After, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
+      description: Human/operator API token.
+    fleetAgentAuth:
+      type: http
+      scheme: bearer
+      description: Enrolled fleet-agent bearer credential. A deployment may instead authenticate through its configured trusted mTLS proxy path.
 
   parameters:
+    FleetProtocolVersion:
+      name: X-Synapse-Fleet-Proto
+      in: header
+      required: true
+      description: Fleet transport protocol version. Only version 1 is accepted; unsupported values fail closed.
+      schema: {type: string, const: "1"}
     EngagementId:
       name: id
       in: path

@@ -10,11 +10,19 @@ static pillars reason about.
 The fleet is off by default and needs PostgreSQL plus `synapse-worker`. The development Compose stack does not enable fleet routes or run the worker, so `/fleet` shows an error there rather than representative coverage data. Capture a Fleet screenshot only from a deployment with the fleet flags, worker, enrolled demo agents, and sanitized inventory configured; do not publish an error state as product documentation.
 
 ```bash
-SYNAPSE_FLEET_ENABLED=true                # transport + agent-admin routes
-SYNAPSE_FLEET_ASSETS_ENABLED=true         # asset model + attack paths
-SYNAPSE_FLEET_HOST_INGEST_ENABLED=true    # accept host inventory
-SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED=true # accept Kubernetes inventory
+SYNAPSE_FLEET_ENABLED=true                      # transport + agent-admin routes
+SYNAPSE_FLEET_ASSETS_ENABLED=true               # asset model + attack paths
+SYNAPSE_FLEET_HOST_INGEST_ENABLED=true          # accept host inventory
+SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED=true       # accept Kubernetes inventory
+SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED=true     # register purpose-bound agent signing keys
+SYNAPSE_FLEET_DETECTION_INGEST_ENABLED=true     # independently signed P1 detection delivery
+SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED=true     # signed raw telemetry + durable-gap transport
 ```
+
+Telemetry transport needs the fleet transport plus key registration. Keep the telemetry ingest flag off if
+the deployment has not applied the telemetry migrations; the server otherwise fails closed when the
+required persistence or signing-key trust boundary is unavailable. Signed detection delivery similarly
+requires both key registration and detection ingest to be enabled.
 
 ## Agents
 
@@ -119,24 +127,25 @@ then seals each detection exactly once.
 A pending batch coordinate, membership, and engagement attribution are written before the network
 request. If the agent restarts or loses the HTTP response, it retries the same sequence and membership;
 the control plane idempotently skips what was already sealed. Changing the configured engagement while
-a batch is pending fails closed instead of re-attributing it. The local WAL is ACKed only after a
-complete 2xx response, and its per-epoch ACK history lets a reboot finish committing a batch whose WAL
+a batch is pending fails closed instead of re-attributing it. The local P1 WAL is ACKed only after a
+complete 2xx response, and per-epoch ACK history lets a reboot finish committing a batch whose WAL
 records were already reclaimed. Keys rotate before expiry, and one `403` causes one new key registration
-plus a retry of the same pending sequence. A second rejection stops delivery instead of generating keys
-indefinitely.
+plus a retry of the same pending sequence. A second rejection stops that delivery lane instead of
+generating keys indefinitely; the raw telemetry and durable-gap workers remain independent.
 
 ### Durable telemetry spool
 
 Before the detection engine evaluates an eBPF event, the agent normalizes it to the canonical telemetry
 envelope and appends it to a checksummed priority WAL. Confirmed detections enter the same spool at P1.
-The four lanes drain in P0 → P3 order:
+The shared WAL has four priority lanes; dedicated transports select only the lanes they own so one busy
+lane cannot consume another transport's read budget:
 
 | Priority | Signals | Disk-pressure behavior |
 | --- | --- | --- |
 | P0 | response verification, coverage, sensor state | never shed; producer backpressure plus a durable gap record |
-| P1 | confirmed detections | never shed; producer backpressure plus a durable gap record |
-| P2 | privilege changes and critical-file telemetry | never shed; producer backpressure plus a durable gap record |
-| P3 | background process and network telemetry | oldest P3 segment evicted first, only after its exact sequence gap is fsynced |
+| P1 | confirmed detections | never shed; independently signed detection delivery when an engagement is configured |
+| P2 | privilege changes and critical-file telemetry | never shed; A3 raw telemetry delivery |
+| P3 | background process and network telemetry | oldest P3 segment evicted first, only after its loss is durably journaled; A3 raw telemetry delivery |
 
 `SYNAPSE_TELEMETRY_SPOOL_BYTES` sets the WAL-segment quota (default 512 MiB). The small state and gap
 journals are outside that quota so a full data allocation cannot prevent the agent recording why data
@@ -145,9 +154,9 @@ repairs corrupt/torn segments, and continues the current `(priority, epoch, sequ
 kernel reboot changes the Linux boot UUID, advances the epoch, and safely restarts sequence at one.
 
 The WAL is the A2 durability boundary. Confirmed P1 detections have their own signed shipper when an
-engagement is configured; the remaining raw-telemetry drain belongs to A3. Until that transport is
-enabled, P3 rotates within the configured quota while P0/P2 can eventually backpressure. Operators
-should therefore size the quota for the expected disconnected interval.
+engagement is configured. A3 independently drains raw P2/P3 telemetry into signed transport batches and
+ships the durable gap journal. Each worker owns only its lane/state and retains WAL on terminal failure,
+so a rejected detection batch cannot silently delete or stop unrelated raw telemetry evidence.
 
 Set `SYNAPSE_AGENT_METRICS_ADDR=127.0.0.1:9465` to expose `/metrics`. This listener is deliberately off
 by default and has no authentication. Exported series have bounded labels (priority only):
@@ -210,17 +219,54 @@ it, so ship the new public key in a release signed by the old one first.
 For packaging, service integration, and uninstall contracts, see
 [Fleet agent packaging](fleet-agent-packaging.md).
 
-## Telemetry
+## Telemetry transport
 
 Raw telemetry is deliberately isolated behind persistence ports so the finding, judgment, and evidence
 paths never wait on a high-volume store. `ports.TelemetrySpool` is the agent-side WAL boundary;
-`ports.TelemetryStore` is the control-plane columnar boundary. Architecture tests keep both concrete
-stores out of domain packages.
+`ports.TelemetryStore` is the control-plane columnar boundary; the A3 transport store owns delivery
+sequence commitments, highest-contiguous ACK state, and persisted coverage gaps.
+
+With `SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED=true` and
+`SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED=true`, the host agent registers a persisted purpose-bound Ed25519
+key and drains recovered raw P2/P3 telemetry without requiring the detection producer to be running. The
+P1 detection lane remains owned by the independent detection shipper described above. The agent rotates
+the telemetry signing key before expiry and retries transient registration failures instead of disabling
+transport until restart.
+
+```
+POST /api/v1/fleet/keys       register the purpose=telemetry-batch public key + proof of possession
+POST /api/v1/fleet/telemetry  signed telemetry batch or signed durable-gap report
+```
+
+Normal batches use JSON (gzip on the wire). Durable spool-gap reports use the same authenticated endpoint
+with `Content-Type: application/vnd.synapse.telemetry-gap+json`; their Ed25519 commitment is domain-separated
+from batch signatures. The control plane treats the authenticated fleet principal and its reconciled host
+asset as authoritative: supplied agent, host, session, asset, stream, key ID, schema version, and signature
+must all pass validation before persistence. Unsupported schema versions and identity/signature failures
+fail closed and are audited.
+
+Batch ingest is idempotent per stream incarnation and sequence. A reboot advances the epoch, so a legitimate
+reset to sequence one is distinct from replay. The response ACK is the highest sequence with no missing
+predecessor; received sequences above a hole are durable but cannot advance deletion past the hole.
+
+The server persists two different forms of coverage evidence:
+
+- inferred delivery gaps, which close only when their missing sequence range actually arrives;
+- agent-origin spool gaps (quota eviction, backpressure, corruption, torn writes, I/O failure, unsynced tail,
+  or state recovery), which are immutable loss provenance and are **not** resolved by a later delivery ACK.
+
+Retro-hunt coverage reads both sources. Any overlapping open delivery hole or agent-origin loss makes the
+window incomplete instead of silently returning `Complete=true`. Agent-origin gaps survive server restart
+and are tenant-isolated by PostgreSQL RLS.
+
+Network errors, HTTP 429, and 5xx responses retain the local WAL/gap journal and retry with bounded backoff;
+`Retry-After` is honored when present. Terminal 4xx responses retain the durable local evidence but stop the
+transport loop rather than hot-looping a request the server has rejected.
 
 The retention, sampling, and ingest-budget behavior described in the
-[telemetry store ADR](repository/telemetry-store-adr.md) is the accepted design, but the operator
-configuration for the control-plane tier is **not wired yet**. Agent-side durability and its quota are
-wired as described above; A3 still owns transmission from that WAL to the existing columnar ingest.
+[telemetry store ADR](repository/telemetry-store-adr.md) remains the columnar-tier contract; A3 adds the
+live signed delivery path and the coverage-honesty bridge into that tier without changing A5's permanent
+evidence/Merkle scope.
 
 ## Purple coverage
 
