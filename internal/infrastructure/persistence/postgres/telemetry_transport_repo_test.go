@@ -37,7 +37,7 @@ func TestTelemetryTransportRepository(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		bg := context.Background()
-		for _, tbl := range []string{"telemetry_batch_events", "telemetry_stream_positions"} {
+		for _, tbl := range []string{"telemetry_batch_events", "telemetry_batch_commits", "telemetry_transport_gaps", "telemetry_stream_positions"} {
 			for _, tn := range []shared.ID{tenant, other} {
 				_, _ = pool.Exec(bg, `DELETE FROM `+tbl+` WHERE tenant_id=$1`, tn.String())
 			}
@@ -54,12 +54,10 @@ func TestTelemetryTransportRepository(t *testing.T) {
 	agentA := shared.ID("agent-a-" + id)
 	agentB := shared.ID("agent-b-" + id)
 
-	// Zero state for an unseen (agent, stream, epoch): Version 0.
 	if st, err := repo.StreamState(tctx, agentA, stream, 1); err != nil || st.Contiguous != 0 || len(st.Pending) != 0 || st.Version != 0 {
 		t.Fatalf("unseen stream must be zero state: %+v err=%v", st, err)
 	}
 
-	// Save (version 0 → insert) + reload; the stored version advances to 1.
 	want := ports.TelemetryStreamState{AgentID: agentA, StreamID: stream, Epoch: 1, Contiguous: 3, Pending: []uint64{5, 7}, UpdatedAt: now}
 	if err := repo.SaveStreamState(tctx, want); err != nil {
 		t.Fatalf("save stream state: %v", err)
@@ -72,20 +70,17 @@ func TestTelemetryTransportRepository(t *testing.T) {
 		t.Fatalf("reloaded state mismatch: %+v", got)
 	}
 
-	// Gaps are DERIVED from the snapshot: contiguous=3, pending={5,7} ⇒ holes [4,4] and [6,6].
 	gaps, err := repo.ListGaps(tctx, agentA, stream)
 	if err != nil || len(gaps) != 2 || gaps[0].FromSequence != 4 || gaps[0].ToSequence != 4 || gaps[1].FromSequence != 6 || gaps[1].ToSequence != 6 {
-		t.Fatalf("want derived gaps [4,4],[6,6], got %+v err=%v", gaps, err)
+		t.Fatalf("want materialized gaps [4,4],[6,6], got %+v err=%v", gaps, err)
 	}
 
-	// Optimistic concurrency: a save carrying a STALE version must be rejected with ErrConflict.
 	stale := got
-	stale.Version = 0 // pretend we still hold the pre-insert version
+	stale.Version = 0
 	stale.Contiguous, stale.Pending = 99, nil
 	if err := repo.SaveStreamState(tctx, stale); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("stale-version save must conflict, got %v", err)
 	}
-	// The CAS with the CURRENT version wins and clears the pending set (so the derived gaps disappear).
 	got.Contiguous, got.Pending = 7, nil
 	if err := repo.SaveStreamState(tctx, got); err != nil {
 		t.Fatal(err)
@@ -94,10 +89,9 @@ func TestTelemetryTransportRepository(t *testing.T) {
 		t.Fatalf("CAS did not advance state+version: %+v", reloaded)
 	}
 	if gaps, _ := repo.ListGaps(tctx, agentA, stream); len(gaps) != 0 {
-		t.Fatalf("a fully-contiguous stream must have no derived gaps, got %+v", gaps)
+		t.Fatalf("a fully-contiguous stream must have no open gaps, got %+v", gaps)
 	}
 
-	// MaxEpoch reflects the highest epoch with state.
 	if err := repo.SaveStreamState(tctx, ports.TelemetryStreamState{AgentID: agentA, StreamID: stream, Epoch: 4, Contiguous: 1, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
@@ -105,13 +99,24 @@ func TestTelemetryTransportRepository(t *testing.T) {
 		t.Fatalf("MaxEpoch = %d, want 4", max)
 	}
 
-	// Batch events: ingest + idempotent + count.
 	batch := ports.TelemetryEventBatch{
+		BatchID: "batch-1", PayloadDigest: "payload-1",
 		AgentID: agentA, StreamID: stream, AssetID: "as", Epoch: 1, Sequence: 1, SchemaVersion: 1,
 		Events: []ports.StoredTelemetryEvent{
 			{EventID: "e1", Class: detection.ClassProcess, Digest: "d1", Payload: []byte("p1"), ObservedAt: now},
 			{EventID: "e2", Class: detection.ClassNetwork, Digest: "d2", Payload: []byte("p2"), ObservedAt: now},
 		},
+	}
+	if err := repo.CommitBatch(tctx, batch); err != nil {
+		t.Fatalf("first batch commitment: %v", err)
+	}
+	if err := repo.CommitBatch(tctx, batch); err != nil {
+		t.Fatalf("identical batch commitment must be idempotent: %v", err)
+	}
+	conflict := batch
+	conflict.PayloadDigest = "different-payload"
+	if err := repo.CommitBatch(tctx, conflict); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("same delivery sequence with different commitment must conflict, got %v", err)
 	}
 	if n, err := repo.IngestBatchEvents(tctx, batch); err != nil || n != 2 {
 		t.Fatalf("first ingest must store 2, got %d err=%v", n, err)
@@ -123,8 +128,6 @@ func TestTelemetryTransportRepository(t *testing.T) {
 		t.Fatalf("CountBatchEvents = %d, want 2", n)
 	}
 
-	// Cross-agent isolation: a DIFFERENT agent using the SAME StreamID has its OWN stream space within the
-	// tenant — it sees agentA's state as zero and cannot read agentA's events. This is the HIGH-2 fix.
 	if st, _ := repo.StreamState(tctx, agentB, stream, 1); st.Contiguous != 0 || st.Version != 0 {
 		t.Fatalf("sibling agent must see zero state for the same stream id, got %+v", st)
 	}
@@ -135,7 +138,6 @@ func TestTelemetryTransportRepository(t *testing.T) {
 		t.Fatalf("sibling agent must not see agentA's events, got %d", n)
 	}
 
-	// RLS isolation: the other tenant sees none of this stream's transport rows.
 	octx := shared.WithTenant(ctx, other)
 	if gaps, _ := repo.ListGaps(octx, agentA, stream); len(gaps) != 0 {
 		t.Fatalf("cross-tenant must not see gaps, got %d", len(gaps))

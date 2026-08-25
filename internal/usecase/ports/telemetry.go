@@ -133,8 +133,8 @@ type HuntQuery struct {
 }
 
 // HuntResult carries the events a hunt matched plus the HONESTY metadata a hunt must not ignore: whether
-// the window was sampled (and at what rate), whether it is complete, and any sequence gaps intersecting
-// it — so a sampled or lossy window is never presented as the whole truth.
+// the window was sampled (and at what rate), whether it is complete, and every sequence/delivery/loss gap
+// intersecting it — so a sampled or lossy window is never presented as the whole truth.
 type HuntResult struct {
 	Events        []detection.Event
 	RowsScanned   int
@@ -142,6 +142,9 @@ type HuntResult struct {
 	MaxSampleRate int // the worst (largest) sample rate in the window; 1 = fully sampled
 	Complete      bool
 	SequenceGaps  []TelemetrySequenceGap
+	// DeliveryGaps contains A3 transport holes plus durable agent-origin spool-loss windows. Any entry
+	// makes the hunt incomplete even when the columnar sequence itself happens to be contiguous.
+	DeliveryGaps []TelemetryGap
 	// Losses are the first-class Truncated/Dropped records intersecting the window (A0.6). A window with
 	// any loss is never Complete, so a truncated/dropped batch can never be presented as the whole truth.
 	Losses []TelemetryLoss

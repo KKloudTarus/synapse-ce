@@ -7,11 +7,14 @@
 //
 // Compatibility rules:
 //   - Current is the schema this build emits.
-//   - [MinSupported, MaxSupported] is the range a reader accepts. Within the range a reader tolerates
-//     additive fields (a newer minor schema stays readable by an older reader; unknown fields are ignored).
+//   - [MinSupported, MaxSupported] is the range a reader accepts.
+//   - Evolution inside the range is additive at the JSON shape. Readers ignore unknown additive fields;
+//     writers never repurpose or change the meaning/type of an existing field.
+//   - v2 tightens the canonical identity contract: AgentSessionID, BootID, and StreamID, which were
+//     present but compatibility-optional in v1, are mandatory for v2 events. This lets ingest bind a
+//     v2 event to a concrete delivery incarnation while keeping historical v1 readable.
 //   - A version outside the range — or an unset/non-positive version — is REJECTED explicitly by the
-//     ingest gate, never parsed under a guessed shape. The range widens (MaxSupported bumps) only when a
-//     new schema version is actually defined; today only v1 exists.
+//     ingest gate, never parsed under a guessed shape.
 package telemetryschema
 
 import (
@@ -21,12 +24,13 @@ import (
 )
 
 const (
-	// Current is the telemetry schema version this build emits. Bump it when the wire shape changes; it
-	// is deliberately NOT derived from the agent binary version.
-	Current = 1
-	// MinSupported and MaxSupported bound the versions the ingest reader accepts, inclusive.
+	// Current is the telemetry schema version this build emits. It is deliberately NOT derived from
+	// the agent binary version.
+	Current = 2
+	// MinSupported and MaxSupported bound the versions the ingest reader accepts, inclusive. Keeping
+	// v1 in-range is the mixed-fleet compatibility window required by A0.3.
 	MinSupported = 1
-	MaxSupported = 1
+	MaxSupported = 2
 )
 
 // Supported reports whether v is within the accepted [MinSupported, MaxSupported] range.

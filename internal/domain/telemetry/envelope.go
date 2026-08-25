@@ -10,11 +10,12 @@ import (
 
 // SchemaVersion is the current canonical raw-telemetry schema version. It is stamped on every envelope so
 // the schema can evolve (A0.3, #608) without an agent-version coupling; SchemaMin..SchemaMax is the range
-// a reader accepts.
+// a reader accepts. The previous version remains in-range during rollout; v2 makes the concrete delivery
+// incarnation identity mandatory while v1 stays readable for historical compatibility.
 const (
-	SchemaVersion = 1
+	SchemaVersion = 2
 	SchemaMin     = 1
-	SchemaMax     = 1
+	SchemaMax     = 2
 )
 
 // TelemetryEnvelope is the canonical unit of raw telemetry (A1, fixes D4): a class-typed observation plus
@@ -60,8 +61,10 @@ type TelemetryEnvelope struct {
 }
 
 // Validate enforces a well-formed envelope: an accepted schema version, the mandatory identity, a class
-// that matches its payload, and the timestamp ordering invariant. ReceivedAt is optional (zero on the
-// agent, stamped at ingest) but, when present, must not precede ObservedAt.
+// that matches its payload, and the timestamp ordering invariant. v1 tolerates an absent session/boot/stream
+// for historical compatibility; v2 requires all three so the event is attributable to one concrete agent
+// incarnation. ReceivedAt is optional (zero on the agent, stamped at ingest) but, when present, must not
+// precede ObservedAt.
 func (e TelemetryEnvelope) Validate() error {
 	if e.SchemaVersion < SchemaMin || e.SchemaVersion > SchemaMax {
 		return fmt.Errorf("%w: telemetry envelope schema version %d outside [%d,%d]", shared.ErrValidation, e.SchemaVersion, SchemaMin, SchemaMax)
@@ -74,6 +77,17 @@ func (e TelemetryEnvelope) Validate() error {
 	}
 	if e.AssetID.IsZero() {
 		return fmt.Errorf("%w: telemetry envelope has no asset id", shared.ErrValidation)
+	}
+	if e.SchemaVersion >= 2 {
+		if e.AgentSessionID.IsZero() {
+			return fmt.Errorf("%w: telemetry v2 envelope has no agent session id", shared.ErrValidation)
+		}
+		if e.BootID.IsZero() {
+			return fmt.Errorf("%w: telemetry v2 envelope has no boot id", shared.ErrValidation)
+		}
+		if e.StreamID.IsZero() {
+			return fmt.Errorf("%w: telemetry v2 envelope has no source stream id", shared.ErrValidation)
+		}
 	}
 	if e.EventClass != e.Event.Class {
 		return fmt.Errorf("%w: telemetry envelope class %q disagrees with payload class %q", shared.ErrValidation, e.EventClass, e.Event.Class)

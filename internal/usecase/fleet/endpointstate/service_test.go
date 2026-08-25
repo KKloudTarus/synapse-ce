@@ -22,12 +22,17 @@ var svcBase = time.Unix(1_800_000_000, 0).UTC()
 
 func procEnv(eventID string, occ time.Time, entityID shared.ID) telemetry.TelemetryEnvelope {
 	return telemetry.TelemetryEnvelope{
-		SchemaVersion: telemetry.SchemaVersion,
-		EventID:       shared.ID(eventID),
-		EventType:     "process.exec",
-		EventClass:    detection.ClassProcess,
-		AgentID:       shared.ID("agent-s"), AssetID: svcAsset, BootID: shared.ID("boot-s"),
-		OccurredAt: occ, ObservedAt: occ,
+		SchemaVersion:  telemetry.SchemaVersion,
+		EventID:        shared.ID(eventID),
+		EventType:      "process.exec",
+		EventClass:     detection.ClassProcess,
+		AgentID:        shared.ID("agent-s"),
+		AgentSessionID: shared.ID("session-s"),
+		AssetID:        svcAsset,
+		BootID:         shared.ID("boot-s"),
+		StreamID:       shared.ID("stream-s"),
+		OccurredAt:     occ,
+		ObservedAt:     occ,
 		Event: telemetry.TelemetryEvent{Class: detection.ClassProcess, Process: &telemetry.ProcessObservation{
 			Kind: "exec", PID: 100, EntityID: entityID, Comm: "app", Path: "/usr/bin/app",
 		}},

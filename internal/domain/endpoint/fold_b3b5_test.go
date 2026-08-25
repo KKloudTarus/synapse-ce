@@ -12,12 +12,17 @@ import (
 
 func fileEnv(eventID string, occ time.Time, proc shared.ID, op, path string, device, inode uint64, hash string) telemetry.TelemetryEnvelope {
 	return telemetry.TelemetryEnvelope{
-		SchemaVersion: telemetry.SchemaVersion,
-		EventID:       shared.ID(eventID),
-		EventType:     "file." + op,
-		EventClass:    detection.ClassFile,
-		AgentID:       testAgent, AssetID: testAsset, BootID: testBoot,
-		OccurredAt: occ, ObservedAt: occ,
+		SchemaVersion:  telemetry.SchemaVersion,
+		EventID:        shared.ID(eventID),
+		EventType:      "file." + op,
+		EventClass:     detection.ClassFile,
+		AgentID:        testAgent,
+		AgentSessionID: testSession,
+		AssetID:        testAsset,
+		BootID:         testBoot,
+		StreamID:       testStream,
+		OccurredAt:     occ,
+		ObservedAt:     occ,
 		Event: telemetry.TelemetryEvent{Class: detection.ClassFile, File: &telemetry.FileObservation{
 			Op: op, Path: path, Device: device, Inode: inode, ContentHash: hash, ProcessEntityID: proc, Comm: "app",
 		}},
@@ -26,12 +31,17 @@ func fileEnv(eventID string, occ time.Time, proc shared.ID, op, path string, dev
 
 func privEnv(eventID string, occ time.Time, proc shared.ID, kind string, fromUID, toUID int, capName string) telemetry.TelemetryEnvelope {
 	return telemetry.TelemetryEnvelope{
-		SchemaVersion: telemetry.SchemaVersion,
-		EventID:       shared.ID(eventID),
-		EventType:     "privilege." + kind,
-		EventClass:    detection.ClassPrivilege,
-		AgentID:       testAgent, AssetID: testAsset, BootID: testBoot,
-		OccurredAt: occ, ObservedAt: occ,
+		SchemaVersion:  telemetry.SchemaVersion,
+		EventID:        shared.ID(eventID),
+		EventType:      "privilege." + kind,
+		EventClass:     detection.ClassPrivilege,
+		AgentID:        testAgent,
+		AgentSessionID: testSession,
+		AssetID:        testAsset,
+		BootID:         testBoot,
+		StreamID:       testStream,
+		OccurredAt:     occ,
+		ObservedAt:     occ,
 		Event: telemetry.TelemetryEvent{Class: detection.ClassPrivilege, Privilege: &telemetry.PrivilegeObservation{
 			Kind: kind, PID: 1, ProcessEntityID: proc, FromUID: fromUID, ToUID: toUID, Cap: capName, Comm: "app",
 		}},

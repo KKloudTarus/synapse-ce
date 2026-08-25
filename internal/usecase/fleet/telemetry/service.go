@@ -1,11 +1,7 @@
 // Package telemetry is the agent-side raw-telemetry tier's control plane (#424, ADR 0001). It wraps the
 // dedicated ports.TelemetryStore with the honesty contract the columnar tier must uphold: ingest is
-// BOUNDED and BACKPRESSURED (overflow at the store-rate stage, or a lost upstream batch seen as a
-// sequence gap, is reported as a telemetry gap on the affected host — never a silent drop); retention is
-// tiered with AUDITED expiry; a sampled window is never presented as complete; and the three retro-hunt
-// patterns are served, including retro-running a detection rule over the hot window.
-//
-// The columnar store is reached ONLY through the port and appears in no domain type.
+// BOUNDED and BACKPRESSURED; retention is tiered with AUDITED expiry; and retro-hunts carry sampling,
+// loss, columnar-sequence-gap, and A3 delivery-gap completeness metadata.
 package telemetry
 
 import (
@@ -14,49 +10,47 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetryschema"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// Service is the telemetry tier control plane.
+// Service is the telemetry tier control plane. deliveryGaps is optional for legacy/test
+// composition; production A3 wiring supplies it so hunt completeness includes transport loss.
 type Service struct {
-	store  ports.TelemetryStore
-	audit  ports.AuditLogger
-	clock  ports.Clock
-	budget int // max events accepted per Ingest call (the store-rate stage of the coherent ingest budget)
+	store        ports.TelemetryStore
+	deliveryGaps ports.TelemetryDeliveryGapReader
+	audit        ports.AuditLogger
+	clock        ports.Clock
+	budget       int
 }
 
-// NewService validates dependencies. budget > 0 bounds a single ingest; <= 0 is refused (an unbounded
-// telemetry ingest is the failure mode this tier exists to avoid).
+// NewService preserves the original constructor for stores that do not compose A3 transport state.
 func NewService(store ports.TelemetryStore, audit ports.AuditLogger, clock ports.Clock, budget int) (*Service, error) {
+	return NewServiceWithDeliveryGaps(store, nil, audit, clock, budget)
+}
+
+// NewServiceWithDeliveryGaps wires the A3 delivery-gap ledger into retro-hunt completeness.
+// The reader is intentionally a narrow port rather than the whole transport store.
+func NewServiceWithDeliveryGaps(store ports.TelemetryStore, gaps ports.TelemetryDeliveryGapReader, audit ports.AuditLogger, clock ports.Clock, budget int) (*Service, error) {
 	if store == nil || audit == nil || clock == nil {
 		return nil, fmt.Errorf("%w: telemetry service is missing a dependency", shared.ErrValidation)
 	}
 	if budget <= 0 {
 		return nil, fmt.Errorf("%w: telemetry ingest budget must be positive", shared.ErrValidation)
 	}
-	return &Service{store: store, audit: audit, clock: clock, budget: budget}, nil
+	return &Service{store: store, deliveryGaps: gaps, audit: audit, clock: clock, budget: budget}, nil
 }
 
-// IngestReport is the honest outcome of one ingest: how many events were accepted, how many were shed at
-// the store-rate stage, the loss disposition of the batch, and any sequence gap (an upstream —
-// agent/transport — loss made visible). Disposition names the store-stage outcome honestly (A0.6): a
-// truncation is Truncated, a refused never-shed overflow is Dropped, an agent-sampled batch is Sampled —
-// never a truncation relabelled as a sample (D2).
 type IngestReport struct {
 	Accepted    int
-	Dropped     int // shed because the batch exceeded the ingest budget; reported, never silent
+	Dropped     int
 	Disposition telemetry.LossDisposition
 	Gap         *ports.TelemetrySequenceGap
 }
 
-// Ingest admits one batch under the coherent ingest budget. Two stages can report a telemetry gap:
-//   - a sequence gap vs. the last batch stored for this (host, class) — an upstream loss made visible;
-//   - the batch exceeding the store-rate budget — the overflow is shed and reported, never dropped silently.
-//
-// Either gap is audited on the affected host. The accepted prefix is persisted with its sampling rate.
 func (s *Service) Ingest(ctx context.Context, batch ports.TelemetryBatch) (IngestReport, error) {
 	if batch.TenantID == "" || batch.HostID == "" || batch.AgentID == "" || batch.AssetID == "" {
 		return IngestReport{}, fmt.Errorf("%w: telemetry batch needs tenant, host, agent and asset", shared.ErrValidation)
@@ -70,15 +64,9 @@ func (s *Service) Ingest(ctx context.Context, batch ports.TelemetryBatch) (Inges
 	if batch.SampleRate < 1 {
 		return IngestReport{}, fmt.Errorf("%w: telemetry sample rate must be >= 1 (1 = full fidelity)", shared.ErrValidation)
 	}
-	// The wire schema version is declared per batch and validated against the range THIS reader supports
-	// (telemetryschema), independent of the agent version. An unset or out-of-range version is rejected
-	// fail-closed rather than parsed under a guessed shape.
 	if err := telemetryschema.Validate(batch.SchemaVersion); err != nil {
 		return IngestReport{}, err
 	}
-	// The write tenant is the AUTHENTICATED tenant on the context, never a self-declared field on the
-	// wire batch: an agent must not be able to write into another tenant's partition by claiming a
-	// different TenantID. Fail closed if the ctx has no tenant or the batch claims a different one.
 	ctxTenant, ok := shared.TenantFrom(ctx)
 	if !ok {
 		return IngestReport{}, fmt.Errorf("%w: telemetry ingest requires a tenant in context", shared.ErrValidation)
@@ -88,9 +76,6 @@ func (s *Service) Ingest(ctx context.Context, batch ports.TelemetryBatch) (Inges
 	}
 
 	report := IngestReport{}
-
-	// Stage 1: sequence gap (an upstream agent/transport loss). Reported as a telemetry gap, not refused —
-	// telemetry is lossy-tolerant, but the loss must be VISIBLE so a hunt knows the window is incomplete.
 	last, err := s.store.LastSequence(ctx, batch.HostID, batch.Class)
 	if err != nil {
 		return report, fmt.Errorf("telemetry last sequence: %w", err)
@@ -98,8 +83,6 @@ func (s *Service) Ingest(ctx context.Context, batch ports.TelemetryBatch) (Inges
 	if batch.Sequence > last+1 {
 		gap := ports.TelemetrySequenceGap{HostID: batch.HostID, Class: batch.Class, Missing: batch.Sequence - last - 1, LastSeen: last, Incoming: batch.Sequence}
 		report.Gap = &gap
-		// HARD: a gap coverage event that cannot be audited fails the ingest rather than admitting an
-		// unrecorded gap (recordGap no longer swallows the audit-write error — the D2 companion bug).
 		if err := s.recordGap(ctx, "telemetry.sequence_gap", batch, map[string]string{
 			"last_sequence": fmt.Sprint(last), "incoming_sequence": fmt.Sprint(batch.Sequence), "missing": fmt.Sprint(gap.Missing),
 		}); err != nil {
@@ -107,29 +90,17 @@ func (s *Service) Ingest(ctx context.Context, batch ports.TelemetryBatch) (Inges
 		}
 	}
 
-	// Stage 2: store-rate budget — HONEST loss accounting (A0.6, fixes D2). An over-budget batch is NEVER
-	// relabelled as an elevated sample rate. A never-shed class (privilege / sensitive-file) is not
-	// truncated at all: it is refused (back-pressured) and recorded as Dropped, so a security-critical
-	// signal is never silently cut. A sheddable class keeps its prefix but the drop is recorded as a
-	// first-class Truncated loss with a reason — so a hunt sees the window as incomplete from stored data,
-	// not from a lie in the sample rate.
 	accepted := batch
 	events := batch.Events
 	report.Disposition = telemetry.Complete
 	if batch.SampleRate > 1 {
-		report.Disposition = telemetry.Sampled // the agent already sampled; this rides SampleRate on the rows
+		report.Disposition = telemetry.Sampled
 	}
-	// If a sampled batch also overflows, the branches below overwrite Disposition with Truncated/Dropped
-	// (the more actionable outcome). The single-valued report cannot express both; agent-side sampling
-	// stays independently visible via SampleRate on the stored rows (HuntResult.Sampled).
 	if len(events) > s.budget {
 		observed, kept := len(events), s.budget
 		dropped := observed - kept
 
 		if telemetry.MustNotShed(batch.Class) {
-			// Never-shed: refuse the WHOLE batch (nothing stored) and record the loss as Dropped, so the
-			// agent re-sends within budget rather than a security-critical class being silently truncated.
-			// The whole batch is refused, so the honest drop count is `observed`, not just the tail.
 			report.Disposition = telemetry.Dropped
 			report.Accepted = 0
 			report.Dropped = observed
@@ -141,8 +112,6 @@ func (s *Service) Ingest(ctx context.Context, batch ports.TelemetryBatch) (Inges
 			}); err != nil {
 				return report, fmt.Errorf("record telemetry drop: %w", err)
 			}
-			// Audit the drop (the domain's most-severe disposition) — hard, like the overflow audit: a
-			// security-critical class being refused must leave an actor-attributed trail or the ingest fails.
 			if err := s.recordGap(ctx, "telemetry.drop", batch, map[string]string{
 				"budget": fmt.Sprint(s.budget), "received": fmt.Sprint(observed), "dropped": fmt.Sprint(observed),
 				"disposition": string(telemetry.Dropped),
@@ -153,9 +122,6 @@ func (s *Service) Ingest(ctx context.Context, batch ports.TelemetryBatch) (Inges
 				shared.ErrSaturated, batch.Class, observed, s.budget)
 		}
 
-		// Sheddable: keep the prefix, record the truncation as a first-class loss BEFORE storing — a
-		// truncated window whose loss could not be recorded must not be stored (fail closed). The loss is
-		// anchored to the DROPPED tail's earliest event time so a time-bounded hunt over it surfaces it.
 		droppedTail := batch.Events[kept:]
 		events = events[:kept]
 		report.Dropped = dropped
@@ -176,7 +142,6 @@ func (s *Service) Ingest(ctx context.Context, batch ports.TelemetryBatch) (Inges
 		}
 	}
 	report.Accepted = len(events)
-
 	accepted.Events = events
 	if err := s.store.Ingest(ctx, accepted); err != nil {
 		return report, fmt.Errorf("telemetry ingest: %w", err)
@@ -184,22 +149,49 @@ func (s *Service) Ingest(ctx context.Context, batch ports.TelemetryBatch) (Inges
 	return report, nil
 }
 
-// Hunt runs a retro-hunt query and returns its result WITH the completeness metadata (sampled / gaps),
-// so a sampled or lossy window is never presented as complete.
+// Hunt combines the columnar store's own honesty metadata with the A3 transport
+// ledger. Failing to read configured delivery gaps fails closed rather than returning
+// a potentially false Complete=true result.
 func (s *Service) Hunt(ctx context.Context, q ports.HuntQuery) (ports.HuntResult, error) {
 	res, err := s.store.Query(ctx, q)
 	if err != nil {
 		return ports.HuntResult{}, fmt.Errorf("telemetry hunt: %w", err)
 	}
+	if err := s.attachDeliveryGaps(ctx, q, &res); err != nil {
+		return ports.HuntResult{}, fmt.Errorf("telemetry hunt delivery gaps: %w", err)
+	}
 	return res, nil
 }
 
-// RetroRunRule re-runs the shipped detection rules for a class over the hot window and returns the
-// detections that WOULD have fired, alongside the hunt result (so the caller sees whether the window it
-// hunted was complete). This is the first of the three acceptance patterns.
+func (s *Service) attachDeliveryGaps(ctx context.Context, q ports.HuntQuery, res *ports.HuntResult) error {
+	if s.deliveryGaps == nil {
+		return nil
+	}
+	gapQuery := ports.TelemetryGapQuery{
+		// A0.1 defines the enrolled agent as the canonical host security principal.
+		AgentID: q.HostID, AssetID: q.AssetID, Since: q.Since, Until: q.Until,
+	}
+	if q.Class != "" {
+		priority, err := fleetagent.TelemetryPriority(q.Class)
+		if err != nil {
+			return err
+		}
+		gapQuery.Priority = &priority
+	}
+	gaps, err := s.deliveryGaps.QueryDeliveryGaps(ctx, gapQuery)
+	if err != nil {
+		return err
+	}
+	res.DeliveryGaps = gaps
+	if len(gaps) != 0 {
+		res.Complete = false
+	}
+	return nil
+}
+
 func (s *Service) RetroRunRule(ctx context.Context, q ports.HuntQuery) ([]detection.Detection, ports.HuntResult, error) {
 	q.Kind = ports.HuntRetroRule
-	res, err := s.store.Query(ctx, q)
+	res, err := s.Hunt(ctx, q)
 	if err != nil {
 		return nil, ports.HuntResult{}, err
 	}
@@ -223,16 +215,11 @@ func (s *Service) RetroRunRule(ctx context.Context, q ports.HuntQuery) ([]detect
 	return fired, res, nil
 }
 
-// Sweep enforces the retention tiers and AUDITS the expiry (never a silent deletion): the warm window is
-// down-sampled and past-warm data is expired, with the counts recorded.
 func (s *Service) Sweep(ctx context.Context) (ports.SweepReport, error) {
 	rep, err := s.store.RetentionSweep(ctx, s.clock.Now().UTC())
 	if err != nil {
 		return ports.SweepReport{}, fmt.Errorf("telemetry retention sweep: %w", err)
 	}
-	// Expiry is destructive, so it MUST be auditable: if the audit write fails, surface it loudly (the
-	// rows are already gone; the operator must know the deletion happened without a durable record)
-	// rather than swallowing it and letting evidence expire silently.
 	if aerr := s.audit.Record(ctx, ports.AuditEntry{
 		Actor: "system:telemetry-retention", Action: "telemetry.retention_sweep", At: s.clock.Now().UTC(),
 		Metadata: map[string]string{
@@ -244,7 +231,6 @@ func (s *Service) Sweep(ctx context.Context) (ports.SweepReport, error) {
 	return rep, nil
 }
 
-// Footprint reports the store size so spend is observable.
 func (s *Service) Footprint(ctx context.Context) (ports.TelemetryFootprint, error) {
 	fp, err := s.store.Footprint(ctx)
 	if err != nil {
@@ -253,10 +239,6 @@ func (s *Service) Footprint(ctx context.Context) (ports.TelemetryFootprint, erro
 	return fp, nil
 }
 
-// lossSpan computes the observed-time SPAN [from, to] of the dropped events, so the loss is windowed by
-// OVERLAP (a hunt overlapping any part of the span surfaces it, not just one whose window starts at the
-// earliest dropped event). Events with no time are ignored; if none carry a time, both bounds fall back to
-// the clock so the loss still anchors somewhere real rather than the zero time.
 func (s *Service) lossSpan(events []detection.Event) (from, to time.Time) {
 	for _, e := range events {
 		if e.At.IsZero() {
@@ -277,10 +259,6 @@ func (s *Service) lossSpan(events []detection.Event) (from, to time.Time) {
 	return from, to
 }
 
-// recordGap audits a telemetry coverage event. It NO LONGER swallows the audit-write error (the D2
-// companion bug): a coverage/loss event that cannot be durably recorded fails the ingest, so a gap is
-// never admitted without a trail. The first-class loss record (RecordLoss) is the queryable object; this
-// audit line is the human-facing trail alongside it.
 func (s *Service) recordGap(ctx context.Context, action string, batch ports.TelemetryBatch, meta map[string]string) error {
 	meta["host"] = batch.HostID.String()
 	meta["class"] = string(batch.Class)

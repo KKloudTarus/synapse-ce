@@ -76,6 +76,9 @@ func (failingStatsSpool) Flush(context.Context) error { return errors.New("not i
 func (failingStatsSpool) Gaps(context.Context) ([]ports.SpoolGap, error) {
 	return nil, errors.New("not implemented")
 }
+func (failingStatsSpool) AckGap(context.Context, ports.SpoolGap) (bool, error) {
+	return false, errors.New("not implemented")
+}
 func (failingStatsSpool) Stats(context.Context) (ports.SpoolStats, error) {
 	return ports.SpoolStats{}, errors.New("disk unavailable")
 }
