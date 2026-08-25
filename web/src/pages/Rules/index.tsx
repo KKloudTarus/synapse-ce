@@ -1,13 +1,19 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowUpRight,
   Check,
   CheckCircle,
   ChevronDown,
   Copy01,
+  FileCode01,
+  LayersThree01,
   RefreshCw01,
   SearchLg,
+  ShieldZap,
+  Tag01,
+  Target04,
   XCircle,
 } from '@untitledui/icons'
 import { Link } from 'react-router-dom'
@@ -46,17 +52,39 @@ function CopyButton({ text, ariaLabel = 'Copy' }: { text: string; ariaLabel?: st
 
 function RuleTypeBadge({ type }: { type: string }) {
   const label = formatRuleType(type as any)
-  let colorClass = 'bg-secondary text-secondary ring-border-secondary'
-  if (type === 'vulnerability' || type === 'bug') {
-    colorClass = 'bg-utility-error-50 text-utility-error-700 ring-utility-error-200 dark:bg-utility-error-950/40 dark:text-utility-error-300 dark:ring-utility-error-800'
+  let colorClass = 'border-secondary bg-secondary text-secondary'
+  let Icon = FileCode01
+
+  if (type === 'vulnerability') {
+    colorClass = 'border-utility-pink-200 bg-utility-pink-50 text-utility-pink-700 dark:border-utility-pink-800 dark:bg-utility-pink-950/40 dark:text-utility-pink-300'
+    Icon = ShieldZap
   } else if (type === 'security_hotspot') {
-    colorClass = 'bg-utility-warning-50 text-utility-warning-700 ring-utility-warning-200 dark:bg-utility-warning-950/40 dark:text-utility-warning-300 dark:ring-utility-warning-800'
+    colorClass = 'border-utility-orange-200 bg-utility-orange-50 text-utility-orange-700 dark:border-utility-orange-800 dark:bg-utility-orange-950/40 dark:text-utility-orange-300'
+    Icon = Target04
   } else if (type === 'code_smell') {
-    colorClass = 'bg-utility-blue-50 text-utility-blue-700 ring-utility-blue-200 dark:bg-utility-blue-950/40 dark:text-utility-blue-300 dark:ring-utility-blue-800'
+    colorClass = 'border-utility-blue-200 bg-utility-blue-50 text-utility-blue-700 dark:border-utility-blue-800 dark:bg-utility-blue-950/40 dark:text-utility-blue-300'
+    Icon = FileCode01
+  } else if (type === 'bug') {
+    colorClass = 'border-utility-error-200 bg-utility-error-50 text-utility-error-700 dark:border-utility-error-800 dark:bg-utility-error-950/40 dark:text-utility-error-300'
+    Icon = AlertTriangle
   }
+
   return (
-    <span className={cn('inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset', colorClass)}>
-      {label}
+    <span className={cn('inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-semibold shadow-xs', colorClass)}>
+      <Icon className="size-3.5 shrink-0" aria-hidden="true" />
+      <span>{label}</span>
+    </span>
+  )
+}
+
+function RuleTagBadge({ tag }: { tag: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 shrink-0 rounded-md border border-secondary bg-secondary px-2 py-0.5 text-xs font-medium text-secondary shadow-xs hover:bg-secondary_hover transition-colors truncate max-w-[115px] select-none"
+      title={tag}
+    >
+      <Tag01 className="size-3 text-tertiary shrink-0" aria-hidden="true" />
+      <span className="truncate">{tag}</span>
     </span>
   )
 }
@@ -65,7 +93,7 @@ function FormattedRationale({ text }: { text: string }) {
   const urlRegex = /(https?:\/\/[^\s]+)/g
   const parts = text.split(urlRegex)
   return (
-    <p className="mt-1 text-secondary leading-relaxed">
+    <p className="mt-1 text-primary leading-relaxed">
       {parts.map((part, i) =>
         urlRegex.test(part) ? (
           <a
@@ -73,7 +101,7 @@ function FormattedRationale({ text }: { text: string }) {
             href={part}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-0.5 text-brand-secondary font-medium underline underline-offset-2 hover:text-brand"
+            className="inline-flex items-center gap-0.5 text-brand-secondary font-semibold underline underline-offset-2 hover:text-brand"
             onClick={(e) => e.stopPropagation()}
           >
             {part}
@@ -103,8 +131,8 @@ function RuleInlineDetail({ ruleKey, initialDescription }: { ruleKey: string; in
     <div className="space-y-4 text-sm">
       {description && (
         <div>
-          <h3 className="text-xs font-bold uppercase tracking-wider text-secondary">Description</h3>
-          <p className="mt-1 text-secondary leading-relaxed">{description}</p>
+          <h3 className="text-xs font-extrabold uppercase tracking-wider text-primary">Description</h3>
+          <p className="mt-1 text-primary leading-relaxed">{description}</p>
         </div>
       )}
       {loading && !resolved && (
@@ -118,7 +146,7 @@ function RuleInlineDetail({ ruleKey, initialDescription }: { ruleKey: string; in
         <>
           {resolved.rationale && (
             <div>
-              <h3 className="text-xs font-bold uppercase tracking-wider text-secondary">Rationale</h3>
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-primary">Rationale</h3>
               <FormattedRationale text={resolved.rationale} />
             </div>
           )}
@@ -200,12 +228,34 @@ export default function Rules() {
     return resultRules.slice(start, start + pageSize)
   }, [resultRules, page, pageSize])
 
+  const stats = useMemo(() => {
+    let vulns = 0
+    let hotspots = 0
+    let smellsAndBugs = 0
+    const languages = new Set<string>()
+
+    for (const r of catalogRules) {
+      if (r.type === 'vulnerability') vulns++
+      else if (r.type === 'security_hotspot') hotspots++
+      else smellsAndBugs++
+
+      if (r.language) languages.add(r.language)
+    }
+
+    return {
+      vulns,
+      hotspots,
+      smellsAndBugs,
+      languages: languages.size,
+    }
+  }, [catalogRules])
+
   return (
-    <div className="mx-auto max-w-[1600px] animate-fade-in space-y-6 pb-12">
-      <header className="flex flex-wrap items-center justify-between gap-4 pb-1">
+    <div className="space-y-6">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">Rules</h1>
-          <p className="mt-1 text-sm text-secondary">
+          <h1 className="text-2xl font-bold tracking-tight text-primary">Rules</h1>
+          <p className="text-sm text-tertiary">
             Security and code-quality rules with rationale and examples
           </p>
         </div>
@@ -220,6 +270,54 @@ export default function Rules() {
           )}
         </div>
       </header>
+
+      {!catalogLoading && !catalogError && catalogRules.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+          <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-secondary">Vulnerabilities</span>
+              <div className="flex size-8 items-center justify-center rounded-lg bg-utility-pink-50 text-utility-pink-700 dark:bg-utility-pink-950/40 dark:text-utility-pink-300">
+                <ShieldZap className="size-4" aria-hidden="true" />
+              </div>
+            </div>
+            <div className="mt-2 text-3xl font-bold tabular-nums text-primary">{stats.vulns.toLocaleString()}</div>
+            <span className="text-xs text-tertiary">Direct security defects</span>
+          </div>
+
+          <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-secondary">Security Hotspots</span>
+              <div className="flex size-8 items-center justify-center rounded-lg bg-utility-orange-50 text-utility-orange-700 dark:bg-utility-orange-950/40 dark:text-utility-orange-300">
+                <Target04 className="size-4" aria-hidden="true" />
+              </div>
+            </div>
+            <div className="mt-2 text-3xl font-bold tabular-nums text-primary">{stats.hotspots.toLocaleString()}</div>
+            <span className="text-xs text-tertiary">Manual review checkpoints</span>
+          </div>
+
+          <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-secondary">Code Smells &amp; Bugs</span>
+              <div className="flex size-8 items-center justify-center rounded-lg bg-utility-blue-50 text-utility-blue-700 dark:bg-utility-blue-950/40 dark:text-utility-blue-300">
+                <FileCode01 className="size-4" aria-hidden="true" />
+              </div>
+            </div>
+            <div className="mt-2 text-3xl font-bold tabular-nums text-primary">{stats.smellsAndBugs.toLocaleString()}</div>
+            <span className="text-xs text-tertiary">Maintainability &amp; reliability</span>
+          </div>
+
+          <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-secondary">Supported Stacks</span>
+              <div className="flex size-8 items-center justify-center rounded-lg bg-utility-green-50 text-utility-green-700 dark:bg-utility-green-950/40 dark:text-utility-green-300">
+                <LayersThree01 className="size-4" aria-hidden="true" />
+              </div>
+            </div>
+            <div className="mt-2 text-3xl font-bold tabular-nums text-primary">{stats.languages}</div>
+            <span className="text-xs text-tertiary">Cloud, languages &amp; IaC</span>
+          </div>
+        </div>
+      )}
 
       {catalogError ? (
         <div className="mb-6 rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-600 dark:text-red-400">
@@ -328,19 +426,17 @@ export default function Rules() {
                                 onClick={() => setExpandedKey(isExpanded ? null : rule.key)}
                               >
                                 <td className="px-5 py-3 overflow-hidden">
-                                  <div className="flex flex-col gap-1 min-w-0">
+                                  <div className="flex flex-col gap-0.5 min-w-0">
                                     <span className={cn("font-semibold truncate leading-snug", isExpanded ? "text-brand-secondary" : "text-primary")}>
                                       {rule.name}
                                     </span>
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-tertiary border border-secondary shrink-0 truncate max-w-[220px]">
-                                        {rule.key}
-                                      </span>
+                                    <div className="flex items-center gap-1.5 text-xs font-mono text-tertiary">
+                                      <span className="truncate max-w-[280px] italic hover:text-secondary transition-colors">{rule.key}</span>
                                       <CopyButton text={rule.key} ariaLabel={`Copy ${rule.key}`} />
                                     </div>
                                   </div>
                                 </td>
-                                <td className="px-4 py-3 capitalize text-secondary font-medium">
+                                <td className="px-4 py-3 capitalize text-secondary font-medium truncate max-w-[140px]" title={rule.language}>
                                   {rule.language}
                                 </td>
                                 <td className="px-4 py-3">
@@ -352,16 +448,11 @@ export default function Rules() {
                                 <td className="px-4 py-3 text-tertiary overflow-hidden">
                                   <div className="flex items-center gap-1.5 flex-nowrap overflow-hidden">
                                     {visibleTags.map((t) => (
-                                      <span
-                                        key={t}
-                                        className="inline-flex items-center shrink-0 rounded-md border border-secondary bg-secondary px-2 py-0.5 text-xs font-medium text-secondary shadow-xs hover:bg-secondary_hover transition-colors truncate max-w-[100px]"
-                                      >
-                                        {t}
-                                      </span>
+                                      <RuleTagBadge key={t} tag={t} />
                                     ))}
                                     {extraTags > 0 && (
                                       <span
-                                        className="inline-flex items-center shrink-0 rounded-md border border-secondary bg-secondary px-1.5 py-0.5 text-xs font-medium text-tertiary shadow-xs"
+                                        className="inline-flex items-center shrink-0 rounded-md border border-secondary bg-secondary px-1.5 py-0.5 text-xs font-medium text-tertiary shadow-xs select-none"
                                         title={(rule.tags ?? []).slice(maxTags).join(', ')}
                                       >
                                         +{extraTags}

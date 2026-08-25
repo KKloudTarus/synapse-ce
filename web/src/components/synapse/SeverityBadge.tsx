@@ -11,10 +11,10 @@ export interface SeverityBadgeProps {
 
 const SEVERITY_COLORS: Record<SeverityBadgeProps['severity'], BadgeColors> = {
   critical: 'error',
-  high: 'warning',
-  medium: 'gray',
+  high: 'orange',
+  medium: 'warning',
   low: 'success',
-  info: 'gray',
+  info: 'blue',
 }
 
 const SEVERITY_LABELS: Record<SeverityBadgeProps['severity'], string> = {
