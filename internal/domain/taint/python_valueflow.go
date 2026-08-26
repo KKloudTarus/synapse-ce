@@ -15,6 +15,7 @@ const (
 	maxPythonTaintSources = 200_000
 	maxPythonTaintSinks   = 1_000_000
 	maxPythonTaintPath    = 64
+	maxPythonTaintWork    = 4_000_000
 )
 
 // TaintClass separates neutralization semantics: an HTML escaper cannot sanitize SQL or a URL.
@@ -476,7 +477,11 @@ func (b *pythonValueBuilder) finish() ValueFlowGraph {
 }
 
 // Vulnerabilities returns deterministic, bounded, class-aware value-flow witnesses.
-func (g ValueFlowGraph) Vulnerabilities() []PythonTaintPath {
+func (g *ValueFlowGraph) Vulnerabilities() []PythonTaintPath {
+	return g.vulnerabilities(maxPythonTaintWork)
+}
+
+func (g *ValueFlowGraph) vulnerabilities(maxWork int) []PythonTaintPath {
 	adjacency := map[string][]string{}
 	for _, flow := range g.Flows {
 		if flow.From != "" && flow.To != "" {
@@ -496,6 +501,7 @@ func (g ValueFlowGraph) Vulnerabilities() []PythonTaintPath {
 	}
 	var findings []PythonTaintPath
 	seenFinding := map[string]bool{}
+	work := 0
 	for _, source := range g.Sources {
 		type state struct {
 			id   string
@@ -504,6 +510,11 @@ func (g ValueFlowGraph) Vulnerabilities() []PythonTaintPath {
 		queue := []state{{id: source.ValueID, path: []string{source.ValueID}}}
 		seen := map[string]bool{source.ValueID: true}
 		for len(queue) > 0 {
+			work++
+			if work > maxWork {
+				g.Truncated = true
+				return sortedPythonTaintPaths(findings)
+			}
 			current := queue[0]
 			queue = queue[1:]
 			for _, sink := range sinks[current.id] {
@@ -534,6 +545,10 @@ func (g ValueFlowGraph) Vulnerabilities() []PythonTaintPath {
 			}
 		}
 	}
+	return sortedPythonTaintPaths(findings)
+}
+
+func sortedPythonTaintPaths(findings []PythonTaintPath) []PythonTaintPath {
 	sort.Slice(findings, func(i, j int) bool {
 		left := string(findings[i].Class) + "\x00" + findings[i].SourceID + "\x00" + findings[i].SinkID
 		right := string(findings[j].Class) + "\x00" + findings[j].SourceID + "\x00" + findings[j].SinkID

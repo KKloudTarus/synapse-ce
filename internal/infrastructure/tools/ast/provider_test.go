@@ -148,6 +148,28 @@ func TestPythonFactsUnavailableWhenBinaryMissing(t *testing.T) {
 	}
 }
 
+func TestProviderRejectsTruncatedSidecarOutput(t *testing.T) {
+	p := New("synapse-ast").WithRunner(fakeRunner{result: ports.ToolResult{
+		Stdout: []byte(`{"schema_version":1}`), Truncated: true,
+	}})
+	if _, available, err := p.PythonFacts(context.Background(), t.TempDir()); err == nil || available {
+		t.Fatalf("truncated sidecar output must fail closed: available=%v err=%v", available, err)
+	}
+}
+
+func TestBoundedOutputCapsBufferedBytesAndDrainsWrites(t *testing.T) {
+	w := boundedOutput{limit: 4}
+	if n, err := w.Write([]byte("abcdef")); err != nil || n != 6 {
+		t.Fatalf("Write = (%d, %v), want (6, nil)", n, err)
+	}
+	if got := w.buf.String(); got != "abcd" || !w.truncated {
+		t.Fatalf("bounded output = %q truncated=%v", got, w.truncated)
+	}
+	if n, err := w.Write([]byte("more")); err != nil || n != 4 || w.buf.Len() != 4 {
+		t.Fatalf("drain write = (%d, %v), buffered=%d", n, err, w.buf.Len())
+	}
+}
+
 type fakeRunner struct {
 	stdout []byte
 	result ports.ToolResult

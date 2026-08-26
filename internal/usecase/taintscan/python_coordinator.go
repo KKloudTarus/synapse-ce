@@ -121,9 +121,13 @@ func (c *PythonCoordinator) ScanWithCoverage(ctx context.Context, engagementID s
 		outcome.Coverage.Status = ports.AnalysisCoveragePartial
 		outcome.Coverage.Complete = false
 	}
-	analysisComplete := resolution.Complete && !graph.Truncated
-
 	paths := deduplicatePythonTaintPaths(graph.Vulnerabilities())
+	if graph.Truncated {
+		outcome.Coverage.Truncated = true
+		outcome.Coverage.Status = ports.AnalysisCoveragePartial
+		outcome.Coverage.Complete = false
+	}
+	analysisComplete := resolution.Complete && !graph.Truncated
 	proposed := 0
 	for _, finding := range paths {
 		if err := ctx.Err(); err != nil {

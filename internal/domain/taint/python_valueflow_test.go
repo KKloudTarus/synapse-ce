@@ -257,6 +257,17 @@ func BenchmarkPythonValueFlowCorpus(b *testing.B) {
 	}
 }
 
+func TestPythonValueFlowTraversalBudgetMarksGraphTruncated(t *testing.T) {
+	graph := ValueFlowGraph{
+		Flows:   []Flow{{From: "source", To: "middle"}, {From: "middle", To: "sink"}},
+		Sources: []TypedValueSource{{ValueID: "source", Class: TaintCommand}},
+		Sinks:   []TypedValueSink{{ValueID: "sink", Class: TaintCommand, CWE: "CWE-78", Rule: "python-taint-command"}},
+	}
+	if findings := graph.vulnerabilities(1); len(findings) != 0 || !graph.Truncated {
+		t.Fatalf("budgeted traversal findings=%+v truncated=%v, want no finding and truncated coverage", findings, graph.Truncated)
+	}
+}
+
 func interproceduralPythonDocument() pythonprogram.Document {
 	document, moduleID := basePythonValueDocument()
 	route := pythonValueSymbol("python:app:route", "route", moduleID, pythonprogram.SymbolFunction, 2)

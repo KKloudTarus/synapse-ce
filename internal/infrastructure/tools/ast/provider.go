@@ -28,6 +28,8 @@ import (
 // build). It maps to available=false, not an error, so callers degrade to their own counting.
 const exitUnavailable = 3
 
+const maxASTOutputBytes = 32 << 20 // 32 MiB per stream; semantic facts are decoded in the API process.
+
 // Provider runs the synapse-ast binary. bin is the executable (path or name); runner, when set, confines
 // it in the sandbox (the sidecar parses UNTRUSTED source with C grammars, so production should set it).
 type Provider struct {
@@ -246,9 +248,10 @@ func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, erro
 	args := []string{cmd, root}
 	if p.runner != nil {
 		res, err := p.runner.Run(ctx, ports.ToolSpec{
-			Name:          p.bin,
-			Args:          args,
-			ReadOnlyPaths: []string{root},
+			Name:           p.bin,
+			Args:           args,
+			ReadOnlyPaths:  []string{root},
+			MaxOutputBytes: maxASTOutputBytes,
 		})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -264,12 +267,17 @@ func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, erro
 		if res.ExitCode != 0 && res.ExitCode != exitUnavailable {
 			return nil, res.ExitCode, fmt.Errorf("synapse-ast %q: exit %d: %s", root, res.ExitCode, truncate(string(res.Stderr), 300))
 		}
+		if res.Truncated {
+			return nil, res.ExitCode, fmt.Errorf("synapse-ast %q output exceeds %d bytes", root, maxASTOutputBytes)
+		}
 		return res.Stdout, res.ExitCode, nil
 	}
-	var stderr bytes.Buffer
+	stdout := boundedOutput{limit: maxASTOutputBytes}
+	stderr := boundedOutput{limit: maxASTOutputBytes}
 	ec := exec.CommandContext(ctx, p.bin, args...)
+	ec.Stdout = &stdout
 	ec.Stderr = &stderr
-	out, err := ec.Output()
+	err := ec.Run()
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
@@ -283,7 +291,33 @@ func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, erro
 		// enrichment, so degrade to Go-only counting rather than failing the whole inventory.
 		return nil, exitUnavailable, nil
 	}
-	return out, 0, nil
+	if stdout.truncated || stderr.truncated {
+		return nil, 0, fmt.Errorf("synapse-ast %q output exceeds %d bytes", root, maxASTOutputBytes)
+	}
+	return stdout.buf.Bytes(), 0, nil
+}
+
+// boundedOutput drains the child stream after the limit so an oversized sidecar response cannot grow
+// API memory without bound or deadlock the child on a full pipe.
+type boundedOutput struct {
+	limit     int
+	buf       bytes.Buffer
+	truncated bool
+}
+
+func (w *boundedOutput) Write(p []byte) (int, error) {
+	remaining := w.limit - w.buf.Len()
+	if remaining <= 0 {
+		w.truncated = true
+		return len(p), nil
+	}
+	if len(p) > remaining {
+		_, _ = w.buf.Write(p[:remaining])
+		w.truncated = true
+		return len(p), nil
+	}
+	_, _ = w.buf.Write(p)
+	return len(p), nil
 }
 
 // truncate caps sidecar stderr in an error message to a bounded, UTF-8-valid prefix.
