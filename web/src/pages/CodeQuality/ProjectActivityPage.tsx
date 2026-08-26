@@ -15,10 +15,14 @@ export function ProjectActivityPage() {
   const [olderError, setOlderError] = useState<string | null>(null)
   const olderRequestToken = useRef<symbol | null>(null)
 
-  const { data: firstPage, loading, error, refetch: loadFirstPage } = useFetch(
-    () => api.projectAnalyses(projectKey),
-    { deps: [projectKey, analysisRevision] },
-  )
+  const {
+    data: firstPage,
+    loading,
+    error,
+    refetch: loadFirstPage,
+  } = useFetch(() => api.projectAnalyses(projectKey), {
+    deps: [projectKey, analysisRevision],
+  })
 
   useEffect(() => {
     if (firstPage) {
@@ -54,19 +58,38 @@ export function ProjectActivityPage() {
   }
 
   if (loading) {
-    return <Card title="Activity"><EmptyState icon={Activity} title="Loading activity" hint="Fetching immutable analysis history." /></Card>
+    return (
+      <Card title="Activity">
+        <EmptyState
+          icon={Activity}
+          title="Loading activity"
+          hint="Fetching immutable analysis history."
+        />
+      </Card>
+    )
   }
+
   if (error) {
     return (
-      <div className="space-y-3">
+      <div className="space-y-4">
         <ErrorState message={error} />
-        <Button variant="secondary" onClick={loadFirstPage}>Retry activity</Button>
+        <div>
+          <Button variant="secondary" onClick={loadFirstPage}>
+            Retry activity
+          </Button>
+        </div>
       </div>
     )
   }
+
   return (
-    <div className="space-y-3">
-      <ProjectActivityView analyses={analyses} hasOlder={cursor !== null} loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
+    <div className="space-y-4">
+      <ProjectActivityView
+        analyses={analyses}
+        hasOlder={cursor !== null}
+        loadingOlder={loadingOlder}
+        onLoadOlder={loadOlder}
+      />
       {olderError && <ErrorState message={olderError} />}
     </div>
   )
