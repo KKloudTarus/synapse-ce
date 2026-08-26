@@ -191,7 +191,7 @@ export function ScanPanel({
             onClick={run}
             loading={running}
             disabled={running || outsideWindow}
-            variant="brand"
+            variant="primary"
             className="h-10 px-6 text-sm font-bold rounded-xl shadow-xs transition-transform active:scale-[0.98]"
           >
             <Play className="size-4" />

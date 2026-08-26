@@ -106,7 +106,7 @@ export function ProfileDetail({
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              variant="brand"
+              variant="primary"
               className="h-8 text-xs !bg-brand-solid !text-white hover:!bg-brand-solid_hover shadow-xs"
               disabled={busy}
               onClick={() => setAssignModalOpen(true)}

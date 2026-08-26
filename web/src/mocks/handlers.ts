@@ -227,8 +227,10 @@ const PROJECTS = [
 ]
 
 // --- Rules ---
+// Field names must track the API contract in internal/adapter/httpapi/rule_handler.go
+// (`default_severity`, `qualities`) — otherwise the mock masks integration breaks.
 const RULES = Array.from({ length: 25 }, (_, i) => ({
-  key: `go:S${1000 + i}`, name: ['SQL injection', 'XSS prevention', 'Path traversal', 'CSRF protection', 'Auth bypass', 'Insecure random', 'Hardcoded secret', 'Weak hash', 'Open redirect', 'SSRF'][i % 10], language: i < 15 ? 'go' : 'typescript', type: ['vulnerability', 'bug', 'code_smell'][i % 3], severity: (['critical', 'high', 'medium', 'low', 'info'] )[i % 5], tags: [['owasp-top10', 'injection'], ['owasp-top10', 'xss'], ['path-traversal'], ['csrf'], ['auth']][i % 5], cwe: [`CWE-${[89, 79, 22, 352, 287, 330, 798, 328, 601, 918][i % 10]}`],
+  key: `go:S${1000 + i}`, name: ['SQL injection', 'XSS prevention', 'Path traversal', 'CSRF protection', 'Auth bypass', 'Insecure random', 'Hardcoded secret', 'Weak hash', 'Open redirect', 'SSRF'][i % 10], language: i < 15 ? 'go' : 'typescript', type: ['vulnerability', 'bug', 'code_smell'][i % 3], default_severity: (['critical', 'high', 'medium', 'low'])[i % 4], qualities: [['security'], ['reliability'], ['maintainability'], ['security', 'reliability']][i % 4], tags: [['owasp-top10', 'injection'], ['owasp-top10', 'xss'], ['path-traversal'], ['csrf'], ['auth']][i % 5], cwe: [`CWE-${[89, 79, 22, 352, 287, 330, 798, 328, 601, 918][i % 10]}`],
 }))
 
 // --- Quality Gates ---
@@ -320,7 +322,12 @@ const TEAM_MEMBERS = [
 // ============================================================================
 
 export const handlers = [
-  // --- Auth ---
+  // --- Auth (BFF) ---
+  // discoverSession() calls GET /api/auth/session and expects an authenticated
+  // session with a CSRF token; without this handler the request falls through to
+  // the Vite SPA fallback (index.html) and JSON.parse throws.
+  http.get('/api/auth/session', () => HttpResponse.json({ authenticated: true, csrf_token: 'mock-csrf-token' })),
+  http.post('/api/auth/logout', () => new HttpResponse(null, { status: 204 })),
   http.get('/api/v1/aup', () => HttpResponse.json({ version: '1.0', accepted: true, accepted_at: NOW })),
   http.post('/api/v1/aup/accept', () => HttpResponse.json({ ok: true })),
 
@@ -344,7 +351,9 @@ export const handlers = [
 
   // --- Engagement Scan ---
   http.get('/api/v1/engagements/:id/sbom', () => new HttpResponse(null, { status: 404 })),
-  http.get('/api/v1/engagements/:id/scan-status', () => HttpResponse.json(null)),
+  // 404 matches the real backend (ErrNotFound) when no job exists. A 200 with a
+  // null body made mapScanJob(null) throw on every poll tick.
+  http.get('/api/v1/engagements/:id/scan-status', () => new HttpResponse(null, { status: 404 })),
   http.get('/api/v1/engagements/:id/scan', () => HttpResponse.json(SCAN_RESULT)),
   http.post('/api/v1/sca/scans', () => HttpResponse.json({ id: 'job-mock', engagement_id: 'eng-001', target: 'https://github.com/KKloudTarus/synapse-ce.git', kind: 'git', status: 'complete', stage: 'done', progress: 100, error: '', started_at: new Date(Date.now() - 300000).toISOString(), finished_at: NOW, debug_events: SCAN_RESULT.debug_events })),
 

@@ -276,7 +276,7 @@ export function GateEditorModal({
                 Close
               </Button>
             ) : (
-              <Button variant="brand" type="submit" loading={saving} className="h-9 px-5 text-xs font-semibold">
+              <Button variant="primary" type="submit" loading={saving} className="h-9 px-5 text-xs font-semibold">
                 {gate ? 'Save changes' : 'Create gate'}
               </Button>
             )}

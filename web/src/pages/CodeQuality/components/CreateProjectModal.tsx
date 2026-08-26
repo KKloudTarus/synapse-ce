@@ -255,7 +255,7 @@ export function CreateProjectModal({
           {/* Modal Footer: NO Cancel button, only Primary CTA */}
           <div className="mt-6 flex items-center justify-end pt-2">
             <Button
-              variant="brand"
+              variant="primary"
               type="submit"
               loading={submitting}
               className="!bg-brand-solid !text-white hover:!bg-brand-solid_hover shadow-xs"

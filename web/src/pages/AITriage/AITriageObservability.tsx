@@ -146,14 +146,17 @@ function DistributionDonut({ title, values }: { title: string; values: Record<st
   const radius = (size - strokeWidth) / 2
   const circumference = 2 * Math.PI * radius
 
-  // Color palette — a descending brand-shade ramp, all driven from theme tokens.
+  // Categorical hues, all from theme tokens. A single-hue brand ramp was hard to
+  // read: its lightest steps (brand-100/200) are near-invisible on a white surface
+  // and adjacent slices of one hue are hard to tell apart. The utility-* tokens
+  // also flip to lighter values in dark mode, so contrast holds in both themes.
   const colors = [
-    'var(--color-brand-600)',
-    'var(--color-brand-500)',
-    'var(--color-brand-400)',
-    'var(--color-brand-300)',
-    'var(--color-brand-200)',
-    'var(--color-brand-100)',
+    'var(--color-utility-brand-600)',
+    'var(--color-utility-blue-600)',
+    'var(--color-utility-purple-600)',
+    'var(--color-utility-orange-600)',
+    'var(--color-utility-pink-600)',
+    'var(--color-utility-indigo-600)',
   ]
 
   let offset = 0

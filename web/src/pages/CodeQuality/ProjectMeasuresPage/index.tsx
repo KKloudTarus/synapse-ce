@@ -164,8 +164,13 @@ export function ProjectMeasuresPage() {
 
   const totalLinesInNode = data?.node?.size?.ncloc?.value ?? 0
   const columns = useMemo(() => getDomainColumns(domain, totalLinesInNode), [domain, totalLinesInNode])
+  // Build the resolved column array once: columns(setPath) allocates fresh cell
+  // closures, so calling it per row (as before) rebuilt them on every render.
+  const cols = columns(setPath)
 
-  if (loading) return <div className="h-20" />
+  // Only blank on the first load. loading is also true while refetching after a
+  // path/domain change, and blanking then wiped the breadcrumbs and selector.
+  if (loading && !data) return <div className="h-20" />
   if (error && !data) return <ErrorState message={error} />
   if (!data || data.state === 'not_analyzed') return <ProjectRouteEmpty running={job?.status === 'running'} />
 
@@ -317,7 +322,7 @@ export function ProjectMeasuresPage() {
             />
           ) : sortedAndFilteredItems.length > 50 ? (
             <VirtualTable
-              columns={columns(setPath)}
+              columns={cols}
               items={sortedAndFilteredItems}
               rowKey={(item) => item.path}
               totalItems={undefined}
@@ -327,7 +332,7 @@ export function ProjectMeasuresPage() {
               <table className="min-w-full text-left text-sm whitespace-nowrap">
                 <thead className="bg-secondary/40 text-[10px] uppercase tracking-wider text-tertiary border-b border-secondary sticky top-0 font-bold font-sans">
                   <tr>
-                    {columns(setPath).map((c) => (
+                    {cols.map((c) => (
                       <th key={c.header} scope="col" className={cn('px-4 py-2.5 font-bold', c.className)}>
                         {c.header}
                       </th>
@@ -337,7 +342,7 @@ export function ProjectMeasuresPage() {
                 <tbody className="divide-y divide-secondary/40 font-sans text-xs">
                   {sortedAndFilteredItems.map((item) => (
                     <tr key={item.path} className="hover:bg-secondary/40 transition-colors group">
-                      {columns(setPath).map((c) => (
+                      {cols.map((c) => (
                         <td key={c.header} className={cn('px-4 py-2.5 min-w-0 truncate', c.className)}>
                           {c.cell(item)}
                         </td>

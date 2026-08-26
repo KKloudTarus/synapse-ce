@@ -54,9 +54,7 @@ export function AITriageReviews() {
         const matchesProject =
           r.projectId === filter.project ||
           r.engagementId === filter.project ||
-          (proj && (r.projectId === proj.key || r.projectId === proj.id || r.projectId === proj.name)) ||
-          (filter.project === 'proj-001' && (r.projectId === 'proj-synapse' || r.projectId === 'synapse-ce')) ||
-          (filter.project === 'proj-002' && (r.projectId === 'proj-acme' || r.projectId === 'gin-gonic'))
+          (proj && (r.projectId === proj.key || r.projectId === proj.id || r.projectId === proj.name))
         if (!matchesProject) return false
       }
       if (filter.state && (filter.state as string) !== 'all' && r.state !== filter.state) return false
@@ -186,7 +184,7 @@ export function AITriageReviews() {
 
             const isOwner = Boolean(
               review.owner &&
-              (review.owner === reviewerId || review.owner === me?.id || review.owner === me?.name || review.owner === me?.name)
+              (review.owner === reviewerId || review.owner === me?.id || review.owner === me?.name)
             )
 
             return (
@@ -376,12 +374,12 @@ export function AITriageReviews() {
 function getReviewStateColor(state: AITriageReviewState) {
   switch (state) {
     case 'accepted':
-      return 'text-emerald-600 dark:text-emerald-400'
+      return 'text-low'
     case 'rejected':
-      return 'text-rose-600 dark:text-rose-400'
+      return 'text-critical'
     case 'pending':
     default:
-      return 'text-amber-600 dark:text-amber-400'
+      return 'text-medium'
   }
 }
 

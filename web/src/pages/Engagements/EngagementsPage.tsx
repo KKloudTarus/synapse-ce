@@ -126,16 +126,12 @@ export const EngagementsPage: FC = () => {
         valA = (a.status || '').toLowerCase()
         valB = (b.status || '').toLowerCase()
       } else if (sortField === 'findings') {
-        const anyA = a as any
-        const anyB = b as any
-        valA = anyA.findingsCount?.total ?? 0
-        valB = anyB.findingsCount?.total ?? 0
+        valA = a.findingsCount?.total ?? 0
+        valB = b.findingsCount?.total ?? 0
       } else {
         // lastScanDate or createdAt
-        const anyA = a as any
-        const anyB = b as any
-        valA = new Date(anyA.lastScanDate || a.createdAt || 0).getTime()
-        valB = new Date(anyB.lastScanDate || b.createdAt || 0).getTime()
+        valA = new Date(a.lastScanDate || a.createdAt || 0).getTime()
+        valB = new Date(b.lastScanDate || b.createdAt || 0).getTime()
       }
 
       if (valA < valB) return sortDirection === 'asc' ? -1 : 1

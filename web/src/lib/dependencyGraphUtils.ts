@@ -21,7 +21,10 @@ export function shortName(name: string) {
 }
 
 // layered assigns each node a depth (distance from a node nothing depends on),
-// giving a left-to-right DAG layout. Cycle-safe via a visited set.
+// giving a left-to-right DAG layout. A node is re-enqueued whenever its level is
+// raised, so the increase propagates to descendants and every child stays strictly
+// to the right of its parents. Cycle-safe: levels are capped at the node count, so
+// a cycle stops relaxing instead of looping forever.
 export function layered(ids: string[], edges: Array<{ source: string; target: string }>): Map<string, number> {
   const adj = new Map<string, string[]>()
   const indeg = new Map<string, number>()
@@ -33,13 +36,16 @@ export function layered(ids: string[], edges: Array<{ source: string; target: st
   }
   const level = new Map<string, number>(ids.map((id) => [id, 0]))
   const queue = ids.filter((id) => (indeg.get(id) ?? 0) === 0)
-  const seen = new Set(queue)
+  // Every node sits in a cycle (no source): relax from all of them instead.
+  if (queue.length === 0) queue.push(...ids)
+  const maxLevel = ids.length
   while (queue.length) {
     const n = queue.shift()!
+    const next = (level.get(n) ?? 0) + 1
+    if (next > maxLevel) continue
     for (const m of adj.get(n) ?? []) {
-      level.set(m, Math.max(level.get(m) ?? 0, (level.get(n) ?? 0) + 1))
-      if (!seen.has(m)) {
-        seen.add(m)
+      if (next > (level.get(m) ?? 0)) {
+        level.set(m, next)
         queue.push(m)
       }
     }

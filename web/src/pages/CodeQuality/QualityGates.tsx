@@ -68,7 +68,7 @@ export function QualityGates() {
           <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">Quality Gates</h1>
         </div>
         <Button
-          variant="brand"
+          variant="primary"
           className="!bg-brand-solid !text-white hover:!bg-brand-solid_hover shadow-xs"
           onClick={() => setEditing('new')}
         >

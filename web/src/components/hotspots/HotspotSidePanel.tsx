@@ -398,7 +398,7 @@ export function HotspotSidePanel({
                       type="submit"
                       disabled={submitting || (transitionStatus === hotspot.status && rationale.trim().length === 0)}
                       className="w-full !bg-brand-solid !text-white hover:!bg-brand-solid_hover shadow-xs font-semibold"
-                      variant="brand"
+                      variant="primary"
                     >
                       {submitting ? <Spinner className="mr-2 size-4" /> : null}
                       Save Decision

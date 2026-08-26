@@ -10,15 +10,14 @@ export function cn(...parts: Array<string | false | null | undefined>): string {
 
 // ---- Button ----
 
-type ButtonVariant = 'primary' | 'brand' | 'secondary' | 'secondary-color' | 'ghost' | 'danger'
+type ButtonVariant = 'primary' | 'secondary' | 'secondary-color' | 'ghost' | 'danger'
 
 const BTN: Record<ButtonVariant, string> = {
-  primary: 'bg-brand-solid text-white shadow-xs hover:bg-brand-solid_hover',
-  brand: 'bg-brand-solid text-white shadow-xs hover:bg-brand-solid_hover',
+  primary: 'bg-brand-solid text-primary_on-brand shadow-xs hover:bg-brand-solid_hover',
   'secondary-color': 'bg-brand-primary text-brand-secondary shadow-xs ring-1 ring-inset ring-brand/25 hover:bg-brand-primary_hover',
   secondary: 'border border-secondary bg-primary text-primary shadow-xs hover:bg-secondary hover:border-primary',
   ghost: 'text-tertiary hover:bg-secondary hover:text-primary',
-  danger: 'bg-critical text-white shadow-sm hover:brightness-110',
+  danger: 'bg-critical text-criticalfg shadow-sm hover:brightness-110',
 }
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

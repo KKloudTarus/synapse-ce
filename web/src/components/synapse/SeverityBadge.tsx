@@ -9,12 +9,14 @@ export interface SeverityBadgeProps {
   className?: string
 }
 
+// Prominence must decrease monotonically: critical > high > medium > low > info.
+// Green on `low` would read as "safe" in a security tool and outrank `medium`.
 const SEVERITY_COLORS: Record<SeverityBadgeProps['severity'], BadgeColors> = {
   critical: 'error',
   high: 'orange',
   medium: 'warning',
-  low: 'success',
-  info: 'blue',
+  low: 'gray',
+  info: 'gray',
 }
 
 const SEVERITY_LABELS: Record<SeverityBadgeProps['severity'], string> = {

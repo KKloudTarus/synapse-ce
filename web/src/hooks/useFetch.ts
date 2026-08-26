@@ -49,12 +49,16 @@ export function useFetch<T>(
   const [loading, setLoading] = useState(enabled)
   const [error, setError] = useState<string | null>(null)
   const revisionRef = useRef(0)
+  // Tracks the controller of the most recent in-flight request so a manual
+  // refetch can still be aborted on unmount.
+  const controllerRef = useRef<AbortController | null>(null)
 
   const execute = useCallback(() => {
     if (!enabled) return
 
     const revision = ++revisionRef.current
     const controller = new AbortController()
+    controllerRef.current = controller
 
     setLoading(true)
     setError(null)
@@ -84,8 +88,11 @@ export function useFetch<T>(
   }, [enabled, ...deps])
 
   useEffect(() => {
-    const cleanup = execute()
-    return cleanup
+    execute()
+    return () => {
+      controllerRef.current?.abort()
+      controllerRef.current = null
+    }
   }, [execute])
 
   const refetch = useCallback(() => {

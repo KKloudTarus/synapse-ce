@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, BarChart01, Check, CheckCircle, Copy01, GitBranch01, LinkExternal02, Play, ShieldTick, Upload01 } from '@untitledui/icons'
+import { AlertTriangle, ArrowLeft, BarChart01, Check, CheckCircle, Copy01, Play, Upload01 } from '@untitledui/icons'
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useOutletContext, useParams } from 'react-router-dom'
 import { Button, EmptyState, ErrorState, Pill, Spinner, cn } from '../../components/ui'
@@ -207,28 +207,21 @@ export function CodeQualityProject() {
         <ArrowLeft className="size-4" aria-hidden="true" /> All projects
       </Link>
       <header className="bg-hero rounded-xl border border-secondary p-5 shadow-xs">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="min-w-0 space-y-2.5">
-            {/* Row 1: Title + Key Pill */}
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="truncate text-2xl font-bold tracking-tight text-primary">{project.name}</h1>
-              <span className="inline-flex items-center rounded-md border border-secondary bg-primary px-2 py-0.5 font-mono text-xs text-secondary shadow-2xs">
-                {project.key}
-              </span>
-            </div>
-
-            {/* Row 2: Metadata Chips */}
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              {/* Repo chip */}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="truncate text-2xl font-bold tracking-tight text-primary">{project.name}</h1>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-tertiary">
+              <span className="font-mono text-xs">{project.key}</span>
+              <span className="text-quaternary">·</span>
               {project.sourceBinding.kind === 'git' && project.sourceBinding.value ? (
-                <div className="inline-flex items-center gap-1.5 rounded-lg border border-secondary bg-primary px-2.5 py-1 text-secondary shadow-2xs">
-                  <span className="font-mono font-medium text-primary" title={project.sourceBinding.value}>
+                <span className="inline-flex items-center gap-1">
+                  <span className="font-mono text-xs text-secondary" title={project.sourceBinding.value}>
                     {formatRepoDisplay(project.sourceBinding.value)}
                   </span>
                   <button
                     type="button"
                     onClick={() => copySource(project.sourceBinding.value)}
-                    className="inline-flex size-4 items-center justify-center rounded text-tertiary transition-colors hover:bg-secondary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+                    className="inline-flex size-5 items-center justify-center rounded text-quaternary transition-colors hover:bg-secondary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
                     title={copied ? 'Copied Git URL!' : `Copy: ${project.sourceBinding.value}`}
                     aria-label="Copy Git URL"
                   >
@@ -238,82 +231,39 @@ export function CodeQualityProject() {
                       <Copy01 className="size-3" aria-hidden="true" />
                     )}
                   </button>
-                  {project.sourceBinding.value.startsWith('http') && (
-                    <a
-                      href={project.sourceBinding.value}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 font-semibold text-brand-secondary hover:text-brand-solid transition-colors border-l border-secondary pl-1.5 ml-0.5"
-                      title={`Open repository: ${project.sourceBinding.value}`}
-                    >
-                      <LinkExternal02 className="size-3" aria-hidden="true" />
-                      <span>View on Git</span>
-                    </a>
-                  )}
-                </div>
+                </span>
               ) : (
-                <div className="inline-flex items-center rounded-lg border border-secondary bg-primary px-2.5 py-1 capitalize text-secondary shadow-2xs">
-                  {project.sourceBinding.kind}
-                </div>
+                <span className="capitalize">{project.sourceBinding.kind}</span>
               )}
-
-              {/* Branch chip */}
-              <div className="inline-flex items-center gap-1.5 rounded-lg border border-secondary bg-primary px-2.5 py-1 text-secondary shadow-2xs">
-                <GitBranch01 className="size-3.5 text-tertiary" aria-hidden="true" />
-                <span className="font-mono font-medium text-primary">{project.sourceBinding.ref || 'main'}</span>
-              </div>
-
-              {/* Quality Gate Selector chip */}
-              <div className="inline-flex items-center gap-1.5 rounded-lg border border-secondary bg-primary px-2.5 py-1 text-secondary shadow-2xs">
-                <ShieldTick className="size-3.5 text-brand-secondary" aria-hidden="true" />
-                <span className="font-medium text-tertiary">Gate:</span>
-                <select
-                  aria-label="Quality gate"
-                  value={project.gateId}
-                  disabled={isRunning}
-                  onChange={(event) => assignGate(event.target.value)}
-                  className="rounded bg-transparent font-semibold text-primary focus:outline-none focus:ring-1 focus:ring-brand/60 cursor-pointer"
-                >
-                  <option value="">Synapse way (Default)</option>
-                  {gates.map((gate) => (
-                    <option key={gate.key} value={gate.key}>{gate.name}</option>
-                  ))}
-                </select>
-              </div>
+              <span className="text-quaternary">·</span>
+              <span className="font-mono text-xs">{project.sourceBinding.ref || 'main'}</span>
+              <span className="text-quaternary">·</span>
+              <select
+                aria-label="Quality gate"
+                value={project.gateId}
+                disabled={isRunning}
+                onChange={(event) => assignGate(event.target.value)}
+                className="h-6 rounded border border-secondary bg-primary px-1.5 text-xs text-primary focus:outline-none focus:ring-2 focus:ring-brand/60"
+              >
+                <option value="">Synapse way</option>
+                {gates.map((gate) => (
+                  <option key={gate.key} value={gate.key}>{gate.name}</option>
+                ))}
+              </select>
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2.5">
-            <Pill className={cn('shrink-0 ring-1 ring-inset font-semibold h-9 px-3 text-xs inline-flex items-center gap-1.5', statusMeta.tone)}>
-              <StatusIcon className="size-3.5" aria-hidden="true" /> {statusMeta.label}
+          <div className="flex shrink-0 items-center gap-2">
+            <Pill className={cn('shrink-0 ring-1 ring-inset', statusMeta.tone)}>
+              <StatusIcon className="size-3" aria-hidden="true" /> {statusMeta.label}
             </Pill>
-            <label
-              className={cn(
-                'inline-flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-3.5 text-sm font-semibold shadow-xs transition-colors',
-                coverageFile
-                  ? 'border-brand/40 bg-brand-primary/10 text-brand-secondary hover:bg-brand-primary/15'
-                  : 'border-secondary bg-primary text-primary hover:bg-secondary hover:border-primary',
-              )}
-            >
-              <Upload01 className="size-4" aria-hidden="true" />
-              <span className="max-w-28 truncate">{coverageFile ? coverageFile.name : 'Coverage'}</span>
-              <input
-                aria-label="Coverage report (optional)"
-                className="sr-only"
-                type="file"
-                accept=".info,.lcov,.xml,text/plain,application/xml,text/xml"
-                disabled={isRunning}
-                onChange={(event) => setCoverageFile(event.target.files?.[0] ?? null)}
-              />
+            <label className={cn('inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-secondary bg-primary px-2.5 py-1.5 text-xs', coverageFile ? 'text-primary' : 'text-tertiary')}>
+              <Upload01 className="size-3.5" aria-hidden="true" />
+              <span className="max-w-32 truncate">{coverageFile ? coverageFile.name : 'Coverage'}</span>
+              <input aria-label="Coverage report (optional)" className="sr-only" type="file" accept=".info,.lcov,.xml,text/plain,application/xml,text/xml" disabled={isRunning} onChange={(event) => setCoverageFile(event.target.files?.[0] ?? null)} />
             </label>
-            <Button
-              variant="brand"
-              className="h-9 px-4 !bg-brand-solid !text-white hover:!bg-brand-solid_hover shadow-xs font-semibold"
-              loading={isRunning}
-              disabled={isRunning}
-              onClick={startAnalysis}
-            >
-              <Play className="size-4 !text-white" aria-hidden="true" /> Run
+            <Button loading={isRunning} disabled={isRunning} onClick={startAnalysis}>
+              <Play className="size-4" aria-hidden="true" /> Run analysis
             </Button>
           </div>
         </div>

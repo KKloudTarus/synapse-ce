@@ -68,7 +68,7 @@ export function CodeQualityProjects() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Button
-            variant="brand"
+            variant="primary"
             className="!bg-brand-solid !text-white hover:!bg-brand-solid_hover shadow-xs"
             onClick={() => setCreating(true)}
           >

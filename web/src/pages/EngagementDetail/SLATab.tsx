@@ -8,7 +8,7 @@ import {
   RefreshCcw01,
   ShieldTick,
 } from '@untitledui/icons'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button, Card, EmptyState, ErrorState, Spinner, cn } from '../../components/ui'
 import { useFetch } from '../../hooks'
 import { ApiError, api } from '../../lib/api'
@@ -98,6 +98,13 @@ export function SLATab({ engagementId, findings }: { engagementId: string; findi
     },
     { deps: [engagementId] },
   )
+
+  // `localItems` is only an optimistic overlay applied right after a transition.
+  // Server data always wins once it arrives, otherwise Refresh would be a silent
+  // no-op and the shadow would outlive the engagement it belongs to.
+  useEffect(() => {
+    setLocalItems(null)
+  }, [fetchedItems])
 
   const items = localItems ?? fetchedItems
 
@@ -248,6 +255,8 @@ export function SLATab({ engagementId, findings }: { engagementId: string; findi
               ),
             )
             setSelected(null)
+            // Re-pull so the server stays authoritative; this also clears the overlay.
+            refetch()
           }}
         />
       )}

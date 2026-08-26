@@ -125,7 +125,7 @@ export function CopyProfileModal({
           {/* Modal Footer */}
           <div className="mt-6 flex items-center justify-end gap-3 pt-2">
             <Button
-              variant="brand"
+              variant="primary"
               type="submit"
               loading={saving}
               className="!bg-brand-solid !text-white hover:!bg-brand-solid_hover shadow-xs"
@@ -247,7 +247,7 @@ export function AssignProfileModal({
           {/* Modal Footer */}
           <div className="mt-6 flex items-center justify-end gap-3 pt-2">
             <Button
-              variant="brand"
+              variant="primary"
               type="submit"
               loading={saving}
               className="!bg-brand-solid !text-white hover:!bg-brand-solid_hover shadow-xs"

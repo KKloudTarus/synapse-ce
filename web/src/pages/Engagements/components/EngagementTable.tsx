@@ -214,8 +214,7 @@ export const EngagementTable: FC<EngagementTableProps> = ({
                   engagement.inScope[0]?.value ||
                   (engagement.businessAssetId ? assetNames[engagement.businessAssetId] : 'N/A')
 
-                const anyEngagement = engagement as any
-                const findingsCount = anyEngagement.findingsCount ?? null
+                const findingsCount = engagement.findingsCount ?? null
                 const totalFindings = findingsCount?.total ?? 0
 
                 return (
@@ -283,7 +282,7 @@ export const EngagementTable: FC<EngagementTableProps> = ({
                           <span className="font-mono text-xs font-semibold tabular-nums text-primary">
                             {totalFindings}
                           </span>
-                          {findingsCount.critical > 0 && (
+                          {(findingsCount?.critical ?? 0) > 0 && (
                             <SeverityBadge
                               severity="critical"
                               size="sm"
@@ -291,7 +290,7 @@ export const EngagementTable: FC<EngagementTableProps> = ({
                               className="font-mono text-[10px] tabular-nums"
                             />
                           )}
-                          {findingsCount.high > 0 && (
+                          {(findingsCount?.high ?? 0) > 0 && (
                             <SeverityBadge
                               severity="high"
                               size="sm"
@@ -299,7 +298,7 @@ export const EngagementTable: FC<EngagementTableProps> = ({
                               className="font-mono text-[10px] tabular-nums"
                             />
                           )}
-                          {findingsCount.medium > 0 && (
+                          {(findingsCount?.medium ?? 0) > 0 && (
                             <SeverityBadge
                               severity="medium"
                               size="sm"
@@ -317,9 +316,9 @@ export const EngagementTable: FC<EngagementTableProps> = ({
                     <td className="px-4 py-3.5">
                       <span
                         className="font-mono text-xs text-secondary"
-                        title={anyEngagement.lastScanDate || engagement.createdAt || undefined}
+                        title={engagement.lastScanDate || engagement.createdAt || undefined}
                       >
-                        {formatRelativeTime(anyEngagement.lastScanDate || engagement.createdAt)}
+                        {formatRelativeTime(engagement.lastScanDate || engagement.createdAt)}
                       </span>
                     </td>
 

@@ -58,6 +58,7 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
   const [err, setErr] = useState<string | null>(null)
   const [issued, setIssued] = useState<{ name: string; key: string } | null>(null)
   const [copied, setCopied] = useState(false)
+  const [copyError, setCopyError] = useState<string | null>(null)
 
   async function submit() {
     if (!name.trim()) { setErr('Name required'); return }
@@ -77,7 +78,15 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
 
   async function copyKey() {
     if (!issued) return
-    try { await navigator.clipboard.writeText(issued.key); setCopied(true) } catch {}
+    try {
+      await navigator.clipboard.writeText(issued.key)
+      setCopied(true)
+      setCopyError(null)
+    } catch {
+      // Clipboard writes reject in non-secure contexts or when the permission is
+      // denied — say so instead of leaving the button silently unchanged.
+      setCopyError('Copy failed. Select the key above and copy it manually.')
+    }
   }
 
   return (
@@ -85,8 +94,9 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
       <div className="flex items-center gap-2">
         <Input
           value={name}
-          onChange={(e) => { setName(e.target.value); setErr(null); setIssued(null); setCopied(false) }}
+          onChange={(e) => { setName(e.target.value); setErr(null); setIssued(null); setCopied(false); setCopyError(null) }}
           placeholder="Name"
+          aria-label="Name"
           className="h-9 w-56 px-3 py-1.5 text-sm"
         />
         <Select
@@ -113,6 +123,7 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
           </button>
         </div>
       )}
+      {copyError && <span className="text-xs text-critical">{copyError}</span>}
     </div>
   )
 }

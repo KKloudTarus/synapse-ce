@@ -17,8 +17,12 @@ export function Settings() {
         </p>
       </header>
 
-      {/* Sub-tab navigation */}
-      <div className="flex flex-wrap gap-1.5 rounded-xl border border-secondary bg-secondary/40 p-1.5" role="tablist">
+      {/* Sub-section navigation. These are route links, not ARIA tabs — a
+          role="tablist" whose children are plain anchors is an incomplete pattern. */}
+      <nav
+        aria-label="Settings sections"
+        className="flex flex-wrap gap-1.5 rounded-xl border border-secondary bg-secondary/40 p-1.5"
+      >
         {TABS.map((tab) => (
           <NavLink
             key={tab.to}
@@ -36,7 +40,7 @@ export function Settings() {
             {tab.label}
           </NavLink>
         ))}
-      </div>
+      </nav>
 
       <Outlet />
     </div>

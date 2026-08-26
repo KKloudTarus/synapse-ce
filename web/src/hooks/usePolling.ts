@@ -54,9 +54,17 @@ export function usePolling<T>(
   const mountedRef = useRef(true)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // Callers commonly pass an inline arrow, so `fetcher` has a new identity on
+  // every render. Holding it in a ref keeps `execute` stable — otherwise the
+  // subscribe effect re-runs each render and polls in a tight loop.
+  const fetcherRef = useRef(fetcher)
+  useEffect(() => {
+    fetcherRef.current = fetcher
+  }, [fetcher])
+
   const execute = useCallback(async () => {
     try {
-      const result = await fetcher()
+      const result = await fetcherRef.current()
       if (mountedRef.current) {
         setData(result)
         setError(null)
@@ -71,7 +79,7 @@ export function usePolling<T>(
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetcher, ...deps])
+  }, deps)
 
   useEffect(() => {
     mountedRef.current = true

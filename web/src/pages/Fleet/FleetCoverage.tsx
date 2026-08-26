@@ -1,7 +1,13 @@
 import { useState } from 'react'
 import { ChevronDown, Download01, Shield01 } from '@untitledui/icons'
 import { api, ApiError } from '../../lib/api'
-import type { FleetAgentHealth, FleetCoverageRow, FleetCoverageSummary, FleetVerdict } from '../../lib/types'
+import type {
+  FleetAgentDetail,
+  FleetAgentHealth,
+  FleetCoverageRow,
+  FleetCoverageSummary,
+  FleetVerdict,
+} from '../../lib/types'
 import { Button, Card, EmptyState, ErrorState, Pill, Spinner, cn } from '../../components/ui'
 import { VirtualTable, type Column } from '../../components/synapse/VirtualTable'
 import { FLEET_VERDICT_ORDER, FleetStateBadge, FleetVerdictBadge, formatFleetTime } from './fleetShared'
@@ -58,12 +64,31 @@ const COLUMNS: Column<FleetCoverageRow>[] = [
 ]
 
 // --- Agent Inline Detail ---
-const agentDetailCache = new Map<string, any>()
+// Short-lived cache so collapsing and re-expanding a row doesn't refetch, while
+// still picking up state changes (agent detail is live data).
+const AGENT_DETAIL_TTL_MS = 30_000
+const agentDetailCache = new Map<string, { detail: FleetAgentDetail; at: number }>()
+
+function readAgentDetailCache(agentId: string): FleetAgentDetail | undefined {
+  const entry = agentDetailCache.get(agentId)
+  if (!entry) return undefined
+  if (Date.now() - entry.at > AGENT_DETAIL_TTL_MS) {
+    agentDetailCache.delete(agentId)
+    return undefined
+  }
+  return entry.detail
+}
 
 function AgentInlineDetail({ agentId }: { agentId: string }) {
-  const cached = agentDetailCache.get(agentId)
-  const { data, error, loading } = useFetch(
-    () => cached ? Promise.resolve(cached) : api.getFleetAgent(agentId).then(d => { agentDetailCache.set(agentId, d); return d }),
+  const cached = readAgentDetailCache(agentId)
+  const { data, error, loading } = useFetch<FleetAgentDetail>(
+    () =>
+      cached
+        ? Promise.resolve(cached)
+        : api.getFleetAgent(agentId).then((d) => {
+            agentDetailCache.set(agentId, { detail: d, at: Date.now() })
+            return d
+          }),
     { deps: [agentId] }
   )
   const detail = data || cached
@@ -75,7 +100,7 @@ function AgentInlineDetail({ agentId }: { agentId: string }) {
   return (
     <div className="border-t border-secondary bg-secondary/10 px-4 py-3 space-y-2">
       <div className="flex flex-wrap gap-2">
-        {detail.agent.capabilities.map((c: string) => (
+        {detail.agent.capabilities.map((c) => (
           <Pill key={c}>{c}</Pill>
         ))}
       </div>
@@ -83,7 +108,7 @@ function AgentInlineDetail({ agentId }: { agentId: string }) {
         <div>
           <div className="text-[11px] font-semibold uppercase text-tertiary mb-1">Recent work</div>
           <div className="grid gap-1">
-            {detail.recentWork.slice(0, 5).map((w: any) => (
+            {detail.recentWork.slice(0, 5).map((w) => (
               <div key={w.id} className="flex items-center gap-3 text-xs text-tertiary">
                 <span className="font-mono text-primary font-medium">{w.capability}</span>
                 <span className="font-mono">{w.assetId}</span>
@@ -154,6 +179,8 @@ export function AgentsSection() {
               <div
                 role="button"
                 tabIndex={0}
+                aria-expanded={expandedId === agent.id}
+                aria-controls={`agent-detail-${agent.id}`}
                 onClick={() => setExpandedId(expandedId === agent.id ? null : agent.id)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
@@ -171,7 +198,11 @@ export function AgentsSection() {
                 <span className="text-xs tabular-nums text-quaternary hidden md:inline">{formatFleetTime(agent.lastSeen)}</span>
                 <ChevronDown className={cn('size-3.5 text-quaternary transition-transform duration-200', expandedId === agent.id && 'rotate-180')} />
               </div>
-              {expandedId === agent.id && <AgentInlineDetail agentId={agent.id} />}
+              {expandedId === agent.id && (
+                <div id={`agent-detail-${agent.id}`}>
+                  <AgentInlineDetail agentId={agent.id} />
+                </div>
+              )}
             </div>
           ))}
         </div>

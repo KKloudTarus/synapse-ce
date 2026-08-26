@@ -85,7 +85,11 @@ describe('EngagementDetail Page Shell', () => {
     fireEvent.click(findingsTab)
 
     await waitFor(() => {
-      expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'panel-findings')
+      // A single panel holds whichever tab is active, so its id is stable and the
+      // active group tab is what labels it.
+      const panel = screen.getByRole('tabpanel')
+      expect(panel).toHaveAttribute('id', 'engagement-tabpanel')
+      expect(panel).toHaveAttribute('aria-labelledby', 'tab-findings')
     })
   })
 

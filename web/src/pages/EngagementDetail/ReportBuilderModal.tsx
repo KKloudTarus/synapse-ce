@@ -113,7 +113,7 @@ export function ReportBuilderModal({ engagementId, onClose }: { engagementId: st
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button type="button" aria-label="Close" className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <button type="button" aria-label="Close" className="absolute inset-0 bg-overlay/50 backdrop-blur-sm" onClick={onClose} />
       <div
         ref={panelRef}
         tabIndex={-1}

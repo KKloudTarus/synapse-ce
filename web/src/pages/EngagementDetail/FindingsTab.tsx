@@ -48,11 +48,22 @@ export function FindingsTab({
   }, [filter, kindFilter, searchQuery])
 
   // Separate actionable third-party findings from first-party historical advisories
-  const thirdParty = (findings ?? []).filter((f) => f.class !== 'first_party_historical')
-  const historical = (findings ?? []).filter((f) => f.class === 'first_party_historical')
-  const kinds = Array.from(new Set(thirdParty.map((f) => f.kind).filter(Boolean)))
+  // Separate actionable third-party findings from first-party historical advisories.
+  const thirdParty = useMemo(
+    () => (findings ?? []).filter((f) => f.class !== 'first_party_historical'),
+    [findings],
+  )
+  const historical = useMemo(
+    () => (findings ?? []).filter((f) => f.class === 'first_party_historical'),
+    [findings],
+  )
+  // The Kind filter only appears when there's more than one to choose from.
+  const kinds = useMemo(
+    () => Array.from(new Set(thirdParty.map((f) => f.kind).filter(Boolean))),
+    [thirdParty],
+  )
 
-  // Filter rows by severity, kind, and search query
+  // Filter rows by severity, kind, and search query.
   const rows = useMemo(() => {
     const q = searchQuery.toLowerCase().trim()
     return thirdParty.filter((f) => {
@@ -74,7 +85,8 @@ export function FindingsTab({
     if (idx >= 0) {
       setPage(Math.floor(idx / PAGE_SIZE) + 1)
     }
-    setExpanded((current) => new Set(current).add(focusedFindingId))
+    // Bail out when already expanded so this never feeds a re-render cycle.
+    setExpanded((current) => (current.has(focusedFindingId) ? current : new Set(current).add(focusedFindingId)))
     const frame = requestAnimationFrame(() => {
       document.getElementById(findingAnchor(focusedFindingId))?.scrollIntoView({ block: 'center', behavior: 'smooth' })
     })

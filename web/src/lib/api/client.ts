@@ -55,7 +55,10 @@ export async function discoverSession(): Promise<BFFSession> {
   } catch {
     throw new ApiError(0, 'Cannot reach the API. Is the server running on :8080?')
   }
-  if (res.status === 401 || res.status === 403) return { authenticated: false, csrfToken: '' }
+  // 401/403 = not signed in; 404 = a token-only server that doesn't mount the OIDC BFF
+  // (the /api/auth/* routes are registered only when OIDC is enabled). Both mean "no
+  // session" — surface the login screen rather than an error.
+  if (res.status === 401 || res.status === 403 || res.status === 404) return { authenticated: false, csrfToken: '' }
   if (!res.ok) throw new ApiError(res.status, await errorMessage(res))
   const body = await res.json()
   if (body?.authenticated !== true) return { authenticated: false, csrfToken: '' }

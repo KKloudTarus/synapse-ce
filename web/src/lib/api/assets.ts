@@ -56,8 +56,8 @@ export const assetsApi = {
   listTechnicalAssets: async (): Promise<TechnicalAsset[]> =>
     ((await req('/assets')) ?? []).map(mapTechnicalAsset),
 
-  listBusinessAssets: async (query = ''): Promise<BusinessAssetPage> => {
-    const raw = await req(`/appsec/assets${query ? `?${query}` : ''}`)
+  listBusinessAssets: async (query = '', signal?: AbortSignal): Promise<BusinessAssetPage> => {
+    const raw = await req(`/appsec/assets${query ? `?${query}` : ''}`, signal ? { signal } : undefined)
     return { items: (raw.items ?? []).map(mapBusinessAsset), total: raw.total ?? 0, limit: raw.limit ?? 50, offset: raw.offset ?? 0 }
   },
 

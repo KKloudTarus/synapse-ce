@@ -1,5 +1,5 @@
-import { useState, useEffect, lazy, Suspense, type FC } from 'react'
-import { Link, useLocation, useParams } from 'react-router-dom'
+import { useState, useEffect, useCallback, lazy, Suspense, type FC } from 'react'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
   ChevronRight,
@@ -130,15 +130,40 @@ function getGroupForTab(tab: Tab): TabGroupDefinition {
   return TAB_GROUPS[0]
 }
 
+const ALL_TABS: Tab[] = TAB_GROUPS.flatMap((g) => (g.sub ? g.sub.map((s) => s.id) : [g.id as Tab]))
+
+function isTab(value: string | undefined): value is Tab {
+  return Boolean(value) && ALL_TABS.includes(value as Tab)
+}
+
 export function EngagementDetail() {
-  const { id = '' } = useParams()
+  const { id = '', tabSlug } = useParams()
   const { hash } = useLocation()
+  const navigate = useNavigate()
   const focusedFindingId = hash.startsWith('#finding-') ? decodeURIComponent(hash.slice(9)) : ''
   const [findings, setFindings] = useState<Finding[] | null>(null)
   const [scan, setScan] = useState<ScanResult | null>(null)
   const [job, setJob] = useState<ScanJob | null>(null)
-  const [tab, setTab] = useState<Tab>('overview')
+  // The `:tabSlug` route segment is the source of truth for the active tab, so
+  // /engagements/:id/<tab> deep links land on the right tab.
+  const [tab, setTabState] = useState<Tab>(() => (isTab(tabSlug) ? tabSlug : 'overview'))
   const [findingsFilter, setFindingsFilter] = useState<Severity | 'all'>('all')
+
+  useEffect(() => {
+    if (isTab(tabSlug)) setTabState(tabSlug)
+    else if (!tabSlug) setTabState('overview')
+  }, [tabSlug])
+
+  const setTab = useCallback(
+    (next: Tab) => {
+      setTabState(next)
+      const base = `/engagements/${encodeURIComponent(id)}`
+      // Keep the hash: a #finding-<id> deep link switches to the Findings tab and
+      // the hash is what FindingsTab scrolls to.
+      navigate(`${next === 'overview' ? base : `${base}/${next}`}${hash}`, { replace: true })
+    },
+    [hash, id, navigate],
+  )
 
   // --- Data fetches via useFetch ---
   const { data: engData, loading: engLoading, error: engErr, refetch: refetchEng } = useFetch<Engagement | null>(
@@ -152,11 +177,17 @@ export function EngagementDetail() {
     },
     { deps: [id] },
   )
-  const [eng, setEng] = useState<Engagement | null | undefined>(undefined)
+  // Local patch state so SettingsTab can update the engagement in place. It is
+  // deliberately never reset on refetch: mirroring `engLoading` into `undefined`
+  // unmounted the entire view (header, scan panel, active tab and its state)
+  // behind a full-page spinner on every VEX apply or SBOM import.
+  const [engPatch, setEngPatch] = useState<Engagement | null | undefined>(undefined)
   useEffect(() => {
-    if (engLoading) setEng(undefined)
-    else setEng(engData)
-  }, [engData, engLoading])
+    // A different engagement id invalidates any patch from the previous one.
+    setEngPatch(undefined)
+  }, [id])
+  const eng = engPatch !== undefined ? engPatch : engData
+  const setEng = setEngPatch
 
   const { data: fetchedFindings, refetch: refetchFindings } = useFetch<Finding[]>(
     () => api.findings(id).catch(() => [] as Finding[]),
@@ -184,7 +215,7 @@ export function EngagementDetail() {
 
   useEffect(() => {
     if (focusedFindingId) setTab('findings')
-  }, [focusedFindingId])
+  }, [focusedFindingId, setTab])
 
   function reloadFindings() {
     refetchFindings()
@@ -225,8 +256,10 @@ export function EngagementDetail() {
         }
       />
     )
-  if (eng === undefined) return <Spinner label="Loading engagement…" />
-  if (eng === null) {
+  // Spinner only on the first load. During a refetch `eng` still holds the
+  // previous engagement, so the view stays mounted.
+  if (eng == null && engLoading) return <Spinner label="Loading engagement…" />
+  if (eng == null) {
     return (
       <EmptyState
         icon={ShieldZap}
@@ -317,7 +350,7 @@ export function EngagementDetail() {
                 role="tab"
                 id={`tab-${group.id}`}
                 aria-selected={isGroupActive}
-                aria-controls={`panel-${isGroupActive ? tab : (group.sub ? group.sub[0].id : group.id)}`}
+                aria-controls="engagement-tabpanel"
                 onClick={() => {
                   if (group.sub && group.sub.length > 0) {
                     if (activeGroup.id !== group.id) {
@@ -364,7 +397,7 @@ export function EngagementDetail() {
                   className={cn(
                     'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-solid',
                     isSubActive
-                      ? 'bg-brand-solid text-white shadow-xs'
+                      ? 'bg-brand-solid text-primary_on-brand shadow-xs'
                       : 'text-secondary hover:bg-secondary hover:text-primary',
                   )}
                 >
@@ -372,8 +405,8 @@ export function EngagementDetail() {
                   {count !== undefined && count > 0 && (
                     <span
                       className={cn(
-                        'rounded-full px-1.5 py-0.2 text-[10px] font-bold tabular-nums',
-                        isSubActive ? 'bg-primary text-brand-secondary' : 'bg-secondary text-tertiary',
+                        'rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums',
+                        isSubActive ? 'bg-primary/20 text-primary_on-brand' : 'bg-secondary text-tertiary',
                       )}
                     >
                       {count}
@@ -386,8 +419,8 @@ export function EngagementDetail() {
         )}
       </div>
 
-      {/* Tab Panel Content */}
-      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${activeGroup.id}`} className="mt-4">
+      {/* A single panel holds whichever tab is active, so all tabs share its id. */}
+      <div role="tabpanel" id="engagement-tabpanel" aria-labelledby={`tab-${activeGroup.id}`} className="mt-5">
         {tab === 'overview' && (
           <OverviewTab findings={findings} scan={scan} job={job} onSelectSeverity={selectSeverity} onGoTab={setTab} />
         )}
@@ -403,7 +436,7 @@ export function EngagementDetail() {
             onReload={reloadFindings}
           />
         )}
-        {tab === 'sla' && <SLATab engagementId={id} findings={findings} />}
+        {tab === 'sla' && <SLATab key={id} engagementId={id} findings={findings} />}
         {tab === 'components' && <ComponentsTab scan={scan} />}
         {tab === 'vulns' && <VulnsTab scan={scan} />}
         {tab === 'graph' && (

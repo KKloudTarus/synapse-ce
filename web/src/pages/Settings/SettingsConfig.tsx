@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { LogOut01, Monitor01, Moon01, Server01, Sun } from '@untitledui/icons'
@@ -37,6 +37,42 @@ export function SettingsConfig() {
   const [showDisconnectModal, setShowDisconnectModal] = useState(false)
   const { logout } = useOptionalAuth()
   const navigate = useNavigate()
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  // Dialog semantics: move focus in, trap Tab, close on Escape, restore focus out.
+  useEffect(() => {
+    if (!showDisconnectModal) return
+    const previous = document.activeElement as HTMLElement | null
+    dialogRef.current?.focus()
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowDisconnectModal(false)
+        return
+      }
+      if (event.key !== 'Tab') return
+      const dialog = dialogRef.current
+      if (!dialog) return
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'),
+      )
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+      if (event.shiftKey && (active === first || active === dialog || !dialog.contains(active))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      previous?.focus?.()
+    }
+  }, [showDisconnectModal])
 
   useEffect(() => {
     const resolved = resolveTheme(pref)
@@ -125,6 +161,7 @@ export function SettingsConfig() {
               type="button"
               onClick={() => handleThemeChange(opt.value)}
               aria-label={`${opt.label} theme`}
+              aria-pressed={pref === opt.value}
               className={cn(
                 'flex items-center gap-3 rounded-xl border p-3.5 text-left transition-all',
                 pref === opt.value
@@ -175,17 +212,26 @@ export function SettingsConfig() {
       {showDisconnectModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
           {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/60"
+          <button
+            type="button"
+            aria-label="Cancel disconnect"
+            className="absolute inset-0 bg-overlay/60"
             onClick={() => setShowDisconnectModal(false)}
           />
           {/* Modal */}
-          <div className="relative w-full max-w-[360px] rounded-xl border border-secondary bg-primary p-5 shadow-lg">
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="disconnect-dialog-title"
+            tabIndex={-1}
+            className="relative w-full max-w-[360px] rounded-xl border border-secondary bg-primary p-5 shadow-lg outline-none"
+          >
             <div className="flex flex-col items-center text-center">
               <div className="mb-3 flex size-10 items-center justify-center rounded-full bg-critical/10">
                 <LogOut01 className="size-4.5 text-critical" />
               </div>
-              <h2 className="text-base font-semibold text-primary">Disconnect?</h2>
+              <h2 id="disconnect-dialog-title" className="text-base font-semibold text-primary">Disconnect?</h2>
               <p className="mt-1.5 text-sm text-tertiary leading-relaxed">
                 Your session token will be cleared. You'll need to re-authenticate to continue.
               </p>

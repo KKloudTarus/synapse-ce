@@ -231,7 +231,7 @@ export function IssueDetail({
 
             <Button
               type="submit"
-              variant="brand"
+              variant="primary"
               loading={busy}
               disabled={busy}
               className="w-full !bg-brand-solid !text-white hover:!bg-brand-solid_hover shadow-xs font-semibold"

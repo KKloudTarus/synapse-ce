@@ -40,15 +40,22 @@ export function VirtualTable<T>({
     overscan: 12,
   })
 
+  // Before the parent element is measured the virtualizer returns nothing, so
+  // fall back to the caller's own size estimate rather than a hardcoded height.
+  const estimateSize = (index: number) => (typeof rowHeight === 'function' ? rowHeight(items[index]) : rowHeight)
   const virtualItems = v.getVirtualItems()
+  let fallbackStart = 0
   const renderedItems =
     virtualItems.length > 0
       ? virtualItems
-      : items.slice(0, Math.min(items.length, 60)).map((_, index) => ({
-          index,
-          start: index * (typeof rowHeight === 'function' ? 46 : rowHeight),
-          size: typeof rowHeight === 'function' ? 46 : rowHeight,
-        }))
+      : items.slice(0, Math.min(items.length, 60)).map((_, index) => {
+          const size = estimateSize(index)
+          const start = fallbackStart
+          fallbackStart += size
+          return { index, start, size }
+        })
+  const totalSize =
+    v.getTotalSize() || items.reduce((sum, _item, index) => sum + estimateSize(index), 0)
 
   return (
     <div
@@ -59,19 +66,23 @@ export function VirtualTable<T>({
       className={cn('overflow-auto', maxHeightClass)}
     >
       <div className={tableMinWidthClass}>
-        <div
-          className={cn(
-            'sticky top-0 z-20 flex items-center gap-3 border-y border-borderstrong bg-elevated/95 px-4 py-3 text-[11px] uppercase tracking-[0.14em] text-foreground shadow-sm backdrop-blur',
-            headerClassName,
-          )}
-        >
-          {columns.map((c, i) => (
-            <div key={i} className={cn('font-semibold', c.className)}>
-              {c.header}
-            </div>
-          ))}
+        <div role="rowgroup">
+          <div
+            role="row"
+            aria-rowindex={1}
+            className={cn(
+              'sticky top-0 z-20 flex items-center gap-3 border-y border-borderstrong bg-elevated/95 px-4 py-3 text-[11px] uppercase tracking-[0.14em] text-foreground shadow-sm backdrop-blur',
+              headerClassName,
+            )}
+          >
+            {columns.map((c, i) => (
+              <div key={i} role="columnheader" className={cn('font-semibold', c.className)}>
+                {c.header}
+              </div>
+            ))}
+          </div>
         </div>
-        <div style={{ height: `${v.getTotalSize() || items.length * 46}px`, position: 'relative' }}>
+        <div role="rowgroup" style={{ height: `${totalSize}px`, position: 'relative' }}>
           {renderedItems.map((vi) => {
             const item = items[vi.index]
             return (
