@@ -54,7 +54,7 @@ func (h *harness) buildSignedTelemetry(epoch, seq, prev uint64, envelopes ...tel
 	}
 	m := fleetagent.TelemetryBatchManifest{
 		ProtocolVersion: fleetagent.TelemetryProtocolVersion, SchemaVersion: telemetry.SchemaVersion,
-		BatchID: shared.ID("batch-fm"), AgentID: e2eAgent, AssetID: e2eAsset, StreamID: e2eStream,
+		BatchID: shared.ID("batch-fm"), AgentID: e2eAgent, HostID: e2eAgent, AssetID: e2eAsset, StreamID: e2eStream,
 		Position:         fleetagent.StreamPosition{Priority: fleetagent.PriorityP1, Epoch: epoch, Sequence: seq, Session: e2eSession, Boot: e2eBoot},
 		PreviousSequence: prev, EventTimeMin: minAt, EventTimeMax: maxAt,
 		ObservedCount: len(events), KeptCount: len(events), Events: refs,
@@ -85,6 +85,11 @@ func (f *flakyTransport) IngestBatchEvents(ctx context.Context, batch ports.Tele
 func TestFailure_NetworkOutageRetryIsIdempotent(t *testing.T) {
 	h := newHarness(t, 0)
 	mem := memory.NewTelemetryTransportStore()
+	if err := mem.BindTelemetryAsset(h.ctx, ports.TelemetryAssetBinding{
+		TenantID: e2eTenant, AgentID: e2eAgent, AssetID: e2eAsset, UpdatedAt: h.now,
+	}); err != nil {
+		t.Fatalf("bind telemetry asset: %v", err)
+	}
 	flaky := &flakyTransport{TelemetryTransportStore: mem, failNext: 1}
 	svc, err := telemetryingest.NewService(flaky, h.keys, h.audit, h.clock)
 	if err != nil {
