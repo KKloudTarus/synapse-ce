@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
@@ -265,7 +264,10 @@ func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, erro
 			return nil, exitUnavailable, nil
 		}
 		if res.ExitCode != 0 && res.ExitCode != exitUnavailable {
-			return nil, res.ExitCode, fmt.Errorf("synapse-ast %q: exit %d: %s", root, res.ExitCode, truncate(string(res.Stderr), 300))
+			// Deliberately omit the child's stderr (mirrors the direct-exec path below): keep the
+			// "parser stderr never enters logs" invariant robust even if the sidecar's stderr behaviour
+			// ever changes to echo target source.
+			return nil, res.ExitCode, fmt.Errorf("synapse-ast %q: exit %d", root, res.ExitCode)
 		}
 		if res.Truncated {
 			return nil, res.ExitCode, fmt.Errorf("synapse-ast %q output exceeds %d bytes", root, maxASTOutputBytes)
@@ -318,15 +320,4 @@ func (w *boundedOutput) Write(p []byte) (int, error) {
 	}
 	_, _ = w.buf.Write(p)
 	return len(p), nil
-}
-
-// truncate caps sidecar stderr in an error message to a bounded, UTF-8-valid prefix.
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return s[:n] + "…"
 }

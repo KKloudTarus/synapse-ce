@@ -1890,6 +1890,8 @@ func main() {
 		factsProvider := asttool.New(cfg.ASTBin)
 		if scaSandbox != nil {
 			factsProvider = factsProvider.WithRunner(scaSandbox)
+		} else {
+			log.Warn("python taint: synapse-ast runs unsandboxed (dev only); target code is parsed but never executed")
 		}
 		pythonTaint, perr := taintscan.NewPythonCoordinator(factsProvider, judgmentSvc, taint.DefaultPythonCatalog(), auditLog, clock)
 		if perr != nil {

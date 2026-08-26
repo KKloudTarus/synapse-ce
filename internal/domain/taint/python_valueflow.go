@@ -528,21 +528,24 @@ func (g *ValueFlowGraph) vulnerabilities(maxWork int) []PythonTaintPath {
 	seenFinding := map[string]bool{}
 	work := 0
 	for _, source := range g.Sources {
-		type state struct {
-			id   string
-			path []string
-		}
-		queue := []state{{id: source.ValueID, path: []string{source.ValueID}}}
+		// BFS from the source. Store parent back-links + per-node depth rather than copying the full
+		// path into every queued state: this keeps the worst-case memory envelope O(nodes) instead of
+		// O(nodes × path-length) near the maxWork ceiling. The witness path is reconstructed from the
+		// back-links only when a sink is hit, and (because seen[] dedups on first discovery) it is the
+		// same first-discovery path the copy-per-state form produced.
+		queue := []string{source.ValueID}
 		seen := map[string]bool{source.ValueID: true}
+		parent := map[string]string{}
+		depth := map[string]int{source.ValueID: 1}
 		for len(queue) > 0 {
 			work++
 			if work > maxWork {
 				g.Truncated = true
 				return sortedPythonTaintPaths(findings)
 			}
-			current := queue[0]
+			currentID := queue[0]
 			queue = queue[1:]
-			for _, sink := range sinks[current.id] {
+			for _, sink := range sinks[currentID] {
 				if sink.Class != source.Class {
 					continue
 				}
@@ -554,23 +557,41 @@ func (g *ValueFlowGraph) vulnerabilities(maxWork int) []PythonTaintPath {
 				findings = append(findings, PythonTaintPath{
 					Class: sink.Class, CWE: sink.CWE, Rule: sink.Rule, SourceID: source.ValueID,
 					SinkID: sink.ValueID, CallID: sink.CallID, Callee: sink.Callee,
-					Path: append([]string(nil), current.path...), SourcePos: source.Pos, SinkPos: sink.Pos,
+					Path: reconstructPythonTaintPath(parent, source.ValueID, currentID), SourcePos: source.Pos, SinkPos: sink.Pos,
 				})
 			}
-			if len(current.path) >= maxPythonTaintPath || sanitized[current.id+"\x00"+string(source.Class)] {
+			if depth[currentID] >= maxPythonTaintPath || sanitized[currentID+"\x00"+string(source.Class)] {
 				continue
 			}
-			for _, next := range adjacency[current.id] {
+			for _, next := range adjacency[currentID] {
 				if seen[next] {
 					continue
 				}
 				seen[next] = true
-				path := append(append([]string(nil), current.path...), next)
-				queue = append(queue, state{id: next, path: path})
+				parent[next] = currentID
+				depth[next] = depth[currentID] + 1
+				queue = append(queue, next)
 			}
 		}
 	}
 	return sortedPythonTaintPaths(findings)
+}
+
+// reconstructPythonTaintPath rebuilds the ordered source-to-node witness from BFS parent back-links.
+func reconstructPythonTaintPath(parent map[string]string, source, node string) []string {
+	path := []string{node}
+	for cur := node; cur != source; {
+		prev, ok := parent[cur]
+		if !ok {
+			break
+		}
+		path = append(path, prev)
+		cur = prev
+	}
+	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
+		path[i], path[j] = path[j], path[i]
+	}
+	return path
 }
 
 func sortedPythonTaintPaths(findings []PythonTaintPath) []PythonTaintPath {
@@ -638,9 +659,9 @@ func matchesAnyName(qualified string, patterns []string) bool {
 
 func trustedCallee(candidates []string, raw string) string {
 	if len(candidates) > 0 {
-		copy := append([]string(nil), candidates...)
-		sort.Strings(copy)
-		return copy[0]
+		sorted := append([]string(nil), candidates...)
+		sort.Strings(sorted)
+		return sorted[0]
 	}
 	if len(raw) > 256 {
 		return "python:unresolved"

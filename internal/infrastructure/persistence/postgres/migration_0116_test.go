@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestMigration0115FindingDataFlowColumn(t *testing.T) {
+func TestMigration0116FindingDataFlowColumn(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -27,9 +27,9 @@ func TestMigration0115FindingDataFlowColumn(t *testing.T) {
 			WHERE table_schema='public' AND table_name='findings'
 			  AND column_name='data_flow' AND data_type='jsonb' AND is_nullable='YES'
 		)`).Scan(&exists); err != nil {
-		t.Fatalf("inspect 0115: %v", err)
+		t.Fatalf("inspect 0116: %v", err)
 	}
 	if !exists {
-		t.Fatal("0115 did not add nullable findings.data_flow JSONB")
+		t.Fatal("0116 did not add nullable findings.data_flow JSONB")
 	}
 }

@@ -159,7 +159,7 @@ func (e *pythonFactExtractor) walk(node *sitter.Node, scope pythonScope) {
 	case "for_statement", "for_in_clause":
 		e.bindingFact(node, scope, "left", "right")
 	case "with_item":
-		e.bindingFact(node, scope, "alias", "value")
+		e.withItemFact(node, scope)
 	case "return_statement":
 		e.returnFact(node, scope)
 	}
@@ -370,8 +370,21 @@ func (e *pythonFactExtractor) assignmentFact(node *sitter.Node, scope pythonScop
 }
 
 func (e *pythonFactExtractor) bindingFact(node *sitter.Node, scope pythonScope, leftField, rightField string) {
-	left := node.ChildByFieldName(leftField)
-	right := node.ChildByFieldName(rightField)
+	e.bindingFactNodes(node, scope, node.ChildByFieldName(leftField), node.ChildByFieldName(rightField))
+}
+
+// withItemFact records the binding introduced by `with <expr> as <target>:`. In the grammar the
+// with_item's `value` field is an as_pattern whose subject is its first named child and whose target is
+// the `alias` field (an as_pattern_target); a with_item without an `as` clause binds nothing.
+func (e *pythonFactExtractor) withItemFact(node *sitter.Node, scope pythonScope) {
+	value := node.ChildByFieldName("value")
+	if value == nil || value.Type() != "as_pattern" {
+		return
+	}
+	e.bindingFactNodes(node, scope, value.ChildByFieldName("alias"), value.NamedChild(0))
+}
+
+func (e *pythonFactExtractor) bindingFactNodes(node *sitter.Node, scope pythonScope, left, right *sitter.Node) {
 	targets := e.targets(left)
 	if len(targets) == 0 || right == nil {
 		return
@@ -535,7 +548,7 @@ func (e *pythonFactExtractor) targets(node *sitter.Node) []pythonprogram.Referen
 	if ref.Kind == pythonprogram.ReferenceName || ref.Kind == pythonprogram.ReferenceAttribute {
 		return []pythonprogram.Reference{ref}
 	}
-	if node.Type() != "pattern_list" && node.Type() != "tuple" && node.Type() != "list" && node.Type() != "list_pattern" && node.Type() != "tuple_pattern" {
+	if node.Type() != "pattern_list" && node.Type() != "tuple" && node.Type() != "list" && node.Type() != "list_pattern" && node.Type() != "tuple_pattern" && node.Type() != "as_pattern_target" {
 		return nil
 	}
 	var out []pythonprogram.Reference
