@@ -12,6 +12,7 @@ import {
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner, cn } from '../../components/ui'
+import { BadgeWithIcon } from '../../components/base/badges/badges'
 import { PaginationCardDefault } from '../../components/application/pagination/pagination'
 import { api } from '../../lib/api'
 import { useFetch } from '../../hooks'
@@ -80,14 +81,11 @@ export function Assets() {
       <header className="flex flex-wrap items-center justify-between gap-4 pb-1">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">Security Asset Inventory</h1>
-          <p className="mt-1 text-sm text-secondary">
-            Track assets, engagement coverage, and security posture
-          </p>
         </div>
         <Button
           variant={creating ? 'secondary' : 'brand'}
           onClick={() => setCreating((value) => !value)}
-          className={creating ? '!border-brand-solid !text-brand-secondary hover:!bg-brand-primary/10' : undefined}
+          className={creating ? '!border-brand-solid !text-brand-secondary hover:!bg-brand-primary/10' : '!bg-brand-solid !text-white hover:!bg-brand-solid_hover shadow-xs'}
         >
           {creating ? <><XClose className="size-4" />Cancel</> : <><Plus className="size-4" />New Asset</>}
         </Button>
@@ -100,10 +98,10 @@ export function Assets() {
       )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <SummaryCard icon={LayersThree01} label="Total assets" value={result?.total ?? '—'} hint="Across this inventory" tone="muted" />
-        <SummaryCard icon={AlertTriangle} label="Critical" value={visible.filter((asset) => asset.criticality === 'critical').length} hint="On current page" tone="critical" />
-        <SummaryCard icon={Activity} label="Active" value={visible.filter((asset) => asset.lifecycle === 'active').length} hint="On current page" tone="accent" />
-        <SummaryCard icon={ShieldTick} label="Needs attention" value={visible.filter((asset) => !['good', 'unknown'].includes(asset.posture ?? 'unknown')).length} hint="On current page" tone="brand" />
+        <SummaryCard icon={LayersThree01} label="Total assets" value={result?.total ?? 0} tone="muted" />
+        <SummaryCard icon={AlertTriangle} label="Critical" value={visible.filter((asset) => asset.criticality === 'critical').length} tone="critical" />
+        <SummaryCard icon={Activity} label="Active" value={visible.filter((asset) => asset.lifecycle === 'active').length} tone="accent" />
+        <SummaryCard icon={ShieldTick} label="Needs attention" value={visible.filter((asset) => !['good', 'unknown'].includes(asset.posture ?? 'unknown')).length} tone="brand" />
       </div>
 
       <Card className="overflow-hidden" bodyClass="p-0">
@@ -111,9 +109,8 @@ export function Assets() {
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="font-semibold text-primary">Asset inventory</h2>
-              <p className="mt-0.5 text-xs text-tertiary">Filter and open an Asset to manage its complete security workspace.</p>
             </div>
-            {result && <span className="text-sm text-tertiary">{result.total} result{result.total === 1 ? '' : 's'}</span>}
+            {result && <span className="text-sm font-medium font-mono text-tertiary tabular-nums">{result.total} result{result.total === 1 ? '' : 's'}</span>}
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="relative">
@@ -147,7 +144,7 @@ export function Assets() {
           <>
             <div className="hidden overflow-x-auto md:block">
               <table className="w-full min-w-[980px] border-collapse text-left text-sm">
-                <thead className="border-b border-secondary bg-secondary/50 text-[11px] font-semibold uppercase tracking-wider text-tertiary">
+                <thead className="border-b border-secondary bg-secondary text-[11px] font-semibold uppercase tracking-wider text-tertiary">
                   <tr>
                     <th className="px-5 py-3">Asset</th>
                     <th className="px-4 py-3">Type</th>
@@ -183,42 +180,42 @@ function SummaryCard({
   icon: Icon,
   label,
   value,
-  hint,
   tone = 'muted',
 }: {
   icon: React.ComponentType<{ className?: string }>
   label: string
   value: number | string
-  hint: string
   tone?: 'muted' | 'critical' | 'accent' | 'brand'
 }) {
   const iconColor = {
-    muted: 'text-quaternary',
+    muted: 'text-tertiary',
     critical: 'text-critical',
-    accent: 'text-accent',
+    accent: 'text-success-primary',
     brand: 'text-brand-secondary',
   }[tone]
   return (
     <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-xs font-semibold text-secondary">{label}</div>
-          <div className="mt-2 text-3xl font-bold tabular-nums text-primary sm:text-4xl">{value}</div>
+        <div className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-secondary">{label}</span>
+          <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">{value}</div>
         </div>
-        <Icon className={cn('mt-0.5 size-5 shrink-0', iconColor)} />
+        <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
+          <Icon className={cn('size-5', iconColor)} aria-hidden="true" />
+        </span>
       </div>
-      <div className="mt-2 text-xs text-tertiary">{hint}</div>
     </div>
   )
 }
 
 function AssetRow({ asset }: { asset: BusinessAsset }) {
+  const assetTarget = asset.key || asset.id
   return (
-    <tr className="group transition-colors hover:bg-secondary/40">
+    <tr className="group transition-colors hover:bg-secondary">
       <td className="px-5 py-4">
-        <Link to={`/assets/${encodeURIComponent(asset.key)}`} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50">
+        <Link to={`/assets/${encodeURIComponent(assetTarget)}`} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50">
           <div className="font-semibold text-primary group-hover:text-brand-secondary">{asset.name}</div>
-          <div className="mt-1 font-mono text-xs text-tertiary">{asset.key}</div>
+          <div className="mt-1 font-mono text-xs text-tertiary">{asset.key || asset.id}</div>
         </Link>
       </td>
       <td className="px-4 py-4"><Pill>{asset.type.replace('_', ' ')}</Pill></td>
@@ -228,7 +225,7 @@ function AssetRow({ asset }: { asset: BusinessAsset }) {
       <td className="px-4 py-4"><PostureBadge rating={asset.posture ?? 'unknown'} /></td>
       <td className="whitespace-nowrap px-4 py-4 text-tertiary">{formatDate(asset.updatedAt)}</td>
       <td className="px-4 py-4">
-        <Link to={`/assets/${encodeURIComponent(asset.key)}`} aria-label={`Open ${asset.name}`} className="inline-flex size-8 items-center justify-center rounded-lg text-quaternary hover:bg-secondary hover:text-primary">
+        <Link to={`/assets/${encodeURIComponent(assetTarget)}`} aria-label={`Open ${asset.name}`} className="inline-flex size-8 items-center justify-center rounded-lg text-quaternary hover:bg-secondary hover:text-primary">
           <ArrowUpRight className="size-4" />
         </Link>
       </td>
@@ -237,12 +234,13 @@ function AssetRow({ asset }: { asset: BusinessAsset }) {
 }
 
 function AssetMobileRow({ asset }: { asset: BusinessAsset }) {
+  const assetTarget = asset.key || asset.id
   return (
-    <Link to={`/assets/${encodeURIComponent(asset.key)}`} className="block p-4 transition-colors hover:bg-secondary/40">
+    <Link to={`/assets/${encodeURIComponent(assetTarget)}`} className="block p-4 transition-colors hover:bg-secondary/40">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate font-semibold text-primary">{asset.name}</h2>
-          <p className="mt-1 truncate font-mono text-xs text-tertiary">{asset.key}</p>
+          <p className="mt-1 truncate font-mono text-xs text-tertiary">{asset.key || asset.id}</p>
         </div>
         <PostureBadge rating={asset.posture ?? 'unknown'} />
       </div>
@@ -272,24 +270,30 @@ function LifecycleBadge({ value }: { value: BusinessAsset['lifecycle'] }) {
 }
 
 function formatDate(value: string | null) {
-  return value ? new Date(value).toLocaleDateString() : '—'
+  return value ? new Date(value).toLocaleDateString() : 'N/A'
 }
 
 export function PostureBadge({ rating }: { rating: string }) {
-  const style = rating === 'good'
-    ? 'bg-accent/10 text-accent ring-accent/30'
-    : rating === 'critical'
-      ? 'bg-critical/10 text-critical ring-critical/30'
-      : rating === 'high_risk'
-        ? 'bg-high/10 text-high ring-high/30'
-        : rating === 'attention'
-          ? 'bg-medium/10 text-medium ring-medium/30'
-          : 'bg-secondary text-tertiary ring-secondary'
+  const colorMap: Record<string, 'error' | 'orange' | 'warning' | 'success' | 'gray'> = {
+    critical: 'error',
+    high_risk: 'orange',
+    attention: 'warning',
+    good: 'success',
+    unknown: 'gray',
+  }
+  const color = colorMap[rating] || 'gray'
+  const label = rating.replace('_', ' ')
+
   return (
-    <span className={cn('inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-semibold capitalize ring-1 ring-inset', style)}>
-      <ShieldTick className="size-3" />
-      {rating.replace('_', ' ')}
-    </span>
+    <BadgeWithIcon
+      type="pill-color"
+      size="sm"
+      color={color}
+      iconLeading={ShieldTick}
+      className="capitalize font-semibold"
+    >
+      {label}
+    </BadgeWithIcon>
   )
 }
 

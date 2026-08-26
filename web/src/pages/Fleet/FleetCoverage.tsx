@@ -23,7 +23,7 @@ const COLUMNS: Column<FleetCoverageRow>[] = [
     className: 'w-40',
     cell: (r) => (
       <span className="font-mono text-[12px] text-tertiary" title={r.capability || undefined}>
-        {r.capability || '—'}
+        {r.capability || 'N/A'}
       </span>
     ),
   },
@@ -35,7 +35,7 @@ const COLUMNS: Column<FleetCoverageRow>[] = [
   {
     header: 'Detail',
     className: 'flex-1',
-    cell: (r) => <span className="text-tertiary">{r.detail || '—'}</span>,
+    cell: (r) => <span className="text-tertiary">{r.detail || 'N/A'}</span>,
   },
   {
     header: 'Last run',
@@ -51,7 +51,7 @@ const COLUMNS: Column<FleetCoverageRow>[] = [
     className: 'w-40',
     cell: (r) => (
       <span className="font-mono text-[12px] text-tertiary" title={r.agentId || undefined}>
-        {r.agentId || '—'}
+        {r.agentId || 'N/A'}
       </span>
     ),
   },
@@ -161,12 +161,12 @@ export function AgentsSection() {
                     setExpandedId(expandedId === agent.id ? null : agent.id)
                   }
                 }}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-sm hover:bg-secondary/30 transition-colors cursor-pointer"
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-sm hover:bg-secondary transition-colors cursor-pointer"
               >
                 <span className="font-mono text-xs font-semibold text-primary w-24 truncate">{agent.id}</span>
-                <span className="text-secondary flex-1 truncate">{agent.name || '—'}</span>
-                <span className="hidden sm:inline text-tertiary text-xs">{agent.platform || '—'}</span>
-                <span className="hidden sm:inline font-mono text-xs text-tertiary">{agent.agentVersion || '—'}</span>
+                <span className="text-secondary flex-1 truncate">{agent.name || 'N/A'}</span>
+                <span className="hidden sm:inline text-tertiary text-xs">{agent.platform || 'N/A'}</span>
+                <span className="hidden sm:inline font-mono text-xs text-tertiary">{agent.agentVersion || 'N/A'}</span>
                 <FleetStateBadge state={agent.state} />
                 <span className="text-xs tabular-nums text-quaternary hidden md:inline">{formatFleetTime(agent.lastSeen)}</span>
                 <ChevronDown className={cn('size-3.5 text-quaternary transition-transform duration-200', expandedId === agent.id && 'rotate-180')} />
@@ -214,10 +214,9 @@ export function FleetCoverage() {
       {/* Header + inline stats (no card) */}
       <header>
         <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">Fleet</h1>
-        <p className="mt-1 text-sm text-secondary">Agent health and per-asset coverage at a glance</p>
 
         {summary && (
-          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-secondary bg-secondary/40 px-4 py-2.5">
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-secondary bg-secondary px-4 py-2.5">
             <span className="text-sm text-secondary">
               <span className="font-bold text-lg tabular-nums text-primary">{Object.values(summary.rowsByVerdict).reduce((a, b) => a + b, 0)}</span> pairs assessed
             </span>
@@ -266,7 +265,6 @@ export function FleetCoverage() {
                   variant="secondary"
                   onClick={onExport}
                   loading={exporting}
-                  className="!border-brand-solid !text-brand-secondary hover:!bg-brand-primary/10"
                 >
                   <Download01 className="size-4" /> Export CSV
                 </Button>
@@ -286,10 +284,6 @@ export function FleetCoverage() {
               />
             </Card>
           )}
-
-          <p className="text-xs text-tertiary">
-            Every state except <span className="font-semibold text-primary">{verdictLabel('covered')}</span> is a gap — surfaced, not hidden.
-          </p>
         </div>
       )}
     </div>

@@ -15,15 +15,41 @@ import { mapFinding } from './findings'
 import type { Engagement } from '../types'
 
 function mapBusinessAsset(r: any): BusinessAsset {
-  return { id: r.ID ?? '', key: r.Key ?? '', name: r.Name ?? '', description: r.Description ?? '', type: r.Type ?? 'application', criticality: r.Criticality ?? 'medium', lifecycle: r.Lifecycle ?? 'draft', owner: r.Owner ?? '', metadata: r.Metadata ?? {}, version: r.Version ?? 1, createdAt: r.Audit?.CreatedAt ?? null, updatedAt: r.Audit?.UpdatedAt ?? null, posture: r.posture, postureExplanation: r.posture_explanation }
+  if (!r) return null as any
+  return {
+    id: r.ID ?? r.id ?? '',
+    key: r.Key ?? r.key ?? '',
+    name: r.Name ?? r.name ?? '',
+    description: r.Description ?? r.description ?? '',
+    type: r.Type ?? r.type ?? 'application',
+    criticality: r.Criticality ?? r.criticality ?? 'medium',
+    lifecycle: r.Lifecycle ?? r.lifecycle ?? 'draft',
+    owner: r.Owner ?? r.owner ?? '',
+    metadata: r.Metadata ?? r.metadata ?? {},
+    version: r.Version ?? r.version ?? 1,
+    createdAt: r.Audit?.CreatedAt ?? r.Audit?.created_at ?? r.created_at ?? null,
+    updatedAt: r.Audit?.UpdatedAt ?? r.Audit?.updated_at ?? r.updated_at ?? null,
+    posture: r.posture,
+    postureExplanation: r.posture_explanation,
+  }
 }
 
 function mapAssetMembership(r: any): AssetMembership {
-  return { componentId: r.ComponentID ?? '', role: r.Role ?? 'supporting', provenance: r.Provenance ?? '' }
+  return {
+    componentId: r.ComponentID ?? r.component_id ?? r.componentId ?? r.id ?? '',
+    role: r.Role ?? r.role ?? 'supporting',
+    provenance: r.Provenance ?? r.provenance ?? '',
+  }
 }
 
 function mapTechnicalAsset(r: any): TechnicalAsset {
-  return { id: r.ID ?? '', kind: r.Kind ?? '', key: r.Key ?? '', name: r.Name ?? '', attributes: r.Attributes ?? {} }
+  return {
+    id: r.ID ?? r.id ?? '',
+    kind: r.Kind ?? r.kind ?? '',
+    key: r.Key ?? r.key ?? '',
+    name: r.Name ?? r.name ?? '',
+    attributes: r.Attributes ?? r.attributes ?? {},
+  }
 }
 
 export const assetsApi = {

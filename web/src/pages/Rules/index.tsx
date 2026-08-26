@@ -18,6 +18,7 @@ import {
 } from '@untitledui/icons'
 import { Link } from 'react-router-dom'
 import { Button, Card, EmptyState, Spinner, cn } from '../../components/ui'
+import { Badge } from '../../components/base/badges/badges'
 import { SeverityBadge } from '../../components/synapse/SeverityBadge'
 import { VirtualRuleCards } from '../../components/rules/VirtualRuleCards'
 import { formatRuleType } from '../../lib/ruleFormat'
@@ -254,19 +255,13 @@ export default function Rules() {
     <div className="space-y-6">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-primary">Rules</h1>
-          <p className="text-sm text-tertiary">
-            Security and code-quality rules with rationale and examples
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">Rules</h1>
         </div>
         <div className="flex shrink-0 items-center justify-end">
           {!catalogLoading && !catalogError && (
-            <div
-              className="inline-flex items-center rounded-full border border-brand/30 bg-brand-primary/10 px-3.5 py-1.5 text-base font-bold text-brand-secondary shadow-xs tabular-nums"
-              aria-live="polite"
-            >
+            <Badge type="pill-color" color="gray" size="md" className="font-semibold tabular-nums">
               {activeFilters ? `${resultRules.length} of ${catalogRules.length} rules` : `${catalogRules.length} rules`}
-            </div>
+            </Badge>
           )}
         </div>
       </header>
@@ -274,47 +269,59 @@ export default function Rules() {
       {!catalogLoading && !catalogError && catalogRules.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
           <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-secondary">Vulnerabilities</span>
-              <div className="flex size-8 items-center justify-center rounded-lg bg-utility-pink-50 text-utility-pink-700 dark:bg-utility-pink-950/40 dark:text-utility-pink-300">
-                <ShieldZap className="size-4" aria-hidden="true" />
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-secondary">Vulnerabilities</span>
+                <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
+                  {stats.vulns.toLocaleString()}
+                </div>
               </div>
+              <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
+                <ShieldZap className="size-5 text-utility-pink-600 dark:text-utility-pink-400" aria-hidden="true" />
+              </span>
             </div>
-            <div className="mt-2 text-3xl font-bold tabular-nums text-primary">{stats.vulns.toLocaleString()}</div>
-            <span className="text-xs text-tertiary">Direct security defects</span>
           </div>
 
           <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-secondary">Security Hotspots</span>
-              <div className="flex size-8 items-center justify-center rounded-lg bg-utility-orange-50 text-utility-orange-700 dark:bg-utility-orange-950/40 dark:text-utility-orange-300">
-                <Target04 className="size-4" aria-hidden="true" />
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-secondary">Security Hotspots</span>
+                <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
+                  {stats.hotspots.toLocaleString()}
+                </div>
               </div>
+              <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
+                <Target04 className="size-5 text-utility-orange-600 dark:text-utility-orange-400" aria-hidden="true" />
+              </span>
             </div>
-            <div className="mt-2 text-3xl font-bold tabular-nums text-primary">{stats.hotspots.toLocaleString()}</div>
-            <span className="text-xs text-tertiary">Manual review checkpoints</span>
           </div>
 
           <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-secondary">Code Smells &amp; Bugs</span>
-              <div className="flex size-8 items-center justify-center rounded-lg bg-utility-blue-50 text-utility-blue-700 dark:bg-utility-blue-950/40 dark:text-utility-blue-300">
-                <FileCode01 className="size-4" aria-hidden="true" />
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-secondary">Code Smells &amp; Bugs</span>
+                <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
+                  {stats.smellsAndBugs.toLocaleString()}
+                </div>
               </div>
+              <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
+                <FileCode01 className="size-5 text-utility-blue-600 dark:text-utility-blue-400" aria-hidden="true" />
+              </span>
             </div>
-            <div className="mt-2 text-3xl font-bold tabular-nums text-primary">{stats.smellsAndBugs.toLocaleString()}</div>
-            <span className="text-xs text-tertiary">Maintainability &amp; reliability</span>
           </div>
 
           <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-secondary">Supported Stacks</span>
-              <div className="flex size-8 items-center justify-center rounded-lg bg-utility-green-50 text-utility-green-700 dark:bg-utility-green-950/40 dark:text-utility-green-300">
-                <LayersThree01 className="size-4" aria-hidden="true" />
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-secondary">Supported Stacks</span>
+                <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
+                  {stats.languages}
+                </div>
               </div>
+              <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
+                <LayersThree01 className="size-5 text-utility-green-600 dark:text-utility-green-400" aria-hidden="true" />
+              </span>
             </div>
-            <div className="mt-2 text-3xl font-bold tabular-nums text-primary">{stats.languages}</div>
-            <span className="text-xs text-tertiary">Cloud, languages &amp; IaC</span>
           </div>
         </div>
       )}

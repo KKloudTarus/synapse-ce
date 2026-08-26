@@ -1,4 +1,5 @@
 import {
+  AlertCircle,
   BarChart01,
   Calendar,
   CheckCircle,
@@ -62,15 +63,15 @@ export function TabBar({ tab, setTab, counts }: { tab: Tab; setTab: (t: Tab) => 
             key={id}
             onClick={() => setTab(id)}
             className={cn(
-              '-mb-px inline-flex items-center gap-2 whitespace-nowrap rounded-t-md border-b-2 px-3.5 py-2.5 text-sm font-medium transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40',
-              active ? 'border-brand text-primary' : 'border-transparent text-tertiary hover:text-primary',
+              '-mb-px inline-flex items-center gap-2 whitespace-nowrap rounded-t-md border-b-2 px-3.5 py-2.5 text-sm font-semibold transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-solid',
+              active ? 'border-brand-solid text-brand-secondary' : 'border-transparent text-tertiary hover:text-primary',
             )}
           >
             <Icon className="size-4" />
-            {label}
+            <span>{label}</span>
             {count !== undefined && count > 0 && (
-              <span className="rounded-full bg-brand-primary px-1.5 text-xs font-medium tabular-nums text-brand-secondary">
+              <span className="rounded-full bg-brand-primary px-1.5 py-0.2 text-xs font-bold tabular-nums text-brand-secondary">
                 {count}
               </span>
             )}
@@ -99,17 +100,17 @@ export function OverviewTab({
       <EmptyState
         icon={LayoutGrid01}
         title="No scan yet"
-        hint="Run a scan above – this overview will show what’s risky, what to fix first, and where it came from."
+        hint="Run a scan above to see risk analysis, remediation priorities, and software composition."
       />
     )
   }
   const open = findings ?? []
   return (
     <div className="space-y-4">
-      {/* Zone 1: Health + Quality + Provenance Strip (1 dòng stat cards) */}
+      {/* Zone 1: Health + Quality + Provenance Strip */}
       <ScanHealth scan={scan} job={job} />
 
-      {/* Zone 2: Risk Analysis (What Needs Attention + Remediation + Severity Chart) */}
+      {/* Zone 2: Risk Analysis & Remediation Priorities */}
       <RiskAnalysisZone
         findings={open}
         scan={scan}
@@ -118,7 +119,7 @@ export function OverviewTab({
         onGoTab={onGoTab}
       />
 
-      {/* Zone 3: Composition + Provenance (1 card 3-column) */}
+      {/* Zone 3: Composition & Provenance */}
       <CompositionProvenanceCard scan={scan} onGoTab={onGoTab} />
     </div>
   )
@@ -137,13 +138,10 @@ export function ScanHealth({ scan, job }: { scan: ScanResult; job: ScanJob | nul
   const m = scan.manifest
   const repro = m.reproScore
   const reproTone = repro >= 85 ? 'accent' : repro >= 60 ? 'medium' : 'critical'
-  const byP = q.byPriority || {}
-  const source = (scan.vulnDBSnapshot.split('@')[0] || 'osv.dev').replace(/\.dev$/, '').toUpperCase()
-  const lockfileCount = scan.completeness.lockfiles.length
 
   return (
-    <Card bodyClass="p-0">
-      {/* 6-Cell Stat Strip */}
+    <Card bodyClass="p-0" className="overflow-hidden shadow-xs">
+      {/* 6-Cell Stat Strip: Label on top, Value on bottom */}
       <div className="grid grid-cols-2 divide-y divide-secondary sm:grid-cols-3 sm:divide-y-0 sm:divide-x lg:grid-cols-6">
         <HealthStat icon={CheckCircle} label="Status" value={statusLabelText} tone={statusTone} />
         <HealthStat
@@ -178,46 +176,6 @@ export function ScanHealth({ scan, job }: { scan: ScanResult; job: ScanJob | nul
           hint={`Reproducibility score: ${m.pinnedInputs.length} pinned, ${m.unpinnedInputs.length} live inputs`}
         />
       </div>
-
-      {/* Finding Quality + Lockfiles Detail Row */}
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-t border-secondary bg-secondary/30 px-4 py-2 text-xs text-tertiary">
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-          <span className="font-semibold text-secondary">Quality:</span>
-          <span>
-            {q.background} bg · {q.production} prod · {q.development} dev · {q.exampleTest} test
-          </span>
-          <span className="text-quaternary">|</span>
-          <div className="flex items-center gap-2">
-            {[1, 2, 3, 4, 5].map((p) =>
-              byP[String(p)] ? (
-                <span key={p} className="font-mono tabular-nums">
-                  <span
-                    className={cn(
-                      'font-semibold',
-                      p <= 2 ? 'text-critical' : p === 3 ? 'text-medium' : 'text-quaternary',
-                    )}
-                  >
-                    P{p}
-                  </span>
-                  :{byP[String(p)]}
-                </span>
-              ) : null,
-            )}
-          </div>
-          <span className="text-quaternary">|</span>
-          <span className="text-quaternary">
-            ver cov {q.versionCoveragePct.toFixed(0)}% · path cov {q.pathCoveragePct.toFixed(0)}%
-          </span>
-        </div>
-        <div className="flex items-center gap-3 text-[11px] text-quaternary">
-          <span title={scan.completeness.lockfiles.join(', ')}>
-            Lockfiles: <span className="font-mono text-tertiary">{lockfileCount}</span>
-          </span>
-          <span>
-            Source: <span className="font-mono text-tertiary">{source}</span>
-          </span>
-        </div>
-      </div>
     </Card>
   )
 }
@@ -237,29 +195,28 @@ export function HealthStat({
 }) {
   const toneText =
     tone === 'accent'
-      ? 'text-accent'
+      ? 'text-success-primary'
       : tone === 'critical'
-        ? 'text-critical'
+        ? 'text-error-primary'
         : tone === 'medium'
-          ? 'text-medium'
+          ? 'text-warning-primary'
           : tone === 'brand'
             ? 'text-brand-secondary'
             : 'text-primary'
+
   return (
     <div className="px-4 py-3" title={hint ?? (typeof value === 'string' ? value : undefined)}>
-      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-tertiary">
-        <Icon className="size-3.5" />
-        {label}
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-secondary">
+        <Icon className="size-3.5 text-fg-tertiary" />
+        <span>{label}</span>
       </div>
-      <div className={cn('mt-1 truncate text-lg font-semibold tabular-nums', toneText)}>{value}</div>
+      <div className={cn('mt-1 truncate font-mono text-xl font-bold tabular-nums', toneText)}>{value}</div>
     </div>
   )
 }
 
-
-
 /* ==========================================================================
-   ZONE 2: Risk Analysis (Attention + Remediation + Severity Chart)
+   ZONE 2: Risk Analysis & Remediation Priorities
    ========================================================================== */
 
 export function RiskAnalysisZone({
@@ -286,80 +243,120 @@ export function RiskAnalysisZone({
   const targets = useMemo(() => remediationTargets(scan), [scan])
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-      {/* Left 4 cols: Top Remediation Targets */}
-      <div className="lg:col-span-4">
+    <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-12">
+      {/* Left 7 cols: Risk Priorities & Top Remediation Targets */}
+      <div className="flex flex-col lg:col-span-7">
         <Card
-          title="Top remediation targets"
+          title="Remediation Priorities & Targets"
           actions={
             targets.length > 0 && (
               <button
                 onClick={() => onGoTab('findings')}
-                className="rounded text-xs font-medium text-brand-secondary transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+                className="inline-flex items-center gap-1 text-xs font-semibold text-brand-secondary transition-colors hover:text-brand-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-solid"
               >
-                All findings →
+                <span>All findings</span>
+                <ChevronRight className="size-3" />
               </button>
             )
           }
-          className="h-full flex flex-col"
-          bodyClass="p-4 flex-1"
+          className="h-full flex flex-col shadow-xs"
+          bodyClass="p-4 flex-1 flex flex-col justify-between gap-4"
         >
-          {targets.length === 0 ? (
-            <CardEmpty icon={CheckCircle} text="No vulnerable packages – nothing to remediate." />
-          ) : (
-            <ol className="space-y-1">
-              {targets.map((t, i) => (
-                <li key={t.component} className="flex items-center gap-2 rounded-lg py-1">
-                  <span className="w-4 shrink-0 text-center font-mono text-xs text-quaternary">{i + 1}</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="truncate text-sm font-medium text-primary" title={`${t.component}@${t.version}`}>
-                        {t.component}
+          {/* Top Row: 4 Horizontal Mini Attention Metric Cards */}
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+            <AttentionCard
+              label="Critical"
+              value={critical}
+              tone="critical"
+              onClick={() => onSelectSeverity('critical')}
+            />
+            <AttentionCard
+              label="High"
+              value={high}
+              tone="high"
+              onClick={() => onSelectSeverity('high')}
+            />
+            <AttentionCard
+              label="Lic. violations"
+              value={denied}
+              tone={denied > 0 ? 'high' : 'purple'}
+              onClick={() => onGoTab('licenses')}
+            />
+            <AttentionCard
+              label="Pkgs at risk"
+              value={componentsAtRisk}
+              tone={componentsAtRisk > 0 ? 'low' : 'success'}
+              onClick={() => onGoTab('components')}
+            />
+          </div>
+
+          {/* Bottom Section: Remediation Target List */}
+          <div className="flex-1 flex flex-col justify-start">
+            <div className="mb-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-secondary">
+                Top remediation packages
+              </span>
+            </div>
+
+            {targets.length === 0 ? (
+              <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-secondary bg-secondary p-4 text-center">
+                <CheckCircle className="mx-auto size-5 text-success-primary" />
+                <p className="mt-1 text-xs font-medium text-secondary">
+                  No vulnerable packages: nothing to remediate.
+                </p>
+              </div>
+            ) : (
+              <ol className="space-y-2">
+                {targets.map((t, i) => (
+                  <li
+                    key={t.component}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-secondary bg-primary p-2.5 shadow-2xs transition-colors hover:border-brand-solid"
+                  >
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <span className="flex size-5 shrink-0 items-center justify-center rounded bg-secondary font-mono text-xs font-bold text-tertiary">
+                        {i + 1}
                       </span>
-                      {t.hasFix && <Pill className="bg-accent/12 text-accent ring-1 ring-inset ring-accent/25">fix</Pill>}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className="truncate text-xs font-semibold text-primary"
+                            title={`${t.component}@${t.version}`}
+                          >
+                            {t.component}
+                          </span>
+                          {t.hasFix && (
+                            <Pill className="border border-utility-green-300 bg-success-primary px-1 py-0.2 text-[10px] font-bold text-success-primary">
+                              fix
+                            </Pill>
+                          )}
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-tertiary">
+                          <span className="font-medium text-secondary">
+                            {t.count} finding{t.count === 1 ? '' : 's'}
+                          </span>
+                          {t.maxEpss > 0 && (
+                            <span className="font-mono text-quaternary">
+                              {' '}· EPSS {(t.maxEpss * 100).toFixed(0)}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="mt-0.5 text-xs text-tertiary">
-                      {t.count} finding{t.count === 1 ? '' : 's'}
-                      {t.maxEpss > 0 && <span className="text-quaternary"> · EPSS {(t.maxEpss * 100).toFixed(0)}%</span>}
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {t.critical > 0 && <CountBadge n={t.critical} sev="critical" />}
+                      {t.high > 0 && <CountBadge n={t.high} sev="high" />}
+                      {t.critical === 0 && t.high === 0 && <SevBadge sev={t.top} />}
                     </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    {t.critical > 0 && <CountBadge n={t.critical} sev="critical" />}
-                    {t.high > 0 && <CountBadge n={t.high} sev="high" />}
-                    {t.critical === 0 && t.high === 0 && <SevBadge sev={t.top} />}
-                  </div>
-                </li>
-              ))}
-            </ol>
-          )}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
         </Card>
       </div>
 
-      {/* Middle 3 cols: Attention Cards (Critical, High, Lic. violations, Pkgs at risk) */}
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 lg:col-span-3 lg:flex lg:flex-col lg:justify-between">
-        <AttentionCard
-          label="Critical"
-          value={critical}
-          tone="critical"
-          onClick={() => onSelectSeverity('critical')}
-        />
-        <AttentionCard label="High" value={high} tone="high" onClick={() => onSelectSeverity('high')} />
-        <AttentionCard
-          label="Lic. violations"
-          value={denied}
-          tone={denied > 0 ? 'medium' : 'neutral'}
-          onClick={() => onGoTab('licenses')}
-        />
-        <AttentionCard
-          label="Pkgs at risk"
-          value={componentsAtRisk}
-          tone={componentsAtRisk > 0 ? 'low' : 'neutral'}
-          onClick={() => onGoTab('components')}
-        />
-      </div>
-
-      {/* Right 5 cols: Findings by Severity (Activity Gauge) */}
-      <div className="lg:col-span-5">
+      {/* Right 5 cols: Findings by Severity (Ring Activity Gauge) */}
+      <div className="flex flex-col lg:col-span-5">
         <VulnDistribution
           findings={findings}
           loading={loading}
@@ -370,8 +367,8 @@ export function RiskAnalysisZone({
   )
 }
 
-const RING_RADII = [118, 104, 90, 76, 62]
-const RING_STROKE_WIDTH = 6
+const RING_RADII = [114, 100, 86, 72, 58]
+const RING_STROKE_WIDTH = 7
 
 export function FindingsActivityGauge({
   findings,
@@ -386,48 +383,55 @@ export function FindingsActivityGauge({
     count: findings.filter((f) => f.severity === sev).length,
     label: sev.charAt(0).toUpperCase() + sev.slice(1),
     dot:
-      sev === 'low'
-        ? 'bg-utility-blue-500'
-        : sev === 'info'
-          ? 'bg-utility-gray-400'
-          : sevBg[sev] ?? 'bg-secondary',
-    stroke:
-      sev === 'low'
-        ? 'text-utility-blue-500'
-        : sev === 'info'
-          ? 'text-utility-gray-400'
-          : sevText[sev] ?? 'text-tertiary',
+      sev === 'critical'
+        ? 'bg-utility-red-600'
+        : sev === 'high'
+          ? 'bg-utility-orange-600'
+          : sev === 'medium'
+            ? 'bg-utility-yellow-600'
+            : sev === 'low'
+              ? 'bg-utility-blue-600'
+              : 'bg-utility-gray-600',
+    colorHex:
+      sev === 'critical'
+        ? '#D92D20'
+        : sev === 'high'
+          ? '#F79009'
+          : sev === 'medium'
+            ? '#FDB022'
+            : sev === 'low'
+              ? '#1570EF'
+              : '#98A2B3',
   }))
   const total = findings.length
   const maxVal = Math.max(...counts.map((c) => c.count), 1)
 
   return (
-    <div className="flex flex-col items-center justify-between gap-4 h-full py-1">
+    <div className="flex flex-col items-center justify-between gap-3 h-full py-1">
       {/* Activity Rings Graphic */}
-      <div className="relative flex items-center justify-center pt-2">
+      <div className="relative flex items-center justify-center pt-1">
         <svg
           viewBox="0 0 260 260"
-          className="size-56 sm:size-60"
+          className="size-52 sm:size-56"
           aria-label={`Findings by severity activity gauge: ${total} total findings`}
         >
-          {counts.map(({ sev, count, stroke }, idx) => {
+          {counts.map(({ sev, count, colorHex }, idx) => {
             const r = RING_RADII[idx]
             const circumference = 2 * Math.PI * r
-            // Scale arc so the peak severity fills ~85% of the circle, showing clear progression
             const ratio = count > 0 ? (count / maxVal) * 0.85 : 0
             const strokeDash = count > 0 ? Math.max(circumference * 0.04, circumference * ratio) : 0
 
             return (
-              <g key={sev} className="transition-all duration-500">
-                {/* Background track ring - subtle and light */}
+              <g key={sev}>
+                {/* Background track ring */}
                 <circle
                   cx="130"
                   cy="130"
                   r={r}
                   fill="none"
-                  stroke="currentColor"
+                  stroke="#F2F4F7"
                   strokeWidth={RING_STROKE_WIDTH}
-                  className="text-secondary/20 dark:text-secondary/35"
+                  className="stroke-utility-gray-100"
                 />
                 {/* Value arc */}
                 {count > 0 && (
@@ -436,12 +440,11 @@ export function FindingsActivityGauge({
                     cy="130"
                     r={r}
                     fill="none"
-                    stroke="currentColor"
+                    stroke={colorHex}
                     strokeWidth={RING_STROKE_WIDTH}
                     strokeLinecap="round"
                     strokeDasharray={`${strokeDash} ${circumference}`}
                     strokeDashoffset={0}
-                    className={cn('transition-all duration-700 ease-out', stroke)}
                     transform="rotate(-90 130 130)"
                   />
                 )}
@@ -452,13 +455,13 @@ export function FindingsActivityGauge({
 
         {/* Center Total Counter */}
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <span className="text-xs font-semibold uppercase tracking-wider text-tertiary">Total</span>
-          <span className="font-mono text-4xl font-bold tabular-nums text-primary mt-1">{total}</span>
+          <span className="text-xs font-bold uppercase tracking-wider text-secondary">Total</span>
+          <span className="font-mono text-3xl font-bold tabular-nums text-primary mt-0.5">{total}</span>
         </div>
       </div>
 
       {/* Legend Rows at Bottom */}
-      <div className="flex w-full flex-wrap items-center justify-center gap-2 border-t border-secondary/60 pt-3">
+      <div className="flex w-full flex-wrap items-center justify-center gap-1.5 border-t border-secondary pt-3">
         {counts.map(({ sev, count, dot, label }) => (
           <button
             key={sev}
@@ -466,17 +469,17 @@ export function FindingsActivityGauge({
             onClick={() => onSelectSeverity(sev)}
             disabled={count === 0}
             className={cn(
-              'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40',
+              'inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-solid',
               count > 0
-                ? 'cursor-pointer text-secondary hover:bg-secondary hover:text-primary'
-                : 'cursor-default text-quaternary opacity-40',
+                ? 'cursor-pointer text-secondary hover:bg-secondary hover:text-primary font-medium'
+                : 'cursor-default text-quaternary',
             )}
             title={`${count} ${label} findings`}
           >
-            <span className={cn('size-2 shrink-0 rounded-full ring-[0.5px] ring-black/10 ring-inset', dot)} />
-            <span className="text-xs font-medium capitalize">{label}</span>
-            <span className="font-mono text-xs font-semibold tabular-nums text-primary">{count}</span>
+            <span className={cn('size-2 shrink-0 rounded-full', dot)} />
+            <span className="text-xs capitalize">{label}</span>
+            <span className="font-mono text-xs font-bold tabular-nums text-primary">{count}</span>
           </button>
         ))}
       </div>
@@ -494,7 +497,11 @@ export function VulnDistribution({
   onSelectSeverity: (s: Severity | 'all') => void
 }) {
   return (
-    <Card title="Findings by severity" className="h-full">
+    <Card
+      title="Findings by severity"
+      className="h-full flex flex-col shadow-xs"
+      bodyClass="p-4 flex-1 flex flex-col justify-between"
+    >
       {loading ? (
         <Spinner />
       ) : findings.length === 0 ? (
@@ -506,8 +513,6 @@ export function VulnDistribution({
   )
 }
 
-
-
 export function AttentionCard({
   label,
   value,
@@ -516,65 +521,78 @@ export function AttentionCard({
 }: {
   label: string
   value: number
-  tone: 'critical' | 'high' | 'medium' | 'low' | 'neutral'
+  tone: 'critical' | 'high' | 'medium' | 'low' | 'success' | 'purple' | 'neutral'
   onClick: () => void
 }) {
-  const zero = value === 0
-
   const toneConfig = {
     critical: {
-      bar: 'bg-critical',
-      text: 'text-critical',
-      chevron: 'text-critical/60 group-hover:text-critical',
-      hoverBorder: 'hover:border-critical/40',
+      bar: 'bg-utility-red-600',
+      text: 'text-error-primary',
+      border: 'border-error',
+      bg: 'bg-error-primary',
+      chevron: 'text-error-primary',
     },
     high: {
-      bar: 'bg-high',
-      text: 'text-high',
-      chevron: 'text-high/60 group-hover:text-high',
-      hoverBorder: 'hover:border-high/40',
+      bar: 'bg-utility-orange-600',
+      text: 'text-warning-primary',
+      border: 'border-utility-orange-300',
+      bg: 'bg-warning-primary',
+      chevron: 'text-warning-primary',
     },
     medium: {
-      bar: 'bg-medium',
-      text: 'text-medium',
-      chevron: 'text-medium/60 group-hover:text-medium',
-      hoverBorder: 'hover:border-medium/40',
+      bar: 'bg-utility-yellow-600',
+      text: 'text-warning-primary',
+      border: 'border-utility-yellow-300',
+      bg: 'bg-warning-primary',
+      chevron: 'text-warning-primary',
     },
     low: {
-      bar: 'bg-utility-blue-500',
-      text: 'text-utility-blue-500',
-      chevron: 'text-utility-blue-500/60 group-hover:text-utility-blue-500',
-      hoverBorder: 'hover:border-utility-blue-500/40',
+      bar: 'bg-utility-blue-600',
+      text: 'text-utility-blue-700',
+      border: 'border-utility-blue-200',
+      bg: 'bg-utility-blue-50',
+      chevron: 'text-utility-blue-700',
+    },
+    success: {
+      bar: 'bg-utility-green-600',
+      text: 'text-success-primary',
+      border: 'border-utility-green-300',
+      bg: 'bg-success-primary',
+      chevron: 'text-success-primary',
+    },
+    purple: {
+      bar: 'bg-utility-purple-600',
+      text: 'text-utility-purple-700',
+      border: 'border-utility-purple-200',
+      bg: 'bg-utility-purple-50',
+      chevron: 'text-utility-purple-700',
     },
     neutral: {
-      bar: 'bg-secondary',
-      text: 'text-primary',
-      chevron: 'text-quaternary group-hover:text-primary',
-      hoverBorder: 'hover:border-primary',
+      bar: 'bg-brand-solid',
+      text: 'text-brand-secondary',
+      border: 'border-brand-solid',
+      bg: 'bg-brand-primary',
+      chevron: 'text-brand-secondary',
     },
   }[tone]
-
-  const valText = zero ? 'text-quaternary' : toneConfig.text
-  const labelText = zero ? 'text-tertiary' : toneConfig.text
 
   return (
     <button
       onClick={onClick}
       className={cn(
-        'group relative flex flex-1 flex-col justify-between overflow-hidden rounded-xl border border-secondary bg-primary px-4 py-3 text-left shadow-xs transition-all',
-        toneConfig.hoverBorder,
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40',
+        'group relative flex flex-col justify-between overflow-hidden rounded-lg border p-2.5 shadow-2xs transition-all',
+        toneConfig.border,
+        toneConfig.bg,
+        'hover:shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-solid',
       )}
     >
       <div className={cn('absolute inset-x-0 top-0 h-0.5', toneConfig.bar)} />
-      <div className="flex items-center justify-between">
-        <span className={cn('truncate text-xs font-semibold', labelText)}>{label}</span>
-        <ChevronRight
-          className={cn('size-3.5 shrink-0 transition-transform group-hover:translate-x-0.5', toneConfig.chevron)}
-        />
+      <div className="flex items-center justify-between w-full">
+        <span className={cn('truncate text-[11px] font-bold', toneConfig.text)}>{label}</span>
+        <ChevronRight className={cn('size-3 shrink-0 transition-transform group-hover:translate-x-0.5', toneConfig.chevron)} />
       </div>
-      <div className="my-auto flex items-center justify-center py-1">
-        <span className={cn('font-mono text-4xl font-bold tracking-tight tabular-nums', valText)}>{value}</span>
+      <div className="my-1 flex items-center justify-center w-full">
+        <span className={cn('font-mono text-2xl sm:text-3xl font-extrabold tabular-nums', toneConfig.text)}>{value}</span>
       </div>
     </button>
   )
@@ -594,7 +612,7 @@ export interface RemTarget {
 export function remediationTargets(scan: ScanResult): RemTarget[] {
   const map = new Map<string, RemTarget>()
   for (const v of scan.vulnerabilities) {
-    if (v.unversioned) continue // first-party historical: not a remediation target
+    if (v.unversioned) continue
     const cur =
       map.get(v.component) ??
       ({
@@ -626,14 +644,14 @@ export function remediationTargets(scan: ScanResult): RemTarget[] {
     .slice(0, 5)
 }
 
-
-
 export function CountBadge({ n, sev }: { n: number; sev: Severity }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ring-1 ring-inset',
-        sev === 'critical' ? 'bg-critical/10 text-critical ring-critical/25' : 'bg-high/10 text-high ring-high/25',
+        'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[11px] font-bold tabular-nums',
+        sev === 'critical'
+          ? 'border-error bg-error-primary text-error-primary'
+          : 'border-utility-orange-300 bg-warning-primary text-warning-primary',
       )}
     >
       {n} {sev === 'critical' ? 'crit' : 'high'}
@@ -641,109 +659,137 @@ export function CountBadge({ n, sev }: { n: number; sev: Severity }) {
   )
 }
 
-
-
 /* ==========================================================================
-   ZONE 3: Composition + Provenance (1 card 3-column)
+   ZONE 3: Composition & Provenance (2-Column Balanced Compact Layout)
    ========================================================================== */
+
+const LANG_COLORS = [
+  'bg-utility-blue-600',
+  'bg-utility-green-600',
+  'bg-utility-orange-600',
+  'bg-utility-pink-600',
+  'bg-brand-solid',
+  'bg-utility-gray-600',
+]
 
 export function CompositionProvenanceCard({ scan, onGoTab }: { scan: ScanResult; onGoTab: (t: Tab) => void }) {
   const langs = scan.languages.slice().sort((a, b) => b.percent - a.percent)
   const m = scan.manifest
 
   return (
-    <Card title="Composition & Provenance">
-      <div className="grid grid-cols-1 divide-y divide-secondary lg:grid-cols-12 lg:divide-y-0 lg:divide-x">
-        {/* Col 1: Languages (4 cols) */}
-        <div className="pb-4 lg:col-span-4 lg:pb-0 lg:pr-6">
-          <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-tertiary">Languages</div>
-          {langs.length === 0 ? (
-            <p className="text-sm text-quaternary">No source languages detected.</p>
-          ) : (
-            <div className="space-y-2">
-              {langs.slice(0, 6).map((l) => (
-                <div key={l.name} className="flex items-center gap-2 text-sm">
-                  <Code01 className="size-3.5 text-tertiary" />
-                  <span className="flex-1 text-primary">{l.name}</span>
-                  <span className="font-mono text-xs tabular-nums text-tertiary">{l.percent.toFixed(1)}%</span>
+    <Card title="Composition & Provenance" className="shadow-xs" bodyClass="p-4">
+      <div className="grid grid-cols-1 items-stretch divide-y divide-secondary lg:grid-cols-12 lg:divide-y-0 lg:divide-x">
+        {/* Col 1 (6 cols): Codebase Languages & Inventory Summary */}
+        <div className="flex flex-col justify-between space-y-4 pb-4 lg:col-span-6 lg:pb-0 lg:pr-5">
+          {/* Languages Section */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-secondary">
+                Languages
+              </span>
+              <span className="text-[11px] text-tertiary">
+                {langs.length} detected
+              </span>
+            </div>
+
+            {langs.length === 0 ? (
+              <p className="text-xs text-quaternary">No source languages detected.</p>
+            ) : (
+              <div className="space-y-2">
+                {/* Multi-segment Language Distribution Bar */}
+                <div className="flex h-2 w-full overflow-hidden rounded-full bg-secondary">
+                  {langs.slice(0, 6).map((l, idx) => (
+                    <div
+                      key={l.name}
+                      className={cn('h-full transition-all', LANG_COLORS[idx % LANG_COLORS.length])}
+                      style={{ width: `${Math.max(1, l.percent)}%` }}
+                      title={`${l.name}: ${l.percent.toFixed(1)}%`}
+                    />
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {langs.slice(0, 6).map((l, idx) => (
+                    <div key={l.name} className="flex items-center gap-1.5 text-xs">
+                      <span className={cn('size-2 rounded-full shrink-0', LANG_COLORS[idx % LANG_COLORS.length])} />
+                      <span className="truncate font-medium text-primary">{l.name}</span>
+                      <span className="font-mono font-bold tabular-nums text-secondary">{l.percent.toFixed(1)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Inventory Counts Section */}
+          <div className="border-t border-secondary pt-3">
+            <div className="mb-2 text-xs font-bold uppercase tracking-wider text-secondary">
+              Inventory Counts
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <CompTile
+                icon={Package}
+                label="packages"
+                value={scan.components.length}
+                tone="blue"
+                onClick={() => onGoTab('components')}
+              />
+              <CompTile
+                icon={Scale01}
+                label="licenses"
+                value={scan.licenses.length}
+                tone="purple"
+                onClick={() => onGoTab('licenses')}
+              />
+              <CompTile
+                icon={Dataflow03}
+                label="dep. edges"
+                value={countEdges(scan)}
+                tone="green"
+                onClick={() => onGoTab('graph')}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Col 2 (6 cols): Tool Versions & Integrity Metadata */}
+        <div className="flex flex-col justify-between pt-4 lg:col-span-6 lg:pt-0 lg:pl-5">
+          <div>
+            <div className="mb-2.5">
+              <span className="text-xs font-bold uppercase tracking-wider text-secondary">
+                Tool Versions &amp; Integrity
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {Object.entries(scan.toolVersions).map(([k, v]) => (
+                <div key={k} className="flex items-center justify-between gap-2 rounded-lg border border-secondary bg-secondary px-3 py-2 text-xs">
+                  <span className="flex items-center gap-1.5 text-tertiary">
+                    <Tool01 className="size-3.5 text-fg-tertiary" />
+                    <span>{k}</span>
+                  </span>
+                  <span className="truncate font-mono font-bold tabular-nums text-primary">{v}</span>
                 </div>
               ))}
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-secondary bg-secondary px-3 py-2 text-xs">
+                <span className="flex items-center gap-1.5 text-tertiary">
+                  <Database01 className="size-3.5 text-fg-tertiary" />
+                  <span>vuln DB</span>
+                </span>
+                <span className="truncate font-mono font-bold text-primary">{scan.vulnDBSnapshot || '0'}</span>
+              </div>
+              {m.sbomSha256 && (
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-secondary bg-secondary px-3 py-2 text-xs">
+                  <span className="flex items-center gap-1.5 text-tertiary">
+                    <File06 className="size-3.5 text-fg-tertiary" />
+                    <span>SBOM sha</span>
+                  </span>
+                  <span className="truncate font-mono font-bold text-primary" title={m.sbomSha256}>
+                    {m.sbomSha256.slice(0, 12)}
+                  </span>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-
-        {/* Col 2: Package / License / Edge Counts (3 cols) */}
-        <div className="py-4 lg:col-span-3 lg:py-0 lg:px-5">
-          <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-tertiary">Inventory Counts</div>
-          <div className="grid grid-cols-3 gap-2">
-            <CompTile
-              icon={Package}
-              label="packages"
-              value={scan.components.length}
-              onClick={() => onGoTab('components')}
-            />
-            <CompTile
-              icon={Scale01}
-              label="licenses"
-              value={scan.licenses.length}
-              onClick={() => onGoTab('licenses')}
-            />
-            <CompTile
-              icon={Dataflow03}
-              label="dep. edges"
-              value={countEdges(scan)}
-              onClick={() => onGoTab('graph')}
-            />
-          </div>
-        </div>
-
-        {/* Col 3: Tool Versions + Vuln DB + SBOM Sha (5 cols) */}
-        <div className="pt-4 lg:col-span-5 lg:pt-0 lg:pl-6">
-          <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-tertiary">
-            <span>Tool Versions & Integrity</span>
-          </div>
-          <div className="space-y-1.5 text-sm">
-            {Object.entries(scan.toolVersions).map(([k, v]) => (
-              <div key={k} className="flex items-center justify-between gap-3 border-b border-secondary/60 pb-1">
-                <span className="flex items-center gap-1.5 text-xs text-tertiary">
-                  <Tool01 className="size-3 text-quaternary" />
-                  {k}
-                </span>
-                <span className="truncate font-mono text-xs tabular-nums text-primary">{v}</span>
-              </div>
-            ))}
-            <div className="flex items-center justify-between gap-3 border-b border-secondary/60 pb-1">
-              <span className="flex items-center gap-1.5 text-xs text-tertiary">
-                <Database01 className="size-3 text-quaternary" />
-                vuln DB
-              </span>
-              <span className="truncate font-mono text-xs text-primary">{scan.vulnDBSnapshot || '–'}</span>
-            </div>
-            {m.sbomSha256 && (
-              <div className="flex items-center justify-between gap-3 border-b border-secondary/60 pb-1">
-                <span className="flex items-center gap-1.5 text-xs text-tertiary">
-                  <File06 className="size-3 text-quaternary" />
-                  SBOM sha
-                </span>
-                <span className="truncate font-mono text-xs text-primary" title={m.sbomSha256}>
-                  {m.sbomSha256.slice(0, 12)}
-                </span>
-              </div>
-            )}
-            {(m.pinnedInputs.length > 0 || m.unpinnedInputs.length > 0) && (
-              <div className="pt-1 text-[11px] text-tertiary">
-                {m.pinnedInputs.length > 0 && (
-                  <div>
-                    pinned: <span className="font-mono text-primary">{m.pinnedInputs.join(', ')}</span>
-                  </div>
-                )}
-                {m.unpinnedInputs.length > 0 && (
-                  <div className="mt-0.5">
-                    live: <span className="font-mono text-medium">{m.unpinnedInputs.join(', ')}</span>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -751,38 +797,64 @@ export function CompositionProvenanceCard({ scan, onGoTab }: { scan: ScanResult;
   )
 }
 
-
-
 export function CompTile({
   icon: Icon,
   label,
   value,
+  tone = 'blue',
   onClick,
 }: {
   icon: ComponentType<{ className?: string }>
   label: string
   value: number
+  tone?: 'blue' | 'purple' | 'green'
   onClick: () => void
 }) {
+  const toneStyles = {
+    blue: {
+      border: 'border-utility-blue-200',
+      bg: 'bg-utility-blue-50',
+      text: 'text-utility-blue-700',
+      icon: 'text-utility-blue-600',
+    },
+    purple: {
+      border: 'border-utility-purple-200',
+      bg: 'bg-utility-purple-50',
+      text: 'text-utility-purple-700',
+      icon: 'text-utility-purple-600',
+    },
+    green: {
+      border: 'border-utility-green-300',
+      bg: 'bg-success-primary',
+      text: 'text-success-primary',
+      icon: 'text-fg-success-primary',
+    },
+  }[tone]
+
   return (
     <button
       onClick={onClick}
-      className="flex flex-col items-center justify-center gap-1 rounded-lg border border-secondary bg-primary py-3 transition-colors hover:border-primary hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+      className={cn(
+        'flex items-center gap-2 rounded-lg border px-2.5 py-2 transition-all shadow-2xs hover:shadow-xs',
+        toneStyles.border,
+        toneStyles.bg,
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-solid',
+      )}
     >
-      <Icon className="size-4 text-tertiary" />
-      <span className="font-mono text-lg font-semibold tabular-nums text-primary">{value}</span>
-      <span className="text-[11px] text-tertiary">{label}</span>
+      <Icon className={cn('size-4 shrink-0', toneStyles.icon)} />
+      <div className="min-w-0 text-left">
+        <div className={cn('font-mono text-sm font-bold tabular-nums', toneStyles.text)}>{value}</div>
+        <div className={cn('text-[10px] font-bold uppercase tracking-wider', toneStyles.text)}>{label}</div>
+      </div>
     </button>
   )
 }
 
-
-
 export function CardEmpty({ icon: Icon, text }: { icon: ComponentType<{ className?: string }>; text: string }) {
   return (
     <div className="flex flex-col items-center gap-2 py-6 text-center">
-      <Icon className="size-6 text-quaternary" />
-      <p className="text-sm text-tertiary">{text}</p>
+      <Icon className="size-6 text-fg-quaternary" />
+      <p className="text-xs font-medium text-tertiary">{text}</p>
     </div>
   )
 }

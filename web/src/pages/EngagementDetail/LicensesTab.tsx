@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { Scale01, SearchLg, ShieldZap } from '@untitledui/icons'
+import { CheckCircle, Package, Scale01, SearchLg, ShieldZap, XClose } from '@untitledui/icons'
 import { Column, VirtualTable } from '../../components/synapse/VirtualTable'
 import { Card, EmptyState, cn } from '../../components/ui'
-import { CATEGORY_LABEL, sevSoft } from '../../lib/severity'
+import { CATEGORY_LABEL } from '../../lib/severity'
 import type { ScanResult, Severity } from '../../lib/types'
 import { ScanPrompt, componentIdentity, dependencyPathToRoot, dependencyRelationshipLabel, dependencySourceLabel, shortPkg } from './VulnsTab'
 
@@ -18,8 +18,6 @@ export interface LicenseDisplayRow {
   version: string
   licenses: string[]
   categories: string[]
-  // entries = the package's licenses kept SEPARATE (dual/multi-license packages are a
-  // choice/OR, shown as one chip each with its own severity – not collapsed into one row).
   entries: LicenseEntry[]
   severity: Severity
   location: string
@@ -61,21 +59,31 @@ export function LicenseChipStack({
   render: (e: LicenseEntry) => string
   title?: (e: LicenseEntry) => string
 }) {
-  const items: LicenseEntry[] = entries.length ? entries : [{ license: 'UNKNOWN', category: 'unknown', severity: 'unknown' }]
+  const items: LicenseEntry[] = entries.length ? entries : [{ license: 'None', category: 'unknown', severity: 'unknown' }]
   return (
     <div className="flex flex-col gap-1">
-      {items.map((e, i) => (
-        <span
-          key={i}
-          title={title?.(e)}
-          className={cn(
-            'inline-flex h-6 w-fit max-w-full items-center truncate rounded-md px-2 font-mono text-[11px] font-semibold ring-1 ring-inset',
-            sevSoft[e.severity],
-          )}
-        >
-          {render(e)}
-        </span>
-      ))}
+      {items.map((e, i) => {
+        const isPermissive = e.category === 'permissive' || e.severity === 'low'
+        const isCopyleft = e.category === 'copyleft' || e.severity === 'high' || e.severity === 'critical'
+        const tone = isPermissive
+          ? 'border-utility-green-300 bg-success-primary text-success-primary'
+          : isCopyleft
+            ? 'border-utility-orange-300 bg-warning-primary text-warning-primary'
+            : 'border-secondary bg-secondary text-tertiary'
+
+        return (
+          <span
+            key={i}
+            title={title?.(e)}
+            className={cn(
+              'inline-flex h-6 w-fit max-w-full items-center truncate rounded-md border px-2 font-mono text-xs font-semibold',
+              tone,
+            )}
+          >
+            {render(e)}
+          </span>
+        )
+      })}
     </div>
   )
 }
@@ -131,10 +139,10 @@ export function buildLicenseDisplayRows(
     const path = dependencyPathToRoot(dependencies, id)
     const via = path.length >= 2 ? shortPkg(path[path.length - 2]) : ''
     const inferredDirect = path.length === 1
-    const rowKey = `${component?.name || componentName || '–'}\x00${component?.version ?? ''}\x00${component?.location ?? ''}`
+    const rowKey = `${component?.name || componentName || 'unknown'}\x00${component?.version ?? ''}\x00${component?.location ?? ''}`
     const existing = byPackage.get(rowKey) ?? {
       key: rowKey,
-      component: component?.name || componentName || '–',
+      component: component?.name || componentName || 'unknown',
       version: component?.version ?? '',
       licenses: [],
       categories: [],
@@ -153,7 +161,6 @@ export function buildLicenseDisplayRows(
       existing.entries.push({ license: licenseName, category: category || 'unknown', severity })
     }
     if (category && !existing.categories.includes(category)) existing.categories.push(category)
-    // Authoritative server risk severity; keep the most severe across a package's licenses (row sort key).
     if (LICENSE_SEVERITY_RANK[severity] < LICENSE_SEVERITY_RANK[existing.severity]) existing.severity = severity
     byPackage.set(rowKey, existing)
   }
@@ -167,7 +174,7 @@ export function buildLicenseDisplayRows(
         upsertRow(
           componentName,
           component,
-          license.license || 'UNKNOWN',
+          license.license || 'None',
           license.category || 'unknown',
           (license.severity || licenseSeverity(license.category || 'unknown')) as Severity,
         )
@@ -176,30 +183,11 @@ export function buildLicenseDisplayRows(
   }
 
   for (const component of unknownPackages) {
-    upsertRow(component.name, component, 'UNKNOWN', 'unknown', 'unknown')
+    upsertRow(component.name, component, 'None', 'unknown', 'unknown')
   }
 
   return [...byPackage.values()].sort(
     (a, b) => LICENSE_SEVERITY_RANK[a.severity] - LICENSE_SEVERITY_RANK[b.severity] || a.component.localeCompare(b.component),
-  )
-}
-
-export function LicenseCoverageHeader({ scan }: { scan: ScanResult }) {
-  const c = scan.licenseCoverage
-  if (c.total === 0) return null
-  const tone = c.pct >= 90 ? 'bg-accent' : c.pct >= 60 ? 'bg-medium' : 'bg-critical'
-  return (
-    <Card className="mb-4">
-      <div className="mb-2 flex items-center justify-between text-sm">
-        <span className="font-medium text-primary">License coverage</span>
-        <span className="font-mono tabular-nums text-tertiary">
-          {c.pct.toFixed(0)}% · {c.detected.toLocaleString()} detected · {c.unknown.toLocaleString()} unknown
-        </span>
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-secondary">
-        <div className={cn('h-full rounded-full transition-[width]', tone)} style={{ width: `${Math.max(1, c.pct)}%` }} />
-      </div>
-    </Card>
   )
 }
 
@@ -210,6 +198,7 @@ export function LicensesTab({ scan }: { scan: ScanResult | null }) {
   if (scan.scanMode === 'vulnerabilities') {
     return <EmptyState icon={ShieldZap} title="Licenses skipped" hint="This run used vulnerability-only scan mode." />
   }
+
   const componentIndex = buildLicenseComponentIndex(scan.components)
   const unknownPackages = scan.components
     .filter((c) => !c.firstParty && c.licenses.length === 0)
@@ -217,24 +206,50 @@ export function LicensesTab({ scan }: { scan: ScanResult | null }) {
     .sort((a, b) => a.name.localeCompare(b.name))
   const allDisplayRows = buildLicenseDisplayRows(scan.licenses, unknownPackages, componentIndex, scan.dependencies)
   const displayRows = allDisplayRows.filter((row) => licenseDisplayRowMatchesSearch(row, search.trim().toLowerCase()))
-  const packagesImpacted = displayRows.length
+
+  const coverage = scan.licenseCoverage
+  const toneBar = coverage.pct >= 90 ? 'bg-utility-green-600' : coverage.pct >= 60 ? 'bg-utility-orange-600' : 'bg-error-primary'
+
   const licenseColumns: Column<LicenseDisplayRow>[] = [
     {
-      header: 'Packages',
-      className: 'sticky left-0 z-10 w-72 bg-primary pr-2 font-mono text-xs text-primary',
-      cell: (row) => <span title={row.version ? `${row.component}@${row.version}` : row.component}>{row.component}</span>,
+      header: 'Package',
+      className: 'sticky left-0 z-10 w-72 bg-primary pr-2 font-semibold text-xs text-primary',
+      cell: (row) => (
+        <span className="truncate font-semibold text-primary" title={row.version ? `${row.component}@${row.version}` : row.component}>
+          {row.component}
+        </span>
+      ),
     },
     {
       header: 'License',
-      className: 'w-72 font-mono text-xs text-primary',
-      // Multi-license packages are a CHOICE (OR) – show one chip per license (coloured by
-      // its own severity), not a collapsed "A AND B" string.
+      className: 'w-64 font-mono text-xs text-primary',
       cell: (row) => <LicenseChipStack entries={row.entries} render={(e) => e.license} title={(e) => e.license} />,
     },
     {
-      header: 'Severity',
-      className: 'w-28',
-      cell: (row) => <LicenseChipStack entries={row.entries} render={(e) => e.severity.toUpperCase()} />,
+      header: 'Category',
+      className: 'w-52 text-xs',
+      cell: (row) => (
+        <div className="flex flex-col gap-1">
+          {(row.entries.length ? row.entries : [{ category: 'unknown', severity: 'unknown' as Severity, license: '' }]).map((e, i) => {
+            const isPermissive = e.category === 'permissive'
+            const isCopyleft = e.category === 'copyleft' || e.category === 'weak-copyleft'
+            const tone = isPermissive
+              ? 'border-utility-green-300 bg-success-primary text-success-primary'
+              : isCopyleft
+                ? 'border-utility-orange-300 bg-warning-primary text-warning-primary'
+                : 'border-secondary bg-secondary text-tertiary'
+            return (
+              <span
+                key={i}
+                className={cn('inline-flex w-fit items-center rounded-md border px-2 py-0.5 text-xs font-semibold', tone)}
+                title={e.category}
+              >
+                {CATEGORY_LABEL[e.category] ?? e.category.toUpperCase()}
+              </span>
+            )
+          })}
+        </div>
+      ),
     },
     {
       header: 'Source / Path',
@@ -247,101 +262,104 @@ export function LicensesTab({ scan }: { scan: ScanResult | null }) {
         return (
           <div className="min-w-0 space-y-1" title={title}>
             <div className="flex min-w-0 items-center gap-2">
-              <span className="shrink-0 rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[10px] uppercase text-tertiary ring-1 ring-secondary">
+              <span className="shrink-0 rounded-md border border-secondary bg-secondary px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-tertiary">
                 {row.sourceLabel}
               </span>
-              <span className="truncate font-mono text-[11px] text-quaternary">{row.sourceFile || 'no source file'}</span>
+              <span className="truncate font-mono text-xs text-quaternary">{row.sourceFile || 'no source file'}</span>
             </div>
             <div className="truncate text-tertiary">
               {row.relationshipLabel}
-              {row.dependencyPath && <span className="text-quaternary"> · {row.dependencyPath}</span>}
+              {row.dependencyPath && <span className="text-quaternary font-mono"> · {row.dependencyPath}</span>}
             </div>
           </div>
         )
       },
     },
-    {
-      header: 'Category',
-      className: 'w-56 text-sm text-tertiary',
-      cell: (row) => (
-        <div className="flex flex-col gap-1">
-          {(row.entries.length ? row.entries : [{ category: 'unknown', severity: 'unknown' as Severity, license: '' }]).map((e, i) => (
-            <span key={i} className="leading-6" title={e.category}>
-              {CATEGORY_LABEL[e.category] ?? e.category.toUpperCase()}
-            </span>
-          ))}
-        </div>
-      ),
-    },
   ]
 
   return (
-    <div className="space-y-4">
-      <LicenseCoverageHeader scan={scan} />
-      {scan.licenses.length === 0 ? (
-        <EmptyState
-          icon={Scale01}
-          title="No licenses classified"
-          hint="No license metadata resolved for these packages – see coverage above."
-        />
-      ) : (
-        <Card bodyClass="p-0">
-          <div className="space-y-3 border-b border-secondary p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-medium text-primary">License inventory</div>
-                <div className="text-xs text-tertiary">All detected package licenses are listed without hiding allowed entries.</div>
-              </div>
-              <div className="relative">
-                <SearchLg className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-quaternary" />
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.currentTarget.value)}
-                  placeholder="Search package, license, source, path…"
-                  aria-label="Search licenses"
-                  className="h-8 w-72 rounded-md border border-secondary bg-primary pl-8 pr-3 text-xs text-primary placeholder:text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
-                />
-              </div>
+    <Card bodyClass="p-0" className="overflow-hidden shadow-xs">
+      {/* Unified Toolbar & Coverage Bar */}
+      <div className="space-y-3.5 border-b border-secondary p-4 bg-primary">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative min-w-[16rem] sm:max-w-xs">
+            <SearchLg className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-tertiary" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.currentTarget.value)}
+              placeholder="Search package, license, category..."
+              aria-label="Search licenses"
+              className="h-9 w-full rounded-lg border border-secondary bg-primary pl-9 pr-8 text-xs text-primary placeholder:text-quaternary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-solid"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-quaternary hover:text-primary"
+                title="Clear search"
+              >
+                <XClose className="size-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-utility-blue-200 bg-utility-blue-50 px-2.5 py-1 font-semibold text-utility-blue-700">
+              <Package className="size-3.5" />
+              <span>{displayRows.length} packages</span>
+            </span>
+            <span className="inline-flex items-center rounded-lg border border-utility-green-300 bg-success-primary px-2.5 py-1 font-semibold text-success-primary">
+              {coverage.detected} detected
+            </span>
+            {coverage.unknown > 0 && (
+              <span className="inline-flex items-center rounded-lg border border-secondary bg-secondary px-2.5 py-1 font-medium text-tertiary">
+                {coverage.unknown} unknown
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Integrated Progress Coverage Bar */}
+        {coverage.total > 0 && (
+          <div className="space-y-1.5 pt-1">
+            <div className="flex items-center justify-between text-xs font-semibold">
+              <span className="text-secondary flex items-center gap-1.5">
+                <Scale01 className="size-3.5 text-brand-secondary" />
+                <span>License Coverage</span>
+              </span>
+              <span className="font-mono tabular-nums text-primary font-bold">
+                {coverage.pct.toFixed(0)}%
+              </span>
             </div>
-            <div className="grid gap-2 text-xs text-tertiary tabular-nums sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
-                <div className="font-mono text-base font-semibold text-primary">{displayRows.length.toLocaleString()}</div>
-                <div>packages listed</div>
-              </div>
-              <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
-                <div className="font-mono text-base font-semibold text-primary">{packagesImpacted.toLocaleString()}</div>
-                <div>packages impacted</div>
-              </div>
-              <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
-                <div className="font-mono text-base font-semibold text-tertiary">{allDisplayRows.length.toLocaleString()}</div>
-                <div>total package rows</div>
-              </div>
-              <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
-                <div className="font-mono text-base font-semibold text-quaternary">{unknownPackages.length.toLocaleString()}</div>
-                <div>unknown-license packages</div>
-              </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+              <div
+                className={cn('h-full rounded-full transition-all duration-300', toneBar)}
+                style={{ width: `${Math.max(2, coverage.pct)}%` }}
+              />
             </div>
           </div>
-          {displayRows.length === 0 ? (
-            <div className="p-8 text-center">
-              <div className="text-sm font-medium text-primary">No licenses match this search.</div>
-              <div className="mx-auto mt-2 max-w-xl text-xs leading-5 text-tertiary">
-                Clear the search query to review the full license inventory.
-              </div>
-            </div>
-          ) : (
-            <VirtualTable
-              items={displayRows}
-              totalItems={allDisplayRows.length}
-              tableMinWidthClass="min-w-[1120px]"
-              rowKey={(row) => row.key}
-              rowClassName={(row) => cn('py-3', row.entries.length > 1 ? 'items-start' : 'items-center')}
-              rowHeight={(row) => Math.max(64, (row.entries.length || 1) * 32 + 20)}
-              columns={licenseColumns}
-            />
-          )}
-        </Card>
+        )}
+      </div>
+
+      {/* Table */}
+      {displayRows.length === 0 ? (
+        <div className="p-8 text-center">
+          <div className="text-sm font-medium text-primary">No licenses match this search.</div>
+          <div className="mx-auto mt-2 max-w-xl text-xs leading-5 text-tertiary">
+            Clear the search query to review the full license inventory.
+          </div>
+        </div>
+      ) : (
+        <VirtualTable
+          items={displayRows}
+          totalItems={allDisplayRows.length}
+          tableMinWidthClass="min-w-[1120px]"
+          rowKey={(row) => row.key}
+          rowClassName={(row) => cn('py-3', row.entries.length > 1 ? 'items-start' : 'items-center')}
+          rowHeight={(row) => Math.max(64, (row.entries.length || 1) * 32 + 20)}
+          columns={licenseColumns}
+        />
       )}
-    </div>
+    </Card>
   )
 }

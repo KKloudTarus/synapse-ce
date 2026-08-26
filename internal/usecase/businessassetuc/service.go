@@ -77,9 +77,21 @@ type UpdateInput struct {
 	Actor             string
 }
 
+func (s *Service) resolveAsset(ctx context.Context, tenantID, idOrKey shared.ID) (*asset.BusinessAsset, error) {
+	tenantID = shared.TenantOrDefault(tenantID)
+	a, err := s.repo.GetBusinessAssetByID(ctx, tenantID, idOrKey)
+	if err == nil {
+		return a, nil
+	}
+	if errors.Is(err, shared.ErrNotFound) {
+		return s.repo.GetBusinessAssetByKey(ctx, tenantID, idOrKey.String())
+	}
+	return nil, err
+}
+
 func (s *Service) Update(ctx context.Context, tenantID, id shared.ID, in UpdateInput) (*asset.BusinessAsset, error) {
 	tenantID = shared.TenantOrDefault(tenantID)
-	a, err := s.repo.GetBusinessAssetByID(ctx, tenantID, id)
+	a, err := s.resolveAsset(ctx, tenantID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +115,7 @@ func (s *Service) Update(ctx context.Context, tenantID, id shared.ID, in UpdateI
 }
 
 func (s *Service) Get(ctx context.Context, tenantID, id shared.ID) (*asset.BusinessAsset, error) {
-	return s.repo.GetBusinessAssetByID(ctx, shared.TenantOrDefault(tenantID), id)
+	return s.resolveAsset(ctx, tenantID, id)
 }
 
 type Filter struct {
@@ -144,10 +156,11 @@ func (s *Service) ReplaceTechnicalAssets(ctx context.Context, tenantID, id share
 }
 func (s *Service) replace(ctx context.Context, tenantID, id shared.ID, links []asset.ComponentMembership, actor string, projects bool) error {
 	tenantID = shared.TenantOrDefault(tenantID)
-	a, err := s.repo.GetBusinessAssetByID(ctx, tenantID, id)
+	a, err := s.resolveAsset(ctx, tenantID, id)
 	if err != nil {
 		return err
 	}
+	id = a.ID
 	if !a.AcceptsAssignments() {
 		return fmt.Errorf("%w: retired business asset is read-only", shared.ErrValidation)
 	}
@@ -169,19 +182,28 @@ func (s *Service) replace(ctx context.Context, tenantID, id shared.ID, links []a
 }
 
 func (s *Service) Projects(ctx context.Context, tenantID, id shared.ID) ([]asset.ComponentMembership, error) {
-	return s.repo.ListBusinessAssetProjects(ctx, shared.TenantOrDefault(tenantID), id)
+	a, err := s.resolveAsset(ctx, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListBusinessAssetProjects(ctx, a.TenantID, a.ID)
 }
 func (s *Service) TechnicalAssets(ctx context.Context, tenantID, id shared.ID) ([]asset.ComponentMembership, error) {
-	return s.repo.ListBusinessAssetTechnicalAssets(ctx, shared.TenantOrDefault(tenantID), id)
+	a, err := s.resolveAsset(ctx, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListBusinessAssetTechnicalAssets(ctx, a.TenantID, a.ID)
 }
 
 func (s *Service) AssignEngagement(ctx context.Context, tenantID, engagementID, assetID shared.ID, actor string) error {
 	tenantID = shared.TenantOrDefault(tenantID)
 	if !assetID.IsZero() {
-		a, err := s.repo.GetBusinessAssetByID(ctx, tenantID, assetID)
+		a, err := s.resolveAsset(ctx, tenantID, assetID)
 		if err != nil {
 			return err
 		}
+		assetID = a.ID
 		if !a.AcceptsAssignments() {
 			return fmt.Errorf("%w: retired business asset is read-only", shared.ErrValidation)
 		}
@@ -193,9 +215,13 @@ func (s *Service) AssignEngagement(ctx context.Context, tenantID, engagementID, 
 }
 
 func (s *Service) Engagements(ctx context.Context, tenantID, id shared.ID) ([]*engagement.Engagement, error) {
-	tenantID = shared.TenantOrDefault(tenantID)
+	a, err := s.resolveAsset(ctx, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	tenantID = a.TenantID
 	ctx = shared.WithTenant(ctx, tenantID)
-	return s.repo.ListEngagementsByBusinessAsset(ctx, shared.TenantOrDefault(tenantID), id)
+	return s.repo.ListEngagementsByBusinessAsset(ctx, tenantID, a.ID)
 }
 
 type AggregatedFinding struct {

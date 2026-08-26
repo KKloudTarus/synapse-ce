@@ -3,11 +3,13 @@ import { Link } from 'react-router-dom'
 import {
   Activity,
   ArrowRight,
+  HelpCircle,
   Package,
   Shield01,
   Signal01,
 } from '@untitledui/icons'
 import { ErrorState, Spinner } from '../../components/ui'
+import { Tooltip, TooltipTrigger } from '../../components/base/tooltip/tooltip'
 import {
   DonutChart,
   FindingsTrendChart,
@@ -60,9 +62,6 @@ export const DashboardPage: FC = () => {
           <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">
             Security Operations
           </h1>
-          <p className="mt-1 text-sm text-secondary">
-            Asset posture, assessment activity, and coverage at a glance
-          </p>
         </div>
       </header>
 
@@ -72,28 +71,24 @@ export const DashboardPage: FC = () => {
           icon={Package}
           label="Total Assets"
           value={data.assetTotal}
-          hint="Managed inventory"
           tone="info"
         />
         <StatCard
           icon={Shield01}
           label="High-risk Assets"
           value={highRiskAssets}
-          hint="Critical or high risk"
           tone={highRiskAssets ? 'critical' : 'accent'}
         />
         <StatCard
           icon={Activity}
           label="Active Engagements"
           value={activeEngagements}
-          hint={`${data.engagements.length} total assessments`}
           tone="brand"
         />
         <StatCard
           icon={Signal01}
           label="Coverage Gaps"
-          value={coverageGaps ?? '—'}
-          hint={fleetUnavailable ? 'Fleet telemetry unavailable' : 'All non-covered states'}
+          value={coverageGaps ?? 'N/A'}
           tone={coverageGaps ? 'high' : 'accent'}
         />
       </section>
@@ -107,17 +102,23 @@ export const DashboardPage: FC = () => {
           <ChartCard
             title="Findings Over Time"
             description="New publishable findings grouped by UTC day and severity."
+            tooltip={
+              analytics.findingsWithoutTimestamp > 0 ? (
+                <Tooltip
+                  title="Excluded findings"
+                  description={`${analytics.findingsWithoutTimestamp} finding${analytics.findingsWithoutTimestamp === 1 ? '' : 's'} excluded from the trend because no creation timestamp is available.`}
+                  arrow
+                >
+                  <TooltipTrigger aria-label="Excluded findings info">
+                    <HelpCircle className="size-4 text-fg-quaternary hover:text-fg-secondary cursor-help" />
+                  </TooltipTrigger>
+                </Tooltip>
+              ) : undefined
+            }
             action={<RangeSelector value={rangeDays} onChange={setRangeDays} />}
             className="lg:col-span-3"
           >
             <FindingsTrendChart points={analytics.findingsOverTime} series={severityChart({}, false)} />
-            {analytics.findingsWithoutTimestamp > 0 && (
-              <p className="mt-2 text-xs text-utility-yellow-600 dark:text-utility-yellow-400">
-                {analytics.findingsWithoutTimestamp} finding
-                {analytics.findingsWithoutTimestamp === 1 ? '' : 's'} excluded from the trend because no
-                creation timestamp is available.
-              </p>
-            )}
           </ChartCard>
 
           {/* Activity Feed — right panel */}
@@ -150,7 +151,20 @@ export const DashboardPage: FC = () => {
           {analytics && (
             <section className="flex flex-col rounded-xl border border-secondary bg-primary shadow-xs">
               <header className="flex items-center justify-between gap-3 border-b border-secondary px-5 py-4">
-                <h3 className="text-sm font-semibold text-primary">Active Finding Risk Mix</h3>
+                <div className="flex items-center gap-1.5">
+                  <h3 className="text-sm font-semibold text-primary">Active Finding Risk Mix</h3>
+                  {!analytics.externalFindingsIncluded && (
+                    <Tooltip
+                      title="Scope Note"
+                      description="Third-party findings are not included."
+                      arrow
+                    >
+                      <TooltipTrigger aria-label="Third-party findings note">
+                        <HelpCircle className="size-4 text-fg-quaternary hover:text-fg-secondary cursor-help" />
+                      </TooltipTrigger>
+                    </Tooltip>
+                  )}
+                </div>
               </header>
               <div className="flex flex-1 items-center justify-center p-5">
                 <DonutChart
@@ -159,11 +173,6 @@ export const DashboardPage: FC = () => {
                   data={severityChart(analytics.activeFindingsBySeverity, true)}
                 />
               </div>
-              {!analytics.externalFindingsIncluded && (
-                <p className="border-t border-secondary px-5 py-2.5 text-xs text-utility-yellow-600 dark:text-utility-yellow-400">
-                  Third-party findings are not included.
-                </p>
-              )}
             </section>
           )}
         </div>
@@ -206,7 +215,7 @@ function RangeSelector({ value, onChange }: { value: number; onChange: (value: n
             'rounded-md px-3 py-1 text-xs font-semibold transition-colors sm:px-3.5 sm:py-1.5 sm:text-sm',
             value === days
               ? 'bg-primary text-primary shadow-xs'
-              : 'text-secondary hover:text-primary hover:bg-primary/50',
+              : 'text-secondary hover:text-primary hover:bg-secondary',
           )}
         >
           {days}d

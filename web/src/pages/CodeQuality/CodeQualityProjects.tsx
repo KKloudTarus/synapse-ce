@@ -107,9 +107,6 @@ export function CodeQualityProjects() {
           <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">
             Code Quality
           </h1>
-          <p className="mt-1 text-sm text-secondary">
-            See what needs attention, enforce quality policy, and track every successful analysis against its previous baseline
-          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Button

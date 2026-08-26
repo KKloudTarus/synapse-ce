@@ -179,7 +179,7 @@ export function dependencyPathToRoot(dependencies: ScanResult['dependencies'], t
 export function buildVulnerabilityDisplayRows(vulns: Vulnerability[], packageLocations: Map<string, string[]>): VulnerabilityDisplayRow[] {
   // Group rows by package, ordering packages (and CVEs within a package) by their FIRST
   // appearance in the already-risk-ordered (KEV -> EPSS x CVSS) input. Never re-rank by raw
-  // CVSS severity – that would violate the risk-priority invariant.
+  // CVSS severity: that would violate the risk-priority invariant.
   const packageOrder = new Map<string, number>()
   const cveOrder = new Map<string, number>()
   vulns.forEach((vuln, i) => {
@@ -220,7 +220,7 @@ export function buildVulnerabilityDisplayRows(vulns: Vulnerability[], packageLoc
     const cveDelta =
       (cveOrder.get(`${a.component}\x00${a.cve}`) ?? 0) - (cveOrder.get(`${b.component}\x00${b.cve}`) ?? 0)
     if (cveDelta !== 0) return cveDelta
-    // same CVE expanded across install paths/locations – stable, deterministic tiebreak
+    // same CVE expanded across install paths/locations: stable, deterministic tiebreak
     return a.installed.localeCompare(b.installed) || a.location.localeCompare(b.location)
   })
 
@@ -257,7 +257,7 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
   )
   const shownPackages = new Set(displayRows.map((row) => packageVersionKey(row.component, row.installed))).size
   // Counts MUST equal the rows actually rendered: every advisory×package×location (incl.
-  // non-CVE advisories), not distinct CVE ids – otherwise the headline undercounts the table.
+  // non-CVE advisories), not distinct CVE ids: otherwise the headline undercounts the table.
   const shownAdvisories = displayRows.length
   const totalAdvisories = allSeverityDisplayRows.length
   const vulnColumns = useMemo<Column<VulnerabilityDisplayRow>[]>(
@@ -284,7 +284,7 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
       },
       {
         header: 'Severity',
-        className: 'w-24',
+        className: 'w-28',
         cell: (row) => <SevBadge sev={row.severity} />,
       },
       {
@@ -293,8 +293,12 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
         cell: (row) => (
           <span
             className={cn(
-              'inline-flex w-fit rounded-md px-2 py-0.5 font-mono text-[11px] font-semibold ring-1 ring-inset',
-              sevSoft[row.severity],
+              'inline-flex w-fit rounded-md border px-2 py-0.5 font-mono text-xs font-semibold uppercase',
+              row.severity === 'critical'
+                ? 'border-error bg-error-primary text-error-primary'
+                : row.severity === 'high'
+                  ? 'border-utility-orange-300 bg-warning-primary text-warning-primary'
+                  : 'border-secondary bg-secondary text-secondary',
             )}
           >
             {row.cve}
@@ -303,18 +307,26 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
       },
       {
         header: 'Installed',
-        className: 'w-28 font-mono text-xs',
+        className: 'w-32 font-mono text-xs',
         cell: (row) => (
-          <span className="truncate text-critical" title={`${row.component}@${row.installed || 'unknown'}`}>
+          <span className="truncate font-bold text-error-primary" title={`${row.component}@${row.installed || 'unknown'}`}>
             {row.installed || 'unknown'}
           </span>
         ),
       },
       {
         header: 'Fixed Version',
-        className: 'w-32 font-mono text-xs',
+        className: 'w-36 font-mono text-xs',
         cell: (row) =>
-          row.fixedVersion ? <span className="text-accent">{row.fixedVersion}</span> : <span className="text-quaternary">–</span>,
+          row.fixedVersion ? (
+            <span className="inline-flex items-center rounded-md border border-utility-green-300 bg-success-primary px-2 py-0.5 text-xs font-semibold text-success-primary">
+              {row.fixedVersion}
+            </span>
+          ) : (
+            <span className="inline-flex items-center rounded-md border border-secondary bg-secondary px-2 py-0.5 text-xs font-medium text-tertiary">
+              None
+            </span>
+          ),
       },
       {
         header: 'Source / Path',
@@ -327,14 +339,14 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
           return (
             <div className="min-w-0 space-y-1" title={title}>
               <div className="flex min-w-0 items-center gap-2">
-                <span className="shrink-0 rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[10px] uppercase text-tertiary ring-1 ring-secondary">
+                <span className="shrink-0 rounded-md border border-secondary bg-secondary px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-tertiary">
                   {row.sourceLabel}
                 </span>
-                <span className="truncate font-mono text-[11px] text-quaternary">{row.sourceFile || 'no source file'}</span>
+                <span className="truncate font-mono text-xs text-quaternary">{row.sourceFile || 'no source file'}</span>
               </div>
               <div className="truncate text-tertiary">
                 {row.relationshipLabel}
-                {row.dependencyPath && <span className="text-quaternary"> · {row.dependencyPath}</span>}
+                {row.dependencyPath && <span className="text-quaternary font-mono"> · {row.dependencyPath}</span>}
               </div>
             </div>
           )
@@ -358,36 +370,33 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
     )
   }
   return (
-    <Card bodyClass="p-0">
-      <div className="space-y-3 border-b border-secondary p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <SeverityFilter value={filter} onChange={setFilter} available={available} />
-          <div className="relative">
-            <SearchLg className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-quaternary" />
+    <Card bodyClass="p-0" className="overflow-hidden shadow-xs">
+      <div className="flex flex-col gap-3 border-b border-secondary p-4 sm:flex-row sm:items-center sm:justify-between bg-primary">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative min-w-[16rem] sm:max-w-xs">
+            <SearchLg className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-tertiary" />
             <input
               value={search}
               onChange={(event) => setSearch(event.currentTarget.value)}
-              placeholder="Search CVE, package, source, path…"
+              placeholder="Search CVE, package, source, path..."
               aria-label="Search vulnerabilities"
-              className="h-8 w-72 rounded-md border border-secondary bg-primary pl-8 pr-3 text-xs text-primary placeholder:text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
+              className="h-9 w-full rounded-lg border border-secondary bg-primary pl-9 pr-8 text-xs text-primary placeholder:text-quaternary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-solid"
             />
           </div>
+          <SeverityFilter value={filter} onChange={setFilter} available={available} />
         </div>
-        <div className="grid gap-2 text-xs text-tertiary tabular-nums sm:grid-cols-2 xl:grid-cols-3">
-          <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
-            <div className="font-mono text-base font-semibold text-primary">{shownPackages.toLocaleString()}</div>
-            <div>packages shown</div>
-          </div>
-          <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
-            <div className="font-mono text-base font-semibold text-primary">{shownAdvisories.toLocaleString()}</div>
-            <div>advisories shown</div>
-          </div>
-          <div className="rounded-md bg-secondary/60 px-3 py-2 ring-1 ring-secondary">
-            <div className="font-mono text-base font-semibold text-tertiary">{totalAdvisories.toLocaleString()}</div>
-            <div>total advisories after filters</div>
-          </div>
+
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="inline-flex items-center gap-1.5 rounded-lg border border-utility-orange-300 bg-warning-primary px-2.5 py-1 font-semibold text-warning-primary">
+            <ShieldZap className="size-3.5" />
+            <span>{shownAdvisories} advisor{shownAdvisories === 1 ? 'y' : 'ies'}</span>
+          </span>
+          <span className="inline-flex items-center rounded-lg border border-secondary bg-secondary px-2.5 py-1 font-medium text-tertiary">
+            {shownPackages} package{shownPackages === 1 ? '' : 's'} affected
+          </span>
         </div>
       </div>
+
       {displayRows.length === 0 ? (
         <div className="p-8 text-center">
           <div className="text-sm font-medium text-primary">No vulnerabilities match this filter.</div>
@@ -403,7 +412,7 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
           rowKey={(row) => row.key}
           rowHeight={64}
           rowClassName={(row) =>
-            cn('items-center py-3', row.isFirstInPackage && 'border-t-2 border-t-primary bg-secondary/20')
+            cn('items-center py-3', row.isFirstInPackage && 'border-t-2 border-t-primary bg-secondary')
           }
           columns={vulnColumns}
         />
@@ -415,17 +424,68 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
 export function PriorityBadge({ priority }: { priority: number }) {
   const tone =
     priority <= 1
-      ? 'bg-critical/15 text-critical ring-critical/30'
+      ? 'border-error bg-error-primary text-error-primary'
       : priority === 2
-        ? 'bg-high/15 text-high ring-high/30'
+        ? 'border-utility-orange-200 bg-utility-orange-50 text-utility-orange-700'
         : priority === 3
-          ? 'bg-medium/15 text-medium ring-medium/30'
-          : 'bg-secondary text-quaternary ring-secondary'
+          ? 'border-utility-yellow-200 bg-utility-yellow-50 text-utility-yellow-700'
+          : 'border-secondary bg-secondary text-tertiary'
   return (
-    <span className={cn('inline-flex items-center rounded px-1.5 py-0.5 font-mono text-xs font-semibold ring-1 ring-inset', tone)}>
+    <span className={cn('inline-flex items-center rounded border px-1.5 py-0.2 font-mono text-xs font-bold', tone)}>
       P{priority}
     </span>
   )
+}
+
+export const SCOPE_CONFIG: Record<string, { label: string; tone: string }> = {
+  production: {
+    label: 'prod',
+    tone: 'text-error-primary bg-error-primary border-error',
+  },
+  prod: {
+    label: 'prod',
+    tone: 'text-error-primary bg-error-primary border-error',
+  },
+  development: {
+    label: 'dev',
+    tone: 'text-utility-blue-700 bg-utility-blue-50 border-utility-blue-200',
+  },
+  dev: {
+    label: 'dev',
+    tone: 'text-utility-blue-700 bg-utility-blue-50 border-utility-blue-200',
+  },
+  test: {
+    label: 'test',
+    tone: 'text-utility-purple-700 bg-utility-purple-50 border-utility-purple-200',
+  },
+  fixture: {
+    label: 'fixture',
+    tone: 'text-utility-orange-700 bg-utility-orange-50 border-utility-orange-200',
+  },
+  documentation: {
+    label: 'docs',
+    tone: 'text-utility-teal-700 bg-utility-teal-50 border-utility-teal-200',
+  },
+  docs: {
+    label: 'docs',
+    tone: 'text-utility-teal-700 bg-utility-teal-50 border-utility-teal-200',
+  },
+  benchmark: {
+    label: 'bench',
+    tone: 'text-utility-yellow-700 bg-utility-yellow-50 border-utility-yellow-200',
+  },
+  bench: {
+    label: 'bench',
+    tone: 'text-utility-yellow-700 bg-utility-yellow-50 border-utility-yellow-200',
+  },
+  example: {
+    label: 'example',
+    tone: 'text-utility-green-700 bg-utility-green-50 border-utility-green-200',
+  },
+  unknown: {
+    label: 'unknown',
+    tone: 'text-tertiary bg-secondary border-secondary',
+  },
 }
 
 export const SCOPE_LABEL: Record<string, string> = {
@@ -436,28 +496,34 @@ export const SCOPE_LABEL: Record<string, string> = {
   fixture: 'fixture',
   benchmark: 'bench',
   documentation: 'docs',
-  unknown: '–',
+  unknown: 'unknown',
 }
 
 export function ScopeBadge({ scope }: { scope: string }) {
-  const bg = scope !== 'production' && scope !== 'unknown'
+  const norm = (scope || '').toLowerCase()
+  const conf = SCOPE_CONFIG[norm] ?? { label: scope, tone: 'text-secondary bg-secondary border-secondary' }
   return (
-    <span className={cn('font-mono text-[11px]', bg ? 'text-quaternary' : 'text-tertiary')}>
-      {SCOPE_LABEL[scope] ?? scope}
+    <span
+      className={cn(
+        'inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold uppercase tracking-wide',
+        conf.tone,
+      )}
+    >
+      {conf.label}
     </span>
   )
 }
 
 export function DetectedBy({ sources }: { sources: string[] }) {
-  if (!sources || sources.length === 0) return <span className="text-quaternary">–</span>
+  if (!sources || sources.length === 0) return <span className="text-quaternary font-mono text-xs">None</span>
   return (
     <div className="flex flex-wrap gap-1">
       {sources.map((s) => (
         <span
           key={s}
           className={cn(
-            'rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset',
-            s === 'grype' ? 'bg-brand-primary text-brand-secondary ring-brand' : 'bg-secondary text-tertiary ring-secondary',
+            'rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+            s === 'grype' ? 'border-brand bg-brand-primary text-brand-secondary' : 'border-secondary bg-secondary text-tertiary',
           )}
         >
           {s}
@@ -475,17 +541,17 @@ export const CONFIDENCE_LABEL: Record<string, string> = {
 }
 
 export function ConfidenceBadge({ confidence }: { confidence: string }) {
-  if (!confidence) return <span className="text-quaternary">–</span>
+  if (!confidence) return <span className="text-quaternary font-mono text-xs">None</span>
   const tone =
     confidence === 'very_high'
-      ? 'bg-accent/10 text-accent ring-accent/25'
+      ? 'border-utility-green-300 bg-success-primary text-success-primary'
       : confidence === 'high'
-        ? 'bg-brand-primary text-brand-secondary ring-brand'
+        ? 'border-brand bg-brand-primary text-brand-secondary'
         : confidence === 'medium'
-          ? 'bg-secondary text-tertiary ring-secondary'
-          : 'text-quaternary ring-secondary'
+          ? 'border-secondary bg-secondary text-tertiary'
+          : 'border-secondary bg-primary text-quaternary'
   return (
-    <span className={cn('inline-flex rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset', tone)}>
+    <span className={cn('inline-flex rounded-md border px-2 py-0.5 text-xs font-semibold', tone)}>
       {CONFIDENCE_LABEL[confidence] ?? confidence}
     </span>
   )
@@ -562,7 +628,7 @@ export function countEdges(scan: ScanResult): number {
 }
 
 export function fmtDuration(start: string | null, end: string | null): string {
-  if (!start) return '–'
+  if (!start) return '0s'
   const s = new Date(start).getTime()
   const e = end ? new Date(end).getTime() : Date.now()
   const sec = Math.max(0, Math.round((e - s) / 1000))
@@ -572,7 +638,7 @@ export function fmtDuration(start: string | null, end: string | null): string {
 }
 
 export function fmtWindow(from: string | null, to: string | null): string {
-  const f = from ? new Date(from).toLocaleDateString() : '–'
+  const f = from ? new Date(from).toLocaleDateString() : 'N/A'
   const t = to ? new Date(to).toLocaleDateString() : 'open'
   return `${f} → ${t}`
 }

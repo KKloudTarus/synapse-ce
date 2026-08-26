@@ -17,6 +17,7 @@ import { useFetch } from '../../hooks'
 import type { QualityGate, QualityGateCondition } from '../../lib/types'
 import { metricLabel } from '../../components/codequality/qualityPresentation'
 import { Button, Card, EmptyState, ErrorState, Input, Select, Spinner, cn } from '../../components/ui'
+import { Badge } from '../../components/base/badges/badges'
 
 const metrics = [
   'new_critical',
@@ -68,28 +69,28 @@ function getMetricCategoryStyle(category: MetricCategory) {
   switch (category) {
     case 'security':
       return {
-        cardBg: 'border-utility-pink-200 bg-utility-pink-50/50 dark:border-utility-pink-800 dark:bg-utility-pink-950/20',
+        cardBg: 'border-utility-pink-200 bg-utility-pink-50 dark:border-utility-pink-800 dark:bg-utility-pink-950',
         icon: ShieldZap,
-        iconBg: 'bg-utility-pink-100 text-utility-pink-700 dark:bg-utility-pink-900/40 dark:text-utility-pink-300',
+        iconBg: 'bg-utility-pink-100 text-utility-pink-700 dark:bg-utility-pink-900 dark:text-utility-pink-300',
       }
     case 'rating':
       return {
-        cardBg: 'border-utility-orange-200 bg-utility-orange-50/50 dark:border-utility-orange-800 dark:bg-utility-orange-950/20',
+        cardBg: 'border-utility-orange-200 bg-utility-orange-50 dark:border-utility-orange-800 dark:bg-utility-orange-950',
         icon: Award01,
-        iconBg: 'bg-utility-orange-100 text-utility-orange-700 dark:bg-utility-orange-900/40 dark:text-utility-orange-300',
+        iconBg: 'bg-utility-orange-100 text-utility-orange-700 dark:bg-utility-orange-900 dark:text-utility-orange-300',
       }
     case 'coverage':
       return {
-        cardBg: 'border-utility-green-200 bg-utility-green-50/50 dark:border-utility-green-800 dark:bg-utility-green-950/20',
+        cardBg: 'border-utility-green-200 bg-utility-green-50 dark:border-utility-green-800 dark:bg-utility-green-950',
         icon: Percent01,
-        iconBg: 'bg-utility-green-100 text-utility-green-700 dark:bg-utility-green-900/40 dark:text-utility-green-300',
+        iconBg: 'bg-utility-green-100 text-utility-green-700 dark:bg-utility-green-900 dark:text-utility-green-300',
       }
     case 'duplication':
     default:
       return {
-        cardBg: 'border-utility-blue-200 bg-utility-blue-50/50 dark:border-utility-blue-800 dark:bg-utility-blue-950/20',
+        cardBg: 'border-utility-blue-200 bg-utility-blue-50 dark:border-utility-blue-800 dark:bg-utility-blue-950',
         icon: FileCode01,
-        iconBg: 'bg-utility-blue-100 text-utility-blue-700 dark:bg-utility-blue-900/40 dark:text-utility-blue-300',
+        iconBg: 'bg-utility-blue-100 text-utility-blue-700 dark:bg-utility-blue-900 dark:text-utility-blue-300',
       }
   }
 }
@@ -150,7 +151,6 @@ export function QualityGates() {
       <header className="flex flex-wrap items-center justify-between gap-4 pb-1">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">Quality Gates</h1>
-          <p className="mt-1 text-sm text-secondary">Define release policies with measurable conditions and assign them to Projects</p>
         </div>
         <Button
           variant="brand"
@@ -215,18 +215,18 @@ export function QualityGates() {
               </div>
 
               {/* Segmented Filter Pills */}
-              <div className="flex items-center rounded-lg border border-secondary bg-secondary/30 p-0.5 shadow-xs">
+              <div className="flex items-center rounded-lg border border-secondary bg-secondary p-0.5 shadow-xs">
                 <button
                   type="button"
                   onClick={() => setTypeFilter('all')}
                   className={cn(
                     'rounded-md px-2.5 py-1 text-xs font-semibold transition-all',
                     typeFilter === 'all'
-                      ? 'bg-primary text-primary shadow-xs border border-secondary/60'
-                      : 'text-tertiary hover:text-primary'
+                      ? 'bg-primary text-primary shadow-xs border border-secondary'
+                      : 'text-secondary hover:text-primary'
                   )}
                 >
-                  All <span className="ml-1 text-[11px] font-mono text-quaternary tabular-nums">({gates.length})</span>
+                  All <span className="ml-1 text-xs font-mono text-tertiary tabular-nums">({gates.length})</span>
                 </button>
                 <button
                   type="button"
@@ -234,11 +234,11 @@ export function QualityGates() {
                   className={cn(
                     'rounded-md px-2.5 py-1 text-xs font-semibold transition-all',
                     typeFilter === 'builtin'
-                      ? 'bg-primary text-brand-secondary shadow-xs border border-secondary/60'
-                      : 'text-tertiary hover:text-primary'
+                      ? 'bg-primary text-brand-secondary shadow-xs border border-secondary'
+                      : 'text-secondary hover:text-primary'
                   )}
                 >
-                  Built-in <span className="ml-1 text-[11px] font-mono text-quaternary tabular-nums">({builtInCount})</span>
+                  Built-in <span className="ml-1 text-xs font-mono text-tertiary tabular-nums">({builtInCount})</span>
                 </button>
                 <button
                   type="button"
@@ -246,11 +246,11 @@ export function QualityGates() {
                   className={cn(
                     'rounded-md px-2.5 py-1 text-xs font-semibold transition-all',
                     typeFilter === 'custom'
-                      ? 'bg-primary text-utility-blue-700 dark:text-utility-blue-300 shadow-xs border border-secondary/60'
-                      : 'text-tertiary hover:text-primary'
+                      ? 'bg-primary text-utility-blue-700 dark:text-utility-blue-300 shadow-xs border border-secondary'
+                      : 'text-secondary hover:text-primary'
                   )}
                 >
-                  Custom <span className="ml-1 text-[11px] font-mono text-quaternary tabular-nums">({customCount})</span>
+                  Custom <span className="ml-1 text-xs font-mono text-tertiary tabular-nums">({customCount})</span>
                 </button>
               </div>
             </div>
@@ -311,38 +311,40 @@ export function QualityGates() {
                       <div className="flex items-center gap-3">
                         <div
                           className={cn(
-                            'flex size-9 shrink-0 items-center justify-center rounded-xl border shadow-sm transition-all',
+                            'flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs',
                             gate.builtIn
-                              ? 'border-brand/30 bg-brand-primary/10 text-brand-secondary ring-1 ring-brand/10'
-                              : 'border-utility-blue-200 bg-utility-blue-50 text-utility-blue-700 ring-1 ring-utility-blue-100 dark:border-utility-blue-800 dark:bg-utility-blue-950/40 dark:text-utility-blue-300'
+                              ? 'text-fg-brand-primary'
+                              : 'text-utility-blue-600 dark:text-utility-blue-400'
                           )}
                         >
-                          <ShieldTick className="size-4.5" aria-hidden="true" />
+                          <ShieldTick className="size-5" aria-hidden="true" />
                         </div>
                         <div className="min-w-0">
                           <span className="font-bold text-primary block leading-tight truncate">{gate.name}</span>
-                          <span className="font-mono text-xs text-tertiary italic">{gate.key}</span>
                         </div>
                       </div>
                     }
                     actions={
                       <div className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            'inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold shadow-xs',
-                            gate.builtIn
-                              ? 'border-brand/30 bg-brand-primary/15 text-brand-secondary'
-                              : 'border-utility-blue-200 bg-utility-blue-50 text-utility-blue-700 dark:border-utility-blue-800 dark:bg-utility-blue-950/40 dark:text-utility-blue-300'
-                          )}
+                        <Badge
+                          type="pill-color"
+                          color={gate.builtIn ? 'brand' : 'blue'}
+                          size="sm"
+                          className="font-semibold"
                         >
                           {gate.builtIn ? 'Built-in' : 'Custom'}
-                        </span>
-                        <span className="inline-flex items-center rounded-md border border-secondary bg-secondary px-2 py-0.5 text-xs font-medium text-tertiary shadow-xs tabular-nums">
+                        </Badge>
+                        <Badge
+                          type="pill-color"
+                          color="gray"
+                          size="sm"
+                          className="font-medium font-mono tabular-nums text-tertiary"
+                        >
                           {gate.conditions.length} conditions
-                        </span>
+                        </Badge>
                       </div>
                     }
-                    className={cn(gate.builtIn ? 'border-brand/30 shadow-xs' : 'border-secondary shadow-xs')}
+                    className="border-secondary shadow-xs"
                   >
                     {/* Compact 2-column Semantic Chips Grid (Max 6 shown directly on card) */}
                     <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -367,7 +369,7 @@ export function QualityGates() {
                                 {metricLabel(condition.metric)}
                               </span>
                             </div>
-                            <span className="shrink-0 rounded border border-secondary bg-primary px-1.5 py-0.5 font-mono text-[11px] font-bold text-primary shadow-xs tabular-nums">
+                            <span className="shrink-0 rounded border border-secondary bg-primary px-1.5 py-0.5 font-mono text-xs font-bold text-primary shadow-xs tabular-nums">
                               {condition.op} {condition.threshold}
                             </span>
                           </li>
@@ -381,33 +383,29 @@ export function QualityGates() {
                         <button
                           type="button"
                           onClick={() => setEditing(gate)}
-                          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-secondary bg-secondary/40 py-1.5 text-xs font-medium text-secondary transition hover:border-brand-solid hover:bg-brand-primary/10 hover:text-brand-primary"
+                          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-secondary bg-secondary py-1.5 text-xs font-semibold text-secondary transition hover:border-brand-solid hover:bg-brand-primary hover:text-brand-secondary"
                         >
-                          <span className="font-semibold">+ {gate.conditions.length - 6} more conditions</span>
-                          <span className="text-[11px] font-normal text-tertiary">
-                            ({gate.builtIn ? 'Click to view all' : 'Click to view & edit'})
-                          </span>
+                          <span>+ {gate.conditions.length - 6} more conditions</span>
                         </button>
                       </div>
                     )}
 
                     {gate.builtIn ? (
-                      <div className="mt-3 flex items-center justify-between border-t border-secondary/60 pt-2.5">
-                        <p className="text-xs text-tertiary">Built-in policy maintained by Synapse</p>
-                        <span className="text-[11px] font-medium text-brand-secondary">Active Baseline</span>
+                      <div className="mt-3 flex items-center justify-end border-t border-secondary pt-2.5">
+                        <Badge type="pill-color" color="brand" size="sm">Active Baseline</Badge>
                       </div>
                     ) : (
-                      <div className="mt-3 flex items-center justify-end gap-2 border-t border-secondary/60 pt-2.5">
+                      <div className="mt-3 flex items-center justify-end gap-2 border-t border-secondary pt-2.5">
                         <Button
                           variant="secondary"
-                          className="h-8 !border-brand-solid !text-brand-secondary hover:!border-brand-solid hover:!bg-brand-primary/10 hover:!text-brand-primary text-xs"
+                          className="h-8 text-xs font-semibold text-brand-secondary hover:text-brand-primary"
                           onClick={() => setEditing(gate)}
                         >
                           <Edit01 className="size-3.5" aria-hidden="true" /> Edit
                         </Button>
                         <Button
                           variant="secondary"
-                          className="h-8 !border-utility-red-400 !text-utility-red-600 hover:!border-utility-red-600 hover:!bg-utility-red-50 hover:!text-utility-red-700 dark:border-utility-red-800 dark:text-utility-red-400 dark:hover:!bg-utility-red-950/40 dark:hover:!text-utility-red-300 text-xs"
+                          className="h-8 text-xs font-semibold text-error-primary hover:text-utility-red-700"
                           onClick={() => setDeletingGate(gate)}
                         >
                           <Trash01 className="size-3.5" aria-hidden="true" /> Delete
@@ -588,17 +586,10 @@ function GateEditorModal({
         className="relative z-10 w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl border border-secondary bg-primary shadow-2xl overflow-hidden animate-scale-in text-left"
       >
         {/* Modal Header */}
-        <div className="flex items-center justify-between border-b border-secondary px-6 py-4 bg-secondary/30">
+        <div className="flex items-center justify-between border-b border-secondary px-6 py-4 bg-secondary">
           <div className="flex items-center gap-3">
-            <div
-              className={cn(
-                'flex size-9 shrink-0 items-center justify-center rounded-xl border shadow-sm',
-                isBuiltIn
-                  ? 'border-brand/30 bg-brand-primary/10 text-brand-secondary'
-                  : 'border-brand/30 bg-brand-primary/10 text-brand-secondary'
-              )}
-            >
-              <ShieldTick className="size-4.5" aria-hidden="true" />
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-primary text-brand-secondary shadow-2xs">
+              <ShieldTick className="size-5" aria-hidden="true" />
             </div>
             <div>
               <h2 id="gate-modal-title" className="text-lg font-bold text-primary">

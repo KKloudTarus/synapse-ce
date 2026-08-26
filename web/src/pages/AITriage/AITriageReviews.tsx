@@ -22,7 +22,7 @@ export function AITriageReviews() {
     severity: (params.get('severity') as Severity) || undefined,
     cwe: params.get('cwe') || undefined,
     project: params.get('project') || undefined,
-    state: (params.get('state') as AITriageReviewState) || 'pending',
+    state: (params.get('state') as AITriageReviewState) || undefined,
   }), [params])
 
   const { data, error } = useFetch<{ reviews: AITriageReview[]; projects: Project[]; me: CurrentUser | null }>(
@@ -77,7 +77,7 @@ export function AITriageReviews() {
 
   function patch(key: string, value: string) {
     const next = new URLSearchParams(params)
-    if (value && !(key === 'state' && value === 'pending')) next.set(key, value)
+    if (value && value !== 'all') next.set(key, value)
     else next.delete(key)
     setParams(next, { replace: true })
   }
@@ -122,9 +122,6 @@ export function AITriageReviews() {
           <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">
             AI Triage Reviews
           </h1>
-          <p className="mt-1 text-sm text-secondary">
-            Human decisions for false-positive recommendations that policy would not let AI exempt
-          </p>
         </div>
       </header>
 
@@ -151,8 +148,8 @@ export function AITriageReviews() {
           options={[{ value: 'all', label: 'All projects' }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
         />
         <Select
-          value={filter.state ?? 'pending'}
-          onValueChange={(v) => patch('state', v)}
+          value={filter.state ?? 'all'}
+          onValueChange={(v) => patch('state', v === 'all' ? '' : v)}
           ariaLabel="Filter reviews by state"
           className="h-10 w-full"
           options={[

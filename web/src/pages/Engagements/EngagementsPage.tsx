@@ -250,9 +250,6 @@ export const EngagementsPage: FC = () => {
           <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">
             Engagements
           </h1>
-          <p className="mt-1 text-sm text-secondary">
-            Define scopes, link Assets, and track execution to completion
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -294,31 +291,27 @@ export const EngagementsPage: FC = () => {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <EngagementStatCard
           label="Total"
-          value={data ? totalCount : '—'}
+          value={data ? totalCount : 0}
           icon={Target01}
           tone="info"
-          hint="All recorded scopes"
         />
         <EngagementStatCard
           label="Active"
-          value={data ? activeCount : '—'}
+          value={data ? activeCount : 0}
           icon={Activity}
           tone="accent"
-          hint="Currently undergoing test"
         />
         <EngagementStatCard
           label="Completed"
-          value={data ? completedCount : '—'}
+          value={data ? completedCount : 0}
           icon={CheckCircle}
           tone="brand"
-          hint="Closed assessments"
         />
         <EngagementStatCard
           label="Unassigned"
-          value={data ? unassignedCount : '—'}
+          value={data ? unassignedCount : 0}
           icon={LayersThree01}
           tone={unassignedCount > 0 ? 'warning' : 'default'}
-          hint="No connected business asset"
         />
       </div>
 

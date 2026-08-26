@@ -116,52 +116,69 @@ export function QualityProfiles() {
       <header className="flex flex-wrap items-center justify-between gap-4 pb-1">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">Quality Profiles</h1>
-          <p className="mt-1 text-sm text-secondary">
-            Manage rule baselines, customize rules, and assign to projects
-          </p>
         </div>
       </header>
 
       {/* Top KPI Stat Cards (DESIGN-REFERENCE.md standard) */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
         {/* Total Profiles */}
-        <div className="flex flex-col justify-between rounded-xl border border-secondary bg-primary p-4 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-secondary">Total Profiles</span>
-            <LayersThree01 className="size-4 text-brand-secondary" aria-hidden="true" />
+        <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-secondary">Total Profiles</span>
+              <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
+                {stats.total}
+              </div>
+            </div>
+            <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
+              <LayersThree01 className="size-5 text-brand-secondary" aria-hidden="true" />
+            </span>
           </div>
-          <div className="mt-2 text-3xl font-bold tabular-nums text-primary">{stats.total}</div>
-          <div className="mt-1 text-xs text-tertiary truncate">Across all languages</div>
         </div>
 
         {/* Languages */}
-        <div className="flex flex-col justify-between rounded-xl border border-secondary bg-primary p-4 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-secondary">Languages</span>
-            <FileCode01 className="size-4 text-utility-blue-600 dark:text-utility-blue-400" aria-hidden="true" />
+        <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-secondary">Languages</span>
+              <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
+                {stats.languages}
+              </div>
+            </div>
+            <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
+              <FileCode01 className="size-5 text-utility-blue-600 dark:text-utility-blue-400" aria-hidden="true" />
+            </span>
           </div>
-          <div className="mt-2 text-3xl font-bold tabular-nums text-primary">{stats.languages}</div>
-          <div className="mt-1 text-xs text-tertiary truncate">Active tech stacks</div>
         </div>
 
         {/* Built-in Profiles */}
-        <div className="flex flex-col justify-between rounded-xl border border-secondary bg-primary p-4 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-secondary">Built-in Defaults</span>
-            <ShieldTick className="size-4 text-utility-green-600 dark:text-utility-green-400" aria-hidden="true" />
+        <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-secondary">Built-in Defaults</span>
+              <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
+                {stats.builtIn}
+              </div>
+            </div>
+            <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
+              <ShieldTick className="size-5 text-utility-green-600 dark:text-utility-green-400" aria-hidden="true" />
+            </span>
           </div>
-          <div className="mt-2 text-3xl font-bold tabular-nums text-primary">{stats.builtIn}</div>
-          <div className="mt-1 text-xs text-tertiary truncate">Vendor recommended baselines</div>
         </div>
 
         {/* Custom Profiles */}
-        <div className="flex flex-col justify-between rounded-xl border border-secondary bg-primary p-4 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-secondary">Custom Profiles</span>
-            <ShieldZap className="size-4 text-utility-orange-600 dark:text-utility-orange-400" aria-hidden="true" />
+        <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-secondary">Custom Profiles</span>
+              <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
+                {stats.custom}
+              </div>
+            </div>
+            <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
+              <ShieldZap className="size-5 text-utility-orange-600 dark:text-utility-orange-400" aria-hidden="true" />
+            </span>
           </div>
-          <div className="mt-2 text-3xl font-bold tabular-nums text-primary">{stats.custom}</div>
-          <div className="mt-1 text-xs text-tertiary truncate">Tailored project configurations</div>
         </div>
       </div>
 

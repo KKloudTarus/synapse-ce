@@ -91,7 +91,7 @@ describe('Dashboard', () => {
     expect(screen.getByRole('heading', { name: 'Active Finding Risk Mix' })).toBeInTheDocument()
     expect(screen.getByLabelText('Asset Security Posture: 3 total')).toBeInTheDocument()
     expect(screen.getByLabelText('Active Finding Risk Mix: 7 total')).toBeInTheDocument()
-    expect(screen.getByText(/excluded from the trend/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Excluded findings info')).toBeInTheDocument()
   })
 
   // The completeness disclosures are the point of these charts: a trend that quietly omits rows, or a
@@ -101,7 +101,7 @@ describe('Dashboard', () => {
     vi.mocked(api.dashboardSecurityOperations).mockResolvedValue({ ...analytics, externalFindingsIncluded: false })
     renderDashboard()
 
-    expect(await screen.findByText('Third-party findings are not included.')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Third-party findings note')).toBeInTheDocument()
   })
 
   it('keeps core operations visible when Fleet telemetry fails', async () => {
@@ -109,8 +109,7 @@ describe('Dashboard', () => {
     renderDashboard()
 
     expect(await screen.findByLabelText(/Total assets: 3/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/Coverage gaps: —/i)).toBeInTheDocument()
-    expect(screen.getAllByText('Fleet telemetry unavailable').length).toBeGreaterThan(0)
+    expect(screen.getByLabelText(/Coverage gaps: N\/A/i)).toBeInTheDocument()
   })
 
   it('reloads the finding trend for a selected range', async () => {

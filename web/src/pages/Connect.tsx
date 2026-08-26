@@ -92,17 +92,17 @@ export function Connect() {
 
             {error && <ErrorState message={error} id="connect-error" tabIndex={-1} />}
 
-            <div role="tablist" aria-label="Sign in methods" className="flex rounded-lg border border-secondary bg-secondary/50 p-1">
+            <div role="tablist" aria-label="Sign in methods" className="flex rounded-lg border border-secondary bg-secondary p-1">
               <button
                 type="button"
                 role="tab"
                 aria-selected={currentTab === 'sso'}
                 onClick={() => setUserSelectedTab('sso')}
                 className={cn(
-                  'flex flex-1 items-center justify-center gap-2 rounded-md py-2 text-xs transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60',
+                  'flex flex-1 items-center justify-center gap-2 rounded-md py-2 text-xs transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
                   currentTab === 'sso'
-                    ? 'bg-primary font-semibold text-primary shadow-xs'
-                    : 'font-medium text-tertiary hover:text-primary',
+                    ? 'border border-brand bg-primary font-semibold text-brand-secondary shadow-xs'
+                    : 'border border-transparent font-medium text-secondary hover:text-primary',
                 )}
               >
                 <LogIn04 className="size-3.5" /> Organization
@@ -113,10 +113,10 @@ export function Connect() {
                 aria-selected={currentTab === 'token'}
                 onClick={() => setUserSelectedTab('token')}
                 className={cn(
-                  'flex flex-1 items-center justify-center gap-2 rounded-md py-2 text-xs transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60',
+                  'flex flex-1 items-center justify-center gap-2 rounded-md py-2 text-xs transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
                   currentTab === 'token'
-                    ? 'bg-primary font-semibold text-primary shadow-xs'
-                    : 'font-medium text-tertiary hover:text-primary',
+                    ? 'border border-brand bg-primary font-semibold text-brand-secondary shadow-xs'
+                    : 'border border-transparent font-medium text-secondary hover:text-primary',
                 )}
               >
                 <Key01 className="size-3.5" /> API Token

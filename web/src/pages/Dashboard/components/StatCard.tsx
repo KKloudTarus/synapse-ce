@@ -28,15 +28,21 @@ export const StatCard: FC<StatCardProps> = ({
         className,
       )}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-sm font-semibold text-secondary">{label}</span>
-        {Icon && <Icon className={cx('size-5 shrink-0', iconTone)} aria-hidden="true" />}
-      </div>
-      <div className="mt-2 text-3xl font-bold tabular-nums text-primary sm:text-4xl">
-        {typeof value === 'number' ? value.toLocaleString() : value}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <span className="truncate block text-sm font-semibold text-secondary">{label}</span>
+          <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
+            {typeof value === 'number' ? value.toLocaleString() : value}
+          </div>
+        </div>
+        {Icon && (
+          <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary text-secondary shadow-2xs">
+            <Icon className={cx('size-5', iconTone)} aria-hidden="true" />
+          </span>
+        )}
       </div>
       {hint && (
-        <p className="mt-2 truncate text-[11px] text-tertiary" title={hint}>
+        <p className="mt-2 truncate text-xs text-tertiary" title={hint}>
           {hint}
         </p>
       )}

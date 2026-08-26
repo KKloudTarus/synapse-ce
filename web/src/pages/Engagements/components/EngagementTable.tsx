@@ -33,9 +33,9 @@ export interface EngagementTableProps {
 }
 
 function formatRelativeTime(dateString: string | null | undefined): string {
-  if (!dateString) return '—'
+  if (!dateString) return 'N/A'
   const date = new Date(dateString)
-  if (isNaN(date.getTime())) return '—'
+  if (isNaN(date.getTime())) return 'N/A'
   const now = Date.now()
   const diffSec = Math.floor((now - date.getTime()) / 1000)
   if (diffSec < 60) return 'Just now'
@@ -95,7 +95,7 @@ export const EngagementTable: FC<EngagementTableProps> = ({
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] border-collapse text-left text-sm" role="table" aria-rowcount={totalItems + 1}>
           <thead>
-            <tr className="border-b border-secondary bg-secondary/50 text-xs font-semibold text-tertiary">
+            <tr className="border-b border-secondary bg-secondary text-xs font-semibold text-tertiary">
               {/* Column 1: Name */}
               <th scope="col" className="px-5 py-3">
                 <button
@@ -212,7 +212,7 @@ export const EngagementTable: FC<EngagementTableProps> = ({
                 const targetRepo =
                   engagement.inScope.find((s) => s.kind === 'repo')?.value ||
                   engagement.inScope[0]?.value ||
-                  (engagement.businessAssetId ? assetNames[engagement.businessAssetId] : '—')
+                  (engagement.businessAssetId ? assetNames[engagement.businessAssetId] : 'N/A')
 
                 const anyEngagement = engagement as any
                 const findingsCount = anyEngagement.findingsCount ?? null
@@ -222,7 +222,7 @@ export const EngagementTable: FC<EngagementTableProps> = ({
                   <tr
                     key={engagement.id}
                     onClick={() => navigate(`/engagements/${engagement.id}`)}
-                    className="group cursor-pointer transition-colors hover:bg-secondary/40"
+                    className="group cursor-pointer transition-colors hover:bg-secondary"
                   >
                     {/* Column 1: Name + ID */}
                     <td className="px-5 py-3.5">
@@ -309,7 +309,7 @@ export const EngagementTable: FC<EngagementTableProps> = ({
                           )}
                         </div>
                       ) : (
-                        <span className="font-mono text-xs text-tertiary">—</span>
+                        <span className="font-mono text-xs text-tertiary">0</span>
                       )}
                     </td>
 

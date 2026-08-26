@@ -57,25 +57,31 @@ export function AssetDetail() {
   const [notFound, setNotFound] = useState(false)
 
   const { data: fetchedData, error, refetch } = useFetch<Omit<Context, 'reload'>>(
-    () => Promise.all([
-      api.getBusinessAsset(key),
-      api.businessAssetProjects(key),
-      api.businessAssetTechnicalAssets(key),
-      api.businessAssetEngagements(key),
-      api.businessAssetFindings(key),
-      api.businessAssetCoverage(key),
-      api.businessAssetPosture(key),
-      api.businessAssetHistory(key),
-    ]).then(([asset, projects, technical, engagements, findings, coverage, posture, history]) => {
-      setNotFound(false)
-      return { asset, projects, technical, engagements, findings, coverage, posture, history }
-    }).catch((nextError) => {
-      if (nextError instanceof ApiError && nextError.status === 404) {
-        setNotFound(true)
-        return null as never
+    async () => {
+      try {
+        const asset = await api.getBusinessAsset(key)
+        const assetId = asset.id || key
+
+        const [projects, technical, engagements, findings, coverage, posture, history] = await Promise.all([
+          api.businessAssetProjects(assetId).catch(() => []),
+          api.businessAssetTechnicalAssets(assetId).catch(() => []),
+          api.businessAssetEngagements(assetId).catch(() => []),
+          api.businessAssetFindings(assetId).catch(() => []),
+          api.businessAssetCoverage(assetId).catch(() => ({ rows: [], counts: {}, freshnessTargetDays: 0 })),
+          api.businessAssetPosture(assetId).catch(() => ({ rating: 'unknown', explanation: '', findingCounts: {}, coverageCounts: {} })),
+          api.businessAssetHistory(assetId).catch(() => []),
+        ])
+
+        setNotFound(false)
+        return { asset, projects, technical, engagements, findings, coverage, posture, history }
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          setNotFound(true)
+          return null as never
+        }
+        throw err
       }
-      throw nextError
-    }),
+    },
     { deps: [key] },
   )
 

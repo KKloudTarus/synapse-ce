@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Activity, AlertTriangle, BarChart01, Coins01, RefreshCw01 } from '@untitledui/icons'
-import { Button, Card, EmptyState, ErrorState, Spinner } from '../../components/ui'
+import { Button, Card, EmptyState, ErrorState, Spinner, cn } from '../../components/ui'
 import { api } from '../../lib/api'
 import type { AITriageMetricRow, AITriageObservability as Observability } from '../../lib/types'
 import { useFetch } from '../../hooks'
@@ -19,14 +19,10 @@ export function AITriageObservability() {
           <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">
             Automation Observability
           </h1>
-          <p className="mt-1 text-sm text-secondary">
-            Evidence-sealed safety, reliability, token and cost signals from each project's latest scan
-          </p>
         </div>
         <Button
           variant="secondary"
           onClick={() => setRevision((v) => v + 1)}
-          className="!border-brand-solid !text-brand-secondary hover:!bg-brand-primary/10"
         >
           <RefreshCw01 className="size-4" />Refresh
         </Button>
@@ -47,7 +43,7 @@ function Dashboard({ data }: { data: Observability }) {
     <div className="space-y-6">
       {/* Alert banner (inline, no card) */}
       {data.alerts.length > 0 && (
-        <div className="flex items-start gap-2 rounded-lg border border-utility-orange-200 bg-utility-orange-50 px-4 py-2.5 dark:border-utility-orange-800 dark:bg-utility-orange-950/30">
+        <div className="flex items-start gap-2 rounded-lg border border-utility-orange-200 bg-utility-orange-50 px-4 py-2.5 dark:border-utility-orange-800 dark:bg-utility-orange-950">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-utility-orange-600 dark:text-utility-orange-400" />
           <div className="space-y-1">
             {data.alerts.map((item, i) => (
@@ -62,19 +58,36 @@ function Dashboard({ data }: { data: Observability }) {
       )}
 
       {/* Stat cards row */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric icon={Activity} label="Provider requests" value={data.totals.requestCount.toLocaleString()} hint={`${data.totals.averageLatencyMillis.toLocaleString()} ms average`} />
-        <Metric icon={BarChart01} label="Disagreement rate" value={disagreementRate} hint={`${data.totals.comparisons} verified comparisons`} />
-        <Metric icon={AlertTriangle} label="Gate exemption rate" value={exemptionRate} hint={`${data.totals.gateExemptions} retained findings exempted`} />
-        <Metric icon={Coins01} label="Estimated cost" value={formatCost(data.totals.estimatedCostMicroUSD)} hint={`${data.totals.totalTokens.toLocaleString()} tokens`} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+        <Metric
+          icon={Activity}
+          label="Provider requests"
+          value={data.totals.requestCount.toLocaleString()}
+          iconColor="text-fg-brand-primary"
+        />
+        <Metric
+          icon={BarChart01}
+          label="Disagreement rate"
+          value={disagreementRate}
+          iconColor="text-utility-blue-600 dark:text-utility-blue-400"
+        />
+        <Metric
+          icon={AlertTriangle}
+          label="Gate exemption rate"
+          value={exemptionRate}
+          iconColor="text-utility-orange-600 dark:text-utility-orange-400"
+        />
+        <Metric
+          icon={Coins01}
+          label="Estimated cost"
+          value={formatCost(data.totals.estimatedCostMicroUSD)}
+          iconColor="text-utility-green-600 dark:text-utility-green-400"
+        />
       </div>
 
       {/* Distribution with donut charts */}
       <Card title="Drift input distribution">
-        <p className="text-xs text-tertiary mb-5">
-          Normalized from {data.distribution.sampleSize.toLocaleString()} AI-triaged findings.
-        </p>
-        <div className="flex flex-col items-start gap-8 sm:flex-row sm:justify-around overflow-hidden">
+        <div className="flex flex-col items-start gap-8 sm:flex-row sm:justify-around overflow-hidden pt-2">
           <DistributionDonut title="Language" values={data.distribution.languageBasisPoints} />
           <DistributionDonut title="CWE" values={data.distribution.cweBasisPoints} />
           <DistributionDonut title="Project" values={data.distribution.projectBasisPoints} />
@@ -93,18 +106,31 @@ function Dashboard({ data }: { data: Observability }) {
   )
 }
 
-function Metric({ icon: Icon, label, value, hint }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; hint: string }) {
+function Metric({
+  icon: Icon,
+  label,
+  value,
+  iconColor,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  value: string
+  iconColor?: string
+}) {
   return (
-    <Card bodyClass="p-5">
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wide text-secondary">{label}</div>
-          <div className="mt-2 text-2xl font-bold tabular-nums text-primary">{value}</div>
-          <div className="mt-1 text-xs text-tertiary">{hint}</div>
+    <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-secondary">{label}</span>
+          <div className="mt-2 font-mono text-3xl font-bold tabular-nums text-primary sm:text-4xl">
+            {value}
+          </div>
         </div>
-        <Icon className="size-5 text-brand" />
+        <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-secondary bg-secondary shadow-2xs">
+          <Icon className={cn('size-5', iconColor ?? 'text-fg-brand-primary')} aria-hidden="true" />
+        </span>
       </div>
-    </Card>
+    </div>
   )
 }
 
@@ -161,7 +187,7 @@ function DistributionDonut({ title, values }: { title: string; values: Record<st
         </svg>
         {/* Center label */}
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-2xl font-bold text-primary tabular-nums">{rows.length}</span>
+          <span className="font-mono text-2xl font-bold text-primary tabular-nums">{rows.length}</span>
         </div>
       </div>
       {/* Legend — horizontal wrap below donut */}
@@ -293,7 +319,7 @@ function ProjectSection({ rows }: { rows: AITriageMetricRow[] }) {
 }
 
 function rate(numerator: number, denominator: number) {
-  return denominator > 0 ? `${(numerator * 100 / denominator).toFixed(1)}%` : '—'
+  return denominator > 0 ? `${((numerator * 100) / denominator).toFixed(1)}%` : '0.0%'
 }
 
 function formatCost(microUSD: number) {

@@ -2,20 +2,17 @@ import { useState, useEffect, lazy, Suspense, type FC } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
-  Package,
-  Calendar,
-  FileCheck01,
-  ShieldZap,
-  ShieldTick,
-  Target04,
-  LayoutGrid01,
-  Sliders04,
   ChevronRight,
+  LayoutGrid01,
+  Package,
+  ShieldTick,
+  ShieldZap,
+  Sliders04,
+  Target04,
 } from '@untitledui/icons'
 import { Button, cn, EmptyState, Spinner } from '../../components/ui'
 import { useFetch } from '../../hooks'
 import { api, ApiError } from '../../lib/api'
-import { kindLabel } from '../../lib/format'
 import type {
   Engagement,
   Finding,
@@ -257,44 +254,50 @@ export function EngagementDetail() {
   const activeGroup = getGroupForTab(tab)
 
   return (
-    <div className="mx-auto max-w-[1600px] animate-fade-in">
-      {/* Breadcrumb navigation */}
-      <nav aria-label="Breadcrumb" className="mb-4 flex items-center gap-2 text-xs text-tertiary">
-        <Link
-          to="/engagements"
-          className="inline-flex items-center gap-1 font-medium text-secondary transition-colors hover:text-primary"
-        >
-          <ArrowLeft className="size-3.5" /> Engagements
-        </Link>
-        <ChevronRight className="size-3 text-quaternary" />
-        <span className="truncate font-semibold text-primary" aria-current="page">
-          {eng.name}
-        </span>
-      </nav>
+    <div className="mx-auto max-w-[1600px] animate-fade-in space-y-5">
+      {/* Top Bar: Breadcrumb navigation on left + 3 Action Buttons on right */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-xs text-tertiary">
+          <Link
+            to="/engagements"
+            className="inline-flex items-center gap-1 font-medium text-secondary transition-colors hover:text-primary"
+          >
+            <ArrowLeft className="size-3.5" /> Engagements
+          </Link>
+          <ChevronRight className="size-3 text-quaternary" />
+          <span className="truncate font-semibold text-primary" aria-current="page">
+            {eng.name}
+          </span>
+        </nav>
 
-      <Header eng={eng} scan={scan} onChanged={refreshAll} />
+        {/* 3 action buttons moved up to be on the same horizontal row with breadcrumbs */}
+        <ExportButtons engagementId={eng.id} scan={scan} onChanged={refreshAll} />
+      </div>
 
-      <ScanPanel
-        eng={eng}
-        importedSBOM={importedSBOM}
-        onImportedSBOMChanged={refreshAll}
-        job={job}
-        setJob={setJob}
-        onScanned={(r) => {
-          setScan(r)
-          if (r.scanMode === 'licenses') {
-            setFindings(r.findings)
-            setTab('licenses')
-          } else {
-            if (r.scanMode === 'vulnerabilities') setTab('vulns')
-            reloadFindings()
-          }
-        }}
-      />
+      {/* Single Unified Hero Card for Engagement Details and Scan Console */}
+      <div className="bg-hero rounded-2xl border border-secondary p-5 sm:p-6 shadow-xs space-y-4">
+        <ScanPanel
+          eng={eng}
+          importedSBOM={importedSBOM}
+          onImportedSBOMChanged={refreshAll}
+          job={job}
+          setJob={setJob}
+          onScanned={(r) => {
+            setScan(r)
+            if (r.scanMode === 'licenses') {
+              setFindings(r.findings)
+              setTab('licenses')
+            } else {
+              if (r.scanMode === 'vulnerabilities') setTab('vulns')
+              reloadFindings()
+            }
+          }}
+        />
+      </div>
 
-      {/* 6 Grouped Tabs */}
-      <div className="space-y-2">
-        {/* Top-Level Tabs */}
+      {/* 2-Tier Navigation Section */}
+      <div className="space-y-2.5">
+        {/* Level 1: Main Tabs */}
         <div
           role="tablist"
           aria-label="Engagement Views"
@@ -318,7 +321,6 @@ export function EngagementDetail() {
                 aria-controls={`panel-${isGroupActive ? tab : (group.sub ? group.sub[0].id : group.id)}`}
                 onClick={() => {
                   if (group.sub && group.sub.length > 0) {
-                    // Switch to first sub-tab of group if not already in this group
                     if (activeGroup.id !== group.id) {
                       setTab(group.sub[0].id)
                     }
@@ -327,9 +329,9 @@ export function EngagementDetail() {
                   }
                 }}
                 className={cn(
-                  '-mb-px inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-3.5 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40',
+                  '-mb-px inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-3.5 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-solid',
                   isGroupActive
-                    ? 'border-brand text-brand-secondary'
+                    ? 'border-brand-solid text-brand-secondary'
                     : 'border-transparent text-tertiary hover:border-secondary hover:text-primary',
                 )}
               >
@@ -350,9 +352,9 @@ export function EngagementDetail() {
           })}
         </div>
 
-        {/* Sub-Navigation Pills (if active group has sub-tabs) */}
+        {/* Level 2: Sub-Navigation Pills (fixed height container to prevent layout shifts) */}
         {activeGroup.sub && activeGroup.sub.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1 border-b border-secondary px-1 pb-2 pt-1">
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-secondary pb-2.5 pt-0.5">
             {activeGroup.sub.map((sub) => {
               const isSubActive = tab === sub.id
               const count = sub.countKey ? counts[sub.countKey] : undefined
@@ -361,7 +363,7 @@ export function EngagementDetail() {
                   key={sub.id}
                   onClick={() => setTab(sub.id)}
                   className={cn(
-                    'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                    'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-solid',
                     isSubActive
                       ? 'bg-brand-solid text-white shadow-xs'
                       : 'text-secondary hover:bg-secondary hover:text-primary',
@@ -371,8 +373,8 @@ export function EngagementDetail() {
                   {count !== undefined && count > 0 && (
                     <span
                       className={cn(
-                        'rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums',
-                        isSubActive ? 'bg-white/20 text-white' : 'bg-secondary text-tertiary',
+                        'rounded-full px-1.5 py-0.2 text-[10px] font-bold tabular-nums',
+                        isSubActive ? 'bg-primary text-brand-secondary' : 'bg-secondary text-tertiary',
                       )}
                     >
                       {count}
@@ -385,7 +387,8 @@ export function EngagementDetail() {
         )}
       </div>
 
-      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${activeGroup.id}`} className="mt-5">
+      {/* Tab Panel Content */}
+      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${activeGroup.id}`} className="mt-4">
         {tab === 'overview' && (
           <OverviewTab findings={findings} scan={scan} job={job} onSelectSeverity={selectSeverity} onGoTab={setTab} />
         )}
@@ -419,95 +422,5 @@ export function EngagementDetail() {
         {tab === 'settings' && <SettingsTab eng={eng} onUpdated={setEng} />}
       </div>
     </div>
-  )
-}
-
-function Header({ eng, scan, onChanged }: { eng: Engagement; scan: ScanResult | null; onChanged: () => void }) {
-  return (
-    <div className="mb-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-3xl font-bold tracking-tight text-primary">{eng.name}</h1>
-          <StatusPill status={eng.status} />
-          <EvidenceBadge engagementId={eng.id} />
-        </div>
-        <ExportButtons engagementId={eng.id} scan={scan} onChanged={onChanged} />
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-tertiary">
-        {eng.client && <span>{eng.client}</span>}
-        {eng.businessAssetId ? (
-          <Link
-            to={`/assets/${encodeURIComponent(eng.businessAssetId)}`}
-            className="flex items-center gap-1.5 text-brand-secondary hover:underline"
-          >
-            <Package className="size-3.5" /> Asset: {eng.businessAssetId}
-          </Link>
-        ) : (
-          <span className="flex items-center gap-1.5">
-            <Package className="size-3.5 text-quaternary" /> Unassigned Asset
-          </span>
-        )}
-        <span className="flex items-center gap-1.5">
-          <Target04 className="size-3.5" /> {eng.inScope.length} in scope
-        </span>
-        {eng.inScope.map((t, i) => {
-          const displayValue = t.kind === 'repo' && t.value.includes('/')
-            ? t.value.split('/').slice(-1)[0].replace(/\.git$/, '')
-            : t.value
-          return (
-            <span
-              key={i}
-              className="inline-flex items-center gap-1.5 rounded-md border border-secondary bg-secondary py-0.5 pl-1.5 pr-2 text-xs text-tertiary"
-              title={t.value}
-            >
-              <span className="rounded bg-brand-primary px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-brand-secondary">
-                {kindLabel(t.kind)}
-              </span>
-              <span className="font-mono text-primary">{displayValue}</span>
-            </span>
-          )
-        })}
-        {(eng.authorizedFrom || eng.authorizedTo) && (
-          <span className="flex items-center gap-1.5 font-mono">
-            <Calendar className="size-3.5" /> {fmtWindow(eng.authorizedFrom, eng.authorizedTo)}
-          </span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// EvidenceBadge shows the tamper-evident evidence-chain status and, when
-// the chain head is signed, its origin attestation (integrity + origin).
-function EvidenceBadge({ engagementId }: { engagementId: string }) {
-  const { data: ev } = useFetch(
-    () => api.evidence(engagementId).then((e) =>
-      e && e.verified > 0 ? { intact: e.intact, verified: e.verified, keyId: e.attestation?.key_id } : null,
-    ),
-    { deps: [engagementId] },
-  )
-  if (!ev) return null
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span
-        className={cn(
-          'inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset',
-          ev.intact ? 'bg-accent/10 text-accent ring-accent/25' : 'bg-critical/10 text-critical ring-critical/25',
-        )}
-        title={`${ev.verified} evidence link(s) in the hash chain`}
-      >
-        <ShieldTick className="size-3.5" />
-        {ev.intact ? 'Evidence verified' : 'Evidence tampered'}
-      </span>
-      {ev.intact && ev.keyId && (
-        <span
-          className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-0.5 font-mono text-xs text-tertiary ring-1 ring-inset ring-secondary"
-          title={`Chain head signed (ed25519) by key ${ev.keyId} – proves origin, not just integrity`}
-        >
-          <FileCheck01 className="size-3.5 text-quaternary" />
-          {ev.keyId}
-        </span>
-      )}
-    </span>
   )
 }

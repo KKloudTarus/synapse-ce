@@ -156,7 +156,7 @@ export function RadarChart({
             key={item.key}
             className={cn(
               'grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem] items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors cursor-pointer',
-              hoverKey === item.key ? 'bg-secondary' : 'hover:bg-secondary/60',
+              hoverKey === item.key ? 'bg-secondary' : 'hover:bg-secondary',
             )}
             onMouseEnter={() => setHoverKey(item.key)}
             onMouseLeave={() => setHoverKey(null)}
@@ -219,7 +219,7 @@ export function DonutChart({ title, centerLabel, data }: { title: string; center
       </figure>
       <ul className="w-full sm:w-auto sm:min-w-[190px] sm:max-w-[220px] space-y-2">
         {data.map((item) => (
-          <li key={item.key} className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem] items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors hover:bg-secondary/60">
+          <li key={item.key} className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem] items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors hover:bg-secondary">
             <span className="flex min-w-0 items-center gap-2.5 font-medium text-secondary">
               <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
               <span className="truncate">{item.label}</span>
@@ -496,9 +496,23 @@ function createSmoothPath(points: { x: number; y: number }[]): string {
     const p3 = points[Math.min(points.length - 1, i + 2)]
 
     const cp1x = p1.x + (p2.x - p0.x) / 6
-    const cp1y = p1.y + (p2.y - p0.y) / 6
     const cp2x = p2.x - (p3.x - p1.x) / 6
-    const cp2y = p2.y - (p3.y - p1.y) / 6
+
+    let cp1y: number
+    let cp2y: number
+
+    if (p1.y === p2.y) {
+      cp1y = p1.y
+      cp2y = p2.y
+    } else {
+      cp1y = p1.y + (p2.y - p0.y) / 6
+      cp2y = p2.y - (p3.y - p1.y) / 6
+
+      const minY = Math.min(p1.y, p2.y)
+      const maxY = Math.max(p1.y, p2.y)
+      cp1y = Math.max(minY, Math.min(maxY, cp1y))
+      cp2y = Math.max(minY, Math.min(maxY, cp2y))
+    }
 
     d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`
   }
