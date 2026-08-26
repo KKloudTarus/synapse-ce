@@ -52,6 +52,24 @@ func TestPythonSanitizersAreClassSpecific(t *testing.T) {
 	}
 }
 
+func TestPythonPrimitiveConversionStopsStringInjectionTaint(t *testing.T) {
+	graph := mustBuildPythonGraph(t, primitiveConversionPythonDocument())
+	if finding, ok := pythonFindingFor(graph.Vulnerabilities(), TaintCommand, "python-taint-command"); ok {
+		t.Fatalf("numeric conversion must stop string command taint: %+v", finding)
+	}
+}
+
+func TestPythonPathConstructorPropagatesToReceiverIOSink(t *testing.T) {
+	graph := mustBuildPythonGraph(t, pathlibReceiverPythonDocument())
+	finding, ok := pythonFindingFor(graph.Vulnerabilities(), TaintPathTraversal, "python-taint-path")
+	if !ok {
+		t.Fatalf("tainted pathlib receiver did not reach filesystem I/O: %+v", graph.Vulnerabilities())
+	}
+	if finding.CallID != "app.py:4:4" {
+		t.Fatalf("Path construction must not be the reported sink: %+v", finding)
+	}
+}
+
 func TestPythonSinkArgumentModelsDoNotTaintParameterizedSQLText(t *testing.T) {
 	document := sqlArgumentPythonDocument()
 	resolution, err := pythonprogram.Resolve(document)
@@ -474,6 +492,47 @@ func siblingCallsPythonDocument() pythonprogram.Document {
 		{ID: "app.py:4:4", CallerID: route.ID, Callee: pyAttr("os", "system"), Arguments: []pythonprogram.Argument{{Value: pythonprogram.Reference{Kind: pythonprogram.ReferenceLiteral}, ValueID: "literal", Pos: pyPos(4, 14)}}, ResultID: "sink-result", Pos: pyPos(4, 4)},
 	}
 	document.Entrypoints = []pythonprogram.EntrypointHint{{SymbolID: route.ID, Kind: "framework_route", Pos: route.Pos}}
+	return document
+}
+
+func primitiveConversionPythonDocument() pythonprogram.Document {
+	document, moduleID := basePythonValueDocument()
+	route := pythonValueSymbol("python:app:route", "route", moduleID, pythonprogram.SymbolFunction, 2)
+	route.Parameters = []pythonprogram.Parameter{{Name: "request", Kind: pythonprogram.ParameterPositional, ValueID: "request", Pos: pyPos(2, 10)}}
+	document.Symbols = append(document.Symbols, route)
+	document.Imports = []pythonprogram.Import{{ScopeID: moduleID, Module: "os", Pos: pyPos(1, 0)}}
+	document.Values = []pythonprogram.Value{
+		pyValue("request", route.ID, pythonprogram.ValueParameter, "request", pyName("request"), 2, 10),
+		pyValue("request-use", route.ID, pythonprogram.ValueReference, "", pyName("request"), 3, 16),
+		pyValue("number", route.ID, pythonprogram.ValueCallResult, "", pyCallRef("int"), 3, 4),
+		pyValue("sink", route.ID, pythonprogram.ValueCallResult, "", pyCallRef("os", "system"), 4, 4),
+	}
+	document.Calls = []pythonprogram.Call{
+		{ID: "app.py:3:4", CallerID: route.ID, Callee: pyName("int"), Arguments: []pythonprogram.Argument{{Value: pyName("request"), ValueID: "request-use", Pos: pyPos(3, 8)}}, ResultID: "number", Pos: pyPos(3, 4)},
+		{ID: "app.py:4:4", CallerID: route.ID, Callee: pyAttr("os", "system"), Arguments: []pythonprogram.Argument{{Value: pyCallRef("int"), ValueID: "number", Pos: pyPos(4, 14)}}, ResultID: "sink", Pos: pyPos(4, 4)},
+	}
+	document.Entrypoints = []pythonprogram.EntrypointHint{{SymbolID: route.ID, Kind: "framework_route", Pos: route.Pos}}
+	return document
+}
+
+func pathlibReceiverPythonDocument() pythonprogram.Document {
+	document, moduleID := basePythonValueDocument()
+	route := pythonValueSymbol("python:app:route", "route", moduleID, pythonprogram.SymbolFunction, 2)
+	document.Symbols = append(document.Symbols, route)
+	document.Imports = []pythonprogram.Import{{ScopeID: moduleID, Module: "pathlib", Name: "Path", Pos: pyPos(1, 0)}}
+	document.Values = []pythonprogram.Value{
+		pyValue("source", route.ID, pythonprogram.ValueCallResult, "", pyCallRef("request", "args", "get"), 2, 12),
+		pyValue("path", route.ID, pythonprogram.ValueCallResult, "", pyCallRef("Path"), 3, 4),
+		pyValue("io", route.ID, pythonprogram.ValueCallResult, "", pyCallRef("path", "read_text"), 4, 4),
+	}
+	document.Assignments = []pythonprogram.Assignment{{
+		ScopeID: route.ID, Targets: []pythonprogram.Reference{pyName("path")}, Value: pyCallRef("Path"), ValueID: "path", Pos: pyPos(3, 4),
+	}}
+	document.Calls = []pythonprogram.Call{
+		{ID: "app.py:2:12", CallerID: route.ID, Callee: pyAttr("request", "args", "get"), ResultID: "source", Pos: pyPos(2, 12)},
+		{ID: "app.py:3:4", CallerID: route.ID, Callee: pyName("Path"), Arguments: []pythonprogram.Argument{{Value: pyCallRef("request", "args", "get"), ValueID: "source", Pos: pyPos(3, 9)}}, ResultID: "path", Pos: pyPos(3, 4)},
+		{ID: "app.py:4:4", CallerID: route.ID, Callee: pyAttr("path", "read_text"), ReceiverValueID: "path", ResultID: "io", Pos: pyPos(4, 4)},
+	}
 	return document
 }
 
