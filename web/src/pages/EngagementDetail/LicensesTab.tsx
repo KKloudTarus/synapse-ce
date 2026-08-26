@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CheckCircle, Package, Scale01, SearchLg, ShieldZap, XClose } from '@untitledui/icons'
+import { Package, Scale01, SearchLg, ShieldZap, XClose } from '@untitledui/icons'
 import { Column, VirtualTable } from '../../components/synapse/VirtualTable'
 import { Card, EmptyState, cn } from '../../components/ui'
 import { CATEGORY_LABEL } from '../../lib/severity'

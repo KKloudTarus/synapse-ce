@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 import { Column, VirtualTable } from '../../components/synapse/VirtualTable'
 import { Card, EmptyState, SevBadge, cn } from '../../components/ui'
 import { findingKindLabel } from '../../lib/format'
-import { SEVERITY_ORDER, sevSoft } from '../../lib/severity'
+import { SEVERITY_ORDER } from '../../lib/severity'
 import type { ScanResult, Severity, Vulnerability } from '../../lib/types'
 
 export function vulnKey(v: Vulnerability): string {
@@ -259,7 +259,6 @@ export function VulnsTab({ scan }: { scan: ScanResult | null }) {
   // Counts MUST equal the rows actually rendered: every advisory×package×location (incl.
   // non-CVE advisories), not distinct CVE ids: otherwise the headline undercounts the table.
   const shownAdvisories = displayRows.length
-  const totalAdvisories = allSeverityDisplayRows.length
   const vulnColumns = useMemo<Column<VulnerabilityDisplayRow>[]>(
     () => [
       {

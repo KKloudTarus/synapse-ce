@@ -21,7 +21,6 @@ import type {
   ScanResult,
   Severity,
 } from '../../lib/types'
-import { StatusPill } from '../Engagements'
 import { AgentTab } from '../AgentTab'
 import { ThreatModelTab } from './ThreatModelTab'
 import { CodeQualityTab } from '../CodeQuality/CodeQualityTab'
@@ -30,7 +29,7 @@ import { OverviewTab } from './OverviewTab'
 import { FindingsTab } from './FindingsTab'
 import { ScanPanel } from './ScanPanel'
 import { ExportButtons } from './ExportButtons'
-import { packageLocationMap, countVulnerabilityFindings, VulnsTab, fmtWindow } from './VulnsTab'
+import { packageLocationMap, countVulnerabilityFindings, VulnsTab } from './VulnsTab'
 import { LicensesTab } from './LicensesTab'
 import { ComponentsTab } from './ComponentsTab'
 import { ReconTab } from './ReconTab'

@@ -27,7 +27,6 @@ export const DashboardPage: FC = () => {
   const {
     data,
     error,
-    fleetError,
     analytics,
     analyticsError,
     rangeDays,
@@ -39,8 +38,6 @@ export const DashboardPage: FC = () => {
     assessmentQueue,
     assetNames,
   } = useDashboardData()
-
-  const fleetUnavailable = fleetError !== null
 
   if (error) {
     return (

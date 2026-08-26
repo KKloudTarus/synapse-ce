@@ -4,7 +4,6 @@ import {
   CpuChip01,
   File01,
   FileCode01,
-  Folder,
   FolderClosed,
   Percent01,
   ShieldTick,
@@ -67,7 +66,7 @@ export function MetricValue({
   }
 
   if ('grade' in m) {
-    return <GradeBadge grade={m.grade} />
+    return <GradeBadge grade={m.grade ?? ''} />
   }
 
   if (m.value === null) return <span className="text-tertiary font-mono">—</span>

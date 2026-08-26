@@ -37,7 +37,7 @@ function statusBadgeStyle(status: HotspotStatus) {
   }
 }
 
-function severityBadgeStyle(severity: Severity) {
+function severityBadgeStyle(severity: Severity | 'blocker' | 'major' | 'minor') {
   switch (severity) {
     case 'blocker':
     case 'critical':

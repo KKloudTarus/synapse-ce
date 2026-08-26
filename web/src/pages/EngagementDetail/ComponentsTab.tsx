@@ -1,7 +1,7 @@
 import { Check, Copy01, Package, SearchLg, XClose } from '@untitledui/icons'
 import { useState } from 'react'
 import { VirtualTable } from '../../components/synapse/VirtualTable'
-import { Card, EmptyState, cn } from '../../components/ui'
+import { Card, EmptyState } from '../../components/ui'
 import type { ScanResult } from '../../lib/types'
 import { ScanPrompt } from './VulnsTab'
 

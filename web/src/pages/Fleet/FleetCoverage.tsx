@@ -4,7 +4,7 @@ import { api, ApiError } from '../../lib/api'
 import type { FleetAgentHealth, FleetCoverageRow, FleetCoverageSummary, FleetVerdict } from '../../lib/types'
 import { Button, Card, EmptyState, ErrorState, Pill, Spinner, cn } from '../../components/ui'
 import { VirtualTable, type Column } from '../../components/synapse/VirtualTable'
-import { FLEET_VERDICT_ORDER, FleetStateBadge, FleetVerdictBadge, formatFleetTime, verdictLabel } from './fleetShared'
+import { FLEET_VERDICT_ORDER, FleetStateBadge, FleetVerdictBadge, formatFleetTime } from './fleetShared'
 import { useFetch, useParallelFetch } from '../../hooks'
 
 // --- Coverage Table Columns ---

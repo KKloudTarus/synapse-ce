@@ -10,7 +10,7 @@ export type DashboardData = {
 export interface StatCardProps {
   label: string
   value: number | string
-  hint: string
+  hint?: string
   trend?: number
   trendDirection?: 'up' | 'down' | 'neutral'
   tone?: 'muted' | 'brand' | 'critical' | 'high' | 'medium' | 'accent' | 'info'

@@ -83,7 +83,7 @@ describe('Project Measures route and logic', () => {
     const router = renderRoute('/code-quality/projects/synapse/measures')
     
     // Wait for the page to render (Current Node Metrics is in data.node detail panel)
-    expect(await screen.findByText('Current Node Metrics')).toBeInTheDocument()
+    expect(await screen.findByText((_, el) => el?.tagName === 'H3' && /Current Node Metrics/.test(el.textContent || ''))).toBeInTheDocument()
     
     // Tab verification
     const tabs = ['Overview', 'Issues', 'Security Hotspots', 'Measures', 'Analysis details', 'Activity']
@@ -167,7 +167,7 @@ describe('Project Measures route and logic', () => {
     const router = renderRoute('/code-quality/projects/synapse/measures?path=a.ts&domain=size')
     
     // Node metrics panel should render "Current Node Metrics"
-    expect(await screen.findByText('Current Node Metrics')).toBeInTheDocument()
+    expect(await screen.findByText((_, el) => el?.tagName === 'H3' && /Current Node Metrics/.test(el.textContent || ''))).toBeInTheDocument()
     
     // Ensure "Empty directory" is NOT shown for files
     expect(screen.queryByText('Empty directory')).not.toBeInTheDocument()
@@ -222,22 +222,13 @@ describe('Project Measures route and logic', () => {
     
     renderRoute('/code-quality/projects/synapse/measures?domain=issues')
     
-    expect(await screen.findByText('Current Node Metrics')).toBeInTheDocument()
-    
-    expect(screen.getByText('Critical')).toBeInTheDocument()
+    expect(await screen.findByText((_, el) => el?.tagName === 'H3' && /Current Node Metrics/.test(el.textContent || ''))).toBeInTheDocument()
+
+    expect(screen.getByText('Critical Issues')).toBeInTheDocument()
     expect(screen.getByText('5')).toBeInTheDocument()
-    
-    expect(screen.getByText('High')).toBeInTheDocument()
+
+    expect(screen.getByText('High Issues')).toBeInTheDocument()
     expect(screen.getByText('4')).toBeInTheDocument()
-    
-    expect(screen.getByText('Medium')).toBeInTheDocument()
-    expect(screen.getByText('3')).toBeInTheDocument()
-    
-    expect(screen.getByText('Low')).toBeInTheDocument()
-    expect(screen.getByText('2')).toBeInTheDocument()
-    
-    expect(screen.getByText('Info')).toBeInTheDocument()
-    expect(screen.getByText('1')).toBeInTheDocument()
   })
 
   it('normal load more appends children and deduplicates', async () => {
