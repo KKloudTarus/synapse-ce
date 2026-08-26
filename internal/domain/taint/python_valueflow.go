@@ -311,8 +311,14 @@ func (b *pythonValueBuilder) modelCalls() {
 func (b *pythonValueBuilder) bindCall(call pythonprogram.Call, callee pythonprogram.Symbol) {
 	parameters := callee.Parameters
 	positional := 0
-	if callee.Kind == pythonprogram.SymbolMethod && len(parameters) > 0 && call.ReceiverValueID != "" {
-		b.addFlow(call.ReceiverValueID, parameters[0].ValueID)
+	if callee.Kind == pythonprogram.SymbolMethod && len(parameters) > 0 && !pythonStaticMethod(callee) {
+		receiverID := call.ReceiverValueID
+		if receiverID == "" && callee.Name == "__init__" {
+			// A constructor is written as Class(...), so the syntax fact has no attribute receiver. Its
+			// result is the instance bound to self; user positional arguments still start at parameter 1.
+			receiverID = call.ResultID
+		}
+		b.addFlow(receiverID, parameters[0].ValueID)
 		positional = 1
 	}
 	for _, argument := range call.Arguments {
@@ -346,6 +352,15 @@ func (b *pythonValueBuilder) bindCall(call pythonprogram.Call, callee pythonprog
 	for _, returnID := range b.returns[callee.ID] {
 		b.addFlow(returnID, call.ResultID)
 	}
+}
+
+func pythonStaticMethod(symbol pythonprogram.Symbol) bool {
+	for _, decorator := range symbol.Decorators {
+		if len(decorator.Segments) > 0 && decorator.Segments[len(decorator.Segments)-1] == "staticmethod" {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *pythonValueBuilder) propagateCallInputs(call pythonprogram.Call) {

@@ -268,6 +268,89 @@ func TestPythonValueFlowTraversalBudgetMarksGraphTruncated(t *testing.T) {
 	}
 }
 
+func TestPythonValueFlowBindsConstructorArgumentsAfterSelf(t *testing.T) {
+	graph := mustBuildPythonGraph(t, methodBindingPythonDocument(false))
+	if _, ok := pythonFindingFor(graph.Vulnerabilities(), TaintCommand, "python-taint-command"); !ok {
+		t.Fatalf("constructor argument taint did not reach __init__ sink: %+v", graph.Vulnerabilities())
+	}
+}
+
+func TestPythonValueFlowDoesNotConsumeStaticMethodReceiver(t *testing.T) {
+	graph := mustBuildPythonGraph(t, methodBindingPythonDocument(true))
+	if _, ok := pythonFindingFor(graph.Vulnerabilities(), TaintCommand, "python-taint-command"); !ok {
+		t.Fatalf("staticmethod argument taint did not reach sink: %+v", graph.Vulnerabilities())
+	}
+}
+
+func mustBuildPythonGraph(t *testing.T, document pythonprogram.Document) ValueFlowGraph {
+	t.Helper()
+	resolution, err := pythonprogram.Resolve(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph, err := BuildPythonValueGraph(document, resolution, DefaultPythonCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return graph
+}
+
+func methodBindingPythonDocument(static bool) pythonprogram.Document {
+	document, moduleID := basePythonValueDocument()
+	class := pythonValueSymbol("python:app:Runner", "Runner", moduleID, pythonprogram.SymbolClass, 2)
+	methodName := "__init__"
+	methodID := "python:app:Runner.__init__"
+	parameters := []pythonprogram.Parameter{
+		{Name: "self", Kind: pythonprogram.ParameterPositional, ValueID: "method#self", Pos: pyPos(3, 17)},
+		{Name: "command", Kind: pythonprogram.ParameterPositional, ValueID: "method#command", Pos: pyPos(3, 23)},
+	}
+	decorators := []pythonprogram.Reference(nil)
+	if static {
+		methodName = "run"
+		methodID = "python:app:Runner.run"
+		parameters = parameters[1:]
+		decorators = []pythonprogram.Reference{pyName("staticmethod")}
+	}
+	method := pythonValueSymbol(methodID, methodName, class.ID, pythonprogram.SymbolMethod, 3)
+	method.QualifiedName = "Runner." + methodName
+	method.Parameters = parameters
+	method.Decorators = decorators
+	route := pythonValueSymbol("python:app:route", "route", moduleID, pythonprogram.SymbolFunction, 8)
+	route.Parameters = []pythonprogram.Parameter{{Name: "request", Kind: pythonprogram.ParameterPositional, ValueID: "route#request", Pos: pyPos(8, 10)}}
+	document.Symbols = append(document.Symbols, class, method, route)
+	document.Imports = []pythonprogram.Import{{ScopeID: moduleID, Module: "os", Pos: pyPos(1, 0)}}
+	document.Values = []pythonprogram.Value{
+		pyValue("method#command", method.ID, pythonprogram.ValueParameter, "command", pyName("command"), 3, 23),
+		pyValue("method#command-use", method.ID, pythonprogram.ValueReference, "", pyName("command"), 4, 18),
+		pyValue("method#sink-result", method.ID, pythonprogram.ValueCallResult, "", pyCallRef("os", "system"), 4, 8),
+		pyValue("route#request", route.ID, pythonprogram.ValueParameter, "request", pyName("request"), 8, 10),
+		pyValue("route#request-use", route.ID, pythonprogram.ValueReference, "", pyName("request"), 9, 15),
+		pyValue("route#call-result", route.ID, pythonprogram.ValueCallResult, "", pyCallRef("Runner", methodName), 9, 4),
+	}
+	if !static {
+		document.Values = append(document.Values, pyValue("method#self", method.ID, pythonprogram.ValueParameter, "self", pyName("self"), 3, 17))
+	} else {
+		document.Values = append(document.Values, pyValue("route#receiver", route.ID, pythonprogram.ValueReference, "", pyName("Runner"), 9, 4))
+	}
+	call := pythonprogram.Call{
+		ID: "app.py:9:4", CallerID: route.ID, Arguments: []pythonprogram.Argument{{Value: pyName("request"), ValueID: "route#request-use", Pos: pyPos(9, 15)}},
+		ResultID: "route#call-result", Pos: pyPos(9, 4),
+	}
+	if static {
+		call.Callee = pyAttr("Runner", "run")
+		call.ReceiverValueID = "route#receiver"
+	} else {
+		call.Callee = pyName("Runner")
+	}
+	document.Calls = []pythonprogram.Call{
+		call,
+		{ID: "app.py:4:8", CallerID: method.ID, Callee: pyAttr("os", "system"), Arguments: []pythonprogram.Argument{{Value: pyName("command"), ValueID: "method#command-use", Pos: pyPos(4, 18)}}, ResultID: "method#sink-result", Pos: pyPos(4, 8)},
+	}
+	document.Entrypoints = []pythonprogram.EntrypointHint{{SymbolID: route.ID, Kind: "framework_route", Pos: route.Pos}}
+	document.SortCanonical()
+	return document
+}
+
 func interproceduralPythonDocument() pythonprogram.Document {
 	document, moduleID := basePythonValueDocument()
 	route := pythonValueSymbol("python:app:route", "route", moduleID, pythonprogram.SymbolFunction, 2)
