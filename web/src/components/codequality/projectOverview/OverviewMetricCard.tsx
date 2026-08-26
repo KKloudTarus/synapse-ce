@@ -1,4 +1,7 @@
-import { ArrowRight, Bug, Copy, Eye, Gauge, Shield, Wrench, type LucideIcon } from 'lucide-react'
+// Forced aliases: @untitledui/icons has no bug glyph, so the reliability metric
+// renders an alert octagon (`Bug` is kept as the local name for readability).
+import { ArrowRight, AlertOctagon as Bug, Copy01 as Copy, Eye, Speedometer04 as Gauge, Shield01 as Shield, Tool01 as Wrench } from '@untitledui/icons'
+import type { FC, SVGProps } from 'react'
 import { Link } from 'react-router-dom'
 import type { OverviewDetailTarget } from '../../../lib/projectOverviewDetailTargets'
 import type { OverviewMetricCardModel } from '../../../lib/projectOverviewPresentation'
@@ -9,7 +12,7 @@ import {
 } from '../../../lib/projectOverviewPresentation'
 import { Card, cn } from '../../ui'
 
-const icons: Record<OverviewMetricCardModel['key'], LucideIcon> = {
+const icons: Record<OverviewMetricCardModel['key'], FC<SVGProps<SVGSVGElement>>> = {
   security: Shield,
   reliability: Bug,
   maintainability: Wrench,

@@ -3,19 +3,41 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import './index.css'
+import "./styles/globals.css";
 
-// Apply the persisted theme before the first render. The sidebar owns the toggle, but it only
-// mounts once authenticated, so without this the login screen ignores a saved dark preference.
-try {
-  if (globalThis.localStorage?.getItem('synapse-theme') === 'dark') {
-    document.documentElement.dataset.theme = 'dark'
+// Apply theme BEFORE first render to prevent flash of wrong theme.
+// Guarded: localStorage/matchMedia can throw when site data is blocked, and an
+// exception here aborts the module before bootstrap() renders anything.
+;(function initTheme() {
+  try {
+    const pref = localStorage.getItem('synapse-theme') || 'light'
+    let resolved = pref
+    if (pref === 'system') {
+      resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+    }
+    document.documentElement.dataset.theme = resolved
+    if (resolved === 'dark') document.documentElement.classList.add('dark-mode')
+  } catch {
+    document.documentElement.dataset.theme = 'light'
   }
-} catch {}
+})()
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </StrictMode>,
-)
+async function bootstrap() {
+  // MSW mock mode is dev-only AND mutually exclusive with the real backend:
+  // when VITE_API_PROXY_TARGET is set the dev server proxies /api to the backend,
+  // so the mock worker must stay off or it would intercept those calls first.
+  if (import.meta.env.DEV && !import.meta.env.VITE_API_PROXY_TARGET) {
+    const { worker } = await import('./mocks/browser')
+    await worker.start({ onUnhandledRequest: 'bypass' })
+  }
+
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </StrictMode>,
+  )
+}
+
+bootstrap()

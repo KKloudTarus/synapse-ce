@@ -30,28 +30,28 @@ describe('ProjectCodeWorkspace', () => {
   it('renders escaped source and selects collocated findings', () => {
     const select = vi.fn()
     render(<ProjectCodeWorkspace index={index} source={source} diff={null} selectedPath="src/main.ts" selectedFindingId={null} view="source" onSelectFile={vi.fn()} onSelectFinding={select} onView={vi.fn()} onRetrySource={vi.fn()} sourceError={null} diffError={null} />)
-    expect(screen.getByText('<script>danger()</script>')).toBeInTheDocument()
+    // The source line is syntax-highlighted into multiple spans, so the whole-line text is only
+    // contiguous as the code cell's accessible name (getByText reads direct text nodes only).
+    expect(screen.getByRole('gridcell', { name: '<script>danger()</script>' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '2 findings on line 1' }))
     expect(select).toHaveBeenCalledWith(expect.objectContaining({ id: 'f1' }))
   })
 
   it('shows immutable and current finding statuses separately', () => {
     render(<ProjectCodeWorkspace index={index} source={source} diff={null} selectedPath="src/main.ts" selectedFindingId="f1" view="source" onSelectFile={vi.fn()} onSelectFinding={vi.fn()} onView={vi.fn()} onRetrySource={vi.fn()} sourceError={null} diffError={null} />)
-    expect(screen.getByText('Detected status')).toBeInTheDocument()
-    expect(screen.getByText('Current status')).toBeInTheDocument()
+    // The inline finding card shows the immutable detected status and the mutable current status distinctly.
+    expect(screen.getByText(/Detected:/)).toBeInTheDocument()
+    expect(screen.getByText(/Current:/)).toBeInTheDocument()
+    expect(screen.getByText('open')).toBeInTheDocument()
     expect(screen.getByText('accepted')).toBeInTheDocument()
   })
 
-  it('resizes expanded finding details with the keyboard', () => {
-    render(<ProjectCodeWorkspace index={index} source={source} diff={null} selectedPath="src/main.ts" selectedFindingId="f1" view="source" onSelectFile={vi.fn()} onSelectFinding={vi.fn()} onView={vi.fn()} onRetrySource={vi.fn()} sourceError={null} diffError={null} />)
-    const separator = screen.getByRole('separator', { name: 'Resize finding details' })
-    const panel = screen.getByRole('complementary', { name: 'Findings' })
-
-    expect(panel).toHaveStyle({ height: '192px' })
-    fireEvent.keyDown(separator, { key: 'ArrowUp' })
-    expect(panel).toHaveStyle({ height: '216px' })
-    fireEvent.keyDown(separator, { key: 'ArrowDown' })
-    expect(panel).toHaveStyle({ height: '192px' })
+  it('closes the inline finding card via its close button', () => {
+    const select = vi.fn()
+    render(<ProjectCodeWorkspace index={index} source={source} diff={null} selectedPath="src/main.ts" selectedFindingId="f1" view="source" onSelectFile={vi.fn()} onSelectFinding={select} onView={vi.fn()} onRetrySource={vi.fn()} sourceError={null} diffError={null} />)
+    expect(screen.getByText('Rule A')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close inline finding' }))
+    expect(select).toHaveBeenCalledWith(null)
   })
 
   it('disables diff modes for an unchanged file', () => {
@@ -108,7 +108,7 @@ describe('ProjectCodeWorkspace', () => {
     const { container } = render(<ProjectCodeWorkspace index={index} source={source} diff={diff} selectedPath="src/main.ts" selectedFindingId={null} view="unified" onSelectFile={vi.fn()} onSelectFinding={vi.fn()} onView={vi.fn()} onRetrySource={vi.fn()} sourceError={null} diffError={null} />)
 
     expect(screen.getByRole('table', { name: 'Unified code diff' })).toHaveAttribute('aria-rowcount', '502')
-    expect(screen.getByText('line-1')).toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: 'line-1' })).toBeInTheDocument()
     expect(screen.getAllByRole('row').length).toBeLessThan(100)
     expect(screen.getByRole('status')).toHaveTextContent('src/main.ts, unified view')
     expect(container.firstElementChild).not.toHaveAttribute('aria-live')

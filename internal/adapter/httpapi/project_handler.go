@@ -352,24 +352,28 @@ func (rt *Router) filterFindings(ctx context.Context, object map[string]json.Raw
 		if ruleKeyRaw, ok := finding["RuleKey"]; ok {
 			var ruleKey string
 			_ = json.Unmarshal(ruleKeyRaw, &ruleKey)
-			catalogRule, err := rt.rules.Get(ctx, rule.Key(strings.TrimSpace(ruleKey)))
-			if err != nil {
-				if !errors.Is(err, shared.ErrNotFound) {
-					return err
+			if key := rule.Key(strings.TrimSpace(ruleKey)); key != "" {
+				catalogRule, err := rt.rules.Get(ctx, key)
+				if err != nil {
+					if !errors.Is(err, shared.ErrNotFound) {
+						return err
+					}
+				} else if catalogRule.Type == rule.TypeSecurityHotspot {
+					isHotspot = true
 				}
-			} else if catalogRule.Type == rule.TypeSecurityHotspot {
-				isHotspot = true
 			}
 		} else if ruleKeyRaw, ok := finding["rule_key"]; ok {
 			var ruleKey string
 			_ = json.Unmarshal(ruleKeyRaw, &ruleKey)
-			catalogRule, err := rt.rules.Get(ctx, rule.Key(strings.TrimSpace(ruleKey)))
-			if err != nil {
-				if !errors.Is(err, shared.ErrNotFound) {
-					return err
+			if key := rule.Key(strings.TrimSpace(ruleKey)); key != "" {
+				catalogRule, err := rt.rules.Get(ctx, key)
+				if err != nil {
+					if !errors.Is(err, shared.ErrNotFound) {
+						return err
+					}
+				} else if catalogRule.Type == rule.TypeSecurityHotspot {
+					isHotspot = true
 				}
-			} else if catalogRule.Type == rule.TypeSecurityHotspot {
-				isHotspot = true
 			}
 		}
 

@@ -1,9 +1,9 @@
 import { useMemo, type ReactNode } from 'react'
-import { Braces, Copy, FileCode2, Gauge, ShieldCheck, Wrench } from 'lucide-react'
+import { Code02 as Braces, Copy01 as Copy, FileCode01 as FileCode2, Speedometer04 as Gauge, ShieldTick as ShieldCheck, Tool01 as Wrench } from '@untitledui/icons'
 import { formatOverviewPercentage } from '../../lib/projectOverviewPresentation'
 import type { CodeQualityReport, Finding, Grade, LanguageInventory } from '../../lib/types'
 import { Card, Pill, SevBadge, cn } from '../ui'
-import { VirtualTable, type Column } from '../VirtualTable'
+import { VirtualTable, type Column } from '../synapse/VirtualTable'
 import { gradeTone } from './qualityPresentation'
 
 function GradeCard({ label, grade, detail, icon: Icon }: { label: string; grade: Grade; detail: string; icon: typeof Gauge }) {

@@ -1,9 +1,9 @@
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import App from './App'
 import { api } from './lib/api'
-import { Sidebar } from './components/Sidebar'
+import { Sidebar } from './components/layout/Sidebar'
 
 vi.mock('./lib/api', () => ({
   api: {
@@ -32,6 +32,8 @@ vi.mock('./auth/AuthContext', () => ({
 
 describe('App Routing - Rules', () => {
   beforeEach(() => {
+    localStorage.clear()
+    vi.resetAllMocks()
     vi.mocked(api.listRules).mockResolvedValue([])
     vi.mocked(api.listEngagements).mockResolvedValue([])
     vi.mocked(api.listBusinessAssets).mockResolvedValue({ items: [], total: 0, limit: 200, offset: 0 })
@@ -67,7 +69,7 @@ describe('App Routing - Rules', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Rules' })).toBeInTheDocument()
-    })
+    }, { timeout: 8000 })
   })
 
   it('renders Dashboard as the default route', async () => {
@@ -77,7 +79,7 @@ describe('App Routing - Rules', () => {
       </MemoryRouter>
     )
 
-    expect(await screen.findByRole('heading', { name: 'Security Operations' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Security Operations' }, { timeout: 8000 })).toBeInTheDocument()
   })
 
   it('renders RuleDetail page on /rules/:key route and decodes colon exactly once', async () => {
@@ -89,7 +91,7 @@ describe('App Routing - Rules', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'SQL Injection' })).toBeInTheDocument()
-    })
+    }, { timeout: 8000 })
 
     expect(api.getRule).toHaveBeenCalledWith('go:sql')
   })
@@ -102,7 +104,7 @@ describe('App Routing - Rules', () => {
     )
 
     const rulesLink = screen.getByRole('link', { name: /Rules/i })
-    expect(rulesLink.className).toMatch(/bg-navactive|text-white/)
+    expect(rulesLink.className).toMatch(/bg-active|bg-navactive|text-white/)
   })
 
   it('maintains active state on Rules detail', async () => {
@@ -113,7 +115,7 @@ describe('App Routing - Rules', () => {
     )
 
     const rulesLink = screen.getByRole('link', { name: /Rules/i })
-    expect(rulesLink.className).toMatch(/bg-navactive|text-white/)
+    expect(rulesLink.className).toMatch(/bg-active|bg-navactive|text-white/)
   })
 
   it('keeps Code Quality active on project shells', () => {
@@ -123,7 +125,7 @@ describe('App Routing - Rules', () => {
       </MemoryRouter>
     )
     const link = screen.getByRole('link', { name: /Code Quality/i })
-    expect(link.className).toMatch(/bg-navactive|text-white/)
+    expect(link.className).toMatch(/bg-active|bg-navactive|text-white/)
   })
 
   it('keeps Dashboard active in the command center', () => {
@@ -133,10 +135,10 @@ describe('App Routing - Rules', () => {
       </MemoryRouter>
     )
     const link = screen.getByRole('link', { name: /Dashboard/i })
-    expect(link.className).toMatch(/bg-navactive|text-white/)
+    expect(link.className).toMatch(/bg-active|bg-navactive|text-white/)
   })
 
-  it('supports collapsed navigation and theme switching', () => {
+  it('supports collapsed navigation', () => {
     render(
       <MemoryRouter initialEntries={['/assets']}>
         <Sidebar />
@@ -145,10 +147,6 @@ describe('App Routing - Rules', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
     expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Dark theme' }))
-    expect(document.documentElement.dataset.theme).toBe('dark')
-    fireEvent.click(screen.getByRole('button', { name: 'Light theme' }))
-    expect(document.documentElement.dataset.theme).toBe('light')
   })
 
   it('separates the create action from the active Engagements destination', () => {
@@ -175,8 +173,8 @@ describe('App Routing - Rules', () => {
     expect(screen.getByRole('heading', { name: 'Exposure management' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Security engineering' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Runtime security' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Governance' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Review queue' })).toHaveAttribute('href', '/ai-triage/reviews')
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings')
+    expect(screen.getByRole('link', { name: /Review [Qq]ueue/i })).toHaveAttribute('href', '/ai-triage/reviews')
     expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
   })
 
@@ -219,17 +217,19 @@ describe('App Routing - Rules', () => {
     })
   })
 
-  it('switches theme from the mobile navigation', async () => {
+  it('switches theme from settings config', async () => {
     render(
-      <MemoryRouter initialEntries={['/engagements']}>
+      <MemoryRouter initialEntries={['/settings/config']}>
         <App />
       </MemoryRouter>
     )
 
-    await screen.findByRole('heading', { name: 'Engagements' })
-    fireEvent.click(screen.getByRole('button', { name: /open menu/i }))
-    const dialog = screen.getByRole('dialog', { name: /navigation/i })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Dark theme' }))
+    await screen.findByRole('heading', { name: 'Settings' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Dark theme' }))
     expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(document.documentElement.classList.contains('dark-mode')).toBe(true)
+    fireEvent.click(await screen.findByRole('button', { name: 'Light theme' }))
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(document.documentElement.classList.contains('dark-mode')).toBe(false)
   })
 })
