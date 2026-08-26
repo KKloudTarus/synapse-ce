@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -39,8 +38,8 @@ func countJournalLines(t *testing.T, path string) int {
 // grant be replayed (before or after compaction, and across a restart of the compacted file).
 func TestFileGrantReplayStoreCompactsExpiredRecords(t *testing.T) {
 	base := time.Unix(1_800_000_000, 0)
-	path := filepath.Join(t.TempDir(), "broker", "replay.jsonl")
-	store, err := NewFileGrantReplayStore(path, base)
+	path := privateReplayPath(t)
+	store, err := newFileGrantReplayStore(path, base, os.Geteuid())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +82,7 @@ func TestFileGrantReplayStoreCompactsExpiredRecords(t *testing.T) {
 	}
 
 	// A fresh store reading the COMPACTED file must still reject the live grant as a replay.
-	restarted, err := NewFileGrantReplayStore(path, lastNow)
+	restarted, err := newFileGrantReplayStore(path, lastNow, os.Geteuid())
 	if err != nil {
 		t.Fatal(err)
 	}
