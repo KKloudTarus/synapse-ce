@@ -117,7 +117,7 @@ export function QualityProfiles() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">Quality Profiles</h1>
           <p className="mt-1 text-sm text-secondary">
-            Browse built-in rule baselines, customize rules for your tech stack, and assign profiles to projects
+            Manage rule baselines, customize rules, and assign to projects
           </p>
         </div>
       </header>

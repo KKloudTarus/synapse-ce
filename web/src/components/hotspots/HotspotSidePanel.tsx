@@ -1,17 +1,30 @@
-import { useEffect, useState, useRef } from 'react'
-import { XClose as X, Clock as CalendarClock, ShieldZap as ShieldAlert, CheckCircle as CheckCircle2, ShieldTick as ShieldCheck, Shield01 as Shield, AlertTriangle } from '@untitledui/icons'
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  CheckCircle as CheckCircle2,
+  Clock as CalendarClock,
+  Copy01,
+  File02,
+  LinkExternal02,
+  Shield01 as Shield,
+  ShieldTick,
+  ShieldTick as ShieldCheck,
+  ShieldZap as ShieldAlert,
+  XClose as X,
+} from '@untitledui/icons'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api, ApiError } from '../../lib/api'
-import type { Hotspot, HotspotReviewEvent, HotspotStatus } from '../../lib/types'
+import { CanTransitionTo, type CurrentUser, type Hotspot, type HotspotReviewEvent, type HotspotStatus, type Severity } from '../../lib/types'
 import { Button, ErrorState, Pill, Spinner, cn } from '../ui'
-import { CanTransitionTo } from '../../lib/types'
-import type { CurrentUser } from '../../lib/types'
 
 function StatusIcon({ status, className }: { status: HotspotStatus; className?: string }) {
   switch (status) {
-    case 'to_review': return <ShieldAlert className={cn('text-high', className)} />
-    case 'acknowledged': return <AlertTriangle className={cn('text-medium', className)} />
-    case 'fixed': return <CheckCircle2 className={cn('text-accent', className)} />
-    case 'safe': return <ShieldCheck className={cn('text-brand', className)} />
+    case 'to_review': return <ShieldAlert className={cn('text-warning-primary', className)} />
+    case 'acknowledged': return <AlertTriangle className={cn('text-utility-blue-600 dark:text-utility-blue-400', className)} />
+    case 'fixed': return <CheckCircle2 className={cn('text-utility-purple-600 dark:text-utility-purple-400', className)} />
+    case 'safe': return <ShieldCheck className={cn('text-success-primary', className)} />
     default: return <Shield className={className} />
   }
 }
@@ -24,6 +37,56 @@ export function formatHotspotStatus(status: HotspotStatus) {
     case 'safe': return 'Safe'
     default: return status
   }
+}
+
+function statusBadgeStyle(status: HotspotStatus) {
+  switch (status) {
+    case 'to_review':
+      return 'bg-warning-primary/10 text-warning-primary border-warning-primary/25'
+    case 'acknowledged':
+      return 'bg-utility-blue-50 text-utility-blue-700 dark:bg-utility-blue-950/40 dark:text-utility-blue-300 border-utility-blue-200'
+    case 'fixed':
+      return 'bg-utility-purple-50 text-utility-purple-700 dark:bg-utility-purple-950/40 dark:text-utility-purple-300 border-utility-purple-200'
+    case 'safe':
+      return 'bg-success-primary/10 text-success-primary border-success-primary/25'
+    default:
+      return 'bg-secondary text-secondary border-secondary'
+  }
+}
+
+function severityBadgeStyle(severity: Severity) {
+  switch (severity) {
+    case 'blocker':
+    case 'critical':
+      return 'bg-error-primary/10 text-error-primary border-error-primary/25'
+    case 'major':
+    case 'high':
+      return 'bg-utility-orange-50 text-utility-orange-700 dark:bg-utility-orange-950/40 dark:text-utility-orange-300 border-utility-orange-200'
+    case 'medium':
+      return 'bg-warning-primary/10 text-warning-primary border-warning-primary/25'
+    case 'low':
+    case 'minor':
+    case 'info':
+      return 'bg-secondary text-secondary border-secondary'
+    default:
+      return 'bg-secondary text-secondary border-secondary'
+  }
+}
+
+function parseDescription(desc: string) {
+  if (!desc) return []
+  const lines = desc.split('\n').filter((l) => l.trim().length > 0)
+  const items: Array<{ key: string; text: string }> = []
+  for (const line of lines) {
+    const trimmed = line.trim().replace(/^[-*]\s*/, '')
+    const match = trimmed.match(/^([^:]+):\s*(.*)$/)
+    if (match) {
+      items.push({ key: match[1].trim(), text: match[2].trim() })
+    } else {
+      items.push({ key: '', text: trimmed })
+    }
+  }
+  return items
 }
 
 export function HotspotSidePanel({
@@ -42,8 +105,18 @@ export function HotspotSidePanel({
   const [me, setMe] = useState<CurrentUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  
+  const [copied, setCopied] = useState(false)
+  const [activeTab, setActiveTab] = useState<'risk' | 'decision'>('risk')
+
   const panelRef = useRef<HTMLDivElement>(null)
+
+  function copyLocation(text: string) {
+    if (!text) return
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }).catch(() => {})
+  }
 
   useEffect(() => {
     if (hotspot && panelRef.current) {
@@ -58,7 +131,7 @@ export function HotspotSidePanel({
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [onClose])
-  
+
   const canReview = me && (me.role === 'admin' || me.role === 'reviewer')
 
   useEffect(() => {
@@ -68,7 +141,7 @@ export function HotspotSidePanel({
     Promise.all([
       api.getProjectHotspot(projectKey, hotspotId),
       api.getProjectHotspotHistory(projectKey, hotspotId),
-      api.me()
+      api.me(),
     ])
       .then(([hotspotRes, historyRes, meRes]) => {
         if (!active) return
@@ -119,7 +192,7 @@ export function HotspotSidePanel({
         hotspot.id,
         transitionStatus,
         rationale.trim(),
-        hotspot.version
+        hotspot.version,
       )
       setHotspot(res.hotspot)
       setHistory((prev) => [res.event, ...prev])
@@ -161,140 +234,290 @@ export function HotspotSidePanel({
 
   if (!hotspot) return null
 
+  const parsedBullets = parseDescription(hotspot.description)
+
   return (
-    <div 
-      className="flex h-full flex-col"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="hotspot-dialog-title"
+    <div
+      className="flex h-full flex-col overflow-hidden"
+      role="region"
+      aria-label="Hotspot inspector"
       tabIndex={-1}
       ref={panelRef}
     >
-      <div className="flex items-start justify-between border-b border-border bg-surface p-4">
-        <div className="flex items-center gap-2">
-          <StatusIcon status={hotspot.status} className="size-5" />
-          <h2 id="hotspot-dialog-title" className="font-semibold">{formatHotspotStatus(hotspot.status)}</h2>
+      {/* Top Header Card */}
+      <div className="border-b border-secondary bg-primary p-5 shadow-2xs">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 space-y-2">
+            <h2 className="text-lg font-bold text-primary leading-snug break-words">
+              {hotspot.title}
+            </h2>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className={cn('inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-semibold border', statusBadgeStyle(hotspot.status))}>
+                <StatusIcon status={hotspot.status} className="size-3.5" />
+                {formatHotspotStatus(hotspot.status)}
+              </span>
+              <span className={cn('inline-flex items-center rounded-md px-2 py-0.5 font-mono font-bold uppercase border', severityBadgeStyle(hotspot.severity))}>
+                {hotspot.severity}
+              </span>
+              <Link
+                to={`/rules/${encodeURIComponent(hotspot.ruleKey)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-md border border-secondary bg-secondary px-2 py-0.5 font-mono text-brand-secondary hover:underline"
+                title="View Rule Specification"
+              >
+                <span>{hotspot.ruleKey}</span>
+                <LinkExternal02 className="size-3" aria-hidden="true" />
+              </Link>
+              {hotspot.cwe && (
+                <span className="rounded-md border border-secondary bg-secondary px-2 py-0.5 font-mono text-secondary">
+                  {hotspot.cwe}
+                </span>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label="Close inspector"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-tertiary transition-colors hover:bg-secondary hover:text-primary focus:outline-none focus:ring-2 focus:ring-brand/60 shrink-0"
+          >
+            <X className="size-4" />
+          </button>
         </div>
-        <button
-          aria-label="Close dialog"
-          onClick={onClose}
-          className="rounded-md p-1 text-mutedfg hover:bg-bg hover:text-foreground focus:outline-none focus:ring-2 focus:ring-brand/60"
-        >
-          <X className="size-4" />
-        </button>
-      </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        <div>
-          <h3 className="text-lg font-medium text-foreground">{hotspot.title}</h3>
-          <div className="mt-2 flex flex-wrap gap-2 text-xs">
-            <Pill>{hotspot.ruleKey}</Pill>
-            <Pill className="capitalize">{hotspot.severity}</Pill>
-            {hotspot.cwe && <Pill>{hotspot.cwe}</Pill>}
+        {/* Location chip row */}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-secondary bg-secondary/30 px-3 py-2 text-xs">
+          <div className="flex items-center gap-1.5 min-w-0 font-mono text-primary truncate">
+            <File02 className="size-3.5 text-tertiary shrink-0" aria-hidden="true" />
+            <span className="truncate">{hotspot.location}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => copyLocation(hotspot.location)}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-tertiary hover:bg-secondary hover:text-primary transition-colors"
+              title={copied ? 'Copied location!' : 'Copy file path'}
+            >
+              {copied ? <Check className="size-3 text-success-primary" /> : <Copy01 className="size-3" />}
+              <span>{copied ? 'Copied' : 'Copy'}</span>
+            </button>
+            <Link
+              to={`/code-quality/projects/${encodeURIComponent(projectKey)}/code`}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold text-brand-secondary hover:underline"
+            >
+              <span>View Code</span>
+              <ArrowRight className="size-3" aria-hidden="true" />
+            </Link>
           </div>
         </div>
 
-        <div>
-          <h4 className="text-sm font-semibold text-foreground">Location</h4>
-          <p className="mt-1 font-mono text-xs text-mutedfg break-all">{hotspot.location}</p>
-        </div>
-
-        <div>
-          <h4 className="text-sm font-semibold text-foreground">Description</h4>
-          <p className="mt-1 whitespace-pre-wrap text-sm text-mutedfg">
-            {hotspot.description || 'No description provided.'}
-          </p>
-        </div>
-
-        {hotspot.status !== 'fixed' || history.some(h => h.status === 'fixed') ? (
-          <form onSubmit={handleTransition} className="rounded-lg border border-border bg-surface p-4">
-            <h4 className="text-sm font-semibold text-foreground">Review Decision</h4>
-            
-            {!canReview ? (
-              <div className="mt-3 text-sm text-mutedfg p-3 bg-elevated rounded-md">
-                You do not have permission to review Security Hotspots.
-              </div>
-            ) : (
-            <div className="mt-3 space-y-3">
-              <div>
-                <label htmlFor="status" className="sr-only">Status</label>
-                <select
-                  id="status"
-                  value={transitionStatus}
-                  onChange={(e) => setTransitionStatus(e.target.value as HotspotStatus)}
-                  className="w-full rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                  disabled={submitting}
-                >
-                  <option value={hotspot.status} disabled>{formatHotspotStatus(hotspot.status)} (Current)</option>
-                  {CanTransitionTo(hotspot.status, 'to_review') && <option value="to_review">To review</option>}
-                  {CanTransitionTo(hotspot.status, 'acknowledged') && <option value="acknowledged">Acknowledged</option>}
-                  {CanTransitionTo(hotspot.status, 'fixed') && <option value="fixed">Fixed</option>}
-                  {CanTransitionTo(hotspot.status, 'safe') && <option value="safe">Safe</option>}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="rationale" className="sr-only">Rationale</label>
-                <textarea
-                  id="rationale"
-                  value={rationale}
-                  onChange={(e) => setRationale(e.target.value)}
-                  placeholder="Provide a rationale for this decision..."
-                  className="w-full resize-y rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                  rows={3}
-                  disabled={submitting}
-                  maxLength={4000}
-                />
-              </div>
-              {submitError && (
-                <div className="text-xs text-critical">{submitError}</div>
-              )}
-              <Button
-                type="submit"
-                disabled={submitting || (transitionStatus === hotspot.status && rationale.trim().length === 0)}
-                className="w-full"
-                variant="brand"
-              >
-                {submitting ? <Spinner className="size-4 mr-2" /> : null}
-                Save decision
-              </Button>
-            </div>
+        {/* Tab Navigation */}
+        <div className="mt-4 flex items-center gap-2 border-t border-secondary pt-3" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'risk'}
+            onClick={() => setActiveTab('risk')}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all',
+              activeTab === 'risk'
+                ? 'bg-brand-primary/15 text-brand-secondary border border-brand/30 shadow-2xs'
+                : 'text-tertiary hover:bg-secondary hover:text-primary border border-transparent',
             )}
-          </form>
-        ) : null}
+          >
+            <AlertTriangle className="size-3.5" aria-hidden="true" />
+            <span>Risk Analysis</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'decision'}
+            onClick={() => setActiveTab('decision')}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all',
+              activeTab === 'decision'
+                ? 'bg-brand-primary/15 text-brand-secondary border border-brand/30 shadow-2xs'
+                : 'text-tertiary hover:bg-secondary hover:text-primary border border-transparent',
+            )}
+          >
+            <ShieldTick className="size-3.5" aria-hidden="true" />
+            <span>Review & Audit</span>
+          </button>
+        </div>
+      </div>
 
-        <div>
-          <h4 className="text-sm font-semibold text-foreground">Review History</h4>
-          {history.length === 0 ? (
-            <p className="mt-2 text-xs text-mutedfg">No review history available.</p>
-          ) : (
-            <div className="mt-3 space-y-4">
-              {history.map((event, i) => (
-                <div key={i} className="flex gap-3 text-sm">
-                  <div className="mt-0.5 flex flex-col items-center">
-                    <StatusIcon status={event.status} className="size-4" />
-                    {i < history.length - 1 && <div className="mt-2 w-[1px] flex-1 bg-border" />}
-                  </div>
-                  <div className="flex-1 pb-4">
-                    <div className="flex flex-wrap items-baseline gap-2">
-                      <span className="font-medium text-foreground">{event.actor}</span>
-                      <span className="text-mutedfg">changed status to</span>
-                      <span className="font-medium text-foreground">{formatHotspotStatus(event.status)}</span>
-                    </div>
-                    <div className="mt-1 flex items-center gap-1.5 text-xs text-subtlefg">
-                      <CalendarClock className="size-3" />
-                      {new Date(event.at).toLocaleString()}
-                    </div>
-                    {event.rationale && (
-                      <div className="mt-2 rounded bg-surface p-2 text-xs text-mutedfg">
-                        {event.rationale}
+      {/* Tab Body */}
+      <div className="flex-1 overflow-y-auto p-5 space-y-6">
+        {activeTab === 'risk' && (
+          <div className="space-y-5 animate-fade-in">
+            {/* Finding Evidence */}
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-tertiary mb-2.5">
+                Finding Evidence
+              </h3>
+              {parsedBullets.length > 0 ? (
+                <div className="space-y-2.5">
+                  {parsedBullets.map((item, idx) => (
+                    <div key={idx} className="rounded-xl border border-secondary bg-primary p-3.5 shadow-2xs">
+                      {item.key && (
+                        <div className="mb-1 font-bold text-xs text-primary capitalize tracking-wide">
+                          {item.key}
+                        </div>
+                      )}
+                      <div className="text-secondary leading-relaxed font-mono whitespace-pre-wrap break-words text-[11.5px]">
+                        {item.text}
                       </div>
-                    )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-secondary bg-secondary/20 p-4 text-xs text-tertiary">
+                  No automated evidence recorded for this finding.
+                </div>
+              )}
+            </div>
+
+            {/* Context & Policy */}
+            <div className="rounded-xl border border-warning-primary/40 bg-warning-primary/10 p-4 shadow-2xs">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="size-4 text-warning-primary shrink-0 mt-0.5" aria-hidden="true" />
+                <div className="text-xs space-y-1">
+                  <div className="font-bold text-warning-primary">Triage Policy</div>
+                  <div className="text-secondary leading-relaxed">
+                    Hotspots indicate security-sensitive patterns. Validate sanitization, reachability, and source-to-sink boundaries before classifying as Safe.
                   </div>
                 </div>
-              ))}
+              </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {activeTab === 'decision' && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Review Decision Form */}
+            {hotspot.status !== 'fixed' || history.some((h) => h.status === 'fixed') ? (
+              <form onSubmit={handleTransition} className="rounded-xl border border-secondary bg-primary p-5 shadow-xs space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
+                  Review Classification
+                </h3>
+
+                {!canReview ? (
+                  <div className="rounded-md bg-secondary p-3 text-xs text-tertiary">
+                    You do not have permission to review Security Hotspots in this project.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs font-medium text-secondary mb-2 block">
+                        Target Status
+                      </label>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        {(['safe', 'acknowledged', 'fixed', 'to_review'] as HotspotStatus[]).map((st) => {
+                          const allowed = CanTransitionTo(hotspot.status, st) || st === hotspot.status
+                          const isCurrent = hotspot.status === st
+                          const isSelected = transitionStatus === st
+                          return (
+                            <button
+                              key={st}
+                              type="button"
+                              disabled={!allowed || submitting}
+                              onClick={() => setTransitionStatus(st)}
+                              className={cn(
+                                'flex items-center justify-between rounded-lg border p-2.5 text-xs font-semibold transition-all',
+                                isSelected
+                                  ? 'border-brand-solid bg-brand-primary/10 text-brand-secondary ring-1 ring-brand-solid'
+                                  : 'border-secondary bg-secondary/40 text-secondary hover:bg-secondary hover:text-primary',
+                                !allowed && 'opacity-40 pointer-events-none',
+                              )}
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <StatusIcon status={st} className="size-3.5 shrink-0" />
+                                {formatHotspotStatus(st)}
+                              </span>
+                              {isCurrent && (
+                                <span className="text-[10px] font-normal text-tertiary">(Current)</span>
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label htmlFor="rationale" className="text-xs font-medium text-secondary mb-1.5 block">
+                        Rationale <span className="text-error-primary">*</span>
+                      </label>
+                      <textarea
+                        id="rationale"
+                        value={rationale}
+                        onChange={(e) => setRationale(e.target.value)}
+                        placeholder="Enter triage notes or justification for this status change..."
+                        className="w-full resize-y rounded-lg border border-secondary bg-primary px-3 py-2 text-xs text-primary shadow-2xs focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/60"
+                        rows={3}
+                        disabled={submitting}
+                        maxLength={4000}
+                      />
+                    </div>
+
+                    {submitError && (
+                      <div className="text-xs font-medium text-error-primary">{submitError}</div>
+                    )}
+
+                    <Button
+                      type="submit"
+                      disabled={submitting || (transitionStatus === hotspot.status && rationale.trim().length === 0)}
+                      className="w-full !bg-brand-solid !text-white hover:!bg-brand-solid_hover shadow-xs font-semibold"
+                      variant="brand"
+                    >
+                      {submitting ? <Spinner className="mr-2 size-4" /> : null}
+                      Save Decision
+                    </Button>
+                  </div>
+                )}
+              </form>
+            ) : null}
+
+            {/* Audit Trail Timeline */}
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-tertiary mb-3">
+                Audit Trail
+              </h3>
+              {history.length === 0 ? (
+                <p className="text-xs text-tertiary">No review history recorded yet.</p>
+              ) : (
+                <div className="space-y-4">
+                  {history.map((event, i) => (
+                    <div key={i} className="flex gap-3 text-xs">
+                      <div className="mt-0.5 flex flex-col items-center">
+                        <StatusIcon status={event.status} className="size-4 shrink-0" />
+                        {i < history.length - 1 && <div className="mt-2 w-[1px] flex-1 bg-secondary" />}
+                      </div>
+                      <div className="flex-1 pb-4">
+                        <div className="flex flex-wrap items-baseline gap-1.5">
+                          <span className="font-bold text-primary">{event.actor}</span>
+                          <span className="text-tertiary">changed status to</span>
+                          <span className={cn('inline-flex items-center rounded px-1.5 py-0.2 font-semibold border', statusBadgeStyle(event.status))}>
+                            {formatHotspotStatus(event.status)}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-1 text-[11px] text-tertiary">
+                          <CalendarClock className="size-3" />
+                          {new Date(event.at).toLocaleString()}
+                        </div>
+                        {event.rationale && (
+                          <div className="mt-2 rounded-lg border border-secondary bg-secondary/30 p-2.5 text-xs text-secondary shadow-2xs">
+                            {event.rationale}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
