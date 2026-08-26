@@ -41,6 +41,7 @@ type PythonCoordinator struct {
 }
 
 var _ ports.TaintScanner = (*PythonCoordinator)(nil)
+var _ ports.TaintCoverageScanner = (*PythonCoordinator)(nil)
 
 func NewPythonCoordinator(provider ports.PythonFactsProvider, p proposer, catalog taint.PythonCatalog, audit ports.AuditLogger, clock ports.Clock) (*PythonCoordinator, error) {
 	if provider == nil || p == nil || audit == nil || clock == nil {
@@ -56,46 +57,181 @@ func NewPythonCoordinator(provider ports.PythonFactsProvider, p proposer, catalo
 // most maxPythonTaintProposals stable, deduplicated judgments. No-coverage errors are returned to the
 // best-effort SCA hook and propose nothing; partial coverage is recorded on positive witnesses.
 func (c *PythonCoordinator) Scan(ctx context.Context, engagementID shared.ID, targetRef string) (int, error) {
+	outcome, err := c.ScanWithCoverage(ctx, engagementID, targetRef)
+	return outcome.Proposed, err
+}
+
+// ScanWithCoverage is the coverage-aware form of Scan. Failures retain a closed, non-sensitive reason
+// so callers can distinguish zero findings from zero analysis without exposing parser or target data.
+func (c *PythonCoordinator) ScanWithCoverage(ctx context.Context, engagementID shared.ID, targetRef string) (ports.TaintScanOutcome, error) {
+	outcome := ports.TaintScanOutcome{Coverage: ports.AnalysisCoverage{
+		Analyzer: "python-semantic-taint-v1", Language: "python", Status: ports.AnalysisCoverageUnavailable,
+	}}
 	if ctx == nil || engagementID.IsZero() || strings.TrimSpace(targetRef) == "" {
-		return 0, fmt.Errorf("%w: python taint scan needs context, engagement, and target", shared.ErrValidation)
+		outcome.Coverage.Reason = ports.AnalysisReasonAnalysisFailed
+		return outcome, fmt.Errorf("%w: python taint scan needs context, engagement, and target", shared.ErrValidation)
 	}
 	document, available, err := c.provider.PythonFacts(ctx, targetRef)
 	if err != nil {
-		return 0, fmt.Errorf("python taint semantic extraction (no coverage): %w", err)
+		outcome.Coverage.Reason = ports.AnalysisReasonExtractionFailed
+		return outcome, fmt.Errorf("python taint semantic extraction (no coverage): %w", err)
 	}
 	if !available {
-		return 0, fmt.Errorf("%w: python taint semantic sidecar is unavailable", shared.ErrNotFound)
+		outcome.Coverage.Reason = ports.AnalysisReasonSidecarUnavailable
+		return outcome, fmt.Errorf("%w: python taint semantic sidecar is unavailable", shared.ErrNotFound)
+	}
+	if err := ctx.Err(); err != nil {
+		outcome.Coverage.Reason = ports.AnalysisReasonAnalysisFailed
+		return outcome, err
+	}
+	outcome.Coverage.Available = true
+	outcome.Coverage.FilesSeen = document.FilesSeen
+	outcome.Coverage.FilesParsed = document.FilesParsed
+	outcome.Coverage.Symbols = len(document.Symbols)
+	outcome.Coverage.Calls = len(document.Calls)
+	outcome.Coverage.Values = len(document.Values)
+	outcome.Coverage.Flows = len(document.Flows)
+	outcome.Coverage.Truncated = document.Truncated
+	if document.FilesSeen == 0 {
+		outcome.Coverage.Status = ports.AnalysisCoverageNotApplicable
+		outcome.Coverage.Reason = ports.AnalysisReasonNoSource
+		return outcome, nil
 	}
 	resolution, err := pythonprogram.Resolve(document)
 	if err != nil {
-		return 0, fmt.Errorf("python taint semantic resolution (no coverage): %w", err)
+		outcome.Coverage.Reason = ports.AnalysisReasonResolutionFailed
+		return outcome, fmt.Errorf("python taint semantic resolution (no coverage): %w", err)
+	}
+	outcome.Coverage.Gaps = pythonCoverageGaps(resolution.Gaps)
+	outcome.Coverage.Complete = resolution.Complete
+	if resolution.Complete {
+		outcome.Coverage.Status = ports.AnalysisCoverageComplete
+	} else {
+		outcome.Coverage.Status = ports.AnalysisCoveragePartial
 	}
 	graph, err := taint.BuildPythonValueGraph(document, resolution, c.catalog)
 	if err != nil {
-		return 0, err
+		outcome.Coverage.Status = ports.AnalysisCoverageUnavailable
+		outcome.Coverage.Complete = false
+		outcome.Coverage.Reason = ports.AnalysisReasonAnalysisFailed
+		return outcome, err
 	}
+	outcome.Coverage.Truncated = outcome.Coverage.Truncated || graph.Truncated
+	if graph.Truncated {
+		outcome.Coverage.Status = ports.AnalysisCoveragePartial
+		outcome.Coverage.Complete = false
+	}
+	analysisComplete := resolution.Complete && !graph.Truncated
 
 	paths := deduplicatePythonTaintPaths(graph.Vulnerabilities())
 	proposed := 0
 	for _, finding := range paths {
-		if proposed >= maxPythonTaintProposals {
-			return proposed, fmt.Errorf("%w: python taint proposal budget exceeded", shared.ErrValidation)
+		if err := ctx.Err(); err != nil {
+			outcome.Proposed = proposed
+			outcome.Coverage.Proposals = proposed
+			outcome.Coverage.Status = ports.AnalysisCoveragePartial
+			outcome.Coverage.Complete = false
+			outcome.Coverage.Reason = ports.AnalysisReasonAnalysisFailed
+			return outcome, err
 		}
-		location := boundedPythonLocation(positionString(finding.SinkPos, true), finding.Callee)
-		claim := judgment.SASTClaim{CWE: finding.CWE, Location: location, Rule: finding.Rule}
+		if proposed >= maxPythonTaintProposals {
+			outcome.Proposed = proposed
+			outcome.Coverage.Proposals = proposed
+			outcome.Coverage.Status = ports.AnalysisCoveragePartial
+			outcome.Coverage.Complete = false
+			outcome.Coverage.Reason = ports.AnalysisReasonProposalBudgetExceeded
+			return outcome, fmt.Errorf("%w: python taint proposal budget exceeded", shared.ErrValidation)
+		}
+		location := boundedPythonLocation(positionLineString(finding.SinkPos), finding.Callee)
+		claim := judgment.SASTClaim{
+			CWE: finding.CWE, Location: location, Rule: finding.Rule,
+			DataFlow: pythonClaimDataFlow(finding, graph, analysisComplete),
+		}
 		judged, err := c.proposer.Propose(
 			ctx, pythonProposerActor, engagementID, judgment.CapSAST, judgment.SubjectDataFlow,
 			pythonFlowSubjectID(engagementID, finding), claim,
 		)
 		if err != nil {
-			return proposed, fmt.Errorf("propose python taint judgment: %w", err)
+			outcome.Proposed = proposed
+			outcome.Coverage.Proposals = proposed
+			outcome.Coverage.Status = ports.AnalysisCoveragePartial
+			outcome.Coverage.Complete = false
+			outcome.Coverage.Reason = ports.AnalysisReasonAnalysisFailed
+			return outcome, fmt.Errorf("propose python taint judgment: %w", err)
 		}
-		if err := c.recordPythonWitness(ctx, engagementID, judged.ID, finding, graph, resolution.Complete); err != nil {
-			return proposed, err
+		if err := c.recordPythonWitness(ctx, engagementID, judged.ID, finding, graph, analysisComplete); err != nil {
+			outcome.Proposed = proposed + 1
+			outcome.Coverage.Proposals = proposed + 1
+			outcome.Coverage.Status = ports.AnalysisCoveragePartial
+			outcome.Coverage.Complete = false
+			outcome.Coverage.Reason = ports.AnalysisReasonAnalysisFailed
+			return outcome, err
 		}
 		proposed++
 	}
-	return proposed, nil
+	outcome.Proposed = proposed
+	outcome.Coverage.Proposals = proposed
+	return outcome, nil
+}
+
+func pythonClaimDataFlow(finding taint.PythonTaintPath, graph taint.ValueFlowGraph, complete bool) *judgment.SASTDataFlow {
+	source, ok := pythonFlowLocation(finding.SourcePos)
+	if !ok {
+		return nil
+	}
+	sink, ok := pythonFlowLocation(finding.SinkPos)
+	if !ok {
+		return nil
+	}
+	steps := make([]judgment.SASTFlowLocation, 0, min(len(finding.Path)+2, judgment.MaxSASTDataFlowSteps))
+	appendStep := func(location judgment.SASTFlowLocation) {
+		if len(steps) == 0 || steps[len(steps)-1] != location {
+			steps = append(steps, location)
+		}
+	}
+	appendStep(source)
+	for _, valueID := range finding.Path {
+		location, exists := pythonFlowLocation(graph.Positions[valueID])
+		if !exists || len(steps) >= judgment.MaxSASTDataFlowSteps-1 {
+			continue
+		}
+		appendStep(location)
+	}
+	if len(steps) == judgment.MaxSASTDataFlowSteps && steps[len(steps)-1] != sink {
+		steps[len(steps)-1] = sink
+	} else {
+		appendStep(sink)
+	}
+	return &judgment.SASTDataFlow{
+		Language: "python", Source: source, Sink: sink, Steps: steps,
+		CoverageComplete: complete, GraphTruncated: graph.Truncated,
+	}
+}
+
+func pythonFlowLocation(pos pythonprogram.Position) (judgment.SASTFlowLocation, bool) {
+	if pos.File == "" || len(pos.File) > maxPythonLocationBytes || pos.Line <= 0 || pos.Column < 0 {
+		return judgment.SASTFlowLocation{}, false
+	}
+	return judgment.SASTFlowLocation{File: pos.File, Line: pos.Line, Column: pos.Column}, true
+}
+
+func pythonCoverageGaps(gaps []pythonprogram.CoverageGap) []ports.AnalysisCoverageGap {
+	counts := make(map[string]int, len(gaps))
+	for _, gap := range gaps {
+		if gap.Kind != "" {
+			counts[string(gap.Kind)]++
+		}
+	}
+	kinds := make([]string, 0, len(counts))
+	for kind := range counts {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+	out := make([]ports.AnalysisCoverageGap, 0, len(kinds))
+	for _, kind := range kinds {
+		out = append(out, ports.AnalysisCoverageGap{Kind: kind, Count: counts[kind]})
+	}
+	return out
 }
 
 // One dangerous call and class is one review item even if several sources reach it. Sort shortest witnesses
@@ -198,6 +334,13 @@ func positionString(pos pythonprogram.Position, omitZeroColumn bool) string {
 		label += ":" + strconv.Itoa(pos.Column)
 	}
 	return label
+}
+
+func positionLineString(pos pythonprogram.Position) string {
+	if pos.File == "" || pos.Line <= 0 {
+		return ""
+	}
+	return pos.File + ":" + strconv.Itoa(pos.Line)
 }
 
 func boundedPythonLocation(location, fallback string) string {

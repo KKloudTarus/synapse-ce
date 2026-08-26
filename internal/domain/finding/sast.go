@@ -18,6 +18,7 @@ type SASTInput struct {
 	Location   string          // where: "path[:line]" or the importPath.Symbol of the sink-using function
 	Rule       string          // the taint rule that fired, e.g. "taint-sqli"
 	Severity   shared.Severity // optional; defaults to Unknown (re-triaged via the normal finding workflow)
+	DataFlow   *DataFlowTrace  // optional bounded source-to-sink witness from the confirmed judgment
 }
 
 // NewSAST builds a first-party SAST finding (Kind=sast) from a verifier-confirmed taint judgment. The title
@@ -46,22 +47,39 @@ func NewSAST(id, engagementID shared.ID, in SASTInput, now time.Time) (Finding, 
 	if !sev.Valid() {
 		return Finding{}, fmt.Errorf("%w: unknown severity %q", shared.ErrValidation, sev)
 	}
+	dataFlow := CloneDataFlowTrace(in.DataFlow)
+	if dataFlow != nil {
+		if err := dataFlow.Validate(); err != nil {
+			return Finding{}, fmt.Errorf("%w: invalid sast data flow: %v", shared.ErrValidation, err)
+		}
+	}
+	var sourceLocation *SourceLocation
+	sources := []string{"synapse-taint"}
+	if dataFlow != nil {
+		sink := cloneSourceLocation(dataFlow.Sink)
+		sourceLocation = &sink
+		if dataFlow.Language == "python" {
+			sources = []string{"synapse-python-taint"}
+		}
+	}
 	return Finding{
-		ID:           id,
-		EngagementID: engagementID,
-		Title:        "Taint: " + rule + " (" + cwe + ") at " + loc,
-		Description:  "Tainted (attacker-controllable) data reaches a " + cwe + " sink. Promoted from a verifier-confirmed taint judgment (rule " + rule + ").",
-		Severity:     sev,
-		CWE:          cwe,
-		Sources:      []string{"synapse-taint"},
-		Class:        ClassFirstParty, // a first-party source-code issue
-		Scope:        "unknown",
-		Reachability: "unknown",
-		Priority:     priorityForSeverity(sev),
-		Status:       StatusOpen,
-		Kind:         KindSAST,
-		RuleKey:      rule,
-		DedupKey:     "sast:ai:" + anchor,
+		ID:             id,
+		EngagementID:   engagementID,
+		Title:          "Taint: " + rule + " (" + cwe + ") at " + loc,
+		Description:    "Tainted (attacker-controllable) data reaches a " + cwe + " sink. Promoted from a verifier-confirmed taint judgment (rule " + rule + ").",
+		Severity:       sev,
+		CWE:            cwe,
+		Sources:        sources,
+		Class:          ClassFirstParty, // a first-party source-code issue
+		Scope:          "unknown",
+		Reachability:   "unknown",
+		Priority:       priorityForSeverity(sev),
+		Status:         StatusOpen,
+		Kind:           KindSAST,
+		RuleKey:        rule,
+		SourceLocation: sourceLocation,
+		DataFlow:       dataFlow,
+		DedupKey:       "sast:ai:" + anchor,
 		// ProposedBy LEFT EMPTY (the judgment-layer gate already ran) – see the doc above.
 		Version: 1,
 		Audit:   shared.Audit{CreatedAt: now, UpdatedAt: now},

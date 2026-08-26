@@ -659,6 +659,9 @@ type ScanResult struct {
 	// SourceWarnings flags a configured detection source that did NOT run (e.g. the Grype
 	// binary/DB is missing), so a silently-degraded source can't masquerade as "0 vulns / clean".
 	SourceWarnings []string `json:"source_warnings,omitempty"`
+	// AnalysisCoverage makes semantic-analysis negative-proof coverage explicit. A partial analyzer can
+	// still produce positive witnesses, but an empty result must not be interpreted as clean.
+	AnalysisCoverage []ports.AnalysisCoverage `json:"analysis_coverage,omitempty"`
 	// SuppressedFindings marks findings accepted by the repo's .synapseignore policy. The findings REMAIN in
 	// Findings (reported, persisted, evidence-sealed – never hidden); this is only an accepted-risk
 	// annotation a CI --fail-on gate consults to exempt them. Acceptance suppresses the GATE, not visibility.
@@ -2887,7 +2890,15 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// function-level scanner, but follows the same propose-only lifecycle: positive witnesses become gated
 	// CapSAST proposals, while missing/partial coverage never becomes a clean conclusion.
 	if opts.scansVulnerabilities() && s.pythonTaint != nil {
-		_, _ = s.pythonTaint.Scan(ctx, engagementID, ws.Dir)
+		if scanner, ok := s.pythonTaint.(ports.TaintCoverageScanner); ok {
+			outcome, _ := scanner.ScanWithCoverage(ctx, engagementID, ws.Dir)
+			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
+			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
+				result.SourceWarnings = mergeStrings(result.SourceWarnings, []string{warning})
+			}
+		} else {
+			_, _ = s.pythonTaint.Scan(ctx, engagementID, ws.Dir)
+		}
 	}
 
 	// AI false-positive triage (opt-in, best-effort, PROPOSE-ONLY). After the deterministic pass, the
@@ -3116,6 +3127,7 @@ func mergeCachedScanResult(current *ScanResult, previous ScanResult, opts ScanOp
 		current.Manifest = previous.Manifest
 		current.RiskMatches = previous.RiskMatches
 		current.Findings = mergeFindingsByKind(previous.Findings, current.Findings, true)
+		current.AnalysisCoverage = cloneAnalysisCoverage(previous.AnalysisCoverage)
 		preservedVulnerabilities = len(previous.Vulnerabilities) > 0 || hasFindingKind(previous.Findings, false)
 		preserved = preservedVulnerabilities
 	}
@@ -3132,6 +3144,41 @@ func mergeCachedScanResult(current *ScanResult, previous ScanResult, opts ScanOp
 	}
 	current.ScanMode = ScanModeFull
 	mergeCachedAnnotations(current, previous, preservedVulnerabilities)
+}
+
+func semanticCoverageWarning(coverage ports.AnalysisCoverage) string {
+	switch coverage.Status {
+	case ports.AnalysisCoveragePartial:
+		return coverage.Analyzer + " coverage is partial; negative findings are not conclusive"
+	case ports.AnalysisCoverageUnavailable:
+		return coverage.Analyzer + " is unavailable; no semantic taint coverage was produced"
+	default:
+		return ""
+	}
+}
+
+// mergeAnalysisCoverage keeps one current summary per analyzer and deterministic analyzer ordering.
+func mergeAnalysisCoverage(items []ports.AnalysisCoverage, current ports.AnalysisCoverage) []ports.AnalysisCoverage {
+	if current.Analyzer == "" {
+		return items
+	}
+	out := make([]ports.AnalysisCoverage, 0, len(items)+1)
+	for _, item := range items {
+		if item.Analyzer != current.Analyzer {
+			out = append(out, item)
+		}
+	}
+	out = append(out, current)
+	sort.Slice(out, func(i, j int) bool { return out[i].Analyzer < out[j].Analyzer })
+	return out
+}
+
+func cloneAnalysisCoverage(items []ports.AnalysisCoverage) []ports.AnalysisCoverage {
+	out := append([]ports.AnalysisCoverage(nil), items...)
+	for i := range out {
+		out[i].Gaps = append([]ports.AnalysisCoverageGap(nil), out[i].Gaps...)
+	}
+	return out
 }
 
 func mergeCachedAnnotations(current *ScanResult, previous ScanResult, preservePrevious bool) {

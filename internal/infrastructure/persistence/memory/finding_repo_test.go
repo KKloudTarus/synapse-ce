@@ -89,6 +89,35 @@ func TestFindingRepositoryUpsertVersionOnlyChangesForMachineProjection(t *testin
 	}
 }
 
+func TestFindingRepositoryDeepCopiesDataFlow(t *testing.T) {
+	repo := NewFindingRepository()
+	column := 4
+	source := finding.SourceLocation{File: "app.py", StartLine: 3, EndLine: 3, StartColumn: &column, EndColumn: &column}
+	sink := finding.SourceLocation{File: "app.py", StartLine: 4, EndLine: 4, StartColumn: &column, EndColumn: &column}
+	item := finding.Finding{
+		ID: "f-flow", EngagementID: "e-flow", Kind: finding.KindSAST, RuleKey: "python-taint-command", DedupKey: "sast:ai:j-flow",
+		DataFlow:       &finding.DataFlowTrace{Language: "python", Source: source, Sink: sink, Steps: []finding.SourceLocation{source, sink}},
+		SourceLocation: &sink,
+	}
+	if err := repo.Upsert(context.Background(), []finding.Finding{item}); err != nil {
+		t.Fatal(err)
+	}
+	item.DataFlow.Steps[0].File = "caller-mutated.py"
+	item.SourceLocation.File = "caller-mutated.py"
+	got, err := repo.GetByEngagementAndID(context.Background(), "e-flow", "f-flow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DataFlow.Steps[0].File != "app.py" || got.SourceLocation.File != "app.py" {
+		t.Fatalf("stored finding was mutated through input: %+v", got)
+	}
+	got.DataFlow.Steps[0].File = "reader-mutated.py"
+	again, _ := repo.GetByEngagementAndID(context.Background(), "e-flow", "f-flow")
+	if again.DataFlow.Steps[0].File != "app.py" {
+		t.Fatalf("stored finding was mutated through output: %+v", again)
+	}
+}
+
 func TestFindingRepositoryRuleKey(t *testing.T) {
 	r := NewFindingRepository()
 	ctx := context.Background()

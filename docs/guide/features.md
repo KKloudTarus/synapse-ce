@@ -214,8 +214,18 @@ Every hit is a gated `CapSAST` proposal at score zero under `system:python-taint
 verification or self-confirmation path. The audit witness contains only bounded relative positions and
 closed catalog metadata—never source contents or literal values. Parser/resolution gaps are recorded as
 incomplete coverage: a real positive path may still be proposed, but absence of a path is never published
-as a clean judgment. The feature needs judgments plus a CGO-enabled `synapse-ast`; it does not import,
-execute, or compile target Python and therefore does not require the target-compilation sandbox.
+as a clean judgment. Scan JSON exposes this distinction in `analysis_coverage` as `complete`, `partial`,
+`unavailable`, or `not_applicable`, with closed failure reasons, bounded counters, and an aggregated gap
+histogram. Partial/unavailable analysis also produces an operator-facing `source_warnings` entry; tool
+stderr, target paths, and source text are never copied into either surface.
+
+After a distinct verifier confirms the proposal, its bounded source-to-sink position trace is retained on
+the finding. The sink becomes the finding's primary source location, and SARIF 2.1.0 exports the ordered
+trace as `codeFlows`/`threadFlows`, together with coverage-complete and graph-truncated properties. A trace
+contains at most 64 canonical repository-relative positions and never contains expressions, source lines,
+literal values, or internal value identifiers. The feature needs judgments plus a CGO-enabled
+`synapse-ast`; it does not import, execute, or compile target Python and therefore does not require the
+target-compilation sandbox.
 
 ### Runtime confirmation (DAST)
 

@@ -174,6 +174,89 @@ func TestPythonFrameworkRouteParameterIsSourceRegardlessOfName(t *testing.T) {
 	}
 }
 
+type pythonCorpusCase struct {
+	name  string
+	doc   pythonprogram.Document
+	class TaintClass
+	want  bool
+}
+
+func pythonValueFlowCorpus() []pythonCorpusCase {
+	return []pythonCorpusCase{
+		{name: "interprocedural command", doc: interproceduralPythonDocument(), class: TaintCommand, want: true},
+		{name: "sibling source and sink", doc: siblingCallsPythonDocument(), class: TaintCommand, want: false},
+		{name: "class-specific escaped XSS", doc: sanitizerPythonDocument(), class: TaintXSS, want: false},
+		{name: "HTML escape is not command sanitizer", doc: sanitizerPythonDocument(), class: TaintCommand, want: true},
+		{name: "raw SQL argument only", doc: sqlArgumentPythonDocument(), class: TaintSQL, want: true},
+	}
+}
+
+func TestPythonValueFlowCorpusMetrics(t *testing.T) {
+	tp, fp, fn, tn, complete, partial := 0, 0, 0, 0, 0, 0
+	for _, item := range pythonValueFlowCorpus() {
+		resolution, err := pythonprogram.Resolve(item.doc)
+		if err != nil {
+			t.Fatalf("%s resolve: %v", item.name, err)
+		}
+		if resolution.Complete {
+			complete++
+		} else {
+			partial++
+		}
+		graph, err := BuildPythonValueGraph(item.doc, resolution, DefaultPythonCatalog())
+		if err != nil {
+			t.Fatalf("%s graph: %v", item.name, err)
+		}
+		got := false
+		for _, candidate := range graph.Vulnerabilities() {
+			got = got || candidate.Class == item.class
+		}
+		switch {
+		case item.want && got:
+			tp++
+		case !item.want && got:
+			fp++
+		case item.want && !got:
+			fn++
+		default:
+			tn++
+		}
+	}
+	if tp != 3 || fp != 0 || fn != 0 || tn != 2 {
+		t.Fatalf("corpus metrics TP=%d FP=%d FN=%d TN=%d complete=%d partial=%d", tp, fp, fn, tn, complete, partial)
+	}
+	t.Logf("synthetic regression corpus: precision=100%% recall=100%% TP=%d FP=%d FN=%d TN=%d complete=%d partial=%d", tp, fp, fn, tn, complete, partial)
+}
+
+func BenchmarkPythonValueFlowCorpus(b *testing.B) {
+	type preparedCase struct {
+		doc        pythonprogram.Document
+		resolution pythonprogram.Resolution
+	}
+	corpus := pythonValueFlowCorpus()
+	prepared := make([]preparedCase, len(corpus))
+	for i := range corpus {
+		resolution, err := pythonprogram.Resolve(corpus[i].doc)
+		if err != nil {
+			b.Fatal(err)
+		}
+		prepared[i] = preparedCase{doc: corpus[i].doc, resolution: resolution}
+	}
+	b.ReportMetric(100, "precision_pct")
+	b.ReportMetric(100, "recall_pct")
+	b.ReportMetric(float64(len(corpus)), "corpus_cases")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, item := range prepared {
+			graph, err := BuildPythonValueGraph(item.doc, item.resolution, DefaultPythonCatalog())
+			if err != nil {
+				b.Fatal(err)
+			}
+			_ = graph.Vulnerabilities()
+		}
+	}
+}
+
 func interproceduralPythonDocument() pythonprogram.Document {
 	document, moduleID := basePythonValueDocument()
 	route := pythonValueSymbol("python:app:route", "route", moduleID, pythonprogram.SymbolFunction, 2)

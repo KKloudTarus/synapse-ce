@@ -5,10 +5,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 type fakePythonFacts struct {
@@ -43,8 +45,11 @@ func TestPythonScanProposesValueFlowWithBoundedEvidence(t *testing.T) {
 	if proposal.proposer != pythonProposerActor || proposal.capability != judgment.CapSAST || proposal.subjectKind != judgment.SubjectDataFlow {
 		t.Fatalf("proposal lifecycle = %+v", proposal)
 	}
-	if claim.CWE != "CWE-78" || claim.Rule != "python-taint-command" || claim.Location != "app.py:4:4" {
+	if claim.CWE != "CWE-78" || claim.Rule != "python-taint-command" || claim.Location != "app.py:4" {
 		t.Fatalf("claim = %+v", claim)
+	}
+	if claim.DataFlow == nil || claim.DataFlow.Language != "python" || len(claim.DataFlow.Steps) < 2 || claim.DataFlow.Source.Line != 3 || claim.DataFlow.Sink.Line != 4 || claim.DataFlow.CoverageComplete {
+		t.Fatalf("structured data flow = %+v", claim.DataFlow)
 	}
 	if len(audit.entries) != 1 || audit.entries[0].Action != "judgment.python_taint_proposed" {
 		t.Fatalf("audit = %+v", audit.entries)
@@ -91,6 +96,104 @@ func TestPythonScanNoCoverageProposesNothing(t *testing.T) {
 		if n, err := coordinator.Scan(context.Background(), engID, "/work/target"); err == nil || n != 0 || len(proposals.calls) != 0 || len(audit.entries) != 0 {
 			t.Fatalf("no coverage must propose nothing: n=%d err=%v calls=%d audit=%d", n, err, len(proposals.calls), len(audit.entries))
 		}
+	}
+}
+
+func TestPythonScanCoverageDistinguishesEmptyPartialAndUnavailable(t *testing.T) {
+	tests := []struct {
+		name       string
+		provider   *fakePythonFacts
+		status     ports.AnalysisCoverageStatus
+		reason     ports.AnalysisCoverageReason
+		available  bool
+		wantError  bool
+		wantPython int
+	}{
+		{
+			name: "no Python source", provider: &fakePythonFacts{available: true, document: pythonprogram.Document{SchemaVersion: pythonprogram.SchemaVersion}},
+			status: ports.AnalysisCoverageNotApplicable, reason: ports.AnalysisReasonNoSource, available: true,
+		},
+		{
+			name: "partial positive", provider: &fakePythonFacts{available: true, document: pythonCommandDocument()},
+			status: ports.AnalysisCoveragePartial, available: true, wantPython: 1,
+		},
+		{
+			name: "sidecar unavailable", provider: &fakePythonFacts{},
+			status: ports.AnalysisCoverageUnavailable, reason: ports.AnalysisReasonSidecarUnavailable, wantError: true,
+		},
+		{
+			name: "extraction failure", provider: &fakePythonFacts{err: errors.New("unsafe parser detail")},
+			status: ports.AnalysisCoverageUnavailable, reason: ports.AnalysisReasonExtractionFailed, wantError: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			coordinator, _ := NewPythonCoordinator(test.provider, &fakeProposer{}, taint.DefaultPythonCatalog(), &fakeAudit{}, fixedClock{})
+			outcome, err := coordinator.ScanWithCoverage(context.Background(), engID, "/work/target")
+			if (err != nil) != test.wantError {
+				t.Fatalf("error = %v, wantError=%v", err, test.wantError)
+			}
+			coverage := outcome.Coverage
+			if coverage.Status != test.status || coverage.Reason != test.reason || coverage.Available != test.available || outcome.Proposed != test.wantPython {
+				t.Fatalf("outcome = %+v, want status=%q reason=%q available=%v proposed=%d", outcome, test.status, test.reason, test.available, test.wantPython)
+			}
+			if coverage.Analyzer != "python-semantic-taint-v1" || coverage.Language != "python" {
+				t.Fatalf("identity = %+v", coverage)
+			}
+		})
+	}
+}
+
+func TestPythonScanReportsCompleteCoverage(t *testing.T) {
+	document := pythonprogram.Document{
+		SchemaVersion: pythonprogram.SchemaVersion, FilesSeen: 1, FilesParsed: 1,
+		Modules: []pythonprogram.Module{{Name: "app", File: "app.py", Pos: pyScanPos(1, 0)}},
+		Symbols: []pythonprogram.Symbol{{ID: "python:app:<module>", Module: "app", QualifiedName: "<module>", Name: "app", Kind: pythonprogram.SymbolModule, Pos: pyScanPos(1, 0)}},
+	}
+	coordinator, _ := NewPythonCoordinator(&fakePythonFacts{document: document, available: true}, &fakeProposer{}, taint.DefaultPythonCatalog(), &fakeAudit{}, fixedClock{})
+	outcome, err := coordinator.ScanWithCoverage(context.Background(), engID, "/work/target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Coverage.Status != ports.AnalysisCoverageComplete || !outcome.Coverage.Complete || len(outcome.Coverage.Gaps) != 0 {
+		t.Fatalf("coverage = %+v", outcome.Coverage)
+	}
+}
+
+func TestPythonScanCancellationAndWriteFailuresDegradeCoverage(t *testing.T) {
+	t.Run("canceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		coordinator, _ := NewPythonCoordinator(&fakePythonFacts{document: pythonCommandDocument(), available: true}, &fakeProposer{}, taint.DefaultPythonCatalog(), &fakeAudit{}, fixedClock{})
+		outcome, err := coordinator.ScanWithCoverage(ctx, engID, "/work/target")
+		if !errors.Is(err, context.Canceled) || outcome.Coverage.Status != ports.AnalysisCoverageUnavailable || outcome.Coverage.Reason != ports.AnalysisReasonAnalysisFailed {
+			t.Fatalf("canceled outcome = %+v err=%v", outcome, err)
+		}
+	})
+	t.Run("proposal failure", func(t *testing.T) {
+		coordinator, _ := NewPythonCoordinator(&fakePythonFacts{document: pythonCommandDocument(), available: true}, &fakeProposer{err: errors.New("proposal down")}, taint.DefaultPythonCatalog(), &fakeAudit{}, fixedClock{})
+		outcome, err := coordinator.ScanWithCoverage(context.Background(), engID, "/work/target")
+		if err == nil || outcome.Proposed != 0 || outcome.Coverage.Status != ports.AnalysisCoveragePartial || outcome.Coverage.Reason != ports.AnalysisReasonAnalysisFailed {
+			t.Fatalf("proposal failure outcome = %+v err=%v", outcome, err)
+		}
+	})
+	t.Run("audit failure after proposal", func(t *testing.T) {
+		coordinator, _ := NewPythonCoordinator(&fakePythonFacts{document: pythonCommandDocument(), available: true}, &fakeProposer{}, taint.DefaultPythonCatalog(), &fakeAudit{err: errors.New("audit down")}, fixedClock{})
+		outcome, err := coordinator.ScanWithCoverage(context.Background(), engID, "/work/target")
+		if err == nil || outcome.Proposed != 1 || outcome.Coverage.Status != ports.AnalysisCoveragePartial || outcome.Coverage.Reason != ports.AnalysisReasonAnalysisFailed {
+			t.Fatalf("audit failure outcome = %+v err=%v", outcome, err)
+		}
+	})
+}
+
+func TestPythonWitnessRejectsOversizedUnicodePathWithoutBreakingUTF8(t *testing.T) {
+	path := strings.Repeat("ữ", maxPythonLocationBytes) + ".py"
+	if _, ok := pythonFlowLocation(pythonprogram.Position{File: path, Line: 1}); ok {
+		t.Fatal("oversized UTF-8 path entered structured witness")
+	}
+	bounded := boundedPythonLocation(path+":1", "")
+	if !utf8.ValidString(bounded) || len(bounded) > maxPythonLocationBytes {
+		t.Fatalf("bounded legacy location is invalid UTF-8 or oversized: bytes=%d", len(bounded))
 	}
 }
 

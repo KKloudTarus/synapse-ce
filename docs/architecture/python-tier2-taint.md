@@ -1,6 +1,7 @@
 # Python Tier-2 Reachability and Interprocedural Taint
 
-Status: implementation plan; work in progress on `feat/python-tier2-taint`.
+Status: implementation complete through product integration; release-gate review is in progress on
+`feat/python-tier2-taint`.
 
 This document is the source of truth for the multi-pass implementation. It records the target
 architecture, safety invariants, package boundaries, pass ordering, test strategy, and completion
@@ -307,13 +308,14 @@ Exit: the supported framework matrix produces reviewable, evidence-backed propos
 
 ### Pass 6 — Product integration and hardening
 
-- [ ] Expose coverage summaries without treating unsupported code as clean.
-- [ ] Add SARIF/finding metadata needed to display source-to-sink witnesses.
-- [ ] Document flags, tiers, limitations, and operational sidecar requirements.
-- [ ] Add changelog entry.
-- [ ] Add architecture dependency tests and hostile harness cases.
-- [ ] Add corpus benchmarks with explicit precision/recall and coverage metrics.
-- [ ] Run build, vet, tests, lint/typecheck, web build, CGO-on sidecar tests, and CGO-off compilation.
+- [x] Expose coverage summaries without treating unsupported code as clean.
+- [x] Add SARIF/finding metadata needed to display source-to-sink witnesses.
+- [x] Document flags, tiers, limitations, and operational sidecar requirements.
+- [x] Add changelog entry.
+- [x] Add architecture dependency tests and hostile harness cases.
+- [x] Add corpus benchmarks with explicit precision/recall and coverage metrics.
+- [x] Run build, vet, tests, lint/typecheck, web build, CGO-on sidecar tests, and CGO-off compilation
+  where supported; record environment-only skips instead of claiming they passed.
 
 Exit: all public behavior, safety boundaries, and release gates are documented and green.
 
@@ -379,6 +381,7 @@ Append one row at the end of every implementation pass.
 | 3 | `feat:python-tier2-reachability` | Python Tier-2 analyzer/recorder, reachproof, SCA subject, judgment provenance, config and OpenVEX tests pass | Focused cross-package tests and `go build ./cmd/...` pass | Exact PyPI PURL + advisory symbol subjects prevent package/symbol confusion. Partial coverage admits bounded positive witnesses only; incomplete negatives are removed before the coordinator so Tier-1 stands. API composition is opt-in via `SYNAPSE_PYREACH_TIER2_ENABLED`. |
 | 4 | `feat:python-value-flow-taint` | Python facts/value-flow, typed catalog, interprocedural binding and resolver regression tests pass | Focused cross-package tests and `go build ./cmd/...` pass | The Python graph tracks value slots rather than treating call adjacency as data flow. Traversal is cycle-safe and bounded; sinks and sanitizers are class-specific. CGO extractor golden tests remain CI-only on this workstation because no C compiler is installed. |
 | 5 | `feat:python-taint-proposals` | Python coordinator, framework matrix, keyword sinks, catalog metadata/config and SCA composition tests pass | Focused cross-package tests and `go build ./cmd/...` pass | Python hits are stable, deduplicated, bounded `CapSAST` proposals under `system:python-taint-scan`; the coordinator has no verifier port. Partial coverage is explicit on positive audit witnesses and never becomes a clean judgment. Opt-in via `SYNAPSE_PYTAINT_ENABLED`. |
+| 6 | `feat:python-product-integration` | Coverage/outcome, judgment/finding projection, memory/Postgres persistence, SARIF code-flow, hardening and synthetic corpus tests pass | `go vet ./...`, normal + CGO-off command builds, web typecheck/build, and 327 Vitest tests pass; full Go suite differs only by the four recorded Windows baseline failures | Scan JSON distinguishes complete/partial/unavailable/not-applicable analysis. Confirmed Python findings persist a bounded position-only trace through migration 0115 and emit SARIF `codeFlows`. The five-case synthetic regression corpus records TP=3, FP=0, FN=0, TN=2; its benchmark smoke run completed. PostgreSQL integration tests skip without `SYNAPSE_TEST_DB_DSN`; CGO-on parser fixtures cannot run because this workstation has no C compiler; `golangci-lint` is not installed. |
 
 ## Definition of done
 

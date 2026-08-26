@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
 )
@@ -103,7 +104,9 @@ const (
 	maxClaimPathElemLen = 256
 	maxSASTLocationLen  = 512
 	maxSASTRuleLen      = 128
-	maxRiskDrivers      = 32
+	// MaxSASTDataFlowSteps caps the structured witness admitted to the judgment ledger.
+	MaxSASTDataFlowSteps = 64
+	maxRiskDrivers       = 32
 )
 
 // Claim is the TYPED, capability-discriminated payload of a Judgment. It is NEVER free prose
@@ -213,10 +216,66 @@ func (c ReachabilityClaim) Validate() error {
 // SASTClaim is the typed result of a SAST judgment: the weakness (CWE), where, and the
 // rule that fired. No free-text – a "hardcoded secret at L42" finding renders from these fields.
 type SASTClaim struct {
-	CWE      string    `json:"cwe"`
-	Location string    `json:"location"` // path[:line]
-	Rule     string    `json:"rule"`
-	AssetID  shared.ID `json:"asset_id"`
+	CWE      string        `json:"cwe"`
+	Location string        `json:"location"` // path[:line]
+	Rule     string        `json:"rule"`
+	AssetID  shared.ID     `json:"asset_id"`
+	DataFlow *SASTDataFlow `json:"data_flow,omitempty"`
+}
+
+// SASTFlowLocation is a source-only point in a repository-relative file. Columns are zero-based UTF-8
+// byte offsets. It intentionally carries no source line, expression text, value id, or local root path.
+type SASTFlowLocation struct {
+	File   string `json:"file"`
+	Line   int    `json:"line"`
+	Column int    `json:"column"`
+}
+
+// SASTDataFlow is a bounded source-to-sink witness attached to a proposed SAST claim. Steps are ordered
+// and include Source and Sink. CoverageComplete describes the whole semantic analysis, not confidence in
+// the positive witness; GraphTruncated is surfaced separately so consumers never infer a clean result.
+type SASTDataFlow struct {
+	Language         string             `json:"language"`
+	Source           SASTFlowLocation   `json:"source"`
+	Sink             SASTFlowLocation   `json:"sink"`
+	Steps            []SASTFlowLocation `json:"steps"`
+	CoverageComplete bool               `json:"coverage_complete"`
+	GraphTruncated   bool               `json:"graph_truncated"`
+}
+
+func (l SASTFlowLocation) validate() error {
+	canonical, err := measure.CanonicalPath(l.File)
+	if err != nil || canonical == "" || canonical != l.File || len(l.File) > maxSASTLocationLen {
+		return fmt.Errorf("%w: sast data-flow file must be a bounded canonical relative path", shared.ErrValidation)
+	}
+	if l.Line < 1 || l.Column < 0 {
+		return fmt.Errorf("%w: sast data-flow position is invalid", shared.ErrValidation)
+	}
+	return nil
+}
+
+func (d SASTDataFlow) validate() error {
+	if d.Language != "python" {
+		return fmt.Errorf("%w: sast data-flow language is unknown", shared.ErrValidation)
+	}
+	if len(d.Steps) == 0 || len(d.Steps) > MaxSASTDataFlowSteps {
+		return fmt.Errorf("%w: sast data-flow must have 1..%d steps", shared.ErrValidation, MaxSASTDataFlowSteps)
+	}
+	if err := d.Source.validate(); err != nil {
+		return err
+	}
+	if err := d.Sink.validate(); err != nil {
+		return err
+	}
+	for _, step := range d.Steps {
+		if err := step.validate(); err != nil {
+			return err
+		}
+	}
+	if d.Steps[0] != d.Source || d.Steps[len(d.Steps)-1] != d.Sink {
+		return fmt.Errorf("%w: sast data-flow steps must be anchored by source and sink", shared.ErrValidation)
+	}
+	return nil
 }
 
 // DASTClaim is the typed result of a dynamic check. Source and Fingerprint are
@@ -269,6 +328,11 @@ func (c SASTClaim) Validate() error {
 	}
 	if len(c.Rule) > maxSASTRuleLen || !sastRuleRE.MatchString(c.Rule) {
 		return fmt.Errorf("%w: sast claim rule must be a structured token of at most %d bytes", shared.ErrValidation, maxSASTRuleLen)
+	}
+	if c.DataFlow != nil {
+		if err := c.DataFlow.validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

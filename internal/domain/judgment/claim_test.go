@@ -14,6 +14,10 @@ func TestClaimRoundTrip(t *testing.T) {
 	claims := []Claim{
 		ReachabilityClaim{Reachable: Reachable, Tier: Tier2, Path: []string{"main", "vuln"}, Confidence: 95},
 		SASTClaim{CWE: "CWE-327", Location: "auth.go:42", Rule: "weak-hash-md5"},
+		SASTClaim{CWE: "CWE-78", Location: "app.py:4", Rule: "python-taint-command", DataFlow: &SASTDataFlow{
+			Language: "python", Source: SASTFlowLocation{File: "app.py", Line: 3, Column: 4}, Sink: SASTFlowLocation{File: "app.py", Line: 4, Column: 4},
+			Steps: []SASTFlowLocation{{File: "app.py", Line: 3, Column: 4}, {File: "app.py", Line: 4, Column: 4}},
+		}},
 		DASTClaim{CWE: "CWE-79", Location: "/search", Rule: "reflected-xss", Source: "first_party", Fingerprint: "search_reflection", ProofEvidenceID: "proof-1"},
 		RiskNarrativeClaim{Drivers: []string{"kev", "cvss>=9"}, Priority: 1},
 		CritiqueClaim{Verdict: CritiqueRefuted, Driver: "version_mismatch", Confidence: 85},
@@ -138,6 +142,40 @@ func TestSASTClaimValidateRejectsModelProseAndOversizedFields(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := tc.claim.Validate(); !errors.Is(err, shared.ErrValidation) {
+				t.Fatalf("want ErrValidation, got %v", err)
+			}
+		})
+	}
+}
+
+func TestSASTClaimValidatesBoundedPythonDataFlow(t *testing.T) {
+	source := SASTFlowLocation{File: "app/routes.py", Line: 3, Column: 4}
+	sink := SASTFlowLocation{File: "app/routes.py", Line: 7, Column: 8}
+	valid := SASTClaim{
+		CWE: "CWE-78", Location: "app/routes.py:7", Rule: "python-taint-command",
+		DataFlow: &SASTDataFlow{Language: "python", Source: source, Sink: sink, Steps: []SASTFlowLocation{source, sink}},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid Python data flow: %v", err)
+	}
+
+	tooMany := valid
+	tooMany.DataFlow = &SASTDataFlow{Language: "python", Source: source, Sink: sink, Steps: make([]SASTFlowLocation, MaxSASTDataFlowSteps+1)}
+	for i := range tooMany.DataFlow.Steps {
+		tooMany.DataFlow.Steps[i] = source
+	}
+	tooMany.DataFlow.Steps[len(tooMany.DataFlow.Steps)-1] = sink
+	badPath := valid
+	badPath.DataFlow = &SASTDataFlow{Language: "python", Source: SASTFlowLocation{File: "../secret.py", Line: 1}, Sink: sink, Steps: []SASTFlowLocation{{File: "../secret.py", Line: 1}, sink}}
+	badAnchor := valid
+	badAnchor.DataFlow = &SASTDataFlow{Language: "python", Source: source, Sink: sink, Steps: []SASTFlowLocation{sink, source}}
+	badLanguage := valid
+	badLanguage.DataFlow = &SASTDataFlow{Language: "ruby", Source: source, Sink: sink, Steps: []SASTFlowLocation{source, sink}}
+	for name, claim := range map[string]SASTClaim{
+		"too many steps": tooMany, "traversal": badPath, "unanchored": badAnchor, "unknown language": badLanguage,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := claim.Validate(); !errors.Is(err, shared.ErrValidation) {
 				t.Fatalf("want ErrValidation, got %v", err)
 			}
 		})

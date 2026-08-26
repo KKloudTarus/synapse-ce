@@ -59,6 +59,7 @@ type SARIFResult struct {
 	Level        string             `json:"level"`
 	Message      SARIFText          `json:"message"`
 	Locations    []SARIFLocation    `json:"locations,omitempty"`
+	CodeFlows    []SARIFCodeFlow    `json:"codeFlows,omitempty"`
 	Suppressions []SARIFSuppression `json:"suppressions,omitempty"`
 	Properties   map[string]any     `json:"properties,omitempty"`
 }
@@ -87,12 +88,25 @@ type SARIFArtifactLocation struct {
 }
 
 type SARIFRegion struct {
-	StartLine int `json:"startLine"` // 1-based; SARIF requires >= 1
+	StartLine   int `json:"startLine"` // 1-based; SARIF requires >= 1
+	StartColumn int `json:"startColumn,omitempty"`
 }
 
 type SARIFLogicalLocation struct {
 	Name string `json:"name"`
 	Kind string `json:"kind,omitempty"`
+}
+
+type SARIFCodeFlow struct {
+	ThreadFlows []SARIFThreadFlow `json:"threadFlows"`
+}
+
+type SARIFThreadFlow struct {
+	Locations []SARIFThreadFlowLocation `json:"locations"`
+}
+
+type SARIFThreadFlowLocation struct {
+	Location SARIFLocation `json:"location"`
 }
 
 // SARIFOptions carries optional per-finding resolvers. Every field is nil-safe.
@@ -186,6 +200,12 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 			},
 			Locations: locations,
 		}
+		if codeFlows := sarifDataFlows(f.DataFlow); len(codeFlows) > 0 {
+			res.CodeFlows = codeFlows
+			res.Properties["synapse.dataFlowLanguage"] = f.DataFlow.Language
+			res.Properties["synapse.coverageComplete"] = f.DataFlow.CoverageComplete
+			res.Properties["synapse.graphTruncated"] = f.DataFlow.GraphTruncated
+		}
 		if f.CVSSVector != "" {
 			res.Properties["cvssVector"] = f.CVSSVector
 		}
@@ -250,12 +270,35 @@ func firstPartyFindingLoc(f finding.Finding) (ruleID, file string, line int, ok 
 			}
 			return "", "", 0, false
 		}
+		if f.DataFlow != nil && f.DataFlow.Validate() == nil {
+			return f.RuleKey, f.DataFlow.Sink.File, f.DataFlow.Sink.StartLine, true
+		}
 		if file, line, ok := legacyLocationForRule(f.DedupKey, f.RuleKey); ok {
 			return f.RuleKey, file, line, true
 		}
 		return "", "", 0, false
 	}
 	return firstPartyLoc(f.DedupKey)
+}
+
+func sarifDataFlows(trace *finding.DataFlowTrace) []SARIFCodeFlow {
+	if trace == nil || trace.Validate() != nil {
+		return nil
+	}
+	locations := make([]SARIFThreadFlowLocation, 0, len(trace.Steps))
+	for _, step := range trace.Steps {
+		region := &SARIFRegion{StartLine: step.StartLine}
+		if step.StartColumn != nil {
+			region.StartColumn = *step.StartColumn + 1
+		}
+		locations = append(locations, SARIFThreadFlowLocation{Location: SARIFLocation{
+			PhysicalLocation: &SARIFPhysicalLocation{
+				ArtifactLocation: SARIFArtifactLocation{URI: step.File},
+				Region:           region,
+			},
+		}})
+	}
+	return []SARIFCodeFlow{{ThreadFlows: []SARIFThreadFlow{{Locations: locations}}}}
 }
 
 func legacyLocationForRule(key, ruleID string) (file string, line int, ok bool) {

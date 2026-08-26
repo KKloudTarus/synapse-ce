@@ -9,6 +9,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Python Tier-2 semantic reachability and interprocedural taint analysis.** An opt-in, source-only
+  tree-sitter sidecar now emits bounded semantic facts without importing or executing target Python;
+  pure Go resolution proves affected-symbol call paths and precise value flow across assignments,
+  arguments, receivers, and returns. Flask, Django, FastAPI, SQL, command, path, SSRF, XSS,
+  deserialization, and redirect models produce gated, propose-only SAST judgments with class-specific
+  sanitizers. Scan results distinguish complete, partial, unavailable, and not-applicable coverage;
+  confirmed findings retain a bounded source-to-sink trace that SARIF exports as `codeFlows`.
+
 - **Independent signed agent detection delivery.** Confirmed detections now drain from an isolated P1
   WAL lane into crash-recoverable batches, using an agent-owned Ed25519 key registered with
   proof-of-possession. Pending sequence/membership survives restart and lost responses, local records
