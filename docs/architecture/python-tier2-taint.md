@@ -1,7 +1,7 @@
 # Python Tier-2 Reachability and Interprocedural Taint
 
-Status: implementation complete through product integration; release-gate review is in progress on
-`feat/python-tier2-taint`.
+Status: implementation and release-gate review complete on `feat/python-tier2-taint`; upstream pull
+request [#743](https://github.com/KKloudTarus/synapse-ce/pull/743) is open.
 
 This document is the source of truth for the multi-pass implementation. It records the target
 architecture, safety invariants, package boundaries, pass ordering, test strategy, and completion
@@ -321,12 +321,12 @@ Exit: all public behavior, safety boundaries, and release gates are documented a
 
 ### Pass 7 — Final branch review and one upstream PR
 
-- [ ] Rebase/merge current upstream `main` and resolve migration/config drift.
-- [ ] Review diff for secrets, shell execution, absolute paths, unbounded data, architecture violations,
+- [x] Fetch current upstream `main`; merge/rebase only when it has diverged, and resolve migration/config drift.
+- [x] Review diff for secrets, shell execution, absolute paths, unbounded data, architecture violations,
   accidental generated artifacts, and unrelated changes.
-- [ ] Ensure commits remain logically reviewable while the PR is one unit.
-- [ ] Push `feat/python-tier2-taint` to the fork.
-- [ ] Open one PR to `KKloudTarus/synapse-ce:main` with architecture, threat model, coverage semantics,
+- [x] Ensure commits remain logically reviewable while the PR is one unit.
+- [x] Push `feat/python-tier2-taint` to the fork.
+- [x] Open one PR to `KKloudTarus/synapse-ce:main` with architecture, threat model, coverage semantics,
   test evidence, limitations, and rollout plan.
 
 Exit: one complete upstream PR is open from the fork branch.
@@ -382,6 +382,7 @@ Append one row at the end of every implementation pass.
 | 4 | `feat:python-value-flow-taint` | Python facts/value-flow, typed catalog, interprocedural binding and resolver regression tests pass | Focused cross-package tests and `go build ./cmd/...` pass | The Python graph tracks value slots rather than treating call adjacency as data flow. Traversal is cycle-safe and bounded; sinks and sanitizers are class-specific. CGO extractor golden tests remain CI-only on this workstation because no C compiler is installed. |
 | 5 | `feat:python-taint-proposals` | Python coordinator, framework matrix, keyword sinks, catalog metadata/config and SCA composition tests pass | Focused cross-package tests and `go build ./cmd/...` pass | Python hits are stable, deduplicated, bounded `CapSAST` proposals under `system:python-taint-scan`; the coordinator has no verifier port. Partial coverage is explicit on positive audit witnesses and never becomes a clean judgment. Opt-in via `SYNAPSE_PYTAINT_ENABLED`. |
 | 6 | `feat:python-product-integration` | Coverage/outcome, judgment/finding projection, memory/Postgres persistence, SARIF code-flow, hardening and synthetic corpus tests pass | `go vet ./...`, normal + CGO-off command builds, web typecheck/build, and 327 Vitest tests pass; full Go suite differs only by the four recorded Windows baseline failures | Scan JSON distinguishes complete/partial/unavailable/not-applicable analysis. Confirmed Python findings persist a bounded position-only trace through migration 0115 and emit SARIF `codeFlows`. The five-case synthetic regression corpus records TP=3, FP=0, FN=0, TN=2; its benchmark smoke run completed. PostgreSQL integration tests skip without `SYNAPSE_TEST_DB_DSN`; CGO-on parser fixtures cannot run because this workstation has no C compiler; `golangci-lint` is not installed. |
+| 7 | `docs:record-python-pr-handoff` | Branch review and `git diff --check` pass | Fork branch pushed; upstream/main and origin/main both remain at `bf7dad4` | No migration drift was present (`0115` remains next). One upstream PR is open: [#743](https://github.com/KKloudTarus/synapse-ce/pull/743). |
 
 ## Definition of done
 
