@@ -2,19 +2,23 @@
 // occurrences, and per-occurrence risk assessments) into the exposureuc.AssetVulnerabilityReader port —
 // the missing join that lets the X5 Exposure producer read an asset's open vulnerable components with their
 // evaluated Priority/KEV/Severity. It reuses the already-evaluated risk (vulnerabilityrisk.Assessment); it
-// recomputes nothing. Every read is tenant-scoped from ctx. Running presence is not yet available (the B5
-// per-asset process-entity snapshot store is deferred), so it reports installed-only — the producer notes
-// the reduced running-vs-installed precision.
+// recomputes nothing. Every read is tenant-scoped from ctx. When constructed with NewReaderWithRuntime it
+// also resolves running-vs-installed — marking a vulnerable component Running if its package matches a
+// process observed executing on one of the asset's hosts (the B5 process store); constructed with NewReader
+// (no runtime signals) it reports installed-only and the producer notes the reduced precision.
 package exposurereader
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"sort"
+	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityoccurrence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityrisk"
@@ -49,14 +53,33 @@ type RiskReader interface {
 	Current(ctx context.Context, tenantID, occurrenceID shared.ID) (vulnerabilityrisk.Assessment, error)
 }
 
-// Reader implements exposureuc.AssetVulnerabilityReader over the SCA stores.
+// ProcessLister returns the running processes for a HOST/fleet asset (the running side of
+// running-vs-installed). ports.EndpointProcessStore satisfies it.
+type ProcessLister interface {
+	ListRunningByAsset(ctx context.Context, assetID shared.ID) ([]ports.ProcessSnapshot, error)
+}
+
+// ComponentLister enumerates an engagement's current components so a vulnerable ComponentID can be resolved
+// to a package name for process matching. The concrete ComponentInventoryStore satisfies it.
+type ComponentLister interface {
+	ListCurrentComponentsByEngagement(ctx context.Context, tenantID, engagementID shared.ID) ([]sbom.ComponentRecord, error)
+}
+
+// Reader implements exposureuc.AssetVulnerabilityReader over the SCA stores. processes + components are
+// OPTIONAL: when both are wired (NewReaderWithRuntime), the reader resolves the running-vs-installed
+// Presence; when nil (NewReader), every component is reported installed-only.
 type Reader struct {
 	memberships MembershipReader
 	occurrences OccurrenceReader
 	risk        RiskReader
+	processes   ProcessLister
+	components  ComponentLister
 }
 
-var _ exposureuc.AssetVulnerabilityReader = (*Reader)(nil)
+var (
+	_ exposureuc.AssetVulnerabilityReader = (*Reader)(nil)
+	_ ProcessLister                       = ports.EndpointProcessStore(nil)
+)
 
 // NewReader constructs the adapter. All three stores are required.
 func NewReader(memberships MembershipReader, occurrences OccurrenceReader, risk RiskReader) (*Reader, error) {
@@ -69,6 +92,22 @@ func NewReader(memberships MembershipReader, occurrences OccurrenceReader, risk 
 		return nil, fmt.Errorf("%w: exposure reader requires a risk store", shared.ErrValidation)
 	}
 	return &Reader{memberships: memberships, occurrences: occurrences, risk: risk}, nil
+}
+
+// NewReaderWithRuntime is NewReader plus the runtime signals needed to resolve running-vs-installed: the
+// B5 process store (running processes per host) and a component enumerator (ComponentID -> package name).
+// With both wired, a vulnerable component whose package matches a running process is marked Running.
+func NewReaderWithRuntime(memberships MembershipReader, occurrences OccurrenceReader, risk RiskReader, processes ProcessLister, components ComponentLister) (*Reader, error) {
+	r, err := NewReader(memberships, occurrences, risk)
+	if err != nil {
+		return nil, err
+	}
+	if processes == nil || components == nil {
+		return nil, fmt.Errorf("%w: runtime reader requires a process store and a component lister", shared.ErrValidation)
+	}
+	r.processes = processes
+	r.components = components
+	return r, nil
 }
 
 func tenantIDFrom(ctx context.Context) (shared.ID, error) {
@@ -102,9 +141,20 @@ func (r *Reader) ListAssetVulnerableComponents(ctx context.Context, assetID shar
 		return nil, fmt.Errorf("%w: asset %s is not scoped into any engagement", shared.ErrNotFound, assetID)
 	}
 
-	components, err := r.componentSet(ctx, tenant, assetID)
+	projects, err := r.memberships.ListBusinessAssetProjects(ctx, tenant, assetID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list project components for asset %s: %w", assetID, err)
+	}
+	technical, err := r.memberships.ListBusinessAssetTechnicalAssets(ctx, tenant, assetID)
+	if err != nil {
+		return nil, fmt.Errorf("list technical components for asset %s: %w", assetID, err)
+	}
+	components := make(map[shared.ID]struct{}, len(projects)+len(technical))
+	for _, m := range projects {
+		components[m.ComponentID] = struct{}{}
+	}
+	for _, m := range technical {
+		components[m.ComponentID] = struct{}{}
 	}
 	if len(components) == 0 {
 		return nil, fmt.Errorf("%w: asset %s has no component inventory", shared.ErrNotFound, assetID)
@@ -114,8 +164,7 @@ func (r *Reader) ListAssetVulnerableComponents(ctx context.Context, assetID shar
 	// asset's engagements, each with its own (possibly divergent) risk evaluation. Keep the WORST — the
 	// exposure factor must never be under-reported — via a deterministic risk order (not first-seen, which
 	// would depend on engagement iteration order).
-	type key struct{ comp, adv shared.ID }
-	byKey := make(map[key]exposureuc.AssetVulnerableComponent)
+	byKey := make(map[componentKey]exposureuc.AssetVulnerableComponent)
 	skippedUnscored := false
 	for _, eng := range engs {
 		if eng == nil {
@@ -145,7 +194,7 @@ func (r *Reader) ListAssetVulnerableComponents(ctx context.Context, assetID shar
 				KEV:         ra.KEV,
 				Running:     false, // installed-only until B5 process-entity snapshots land
 			}
-			k := key{comp: cand.ComponentID, adv: cand.AdvisoryID}
+			k := componentKey{comp: cand.ComponentID, adv: cand.AdvisoryID}
 			if prev, ok := byKey[k]; !ok || riskWorse(cand, prev) {
 				byKey[k] = cand
 			}
@@ -159,6 +208,14 @@ func (r *Reader) ListAssetVulnerableComponents(ctx context.Context, assetID shar
 			return nil, fmt.Errorf("%w: asset %s has detected vulnerabilities awaiting risk evaluation", shared.ErrNotFound, assetID)
 		}
 		return nil, nil // scanned, no open vulnerabilities — a trustworthy clean
+	}
+
+	// Resolve running-vs-installed when the runtime signals are wired (reusing the technical memberships
+	// already fetched above as the host bridge).
+	if r.processes != nil && r.components != nil {
+		if err := r.markRunning(ctx, tenant, technical, engs, byKey); err != nil {
+			return nil, err
+		}
 	}
 
 	out := make([]exposureuc.AssetVulnerableComponent, 0, len(byKey))
@@ -175,24 +232,87 @@ func (r *Reader) ListAssetVulnerableComponents(ctx context.Context, assetID shar
 	return out, nil
 }
 
-// componentSet unions the asset's project and technical-asset component memberships into a lookup set.
-func (r *Reader) componentSet(ctx context.Context, tenant, assetID shared.ID) (map[shared.ID]struct{}, error) {
-	set := make(map[shared.ID]struct{})
-	projects, err := r.memberships.ListBusinessAssetProjects(ctx, tenant, assetID)
+// componentKey dedups a vulnerable (component, advisory) across the asset's engagements.
+type componentKey struct{ comp, adv shared.ID }
+
+// markRunning sets Running=true on any vulnerable component whose package appears to be executing on one of
+// the asset's hosts. The running side is HOST-scoped (technical-asset memberships are fleet-asset ids), so
+// it gathers the running exec names across those hosts and matches them, case-insensitively, against each
+// vulnerable component's package name (resolved via the engagement's component inventory). Matching is
+// deliberately CONSERVATIVE — exact basename/comm == name/package, no substring — because Running scores
+// strictly higher than installed, so a false match would over-report risk; low recall (installed when
+// really running) is the safe failure mode, and exposureuc already notes the reduced precision.
+func (r *Reader) markRunning(ctx context.Context, tenant shared.ID, hosts []asset.ComponentMembership, engs []*engagement.Engagement, byKey map[componentKey]exposureuc.AssetVulnerableComponent) error {
+	running, err := r.runningExecNames(ctx, hosts)
 	if err != nil {
-		return nil, fmt.Errorf("list project components for asset %s: %w", assetID, err)
+		return err
 	}
-	technical, err := r.memberships.ListBusinessAssetTechnicalAssets(ctx, tenant, assetID)
+	if len(running) == 0 {
+		return nil // nothing observed running on any host — every component stays installed-only
+	}
+	names, err := r.componentPackageNames(ctx, tenant, engs)
 	if err != nil {
-		return nil, fmt.Errorf("list technical components for asset %s: %w", assetID, err)
+		return err
 	}
-	for _, m := range projects {
-		set[m.ComponentID] = struct{}{}
+	for k, comp := range byKey {
+		for _, n := range names[comp.ComponentID] {
+			if running[n] {
+				comp.Running = true
+				byKey[k] = comp
+				break
+			}
+		}
 	}
-	for _, m := range technical {
-		set[m.ComponentID] = struct{}{}
+	return nil
+}
+
+// runningExecNames gathers the lowercased exec basenames + comms of every running process across the
+// asset's host (technical) assets.
+func (r *Reader) runningExecNames(ctx context.Context, hosts []asset.ComponentMembership) (map[string]bool, error) {
+	names := make(map[string]bool)
+	for _, h := range hosts {
+		procs, err := r.processes.ListRunningByAsset(ctx, h.ComponentID) // ComponentID here is the host/fleet asset id
+		if err != nil {
+			return nil, fmt.Errorf("list running processes for host %s: %w", h.ComponentID, err)
+		}
+		for _, p := range procs {
+			if p.Path != "" {
+				names[strings.ToLower(path.Base(p.Path))] = true
+			}
+			if p.Comm != "" {
+				names[strings.ToLower(p.Comm)] = true
+			}
+		}
 	}
-	return set, nil
+	return names, nil
+}
+
+// componentPackageNames maps each component id (across the asset's engagements) to its lowercased match
+// candidates (name + package).
+func (r *Reader) componentPackageNames(ctx context.Context, tenant shared.ID, engs []*engagement.Engagement) (map[shared.ID][]string, error) {
+	out := make(map[shared.ID][]string)
+	for _, eng := range engs {
+		if eng == nil {
+			continue
+		}
+		recs, err := r.components.ListCurrentComponentsByEngagement(ctx, tenant, eng.ID)
+		if err != nil {
+			return nil, fmt.Errorf("list components for engagement %s: %w", eng.ID, err)
+		}
+		for _, rec := range recs {
+			var cands []string
+			if rec.Name != "" {
+				cands = append(cands, strings.ToLower(rec.Name))
+			}
+			if rec.Package != "" && !strings.EqualFold(rec.Package, rec.Name) {
+				cands = append(cands, strings.ToLower(rec.Package))
+			}
+			if len(cands) > 0 {
+				out[rec.ComponentID] = cands
+			}
+		}
+	}
+	return out, nil
 }
 
 // riskWorse reports whether exposure a represents a strictly higher risk than b, by a deterministic total
