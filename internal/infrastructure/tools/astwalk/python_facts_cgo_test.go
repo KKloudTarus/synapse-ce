@@ -120,7 +120,10 @@ func TestPythonFactsForExtractsLoopComprehensionAndWithBindings(t *testing.T) {
 		"        consume(item)\n"+
 		"    result = [consume(element) for element in values]\n"+
 		"    with manager() as resource:\n"+
-		"        consume(resource)\n")
+		"        consume(resource)\n"+
+		"    container = {}\n"+
+		"    container['value'] = values\n"+
+		"    consume(container['value'])\n")
 
 	document, err := PythonFactsFor(context.Background(), root)
 	if err != nil {
@@ -130,6 +133,9 @@ func TestPythonFactsForExtractsLoopComprehensionAndWithBindings(t *testing.T) {
 		if !hasPythonBinding(document, name) {
 			t.Errorf("missing value-flow binding for %q (assignments: %+v)", name, document.Assignments)
 		}
+	}
+	if !hasPythonBindingFrom(document, "container", "values") {
+		t.Errorf("missing conservative subscript write flow (assignments: %+v)", document.Assignments)
 	}
 }
 
@@ -205,6 +211,20 @@ func hasPythonBinding(document pythonprogram.Document, name string) bool {
 	for _, assignment := range document.Assignments {
 		for i, target := range assignment.Targets {
 			if joinPythonReference(target) == name && i < len(assignment.TargetIDs) && assignment.TargetIDs[i] != "" && assignment.ValueID != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasPythonBindingFrom(document pythonprogram.Document, targetName, valueName string) bool {
+	for _, assignment := range document.Assignments {
+		if joinPythonReference(assignment.Value) != valueName || assignment.ValueID == "" {
+			continue
+		}
+		for i, target := range assignment.Targets {
+			if joinPythonReference(target) == targetName && i < len(assignment.TargetIDs) && assignment.TargetIDs[i] != "" {
 				return true
 			}
 		}

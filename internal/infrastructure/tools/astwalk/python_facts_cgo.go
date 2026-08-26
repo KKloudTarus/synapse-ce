@@ -453,6 +453,9 @@ func (e *pythonFactExtractor) bindingValues(node *sitter.Node, scope pythonScope
 	if node == nil {
 		return nil
 	}
+	if node.Type() == "subscript" {
+		return e.bindingValues(node.ChildByFieldName("value"), scope)
+	}
 	ref := e.reference(node)
 	if ref.Kind == pythonprogram.ReferenceName || ref.Kind == pythonprogram.ReferenceAttribute {
 		id := pythonValueID(e.file, node, "binding")
@@ -521,6 +524,12 @@ func (e *pythonFactExtractor) reference(node *sitter.Node) pythonprogram.Referen
 func (e *pythonFactExtractor) targets(node *sitter.Node) []pythonprogram.Reference {
 	if node == nil {
 		return nil
+	}
+	if node.Type() == "subscript" {
+		// Track writes at container granularity. Python permits arbitrary key/index expressions, so
+		// field-sensitive identity is not reliable; conservatively tainting the container avoids
+		// dropping flows from d[key] = value to later reads from d[other_key].
+		return e.targets(node.ChildByFieldName("value"))
 	}
 	ref := e.reference(node)
 	if ref.Kind == pythonprogram.ReferenceName || ref.Kind == pythonprogram.ReferenceAttribute {
