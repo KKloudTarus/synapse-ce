@@ -16,7 +16,7 @@ describe('FindingExplorer', () => {
     expect(screen.getByRole('heading', { name: 'First finding' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Search findings'), { target: { value: 'Second' } })
     expect(screen.queryByRole('heading', { name: 'First finding' })).not.toBeInTheDocument()
-    expect(screen.getByText('Select a finding to inspect its evidence and status.')).toBeInTheDocument()
+    expect(screen.getByText('No Finding Selected')).toBeInTheDocument()
   })
 
   it('uses the id and dedup key to identify empty-id findings', () => {
@@ -77,7 +77,7 @@ describe('FindingExplorer', () => {
 
     fireEvent.click(screen.getByRole('combobox', { name: 'Filter findings by severity' }))
     fireEvent.click(screen.getByRole('option', { name: 'low' }))
-    expect(screen.getByText('No findings match these filters.')).toBeInTheDocument()
+    expect(screen.getByText('No findings match the selected filters.')).toBeInTheDocument()
   })
 })
 

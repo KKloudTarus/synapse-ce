@@ -1,4 +1,4 @@
-import { Key01, Loading01, LogIn04, ShieldTick } from '@untitledui/icons'
+import { Eye, EyeOff, Key01, Loading01, LogIn04, ShieldTick } from '@untitledui/icons'
 import { useState, type ReactNode } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { Button, Card, ErrorState, Field, Input } from '../components/ui'
@@ -7,6 +7,7 @@ import logoFull from '../assets/logo-full-dark.png'
 export function Connect() {
   const { phase, aup, error, connecting, connect, acceptAup, logout } = useAuth()
   const [token, setToken] = useState('')
+  const [showToken, setShowToken] = useState(false)
   const [accepting, setAccepting] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
 
@@ -70,16 +71,26 @@ export function Connect() {
               <summary className="cursor-pointer text-sm font-medium text-primary">Development or automation API token</summary>
               <form onSubmit={(e) => { e.preventDefault(); void connect(token) }} className="mt-4 space-y-4">
                 <Field label="API token">
-                  <Input
-                    type="password"
-                    required
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
-                    placeholder="paste token…"
-                    className="font-mono"
-                    aria-label="API token"
-                    aria-describedby="api-token-hint"
-                  />
+                  <div className="relative">
+                    <Input
+                      type={showToken ? 'text' : 'password'}
+                      required
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                      placeholder="paste token…"
+                      className="font-mono pr-10"
+                      aria-label="API token"
+                      aria-describedby="api-token-hint"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowToken((v) => !v)}
+                      aria-label={showToken ? 'Hide token' : 'Show token'}
+                      className="absolute inset-y-0 right-0 flex items-center rounded-r-lg px-3 text-tertiary transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+                    >
+                      {showToken ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </button>
+                  </div>
                 </Field>
                 <p id="api-token-hint" className="text-[11px] text-tertiary">
                   {token.trim() ? 'The token is sent only to this server.' : 'Paste a token to enable this development sign-in.'}

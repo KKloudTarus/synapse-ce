@@ -97,6 +97,7 @@ export function FindingExplorer({
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search title, description, or CWE..."
+                aria-label="Search findings"
                 className="w-full rounded-lg border border-secondary bg-primary py-1.5 pl-8 pr-7 text-xs text-primary shadow-2xs placeholder:text-tertiary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/60"
               />
               {query && (
@@ -120,7 +121,7 @@ export function FindingExplorer({
                 { value: 'all', label: 'All severities' },
                 ...['critical', 'high', 'medium', 'low', 'info', 'unknown'].map((value) => ({
                   value,
-                  label: value.toUpperCase(),
+                  label: value,
                 })),
               ]}
             />
@@ -202,6 +203,7 @@ export function FindingExplorer({
                       <button
                         type="button"
                         onClick={() => setShown((count) => Math.min(count + pageSize, visible.length))}
+                        aria-label="Load more findings"
                         className="w-full rounded-lg border border-secondary bg-primary py-2 text-xs font-semibold text-primary hover:bg-secondary transition-colors shadow-2xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
                       >
                         Load more findings ({visible.length - shown} remaining)

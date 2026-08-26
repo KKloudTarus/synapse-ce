@@ -186,8 +186,10 @@ describe('Project Measures route and logic', () => {
         nextCursor: null
       }
     }))
-    router.navigate('/code-quality/projects/synapse/measures?domain=size')
-    
+    await act(async () => {
+      router.navigate('/code-quality/projects/synapse/measures?domain=size')
+    })
+
     expect(await screen.findByText('dir')).toBeInTheDocument()
     expect(screen.getByText('a.ts')).toBeInTheDocument()
     

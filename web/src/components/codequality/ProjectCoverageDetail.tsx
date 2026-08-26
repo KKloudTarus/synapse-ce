@@ -35,7 +35,7 @@ export function ProjectCoverageDetail({ coverage }: { coverage: ProjectAnalysis[
 
   return (
     <Card
-      title="Coverage breakdown"
+      title="Coverage"
       titleId={projectAnalysisLandmarks.coverage}
       titleTabIndex={-1}
       titleClassName="scroll-mt-6 rounded-sm focus:outline-none focus:ring-2 focus:ring-brand/60"

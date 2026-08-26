@@ -81,11 +81,11 @@ export function FileNavigator({
         {/* Filter Buttons */}
         <div className="grid grid-cols-2 gap-1.5">
           <FilterButton pressed={changedOnly} onClick={() => onChangedOnly(!changedOnly)}>
-            <span>Changed</span>
+            <span>Changed</span>{' '}
             <span className="font-mono tabular-nums font-bold">{changed}</span>
           </FilterButton>
           <FilterButton pressed={findingsOnly} onClick={() => onFindingsOnly(!findingsOnly)}>
-            <span>Findings</span>
+            <span>Findings</span>{' '}
             <span className="font-mono tabular-nums font-bold text-error-primary">{withFindings}</span>
           </FilterButton>
         </div>

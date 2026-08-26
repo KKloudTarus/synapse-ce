@@ -212,6 +212,9 @@ function LatestAnalysisView({
             </div>
           </div>
         </div>
+        {lens === 'new-code' && (
+          <p className="mt-3 text-xs text-tertiary">Individual New Code issues are not available in this view.</p>
+        )}
       </Card>
 
       {/* Section 3: Coverage details */}
@@ -320,7 +323,7 @@ function LatestAnalysisView({
                     <div key={occIndex} className="flex min-w-0 items-center justify-between gap-2">
                       <span className="truncate text-primary font-medium">{occ.file}</span>
                       <span className="shrink-0 tabular-nums text-secondary">
-                        lines {occ.startLine}-{occ.endLine}
+                        lines {occ.startLine}–{occ.endLine}
                       </span>
                     </div>
                   ))}
