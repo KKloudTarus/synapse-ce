@@ -4,13 +4,38 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityoccurrence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityrisk"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+type fakeProcesses struct {
+	byHost map[shared.ID][]ports.ProcessSnapshot
+	err    error
+}
+
+func (p fakeProcesses) ListRunningByAsset(_ context.Context, assetID shared.ID) ([]ports.ProcessSnapshot, error) {
+	return p.byHost[assetID], p.err
+}
+
+type fakeComponents struct {
+	byEng map[shared.ID][]sbom.ComponentRecord
+	err   error
+}
+
+func (c fakeComponents) ListCurrentComponentsByEngagement(_ context.Context, _, engagementID shared.ID) ([]sbom.ComponentRecord, error) {
+	return c.byEng[engagementID], c.err
+}
+
+func techHost(host string) asset.ComponentMembership {
+	return asset.ComponentMembership{TenantID: "t1", AssetID: "asset-1", ComponentID: shared.ID(host), Role: asset.MembershipRole("technical")}
+}
 
 type fakeMembership struct {
 	engs      []*engagement.Engagement
@@ -182,6 +207,53 @@ func TestAbstainWhenAllOccurrencesUnscored(t *testing.T) {
 	rd := mustReader(t, m, occs, fakeRisk{byOcc: map[shared.ID]vulnerabilityrisk.Assessment{}})
 	if _, err := rd.ListAssetVulnerableComponents(ctxT(), "asset-1"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("all-unscored detected occurrences must abstain (ErrNotFound), not read as clean, got %v", err)
+	}
+}
+
+func TestRunningVsInstalledMarksRunning(t *testing.T) {
+	m := fakeMembership{
+		engs:      oneEngagement(),
+		projects:  []asset.ComponentMembership{member("c1"), member("c2")}, // vulnerable code components
+		technical: []asset.ComponentMembership{techHost("host-1")},         // the host bridge
+	}
+	occs := &fakeOccurrences{byEng: map[shared.ID][]vulnerabilityoccurrence.Occurrence{
+		"eng-1": {occ("o1", "c1", "CVE-1"), occ("o2", "c2", "CVE-2")},
+	}}
+	risk := fakeRisk{byOcc: map[shared.ID]vulnerabilityrisk.Assessment{"o1": assess(2, false), "o2": assess(2, false)}}
+	// host-1 runs /usr/bin/openssl; c1 is "openssl" (running), c2 is "leftpad" (installed-only).
+	procs := fakeProcesses{byHost: map[shared.ID][]ports.ProcessSnapshot{
+		"host-1": {{TenantID: "t1", AssetID: "host-1", EntityID: "e1", Path: "/usr/bin/openssl", Comm: "openssl", Running: true, LastSeenAt: time.Unix(1, 0)}},
+	}}
+	comps := fakeComponents{byEng: map[shared.ID][]sbom.ComponentRecord{
+		"eng-1": {{ComponentID: "c1", Name: "openssl"}, {ComponentID: "c2", Name: "leftpad"}},
+	}}
+	rd, err := NewReaderWithRuntime(m, occs, risk, procs, comps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := rd.ListAssetVulnerableComponents(ctxT(), "asset-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byComp := map[shared.ID]bool{}
+	for _, g := range got {
+		byComp[g.ComponentID] = g.Running
+	}
+	if !byComp["c1"] {
+		t.Fatal("c1 (openssl) matches a running process → must be Running")
+	}
+	if byComp["c2"] {
+		t.Fatal("c2 (leftpad) has no running process → must be installed-only")
+	}
+}
+
+func TestRuntimeReaderRequiresBothDeps(t *testing.T) {
+	m := fakeMembership{}
+	if _, err := NewReaderWithRuntime(m, &fakeOccurrences{}, fakeRisk{}, nil, fakeComponents{}); !errors.Is(err, shared.ErrValidation) {
+		t.Fatal("nil process store must be rejected")
+	}
+	if _, err := NewReaderWithRuntime(m, &fakeOccurrences{}, fakeRisk{}, fakeProcesses{}, nil); !errors.Is(err, shared.ErrValidation) {
+		t.Fatal("nil component lister must be rejected")
 	}
 }
 
