@@ -34,7 +34,7 @@ import (
 // false. Neither is mintable by the agent/human actor factories. The identities + proof label are
 // tier-specific so a Tier-1 IMPORT proof is never attributed to the call-graph engine (audit accuracy).
 func actorsForTier(tier judgment.ReachabilityTier) (proposer, verifier, proofLabel string) {
-	return actorsFor(tier, LanguagePython)
+	return actorsFor(tier, LanguageGo)
 }
 
 // Language identifies which source language produced a Tier-1 import proof. Tier-1 identities are
@@ -43,6 +43,7 @@ func actorsForTier(tier judgment.ReachabilityTier) (proposer, verifier, proofLab
 type Language string
 
 const (
+	LanguageGo         Language = "go"
 	LanguagePython     Language = "python"
 	LanguageJavaScript Language = "javascript"
 	LanguageRust       Language = "rust"
@@ -53,7 +54,7 @@ const (
 // Valid reports whether l is a supported Tier-1 language.
 func (l Language) Valid() bool {
 	switch l {
-	case LanguagePython, LanguageJavaScript, LanguageRust, LanguagePHP, LanguageRuby:
+	case LanguageGo, LanguagePython, LanguageJavaScript, LanguageRust, LanguagePHP, LanguageRuby:
 		return true
 	}
 	return false
@@ -67,6 +68,9 @@ func actorsFor(tier judgment.ReachabilityTier, language Language) (proposer, ver
 		// one in the report and in the audit trail.
 		if language == LanguageJavaScript {
 			return judgment.ProofActorJSSymbolScan, judgment.ProofActorJSSymbolEngine, "tier-2 javascript affected-export proof"
+		}
+		if language == LanguagePython {
+			return judgment.ProofActorPySemanticScan, judgment.ProofActorPySemanticEngine, "tier-2 python semantic call-graph proof"
 		}
 		return judgment.ProofActorCallgraphScan, judgment.ProofActorCallgraphEngine, "tier-2 call-graph proof"
 	}

@@ -1,6 +1,7 @@
 // Command synapse-ast parses a source tree with language-aware (tree-sitter) grammars and emits
-// structural facts as JSON on stdout. Its first capability is accurate per-language function counts
-// (`synapse-ast functions <dir>`). It isolates the CGO tree-sitter grammars into a standalone,
+// structural facts as JSON on stdout. In addition to code metrics and quality facts, it emits the
+// versioned Python semantic-facts document consumed by Tier-2 reachability (`python-facts`). It isolates
+// the CGO tree-sitter grammars into a standalone,
 // sandboxable binary so the api server and CLI never import them and the UNTRUSTED target is parsed only
 // inside the sandbox the ast adapter runs this binary under. Composition root only – the analysis lives
 // in internal/infrastructure/tools/astwalk.
@@ -20,8 +21,8 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 3 || (os.Args[1] != "functions" && os.Args[1] != "metrics" && os.Args[1] != "bugs" && os.Args[1] != "quality") {
-		fmt.Fprintln(os.Stderr, "usage: synapse-ast functions|metrics|bugs|quality <dir>")
+	if len(os.Args) != 3 || (os.Args[1] != "functions" && os.Args[1] != "metrics" && os.Args[1] != "bugs" && os.Args[1] != "quality" && os.Args[1] != "python-facts") {
+		fmt.Fprintln(os.Stderr, "usage: synapse-ast functions|metrics|bugs|quality|python-facts <dir>")
 		os.Exit(2)
 	}
 	var (
@@ -37,6 +38,8 @@ func main() {
 		out, err = astwalk.BugsFor(context.Background(), os.Args[2])
 	case "quality":
 		out, err = astwalk.QualityFor(context.Background(), os.Args[2])
+	case "python-facts":
+		out, err = astwalk.PythonFactsFor(context.Background(), os.Args[2])
 	}
 	if errors.Is(err, astwalk.ErrUnavailable) {
 		fmt.Fprintln(os.Stderr, "synapse-ast:", err)

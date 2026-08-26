@@ -210,4 +210,24 @@ func TestFindingRepository(t *testing.T) {
 	if err != nil || fUpd.RuleKey != "healed-rule" {
 		t.Errorf("SetEvidenceScore must preserve RuleKey, got %q (err: %v)", fUpd.RuleKey, err)
 	}
+
+	column := 4
+	source := finding.SourceLocation{File: "app.py", StartLine: 3, EndLine: 3, StartColumn: &column, EndColumn: &column}
+	sink := finding.SourceLocation{File: "app.py", StartLine: 4, EndLine: 4, StartColumn: &column, EndColumn: &column}
+	flowFinding := finding.Finding{
+		ID: shared.ID("fid-" + randHex(t)), EngagementID: eid, Title: "Python command flow", Severity: shared.SeverityHigh,
+		Status: finding.StatusOpen, Kind: finding.KindSAST, RuleKey: "python-taint-command", DedupKey: "sast:ai:j-python-flow",
+		DataFlow: &finding.DataFlowTrace{Language: "python", Source: source, Sink: sink, Steps: []finding.SourceLocation{source, sink}, GraphTruncated: true},
+		Audit:    shared.Audit{CreatedAt: now, UpdatedAt: now},
+	}
+	if err := repo.Upsert(ctx, []finding.Finding{flowFinding}); err != nil {
+		t.Fatalf("upsert Python data flow: %v", err)
+	}
+	flowRoundTrip, err := repo.GetByEngagementAndID(ctx, eid, flowFinding.ID)
+	if err != nil {
+		t.Fatalf("read Python data flow: %v", err)
+	}
+	if flowRoundTrip.DataFlow == nil || flowRoundTrip.SourceLocation == nil || flowRoundTrip.SourceLocation.StartLine != 4 || len(flowRoundTrip.DataFlow.Steps) != 2 || !flowRoundTrip.DataFlow.GraphTruncated {
+		t.Fatalf("Python data flow round trip = %+v", flowRoundTrip)
+	}
 }

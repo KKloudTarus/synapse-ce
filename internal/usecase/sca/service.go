@@ -94,6 +94,7 @@ type Service struct {
 	detectionPriority                string                                // server default detection priority (comprehensive|precise); empty = comprehensive
 	reachability                     ports.ReachabilityRecorder            // optional deterministic Tier-2 reachability proof (Go call-graph)
 	pyReachability                   ports.ReachabilityRecorder            // optional deterministic Tier-1 Python import-reachability proof
+	pySymbolReachability             ports.ReachabilityRecorder            // optional deterministic Tier-2 Python semantic call-graph proof
 	jsReachability                   jsSBOMReachabilityRecorder            // optional deterministic Tier-1 JavaScript import-reachability proof
 	jsSymbolReachability             jsSBOMReachabilityRecorder            // optional deterministic Tier-2 JavaScript affected-export proof
 	srcReachability                  map[string]ports.ReachabilityRecorder // optional Tier-1 provers keyed by package-URL type
@@ -102,6 +103,7 @@ type Service struct {
 	sbomCache                        ports.SBOMCache                       // optional content+version-addressed cache of the generated SBOM
 	sbomCrossCheck                   ports.SBOMCrossCheckRecorder          // optional SBOM-producer disagreement → judgment minter
 	taint                            ports.TaintScanner                    // optional deterministic taint-analysis → gated CapSAST proposals
+	pythonTaint                      ports.TaintScanner                    // optional Python semantic value-flow → gated CapSAST proposals
 	graphResolver                    ports.DependencyGraphResolver         // optional transitive-edge resolver (Go via `go mod graph`)
 	mavenResolver                    ports.MavenResolver                   // optional Maven transitive-tree resolver (`mvn dependency:list`)
 	gradleResolver                   ports.GradleResolver                  // optional Gradle transitive-tree resolver (`gradle dependencies`)
@@ -381,6 +383,10 @@ func (s *Service) SetReachability(r ports.ReachabilityRecorder) { s.reachability
 // "not reachable"). Kept distinct from the Go call-graph prover: it is a WEAKER (Tier-1, import-level) proof.
 func (s *Service) SetPyReachability(r ports.ReachabilityRecorder) { s.pyReachability = r }
 
+// SetPySymbolReachability configures the optional Python Tier-2 affected-symbol call-graph proof. It is
+// run after Tier-1 so an incomplete semantic analysis leaves the package-level judgment standing.
+func (s *Service) SetPySymbolReachability(r ports.ReachabilityRecorder) { s.pySymbolReachability = r }
+
 // jsSBOMReachabilityRecorder is the narrow slice of a JavaScript reachability recorder this service
 // needs. BOTH tiers satisfy it — the name is deliberately tier-neutral, because Go interfaces are
 // structural and a tier-specific name would imply a distinction the type system does not enforce.
@@ -438,6 +444,11 @@ func (s *Service) SetVulnerabilityReconciler(reconciler ports.SBOMVulnerabilityR
 // judgments. Best-effort + opt-in: a no-coverage/un-buildable target is ignored (the scan never fails). A
 // setter keeps NewService call sites unchanged.
 func (s *Service) SetTaint(t ports.TaintScanner) { s.taint = t }
+
+// SetPythonTaint configures Python's source-only, interprocedural value-flow proposer separately from the
+// legacy Go function-level scanner. Keeping independent hooks lets operators enable Python analysis without
+// enabling target compilation. No-coverage parser/resolution failures remain best-effort and propose nothing.
+func (s *Service) SetPythonTaint(t ports.TaintScanner) { s.pythonTaint = t }
 
 // SetGraphResolver configures the optional transitive-edge resolver (Go via `go mod graph`). nil ⇒
 // no resolved Go edges. Best-effort + opt-in: a non-Go target / no module cache / tool error adds no edges
@@ -648,6 +659,9 @@ type ScanResult struct {
 	// SourceWarnings flags a configured detection source that did NOT run (e.g. the Grype
 	// binary/DB is missing), so a silently-degraded source can't masquerade as "0 vulns / clean".
 	SourceWarnings []string `json:"source_warnings,omitempty"`
+	// AnalysisCoverage makes semantic-analysis negative-proof coverage explicit. A partial analyzer can
+	// still produce positive witnesses, but an empty result must not be interpreted as clean.
+	AnalysisCoverage []ports.AnalysisCoverage `json:"analysis_coverage,omitempty"`
 	// SuppressedFindings marks findings accepted by the repo's .synapseignore policy. The findings REMAIN in
 	// Findings (reported, persisted, evidence-sealed – never hidden); this is only an accepted-risk
 	// annotation a CI --fail-on gate consults to exempt them. Acceptance suppresses the GATE, not visibility.
@@ -2822,6 +2836,14 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 	}
 
+	// Python Tier-2 runs after Tier-1. Partial semantic coverage may still prove a positive path, but an
+	// incomplete negative is filtered by the recorder and therefore leaves the Tier-1 judgment standing.
+	if opts.scansVulnerabilities() && s.pySymbolReachability != nil {
+		if subs := pySymbolReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
+			_, _ = s.pySymbolReachability.Record(ctx, engagementID, ws.Dir, subs)
+		}
+	}
+
 	// Deterministic TIER-1 reachability for the name-addressed ecosystems (Rust, PHP, Ruby). Each is
 	// best-effort and opt-in; a no-coverage result is ignored so the scan is never failed by it.
 	if opts.scansVulnerabilities() && len(s.srcReachability) > 0 {
@@ -2862,6 +2884,21 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// enhancement; the scan is never failed). Runs while ws.Dir still exists.
 	if opts.scansVulnerabilities() && s.taint != nil {
 		_, _ = s.taint.Scan(ctx, engagementID, ws.Dir)
+	}
+
+	// Python semantic taint is source-only and value-granular. It runs independently of the legacy Go
+	// function-level scanner, but follows the same propose-only lifecycle: positive witnesses become gated
+	// CapSAST proposals, while missing/partial coverage never becomes a clean conclusion.
+	if opts.scansVulnerabilities() && s.pythonTaint != nil {
+		if scanner, ok := s.pythonTaint.(ports.TaintCoverageScanner); ok {
+			outcome, _ := scanner.ScanWithCoverage(ctx, engagementID, ws.Dir)
+			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
+			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
+				result.SourceWarnings = mergeStrings(result.SourceWarnings, []string{warning})
+			}
+		} else {
+			_, _ = s.pythonTaint.Scan(ctx, engagementID, ws.Dir)
+		}
 	}
 
 	// AI false-positive triage (opt-in, best-effort, PROPOSE-ONLY). After the deterministic pass, the
@@ -3090,6 +3127,7 @@ func mergeCachedScanResult(current *ScanResult, previous ScanResult, opts ScanOp
 		current.Manifest = previous.Manifest
 		current.RiskMatches = previous.RiskMatches
 		current.Findings = mergeFindingsByKind(previous.Findings, current.Findings, true)
+		current.AnalysisCoverage = cloneAnalysisCoverage(previous.AnalysisCoverage)
 		preservedVulnerabilities = len(previous.Vulnerabilities) > 0 || hasFindingKind(previous.Findings, false)
 		preserved = preservedVulnerabilities
 	}
@@ -3106,6 +3144,41 @@ func mergeCachedScanResult(current *ScanResult, previous ScanResult, opts ScanOp
 	}
 	current.ScanMode = ScanModeFull
 	mergeCachedAnnotations(current, previous, preservedVulnerabilities)
+}
+
+func semanticCoverageWarning(coverage ports.AnalysisCoverage) string {
+	switch coverage.Status {
+	case ports.AnalysisCoveragePartial:
+		return coverage.Analyzer + " coverage is partial; negative findings are not conclusive"
+	case ports.AnalysisCoverageUnavailable:
+		return coverage.Analyzer + " is unavailable; no semantic taint coverage was produced"
+	default:
+		return ""
+	}
+}
+
+// mergeAnalysisCoverage keeps one current summary per analyzer and deterministic analyzer ordering.
+func mergeAnalysisCoverage(items []ports.AnalysisCoverage, current ports.AnalysisCoverage) []ports.AnalysisCoverage {
+	if current.Analyzer == "" {
+		return items
+	}
+	out := make([]ports.AnalysisCoverage, 0, len(items)+1)
+	for _, item := range items {
+		if item.Analyzer != current.Analyzer {
+			out = append(out, item)
+		}
+	}
+	out = append(out, current)
+	sort.Slice(out, func(i, j int) bool { return out[i].Analyzer < out[j].Analyzer })
+	return out
+}
+
+func cloneAnalysisCoverage(items []ports.AnalysisCoverage) []ports.AnalysisCoverage {
+	out := append([]ports.AnalysisCoverage(nil), items...)
+	for i := range out {
+		out[i].Gaps = append([]ports.AnalysisCoverageGap(nil), out[i].Gaps...)
+	}
+	return out
 }
 
 func mergeCachedAnnotations(current *ScanResult, previous ScanResult, preservePrevious bool) {

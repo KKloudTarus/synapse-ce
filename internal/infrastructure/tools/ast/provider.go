@@ -16,9 +16,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -26,6 +26,8 @@ import (
 // exitUnavailable is the sidecar's exit code when it was built without the tree-sitter backend (CGO-free
 // build). It maps to available=false, not an error, so callers degrade to their own counting.
 const exitUnavailable = 3
+
+const maxASTOutputBytes = 32 << 20 // 32 MiB per stream; semantic facts are decoded in the API process.
 
 // Provider runs the synapse-ast binary. bin is the executable (path or name); runner, when set, confines
 // it in the sandbox (the sidecar parses UNTRUSTED source with C grammars, so production should set it).
@@ -99,7 +101,31 @@ var (
 	_ ports.CodeMetricsProvider = (*Provider)(nil)
 	_ ports.BugDetector         = (*Provider)(nil)
 	_ ports.CodeAnalyzer        = (*Provider)(nil)
+	_ ports.PythonFactsProvider = (*Provider)(nil)
 )
+
+// PythonFacts runs `synapse-ast python-facts <root>`. The wire document is validated here because the
+// sidecar is outside the application trust boundary and parses attacker-controlled repositories.
+func (p *Provider) PythonFacts(ctx context.Context, root string) (pythonprogram.Document, bool, error) {
+	if strings.TrimSpace(root) == "" {
+		return pythonprogram.Document{}, false, nil
+	}
+	out, exit, err := p.run(ctx, "python-facts", root)
+	if exit == exitUnavailable {
+		return pythonprogram.Document{}, false, nil
+	}
+	if err != nil {
+		return pythonprogram.Document{}, false, err
+	}
+	var document pythonprogram.Document
+	if err := json.Unmarshal(out, &document); err != nil {
+		return pythonprogram.Document{}, false, fmt.Errorf("parse synapse-ast python facts: %w", err)
+	}
+	if err := document.Validate(); err != nil {
+		return pythonprogram.Document{}, false, fmt.Errorf("validate synapse-ast python facts: %w", err)
+	}
+	return document, true, nil
+}
 
 // FunctionCounts runs `synapse-ast functions <root>` and returns per-language function counts. A sidecar
 // built without the tree-sitter backend exits exitUnavailable, which maps to (nil, false, nil) so the
@@ -221,9 +247,10 @@ func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, erro
 	args := []string{cmd, root}
 	if p.runner != nil {
 		res, err := p.runner.Run(ctx, ports.ToolSpec{
-			Name:          p.bin,
-			Args:          args,
-			ReadOnlyPaths: []string{root},
+			Name:           p.bin,
+			Args:           args,
+			ReadOnlyPaths:  []string{root},
+			MaxOutputBytes: maxASTOutputBytes,
 		})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -237,14 +264,22 @@ func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, erro
 			return nil, exitUnavailable, nil
 		}
 		if res.ExitCode != 0 && res.ExitCode != exitUnavailable {
-			return nil, res.ExitCode, fmt.Errorf("synapse-ast %q: exit %d: %s", root, res.ExitCode, truncate(string(res.Stderr), 300))
+			// Deliberately omit the child's stderr (mirrors the direct-exec path below): keep the
+			// "parser stderr never enters logs" invariant robust even if the sidecar's stderr behaviour
+			// ever changes to echo target source.
+			return nil, res.ExitCode, fmt.Errorf("synapse-ast %q: exit %d", root, res.ExitCode)
+		}
+		if res.Truncated {
+			return nil, res.ExitCode, fmt.Errorf("synapse-ast %q output exceeds %d bytes", root, maxASTOutputBytes)
 		}
 		return res.Stdout, res.ExitCode, nil
 	}
-	var stderr bytes.Buffer
+	stdout := boundedOutput{limit: maxASTOutputBytes}
+	stderr := boundedOutput{limit: maxASTOutputBytes}
 	ec := exec.CommandContext(ctx, p.bin, args...)
+	ec.Stdout = &stdout
 	ec.Stderr = &stderr
-	out, err := ec.Output()
+	err := ec.Run()
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
@@ -258,16 +293,31 @@ func (p *Provider) run(ctx context.Context, cmd, root string) ([]byte, int, erro
 		// enrichment, so degrade to Go-only counting rather than failing the whole inventory.
 		return nil, exitUnavailable, nil
 	}
-	return out, 0, nil
+	if stdout.truncated || stderr.truncated {
+		return nil, 0, fmt.Errorf("synapse-ast %q output exceeds %d bytes", root, maxASTOutputBytes)
+	}
+	return stdout.buf.Bytes(), 0, nil
 }
 
-// truncate caps sidecar stderr in an error message to a bounded, UTF-8-valid prefix.
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
+// boundedOutput drains the child stream after the limit so an oversized sidecar response cannot grow
+// API memory without bound or deadlock the child on a full pipe.
+type boundedOutput struct {
+	limit     int
+	buf       bytes.Buffer
+	truncated bool
+}
+
+func (w *boundedOutput) Write(p []byte) (int, error) {
+	remaining := w.limit - w.buf.Len()
+	if remaining <= 0 {
+		w.truncated = true
+		return len(p), nil
 	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
+	if len(p) > remaining {
+		_, _ = w.buf.Write(p[:remaining])
+		w.truncated = true
+		return len(p), nil
 	}
-	return s[:n] + "…"
+	_, _ = w.buf.Write(p)
+	return len(p), nil
 }
