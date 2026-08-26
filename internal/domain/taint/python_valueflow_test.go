@@ -140,6 +140,33 @@ func TestPythonValueFlowBindsKeywordArgumentsAndTerminatesOnCycles(t *testing.T)
 	}
 }
 
+func TestPythonValueFlowBindsUnmatchedKeywordsToKwargs(t *testing.T) {
+	document := interproceduralPythonDocument()
+	for i := range document.Symbols {
+		if document.Symbols[i].ID != "python:app:helper" {
+			continue
+		}
+		document.Symbols[i].Parameters[0].Name = "kwargs"
+		document.Symbols[i].Parameters[0].Kind = pythonprogram.ParameterKwArgs
+	}
+	for i := range document.Values {
+		if document.Values[i].ID == "helper#value" {
+			document.Values[i].Name = "kwargs"
+			document.Values[i].Ref = pyName("kwargs")
+		}
+		if document.Values[i].ID == "helper#value-use" {
+			document.Values[i].Ref = pyName("kwargs")
+		}
+	}
+	document.Calls[0].Arguments[0].Keyword = "command"
+	document.Returns[0].Value = pyName("kwargs")
+
+	graph := mustBuildPythonGraph(t, document)
+	if _, ok := pythonFindingFor(graph.Vulnerabilities(), TaintCommand, "python-taint-command"); !ok {
+		t.Fatalf("keyword captured by **kwargs did not reach sink: %+v", graph.Vulnerabilities())
+	}
+}
+
 func TestPythonSinkMatchesReorderedKeywordArgument(t *testing.T) {
 	document := keywordSinkPythonDocument()
 	resolution, err := pythonprogram.Resolve(document)

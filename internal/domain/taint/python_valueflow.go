@@ -326,9 +326,19 @@ func (b *pythonValueBuilder) bindCall(call pythonprogram.Call, callee pythonprog
 			continue
 		}
 		if argument.Keyword != "" && argument.Keyword != "**" {
+			matched := false
 			for _, parameter := range parameters {
 				if parameter.Name == argument.Keyword {
 					b.addFlow(argument.ValueID, parameter.ValueID)
+					matched = true
+				}
+			}
+			if !matched {
+				for _, parameter := range parameters {
+					if parameter.Kind == pythonprogram.ParameterKwArgs {
+						b.addFlow(argument.ValueID, parameter.ValueID)
+						break
+					}
 				}
 			}
 			continue
