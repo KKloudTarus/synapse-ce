@@ -156,6 +156,10 @@ func (e *pythonFactExtractor) walk(node *sitter.Node, scope pythonScope) {
 		e.callFact(node, scope)
 	case "assignment", "annotated_assignment", "augmented_assignment", "named_expression":
 		e.assignmentFact(node, scope)
+	case "for_statement", "for_in_clause":
+		e.bindingFact(node, scope, "left", "right")
+	case "with_item":
+		e.bindingFact(node, scope, "alias", "value")
 	case "return_statement":
 		e.returnFact(node, scope)
 	}
@@ -359,6 +363,27 @@ func (e *pythonFactExtractor) assignmentFact(node *sitter.Node, scope pythonScop
 		if node.Type() == "augmented_assignment" {
 			e.addValueFlow(e.valueFor(left, scope), targetID, pythonprogram.FlowAssignment, node)
 		}
+	}
+	e.doc.Assignments = append(e.doc.Assignments, pythonprogram.Assignment{
+		ScopeID: scope.id, Targets: targets, TargetIDs: targetIDs, Value: value, ValueID: valueID, Pos: e.position(node),
+	})
+}
+
+func (e *pythonFactExtractor) bindingFact(node *sitter.Node, scope pythonScope, leftField, rightField string) {
+	left := node.ChildByFieldName(leftField)
+	right := node.ChildByFieldName(rightField)
+	targets := e.targets(left)
+	if len(targets) == 0 || right == nil {
+		return
+	}
+	value := e.reference(right)
+	valueID := e.valueFor(right, scope)
+	if value.Kind == pythonprogram.ReferenceUnknown && valueID == "" {
+		e.gap(pythonprogram.GapUnresolvedValue, scope.id, "binding_value", node)
+	}
+	targetIDs := e.bindingValues(left, scope)
+	for _, targetID := range targetIDs {
+		e.addValueFlow(valueID, targetID, pythonprogram.FlowAssignment, node)
 	}
 	e.doc.Assignments = append(e.doc.Assignments, pythonprogram.Assignment{
 		ScopeID: scope.id, Targets: targets, TargetIDs: targetIDs, Value: value, ValueID: valueID, Pos: e.position(node),

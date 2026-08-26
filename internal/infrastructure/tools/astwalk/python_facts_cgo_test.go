@@ -113,6 +113,26 @@ func TestPythonFactsForReportsDynamicAndRecoveryGaps(t *testing.T) {
 	}
 }
 
+func TestPythonFactsForExtractsLoopComprehensionAndWithBindings(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "bindings.py", "def process(values, manager):\n"+
+		"    for item in values:\n"+
+		"        consume(item)\n"+
+		"    result = [consume(element) for element in values]\n"+
+		"    with manager() as resource:\n"+
+		"        consume(resource)\n")
+
+	document, err := PythonFactsFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("PythonFactsFor: %v", err)
+	}
+	for _, name := range []string{"item", "element", "resource"} {
+		if !hasPythonBinding(document, name) {
+			t.Errorf("missing value-flow binding for %q (assignments: %+v)", name, document.Assignments)
+		}
+	}
+}
+
 func TestPythonFactsForRootPackageInit(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "__init__.py", "def create():\n    return 1\n")
@@ -176,6 +196,17 @@ func hasPythonGap(document pythonprogram.Document, kind pythonprogram.GapKind) b
 	for _, gap := range document.CoverageGaps {
 		if gap.Kind == kind {
 			return true
+		}
+	}
+	return false
+}
+
+func hasPythonBinding(document pythonprogram.Document, name string) bool {
+	for _, assignment := range document.Assignments {
+		for i, target := range assignment.Targets {
+			if joinPythonReference(target) == name && i < len(assignment.TargetIDs) && assignment.TargetIDs[i] != "" && assignment.ValueID != "" {
+				return true
+			}
 		}
 	}
 	return false

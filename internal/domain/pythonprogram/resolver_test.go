@@ -147,6 +147,37 @@ func TestResolvePropagatesExtractionCoverageAndExternalInheritance(t *testing.T)
 	}
 }
 
+func TestResolveTracksConstructorTypesAssignedToInstanceAttributes(t *testing.T) {
+	document := minimalResolverDocument()
+	moduleID := document.Symbols[0].ID
+	controller := resolverSymbol("python:app:Controller", "app", "Controller", "Controller", moduleID, SymbolClass, 3)
+	initMethod := resolverSymbol("python:app:Controller.__init__", "app", "Controller.__init__", "__init__", controller.ID, SymbolMethod, 4)
+	route := resolverSymbol("python:app:Controller.route", "app", "Controller.route", "route", controller.ID, SymbolMethod, 7)
+	document.Symbols = append(document.Symbols, controller, initMethod, route)
+	document.Imports = []Import{{ScopeID: moduleID, Module: "clients", Name: "Client", Pos: resolverPos("app.py", 1)}}
+	document.Assignments = []Assignment{{
+		ScopeID: initMethod.ID,
+		Targets: []Reference{attrRef("self", "client")},
+		Value:   Reference{Kind: ReferenceCall, Segments: []string{"Client"}},
+		Pos:     resolverPos("app.py", 5),
+	}}
+	document.Calls = []Call{{
+		ID: "app.py:8:8", CallerID: route.ID, Callee: attrRef("self", "client", "execute"), Pos: resolverPos("app.py", 8),
+	}}
+	document.Entrypoints = []EntrypointHint{{SymbolID: route.ID, Kind: "framework_route", Pos: route.Pos}}
+
+	resolution, err := Resolve(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolution.Complete || callStatus(resolution, "app.py:8:8") != CallExternal {
+		t.Fatalf("instance attribute call was not resolved: %+v", resolution)
+	}
+	if !graphHasPythonEdge(resolution, route.ID, "python:clients:Client.execute") {
+		t.Fatalf("missing external client edge: %+v", resolution.Graph.Edges)
+	}
+}
+
 func resolverFixture() Document {
 	apiModule := "python:app.api:<module>"
 	serviceModule := "python:app.service:<module>"

@@ -263,15 +263,24 @@ func (r *semanticResolver) indexReceivers() {
 				continue
 			}
 			for _, target := range assignment.Targets {
-				if target.Kind != ReferenceName || len(target.Segments) != 1 {
+				ownerID := assignment.ScopeID
+				name := ""
+				switch {
+				case target.Kind == ReferenceName && len(target.Segments) == 1:
+					name = target.Segments[0]
+				case target.Kind == ReferenceAttribute && len(target.Segments) == 2 && (target.Segments[0] == "self" || target.Segments[0] == "cls"):
+					ownerID = r.enclosingClass(assignment.ScopeID)
+					name = target.Segments[1]
+				}
+				if ownerID == "" || name == "" {
 					continue
 				}
-				if r.receivers[assignment.ScopeID] == nil {
-					r.receivers[assignment.ScopeID] = map[string][]pythonType{}
+				if r.receivers[ownerID] == nil {
+					r.receivers[ownerID] = map[string][]pythonType{}
 				}
-				before := len(r.receivers[assignment.ScopeID][target.Segments[0]])
-				r.receivers[assignment.ScopeID][target.Segments[0]] = uniqueTypes(append(r.receivers[assignment.ScopeID][target.Segments[0]], types...))
-				changed = changed || len(r.receivers[assignment.ScopeID][target.Segments[0]]) != before
+				before := len(r.receivers[ownerID][name])
+				r.receivers[ownerID][name] = uniqueTypes(append(r.receivers[ownerID][name], types...))
+				changed = changed || len(r.receivers[ownerID][name]) != before
 			}
 		}
 		if !changed {
@@ -287,6 +296,15 @@ func (r *semanticResolver) resolveReference(scopeID string, ref Reference) ([]st
 	segments := ref.Segments
 	if (segments[0] == "self" || segments[0] == "cls") && len(segments) > 1 {
 		if classID := r.enclosingClass(scopeID); classID != "" {
+			if len(segments) > 2 {
+				var candidates []string
+				for _, typ := range r.receiverTypes(scopeID, segments[1]) {
+					candidates = append(candidates, r.methodsForType(typ, segments[2:])...)
+				}
+				if len(candidates) > 0 {
+					return sortedUnique(candidates), hasExternalCandidate(candidates, r.symbols)
+				}
+			}
 			return r.methodsForType(pythonType{classID: classID}, segments[1:]), false
 		}
 	}
