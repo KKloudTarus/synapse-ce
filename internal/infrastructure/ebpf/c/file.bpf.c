@@ -7,6 +7,7 @@
 #include "detect.bpf.h"
 
 struct file_event {
+	__u64 ktime_ns; // kernel-monotonic occurred-at (bpf_ktime_get_ns); userspace maps it to wall-clock
 	__u32 pid;
 	__u32 uid;
 	char comm[COMM_LEN];
@@ -50,6 +51,7 @@ int detect_openat(struct sys_enter_ctx *ctx)
 	struct file_event *e = bpf_ringbuf_reserve(&file_events, sizeof(*e), 0);
 	if (!e)
 		return 0;
+	e->ktime_ns = bpf_ktime_get_ns();
 	e->pid = bpf_get_current_pid_tgid() >> 32;
 	e->uid = bpf_get_current_uid_gid() & 0xffffffff;
 	bpf_get_current_comm(&e->comm, sizeof(e->comm));

@@ -3,6 +3,10 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 src_dir="${repo_root}/internal/infrastructure/ebpf/c"
+# OUT_DIR lets the reproducible-build check compile into a scratch directory and diff against the committed
+# objects without clobbering them; it defaults to compiling in place (src_dir).
+out_dir="${OUT_DIR:-${src_dir}}"
+mkdir -p "${out_dir}"
 clang_bin="${CLANG:-clang}"
 strip_bin="${LLVM_STRIP:-llvm-strip}"
 
@@ -42,7 +46,7 @@ build_arch() {
 
   for name in "${sources[@]}"; do
     local source="${src_dir}/${name}.bpf.c"
-    local output="${src_dir}/${name}${suffix}.bpf.o"
+    local output="${out_dir}/${name}${suffix}.bpf.o"
     "${clang_bin}" "${common_flags[@]}" "-D__TARGET_ARCH_${target_arch}" -c "${source}" -o "${output}"
     # Keep BTF and BTF.ext for CO-RE, but remove nonessential DWARF/debug sections and absolute source
     # paths. The checked-in artifact remains loadable without clang on production hosts.

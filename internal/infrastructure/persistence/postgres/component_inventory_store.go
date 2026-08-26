@@ -20,6 +20,49 @@ func NewComponentInventoryStore(pool *pgxpool.Pool) *ComponentInventoryStore {
 
 var _ ports.ComponentInventoryStore = (*ComponentInventoryStore)(nil)
 
+// ListCurrentComponentsByEngagement returns the components of the engagement's latest SBOM (id + name +
+// package only — enough to resolve a vulnerable ComponentID to a package name for running-vs-installed
+// matching). Unlike ListCurrentComponents it takes no package/CPE key, so it can enumerate all components.
+// Tenant-scoped via WithTenant (RLS) + an explicit tenant_id predicate.
+func (s *ComponentInventoryStore) ListCurrentComponentsByEngagement(ctx context.Context, tenantID, engagementID shared.ID) ([]sbom.ComponentRecord, error) {
+	if tenantID.IsZero() || engagementID.IsZero() {
+		return nil, fmt.Errorf("%w: tenant and engagement are required", shared.ErrValidation)
+	}
+	out := make([]sbom.ComponentRecord, 0)
+	err := WithTenant(ctx, s.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			WITH latest_sbom AS (
+				SELECT id FROM sboms
+				WHERE tenant_id=$1 AND engagement_id=$2
+				ORDER BY created_at DESC, id DESC
+				LIMIT 1
+			)
+			SELECT c.id, c.name, c.package_name
+			FROM components c
+			JOIN latest_sbom s ON s.id=c.sbom_id
+			WHERE c.tenant_id=$1
+			ORDER BY c.id COLLATE "C"`, tenantID.String(), engagementID.String())
+		if err != nil {
+			return fmt.Errorf("list components by engagement: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			item := sbom.ComponentRecord{TenantID: tenantID, EngagementID: engagementID}
+			var id string
+			if err := rows.Scan(&id, &item.Name, &item.Package); err != nil {
+				return fmt.Errorf("scan component: %w", err)
+			}
+			item.ComponentID = shared.ID(id)
+			out = append(out, item)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (s *ComponentInventoryStore) ListCurrentComponents(ctx context.Context, query sbom.ComponentQuery) (sbom.ComponentPage, error) {
 	tenantID, ok := shared.TenantFrom(ctx)
 	if !ok {
