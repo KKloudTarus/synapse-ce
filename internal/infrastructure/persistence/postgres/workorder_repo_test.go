@@ -156,6 +156,11 @@ func TestMigration0059(t *testing.T) {
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := Migrate(context.Background(), dsn); err != nil {
+			t.Errorf("restore latest migrations: %v", err)
+		}
+	})
 	db, err := goose.OpenDBWithDriver("pgx", dsn)
 	if err != nil {
 		t.Fatalf("goose open: %v", err)
