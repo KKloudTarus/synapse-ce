@@ -399,6 +399,56 @@ func TestGatedTaintSASTRuleID(t *testing.T) {
 	}
 }
 
+func TestSARIFPythonTaintIncludesDeterministicCodeFlow(t *testing.T) {
+	column4, column14 := 4, 14
+	trace := &finding.DataFlowTrace{
+		Language: "python",
+		Source:   finding.SourceLocation{File: "app.py", StartLine: 3, EndLine: 3, StartColumn: &column4, EndColumn: &column4},
+		Sink:     finding.SourceLocation{File: "app.py", StartLine: 4, EndLine: 4, StartColumn: &column4, EndColumn: &column4},
+		Steps: []finding.SourceLocation{
+			{File: "app.py", StartLine: 3, EndLine: 3, StartColumn: &column4, EndColumn: &column4},
+			{File: "app.py", StartLine: 4, EndLine: 4, StartColumn: &column14, EndColumn: &column14},
+			{File: "app.py", StartLine: 4, EndLine: 4, StartColumn: &column4, EndColumn: &column4},
+		},
+		CoverageComplete: false,
+		GraphTruncated:   true,
+	}
+	f := finding.Finding{
+		ID: "t1", Title: "Taint: python-taint-command", Severity: shared.SeverityHigh, Status: finding.StatusOpen,
+		Kind: finding.KindSAST, RuleKey: "python-taint-command", DedupKey: "sast:ai:j-1", DataFlow: trace,
+	}
+
+	result := buildSARIF([]finding.Finding{f}, "v9", SARIFOptions{}).Runs[0].Results[0]
+	if len(result.Locations) != 1 || result.Locations[0].PhysicalLocation == nil || result.Locations[0].PhysicalLocation.ArtifactLocation.URI != "app.py" || result.Locations[0].PhysicalLocation.Region.StartLine != 4 {
+		t.Fatalf("primary sink location = %+v", result.Locations)
+	}
+	if len(result.CodeFlows) != 1 || len(result.CodeFlows[0].ThreadFlows) != 1 || len(result.CodeFlows[0].ThreadFlows[0].Locations) != 3 {
+		t.Fatalf("codeFlows = %+v", result.CodeFlows)
+	}
+	first := result.CodeFlows[0].ThreadFlows[0].Locations[0].Location.PhysicalLocation
+	if first == nil || first.ArtifactLocation.URI != "app.py" || first.Region.StartLine != 3 || first.Region.StartColumn != 5 {
+		t.Fatalf("first thread-flow location = %+v", first)
+	}
+	if result.Properties["synapse.dataFlowLanguage"] != "python" || result.Properties["synapse.coverageComplete"] != false || result.Properties["synapse.graphTruncated"] != true {
+		t.Fatalf("data-flow properties = %+v", result.Properties)
+	}
+	firstJSON, err := MarshalSARIF([]finding.Finding{f}, "v9", SARIFOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondJSON, err := MarshalSARIF([]finding.Finding{f}, "v9", SARIFOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(firstJSON) != string(secondJSON) {
+		t.Fatal("Python data-flow SARIF is not deterministic")
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(firstJSON, &wire); err != nil {
+		t.Fatalf("code-flow SARIF JSON: %v", err)
+	}
+}
+
 func TestSARIFFixedVersion(t *testing.T) {
 	fix := func(f finding.Finding) string {
 		if f.DedupKey == "vuln:CVE-2020-7471:django:2.2.0" {

@@ -17,6 +17,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/pyreach"
 )
 
 // suppressedByFloor reports whether a vulnerability is NOT promoted to a finding because it
@@ -690,6 +691,54 @@ func pyReachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vu
 		subs = append(subs, ports.ReachabilitySubject{FindingID: f.ID, Symbols: []string{v.Component}})
 	}
 	return subs
+}
+
+// pySymbolReachabilitySubjects builds Tier-2 Python subjects from the exact PyPI component identity and
+// advisory-provided affected symbols. A missing or malformed symbol drops the entire finding: Tier-2 must
+// never invent a callable or decide a negative from only the subset it happened to understand.
+func pySymbolReachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vulnerability, doc *sbom.SBOM) []ports.ReachabilitySubject {
+	if doc == nil {
+		return nil
+	}
+	purlByComponent := map[string]string{}
+	for _, component := range doc.Components {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(component.PURL)), "pkg:pypi/") {
+			purlByComponent[strings.ToLower(component.Name)+"\x00"+component.Version] = component.PURL
+		}
+	}
+	byDedup := make(map[string]vulnerability.Vulnerability, len(vulns))
+	for _, vulnerability := range vulns {
+		byDedup[vulnDedupKey(vulnerability)] = vulnerability
+	}
+	var subjects []ports.ReachabilitySubject
+	for _, item := range findings {
+		vulnerability, ok := byDedup[item.DedupKey]
+		if !ok || len(vulnerability.AffectedSymbols) == 0 {
+			continue
+		}
+		purl := purlByComponent[strings.ToLower(vulnerability.Component)+"\x00"+vulnerability.Version]
+		if purl == "" {
+			continue
+		}
+		seen := map[string]bool{}
+		encoded := make([]string, 0, len(vulnerability.AffectedSymbols))
+		placeable := true
+		for _, raw := range vulnerability.AffectedSymbols {
+			subject, valid := pyreach.SymbolSubject(purl, raw)
+			if !valid {
+				placeable = false
+				break
+			}
+			if !seen[subject] {
+				seen[subject] = true
+				encoded = append(encoded, subject)
+			}
+		}
+		if placeable && len(encoded) > 0 {
+			subjects = append(subjects, ports.ReachabilitySubject{FindingID: item.ID, Symbols: encoded})
+		}
+	}
+	return subjects
 }
 
 // detectionSourceNames returns the names of the run detection sources – the cross-check "run set",

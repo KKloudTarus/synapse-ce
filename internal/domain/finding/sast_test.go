@@ -40,6 +40,24 @@ func TestNewSAST(t *testing.T) {
 	}
 }
 
+func TestNewSASTCarriesPythonDataFlowAndSinkLocation(t *testing.T) {
+	column4 := 4
+	source := SourceLocation{File: "app.py", StartLine: 3, EndLine: 3, StartColumn: &column4, EndColumn: &column4}
+	sink := SourceLocation{File: "app.py", StartLine: 4, EndLine: 4, StartColumn: &column4, EndColumn: &column4}
+	trace := &DataFlowTrace{Language: "python", Source: source, Sink: sink, Steps: []SourceLocation{source, sink}}
+	f, err := NewSAST("f1", "eng1", SASTInput{JudgmentID: "j-1", CWE: "CWE-78", Location: "app.py:4", Rule: "python-taint-command", DataFlow: trace}, time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.DataFlow == nil || f.SourceLocation == nil || f.SourceLocation.File != "app.py" || f.SourceLocation.StartLine != 4 || len(f.Sources) != 1 || f.Sources[0] != "synapse-python-taint" {
+		t.Fatalf("Python projection = %+v", f)
+	}
+	trace.Steps[0].File = "mutated.py"
+	if f.DataFlow.Steps[0].File != "app.py" {
+		t.Fatal("NewSAST retained caller-owned data-flow memory")
+	}
+}
+
 func TestNewSASTDedupStableAcrossReconfirm(t *testing.T) {
 	in := SASTInput{JudgmentID: "j-1", CWE: "CWE-78", Location: "app.run", Rule: "taint-command-injection"}
 	a, _ := NewSAST("f1", "eng1", in, time.Unix(0, 0).UTC())

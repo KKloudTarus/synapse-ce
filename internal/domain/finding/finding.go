@@ -167,6 +167,9 @@ type Finding struct {
 	// analyzers. Legacy DedupKey locations remain supported during migration.
 	SourceLocation *SourceLocation
 
+	// DataFlow is a bounded source-to-sink position trace for confirmed semantic taint findings.
+	DataFlow *DataFlowTrace
+
 	// Workflow: the human assignee, and an optimistic-concurrency version that
 	// Kanban/status/assignee edits check to prevent lost updates.
 	Assignee string

@@ -20,6 +20,20 @@ type fakeAnalyzer struct {
 	err error
 }
 
+func TestPythonTier2UsesDistinctSemanticProofActors(t *testing.T) {
+	proposer, verifier, label := actorsFor(judgment.Tier2, LanguagePython)
+	if proposer != judgment.ProofActorPySemanticScan || verifier != judgment.ProofActorPySemanticEngine {
+		t.Fatalf("python tier-2 actors = (%q,%q)", proposer, verifier)
+	}
+	if label != "tier-2 python semantic call-graph proof" {
+		t.Fatalf("python tier-2 label = %q", label)
+	}
+	goProposer, goVerifier, _ := actorsForTier(judgment.Tier2)
+	if goProposer != judgment.ProofActorCallgraphScan || goVerifier != judgment.ProofActorCallgraphEngine {
+		t.Fatalf("default Go callgraph actors changed = (%q,%q)", goProposer, goVerifier)
+	}
+}
+
 func (f fakeAnalyzer) Analyze(context.Context, string, []string) (*reachability.Analysis, error) {
 	if f.err != nil {
 		return nil, f.err

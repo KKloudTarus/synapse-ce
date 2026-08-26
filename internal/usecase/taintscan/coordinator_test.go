@@ -53,11 +53,14 @@ func (f *fakeProposer) Propose(_ context.Context, proposer string, eng shared.ID
 	return j, nil
 }
 
-type fakeAudit struct{ entries []ports.AuditEntry }
+type fakeAudit struct {
+	entries []ports.AuditEntry
+	err     error
+}
 
 func (f *fakeAudit) Record(_ context.Context, e ports.AuditEntry) error {
 	f.entries = append(f.entries, e)
-	return nil
+	return f.err
 }
 func (f *fakeAudit) RecordOnce(ctx context.Context, e ports.AuditEntry) error {
 	return f.Record(ctx, e)

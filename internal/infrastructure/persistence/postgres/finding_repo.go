@@ -1,9 +1,12 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -19,7 +22,7 @@ const findingCols = `id, engagement_id, title, description, severity, cvss_vecto
 	`COALESCE(dedup_key, ''), kev, risk_score, created_at, updated_at, sources, confidence, class, scope, ` +
 	`reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key, ` +
 	`COALESCE(advisory_id, ''), COALESCE(occurrence_id, ''), COALESCE(component_fingerprint, ''), ` +
-	`COALESCE(fixed_version, ''), COALESCE(detection_state, ''), COALESCE(risk_assessment_id, ''), evaluated_at`
+	`COALESCE(fixed_version, ''), COALESCE(detection_state, ''), COALESCE(risk_assessment_id, ''), evaluated_at, data_flow`
 
 // FindingRepository persists findings to PostgreSQL, deduped per engagement.
 type FindingRepository struct{ pool *pgxpool.Pool }
@@ -77,9 +80,13 @@ func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Findi
 	}
 	return WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
 		for _, f := range findings {
+			dataFlow, err := findingDataFlowJSON(f.DataFlow)
+			if err != nil {
+				return fmt.Errorf("encode finding data flow: %w", err)
+			}
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO findings (id, tenant_id, engagement_id, title, description, severity, cvss_vector, cwe, status, evidence_score, dedup_key, kev, risk_score, created_at, updated_at, sources, confidence, class, scope, reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key, advisory_id, occurrence_id, component_fingerprint, fixed_version, detection_state, risk_assessment_id, evaluated_at)
-				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)
+				`INSERT INTO findings (id, tenant_id, engagement_id, title, description, severity, cvss_vector, cwe, status, evidence_score, dedup_key, kev, risk_score, created_at, updated_at, sources, confidence, class, scope, reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key, advisory_id, occurrence_id, component_fingerprint, fixed_version, detection_state, risk_assessment_id, evaluated_at, data_flow)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36)
 			 ON CONFLICT (engagement_id, dedup_key) WHERE dedup_key IS NOT NULL
 			 DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description,
 				               severity = EXCLUDED.severity, cvss_vector = EXCLUDED.cvss_vector, kev = EXCLUDED.kev, risk_score = EXCLUDED.risk_score,
@@ -89,7 +96,7 @@ func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Findi
 				               rule_key = EXCLUDED.rule_key, advisory_id = EXCLUDED.advisory_id, occurrence_id = EXCLUDED.occurrence_id,
 				               component_fingerprint = EXCLUDED.component_fingerprint, fixed_version = EXCLUDED.fixed_version,
 				               detection_state = EXCLUDED.detection_state, risk_assessment_id = EXCLUDED.risk_assessment_id,
-			               evaluated_at = EXCLUDED.evaluated_at, version = findings.version + 1, updated_at = EXCLUDED.updated_at
+			               evaluated_at = EXCLUDED.evaluated_at, data_flow = EXCLUDED.data_flow, version = findings.version + 1, updated_at = EXCLUDED.updated_at
 			 WHERE findings.title IS DISTINCT FROM EXCLUDED.title
 			    OR findings.description IS DISTINCT FROM EXCLUDED.description
 			    OR findings.severity IS DISTINCT FROM EXCLUDED.severity
@@ -111,14 +118,15 @@ func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Findi
 				OR findings.fixed_version IS DISTINCT FROM EXCLUDED.fixed_version
 				    OR findings.detection_state IS DISTINCT FROM EXCLUDED.detection_state
 				    OR findings.risk_assessment_id IS DISTINCT FROM EXCLUDED.risk_assessment_id
-				    OR findings.evaluated_at IS DISTINCT FROM EXCLUDED.evaluated_at`,
+				    OR findings.evaluated_at IS DISTINCT FROM EXCLUDED.evaluated_at
+				    OR findings.data_flow IS DISTINCT FROM EXCLUDED.data_flow`,
 				f.ID.String(), tenantID.String(), f.EngagementID.String(), f.Title, f.Description, string(f.Severity),
 				f.CVSSVector, f.CWE, string(f.Status), f.EvidenceScore, f.DedupKey,
 				f.KEV, f.RiskScore, f.Audit.CreatedAt, f.Audit.UpdatedAt, strings.Join(f.Sources, ","), f.Confidence, classOrDefault(f.Class),
 				scopeOrDefault(f.Scope), reachOrDefault(f.Reachability), f.Impact, priorityOrDefault(f.Priority), kindOrDefault(string(f.Kind)),
 				f.Assignee, versionOrDefault(f.Version), f.ProposedBy, f.ClassReachability, f.RuleKey,
 				f.AdvisoryID, nullableFindingID(f.OccurrenceID), f.ComponentFingerprint, f.FixedVersion, f.DetectionState,
-				nullableFindingID(f.RiskAssessmentID), f.EvaluatedAt); err != nil {
+				nullableFindingID(f.RiskAssessmentID), f.EvaluatedAt, dataFlow); err != nil {
 				return fmt.Errorf("upsert finding: %w", err)
 			}
 		}
@@ -266,12 +274,13 @@ func scanFinding(row rowScanner) (finding.Finding, error) {
 		f                                                                                              finding.Finding
 		id, eid, sev, status, dedup, sources, kind                                                     string
 		advisoryID, occurrenceID, componentFingerprint, fixedVersion, detectionState, riskAssessmentID string
+		dataFlowJSON                                                                                   []byte
 	)
 	if err := row.Scan(&id, &eid, &f.Title, &f.Description, &sev, &f.CVSSVector, &f.CWE,
 		&status, &f.EvidenceScore, &dedup, &f.KEV, &f.RiskScore, &f.Audit.CreatedAt, &f.Audit.UpdatedAt,
 		&sources, &f.Confidence, &f.Class, &f.Scope, &f.Reachability, &f.Impact, &f.Priority, &kind,
 		&f.Assignee, &f.Version, &f.ProposedBy, &f.ClassReachability, &f.RuleKey,
-		&advisoryID, &occurrenceID, &componentFingerprint, &fixedVersion, &detectionState, &riskAssessmentID, &f.EvaluatedAt); err != nil {
+		&advisoryID, &occurrenceID, &componentFingerprint, &fixedVersion, &detectionState, &riskAssessmentID, &f.EvaluatedAt, &dataFlowJSON); err != nil {
 		return finding.Finding{}, err
 	}
 	f.ID = shared.ID(id)
@@ -287,7 +296,34 @@ func scanFinding(row rowScanner) (finding.Finding, error) {
 	f.FixedVersion = fixedVersion
 	f.DetectionState = detectionState
 	f.RiskAssessmentID = shared.ID(riskAssessmentID)
+	if len(dataFlowJSON) > 0 {
+		var trace finding.DataFlowTrace
+		decoder := json.NewDecoder(bytes.NewReader(dataFlowJSON))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&trace); err != nil {
+			return finding.Finding{}, fmt.Errorf("decode finding data flow: %w", err)
+		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			return finding.Finding{}, errors.New("decode finding data flow: trailing JSON")
+		}
+		if err := trace.Validate(); err != nil {
+			return finding.Finding{}, fmt.Errorf("validate finding data flow: %w", err)
+		}
+		f.DataFlow = &trace
+		sink := trace.Sink
+		f.SourceLocation = &sink
+	}
 	return f, nil
+}
+
+func findingDataFlowJSON(trace *finding.DataFlowTrace) (any, error) {
+	if trace == nil {
+		return nil, nil
+	}
+	if err := trace.Validate(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(trace)
 }
 
 func nullableFindingID(value shared.ID) any {
@@ -355,6 +391,11 @@ func validateFindingBatch(findings []finding.Finding) error {
 	for _, f := range findings {
 		if err := f.ValidateRuleKey(); err != nil {
 			return fmt.Errorf("finding %s (kind %s): %w", f.DedupKey, f.Kind, err)
+		}
+		if f.DataFlow != nil {
+			if err := f.DataFlow.Validate(); err != nil {
+				return fmt.Errorf("finding %s data flow: %w", f.DedupKey, err)
+			}
 		}
 	}
 	return nil

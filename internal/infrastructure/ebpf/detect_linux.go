@@ -29,6 +29,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
+	"golang.org/x/sys/unix"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -55,7 +56,10 @@ type classProgram struct {
 	requiresCORE bool
 	mapName      string
 	attach       []progAttach
-	decode       func(host shared.ID, raw []byte, now time.Time) (detection.Event, bool)
+	// decode maps one raw ring-buffer record to a domain event. epoch is the wall-clock instant of kernel
+	// monotonic time zero (boot), so a decoder derives the event's occurred-at from the kernel timestamp
+	// in the record — not the userspace drain time.
+	decode func(host shared.ID, raw []byte, epoch time.Time) (detection.Event, bool)
 }
 
 type attachKind int
@@ -115,6 +119,11 @@ type Sensor struct {
 	loaded   []*loadedClass
 	coverage []detection.ClassCoverage
 
+	// ktimeEpoch is the wall-clock instant of kernel monotonic time zero (boot), captured at Start; a
+	// decoder adds a record's bpf_ktime_get_ns() to it to recover the event's true occurred-at instead of
+	// stamping the userspace drain time (fixes the D4 "no kernel occurred-at" defect).
+	ktimeEpoch time.Time
+
 	events  chan detection.Event
 	wg      sync.WaitGroup
 	started bool
@@ -161,6 +170,10 @@ func (s *Sensor) Start(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("%w: %v", ErrSensorUnavailable, err)
 	}
+	// Capture the boot epoch once, before any class is attached, so every decoded event maps its kernel
+	// monotonic timestamp to the same wall-clock reference. This write happens-before the drain goroutines
+	// are launched below (and they are the only readers), so the lock-free access is race-free.
+	s.ktimeEpoch = captureKtimeEpoch()
 	if embeddedObjectArch == "" {
 		for _, cp := range classPrograms() {
 			if s.requested[cp.class] {
@@ -293,7 +306,7 @@ func (s *Sensor) drain(lc *loadedClass, decode func(shared.ID, []byte, time.Time
 		if err != nil {
 			return // reader closed on Close()
 		}
-		ev, ok := decode(s.host, rec.RawSample, time.Now().UTC())
+		ev, ok := decode(s.host, rec.RawSample, s.ktimeEpoch)
 		if !ok {
 			continue
 		}
@@ -407,6 +420,7 @@ func (lc *loadedClass) closeAll() {
 // ---- decoders: mirror the C event structs (fixed layout, little-endian host) ------------------------
 
 type rawExec struct {
+	Ktime    uint64
 	PID      uint32
 	UID      uint32
 	Comm     [16]byte
@@ -415,11 +429,12 @@ type rawExec struct {
 	Arg2     [48]byte
 }
 
-func decodeExec(host shared.ID, raw []byte, now time.Time) (detection.Event, bool) {
+func decodeExec(host shared.ID, raw []byte, epoch time.Time) (detection.Event, bool) {
 	var e rawExec
 	if binary.Read(bytes.NewReader(raw), binary.LittleEndian, &e) != nil {
 		return detection.Event{}, false
 	}
+	now := kernelOccurredAt(epoch, e.Ktime)
 	var args []string
 	if a := cstr(e.Arg1[:]); a != "" {
 		args = append(args, a)
@@ -443,17 +458,19 @@ func decodeExec(host shared.ID, raw []byte, now time.Time) (detection.Event, boo
 }
 
 type rawFile struct {
+	Ktime    uint64
 	PID      uint32
 	UID      uint32
 	Comm     [16]byte
 	Filename [256]byte
 }
 
-func decodeFile(host shared.ID, raw []byte, now time.Time) (detection.Event, bool) {
+func decodeFile(host shared.ID, raw []byte, epoch time.Time) (detection.Event, bool) {
 	var e rawFile
 	if binary.Read(bytes.NewReader(raw), binary.LittleEndian, &e) != nil {
 		return detection.Event{}, false
 	}
+	now := kernelOccurredAt(epoch, e.Ktime)
 	return detection.Event{
 		Class: detection.ClassFile, At: now, Host: host,
 		File: &detection.FileEvent{PID: int(e.PID), Comm: cstr(e.Comm[:]), Path: cstr(e.Filename[:]), Op: "open"},
@@ -461,6 +478,7 @@ func decodeFile(host shared.ID, raw []byte, now time.Time) (detection.Event, boo
 }
 
 type rawPriv struct {
+	Ktime uint64
 	PID   uint32
 	UID   uint32
 	ToUID uint32
@@ -468,11 +486,12 @@ type rawPriv struct {
 	Kind  [12]byte
 }
 
-func decodePriv(host shared.ID, raw []byte, now time.Time) (detection.Event, bool) {
+func decodePriv(host shared.ID, raw []byte, epoch time.Time) (detection.Event, bool) {
 	var e rawPriv
 	if binary.Read(bytes.NewReader(raw), binary.LittleEndian, &e) != nil {
 		return detection.Event{}, false
 	}
+	now := kernelOccurredAt(epoch, e.Ktime)
 	return detection.Event{
 		Class: detection.ClassPrivilege, At: now, Host: host,
 		Privilege: &detection.PrivilegeEvent{PID: int(e.PID), Comm: cstr(e.Comm[:]), ToUID: int(e.ToUID), Kind: cstr(e.Kind[:])},
@@ -480,6 +499,7 @@ func decodePriv(host shared.ID, raw []byte, now time.Time) (detection.Event, boo
 }
 
 type rawNet struct {
+	Ktime uint64
 	PID   uint32
 	DAddr uint32 // network byte order
 	DPort uint16 // host order (BPF ntohs'd it)
@@ -488,11 +508,12 @@ type rawNet struct {
 	Comm  [16]byte
 }
 
-func decodeNet(host shared.ID, raw []byte, now time.Time) (detection.Event, bool) {
+func decodeNet(host shared.ID, raw []byte, epoch time.Time) (detection.Event, bool) {
 	var e rawNet
 	if binary.Read(bytes.NewReader(raw), binary.LittleEndian, &e) != nil {
 		return detection.Event{}, false
 	}
+	now := kernelOccurredAt(epoch, e.Ktime)
 	proto := "tcp"
 	if e.Proto == 17 {
 		proto = "udp"
@@ -512,6 +533,29 @@ func decodeNet(host shared.ID, raw []byte, now time.Time) (detection.Event, bool
 // host uint32 whose bytes are the address octets in order.
 func ntohl(n uint32) uint32 {
 	return (n&0xff)<<24 | (n&0xff00)<<8 | (n&0xff0000)>>8 | (n&0xff000000)>>24
+}
+
+// captureKtimeEpoch returns the wall-clock instant of kernel monotonic time zero (boot), by pairing a
+// CLOCK_MONOTONIC reading with the wall clock at the same moment. Adding a record's bpf_ktime_get_ns()
+// (also CLOCK_MONOTONIC) to this epoch recovers the event's true occurred-at. A zero return (clock read
+// failed) makes decoders fall back to the userspace drain time.
+func captureKtimeEpoch() time.Time {
+	var ts unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts); err != nil {
+		return time.Time{}
+	}
+	mono := time.Duration(ts.Sec)*time.Second + time.Duration(ts.Nsec)*time.Nanosecond
+	return time.Now().UTC().Add(-mono)
+}
+
+// kernelOccurredAt maps a kernel monotonic timestamp (ns since boot) to wall-clock using the boot epoch.
+// It fails safe: if the epoch was not captured or the record carries no kernel timestamp, it returns the
+// current userspace time so an event is never stamped with a bogus (near-zero) instant.
+func kernelOccurredAt(epoch time.Time, ktimeNs uint64) time.Time {
+	if epoch.IsZero() || ktimeNs == 0 {
+		return time.Now().UTC()
+	}
+	return epoch.Add(time.Duration(ktimeNs)).UTC()
 }
 
 // cstr trims a fixed C char array at its first NUL and returns the Go string.

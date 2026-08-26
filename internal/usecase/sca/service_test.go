@@ -103,6 +103,21 @@ type staticSASTAnalyzer struct {
 	findings []ports.SASTRawFinding
 }
 
+type staticTaintCoverage struct {
+	outcome ports.TaintScanOutcome
+	err     error
+	calls   int
+}
+
+func (s *staticTaintCoverage) Scan(context.Context, shared.ID, string) (int, error) {
+	return s.outcome.Proposed, s.err
+}
+
+func (s *staticTaintCoverage) ScanWithCoverage(context.Context, shared.ID, string) (ports.TaintScanOutcome, error) {
+	s.calls++
+	return s.outcome, s.err
+}
+
 func (a staticSASTAnalyzer) Name() string { return "static-sast" }
 
 func (a staticSASTAnalyzer) AnalyzeSource(context.Context, string) ([]ports.SASTRawFinding, error) {
@@ -258,6 +273,28 @@ func TestScanInScopeRunsAndAudits(t *testing.T) {
 	}
 	assertDebugEvent(t, res.DebugEvents, stageVulns, "fake", ports.ScanDebugSucceeded)
 	assertDebugEvent(t, res.DebugEvents, stageLicense, "license-policy", ports.ScanDebugSucceeded)
+}
+
+func TestScanSurfacesPythonTaintCoverageEvenWhenBestEffortScannerFails(t *testing.T) {
+	svc := newSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{})
+	scanner := &staticTaintCoverage{
+		outcome: ports.TaintScanOutcome{Coverage: ports.AnalysisCoverage{
+			Analyzer: "python-semantic-taint-v1", Language: "python", Status: ports.AnalysisCoveragePartial,
+			Available: true, FilesSeen: 2, FilesParsed: 1, Gaps: []ports.AnalysisCoverageGap{{Kind: "parse_recovery", Count: 1}},
+		}},
+		err: errors.New("untrusted parser detail"),
+	}
+	svc.SetPythonTaint(scanner)
+	result, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
+	if err != nil {
+		t.Fatalf("best-effort semantic scanner failed the SCA scan: %v", err)
+	}
+	if scanner.calls != 1 || len(result.AnalysisCoverage) != 1 || result.AnalysisCoverage[0].FilesParsed != 1 {
+		t.Fatalf("coverage result = %+v calls=%d", result.AnalysisCoverage, scanner.calls)
+	}
+	if len(result.SourceWarnings) != 1 || strings.Contains(result.SourceWarnings[0], "untrusted parser detail") {
+		t.Fatalf("safe source warning = %v", result.SourceWarnings)
+	}
 }
 
 func TestCodeQualityRequiresExplicitScanOption(t *testing.T) {
@@ -959,7 +996,8 @@ func TestMergeCachedScanResultPreservesComplementaryModeData(t *testing.T) {
 			Version:   "1.0.0",
 			Severity:  shared.SeverityHigh,
 		}},
-		Findings: []finding.Finding{{DedupKey: "vuln:CVE-1:pkg:1.0.0"}},
+		Findings:         []finding.Finding{{DedupKey: "vuln:CVE-1:pkg:1.0.0"}},
+		AnalysisCoverage: []ports.AnalysisCoverage{{Analyzer: "python-semantic-taint-v1", Language: "python", Status: ports.AnalysisCoveragePartial, Gaps: []ports.AnalysisCoverageGap{{Kind: "dynamic_call", Count: 1}}}},
 	}
 	current := &ScanResult{
 		ScanMode: ScanModeLicenses,
@@ -988,6 +1026,23 @@ func TestMergeCachedScanResultPreservesComplementaryModeData(t *testing.T) {
 	}
 	if current.Findings[0].DedupKey != "vuln:CVE-1:pkg:1.0.0" || current.Findings[1].DedupKey != "license:GPL-3.0-only:pkg" {
 		t.Fatalf("unexpected merged findings: %+v", current.Findings)
+	}
+	if len(current.AnalysisCoverage) != 1 || current.AnalysisCoverage[0].Status != ports.AnalysisCoveragePartial {
+		t.Fatalf("analysis coverage was not preserved: %+v", current.AnalysisCoverage)
+	}
+}
+
+func TestSemanticCoverageWarningNeverIncludesFailureDetail(t *testing.T) {
+	partial := ports.AnalysisCoverage{Analyzer: "python-semantic-taint-v1", Status: ports.AnalysisCoveragePartial, Reason: ports.AnalysisReasonResolutionFailed}
+	unavailable := ports.AnalysisCoverage{Analyzer: "python-semantic-taint-v1", Status: ports.AnalysisCoverageUnavailable, Reason: ports.AnalysisReasonExtractionFailed}
+	if got := semanticCoverageWarning(partial); got != "python-semantic-taint-v1 coverage is partial; negative findings are not conclusive" {
+		t.Fatalf("partial warning = %q", got)
+	}
+	if got := semanticCoverageWarning(unavailable); got != "python-semantic-taint-v1 is unavailable; no semantic taint coverage was produced" {
+		t.Fatalf("unavailable warning = %q", got)
+	}
+	if got := semanticCoverageWarning(ports.AnalysisCoverage{Analyzer: "python-semantic-taint-v1", Status: ports.AnalysisCoverageNotApplicable}); got != "" {
+		t.Fatalf("not-applicable warning = %q", got)
 	}
 }
 

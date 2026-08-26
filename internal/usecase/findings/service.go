@@ -192,6 +192,7 @@ func (s *Service) RecordConfirmedSAST(ctx context.Context, verifier string, j ju
 		CWE:        sc.CWE,
 		Location:   sc.Location,
 		Rule:       sc.Rule,
+		DataFlow:   findingDataFlowFromClaim(sc.DataFlow),
 	}, s.clock.Now())
 	if err != nil {
 		return err
@@ -217,6 +218,26 @@ func (s *Service) RecordConfirmedSAST(ctx context.Context, verifier string, j ju
 		return &ports.PartialWriteError{Operation: "sast finding", IDs: []shared.ID{f.ID}, Err: err}
 	}
 	return nil
+}
+
+func findingDataFlowFromClaim(claim *judgment.SASTDataFlow) *finding.DataFlowTrace {
+	if claim == nil {
+		return nil
+	}
+	location := func(in judgment.SASTFlowLocation) finding.SourceLocation {
+		start, end := in.Column, in.Column
+		return finding.SourceLocation{
+			File: in.File, StartLine: in.Line, EndLine: in.Line, StartColumn: &start, EndColumn: &end,
+		}
+	}
+	steps := make([]finding.SourceLocation, len(claim.Steps))
+	for i := range claim.Steps {
+		steps[i] = location(claim.Steps[i])
+	}
+	return &finding.DataFlowTrace{
+		Language: claim.Language, Source: location(claim.Source), Sink: location(claim.Sink), Steps: steps,
+		CoverageComplete: claim.CoverageComplete, GraphTruncated: claim.GraphTruncated,
+	}
 }
 
 // RecordConfirmedDAST promotes a RUNTIME-verifier-confirmed CapSAST judgment to a persisted Kind=dast

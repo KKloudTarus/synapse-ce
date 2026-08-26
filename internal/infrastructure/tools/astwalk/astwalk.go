@@ -93,17 +93,42 @@ var skipDirs = map[string]bool{
 	".vscode": true, ".tox": true, ".hg": true, ".svn": true,
 }
 
+type sourceIssueReason string
+
+const (
+	sourceIssueUnreadable        sourceIssueReason = "unreadable"
+	sourceIssueSymlink           sourceIssueReason = "symlink"
+	sourceIssueOversized         sourceIssueReason = "oversized"
+	sourceIssueBinary            sourceIssueReason = "binary"
+	sourceIssueGenerated         sourceIssueReason = "generated"
+	sourceIssueMalformedNotebook sourceIssueReason = "malformed_notebook"
+)
+
+type sourceIssue struct {
+	Rel    string
+	Reason sourceIssueReason
+}
+
 // walkSource traverses root and calls visit(rel, language, content) for each regular, non-vendored,
 // non-binary source file (rel is the path relative to root). It follows no symlinks, bounds file size and
 // count, and honors ctx cancellation, mirroring the codeinventory and enry adapters. Notebook code cells
 // are presented as Python with a stable #cell-N path. truncated is true when the file cap tripped.
 func walkSource(ctx context.Context, root string, visit func(rel, lang string, content []byte)) (truncated bool, err error) {
+	return walkSourceWithIssues(ctx, root, visit, nil)
+}
+
+// walkSourceWithIssues is the coverage-aware form used by analyzers that can publish negative proofs.
+// report receives only Python/notebook candidates that were seen but deliberately could not be parsed;
+// existing metric consumers retain their historical best-effort behavior through walkSource.
+func walkSourceWithIssues(ctx context.Context, root string, visit func(rel, lang string, content []byte), report func(sourceIssue)) (truncated bool, err error) {
 	if root == "" {
 		return false, nil
 	}
 	files := 0
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, werr error) error {
+		rel := normalizedWalkRelative(root, path)
 		if werr != nil {
+			reportPythonSourceIssue(report, rel, sourceIssueUnreadable)
 			return nil
 		}
 		if ctx.Err() != nil {
@@ -116,6 +141,7 @@ func walkSource(ctx context.Context, root string, visit func(rel, lang string, c
 			return nil
 		}
 		if !d.Type().IsRegular() {
+			reportPythonSourceIssue(report, rel, sourceIssueSymlink)
 			return nil
 		}
 		if files++; files > maxFiles {
@@ -128,22 +154,33 @@ func walkSource(ctx context.Context, root string, visit func(rel, lang string, c
 			maxBytes = maxNotebookBytes
 		}
 		if lerr != nil || !fi.Mode().IsRegular() || fi.Size() > maxBytes {
+			reason := sourceIssueUnreadable
+			if lerr == nil && fi.Size() > maxBytes {
+				reason = sourceIssueOversized
+			}
+			reportPythonSourceIssue(report, rel, reason)
 			return nil
 		}
 		content, rerr := os.ReadFile(path) // #nosec G304 -- regular file, size-capped via Lstat above, under the walked root
 		if rerr != nil {
+			reportPythonSourceIssue(report, rel, sourceIssueUnreadable)
 			return nil
 		}
-		if enry.IsVendor(path) || enry.IsDotFile(path) || enry.IsGenerated(path, content) || enry.IsBinary(content) {
+		if enry.IsVendor(path) || enry.IsDotFile(path) {
 			return nil
 		}
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			rel = path
+		if enry.IsGenerated(path, content) {
+			reportPythonSourceIssue(report, rel, sourceIssueGenerated)
+			return nil
+		}
+		if enry.IsBinary(content) {
+			reportPythonSourceIssue(report, rel, sourceIssueBinary)
+			return nil
 		}
 		if notebook.IsPath(path) {
 			doc, err := notebook.Parse(content)
 			if err != nil {
+				reportPythonSourceIssue(report, rel, sourceIssueMalformedNotebook)
 				return nil // malformed notebooks are source data, not scan failures
 			}
 			if !strings.EqualFold(doc.KernelLanguage, "python") {
@@ -157,6 +194,9 @@ func walkSource(ctx context.Context, root string, visit func(rel, lang string, c
 			return nil
 		}
 		lang := enry.GetLanguage(filepath.Base(path), content)
+		if strings.EqualFold(filepath.Ext(path), ".py") {
+			lang = "Python"
+		}
 		if lang == "" {
 			return nil
 		}
@@ -167,4 +207,23 @@ func walkSource(ctx context.Context, root string, visit func(rel, lang string, c
 		return false, walkErr
 	}
 	return truncated, nil
+}
+
+func normalizedWalkRelative(root, target string) string {
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == "." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return ""
+	}
+	return filepath.ToSlash(rel)
+}
+
+func reportPythonSourceIssue(report func(sourceIssue), rel string, reason sourceIssueReason) {
+	if report == nil || rel == "" {
+		return
+	}
+	lower := strings.ToLower(rel)
+	if !strings.HasSuffix(lower, ".py") && !strings.HasSuffix(lower, ".ipynb") {
+		return
+	}
+	report(sourceIssue{Rel: rel, Reason: reason})
 }

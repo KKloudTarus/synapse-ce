@@ -55,6 +55,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
+	asttool "github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/codeinventory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/duplication"
@@ -1763,6 +1764,27 @@ func main() {
 		}
 		scaService.SetPyReachability(pyCoord)
 		log.Info("Tier-1 Python import-reachability ENABLED (source-only dead-dependency detection → OpenVEX not_affected; best-effort)")
+
+		// Tier-2 rides on Tier-1: incomplete parsing/resolution mints nothing and leaves the package-level
+		// judgment standing. The sidecar never imports or executes target Python and uses the SCA sandbox
+		// when one is configured.
+		if cfg.PySemanticReachabilityEnabled {
+			factsProvider := asttool.New(cfg.ASTBin)
+			if scaSandbox != nil {
+				factsProvider = factsProvider.WithRunner(scaSandbox)
+			} else {
+				log.Warn("python tier-2: synapse-ast runs unsandboxed (dev only); target code is parsed but never executed")
+			}
+			pyTier2, terr := pyreach.NewTier2Recorder(factsProvider, judgmentSvc, auditLog, clock)
+			if terr != nil {
+				log.Error("python tier-2 reachability init failed", "err", terr)
+				os.Exit(1)
+			}
+			scaService.SetPySymbolReachability(pyTier2)
+			log.Info("Python TIER-2 semantic reachability ENABLED (affected-symbol call paths; incomplete negatives leave Tier-1 standing)")
+		}
+	} else if cfg.PySemanticReachabilityEnabled {
+		log.Warn("SYNAPSE_PYREACH_TIER2_ENABLED is set but tier-1 Python reachability is off - tier-2 is SKIPPED, because a refusal must leave a tier-1 judgment standing")
 	}
 
 	// Deterministic Tier-1 JavaScript/TypeScript import-reachability, opt-in. Source-only like the Python
@@ -1859,6 +1881,25 @@ func main() {
 		}
 		scaService.SetTaint(taintCoord)
 		log.Info("taint-analysis CapSAST proposals ENABLED (sandboxed call-graph; propose-only, a distinct verifier gates)")
+	}
+
+	// Python Tier-2 taint is source-only: synapse-ast parses bounded semantic/value facts and never imports,
+	// executes, or compiles target Python. It therefore does not require the compile sandbox, though it uses
+	// the sandbox runner when available. Findings enter the same gated CapSAST lifecycle at score zero.
+	if cfg.PythonTaintEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_PYTAINT_ENABLED", "python semantic taint") {
+		factsProvider := asttool.New(cfg.ASTBin)
+		if scaSandbox != nil {
+			factsProvider = factsProvider.WithRunner(scaSandbox)
+		} else {
+			log.Warn("python taint: synapse-ast runs unsandboxed (dev only); target code is parsed but never executed")
+		}
+		pythonTaint, perr := taintscan.NewPythonCoordinator(factsProvider, judgmentSvc, taint.DefaultPythonCatalog(), auditLog, clock)
+		if perr != nil {
+			log.Error("python semantic taint coordinator init failed", "err", perr)
+			os.Exit(1)
+		}
+		scaService.SetPythonTaint(pythonTaint)
+		log.Info("Python semantic taint ENABLED (source-only interprocedural value flow; propose-only, a distinct verifier gates)")
 	}
 
 	// Cross-check disagreement judgments, opt-in. Like reachability it mints judgments, so it needs

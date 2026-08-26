@@ -44,6 +44,26 @@ func TestRecordConfirmedSAST(t *testing.T) {
 	}
 }
 
+func TestRecordConfirmedSASTProjectsStructuredDataFlow(t *testing.T) {
+	j := confirmedSAST()
+	source := judgment.SASTFlowLocation{File: "app.py", Line: 3, Column: 4}
+	sink := judgment.SASTFlowLocation{File: "app.py", Line: 4, Column: 8}
+	claim := j.Claim.(judgment.SASTClaim)
+	claim.Location = "app.py:4"
+	claim.DataFlow = &judgment.SASTDataFlow{
+		Language: "python", Source: source, Sink: sink, Steps: []judgment.SASTFlowLocation{source, sink}, GraphTruncated: true,
+	}
+	j.Claim = claim
+	repo := &fakeRepo{}
+	if err := newSvc(repo, &fakeComments{}, &fakeAudit{}).RecordConfirmedSAST(context.Background(), "human:bob", j); err != nil {
+		t.Fatal(err)
+	}
+	f := repo.upserted[0]
+	if f.DataFlow == nil || f.SourceLocation == nil || f.SourceLocation.StartLine != 4 || len(f.DataFlow.Steps) != 2 || !f.DataFlow.GraphTruncated {
+		t.Fatalf("projected data flow = %+v", f)
+	}
+}
+
 func TestRecordConfirmedSASTRejectsWrongInput(t *testing.T) {
 	for _, tc := range []struct {
 		name string

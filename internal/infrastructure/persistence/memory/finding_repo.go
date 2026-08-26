@@ -65,6 +65,7 @@ func (r *FindingRepository) Upsert(_ context.Context, findings []finding.Finding
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, f := range findings {
+		f = cloneFinding(f)
 		byKey := r.data[f.EngagementID]
 		if byKey == nil {
 			byKey = map[string]finding.Finding{}
@@ -89,7 +90,7 @@ func (r *FindingRepository) Upsert(_ context.Context, findings []finding.Finding
 		} else if f.Version <= 0 {
 			f.Version = 1
 		}
-		byKey[key] = f
+		byKey[key] = cloneFinding(f)
 	}
 	return nil
 }
@@ -116,7 +117,36 @@ func findingMachineProjectionChanged(existing, incoming finding.Finding) bool {
 		existing.FixedVersion != incoming.FixedVersion ||
 		existing.DetectionState != incoming.DetectionState ||
 		existing.RiskAssessmentID != incoming.RiskAssessmentID ||
+		!finding.EqualDataFlowTrace(existing.DataFlow, incoming.DataFlow) ||
 		!sameFindingTime(existing.EvaluatedAt, incoming.EvaluatedAt)
+}
+
+func cloneFinding(in finding.Finding) finding.Finding {
+	out := in
+	out.Sources = append([]string(nil), in.Sources...)
+	if in.SourceLocation != nil {
+		location := cloneFindingSourceLocation(*in.SourceLocation)
+		out.SourceLocation = &location
+	}
+	out.DataFlow = finding.CloneDataFlowTrace(in.DataFlow)
+	if in.EvaluatedAt != nil {
+		value := *in.EvaluatedAt
+		out.EvaluatedAt = &value
+	}
+	return out
+}
+
+func cloneFindingSourceLocation(in finding.SourceLocation) finding.SourceLocation {
+	out := in
+	if in.StartColumn != nil {
+		value := *in.StartColumn
+		out.StartColumn = &value
+	}
+	if in.EndColumn != nil {
+		value := *in.EndColumn
+		out.EndColumn = &value
+	}
+	return out
 }
 
 func sameFindingTime(left, right *time.Time) bool {
@@ -151,8 +181,8 @@ func (r *FindingRepository) UpdateStatus(_ context.Context, engagementID, findin
 			}
 			f.Status = status
 			f.Version++
-			r.data[engagementID][key] = f
-			return f, nil
+			r.data[engagementID][key] = cloneFinding(f)
+			return cloneFinding(f), nil
 		}
 	}
 	return finding.Finding{}, fmt.Errorf("finding %s: %w", findingID, shared.ErrNotFound)
@@ -169,8 +199,8 @@ func (r *FindingRepository) SetAssignee(_ context.Context, engagementID, finding
 			}
 			f.Assignee = assignee
 			f.Version++
-			r.data[engagementID][key] = f
-			return f, nil
+			r.data[engagementID][key] = cloneFinding(f)
+			return cloneFinding(f), nil
 		}
 	}
 	return finding.Finding{}, fmt.Errorf("finding %s: %w", findingID, shared.ErrNotFound)
@@ -182,7 +212,7 @@ func (r *FindingRepository) GetByEngagementAndID(_ context.Context, engagementID
 	defer r.mu.RUnlock()
 	for _, f := range r.data[engagementID] {
 		if f.ID == findingID {
-			return f, nil
+			return cloneFinding(f), nil
 		}
 	}
 	return finding.Finding{}, fmt.Errorf("finding %s in engagement %s: %w", findingID, engagementID, shared.ErrNotFound)
@@ -201,8 +231,8 @@ func (r *FindingRepository) SetEvidenceScore(_ context.Context, engagementID, fi
 			}
 			f.EvidenceScore = score
 			f.Version++
-			r.data[engagementID][key] = f
-			return f, nil
+			r.data[engagementID][key] = cloneFinding(f)
+			return cloneFinding(f), nil
 		}
 	}
 	return finding.Finding{}, fmt.Errorf("finding %s: %w", findingID, shared.ErrNotFound)
@@ -223,8 +253,8 @@ func (r *FindingRepository) setPriorityInternal(engagementID, findingID shared.I
 			}
 			f.Priority = priority
 			f.Version++
-			r.data[engagementID][key] = f
-			return f, nil
+			r.data[engagementID][key] = cloneFinding(f)
+			return cloneFinding(f), nil
 		}
 	}
 	return finding.Finding{}, fmt.Errorf("finding %s: %w", findingID, shared.ErrNotFound)
@@ -237,7 +267,7 @@ func (r *FindingRepository) ListByEngagement(ctx context.Context, engagementID s
 	observationStore := r.cloudObservations
 	candidates := make([]finding.Finding, 0, len(byKey))
 	for _, f := range byKey {
-		candidates = append(candidates, f)
+		candidates = append(candidates, cloneFinding(f))
 	}
 	r.mu.RUnlock()
 	tenantID, _ := shared.TenantFrom(ctx)
@@ -280,6 +310,11 @@ func validateFindingBatch(findings []finding.Finding) error {
 	for _, f := range findings {
 		if err := f.ValidateRuleKey(); err != nil {
 			return fmt.Errorf("finding %s (kind %s): %w", f.DedupKey, f.Kind, err)
+		}
+		if f.DataFlow != nil {
+			if err := f.DataFlow.Validate(); err != nil {
+				return fmt.Errorf("finding %s data flow: %w", f.DedupKey, err)
+			}
 		}
 	}
 	return nil

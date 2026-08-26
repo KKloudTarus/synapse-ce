@@ -2,7 +2,11 @@
 
 package astwalk
 
-import "context"
+import (
+	"context"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/pythonprogram"
+)
 
 // FunctionsFor / MetricsFor are the CGO-free stubs: no tree-sitter grammar is compiled in, so the sidecar
 // reports the backend as unavailable and callers fall back to their own counting. This is the build the
@@ -21,4 +25,8 @@ func BugsFor(ctx context.Context, root string) (Bugs, error) {
 
 func QualityFor(ctx context.Context, root string) (Quality, error) {
 	return Quality{}, ErrUnavailable
+}
+
+func PythonFactsFor(ctx context.Context, root string) (pythonprogram.Document, error) {
+	return pythonprogram.Document{}, ErrUnavailable
 }
