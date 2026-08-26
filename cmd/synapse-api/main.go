@@ -1883,6 +1883,23 @@ func main() {
 		log.Info("taint-analysis CapSAST proposals ENABLED (sandboxed call-graph; propose-only, a distinct verifier gates)")
 	}
 
+	// Python Tier-2 taint is source-only: synapse-ast parses bounded semantic/value facts and never imports,
+	// executes, or compiles target Python. It therefore does not require the compile sandbox, though it uses
+	// the sandbox runner when available. Findings enter the same gated CapSAST lifecycle at score zero.
+	if cfg.PythonTaintEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_PYTAINT_ENABLED", "python semantic taint") {
+		factsProvider := asttool.New(cfg.ASTBin)
+		if scaSandbox != nil {
+			factsProvider = factsProvider.WithRunner(scaSandbox)
+		}
+		pythonTaint, perr := taintscan.NewPythonCoordinator(factsProvider, judgmentSvc, taint.DefaultPythonCatalog(), auditLog, clock)
+		if perr != nil {
+			log.Error("python semantic taint coordinator init failed", "err", perr)
+			os.Exit(1)
+		}
+		scaService.SetPythonTaint(pythonTaint)
+		log.Info("Python semantic taint ENABLED (source-only interprocedural value flow; propose-only, a distinct verifier gates)")
+	}
+
 	// Cross-check disagreement judgments, opt-in. Like reachability it mints judgments, so it needs
 	// the judgment lifecycle. The coordinator proposes ungated CapCorrelation judgments (system identity) for
 	// human review where the run detection sources disagree; composition-root only (the crosscheckjudge arch

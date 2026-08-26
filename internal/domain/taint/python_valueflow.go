@@ -58,12 +58,13 @@ type PythonSourceModel struct {
 
 // PythonSinkModel marks selected call arguments (zero-based) or the receiver as dangerous.
 type PythonSinkModel struct {
-	Pattern         PythonCallablePattern
-	Class           TaintClass
-	CWE             string
-	Rule            string
-	ArgumentIndexes []int
-	Receiver        bool
+	Pattern          PythonCallablePattern
+	Class            TaintClass
+	CWE              string
+	Rule             string
+	ArgumentIndexes  []int
+	ArgumentKeywords []string
+	Receiver         bool
 }
 
 // PythonSanitizerModel neutralizes only its listed classes at the call-result slot.
@@ -275,6 +276,11 @@ func (b *pythonValueBuilder) modelCalls() {
 			for _, argument := range model.ArgumentIndexes {
 				if argument >= 0 && argument < len(call.Arguments) {
 					b.addFlow(call.Arguments[argument].ValueID, sinkID)
+				}
+			}
+			for _, argument := range call.Arguments {
+				if containsString(model.ArgumentKeywords, argument.Keyword) {
+					b.addFlow(argument.ValueID, sinkID)
 				}
 			}
 			if model.Receiver {
@@ -617,6 +623,11 @@ func validatePythonCatalog(catalog PythonCatalog) error {
 		if !sink.Class.Valid() || !strings.HasPrefix(sink.CWE, "CWE-") || sink.Rule == "" {
 			return fmt.Errorf("%w: invalid Python sink model", shared.ErrValidation)
 		}
+		for _, keyword := range sink.ArgumentKeywords {
+			if keyword == "" || strings.ContainsAny(keyword, "\r\n\t") {
+				return fmt.Errorf("%w: invalid Python sink keyword", shared.ErrValidation)
+			}
+		}
 	}
 	for _, sanitizer := range catalog.Sanitizers {
 		for _, class := range sanitizer.Classes {
@@ -642,6 +653,18 @@ func likelyRequestParameter(name string) bool {
 	switch strings.ToLower(name) {
 	case "request", "req", "body", "data", "payload", "form", "query", "params", "headers", "cookies", "path":
 		return true
+	}
+	return false
+}
+
+func containsString(values []string, want string) bool {
+	if want == "" {
+		return false
+	}
+	for _, value := range values {
+		if value == want {
+			return true
+		}
 	}
 	return false
 }

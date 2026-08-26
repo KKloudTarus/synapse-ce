@@ -295,13 +295,13 @@ Exit: value flow—not mere call adjacency—drives Python taint candidates.
 
 ### Pass 5 — Framework catalog and proposed findings
 
-- [ ] Add Flask, Django, and FastAPI request sources.
-- [ ] Add SQLAlchemy/Django DB/raw SQL sinks.
-- [ ] Add subprocess/OS command, path, SSRF, template/XSS, deserialization, and redirect sinks.
-- [ ] Add class-specific sanitizers and safe API shapes.
-- [ ] Create complete first-party catalog metadata and golden compliant/noncompliant examples.
-- [ ] Propose `CapSAST` judgments only; never self-confirm.
-- [ ] Add deduplication and bounded audit evidence.
+- [x] Add Flask, Django, and FastAPI request sources.
+- [x] Add SQLAlchemy/Django DB/raw SQL sinks.
+- [x] Add subprocess/OS command, path, SSRF, template/XSS, deserialization, and redirect sinks.
+- [x] Add class-specific sanitizers and safe API shapes.
+- [x] Create complete first-party catalog metadata and golden compliant/noncompliant examples.
+- [x] Propose `CapSAST` judgments only; never self-confirm.
+- [x] Add deduplication and bounded audit evidence.
 
 Exit: the supported framework matrix produces reviewable, evidence-backed proposed findings.
 
@@ -378,6 +378,7 @@ Append one row at the end of every implementation pass.
 | 2 | `feat:python-semantic-resolver` | Python resolver and shared callgraph tests pass | Focused AST/ports tests and `go build ./cmd/...` pass | Resolver emits conservative candidates for ambiguity, keeps positive graphs usable under partial coverage, and requires complete extraction plus resolution before a negative proof. Public Python API symbols are entrypoints by design to keep library scans sound. |
 | 3 | `feat:python-tier2-reachability` | Python Tier-2 analyzer/recorder, reachproof, SCA subject, judgment provenance, config and OpenVEX tests pass | Focused cross-package tests and `go build ./cmd/...` pass | Exact PyPI PURL + advisory symbol subjects prevent package/symbol confusion. Partial coverage admits bounded positive witnesses only; incomplete negatives are removed before the coordinator so Tier-1 stands. API composition is opt-in via `SYNAPSE_PYREACH_TIER2_ENABLED`. |
 | 4 | `feat:python-value-flow-taint` | Python facts/value-flow, typed catalog, interprocedural binding and resolver regression tests pass | Focused cross-package tests and `go build ./cmd/...` pass | The Python graph tracks value slots rather than treating call adjacency as data flow. Traversal is cycle-safe and bounded; sinks and sanitizers are class-specific. CGO extractor golden tests remain CI-only on this workstation because no C compiler is installed. |
+| 5 | `feat:python-taint-proposals` | Python coordinator, framework matrix, keyword sinks, catalog metadata/config and SCA composition tests pass | Focused cross-package tests and `go build ./cmd/...` pass | Python hits are stable, deduplicated, bounded `CapSAST` proposals under `system:python-taint-scan`; the coordinator has no verifier port. Partial coverage is explicit on positive audit witnesses and never becomes a clean judgment. Opt-in via `SYNAPSE_PYTAINT_ENABLED`. |
 
 ## Definition of done
 

@@ -103,6 +103,7 @@ type Service struct {
 	sbomCache                        ports.SBOMCache                       // optional content+version-addressed cache of the generated SBOM
 	sbomCrossCheck                   ports.SBOMCrossCheckRecorder          // optional SBOM-producer disagreement → judgment minter
 	taint                            ports.TaintScanner                    // optional deterministic taint-analysis → gated CapSAST proposals
+	pythonTaint                      ports.TaintScanner                    // optional Python semantic value-flow → gated CapSAST proposals
 	graphResolver                    ports.DependencyGraphResolver         // optional transitive-edge resolver (Go via `go mod graph`)
 	mavenResolver                    ports.MavenResolver                   // optional Maven transitive-tree resolver (`mvn dependency:list`)
 	gradleResolver                   ports.GradleResolver                  // optional Gradle transitive-tree resolver (`gradle dependencies`)
@@ -443,6 +444,11 @@ func (s *Service) SetVulnerabilityReconciler(reconciler ports.SBOMVulnerabilityR
 // judgments. Best-effort + opt-in: a no-coverage/un-buildable target is ignored (the scan never fails). A
 // setter keeps NewService call sites unchanged.
 func (s *Service) SetTaint(t ports.TaintScanner) { s.taint = t }
+
+// SetPythonTaint configures Python's source-only, interprocedural value-flow proposer separately from the
+// legacy Go function-level scanner. Keeping independent hooks lets operators enable Python analysis without
+// enabling target compilation. No-coverage parser/resolution failures remain best-effort and propose nothing.
+func (s *Service) SetPythonTaint(t ports.TaintScanner) { s.pythonTaint = t }
 
 // SetGraphResolver configures the optional transitive-edge resolver (Go via `go mod graph`). nil ⇒
 // no resolved Go edges. Best-effort + opt-in: a non-Go target / no module cache / tool error adds no edges
@@ -2875,6 +2881,13 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// enhancement; the scan is never failed). Runs while ws.Dir still exists.
 	if opts.scansVulnerabilities() && s.taint != nil {
 		_, _ = s.taint.Scan(ctx, engagementID, ws.Dir)
+	}
+
+	// Python semantic taint is source-only and value-granular. It runs independently of the legacy Go
+	// function-level scanner, but follows the same propose-only lifecycle: positive witnesses become gated
+	// CapSAST proposals, while missing/partial coverage never becomes a clean conclusion.
+	if opts.scansVulnerabilities() && s.pythonTaint != nil {
+		_, _ = s.pythonTaint.Scan(ctx, engagementID, ws.Dir)
 	}
 
 	// AI false-positive triage (opt-in, best-effort, PROPOSE-ONLY). After the deterministic pass, the

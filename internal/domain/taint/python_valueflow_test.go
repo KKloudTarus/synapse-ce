@@ -140,6 +140,40 @@ func TestPythonValueFlowBindsKeywordArgumentsAndTerminatesOnCycles(t *testing.T)
 	}
 }
 
+func TestPythonSinkMatchesReorderedKeywordArgument(t *testing.T) {
+	document := keywordSinkPythonDocument()
+	resolution, err := pythonprogram.Resolve(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph, err := BuildPythonValueGraph(document, resolution, DefaultPythonCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := pythonFindingFor(graph.Vulnerabilities(), TaintSSRF, "python-taint-ssrf"); !ok {
+		t.Fatalf("reordered url= keyword did not reach SSRF sink: %+v", graph.Vulnerabilities())
+	}
+}
+
+func TestPythonFrameworkRouteParameterIsSourceRegardlessOfName(t *testing.T) {
+	document := interproceduralPythonDocument()
+	document.Symbols[1].Parameters[0].Name = "user_id"
+	document.Values[0].Name, document.Values[0].Ref = "user_id", pyName("user_id")
+	document.Values[1].Ref = pyName("user_id")
+	document.Calls[0].Arguments[0].Value = pyName("user_id")
+	resolution, err := pythonprogram.Resolve(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph, err := BuildPythonValueGraph(document, resolution, DefaultPythonCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := pythonFindingFor(graph.Vulnerabilities(), TaintCommand, "python-taint-command"); !ok {
+		t.Fatal("explicit Flask/Django/FastAPI route parameters must be treated as request sources")
+	}
+}
+
 func interproceduralPythonDocument() pythonprogram.Document {
 	document, moduleID := basePythonValueDocument()
 	route := pythonValueSymbol("python:app:route", "route", moduleID, pythonprogram.SymbolFunction, 2)
@@ -234,6 +268,27 @@ func siblingCallsPythonDocument() pythonprogram.Document {
 	document.Calls = []pythonprogram.Call{
 		{ID: "app.py:3:4", CallerID: route.ID, Callee: pyAttr("request", "args", "get"), ResultID: "source-result", Pos: pyPos(3, 4)},
 		{ID: "app.py:4:4", CallerID: route.ID, Callee: pyAttr("os", "system"), Arguments: []pythonprogram.Argument{{Value: pythonprogram.Reference{Kind: pythonprogram.ReferenceLiteral}, ValueID: "literal", Pos: pyPos(4, 14)}}, ResultID: "sink-result", Pos: pyPos(4, 4)},
+	}
+	document.Entrypoints = []pythonprogram.EntrypointHint{{SymbolID: route.ID, Kind: "framework_route", Pos: route.Pos}}
+	return document
+}
+
+func keywordSinkPythonDocument() pythonprogram.Document {
+	document, moduleID := basePythonValueDocument()
+	route := pythonValueSymbol("python:app:route", "route", moduleID, pythonprogram.SymbolFunction, 2)
+	document.Symbols = append(document.Symbols, route)
+	document.Imports = []pythonprogram.Import{{ScopeID: moduleID, Module: "requests", Pos: pyPos(1, 0)}}
+	document.Values = []pythonprogram.Value{
+		pyValue("source", route.ID, pythonprogram.ValueCallResult, "", pyCallRef("request", "args", "get"), 3, 4),
+		pyValue("timeout", route.ID, pythonprogram.ValueLiteral, "", pythonprogram.Reference{Kind: pythonprogram.ReferenceLiteral}, 4, 25),
+		pyValue("sink", route.ID, pythonprogram.ValueCallResult, "", pyCallRef("requests", "get"), 4, 4),
+	}
+	document.Calls = []pythonprogram.Call{
+		{ID: "app.py:3:4", CallerID: route.ID, Callee: pyAttr("request", "args", "get"), ResultID: "source", Pos: pyPos(3, 4)},
+		{ID: "app.py:4:4", CallerID: route.ID, Callee: pyAttr("requests", "get"), Arguments: []pythonprogram.Argument{
+			{Keyword: "timeout", Value: pythonprogram.Reference{Kind: pythonprogram.ReferenceLiteral}, ValueID: "timeout", Pos: pyPos(4, 25)},
+			{Keyword: "url", Value: pyCallRef("request", "args", "get"), ValueID: "source", Pos: pyPos(4, 37)},
+		}, ResultID: "sink", Pos: pyPos(4, 4)},
 	}
 	document.Entrypoints = []pythonprogram.EntrypointHint{{SymbolID: route.ID, Kind: "framework_route", Pos: route.Pos}}
 	return document

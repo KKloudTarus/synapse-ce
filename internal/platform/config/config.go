@@ -436,6 +436,10 @@ type Config struct {
 	// ASTBin is the sandboxable synapse-ast sidecar; empty enables bundled/PATH discovery.
 	PySemanticReachabilityEnabled bool
 	ASTBin                        string
+	// PythonTaintEnabled turns on source-only Python semantic value-flow analysis. The same synapse-ast
+	// sidecar extracts bounded facts, but unlike Go taint this pass never compiles or imports target code.
+	// Positive paths become gated CapSAST proposals; incomplete coverage never produces a clean verdict.
+	PythonTaintEnabled bool
 
 	// JSReachabilityEnabled turns on deterministic Tier-1 JavaScript/TypeScript import-reachability: a
 	// declared npm dependency that first-party source never imports becomes not_reachable, which the
@@ -693,6 +697,7 @@ func Load() Config {
 		PyReachabilityEnabled:                 getbool("SYNAPSE_PYREACH_ENABLED", false),
 		PySemanticReachabilityEnabled:         getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
 		ASTBin:                                os.Getenv("SYNAPSE_AST_BIN"),
+		PythonTaintEnabled:                    getbool("SYNAPSE_PYTAINT_ENABLED", false),
 		JSReachabilityEnabled:                 getbool("SYNAPSE_JSREACH_ENABLED", false),
 		JSSymbolReachabilityEnabled:           getbool("SYNAPSE_JSREACH_TIER2_ENABLED", false),
 		RustReachabilityEnabled:               getbool("SYNAPSE_REACH_RUST", false),

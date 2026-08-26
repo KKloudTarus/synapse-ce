@@ -23,6 +23,7 @@ func Default() (*Catalog, error) {
 	all = append(all, reliabilityRules()...)
 	all = append(all, xmlRules()...)
 	all = append(all, pythonRules()...)
+	all = append(all, pythonTaintRules()...)
 	all = append(all, notebookRules()...)
 	all = append(all, cssRules()...)
 	all = append(all, htmlRules()...)

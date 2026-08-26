@@ -200,6 +200,23 @@ bounded Tier-2 call path even when unrelated coverage is incomplete. A Tier-2 ne
 when extraction, resolution and symbol placement are complete; otherwise the Tier-1 judgment remains.
 The Tier-2 flag is ignored unless `SYNAPSE_PYREACH_ENABLED=true`.
 
+### Python semantic taint
+
+`SYNAPSE_PYTAINT_ENABLED=true` enables a separate source-only Python value-flow pass. The `synapse-ast`
+sidecar emits bounded value slots and expression/assignment/return flows; the analyzer then binds
+positional and keyword arguments, method receivers, parameters, and return values across the resolved
+call graph. It supports Flask, Django, and FastAPI request entrypoints and initial SQL, command, path,
+SSRF, XSS, deserialization, and redirect sink models. Sanitizers are class-specific: HTML escaping stops
+an XSS path but cannot hide the same value reaching `os.system`, and `yaml.safe_load` only neutralizes
+unsafe-deserialization semantics.
+
+Every hit is a gated `CapSAST` proposal at score zero under `system:python-taint-scan`; this pass has no
+verification or self-confirmation path. The audit witness contains only bounded relative positions and
+closed catalog metadata—never source contents or literal values. Parser/resolution gaps are recorded as
+incomplete coverage: a real positive path may still be proposed, but absence of a path is never published
+as a clean judgment. The feature needs judgments plus a CGO-enabled `synapse-ast`; it does not import,
+execute, or compile target Python and therefore does not require the target-compilation sandbox.
+
 ### Runtime confirmation (DAST)
 
 A gated SAST hypothesis can be confirmed at runtime by a **safe HTTP probe**. When a distinct
