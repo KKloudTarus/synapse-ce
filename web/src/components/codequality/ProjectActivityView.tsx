@@ -6,6 +6,7 @@ import {
   ChevronDown,
   GitBranch01,
   GitCommit,
+  HelpCircle,
   InfoCircle,
 } from '@untitledui/icons'
 import { useState } from 'react'
@@ -87,62 +88,54 @@ export function ProjectActivityView({
   }
 
   return (
-    <section className="space-y-6" aria-label="Project activity">
-      {/* Header & Scope Toggle */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-primary">Analysis activity</h2>
-          <p className="mt-1 max-w-2xl text-sm text-tertiary">
-            Audit immutable gate decisions and compare each successful analysis with its immediate predecessor.
-          </p>
-        </div>
-        <div className="flex items-center gap-1 rounded-lg border border-secondary bg-secondary p-1" aria-label="Activity scope">
-          <ScopeButton active={mode === 'overall'} onClick={() => changeMode('overall')}>
-            Overall
-          </ScopeButton>
-          <ScopeButton active={mode === 'new'} onClick={() => changeMode('new')}>
-            New Code
-          </ScopeButton>
-        </div>
-      </div>
-
+    <section className="space-y-5" aria-label="Project activity">
       {/* Quality Trend Section */}
       <Card
         title="Quality trend"
         actions={
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             {direction && <DirectionBadge direction={direction} />}
+            <div className="w-44">
+              <Select
+                value={metric}
+                onValueChange={(value) => setMetric(value as MetricKey)}
+                ariaLabel="Trend metric"
+                options={options}
+              />
+            </div>
+            <div
+              className="flex items-center gap-1 rounded-lg border border-secondary bg-secondary p-0.5"
+              aria-label="Activity scope"
+            >
+              <ScopeButton active={mode === 'overall'} onClick={() => changeMode('overall')}>
+                Overall
+              </ScopeButton>
+              <ScopeButton active={mode === 'new'} onClick={() => changeMode('new')}>
+                New Code
+              </ScopeButton>
+            </div>
           </div>
         }
+        bodyClass="p-0"
       >
-        <div className="mb-4 max-w-xs">
-          <Select
-            value={metric}
-            onValueChange={(value) => setMetric(value as MetricKey)}
-            ariaLabel="Trend metric"
-            options={options}
-          />
-        </div>
+        {mode === 'overall' && metric !== 'coverage' && !analyses.some((analysis) => analysis.coverage) && (
+          <span className="sr-only">
+            Line coverage is unavailable because no coverage artifact was supplied.
+          </span>
+        )}
 
         {metric === 'coverage' && points.length === 0 ? (
-          <div className="flex items-center gap-3 rounded-lg border border-dashed border-secondary bg-secondary px-4 py-5 text-sm text-tertiary">
-            <InfoCircle className="size-5 shrink-0 text-fg-tertiary" aria-hidden="true" />
+          <div className="m-4 flex items-center gap-2.5 rounded-lg border border-dashed border-secondary bg-secondary px-4 py-4 text-xs text-tertiary">
+            <InfoCircle className="size-4 shrink-0 text-fg-tertiary" aria-hidden="true" />
             <span>Line coverage is unavailable because no coverage artifact was supplied.</span>
           </div>
         ) : ['security', 'reliability', 'maintainability'].includes(metric) && points.length === 0 ? (
-          <div className="flex items-center gap-3 rounded-lg border border-dashed border-secondary bg-secondary px-4 py-5 text-sm text-tertiary">
-            <InfoCircle className="size-5 shrink-0 text-fg-tertiary" aria-hidden="true" />
+          <div className="m-4 flex items-center gap-2.5 rounded-lg border border-dashed border-secondary bg-secondary px-4 py-4 text-xs text-tertiary">
+            <InfoCircle className="size-4 shrink-0 text-fg-tertiary" aria-hidden="true" />
             <span>Rating is unavailable because the analysis did not provide a grade.</span>
           </div>
         ) : (
           <Trend metric={metric} points={points} />
-        )}
-
-        {mode === 'overall' && metric !== 'coverage' && !analyses.some((analysis) => analysis.coverage) && (
-          <div className="mt-4 flex items-center gap-2 rounded-md border border-secondary bg-primary px-3 py-2 text-xs text-tertiary">
-            <InfoCircle className="size-4 shrink-0 text-fg-tertiary" aria-hidden="true" />
-            <span>Line coverage is unavailable because no coverage artifact was supplied.</span>
-          </div>
         )}
       </Card>
 
@@ -154,29 +147,40 @@ export function ProjectActivityView({
             {analyses.length} loaded
           </Pill>
         }
-        bodyClass="p-0"
+        bodyClass="p-3.5"
       >
-        <ol className="divide-y divide-secondary">
+        <ol className="space-y-2.5">
           {analyses.map((analysis, index) => {
             const open = expanded === analysis.id
             const first = index === analyses.length - 1 && !hasOlder
             const isPassed = analysis.gate.passed
 
             return (
-              <li key={analysis.id}>
+              <li
+                key={analysis.id}
+                className={cn(
+                  'overflow-hidden rounded-xl border transition-all shadow-2xs',
+                  isPassed
+                    ? 'border-utility-green-300 bg-success-primary'
+                    : 'border-error bg-error-primary',
+                )}
+              >
                 <button
                   type="button"
-                  className="flex w-full flex-wrap items-center justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-secondary_hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-solid"
+                  className={cn(
+                    'flex w-full flex-wrap items-center justify-between gap-3.5 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-solid',
+                    isPassed ? 'hover:bg-success-secondary' : 'hover:bg-error-secondary',
+                  )}
                   aria-expanded={open}
                   onClick={() => setExpanded(open ? null : analysis.id)}
                 >
-                  <div className="flex min-w-0 items-start gap-3.5">
+                  <div className="flex min-w-0 items-start gap-3">
                     <span
                       className={cn(
                         'mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-lg border shadow-2xs',
                         isPassed
-                          ? 'border-utility-green-300 bg-success-primary text-fg-success-primary'
-                          : 'border-error bg-error-primary text-fg-error-primary',
+                          ? 'border-utility-green-400 bg-primary text-fg-success-primary'
+                          : 'border-error bg-primary text-fg-error-primary',
                       )}
                     >
                       <GitCommit className="size-4.5" aria-hidden="true" />
@@ -185,18 +189,18 @@ export function ProjectActivityView({
                       <div className="flex flex-wrap items-center gap-2 font-semibold text-primary text-sm">
                         <span>{formatDate(analysis.createdAt)}</span>
                         {first && (
-                          <span className="rounded-md border border-secondary bg-secondary px-2 py-0.5 text-[11px] font-medium text-tertiary">
+                          <span className="rounded-md border border-secondary bg-primary px-2 py-0.5 text-[11px] font-medium text-tertiary">
                             first analysis
                           </span>
                         )}
                       </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-xs text-tertiary">
-                        <span className="inline-flex items-center gap-1">
-                          <GitBranch01 className="size-3.5 text-fg-tertiary" aria-hidden="true" />
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2 font-mono text-xs text-tertiary">
+                        <span className="inline-flex items-center gap-1 font-medium text-secondary">
+                          <GitBranch01 className="size-3 text-fg-tertiary" aria-hidden="true" />
                           {analysis.sourceRef || 'source ref unavailable'}
                         </span>
                         {analysis.sourceCommit && (
-                          <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] font-semibold text-secondary">
+                          <span className="rounded border border-secondary bg-primary px-1.5 py-0.2 text-[11px] font-bold text-primary">
                             {analysis.sourceCommit.slice(0, 12)}
                           </span>
                         )}
@@ -205,7 +209,7 @@ export function ProjectActivityView({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2.5">
                     <GateStatus passed={analysis.gate.passed} />
                     <ChevronDown
                       className={cn(
@@ -218,14 +222,38 @@ export function ProjectActivityView({
                 </button>
 
                 {open && (
-                  <div className="border-t border-secondary bg-secondary p-5">
-                    <div className="grid gap-6 xl:grid-cols-[1.15fr_1fr]">
+                  <div className="border-t border-secondary bg-primary p-4">
+                    <div className="grid gap-4 xl:grid-cols-[1.15fr_1fr]">
                       <GateEvidence compact gate={analysis.gate} info={analysis.gateInfo} />
-                      <div className="rounded-xl border border-secondary bg-primary p-4 shadow-xs">
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-secondary">
-                          Changes in this analysis
-                        </h3>
-                        <div className="mt-3 grid grid-cols-2 gap-3">
+                      <div className="rounded-xl border border-secondary bg-secondary p-3.5 shadow-xs">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-secondary">
+                            Changes in this analysis
+                          </h3>
+                          {analysis.delta ? (
+                            <span
+                              className="text-tertiary hover:text-primary cursor-help"
+                              title={`Signed changes are compared with analysis ${analysis.newCode.previousId.slice(0, 12)}.`}
+                            >
+                              <HelpCircle className="size-3.5 text-fg-tertiary" aria-hidden="true" />
+                              <span className="sr-only">
+                                Signed changes are compared with analysis {analysis.newCode.previousId.slice(0, 12)}.
+                              </span>
+                            </span>
+                          ) : (
+                            <span
+                              className="text-tertiary hover:text-primary cursor-help"
+                              title="Baseline analysis: no previous successful result exists, so no delta is shown."
+                            >
+                              <HelpCircle className="size-3.5 text-fg-tertiary" aria-hidden="true" />
+                              <span className="sr-only">
+                                Baseline analysis: no previous successful result exists, so no delta is shown.
+                              </span>
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="mt-2.5 grid grid-cols-2 gap-2.5">
                           <AuditMetric
                             label="Total issues"
                             value={analysis.issues.total}
@@ -244,16 +272,6 @@ export function ProjectActivityView({
                             value={analysis.newCode.counts.bySeverity.high ?? 0}
                           />
                         </div>
-
-                        {analysis.delta ? (
-                          <p className="mt-3 text-xs text-tertiary">
-                            Signed changes are compared with analysis {analysis.newCode.previousId.slice(0, 12)}.
-                          </p>
-                        ) : (
-                          <p className="mt-3 text-xs text-tertiary">
-                            Baseline analysis: no previous successful result exists, so no delta is shown.
-                          </p>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -264,7 +282,7 @@ export function ProjectActivityView({
         </ol>
 
         {hasOlder && onLoadOlder && (
-          <div className="border-t border-secondary bg-secondary p-4 text-center">
+          <div className="mt-3 border-t border-secondary pt-3 text-center">
             <Button
               variant="secondary"
               loading={loadingOlder}
@@ -351,108 +369,250 @@ function pointOf(analysis: ProjectAnalysis | undefined, mode: Mode, metric: Metr
 
 function Trend({ metric, points }: { metric: MetricKey; points: TrendPoint[] }) {
   const width = 760
-  const height = 180
+  const height = 150
+  const padLeft = 48
+  const padRight = 32
+  const padTop = 28
+  const baselineY = height - 38
+  const plotWidth = width - padLeft - padRight
+  const plotHeight = baselineY - padTop
+
   const grade = ['security', 'reliability', 'maintainability'].includes(metric)
   const values = points.map((point) => point.value)
-  const min = grade ? 1 : Math.min(0, ...values)
-  const max = grade ? 5 : Math.max(1, ...values)
+
+  let min = 0
+  let max = 10
+  if (grade) {
+    min = 1
+    max = 5
+  } else if (metric === 'coverage' || metric === 'duplication') {
+    min = 0
+    max = 100
+  } else {
+    const dataMax = Math.max(...values, 0)
+    min = 0
+    max = dataMax === 0 ? 10 : Math.ceil(dataMax * 1.25)
+  }
+
   const range = Math.max(1, max - min)
-  const coords = points.map((point, index) => ({
-    x: points.length === 1 ? width / 2 : 24 + (index * (width - 48)) / (points.length - 1),
-    y: height - 24 - ((point.value - min) / range) * (height - 48),
-  }))
+
+  const coords = points.map((point, index) => {
+    const x = points.length === 1 ? padLeft + plotWidth / 2 : padLeft + (index * plotWidth) / (points.length - 1)
+    const y = grade
+      ? padTop + ((point.value - 1) / 4) * plotHeight
+      : padTop + plotHeight - ((point.value - min) / range) * plotHeight
+    return { x, y }
+  })
+
   const title = grade
     ? `${metricLabel(`${metric}_rating`)} (A is best)`
     : metricLabel(metric === 'duplication' ? 'duplication_density' : metric === 'coverage' ? 'coverage' : metric)
 
+  // Polyline path connecting heads
+  const linePath = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x} ${c.y}`).join(' ')
+  const areaPath =
+    coords.length > 1
+      ? `${linePath} L ${coords[coords.length - 1].x} ${baselineY} L ${coords[0].x} ${baselineY} Z`
+      : ''
+
+  // Tick labels
+  const yTicks = grade
+    ? [
+        { label: 'A', y: padTop },
+        { label: 'C', y: padTop + plotHeight / 2 },
+        { label: 'E', y: baselineY },
+      ]
+    : [
+        { label: formatTick(max, metric), y: padTop },
+        { label: formatTick((max + min) / 2, metric), y: padTop + plotHeight / 2 },
+        { label: formatTick(min, metric), y: baselineY },
+      ]
+
   return (
-    <div className="space-y-4">
-      <div className="relative rounded-xl border border-secondary bg-primary p-4 shadow-xs">
+    <div>
+      {/* Seamless Chart Canvas */}
+      <div className="relative px-4 pt-3 pb-1">
         <svg
           viewBox={`0 0 ${width} ${height}`}
           role="img"
           aria-label={`${title} trend`}
-          className="h-52 w-full overflow-visible"
+          className="h-44 w-full overflow-visible"
         >
           <title>{title} trend</title>
 
-          {/* Reference Grid Lines */}
+          <defs>
+            <linearGradient id="githubTrackGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#1570EF" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="#1570EF" stopOpacity="0.02" />
+            </linearGradient>
+          </defs>
+
+          {/* Background horizontal guide lines */}
+          {yTicks.map((tick, idx) => (
+            <g key={idx}>
+              <line
+                x1={padLeft}
+                y1={tick.y}
+                x2={width - padRight}
+                y2={tick.y}
+                stroke="currentColor"
+                strokeDasharray="4 4"
+                className="text-secondary"
+                strokeWidth="1"
+              />
+              <text
+                x={padLeft - 10}
+                y={tick.y + 3.5}
+                textAnchor="end"
+                className="fill-secondary font-mono font-bold text-[10px]"
+              >
+                {tick.label}
+              </text>
+            </g>
+          ))}
+
+          {/* Horizontal Timeline Rail */}
           <line
-            x1="20"
-            y1="24"
-            x2={width - 20}
-            y2="24"
+            x1={padLeft - 10}
+            y1={baselineY}
+            x2={width - padRight + 10}
+            y2={baselineY}
             stroke="currentColor"
-            strokeDasharray="4 4"
             className="text-secondary"
-          />
-          <line
-            x1="20"
-            y1={height / 2}
-            x2={width - 20}
-            y2={height / 2}
-            stroke="currentColor"
-            strokeDasharray="4 4"
-            className="text-secondary"
-          />
-          <line
-            x1="20"
-            y1={height - 24}
-            x2={width - 20}
-            y2={height - 24}
-            stroke="currentColor"
-            strokeDasharray="4 4"
-            className="text-secondary"
+            strokeWidth="2"
+            strokeLinecap="round"
           />
 
-          {/* Trend Polyline */}
+          {/* Stem Lines from Baseline up to each Node */}
+          {coords.map((coord, idx) => (
+            <g key={`stem-${points[idx].id}`}>
+              <line
+                x1={coord.x}
+                y1={baselineY}
+                x2={coord.x}
+                y2={coord.y}
+                stroke="#1570EF"
+                strokeDasharray="3 3"
+                strokeWidth="1.5"
+              />
+              {/* Baseline anchor node */}
+              <circle
+                cx={coord.x}
+                cy={baselineY}
+                r="3.5"
+                fill="#1570EF"
+              />
+            </g>
+          ))}
+
+          {/* Shaded Area Fill */}
+          {areaPath && <path d={areaPath} fill="url(#githubTrackGrad)" />}
+
+          {/* Connecting Rail Line */}
           {coords.length > 1 && (
             <polyline
               fill="none"
-              stroke="currentColor"
-              strokeWidth="3"
+              stroke="#1570EF"
+              strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
               points={coords.map((point) => `${point.x},${point.y}`).join(' ')}
-              className="text-utility-blue-600 dark:text-utility-blue-400"
             />
           )}
 
-          {/* Trend Points */}
-          {coords.map((point, index) => (
-            <g key={points[index].id} className="group">
-              <circle
-                cx={point.x}
-                cy={point.y}
-                r="7"
-                className="fill-primary stroke-utility-blue-600 dark:stroke-utility-blue-400 transition-all duration-150 group-hover:r-8"
-                strokeWidth="2.5"
-              />
-              <circle
-                cx={point.x}
-                cy={point.y}
-                r="3.5"
-                fill="currentColor"
-                className="text-utility-blue-600 dark:text-utility-blue-400"
+          {/* X-Axis Date & Commit Ticks below baseline */}
+          {coords.map((coord, index) => (
+            <g key={`xtick-${points[index].id}`}>
+              <text
+                x={coord.x}
+                y={baselineY + 14}
+                textAnchor="middle"
+                className="fill-primary font-bold font-mono text-[11px]"
               >
-                <title>
-                  {points[index].label}: {points[index].display}
-                  {points[index].commit ? ` · ${points[index].commit}` : ''}
-                </title>
-              </circle>
+                {shortDate(points[index].label)}
+              </text>
+              {points[index].commit && (
+                <text
+                  x={coord.x}
+                  y={baselineY + 26}
+                  textAnchor="middle"
+                  className="fill-tertiary font-mono text-[9.5px] font-medium"
+                >
+                  {points[index].commit}
+                </text>
+              )}
             </g>
           ))}
+
+          {/* GitHub Milestone Nodes ("Con ruồi") with High-Contrast Value Badges */}
+          {coords.map((coord, index) => {
+            const p = points[index]
+            return (
+              <g key={p.id} className="cursor-pointer">
+                {/* Outer Glow Halo */}
+                <circle
+                  cx={coord.x}
+                  cy={coord.y}
+                  r="8"
+                  fill="#EFF8FF"
+                  stroke="#1570EF"
+                  strokeWidth="2.5"
+                />
+
+                {/* Inner Core */}
+                <circle
+                  cx={coord.x}
+                  cy={coord.y}
+                  r="3.5"
+                  fill="#1570EF"
+                >
+                  <title>
+                    {p.label}: {p.display}
+                    {p.commit ? ` · ${p.commit}` : ''}
+                  </title>
+                </circle>
+
+                {/* Top Callout Value Badge */}
+                <g transform={`translate(${coord.x}, ${coord.y - 16})`}>
+                  <rect
+                    x="-24"
+                    y="-11"
+                    width="48"
+                    height="18"
+                    rx="4"
+                    fill="#1570EF"
+                    stroke="#175CD3"
+                    strokeWidth="1"
+                  />
+                  <polygon
+                    points="0,-1 -3,-4 3,-4"
+                    fill="#1570EF"
+                  />
+                  <text
+                    x="0"
+                    y="-2"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fill="#FFFFFF"
+                    className="font-mono font-bold text-[10px]"
+                  >
+                    {p.display}
+                  </text>
+                </g>
+              </g>
+            )
+          })}
         </svg>
       </div>
 
-      {/* History Data Table */}
-      <div className="overflow-x-auto rounded-lg border border-secondary bg-primary">
-        <table className="w-full min-w-[36rem] text-left text-xs">
+      {/* Seamless History Data Table Strip */}
+      <div className="border-t border-secondary">
+        <table className="w-full text-left text-xs">
           <thead>
             <tr className="border-b border-secondary bg-secondary text-secondary">
-              <th className="px-4 py-2.5 font-bold">Analysis</th>
+              <th className="px-4 py-2 font-bold">Analysis</th>
               {points.map((point) => (
-                <th key={point.id} className="px-4 py-2.5 text-right font-semibold">
+                <th key={point.id} className="px-4 py-2 text-right font-semibold">
                   {shortDate(point.label)}
                 </th>
               ))}
@@ -460,11 +620,11 @@ function Trend({ metric, points }: { metric: MetricKey; points: TrendPoint[] }) 
           </thead>
           <tbody>
             <tr>
-              <th className="px-4 py-3 font-semibold text-tertiary">{title}</th>
+              <th className="px-4 py-2 font-semibold text-tertiary">{title}</th>
               {points.map((point) => (
                 <td
                   key={point.id}
-                  className="px-4 py-3 text-right font-mono font-bold tabular-nums text-primary"
+                  className="px-4 py-2 text-right font-mono font-bold tabular-nums text-primary"
                 >
                   {point.display}
                 </td>
@@ -475,6 +635,16 @@ function Trend({ metric, points }: { metric: MetricKey; points: TrendPoint[] }) 
       </div>
     </div>
   )
+}
+
+function formatTick(value: number, metric: MetricKey) {
+  if (metric === 'coverage' || metric === 'duplication') {
+    return `${Math.round(value)}%`
+  }
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(1)}k`
+  }
+  return Math.round(value).toString()
 }
 
 type Direction = 'improving' | 'regressing' | 'unchanged'
@@ -529,7 +699,7 @@ function ScopeButton({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        'rounded-md px-3 py-1.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-solid',
+        'rounded-md px-2.5 py-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-solid',
         active
           ? 'bg-primary text-brand-secondary shadow-xs'
           : 'text-tertiary hover:bg-primary_hover hover:text-primary',
@@ -542,15 +712,15 @@ function ScopeButton({
 
 function AuditMetric({ label, value, delta }: { label: string; value: number; delta?: number }) {
   return (
-    <div className="rounded-lg border border-secondary bg-primary p-3 shadow-2xs">
+    <div className="rounded-lg border border-secondary bg-primary p-2.5 shadow-2xs">
       <div className="text-xs font-semibold text-secondary">{label}</div>
-      <div className="mt-1 font-mono text-xl font-bold tabular-nums text-primary">
+      <div className="mt-0.5 font-mono text-lg font-bold tabular-nums text-primary">
         {value.toLocaleString()}
       </div>
       {delta !== undefined && (
         <div
           className={cn(
-            'mt-1 font-mono text-[11px] font-semibold tabular-nums',
+            'mt-0.5 font-mono text-[10px] font-semibold tabular-nums',
             delta > 0
               ? 'text-error-primary'
               : delta < 0
