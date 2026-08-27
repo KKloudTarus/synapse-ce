@@ -29,6 +29,9 @@ func Default() (*Catalog, error) {
 	all = append(all, htmlRules()...)
 	all = append(all, textRules()...)
 	all = append(all, swiftRules()...)
+	all = append(all, rustRules()...)
+	all = append(all, cExtendedRules()...)
+	all = append(all, cppExtendedRules()...)
 
 	return New(all)
 }

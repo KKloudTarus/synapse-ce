@@ -213,7 +213,7 @@ func QualityFor(ctx context.Context, root string) (Quality, error) {
 	}
 	notebooks := map[string][]notebookChunk{}
 	truncated, err := walkSource(ctx, root, func(rel, lang string, content []byte) {
-		if lang != "Python" && lang != "Java" && lang != "JavaScript" && lang != "Kotlin" && lang != "Scala" && lang != "Ruby" && lang != "CSS" && lang != "HTML" && lang != "Swift" {
+		if lang != "Python" && lang != "Java" && lang != "JavaScript" && lang != "Kotlin" && lang != "Scala" && lang != "Ruby" && lang != "CSS" && lang != "HTML" && lang != "Swift" && lang != "Rust" && lang != "C" && lang != "C++" {
 			return
 		}
 		if lang == "Python" {
@@ -261,6 +261,12 @@ func QualityFor(ctx context.Context, root string) (Quality, error) {
 			findings, fileTruncated := swiftFindingsLimitWithCounts(tree, content, rel, remaining, swiftPerRule)
 			out.Findings = append(out.Findings, findings...)
 			swiftTruncated = swiftTruncated || fileTruncated
+		case "Rust":
+			out.Findings = append(out.Findings, rustFindings(tree, content, rel)...)
+		case "C":
+			out.Findings = append(out.Findings, cFindings(tree, content, rel)...)
+		case "C++":
+			out.Findings = append(out.Findings, cppFindings(tree, content, rel)...)
 		}
 	})
 	if err != nil {
