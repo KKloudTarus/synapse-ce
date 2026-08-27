@@ -207,7 +207,7 @@ func TestPostgresJobQueueAggregateJobQueueStatsAcrossTenants(t *testing.T) {
 	}
 
 	otherTenant := shared.ID("other-tenant")
-	if _, err := q.pool.Exec(ctx, `INSERT INTO tenants (id) VALUES ($1) ON CONFLICT DO NOTHING`, otherTenant.String()); err != nil {
+	if _, err := q.pool.Exec(ctx, `INSERT INTO tenants (id, name) VALUES ($1, $1) ON CONFLICT DO NOTHING`, otherTenant.String()); err != nil {
 		t.Fatalf("seed second tenant: %v", err)
 	}
 	ctxB := shared.WithTenant(context.Background(), otherTenant)
