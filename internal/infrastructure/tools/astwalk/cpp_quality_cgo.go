@@ -407,12 +407,12 @@ func cppMatchDeclaration(n *sitter.Node, text string, src []byte, emit func(stri
 			emit("reinterpret-cast-unrelated-classes", n)
 		}
 	}
-	if strings.Contains(text, "= NULL;") || strings.Contains(text, "= 0;") || strings.Contains(text, "NULL") {
+	if strings.Contains(text, "NULL") {
 		if strings.Contains(text, "*") && !strings.Contains(text, "nullptr") {
 			emit("null-macro-instead-of-nullptr", n)
 		}
 	}
-	if strings.HasPrefix(strings.TrimSpace(text), "const int ") || strings.HasPrefix(strings.TrimSpace(text), "const size_t ") {
+	if (strings.Contains(text, "const int ") || strings.Contains(text, "const size_t ") || strings.Contains(text, "const float ") || strings.Contains(text, "const double ")) {
 		if !strings.Contains(text, "constexpr") {
 			emit("missing-constexpr-specifier", n)
 		}

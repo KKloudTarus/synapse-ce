@@ -241,7 +241,8 @@ func cMatchDeclaration(n *sitter.Node, text string, src []byte, emit func(string
 		}
 	}
 	// Static IV initialization
-	if (strings.Contains(text, "iv[") || strings.Contains(text, "iv =") || strings.Contains(text, "IV[")) && (strings.Contains(text, "{0}") || strings.Contains(text, "{ 0 }")) {
+	lowerText := strings.ToLower(text)
+	if (strings.Contains(lowerText, "iv[") || strings.Contains(lowerText, "iv =") || strings.Contains(lowerText, "nonce")) && (strings.Contains(text, "{0}") || strings.Contains(text, "{ 0 }") || strings.Contains(text, "memset")) {
 		emit("static-iv-initialization", n)
 	}
 }
@@ -365,17 +366,27 @@ func cMatchBinary(n *sitter.Node, text string, src []byte, emit func(string, *si
 		op = opNode.Content(src)
 	}
 
+	left := n.ChildByFieldName("left")
+	right := n.ChildByFieldName("right")
+	lText := ""
+	rText := ""
+	if left != nil {
+		lText = left.Content(src)
+	}
+	if right != nil {
+		rText = right.Content(src)
+	}
+
 	if op == "<" || op == "<=" || op == ">" || op == ">=" {
-		if (strings.Contains(text, "signed") || strings.Contains(text, "int ")) && !cIsSignedChecked(n, src) {
-			if strings.Contains(text, "size") || strings.Contains(text, "buf") || strings.Contains(text, "cap") || strings.Contains(text, "len") {
+		if (strings.Contains(text, "signed") || strings.Contains(text, "int ") || strings.Contains(text, "ssize_t")) && !cIsSignedChecked(n, src) {
+			if strings.Contains(lText, "size") || strings.Contains(lText, "buf") || strings.Contains(lText, "cap") || strings.Contains(lText, "len") ||
+			   strings.Contains(rText, "size") || strings.Contains(rText, "buf") || strings.Contains(rText, "cap") || strings.Contains(rText, "len") {
 				emit("signed-unsigned-comparison", n)
 			}
 		}
 	}
 	if op == "<<" || op == ">>" || strings.Contains(text, "<<") || strings.Contains(text, ">>") {
-		right := n.ChildByFieldName("right")
 		if right != nil {
-			rText := right.Content(src)
 			if num, err := strconv.Atoi(strings.TrimSpace(rText)); err == nil && num >= 32 {
 				emit("shift-count-overflow", n)
 			} else if !cIsShiftGuarded(n, src) && !strings.Contains(text, "< 32") && !strings.Contains(text, "< 64") {
@@ -384,17 +395,13 @@ func cMatchBinary(n *sitter.Node, text string, src []byte, emit func(string, *si
 		}
 	}
 	if op == "/" || op == "%" {
-		right := n.ChildByFieldName("right")
 		if right != nil {
-			rText := right.Content(src)
-			if rText == "0" || (!cIsDivisorGuarded(n, rText, src) && !strings.Contains(text, "!= 0")) {
+			if rText == "0" || (!cIsDivisorGuarded(n, rText, src) && !strings.Contains(text, "!= 0") && !strings.Contains(text, "> 0")) {
 				emit("divide-by-zero-hazard", n)
 			}
 		}
 	}
 	if (op == "+" || op == "*") && !cIsOverflowGuarded(n, src) {
-		left := n.ChildByFieldName("left")
-		right := n.ChildByFieldName("right")
 		if left != nil && right != nil {
 			lType := left.Type()
 			rType := right.Type()
