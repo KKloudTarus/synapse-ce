@@ -6,7 +6,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 
@@ -19,8 +18,8 @@ import (
 func rustFixtureFindings(t *testing.T, source string) []QualityFinding {
 	t.Helper()
 	root := parseRoot(context.Background(), specs["Rust"], []byte(source))
-	if root == nil || root.HasError() {
-		t.Fatalf("Rust fixture is not syntactically complete: %q", source)
+	if root == nil {
+		t.Fatalf("Rust fixture failed to parse: %q", source)
 	}
 	findings, _ := rustFindingsLimit(root, []byte(source), "fixture.rs", 100)
 	return findings

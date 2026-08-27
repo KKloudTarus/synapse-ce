@@ -124,16 +124,24 @@ func TestCASTCatalogExamples(t *testing.T) {
 
 func cExampleProgram(example string) string {
 	trimmed := strings.TrimSpace(example)
-	if strings.HasPrefix(trimmed, "void ") || strings.HasPrefix(trimmed, "int ") || strings.HasPrefix(trimmed, "char ") || strings.HasPrefix(trimmed, "struct ") || strings.HasPrefix(trimmed, "#define") || strings.HasPrefix(trimmed, "__attribute__") || strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "//") {
-		if strings.HasPrefix(trimmed, "__attribute__") && !strings.Contains(trimmed, "{") {
-			return trimmed + "\nvoid fixture(void) {}"
-		}
-		if (strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "//")) && !strings.Contains(trimmed, "void ") {
-			return trimmed + "\nvoid fixture(void) {}"
-		}
-		return trimmed
+	if strings.HasPrefix(trimmed, "#define") {
+		return trimmed + "\nvoid fixture(void) {}\n"
 	}
-	return "void fixture(void) {\n" + trimmed + "\n}"
+	if strings.HasPrefix(trimmed, "__attribute__") {
+		return trimmed + "\nvoid fixture(void) {}\n"
+	}
+	if (strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "//")) && !strings.Contains(trimmed, "void ") {
+		return trimmed + "\nvoid fixture(void) {}\n"
+	}
+	if strings.HasPrefix(trimmed, "void ") || strings.HasPrefix(trimmed, "int ") || strings.HasPrefix(trimmed, "char ") || strings.HasPrefix(trimmed, "struct ") || strings.HasPrefix(trimmed, "static ") || strings.HasPrefix(trimmed, "FILE ") {
+		if strings.Contains(trimmed, ";") && !strings.Contains(trimmed, "{") && (strings.HasPrefix(trimmed, "void ") || strings.HasPrefix(trimmed, "int ")) {
+			return trimmed + "\nvoid fixture(void) {}\n"
+		}
+		if strings.Contains(trimmed, "{") {
+			return trimmed + "\n"
+		}
+	}
+	return "void fixture(void) {\n" + trimmed + "\n}\n"
 }
 
 func TestCQualityForDispatch(t *testing.T) {
