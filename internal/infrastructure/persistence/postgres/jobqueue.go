@@ -210,7 +210,7 @@ func (q *JobQueue) AggregateJobQueueStats(ctx context.Context, kinds ...string) 
 	rows.Close()
 
 	var total ports.JobStats
-	for _, tenantID := range tenantIDs {
+	for _, tenantID := range logicalQueueTenantIDs(tenantIDs) {
 		stats, err := q.Stats(shared.WithTenant(ctx, tenantID), kinds...)
 		if err != nil {
 			return ports.JobStats{}, fmt.Errorf("queue stats for tenant: %w", err)
@@ -225,4 +225,19 @@ func (q *JobQueue) AggregateJobQueueStats(ctx context.Context, kinds ...string) 
 		}
 	}
 	return total, nil
+}
+
+// logicalQueueTenantIDs maps legacy tenant IDs to their RLS partition and returns each partition once.
+func logicalQueueTenantIDs(tenantIDs []shared.ID) []shared.ID {
+	seen := make(map[shared.ID]struct{}, len(tenantIDs))
+	logical := make([]shared.ID, 0, len(tenantIDs))
+	for _, tenantID := range tenantIDs {
+		tenantID = shared.TenantOrDefault(tenantID)
+		if _, exists := seen[tenantID]; exists {
+			continue
+		}
+		seen[tenantID] = struct{}{}
+		logical = append(logical, tenantID)
+	}
+	return logical
 }

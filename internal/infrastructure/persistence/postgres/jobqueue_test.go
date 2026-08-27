@@ -163,6 +163,19 @@ func TestPostgresJobQueueClaimByKind(t *testing.T) {
 	}
 }
 
+func TestLogicalQueueTenantIDsDeduplicatesLegacyDefault(t *testing.T) {
+	got := logicalQueueTenantIDs([]shared.ID{"", shared.DefaultTenant, "other-tenant"})
+	want := []shared.ID{shared.DefaultTenant, "other-tenant"}
+	if len(got) != len(want) {
+		t.Fatalf("logical tenant count = %d, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("logical tenant %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 // TestPostgresJobQueueAggregateJobQueueStatsAcrossTenants covers the operator metrics
 // seam: AggregateJobQueueStats must sum every tenant's RLS-scoped Stats (mirroring
 // Claim's per-tenant transaction loop), never a privileged cross-tenant query, and must
@@ -189,7 +202,9 @@ func TestPostgresJobQueueRetryDoesNotBurnAttempt(t *testing.T) {
 func TestPostgresJobQueueAggregateJobQueueStatsAcrossTenants(t *testing.T) {
 	q, ctx := setupJobQueue(t)
 	tenantA := shared.DefaultTenant
-	_, _ = q.Enqueue(ctx, "sca", []byte("a"))
+	if _, err := q.Enqueue(ctx, "sca", []byte("a")); err != nil {
+		t.Fatalf("enqueue default tenant: %v", err)
+	}
 
 	otherTenant := shared.ID("other-tenant")
 	if _, err := q.pool.Exec(ctx, `INSERT INTO tenants (id) VALUES ($1) ON CONFLICT DO NOTHING`, otherTenant.String()); err != nil {

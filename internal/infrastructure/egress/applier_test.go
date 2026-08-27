@@ -73,6 +73,9 @@ func TestRecoverStaleOnlyRemovesBrokerOwnedNamespaces(t *testing.T) {
 			commands = append(commands, strings.Join(args, " "))
 			return nil
 		},
+		// Temp files model stale entry ownership; they are not namespace mounts, so use
+		// file removal rather than requiring CAP_SYS_ADMIN for a Linux unmount.
+		removePinnedNamespace: os.Remove,
 	}
 	if err := a.RecoverStale(context.Background()); err != nil {
 		t.Fatal(err)

@@ -39,13 +39,14 @@ const networkNamespaceDir = "/run/netns"
 
 // Applier creates + tears down egress-filtered network namespaces.
 type Applier struct {
-	ip          string   // resolved `ip` path
-	iptables    string   // resolved `iptables` path
-	ip6tables   string   // resolved `ip6tables` path ("" if absent) – IPv6 default-drop fail-closed
-	sysctl      string   // resolved `sysctl` path ("" if absent) – IPv6 disable fail-closed
-	cmdPrefix   []string // prepended to every privileged command (e.g. {"sudo"}); empty when already privileged
-	netnsDir    string   // standard ip-netns directory in production; injectable in tests
-	commandHook func(context.Context, []string) error
+	ip                    string   // resolved `ip` path
+	iptables              string   // resolved `iptables` path
+	ip6tables             string   // resolved `ip6tables` path ("" if absent) – IPv6 default-drop fail-closed
+	sysctl                string   // resolved `sysctl` path ("" if absent) – IPv6 disable fail-closed
+	cmdPrefix             []string // prepended to every privileged command (e.g. {"sudo"}); empty when already privileged
+	netnsDir              string   // standard ip-netns directory in production; injectable in tests
+	commandHook           func(context.Context, []string) error
+	removePinnedNamespace func(string) error // test hook; production uses removePinnedNetworkNamespace
 }
 
 // NewApplier resolves the `ip` + `iptables` binaries (Linux only). cmdPrefix is prepended
@@ -115,7 +116,11 @@ func (a *Applier) RecoverStale(ctx context.Context) error {
 				firstErr = fmt.Errorf("clean stale egress namespace %q: %w", name, err)
 			}
 		}
-		if err := removePinnedNetworkNamespace(filepath.Join(dir, name)); err != nil && firstErr == nil {
+		removeNamespace := a.removePinnedNamespace
+		if removeNamespace == nil {
+			removeNamespace = removePinnedNetworkNamespace
+		}
+		if err := removeNamespace(filepath.Join(dir, name)); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("remove stale egress namespace %q: %w", name, err)
 		}
 	}

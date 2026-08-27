@@ -3,10 +3,13 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pressly/goose/v3"
 
@@ -148,10 +151,11 @@ func TestWorkOrderRepository(t *testing.T) {
 
 // TestMigration0059 exercises the migration down and back up.
 func TestMigration0059(t *testing.T) {
-	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
-	if dsn == "" {
+	sharedDSN := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if sharedDSN == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
 	}
+	dsn := isolatedMigration0059DSN(t, sharedDSN)
 	ctx := context.Background()
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -184,4 +188,40 @@ func TestMigration0059(t *testing.T) {
 	if _, err := pool.Exec(ctx, `SELECT 1 FROM work_orders LIMIT 1`); err != nil {
 		t.Fatalf("work_orders should exist after up to 59: %v", err)
 	}
+}
+
+// isolatedMigration0059DSN creates a disposable database so this historical down/up test never
+// rolls the shared integration schema back while other packages are using it.
+func isolatedMigration0059DSN(t *testing.T, sharedDSN string) string {
+	t.Helper()
+
+	u, err := url.Parse(sharedDSN)
+	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
+		t.Fatalf("parse PostgreSQL test DSN for isolated migration test: %v", err)
+	}
+	name := fmt.Sprintf("synapse_migration_0059_%d", time.Now().UnixNano())
+	isolated := *u
+	isolated.Path = "/" + name
+	isolated.RawPath = ""
+
+	ctx := context.Background()
+	admin, err := Connect(ctx, sharedDSN)
+	if err != nil {
+		t.Fatalf("connect shared PostgreSQL database for isolated migration test: %v", err)
+	}
+	quotedName := pgx.Identifier{name}.Sanitize()
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+quotedName); err != nil {
+		admin.Close()
+		t.Fatalf("create isolated migration database: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = admin.Exec(cleanupCtx, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=$1`, name)
+		if _, err := admin.Exec(cleanupCtx, "DROP DATABASE "+quotedName); err != nil {
+			t.Errorf("drop isolated migration database: %v", err)
+		}
+		admin.Close()
+	})
+	return isolated.String()
 }

@@ -74,28 +74,7 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        shell: bash
-        run: |
-          set +e
-          go test -count=1 -json ./... > "$RUNNER_TEMP/go-test.json"
-          status=$?
-          jq -r 'select(.Action == "fail") | [(.Package // "<unknown-package>"), (.Test // "<package>")] | @tsv' "$RUNNER_TEMP/go-test.json" \
-            | sort -u > "$RUNNER_TEMP/go-test-failures.txt"
-          {
-            echo "### Linux Go test failures"
-            echo '```'
-            cat "$RUNNER_TEMP/go-test-failures.txt"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit "$status"
-
-      - name: Upload Linux Go test failures
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-go-test-failures
-          path: ${{ runner.temp }}/go-test-failures.txt
-          if-no-files-found: error
+        run: go test -count=1 ./...
 
       - name: Test Postgres suite again on the same database
         run: go test -count=1 ./internal/infrastructure/persistence/postgres
@@ -136,6 +115,11 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
+          # vite 8 requires ^20.19 || >=22.12, and vitest's forks pool needs
+          # worker_threads.markAsUncloneable. Node 20 resolved to a build without it, so every web test
+          # failed to start its worker — a red suite that said nothing about the code. Pinned to the
+          # 22 LTS line, which satisfies both, and recorded in web/package.json engines so the
+          # requirement lives with the package rather than only in this file.
           node-version: 22
 
       - name: Set up pnpm
