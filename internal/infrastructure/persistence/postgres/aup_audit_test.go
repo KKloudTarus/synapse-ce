@@ -107,12 +107,19 @@ func TestAUPStoreAndAuditLog(t *testing.T) {
 	// row after exercising the runtime path because migration 0085 correctly
 	// refuses to roll back while any v2 history exists.
 	t.Cleanup(func() {
-		if _, err := pool.Exec(context.Background(), "SET session_replication_role = replica"); err != nil {
+		bg := context.Background()
+		conn, err := pool.Acquire(bg)
+		if err != nil {
+			t.Errorf("acquire conn for audit cleanup: %v", err)
+			return
+		}
+		defer conn.Release()
+		if _, err := conn.Exec(bg, "SET session_replication_role = replica"); err != nil {
 			t.Errorf("disable audit append-only trigger: %v", err)
 			return
 		}
-		defer func() { _, _ = pool.Exec(context.Background(), "SET session_replication_role = origin") }()
-		if _, err := pool.Exec(context.Background(), "DELETE FROM audit_log WHERE action='aup.accept' AND target=$1", "aup:"+version); err != nil {
+		defer func() { _, _ = conn.Exec(bg, "SET session_replication_role = origin") }()
+		if _, err := conn.Exec(bg, "DELETE FROM audit_log WHERE action='aup.accept' AND target=$1", "aup:"+version); err != nil {
 			t.Errorf("remove test audit row: %v", err)
 		}
 	})

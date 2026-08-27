@@ -62,6 +62,21 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 	rejects("TRUNCATE evidence CASCADE", `TRUNCATE evidence CASCADE`)
 
 	action := "ao.action-" + randHex(t)
+	t.Cleanup(func() {
+		bg := context.Background()
+		conn, err := pool.Acquire(bg)
+		if err != nil {
+			return
+		}
+		defer conn.Release()
+		if _, err := conn.Exec(bg, `SET session_replication_role = replica`); err != nil {
+			return
+		}
+		defer conn.Exec(bg, `SET session_replication_role = origin`)
+		_, _ = conn.Exec(bg, `DELETE FROM evidence WHERE id=$1`, ev.ID.String())
+		_, _ = conn.Exec(bg, `DELETE FROM engagements WHERE id=$1`, eng)
+		_, _ = conn.Exec(bg, `DELETE FROM audit_log WHERE action=$1`, action)
+	})
 	if err := NewAuditLog(pool).Record(ctx, ports.AuditEntry{Actor: "op", Action: action, Target: "t", At: time.Now().UTC()}); err != nil {
 		t.Fatalf("record audit: %v", err)
 	}
