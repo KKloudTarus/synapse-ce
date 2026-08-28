@@ -2175,7 +2175,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 			sourceWarnings = append(sourceWarnings, fmt.Sprintf("detection source %q did not run (tool/DB missing or errored) – its vulnerabilities are NOT included", src.Name()))
 		}
 	}
-	snap := ports.ScanSnapshot{ToolVersions: toolVersions, VulnDBSnapshot: s.prov.VulnDBSource + "@" + now.UTC().Format(time.RFC3339), GrypeDBVersion: grypeDB}
+	snap := ports.ScanSnapshot{ToolVersions: toolVersions, VulnDBSnapshot: vulnDBSnapshot(s.prov.VulnDBSource, now), GrypeDBVersion: grypeDB}
 	sourceWarnings = append(sourceWarnings, dbFreshnessWarnings(toolVersions, now, s.dbMaxAgeDays)...) // stale-DB freshness policy
 	manifest := buildManifest(toolVersions, snap.VulnDBSnapshot, grypeDB, doc)
 	manifest.SBOMSHA256 = record.SHA256
@@ -2884,7 +2884,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	}
 	snap := ports.ScanSnapshot{
 		ToolVersions:   toolVersions,
-		VulnDBSnapshot: s.prov.VulnDBSource + "@" + now.UTC().Format(time.RFC3339),
+		VulnDBSnapshot: vulnDBSnapshot(s.prov.VulnDBSource, now),
 		GrypeDBVersion: grypeDB,
 	}
 	sourceWarnings = append(sourceWarnings, dbFreshnessWarnings(toolVersions, now, s.dbMaxAgeDays)...) // stale-DB freshness policy
@@ -4193,6 +4193,17 @@ func (s *Service) newRunID() string {
 // buildManifest assembles the reproducibility manifest + score. The
 // repro score is the fraction of detection inputs that are version-pinned; the
 // live OSV.dev query is honestly counted as unpinned.
+// vulnDBSnapshot builds the "<source>@<time>" evidence marker for the online vulnerability feed. It
+// returns "" when no online source was queried (e.g. an --offline / air-gapped scan), so the evidence
+// never asserts a feed — like osv.dev — that was never contacted. Grype's offline DB version is recorded
+// separately in GrypeDBVersion, so offline scans still carry honest DB provenance.
+func vulnDBSnapshot(source string, t time.Time) string {
+	if source == "" {
+		return ""
+	}
+	return source + "@" + t.UTC().Format(time.RFC3339)
+}
+
 func buildManifest(toolVersions map[string]string, vulnDBSnapshot, grypeDB string, doc *sbom.SBOM) ports.ScanManifest {
 	m := ports.ScanManifest{
 		ToolVersions:       toolVersions,
