@@ -1,13 +1,16 @@
 package engagement
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -91,6 +94,47 @@ func (a *capAudit) has(action string) bool {
 	return false
 }
 
+type sourceStoreFake struct {
+	item    sourcepackage.Package
+	saved   []byte
+	deleted bool
+}
+
+func (s *sourceStoreFake) Save(_ context.Context, tenantID, engagementID shared.ID, filename, actor string, createdAt time.Time, size int64, sha256hex string, src io.Reader) (sourcepackage.Package, error) {
+	data, err := io.ReadAll(src)
+	if err != nil {
+		return sourcepackage.Package{}, err
+	}
+	s.saved = data
+	s.item = sourcepackage.Package{
+		TenantID: tenantID, EngagementID: engagementID, Filename: sourcepackage.BaseFilename(filename),
+		Size: size, SHA256: sha256hex, CreatedBy: actor, CreatedAt: createdAt, Locator: "source-locator",
+	}
+	return s.item, nil
+}
+
+func (s *sourceStoreFake) Get(_ context.Context, tenantID, engagementID shared.ID) (sourcepackage.Package, error) {
+	if s.item.TenantID != tenantID || s.item.EngagementID != engagementID {
+		return sourcepackage.Package{}, shared.ErrNotFound
+	}
+	return s.item, nil
+}
+
+func (s *sourceStoreFake) Delete(context.Context, shared.ID, shared.ID) error {
+	s.deleted = true
+	return nil
+}
+
+func (s *sourceStoreFake) Materialize(context.Context, string) (string, sourcepackage.Package, func() error, error) {
+	return "", sourcepackage.Package{}, nil, shared.ErrNotFound
+}
+
+type createFailRepo struct{ *memRepo }
+
+func (createFailRepo) Create(context.Context, *domain.Engagement) error {
+	return errors.New("create failed")
+}
+
 // TestEngagementOwnership covers ownership: Create stamps the engagement owner
 // (created_by) from the actor; a later mutation by a different actor updates updated_by but
 // the owner (created_by) is immutable – the basis for per-engagement RBAC.
@@ -115,6 +159,36 @@ func TestEngagementOwnership(t *testing.T) {
 	}
 	if got.Audit.UpdatedBy != "bob" {
 		t.Errorf("updated_by must record the last modifier, got %q", got.Audit.UpdatedBy)
+	}
+}
+
+func TestCreateFromSourcePackageAddsImmutableScopeAndCleansFailure(t *testing.T) {
+	now := time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)
+	data := []byte("archive")
+	sources := &sourceStoreFake{}
+	svc := NewService(newMemRepo(), fixedClock{now}, fixedIDs{}, &capAudit{})
+	svc.SetSourceStore(sources)
+
+	created, item, err := svc.CreateFromSourcePackage(context.Background(), CreateInput{
+		TenantID: "tenant-a", Name: "Uploaded", Client: "Acme", CreatedBy: "alice",
+	}, "../source.zip", int64(len(data)), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("CreateFromSourcePackage: %v", err)
+	}
+	if !bytes.Equal(sources.saved, data) || len(created.Scope.InScope) == 0 || created.Scope.InScope[0].Value != item.Target() {
+		t.Fatalf("source creation did not bind immutable scope: engagement=%+v item=%+v", created.Scope, item)
+	}
+
+	failingSources := &sourceStoreFake{}
+	failing := NewService(createFailRepo{newMemRepo()}, fixedClock{now}, fixedIDs{}, &capAudit{})
+	failing.SetSourceStore(failingSources)
+	if _, _, err := failing.CreateFromSourcePackage(context.Background(), CreateInput{
+		TenantID: "tenant-a", Name: "Uploaded", CreatedBy: "alice",
+	}, "source.zip", int64(len(data)), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", bytes.NewReader(data)); err == nil {
+		t.Fatal("CreateFromSourcePackage succeeded when engagement persistence failed")
+	}
+	if !failingSources.deleted {
+		t.Fatal("uploaded source was not cleaned up after engagement persistence failed")
 	}
 }
 

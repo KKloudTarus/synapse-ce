@@ -340,6 +340,7 @@ export const handlers = [
     const eng = ENGAGEMENTS.find(e => e.ID === params.id) ?? ENGAGEMENTS[0]
     return HttpResponse.json(eng)
   }),
+  http.get('/api/v1/engagements/:id/source', () => new HttpResponse(null, { status: 404 })),
   http.post('/api/v1/engagements', () => HttpResponse.json(ENGAGEMENTS[0])),
   http.patch('/api/v1/engagements/:id', ({ params }) => {
     const eng = ENGAGEMENTS.find(e => e.ID === params.id) ?? ENGAGEMENTS[0]

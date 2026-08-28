@@ -31,6 +31,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sla"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
@@ -49,6 +50,7 @@ type Service struct {
 	results                          ports.ScanResultStore
 	scannedImages                    ports.ScannedImageStore
 	importedSBOM                     ports.ImportedSBOMStore
+	uploadedSources                  ports.EngagementSourceStore
 	jobs                             ports.ScanJobStore
 	runs                             ports.ScanRunStore
 	evidence                         *evidenceuc.Service
@@ -133,6 +135,31 @@ func (s *Service) SetSeverityEnricher(e ports.SeverityEnricher) { s.sevEnricher 
 
 // SetImportedSBOMStore configures the engagement-scoped client SBOM artifact store.
 func (s *Service) SetImportedSBOMStore(store ports.ImportedSBOMStore) { s.importedSBOM = store }
+
+func (s *Service) SetUploadedSourceStore(store ports.EngagementSourceStore) {
+	s.uploadedSources = store
+}
+
+func (s *Service) UploadedSourceMetadata(ctx context.Context, tenantID, engagementID shared.ID) (sourcepackage.Package, error) {
+	tenantID = shared.TenantOrDefault(tenantID)
+	if _, err := s.engagements.GetByIDInTenant(ctx, tenantID, engagementID); err != nil {
+		return sourcepackage.Package{}, fmt.Errorf("load engagement: %w", err)
+	}
+	if s.uploadedSources == nil {
+		return sourcepackage.Package{}, fmt.Errorf("uploaded source for engagement %s: %w", engagementID, shared.ErrNotFound)
+	}
+	return s.uploadedSources.Get(ctx, tenantID, engagementID)
+}
+
+func (s *Service) StartUploadedSourceScanWithOptions(ctx context.Context, actor string, tenantID, engagementID shared.ID, opts ScanOptions) (ports.ScanJob, error) {
+	item, err := s.UploadedSourceMetadata(ctx, tenantID, engagementID)
+	if err != nil {
+		return ports.ScanJob{}, err
+	}
+	return s.StartScanWithOptions(ctx, actor, engagementID, ports.AcquireRequest{
+		Kind: ports.TargetUpload, Value: item.Target(), Locator: item.Locator,
+	}, opts)
+}
 
 // SetScannedImageRecorder wires the scanned-image digest index (#446). When set, a completed image
 // scan records its manifest digest under the engagement's tenant, so the fleet cluster agent can
@@ -1358,7 +1385,7 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 		defer cancel()
 	}
 	started := s.clock.Now()
-	if imported, doc, ok, err := s.loadImportedSBOM(ctx, engagementID, opts); err != nil {
+	if imported, doc, ok, err := s.loadImportedSBOMForRequest(ctx, engagementID, req, opts); err != nil {
 		return nil, err
 	} else if ok {
 		now, err := s.gateImportedSBOMAndAudit(ctx, actor, engagementID, imported, opts)
@@ -1400,7 +1427,7 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 	var imported importedsbom.Record
 	var importedDoc *sbom.SBOM
 	var useImported bool
-	if imported, importedDoc, useImported, err = s.loadImportedSBOM(ctx, engagementID, opts); err != nil {
+	if imported, importedDoc, useImported, err = s.loadImportedSBOMForRequest(ctx, engagementID, req, opts); err != nil {
 		return ports.ScanJob{}, err
 	}
 	var now time.Time
@@ -1719,6 +1746,13 @@ func (s *Service) gateImportedSBOMAndAudit(ctx context.Context, actor string, en
 	})
 }
 
+func (s *Service) loadImportedSBOMForRequest(ctx context.Context, engagementID shared.ID, req ports.AcquireRequest, opts ScanOptions) (importedsbom.Record, *sbom.SBOM, bool, error) {
+	if req.Kind == ports.TargetUpload {
+		return importedsbom.Record{}, nil, false, nil
+	}
+	return s.loadImportedSBOM(ctx, engagementID, opts)
+}
+
 func (s *Service) loadImportedSBOM(ctx context.Context, engagementID shared.ID, opts ScanOptions) (importedsbom.Record, *sbom.SBOM, bool, error) {
 	// Project analyses must acquire their configured source so the snapshot and
 	// persisted diff describe the exact bytes that were analyzed.
@@ -1837,7 +1871,7 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 		result *ScanResult
 		err    error
 	)
-	if imported, doc, ok, loadErr := s.loadImportedSBOM(executionCtx, engagementID, opts); loadErr != nil {
+	if imported, doc, ok, loadErr := s.loadImportedSBOMForRequest(executionCtx, engagementID, req, opts); loadErr != nil {
 		err = loadErr
 	} else if ok {
 		result, err = s.runImportedSBOMPipeline(executionCtx, actor, engagementID, now, imported, doc, opts, report, shared.ID(job.ID))

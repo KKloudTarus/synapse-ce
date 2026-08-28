@@ -20,6 +20,7 @@ import type {
   ScanJob,
   ScanResult,
   Severity,
+  UploadedSourcePackage,
 } from '../../lib/types'
 import { AgentTab } from '../AgentTab'
 import { ThreatModelTab } from './ThreatModelTab'
@@ -138,8 +139,12 @@ function isTab(value: string | undefined): value is Tab {
 
 export function EngagementDetail() {
   const { id = '', tabSlug } = useParams()
-  const { hash } = useLocation()
+  const location = useLocation()
+  const { hash } = location
   const navigate = useNavigate()
+  const scanStartError = typeof (location.state as { scanStartError?: unknown } | null)?.scanStartError === 'string'
+    ? (location.state as { scanStartError: string }).scanStartError
+    : undefined
   const focusedFindingId = hash.startsWith('#finding-') ? decodeURIComponent(hash.slice(9)) : ''
   const [findings, setFindings] = useState<Finding[] | null>(null)
   const [scan, setScan] = useState<ScanResult | null>(null)
@@ -210,6 +215,10 @@ export function EngagementDetail() {
 
   const { data: importedSBOM, refetch: refetchSBOM } = useFetch<ImportedSBOMMetadata | null>(
     () => api.importedSBOM(id).catch(() => null),
+    { deps: [id] },
+  )
+  const { data: uploadedSource } = useFetch<UploadedSourcePackage | null>(
+    () => api.uploadedSource(id).catch(() => null),
     { deps: [id] },
   )
 
@@ -311,6 +320,8 @@ export function EngagementDetail() {
         <ScanPanel
           eng={eng}
           importedSBOM={importedSBOM}
+          uploadedSource={uploadedSource}
+          initialError={scanStartError}
           onImportedSBOMChanged={refreshAll}
           job={job}
           setJob={setJob}

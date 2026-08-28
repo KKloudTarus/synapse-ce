@@ -3,6 +3,8 @@ package httpapi
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 func TestValidateScanTarget(t *testing.T) {
@@ -28,6 +30,8 @@ func TestValidateScanTarget(t *testing.T) {
 		{"local relative rejected", "local", "repo", false},
 		{"archive unsupported", "archive", "/tmp/x.tar", false},
 		{"image unsupported", "image", "alpine:3", false},
+		{"upload managed target", ports.TargetUpload, "", true},
+		{"upload forged target rejected", ports.TargetUpload, "uploaded-source/sha256/forged", false},
 		{"unknown kind", "weird", "/tmp/x", false},
 	}
 	for _, c := range cases {

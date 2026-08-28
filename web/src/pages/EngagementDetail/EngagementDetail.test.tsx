@@ -11,6 +11,8 @@ vi.mock('../../lib/api', () => ({
     latestScan: vi.fn(),
     scanStatus: vi.fn(),
     importedSBOM: vi.fn(),
+    uploadedSource: vi.fn(),
+    startScan: vi.fn(),
     evidence: vi.fn(),
     listBusinessAssets: vi.fn(),
     assignEngagementAsset: vi.fn(),
@@ -47,6 +49,7 @@ describe('EngagementDetail Page Shell', () => {
     vi.mocked(api.latestScan).mockResolvedValue(null)
     vi.mocked(api.scanStatus).mockResolvedValue(null)
     vi.mocked(api.importedSBOM).mockResolvedValue(null as any)
+    vi.mocked(api.uploadedSource).mockResolvedValue(null as any)
     vi.mocked(api.evidence).mockResolvedValue(null)
     vi.mocked(api.listBusinessAssets).mockResolvedValue({ items: [], total: 0, limit: 200, offset: 0 })
   })
@@ -106,5 +109,66 @@ describe('EngagementDetail Page Shell', () => {
 
     expect(await screen.findByText('Engagement not found')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Back to engagements/i })).toBeInTheDocument()
+  })
+
+  it('locks scan settings to an uploaded source package', async () => {
+    vi.mocked(api.getEngagement).mockResolvedValue({
+      ...mockEngagement,
+      inScope: [{ kind: 'repo', value: `uploaded-source/sha256/${'a'.repeat(64)}` }],
+    })
+    vi.mocked(api.uploadedSource).mockResolvedValue({
+      filename: 'acme-source.tar.gz',
+      size: 1024,
+      sha256: 'a'.repeat(64),
+      target: `uploaded-source/sha256/${'a'.repeat(64)}`,
+      uploadedBy: 'operator',
+      uploadedAt: '2026-08-28T00:00:00Z',
+    })
+    vi.mocked(api.startScan).mockResolvedValue({
+      id: 'scan-1', engagementId: 'eng-123456', target: `uploaded-source/sha256/${'a'.repeat(64)}`,
+      kind: 'upload', status: 'running', stage: 'queued', progress: 0, error: '', startedAt: null, finishedAt: null, debugEvents: [],
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/engagements/eng-123456']}>
+        <Routes>
+          <Route path="/engagements/:id" element={<EngagementDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Source: acme-source.tar.gz')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Scan settings' }))
+    expect(await screen.findByText('Uploaded Source Active')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Scan target')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Run scan' }))
+    await waitFor(() => expect(api.startScan).toHaveBeenCalledWith('eng-123456', '', 'upload', '', 'full', false))
+  })
+
+  it('locks uploaded source scans before package metadata loads', async () => {
+    vi.mocked(api.getEngagement).mockResolvedValue({
+      ...mockEngagement,
+      inScope: [{ kind: 'repo', value: `uploaded-source/sha256/${'b'.repeat(64)}` }],
+    })
+    vi.mocked(api.uploadedSource).mockImplementation(() => new Promise<never>(() => undefined))
+    vi.mocked(api.startScan).mockResolvedValue({
+      id: 'scan-2', engagementId: 'eng-123456', target: `uploaded-source/sha256/${'b'.repeat(64)}`,
+      kind: 'upload', status: 'running', stage: 'queued', progress: 0, error: '', startedAt: null, finishedAt: null, debugEvents: [],
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/engagements/eng-123456']}>
+        <Routes>
+          <Route path="/engagements/:id" element={<EngagementDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Acme Core Security Audit' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Scan settings' }))
+    expect(await screen.findByText('Uploaded Source Active')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Scan target')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Run scan' }))
+    await waitFor(() => expect(api.startScan).toHaveBeenCalledWith('eng-123456', '', 'upload', '', 'full', false))
   })
 })

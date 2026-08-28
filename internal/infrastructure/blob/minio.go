@@ -46,6 +46,7 @@ type MinIO struct {
 }
 
 var _ ports.BlobStore = (*MinIO)(nil)
+var _ ports.ObjectStore = (*MinIO)(nil)
 var _ ports.RestoreBlobReader = (*ReadOnlyMinIO)(nil)
 
 // NewMinIO connects to the object store and ensures the bucket exists.
@@ -123,6 +124,34 @@ func (m *MinIO) Get(ctx context.Context, key string) ([]byte, error) {
 	return get(m.client, ctx, m.bucket, key)
 }
 
+func (m *MinIO) PutObject(ctx context.Context, key string, src io.Reader, size int64) error {
+	if size < 0 {
+		return fmt.Errorf("object size must not be negative")
+	}
+	if _, err := m.client.PutObject(ctx, m.bucket, key, src, size, minio.PutObjectOptions{ContentType: "application/octet-stream"}); err != nil {
+		return fmt.Errorf("put object: %w", err)
+	}
+	return nil
+}
+
+func (m *MinIO) OpenObject(ctx context.Context, key string) (io.ReadCloser, error) {
+	if _, err := m.client.StatObject(ctx, m.bucket, key, minio.StatObjectOptions{}); err != nil {
+		return nil, minioGetError("stat object", err)
+	}
+	obj, err := m.client.GetObject(ctx, m.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, minioGetError("get object", err)
+	}
+	return obj, nil
+}
+
+func (m *MinIO) DeleteObject(ctx context.Context, key string) error {
+	if err := m.client.RemoveObject(ctx, m.bucket, key, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("delete object: %w", err)
+	}
+	return nil
+}
+
 // Stat reads and hashes the object so metadata-less legacy objects are verified
 // securely. Object contents never appear in errors or logs.
 func (m *ReadOnlyMinIO) Stat(ctx context.Context, key string) (ObjectMetadata, error) {
@@ -178,7 +207,8 @@ func verify(client *minio.Client, ctx context.Context, bucket, key, expected str
 }
 
 func minioGetError(operation string, err error) error {
-	if minio.ToErrorResponse(err).Code == "NoSuchKey" {
+	code := minio.ToErrorResponse(err).Code
+	if code == "NoSuchKey" || code == "NoSuchObject" {
 		return shared.ErrNotFound
 	}
 	return fmt.Errorf("%s: %w", operation, err)

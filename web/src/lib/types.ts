@@ -66,6 +66,15 @@ export interface CreateEngagementInput {
   assetId?: string
 }
 
+export interface UploadedSourcePackage {
+  filename: string
+  size: number
+  sha256: string
+  target: string
+  uploadedBy: string
+  uploadedAt: string | null
+}
+
 export type BusinessAssetType = 'product' | 'application' | 'system' | 'business_service'
 export type BusinessAssetCriticality = 'critical' | 'high' | 'medium' | 'low'
 export type BusinessAssetLifecycle = 'draft' | 'active' | 'decommissioning' | 'retired'

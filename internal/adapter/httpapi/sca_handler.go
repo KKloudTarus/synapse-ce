@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -15,10 +16,19 @@ import (
 type scaScanRequest struct {
 	EngagementID string `json:"engagement_id"`
 	Target       string `json:"target"`
-	Kind         string `json:"kind"`         // local (default) | git | archive | image
+	Kind         string `json:"kind"`         // local (default) | git | archive | upload | image
 	Ref          string `json:"ref"`          // optional git branch/tag
 	Mode         string `json:"mode"`         // full (default) | vulnerabilities | licenses
 	CodeQuality  bool   `json:"code_quality"` // include first-party code-quality findings
+}
+
+type uploadedSourceResponse struct {
+	Filename   string    `json:"filename"`
+	Size       int64     `json:"size"`
+	SHA256     string    `json:"sha256"`
+	Target     string    `json:"target"`
+	UploadedBy string    `json:"uploaded_by"`
+	UploadedAt time.Time `json:"uploaded_at"`
 }
 
 // validateScanTarget rejects a malformed target synchronously. Returns
@@ -40,6 +50,10 @@ func validateScanTarget(kind, target string) string {
 		}
 		if u.Host == "" {
 			return "git target URL must have a host"
+		}
+	case ports.TargetUpload:
+		if target != "" {
+			return "uploaded source target is managed by the server"
 		}
 	case "archive", "image":
 		return "archive/image targets are not supported yet"
@@ -78,13 +92,32 @@ func (rt *Router) runSCAScan(w http.ResponseWriter, r *http.Request) {
 	// Tenant isolation: the engagement id is in the BODY, not a path param, so the
 	// withEngTenant route wrapper can't cover this route – verify the engagement belongs to the
 	// caller's tenant here (404 cross-tenant, before any scope/window gate or scan starts).
-	if _, err := rt.eng.Get(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(req.EngagementID)); err != nil {
+	tenantID := shared.TenantOrDefault(shared.ID(TenantFrom(r.Context())))
+	engagementID := shared.ID(req.EngagementID)
+	if _, err := rt.eng.Get(r.Context(), tenantID, engagementID); err != nil {
 		writeError(w, rt.log, err)
+		return
+	}
+	if req.Kind == ports.TargetUpload {
+		if msg := validateScanTarget(req.Kind, req.Target); msg != "" {
+			writeJSON(w, http.StatusBadRequest, errorBody{Error: msg})
+			return
+		}
+		if msg := validateScanMode(req.Mode); msg != "" {
+			writeJSON(w, http.StatusBadRequest, errorBody{Error: msg})
+			return
+		}
+		job, err := rt.sca.StartUploadedSourceScanWithOptions(r.Context(), PrincipalFrom(r.Context()), tenantID, engagementID, scauc.ScanOptions{Mode: req.Mode, CodeQuality: req.CodeQuality})
+		if err != nil {
+			writeError(w, rt.log, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, job)
 		return
 	}
 	usingImportedSBOM := false
 	if strings.TrimSpace(req.Target) == "" {
-		if _, err := rt.sca.ImportedSBOMMetadata(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(req.EngagementID)); err != nil {
+		if _, err := rt.sca.ImportedSBOMMetadata(r.Context(), tenantID, engagementID); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorBody{Error: "target is required unless an imported SBOM is active"})
 			return
 		}
@@ -103,7 +136,7 @@ func (rt *Router) runSCAScan(w http.ResponseWriter, r *http.Request) {
 	job, err := rt.sca.StartScanWithOptions(
 		r.Context(),
 		PrincipalFrom(r.Context()),
-		shared.ID(req.EngagementID),
+		engagementID,
 		ports.AcquireRequest{Kind: req.Kind, Value: req.Target, Ref: req.Ref},
 		scauc.ScanOptions{Mode: req.Mode, CodeQuality: req.CodeQuality},
 	)
@@ -112,6 +145,22 @@ func (rt *Router) runSCAScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (rt *Router) uploadedSource(w http.ResponseWriter, r *http.Request) {
+	engagementID := shared.ID(r.PathValue("id"))
+	if engagementID.IsZero() {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "engagement id is required"})
+		return
+	}
+	item, err := rt.sca.UploadedSourceMetadata(r.Context(), shared.ID(TenantFrom(r.Context())), engagementID)
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, uploadedSourceResponse{
+		Filename: item.Filename, Size: item.Size, SHA256: item.SHA256, Target: item.Target(), UploadedBy: item.CreatedBy, UploadedAt: item.CreatedAt,
+	})
 }
 
 // evidenceLedger returns the engagement's hash-chained evidence + verification.

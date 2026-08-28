@@ -469,6 +469,7 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/engagements/{id}/purple-coverage", rt.authz(userdom.PermView, rt.withEngTenant(rt.listPurpleCoverage)))
 	}
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan", rt.authz(userdom.PermView, rt.withEngTenant(rt.latestScan)))
+	mux.HandleFunc("GET /api/v1/engagements/{id}/source", rt.authz(userdom.PermView, rt.withEngTenant(rt.uploadedSource)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan-status", rt.authz(userdom.PermView, rt.withEngTenant(rt.scanStatus)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan-runs", rt.authz(userdom.PermView, rt.withEngTenant(rt.scanRuns)))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan-runs/compare", rt.authz(userdom.PermView, rt.withEngTenant(rt.compareScanRuns)))

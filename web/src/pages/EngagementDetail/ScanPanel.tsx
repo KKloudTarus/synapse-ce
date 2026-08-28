@@ -7,7 +7,7 @@ import { useFetch, usePolling } from '../../hooks'
 import { api } from '../../lib/api'
 import { StatusPill } from '../Engagements'
 import { fmtWindow } from './VulnsTab'
-import type { Engagement, ImportedSBOMMetadata, ScanJob, ScanMode, ScanResult } from '../../lib/types'
+import type { Engagement, ImportedSBOMMetadata, ScanJob, ScanMode, ScanResult, UploadedSourcePackage } from '../../lib/types'
 import { EvidenceBadge, ScopeBadge } from './components/ScanBadges'
 import { ScanConfigModal, detectKind } from './components/ScanConfigModal'
 import { ScanDebugTimeline } from './components/ScanDebugTimeline'
@@ -15,9 +15,17 @@ import { ScanDebugTimeline } from './components/ScanDebugTimeline'
 // Re-export shared helpers consumed by sibling modules (ReportBuilderModal).
 export { trapTabFocus } from './components/ScanConfigModal'
 
+const UPLOADED_SOURCE_TARGET = /^uploaded-source\/sha256\/[0-9a-f]{64}$/
+
+function isUploadedSourceTarget(value: string) {
+  return UPLOADED_SOURCE_TARGET.test(value.trim())
+}
+
 export function ScanPanel({
   eng,
   importedSBOM,
+  uploadedSource,
+  initialError,
   onImportedSBOMChanged,
   job,
   setJob,
@@ -25,19 +33,23 @@ export function ScanPanel({
 }: {
   eng: Engagement
   importedSBOM: ImportedSBOMMetadata | null
+  uploadedSource: UploadedSourcePackage | null
+  initialError?: string
   onImportedSBOMChanged: () => void
   job: ScanJob | null
   setJob: (j: ScanJob | null) => void
   onScanned: (r: ScanResult) => void
 }) {
-  const target0 = eng.inScope[0]?.value ?? ''
+  const usingUploadedSource = Boolean(uploadedSource) || eng.inScope.some((scopeTarget) => isUploadedSourceTarget(scopeTarget.value))
+  const visibleScope = eng.inScope.filter((scopeTarget) => !isUploadedSourceTarget(scopeTarget.value))
+  const target0 = usingUploadedSource ? '' : (eng.inScope[0]?.value ?? '')
   const [target, setTarget] = useState(target0)
-  const [kind, setKind] = useState(detectKind(target0))
+  const [kind, setKind] = useState(usingUploadedSource ? 'upload' : detectKind(target0))
   const [kindManual, setKindManual] = useState(false)
   const [mode, setMode] = useState<ScanMode>('full')
   const [codeQuality, setCodeQuality] = useState(false)
   const [branch, setBranch] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(initialError ?? null)
   const [summary, setSummary] = useState<ScanResult | null>(null)
   const [configOpen, setConfigOpen] = useState(false)
   const [sbomBusy, setSBOMBusy] = useState(false)
@@ -52,7 +64,19 @@ export function ScanPanel({
 
   const running = job?.status === 'running'
   const debugEvents = job?.debugEvents?.length ? job.debugEvents : (summary?.debugEvents ?? [])
-  const usingImportedSBOM = Boolean(importedSBOM)
+  const usingImportedSBOM = Boolean(importedSBOM) && !usingUploadedSource
+
+  useEffect(() => {
+    if (!usingUploadedSource) return
+    setKind('upload')
+    setKindManual(true)
+    setTarget('')
+    setBranch('')
+  }, [usingUploadedSource])
+
+  useEffect(() => {
+    if (initialError) setError(initialError)
+  }, [initialError])
 
   const now = Date.now()
   const notYet = eng.authorizedFrom ? now < new Date(eng.authorizedFrom).getTime() : false
@@ -99,7 +123,7 @@ export function ScanPanel({
   }, [eng.id])
 
   async function run() {
-    if (!usingImportedSBOM && !target.trim()) {
+    if (!usingUploadedSource && !usingImportedSBOM && !target.trim()) {
       setError('Enter a target in Scan Settings.')
       setConfigOpen(true)
       return
@@ -108,7 +132,8 @@ export function ScanPanel({
     setSummary(null)
     try {
       const ref = kind === 'git' ? branch.trim() : ''
-      setJob(await api.startScan(eng.id, usingImportedSBOM ? '' : target.trim(), usingImportedSBOM ? 'imported-sbom' : kind, ref, mode, codeQuality))
+      const scanKind = usingUploadedSource ? 'upload' : (usingImportedSBOM ? 'imported-sbom' : kind)
+      setJob(await api.startScan(eng.id, usingUploadedSource || usingImportedSBOM ? '' : target.trim(), scanKind, ref, mode, codeQuality))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start scan')
     }
@@ -159,12 +184,18 @@ export function ScanPanel({
                 <span>Asset: {businessAsset?.name || 'Loading…'}</span>
               </Link>
             )}
-            {eng.inScope.length > 1 && (
-              <span className="flex items-center gap-1.5 font-semibold text-primary">
-                <Target04 className="size-3.5 text-fg-tertiary" /> {eng.inScope.length} in scope
+            {uploadedSource && (
+              <span className="flex min-w-0 items-center gap-1.5 font-semibold text-primary" title={uploadedSource.sha256}>
+                <Package className="size-3.5 shrink-0 text-brand-secondary" />
+                <span className="max-w-64 truncate">Source: {uploadedSource.filename}</span>
               </span>
             )}
-            {eng.inScope.map((t, i) => (
+            {visibleScope.length > 1 && (
+              <span className="flex items-center gap-1.5 font-semibold text-primary">
+                <Target04 className="size-3.5 text-fg-tertiary" /> {visibleScope.length} in scope
+              </span>
+            )}
+            {visibleScope.map((t, i) => (
               <ScopeBadge key={i} target={t} />
             ))}
             {(eng.authorizedFrom || eng.authorizedTo) && (
@@ -275,6 +306,8 @@ export function ScanPanel({
         setBranch={setBranch}
         usingImportedSBOM={usingImportedSBOM}
         importedSBOM={importedSBOM}
+        usingUploadedSource={usingUploadedSource}
+        uploadedSource={uploadedSource}
         onTriggerUpload={() => sbomRef.current?.click()}
         sbomBusy={sbomBusy}
         onRun={run}

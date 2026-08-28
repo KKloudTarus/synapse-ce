@@ -2,8 +2,22 @@ import type {
   CreateEngagementInput,
   Engagement,
   ScopeTarget,
+  UploadedSourcePackage,
 } from '../types'
 import { req } from './client'
+
+function createRequest(input: CreateEngagementInput) {
+  return {
+    name: input.name,
+    client: input.client,
+    in_scope: input.inScope.map((target) => ({ kind: target.kind, value: target.value })),
+    out_of_scope: input.outOfScope.map((target) => ({ kind: target.kind, value: target.value })),
+    authorized_from: input.authorizedFrom ?? '',
+    authorized_to: input.authorizedTo ?? '',
+    timezone: input.timezone ?? '',
+    asset_id: input.assetId ?? '',
+  }
+}
 
 function mapEngagement(r: any): Engagement {
   const targets = (xs: any[]): { kind: string; value: string }[] =>
@@ -48,21 +62,34 @@ export const engagementsApi = {
     mapEngagement(
       await req('/engagements', {
         method: 'POST',
-        body: JSON.stringify({
-          name: input.name,
-          client: input.client,
-          in_scope: input.inScope.map((t) => ({ kind: t.kind, value: t.value })),
-          out_of_scope: input.outOfScope.map((t) => ({ kind: t.kind, value: t.value })),
-          authorized_from: input.authorizedFrom ?? '',
-          authorized_to: input.authorizedTo ?? '',
-          timezone: input.timezone ?? '',
-          asset_id: input.assetId ?? '',
-        }),
+        body: JSON.stringify(createRequest(input)),
       }),
     ),
 
+  createEngagementFromSource: async (input: CreateEngagementInput, source: File): Promise<Engagement> => {
+    const form = new FormData()
+    form.append('metadata', JSON.stringify(createRequest(input)))
+    form.append('source', source)
+    return mapEngagement(await req('/engagements', {
+      method: 'POST',
+      body: form,
+    }))
+  },
+
   getEngagement: async (id: string): Promise<Engagement> =>
     mapEngagement(await req(`/engagements/${encodeURIComponent(id)}`)),
+
+  uploadedSource: async (id: string): Promise<UploadedSourcePackage> => {
+    const source = await req(`/engagements/${encodeURIComponent(id)}/source`)
+    return {
+      filename: source.filename ?? '',
+      size: source.size ?? 0,
+      sha256: source.sha256 ?? '',
+      target: source.target ?? '',
+      uploadedBy: source.uploaded_by ?? '',
+      uploadedAt: source.uploaded_at ?? null,
+    }
+  },
 
   updateScope: async (id: string, inScope: ScopeTarget[], outOfScope: ScopeTarget[]): Promise<Engagement> =>
     mapEngagement(
