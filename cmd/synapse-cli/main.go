@@ -8,9 +8,11 @@
 package main
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -28,6 +30,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rating"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/suppression"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
@@ -82,6 +85,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
+	"gopkg.in/yaml.v3"
 )
 
 func main() {
@@ -1183,6 +1187,65 @@ func (stderrAudit) Record(_ context.Context, e ports.AuditEntry) error {
 
 var _ ports.AuditLogger = stderrAudit{}
 
+// loadSynapseignore reads <dir>/.synapseignore (YAML) into a suppression ruleset. Missing file => empty
+// ruleset, no error. Every entry is validated (a matcher, a reason, and a parseable expiry are required)
+// so a malformed suppression fails the scan loudly rather than silently ignoring nothing — or worse,
+// silently everything.
+func loadSynapseignore(dir string) (suppression.Ruleset, error) {
+	data, err := os.ReadFile(filepath.Join(dir, ".synapseignore"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read .synapseignore: %w", err)
+	}
+	var doc struct {
+		Suppress []struct {
+			Rule    string `yaml:"rule"`
+			Path    string `yaml:"path"`
+			Reason  string `yaml:"reason"`
+			Expires string `yaml:"expires"`
+		} `yaml:"suppress"`
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&doc); err != nil {
+		return nil, fmt.Errorf("parse .synapseignore: %w", err)
+	}
+	rs := make(suppression.Ruleset, 0, len(doc.Suppress))
+	for i, e := range doc.Suppress {
+		expires, perr := time.Parse("2006-01-02", strings.TrimSpace(e.Expires))
+		if perr != nil {
+			return nil, fmt.Errorf(".synapseignore entry %d: expires %q must be YYYY-MM-DD", i+1, e.Expires)
+		}
+		r := suppression.Rule{RuleKey: strings.TrimSpace(e.Rule), Path: strings.TrimSpace(e.Path), Reason: e.Reason, Expires: expires}
+		if verr := r.Validate(); verr != nil {
+			return nil, fmt.Errorf(".synapseignore entry %d: %w", i+1, verr)
+		}
+		rs = append(rs, r)
+	}
+	return rs, nil
+}
+
+// applySuppressions drops findings matched by an active .synapseignore rule and returns the kept set plus
+// the count suppressed. Non-line findings still match by rule key / advisory id.
+func applySuppressions(findings []finding.Finding, rs suppression.Ruleset, now time.Time) ([]finding.Finding, int) {
+	if len(rs) == 0 {
+		return findings, 0
+	}
+	kept := make([]finding.Finding, 0, len(findings))
+	suppressed := 0
+	for _, f := range findings {
+		file, _, _ := findingFileLine(f)
+		if _, ok := rs.Suppress([]string{f.RuleKey, string(f.AdvisoryID)}, file, now); ok {
+			suppressed++
+			continue
+		}
+		kept = append(kept, f)
+	}
+	return kept, suppressed
+}
+
 func confidenceRank(c string) int {
 	switch c {
 	case "very_high":
@@ -1509,6 +1572,21 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		before := len(res.Findings)
 		res.Findings = scopeToNewCode(res.Findings, changed)
 		fmt.Fprintf(os.Stderr, "synapse-cli: scoped to new code vs %s (%d of %d findings on changed lines; dependency/license findings kept)\n", baseRef, len(res.Findings), before)
+	}
+	if !image { // .synapseignore lives in the repo; not applicable to an image reference
+		ignoreRules, ierr := loadSynapseignore(target)
+		if ierr != nil {
+			return ierr
+		}
+		now := time.Now()
+		var suppressed int
+		res.Findings, suppressed = applySuppressions(res.Findings, ignoreRules, now)
+		if suppressed > 0 {
+			fmt.Fprintf(os.Stderr, "synapse-cli: .synapseignore suppressed %d finding(s)\n", suppressed)
+		}
+		for _, e := range ignoreRules.Expired(now) {
+			fmt.Fprintf(os.Stderr, "synapse-cli: WARNING .synapseignore suppression expired %s (rule=%q path=%q) — its findings are NOT suppressed; renew or remove it\n", e.Expires.Format("2006-01-02"), e.RuleKey, e.Path)
+		}
 	}
 
 	// Report advisory opinions separately from the smaller policy-authorized gate-exempt set.
