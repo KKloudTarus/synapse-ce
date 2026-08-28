@@ -76,6 +76,29 @@ func TestRedactArgvClosesInternalSpaceCredentialResidual(t *testing.T) {
 	}
 }
 
+func TestScrubWholeCredentialArgCoversDottedAndGluedKeys(t *testing.T) {
+	secret := "s3cr3t" + "Val"
+	redacted := []string{
+		"-Dspring.datasource.password=" + secret,   // JVM system property (dotted, dash-prefixed)
+		"javax.net.ssl.keyStorePassword=" + secret, // Java property (dotted + camelCase glued keyword)
+		"keyStorePassword=" + secret,               // camelCase glued keyword
+		"DB_PASSWORD=" + secret,                    // underscore form still works
+		"aws_secret_access_key:" + secret,          // colon-separated
+	}
+	for _, in := range redacted {
+		out, ok := scrubWholeCredentialArg(in)
+		if !ok || strings.Contains(out, secret) {
+			t.Errorf("scrubWholeCredentialArg(%q) = %q ok=%v; want the value redacted", in, out, ok)
+		}
+	}
+	// A keyword embedded mid-token (not a credential key) must NOT be redacted.
+	for _, in := range []string{"tokenizer=lexer", "passwordHash=abc123"} {
+		if out, ok := scrubWholeCredentialArg(in); ok {
+			t.Errorf("scrubWholeCredentialArg(%q) = %q redacted; want left intact", in, out)
+		}
+	}
+}
+
 func TestResidualCredentialFormsNeverReachTelemetryOrDetection(t *testing.T) {
 	glued := "glued" + "Leak93"
 	spaceLeft := "left" + "Leak"

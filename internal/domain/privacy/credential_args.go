@@ -9,7 +9,12 @@ import (
 // value follows '=' or ':'. The value capture deliberately accepts spaces: after shell parsing a quoted
 // value such as DB_PASSWORD="two words" is one argv element with the quotes removed, and redacting only
 // the first token would leak the remainder.
-var credentialAssignmentArg = regexp.MustCompile(`(?i)^((?:(?:[A-Za-z0-9]+[_-])*)?(?:password|passwd|pwd|secret|token|api[-_]?key|access[-_]?key|secret[-_]?key|auth[-_]?token|client[-_]?secret|credential)\s*[=:]\s*)(.*)$`)
+// The key prefix accepts any run of [A-Za-z0-9._-] before the credential keyword, so dotted and glued
+// forms are caught too: a JVM system property (-Dspring.datasource.password=…), a Java property
+// (javax.net.ssl.keyStorePassword=…), and camelCase (keyStorePassword=…) — not only underscore/dash
+// separated names (DB_PASSWORD=…). The trailing [=:] anchor keeps a keyword embedded mid-token (e.g.
+// "tokenizer=") from matching.
+var credentialAssignmentArg = regexp.MustCompile(`(?i)^([A-Za-z0-9._-]*(?:password|passwd|pwd|secret|token|api[-_]?key|access[-_]?key|secret[-_]?key|auth[-_]?token|client[-_]?secret|credential)\s*[=:]\s*)(.*)$`)
 
 // credentialFlagValueArg is the same whole-value guard for a credential flag and value carried in ONE argv
 // element (for example an unusual collector representation of "--password two words"). Normal split argv

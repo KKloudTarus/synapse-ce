@@ -119,7 +119,7 @@ func (rt *Router) auditDetectionQuery(ctx context.Context, engagementID shared.I
 			"field_scope": string(scope),
 		},
 	}); err != nil {
-		return fmt.Errorf("%w: record detection query audit: %v", shared.ErrSaturated, err)
+		return fmt.Errorf("%w: record detection query audit: %w", shared.ErrSaturated, err)
 	}
 	return nil
 }
