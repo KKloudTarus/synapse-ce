@@ -208,9 +208,9 @@ func stableFileSnapshot(before, after fs.FileInfo, bytesRead int64) bool {
 }
 
 func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out *[]ports.SecretRawFinding, limit int) bool {
-	if strings.EqualFold(filepath.Ext(rel), ".vb") {
-		data = maskVBComments(data)
-	}
+	// Blank comment regions (VB, #-family, //-and-/* */-family) before the rules run, so a secret that
+	// lives only in a comment is not reported as a live finding. Offsets/newlines are preserved.
+	data = maskComments(rel, data)
 	text := string(data)
 	for i := range s.rules {
 		r := &s.rules[i]
