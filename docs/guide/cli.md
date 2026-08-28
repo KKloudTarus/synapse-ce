@@ -368,8 +368,7 @@ synapse-scan:
     - ./bin/synapse-cli scan . --fail-on high
 ```
 
-To publish to the GitLab SAST report so findings show in the merge-request widget, emit SARIF and
-keep it as an artifact (GitLab reads SARIF as a `sast` report):
+Keep the SARIF report as a downloadable build artifact (works on every GitLab tier):
 
 ```yaml
 synapse-scan:
@@ -378,12 +377,18 @@ synapse-scan:
   script:
     - make tools
     - make build
-    - ./bin/synapse-cli scan . --sarif --fail-on high > gl-sast-report.sarif
+    - ./bin/synapse-cli scan . --sarif --fail-on high > synapse.sarif
   artifacts:
     when: always
-    reports:
-      sast: gl-sast-report.sarif
+    paths:
+      - synapse.sarif
 ```
+
+> **Note on native GitLab ingestion.** `artifacts:reports:sast` does **not** accept SARIF — it takes
+> GitLab's own report schema (a `gl-sast-report.json`), so pointing `reports: sast:` at a SARIF file
+> does nothing. GitLab ingests SARIF only through `artifacts:reports:sarif`, and that (with the
+> merge-request security widget and the Vulnerability Report) is a **GitLab Ultimate** feature. On
+> Free/Premium, download the artifact above or upload the SARIF to your own tooling.
 
 ## Jenkins
 
