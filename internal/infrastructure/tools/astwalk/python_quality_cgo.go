@@ -3,10 +3,8 @@
 package astwalk
 
 import (
-	"context"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -109,7 +107,6 @@ func pyComplexity(n *sitter.Node) int {
 	return c
 }
 
-
 // pyHasDescendantType reports whether n has a descendant (excluding itself) of the given type.
 func pyHasDescendantType(n *sitter.Node, typ string) bool {
 	for i := 0; i < int(n.ChildCount()); i++ {
@@ -174,7 +171,6 @@ var (
 	mktempRE          = regexp.MustCompile(`(?s)\btempfile\.mktemp\s*\(|\bmktemp\s*\(`)
 	yamlLoadRE        = regexp.MustCompile(`(?s)\byaml\.load\s*\(`)
 )
-
 
 func pythonFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
 	var out []QualityFinding

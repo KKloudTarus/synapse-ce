@@ -21,10 +21,10 @@ const (
 )
 
 var (
-	cCommentedCodeRE   = regexp.MustCompile(`^\s*(?:void|int|char|long|float|double|struct|typedef|for|if|while)\b`)
-	cMagicNumberRE     = regexp.MustCompile(`(?:==|!=|<=|>=|<|>)\s*([2-9]|[1-9][0-9]+)\b`)
+	cCommentedCodeRE    = regexp.MustCompile(`^\s*(?:void|int|char|long|float|double|struct|typedef|for|if|while)\b`)
+	cMagicNumberRE      = regexp.MustCompile(`(?:==|!=|<=|>=|<|>)\s*([2-9]|[1-9][0-9]+)\b`)
 	cSingleLetterDeclRE = regexp.MustCompile(`^(?:(?:signed|unsigned|const|static)\s+)*(?:int|char|long|short|float|double)\s+([a-zA-Z])\s*[;=]`)
-	cSensitiveNameRE   = regexp.MustCompile(`(?i)(?:password|secret|token|api[_-]?key|private[_-]?key)`)
+	cSensitiveNameRE    = regexp.MustCompile(`(?i)(?:password|secret|token|api[_-]?key|private[_-]?key)`)
 )
 
 func cFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
