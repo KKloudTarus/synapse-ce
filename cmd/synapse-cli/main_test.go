@@ -79,3 +79,23 @@ func TestRunGateFailsForRubyEvalRequestData(t *testing.T) {
 		t.Fatalf("runGate error = %v, want critical Ruby SAST finding to fail the gate", err)
 	}
 }
+
+func TestFilterByConfidence(t *testing.T) {
+	findings := []finding.Finding{
+		{Title: "high", Confidence: "high"},
+		{Title: "medium", Confidence: "medium"},
+		{Title: "low", Confidence: "low"},
+		{Title: "sast-no-confidence", Confidence: ""}, // SAST/misconfig carry none — must be kept
+	}
+	got := filterByConfidence(findings, "high")
+	titles := map[string]bool{}
+	for _, f := range got {
+		titles[f.Title] = true
+	}
+	if !titles["high"] || !titles["sast-no-confidence"] {
+		t.Fatalf("--min-confidence high must keep high + unscored findings: %+v", titles)
+	}
+	if titles["medium"] || titles["low"] {
+		t.Fatalf("--min-confidence high must drop medium/low: %+v", titles)
+	}
+}

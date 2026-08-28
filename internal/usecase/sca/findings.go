@@ -287,7 +287,7 @@ func buildSecretFindings(engagementID shared.ID, raws []ports.SecretRawFinding, 
 			Description:  secretDescription(sr),
 			Severity:     sr.Severity,
 			Sources:      []string{"synapse-secret-scan"},
-			Confidence:   vulnerability.ConfidenceForSources(1),
+			Confidence:   secretRuleConfidence(sr.RuleID),
 			Class:        finding.ClassFirstParty,
 			Scope:        scope,
 			// Reachability/Impact are left empty on purpose: a hardcoded secret is a PRESENCE fact, not a
@@ -302,6 +302,26 @@ func buildSecretFindings(engagementID shared.ID, raws []ports.SecretRawFinding, 
 		})
 	}
 	return out
+}
+
+// lowSignalSecretRules are the entropy/context-based secret rules whose matches carry more false
+// positives than the fixed-prefix vendor-token rules (AKIA…, ghp_…, glpat-…, xox…, PEM blocks, etc.).
+// Everything not listed here is a distinctive fixed-format token, so a match is high-confidence.
+var lowSignalSecretRules = map[string]bool{
+	"generic-secret":        true, // catch-all high-entropy assignment
+	"aws-secret-access-key": true, // entropy-only 40-char base64, no distinctive prefix
+	"db-connection-string":  true, // credential embedded in an otherwise ordinary URL
+	"jwt":                   true, // JWTs are common and frequently non-secret
+}
+
+// secretRuleConfidence tags a secret finding's confidence: high for the fixed-prefix vendor-token rules
+// (a match is structurally unambiguous), medium for the entropy/context-based rules above — so
+// --min-confidence can filter the noisier ones.
+func secretRuleConfidence(ruleID string) string {
+	if lowSignalSecretRules[ruleID] {
+		return vulnerability.ConfidenceMedium
+	}
+	return vulnerability.ConfidenceHigh
 }
 
 func secretDescription(sr ports.SecretRawFinding) string {
