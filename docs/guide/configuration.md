@@ -82,14 +82,19 @@ The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADD
 | `SYNAPSE_DB_MAX_CONN_LIFETIME` | `1h` | Connection lifetime. |
 | `SYNAPSE_DB_MAX_CONN_IDLE` | `30m` | Idle connection timeout. |
 
-## Evidence blob store (S3 or MinIO)
+## Shared artifact store (S3 or MinIO)
+
+The same object store retains evidence artifacts and Engagement source packages uploaded from the UI.
+Uploaded packages accept `.zip`, `.tar`, `.tar.gz`, and `.tgz` files up to 512 MiB compressed. API and
+worker processes must use the same bucket; the in-memory default only supports a single-process local
+development run and is not durable across restarts.
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_BLOB_ENDPOINT` | (in-memory) | Host and port without a scheme. Empty runs an in-memory blob store. |
 | `SYNAPSE_BLOB_ACCESS_KEY` | `synapse` | Access key. |
 | `SYNAPSE_BLOB_SECRET_KEY` | `synapse-secret` | Secret key. |
-| `SYNAPSE_BLOB_BUCKET` | `synapse-evidence` | Bucket for evidence artifacts. |
+| `SYNAPSE_BLOB_BUCKET` | `synapse-evidence` | Shared bucket for evidence artifacts and uploaded Engagement source packages. |
 | `SYNAPSE_BLOB_USE_SSL` | `false` | Set true for https endpoints. |
 
 ## Restore verification (synapse-verify-restore)

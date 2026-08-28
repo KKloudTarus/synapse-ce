@@ -4,27 +4,32 @@ package engagement
 import (
 	"context"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
 
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // Service implements engagement use cases.
 type Service struct {
-	repo  ports.EngagementRepository
-	clock ports.Clock
-	ids   ports.IDGenerator
-	audit ports.AuditLogger
+	repo    ports.EngagementRepository
+	clock   ports.Clock
+	ids     ports.IDGenerator
+	audit   ports.AuditLogger
+	sources ports.EngagementSourceStore
 }
 
 // NewService wires the engagement use case with its driven ports.
 func NewService(repo ports.EngagementRepository, clock ports.Clock, ids ports.IDGenerator, audit ports.AuditLogger) *Service {
 	return &Service{repo: repo, clock: clock, ids: ids, audit: audit}
 }
+
+func (s *Service) SetSourceStore(store ports.EngagementSourceStore) { s.sources = store }
 
 // CreateInput is the input for creating an engagement.
 type CreateInput struct {
@@ -42,8 +47,40 @@ type CreateInput struct {
 
 // Create validates and persists a new engagement with its scope.
 func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Engagement, error) {
+	return s.create(ctx, in, s.ids.NewID())
+}
+
+func (s *Service) CreateFromSourcePackage(ctx context.Context, in CreateInput, filename string, size int64, sha256hex string, src io.Reader) (*domain.Engagement, sourcepackage.Package, error) {
+	if s.sources == nil {
+		return nil, sourcepackage.Package{}, fmt.Errorf("%w: engagement source uploads are not configured", shared.ErrValidation)
+	}
+	id := s.ids.NewID()
+	item, err := s.sources.Save(ctx, shared.TenantOrDefault(in.TenantID), id, filename, in.CreatedBy, s.clock.Now(), size, sha256hex, src)
+	if err != nil {
+		return nil, sourcepackage.Package{}, err
+	}
+	in.InScope = append([]domain.Target{{Kind: domain.TargetRepo, Value: item.Target()}}, in.InScope...)
+	engagement, err := s.create(ctx, in, id)
+	if err != nil {
+		// Compensating delete: the engagement didn't persist, so the stored source would be orphaned.
+		_ = s.sources.Delete(context.WithoutCancel(ctx), item.TenantID, id)
+		return nil, sourcepackage.Package{}, err
+	}
+	// Chain-of-custody: record the ingest of untrusted source bytes in the append-only, hash-chained
+	// audit log (who uploaded which archive to which engagement), not only in the manifest metadata.
+	if err := s.auditChange(ctx, in.CreatedBy, "engagement.source_uploaded", id, map[string]string{
+		"filename": item.Filename,
+		"sha256":   item.SHA256,
+		"size":     strconv.FormatInt(item.Size, 10),
+	}, s.clock.Now()); err != nil {
+		return nil, sourcepackage.Package{}, err
+	}
+	return engagement, item, nil
+}
+
+func (s *Service) create(ctx context.Context, in CreateInput, id shared.ID) (*domain.Engagement, error) {
 	now := s.clock.Now()
-	e, err := domain.New(s.ids.NewID(), in.TenantID, in.Name, in.Client, now)
+	e, err := domain.New(id, in.TenantID, in.Name, in.Client, now)
 	if err != nil {
 		return nil, err
 	}

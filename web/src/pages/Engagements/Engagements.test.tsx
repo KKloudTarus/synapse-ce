@@ -10,6 +10,8 @@ vi.mock('../../lib/api', () => ({
     listEngagements: vi.fn(),
     listBusinessAssets: vi.fn(),
     createEngagement: vi.fn(),
+    createEngagementFromSource: vi.fn(),
+    startScan: vi.fn(),
     importBundle: vi.fn(),
     transitionEngagement: vi.fn(),
   },
@@ -82,6 +84,40 @@ describe('Engagements', () => {
     const newEngagementLinks = screen.getAllByRole('link', { name: 'New Engagement' })
     fireEvent.click(newEngagementLinks[0])
     expect(await screen.findByRole('heading', { name: 'New Engagement' })).toBeInTheDocument()
+  })
+
+  it('uploads a source package, creates the engagement, and starts its scan', async () => {
+    const created = {
+      id: 'eng-upload', name: 'Uploaded assessment', client: '', status: 'draft',
+      inScope: [{ kind: 'repo', value: `uploaded-source/sha256/${'b'.repeat(64)}` }], outOfScope: [],
+      authorizedFrom: null, authorizedTo: null, roe: { allowedToolClasses: [], blackouts: [] },
+      liveReconEnabled: false, createdAt: '2026-08-28T00:00:00Z', businessAssetId: '',
+    }
+    vi.mocked(api.createEngagementFromSource).mockResolvedValue(created)
+    vi.mocked(api.startScan).mockResolvedValue({
+      id: 'scan-upload', engagementId: created.id, target: created.inScope[0].value, kind: 'upload',
+      status: 'running', stage: 'queued', progress: 0, error: '', startedAt: null, finishedAt: null, debugEvents: [],
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/engagements/new']}>
+        <Routes>
+          <Route path="/engagements/new" element={<NewEngagement />} />
+          <Route path="/engagements/:id" element={<div>Uploaded engagement detail</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'Uploaded assessment' } })
+    fireEvent.click(screen.getByRole('radio', { name: /Upload package/i }))
+    fireEvent.change(screen.getByLabelText('Source package'), {
+      target: { files: [new File(['archive'], 'source.tar.gz', { type: 'application/gzip' })] },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Create & Scan' }))
+
+    await waitFor(() => expect(api.createEngagementFromSource).toHaveBeenCalled())
+    expect(api.startScan).toHaveBeenCalledWith('eng-upload', '', 'upload')
+    expect(await screen.findByText('Uploaded engagement detail')).toBeInTheDocument()
   })
 
   it('renders engagement rows and supports searching and filtering', async () => {

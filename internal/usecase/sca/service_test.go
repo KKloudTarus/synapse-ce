@@ -23,6 +23,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
@@ -513,6 +514,70 @@ func TestScanUsesImportedSBOMWithoutAcquiringTarget(t *testing.T) {
 	}
 	if res.Target != "product-service" || len(res.SBOM.Components) != 1 || len(res.SBOM.Dependencies) != 1 {
 		t.Fatalf("result imported SBOM = target %q comps %d deps %d", res.Target, len(res.SBOM.Components), len(res.SBOM.Dependencies))
+	}
+}
+
+type uploadedSourceStoreStub struct {
+	ports.EngagementSourceStore
+	item         sourcepackage.Package
+	tenantID     shared.ID
+	engagementID shared.ID
+}
+
+func (s *uploadedSourceStoreStub) Get(_ context.Context, tenantID, engagementID shared.ID) (sourcepackage.Package, error) {
+	s.tenantID, s.engagementID = tenantID, engagementID
+	return s.item, nil
+}
+
+func TestStartUploadedSourceScanUsesStoredIdentityOverImportedSBOM(t *testing.T) {
+	tenantID := shared.ID("tenant-1")
+	digest := strings.Repeat("a", 64)
+	item := sourcepackage.Package{
+		TenantID: tenantID, EngagementID: "e1", Filename: "source.zip", Size: 7, SHA256: digest,
+		CreatedBy: "operator", CreatedAt: time.Unix(100, 0).UTC(), Locator: "internal-source-locator",
+	}
+	eng := engagementWithScope(t, item.Target())
+	eng.TenantID = tenantID
+
+	imported := memory.NewImportedSBOMStore()
+	data := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","components":[{"name":"pkg","version":"1.0.0"}]}`)
+	if err := imported.SaveActive(context.Background(), importedsbom.Record{
+		ID: "sbom-1", TenantID: tenantID, EngagementID: "e1", Filename: "SBOM.json",
+		Format: importedsbom.FormatCycloneDX, SpecVersion: "1.4", TargetRef: "imported-target",
+		ComponentCount: 1, SHA256: hashHex(data), RawJSON: data, CreatedBy: "operator", CreatedAt: time.Unix(100, 0).UTC(),
+	}); err != nil {
+		t.Fatalf("SaveActive: %v", err)
+	}
+
+	jobs := newFakeJobStore()
+	queue := memory.NewJobQueue(fakeIDs{}, func() time.Time { return time.Unix(200, 0).UTC() })
+	sources := &uploadedSourceStoreStub{item: item}
+	svc := newAsyncSvc(&fakeEngRepo{eng: eng}, fakeClock{t: time.Unix(200, 0).UTC()}, &fakeAcquirer{}, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
+	svc.SetImportedSBOMStore(imported)
+	svc.SetUploadedSourceStore(sources)
+	svc.SetQueue(queue)
+
+	job, err := svc.StartUploadedSourceScanWithOptions(shared.WithTenant(context.Background(), tenantID), "operator", tenantID, "e1", ScanOptions{Mode: ScanModeFull})
+	if err != nil {
+		t.Fatalf("StartUploadedSourceScanWithOptions: %v", err)
+	}
+	if job.Kind != ports.TargetUpload || job.Target != item.Target() {
+		t.Fatalf("scan job target = kind %q target %q", job.Kind, job.Target)
+	}
+	if sources.tenantID != tenantID || sources.engagementID != "e1" {
+		t.Fatalf("source lookup = tenant %q engagement %q", sources.tenantID, sources.engagementID)
+	}
+
+	queued, err := queue.Claim(context.Background(), time.Minute, ScanJobKind)
+	if err != nil || queued == nil {
+		t.Fatalf("Claim: job=%+v err=%v", queued, err)
+	}
+	var payload scaJobPayload
+	if err := json.Unmarshal(queued.Payload, &payload); err != nil {
+		t.Fatalf("decode queued scan: %v", err)
+	}
+	if payload.Req.Kind != ports.TargetUpload || payload.Req.Value != item.Target() || payload.Req.Locator != item.Locator {
+		t.Fatalf("queued source request = %+v", payload.Req)
 	}
 }
 

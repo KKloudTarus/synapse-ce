@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState, type FC, type FormEvent } from 'react'
-import { Plus, Trash01, Check } from '@untitledui/icons'
+import { Check, Link01, Plus, Trash01, Upload01 } from '@untitledui/icons'
 import { api } from '../../../lib/api'
 import { kindLabel } from '../../../lib/format'
-import type { BusinessAsset, ScopeTarget } from '../../../lib/types'
+import type { BusinessAsset, Engagement, ScopeTarget } from '../../../lib/types'
 import { Select } from '../../../components/ui'
 
 const KINDS = ['repo', 'domain', 'host', 'url', 'image', 'cidr']
+const MAX_SOURCE_BYTES = 512 * 1024 * 1024
+type SourceMode = 'linked' | 'upload'
 
 export interface CreateEngagementFormProps {
   initialAssetId?: string
-  onCreated: () => void
+  onCreated: (engagement: Engagement, sourceMode: SourceMode, scanStartError?: string) => void
 }
 
 export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
@@ -18,6 +20,8 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
 }) => {
   const [name, setName] = useState('')
   const [client, setClient] = useState('')
+  const [sourceMode, setSourceMode] = useState<SourceMode>('linked')
+  const [sourceFile, setSourceFile] = useState<File | null>(null)
   const [scope, setScope] = useState<ScopeTarget[]>([{ kind: 'repo', value: '' }])
   const [authFrom, setAuthFrom] = useState('')
   const [authTo, setAuthTo] = useState('')
@@ -64,15 +68,35 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
     setScope((rows) => rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)))
   }
 
+  function chooseSource(file: File | undefined) {
+    if (!file) return
+    if (!/\.(zip|tar|tar\.gz|tgz)$/i.test(file.name)) {
+      setSourceFile(null)
+      setError('Choose a .zip, .tar, .tar.gz, or .tgz source package.')
+      return
+    }
+    if (file.size <= 0 || file.size > MAX_SOURCE_BYTES) {
+      setSourceFile(null)
+      setError('Source package must be non-empty and 512 MiB or smaller.')
+      return
+    }
+    setSourceFile(file)
+    setError(null)
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
-    const inScope = scope.filter((row) => row.value.trim() !== '')
+    const inScope = sourceMode === 'linked' ? scope.filter((row) => row.value.trim() !== '') : []
     if (!name.trim()) {
       setError('Name is required.')
       return
     }
-    if (inScope.length === 0) {
+    if (sourceMode === 'linked' && inScope.length === 0) {
       setError('Add at least one in-scope target.')
+      return
+    }
+    if (sourceMode === 'upload' && !sourceFile) {
+      setError('Choose a source package to upload.')
       return
     }
     if (assetId && !assets.some((asset) => asset.id === assetId)) {
@@ -90,7 +114,7 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
     setSubmitting(true)
     setError(null)
     try {
-      await api.createEngagement({
+      const input = {
         name: name.trim(),
         client: client.trim(),
         inScope,
@@ -99,8 +123,20 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
         authorizedTo: to,
         timezone: from || to ? timezone : undefined,
         assetId,
-      })
-      onCreated()
+      }
+      const engagement = sourceMode === 'upload'
+        ? await api.createEngagementFromSource(input, sourceFile!)
+        : await api.createEngagement(input)
+      if (sourceMode === 'upload') {
+        try {
+          await api.startScan(engagement.id, '', 'upload')
+          onCreated(engagement, sourceMode)
+        } catch (scanError) {
+          onCreated(engagement, sourceMode, scanError instanceof Error ? scanError.message : 'Failed to start scan')
+        }
+      } else {
+        onCreated(engagement, sourceMode)
+      }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Failed to create engagement')
     } finally {
@@ -175,60 +211,128 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
           </div>
         </div>
 
-        {/* Step 2: In-Scope Targets */}
+        {/* Step 2: Source */}
         <div className="border-t border-secondary pt-6">
           <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-primary">
             <span className="flex size-6 items-center justify-center rounded-full bg-brand-solid text-xs font-bold text-white">
               2
             </span>
-            In-scope targets
+            Source
           </div>
 
-          <div className="space-y-2.5">
-            {scope.map((row, index) => (
-              <div key={index} className="flex items-center gap-2">
-                <Select
-                  disabled={submitting}
-                  value={row.kind}
-                  onValueChange={(val) => setRow(index, { kind: val })}
-                  ariaLabel={`Target kind for row ${index + 1}`}
-                  options={kindOptions}
-                  className="h-10 w-32 shrink-0 border-primary bg-primary shadow-xs"
-                />
-
+          <div className="space-y-4">
+            <div role="radiogroup" aria-label="Engagement source" className="grid gap-3 sm:grid-cols-2">
+              <label className="flex cursor-pointer gap-3 rounded-xl border border-secondary bg-secondary/30 p-4 transition hover:border-brand/50">
                 <input
-                  type="text"
+                  type="radio"
+                  name="source-mode"
+                  value="linked"
+                  checked={sourceMode === 'linked'}
                   disabled={submitting}
-                  value={row.value}
-                  onChange={(e) => setRow(index, { value: e.target.value })}
-                  placeholder="/path/to/repo or app.acme.io"
-                  aria-label={`Target value for row ${index + 1}`}
-                  className="h-10 flex-1 font-mono rounded-lg border border-primary bg-primary px-3.5 py-2 text-sm text-primary shadow-xs outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  onChange={() => {
+                    setSourceMode('linked')
+                    setError(null)
+                  }}
+                  className="mt-1 size-4 accent-brand-solid"
                 />
+                <span>
+                  <span className="flex items-center gap-2 text-sm font-semibold text-primary"><Link01 className="size-4" /> Linked target</span>
+                  <span className="mt-1 block text-xs text-tertiary">Use a repository URL, server path, domain, or other scoped target.</span>
+                </span>
+              </label>
+              <label className="flex cursor-pointer gap-3 rounded-xl border border-secondary bg-secondary/30 p-4 transition hover:border-brand/50">
+                <input
+                  type="radio"
+                  name="source-mode"
+                  value="upload"
+                  checked={sourceMode === 'upload'}
+                  disabled={submitting}
+                  onChange={() => {
+                    setSourceMode('upload')
+                    setError(null)
+                  }}
+                  className="mt-1 size-4 accent-brand-solid"
+                />
+                <span>
+                  <span className="flex items-center gap-2 text-sm font-semibold text-primary"><Upload01 className="size-4" /> Upload package</span>
+                  <span className="mt-1 block text-xs text-tertiary">Attach an immutable source archive and scan it immediately.</span>
+                </span>
+              </label>
+            </div>
 
-                {scope.length > 1 && (
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() => setScope((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}
-                    aria-label={`Remove target row ${index + 1}`}
-                    className="flex size-10 items-center justify-center rounded-lg text-tertiary transition hover:bg-secondary hover:text-utility-red-600 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Trash01 className="size-4" />
-                  </button>
-                )}
+            {sourceMode === 'linked' ? (
+              <div className="space-y-2.5">
+                {scope.map((row, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <Select
+                      disabled={submitting}
+                      value={row.kind}
+                      onValueChange={(val) => setRow(index, { kind: val })}
+                      ariaLabel={`Target kind for row ${index + 1}`}
+                      options={kindOptions}
+                      className="h-10 w-32 shrink-0 border-primary bg-primary shadow-xs"
+                    />
+
+                    <input
+                      type="text"
+                      disabled={submitting}
+                      value={row.value}
+                      onChange={(e) => setRow(index, { value: e.target.value })}
+                      placeholder="/path/to/repo or app.acme.io"
+                      aria-label={`Target value for row ${index + 1}`}
+                      className="h-10 flex-1 font-mono rounded-lg border border-primary bg-primary px-3.5 py-2 text-sm text-primary shadow-xs outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+
+                    {scope.length > 1 && (
+                      <button
+                        type="button"
+                        disabled={submitting}
+                        onClick={() => setScope((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}
+                        aria-label={`Remove target row ${index + 1}`}
+                        className="flex size-10 items-center justify-center rounded-lg text-tertiary transition hover:bg-secondary hover:text-utility-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Trash01 className="size-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => setScope((rows) => [...rows, { kind: 'repo', value: '' }])}
+                  className="inline-flex items-center gap-1.5 pt-1 text-xs font-semibold text-brand-secondary transition hover:text-brand-primary disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Plus className="size-3.5" />
+                  Add target
+                </button>
               </div>
-            ))}
-
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={() => setScope((rows) => [...rows, { kind: 'repo', value: '' }])}
-              className="inline-flex items-center gap-1.5 pt-1 text-xs font-semibold text-brand-secondary transition hover:text-brand-primary disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Plus className="size-3.5" />
-              Add target
-            </button>
+            ) : (
+              <div className="rounded-xl border border-dashed border-secondary bg-secondary/30 p-5 text-center">
+                <input
+                  id="engagement-source-package"
+                  type="file"
+                  accept=".zip,.tar,.tar.gz,.tgz"
+                  disabled={submitting}
+                  className="sr-only"
+                  aria-label="Source package"
+                  aria-describedby="engagement-source-help"
+                  onChange={(event) => chooseSource(event.target.files?.[0])}
+                />
+                <Upload01 className="mx-auto size-6 text-brand-secondary" aria-hidden="true" />
+                <p className="mt-2 text-sm font-semibold text-primary">
+                  {sourceFile ? sourceFile.name : 'Choose a source package'}
+                </p>
+                {sourceFile && <p className="mt-1 text-xs text-tertiary">{(sourceFile.size / 1024 / 1024).toFixed(1)} MiB</p>}
+                <label
+                  htmlFor="engagement-source-package"
+                  className="mt-3 inline-flex cursor-pointer items-center justify-center rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-semibold text-secondary shadow-xs transition hover:border-brand/50 hover:text-primary focus-within:ring-2 focus-within:ring-brand/30"
+                >
+                  {sourceFile ? 'Choose another file' : 'Browse files'}
+                </label>
+                <p id="engagement-source-help" className="mt-3 text-xs text-tertiary">.zip, .tar, .tar.gz, or .tgz · maximum 512 MiB</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -289,7 +393,7 @@ export const CreateEngagementForm: FC<CreateEngagementFormProps> = ({
             ) : (
               <Check className="size-4" />
             )}
-            Create Engagement
+            {sourceMode === 'upload' ? 'Create & Scan' : 'Create Engagement'}
           </button>
         </div>
       </form>

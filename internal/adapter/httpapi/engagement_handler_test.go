@@ -1,8 +1,13 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +16,7 @@ import (
 
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 )
 
@@ -76,6 +82,34 @@ func (r *engRepoFake) List(context.Context, shared.ID) ([]*engdom.Engagement, er
 type engIDs struct{}
 
 func (engIDs) NewID() shared.ID { return shared.ID("eng-1") }
+
+type sourceStoreHTTPFake struct {
+	item sourcepackage.Package
+	data []byte
+}
+
+func (s *sourceStoreHTTPFake) Save(_ context.Context, tenantID, engagementID shared.ID, filename, actor string, createdAt time.Time, size int64, sha256hex string, src io.Reader) (sourcepackage.Package, error) {
+	data, err := io.ReadAll(src)
+	if err != nil {
+		return sourcepackage.Package{}, err
+	}
+	s.data = data
+	s.item = sourcepackage.Package{
+		TenantID: tenantID, EngagementID: engagementID, Filename: filename, Size: size,
+		SHA256: sha256hex, CreatedBy: actor, CreatedAt: createdAt, Locator: "source-locator",
+	}
+	return s.item, nil
+}
+
+func (s *sourceStoreHTTPFake) Get(context.Context, shared.ID, shared.ID) (sourcepackage.Package, error) {
+	return s.item, nil
+}
+
+func (*sourceStoreHTTPFake) Delete(context.Context, shared.ID, shared.ID) error { return nil }
+
+func (*sourceStoreHTTPFake) Materialize(context.Context, string) (string, sourcepackage.Package, func() error, error) {
+	return "", sourcepackage.Package{}, nil, shared.ErrNotFound
+}
 
 // newEngRouter wires a Router with only the engagement service (the E1 handlers
 // touch rt.eng + rt.log), seeded with one in-scope engagement "eng-1".
@@ -179,6 +213,55 @@ func TestGetEngagementHandler(t *testing.T) {
 	rt.getEngagement(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unknown id: want 404, got %d", rec.Code)
+	}
+}
+
+func TestCreateEngagementMultipartSource(t *testing.T) {
+	repo := newEngRepoFake()
+	sources := &sourceStoreHTTPFake{}
+	svc := enguc.NewService(repo, fixedClock{t: time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)}, engIDs{}, &fakeAudit{})
+	svc.SetSourceStore(sources)
+	rt := &Router{log: discardLog(), eng: svc}
+
+	archive := []byte("source archive")
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	metadata, err := writer.CreateFormField("metadata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := metadata.Write([]byte(`{"name":"Uploaded assessment","client":"Acme","in_scope":[],"out_of_scope":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	part, err := writer.CreateFormFile("source", "source.tar.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(archive); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/engagements", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice", TenantID: "tenant-a"}))
+	rec := httptest.NewRecorder()
+	rt.createEngagement(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	created, err := repo.GetByID(context.Background(), "eng-1")
+	if err != nil {
+		t.Fatalf("created engagement: %v", err)
+	}
+	wantDigest := sha256.Sum256(archive)
+	if !bytes.Equal(sources.data, archive) || sources.item.SHA256 != hex.EncodeToString(wantDigest[:]) {
+		t.Fatalf("stored source = %+v bytes=%q", sources.item, sources.data)
+	}
+	if len(created.Scope.InScope) != 1 || created.Scope.InScope[0].Value != sources.item.Target() {
+		t.Fatalf("uploaded source scope = %+v", created.Scope.InScope)
 	}
 }
 

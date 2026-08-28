@@ -36,6 +36,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceupload"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/license"
@@ -181,6 +182,7 @@ func main() {
 
 	// Evidence blob store (shared with the API when MinIO is configured).
 	var blobStore ports.BlobStore
+	var objectStore ports.ObjectStore
 	if cfg.BlobEndpoint != "" {
 		bs, berr := blob.NewMinIO(context.Background(), blob.Config{Endpoint: cfg.BlobEndpoint, AccessKey: cfg.BlobAccessKey, SecretKey: cfg.BlobSecretKey, Bucket: cfg.BlobBucket, UseSSL: cfg.BlobUseSSL})
 		if berr != nil {
@@ -188,9 +190,13 @@ func main() {
 			os.Exit(1)
 		}
 		blobStore = bs
+		objectStore = bs
 	} else {
-		blobStore = blob.NewMemory()
+		memoryStore := blob.NewMemory()
+		blobStore = memoryStore
+		objectStore = memoryStore
 	}
+	uploadedSources := sourceupload.NewStore(objectStore, 0)
 
 	guard, err := execution.NewGuard(repo, clock, auditLog)
 	if err != nil {
@@ -250,10 +256,11 @@ func main() {
 		log.Error(eerr.Error())
 		os.Exit(1)
 	}
-	scaService := scauc.NewService(repo, findingRepo, scanRepo, scanResultStore, scanJobStore, scanRunStore, evidenceService, ids, prov, clock, auditLog, shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, scaExecution.Acquirer,
+	scaService := scauc.NewService(repo, findingRepo, scanRepo, scanResultStore, scanJobStore, scanRunStore, evidenceService, ids, prov, clock, auditLog, shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, sourceupload.NewAcquirer(scaExecution.Acquirer, uploadedSources),
 		enry.New(), scaExecution.SBOMGen, scaExecution.Sources,
 		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil)))
 	scaService.SetImportedSBOMStore(importedSBOMStore)
+	scaService.SetUploadedSourceStore(uploadedSources)
 	configureCleanup := scacompose.Configure(scaService, cfg, scaExecution.Sandbox, log)
 	defer configureCleanup()
 	if cfg.ComplianceEnabled {
