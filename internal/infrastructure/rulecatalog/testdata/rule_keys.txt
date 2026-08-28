@@ -434,9 +434,9 @@ cpp-wstring-convert
 cpp:algorithm-pass-by-value-functor
 cpp:async-future-discarded
 cpp:auto-ptr-deprecated
-cpp:auto-ptr-usage
 cpp:bind-instead-of-lambda
 cpp:c-style-cast-in-cpp
+cpp:c-style-variadic-function
 cpp:catch-by-value
 cpp:condition-variable-spurious-wakeup
 cpp:const-cast-removing-constness
@@ -444,7 +444,6 @@ cpp:container-access-empty
 cpp:dangling-reference-span
 cpp:dangling-string-view-temporary
 cpp:default-delete-special-members
-cpp:destructor-throwing-exception
 cpp:double-checked-locking-pattern
 cpp:empty-catch-clause
 cpp:enum-unscoped-in-header
@@ -458,6 +457,7 @@ cpp:iterator-invalidation-loop
 cpp:iterator-past-the-end-deref
 cpp:ldap-query-concatenation
 cpp:lock-inversion-deadlock
+cpp:malloc-free-in-cpp
 cpp:manual-mutex-lock-unlock
 cpp:map-operator-bracket-unwanted-insert
 cpp:missing-constexpr-specifier
@@ -2640,6 +2640,7 @@ rust:deprecated-no-note
 rust:deserialize-untrusted
 rust:display-missing-debug
 rust:drop-ref
+rust:drop-reference-noop
 rust:empty-loop
 rust:eprint-stderr
 rust:error-unit-type
@@ -2692,7 +2693,6 @@ rust:mem-forget
 rust:mem-uninitialized
 rust:mem-zeroed
 rust:missing-must-use
-rust:mutex-guard-across-await
 rust:mutex-lock-unwrap
 rust:needless-collect-iter
 rust:needless-collect-len

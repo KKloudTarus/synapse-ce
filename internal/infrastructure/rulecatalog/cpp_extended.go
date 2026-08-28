@@ -30,7 +30,7 @@ func cppExtendedRules() []rule.Rule {
 		cppRule("auto-ptr-deprecated", "Use of deprecated std::auto_ptr", "CWE-676", "std::unique_ptr<Widget> p = std::make_unique<Widget>();", "std::auto_ptr<Widget> p(new Widget());", "Replace deprecated std::auto_ptr with std::unique_ptr.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityMedium),
 		cppRule("unique-ptr-custom-deleter-mismatch", "std::unique_ptr array with scalar delete", "CWE-762", "std::unique_ptr<int[]> arr(new int[10]);", "std::unique_ptr<int> arr(new int[10]);", "Use std::unique_ptr<T[]> for dynamically allocated arrays.", rule.TypeBug, rule.QualityReliability, shared.SeverityHigh),
 		cppRule("shared-ptr-from-this-in-constructor", "shared_from_this in constructor", "CWE-476", "class Service : public std::enable_shared_from_this<Service> {\npublic:\n    static std::shared_ptr<Service> create() {\n        auto s = std::make_shared<Service>();\n        s->init();\n        return s;\n    }\n};", "class Service : public std::enable_shared_from_this<Service> {\npublic:\n    Service() { auto self = shared_from_this(); }\n};", "Call shared_from_this() in factory methods or after the object is managed by a shared_ptr.", rule.TypeBug, rule.QualityReliability, shared.SeverityHigh),
-		cppRule("destructor-throwing-exception", "Destructor throws an exception", "CWE-248", "class Worker {\npublic:\n    ~Worker() noexcept {\n        try { cleanup(); } catch (...) {}\n    }\n};", "class Worker {\npublic:\n    ~Worker() {\n        throw std::runtime_error(\"error\");\n    }\n};", "Never throw exceptions from destructors; catch and handle them internally.", rule.TypeBug, rule.QualityReliability, shared.SeverityHigh),
+		cppRule("malloc-free-in-cpp", "C-style malloc or free used in C++", "CWE-762", "auto p = std::make_unique<Widget>();", "Widget *p = (Widget *)malloc(sizeof(Widget));\nfree(p);", "Use std::make_unique, std::make_shared, or new/delete instead of malloc and free in C++.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityMedium),
 	}
 
 	oop := []cppRuleSpec{
@@ -86,7 +86,7 @@ func cppExtendedRules() []rule.Rule {
 		cppRule("typedef-instead-of-using", "typedef instead of using", "CWE-398", "using Callback = std::function<void()>;", "typedef void (*Callback)();", "Use `using` alias declarations instead of `typedef`.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow),
 		cppRule("raw-loop-instead-of-range-for", "Index loop instead of range-for", "CWE-398", "for (const auto &item : items) { process(item); }", "for (size_t i = 0; i < items.size(); i++) { process(items[i]); }", "Use range-based for loops over indexed iterations when index is not needed.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow),
 		cppRule("missing-constexpr-specifier", "Compile-time constant missing constexpr", "CWE-398", "constexpr int BufferSize = 1024;", "const int BufferSize = 1024;", "Declare compile-time constants with constexpr.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow),
-		cppRule("auto-ptr-usage", "std::auto_ptr used", "CWE-676", "std::unique_ptr<Widget> w = std::make_unique<Widget>();", "std::auto_ptr<Widget> w(new Widget());", "Replace removed std::auto_ptr with std::unique_ptr.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow),
+		cppRule("c-style-variadic-function", "C-style variadic function instead of variadic template", "CWE-398", "template<typename... Args>\nvoid print_all(Args&&... args);", "void print_all(int count, ...);", "Use C++11 variadic templates or fold expressions instead of C-style ellipses (...).", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow),
 		cppRule("bind-instead-of-lambda", "std::bind instead of lambda", "CWE-398", "auto fn = [x](int y) { return compute(x, y); };", "auto fn = std::bind(compute, x, std::placeholders::_1);", "Use C++ lambda expressions instead of std::bind.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow),
 		cppRule("explicit-constructor-missing", "Single-argument constructor not explicit", "CWE-398", "class Buffer {\npublic:\n    explicit Buffer(size_t size);\n};", "class Buffer {\npublic:\n    Buffer(size_t size);\n};", "Mark single-argument constructors explicit to prevent unintended implicit conversions.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow),
 		cppRule("default-delete-special-members", "Empty constructor instead of = default", "CWE-398", "class Widget {\npublic:\n    Widget() = default;\n};", "class Widget {\npublic:\n    Widget() {}\n};", "Use = default to allow compiler optimizations on trivial constructors.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow),
@@ -148,7 +148,7 @@ func cppDescription(s cppRuleSpec) string {
 		"auto-ptr-deprecated": "using deprecated std::auto_ptr",
 		"unique-ptr-custom-deleter-mismatch": "a scalar std::unique_ptr managing array allocations",
 		"shared-ptr-from-this-in-constructor": "invoking shared_from_this() in a constructor",
-		"destructor-throwing-exception": "throwing an exception from a destructor body",
+		"malloc-free-in-cpp": "using C-style malloc or free instead of C++ resource management",
 
 		"missing-virtual-destructor": "a polymorphic base class with non-virtual destructor",
 		"object-slicing-pass-by-value": "passing a polymorphic object by value",
@@ -192,7 +192,7 @@ func cppDescription(s cppRuleSpec) string {
 		"typedef-instead-of-using": "using typedef instead of using alias declarations",
 		"raw-loop-instead-of-range-for": "using indexed loops instead of range-based for loops",
 		"missing-constexpr-specifier": "declaring compile-time constants without constexpr",
-		"auto-ptr-usage": "using removed std::auto_ptr",
+		"c-style-variadic-function": "declaring a C-style variadic function with ellipses",
 		"bind-instead-of-lambda": "using std::bind instead of C++ lambda expressions",
 		"explicit-constructor-missing": "single-argument constructor not marked explicit",
 		"default-delete-special-members": "empty constructor body instead of = default",
@@ -222,7 +222,7 @@ func cppRationale(s cppRuleSpec) string {
 		"auto-ptr-deprecated": "std::auto_ptr has broken copy semantics that silently transfer ownership.",
 		"unique-ptr-custom-deleter-mismatch": "Scalar delete on array allocations causes undefined heap corruption.",
 		"shared-ptr-from-this-in-constructor": "Calling shared_from_this in constructor throws std::bad_weak_ptr because control block is not ready.",
-		"destructor-throwing-exception": "Exceptions escaping destructors during stack unwinding cause immediate std::terminate calls.",
+		"malloc-free-in-cpp": "malloc and free bypass C++ constructors and destructors, leading to uninitialized objects and memory corruption.",
 
 		"missing-virtual-destructor": "Deleting a derived object through a base pointer with non-virtual destructor causes undefined behavior and resource leaks.",
 		"object-slicing-pass-by-value": "Passing polymorphic types by value truncates derived member state and virtual table pointers.",
@@ -266,7 +266,7 @@ func cppRationale(s cppRuleSpec) string {
 		"typedef-instead-of-using": "`using` syntax is cleaner and supports template aliases directly.",
 		"raw-loop-instead-of-range-for": "Manual indexing invites off-by-one errors and increases loop boilerplate.",
 		"missing-constexpr-specifier": "constexpr enables compile-time evaluation and placement in read-only memory segments.",
-		"auto-ptr-usage": "std::auto_ptr was deprecated in C++11 and removed in C++17.",
+		"c-style-variadic-function": "C-style variadic functions lack type safety and cannot safely handle non-trivial C++ types.",
 		"bind-instead-of-lambda": "Lambdas are faster, easier to optimize for compilers, and clearer to read than std::bind.",
 		"explicit-constructor-missing": "Implicit conversions from single-argument constructors cause subtle type conversion bugs.",
 		"default-delete-special-members": "Explicit empty constructors inhibit trivial type properties and compiler optimizations.",

@@ -21,8 +21,9 @@ const (
 )
 
 var (
-	cppMagicNumberRE = regexp.MustCompile(`(?:==|!=|<=|>=|<|>)\s*([2-9]|[1-9][0-9]+)\b`)
-	cppSQLPatternRE  = regexp.MustCompile(`(?i)(?:SELECT|INSERT|UPDATE|DELETE)\s+.*(?:FROM|INTO|SET|WHERE)`)
+	cppCommentedCodeRE   = regexp.MustCompile(`^\s*(?:class|struct|template|namespace|void|int|auto|for|if|while)\b`)
+	cppSQLPatternRE      = regexp.MustCompile(`(?i)(?:SELECT|INSERT|UPDATE|DELETE)\s+.*(?:FROM|INTO|SET|WHERE)`)
+	cppSensitiveSecretRE = regexp.MustCompile(`(?i)(?:password|secret|token|api[_-]?key|private[_-]?key)`)
 )
 
 func cppFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
@@ -141,16 +142,15 @@ func cppMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) {
 		cppMatchClass(n, text, src, emit)
 	case "function_definition":
 		cppMatchFunction(n, text, src, emit)
-	case "call_expression":
-		cppMatchCall(n, text, src, emit)
 	case "declaration":
 		cppMatchDeclaration(n, text, src, emit)
-		cppMatchFunctionDecl(n, text, src, emit)
+	case "call_expression":
+		cppMatchCall(n, text, src, emit)
 	case "throw_statement":
 		cppMatchThrow(n, text, src, emit)
 	case "catch_clause":
 		cppMatchCatch(n, text, src, emit)
-	case "for_statement":
+	case "for_statement", "for_range_loop":
 		cppMatchFor(n, text, src, emit)
 	case "template_declaration":
 		cppMatchTemplate(n, text, src, emit)
@@ -158,92 +158,119 @@ func cppMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) {
 		cppMatchEnum(n, text, emit)
 	case "type_definition":
 		cppMatchTypeDefinition(n, text, emit)
-	case "cast_expression":
+	case "c_style_cast_expression":
 		emit("c-style-cast-in-cpp", n)
-	case "new_expression", "delete_expression":
-		emit("raw-new-delete", n)
+	case "cast_expression":
+		cppMatchCast(n, text, src, emit)
 	}
+}
 
-	if strings.Contains(text, "const_cast<") && (strings.Contains(text, ".set_") || strings.Contains(text, "=")) {
+func cppMatchCast(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
+	if strings.HasPrefix(text, "reinterpret_cast") {
+		if strings.Contains(text, "int") || strings.Contains(text, "uint32_t") {
+			emit("reinterpret-cast-pointer-to-int", n)
+		} else if strings.Contains(text, "*") {
+			emit("reinterpret-cast-unrelated-classes", n)
+		}
+	}
+	if strings.HasPrefix(text, "const_cast") {
 		emit("const-cast-removing-constness", n)
-	}
-	if strings.Contains(text, "export template") {
-		emit("export-template-obsolete", n)
-	}
-	if (strings.Contains(text, "uid=") || strings.Contains(text, "ldap")) && strings.Contains(text, "+") && !strings.Contains(text, "escape") {
-		emit("ldap-query-concatenation", n)
-	}
-	if strings.Contains(text, "text_iarchive") || strings.Contains(text, "binary_iarchive") {
-		emit("untrusted-deserialization-boost", n)
-	}
-	if strings.Contains(text, "XercesDOMParser") {
-		emit("xml-external-entity-parser", n)
 	}
 }
 
 func cppMatchClass(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	hasDestructor := strings.Contains(text, "~")
-	hasCopyCtor := strings.Contains(text, "(const ") && strings.Contains(text, "&)")
-	hasCopyAssign := strings.Contains(text, "operator=(const ")
-	hasMoveCtor := strings.Contains(text, "&&")
-	hasVirtualMethod := strings.Contains(text, "virtual ")
-	hasVirtualDestructor := strings.Contains(text, "virtual ~")
-
-	if hasDestructor && !hasVirtualDestructor && hasVirtualMethod {
-		emit("missing-virtual-destructor", n)
-	}
-	if hasDestructor && (!hasCopyCtor || !hasCopyAssign) && !strings.Contains(text, "= delete") {
-		emit("rule-of-three-violation", n)
-	}
-	if hasCopyCtor && !hasMoveCtor && !strings.Contains(text, "= delete") {
-		emit("rule-of-five-violation", n)
-	}
+	hasVirtualMethod := false
+	hasVirtualDtor := false
+	hasCustomDtor := false
+	hasCopyCtor := false
+	hasCopyAssign := false
+	hasMoveCtor := false
+	hasMoveAssign := false
 
 	body := n.ChildByFieldName("body")
 	if body != nil {
 		for i := 0; i < int(body.NamedChildCount()); i++ {
 			member := body.NamedChild(i)
-			memberText := member.Content(src)
+			mText := member.Content(src)
+
+			if strings.Contains(mText, "virtual ") {
+				hasVirtualMethod = true
+			}
+			if strings.Contains(mText, "~") {
+				hasCustomDtor = true
+				if strings.Contains(mText, "virtual ") {
+					hasVirtualDtor = true
+				}
+			}
+			if strings.Contains(mText, "operator=") {
+				if strings.Contains(mText, "&&") {
+					hasMoveAssign = true
+				} else {
+					hasCopyAssign = true
+				}
+			} else if strings.Contains(mText, "(const ") && strings.Contains(mText, "&)") {
+				hasCopyCtor = true
+			} else if strings.Contains(mText, "(&&") || strings.Contains(mText, "&&)") {
+				hasMoveCtor = true
+			}
 
 			// Owning raw pointer member
 			if member.Type() == "field_declaration" {
-				if strings.Contains(memberText, "*") && !strings.Contains(memberText, "const") && !strings.Contains(memberText, "unique_ptr") && !strings.Contains(memberText, "shared_ptr") && !strings.Contains(memberText, "weak_ptr") {
+				if strings.Contains(mText, "*") && !strings.Contains(mText, "const") &&
+					!strings.Contains(mText, "unique_ptr") && !strings.Contains(mText, "shared_ptr") && !strings.Contains(mText, "weak_ptr") {
 					emit("owning-raw-pointer-member", member)
 				}
 			}
+
 			// Missing override specifier
-			if strings.Contains(text, ": public") || strings.Contains(text, ": Base") {
+			if strings.Contains(text, ": public") || strings.Contains(text, ": protected") || strings.Contains(text, ": private") {
 				if member.Type() == "field_declaration" || member.Type() == "declaration" || member.Type() == "function_definition" {
-					if strings.Contains(memberText, "(") && !strings.Contains(memberText, "override") && !strings.Contains(memberText, "virtual") && !strings.Contains(memberText, "static") && !strings.Contains(memberText, "~") {
+					if strings.Contains(mText, "(") && !strings.Contains(mText, "override") && !strings.Contains(mText, "virtual") &&
+						!strings.Contains(mText, "static") && !strings.Contains(mText, "~") {
 						emit("missing-override-specifier", member)
 					}
 				}
 			}
+
 			// Hidden virtual function
-			if strings.Contains(text, ": public") || strings.Contains(text, ": Base") {
+			if strings.Contains(text, ": public") || strings.Contains(text, ": protected") {
 				if member.Type() == "field_declaration" || member.Type() == "declaration" || member.Type() == "function_definition" {
-					if strings.Contains(memberText, "(") && !strings.Contains(memberText, "override") && !strings.Contains(text, "using Base::") && !strings.Contains(text, "using ") {
-						if strings.Contains(memberText, "render(int") || strings.Contains(memberText, "handle(int") || strings.Contains(memberText, "process(int") {
+					if strings.Contains(mText, "(") && !strings.Contains(mText, "override") && !strings.Contains(text, "using ") {
+						if strings.Contains(mText, "render(") || strings.Contains(mText, "handle(") || strings.Contains(mText, "process(") {
 							emit("hidden-virtual-function", member)
 						}
 					}
 				}
 			}
+
 			// Explicit constructor missing
 			if member.Type() == "field_declaration" || member.Type() == "function_definition" || member.Type() == "declaration" {
-				if (strings.Contains(memberText, "(size_t ") || strings.Contains(memberText, "(int ")) && !strings.Contains(memberText, "explicit ") && !strings.Contains(memberText, "void ") {
+				if (strings.Contains(mText, "(size_t ") || strings.Contains(mText, "(int ")) && !strings.Contains(mText, "explicit ") && !strings.Contains(mText, "void ") {
 					emit("explicit-constructor-missing", member)
 				}
 			}
+
 			// Default delete special members
-			if strings.Contains(memberText, "() {}") && !strings.Contains(memberText, "= default") {
+			if strings.Contains(mText, "() {}") && !strings.Contains(mText, "= default") {
 				emit("default-delete-special-members", member)
 			}
 		}
 	}
 
-	if (n.Type() == "union_specifier" || strings.HasPrefix(strings.TrimSpace(text), "union")) && strings.Contains(text, "int") && strings.Contains(text, "float") {
-		emit("type-punning-union-misuse", n)
+	if hasVirtualMethod && !hasVirtualDtor {
+		emit("missing-virtual-destructor", n)
+	}
+	if hasCustomDtor && (!hasCopyCtor || !hasCopyAssign) {
+		emit("rule-of-three-violation", n)
+	}
+	if (hasCopyCtor || hasCopyAssign) && (!hasMoveCtor || !hasMoveAssign) {
+		emit("rule-of-five-violation", n)
+	}
+
+	if n.Type() == "union_specifier" || strings.HasPrefix(strings.TrimSpace(text), "union") {
+		if strings.Contains(text, "int") && (strings.Contains(text, "float") || strings.Contains(text, "double")) {
+			emit("type-punning-union-misuse", n)
+		}
 	}
 }
 
@@ -253,56 +280,58 @@ func cppMatchFunction(n *sitter.Node, text string, src []byte, emit func(string,
 		body := n.ChildByFieldName("body")
 		if body != nil {
 			bodyText := body.Content(src)
-			if strings.Contains(bodyText, "setup()") || strings.Contains(bodyText, "init()") || strings.Contains(bodyText, "run()") || strings.Contains(bodyText, "setup();") {
+			if strings.Contains(bodyText, "setup()") || strings.Contains(bodyText, "init()") || strings.Contains(bodyText, "run()") {
 				emit("virtual-call-in-constructor", n)
 			}
 		}
 	}
-	// Object slicing pass by value
+
+	// Object slicing pass by value & C-style variadic function
 	if declarator := n.ChildByFieldName("declarator"); declarator != nil {
 		params := declarator.ChildByFieldName("parameters")
 		if params != nil {
 			for i := 0; i < int(params.NamedChildCount()); i++ {
 				p := params.NamedChild(i)
-				pText := p.Content(src)
-				if (strings.HasPrefix(pText, "Base ") || strings.HasPrefix(pText, "Shape ") || strings.HasPrefix(pText, "Widget ")) && !strings.Contains(pText, "&") && !strings.Contains(pText, "*") {
+				pText := strings.TrimSpace(p.Content(src))
+				if pText == "..." || strings.HasSuffix(pText, "...") {
+					if !strings.Contains(text, "template") {
+						emit("c-style-variadic-function", p)
+					}
+				}
+				// Polymorphic object slicing
+				if (strings.HasPrefix(pText, "Base ") || strings.HasPrefix(pText, "Shape ") || strings.HasPrefix(pText, "Widget ") ||
+					strings.HasPrefix(pText, "Service ") || strings.HasPrefix(pText, "Handler ")) &&
+					!strings.Contains(pText, "&") && !strings.Contains(pText, "*") {
 					emit("object-slicing-pass-by-value", p)
 				}
 			}
 		}
 	}
+
 	// Unnecessary temporary vector
 	if strings.Contains(text, "const std::vector<") && (strings.Contains(text, "> &") || strings.Contains(text, ">&")) {
 		emit("unnecessary-temporary-vector", n)
 	}
+
 	// Noexcept throwing
 	if strings.Contains(text, "noexcept") && strings.Contains(text, "throw ") {
 		emit("noexcept-function-throws", n)
 	}
+
 	// Destructor throwing
 	if strings.Contains(text, "~") && strings.Contains(text, "throw ") {
-		emit("destructor-throwing-exception", n)
 		emit("exception-in-destructor", n)
-	}
-}
-
-func cppMatchFunctionDecl(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	if strings.Contains(text, "Base b") || strings.Contains(text, "Shape s") || strings.Contains(text, "Widget w") {
-		if !strings.Contains(text, "&") && !strings.Contains(text, "*") {
-			emit("object-slicing-pass-by-value", n)
-		}
-	}
-	if strings.Contains(text, "const std::vector<") && (strings.Contains(text, "> &") || strings.Contains(text, ">&")) {
-		emit("unnecessary-temporary-vector", n)
 	}
 }
 
 func cppMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
 	callee := cppCallName(n, src)
 
+	if callee == "malloc" || callee == "free" || callee == "calloc" || callee == "realloc" {
+		emit("malloc-free-in-cpp", n)
+	}
 	if strings.Contains(text, "auto_ptr") {
 		emit("auto-ptr-deprecated", n)
-		emit("auto-ptr-usage", n)
 	}
 	if strings.Contains(text, "shared_from_this()") {
 		if cppInConstructor(n, src) {
@@ -355,17 +384,27 @@ func cppMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *si
 	if strings.Contains(text, "std::vformat(") || strings.Contains(text, "vformat(") {
 		emit("format-string-user-input", n)
 	}
-	if (strings.Contains(text, "std::regex ") || strings.Contains(text, "std::regex(")) && (strings.Contains(text, "user_") || strings.Contains(text, "pattern)") || strings.Contains(text, "user_pattern")) {
+	if (strings.Contains(text, "std::regex ") || strings.Contains(text, "std::regex(")) && (strings.Contains(text, "user_") || strings.Contains(text, "user_pattern")) {
 		if !strings.Contains(text, "\"") {
 			emit("regex-dos-dynamic-pattern", n)
 		}
+	}
+	if strings.Contains(callee, "XercesDOMParser") || strings.Contains(text, "XercesDOMParser") {
+		if !strings.Contains(text, "fgXercesDisableDefaultEntityResolution") {
+			emit("xml-external-entity-parser", n)
+		}
+	}
+	if strings.Contains(text, "boost::archive::text_iarchive") || strings.Contains(text, "text_iarchive") {
+		emit("untrusted-deserialization-boost", n)
 	}
 }
 
 func cppMatchDeclaration(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
 	if strings.Contains(text, "auto_ptr") {
 		emit("auto-ptr-deprecated", n)
-		emit("auto-ptr-usage", n)
+	}
+	if strings.Contains(text, "malloc(") || strings.Contains(text, "free(") {
+		emit("malloc-free-in-cpp", n)
 	}
 	if (strings.Contains(text, "new ") && strings.Contains(text, "delete ")) || (strings.Contains(text, "new ") && !strings.Contains(text, "make_unique") && !strings.Contains(text, "make_shared")) {
 		if strings.Contains(text, "delete ") {
@@ -393,27 +432,16 @@ func cppMatchDeclaration(n *sitter.Node, text string, src []byte, emit func(stri
 			}
 		}
 	}
-	if strings.Contains(text, "int counter = 0") || (strings.Contains(text, "counter++") && !strings.Contains(text, "atomic")) {
-		emit("shared-variable-no-synchronization", n)
-	}
 	if strings.Contains(text, "std::thread ") && !strings.Contains(text, ".join()") && !strings.Contains(text, ".detach()") {
 		emit("thread-joinable-destructor", n)
-	}
-	if strings.Contains(text, "reinterpret_cast<uint32_t>") || strings.Contains(text, "reinterpret_cast<int>") {
-		emit("reinterpret-cast-pointer-to-int", n)
-	}
-	if strings.Contains(text, "reinterpret_cast<") && strings.Contains(text, "*") {
-		if !strings.Contains(text, "char*") && !strings.Contains(text, "uint8_t*") && !strings.Contains(text, "uint32_t") && !strings.Contains(text, "uintptr_t") {
-			emit("reinterpret-cast-unrelated-classes", n)
-		}
 	}
 	if strings.Contains(text, "NULL") {
 		if strings.Contains(text, "*") && !strings.Contains(text, "nullptr") {
 			emit("null-macro-instead-of-nullptr", n)
 		}
 	}
-	if (strings.Contains(text, "const int ") || strings.Contains(text, "const size_t ") || strings.Contains(text, "const float ") || strings.Contains(text, "const double ")) {
-		if !strings.Contains(text, "constexpr") {
+	if strings.HasPrefix(strings.TrimSpace(text), "const int ") || strings.HasPrefix(strings.TrimSpace(text), "const size_t ") {
+		if !strings.Contains(text, "constexpr") && strings.Contains(text, "=") {
 			emit("missing-constexpr-specifier", n)
 		}
 	}
@@ -433,22 +461,14 @@ func cppMatchDeclaration(n *sitter.Node, text string, src []byte, emit func(stri
 	if strings.Contains(text, "[key]") && strings.Contains(text, "map") {
 		emit("map-operator-bracket-unwanted-insert", n)
 	}
-	if strings.Contains(text, "std::regex") && (strings.Contains(text, "user_") || strings.Contains(text, "user_pattern")) {
-		if !strings.Contains(text, "\"") {
-			emit("regex-dos-dynamic-pattern", n)
-		}
+	if (strings.Contains(text, "uid=") || strings.Contains(text, "ldap")) && strings.Contains(text, "+") {
+		emit("ldap-query-concatenation", n)
+	}
+	if (strings.Contains(text, "int counter = 0") || strings.Contains(text, "int shared_val")) && !strings.Contains(text, "atomic") && strings.Contains(string(src), "thread") {
+		emit("shared-variable-no-synchronization", n)
 	}
 	if strings.Contains(text, "::iterator") && !strings.Contains(text, "typename ") {
 		emit("missing-typename-dependent-type", n)
-	}
-	if strings.Contains(text, "v.find(") || strings.Contains(text, ".find(") {
-		fn := cppEnclosingFunction(n)
-		if fn != nil {
-			fnText := fn.Content(src)
-			if (strings.Contains(fnText, "*it") || strings.Contains(fnText, "use(*it)")) && !strings.Contains(fnText, "it != ") && !strings.Contains(fnText, "!= end()") {
-				emit("iterator-past-the-end-deref", n)
-			}
-		}
 	}
 }
 
@@ -492,8 +512,13 @@ func cppMatchFor(n *sitter.Node, text string, src []byte, emit func(string, *sit
 }
 
 func cppMatchTemplate(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	if strings.Contains(text, "Factorial<N-1>") && !strings.Contains(string(src), "Factorial<0>") {
-		emit("unbounded-template-recursion", n)
+	if strings.Contains(text, "export template") {
+		emit("export-template-obsolete", n)
+	}
+	if strings.Contains(text, "<N-1>") || strings.Contains(text, "<Depth-1>") || strings.Contains(text, "<Count-1>") {
+		if !strings.Contains(string(src), "<0>") && !strings.Contains(string(src), "<1>") {
+			emit("unbounded-template-recursion", n)
+		}
 	}
 	if strings.Contains(text, "::iterator") && !strings.Contains(text, "typename ") {
 		emit("missing-typename-dependent-type", n)

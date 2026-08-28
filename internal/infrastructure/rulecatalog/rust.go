@@ -40,7 +40,7 @@ func rustRules() []rule.Rule {
 
 	ownership := []rustRuleSpec{
 		rustRule("refcell-borrow-across-await", "RefCell borrow held across await point", "CWE-667", "let data = cell.borrow().clone();\nasync_op().await;", "let guard = cell.borrow();\nasync_op().await;\nuse_guard(&guard);", "Drop RefCell borrows before asynchronous suspension points.", rule.TypeBug, rule.QualityReliability, shared.SeverityHigh),
-		rustRule("mutex-guard-across-await", "std::sync::MutexGuard held across await point", "CWE-667", "let val = { let g = lock.lock().unwrap(); *g };\nasync_op().await;", "let guard = lock.lock().unwrap();\nasync_op().await;", "Use tokio::sync::Mutex or release standard mutex guards before await.", rule.TypeBug, rule.QualityReliability, shared.SeverityHigh),
+		rustRule("drop-reference-noop", "Explicit drop called on a reference", "CWE-672", "let x = 42;\nstd::mem::drop(x);", "let mut x = 42;\nstd::mem::drop(&mut x);", "Pass the owned value to std::mem::drop instead of dropping a reference.", rule.TypeBug, rule.QualityReliability, shared.SeverityMedium),
 		rustRule("unneeded-box-sized", "Unneeded Box on small sized value", "CWE-401", "fn compute() -> u64 { 42 }", "fn compute() -> Box<u64> { Box::new(42) }", "Pass small sized types directly on the stack instead of heap allocating.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow),
 		rustRule("clone-in-hot-loop", "Redundant clone inside loop body", "CWE-400", "let template = make_template();\nfor item in items { process(&template, item); }", "for item in items { process(template.clone(), item); }", "Borrow shared structures inside loops instead of cloning on every iteration.", rule.TypeCodeSmell, rule.QualityMaintainability, shared.SeverityLow),
 		rustRule("interior-mutability-shared", "Non-thread-safe interior mutability shared across threads", "CWE-362", "use std::sync::Mutex;\nlet counter = Mutex::new(0);", "use std::cell::Cell;\nlet counter = Cell::new(0);", "Use Mutex, RwLock, or Atomic types for interior mutability shared across threads.", rule.TypeBug, rule.QualityReliability, shared.SeverityHigh),
@@ -183,7 +183,7 @@ func rustDescription(s rustRuleSpec) string {
 		"unsafe-fn-without-doc": "an unsafe function declaration without a # Safety documentation section",
 
 		"refcell-borrow-across-await": "a RefCell borrow guard held across an async await point",
-		"mutex-guard-across-await": "a std::sync::MutexGuard held across an async await point",
+		"drop-reference-noop": "std::mem::drop invoked on a reference which has no effect",
 		"unneeded-box-sized": "a small sized value unnecessarily allocated in a Box on the heap",
 		"clone-in-hot-loop": "a deep clone called redundantly inside a loop body",
 		"interior-mutability-shared": "a thread-shared struct containing Cell or RefCell interior mutability",
@@ -276,7 +276,7 @@ func rustRationale(s rustRuleSpec) string {
 		"unsafe-fn-without-doc": "Unsafe functions require clear documentation of caller invariants to prevent misuse.",
 
 		"refcell-borrow-across-await": "Holding RefCell borrow guards across await points causes runtime panic on re-entrant calls.",
-		"mutex-guard-across-await": "Holding synchronous mutex guards across await points blocks executor threads and causes deadlocks.",
+		"drop-reference-noop": "Calling std::mem::drop on a reference does not drop the underlying owned value.",
 		"unneeded-box-sized": "Heap allocating small sized values adds unnecessary allocation overhead and indirection.",
 		"clone-in-hot-loop": "Deep cloning large structures on each loop iteration multiplies memory and CPU overhead.",
 		"interior-mutability-shared": "Cell and RefCell are not thread-safe; sharing them across threads causes data corruption.",

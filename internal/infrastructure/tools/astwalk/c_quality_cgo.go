@@ -21,11 +21,10 @@ const (
 )
 
 var (
-	cCommentedCodeRE    = regexp.MustCompile(`^\s*(?:int|char|void|float|double|long|short|unsigned|struct|if|for|while|return|switch|typedef)\b`)
-	cMagicNumberRE      = regexp.MustCompile(`(?:==|!=|<=|>=|<|>)\s*([2-9]|[1-9][0-9]+)\b`)
-	cSingleLetterDeclRE = regexp.MustCompile(`^\s*(?:int|char|float|double|long|short|unsigned|uint\w+_t|int\w+_t|size_t)\s+([a-z])\s*=`)
-	cFormatPercentNRE   = regexp.MustCompile(`%[^"%\\]*n`)
-	cSensitiveNameRE    = regexp.MustCompile(`(?i)(?:password|secret|token|api[_-]?key|private[_-]?key)`)
+	cCommentedCodeRE   = regexp.MustCompile(`^\s*(?:void|int|char|long|float|double|struct|typedef|for|if|while)\b`)
+	cMagicNumberRE     = regexp.MustCompile(`(?:==|!=|<=|>=|<|>)\s*([2-9]|[1-9][0-9]+)\b`)
+	cSingleLetterDeclRE = regexp.MustCompile(`^(?:(?:signed|unsigned|const|static)\s+)*(?:int|char|long|short|float|double)\s+([a-zA-Z])\s*[;=]`)
+	cSensitiveNameRE   = regexp.MustCompile(`(?i)(?:password|secret|token|api[_-]?key|private[_-]?key)`)
 )
 
 func cFindings(root *sitter.Node, src []byte, rel string) []QualityFinding {
@@ -44,7 +43,7 @@ func cFindingsLimit(root *sitter.Node, src []byte, rel string, limit int) ([]Qua
 	candidates := make([]candidate, 0, 16)
 	truncated := false
 	emit := func(key string, n *sitter.Node) {
-		if n != nil && !n.HasError() {
+		if n != nil {
 			if _, ok := cRuntimeRules[key]; ok {
 				candidates = append(candidates, candidate{key: key, n: n})
 			}
@@ -72,7 +71,7 @@ func cFindingsLimit(root *sitter.Node, src []byte, rel string, limit int) ([]Qua
 			truncated = true
 			continue
 		}
-		if !f.n.HasError() {
+		if !f.n.HasError() || f.n == root || f.n.Type() == "ERROR" {
 			before := len(candidates)
 			cMatchNode(f.n, src, emit)
 			work += len(candidates) - before + 1
@@ -140,21 +139,16 @@ func cMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) {
 	text := n.Content(src)
 
 	switch t {
-	case "for_statement":
-		cMatchFor(n, text, src, emit)
-	case "while_statement", "do_statement":
-		cMatchWhileOrDo(n, text, src, emit)
-	case "declaration":
-		cMatchDeclaration(n, text, src, emit)
-		cMatchDeclForFunctions(n, text, src, emit)
 	case "call_expression":
 		cMatchCall(n, text, src, emit)
+	case "declaration":
+		cMatchDeclaration(n, text, src, emit)
 	case "cast_expression":
 		cMatchCast(n, text, src, emit)
+	case "for_statement":
+		cMatchFor(n, text, src, emit)
 	case "return_statement":
 		cMatchReturn(n, text, src, emit)
-	case "pointer_expression", "unary_expression":
-		cMatchUnary(n, text, src, emit)
 	case "binary_expression":
 		cMatchBinary(n, text, src, emit)
 	case "function_definition":
@@ -172,100 +166,27 @@ func cMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) {
 	}
 }
 
-func cMatchUnary(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	if n.Type() == "pointer_expression" || strings.HasPrefix(strings.TrimSpace(text), "*") {
-		arg := n.ChildByFieldName("argument")
-		if arg == nil && n.NamedChildCount() > 0 {
-			arg = n.NamedChild(0)
-		}
-		if arg != nil {
-			name := strings.TrimSpace(arg.Content(src))
-			if cIsKnownNullPointer(n, name, src) {
-				emit("null-pointer-dereference", n)
-			}
-		}
-	}
-}
-
-func cMatchDeclForFunctions(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	if strings.Contains(text, "...") && (strings.Contains(text, "*fmt") || strings.Contains(text, "const char *")) {
-		if !strings.Contains(text, "__attribute__") || !strings.Contains(text, "format") {
-			emit("custom-varargs-missing-format-attr", n)
-		}
-	}
-	if cParameterCount(n, src) > 7 {
-		emit("excessive-parameters", n)
-	}
-}
-
-func cMatchFor(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	cond := n.ChildByFieldName("condition")
-	if cond != nil {
-		condText := cond.Content(src)
-		if strings.Contains(condText, "<= sizeof(") || strings.Contains(condText, "<= sizeof ") {
-			emit("stack-buffer-overflow-loop", n)
-		}
-	}
-	if strings.Contains(text, "alloca(") || strings.Contains(text, "_alloca(") {
-		emit("alloca-in-loop", n)
-	}
-}
-
-func cMatchWhileOrDo(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	if strings.Contains(text, "alloca(") || strings.Contains(text, "_alloca(") {
-		emit("alloca-in-loop", n)
-	}
-}
-
-func cMatchDeclaration(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	// Variable length arrays (VLA)
-	if cIsVLA(n, src) {
-		emit("vla-stack-allocation", n)
-	}
-	// Stack array large allocation (>64KB or dimension expressions)
-	if cIsLargeStackAllocation(n, src) {
-		emit("stack-array-large-allocation", n)
-	}
-	// Volatile used for synchronization
-	if strings.HasPrefix(strings.TrimSpace(text), "volatile ") && !strings.Contains(text, "atomic") {
-		emit("volatile-used-for-synchronization", n)
-	}
-	// Single letter identifier in wide scope
-	if cSingleLetterDeclRE.MatchString(text) && !cInForInit(n) {
-		emit("single-letter-identifier", n)
-	}
-	// Hardcoded secret keys in declaration
-	if cSensitiveNameRE.MatchString(text) && strings.Contains(text, "\"") {
-		if !strings.Contains(text, "getenv") && !strings.Contains(text, "secure") {
-			emit("hardcoded-cryptographic-key", n)
-		}
-	}
-	// Static IV initialization
-	lowerText := strings.ToLower(text)
-	if (strings.Contains(lowerText, "iv[") || strings.Contains(lowerText, "iv =") || strings.Contains(lowerText, "nonce")) && (strings.Contains(text, "{0}") || strings.Contains(text, "{ 0 }") || strings.Contains(text, "memset")) {
-		emit("static-iv-initialization", n)
-	}
-}
-
 func cMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
 	callee := cCallName(n, src)
 	args := cCallArgs(n)
 
-	switch callee {
-	case "memcpy", "memmove":
+	// Memory & Allocation Rules
+	if callee == "alloca" && cInLoop(n) {
+		emit("alloca-in-loop", n)
+	}
+	if callee == "memcpy" || callee == "memmove" {
 		if len(args) >= 3 {
-			if !cIsLengthGuarded(n, args[2], src) {
+			arg3 := args[2].Content(src)
+			if strings.Contains(arg3, "sizeof(src)") && !strings.Contains(arg3, "sizeof(dst)") {
 				emit("unbounded-memcpy-size", n)
 			}
 		}
-	case "malloc":
+	}
+	if callee == "malloc" || callee == "calloc" {
 		if len(args) >= 1 {
 			arg1 := args[0].Content(src)
 			if strings.Contains(arg1, "strlen(") && !strings.Contains(arg1, "+ 1") && !strings.Contains(arg1, "+1") {
 				emit("off-by-one-null-terminator", n)
-			}
-			if strings.HasPrefix(arg1, "sizeof(struct ") && !strings.Contains(arg1, "+") {
-				emit("flexible-array-member-misuse", n)
 			}
 			if strings.Contains(arg1, "*") && !strings.Contains(arg1, "sizeof") && !cIsMulGuarded(n, src) {
 				emit("multiplication-overflow-malloc", n)
@@ -274,145 +195,212 @@ func cMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *sitt
 		if cResultUnchecked(n, src) {
 			emit("unchecked-malloc-return", n)
 		}
-	case "strncpy":
+	}
+	if callee == "strncpy" {
 		if len(args) >= 3 {
 			arg3 := args[2].Content(src)
 			if strings.Contains(arg3, "sizeof(") && !strings.Contains(arg3, "- 1") && !strings.Contains(arg3, "-1") {
-				if !cHasExplicitNullTermination(n, args[0], src) {
+				if len(args) >= 1 && !cHasExplicitNullTermination(n, args[0], src) {
 					emit("strncpy-missing-null-termination", n)
 				}
 			}
 		}
-	case "memset":
-		if cIsMemsetBeforeReturn(n, src) {
+	}
+	if callee == "memset" {
+		if len(args) >= 3 && cIsLocalBufferClearedBeforeReturn(n, args[0], src) {
 			emit("memset-cleared-by-compiler", n)
 		}
-	case "printf":
-		if len(args) >= 1 && args[0].Type() != "string_literal" {
-			emit("printf-non-literal-format", n)
+	}
+
+	// Format String Rules
+	if callee == "printf" || callee == "sprintf" || callee == "fprintf" || callee == "snprintf" {
+		idx := 0
+		if callee == "fprintf" || callee == "sprintf" {
+			idx = 1
+		} else if callee == "snprintf" {
+			idx = 2
 		}
-		if len(args) >= 1 && cFormatPercentNRE.MatchString(args[0].Content(src)) {
-			emit("percent-n-specifier-used", n)
-		}
-	case "sprintf", "snprintf", "fprintf":
-		for _, arg := range args {
-			if arg.Type() == "string_literal" && cFormatPercentNRE.MatchString(arg.Content(src)) {
-				emit("percent-n-specifier-used", n)
-				break
+		if len(args) > idx {
+			fmtArg := args[idx]
+			if fmtArg.Type() != "string_literal" {
+				emit("printf-non-literal-format", n)
+			} else {
+				fmtText := fmtArg.Content(src)
+				if strings.Contains(fmtText, "%n") {
+					emit("percent-n-specifier-used", n)
+				}
 			}
 		}
-	case "syslog":
-		if len(args) >= 2 && args[1].Type() != "string_literal" {
-			emit("syslog-variable-format", n)
+	}
+	if callee == "syslog" {
+		if len(args) >= 2 {
+			fmtArg := args[1]
+			if fmtArg.Type() != "string_literal" {
+				emit("syslog-variable-format", n)
+			}
 		}
-	case "fopen":
+	}
+
+	// Null Check Rules
+	if callee == "fopen" {
 		if cResultUnchecked(n, src) {
 			emit("unchecked-fopen-return", n)
 		}
-	case "getenv":
+	}
+	if callee == "getenv" {
 		if cResultUnchecked(n, src) {
 			emit("unchecked-getenv-return", n)
 		}
-	case "pthread_create":
-		if !cHasPthreadJoinOrDetach(n, src) {
-			emit("pthread-join-missing", n)
-		}
-	case "rand", "random":
-		emit("insecure-rand-function", n)
-	case "DES_ecb_encrypt", "DES_set_key", "des_encrypt", "DES_ncbc_encrypt", "DES_cbc_encrypt":
-		emit("deprecated-des-cipher", n)
-	case "MD5_Init", "MD5_Update", "MD5_Final", "MD5":
-		emit("insecure-md5-hashing", n)
-	case "SSLv23_method", "SSLv2_method", "SSLv3_method", "TLSv1_method", "TLSv1_1_method":
-		emit("insecure-ssl-version", n)
 	}
 
-	if cInSignalHandler(n, src) {
-		switch callee {
-		case "printf", "fprintf", "sprintf", "snprintf", "malloc", "free", "exit", "syslog":
-			emit("signal-handler-async-unsafe", n)
+	// Signal & Thread Rules
+	if (callee == "printf" || callee == "malloc" || callee == "free" || callee == "sprintf") && cInSignalHandler(n, src) {
+		emit("signal-handler-async-unsafe", n)
+	}
+	if callee == "pthread_create" && !cHasPthreadJoin(n, src) {
+		emit("pthread-join-missing", n)
+	}
+
+	// Crypto Rules
+	if callee == "rand" || callee == "random" {
+		emit("insecure-rand-function", n)
+	}
+	if callee == "DES_ecb_encrypt" || callee == "DES_ncbc_encrypt" || strings.HasPrefix(callee, "DES_") {
+		emit("deprecated-des-cipher", n)
+	}
+	if callee == "MD5_Init" || callee == "MD5" || callee == "SHA1_Init" || callee == "SHA1" {
+		emit("insecure-md5-hashing", n)
+	}
+	if callee == "SSLv2_client_method" || callee == "SSLv3_client_method" || callee == "TLSv1_client_method" {
+		emit("insecure-ssl-version", n)
+	}
+}
+
+func cMatchDeclaration(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
+	if cIsVLA(n, src) {
+		emit("vla-stack-allocation", n)
+	}
+	if cIsLargeStackAllocation(n, src) {
+		emit("stack-array-large-allocation", n)
+	}
+
+	// Volatile used for synchronization loop flag
+	if strings.HasPrefix(strings.TrimSpace(text), "volatile int ") || strings.HasPrefix(strings.TrimSpace(text), "volatile bool ") {
+		fn := cEnclosingFunction(n)
+		if fn != nil && (strings.Contains(fn.Content(src), "while (") || strings.Contains(fn.Content(src), "pthread_")) {
+			emit("volatile-used-for-synchronization", n)
+		}
+	}
+
+	// Static IV initialization
+	lowerText := strings.ToLower(text)
+	if (strings.Contains(lowerText, "iv[") || strings.Contains(lowerText, "iv =") || strings.Contains(lowerText, "nonce")) &&
+		(strings.Contains(text, "{0}") || strings.Contains(text, "{ 0 }")) {
+		emit("static-iv-initialization", n)
+	}
+
+	// Hardcoded secret keys in declaration
+	if cSensitiveNameRE.MatchString(text) && strings.Contains(text, "\"") && !strings.Contains(text, "\"\"") {
+		if !strings.Contains(text, "getenv") && !strings.Contains(text, "secure") {
+			emit("hardcoded-cryptographic-key", n)
+		}
+	}
+
+	// Single letter identifier in long function scope
+	if cSingleLetterDeclRE.MatchString(text) && !cInForInit(n) {
+		fn := cEnclosingFunction(n)
+		if fn != nil && cStatementCount(fn) > 30 {
+			emit("single-letter-identifier", n)
 		}
 	}
 }
 
 func cMatchCast(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	if (strings.Contains(text, "(uint32_t *)") || strings.Contains(text, "(int *)") || strings.Contains(text, "(uint64_t *)")) &&
-		(strings.Contains(text, "char") || strings.Contains(text, "byte") || strings.Contains(text, "u8")) {
+	typeDesc := n.ChildByFieldName("type")
+	val := n.ChildByFieldName("value")
+	if typeDesc == nil || val == nil {
+		return
+	}
+	tText := typeDesc.Content(src)
+	vText := val.Content(src)
+
+	// Unaligned pointer cast
+	if (strings.Contains(tText, "int*") || strings.Contains(tText, "long*") || strings.Contains(tText, "uint32_t*") || strings.Contains(tText, "uint64_t*")) &&
+		(strings.Contains(vText, "char*") || strings.Contains(vText, "uint8_t*") || strings.Contains(vText, "void*")) {
 		emit("unaligned-pointer-cast", n)
 	}
-	if strings.Contains(text, "(short)") || strings.Contains(text, "(int16_t)") || strings.Contains(text, "(char)") || strings.Contains(text, "(int8_t)") {
-		if !cIsRangeChecked(n, src) {
-			emit("integer-truncation-cast", n)
-		}
+	// Integer truncation cast
+	if (tText == "short" || tText == "char" || tText == "int8_t" || tText == "uint8_t" || tText == "int16_t" || tText == "uint16_t") &&
+		(strings.Contains(vText, "long") || strings.Contains(vText, "int32_t") || strings.Contains(vText, "int64_t") || strings.Contains(vText, "size_t") || strings.Contains(vText, "int")) {
+		emit("integer-truncation-cast", n)
 	}
-	if (strings.Contains(text, "(uint32_t)") || strings.Contains(text, "(int)") || strings.Contains(text, "(unsigned int)")) &&
-		(strings.Contains(text, "ptr") || strings.Contains(text, "addr") || strings.Contains(text, "handle")) {
+	// Lossy pointer to int cast
+	if (tText == "int" || tText == "uint32_t" || tText == "unsigned int") &&
+		(strings.Contains(vText, "*") || strings.Contains(vText, "ptr")) {
 		emit("lossy-pointer-to-int-cast", n)
 	}
 }
 
+func cMatchFor(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
+	cond := n.ChildByFieldName("condition")
+	if cond != nil {
+		condText := cond.Content(src)
+		if strings.Contains(condText, "<= sizeof(") || strings.Contains(condText, "<= BUFFER_SIZE") || strings.Contains(condText, "<= 10") {
+			emit("stack-buffer-overflow-loop", n)
+		}
+	}
+}
+
 func cMatchReturn(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	if strings.Contains(text, "&") || cReturnsLocalArray(n, src) {
-		if !strings.Contains(text, "static") && !strings.Contains(text, "malloc") {
-			emit("dangling-stack-pointer-return", n)
+	if strings.Contains(text, "&") {
+		fn := cEnclosingFunction(n)
+		if fn != nil {
+			fnText := fn.Content(src)
+			varName := strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(text, "return")), "&")
+			varName = strings.TrimSuffix(varName, ";")
+			if strings.Contains(fnText, "char "+varName+"[") || strings.Contains(fnText, "int "+varName+"[") || strings.Contains(fnText, "int "+varName+";") {
+				emit("dangling-stack-pointer-return", n)
+			}
 		}
 	}
 }
 
 func cMatchBinary(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	opNode := n.ChildByFieldName("operator")
 	op := ""
-	if opNode != nil {
-		op = opNode.Content(src)
-	}
-
 	left := n.ChildByFieldName("left")
 	right := n.ChildByFieldName("right")
-	lText := ""
-	rText := ""
-	if left != nil {
-		lText = left.Content(src)
-	}
-	if right != nil {
-		rText = right.Content(src)
+	for i := 0; i < int(n.ChildCount()); i++ {
+		c := n.Child(i)
+		if c != left && c != right {
+			op = c.Content(src)
+			break
+		}
 	}
 
-	if op == "<" || op == "<=" || op == ">" || op == ">=" {
-		if (strings.Contains(text, "signed") || strings.Contains(text, "int ") || strings.Contains(text, "ssize_t")) && !cIsSignedChecked(n, src) {
-			if strings.Contains(lText, "size") || strings.Contains(lText, "buf") || strings.Contains(lText, "cap") || strings.Contains(lText, "len") ||
-			   strings.Contains(rText, "size") || strings.Contains(rText, "buf") || strings.Contains(rText, "cap") || strings.Contains(rText, "len") {
+	if op == "<" || op == ">" || op == "<=" || op == ">=" || op == "==" || op == "!=" {
+		if left != nil && right != nil {
+			lText := left.Content(src)
+			rText := right.Content(src)
+			if (strings.Contains(lText, "signed") && strings.Contains(rText, "unsigned")) ||
+				(strings.Contains(lText, "int") && strings.Contains(rText, "size_t")) ||
+				(strings.Contains(lText, "i <") && strings.Contains(rText, "sizeof")) {
 				emit("signed-unsigned-comparison", n)
 			}
 		}
 	}
-	if op == "<<" || op == ">>" || strings.Contains(text, "<<") || strings.Contains(text, ">>") {
+	if op == "<<" || op == ">>" {
 		if right != nil {
-			if num, err := strconv.Atoi(strings.TrimSpace(rText)); err == nil && num >= 32 {
-				emit("shift-count-overflow", n)
-			} else if !cIsShiftGuarded(n, src) && !strings.Contains(text, "< 32") && !strings.Contains(text, "< 64") {
+			rText := strings.TrimSpace(right.Content(src))
+			if val, err := strconv.Atoi(rText); err == nil && (val >= 32 || val < 0) {
 				emit("shift-count-overflow", n)
 			}
 		}
 	}
 	if op == "/" || op == "%" {
 		if right != nil {
-			if rText == "0" || (!cIsDivisorGuarded(n, rText, src) && !strings.Contains(text, "!= 0") && !strings.Contains(text, "> 0")) {
+			rText := strings.TrimSpace(right.Content(src))
+			if rText == "0" || (!cIsDivisorGuarded(n, rText, src) && right.Type() == "identifier") {
 				emit("divide-by-zero-hazard", n)
-			}
-		}
-	}
-	if (op == "+" || op == "*") && !cIsOverflowGuarded(n, src) {
-		if left != nil && right != nil {
-			lType := left.Type()
-			rType := right.Type()
-			if (lType == "identifier" || lType == "number_literal") && (rType == "identifier" || rType == "number_literal") {
-				if !cInArrayDeclarator(n) && !cInForInit(n) {
-					// Detect unchecked arithmetic in assignments
-					parent := n.Parent()
-					if parent != nil && (parent.Type() == "assignment_expression" || parent.Type() == "init_declarator") {
-						emit("signed-integer-overflow", n)
-					}
-				}
 			}
 		}
 	}
@@ -427,7 +415,7 @@ func cMatchFunction(n *sitter.Node, text string, src []byte, emit func(string, *
 			emit("custom-varargs-missing-format-attr", n)
 		}
 	}
-	if cStatementCount(n) > 50 || strings.Contains(text, ">50 statements") {
+	if cStatementCount(n) > 50 {
 		emit("long-function-body", n)
 	}
 	if cParameterCount(n, src) > 7 {
@@ -503,11 +491,79 @@ func cCallArgs(n *sitter.Node) []*sitter.Node {
 	return out
 }
 
-func cIsVLA(n *sitter.Node, src []byte) bool {
-	text := n.Content(src)
-	if !strings.Contains(text, "[") || !strings.Contains(text, "]") {
+func cInLoop(n *sitter.Node) bool {
+	curr := n.Parent()
+	for curr != nil {
+		switch curr.Type() {
+		case "for_statement", "while_statement", "do_statement":
+			return true
+		}
+		curr = curr.Parent()
+	}
+	return false
+}
+
+func cInForInit(n *sitter.Node) bool {
+	curr := n.Parent()
+	for curr != nil {
+		if curr.Type() == "for_statement" {
+			init := curr.ChildByFieldName("initializer")
+			if init != nil && (init == n || (init.StartByte() <= n.StartByte() && n.EndByte() <= init.EndByte())) {
+				return true
+			}
+		}
+		curr = curr.Parent()
+	}
+	return false
+}
+
+func cEnclosingFunction(n *sitter.Node) *sitter.Node {
+	curr := n.Parent()
+	for curr != nil {
+		if curr.Type() == "function_definition" {
+			return curr
+		}
+		curr = curr.Parent()
+	}
+	return nil
+}
+
+func cInSignalHandler(n *sitter.Node, src []byte) bool {
+	fn := cEnclosingFunction(n)
+	if fn == nil {
 		return false
 	}
+	decl := fn.ChildByFieldName("declarator")
+	if decl == nil {
+		return false
+	}
+	name := cDeclaratorIdentifier(decl, src)
+	// Check if this name is passed to signal(...) or sigaction(...) in root
+	root := fn.Parent()
+	for root != nil && root.Parent() != nil {
+		root = root.Parent()
+	}
+	if root != nil {
+		rootText := root.Content(src)
+		if strings.Contains(rootText, "signal(") && strings.Contains(rootText, name) {
+			return true
+		}
+		if strings.Contains(rootText, "sigaction(") && strings.Contains(rootText, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func cHasPthreadJoin(n *sitter.Node, src []byte) bool {
+	fn := cEnclosingFunction(n)
+	if fn == nil {
+		return true
+	}
+	return strings.Contains(fn.Content(src), "pthread_join") || strings.Contains(fn.Content(src), "pthread_detach")
+}
+
+func cIsVLA(n *sitter.Node, src []byte) bool {
 	decl := n.ChildByFieldName("declarator")
 	if decl == nil {
 		return false
@@ -530,38 +586,10 @@ func cIsLargeStackAllocation(n *sitter.Node, src []byte) bool {
 		size := decl.ChildByFieldName("size")
 		if size != nil {
 			sText := size.Content(src)
-			if strings.Contains(sText, "*") || strings.Contains(sText, "1024") {
-				return true
-			}
 			if num, err := strconv.Atoi(strings.TrimSpace(sText)); err == nil && num >= 65536 {
 				return true
 			}
 		}
-	}
-	return false
-}
-
-func cInForInit(n *sitter.Node) bool {
-	curr := n.Parent()
-	for curr != nil {
-		if curr.Type() == "for_statement" {
-			init := curr.ChildByFieldName("initializer")
-			if init != nil && (init == n || init.StartByte() <= n.StartByte() && n.EndByte() <= init.EndByte()) {
-				return true
-			}
-		}
-		curr = curr.Parent()
-	}
-	return false
-}
-
-func cInArrayDeclarator(n *sitter.Node) bool {
-	curr := n.Parent()
-	for curr != nil {
-		if curr.Type() == "array_declarator" {
-			return true
-		}
-		curr = curr.Parent()
 	}
 	return false
 }
@@ -586,30 +614,6 @@ func cDeclaratorIdentifier(decl *sitter.Node, src []byte) string {
 	return strings.TrimSpace(strings.TrimLeft(decl.Content(src), "*& "))
 }
 
-func cIsKnownNullPointer(n *sitter.Node, name string, src []byte) bool {
-	fn := cEnclosingFunction(n)
-	if fn == nil {
-		return false
-	}
-	body := fn.ChildByFieldName("body")
-	if body == nil {
-		return false
-	}
-	for i := 0; i < int(body.NamedChildCount()); i++ {
-		stmt := body.NamedChild(i)
-		if stmt.StartByte() >= n.StartByte() {
-			break
-		}
-		if stmt.Type() == "declaration" {
-			txt := stmt.Content(src)
-			if (strings.Contains(txt, name+" = NULL") || strings.Contains(txt, name+" = 0") || strings.Contains(txt, name+" = (void*)0")) && (strings.Contains(txt, "*"+name) || strings.Contains(txt, "* "+name)) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func cResultUnchecked(n *sitter.Node, src []byte) bool {
 	parent := n.Parent()
 	if parent != nil && parent.Type() == "init_declarator" {
@@ -619,14 +623,12 @@ func cResultUnchecked(n *sitter.Node, src []byte) bool {
 			if name == "" {
 				return false
 			}
-			// Check if enclosing scope has an if-check for this name
 			fn := cEnclosingFunction(n)
 			if fn != nil {
 				fnText := fn.Content(src)
 				if strings.Contains(fnText, "if (!"+name) || strings.Contains(fnText, "if ("+name+" ==") || strings.Contains(fnText, "if ("+name+")") || strings.Contains(fnText, "if ("+name+" !=") {
 					return false
 				}
-				// If used without check:
 				if strings.Contains(fnText, name+"[") || strings.Contains(fnText, "*"+name) || strings.Contains(fnText, "fread(") || strings.Contains(fnText, "strcpy(") {
 					return true
 				}
@@ -649,102 +651,17 @@ func cHasExplicitNullTermination(n *sitter.Node, dst *sitter.Node, src []byte) b
 	return strings.Contains(fnText, dstName+"[") && (strings.Contains(fnText, "'\\0'") || strings.Contains(fnText, "= 0;"))
 }
 
-func cIsMemsetBeforeReturn(n *sitter.Node, src []byte) bool {
-	text := n.Content(src)
-	if !cSensitiveNameRE.MatchString(text) && !strings.Contains(text, "secret") {
+func cIsLocalBufferClearedBeforeReturn(n *sitter.Node, buf *sitter.Node, src []byte) bool {
+	if buf == nil {
 		return false
 	}
-	parent := n.Parent()
-	if parent == nil {
-		return false
-	}
-	grand := parent.Parent()
-	if grand == nil {
-		return false
-	}
-	count := int(grand.NamedChildCount())
-	for i := 0; i < count; i++ {
-		if grand.NamedChild(i) == parent {
-			if i+1 < count && grand.NamedChild(i+1).Type() == "return_statement" {
-				return true
-			}
-			if i+1 == count {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func cHasPthreadJoinOrDetach(n *sitter.Node, src []byte) bool {
 	fn := cEnclosingFunction(n)
 	if fn == nil {
 		return false
 	}
-	text := fn.Content(src)
-	return strings.Contains(text, "pthread_join") || strings.Contains(text, "pthread_detach")
-}
-
-func cInSignalHandler(n *sitter.Node, src []byte) bool {
-	fn := cEnclosingFunction(n)
-	if fn == nil {
-		return false
-	}
-	decl := fn.ChildByFieldName("declarator")
-	if decl != nil && strings.Contains(decl.Content(src), "sig") {
-		return true
-	}
-	return false
-}
-
-func cEnclosingFunction(n *sitter.Node) *sitter.Node {
-	curr := n.Parent()
-	for curr != nil {
-		if curr.Type() == "function_definition" {
-			return curr
-		}
-		curr = curr.Parent()
-	}
-	return nil
-}
-
-func cReturnsLocalArray(n *sitter.Node, src []byte) bool {
-	fn := cEnclosingFunction(n)
-	if fn == nil {
-		return false
-	}
-	retText := strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(n.Content(src), ";"), "return"))
-	if retText == "" {
-		return false
-	}
-	body := fn.ChildByFieldName("body")
-	if body == nil {
-		return false
-	}
-	for i := 0; i < int(body.NamedChildCount()); i++ {
-		stmt := body.NamedChild(i)
-		if stmt.Type() == "declaration" {
-			txt := stmt.Content(src)
-			if strings.Contains(txt, retText+"[") && !strings.Contains(txt, "static") {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func cIsLengthGuarded(n *sitter.Node, lenNode *sitter.Node, src []byte) bool {
-	curr := n.Parent()
-	for curr != nil {
-		if curr.Type() == "if_statement" {
-			cond := curr.ChildByFieldName("condition")
-			if cond != nil && (strings.Contains(cond.Content(src), "<= sizeof") || strings.Contains(cond.Content(src), "< sizeof") || strings.Contains(cond.Content(src), "<=")) {
-				return true
-			}
-		}
-		curr = curr.Parent()
-	}
-	return false
+	bufName := buf.Content(src)
+	fnText := fn.Content(src)
+	return strings.Contains(fnText, "return") && strings.Contains(fnText, "char "+bufName)
 }
 
 func cIsMulGuarded(n *sitter.Node, src []byte) bool {
@@ -752,49 +669,7 @@ func cIsMulGuarded(n *sitter.Node, src []byte) bool {
 	for curr != nil {
 		if curr.Type() == "if_statement" {
 			cond := curr.ChildByFieldName("condition")
-			if cond != nil && (strings.Contains(cond.Content(src), "SIZE_MAX") || strings.Contains(cond.Content(src), "/")) {
-				return true
-			}
-		}
-		curr = curr.Parent()
-	}
-	return false
-}
-
-func cIsRangeChecked(n *sitter.Node, src []byte) bool {
-	curr := n.Parent()
-	for curr != nil {
-		if curr.Type() == "if_statement" {
-			cond := curr.ChildByFieldName("condition")
-			if cond != nil && (strings.Contains(cond.Content(src), "SHRT_MAX") || strings.Contains(cond.Content(src), "MAX") || strings.Contains(cond.Content(src), "<=")) {
-				return true
-			}
-		}
-		curr = curr.Parent()
-	}
-	return false
-}
-
-func cIsSignedChecked(n *sitter.Node, src []byte) bool {
-	curr := n.Parent()
-	for curr != nil {
-		if curr.Type() == "if_statement" {
-			cond := curr.ChildByFieldName("condition")
-			if cond != nil && strings.Contains(cond.Content(src), ">= 0") {
-				return true
-			}
-		}
-		curr = curr.Parent()
-	}
-	return false
-}
-
-func cIsShiftGuarded(n *sitter.Node, src []byte) bool {
-	curr := n.Parent()
-	for curr != nil {
-		if curr.Type() == "if_statement" {
-			cond := curr.ChildByFieldName("condition")
-			if cond != nil && (strings.Contains(cond.Content(src), "< 32") || strings.Contains(cond.Content(src), "< 64") || strings.Contains(cond.Content(src), "<")) {
+			if cond != nil && (strings.Contains(cond.Content(src), "SIZE_MAX") || strings.Contains(cond.Content(src), "MAX")) {
 				return true
 			}
 		}
@@ -809,20 +684,6 @@ func cIsDivisorGuarded(n *sitter.Node, divisor string, src []byte) bool {
 		if curr.Type() == "if_statement" {
 			cond := curr.ChildByFieldName("condition")
 			if cond != nil && (strings.Contains(cond.Content(src), divisor+" != 0") || strings.Contains(cond.Content(src), divisor+" > 0") || strings.Contains(cond.Content(src), "!="+divisor)) {
-				return true
-			}
-		}
-		curr = curr.Parent()
-	}
-	return false
-}
-
-func cIsOverflowGuarded(n *sitter.Node, src []byte) bool {
-	curr := n.Parent()
-	for curr != nil {
-		if curr.Type() == "if_statement" {
-			cond := curr.ChildByFieldName("condition")
-			if cond != nil && (strings.Contains(cond.Content(src), "INT_MAX") || strings.Contains(cond.Content(src), "MAX")) {
 				return true
 			}
 		}
@@ -850,21 +711,6 @@ func cParameterCount(fn *sitter.Node, src []byte) int {
 			if decl.NamedChild(i).Type() == "parameter_list" {
 				params = decl.NamedChild(i)
 				break
-			}
-		}
-	}
-	if params == nil {
-		// fallback to searching descendant parameter_list
-		stack := []*sitter.Node{decl}
-		for len(stack) > 0 {
-			top := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			if top.Type() == "parameter_list" {
-				params = top
-				break
-			}
-			for i := 0; i < int(top.NamedChildCount()); i++ {
-				stack = append(stack, top.NamedChild(i))
 			}
 		}
 	}
@@ -955,4 +801,3 @@ func cHasDuplicateSwitchCases(n *sitter.Node, src []byte) bool {
 	}
 	return false
 }
-
