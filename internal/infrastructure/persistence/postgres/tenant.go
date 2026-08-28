@@ -34,7 +34,8 @@ func (runner *TenantTransactionRunner) Run(ctx context.Context, tenantID shared.
 		return fmt.Errorf("%w: tenant transaction identity is required", shared.ErrValidation)
 	}
 	return WithTenant(ctx, runner.pool, tenantID.String(), func(tx pgx.Tx) error {
-		return fn(context.WithValue(ctx, tenantTransactionKey{}, tenantTransaction{tenantID: tenantID.String(), tx: tx}))
+		txCtx := shared.WithTenant(context.WithValue(ctx, tenantTransactionKey{}, tenantTransaction{tenantID: tenantID.String(), tx: tx}), tenantID)
+		return fn(txCtx)
 	})
 }
 
