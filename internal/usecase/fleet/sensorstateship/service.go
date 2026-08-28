@@ -16,8 +16,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-const DeliveryStateVersion = 1
-
 var ErrProtocol = errors.New("sensor-state delivery protocol error")
 
 // PrioritySpool is the narrow P0 WAL contract needed by sensor-state delivery.
@@ -36,11 +34,6 @@ type ACK struct {
 	ReportID     shared.ID
 }
 
-type StateStore interface {
-	Load(context.Context) (DeliveryState, error)
-	Save(context.Context, DeliveryState) error
-}
-
 type Signer struct {
 	PrivateKey ed25519.PrivateKey
 	KeyID      string
@@ -53,26 +46,14 @@ type Config struct {
 	Signer  Signer
 }
 
-type DeliveryState struct {
-	Version int            `json:"version"`
-	Pending *PendingReport `json:"pending,omitempty"`
-}
-
-type PendingReport struct {
-	Epoch      uint64                       `json:"epoch"`
-	WALThrough uint64                       `json:"wal_through"`
-	Acked      bool                         `json:"acked"`
-	Report     fleetagent.SensorStateReport `json:"report"`
-}
-
 type Service struct {
 	spool     PrioritySpool
 	transport Transport
-	state     StateStore
+	state     ports.SensorStateJournal
 	cfg       Config
 }
 
-func NewService(spool PrioritySpool, transport Transport, state StateStore, cfg Config) (*Service, error) {
+func NewService(spool PrioritySpool, transport Transport, state ports.SensorStateJournal, cfg Config) (*Service, error) {
 	if spool == nil || transport == nil || state == nil {
 		return nil, fmt.Errorf("%w: sensor-state delivery dependencies are required", shared.ErrValidation)
 	}
@@ -93,7 +74,7 @@ func (s *Service) DeliverOnce(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, protocolError(err)
 	}
-	if err := ValidateDeliveryState(state); err != nil {
+	if err := state.Validate(); err != nil {
 		return false, protocolError(err)
 	}
 	if pending := state.Pending; pending != nil {
@@ -112,7 +93,7 @@ func (s *Service) DeliverOnce(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, protocolError(err)
 	}
-	state.Pending = &PendingReport{
+	state.Pending = &ports.PendingSensorStateReport{
 		Epoch: records[0].Position.Epoch, WALThrough: records[0].Position.Sequence, Report: report,
 	}
 	if err := s.state.Save(ctx, state); err != nil {
@@ -121,7 +102,7 @@ func (s *Service) DeliverOnce(ctx context.Context) (bool, error) {
 	return s.sendPending(ctx, &state)
 }
 
-func (s *Service) sendPending(ctx context.Context, state *DeliveryState) (bool, error) {
+func (s *Service) sendPending(ctx context.Context, state *ports.SensorStateDeliveryState) (bool, error) {
 	pending := state.Pending
 	if pending == nil {
 		return false, protocolError(errors.New("sensor-state state has no pending report"))
@@ -143,7 +124,7 @@ func (s *Service) sendPending(ctx context.Context, state *DeliveryState) (bool, 
 	return true, nil
 }
 
-func (s *Service) finalize(ctx context.Context, state *DeliveryState) error {
+func (s *Service) finalize(ctx context.Context, state *ports.SensorStateDeliveryState) error {
 	pending := state.Pending
 	if pending == nil || !pending.Acked {
 		return protocolError(errors.New("sensor-state state has no acknowledged report"))
@@ -193,22 +174,6 @@ func BuildReport(agentID, assetID shared.ID, signer Signer, record ports.SpoolRe
 		return fleetagent.SensorStateReport{}, err
 	}
 	return report, nil
-}
-
-func ValidateDeliveryState(state DeliveryState) error {
-	if state.Version != DeliveryStateVersion {
-		return fmt.Errorf("unsupported sensor-state delivery state version %d", state.Version)
-	}
-	if state.Pending == nil {
-		return nil
-	}
-	if state.Pending.Epoch == 0 || state.Pending.WALThrough == 0 {
-		return errors.New("pending sensor-state WAL coordinates are invalid")
-	}
-	if err := state.Pending.Report.Validate(); err != nil {
-		return fmt.Errorf("pending sensor-state report: %w", err)
-	}
-	return nil
 }
 
 type coveragePayload struct {

@@ -10,10 +10,10 @@ import (
 	"runtime"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/sensorstateship"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-var _ sensorstateship.StateStore = (*Store)(nil)
+var _ ports.SensorStateJournal = (*Store)(nil)
 
 type Store struct {
 	path string
@@ -26,32 +26,32 @@ func New(stateDir string) (*Store, error) {
 	return &Store{path: filepath.Join(stateDir, "sensor-state-reports", "pending.json")}, nil
 }
 
-func (s *Store) Load(ctx context.Context) (sensorstateship.DeliveryState, error) {
+func (s *Store) Load(ctx context.Context) (ports.SensorStateDeliveryState, error) {
 	if err := ctx.Err(); err != nil {
-		return sensorstateship.DeliveryState{}, err
+		return ports.SensorStateDeliveryState{}, err
 	}
-	state := sensorstateship.DeliveryState{Version: sensorstateship.DeliveryStateVersion}
+	state := ports.SensorStateDeliveryState{Version: ports.SensorStateDeliveryStateVersion}
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return state, nil
 	}
 	if err != nil {
-		return sensorstateship.DeliveryState{}, fmt.Errorf("sensor-state journal: read: %w", err)
+		return ports.SensorStateDeliveryState{}, fmt.Errorf("sensor-state journal: read: %w", err)
 	}
 	if err := json.Unmarshal(data, &state); err != nil {
-		return sensorstateship.DeliveryState{}, fmt.Errorf("sensor-state journal: decode: %w", err)
+		return ports.SensorStateDeliveryState{}, fmt.Errorf("sensor-state journal: decode: %w", err)
 	}
-	if err := sensorstateship.ValidateDeliveryState(state); err != nil {
-		return sensorstateship.DeliveryState{}, fmt.Errorf("sensor-state journal: %w", err)
+	if err := state.Validate(); err != nil {
+		return ports.SensorStateDeliveryState{}, fmt.Errorf("sensor-state journal: %w", err)
 	}
 	return state, nil
 }
 
-func (s *Store) Save(ctx context.Context, state sensorstateship.DeliveryState) error {
+func (s *Store) Save(ctx context.Context, state ports.SensorStateDeliveryState) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := sensorstateship.ValidateDeliveryState(state); err != nil {
+	if err := state.Validate(); err != nil {
 		return fmt.Errorf("sensor-state journal: %w", err)
 	}
 	data, err := json.MarshalIndent(state, "", "  ")

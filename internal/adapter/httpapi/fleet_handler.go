@@ -558,8 +558,10 @@ func (f *fleetRouter) activePrivacyPolicy(w http.ResponseWriter, r *http.Request
 		writeError(w, f.log, fmt.Errorf("%w: active privacy policy tenant does not match authenticated agent", shared.ErrForbidden))
 		return
 	}
+	// Agent plane: this response carries the hash salt, which the agent needs to hash
+	// pseudonymized fields at the source. The human read plane deliberately omits it.
 	writeJSON(w, http.StatusOK, privacyPolicyAssignmentEnvelope{
-		Assignment: newPrivacyPolicyAssignmentResponse(assignment),
+		Assignment: newAgentPrivacyPolicyAssignmentResponse(assignment),
 	})
 }
 

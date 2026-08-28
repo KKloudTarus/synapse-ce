@@ -2545,7 +2545,7 @@ components:
         max_arg_len: {type: integer, minimum: 0, description: Maximum retained argument length; zero means unbounded subject to the source-privacy floor}
         max_arg_count: {type: integer, minimum: 0, description: Maximum retained argument count; zero means unbounded subject to the source-privacy floor}
         max_path_len: {type: integer, minimum: 0, description: Maximum retained path length; zero means unbounded subject to the source-privacy floor}
-        hash_salt: {type: string, description: Non-secret policy salt used to prevent trivial cross-policy hash correlation}
+        hash_salt: {type: string, description: Sensitive. Salt for hash-disposition pseudonymization; required on admission when any category uses hash. Returned ONLY on the agent-authenticated policy route, because agents hash at the source. The human read routes (active pointer, history, admission echo) always omit it, since a principal who can read hashed telemetry and also learn the salt could de-anonymize it offline. Identify a policy by its digest instead.}
         version: {type: string, minLength: 1, description: Immutable policy-version alias; not part of the redaction behavior digest}
 
     PrivacyPolicyAssignment:

@@ -69,7 +69,27 @@ func (dto privacyPolicyDTO) domain() privacy.Policy {
 	}
 }
 
+// newPrivacyPolicyDTO renders a policy WITHOUT its hash salt, for the human plane.
+//
+// SECURITY (Rule 3): HashSalt is what makes DispositionHash pseudonymization resistant
+// to dictionary/rainbow attacks over low-entropy telemetry (usernames, paths, comm). A
+// human principal who can read hashed telemetry and also learn the salt can
+// de-anonymize it offline, so the salt never travels the human read plane — not even to
+// the actor who admitted the policy, since history and the active pointer expose
+// policies other actors authored. Only the agent plane receives it, and only because
+// agents must hash at the source. The digest still identifies the policy exactly, so
+// governance callers lose no ability to audit which policy is in force.
 func newPrivacyPolicyDTO(policy privacy.Policy) privacyPolicyDTO {
+	dto := newAgentPrivacyPolicyDTO(policy)
+	dto.HashSalt = ""
+	return dto
+}
+
+// newAgentPrivacyPolicyDTO renders a policy INCLUDING its hash salt, for the
+// agent-authenticated plane only (see fleetRouter.activePrivacyPolicy). An agent
+// applies source privacy before the telemetry ever leaves the host, so it genuinely
+// needs the salt; that route is agent-credentialed and tenant-checked.
+func newAgentPrivacyPolicyDTO(policy privacy.Policy) privacyPolicyDTO {
 	dispositions := make(map[string]string, len(policy.Dispositions))
 	for category, disposition := range policy.Dispositions {
 		dispositions[string(category)] = string(disposition)
@@ -85,10 +105,23 @@ func newPrivacyPolicyDTO(policy privacy.Policy) privacyPolicyDTO {
 	}
 }
 
+// newPrivacyPolicyAssignmentResponse builds the human-plane response (no hash salt).
 func newPrivacyPolicyAssignmentResponse(assignment privacy.Assignment) privacyPolicyAssignmentResponse {
 	return privacyPolicyAssignmentResponse{
 		TenantID:  assignment.TenantID.String(),
 		Policy:    newPrivacyPolicyDTO(assignment.Policy),
+		Digest:    assignment.Digest,
+		CreatedBy: assignment.CreatedBy,
+		CreatedAt: assignment.CreatedAt,
+	}
+}
+
+// newAgentPrivacyPolicyAssignmentResponse builds the agent-plane response, which carries
+// the hash salt because the agent redacts at the source.
+func newAgentPrivacyPolicyAssignmentResponse(assignment privacy.Assignment) privacyPolicyAssignmentResponse {
+	return privacyPolicyAssignmentResponse{
+		TenantID:  assignment.TenantID.String(),
+		Policy:    newAgentPrivacyPolicyDTO(assignment.Policy),
 		Digest:    assignment.Digest,
 		CreatedBy: assignment.CreatedBy,
 		CreatedAt: assignment.CreatedAt,

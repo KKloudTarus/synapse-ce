@@ -48,21 +48,21 @@ func (t *testTransport) ShipSensorState(_ context.Context, _ string, report flee
 }
 
 type testStateStore struct {
-	state DeliveryState
+	state ports.SensorStateDeliveryState
 	saves int
 }
 
-func (s *testStateStore) Load(context.Context) (DeliveryState, error) {
+func (s *testStateStore) Load(context.Context) (ports.SensorStateDeliveryState, error) {
 	return cloneState(s.state), nil
 }
 
-func (s *testStateStore) Save(_ context.Context, state DeliveryState) error {
+func (s *testStateStore) Save(_ context.Context, state ports.SensorStateDeliveryState) error {
 	s.saves++
 	s.state = cloneState(state)
 	return nil
 }
 
-func cloneState(state DeliveryState) DeliveryState {
+func cloneState(state ports.SensorStateDeliveryState) ports.SensorStateDeliveryState {
 	if state.Pending == nil {
 		return state
 	}
@@ -94,7 +94,7 @@ func TestACKedStateFinalizesWithoutNetworkReplay(t *testing.T) {
 	}
 	spool := &testSpool{records: []ports.SpoolRecord{record}}
 	transport := &testTransport{}
-	state := &testStateStore{state: DeliveryState{Version: DeliveryStateVersion, Pending: &PendingReport{
+	state := &testStateStore{state: ports.SensorStateDeliveryState{Version: ports.SensorStateDeliveryStateVersion, Pending: &ports.PendingSensorStateReport{
 		Epoch: record.Position.Epoch, WALThrough: record.Position.Sequence, Acked: true, Report: report,
 	}}}
 	service := newTestService(t, spool, transport, state, signer)
@@ -113,7 +113,7 @@ func TestRetryRetainsExactPendingReportAndP0WAL(t *testing.T) {
 	signer := testSigner(t)
 	spool := &testSpool{records: []ports.SpoolRecord{record}}
 	transport := &testTransport{err: errors.New("temporarily unavailable")}
-	state := &testStateStore{state: DeliveryState{Version: DeliveryStateVersion}}
+	state := &testStateStore{state: ports.SensorStateDeliveryState{Version: ports.SensorStateDeliveryStateVersion}}
 	service := newTestService(t, spool, transport, state, signer)
 	if delivered, err := service.DeliverOnce(context.Background()); delivered || err == nil {
 		t.Fatalf("first delivery = %t, %v; want retained failure", delivered, err)
@@ -141,7 +141,7 @@ func TestMismatchedACKRetainsPendingReportAndWAL(t *testing.T) {
 	signer := testSigner(t)
 	spool := &testSpool{records: []ports.SpoolRecord{record}}
 	transport := &testTransport{ack: ACK{Acknowledged: true, ReportID: "other-report"}}
-	state := &testStateStore{state: DeliveryState{Version: DeliveryStateVersion}}
+	state := &testStateStore{state: ports.SensorStateDeliveryState{Version: ports.SensorStateDeliveryStateVersion}}
 	service := newTestService(t, spool, transport, state, signer)
 	if delivered, err := service.DeliverOnce(context.Background()); delivered || !errors.Is(err, ErrProtocol) {
 		t.Fatalf("mismatched ACK = %t, %v; want protocol error", delivered, err)
@@ -151,7 +151,7 @@ func TestMismatchedACKRetainsPendingReportAndWAL(t *testing.T) {
 	}
 }
 
-func newTestService(t *testing.T, spool PrioritySpool, transport Transport, state StateStore, signer Signer) *Service {
+func newTestService(t *testing.T, spool PrioritySpool, transport Transport, state ports.SensorStateJournal, signer Signer) *Service {
 	t.Helper()
 	service, err := NewService(spool, transport, state, Config{
 		AgentID: "agent-state-1", AssetID: "asset-state-1", Token: "token", Signer: signer,

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,7 +50,11 @@ func TestPrivacyPolicyHumanRoutesEnforceRBACAndTenantIsolation(t *testing.T) {
 	h := rt.routes()
 
 	firstPolicy := privacy.DefaultPolicy()
-	first := newPrivacyPolicyDTO(firstPolicy)
+	// Build the REQUEST body with the agent-plane renderer, which keeps HashSalt: the salt
+	// is still accepted on admission input (a hash disposition is invalid without one) —
+	// only the human-plane RESPONSE omits it. Using the human renderer here would produce
+	// a saltless policy and fail validation for a reason unrelated to what this test covers.
+	first := newAgentPrivacyPolicyDTO(firstPolicy)
 	first.Dispositions[string(privacy.CategoryProcessArg)] = string(privacy.DispositionRedact)
 	first.Dispositions[string(privacy.CategoryProcessPath)] = string(privacy.DispositionHash)
 	first.Version = "tenant-a:v1"
@@ -236,4 +241,113 @@ func TestFleetPrivacyPolicyRouteAuthenticatesAndIsolatesTenant(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("unwired fleet policy status = %d, want 503", rec.Code)
 	}
+}
+
+// TestPrivacyPolicyHashSaltNeverLeavesTheAgentPlane pins the Rule 3 boundary: HashSalt is
+// what makes DispositionHash pseudonymization resistant to dictionary attacks over
+// low-entropy telemetry, so a human principal who can read hashed telemetry must not be
+// able to learn it. The agent plane still receives it, because agents hash at the source.
+//
+// The assertion is on the RAW JSON, not the decoded struct: hash_salt is `omitempty`, so a
+// decoded struct reads "" whether the field was omitted or present-and-empty. Only the wire
+// bytes prove the salt never reached the client.
+func TestPrivacyPolicyHashSaltNeverLeavesTheAgentPlane(t *testing.T) {
+	const salt = "sentinel-redaction-salt"
+	policy := privacy.DefaultPolicy()
+	policy.HashSalt = salt
+	policy.Dispositions[privacy.CategoryProcessPath] = privacy.DispositionHash
+	policy.Version = "tenant-a:salted"
+
+	// saltedEchoDTO renders a DISTINCT salted policy — its own version AND its own content,
+	// because the digest is derived from content alone: a version-only change still collides
+	// on digest. The salt itself is unchanged, which is the point of the assertion.
+	saltedEchoDTO := func(p privacy.Policy) privacyPolicyDTO {
+		dto := newAgentPrivacyPolicyDTO(p)
+		dto.Version = "tenant-a:salted-echo"
+		dto.MaxArgLen = p.MaxArgLen - 1
+		return dto
+	}
+
+	service, _ := newPrivacyPolicyHTTPService(t)
+	ctx := shared.WithTenant(context.Background(), "tenant-a")
+	admitted, _, err := service.Admit(ctx, "operator", policy)
+	if err != nil {
+		t.Fatalf("admit salted policy: %v", err)
+	}
+	if _, err := service.Activate(ctx, "operator", admitted.Digest, "activate-salted"); err != nil {
+		t.Fatalf("activate salted policy: %v", err)
+	}
+
+	// Human plane: admission echo, active pointer, and history must all be salt-free, for
+	// every role that can reach them — including the admin who authored the policy, since
+	// these routes also expose policies other actors authored.
+	human := &Router{log: discardLog()}
+	human.SetPrivacyPolicyService(service)
+	humanHandler := human.routes()
+	for _, tc := range []struct {
+		name, method, path, role string
+		body                     any
+	}{
+		// A distinct version: re-admitting "tenant-a:salted" under a different actor would
+		// conflict on immutable content, which is not what this case is testing.
+		{"admission echo", http.MethodPost, "/api/v1/fleet/privacy-policies", "admin", privacyPolicyAdmissionRequest{Policy: saltedEchoDTO(policy)}},
+		{"active as admin", http.MethodGet, "/api/v1/fleet/privacy-policies/active", "admin", nil},
+		{"active as readonly", http.MethodGet, "/api/v1/fleet/privacy-policies/active", "readonly", nil},
+		{"history as readonly", http.MethodGet, "/api/v1/fleet/privacy-policies", "readonly", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			humanHandler.ServeHTTP(rec, privacyPolicyHumanRequest(tc.method, tc.path, tc.role, "tenant-a", tc.body))
+			if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+				t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			if strings.Contains(body, salt) {
+				t.Fatalf("human plane leaked the redaction hash salt: %s", body)
+			}
+			if strings.Contains(body, "hash_salt") {
+				t.Fatalf("human plane emitted a hash_salt field: %s", body)
+			}
+			// Sanity: the payload really is the policy, so an empty/error body cannot pass.
+			if !strings.Contains(body, "max_arg_len") {
+				t.Fatalf("payload does not look like a policy: %s", body)
+			}
+		})
+	}
+
+	// Agent plane: the salt MUST still be delivered, or source-side hashing breaks.
+	t.Run("agent plane still receives the salt", func(t *testing.T) {
+		fleetHandler, agentSvc, _ := setupFleet(t)
+		agentRouter := &Router{log: discardLog()}
+		agentRouter.SetFleet(agentSvc, nil, func() time.Time { return time.Now().UTC() }, "")
+		agentRouter.SetFleetPrivacyPolicyReader(service)
+		fleetHandler = agentRouter.fleet.handler()
+
+		token, err := agentSvc.MintEnrolToken(context.Background(), "operator", "tenant-a", time.Hour)
+		if err != nil {
+			t.Fatalf("mint enrol token: %v", err)
+		}
+		rec := fleetCall(fleetHandler, http.MethodPost, "/api/v1/fleet/enrol", token, map[string]string{"name": "agent-a", "platform": "linux"}, true)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("enrol status = %d (%s)", rec.Code, rec.Body.String())
+		}
+		var enrolled struct {
+			Token string `json:"token"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &enrolled); err != nil || enrolled.Token == "" {
+			t.Fatalf("decode enrol response: %v", err)
+		}
+
+		rec = fleetCall(fleetHandler, http.MethodGet, "/api/v1/fleet/privacy-policy", enrolled.Token, nil, true)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("agent policy status = %d (%s), want 200", rec.Code, rec.Body.String())
+		}
+		var envelope privacyPolicyAssignmentEnvelope
+		if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+			t.Fatalf("decode agent assignment: %v", err)
+		}
+		if envelope.Assignment.Policy.HashSalt != salt {
+			t.Fatalf("agent hash salt = %q, want %q — source-side hashing needs it", envelope.Assignment.Policy.HashSalt, salt)
+		}
+	})
 }

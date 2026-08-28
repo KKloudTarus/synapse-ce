@@ -10,7 +10,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/sensorstateship"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 func TestStoreReplacesStateAtomically(t *testing.T) {
@@ -24,7 +24,7 @@ func TestStoreReplacesStateAtomically(t *testing.T) {
 	if err := store.Save(ctx, first); err != nil {
 		t.Fatalf("save first state: %v", err)
 	}
-	second := sensorstateship.DeliveryState{Version: sensorstateship.DeliveryStateVersion}
+	second := ports.SensorStateDeliveryState{Version: ports.SensorStateDeliveryStateVersion}
 	if err := store.Save(ctx, second); err != nil {
 		t.Fatalf("replace state: %v", err)
 	}
@@ -49,12 +49,12 @@ func TestStoreRejectsInvalidState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Save(context.Background(), sensorstateship.DeliveryState{Version: sensorstateship.DeliveryStateVersion + 1}); err == nil {
+	if err := store.Save(context.Background(), ports.SensorStateDeliveryState{Version: ports.SensorStateDeliveryStateVersion + 1}); err == nil {
 		t.Fatal("invalid state version unexpectedly persisted")
 	}
 }
 
-func validState(t *testing.T) sensorstateship.DeliveryState {
+func validState(t *testing.T) ports.SensorStateDeliveryState {
 	t.Helper()
 	_, privateKey, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -71,8 +71,8 @@ func validState(t *testing.T) sensorstateship.DeliveryState {
 		KeyID:         "key-1",
 	}
 	report.Signature = fleetagent.SignSensorState(privateKey, report)
-	return sensorstateship.DeliveryState{
-		Version: sensorstateship.DeliveryStateVersion,
-		Pending: &sensorstateship.PendingReport{Epoch: 1, WALThrough: 1, Report: report},
+	return ports.SensorStateDeliveryState{
+		Version: ports.SensorStateDeliveryStateVersion,
+		Pending: &ports.PendingSensorStateReport{Epoch: 1, WALThrough: 1, Report: report},
 	}
 }
