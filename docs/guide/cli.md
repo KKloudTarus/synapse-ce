@@ -92,6 +92,27 @@ synapse-cli scan <path|image-ref> [flags]
 `--json`, `--sarif`, and `--sbom` each take over stdout completely, so they are mutually exclusive.
 Passing more than one exits `2` rather than silently honoring the last flag.
 
+### Suppressing findings with `.synapseignore`
+
+Drop known/accepted findings by committing a `.synapseignore` file at the scan root. Every suppression
+**must** carry a `reason` and an `expires` date (`YYYY-MM-DD`) — after the expiry the suppression stops
+applying and the finding reappears (with a warning), so suppressions are periodically re-justified instead
+of rotting. Each entry matches by `rule` (a rule key or advisory id), by `path` (a file glob), or both:
+
+```yaml
+suppress:
+  - rule: generic-secret
+    path: "testdata/**"
+    reason: "test fixtures, not real credentials"
+    expires: "2026-12-31"
+  - rule: CVE-2024-1234
+    reason: "not exploitable in our configuration; tracked in JIRA-123"
+    expires: "2026-09-30"
+```
+
+A malformed entry (missing reason/expiry, or no matcher) fails the scan rather than silently ignoring
+nothing. Suppressed counts and any expired entries are printed to stderr.
+
 ### Examples
 
 ```bash
