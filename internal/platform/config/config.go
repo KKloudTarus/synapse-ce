@@ -516,6 +516,12 @@ type Config struct {
 	BundleBin              string
 	PoetryBin              string
 	ManifestRegistryHosts  []string
+	// BundlerResolveEnabled turns on the Ruby Bundler resolver (`bundle lock` over a lockfile-less
+	// Gemfile). Unlike the composer/poetry/npm resolvers — which run lock-only with no project scripts —
+	// `bundle lock` EVALUATES the Gemfile, which IS a Ruby program, so it executes arbitrary project code
+	// on the host. It is therefore OPT-IN everywhere (default false), including the CLI, and production
+	// MUST run it sandbox-confined.
+	BundlerResolveEnabled bool
 	// JVMReachabilityEnabled turns on coarse JVM class-reachability tagging: after resolving the
 	// dependency tree, tag each component with whether the app's own compiled classes (transitively)
 	// reference its classes, so a finding on an unreferenced dependency can be deprioritized. Read-only
@@ -767,6 +773,7 @@ func Load() Config {
 		BundleBin:                             getenv("SYNAPSE_BUNDLE_BIN", "bundle"),
 		PoetryBin:                             getenv("SYNAPSE_POETRY_BIN", "poetry"),
 		ManifestRegistryHosts:                 splitList(getenv("SYNAPSE_MANIFEST_REGISTRY_HOSTS", "")),
+		BundlerResolveEnabled:                 getbool("SYNAPSE_BUNDLER_RESOLVE_ENABLED", false),
 		JVMReachabilityEnabled:                getbool("SYNAPSE_JVM_REACHABILITY_ENABLED", true),
 		JarHashOnlineEnabled:                  getbool("SYNAPSE_JARHASH_ONLINE_ENABLED", false),
 		JarHashBaseURL:                        getenv("SYNAPSE_JARHASH_BASE_URL", ""),

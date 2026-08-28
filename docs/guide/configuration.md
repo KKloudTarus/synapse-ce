@@ -370,6 +370,7 @@ allowlist; an empty or overly broad allowlist must not become an implicit networ
 | `SYNAPSE_NPM_RESOLVE_ENABLED` | `false` | Resolve npm manifests from allowlisted registries. |
 | `SYNAPSE_NPM_REGISTRY_HOSTS` | empty | Comma-separated npm registry host allowlist. |
 | `SYNAPSE_MANIFEST_RESOLVE_ENABLED` | `false` | Enable remaining external manifest resolvers. |
+| `SYNAPSE_BUNDLER_RESOLVE_ENABLED` | `false` | Enable the Ruby Bundler resolver. Opt-in everywhere (incl. the CLI) because `bundle lock` evaluates the Gemfile as Ruby, i.e. runs project code; run sandbox-confined in production. |
 | `SYNAPSE_MANIFEST_REGISTRY_HOSTS` | empty | Comma-separated host allowlist for those resolvers. |
 | `SYNAPSE_JARHASH_BASE_URL` | empty | Approved jar-hash service or mirror URL. |
 | `SYNAPSE_JARHASH_DB_PATH` | empty | Offline jar-hash database path. |
