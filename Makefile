@@ -1,5 +1,5 @@
 .PHONY: help install tools dev build run test harness dataplane-e2e vet lint format typecheck tidy ebpf-generate ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify \
-        rulepack-verify rulepack-replay rulepack-gate docker-build docker-up docker-down clean web-dev web-build smoke
+        rulepack-verify rulepack-replay rulepack-gate docker-build docker-up docker-down clean web-dev web-build smoke release-smoke
 
 GO ?= go
 IMAGE ?= synapse-api:dev
@@ -113,3 +113,7 @@ web-build: ## Build the web app
 
 smoke: build ## Build then probe /healthz
 	./bin/synapse-api & sleep 1; curl -s localhost:8080/healthz; kill %1
+
+release-smoke: ## Build synapse-cli into ./bin and run a real scan from it (packaged-binary smoke)
+	$(GO) build -o bin/synapse-cli ./cmd/synapse-cli
+	./scripts/release/smoke-scan.sh bin
