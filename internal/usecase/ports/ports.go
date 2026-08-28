@@ -1879,6 +1879,12 @@ const (
 	LicenseDeny  LicenseVerdict = "deny"
 )
 
+type LicensePolicyOption struct {
+	License      string `json:"license"`
+	Severity     string `json:"severity"`
+	PolicyRuleID string `json:"policy_rule_id"`
+}
+
 // LicenseFinding is a distinct license across the SBOM, its category, the policy
 // verdict, and the components that use it.
 type LicenseFinding struct {
@@ -1889,9 +1895,13 @@ type LicenseFinding struct {
 	// (forbidden/restricted/reciprocal/notice/permissive/unencumbered → critical/high/
 	// medium/low), derived from SPDX + Google licenseclassifier. They complement (never
 	// replace) Verdict; empty when the scanner predates this field.
-	RiskCategory string   `json:"risk_category"`
-	Severity     string   `json:"severity"`
-	Components   []string `json:"components"`
+	RiskCategory      string                `json:"risk_category"`
+	Severity          string                `json:"severity"`
+	Components        []string              `json:"components"`
+	PolicyRuleID      string                `json:"policy_rule_id"`
+	RecommendedChoice string                `json:"recommended_choice"`
+	SelectionReason   string                `json:"selection_reason"`
+	Options           []LicensePolicyOption `json:"options,omitempty"`
 }
 
 // LicenseEnricher fills in missing component licenses from package-registry

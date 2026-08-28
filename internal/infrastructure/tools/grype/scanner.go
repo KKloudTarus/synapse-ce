@@ -458,20 +458,19 @@ func matchToRaw(m grypeMatch, components map[string]sbom.Component) vulnerabilit
 	for _, rel := range m.RelatedVulnerabilities {
 		aliases = append(aliases, rel.ID)
 	}
-	componentName := m.Artifact.Name
-	componentVersion := m.Artifact.Version
+	component := sbom.Component{Name: m.Artifact.Name, Version: m.Artifact.Version, PURL: m.Artifact.PURL}
 	if c, ok := components[m.Artifact.PURL]; ok {
-		componentName = c.Name
-		if c.Version != "" {
-			componentVersion = c.Version
-		}
+		component = c
 	}
+	identity := sbom.IdentityFromComponent(component)
 	r := vulnerability.RawFinding{
 		Source:      "grype",
 		AdvisoryID:  preferCVE(m.Vulnerability.ID, aliases),
 		Aliases:     aliases,
-		Component:   componentName,
-		Version:     componentVersion,
+		Component:   component.Name,
+		Version:     component.Version,
+		Ecosystem:   identity.Ecosystem,
+		PackagePURL: component.PURL,
 		Severity:    mapSeverity(m.Vulnerability.Severity),
 		Description: m.Vulnerability.Description,
 	}
@@ -483,6 +482,7 @@ func matchToRaw(m grypeMatch, components map[string]sbom.Component) vulnerabilit
 	}
 	r.FixState = m.Vulnerability.Fix.State // fixed / not-fixed / wont-fix / unknown – drives --ignore-unfixed
 	if m.Vulnerability.Fix.State == "fixed" && len(m.Vulnerability.Fix.Versions) > 0 {
+		r.FixedVersions = append([]string(nil), m.Vulnerability.Fix.Versions...)
 		r.FixedVersion = m.Vulnerability.Fix.Versions[0]
 	}
 	return r

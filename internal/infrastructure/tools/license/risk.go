@@ -200,6 +200,7 @@ var riskByLicense = map[string]RiskCategory{
 	"mit": RiskNotice, "mit-0": RiskNotice,
 	"apache-1.0": RiskNotice, "apache-1.1": RiskNotice, "apache-2.0": RiskNotice,
 	"bsd-1-clause": RiskNotice, "bsd-2-clause": RiskNotice, "bsd-3-clause": RiskNotice, "bsd-4-clause": RiskNotice,
+	"bsd-unspecified":     RiskNotice,
 	"bsd-2-clause-netbsd": RiskNotice, "bsd-3-clause-clear": RiskNotice,
 	"edl-1.0": RiskNotice, // Eclipse Distribution License — a BSD-3-Clause variant (permissive)
 	"isc":     RiskNotice, "afl-2.1": RiskNotice, "afl-3.0": RiskNotice,
