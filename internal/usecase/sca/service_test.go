@@ -1780,6 +1780,34 @@ func TestSecretScanTruncationWarning(t *testing.T) {
 	}
 }
 
+func TestVulnDBSnapshotHonestWhenOffline(t *testing.T) {
+	ts := time.Unix(0, 0).UTC()
+	if got := vulnDBSnapshot("", ts); got != "" {
+		t.Fatalf("an offline scan (no online source queried) must yield an empty snapshot, got %q", got)
+	}
+	if got := vulnDBSnapshot("osv.dev", ts); got != "osv.dev@1970-01-01T00:00:00Z" {
+		t.Fatalf("online snapshot = %q, want osv.dev@<time>", got)
+	}
+}
+
+// TestScanOfflineSnapshotDoesNotClaimOSV: a scan whose provenance names no online vuln source (the
+// --offline / air-gapped CLI path) must NOT record vuln_db_snapshot="osv.dev@…" — that would assert a
+// feed that was never queried.
+func TestScanOfflineSnapshotDoesNotClaimOSV(t *testing.T) {
+	// newSvc builds the Service with ports.Provenance{} (empty VulnDBSource) = the offline shape.
+	svc := newSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: t.TempDir()}, &fakeAudit{}, &fakeDetector{})
+	res, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.VulnDBSnapshot != "" {
+		t.Fatalf("offline scan must not claim an online vuln feed, got vuln_db_snapshot=%q", res.VulnDBSnapshot)
+	}
+	if res.Manifest.VulnDBSnapshot != "" {
+		t.Fatalf("offline scan manifest must not claim an online vuln feed, got %q", res.Manifest.VulnDBSnapshot)
+	}
+}
+
 type erroringSBOM struct{}
 
 func (erroringSBOM) Generate(context.Context, string) (*sbom.SBOM, error) {

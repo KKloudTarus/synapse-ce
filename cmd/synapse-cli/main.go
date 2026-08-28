@@ -1192,14 +1192,16 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 			"go-enry": buildinfo.Module("github.com/go-enry/go-enry/v2"),
 			"synapse": buildinfo.App(),
 		},
-		VulnDBSource: "osv.dev",
 	}
 	// Grype (offline DB) always; live OSV unless --offline / SYNAPSE_OFFLINE (air-gapped / fast path).
 	detectionSources := []ports.DetectionSource{grype.New(cfg.GrypeBin, cfg.GrypeDBDir)}
 	if offline || cfg.Offline {
-		// Make the reduced-coverage mode visible: the operator chose lower recall for speed.
+		// Make the reduced-coverage mode visible: the operator chose lower recall for speed. Leave
+		// VulnDBSource empty so the evidence snapshot does NOT claim osv.dev was queried when it wasn't
+		// (Grype's DB version is recorded separately in GrypeDBVersion).
 		fmt.Fprintln(os.Stderr, "synapse-cli: offline mode – live OSV disabled; detecting with Grype's offline DB only")
 	} else {
+		prov.VulnDBSource = "osv.dev"
 		detectionSources = append([]ports.DetectionSource{osv.New(cfg.OSVBaseURL, nil)}, detectionSources...)
 	}
 	sca := scauc.NewService(
