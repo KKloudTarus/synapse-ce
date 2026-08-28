@@ -193,9 +193,12 @@ type Finding struct {
 	OccurrenceID         shared.ID
 	ComponentFingerprint string
 	FixedVersion         string
-	DetectionState       string
-	RiskAssessmentID     shared.ID
-	EvaluatedAt          *time.Time
+	// DetectionState is the continuous-intelligence projection's lifecycle state; empty on a one-shot
+	// scan (e.g. the CLI) that has no stored occurrence history. Omitted from JSON when empty so a
+	// consumer does not build logic on a field that is a constant blank on those paths.
+	DetectionState   string `json:",omitempty"`
+	RiskAssessmentID shared.ID
+	EvaluatedAt      *time.Time
 
 	// Class separates actionable third-party findings from historical
 	// advisories matched against the project's own unversioned modules.
