@@ -60,6 +60,59 @@ func TestClassifyFreeTextNames(t *testing.T) {
 	}
 }
 
+func TestLicenseMetadataParsingIsQuoteAndCommaAware(t *testing.T) {
+	cases := map[string]string{
+		`"The Apache Software License, Version 2.0";link="https://www.apache.org/licenses/LICENSE-2.0.txt"`: "Apache-2.0",
+		"Apache License, Version 2.0; see: http://www.apache.org/licenses/LICENSE-2.0.txt":                  "Apache-2.0",
+	}
+	for raw, want := range cases {
+		if got := canonicalLicenseKey(raw); got != want {
+			t.Errorf("canonicalLicenseKey(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+func TestLicensePolicyPreservesOROptionsAndReason(t *testing.T) {
+	doc := &sbom.SBOM{Components: []sbom.Component{{
+		Name: "jaxb-api", Version: "2.3.1", PURL: "pkg:maven/javax.xml.bind/jaxb-api@2.3.1",
+		Licenses: []sbom.License{{SPDXID: "CDDL-1.1 OR GPL-2.0-with-classpath-exception"}},
+	}}}
+	out, err := New().Scan(context.Background(), doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("findings = %+v, want one preserved expression", out)
+	}
+	got := out[0]
+	if got.License != "CDDL-1.1 OR GPL-2.0-with-classpath-exception" || got.RecommendedChoice != "CDDL-1.1" || got.SelectionReason != "Lowest-risk valid OR option" {
+		t.Fatalf("policy = %+v", got)
+	}
+	if len(got.Options) != 2 || got.PolicyRuleID == "" {
+		t.Fatalf("policy options/rule = %+v", got)
+	}
+}
+
+func TestLicensePolicyLeavesRecommendationBlankWithoutAChoice(t *testing.T) {
+	for _, expression := range []string{"MIT", "MIT AND GPL-3.0-only"} {
+		_, recommendation, rule, _ := licensePolicy(expression)
+		if recommendation != "" {
+			t.Errorf("licensePolicy(%q) recommendation = %q, want blank", expression, recommendation)
+		}
+		if rule == "" {
+			t.Errorf("licensePolicy(%q) must still emit an effective policy rule", expression)
+		}
+	}
+}
+
+func TestAmbiguousBSDStaysUnspecified(t *testing.T) {
+	for _, raw := range []string{"BSD", "BSD License", "http://www.opensource.org/licenses/bsd-license.php"} {
+		if got := canonicalLicenseKey(raw); got != "BSD-UNSPECIFIED" {
+			t.Errorf("canonicalLicenseKey(%q) = %q, want BSD-UNSPECIFIED", raw, got)
+		}
+	}
+}
+
 func TestScanSplitsBareLicenseListAsSeparateNotAnd(t *testing.T) {
 	// jakarta.annotation-api is dual-licensed (EPL-2.0 OR GPL-2.0-with-classpath-exception).
 	// Syft emits it as a bare comma list; we must list the two SEPARATELY (choose-any/OR),

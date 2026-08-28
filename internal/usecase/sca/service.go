@@ -980,17 +980,28 @@ func (o ScanOptions) scansLicenses() bool {
 }
 
 type ComponentLicenseAudit struct {
-	Component     string               `json:"component"`
-	Version       string               `json:"version"`
-	PURL          string               `json:"purl"`
-	Scope         string               `json:"scope"`
-	Location      string               `json:"location"`
-	License       string               `json:"license"`
-	Category      sbom.LicenseCategory `json:"category"`
-	Verdict       ports.LicenseVerdict `json:"verdict"`
-	Source        string               `json:"source"`
-	Confidence    string               `json:"confidence"`
-	UnknownReason string               `json:"unknown_reason"`
+	Component          string               `json:"component"`
+	Version            string               `json:"version"`
+	VersionStatus      string               `json:"version_status"`
+	PURL               string               `json:"purl"`
+	Scope              string               `json:"scope"`
+	Location           string               `json:"location"`
+	Locations          []string             `json:"locations,omitempty"`
+	DependencyType     string               `json:"dependency_type"`
+	EvidenceStatus     string               `json:"evidence_status"`
+	RawLicense         string               `json:"raw_license"`
+	License            string               `json:"license"`
+	DetectedExpression string               `json:"detected_expression"`
+	Category           sbom.LicenseCategory `json:"category"`
+	Verdict            ports.LicenseVerdict `json:"verdict"`
+	OptionSeverity     string               `json:"option_severity"`
+	EffectiveSeverity  string               `json:"effective_severity"`
+	PolicyRuleID       string               `json:"policy_rule_id"`
+	RecommendedChoice  string               `json:"recommended_choice"`
+	SelectionReason    string               `json:"selection_reason"`
+	Source             string               `json:"source"`
+	Confidence         string               `json:"confidence"`
+	UnknownReason      string               `json:"unknown_reason"`
 }
 
 type LicenseCoverageBreakdown struct {
@@ -1126,25 +1137,49 @@ func purlArch(purl string) string {
 	return ""
 }
 
-func buildComponentLicenseAudit(comps []sbom.Component, findings []ports.LicenseFinding) []ComponentLicenseAudit {
+func buildComponentLicenseAudit(doc *sbom.SBOM, findings []ports.LicenseFinding) []ComponentLicenseAudit {
 	policy := map[string]ports.LicenseFinding{}
 	for _, f := range findings {
 		policy[f.License] = f
 	}
-	out := make([]ComponentLicenseAudit, 0, len(comps))
-	for _, c := range comps {
+	out := make([]ComponentLicenseAudit, 0, len(doc.Components))
+	for _, c := range doc.Components {
+		licenses := make([]string, 0, len(c.Licenses))
+		for _, current := range c.Licenses {
+			if key := componentLicenseKey(current); key != "" {
+				licenses = append(licenses, key)
+			}
+		}
+		licenses = uniqueStrings(licenses)
+		expression := strings.Join(licenses, " OR ")
+		recommendedChoice, effectiveSeverity, policyRuleID, selectionReason := componentLicensePolicy(licenses, policy)
+		locations := componentLocations(c)
+		dependencyType, evidenceStatus := componentDependencyEvidence(doc.Dependencies, c, locations)
+		versionStatus := vulnerability.VersionResolved
+		if !sbom.IsResolvedVersion(c.Version) {
+			versionStatus = vulnerability.VersionUnresolved
+		}
 		if len(c.Licenses) == 0 {
 			out = append(out, ComponentLicenseAudit{
-				Component:     c.Name,
-				Version:       c.Version,
-				PURL:          c.PURL,
-				Scope:         c.Scope,
-				Location:      c.Location,
-				Category:      sbom.LicenseUnknown,
-				Verdict:       ports.LicenseWarn,
-				Source:        c.LicenseSource,
-				Confidence:    c.LicenseConfidence,
-				UnknownReason: c.UnknownReason,
+				Component:          c.Name,
+				Version:            c.Version,
+				VersionStatus:      versionStatus,
+				PURL:               c.PURL,
+				Scope:              c.Scope,
+				Location:           c.Location,
+				Locations:          locations,
+				DependencyType:     dependencyType,
+				EvidenceStatus:     evidenceStatus,
+				DetectedExpression: expression,
+				Category:           sbom.LicenseUnknown,
+				Verdict:            ports.LicenseWarn,
+				OptionSeverity:     "unknown",
+				EffectiveSeverity:  "unknown",
+				PolicyRuleID:       "LIC-UNKNOWN",
+				SelectionReason:    "No license metadata resolved",
+				Source:             c.LicenseSource,
+				Confidence:         c.LicenseConfidence,
+				UnknownReason:      c.UnknownReason,
 			})
 			continue
 		}
@@ -1155,25 +1190,133 @@ func buildComponentLicenseAudit(comps []sbom.Component, findings []ports.License
 			}
 			category := sbom.LicenseUnknown
 			verdict := ports.LicenseWarn
+			optionSeverity := "unknown"
 			if f, ok := policy[key]; ok {
 				category = f.Category
 				verdict = f.Verdict
+				optionSeverity = f.Severity
+			}
+			rawLicense := strings.TrimSpace(lic.RawValue)
+			if rawLicense == "" {
+				rawLicense = licenseKeyForAudit(lic)
 			}
 			out = append(out, ComponentLicenseAudit{
-				Component:     c.Name,
-				Version:       c.Version,
-				PURL:          c.PURL,
-				Scope:         c.Scope,
-				Location:      c.Location,
-				License:       key,
-				Category:      category,
-				Verdict:       verdict,
-				Source:        c.LicenseSource,
-				Confidence:    c.LicenseConfidence,
-				UnknownReason: c.UnknownReason,
+				Component:          c.Name,
+				Version:            c.Version,
+				VersionStatus:      versionStatus,
+				PURL:               c.PURL,
+				Scope:              c.Scope,
+				Location:           c.Location,
+				Locations:          locations,
+				DependencyType:     dependencyType,
+				EvidenceStatus:     evidenceStatus,
+				RawLicense:         rawLicense,
+				License:            key,
+				DetectedExpression: expression,
+				Category:           category,
+				Verdict:            verdict,
+				OptionSeverity:     optionSeverity,
+				EffectiveSeverity:  effectiveSeverity,
+				PolicyRuleID:       policyRuleID,
+				RecommendedChoice:  recommendedChoice,
+				SelectionReason:    selectionReason,
+				Source:             c.LicenseSource,
+				Confidence:         c.LicenseConfidence,
+				UnknownReason:      c.UnknownReason,
 			})
 		}
 	}
+	return out
+}
+
+func componentLocations(component sbom.Component) []string {
+	return uniqueStrings(append(append([]string(nil), component.Locations...), component.Location))
+}
+
+func componentDependencyEvidence(dependencies []sbom.Dependency, component sbom.Component, locations []string) (string, string) {
+	if component.FirstParty {
+		return "INTERNAL_MODULE", "INTERNAL_SOURCE"
+	}
+	for _, location := range locations {
+		normalized := filepath.ToSlash(location)
+		if strings.Contains(normalized, "/BOOT-INF/lib/") || strings.Contains(normalized, "/WEB-INF/lib/") {
+			return "PACKAGED_JAR", "CONFIRMED_PACKAGED"
+		}
+	}
+	path := sbom.PathToRoot(dependencies, sbom.ComponentID(component.Name, component.Version, component.PURL))
+	if len(path) == 1 {
+		return "DECLARED_DIRECT", "CONFIRMED_DEPENDENCY"
+	}
+	if len(path) > 1 {
+		return "RESOLVED_TRANSITIVE", "CONFIRMED_DEPENDENCY"
+	}
+	return "UNVERIFIED_INVENTORY", "UNVERIFIED_INVENTORY"
+}
+
+func componentLicensePolicy(licenses []string, policy map[string]ports.LicenseFinding) (string, string, string, string) {
+	if len(licenses) == 0 {
+		return "", "unknown", "LIC-UNKNOWN", "No license metadata resolved"
+	}
+	recommendedChoice := ""
+	selectedSeverity := "unknown"
+	selectedRule := "LIC-UNKNOWN"
+	for index, license := range licenses {
+		finding, ok := policy[license]
+		if !ok {
+			continue
+		}
+		if index == 0 || licenseSeverityRank(finding.Severity) < licenseSeverityRank(selectedSeverity) {
+			recommendedChoice = finding.RecommendedChoice
+			if recommendedChoice == "" && len(licenses) > 1 {
+				recommendedChoice = license
+			}
+			selectedSeverity = finding.Severity
+			selectedRule = finding.PolicyRuleID
+		}
+	}
+	reason := "Single detected license"
+	if len(licenses) > 1 || strings.Contains(licenses[0], " OR ") {
+		reason = "Lowest-risk valid OR option"
+	} else if strings.Contains(licenses[0], " AND ") {
+		reason = "Highest-risk mandatory AND option"
+	}
+	return recommendedChoice, selectedSeverity, selectedRule, reason
+}
+
+func licenseSeverityRank(severity string) int {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "low":
+		return 0
+	case "medium":
+		return 1
+	case "high":
+		return 2
+	case "critical":
+		return 3
+	default:
+		return 4
+	}
+}
+
+func licenseKeyForAudit(license sbom.License) string {
+	if strings.TrimSpace(license.SPDXID) != "" {
+		return strings.TrimSpace(license.SPDXID)
+	}
+	return strings.TrimSpace(license.Name)
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	sort.Strings(out)
 	return out
 }
 
@@ -1959,7 +2102,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		}
 		trace.succeed(step, "License policy scan completed", map[string]int{"components": countComponents(doc), "licenses": len(lics)})
 		licenseCoverage = sbom.ComputeLicenseCoverage(doc.Components)
-		componentLicenses = buildComponentLicenseAudit(doc.Components, lics)
+		componentLicenses = buildComponentLicenseAudit(doc, lics)
 		licenseCoverageBreakdown = buildLicenseCoverageBreakdown(doc.Components)
 	}
 
@@ -2605,7 +2748,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 		trace.succeed(step, "License policy scan completed", map[string]int{"components": countComponents(doc), "licenses": len(lics)})
 		licenseCoverage = sbom.ComputeLicenseCoverage(doc.Components)
-		componentLicenses = buildComponentLicenseAudit(doc.Components, lics)
+		componentLicenses = buildComponentLicenseAudit(doc, lics)
 		licenseCoverageBreakdown = buildLicenseCoverageBreakdown(doc.Components)
 	}
 
@@ -3367,6 +3510,7 @@ func classifyVulns(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) {
 	for i := range vulns {
 		v := &vulns[i]
 		v.Unversioned = !sbom.IsResolvedVersion(v.Version)
+		v.VersionStatus = vulnerability.VersionResolved
 		if v.Unversioned {
 			// No resolvable installed version → the advisory cannot be confirmed to apply (the
 			// source matched by NAME only, e.g. a vendored dep whose package.json has the version
@@ -3375,6 +3519,12 @@ func classifyVulns(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) {
 			// advisory (ClassFirstPartyHistoric) but is treated as no-fix, so --ignore-unfixed keeps
 			// it out of the actionable gate instead of matching every historical CVE for the name.
 			v.FixedVersion = ""
+			v.AlternativeFixedVersions = nil
+			v.FixStatus = vulnerability.FixStatusVersionUnresolved
+			v.UpgradeType = ""
+			v.FixConfidence = vulnerability.ConfidenceLow
+			v.FixReason = "Installed package version could not be resolved"
+			v.VersionStatus = vulnerability.VersionUnresolved
 			if v.FixState == "fixed" {
 				v.FixState = "unknown"
 			}

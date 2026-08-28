@@ -8,6 +8,7 @@ package ownadvisory
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
@@ -77,17 +78,26 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 
 // rawFinding builds the normalized finding from a matched advisory + component.
 func rawFinding(a advisory.Advisory, c sbom.Component, fixed string) vulnerability.RawFinding {
+	identity := sbom.IdentityFromComponent(c)
+	fixedVersions, rejectedFixedVersions := ownedFixedVersions(a, identity, fixed)
 	rf := vulnerability.RawFinding{
-		Source:       sourceName,
-		AdvisoryID:   preferCVE(a.ID, a.Aliases),
-		Aliases:      append([]string{a.ID}, a.Aliases...),
-		Component:    c.Name,
-		Version:      c.Version,
-		Severity:     shared.SeverityUnknown,
-		CVSSVector:   a.CVSSVector,
-		CVSSScore:    a.CVSSScore,
-		FixedVersion: fixed,
-		Description:  a.Summary,
+		Source:                sourceName,
+		AdvisoryID:            preferCVE(a.ID, a.Aliases),
+		Aliases:               append([]string{a.ID}, a.Aliases...),
+		Component:             c.Name,
+		Version:               c.Version,
+		Ecosystem:             identity.Ecosystem,
+		PackagePURL:           c.PURL,
+		Severity:              shared.SeverityUnknown,
+		CVSSVector:            a.CVSSVector,
+		CVSSScore:             a.CVSSScore,
+		FixedVersions:         fixedVersions,
+		RejectedFixedVersions: rejectedFixedVersions,
+		Description:           a.Summary,
+	}
+	if len(fixedVersions) > 0 {
+		rf.FixedVersion = fixedVersions[0]
+		rf.FixState = "fixed"
 	}
 	// Severity from the score; if the store has the vector but no precomputed score, derive it (an ingester
 	// may store only the vector) – mirrors the OSV adapter so a vuln found by both correlates to one band.
@@ -102,6 +112,41 @@ func rawFinding(a advisory.Advisory, c sbom.Component, fixed string) vulnerabili
 		rf.Severity = shared.SeverityFromScore(score)
 	}
 	return rf
+}
+
+func ownedFixedVersions(value advisory.Advisory, identity sbom.ComponentIdentity, fallback string) ([]string, []string) {
+	candidates := []string{fallback}
+	ranges := make([]advisory.Range, 0)
+	for _, affected := range value.Affected {
+		if affected.Ecosystem != identity.Ecosystem || affected.Package != identity.Package {
+			continue
+		}
+		candidates = append(candidates, advisory.FixedVersions(affected)...)
+		ranges = append(ranges, affected.Ranges...)
+	}
+	valid := map[string]bool{}
+	rejected := map[string]bool{}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		comparison, comparable := advisory.CompareVersions(identity.Ecosystem, identity.Version, candidate)
+		if candidate == "" || !comparable || comparison >= 0 || advisory.Affected(identity.Ecosystem, candidate, ranges, nil) {
+			if candidate != "" {
+				rejected[candidate] = true
+			}
+			continue
+		}
+		valid[candidate] = true
+	}
+	return sortedVersionKeys(valid), sortedVersionKeys(rejected)
+}
+
+func sortedVersionKeys(values map[string]bool) []string {
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // preferCVE returns a CVE id when one is present (the id or an alias), else the primary id – mirroring the

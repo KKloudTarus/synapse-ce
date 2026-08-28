@@ -113,8 +113,9 @@ type Component struct {
 	// production code vs dev/test/example/fixture/benchmark/docs – so findings on
 	// non-shipping assets can be ranked as background, not actionable. Location is
 	// the on-disk manifest path the classification was derived from.
-	Scope    string
-	Location string
+	Scope     string
+	Location  string
+	Locations []string
 
 	// LayerID is the container-image layer (its uncompressed diff_id digest, e.g.
 	// "sha256:…") that introduced this component, recovered from Syft's
@@ -399,6 +400,7 @@ func ComponentID(name, version, purl string) string {
 type License struct {
 	SPDXID   string
 	Name     string
+	RawValue string
 	Category LicenseCategory
 }
 
