@@ -54,11 +54,15 @@ func componentIdentity(c Component) string {
 // and order-preserving.
 func mergeComponents(dst, src Component) Component {
 	dst.Licenses = unionLicenses(dst.Licenses, src.Licenses)
+	dst.Locations = uniqueSorted(append(append(append([]string(nil), dst.Locations...), dst.Location), append(append([]string(nil), src.Locations...), src.Location)...))
 	if dst.CPE == "" {
 		dst.CPE = src.CPE
 	}
 	if dst.Location == "" {
 		dst.Location = src.Location
+	}
+	if dst.Location == "" && len(dst.Locations) > 0 {
+		dst.Location = dst.Locations[0]
 	}
 	if dst.Scope == "" || dst.Scope == ScopeUnknown {
 		if src.Scope != "" && src.Scope != ScopeUnknown {

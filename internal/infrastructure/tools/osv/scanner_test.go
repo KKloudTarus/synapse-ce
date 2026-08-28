@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
@@ -36,7 +37,7 @@ func TestOsvToRaw(t *testing.T) {
 		Summary:          "bad thing",
 		Aliases:          []string{"CVE-2024-9999"},
 		Severity:         []osvSeverity{{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}},
-		Affected:         []osvAffected{{Ranges: []osvRange{{Events: []map[string]string{{"introduced": "0"}, {"fixed": "1.2.4"}}}}}},
+		Affected:         []osvAffected{{Package: osvPackage{Ecosystem: "Go", Name: "foo", PURL: "pkg:golang/foo"}, Ranges: []osvRange{{Type: "ECOSYSTEM", Events: []map[string]string{{"introduced": "0"}, {"fixed": "1.2.4"}}}}}},
 		DatabaseSpecific: map[string]any{"severity": "HIGH"},
 	}
 	got := osvToRaw(comp, v)
@@ -66,14 +67,33 @@ func TestOsvToRaw(t *testing.T) {
 func TestOsvToRawAffectedSymbols(t *testing.T) {
 	// the Go vuln DB carries affected functions in affected[].ecosystem_specific.imports[].symbols
 	const raw = `{"id":"GO-2024-1","aliases":["CVE-2024-1"],
-		"affected":[{"ecosystem_specific":{"imports":[{"path":"github.com/foo/bar","symbols":["Vuln","Other"]}]}}]}`
+		"affected":[{"package":{"ecosystem":"Go","name":"github.com/foo/bar","purl":"pkg:golang/github.com/foo/bar"},"ecosystem_specific":{"imports":[{"path":"github.com/foo/bar","symbols":["Vuln","Other"]}]}}]}`
 	var v osvVuln
 	if err := json.Unmarshal([]byte(raw), &v); err != nil {
 		t.Fatal(err)
 	}
-	got := osvToRaw(sbom.Component{Name: "bar", Version: "1.0.0"}, v)
+	got := osvToRaw(sbom.Component{Name: "github.com/foo/bar", Version: "1.0.0", PURL: "pkg:golang/github.com/foo/bar@1.0.0"}, v)
 	if len(got.AffectedSymbols) != 2 || got.AffectedSymbols[0] != "github.com/foo/bar.Vuln" || got.AffectedSymbols[1] != "github.com/foo/bar.Other" {
 		t.Fatalf("AffectedSymbols = %v, want path-qualified [Vuln Other]", got.AffectedSymbols)
+	}
+}
+
+func TestOsvToRawUsesOnlyMatchingMavenArtifactRanges(t *testing.T) {
+	component := sbom.Component{Name: "netty-codec", Version: "4.1.75.Final", PURL: "pkg:maven/io.netty/netty-codec@4.1.75.Final"}
+	value := osvVuln{ID: "CVE-2025-58057", Affected: []osvAffected{
+		{Package: osvPackage{Ecosystem: "Maven", Name: "other:artifact", PURL: "pkg:maven/other/artifact"}, Ranges: []osvRange{{Type: "ECOSYSTEM", Events: []map[string]string{{"introduced": "0"}, {"fixed": "1.5"}}}}},
+		{Package: osvPackage{Ecosystem: "Maven", Name: "io.netty:netty-codec", PURL: "pkg:maven/io.netty/netty-codec"}, Ranges: []osvRange{
+			{Type: "ECOSYSTEM", Events: []map[string]string{{"introduced": "4.1.0.Final"}, {"fixed": "4.1.125.Final"}}},
+			{Type: "ECOSYSTEM", Events: []map[string]string{{"introduced": "4.2.0.Final"}, {"fixed": "4.2.5.Final"}}},
+		}},
+	}}
+	raw := osvToRaw(component, value)
+	want := []string{"4.1.125.Final", "4.2.5.Final"}
+	if !reflect.DeepEqual(raw.FixedVersions, want) {
+		t.Fatalf("fixed versions = %v, want %v", raw.FixedVersions, want)
+	}
+	if raw.FixedVersion == "1.5" {
+		t.Fatal("wrong artifact fixed version leaked into remediation")
 	}
 }
 
@@ -90,7 +110,7 @@ func TestScanAgainstFakeOSV(t *testing.T) {
 			ID:               r.PathValue("id"),
 			Summary:          "vulnerable",
 			Severity:         []osvSeverity{{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}},
-			Affected:         []osvAffected{{Ranges: []osvRange{{Events: []map[string]string{{"fixed": "2.0.0"}}}}}},
+			Affected:         []osvAffected{{Package: osvPackage{Ecosystem: "npm", Name: "vuln-pkg", PURL: "pkg:npm/vuln-pkg"}, Ranges: []osvRange{{Type: "ECOSYSTEM", Events: []map[string]string{{"introduced": "0"}, {"fixed": "2.0.0"}}}}}},
 			DatabaseSpecific: map[string]any{"severity": "CRITICAL"},
 		})
 	})
@@ -116,6 +136,67 @@ func TestScanAgainstFakeOSV(t *testing.T) {
 	}
 	if got.Severity != shared.SeverityCritical || got.FixedVersion != "2.0.0" {
 		t.Errorf("severity/fixed = %q/%q", got.Severity, got.FixedVersion)
+	}
+}
+
+func TestScanEmitsOSVMatchForUnresolvedEcosystem(t *testing.T) {
+	// Composer/Packagist is an OSV-supported ecosystem our identity resolver does not model. OSV's
+	// versioned-PURL query is authoritative, so a match must still be emitted (with no fabricated fix
+	// data) rather than silently dropped — otherwise the whole ecosystem reports zero OSV vulns.
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/querybatch", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(batchResp{Results: []batchResult{{Vulns: []batchVuln{{ID: "CVE-2024-composer"}}}}})
+	})
+	mux.HandleFunc("GET /v1/vulns/{id}", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(osvVuln{
+			ID:       "CVE-2024-composer",
+			Summary:  "vulnerable monolog",
+			Affected: []osvAffected{{Package: osvPackage{Ecosystem: "Packagist", Name: "monolog/monolog", PURL: "pkg:composer/monolog/monolog"}}},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	scanner := New(srv.URL, srv.Client())
+	doc := &sbom.SBOM{Components: []sbom.Component{{
+		Name: "monolog/monolog", Version: "1.0.0", PURL: "pkg:composer/monolog/monolog@1.0.0",
+	}}}
+	findings, err := scanner.Scan(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(findings) != 1 || findings[0].AdvisoryID != "CVE-2024-composer" {
+		t.Fatalf("findings = %+v, want the composer OSV match emitted", findings)
+	}
+}
+
+func TestScanSkipsAdvisoryWithoutMatchingAffectedPackage(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/querybatch", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(batchResp{Results: []batchResult{{Vulns: []batchVuln{{ID: "GHSA-wrong-artifact"}}}}})
+	})
+	mux.HandleFunc("GET /v1/vulns/{id}", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(osvVuln{
+			ID: "GHSA-wrong-artifact",
+			Affected: []osvAffected{{
+				Package: osvPackage{Ecosystem: "Maven", Name: "example:other", PURL: "pkg:maven/example/other"},
+				Ranges:  []osvRange{{Type: "ECOSYSTEM", Events: []map[string]string{{"introduced": "0"}, {"fixed": "9.9.9"}}}},
+			}},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	scanner := New(srv.URL, srv.Client())
+	doc := &sbom.SBOM{Components: []sbom.Component{{
+		Name: "target", Version: "1.0.0", PURL: "pkg:maven/example/target@1.0.0",
+	}}}
+	findings, err := scanner.Scan(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("findings = %+v, want none for a different affected artifact", findings)
 	}
 }
 

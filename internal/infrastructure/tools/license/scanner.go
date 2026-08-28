@@ -87,13 +87,18 @@ func (s *Scanner) Scan(_ context.Context, doc *sbom.SBOM) ([]ports.LicenseFindin
 		}
 		sort.Strings(comps)
 		risk, severity := RiskOf(key)
+		options, recommendedChoice, policyRuleID, selectionReason := licensePolicy(key)
 		out = append(out, ports.LicenseFinding{
-			License:      key,
-			Category:     a.category,
-			Verdict:      s.policy.verdict(a.category),
-			RiskCategory: string(risk),
-			Severity:     severity,
-			Components:   comps,
+			License:           key,
+			Category:          a.category,
+			Verdict:           s.policy.verdict(a.category),
+			RiskCategory:      string(risk),
+			Severity:          severity,
+			Components:        comps,
+			PolicyRuleID:      policyRuleID,
+			RecommendedChoice: recommendedChoice,
+			SelectionReason:   selectionReason,
+			Options:           options,
 		})
 	}
 	return out, nil
@@ -139,7 +144,11 @@ func normalizeComponentLicenses(in []sbom.License) []sbom.License {
 			if category != sbom.LicenseUnknown {
 				hasResolved = true
 			}
-			entries = append(entries, entry{lic: sbom.License{SPDXID: key, Name: key, Category: category}, category: category})
+			rawValue := strings.TrimSpace(l.RawValue)
+			if rawValue == "" {
+				rawValue = raw
+			}
+			entries = append(entries, entry{lic: sbom.License{SPDXID: key, Name: key, RawValue: rawValue, Category: category}, category: category})
 		}
 	}
 	if len(entries) == 0 {
@@ -156,7 +165,7 @@ func normalizeComponentLicenses(in []sbom.License) []sbom.License {
 }
 
 func canonicalLicenseKey(raw string) string {
-	key := strings.TrimSpace(raw)
+	key := licenseValueWithoutMetadata(raw)
 	if key == "" {
 		return ""
 	}
@@ -206,6 +215,52 @@ func canonicalLicenseKey(raw string) string {
 		return strings.Join(out, " OR ")
 	}
 	return key
+}
+
+func licensePolicy(expression string) ([]ports.LicensePolicyOption, string, string, string) {
+	expression = stripOuterParens(strings.TrimSpace(expression))
+	parts := splitTopLevel(expression, "OR")
+	chooseLowest := len(parts) > 1
+	if !chooseLowest {
+		parts = splitTopLevel(expression, "AND")
+	}
+	options := make([]ports.LicensePolicyOption, 0, len(parts))
+	selected := ""
+	selectedRisk := RiskUnknown
+	for index, part := range parts {
+		part = strings.TrimSpace(part)
+		risk, severity := RiskOf(part)
+		options = append(options, ports.LicensePolicyOption{License: part, Severity: severity, PolicyRuleID: policyRuleID(part)})
+		if index == 0 || (chooseLowest && riskRank(risk) < riskRank(selectedRisk)) || (!chooseLowest && riskRank(risk) > riskRank(selectedRisk)) {
+			selected = part
+			selectedRisk = risk
+		}
+	}
+	if selected == "" {
+		selected = expression
+	}
+	recommendedChoice := ""
+	reason := "Single detected license"
+	if len(options) > 1 && chooseLowest {
+		recommendedChoice = selected
+		reason = "Lowest-risk valid OR option"
+	} else if len(options) > 1 {
+		reason = "Highest-risk mandatory AND option"
+	}
+	return options, recommendedChoice, policyRuleID(selected), reason
+}
+
+var policyRuleSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
+
+func policyRuleID(license string) string {
+	value := strings.Trim(policyRuleSanitizer.ReplaceAllString(strings.ToUpper(strings.TrimSpace(license)), "-"), "-")
+	if value == "" {
+		value = "UNKNOWN"
+	}
+	if len(value) > 48 {
+		value = value[:48]
+	}
+	return "LIC-" + value
 }
 
 // classify resolves an SPDX id or expression to a category, respecting SPDX
@@ -426,9 +481,18 @@ func splitLicenseList(s string) []string {
 	}
 	for _, sep := range []byte{',', ';'} {
 		depth, start := 0, 0
+		var quote byte
 		parts := []string{}
 		for i := 0; i < len(s); i++ {
+			if quote != 0 {
+				if s[i] == quote && (i == 0 || s[i-1] != '\\') {
+					quote = 0
+				}
+				continue
+			}
 			switch s[i] {
+			case '\'', '"':
+				quote = s[i]
 			case '(':
 				depth++
 			case ')':
@@ -448,6 +512,56 @@ func splitLicenseList(s string) []string {
 		}
 	}
 	return nil
+}
+
+func licenseValueWithoutMetadata(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	if value[0] == '\'' || value[0] == '"' {
+		quote := value[0]
+		for index := 1; index < len(value); index++ {
+			if value[index] != quote || value[index-1] == '\\' {
+				continue
+			}
+			rest := strings.TrimSpace(value[index+1:])
+			if rest == "" || isLicenseMetadataSuffix(rest) {
+				return strings.TrimSpace(value[1:index])
+			}
+			break
+		}
+	}
+	var quote byte
+	depth := 0
+	for index := 0; index < len(value); index++ {
+		if quote != 0 {
+			if value[index] == quote && value[index-1] != '\\' {
+				quote = 0
+			}
+			continue
+		}
+		switch value[index] {
+		case '\'', '"':
+			quote = value[index]
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ';':
+			if depth == 0 && isLicenseMetadataSuffix(value[index:]) {
+				return strings.TrimSpace(value[:index])
+			}
+		}
+	}
+	return value
+}
+
+func isLicenseMetadataSuffix(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(value), ";")))
+	return strings.HasPrefix(value, "link=") || strings.HasPrefix(value, "url=") || strings.HasPrefix(value, "href=") || strings.HasPrefix(value, "see:")
 }
 
 func canonicalSPDXID(norm string) string {
@@ -628,6 +742,7 @@ var spdxCategory = map[string]sbom.LicenseCategory{
 	"mit": sbom.LicensePermissive, "mit-0": sbom.LicensePermissive,
 	"apache-2.0": sbom.LicensePermissive, "apache-1.1": sbom.LicensePermissive,
 	"bsd-2-clause": sbom.LicensePermissive, "bsd-3-clause": sbom.LicensePermissive,
+	"bsd-unspecified":     sbom.LicensePermissive,
 	"bsd-4-clause":        sbom.LicensePermissive,
 	"bsd-2-clause-netbsd": sbom.LicensePermissive,
 	"bsd-3-clause-clear":  sbom.LicensePermissive, "0bsd": sbom.LicensePermissive,
@@ -690,7 +805,7 @@ var licenseAliases = map[string]string{
 	"apache public license 2.0": "apache-2.0",
 	"apache license 1.1":        "apache-1.1", "apache software license 1.1": "apache-1.1",
 	// BSD (all permissive — exact clause count doesn't change the verdict)
-	"bsd license": "bsd-3-clause", "bsd": "bsd-3-clause",
+	"bsd license": "bsd-unspecified", "bsd": "bsd-unspecified",
 	"new bsd license": "bsd-3-clause", "modified bsd license": "bsd-3-clause",
 	"bsd 3 clause license": "bsd-3-clause", "bsd 3 clause": "bsd-3-clause", "3 clause bsd license": "bsd-3-clause",
 	"simplified bsd license": "bsd-2-clause", "bsd 2 clause license": "bsd-2-clause",
@@ -732,7 +847,7 @@ var rawLicenseAliases = map[string]string{
 	"http://www.apache.org/licenses/license-2.0":         "apache-2.0",
 	"https://www.apache.org/licenses/license-2.0":        "apache-2.0",
 	"http://www.opensource.org/licenses/mit-license.php": "mit",
-	"http://www.opensource.org/licenses/bsd-license.php": "bsd-3-clause",
+	"http://www.opensource.org/licenses/bsd-license.php": "bsd-unspecified",
 	"http://opensource.org/licenses/bsd-2-clause":        "bsd-2-clause",
 	"https://opensource.org/licenses/bsd-2-clause":       "bsd-2-clause",
 	"http://opensource.org/licenses/bsd-3-clause":        "bsd-3-clause",
@@ -770,6 +885,7 @@ var canonicalSPDX = map[string]string{
 	"beerware":         "Beerware",
 	"bsd-2-clause":     "BSD-2-Clause",
 	"bsd-3-clause":     "BSD-3-Clause",
+	"bsd-unspecified":  "BSD-UNSPECIFIED",
 	"bsl-1.0":          "BSL-1.0",
 	"bzip2-1.0.6":      "bzip2-1.0.6",
 	"bouncycastle":     "Bouncy-Castle",

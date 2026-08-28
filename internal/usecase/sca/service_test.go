@@ -769,7 +769,7 @@ func TestScanResultIncludesComponentLicenseAuditAndCoverageBreakdown(t *testing.
 	if len(res.ComponentLicenses) != 3 {
 		t.Fatalf("component_licenses len = %d, want 3: %+v", len(res.ComponentLicenses), res.ComponentLicenses)
 	}
-	if got := res.ComponentLicenses[0]; got.Component != "prod-lib" || got.License != "MIT" || got.Verdict != ports.LicenseAllow || got.Scope != sbom.ScopeProduction {
+	if got := res.ComponentLicenses[0]; got.Component != "prod-lib" || got.License != "MIT" || got.Verdict != ports.LicenseAllow || got.Scope != sbom.ScopeProduction || got.RecommendedChoice != "" {
 		t.Errorf("prod-lib audit = %+v, want MIT allow production", got)
 	}
 	if got := res.ComponentLicenses[1]; got.Component != "prod-mystery" || got.License != "" || got.Verdict != ports.LicenseWarn || got.UnknownReason != sbom.ReasonMetadataMissing {
@@ -1659,7 +1659,7 @@ func TestBuildManifestReproScore(t *testing.T) {
 	if m.ReproScore != 6*100/7 {
 		t.Errorf("repro score = %d, want %d", m.ReproScore, 6*100/7)
 	}
-	if m.SBOMSHA256 == "" || m.CorrelationVersion != 2 {
+	if m.SBOMSHA256 == "" || m.CorrelationVersion != vulnerability.CorrelationVersion {
 		t.Errorf("manifest incomplete: %+v", m)
 	}
 }

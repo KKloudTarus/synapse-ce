@@ -17,8 +17,9 @@ const canonicalOSV = `{
   "aliases": ["CVE-2021-44228"],
   "summary": "Remote code injection",
   "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"}],
-  "affected": [{
-    "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "2.0.0"}, {"fixed": "2.3.1"}]}],
+	"affected": [{
+	    "package": {"ecosystem": "Go", "name": "github.com/example/log4j", "purl": "pkg:golang/github.com/example/log4j"},
+	    "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "2.0.0"}, {"fixed": "2.3.1"}]}],
     "ecosystem_specific": {"imports": [{"path": "github.com/example/log4j", "symbols": ["Lookup", "JndiManager"]}]}
   }],
   "database_specific": {"severity": "CRITICAL"}
@@ -34,7 +35,7 @@ func TestOSVSchemaConformance(t *testing.T) {
 	if err := json.Unmarshal([]byte(canonicalOSV), &v); err != nil {
 		t.Fatalf("decode OSV record: %v", err)
 	}
-	comp := sbom.Component{Name: "github.com/example/log4j", Version: "2.14.0", PURL: "pkg:golang/github.com/example/log4j@2.14.0"}
+	comp := sbom.Component{Name: "github.com/example/log4j", Version: "2.2.0", PURL: "pkg:golang/github.com/example/log4j@2.2.0"}
 	got := osvToRaw(comp, v)
 
 	if got.Source != "osv" {
