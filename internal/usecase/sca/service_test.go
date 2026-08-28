@@ -1780,6 +1780,42 @@ func TestSecretScanTruncationWarning(t *testing.T) {
 	}
 }
 
+type erroringSBOM struct{}
+
+func (erroringSBOM) Generate(context.Context, string) (*sbom.SBOM, error) {
+	return nil, errors.New("syft not installed")
+}
+
+type countingSecretScanner struct{ calls int }
+
+func (*countingSecretScanner) Name() string { return "counting-secret-scanner" }
+func (c *countingSecretScanner) ScanFiles(context.Context, string) (ports.SecretScanReport, error) {
+	c.calls++
+	return ports.SecretScanReport{}, nil
+}
+
+// TestScanDegradesWhenSBOMGenerationFails: an SBOM producer failure must NOT abort the whole scan — the
+// source-only analyzers still run and the scan is marked INCOMPLETE rather than returning a silent clean
+// (zero-finding) result.
+func TestScanDegradesWhenSBOMGenerationFails(t *testing.T) {
+	sec := &countingSecretScanner{}
+	svc := NewService(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, nil, nil, nil, nil, nil, nil, nil, ports.Provenance{}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAudit{}, shared.SeverityHigh, 0, &fakeAcquirer{dir: t.TempDir()}, &fakeDetector{}, erroringSBOM{}, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil)
+	svc.SetSecretScanner(sec)
+	res, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
+	if err != nil {
+		t.Fatalf("SBOM-generation failure must degrade, not abort the scan: %v", err)
+	}
+	if res.Completeness.Confident {
+		t.Fatal("a scan without an SBOM must be marked INCOMPLETE (Confident=false)")
+	}
+	if res.Completeness.Warning == "" {
+		t.Fatal("expected an INCOMPLETE completeness warning when SBOM generation fails")
+	}
+	if sec.calls != 1 {
+		t.Fatalf("the source-only secret scanner must still run when SBOM generation fails (calls=%d)", sec.calls)
+	}
+}
+
 func TestEvidenceFailurePreventsPersistence(t *testing.T) {
 	ctx := context.Background()
 	findings := memory.NewFindingRepository()
