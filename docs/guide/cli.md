@@ -81,6 +81,8 @@ synapse-cli scan <path|image-ref> [flags]
 | `--image` | Treat the argument as a container image reference, pulled via crane, instead of a local path. |
 | `--offline` | Skip the live advisory source and detect with the offline database only. |
 | `--ignore-unfixed` | Ignore vulnerabilities that have no fix available. |
+| `--min-confidence low\|medium\|high\|very_high` | Drop findings below this confidence. Findings that carry no confidence (SAST/misconfig) are kept. Useful to cut lower-signal secret matches. |
+| `--base <ref>` | Scope line-anchored findings (SAST, secret, misconfig) to code changed vs this git ref (Clean-as-You-Code), so a repo with a backlog gates the pipeline only on what a change introduces. Dependency/license findings are not line-attributable and are kept — baseline those with `.synapseignore`. Local git repos only (not `--image`). |
 | `--detection-priority comprehensive\|precise` | `comprehensive` (default) reports every match. `precise` moves single-source, non-KEV findings into a needs-verify queue that does not trip `--fail-on`. |
 | `--include-test` | Also gate on findings in test, fixture, and example paths. They are reported but gate-exempt by default. |
 | `--json` | Print the full scan result as JSON to stdout, for machine consumption in CI. |
