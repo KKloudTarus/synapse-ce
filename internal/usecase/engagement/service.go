@@ -61,10 +61,18 @@ func (s *Service) CreateFromSourcePackage(ctx context.Context, in CreateInput, f
 	}
 	in.InScope = append([]domain.Target{{Kind: domain.TargetRepo, Value: item.Target()}}, in.InScope...)
 	engagement, err := s.create(ctx, in, id)
-	if err != nil || engagement.ID != id {
-		_ = s.sources.Delete(context.WithoutCancel(ctx), item.TenantID, id)
-	}
 	if err != nil {
+		// Compensating delete: the engagement didn't persist, so the stored source would be orphaned.
+		_ = s.sources.Delete(context.WithoutCancel(ctx), item.TenantID, id)
+		return nil, sourcepackage.Package{}, err
+	}
+	// Chain-of-custody: record the ingest of untrusted source bytes in the append-only, hash-chained
+	// audit log (who uploaded which archive to which engagement), not only in the manifest metadata.
+	if err := s.auditChange(ctx, in.CreatedBy, "engagement.source_uploaded", id, map[string]string{
+		"filename": item.Filename,
+		"sha256":   item.SHA256,
+		"size":     strconv.FormatInt(item.Size, 10),
+	}, s.clock.Now()); err != nil {
 		return nil, sourcepackage.Package{}, err
 	}
 	return engagement, item, nil

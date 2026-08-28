@@ -166,7 +166,8 @@ func TestCreateFromSourcePackageAddsImmutableScopeAndCleansFailure(t *testing.T)
 	now := time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)
 	data := []byte("archive")
 	sources := &sourceStoreFake{}
-	svc := NewService(newMemRepo(), fixedClock{now}, fixedIDs{}, &capAudit{})
+	audit := &capAudit{}
+	svc := NewService(newMemRepo(), fixedClock{now}, fixedIDs{}, audit)
 	svc.SetSourceStore(sources)
 
 	created, item, err := svc.CreateFromSourcePackage(context.Background(), CreateInput{
@@ -177,6 +178,9 @@ func TestCreateFromSourcePackageAddsImmutableScopeAndCleansFailure(t *testing.T)
 	}
 	if !bytes.Equal(sources.saved, data) || len(created.Scope.InScope) == 0 || created.Scope.InScope[0].Value != item.Target() {
 		t.Fatalf("source creation did not bind immutable scope: engagement=%+v item=%+v", created.Scope, item)
+	}
+	if !audit.has("engagement.source_uploaded") {
+		t.Fatal("source upload must be recorded in the append-only audit log (chain-of-custody)")
 	}
 
 	failingSources := &sourceStoreFake{}

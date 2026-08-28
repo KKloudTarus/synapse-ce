@@ -81,10 +81,10 @@ func hashSourceUpload(file multipart.File) (int64, string, error) {
 		return 0, "", err
 	}
 	if written > sourcepackage.MaxArchiveBytes {
-		return written, "", fmt.Errorf("uploaded source exceeds %d bytes", sourcepackage.MaxArchiveBytes)
+		return written, "", fmt.Errorf("%w: uploaded source exceeds %d bytes", shared.ErrValidation, sourcepackage.MaxArchiveBytes)
 	}
 	if written == 0 {
-		return 0, "", fmt.Errorf("uploaded source is empty")
+		return 0, "", fmt.Errorf("%w: uploaded source is empty", shared.ErrValidation)
 	}
 	return written, hex.EncodeToString(hash.Sum(nil)), nil
 }
@@ -140,11 +140,15 @@ func (rt *Router) createEngagement(w http.ResponseWriter, r *http.Request) {
 		}
 		sourceSize, sourceSHA256, err = hashSourceUpload(sourceFile)
 		if err != nil {
-			status := http.StatusBadRequest
-			if sourceSize > sourcepackage.MaxArchiveBytes {
-				status = http.StatusRequestEntityTooLarge
+			switch {
+			case sourceSize > sourcepackage.MaxArchiveBytes:
+				writeJSON(w, http.StatusRequestEntityTooLarge, errorBody{Error: err.Error()})
+			case errors.Is(err, shared.ErrValidation):
+				writeJSON(w, http.StatusBadRequest, errorBody{Error: err.Error()})
+			default:
+				// A raw read/seek failure: don't leak the internal error text to the client.
+				writeError(w, rt.log, fmt.Errorf("read source upload: %w", err))
 			}
-			writeJSON(w, status, errorBody{Error: err.Error()})
 			return
 		}
 	} else if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
