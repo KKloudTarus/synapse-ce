@@ -99,3 +99,26 @@ func TestFilterByConfidence(t *testing.T) {
 		t.Fatalf("--min-confidence high must drop medium/low: %+v", titles)
 	}
 }
+
+func TestScopeToNewCodeKeepsUnanchoredFindings(t *testing.T) {
+	changed := gitdiff.ChangedLines{"app.go": {10: true}}
+	findings := []finding.Finding{
+		{Title: "sast on changed line", SourceLocation: &finding.SourceLocation{File: "app.go", StartLine: 10, EndLine: 10}},
+		{Title: "sast on unchanged line", SourceLocation: &finding.SourceLocation{File: "app.go", StartLine: 99, EndLine: 99}},
+		{Title: "sca vuln (no line)", Kind: finding.KindSCA, DedupKey: "CVE-2024-1:pkg:1.0"},
+	}
+	out := scopeToNewCode(findings, changed)
+	got := map[string]bool{}
+	for _, f := range out {
+		got[f.Title] = true
+	}
+	if !got["sast on changed line"] {
+		t.Error("a line-anchored finding on a changed line must be kept")
+	}
+	if got["sast on unchanged line"] {
+		t.Error("a line-anchored finding on an unchanged line must be dropped")
+	}
+	if !got["sca vuln (no line)"] {
+		t.Error("a non-line-anchored SCA finding must be KEPT (dropping it would falsely report clean)")
+	}
+}
