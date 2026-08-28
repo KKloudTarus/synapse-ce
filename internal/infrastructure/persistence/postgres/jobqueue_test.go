@@ -188,11 +188,18 @@ func TestPostgresJobQueueRetryDoesNotBurnAttempt(t *testing.T) {
 
 func TestPostgresJobQueueAggregateJobQueueStatsAcrossTenants(t *testing.T) {
 	q, ctx := setupJobQueue(t)
+	// AggregateJobQueueStats sums per-tenant Stats over every tenant row, so the total is
+	// only meaningful when RLS actually constrains each per-tenant read. Under a
+	// SUPERUSER/BYPASSRLS role every iteration sees every tenant's jobs and the sum
+	// multiplies by the tenant count — a property of the DSN, not of the code under test.
+	if err := CheckRLSRuntimeRole(ctx, q.pool); err != nil {
+		t.Skipf("cross-tenant queue aggregation requires an RLS-enforcing runtime role: %v", err)
+	}
 	tenantA := shared.DefaultTenant
 	_, _ = q.Enqueue(ctx, "sca", []byte("a"))
 
 	otherTenant := shared.ID("other-tenant")
-	if _, err := q.pool.Exec(ctx, `INSERT INTO tenants (id) VALUES ($1) ON CONFLICT DO NOTHING`, otherTenant.String()); err != nil {
+	if _, err := q.pool.Exec(ctx, `INSERT INTO tenants (id, name) VALUES ($1,$1) ON CONFLICT DO NOTHING`, otherTenant.String()); err != nil {
 		t.Fatalf("seed second tenant: %v", err)
 	}
 	ctxB := shared.WithTenant(context.Background(), otherTenant)

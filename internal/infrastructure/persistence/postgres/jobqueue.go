@@ -194,14 +194,24 @@ func (q *JobQueue) AggregateJobQueueStats(ctx context.Context, kinds ...string) 
 	if err != nil {
 		return ports.JobStats{}, fmt.Errorf("list queue tenants: %w", err)
 	}
+	// Deduplicate by the NORMALIZED tenant id. Migration 0002 seeds a legacy
+	// empty-string tenant row, and WithTenant maps the empty id onto DefaultTenant, so
+	// enumerating raw rows would scope two iterations to "default" and double-count its
+	// jobs in every deployment that carries that row.
 	var tenantIDs []shared.ID
+	seen := make(map[shared.ID]bool)
 	for rows.Next() {
 		var tenantID shared.ID
 		if err := rows.Scan(&tenantID); err != nil {
 			rows.Close()
 			return ports.JobStats{}, fmt.Errorf("scan queue tenant: %w", err)
 		}
-		tenantIDs = append(tenantIDs, tenantID)
+		normalized := shared.TenantOrDefault(tenantID)
+		if seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		tenantIDs = append(tenantIDs, normalized)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()

@@ -160,11 +160,28 @@ func TestMigration0059(t *testing.T) {
 	if err != nil {
 		t.Fatalf("goose open: %v", err)
 	}
-	defer db.Close()
+	// Registered as a cleanup rather than deferred: cleanups run LIFO and AFTER every
+	// deferred call, so a deferred Close would shut the handle before the schema-restore
+	// cleanup below could use it.
+	t.Cleanup(func() { _ = db.Close() })
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		t.Fatalf("dialect: %v", err)
 	}
+	// Migration 0085 refuses to roll back once tenant-chained (hash_version = 2) audit
+	// rows exist, and Migrate above creates them. Clear them first: this test walks the
+	// schema down through 0085 deliberately, so the guard is protecting real history it
+	// does not have here.
+	deleteV2AuditRowsForMigrationRollback(t, db)
+	// DownTo unwinds EVERY migration above the target, so restore the full schema on the
+	// way out. Without this the package is left at version 59 and any test that runs
+	// later sees a partial schema. Registered after the Close cleanup so LIFO runs this
+	// restore first, while the handle is still open.
+	t.Cleanup(func() {
+		if err := goose.Up(db, "."); err != nil {
+			t.Errorf("restore migrations after rollback probe: %v", err)
+		}
+	})
 	if err := goose.DownTo(db, ".", 58); err != nil {
 		t.Fatalf("down to 58: %v", err)
 	}
