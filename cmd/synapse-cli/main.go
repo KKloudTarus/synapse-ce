@@ -994,7 +994,7 @@ func gradeNum(g rating.Grade) float64 {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  synapse-cli doctor [path] [--json]       # offline pre-scan readiness: toolchain, markers, and dimension coverage")
-	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--include-test] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
+	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--min-confidence low|medium|high|very_high] [--include-test] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
 	fmt.Fprintln(os.Stderr, "      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  skip the live OSV.dev source; detect with Grype's offline DB only (air-gapped / fast)")
@@ -1032,10 +1032,14 @@ func runScan() {
 	sarifOut := false
 	sbomOut := false
 	includeTest := false
+	minConfidence := ""
 	for i := 3; i < len(os.Args); i++ {
 		switch {
 		case os.Args[i] == "--fail-on" && i+1 < len(os.Args):
 			failOn = shared.Severity(os.Args[i+1])
+			i++
+		case os.Args[i] == "--min-confidence" && i+1 < len(os.Args):
+			minConfidence = os.Args[i+1]
 			i++
 		case os.Args[i] == "--include-test":
 			includeTest = true
@@ -1068,6 +1072,12 @@ func runScan() {
 		fmt.Fprintf(os.Stderr, "synapse-cli: invalid --fail-on %q (want critical|high|medium|low|info)\n", failOn)
 		os.Exit(2)
 	}
+	switch minConfidence {
+	case "", "low", "medium", "high", "very_high":
+	default:
+		fmt.Fprintf(os.Stderr, "synapse-cli: invalid --min-confidence %q (want low|medium|high|very_high)\n", minConfidence)
+		os.Exit(2)
+	}
 	if priority == "" { // resolve the configured default here so an invalid env value gets this same exit-2 message
 		priority = os.Getenv("SYNAPSE_DETECTION_PRIORITY")
 	}
@@ -1087,7 +1097,7 @@ func runScan() {
 		fmt.Fprintln(os.Stderr, "synapse-cli: choose only one of --json, --sarif or --sbom")
 		os.Exit(2)
 	}
-	if err := run(os.Args[2], failOn, mode, priority, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest); err != nil {
+	if err := run(os.Args[2], failOn, mode, priority, minConfidence, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 		os.Exit(1)
 	}
@@ -1165,7 +1175,37 @@ func (stderrAudit) Record(_ context.Context, e ports.AuditEntry) error {
 
 var _ ports.AuditLogger = stderrAudit{}
 
-func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest bool) error {
+func confidenceRank(c string) int {
+	switch c {
+	case "very_high":
+		return 4
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0 // unset / unknown
+	}
+}
+
+// filterByConfidence drops findings whose confidence is below min. A finding with no confidence (SAST /
+// misconfig do not carry one) is kept — --min-confidence targets the confidence-bearing SCA/secret
+// findings, not a blanket drop of everything unscored.
+func filterByConfidence(findings []finding.Finding, min string) []finding.Finding {
+	threshold := confidenceRank(min)
+	out := make([]finding.Finding, 0, len(findings))
+	for _, f := range findings {
+		if f.Confidence != "" && confidenceRank(f.Confidence) < threshold {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+func run(path string, failOn shared.Severity, mode, priority, minConfidence string, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest bool) error {
 	// An image target is an OCI reference (acquired via crane → OCI layout); a local
 	// target is a filesystem path that must be absolute for the scope check.
 	target := strings.TrimSpace(path)
@@ -1430,6 +1470,9 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	res, err := sca.ScanWithOptions(ctx, "synapse-cli", eng.ID, ports.AcquireRequest{Kind: acqKind, Value: target}, scauc.ScanOptions{Mode: mode, DetectionPriority: priority, PolicyDir: policyDir})
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
+	}
+	if minConfidence != "" {
+		res.Findings = filterByConfidence(res.Findings, minConfidence)
 	}
 
 	// Report advisory opinions separately from the smaller policy-authorized gate-exempt set.
