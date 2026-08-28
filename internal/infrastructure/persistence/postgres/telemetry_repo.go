@@ -82,16 +82,45 @@ func (r *TelemetryRepository) RecordLoss(ctx context.Context, loss ports.Telemet
 	if _, ok := shared.TenantFrom(ctx); !ok {
 		return fmt.Errorf("%w: telemetry loss requires a tenant in context", shared.ErrValidation)
 	}
+	loss.FromAt = loss.FromAt.UTC().Truncate(time.Microsecond)
+	loss.ToAt = loss.ToAt.UTC().Truncate(time.Microsecond)
 	return WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		tenant, _ := shared.TenantFrom(ctx)
-		if _, err := tx.Exec(ctx, `
+		tag, err := tx.Exec(ctx, `
 			INSERT INTO telemetry_losses
 			  (tenant_id, host_id, asset_id, class, seq, disposition, observed_count, kept_count, dropped_count, reason, from_at, to_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 			ON CONFLICT (tenant_id, host_id, class, seq, disposition) DO NOTHING`,
 			tenant.String(), loss.HostID.String(), loss.AssetID.String(), string(loss.Class), int64(loss.Sequence), string(loss.Disposition),
-			loss.ObservedCount, loss.KeptCount, loss.DroppedCount, loss.Reason, loss.FromAt.UTC(), loss.ToAt.UTC()); err != nil {
+			loss.ObservedCount, loss.KeptCount, loss.DroppedCount, loss.Reason, loss.FromAt, loss.ToAt)
+		if err != nil {
 			return fmt.Errorf("insert telemetry loss: %w", err)
+		}
+		if tag.RowsAffected() == 1 {
+			return nil
+		}
+		var existing ports.TelemetryLoss
+		var sequence int64
+		if err := tx.QueryRow(ctx, `
+			SELECT host_id, asset_id, class, seq, disposition,
+			       observed_count, kept_count, dropped_count, reason, from_at, to_at
+			FROM telemetry_losses
+			WHERE tenant_id=$1 AND host_id=$2 AND class=$3 AND seq=$4 AND disposition=$5`,
+			tenant.String(), loss.HostID.String(), string(loss.Class), int64(loss.Sequence), string(loss.Disposition)).Scan(
+			&existing.HostID, &existing.AssetID, &existing.Class, &sequence, &existing.Disposition,
+			&existing.ObservedCount, &existing.KeptCount, &existing.DroppedCount, &existing.Reason,
+			&existing.FromAt, &existing.ToAt,
+		); err != nil {
+			return fmt.Errorf("read telemetry loss collision: %w", err)
+		}
+		if sequence < 0 {
+			return fmt.Errorf("%w: persisted telemetry loss has a negative sequence", shared.ErrConflict)
+		}
+		existing.Sequence = uint64(sequence)
+		existing.FromAt = existing.FromAt.UTC().Truncate(time.Microsecond)
+		existing.ToAt = existing.ToAt.UTC().Truncate(time.Microsecond)
+		if existing != loss {
+			return fmt.Errorf("%w: telemetry loss identity is already committed to different immutable facts", shared.ErrConflict)
 		}
 		return nil
 	})

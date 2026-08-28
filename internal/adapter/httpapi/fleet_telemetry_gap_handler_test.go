@@ -30,6 +30,10 @@ func (f *telemetryGapHandlerFake) IngestGap(_ context.Context, authAgentID share
 	return telemetryingest.GapIngestResult{GapID: report.GapID}, nil
 }
 
+func (f *telemetryGapHandlerFake) IngestSensorState(context.Context, shared.ID, fleetagent.SensorStateReport) (telemetryingest.SensorStateIngestResult, error) {
+	return telemetryingest.SensorStateIngestResult{}, nil
+}
+
 func TestFleetTelemetryGapMediaDispatchesToSignedGapUsecase(t *testing.T) {
 	agentID := shared.ID("agent-gap-http")
 	session := fleetagent.CanonicalSessionID(agentID)

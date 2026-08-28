@@ -67,7 +67,7 @@ func TestTelemetryTransportTailBindingAndDurableGaps(t *testing.T) {
 		t.Fatalf("seed host asset and trigger telemetry binding: %v", err)
 	}
 
-	repo := NewTelemetryTransportRepository(pool)
+	repo := mustNewTelemetryTransportRepository(t, pool)
 	tenantCtx := shared.WithTenant(ctx, tenant)
 	resolved, err := repo.ResolveTelemetryAsset(tenantCtx, agent)
 	if err != nil || resolved != asset {
@@ -86,17 +86,21 @@ func TestTelemetryTransportTailBindingAndDurableGaps(t *testing.T) {
 	afterAt := now.Add(10 * time.Minute)
 	before := ports.TelemetryEventBatch{
 		BatchID: shared.ID("batch-before-" + suffix), PayloadDigest: "payload-before-" + suffix,
-		AgentID: agent, StreamID: stream, AssetID: asset, Epoch: 1, Sequence: 1, SchemaVersion: 2,
+		AgentID: agent, StreamID: stream, AssetID: asset, Priority: fleetagent.PriorityP3, Epoch: 1, Sequence: 1, SchemaVersion: 2,
+		EventTimeMin: beforeAt, EventTimeMax: beforeAt,
+		ObservedCount: 1, KeptCount: 1, SamplingPolicyDigest: "test-policy-digest",
 		Events: []ports.StoredTelemetryEvent{{
-			EventID: shared.ID("event-before-" + suffix), Class: detection.ClassProcess, Digest: "digest-before-" + suffix,
+			EventID: shared.ID("event-before-" + suffix), Class: detection.ClassProcess, Digest: "digest-before-" + suffix, RedactionPolicyDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			Payload: []byte("before"), ObservedAt: beforeAt,
 		}},
 	}
 	after := ports.TelemetryEventBatch{
 		BatchID: shared.ID("batch-after-" + suffix), PayloadDigest: "payload-after-" + suffix,
-		AgentID: agent, StreamID: stream, AssetID: asset, Epoch: 1, Sequence: 4, SchemaVersion: 2,
+		AgentID: agent, StreamID: stream, AssetID: asset, Priority: fleetagent.PriorityP3, Epoch: 1, Sequence: 4, SchemaVersion: 2,
+		EventTimeMin: afterAt, EventTimeMax: afterAt,
+		ObservedCount: 1, KeptCount: 1, SamplingPolicyDigest: "test-policy-digest",
 		Events: []ports.StoredTelemetryEvent{{
-			EventID: shared.ID("event-after-" + suffix), Class: detection.ClassProcess, Digest: "digest-after-" + suffix,
+			EventID: shared.ID("event-after-" + suffix), Class: detection.ClassProcess, Digest: "digest-after-" + suffix, RedactionPolicyDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			Payload: []byte("after"), ObservedAt: afterAt,
 		}},
 	}
@@ -132,7 +136,7 @@ func TestTelemetryTransportTailBindingAndDurableGaps(t *testing.T) {
 		t.Fatalf("delivery-gap overlap query = %+v, %v; want persisted [2,3]", coverage, err)
 	}
 
-	restarted := NewTelemetryTransportRepository(pool)
+	restarted := mustNewTelemetryTransportRepository(t, pool)
 	gaps, err = restarted.ListGaps(tenantCtx, agent, stream)
 	if err != nil || len(gaps) != 1 || gaps[0].FromSequence != 2 || gaps[0].ToSequence != 3 {
 		t.Fatalf("gap after repository restart = %+v, %v; want [2,3]", gaps, err)
@@ -195,7 +199,7 @@ func TestTelemetryTransportTailBindingAndDurableGaps(t *testing.T) {
 	if err := restarted.SaveStreamState(tenantCtx, latest); err != nil {
 		t.Fatalf("resave ACK state after agent gap: %v", err)
 	}
-	restartedAgain := NewTelemetryTransportRepository(pool)
+	restartedAgain := mustNewTelemetryTransportRepository(t, pool)
 	agentCoverage, err := restartedAgain.QueryAgentGaps(tenantCtx, inside)
 	if err != nil || len(agentCoverage) != 1 || agentCoverage[0].FromSequence != 0 || agentCoverage[0].ToSequence != 0 {
 		t.Fatalf("agent-origin gap after ACK reconciliation/restart = %+v, %v; want one", agentCoverage, err)

@@ -12,11 +12,9 @@ import (
 // scrubs — and, once sealed into the permanent evidence chain (A5), unredactably so. It returns a redacted
 // DEEP COPY (the caller's Detection, still held by the engine, is never mutated) and a Report.
 //
-// It applies the same field classifier as the telemetry Scrub, but only the redact/hash/drop/secret-scan
-// transforms — it does NOT length-bound, because detection.Event carries no per-field truncation-honesty
-// flag and a silent truncation would be dishonest; the evidence window is already bounded by the rule.
+// It applies the same field classifier and argv/path bounds as telemetry Scrub. Detection evidence has no\n// per-field truncation-honesty flags, but its evidence is already bounded by the rule window.
 func ScrubDetection(det detection.Detection, policy Policy) (detection.Detection, Report, error) {
-	if err := policy.Validate(); err != nil {
+	if err := policy.ValidateSourceFloor(); err != nil {
 		return detection.Detection{}, Report{}, fmt.Errorf("scrub detection: %w", err)
 	}
 	rep := Report{PolicyDigest: RedactionPolicyDigest(policy)}
@@ -41,18 +39,24 @@ func ScrubDetection(det detection.Detection, policy Policy) (detection.Detection
 		switch {
 		case ev.Process != nil:
 			p := *ev.Process
-			// Slice-aware argv redaction (fresh slice — non-mutating): per-element scan + cross-element
-			// credential-flag → next-value redaction, same as the telemetry path.
-			scrubbedArgs, red, drop := policy.RedactArgv(ev.Process.Args)
+			if policy.MaxArgCount > 0 && len(p.Args) > policy.MaxArgCount {
+				p.Args = p.Args[:policy.MaxArgCount]
+			}
+			// Slice-aware argv redaction is performed before length bounds, so a bound cannot split a
+			// recognized credential. It also retains the telemetry path's cross-element credential flag handling.
+			scrubbedArgs, red, drop := policy.RedactArgv(p.Args)
 			rep.Redacted += red
 			rep.Dropped += drop
+			for i := range scrubbedArgs {
+				scrubbedArgs[i], _ = boundLen(scrubbedArgs[i], policy.MaxArgLen)
+			}
 			p.Args = scrubbedArgs
-			p.Path = apply(CategoryProcessPath, p.Path)
+			p.Path, _ = boundLen(apply(CategoryProcessPath, p.Path), policy.MaxPathLen)
 			p.Comm = apply(CategoryProcessComm, p.Comm)
 			e.Process = &p
 		case ev.File != nil:
 			f := *ev.File
-			f.Path = apply(CategoryFilePath, f.Path)
+			f.Path, _ = boundLen(apply(CategoryFilePath, f.Path), policy.MaxPathLen)
 			f.Comm = apply(CategoryFileComm, f.Comm)
 			e.File = &f
 		case ev.Network != nil:

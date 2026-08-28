@@ -195,6 +195,45 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/engagements/{id}/detection-provenance:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    get:
+      tags: [engagements, findings]
+      operationId: listDetectionProvenance
+      summary: List durable detection-provenance states for an engagement
+      description: Returns tenant-scoped custody and health projections independently of the ordinary detection projection.
+      responses:
+        "200":
+          description: Current detection-provenance states
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DetectionProvenanceList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalServerError"}
+
+  /api/v1/engagements/{id}/detections/{did}/provenance:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    - $ref: "#/components/parameters/DetectionId"
+    get:
+      tags: [engagements, findings]
+      operationId: listDetectionProvenanceTransitions
+      summary: List append-only provenance transitions for one detection
+      description: Returns the ordered custody history, including causal telemetry references and the sealed evidence identity when available.
+      responses:
+        "200":
+          description: Oldest-to-newest detection-provenance history
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DetectionProvenanceTransitionList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalServerError"}
+
   /api/v1/engagements/{id}/findings:
     parameters:
     - $ref: "#/components/parameters/EngagementId"
@@ -1852,7 +1891,7 @@ paths:
       tags: [fleet]
       operationId: ingestFleetDetectionBatch
       summary: Verify and ingest an independently signed agent detection batch
-      description: Verifies authenticated agent identity, key lifecycle, signature, exact membership, and per-detection content digests before exactly-once evidence sealing.
+      description: Accepts only V2 batches. Verifies authenticated agent identity, key lifecycle, signature, exact membership, causal durable telemetry, privacy-policy attribution, and per-detection content digests before exactly-once evidence sealing.
       security:
       - fleetAgentAuth: []
       parameters:
@@ -1872,6 +1911,208 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/fleet/privacy-policies/active:
+    get:
+      tags: [fleet]
+      operationId: getActiveFleetPrivacyPolicy
+      summary: Get the active immutable source-privacy policy assignment
+      description: Human/operator read of the tenant's active source-redaction policy. Tenant identity comes only from the authenticated principal.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Active privacy-policy assignment
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrivacyPolicyAssignmentEnvelope'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/privacy-policies:
+    get:
+      tags: [fleet]
+      operationId: listFleetPrivacyPolicyHistory
+      summary: List immutable source-privacy policy history
+      description: Human/operator read of every immutable policy assignment admitted for the authenticated tenant.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Ordered immutable privacy-policy assignment history
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrivacyPolicyHistoryResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+    post:
+      tags: [fleet]
+      operationId: admitFleetPrivacyPolicy
+      summary: Admit an immutable source-privacy policy assignment
+      description: Human administrator admission of immutable policy content. Activation is a separate revisioned governance operation.
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PrivacyPolicyAdmissionRequest'}
+      responses:
+        '200':
+          description: An identical immutable assignment already existed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrivacyPolicyAdmissionResponse'}
+        '201':
+          description: Immutable privacy-policy assignment admitted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrivacyPolicyAdmissionResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/privacy-policies/activate:
+    post:
+      tags: [fleet]
+      operationId: activateFleetPrivacyPolicy
+      summary: Activate an admitted immutable source-privacy policy assignment
+      description: Human administrator mutation of the active-policy pointer. Every transition requires a caller-stable operation ID and appends an immutable revision.
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PrivacyPolicyActivationRequest'}
+      responses:
+        '200':
+          description: Privacy-policy assignment activated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrivacyPolicyAssignmentEnvelope'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/privacy-policy:
+    get:
+      tags: [fleet]
+      operationId: getFleetAgentPrivacyPolicy
+      summary: Deliver the active source-privacy policy to an authenticated fleet agent
+      description: >
+        Returns only the active assignment for the authenticated agent's tenant. Agent identity and tenant
+        binding come from fleet-agent authentication; request-controlled identity cannot select another policy.
+      security:
+      - fleetAgentAuth: []
+      parameters:
+      - $ref: '#/components/parameters/FleetProtocolVersion'
+      responses:
+        '200':
+          description: Active privacy-policy assignment bound to the authenticated fleet agent's tenant
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrivacyPolicyAssignmentEnvelope'}
+        '401': {description: Fleet agent authentication failed, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {description: Privacy-policy delivery is unavailable, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/coverage-windows:
+    get:
+      tags: [fleet]
+      operationId: listFleetCoverageWindows
+      summary: List immutable telemetry coverage-window revisions
+      description: >
+        Human/operator read of tenant-scoped coverage revisions derived from signed sensor state,
+        immutable telemetry accounting, agent-origin gaps, and inferred delivery gaps. Tenant identity
+        comes only from the authenticated principal. Filters use half-open overlap semantics; the
+        response excludes raw telemetry, source payloads, signing material, and request-controlled
+        tenant identity. A gap, loss fact, or unhealthy sensor state cannot be represented as complete
+        coverage. Coverage may lower Confidence but never changes true Risk.
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: agent_id
+        in: query
+        schema: {type: string, minLength: 1}
+      - name: asset_id
+        in: query
+        schema: {type: string, minLength: 1}
+      - name: host_id
+        in: query
+        schema: {type: string, minLength: 1}
+      - name: since
+        in: query
+        description: RFC 3339 lower overlap bound; when both bounds are present it must be before until.
+        schema: {type: string, format: date-time}
+      - name: until
+        in: query
+        description: RFC 3339 exclusive upper overlap bound; when both bounds are present it must be after since.
+        schema: {type: string, format: date-time}
+      - name: limit
+        in: query
+        description: Maximum revisions to return; omit or set zero for the server default.
+        schema: {type: integer, minimum: 0, maximum: 1000}
+      responses:
+        '200':
+          description: Ordered immutable coverage-window revisions
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CoverageWindowList'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
+  /api/v1/fleet/sensor-states:
+    post:
+      tags: [fleet]
+      operationId: ingestFleetSensorState
+      summary: Verify and persist a signed P0 sensor-state report
+      description: >
+        Persists restart-safe sensor-state and class-coverage history after verifying
+        the enrolled agent, session, server-authoritative asset binding, telemetry-signing
+        key lifecycle, purpose-bound signature, and payload digest. Unknown JSON fields
+        fail closed and reports are idempotent by immutable report identity.
+      security:
+      - fleetAgentAuth: []
+      parameters:
+      - $ref: '#/components/parameters/FleetProtocolVersion'
+      - name: Content-Encoding
+        in: header
+        required: false
+        description: Optional wire compression. Omit for raw JSON.
+        schema: {type: string, enum: [gzip]}
+      requestBody:
+        required: true
+        content:
+          application/vnd.synapse.sensor-state+json:
+            schema: {$ref: '#/components/schemas/SensorStateReport'}
+      responses:
+        '200':
+          description: Sensor-state report durably acknowledged or idempotently observed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SensorStateAcknowledgement'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {description: Fleet agent authentication failed, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Immutable sensor-state report identity conflicts with different content, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Encoded or decoded sensor-state body exceeds the bounded transport limit, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '415': {description: Unsupported content encoding or media type, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '503': {description: Backpressure; the agent keeps the report pending and retries according to Retry-After, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '500': {$ref: '#/components/responses/InternalServerError'}
 
   /api/v1/fleet/telemetry:
     post:
@@ -1935,7 +2176,7 @@ paths:
                     EventTimeMin: {type: string, format: date-time}
                     EventTimeMax: {type: string, format: date-time}
                     ObservedCount: {type: integer, minimum: 0}
-                    KeptCount: {type: integer, minimum: 0}
+                    KeptCount: {type: integer, minimum: 0, description: May be zero when every observed event was honestly sampled out, dropped, or otherwise accounted without fabricating a retained event}
                     SampledOutCount: {type: integer, minimum: 0}
                     TruncatedCount: {type: integer, minimum: 0}
                     DroppedCount: {type: integer, minimum: 0}
@@ -2042,6 +2283,11 @@ components:
       in: path
       required: true
       schema: {type: string}
+    DetectionId:
+      name: did
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
     FindingId:
       name: fid
       in: path
@@ -2146,6 +2392,11 @@ components:
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
+    Conflict:
+      description: Request conflicts with immutable or current resource state
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
     InternalServerError:
       description: Internal server error
       content:
@@ -2153,6 +2404,244 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
 
   schemas:
+    DetectionProvenanceStatus:
+      type: string
+      enum: [pending, complete, expired, broken]
+
+    DetectionProvenanceCurrent:
+      type: object
+      additionalProperties: false
+      required: [tenant_id, engagement_id, detection_id, status, updated_at]
+      properties:
+        tenant_id: {type: string, minLength: 1}
+        engagement_id: {type: string, minLength: 1}
+        detection_id: {type: string, minLength: 1}
+        status: {$ref: '#/components/schemas/DetectionProvenanceStatus'}
+        evidence_id: {type: string, minLength: 1}
+        updated_at: {type: string, format: date-time}
+
+    DetectionProvenanceList:
+      type: object
+      additionalProperties: false
+      required: [provenance]
+      properties:
+        provenance:
+          type: array
+          items: {$ref: '#/components/schemas/DetectionProvenanceCurrent'}
+
+    DetectionProvenanceTransitionKind:
+      type: string
+      enum: [received, telemetry_durable, commitment_pending, commitment_sealed, acknowledged, expired, broken]
+
+    TelemetryReference:
+      type: object
+      additionalProperties: false
+      required: [stream_id, epoch, sequence, event_id, digest]
+      properties:
+        stream_id: {type: string, minLength: 1}
+        epoch: {type: integer, format: uint64, minimum: 1}
+        sequence: {type: integer, format: uint64, minimum: 1}
+        event_id: {type: string, minLength: 1}
+        digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+
+    DetectionProvenanceTransition:
+      type: object
+      additionalProperties: false
+      required: [tenant_id, engagement_id, detection_id, sequence, kind, status, occurred_at]
+      properties:
+        tenant_id: {type: string, minLength: 1}
+        engagement_id: {type: string, minLength: 1}
+        detection_id: {type: string, minLength: 1}
+        sequence: {type: integer, format: uint64, minimum: 1}
+        kind: {$ref: '#/components/schemas/DetectionProvenanceTransitionKind'}
+        status: {$ref: '#/components/schemas/DetectionProvenanceStatus'}
+        evidence_id: {type: string, minLength: 1}
+        telemetry_refs:
+          type: array
+          items: {$ref: '#/components/schemas/TelemetryReference'}
+        agent_id: {type: string, minLength: 1}
+        asset_id: {type: string, minLength: 1}
+        reason: {type: string}
+        occurred_at: {type: string, format: date-time}
+
+    DetectionProvenanceTransitionList:
+      type: object
+      additionalProperties: false
+      required: [transitions]
+      properties:
+        transitions:
+          type: array
+          items: {$ref: '#/components/schemas/DetectionProvenanceTransition'}
+
+    CoverageClassState:
+      type: object
+      additionalProperties: false
+      required: [class, host_id, agent_id, state, since]
+      properties:
+        class: {type: string, enum: [process, network, file, privilege]}
+        host_id: {type: string, minLength: 1}
+        agent_id: {type: string, minLength: 1}
+        state: {type: string, enum: [active, degraded, failed, disabled]}
+        reason: {type: string}
+        since: {type: string, format: date-time}
+
+    CoverageVector:
+      type: object
+      additionalProperties: false
+      required: [process, network, file, privilege, reasons]
+      properties:
+        process: {type: integer, minimum: 0, maximum: 100}
+        network: {type: integer, minimum: 0, maximum: 100}
+        file: {type: integer, minimum: 0, maximum: 100}
+        privilege: {type: integer, minimum: 0, maximum: 100}
+        reasons:
+          type: array
+          items: {type: string}
+
+    PrivacyPolicy:
+      type: object
+      additionalProperties: false
+      required: [dispositions, redact_secrets, max_arg_len, max_arg_count, max_path_len, version]
+      properties:
+        dispositions:
+          type: object
+          description: Closed-set source field categories mapped to allow, redact, hash, or drop. Omitted categories use the server-defined allow behavior subject to the non-relaxable source-privacy floor.
+          propertyNames:
+            enum: [process_arg, process_path, process_comm, process_env, file_path, file_comm, network_comm, privilege_comm]
+          additionalProperties:
+            type: string
+            enum: [allow, redact, hash, drop]
+        redact_secrets: {type: boolean, description: Scrub recognized secret patterns before telemetry WAL serialization}
+        max_arg_len: {type: integer, minimum: 0, description: Maximum retained argument length; zero means unbounded subject to the source-privacy floor}
+        max_arg_count: {type: integer, minimum: 0, description: Maximum retained argument count; zero means unbounded subject to the source-privacy floor}
+        max_path_len: {type: integer, minimum: 0, description: Maximum retained path length; zero means unbounded subject to the source-privacy floor}
+        hash_salt: {type: string, description: Non-secret policy salt used to prevent trivial cross-policy hash correlation}
+        version: {type: string, minLength: 1, description: Immutable policy-version alias; not part of the redaction behavior digest}
+
+    PrivacyPolicyAssignment:
+      type: object
+      additionalProperties: false
+      required: [tenant_id, policy, digest, created_by, created_at]
+      properties:
+        tenant_id: {type: string, minLength: 1}
+        policy: {$ref: '#/components/schemas/PrivacyPolicy'}
+        digest: {type: string, pattern: '^[0-9a-f]{64}$', description: Immutable assignment digest}
+        created_by: {type: string, minLength: 1}
+        created_at: {type: string, format: date-time}
+
+    PrivacyPolicyAdmissionRequest:
+      type: object
+      additionalProperties: false
+      required: [policy]
+      properties:
+        policy: {$ref: '#/components/schemas/PrivacyPolicy'}
+
+    PrivacyPolicyAdmissionResponse:
+      type: object
+      additionalProperties: false
+      required: [assignment, created]
+      properties:
+        assignment: {$ref: '#/components/schemas/PrivacyPolicyAssignment'}
+        created: {type: boolean}
+
+    PrivacyPolicyAssignmentEnvelope:
+      type: object
+      additionalProperties: false
+      required: [assignment]
+      properties:
+        assignment: {$ref: '#/components/schemas/PrivacyPolicyAssignment'}
+
+    PrivacyPolicyHistoryResponse:
+      type: object
+      additionalProperties: false
+      required: [assignments]
+      properties:
+        assignments:
+          type: array
+          items: {$ref: '#/components/schemas/PrivacyPolicyAssignment'}
+
+    PrivacyPolicyActivationRequest:
+      type: object
+      additionalProperties: false
+      required: [digest, operation_id]
+      properties:
+        digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        operation_id: {type: string, minLength: 1, description: Stable idempotency identity for this activation transition}
+
+    CoverageWindow:
+      type: object
+      additionalProperties: false
+      required: [asset_id, agent_id, host_id, since, until, input_digest, revision, created_at, states, sampled_count, truncated_count, dropped_count, gap_count, batch_count, coverage]
+      properties:
+        asset_id: {type: string, minLength: 1}
+        agent_id: {type: string, minLength: 1}
+        host_id: {type: string, minLength: 1}
+        since: {type: string, format: date-time, description: Inclusive coverage-window lower bound}
+        until: {type: string, format: date-time, description: Exclusive coverage-window upper bound}
+        input_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        revision: {type: string, pattern: '^[0-9a-f]{64}$'}
+        created_at: {type: string, format: date-time}
+        states:
+          type: array
+          items: {$ref: '#/components/schemas/CoverageClassState'}
+        sampled_count: {type: integer, minimum: 0}
+        truncated_count: {type: integer, minimum: 0}
+        dropped_count: {type: integer, minimum: 0}
+        gap_count: {type: integer, minimum: 0}
+        batch_count: {type: integer, minimum: 0}
+        coverage: {$ref: '#/components/schemas/CoverageVector'}
+
+    CoverageWindowList:
+      type: object
+      additionalProperties: false
+      required: [coverage_windows]
+      properties:
+        coverage_windows:
+          type: array
+          items: {$ref: '#/components/schemas/CoverageWindow'}
+
+    SensorClassCoverage:
+      type: object
+      additionalProperties: false
+      required: [Class, HostID, AgentID, State, Since]
+      properties:
+        Class: {type: string, enum: [process, network, file, privilege]}
+        HostID: {type: string, minLength: 1}
+        AgentID: {type: string, minLength: 1}
+        State: {type: string, enum: [active, degraded, failed, disabled]}
+        Reason: {type: string}
+        Since: {type: string, format: date-time}
+
+    SensorStateReport:
+      type: object
+      additionalProperties: false
+      required: [ProtocolVersion, ReportID, AgentID, HostID, AgentSessionID, AssetID, Kind, ObservedAt, SchemaVersion, PayloadDigest, States, KeyID, Signature]
+      properties:
+        ProtocolVersion: {type: integer, const: 1}
+        ReportID: {type: string, minLength: 1}
+        AgentID: {type: string, minLength: 1, description: Must equal the authenticated fleet-agent identity}
+        HostID: {type: string, minLength: 1, description: Must equal the enrolled agent host identity}
+        AgentSessionID: {type: string, minLength: 1, description: Must equal the current enrollment session}
+        AssetID: {type: string, minLength: 1, description: Must equal the server-authoritative asset binding}
+        Kind: {type: string, enum: [coverage, sensor_state]}
+        ObservedAt: {type: string, format: date-time}
+        SchemaVersion: {type: integer, minimum: 1}
+        PayloadDigest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        States:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/SensorClassCoverage'}
+        KeyID: {type: string, minLength: 1}
+        Signature: {type: string, contentEncoding: base64}
+
+    SensorStateAcknowledgement:
+      type: object
+      additionalProperties: false
+      required: [acknowledged, report_id]
+      properties:
+        acknowledged: {type: boolean, const: true}
+        report_id: {type: string, minLength: 1}
+
     AgentSigningKeyRegistration:
       type: object
       additionalProperties: false
@@ -2195,51 +2684,75 @@ components:
           type: array
           items: {$ref: '#/components/schemas/AgentSigningKeySummary'}
 
-    DetectionBatchRef:
+    DetectionBatchRefV2:
       type: object
       additionalProperties: false
-      required: [ID, ContentSHA256]
+      required: [id, content_sha256, asset_id, telemetry_refs, rulepack, redaction_policy_digest]
       properties:
-        ID: {type: string}
-        ContentSHA256: {type: string, pattern: '^[0-9a-f]{64}$'}
-
-    AgentDetectionBatch:
-      type: object
-      additionalProperties: false
-      required: [AgentID, EngagementID, Sequence, KeyID, Signature, Detections]
-      properties:
-        AgentID: {type: string, description: Must equal the authenticated agent identity}
-        EngagementID: {type: string}
-        Sequence: {type: integer, format: uint64, minimum: 1}
-        KeyID: {type: string}
-        Signature: {type: string, contentEncoding: base64}
-        Detections:
+        id: {type: string, minLength: 1}
+        content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        asset_id: {type: string, minLength: 1}
+        telemetry_refs:
           type: array
           minItems: 1
-          items: {$ref: '#/components/schemas/DetectionBatchRef'}
+          items: {$ref: '#/components/schemas/TelemetryReference'}
+        rulepack: {$ref: '#/components/schemas/RulepackReference'}
+        redaction_policy_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
 
-    DetectionBatchItem:
+    RulepackReference:
       type: object
       additionalProperties: false
-      required: [ID, Detection, AssetID]
+      required: [id, version, digest]
       properties:
-        ID: {type: string}
-        Detection:
+        id: {type: string, minLength: 1}
+        version: {type: integer, minimum: 1}
+        digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+
+    AgentDetectionBatchV2:
+      type: object
+      additionalProperties: false
+      required: [context, version, agent_id, engagement_id, sequence, key_id, signature, detections]
+      properties:
+        context: {type: string, const: 'synapse-agent-detection-batch:v2'}
+        version: {type: integer, const: 2}
+        agent_id: {type: string, description: Must equal the authenticated agent identity}
+        engagement_id: {type: string, minLength: 1}
+        sequence: {type: integer, format: uint64, minimum: 1}
+        key_id: {type: string, minLength: 1}
+        signature: {type: string, contentEncoding: base64}
+        detections:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/DetectionBatchRefV2'}
+
+    DetectionBatchItemV2:
+      type: object
+      additionalProperties: false
+      required: [id, detection, asset_id, telemetry_refs, rulepack, redaction_policy_digest]
+      properties:
+        id: {type: string, minLength: 1}
+        detection:
           type: object
-          description: Typed detection.Detection body whose canonical JSON and AssetID must match the signed content digest.
+          description: Typed detection.Detection body whose canonical attribution must match its signed V2 reference.
           additionalProperties: true
-        AssetID: {type: string}
+        asset_id: {type: string, minLength: 1}
+        telemetry_refs:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/TelemetryReference'}
+        rulepack: {$ref: '#/components/schemas/RulepackReference'}
+        redaction_policy_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
 
     AgentDetectionBatchRequest:
       type: object
       additionalProperties: false
-      required: [batch, items]
+      required: [batch_v2, items_v2]
       properties:
-        batch: {$ref: '#/components/schemas/AgentDetectionBatch'}
-        items:
+        batch_v2: {$ref: '#/components/schemas/AgentDetectionBatchV2'}
+        items_v2:
           type: array
           minItems: 1
-          items: {$ref: '#/components/schemas/DetectionBatchItem'}
+          items: {$ref: '#/components/schemas/DetectionBatchItemV2'}
 
     AgentDetectionBatchResult:
       type: object

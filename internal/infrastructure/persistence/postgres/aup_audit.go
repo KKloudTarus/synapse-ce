@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -313,6 +315,16 @@ func appendAudit(ctx context.Context, tx pgx.Tx, e ports.AuditEntry) error {
 	return nil
 }
 
+// sameAuditPayload reports whether two entries would hash identically. It compares
+// exactly the fields audit.ComputeHash covers — Hash/PreviousHash are assigned by
+// the chain on append and are deliberately excluded.
+func sameAuditPayload(left, right ports.AuditEntry) bool {
+	return left.Actor == right.Actor && left.Action == right.Action &&
+		left.Target == right.Target &&
+		left.At.UTC().Truncate(time.Microsecond).Equal(right.At.UTC().Truncate(time.Microsecond)) &&
+		maps.Equal(left.Metadata, right.Metadata)
+}
+
 func appendTenantAudit(ctx context.Context, tx pgx.Tx, tenantID string, e ports.AuditEntry) error {
 	meta, err := json.Marshal(e.Metadata)
 	if err != nil {
@@ -322,13 +334,29 @@ func appendTenantAudit(ctx context.Context, tx pgx.Tx, tenantID string, e ports.
 		return fmt.Errorf("audit lock: %w", err)
 	}
 	if key := e.Metadata["idempotency_key"]; key != "" {
-		var exists bool
-		if err := tx.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM audit_log WHERE tenant_id = $1 AND action = $2 AND idempotency_key = $3)`, tenantID, e.Action, key).Scan(&exists); err != nil {
-			return fmt.Errorf("check idempotent audit record: %w", err)
-		}
-		if exists {
+		// Collapse only a TRUE duplicate. Treating any pre-existing row under this
+		// idempotency key as success would let a caller (notably the fleet audit
+		// reconciler) acknowledge an obligation whose exact immutable payload was
+		// never written, leaving durable state with a chain entry that describes
+		// something else. Compare the full canonical payload and fail closed.
+		var stored ports.AuditEntry
+		var storedMeta []byte
+		err := tx.QueryRow(ctx,
+			`SELECT actor, target, metadata, created_at FROM audit_log
+			 WHERE tenant_id = $1 AND action = $2 AND idempotency_key = $3`,
+			tenantID, e.Action, key).Scan(&stored.Actor, &stored.Target, &storedMeta, &stored.At)
+		switch {
+		case err == nil:
+			if err := json.Unmarshal(storedMeta, &stored.Metadata); err != nil {
+				return fmt.Errorf("decode idempotent audit metadata: %w", err)
+			}
+			stored.Action = e.Action
+			if !sameAuditPayload(stored, e) {
+				return fmt.Errorf("%w: audit idempotency key %q is already committed to different content", shared.ErrConflict, key)
+			}
 			return nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			return fmt.Errorf("check idempotent audit record: %w", err)
 		}
 	}
 	var prev *string

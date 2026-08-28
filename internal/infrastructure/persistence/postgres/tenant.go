@@ -121,6 +121,20 @@ func WithContextTenant(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) 
 // RLS-protected tables must refuse to serve if this returns an error. It is exported and separate
 // so that path can enforce it at startup, while single-tenant deployments that connect as a
 // superuser and use no RLS-protected table are not forced to change their role.
+// contextTenantTx returns the transaction already bound by TenantTransactionRunner.
+// It permits consumer-level composite operations to reuse the same tenant-local
+// transaction across concrete repositories without exposing pgx through ports.
+func contextTenantTx(ctx context.Context, tenantID shared.ID) (pgx.Tx, bool, error) {
+	bound, ok := ctx.Value(tenantTransactionKey{}).(tenantTransaction)
+	if !ok {
+		return nil, false, nil
+	}
+	if bound.tenantID != tenantID.String() {
+		return nil, true, fmt.Errorf("%w: nested tenant transaction mismatch", shared.ErrValidation)
+	}
+	return bound.tx, true, nil
+}
+
 func CheckRLSRuntimeRole(ctx context.Context, pool *pgxpool.Pool) error {
 	var super, bypass, databaseCreate, schemaCreate, ownsRLSTable bool
 	err := pool.QueryRow(ctx, `SELECT r.rolsuper, r.rolbypassrls,

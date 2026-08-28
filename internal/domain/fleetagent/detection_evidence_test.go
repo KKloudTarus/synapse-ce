@@ -3,6 +3,7 @@ package fleetagent
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,5 +152,44 @@ func TestDetectionEvidenceEnvelopeValidate(t *testing.T) {
 	e.Context = "wrong"
 	if err := e.Validate(); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("wrong context must fail, got %v", err)
+	}
+}
+
+func TestDetectionEvidenceEnvelopeV2BindsAgentIdentity(t *testing.T) {
+	det := mkEnvDetection(t)
+	item := DetectionBatchItemV2{
+		ID: "d-v2", Detection: det, AssetID: "asset-1",
+		TelemetryRefs: []TelemetryReference{{
+			StreamID: "stream-1", Epoch: 1, Sequence: 7, EventID: "event-7",
+			Digest: strings.Repeat("b", 64),
+		}},
+		Rulepack: RulepackReference{
+			ID: "builtin", Version: 1, Digest: strings.Repeat("c", 64),
+		},
+		RedactionPolicyDigest: strings.Repeat("d", 64),
+	}
+	if _, err := NewDetectionEvidenceEnvelopeV2("tenant-1", "eng-1", "other-agent", 7, "key-1", item); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("contradictory constructor agent error = %v, want validation", err)
+	}
+
+	env, err := NewDetectionEvidenceEnvelopeV2("tenant-1", "eng-1", det.AgentID, 7, "key-1", item)
+	if err != nil {
+		t.Fatalf("build v2 envelope: %v", err)
+	}
+	content, err := env.Canonical()
+	if err != nil {
+		t.Fatalf("canonical v2 envelope: %v", err)
+	}
+	var tampered map[string]any
+	if err := json.Unmarshal(content, &tampered); err != nil {
+		t.Fatal(err)
+	}
+	tampered["agent_id"] = "other-agent"
+	content, err = json.Marshal(tampered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeDetectionEvidenceEnvelopeV2(content); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("tampered decoded agent error = %v, want validation", err)
 	}
 }

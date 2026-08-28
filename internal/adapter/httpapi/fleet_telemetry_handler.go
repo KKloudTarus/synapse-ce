@@ -21,6 +21,7 @@ const (
 	fleetTelemetryDecodedCap    = 32 << 20
 	fleetTelemetryJSONMediaType = "application/json"
 	fleetTelemetryGapMediaType  = "application/vnd.synapse.telemetry-gap+json"
+	fleetSensorStateMediaType   = "application/vnd.synapse.sensor-state+json"
 )
 
 var (
@@ -32,6 +33,7 @@ var (
 type fleetTelemetryIngest interface {
 	Ingest(ctx context.Context, authAgentID shared.ID, req telemetryingest.IngestRequest) (telemetryingest.IngestResult, error)
 	IngestGap(ctx context.Context, authAgentID shared.ID, report fleetagent.TelemetryGapReport) (telemetryingest.GapIngestResult, error)
+	IngestSensorState(ctx context.Context, authAgentID shared.ID, report fleetagent.SensorStateReport) (telemetryingest.SensorStateIngestResult, error)
 }
 
 // ingestTelemetry is the agent-plane endpoint (POST /api/v1/fleet/telemetry). Batch JSON and signed
@@ -83,6 +85,40 @@ func (f *fleetRouter) ingestTelemetry(w http.ResponseWriter, r *http.Request) {
 // ingestTelemetryGap handles the gap-report media type. A successful response acknowledges the exact
 // stable GapID only after the signed report has passed the server-authoritative trust boundary and been
 // durably persisted.
+// ingestSensorState accepts signed P0 health facts. It shares the same size and
+// decompression guards as telemetry but has a dedicated media type and signature.
+func (f *fleetRouter) ingestSensorState(w http.ResponseWriter, r *http.Request) {
+	if f.telemetry == nil {
+		writeJSON(w, http.StatusNotFound, errorBody{Error: "sensor-state ingest not enabled"})
+		return
+	}
+	agent, ok := agentFrom(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, errorBody{Error: "unauthenticated"})
+		return
+	}
+	if requestMediaType(r) != fleetSensorStateMediaType {
+		writeJSON(w, http.StatusUnsupportedMediaType, errorBody{Error: "unsupported sensor-state media type"})
+		return
+	}
+	body, err := readFleetTelemetryBody(w, r)
+	if err != nil {
+		writeFleetTelemetryBodyError(w, err, "sensor-state")
+		return
+	}
+	var report fleetagent.SensorStateReport
+	if err := decodeStrictFleetTelemetry(body, &report); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid sensor-state body"})
+		return
+	}
+	res, err := f.telemetry.IngestSensorState(r.Context(), agent.ID, report)
+	if err != nil {
+		writeError(w, f.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"acknowledged": true, "report_id": res.ReportID})
+}
+
 func (f *fleetRouter) ingestTelemetryGap(w http.ResponseWriter, r *http.Request) {
 	if f.telemetry == nil {
 		writeJSON(w, http.StatusNotFound, errorBody{Error: "telemetry ingest not enabled"})

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetrollout"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetversion"
 	dhi "github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
 	clusterinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/clusterinventory"
@@ -40,6 +42,10 @@ const (
 )
 
 // fleetAgentService is the narrow view of fleet agent identity the transport needs.
+type fleetPrivacyPolicyReader interface {
+	Active(ctx context.Context) (privacy.Assignment, error)
+}
+
 type fleetAgentService interface {
 	Enrol(ctx context.Context, enrolToken string, in fleetagentuc.EnrolInput) (*fleetagent.Agent, string, []byte, error)
 	Authenticate(ctx context.Context, token string) (*fleetagent.Agent, error)
@@ -77,14 +83,15 @@ type fleetRolloutDecider interface {
 type fleetRouter struct {
 	agents           fleetAgentService
 	work             fleetWorkService
-	clusterInv       fleetClusterInventory // optional; nil ⇒ cluster inventory ingest is not served
-	hostInv          fleetHostInventory    // optional; nil ⇒ host inventory ingest is not served
-	telemetry        fleetTelemetryIngest  // optional; nil ⇒ telemetry ingest is not served (A3 #624)
-	detections       fleetDetectionIngest  // optional; nil ⇒ detection ingest is not served (A4 #625)
-	keyReg           fleetKeyRegistration  // optional; nil ⇒ signing-key registration is not served (A4 #625)
-	minAgentVersion  string                // #412 version skew: agents below this are refused work; "" = no floor
-	cpVersion        string                // control-plane version advertised to agents (min_control_plane check)
-	rollout          fleetRolloutDecider   // optional; nil ⇒ no update is ever offered (#412 req 9)
+	clusterInv       fleetClusterInventory    // optional; nil ⇒ cluster inventory ingest is not served
+	hostInv          fleetHostInventory       // optional; nil ⇒ host inventory ingest is not served
+	telemetry        fleetTelemetryIngest     // optional; nil ⇒ telemetry ingest is not served (A3 #624)
+	detections       fleetDetectionIngest     // optional; nil ⇒ detection ingest is not served (A4 #625)
+	keyReg           fleetKeyRegistration     // optional; nil ⇒ signing-key registration is not served (A4 #625)
+	privacyPolicies  fleetPrivacyPolicyReader // optional; nil ⇒ active source-privacy policy delivery is not served
+	minAgentVersion  string                   // #412 version skew: agents below this are refused work; "" = no floor
+	cpVersion        string                   // control-plane version advertised to agents (min_control_plane check)
+	rollout          fleetRolloutDecider      // optional; nil ⇒ no update is ever offered (#412 req 9)
 	log              *slog.Logger
 	agentLim         *keyedLimiter // post-auth, keyed by agent id
 	ipLim            *keyedLimiter // pre-auth, keyed by client IP (throttles enrol + failed auth)
@@ -181,6 +188,13 @@ func (rt *Router) SetFleetHostInventory(s fleetHostInventory) {
 func (rt *Router) SetFleetTelemetry(s fleetTelemetryIngest) {
 	if rt.fleet != nil {
 		rt.fleet.telemetry = s
+	}
+}
+
+// SetFleetPrivacyPolicyReader enables read-only active-policy delivery to authenticated agents.
+func (rt *Router) SetFleetPrivacyPolicyReader(reader fleetPrivacyPolicyReader) {
+	if rt.fleet != nil {
+		rt.fleet.privacyPolicies = reader
 	}
 }
 
@@ -318,6 +332,8 @@ func fleetAgentPlaneRoutes() []fleetAgentPlaneRoute {
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.enrol) }},
 		{"POST /api/v1/fleet/heartbeat", "/api/v1/fleet/heartbeat",
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.heartbeat)) }},
+		{"GET /api/v1/fleet/privacy-policy", "/api/v1/fleet/privacy-policy",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.activePrivacyPolicy)) }},
 		{"POST /api/v1/fleet/decommission", "/api/v1/fleet/decommission",
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.decommission)) }},
 		{"POST /api/v1/fleet/work/claim", "/api/v1/fleet/work/",
@@ -332,6 +348,8 @@ func fleetAgentPlaneRoutes() []fleetAgentPlaneRoute {
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.hostInventory)) }},
 		{"POST /api/v1/fleet/telemetry", "/api/v1/fleet/telemetry",
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestTelemetry)) }},
+		{"POST /api/v1/fleet/sensor-states", "/api/v1/fleet/sensor-states",
+			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestSensorState)) }},
 		{"POST /api/v1/fleet/detections", "/api/v1/fleet/detections",
 			func(f *fleetRouter) http.HandlerFunc { return f.entry(f.authed(f.ingestDetections)) }},
 		{"POST /api/v1/fleet/keys", "/api/v1/fleet/keys",
@@ -519,6 +537,30 @@ func (f *fleetRouter) heartbeat(w http.ResponseWriter, r *http.Request) {
 	// service wired, no update is ever offered: the absence of a decider is not permission.
 	out["update"] = f.updateOffer(r.Context(), agent, req.AgentVersion)
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (f *fleetRouter) activePrivacyPolicy(w http.ResponseWriter, r *http.Request) {
+	if f.privacyPolicies == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "privacy_policy_unavailable"})
+		return
+	}
+	assignment, err := f.privacyPolicies.Active(r.Context())
+	if err != nil {
+		writeError(w, f.log, err)
+		return
+	}
+	if err := assignment.Validate(); err != nil {
+		writeError(w, f.log, fmt.Errorf("active privacy policy is invalid: %w", err))
+		return
+	}
+	agent, ok := agentFrom(r.Context())
+	if !ok || assignment.TenantID != shared.TenantOrDefault(agent.TenantID) {
+		writeError(w, f.log, fmt.Errorf("%w: active privacy policy tenant does not match authenticated agent", shared.ErrForbidden))
+		return
+	}
+	writeJSON(w, http.StatusOK, privacyPolicyAssignmentEnvelope{
+		Assignment: newPrivacyPolicyAssignmentResponse(assignment),
+	})
 }
 
 // decommission records the agent's own clean-uninstall report (#412, AC 11). It is agent-authenticated

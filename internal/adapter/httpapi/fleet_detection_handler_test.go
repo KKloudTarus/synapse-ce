@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/worksign"
 	detectledger "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectledger"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
 )
 
@@ -35,6 +37,12 @@ func (r *detKeyResolver) ResolveSigningKey(_ context.Context, agentID shared.ID,
 		return r.key, nil
 	}
 	return fleetagent.AgentSigningKey{}, shared.ErrNotFound
+}
+
+type durableDetTelemetry struct{}
+
+func (durableDetTelemetry) ResolveTelemetryReferences(_ context.Context, _, _ shared.ID, _ string, _ []fleetagent.TelemetryReference) (ports.TelemetryReferenceStatus, error) {
+	return ports.TelemetryReferencesDurable, nil
 }
 
 func setupFleetWithDetections(t *testing.T, wire bool) (http.Handler, *fleetagentuc.Service, ed25519.PrivateKey, func(agentID shared.ID) string) {
@@ -64,7 +72,7 @@ func setupFleetWithDetections(t *testing.T, wire bool) (http.Handler, *fleetagen
 		resolver.key = key
 		return key.KeyID
 	}
-	detSvc, err := detectledger.NewService(memory.NewDetectionRecordStore(), fakeDetChain{}, resolver, ftAudit{}, ftClock{}, &ftIDs{}, 0)
+	detSvc, err := detectledger.NewServiceWithProvenance(memory.NewDetectionRecordStore(), memory.NewDetectionProvenanceStore(), durableDetTelemetry{}, fakeDetChain{}, resolver, ftAudit{}, ftClock{}, &ftIDs{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,20 +101,29 @@ func mkTestDetection(t *testing.T, agentID shared.ID) detection.Detection {
 
 func signedDetectionBody(t *testing.T, agentID shared.ID, keyID string, priv ed25519.PrivateKey) map[string]any {
 	t.Helper()
-	det := mkTestDetection(t, agentID)
-	asset := shared.ID("asset-1")
-	payload, err := json.Marshal(det)
+	item := fleetagent.DetectionBatchItemV2{
+		ID:        "d1",
+		Detection: mkTestDetection(t, agentID),
+		AssetID:   "asset-1",
+		TelemetryRefs: []fleetagent.TelemetryReference{{
+			StreamID: "stream-1", Epoch: 1, Sequence: 1, EventID: "event-1", Digest: strings.Repeat("a", 64),
+		}},
+		Rulepack:              fleetagent.RulepackReference{ID: "builtin", Version: 1, Digest: strings.Repeat("b", 64)},
+		RedactionPolicyDigest: strings.Repeat("c", 64),
+	}
+	ref, err := item.Reference()
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch := fleetagent.AgentBatch{
+	batch := fleetagent.AgentBatchV2{
+		Context: "synapse-agent-detection-batch:v2", Version: 2,
 		AgentID: agentID, EngagementID: "eng-1", Sequence: 1, KeyID: keyID,
-		Detections: []fleetagent.DetectionRef{{ID: "d1", ContentSHA256: fleetagent.DetectionContentHash(payload, asset)}},
+		Detections: []fleetagent.DetectionRefV2{ref},
 	}
-	batch.Signature = fleetagent.SignBatch(priv, batch)
+	batch.Signature = fleetagent.SignBatchV2(priv, batch)
 	return map[string]any{
-		"batch": batch,
-		"items": []detectledger.IngestItem{{ID: "d1", Detection: det, AssetID: asset}},
+		"batch_v2": batch,
+		"items_v2": []fleetagent.DetectionBatchItemV2{item},
 	}
 }
 
@@ -124,6 +141,30 @@ func TestIngestDetectionsEndpointAccepts(t *testing.T) {
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || resp.Sealed != 1 {
 		t.Fatalf("accept response: %+v err=%v (%s)", resp, err, w.Body.String())
+	}
+}
+
+func TestIngestDetectionsEndpointRejectsLegacyV1(t *testing.T) {
+	h, agentSvc, priv, keyOf := setupFleetWithDetections(t, true)
+	token, agentID := enrolAgent(t, h, agentSvc)
+	det := mkTestDetection(t, agentID)
+	assetID := shared.ID("asset-1")
+	payload, err := json.Marshal(det)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := fleetagent.AgentBatch{
+		AgentID: agentID, EngagementID: "eng-1", Sequence: 1, KeyID: keyOf(agentID),
+		Detections: []fleetagent.DetectionRef{{ID: "legacy-d1", ContentSHA256: fleetagent.DetectionContentHash(payload, assetID)}},
+	}
+	batch.Signature = fleetagent.SignBatch(priv, batch)
+	body := map[string]any{
+		"batch": batch,
+		"items": []detectledger.IngestItem{{ID: "legacy-d1", Detection: det, AssetID: assetID}},
+	}
+	w := fleetCall(h, http.MethodPost, "/api/v1/fleet/detections", token, body, true)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("legacy v1 ingest should fail closed with 400, got %d (%s)", w.Code, w.Body.String())
 	}
 }
 

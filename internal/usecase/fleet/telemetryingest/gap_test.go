@@ -1,6 +1,8 @@
 package telemetryingest
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"testing"
 	"time"
@@ -62,7 +64,7 @@ func TestIngestKnownWALGapDoesNotAdvanceTransportBatchACK(t *testing.T) {
 	}
 
 	report := signedGapForHarness(t, h, "gap-known-wal")
-	report.Priority = fleetagent.PriorityP1
+	report.Priority = fleetagent.PriorityP3
 	report.StreamID = h.stream
 	report.KnownSequence = true
 	report.FromSequence = 2
@@ -107,6 +109,11 @@ func TestIngestGapAcceptsOnlyMonotonicCoalescingExtension(t *testing.T) {
 	if _, err := h.svc.IngestGap(h.ctx, "agent-1", report); err != nil {
 		t.Fatal(err)
 	}
+	firstDigest := sha256.Sum256(fleetagent.TelemetryGapMessage(report))
+	firstKey := "fleet.telemetry.gap_ingest:" + hex.EncodeToString(firstDigest[:])
+	if got := h.audit.recordedOnce(firstKey); got != 1 {
+		t.Fatalf("initial gap revision audit lines = %d, want 1", got)
+	}
 	extended := report
 	extended.Count = 4
 	extended.ToAt = report.ToAt.Add(2 * time.Minute)
@@ -114,11 +121,60 @@ func TestIngestGapAcceptsOnlyMonotonicCoalescingExtension(t *testing.T) {
 	if _, err := h.svc.IngestGap(h.ctx, "agent-1", extended); err != nil {
 		t.Fatalf("monotonic coalescing extension rejected: %v", err)
 	}
+	extendedDigest := sha256.Sum256(fleetagent.TelemetryGapMessage(extended))
+	extendedKey := "fleet.telemetry.gap_ingest:" + hex.EncodeToString(extendedDigest[:])
+	if firstKey == extendedKey {
+		t.Fatal("monotonic extension reused the initial immutable revision identity")
+	}
+	if got := h.audit.recordedOnce(extendedKey); got != 1 {
+		t.Fatalf("extended gap revision audit lines = %d, want 1", got)
+	}
+	if _, err := h.svc.IngestGap(h.ctx, "agent-1", extended); err != nil {
+		t.Fatalf("exact extension retry rejected: %v", err)
+	}
+	if got := h.audit.recordedOnce(extendedKey); got != 1 {
+		t.Fatalf("exact extension retry audit lines = %d, want 1", got)
+	}
 
 	conflict := extended
 	conflict.Reason = fleetagent.TelemetryGapIOFailure
 	conflict.Signature = fleetagent.SignTelemetryGap(h.priv, conflict)
 	if _, err := h.svc.IngestGap(h.ctx, "agent-1", conflict); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("gap-id equivocation error = %v, want conflict", err)
+	}
+}
+
+func TestIngestGapPersistsEverySignedRevision(t *testing.T) {
+	h := newHarness(t)
+	first := signedGapForHarness(t, h, "gap-revision-history")
+	if _, err := h.svc.IngestGap(h.ctx, "agent-1", first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.IngestGap(h.ctx, "agent-1", first); err != nil {
+		t.Fatalf("exact retry: %v", err)
+	}
+	extended := first
+	extended.Count = 5
+	extended.ToAt = first.ToAt.Add(3 * time.Minute)
+	extended.Signature = fleetagent.SignTelemetryGap(h.priv, extended)
+	if _, err := h.svc.IngestGap(h.ctx, "agent-1", extended); err != nil {
+		t.Fatalf("extension: %v", err)
+	}
+
+	revisions, err := h.transport.AgentGapRevisions(h.ctx, first.GapID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revisions) != 2 {
+		t.Fatalf("immutable gap revisions = %d, want 2", len(revisions))
+	}
+	if revisions[0].Signature != first.Signature || revisions[1].Signature != extended.Signature {
+		t.Fatalf("signed revision history did not preserve exact accepted signatures: %+v", revisions)
+	}
+	if revisions[0].SignedContentDigest == revisions[1].SignedContentDigest {
+		t.Fatal("extension reused exact signed-content identity")
+	}
+	if revisions[0].AuthenticatedAgentID != "agent-1" || revisions[1].AuthenticatedAgentID != "agent-1" {
+		t.Fatalf("revision history lost authenticated identity: %+v", revisions)
 	}
 }

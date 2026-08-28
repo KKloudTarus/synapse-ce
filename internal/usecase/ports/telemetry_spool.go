@@ -34,6 +34,23 @@ func (k SpoolRecordKind) Valid() bool {
 	}
 }
 
+// MustNotShedRecord is the single classification rule for durable spool records.
+// P0 health and response evidence are never shed; raw telemetry follows its
+// event-class policy; detections retain the existing P1 must-not-shed semantics.
+func MustNotShedRecord(kind SpoolRecordKind, eventClass detection.Class) (bool, error) {
+	switch kind {
+	case SpoolRecordTelemetry:
+		if !eventClass.Valid() {
+			return false, fmt.Errorf("%w: telemetry spool item has invalid class %q", shared.ErrValidation, eventClass)
+		}
+		return telemetry.MustNotShed(eventClass), nil
+	case SpoolRecordDetection, SpoolRecordCoverage, SpoolRecordSensorState, SpoolRecordResponseVerification:
+		return true, nil
+	default:
+		return false, fmt.Errorf("%w: unknown spool record kind %q", shared.ErrValidation, kind)
+	}
+}
+
 type SpoolItem struct {
 	Kind          SpoolRecordKind
 	Priority      fleetagent.DeliveryPriority
@@ -68,12 +85,13 @@ func (i SpoolItem) Validate() error {
 	if i.SchemaVersion <= 0 {
 		return fmt.Errorf("%w: spool item schema version must be positive", shared.ErrValidation)
 	}
-	if i.Kind == SpoolRecordTelemetry && !i.EventClass.Valid() {
-		return fmt.Errorf("%w: telemetry spool item has invalid class %q", shared.ErrValidation, i.EventClass)
+	wantMustNotShed, err := MustNotShedRecord(i.Kind, i.EventClass)
+	if err != nil {
+		return err
 	}
-	if i.Kind == SpoolRecordTelemetry && i.MustNotShed != telemetry.MustNotShed(i.EventClass) {
-		return fmt.Errorf("%w: telemetry class %s must-not-shed=%t, got %t", shared.ErrValidation,
-			i.EventClass, telemetry.MustNotShed(i.EventClass), i.MustNotShed)
+	if i.MustNotShed != wantMustNotShed {
+		return fmt.Errorf("%w: %s spool item must-not-shed=%t, got %t", shared.ErrValidation,
+			i.Kind, wantMustNotShed, i.MustNotShed)
 	}
 	if i.Priority != fleetagent.PriorityP3 && !i.MustNotShed {
 		return fmt.Errorf("%w: %s spool item must be marked must-not-shed", shared.ErrValidation, i.Priority)

@@ -12,6 +12,12 @@ import (
 // SamplingPolicyDigest commits the complete sampling-policy tuple named by A3.
 // Length-prefixing every field makes the commitment unambiguous without relying
 // on JSON key ordering or whitespace, and keeps future policy changes explicit.
+const (
+	NoSamplingAlgorithm = "none"
+	NoSamplingPolicyID  = "none"
+	NoSamplingVersion   = uint64(1)
+)
+
 func SamplingPolicyDigest(algorithm, policyID, seed string, version uint64) (string, error) {
 	if algorithm == "" || policyID == "" || version == 0 {
 		return "", fmt.Errorf("%w: sampling policy commitment requires algorithm, policy id and positive version", shared.ErrValidation)

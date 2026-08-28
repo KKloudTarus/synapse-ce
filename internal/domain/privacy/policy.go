@@ -42,6 +42,22 @@ func (d FieldDisposition) Valid() bool {
 // without coupling to concrete struct layouts.
 type FieldCategory string
 
+func (c FieldCategory) Valid() bool {
+	switch c {
+	case CategoryProcessArg,
+		CategoryProcessPath,
+		CategoryProcessComm,
+		CategoryProcessEnv,
+		CategoryFilePath,
+		CategoryFileComm,
+		CategoryNetworkComm,
+		CategoryPrivilegeComm:
+		return true
+	default:
+		return false
+	}
+}
+
 const (
 	CategoryProcessArg  FieldCategory = "process.arg"
 	CategoryProcessPath FieldCategory = "process.path"
@@ -74,7 +90,7 @@ type Policy struct {
 	// HashSalt keys the DispositionHash digest. It is NOT a secret store; it only prevents trivial
 	// dictionary correlation across policies. Same salt+value → same hash (correlation preserved).
 	HashSalt string
-	// Version identifies the policy lineage for the RedactionPolicyDigest.
+	// Version is the immutable policy-version alias and lineage label. It is not part of the redaction-content digest.
 	Version string
 }
 
@@ -109,6 +125,9 @@ func (p Policy) Validate() error {
 		return fmt.Errorf("%w: redaction policy needs a version", shared.ErrValidation)
 	}
 	for cat, d := range p.Dispositions {
+		if !cat.Valid() {
+			return fmt.Errorf("%w: redaction policy has an unknown field category %q", shared.ErrValidation, cat)
+		}
 		if !d.Valid() {
 			return fmt.Errorf("%w: redaction policy has an unknown disposition %q for %q", shared.ErrValidation, d, cat)
 		}
@@ -118,6 +137,32 @@ func (p Policy) Validate() error {
 	}
 	if p.MaxArgLen < 0 || p.MaxArgCount < 0 || p.MaxPathLen < 0 {
 		return fmt.Errorf("%w: redaction policy caps cannot be negative", shared.ErrValidation)
+	}
+	return nil
+}
+
+// ValidateSourceFloor enforces the non-relaxable source-privacy floor. Tenant
+// policy may collect less data than the default, but it cannot enable process
+// environments, disable known-secret scrubbing, or loosen argv/path bounds.
+func (p Policy) ValidateSourceFloor() error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	floor := DefaultPolicy()
+	if p.dispositionFor(CategoryProcessEnv) != DispositionDrop {
+		return fmt.Errorf("%w: redaction policy must drop process environments", shared.ErrValidation)
+	}
+	if !p.RedactSecrets {
+		return fmt.Errorf("%w: redaction policy cannot disable known-secret scrubbing", shared.ErrValidation)
+	}
+	if p.MaxArgLen <= 0 || p.MaxArgLen > floor.MaxArgLen {
+		return fmt.Errorf("%w: redaction policy max argument length must be within 1..%d", shared.ErrValidation, floor.MaxArgLen)
+	}
+	if p.MaxArgCount <= 0 || p.MaxArgCount > floor.MaxArgCount {
+		return fmt.Errorf("%w: redaction policy max argument count must be within 1..%d", shared.ErrValidation, floor.MaxArgCount)
+	}
+	if p.MaxPathLen <= 0 || p.MaxPathLen > floor.MaxPathLen {
+		return fmt.Errorf("%w: redaction policy max path length must be within 1..%d", shared.ErrValidation, floor.MaxPathLen)
 	}
 	return nil
 }
@@ -155,10 +200,17 @@ func (p Policy) Classify(cat FieldCategory, value string) (string, FieldDisposit
 	switch p.dispositionFor(cat) {
 	case DispositionDrop:
 		return "", DispositionDrop
-	case DispositionHash:
-		return hashValue(p.HashSalt, value), DispositionHash
 	case DispositionRedact:
 		return RedactionPlaceholder, DispositionRedact
+	case DispositionHash:
+		// A known secret must be redacted before hashing so the result cannot be a direct hash of
+		// credential material.
+		if p.RedactSecrets {
+			if scrubbed, changed := scrubSecrets(value); changed {
+				return scrubbed, DispositionRedact
+			}
+		}
+		return hashValue(p.HashSalt, value), DispositionHash
 	default: // allow
 		if p.RedactSecrets {
 			if scrubbed, changed := scrubSecrets(value); changed {

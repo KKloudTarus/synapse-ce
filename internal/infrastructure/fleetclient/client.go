@@ -108,6 +108,28 @@ type EnrolResponse struct {
 // the control plane serialises domain/workorder.WorkOrder with NO json tags, so encoding/json emits
 // the exact Go field names (ID, Capability, AssetID). Matching that here is what lets these decode;
 // snake_case tags would silently zero these fields. Verified against the server's claim handler.
+type PrivacyPolicy struct {
+	Dispositions  map[string]string `json:"dispositions"`
+	RedactSecrets bool              `json:"redact_secrets"`
+	MaxArgLen     int               `json:"max_arg_len"`
+	MaxArgCount   int               `json:"max_arg_count"`
+	MaxPathLen    int               `json:"max_path_len"`
+	HashSalt      string            `json:"hash_salt,omitempty"`
+	Version       string            `json:"version"`
+}
+
+type PrivacyPolicyAssignment struct {
+	TenantID  string        `json:"tenant_id"`
+	Policy    PrivacyPolicy `json:"policy"`
+	Digest    string        `json:"digest"`
+	CreatedBy string        `json:"created_by"`
+	CreatedAt time.Time     `json:"created_at"`
+}
+
+type PrivacyPolicyResponse struct {
+	Assignment PrivacyPolicyAssignment `json:"assignment"`
+}
+
 type Order struct {
 	ID         string `json:"ID"`
 	Capability string `json:"Capability"`
@@ -135,6 +157,13 @@ type HeartbeatResponse struct {
 func (c *Client) Heartbeat(ctx context.Context, token string, req EnrolRequest) (HeartbeatResponse, error) {
 	var out HeartbeatResponse
 	err := c.do(ctx, http.MethodPost, "/api/v1/fleet/heartbeat", token, req, &out)
+	return out, err
+}
+
+// ActivePrivacyPolicy fetches the tenant's active source-redaction policy for an authenticated agent.
+func (c *Client) ActivePrivacyPolicy(ctx context.Context, token string) (PrivacyPolicyResponse, error) {
+	var out PrivacyPolicyResponse
+	err := c.do(ctx, http.MethodGet, "/api/v1/fleet/privacy-policy", token, nil, &out)
 	return out, err
 }
 
@@ -189,7 +218,25 @@ func (c *Client) SendDetectionBatch(ctx context.Context, token string, batch fle
 		Batch fleetagent.AgentBatch           `json:"batch"`
 		Items []fleetagent.DetectionBatchItem `json:"items"`
 	}{Batch: batch, Items: items}
-	return c.do(ctx, http.MethodPost, "/api/v1/fleet/detections", token, body, nil)
+	return translateDetectionBatchError(c.do(ctx, http.MethodPost, "/api/v1/fleet/detections", token, body, nil))
+}
+
+// SendDetectionBatchV2 posts the separately signed v2 attribution contract. The endpoint remains
+// shared with v1 so enrolled agents retain one narrowly scoped delivery capability.
+func (c *Client) SendDetectionBatchV2(ctx context.Context, token string, batch fleetagent.AgentBatchV2, items []fleetagent.DetectionBatchItemV2) error {
+	body := struct {
+		Batch fleetagent.AgentBatchV2           `json:"batch_v2"`
+		Items []fleetagent.DetectionBatchItemV2 `json:"items_v2"`
+	}{Batch: batch, Items: items}
+	return translateDetectionBatchError(c.do(ctx, http.MethodPost, "/api/v1/fleet/detections", token, body, nil))
+}
+
+func translateDetectionBatchError(err error) error {
+	status, _, ok := HTTPStatus(err)
+	if ok && status == http.StatusForbidden {
+		return fmt.Errorf("%w: %v", ports.ErrDetectionSigningKeyRejected, err)
+	}
+	return err
 }
 
 func (c *Client) do(ctx context.Context, method, path, token string, body, out any) error {
@@ -232,3 +279,4 @@ func (c *Client) do(ctx context.Context, method, path, token string, body, out a
 }
 
 var _ ports.DetectionTransport = (*Client)(nil)
+var _ ports.DetectionTransportV2 = (*Client)(nil)

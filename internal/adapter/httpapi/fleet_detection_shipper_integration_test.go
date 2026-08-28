@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,7 +45,7 @@ func TestAgentDetectionShipperLivePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	records := memory.NewDetectionRecordStore()
-	detectionSvc, err := detectledger.NewService(records, fakeDetChain{}, keyStore, ftAudit{}, ftClock{}, &ftIDs{}, 0)
+	detectionSvc, err := detectledger.NewServiceWithProvenance(records, memory.NewDetectionProvenanceStore(), durableDetTelemetry{}, fakeDetChain{}, keyStore, ftAudit{}, ftClock{}, &ftIDs{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,10 +76,22 @@ func TestAgentDetectionShipperLivePath(t *testing.T) {
 	second.Observed = second.Observed.Add(time.Second)
 	second.Evidence[0].At = second.Evidence[0].At.Add(time.Second)
 	second.Evidence[0].Process.PID++
-	if err := sink.Emit(context.Background(), first); err != nil {
+	// The live path is v2-only: every detection must carry its causal telemetry references,
+	// rulepack identity, and the source-privacy policy digest it was produced under.
+	attribution := func(sequence uint64) fleetagent.DetectionAttribution {
+		return fleetagent.DetectionAttribution{
+			TelemetryRefs: []fleetagent.TelemetryReference{{
+				StreamID: "stream-1", Epoch: 1, Sequence: sequence,
+				EventID:  shared.ID(fmt.Sprintf("event-%d", sequence)),
+				Digest:   strings.Repeat("a", 64),
+			}},
+			Rulepack: fleetagent.RulepackReference{ID: "builtin", Version: 1, Digest: strings.Repeat("b", 64)},
+		}
+	}
+	if err := sink.EmitAttributed(context.Background(), first, attribution(1)); err != nil {
 		t.Fatal(err)
 	}
-	if err := sink.Emit(context.Background(), second); err != nil {
+	if err := sink.EmitAttributed(context.Background(), second, attribution(2)); err != nil {
 		t.Fatal(err)
 	}
 

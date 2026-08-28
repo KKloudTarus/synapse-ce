@@ -65,34 +65,37 @@ type Router struct {
 	credentials            *credentialsuc.Service
 	dastVerifier           runtimeVerifierService
 	dastWorkflow           dastWorkflowService
-	agent                  *agentDeps            // optional; nil ⇒ agent routes are not registered
-	exploitation           findingVerifier       // optional; nil ⇒ the verify route is not registered
-	judgments              judgmentService       // optional; nil ⇒ judgment routes are not registered
-	autoVerifier           autoVerifierService   // optional; nil ⇒ the LLM auto-verify route is not registered
-	threatModels           threatModelService    // optional; nil ⇒ threat-model routes are not registered
-	drafts                 writeupDraftService   // optional; nil ⇒ writeup-draft sign-off routes are not registered
-	aiTriageReviews        aiTriageReviewService // optional; nil ⇒ AI-triage review queue routes are not registered
-	projects               projectService        // optional; nil ⇒ project routes are not registered
-	assets                 assetService          // optional; nil ⇒ fleet asset routes are not registered
-	cspm                   *cspm.Service         // optional; nil ⇒ CSPM routes are not registered
-	businessAssets         businessAssetService  // optional; nil ⇒ business-level Asset routes are not registered
-	attackPaths            attackPathService     // optional; nil ⇒ attack-path routes are not registered
-	coverage               coverageService       // optional; nil ⇒ fleet coverage/agent-view routes are not registered
-	incidents              incidentReader        // optional; nil ⇒ incident read routes are not registered (#594 C7)
-	incidentTriage         incidentTriager       // optional; nil ⇒ incident triage routes are not registered (#594 C5)
-	sarif                  sarifIngester         // optional; nil ⇒ the third-party SARIF import route is not registered
-	importedFindings       sarifReader           // optional read side for imported findings
-	fleetRolloutAdmin      fleetRolloutService   // optional; nil ⇒ the operator rollout routes are not served
-	offensiveHalt          offensiveKillSwitch   // optional; nil ⇒ the red-team halt route is not served
-	detections             detectionReader       // optional read side for the detection ledger (#423)
-	riskStories            riskStoryReader       // optional read side for the unified per-asset risk story (#427)
-	purpleCoverage         purpleCoverageReader  // optional read side for purple-team coverage (#426)
-	fleet                  *fleetRouter          // optional; nil ⇒ agent transport plane is not served
-	fleetAdmin             fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
-	fleetKeys              fleetKeyAdmin         // optional; nil ⇒ operator signing-key routes not registered (A4 #625)
-	qualityGates           qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
-	qualityProfiles        qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
-	rules                  rulesService          // optional; nil ⇒ rule catalog routes are not registered
+	agent                  *agentDeps                // optional; nil ⇒ agent routes are not registered
+	exploitation           findingVerifier           // optional; nil ⇒ the verify route is not registered
+	judgments              judgmentService           // optional; nil ⇒ judgment routes are not registered
+	autoVerifier           autoVerifierService       // optional; nil ⇒ the LLM auto-verify route is not registered
+	threatModels           threatModelService        // optional; nil ⇒ threat-model routes are not registered
+	drafts                 writeupDraftService       // optional; nil ⇒ writeup-draft sign-off routes are not registered
+	aiTriageReviews        aiTriageReviewService     // optional; nil ⇒ AI-triage review queue routes are not registered
+	projects               projectService            // optional; nil ⇒ project routes are not registered
+	assets                 assetService              // optional; nil ⇒ fleet asset routes are not registered
+	cspm                   *cspm.Service             // optional; nil ⇒ CSPM routes are not registered
+	businessAssets         businessAssetService      // optional; nil ⇒ business-level Asset routes are not registered
+	attackPaths            attackPathService         // optional; nil ⇒ attack-path routes are not registered
+	coverage               coverageService           // optional; nil ⇒ fleet coverage/agent-view routes are not registered
+	coverageWindows        coverageWindowReader      // optional; nil ⇒ immutable telemetry coverage-window routes are not registered
+	privacyPolicies        privacyPolicyService      // optional; nil ⇒ tenant source-privacy policy routes are not registered
+	incidents              incidentReader            // optional; nil ⇒ incident read routes are not registered (#594 C7)
+	incidentTriage         incidentTriager           // optional; nil ⇒ incident triage routes are not registered (#594 C5)
+	sarif                  sarifIngester             // optional; nil ⇒ the third-party SARIF import route is not registered
+	importedFindings       sarifReader               // optional read side for imported findings
+	fleetRolloutAdmin      fleetRolloutService       // optional; nil ⇒ the operator rollout routes are not served
+	offensiveHalt          offensiveKillSwitch       // optional; nil ⇒ the red-team halt route is not served
+	detections             detectionReader           // optional read side for the detection ledger (#423)
+	detectionProvenance    detectionProvenanceReader // optional read side for durable detection provenance (#610)
+	riskStories            riskStoryReader           // optional read side for the unified per-asset risk story (#427)
+	purpleCoverage         purpleCoverageReader      // optional read side for purple-team coverage (#426)
+	fleet                  *fleetRouter              // optional; nil ⇒ agent transport plane is not served
+	fleetAdmin             fleetAdminService         // optional; nil ⇒ operator agent-admin routes not registered
+	fleetKeys              fleetKeyAdmin             // optional; nil ⇒ operator signing-key routes not registered (A4 #625)
+	qualityGates           qualityGateService        // optional; nil ⇒ quality-gate routes are not registered
+	qualityProfiles        qualityProfileService     // optional; nil ⇒ quality-profile routes are not registered
+	rules                  rulesService              // optional; nil ⇒ rule catalog routes are not registered
 	dastScan               dastScanService
 	vulnerabilitySources   *vulnerabilitysourceuc.Service
 	vulnerabilityMonitor   *vulnerabilitymonitor.Service
@@ -366,6 +369,20 @@ func (rt *Router) routes() *http.ServeMux {
 	if rt.attackPaths != nil {
 		mux.HandleFunc("GET /api/v1/attack-paths", rt.authz(userdom.PermView, rt.listAttackPaths))
 	}
+	if rt.coverageWindows != nil {
+		// Immutable telemetry coverage revisions (#611) are operator reads on the human RBAC plane.
+		// Tenant identity comes only from the authenticated context; query parameters are filters.
+		mux.HandleFunc("GET /api/v1/fleet/coverage-windows", rt.authz(userdom.PermView, rt.listCoverageWindows))
+	}
+	if rt.privacyPolicies != nil {
+		// Source-privacy policy history is tenant-scoped operator governance. Only administrators
+		// may append or activate a policy; agents receive only the active assignment on their
+		// separately authenticated transport plane.
+		mux.HandleFunc("GET /api/v1/fleet/privacy-policies/active", rt.authz(userdom.PermView, rt.getActivePrivacyPolicy))
+		mux.HandleFunc("GET /api/v1/fleet/privacy-policies", rt.authz(userdom.PermView, rt.listPrivacyPolicyHistory))
+		mux.HandleFunc("POST /api/v1/fleet/privacy-policies", rt.authz(userdom.PermAdminister, rt.admitPrivacyPolicy))
+		mux.HandleFunc("POST /api/v1/fleet/privacy-policies/activate", rt.authz(userdom.PermAdminister, rt.activatePrivacyPolicy))
+	}
 	if rt.coverage != nil {
 		// Fleet coverage + agent-health views (#413): operator reads, RBAC PermView, tenant-scoped via
 		// fleetTenant. No default-to-clean — verdicts distinguish unknown/stale/refused/unauthorized.
@@ -454,6 +471,10 @@ func (rt *Router) routes() *http.ServeMux {
 	mux.HandleFunc("PUT /api/v1/engagements/{id}/live-recon", rt.authz(userdom.PermOperate, rt.setLiveRecon))
 	mux.HandleFunc("GET /api/v1/engagements/{id}/findings", rt.authz(userdom.PermView, rt.withEngTenant(rt.listFindings)))
 	mux.HandleFunc("POST /api/v1/engagements/{id}/findings", rt.authz(userdom.PermOperate, rt.withEngTenant(rt.createFinding)))
+	if rt.detectionProvenance != nil {
+		mux.HandleFunc("GET /api/v1/engagements/{id}/detection-provenance", rt.authz(userdom.PermView, rt.withEngTenant(rt.listDetectionProvenance)))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/detections/{did}/provenance", rt.authz(userdom.PermView, rt.withEngTenant(rt.listDetectionProvenanceTransitions)))
+	}
 	if rt.sarif != nil {
 		// Ingesting a third-party report is an OPERATE action on the engagement, tenant-scoped like any
 		// other child resource. It grants no promotion authority: an imported finding can never confirm
@@ -463,9 +484,13 @@ func (rt *Router) routes() *http.ServeMux {
 		// it is: every row carries its provenance and states that it is external and cannot promote
 		// itself, rather than the governance claim being made by a method nothing calls.
 		mux.HandleFunc("GET /api/v1/engagements/{id}/imported-findings", rt.authz(userdom.PermView, rt.withEngTenant(rt.listImportedFindings)))
+	}
+	if rt.detections != nil {
 		mux.HandleFunc("GET /api/v1/engagements/{id}/detections", rt.authz(userdom.PermView, rt.withEngTenant(rt.listDetections)))
-		mux.HandleFunc("GET /api/v1/engagements/{id}/risk-stories", rt.authz(userdom.PermView, rt.withEngTenant(rt.listRiskStories)))
-		mux.HandleFunc("GET /api/v1/engagements/{id}/risk-stories/{assetID}", rt.authz(userdom.PermView, rt.withEngTenant(rt.getRiskStory)))
+	}
+	mux.HandleFunc("GET /api/v1/engagements/{id}/risk-stories", rt.authz(userdom.PermView, rt.withEngTenant(rt.listRiskStories)))
+	mux.HandleFunc("GET /api/v1/engagements/{id}/risk-stories/{assetID}", rt.authz(userdom.PermView, rt.withEngTenant(rt.getRiskStory)))
+	if rt.purpleCoverage != nil {
 		mux.HandleFunc("GET /api/v1/engagements/{id}/purple-coverage", rt.authz(userdom.PermView, rt.withEngTenant(rt.listPurpleCoverage)))
 	}
 	mux.HandleFunc("GET /api/v1/engagements/{id}/scan", rt.authz(userdom.PermView, rt.withEngTenant(rt.latestScan)))

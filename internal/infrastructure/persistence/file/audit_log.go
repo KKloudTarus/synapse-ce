@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/audit"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -162,9 +164,16 @@ func (a *AuditLog) RecordOnce(ctx context.Context, e ports.AuditEntry) error {
 			tenantID = tenant.String()
 		}
 		for _, existing := range all {
-			if existing.Action == e.Action && existing.Metadata["idempotency_key"] == key && existing.TenantID == tenantID {
-				return nil
+			if existing.Action != e.Action || existing.Metadata["idempotency_key"] != key || existing.TenantID != tenantID {
+				continue
 			}
+			// Collapse only a TRUE duplicate. Accepting any pre-existing row under this
+			// idempotency key would let a caller acknowledge an obligation whose exact
+			// immutable payload was never recorded. Fail closed on any difference.
+			if !sameFileAuditPayload(existing.AuditEntry, e) {
+				return fmt.Errorf("%w: audit idempotency key %q is already committed to different content", shared.ErrConflict, key)
+			}
+			return nil
 		}
 		return a.recordLocked(auditFileEntry{AuditEntry: e, TenantID: tenantID})
 	}
@@ -186,6 +195,16 @@ func (a *AuditLog) Record(ctx context.Context, e ports.AuditEntry) error {
 		tenantID = tenant.String()
 	}
 	return a.recordLocked(auditFileEntry{AuditEntry: e, TenantID: tenantID})
+}
+
+// sameFileAuditPayload reports whether two entries would hash identically. It
+// compares exactly the fields audit.ComputeHash covers — Hash/PreviousHash are
+// assigned by the chain on append and are deliberately excluded.
+func sameFileAuditPayload(left, right ports.AuditEntry) bool {
+	return left.Actor == right.Actor && left.Action == right.Action &&
+		left.Target == right.Target &&
+		left.At.UTC().Truncate(time.Microsecond).Equal(right.At.UTC().Truncate(time.Microsecond)) &&
+		maps.Equal(left.Metadata, right.Metadata)
 }
 
 func (a *AuditLog) recordLocked(entry auditFileEntry) error {

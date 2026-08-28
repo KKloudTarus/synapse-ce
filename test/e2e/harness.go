@@ -41,7 +41,7 @@ const (
 
 var e2eSession = fleetagent.CanonicalSessionID(e2eAgent)
 var e2eStream = func() shared.ID {
-	stream, err := fleetagent.TelemetryDeliveryStreamID(e2eAgent, e2eSession, fleetagent.PriorityP1)
+	stream, err := fleetagent.TelemetryDeliveryStreamID(e2eAgent, e2eSession, fleetagent.PriorityP3)
 	if err != nil {
 		panic(err)
 	}
@@ -52,6 +52,7 @@ var e2eStream = func() shared.ID {
 type captureAudit struct {
 	mu      sync.Mutex
 	actions []string
+	keys    map[string]bool
 }
 
 func (a *captureAudit) Record(_ context.Context, e ports.AuditEntry) error {
@@ -59,6 +60,26 @@ func (a *captureAudit) Record(_ context.Context, e ports.AuditEntry) error {
 	a.actions = append(a.actions, e.Action)
 	a.mu.Unlock()
 	return nil
+}
+
+// RecordOnce collapses exact retries on the deterministic key, matching the durable
+// audit adapters so fail-closed audit paths can be exercised end to end.
+func (a *captureAudit) RecordOnce(ctx context.Context, e ports.AuditEntry) error {
+	key := e.Metadata["idempotency_key"]
+	if key == "" {
+		return a.Record(ctx, e)
+	}
+	a.mu.Lock()
+	if a.keys == nil {
+		a.keys = map[string]bool{}
+	}
+	if a.keys[key] {
+		a.mu.Unlock()
+		return nil
+	}
+	a.keys[key] = true
+	a.mu.Unlock()
+	return a.Record(ctx, e)
 }
 func (a *captureAudit) has(action string) bool {
 	a.mu.Lock()
@@ -98,6 +119,7 @@ type harness struct {
 	audit     *captureAudit
 	keys      *memory.AgentSigningKeyStore
 	transport *memory.TelemetryTransportStore
+	policies  *memory.PrivacyPolicyStore
 	records   *memory.DetectionRecordStore
 	evidence  *evidenceuc.Service
 	telemetry *telemetryingest.Service
@@ -128,12 +150,27 @@ func newHarness(t *testing.T, retention time.Duration) *harness {
 		t.Fatalf("bind telemetry asset: %v", err)
 	}
 	records := memory.NewDetectionRecordStore()
+	policy := privacy.DefaultPolicy()
+	policies := memory.NewPrivacyPolicyStore()
+	assignment, err := privacy.NewAssignment(e2eTenant, policy, "e2e-operator", now)
+	if err != nil {
+		t.Fatalf("privacy assignment: %v", err)
+	}
+	if _, err := policies.PutPrivacyPolicy(ctx, assignment); err != nil {
+		t.Fatalf("persist privacy assignment: %v", err)
+	}
+	if _, err := policies.ActivatePrivacyPolicy(ctx, privacy.Activation{
+		TenantID: e2eTenant, OperationID: "e2e-activate-default", PolicyDigest: assignment.Digest,
+		PolicyVersion: assignment.Policy.Version, ActivatedBy: "e2e-operator", ActivatedAt: now,
+	}); err != nil {
+		t.Fatalf("activate privacy assignment: %v", err)
+	}
 
 	evidence, err := evidenceuc.NewService(memory.NewEvidenceStore(), nil, audit, clock, ids)
 	if err != nil {
 		t.Fatalf("evidence service: %v", err)
 	}
-	telemetrySvc, err := telemetryingest.NewService(transport, keys, audit, clock)
+	telemetrySvc, err := telemetryingest.NewService(transport, keys, policies, audit, clock)
 	if err != nil {
 		t.Fatalf("telemetry ingest: %v", err)
 	}
@@ -157,7 +194,7 @@ func newHarness(t *testing.T, retention time.Duration) *harness {
 
 	h := &harness{
 		t: t, ctx: ctx, now: now, clock: clock, audit: audit, keys: keys, transport: transport,
-		records: records, evidence: evidence, telemetry: telemetrySvc, ledger: ledger, policy: privacy.DefaultPolicy(),
+		policies: policies, records: records, evidence: evidence, telemetry: telemetrySvc, ledger: ledger, policy: policy,
 	}
 	h.telPriv, h.telKey = h.registerKey(fleetagent.PurposeTelemetryBatch)
 	h.detPriv, h.detKey = h.registerKey(fleetagent.PurposeDetectionBatch)
@@ -231,9 +268,9 @@ func (h *harness) shipTelemetry(epoch, seq, prev uint64, envelopes ...telemetry.
 	m := fleetagent.TelemetryBatchManifest{
 		ProtocolVersion: fleetagent.TelemetryProtocolVersion, SchemaVersion: telemetry.SchemaVersion,
 		BatchID: shared.ID(fmt.Sprintf("batch-%d-%d", epoch, seq)), AgentID: e2eAgent, HostID: e2eAgent, AssetID: e2eAsset, StreamID: e2eStream,
-		Position:         fleetagent.StreamPosition{Priority: fleetagent.PriorityP1, Epoch: epoch, Sequence: seq, Session: e2eSession, Boot: e2eBoot},
+		Position:         fleetagent.StreamPosition{Priority: fleetagent.PriorityP3, Epoch: epoch, Sequence: seq, Session: e2eSession, Boot: e2eBoot},
 		PreviousSequence: prev, EventTimeMin: minAt, EventTimeMax: maxAt,
-		ObservedCount: len(events), KeptCount: len(events), Events: refs,
+		ObservedCount: len(events), KeptCount: len(events), SamplingPolicyDigest: "test-policy-digest", Events: refs,
 		PayloadDigest: fleetagent.TelemetryPayloadDigest(refs), KeyID: h.telKey.KeyID,
 	}
 	m.Signature = fleetagent.SignTelemetryManifest(h.telPriv, m)

@@ -64,6 +64,9 @@ func (s *Service) Ingest(ctx context.Context, batch ports.TelemetryBatch) (Inges
 	if batch.SampleRate < 1 {
 		return IngestReport{}, fmt.Errorf("%w: telemetry sample rate must be >= 1 (1 = full fidelity)", shared.ErrValidation)
 	}
+	if telemetry.MustNotShed(batch.Class) && batch.SampleRate > 1 {
+		return IngestReport{}, fmt.Errorf("%w: telemetry batch for protected class %q cannot be sampled", shared.ErrValidation, batch.Class)
+	}
 	if err := telemetryschema.Validate(batch.SchemaVersion); err != nil {
 		return IngestReport{}, err
 	}
@@ -101,24 +104,7 @@ func (s *Service) Ingest(ctx context.Context, batch ports.TelemetryBatch) (Inges
 		dropped := observed - kept
 
 		if telemetry.MustNotShed(batch.Class) {
-			report.Disposition = telemetry.Dropped
-			report.Accepted = 0
-			report.Dropped = observed
-			dropFrom, dropTo := s.lossSpan(batch.Events)
-			if err := s.store.RecordLoss(ctx, ports.TelemetryLoss{
-				HostID: batch.HostID, AssetID: batch.AssetID, Class: batch.Class, Sequence: batch.Sequence, Disposition: telemetry.Dropped,
-				ObservedCount: observed, KeptCount: 0, DroppedCount: observed, Reason: "over budget on a never-shed class",
-				FromAt: dropFrom, ToAt: dropTo,
-			}); err != nil {
-				return report, fmt.Errorf("record telemetry drop: %w", err)
-			}
-			if err := s.recordGap(ctx, "telemetry.drop", batch, map[string]string{
-				"budget": fmt.Sprint(s.budget), "received": fmt.Sprint(observed), "dropped": fmt.Sprint(observed),
-				"disposition": string(telemetry.Dropped),
-			}); err != nil {
-				return report, err
-			}
-			return report, fmt.Errorf("%w: telemetry batch for never-shed class %q exceeds the ingest budget (%d > %d); refused whole rather than truncating a security-critical class",
+			return report, fmt.Errorf("%w: telemetry batch for protected class %q exceeds the ingest budget (%d > %d); caller must retain and retry the complete batch",
 				shared.ErrSaturated, batch.Class, observed, s.budget)
 		}
 

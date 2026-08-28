@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -138,10 +137,6 @@ func (c *captureTransport) SendDetectionBatch(_ context.Context, _ string, batch
 	return nil
 }
 
-type statusError struct{ status int }
-
-func (e statusError) Error() string                 { return fmt.Sprintf("status %d", e.status) }
-func (e statusError) ResponseStatus() (int, string) { return e.status, "" }
 
 func testConfig() Config {
 	return Config{AgentID: "agent-1", EngagementID: "eng-1", Token: "secret", Now: func() time.Time { return shipNow },
@@ -245,7 +240,7 @@ func TestRunRotatesRejectedKeyOnceAndRetriesPendingBatch(t *testing.T) {
 	defer cancel()
 	spool := &memorySpool{records: []ports.SpoolRecord{spoolDetection(1, "det-1")}}
 	state := &memoryState{}
-	transport := &captureTransport{sendErrs: []error{statusError{status: 403}, nil}, onSend: func(index int) {
+	transport := &captureTransport{sendErrs: []error{ports.ErrDetectionSigningKeyRejected, nil}, onSend: func(index int) {
 		if index == 1 {
 			cancel()
 		}

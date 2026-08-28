@@ -32,6 +32,10 @@ type TelemetryTransportStore interface {
 	// ListGaps returns the currently open inferred transport gaps for (agent, stream). Persisted gap history
 	// is reconciled against ACK state so a filled range no longer appears open.
 	ListGaps(ctx context.Context, agentID, streamID shared.ID) ([]TelemetryGap, error)
+	// ListGapChanges returns durable inferred-gap spans created or superseded by one delivery
+	// sequence. It includes resolved history so an exact batch retry can repair coverage-window
+	// persistence after the ACK transaction committed but coverage composition failed.
+	ListGapChanges(ctx context.Context, agentID, streamID shared.ID, epoch, sequence uint64) ([]TelemetryGap, error)
 	// CommitBatch durably commits one immutable batch coordinate before ACK state advances. Reusing a
 	// coordinate with different batch identity/content conflicts; an identical retry is idempotent.
 	CommitBatch(ctx context.Context, batch TelemetryEventBatch) error
@@ -64,25 +68,35 @@ type TelemetryGapQuery struct {
 // signed manifest (authenticated identity, key, schema, per-event digest, and immutable batch commitment)
 // by the ingest use case.
 type TelemetryEventBatch struct {
-	BatchID       shared.ID
-	PayloadDigest string
-	AgentID       shared.ID
-	StreamID      shared.ID
-	AssetID       shared.ID
-	Epoch         uint64
-	Sequence      uint64
-	SchemaVersion int
-	Events        []StoredTelemetryEvent
+	BatchID              shared.ID
+	PayloadDigest        string
+	AgentID              shared.ID
+	StreamID             shared.ID
+	AssetID              shared.ID
+	Priority             fleetagent.DeliveryPriority
+	Epoch                uint64
+	Sequence             uint64
+	SchemaVersion        int
+	EventTimeMin         time.Time
+	EventTimeMax         time.Time
+	ObservedCount        int
+	KeptCount            int
+	SampledOutCount      int
+	TruncatedCount       int
+	DroppedCount         int
+	SamplingPolicyDigest string
+	Events               []StoredTelemetryEvent
 }
 
 // StoredTelemetryEvent is one raw telemetry event persisted by the transport store: its stable id, class,
 // content digest (matched against the signed manifest), opaque shipped bytes, and source-observed time.
 type StoredTelemetryEvent struct {
-	EventID    shared.ID
-	Class      detection.Class
-	Digest     string
-	Payload    []byte
-	ObservedAt time.Time
+	EventID               shared.ID
+	Class                 detection.Class
+	Digest                string
+	RedactionPolicyDigest string
+	Payload               []byte
+	ObservedAt            time.Time
 }
 
 // Validate checks that the immutable batch commitment and every stored event are well formed.
@@ -93,14 +107,32 @@ func (b TelemetryEventBatch) Validate() error {
 	if b.AgentID.IsZero() || b.StreamID.IsZero() || b.AssetID.IsZero() {
 		return fmt.Errorf("%w: telemetry event batch needs agent, stream and asset ids", shared.ErrValidation)
 	}
-	if b.Epoch == 0 || b.Sequence == 0 {
-		return fmt.Errorf("%w: telemetry event batch needs a non-zero epoch and sequence", shared.ErrValidation)
+	if !b.Priority.Valid() || b.Epoch == 0 || b.Sequence == 0 {
+		return fmt.Errorf("%w: telemetry event batch needs a valid priority and non-zero epoch and sequence", shared.ErrValidation)
 	}
 	if b.SchemaVersion < 1 {
 		return fmt.Errorf("%w: telemetry event batch schema version must be >= 1", shared.ErrValidation)
 	}
-	if len(b.Events) == 0 {
-		return fmt.Errorf("%w: telemetry event batch needs at least one event", shared.ErrValidation)
+	if b.EventTimeMin.IsZero() || b.EventTimeMax.IsZero() || b.EventTimeMax.Before(b.EventTimeMin) {
+		return fmt.Errorf("%w: telemetry event batch has invalid signed event-time bounds", shared.ErrValidation)
+	}
+	if b.ObservedCount < 0 || b.KeptCount < 0 || b.SampledOutCount < 0 || b.TruncatedCount < 0 || b.DroppedCount < 0 {
+		return fmt.Errorf("%w: telemetry event batch has a negative count", shared.ErrValidation)
+	}
+	if b.ObservedCount == 0 {
+		return fmt.Errorf("%w: telemetry event batch must account for at least one observed event", shared.ErrValidation)
+	}
+	if b.ObservedCount != b.KeptCount+b.SampledOutCount+b.DroppedCount {
+		return fmt.Errorf("%w: telemetry event batch observed count must equal kept+sampled-out+dropped", shared.ErrValidation)
+	}
+	if b.TruncatedCount > b.KeptCount {
+		return fmt.Errorf("%w: telemetry event batch truncated count exceeds kept count", shared.ErrValidation)
+	}
+	if b.SamplingPolicyDigest == "" {
+		return fmt.Errorf("%w: telemetry event batch has no sampling policy digest", shared.ErrValidation)
+	}
+	if len(b.Events) != b.KeptCount {
+		return fmt.Errorf("%w: telemetry event batch lists %d events but kept count is %d", shared.ErrValidation, len(b.Events), b.KeptCount)
 	}
 	for i, e := range b.Events {
 		if e.EventID.IsZero() {
@@ -111,6 +143,9 @@ func (b TelemetryEventBatch) Validate() error {
 		}
 		if e.Digest == "" {
 			return fmt.Errorf("%w: telemetry event[%d] has no digest", shared.ErrValidation, i)
+		}
+		if e.RedactionPolicyDigest == "" {
+			return fmt.Errorf("%w: telemetry event[%d] has no redaction policy digest", shared.ErrValidation, i)
 		}
 		if len(e.Payload) == 0 {
 			return fmt.Errorf("%w: telemetry event[%d] has no payload", shared.ErrValidation, i)
