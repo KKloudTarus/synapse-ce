@@ -117,17 +117,15 @@ func schemeFor(ecosystem, rangeType string) (scheme, bool) {
 	return scheme{}, false
 }
 
+// CompareVersions orders two versions under the ecosystem's version scheme. The bool is false (and the
+// int meaningless) when the ecosystem is unknown or either version is unparseable, so callers fail closed
+// rather than trusting a lexical comparison.
 func CompareVersions(ecosystem, left, right string) (int, bool) {
 	sc, ok := schemeFor(ecosystem, "ECOSYSTEM")
 	if !ok || !sc.valid(left) || !sc.valid(right) {
 		return 0, false
 	}
 	return sc.compare(left, right), true
-}
-
-func ValidVersion(ecosystem, version string) bool {
-	sc, ok := schemeFor(ecosystem, "ECOSYSTEM")
-	return ok && sc.valid(version)
 }
 
 // affectedRanges reports whether version falls in any of the advisory's ranges, each matched with its

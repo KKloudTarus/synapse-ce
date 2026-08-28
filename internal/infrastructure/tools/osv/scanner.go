@@ -90,9 +90,11 @@ func (s *Scanner) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.Raw
 		if isOSDistroPURL(c.PURL) {
 			continue
 		}
-		if sbom.IdentityFromComponent(c).Status != sbom.IdentityResolved {
-			continue
-		}
+		// Query OSV by the versioned PURL for EVERY non-distro package, not only the ecosystems our
+		// identity resolver recognizes: OSV.dev's versioned-PURL match is authoritative and covers many
+		// ecosystems we do not resolve locally (Composer, Hex, Pub, Swift, Conan, …). Gating the query on
+		// IdentityResolved silently dropped those ecosystems from OSV entirely (a false "not vulnerable").
+		// Identity is used only to ENRICH the affected-range/fix data below, never to suppress a match.
 		items = append(items, item{compIdx: i, purl: c.PURL})
 	}
 	if len(items) == 0 {
@@ -141,7 +143,13 @@ func (s *Scanner) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.Raw
 		sort.Ints(cis)
 		for _, ci := range cis {
 			component := doc.Components[ci]
-			if len(matchingAffected(sbom.IdentityFromComponent(component), component.PURL, detail.Affected)) == 0 {
+			identity := sbom.IdentityFromComponent(component)
+			// Drop a match ONLY when we have a resolved identity that lets us confidently say every
+			// affected block names a DIFFERENT artifact (the wrong-artifact false positive this PR fixed).
+			// When our identity is unresolved (an ecosystem we do not model) we cannot make that judgement,
+			// so we trust OSV's versioned-PURL match and emit the finding (with fix data left empty rather
+			// than fabricated) — otherwise a whole ecosystem silently reports zero OSV vulns.
+			if identity.Status == sbom.IdentityResolved && len(matchingAffected(identity, component.PURL, detail.Affected)) == 0 {
 				continue
 			}
 			out = append(out, osvToRaw(component, detail))
@@ -319,7 +327,7 @@ func matchingAffected(identity sbom.ComponentIdentity, componentPURL string, aff
 	out := make([]osvAffected, 0, len(affected))
 	for _, current := range affected {
 		matchesName := current.Package.Ecosystem != "" && current.Package.Name != "" &&
-			strings.EqualFold(current.Package.Ecosystem, identity.Ecosystem) && current.Package.Name == identity.Package
+			strings.EqualFold(current.Package.Ecosystem, identity.Ecosystem) && strings.EqualFold(current.Package.Name, identity.Package)
 		matchesPURL := current.Package.PURL != "" && componentPackagePURL != "" && packagePURL(current.Package.PURL) == componentPackagePURL
 		if matchesName || matchesPURL {
 			out = append(out, current)

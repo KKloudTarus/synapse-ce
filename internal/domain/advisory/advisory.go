@@ -33,6 +33,8 @@ type AffectedPackage struct {
 	FixedVersion string   // first fixed version, for the finding's remediation hint
 }
 
+// FixedVersions returns the deduplicated, non-empty "fixed" versions an affected package declares — the
+// explicit FixedVersion plus every range's fixed event — as remediation-fix candidates.
 func FixedVersions(affected AffectedPackage) []string {
 	values := []string{affected.FixedVersion}
 	for _, current := range affected.Ranges {

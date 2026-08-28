@@ -139,6 +139,37 @@ func TestScanAgainstFakeOSV(t *testing.T) {
 	}
 }
 
+func TestScanEmitsOSVMatchForUnresolvedEcosystem(t *testing.T) {
+	// Composer/Packagist is an OSV-supported ecosystem our identity resolver does not model. OSV's
+	// versioned-PURL query is authoritative, so a match must still be emitted (with no fabricated fix
+	// data) rather than silently dropped — otherwise the whole ecosystem reports zero OSV vulns.
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/querybatch", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(batchResp{Results: []batchResult{{Vulns: []batchVuln{{ID: "CVE-2024-composer"}}}}})
+	})
+	mux.HandleFunc("GET /v1/vulns/{id}", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(osvVuln{
+			ID:       "CVE-2024-composer",
+			Summary:  "vulnerable monolog",
+			Affected: []osvAffected{{Package: osvPackage{Ecosystem: "Packagist", Name: "monolog/monolog", PURL: "pkg:composer/monolog/monolog"}}},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	scanner := New(srv.URL, srv.Client())
+	doc := &sbom.SBOM{Components: []sbom.Component{{
+		Name: "monolog/monolog", Version: "1.0.0", PURL: "pkg:composer/monolog/monolog@1.0.0",
+	}}}
+	findings, err := scanner.Scan(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(findings) != 1 || findings[0].AdvisoryID != "CVE-2024-composer" {
+		t.Fatalf("findings = %+v, want the composer OSV match emitted", findings)
+	}
+}
+
 func TestScanSkipsAdvisoryWithoutMatchingAffectedPackage(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/querybatch", func(w http.ResponseWriter, _ *http.Request) {
