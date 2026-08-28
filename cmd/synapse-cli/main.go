@@ -1695,7 +1695,13 @@ func printReport(target string, res *scauc.ScanResult) {
 		if f.KEV {
 			kev = " [KEV]"
 		}
-		fmt.Printf("    %-9s risk %5.2f  %s%s\n", f.Severity, f.RiskScore, f.Title, kev)
+		// Only show the risk column when it is actually computed (KEV→EPSS×CVSS enrichment). The CLI does
+		// not populate it, so printing "risk 0.00" for every finding reads as a broken tool.
+		risk := ""
+		if f.RiskScore > 0 {
+			risk = fmt.Sprintf(" risk %5.2f", f.RiskScore)
+		}
+		fmt.Printf("    %-9s%s  %s%s\n", f.Severity, risk, f.Title, kev)
 	}
 	if c := res.Compliance; c != nil {
 		scope := ""
