@@ -66,6 +66,15 @@ export interface CreateEngagementInput {
   assetId?: string
 }
 
+export interface UploadedSourcePackage {
+  filename: string
+  size: number
+  sha256: string
+  target: string
+  uploadedBy: string
+  uploadedAt: string | null
+}
+
 export type BusinessAssetType = 'product' | 'application' | 'system' | 'business_service'
 export type BusinessAssetCriticality = 'critical' | 'high' | 'medium' | 'low'
 export type BusinessAssetLifecycle = 'draft' | 'active' | 'decommissioning' | 'retired'
@@ -295,6 +304,7 @@ export interface ComponentLicense {
   spdxId: string
   name: string
   category: string
+  rawValue?: string
 }
 
 export interface Component {
@@ -307,6 +317,7 @@ export interface Component {
   unknownReason: string
   firstParty: boolean
   location: string
+  locations?: string[]
 }
 
 export interface Detection {
@@ -314,6 +325,11 @@ export interface Detection {
   advisoryId: string
   severity: Severity
   fixedVersion: string
+  fixedVersions?: string[]
+  rejectedFixedVersions?: string[]
+  fixState?: string
+  ecosystem?: string
+  packagePurl?: string
 }
 
 export interface Vulnerability {
@@ -324,7 +340,16 @@ export interface Vulnerability {
   cvssScore: number
   component: string
   version: string
+  ecosystem?: string
+  packagePurl?: string
   fixedVersion: string
+  alternativeFixedVersions?: string[]
+  rejectedFixedVersions?: string[]
+  fixStatus?: string
+  upgradeType?: string
+  fixConfidence?: string
+  fixReason?: string
+  versionStatus?: string
   description: string
   kev: boolean
   epss: number
@@ -374,6 +399,41 @@ export interface LicenseFinding {
   riskCategory: string
   severity: string
   components: string[]
+  policyRuleId?: string
+  recommendedChoice?: string
+  selectionReason?: string
+  options?: LicensePolicyOption[]
+}
+
+export interface LicensePolicyOption {
+  license: string
+  severity: string
+  policyRuleId: string
+}
+
+export interface ComponentLicenseAudit {
+  component: string
+  version: string
+  versionStatus: string
+  purl: string
+  scope: string
+  location: string
+  locations: string[]
+  dependencyType: string
+  evidenceStatus: string
+  rawLicense: string
+  license: string
+  detectedExpression: string
+  category: LicenseCategory
+  verdict: Verdict
+  optionSeverity: string
+  effectiveSeverity: string
+  policyRuleId: string
+  recommendedChoice: string
+  selectionReason: string
+  source: string
+  confidence: string
+  unknownReason: string
 }
 
 export interface DetectedLanguage {
@@ -421,6 +481,7 @@ export interface ScanResult {
   dependencies: Dependency[]
   vulnerabilities: Vulnerability[]
   licenses: LicenseFinding[]
+  componentLicenses?: ComponentLicenseAudit[]
   findings: Finding[]
   slas?: SLAView[]
   aiTriage?: AITriage[]

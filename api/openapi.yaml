@@ -134,6 +134,18 @@ paths:
         content:
           application/json:
             schema: {$ref: "#/components/schemas/CreateEngagementRequest"}
+          multipart/form-data:
+            schema:
+              type: object
+              required: [metadata, source]
+              properties:
+                metadata:
+                  type: string
+                  description: JSON-encoded CreateEngagementRequest.
+                source:
+                  type: string
+                  format: binary
+                  description: Source package in .zip, .tar, .tar.gz, or .tgz format; maximum compressed size is 512 MiB.
       responses:
         "201":
           description: Created
@@ -143,6 +155,24 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: Engagement already has a different uploaded source package}
+        "413": {description: Uploaded source package exceeds 512 MiB}
+
+  /api/v1/engagements/{id}/source:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    get:
+      tags: [engagements, sca]
+      summary: Get the immutable uploaded source package metadata for an engagement
+      responses:
+        "200":
+          description: Uploaded source package metadata
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UploadedSourcePackage"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/engagements/{id}/cspm/runs:
     parameters:
@@ -3896,6 +3926,21 @@ components:
         out_of_scope:
           type: array
           items: {$ref: "#/components/schemas/ScopeTargetRequest"}
+        authorized_from: {type: string, format: date-time}
+        authorized_to: {type: string, format: date-time}
+        timezone: {type: string, description: IANA timezone name}
+        asset_id: {type: string}
+
+    UploadedSourcePackage:
+      type: object
+      required: [filename, size, sha256, target, uploaded_by, uploaded_at]
+      properties:
+        filename: {type: string}
+        size: {type: integer, format: int64, minimum: 1, maximum: 536870912}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        target: {type: string, pattern: '^uploaded-source/sha256/[0-9a-f]{64}$'}
+        uploaded_by: {type: string}
+        uploaded_at: {type: string, format: date-time}
 
     Engagement:
       type: object
@@ -4158,14 +4203,17 @@ components:
 
     ScanRequest:
       type: object
-      required: [engagement_id, target]
+      required: [engagement_id]
       properties:
         engagement_id: {type: string}
-        target: {type: string, description: path / git URL / archive / image ref}
+        target: {type: string, description: Path or git URL; must be empty for kind upload and may be empty when an imported SBOM is active.}
         kind:
           type: string
-          enum: [local, git, archive, image]
+          enum: [local, git, archive, upload, image]
           default: local
+        ref: {type: string, description: optional git branch or tag resolved server-side to an immutable commit}
+        mode: {type: string, enum: [full, vulnerabilities, licenses], default: full}
+        code_quality: {type: boolean, default: false}
 
     ScanJob:
       type: object

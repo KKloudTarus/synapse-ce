@@ -11,9 +11,10 @@ import (
 // sampling-policy digest (#611/#594) or any other digest — they identify DIFFERENT concerns.
 const redactionPolicyContext = "synapse-redaction-policy:v1"
 
-// secretPatternSetID versions the built-in secret-pattern set, so a policy digest changes when the patterns
-// that scrubbed the data change — the digest attributes the FULL redaction behavior, not just the config.
-const secretPatternSetID = "secret-patterns:v1"
+// secretPatternSetID versions the built-in secret-pattern/argv-credential behavior, so a policy digest
+// changes whenever the scrub semantics change — the digest attributes the FULL redaction behavior, not just
+// the tenant/config fields. v2 closes the MySQL/MariaDB -pPASSWORD and internal-space credential residuals.
+const secretPatternSetID = "secret-patterns:v2"
 
 // RedactionPolicyDigest is a deterministic, domain-separated identity for source-redaction behavior,
 // recorded with scrubbed data so a reader knows exactly how it was redacted. It is DISTINCT from the

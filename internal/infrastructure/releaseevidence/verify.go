@@ -63,7 +63,7 @@ func loadManifest(path string) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, fmt.Errorf("open release evidence: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	opened, err := file.Stat()
 	if err != nil {
 		return Manifest{}, fmt.Errorf("inspect open release evidence: %w", err)

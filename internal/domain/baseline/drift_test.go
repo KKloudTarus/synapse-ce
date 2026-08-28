@@ -43,8 +43,11 @@ func TestDriftTrackerHysteresis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Observe(90) || d.Observe(90) {
-		t.Fatal("must not drift before the threshold of consecutive divergent windows")
+	if d.Observe(90) {
+		t.Fatal("must not drift after the first divergent window")
+	}
+	if d.Observe(90) {
+		t.Fatal("must not drift after the second divergent window")
 	}
 	if !d.Observe(90) {
 		t.Fatal("third consecutive divergent window must declare drift")

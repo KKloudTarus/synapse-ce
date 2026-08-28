@@ -39,12 +39,21 @@ func ScrubDetection(det detection.Detection, policy Policy) (detection.Detection
 		switch {
 		case ev.Process != nil:
 			p := *ev.Process
+			commandIdentity := ev.Process.Path
+			if commandIdentity == "" {
+				commandIdentity = ev.Process.Comm
+			}
+			// Bound the argv COUNT first: dropping trailing elements can only remove a credential
+			// from the output, never split one, and it caps the work the scan below has to do.
 			if policy.MaxArgCount > 0 && len(p.Args) > policy.MaxArgCount {
 				p.Args = p.Args[:policy.MaxArgCount]
 			}
-			// Slice-aware argv redaction is performed before length bounds, so a bound cannot split a
-			// recognized credential. It also retains the telemetry path's cross-element credential flag handling.
-			scrubbedArgs, red, drop := policy.RedactArgv(p.Args)
+			// Slice-aware argv redaction (fresh slice — non-mutating): per-element scan + cross-element
+			// credential-flag → next-value redaction. The original Path/Comm supplies command identity so
+			// MySQL/MariaDB -pPASSWORD is covered even when the evidence argv omits argv[0]. Redaction
+			// runs before the per-element LENGTH bound below, so a bound cannot split a recognized
+			// credential and leave a fragment of it in the output.
+			scrubbedArgs, red, drop := policy.redactArgvForCommand(p.Args, commandIdentity)
 			rep.Redacted += red
 			rep.Dropped += drop
 			for i := range scrubbedArgs {

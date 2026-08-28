@@ -26,21 +26,39 @@ func (rt *Router) SetDetectionReader(r detectionReader) {
 
 // listDetections returns the engagement's chained detections, or — with ?view=incidents — the incident
 // rollup over them (the individual detections remain the ledger underneath). PermView + withEngTenant;
-// a cross-tenant engagement is already a 404 before this runs.
+// a cross-tenant engagement is already a 404 before this runs. A6 adds a second, field-level authz layer
+// to the evidence-bearing records view and requires a query-audit entry before either read executes.
 func (rt *Router) listDetections(w http.ResponseWriter, r *http.Request) {
 	engID := shared.ID(r.PathValue("id"))
-	if rt.detections == nil {
-		// Not wired: an empty, honest answer (not a 500), consistent with the read being optional.
-		writeJSON(w, http.StatusOK, map[string]any{"detections": []detection.Record{}})
-		return
-	}
 	if r.URL.Query().Get("view") == "incidents" {
+		if err := rt.auditDetectionQuery(r.Context(), engID, "incidents", detectionFieldScopeSummary); err != nil {
+			writeError(w, rt.log, err)
+			return
+		}
+		if rt.detections == nil {
+			writeJSON(w, http.StatusOK, map[string]any{"incidents": []detection.Incident{}, "field_scope": detectionFieldScopeSummary})
+			return
+		}
 		inc, err := rt.detections.Incidents(r.Context(), engID)
 		if err != nil {
 			writeError(w, rt.log, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"incidents": inc})
+		writeJSON(w, http.StatusOK, map[string]any{"incidents": inc, "field_scope": detectionFieldScopeSummary})
+		return
+	}
+
+	scope, err := detectionFieldScopeFor(r.Context())
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	if err := rt.auditDetectionQuery(r.Context(), engID, "records", scope); err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	if rt.detections == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"detections": []detection.Record{}, "field_scope": scope})
 		return
 	}
 	recs, err := rt.detections.ListDetections(r.Context(), engID)
@@ -48,5 +66,5 @@ func (rt *Router) listDetections(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"detections": recs})
+	writeJSON(w, http.StatusOK, map[string]any{"detections": projectDetectionRecords(recs, scope), "field_scope": scope})
 }

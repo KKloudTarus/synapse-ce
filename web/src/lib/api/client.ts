@@ -38,7 +38,8 @@ export type BFFSession = { authenticated: boolean; csrfToken: string }
 function apiRequestInit(init: RequestInit = {}, json = true): RequestInit {
   const method = (init.method ?? 'GET').toUpperCase()
   const headers: Record<string, string> = {}
-  if (json && !headers['content-type']) headers['content-type'] = 'application/json'
+  const formData = typeof FormData !== 'undefined' && init.body instanceof FormData
+  if (json && !formData) headers['content-type'] = 'application/json'
   if (token) headers.authorization = `Bearer ${token}`
   else if (!['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method) && csrfToken) headers['X-CSRF-Token'] = csrfToken
   return { ...init, credentials: token ? 'omit' : 'same-origin', headers: { ...headers, ...(init.headers as Record<string, string> ?? {}) } }

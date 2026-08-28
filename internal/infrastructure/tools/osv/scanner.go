@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/advisory"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
@@ -89,6 +90,11 @@ func (s *Scanner) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.Raw
 		if isOSDistroPURL(c.PURL) {
 			continue
 		}
+		// Query OSV by the versioned PURL for EVERY non-distro package, not only the ecosystems our
+		// identity resolver recognizes: OSV.dev's versioned-PURL match is authoritative and covers many
+		// ecosystems we do not resolve locally (Composer, Hex, Pub, Swift, Conan, …). Gating the query on
+		// IdentityResolved silently dropped those ecosystems from OSV entirely (a false "not vulnerable").
+		// Identity is used only to ENRICH the affected-range/fix data below, never to suppress a match.
 		items = append(items, item{compIdx: i, purl: c.PURL})
 	}
 	if len(items) == 0 {
@@ -136,7 +142,17 @@ func (s *Scanner) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.Raw
 		}
 		sort.Ints(cis)
 		for _, ci := range cis {
-			out = append(out, osvToRaw(doc.Components[ci], detail))
+			component := doc.Components[ci]
+			identity := sbom.IdentityFromComponent(component)
+			// Drop a match ONLY when we have a resolved identity that lets us confidently say every
+			// affected block names a DIFFERENT artifact (the wrong-artifact false positive this PR fixed).
+			// When our identity is unresolved (an ecosystem we do not model) we cannot make that judgement,
+			// so we trust OSV's versioned-PURL match and emit the finding (with fix data left empty rather
+			// than fabricated) — otherwise a whole ecosystem silently reports zero OSV vulns.
+			if identity.Status == sbom.IdentityResolved && len(matchingAffected(identity, component.PURL, detail.Affected)) == 0 {
+				continue
+			}
+			out = append(out, osvToRaw(component, detail))
 		}
 	}
 	out = dedupRaws(out)
@@ -231,6 +247,7 @@ type osvSeverity struct {
 	Score string `json:"score"`
 }
 type osvAffected struct {
+	Package           osvPackage `json:"package"`
 	Ranges            []osvRange `json:"ranges"`
 	EcosystemSpecific struct {
 		Imports []struct {
@@ -239,7 +256,13 @@ type osvAffected struct {
 		} `json:"imports"`
 	} `json:"ecosystem_specific"`
 }
+type osvPackage struct {
+	Ecosystem string `json:"ecosystem"`
+	Name      string `json:"name"`
+	PURL      string `json:"purl"`
+}
 type osvRange struct {
+	Type   string              `json:"type"`
 	Events []map[string]string `json:"events"`
 }
 
@@ -247,15 +270,25 @@ type osvRange struct {
 // deriving the CVSS base score + severity from the vector. Aliases (CVE/GHSA/OSV
 // ids) are kept for cross-source correlation.
 func osvToRaw(comp sbom.Component, v osvVuln) vulnerability.RawFinding {
+	identity := sbom.IdentityFromComponent(comp)
+	matchedAffected := matchingAffected(identity, comp.PURL, v.Affected)
+	fixedVersions, rejectedFixedVersions := validatedFixedVersions(identity, matchedAffected)
 	out := vulnerability.RawFinding{
-		Source:       "osv",
-		AdvisoryID:   preferCVE(v.ID, v.Aliases),
-		Aliases:      append([]string{v.ID}, v.Aliases...),
-		Severity:     shared.SeverityUnknown,
-		Component:    comp.Name,
-		Version:      comp.Version,
-		FixedVersion: firstFixed(v.Affected),
-		Description:  firstNonEmpty(v.Summary, v.Details),
+		Source:                "osv",
+		AdvisoryID:            preferCVE(v.ID, v.Aliases),
+		Aliases:               append([]string{v.ID}, v.Aliases...),
+		Severity:              shared.SeverityUnknown,
+		Component:             comp.Name,
+		Version:               comp.Version,
+		Ecosystem:             identity.Ecosystem,
+		PackagePURL:           comp.PURL,
+		FixedVersions:         fixedVersions,
+		RejectedFixedVersions: rejectedFixedVersions,
+		Description:           firstNonEmpty(v.Summary, v.Details),
+	}
+	if len(fixedVersions) > 0 {
+		out.FixedVersion = fixedVersions[0]
+		out.FixState = "fixed"
 	}
 	// Pick a CVSS vector – prefer v3.x (scoreable) for the base score.
 	var v3vec string
@@ -282,7 +315,80 @@ func osvToRaw(comp sbom.Component, v osvVuln) vulnerability.RawFinding {
 			out.Severity = s
 		}
 	}
-	out.AffectedSymbols = affectedSymbols(v.Affected)
+	out.AffectedSymbols = affectedSymbols(matchedAffected)
+	return out
+}
+
+func matchingAffected(identity sbom.ComponentIdentity, componentPURL string, affected []osvAffected) []osvAffected {
+	if identity.Status != sbom.IdentityResolved {
+		return nil
+	}
+	componentPackagePURL := packagePURL(componentPURL)
+	out := make([]osvAffected, 0, len(affected))
+	for _, current := range affected {
+		matchesName := current.Package.Ecosystem != "" && current.Package.Name != "" &&
+			strings.EqualFold(current.Package.Ecosystem, identity.Ecosystem) && strings.EqualFold(current.Package.Name, identity.Package)
+		matchesPURL := current.Package.PURL != "" && componentPackagePURL != "" && packagePURL(current.Package.PURL) == componentPackagePURL
+		if matchesName || matchesPURL {
+			out = append(out, current)
+		}
+	}
+	return out
+}
+
+func packagePURL(value string) string {
+	value = strings.TrimSpace(value)
+	if index := strings.IndexAny(value, "?#"); index >= 0 {
+		value = value[:index]
+	}
+	if slash := strings.IndexByte(value, '/'); slash >= 0 {
+		if at := strings.LastIndexByte(value, '@'); at > slash {
+			value = value[:at]
+		}
+	}
+	return value
+}
+
+func validatedFixedVersions(identity sbom.ComponentIdentity, affected []osvAffected) ([]string, []string) {
+	if identity.Status != sbom.IdentityResolved {
+		return nil, nil
+	}
+	ranges := make([]advisory.Range, 0)
+	candidates := make([]string, 0)
+	for _, current := range affected {
+		for _, osvRange := range current.Ranges {
+			converted := advisory.Range{Type: strings.ToUpper(strings.TrimSpace(osvRange.Type))}
+			for _, event := range osvRange.Events {
+				converted.Events = append(converted.Events, advisory.Event{
+					Introduced: event["introduced"], Fixed: event["fixed"], LastAffected: event["last_affected"],
+				})
+				candidates = append(candidates, event["fixed"])
+			}
+			ranges = append(ranges, converted)
+		}
+	}
+	valid := map[string]bool{}
+	rejected := map[string]bool{}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		comparison, comparable := advisory.CompareVersions(identity.Ecosystem, identity.Version, candidate)
+		if candidate == "" || !comparable || comparison >= 0 || advisory.Affected(identity.Ecosystem, candidate, ranges, nil) {
+			if candidate != "" {
+				rejected[candidate] = true
+			}
+			continue
+		}
+		valid[candidate] = true
+	}
+	return sortedKeys(valid), sortedKeys(rejected)
+}
+
+func sortedKeys(values map[string]bool) []string {
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
 	return out
 }
 
@@ -332,19 +438,6 @@ func mapSeverityLabel(s string) shared.Severity {
 	default:
 		return shared.SeverityUnknown
 	}
-}
-
-func firstFixed(affected []osvAffected) string {
-	for _, a := range affected {
-		for _, r := range a.Ranges {
-			for _, e := range r.Events {
-				if f := e["fixed"]; f != "" {
-					return f
-				}
-			}
-		}
-	}
-	return ""
 }
 
 func firstNonEmpty(vals ...string) string {

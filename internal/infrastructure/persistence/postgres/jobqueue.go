@@ -194,24 +194,17 @@ func (q *JobQueue) AggregateJobQueueStats(ctx context.Context, kinds ...string) 
 	if err != nil {
 		return ports.JobStats{}, fmt.Errorf("list queue tenants: %w", err)
 	}
-	// Deduplicate by the NORMALIZED tenant id. Migration 0002 seeds a legacy
-	// empty-string tenant row, and WithTenant maps the empty id onto DefaultTenant, so
-	// enumerating raw rows would scope two iterations to "default" and double-count its
-	// jobs in every deployment that carries that row.
+	// Raw rows are collected as-is; logicalQueueTenantIDs below collapses them onto their
+	// RLS partitions, so the legacy empty-string tenant seeded by migration 0002 cannot
+	// be summed twice as DefaultTenant.
 	var tenantIDs []shared.ID
-	seen := make(map[shared.ID]bool)
 	for rows.Next() {
 		var tenantID shared.ID
 		if err := rows.Scan(&tenantID); err != nil {
 			rows.Close()
 			return ports.JobStats{}, fmt.Errorf("scan queue tenant: %w", err)
 		}
-		normalized := shared.TenantOrDefault(tenantID)
-		if seen[normalized] {
-			continue
-		}
-		seen[normalized] = true
-		tenantIDs = append(tenantIDs, normalized)
+		tenantIDs = append(tenantIDs, tenantID)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -220,7 +213,7 @@ func (q *JobQueue) AggregateJobQueueStats(ctx context.Context, kinds ...string) 
 	rows.Close()
 
 	var total ports.JobStats
-	for _, tenantID := range tenantIDs {
+	for _, tenantID := range logicalQueueTenantIDs(tenantIDs) {
 		stats, err := q.Stats(shared.WithTenant(ctx, tenantID), kinds...)
 		if err != nil {
 			return ports.JobStats{}, fmt.Errorf("queue stats for tenant: %w", err)
@@ -235,4 +228,19 @@ func (q *JobQueue) AggregateJobQueueStats(ctx context.Context, kinds ...string) 
 		}
 	}
 	return total, nil
+}
+
+// logicalQueueTenantIDs maps legacy tenant IDs to their RLS partition and returns each partition once.
+func logicalQueueTenantIDs(tenantIDs []shared.ID) []shared.ID {
+	seen := make(map[shared.ID]struct{}, len(tenantIDs))
+	logical := make([]shared.ID, 0, len(tenantIDs))
+	for _, tenantID := range tenantIDs {
+		tenantID = shared.TenantOrDefault(tenantID)
+		if _, exists := seen[tenantID]; exists {
+			continue
+		}
+		seen[tenantID] = struct{}{}
+		logical = append(logical, tenantID)
+	}
+	return logical
 }

@@ -53,6 +53,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceupload"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
 	asttool "github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
@@ -675,6 +676,7 @@ func main() {
 	}
 	// Evidence artifact blob store: MinIO/S3 when configured, else in-memory (dev).
 	var blobStore ports.BlobStore
+	var objectStore ports.ObjectStore
 	if cfg.BlobEndpoint != "" {
 		bs, err := blob.NewMinIO(context.Background(), blob.Config{
 			Endpoint:  cfg.BlobEndpoint,
@@ -688,12 +690,17 @@ func main() {
 			os.Exit(1)
 		}
 		blobStore = bs
+		objectStore = bs
 		readinessChecks["object_store"] = bs.CheckReady
 		log.Info("blob store: minio/s3", "bucket", cfg.BlobBucket)
 	} else {
-		blobStore = blob.NewMemory()
+		memoryStore := blob.NewMemory()
+		blobStore = memoryStore
+		objectStore = memoryStore
 		log.Info("blob store: in-memory (set SYNAPSE_BLOB_ENDPOINT for MinIO/S3)")
 	}
+	uploadedSources := sourceupload.NewStore(objectStore, 0)
+	engService.SetSourceStore(uploadedSources)
 	// Evidence vault: the one tamper-evident chain + verify-on-read path per engagement.
 	evidenceService, err := evidenceuc.NewService(evidenceStore, blobStore, auditLog, clock, ids)
 	if err != nil {
@@ -767,6 +774,7 @@ func main() {
 		sbomGen = execution.SBOMGen
 		detectionSources = execution.Sources
 	}
+	acquirer = sourceupload.NewAcquirer(acquirer, uploadedSources)
 	scaService := scauc.NewService(repo, findingRepo, scanRepo, scanResultStore, scanJobStore, scanRunStore, evidenceService, ids, prov, clock, auditLog, shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, acquirer,
 		enry.New(), sbomGen,
 		detectionSources,
@@ -783,6 +791,7 @@ func main() {
 		log.Info("risk-based remediation SLA governance ENABLED")
 	}
 	scaService.SetImportedSBOMStore(importedSBOMStore)
+	scaService.SetUploadedSourceStore(uploadedSources)
 	// Record scanned image digests so the fleet cluster agent can correlate running images (#446).
 	scaService.SetScannedImageRecorder(scannedImageStore)
 	configureCleanup := func() {}

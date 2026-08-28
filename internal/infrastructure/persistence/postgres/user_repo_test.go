@@ -36,6 +36,20 @@ func TestBootstrapIsConcurrentAndAuditedOnce(t *testing.T) {
 		Actor: id.String(), Action: "user.bootstrap_admin_seeded", Target: id.String(),
 		Metadata: map[string]string{"idempotency_key": "bootstrap-admin:" + id.String()}, At: time.Now().UTC(),
 	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM users WHERE id=$1`, id.String())
+		conn, err := pool.Acquire(bg)
+		if err != nil {
+			return
+		}
+		defer conn.Release()
+		if _, err := conn.Exec(bg, `SET session_replication_role = replica`); err != nil {
+			return
+		}
+		defer conn.Exec(bg, `SET session_replication_role = origin`)
+		_, _ = conn.Exec(bg, `DELETE FROM audit_log WHERE action=$1 AND target=$2`, auditEntry.Action, auditEntry.Target)
+	})
 
 	start := make(chan struct{})
 	errs := make(chan error, 2)

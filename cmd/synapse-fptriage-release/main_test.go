@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,10 @@ func (t releaseFixtureTriager) Triage(_ context.Context, candidates []finding.Fi
 }
 
 func TestRunCreatesPromotionAndRollbackLedger(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("private release input files are not supported on Windows")
+	}
+
 	dir := t.TempDir()
 	baseline := releaseFixtureReport(t, "prompt-v1")
 	candidate := releaseFixtureReport(t, "prompt-v2")

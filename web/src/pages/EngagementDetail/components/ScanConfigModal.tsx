@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Button, Input, cn } from '../../../components/ui'
 import { kindLabel } from '../../../lib/format'
-import type { ImportedSBOMMetadata, ScanMode } from '../../../lib/types'
+import type { ImportedSBOMMetadata, ScanMode, UploadedSourcePackage } from '../../../lib/types'
 
 export function trapTabFocus(e: KeyboardEvent, panel: HTMLElement | null) {
   if (!panel) return
@@ -108,6 +108,8 @@ export function ScanConfigModal({
   setBranch,
   usingImportedSBOM,
   importedSBOM,
+  usingUploadedSource,
+  uploadedSource,
   onTriggerUpload,
   sbomBusy,
   onRun,
@@ -127,12 +129,15 @@ export function ScanConfigModal({
   setBranch: (v: string) => void
   usingImportedSBOM: boolean
   importedSBOM: ImportedSBOMMetadata | null
+  usingUploadedSource: boolean
+  uploadedSource: UploadedSourcePackage | null
   onTriggerUpload: () => void
   sbomBusy: boolean
   onRun: () => void
   running: boolean
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const sourceLocked = usingUploadedSource || usingImportedSBOM
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -192,10 +197,20 @@ export function ScanConfigModal({
         {/* Modal Form Body */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4 text-xs">
           {/* Target Source Type */}
-          {!usingImportedSBOM ? (
+          {!sourceLocked ? (
             <div className="space-y-1.5">
               <label className="block font-semibold text-secondary">Target Type</label>
               <SegmentedKind value={kind} onChange={setKind} />
+            </div>
+          ) : usingUploadedSource ? (
+            <div className="rounded-xl border border-utility-green-300 bg-success-primary p-3.5 text-success-primary space-y-1">
+              <div className="flex items-center gap-2 font-bold text-sm">
+                <Upload01 className="size-4" />
+                <span>Uploaded Source Active</span>
+              </div>
+              <p className="text-xs">
+                Scanning target is locked to the immutable package: <span className="font-mono font-semibold">{uploadedSource?.filename || 'source package'}</span>
+              </p>
             </div>
           ) : (
             <div className="rounded-xl border border-utility-green-300 bg-success-primary p-3.5 text-success-primary space-y-1">
@@ -212,11 +227,15 @@ export function ScanConfigModal({
           {/* Target Location / URL */}
           <div className="space-y-1.5">
             <label htmlFor="scan-target-input" className="block font-semibold text-secondary">
-              {kind === 'git' ? 'Repository URL' : 'Target Path / Location'}
+              {usingUploadedSource ? 'Uploaded source package' : kind === 'git' ? 'Repository URL' : 'Target Path / Location'}
             </label>
-            {usingImportedSBOM ? (
+            {sourceLocked ? (
               <div className="flex h-9 min-w-0 items-center rounded-lg border border-secondary bg-secondary px-3 font-mono text-xs text-tertiary">
-                <span className="truncate">{importedSBOM?.targetRef || importedSBOM?.filename || 'SBOM.json'}</span>
+                <span className="truncate">
+                  {usingUploadedSource
+                    ? uploadedSource?.filename || 'Source package'
+                    : importedSBOM?.targetRef || importedSBOM?.filename || 'SBOM.json'}
+                </span>
               </div>
             ) : (
               <Input
@@ -228,7 +247,7 @@ export function ScanConfigModal({
                 aria-label="Scan target"
               />
             )}
-            {!usingImportedSBOM && kind === 'local' && (
+            {!sourceLocked && kind === 'local' && (
               <p className="text-[11px] text-tertiary">
                 Use an absolute folder path on the server inside this engagement scope.
               </p>
@@ -236,7 +255,7 @@ export function ScanConfigModal({
           </div>
 
           {/* Branch / Tag if Git */}
-          {!usingImportedSBOM && kind === 'git' && (
+          {!sourceLocked && kind === 'git' && (
             <div className="space-y-1.5">
               <label htmlFor="scan-branch-input" className="block font-semibold text-secondary">
                 Branch / Tag <span className="font-normal text-quaternary">(optional)</span>
@@ -277,19 +296,21 @@ export function ScanConfigModal({
           )}
 
           {/* SBOM Upload Option */}
-          <div className="rounded-xl border border-dashed border-secondary bg-secondary p-3.5 text-center space-y-2">
-            <div className="text-xs font-semibold text-secondary">Or scan with an external SBOM document</div>
-            <Button
-              type="button"
-              variant="secondary"
-              loading={sbomBusy}
-              onClick={onTriggerUpload}
-              className="h-8 text-xs font-semibold mx-auto"
-            >
-              <Upload01 className="size-3.5" />
-              <span>{importedSBOM ? 'Replace SBOM (.json)' : 'Upload SBOM (.json)'}</span>
-            </Button>
-          </div>
+          {!usingUploadedSource && (
+            <div className="rounded-xl border border-dashed border-secondary bg-secondary p-3.5 text-center space-y-2">
+              <div className="text-xs font-semibold text-secondary">Or scan with an external SBOM document</div>
+              <Button
+                type="button"
+                variant="secondary"
+                loading={sbomBusy}
+                onClick={onTriggerUpload}
+                className="h-8 text-xs font-semibold mx-auto"
+              >
+                <Upload01 className="size-3.5" />
+                <span>{importedSBOM ? 'Replace SBOM (.json)' : 'Upload SBOM (.json)'}</span>
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Footer: Single primary action button only (per DESIGN-REFERENCE.md rule) */}

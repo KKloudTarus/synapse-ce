@@ -33,6 +33,18 @@ type AffectedPackage struct {
 	FixedVersion string   // first fixed version, for the finding's remediation hint
 }
 
+// FixedVersions returns the deduplicated, non-empty "fixed" versions an affected package declares — the
+// explicit FixedVersion plus every range's fixed event — as remediation-fix candidates.
+func FixedVersions(affected AffectedPackage) []string {
+	values := []string{affected.FixedVersion}
+	for _, current := range affected.Ranges {
+		for _, event := range current.Events {
+			values = append(values, event.Fixed)
+		}
+	}
+	return uniqueSorted(values)
+}
+
 // Match reports whether the advisory affects (ecosystem, name) at version, and returns the matched block's
 // fixed version. It runs the owned matcher (Affected = explicit-versions OR semver-range) against every
 // affected block for that exact ecosystem+package – so it is a deterministic, third-party-free verdict.
