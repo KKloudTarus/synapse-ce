@@ -89,3 +89,26 @@ jobs:
           # Fail closed: a release with no scannable artifact must NOT pass vacuously.
           test "${scanned}" -gt 0 || { echo "no artifacts were scanned — failing the release"; exit 1; }
           # The container image is scanned the same way once dockers_v2 image publishing is re-enabled.
+
+  tarball-smoke:
+    name: Smoke-test the packaged CLI tarball
+    runs-on: ubuntu-latest
+    needs: no-exit-swallow-lint
+    # Runs the shipped synapse-cli FROM the release tarball (not a from-source build) against a real
+    # sample, so a release whose packaged binary cannot complete a scan is caught — the v0.1.8 class
+    # (scan died at "persist scan: validation error: tenant context is required" while main was fine).
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Download + extract the Linux tarball, smoke-scan the packaged binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          test -n "${tag}"
+          mkdir -p ./tarball ./tarball/extract
+          # goreleaser name_template is synapse_<ver>_Linux_<arch>.tar.gz; glob the arch string so this
+          # is robust whether goreleaser emits amd64 or x86_64.
+          gh release download "${tag}" --dir ./tarball --pattern 'synapse_*_Linux_*.tar.gz'
+          tar -xzf ./tarball/synapse_*_Linux_*.tar.gz -C ./tarball/extract
+          ./scripts/release/smoke-scan.sh ./tarball/extract
