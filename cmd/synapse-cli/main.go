@@ -1246,26 +1246,19 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	// The CLI dogfoods a TRUSTED local project, so this is ON BY DEFAULT; set
 	// SYNAPSE_MAVEN_RESOLVE_ENABLED=false to opt out. Best-effort: a missing mvn / non-Maven target / error
 	// is a no-op (falls back to the pom-only result + the INCOMPLETE warning). Runs mvn directly.
-	mavenOn := cfg.MavenResolveEnabled
-	if _, set := os.LookupEnv("SYNAPSE_MAVEN_RESOLVE_ENABLED"); !set {
-		mavenOn = true // CLI default-on (trusted local); the API stays opt-in + sandbox-gated
-	}
-	if mavenOn {
+	// Maven full-tree resolution runs `mvn` UNSANDBOXED, which evaluates the project's POM/plugin config
+	// (arbitrary code via build extensions/plugins) on the host. It is therefore OPT-IN even for the CLI —
+	// default-on would contradict "safe by construction" and is dangerous on a shared/multi-tenant CI
+	// runner. Enable with SYNAPSE_MAVEN_RESOLVE_ENABLED=true. Best-effort when on.
+	if cfg.MavenResolveEnabled {
 		sca.SetMavenResolver(mavenresolve.New(cfg.MvnBin).WithRepoHosts(cfg.MavenRepoHosts).WithLocalRepo(cfg.MavenLocalRepo))
-		// Transparency: the CLI runs mvn UNSANDBOXED (it evaluates the project's POM/plugin config) – make
-		// that visible so it's never a silent host-exec (the API stays sandbox-gated).
-		fmt.Fprintln(os.Stderr, "synapse-cli: Maven resolver ON – runs `mvn` UNSANDBOXED over the project if it has a pom.xml (trusted-local assumption; set SYNAPSE_MAVEN_RESOLVE_ENABLED=false to disable)")
+		fmt.Fprintln(os.Stderr, "synapse-cli: Maven resolver ON – runs `mvn` UNSANDBOXED over the project if it has a pom.xml (opt-in via SYNAPSE_MAVEN_RESOLVE_ENABLED)")
 	}
-	// Gradle full-tree resolution – same default-on-for-CLI model as Maven (trusted local project),
-	// handled straight from build.gradle. Opt out with SYNAPSE_GRADLE_RESOLVE_ENABLED=false. Best-effort.
-	gradleOn := cfg.GradleResolveEnabled
-	if _, set := os.LookupEnv("SYNAPSE_GRADLE_RESOLVE_ENABLED"); !set {
-		gradleOn = true
-	}
-	if gradleOn {
+	// Gradle full-tree resolution EXECUTES build.gradle (arbitrary Groovy/Kotlin) — even higher-risk than
+	// mvn — so it is likewise OPT-IN (SYNAPSE_GRADLE_RESOLVE_ENABLED=true), never default-on.
+	if cfg.GradleResolveEnabled {
 		sca.SetGradleResolver(gradleresolve.New(cfg.GradleBin).WithRepoHosts(cfg.MavenRepoHosts).WithGradleHome(cfg.GradleHome))
-		// Gradle evaluates build.gradle (arbitrary Groovy/Kotlin) – even higher-risk than mvn; surface it.
-		fmt.Fprintln(os.Stderr, "synapse-cli: Gradle resolver ON – runs `gradle` UNSANDBOXED over the project if it has a build.gradle, which executes the build script (trusted-local assumption; set SYNAPSE_GRADLE_RESOLVE_ENABLED=false to disable)")
+		fmt.Fprintln(os.Stderr, "synapse-cli: Gradle resolver ON – runs `gradle` UNSANDBOXED over the project if it has a build.gradle, which executes the build script (opt-in via SYNAPSE_GRADLE_RESOLVE_ENABLED)")
 	}
 	// npm resolution for a lockfile-less package.json – same default-on-for-CLI model (trusted local).
 	// Opt out with SYNAPSE_NPM_RESOLVE_ENABLED=false. Best-effort; --ignore-scripts so no project code runs.
@@ -1284,12 +1277,19 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		manifestOn = true
 	}
 	if manifestOn {
-		binOf := map[string]string{"composer": cfg.ComposerBin, "gem": cfg.BundleBin, "poetry": cfg.PoetryBin}
-		for _, eco := range []string{"composer", "gem", "poetry"} {
+		// composer + poetry only: each runs lock-only, --no-scripts over a COPY, so no project code runs.
+		binOf := map[string]string{"composer": cfg.ComposerBin, "poetry": cfg.PoetryBin}
+		for _, eco := range []string{"composer", "poetry"} {
 			sca.AddManifestResolver(manifestresolve.New(eco, binOf[eco]).WithRegistryHosts(cfg.ManifestRegistryHosts))
 		}
 		fmt.Fprintln(os.Stderr, "synapse-cli: manifest resolvers ON – composer/poetry resolve a lockfile-less composer.json/pyproject.toml over a COPY in lock-only, no-scripts mode (inert manifests; no project code runs)")
-		fmt.Fprintln(os.Stderr, "synapse-cli: manifest resolvers ON – `bundle lock` EVALUATES a lockfile-less Gemfile as Ruby, so it runs the project's manifest code UNSANDBOXED (trusted-local assumption, like the Gradle resolver); set SYNAPSE_MANIFEST_RESOLVE_ENABLED=false to disable")
+	}
+	// Bundler (gem) is split out and OPT-IN: `bundle lock` EVALUATES the Gemfile as Ruby, so it runs the
+	// project's manifest code UNSANDBOXED — unlike the inert composer/poetry/npm resolvers it is NOT
+	// default-on. Enable with SYNAPSE_BUNDLER_RESOLVE_ENABLED=true.
+	if cfg.BundlerResolveEnabled {
+		sca.AddManifestResolver(manifestresolve.New("gem", cfg.BundleBin).WithRegistryHosts(cfg.ManifestRegistryHosts))
+		fmt.Fprintln(os.Stderr, "synapse-cli: Bundler resolver ON – `bundle lock` EVALUATES a lockfile-less Gemfile as Ruby (runs project code UNSANDBOXED); opt-in via SYNAPSE_BUNDLER_RESOLVE_ENABLED")
 	}
 	// Coarse JVM class-reachability – default-on for the CLI (read-only bytecode parsing, no exec);
 	// tags each JVM component reachable/unreferenced from the app's compiled closure. Opt out with
