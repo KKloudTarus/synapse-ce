@@ -7,10 +7,6 @@ import (
 	"os"
 )
 
-func pinNetworkNamespace(string, int) (string, error) {
-	return "", errors.New("network namespace pinning is Linux-only")
-}
-
 func pinNetworkNamespaceAt(string, string, int) (string, error) {
 	return "", errors.New("network namespace pinning is Linux-only")
 }

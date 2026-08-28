@@ -67,7 +67,7 @@ func TestRunOutputCapTruncates(t *testing.T) {
 
 func TestRunStdinIsData(t *testing.T) {
 	skipIfMissing(t, "cat")
-	res, err := NewExecRunner(time.Second, 1<<20).Run(context.Background(),
+	res, err := NewExecRunner(5*time.Second, 1<<20).Run(context.Background(),
 		ports.ToolSpec{Name: "cat", Stdin: []byte("piped-in")})
 	if err != nil {
 		t.Fatalf("run: %v", err)

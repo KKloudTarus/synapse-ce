@@ -41,9 +41,14 @@ func ScrubDetection(det detection.Detection, policy Policy) (detection.Detection
 		switch {
 		case ev.Process != nil:
 			p := *ev.Process
+			commandIdentity := ev.Process.Path
+			if commandIdentity == "" {
+				commandIdentity = ev.Process.Comm
+			}
 			// Slice-aware argv redaction (fresh slice — non-mutating): per-element scan + cross-element
-			// credential-flag → next-value redaction, same as the telemetry path.
-			scrubbedArgs, red, drop := policy.RedactArgv(ev.Process.Args)
+			// credential-flag → next-value redaction. The original Path/Comm supplies command identity so
+			// MySQL/MariaDB -pPASSWORD is covered even when the evidence argv omits argv[0].
+			scrubbedArgs, red, drop := policy.redactArgvForCommand(ev.Process.Args, commandIdentity)
 			rep.Redacted += red
 			rep.Dropped += drop
 			p.Args = scrubbedArgs

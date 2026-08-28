@@ -26,12 +26,11 @@ var secretPatterns = []secretPattern{
 	// aws_secret_access_key:), so the lead delimiter is a captured class (start | space | quote | separator |
 	// _ | -) that is preserved in the replacement rather than a \b (which does not break between '_' and a
 	// letter and would miss the canonical env-var-as-argv form).
-	{regexp.MustCompile(`(?i)(^|[\s"'=:,;/\\_-])((?:password|passwd|pwd|secret|token|api[-_]?key|access[-_]?key|secret[-_]?key|auth[-_]?token|client[-_]?secret|credential)\s*[=:]\s*)([^\s"']+)`), `${1}${2}` + RedactionPlaceholder},
+	{regexp.MustCompile(`(?i)(^|[\s"'=:,;/\\._-])((?:password|passwd|pwd|secret|token|api[-_]?key|access[-_]?key|secret[-_]?key|auth[-_]?token|client[-_]?secret|credential)\s*[=:]\s*)([^\s"']+)`), `${1}${2}` + RedactionPlaceholder},
 	// CLI credential flags with an INLINE value: --password=X, --token:X, and the single-token
 	// "--password X" form. The space-separated form where the value is a SEPARATE argv element is handled
-	// cross-element by scrubArgv (per-element scanning cannot see the next element). A bare "-p" short flag
-	// is deliberately NOT matched here: it is too ambiguous (-progress, -port, tar -pxf, cp -pr) and would
-	// destroy forensic context; glued `-pSECRET` is a documented residual covered by --password/env/=forms.
+	// cross-element by RedactArgv. A bare "-p" short flag remains deliberately absent here because it is
+	// globally ambiguous; RedactArgv handles glued -pPASSWORD only when argv[0] is a MySQL/MariaDB client.
 	{regexp.MustCompile(`(?i)(^|\s)(--?(?:password|passwd|pwd|token|secret|api[-_]?key|auth)[=: ]\s*)([^\s"']+)`), `${1}${2}` + RedactionPlaceholder},
 	// connection string credentials: scheme://user:PASSWORD@host  → redact only the password
 	{regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.\-]*://[^\s:/@]+:)([^\s:/@]+)(@)`), `${1}` + RedactionPlaceholder + `${3}`},

@@ -364,6 +364,7 @@ func TestHostileHarness(t *testing.T) {
 	rt.SetAttackPaths(attackSvc)              // real #419 service proves cross-tenant derived data isolation
 	rt.SetSARIFIngest(harnessSARIF{})         // register the #415 import route so the harness guards its operate/tenant gates
 	rt.SetImportedFindings(harnessImportedFindings{})
+	rt.SetVulnerabilityAudit(audit)
 	rt.SetDetectionReader(harnessDetections{})  // register the #423 detection-ledger read route
 	rt.SetPurpleCoverageReader(harnessPurple{}) // register the #426 purple-coverage read route
 	rt.SetFleetRolloutAdmin(harnessRollout{})

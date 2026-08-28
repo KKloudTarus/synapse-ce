@@ -148,7 +148,7 @@ func hashRegularFile(path string, expected os.FileInfo) (string, int64, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	opened, err := file.Stat()
 	if err != nil {

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -31,15 +33,57 @@ func setupJobQueue(t *testing.T) (*JobQueue, context.Context) {
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	pool, err := Connect(ctx, dsn)
+	adminPool, err := Connect(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, "TRUNCATE jobs CASCADE"); err != nil {
+	t.Cleanup(adminPool.Close)
+	if _, err := adminPool.Exec(ctx, "TRUNCATE jobs CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
-	return NewJobQueue(pool, idgen.RandomID{}), shared.WithTenant(ctx, shared.DefaultTenant)
+
+	var superuser, bypass bool
+	if err := adminPool.QueryRow(ctx, `
+		SELECT rolsuper, rolbypassrls
+		FROM pg_roles
+		WHERE rolname = current_user
+	`).Scan(&superuser, &bypass); err != nil {
+		t.Fatalf("inspect postgres test role: %v", err)
+	}
+	if !superuser && !bypass {
+		return NewJobQueue(adminPool, idgen.RandomID{}), shared.WithTenant(ctx, shared.DefaultTenant)
+	}
+
+	role := "jobqueue_test_" + randHex(t)
+	for _, statement := range []string{
+		"CREATE ROLE " + role + " LOGIN PASSWORD 'test-password' NOSUPERUSER NOBYPASSRLS",
+		"GRANT USAGE ON SCHEMA public TO " + role,
+		"GRANT SELECT, INSERT, UPDATE, DELETE ON jobs TO " + role,
+		"GRANT SELECT, INSERT, DELETE ON tenants TO " + role,
+	} {
+		if _, err := adminPool.Exec(ctx, statement); err != nil {
+			t.Fatalf("setup runtime role %s: %v", role, err)
+		}
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = adminPool.Exec(bg, "DROP OWNED BY "+role)
+		_, _ = adminPool.Exec(bg, "DROP ROLE IF EXISTS "+role)
+	})
+
+	runtimeConfig, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse runtime pool config: %v", err)
+	}
+	runtimeConfig.ConnConfig.User = role
+	runtimeConfig.ConnConfig.Password = "test-password"
+	runtimePool, err := pgxpool.NewWithConfig(ctx, runtimeConfig)
+	if err != nil {
+		t.Fatalf("connect runtime pool: %v", err)
+	}
+	t.Cleanup(runtimePool.Close)
+
+	return NewJobQueue(runtimePool, idgen.RandomID{}), shared.WithTenant(ctx, shared.DefaultTenant)
 }
 
 func TestPostgresJobQueueConcurrentClaimSkipLocked(t *testing.T) {
@@ -163,6 +207,19 @@ func TestPostgresJobQueueClaimByKind(t *testing.T) {
 	}
 }
 
+func TestLogicalQueueTenantIDsDeduplicatesLegacyDefault(t *testing.T) {
+	got := logicalQueueTenantIDs([]shared.ID{"", shared.DefaultTenant, "other-tenant"})
+	want := []shared.ID{shared.DefaultTenant, "other-tenant"}
+	if len(got) != len(want) {
+		t.Fatalf("logical tenant count = %d, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("logical tenant %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 // TestPostgresJobQueueAggregateJobQueueStatsAcrossTenants covers the operator metrics
 // seam: AggregateJobQueueStats must sum every tenant's RLS-scoped Stats (mirroring
 // Claim's per-tenant transaction loop), never a privileged cross-tenant query, and must
@@ -189,12 +246,17 @@ func TestPostgresJobQueueRetryDoesNotBurnAttempt(t *testing.T) {
 func TestPostgresJobQueueAggregateJobQueueStatsAcrossTenants(t *testing.T) {
 	q, ctx := setupJobQueue(t)
 	tenantA := shared.DefaultTenant
-	_, _ = q.Enqueue(ctx, "sca", []byte("a"))
+	if _, err := q.Enqueue(ctx, "sca", []byte("a")); err != nil {
+		t.Fatalf("enqueue default tenant: %v", err)
+	}
 
-	otherTenant := shared.ID("other-tenant")
-	if _, err := q.pool.Exec(ctx, `INSERT INTO tenants (id) VALUES ($1) ON CONFLICT DO NOTHING`, otherTenant.String()); err != nil {
+	otherTenant := shared.ID("other-tenant-" + randHex(t))
+	if _, err := q.pool.Exec(ctx, `INSERT INTO tenants (id, name) VALUES ($1, $1) ON CONFLICT DO NOTHING`, otherTenant.String()); err != nil {
 		t.Fatalf("seed second tenant: %v", err)
 	}
+	t.Cleanup(func() {
+		_, _ = q.pool.Exec(context.Background(), `DELETE FROM tenants WHERE id=$1`, otherTenant.String())
+	})
 	ctxB := shared.WithTenant(context.Background(), otherTenant)
 	if _, err := q.Enqueue(ctxB, "sca", []byte("b")); err != nil {
 		t.Fatalf("enqueue tenant b: %v", err)

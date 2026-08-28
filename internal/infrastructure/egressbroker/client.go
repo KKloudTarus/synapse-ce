@@ -142,7 +142,7 @@ func (c *Client) call(ctx context.Context, req request) (response, error) {
 	if err != nil {
 		return response{}, fmt.Errorf("%w: dial %s: %w", ErrUnavailable, c.socketPath, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if deadline, ok := callCtx.Deadline(); ok {
 		if err := conn.SetDeadline(deadline); err != nil {
 			return response{}, fmt.Errorf("set broker deadline: %w", err)

@@ -95,7 +95,7 @@ func (a *HTTPGrantAuthority) Authorize(ctx context.Context, grantReq GrantReques
 	if err != nil {
 		return "", fmt.Errorf("request egress grant: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4<<10))
 		return "", fmt.Errorf("egress grant authority returned status %d", res.StatusCode)

@@ -101,8 +101,8 @@ func (s *Server) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listen on broker socket: %w", err)
 	}
-	defer listener.Close()
-	defer os.Remove(s.socketPath)
+	defer func() { _ = listener.Close() }()
+	defer func() { _ = os.Remove(s.socketPath) }()
 	if err := os.Chown(s.socketPath, 0, s.groupID); err != nil {
 		return fmt.Errorf("set broker socket ownership: %w", err)
 	}
@@ -111,7 +111,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 	go func() {
 		<-ctx.Done()
-		listener.Close()
+		_ = listener.Close()
 	}()
 
 	// Drain in-flight handlers before returning so a shutdown cannot orphan a privileged
@@ -136,7 +136,7 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) handle(serverCtx context.Context, conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	requestCtx, cancel := context.WithTimeout(serverCtx, 30*time.Second)
 	defer cancel()
 	if deadline, ok := requestCtx.Deadline(); ok {
@@ -162,7 +162,7 @@ func (s *Server) handle(serverCtx context.Context, conn net.Conn) {
 			_ = encodeResponse(conn, response{Version: protocolVersion, Error: "unauthorized sandbox process"})
 			return
 		}
-		defer process.Close()
+		defer func() { _ = process.Close() }()
 	}
 	res, err := s.execute(requestCtx, req, process)
 	if err != nil {
@@ -311,7 +311,7 @@ func removeStaleSocket(path string) error {
 	}
 	conn, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond)
 	if dialErr == nil {
-		conn.Close()
+		_ = conn.Close()
 		return errors.New("egress broker is already running")
 	}
 	if !strings.Contains(dialErr.Error(), "connection refused") {
