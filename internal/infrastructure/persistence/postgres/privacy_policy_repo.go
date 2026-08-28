@@ -201,7 +201,7 @@ func (r *PrivacyPolicyRepository) ActivatePrivacyPolicyWithAudit(
 		candidate.Entry.Metadata = maps.Clone(candidate.Entry.Metadata)
 		candidate.Entry.At = admitted.ActivatedAt
 		candidate.Entry.Metadata["revision"] = fmt.Sprintf("%d", admitted.Revision)
-		committed, err = r.InsertFleetAudit(transactionCtx, candidate)
+		committed, err = r.insertFleetAudit(transactionCtx, candidate)
 		return err
 	})
 	return admitted, committed, err

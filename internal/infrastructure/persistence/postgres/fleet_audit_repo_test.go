@@ -141,7 +141,7 @@ func TestFleetAuditRepositoryReturnsExactDurablePayload(t *testing.T) {
 	f := newFleetAuditFixture(t)
 	repo := f.repo(t)
 	candidate := fleetAuditIntent("intent-exact", f.at.Add(1234*time.Nanosecond))
-	stored, err := repo.InsertFleetAudit(f.ctx, candidate)
+	stored, err := repo.insertFleetAudit(f.ctx, candidate)
 	if err != nil {
 		t.Fatalf("insert fleet audit: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestFleetAuditRepositoryExactRetryIsIdempotent(t *testing.T) {
 	f := newFleetAuditFixture(t)
 	repo := f.repo(t)
 	intent := fleetAuditIntent("intent-retry", f.at)
-	first, err := repo.InsertFleetAudit(f.ctx, intent)
+	first, err := repo.insertFleetAudit(f.ctx, intent)
 	if err != nil {
 		t.Fatalf("first insert: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestFleetAuditRepositoryExactRetryIsIdempotent(t *testing.T) {
 		"batch_id":        "batch-1",
 		"idempotency_key": "intent-retry",
 	}
-	second, err := repo.InsertFleetAudit(f.ctx, reordered)
+	second, err := repo.insertFleetAudit(f.ctx, reordered)
 	if err != nil {
 		t.Fatalf("exact retry must be idempotent, got %v", err)
 	}
@@ -211,7 +211,7 @@ func TestFleetAuditRepositoryExactRetryIsIdempotent(t *testing.T) {
 func TestFleetAuditRepositoryRejectsDifferentContentForSameID(t *testing.T) {
 	f := newFleetAuditFixture(t)
 	repo := f.repo(t)
-	if _, err := repo.InsertFleetAudit(f.ctx, fleetAuditIntent("intent-conflict", f.at)); err != nil {
+	if _, err := repo.insertFleetAudit(f.ctx, fleetAuditIntent("intent-conflict", f.at)); err != nil {
 		t.Fatalf("first insert: %v", err)
 	}
 	for _, tc := range []struct {
@@ -231,7 +231,7 @@ func TestFleetAuditRepositoryRejectsDifferentContentForSameID(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := repo.InsertFleetAudit(f.ctx, tc.mutID(fleetAuditIntent("intent-conflict", f.at)))
+			_, err := repo.insertFleetAudit(f.ctx, tc.mutID(fleetAuditIntent("intent-conflict", f.at)))
 			if !errors.Is(err, shared.ErrConflict) {
 				t.Fatalf("want conflict for differing %s, got %v", tc.name, err)
 			}
@@ -303,7 +303,7 @@ func TestFleetAuditRepositoryRejectsMalformedIntentions(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := repo.InsertFleetAudit(f.ctx, tc.intent); !errors.Is(err, shared.ErrValidation) {
+			if _, err := repo.insertFleetAudit(f.ctx, tc.intent); !errors.Is(err, shared.ErrValidation) {
 				t.Fatalf("want validation error, got %v", err)
 			}
 		})
@@ -313,7 +313,7 @@ func TestFleetAuditRepositoryRejectsMalformedIntentions(t *testing.T) {
 func TestFleetAuditRepositoryRequiresTenantContext(t *testing.T) {
 	f := newFleetAuditFixture(t)
 	repo := f.repo(t)
-	if _, err := repo.InsertFleetAudit(context.Background(), fleetAuditIntent("intent-notenant", f.at)); !errors.Is(err, shared.ErrValidation) {
+	if _, err := repo.insertFleetAudit(context.Background(), fleetAuditIntent("intent-notenant", f.at)); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("want validation error without tenant, got %v", err)
 	}
 }
@@ -323,7 +323,7 @@ func TestFleetAuditRepositoryRequiresTenantContext(t *testing.T) {
 func TestFleetAuditRepositoryAcknowledgement(t *testing.T) {
 	f := newFleetAuditFixture(t)
 	repo := f.repo(t)
-	if _, err := repo.InsertFleetAudit(f.ctx, fleetAuditIntent("intent-ack", f.at)); err != nil {
+	if _, err := repo.insertFleetAudit(f.ctx, fleetAuditIntent("intent-ack", f.at)); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 	if err := repo.AcknowledgeFleetAudit(f.ctx, "intent-ack"); err != nil {
@@ -369,7 +369,7 @@ func TestFleetAuditRepositoryListsPendingInCommitOrder(t *testing.T) {
 	first := fleetAuditIntent("intent-a", f.at)
 	second := fleetAuditIntent("intent-b", f.at.Add(time.Second))
 	for _, intent := range []ports.FleetAuditIntent{third, first, second} {
-		if _, err := repo.InsertFleetAudit(f.ctx, intent); err != nil {
+		if _, err := repo.insertFleetAudit(f.ctx, intent); err != nil {
 			t.Fatalf("insert %s: %v", intent.ID, err)
 		}
 	}
@@ -402,7 +402,7 @@ func TestFleetAuditRepositoryIsolatesTenants(t *testing.T) {
 	if _, err := f.pool.Exec(context.Background(), `INSERT INTO tenants(id,name) VALUES($1,$1)`, other.String()); err != nil {
 		t.Fatalf("seed other tenant: %v", err)
 	}
-	if _, err := repo.InsertFleetAudit(f.ctx, fleetAuditIntent("intent-mine", f.at)); err != nil {
+	if _, err := repo.insertFleetAudit(f.ctx, fleetAuditIntent("intent-mine", f.at)); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 	otherCtx := shared.WithTenant(context.Background(), other)
@@ -428,7 +428,7 @@ func TestFleetAuditRepositoryHonoursCancellation(t *testing.T) {
 	repo := f.repo(t)
 	ctx, cancel := context.WithCancel(f.ctx)
 	cancel()
-	if _, err := repo.InsertFleetAudit(ctx, fleetAuditIntent("intent-cancel", f.at)); err == nil {
+	if _, err := repo.insertFleetAudit(ctx, fleetAuditIntent("intent-cancel", f.at)); err == nil {
 		t.Fatal("insert under a cancelled context must fail")
 	}
 	if _, err := repo.ListPendingFleetAudits(ctx); err == nil {
@@ -464,7 +464,7 @@ func TestMigration0125FleetAuditIntentGuards(t *testing.T) {
 	}
 
 	repo := f.repo(t)
-	if _, err := repo.InsertFleetAudit(f.ctx, fleetAuditIntent("intent-guard", f.at)); err != nil {
+	if _, err := repo.insertFleetAudit(f.ctx, fleetAuditIntent("intent-guard", f.at)); err != nil {
 		t.Fatalf("seed intention: %v", err)
 	}
 
@@ -527,7 +527,7 @@ func TestMigration0125FleetAuditIntentRLSIsolation(t *testing.T) {
 	f := newFleetAuditFixture(t)
 	ctx := context.Background()
 	repo := f.repo(t)
-	if _, err := repo.InsertFleetAudit(f.ctx, fleetAuditIntent("intent-rls", f.at)); err != nil {
+	if _, err := repo.insertFleetAudit(f.ctx, fleetAuditIntent("intent-rls", f.at)); err != nil {
 		t.Fatalf("seed intention: %v", err)
 	}
 	role := "fleet_audit_runtime_" + randHex(t)
@@ -575,7 +575,7 @@ func TestMigration0125RefusesRollbackWithIntentHistory(t *testing.T) {
 	}
 	f := newFleetAuditFixture(t)
 	repo := f.repo(t)
-	if _, err := repo.InsertFleetAudit(f.ctx, fleetAuditIntent("intent-rollback", f.at)); err != nil {
+	if _, err := repo.insertFleetAudit(f.ctx, fleetAuditIntent("intent-rollback", f.at)); err != nil {
 		t.Fatalf("seed intention: %v", err)
 	}
 	db, err := goose.OpenDBWithDriver("pgx", dsn)

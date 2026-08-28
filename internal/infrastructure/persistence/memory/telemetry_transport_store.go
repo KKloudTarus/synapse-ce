@@ -392,16 +392,6 @@ func (s *TelemetryTransportStore) acceptAgentGapRevisionWithAudit(
 				gap.UpdatedAt = current.UpdatedAt
 			}
 		}
-		if intent != nil {
-			auditKey := fleetAuditKey{tenant: tenant, id: intent.ID}
-			candidate := *intent
-			if existing, ok := s.auditIntents[auditKey]; ok {
-				candidate.Entry.At = existing.Entry.At
-				if !memoryFleetAuditIntentEqual(existing, candidate) {
-					return ports.FleetAuditIntent{}, fmt.Errorf("%w: fleet audit intention id already has different immutable content", shared.ErrConflict)
-				}
-			}
-		}
 		s.agentGapRevisions[tenant][gap.GapID] = append(s.agentGapRevisions[tenant][gap.GapID], revision)
 		s.agentGapDigests[tenant][revision.SignedContentDigest] = gap.GapID
 		s.agentGaps[tenant][gap.GapID] = gap

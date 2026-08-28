@@ -107,7 +107,7 @@ func (r *SensorStateRepository) AppendSensorStateWithAudit(
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("read sensor-state audit intention: %w", err)
 		}
-		stored, err := r.InsertFleetAudit(transactionCtx, intent)
+		stored, err := r.insertFleetAudit(transactionCtx, intent)
 		if err != nil {
 			return err
 		}

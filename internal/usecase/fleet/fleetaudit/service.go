@@ -114,7 +114,7 @@ func (r *ReconciliationRunner) RunOnce(ctx context.Context) error {
 
 func (r *ReconciliationRunner) RunPeriodic(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
-		interval = time.Minute
+		interval = DefaultInterval
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

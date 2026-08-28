@@ -255,7 +255,7 @@ func (r *TelemetryTransportRepository) acceptAgentGapRevisionWithAudit(
 			tenantID: tenant.String(),
 			tx:       tx,
 		})
-		stored, err := r.InsertFleetAudit(transactionCtx, candidate)
+		stored, err := r.insertFleetAudit(transactionCtx, candidate)
 		if err != nil {
 			return err
 		}

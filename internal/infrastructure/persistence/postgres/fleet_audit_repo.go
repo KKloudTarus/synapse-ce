@@ -27,13 +27,13 @@ func NewFleetAuditRepository(pool *pgxpool.Pool) (*FleetAuditRepository, error) 
 	return &FleetAuditRepository{pool: pool}, nil
 }
 
-// InsertFleetAudit durably records one immutable audit intention alongside the
+// insertFleetAudit durably records one immutable audit intention alongside the
 // mutation that requires it, and returns the EXACT payload that became durable.
 // Callers must audit the returned intention rather than their own candidate: the
 // stored occurred_at is microsecond-normalized, so a restart-time reconciler and
 // an immediate delivery would otherwise hash two different entries for one
 // intention identity.
-func (r *FleetAuditRepository) InsertFleetAudit(ctx context.Context, intent ports.FleetAuditIntent) (ports.FleetAuditIntent, error) {
+func (r *FleetAuditRepository) insertFleetAudit(ctx context.Context, intent ports.FleetAuditIntent) (ports.FleetAuditIntent, error) {
 	tenantID, ok := shared.TenantFrom(ctx)
 	if !ok || tenantID.IsZero() {
 		return ports.FleetAuditIntent{}, fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
