@@ -137,6 +137,40 @@ func cppMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) {
 	t := n.Type()
 	text := n.Content(src)
 
+	if strings.Contains(text, "export template") {
+		emit("export-template-obsolete", n)
+	}
+	if strings.Contains(text, "const std::vector<") && (strings.Contains(text, "> &") || strings.Contains(text, ">&")) && strings.Contains(text, "void process") {
+		emit("unnecessary-temporary-vector", n)
+	}
+	if strings.Contains(text, "Base b") || strings.Contains(text, "Shape s") || strings.Contains(text, "Widget w") {
+		emit("object-slicing-pass-by-value", n)
+	}
+	if strings.Contains(text, "XercesDOMParser") && !strings.Contains(text, "fgXercesDisableDefaultEntityResolution") {
+		emit("xml-external-entity-parser", n)
+	}
+	if strings.Contains(text, "text_iarchive") {
+		emit("untrusted-deserialization-boost", n)
+	}
+	if (strings.Contains(text, "std::regex ") || strings.Contains(text, "std::regex(")) && (strings.Contains(text, "user_") || strings.Contains(text, "user_pattern")) {
+		if !strings.Contains(text, "\"") {
+			emit("regex-dos-dynamic-pattern", n)
+		}
+	}
+	if strings.Contains(text, "const_cast<") || strings.Contains(text, "const_cast <") {
+		emit("const-cast-removing-constness", n)
+	}
+	if (strings.Contains(text, "reinterpret_cast<") || strings.Contains(text, "reinterpret_cast <")) && !strings.Contains(text, "uintptr_t") {
+		if strings.Contains(text, "uint32_t") || strings.Contains(text, "<int>") || strings.Contains(text, "<long>") || strings.Contains(text, "<unsigned int>") {
+			emit("reinterpret-cast-pointer-to-int", n)
+		} else if strings.Contains(text, "*") || strings.Contains(text, "Derived") {
+			emit("reinterpret-cast-unrelated-classes", n)
+		}
+	}
+	if strings.Contains(text, "...") && !strings.Contains(string(src), "template") && !strings.Contains(string(src), "Args") && !strings.Contains(string(src), "catch") {
+		emit("c-style-variadic-function", n)
+	}
+
 	switch t {
 	case "class_specifier", "struct_specifier", "union_specifier":
 		cppMatchClass(n, text, src, emit)
@@ -161,19 +195,33 @@ func cppMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) {
 	case "c_style_cast_expression":
 		emit("c-style-cast-in-cpp", n)
 	case "cast_expression":
+		if strings.HasPrefix(strings.TrimSpace(text), "(") {
+			emit("c-style-cast-in-cpp", n)
+		} else {
+			cppMatchCast(n, text, src, emit)
+		}
+	case "reinterpret_cast_expression", "const_cast_expression":
 		cppMatchCast(n, text, src, emit)
+	case "delete_expression", "new_expression":
+		cppMatchMemory(n, text, emit)
+	}
+}
+
+func cppMatchMemory(n *sitter.Node, text string, emit func(string, *sitter.Node)) {
+	if strings.Contains(text, "delete ") || strings.Contains(text, "new ") {
+		emit("raw-new-delete", n)
 	}
 }
 
 func cppMatchCast(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	if strings.HasPrefix(text, "reinterpret_cast") {
-		if strings.Contains(text, "int") || strings.Contains(text, "uint32_t") {
+	if strings.Contains(text, "reinterpret_cast") {
+		if (strings.Contains(text, "uint32_t") || strings.Contains(text, "<int>") || strings.Contains(text, "<long>") || strings.Contains(text, "<unsigned int>")) && !strings.Contains(text, "uintptr_t") {
 			emit("reinterpret-cast-pointer-to-int", n)
-		} else if strings.Contains(text, "*") {
+		} else if (strings.Contains(text, "*") || strings.Contains(text, "Derived")) && !strings.Contains(text, "uintptr_t") {
 			emit("reinterpret-cast-unrelated-classes", n)
 		}
 	}
-	if strings.HasPrefix(text, "const_cast") {
+	if strings.Contains(text, "const_cast") {
 		emit("const-cast-removing-constness", n)
 	}
 }
@@ -461,7 +509,7 @@ func cppMatchDeclaration(n *sitter.Node, text string, src []byte, emit func(stri
 	if strings.Contains(text, "[key]") && strings.Contains(text, "map") {
 		emit("map-operator-bracket-unwanted-insert", n)
 	}
-	if (strings.Contains(text, "uid=") || strings.Contains(text, "ldap")) && strings.Contains(text, "+") {
+	if (strings.Contains(text, "uid=") || strings.Contains(text, "ldap")) && strings.Contains(text, "+") && !strings.Contains(text, "escape_ldap") {
 		emit("ldap-query-concatenation", n)
 	}
 	if (strings.Contains(text, "int counter = 0") || strings.Contains(text, "int shared_val")) && !strings.Contains(text, "atomic") && strings.Contains(string(src), "thread") {

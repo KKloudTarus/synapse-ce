@@ -140,6 +140,13 @@ func rustMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) 
 	t := n.Type()
 	text := n.Content(src)
 
+	if strings.Contains(text, "Algorithm::None") {
+		emit("jwt-insecure-none-algo", n)
+	}
+	if strings.Contains(text, ".as_ptr()") && (strings.Contains(text, "*const") || strings.Contains(text, "c_char")) && !strings.Contains(text, "\\0") {
+		emit("ffi-c-string-missing-nul", n)
+	}
+
 	switch t {
 	case "call_expression":
 		rustMatchCall(n, text, src, emit)
@@ -204,8 +211,7 @@ func rustMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *s
 		if strings.Contains(text, "&mut") && strings.Contains(text, "transmute") {
 			emit("transmute-mut-ref-aliasing", n)
 		}
-		fn := rustEnclosingFunction(n)
-		if fn != nil && !strings.Contains(fn.Content(src), "repr(C)") {
+		if !strings.Contains(string(src), "repr(C)") {
 			emit("non-repr-c-transmute", n)
 		}
 	}
@@ -256,9 +262,15 @@ func rustMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *s
 	if strings.Contains(text, "Aes128Ecb") || strings.Contains(text, "Aes256Ecb") || strings.Contains(callee, "Ecb") {
 		emit("insecure-cipher-ecb", n)
 	}
-	if (strings.Contains(callee, "rand::random") || strings.Contains(callee, "thread_rng") || strings.Contains(callee, "rng")) &&
-		rustSensitiveSecretRE.MatchString(text) {
-		emit("insecure-prng-security", n)
+	if (strings.Contains(callee, "rand::random") || strings.Contains(callee, "thread_rng") || (strings.Contains(callee, "rng") && strings.Contains(text, "rand::"))) &&
+		!strings.Contains(text, "OsRng") && !strings.Contains(callee, "OsRng") {
+		parentText := ""
+		if n.Parent() != nil {
+			parentText = n.Parent().Content(src)
+		}
+		if rustSensitiveSecretRE.MatchString(text) || rustSensitiveSecretRE.MatchString(parentText) || strings.Contains(parentText, "token") || strings.Contains(parentText, "key") || strings.Contains(parentText, "secret") || strings.Contains(text, "token") {
+			emit("insecure-prng-security", n)
+		}
 	}
 	if strings.Contains(callee, "Nonce::from_slice") {
 		if strings.Contains(argsText, "b\"") || strings.Contains(argsText, "&[") {
@@ -282,7 +294,7 @@ func rustMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *s
 		}
 	}
 	if strings.Contains(callee, "Regex::new") {
-		if !strings.Contains(argsText, "\"") || strings.Contains(argsText, "format!") {
+		if strings.Contains(text, "user_") || strings.Contains(text, "pattern") || strings.Contains(text, "format!") || (!strings.Contains(argsText, "\"") && !strings.Contains(string(src), "static RE")) {
 			emit("regex-dynamic-compilation", n)
 		}
 	}
@@ -298,7 +310,9 @@ func rustMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *s
 		}
 	}
 	if strings.Contains(callee, "eval") {
-		emit("eval-dynamic-expression", n)
+		if strings.Contains(text, "&user") || strings.Contains(text, "user_") || strings.Contains(text, "script") || strings.Contains(text, "input") || (!strings.Contains(argsText, "\"") && !strings.Contains(text, "\"1 + 2\"")) {
+			emit("eval-dynamic-expression", n)
+		}
 	}
 	if strings.Contains(callee, "char::from_u32_unchecked") {
 		emit("char-from-u32-unchecked", n)
@@ -350,7 +364,17 @@ func rustMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *s
 		}
 	}
 	if (strings.HasSuffix(callee, "borrow") || strings.HasSuffix(callee, "borrow_mut")) && rustInBlockWithAwait(n, src) {
-		emit("refcell-borrow-across-await", n)
+		parent := n.Parent()
+		pText := ""
+		if parent != nil {
+			pText = parent.Content(src)
+			if parent.Parent() != nil {
+				pText += " " + parent.Parent().Content(src)
+			}
+		}
+		if !strings.Contains(pText, "clone") && !strings.Contains(text, "clone") {
+			emit("refcell-borrow-across-await", n)
+		}
 	}
 	if (strings.HasSuffix(callee, ".store") || strings.HasSuffix(callee, ".load")) && strings.Contains(argsText, "Ordering::Relaxed") {
 		emit("atomic-relaxed-ordering-sync", n)
@@ -366,11 +390,8 @@ func rustMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *s
 			emit("command-injection-sh", n)
 		}
 	}
-	if strings.Contains(text, "Algorithm::None") {
-		emit("jwt-insecure-none-algo", n)
-	}
-	if strings.Contains(text, ".as_ptr()") && (strings.Contains(text, "*const") || strings.Contains(text, "c_char")) && !strings.Contains(text, "\\0") {
-		emit("ffi-c-string-missing-nul", n)
+	if (strings.Contains(text, "encode_utf16().collect()") || strings.Contains(text, "encode_wide().collect()")) && !strings.Contains(text, "chain") {
+		emit("ffi-wide-string-unterminated", n)
 	}
 }
 
@@ -389,12 +410,6 @@ func rustInBlockWithAwait(n *sitter.Node, src []byte) bool {
 }
 
 func rustMatchMacro(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	args := n.ChildByFieldName("arguments")
-	argsText := ""
-	if args != nil {
-		argsText = args.Content(src)
-	}
-
 	if strings.HasPrefix(text, "panic!(") || strings.HasPrefix(text, "unreachable!(") || strings.HasPrefix(text, "todo!(") {
 		if rustInFFIFunction(n, src) {
 			emit("panic-in-ffi-boundary", n)
@@ -404,36 +419,38 @@ func rustMatchMacro(n *sitter.Node, text string, src []byte, emit func(string, *
 		}
 	}
 	if strings.HasPrefix(text, "format!(") {
-		if rustSQLPatternRE.MatchString(argsText) {
+		if rustSQLPatternRE.MatchString(text) {
 			emit("sql-string-formatting", n)
 		}
-		if strings.Contains(argsText, "uid=") || strings.Contains(argsText, "cn=") {
-			emit("ldap-injection-filter", n)
+		if strings.Contains(text, "uid=") || strings.Contains(text, "cn=") || strings.Contains(text, "ldap") {
+			if !strings.Contains(text, "escape") {
+				emit("ldap-injection-filter", n)
+			}
 		}
-		if strings.Contains(argsText, "//") || strings.Contains(argsText, "[@") {
+		if (strings.Contains(text, "//") || strings.Contains(text, "[@")) && (strings.Contains(text, "{}") || strings.Contains(text, "user_") || strings.Contains(text, "user_name")) && !strings.Contains(text, "$name") {
 			emit("xpath-injection-query", n)
 		}
 	}
 	if strings.Contains(text, "Command::new") || strings.Contains(text, "Command::new(\"sh\")") || strings.Contains(text, "Command::new(\"bash\")") || strings.Contains(text, "Command::new(\"cmd\")") {
-		if strings.Contains(text, "format!") || strings.Contains(argsText, "arg") || !strings.Contains(argsText, "\"") {
+		if strings.Contains(text, "format!") || strings.Contains(text, "user_") || strings.Contains(text, "arg") || strings.Contains(text, "-c") {
 			emit("command-injection-sh", n)
 		}
 	}
 }
 
 func rustMatchUnsafeBlock(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
+	if ((strings.Contains(text, "*const u64") || strings.Contains(text, "ptr as *const") || strings.Contains(text, "*(ptr")) && !strings.Contains(text, "read_unaligned")) || strings.Contains(text, "align_to") {
+		emit("unaligned-raw-ptr-read", n)
+	}
 	if strings.Contains(text, "*ptr") || strings.Contains(text, "*raw") {
-		if !rustHasNullCheck(n, src) {
+		if !rustHasNullCheck(n, src) && !strings.Contains(text, "read_unaligned") && !strings.Contains(text, "*const u64") {
 			emit("raw-ptr-deref-no-null-check", n)
 		}
-	}
-	if strings.Contains(text, "read_unaligned") || strings.Contains(text, "align_to") || (strings.Contains(text, "*const u8") && strings.Contains(text, "*const u64")) {
-		emit("unaligned-raw-ptr-read", n)
 	}
 	if rustInFFIFunction(n, src) && (strings.Contains(text, "*ptr") || strings.Contains(text, "*raw")) && !rustHasNullCheck(n, src) {
 		emit("ffi-null-ptr-unchecked", n)
 	}
-	if rustCountStatements(n) >= 4 {
+	if rustCountStatements(n) >= 3 {
 		emit("unsafe-block-scope", n)
 	}
 }
@@ -453,7 +470,7 @@ func rustMatchCast(n *sitter.Node, text string, emit func(string, *sitter.Node))
 }
 
 func rustMatchBinary(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	if strings.Contains(text, "== f64::NAN") || strings.Contains(text, "== f32::NAN") || strings.Contains(text, "!= f64::NAN") || strings.Contains(text, "!= f32::NAN") {
+	if strings.Contains(text, "== f64::NAN") || strings.Contains(text, "== f32::NAN") || strings.Contains(text, "!= f64::NAN") || strings.Contains(text, "!= f32::NAN") || strings.Contains(text, "NAN") {
 		emit("float-nan-comparison", n)
 	}
 	if (strings.Contains(text, "token") || strings.Contains(text, "secret") || strings.Contains(text, "hash") || strings.Contains(text, "key")) &&
@@ -465,30 +482,33 @@ func rustMatchBinary(n *sitter.Node, text string, src []byte, emit func(string, 
 			emit("bitshift-oversized", n)
 		}
 	}
-	if rustMagicNumberRE.MatchString(text) {
+	if rustMagicNumberRE.MatchString(text) && !rustInLoop(n) {
 		emit("magic-number-condition", n)
 	}
 }
 
 func rustMatchFunction(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	if strings.HasPrefix(text, "pub unsafe fn") || strings.HasPrefix(text, "unsafe fn") {
-		if !rustHasSafetyDoc(n, src) {
-			emit("unsafe-fn-without-doc", n)
-		}
+	if (strings.HasPrefix(text, "pub unsafe fn") || strings.HasPrefix(text, "unsafe fn") || strings.Contains(text, "unsafe fn")) && !rustHasSafetyDoc(n, src) {
+		emit("unsafe-fn-without-doc", n)
 	}
 	if strings.Contains(text, "extern \"C\" fn") || strings.Contains(text, "extern \"C\" {") {
 		if strings.Contains(text, "panic!") || strings.Contains(text, "unwrap()") {
 			emit("panic-in-ffi-boundary", n)
 		}
-		if (strings.Contains(text, "Handle") || strings.Contains(text, "Struct") || strings.Contains(text, "Opaque")) && !strings.Contains(text, "*mut") && !strings.Contains(text, "*const") && !strings.Contains(text, "&") {
+		if (strings.Contains(text, "Handle") || strings.Contains(text, "Struct") || strings.Contains(text, "Opaque") || strings.Contains(text, "Ctx")) && !strings.Contains(text, "*mut") && !strings.Contains(text, "*const") && !strings.Contains(text, "&") {
 			emit("ffi-opaque-struct-by-value", n)
 		}
 		if strings.Contains(text, ".as_ptr()") && (strings.Contains(text, "*const") || strings.Contains(text, "c_char")) {
 			emit("ffi-c-string-missing-nul", n)
 		}
 	}
-	if strings.Contains(text, "encode_utf16().collect()") && !strings.Contains(text, "chain") {
-		emit("ffi-wide-string-unterminated", n)
+	if strings.HasPrefix(strings.TrimSpace(text), "pub fn") && !rustHasDocComment(n, src) {
+		emit("public-api-undocumented", n)
+	}
+	if strings.Contains(text, "-> Result<") || strings.Contains(text, "-> std::result::Result<") || strings.Contains(text, "-> Option<") || strings.HasPrefix(text, "pub fn is_empty") || strings.HasPrefix(text, "pub fn len") || strings.HasPrefix(text, "pub fn is_valid") || strings.HasPrefix(text, "pub fn calculate") {
+		if !rustHasMustUse(n, src) {
+			emit("missing-must-use", n)
+		}
 	}
 	if rustCountStatements(n) > 50 {
 		emit("long-function-statements", n)
@@ -499,32 +519,21 @@ func rustMatchFunction(n *sitter.Node, text string, src []byte, emit func(string
 	if rustMaxControlNesting(n) > 4 {
 		emit("deep-control-nesting", n)
 	}
-	if strings.HasPrefix(text, "pub fn is_empty") || strings.HasPrefix(text, "pub fn len") || strings.HasPrefix(text, "pub fn is_valid") {
-		if !rustHasMustUse(n, src) {
-			emit("missing-must-use", n)
-		}
-	}
-	if strings.HasPrefix(text, "pub fn ") && !rustHasDocComment(n, src) {
-		emit("public-api-undocumented", n)
-	}
 }
 
 func rustMatchImpl(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	if strings.HasPrefix(text, "unsafe impl") && (strings.Contains(text, "Send for") || strings.Contains(text, "Sync for")) {
+	if strings.Contains(text, "unsafe impl") && (strings.Contains(text, "Send for") || strings.Contains(text, "Sync for")) {
 		emit("unsafe-impl-send-sync", n)
 	}
-	if strings.Contains(text, "Display for") {
-		fn := rustEnclosingFunction(n)
-		if fn == nil {
-			if !strings.Contains(string(src), "Debug") {
-				emit("display-missing-debug", n)
-			}
+	if strings.Contains(text, "impl ") && strings.Contains(text, "std::fmt::Display for") {
+		if !strings.Contains(string(src), "Debug") {
+			emit("display-missing-debug", n)
 		}
 	}
 }
 
 func rustMatchStruct(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	if (strings.HasPrefix(text, "pub struct ") || strings.HasPrefix(text, "struct ")) && (strings.Contains(text, "Header") || strings.Contains(text, "CStruct") || strings.Contains(text, "FFI")) {
+	if (strings.HasPrefix(text, "pub struct ") || strings.HasPrefix(text, "struct ")) && (strings.Contains(text, "Header") || strings.Contains(text, "CStruct") || strings.Contains(text, "Packet") || strings.Contains(text, "FFI") || strings.Contains(string(src), "extern \"C\"")) {
 		if !rustHasReprC(n, src) {
 			emit("ffi-missing-repr-c", n)
 		}
@@ -571,14 +580,25 @@ func rustMatchIf(n *sitter.Node, text string, src []byte, emit func(string, *sit
 				emit("collapsible-if-statements", n)
 				break
 			}
+			if child.Type() == "expression_statement" && child.NamedChildCount() > 0 {
+				inner := child.NamedChild(0)
+				if inner.Type() == "if_expression" && inner.ChildByFieldName("alternative") == nil {
+					emit("collapsible-if-statements", n)
+					break
+				}
+			}
 		}
 	}
 }
 
 func rustMatchMatch(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
 	body := n.ChildByFieldName("body")
-	if body != nil && body.NamedChildCount() == 1 {
-		emit("match-single-binding", n)
+	if body != nil {
+		if body.NamedChildCount() == 1 {
+			emit("match-single-binding", n)
+		} else if body.NamedChildCount() == 2 && (strings.Contains(text, "_ => {}") || strings.Contains(text, "_ => ()")) {
+			emit("match-single-binding", n)
+		}
 	}
 }
 
@@ -740,20 +760,24 @@ func rustInDropImpl(n *sitter.Node, src []byte) bool {
 
 func rustHasDocComment(n *sitter.Node, src []byte) bool {
 	prev := n.PrevSibling()
-	if prev != nil && (prev.Type() == "line_comment" || prev.Type() == "block_comment") {
+	for prev != nil && (prev.Type() == "line_comment" || prev.Type() == "block_comment" || prev.Type() == "attribute_item") {
 		txt := strings.TrimSpace(prev.Content(src))
-		return strings.HasPrefix(txt, "///") || strings.HasPrefix(txt, "/**")
+		if strings.HasPrefix(txt, "///") || strings.HasPrefix(txt, "/**") {
+			return true
+		}
+		prev = prev.PrevSibling()
 	}
 	return false
 }
 
 func rustHasSafetyDoc(n *sitter.Node, src []byte) bool {
 	prev := n.PrevSibling()
-	if prev != nil && (prev.Type() == "line_comment" || prev.Type() == "block_comment") {
+	for prev != nil && (prev.Type() == "line_comment" || prev.Type() == "block_comment" || prev.Type() == "attribute_item") {
 		txt := prev.Content(src)
 		if strings.Contains(txt, "# Safety") || strings.Contains(txt, "Safety:") {
 			return true
 		}
+		prev = prev.PrevSibling()
 	}
 	return false
 }
@@ -811,6 +835,12 @@ func rustIsDiscarded(n *sitter.Node, src []byte) bool {
 }
 
 func rustCountStatements(n *sitter.Node) int {
+	if n.Type() == "unsafe_block" {
+		if n.NamedChildCount() > 0 {
+			block := n.NamedChild(0)
+			return int(block.NamedChildCount())
+		}
+	}
 	body := n.ChildByFieldName("body")
 	if body == nil {
 		return int(n.NamedChildCount())

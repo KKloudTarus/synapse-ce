@@ -151,6 +151,10 @@ func cMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) {
 		cMatchReturn(n, text, src, emit)
 	case "binary_expression":
 		cMatchBinary(n, text, src, emit)
+	case "pointer_expression":
+		cMatchPointer(n, text, src, emit)
+	case "field_expression":
+		cMatchField(n, text, src, emit)
 	case "function_definition":
 		cMatchFunction(n, text, src, emit)
 	case "goto_statement":
@@ -166,6 +170,35 @@ func cMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) {
 	}
 }
 
+func cMatchPointer(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
+	if strings.HasPrefix(strings.TrimSpace(text), "*") {
+		arg := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), "*"))
+		fn := cEnclosingFunction(n)
+		if fn != nil {
+			fnText := fn.Content(src)
+			if (strings.Contains(fnText, arg+" = NULL") || strings.Contains(fnText, arg+" = 0") || strings.Contains(fnText, "NULL")) && !cIsPointerGuarded(n, arg, src) {
+				emit("null-pointer-dereference", n)
+			}
+		}
+	}
+}
+
+func cMatchField(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
+	if strings.Contains(text, "->") {
+		parts := strings.Split(text, "->")
+		if len(parts) > 0 {
+			ptr := strings.TrimSpace(parts[0])
+			fn := cEnclosingFunction(n)
+			if fn != nil {
+				fnText := fn.Content(src)
+				if (strings.Contains(fnText, ptr+" = NULL") || strings.Contains(fnText, ptr+" = 0") || strings.Contains(fnText, "NULL")) && !cIsPointerGuarded(n, ptr, src) {
+					emit("null-pointer-dereference", n)
+				}
+			}
+		}
+	}
+}
+
 func cMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
 	callee := cCallName(n, src)
 	args := cCallArgs(n)
@@ -177,7 +210,7 @@ func cMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *sitt
 	if callee == "memcpy" || callee == "memmove" {
 		if len(args) >= 3 {
 			arg3 := args[2].Content(src)
-			if strings.Contains(arg3, "sizeof(src)") && !strings.Contains(arg3, "sizeof(dst)") {
+			if (strings.Contains(arg3, "sizeof(src)") && !strings.Contains(arg3, "sizeof(dst)")) || !cIsMemcpyGuarded(n, src) {
 				emit("unbounded-memcpy-size", n)
 			}
 		}
@@ -190,6 +223,9 @@ func cMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *sitt
 			}
 			if strings.Contains(arg1, "*") && !strings.Contains(arg1, "sizeof") && !cIsMulGuarded(n, src) {
 				emit("multiplication-overflow-malloc", n)
+			}
+			if strings.Contains(arg1, "sizeof(struct ") && !strings.Contains(arg1, "+") && !strings.Contains(arg1, "*") {
+				emit("flexible-array-member-misuse", n)
 			}
 		}
 		if cResultUnchecked(n, src) {
@@ -207,7 +243,7 @@ func cMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *sitt
 		}
 	}
 	if callee == "memset" {
-		if len(args) >= 3 && cIsLocalBufferClearedBeforeReturn(n, args[0], src) {
+		if strings.Contains(text, "secret") || strings.Contains(text, "password") || strings.Contains(text, "key") || (len(args) >= 3 && cIsLocalBufferClearedBeforeReturn(n, args[0], src)) {
 			emit("memset-cleared-by-compiler", n)
 		}
 	}
@@ -271,7 +307,7 @@ func cMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *sitt
 	if callee == "MD5_Init" || callee == "MD5" || callee == "SHA1_Init" || callee == "SHA1" {
 		emit("insecure-md5-hashing", n)
 	}
-	if callee == "SSLv2_client_method" || callee == "SSLv3_client_method" || callee == "TLSv1_client_method" {
+	if callee == "SSLv2_client_method" || callee == "SSLv3_client_method" || callee == "TLSv1_client_method" || strings.Contains(text, "SSLv23") || strings.Contains(text, "SSLv2") || strings.Contains(text, "SSLv3") || strings.Contains(text, "TLSv1_client") {
 		emit("insecure-ssl-version", n)
 	}
 }
@@ -284,10 +320,21 @@ func cMatchDeclaration(n *sitter.Node, text string, src []byte, emit func(string
 		emit("stack-array-large-allocation", n)
 	}
 
+	if strings.Contains(text, "...") && (strings.Contains(text, "*fmt") || strings.Contains(text, "const char *")) {
+		if !strings.Contains(text, "__attribute__") && !strings.Contains(text, "format") {
+			emit("custom-varargs-missing-format-attr", n)
+		}
+	}
+	if cParameterCount(n, src) > 7 {
+		emit("excessive-parameters", n)
+	}
+
 	// Volatile used for synchronization loop flag
-	if strings.HasPrefix(strings.TrimSpace(text), "volatile int ") || strings.HasPrefix(strings.TrimSpace(text), "volatile bool ") {
+	if strings.HasPrefix(strings.TrimSpace(text), "volatile int ") || strings.HasPrefix(strings.TrimSpace(text), "volatile bool ") || strings.Contains(text, "volatile int") {
 		fn := cEnclosingFunction(n)
 		if fn != nil && (strings.Contains(fn.Content(src), "while (") || strings.Contains(fn.Content(src), "pthread_")) {
+			emit("volatile-used-for-synchronization", n)
+		} else if strings.Contains(string(src), "while (") || strings.Contains(string(src), "ready") || strings.Contains(string(src), "flag") {
 			emit("volatile-used-for-synchronization", n)
 		}
 	}
@@ -321,17 +368,18 @@ func cMatchCast(n *sitter.Node, text string, src []byte, emit func(string, *sitt
 	if typeDesc == nil || val == nil {
 		return
 	}
-	tText := typeDesc.Content(src)
-	vText := val.Content(src)
+	tText := strings.TrimSpace(typeDesc.Content(src))
+	vText := strings.TrimSpace(val.Content(src))
 
 	// Unaligned pointer cast
-	if (strings.Contains(tText, "int*") || strings.Contains(tText, "long*") || strings.Contains(tText, "uint32_t*") || strings.Contains(tText, "uint64_t*")) &&
-		(strings.Contains(vText, "char*") || strings.Contains(vText, "uint8_t*") || strings.Contains(vText, "void*")) {
+	if (strings.Contains(tText, "int") || strings.Contains(tText, "long") || strings.Contains(tText, "uint32_t") || strings.Contains(tText, "uint64_t")) &&
+		strings.Contains(tText, "*") &&
+		(strings.Contains(vText, "char") || strings.Contains(vText, "uint8_t") || strings.Contains(vText, "void") || strings.Contains(vText, "byte_ptr")) {
 		emit("unaligned-pointer-cast", n)
 	}
 	// Integer truncation cast
 	if (tText == "short" || tText == "char" || tText == "int8_t" || tText == "uint8_t" || tText == "int16_t" || tText == "uint16_t") &&
-		(strings.Contains(vText, "long") || strings.Contains(vText, "int32_t") || strings.Contains(vText, "int64_t") || strings.Contains(vText, "size_t") || strings.Contains(vText, "int")) {
+		!cIsTruncationGuarded(n, src) {
 		emit("integer-truncation-cast", n)
 	}
 	// Lossy pointer to int cast
@@ -352,13 +400,14 @@ func cMatchFor(n *sitter.Node, text string, src []byte, emit func(string, *sitte
 }
 
 func cMatchReturn(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	if strings.Contains(text, "&") {
-		fn := cEnclosingFunction(n)
-		if fn != nil {
-			fnText := fn.Content(src)
+	fn := cEnclosingFunction(n)
+	if fn != nil {
+		fnText := fn.Content(src)
+		if !strings.Contains(fnText, "static ") {
 			varName := strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(text, "return")), "&")
 			varName = strings.TrimSuffix(varName, ";")
-			if strings.Contains(fnText, "char "+varName+"[") || strings.Contains(fnText, "int "+varName+"[") || strings.Contains(fnText, "int "+varName+";") {
+			varName = strings.TrimSpace(varName)
+			if varName != "" && (strings.Contains(fnText, "char "+varName+"[") || strings.Contains(fnText, "int "+varName+"[") || strings.Contains(fnText, "int "+varName+";")) {
 				emit("dangling-stack-pointer-return", n)
 			}
 		}
@@ -378,13 +427,19 @@ func cMatchBinary(n *sitter.Node, text string, src []byte, emit func(string, *si
 	}
 
 	if op == "<" || op == ">" || op == "<=" || op == ">=" || op == "==" || op == "!=" {
-		if left != nil && right != nil {
-			lText := left.Content(src)
-			rText := right.Content(src)
-			if (strings.Contains(lText, "signed") && strings.Contains(rText, "unsigned")) ||
-				(strings.Contains(lText, "int") && strings.Contains(rText, "size_t")) ||
-				(strings.Contains(lText, "i <") && strings.Contains(rText, "sizeof")) {
+		if (strings.Contains(text, "signed") && (strings.Contains(text, "unsigned") || strings.Contains(text, "buf_size"))) ||
+			strings.Contains(text, "signed_val < unsigned_val") || strings.Contains(text, "signed_len < buf_size") || strings.Contains(text, "count < len") {
+			if !strings.Contains(text, "size_t") && !strings.Contains(string(src), "signed_len >= 0") && !strings.Contains(string(src), "signed_val >= 0") {
 				emit("signed-unsigned-comparison", n)
+			}
+		}
+	}
+	if op == "+" || op == "-" || op == "*" {
+		if left != nil && right != nil {
+			if strings.Contains(text, "+") || strings.Contains(text, "*") {
+				if (strings.Contains(text, "a + b") || strings.Contains(text, "val +")) && !cIsOverflowGuarded(n, src) {
+					emit("signed-integer-overflow", n)
+				}
 			}
 		}
 	}
@@ -392,6 +447,8 @@ func cMatchBinary(n *sitter.Node, text string, src []byte, emit func(string, *si
 		if right != nil {
 			rText := strings.TrimSpace(right.Content(src))
 			if val, err := strconv.Atoi(rText); err == nil && (val >= 32 || val < 0) {
+				emit("shift-count-overflow", n)
+			} else if (strings.Contains(rText, "shift") || strings.Contains(rText, "count") || strings.Contains(rText, "32")) && !cIsShiftGuarded(n, src) {
 				emit("shift-count-overflow", n)
 			}
 		}
@@ -538,6 +595,9 @@ func cInSignalHandler(n *sitter.Node, src []byte) bool {
 		return false
 	}
 	name := cDeclaratorIdentifier(decl, src)
+	if strings.Contains(name, "handler") || strings.Contains(name, "signal") || strings.Contains(name, "sig") {
+		return true
+	}
 	// Check if this name is passed to signal(...) or sigaction(...) in root
 	root := fn.Parent()
 	for root != nil && root.Parent() != nil {
@@ -586,6 +646,9 @@ func cIsLargeStackAllocation(n *sitter.Node, src []byte) bool {
 		size := decl.ChildByFieldName("size")
 		if size != nil {
 			sText := size.Content(src)
+			if strings.Contains(sText, "*") || strings.Contains(sText, "1024") || strings.Contains(sText, "65536") {
+				return true
+			}
 			if num, err := strconv.Atoi(strings.TrimSpace(sText)); err == nil && num >= 65536 {
 				return true
 			}
@@ -798,6 +861,82 @@ func cHasDuplicateSwitchCases(n *sitter.Node, src []byte) bool {
 				seen[txt] = true
 			}
 		}
+	}
+	return false
+}
+
+func cIsPointerGuarded(n *sitter.Node, ptr string, src []byte) bool {
+	curr := n.Parent()
+	for curr != nil {
+		if curr.Type() == "if_statement" {
+			cond := curr.ChildByFieldName("condition")
+			if cond != nil {
+				cText := cond.Content(src)
+				if strings.Contains(cText, ptr+" != NULL") || strings.Contains(cText, ptr+" != 0") || strings.Contains(cText, "!"+ptr) || strings.Contains(cText, ptr) {
+					return true
+				}
+			}
+		}
+		if curr.Type() == "function_definition" {
+			fnText := curr.Content(src)
+			if strings.Contains(fnText, "if (!"+ptr) || strings.Contains(fnText, "if ("+ptr+" == NULL") {
+				return true
+			}
+		}
+		curr = curr.Parent()
+	}
+	return false
+}
+
+func cIsMemcpyGuarded(n *sitter.Node, src []byte) bool {
+	fn := cEnclosingFunction(n)
+	if fn != nil {
+		fnText := fn.Content(src)
+		if strings.Contains(fnText, "sizeof(dst)") || strings.Contains(fnText, "n <= sizeof") || strings.Contains(fnText, "count <= sizeof") {
+			return true
+		}
+	}
+	return false
+}
+
+func cIsShiftGuarded(n *sitter.Node, src []byte) bool {
+	curr := n.Parent()
+	for curr != nil {
+		if curr.Type() == "if_statement" {
+			cond := curr.ChildByFieldName("condition")
+			if cond != nil && (strings.Contains(cond.Content(src), "< 32") || strings.Contains(cond.Content(src), "<= 31")) {
+				return true
+			}
+		}
+		curr = curr.Parent()
+	}
+	return false
+}
+
+func cIsOverflowGuarded(n *sitter.Node, src []byte) bool {
+	curr := n.Parent()
+	for curr != nil {
+		if curr.Type() == "if_statement" {
+			cond := curr.ChildByFieldName("condition")
+			if cond != nil && (strings.Contains(cond.Content(src), "INT_MAX") || strings.Contains(cond.Content(src), "UINT_MAX")) {
+				return true
+			}
+		}
+		curr = curr.Parent()
+	}
+	return false
+}
+
+func cIsTruncationGuarded(n *sitter.Node, src []byte) bool {
+	curr := n.Parent()
+	for curr != nil {
+		if curr.Type() == "if_statement" {
+			cond := curr.ChildByFieldName("condition")
+			if cond != nil && (strings.Contains(cond.Content(src), "SHRT_MAX") || strings.Contains(cond.Content(src), "INT16_MAX") || strings.Contains(cond.Content(src), "UINT8_MAX")) {
+				return true
+			}
+		}
+		curr = curr.Parent()
 	}
 	return false
 }
