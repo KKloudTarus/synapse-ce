@@ -1,10 +1,12 @@
 package blob
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -22,6 +24,7 @@ type Memory struct {
 func NewMemory() *Memory { return &Memory{m: map[string][]byte{}} }
 
 var _ ports.BlobStore = (*Memory)(nil)
+var _ ports.ObjectStore = (*Memory)(nil)
 var _ ports.RestoreBlobReader = (*Memory)(nil)
 
 func (s *Memory) Put(_ context.Context, key string, data []byte) error {
@@ -43,6 +46,38 @@ func (s *Memory) Get(_ context.Context, key string) ([]byte, error) {
 	cp := make([]byte, len(d))
 	copy(cp, d)
 	return cp, nil
+}
+
+func (s *Memory) PutObject(ctx context.Context, key string, src io.Reader, size int64) error {
+	if size < 0 {
+		return fmt.Errorf("object size must not be negative")
+	}
+	data, err := io.ReadAll(io.LimitReader(src, size+1))
+	if err != nil {
+		return err
+	}
+	if int64(len(data)) != size {
+		return fmt.Errorf("object size mismatch")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.Put(ctx, key, data)
+}
+
+func (s *Memory) OpenObject(ctx context.Context, key string) (io.ReadCloser, error) {
+	data, err := s.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func (s *Memory) DeleteObject(_ context.Context, key string) error {
+	s.mu.Lock()
+	delete(s.m, key)
+	s.mu.Unlock()
+	return nil
 }
 
 // Verify streams the stored bytes into SHA-256 and compares them with expected.

@@ -12,31 +12,53 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@internationalized/date": "^3.12.3",
     "@radix-ui/react-select": "^2.3.7",
-    "@tanstack/react-virtual": "^3.14.9",
+    "@react-aria/utils": "^3.34.1",
+    "@react-stately/utils": "^3.12.1",
+    "@tailwindcss/typography": "^0.5.20",
+    "@tanstack/react-virtual": "^3.14.10",
+    "@untitledui/file-icons": "^0.0.9",
+    "@untitledui/icons": "^0.0.22",
     "@xyflow/react": "^12.11.3",
+    "embla-carousel-react": "^8.6.0",
     "fflate": "0.8.3",
-    "lucide-react": "^1.31.0",
+    "input-otp": "^1.5.0",
+    "motion": "^12.43.0",
     "react": "^19.2.8",
+    "react-aria": "^3.51.0",
+    "react-aria-components": "^1.20.0",
     "react-dom": "^19.2.8",
+    "react-hook-form": "^7.85.0",
+    "react-hotkeys-hook": "^5.3.3",
     "react-router-dom": "^7.18.2",
+    "recharts": "^3.10.1",
+    "tailwind-merge": "^3.6.0",
+    "tailwindcss-animate": "^1.0.7",
+    "tailwindcss-react-aria-components": "^2.2.0",
     "xlsx-js-style": "1.2.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.0.0",
-    "@testing-library/user-event": "^14.6.4",
+    "@testing-library/user-event": "^14.6.5",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "@vitejs/plugin-react": "^6.0.5",
+    "@vitejs/plugin-react": "^6.1.0",
     "jsdom": "^30.0.1",
+    "msw": "^2.15.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
-    "vite": "^8.2.1",
-    "vitest": "^4.1.10"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
+  },
+  "msw": {
+    "workerDirectory": [
+      "public"
+    ]
   }
 }

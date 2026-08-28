@@ -31,6 +31,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/threatmodel"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
@@ -294,6 +295,19 @@ type ProjectSourceArtifactStore interface {
 type ProjectArchiveStore interface {
 	Save(ctx context.Context, projectID shared.ID, filename string, src io.Reader) (string, error)
 	Delete(ctx context.Context, projectID shared.ID) error
+}
+
+type ObjectStore interface {
+	PutObject(ctx context.Context, key string, src io.Reader, size int64) error
+	OpenObject(ctx context.Context, key string) (io.ReadCloser, error)
+	DeleteObject(ctx context.Context, key string) error
+}
+
+type EngagementSourceStore interface {
+	Save(ctx context.Context, tenantID, engagementID shared.ID, filename, actor string, createdAt time.Time, size int64, sha256hex string, src io.Reader) (sourcepackage.Package, error)
+	Get(ctx context.Context, tenantID, engagementID shared.ID) (sourcepackage.Package, error)
+	Delete(ctx context.Context, tenantID, engagementID shared.ID) error
+	Materialize(ctx context.Context, locator string) (string, sourcepackage.Package, func() error, error)
 }
 
 // EngagementRepository persists engagements. Returned aggregates are read-only –
@@ -1209,13 +1223,15 @@ const (
 	TargetLocal   = "local"
 	TargetGit     = "git"
 	TargetArchive = "archive"
+	TargetUpload  = "upload"
 	TargetImage   = "image"
 )
 
 // AcquireRequest identifies a scan target and how to obtain it.
 type AcquireRequest struct {
-	Kind       string // local | git | archive | image (default: local)
+	Kind       string // local | git | archive | upload | image (default: local)
 	Value      string // path, git URL, archive path, or image ref
+	Locator    string // internal locator for a server-owned uploaded source package
 	Ref        string // optional git branch/tag to clone (git kind only)
 	BaseRef    string // optional validated Git comparison base ref
 	BaseCommit string // optional immutable base commit from a previous analysis
@@ -1863,6 +1879,12 @@ const (
 	LicenseDeny  LicenseVerdict = "deny"
 )
 
+type LicensePolicyOption struct {
+	License      string `json:"license"`
+	Severity     string `json:"severity"`
+	PolicyRuleID string `json:"policy_rule_id"`
+}
+
 // LicenseFinding is a distinct license across the SBOM, its category, the policy
 // verdict, and the components that use it.
 type LicenseFinding struct {
@@ -1873,9 +1895,13 @@ type LicenseFinding struct {
 	// (forbidden/restricted/reciprocal/notice/permissive/unencumbered → critical/high/
 	// medium/low), derived from SPDX + Google licenseclassifier. They complement (never
 	// replace) Verdict; empty when the scanner predates this field.
-	RiskCategory string   `json:"risk_category"`
-	Severity     string   `json:"severity"`
-	Components   []string `json:"components"`
+	RiskCategory      string                `json:"risk_category"`
+	Severity          string                `json:"severity"`
+	Components        []string              `json:"components"`
+	PolicyRuleID      string                `json:"policy_rule_id"`
+	RecommendedChoice string                `json:"recommended_choice"`
+	SelectionReason   string                `json:"selection_reason"`
+	Options           []LicensePolicyOption `json:"options,omitempty"`
 }
 
 // LicenseEnricher fills in missing component licenses from package-registry

@@ -140,7 +140,7 @@ func TestDeterministicAnalysisPrecedesAITriageInSourcePipeline(t *testing.T) {
 		if fn == nil {
 			t.Fatalf("%s missing", name)
 		}
-		triagePos, taintPos, reachPos := token.NoPos, token.NoPos, token.NoPos
+		triagePos, taintPos, pythonTaintPos, reachPos := token.NoPos, token.NoPos, token.NoPos, token.NoPos
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
@@ -157,14 +157,18 @@ func TestDeterministicAnalysisPrecedesAITriageInSourcePipeline(t *testing.T) {
 				if ident, ok := base.X.(*ast.Ident); ok && ident.Name == "s" && base.Sel.Name == "taint" && sel.Sel.Name == "Scan" {
 					taintPos = call.Pos()
 				}
+				if ident, ok := base.X.(*ast.Ident); ok && ident.Name == "s" && base.Sel.Name == "pythonTaint" && sel.Sel.Name == "Scan" {
+					pythonTaintPos = call.Pos()
+				}
 				if ident, ok := base.X.(*ast.Ident); ok && ident.Name == "s" && base.Sel.Name == "reachability" && sel.Sel.Name == "Record" {
 					reachPos = call.Pos()
 				}
 			}
 			return true
 		})
-		if triagePos == token.NoPos || taintPos == token.NoPos || reachPos == token.NoPos || !(reachPos < triagePos && taintPos < triagePos) {
-			t.Fatalf("%s ordering reach=%v taint=%v triage=%v", name, reachPos, taintPos, triagePos)
+		if triagePos == token.NoPos || taintPos == token.NoPos || pythonTaintPos == token.NoPos || reachPos == token.NoPos ||
+			!(reachPos < triagePos && taintPos < triagePos && pythonTaintPos < triagePos) {
+			t.Fatalf("%s ordering reach=%v taint=%v python_taint=%v triage=%v", name, reachPos, taintPos, pythonTaintPos, triagePos)
 		}
 	}
 }

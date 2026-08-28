@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Card } from '../ui'
 import { RuleMetadata } from './RuleMetadata'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight } from '@untitledui/icons'
 import type { RuleSummary } from '../../lib/types'
 
 interface VirtualRuleCardsProps {

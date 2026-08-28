@@ -56,14 +56,23 @@ Policy, which records that you understand Synapse is for authorized testing only
 An engagement is the container for a piece of authorized work. Create one with:
 
 - a name and client,
-- an in-scope target (for example a domain),
+- either an in-scope linked target or an uploaded source package,
 - an authorization window (from and to timestamps).
+
+The dashboard accepts `.zip`, `.tar`, `.tar.gz`, and `.tgz` source packages up to 512 MiB. Synapse stores
+the package as an Engagement-owned artifact, verifies its SHA-256 before every scan, and extracts it into a
+bounded temporary workspace. In API + worker deployments, both processes must point at the same S3/MinIO
+bucket through the `SYNAPSE_BLOB_*` settings.
 
 Nothing runs outside that scope and window.
 
 ## 4. Run a scan
 
 You have two ways to feed the scanner.
+
+**Upload source with the engagement.** Choose source upload while creating the engagement and select a
+supported archive. Create & Scan starts the scan against that immutable package; no server filesystem path
+or repository URL is exposed to the browser.
 
 **Scan a target directly.** From the dashboard, point the scan at a local path or a git reference. Synapse
 generates the SBOM and runs detection.

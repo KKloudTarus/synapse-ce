@@ -82,14 +82,19 @@ The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADD
 | `SYNAPSE_DB_MAX_CONN_LIFETIME` | `1h` | Connection lifetime. |
 | `SYNAPSE_DB_MAX_CONN_IDLE` | `30m` | Idle connection timeout. |
 
-## Evidence blob store (S3 or MinIO)
+## Shared artifact store (S3 or MinIO)
+
+The same object store retains evidence artifacts and Engagement source packages uploaded from the UI.
+Uploaded packages accept `.zip`, `.tar`, `.tar.gz`, and `.tgz` files up to 512 MiB compressed. API and
+worker processes must use the same bucket; the in-memory default only supports a single-process local
+development run and is not durable across restarts.
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_BLOB_ENDPOINT` | (in-memory) | Host and port without a scheme. Empty runs an in-memory blob store. |
 | `SYNAPSE_BLOB_ACCESS_KEY` | `synapse` | Access key. |
 | `SYNAPSE_BLOB_SECRET_KEY` | `synapse-secret` | Secret key. |
-| `SYNAPSE_BLOB_BUCKET` | `synapse-evidence` | Bucket for evidence artifacts. |
+| `SYNAPSE_BLOB_BUCKET` | `synapse-evidence` | Shared bucket for evidence artifacts and uploaded Engagement source packages. |
 | `SYNAPSE_BLOB_USE_SSL` | `false` | Set true for https endpoints. |
 
 ## Restore verification (synapse-verify-restore)
@@ -210,6 +215,9 @@ reports whether traversal was truncated; lowering a bound never produces a resul
 | `SYNAPSE_REACHABILITY_ENABLED` | `true` | Go Tier-2 call-graph reachability proof (best-effort). |
 | `SYNAPSE_JVM_REACHABILITY_ENABLED` | `true` | JVM (Java/Kotlin) reachability. |
 | `SYNAPSE_PYREACH_ENABLED` | `false` | Python Tier-1 import-reachability (a dead dependency becomes an OpenVEX `not_affected`). |
+| `SYNAPSE_PYREACH_TIER2_ENABLED` | `false` | Python Tier-2 affected-symbol semantic reachability. Requires Tier-1, judgments, and a CGO-enabled `synapse-ast`. |
+| `SYNAPSE_PYTAINT_ENABLED` | `false` | Python interprocedural semantic taint proposals. Requires judgments and a CGO-enabled `synapse-ast`; it does not require the target-compilation sandbox. |
+| `SYNAPSE_AST_BIN` | bundled / `PATH` | Optional path to the `synapse-ast` sidecar used by Python Tier-2 reachability, Python taint, and code-quality analysis. |
 | `SYNAPSE_JSREACH_ENABLED` | `false` | JS/TS Tier-1 import-level reachability. |
 | `SYNAPSE_JSREACH_TIER2_ENABLED` | `false` | JS/TS Tier-2 symbol-level reachability. |
 
@@ -319,7 +327,9 @@ All are best-effort and no-op without inputs. Set a flag to `false` to opt out.
 | `SYNAPSE_SAST_ENABLED` | `true` | Pattern SAST in the scan pipeline. |
 | `SYNAPSE_REACHABILITY_ENABLED` | `true` | Call-graph reachability proof (Go, Tier-2). Needs judgments. |
 | `SYNAPSE_PYREACH_ENABLED` | `false` | Python import-reachability (Tier-1 dead-dependency → OpenVEX). Needs judgments. |
-| `SYNAPSE_TAINT_ENABLED` | `false` | Taint proposals. Needs judgments and the sandbox. |
+| `SYNAPSE_PYREACH_TIER2_ENABLED` | `false` | Python semantic call-graph reachability (Tier-2). Requires Python Tier-1 and `synapse-ast`. |
+| `SYNAPSE_TAINT_ENABLED` | `false` | Go call-graph taint proposals. Needs judgments and the target-compilation sandbox. |
+| `SYNAPSE_PYTAINT_ENABLED` | `false` | Python value-flow taint proposals. Needs judgments and `synapse-ast`; source-only, so the sandbox is optional. |
 | `SYNAPSE_CROSSCHECK_ENABLED` | `true` | Detection-source disagreement judgments. |
 | `SYNAPSE_SBOM_CROSSCHECK_ENABLED` | `true` | Dual-producer SBOM cross-check. |
 | `SYNAPSE_GOMODGRAPH_ENABLED` | `true` | Transitive Go dependency edges via `go mod graph`. |

@@ -29,6 +29,9 @@ var _ ports.QualityGateMutator = (*QualityGateMutator)(nil)
 
 func (m *QualityGateMutator) CreateGate(ctx context.Context, tenantID shared.ID, gate qualitygate.Gate, audit ports.AuditEntry) error {
 	return m.inTx(ctx, func(tx pgx.Tx) error {
+		if err := setAuditTenant(ctx, tx, tenantID); err != nil {
+			return err
+		}
 		if err := lockGate(ctx, tx, tenantID, gate.Key); err != nil {
 			return err
 		}
@@ -39,12 +42,15 @@ func (m *QualityGateMutator) CreateGate(ctx context.Context, tenantID shared.ID,
 		if _, err := tx.Exec(ctx, `INSERT INTO quality_gates (tenant_id, key, name, conditions) VALUES ($1,$2,$3,$4)`, tenantID.String(), gate.Key, gate.Name, conditions); err != nil {
 			return gateWriteError("insert quality gate", err)
 		}
-		return appendAudit(ctx, tx, audit)
+		return appendTenantAudit(ctx, tx, tenantID.String(), audit)
 	})
 }
 
 func (m *QualityGateMutator) UpdateGate(ctx context.Context, tenantID shared.ID, gate qualitygate.Gate, audit ports.AuditEntry) error {
 	return m.inTx(ctx, func(tx pgx.Tx) error {
+		if err := setAuditTenant(ctx, tx, tenantID); err != nil {
+			return err
+		}
 		if err := lockGate(ctx, tx, tenantID, gate.Key); err != nil {
 			return err
 		}
@@ -59,12 +65,15 @@ func (m *QualityGateMutator) UpdateGate(ctx context.Context, tenantID shared.ID,
 		if ct.RowsAffected() == 0 {
 			return shared.ErrNotFound
 		}
-		return appendAudit(ctx, tx, audit)
+		return appendTenantAudit(ctx, tx, tenantID.String(), audit)
 	})
 }
 
 func (m *QualityGateMutator) DeleteGate(ctx context.Context, tenantID shared.ID, key string, audit ports.AuditEntry) error {
 	return m.inTx(ctx, func(tx pgx.Tx) error {
+		if err := setAuditTenant(ctx, tx, tenantID); err != nil {
+			return err
+		}
 		if err := lockGate(ctx, tx, tenantID, key); err != nil {
 			return err
 		}
@@ -85,12 +94,15 @@ func (m *QualityGateMutator) DeleteGate(ctx context.Context, tenantID shared.ID,
 		if _, err := tx.Exec(ctx, `DELETE FROM quality_gates WHERE tenant_id=$1 AND key=$2`, tenantID.String(), key); err != nil {
 			return fmt.Errorf("delete quality gate: %w", err)
 		}
-		return appendAudit(ctx, tx, audit)
+		return appendTenantAudit(ctx, tx, tenantID.String(), audit)
 	})
 }
 
 func (m *QualityGateMutator) AssignProjectGate(ctx context.Context, tenantID shared.ID, projectKey, gateID string, audit ports.AuditEntry) error {
 	return m.inTx(ctx, func(tx pgx.Tx) error {
+		if err := setAuditTenant(ctx, tx, tenantID); err != nil {
+			return err
+		}
 		gateID = strings.TrimSpace(gateID)
 		if err := requireCustomGate(ctx, tx, tenantID, gateID); err != nil {
 			return err
@@ -102,7 +114,7 @@ func (m *QualityGateMutator) AssignProjectGate(ctx context.Context, tenantID sha
 		if ct.RowsAffected() == 0 {
 			return shared.ErrNotFound
 		}
-		return appendAudit(ctx, tx, audit)
+		return appendTenantAudit(ctx, tx, tenantID.String(), audit)
 	})
 }
 
@@ -163,6 +175,16 @@ func (m *QualityGateMutator) inTxOnce(ctx context.Context, fn func(pgx.Tx) error
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("quality gate commit: %w", err)
+	}
+	return nil
+}
+
+// setAuditTenant binds the transaction-scoped tenant that the audit_log RLS policy
+// (synapse_current_tenant) checks. It must run before appendTenantAudit, otherwise the
+// audit INSERT is rejected with a row-level security violation.
+func setAuditTenant(ctx context.Context, tx pgx.Tx, tenantID shared.ID) error {
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", tenantID.String()); err != nil {
+		return fmt.Errorf("set audit tenant: %w", err)
 	}
 	return nil
 }

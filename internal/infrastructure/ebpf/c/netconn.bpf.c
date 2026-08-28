@@ -20,6 +20,7 @@
 #define RINGBUF_BYTES (256 * 1024)
 
 struct net_event {
+	__u64 ktime_ns; // kernel-monotonic occurred-at (bpf_ktime_get_ns); userspace maps it to wall-clock
 	__u32 pid;
 	__u32 daddr; // IPv4 destination, network byte order
 	__u16 dport; // destination port, host byte order
@@ -40,6 +41,7 @@ static __always_inline void emit(__u8 proto, __u32 daddr, __u16 dport)
 	struct net_event *e = bpf_ringbuf_reserve(&net_events, sizeof(*e), 0);
 	if (!e)
 		return;
+	e->ktime_ns = bpf_ktime_get_ns();
 	e->pid = bpf_get_current_pid_tgid() >> 32;
 	e->proto = proto;
 	e->pad = 0;

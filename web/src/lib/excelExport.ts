@@ -167,11 +167,20 @@ function excelSourcePath(location: string, scanTarget: string): string {
   return targetName || 'root'
 }
 
+function componentLocations(component: Pick<ScanResult['components'][number], 'location' | 'locations'>): string[] {
+  const locations = [...(component.locations ?? []), component.location]
+    .map((location) => location.trim())
+    .filter(Boolean)
+  return [...new Set(locations)]
+}
+
 function scanLooksLikeSingleRootProject(scan: ScanResult): boolean {
   return scan.components.some((component) => {
-    const relative = excelRelativeLocation(component.location, scan.target)
-    if (!relative) return false
-    return ROOT_PROJECT_MANIFESTS.has(relative) || (!relative.includes('/') && ROOT_PROJECT_MANIFESTS.has(relative.split('/').at(-1) ?? ''))
+    return componentLocations(component).some((location) => {
+      const relative = excelRelativeLocation(location, scan.target)
+      if (!relative) return false
+      return ROOT_PROJECT_MANIFESTS.has(relative) || (!relative.includes('/') && ROOT_PROJECT_MANIFESTS.has(relative.split('/').at(-1) ?? ''))
+    })
   })
 }
 
@@ -229,15 +238,32 @@ interface ExcelVulnInstance {
   cve: string
   severity: string
   installed: string
+  versionStatus: string
   fixed: string
+  alternativeFixes: string
+  fixStatus: string
+  upgradeType: string
+  fixConfidence: string
+  fixReason: string
 }
 
 interface ExcelLicenseInstance {
   service: string
   sourcePath: string
   pkg: string
+  installed: string
+  versionStatus: string
+  purl: string
+  dependencyType: string
+  scope: string
+  rawLicense: string
   license: string
+  detectedExpression: string
   severity: string
+  policyRuleId: string
+  recommendation: string
+  selectionReason: string
+  evidenceStatus: string
 }
 
 export function packageVersionKey(component: string, version: string): string {
@@ -260,6 +286,12 @@ export interface VulnerabilityDisplayRow {
   severity: Severity
   installed: string
   fixedVersion: string
+  alternativeFixedVersions: string[]
+  fixStatus: string
+  upgradeType: string
+  fixConfidence: string
+  fixReason: string
+  versionStatus: string
   location: string
   direct: boolean
   via: string
@@ -285,6 +317,12 @@ export function buildVulnerabilityDisplayRows(vulns: Vulnerability[], packageLoc
       severity: vuln.severity,
       installed: vuln.version,
       fixedVersion: vuln.fixedVersion,
+      alternativeFixedVersions: vuln.alternativeFixedVersions ?? [],
+      fixStatus: vuln.fixStatus ?? '',
+      upgradeType: vuln.upgradeType ?? '',
+      fixConfidence: vuln.fixConfidence ?? '',
+      fixReason: vuln.fixReason ?? '',
+      versionStatus: vuln.versionStatus ?? '',
       location,
       direct: vuln.direct,
       via: vuln.path.length >= 2 ? shortPkg(vuln.path[vuln.path.length - 2]) : '',
@@ -362,15 +400,34 @@ function recommendedExcelLicense(licenses: ExcelLicenseInstance[]): ExcelLicense
   )[0]
 }
 
+function safeExcelRecommendation(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  const recommendation = value.trim()
+  if (!recommendation || /^[+-]?\d+(?:[.,]\d+)?$/.test(recommendation)) return ''
+  return recommendation
+}
+
+function excelLicenseRecommendation(licenses: ExcelLicenseInstance[]): string {
+  const choices = new Set(licenses.map((license) => license.license.trim()).filter(Boolean))
+  const hasChoiceExpression = licenses.some((license) => /\sOR\s/i.test(license.detectedExpression))
+  const hasRequiredExpression = licenses.some((license) => /\sAND\s/i.test(license.detectedExpression))
+  if (hasRequiredExpression && !hasChoiceExpression) return ''
+  if (choices.size <= 1 && !hasChoiceExpression) return ''
+  for (const license of licenses) {
+    const recommendation = safeExcelRecommendation(license.recommendation)
+    if (recommendation) return recommendation
+  }
+  return safeExcelRecommendation(recommendedExcelLicense(licenses)?.license)
+}
+
 function buildExcelInstances(scan: ScanResult) {
   const singleRootProject = scanLooksLikeSingleRootProject(scan)
   const packageLocations = new Map<string, string[]>()
   for (const component of scan.components) {
-    const location = component.location.trim()
-    if (!location) continue
     const key = packageVersionKey(component.name, component.version)
     const existing = packageLocations.get(key) ?? []
-    if (!existing.includes(location)) packageLocations.set(key, [...existing, location])
+    const locations = componentLocations(component).filter((location) => !existing.includes(location))
+    if (locations.length > 0) packageLocations.set(key, [...existing, ...locations])
   }
 
   const vulnRows = buildVulnerabilityDisplayRows(scan.vulnerabilities, packageLocations)
@@ -381,54 +438,144 @@ function buildExcelInstances(scan: ScanResult) {
     cve: row.cve,
     severity: row.severity.toUpperCase(),
     installed: row.installed || 'unknown',
-    fixed: row.fixedVersion || '-',
+    versionStatus: row.versionStatus || '',
+    fixed: row.fixedVersion || '',
+    alternativeFixes: row.alternativeFixedVersions.join('\n'),
+    fixStatus: row.fixStatus || '',
+    upgradeType: row.upgradeType || '',
+    fixConfidence: row.fixConfidence || '',
+    fixReason: row.fixReason || '',
   }))
 
-  const componentIndex = buildLicenseComponentIndex(scan.components)
   const licenses: ExcelLicenseInstance[] = []
   const licenseKeys = new Set<string>()
   const addLicenseInstance = (item: ExcelLicenseInstance) => {
-    const key = `${item.service}\x00${item.sourcePath}\x00${item.pkg}\x00${item.license}\x00${item.severity}`
+    const key = [
+      item.service,
+      item.sourcePath,
+      item.pkg,
+      item.installed,
+      item.purl,
+      item.rawLicense,
+      item.license,
+      item.detectedExpression,
+      item.severity,
+      item.policyRuleId,
+      item.recommendation,
+      item.evidenceStatus,
+    ].join('\x00')
     if (licenseKeys.has(key)) return
     licenseKeys.add(key)
     licenses.push(item)
   }
-  const licensedComponentIDs = new Set<string>()
-  const componentID = (component: { name: string; version: string; location: string }) =>
-    `${component.name}\x00${component.version}\x00${component.location}`
-  for (const license of scan.licenses) {
-    const componentNames = license.components.length > 0 ? license.components : ['']
-    for (const componentName of componentNames) {
-      const matchedComponents = componentIndex.get(licenseComponentKey(componentName)) ?? []
-      const componentRows = matchedComponents.length > 0 ? matchedComponents : [null]
-      for (const component of componentRows) {
-        if (component) licensedComponentIDs.add(componentID(component))
+
+  if ((scan.componentLicenses?.length ?? 0) > 0) {
+    for (const license of scan.componentLicenses ?? []) {
+      const locations = [...new Set([...(license.locations ?? []), license.location].map((location) => location.trim()).filter(Boolean))]
+      for (const location of locations.length > 0 ? locations : ['']) {
         addLicenseInstance({
-          service: excelServiceFromLocation(component?.location ?? '', scan.target, singleRootProject),
-          sourcePath: excelSourcePath(component?.location ?? '', scan.target),
-          pkg: component?.name || componentName || '-',
+          service: excelServiceFromLocation(location, scan.target, singleRootProject),
+          sourcePath: excelSourcePath(location, scan.target),
+          pkg: license.component || '-',
+          installed: license.version || 'unknown',
+          versionStatus: license.versionStatus || '',
+          purl: license.purl || '',
+          dependencyType: license.dependencyType || '',
+          scope: license.scope || '',
+          rawLicense: license.rawLicense || '',
           license: license.license || 'UNKNOWN',
-          severity: (license.severity || licenseSeverity(license.category)).toUpperCase(),
+          detectedExpression: license.detectedExpression || license.license || 'UNKNOWN',
+          severity: (license.effectiveSeverity || license.optionSeverity || 'unknown').toUpperCase(),
+          policyRuleId: license.policyRuleId || '',
+          recommendation: safeExcelRecommendation(license.recommendedChoice),
+          selectionReason: license.selectionReason || '',
+          evidenceStatus: license.evidenceStatus || '',
         })
       }
     }
-  }
-  for (const component of scan.components.filter((item) => !item.firstParty && item.licenses.length === 0)) {
-    if (licensedComponentIDs.has(componentID(component))) continue
-    addLicenseInstance({
-      service: excelServiceFromLocation(component.location, scan.target, singleRootProject),
-      sourcePath: excelSourcePath(component.location, scan.target),
-      pkg: component.name || '-',
-      license: 'UNKNOWN',
-      severity: 'UNKNOWN',
-    })
+  } else {
+    const componentIndex = buildLicenseComponentIndex(scan.components)
+    const licensedComponentIDs = new Set<string>()
+    const componentID = (component: { name: string; version: string; purl: string }) =>
+      `${component.name}\x00${component.version}\x00${component.purl}`
+    for (const license of scan.licenses) {
+      const componentNames = license.components.length > 0 ? license.components : ['']
+      for (const componentName of componentNames) {
+        const matchedComponents = componentIndex.get(licenseComponentKey(componentName)) ?? []
+        const componentRows = matchedComponents.length > 0 ? matchedComponents : [null]
+        const options = license.options?.length ? license.options : [{ license: license.license || 'UNKNOWN', severity: license.severity, policyRuleId: license.policyRuleId || '' }]
+        for (const component of componentRows) {
+          if (component) licensedComponentIDs.add(componentID(component))
+          const locations = component ? componentLocations(component) : ['']
+          for (const location of locations.length > 0 ? locations : ['']) {
+            for (const option of options) {
+              addLicenseInstance({
+                service: excelServiceFromLocation(location, scan.target, singleRootProject),
+                sourcePath: excelSourcePath(location, scan.target),
+                pkg: component?.name || componentName || '-',
+                installed: component?.version || 'unknown',
+                versionStatus: component?.version ? 'RESOLVED' : 'VERSION_UNRESOLVED',
+                purl: component?.purl || '',
+                dependencyType: component?.firstParty ? 'INTERNAL_MODULE' : '',
+                scope: '',
+                rawLicense: license.license || '',
+                license: option.license || 'UNKNOWN',
+                detectedExpression: license.license || option.license || 'UNKNOWN',
+                severity: (license.severity || option.severity || licenseSeverity(license.category)).toUpperCase(),
+                policyRuleId: license.policyRuleId || option.policyRuleId || '',
+                recommendation: safeExcelRecommendation(license.recommendedChoice),
+                selectionReason: license.selectionReason || '',
+                evidenceStatus: '',
+              })
+            }
+          }
+        }
+      }
+    }
+    for (const component of scan.components.filter((item) => !item.firstParty && item.licenses.length === 0)) {
+      if (licensedComponentIDs.has(componentID(component))) continue
+      const locations = componentLocations(component)
+      for (const location of locations.length > 0 ? locations : ['']) {
+        addLicenseInstance({
+          service: excelServiceFromLocation(location, scan.target, singleRootProject),
+          sourcePath: excelSourcePath(location, scan.target),
+          pkg: component.name || '-',
+          installed: component.version || 'unknown',
+          versionStatus: component.version ? 'RESOLVED' : 'VERSION_UNRESOLVED',
+          purl: component.purl || '',
+          dependencyType: '',
+          scope: '',
+          rawLicense: '',
+          license: 'UNKNOWN',
+          detectedExpression: 'UNKNOWN',
+          severity: 'UNKNOWN',
+          policyRuleId: 'LIC-UNKNOWN',
+          recommendation: '',
+          selectionReason: 'No license metadata resolved',
+          evidenceStatus: '',
+        })
+      }
+    }
   }
 
   return { vulns, licenses, services: [...new Set([...vulns.map((row) => row.service), ...licenses.map((row) => row.service)])].sort((a, b) => a.localeCompare(b)) }
 }
 
 function vulnerabilitySheetForService(vulns: ExcelVulnInstance[], service: string) {
-  const rows: unknown[][] = [['Package', 'Advisory ID', 'Severity', 'Installed Version', 'Fix To']]
+  const rows: unknown[][] = [[
+    'Package',
+    'Advisory ID',
+    'Severity',
+    'Installed Version',
+    'Version Status',
+    'Fix Status',
+    'Recommended Fix',
+    'Alternative Fixes',
+    'Upgrade Type',
+    'Fix Confidence',
+    'Fix Reason',
+    'Source Path',
+  ]]
   const merges: Array<{ s: { r: number; c: number }; e: { r: number; c: number } }> = []
   const rowHeights: Array<{ hpt: number } | undefined> = [{ hpt: 20 }]
   const byPackage = new Map<string, ExcelVulnInstance[]>()
@@ -440,71 +587,152 @@ function vulnerabilitySheetForService(vulns: ExcelVulnInstance[], service: strin
       items
         .sort((a, b) => sortExcelSeverity(a.severity, b.severity) || a.cve.localeCompare(b.cve))
         .forEach((item, index) => {
-          rows.push([index === 0 ? pkg : '', item.cve || '-', item.severity || 'UNKNOWN', item.installed || '-', item.fixed || '-'])
+          rows.push([
+            index === 0 ? pkg : '',
+            item.cve || '-',
+            item.severity || 'UNKNOWN',
+            item.installed || 'unknown',
+            item.versionStatus,
+            item.fixStatus,
+            item.fixed,
+            item.alternativeFixes,
+            item.upgradeType,
+            item.fixConfidence,
+            item.fixReason,
+            item.sourcePath || item.service || 'root',
+          ])
           rowHeights[rows.length - 1] = { hpt: 24 }
         })
       mergeExcelColumn(merges, start, rows.length - 1, 0)
     })
-  return sheetFromRows(rows, [38, 24, 14, 18, 24], 2, merges, rowHeights)
+  return sheetFromRows(rows, [38, 24, 14, 18, 20, 22, 20, 26, 18, 18, 46, 42], 2, merges, rowHeights)
 }
 
 function licenseSheetForService(licenses: ExcelLicenseInstance[], service: string) {
-  const rows: unknown[][] = [['Package', 'License', 'Severity', 'Recommendation (multiple licenses)']]
+  const rows: unknown[][] = [[
+    'Package',
+    'Installed Version',
+    'Version Status',
+    'PURL',
+    'Dependency Type',
+    'Scope',
+    'Raw License',
+    'SPDX License',
+    'SPDX Expression',
+    'Effective Severity',
+    'Policy Rule',
+    'Recommendation (multiple licenses)',
+    'Selection Reason',
+    'Evidence Status',
+    'Source Path',
+  ]]
   const merges: Array<{ s: { r: number; c: number }; e: { r: number; c: number } }> = []
   const rowHeights: Array<{ hpt: number } | undefined> = [{ hpt: 20 }]
   const byPackage = new Map<string, ExcelLicenseInstance[]>()
-  for (const row of licenses.filter((item) => item.service === service)) byPackage.set(row.pkg, [...(byPackage.get(row.pkg) ?? []), row])
+  for (const row of licenses.filter((item) => item.service === service)) {
+    const key = `${row.sourcePath}\x00${row.pkg}\x00${row.installed}\x00${row.purl}`
+    byPackage.set(key, [...(byPackage.get(key) ?? []), row])
+  }
   ;[...byPackage.entries()]
-    .sort(([aPkg, aItems], [bPkg, bItems]) => {
+    .sort(([, aItems], [, bItems]) => {
       const aMulti = aItems.length > 1 ? 0 : 1
       const bMulti = bItems.length > 1 ? 0 : 1
-      return aMulti - bMulti || sortExcelSeverity(aItems[0]?.severity ?? 'UNKNOWN', bItems[0]?.severity ?? 'UNKNOWN') || aPkg.localeCompare(bPkg)
+      return aMulti - bMulti
+        || sortExcelSeverity(aItems[0]?.severity ?? 'UNKNOWN', bItems[0]?.severity ?? 'UNKNOWN')
+        || (aItems[0]?.pkg ?? '').localeCompare(bItems[0]?.pkg ?? '')
+        || (aItems[0]?.sourcePath ?? '').localeCompare(bItems[0]?.sourcePath ?? '')
     })
-    .forEach(([pkg, items]) => {
+    .forEach(([, items]) => {
       const start = rows.length
       const sorted = items.sort((a, b) => sortExcelSeverity(a.severity, b.severity) || a.license.localeCompare(b.license))
-      const recommended = recommendedExcelLicense(sorted)
-      const recommendation = recommended ? `Prefer ${recommended.license || '-'} (${recommended.severity || 'UNKNOWN'})` : ''
+      const recommendation = excelLicenseRecommendation(sorted)
       sorted.forEach((row, index) => {
-        rows.push([index === 0 ? pkg : '', row.license || 'UNKNOWN', row.severity || 'UNKNOWN', index === 0 ? recommendation : ''])
+        rows.push([
+          index === 0 ? row.pkg : '',
+          row.installed,
+          row.versionStatus,
+          row.purl,
+          row.dependencyType,
+          row.scope,
+          row.rawLicense,
+          row.license || 'UNKNOWN',
+          row.detectedExpression || row.license || 'UNKNOWN',
+          row.severity || 'UNKNOWN',
+          row.policyRuleId,
+          index === 0 ? recommendation : '',
+          row.selectionReason,
+          row.evidenceStatus,
+          row.sourcePath || row.service || 'root',
+        ])
         rowHeights[rows.length - 1] = { hpt: 24 }
       })
       const end = rows.length - 1
       mergeExcelColumn(merges, start, end, 0)
-      mergeExcelColumn(merges, start, end, 3)
-
-      let runStart = start
-      let runSeverity = rows[start]?.[2]
-      for (let row = start + 1; row <= end + 1; row++) {
-        const severity = row <= end ? rows[row][2] : null
-        if (severity === runSeverity) continue
-        mergeExcelColumn(merges, runStart, row - 1, 2)
-        for (let blankRow = runStart + 1; blankRow <= row - 1; blankRow++) rows[blankRow][2] = ''
-        runStart = row
-        runSeverity = severity
-      }
+      mergeExcelColumn(merges, start, end, 11)
     })
-  return sheetFromRows(rows, [38, 34, 14, 44], 2, merges, rowHeights)
+  return sheetFromRows(rows, [38, 18, 20, 46, 22, 14, 42, 26, 46, 18, 18, 32, 46, 22, 42], 9, merges, rowHeights)
 }
 
 function mergedVulnerabilitySheet(vulns: ExcelVulnInstance[]) {
-  const rows: unknown[][] = [['Source Path', 'Package', 'Advisory ID', 'Severity', 'Installed Version', 'Fix To']]
+  const rows: unknown[][] = [[
+    'Source Path',
+    'Package',
+    'Advisory ID',
+    'Severity',
+    'Installed Version',
+    'Version Status',
+    'Fix Status',
+    'Recommended Fix',
+    'Alternative Fixes',
+    'Upgrade Type',
+    'Fix Confidence',
+    'Fix Reason',
+  ]]
   const rowHeights: Array<{ hpt: number } | undefined> = [{ hpt: 20 }]
   ;[...vulns]
     .sort((a, b) => a.sourcePath.localeCompare(b.sourcePath) || a.pkg.localeCompare(b.pkg) || sortExcelSeverity(a.severity, b.severity) || a.cve.localeCompare(b.cve))
     .forEach((item) => {
-      rows.push([item.sourcePath || item.service || 'root', item.pkg || '-', item.cve || '-', item.severity || 'UNKNOWN', item.installed || '-', item.fixed || '-'])
+      rows.push([
+        item.sourcePath || item.service || 'root',
+        item.pkg || '-',
+        item.cve || '-',
+        item.severity || 'UNKNOWN',
+        item.installed || 'unknown',
+        item.versionStatus,
+        item.fixStatus,
+        item.fixed,
+        item.alternativeFixes,
+        item.upgradeType,
+        item.fixConfidence,
+        item.fixReason,
+      ])
       rowHeights[rows.length - 1] = { hpt: 24 }
     })
-  return sheetFromRows(rows, [42, 38, 24, 14, 18, 24], 3, [], rowHeights)
+  return sheetFromRows(rows, [42, 38, 24, 14, 18, 20, 22, 20, 26, 18, 18, 46], 3, [], rowHeights)
 }
 
 function mergedLicenseSheet(licenses: ExcelLicenseInstance[]) {
-  const rows: unknown[][] = [['Source Path', 'Package', 'License', 'Severity', 'Recommendation (multiple licenses)']]
+  const rows: unknown[][] = [[
+    'Source Path',
+    'Package',
+    'Installed Version',
+    'Version Status',
+    'PURL',
+    'Dependency Type',
+    'Scope',
+    'Raw License',
+    'SPDX License',
+    'SPDX Expression',
+    'Effective Severity',
+    'Policy Rule',
+    'Recommendation (multiple licenses)',
+    'Selection Reason',
+    'Evidence Status',
+  ]]
   const rowHeights: Array<{ hpt: number } | undefined> = [{ hpt: 20 }]
   const byPackage = new Map<string, ExcelLicenseInstance[]>()
   for (const row of licenses) {
-    const key = `${row.sourcePath}\x00${row.pkg}`
+    const key = `${row.sourcePath}\x00${row.pkg}\x00${row.installed}\x00${row.purl}`
     byPackage.set(key, [...(byPackage.get(key) ?? []), row])
   }
   ;[...byPackage.entries()]
@@ -515,14 +743,29 @@ function mergedLicenseSheet(licenses: ExcelLicenseInstance[]) {
     })
     .forEach(([, items]) => {
       const sorted = items.sort((a, b) => sortExcelSeverity(a.severity, b.severity) || a.license.localeCompare(b.license))
-      const recommended = recommendedExcelLicense(sorted)
-      const recommendation = recommended ? `Prefer ${recommended.license || '-'} (${recommended.severity || 'UNKNOWN'})` : ''
+      const recommendation = excelLicenseRecommendation(sorted)
       sorted.forEach((row, index) => {
-        rows.push([row.sourcePath || row.service || 'root', row.pkg || '-', row.license || 'UNKNOWN', row.severity || 'UNKNOWN', index === 0 ? recommendation : ''])
+        rows.push([
+          row.sourcePath || row.service || 'root',
+          row.pkg || '-',
+          row.installed,
+          row.versionStatus,
+          row.purl,
+          row.dependencyType,
+          row.scope,
+          row.rawLicense,
+          row.license || 'UNKNOWN',
+          row.detectedExpression || row.license || 'UNKNOWN',
+          row.severity || 'UNKNOWN',
+          row.policyRuleId,
+          index === 0 ? recommendation : '',
+          row.selectionReason,
+          row.evidenceStatus,
+        ])
         rowHeights[rows.length - 1] = { hpt: 24 }
       })
     })
-  return sheetFromRows(rows, [42, 38, 34, 14, 44], 3, [], rowHeights)
+  return sheetFromRows(rows, [42, 38, 18, 20, 46, 22, 14, 42, 26, 46, 18, 18, 32, 46, 22], 10, [], rowHeights)
 }
 
 function appendExcelServiceSheets(wb: ExcelWb, scan: ScanResult) {

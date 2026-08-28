@@ -266,7 +266,7 @@ function projectGate(value: unknown): ProjectOverviewGate {
   const raw = record(value)
   if (!Array.isArray(raw.failed_conditions)) invalid()
   const status = stringEnum(raw.status, GATE_STATUSES)
-  if ((status === 'passed' || status === 'incomplete') && raw.failed_conditions.length !== 0) invalid()
+  if (status === 'passed' && raw.failed_conditions.length !== 0) invalid()
   if (status === 'failed' && raw.failed_conditions.length === 0) invalid()
   return {
     status,

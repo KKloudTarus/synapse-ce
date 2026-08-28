@@ -31,6 +31,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sla"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
@@ -49,6 +50,7 @@ type Service struct {
 	results                          ports.ScanResultStore
 	scannedImages                    ports.ScannedImageStore
 	importedSBOM                     ports.ImportedSBOMStore
+	uploadedSources                  ports.EngagementSourceStore
 	jobs                             ports.ScanJobStore
 	runs                             ports.ScanRunStore
 	evidence                         *evidenceuc.Service
@@ -94,6 +96,7 @@ type Service struct {
 	detectionPriority                string                                // server default detection priority (comprehensive|precise); empty = comprehensive
 	reachability                     ports.ReachabilityRecorder            // optional deterministic Tier-2 reachability proof (Go call-graph)
 	pyReachability                   ports.ReachabilityRecorder            // optional deterministic Tier-1 Python import-reachability proof
+	pySymbolReachability             ports.ReachabilityRecorder            // optional deterministic Tier-2 Python semantic call-graph proof
 	jsReachability                   jsSBOMReachabilityRecorder            // optional deterministic Tier-1 JavaScript import-reachability proof
 	jsSymbolReachability             jsSBOMReachabilityRecorder            // optional deterministic Tier-2 JavaScript affected-export proof
 	srcReachability                  map[string]ports.ReachabilityRecorder // optional Tier-1 provers keyed by package-URL type
@@ -102,6 +105,7 @@ type Service struct {
 	sbomCache                        ports.SBOMCache                       // optional content+version-addressed cache of the generated SBOM
 	sbomCrossCheck                   ports.SBOMCrossCheckRecorder          // optional SBOM-producer disagreement → judgment minter
 	taint                            ports.TaintScanner                    // optional deterministic taint-analysis → gated CapSAST proposals
+	pythonTaint                      ports.TaintScanner                    // optional Python semantic value-flow → gated CapSAST proposals
 	graphResolver                    ports.DependencyGraphResolver         // optional transitive-edge resolver (Go via `go mod graph`)
 	mavenResolver                    ports.MavenResolver                   // optional Maven transitive-tree resolver (`mvn dependency:list`)
 	gradleResolver                   ports.GradleResolver                  // optional Gradle transitive-tree resolver (`gradle dependencies`)
@@ -131,6 +135,31 @@ func (s *Service) SetSeverityEnricher(e ports.SeverityEnricher) { s.sevEnricher 
 
 // SetImportedSBOMStore configures the engagement-scoped client SBOM artifact store.
 func (s *Service) SetImportedSBOMStore(store ports.ImportedSBOMStore) { s.importedSBOM = store }
+
+func (s *Service) SetUploadedSourceStore(store ports.EngagementSourceStore) {
+	s.uploadedSources = store
+}
+
+func (s *Service) UploadedSourceMetadata(ctx context.Context, tenantID, engagementID shared.ID) (sourcepackage.Package, error) {
+	tenantID = shared.TenantOrDefault(tenantID)
+	if _, err := s.engagements.GetByIDInTenant(ctx, tenantID, engagementID); err != nil {
+		return sourcepackage.Package{}, fmt.Errorf("load engagement: %w", err)
+	}
+	if s.uploadedSources == nil {
+		return sourcepackage.Package{}, fmt.Errorf("uploaded source for engagement %s: %w", engagementID, shared.ErrNotFound)
+	}
+	return s.uploadedSources.Get(ctx, tenantID, engagementID)
+}
+
+func (s *Service) StartUploadedSourceScanWithOptions(ctx context.Context, actor string, tenantID, engagementID shared.ID, opts ScanOptions) (ports.ScanJob, error) {
+	item, err := s.UploadedSourceMetadata(ctx, tenantID, engagementID)
+	if err != nil {
+		return ports.ScanJob{}, err
+	}
+	return s.StartScanWithOptions(ctx, actor, engagementID, ports.AcquireRequest{
+		Kind: ports.TargetUpload, Value: item.Target(), Locator: item.Locator,
+	}, opts)
+}
 
 // SetScannedImageRecorder wires the scanned-image digest index (#446). When set, a completed image
 // scan records its manifest digest under the engagement's tenant, so the fleet cluster agent can
@@ -381,6 +410,10 @@ func (s *Service) SetReachability(r ports.ReachabilityRecorder) { s.reachability
 // "not reachable"). Kept distinct from the Go call-graph prover: it is a WEAKER (Tier-1, import-level) proof.
 func (s *Service) SetPyReachability(r ports.ReachabilityRecorder) { s.pyReachability = r }
 
+// SetPySymbolReachability configures the optional Python Tier-2 affected-symbol call-graph proof. It is
+// run after Tier-1 so an incomplete semantic analysis leaves the package-level judgment standing.
+func (s *Service) SetPySymbolReachability(r ports.ReachabilityRecorder) { s.pySymbolReachability = r }
+
 // jsSBOMReachabilityRecorder is the narrow slice of a JavaScript reachability recorder this service
 // needs. BOTH tiers satisfy it — the name is deliberately tier-neutral, because Go interfaces are
 // structural and a tier-specific name would imply a distinction the type system does not enforce.
@@ -438,6 +471,11 @@ func (s *Service) SetVulnerabilityReconciler(reconciler ports.SBOMVulnerabilityR
 // judgments. Best-effort + opt-in: a no-coverage/un-buildable target is ignored (the scan never fails). A
 // setter keeps NewService call sites unchanged.
 func (s *Service) SetTaint(t ports.TaintScanner) { s.taint = t }
+
+// SetPythonTaint configures Python's source-only, interprocedural value-flow proposer separately from the
+// legacy Go function-level scanner. Keeping independent hooks lets operators enable Python analysis without
+// enabling target compilation. No-coverage parser/resolution failures remain best-effort and propose nothing.
+func (s *Service) SetPythonTaint(t ports.TaintScanner) { s.pythonTaint = t }
 
 // SetGraphResolver configures the optional transitive-edge resolver (Go via `go mod graph`). nil ⇒
 // no resolved Go edges. Best-effort + opt-in: a non-Go target / no module cache / tool error adds no edges
@@ -648,6 +686,9 @@ type ScanResult struct {
 	// SourceWarnings flags a configured detection source that did NOT run (e.g. the Grype
 	// binary/DB is missing), so a silently-degraded source can't masquerade as "0 vulns / clean".
 	SourceWarnings []string `json:"source_warnings,omitempty"`
+	// AnalysisCoverage makes semantic-analysis negative-proof coverage explicit. A partial analyzer can
+	// still produce positive witnesses, but an empty result must not be interpreted as clean.
+	AnalysisCoverage []ports.AnalysisCoverage `json:"analysis_coverage,omitempty"`
 	// SuppressedFindings marks findings accepted by the repo's .synapseignore policy. The findings REMAIN in
 	// Findings (reported, persisted, evidence-sealed – never hidden); this is only an accepted-risk
 	// annotation a CI --fail-on gate consults to exempt them. Acceptance suppresses the GATE, not visibility.
@@ -966,17 +1007,28 @@ func (o ScanOptions) scansLicenses() bool {
 }
 
 type ComponentLicenseAudit struct {
-	Component     string               `json:"component"`
-	Version       string               `json:"version"`
-	PURL          string               `json:"purl"`
-	Scope         string               `json:"scope"`
-	Location      string               `json:"location"`
-	License       string               `json:"license"`
-	Category      sbom.LicenseCategory `json:"category"`
-	Verdict       ports.LicenseVerdict `json:"verdict"`
-	Source        string               `json:"source"`
-	Confidence    string               `json:"confidence"`
-	UnknownReason string               `json:"unknown_reason"`
+	Component          string               `json:"component"`
+	Version            string               `json:"version"`
+	VersionStatus      string               `json:"version_status"`
+	PURL               string               `json:"purl"`
+	Scope              string               `json:"scope"`
+	Location           string               `json:"location"`
+	Locations          []string             `json:"locations,omitempty"`
+	DependencyType     string               `json:"dependency_type"`
+	EvidenceStatus     string               `json:"evidence_status"`
+	RawLicense         string               `json:"raw_license"`
+	License            string               `json:"license"`
+	DetectedExpression string               `json:"detected_expression"`
+	Category           sbom.LicenseCategory `json:"category"`
+	Verdict            ports.LicenseVerdict `json:"verdict"`
+	OptionSeverity     string               `json:"option_severity"`
+	EffectiveSeverity  string               `json:"effective_severity"`
+	PolicyRuleID       string               `json:"policy_rule_id"`
+	RecommendedChoice  string               `json:"recommended_choice"`
+	SelectionReason    string               `json:"selection_reason"`
+	Source             string               `json:"source"`
+	Confidence         string               `json:"confidence"`
+	UnknownReason      string               `json:"unknown_reason"`
 }
 
 type LicenseCoverageBreakdown struct {
@@ -1112,25 +1164,49 @@ func purlArch(purl string) string {
 	return ""
 }
 
-func buildComponentLicenseAudit(comps []sbom.Component, findings []ports.LicenseFinding) []ComponentLicenseAudit {
+func buildComponentLicenseAudit(doc *sbom.SBOM, findings []ports.LicenseFinding) []ComponentLicenseAudit {
 	policy := map[string]ports.LicenseFinding{}
 	for _, f := range findings {
 		policy[f.License] = f
 	}
-	out := make([]ComponentLicenseAudit, 0, len(comps))
-	for _, c := range comps {
+	out := make([]ComponentLicenseAudit, 0, len(doc.Components))
+	for _, c := range doc.Components {
+		licenses := make([]string, 0, len(c.Licenses))
+		for _, current := range c.Licenses {
+			if key := componentLicenseKey(current); key != "" {
+				licenses = append(licenses, key)
+			}
+		}
+		licenses = uniqueStrings(licenses)
+		expression := strings.Join(licenses, " OR ")
+		recommendedChoice, effectiveSeverity, policyRuleID, selectionReason := componentLicensePolicy(licenses, policy)
+		locations := componentLocations(c)
+		dependencyType, evidenceStatus := componentDependencyEvidence(doc.Dependencies, c, locations)
+		versionStatus := vulnerability.VersionResolved
+		if !sbom.IsResolvedVersion(c.Version) {
+			versionStatus = vulnerability.VersionUnresolved
+		}
 		if len(c.Licenses) == 0 {
 			out = append(out, ComponentLicenseAudit{
-				Component:     c.Name,
-				Version:       c.Version,
-				PURL:          c.PURL,
-				Scope:         c.Scope,
-				Location:      c.Location,
-				Category:      sbom.LicenseUnknown,
-				Verdict:       ports.LicenseWarn,
-				Source:        c.LicenseSource,
-				Confidence:    c.LicenseConfidence,
-				UnknownReason: c.UnknownReason,
+				Component:          c.Name,
+				Version:            c.Version,
+				VersionStatus:      versionStatus,
+				PURL:               c.PURL,
+				Scope:              c.Scope,
+				Location:           c.Location,
+				Locations:          locations,
+				DependencyType:     dependencyType,
+				EvidenceStatus:     evidenceStatus,
+				DetectedExpression: expression,
+				Category:           sbom.LicenseUnknown,
+				Verdict:            ports.LicenseWarn,
+				OptionSeverity:     "unknown",
+				EffectiveSeverity:  "unknown",
+				PolicyRuleID:       "LIC-UNKNOWN",
+				SelectionReason:    "No license metadata resolved",
+				Source:             c.LicenseSource,
+				Confidence:         c.LicenseConfidence,
+				UnknownReason:      c.UnknownReason,
 			})
 			continue
 		}
@@ -1141,25 +1217,133 @@ func buildComponentLicenseAudit(comps []sbom.Component, findings []ports.License
 			}
 			category := sbom.LicenseUnknown
 			verdict := ports.LicenseWarn
+			optionSeverity := "unknown"
 			if f, ok := policy[key]; ok {
 				category = f.Category
 				verdict = f.Verdict
+				optionSeverity = f.Severity
+			}
+			rawLicense := strings.TrimSpace(lic.RawValue)
+			if rawLicense == "" {
+				rawLicense = licenseKeyForAudit(lic)
 			}
 			out = append(out, ComponentLicenseAudit{
-				Component:     c.Name,
-				Version:       c.Version,
-				PURL:          c.PURL,
-				Scope:         c.Scope,
-				Location:      c.Location,
-				License:       key,
-				Category:      category,
-				Verdict:       verdict,
-				Source:        c.LicenseSource,
-				Confidence:    c.LicenseConfidence,
-				UnknownReason: c.UnknownReason,
+				Component:          c.Name,
+				Version:            c.Version,
+				VersionStatus:      versionStatus,
+				PURL:               c.PURL,
+				Scope:              c.Scope,
+				Location:           c.Location,
+				Locations:          locations,
+				DependencyType:     dependencyType,
+				EvidenceStatus:     evidenceStatus,
+				RawLicense:         rawLicense,
+				License:            key,
+				DetectedExpression: expression,
+				Category:           category,
+				Verdict:            verdict,
+				OptionSeverity:     optionSeverity,
+				EffectiveSeverity:  effectiveSeverity,
+				PolicyRuleID:       policyRuleID,
+				RecommendedChoice:  recommendedChoice,
+				SelectionReason:    selectionReason,
+				Source:             c.LicenseSource,
+				Confidence:         c.LicenseConfidence,
+				UnknownReason:      c.UnknownReason,
 			})
 		}
 	}
+	return out
+}
+
+func componentLocations(component sbom.Component) []string {
+	return uniqueStrings(append(append([]string(nil), component.Locations...), component.Location))
+}
+
+func componentDependencyEvidence(dependencies []sbom.Dependency, component sbom.Component, locations []string) (string, string) {
+	if component.FirstParty {
+		return "INTERNAL_MODULE", "INTERNAL_SOURCE"
+	}
+	for _, location := range locations {
+		normalized := filepath.ToSlash(location)
+		if strings.Contains(normalized, "/BOOT-INF/lib/") || strings.Contains(normalized, "/WEB-INF/lib/") {
+			return "PACKAGED_JAR", "CONFIRMED_PACKAGED"
+		}
+	}
+	path := sbom.PathToRoot(dependencies, sbom.ComponentID(component.Name, component.Version, component.PURL))
+	if len(path) == 1 {
+		return "DECLARED_DIRECT", "CONFIRMED_DEPENDENCY"
+	}
+	if len(path) > 1 {
+		return "RESOLVED_TRANSITIVE", "CONFIRMED_DEPENDENCY"
+	}
+	return "UNVERIFIED_INVENTORY", "UNVERIFIED_INVENTORY"
+}
+
+func componentLicensePolicy(licenses []string, policy map[string]ports.LicenseFinding) (string, string, string, string) {
+	if len(licenses) == 0 {
+		return "", "unknown", "LIC-UNKNOWN", "No license metadata resolved"
+	}
+	recommendedChoice := ""
+	selectedSeverity := "unknown"
+	selectedRule := "LIC-UNKNOWN"
+	for index, license := range licenses {
+		finding, ok := policy[license]
+		if !ok {
+			continue
+		}
+		if index == 0 || licenseSeverityRank(finding.Severity) < licenseSeverityRank(selectedSeverity) {
+			recommendedChoice = finding.RecommendedChoice
+			if recommendedChoice == "" && len(licenses) > 1 {
+				recommendedChoice = license
+			}
+			selectedSeverity = finding.Severity
+			selectedRule = finding.PolicyRuleID
+		}
+	}
+	reason := "Single detected license"
+	if len(licenses) > 1 || strings.Contains(licenses[0], " OR ") {
+		reason = "Lowest-risk valid OR option"
+	} else if strings.Contains(licenses[0], " AND ") {
+		reason = "Highest-risk mandatory AND option"
+	}
+	return recommendedChoice, selectedSeverity, selectedRule, reason
+}
+
+func licenseSeverityRank(severity string) int {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "low":
+		return 0
+	case "medium":
+		return 1
+	case "high":
+		return 2
+	case "critical":
+		return 3
+	default:
+		return 4
+	}
+}
+
+func licenseKeyForAudit(license sbom.License) string {
+	if strings.TrimSpace(license.SPDXID) != "" {
+		return strings.TrimSpace(license.SPDXID)
+	}
+	return strings.TrimSpace(license.Name)
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	sort.Strings(out)
 	return out
 }
 
@@ -1344,7 +1528,7 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 		defer cancel()
 	}
 	started := s.clock.Now()
-	if imported, doc, ok, err := s.loadImportedSBOM(ctx, engagementID, opts); err != nil {
+	if imported, doc, ok, err := s.loadImportedSBOMForRequest(ctx, engagementID, req, opts); err != nil {
 		return nil, err
 	} else if ok {
 		now, err := s.gateImportedSBOMAndAudit(ctx, actor, engagementID, imported, opts)
@@ -1386,7 +1570,7 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 	var imported importedsbom.Record
 	var importedDoc *sbom.SBOM
 	var useImported bool
-	if imported, importedDoc, useImported, err = s.loadImportedSBOM(ctx, engagementID, opts); err != nil {
+	if imported, importedDoc, useImported, err = s.loadImportedSBOMForRequest(ctx, engagementID, req, opts); err != nil {
 		return ports.ScanJob{}, err
 	}
 	var now time.Time
@@ -1705,6 +1889,13 @@ func (s *Service) gateImportedSBOMAndAudit(ctx context.Context, actor string, en
 	})
 }
 
+func (s *Service) loadImportedSBOMForRequest(ctx context.Context, engagementID shared.ID, req ports.AcquireRequest, opts ScanOptions) (importedsbom.Record, *sbom.SBOM, bool, error) {
+	if req.Kind == ports.TargetUpload {
+		return importedsbom.Record{}, nil, false, nil
+	}
+	return s.loadImportedSBOM(ctx, engagementID, opts)
+}
+
 func (s *Service) loadImportedSBOM(ctx context.Context, engagementID shared.ID, opts ScanOptions) (importedsbom.Record, *sbom.SBOM, bool, error) {
 	// Project analyses must acquire their configured source so the snapshot and
 	// persisted diff describe the exact bytes that were analyzed.
@@ -1823,7 +2014,7 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 		result *ScanResult
 		err    error
 	)
-	if imported, doc, ok, loadErr := s.loadImportedSBOM(executionCtx, engagementID, opts); loadErr != nil {
+	if imported, doc, ok, loadErr := s.loadImportedSBOMForRequest(executionCtx, engagementID, req, opts); loadErr != nil {
 		err = loadErr
 	} else if ok {
 		result, err = s.runImportedSBOMPipeline(executionCtx, actor, engagementID, now, imported, doc, opts, report, shared.ID(job.ID))
@@ -1945,7 +2136,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		}
 		trace.succeed(step, "License policy scan completed", map[string]int{"components": countComponents(doc), "licenses": len(lics)})
 		licenseCoverage = sbom.ComputeLicenseCoverage(doc.Components)
-		componentLicenses = buildComponentLicenseAudit(doc.Components, lics)
+		componentLicenses = buildComponentLicenseAudit(doc, lics)
 		licenseCoverageBreakdown = buildLicenseCoverageBreakdown(doc.Components)
 	}
 
@@ -2591,7 +2782,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 		trace.succeed(step, "License policy scan completed", map[string]int{"components": countComponents(doc), "licenses": len(lics)})
 		licenseCoverage = sbom.ComputeLicenseCoverage(doc.Components)
-		componentLicenses = buildComponentLicenseAudit(doc.Components, lics)
+		componentLicenses = buildComponentLicenseAudit(doc, lics)
 		licenseCoverageBreakdown = buildLicenseCoverageBreakdown(doc.Components)
 	}
 
@@ -2822,6 +3013,14 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 	}
 
+	// Python Tier-2 runs after Tier-1. Partial semantic coverage may still prove a positive path, but an
+	// incomplete negative is filtered by the recorder and therefore leaves the Tier-1 judgment standing.
+	if opts.scansVulnerabilities() && s.pySymbolReachability != nil {
+		if subs := pySymbolReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
+			_, _ = s.pySymbolReachability.Record(ctx, engagementID, ws.Dir, subs)
+		}
+	}
+
 	// Deterministic TIER-1 reachability for the name-addressed ecosystems (Rust, PHP, Ruby). Each is
 	// best-effort and opt-in; a no-coverage result is ignored so the scan is never failed by it.
 	if opts.scansVulnerabilities() && len(s.srcReachability) > 0 {
@@ -2862,6 +3061,21 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// enhancement; the scan is never failed). Runs while ws.Dir still exists.
 	if opts.scansVulnerabilities() && s.taint != nil {
 		_, _ = s.taint.Scan(ctx, engagementID, ws.Dir)
+	}
+
+	// Python semantic taint is source-only and value-granular. It runs independently of the legacy Go
+	// function-level scanner, but follows the same propose-only lifecycle: positive witnesses become gated
+	// CapSAST proposals, while missing/partial coverage never becomes a clean conclusion.
+	if opts.scansVulnerabilities() && s.pythonTaint != nil {
+		if scanner, ok := s.pythonTaint.(ports.TaintCoverageScanner); ok {
+			outcome, _ := scanner.ScanWithCoverage(ctx, engagementID, ws.Dir)
+			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
+			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
+				result.SourceWarnings = mergeStrings(result.SourceWarnings, []string{warning})
+			}
+		} else {
+			_, _ = s.pythonTaint.Scan(ctx, engagementID, ws.Dir)
+		}
 	}
 
 	// AI false-positive triage (opt-in, best-effort, PROPOSE-ONLY). After the deterministic pass, the
@@ -3090,6 +3304,7 @@ func mergeCachedScanResult(current *ScanResult, previous ScanResult, opts ScanOp
 		current.Manifest = previous.Manifest
 		current.RiskMatches = previous.RiskMatches
 		current.Findings = mergeFindingsByKind(previous.Findings, current.Findings, true)
+		current.AnalysisCoverage = cloneAnalysisCoverage(previous.AnalysisCoverage)
 		preservedVulnerabilities = len(previous.Vulnerabilities) > 0 || hasFindingKind(previous.Findings, false)
 		preserved = preservedVulnerabilities
 	}
@@ -3106,6 +3321,41 @@ func mergeCachedScanResult(current *ScanResult, previous ScanResult, opts ScanOp
 	}
 	current.ScanMode = ScanModeFull
 	mergeCachedAnnotations(current, previous, preservedVulnerabilities)
+}
+
+func semanticCoverageWarning(coverage ports.AnalysisCoverage) string {
+	switch coverage.Status {
+	case ports.AnalysisCoveragePartial:
+		return coverage.Analyzer + " coverage is partial; negative findings are not conclusive"
+	case ports.AnalysisCoverageUnavailable:
+		return coverage.Analyzer + " is unavailable; no semantic taint coverage was produced"
+	default:
+		return ""
+	}
+}
+
+// mergeAnalysisCoverage keeps one current summary per analyzer and deterministic analyzer ordering.
+func mergeAnalysisCoverage(items []ports.AnalysisCoverage, current ports.AnalysisCoverage) []ports.AnalysisCoverage {
+	if current.Analyzer == "" {
+		return items
+	}
+	out := make([]ports.AnalysisCoverage, 0, len(items)+1)
+	for _, item := range items {
+		if item.Analyzer != current.Analyzer {
+			out = append(out, item)
+		}
+	}
+	out = append(out, current)
+	sort.Slice(out, func(i, j int) bool { return out[i].Analyzer < out[j].Analyzer })
+	return out
+}
+
+func cloneAnalysisCoverage(items []ports.AnalysisCoverage) []ports.AnalysisCoverage {
+	out := append([]ports.AnalysisCoverage(nil), items...)
+	for i := range out {
+		out[i].Gaps = append([]ports.AnalysisCoverageGap(nil), out[i].Gaps...)
+	}
+	return out
 }
 
 func mergeCachedAnnotations(current *ScanResult, previous ScanResult, preservePrevious bool) {
@@ -3294,6 +3544,7 @@ func classifyVulns(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) {
 	for i := range vulns {
 		v := &vulns[i]
 		v.Unversioned = !sbom.IsResolvedVersion(v.Version)
+		v.VersionStatus = vulnerability.VersionResolved
 		if v.Unversioned {
 			// No resolvable installed version → the advisory cannot be confirmed to apply (the
 			// source matched by NAME only, e.g. a vendored dep whose package.json has the version
@@ -3302,6 +3553,12 @@ func classifyVulns(doc *sbom.SBOM, vulns []vulnerability.Vulnerability) {
 			// advisory (ClassFirstPartyHistoric) but is treated as no-fix, so --ignore-unfixed keeps
 			// it out of the actionable gate instead of matching every historical CVE for the name.
 			v.FixedVersion = ""
+			v.AlternativeFixedVersions = nil
+			v.FixStatus = vulnerability.FixStatusVersionUnresolved
+			v.UpgradeType = ""
+			v.FixConfidence = vulnerability.ConfidenceLow
+			v.FixReason = "Installed package version could not be resolved"
+			v.VersionStatus = vulnerability.VersionUnresolved
 			if v.FixState == "fixed" {
 				v.FixState = "unknown"
 			}

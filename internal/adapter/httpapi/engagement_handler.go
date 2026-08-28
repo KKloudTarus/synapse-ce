@@ -1,14 +1,26 @@
 package httpapi
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"strings"
 	"time"
 
 	engdom "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
 )
+
+const createEngagementMetadataLimit = int64(1 << 20)
 
 type scopeTargetDTO struct {
 	Kind  string `json:"kind"`
@@ -46,9 +58,100 @@ func toTargets(dtos []scopeTargetDTO) []engdom.Target {
 	return out
 }
 
+func decodeCreateEngagementRequest(raw []byte) (createEngagementRequest, error) {
+	var request createEngagementRequest
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return createEngagementRequest{}, err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return createEngagementRequest{}, fmt.Errorf("unexpected trailing JSON")
+	}
+	return request, nil
+}
+
+func hashSourceUpload(file multipart.File) (int64, string, error) {
+	hash := sha256.New()
+	written, err := io.Copy(hash, io.LimitReader(file, sourcepackage.MaxArchiveBytes+1))
+	if err != nil {
+		return 0, "", err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return 0, "", err
+	}
+	if written > sourcepackage.MaxArchiveBytes {
+		return written, "", fmt.Errorf("%w: uploaded source exceeds %d bytes", shared.ErrValidation, sourcepackage.MaxArchiveBytes)
+	}
+	if written == 0 {
+		return 0, "", fmt.Errorf("%w: uploaded source is empty", shared.ErrValidation)
+	}
+	return written, hex.EncodeToString(hash.Sum(nil)), nil
+}
+
 func (rt *Router) createEngagement(w http.ResponseWriter, r *http.Request) {
-	var req createEngagementRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var (
+		req            createEngagementRequest
+		sourceFile     multipart.File
+		sourceFilename string
+		sourceSize     int64
+		sourceSHA256   string
+		err            error
+	)
+	mediaType, _, mediaErr := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if mediaErr == nil && mediaType == "multipart/form-data" {
+		r.Body = http.MaxBytesReader(w, r.Body, sourcepackage.MaxArchiveBytes+createEngagementMetadataLimit)
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			if r.MultipartForm != nil {
+				_ = r.MultipartForm.RemoveAll()
+			}
+			status := http.StatusBadRequest
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) || strings.Contains(strings.ToLower(err.Error()), "too large") {
+				status = http.StatusRequestEntityTooLarge
+			}
+			writeJSON(w, status, errorBody{Error: "invalid or oversized source upload"})
+			return
+		}
+		if r.MultipartForm != nil {
+			defer func() { _ = r.MultipartForm.RemoveAll() }()
+		}
+		raw := []byte(r.FormValue("metadata"))
+		if len(raw) == 0 || int64(len(raw)) > createEngagementMetadataLimit {
+			writeJSON(w, http.StatusBadRequest, errorBody{Error: "metadata is required and must be valid JSON"})
+			return
+		}
+		req, err = decodeCreateEngagementRequest(raw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid metadata JSON"})
+			return
+		}
+		var header *multipart.FileHeader
+		sourceFile, header, err = r.FormFile("source")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errorBody{Error: "source package is required"})
+			return
+		}
+		defer func() { _ = sourceFile.Close() }()
+		sourceFilename = sourcepackage.BaseFilename(header.Filename)
+		if !sourcepackage.ValidFilename(sourceFilename) {
+			writeJSON(w, http.StatusBadRequest, errorBody{Error: "source package must be .zip, .tar, .tar.gz, or .tgz"})
+			return
+		}
+		sourceSize, sourceSHA256, err = hashSourceUpload(sourceFile)
+		if err != nil {
+			switch {
+			case sourceSize > sourcepackage.MaxArchiveBytes:
+				writeJSON(w, http.StatusRequestEntityTooLarge, errorBody{Error: err.Error()})
+			case errors.Is(err, shared.ErrValidation):
+				writeJSON(w, http.StatusBadRequest, errorBody{Error: err.Error()})
+			default:
+				// A raw read/seek failure: don't leak the internal error text to the client.
+				writeError(w, rt.log, fmt.Errorf("read source upload: %w", err))
+			}
+			return
+		}
+	} else if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
 		return
 	}
@@ -80,7 +183,7 @@ func (rt *Router) createEngagement(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	e, err := rt.eng.Create(r.Context(), enguc.CreateInput{
+	input := enguc.CreateInput{
 		TenantID:        tenantID,
 		BusinessAssetID: shared.ID(req.AssetID),
 		CreatedBy:       PrincipalFrom(r.Context()), // engagement owner (ownership)
@@ -91,7 +194,13 @@ func (rt *Router) createEngagement(w http.ResponseWriter, r *http.Request) {
 		AuthorizedFrom:  from,
 		AuthorizedTo:    to,
 		Timezone:        req.Timezone,
-	})
+	}
+	var e *engdom.Engagement
+	if sourceFile != nil {
+		e, _, err = rt.eng.CreateFromSourcePackage(r.Context(), input, sourceFilename, sourceSize, sourceSHA256, sourceFile)
+	} else {
+		e, err = rt.eng.Create(r.Context(), input)
+	}
 	if err != nil {
 		writeError(w, rt.log, err)
 		return

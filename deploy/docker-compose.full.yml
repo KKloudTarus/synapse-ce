@@ -175,11 +175,20 @@ services:
       SYNAPSE_MAVEN_LOCAL_REPO: "/home/synapse/.m2/repository"
       SYNAPSE_GRADLE_HOME: "/home/synapse/.gradle"
 
-      # --- AI orchestrator / LLM: OFF (SCA needs no LLM). Set these to enable the agent. ---
-      SYNAPSE_AGENT_ENABLED: "false"
-      # SYNAPSE_LLM_BASE_URL: "http://host.docker.internal:9000/v1"
-      # SYNAPSE_LLM_API_KEY: ""
-      # SYNAPSE_LLM_MODEL: ""
+      # --- Governance surfaces (drive Remediation SLA + AI Triage / Review Queue tabs).
+      #     Off by default in this committed file; turn on via deploy/.env. ---
+      SYNAPSE_SLA_ENABLED: "${SYNAPSE_SLA_ENABLED:-false}"
+
+      # --- AI orchestrator / LLM. Real values live in deploy/.env (mirrors synapse-infra
+      #     compute module). Empty SYNAPSE_LLM_API_KEY / model leaves the agent off. ---
+      SYNAPSE_AGENT_ENABLED: "${SYNAPSE_AGENT_ENABLED:-false}"
+      SYNAPSE_FP_TRIAGE_ENABLED: "${SYNAPSE_FP_TRIAGE_ENABLED:-false}"
+      SYNAPSE_FP_TRIAGE_MODE: "${SYNAPSE_FP_TRIAGE_MODE:-shadow}"   # code accepts only shadow|enforce
+      SYNAPSE_LLM_BASE_URL: "${SYNAPSE_LLM_BASE_URL:-}"
+      SYNAPSE_LLM_MODEL: "${SYNAPSE_LLM_MODEL:-}"                   # REQUIRED when the agent is enabled
+      SYNAPSE_LLM_API_KEY: "${SYNAPSE_LLM_API_KEY:-}"
+      SYNAPSE_FP_TRIAGE_MODEL: "${SYNAPSE_FP_TRIAGE_MODEL:-}"
+      SYNAPSE_VERIFIER_MODEL: "${SYNAPSE_VERIFIER_MODEL:-}"         # distinct family enables consensus
 
   # Vite dev server for the React/Tailwind web UI. Vite proxies /api + /healthz
   # to synapse-api:8080 via the VITE_API_PROXY_TARGET env var (see Dockerfile.web),
@@ -188,6 +197,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.web
+      target: dev
     depends_on:
       synapse-api:
         condition: service_healthy
@@ -196,6 +206,8 @@ services:
     environment:
       # In-network API URL – the Vite dev server proxies /api + /healthz to this.
       VITE_API_PROXY_TARGET: "http://synapse-api:8080"
+      # Hit the real API through the proxy instead of the in-browser MSW mocks.
+      VITE_ENABLE_MSW: "false"
     volumes:
       # Hot reload: mount the source in, leave node_modules from the image intact.
       - ../web:/app

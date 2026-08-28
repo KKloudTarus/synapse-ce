@@ -6,12 +6,16 @@ import (
 )
 
 // aupText is the acceptable-use policy shown on first run.
-const aupText = `Synapse – Acceptable Use Policy (summary)
+const aupText = `Synapse Acceptable Use Policy (AUP)
 
-Synapse is for AUTHORIZED security testing ONLY. You must have explicit written
-permission to test any target. Synapse validates scope DATA but cannot verify
-legal authorization – you, the operator, are solely responsible. Provided WITHOUT
-WARRANTY of any kind. By accepting, you agree to these terms. See docs/adr/0008.`
+1. Authorized Security Testing Only
+Synapse is strictly designed and licensed for authorized security assessments, vulnerability research, and penetration testing. You confirm that you possess verifiable, explicit written authorization from asset owners prior to initiating any assessment.
+
+2. Operator Responsibility & Compliance
+While Synapse enforces technical scope boundaries, it does not verify legal authority. You, as the operator, assume full legal and operational responsibility for all initiated actions, scan traffic, and compliance with applicable cybersecurity regulations.
+
+3. Disclaimer of Warranty & Liability
+This platform is provided "as is" without warranty of any kind, express or implied. By accepting, you acknowledge and agree to adhere to these operational and legal terms.`
 
 func (rt *Router) getAUP(w http.ResponseWriter, r *http.Request) {
 	st, err := rt.aup.Status(r.Context())

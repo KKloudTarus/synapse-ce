@@ -23,6 +23,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
@@ -101,6 +102,21 @@ type fakeDetector struct{ gotPath string }
 
 type staticSASTAnalyzer struct {
 	findings []ports.SASTRawFinding
+}
+
+type staticTaintCoverage struct {
+	outcome ports.TaintScanOutcome
+	err     error
+	calls   int
+}
+
+func (s *staticTaintCoverage) Scan(context.Context, shared.ID, string) (int, error) {
+	return s.outcome.Proposed, s.err
+}
+
+func (s *staticTaintCoverage) ScanWithCoverage(context.Context, shared.ID, string) (ports.TaintScanOutcome, error) {
+	s.calls++
+	return s.outcome, s.err
 }
 
 func (a staticSASTAnalyzer) Name() string { return "static-sast" }
@@ -258,6 +274,28 @@ func TestScanInScopeRunsAndAudits(t *testing.T) {
 	}
 	assertDebugEvent(t, res.DebugEvents, stageVulns, "fake", ports.ScanDebugSucceeded)
 	assertDebugEvent(t, res.DebugEvents, stageLicense, "license-policy", ports.ScanDebugSucceeded)
+}
+
+func TestScanSurfacesPythonTaintCoverageEvenWhenBestEffortScannerFails(t *testing.T) {
+	svc := newSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{})
+	scanner := &staticTaintCoverage{
+		outcome: ports.TaintScanOutcome{Coverage: ports.AnalysisCoverage{
+			Analyzer: "python-semantic-taint-v1", Language: "python", Status: ports.AnalysisCoveragePartial,
+			Available: true, FilesSeen: 2, FilesParsed: 1, Gaps: []ports.AnalysisCoverageGap{{Kind: "parse_recovery", Count: 1}},
+		}},
+		err: errors.New("untrusted parser detail"),
+	}
+	svc.SetPythonTaint(scanner)
+	result, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
+	if err != nil {
+		t.Fatalf("best-effort semantic scanner failed the SCA scan: %v", err)
+	}
+	if scanner.calls != 1 || len(result.AnalysisCoverage) != 1 || result.AnalysisCoverage[0].FilesParsed != 1 {
+		t.Fatalf("coverage result = %+v calls=%d", result.AnalysisCoverage, scanner.calls)
+	}
+	if len(result.SourceWarnings) != 1 || strings.Contains(result.SourceWarnings[0], "untrusted parser detail") {
+		t.Fatalf("safe source warning = %v", result.SourceWarnings)
+	}
 }
 
 func TestCodeQualityRequiresExplicitScanOption(t *testing.T) {
@@ -476,6 +514,70 @@ func TestScanUsesImportedSBOMWithoutAcquiringTarget(t *testing.T) {
 	}
 	if res.Target != "product-service" || len(res.SBOM.Components) != 1 || len(res.SBOM.Dependencies) != 1 {
 		t.Fatalf("result imported SBOM = target %q comps %d deps %d", res.Target, len(res.SBOM.Components), len(res.SBOM.Dependencies))
+	}
+}
+
+type uploadedSourceStoreStub struct {
+	ports.EngagementSourceStore
+	item         sourcepackage.Package
+	tenantID     shared.ID
+	engagementID shared.ID
+}
+
+func (s *uploadedSourceStoreStub) Get(_ context.Context, tenantID, engagementID shared.ID) (sourcepackage.Package, error) {
+	s.tenantID, s.engagementID = tenantID, engagementID
+	return s.item, nil
+}
+
+func TestStartUploadedSourceScanUsesStoredIdentityOverImportedSBOM(t *testing.T) {
+	tenantID := shared.ID("tenant-1")
+	digest := strings.Repeat("a", 64)
+	item := sourcepackage.Package{
+		TenantID: tenantID, EngagementID: "e1", Filename: "source.zip", Size: 7, SHA256: digest,
+		CreatedBy: "operator", CreatedAt: time.Unix(100, 0).UTC(), Locator: "internal-source-locator",
+	}
+	eng := engagementWithScope(t, item.Target())
+	eng.TenantID = tenantID
+
+	imported := memory.NewImportedSBOMStore()
+	data := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.4","components":[{"name":"pkg","version":"1.0.0"}]}`)
+	if err := imported.SaveActive(context.Background(), importedsbom.Record{
+		ID: "sbom-1", TenantID: tenantID, EngagementID: "e1", Filename: "SBOM.json",
+		Format: importedsbom.FormatCycloneDX, SpecVersion: "1.4", TargetRef: "imported-target",
+		ComponentCount: 1, SHA256: hashHex(data), RawJSON: data, CreatedBy: "operator", CreatedAt: time.Unix(100, 0).UTC(),
+	}); err != nil {
+		t.Fatalf("SaveActive: %v", err)
+	}
+
+	jobs := newFakeJobStore()
+	queue := memory.NewJobQueue(fakeIDs{}, func() time.Time { return time.Unix(200, 0).UTC() })
+	sources := &uploadedSourceStoreStub{item: item}
+	svc := newAsyncSvc(&fakeEngRepo{eng: eng}, fakeClock{t: time.Unix(200, 0).UTC()}, &fakeAcquirer{}, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
+	svc.SetImportedSBOMStore(imported)
+	svc.SetUploadedSourceStore(sources)
+	svc.SetQueue(queue)
+
+	job, err := svc.StartUploadedSourceScanWithOptions(shared.WithTenant(context.Background(), tenantID), "operator", tenantID, "e1", ScanOptions{Mode: ScanModeFull})
+	if err != nil {
+		t.Fatalf("StartUploadedSourceScanWithOptions: %v", err)
+	}
+	if job.Kind != ports.TargetUpload || job.Target != item.Target() {
+		t.Fatalf("scan job target = kind %q target %q", job.Kind, job.Target)
+	}
+	if sources.tenantID != tenantID || sources.engagementID != "e1" {
+		t.Fatalf("source lookup = tenant %q engagement %q", sources.tenantID, sources.engagementID)
+	}
+
+	queued, err := queue.Claim(context.Background(), time.Minute, ScanJobKind)
+	if err != nil || queued == nil {
+		t.Fatalf("Claim: job=%+v err=%v", queued, err)
+	}
+	var payload scaJobPayload
+	if err := json.Unmarshal(queued.Payload, &payload); err != nil {
+		t.Fatalf("decode queued scan: %v", err)
+	}
+	if payload.Req.Kind != ports.TargetUpload || payload.Req.Value != item.Target() || payload.Req.Locator != item.Locator {
+		t.Fatalf("queued source request = %+v", payload.Req)
 	}
 }
 
@@ -732,7 +834,7 @@ func TestScanResultIncludesComponentLicenseAuditAndCoverageBreakdown(t *testing.
 	if len(res.ComponentLicenses) != 3 {
 		t.Fatalf("component_licenses len = %d, want 3: %+v", len(res.ComponentLicenses), res.ComponentLicenses)
 	}
-	if got := res.ComponentLicenses[0]; got.Component != "prod-lib" || got.License != "MIT" || got.Verdict != ports.LicenseAllow || got.Scope != sbom.ScopeProduction {
+	if got := res.ComponentLicenses[0]; got.Component != "prod-lib" || got.License != "MIT" || got.Verdict != ports.LicenseAllow || got.Scope != sbom.ScopeProduction || got.RecommendedChoice != "" {
 		t.Errorf("prod-lib audit = %+v, want MIT allow production", got)
 	}
 	if got := res.ComponentLicenses[1]; got.Component != "prod-mystery" || got.License != "" || got.Verdict != ports.LicenseWarn || got.UnknownReason != sbom.ReasonMetadataMissing {
@@ -959,7 +1061,8 @@ func TestMergeCachedScanResultPreservesComplementaryModeData(t *testing.T) {
 			Version:   "1.0.0",
 			Severity:  shared.SeverityHigh,
 		}},
-		Findings: []finding.Finding{{DedupKey: "vuln:CVE-1:pkg:1.0.0"}},
+		Findings:         []finding.Finding{{DedupKey: "vuln:CVE-1:pkg:1.0.0"}},
+		AnalysisCoverage: []ports.AnalysisCoverage{{Analyzer: "python-semantic-taint-v1", Language: "python", Status: ports.AnalysisCoveragePartial, Gaps: []ports.AnalysisCoverageGap{{Kind: "dynamic_call", Count: 1}}}},
 	}
 	current := &ScanResult{
 		ScanMode: ScanModeLicenses,
@@ -988,6 +1091,23 @@ func TestMergeCachedScanResultPreservesComplementaryModeData(t *testing.T) {
 	}
 	if current.Findings[0].DedupKey != "vuln:CVE-1:pkg:1.0.0" || current.Findings[1].DedupKey != "license:GPL-3.0-only:pkg" {
 		t.Fatalf("unexpected merged findings: %+v", current.Findings)
+	}
+	if len(current.AnalysisCoverage) != 1 || current.AnalysisCoverage[0].Status != ports.AnalysisCoveragePartial {
+		t.Fatalf("analysis coverage was not preserved: %+v", current.AnalysisCoverage)
+	}
+}
+
+func TestSemanticCoverageWarningNeverIncludesFailureDetail(t *testing.T) {
+	partial := ports.AnalysisCoverage{Analyzer: "python-semantic-taint-v1", Status: ports.AnalysisCoveragePartial, Reason: ports.AnalysisReasonResolutionFailed}
+	unavailable := ports.AnalysisCoverage{Analyzer: "python-semantic-taint-v1", Status: ports.AnalysisCoverageUnavailable, Reason: ports.AnalysisReasonExtractionFailed}
+	if got := semanticCoverageWarning(partial); got != "python-semantic-taint-v1 coverage is partial; negative findings are not conclusive" {
+		t.Fatalf("partial warning = %q", got)
+	}
+	if got := semanticCoverageWarning(unavailable); got != "python-semantic-taint-v1 is unavailable; no semantic taint coverage was produced" {
+		t.Fatalf("unavailable warning = %q", got)
+	}
+	if got := semanticCoverageWarning(ports.AnalysisCoverage{Analyzer: "python-semantic-taint-v1", Status: ports.AnalysisCoverageNotApplicable}); got != "" {
+		t.Fatalf("not-applicable warning = %q", got)
 	}
 }
 
@@ -1604,7 +1724,7 @@ func TestBuildManifestReproScore(t *testing.T) {
 	if m.ReproScore != 6*100/7 {
 		t.Errorf("repro score = %d, want %d", m.ReproScore, 6*100/7)
 	}
-	if m.SBOMSHA256 == "" || m.CorrelationVersion != 2 {
+	if m.SBOMSHA256 == "" || m.CorrelationVersion != vulnerability.CorrelationVersion {
 		t.Errorf("manifest incomplete: %+v", m)
 	}
 }

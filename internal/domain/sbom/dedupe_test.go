@@ -1,6 +1,9 @@
 package sbom
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestDedupeComponentsUnionsLicenses(t *testing.T) {
 	// The reported bug: Syft emits the same package twice – one entry with the resolved license,
@@ -70,6 +73,18 @@ func TestDedupeComponentsFillsEmptyTwin(t *testing.T) {
 	}
 	if !out[0].FirstParty {
 		t.Errorf("FirstParty must be a true OR across instances")
+	}
+}
+
+func TestDedupeComponentsPreservesAllLocations(t *testing.T) {
+	in := []Component{
+		{Name: "jsoup", Version: "1.16.1", PURL: "pkg:maven/org.jsoup/jsoup@1.16.1", Location: "core/pom.xml"},
+		{Name: "jsoup", Version: "1.16.1", PURL: "pkg:maven/org.jsoup/jsoup@1.16.1", Location: "service/pom.xml"},
+	}
+	out := DedupeComponents(in)
+	want := []string{"core/pom.xml", "service/pom.xml"}
+	if len(out) != 1 || !reflect.DeepEqual(out[0].Locations, want) {
+		t.Fatalf("locations = %+v, want %v", out, want)
 	}
 }
 
