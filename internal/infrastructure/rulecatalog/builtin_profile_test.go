@@ -51,7 +51,7 @@ func TestEveryShippedLanguageHasBuiltInProfile(t *testing.T) {
 	}
 
 	// The core shipped packs (per docs/guide/code-quality-rules.md) must each have a built-in profile.
-	for _, lang := range []string{"Go", "Python", "Java", "JavaScript/TypeScript", "Kotlin", "Secrets", "Text", "Swift", "VB.NET", "PHP"} {
+	for _, lang := range []string{"Go", "Python", "Java", "JavaScript/TypeScript", "Kotlin", "Secrets", "Text", "Swift", "VB.NET", "PHP", "Rust", "C", "C++"} {
 		if _, ok := qualityprofile.BuiltIn(lang, rules); !ok {
 			t.Errorf("expected a shipped built-in profile for %q", lang)
 		}
