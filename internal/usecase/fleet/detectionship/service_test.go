@@ -137,7 +137,6 @@ func (c *captureTransport) SendDetectionBatch(_ context.Context, _ string, batch
 	return nil
 }
 
-
 func testConfig() Config {
 	return Config{AgentID: "agent-1", EngagementID: "eng-1", Token: "secret", Now: func() time.Time { return shipNow },
 		IdleInterval: time.Millisecond, Retry: func(error, uint) (bool, time.Duration) { return false, 0 }}

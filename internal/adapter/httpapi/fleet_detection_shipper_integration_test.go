@@ -82,8 +82,8 @@ func TestAgentDetectionShipperLivePath(t *testing.T) {
 		return fleetagent.DetectionAttribution{
 			TelemetryRefs: []fleetagent.TelemetryReference{{
 				StreamID: "stream-1", Epoch: 1, Sequence: sequence,
-				EventID:  shared.ID(fmt.Sprintf("event-%d", sequence)),
-				Digest:   strings.Repeat("a", 64),
+				EventID: shared.ID(fmt.Sprintf("event-%d", sequence)),
+				Digest:  strings.Repeat("a", 64),
 			}},
 			Rulepack: fleetagent.RulepackReference{ID: "builtin", Version: 1, Digest: strings.Repeat("b", 64)},
 		}

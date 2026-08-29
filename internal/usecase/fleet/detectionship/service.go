@@ -444,7 +444,6 @@ func (s *Service) persist(next ports.DetectionDeliveryState) error {
 	return nil
 }
 
-
 func wait(ctx context.Context, delay time.Duration) error {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()

@@ -91,28 +91,28 @@ func (g TelemetryAgentGap) Validate() error {
 // accepted for one current gap projection. SignedContentDigest identifies exact
 // retries while later monotonic extensions append distinct immutable revisions.
 type TelemetryAgentGapRevision struct {
-	Revision              uint64
-	ProtocolVersion       int
-	GapID                 shared.ID
-	AuthenticatedAgentID  shared.ID
-	AgentID               shared.ID
-	HostID                shared.ID
-	AgentSessionID        fleetagent.SessionID
-	AssetID               shared.ID
-	StreamID              shared.ID
-	Priority              fleetagent.DeliveryPriority
-	Epoch                 uint64
-	KnownSequence         bool
-	FromSequence          uint64
-	ToSequence            uint64
-	Count                 uint64
-	Reason                fleetagent.TelemetryGapReason
-	FromAt                time.Time
-	ToAt                  time.Time
-	KeyID                 string
-	Signature             string
-	SignedContentDigest   string
-	ReceivedAt            time.Time
+	Revision             uint64
+	ProtocolVersion      int
+	GapID                shared.ID
+	AuthenticatedAgentID shared.ID
+	AgentID              shared.ID
+	HostID               shared.ID
+	AgentSessionID       fleetagent.SessionID
+	AssetID              shared.ID
+	StreamID             shared.ID
+	Priority             fleetagent.DeliveryPriority
+	Epoch                uint64
+	KnownSequence        bool
+	FromSequence         uint64
+	ToSequence           uint64
+	Count                uint64
+	Reason               fleetagent.TelemetryGapReason
+	FromAt               time.Time
+	ToAt                 time.Time
+	KeyID                string
+	Signature            string
+	SignedContentDigest  string
+	ReceivedAt           time.Time
 }
 
 // Validate checks that an immutable revision is a complete valid signed report
@@ -139,7 +139,7 @@ func (r TelemetryAgentGapRevision) Validate() error {
 func (r TelemetryAgentGapRevision) Report() fleetagent.TelemetryGapReport {
 	return fleetagent.TelemetryGapReport{
 		ProtocolVersion: r.ProtocolVersion,
-		GapID: r.GapID, AgentID: r.AgentID, HostID: r.HostID,
+		GapID:           r.GapID, AgentID: r.AgentID, HostID: r.HostID,
 		AgentSessionID: r.AgentSessionID, AssetID: r.AssetID, StreamID: r.StreamID,
 		Priority: r.Priority, Epoch: r.Epoch, KnownSequence: r.KnownSequence,
 		FromSequence: r.FromSequence, ToSequence: r.ToSequence, Count: r.Count,

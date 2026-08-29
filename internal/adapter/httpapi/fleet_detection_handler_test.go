@@ -16,8 +16,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/worksign"
 	detectledger "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectledger"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetagentuc"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // fakeDetChain is a minimal EvidenceChain for the handler test: it seals a deterministic id per

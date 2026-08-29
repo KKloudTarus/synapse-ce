@@ -15,10 +15,10 @@ type Activation struct {
 	TenantID      shared.ID `json:"tenant_id"`
 	OperationID   shared.ID `json:"operation_id"`
 	Revision      uint64    `json:"revision"`
-	PolicyDigest string    `json:"policy_digest"`
-	PolicyVersion string   `json:"policy_version"`
-	ActivatedBy  string    `json:"activated_by"`
-	ActivatedAt  time.Time `json:"activated_at"`
+	PolicyDigest  string    `json:"policy_digest"`
+	PolicyVersion string    `json:"policy_version"`
+	ActivatedBy   string    `json:"activated_by"`
+	ActivatedAt   time.Time `json:"activated_at"`
 }
 
 func (a Activation) Validate() error {
