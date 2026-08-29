@@ -171,13 +171,16 @@ func cMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) {
 }
 
 func cMatchPointer(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
-	if strings.HasPrefix(strings.TrimSpace(text), "*") {
-		arg := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), "*"))
-		fn := cEnclosingFunction(n)
-		if fn != nil {
-			fnText := fn.Content(src)
-			if (strings.Contains(fnText, arg+" = NULL") || strings.Contains(fnText, arg+" = 0") || strings.Contains(fnText, "NULL")) && !cIsPointerGuarded(n, arg, src) {
-				emit("null-pointer-dereference", n)
+	trimmed := strings.TrimSpace(text)
+	if strings.HasPrefix(trimmed, "*") {
+		arg := strings.TrimSpace(strings.TrimPrefix(trimmed, "*"))
+		if arg != "" && !strings.Contains(arg, " ") && !strings.Contains(arg, "(") {
+			fn := cEnclosingFunction(n)
+			if fn != nil {
+				fnText := fn.Content(src)
+				if (strings.Contains(fnText, arg+" = NULL") || strings.Contains(fnText, arg+" = 0") || strings.Contains(fnText, arg+" = (void*)0")) && !cIsPointerGuarded(n, arg, src) {
+					emit("null-pointer-dereference", n)
+				}
 			}
 		}
 	}
@@ -188,11 +191,13 @@ func cMatchField(n *sitter.Node, text string, src []byte, emit func(string, *sit
 		parts := strings.Split(text, "->")
 		if len(parts) > 0 {
 			ptr := strings.TrimSpace(parts[0])
-			fn := cEnclosingFunction(n)
-			if fn != nil {
-				fnText := fn.Content(src)
-				if (strings.Contains(fnText, ptr+" = NULL") || strings.Contains(fnText, ptr+" = 0") || strings.Contains(fnText, "NULL")) && !cIsPointerGuarded(n, ptr, src) {
-					emit("null-pointer-dereference", n)
+			if ptr != "" && !strings.Contains(ptr, " ") {
+				fn := cEnclosingFunction(n)
+				if fn != nil {
+					fnText := fn.Content(src)
+					if (strings.Contains(fnText, ptr+" = NULL") || strings.Contains(fnText, ptr+" = 0") || strings.Contains(fnText, ptr+" = (void*)0")) && !cIsPointerGuarded(n, ptr, src) {
+						emit("null-pointer-dereference", n)
+					}
 				}
 			}
 		}
@@ -371,11 +376,14 @@ func cMatchCast(n *sitter.Node, text string, src []byte, emit func(string, *sitt
 	tText := strings.TrimSpace(typeDesc.Content(src))
 	vText := strings.TrimSpace(val.Content(src))
 
-	// Unaligned pointer cast
-	if (strings.Contains(tText, "int") || strings.Contains(tText, "long") || strings.Contains(tText, "uint32_t") || strings.Contains(tText, "uint64_t")) &&
-		strings.Contains(tText, "*") &&
-		(strings.Contains(vText, "char") || strings.Contains(vText, "uint8_t") || strings.Contains(vText, "void") || strings.Contains(vText, "byte_ptr")) {
-		emit("unaligned-pointer-cast", n)
+	// Unaligned pointer cast: casting char*/uint8_t*/void* to int*/uint32_t*/uint64_t*/long*
+	if strings.HasSuffix(tText, "*") {
+		targetBase := strings.TrimSpace(strings.TrimSuffix(tText, "*"))
+		if targetBase == "uint32_t" || targetBase == "uint64_t" || targetBase == "int" || targetBase == "long" || targetBase == "int32_t" || targetBase == "int64_t" {
+			if strings.Contains(vText, "char") || strings.Contains(vText, "uint8_t") || strings.Contains(vText, "void") || strings.Contains(vText, "byte") || strings.Contains(vText, "raw") {
+				emit("unaligned-pointer-cast", n)
+			}
+		}
 	}
 	// Integer truncation cast
 	if (tText == "short" || tText == "char" || tText == "int8_t" || tText == "uint8_t" || tText == "int16_t" || tText == "uint16_t") &&
@@ -383,8 +391,8 @@ func cMatchCast(n *sitter.Node, text string, src []byte, emit func(string, *sitt
 		emit("integer-truncation-cast", n)
 	}
 	// Lossy pointer to int cast
-	if (tText == "int" || tText == "uint32_t" || tText == "unsigned int") &&
-		(strings.Contains(vText, "*") || strings.Contains(vText, "ptr")) {
+	if (tText == "int" || tText == "uint32_t" || tText == "unsigned int" || tText == "int32_t") &&
+		(strings.Contains(vText, "*") || strings.Contains(vText, "ptr") || strings.Contains(vText, "addr")) {
 		emit("lossy-pointer-to-int-cast", n)
 	}
 }
@@ -427,17 +435,22 @@ func cMatchBinary(n *sitter.Node, text string, src []byte, emit func(string, *si
 	}
 
 	if op == "<" || op == ">" || op == "<=" || op == ">=" || op == "==" || op == "!=" {
-		if (strings.Contains(text, "signed") && (strings.Contains(text, "unsigned") || strings.Contains(text, "buf_size"))) ||
-			strings.Contains(text, "signed_val < unsigned_val") || strings.Contains(text, "signed_len < buf_size") || strings.Contains(text, "count < len") {
-			if !strings.Contains(text, "size_t") && !strings.Contains(string(src), "signed_len >= 0") && !strings.Contains(string(src), "signed_val >= 0") {
-				emit("signed-unsigned-comparison", n)
+		if left != nil && right != nil {
+			lText := strings.TrimSpace(left.Content(src))
+			rText := strings.TrimSpace(right.Content(src))
+			if (strings.Contains(lText, "signed") || strings.Contains(rText, "signed") || strings.Contains(lText, "int ") || strings.Contains(lText, "count")) &&
+				(strings.Contains(rText, "unsigned") || strings.Contains(lText, "unsigned") || strings.Contains(rText, "size_t") || strings.Contains(rText, "buf_size") || strings.Contains(rText, "len") || strings.Contains(rText, "sizeof")) {
+				if !strings.Contains(text, "(size_t)") && !strings.Contains(string(src), ">= 0") {
+					emit("signed-unsigned-comparison", n)
+				}
 			}
 		}
 	}
 	if op == "+" || op == "-" || op == "*" {
-		if left != nil && right != nil {
-			if strings.Contains(text, "+") || strings.Contains(text, "*") {
-				if (strings.Contains(text, "a + b") || strings.Contains(text, "val +")) && !cIsOverflowGuarded(n, src) {
+		if left != nil && right != nil && !cIsOverflowGuarded(n, src) {
+			if left.Type() == "identifier" || right.Type() == "identifier" || left.Type() == "binary_expression" || right.Type() == "binary_expression" {
+				p := n.Parent()
+				if p != nil && (p.Type() == "init_declarator" || p.Type() == "assignment_expression" || p.Type() == "binary_expression") {
 					emit("signed-integer-overflow", n)
 				}
 			}
@@ -872,16 +885,17 @@ func cIsPointerGuarded(n *sitter.Node, ptr string, src []byte) bool {
 			cond := curr.ChildByFieldName("condition")
 			if cond != nil {
 				cText := cond.Content(src)
-				if strings.Contains(cText, ptr+" != NULL") || strings.Contains(cText, ptr+" != 0") || strings.Contains(cText, "!"+ptr) || strings.Contains(cText, ptr) {
-					return true
+				if strings.Contains(cText, ptr+" != NULL") || strings.Contains(cText, ptr+" != 0") ||
+					strings.Contains(cText, ptr+" != nullptr") || strings.Contains(cText, "!"+ptr) ||
+					strings.Contains(cText, "("+ptr+")") || strings.HasPrefix(strings.TrimSpace(cText), "if ("+ptr+")") {
+					if !strings.Contains(cText, ptr+" == NULL") && !strings.Contains(cText, ptr+" == 0") {
+						return true
+					}
 				}
 			}
 		}
 		if curr.Type() == "function_definition" {
-			fnText := curr.Content(src)
-			if strings.Contains(fnText, "if (!"+ptr) || strings.Contains(fnText, "if ("+ptr+" == NULL") {
-				return true
-			}
+			break
 		}
 		curr = curr.Parent()
 	}

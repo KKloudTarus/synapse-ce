@@ -140,13 +140,6 @@ func rustMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) 
 	t := n.Type()
 	text := n.Content(src)
 
-	if strings.Contains(text, "Algorithm::None") {
-		emit("jwt-insecure-none-algo", n)
-	}
-	if strings.Contains(text, ".as_ptr()") && (strings.Contains(text, "*const") || strings.Contains(text, "c_char")) && !strings.Contains(text, "\\0") {
-		emit("ffi-c-string-missing-nul", n)
-	}
-
 	switch t {
 	case "call_expression":
 		rustMatchCall(n, text, src, emit)
@@ -181,6 +174,10 @@ func rustMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) 
 	case "static_item":
 		if strings.Contains(text, "static mut ") {
 			emit("unsafe-static-mut-ref", n)
+		}
+	case "scoped_identifier":
+		if text == "Algorithm::None" || strings.HasSuffix(text, "::Algorithm::None") {
+			emit("jwt-insecure-none-algo", n)
 		}
 	}
 }
@@ -393,6 +390,14 @@ func rustMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *s
 	if (strings.Contains(text, "encode_utf16().collect()") || strings.Contains(text, "encode_wide().collect()")) && !strings.Contains(text, "chain") {
 		emit("ffi-wide-string-unterminated", n)
 	}
+	if strings.Contains(text, "Algorithm::None") {
+		emit("jwt-insecure-none-algo", n)
+	}
+	if strings.Contains(text, ".as_ptr()") && (strings.Contains(text, "*const") || strings.Contains(text, "c_char")) {
+		if !strings.Contains(text, "\\0") && !strings.Contains(text, "CString") {
+			emit("ffi-c-string-missing-nul", n)
+		}
+	}
 }
 
 func rustInBlockWithAwait(n *sitter.Node, src []byte) bool {
@@ -431,6 +436,9 @@ func rustMatchMacro(n *sitter.Node, text string, src []byte, emit func(string, *
 			emit("xpath-injection-query", n)
 		}
 	}
+	if strings.Contains(text, "Algorithm::None") {
+		emit("jwt-insecure-none-algo", n)
+	}
 	if strings.Contains(text, "Command::new") || strings.Contains(text, "Command::new(\"sh\")") || strings.Contains(text, "Command::new(\"bash\")") || strings.Contains(text, "Command::new(\"cmd\")") {
 		if strings.Contains(text, "format!") || strings.Contains(text, "user_") || strings.Contains(text, "arg") || strings.Contains(text, "-c") {
 			emit("command-injection-sh", n)
@@ -456,6 +464,11 @@ func rustMatchUnsafeBlock(n *sitter.Node, text string, src []byte, emit func(str
 }
 
 func rustMatchCast(n *sitter.Node, text string, emit func(string, *sitter.Node)) {
+	if strings.Contains(text, ".as_ptr()") && (strings.Contains(text, "*const") || strings.Contains(text, "c_char")) {
+		if !strings.Contains(text, "\\0") && !strings.Contains(text, "CString") {
+			emit("ffi-c-string-missing-nul", n)
+		}
+	}
 	if strings.Contains(text, "as u16") || strings.Contains(text, "as u8") || strings.Contains(text, "as i8") || strings.Contains(text, "as i16") {
 		emit("lossy-integer-cast", n)
 	}
@@ -495,8 +508,20 @@ func rustMatchFunction(n *sitter.Node, text string, src []byte, emit func(string
 		if strings.Contains(text, "panic!") || strings.Contains(text, "unwrap()") {
 			emit("panic-in-ffi-boundary", n)
 		}
-		if (strings.Contains(text, "Handle") || strings.Contains(text, "Struct") || strings.Contains(text, "Opaque") || strings.Contains(text, "Ctx")) && !strings.Contains(text, "*mut") && !strings.Contains(text, "*const") && !strings.Contains(text, "&") {
-			emit("ffi-opaque-struct-by-value", n)
+		if params := n.ChildByFieldName("parameters"); params != nil {
+			for i := 0; i < int(params.NamedChildCount()); i++ {
+				p := params.NamedChild(i)
+				pText := strings.TrimSpace(p.Content(src))
+				if strings.Contains(pText, ":") {
+					parts := strings.Split(pText, ":")
+					if len(parts) == 2 {
+						typeName := strings.TrimSpace(parts[1])
+						if !strings.HasPrefix(typeName, "*") && !strings.HasPrefix(typeName, "&") && !rustIsPrimitiveType(typeName) {
+							emit("ffi-opaque-struct-by-value", p)
+						}
+					}
+				}
+			}
 		}
 		if strings.Contains(text, ".as_ptr()") && (strings.Contains(text, "*const") || strings.Contains(text, "c_char")) {
 			emit("ffi-c-string-missing-nul", n)
@@ -505,7 +530,7 @@ func rustMatchFunction(n *sitter.Node, text string, src []byte, emit func(string
 	if strings.HasPrefix(strings.TrimSpace(text), "pub fn") && !rustHasDocComment(n, src) {
 		emit("public-api-undocumented", n)
 	}
-	if strings.Contains(text, "-> Result<") || strings.Contains(text, "-> std::result::Result<") || strings.Contains(text, "-> Option<") || strings.HasPrefix(text, "pub fn is_empty") || strings.HasPrefix(text, "pub fn len") || strings.HasPrefix(text, "pub fn is_valid") || strings.HasPrefix(text, "pub fn calculate") {
+	if strings.Contains(text, "-> Result<") || strings.Contains(text, "-> std::result::Result<") || strings.Contains(text, "-> Option<") || strings.HasPrefix(text, "pub fn is_") || strings.HasPrefix(text, "pub fn has_") || strings.HasPrefix(text, "pub fn len") || strings.HasPrefix(text, "pub fn calculate") {
 		if !rustHasMustUse(n, src) {
 			emit("missing-must-use", n)
 		}
@@ -870,4 +895,15 @@ func rustMaxControlNesting(n *sitter.Node) int {
 		return best + 1
 	}
 	return best
+}
+
+func rustIsPrimitiveType(t string) bool {
+	primitives := map[string]bool{
+		"u8": true, "u16": true, "u32": true, "u64": true, "u128": true, "usize": true,
+		"i8": true, "i16": true, "i32": true, "i64": true, "i128": true, "isize": true,
+		"f32": true, "f64": true, "bool": true, "char": true, "str": true,
+		"c_char": true, "c_int": true, "c_uint": true, "c_long": true, "c_ulong": true,
+		"c_void": true, "c_short": true, "c_ushort": true, "c_float": true, "c_double": true,
+	}
+	return primitives[strings.TrimSpace(t)]
 }

@@ -137,40 +137,6 @@ func cppMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) {
 	t := n.Type()
 	text := n.Content(src)
 
-	if strings.Contains(text, "export template") {
-		emit("export-template-obsolete", n)
-	}
-	if strings.Contains(text, "const std::vector<") && (strings.Contains(text, "> &") || strings.Contains(text, ">&")) && strings.Contains(text, "void process") {
-		emit("unnecessary-temporary-vector", n)
-	}
-	if strings.Contains(text, "Base b") || strings.Contains(text, "Shape s") || strings.Contains(text, "Widget w") {
-		emit("object-slicing-pass-by-value", n)
-	}
-	if strings.Contains(text, "XercesDOMParser") && !strings.Contains(text, "fgXercesDisableDefaultEntityResolution") {
-		emit("xml-external-entity-parser", n)
-	}
-	if strings.Contains(text, "text_iarchive") {
-		emit("untrusted-deserialization-boost", n)
-	}
-	if (strings.Contains(text, "std::regex ") || strings.Contains(text, "std::regex(")) && (strings.Contains(text, "user_") || strings.Contains(text, "user_pattern")) {
-		if !strings.Contains(text, "\"") {
-			emit("regex-dos-dynamic-pattern", n)
-		}
-	}
-	if strings.Contains(text, "const_cast<") || strings.Contains(text, "const_cast <") {
-		emit("const-cast-removing-constness", n)
-	}
-	if (strings.Contains(text, "reinterpret_cast<") || strings.Contains(text, "reinterpret_cast <")) && !strings.Contains(text, "uintptr_t") {
-		if strings.Contains(text, "uint32_t") || strings.Contains(text, "<int>") || strings.Contains(text, "<long>") || strings.Contains(text, "<unsigned int>") {
-			emit("reinterpret-cast-pointer-to-int", n)
-		} else if strings.Contains(text, "*") || strings.Contains(text, "Derived") {
-			emit("reinterpret-cast-unrelated-classes", n)
-		}
-	}
-	if strings.Contains(text, "...") && !strings.Contains(string(src), "template") && !strings.Contains(string(src), "Args") && !strings.Contains(string(src), "catch") {
-		emit("c-style-variadic-function", n)
-	}
-
 	switch t {
 	case "class_specifier", "struct_specifier", "union_specifier":
 		cppMatchClass(n, text, src, emit)
@@ -186,8 +152,13 @@ func cppMatchNode(n *sitter.Node, src []byte, emit func(string, *sitter.Node)) {
 		cppMatchCatch(n, text, src, emit)
 	case "for_statement", "for_range_loop":
 		cppMatchFor(n, text, src, emit)
-	case "template_declaration":
-		cppMatchTemplate(n, text, src, emit)
+	case "template_declaration", "export_declaration", "ERROR":
+		if strings.Contains(text, "export template") {
+			emit("export-template-obsolete", n)
+		}
+		if t == "template_declaration" {
+			cppMatchTemplate(n, text, src, emit)
+		}
 	case "enum_specifier":
 		cppMatchEnum(n, text, emit)
 	case "type_definition":
@@ -323,6 +294,8 @@ func cppMatchClass(n *sitter.Node, text string, src []byte, emit func(string, *s
 }
 
 func cppMatchFunction(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
+	cppCheckFunctionParameters(n, text, src, emit)
+
 	// Virtual call in constructor
 	if cppIsConstructor(n, src) {
 		body := n.ChildByFieldName("body")
@@ -332,33 +305,6 @@ func cppMatchFunction(n *sitter.Node, text string, src []byte, emit func(string,
 				emit("virtual-call-in-constructor", n)
 			}
 		}
-	}
-
-	// Object slicing pass by value & C-style variadic function
-	if declarator := n.ChildByFieldName("declarator"); declarator != nil {
-		params := declarator.ChildByFieldName("parameters")
-		if params != nil {
-			for i := 0; i < int(params.NamedChildCount()); i++ {
-				p := params.NamedChild(i)
-				pText := strings.TrimSpace(p.Content(src))
-				if pText == "..." || strings.HasSuffix(pText, "...") {
-					if !strings.Contains(text, "template") {
-						emit("c-style-variadic-function", p)
-					}
-				}
-				// Polymorphic object slicing
-				if (strings.HasPrefix(pText, "Base ") || strings.HasPrefix(pText, "Shape ") || strings.HasPrefix(pText, "Widget ") ||
-					strings.HasPrefix(pText, "Service ") || strings.HasPrefix(pText, "Handler ")) &&
-					!strings.Contains(pText, "&") && !strings.Contains(pText, "*") {
-					emit("object-slicing-pass-by-value", p)
-				}
-			}
-		}
-	}
-
-	// Unnecessary temporary vector
-	if strings.Contains(text, "const std::vector<") && (strings.Contains(text, "> &") || strings.Contains(text, ">&")) {
-		emit("unnecessary-temporary-vector", n)
 	}
 
 	// Noexcept throwing
@@ -372,9 +318,88 @@ func cppMatchFunction(n *sitter.Node, text string, src []byte, emit func(string,
 	}
 }
 
+func cppCheckFunctionParameters(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
+	var params *sitter.Node
+	declarator := n.ChildByFieldName("declarator")
+	if declarator == nil {
+		for i := 0; i < int(n.NamedChildCount()); i++ {
+			c := n.NamedChild(i)
+			if c.Type() == "function_declarator" || c.Type() == "init_declarator" {
+				declarator = c
+				break
+			}
+		}
+	}
+	if declarator != nil {
+		params = declarator.ChildByFieldName("parameters")
+		if params == nil {
+			for i := 0; i < int(declarator.NamedChildCount()); i++ {
+				if declarator.NamedChild(i).Type() == "parameter_list" {
+					params = declarator.NamedChild(i)
+					break
+				}
+			}
+		}
+	}
+	if params == nil {
+		for i := 0; i < int(n.NamedChildCount()); i++ {
+			if n.NamedChild(i).Type() == "parameter_list" {
+				params = n.NamedChild(i)
+				break
+			}
+		}
+	}
+	if params != nil {
+		if strings.Contains(params.Content(src), "...") && !strings.Contains(text, "template") && !strings.Contains(text, "Args") {
+			emit("c-style-variadic-function", params)
+		}
+		for i := 0; i < int(params.NamedChildCount()); i++ {
+			p := params.NamedChild(i)
+			pText := strings.TrimSpace(p.Content(src))
+			// Unnecessary temporary vector (passing const std::vector<T>& when span/view could be used)
+			if strings.Contains(pText, "std::vector<") || strings.Contains(pText, "vector<") {
+				if strings.Contains(pText, "const ") && (strings.Contains(pText, "&") || strings.Contains(pText, "> &") || strings.Contains(pText, ">&")) {
+					emit("unnecessary-temporary-vector", p)
+				}
+			}
+			// Polymorphic object slicing
+			if p.Type() == "parameter_declaration" {
+				if !strings.Contains(pText, "&") && !strings.Contains(pText, "*") && !strings.Contains(pText, "auto") {
+					typeNode := p.ChildByFieldName("type")
+					if typeNode != nil {
+						tName := strings.TrimSpace(typeNode.Content(src))
+						if !cppIsPrimitiveType(tName) && !strings.HasPrefix(tName, "std::") {
+							emit("object-slicing-pass-by-value", p)
+						}
+					} else if strings.Contains(pText, " ") {
+						parts := strings.Fields(pText)
+						if len(parts) >= 2 && !cppIsPrimitiveType(parts[0]) && !strings.HasPrefix(parts[0], "std::") {
+							emit("object-slicing-pass-by-value", p)
+						}
+					}
+				}
+			}
+		}
+	} else if strings.Contains(text, "(int count, ...)") || strings.Contains(text, "(...)") || strings.Contains(text, ", ...)") || strings.Contains(text, ",...)") {
+		if !strings.Contains(text, "template") && !strings.Contains(text, "Args") {
+			emit("c-style-variadic-function", n)
+		}
+	}
+}
+
 func cppMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
 	callee := cppCallName(n, src)
 
+	if strings.Contains(callee, "const_cast") || strings.Contains(text, "const_cast<") || strings.Contains(text, "const_cast <") {
+		emit("const-cast-removing-constness", n)
+	}
+	if strings.Contains(callee, "reinterpret_cast") || strings.Contains(text, "reinterpret_cast<") || strings.Contains(text, "reinterpret_cast <") {
+		if (strings.Contains(text, "uint32_t") || strings.Contains(text, "<int>") || strings.Contains(text, "<long>") || strings.Contains(text, "<unsigned int>")) && !strings.Contains(text, "uintptr_t") {
+			emit("reinterpret-cast-pointer-to-int", n)
+		} else if (strings.Contains(text, "*") || strings.Contains(text, "Derived")) && !strings.Contains(text, "uintptr_t") {
+			emit("reinterpret-cast-unrelated-classes", n)
+		}
+	}
 	if callee == "malloc" || callee == "free" || callee == "calloc" || callee == "realloc" {
 		emit("malloc-free-in-cpp", n)
 	}
@@ -432,22 +457,48 @@ func cppMatchCall(n *sitter.Node, text string, src []byte, emit func(string, *si
 	if strings.Contains(text, "std::vformat(") || strings.Contains(text, "vformat(") {
 		emit("format-string-user-input", n)
 	}
-	if (strings.Contains(text, "std::regex ") || strings.Contains(text, "std::regex(")) && (strings.Contains(text, "user_") || strings.Contains(text, "user_pattern")) {
+	if (strings.Contains(callee, "std::regex") || strings.Contains(text, "std::regex(") || strings.Contains(text, "std::regex ")) &&
+		(strings.Contains(text, "user_") || strings.Contains(text, "pattern") || strings.Contains(text, "input") || strings.Contains(text, "query")) {
 		if !strings.Contains(text, "\"") {
 			emit("regex-dos-dynamic-pattern", n)
 		}
 	}
 	if strings.Contains(callee, "XercesDOMParser") || strings.Contains(text, "XercesDOMParser") {
-		if !strings.Contains(text, "fgXercesDisableDefaultEntityResolution") {
+		if !strings.Contains(text, "fgXercesDisableDefaultEntityResolution") && !strings.Contains(string(src), "fgXercesDisableDefaultEntityResolution") {
 			emit("xml-external-entity-parser", n)
 		}
 	}
-	if strings.Contains(text, "boost::archive::text_iarchive") || strings.Contains(text, "text_iarchive") {
+	if strings.Contains(callee, "text_iarchive") || strings.Contains(callee, "binary_iarchive") || strings.Contains(text, "text_iarchive") || strings.Contains(text, "binary_iarchive") {
 		emit("untrusted-deserialization-boost", n)
 	}
 }
 
 func cppMatchDeclaration(n *sitter.Node, text string, src []byte, emit func(string, *sitter.Node)) {
+	cppCheckFunctionParameters(n, text, src, emit)
+
+	if strings.Contains(text, "export template") {
+		emit("export-template-obsolete", n)
+	}
+	if (strings.Contains(text, "XercesDOMParser") || strings.Contains(text, "XMLReader")) &&
+		!strings.Contains(text, "fgXercesDisableDefaultEntityResolution") && !strings.Contains(string(src), "fgXercesDisableDefaultEntityResolution") {
+		emit("xml-external-entity-parser", n)
+	}
+	if strings.Contains(text, "text_iarchive") || strings.Contains(text, "binary_iarchive") || strings.Contains(text, "xml_iarchive") {
+		emit("untrusted-deserialization-boost", n)
+	}
+	if strings.Contains(text, "std::regex") && !strings.Contains(text, "\"") && (strings.Contains(text, "(") || strings.Contains(text, "=")) {
+		emit("regex-dos-dynamic-pattern", n)
+	}
+	if strings.Contains(text, "const_cast<") || strings.Contains(text, "const_cast <") {
+		emit("const-cast-removing-constness", n)
+	}
+	if strings.Contains(text, "reinterpret_cast<") || strings.Contains(text, "reinterpret_cast <") {
+		if (strings.Contains(text, "uint32_t") || strings.Contains(text, "<int>") || strings.Contains(text, "<long>") || strings.Contains(text, "<unsigned int>")) && !strings.Contains(text, "uintptr_t") {
+			emit("reinterpret-cast-pointer-to-int", n)
+		} else if (strings.Contains(text, "*") || strings.Contains(text, "Derived")) && !strings.Contains(text, "uintptr_t") {
+			emit("reinterpret-cast-unrelated-classes", n)
+		}
+	}
 	if strings.Contains(text, "auto_ptr") {
 		emit("auto-ptr-deprecated", n)
 	}
@@ -459,7 +510,7 @@ func cppMatchDeclaration(n *sitter.Node, text string, src []byte, emit func(stri
 			emit("raw-new-delete", n)
 		}
 	}
-	if strings.Contains(text, "std::unique_ptr<") && strings.Contains(text, "new int[") && !strings.Contains(text, "unique_ptr<int[]>") {
+	if strings.Contains(text, "std::unique_ptr<") && strings.Contains(text, "new ") && strings.Contains(text, "[") && !strings.Contains(text, "[]") {
 		emit("unique-ptr-custom-deleter-mismatch", n)
 	}
 	if strings.Contains(text, "std::string_view") && strings.Contains(text, "get_") {
@@ -657,4 +708,22 @@ func cppHasEmptyCheck(n *sitter.Node, src []byte) bool {
 func cppIsDiscardedExpression(n *sitter.Node) bool {
 	parent := n.Parent()
 	return parent != nil && parent.Type() == "expression_statement"
+}
+
+func cppIsPrimitiveType(t string) bool {
+	primitives := map[string]bool{
+		"int": true, "unsigned int": true, "signed int": true,
+		"short": true, "unsigned short": true, "signed short": true,
+		"long": true, "unsigned long": true, "signed long": true,
+		"long long": true, "unsigned long long": true,
+		"char": true, "unsigned char": true, "signed char": true,
+		"float": true, "double": true, "long double": true,
+		"bool": true, "void": true, "size_t": true, "uint8_t": true,
+		"uint16_t": true, "uint32_t": true, "uint64_t": true,
+		"int8_t": true, "int16_t": true, "int32_t": true, "int64_t": true,
+		"uintptr_t": true, "intptr_t": true, "std::string": true,
+		"string": true, "std::string_view": true, "string_view": true,
+		"std::span": true, "span": true,
+	}
+	return primitives[strings.TrimSpace(t)]
 }
