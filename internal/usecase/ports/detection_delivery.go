@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
@@ -19,6 +20,18 @@ type DetectionTransport interface {
 	RegisterDetectionKey(ctx context.Context, token string, key fleetagent.AgentSigningKey, proof string) error
 	SendDetectionBatch(ctx context.Context, token string, batch fleetagent.AgentBatch, items []fleetagent.DetectionBatchItem) error
 }
+
+// DetectionTransportV2 is an optional extension. Keeping it separate leaves existing v1 shippers
+// and transports source-compatible while attributed sources fail closed when their transport lacks v2.
+type DetectionTransportV2 interface {
+	DetectionTransport
+	SendDetectionBatchV2(ctx context.Context, token string, batch fleetagent.AgentBatchV2, items []fleetagent.DetectionBatchItemV2) error
+}
+
+// ErrDetectionSigningKeyRejected is returned by a transport when the control plane rejects the
+// purpose-bound key used for a detection batch. The delivery use case may rotate once without
+// depending on transport-specific status codes.
+var ErrDetectionSigningKeyRejected = errors.New("detection signing key rejected by transport")
 
 // DetectionSigningKeyState is the private half of one purpose-bound agent key. Only Key.PublicKey and
 // a proof produced from PrivateKey may leave the host.

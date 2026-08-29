@@ -194,6 +194,9 @@ func (q *JobQueue) AggregateJobQueueStats(ctx context.Context, kinds ...string) 
 	if err != nil {
 		return ports.JobStats{}, fmt.Errorf("list queue tenants: %w", err)
 	}
+	// Raw rows are collected as-is; logicalQueueTenantIDs below collapses them onto their
+	// RLS partitions, so the legacy empty-string tenant seeded by migration 0002 cannot
+	// be summed twice as DefaultTenant.
 	var tenantIDs []shared.ID
 	for rows.Next() {
 		var tenantID shared.ID

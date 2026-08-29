@@ -88,7 +88,7 @@ func NewDurableSensor(source ports.DetectionSensor, durable ports.TelemetrySpool
 // privacy.DefaultPolicy(); an operator/tenant policy is applied here before Start. An invalid policy is
 // rejected so the sensor never ships with a broken (fail-open) redaction config.
 func (s *DurableSensor) SetRedactionPolicy(p privacy.Policy) error {
-	if err := p.Validate(); err != nil {
+	if err := p.ValidateSourceFloor(); err != nil {
 		return err
 	}
 	s.mu.Lock()

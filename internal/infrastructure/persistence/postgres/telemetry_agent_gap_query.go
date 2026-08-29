@@ -41,7 +41,7 @@ func (r *TelemetryTransportRepository) QueryAgentGaps(ctx context.Context, q por
 			  AND ($3='' OR asset_id=$3)
 			  AND ($4::integer IS NULL OR priority=$4)
 			  AND ($5::timestamptz IS NULL OR to_at >= $5)
-			  AND ($6::timestamptz IS NULL OR from_at <= $6)
+			  AND ($6::timestamptz IS NULL OR from_at < $6)
 			ORDER BY from_at, first_reported_at, gap_id`,
 			tenant.String(), q.AgentID.String(), q.AssetID.String(), priority, since, until)
 		if err != nil {

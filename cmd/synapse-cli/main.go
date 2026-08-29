@@ -8,9 +8,11 @@
 package main
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -28,6 +30,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rating"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/suppression"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
@@ -82,6 +85,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
+	"gopkg.in/yaml.v3"
 )
 
 func main() {
@@ -994,7 +998,7 @@ func gradeNum(g rating.Grade) float64 {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  synapse-cli doctor [path] [--json]       # offline pre-scan readiness: toolchain, markers, and dimension coverage")
-	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--include-test] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
+	fmt.Fprintln(os.Stderr, "  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--min-confidence low|medium|high|very_high] [--base REF] [--include-test] [--ignore-unfixed] [--detection-priority comprehensive|precise]")
 	fmt.Fprintln(os.Stderr, "      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
 	fmt.Fprintln(os.Stderr, "      --image    treat the argument as a container image reference (pulled via crane) instead of a local path")
 	fmt.Fprintln(os.Stderr, "      --offline  skip the live OSV.dev source; detect with Grype's offline DB only (air-gapped / fast)")
@@ -1032,10 +1036,18 @@ func runScan() {
 	sarifOut := false
 	sbomOut := false
 	includeTest := false
+	minConfidence := ""
+	baseRef := ""
 	for i := 3; i < len(os.Args); i++ {
 		switch {
 		case os.Args[i] == "--fail-on" && i+1 < len(os.Args):
 			failOn = shared.Severity(os.Args[i+1])
+			i++
+		case os.Args[i] == "--min-confidence" && i+1 < len(os.Args):
+			minConfidence = os.Args[i+1]
+			i++
+		case os.Args[i] == "--base" && i+1 < len(os.Args):
+			baseRef = os.Args[i+1]
 			i++
 		case os.Args[i] == "--include-test":
 			includeTest = true
@@ -1068,6 +1080,16 @@ func runScan() {
 		fmt.Fprintf(os.Stderr, "synapse-cli: invalid --fail-on %q (want critical|high|medium|low|info)\n", failOn)
 		os.Exit(2)
 	}
+	switch minConfidence {
+	case "", "low", "medium", "high", "very_high":
+	default:
+		fmt.Fprintf(os.Stderr, "synapse-cli: invalid --min-confidence %q (want low|medium|high|very_high)\n", minConfidence)
+		os.Exit(2)
+	}
+	if baseRef != "" && image {
+		fmt.Fprintln(os.Stderr, "synapse-cli: --base scopes to new code in a local git repo; it cannot be combined with --image")
+		os.Exit(2)
+	}
 	if priority == "" { // resolve the configured default here so an invalid env value gets this same exit-2 message
 		priority = os.Getenv("SYNAPSE_DETECTION_PRIORITY")
 	}
@@ -1087,7 +1109,7 @@ func runScan() {
 		fmt.Fprintln(os.Stderr, "synapse-cli: choose only one of --json, --sarif or --sbom")
 		os.Exit(2)
 	}
-	if err := run(os.Args[2], failOn, mode, priority, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest); err != nil {
+	if err := run(os.Args[2], failOn, mode, priority, minConfidence, baseRef, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 		os.Exit(1)
 	}
@@ -1165,7 +1187,115 @@ func (stderrAudit) Record(_ context.Context, e ports.AuditEntry) error {
 
 var _ ports.AuditLogger = stderrAudit{}
 
-func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest bool) error {
+// loadSynapseignore reads <dir>/.synapseignore (YAML) into a suppression ruleset. Missing file => empty
+// ruleset, no error. Every entry is validated (a matcher, a reason, and a parseable expiry are required)
+// so a malformed suppression fails the scan loudly rather than silently ignoring nothing — or worse,
+// silently everything.
+func loadSynapseignore(dir string) (suppression.Ruleset, error) {
+	data, err := os.ReadFile(filepath.Join(dir, ".synapseignore"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read .synapseignore: %w", err)
+	}
+	var doc struct {
+		Suppress []struct {
+			Rule    string `yaml:"rule"`
+			Path    string `yaml:"path"`
+			Reason  string `yaml:"reason"`
+			Expires string `yaml:"expires"`
+		} `yaml:"suppress"`
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&doc); err != nil {
+		return nil, fmt.Errorf("parse .synapseignore: %w", err)
+	}
+	rs := make(suppression.Ruleset, 0, len(doc.Suppress))
+	for i, e := range doc.Suppress {
+		expires, perr := time.Parse("2006-01-02", strings.TrimSpace(e.Expires))
+		if perr != nil {
+			return nil, fmt.Errorf(".synapseignore entry %d: expires %q must be YYYY-MM-DD", i+1, e.Expires)
+		}
+		r := suppression.Rule{RuleKey: strings.TrimSpace(e.Rule), Path: strings.TrimSpace(e.Path), Reason: e.Reason, Expires: expires}
+		if verr := r.Validate(); verr != nil {
+			return nil, fmt.Errorf(".synapseignore entry %d: %w", i+1, verr)
+		}
+		rs = append(rs, r)
+	}
+	return rs, nil
+}
+
+// applySuppressions drops findings matched by an active .synapseignore rule and returns the kept set plus
+// the count suppressed. Non-line findings still match by rule key / advisory id.
+func applySuppressions(findings []finding.Finding, rs suppression.Ruleset, now time.Time) ([]finding.Finding, int) {
+	if len(rs) == 0 {
+		return findings, 0
+	}
+	kept := make([]finding.Finding, 0, len(findings))
+	suppressed := 0
+	for _, f := range findings {
+		file, _, _ := findingFileLine(f)
+		if _, ok := rs.Suppress([]string{f.RuleKey, string(f.AdvisoryID)}, file, now); ok {
+			suppressed++
+			continue
+		}
+		kept = append(kept, f)
+	}
+	return kept, suppressed
+}
+
+func confidenceRank(c string) int {
+	switch c {
+	case "very_high":
+		return 4
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0 // unset / unknown
+	}
+}
+
+// filterByConfidence drops findings whose confidence is below min. A finding with no confidence (SAST /
+// misconfig do not carry one) is kept — --min-confidence targets the confidence-bearing SCA/secret
+// findings, not a blanket drop of everything unscored.
+func filterByConfidence(findings []finding.Finding, min string) []finding.Finding {
+	threshold := confidenceRank(min)
+	out := make([]finding.Finding, 0, len(findings))
+	for _, f := range findings {
+		if f.Confidence != "" && confidenceRank(f.Confidence) < threshold {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// scopeToNewCode keeps only line-anchored findings (SAST/secret/misconfig) that fall on a line changed
+// vs the base ref, so a scan of a repo with a backlog can gate a pipeline on what THIS change introduced.
+// Findings that are NOT line-attributable (SCA vulnerabilities, licenses) are KEPT: dropping them would
+// falsely report clean when a change adds a vulnerable dependency. Baseline those via .synapseignore.
+func scopeToNewCode(findings []finding.Finding, changed gitdiff.ChangedLines) []finding.Finding {
+	out := make([]finding.Finding, 0, len(findings))
+	for _, f := range findings {
+		file, line, ok := findingFileLine(f)
+		if !ok {
+			out = append(out, f)
+			continue
+		}
+		if changed.Has(file, line) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func run(path string, failOn shared.Severity, mode, priority, minConfidence, baseRef string, ignoreUnfixed, image, offline, jsonOut, sarifOut, sbomOut, includeTest bool) error {
 	// An image target is an OCI reference (acquired via crane → OCI layout); a local
 	// target is a filesystem path that must be absolute for the scope check.
 	target := strings.TrimSpace(path)
@@ -1192,14 +1322,16 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 			"go-enry": buildinfo.Module("github.com/go-enry/go-enry/v2"),
 			"synapse": buildinfo.App(),
 		},
-		VulnDBSource: "osv.dev",
 	}
 	// Grype (offline DB) always; live OSV unless --offline / SYNAPSE_OFFLINE (air-gapped / fast path).
 	detectionSources := []ports.DetectionSource{grype.New(cfg.GrypeBin, cfg.GrypeDBDir)}
 	if offline || cfg.Offline {
-		// Make the reduced-coverage mode visible: the operator chose lower recall for speed.
+		// Make the reduced-coverage mode visible: the operator chose lower recall for speed. Leave
+		// VulnDBSource empty so the evidence snapshot does NOT claim osv.dev was queried when it wasn't
+		// (Grype's DB version is recorded separately in GrypeDBVersion).
 		fmt.Fprintln(os.Stderr, "synapse-cli: offline mode – live OSV disabled; detecting with Grype's offline DB only")
 	} else {
+		prov.VulnDBSource = "osv.dev"
 		detectionSources = append([]ports.DetectionSource{osv.New(cfg.OSVBaseURL, nil)}, detectionSources...)
 	}
 	sca := scauc.NewService(
@@ -1246,26 +1378,19 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	// The CLI dogfoods a TRUSTED local project, so this is ON BY DEFAULT; set
 	// SYNAPSE_MAVEN_RESOLVE_ENABLED=false to opt out. Best-effort: a missing mvn / non-Maven target / error
 	// is a no-op (falls back to the pom-only result + the INCOMPLETE warning). Runs mvn directly.
-	mavenOn := cfg.MavenResolveEnabled
-	if _, set := os.LookupEnv("SYNAPSE_MAVEN_RESOLVE_ENABLED"); !set {
-		mavenOn = true // CLI default-on (trusted local); the API stays opt-in + sandbox-gated
-	}
-	if mavenOn {
+	// Maven full-tree resolution runs `mvn` UNSANDBOXED, which evaluates the project's POM/plugin config
+	// (arbitrary code via build extensions/plugins) on the host. It is therefore OPT-IN even for the CLI —
+	// default-on would contradict "safe by construction" and is dangerous on a shared/multi-tenant CI
+	// runner. Enable with SYNAPSE_MAVEN_RESOLVE_ENABLED=true. Best-effort when on.
+	if cfg.MavenResolveEnabled {
 		sca.SetMavenResolver(mavenresolve.New(cfg.MvnBin).WithRepoHosts(cfg.MavenRepoHosts).WithLocalRepo(cfg.MavenLocalRepo))
-		// Transparency: the CLI runs mvn UNSANDBOXED (it evaluates the project's POM/plugin config) – make
-		// that visible so it's never a silent host-exec (the API stays sandbox-gated).
-		fmt.Fprintln(os.Stderr, "synapse-cli: Maven resolver ON – runs `mvn` UNSANDBOXED over the project if it has a pom.xml (trusted-local assumption; set SYNAPSE_MAVEN_RESOLVE_ENABLED=false to disable)")
+		fmt.Fprintln(os.Stderr, "synapse-cli: Maven resolver ON – runs `mvn` UNSANDBOXED over the project if it has a pom.xml (opt-in via SYNAPSE_MAVEN_RESOLVE_ENABLED)")
 	}
-	// Gradle full-tree resolution – same default-on-for-CLI model as Maven (trusted local project),
-	// handled straight from build.gradle. Opt out with SYNAPSE_GRADLE_RESOLVE_ENABLED=false. Best-effort.
-	gradleOn := cfg.GradleResolveEnabled
-	if _, set := os.LookupEnv("SYNAPSE_GRADLE_RESOLVE_ENABLED"); !set {
-		gradleOn = true
-	}
-	if gradleOn {
+	// Gradle full-tree resolution EXECUTES build.gradle (arbitrary Groovy/Kotlin) — even higher-risk than
+	// mvn — so it is likewise OPT-IN (SYNAPSE_GRADLE_RESOLVE_ENABLED=true), never default-on.
+	if cfg.GradleResolveEnabled {
 		sca.SetGradleResolver(gradleresolve.New(cfg.GradleBin).WithRepoHosts(cfg.MavenRepoHosts).WithGradleHome(cfg.GradleHome))
-		// Gradle evaluates build.gradle (arbitrary Groovy/Kotlin) – even higher-risk than mvn; surface it.
-		fmt.Fprintln(os.Stderr, "synapse-cli: Gradle resolver ON – runs `gradle` UNSANDBOXED over the project if it has a build.gradle, which executes the build script (trusted-local assumption; set SYNAPSE_GRADLE_RESOLVE_ENABLED=false to disable)")
+		fmt.Fprintln(os.Stderr, "synapse-cli: Gradle resolver ON – runs `gradle` UNSANDBOXED over the project if it has a build.gradle, which executes the build script (opt-in via SYNAPSE_GRADLE_RESOLVE_ENABLED)")
 	}
 	// npm resolution for a lockfile-less package.json – same default-on-for-CLI model (trusted local).
 	// Opt out with SYNAPSE_NPM_RESOLVE_ENABLED=false. Best-effort; --ignore-scripts so no project code runs.
@@ -1284,12 +1409,19 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 		manifestOn = true
 	}
 	if manifestOn {
-		binOf := map[string]string{"composer": cfg.ComposerBin, "gem": cfg.BundleBin, "poetry": cfg.PoetryBin}
-		for _, eco := range []string{"composer", "gem", "poetry"} {
+		// composer + poetry only: each runs lock-only, --no-scripts over a COPY, so no project code runs.
+		binOf := map[string]string{"composer": cfg.ComposerBin, "poetry": cfg.PoetryBin}
+		for _, eco := range []string{"composer", "poetry"} {
 			sca.AddManifestResolver(manifestresolve.New(eco, binOf[eco]).WithRegistryHosts(cfg.ManifestRegistryHosts))
 		}
 		fmt.Fprintln(os.Stderr, "synapse-cli: manifest resolvers ON – composer/poetry resolve a lockfile-less composer.json/pyproject.toml over a COPY in lock-only, no-scripts mode (inert manifests; no project code runs)")
-		fmt.Fprintln(os.Stderr, "synapse-cli: manifest resolvers ON – `bundle lock` EVALUATES a lockfile-less Gemfile as Ruby, so it runs the project's manifest code UNSANDBOXED (trusted-local assumption, like the Gradle resolver); set SYNAPSE_MANIFEST_RESOLVE_ENABLED=false to disable")
+	}
+	// Bundler (gem) is split out and OPT-IN: `bundle lock` EVALUATES the Gemfile as Ruby, so it runs the
+	// project's manifest code UNSANDBOXED — unlike the inert composer/poetry/npm resolvers it is NOT
+	// default-on. Enable with SYNAPSE_BUNDLER_RESOLVE_ENABLED=true.
+	if cfg.BundlerResolveEnabled {
+		sca.AddManifestResolver(manifestresolve.New("gem", cfg.BundleBin).WithRegistryHosts(cfg.ManifestRegistryHosts))
+		fmt.Fprintln(os.Stderr, "synapse-cli: Bundler resolver ON – `bundle lock` EVALUATES a lockfile-less Gemfile as Ruby (runs project code UNSANDBOXED); opt-in via SYNAPSE_BUNDLER_RESOLVE_ENABLED")
 	}
 	// Coarse JVM class-reachability – default-on for the CLI (read-only bytecode parsing, no exec);
 	// tags each JVM component reachable/unreferenced from the app's compiled closure. Opt out with
@@ -1428,6 +1560,33 @@ func run(path string, failOn shared.Severity, mode, priority string, ignoreUnfix
 	res, err := sca.ScanWithOptions(ctx, "synapse-cli", eng.ID, ports.AcquireRequest{Kind: acqKind, Value: target}, scauc.ScanOptions{Mode: mode, DetectionPriority: priority, PolicyDir: policyDir})
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
+	}
+	if minConfidence != "" {
+		res.Findings = filterByConfidence(res.Findings, minConfidence)
+	}
+	if baseRef != "" {
+		changed, derr := gitdiff.Changed(ctx, target, baseRef)
+		if derr != nil {
+			return fmt.Errorf("new-code diff vs %q: %w", baseRef, derr)
+		}
+		before := len(res.Findings)
+		res.Findings = scopeToNewCode(res.Findings, changed)
+		fmt.Fprintf(os.Stderr, "synapse-cli: scoped to new code vs %s (%d of %d findings on changed lines; dependency/license findings kept)\n", baseRef, len(res.Findings), before)
+	}
+	if !image { // .synapseignore lives in the repo; not applicable to an image reference
+		ignoreRules, ierr := loadSynapseignore(target)
+		if ierr != nil {
+			return ierr
+		}
+		now := time.Now()
+		var suppressed int
+		res.Findings, suppressed = applySuppressions(res.Findings, ignoreRules, now)
+		if suppressed > 0 {
+			fmt.Fprintf(os.Stderr, "synapse-cli: .synapseignore suppressed %d finding(s)\n", suppressed)
+		}
+		for _, e := range ignoreRules.Expired(now) {
+			fmt.Fprintf(os.Stderr, "synapse-cli: WARNING .synapseignore suppression expired %s (rule=%q path=%q) — its findings are NOT suppressed; renew or remove it\n", e.Expires.Format("2006-01-02"), e.RuleKey, e.Path)
+		}
 	}
 
 	// Report advisory opinions separately from the smaller policy-authorized gate-exempt set.
@@ -1693,7 +1852,13 @@ func printReport(target string, res *scauc.ScanResult) {
 		if f.KEV {
 			kev = " [KEV]"
 		}
-		fmt.Printf("    %-9s risk %5.2f  %s%s\n", f.Severity, f.RiskScore, f.Title, kev)
+		// Only show the risk column when it is actually computed (KEV→EPSS×CVSS enrichment). The CLI does
+		// not populate it, so printing "risk 0.00" for every finding reads as a broken tool.
+		risk := ""
+		if f.RiskScore > 0 {
+			risk = fmt.Sprintf(" risk %5.2f", f.RiskScore)
+		}
+		fmt.Printf("    %-9s%s  %s%s\n", f.Severity, risk, f.Title, kev)
 	}
 	if c := res.Compliance; c != nil {
 		scope := ""

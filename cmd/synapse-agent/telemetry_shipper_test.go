@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"runtime"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -50,6 +52,33 @@ func testTelemetrySigner(t *testing.T, agent string) fleetclient.TelemetrySigner
 
 func testTelemetryRecord(agent string, sequence uint64, schema int) ports.SpoolRecord {
 	now := time.Unix(1_700_000_000+int64(sequence), 0).UTC()
+	eventID := shared.ID("event-" + strconv.FormatUint(sequence, 10))
+	envelope := telemetry.TelemetryEnvelope{
+		SchemaVersion:   schema,
+		EventID:         eventID,
+		EventType:       "process.exec",
+		EventClass:      detection.ClassProcess,
+		AgentID:         shared.ID(agent),
+		AgentSessionID:  shared.ID(fleetagent.CanonicalSessionID(shared.ID(agent))),
+		AssetID:         "asset-1",
+		BootID:          "boot-1",
+		StreamID:        "source-stream-1",
+		OccurredAt:      now,
+		ObservedAt:      now,
+		Sequence:        sequence,
+		DataQuality:     telemetry.QualityMissingPPID,
+		ResourceContext: telemetry.ResourceContext{},
+		Event: telemetry.TelemetryEvent{
+			Class: detection.ClassProcess,
+			Process: &telemetry.ProcessObservation{
+				Kind: "exec", PID: 10, EntityID: "process-1", Comm: "curl",
+			},
+		},
+	}
+	payload, err := json.Marshal(envelope)
+	if err != nil {
+		panic(err)
+	}
 	return ports.SpoolRecord{
 		Kind: ports.SpoolRecordTelemetry,
 		Position: fleetagent.StreamPosition{
@@ -59,10 +88,10 @@ func testTelemetryRecord(agent string, sequence uint64, schema int) ports.SpoolR
 			Session:  fleetagent.CanonicalSessionID(shared.ID(agent)),
 			Boot:     "boot-1",
 		},
-		EventID:       shared.ID("event-" + strconv.FormatUint(sequence, 10)),
+		EventID:       eventID,
 		EventClass:    detection.ClassProcess,
-		ContentType:   "application/json",
-		Payload:       []byte(`{"event":"ok"}`),
+		ContentType:   telemetryEnvelopeContentType,
+		Payload:       payload,
 		ObservedAt:    now,
 		EnqueuedAt:    now,
 		MustNotShed:   false,
@@ -99,6 +128,89 @@ func TestBuildTelemetryIngestRequestUsesBatchSequenceNotWALSequence(t *testing.T
 	}
 	if req2.Manifest.BatchID != m.BatchID {
 		t.Fatalf("same delivery coordinates/content must derive stable batch id: %q != %q", req2.Manifest.BatchID, m.BatchID)
+	}
+}
+
+func TestBuildTelemetryIngestRequestCommitsRetainedTruncation(t *testing.T) {
+	signer := testTelemetrySigner(t, "agent-1")
+	clean := testTelemetryRecord("agent-1", 11, 2)
+	truncatedArgv := testTelemetryRecord("agent-1", 12, 2)
+	truncatedPath := testTelemetryRecord("agent-1", 13, 2)
+	both := testTelemetryRecord("agent-1", 14, 2)
+	setQuality := func(record *ports.SpoolRecord, quality telemetry.DataQuality) {
+		t.Helper()
+		var envelope telemetry.TelemetryEnvelope
+		if err := json.Unmarshal(record.Payload, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		envelope.DataQuality = quality
+		payload, err := json.Marshal(envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record.Payload = payload
+	}
+	setQuality(&truncatedArgv, telemetry.QualityTruncatedArgv)
+	setQuality(&truncatedPath, telemetry.QualityTruncatedPath)
+	setQuality(&both, telemetry.QualityTruncatedArgv.With(telemetry.QualityTruncatedPath))
+
+	req, err := buildTelemetryIngestRequest(
+		fleetclient.Credential{AgentID: "agent-1", AssetID: "asset-1"},
+		signer,
+		[]ports.SpoolRecord{clean, truncatedArgv, truncatedPath, both},
+		7,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := req.Manifest.TruncatedCount, 3; got != want {
+		t.Fatalf("truncated count = %d, want %d retained events", got, want)
+	}
+	if req.Manifest.SampledOutCount != 0 || req.Manifest.DroppedCount != 0 {
+		t.Fatalf("retained truncation changed loss dispositions: sampled=%d dropped=%d", req.Manifest.SampledOutCount, req.Manifest.DroppedCount)
+	}
+	wantPolicy, err := fleetagent.SamplingPolicyDigest(
+		fleetagent.NoSamplingAlgorithm,
+		fleetagent.NoSamplingPolicyID,
+		"",
+		fleetagent.NoSamplingVersion,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Manifest.SamplingPolicyDigest != wantPolicy {
+		t.Fatalf("sampling policy digest = %q, want stable no-sampling policy %q", req.Manifest.SamplingPolicyDigest, wantPolicy)
+	}
+	if err := fleetagent.VerifyTelemetryManifestWithKey(signer.Key, time.Unix(1_700_000_000, 0).UTC(), req.Manifest); err != nil {
+		t.Fatalf("signed manifest did not verify: %v", err)
+	}
+}
+
+func TestBuildTelemetryIngestRequestRejectsUnverifiableTruncation(t *testing.T) {
+	signer := testTelemetrySigner(t, "agent-1")
+	valid := testTelemetryRecord("agent-1", 11, 2)
+	wrongType := valid
+	wrongType.ContentType = "application/json"
+	malformed := valid
+	malformed.Payload = []byte(`{"event":"not-an-envelope"}`)
+
+	for _, tc := range []struct {
+		name   string
+		record ports.SpoolRecord
+	}{
+		{name: "unexpected content type", record: wrongType},
+		{name: "malformed envelope", record: malformed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := buildTelemetryIngestRequest(
+				fleetclient.Credential{AgentID: "agent-1", AssetID: "asset-1"},
+				signer,
+				[]ports.SpoolRecord{tc.record},
+				7,
+			); err == nil {
+				t.Fatal("build request succeeded without trustworthy truncation metadata")
+			}
+		})
 	}
 }
 

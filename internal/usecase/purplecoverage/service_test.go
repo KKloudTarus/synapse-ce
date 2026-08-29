@@ -30,8 +30,11 @@ func (f *fakeDetections) ListDetections(context.Context, shared.ID) ([]detection
 	return f.records, nil
 }
 func (f *fakeDetections) LastBatchSequence(context.Context, shared.ID) (uint64, error) { return 0, nil }
-func (f *fakeDetections) ExpireDetections(context.Context, shared.ID, time.Time) ([]shared.ID, error) {
+func (f *fakeDetections) ListExpiredDetections(context.Context, shared.ID, time.Time) ([]shared.ID, error) {
 	return nil, nil
+}
+func (f *fakeDetections) DeleteDetection(context.Context, shared.ID, shared.ID) (bool, error) {
+	return false, nil
 }
 
 type fakeAudit struct {

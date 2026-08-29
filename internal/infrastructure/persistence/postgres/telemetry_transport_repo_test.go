@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -47,7 +49,7 @@ func TestTelemetryTransportRepository(t *testing.T) {
 		}
 	})
 
-	repo := NewTelemetryTransportRepository(pool)
+	repo := mustNewTelemetryTransportRepository(t, pool)
 	tctx := shared.WithTenant(ctx, tenant)
 	now := time.Now().UTC()
 	stream := shared.ID("stream-" + id)
@@ -101,22 +103,45 @@ func TestTelemetryTransportRepository(t *testing.T) {
 
 	batch := ports.TelemetryEventBatch{
 		BatchID: "batch-1", PayloadDigest: "payload-1",
-		AgentID: agentA, StreamID: stream, AssetID: "as", Epoch: 1, Sequence: 1, SchemaVersion: 1,
+		AgentID: agentA, StreamID: stream, AssetID: "as", Priority: fleetagent.PriorityP3, Epoch: 1, Sequence: 1, SchemaVersion: 1,
+		EventTimeMin: now, EventTimeMax: now,
+		ObservedCount: 5, KeptCount: 2, SampledOutCount: 1, TruncatedCount: 1, DroppedCount: 2,
+		SamplingPolicyDigest: "test-policy-digest",
 		Events: []ports.StoredTelemetryEvent{
-			{EventID: "e1", Class: detection.ClassProcess, Digest: "d1", Payload: []byte("p1"), ObservedAt: now},
-			{EventID: "e2", Class: detection.ClassNetwork, Digest: "d2", Payload: []byte("p2"), ObservedAt: now},
+			{EventID: "e1", Class: detection.ClassProcess, Digest: "d1", RedactionPolicyDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Payload: []byte("p1"), ObservedAt: now},
+			{EventID: "e2", Class: detection.ClassNetwork, Digest: "d2", RedactionPolicyDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Payload: []byte("p2"), ObservedAt: now},
 		},
 	}
 	if err := repo.CommitBatch(tctx, batch); err != nil {
 		t.Fatalf("first batch commitment: %v", err)
 	}
-	if err := repo.CommitBatch(tctx, batch); err != nil {
-		t.Fatalf("identical batch commitment must be idempotent: %v", err)
+	if err := mustNewTelemetryTransportRepository(t, pool).CommitBatch(tctx, batch); err != nil {
+		t.Fatalf("identical commitment after repository restart must be idempotent: %v", err)
 	}
-	conflict := batch
-	conflict.PayloadDigest = "different-payload"
-	if err := repo.CommitBatch(tctx, conflict); !errors.Is(err, shared.ErrConflict) {
-		t.Fatalf("same delivery sequence with different commitment must conflict, got %v", err)
+	for _, tc := range []struct {
+		name   string
+		mutate func(*ports.TelemetryEventBatch)
+	}{
+		{"payload digest", func(b *ports.TelemetryEventBatch) { b.PayloadDigest = "different-payload" }},
+		{"sampled count", func(b *ports.TelemetryEventBatch) {
+			b.SampledOutCount++
+			b.DroppedCount--
+		}},
+		{"truncated count", func(b *ports.TelemetryEventBatch) { b.TruncatedCount-- }},
+		{"sampling policy digest", func(b *ports.TelemetryEventBatch) { b.SamplingPolicyDigest = "different-policy" }},
+		// Widen the signed bounds instead of narrowing them, so the retained events stay
+		// inside the claimed window and the repository reaches the immutable-commitment
+		// comparison rather than rejecting the batch as malformed.
+		{"signed minimum time", func(b *ports.TelemetryEventBatch) { b.EventTimeMin = b.EventTimeMin.Add(-time.Microsecond) }},
+		{"signed maximum time", func(b *ports.TelemetryEventBatch) { b.EventTimeMax = b.EventTimeMax.Add(time.Microsecond) }},
+	} {
+		t.Run("commit conflict "+tc.name, func(t *testing.T) {
+			conflict := batch
+			tc.mutate(&conflict)
+			if err := repo.CommitBatch(tctx, conflict); !errors.Is(err, shared.ErrConflict) {
+				t.Fatalf("same delivery sequence with different %s must conflict, got %v", tc.name, err)
+			}
+		})
 	}
 	if n, err := repo.IngestBatchEvents(tctx, batch); err != nil || n != 2 {
 		t.Fatalf("first ingest must store 2, got %d err=%v", n, err)
@@ -126,6 +151,101 @@ func TestTelemetryTransportRepository(t *testing.T) {
 	}
 	if n, _ := repo.CountBatchEvents(tctx, agentA, stream, 1, 1); n != 2 {
 		t.Fatalf("CountBatchEvents = %d, want 2", n)
+	}
+	ref := fleetagent.TelemetryReference{
+		StreamID: stream, Epoch: 1, Sequence: 1, EventID: "e1", Digest: "d1",
+	}
+	policyDigest := strings.Repeat("a", 64)
+	if status, err := repo.ResolveTelemetryReferences(tctx, agentA, "as", policyDigest, []fleetagent.TelemetryReference{ref}); err != nil || status != ports.TelemetryReferencesDurable {
+		t.Fatalf("matching policy resolution = %q, %v; want durable", status, err)
+	}
+	if status, err := repo.ResolveTelemetryReferences(tctx, agentA, "as", strings.Repeat("b", 64), []fleetagent.TelemetryReference{ref}); err != nil || status != ports.TelemetryReferencesContradictory {
+		t.Fatalf("mismatched policy resolution = %q, %v; want contradictory", status, err)
+	}
+	missing := ref
+	missing.EventID = "missing-event"
+	if status, err := repo.ResolveTelemetryReferences(tctx, agentA, "as", policyDigest, []fleetagent.TelemetryReference{missing}); err != nil || status != ports.TelemetryReferencesMissing {
+		t.Fatalf("missing reference resolution = %q, %v; want missing", status, err)
+	}
+	if _, err := repo.ResolveTelemetryReferences(tctx, agentA, "as", "", []fleetagent.TelemetryReference{ref}); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("empty policy digest error = %v, want validation", err)
+	}
+
+	for i, tc := range []struct {
+		name       string
+		slug       string
+		sampledOut int
+		dropped    int
+	}{
+		{name: "all sampled", slug: "all-sampled", sampledOut: 4},
+		{name: "all dropped", slug: "all-dropped", dropped: 4},
+	} {
+		t.Run("zero kept "+tc.name, func(t *testing.T) {
+			sequence := uint64(i + 2)
+			zero := ports.TelemetryEventBatch{
+				BatchID: shared.ID("zero-kept-" + tc.slug), PayloadDigest: "empty-payload-" + tc.slug,
+				AgentID: agentA, StreamID: stream, AssetID: "as", Priority: fleetagent.PriorityP3,
+				Epoch: 1, Sequence: sequence, SchemaVersion: 2,
+				EventTimeMin: now, EventTimeMax: now.Add(time.Second),
+				ObservedCount: 4, KeptCount: 0, SampledOutCount: tc.sampledOut,
+				DroppedCount: tc.dropped, SamplingPolicyDigest: "zero-kept-policy",
+			}
+			if err := repo.CommitBatch(tctx, zero); err != nil {
+				t.Fatalf("commit zero-kept batch: %v", err)
+			}
+			if err := mustNewTelemetryTransportRepository(t, pool).CommitBatch(tctx, zero); err != nil {
+				t.Fatalf("identical zero-kept retry after repository restart: %v", err)
+			}
+			if n, err := repo.IngestBatchEvents(tctx, zero); err != nil || n != 0 {
+				t.Fatalf("zero-kept ingest = %d, %v; want zero without a fake event", n, err)
+			}
+			if n, err := repo.CountBatchEvents(tctx, agentA, stream, 1, sequence); err != nil || n != 0 {
+				t.Fatalf("zero-kept event count = %d, %v; want zero", n, err)
+			}
+
+			changedLane := zero
+			changedLane.Priority = fleetagent.PriorityP2
+			if err := repo.CommitBatch(tctx, changedLane); !errors.Is(err, shared.ErrConflict) {
+				t.Fatalf("valid zero-kept lane equivocation error = %v, want conflict", err)
+			}
+			changedBounds := zero
+			changedBounds.EventTimeMin = changedBounds.EventTimeMin.Add(-time.Microsecond)
+			if err := repo.CommitBatch(tctx, changedBounds); !errors.Is(err, shared.ErrConflict) {
+				t.Fatalf("valid zero-kept bounds equivocation error = %v, want conflict", err)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*ports.TelemetryEventBatch)
+	}{
+		{name: "priority lane", mutate: func(candidate *ports.TelemetryEventBatch) {
+			candidate.Priority = fleetagent.PriorityP2
+		}},
+		{name: "event-time bounds", mutate: func(candidate *ports.TelemetryEventBatch) {
+			candidate.EventTimeMin = now.Add(time.Microsecond)
+			candidate.EventTimeMax = now.Add(time.Microsecond)
+		}},
+	} {
+		t.Run("reject retained event outside "+tc.name, func(t *testing.T) {
+			invalid := ports.TelemetryEventBatch{
+				BatchID: "invalid-retained", PayloadDigest: "invalid-retained-payload",
+				AgentID: agentA, StreamID: stream, AssetID: "as", Priority: fleetagent.PriorityP3,
+				Epoch: 2, Sequence: 1, SchemaVersion: 2,
+				EventTimeMin: now, EventTimeMax: now,
+				ObservedCount: 1, KeptCount: 1, SamplingPolicyDigest: "invalid-retained-policy",
+				Events: []ports.StoredTelemetryEvent{{
+					EventID: "invalid-event", Class: detection.ClassProcess, Digest: "invalid-digest",
+					RedactionPolicyDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					Payload:               []byte("payload"), ObservedAt: now,
+				}},
+			}
+			tc.mutate(&invalid)
+			if err := repo.CommitBatch(tctx, invalid); !errors.Is(err, shared.ErrValidation) {
+				t.Fatalf("CommitBatch() error = %v, want validation", err)
+			}
+		})
 	}
 
 	if st, _ := repo.StreamState(tctx, agentB, stream, 1); st.Contiguous != 0 || st.Version != 0 {
@@ -139,6 +259,9 @@ func TestTelemetryTransportRepository(t *testing.T) {
 	}
 
 	octx := shared.WithTenant(ctx, other)
+	if err := repo.CommitBatch(octx, batch); err != nil {
+		t.Fatalf("same coordinate in another tenant must be independent: %v", err)
+	}
 	if gaps, _ := repo.ListGaps(octx, agentA, stream); len(gaps) != 0 {
 		t.Fatalf("cross-tenant must not see gaps, got %d", len(gaps))
 	}

@@ -56,7 +56,10 @@ type DetectionRecordStore interface {
 	// LastBatchSequence returns the highest batch sequence recorded for an agent (0 = none yet), so a gap
 	// in the sequence can be detected. Tenant-scoped.
 	LastBatchSequence(ctx context.Context, agentID shared.ID) (uint64, error)
-	// ExpireDetections removes the records for an engagement whose ExpiresAt has elapsed at cutoff, and
-	// returns their ids so the removal can be audited. It never touches records with no expiry set.
-	ExpireDetections(ctx context.Context, engagementID shared.ID, cutoff time.Time) ([]shared.ID, error)
+	// ListExpiredDetections identifies immutable projection rows eligible for retention expiry without
+	// deleting them. Callers can durably record an expiry tombstone before removing each exact row.
+	ListExpiredDetections(ctx context.Context, engagementID shared.ID, cutoff time.Time) ([]shared.ID, error)
+	// DeleteDetection removes one exact retention-bounded projection row. It is idempotent and never
+	// deletes evidence or provenance; deleted reports whether the row existed.
+	DeleteDetection(ctx context.Context, engagementID, detectionID shared.ID) (deleted bool, err error)
 }

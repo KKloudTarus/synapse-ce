@@ -36,7 +36,7 @@ func TestScrubDetectionRedactsEvidenceSecret(t *testing.T) {
 	}
 	blob, _ := json.Marshal(out)
 	if strings.Contains(string(blob), secret) {
-		t.Fatalf("secret survived into the serialized detection: %s", blob)
+		t.Fatal("secret survived into the serialized detection")
 	}
 	if !rep.Changed() {
 		t.Fatal("report must record the redaction")
@@ -52,6 +52,54 @@ func TestScrubDetectionRedactsEvidenceSecret(t *testing.T) {
 	// Rule attribution intact.
 	if out.RuleID != det.RuleID || out.AgentID != det.AgentID {
 		t.Fatalf("detection attribution changed: %+v", out)
+	}
+}
+
+func TestScrubDetectionMatchesTelemetryBoundsAndPreservesInput(t *testing.T) {
+	policy := DefaultPolicy()
+	policy.MaxArgCount = 2
+	policy.MaxArgLen = 4
+	policy.MaxPathLen = 5
+	det := mkDetectionWithArgs(t, []string{"123456", "abcdef", "discarded"})
+	det.Evidence[0].Process.Path = "/a/very/long/path"
+
+	out, _, err := ScrubDetection(det, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Evidence[0].Process.Args) != policy.MaxArgCount {
+		t.Fatal("argv count was not bounded")
+	}
+	for _, arg := range out.Evidence[0].Process.Args {
+		if len([]rune(arg)) > policy.MaxArgLen {
+			t.Fatal("argv value was not bounded")
+		}
+	}
+	if len([]rune(out.Evidence[0].Process.Path)) > policy.MaxPathLen {
+		t.Fatal("process path was not bounded")
+	}
+	if len(det.Evidence[0].Process.Args) != 3 || det.Evidence[0].Process.Path != "/a/very/long/path" {
+		t.Fatal("ScrubDetection must not mutate its input")
+	}
+}
+
+func TestScrubDetectionRedactsKnownSecretBeforeHashAndTruncation(t *testing.T) {
+	secret := "hunter2" + "SuperSecret"
+	policy := DefaultPolicy()
+	policy.MaxArgLen = 4
+	policy.Dispositions[CategoryProcessArg] = DispositionHash
+	det := mkDetectionWithArgs(t, []string{"tool", "--password=" + secret})
+
+	out, rep, err := ScrubDetection(det, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arg := out.Evidence[0].Process.Args[1]
+	if strings.Contains(arg, secret) || arg == hashValue(policy.HashSalt, "--password="+secret) {
+		t.Fatal("recognized secret was not redacted before hashing and truncation")
+	}
+	if len([]rune(arg)) > policy.MaxArgLen || !rep.Changed() {
+		t.Fatal("scrubbed detection did not preserve bounds and redaction accounting")
 	}
 }
 

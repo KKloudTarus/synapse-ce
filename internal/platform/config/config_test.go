@@ -96,6 +96,17 @@ func TestLoadToolExecutionMode(t *testing.T) {
 	}
 }
 
+func TestLoadFleetDetectionReconcileInterval(t *testing.T) {
+	t.Setenv("SYNAPSE_FLEET_DETECTION_RECONCILE_INTERVAL", "")
+	if got := Load().FleetDetectionReconcileInterval; got != time.Minute {
+		t.Fatalf("default detection reconciliation interval = %s, want 1m", got)
+	}
+	t.Setenv("SYNAPSE_FLEET_DETECTION_RECONCILE_INTERVAL", "17s")
+	if got := Load().FleetDetectionReconcileInterval; got != 17*time.Second {
+		t.Fatalf("configured detection reconciliation interval = %s, want 17s", got)
+	}
+}
+
 func TestLoadEgressBrokerSocket(t *testing.T) {
 	const defaultPath = "/run/synapse-egress-broker/egress-broker.sock"
 	if got := Load().EgressBrokerSocket; got != defaultPath {

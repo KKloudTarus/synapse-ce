@@ -81,6 +81,8 @@ synapse-cli scan <path|image-ref> [flags]
 | `--image` | Treat the argument as a container image reference, pulled via crane, instead of a local path. |
 | `--offline` | Skip the live advisory source and detect with the offline database only. |
 | `--ignore-unfixed` | Ignore vulnerabilities that have no fix available. |
+| `--min-confidence low\|medium\|high\|very_high` | Drop findings below this confidence. Findings that carry no confidence (SAST/misconfig) are kept. Useful to cut lower-signal secret matches. |
+| `--base <ref>` | Scope line-anchored findings (SAST, secret, misconfig) to code changed vs this git ref (Clean-as-You-Code), so a repo with a backlog gates the pipeline only on what a change introduces. Dependency/license findings are not line-attributable and are kept — baseline those with `.synapseignore`. Local git repos only (not `--image`). |
 | `--detection-priority comprehensive\|precise` | `comprehensive` (default) reports every match. `precise` moves single-source, non-KEV findings into a needs-verify queue that does not trip `--fail-on`. |
 | `--include-test` | Also gate on findings in test, fixture, and example paths. They are reported but gate-exempt by default. |
 | `--json` | Print the full scan result as JSON to stdout, for machine consumption in CI. |
@@ -89,6 +91,27 @@ synapse-cli scan <path|image-ref> [flags]
 
 `--json`, `--sarif`, and `--sbom` each take over stdout completely, so they are mutually exclusive.
 Passing more than one exits `2` rather than silently honoring the last flag.
+
+### Suppressing findings with `.synapseignore`
+
+Drop known/accepted findings by committing a `.synapseignore` file at the scan root. Every suppression
+**must** carry a `reason` and an `expires` date (`YYYY-MM-DD`) — after the expiry the suppression stops
+applying and the finding reappears (with a warning), so suppressions are periodically re-justified instead
+of rotting. Each entry matches by `rule` (a rule key or advisory id), by `path` (a file glob), or both:
+
+```yaml
+suppress:
+  - rule: generic-secret
+    path: "testdata/**"
+    reason: "test fixtures, not real credentials"
+    expires: "2026-12-31"
+  - rule: CVE-2024-1234
+    reason: "not exploitable in our configuration; tracked in JIRA-123"
+    expires: "2026-09-30"
+```
+
+A malformed entry (missing reason/expiry, or no matcher) fails the scan rather than silently ignoring
+nothing. Suppressed counts and any expired entries are printed to stderr.
 
 ### Examples
 
@@ -368,8 +391,7 @@ synapse-scan:
     - ./bin/synapse-cli scan . --fail-on high
 ```
 
-To publish to the GitLab SAST report so findings show in the merge-request widget, emit SARIF and
-keep it as an artifact (GitLab reads SARIF as a `sast` report):
+Keep the SARIF report as a downloadable build artifact (works on every GitLab tier):
 
 ```yaml
 synapse-scan:
@@ -378,12 +400,18 @@ synapse-scan:
   script:
     - make tools
     - make build
-    - ./bin/synapse-cli scan . --sarif --fail-on high > gl-sast-report.sarif
+    - ./bin/synapse-cli scan . --sarif --fail-on high > synapse.sarif
   artifacts:
     when: always
-    reports:
-      sast: gl-sast-report.sarif
+    paths:
+      - synapse.sarif
 ```
+
+> **Note on native GitLab ingestion.** `artifacts:reports:sast` does **not** accept SARIF — it takes
+> GitLab's own report schema (a `gl-sast-report.json`), so pointing `reports: sast:` at a SARIF file
+> does nothing. GitLab ingests SARIF only through `artifacts:reports:sarif`, and that (with the
+> merge-request security widget and the Vulnerability Report) is a **GitLab Ultimate** feature. On
+> Free/Premium, download the artifact above or upload the SARIF to your own tooling.
 
 ## Jenkins
 

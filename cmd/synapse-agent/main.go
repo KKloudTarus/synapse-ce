@@ -18,16 +18,21 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetversion"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/hostinv"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo"
@@ -51,6 +56,7 @@ const minControlPlaneVersion = "0.1.0"
 type fleetAPI interface {
 	Enrol(ctx context.Context, enrolToken string, req fleetclient.EnrolRequest) (fleetclient.EnrolResponse, error)
 	Heartbeat(ctx context.Context, token string, req fleetclient.EnrolRequest) (fleetclient.HeartbeatResponse, error)
+	ActivePrivacyPolicy(ctx context.Context, token string) (fleetclient.PrivacyPolicyResponse, error)
 	ClaimWork(ctx context.Context, token string, max int) ([]fleetclient.Order, error)
 	Progress(ctx context.Context, token, orderID string) error
 	SubmitResult(ctx context.Context, token, orderID, status, reason string) error
@@ -62,6 +68,105 @@ type fleetAPI interface {
 // the canonical asset identity reconciled by the authenticated control plane.
 type hostInventoryResolvedAPI interface {
 	SendHostInventoryResolved(ctx context.Context, token string, inv any) (fleetclient.HostInventoryResponse, error)
+}
+
+// producerController owns the source-observation lifetime. Durable telemetry
+// shippers are process-owned separately so historical WAL continues shipping
+// while a current privacy policy is unavailable or changes.
+type producerController struct {
+	mu       sync.Mutex
+	cancel   context.CancelFunc
+	done     <-chan struct{}
+	digest   string
+	disabled bool
+}
+
+func (c *producerController) reconcile(
+	ctx context.Context,
+	r *runner,
+	transport *detectionTransport,
+	assignment privacy.Assignment,
+) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.disabled {
+		return false
+	}
+	if c.digest == assignment.Digest && c.cancel != nil {
+		return true
+	}
+	if c.cancel != nil {
+		c.cancel()
+		<-c.done
+		c.cancel = nil
+		c.done = nil
+		c.digest = ""
+	}
+	producerCtx, cancel := context.WithCancel(ctx)
+	done, err := r.startDetectionProducer(producerCtx, transport, assignment)
+	if err != nil {
+		cancel()
+		log.Printf("detection: start policy-bound producer: %v; source observation disabled", err)
+		return false
+	}
+	c.cancel = cancel
+	c.done = done
+	c.digest = assignment.Digest
+	return true
+}
+
+func (c *producerController) stop() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.disabled = true
+	if c.cancel != nil {
+		c.cancel()
+		<-c.done
+		c.cancel = nil
+		c.done = nil
+	}
+}
+
+func (r *runner) resolvePrivacyPolicy(
+	ctx context.Context,
+	cred fleetclient.Credential,
+) (privacy.Assignment, error) {
+	agentID := shared.ID(strings.TrimSpace(cred.AgentID))
+	response, err := r.api.ActivePrivacyPolicy(ctx, cred.Token)
+	if err == nil {
+		assignment, conversionErr := response.AssignmentDomain()
+		if conversionErr != nil {
+			return privacy.Assignment{}, conversionErr
+		}
+		if persistErr := fleetclient.PersistPrivacyPolicy(
+			r.cfg.stateDir,
+			agentID,
+			r.cfg.baseURL,
+			assignment,
+		); persistErr != nil {
+			return privacy.Assignment{}, fmt.Errorf("persist active privacy policy: %w", persistErr)
+		}
+		return assignment, nil
+	}
+	if !privacyPolicyCacheFallbackAllowed(err) {
+		return privacy.Assignment{}, fmt.Errorf("fetch active privacy policy: %w", err)
+	}
+	if assignment, ok := fleetclient.LoadPrivacyPolicy(
+		r.cfg.stateDir,
+		agentID,
+		r.cfg.baseURL,
+	); ok {
+		return assignment, nil
+	}
+	return privacy.Assignment{}, fmt.Errorf("fetch active privacy policy: %w", err)
+}
+
+func privacyPolicyCacheFallbackAllowed(err error) bool {
+	if fleetclient.IsNetworkError(err) {
+		return true
+	}
+	status, _, ok := fleetclient.HTTPStatus(err)
+	return ok && status >= http.StatusInternalServerError
 }
 
 type config struct {
@@ -168,15 +273,38 @@ func (r *runner) run(ctx context.Context) error {
 	// scan.host work-order loop. A3 still gates telemetry observation/signing on
 	// the canonical server-provided AssetID below.
 	r.startInventorySweep(ctx, cred)
-	// A0.1 requires the canonical server-provided asset binding before telemetry
-	// observation/signing starts. A persisted binding from an earlier host sync can
-	// start immediately; a first enrolment waits until its first successful host sync.
-	detectionStarted := false
-	if cred.AssetID != "" {
-		r.startDetection(ctx, cred)
-		detectionStarted = true
-	}
+
+	var transport *detectionTransport
+	producer := &producerController{}
+	defer func() {
+		producer.stop()
+		transport.stop()
+	}()
+	policyDigest := ""
+
 	for {
+		// A0.1 requires the canonical server-provided asset binding before telemetry
+		// transport starts. The transport owns historical durable WAL independently of
+		// whether current source observation is authorized by an active privacy policy.
+		if transport == nil && cred.AssetID != "" {
+			transport, err = r.startDetectionTransport(ctx, cred)
+			if err != nil {
+				log.Printf("telemetry: %v; transport will retry after the next cycle", err)
+			}
+		}
+		if transport != nil && len(transport.classes) > 0 {
+			assignment, policyErr := r.resolvePrivacyPolicy(ctx, cred)
+			if policyErr != nil {
+				if policyDigest == "" {
+					log.Printf("detection: active source-privacy policy unavailable; source observation disabled: %v", policyErr)
+				} else {
+					log.Printf("detection: refresh source-privacy policy: %v; retaining the last validated policy", policyErr)
+				}
+			} else if producer.reconcile(ctx, r, transport, assignment) {
+				policyDigest = assignment.Digest
+			}
+		}
+
 		if err := r.cycle(ctx, cred); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return err
@@ -187,10 +315,6 @@ func (r *runner) run(ctx context.Context) error {
 		// after every cycle so the transport starts exactly once with the server binding.
 		if current, ok := r.store.Load(); ok && current.AgentID == cred.AgentID {
 			cred = current
-		}
-		if !detectionStarted && cred.AssetID != "" {
-			r.startDetection(ctx, cred)
-			detectionStarted = true
 		}
 		if r.cfg.once {
 			return nil

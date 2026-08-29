@@ -3,13 +3,16 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/hostinventory"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/fssecurity"
@@ -26,6 +29,8 @@ type fakeAPI struct {
 	sendErr     error
 	hbResp      fleetclient.HeartbeatResponse
 	claims      int
+	policyResp  fleetclient.PrivacyPolicyResponse
+	policyErr   error
 }
 
 type result struct{ orderID, status, reason string }
@@ -37,6 +42,15 @@ func (f *fakeAPI) Enrol(_ context.Context, _ string, _ fleetclient.EnrolRequest)
 func (f *fakeAPI) Heartbeat(_ context.Context, _ string, _ fleetclient.EnrolRequest) (fleetclient.HeartbeatResponse, error) {
 	f.heartbeats++
 	return f.hbResp, nil
+}
+func (f *fakeAPI) ActivePrivacyPolicy(context.Context, string) (fleetclient.PrivacyPolicyResponse, error) {
+	if f.policyErr != nil {
+		return fleetclient.PrivacyPolicyResponse{}, f.policyErr
+	}
+	if f.policyResp.Assignment.TenantID == "" {
+		return fleetclient.PrivacyPolicyResponse{}, errors.New("privacy policy unavailable")
+	}
+	return f.policyResp, nil
 }
 func (f *fakeAPI) ClaimWork(_ context.Context, _ string, _ int) ([]fleetclient.Order, error) {
 	f.claims++
@@ -72,6 +86,114 @@ func newRunner(t *testing.T, api fleetAPI, orders []fleetclient.Order, collect f
 		collect: collect,
 		cfg:     config{stateDir: dir, root: dir, name: "host1", enrolToken: "enrol", once: true, maxOrders: 8},
 		store:   fleetclient.NewCredentialStore(dir),
+	}
+}
+
+func privacyPolicyResponse(t *testing.T) fleetclient.PrivacyPolicyResponse {
+	t.Helper()
+	assignment, err := privacy.NewAssignment(
+		"tenant-1",
+		privacy.DefaultPolicy(),
+		"operator",
+		time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC),
+	)
+	if err != nil {
+		t.Fatalf("NewAssignment() error = %v", err)
+	}
+	dispositions := make(map[string]string, len(assignment.Policy.Dispositions))
+	for category, disposition := range assignment.Policy.Dispositions {
+		dispositions[string(category)] = string(disposition)
+	}
+	return fleetclient.PrivacyPolicyResponse{Assignment: fleetclient.PrivacyPolicyAssignment{
+		TenantID: assignment.TenantID.String(),
+		Policy: fleetclient.PrivacyPolicy{
+			Dispositions:  dispositions,
+			RedactSecrets: assignment.Policy.RedactSecrets,
+			MaxArgLen:     assignment.Policy.MaxArgLen,
+			MaxArgCount:   assignment.Policy.MaxArgCount,
+			MaxPathLen:    assignment.Policy.MaxPathLen,
+			HashSalt:      assignment.Policy.HashSalt,
+			Version:       assignment.Policy.Version,
+		},
+		Digest:    assignment.Digest,
+		CreatedBy: assignment.CreatedBy,
+		CreatedAt: assignment.CreatedAt,
+	}}
+}
+
+func TestResolvePrivacyPolicyUsesValidatedCacheOnlyForTransientFailure(t *testing.T) {
+	response := privacyPolicyResponse(t)
+	api := &fakeAPI{policyResp: response}
+	r := newRunner(t, api, nil, nil)
+	r.cfg.baseURL = "https://control.example/api/"
+	cred := fleetclient.Credential{AgentID: "agent-1", Token: "token"}
+
+	first, err := r.resolvePrivacyPolicy(t.Context(), cred)
+	if err != nil {
+		t.Fatalf("resolve live policy: %v", err)
+	}
+	api.policyResp = fleetclient.PrivacyPolicyResponse{}
+	api.policyErr = &fleetclient.NetworkError{Method: "GET", Path: "/api/v1/fleet/privacy-policy", Err: errors.New("offline")}
+	cached, err := r.resolvePrivacyPolicy(t.Context(), cred)
+	if err != nil {
+		t.Fatalf("resolve cached policy after network failure: %v", err)
+	}
+	if !privacy.SameAssignment(first, cached) || !first.CreatedAt.Equal(cached.CreatedAt) {
+		t.Fatalf("cached assignment = %#v, want %#v", cached, first)
+	}
+
+	api.policyErr = &fleetclient.HTTPError{Method: "GET", Path: "/api/v1/fleet/privacy-policy", StatusCode: http.StatusServiceUnavailable}
+	if _, err := r.resolvePrivacyPolicy(t.Context(), cred); err != nil {
+		t.Fatalf("resolve cached policy after 5xx: %v", err)
+	}
+}
+
+func TestResolvePrivacyPolicyFailsClosedForAuthoritativeClientErrors(t *testing.T) {
+	response := privacyPolicyResponse(t)
+	api := &fakeAPI{policyResp: response}
+	r := newRunner(t, api, nil, nil)
+	r.cfg.baseURL = "https://control.example"
+	cred := fleetclient.Credential{AgentID: "agent-1", Token: "token"}
+	if _, err := r.resolvePrivacyPolicy(t.Context(), cred); err != nil {
+		t.Fatalf("prime privacy policy cache: %v", err)
+	}
+
+	for _, status := range []int{
+		http.StatusUnauthorized,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusConflict,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			api.policyResp = fleetclient.PrivacyPolicyResponse{}
+			api.policyErr = &fleetclient.HTTPError{
+				Method: "GET", Path: "/api/v1/fleet/privacy-policy", StatusCode: status,
+			}
+			if _, err := r.resolvePrivacyPolicy(t.Context(), cred); err == nil {
+				t.Fatalf("resolvePrivacyPolicy() accepted cached policy after HTTP %d", status)
+			}
+		})
+	}
+}
+
+func TestResolvePrivacyPolicyRejectsCacheForDifferentAgentOrControlPlane(t *testing.T) {
+	response := privacyPolicyResponse(t)
+	api := &fakeAPI{policyResp: response}
+	r := newRunner(t, api, nil, nil)
+	r.cfg.baseURL = "https://control.example"
+	cred := fleetclient.Credential{AgentID: "agent-1", Token: "token"}
+	if _, err := r.resolvePrivacyPolicy(t.Context(), cred); err != nil {
+		t.Fatalf("prime privacy policy cache: %v", err)
+	}
+	api.policyResp = fleetclient.PrivacyPolicyResponse{}
+	api.policyErr = &fleetclient.NetworkError{Method: "GET", Path: "/api/v1/fleet/privacy-policy", Err: errors.New("offline")}
+
+	if _, err := r.resolvePrivacyPolicy(t.Context(), fleetclient.Credential{AgentID: "agent-2", Token: "token"}); err == nil {
+		t.Fatal("resolvePrivacyPolicy() accepted cache bound to another agent")
+	}
+	r.cfg.baseURL = "https://other.example"
+	if _, err := r.resolvePrivacyPolicy(t.Context(), cred); err == nil {
+		t.Fatal("resolvePrivacyPolicy() accepted cache bound to another control plane")
 	}
 }
 
@@ -237,6 +359,97 @@ func TestSummaryIsCoverageHonest(t *testing.T) {
 	inv = inv.Normalize()
 	if got := summary(inv); got == "" || !strings.Contains(got, "INCOMPLETE") {
 		t.Fatalf("incomplete inventory summary must say INCOMPLETE, got %q", got)
+	}
+}
+
+func TestProducerControllerKeepsSamePolicyProducer(t *testing.T) {
+	assignment := func() privacy.Assignment {
+		assignment, err := privacyPolicyResponse(t).AssignmentDomain()
+		if err != nil {
+			t.Fatalf("AssignmentDomain() error = %v", err)
+		}
+		return assignment
+	}()
+	cancelled := false
+	controller := producerController{
+		digest: assignment.Digest,
+		cancel: func() { cancelled = true },
+		done:   make(chan struct{}),
+	}
+	if !controller.reconcile(t.Context(), nil, nil, assignment) {
+		t.Fatal("reconcile rejected the running producer for the same policy digest")
+	}
+	if cancelled {
+		t.Fatal("same policy digest restarted the running producer")
+	}
+}
+
+func TestProducerControllerDoesNotActivateFailedPolicy(t *testing.T) {
+	assignment := func() privacy.Assignment {
+		assignment, err := privacyPolicyResponse(t).AssignmentDomain()
+		if err != nil {
+			t.Fatalf("AssignmentDomain() error = %v", err)
+		}
+		return assignment
+	}()
+	controller := producerController{}
+	if controller.reconcile(t.Context(), &runner{}, nil, assignment) {
+		t.Fatal("reconcile activated a policy whose producer failed to start")
+	}
+	if controller.digest != "" || controller.cancel != nil || controller.done != nil {
+		t.Fatalf("failed producer left active controller state: digest=%q cancel=%v done=%v", controller.digest, controller.cancel != nil, controller.done != nil)
+	}
+}
+
+func TestProducerControllerJoinsOldProducerBeforeFailedReplacement(t *testing.T) {
+	assignment := func() privacy.Assignment {
+		assignment, err := privacyPolicyResponse(t).AssignmentDomain()
+		if err != nil {
+			t.Fatalf("AssignmentDomain() error = %v", err)
+		}
+		return assignment
+	}()
+	oldDone := make(chan struct{})
+	cancelled := false
+	controller := producerController{
+		digest: "old-policy-digest",
+		cancel: func() {
+			cancelled = true
+			close(oldDone)
+		},
+		done: oldDone,
+	}
+	if controller.reconcile(t.Context(), &runner{}, nil, assignment) {
+		t.Fatal("reconcile activated a replacement whose producer failed to start")
+	}
+	if !cancelled {
+		t.Fatal("replacement did not cancel and join the old producer")
+	}
+	if controller.digest != "" || controller.cancel != nil || controller.done != nil {
+		t.Fatalf("failed replacement retained stale controller state: digest=%q cancel=%v done=%v", controller.digest, controller.cancel != nil, controller.done != nil)
+	}
+}
+
+func TestProducerControllerStopDisablesFutureReconciliation(t *testing.T) {
+	assignment := func() privacy.Assignment {
+		assignment, err := privacyPolicyResponse(t).AssignmentDomain()
+		if err != nil {
+			t.Fatalf("AssignmentDomain() error = %v", err)
+		}
+		return assignment
+	}()
+	done := make(chan struct{})
+	controller := producerController{
+		digest: assignment.Digest,
+		cancel: func() { close(done) },
+		done:   done,
+	}
+	controller.stop()
+	if !controller.disabled || controller.cancel != nil || controller.done != nil {
+		t.Fatalf("stopped controller state: disabled=%v cancel=%v done=%v", controller.disabled, controller.cancel != nil, controller.done != nil)
+	}
+	if controller.reconcile(t.Context(), nil, nil, assignment) {
+		t.Fatal("stopped controller restarted source observation")
 	}
 }
 

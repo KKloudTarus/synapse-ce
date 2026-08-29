@@ -167,3 +167,92 @@ func DecodeDetectionEvidenceEnvelope(content []byte) (DetectionEvidenceEnvelope,
 	}
 	return e, nil
 }
+
+const detectionEvidenceV2Context = "synapse-detection-evidence:v2"
+
+// DetectionEvidenceEnvelopeV2 commits the v2 signed attribution as immutable evidence. It is a
+// distinct envelope so the v1 envelope's canonical bytes and decoder contract remain unchanged.
+type DetectionEvidenceEnvelopeV2 struct {
+	Context               string               `json:"context"`
+	EnvelopeVersion       int                  `json:"envelope_version"`
+	TenantID              shared.ID            `json:"tenant_id"`
+	EngagementID          shared.ID            `json:"engagement_id"`
+	AgentID               shared.ID            `json:"agent_id"`
+	AssetID               shared.ID            `json:"asset_id"`
+	DetectionID           shared.ID            `json:"detection_id"`
+	BatchSequence         uint64               `json:"batch_sequence"`
+	KeyID                 string               `json:"key_id"`
+	ContentSHA256         string               `json:"content_sha256"`
+	TelemetryRefs         []TelemetryReference `json:"telemetry_refs"`
+	Rulepack              RulepackReference    `json:"rulepack"`
+	RedactionPolicyDigest string               `json:"redaction_policy_digest"`
+	ObservedAt            time.Time            `json:"observed_at"`
+	Detection             detection.Detection  `json:"detection"`
+}
+
+// NewDetectionEvidenceEnvelopeV2 builds a self-contained immutable v2 commitment.
+func NewDetectionEvidenceEnvelopeV2(tenantID, engagementID, agentID shared.ID, batchSequence uint64, keyID string, item DetectionBatchItemV2) (DetectionEvidenceEnvelopeV2, error) {
+	ref, err := item.Reference()
+	if err != nil {
+		return DetectionEvidenceEnvelopeV2{}, err
+	}
+	env := DetectionEvidenceEnvelopeV2{
+		Context: detectionEvidenceV2Context, EnvelopeVersion: 2,
+		TenantID: tenantID, EngagementID: engagementID, AgentID: agentID,
+		AssetID: item.AssetID, DetectionID: item.ID, BatchSequence: batchSequence, KeyID: keyID,
+		ContentSHA256: ref.ContentSHA256, TelemetryRefs: append([]TelemetryReference(nil), item.TelemetryRefs...),
+		Rulepack: item.Rulepack, RedactionPolicyDigest: item.RedactionPolicyDigest,
+		ObservedAt: item.Detection.Observed.UTC(), Detection: item.Detection,
+	}
+	if err := env.Validate(); err != nil {
+		return DetectionEvidenceEnvelopeV2{}, err
+	}
+	return env, nil
+}
+
+func (e DetectionEvidenceEnvelopeV2) Validate() error {
+	if e.Context != detectionEvidenceV2Context || e.EnvelopeVersion != 2 {
+		return fmt.Errorf("%w: v2 detection evidence envelope has an invalid context or version", shared.ErrValidation)
+	}
+	if e.TenantID.IsZero() || e.EngagementID.IsZero() || e.AgentID.IsZero() || e.AssetID.IsZero() || e.DetectionID.IsZero() || e.BatchSequence == 0 || e.KeyID == "" {
+		return fmt.Errorf("%w: v2 detection evidence envelope has incomplete attribution", shared.ErrValidation)
+	}
+	if e.AgentID != e.Detection.AgentID {
+		return fmt.Errorf("%w: v2 detection evidence envelope agent contradicts the detection agent", shared.ErrValidation)
+	}
+	item := DetectionBatchItemV2{ID: e.DetectionID, Detection: e.Detection, AssetID: e.AssetID, TelemetryRefs: e.TelemetryRefs, Rulepack: e.Rulepack, RedactionPolicyDigest: e.RedactionPolicyDigest}
+	ref, err := item.Reference()
+	if err != nil {
+		return fmt.Errorf("validate v2 detection evidence attribution: %w", err)
+	}
+	if ref.ContentSHA256 != e.ContentSHA256 || !e.ObservedAt.Equal(e.Detection.Observed.UTC()) {
+		return fmt.Errorf("%w: v2 detection evidence envelope content is inconsistent", shared.ErrValidation)
+	}
+	return nil
+}
+
+func (e DetectionEvidenceEnvelopeV2) Canonical() ([]byte, error) {
+	if err := e.Validate(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(e)
+}
+
+func (e DetectionEvidenceEnvelopeV2) VerifyContent() error {
+	if err := e.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// DecodeDetectionEvidenceEnvelopeV2 decodes a v2 envelope without broadening the v1 decoder.
+func DecodeDetectionEvidenceEnvelopeV2(content []byte) (DetectionEvidenceEnvelopeV2, error) {
+	var e DetectionEvidenceEnvelopeV2
+	if err := json.Unmarshal(content, &e); err != nil {
+		return DetectionEvidenceEnvelopeV2{}, fmt.Errorf("%w: cannot decode v2 detection evidence envelope: %v", shared.ErrValidation, err)
+	}
+	if err := e.Validate(); err != nil {
+		return DetectionEvidenceEnvelopeV2{}, err
+	}
+	return e, nil
+}

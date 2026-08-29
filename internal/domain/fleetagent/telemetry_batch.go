@@ -108,16 +108,25 @@ func (m TelemetryBatchManifest) Validate() error {
 	if m.PayloadDigest == "" {
 		return fmt.Errorf("%w: telemetry manifest has no payload digest", shared.ErrValidation)
 	}
-	if m.EventTimeMax.Before(m.EventTimeMin) {
-		return fmt.Errorf("%w: telemetry manifest event-time-max precedes event-time-min", shared.ErrValidation)
+	if m.EventTimeMin.IsZero() || m.EventTimeMax.IsZero() || m.EventTimeMax.Before(m.EventTimeMin) {
+		return fmt.Errorf("%w: telemetry manifest has invalid event-time bounds", shared.ErrValidation)
 	}
 	if m.ObservedCount < 0 || m.KeptCount < 0 || m.SampledOutCount < 0 || m.TruncatedCount < 0 || m.DroppedCount < 0 {
 		return fmt.Errorf("%w: telemetry manifest has a negative count", shared.ErrValidation)
 	}
-	// Observed is what the agent saw; kept + the three loss buckets must not exceed it (they account for
-	// where the observed events went; a shortfall is allowed — not every observed event is enumerated).
-	if m.KeptCount+m.SampledOutCount+m.TruncatedCount+m.DroppedCount > m.ObservedCount {
-		return fmt.Errorf("%w: telemetry manifest kept+lost exceeds observed", shared.ErrValidation)
+	if m.ObservedCount == 0 {
+		return fmt.Errorf("%w: telemetry manifest must account for at least one observed event", shared.ErrValidation)
+	}
+	if m.ObservedCount != m.KeptCount+m.SampledOutCount+m.DroppedCount {
+		return fmt.Errorf("%w: telemetry manifest observed count must equal kept+sampled-out+dropped", shared.ErrValidation)
+	}
+	// Truncation describes degraded content among events that remain kept; it is not
+	// another loss disposition and therefore does not contribute to ObservedCount.
+	if m.TruncatedCount > m.KeptCount {
+		return fmt.Errorf("%w: telemetry manifest truncated count exceeds kept count", shared.ErrValidation)
+	}
+	if m.SamplingPolicyDigest == "" {
+		return fmt.Errorf("%w: telemetry manifest has no sampling policy digest", shared.ErrValidation)
 	}
 	if len(m.Events) != m.KeptCount {
 		return fmt.Errorf("%w: telemetry manifest lists %d events but kept count is %d", shared.ErrValidation, len(m.Events), m.KeptCount)

@@ -4,12 +4,10 @@
 *.exe
 *.test
 *.out
-/synapse-api
-/synapse-cli
-/synapse-worker
-/synapse-mcp
-/synapse-agent
-/synapse-cluster-agent
+# Root-level built cmd binaries (`go build` / `make build` outputs; make build puts them in ./bin).
+# A glob so every cmd/* binary — synapse-ast, synapse-callgraph, … — is ignored and none is ever
+# committed again (the macOS synapse-ast binary previously was). No tracked repo file matches this.
+/synapse-*
 
 # Env / secrets (never commit)
 .env

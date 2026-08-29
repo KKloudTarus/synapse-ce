@@ -54,6 +54,39 @@ func TestSpoolItemValidation(t *testing.T) {
 	}
 }
 
+func TestMustNotShedRecordClassifiesEveryExistingRecordKind(t *testing.T) {
+	tests := []struct {
+		kind     SpoolRecordKind
+		class    detection.Class
+		want     bool
+		wantErr  bool
+		priority fleetagent.DeliveryPriority
+	}{
+		{SpoolRecordTelemetry, detection.ClassProcess, false, false, fleetagent.PriorityP3},
+		{SpoolRecordTelemetry, detection.ClassFile, true, false, fleetagent.PriorityP2},
+		{SpoolRecordDetection, "", true, false, fleetagent.PriorityP1},
+		{SpoolRecordCoverage, "", true, false, fleetagent.PriorityP0},
+		{SpoolRecordSensorState, "", true, false, fleetagent.PriorityP0},
+		{SpoolRecordResponseVerification, "", true, false, fleetagent.PriorityP0},
+		{"future", "", false, true, fleetagent.PriorityP0},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.kind), func(t *testing.T) {
+			got, err := MustNotShedRecord(tt.kind, tt.class)
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Fatalf("MustNotShedRecord(%q, %q) = %t, %v; want %t, error=%t", tt.kind, tt.class, got, err, tt.want, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			item := SpoolItem{Kind: tt.kind, Priority: tt.priority, EventID: "event-1", EventClass: tt.class, ContentType: "application/json", Payload: []byte("{}"), ObservedAt: spoolTestTime, MustNotShed: got, SchemaVersion: 1}
+			if err := item.Validate(); err != nil {
+				t.Fatalf("classified spool item does not validate: %v", err)
+			}
+		})
+	}
+}
+
 func TestSpoolGapValidation(t *testing.T) {
 	gap := SpoolGap{
 		ID: "gap-1", Priority: fleetagent.PriorityP3, Epoch: 2,

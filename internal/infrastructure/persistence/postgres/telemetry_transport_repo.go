@@ -23,13 +23,25 @@ import (
 // its open gaps transactionally and stores the authenticated agent->asset binding.
 type TelemetryTransportRepository struct {
 	pool *pgxpool.Pool
+	*FleetAuditRepository
 }
 
 var _ ports.TelemetryTransportStore = (*TelemetryTransportRepository)(nil)
+var _ ports.TelemetryAuditStore = (*TelemetryTransportRepository)(nil)
+var _ ports.TelemetryAgentGapStore = (*TelemetryTransportRepository)(nil)
 var _ ports.TelemetryAssetBindingStore = (*TelemetryTransportRepository)(nil)
+var _ ports.TelemetryBatchAccountingReader = (*TelemetryTransportRepository)(nil)
+var _ ports.CoverageGapReader = (*TelemetryTransportRepository)(nil)
 
-func NewTelemetryTransportRepository(pool *pgxpool.Pool) *TelemetryTransportRepository {
-	return &TelemetryTransportRepository{pool: pool}
+func NewTelemetryTransportRepository(pool *pgxpool.Pool) (*TelemetryTransportRepository, error) {
+	if pool == nil {
+		return nil, fmt.Errorf("%w: telemetry transport repository requires a database pool", shared.ErrValidation)
+	}
+	audits, err := NewFleetAuditRepository(pool)
+	if err != nil {
+		return nil, err
+	}
+	return &TelemetryTransportRepository{pool: pool, FleetAuditRepository: audits}, nil
 }
 
 func requireTransportTenant(ctx context.Context) error {
@@ -149,7 +161,9 @@ func postgresGapCoverageFor(ctx context.Context, tx pgx.Tx, tenant shared.ID, st
 	}
 	coverage := postgresGapCoverage{
 		assetID: shared.ID(nextAsset), priority: fleetagent.DeliveryPriority(nextPriority),
-		fromAt: time.Unix(0, 0).UTC(), toAt: nextFrom.UTC(),
+		// Without a predecessor commitment there is no honest historical lower
+		// bound. Use a point at the known successor instead of inventing a span.
+		fromAt: nextFrom.UTC(), toAt: nextFrom.UTC(),
 	}
 	if gap.FromSequence > 1 {
 		var prevAsset string
@@ -161,8 +175,8 @@ func postgresGapCoverageFor(ctx context.Context, tx pgx.Tx, tenant shared.ID, st
 			Scan(&prevAsset, &prevPriority, &prevTo)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			// A repaired/imported ACK state may lack the predecessor commitment. Keep
-			// the conservative Unix lower bound rather than inventing a precise span.
+			// A repaired/imported ACK state may lack the predecessor commitment.
+			// Keep the successor point rather than inventing a historical span.
 		case err != nil:
 			return postgresGapCoverage{}, false, fmt.Errorf("read telemetry gap predecessor commitment: %w", err)
 		case prevAsset == nextAsset && prevPriority == nextPriority:
@@ -350,6 +364,46 @@ func (r *TelemetryTransportRepository) ListGaps(ctx context.Context, agentID, st
 	return gaps, nil
 }
 
+// ListGapChanges returns both open and resolved inferred gaps affected by one
+// sequence so exact source retries can repair failed coverage materialization.
+func (r *TelemetryTransportRepository) ListGapChanges(
+	ctx context.Context,
+	agentID, streamID shared.ID,
+	epoch, sequence uint64,
+) ([]ports.TelemetryGap, error) {
+	if err := requireTransportTenant(ctx); err != nil {
+		return nil, err
+	}
+	var gaps []ports.TelemetryGap
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		tenant, _ := shared.TenantFrom(ctx)
+		rows, err := tx.Query(ctx, `SELECT agent_id,asset_id,stream_id,priority,epoch,from_sequence,to_sequence,from_at,to_at,detected_at
+			FROM telemetry_transport_gaps
+			WHERE tenant_id=$1 AND agent_id=$2 AND stream_id=$3 AND epoch=$4
+			  AND asset_id IS NOT NULL AND priority IS NOT NULL AND from_at IS NOT NULL AND to_at IS NOT NULL
+			  AND ((from_sequence <= $5 AND to_sequence >= $5)
+			       OR (resolved_at IS NULL AND (from_sequence = $5 + 1 OR to_sequence + 1 = $5)))
+			ORDER BY from_at,from_sequence,to_sequence,detected_at`,
+			tenant.String(), agentID.String(), streamID.String(), int64(epoch), int64(sequence))
+		if err != nil {
+			return fmt.Errorf("list telemetry gap changes: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			gap, err := scanPostgresTelemetryGap(rows, agentID, streamID)
+			if err != nil {
+				return fmt.Errorf("scan telemetry gap change: %w", err)
+			}
+			gaps = append(gaps, gap)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return gaps, nil
+}
+
 func (r *TelemetryTransportRepository) QueryDeliveryGaps(ctx context.Context, q ports.TelemetryGapQuery) ([]ports.TelemetryGap, error) {
 	if err := requireTransportTenant(ctx); err != nil {
 		return nil, err
@@ -382,7 +436,7 @@ func (r *TelemetryTransportRepository) QueryDeliveryGaps(ctx context.Context, q 
 			add("to_at >= $%d", q.Since.UTC())
 		}
 		if !q.Until.IsZero() {
-			add("from_at <= $%d", q.Until.UTC())
+			add("from_at < $%d", q.Until.UTC())
 		}
 		rows, err := tx.Query(ctx, `SELECT agent_id,asset_id,stream_id,priority,epoch,from_sequence,to_sequence,from_at,to_at,detected_at
 			FROM telemetry_transport_gaps WHERE `+strings.Join(conds, " AND ")+` ORDER BY from_at,epoch,from_sequence`, args...)
@@ -420,6 +474,80 @@ func (r *TelemetryTransportRepository) QueryDeliveryGaps(ctx context.Context, q 
 	return gaps, nil
 }
 
+// ListCoverageGapFacts exposes exact loss provenance for deterministic coverage
+// revisions. Agent-origin and inferred facts remain separate even when they
+// describe the same delivery coordinate.
+func (r *TelemetryTransportRepository) ListCoverageGapFacts(ctx context.Context, q ports.CoverageGapQuery) ([]ports.CoverageGapFact, error) {
+	if !q.Valid() {
+		return nil, fmt.Errorf("%w: coverage gap query has invalid identity or half-open interval", shared.ErrValidation)
+	}
+	if err := requireTransportTenant(ctx); err != nil {
+		return nil, err
+	}
+	facts := make([]ports.CoverageGapFact, 0)
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		tenant, _ := shared.TenantFrom(ctx)
+		rows, err := tx.Query(ctx, `SELECT 'inferred_delivery',NULL,
+			agent_id,asset_id,stream_id,priority,epoch,true,from_sequence,to_sequence,
+			(to_sequence-from_sequence+1),'missing_delivery_sequence',from_at,to_at,detected_at
+			FROM telemetry_transport_gaps
+			WHERE tenant_id=$1 AND agent_id=$2 AND asset_id=$3
+			  AND resolved_at IS NULL AND priority IS NOT NULL AND from_at IS NOT NULL AND to_at IS NOT NULL
+			  AND to_at >= $4 AND from_at < $5
+			UNION ALL
+			SELECT 'agent_origin',gap_id,agent_id,asset_id,stream_id,priority,epoch,known_sequence,
+			       COALESCE(from_sequence,0),COALESCE(to_sequence,0),count,reason,from_at,to_at,first_reported_at
+			FROM telemetry_agent_gaps
+			WHERE tenant_id=$1 AND agent_id=$2 AND asset_id=$3 AND to_at >= $4 AND from_at < $5
+			ORDER BY 13,5,7,9,1,2`,
+			tenant.String(), q.AgentID.String(), q.AssetID.String(), q.Since.UTC(), q.Until.UTC())
+		if err != nil {
+			return fmt.Errorf("query coverage gap facts: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var fact ports.CoverageGapFact
+			var source string
+			var factID *string
+			var priority int
+			var epoch, fromSequence, toSequence, count int64
+			if err := rows.Scan(
+				&source, &factID, &fact.AgentID, &fact.AssetID, &fact.StreamID,
+				&priority, &epoch, &fact.KnownSequence, &fromSequence, &toSequence,
+				&count, &fact.Reason, &fact.FromAt, &fact.ToAt, &fact.RecordedAt,
+			); err != nil {
+				return fmt.Errorf("scan coverage gap fact: %w", err)
+			}
+			fact.Source = ports.CoverageGapSource(source)
+			fact.Priority = fleetagent.DeliveryPriority(priority)
+			fact.Epoch = uint64(epoch)
+			fact.FromSequence = uint64(fromSequence)
+			fact.ToSequence = uint64(toSequence)
+			fact.Count = uint64(count)
+			fact.FromAt = fact.FromAt.UTC()
+			fact.ToAt = fact.ToAt.UTC()
+			fact.RecordedAt = fact.RecordedAt.UTC()
+			if fact.Source == ports.CoverageGapInferred {
+				fact.FactID = ports.InferredCoverageGapFactID(
+					fact.AgentID, fact.StreamID, fact.Epoch,
+					fact.FromSequence, fact.ToSequence, fact.RecordedAt,
+				)
+			} else if factID != nil {
+				fact.FactID = shared.ID(*factID)
+			}
+			if err := fact.Validate(); err != nil {
+				return fmt.Errorf("validate coverage gap fact: %w", err)
+			}
+			facts = append(facts, fact)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return facts, nil
+}
+
 func (r *TelemetryTransportRepository) IngestBatchEvents(ctx context.Context, batch ports.TelemetryEventBatch) (int, error) {
 	if err := batch.Validate(); err != nil {
 		return 0, err
@@ -432,11 +560,11 @@ func (r *TelemetryTransportRepository) IngestBatchEvents(ctx context.Context, ba
 		tenant, _ := shared.TenantFrom(ctx)
 		for _, e := range batch.Events {
 			tag, err := tx.Exec(ctx, `INSERT INTO telemetry_batch_events
-				(tenant_id,agent_id,stream_id,asset_id,epoch,sequence,event_id,class,digest,schema_version,payload,observed_at)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+				(tenant_id,agent_id,stream_id,asset_id,epoch,sequence,event_id,class,digest,redaction_policy_digest,schema_version,payload,observed_at)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 				ON CONFLICT (tenant_id,agent_id,stream_id,epoch,sequence,event_id) DO NOTHING`,
 				tenant.String(), batch.AgentID.String(), batch.StreamID.String(), batch.AssetID.String(), int64(batch.Epoch), int64(batch.Sequence),
-				e.EventID.String(), string(e.Class), e.Digest, batch.SchemaVersion, e.Payload, e.ObservedAt.UTC())
+				e.EventID.String(), string(e.Class), e.Digest, e.RedactionPolicyDigest, batch.SchemaVersion, e.Payload, e.ObservedAt.UTC())
 			if err != nil {
 				return fmt.Errorf("insert batch event: %w", err)
 			}
@@ -444,15 +572,15 @@ func (r *TelemetryTransportRepository) IngestBatchEvents(ctx context.Context, ba
 				stored++
 				continue
 			}
-			var assetID, class, digest string
+			var assetID, class, digest, redactionPolicyDigest string
 			var schemaVersion int
 			var payload []byte
-			if err := tx.QueryRow(ctx, `SELECT asset_id,class,digest,schema_version,payload FROM telemetry_batch_events
+			if err := tx.QueryRow(ctx, `SELECT asset_id,class,digest,redaction_policy_digest,schema_version,payload FROM telemetry_batch_events
 				WHERE tenant_id=$1 AND agent_id=$2 AND stream_id=$3 AND epoch=$4 AND sequence=$5 AND event_id=$6`,
-				tenant.String(), batch.AgentID.String(), batch.StreamID.String(), int64(batch.Epoch), int64(batch.Sequence), e.EventID.String()).Scan(&assetID, &class, &digest, &schemaVersion, &payload); err != nil {
+				tenant.String(), batch.AgentID.String(), batch.StreamID.String(), int64(batch.Epoch), int64(batch.Sequence), e.EventID.String()).Scan(&assetID, &class, &digest, &redactionPolicyDigest, &schemaVersion, &payload); err != nil {
 				return fmt.Errorf("read batch event collision: %w", err)
 			}
-			if assetID != batch.AssetID.String() || class != string(e.Class) || digest != e.Digest || schemaVersion != batch.SchemaVersion || !bytes.Equal(payload, e.Payload) {
+			if assetID != batch.AssetID.String() || class != string(e.Class) || digest != e.Digest || redactionPolicyDigest != e.RedactionPolicyDigest || schemaVersion != batch.SchemaVersion || !bytes.Equal(payload, e.Payload) {
 				return fmt.Errorf("%w: telemetry event coordinate is already committed to different content", shared.ErrConflict)
 			}
 		}
@@ -476,6 +604,58 @@ func (r *TelemetryTransportRepository) CountBatchEvents(ctx context.Context, age
 			tenant.String(), agentID.String(), streamID.String(), int64(epoch), int64(sequence)).Scan(&n)
 	})
 	return n, err
+}
+
+func (r *TelemetryTransportRepository) QueryTelemetryBatchAccounting(ctx context.Context, q ports.TelemetryBatchAccountingQuery) ([]ports.TelemetryBatchAccounting, error) {
+	if !q.Valid() {
+		return nil, fmt.Errorf("%w: telemetry batch accounting query has invalid identity or half-open interval", shared.ErrValidation)
+	}
+	if err := requireTransportTenant(ctx); err != nil {
+		return nil, err
+	}
+	out := make([]ports.TelemetryBatchAccounting, 0)
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		tenant, _ := shared.TenantFrom(ctx)
+		rows, err := tx.Query(ctx, `SELECT agent_id,stream_id,batch_id,asset_id,priority,epoch,sequence,
+			observed_count,kept_count,sampled_out_count,truncated_count,dropped_count,sampling_policy_digest,
+			event_time_min,event_time_max
+			FROM telemetry_batch_commits
+			WHERE tenant_id=$1 AND agent_id=$2 AND asset_id=$3
+			  AND event_time_max >= $4 AND event_time_min < $5
+			ORDER BY event_time_min,stream_id,epoch,sequence`,
+			tenant.String(), q.AgentID.String(), q.AssetID.String(), q.Since.UTC(), q.Until.UTC())
+		if err != nil {
+			return fmt.Errorf("query telemetry batch accounting: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var accounting ports.TelemetryBatchAccounting
+			var priority int
+			var epoch, sequence int64
+			if err := rows.Scan(
+				&accounting.AgentID, &accounting.StreamID, &accounting.BatchID, &accounting.AssetID,
+				&priority, &epoch, &sequence, &accounting.ObservedCount, &accounting.KeptCount,
+				&accounting.SampledOutCount, &accounting.TruncatedCount, &accounting.DroppedCount,
+				&accounting.SamplingPolicyDigest, &accounting.FromAt, &accounting.ToAt,
+			); err != nil {
+				return fmt.Errorf("scan telemetry batch accounting: %w", err)
+			}
+			accounting.Priority = fleetagent.DeliveryPriority(priority)
+			accounting.Epoch = uint64(epoch)
+			accounting.Sequence = uint64(sequence)
+			accounting.FromAt = accounting.FromAt.UTC()
+			accounting.ToAt = accounting.ToAt.UTC()
+			if err := accounting.Validate(); err != nil {
+				return fmt.Errorf("validate telemetry batch accounting: %w", err)
+			}
+			out = append(out, accounting)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (r *TelemetryTransportRepository) BindTelemetryAsset(ctx context.Context, binding ports.TelemetryAssetBinding) error {
@@ -527,4 +707,42 @@ func (r *TelemetryTransportRepository) ResolveTelemetryAsset(ctx context.Context
 		return nil
 	})
 	return asset, err
+}
+
+// TelemetryReferencesDurable resolves a detection's causal references from telemetry_batch_events,
+// the existing accepted raw-telemetry fact store. Missing or mismatched facts are pending, never inferred.
+func (r *TelemetryTransportRepository) ResolveTelemetryReferences(ctx context.Context, agentID, assetID shared.ID, redactionPolicyDigest string, refs []fleetagent.TelemetryReference) (ports.TelemetryReferenceStatus, error) {
+	if err := requireTransportTenant(ctx); err != nil {
+		return "", err
+	}
+	if agentID.IsZero() || assetID.IsZero() || strings.TrimSpace(redactionPolicyDigest) == "" || len(refs) == 0 {
+		return "", fmt.Errorf("%w: agent, asset, redaction policy digest and telemetry references are required", shared.ErrValidation)
+	}
+	status := ports.TelemetryReferencesDurable
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		tenant, _ := shared.TenantFrom(ctx)
+		for _, ref := range refs {
+			if err := ref.Validate(); err != nil {
+				return err
+			}
+			var storedAsset shared.ID
+			var storedDigest, storedRedactionPolicyDigest string
+			err := tx.QueryRow(ctx, `SELECT asset_id,digest,redaction_policy_digest FROM telemetry_batch_events
+				WHERE tenant_id=$1 AND agent_id=$2 AND stream_id=$3 AND epoch=$4 AND sequence=$5 AND event_id=$6`,
+				tenant.String(), agentID.String(), ref.StreamID.String(), int64(ref.Epoch), int64(ref.Sequence), ref.EventID.String()).Scan(&storedAsset, &storedDigest, &storedRedactionPolicyDigest)
+			if err == pgx.ErrNoRows {
+				status = ports.TelemetryReferencesMissing
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("resolve telemetry reference: %w", err)
+			}
+			if storedAsset != assetID || storedDigest != ref.Digest || storedRedactionPolicyDigest != redactionPolicyDigest {
+				status = ports.TelemetryReferencesContradictory
+				return nil
+			}
+		}
+		return nil
+	})
+	return status, err
 }

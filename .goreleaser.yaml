@@ -114,6 +114,22 @@ archives:
       - README.md
       - CHANGELOG.md
 
+  # A slim CI archive: just synapse-cli. A scan/gate job needs only that one binary, so this avoids
+  # downloading the full ~44MB suite (synapse-agent, synapse-cspm, synapse-dast-helper, …) on every
+  # pipeline run across hundreds of projects.
+  - id: synapse-cli
+    ids:
+      - synapse-cli
+    name_template: "synapse-cli_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE
+
 checksum:
   name_template: "checksums.txt"
   algorithm: sha256

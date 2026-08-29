@@ -2175,7 +2175,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 			sourceWarnings = append(sourceWarnings, fmt.Sprintf("detection source %q did not run (tool/DB missing or errored) – its vulnerabilities are NOT included", src.Name()))
 		}
 	}
-	snap := ports.ScanSnapshot{ToolVersions: toolVersions, VulnDBSnapshot: s.prov.VulnDBSource + "@" + now.UTC().Format(time.RFC3339), GrypeDBVersion: grypeDB}
+	snap := ports.ScanSnapshot{ToolVersions: toolVersions, VulnDBSnapshot: vulnDBSnapshot(s.prov.VulnDBSource, now), GrypeDBVersion: grypeDB}
 	sourceWarnings = append(sourceWarnings, dbFreshnessWarnings(toolVersions, now, s.dbMaxAgeDays)...) // stale-DB freshness policy
 	manifest := buildManifest(toolVersions, snap.VulnDBSnapshot, grypeDB, doc)
 	manifest.SBOMSHA256 = record.SHA256
@@ -2451,6 +2451,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// analyzer-version invalidation). Best-effort – a miss/error just regenerates.
 	producerVer := sbomProducerVersion(s.prov.ToolVersions)
 	var doc *sbom.SBOM
+	var sbomGenErr error // non-nil ⇒ SBOM production failed; degrade to an empty inventory + INCOMPLETE
 	cacheHit := false
 	if s.sbomCache != nil {
 		if cached, ok, _ := s.sbomCache.Load(ctx, ws.Dir, producerVer); ok && cached != nil {
@@ -2460,10 +2461,15 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if doc == nil {
 		doc, err = s.sbomGen.Generate(ctx, ws.Dir)
 		if err != nil {
+			// Degrade, don't abort. An SBOM producer (syft) failing or being absent must NOT discard the
+			// source-only analyzers (secret / SAST / misconfig) — they run in-process, need no SBOM, and
+			// doctor advertises them as available with no external setup. Continue with an empty inventory
+			// and mark the scan INCOMPLETE (below) so the missing dependency/vuln/license coverage is
+			// explicit, never a silent clean result.
 			trace.fail(step, err)
-			return nil, fmt.Errorf("generate sbom: %w", err)
-		}
-		if s.sbomCache != nil {
+			sbomGenErr = err
+			doc = &sbom.SBOM{}
+		} else if s.sbomCache != nil {
 			// Store re-fingerprints ws.Dir; this assumes the generator did NOT mutate the workspace (Syft +
 			// the owned parsers read only), so the stored key matches the next clean scan's Load key.
 			_ = s.sbomCache.Store(ctx, ws.Dir, producerVer, doc) // best-effort; a store error never fails the scan
@@ -2477,7 +2483,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		doc.Audit.CreatedAt = now
 		doc.Audit.UpdatedAt = now
 	}
-	trace.succeed(step, "SBOM generated", map[string]int{"components": countComponents(doc), "dependencies": len(doc.Dependencies), "cache_hit": boolToInt(cacheHit)})
+	if sbomGenErr == nil {
+		trace.succeed(step, "SBOM generated", map[string]int{"components": countComponents(doc), "dependencies": len(doc.Dependencies), "cache_hit": boolToInt(cacheHit)})
+	}
 	// SBOM producer cross-check: when a 2nd producer is configured, diff the two RAW
 	// component sets – BEFORE enrichment, so it compares the PRODUCERS themselves, not a shared post-process –
 	// and record components only one producer emitted as ungated CapCorrelation judgments for human review.
@@ -2876,7 +2884,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	}
 	snap := ports.ScanSnapshot{
 		ToolVersions:   toolVersions,
-		VulnDBSnapshot: s.prov.VulnDBSource + "@" + now.UTC().Format(time.RFC3339),
+		VulnDBSnapshot: vulnDBSnapshot(s.prov.VulnDBSource, now),
 		GrypeDBVersion: grypeDB,
 	}
 	sourceWarnings = append(sourceWarnings, dbFreshnessWarnings(toolVersions, now, s.dbMaxAgeDays)...) // stale-DB freshness policy
@@ -2922,6 +2930,19 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		LineCoverage:             opts.LineCoverage,
 		Gate:                     opts.Gate,
 		Comparison:               comparisonFromWorkspace(req, ws),
+	}
+	// SBOM production failed: force the scan INCOMPLETE and surface it, so the empty dependency/vuln/
+	// license coverage reads as a known gap rather than a clean result. The source-only analyzers below
+	// still run and contribute findings.
+	if sbomGenErr != nil {
+		const warn = "SBOM generation did not run (producer unavailable or errored); dependency, vulnerability and license coverage is EMPTY — the source-only analyzers (secret/SAST/misconfig) still ran"
+		result.Completeness.Confident = false
+		if result.Completeness.Warning == "" {
+			result.Completeness.Warning = warn
+		} else {
+			result.Completeness.Warning = warn + "; " + result.Completeness.Warning
+		}
+		result.SourceWarnings = append(result.SourceWarnings, warn)
 	}
 	// Container-image layer attribution (Epic D): join each vuln to the layer that introduced
 	// its component, and classify base vs application layers. No-op for non-image scans.
@@ -4172,6 +4193,17 @@ func (s *Service) newRunID() string {
 // buildManifest assembles the reproducibility manifest + score. The
 // repro score is the fraction of detection inputs that are version-pinned; the
 // live OSV.dev query is honestly counted as unpinned.
+// vulnDBSnapshot builds the "<source>@<time>" evidence marker for the online vulnerability feed. It
+// returns "" when no online source was queried (e.g. an --offline / air-gapped scan), so the evidence
+// never asserts a feed — like osv.dev — that was never contacted. Grype's offline DB version is recorded
+// separately in GrypeDBVersion, so offline scans still carry honest DB provenance.
+func vulnDBSnapshot(source string, t time.Time) string {
+	if source == "" {
+		return ""
+	}
+	return source + "@" + t.UTC().Format(time.RFC3339)
+}
+
 func buildManifest(toolVersions map[string]string, vulnDBSnapshot, grypeDB string, doc *sbom.SBOM) ports.ScanManifest {
 	m := ports.ScanManifest{
 		ToolVersions:       toolVersions,

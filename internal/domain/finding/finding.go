@@ -177,8 +177,10 @@ type Finding struct {
 
 	// Risk priority (CISA KEV -> EPSS x CVSS), copied from the source vuln so
 	// findings can be ordered by real risk. KEV findings rank above all.
-	KEV       bool
-	RiskScore float64
+	KEV bool
+	// RiskScore is the computed risk priority; omitted from JSON when unset (0) so a scan path that does
+	// not populate it — e.g. the CLI, which has no KEV/EPSS enrichment — does not emit a misleading 0.00.
+	RiskScore float64 `json:",omitempty"`
 
 	// Detection provenance: the sources that detected the underlying
 	// vulnerability and the multi-source confidence. Empty for non-SCA findings.
@@ -191,9 +193,12 @@ type Finding struct {
 	OccurrenceID         shared.ID
 	ComponentFingerprint string
 	FixedVersion         string
-	DetectionState       string
-	RiskAssessmentID     shared.ID
-	EvaluatedAt          *time.Time
+	// DetectionState is the continuous-intelligence projection's lifecycle state; empty on a one-shot
+	// scan (e.g. the CLI) that has no stored occurrence history. Omitted from JSON when empty so a
+	// consumer does not build logic on a field that is a constant blank on those paths.
+	DetectionState   string `json:",omitempty"`
+	RiskAssessmentID shared.ID
+	EvaluatedAt      *time.Time
 
 	// Class separates actionable third-party findings from historical
 	// advisories matched against the project's own unversioned modules.
@@ -219,8 +224,9 @@ type Finding struct {
 
 	// EvidenceScore gates promotion: candidates below the threshold are not
 	// auto-promoted (deterministic evidence gating: AI-proposed findings are never
-	// auto-promoted).
-	EvidenceScore int
+	// auto-promoted). Omitted from JSON when unset (0), so a scan path that does not score evidence
+	// (e.g. the CLI) does not emit a meaningless 0.
+	EvidenceScore int `json:",omitempty"`
 
 	// ProposedBy is the actor that proposed an exploitation/AI finding (e.g. "agent:<sid>").
 	// It exists so the adversarial verifier that later raises the score CANNOT be the same

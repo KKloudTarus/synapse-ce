@@ -40,7 +40,8 @@ func (g *ftIDs) NewID() shared.ID { g.n++; return shared.ID(fmt.Sprintf("fid-%d"
 
 type ftAudit struct{}
 
-func (ftAudit) Record(context.Context, ports.AuditEntry) error { return nil }
+func (ftAudit) Record(context.Context, ports.AuditEntry) error     { return nil }
+func (ftAudit) RecordOnce(context.Context, ports.AuditEntry) error { return nil }
 
 func setupFleet(t *testing.T) (http.Handler, *fleetagentuc.Service, *fleetwork.Service) {
 	t.Helper()

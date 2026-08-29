@@ -2,6 +2,7 @@ package privacy
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -81,6 +82,11 @@ func TestClassifyDispositions(t *testing.T) {
 	if da != DispositionHash || strings.Contains(a, "sshd") || a != b || a == c {
 		t.Fatalf("hash must hide value but correlate: a=%q b=%q c=%q", a, b, c)
 	}
+	secret := "hunter2" + "SuperSecret"
+	v, d := hp.Classify(CategoryProcessComm, "--password="+secret)
+	if d != DispositionRedact || strings.Contains(v, secret) || v == hashValue(hp.HashSalt, "--password="+secret) {
+		t.Fatal("recognized secret must be redacted instead of directly hashed")
+	}
 }
 
 func TestRedactionPolicyDigestDeterministicAndDistinct(t *testing.T) {
@@ -89,10 +95,15 @@ func TestRedactionPolicyDigestDeterministicAndDistinct(t *testing.T) {
 	if a == "" || a != b {
 		t.Fatalf("digest must be deterministic: %q vs %q", a, b)
 	}
+	alias := DefaultPolicy()
+	alias.Version = "tenant-x:v2"
+	if RedactionPolicyDigest(alias) != a {
+		t.Fatal("policy version labels must not alter source-redaction content identity")
+	}
 	other := DefaultPolicy()
-	other.Version = "tenant-x:v2"
+	other.MaxArgLen--
 	if RedactionPolicyDigest(other) == a {
-		t.Fatal("a different policy must have a different digest")
+		t.Fatal("different source-redaction behavior must have a different digest")
 	}
 }
 
@@ -243,5 +254,76 @@ func TestScrubRejectsInvalidPolicy(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), shared.ErrValidation.Error()) {
 		t.Fatalf("want validation error, got %v", err)
+	}
+}
+
+func TestSourcePrivacyFloorCannotBeRelaxed(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Policy)
+	}{
+		{
+			name: "unknown field category",
+			mutate: func(p *Policy) {
+				p.Dispositions[FieldCategory("process.unknown")] = DispositionAllow
+			},
+		},
+		{
+			name: "environment collection",
+			mutate: func(p *Policy) {
+				p.Dispositions[CategoryProcessEnv] = DispositionAllow
+			},
+		},
+		{
+			name: "secret scrubbing disabled",
+			mutate: func(p *Policy) {
+				p.RedactSecrets = false
+			},
+		},
+		{
+			name: "argument length unbounded",
+			mutate: func(p *Policy) {
+				p.MaxArgLen = 0
+			},
+		},
+		{
+			name: "argument count weaker than floor",
+			mutate: func(p *Policy) {
+				p.MaxArgCount = DefaultPolicy().MaxArgCount + 1
+			},
+		},
+		{
+			name: "path length unbounded",
+			mutate: func(p *Policy) {
+				p.MaxPathLen = 0
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := DefaultPolicy()
+			tt.mutate(&p)
+			if err := p.ValidateSourceFloor(); !errors.Is(err, shared.ErrValidation) {
+				t.Fatalf("ValidateSourceFloor() error = %v, want validation", err)
+			}
+			if _, _, err := Scrub(mkEnvelope(nil, "/x"), p); !errors.Is(err, shared.ErrValidation) {
+				t.Fatalf("Scrub() error = %v, want validation", err)
+			}
+		})
+	}
+}
+
+func TestSourcePrivacyFloorAllowsStrongerTenantPolicy(t *testing.T) {
+	p := DefaultPolicy()
+	p.Version = "tenant-a:v2"
+	p.MaxArgLen = 256
+	p.MaxArgCount = 64
+	p.MaxPathLen = 1024
+	p.Dispositions[CategoryProcessArg] = DispositionRedact
+	if err := p.ValidateSourceFloor(); err != nil {
+		t.Fatalf("ValidateSourceFloor() error = %v", err)
+	}
+	if got, want := RedactionPolicyDigest(p), RedactionPolicyDigest(p); got == "" || got != want {
+		t.Fatalf("stronger policy digest = %q/%q, want stable non-empty identity", got, want)
 	}
 }

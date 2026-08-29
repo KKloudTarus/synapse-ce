@@ -22,7 +22,7 @@ func (r Report) Changed() bool { return r.Redacted > 0 || r.Dropped > 0 }
 // RedactionPolicyDigest and sets QualityRedacted when anything changed, so the redaction travels with the
 // data. Callers apply it BEFORE the spool/ship so unredacted secrets never persist or leave the host.
 func Scrub(env telemetry.TelemetryEnvelope, policy Policy) (telemetry.TelemetryEnvelope, Report, error) {
-	if err := policy.Validate(); err != nil {
+	if err := policy.ValidateSourceFloor(); err != nil {
 		return telemetry.TelemetryEnvelope{}, Report{}, fmt.Errorf("scrub: %w", err)
 	}
 	out := env.Clone()

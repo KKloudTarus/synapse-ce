@@ -40,7 +40,7 @@ func TestTelemetryLosses(t *testing.T) {
 		_, _ = pool.Exec(bg, `DELETE FROM tenants WHERE id=$1`, tenant.String())
 	})
 
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	repo := NewTelemetryRepository(pool, time.Hour, 2*time.Hour)
 	tctx := shared.WithTenant(ctx, tenant)
 
@@ -54,12 +54,21 @@ func TestTelemetryLosses(t *testing.T) {
 	if err := repo.RecordLoss(tctx, trunc); err != nil {
 		t.Fatalf("record truncation: %v", err)
 	}
-	// Idempotent on (host, class, seq, disposition).
-	if err := repo.RecordLoss(tctx, trunc); err != nil {
+	// Exact immutable retry is idempotent, including sub-microsecond timestamp differences
+	// that PostgreSQL cannot preserve.
+	retry := trunc
+	retry.FromAt = retry.FromAt.Add(123 * time.Nanosecond)
+	retry.ToAt = retry.ToAt.Add(456 * time.Nanosecond)
+	if err := repo.RecordLoss(tctx, retry); err != nil {
 		t.Fatalf("re-record truncation: %v", err)
 	}
+	contradictory := trunc
+	contradictory.AssetID = "asset-2"
+	if err := repo.RecordLoss(tctx, contradictory); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("contradictory immutable retry error = %v, want conflict", err)
+	}
 	if err := repo.RecordLoss(tctx, ports.TelemetryLoss{HostID: "host-1", AssetID: "asset-1", Class: detection.ClassProcess, Sequence: 3, Disposition: telemetry.Dropped,
-		ObservedCount: 5, KeptCount: 0, DroppedCount: 5, Reason: "over budget on a never-shed class", FromAt: now.Add(-3 * time.Minute), ToAt: now.Add(-1 * time.Minute)}); err != nil {
+		ObservedCount: 5, KeptCount: 0, DroppedCount: 5, Reason: "source buffer evicted observed process events", FromAt: now.Add(-3 * time.Minute), ToAt: now.Add(-1 * time.Minute)}); err != nil {
 		t.Fatalf("record drop: %v", err)
 	}
 	// An inconsistent loss is refused (counts do not add up).
