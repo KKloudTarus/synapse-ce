@@ -131,16 +131,14 @@ func (r *DetectionRecordRepository) LastBatchSequence(ctx context.Context, agent
 	return uint64(last), nil
 }
 
-// ExpireDetections deletes the engagement's records whose expiry has elapsed at cutoff and returns their
-// ids for auditing. Rows with a NULL expires_at are never removed. Deleting a projection row leaves its
-// evidence-chain link intact — the ledger is permanent, only the queryable projection ages out.
-func (r *DetectionRecordRepository) ExpireDetections(ctx context.Context, engagementID shared.ID, cutoff time.Time) ([]shared.ID, error) {
+// ListExpiredDetections returns eligible record ids without mutating the projection.
+func (r *DetectionRecordRepository) ListExpiredDetections(ctx context.Context, engagementID shared.ID, cutoff time.Time) ([]shared.ID, error) {
 	var ids []shared.ID
 	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			DELETE FROM detections
+			SELECT id FROM detections
 			WHERE engagement_id = $1 AND expires_at IS NOT NULL AND expires_at <= $2
-			RETURNING id`, engagementID.String(), cutoff.UTC())
+			ORDER BY id`, engagementID.String(), cutoff.UTC())
 		if err != nil {
 			return err
 		}
@@ -155,4 +153,18 @@ func (r *DetectionRecordRepository) ExpireDetections(ctx context.Context, engage
 		return rows.Err()
 	})
 	return ids, err
+}
+
+// DeleteDetection removes one exact projection row and leaves permanent evidence and provenance intact.
+func (r *DetectionRecordRepository) DeleteDetection(ctx context.Context, engagementID, detectionID shared.ID) (bool, error) {
+	var deleted bool
+	err := WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		result, err := tx.Exec(ctx, `DELETE FROM detections WHERE engagement_id = $1 AND id = $2`, engagementID.String(), detectionID.String())
+		if err != nil {
+			return err
+		}
+		deleted = result.RowsAffected() > 0
+		return nil
+	})
+	return deleted, err
 }

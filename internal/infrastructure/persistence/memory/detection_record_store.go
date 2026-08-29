@@ -106,21 +106,32 @@ func (s *DetectionRecordStore) LastBatchSequence(ctx context.Context, agentID sh
 	return highest, nil
 }
 
-// ExpireDetections removes the engagement's records whose ExpiresAt has elapsed at cutoff and returns
-// their ids. Records with no expiry set are never removed.
-func (s *DetectionRecordStore) ExpireDetections(ctx context.Context, engagementID shared.ID, cutoff time.Time) ([]shared.ID, error) {
+// ListExpiredDetections returns eligible record ids without mutating the projection.
+func (s *DetectionRecordStore) ListExpiredDetections(ctx context.Context, engagementID shared.ID, cutoff time.Time) ([]shared.ID, error) {
 	tenant := shared.TenantOrDefault(tenantFromCtx(ctx))
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var expired []shared.ID
-	for k, r := range s.byTenant[tenant] {
+	for _, r := range s.byTenant[tenant] {
 		if r.EngagementID == engagementID && r.Expired(cutoff) {
 			expired = append(expired, r.ID)
-			delete(s.byTenant[tenant], k)
 		}
 	}
 	sort.Slice(expired, func(i, j int) bool { return expired[i] < expired[j] })
 	return expired, nil
+}
+
+// DeleteDetection removes one exact projection row. Repeating a successful deletion is a no-op.
+func (s *DetectionRecordStore) DeleteDetection(ctx context.Context, engagementID, detectionID shared.ID) (bool, error) {
+	tenant := shared.TenantOrDefault(tenantFromCtx(ctx))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := recKey{eng: engagementID, id: detectionID}
+	if _, exists := s.byTenant[tenant][key]; !exists {
+		return false, nil
+	}
+	delete(s.byTenant[tenant], key)
+	return true, nil
 }
 
 func cloneRecord(r detection.Record) detection.Record {

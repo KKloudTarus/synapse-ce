@@ -19,11 +19,12 @@ import (
 // traverse plaintext HTTP. http is allowed only for a loopback host (local development/testing).
 // Shared by every agent binary so the transport-security rule is enforced identically.
 func ValidateControlPlaneURL(raw string) error {
+	raw = strings.TrimSpace(raw)
 	u, err := url.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("invalid control-plane URL: %w", err)
 	}
-	switch u.Scheme {
+	switch strings.ToLower(u.Scheme) {
 	case "https":
 		return nil
 	case "http":

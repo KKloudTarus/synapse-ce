@@ -43,6 +43,28 @@ func NewTelemetryStore(hot, warm time.Duration) *TelemetryStore {
 
 // RecordLoss persists a Truncated/Dropped loss record for the ctx tenant, idempotent on
 // (host, class, seq, disposition) so a re-ingest of the same over-budget batch records one loss.
+func normalizeTelemetryLoss(loss ports.TelemetryLoss) ports.TelemetryLoss {
+	loss.FromAt = loss.FromAt.UTC().Truncate(time.Microsecond)
+	loss.ToAt = loss.ToAt.UTC().Truncate(time.Microsecond)
+	return loss
+}
+
+func sameTelemetryLoss(a, b ports.TelemetryLoss) bool {
+	a = normalizeTelemetryLoss(a)
+	b = normalizeTelemetryLoss(b)
+	return a.HostID == b.HostID &&
+		a.AssetID == b.AssetID &&
+		a.Class == b.Class &&
+		a.Sequence == b.Sequence &&
+		a.Disposition == b.Disposition &&
+		a.ObservedCount == b.ObservedCount &&
+		a.KeptCount == b.KeptCount &&
+		a.DroppedCount == b.DroppedCount &&
+		a.Reason == b.Reason &&
+		a.FromAt.Equal(b.FromAt) &&
+		a.ToAt.Equal(b.ToAt)
+}
+
 func (s *TelemetryStore) RecordLoss(ctx context.Context, loss ports.TelemetryLoss) error {
 	if err := loss.Validate(); err != nil {
 		return err
@@ -51,12 +73,17 @@ func (s *TelemetryStore) RecordLoss(ctx context.Context, loss ports.TelemetryLos
 	if err != nil {
 		return err
 	}
+	loss = normalizeTelemetryLoss(loss)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, l := range s.losses[tenant] {
-		if l.HostID == loss.HostID && l.Class == loss.Class && l.Sequence == loss.Sequence && l.Disposition == loss.Disposition {
-			return nil // idempotent
+	for _, existing := range s.losses[tenant] {
+		if existing.HostID != loss.HostID || existing.Class != loss.Class || existing.Sequence != loss.Sequence || existing.Disposition != loss.Disposition {
+			continue
 		}
+		if sameTelemetryLoss(existing, loss) {
+			return nil
+		}
+		return fmt.Errorf("%w: telemetry loss identity is already committed to different immutable facts", shared.ErrConflict)
 	}
 	s.losses[tenant] = append(s.losses[tenant], loss)
 	return nil

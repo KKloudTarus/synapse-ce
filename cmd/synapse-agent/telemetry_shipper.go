@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetclient"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/spool"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -317,6 +319,29 @@ func telemetryBatchPrefix(records []ports.SpoolRecord) ([]ports.SpoolRecord, err
 	return out, nil
 }
 
+const telemetryEnvelopeContentType = "application/vnd.synapse.telemetry-envelope+json;version=1"
+
+func telemetryRecordTruncated(record ports.SpoolRecord) (bool, error) {
+	if record.ContentType != telemetryEnvelopeContentType {
+		return false, fmt.Errorf("telemetry record has unexpected content type %q", record.ContentType)
+	}
+	var envelope telemetry.TelemetryEnvelope
+	if err := json.Unmarshal(record.Payload, &envelope); err != nil {
+		return false, fmt.Errorf("decode telemetry envelope: %w", err)
+	}
+	if err := envelope.Validate(); err != nil {
+		return false, fmt.Errorf("validate telemetry envelope: %w", err)
+	}
+	if envelope.EventID != record.EventID ||
+		envelope.EventClass != record.EventClass ||
+		envelope.SchemaVersion != record.SchemaVersion ||
+		!envelope.ObservedAt.Equal(record.ObservedAt) {
+		return false, fmt.Errorf("telemetry envelope metadata disagrees with WAL record")
+	}
+	return envelope.DataQuality.Has(telemetry.QualityTruncatedArgv) ||
+		envelope.DataQuality.Has(telemetry.QualityTruncatedPath), nil
+}
+
 func buildTelemetryIngestRequest(
 	cred fleetclient.Credential,
 	signer fleetclient.TelemetrySigner,
@@ -347,6 +372,7 @@ func buildTelemetryIngestRequest(
 	events := make([]fleetclient.TelemetryEventPayload, 0, len(records))
 	minAt, maxAt := first.ObservedAt.UTC(), first.ObservedAt.UTC()
 	previousSequence := first.Position.Sequence
+	truncatedCount := 0
 	for i, record := range records {
 		if err := record.Validate(); err != nil {
 			return fleetclient.TelemetryIngestRequest{}, fmt.Errorf("telemetry WAL record %d: %w", i, err)
@@ -363,6 +389,13 @@ func buildTelemetryIngestRequest(
 			return fleetclient.TelemetryIngestRequest{}, fmt.Errorf("telemetry batch WAL records are not contiguous")
 		}
 		previousSequence = record.Position.Sequence
+		truncated, err := telemetryRecordTruncated(record)
+		if err != nil {
+			return fleetclient.TelemetryIngestRequest{}, fmt.Errorf("telemetry WAL record %d: %w", i, err)
+		}
+		if truncated {
+			truncatedCount++
+		}
 		digest := fleetagent.TelemetryEventDigest(record.Payload, assetID)
 		refs = append(refs, fleetagent.EventRef{ID: record.EventID, Digest: digest})
 		events = append(events, fleetclient.TelemetryEventPayload{
@@ -379,7 +412,12 @@ func buildTelemetryIngestRequest(
 			maxAt = at
 		}
 	}
-	policyDigest, err := fleetagent.SamplingPolicyDigest("none", "none", "", 1)
+	policyDigest, err := fleetagent.SamplingPolicyDigest(
+		fleetagent.NoSamplingAlgorithm,
+		fleetagent.NoSamplingPolicyID,
+		"",
+		fleetagent.NoSamplingVersion,
+	)
 	if err != nil {
 		return fleetclient.TelemetryIngestRequest{}, err
 	}
@@ -404,6 +442,7 @@ func buildTelemetryIngestRequest(
 		EventTimeMax:         maxAt,
 		ObservedCount:        len(records),
 		KeptCount:            len(records),
+		TruncatedCount:       truncatedCount,
 		SamplingPolicyDigest: policyDigest,
 		Events:               refs,
 		PayloadDigest:        payloadDigest,

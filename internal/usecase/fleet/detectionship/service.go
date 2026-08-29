@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
@@ -36,12 +35,6 @@ var (
 	// unsent detection, so the shipper stops and leaves the WAL intact for operator recovery.
 	ErrDeliveryState = errors.New("detection delivery state inconsistent")
 )
-
-// ResponseError is implemented by transports that preserve an HTTP status and Retry-After value.
-type ResponseError interface {
-	error
-	ResponseStatus() (status int, retryAfter string)
-}
 
 // RetryDecider classifies a transport failure. retry=false makes Run fail closed; retry=true waits for
 // delay without removing anything from the WAL.
@@ -210,7 +203,7 @@ func (s *Service) DeliverOnce(ctx context.Context) (bool, error) {
 	if err != nil || len(records) == 0 {
 		return false, err
 	}
-	items, refs, err := s.decodeRecords(records)
+	items, refs, itemsV2, refsV2, version, err := s.decodeRecords(records)
 	if err != nil {
 		return false, err
 	}
@@ -227,17 +220,33 @@ func (s *Service) DeliverOnce(ctx context.Context) (bool, error) {
 			return false, fmt.Errorf("persist pending detection batch: %w", err)
 		}
 	}
-	batch := fleetagent.AgentBatch{AgentID: s.cfg.AgentID, EngagementID: s.state.Pending.EngagementID,
-		Sequence: s.state.Pending.Sequence, KeyID: s.state.Key.Key.KeyID, Detections: refs}
-	batch.Signature = fleetagent.SignBatch(s.state.Key.PrivateKey, batch)
-	if err := batch.Validate(); err != nil {
-		return false, err
-	}
-	if err := s.transport.SendDetectionBatch(ctx, s.cfg.Token, batch, items); err != nil {
-		if status, _, ok := responseStatus(err); ok && status == http.StatusForbidden {
-			return false, fmt.Errorf("%w: %v", ErrSigningKeyRejected, err)
+	var sendErr error
+	if version == 2 {
+		transport, ok := s.transport.(ports.DetectionTransportV2)
+		if !ok {
+			return false, fmt.Errorf("%w: attributed detection transport does not support v2", shared.ErrValidation)
 		}
-		return false, fmt.Errorf("send detection batch: %w", err)
+		batch := fleetagent.AgentBatchV2{Context: "synapse-agent-detection-batch:v3", Version: 3, AgentID: s.cfg.AgentID, EngagementID: s.state.Pending.EngagementID,
+			Sequence: s.state.Pending.Sequence, KeyID: s.state.Key.Key.KeyID, Detections: refsV2}
+		batch.Signature = fleetagent.SignBatchV2(s.state.Key.PrivateKey, batch)
+		if err := batch.Validate(); err != nil {
+			return false, err
+		}
+		sendErr = transport.SendDetectionBatchV2(ctx, s.cfg.Token, batch, itemsV2)
+	} else {
+		batch := fleetagent.AgentBatch{AgentID: s.cfg.AgentID, EngagementID: s.state.Pending.EngagementID,
+			Sequence: s.state.Pending.Sequence, KeyID: s.state.Key.Key.KeyID, Detections: refs}
+		batch.Signature = fleetagent.SignBatch(s.state.Key.PrivateKey, batch)
+		if err := batch.Validate(); err != nil {
+			return false, err
+		}
+		sendErr = s.transport.SendDetectionBatch(ctx, s.cfg.Token, batch, items)
+	}
+	if sendErr != nil {
+		if errors.Is(sendErr, ports.ErrDetectionSigningKeyRejected) {
+			return false, fmt.Errorf("%w: %v", ErrSigningKeyRejected, sendErr)
+		}
+		return false, fmt.Errorf("send detection batch: %w", sendErr)
 	}
 	if _, err := s.spool.Ack(ctx, ports.SpoolACK{Priority: fleetagent.PriorityP1,
 		Epoch: s.state.Pending.Epoch, Through: s.state.Pending.Through}); err != nil {
@@ -293,9 +302,10 @@ func (s *Service) recordsForBatch(ctx context.Context) ([]ports.SpoolRecord, err
 			return nil, nil
 		}
 		epoch := records[0].Position.Epoch
+		schemaVersion := records[0].SchemaVersion
 		end := len(records)
 		for i, record := range records {
-			if record.Position.Epoch != epoch {
+			if record.Position.Epoch != epoch || record.SchemaVersion != schemaVersion {
 				end = i
 				break
 			}
@@ -316,45 +326,78 @@ func (s *Service) recordsForBatch(ctx context.Context) ([]ports.SpoolRecord, err
 	return records, nil
 }
 
-func (s *Service) decodeRecords(records []ports.SpoolRecord) ([]fleetagent.DetectionBatchItem, []fleetagent.DetectionRef, error) {
+func (s *Service) decodeRecords(records []ports.SpoolRecord) ([]fleetagent.DetectionBatchItem, []fleetagent.DetectionRef, []fleetagent.DetectionBatchItemV2, []fleetagent.DetectionRefV2, int, error) {
 	items := make([]fleetagent.DetectionBatchItem, 0, len(records))
 	refs := make([]fleetagent.DetectionRef, 0, len(records))
+	itemsV2 := make([]fleetagent.DetectionBatchItemV2, 0, len(records))
+	refsV2 := make([]fleetagent.DetectionRefV2, 0, len(records))
 	seen := make(map[shared.ID]string, len(records))
+	version := 0
 	for _, record := range records {
 		if record.Kind != ports.SpoolRecordDetection || record.Position.Priority != fleetagent.PriorityP1 {
-			return nil, nil, fmt.Errorf("%w: P1 lane contains non-detection record %s", ErrDeliveryState, record.EventID)
+			return nil, nil, nil, nil, 0, fmt.Errorf("%w: P1 lane contains non-detection record %s", ErrDeliveryState, record.EventID)
+		}
+		recordVersion := record.SchemaVersion
+		if recordVersion != 1 && recordVersion != 2 {
+			return nil, nil, nil, nil, 0, fmt.Errorf("%w: unsupported detection spool schema %d", ErrDeliveryState, recordVersion)
+		}
+		if version == 0 {
+			version = recordVersion
+		} else if version != recordVersion {
+			return nil, nil, nil, nil, 0, fmt.Errorf("%w: a delivery batch cannot mix v1 and v2 detections", ErrDeliveryState)
+		}
+		if recordVersion == 2 {
+			var payload fleetagent.DetectionSpoolPayload
+			if err := json.Unmarshal(record.Payload, &payload); err != nil {
+				return nil, nil, nil, nil, 0, fmt.Errorf("decode attributed detection %s: %w", record.EventID, err)
+			}
+			if err := payload.Validate(); err != nil {
+				return nil, nil, nil, nil, 0, err
+			}
+			item := payload.Item
+			if item.ID != record.EventID || item.Detection.AgentID != s.cfg.AgentID {
+				return nil, nil, nil, nil, 0, fmt.Errorf("%w: attributed detection %s has inconsistent identity", ErrDeliveryState, record.EventID)
+			}
+			ref, err := item.Reference()
+			if err != nil {
+				return nil, nil, nil, nil, 0, err
+			}
+			if previous, duplicate := seen[record.EventID]; duplicate {
+				if previous != ref.ContentSHA256 {
+					return nil, nil, nil, nil, 0, fmt.Errorf("%w: repeated detection id %s has different content", ErrDeliveryState, record.EventID)
+				}
+				continue
+			}
+			seen[record.EventID] = ref.ContentSHA256
+			itemsV2, refsV2 = append(itemsV2, item), append(refsV2, ref)
+			continue
 		}
 		var value detection.Detection
 		if err := json.Unmarshal(record.Payload, &value); err != nil {
-			return nil, nil, fmt.Errorf("decode spooled detection %s: %w", record.EventID, err)
+			return nil, nil, nil, nil, 0, fmt.Errorf("decode spooled detection %s: %w", record.EventID, err)
 		}
 		item := fleetagent.DetectionBatchItem{ID: record.EventID, Detection: value, AssetID: value.HostID}
 		if err := item.Validate(); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, nil, 0, err
 		}
 		if value.AgentID != s.cfg.AgentID {
-			return nil, nil, fmt.Errorf("%w: spooled detection %s belongs to agent %s, not %s", shared.ErrForbidden, record.EventID, value.AgentID, s.cfg.AgentID)
+			return nil, nil, nil, nil, 0, fmt.Errorf("%w: spooled detection %s belongs to agent %s, not %s", shared.ErrForbidden, record.EventID, value.AgentID, s.cfg.AgentID)
 		}
 		canonical, err := json.Marshal(value)
 		if err != nil {
-			return nil, nil, fmt.Errorf("encode detection %s: %w", record.EventID, err)
+			return nil, nil, nil, nil, 0, fmt.Errorf("encode detection %s: %w", record.EventID, err)
 		}
 		digest := fleetagent.DetectionContentHash(canonical, item.AssetID)
 		if previous, duplicate := seen[record.EventID]; duplicate {
 			if previous != digest {
-				return nil, nil, fmt.Errorf("%w: repeated detection id %s has different content", ErrDeliveryState, record.EventID)
+				return nil, nil, nil, nil, 0, fmt.Errorf("%w: repeated detection id %s has different content", ErrDeliveryState, record.EventID)
 			}
-			// Sink retries can append the same deterministic detection more than once. One signed
-			// item admits that content; ACKing through the pending WAL membership then removes all
-			// identical copies without sending a server-invalid batch with duplicate refs.
 			continue
 		}
 		seen[record.EventID] = digest
-		items = append(items, item)
-		refs = append(refs, fleetagent.DetectionRef{ID: record.EventID,
-			ContentSHA256: digest})
+		items, refs = append(items, item), append(refs, fleetagent.DetectionRef{ID: record.EventID, ContentSHA256: digest})
 	}
-	return items, refs, nil
+	return items, refs, itemsV2, refsV2, version, nil
 }
 
 func (s *Service) pendingAlreadyACKed(ctx context.Context) (bool, error) {
@@ -399,15 +442,6 @@ func (s *Service) persist(next ports.DetectionDeliveryState) error {
 	}
 	s.state = next
 	return nil
-}
-
-func responseStatus(err error) (int, string, bool) {
-	var responseErr ResponseError
-	if !errors.As(err, &responseErr) {
-		return 0, "", false
-	}
-	status, retryAfter := responseErr.ResponseStatus()
-	return status, retryAfter, true
 }
 
 func wait(ctx context.Context, delay time.Duration) error {

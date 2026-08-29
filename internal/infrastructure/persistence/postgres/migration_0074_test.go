@@ -160,19 +160,28 @@ func TestMigration0074Detections(t *testing.T) {
 		t.Errorf("incident worst_severity = %q, want critical (ranked, not alphabetical max)", worst)
 	}
 
-	// Expiry: a record past its retention is removed and returned; a no-expiry record stays.
+	// Expiry is two-step: identify without mutation, then delete the exact projection.
 	expRec := rec
 	expRec.ID = shared.ID("rec-exp-" + id)
 	expRec.ExpiresAt = time.Unix(2000, 0).UTC()
 	if err := repo.AppendDetection(tctx, expRec); err != nil {
 		t.Fatalf("append expiring: %v", err)
 	}
-	expired, err := repo.ExpireDetections(tctx, shared.ID(engA), time.Unix(3000, 0).UTC())
+	expired, err := repo.ListExpiredDetections(tctx, shared.ID(engA), time.Unix(3000, 0).UTC())
 	if err != nil {
-		t.Fatalf("expire: %v", err)
+		t.Fatalf("list expired: %v", err)
 	}
 	if len(expired) != 1 || expired[0] != expRec.ID {
-		t.Fatalf("only the past-retention record must expire, got %v", expired)
+		t.Fatalf("only the past-retention record must be eligible, got %v", expired)
+	}
+	if ok, err := repo.HasDetection(tctx, expRec.EngagementID, expRec.ID); err != nil || !ok {
+		t.Fatalf("listing expiry candidates must not delete the projection (ok=%v err=%v)", ok, err)
+	}
+	if deleted, err := repo.DeleteDetection(tctx, expRec.EngagementID, expRec.ID); err != nil || !deleted {
+		t.Fatalf("delete expired projection: deleted=%v err=%v", deleted, err)
+	}
+	if deleted, err := repo.DeleteDetection(tctx, expRec.EngagementID, expRec.ID); err != nil || deleted {
+		t.Fatalf("repeated delete must be idempotent: deleted=%v err=%v", deleted, err)
 	}
 	if got, _ := repo.ListDetections(tctx, shared.ID(engA)); len(got) != 2 {
 		t.Fatalf("the two no-expiry records must remain after expiry, got %d", len(got))

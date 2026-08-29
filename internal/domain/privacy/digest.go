@@ -16,15 +16,15 @@ const redactionPolicyContext = "synapse-redaction-policy:v1"
 // the tenant/config fields. v2 closes the MySQL/MariaDB -pPASSWORD and internal-space credential residuals.
 const secretPatternSetID = "secret-patterns:v2"
 
-// RedactionPolicyDigest is a deterministic, domain-separated identity for a redaction policy, recorded with
-// the scrubbed data so a reader knows exactly how it was redacted. It is DISTINCT from the sampling policy
-// digest. The HashSalt is folded in as its own digest (not raw) so the identity is stable without echoing
-// the salt into the commitment.
+// RedactionPolicyDigest is a deterministic, domain-separated identity for source-redaction behavior,
+// recorded with scrubbed data so a reader knows exactly how it was redacted. It is DISTINCT from the
+// sampling-policy digest. Human policy version labels are aliases around this content identity and are
+// therefore excluded. The HashSalt is folded in as its own digest (not raw) so the identity is stable
+// without echoing the salt into the commitment.
 func RedactionPolicyDigest(p Policy) string {
 	h := sha256.New()
 	write := func(s string) { h.Write([]byte(s)); h.Write([]byte{0x1e}) }
 	write(redactionPolicyContext)
-	write(p.Version)
 	write(secretPatternSetID)
 	write(strconv.FormatBool(p.RedactSecrets))
 	write(strconv.Itoa(p.MaxArgLen))

@@ -10,12 +10,16 @@ package detectledger
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/detectionprovenance"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -74,25 +78,36 @@ type IngestResult struct {
 
 // Service ingests agent detection batches into the evidence ledger.
 type Service struct {
-	records   ports.DetectionRecordStore
-	chain     EvidenceChain
-	keys      AgentKeyResolver
-	audit     ports.AuditLogger
-	clock     ports.Clock
-	ids       ports.IDGenerator
-	retention time.Duration // 0 = keep the projection forever (the chain is always permanent)
+	records    ports.DetectionRecordStore
+	provenance ports.DetectionProvenanceStore
+	telemetry  ports.TelemetryReferenceResolver
+	chain      EvidenceChain
+	keys       AgentKeyResolver
+	audit      ports.IdempotentAuditLogger
+	clock      ports.Clock
+	ids        ports.IDGenerator
+	retention  time.Duration // 0 = keep the projection forever (the chain is always permanent)
 }
 
 // NewService validates its dependencies. Every one is required: a ledger that cannot seal, resolve an
 // agent key, persist, or audit is not producing attributable evidence.
-func NewService(records ports.DetectionRecordStore, chain EvidenceChain, keys AgentKeyResolver, audit ports.AuditLogger, clock ports.Clock, ids ports.IDGenerator, retention time.Duration) (*Service, error) {
+func NewService(records ports.DetectionRecordStore, chain EvidenceChain, keys AgentKeyResolver, audit ports.IdempotentAuditLogger, clock ports.Clock, ids ports.IDGenerator, retention time.Duration) (*Service, error) {
+	return NewServiceWithProvenance(records, nil, nil, chain, keys, audit, clock, ids, retention)
+}
+
+// NewServiceWithProvenance adds the #610 durable provenance seam. Passing both optional dependencies
+// enables v2 admission and lifecycle transitions; the legacy constructor retains v1 callers unchanged.
+func NewServiceWithProvenance(records ports.DetectionRecordStore, provenance ports.DetectionProvenanceStore, telemetry ports.TelemetryReferenceResolver, chain EvidenceChain, keys AgentKeyResolver, audit ports.IdempotentAuditLogger, clock ports.Clock, ids ports.IDGenerator, retention time.Duration) (*Service, error) {
 	if records == nil || chain == nil || keys == nil || audit == nil || clock == nil || ids == nil {
 		return nil, fmt.Errorf("%w: detection ledger is missing a dependency", shared.ErrValidation)
+	}
+	if (provenance == nil) != (telemetry == nil) {
+		return nil, fmt.Errorf("%w: detection provenance and telemetry resolver must be wired together", shared.ErrValidation)
 	}
 	if retention < 0 {
 		return nil, fmt.Errorf("%w: retention cannot be negative", shared.ErrValidation)
 	}
-	return &Service{records: records, chain: chain, keys: keys, audit: audit, clock: clock, ids: ids, retention: retention}, nil
+	return &Service{records: records, provenance: provenance, telemetry: telemetry, chain: chain, keys: keys, audit: audit, clock: clock, ids: ids, retention: retention}, nil
 }
 
 // Ingest admits one signed, sequenced agent batch: it verifies the signature, detects a sequence gap
@@ -108,10 +123,12 @@ func (s *Service) Ingest(ctx context.Context, authAgentID shared.ID, batch fleet
 		return IngestResult{}, err
 	}
 	if authAgentID.IsZero() || batch.AgentID != authAgentID {
-		s.recordAudit(ctx, "detection.batch_rejected", authAgentID.String(), map[string]string{
+		if err := s.recordAudit(ctx, "detection.batch_rejected", authAgentID.String(), map[string]string{
 			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
 			"manifest_agent_id": batch.AgentID.String(), "reason": "identity_mismatch",
-		})
+		}); err != nil {
+			return IngestResult{}, fmt.Errorf("%w: audit rejected detection batch: %v", shared.ErrSaturated, err)
+		}
 		return IngestResult{}, fmt.Errorf("%w: batch agent %q is not the authenticated agent %q", shared.ErrForbidden, batch.AgentID, authAgentID)
 	}
 	refByID, err := membership(batch, items)
@@ -129,17 +146,21 @@ func (s *Service) Ingest(ctx context.Context, authAgentID shared.ID, batch fleet
 	// key, a pending/expired/revoked key, or a bad signature.
 	key, err := s.keys.ResolveSigningKey(ctx, batch.AgentID, batch.KeyID)
 	if err != nil {
-		s.recordAudit(ctx, "detection.batch_rejected", batch.AgentID.String(), map[string]string{
+		if auditErr := s.recordAudit(ctx, "detection.batch_rejected", batch.AgentID.String(), map[string]string{
 			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
 			"key_id": batch.KeyID, "reason": "unknown_key",
-		})
+		}); auditErr != nil {
+			return IngestResult{}, fmt.Errorf("%w: audit rejected detection batch: %v", shared.ErrSaturated, auditErr)
+		}
 		return IngestResult{}, fmt.Errorf("%w: no signing key %s for agent %s: %v", shared.ErrForbidden, batch.KeyID, batch.AgentID, err)
 	}
 	if err := fleetagent.VerifyBatchWithKey(key, fleetagent.PurposeDetectionBatch, s.clock.Now().UTC(), batch); err != nil {
-		s.recordAudit(ctx, "detection.batch_rejected", batch.AgentID.String(), map[string]string{
+		if auditErr := s.recordAudit(ctx, "detection.batch_rejected", batch.AgentID.String(), map[string]string{
 			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
 			"key_id": batch.KeyID, "reason": "unverified",
-		})
+		}); auditErr != nil {
+			return IngestResult{}, fmt.Errorf("%w: audit rejected detection batch: %v", shared.ErrSaturated, auditErr)
+		}
 		return IngestResult{}, err
 	}
 
@@ -235,17 +256,347 @@ func (s *Service) Ingest(ctx context.Context, authAgentID shared.ID, batch fleet
 		result.SealedRecords = append(result.SealedRecords, rec.ID)
 		result.EvidenceIDs = append(result.EvidenceIDs, evID)
 	}
-	s.recordAudit(ctx, "detection.batch_sealed", batch.AgentID.String(), map[string]string{
-		"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
-		"sealed": fmt.Sprint(len(result.SealedRecords)), "skipped": fmt.Sprint(len(result.Skipped)),
-	})
+	if err := s.recordAuditOnce(ctx, "detection.batch_sealed", batch.AgentID.String(),
+		detectionBatchAuditKey("detection.batch_sealed", batch.AgentID, batch.EngagementID, batch.Sequence), map[string]string{
+			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
+			"sealed": fmt.Sprint(len(result.SealedRecords)), "skipped": fmt.Sprint(len(result.Skipped)),
+		}); err != nil {
+		return result, fmt.Errorf("audit sealed detection batch: %w", err)
+	}
 	return result, nil
 }
 
-// VerifyChain checks the engagement's evidence chain; a broken chain returns an error wrapping
-// evidence.ErrChainBroken so the report that depends on it is blocked, exactly as any chain break is.
+// IngestV2 admits a separately signed v2 detection batch. A v2 item cannot be admitted without its
+// actual causal telemetry coordinates: it records their receipt first, seals immutable attribution once,
+// and becomes complete only after both the commitment and referenced telemetry are durable.
+func (s *Service) IngestV2(ctx context.Context, authAgentID shared.ID, batch fleetagent.AgentBatchV2, items []fleetagent.DetectionBatchItemV2) (IngestResult, error) {
+	if s.provenance == nil || s.telemetry == nil {
+		return IngestResult{}, fmt.Errorf("%w: attributed detection ingest is not enabled", shared.ErrValidation)
+	}
+	if err := batch.Validate(); err != nil {
+		return IngestResult{}, err
+	}
+	if authAgentID.IsZero() || batch.AgentID != authAgentID {
+		if err := s.recordAudit(ctx, "detection.v2_batch_rejected", authAgentID.String(), map[string]string{
+			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
+			"manifest_agent_id": batch.AgentID.String(), "reason": "identity_mismatch",
+		}); err != nil {
+			return IngestResult{}, fmt.Errorf("%w: audit rejected attributed detection batch: %v", shared.ErrSaturated, err)
+		}
+		return IngestResult{}, fmt.Errorf("%w: batch agent %q is not the authenticated agent %q", shared.ErrForbidden, batch.AgentID, authAgentID)
+	}
+	if _, err := v2RefByID(batch, items); err != nil {
+		return IngestResult{}, err
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID.IsZero() {
+		return IngestResult{}, fmt.Errorf("%w: detection ingest requires a tenant in context", shared.ErrValidation)
+	}
+	key, err := s.keys.ResolveSigningKey(ctx, batch.AgentID, batch.KeyID)
+	if err != nil {
+		if auditErr := s.recordAudit(ctx, "detection.v2_batch_rejected", batch.AgentID.String(), map[string]string{
+			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
+			"key_id": batch.KeyID, "reason": "unknown_key",
+		}); auditErr != nil {
+			return IngestResult{}, fmt.Errorf("%w: audit rejected attributed detection batch: %v", shared.ErrSaturated, auditErr)
+		}
+		return IngestResult{}, fmt.Errorf("%w: no signing key %s for agent %s: %v", shared.ErrForbidden, batch.KeyID, batch.AgentID, err)
+	}
+	if err := fleetagent.VerifyBatchV2WithKey(key, fleetagent.PurposeDetectionBatch, s.clock.Now().UTC(), batch); err != nil {
+		if auditErr := s.recordAudit(ctx, "detection.v2_batch_rejected", batch.AgentID.String(), map[string]string{
+			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence),
+			"key_id": batch.KeyID, "reason": "unverified",
+		}); auditErr != nil {
+			return IngestResult{}, fmt.Errorf("%w: audit rejected attributed detection batch: %v", shared.ErrSaturated, auditErr)
+		}
+		return IngestResult{}, err
+	}
+	last, err := s.records.LastBatchSequence(ctx, batch.AgentID)
+	if err != nil {
+		return IngestResult{}, fmt.Errorf("read last batch sequence: %w", err)
+	}
+	gap := fleetagent.DetectSequenceGap(last, batch.Sequence)
+	if gap.HasGap() {
+		if err := s.audit.Record(ctx, ports.AuditEntry{Actor: batch.AgentID.String(), Action: "detection.batch_gap", Target: batch.EngagementID.String(), At: s.clock.Now().UTC(), Metadata: map[string]string{
+			"engagement": batch.EngagementID.String(), "last_sequence": fmt.Sprint(last),
+			"incoming_sequence": fmt.Sprint(batch.Sequence), "missing": fmt.Sprint(gap.Missing), "replay": fmt.Sprint(gap.Replay),
+		}}); err != nil {
+			return IngestResult{Gap: gap}, fmt.Errorf("%w: could not record the batch_gap coverage event: %v", shared.ErrSaturated, err)
+		}
+	}
+
+	result := IngestResult{EngagementID: batch.EngagementID, Gap: gap}
+	wasComplete := make(map[shared.ID]bool, len(items))
+	for _, item := range items {
+		if item.Detection.AgentID != batch.AgentID {
+			return result, fmt.Errorf("%w: v2 detection %s belongs to agent %s, not %s", shared.ErrForbidden, item.ID, item.Detection.AgentID, batch.AgentID)
+		}
+		state, found, err := s.provenance.Current(ctx, batch.EngagementID, item.ID)
+		if err != nil {
+			return result, fmt.Errorf("read v2 detection %s provenance: %w", item.ID, err)
+		}
+		wasComplete[item.ID] = found && state.Status == detectionprovenance.StatusComplete
+
+		pendingInput, err := (fleetagent.PendingDetectionV2{Batch: batch, Item: item}).Canonical()
+		if err != nil {
+			return result, fmt.Errorf("canonicalize pending v2 detection %s: %w", item.ID, err)
+		}
+		if err := admitProvenance(ctx, s.provenance, tenantID, batch.EngagementID, batch, item, pendingInput, s.clock); err != nil {
+			return result, err
+		}
+	}
+	completed, err := s.ReconcilePending(ctx, batch.EngagementID)
+	if err != nil {
+		return result, err
+	}
+	for _, item := range items {
+		state, found, err := s.provenance.Current(ctx, batch.EngagementID, item.ID)
+		if err != nil {
+			return result, fmt.Errorf("read v2 detection %s provenance: %w", item.ID, err)
+		}
+		if !found || state.Status != detectionprovenance.StatusComplete {
+			continue
+		}
+		if wasComplete[item.ID] {
+			result.Skipped = append(result.Skipped, item.ID)
+		} else {
+			result.SealedRecords = append(result.SealedRecords, item.ID)
+		}
+		result.EvidenceIDs = append(result.EvidenceIDs, state.EvidenceID)
+	}
+	if err := s.recordAuditOnce(ctx, "detection.v2_batch_reconciled", batch.AgentID.String(),
+		detectionBatchAuditKey("detection.v2_batch_reconciled", batch.AgentID, batch.EngagementID, batch.Sequence), map[string]string{
+			"engagement": batch.EngagementID.String(), "sequence": fmt.Sprint(batch.Sequence), "completed": fmt.Sprint(completed),
+		}); err != nil {
+		return result, fmt.Errorf("audit reconciled v2 detection batch: %w", err)
+	}
+	return result, nil
+}
+
+// ReconcilePending advances pending v2 provenance only when the original transport coordinates are now
+// durably present. It never rewrites a sealed envelope and deliberately cannot invent a missing commitment.
+func (s *Service) reconcileDetection(ctx context.Context, state detectionprovenance.Current) (bool, shared.ID, error) {
+	history, err := s.provenance.ListTransitions(ctx, state.EngagementID, state.DetectionID)
+	if err != nil {
+		return false, "", fmt.Errorf("list provenance for detection %s: %w", state.DetectionID, err)
+	}
+	var received *detectionprovenance.Transition
+	var sealed *detectionprovenance.Transition
+	telemetryDurable := false
+	commitmentPending := false
+	for i := range history {
+		transition := &history[i]
+		switch transition.Kind {
+		case detectionprovenance.Received:
+			received = transition
+		case detectionprovenance.TelemetryDurable:
+			telemetryDurable = true
+		case detectionprovenance.CommitmentPending:
+			commitmentPending = true
+		case detectionprovenance.CommitmentSealed:
+			sealed = transition
+		case detectionprovenance.Acknowledged:
+			return true, transition.EvidenceID, nil
+		case detectionprovenance.Broken, detectionprovenance.Expired:
+			return false, transition.EvidenceID, nil
+		}
+	}
+	if received == nil || len(state.PendingInput) == 0 {
+		return false, "", fmt.Errorf("%w: pending detection %s has no durable verified input", shared.ErrConflict, state.DetectionID)
+	}
+	pending, err := fleetagent.DecodePendingDetectionV2(state.PendingInput)
+	if err != nil {
+		if appendErr := appendProvenance(ctx, s.provenance, state.TenantID, state.EngagementID, state.DetectionID,
+			detectionprovenance.Broken, detectionprovenance.StatusBroken, state.EvidenceID, "durable pending input is invalid", s.clock); appendErr != nil {
+			return false, "", appendErr
+		}
+		return false, "", nil
+	}
+	key, err := s.keys.ResolveSigningKey(ctx, pending.Batch.AgentID, pending.Batch.KeyID)
+	if err != nil {
+		return false, "", fmt.Errorf("resolve signing key for pending detection %s: %w", state.DetectionID, err)
+	}
+	if key.Purpose != fleetagent.PurposeDetectionBatch || key.AgentID != pending.Batch.AgentID || key.KeyID != pending.Batch.KeyID {
+		if appendErr := appendProvenance(ctx, s.provenance, state.TenantID, state.EngagementID, state.DetectionID,
+			detectionprovenance.Broken, detectionprovenance.StatusBroken, state.EvidenceID, "durable pending input signing attribution is invalid", s.clock); appendErr != nil {
+			return false, "", appendErr
+		}
+		return false, "", nil
+	}
+	if err := fleetagent.VerifyBatchV2(key.PublicKey, pending.Batch); err != nil {
+		if appendErr := appendProvenance(ctx, s.provenance, state.TenantID, state.EngagementID, state.DetectionID,
+			detectionprovenance.Broken, detectionprovenance.StatusBroken, state.EvidenceID, "durable pending input signature is invalid", s.clock); appendErr != nil {
+			return false, "", appendErr
+		}
+		return false, "", nil
+	}
+	if pending.Batch.EngagementID != state.EngagementID || pending.Item.ID != state.DetectionID ||
+		pending.Batch.AgentID != received.AgentID || pending.Item.AssetID != received.AssetID ||
+		!sameTelemetryReferences(pending.Item.TelemetryRefs, received.TelemetryRefs) {
+		if err := appendProvenance(ctx, s.provenance, state.TenantID, state.EngagementID, state.DetectionID,
+			detectionprovenance.Broken, detectionprovenance.StatusBroken, state.EvidenceID, "durable pending input contradicts received attribution", s.clock); err != nil {
+			return false, "", err
+		}
+		return false, "", nil
+	}
+
+	status, err := s.telemetry.ResolveTelemetryReferences(ctx, received.AgentID, received.AssetID, pending.Item.RedactionPolicyDigest, received.TelemetryRefs)
+	if err != nil {
+		return false, "", fmt.Errorf("resolve causal telemetry for detection %s: %w", state.DetectionID, err)
+	}
+	switch status {
+	case ports.TelemetryReferencesMissing:
+		return false, "", nil
+	case ports.TelemetryReferencesContradictory:
+		if err := appendProvenance(ctx, s.provenance, state.TenantID, state.EngagementID, state.DetectionID,
+			detectionprovenance.Broken, detectionprovenance.StatusBroken, "", "causal telemetry attribution contradicts durable content", s.clock); err != nil {
+			return false, "", err
+		}
+		return false, "", nil
+	case ports.TelemetryReferencesDurable:
+	default:
+		return false, "", fmt.Errorf("%w: unknown telemetry reference status %q", shared.ErrValidation, status)
+	}
+	if !telemetryDurable {
+		if err := appendProvenance(ctx, s.provenance, state.TenantID, state.EngagementID, state.DetectionID,
+			detectionprovenance.TelemetryDurable, detectionprovenance.StatusPending, "", "causal telemetry durable", s.clock); err != nil {
+			return false, "", err
+		}
+	}
+	if sealed == nil {
+		if !commitmentPending {
+			if err := appendProvenance(ctx, s.provenance, state.TenantID, state.EngagementID, state.DetectionID,
+				detectionprovenance.CommitmentPending, detectionprovenance.StatusPending, "", "evidence commitment pending", s.clock); err != nil {
+				return false, "", err
+			}
+		}
+		envelope, err := fleetagent.NewDetectionEvidenceEnvelopeV2(state.TenantID, state.EngagementID, pending.Batch.AgentID,
+			pending.Batch.Sequence, pending.Batch.KeyID, pending.Item)
+		if err != nil {
+			return false, "", fmt.Errorf("build v2 detection %s evidence envelope: %w", state.DetectionID, err)
+		}
+		content, err := envelope.Canonical()
+		if err != nil {
+			return false, "", fmt.Errorf("canonicalize v2 detection %s evidence envelope: %w", state.DetectionID, err)
+		}
+		evidenceID, err := s.chain.SealOnce(ctx, state.EngagementID, evidenceKindDetection, state.DetectionID.String(), content, received.AgentID.String())
+		if err != nil {
+			return false, "", fmt.Errorf("seal v2 detection %s: %w", state.DetectionID, err)
+		}
+		if err := appendProvenance(ctx, s.provenance, state.TenantID, state.EngagementID, state.DetectionID,
+			detectionprovenance.CommitmentSealed, detectionprovenance.StatusPending, evidenceID, "evidence commitment sealed", s.clock); err != nil {
+			return false, "", err
+		}
+		sealed = &detectionprovenance.Transition{EvidenceID: evidenceID}
+	}
+	if sealed.EvidenceID.IsZero() {
+		return false, "", fmt.Errorf("%w: sealed detection %s has no evidence identity", shared.ErrConflict, state.DetectionID)
+	}
+	exists, err := s.records.HasDetection(ctx, state.EngagementID, state.DetectionID)
+	if err != nil {
+		return false, "", fmt.Errorf("check v2 detection %s: %w", state.DetectionID, err)
+	}
+	if !exists {
+		now := s.clock.Now().UTC()
+		record := detection.Record{
+			ID: state.DetectionID, TenantID: state.TenantID, EngagementID: state.EngagementID,
+			AssetID: pending.Item.AssetID, AgentID: pending.Batch.AgentID, Detection: pending.Item.Detection,
+			EvidenceID: sealed.EvidenceID, BatchSeq: pending.Batch.Sequence, RecordedAt: now,
+		}
+		if s.retention > 0 {
+			record.ExpiresAt = now.Add(s.retention)
+		}
+		if err := record.Validate(); err != nil {
+			return false, "", err
+		}
+		if err := s.records.AppendDetection(ctx, record); err != nil {
+			return false, "", fmt.Errorf("persist v2 detection %s: %w", state.DetectionID, err)
+		}
+	}
+	if err := appendProvenance(ctx, s.provenance, state.TenantID, state.EngagementID, state.DetectionID,
+		detectionprovenance.Acknowledged, detectionprovenance.StatusComplete, sealed.EvidenceID, "telemetry reconciliation complete", s.clock); err != nil {
+		return false, "", err
+	}
+	return true, sealed.EvidenceID, nil
+}
+
+func (s *Service) ReconcilePending(ctx context.Context, engagementID shared.ID) (int, error) {
+	if s.provenance == nil || s.telemetry == nil {
+		return 0, fmt.Errorf("%w: attributed detection reconciliation is not enabled", shared.ErrValidation)
+	}
+	if engagementID.IsZero() {
+		return 0, fmt.Errorf("%w: reconciliation requires an engagement", shared.ErrValidation)
+	}
+	current, err := s.provenance.ListCurrent(ctx, engagementID)
+	if err != nil {
+		return 0, fmt.Errorf("list pending detection provenance: %w", err)
+	}
+	completed := 0
+	for _, state := range current {
+		if state.Status != detectionprovenance.StatusPending {
+			continue
+		}
+		wasCompleted, _, err := s.reconcileDetection(ctx, state)
+		if err != nil {
+			return completed, err
+		}
+		if wasCompleted {
+			completed++
+		}
+	}
+	return completed, nil
+}
+
+// ReconcilePendingDetections repairs every pending detection in the tenant bound to ctx. It is safe
+// to call after each durable telemetry commit and during tenant-scoped startup/background repair.
+func (s *Service) ReconcilePendingDetections(ctx context.Context) (int, error) {
+	if s.provenance == nil || s.telemetry == nil {
+		return 0, fmt.Errorf("%w: attributed detection reconciliation is not enabled", shared.ErrValidation)
+	}
+	current, err := s.provenance.ListPending(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list pending detection provenance: %w", err)
+	}
+	completed := 0
+	for _, state := range current {
+		wasCompleted, _, err := s.reconcileDetection(ctx, state)
+		if err != nil {
+			return completed, err
+		}
+		if wasCompleted {
+			completed++
+		}
+	}
+	return completed, nil
+}
+
+// ReconciliationRunner repairs pending detection provenance across every persisted tenant.
+// Tenant discovery is global; each repair call is rebound to exactly one tenant context.
+// VerifyChain checks the engagement's evidence chain. When it is broken, the terminal provenance facts
+// are retained alongside the original failure so every downstream report remains blocked by that cause.
 func (s *Service) VerifyChain(ctx context.Context, engagementID shared.ID) error {
-	return s.chain.Verify(ctx, engagementID)
+	err := s.chain.Verify(ctx, engagementID)
+	if err == nil || s.provenance == nil {
+		return err
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID.IsZero() {
+		return err
+	}
+	current, listErr := s.provenance.ListCurrent(ctx, engagementID)
+	if listErr != nil {
+		return fmt.Errorf("verify detection chain: %w; list provenance after failure: %v", err, listErr)
+	}
+	for _, state := range current {
+		if state.Status == detectionprovenance.StatusBroken || state.Status == detectionprovenance.StatusExpired {
+			continue
+		}
+		if appendErr := appendProvenance(ctx, s.provenance, tenantID, engagementID, state.DetectionID,
+			detectionprovenance.Broken, detectionprovenance.StatusBroken, state.EvidenceID, "evidence chain verification failed", s.clock); appendErr != nil {
+			return fmt.Errorf("verify detection chain: %w; record broken provenance: %v", err, appendErr)
+		}
+	}
+	return err
 }
 
 // ListDetections returns the engagement's (non-expired) detection records, tenant-scoped by the store.
@@ -300,14 +651,95 @@ func (s *Service) Expire(ctx context.Context, engagementID shared.ID, actor, rea
 	if strings.TrimSpace(reason) == "" {
 		return 0, fmt.Errorf("%w: expiry must carry a reason", shared.ErrValidation)
 	}
-	expired, err := s.records.ExpireDetections(ctx, engagementID, s.clock.Now().UTC())
+
+	expired, err := s.records.ListExpiredDetections(ctx, engagementID, s.clock.Now().UTC())
 	if err != nil {
-		return 0, fmt.Errorf("expire detections: %w", err)
+		return 0, fmt.Errorf("list expired detections: %w", err)
 	}
-	s.recordAudit(ctx, "detection.expired", actor, map[string]string{
-		"engagement": engagementID.String(), "reason": reason, "expired": fmt.Sprint(len(expired)),
-	})
-	return len(expired), nil
+	if len(expired) == 0 {
+		return 0, nil
+	}
+	if s.provenance == nil {
+		return s.deleteExpiredProjections(ctx, engagementID, expired, actor, reason)
+	}
+
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID.IsZero() {
+		return 0, fmt.Errorf("%w: provenance expiry requires a tenant in context", shared.ErrValidation)
+	}
+	for _, detectionID := range expired {
+		current, found, err := s.provenance.Current(ctx, engagementID, detectionID)
+		if err != nil {
+			return 0, fmt.Errorf("read provenance before expiry: %w", err)
+		}
+		if !found {
+			return 0, fmt.Errorf("%w: detection %s has no durable provenance", shared.ErrConflict, detectionID)
+		}
+		if current.Status == detectionprovenance.StatusBroken {
+			return 0, fmt.Errorf("%w: detection %s provenance is broken", shared.ErrConflict, detectionID)
+		}
+		if current.Status != detectionprovenance.StatusExpired {
+			if err := appendProvenance(ctx, s.provenance, tenantID, engagementID, detectionID,
+				detectionprovenance.Expired, detectionprovenance.StatusExpired, current.EvidenceID, reason, s.clock); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return s.deleteExpiredProjections(ctx, engagementID, expired, actor, reason)
+}
+
+// deleteExpiredProjections audits the actor and reason BEFORE dropping any projection row.
+// The permanent chain and (when enabled) the Expired provenance tombstone already record the
+// lifecycle, but the human actor/reason attribution exists only here — so a failed audit must
+// stop the deletion rather than leave unattributable data loss behind. The key is derived from
+// the immutable expiry set, so an exact retry reuses the same line instead of duplicating it.
+func (s *Service) deleteExpiredProjections(ctx context.Context, engagementID shared.ID, ids []shared.ID, actor, reason string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	if err := s.audit.RecordOnce(ctx, ports.AuditEntry{
+		Actor: actor, Action: "detection.expired", Target: engagementID.String(), At: s.clock.Now().UTC(),
+		Metadata: map[string]string{
+			"idempotency_key": expiryAuditKey(engagementID, ids, actor, reason),
+			"engagement":      engagementID.String(), "reason": reason, "expired": fmt.Sprint(len(ids)),
+		},
+	}); err != nil {
+		return 0, fmt.Errorf("audit detection expiry before deletion: %w", err)
+	}
+	deleted := 0
+	for _, detectionID := range ids {
+		removed, err := s.records.DeleteDetection(ctx, engagementID, detectionID)
+		if err != nil {
+			return deleted, fmt.Errorf("delete expired detection %s: %w", detectionID, err)
+		}
+		if removed {
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
+// expiryAuditKey binds the audit line to the exact expiry set so a retry of the same
+// expiry repairs a missing line, while a later expiry of different detections records its own.
+func expiryAuditKey(engagementID shared.ID, ids []shared.ID, actor, reason string) string {
+	sorted := make([]string, 0, len(ids))
+	for _, id := range ids {
+		sorted = append(sorted, id.String())
+	}
+	sort.Strings(sorted)
+	h := sha256.New()
+	write := func(value string) {
+		_, _ = fmt.Fprintf(h, "%d:", len(value))
+		_, _ = h.Write([]byte(value))
+	}
+	write(engagementID.String())
+	write(strings.TrimSpace(actor))
+	write(strings.TrimSpace(reason))
+	write(fmt.Sprint(len(sorted)))
+	for _, id := range sorted {
+		write(id)
+	}
+	return "detection.expired:" + engagementID.String() + ":" + hex.EncodeToString(h.Sum(nil))
 }
 
 // membership asserts the supplied items are EXACTLY the signed batch membership — a multiset match, so a
@@ -337,11 +769,29 @@ func membership(batch fleetagent.AgentBatch, items []IngestItem) (map[shared.ID]
 	return refByID, nil
 }
 
-func (s *Service) recordAudit(ctx context.Context, action, actor string, meta map[string]string) {
-	if err := s.audit.Record(ctx, ports.AuditEntry{Actor: actor, Action: action, Target: meta["engagement"], At: s.clock.Now().UTC(), Metadata: meta}); err != nil {
-		// Audit is best-effort here (the seal already happened / is about to), but never swallowed silently
-		// at the type level: callers that require a guaranteed audit use the evidence chain, which is the
-		// authoritative record. A dropped audit line is logged by the audit adapter, not here.
-		_ = err
+func detectionBatchAuditKey(action string, agentID, engagementID shared.ID, sequence uint64) string {
+	return fmt.Sprintf("%s:%s:%s:%d", action, agentID, engagementID, sequence)
+}
+
+// recordAuditOnce makes successful custody outcomes retry-repairable without
+// weakening SealOnce or coupling the evidence chain to the audit store.
+func (s *Service) recordAuditOnce(ctx context.Context, action, actor, key string, meta map[string]string) error {
+	metadata := make(map[string]string, len(meta)+1)
+	for name, value := range meta {
+		metadata[name] = value
 	}
+	metadata["idempotency_key"] = key
+	return s.audit.RecordOnce(ctx, ports.AuditEntry{
+		Actor: actor, Action: action, Target: metadata["engagement"],
+		At: s.clock.Now().UTC(), Metadata: metadata,
+	})
+}
+
+// recordAudit is the best-effort path for rejected input that mutated no state.
+// Successful custody paths use recordAuditOnce and surface failures.
+func (s *Service) recordAudit(ctx context.Context, action, actor string, meta map[string]string) error {
+	return s.audit.Record(ctx, ports.AuditEntry{
+		Actor: actor, Action: action, Target: meta["engagement"],
+		At: s.clock.Now().UTC(), Metadata: meta,
+	})
 }

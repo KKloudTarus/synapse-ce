@@ -268,13 +268,15 @@ type Config struct {
 	// (backpressure → 503). ApprovalSweepInterval drives the prod timeout sweeper. MaxParallel
 	// caps in-flight plan nodes (P5). ReconConcurrency sizes the agent's dedicated recon pool.
 	// PromotionReconcileInterval schedules server-only recovery of confirmed promotions and audits.
-	AgentViaWorker             bool
-	AgentConcurrency           int
-	AgentQueueDepth            int
-	AgentMaxParallel           int
-	AgentReconConcurrency      int
-	ApprovalSweepInterval      time.Duration
-	PromotionReconcileInterval time.Duration
+	// FleetDetectionReconcileInterval schedules tenant-scoped repair of pending attributed detections.
+	AgentViaWorker                  bool
+	AgentConcurrency                int
+	AgentQueueDepth                 int
+	AgentMaxParallel                int
+	AgentReconConcurrency           int
+	ApprovalSweepInterval           time.Duration
+	PromotionReconcileInterval      time.Duration
+	FleetDetectionReconcileInterval time.Duration
 
 	// JudgmentsEnabled turns on the AI judgment lifecycle HTTP routes; off by default.
 	JudgmentsEnabled bool
@@ -812,19 +814,20 @@ func Load() Config {
 		AgentTokenBudget:     getint("SYNAPSE_AGENT_TOKEN_BUDGET", 0),
 		AgentMaxDuration:     getduration("SYNAPSE_AGENT_MAX_DURATION", 10*time.Minute),
 
-		DBMaxConns:                 getint("SYNAPSE_DB_MAX_CONNS", 32),
-		DBMinConns:                 getint("SYNAPSE_DB_MIN_CONNS", 0),
-		DBMaxConnLifetime:          getduration("SYNAPSE_DB_MAX_CONN_LIFETIME", time.Hour),
-		DBMaxConnIdleTime:          getduration("SYNAPSE_DB_MAX_CONN_IDLE", 30*time.Minute),
-		AgentViaWorker:             getbool("SYNAPSE_AGENT_VIA_WORKER", false),
-		AgentConcurrency:           getint("SYNAPSE_AGENT_CONCURRENCY", 8),
-		AgentQueueDepth:            getint("SYNAPSE_AGENT_QUEUE_DEPTH", 256),
-		AgentMaxParallel:           getint("SYNAPSE_AGENT_MAX_PARALLEL", 1), // serial by default; operators raise it to parallelize
-		AgentReconConcurrency:      getint("SYNAPSE_AGENT_RECON_CONCURRENCY", 3),
-		ApprovalSweepInterval:      getduration("SYNAPSE_APPROVAL_SWEEP_INTERVAL", time.Minute),
-		PromotionReconcileInterval: getduration("SYNAPSE_PROMOTION_RECONCILE_INTERVAL", time.Minute),
-		VerifierBaseURL:            getenv("SYNAPSE_VERIFIER_BASE_URL", getenv("SYNAPSE_LLM_BASE_URL", "http://localhost:20128/v1")),
-		VerifierAPIKey:             getenv("SYNAPSE_VERIFIER_API_KEY", getenv("SYNAPSE_LLM_API_KEY", "")),
+		DBMaxConns:                      getint("SYNAPSE_DB_MAX_CONNS", 32),
+		DBMinConns:                      getint("SYNAPSE_DB_MIN_CONNS", 0),
+		DBMaxConnLifetime:               getduration("SYNAPSE_DB_MAX_CONN_LIFETIME", time.Hour),
+		DBMaxConnIdleTime:               getduration("SYNAPSE_DB_MAX_CONN_IDLE", 30*time.Minute),
+		AgentViaWorker:                  getbool("SYNAPSE_AGENT_VIA_WORKER", false),
+		AgentConcurrency:                getint("SYNAPSE_AGENT_CONCURRENCY", 8),
+		AgentQueueDepth:                 getint("SYNAPSE_AGENT_QUEUE_DEPTH", 256),
+		AgentMaxParallel:                getint("SYNAPSE_AGENT_MAX_PARALLEL", 1), // serial by default; operators raise it to parallelize
+		AgentReconConcurrency:           getint("SYNAPSE_AGENT_RECON_CONCURRENCY", 3),
+		ApprovalSweepInterval:           getduration("SYNAPSE_APPROVAL_SWEEP_INTERVAL", time.Minute),
+		PromotionReconcileInterval:      getduration("SYNAPSE_PROMOTION_RECONCILE_INTERVAL", time.Minute),
+		FleetDetectionReconcileInterval: getduration("SYNAPSE_FLEET_DETECTION_RECONCILE_INTERVAL", time.Minute),
+		VerifierBaseURL:                 getenv("SYNAPSE_VERIFIER_BASE_URL", getenv("SYNAPSE_LLM_BASE_URL", "http://localhost:20128/v1")),
+		VerifierAPIKey:                  getenv("SYNAPSE_VERIFIER_API_KEY", getenv("SYNAPSE_LLM_API_KEY", "")),
 		VerifierProvider: normalizeProvider(getenv("SYNAPSE_VERIFIER_PROVIDER",
 			getenv("SYNAPSE_FP_TRIAGE_PROVIDER", getenv("SYNAPSE_LLM_PROVIDER", "openai-compatible")))),
 		VerifierModel: getenv("SYNAPSE_VERIFIER_MODEL", getenv("SYNAPSE_LLM_MODEL", "")),

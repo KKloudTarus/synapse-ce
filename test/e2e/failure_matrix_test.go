@@ -55,9 +55,9 @@ func (h *harness) buildSignedTelemetry(epoch, seq, prev uint64, envelopes ...tel
 	m := fleetagent.TelemetryBatchManifest{
 		ProtocolVersion: fleetagent.TelemetryProtocolVersion, SchemaVersion: telemetry.SchemaVersion,
 		BatchID: shared.ID("batch-fm"), AgentID: e2eAgent, HostID: e2eAgent, AssetID: e2eAsset, StreamID: e2eStream,
-		Position:         fleetagent.StreamPosition{Priority: fleetagent.PriorityP1, Epoch: epoch, Sequence: seq, Session: e2eSession, Boot: e2eBoot},
+		Position:         fleetagent.StreamPosition{Priority: fleetagent.PriorityP3, Epoch: epoch, Sequence: seq, Session: e2eSession, Boot: e2eBoot},
 		PreviousSequence: prev, EventTimeMin: minAt, EventTimeMax: maxAt,
-		ObservedCount: len(events), KeptCount: len(events), Events: refs,
+		ObservedCount: len(events), KeptCount: len(events), SamplingPolicyDigest: "test-policy-digest", Events: refs,
 		PayloadDigest: fleetagent.TelemetryPayloadDigest(refs), KeyID: h.telKey.KeyID,
 	}
 	m.Signature = fleetagent.SignTelemetryManifest(h.telPriv, m)
@@ -67,7 +67,7 @@ func (h *harness) buildSignedTelemetry(epoch, seq, prev uint64, envelopes ...tel
 // flakyTransport wraps a real transport store and fails the next N IngestBatchEvents calls with a
 // transient error, standing in for a control-plane outage / network partition during the store step.
 type flakyTransport struct {
-	ports.TelemetryTransportStore
+	ports.TelemetryAuditStore
 	failNext int
 }
 
@@ -76,7 +76,7 @@ func (f *flakyTransport) IngestBatchEvents(ctx context.Context, batch ports.Tele
 		f.failNext--
 		return 0, errors.New("transient control-plane outage")
 	}
-	return f.TelemetryTransportStore.IngestBatchEvents(ctx, batch)
+	return f.TelemetryAuditStore.IngestBatchEvents(ctx, batch)
 }
 
 // TestFailure_NetworkOutageRetryIsIdempotent: a transient store outage fails the batch fail-closed (no ACK
@@ -90,8 +90,8 @@ func TestFailure_NetworkOutageRetryIsIdempotent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("bind telemetry asset: %v", err)
 	}
-	flaky := &flakyTransport{TelemetryTransportStore: mem, failNext: 1}
-	svc, err := telemetryingest.NewService(flaky, h.keys, h.audit, h.clock)
+	flaky := &flakyTransport{TelemetryAuditStore: mem, failNext: 1}
+	svc, err := telemetryingest.NewService(flaky, h.keys, h.policies, h.audit, h.clock)
 	if err != nil {
 		t.Fatalf("ingest service: %v", err)
 	}

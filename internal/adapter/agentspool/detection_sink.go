@@ -35,7 +35,7 @@ func NewDetectionSink(durable ports.TelemetrySpool) (*DetectionSink, error) {
 // The sink defaults to privacy.DefaultPolicy(); an invalid policy is rejected so evidence is never shipped
 // with a broken (fail-open) redaction config.
 func (s *DetectionSink) SetRedactionPolicy(p privacy.Policy) error {
-	if err := p.Validate(); err != nil {
+	if err := p.ValidateSourceFloor(); err != nil {
 		return err
 	}
 	s.policy = p
@@ -58,16 +58,59 @@ func (s *DetectionSink) Emit(ctx context.Context, value detection.Detection) err
 	if err != nil {
 		return fmt.Errorf("encode detection for spool: %w", err)
 	}
+	return s.enqueue(ctx, value, payload, detectionContentType, 1)
+}
+
+// EmitAttributed creates a v2 spool record only for sources that possess actual transport facts.
+// The current DetectionSensor API does not expose those facts, so its ordinary Emit path remains v1
+// rather than fabricating causal coordinates from a host or timestamp.
+func (s *DetectionSink) EmitAttributed(ctx context.Context, value detection.Detection, attribution fleetagent.DetectionAttribution) error {
+	if err := value.Validate(); err != nil {
+		return err
+	}
+	value, _, err := privacy.ScrubDetection(value, s.policy)
+	if err != nil {
+		return fmt.Errorf("redact attributed detection evidence: %w", err)
+	}
+	attribution.RedactionPolicyDigest = privacy.RedactionPolicyDigest(s.policy)
+	if err := attribution.Validate(); err != nil {
+		return fmt.Errorf("validate attributed detection: %w", err)
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("encode attributed detection for spool: %w", err)
+	}
 	digest := sha256.Sum256(payload)
 	id := shared.ID("det_" + hex.EncodeToString(digest[:16]))
-	item := ports.SpoolItem{
-		Kind: ports.SpoolRecordDetection, Priority: fleetagent.PriorityP1,
-		EventID: id, EventClass: value.Class, ContentType: detectionContentType,
-		Payload: payload, ObservedAt: value.Observed.UTC(), MustNotShed: true,
-		SchemaVersion: 1,
+	spooled := fleetagent.DetectionSpoolPayload{Version: 2, Item: fleetagent.DetectionBatchItemV2{
+		ID: id, Detection: value, AssetID: value.HostID, TelemetryRefs: attribution.TelemetryRefs,
+		Rulepack: attribution.Rulepack, RedactionPolicyDigest: attribution.RedactionPolicyDigest,
+	}, ObservedAt: value.Observed.UTC()}
+	if err := spooled.Validate(); err != nil {
+		return err
 	}
+	encoded, err := json.Marshal(spooled)
+	if err != nil {
+		return fmt.Errorf("encode attributed detection spool payload: %w", err)
+	}
+	return s.enqueue(ctx, value, encoded, "application/vnd.synapse.detection+json;version=2", 2)
+}
+
+func (s *DetectionSink) enqueue(ctx context.Context, value detection.Detection, payload []byte, contentType string, schemaVersion int) error {
+	digest := sha256.Sum256(payload)
+	id := shared.ID("det_" + hex.EncodeToString(digest[:16]))
+	if schemaVersion == 2 {
+		var spooled fleetagent.DetectionSpoolPayload
+		if err := json.Unmarshal(payload, &spooled); err != nil {
+			return fmt.Errorf("decode attributed detection identifier: %w", err)
+		}
+		id = spooled.Item.ID
+	}
+	item := ports.SpoolItem{Kind: ports.SpoolRecordDetection, Priority: fleetagent.PriorityP1,
+		EventID: id, EventClass: value.Class, ContentType: contentType, Payload: payload,
+		ObservedAt: value.Observed.UTC(), MustNotShed: true, SchemaVersion: schemaVersion}
 	for {
-		if _, err = s.spool.Enqueue(ctx, item); !errors.Is(err, ports.ErrTelemetrySpoolSaturated) {
+		if _, err := s.spool.Enqueue(ctx, item); !errors.Is(err, ports.ErrTelemetrySpoolSaturated) {
 			return err
 		}
 		if err := waitForSpoolCapacity(ctx); err != nil {

@@ -159,7 +159,7 @@ func writeTelemetryJournalFile(path string, data []byte) error {
 		_ = os.Remove(tmpName)
 		return err
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := replaceJournalFile(tmpName, path); err != nil {
 		_ = os.Remove(tmpName)
 		return err
 	}

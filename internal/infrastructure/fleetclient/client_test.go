@@ -13,6 +13,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 func TestClientRoundTrips(t *testing.T) {
@@ -168,6 +169,50 @@ func TestDetectionKeyAndBatchWireShape(t *testing.T) {
 	}
 	if keyCalls != 1 || batchCalls != 1 {
 		t.Fatalf("key calls=%d batch calls=%d", keyCalls, batchCalls)
+	}
+}
+
+func TestDetectionBatchErrorTranslationIsEndpointSpecific(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     int
+		detection  bool
+		wantKeyErr bool
+	}{
+		{name: "detection forbidden", status: http.StatusForbidden, detection: true, wantKeyErr: true},
+		{name: "detection conflict", status: http.StatusConflict, detection: true},
+		{name: "heartbeat forbidden", status: http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "rejected", tc.status)
+			}))
+			t.Cleanup(srv.Close)
+			client := New(srv.URL, time.Second)
+
+			var err error
+			if tc.detection {
+				err = client.SendDetectionBatch(context.Background(), "token", fleetagent.AgentBatch{}, nil)
+			} else {
+				_, err = client.Heartbeat(context.Background(), "token", EnrolRequest{})
+			}
+			if err == nil {
+				t.Fatal("request unexpectedly succeeded")
+			}
+			if got := errors.Is(err, ports.ErrDetectionSigningKeyRejected); got != tc.wantKeyErr {
+				t.Fatalf("signing-key rejection = %t, want %t: %v", got, tc.wantKeyErr, err)
+			}
+			status, _, ok := HTTPStatus(err)
+			if tc.wantKeyErr {
+				if ok {
+					t.Fatalf("translated signing-key rejection still exposes HTTP status %d", status)
+				}
+				return
+			}
+			if !ok || status != tc.status {
+				t.Fatalf("HTTP status = %d, ok=%t, want %d: %v", status, ok, tc.status, err)
+			}
+		})
 	}
 }
 

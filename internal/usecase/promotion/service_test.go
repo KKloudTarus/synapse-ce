@@ -158,8 +158,11 @@ func (s *fakeDetectionStore) ListDetections(_ context.Context, _ shared.ID) ([]d
 func (s *fakeDetectionStore) LastBatchSequence(_ context.Context, _ shared.ID) (uint64, error) {
 	return 0, nil
 }
-func (s *fakeDetectionStore) ExpireDetections(_ context.Context, _ shared.ID, _ time.Time) ([]shared.ID, error) {
+func (s *fakeDetectionStore) ListExpiredDetections(_ context.Context, _ shared.ID, _ time.Time) ([]shared.ID, error) {
 	return nil, nil
+}
+func (s *fakeDetectionStore) DeleteDetection(_ context.Context, _, _ shared.ID) (bool, error) {
+	return false, nil
 }
 
 type fakeEngagementReader struct {

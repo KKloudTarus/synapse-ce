@@ -57,7 +57,29 @@ func TestTelemetryManifestValidate(t *testing.T) {
 		{"no payload digest", func(m *TelemetryBatchManifest) { m.PayloadDigest = "" }, true},
 		{"time max before min", func(m *TelemetryBatchManifest) { m.EventTimeMax = m.EventTimeMin.Add(-time.Hour) }, true},
 		{"negative count", func(m *TelemetryBatchManifest) { m.DroppedCount = -1 }, true},
-		{"kept+lost exceeds observed", func(m *TelemetryBatchManifest) { m.DroppedCount = 5 }, true},
+		{"all sampled with no kept events", func(m *TelemetryBatchManifest) {
+			m.ObservedCount = 3
+			m.KeptCount = 0
+			m.SampledOutCount = 3
+			m.Events = nil
+		}, false},
+		{"all dropped with no kept events", func(m *TelemetryBatchManifest) {
+			m.ObservedCount = 3
+			m.KeptCount = 0
+			m.SampledOutCount = 0
+			m.DroppedCount = 3
+			m.Events = nil
+		}, false},
+		{"accounting excess", func(m *TelemetryBatchManifest) { m.DroppedCount = 1 }, true},
+		{"accounting shortfall", func(m *TelemetryBatchManifest) { m.ObservedCount = 4 }, true},
+		{"sampled and dropped account exactly", func(m *TelemetryBatchManifest) {
+			m.ObservedCount = 5
+			m.SampledOutCount = 2
+			m.DroppedCount = 1
+		}, false},
+		{"truncation is independent of disposition", func(m *TelemetryBatchManifest) { m.TruncatedCount = 2 }, false},
+		{"truncated exceeds kept", func(m *TelemetryBatchManifest) { m.TruncatedCount = 3 }, true},
+		{"no sampling policy digest", func(m *TelemetryBatchManifest) { m.SamplingPolicyDigest = "" }, true},
 		{"events count != kept", func(m *TelemetryBatchManifest) { m.KeptCount = 3 }, true},
 		{"event missing id", func(m *TelemetryBatchManifest) { m.Events[0].ID = "" }, true},
 		{"event missing digest", func(m *TelemetryBatchManifest) { m.Events[0].Digest = "" }, true},
@@ -87,6 +109,32 @@ func TestTelemetryManifestMessageOrderIndependent(t *testing.T) {
 	// AgentSessionID is the position session.
 	if a.AgentSessionID() != "sess-1" {
 		t.Fatalf("AgentSessionID() = %q", a.AgentSessionID())
+	}
+}
+
+func TestSamplingPolicyIdentityExcludesRuntimeAccounting(t *testing.T) {
+	policyDigest, err := SamplingPolicyDigest("deterministic-hash", "policy-1", "seed-1", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	baseline := validManifest()
+	baseline.SamplingPolicyDigest = policyDigest
+	withRuntimeLoss := baseline
+	withRuntimeLoss.ObservedCount = 6
+	withRuntimeLoss.SampledOutCount = 2
+	withRuntimeLoss.TruncatedCount = 1
+	withRuntimeLoss.DroppedCount = 2
+
+	recomputed, err := SamplingPolicyDigest("deterministic-hash", "policy-1", "seed-1", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recomputed != policyDigest || withRuntimeLoss.SamplingPolicyDigest != policyDigest {
+		t.Fatalf("runtime accounting changed sampling policy identity: baseline=%q runtime=%q recomputed=%q", policyDigest, withRuntimeLoss.SamplingPolicyDigest, recomputed)
+	}
+	if string(TelemetryManifestMessage(baseline)) == string(TelemetryManifestMessage(withRuntimeLoss)) {
+		t.Fatal("signed manifest message must commit runtime sampled, truncated and dropped counts")
 	}
 }
 

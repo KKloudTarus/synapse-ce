@@ -30,6 +30,7 @@ func NewEngagementRepository(pool *pgxpool.Pool) *EngagementRepository {
 var _ ports.EngagementRepository = (*EngagementRepository)(nil)
 var _ ports.PromotionReconciliationScopeReader = (*EngagementRepository)(nil)
 var _ ports.VulnerabilityReconciliationTenantStore = (*EngagementRepository)(nil)
+var _ ports.DetectionReconciliationTenantStore = (*EngagementRepository)(nil)
 
 // Create inserts the engagement and its scope targets in one transaction.
 func (r *EngagementRepository) Create(ctx context.Context, e *engagement.Engagement) error {

@@ -111,6 +111,20 @@ func WithContextTenant(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) 
 	return WithTenant(ctx, pool, tenantID.String(), fn)
 }
 
+// contextTenantTx returns the transaction already bound by TenantTransactionRunner.
+// It permits consumer-level composite operations to reuse the same tenant-local
+// transaction across concrete repositories without exposing pgx through ports.
+func contextTenantTx(ctx context.Context, tenantID shared.ID) (pgx.Tx, bool, error) {
+	bound, ok := ctx.Value(tenantTransactionKey{}).(tenantTransaction)
+	if !ok {
+		return nil, false, nil
+	}
+	if bound.tenantID != tenantID.String() {
+		return nil, true, fmt.Errorf("%w: nested tenant transaction mismatch", shared.ErrValidation)
+	}
+	return bound.tx, true, nil
+}
+
 // CheckRLSRuntimeRole reports whether the role the pool connects as can actually be constrained by
 // Row Level Security. RLS is bypassed entirely by SUPERUSER and BYPASSRLS roles regardless of
 // FORCE ROW LEVEL SECURITY, so if the runtime role holds either attribute the whole tenant

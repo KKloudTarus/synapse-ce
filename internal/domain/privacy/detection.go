@@ -12,11 +12,9 @@ import (
 // scrubs — and, once sealed into the permanent evidence chain (A5), unredactably so. It returns a redacted
 // DEEP COPY (the caller's Detection, still held by the engine, is never mutated) and a Report.
 //
-// It applies the same field classifier as the telemetry Scrub, but only the redact/hash/drop/secret-scan
-// transforms — it does NOT length-bound, because detection.Event carries no per-field truncation-honesty
-// flag and a silent truncation would be dishonest; the evidence window is already bounded by the rule.
+// It applies the same field classifier and argv/path bounds as telemetry Scrub. Detection evidence has no\n// per-field truncation-honesty flags, but its evidence is already bounded by the rule window.
 func ScrubDetection(det detection.Detection, policy Policy) (detection.Detection, Report, error) {
-	if err := policy.Validate(); err != nil {
+	if err := policy.ValidateSourceFloor(); err != nil {
 		return detection.Detection{}, Report{}, fmt.Errorf("scrub detection: %w", err)
 	}
 	rep := Report{PolicyDigest: RedactionPolicyDigest(policy)}
@@ -45,19 +43,29 @@ func ScrubDetection(det detection.Detection, policy Policy) (detection.Detection
 			if commandIdentity == "" {
 				commandIdentity = ev.Process.Comm
 			}
+			// Bound the argv COUNT first: dropping trailing elements can only remove a credential
+			// from the output, never split one, and it caps the work the scan below has to do.
+			if policy.MaxArgCount > 0 && len(p.Args) > policy.MaxArgCount {
+				p.Args = p.Args[:policy.MaxArgCount]
+			}
 			// Slice-aware argv redaction (fresh slice — non-mutating): per-element scan + cross-element
 			// credential-flag → next-value redaction. The original Path/Comm supplies command identity so
-			// MySQL/MariaDB -pPASSWORD is covered even when the evidence argv omits argv[0].
-			scrubbedArgs, red, drop := policy.redactArgvForCommand(ev.Process.Args, commandIdentity)
+			// MySQL/MariaDB -pPASSWORD is covered even when the evidence argv omits argv[0]. Redaction
+			// runs before the per-element LENGTH bound below, so a bound cannot split a recognized
+			// credential and leave a fragment of it in the output.
+			scrubbedArgs, red, drop := policy.redactArgvForCommand(p.Args, commandIdentity)
 			rep.Redacted += red
 			rep.Dropped += drop
+			for i := range scrubbedArgs {
+				scrubbedArgs[i], _ = boundLen(scrubbedArgs[i], policy.MaxArgLen)
+			}
 			p.Args = scrubbedArgs
-			p.Path = apply(CategoryProcessPath, p.Path)
+			p.Path, _ = boundLen(apply(CategoryProcessPath, p.Path), policy.MaxPathLen)
 			p.Comm = apply(CategoryProcessComm, p.Comm)
 			e.Process = &p
 		case ev.File != nil:
 			f := *ev.File
-			f.Path = apply(CategoryFilePath, f.Path)
+			f.Path, _ = boundLen(apply(CategoryFilePath, f.Path), policy.MaxPathLen)
 			f.Comm = apply(CategoryFileComm, f.Comm)
 			e.File = &f
 		case ev.Network != nil:

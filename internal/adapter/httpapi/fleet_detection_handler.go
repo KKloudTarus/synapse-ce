@@ -20,7 +20,7 @@ const fleetDetectionCap = 8 << 20 // 8 MiB
 // contract, not the whole ledger. authAgentID is passed from the credential so the usecase can enforce
 // A0.1 server-authoritative identity (the batch cannot claim another agent).
 type fleetDetectionIngest interface {
-	Ingest(ctx context.Context, authAgentID shared.ID, batch fleetagent.AgentBatch, items []detectledger.IngestItem) (detectledger.IngestResult, error)
+	IngestV2(ctx context.Context, authAgentID shared.ID, batch fleetagent.AgentBatchV2, items []fleetagent.DetectionBatchItemV2) (detectledger.IngestResult, error)
 }
 
 // ingestDetections is the agent-plane endpoint (POST /api/v1/fleet/detections): an enrolled agent ships a
@@ -40,14 +40,20 @@ func (f *fleetRouter) ingestDetections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Batch fleetagent.AgentBatch     `json:"batch"`
-		Items []detectledger.IngestItem `json:"items"`
+		BatchV2 fleetagent.AgentBatchV2           `json:"batch_v2"`
+		ItemsV2 []fleetagent.DetectionBatchItemV2 `json:"items_v2"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, fleetDetectionCap)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid detection batch body"})
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, fleetDetectionCap))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid v2 detection batch body"})
 		return
 	}
-	res, err := f.detections.Ingest(r.Context(), agent.ID, req.Batch, req.Items)
+	if req.BatchV2.Context == "" || len(req.ItemsV2) == 0 {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "v2 detection batch and items are required"})
+		return
+	}
+	res, err := f.detections.IngestV2(r.Context(), agent.ID, req.BatchV2, req.ItemsV2)
 	if err != nil {
 		writeError(w, f.log, err)
 		return

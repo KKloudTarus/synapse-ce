@@ -29,6 +29,7 @@ func NewEngagementRepository() *EngagementRepository {
 var _ ports.EngagementRepository = (*EngagementRepository)(nil)
 var _ ports.PromotionReconciliationScopeReader = (*EngagementRepository)(nil)
 var _ ports.VulnerabilityReconciliationTenantStore = (*EngagementRepository)(nil)
+var _ ports.DetectionReconciliationTenantStore = (*EngagementRepository)(nil)
 var _ ports.VulnerabilityReconciliationEngagementStore = (*EngagementRepository)(nil)
 
 func (r *EngagementRepository) Create(_ context.Context, e *engagement.Engagement) error {

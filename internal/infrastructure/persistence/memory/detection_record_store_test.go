@@ -100,17 +100,26 @@ func TestDetectionStoreExpire(t *testing.T) {
 	_ = s.AppendDetection(ctxT("t1"), drRecord(t, "future", "t1", "e1", "agent:1", 2, time.Unix(5000, 0))) // not yet
 	_ = s.AppendDetection(ctxT("t1"), drRecord(t, "old", "t1", "e1", "agent:1", 3, time.Unix(2000, 0)))    // expired
 
-	// ListDetections hides the already-expired "old" row even before ExpireDetections runs (mirrors the
-	// Postgres `expires_at > now()` predicate).
+	// ListDetections hides the already-expired "old" row even before physical projection cleanup.
 	if got, _ := s.ListDetections(ctxT("t1"), "e1"); len(got) != 2 {
 		t.Fatalf("list must hide the expired row, got %d", len(got))
 	}
-	expired, err := s.ExpireDetections(ctxT("t1"), "e1", time.Unix(3000, 0))
+	expired, err := s.ListExpiredDetections(ctxT("t1"), "e1", time.Unix(3000, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(expired) != 1 || expired[0] != "old" {
-		t.Fatalf("only the past-retention record must expire, got %v", expired)
+		t.Fatalf("only the past-retention record must be eligible, got %v", expired)
+	}
+	if exists, _ := s.HasDetection(ctxT("t1"), "e1", "old"); !exists {
+		t.Fatal("listing expiry candidates must not delete the projection")
+	}
+	deleted, err := s.DeleteDetection(ctxT("t1"), "e1", "old")
+	if err != nil || !deleted {
+		t.Fatalf("delete exact expired projection: deleted=%v err=%v", deleted, err)
+	}
+	if deleted, err := s.DeleteDetection(ctxT("t1"), "e1", "old"); err != nil || deleted {
+		t.Fatalf("repeated deletion must be idempotent: deleted=%v err=%v", deleted, err)
 	}
 	got, _ := s.ListDetections(ctxT("t1"), "e1")
 	if len(got) != 2 {

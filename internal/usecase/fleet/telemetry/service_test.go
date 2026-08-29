@@ -101,40 +101,102 @@ func TestIngestBudgetOverflowIsTruncatedNotSampled(t *testing.T) {
 	}
 }
 
+func TestTelemetryLossRetryRequiresExactImmutableFacts(t *testing.T) {
+	svc, _, _ := newSvc(t, 2, 7*24*time.Hour, 30*24*time.Hour)
+	at := time.Unix(1_000_000, 123_456_789)
+	original := batch(1, 1,
+		procEventAt("ps", at),
+		procEventAt("top", at.Add(time.Second)),
+		procEventAt("ls", at.Add(2*time.Second)),
+	)
+	if _, err := svc.Ingest(tctx(), original); err != nil {
+		t.Fatalf("initial truncation: %v", err)
+	}
+	if _, err := svc.Ingest(tctx(), original); err != nil {
+		t.Fatalf("exact truncation retry: %v", err)
+	}
+
+	contradictory := original
+	contradictory.AssetID = "asset-2"
+	if _, err := svc.Ingest(tctx(), contradictory); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("contradictory telemetry loss retry error = %v, want conflict", err)
+	}
+
+	result, err := svc.Hunt(tctx(), ports.HuntQuery{HostID: "host-1", Class: detection.ClassProcess})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Losses) != 1 || result.Losses[0].AssetID != original.AssetID {
+		t.Fatalf("immutable loss changed after contradictory retry: %+v", result.Losses)
+	}
+}
+
 func TestIngestNeverShedClassRefusesOverflow(t *testing.T) {
-	// A never-shed class (privilege) that exceeds the budget is refused WHOLE (back-pressure) and recorded
-	// as Dropped — never truncated into a lossy prefix that hides a security-critical event.
-	svc, _, audit := newSvc(t, 2, 7*24*time.Hour, 30*24*time.Hour)
 	at := time.Unix(1_000_000, 0)
 	priv := func(comm string) detection.Event {
 		return detection.Event{Class: detection.ClassPrivilege, At: at, Host: "host-1",
 			Process: &detection.ProcessEvent{PID: 1, Comm: comm, Path: "/usr/bin/" + comm}}
 	}
-	b := ports.TelemetryBatch{TenantID: "t1", HostID: "host-1", AssetID: "asset-1", AgentID: "agent:1",
+	batch := ports.TelemetryBatch{TenantID: "t1", HostID: "host-1", AssetID: "asset-1", AgentID: "agent:1",
 		SchemaVersion: telemetryschema.Current, Class: detection.ClassPrivilege, Sequence: 1, SampleRate: 1,
 		Events: []detection.Event{priv("su"), priv("sudo"), priv("setuid")}}
-	rep, err := svc.Ingest(tctx(), b)
+
+	constrained, _, audit := newSvc(t, 2, 7*24*time.Hour, 30*24*time.Hour)
+	report, err := constrained.Ingest(tctx(), batch)
 	if !errors.Is(err, shared.ErrSaturated) {
-		t.Fatalf("a never-shed overflow must be refused with ErrSaturated, got %v", err)
+		t.Fatalf("protected overflow error = %v, want saturation", err)
 	}
-	if rep.Disposition != telemetry.Dropped || rep.Accepted != 0 || rep.Dropped != 3 {
-		t.Fatalf("a refused never-shed batch must be Dropped with 0 accepted and the WHOLE batch dropped, got %+v", rep)
+	if report.Disposition != telemetry.Complete || report.Accepted != 0 || report.Dropped != 0 {
+		t.Fatalf("backpressured protected batch falsely claimed a disposition: %+v", report)
 	}
-	if !audit.has("telemetry.drop") {
-		t.Error("a refused never-shed drop (the most severe loss) must be audited")
+	if audit.has("telemetry.drop") || audit.has("telemetry.overflow") {
+		t.Fatal("backpressure was falsely audited as observed data loss")
 	}
-	// Nothing was stored (refused whole), but the loss is queryable so the drop is never silent.
-	res, _ := svc.Hunt(tctx(), ports.HuntQuery{HostID: "host-1", Class: detection.ClassPrivilege})
-	if len(res.Events) != 0 {
-		t.Errorf("no event of a refused never-shed batch may be stored, got %d", len(res.Events))
+	result, err := constrained.Hunt(tctx(), ports.HuntQuery{HostID: "host-1", Class: detection.ClassPrivilege})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(res.Losses) != 1 || res.Losses[0].Disposition != telemetry.Dropped {
-		t.Fatalf("the drop must be a queryable first-class loss, got %+v", res.Losses)
+	if len(result.Events) != 0 || len(result.Losses) != 0 {
+		t.Fatalf("backpressured protected batch mutated durable telemetry: events=%d losses=%+v", len(result.Events), result.Losses)
 	}
-	// The loss must ALSO surface on an asset-pivot hunt (HuntAssetPivot) — otherwise a dropped window
-	// reads complete on exactly that acceptance pattern.
-	if ap, _ := svc.Hunt(tctx(), ports.HuntQuery{AssetID: "asset-1", Class: detection.ClassPrivilege}); len(ap.Losses) != 1 || ap.Complete {
-		t.Fatalf("an asset-pivot hunt must surface the drop and never be complete, got losses=%+v complete=%v", ap.Losses, ap.Complete)
+
+	retry, _, _ := newSvc(t, len(batch.Events), 7*24*time.Hour, 30*24*time.Hour)
+	report, err = retry.Ingest(tctx(), batch)
+	if err != nil {
+		t.Fatalf("retry after capacity relief: %v", err)
+	}
+	if report.Disposition != telemetry.Complete || report.Accepted != len(batch.Events) || report.Dropped != 0 {
+		t.Fatalf("protected retry did not accept the complete batch: %+v", report)
+	}
+	result, err = retry.Hunt(tctx(), ports.HuntQuery{HostID: "host-1", Class: detection.ClassPrivilege})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Events) != len(batch.Events) || len(result.Losses) != 0 {
+		t.Fatalf("protected retry events=%d losses=%+v, want complete batch and no loss", len(result.Events), result.Losses)
+	}
+}
+
+func TestIngestRejectsSamplingForProtectedClass(t *testing.T) {
+	svc, _, _ := newSvc(t, 10, 7*24*time.Hour, 30*24*time.Hour)
+	at := time.Unix(1_000_000, 0)
+	batch := ports.TelemetryBatch{
+		TenantID: "t1", HostID: "host-1", AssetID: "asset-1", AgentID: "agent:1",
+		SchemaVersion: telemetryschema.Current, Class: detection.ClassFile, Sequence: 1, SampleRate: 2,
+		Events: []detection.Event{{
+			Class: detection.ClassFile, At: at, Host: "host-1",
+			File: &detection.FileEvent{Path: "/etc/sudoers", Op: "write"},
+		}},
+	}
+	if _, err := svc.Ingest(tctx(), batch); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("sampled protected batch error = %v, want validation", err)
+	}
+	result, err := svc.Hunt(tctx(), ports.HuntQuery{HostID: "host-1", Class: detection.ClassFile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Events) != 0 || len(result.Losses) != 0 {
+		t.Fatalf("rejected sampled protected batch mutated durable telemetry: events=%d losses=%+v", len(result.Events), result.Losses)
 	}
 }
 
