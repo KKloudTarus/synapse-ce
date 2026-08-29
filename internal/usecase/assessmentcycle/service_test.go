@@ -155,11 +155,11 @@ func TestService_CreateRetestAndBranching(t *testing.T) {
 
 	// 1. Create Retest 1 from Root (which is selected head) -> Advances selected head to retest-1
 	m1, err := svc.CreateRetest(ctx, uc.CreateRetestInput{
-		TenantID:                 tenantID,
-		CycleID:                  cycle.ID,
+		TenantID:                tenantID,
+		CycleID:                 cycle.ID,
 		PredecessorAssessmentID: "root",
-		NewAssessmentID:          "retest-1",
-		Actor:                    "alice",
+		NewAssessmentID:         "retest-1",
+		Actor:                   "alice",
 	})
 	if err != nil {
 		t.Fatalf("create retest 1: %v", err)
@@ -175,11 +175,11 @@ func TestService_CreateRetestAndBranching(t *testing.T) {
 
 	// 2. Create Retest 2 from Retest 1 (selected head) -> Advances selected head to retest-2
 	m2, err := svc.CreateRetest(ctx, uc.CreateRetestInput{
-		TenantID:                 tenantID,
-		CycleID:                  cycle.ID,
+		TenantID:                tenantID,
+		CycleID:                 cycle.ID,
 		PredecessorAssessmentID: "retest-1",
-		NewAssessmentID:          "retest-2",
-		Actor:                    "alice",
+		NewAssessmentID:         "retest-2",
+		Actor:                   "alice",
 	})
 	if err != nil {
 		t.Fatalf("create retest 2: %v", err)
@@ -195,11 +195,11 @@ func TestService_CreateRetestAndBranching(t *testing.T) {
 
 	// 3. Create Retest Branch from Retest 1 (BRANCH - predecessor is NOT selected head)
 	mBranch, err := svc.CreateRetest(ctx, uc.CreateRetestInput{
-		TenantID:                 tenantID,
-		CycleID:                  cycle.ID,
+		TenantID:                tenantID,
+		CycleID:                 cycle.ID,
 		PredecessorAssessmentID: "retest-1",
-		NewAssessmentID:          "retest-branch",
-		Actor:                    "alice",
+		NewAssessmentID:         "retest-branch",
+		Actor:                   "alice",
 	})
 	if err != nil {
 		t.Fatalf("create retest branch: %v", err)
@@ -277,11 +277,11 @@ func TestService_SelectHeadAndReparent(t *testing.T) {
 
 	t.Run("reparent branch under root", func(t *testing.T) {
 		err := svc.ReparentWithinCycle(ctx, uc.ReparentInput{
-			TenantID:                    tenantID,
-			CycleID:                     cycle.ID,
-			AssessmentID:                "retest-branch",
+			TenantID:                   tenantID,
+			CycleID:                    cycle.ID,
+			AssessmentID:               "retest-branch",
 			NewPredecessorAssessmentID: "root",
-			Actor:                       "alice",
+			Actor:                      "alice",
 		})
 		if err != nil {
 			t.Fatalf("reparent: %v", err)
@@ -295,11 +295,11 @@ func TestService_SelectHeadAndReparent(t *testing.T) {
 	t.Run("cannot reparent causing cycle loop", func(t *testing.T) {
 		// Attempt to reparent retest-1 under retest-2 (retest-2 is a child of retest-1)
 		err := svc.ReparentWithinCycle(ctx, uc.ReparentInput{
-			TenantID:                    tenantID,
-			CycleID:                     cycle.ID,
-			AssessmentID:                "retest-1",
+			TenantID:                   tenantID,
+			CycleID:                    cycle.ID,
+			AssessmentID:               "retest-1",
 			NewPredecessorAssessmentID: "retest-2",
-			Actor:                       "alice",
+			Actor:                      "alice",
 		})
 		if !errors.Is(err, shared.ErrValidation) {
 			t.Fatalf("expected ErrValidation reparenting to descendant, got %v", err)
@@ -436,11 +436,11 @@ func TestService_PostgresParity(t *testing.T) {
 
 	// 2. Create Retest
 	retestMember, err := svc.CreateRetest(ctx, uc.CreateRetestInput{
-		TenantID:                 tenantID,
-		CycleID:                  cycle.ID,
+		TenantID:                tenantID,
+		CycleID:                 cycle.ID,
 		PredecessorAssessmentID: rootID,
-		NewAssessmentID:          retestID,
-		Actor:                    "alice",
+		NewAssessmentID:         retestID,
+		Actor:                   "alice",
 	})
 	if err != nil {
 		t.Fatalf("postgres create retest: %v", err)

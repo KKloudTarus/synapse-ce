@@ -361,7 +361,6 @@ func (r *AssessmentCycleRepository) LockCycleForUpdate(ctx context.Context, tena
 	return cycle, err
 }
 
-
 func scanAssessmentCycle(row rowScanner) (*assessmentcycle.AssessmentCycle, error) {
 	var (
 		tenantID, id, name, boundaryKind, status string

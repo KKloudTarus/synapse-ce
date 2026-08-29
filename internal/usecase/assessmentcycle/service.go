@@ -210,12 +210,12 @@ func (s *Service) CreateInitialCycle(ctx context.Context, in CreateInitialCycleI
 }
 
 type CreateRetestInput struct {
-	TenantID                 shared.ID
-	CycleID                  shared.ID
+	TenantID                shared.ID
+	CycleID                 shared.ID
 	PredecessorAssessmentID shared.ID
-	NewAssessmentID          shared.ID
-	ExpectedCycleVersion     int64
-	Actor                    string
+	NewAssessmentID         shared.ID
+	ExpectedCycleVersion    int64
+	Actor                   string
 }
 
 // CreateRetest atomically adds a new re-test member to an open AssessmentCycle and updates the cycle sequence.
@@ -335,13 +335,13 @@ func (s *Service) CreateRetest(ctx context.Context, in CreateRetestInput) (*asse
 }
 
 type ReparentInput struct {
-	TenantID                    shared.ID
-	CycleID                     shared.ID
-	AssessmentID                shared.ID
+	TenantID                   shared.ID
+	CycleID                    shared.ID
+	AssessmentID               shared.ID
 	NewPredecessorAssessmentID shared.ID
-	ExpectedMemberVersion       int64
-	ExpectedCycleVersion        int64
-	Actor                       string
+	ExpectedMemberVersion      int64
+	ExpectedCycleVersion       int64
+	Actor                      string
 }
 
 // ReparentWithinCycle atomically changes a re-test member's predecessor within the same cycle.
@@ -431,9 +431,9 @@ func (s *Service) ReparentWithinCycle(ctx context.Context, in ReparentInput) err
 				Action: "assessment_cycle.reparented",
 				Target: in.CycleID.String(),
 				Metadata: map[string]string{
-					"tenant_id":           tenantID.String(),
-					"assessment_id":       in.AssessmentID.String(),
-					"new_predecessor_id":  in.NewPredecessorAssessmentID.String(),
+					"tenant_id":          tenantID.String(),
+					"assessment_id":      in.AssessmentID.String(),
+					"new_predecessor_id": in.NewPredecessorAssessmentID.String(),
 				},
 				At: now,
 			})

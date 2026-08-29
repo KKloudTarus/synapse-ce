@@ -10,7 +10,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/migrations"
 )
 
-func TestMigration0117AssessmentCyclesSchema(t *testing.T) {
+func TestMigration0126AssessmentCyclesSchema(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -35,7 +35,7 @@ func TestMigration0117AssessmentCyclesSchema(t *testing.T) {
 		t.Fatalf("inspect assessment_cycles: %v", err)
 	}
 	if !cyclesExists {
-		t.Fatal("0117 did not create assessment_cycles table")
+		t.Fatal("0126 did not create assessment_cycles table")
 	}
 
 	if err := pool.QueryRow(ctx, `
@@ -46,7 +46,7 @@ func TestMigration0117AssessmentCyclesSchema(t *testing.T) {
 		t.Fatalf("inspect assessment_cycle_members: %v", err)
 	}
 	if !membersExists {
-		t.Fatal("0117 did not create assessment_cycle_members table")
+		t.Fatal("0126 did not create assessment_cycle_members table")
 	}
 
 	// Verify RLS is enabled and forced on both tables
@@ -65,7 +65,7 @@ func TestMigration0117AssessmentCyclesSchema(t *testing.T) {
 	}
 }
 
-func TestMigration0117RollbackAndReapply(t *testing.T) {
+func TestMigration0126RollbackAndReapply(t *testing.T) {
 	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
@@ -88,9 +88,9 @@ func TestMigration0117RollbackAndReapply(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 1. Rollback migration 0117 to 0116
-	if err := goose.DownTo(db, ".", 116); err != nil {
-		t.Fatalf("down to 116: %v", err)
+	// 1. Rollback migration 0126 to 0125
+	if err := goose.DownTo(db, ".", 125); err != nil {
+		t.Fatalf("down to 125: %v", err)
 	}
 
 	pool, err := Connect(ctx, dsn)
@@ -107,9 +107,9 @@ func TestMigration0117RollbackAndReapply(t *testing.T) {
 		t.Fatalf("tables still exist after rollback: cycles=%v, members=%v", cyclesExists, membersExists)
 	}
 
-	// 2. Re-apply migration 0117
-	if err := goose.UpTo(db, ".", 117); err != nil {
-		t.Fatalf("up to 117: %v", err)
+	// 2. Re-apply migration 0126
+	if err := goose.UpTo(db, ".", 126); err != nil {
+		t.Fatalf("up to 126: %v", err)
 	}
 
 	_ = pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='assessment_cycles')`).Scan(&cyclesExists)
