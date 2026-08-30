@@ -1693,7 +1693,7 @@ func main() {
 				incidentSvc,
 				riskscorebridge.NewExposure(exposureSvc),
 				riskscorebridge.AbstainingBehavior("behavior: baselineuc per-asset read path not yet wired"),
-				riskscorebridge.AbstainingCoverage(),
+				riskscorebridge.NewCoverage(coverageWindowStore),
 				scorer, auditLog, ids, func() time.Time { return clock.Now().UTC() },
 			)
 			if aerr != nil {
@@ -1702,7 +1702,7 @@ func main() {
 			}
 			triScore = assembler
 			router.SetIncidentRiskReassessor(assembler)
-			log.Warn("tri-score risk reassessment ENABLED (Threat + Exposure live; Behavior/Coverage abstaining until their producers are wired) - POST /api/v1/fleet/incidents/{id}/risk/reassess")
+			log.Warn("tri-score risk reassessment ENABLED (Threat + Exposure + Coverage live; Behavior abstaining until its producer is wired) - POST /api/v1/fleet/incidents/{id}/risk/reassess")
 		}
 		if cfg.FleetCorrelationEnabled {
 			// Correlation orchestration (#594 C2/C3): fold an engagement's sealed detections into incidents,

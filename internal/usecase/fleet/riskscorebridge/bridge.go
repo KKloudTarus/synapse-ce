@@ -5,19 +5,20 @@
 // into the CoverageVector, so a not-yet-wired factor lowers coverage/confidence and NEVER fabricates risk.
 //
 // This lets the deterministic Scorer run in production on the factors that ARE wired while the remaining
-// producers are swapped in as isolated follow-ups. Exposure is wired via NewExposure (over exposureuc);
-// Behavior and Coverage still abstain until their producers are integrated (Behavior → a baselineuc
-// per-asset read path, Coverage → coveragewindow). Each swap replaces one Abstaining* here with a real
-// bridge.
+// producers are swapped in as isolated follow-ups. Exposure is wired via NewExposure (over exposureuc) and
+// Coverage via NewCoverage (over the coverage-window store); Behavior still abstains until its producer (a
+// baselineuc per-asset read path) is integrated. Each swap replaces one Abstaining* here with a real bridge.
 package riskscorebridge
 
 import (
 	"context"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sensorstate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/exposureuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscoreuc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // ExposureProducer is the exposureuc surface the real Exposure bridge adapts. exposureuc.Service
@@ -56,14 +57,29 @@ func (a abstainingBehavior) BehaviorFor(context.Context, shared.ID) (riskscoreuc
 	return riskscoreuc.FactorInput{Scoreable: false, Reasons: []string{a.reason}}, nil
 }
 
-// abstainingCoverage reports no per-class detection coverage — used until coveragewindow is bridged. The
-// assembler then treats every class as an observation gap, which is the honest state when detection
-// coverage is not yet wired.
-type abstainingCoverage struct{}
+// CoverageWindowReader lists an asset's composed coverage windows (tenant-scoped via ctx).
+// ports.CoverageWindowStore satisfies it.
+type CoverageWindowReader interface {
+	ListCoverageWindows(ctx context.Context, q ports.CoverageWindowQuery) ([]sensorstate.CoverageWindow, error)
+}
 
-// AbstainingCoverage returns a CoverageSource that yields no class coverage (every class reads as a gap).
-func AbstainingCoverage() riskscoreuc.CoverageSource { return abstainingCoverage{} }
+type coverageBridge struct{ reader CoverageWindowReader }
 
-func (abstainingCoverage) ClassCoverageForAsset(context.Context, shared.ID) ([]detection.ClassCoverage, error) {
-	return nil, nil
+// NewCoverage bridges the real coverage-window store to the assembler's CoverageSource port: it returns
+// the per-class coverage of the asset's MOST RECENT composed window (windows are listed newest-first).
+// When the asset has no window yet, it returns nil — the assembler then reads every class as a gap, the
+// honest state when no coverage has been observed. This feeds the CoverageVector only, never Risk.
+func NewCoverage(reader CoverageWindowReader) riskscoreuc.CoverageSource {
+	return coverageBridge{reader: reader}
+}
+
+func (b coverageBridge) ClassCoverageForAsset(ctx context.Context, assetID shared.ID) ([]detection.ClassCoverage, error) {
+	windows, err := b.reader.ListCoverageWindows(ctx, ports.CoverageWindowQuery{AssetID: assetID, Limit: 1})
+	if err != nil {
+		return nil, err
+	}
+	if len(windows) == 0 {
+		return nil, nil
+	}
+	return windows[0].States, nil
 }

@@ -5,8 +5,11 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sensorstate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/exposureuc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 type fakeExposureProducer struct {
@@ -55,12 +58,32 @@ func TestAbstainingBehaviorAlwaysAbstains(t *testing.T) {
 	}
 }
 
-func TestAbstainingCoverageYieldsNoClasses(t *testing.T) {
-	classes, err := AbstainingCoverage().ClassCoverageForAsset(context.Background(), "asset-1")
+type fakeCoverageReader struct {
+	windows []sensorstate.CoverageWindow
+	err     error
+}
+
+func (f fakeCoverageReader) ListCoverageWindows(_ context.Context, _ ports.CoverageWindowQuery) ([]sensorstate.CoverageWindow, error) {
+	return f.windows, f.err
+}
+
+func TestNewCoverageReturnsLatestWindowStates(t *testing.T) {
+	states := []detection.ClassCoverage{{Class: detection.ClassProcess, HostID: "h1", State: detection.StateActive}}
+	cov, err := NewCoverage(fakeCoverageReader{windows: []sensorstate.CoverageWindow{{AssetID: "asset-1", States: states}}}).ClassCoverageForAsset(context.Background(), "asset-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(classes) != 0 {
-		t.Fatalf("abstaining coverage must yield no class coverage (all classes read as gaps), got %d", len(classes))
+	if len(cov) != 1 || cov[0].Class != detection.ClassProcess {
+		t.Fatalf("coverage must be the latest window's states: %+v", cov)
+	}
+}
+
+func TestNewCoverageEmptyWhenNoWindow(t *testing.T) {
+	cov, err := NewCoverage(fakeCoverageReader{}).ClassCoverageForAsset(context.Background(), "asset-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cov) != 0 {
+		t.Fatalf("no window must yield no coverage (all classes read as gaps), got %d", len(cov))
 	}
 }
