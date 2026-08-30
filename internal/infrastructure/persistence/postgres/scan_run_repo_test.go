@@ -375,3 +375,91 @@ func TestPostgresScanRunStore_TimestampMicrosecondEquality(t *testing.T) {
 		t.Errorf("CreatedAt timestamp mismatch: got %v, want %v", got.CreatedAt, now)
 	}
 }
+
+func TestPostgresScanRunStore_DirectSQLTriggerDefense(t *testing.T) {
+	ctx, pool := setupTestDB(t)
+	store := NewScanRunStore(pool)
+
+	tenantID := shared.ID(fmt.Sprintf("t-trig-%d", time.Now().UnixNano()))
+	engID := shared.ID(fmt.Sprintf("e-trig-%d", time.Now().UnixNano()))
+	runID := fmt.Sprintf("run-trig-%d", time.Now().UnixNano())
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	ensureTestTenantAndEngagement(t, ctx, pool, tenantID, engID, "", "")
+
+	target, _ := scanrun.CanonicalizeRepositoryTarget("https://github.com/org/repo", "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04")
+
+	run := scanrun.ScanRun{
+		TenantID:              tenantID,
+		EngagementID:          engID,
+		ID:                    runID,
+		Provenance:            scanrun.ProvenanceNative,
+		TerminalStatus:        scanrun.StatusBuilding,
+		ManifestSchemaVersion: 1,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+	}
+	if err := store.SaveScanRun(ctx, run); err != nil {
+		t.Fatalf("save scan run: %v", err)
+	}
+
+	lane := scanrun.Lane{
+		TenantID:                  tenantID,
+		EngagementID:              engID,
+		ScanRunID:                 runID,
+		LaneKey:                   "sast-lane",
+		Producer:                  "synapse-sast",
+		TerminalStatus:            scanrun.StatusSucceeded,
+		Target:                    target,
+		AuthoritativeFindingKinds: []string{"sast_vuln"},
+		StartedAt:                 now,
+		ManifestSchemaVersion:     1,
+		ManifestHash:              "hash1",
+		Versions: []scanrun.LaneVersion{
+			{VersionKind: scanrun.VersionScanner, Name: "semgrep", Version: "1.45.0"},
+		},
+		Stages: []scanrun.LaneStage{
+			{StageKey: "scan", Status: scanrun.StageSucceeded, StartedAt: now},
+		},
+	}
+	if err := store.SealScanRun(ctx, tenantID, runID, scanrun.StatusSucceeded, []scanrun.Lane{lane}, 1, "hash1", now); err != nil {
+		t.Fatalf("seal scan run: %v", err)
+	}
+
+	// 1. Direct raw SQL mutation of scan_runs header must trigger DB exception
+	err := WithTenant(ctx, pool, tenantID.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE scan_runs SET terminal_status = 'failed' WHERE tenant_id = $1 AND id = $2`, tenantID.String(), runID)
+		return err
+	})
+	if err == nil {
+		t.Fatal("expected DB trigger to reject direct UPDATE on sealed scan_runs header")
+	}
+
+	// 2. Direct raw SQL mutation of scan_run_lanes must trigger DB exception
+	err = WithTenant(ctx, pool, tenantID.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE scan_run_lanes SET producer = 'hacked' WHERE tenant_id = $1 AND scan_run_id = $2`, tenantID.String(), runID)
+		return err
+	})
+	if err == nil {
+		t.Fatal("expected DB trigger to reject direct UPDATE on child scan_run_lanes of sealed run")
+	}
+
+	// 3. Direct raw SQL deletion of scan_run_lane_versions must trigger DB exception
+	err = WithTenant(ctx, pool, tenantID.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `DELETE FROM scan_run_lane_versions WHERE tenant_id = $1 AND scan_run_id = $2`, tenantID.String(), runID)
+		return err
+	})
+	if err == nil {
+		t.Fatal("expected DB trigger to reject direct DELETE on scan_run_lane_versions of sealed run")
+	}
+
+	// 4. Direct raw SQL deletion of scan_run_lane_stages must trigger DB exception
+	err = WithTenant(ctx, pool, tenantID.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `DELETE FROM scan_run_lane_stages WHERE tenant_id = $1 AND scan_run_id = $2`, tenantID.String(), runID)
+		return err
+	})
+	if err == nil {
+		t.Fatal("expected DB trigger to reject direct DELETE on scan_run_lane_stages of sealed run")
+	}
+}
+
