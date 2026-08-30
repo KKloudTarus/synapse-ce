@@ -84,6 +84,7 @@ type Router struct {
 	incidentTriage         incidentTriager           // optional; nil ⇒ incident triage routes are not registered (#594 C5)
 	incidentRiskReassessor incidentRiskReassessor    // optional; nil ⇒ the tri-score reassess route is not registered (#594 C3/D/X5)
 	incidentCorrelator     incidentCorrelator        // optional; nil ⇒ the correlation route is not registered (#594 C2/C3)
+	endpointProcesses      endpointProcessStore      // optional; nil ⇒ the process-report routes are not registered (#594 B5)
 	sarif                  sarifIngester             // optional; nil ⇒ the third-party SARIF import route is not registered
 	importedFindings       sarifReader               // optional read side for imported findings
 	fleetRolloutAdmin      fleetRolloutService       // optional; nil ⇒ the operator rollout routes are not served
@@ -422,6 +423,13 @@ func (rt *Router) routes() *http.ServeMux {
 			// Correlation (#594 C2/C3): fold the engagement's sealed detections into incidents (auto-scoring
 			// each when tri-score is wired). Operator action (creates incidents), actor from the principal.
 			mux.HandleFunc("POST /api/v1/fleet/engagements/{id}/correlate", rt.authz(userdom.PermOperate, rt.correlateEngagement))
+		}
+		if rt.endpointProcesses != nil {
+			// B5 per-host running-process projection (#594): report the processes running on a host asset
+			// (feeds Exposure's running-vs-installed refinement), and read them back. Report = PermOperate
+			// (writes the projection); read = PermView. Tenant + asset are server-side, not request fields.
+			mux.HandleFunc("POST /api/v1/fleet/assets/{id}/processes", rt.authz(userdom.PermOperate, rt.reportEndpointProcesses))
+			mux.HandleFunc("GET /api/v1/fleet/assets/{id}/processes", rt.authz(userdom.PermView, rt.listEndpointProcesses))
 		}
 	}
 	if rt.projects != nil {

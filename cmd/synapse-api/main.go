@@ -290,6 +290,7 @@ func main() {
 	} // #611 append-only signed P0 health history
 	var privacyPolicyStore ports.PrivacyPolicyAuditStore // #611 immutable source-redaction policy history
 	var coverageWindowStore ports.CoverageWindowStore    // #611 immutable coverage-window revisions
+	var endpointProcessStore ports.EndpointProcessStore  // #594 B5 per-host running-process projection
 	var telemetrySvc *telemetryingest.Service            // wired to detection repair after both services exist
 	var detectSvc *detectledger.Service                  // tenant-scoped startup and periodic provenance repair
 	var detectionRunner *detectledger.ReconciliationRunner
@@ -492,6 +493,7 @@ func main() {
 			log.Error("postgres coverage-window store init failed", "err", err)
 			os.Exit(1)
 		}
+		endpointProcessStore = postgres.NewEndpointProcessRepository(pool)
 		fleetRolloutStore = postgres.NewFleetRolloutRepository(pool)
 		leaderStore = postgres.NewLeaderStore(pool)
 		// SECURITY (#431 req 6, #432, #409): the fleet_* tables are RLS-protected, but RLS is a
@@ -546,6 +548,7 @@ func main() {
 		privacyPolicyStore = memory.NewPrivacyPolicyStore()
 		sensorStateStore = memory.NewSensorStateStore()
 		coverageWindowStore = memory.NewCoverageWindowStore()
+		endpointProcessStore = memory.NewEndpointProcessStore()
 		fleetRolloutStore = memory.NewFleetRolloutStore()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
@@ -1655,6 +1658,7 @@ func main() {
 			os.Exit(1)
 		}
 		router.SetIncidentTriage(triageSvc)
+		router.SetEndpointProcesses(endpointProcessStore) // #594 B5: running-process report/read + Exposure running-vs-installed
 		if cfg.DBDSN != "" {
 			log.Info("incident read + analyst-triage surface ENABLED (durable; append-only event log; tenant-scoped; RBAC-gated)")
 		} else {
@@ -1675,11 +1679,20 @@ func main() {
 				log.Error("tri-score scorer init failed", "err", serr)
 				os.Exit(1)
 			}
-			// Exposure (X5, #634): the real producer over the SCA stores — installed-based exposure from the
-			// asset's open vulnerability occurrences + their risk. Running-vs-installed refinement (the B5
-			// process store) is a further follow-up; NewReader (no runtime) scores installed exposures and
-			// records that running-vs-installed precision is limited, an honest coverage note.
-			exposureReader, xrerr := exposurereader.NewReader(businessAssetStore, vulnerabilityOccurrences, vulnerabilityAssessments)
+			// Exposure (X5, #634): the real producer over the SCA stores. When the component inventory
+			// exposes ListCurrentComponentsByEngagement, wire the RUNNING-vs-installed reader (B5): it marks
+			// which vulnerable components are actually running (endpointProcessStore) so exposure reflects
+			// runtime reachability, not just installed presence. Otherwise fall back to installed-only, which
+			// records that running-vs-installed precision is limited (an honest coverage note, never a Risk
+			// discount).
+			var exposureReader *exposurereader.Reader
+			var xrerr error
+			if componentLister, ok := vulnerabilityInventory.(exposurereader.ComponentLister); ok {
+				exposureReader, xrerr = exposurereader.NewReaderWithRuntime(businessAssetStore, vulnerabilityOccurrences, vulnerabilityAssessments, endpointProcessStore, componentLister)
+				log.Info("exposure: running-vs-installed ENABLED (B5 process store + component inventory)")
+			} else {
+				exposureReader, xrerr = exposurereader.NewReader(businessAssetStore, vulnerabilityOccurrences, vulnerabilityAssessments)
+			}
 			if xrerr != nil {
 				log.Error("exposure reader init failed", "err", xrerr)
 				os.Exit(1)
