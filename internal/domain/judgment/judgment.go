@@ -30,12 +30,13 @@ const (
 	CapCorrelation      Capability = "correlation"       // NOT gated (a cross-check disagreement; human-acknowledged, never auto-resolved)
 	CapPromotion        Capability = "promotion"         // gated (cross-pillar priority change, distinct-verifier only)
 	CapVexJustification Capability = "vex_justification" // gated (AI-proposed OpenVEX not_affected justification, human-ratified)
+	CapInvestigation    Capability = "investigation"     // NOT gated (E: an AI investigation HYPOTHESIS about an incident; advisory, human-accepted, never auto-acted)
 )
 
 // Valid reports whether c is a known capability.
 func (c Capability) Valid() bool {
 	switch c {
-	case CapReachability, CapSAST, CapDAST, CapCritique, CapRiskNarrative, CapThreat, CapCorrelation, CapPromotion, CapVexJustification:
+	case CapReachability, CapSAST, CapDAST, CapCritique, CapRiskNarrative, CapThreat, CapCorrelation, CapPromotion, CapVexJustification, CapInvestigation:
 		return true
 	}
 	return false
@@ -80,12 +81,13 @@ const (
 	SubjectVulnerability SubjectKind = "vulnerability"
 	SubjectEngagement    SubjectKind = "engagement"
 	SubjectDataFlow      SubjectKind = "data_flow" // a threat-model data flow (a boundary crossing)
+	SubjectIncident      SubjectKind = "incident"  // a fleet incident (E: an AI investigation hypothesis is about one)
 )
 
 // Valid reports whether k is a known subject kind.
 func (k SubjectKind) Valid() bool {
 	switch k {
-	case SubjectFinding, SubjectComponent, SubjectVulnerability, SubjectEngagement, SubjectDataFlow:
+	case SubjectFinding, SubjectComponent, SubjectVulnerability, SubjectEngagement, SubjectDataFlow, SubjectIncident:
 		return true
 	}
 	return false

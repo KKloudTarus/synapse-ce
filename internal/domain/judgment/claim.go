@@ -460,6 +460,69 @@ func (c ThreatClaim) Validate() error {
 	return nil
 }
 
+// InvestigationTactic is the closed hypothesis category for an incident — an ATT&CK-style tactic token,
+// never free prose. It is the ONLY semantic payload of an AI investigation hypothesis.
+type InvestigationTactic string
+
+const (
+	TacticLateralMovement     InvestigationTactic = "lateral_movement"
+	TacticDataExfiltration    InvestigationTactic = "data_exfiltration"
+	TacticPrivilegeEscalation InvestigationTactic = "privilege_escalation"
+	TacticCredentialAccess    InvestigationTactic = "credential_access"
+	TacticPersistence         InvestigationTactic = "persistence"
+	TacticCommandAndControl   InvestigationTactic = "command_and_control"
+	TacticDefenseEvasion      InvestigationTactic = "defense_evasion"
+	TacticExecution           InvestigationTactic = "execution"
+	TacticBenign              InvestigationTactic = "benign" // the hypothesis that the incident is NOT malicious
+)
+
+// Valid reports whether t is a known tactic (fail-closed).
+func (t InvestigationTactic) Valid() bool {
+	switch t {
+	case TacticLateralMovement, TacticDataExfiltration, TacticPrivilegeEscalation, TacticCredentialAccess,
+		TacticPersistence, TacticCommandAndControl, TacticDefenseEvasion, TacticExecution, TacticBenign:
+		return true
+	}
+	return false
+}
+
+// InvestigationClaim is an AI-proposed HYPOTHESIS about an incident (#594 E): a single closed tactic
+// category, a confidence, and structured driver tokens (the signals that support it — never free prose).
+// It is propose-only and NOT gated: it never proves anything or drives a response on its own; it is
+// advisory context a human analyst accepts or rejects. The LLM proposes; a human decides.
+type InvestigationClaim struct {
+	IncidentID shared.ID           `json:"incident_id"`
+	Tactic     InvestigationTactic `json:"tactic"`
+	Confidence int                 `json:"confidence"` // 0..100
+	Drivers    []string            `json:"drivers"`    // closed signal tokens (e.g. "new_exec_paths", "network_fanout_spike"), no prose
+}
+
+// Capability identifies this claim's brain.
+func (InvestigationClaim) Capability() Capability { return CapInvestigation }
+
+// Validate enforces the closed tactic vocabulary, a bounded confidence, an incident reference, and
+// token-only drivers (no free prose ever reaches the record).
+func (c InvestigationClaim) Validate() error {
+	if c.IncidentID.IsZero() {
+		return fmt.Errorf("%w: investigation hypothesis requires an incident id", shared.ErrValidation)
+	}
+	if !c.Tactic.Valid() {
+		return fmt.Errorf("%w: investigation tactic must be a known ATT&CK-style token, got %q", shared.ErrValidation, c.Tactic)
+	}
+	if c.Confidence < 0 || c.Confidence > 100 {
+		return fmt.Errorf("%w: investigation confidence must be 0..100, got %d", shared.ErrValidation, c.Confidence)
+	}
+	if len(c.Drivers) > maxRiskDrivers {
+		return fmt.Errorf("%w: investigation hypothesis has too many drivers (%d > %d)", shared.ErrValidation, len(c.Drivers), maxRiskDrivers)
+	}
+	for _, d := range c.Drivers {
+		if len(d) > 64 || !driverRE.MatchString(d) {
+			return fmt.Errorf("%w: investigation driver %q must be a token (no free text)", shared.ErrValidation, d)
+		}
+	}
+	return nil
+}
+
 // CorrelationClaim is a cross-check DISAGREEMENT: on a vulnerability, which detection
 // sources reported it (Reporters) and which RAN but did not (Missing). It is the deterministic, descriptive
 // record that a human acknowledges – NEVER auto-resolved (the disagreement is itself the signal). Both lists
@@ -741,6 +804,12 @@ func UnmarshalClaim(data []byte) (Claim, error) {
 			return nil, err
 		}
 		c = vc
+	case CapInvestigation:
+		var ic InvestigationClaim
+		if err := strictDecode(env.Claim, &ic); err != nil {
+			return nil, err
+		}
+		c = ic
 	default:
 		// In the Valid() vocabulary but no decoder yet – registered alongside the capability.
 		return nil, fmt.Errorf("%w: no claim decoder for capability %q", shared.ErrValidation, env.Capability)
