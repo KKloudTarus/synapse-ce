@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -29,6 +30,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/correlation"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/riskassessment"
@@ -111,6 +113,7 @@ import (
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
 	clusterinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/clusterinventory"
+	correlationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/correlationuc"
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
 	coveragewindow "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coveragewindow"
 	detectledger "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectledger"
@@ -1657,12 +1660,16 @@ func main() {
 		} else {
 			log.Warn("incident read + analyst-triage surface ENABLED but NOT DURABLE - incidents and their triage history live in memory and are lost on restart; configure SYNAPSE_DB_DSN for a durable store")
 		}
+		// The tri-score assembler is shared: it backs both the manual reassess route and the auto-reassess
+		// pass in correlation. It stays nil unless tri-score is enabled, in which case correlation passes it
+		// as a real reassessor (a nil *Service must NOT be boxed into the interface, so guard on the pointer).
+		var triScore *riskscoreuc.Service
 		if cfg.TriScoreReassessEnabled {
 			// Tri-score assembler (#594 C3/D/X5): the deterministic Scorer, run live on an incident's factors.
 			// Threat comes from the incident's own correlated severity (DefaultPolicy treats it as dominant);
-			// Exposure/Behavior/Coverage abstain honestly until their producers (exposureuc / baselineuc /
-			// coveragewindow) are wired — an abstaining factor contributes 0 and records its reason in the
-			// CoverageVector, never fabricating risk. incidentSvc satisfies the assembler's IncidentStore.
+			// Exposure is the real X5 producer; Behavior/Coverage abstain honestly until their producers
+			// (baselineuc / coveragewindow) are wired — an abstaining factor contributes 0 and records its
+			// reason in the CoverageVector, never fabricating risk. incidentSvc satisfies the IncidentStore.
 			scorer, serr := riskassessment.NewScorer(riskassessment.DefaultPolicy())
 			if serr != nil {
 				log.Error("tri-score scorer init failed", "err", serr)
@@ -1693,8 +1700,25 @@ func main() {
 				log.Error("tri-score assembler init failed", "err", aerr)
 				os.Exit(1)
 			}
+			triScore = assembler
 			router.SetIncidentRiskReassessor(assembler)
 			log.Warn("tri-score risk reassessment ENABLED (Threat + Exposure live; Behavior/Coverage abstaining until their producers are wired) - POST /api/v1/fleet/incidents/{id}/risk/reassess")
+		}
+		if cfg.FleetCorrelationEnabled {
+			// Correlation orchestration (#594 C2/C3): fold an engagement's sealed detections into incidents,
+			// and — when tri-score is enabled — auto-score each freshly created incident. This is the caller
+			// that turns detection ingest → incident → risk into a running pipeline.
+			var reassessor correlationuc.RiskReassessor
+			if triScore != nil {
+				reassessor = triScore
+			}
+			corr, cerr := correlationuc.NewService(detectionRecordStore, incidentSvc, reassessor, correlation.Config{Window: cfg.FleetCorrelationWindow, MaxPerIncident: cfg.FleetCorrelationMaxPerIncident}, auditLog, func() time.Time { return clock.Now().UTC() })
+			if cerr != nil {
+				log.Error("correlation service init failed", "err", cerr)
+				os.Exit(1)
+			}
+			router.SetIncidentCorrelator(corr)
+			log.Warn("fleet correlation ENABLED (detections -> incidents; auto-reassess=" + strconv.FormatBool(triScore != nil) + ") - POST /api/v1/fleet/engagements/{id}/correlate")
 		}
 	}
 

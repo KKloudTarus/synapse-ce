@@ -9,6 +9,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/correlationuc"
 )
 
 // incidentReader is the read side of the Phase-C incident store this API surfaces (#594 C7):
@@ -39,8 +40,18 @@ type incidentRiskReassessor interface {
 	Reassess(ctx context.Context, actor string, incidentID shared.ID) (incident.Incident, error)
 }
 
+// incidentCorrelator folds an engagement's detections into incidents (#594 C2/C3), auto-scoring each when
+// a tri-score reassessor is wired. correlationuc.Service satisfies it. The actor is the FIRST arg after
+// ctx: the server-side authenticated principal.
+type incidentCorrelator interface {
+	CorrelateEngagement(ctx context.Context, actor string, engagementID shared.ID) (correlationuc.Result, error)
+}
+
 // SetIncidents wires the incident read surface (nil ⇒ the routes are not registered).
 func (rt *Router) SetIncidents(r incidentReader) { rt.incidents = r }
+
+// SetIncidentCorrelator wires the correlation surface (nil ⇒ the route is not registered).
+func (rt *Router) SetIncidentCorrelator(c incidentCorrelator) { rt.incidentCorrelator = c }
 
 // SetIncidentRiskReassessor wires the tri-score reassessment surface (nil ⇒ the route is not registered).
 func (rt *Router) SetIncidentRiskReassessor(r incidentRiskReassessor) { rt.incidentRiskReassessor = r }
@@ -193,6 +204,24 @@ func (rt *Router) changeIncidentStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, inc)
+}
+
+// correlationResponse renders a correlation pass: the incidents created + how many were tri-scored.
+type correlationResponse struct {
+	Created        []incident.Incident `json:"created"`
+	Reassessed     int                 `json:"reassessed"`
+	ReassessFailed int                 `json:"reassess_failed"`
+}
+
+// correlateEngagement folds the engagement's detections into incidents (auto-scoring each when tri-score
+// is wired) and returns the incidents created this pass. No request body: detections are read server-side.
+func (rt *Router) correlateEngagement(w http.ResponseWriter, r *http.Request) {
+	res, err := rt.incidentCorrelator.CorrelateEngagement(incidentTenantContext(r), PrincipalFrom(r.Context()), shared.ID(r.PathValue("id")))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, correlationResponse{Created: res.Created, Reassessed: res.Reassessed, ReassessFailed: res.ReassessFailed})
 }
 
 // reassessIncidentRisk runs the tri-score assembler for the incident and returns the updated incident

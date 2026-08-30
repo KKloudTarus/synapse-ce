@@ -235,6 +235,9 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED` | `false` | Accept signed agent telemetry batches (A3, `POST /api/v1/fleet/telemetry`); verified + idempotently sequenced server-side. |
 | `SYNAPSE_FLEET_DETECTION_INGEST_ENABLED` | `false` | Accept signed agent detection batches (A4, `POST /api/v1/fleet/detections`); sealed once into the evidence chain. |
 | `SYNAPSE_FLEET_DETECTION_RECONCILE_INTERVAL` | `1m` | How often the tenant-scoped reconciler repairs pending attributed detections. |
+| `SYNAPSE_FLEET_CORRELATION_ENABLED` | `false` | Correlation orchestration (`POST /api/v1/fleet/engagements/{id}/correlate`): folds an engagement's sealed detections into incidents, auto-scoring each when tri-score is enabled. |
+| `SYNAPSE_FLEET_CORRELATION_WINDOW` | `30m` | Session gap for correlation — detections on one (asset, host) more than this apart start a new incident. |
+| `SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT` | `100` | Cap on detections one incident reflects individually before a storm is suppressed to a single note. |
 | `SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED` | `false` | Serve agent signing-key registration (`POST /api/v1/fleet/keys`) + operator key list/revoke (A4, A0.2). |
 | `SYNAPSE_FLEET_STALE_AFTER` | `10m` | An agent older than this reads as stale (`<=0` disables the staleness view). |
 | `SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET` | `24h` | Coverage freshness SLO. |

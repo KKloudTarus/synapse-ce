@@ -7,6 +7,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/correlationuc"
 )
 
 // fakeReassessor records the actor + id it was called with and returns a fixed incident.
@@ -67,5 +68,44 @@ func TestReassessRouteAbsentWhenUnwired(t *testing.T) {
 	rec := incidentReq(rt.routes(), "consultant", http.MethodPost, "/api/v1/fleet/incidents/inc-1/risk/reassess", "")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unwired reassess route must 404, got %d", rec.Code)
+	}
+}
+
+// fakeCorrelator records the actor + engagement id and returns a fixed result.
+type fakeCorrelator struct {
+	gotActor string
+	gotEng   shared.ID
+	calls    int
+}
+
+func (f *fakeCorrelator) CorrelateEngagement(_ context.Context, actor string, eng shared.ID) (correlationuc.Result, error) {
+	f.calls++
+	f.gotActor = actor
+	f.gotEng = eng
+	return correlationuc.Result{Created: []incident.Incident{{ID: "inc-new"}}, Reassessed: 1}, nil
+}
+
+func TestCorrelateEngagementRBACAndActor(t *testing.T) {
+	// readonly is forbidden (creates incidents → PermOperate); consultant is allowed + actor is the principal.
+	f := &fakeCorrelator{}
+	rt := &Router{log: discardLog(), incidents: &fakeIncidentStore{}, incidentCorrelator: f}
+	mux := rt.routes()
+
+	if rec := incidentReq(mux, "readonly", http.MethodPost, "/api/v1/fleet/engagements/eng-1/correlate", ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("readonly must be forbidden, got %d", rec.Code)
+	}
+	rec := incidentReq(mux, "consultant", http.MethodPost, "/api/v1/fleet/engagements/eng-7/correlate", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("consultant correlate: got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if f.calls != 1 || f.gotActor != "analyst-1" || f.gotEng != "eng-7" {
+		t.Fatalf("actor/engagement not threaded: calls=%d actor=%q eng=%q", f.calls, f.gotActor, f.gotEng)
+	}
+}
+
+func TestCorrelateRouteAbsentWhenUnwired(t *testing.T) {
+	rt := &Router{log: discardLog(), incidents: &fakeIncidentStore{}} // no correlator
+	if rec := incidentReq(rt.routes(), "consultant", http.MethodPost, "/api/v1/fleet/engagements/eng-1/correlate", ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("unwired correlate route must 404, got %d", rec.Code)
 	}
 }
