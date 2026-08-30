@@ -4,10 +4,11 @@
 // the seam live and coverage-honest — an abstaining factor contributes 0 to Risk and carries its reason
 // into the CoverageVector, so a not-yet-wired factor lowers coverage/confidence and NEVER fabricates risk.
 //
-// This lets the deterministic Scorer run in production on the factors that ARE wired (Threat, from the
-// incident's own correlated severity, which DefaultPolicy treats as dominant) while the remaining
-// producers are swapped in as isolated follow-ups: Exposure → exposureuc, Behavior → baselineuc,
-// Coverage → coveragewindow. Each swap replaces one Abstaining* here with the real bridge.
+// This lets the deterministic Scorer run in production on the factors that ARE wired while the remaining
+// producers are swapped in as isolated follow-ups. Exposure is wired via NewExposure (over exposureuc);
+// Behavior and Coverage still abstain until their producers are integrated (Behavior → a baselineuc
+// per-asset read path, Coverage → coveragewindow). Each swap replaces one Abstaining* here with a real
+// bridge.
 package riskscorebridge
 
 import (
@@ -15,19 +16,32 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/exposureuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscoreuc"
 )
 
-// abstainingExposure always abstains — used until exposureuc is wired at the composition root.
-type abstainingExposure struct{ reason string }
-
-// AbstainingExposure returns an ExposureAssessor that always abstains with a fixed reason.
-func AbstainingExposure(reason string) riskscoreuc.ExposureAssessor {
-	return abstainingExposure{reason: reason}
+// ExposureProducer is the exposureuc surface the real Exposure bridge adapts. exposureuc.Service
+// satisfies it. Kept narrow so the bridge depends on the producer's behavior, not its concrete type.
+type ExposureProducer interface {
+	Assess(ctx context.Context, assetID shared.ID) (exposureuc.Assessment, error)
 }
 
-func (a abstainingExposure) ExposureFor(context.Context, shared.ID) (riskscoreuc.FactorInput, error) {
-	return riskscoreuc.FactorInput{Scoreable: false, Reasons: []string{a.reason}}, nil
+type exposureBridge struct{ producer ExposureProducer }
+
+// NewExposure bridges the real exposureuc producer (X5) to the assembler's ExposureAssessor port,
+// mapping exposureuc.Assessment (Exposure/Scoreable/Reasons) to the assembler's FactorInput. A producer
+// error propagates; an abstain (Scoreable=false) flows through unchanged, so the assembler keeps its
+// coverage-honest handling.
+func NewExposure(producer ExposureProducer) riskscoreuc.ExposureAssessor {
+	return exposureBridge{producer: producer}
+}
+
+func (b exposureBridge) ExposureFor(ctx context.Context, assetID shared.ID) (riskscoreuc.FactorInput, error) {
+	a, err := b.producer.Assess(ctx, assetID)
+	if err != nil {
+		return riskscoreuc.FactorInput{}, err
+	}
+	return riskscoreuc.FactorInput{Score: a.Exposure, Scoreable: a.Scoreable, Reasons: a.Reasons}, nil
 }
 
 // abstainingBehavior always abstains — used until baselineuc exposes a per-asset behavior read path.
