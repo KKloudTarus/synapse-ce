@@ -86,6 +86,8 @@ type Router struct {
 	incidentCorrelator     incidentCorrelator        // optional; nil ⇒ the correlation route is not registered (#594 C2/C3)
 	endpointProcesses      endpointProcessStore      // optional; nil ⇒ the process-report routes are not registered (#594 B5)
 	desiredCapabilities    desiredCapabilityService  // optional; nil ⇒ the desired-vs-observed routes are not registered (#633)
+	endpointTimeline       endpointTimelineReader    // optional; nil ⇒ the State-Timeline read route is not registered (#594 B7)
+	retroHunter            retroHunter               // optional; nil ⇒ the retro-hunt route is not registered (#594 B7)
 	sarif                  sarifIngester             // optional; nil ⇒ the third-party SARIF import route is not registered
 	importedFindings       sarifReader               // optional read side for imported findings
 	fleetRolloutAdmin      fleetRolloutService       // optional; nil ⇒ the operator rollout routes are not served
@@ -431,6 +433,14 @@ func (rt *Router) routes() *http.ServeMux {
 			// (writes the projection); read = PermView. Tenant + asset are server-side, not request fields.
 			mux.HandleFunc("POST /api/v1/fleet/assets/{id}/processes", rt.authz(userdom.PermOperate, rt.reportEndpointProcesses))
 			mux.HandleFunc("GET /api/v1/fleet/assets/{id}/processes", rt.authz(userdom.PermView, rt.listEndpointProcesses))
+		}
+		if rt.endpointTimeline != nil {
+			// B7 State Timeline (#594): read the per-host timeline projection of accepted telemetry. PermView.
+			mux.HandleFunc("GET /api/v1/fleet/assets/{id}/timeline", rt.authz(userdom.PermView, rt.queryEndpointTimeline))
+		}
+		if rt.retroHunter != nil {
+			// B7 retro-hunt (#594): re-hunt a window of the timeline around a pivot. PermView (read-only analysis).
+			mux.HandleFunc("POST /api/v1/fleet/assets/{id}/retro-hunt", rt.authz(userdom.PermView, rt.retroHuntEndpoint))
 		}
 		if rt.desiredCapabilities != nil {
 			// Desired-vs-observed (#633): declare the capabilities an asset SHOULD have (PermOperate),

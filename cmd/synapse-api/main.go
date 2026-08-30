@@ -118,6 +118,7 @@ import (
 	coveragewindow "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coveragewindow"
 	desired "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/desired"
 	detectledger "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detectledger"
+	endpointstate "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/endpointstate"
 	exposurereader "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/exposurereader"
 	exposureuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/exposureuc"
 	fleetaudit "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/fleetaudit"
@@ -126,6 +127,7 @@ import (
 	incidentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
 	keyregistry "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/keyregistry"
 	privacypolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/privacypolicy"
+	retrohunt "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/retrohunt"
 	riskscorebridge "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscorebridge"
 	riskscoreuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscoreuc"
 	telemetryingest "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/telemetryingest"
@@ -307,12 +309,14 @@ func main() {
 		ports.SensorStateAuditStore
 		ports.CoverageSensorStateReader
 	} // #611 append-only signed P0 health history
-	var privacyPolicyStore ports.PrivacyPolicyAuditStore // #611 immutable source-redaction policy history
-	var coverageWindowStore ports.CoverageWindowStore    // #611 immutable coverage-window revisions
-	var endpointProcessStore ports.EndpointProcessStore  // #594 B5 per-host running-process projection
-	var fleetDesiredStore ports.FleetDesiredStore        // #633 desired-vs-observed capability state
-	var telemetrySvc *telemetryingest.Service            // wired to detection repair after both services exist
-	var detectSvc *detectledger.Service                  // tenant-scoped startup and periodic provenance repair
+	var privacyPolicyStore ports.PrivacyPolicyAuditStore  // #611 immutable source-redaction policy history
+	var coverageWindowStore ports.CoverageWindowStore     // #611 immutable coverage-window revisions
+	var endpointProcessStore ports.EndpointProcessStore   // #594 B5 per-host running-process projection
+	var fleetDesiredStore ports.FleetDesiredStore         // #633 desired-vs-observed capability state
+	var endpointTimelineStore ports.EndpointTimelineStore // #594 B7 State Timeline projection
+	var telemetrySvc *telemetryingest.Service             // wired to detection repair after both services exist
+	var endpointStateSvc *endpointstate.Service           // #594 B7 State-Timeline projector; fed by telemetry ingest
+	var detectSvc *detectledger.Service                   // tenant-scoped startup and periodic provenance repair
 	var detectionRunner *detectledger.ReconciliationRunner
 	var fleetAuditRunner *fleetaudit.ReconciliationRunner // #610/#611 state-local audit intention delivery
 	var fleetRolloutStore ports.FleetRolloutStore         // operator update-rollout plans (#412 req 9)
@@ -515,6 +519,7 @@ func main() {
 		}
 		endpointProcessStore = postgres.NewEndpointProcessRepository(pool)
 		fleetDesiredStore = postgres.NewFleetDesiredRepository(pool)
+		endpointTimelineStore = postgres.NewEndpointTimelineRepository(pool)
 		fleetRolloutStore = postgres.NewFleetRolloutRepository(pool)
 		leaderStore = postgres.NewLeaderStore(pool)
 		// SECURITY (#431 req 6, #432, #409): the fleet_* tables are RLS-protected, but RLS is a
@@ -571,6 +576,7 @@ func main() {
 		coverageWindowStore = memory.NewCoverageWindowStore()
 		endpointProcessStore = memory.NewEndpointProcessStore()
 		fleetDesiredStore = memory.NewFleetDesiredStore()
+		endpointTimelineStore = memory.NewEndpointTimelineStore()
 		fleetRolloutStore = memory.NewFleetRolloutStore()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
@@ -1681,6 +1687,22 @@ func main() {
 		}
 		router.SetIncidentTriage(triageSvc)
 		router.SetEndpointProcesses(endpointProcessStore) // #594 B5: running-process report/read + Exposure running-vs-installed
+		// B7 State Timeline + retro-hunt (#594): the timeline projects accepted telemetry per host (fed by
+		// the telemetry-ingest fan-out, wired where telemetrySvc is built), and retro-hunt re-hunts a window
+		// of it. Read-only surfaces (PermView).
+		esSvc, esErr := endpointstate.NewService(endpointTimelineStore)
+		if esErr != nil {
+			log.Error("endpoint state-timeline service init failed", "err", esErr)
+			os.Exit(1)
+		}
+		endpointStateSvc = esSvc
+		router.SetEndpointTimeline(esSvc)
+		huntSvc, hErr := retrohunt.NewService(endpointTimelineStore)
+		if hErr != nil {
+			log.Error("retro-hunt service init failed", "err", hErr)
+			os.Exit(1)
+		}
+		router.SetRetroHunter(huntSvc)
 		// Desired-vs-observed (#633): declare an asset's desired capabilities + list gaps against the
 		// observed agent fleet. Needs an asset reader (GetAssetByID) and the agent→asset binding list; both
 		// are read-only type assertions on stores already in the composition. If either is unavailable the
@@ -1896,6 +1918,9 @@ func main() {
 			}
 			telemetrySvc.SetSensorStateStore(sensorStateStore)
 			telemetrySvc.SetCoverageReconciler(coverageReconciler)
+			if endpointStateSvc != nil { // #594 B7: project accepted telemetry into the State Timeline
+				telemetrySvc.SetEndpointTimeline(endpointStateSvc)
+			}
 			router.SetFleetTelemetry(telemetrySvc)
 			if cfg.DBDSN != "" {
 				log.Info("fleet telemetry ingest ENABLED (durable; server-side identity/key/schema verification, idempotent, acked)")
