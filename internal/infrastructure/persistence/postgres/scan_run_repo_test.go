@@ -462,4 +462,3 @@ func TestPostgresScanRunStore_DirectSQLTriggerDefense(t *testing.T) {
 		t.Fatal("expected DB trigger to reject direct DELETE on scan_run_lane_stages of sealed run")
 	}
 }
-
