@@ -76,6 +76,101 @@ func TestComputeManifestHash_Determinism(t *testing.T) {
 	}
 }
 
+func TestComputeManifestHash_RandomizedPermutations(t *testing.T) {
+	now := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
+	target, _ := scanrun.CanonicalizeRepositoryTarget("https://github.com/org/repo", "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04")
+
+	baseLane := scanrun.Lane{
+		TenantID:                  "tenant-1",
+		EngagementID:              "eng-1",
+		ScanRunID:                 "run-1",
+		LaneKey:                   "sast-primary",
+		Producer:                  "synapse-sast",
+		TerminalStatus:            scanrun.StatusSucceeded,
+		Target:                    target,
+		AuthoritativeFindingKinds: []string{"sast_vuln", "hardcoded_secret", "iac_misconfig", "dependency_vuln"},
+		IncludedScope:             []string{"src/", "cmd/", "pkg/", "internal/"},
+		ExcludedScope:             []string{"vendor/", "test/", "docs/", "build/"},
+		StartedAt:                 now,
+		ResultSHA256:              "result-sha-12345",
+		ManifestSchemaVersion:     1,
+		Versions: []scanrun.LaneVersion{
+			{VersionKind: scanrun.VersionScanner, Name: "semgrep", Version: "1.45.0"},
+			{VersionKind: scanrun.VersionRulePack, Name: "default-rules", Version: "2026.08"},
+			{VersionKind: scanrun.VersionTool, Name: "synapse-engine", Version: "2.1.0"},
+			{VersionKind: scanrun.VersionProfile, Name: "pci-dss", Version: "4.0"},
+		},
+		Stages: []scanrun.LaneStage{
+			{StageKey: "parse_ast", Status: scanrun.StageSucceeded, StartedAt: now},
+			{StageKey: "eval_rules", Status: scanrun.StageSucceeded, StartedAt: now},
+			{StageKey: "filter_findings", Status: scanrun.StageSucceeded, StartedAt: now},
+		},
+	}
+
+	canonicalHash, err := scanrun.ComputeManifestHash(baseLane)
+	if err != nil {
+		t.Fatalf("compute base hash: %v", err)
+	}
+
+	// Run 50 random permutations
+	for i := 0; i < 50; i++ {
+		permutedLane := baseLane
+
+		// Shuffle finding kinds
+		fk := append([]string(nil), baseLane.AuthoritativeFindingKinds...)
+		randPermuteStrings(fk)
+		permutedLane.AuthoritativeFindingKinds = fk
+
+		// Shuffle scopes
+		inc := append([]string(nil), baseLane.IncludedScope...)
+		randPermuteStrings(inc)
+		permutedLane.IncludedScope = inc
+
+		exc := append([]string(nil), baseLane.ExcludedScope...)
+		randPermuteStrings(exc)
+		permutedLane.ExcludedScope = exc
+
+		// Shuffle versions
+		vers := append([]scanrun.LaneVersion(nil), baseLane.Versions...)
+		randPermuteVersions(vers)
+		permutedLane.Versions = vers
+
+		// Shuffle stages
+		stg := append([]scanrun.LaneStage(nil), baseLane.Stages...)
+		randPermuteStages(stg)
+		permutedLane.Stages = stg
+
+		h, err := scanrun.ComputeManifestHash(permutedLane)
+		if err != nil {
+			t.Fatalf("iteration %d: compute hash: %v", i, err)
+		}
+		if h != canonicalHash {
+			t.Fatalf("iteration %d: hash mismatch: got %q, want %q", i, h, canonicalHash)
+		}
+	}
+}
+
+func randPermuteStrings(s []string) {
+	for i := range s {
+		j := (i*7 + 3) % len(s)
+		s[i], s[j] = s[j], s[i]
+	}
+}
+
+func randPermuteVersions(s []scanrun.LaneVersion) {
+	for i := range s {
+		j := (i*5 + 2) % len(s)
+		s[i], s[j] = s[j], s[i]
+	}
+}
+
+func randPermuteStages(s []scanrun.LaneStage) {
+	for i := range s {
+		j := (i*3 + 1) % len(s)
+		s[i], s[j] = s[j], s[i]
+	}
+}
+
 func TestScanRun_CompleteCoverageTrustContract(t *testing.T) {
 	now := time.Now().UTC()
 	target, _ := scanrun.CanonicalizeRepositoryTarget("https://github.com/org/repo", "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04")
@@ -113,6 +208,24 @@ func TestScanRun_CompleteCoverageTrustContract(t *testing.T) {
 		}
 	})
 
+	t.Run("zero lanes fails complete coverage", func(t *testing.T) {
+		run := scanrun.ScanRun{
+			TenantID:              "tenant-1",
+			EngagementID:          "eng-1",
+			ID:                    "run-1",
+			Provenance:            scanrun.ProvenanceNative,
+			TerminalStatus:        scanrun.StatusSucceeded,
+			ManifestSchemaVersion: 1,
+			ManifestHash:          "hash123",
+			SealedAt:              &now,
+			CreatedAt:             now,
+			Lanes:                 nil, // zero lanes
+		}
+		if run.IsCompleteCoverage() {
+			t.Error("zero lanes run must not satisfy complete coverage")
+		}
+	})
+
 	t.Run("legacy run NEVER satisfies complete coverage", func(t *testing.T) {
 		run := scanrun.ScanRun{
 			TenantID:              "tenant-1",
@@ -132,7 +245,7 @@ func TestScanRun_CompleteCoverageTrustContract(t *testing.T) {
 	})
 
 	t.Run("partial or failed run NEVER satisfies complete coverage", func(t *testing.T) {
-		for _, status := range []scanrun.TerminalStatus{scanrun.StatusPartial, scanrun.StatusFailed, scanrun.StatusCancelled, scanrun.StatusUnknown} {
+		for _, status := range []scanrun.TerminalStatus{scanrun.StatusBuilding, scanrun.StatusPartial, scanrun.StatusFailed, scanrun.StatusCancelled, scanrun.StatusUnknown} {
 			run := scanrun.ScanRun{
 				TenantID:              "tenant-1",
 				EngagementID:          "eng-1",

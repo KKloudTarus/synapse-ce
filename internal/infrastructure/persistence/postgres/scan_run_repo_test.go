@@ -380,18 +380,22 @@ func TestPostgresScanRunStore_DirectSQLTriggerDefense(t *testing.T) {
 	ctx, pool := setupTestDB(t)
 	store := NewScanRunStore(pool)
 
-	tenantID := shared.ID(fmt.Sprintf("t-trig-%d", time.Now().UnixNano()))
-	engID := shared.ID(fmt.Sprintf("e-trig-%d", time.Now().UnixNano()))
+	tenantA := shared.ID(fmt.Sprintf("t-trig-a-%d", time.Now().UnixNano()))
+	tenantB := shared.ID(fmt.Sprintf("t-trig-b-%d", time.Now().UnixNano()))
+	engA := shared.ID(fmt.Sprintf("e-trig-a-%d", time.Now().UnixNano()))
+	engB := shared.ID(fmt.Sprintf("e-trig-b-%d", time.Now().UnixNano()))
 	runID := fmt.Sprintf("run-trig-%d", time.Now().UnixNano())
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
-	ensureTestTenantAndEngagement(t, ctx, pool, tenantID, engID, "", "")
+	ensureTestTenantAndEngagement(t, ctx, pool, tenantA, engA, "", "")
+	ensureTestTenantAndEngagement(t, ctx, pool, tenantB, engB, "", "")
 
 	target, _ := scanrun.CanonicalizeRepositoryTarget("https://github.com/org/repo", "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04")
 
+	// Phase 1: Unsealed run allows pre-seal insertions and updates
 	run := scanrun.ScanRun{
-		TenantID:              tenantID,
-		EngagementID:          engID,
+		TenantID:              tenantA,
+		EngagementID:          engA,
 		ID:                    runID,
 		Provenance:            scanrun.ProvenanceNative,
 		TerminalStatus:        scanrun.StatusBuilding,
@@ -400,12 +404,12 @@ func TestPostgresScanRunStore_DirectSQLTriggerDefense(t *testing.T) {
 		UpdatedAt:             now,
 	}
 	if err := store.SaveScanRun(ctx, run); err != nil {
-		t.Fatalf("save scan run: %v", err)
+		t.Fatalf("save building scan run: %v", err)
 	}
 
 	lane := scanrun.Lane{
-		TenantID:                  tenantID,
-		EngagementID:              engID,
+		TenantID:                  tenantA,
+		EngagementID:              engA,
 		ScanRunID:                 runID,
 		LaneKey:                   "sast-lane",
 		Producer:                  "synapse-sast",
@@ -422,43 +426,213 @@ func TestPostgresScanRunStore_DirectSQLTriggerDefense(t *testing.T) {
 			{StageKey: "scan", Status: scanrun.StageSucceeded, StartedAt: now},
 		},
 	}
-	if err := store.SealScanRun(ctx, tenantID, runID, scanrun.StatusSucceeded, []scanrun.Lane{lane}, 1, "hash1", now); err != nil {
+	if err := store.SealScanRun(ctx, tenantA, runID, scanrun.StatusSucceeded, []scanrun.Lane{lane}, 1, "hash1", now); err != nil {
 		t.Fatalf("seal scan run: %v", err)
 	}
 
-	// 1. Direct raw SQL mutation of scan_runs header must trigger DB exception
-	err := WithTenant(ctx, pool, tenantID.String(), func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE scan_runs SET terminal_status = 'failed' WHERE tenant_id = $1 AND id = $2`, tenantID.String(), runID)
-		return err
-	})
-	if err == nil {
-		t.Fatal("expected DB trigger to reject direct UPDATE on sealed scan_runs header")
+	// Phase 2: Parent UPDATE protection on every candidate field
+	parentUpdateCases := []struct {
+		name  string
+		query string
+	}{
+		{"tenant_id", fmt.Sprintf(`UPDATE scan_runs SET tenant_id = '%s' WHERE tenant_id = '%s' AND id = '%s'`, tenantB.String(), tenantA.String(), runID)},
+		{"engagement_id", fmt.Sprintf(`UPDATE scan_runs SET engagement_id = 'other-eng' WHERE tenant_id = '%s' AND id = '%s'`, tenantA.String(), runID)},
+		{"terminal_status", fmt.Sprintf(`UPDATE scan_runs SET terminal_status = 'failed' WHERE tenant_id = '%s' AND id = '%s'`, tenantA.String(), runID)},
+		{"provenance", fmt.Sprintf(`UPDATE scan_runs SET provenance = 'legacy' WHERE tenant_id = '%s' AND id = '%s'`, tenantA.String(), runID)},
+		{"manifest_schema_version", fmt.Sprintf(`UPDATE scan_runs SET manifest_schema_version = 2 WHERE tenant_id = '%s' AND id = '%s'`, tenantA.String(), runID)},
+		{"manifest_hash", fmt.Sprintf(`UPDATE scan_runs SET manifest_hash = 'tampered-hash' WHERE tenant_id = '%s' AND id = '%s'`, tenantA.String(), runID)},
+		{"sealed_at", fmt.Sprintf(`UPDATE scan_runs SET sealed_at = '%s' WHERE tenant_id = '%s' AND id = '%s'`, now.Add(time.Hour).Format(time.RFC3339Nano), tenantA.String(), runID)},
+		{"updated_at", fmt.Sprintf(`UPDATE scan_runs SET updated_at = '%s' WHERE tenant_id = '%s' AND id = '%s'`, now.Add(time.Hour).Format(time.RFC3339Nano), tenantA.String(), runID)},
 	}
 
-	// 2. Direct raw SQL mutation of scan_run_lanes must trigger DB exception
-	err = WithTenant(ctx, pool, tenantID.String(), func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE scan_run_lanes SET producer = 'hacked' WHERE tenant_id = $1 AND scan_run_id = $2`, tenantID.String(), runID)
-		return err
-	})
-	if err == nil {
-		t.Fatal("expected DB trigger to reject direct UPDATE on child scan_run_lanes of sealed run")
+	for _, tc := range parentUpdateCases {
+		t.Run("parent_update_"+tc.name, func(t *testing.T) {
+			err := WithTenant(ctx, pool, tenantA.String(), func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, tc.query)
+				return err
+			})
+			if err == nil {
+				t.Fatalf("expected DB trigger to reject direct UPDATE on field %s of sealed scan_runs header", tc.name)
+			}
+		})
 	}
 
-	// 3. Direct raw SQL deletion of scan_run_lane_versions must trigger DB exception
-	err = WithTenant(ctx, pool, tenantID.String(), func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `DELETE FROM scan_run_lane_versions WHERE tenant_id = $1 AND scan_run_id = $2`, tenantID.String(), runID)
-		return err
-	})
-	if err == nil {
-		t.Fatal("expected DB trigger to reject direct DELETE on scan_run_lane_versions of sealed run")
-	}
+	// Phase 3: Parent DELETE protection
+	t.Run("parent_delete_blocked", func(t *testing.T) {
+		err := WithTenant(ctx, pool, tenantA.String(), func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `DELETE FROM scan_runs WHERE tenant_id = $1 AND id = $2`, tenantA.String(), runID)
+			return err
+		})
+		if err == nil {
+			t.Fatal("expected DB trigger to reject direct DELETE on sealed scan_runs header")
+		}
 
-	// 4. Direct raw SQL deletion of scan_run_lane_stages must trigger DB exception
-	err = WithTenant(ctx, pool, tenantID.String(), func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `DELETE FROM scan_run_lane_stages WHERE tenant_id = $1 AND scan_run_id = $2`, tenantID.String(), runID)
-		return err
+		// Verify parent and child rows still exist
+		got, err := store.GetScanRun(ctx, tenantA, runID)
+		if err != nil {
+			t.Fatalf("get scan run after failed delete: %v", err)
+		}
+		if got.ID != runID || len(got.Lanes) != 1 {
+			t.Fatalf("sealed scan run was corrupted by delete attempt: %+v", got)
+		}
 	})
-	if err == nil {
-		t.Fatal("expected DB trigger to reject direct DELETE on scan_run_lane_stages of sealed run")
-	}
+
+	// Phase 4: Child INSERT attacks after seal
+	t.Run("child_insert_lanes_blocked", func(t *testing.T) {
+		err := WithTenant(ctx, pool, tenantA.String(), func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `
+				INSERT INTO scan_run_lanes (
+					tenant_id, engagement_id, scan_run_id, lane_key, producer,
+					terminal_status, target_kind, target_identity_schema_version,
+					target_identity_canonical, evaluated_revision,
+					authoritative_finding_kinds, included_scope, excluded_scope,
+					started_at, created_at
+				) VALUES (
+					$1, $2, $3, 'injected-lane', 'injected-producer',
+					'succeeded', 'repository', 1,
+					'https://github.com/org/repo', 'e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04',
+					'[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
+					$4, $4
+				)
+			`, tenantA.String(), engA.String(), runID, now)
+			return err
+		})
+		if err == nil {
+			t.Fatal("expected DB trigger to reject direct INSERT on scan_run_lanes for sealed scan run")
+		}
+	})
+
+	t.Run("child_insert_versions_blocked", func(t *testing.T) {
+		err := WithTenant(ctx, pool, tenantA.String(), func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `
+				INSERT INTO scan_run_lane_versions (
+					tenant_id, scan_run_id, lane_key, version_kind, name, version
+				) VALUES ($1, $2, 'sast-lane', 'tool', 'injected-tool', '1.0.0')
+			`, tenantA.String(), runID)
+			return err
+		})
+		if err == nil {
+			t.Fatal("expected DB trigger to reject direct INSERT on scan_run_lane_versions for sealed scan run")
+		}
+	})
+
+	t.Run("child_insert_stages_blocked", func(t *testing.T) {
+		err := WithTenant(ctx, pool, tenantA.String(), func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `
+				INSERT INTO scan_run_lane_stages (
+					tenant_id, scan_run_id, lane_key, stage_key, status, started_at
+				) VALUES ($1, $2, 'sast-lane', 'injected-stage', 'succeeded', $3)
+			`, tenantA.String(), runID, now)
+			return err
+		})
+		if err == nil {
+			t.Fatal("expected DB trigger to reject direct INSERT on scan_run_lane_stages for sealed scan run")
+		}
+	})
+
+	// Phase 5: Child UPDATE attacks after seal
+	t.Run("child_update_lanes_blocked", func(t *testing.T) {
+		err := WithTenant(ctx, pool, tenantA.String(), func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE scan_run_lanes SET producer = 'hacked' WHERE tenant_id = $1 AND scan_run_id = $2`, tenantA.String(), runID)
+			return err
+		})
+		if err == nil {
+			t.Fatal("expected DB trigger to reject direct UPDATE on scan_run_lanes for sealed scan run")
+		}
+	})
+
+	t.Run("child_update_versions_blocked", func(t *testing.T) {
+		err := WithTenant(ctx, pool, tenantA.String(), func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE scan_run_lane_versions SET version = '9.9.9' WHERE tenant_id = $1 AND scan_run_id = $2`, tenantA.String(), runID)
+			return err
+		})
+		if err == nil {
+			t.Fatal("expected DB trigger to reject direct UPDATE on scan_run_lane_versions for sealed scan run")
+		}
+	})
+
+	t.Run("child_update_stages_blocked", func(t *testing.T) {
+		err := WithTenant(ctx, pool, tenantA.String(), func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE scan_run_lane_stages SET status = 'failed' WHERE tenant_id = $1 AND scan_run_id = $2`, tenantA.String(), runID)
+			return err
+		})
+		if err == nil {
+			t.Fatal("expected DB trigger to reject direct UPDATE on scan_run_lane_stages for sealed scan run")
+		}
+	})
+
+	// Phase 6: Child DELETE attacks after seal
+	t.Run("child_delete_stages_blocked", func(t *testing.T) {
+		err := WithTenant(ctx, pool, tenantA.String(), func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `DELETE FROM scan_run_lane_stages WHERE tenant_id = $1 AND scan_run_id = $2`, tenantA.String(), runID)
+			return err
+		})
+		if err == nil {
+			t.Fatal("expected DB trigger to reject direct DELETE on scan_run_lane_stages for sealed scan run")
+		}
+	})
+
+	t.Run("child_delete_versions_blocked", func(t *testing.T) {
+		err := WithTenant(ctx, pool, tenantA.String(), func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `DELETE FROM scan_run_lane_versions WHERE tenant_id = $1 AND scan_run_id = $2`, tenantA.String(), runID)
+			return err
+		})
+		if err == nil {
+			t.Fatal("expected DB trigger to reject direct DELETE on scan_run_lane_versions for sealed scan run")
+		}
+	})
+
+	t.Run("child_delete_lanes_blocked", func(t *testing.T) {
+		err := WithTenant(ctx, pool, tenantA.String(), func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `DELETE FROM scan_run_lanes WHERE tenant_id = $1 AND scan_run_id = $2`, tenantA.String(), runID)
+			return err
+		})
+		if err == nil {
+			t.Fatal("expected DB trigger to reject direct DELETE on scan_run_lanes for sealed scan run")
+		}
+	})
+
+	// Phase 7: Cross-tenant direct SQL attacks by Tenant B
+	t.Run("cross_tenant_insert_child_blocked", func(t *testing.T) {
+		err := WithTenant(ctx, pool, tenantB.String(), func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `
+				INSERT INTO scan_run_lanes (
+					tenant_id, engagement_id, scan_run_id, lane_key, producer,
+					terminal_status, target_kind, target_identity_schema_version,
+					target_identity_canonical, evaluated_revision,
+					authoritative_finding_kinds, included_scope, excluded_scope,
+					started_at, created_at
+				) VALUES (
+					$1, $2, $3, 'b-injected', 'b-producer',
+					'succeeded', 'repository', 1,
+					'https://github.com/org/repo', 'e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04',
+					'[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
+					$4, $4
+				)
+			`, tenantB.String(), engB.String(), runID, now)
+			return err
+		})
+		if err == nil {
+			t.Fatal("expected cross-tenant FK constraint or trigger to reject foreign scan_run_id reference")
+		}
+	})
+
+	t.Run("cross_tenant_delete_parent_blocked", func(t *testing.T) {
+		_ = WithTenant(ctx, pool, tenantB.String(), func(tx pgx.Tx) error {
+			res, err := tx.Exec(ctx, `DELETE FROM scan_runs WHERE id = $1`, runID)
+			if err != nil {
+				return err // Trigger blocked the delete
+			}
+			if res.RowsAffected() > 0 {
+				t.Fatalf("cross-tenant delete affected %d rows", res.RowsAffected())
+			}
+			return nil
+		})
+
+		// Ensure A's run still exists unharmed
+		got, err := store.GetScanRun(ctx, tenantA, runID)
+		if err != nil || got.ID != runID {
+			t.Fatalf("tenant A run was deleted or corrupted by cross-tenant query: %v", err)
+		}
+	})
 }

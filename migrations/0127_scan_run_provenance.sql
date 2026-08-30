@@ -120,41 +120,74 @@ CREATE OR REPLACE FUNCTION fn_prevent_sealed_scan_run_mutation()
 RETURNS TRIGGER AS $$
 BEGIN
     IF TG_TABLE_NAME = 'scan_runs' THEN
-        IF OLD.sealed_at IS NOT NULL AND NEW.sealed_at IS NOT NULL AND (
-            OLD.terminal_status != NEW.terminal_status OR
-            OLD.manifest_hash != NEW.manifest_hash OR
-            OLD.manifest_schema_version != NEW.manifest_schema_version OR
-            OLD.provenance != NEW.provenance
-        ) THEN
-            RAISE EXCEPTION 'cannot update sealed scan_runs row %', OLD.id;
+        IF TG_OP = 'DELETE' THEN
+            IF OLD.sealed_at IS NOT NULL THEN
+                RAISE EXCEPTION 'cannot delete sealed scan run %', OLD.id;
+            END IF;
+            RETURN OLD;
+        ELSIF TG_OP = 'UPDATE' THEN
+            IF OLD.sealed_at IS NOT NULL THEN
+                IF OLD.* IS DISTINCT FROM NEW.* THEN
+                    RAISE EXCEPTION 'cannot update sealed scan run %', OLD.id;
+                END IF;
+            END IF;
+            RETURN NEW;
         END IF;
     ELSE
-        IF EXISTS (SELECT 1 FROM scan_runs WHERE tenant_id = OLD.tenant_id AND id = OLD.scan_run_id AND sealed_at IS NOT NULL) THEN
-            RAISE EXCEPTION 'cannot mutate row in table % for sealed scan run %', TG_TABLE_NAME, OLD.scan_run_id;
+        -- Child tables: scan_run_lanes, scan_run_lane_versions, scan_run_lane_stages
+        IF TG_OP = 'INSERT' THEN
+            IF EXISTS (
+                SELECT 1 FROM scan_runs
+                WHERE tenant_id = NEW.tenant_id
+                  AND id = NEW.scan_run_id
+                  AND sealed_at IS NOT NULL
+            ) THEN
+                RAISE EXCEPTION 'cannot insert into % for sealed scan run %', TG_TABLE_NAME, NEW.scan_run_id;
+            END IF;
+            RETURN NEW;
+        ELSIF TG_OP = 'UPDATE' THEN
+            IF EXISTS (
+                SELECT 1 FROM scan_runs
+                WHERE (tenant_id = OLD.tenant_id AND id = OLD.scan_run_id AND sealed_at IS NOT NULL)
+                   OR (tenant_id = NEW.tenant_id AND id = NEW.scan_run_id AND sealed_at IS NOT NULL)
+            ) THEN
+                RAISE EXCEPTION 'cannot update % for sealed scan run %', TG_TABLE_NAME, OLD.scan_run_id;
+            END IF;
+            RETURN NEW;
+        ELSIF TG_OP = 'DELETE' THEN
+            IF EXISTS (
+                SELECT 1 FROM scan_runs
+                WHERE tenant_id = OLD.tenant_id
+                  AND id = OLD.scan_run_id
+                  AND sealed_at IS NOT NULL
+            ) THEN
+                RAISE EXCEPTION 'cannot delete from % for sealed scan run %', TG_TABLE_NAME, OLD.scan_run_id;
+            END IF;
+            RETURN OLD;
         END IF;
     END IF;
-    RETURN NEW;
+    RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
 -- +goose StatementEnd
 
 CREATE TRIGGER trg_scan_runs_sealed_immutability
-BEFORE UPDATE ON scan_runs
+BEFORE UPDATE OR DELETE ON scan_runs
 FOR EACH ROW
 EXECUTE FUNCTION fn_prevent_sealed_scan_run_mutation();
 
 CREATE TRIGGER trg_scan_run_lanes_sealed_immutability
-BEFORE UPDATE OR DELETE ON scan_run_lanes
+BEFORE INSERT OR UPDATE OR DELETE ON scan_run_lanes
 FOR EACH ROW
 EXECUTE FUNCTION fn_prevent_sealed_scan_run_mutation();
 
 CREATE TRIGGER trg_scan_run_lane_versions_sealed_immutability
-BEFORE UPDATE OR DELETE ON scan_run_lane_versions
+BEFORE INSERT OR UPDATE OR DELETE ON scan_run_lane_versions
 FOR EACH ROW
 EXECUTE FUNCTION fn_prevent_sealed_scan_run_mutation();
 
 CREATE TRIGGER trg_scan_run_lane_stages_sealed_immutability
-BEFORE UPDATE OR DELETE ON scan_run_lane_stages
+BEFORE INSERT OR UPDATE OR DELETE ON scan_run_lane_stages
 FOR EACH ROW
 EXECUTE FUNCTION fn_prevent_sealed_scan_run_mutation();
 

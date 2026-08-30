@@ -112,6 +112,9 @@ func CanonicalizeRepositoryTarget(rawURL, rawRevision string) (TargetIdentity, e
 	// Handle scp-style SSH syntax: git@github.com:org/repo.git
 	if strings.Contains(v, "@") && strings.Contains(v, ":") && !strings.Contains(v, "://") {
 		parts := strings.SplitN(v, "@", 2)
+		if strings.Contains(parts[0], ":") {
+			return TargetIdentity{}, fmt.Errorf("%w: repository target must not contain credentials", shared.ErrValidation)
+		}
 		hostPath := parts[1]
 		hpParts := strings.SplitN(hostPath, ":", 2)
 		if len(hpParts) == 2 {
@@ -124,6 +127,10 @@ func CanonicalizeRepositoryTarget(rawURL, rawRevision string) (TargetIdentity, e
 	u, err := url.Parse(v)
 	if err != nil || u == nil || u.Host == "" {
 		return TargetIdentity{}, fmt.Errorf("%w: invalid repository URL: %v", shared.ErrValidation, err)
+	}
+
+	if u.User != nil {
+		return TargetIdentity{}, fmt.Errorf("%w: repository target must not contain userinfo/credentials", shared.ErrValidation)
 	}
 
 	scheme := strings.ToLower(u.Scheme)

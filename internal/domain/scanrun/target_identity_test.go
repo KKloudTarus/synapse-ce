@@ -59,6 +59,42 @@ func TestCanonicalizeRepositoryTarget(t *testing.T) {
 			rawRevision: "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04",
 			wantErr:     true,
 		},
+		{
+			name:        "https url with user rejected",
+			rawURL:      "https://user@example.com/repo",
+			rawRevision: "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04",
+			wantErr:     true,
+		},
+		{
+			name:        "https url with user and password rejected",
+			rawURL:      "https://user:password@example.com/repo",
+			rawRevision: "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04",
+			wantErr:     true,
+		},
+		{
+			name:        "ssh url with git user rejected",
+			rawURL:      "ssh://git@example.com/repo",
+			rawRevision: "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04",
+			wantErr:     true,
+		},
+		{
+			name:        "ssh url with user and password rejected",
+			rawURL:      "ssh://user:password@example.com/repo",
+			rawRevision: "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04",
+			wantErr:     true,
+		},
+		{
+			name:        "git url with user and password rejected",
+			rawURL:      "git://user:password@example.com/repo",
+			rawRevision: "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04",
+			wantErr:     true,
+		},
+		{
+			name:        "scp-style with password in user part rejected",
+			rawURL:      "user:password@example.com:org/repo.git",
+			rawRevision: "e54b4a04e54b4a04e54b4a04e54b4a04e54b4a04",
+			wantErr:     true,
+		},
 	}
 
 	for _, tt := range tests {
