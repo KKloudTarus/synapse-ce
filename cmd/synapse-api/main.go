@@ -112,6 +112,8 @@ import (
 	exploitationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/exploitation"
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
+	baselineuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/baselineuc"
+	behaviorbaseline "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/behaviorbaseline"
 	clusterinventoryuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/clusterinventory"
 	correlationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/correlationuc"
 	coverageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/coverage"
@@ -314,6 +316,7 @@ func main() {
 	var endpointProcessStore ports.EndpointProcessStore   // #594 B5 per-host running-process projection
 	var fleetDesiredStore ports.FleetDesiredStore         // #633 desired-vs-observed capability state
 	var endpointTimelineStore ports.EndpointTimelineStore // #594 B7 State Timeline projection
+	var baselineStore ports.BaselineStore                 // #594 D behavioral baseline state
 	var telemetrySvc *telemetryingest.Service             // wired to detection repair after both services exist
 	var endpointStateSvc *endpointstate.Service           // #594 B7 State-Timeline projector; fed by telemetry ingest
 	var detectSvc *detectledger.Service                   // tenant-scoped startup and periodic provenance repair
@@ -520,6 +523,7 @@ func main() {
 		endpointProcessStore = postgres.NewEndpointProcessRepository(pool)
 		fleetDesiredStore = postgres.NewFleetDesiredRepository(pool)
 		endpointTimelineStore = postgres.NewEndpointTimelineRepository(pool)
+		baselineStore = postgres.NewBaselineRepository(pool)
 		fleetRolloutStore = postgres.NewFleetRolloutRepository(pool)
 		leaderStore = postgres.NewLeaderStore(pool)
 		// SECURITY (#431 req 6, #432, #409): the fleet_* tables are RLS-protected, but RLS is a
@@ -577,6 +581,7 @@ func main() {
 		endpointProcessStore = memory.NewEndpointProcessStore()
 		fleetDesiredStore = memory.NewFleetDesiredStore()
 		endpointTimelineStore = memory.NewEndpointTimelineStore()
+		baselineStore = memory.NewBaselineStore()
 		fleetRolloutStore = memory.NewFleetRolloutStore()
 		findingRepo = memory.NewFindingRepository()
 		judgmentStore = memory.NewJudgmentStore()
@@ -1686,7 +1691,21 @@ func main() {
 			os.Exit(1)
 		}
 		router.SetIncidentTriage(triageSvc)
+		// Behavioral baseline (#594 D): learn each asset's normal running-process profile at report time and
+		// score the current profile read-only at risk-assessment time (the assembler's Behavior factor). It
+		// is the ONLY place a behavior anomaly becomes a risk factor, and stays a factor (never sets Risk).
+		baselineSvc, blErr := baselineuc.NewService(baselineStore, auditLog, func() time.Time { return clock.Now().UTC() }, baselineuc.DefaultPolicy())
+		if blErr != nil {
+			log.Error("behavioral baseline service init failed", "err", blErr)
+			os.Exit(1)
+		}
+		behaviorSvc, bhErr := behaviorbaseline.NewService(baselineSvc, endpointProcessStore)
+		if bhErr != nil {
+			log.Error("behavior-baseline producer init failed", "err", bhErr)
+			os.Exit(1)
+		}
 		router.SetEndpointProcesses(endpointProcessStore) // #594 B5: running-process report/read + Exposure running-vs-installed
+		router.SetProcessLearner(behaviorSvc)             // #594 D: learn the process profile on each report
 		// B7 State Timeline + retro-hunt (#594): the timeline projects accepted telemetry per host (fed by
 		// the telemetry-ingest fan-out, wired where telemetrySvc is built), and retro-hunt re-hunts a window
 		// of it. Read-only surfaces (PermView).
@@ -1768,7 +1787,7 @@ func main() {
 			assembler, aerr := riskscoreuc.NewService(
 				incidentSvc,
 				riskscorebridge.NewExposure(exposureSvc),
-				riskscorebridge.AbstainingBehavior("behavior: baselineuc per-asset read path not yet wired"),
+				riskscorebridge.NewBehavior(behaviorSvc),
 				riskscorebridge.NewCoverage(coverageWindowStore),
 				scorer, auditLog, ids, func() time.Time { return clock.Now().UTC() },
 			)
@@ -1778,7 +1797,7 @@ func main() {
 			}
 			triScore = assembler
 			router.SetIncidentRiskReassessor(assembler)
-			log.Warn("tri-score risk reassessment ENABLED (Threat + Exposure + Coverage live; Behavior abstaining until its producer is wired) - POST /api/v1/fleet/incidents/{id}/risk/reassess")
+			log.Warn("tri-score risk reassessment ENABLED (all four factors live: Threat + Exposure + Behavior + Coverage) - POST /api/v1/fleet/incidents/{id}/risk/reassess")
 		}
 		if cfg.FleetCorrelationEnabled {
 			// Correlation orchestration (#594 C2/C3): fold an engagement's sealed detections into incidents,

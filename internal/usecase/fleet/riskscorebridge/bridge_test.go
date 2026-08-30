@@ -8,6 +8,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sensorstate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/behaviorbaseline"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/exposureuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -48,13 +49,32 @@ func TestNewExposurePropagatesError(t *testing.T) {
 	}
 }
 
-func TestAbstainingBehaviorAlwaysAbstains(t *testing.T) {
-	f, err := AbstainingBehavior("behavior not wired").BehaviorFor(context.Background(), "asset-1")
+type fakeBehaviorProducer struct {
+	f   behaviorbaseline.Factor
+	err error
+}
+
+func (p fakeBehaviorProducer) BehaviorFor(context.Context, shared.ID) (behaviorbaseline.Factor, error) {
+	return p.f, p.err
+}
+
+func TestNewBehaviorMapsFactor(t *testing.T) {
+	got, err := NewBehavior(fakeBehaviorProducer{f: behaviorbaseline.Factor{Behavior: 55, Scoreable: true, Reasons: []string{"process spawn anomaly"}}}).BehaviorFor(context.Background(), "asset-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.Scoreable || f.Score != 0 || len(f.Reasons) != 1 {
-		t.Fatalf("abstaining behavior must be 0/not-scoreable with a reason: %+v", f)
+	if !got.Scoreable || got.Score != 55 || len(got.Reasons) != 1 {
+		t.Fatalf("behavior not mapped: %+v", got)
+	}
+}
+
+func TestNewBehaviorPassesAbstainThrough(t *testing.T) {
+	got, err := NewBehavior(fakeBehaviorProducer{f: behaviorbaseline.Factor{Scoreable: false, Reasons: []string{"baseline cold-starting"}}}).BehaviorFor(context.Background(), "asset-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Scoreable || got.Score != 0 {
+		t.Fatalf("abstain must flow through as 0/not-scoreable: %+v", got)
 	}
 }
 

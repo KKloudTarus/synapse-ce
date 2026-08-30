@@ -1,21 +1,20 @@
-// Package riskscorebridge provides honest-abstaining factor sources for the tri-score assembler
-// (riskscoreuc) at the composition root. The assembler REQUIRES a non-nil ExposureAssessor,
-// BehaviorAssessor and CoverageSource; where a producer is not yet integrated, an abstaining source keeps
-// the seam live and coverage-honest — an abstaining factor contributes 0 to Risk and carries its reason
-// into the CoverageVector, so a not-yet-wired factor lowers coverage/confidence and NEVER fabricates risk.
-//
-// This lets the deterministic Scorer run in production on the factors that ARE wired while the remaining
-// producers are swapped in as isolated follow-ups. Exposure is wired via NewExposure (over exposureuc) and
-// Coverage via NewCoverage (over the coverage-window store); Behavior still abstains until its producer (a
-// baselineuc per-asset read path) is integrated. Each swap replaces one Abstaining* here with a real bridge.
+// Package riskscorebridge adapts the tri-score assembler's (riskscoreuc) three consumer-side factor ports
+// to their real producers. All three factors are now wired: Exposure via NewExposure (exposureuc, X5),
+// Behavior via NewBehavior (behaviorbaseline, D), and Coverage via NewCoverage (the coverage-window store).
+// Each bridge maps its producer's coverage-honest result to the assembler's FactorInput — a producer error
+// propagates, and an abstain (Scoreable=false, e.g. a cold-starting baseline) flows through unchanged so
+// the assembler keeps its discipline: an abstaining factor contributes 0 to Risk and its reason lowers
+// Coverage/confidence in the CoverageVector, NEVER fabricating risk.
 package riskscorebridge
 
 import (
 	"context"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/riskassessment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sensorstate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/behaviorbaseline"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/exposureuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/riskscoreuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -45,16 +44,27 @@ func (b exposureBridge) ExposureFor(ctx context.Context, assetID shared.ID) (ris
 	return riskscoreuc.FactorInput{Score: a.Exposure, Scoreable: a.Scoreable, Reasons: a.Reasons}, nil
 }
 
-// abstainingBehavior always abstains — used until baselineuc exposes a per-asset behavior read path.
-type abstainingBehavior struct{ reason string }
-
-// AbstainingBehavior returns a BehaviorAssessor that always abstains with a fixed reason.
-func AbstainingBehavior(reason string) riskscoreuc.BehaviorAssessor {
-	return abstainingBehavior{reason: reason}
+// BehaviorProducer is the behaviorbaseline surface the real Behavior bridge adapts. behaviorbaseline.Service
+// satisfies it.
+type BehaviorProducer interface {
+	BehaviorFor(ctx context.Context, assetID shared.ID) (behaviorbaseline.Factor, error)
 }
 
-func (a abstainingBehavior) BehaviorFor(context.Context, shared.ID) (riskscoreuc.FactorInput, error) {
-	return riskscoreuc.FactorInput{Scoreable: false, Reasons: []string{a.reason}}, nil
+type behaviorBridge struct{ producer BehaviorProducer }
+
+// NewBehavior bridges the real behaviorbaseline producer (D) to the assembler's BehaviorAssessor port,
+// mapping its Factor to FactorInput. A producer error propagates; an abstain (Scoreable=false, e.g. a
+// baseline still cold-starting) flows through unchanged.
+func NewBehavior(producer BehaviorProducer) riskscoreuc.BehaviorAssessor {
+	return behaviorBridge{producer: producer}
+}
+
+func (b behaviorBridge) BehaviorFor(ctx context.Context, assetID shared.ID) (riskscoreuc.FactorInput, error) {
+	f, err := b.producer.BehaviorFor(ctx, assetID)
+	if err != nil {
+		return riskscoreuc.FactorInput{}, err
+	}
+	return riskscoreuc.FactorInput{Score: riskassessment.Score(f.Behavior), Scoreable: f.Scoreable, Reasons: f.Reasons}, nil
 }
 
 // CoverageWindowReader lists an asset's composed coverage windows (tenant-scoped via ctx).

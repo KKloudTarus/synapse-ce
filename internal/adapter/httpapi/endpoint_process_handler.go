@@ -19,8 +19,17 @@ type endpointProcessStore interface {
 	ListRunningByAsset(ctx context.Context, assetID shared.ID) ([]ports.ProcessSnapshot, error)
 }
 
+// processLearner folds a just-reported process profile into the asset's behavioral baseline (#594 D).
+// behaviorbaseline.Service satisfies it. Optional: nil ⇒ reporting does not learn.
+type processLearner interface {
+	Learn(ctx context.Context, actor string, assetID shared.ID) error
+}
+
 // SetEndpointProcesses wires the process-projection surface (nil ⇒ the routes are not registered).
 func (rt *Router) SetEndpointProcesses(s endpointProcessStore) { rt.endpointProcesses = s }
+
+// SetProcessLearner wires the behavioral-baseline learner (nil ⇒ reported processes are not learned).
+func (rt *Router) SetProcessLearner(l processLearner) { rt.processLearner = l }
 
 const (
 	// endpointProcessBodyLimit caps a process-report body. A host reports a bounded process list; a very
@@ -68,6 +77,13 @@ func (rt *Router) reportEndpointProcesses(w http.ResponseWriter, r *http.Request
 	if err := rt.endpointProcesses.SaveProcesses(ctx, snapshots); err != nil {
 		writeError(w, rt.log, err)
 		return
+	}
+	// Best-effort: fold the reported profile into the asset's behavioral baseline (#594 D). The processes
+	// are already durably saved, so a learn failure must not fail the report; log it, never swallow silently.
+	if rt.processLearner != nil {
+		if err := rt.processLearner.Learn(ctx, PrincipalFrom(r.Context()), assetID); err != nil {
+			rt.log.Warn("behavior baseline learn failed", "asset", assetID, "err", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"saved": len(snapshots)})
 }
