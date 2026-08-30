@@ -83,6 +83,7 @@ type Router struct {
 	incidents              incidentReader            // optional; nil ⇒ incident read routes are not registered (#594 C7)
 	incidentTriage         incidentTriager           // optional; nil ⇒ incident triage routes are not registered (#594 C5)
 	incidentRiskReassessor incidentRiskReassessor    // optional; nil ⇒ the tri-score reassess route is not registered (#594 C3/D/X5)
+	incidentCorrelator     incidentCorrelator        // optional; nil ⇒ the correlation route is not registered (#594 C2/C3)
 	sarif                  sarifIngester             // optional; nil ⇒ the third-party SARIF import route is not registered
 	importedFindings       sarifReader               // optional read side for imported findings
 	fleetRolloutAdmin      fleetRolloutService       // optional; nil ⇒ the operator rollout routes are not served
@@ -416,6 +417,11 @@ func (rt *Router) routes() *http.ServeMux {
 			// RiskAssessment on the append-only incident log. Operator action (writes the incident), actor
 			// from the authenticated principal.
 			mux.HandleFunc("POST /api/v1/fleet/incidents/{id}/risk/reassess", rt.authz(userdom.PermOperate, rt.reassessIncidentRisk))
+		}
+		if rt.incidentCorrelator != nil {
+			// Correlation (#594 C2/C3): fold the engagement's sealed detections into incidents (auto-scoring
+			// each when tri-score is wired). Operator action (creates incidents), actor from the principal.
+			mux.HandleFunc("POST /api/v1/fleet/engagements/{id}/correlate", rt.authz(userdom.PermOperate, rt.correlateEngagement))
 		}
 	}
 	if rt.projects != nil {

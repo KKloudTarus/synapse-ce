@@ -447,6 +447,16 @@ type Config struct {
 	// Coverage as their producers are wired) via the deterministic Scorer. Off by default while the
 	// Exposure/Behavior/Coverage producers are still being integrated.
 	TriScoreReassessEnabled bool
+	// FleetCorrelationEnabled turns on the correlation orchestration (#594 C2/C3): an operator route that
+	// folds an engagement's sealed detections into incidents and (when tri-score is enabled) auto-scores
+	// each. Off by default.
+	FleetCorrelationEnabled bool
+	// FleetCorrelationWindow is the session gap for correlation: detections on one (asset, host) more than
+	// this apart start a new incident.
+	FleetCorrelationWindow time.Duration
+	// FleetCorrelationMaxPerIncident caps how many detections one incident reflects individually before a
+	// storm is suppressed to a single note.
+	FleetCorrelationMaxPerIncident int
 
 	// JSReachabilityEnabled turns on deterministic Tier-1 JavaScript/TypeScript import-reachability: a
 	// declared npm dependency that first-party source never imports becomes not_reachable, which the
@@ -712,6 +722,9 @@ func Load() Config {
 		ASTBin:                                os.Getenv("SYNAPSE_AST_BIN"),
 		PythonTaintEnabled:                    getbool("SYNAPSE_PYTAINT_ENABLED", false),
 		TriScoreReassessEnabled:               getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
+		FleetCorrelationEnabled:               getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
+		FleetCorrelationWindow:                getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
+		FleetCorrelationMaxPerIncident:        getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
 		JSReachabilityEnabled:                 getbool("SYNAPSE_JSREACH_ENABLED", false),
 		JSSymbolReachabilityEnabled:           getbool("SYNAPSE_JSREACH_TIER2_ENABLED", false),
 		RustReachabilityEnabled:               getbool("SYNAPSE_REACH_RUST", false),
