@@ -66,6 +66,7 @@ const (
 	ToolProposeWriteupDraft     = "propose_writeup_draft"     // propose a finding write-up DRAFT (prose) awaiting human sign-off (NOT a judgment)
 	ToolProposeAttackChain      = "propose_attack_chain"      // propose an attack-chain HYPOTHESIS finding (score 0; gated until a human verifies)
 	ToolProposeVexJustification = "propose_vex_justification" // propose an OpenVEX not_affected justification Judgment (score 0; a human ratifies)
+	ToolProposeInvestigation    = "propose_investigation"     // propose an AI investigation HYPOTHESIS about an incident (E; ungated, a human accepts)
 )
 
 // MaxPlanNodes bounds how many nodes a single propose_plan may carry (mirrors the domain cap);
@@ -288,6 +289,11 @@ func (c *Catalog) Tools() []agent.ToolSchema {
 			Description: "Propose an OpenVEX JUSTIFICATION for why a finding is NOT AFFECTED – pick ONE of the closed OpenVEX justifications. This is a PROPOSAL recorded at score 0: you CANNOT confirm it; a distinct human ratifies it before any export trusts it (a false 'not affected' suppresses a real vuln). Pick the most specific justification you can support.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"finding_id":{"type":"string","description":"the finding this justification is about (from list_findings)"},"justification":{"type":"string","description":"one of: component_not_present | vulnerable_code_not_present | vulnerable_code_not_in_execute_path | vulnerable_code_cannot_be_controlled_by_adversary | inline_mitigations_already_exist"}},"required":["finding_id","justification"],"additionalProperties":false}`),
 		})
+		schemas = append(schemas, agent.ToolSchema{
+			Name:        ToolProposeInvestigation,
+			Description: "Propose an INVESTIGATION HYPOTHESIS about an incident: pick ONE closed ATT&CK-style tactic that best explains what is happening, a confidence 0..100, and the STRUCTURED signal tokens that support it (never prose). This is a PROPOSAL recorded at score 0 that a human analyst ACCEPTS or REJECTS – it proves nothing and NEVER drives a response on its own; you cannot accept your own hypothesis. Use 'benign' when the evidence points to NOT malicious.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"incident_id":{"type":"string","description":"the incident this hypothesis is about (from the incident list)"},"tactic":{"type":"string","description":"one of: lateral_movement | data_exfiltration | privilege_escalation | credential_access | persistence | command_and_control | defense_evasion | execution | benign"},"confidence":{"type":"integer","description":"0..100 confidence in the hypothesis"},"drivers":{"type":"array","items":{"type":"string"},"description":"the signal TOKENS that support it, e.g. new_exec_paths, network_fanout_spike, privilege_events (lowercase tokens, no spaces, no prose)"}},"required":["incident_id","tactic","confidence"],"additionalProperties":false}`),
+		})
 	}
 	if c.drafter != nil {
 		schemas = append(schemas, agent.ToolSchema{
@@ -371,6 +377,11 @@ func (c *Catalog) Dispatch(ctx context.Context, sess agent.Session, call agent.T
 			return Result{}, fmt.Errorf("%w: VEX justification proposals are not enabled", shared.ErrValidation)
 		}
 		return c.proposeVexJustification(ctx, sess, call.Arguments)
+	case ToolProposeInvestigation:
+		if c.jproposer == nil {
+			return Result{}, fmt.Errorf("%w: investigation proposals are not enabled", shared.ErrValidation)
+		}
+		return c.proposeInvestigation(ctx, sess, call.Arguments)
 	case ToolProposeWriteupDraft:
 		if c.drafter == nil {
 			return Result{}, fmt.Errorf("%w: writeup draft proposals are not enabled", shared.ErrValidation)
@@ -1210,6 +1221,48 @@ func (c *Catalog) proposeThreat(ctx context.Context, sess agent.Session, raw jso
 		"judgment_id": j.ID.String(), "state": string(j.State), "evidence_score": j.EvidenceScore,
 		"proposed_by": j.ProposedBy, "publishable": j.Publishable(),
 		"note": "recorded as a PROPOSED STRIDE threat (score 0); a distinct human reviewer must ratify it – you cannot confirm your own.",
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("marshal judgment: %w", err)
+	}
+	return Result{Data: payload}, nil
+}
+
+type proposeInvestigationArgs struct {
+	IncidentID string   `json:"incident_id"`
+	Tactic     string   `json:"tactic"`
+	Confidence int      `json:"confidence"`
+	Drivers    []string `json:"drivers"`
+}
+
+// proposeInvestigation records a PROPOSED investigation hypothesis about an incident (#594 E): a single
+// closed ATT&CK-style tactic + confidence + structured driver tokens, persisted at score 0 by the analysis
+// service. UNGATED and human-accepted — the agent CANNOT accept its own hypothesis (the propose-only
+// interface + the arch tripwire make that structural), and a hypothesis NEVER drives a response on its own.
+// The domain InvestigationClaim.Validate rejects free prose and an unknown tactic.
+func (c *Catalog) proposeInvestigation(ctx context.Context, sess agent.Session, raw json.RawMessage) (Result, error) {
+	var a proposeInvestigationArgs
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return Result{}, fmt.Errorf("%w: propose_investigation args: %w", shared.ErrValidation, err)
+	}
+	incidentID := shared.ID(strings.TrimSpace(a.IncidentID))
+	if incidentID.IsZero() {
+		return Result{}, fmt.Errorf("%w: incident_id is required", shared.ErrValidation)
+	}
+	claim := judgment.InvestigationClaim{
+		IncidentID: incidentID,
+		Tactic:     judgment.InvestigationTactic(strings.TrimSpace(a.Tactic)),
+		Confidence: a.Confidence,
+		Drivers:    a.Drivers,
+	}
+	j, err := c.jproposer.Propose(ctx, sess.AgentActor(), sess.EngagementID, judgment.CapInvestigation, judgment.SubjectIncident, incidentID, claim)
+	if err != nil {
+		return Result{}, err // domain validates the claim; the service persists at score 0 + audits
+	}
+	payload, err := json.Marshal(map[string]any{
+		"judgment_id": j.ID.String(), "state": string(j.State), "evidence_score": j.EvidenceScore,
+		"proposed_by": j.ProposedBy, "publishable": j.Publishable(),
+		"note": "recorded as a PROPOSED investigation hypothesis (score 0); a human analyst accepts or rejects it – you cannot accept your own, and it never drives a response.",
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal judgment: %w", err)

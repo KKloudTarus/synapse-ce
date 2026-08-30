@@ -41,6 +41,7 @@ var toolsetControlled = []string{
 	ToolProposeRiskNarrative,
 	ToolProposeThreat,
 	ToolProposeVexJustification,
+	ToolProposeInvestigation,
 	ToolProposeWriteupDraft,
 }
 
