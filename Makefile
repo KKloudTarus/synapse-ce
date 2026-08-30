@@ -45,6 +45,9 @@ test: ## Run Go tests
 harness: ## Run the hostile tenant-isolation harness
 	$(GO) test ./internal/adapter/httpapi -run '^TestHostileHarness$$'
 
+edr-slo: ## Run the EDR data-plane SLO / scale / chaos release gates (#594 #636)
+	$(GO) test ./test/slo/... -v
+
 dataplane-e2e: ## Run the Phase-A data-plane e2e + failure-matrix + soak harness (A7, #628)
 	$(GO) test -race ./test/e2e/...
 
