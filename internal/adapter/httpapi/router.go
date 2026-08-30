@@ -85,6 +85,7 @@ type Router struct {
 	incidentRiskReassessor incidentRiskReassessor    // optional; nil ⇒ the tri-score reassess route is not registered (#594 C3/D/X5)
 	incidentCorrelator     incidentCorrelator        // optional; nil ⇒ the correlation route is not registered (#594 C2/C3)
 	endpointProcesses      endpointProcessStore      // optional; nil ⇒ the process-report routes are not registered (#594 B5)
+	desiredCapabilities    desiredCapabilityService  // optional; nil ⇒ the desired-vs-observed routes are not registered (#633)
 	sarif                  sarifIngester             // optional; nil ⇒ the third-party SARIF import route is not registered
 	importedFindings       sarifReader               // optional read side for imported findings
 	fleetRolloutAdmin      fleetRolloutService       // optional; nil ⇒ the operator rollout routes are not served
@@ -430,6 +431,15 @@ func (rt *Router) routes() *http.ServeMux {
 			// (writes the projection); read = PermView. Tenant + asset are server-side, not request fields.
 			mux.HandleFunc("POST /api/v1/fleet/assets/{id}/processes", rt.authz(userdom.PermOperate, rt.reportEndpointProcesses))
 			mux.HandleFunc("GET /api/v1/fleet/assets/{id}/processes", rt.authz(userdom.PermView, rt.listEndpointProcesses))
+		}
+		if rt.desiredCapabilities != nil {
+			// Desired-vs-observed (#633): declare the capabilities an asset SHOULD have (PermOperate),
+			// read/clear them, and list the gaps against the observed agent fleet (PermView). Actor + tenant
+			// + asset are server-side, never request fields.
+			mux.HandleFunc("PUT /api/v1/fleet/assets/{id}/desired-capabilities", rt.authz(userdom.PermOperate, rt.setDesiredCapabilities))
+			mux.HandleFunc("GET /api/v1/fleet/assets/{id}/desired-capabilities", rt.authz(userdom.PermView, rt.getDesiredCapabilities))
+			mux.HandleFunc("DELETE /api/v1/fleet/assets/{id}/desired-capabilities", rt.authz(userdom.PermOperate, rt.clearDesiredCapabilities))
+			mux.HandleFunc("GET /api/v1/fleet/desired-capabilities/gaps", rt.authz(userdom.PermView, rt.listDesiredGaps))
 		}
 	}
 	if rt.projects != nil {
